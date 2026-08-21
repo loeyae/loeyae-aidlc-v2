@@ -163,11 +163,19 @@ function getExecutableStages(graph: StageGraph, scope: string): StageNode[] {
 
 /**
  * Check if a stage's requires dependencies are all satisfied.
+ * Only checks dependencies that are in the executable stages list —
+ * a requires pointing to a stage that's not in scope is auto-satisfied
+ * (the scope intentionally skips that prerequisite).
  */
-function checkRequires(stage: StageNode, completedSlugs: string[], skippedSlugs: string[]): string[] {
+function checkRequires(
+  stage: StageNode,
+  completedSlugs: string[],
+  skippedSlugs: string[],
+  executableSlugs: Set<string>
+): string[] {
   if (!stage.requires || stage.requires.length === 0) return [];
   const done = new Set([...completedSlugs, ...skippedSlugs]);
-  return stage.requires.filter((dep) => !done.has(dep));
+  return stage.requires.filter((dep) => executableSlugs.has(dep) && !done.has(dep));
 }
 
 /**
@@ -206,14 +214,14 @@ function findNextStage(
   skippedSlugs: string[]
 ): { stage: StageNode | null; blocked?: { stage: StageNode; unsatisfied: string[] } } {
   const done = new Set([...completedSlugs, ...skippedSlugs]);
+  const executableSlugs = new Set(executableStages.map((s) => s.slug));
 
   for (const s of executableStages) {
     if (done.has(s.slug)) continue;
 
-    // Check requires dependencies
-    const unsatisfied = checkRequires(s, completedSlugs, skippedSlugs);
+    // Check requires dependencies (only those in scope)
+    const unsatisfied = checkRequires(s, completedSlugs, skippedSlugs, executableSlugs);
     if (unsatisfied.length > 0) {
-      // This stage is blocked — return it as blocked info
       return { stage: null, blocked: { stage: s, unsatisfied } };
     }
 
