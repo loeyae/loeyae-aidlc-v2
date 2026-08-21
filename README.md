@@ -4,19 +4,10 @@
 
 ## 安装
 
-### Kiro Crew（推荐）
-
-直接从 GitHub 全局安装，不需要 npm registry：
+### 全局安装（从 GitHub，不需要 npm registry）
 
 ```bash
-# 安装
 npm install -g git+https://github.com/loeyae/loeyae-aidlc-v2.git
-
-# 部署 skill 到 Kiro Crew
-loeyae-aidlc install
-
-# 重启 Kiro Crew 使 skill 生效
-kirocrew restart
 ```
 
 固定到指定版本：
@@ -25,29 +16,53 @@ kirocrew restart
 npm install -g git+https://github.com/loeyae/loeyae-aidlc-v2.git#v2.0.0
 ```
 
+### 部署到各平台
+
+```bash
+# Kiro Crew Dashboard（默认，全局 skill）
+loeyae-aidlc install
+
+# Kiro IDE（全局 Power）
+loeyae-aidlc install --harness kiro-ide
+
+# Kiro CLI（全局 agent skill）
+loeyae-aidlc install --harness kiro-cli
+
+# Claude Code（全局 plugin）
+loeyae-aidlc install --harness claude
+
+# OpenCode（全局 plugin）
+loeyae-aidlc install --harness opencode
+
+# Codex（全局 agent）
+loeyae-aidlc install --harness codex
+
+# 一次性安装到所有平台
+loeyae-aidlc install --all
+```
+
+各平台的全局安装路径：
+
+| 平台 | 安装路径 |
+|------|---------|
+| Kiro Crew | `~/.kiro/crew/skills/loeyae-aidlc/` |
+| Kiro IDE | `~/.kiro/powers/loeyae-aidlc/` |
+| Kiro CLI | `~/.kiro/skills/loeyae-aidlc/` |
+| Claude Code | `~/.claude/plugins/loeyae-aidlc/` |
+| OpenCode | `~/.config/opencode/plugins/loeyae-aidlc/` |
+| Codex | `~/.codex/agents/loeyae-aidlc/` |
+
+自定义路径（项目级部署）：
+
+```bash
+loeyae-aidlc install --harness claude --target ./my-project
+```
+
 ### 升级
 
 ```bash
-npm update -g loeyae-aidlc
-# 或重新安装最新版
 npm install -g git+https://github.com/loeyae/loeyae-aidlc-v2.git
-
-# 重新部署 skill
-loeyae-aidlc install
-kirocrew restart
-```
-
-### 其他平台
-
-```bash
-# Kiro IDE (Power 模式)
-loeyae-aidlc install --harness kiro-ide --target ./my-project
-
-# Claude Code
-loeyae-aidlc install --harness claude --target ./my-project
-
-# OpenCode
-loeyae-aidlc install --harness opencode --target ./my-project
+loeyae-aidlc install        # 重新部署（或 --all 全部）
 ```
 
 ### 开发模式（从本地仓库）
@@ -56,8 +71,21 @@ loeyae-aidlc install --harness opencode --target ./my-project
 git clone https://github.com/loeyae/loeyae-aidlc-v2.git
 cd loeyae-aidlc-v2
 npm link
-loeyae-aidlc install
+loeyae-aidlc install --all
 ```
+
+### 平台重启
+
+安装后需重启对应平台使 skill 生效：
+
+| 平台 | 重启方式 |
+|------|---------|
+| Kiro Crew | `kirocrew restart` 或重启桌面 App |
+| Kiro IDE | 重新打开项目 |
+| Kiro CLI | 新开 `kiro-cli chat` 会话 |
+| Claude Code | 新开对话 |
+| OpenCode | 重启 OpenCode |
+| Codex | 新开会话 |
 
 ## 使用
 
