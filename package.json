@@ -5,21 +5,42 @@
   "author": "Loeyae Team",
   "license": "MIT",
   "type": "module",
+  "bin": {
+    "loeyae-aidlc": "./bin/cli.ts"
+  },
+  "files": [
+    "bin/",
+    "core/",
+    "harness/",
+    "scripts/",
+    "dist/",
+    "README.md"
+  ],
   "scripts": {
-    "build": "bun scripts/build.ts",
-    "build:kiro-crew": "bun scripts/build.ts --harness kiro-crew",
-    "build:kiro-ide": "bun scripts/build.ts --harness kiro-ide",
-    "build:claude": "bun scripts/build.ts --harness claude",
-    "build:opencode": "bun scripts/build.ts --harness opencode",
-    "build:all": "bun scripts/build.ts --all",
-    "test": "bun test",
-    "lint": "biome check .",
-    "compile-graph": "bun core/tools/aidlc-graph.ts compile",
-    "scope-table": "bun core/tools/aidlc-utility.ts scope-table"
+    "build": "npx tsx scripts/build.ts",
+    "build:kiro-crew": "npx tsx scripts/build.ts --harness kiro-crew",
+    "build:kiro-ide": "npx tsx scripts/build.ts --harness kiro-ide",
+    "build:claude": "npx tsx scripts/build.ts --harness claude",
+    "build:opencode": "npx tsx scripts/build.ts --harness opencode",
+    "build:all": "npx tsx scripts/build.ts --all",
+    "install-skill": "npx tsx bin/cli.ts install",
+    "test": "npx tsx --test tests/",
+    "compile-graph": "npx tsx core/tools/aidlc-graph.ts compile",
+    "scope-table": "npx tsx core/tools/aidlc-utility.ts scope-table",
+    "postinstall": "npx tsx core/tools/aidlc-graph.ts compile || true"
+  },
+  "dependencies": {
+    "tsx": "^4.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",
-    "typescript": "^5.5.0",
-    "bun-types": "latest"
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/loeyae/loeyae-aidlc-v2.git"
   }
 }
