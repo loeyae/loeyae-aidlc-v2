@@ -9,8 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: []
+produces: [docs/aidlc/construction/nfr-requirements.md]
 sensors: []
+requires: [functional-design]
+approval: notify
 ---
 
 # NFR 需求

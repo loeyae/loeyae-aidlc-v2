@@ -9,8 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: []
+produces: [docs/aidlc/inception/units.md]
 sensors: []
+requires: [application-design]
+approval: notify
 ---
 # 单元生成 - 详细步骤
 

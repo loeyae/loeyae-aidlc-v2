@@ -9,8 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: []
+produces: [docs/aidlc/construction/infrastructure-design.md]
 sensors: []
+requires: [functional-design]
+approval: notify
 ---
 
 # 基础设施设计

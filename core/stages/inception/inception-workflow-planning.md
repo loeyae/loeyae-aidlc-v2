@@ -9,8 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: []
+produces: [docs/aidlc/inception/workflow-plan.md]
 sensors: []
+requires: [user-stories, cross-validation]
+approval: notify
 ---
 # 工作流规划
 

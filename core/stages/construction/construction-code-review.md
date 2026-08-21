@@ -9,8 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
-produces: []
+produces: [docs/aidlc/construction/code-review.md]
 sensors: []
+requires: [code-generation]
+approval: notify
 ---
 
 # 代码审查

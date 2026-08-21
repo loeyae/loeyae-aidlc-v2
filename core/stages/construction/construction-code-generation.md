@@ -9,8 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
-produces: []
+produces: [src/]
 sensors: []
+requires: [functional-design]
+approval: notify
 ---
 
 # 代码生成 - 详细步骤

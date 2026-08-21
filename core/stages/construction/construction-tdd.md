@@ -9,8 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
-produces: []
+produces: [src/test/]
 sensors: []
+requires: [code-generation]
+approval: notify
 ---
 
 # 测试驱动开发（TDD）

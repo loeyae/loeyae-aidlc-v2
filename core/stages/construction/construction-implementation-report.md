@@ -9,8 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
-produces: []
+produces: [docs/aidlc/construction/implementation-report.md]
 sensors: []
+requires: [build-and-test]
+approval: notify
 ---
 
 # 实施与验收报告

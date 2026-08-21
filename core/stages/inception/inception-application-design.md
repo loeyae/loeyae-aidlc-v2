@@ -9,8 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: []
+produces: [docs/aidlc/inception/application-design.md]
 sensors: []
+requires: [user-stories]
+approval: block
 ---
 # 应用设计 - 详细步骤
 

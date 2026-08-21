@@ -9,8 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
-produces: []
+produces: [docs/aidlc/construction/build-test-report.md]
 sensors: []
+requires: [code-generation, code-review]
+approval: block
 ---
 
 # 构建和测试

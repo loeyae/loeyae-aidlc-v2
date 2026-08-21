@@ -5,6 +5,9 @@ name: 部署运维
 execution: CONDITIONAL
 lead: aidlc-operations-agent
 scopes: [feature, enterprise, mvp]
+requires: [build-and-test]
+produces: [docs/aidlc/operation/deployment-config.md]
+approval: block
 ---
 
 # Operations：部署准备

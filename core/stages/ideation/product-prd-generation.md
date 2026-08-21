@@ -5,6 +5,9 @@ name: PRD 生成
 execution: CONDITIONAL
 lead: aidlc-product-agent
 scopes: [feature, enterprise, mvp, classic]
+requires: [product-inception]
+produces: [docs/aidlc/ideation/prd.md]
+approval: confirm
 ---
 
 # PRD 生成（I15）
