@@ -101,9 +101,11 @@ function scanStages(): StageNode[] {
         support_agents: (fm.support_agents as string[]) || [],
         mode: (fm.mode as string) || "inline",
         scopes: (fm.scopes as string[]) || [],
+        requires: (fm.requires as string[]) || [],
         consumes: (fm.consumes as string[]) || [],
         produces: (fm.produces as string[]) || [],
         sensors: (fm.sensors as string[]) || [],
+        approval: (fm.approval as string) || "notify",
         file: `stages/${phase}/${file}`,
       });
     }

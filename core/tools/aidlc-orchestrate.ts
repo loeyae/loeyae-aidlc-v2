@@ -46,9 +46,11 @@ interface StageNode {
   support_agents: string[];
   mode: string;
   scopes: string[];
+  requires: string[];
   consumes: string[];
   produces: string[];
   sensors: string[];
+  approval: "block" | "confirm" | "notify";
   file: string;
 }
 
@@ -160,15 +162,65 @@ function getExecutableStages(graph: StageGraph, scope: string): StageNode[] {
 }
 
 /**
- * Find the next stage to execute: first executable stage not yet completed or skipped.
+ * Check if a stage's requires dependencies are all satisfied.
+ */
+function checkRequires(stage: StageNode, completedSlugs: string[], skippedSlugs: string[]): string[] {
+  if (!stage.requires || stage.requires.length === 0) return [];
+  const done = new Set([...completedSlugs, ...skippedSlugs]);
+  return stage.requires.filter((dep) => !done.has(dep));
+}
+
+/**
+ * Check if produces files exist (glob patterns resolved against PROJECT_ROOT).
+ * Returns list of missing produces.
+ */
+function checkProduces(stage: StageNode): string[] {
+  if (!stage.produces || stage.produces.length === 0) return [];
+  const missing: string[] = [];
+  for (const pattern of stage.produces) {
+    // Simple check: if it's a specific file path, check existence
+    // If it contains *, treat as "at least one file should exist" (simplified)
+    if (pattern.includes("*")) {
+      // For glob patterns, we do a basic directory existence check
+      const dir = join(PROJECT_ROOT, pattern.split("*")[0]);
+      if (!existsSync(dir)) {
+        missing.push(pattern);
+      }
+    } else {
+      const filePath = join(PROJECT_ROOT, pattern);
+      if (!existsSync(filePath)) {
+        missing.push(pattern);
+      }
+    }
+  }
+  return missing;
+}
+
+/**
+ * Find the next stage to execute: first executable stage whose
+ * dependencies are all satisfied and not yet completed or skipped.
  */
 function findNextStage(
   executableStages: StageNode[],
   completedSlugs: string[],
   skippedSlugs: string[]
-): StageNode | null {
+): { stage: StageNode | null; blocked?: { stage: StageNode; unsatisfied: string[] } } {
   const done = new Set([...completedSlugs, ...skippedSlugs]);
-  return executableStages.find((s) => !done.has(s.slug)) || null;
+
+  for (const s of executableStages) {
+    if (done.has(s.slug)) continue;
+
+    // Check requires dependencies
+    const unsatisfied = checkRequires(s, completedSlugs, skippedSlugs);
+    if (unsatisfied.length > 0) {
+      // This stage is blocked — return it as blocked info
+      return { stage: null, blocked: { stage: s, unsatisfied } };
+    }
+
+    return { stage: s };
+  }
+
+  return { stage: null };
 }
 
 function parseFlags(args: string[]): Record<string, string> {
@@ -264,7 +316,17 @@ async function handleNext(args: string[]): Promise<Directive> {
 
   // Find next executable stage
   const executableStages = getExecutableStages(graph, state.scope);
-  const nextStage = findNextStage(executableStages, state.completed_stages, state.skipped_stages);
+  const { stage: nextStage, blocked } = findNextStage(executableStages, state.completed_stages, state.skipped_stages);
+
+  if (blocked) {
+    // Stage exists but dependencies not met — report blocker
+    return {
+      kind: "error",
+      message: `🚫 Stage "${blocked.stage.slug}" (${blocked.stage.name}) is blocked.\n` +
+        `  Unsatisfied requires: ${blocked.unsatisfied.join(", ")}\n` +
+        `  These stages must be completed first.`,
+    };
+  }
 
   if (!nextStage) {
     // All stages done
@@ -351,6 +413,24 @@ async function handleReport(args: string[]): Promise<Directive> {
     timestamp: new Date().toISOString(),
   };
   if (userInput) entry.user_input = userInput;
+
+  // --- P0 Gate: Validate produces before allowing completion ---
+  if (result === "completed" || result === "approved") {
+    const graph = loadGraph();
+    const stageNode = graph.stages.find((s) => s.slug === stageSlug);
+    if (stageNode) {
+      const missingProduces = checkProduces(stageNode);
+      if (missingProduces.length > 0) {
+        return {
+          kind: "error",
+          message: `🚫 Cannot complete stage "${stageSlug}" — required produces not found:\n` +
+            missingProduces.map((p) => `  ❌ ${p}`).join("\n") +
+            `\n\nGenerate these artifacts first, then report again.`,
+        };
+      }
+    }
+  }
+
   state.history.push(entry);
 
   // Process result

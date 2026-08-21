@@ -8,9 +8,11 @@ lead_agent: aidlc-product-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
+requires: [workspace-detection]
 consumes: []
-produces: []
-sensors: []
+produces: [docs/aidlc/inception/requirements.md]
+sensors: [traceability]
+approval: notify
 ---
 # 需求分析（自适应）
 
