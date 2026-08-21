@@ -17,10 +17,12 @@
  */
 
 import { existsSync, mkdirSync, cpSync, rmSync, readdirSync } from "fs";
-import { join, resolve } from "path";
+import { join, resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 import type { HarnessManifest } from "./manifest-types.ts";
 
-const ROOT = resolve(import.meta.dir, "..");
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(__dirname, "..");
 const CORE_DIR = join(ROOT, "core");
 const HARNESS_DIR = join(ROOT, "harness");
 const DIST_DIR = join(ROOT, "dist");
