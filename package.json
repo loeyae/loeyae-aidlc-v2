@@ -1,0 +1,25 @@
+{
+  "name": "loeyae-aidlc",
+  "version": "2.0.0",
+  "description": "Loeyae AI-DLC v2 — engine-driven workflow with multi-harness distribution",
+  "author": "Loeyae Team",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "build:kiro-crew": "bun scripts/build.ts --harness kiro-crew",
+    "build:kiro-ide": "bun scripts/build.ts --harness kiro-ide",
+    "build:claude": "bun scripts/build.ts --harness claude",
+    "build:opencode": "bun scripts/build.ts --harness opencode",
+    "build:all": "bun scripts/build.ts --all",
+    "test": "bun test",
+    "lint": "biome check .",
+    "compile-graph": "bun core/tools/aidlc-graph.ts compile",
+    "scope-table": "bun core/tools/aidlc-utility.ts scope-table"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "typescript": "^5.5.0",
+    "bun-types": "latest"
+  }
+}
