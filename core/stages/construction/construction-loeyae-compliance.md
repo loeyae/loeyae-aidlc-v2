@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []
 sensors: []
+requires: [code-generation]
 ---
 
 # Loeyae Boot 编码规范加载与合规验证

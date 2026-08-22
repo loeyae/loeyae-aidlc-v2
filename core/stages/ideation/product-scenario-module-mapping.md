@@ -5,6 +5,7 @@ name: 场景模块映射
 execution: CONDITIONAL
 lead: aidlc-product-agent
 scopes: [feature, enterprise, mvp, classic]
+produces: [docs/aidlc/ideation/scenario-module-mapping.md]
 ---
 
 # 场景分析与模块映射

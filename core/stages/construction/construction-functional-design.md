@@ -10,7 +10,7 @@ mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: [docs/aidlc/construction/functional-design.md]
-sensors: []
+sensors: [doc-cascade]
 requires: [units-generation]
 ---
 

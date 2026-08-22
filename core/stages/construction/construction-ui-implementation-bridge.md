@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []
 sensors: []
+requires: [code-generation]
 ---
 
 # UI 实现桥接 — UI 设计到平台代码的翻译流程

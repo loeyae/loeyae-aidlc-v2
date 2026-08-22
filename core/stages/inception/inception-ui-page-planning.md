@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []
 sensors: []
+requires: [ui-mock]
 ---
 # UI 页面语义规划
 

@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []
 sensors: []
+requires: [code-generation]
 ---
 
 # 平台自适应子 Agent 执行

@@ -318,6 +318,42 @@ async function checkSensors(stage: StageNode): Promise<SensorResult[]> {
         break;
       }
 
+      case "doc-cascade": {
+        // Verify document cascade: current stage's produces should have
+        // prior chain documents existing
+        const cascadeChain: Record<string, string[]> = {
+          "functional-design": ["docs/aidlc/inception/application-design.md", "docs/aidlc/inception/units.md"],
+          "nfr-design": ["docs/aidlc/construction/nfr-requirements.md"],
+          "code-generation": ["docs/aidlc/construction/functional-design.md"],
+          "build-and-test": ["docs/aidlc/construction/code-review.md"],
+          "implementation-report": ["docs/aidlc/construction/build-test-report.md"],
+          "operations": ["docs/aidlc/construction/implementation-report.md"],
+        };
+        const requiredDocs = cascadeChain[stage.slug] || [];
+        const missingDocs = requiredDocs.filter((d) => !existsSync(join(PROJECT_ROOT, d)));
+        if (missingDocs.length > 0) {
+          failures.push({
+            sensor: "doc-cascade",
+            passed: false,
+            message: `Document cascade broken — missing upstream docs: ${missingDocs.join(", ")}`,
+          });
+        }
+        break;
+      }
+
+      case "reviewer-required": {
+        // Check that a review record exists for this stage
+        const reviewPath = join(PROJECT_ROOT, "docs/aidlc/reviews", `${stage.slug}-review.md`);
+        if (!existsSync(reviewPath)) {
+          failures.push({
+            sensor: "reviewer-required",
+            passed: false,
+            message: `No review record found at docs/aidlc/reviews/${stage.slug}-review.md. Run review first.`,
+          });
+        }
+        break;
+      }
+
       default:
         // Unknown sensor — warn but don't fail
         failures.push({

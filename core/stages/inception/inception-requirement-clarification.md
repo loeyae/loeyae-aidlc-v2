@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []
 sensors: []
+requires: [requirements-analysis]
 ---
 # 需求澄清流程
 

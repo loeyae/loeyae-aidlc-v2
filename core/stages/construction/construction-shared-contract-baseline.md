@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []
 sensors: []
+requires: [functional-design]
 ---
 
 # 共享契约基线物化（C5 条件）

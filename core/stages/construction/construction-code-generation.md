@@ -10,7 +10,7 @@ mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
 produces: [src/]
-sensors: []
+sensors: [doc-cascade, reviewer-required]
 requires: [functional-design]
 ---
 

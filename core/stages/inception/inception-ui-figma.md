@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []
 sensors: []
+requires: [ui-mock]
 ---
 # UI 设计 — Figma 模式编排
 

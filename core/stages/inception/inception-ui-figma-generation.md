@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []
 sensors: []
+requires: [ui-mock]
 ---
 # Figma 设计生成与登记规范
 

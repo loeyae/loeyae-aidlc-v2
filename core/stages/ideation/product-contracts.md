@@ -5,6 +5,7 @@ name: 产品契约
 execution: CONDITIONAL
 lead: aidlc-architect-agent
 scopes: [feature, enterprise, mvp, classic]
+produces: [docs/aidlc/ideation/product-contracts.md]
 ---
 
 # 产品级契约索引

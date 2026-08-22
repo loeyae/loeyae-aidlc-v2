@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []
 sensors: []
+requires: [build-and-test]
 ---
 
 # 构建和测试 — 输出文档模板

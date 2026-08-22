@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []
 sensors: []
+requires: [ui-mock]
 ---
 # HTML UI Mock 生成规范
 

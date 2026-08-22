@@ -84,6 +84,17 @@ class TestRunner:
             # Complete or skip
             if slug in produces_map:
                 self.mkfile(produces_map[slug])
+            # Auto-create sensor prerequisite files
+            if slug == "code-generation":
+                self.mkfile("docs/aidlc/reviews/code-generation-review.md")
+                self.mkfile("docs/aidlc/construction/functional-design.md")
+            elif slug == "build-and-test":
+                self.mkfile("docs/aidlc/reviews/build-and-test-review.md")
+                self.mkfile("docs/aidlc/construction/code-review.md")
+            elif slug == "implementation-report":
+                self.mkfile("docs/aidlc/construction/build-test-report.md")
+            elif slug == "operations":
+                self.mkfile("docs/aidlc/construction/implementation-report.md")
             r = self.report(slug, "completed")
             if r.get("kind") == "error":
                 self.report(slug, "skipped", reason="walk-through")
@@ -103,6 +114,17 @@ class TestRunner:
                 return steps, False
             if slug in produces_map:
                 self.mkfile(produces_map[slug])
+            # Auto-create sensor prerequisite files
+            if slug == "code-generation":
+                self.mkfile("docs/aidlc/reviews/code-generation-review.md")
+                self.mkfile("docs/aidlc/construction/functional-design.md")
+            elif slug == "build-and-test":
+                self.mkfile("docs/aidlc/reviews/build-and-test-review.md")
+                self.mkfile("docs/aidlc/construction/code-review.md")
+            elif slug == "implementation-report":
+                self.mkfile("docs/aidlc/construction/build-test-report.md")
+            elif slug == "operations":
+                self.mkfile("docs/aidlc/construction/implementation-report.md")
             r = self.report(slug, "completed")
             if r.get("kind") == "error":
                 self.report(slug, "skipped", reason="auto-walk")
@@ -167,10 +189,12 @@ def test_b_produces_gate():
             "BLOCKED: report rejected — src/ not found",
         )
 
-        # Create src/ and retry — should pass
+        # Create src/ + review file + cascade file, then retry — should pass
         t.mkfile("src/app.ts")
+        t.mkfile("docs/aidlc/reviews/code-generation-review.md")
+        t.mkfile("docs/aidlc/construction/functional-design.md")
         r = t.report("code-generation", "completed")
-        t.ok(r.get("kind") == "print", "PASSED: report accepted after src/ created")
+        t.ok(r.get("kind") == "print", "PASSED: report accepted after all gates satisfied")
 
         # Also test: nfr-requirements has produces requirement
         # Walk back from scratch to test another produces

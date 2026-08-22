@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []
 sensors: []
+requires: [requirements-analysis]
 ---
 # 5 维度需求验证（标准 + 全面深度）
 

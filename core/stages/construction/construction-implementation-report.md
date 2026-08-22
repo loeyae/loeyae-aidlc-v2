@@ -10,7 +10,7 @@ mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
 produces: [docs/aidlc/construction/implementation-report.md]
-sensors: []
+sensors: [doc-cascade]
 requires: [build-and-test]
 ---
 
