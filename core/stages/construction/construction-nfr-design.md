@@ -12,7 +12,6 @@ consumes: []
 produces: [docs/aidlc/construction/nfr-design.md]
 sensors: []
 requires: [nfr-requirements]
-approval: notify
 ---
 
 # NFR 设计

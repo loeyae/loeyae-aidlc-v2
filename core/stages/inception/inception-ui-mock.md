@@ -12,7 +12,7 @@ consumes: []
 produces: [docs/aidlc/inception/ui-mock/]
 sensors: []
 requires: [user-stories]
-approval: confirm
+condition: has_ui_requirements
 ---
 # UI 设计模式路由（I9）
 

@@ -12,7 +12,6 @@ consumes: []
 produces: [docs/aidlc/construction/code-review.md]
 sensors: []
 requires: [code-generation]
-approval: notify
 ---
 
 # 代码审查

@@ -12,7 +12,7 @@ consumes: []
 produces: [docs/aidlc/construction/nfr-requirements.md]
 sensors: []
 requires: [functional-design]
-approval: notify
+condition: has_nfr_needs
 ---
 
 # NFR 需求

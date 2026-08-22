@@ -13,11 +13,16 @@
  *
  * This tool is DETERMINISTIC: same state → same directive.
  * `next` NEVER mutates state — only `report` and `park` write.
+ *
+ * Gate model: requires (准入) + produces + sensors (准出) guarantee completeness.
+ * Approval is REMOVED — the engine auto-advances. Only machine-unverifiable
+ * decisions retain `approval: block` in stage frontmatter (currently none).
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
+import { execSync } from "child_process";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -50,6 +55,7 @@ interface StageNode {
   consumes: string[];
   produces: string[];
   sensors: string[];
+  condition: string;
   approval: "block" | "confirm" | "notify";
   file: string;
 }
@@ -101,6 +107,13 @@ interface Directive {
   [key: string]: unknown;
 }
 
+interface ConditionContext {
+  has_legacy_code: boolean;
+  has_ui_requirements: boolean;
+  has_reverse_output: boolean;
+  multi_module: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Subcommands
 // ---------------------------------------------------------------------------
@@ -108,7 +121,7 @@ interface Directive {
 const SUBCOMMANDS = ["next", "continue", "report", "park"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
-const VALID_RESULTS = ["completed", "approved", "rejected", "revised", "skipped", "awaiting-approval"] as const;
+const VALID_RESULTS = ["completed", "approved", "rejected", "revised", "skipped"] as const;
 type StageResult = (typeof VALID_RESULTS)[number];
 
 // ---------------------------------------------------------------------------
@@ -204,31 +217,264 @@ function checkProduces(stage: StageNode): string[] {
   return missing;
 }
 
+// ---------------------------------------------------------------------------
+// Sensors — 准出 quality gates (machine-verifiable checks)
+// ---------------------------------------------------------------------------
+
+interface SensorResult {
+  sensor: string;
+  passed: boolean;
+  message: string;
+}
+
+/**
+ * Run sensors defined on a stage. Each sensor is a named check.
+ * Built-in sensors:
+ *   - 'no-todo': grep produces files for TODO/FIXME/HACK
+ *   - 'build-success': check if .aidlc-build-ok marker exists
+ *   - 'test-pass': check if .aidlc-test-ok marker exists
+ *   - 'traceability': check that produces files reference a requirement ID
+ *
+ * Returns list of failed sensor results.
+ */
+async function checkSensors(stage: StageNode): Promise<SensorResult[]> {
+  if (!stage.sensors || stage.sensors.length === 0) return [];
+
+  const failures: SensorResult[] = [];
+
+  for (const sensor of stage.sensors) {
+    switch (sensor) {
+      case "no-todo": {
+        // Grep produces files for TODO/FIXME/HACK
+        const todoFiles: string[] = [];
+        for (const pattern of stage.produces || []) {
+          if (pattern.includes("*")) continue; // skip globs for simplicity
+          const filePath = join(PROJECT_ROOT, pattern);
+          if (existsSync(filePath)) {
+            try {
+              const content = readFileSync(filePath, "utf-8");
+              if (/\b(TODO|FIXME|HACK)\b/.test(content)) {
+                todoFiles.push(pattern);
+              }
+            } catch { /* unreadable file, skip */ }
+          }
+        }
+        if (todoFiles.length > 0) {
+          failures.push({
+            sensor: "no-todo",
+            passed: false,
+            message: `Found TODO/FIXME/HACK in: ${todoFiles.join(", ")}`,
+          });
+        }
+        break;
+      }
+
+      case "build-success": {
+        const markerPath = join(PROJECT_ROOT, ".aidlc-build-ok");
+        if (!existsSync(markerPath)) {
+          failures.push({
+            sensor: "build-success",
+            passed: false,
+            message: "Build marker .aidlc-build-ok not found. Run a successful build first.",
+          });
+        }
+        break;
+      }
+
+      case "test-pass": {
+        const markerPath = join(PROJECT_ROOT, ".aidlc-test-ok");
+        if (!existsSync(markerPath)) {
+          failures.push({
+            sensor: "test-pass",
+            passed: false,
+            message: "Test marker .aidlc-test-ok not found. Run tests successfully first.",
+          });
+        }
+        break;
+      }
+
+      case "traceability": {
+        // Check that produces files contain at least one requirement reference (REQ-xxx or R-xxx pattern)
+        const untraced: string[] = [];
+        for (const pattern of stage.produces || []) {
+          if (pattern.includes("*")) continue;
+          const filePath = join(PROJECT_ROOT, pattern);
+          if (existsSync(filePath)) {
+            try {
+              const content = readFileSync(filePath, "utf-8");
+              if (!/\b(REQ-\w+|R-\d+)\b/.test(content)) {
+                untraced.push(pattern);
+              }
+            } catch { /* unreadable file, skip */ }
+          }
+        }
+        if (untraced.length > 0) {
+          failures.push({
+            sensor: "traceability",
+            passed: false,
+            message: `No requirement ID (REQ-xxx) found in: ${untraced.join(", ")}`,
+          });
+        }
+        break;
+      }
+
+      default:
+        // Unknown sensor — warn but don't fail
+        failures.push({
+          sensor,
+          passed: false,
+          message: `Unknown sensor "${sensor}" — cannot evaluate. Register it or remove from stage.`,
+        });
+        break;
+    }
+  }
+
+  return failures;
+}
+
+// ---------------------------------------------------------------------------
+// Condition evaluation — conditional stage execution
+// ---------------------------------------------------------------------------
+
+/**
+ * Build condition context by inspecting project state.
+ */
+function buildConditionContext(): ConditionContext {
+  // has_legacy_code: src/ has >10 files pre-existing
+  let has_legacy_code = false;
+  const srcDir = join(PROJECT_ROOT, "src");
+  if (existsSync(srcDir)) {
+    try {
+      const fileCount = countFilesRecursive(srcDir);
+      has_legacy_code = fileCount > 10;
+    } catch { /* inaccessible, treat as no legacy */ }
+  }
+
+  // has_ui_requirements: user-stories.md contains 'UI' or '界面'
+  let has_ui_requirements = false;
+  const userStoriesPath = join(PROJECT_ROOT, "docs", "aidlc", "inception", "user-stories.md");
+  if (existsSync(userStoriesPath)) {
+    try {
+      const content = readFileSync(userStoriesPath, "utf-8");
+      has_ui_requirements = /\bUI\b|界面/.test(content);
+    } catch { /* unreadable */ }
+  }
+
+  // has_reverse_output: reverse-engineering.md exists
+  const reverseEngineeringPath = join(PROJECT_ROOT, "docs", "aidlc", "inception", "reverse-engineering.md");
+  const has_reverse_output = existsSync(reverseEngineeringPath);
+
+  // multi_module: units.md has >1 unit section (## headings)
+  let multi_module = false;
+  const unitsPath = join(PROJECT_ROOT, "docs", "aidlc", "inception", "units.md");
+  if (existsSync(unitsPath)) {
+    try {
+      const content = readFileSync(unitsPath, "utf-8");
+      const unitHeadings = content.match(/^## /gm);
+      multi_module = (unitHeadings?.length ?? 0) > 1;
+    } catch { /* unreadable */ }
+  }
+
+  return { has_legacy_code, has_ui_requirements, has_reverse_output, multi_module };
+}
+
+/**
+ * Count files recursively in a directory (non-hidden files only).
+ */
+function countFilesRecursive(dir: string): number {
+  let count = 0;
+  const entries = readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      count += countFilesRecursive(fullPath);
+    } else if (entry.isFile()) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Evaluate a condition string against the context.
+ * Supported conditions (exact match):
+ *   - 'has_legacy_code'
+ *   - 'has_ui_requirements'
+ *   - '!has_reverse_output' (negated)
+ *   - 'multi_module'
+ *   - '' (empty string — always true)
+ */
+function evaluateCondition(condition: string, context: ConditionContext): boolean {
+  if (!condition || condition.trim() === "") return true;
+
+  const trimmed = condition.trim();
+
+  // Handle negation
+  if (trimmed.startsWith("!")) {
+    const inner = trimmed.slice(1);
+    if (inner in context) {
+      return !(context as Record<string, boolean>)[inner];
+    }
+    // Unknown negated condition — default true (don't block)
+    return true;
+  }
+
+  // Direct lookup
+  if (trimmed in context) {
+    return (context as Record<string, boolean>)[trimmed];
+  }
+
+  // Unknown condition — default true (don't block)
+  return true;
+}
+
 /**
  * Find the next stage to execute: first executable stage whose
- * dependencies are all satisfied and not yet completed or skipped.
+ * dependencies are all satisfied, condition evaluates to true,
+ * and not yet completed or skipped.
  */
 function findNextStage(
   executableStages: StageNode[],
   completedSlugs: string[],
-  skippedSlugs: string[]
-): { stage: StageNode | null; blocked?: { stage: StageNode; unsatisfied: string[] } } {
+  skippedSlugs: string[],
+  state: WorkflowState
+): { stage: StageNode | null; blocked?: { stage: StageNode; unsatisfied: string[] }; skippedByCondition?: { stage: StageNode; reason: string }[] } {
   const done = new Set([...completedSlugs, ...skippedSlugs]);
   const executableSlugs = new Set(executableStages.map((s) => s.slug));
+  const conditionContext = buildConditionContext();
+  const conditionSkips: { stage: StageNode; reason: string }[] = [];
 
   for (const s of executableStages) {
     if (done.has(s.slug)) continue;
 
+    // Evaluate condition — if false, auto-skip
+    if (s.condition && s.condition.trim() !== "") {
+      if (!evaluateCondition(s.condition, conditionContext)) {
+        conditionSkips.push({ stage: s, reason: "condition not met" });
+        // Add to skipped in state (caller must persist)
+        state.skipped_stages.push(s.slug);
+        state.history.push({
+          stage: s.slug,
+          result: "skipped",
+          timestamp: new Date().toISOString(),
+          user_input: `Auto-skipped: condition "${s.condition}" evaluated to false`,
+        });
+        done.add(s.slug);
+        continue;
+      }
+    }
+
     // Check requires dependencies (only those in scope)
     const unsatisfied = checkRequires(s, completedSlugs, skippedSlugs, executableSlugs);
     if (unsatisfied.length > 0) {
-      return { stage: null, blocked: { stage: s, unsatisfied } };
+      return { stage: null, blocked: { stage: s, unsatisfied }, skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined };
     }
 
-    return { stage: s };
+    return { stage: s, skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined };
   }
 
-  return { stage: null };
+  return { stage: null, skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined };
 }
 
 function parseFlags(args: string[]): Record<string, string> {
@@ -322,9 +568,14 @@ async function handleNext(args: string[]): Promise<Directive> {
     return { kind: "done", message: "Workflow is already complete." };
   }
 
-  // Find next executable stage
+  // Find next executable stage (with condition evaluation)
   const executableStages = getExecutableStages(graph, state.scope);
-  const { stage: nextStage, blocked } = findNextStage(executableStages, state.completed_stages, state.skipped_stages);
+  const { stage: nextStage, blocked, skippedByCondition } = findNextStage(executableStages, state.completed_stages, state.skipped_stages, state);
+
+  // Persist any condition-based skips
+  if (skippedByCondition && skippedByCondition.length > 0) {
+    saveState(state);
+  }
 
   if (blocked) {
     // Stage exists but dependencies not met — report blocker
@@ -332,7 +583,10 @@ async function handleNext(args: string[]): Promise<Directive> {
       kind: "error",
       message: `🚫 Stage "${blocked.stage.slug}" (${blocked.stage.name}) is blocked.\n` +
         `  Unsatisfied requires: ${blocked.unsatisfied.join(", ")}\n` +
-        `  These stages must be completed first.`,
+        `  These stages must be completed first.` +
+        (skippedByCondition && skippedByCondition.length > 0
+          ? `\n  ⏭️ Auto-skipped by condition: ${skippedByCondition.map((s) => s.stage.slug).join(", ")}`
+          : ""),
     };
   }
 
@@ -352,9 +606,8 @@ async function handleNext(args: string[]): Promise<Directive> {
   state.current_phase = nextStage.phase;
   saveState(state);
 
-  // Determine gate: ALWAYS stages with number starting with "0." or phase "initialization" get no gate
-  const isBootstrap = nextStage.number.startsWith("0.") || nextStage.phase === "initialization";
-  const gate = !isBootstrap;
+  // gate is always false — approval removed, engine auto-advances via requires+produces+sensors
+  const gate = false;
 
   // Build the run-stage directive
   return {
@@ -427,6 +680,7 @@ async function handleReport(args: string[]): Promise<Directive> {
     const graph = loadGraph();
     const stageNode = graph.stages.find((s) => s.slug === stageSlug);
     if (stageNode) {
+      // Check produces (准出 — artifact existence)
       const missingProduces = checkProduces(stageNode);
       if (missingProduces.length > 0) {
         return {
@@ -436,12 +690,23 @@ async function handleReport(args: string[]): Promise<Directive> {
             `\n\nGenerate these artifacts first, then report again.`,
         };
       }
+
+      // Check sensors (准出 — quality gates)
+      const sensorFailures = await checkSensors(stageNode);
+      if (sensorFailures.length > 0) {
+        return {
+          kind: "error",
+          message: `🚫 Cannot complete stage "${stageSlug}" — sensor checks failed:\n` +
+            sensorFailures.map((f) => `  ❌ [${f.sensor}] ${f.message}`).join("\n") +
+            `\n\nFix sensor failures, then report again.`,
+        };
+      }
     }
   }
 
   state.history.push(entry);
 
-  // Process result
+  // Process result — auto-advance on completed/approved (no approval gate)
   switch (result) {
     case "completed":
     case "approved":
@@ -462,11 +727,7 @@ async function handleReport(args: string[]): Promise<Directive> {
       break;
 
     case "revised":
-      // After revision, stays current for re-approval
-      break;
-
-    case "awaiting-approval":
-      // Stage stays current — waiting for user gate decision
+      // After revision, stays current for re-completion attempt
       break;
   }
 
@@ -488,17 +749,12 @@ async function handleReport(args: string[]): Promise<Directive> {
     case "rejected":
       return {
         kind: "print",
-        message: `🔄 Stage "${stageSlug}" rejected. Revise and report --result revised, then re-present gate.`,
+        message: `🔄 Stage "${stageSlug}" rejected. Revise and report --result revised, then re-report --result completed.`,
       };
     case "revised":
       return {
         kind: "print",
-        message: `📝 Stage "${stageSlug}" revised. Re-present the approval gate.`,
-      };
-    case "awaiting-approval":
-      return {
-        kind: "print",
-        message: `⏳ Stage "${stageSlug}" awaiting approval. Present the gate to the user.`,
+        message: `📝 Stage "${stageSlug}" revised. Report --result completed when ready.`,
       };
   }
 }

@@ -12,7 +12,6 @@ consumes: []
 produces: [docs/aidlc/inception/user-stories.md]
 sensors: []
 requires: [requirements-analysis]
-approval: notify
 ---
 # 用户故事 - 详细步骤
 

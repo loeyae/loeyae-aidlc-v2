@@ -12,7 +12,6 @@ consumes: []
 produces: [docs/aidlc/construction/build-test-report.md]
 sensors: []
 requires: [code-generation, code-review]
-approval: block
 ---
 
 # 构建和测试

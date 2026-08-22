@@ -12,7 +12,7 @@ consumes: []
 produces: [docs/aidlc/inception/reverse-engineering.md]
 sensors: []
 requires: [workspace-detection]
-approval: notify
+condition: has_legacy_code
 ---
 # 逆向工程
 

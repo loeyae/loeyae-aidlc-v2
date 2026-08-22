@@ -12,7 +12,6 @@ consumes: []
 produces: [docs/aidlc/inception/cross-validation-report.md]
 sensors: []
 requires: [requirements-analysis]
-approval: notify
 ---
 # Inception 产物交叉验证（强制审查）
 

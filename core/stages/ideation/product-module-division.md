@@ -7,7 +7,6 @@ lead: aidlc-architect-agent
 scopes: [feature, enterprise, mvp, classic]
 requires: [product-inception]
 produces: [docs/aidlc/ideation/module-division.md]
-approval: notify
 ---
 
 # 产品模块划分规则

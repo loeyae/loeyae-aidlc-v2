@@ -12,7 +12,6 @@ requires: [workspace-detection]
 consumes: []
 produces: [docs/aidlc/inception/requirements.md]
 sensors: [traceability]
-approval: notify
 ---
 # 需求分析（自适应）
 

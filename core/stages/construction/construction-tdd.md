@@ -12,7 +12,6 @@ consumes: []
 produces: [src/test/]
 sensors: []
 requires: [code-generation]
-approval: notify
 ---
 
 # 测试驱动开发（TDD）

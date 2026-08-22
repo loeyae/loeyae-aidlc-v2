@@ -12,7 +12,6 @@ consumes: []
 produces: [docs/aidlc/construction/functional-design.md]
 sensors: []
 requires: [units-generation]
-approval: notify
 ---
 
 # 功能设计

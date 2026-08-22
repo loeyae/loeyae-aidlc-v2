@@ -7,7 +7,6 @@ lead: aidlc-operations-agent
 scopes: [feature, enterprise, mvp]
 requires: [operations]
 produces: [docs/aidlc/operation/templates/]
-approval: notify
 ---
 
 # Operations 配置模板

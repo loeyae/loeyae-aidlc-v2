@@ -12,7 +12,6 @@ consumes: []
 produces: [src/]
 sensors: []
 requires: [functional-design]
-approval: notify
 ---
 
 # 代码生成 - 详细步骤

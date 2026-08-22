@@ -45,6 +45,7 @@ interface StageNode {
   consumes: string[];
   produces: string[];
   sensors: string[];
+  condition: string;
   file: string;
 }
 
@@ -105,6 +106,7 @@ function scanStages(): StageNode[] {
         consumes: (fm.consumes as string[]) || [],
         produces: (fm.produces as string[]) || [],
         sensors: (fm.sensors as string[]) || [],
+        condition: (fm.condition as string) || '',
         approval: (fm.approval as string) || "notify",
         file: `stages/${phase}/${file}`,
       });

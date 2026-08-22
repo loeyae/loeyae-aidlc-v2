@@ -12,7 +12,7 @@ consumes: []
 produces: [docs/aidlc/construction/infrastructure-design.md]
 sensors: []
 requires: [functional-design]
-approval: notify
+condition: has_infra_needs
 ---
 
 # 基础设施设计

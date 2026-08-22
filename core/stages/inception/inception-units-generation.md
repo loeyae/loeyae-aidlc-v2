@@ -12,7 +12,7 @@ consumes: []
 produces: [docs/aidlc/inception/units.md]
 sensors: []
 requires: [application-design]
-approval: notify
+condition: multi_module
 ---
 # 单元生成 - 详细步骤
 
