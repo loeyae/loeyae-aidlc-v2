@@ -5,6 +5,7 @@
  * Subcommands:
  *   orchestrate <next|report|park> [flags]  — Run the workflow engine
  *   evidence run [flags]                    — Produce controlled build/test evidence
+ *   check --sensor <name>                  — Run a deterministic semantic checker
  *   install --harness <name>                — Deploy skill to target platform
  *   build --harness <name> | --all          — Compile dist output
  *   graph <compile|validate>                — Stage graph operations
@@ -162,6 +163,7 @@ Usage:
 Commands:
   orchestrate <next|report|park> [flags]   Run the workflow engine
   evidence run [flags]                   Produce controlled build/test evidence
+  check --sensor <name>                  Run a deterministic semantic checker
   install [options]                         Deploy skill to platform(s)
   build --harness <name> | --all           Compile dist output
   graph <compile|validate>                 Stage graph operations
@@ -206,6 +208,9 @@ switch (cmd) {
     break;
   case "evidence":
     run("core/tools/aidlc-evidence.ts", rest);
+    break;
+  case "check":
+    run("core/tools/aidlc-semantic-checks.ts", rest);
     break;
   case "install":
     install(rest);

@@ -77,9 +77,25 @@ Construction 各 sensor 验证的证据必须来自机器执行（CI 脚本、�
 
 `build-test-evidence` 的标准 Producer 入口为 `loeyae-aidlc evidence run --stage build-and-test`。它只读取业务项目 `.aidlc/evidence-commands.json` 中的 argv allowlist，使用 `shell: false` 执行 `build`、`test` 和 `check` 命令，采集真实退出码、耗时和测试输出，记录源 revision 与配置 artifact 的 SHA-256，并通过同目录临时文件加 rename 原子写入。任一命令失败、测试统计无法解析、artifact 缺失或配置越界时 fail-closed，既不生成通过证据，也不更新 state/audit。
 
-其他语义 sensor 使用同一入口并显式传入 `--sensor <sensor>`，allowlist 中必须存在唯一的 `role: "semantic"` 命令。该 checker 必须以退出码 0 在 stdout 返回一个 JSON object，只提供 sensor-specific 字段；`evidence_version`、`timestamp`、`producer`、`source_revision` 和 `checker` 由 Producer 注入，禁止 checker 伪造。引擎随后仍执行对应 sensor 的完整 schema 校验；checker 失败、输出非 JSON、输出包含受控字段或缺少 status 时不写 evidence。
+其他语义 sensor 使用同一入口并显式传入 `--sensor <sensor>`，allowlist 中必须存在唯一的 `role: "semantic"` 命令。仓库内置 checker 可通过 `loeyae-aidlc check --sensor <sensor>` 调用；项目也可以配置经过审计的等价 checker。该 checker 必须以退出码 0 在 stdout 返回一个 JSON object，只提供 sensor-specific 字段；`evidence_version`、`timestamp`、`producer`、`source_revision` 和 `checker` 由 Producer 注入，禁止 checker 伪造。引擎随后仍执行对应 sensor 的完整 schema 校验；checker 失败、输出非 JSON、输出包含受控字段或缺少 status 时不写 evidence。
 
-### Construction Sensors 一览
+语义 checker 的 allowlist 示例：
+
+```json
+{
+  "version": "1",
+  "stage": "code-review",
+  "commands": [
+    {
+      "id": "review-checker",
+      "role": "semantic",
+      "sensor": "review-evidence",
+      "argv": ["loeyae-aidlc", "check", "--sensor", "review-evidence"]
+    }
+  ]
+}
+```
+
 
 | Sensor | 适用 Stage | 触发条件 | 阻断语义 |
 |--------|-----------|----------|----------|

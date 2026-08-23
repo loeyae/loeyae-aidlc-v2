@@ -194,7 +194,27 @@ Construction sensors 从 `.aidlc/evidence/<stage-slug>/<sensor>.json` 读取机�
 loeyae-aidlc evidence run --stage code-review --sensor review-evidence
 ```
 
-语义 checker 必须由 allowlist 命令真实执行，并在 stdout 返回单个 JSON object；Producer 注入受控 provenance、时间戳、checker 执行记录和 source revision，禁止 checker 直接提供这些字段。命令失败、输出非 JSON、测试统计无法解析或配置的 artifact 缺失时 fail-closed。最终 sensor-specific schema 仍由引擎校验，成功结果原子写入 `.aidlc/evidence/<stage-slug>/<sensor>.json`。
+语义 checker 可以直接调用仓库内置检查器：
+
+```bash
+loeyae-aidlc check --sensor review-evidence
+```
+
+allowlist 中的最小语义命令配置如下：
+
+```json
+{
+  "version": "1",
+  "stage": "code-review",
+  "commands": [{
+    "id": "review-checker",
+    "role": "semantic",
+    "sensor": "review-evidence",
+    "argv": ["loeyae-aidlc", "check", "--sensor", "review-evidence"]
+  }]
+}
+```
+
 
 ### Scope 过滤
 
