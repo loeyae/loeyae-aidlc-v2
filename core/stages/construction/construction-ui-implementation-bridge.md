@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces:
   - docs/aidlc/frontend-platform-spec.md
+  - .aidlc/evidence/ui-implementation-bridge/frontend-platform-spec.json
 sensors: [frontend-platform-spec]
 requires: [code-generation]
 condition: has_ui_requirements

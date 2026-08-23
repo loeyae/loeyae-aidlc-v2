@@ -1,3 +1,10 @@
+---
+id: prd-completeness
+name: PRD Completeness
+description: Verifies that the generated PRD is complete and traceable.
+evidence_path: .aidlc/evidence/prd-generation/prd-completeness.json
+---
+
 # prd-completeness
 
 ## 目的

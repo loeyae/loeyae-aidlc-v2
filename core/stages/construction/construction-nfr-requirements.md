@@ -13,6 +13,7 @@ produces:
   - docs/aidlc/construction/nfr-requirements.md
   - docs/aidlc/construction/{unit-name}/nfr-requirements/nfr-requirements.md
   - docs/aidlc/construction/{unit-name}/nfr-requirements/tech-stack-decisions.md
+  - .aidlc/evidence/nfr-requirements/nfr-coverage.json
 sensors: [nfr-coverage]
 requires: [functional-design]
 condition: has_nfr_needs

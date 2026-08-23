@@ -1,3 +1,10 @@
+---
+id: design-intent-coverage
+name: Design Intent Coverage
+description: Verifies that structural design intents are assigned to completed units.
+evidence_path: .aidlc/evidence/units-generation/design-intent-coverage.json
+---
+
 # design-intent-coverage
 
 ## 目的

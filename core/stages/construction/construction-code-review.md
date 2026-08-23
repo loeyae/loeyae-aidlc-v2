@@ -12,7 +12,8 @@ consumes: []
 produces:
   - docs/aidlc/construction/code-review.md
   - docs/aidlc/construction/audit/{unit-id}.md
-  - .aidlc/evidence/code-review/review-report.json
+  - .aidlc/evidence/code-review/review-evidence.json
+  - .aidlc/evidence/code-review/ui-design-alignment.json
 sensors: [reviewer-required, review-evidence, ui-design-alignment]
 requires: [code-generation, tdd]
 ---

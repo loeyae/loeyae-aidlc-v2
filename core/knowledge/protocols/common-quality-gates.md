@@ -70,10 +70,14 @@ Construction 各 sensor 验证的证据必须来自机器执行（CI 脚本、�
 | 格式 | 合法 JSON object，必须含 `evidence_version: "1"` |
 | 大小 | ≤ 512 KB |
 | 时效 | `timestamp` 字段为合法 ISO 日期，≤ 24 小时；超期拒绝，未来时间戳拒绝 |
-| 来源 | 由受控 evidence producer（CI 脚本、构建工具、测试 runner）写入 |
+| 来源 | 由受控 evidence producer（CI 脚本、构建工具、测试 runner）写入；禁止 Agent 直接编辑通过证据 |
 | 完整性 | 每个字段按 sensor schema 严格校验；缺失、类型不匹配或值异常均阻断 |
 
 证据文件路径约定：`.aidlc/evidence/<stage-slug>/<sensor-name>.json`
+
+`build-test-evidence` 的标准 Producer 入口为 `loeyae-aidlc evidence run --stage build-and-test`。它只读取业务项目 `.aidlc/evidence-commands.json` 中的 argv allowlist，使用 `shell: false` 执行 `build`、`test` 和 `check` 命令，采集真实退出码、耗时和测试输出，记录源 revision 与配置 artifact 的 SHA-256，并通过同目录临时文件加 rename 原子写入。任一命令失败、测试统计无法解析、artifact 缺失或配置越界时 fail-closed，既不生成通过证据，也不更新 state/audit。
+
+其他语义 sensor 使用同一入口并显式传入 `--sensor <sensor>`，allowlist 中必须存在唯一的 `role: "semantic"` 命令。该 checker 必须以退出码 0 在 stdout 返回一个 JSON object，只提供 sensor-specific 字段；`evidence_version`、`timestamp`、`producer`、`source_revision` 和 `checker` 由 Producer 注入，禁止 checker 伪造。引擎随后仍执行对应 sensor 的完整 schema 校验；checker 失败、输出非 JSON、输出包含受控字段或缺少 status 时不写 evidence。
 
 ### Construction Sensors 一览
 

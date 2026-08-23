@@ -22,6 +22,16 @@ description: "执行真实构建和测试命令并生成结构化证据；不负
 
 加载发布包中的 `stages/construction/construction-build-and-test.md`。
 
+## 执行
+
+在业务项目根目录准备 `.aidlc/evidence-commands.json` 命令清单。每条命令必须使用 `argv` 数组和 `role`（`build`、`test` 或 `check`），Producer 不启用 shell，也不接受临时命令参数：
+
+```bash
+loeyae-aidlc evidence run --stage build-and-test
+```
+
+Producer 只执行命令清单中的命令，解析真实测试输出，记录退出码、耗时、测试统计、源代码 revision 和已配置 artifact 的 SHA-256，并以原子方式写入 `.aidlc/evidence/build-and-test/build-test-evidence.json`。任何命令失败、测试统计无法解析或 artifact 缺失时都不写入通过证据。
+
 ## 输出
 
 返回构建报告路径、测试结果摘要、结构化 evidence（`build-test-evidence.json`）和失败项。

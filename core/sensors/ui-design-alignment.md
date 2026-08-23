@@ -1,3 +1,10 @@
+---
+id: ui-design-alignment
+name: UI Design Alignment
+description: Verifies implementation alignment with HTML Mock or Figma design evidence.
+evidence_path: .aidlc/evidence/code-review/ui-design-alignment.json
+---
+
 # ui-design-alignment
 
 ## 目的

@@ -75,6 +75,7 @@ class TestRunner:
         payloads = {
             "build-test-evidence": {
                 "evidence_version": "1", "status": "passed",
+                "producer": {"name": "test-controlled-producer", "mode": "controlled", "execution_id": "test-run-001"},
                 "commands": [{"cmd": "test-command", "exit_code": 0, "status": "passed", "duration_ms": 1}],
                 "tests": {"total": 1, "passed": 1, "failed": 0}, "checks": {"status": "passed"},
             },
@@ -162,6 +163,7 @@ class TestRunner:
             path = os.path.join(self.test_dir, ".aidlc", "evidence", stage, f"{sensor}.json")
             os.makedirs(os.path.dirname(path), exist_ok=True)
             payload = dict(payloads[sensor])
+            payload.setdefault("producer", {"name": "test-controlled-producer", "mode": "controlled", "execution_id": f"test-run-{stage}-{sensor}"})
             payload["timestamp"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             with open(path, "w") as f:
                 json.dump(payload, f)

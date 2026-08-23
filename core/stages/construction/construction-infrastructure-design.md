@@ -13,6 +13,7 @@ produces:
   - docs/aidlc/construction/infrastructure-design.md
   - docs/aidlc/construction/{unit-name}/infrastructure-design/infrastructure-design.md
   - docs/aidlc/construction/{unit-name}/infrastructure-design/deployment-architecture.md
+  - .aidlc/evidence/infrastructure-design/infrastructure-completeness.json
 sensors: [infrastructure-completeness]
 requires: [functional-design]
 condition: has_infra_needs

@@ -84,7 +84,7 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 - 格式：合法 JSON object，含 `evidence_version: "1"`
 - 大小：≤ 512 KB
 - 时效：`timestamp` 为合法 ISO 日期，≤ 24 小时
-- 来源：由受控 evidence producer（CI 脚本、构建工具、测试 runner）写入
+- 来源：由受控 evidence producer（CI 脚本、构建工具、测试 runner）写入；所有 evidence 必须带 `producer.mode: "controlled"`、执行 ID 和最近时间戳。`build-test-evidence` 使用 `loeyae-aidlc evidence run --stage build-and-test`；其他语义 sensor 使用 `--sensor <sensor>` 执行 allowlist 中唯一的 `role: "semantic"` checker。checker 只能在 stdout 返回 sensor-specific JSON，Producer 注入 provenance、时间戳和 checker 执行记录，不能由 Agent 直接编辑 evidence 文件。
 
 #### Inception Sensors
 

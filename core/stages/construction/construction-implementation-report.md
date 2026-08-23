@@ -12,6 +12,7 @@ consumes: []
 produces:
   - docs/aidlc/construction/implementation-report.md
   - docs/aidlc/construction/{unit-name}/implementation-summary.md
+  - .aidlc/evidence/implementation-report/implementation-report.json
 sensors: [doc-cascade, implementation-report]
 requires: [build-and-test]
 ---

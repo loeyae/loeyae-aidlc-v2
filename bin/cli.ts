@@ -4,6 +4,7 @@
  *
  * Subcommands:
  *   orchestrate <next|report|park> [flags]  — Run the workflow engine
+ *   evidence run [flags]                    — Produce controlled build/test evidence
  *   install --harness <name>                — Deploy skill to target platform
  *   build --harness <name> | --all          — Compile dist output
  *   graph <compile|validate>                — Stage graph operations
@@ -160,6 +161,7 @@ Usage:
 
 Commands:
   orchestrate <next|report|park> [flags]   Run the workflow engine
+  evidence run [flags]                   Produce controlled build/test evidence
   install [options]                         Deploy skill to platform(s)
   build --harness <name> | --all           Compile dist output
   graph <compile|validate>                 Stage graph operations
@@ -201,6 +203,9 @@ const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
   case "orchestrate":
     run("core/tools/aidlc-orchestrate.ts", rest);
+    break;
+  case "evidence":
+    run("core/tools/aidlc-evidence.ts", rest);
     break;
   case "install":
     install(rest);

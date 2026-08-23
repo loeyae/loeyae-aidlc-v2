@@ -23,6 +23,11 @@ static analysis results.
   "evidence_version": "1",
   "timestamp": "2026-08-22T10:30:00.000Z",  // ISO-8601, must be < 24h old
   "status": "passed",
+  "producer": {
+    "name": "loeyae-aidlc-evidence",
+    "mode": "controlled",
+    "execution_id": "uuid-or-ci-run-id"
+  },
   "commands": [
     {
       "cmd": "mvn clean verify -DskipITs",
@@ -52,6 +57,7 @@ static analysis results.
 | Field | Rule |
 |-------|------|
 | `status` | Must be `"passed"` |
+| `producer` | Object with non-empty `name`, `mode: "controlled"`, and non-empty `execution_id` |
 | `commands` | Non-empty array; each entry needs `cmd` (non-empty), `exit_code` = 0, `status` = `"passed"`, `duration_ms` (number) |
 | `tests.total` | >= 1 |
 | `tests.passed` | >= 1 |

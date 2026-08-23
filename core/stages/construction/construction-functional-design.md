@@ -15,6 +15,7 @@ produces:
   - docs/aidlc/construction/{unit-name}/functional-design/business-rules.md
   - docs/aidlc/construction/{unit-name}/functional-design/domain-entities.md
   - docs/aidlc/construction/{unit-name}/functional-design/data-source-validation.md
+  - .aidlc/evidence/functional-design/functional-design-completeness.json
 sensors: [doc-cascade, functional-design-completeness]
 requires: [units-generation]
 ---

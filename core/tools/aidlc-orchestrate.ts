@@ -355,6 +355,14 @@ function validateEvidence(
   const loaded = loadEvidence(stage, sensor);
   if (loaded.failure) return loaded.failure;
   const errors = required(loaded.value as Evidence);
+  const producer = asRecord((loaded.value as Evidence).producer);
+  if (!producer) {
+    errors.push("producer object is required for controlled evidence provenance");
+  } else {
+    if (!asNonEmptyString(producer.name)) errors.push("producer.name must identify the controlled producer");
+    if (producer.mode !== "controlled") errors.push('producer.mode must be "controlled"');
+    if (!asNonEmptyString(producer.execution_id)) errors.push("producer.execution_id is required");
+  }
   if (errors.length > 0) {
     return {
       sensor,

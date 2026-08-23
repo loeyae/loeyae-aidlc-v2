@@ -12,6 +12,7 @@ consumes: []
 produces:
   - docs/aidlc/construction/build-and-test/build-instructions.md
   - docs/aidlc/construction/build-and-test/unit-test-instructions.md
+  - .aidlc/evidence/build-and-test-templates/template-completeness.json
 sensors: [template-completeness]
 requires: [build-and-test]
 ---

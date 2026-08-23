@@ -13,6 +13,7 @@ produces:
   - docs/aidlc/construction/nfr-design.md
   - docs/aidlc/construction/{unit-name}/nfr-design/nfr-design-patterns.md
   - docs/aidlc/construction/{unit-name}/nfr-design/logical-components.md
+  - .aidlc/evidence/nfr-design/nfr-coverage.json
 sensors: [doc-cascade, nfr-coverage]
 requires: [nfr-requirements]
 condition: has_nfr_needs

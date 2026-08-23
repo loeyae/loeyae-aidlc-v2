@@ -1,3 +1,10 @@
+---
+id: diagram-contract
+name: Diagram Contract
+description: Verifies SVG and diagram structural contracts.
+evidence_path: .aidlc/evidence/<stage-slug>/diagram-contract.json
+---
+
 # diagram-contract
 
 ## 目的

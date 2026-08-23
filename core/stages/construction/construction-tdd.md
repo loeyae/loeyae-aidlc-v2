@@ -11,7 +11,7 @@ scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
 produces:
   - src/test/
-  - .aidlc/evidence/tdd/test-execution.json
+  - .aidlc/evidence/tdd/test-quality.json
 sensors: [test-quality]
 requires: [code-generation]
 ---

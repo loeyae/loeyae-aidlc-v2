@@ -112,6 +112,9 @@ loeyae-aidlc orchestrate next --status
 loeyae-aidlc orchestrate report --stage requirements-analysis --result completed
 loeyae-aidlc orchestrate park
 
+# 使用业务项目中的受控命令清单生成构建测试证据
+loeyae-aidlc evidence run --stage build-and-test
+
 # 构建某个 harness 的发布产物
 loeyae-aidlc build --harness kiro-crew
 loeyae-aidlc build --all
@@ -184,6 +187,14 @@ Construction sensors 从 `.aidlc/evidence/<stage-slug>/<sensor>.json` 读取机�
 - ≤ 512 KB，按 sensor schema 严格校验
 
 详见 `core/knowledge/protocols/common-quality-gates.md`。
+
+受控 Producer 使用业务项目根目录的 `.aidlc/evidence-commands.json` 作为命令 allowlist。构建测试使用 `build`、`test`、`check` 角色；其他语义 sensor 使用 `role: "semantic"` 并绑定 `sensor`：
+
+```bash
+loeyae-aidlc evidence run --stage code-review --sensor review-evidence
+```
+
+语义 checker 必须由 allowlist 命令真实执行，并在 stdout 返回单个 JSON object；Producer 注入受控 provenance、时间戳、checker 执行记录和 source revision，禁止 checker 直接提供这些字段。命令失败、输出非 JSON、测试统计无法解析或配置的 artifact 缺失时 fail-closed。最终 sensor-specific schema 仍由引擎校验，成功结果原子写入 `.aidlc/evidence/<stage-slug>/<sensor>.json`。
 
 ### Scope 过滤
 
