@@ -9,9 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: []
-sensors: []
+produces: [.aidlc/evidence/shared-contract-baseline/contract-baseline.json]
+sensors: [contract-baseline]
 requires: [functional-design]
+condition: has_contract_dependencies
 ---
 
 # 共享契约基线物化（C5 条件）

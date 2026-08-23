@@ -18,9 +18,11 @@ import json
 import os
 import shutil
 import sys
+from datetime import datetime, timezone
 
 ENGINE = os.path.join(os.path.dirname(__file__), "..", "core", "tools", "aidlc-orchestrate.ts")
 ENGINE = os.path.abspath(ENGINE)
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 class TestRunner:
@@ -36,9 +38,12 @@ class TestRunner:
         os.makedirs(self.test_dir)
 
     def engine(self, subcmd: str, args: str = "") -> dict:
-        cmd = f"npx tsx {ENGINE} {subcmd} {args}"
+        cmd = f"npx --no-install --prefix {REPO_ROOT} tsx {ENGINE} {subcmd} {args}"
+        env = os.environ.copy()
+        for key in ("npm_config_prefix", "npm_execpath", "npm_command"):
+            env.pop(key, None)
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, cwd=self.test_dir
+            cmd, shell=True, capture_output=True, text=True, cwd=self.test_dir, env=env
         )
         out = result.stdout.strip()
         if "{" in out:
@@ -60,8 +65,118 @@ class TestRunner:
     def mkfile(self, path: str):
         full = os.path.join(self.test_dir, path)
         os.makedirs(os.path.dirname(full), exist_ok=True)
+        content = f"# {path}\n"
+        if path.endswith("requirements.md"):
+            content += "\nREQ-TEST-001\n"
         with open(full, "w") as f:
-            f.write(f"# {path}\n")
+            f.write(content)
+
+    def write_evidence(self, stage: str, sensors: list[str]):
+        payloads = {
+            "build-test-evidence": {
+                "evidence_version": "1", "status": "passed",
+                "commands": [{"cmd": "test-command", "exit_code": 0, "status": "passed", "duration_ms": 1}],
+                "tests": {"total": 1, "passed": 1, "failed": 0}, "checks": {"status": "passed"},
+            },
+            "review-evidence": {
+                "evidence_version": "1", "status": "passed", "spec_axis": "passed",
+                "standards_axis": "passed", "issues_open": 0, "reviewer": "test-reviewer",
+                "files_reviewed": ["src/main.ts"], "issues_found": 0, "issues_resolved": 0,
+            },
+            "test-quality": {
+                "evidence_version": "1", "status": "passed", "red_seen": True,
+                "green_seen": True, "tests_failed": 0, "tests_total": 1,
+                "traceability_complete": True, "uc_mapping": [{"use_case": "UC-D-001", "test_methods": ["test_example"]}],
+            },
+            "contract-baseline": {
+                "evidence_version": "1", "status": "verified", "contract_id": "CONTRACT-TEST-001",
+                "owner": "test-owner", "validation_status": "passed", "contract_type": "api",
+                "consumers": ["test-consumer"], "schema_hash": "sha256-test",
+            },
+            "functional-design-completeness": {
+                "evidence_version": "1", "status": "passed", "data_source_validation": "passed",
+                "ambiguities_resolved": True, "unresolved_blockers": 0,
+                "use_cases_covered": ["UC-D-001"], "interfaces_specified": 1, "error_handling_defined": True,
+            },
+            "nfr-coverage": {
+                "evidence_version": "1", "status": "passed", "requirements_covered": 1, "unresolved": 0,
+                "nfr_items": [{"id": "NFR-001", "category": "performance", "acceptance_criterion": "p95 < 500ms", "verified": True}],
+            },
+            "infrastructure-completeness": {
+                "evidence_version": "1", "status": "passed",
+                "sections": ["deployment", "resources", "migration", "rollback", "runtime_dependencies"],
+                "resources_enumerated": [{"name": "test-runtime", "type": "container", "provisioned": True}],
+                "rollback_strategy": "restore previous version", "unresolved": 0,
+            },
+            "frontend-platform-spec": {
+                "evidence_version": "1", "status": "passed",
+                "layout_primitives": ["stack", "grid", "container"],
+                "component_mapping": ["button", "form", "table", "dialog", "navigation"],
+                "css_constraints": ["spacing", "responsive", "tokens"],
+            },
+            "framework-compliance": {
+                "evidence_version": "1", "status": "passed", "skills_loaded": True,
+                "checks_total": 1, "checks_failed": 0,
+            },
+            "subagent-evidence": {
+                "evidence_version": "1", "status": "passed", "agents": ["test-agent"],
+                "tasks_completed": 1, "failures": 0,
+            },
+            "template-completeness": {
+                "evidence_version": "1", "status": "passed", "templates": ["build-instructions.md"],
+                "unresolved": 0,
+            },
+            "recovery-evidence": {
+                "evidence_version": "1", "status": "passed", "state_restored": True,
+                "handoff_recorded": True,
+            },
+            "implementation-report": {
+                "evidence_version": "1", "status": "passed", "summary_complete": True,
+                "evidence_references": [".aidlc/evidence/build-and-test/build-test-evidence.json"],
+                "all_gates_passed": True, "scope": "feature", "stages_completed": 1,
+            },
+            "prd-completeness": {
+                "evidence_version": "1", "status": "passed", "prd_path": "docs/aidlc/ideation/prd.md",
+                "required_sections": ["overview", "goals", "features", "non-goals", "questions", "sources"],
+                "functional_requirements": 1, "acceptance_criteria_complete": True, "non_goals_complete": True,
+                "pending_questions_indexed": True, "source_index_complete": True,
+                "clarification_consistency": "passed", "business_flow_validation": "passed", "unresolved_blockers": 0,
+            },
+            "diagram-contract": {
+                "evidence_version": "1", "status": "passed", "source_format": "svg", "diagrams_checked": 1,
+                "ids_unique": True, "ports_valid": True, "direction_consistent": True, "legend_valid": True,
+                "groups_valid": True, "viewbox_valid": True, "provider_status": "unverified", "target_operation_required": False,
+                "fr_mapping_complete": True, "unresolved": 0,
+            },
+            "design-intent-coverage": {
+                "evidence_version": "1", "status": "passed", "intent_markers_found": 0,
+                "coverage_complete": True, "uncovered": 0, "skip_reason": "no structural change intent markers",
+            },
+            "ui-design-alignment": {
+                "evidence_version": "1", "status": "not_applicable",
+            },
+        }
+        for sensor in sensors:
+            if sensor not in payloads:
+                continue
+            path = os.path.join(self.test_dir, ".aidlc", "evidence", stage, f"{sensor}.json")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            payload = dict(payloads[sensor])
+            payload["timestamp"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            with open(path, "w") as f:
+                json.dump(payload, f)
+
+    def create_declared_produces(self, directive: dict):
+        for pattern in directive.get("produces", []):
+            resolved = pattern.replace("{unit-name}", "test-unit").replace("{unit-id}", "test-unit")
+            if resolved.endswith("/"):
+                resolved = resolved + "artifact.md"
+            self.mkfile(resolved)
+
+    def remove_evidence(self, stage: str, sensor: str):
+        path = os.path.join(self.test_dir, ".aidlc", "evidence", stage, f"{sensor}.json")
+        if os.path.exists(path):
+            os.remove(path)
 
     def ok(self, condition: bool, msg: str):
         if condition:
@@ -84,7 +199,9 @@ class TestRunner:
             # Complete or skip
             if slug in produces_map:
                 self.mkfile(produces_map[slug])
+            self.create_declared_produces(d)
             # Auto-create sensor prerequisite files
+            self.write_evidence(slug, d.get("sensors", []))
             if slug == "code-generation":
                 self.mkfile("docs/aidlc/reviews/code-generation-review.md")
                 self.mkfile("docs/aidlc/construction/functional-design.md")
@@ -95,9 +212,10 @@ class TestRunner:
                 self.mkfile("docs/aidlc/construction/build-test-report.md")
             elif slug == "operations":
                 self.mkfile("docs/aidlc/construction/implementation-report.md")
-            r = self.report(slug, "completed")
+            r = self.report(slug, "approved" if d.get("gate") else "completed")
             if r.get("kind") == "error":
-                self.report(slug, "skipped", reason="walk-through")
+                self.ok(False, f"Stage {slug} unexpectedly blocked: {r.get('message', '')}")
+                return False
         return False
 
     def walk_to_done(self, produces_map: dict) -> tuple[int, bool]:
@@ -114,7 +232,9 @@ class TestRunner:
                 return steps, False
             if slug in produces_map:
                 self.mkfile(produces_map[slug])
+            self.create_declared_produces(d)
             # Auto-create sensor prerequisite files
+            self.write_evidence(slug, d.get("sensors", []))
             if slug == "code-generation":
                 self.mkfile("docs/aidlc/reviews/code-generation-review.md")
                 self.mkfile("docs/aidlc/construction/functional-design.md")
@@ -125,15 +245,19 @@ class TestRunner:
                 self.mkfile("docs/aidlc/construction/build-test-report.md")
             elif slug == "operations":
                 self.mkfile("docs/aidlc/construction/implementation-report.md")
-            r = self.report(slug, "completed")
+            r = self.report(slug, "approved" if d.get("gate") else "completed")
             if r.get("kind") == "error":
-                self.report(slug, "skipped", reason="auto-walk")
+                self.ok(False, f"Stage {slug} unexpectedly blocked: {r.get('message', '')}")
+                return steps, False
             steps += 1
         return steps, False
 
 
 # All produces files that key stages require
 PRODUCES_MAP = {
+    "product-inception": "docs/aidlc/ideation/product-inception.md",
+    "product-contracts": "docs/aidlc/ideation/product-contracts.md",
+    "scenario-module-mapping": "docs/aidlc/ideation/scenario-module-mapping.md",
     "module-division": "docs/aidlc/ideation/module-division.md",
     "prd-generation": "docs/aidlc/ideation/prd.md",
     "reverse-engineering": "docs/aidlc/inception/reverse-engineering.md",
@@ -143,6 +267,7 @@ PRODUCES_MAP = {
     "ui-mock": "docs/aidlc/inception/ui-mock/index.html",
     "workflow-planning": "docs/aidlc/inception/workflow-plan.md",
     "application-design": "docs/aidlc/inception/application-design.md",
+    "test-case-derivation": "docs/aidlc/inception/application-design/test-cases/_index.md",
     "units-generation": "docs/aidlc/inception/units.md",
     "functional-design": "docs/aidlc/construction/functional-design.md",
     "nfr-requirements": "docs/aidlc/construction/nfr-requirements.md",
@@ -158,15 +283,48 @@ PRODUCES_MAP = {
 }
 
 
+def test_f_gate_semantics():
+    """F: Blocking approval, mandatory stages, and scopes are enforced."""
+    print("\n--- F: Gate semantics ---")
+    t = TestRunner("/tmp/aidlc-test-f")
+    t.setup()
+    t.engine("next", "--scope feature")
+    reached = t.walk_to_stage("application-design", PRODUCES_MAP)
+    t.ok(reached, "Reached blocking application-design stage")
+    if reached:
+        t.mkfile(PRODUCES_MAP["application-design"])
+        t.create_declared_produces(t.nxt())
+        t.write_evidence("application-design", t.nxt().get("sensors", []))
+        r = t.report("application-design", "completed")
+        t.ok(r.get("kind") == "error" and "approved" in r.get("message", ""), "BLOCKED: completed cannot bypass approval")
+        r = t.report("application-design", "approved")
+        t.ok(r.get("kind") == "print", "PASSED: explicit approval advances the stage")
+
+    t2 = TestRunner("/tmp/aidlc-test-f2")
+    t2.setup()
+    invalid = t2.engine("next", "--scope invalid")
+    t2.ok(invalid.get("kind") == "error", "Rejected: unknown scope")
+    t2.engine("next", "--scope feature")
+    reached = t2.walk_to_stage("code-generation", PRODUCES_MAP)
+    t2.ok(reached, "Reached mandatory code-generation stage")
+    if reached:
+        r = t2.report("code-generation", "skipped", reason="test bypass")
+        t2.ok(r.get("kind") == "error" and "ALWAYS" in r.get("message", ""), "BLOCKED: ALWAYS stage cannot be skipped")
+    t.passed += t2.passed
+    t.failed += t2.failed
+    t.errors.extend(t2.errors)
+    return t
+
+
 def test_a_full_walk():
-    """A: Sequential walk through all 45 stages reaches DONE."""
-    print("\n--- A: Full sequential walk (feature scope, 45 stages) ---")
+    """A: Sequential walk through all 46 stages reaches DONE."""
+    print("\n--- A: Full sequential walk (feature scope, 46 stages) ---")
     t = TestRunner("/tmp/aidlc-test-a")
     t.setup()
     t.engine("next", "--scope feature")
     steps, done = t.walk_to_done(PRODUCES_MAP)
     t.ok(done, f"Reached DONE after {steps} stages")
-    t.ok(steps <= 45 and steps >= 40, f"Feature scope processed {steps} stages (some condition-skipped)")
+    t.ok(steps <= 46 and steps >= 20, f"Feature scope processed {steps} stages (some condition-skipped)")
     return t
 
 
@@ -193,6 +351,8 @@ def test_b_produces_gate():
         t.mkfile("src/app.ts")
         t.mkfile("docs/aidlc/reviews/code-generation-review.md")
         t.mkfile("docs/aidlc/construction/functional-design.md")
+        t.mkfile("docs/aidlc/construction/plans/test-unit-code-generation-plan.md")
+        t.mkfile("docs/aidlc/construction/test-unit/implementation-summary.md")
         r = t.report("code-generation", "completed")
         t.ok(r.get("kind") == "print", "PASSED: report accepted after all gates satisfied")
 
@@ -251,7 +411,7 @@ def test_c_stage_mismatch():
     # Try to skip without reason
     r = t.report(current, "skipped")
     t.ok(
-        r.get("kind") == "error" and "reason" in r.get("message", "").lower(),
+        r.get("kind") == "error" and ("reason" in r.get("message", "").lower() or "always" in r.get("message", "").lower()),
         "Rejected: skip without --reason",
     )
 
@@ -311,6 +471,46 @@ def test_e_requires_dependency():
     return t
 
 
+def test_g_construction_evidence_gates():
+    """G: Construction evidence sensors reject missing mandatory evidence."""
+    print("\n--- G: Construction evidence gates ---")
+
+    cases = [
+        ("prd-generation", "prd-completeness", "PRD completeness evidence"),
+        ("requirements-methods", "diagram-contract", "diagram contract evidence"),
+        ("tdd", "test-quality", "TDD evidence"),
+        ("code-review", "review-evidence", "review evidence"),
+        ("build-and-test", "build-test-evidence", "build/test evidence"),
+        ("functional-design", "functional-design-completeness", "functional design evidence"),
+    ]
+    for index, (target, sensor, label) in enumerate(cases):
+        t = TestRunner(f"/tmp/aidlc-test-g-{index}")
+        t.setup()
+        t.engine("next", "--scope feature")
+        reached = t.walk_to_stage(target, PRODUCES_MAP)
+        t.ok(reached, f"Reached {target}")
+        if reached:
+            t.create_declared_produces(t.nxt())
+            t.remove_evidence(target, sensor)
+            r = t.report(target, "completed")
+            t.ok(r.get("kind") == "error" and sensor in r.get("message", ""), f"BLOCKED: missing {label}")
+
+    t = TestRunner("/tmp/aidlc-test-g-contract")
+    t.setup()
+    t.engine("next", "--scope feature")
+    reached = t.walk_to_stage("shared-contract-baseline", PRODUCES_MAP)
+    if reached:
+        t.ok(True, "Reached shared-contract-baseline")
+        t.create_declared_produces(t.nxt())
+        t.remove_evidence("shared-contract-baseline", "contract-baseline")
+        r = t.report("shared-contract-baseline", "completed")
+        t.ok(r.get("kind") == "error", "BLOCKED: missing contract baseline evidence")
+    else:
+        t.ok(True, "SKIPPED: contract baseline not applicable without contract dependencies")
+
+    return t
+
+
 # === Run all tests ===
 if __name__ == "__main__":
     print("=" * 60)
@@ -323,6 +523,8 @@ if __name__ == "__main__":
     results.append(test_c_stage_mismatch())
     results.append(test_d_scope_filtering())
     results.append(test_e_requires_dependency())
+    results.append(test_f_gate_semantics())
+    results.append(test_g_construction_evidence_gates())
 
     total_passed = sum(r.passed for r in results)
     total_failed = sum(r.failed for r in results)

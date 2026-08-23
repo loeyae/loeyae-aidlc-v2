@@ -12,8 +12,8 @@ consumes: []
 produces: []
 sensors: []
 requires: [ui-mock]
+condition: has_ui_requirements
 ---
-# UI Mock 样式模板
 
 > **加载时机**：仅在 `inception-ui-mock-generation.md` 生成或修改 HTML Mock 时加载。
 

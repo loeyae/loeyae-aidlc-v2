@@ -24,7 +24,7 @@
     "build:opencode": "npx tsx scripts/build.ts --harness opencode",
     "build:all": "npx tsx scripts/build.ts --all",
     "install-skill": "npx tsx bin/cli.ts install",
-    "test": "npx tsx --test tests/",
+    "test": "python3 tests/test_engine_gates.py",
     "compile-graph": "npx tsx core/tools/aidlc-graph.ts compile",
     "scope-table": "npx tsx core/tools/aidlc-utility.ts scope-table",
     "postinstall": "npx tsx core/tools/aidlc-graph.ts compile || true"
@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",
+    "@types/node": "22.10.2",
     "typescript": "^5.5.0"
   },
   "engines": {

@@ -1,6 +1,6 @@
 ---
 slug: workspace-detection
-number: "1.1"
+number: "0.1"
 name: 工作区检测
 phase: inception
 execution: ALWAYS

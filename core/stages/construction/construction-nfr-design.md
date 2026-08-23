@@ -9,9 +9,13 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: [docs/aidlc/construction/nfr-design.md]
-sensors: [doc-cascade]
+produces:
+  - docs/aidlc/construction/nfr-design.md
+  - docs/aidlc/construction/{unit-name}/nfr-design/nfr-design-patterns.md
+  - docs/aidlc/construction/{unit-name}/nfr-design/logical-components.md
+sensors: [doc-cascade, nfr-coverage]
 requires: [nfr-requirements]
+condition: has_nfr_needs
 ---
 
 # NFR 设计

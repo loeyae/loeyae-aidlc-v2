@@ -12,8 +12,8 @@ consumes: []
 produces: []
 sensors: []
 requires: [ui-mock]
+condition: has_ui_requirements
 ---
-# HTML UI Mock 生成规范
 
 ## 职责
 

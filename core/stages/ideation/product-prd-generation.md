@@ -6,9 +6,11 @@ execution: CONDITIONAL
 lead: aidlc-product-agent
 scopes: [feature, enterprise, mvp, classic]
 requires: [product-inception]
-produces: [docs/aidlc/ideation/prd.md]
+produces:
+  - docs/aidlc/ideation/prd.md
+  - .aidlc/evidence/prd-generation/prd-completeness.json
+sensors: [prd-completeness]
 ---
-
 # PRD 生成（I15）
 
 > **定位**：独立的 PRD 生成流程。PRD 是面向业务方的产品需求文档，可独立执行也可基于已有 Inception 产物生成。
@@ -91,7 +93,7 @@ produces: [docs/aidlc/ideation/prd.md]
 **三维检查（每个功能点）**：
 
 | 维度 | 问题 | 未确认时处理 |
-|------|------|--------------
+|------|------|--------------|
 | 数据来源 | 这个功能读/写什么数据？数据从哪来？ | 标记 `[待确认: 数据来源]` |
 | 业务规则 | 触发条件、计算逻辑、状态流转是什么？ | 标记 `[待确认: 业务规则]` |
 | 异常处理 | 失败时怎么办？边界条件？权限不足？ | 标记 `[待确认: 异常处理]` |
@@ -217,7 +219,7 @@ produces: [docs/aidlc/ideation/prd.md]
 ...
 
 ## 5. 业务流程
-<核心流程描述，Mermaid 流程图或文字>
+<当流程存在分支、异常、跨角色或跨系统交互时，通过 Diagram Invocation Protocol 调用图表能力生成流程图，`constraints` 传入 `delivery-business-flow`。已有 I5 `business-flows.md` 时复用其已批准事实，不重新自由生成。流程简单（线性无分支 ≤5 步）时使用编号步骤即可>
 
 ## 6. 数据需求
 | 实体 | 核心字段 | 说明 |
@@ -298,6 +300,7 @@ produces: [docs/aidlc/ideation/prd.md]
 | 4 | 待确认问题是否全部汇总 | 所有 `[待确认]` 在 §12 有记录 |
 | 5 | 来源索引是否完整 | 每章有对应来源 |
 | 6 | 是否包含技术实现细节（不应包含） | 无 URL 路径、表结构、API 设计等 |
+| 7 | §5 业务流程图是否满足 `delivery-business-flow` 视觉档案 | 有图时：已通过渲染视觉检查且标注验证记录；无图时：已记录不适用原因 |
 
 自审全部通过后输出。未通过项修正后重审，不得跳过。
 

@@ -9,11 +9,12 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: []
-sensors: []
+produces:
+  - docs/aidlc/frontend-platform-spec.md
+sensors: [frontend-platform-spec]
 requires: [code-generation]
+condition: has_ui_requirements
 ---
-
 # UI 实现桥接 — UI 设计到平台代码的翻译流程
 
 ## 目的

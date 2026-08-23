@@ -243,8 +243,10 @@ requires: [user-stories, cross-validation]
 - `source/context`：步骤 3-5 确定的阶段列表、条件和依赖关系；
 - `diagram intent`：展示执行计划的阶段顺序、依赖和关键分支；
 - `approved facts`：已确定的待执行阶段、跳过阶段及其原因、依赖关系；
-- `diagram_type`：Flowchart；
-- `target artifact`：`docs/aidlc/inception/plans/execution-plan.md`。
+- `diagram_type`：Flowchart SVG 场景；
+- `target artifact`：`docs/aidlc/inception/plans/execution-plan.md`；需要保存时，SVG 源和可选 `.diagram.json` 语义伴随清单优先写入其同级 `assets/`，静态 SVG 只有在目标产物明确要求且由外部 Provider 实际生成后才记录；
+- `output_format`：`svg`（SVG 源）；
+- `target_operations`：按执行计划实际要求填写 `source-only`、`preview`、`render` 或 `export`。
 
 Kiro Power 形态降级为直接加载 `common-diagram-design-standards.md` 执行。
 
@@ -262,7 +264,7 @@ Kiro Power 形态降级为直接加载 `common-diagram-design-standards.md` 执�
 
 创建 `docs/aidlc/inception/plans/execution-plan.md`：
 
-```markdown
+````markdown
 # 执行计划
 
 ## 详细分析摘要
@@ -287,32 +289,17 @@ Kiro Power 形态降级为直接加载 `common-diagram-design-standards.md` 执�
 - **回滚复杂度**：[简单/中等/困难]
 - **测试复杂度**：[简单/中等/复杂]
 
+````
+
 ## 工作流可视化
 
-```mermaid
-flowchart TD
-    Start["用户请求"] --> Workspace["工作区检测 - 已完成"]
+![执行计划 SVG 模板](assets/workflow-plan-template.svg)
 
-    subgraph Inception["Inception 阶段"]
-        Workspace --> Reverse["逆向工程 - 状态待填"]
-        Reverse --> Requirements["需求分析 - 状态待填"]
-        Requirements --> Stories["用户故事 - 状态待填"]
-        Stories --> Planning["工作流规划 - 进行中"]
-        Planning --> ApplicationDesign["应用设计 - 状态待填"]
-        ApplicationDesign --> UnitGeneration["单元生成 - 状态待填"]
-    end
-
-    subgraph Construction["Construction 阶段"]
-        FunctionalDesign["功能设计 - 状态待填"] --> Tdd["TDD 实现与审查 - 待执行"]
-        Tdd --> BuildTest["实际构建和测试 - 待执行"]
-    end
-
-    UnitGeneration --> FunctionalDesign
-    BuildTest --> Done["完成"]
-```
+实际计划图需要保存 SVG 源时，在该执行计划文档同级 `assets/` 创建 SVG 源；`.diagram.json` 仅在需要机器检查语义、连通性、稳定 ID 或 Provider 映射时按需创建，并替换模板中的状态、依赖、条件和跳过理由。静态 SVG、预览或导出只有在目标产物明确要求且由外部 Provider 实际生成后才记录；不得把本模板的节点状态作为真实计划事实，也不得把本地脚本设为 AIDLC 默认渲染路径。
 
 **注意**：将“状态待填”替换为实际状态；阶段被跳过时必须在节点文字和正文理由中同时说明。
 
+````markdown
 ## 待执行阶段
 
 ### 🔵 INCEPTION 阶段
@@ -364,7 +351,7 @@ flowchart TD
 [如为存量项目]
 - **集成测试**：所有组件协同工作
 - **运维就绪**：监控、日志、告警正常工作
-```
+````
 
 ## 步骤 8：初始化状态跟踪
 

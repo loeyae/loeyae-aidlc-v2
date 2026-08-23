@@ -1,0 +1,23 @@
+# Loeyae AI-DLC v2 — Codex
+
+## 安装
+
+全局安装后执行：
+
+```bash
+loeyae-aidlc install --harness codex
+```
+
+Skill 会安装到 `~/.agents/skills/loeyae-aidlc/`。
+
+## 使用
+
+在 Codex 新对话中输入：
+
+```
+使用 AI-DLC 开发用户认证模块
+```
+
+引擎通过 `loeyae-aidlc orchestrate next/report/park` 命令驱动；阶段顺序、产物和门禁由 `tools/aidlc-orchestrate.ts`、`stages/` 和编译后的 `tools/data/stage-graph.json` 决定。
+
+状态保存在业务项目的 `docs/aidlc/aidlc-state.json`。

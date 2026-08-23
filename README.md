@@ -50,7 +50,7 @@ loeyae-aidlc install --all
 | Kiro CLI | `~/.kiro/skills/loeyae-aidlc/` |
 | Claude Code | `~/.claude/plugins/loeyae-aidlc/` |
 | OpenCode | `~/.config/opencode/plugins/loeyae-aidlc/` |
-| Codex | `~/.codex/agents/loeyae-aidlc/` |
+| Codex | `~/.agents/skills/loeyae-aidlc/` |
 
 自定义路径（项目级部署）：
 
@@ -123,9 +123,9 @@ loeyae-aidlc build --all
 loeyae-aidlc-v2/
 ├── bin/cli.ts                   # CLI 入口（全局命令）
 ├── core/                        # 平台无关的引擎核心
-│   ├── stages/                  # Stage 定义文件（带 frontmatter）
+│   ├── stages/                  # Stage 定义文件（带 frontmatter），共 46 stages
 │   │   ├── ideation/           # 构思阶段 (5 stages)
-│   │   ├── inception/          # 规划阶段 (23 stages)
+│   │   ├── inception/          # 规划阶段 (24 stages)
 │   │   ├── construction/       # 实现阶段 (15 stages)
 │   │   └── operation/          # 运维阶段 (2 stages)
 │   ├── tools/                   # 确定性 TS 工具链
@@ -164,25 +164,47 @@ Agent ←→ aidlc-orchestrate.ts park   → 保存状态供下次恢复
 
 Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活跃 stage，否则拒绝。
 
+### 五层门禁
+
+| 层 | 机制 | 时机 | 覆盖 |
+|----|------|------|------|
+| requires | 前置 stage 依赖检查（scope-aware） | `next` | 41/46 |
+| condition | 动态条件评估（false 时自动跳过） | `next` | 14/46 |
+| produces | 产物文件存在且非空 | `report` | 32/46 |
+| sensors | 结构化证据校验（evidence 协议） | `report` | 21/46 |
+| current_stage | 防跳步 | `report` | 46/46 |
+
+仅 `application-design`（架构决策）和 `operations`（部署决策）保留 `approval: block`；其余 44 stage 门禁通过即自动推进。
+
+### Evidence 协议（Construction）
+
+Construction sensors 从 `.aidlc/evidence/<stage-slug>/<sensor>.json` 读取机器生成的结构化证据。证据文件必须：
+- 包含 `evidence_version: "1"` 和合法 ISO `timestamp`（≤ 24h）
+- 由 CI/构建工具/测试 runner 写入（非手写）
+- ≤ 512 KB，按 sensor schema 严格校验
+
+详见 `core/knowledge/protocols/common-quality-gates.md`。
+
 ### Scope 过滤
 
-不同 scope 执行不同数量的 stages：
+不同 scope 执行不同数量的 stages（以下为条件判断前的候选数量；实际数量会因项目证据自动跳过条件阶段）：
 
-| Scope | 说明 | 约执行 stages |
-|-------|------|--------------|
-| feature | 完整功能开发 | 45/45 |
-| enterprise | 企业级完整流程 | 45/45 |
-| mvp | 最小可行产品 | ~23/45 |
-| classic | 标准开发流程 | ~26/45 |
-| express | 快速迭代 | ~7/45 |
-| bugfix | Bug 修复 | ~7/45 |
-| refactor | 代码重构 | ~8/45 |
+| Scope | 候选 stages | 典型场景 |
+|-------|------------|---------|
+| feature | 46 | 完整功能开发 |
+| enterprise | 46 | 企业级完整流程 |
+| mvp | 46 | 最小可行产品 |
+| classic | 44 | 标准开发流程 |
+| express | 7 | 快速迭代 |
+| workshop | 7 | 工作坊/探索 |
+| bugfix | 7 | Bug 修复 |
+| refactor | 7 | 代码重构 |
 
 ## 从 v1 迁移
 
 v1 源码在 `loeyae-aidlc` 仓库。v2 的所有 steering 内容已从 v1 迁移：
 
-- v1 的 45 个 `steering/inception-*.md` / `construction-*.md` / `operations-*.md` / `product-*.md`
+- v1 的 46 个 `steering/inception-*.md` / `construction-*.md` / `operations-*.md` / `product-*.md`
   → v2 的 `core/stages/` 带 frontmatter
 - v1 的 44 个 `steering/common-*.md` + `core-workflow*.md`
   → v2 的 `core/knowledge/` 按职责域分类

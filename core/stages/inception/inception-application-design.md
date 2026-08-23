@@ -9,8 +9,14 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: [docs/aidlc/inception/application-design.md]
-sensors: []
+produces:
+  - docs/aidlc/inception/application-design.md
+  - docs/aidlc/inception/application-design/components.md
+  - docs/aidlc/inception/application-design/component-methods.md
+  - docs/aidlc/inception/application-design/application-services.md
+  - docs/aidlc/inception/application-design/component-dependency.md
+  - .aidlc/evidence/application-design/diagram-contract.json
+sensors: [diagram-contract]
 requires: [user-stories]
 approval: block
 ---

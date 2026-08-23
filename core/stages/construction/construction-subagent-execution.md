@@ -9,9 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: []
-sensors: []
+produces: [.aidlc/evidence/subagent-execution/subagent-evidence.json]
+sensors: [subagent-evidence]
 requires: [code-generation]
+condition: has_subagent_support
 ---
 
 # 平台自适应子 Agent 执行

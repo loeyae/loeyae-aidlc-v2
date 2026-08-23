@@ -9,8 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
-produces: [src/test/]
-sensors: []
+produces:
+  - src/test/
+  - .aidlc/evidence/tdd/test-execution.json
+sensors: [test-quality]
 requires: [code-generation]
 ---
 

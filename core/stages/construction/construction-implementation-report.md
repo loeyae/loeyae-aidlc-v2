@@ -9,8 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
-produces: [docs/aidlc/construction/implementation-report.md]
-sensors: [doc-cascade]
+produces:
+  - docs/aidlc/construction/implementation-report.md
+  - docs/aidlc/construction/{unit-name}/implementation-summary.md
+sensors: [doc-cascade, implementation-report]
 requires: [build-and-test]
 ---
 

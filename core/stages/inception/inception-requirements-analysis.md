@@ -295,14 +295,9 @@ sensors: [traceability]
 
 ## 可视化标准
 
-生成或修改 Mermaid 图时加载 `common-mermaid-diagram-standards.md`；实际编写语法时再加载 `common-mermaid-syntax-rules.md`。下表只定义业务表达优先级，不定义 Mermaid 语法。
+业务流程、状态和关系图按 `core-workflow.md` 的 Diagram Invocation Protocol 调用 `aidlc-diagram-design`，并加载 `common-diagram-design-standards.md` 与 `common-svg-diagram-standards.md`。新图表遵循 Blueprinter SVG 设计规则，默认交付可审阅的 SVG 源、可选 `.diagram.json` 语义伴随清单和 Provider Request；静态 SVG、预览或导出只有在外部 Provider 实际生成并提供证据后才作为目标交付物。具体图型选择、语义拆分、布局、字段契约和验收均由共享规范定义，AIDLC 不默认调用本地渲染器。
 
-| 表达方式 | 优先级 | 使用时机 |
-|----------|--------|----------|
-| **UML 图（Mermaid）** | 🥇 最高 | 流程、状态、关系的默认选择 |
-| **其他图表（Mermaid）** | 🥈 次高 | UML 不适用时 |
-| **表格 + 图表** | 🥉 第三 | 补充细节 |
-| **纯文本/表格** | ❌ 避免 | 仅在图表不可能时 |
+图表不能清晰表达或事实不足时，使用文字/表格并记录 `NEEDS_CONTEXT`；事实充分且只要求源时交付 SVG 源/`SOURCE_READY`，将目标几何和视觉标记为 `UNVERIFIED`；只有用户明确要求目标 `preview`、`render` 或 `export` 且没有可验证 Provider 时返回 `NEEDS_CAPABILITY`，经用户同意才可降级为文字/表格。不得把源不存在与 Provider 能力缺失混为一谈，也不得回退为 Mermaid 或二维 ASCII 图。
 
 ---
 

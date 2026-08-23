@@ -12,8 +12,8 @@ consumes: []
 produces: []
 sensors: []
 requires: [ui-mock]
+condition: has_ui_requirements
 ---
-# UI 页面语义规划
 
 ## 目的
 

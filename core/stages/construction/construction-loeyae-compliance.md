@@ -9,9 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: []
-sensors: []
+produces: [.aidlc/evidence/loeyae-compliance/framework-compliance.json]
+sensors: [framework-compliance]
 requires: [code-generation]
+condition: is_loeyae_boot
 ---
 
 # Loeyae Boot 编码规范加载与合规验证

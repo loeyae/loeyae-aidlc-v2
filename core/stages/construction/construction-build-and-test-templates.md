@@ -9,8 +9,10 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: []
-sensors: []
+produces:
+  - docs/aidlc/construction/build-and-test/build-instructions.md
+  - docs/aidlc/construction/build-and-test/unit-test-instructions.md
+sensors: [template-completeness]
 requires: [build-and-test]
 ---
 

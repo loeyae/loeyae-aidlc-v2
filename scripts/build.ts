@@ -19,6 +19,7 @@
 import { existsSync, mkdirSync, cpSync, rmSync, readdirSync } from "fs";
 import { join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { compile as compileGraph } from "../core/tools/aidlc-graph";
 import type { HarnessManifest } from "./manifest-types.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -76,7 +77,7 @@ async function buildHarness(name: string) {
       cpSync(src, dst, { recursive: true });
       coreCount++;
     } else {
-      console.warn(`   ⚠️  Core dir not found: ${mapping.src}`);
+      throw new Error(`Core dir not found: ${mapping.src}`);
     }
   }
 
@@ -92,7 +93,7 @@ async function buildHarness(name: string) {
       cpSync(src, dst);
       harnessCount++;
     } else {
-      console.warn(`   ⚠️  Harness file not found: ${file.src}`);
+      throw new Error(`Harness file not found: ${file.src}`);
     }
   }
 
@@ -110,6 +111,7 @@ async function buildHarness(name: string) {
 }
 
 async function main() {
+  compileGraph();
   const { harnesses } = parseArgs();
   console.log(`🏗️  Loeyae AI-DLC v2 Builder`);
   console.log(`   Harnesses: ${harnesses.join(", ")}`);

@@ -9,9 +9,12 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
-produces: [docs/aidlc/construction/build-test-report.md]
-sensors: [doc-cascade, reviewer-required]
-requires: [code-generation, code-review]
+produces:
+  - docs/aidlc/construction/build-test-report.md
+  - docs/aidlc/construction/build-and-test/build-and-test-summary.md
+  - .aidlc/evidence/build-and-test/build-test-evidence.json
+sensors: [doc-cascade, build-test-evidence]
+requires: [code-generation, tdd, code-review]
 ---
 
 # 构建和测试

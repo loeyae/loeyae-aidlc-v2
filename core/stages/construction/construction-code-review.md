@@ -9,11 +9,13 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
-produces: [docs/aidlc/construction/code-review.md]
-sensors: []
-requires: [code-generation]
+produces:
+  - docs/aidlc/construction/code-review.md
+  - docs/aidlc/construction/audit/{unit-id}.md
+  - .aidlc/evidence/code-review/review-report.json
+sensors: [reviewer-required, review-evidence, ui-design-alignment]
+requires: [code-generation, tdd]
 ---
-
 # 代码审查
 
 ## 概述
@@ -313,19 +315,9 @@ requires: [code-generation]
 
 - 默认执行顺序为 Spec → Standards；两轴判断维度和结论互相独立，不因另一轴结果改变本轴结论。
 
-```
-┌──────────────────────┐
-│ Standards Axis       │ → Standards 报告
-├──────────────────────┤
-│ Spec Axis            │ → Spec 报告
-└──────────────────────┘
-         ↓
-    合并报告（不重排序，两轴各自保留）
-         ↓
-    是否有关键问题？
-    是 → 修复循环
-    否 → 审查通过
-```
+![双轴审查流程](assets/review-dual-axis.svg)
+
+可审阅源：`assets/diagram-library.diagram.json`。两轴结论、合并顺序、问题闭环和放行条件仍以本节后续规则为准。
 
 **为什么两轴独立报告？**
 - Standards 通过但 Spec 失败 → 需求未满足

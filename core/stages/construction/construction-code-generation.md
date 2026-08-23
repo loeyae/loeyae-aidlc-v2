@@ -9,11 +9,13 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
-produces: [src/]
-sensors: [doc-cascade, reviewer-required]
+produces:
+  - src/
+  - docs/aidlc/construction/plans/{unit-name}-code-generation-plan.md
+  - docs/aidlc/construction/{unit-name}/implementation-summary.md
+sensors: [doc-cascade]
 requires: [functional-design]
 ---
-
 # 代码生成 - 详细步骤
 
 ## 概述

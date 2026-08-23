@@ -9,8 +9,13 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: [docs/aidlc/construction/functional-design.md]
-sensors: [doc-cascade]
+produces:
+  - docs/aidlc/construction/functional-design.md
+  - docs/aidlc/construction/{unit-name}/functional-design/business-logic-model.md
+  - docs/aidlc/construction/{unit-name}/functional-design/business-rules.md
+  - docs/aidlc/construction/{unit-name}/functional-design/domain-entities.md
+  - docs/aidlc/construction/{unit-name}/functional-design/data-source-validation.md
+sensors: [doc-cascade, functional-design-completeness]
 requires: [units-generation]
 ---
 

@@ -9,8 +9,13 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: [docs/aidlc/inception/units.md]
-sensors: []
+produces:
+  - docs/aidlc/inception/units.md
+  - docs/aidlc/inception/application-design/unit-of-work.md
+  - docs/aidlc/inception/application-design/unit-of-work-dependency.md
+  - docs/aidlc/inception/application-design/unit-of-work-story-map.md
+  - .aidlc/evidence/units-generation/design-intent-coverage.json
+sensors: [design-intent-coverage]
 requires: [application-design]
 condition: multi_module
 ---

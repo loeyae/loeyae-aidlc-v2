@@ -12,8 +12,8 @@ consumes: []
 produces: []
 sensors: []
 requires: [ui-mock]
+condition: has_ui_requirements
 ---
-# UI 设计 — Figma 模式编排
 
 ## 目的
 

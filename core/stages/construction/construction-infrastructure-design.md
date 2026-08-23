@@ -9,8 +9,11 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: [docs/aidlc/construction/infrastructure-design.md]
-sensors: []
+produces:
+  - docs/aidlc/construction/infrastructure-design.md
+  - docs/aidlc/construction/{unit-name}/infrastructure-design/infrastructure-design.md
+  - docs/aidlc/construction/{unit-name}/infrastructure-design/deployment-architecture.md
+sensors: [infrastructure-completeness]
 requires: [functional-design]
 condition: has_infra_needs
 ---

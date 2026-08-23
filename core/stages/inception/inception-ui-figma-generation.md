@@ -12,8 +12,8 @@ consumes: []
 produces: []
 sensors: []
 requires: [ui-mock]
+condition: has_ui_requirements
 ---
-# Figma 设计生成与登记规范
 
 ## 职责
 

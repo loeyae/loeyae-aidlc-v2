@@ -6,6 +6,7 @@ execution: CONDITIONAL
 lead: aidlc-product-agent
 scopes: [feature, enterprise, mvp, classic]
 produces: [docs/aidlc/ideation/product-inception.md]
+requires: [workspace-detection]
 ---
 
 # 产品级 Inception

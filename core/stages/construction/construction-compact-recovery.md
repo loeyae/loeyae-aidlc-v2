@@ -9,8 +9,9 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: []
-sensors: []
+produces: [.aidlc/evidence/compact-recovery/recovery-evidence.json]
+sensors: [recovery-evidence]
+condition: context_compacted
 ---
 
 # Construction 上下文压缩恢复

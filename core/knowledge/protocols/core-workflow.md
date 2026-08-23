@@ -46,35 +46,30 @@
 
 禁止启动时预加载全部规则。目录、审计、协作、提问和交接分别按 `common-directory-structure.md`、`common-audit-logging.md`、`common-team-collaboration.md`、`common-question-format-guide.md`、`common-session-handoff.md` 按需加载。
 
-规则中出现的 `aidlc-*` 能力调用只是平台入口。当前平台不提供 Skill 发现能力时（例如 Kiro Power 形态只装载 `steering/`），直接加载该能力对应的 steering 执行，输入要求、输出内容和质量门禁均不变。能力入口缺失不构成跳过步骤的理由。
+规则中出现的 `aidlc-*` 能力调用只是平台入口。当前平台不提供 Skill 发现能力时（例如 Kiro Power 形态只装载 `core/knowledge/`），直接加载该能力对应的 steering 执行，输入要求、输出内容和质量门禁均不变。能力入口缺失不构成跳过步骤的理由。
 
 ## Diagram Invocation Protocol
 
 Phase 产物需要图表时，按以下协议调用 `aidlc-diagram-design`（独立 Capability，不是 Phase）：
 
-1. Phase 判断当前产物是否需要图表——满足以下任一条件时考虑调用：
-   - 存在复杂系统结构或多组件依赖；
-   - 存在分支/循环流程；
-   - 存在多方时序交互；
-   - 存在状态迁移或生命周期；
-   - 图比文字/表格明显更容易理解；
-   - 用户明确要求图表。
+1. Phase 判断当前产物是否需要图——复杂结构、多组件依赖、分支/循环、多方时序、状态迁移、层级关系、图明显优于文字/表格或用户明确要求时，才考虑调用；
 2. Phase 准备 Diagram Request：
    - `source/context`：当前 Phase 已确认的语义上下文；
    - `diagram intent`：这张图帮助读者理解什么（一句话）；
-   - `approved facts`：已确认的组件、实体、关系和规则——事实边界，Diagram Capability 不得自行创造业务事实；
-   - `target artifact`：图写入的目标产物路径；
-   - `diagram_type`（可选）：偏好类型，默认 `auto`；
+   - `approved facts`：已确认的组件、实体、关系和规则；Diagram Capability 不得自行创造业务事实；
+   - `target artifact`：图所服务的目标 Markdown 路径；若要求保存源，SVG 源和可选 `.diagram.json` 语义伴随清单优先写入该路径同级 `assets/`，但不强制生成静态 SVG；
+   - `diagram_type`（可选）：偏好 SVG 场景语义，默认 `auto`；
+   - `output_format`（可选）：`svg`，表示 SVG 源，默认且唯一的新图表格式；
+   - `target_operations`（可选）：`source-only`、`preview`、`render`、`export` 中用户或目标产物实际要求的操作；
+   - `target_reading_environment`（可选）：目标浏览器、编辑器、容器尺寸或交付环境；未提供时不得假设目标 Preview 可用；
    - `constraints`（可选）：当前阶段特殊约束。
-3. 调用 `aidlc-diagram-design`，传入上述 Request。
-4. 接收 Diagram Result（Mermaid Markdown + Design Notes + Validation + Assumptions）。
-5. Phase 将 Mermaid 写入自己的目标产物，继续原有审批和流程。
+3. 调用 `aidlc-diagram-design`，传入上述 Request；能力按 Blueprinter 设计规则生成 SVG 源，可选生成语义伴随清单，并生成 Provider Request，不调用或默认绑定本地渲染器。
+4. 接收 Diagram Result：SVG 源路径、可选 `.diagram.json` 路径、Provider Request、Design Notes、源/语义 Validation、目标 Provider Validation（如有）和 Delivery Status。
+5. Phase 仅在目标产物需要时引用 SVG 源；只有外部 Provider 实际返回静态 SVG/预览/导出物并有对应证据时，才能引用或声明该目标交付物已完成。没有 Provider 时保留源检查结果，将目标几何/视觉标为 `UNVERIFIED`；用户明确要求目标操作而无可验证 Provider 时返回 `NEEDS_CAPABILITY`，它不表示源不存在。
 
-每张具有不同语义目的的图应单独调用，不要在一次调用中合并多个独立语义视角。
+每张具有不同语义目的的图应单独调用，不要在一次调用中合并多个独立语义视角。不需要图表时（简单字段列表、两实体简单关系、纯线性步骤、事实不足）正常使用文字或表格，不强制调用。
 
-不需要图表时（简单字段列表、两实体简单关系、纯线性步骤、事实不足）正常使用文字或表格，不强制调用。
-
-图类型选择、节点识别、语义拆分、粒度、布局、QA 和 Mermaid 语法由 Diagram Capability 及其加载的 steering 规则负责，Phase 不得重复定义。
+图类型选择、节点识别、语义拆分、粒度、布局、QA、结构化源和 SVG 验收由 Diagram Capability 及其加载的 steering 规则负责，Phase 不得重复定义。没有已验证目标 Provider 时，不得声称目标环境预览、渲染或导出成功；不得改用 Mermaid 或二维 ASCII 图。
 
 ## 意图路由
 

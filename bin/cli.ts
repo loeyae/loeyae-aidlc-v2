@@ -37,8 +37,8 @@ const HARNESS_INSTALL_PATHS: Record<string, string> = {
   "claude": resolve(HOME, ".claude/plugins/loeyae-aidlc"),
   // OpenCode — global plugin
   "opencode": resolve(HOME, ".config/opencode/plugins/loeyae-aidlc"),
-  // Codex — global agent instructions
-  "codex": resolve(HOME, ".codex/agents/loeyae-aidlc"),
+  // Codex — global skill (Codex's native skill discovery path)
+  "codex": resolve(HOME, ".agents/skills/loeyae-aidlc"),
 };
 
 const HARNESS_DESCRIPTIONS: Record<string, string> = {
@@ -47,7 +47,7 @@ const HARNESS_DESCRIPTIONS: Record<string, string> = {
   "kiro-cli": "Kiro CLI (global agent skill)",
   "claude": "Claude Code (global plugin)",
   "opencode": "OpenCode (global plugin)",
-  "codex": "Codex (global agent)",
+  "codex": "Codex (global skill)",
 };
 
 function run(script: string, args: string[]) {
@@ -113,10 +113,13 @@ function installOne(harness: string, customTarget: string) {
   console.log(`🔧 Building harness: ${buildHarness} (for ${HARNESS_DESCRIPTIONS[harness] || harness})...`);
   run("scripts/build.ts", ["--harness", buildHarness]);
 
-  // Find the dist output
+  // Find the dist output — try known content root patterns
   const distSkillDir = resolve(ROOT, "dist", buildHarness, "skills/loeyae-aidlc");
+  const distAgentsSkillDir = resolve(ROOT, "dist", buildHarness, ".agents/skills/loeyae-aidlc");
   const distRoot = resolve(ROOT, "dist", buildHarness);
-  const srcDir = existsSync(distSkillDir) ? distSkillDir : distRoot;
+  const srcDir = existsSync(distSkillDir) ? distSkillDir
+    : existsSync(distAgentsSkillDir) ? distAgentsSkillDir
+    : distRoot;
 
   if (!existsSync(srcDir)) {
     throw new Error(`Build output not found at ${srcDir}`);
@@ -143,7 +146,7 @@ function getBuildHarness(harness: string): string {
     "kiro-cli": "kiro-ide",  // Kiro CLI uses same structure as Kiro IDE
     "claude": "claude",
     "opencode": "opencode",
-    "codex": "claude",       // Codex uses similar structure to Claude
+    "codex": "codex",        // Codex has its own manifest (global skill layout)
   };
   return mapping[harness] || harness;
 }
@@ -160,7 +163,8 @@ Commands:
   install [options]                         Deploy skill to platform(s)
   build --harness <name> | --all           Compile dist output
   graph <compile|validate>                 Stage graph operations
-  version                                  Print version
+  scope-table                              Show executable stage counts by scope
+  version                                 Print version
   help                                     Show this message
 
 Install options:
@@ -175,7 +179,7 @@ Supported platforms:
   kiro-cli     Kiro CLI               → ~/.kiro/skills/loeyae-aidlc/
   claude       Claude Code            → ~/.claude/plugins/loeyae-aidlc/
   opencode     OpenCode               → ~/.config/opencode/plugins/loeyae-aidlc/
-  codex        Codex                  → ~/.codex/agents/loeyae-aidlc/
+  codex        Codex                  → ~/.agents/skills/loeyae-aidlc/
 
 Install examples:
   loeyae-aidlc install                          # Kiro Crew (default)
@@ -206,6 +210,9 @@ switch (cmd) {
     break;
   case "graph":
     run("core/tools/aidlc-graph.ts", rest);
+    break;
+  case "scope-table":
+    run("core/tools/aidlc-utility.ts", ["scope-table"]);
     break;
   case "version":
   case "--version":

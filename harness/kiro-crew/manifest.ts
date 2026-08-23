@@ -24,6 +24,7 @@ const manifest: HarnessManifest = {
     { src: "stages/operation", dst: "stages/operation" },
     { src: "knowledge", dst: "knowledge" },
     { src: "sensors", dst: "sensors" },
+    { src: "skills", dst: "skills" },
     { src: "scopes", dst: "scopes" },
     { src: "agents", dst: "agents" },
     { src: "memory", dst: "memory" },

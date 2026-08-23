@@ -12,7 +12,7 @@ consumes: []
 produces: []
 sensors: []
 requires: [ui-mock]
----
+condition: has_ui_requirements
 ---
 inclusion: manual
 ---

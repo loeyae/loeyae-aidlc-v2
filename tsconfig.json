@@ -7,8 +7,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "outDir": "./dist",
-    "rootDir": ".",
-    "types": ["bun-types"]
+    "rootDir": "."
   },
   "include": ["core/**/*.ts", "harness/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["node_modules", "dist"]

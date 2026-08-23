@@ -9,8 +9,11 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: [docs/aidlc/construction/nfr-requirements.md]
-sensors: []
+produces:
+  - docs/aidlc/construction/nfr-requirements.md
+  - docs/aidlc/construction/{unit-name}/nfr-requirements/nfr-requirements.md
+  - docs/aidlc/construction/{unit-name}/nfr-requirements/tech-stack-decisions.md
+sensors: [nfr-coverage]
 requires: [functional-design]
 condition: has_nfr_needs
 ---
