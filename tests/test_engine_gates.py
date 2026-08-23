@@ -65,9 +65,7 @@ class TestRunner:
     def mkfile(self, path: str):
         full = os.path.join(self.test_dir, path)
         os.makedirs(os.path.dirname(full), exist_ok=True)
-        content = f"# {path}\n"
-        if path.endswith("requirements.md"):
-            content += "\nREQ-TEST-001\n"
+        content = f"# {path}\nREQ-TEST-001\n"
         with open(full, "w") as f:
             f.write(content)
 
@@ -147,7 +145,7 @@ class TestRunner:
                 "evidence_version": "1", "status": "passed", "source_format": "svg", "diagrams_checked": 1,
                 "ids_unique": True, "ports_valid": True, "direction_consistent": True, "legend_valid": True,
                 "groups_valid": True, "viewbox_valid": True, "provider_status": "unverified", "target_operation_required": False,
-                "fr_mapping_complete": True, "unresolved": 0,
+                "fr_mapping_complete": True, "design_notes_valid": True, "migration_status": "passed", "port_paths_valid": True, "unresolved": 0,
             },
             "design-intent-coverage": {
                 "evidence_version": "1", "status": "passed", "intent_markers_found": 0,
@@ -513,6 +511,35 @@ def test_g_construction_evidence_gates():
     return t
 
 
+def test_h_automatic_common_sensors():
+    """H: Every producing stage receives no-todo and traceability gates automatically."""
+    print("\n--- H: Automatic no-todo and traceability coverage ---")
+    t = TestRunner("/tmp/aidlc-test-h")
+    t.setup()
+    t.engine("next", "--scope feature")
+    reached = t.walk_to_stage("product-inception", PRODUCES_MAP)
+    t.ok(reached, "Reached product-inception")
+    if reached:
+        path = os.path.join(t.test_dir, "docs/aidlc/ideation/product-inception.md")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as handle:
+            handle.write("# product inception\n")
+        r = t.report("product-inception", "completed")
+        t.ok(r.get("kind") == "error" and "traceability" in r.get("message", ""), "BLOCKED: missing requirement reference")
+
+        with open(path, "w") as handle:
+            handle.write("# product inception\nREQ-TEST-001\nTODO: unresolved\n")
+        r = t.report("product-inception", "completed")
+        t.ok(r.get("kind") == "error" and "no-todo" in r.get("message", ""), "BLOCKED: TODO marker detected")
+
+        with open(path, "w") as handle:
+            handle.write("# product inception\nREQ-TEST-001\n")
+        r = t.report("product-inception", "completed")
+        t.ok(r.get("kind") == "print", "PASSED: common sensors pass after cleanup")
+
+    return t
+
+
 # === Run all tests ===
 if __name__ == "__main__":
     print("=" * 60)
@@ -527,6 +554,7 @@ if __name__ == "__main__":
     results.append(test_e_requires_dependency())
     results.append(test_f_gate_semantics())
     results.append(test_g_construction_evidence_gates())
+    results.append(test_h_automatic_common_sensors())
 
     total_passed = sum(r.passed for r in results)
     total_failed = sum(r.failed for r in results)

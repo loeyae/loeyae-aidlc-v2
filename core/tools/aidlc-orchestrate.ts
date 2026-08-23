@@ -20,7 +20,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "fs";
-import { join, dirname, resolve } from "path";
+import { join, dirname, resolve, relative } from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
 
@@ -55,6 +55,7 @@ interface StageNode {
   consumes: string[];
   produces: string[];
   sensors: string[];
+  traceability: "required" | "not_applicable";
   condition: string;
   approval: "block" | "confirm" | "notify";
   file: string;
@@ -210,59 +211,71 @@ function checkRequires(
   return stage.requires.filter((dep) => executableSlugs.has(dep) && !done.has(dep));
 }
 
-function checkDynamicProduce(pattern: string): boolean {
+function collectFiles(path: string): string[] {
+  if (!existsSync(path)) return [];
+  const stat = statSync(path);
+  if (stat.isFile()) return [path];
+  if (!stat.isDirectory()) return [];
+
+  const files: string[] = [];
+  for (const entry of readdirSync(path)) {
+    if (entry.startsWith(".")) continue;
+    files.push(...collectFiles(join(path, entry)));
+  }
+  return files;
+}
+
+function resolveProducePaths(pattern: string): string[] {
   const marker = pattern.match(/\{[^}]+\}/);
-  if (!marker || marker.index === undefined) return false;
+  if (marker && marker.index !== undefined) {
+    const prefix = pattern.slice(0, marker.index);
+    const suffix = pattern.slice(marker.index + marker[0].length);
+    const base = join(PROJECT_ROOT, prefix);
+    if (!existsSync(base) || !statSync(base).isDirectory()) return [];
 
-  const prefix = pattern.slice(0, marker.index);
-  const suffix = pattern.slice(marker.index + marker[0].length);
-  const base = join(PROJECT_ROOT, prefix);
-  if (!existsSync(base) || !statSync(base).isDirectory()) return false;
-
-  return readdirSync(base)
-    .filter((entry) => !entry.startsWith("."))
-    .some((entry) => {
+    const paths: string[] = [];
+    for (const entry of readdirSync(base)) {
+      if (entry.startsWith(".")) continue;
+      if (!suffix.startsWith("/") && !entry.endsWith(suffix)) continue;
       const candidate = suffix.startsWith("/")
         ? join(base, entry, suffix)
         : join(base, entry);
-      if (!existsSync(candidate)) return false;
-      if (!suffix.startsWith("/") && !entry.endsWith(suffix)) return false;
-      if (statSync(candidate).isDirectory()) {
-        return readdirSync(candidate).some((child) => !child.startsWith("."));
-      }
-      return statSync(candidate).size > 0;
-    });
+      paths.push(...collectFiles(candidate));
+    }
+    return paths;
+  }
+
+  const target = join(PROJECT_ROOT, pattern);
+  if (!pattern.includes("*")) return collectFiles(target);
+
+  const wildcardIndex = pattern.search(/[\\*]/);
+  const slashIndex = pattern.lastIndexOf("/", wildcardIndex);
+  const base = join(PROJECT_ROOT, slashIndex >= 0 ? pattern.slice(0, slashIndex) : ".");
+  if (!existsSync(base)) return [];
+  const expression = new RegExp(`^${pattern.slice(slashIndex + 1).replace(/[.+^${}()|[\\]\\\\]/g, "\\\\$&").replace(/\\*/g, ".*")}$`);
+  return collectFiles(base).filter((path) => expression.test(path.slice(join(PROJECT_ROOT, slashIndex >= 0 ? pattern.slice(0, slashIndex) : ".").length + 1)));
 }
 
 /**
- * Check if produces files exist (glob and dynamic unit paths resolved against PROJECT_ROOT).
- * Dynamic `{unit-name}` and `{unit-id}` paths require at least one real matching unit.
+ * Check if produces files exist (including directories and dynamic unit paths).
  */
 function checkProduces(stage: StageNode): string[] {
   if (!stage.produces || stage.produces.length === 0) return [];
   const missing: string[] = [];
   for (const pattern of stage.produces) {
-    if (pattern.includes("{") && !checkDynamicProduce(pattern)) {
+    const paths = resolveProducePaths(pattern);
+    if (paths.length === 0) {
       missing.push(pattern);
       continue;
     }
 
-    const target = join(PROJECT_ROOT, pattern);
-    if (!pattern.includes("{") && !existsSync(target)) {
-      missing.push(pattern);
-      continue;
-    }
-    if (pattern.includes("{")) continue;
-
-    // A directory produce is valid only when it contains at least one
-    // non-hidden entry. Existence alone would allow an empty placeholder.
-    if (pattern.endsWith("/") || statSync(target).isDirectory()) {
-      const entries = readdirSync(target).filter((entry) => !entry.startsWith("."));
-      if (entries.length === 0) missing.push(pattern);
+    if (pattern.endsWith("/") || paths.some((path) => statSync(path).isDirectory())) {
+      const hasNonEmptyFile = paths.some((path) => statSync(path).size > 0);
+      if (!hasNonEmptyFile) missing.push(pattern);
       continue;
     }
 
-    if (statSync(target).size === 0) missing.push(pattern);
+    if (paths.some((path) => statSync(path).size === 0)) missing.push(pattern);
   }
   return missing;
 }
@@ -394,6 +407,24 @@ function asNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function producedText(path: string): string | null {
+  try {
+    const content = readFileSync(path);
+    if (content.includes(0)) return null;
+    return content.toString("utf-8");
+  } catch {
+    return null;
+  }
+}
+
+function artifactLabel(path: string): string {
+  return relative(PROJECT_ROOT, path) || path;
+}
+
+function isEvidenceArtifact(path: string): boolean {
+  return artifactLabel(path).startsWith(".aidlc/evidence/");
+}
+
 /**
  * Run sensors defined on a stage. Each sensor is a named check.
  * Built-in sensors:
@@ -412,25 +443,28 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
   for (const sensor of stage.sensors) {
     switch (sensor) {
       case "no-todo": {
-        // Grep produces files for TODO/FIXME/HACK
         const todoFiles: string[] = [];
+        const unreadableFiles: string[] = [];
         for (const pattern of stage.produces || []) {
-          if (pattern.includes("*")) continue; // skip globs for simplicity
-          const filePath = join(PROJECT_ROOT, pattern);
-          if (existsSync(filePath)) {
-            try {
-              const content = readFileSync(filePath, "utf-8");
-              if (/\b(TODO|FIXME|HACK)\b/.test(content)) {
-                todoFiles.push(pattern);
-              }
-            } catch { /* unreadable file, skip */ }
+          for (const filePath of resolveProducePaths(pattern)) {
+            const content = producedText(filePath);
+            if (content === null) {
+              unreadableFiles.push(artifactLabel(filePath));
+              continue;
+            }
+            if (/\b(TODO|FIXME|HACK)\b/.test(content)) {
+              todoFiles.push(artifactLabel(filePath));
+            }
           }
         }
-        if (todoFiles.length > 0) {
+        if (todoFiles.length > 0 || unreadableFiles.length > 0) {
+          const details = [];
+          if (todoFiles.length > 0) details.push(`TODO/FIXME/HACK in: ${todoFiles.join(", ")}`);
+          if (unreadableFiles.length > 0) details.push(`unreadable produced files: ${unreadableFiles.join(", ")}`);
           failures.push({
             sensor: "no-todo",
             passed: false,
-            message: `Found TODO/FIXME/HACK in: ${todoFiles.join(", ")}`,
+            message: details.join("; "),
           });
         }
         break;
@@ -461,25 +495,41 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "traceability": {
-        // Check that produces files contain at least one requirement reference (REQ-xxx or R-xxx pattern)
+        if (stage.traceability === "not_applicable") break;
+
         const untraced: string[] = [];
-        for (const pattern of stage.produces || []) {
-          if (pattern.includes("*")) continue;
-          const filePath = join(PROJECT_ROOT, pattern);
-          if (existsSync(filePath)) {
-            try {
-              const content = readFileSync(filePath, "utf-8");
-              if (!/\b(REQ-\w+|R-\d+)\b/.test(content)) {
-                untraced.push(pattern);
-              }
-            } catch { /* unreadable file, skip */ }
-          }
-        }
-        if (untraced.length > 0) {
+        const unreadableFiles: string[] = [];
+        const targets = [...new Set((stage.produces || [])
+          .flatMap((pattern) => resolveProducePaths(pattern))
+          .filter((filePath) => !isEvidenceArtifact(filePath)))];
+
+        if (targets.length === 0) {
           failures.push({
             sensor: "traceability",
             passed: false,
-            message: `No requirement ID (REQ-xxx) found in: ${untraced.join(", ")}`,
+            message: "No traceability-applicable produced artifact found; declare traceability: not_applicable only for evidence-only stages.",
+          });
+          break;
+        }
+
+        for (const filePath of targets) {
+          const content = producedText(filePath);
+          if (content === null) {
+            unreadableFiles.push(artifactLabel(filePath));
+            continue;
+          }
+          if (!/\b(REQ-[A-Z0-9][A-Z0-9_-]*|R-[0-9]+)\b/i.test(content)) {
+            untraced.push(artifactLabel(filePath));
+          }
+        }
+        if (untraced.length > 0 || unreadableFiles.length > 0) {
+          const details = [];
+          if (untraced.length > 0) details.push(`No requirement ID (REQ-xxx or R-xxx) found in: ${untraced.join(", ")}`);
+          if (unreadableFiles.length > 0) details.push(`unreadable produced files: ${unreadableFiles.join(", ")}`);
+          failures.push({
+            sensor: "traceability",
+            passed: false,
+            message: details.join("; "),
           });
         }
         break;
@@ -793,6 +843,9 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
           if (typeof evidence.target_operation_required !== "boolean") errors.push("target_operation_required must be boolean");
           if (evidence.target_operation_required === true && evidence.provider_status !== "passed") errors.push('provider_status must be "passed" when target_operation_required is true');
           if (evidence.fr_mapping_complete !== true) errors.push("fr_mapping_complete must be true");
+          if (evidence.design_notes_valid !== true) errors.push("design_notes_valid must be true");
+          if (evidence.migration_status !== "passed") errors.push('migration_status must be "passed"');
+          if (evidence.port_paths_valid !== true) errors.push("port_paths_valid must be true");
           if (asNumber(evidence.unresolved) !== 0) errors.push("unresolved must be 0");
           return errors;
         });
@@ -930,9 +983,8 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
         // The review stage must produce a non-empty review record itself.
         const reviewProduces = (stage.produces || []).filter((pattern) => !pattern.endsWith("/"));
         const missingReview = reviewProduces.filter((pattern) => {
-          if (pattern.includes("{")) return !checkDynamicProduce(pattern);
-          const reviewPath = join(PROJECT_ROOT, pattern);
-          return !existsSync(reviewPath) || statSync(reviewPath).size === 0;
+          const resolved = resolveProducePaths(pattern);
+          return resolved.length === 0 || resolved.some((path) => statSync(path).size === 0);
         });
         if (reviewProduces.length === 0 || missingReview.length > 0) {
           failures.push({

@@ -46,7 +46,7 @@
 | 角色权限矩阵完整性 | I7 完成 | 矩阵缺失，或 `无权表现` 列存在空值，或角色无矩阵条目，或权限不适用 FR 缺少确认记录 |
 | PRD 自审清单 | I15 完成 | `product-prd-generation.md` 自审清单任一项未通过，或 `prd-completeness` evidence 缺失/失败 |
 | `prd-completeness` | prd-generation | PRD 章节、功能验收、非目标、待确认项、来源索引或一致性证据不完整 |
-| `diagram-contract` | requirements-methods, application-design | SVG 源 ID/端口/方向/图例/分组/viewBox/FR 映射不完整 |
+| `diagram-contract` | requirements-methods, application-design | SVG 源或 `.diagram.json` 的 ID/端口/完整 `points`/方向/图例/分组语义/viewBox/FR 映射不完整，缺少 `diagramType`/`designNotes`/Sequence 生命线映射，或旧资产处于 `MIGRATION_REQUIRED` |
 | `design-intent-coverage` | units-generation | 设计意图未被工作单元承接，或存在未覆盖意图 |
 
 ### 契约、配置与工作单元（条件）
@@ -115,8 +115,8 @@ Construction 各 sensor 验证的证据必须来自机器执行（CI 脚本、�
 | `template-completeness` | build-and-test-templates | 始终 | 模板清单为空或存在未解决项 |
 | `recovery-evidence` | compact-recovery | condition: context_compacted | state 未恢复或交接未记录 |
 | `ui-design-alignment` | code-review | 始终 | HTML Mock/Figma 页面或组件未映射、存在多余 UI、样式/可见性/平台约束不一致 |
-| `no-todo` | 含 produces 声明的 stage | 始终 | produces 文件中发现 TODO/FIXME/HACK 关键词 |
-| `traceability` | 含 produces 声明的 stage | 始终 | produces 文件中无需求 ID（REQ-xxx 或 R-xxx） |
+| `no-todo` | 所有含 `produces` 声明的 stage（自动注入） | 始终 | 所有静态、目录和动态 produces 文件中发现 TODO/FIXME/HACK，或产物不可读取 |
+| `traceability` | 所有含 `produces` 声明的 stage（自动注入） | 始终；纯 evidence stage 必须显式 `traceability: not_applicable` | 非 evidence 产物中无需求 ID（REQ-xxx 或 R-xxx），或产物不可读取 |
 
 ### 审批原则
 

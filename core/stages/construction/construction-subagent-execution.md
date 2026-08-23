@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: [.aidlc/evidence/subagent-execution/subagent-evidence.json]
 sensors: [subagent-evidence]
+traceability: not_applicable
 requires: [code-generation]
 condition: has_subagent_support
 ---

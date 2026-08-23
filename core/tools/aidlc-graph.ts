@@ -46,6 +46,7 @@ interface StageNode {
   consumes: string[];
   produces: string[];
   sensors: string[];
+  traceability: "required" | "not_applicable";
   condition: string;
   approval: "block" | "confirm" | "notify";
   file: string;
@@ -107,6 +108,12 @@ function scanStages(): StageNode[] {
       const fm = parseFrontmatter(content);
       if (!fm || !fm.slug) continue;
 
+      const produces = (fm.produces as string[]) || [];
+      const declaredSensors = (fm.sensors as string[]) || [];
+      const sensors = produces.length > 0
+        ? [...new Set([...declaredSensors, "no-todo", "traceability"])]
+        : declaredSensors;
+
       nodes.push({
         slug: fm.slug as string,
         number: (fm.number as string) || "",
@@ -119,8 +126,9 @@ function scanStages(): StageNode[] {
         scopes: (fm.scopes as string[]) || [],
         requires: (fm.requires as string[]) || [],
         consumes: (fm.consumes as string[]) || [],
-        produces: (fm.produces as string[]) || [],
-        sensors: (fm.sensors as string[]) || [],
+        produces,
+        sensors,
+        traceability: fm.traceability === "not_applicable" ? "not_applicable" : "required",
         condition: (fm.condition as string) || '',
         approval: ((fm.approval as string) || "notify") as "block" | "confirm" | "notify",
         file: `stages/${phase}/${file}`,
@@ -198,6 +206,9 @@ function validateGraph(graph: { stages: StageNode[]; stage_count: number }): str
     if (!VALID_CONDITIONS.has(stage.condition)) errors.push(`unknown condition on ${stage.slug}: ${stage.condition}`);
     if (!["ALWAYS", "CONDITIONAL"].includes(stage.execution)) errors.push(`invalid execution on ${stage.slug}: ${stage.execution}`);
     if (!["block", "confirm", "notify"].includes(stage.approval)) errors.push(`invalid approval on ${stage.slug}: ${stage.approval}`);
+    if (!["required", "not_applicable"].includes(stage.traceability)) errors.push(`invalid traceability mode on ${stage.slug}: ${stage.traceability}`);
+    if (stage.produces.length > 0 && !stage.sensors.includes("no-todo")) errors.push(`missing automatic no-todo sensor on ${stage.slug}`);
+    if (stage.produces.length > 0 && !stage.sensors.includes("traceability")) errors.push(`missing automatic traceability sensor on ${stage.slug}`);
     for (const dependency of stage.requires || []) {
       if (!graph.stages.some((candidate) => candidate.slug === dependency)) {
         errors.push(`orphan dependency on ${stage.slug}: ${dependency}`);

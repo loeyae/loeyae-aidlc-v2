@@ -90,7 +90,29 @@ Clarification consistency: passed
     write(project, "docs/aidlc/inception/application-design/unit-of-work.md", "删除\n允许修改范围\n完成证据\n")
     write(project, "docs/aidlc/inception/ui-design/page-plan.md", "PAGE-001 Registration\n")
     write(project, "docs/aidlc/inception/ui-mock/web.html", """<html><style>.box { display: block; }</style><body>PAGE-001<div class="mock-box">condition visible</div></body></html>""")
-    write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox="0 0 100 100"><defs><marker id="arrow"/></defs><g id="group"><path id="port-in" marker-end="url(#arrow)" data-direction="LR"/><text>Legend FR-001</text></g></svg>""")
+    write(project, "docs/aidlc/inception/requirements/business-flows.md", "# Business flows\n\nREQ-001\n")
+    write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox="0 0 400 300" width="400" height="300" role="img"><title>Requirements flow</title><desc>FR-001 business flow</desc><g><rect data-node="start" x="40" y="40" width="100" height="50"/><rect data-node="done" x="260" y="40" width="100" height="50"/><path data-edge="start-done" data-edge-arrow="start-done" data-arrow-target="done:left" d="M140 65 L260 65" marker-end="url(#arrow)"/><text>FR-001</text></g></svg>""")
+    write(project, "docs/aidlc/inception/requirements/business-flows.diagram.json", json.dumps({
+        "version": 1,
+        "document": "docs/aidlc/inception/requirements/business-flows.md",
+        "diagrams": [{
+            "id": "requirements-flow", "output": "business-flows.svg", "title": "Requirements flow",
+            "description": "A minimal approved requirements flow.", "diagramType": "flowchart",
+            "canvas": {"width": 400, "height": 300},
+            "nodes": [
+                {"id": "start", "shape": "round", "label": "开始", "x": 40, "y": 40, "width": 100, "height": 50},
+                {"id": "done", "shape": "round", "label": "完成", "x": 260, "y": 40, "width": 100, "height": 50}
+            ],
+            "edges": [{"id": "start-done", "from": "start", "fromPort": "right", "to": "done", "toPort": "left", "kind": "directed", "points": [[140, 65], [260, 65]], "label": {"text": "完成", "x": 200, "y": 50}}],
+            "designNotes": {
+                "intent": "展示需求从开始到完成的单一流程",
+                "semanticModes": ["process-flow"],
+                "visualSemantics": [],
+                "legendDecision": {"status": "not-needed", "reason": "只有一种有向连线视觉语义且没有复用差异"},
+                "splitDecision": {"status": "not-needed", "reason": "图只表达一个短流程目标"}
+            }
+        }]
+    }))
 
 
 def run_checker(project: str, sensor: str) -> subprocess.CompletedProcess[str]:
@@ -127,7 +149,25 @@ def test_checker_fails_closed_when_required_artifact_is_removed() -> None:
         shutil.rmtree(project)
 
 
+def test_checker_rejects_legacy_diagram_without_structured_contract() -> None:
+    project = tempfile.mkdtemp(prefix="aidlc-semantic-checkers-migration-")
+    try:
+        fixture(project)
+        manifest_path = os.path.join(project, "docs/aidlc/inception/requirements/business-flows.diagram.json")
+        with open(manifest_path) as handle:
+            manifest = json.load(handle)
+        del manifest["diagrams"][0]["designNotes"]
+        with open(manifest_path, "w") as handle:
+            json.dump(manifest, handle)
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode != 0
+        assert "MIGRATION_REQUIRED" in result.stderr
+    finally:
+        shutil.rmtree(project)
+
+
 if __name__ == "__main__":
     test_all_checkers_pass_on_realistic_fixture()
     test_checker_fails_closed_when_required_artifact_is_removed()
-    print("16 semantic checker tests passed")
+    test_checker_rejects_legacy_diagram_without_structured_contract()
+    print("17 semantic checker tests passed")

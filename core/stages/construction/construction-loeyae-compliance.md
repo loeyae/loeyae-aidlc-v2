@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: [.aidlc/evidence/loeyae-compliance/framework-compliance.json]
 sensors: [framework-compliance]
+traceability: not_applicable
 requires: [code-generation]
 condition: is_loeyae_boot
 ---

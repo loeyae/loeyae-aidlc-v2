@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: [.aidlc/evidence/shared-contract-baseline/contract-baseline.json]
 sensors: [contract-baseline]
+traceability: not_applicable
 requires: [functional-design]
 condition: has_contract_dependencies
 ---

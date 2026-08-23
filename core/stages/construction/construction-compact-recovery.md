@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: [.aidlc/evidence/compact-recovery/recovery-evidence.json]
 sensors: [recovery-evidence]
+traceability: not_applicable
 condition: context_compacted
 ---
 

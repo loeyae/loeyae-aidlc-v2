@@ -114,8 +114,8 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 | `template-completeness` | build-and-test-templates | 模板清单为空或存在未解决项 |
 | `recovery-evidence` | compact-recovery | state 未恢复或交接未记录 |
 | `ui-design-alignment` | code-review | HTML Mock/Figma 页面或组件未映射、存在多余 UI、样式/可见性/平台约束不一致 |
-| `no-todo` | 含 produces 的 stage | produces 文件含 TODO/FIXME/HACK |
-| `traceability` | 含 produces 的 stage | produces 文件无需求 ID |
+| `no-todo` | 所有含 produces 的 stage（编译时自动注入） | 所有 produces 文件含 TODO/FIXME/HACK，或产物不可读取 |
+| `traceability` | 所有含 produces 的 stage（编译时自动注入） | 非 evidence produces 文件无 REQ-xxx/R-xxx；纯 evidence stage 必须声明 `traceability: not_applicable` |
 
 覆盖：21/46 stages（含 PRD、图表设计和 Construction 关键 stage）
 

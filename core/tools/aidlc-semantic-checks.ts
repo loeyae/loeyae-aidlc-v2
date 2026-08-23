@@ -268,28 +268,223 @@ function prdCompleteness(): Record<string, unknown> {
 }
 
 function diagramContract(): Record<string, unknown> {
-  const files = projectFiles(/\.svg$/i).filter((path) => !/(template|library)/i.test(path));
-  if (files.length === 0) fail("no SVG diagram source found");
-  let idsUnique = true;
-  let portsValid = true;
-  let direction = true;
-  let legend = true;
-  let groups = true;
-  let viewbox = true;
-  let frMapping = false;
-  for (const path of files) {
-    const content = text(path);
-    const svgIds = [...content.matchAll(/\bid=["']([^"']+)["']/g)].map((match) => match[1]);
-    if (new Set(svgIds).size !== svgIds.length) idsUnique = false;
-    if (!/<svg\b[^>]*\bviewBox=["'][^"']+["']/i.test(content)) viewbox = false;
-    if (!/(?:port|marker-(?:start|end)|data-port)/i.test(content)) portsValid = false;
-    if (!/(?:marker-end|marker-start|data-direction|direction=)/i.test(content)) direction = false;
-    if (!/<g\b/i.test(content)) groups = false;
-    if (!/(?:图例|legend)/i.test(content) && !/(?:图例|legend)/i.test(textIfExists(path.replace(/\.svg$/i, ".md")))) legend = false;
-    if (/\b(?:FR|REQ)-\d+\b/i.test(content) || /\b(?:FR|REQ)-\d+\b/i.test(textIfExists(path.replace(/\.svg$/i, ".md")))) frMapping = true;
+  const manifests = projectFiles(/\.diagram\.json$/i);
+  if (manifests.length === 0) fail("diagram structured source is missing; new or adjusted SVG requires a .diagram.json manifest");
+
+  const ports = new Set(["top", "right", "bottom", "left"]);
+  const shapes = new Set(["round", "rect", "diamond", "ellipse", "database", "actor", "note"]);
+  const edgeKinds = new Set(["directed", "bidirectional", "undirected", "dashed"]);
+  const diagramTypes = new Set(["architecture", "context", "container", "flowchart", "pipeline", "sequence", "state", "er", "deployment", "class", "component", "infrastructure"]);
+  const semanticModes = new Set(["static-boundary", "static-relation", "process-flow", "data-flow", "dependency-flow", "constraint"]);
+  const visualChannels = new Set(["edge-kind", "node-shape", "tone", "group-role", "icon"]);
+  const visualRoles = new Set(["semantic", "decorative"]);
+  const groupTypes = new Set(["exclusive", "nested", "cross-cutting", "overlay"]);
+  const legendStatuses = new Set(["required", "exempt", "not-needed"]);
+  const splitStatuses = new Set(["not-needed", "split", "kept-single"]);
+  const architectureTypes = new Set(["architecture", "context", "container", "deployment", "class", "component", "infrastructure", "er"]);
+  const processTypes = new Set(["flowchart", "pipeline", "sequence", "state"]);
+  const unsafeSvg = /<\s*(?:script|foreignObject|image|style)\b|<[^>]*\b(?:href|on[a-zA-Z]+|style)\s*=|<[^>]*url\s*\(\s*(?!#)[^)]*\)/i;
+  let diagramsChecked = 0;
+
+  const targetKey = (target: Record<string, unknown>): string => `${target.kind}:${target.ref}`;
+  const requireString = (value: unknown, field: string): string => {
+    if (typeof value !== "string" || value.trim().length === 0) fail(`${field} must be a non-empty string`);
+    return value.trim();
+  };
+  const requireFinite = (value: unknown, field: string): number => {
+    if (typeof value !== "number" || !Number.isFinite(value)) fail(`${field} must be a finite number`);
+    return value;
+  };
+  const observedChannelValues = (diagram: Record<string, any>): Map<string, Set<string>> => {
+    const values = new Map<string, Set<string>>();
+    const edges = Array.isArray(diagram.edges) ? diagram.edges : [];
+    const nodes = Array.isArray(diagram.nodes) ? diagram.nodes : [];
+    const groups = Array.isArray(diagram.groups) ? diagram.groups : [];
+    if (edges.length > 0) values.set("edge-kind", new Set(edges.map((edge) => edge.kind || "directed")));
+    if (nodes.length > 0) values.set("node-shape", new Set(nodes.map((node) => node.shape || "rect")));
+    if (nodes.length > 0 || groups.length > 0) values.set("tone", new Set([...nodes, ...groups].map((item) => item.tone || "neutral")));
+    const typedGroups = groups.filter((group) => group.semanticType);
+    if (typedGroups.length > 0) values.set("group-role", new Set(typedGroups.map((group) => group.semanticType)));
+    return values;
+  };
+
+  const portPoint = (node: Record<string, any>, port: string, offset = 0): [number, number] => {
+    const centerX = node.x + node.width / 2;
+    const centerY = node.y + node.height / 2;
+    if (port === "top") return [centerX + offset, node.y];
+    if (port === "right") return [node.x + node.width, centerY + offset];
+    if (port === "bottom") return [centerX - offset, node.y + node.height];
+    return [node.x, centerY - offset];
+  };
+  const samePoint = (first: unknown, second: [number, number]): boolean => {
+    if (!Array.isArray(first) || first.length !== 2 || typeof first[0] !== "number" || typeof first[1] !== "number") return false;
+    return Math.abs(first[0] - second[0]) <= 1 && Math.abs(first[1] - second[1]) <= 1;
+  };
+  const isOrthogonal = (points: unknown[]): boolean => points.every((point, index) => {
+    if (index === 0) return true;
+    const current = point as unknown[];
+    const previous = points[index - 1] as unknown[];
+    return Array.isArray(current) && Array.isArray(previous) && current[0] === previous[0] || Array.isArray(current) && Array.isArray(previous) && current[1] === previous[1];
+  });
+
+  for (const manifestPath of manifests) {
+    const manifest = jsonFile(manifestPath) as Record<string, any>;
+    if (manifest.version !== 1 || !Array.isArray(manifest.diagrams)) fail(`${relativePath(manifestPath)} must be a version 1 diagram manifest`);
+    const documentPath = typeof manifest.document === "string" ? join(ROOT, manifest.document) : "";
+    if (!documentPath || !existsSync(documentPath)) fail(`${relativePath(manifestPath)} references a missing document`);
+    const diagramIds = new Set<string>();
+    const outputs = new Set<string>();
+    const manifestDir = manifestPath.slice(0, manifestPath.lastIndexOf("/"));
+
+    for (const diagram of manifest.diagrams as Record<string, any>[]) {
+      const id = requireString(diagram.id, `${relativePath(manifestPath)} diagram.id`);
+      if (!/^[a-z0-9-]+$/.test(id) || diagramIds.has(id)) fail(`diagram id is invalid or duplicated: ${id}`);
+      diagramIds.add(id);
+      const outputName = requireString(diagram.output, `diagram ${id}.output`);
+      if (!/^[a-z0-9-]+\.svg$/.test(outputName) || outputs.has(outputName)) fail(`diagram output is invalid or duplicated: ${outputName}`);
+      outputs.add(outputName);
+      requireString(diagram.title, `diagram ${id}.title`);
+      requireString(diagram.description, `diagram ${id}.description`);
+      if (!diagram.canvas || requireFinite(diagram.canvas.width, `diagram ${id}.canvas.width`) <= 0 || requireFinite(diagram.canvas.height, `diagram ${id}.canvas.height`) <= 0) fail(`diagram ${id} canvas is invalid`);
+      if (!Array.isArray(diagram.nodes) || diagram.nodes.length === 0) fail(`diagram ${id} must contain nodes`);
+      if (!Array.isArray(diagram.edges)) fail(`diagram ${id}.edges must be an array`);
+      if (!Array.isArray(diagram.groups || [])) fail(`diagram ${id}.groups must be an array`);
+
+      // New/adjusted diagrams must carry the v1 structured design contract.
+      if (!diagramTypes.has(diagram.diagramType)) fail(`MIGRATION_REQUIRED: diagram ${id} lacks a valid diagramType`);
+      const notes = diagram.designNotes;
+      if (!notes || typeof notes !== "object") fail(`MIGRATION_REQUIRED: diagram ${id} lacks designNotes`);
+      requireString(notes.intent, `diagram ${id}.designNotes.intent`);
+      if (!Array.isArray(notes.semanticModes) || notes.semanticModes.length === 0 || !notes.semanticModes.every((mode: unknown) => semanticModes.has(String(mode)))) fail(`diagram ${id}.designNotes.semanticModes is invalid`);
+      if (!Array.isArray(notes.visualSemantics)) fail(`diagram ${id}.designNotes.visualSemantics must be an array`);
+      const declarations = new Map<string, Record<string, any>>();
+      for (const declaration of notes.visualSemantics) {
+        if (!declaration || !visualChannels.has(declaration.channel) || !visualRoles.has(declaration.role)) fail(`diagram ${id}.visualSemantics contains an invalid declaration`);
+        if (declarations.has(declaration.channel)) fail(`diagram ${id}.visualSemantics duplicates ${declaration.channel}`);
+        requireString(declaration.reason, `diagram ${id}.visualSemantics.${declaration.channel}.reason`);
+        declarations.set(declaration.channel, declaration);
+      }
+
+      const nodes = new Map<string, Record<string, any>>();
+      for (const node of diagram.nodes) {
+        const nodeId = requireString(node.id, `diagram ${id} node.id`);
+        if (nodes.has(nodeId) || !shapes.has(node.shape || "rect")) fail(`diagram ${id} has an invalid or duplicated node: ${nodeId}`);
+        nodes.set(nodeId, node);
+        for (const property of ["x", "y", "width", "height"]) requireFinite(node[property], `diagram ${id} node ${nodeId}.${property}`);
+        if (node.width <= 0 || node.height <= 0 || node.x < 0 || node.y < 0 || node.x + node.width > diagram.canvas.width || node.y + node.height > diagram.canvas.height) fail(`diagram ${id} node ${nodeId} is outside the canvas`);
+      }
+
+      const edges = new Map<string, Record<string, any>>();
+      for (const edge of diagram.edges) {
+        const edgeId = requireString(edge.id, `diagram ${id} edge.id`);
+        if (edges.has(edgeId) || !nodes.has(edge.from) || !nodes.has(edge.to)) fail(`diagram ${id} edge ${edgeId} has invalid identity or endpoints`);
+        if (!ports.has(edge.fromPort) || !ports.has(edge.toPort) || !edgeKinds.has(edge.kind || "directed")) fail(`diagram ${id} edge ${edgeId} has invalid port or kind`);
+        for (const offset of ["fromPortOffset", "toPortOffset"]) if (edge[offset] !== undefined) requireFinite(edge[offset], `diagram ${id} edge ${edgeId}.${offset}`);
+        if (!Array.isArray(edge.points) || edge.points.length < 2 || !edge.points.every((point: unknown) => Array.isArray(point) && point.length === 2 && point.every((value) => typeof value === "number" && Number.isFinite(value)))) fail(`MIGRATION_REQUIRED: diagram ${id} edge ${edgeId} lacks complete points`);
+        const points = edge.points as unknown[];
+        if (points.some((point) => (point as number[])[0] < 0 || (point as number[])[1] < 0 || (point as number[])[0] > diagram.canvas.width || (point as number[])[1] > diagram.canvas.height)) fail(`diagram ${id} edge ${edgeId} has points outside the canvas`);
+        if (diagram.diagramType !== "sequence" && !samePoint(points[0], portPoint(nodes.get(edge.from)!, edge.fromPort, edge.fromPortOffset || 0))) fail(`diagram ${id} edge ${edgeId} first point does not match fromPort`);
+        if (diagram.diagramType !== "sequence" && !samePoint(points[points.length - 1], portPoint(nodes.get(edge.to)!, edge.toPort, edge.toPortOffset || 0))) fail(`diagram ${id} edge ${edgeId} last point does not match toPort`);
+        if (processTypes.has(diagram.diagramType) && edge.kind === "bidirectional") fail(`diagram ${id} process edge ${edgeId} must not be bidirectional`);
+        if (diagram.diagramType === "flowchart" || diagram.diagramType === "pipeline") {
+          if (!isOrthogonal(points)) fail(`diagram ${id} process edge ${edgeId} is not orthogonal`);
+        }
+        edges.set(edgeId, edge);      }
+
+      const groups = new Map<string, Record<string, any>>();
+      for (const group of diagram.groups || []) {
+        const groupId = requireString(group.id, `diagram ${id} group.id`);
+        if (groups.has(groupId) || nodes.has(groupId) || edges.has(groupId) || !groupTypes.has(group.semanticType)) fail(`MIGRATION_REQUIRED: diagram ${id} group ${groupId} lacks valid semanticType`);
+        if (!Array.isArray(group.members)) fail(`MIGRATION_REQUIRED: diagram ${id} group ${groupId} lacks members`);
+        if (group.semanticType === "nested" && typeof group.parent !== "string") fail(`diagram ${id} nested group ${groupId} lacks parent`);
+        if (group.semanticType !== "nested" && group.parent !== undefined) fail(`diagram ${id} non-nested group ${groupId} must not declare parent`);
+        if ((group.semanticType === "cross-cutting" || group.semanticType === "overlay") && group.members.length !== 0) fail(`diagram ${id} ${group.semanticType} group ${groupId} must have no members`);
+        for (const member of group.members) if (!nodes.has(member)) fail(`diagram ${id} group ${groupId} references missing node ${member}`);
+        groups.set(groupId, group);
+      }
+      for (const group of groups.values()) if (group.semanticType === "nested" && !groups.has(group.parent)) fail(`diagram ${id} group ${group.id} references missing parent ${group.parent}`);
+
+      const observed = observedChannelValues(diagram);
+      const semanticChannels: string[] = [];
+      for (const [channel, values] of observed) {
+        if (values.size > 1) {
+          const declaration = declarations.get(channel);
+          if (!declaration) fail(`diagram ${id} visual channel ${channel} has multiple values without declaration`);
+          if (declaration.role === "semantic") semanticChannels.push(channel);
+        }
+      }
+      const legendDecision = notes.legendDecision;
+      if (!legendDecision || !legendStatuses.has(legendDecision.status)) fail(`diagram ${id} lacks a valid legendDecision`);
+      requireString(legendDecision.reason, `diagram ${id}.legendDecision.reason`);
+      if (diagram.legend !== undefined && legendDecision.status !== "required") fail(`diagram ${id} has legend but legendDecision is not required`);
+      if (semanticChannels.length > 0 && !["required", "exempt"].includes(legendDecision.status)) fail(`diagram ${id} has semantic visual differences without a legend or exemption`);
+      if (legendDecision.status === "required" && (!diagram.legend || !Array.isArray(diagram.legend.items) || diagram.legend.items.length === 0)) fail(`diagram ${id} requires legend items`);
+      if (legendDecision.status === "exempt" && (diagram.legend || legendDecision.noReusedSymbol !== true || !Array.isArray(legendDecision.inlineSemanticEvidence) || legendDecision.inlineSemanticEvidence.length === 0)) fail(`diagram ${id} legend exemption is incomplete`);
+      if (legendDecision.status === "not-needed" && (semanticChannels.length > 0 || diagram.legend)) fail(`diagram ${id} legendDecision not-needed conflicts with semantic visual differences`);
+      if (diagram.legend) {
+        const legendIds = new Set<string>();
+        const explained = new Set<string>();
+        for (const item of diagram.legend.items) {
+          const itemId = requireString(item.id, `diagram ${id} legend item.id`);
+          if (legendIds.has(itemId)) fail(`diagram ${id} legend item ${itemId} is duplicated`);
+          legendIds.add(itemId);
+          requireString(item.label, `diagram ${id} legend ${itemId}.label`);
+          requireString(item.meaning, `diagram ${id} legend ${itemId}.meaning`);
+          if (!item.sample || !Array.isArray(item.targets) || item.targets.length === 0) fail(`diagram ${id} legend ${itemId} lacks sample or targets`);
+          const sample = targetKey(item.sample);
+          let sampleFound = false;
+          for (const target of item.targets) {
+            if (!new Set(["node", "edge", "group"]).has(target.kind) || typeof target.ref !== "string") fail(`diagram ${id} legend ${itemId} has invalid target`);
+            const exists = target.kind === "node" ? nodes.has(target.ref) : target.kind === "edge" ? edges.has(target.ref) : groups.has(target.ref);
+            if (!exists) fail(`diagram ${id} legend ${itemId} references missing ${targetKey(target)}`);
+            const key = targetKey(target);
+            if (explained.has(key)) fail(`diagram ${id} legend target ${key} is explained more than once`);
+            explained.add(key);
+            if (key === sample) sampleFound = true;
+          }
+          if (!sampleFound) fail(`diagram ${id} legend ${itemId} sample is not included in targets`);
+        }
+      }
+
+      const splitDecision = notes.splitDecision;
+      if (!splitDecision || !splitStatuses.has(splitDecision.status)) fail(`diagram ${id} lacks a valid splitDecision`);
+      requireString(splitDecision.reason, `diagram ${id}.splitDecision.reason`);
+      const mixed = (architectureTypes.has(diagram.diagramType) && notes.semanticModes.some((mode: string) => ["process-flow", "data-flow", "dependency-flow"].includes(mode))) || (processTypes.has(diagram.diagramType) && notes.semanticModes.some((mode: string) => ["static-boundary", "static-relation"].includes(mode)));
+      if (mixed && splitDecision.status === "not-needed") fail(`diagram ${id} mixes static and process semantics without split decision`);
+      if (splitDecision.status === "kept-single") {
+        for (const field of ["singleGoal", "staticBoundary", "processFlowDistinction"]) requireString(splitDecision[field], `diagram ${id}.splitDecision.${field}`);
+        for (const state of ["normal", "fit", "zoom"]) {
+          const evidence = splitDecision.readabilityEvidence?.[state];
+          if (!evidence || !["PASS", "UNVERIFIED"].includes(evidence.status) || typeof evidence.evidence !== "string" || evidence.evidence.length === 0) fail(`diagram ${id} split readability evidence ${state} is invalid`);
+        }
+      }
+
+      const svgPath = join(manifestDir, outputName);
+      if (!existsSync(svgPath)) fail(`diagram ${id} SVG output is missing: ${relativePath(svgPath)}`);
+      const svg = text(svgPath);
+      if (unsafeSvg.test(svg) || !/<svg\b[^>]*\bviewBox=["'][^"']+["']/i.test(svg) || !/\brole=["']img["']/i.test(svg) || !/<title\b/i.test(svg) || !/<desc\b/i.test(svg)) fail(`diagram ${id} SVG fails static safety or accessibility checks`);
+      if ([...svg.matchAll(/\bdata-node=["']([^"']+)["']/g)].length !== nodes.size || [...svg.matchAll(/\bdata-edge=["']([^"']+)["']/g)].length !== edges.size) fail(`diagram ${id} SVG node/edge mapping does not match structured source`);
+      const directedEdgeCount = diagram.edges.filter((edge: Record<string, any>) => (edge.kind || "directed") !== "undirected").length;
+      if ([...svg.matchAll(/\bdata-edge-arrow=["']/g)].length < directedEdgeCount || [...svg.matchAll(/\bdata-arrow-target=["']/g)].length < directedEdgeCount) fail(`diagram ${id} SVG arrow overlay mapping is incomplete`);
+      if ([...svg.matchAll(/\bdata-legend-item=["']/g)].length !== (diagram.legend?.items?.length || 0)) fail(`diagram ${id} SVG legend mapping does not match structured source`);
+      if (diagram.groups?.length && !diagram.groups.every((group: Record<string, any>) => svg.includes(`group-${group.id}`))) fail(`diagram ${id} SVG group mapping is incomplete`);
+      if (diagram.diagramType === "sequence") {
+        for (const nodeId of nodes.keys()) if (!svg.includes(`data-lifeline-for="${nodeId}"`) && !svg.includes(`data-lifeline-for='${nodeId}'`)) fail(`diagram ${id} sequence lifeline mapping is missing for ${nodeId}`);
+      }
+      const adjacentMarkdown = textIfExists(svgPath.replace(/\.svg$/i, ".md"));
+      if (!/\b(?:FR|REQ)-\d+\b/i.test(svg) && !/\b(?:FR|REQ)-\d+\b/i.test(adjacentMarkdown)) fail(`diagram ${id} has no FR/REQ mapping evidence`);
+      diagramsChecked += 1;
+    }
   }
-  if (!idsUnique || !portsValid || !direction || !legend || !groups || !viewbox || !frMapping) fail(`diagram contract failed: ids=${idsUnique}, ports=${portsValid}, direction=${direction}, legend=${legend}, groups=${groups}, viewbox=${viewbox}, fr_mapping=${frMapping}`);
-  return { status: "passed", source_format: "svg", diagrams_checked: files.length, ids_unique: true, ports_valid: true, direction_consistent: true, legend_valid: true, groups_valid: true, viewbox_valid: true, provider_status: "unverified", target_operation_required: false, fr_mapping_complete: true, unresolved: 0 };
+
+  return {
+    status: "passed", source_format: "svg", diagrams_checked: diagramsChecked,
+    ids_unique: true, ports_valid: true, direction_consistent: true, legend_valid: true,
+    groups_valid: true, viewbox_valid: true, provider_status: "unverified",
+    target_operation_required: false, fr_mapping_complete: true,
+    design_notes_valid: true, migration_status: "passed", port_paths_valid: true,
+    unresolved: 0,
+  };
 }
 
 function designIntentCoverage(): Record<string, unknown> {
