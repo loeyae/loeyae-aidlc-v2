@@ -16,8 +16,9 @@
 
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { execSync } from "child_process";
-import { readFileSync, existsSync, cpSync, mkdirSync, rmSync } from "fs";
+import { spawnSync } from "child_process";
+import { readFileSync, writeFileSync, existsSync, cpSync, mkdirSync, rmSync, renameSync } from "fs";
+import { mergeMcpServers } from "../core/tools/aidlc-mcp-config";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -53,16 +54,41 @@ const HARNESS_DESCRIPTIONS: Record<string, string> = {
   "codex": "Codex (global skill)",
 };
 
-function run(script: string, args: string[]) {
-  const cmd = `npx tsx ${resolve(ROOT, script)} ${args.join(" ")}`;
-  try {
-    const result = execSync(cmd, { stdio: "pipe", cwd: process.cwd(), encoding: "utf-8" });
-    process.stdout.write(result);
-  } catch (e: any) {
-    if (e.stdout) process.stdout.write(e.stdout);
-    if (e.stderr) process.stderr.write(e.stderr);
-    process.exit(e.status || 1);
+function registerKiroCrewMcp() {
+  const sourcePath = resolve(ROOT, "harness/kiro-crew/mcp.json");
+  const targetPath = resolve(HOME, ".kiro/settings/mcp.json");
+  const defaults = JSON.parse(readFileSync(sourcePath, "utf-8"));
+  const current = existsSync(targetPath)
+    ? JSON.parse(readFileSync(targetPath, "utf-8"))
+    : {};
+  const merged = mergeMcpServers(current, defaults.mcpServers);
+
+  if (merged.added.length === 0) {
+    console.log(`🔌 Kiro Crew MCP services already present; preserved: ${merged.preserved.join(", ") || "none"}`);
+    return;
   }
+
+  mkdirSync(dirname(targetPath), { recursive: true });
+  const temporaryPath = `${targetPath}.${process.pid}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(merged.config, null, 2)}\n`);
+  renameSync(temporaryPath, targetPath);
+  console.log(`🔌 Added Kiro Crew MCP services: ${merged.added.join(", ")}`);
+}
+
+function run(script: string, args: string[]) {
+  const tsx = resolve(ROOT, "node_modules/tsx/dist/cli.mjs");
+  const result = spawnSync(process.execPath, [tsx, resolve(ROOT, script), ...args], {
+    stdio: "pipe",
+    cwd: process.cwd(),
+    encoding: "utf-8",
+  });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.error) {
+    console.error(result.error.message);
+    process.exit(1);
+  }
+  if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
 function install(args: string[]) {
@@ -134,6 +160,10 @@ function installOne(harness: string, customTarget: string) {
   }
   mkdirSync(dirname(target), { recursive: true });
   cpSync(srcDir, target, { recursive: true });
+
+  if (harness === "kiro-crew" && !customTarget) {
+    registerKiroCrewMcp();
+  }
 
   console.log(`✅ Installed loeyae-aidlc v${PKG.version} (${harness}) → ${target}\n`);
 }

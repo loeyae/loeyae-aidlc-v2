@@ -42,6 +42,7 @@
 | TDD、构建测试 | `common-test-execution-strategy.md` |
 | 存量分布式系统 | 按需加载 `common-runtime-dependency-analysis.md`、`common-contract-governance.md`、`common-configuration-governance.md`、`common-distributed-consistency.md` |
 | 需要图表设计时 | `common-diagram-design-standards.md` |
+| 执行图表源级、几何或目标环境验证时 | `common-diagram-validation-standards.md` + `common-svg-diagram-standards.md` |
 | 检测到技术栈证据 | 按 state.md 加载对应的 `common-tech-*` 条件适配 |
 
 禁止启动时预加载全部规则。目录、审计、协作、提问和交接分别按 `common-directory-structure.md`、`common-audit-logging.md`、`common-team-collaboration.md`、`common-question-format-guide.md`、`common-session-handoff.md` 按需加载。

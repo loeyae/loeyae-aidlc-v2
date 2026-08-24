@@ -25,15 +25,12 @@ const manifest: HarnessManifest = {
     { src: "knowledge", dst: "knowledge" },
     { src: "sensors", dst: "sensors" },
     { src: "skills", dst: "skills" },
-    { src: "scopes", dst: "scopes" },
-    { src: "agents", dst: "agents" },
-    { src: "memory", dst: "memory" },
-    { src: "templates", dst: "templates" },
   ],
 
   harnessFiles: [
     { src: "skills/loeyae-aidlc/SKILL.md", dst: "SKILL.md" },
     { src: "skills/loeyae-aidlc/question-rendering.md", dst: "question-rendering.md" },
+    { src: "mcp.json", dst: "mcp.json" },
     { src: "README.md", dst: "README.md", projectRoot: true },
   ],
 

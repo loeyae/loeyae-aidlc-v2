@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "loeyae-aidlc": "./bin/cli.ts"
+    "loeyae-aidlc": "./bin/cli.js"
   },
   "files": [
     "bin/",
@@ -24,7 +24,7 @@
     "build:opencode": "npx tsx scripts/build.ts --harness opencode",
     "build:all": "npx tsx scripts/build.ts --all",
     "install-skill": "npx tsx bin/cli.ts install",
-    "test": "python3 tests/test_engine_gates.py && python3 tests/test_evidence_producer.py && python3 tests/test_semantic_checkers.py && python3 tests/test_provider_config.py && python3 tests/test_provider_adapter.py",
+    "test": "python3 tests/test_engine_gates.py && python3 tests/test_evidence_producer.py && python3 tests/test_semantic_checkers.py && python3 tests/test_provider_config.py && python3 tests/test_mcp_config.py && python3 tests/test_provider_adapter.py",
     "evidence": "npx tsx core/tools/aidlc-evidence.ts",
     "compile-graph": "npx tsx core/tools/aidlc-graph.ts compile",
     "scope-table": "npx tsx core/tools/aidlc-utility.ts scope-table",

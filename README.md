@@ -41,6 +41,8 @@ loeyae-aidlc install --harness codex
 loeyae-aidlc install --all
 ```
 
+Kiro Crew 的默认安装还会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` MCP 服务按“只补缺失项、不覆盖同名现有配置”的规则合并到 `~/.kiro/settings/mcp.json`。`ssot` 使用环境变量 `SSOT_API_KEY`，不把密钥写入安装包或项目文件。项目级 `--target` 安装不会修改全局 MCP 配置。
+
 各平台的全局安装路径：
 
 | 平台 | 安装路径 |

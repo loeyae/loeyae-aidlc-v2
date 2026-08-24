@@ -2,11 +2,14 @@
 
 ## Install
 
-Copy the `dist/kiro-crew/skills/loeyae-aidlc/` directory to `~/.kiro/crew/skills/loeyae-aidlc/`.
+Use the CLI installer so the skill and the V1 MCP capability set are installed together:
 
 ```bash
-cp -r dist/kiro-crew/skills/loeyae-aidlc/ ~/.kiro/crew/skills/loeyae-aidlc/
+loeyae-aidlc install
 ```
+
+The installer copies the skill to `~/.kiro/crew/skills/loeyae-aidlc/` and merges missing `loeyae-skills`, `awesome-design`, `figma`, `ssot`, and `chrome-devtools` entries into `~/.kiro/settings/mcp.json`. Existing same-name entries are preserved, and project-level `--target` installs do not modify global MCP settings. `ssot` reads `SSOT_API_KEY` from the environment.
+
 
 ## Usage
 

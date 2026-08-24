@@ -1,0 +1,64 @@
+{
+  "mcpServers": {
+    "loeyae-skills": {
+      "type": "http",
+      "url": "https://mcp-skills.allbelieves.com/mcp",
+      "disabled": false,
+      "autoApprove": [
+        "get_skill_outline",
+        "get_skill_section",
+        "get_skill_summary",
+        "get_skill_content",
+        "search_skill"
+      ]
+    },
+    "awesome-design": {
+      "type": "http",
+      "url": "https://mcp-design.allbelieves.com/mcp",
+      "disabled": false,
+      "autoApprove": [
+        "list_design_styles",
+        "get_design_style",
+        "get_design_tokens"
+      ]
+    },
+    "figma": {
+      "type": "http",
+      "url": "https://mcp.figma.com/mcp",
+      "disabled": false,
+      "autoApprove": [
+        "whoami",
+        "get_metadata",
+        "get_design_context",
+        "get_variable_defs",
+        "get_screenshot",
+        "get_libraries",
+        "search_design_system",
+        "get_code_connect_map"
+      ]
+    },
+    "ssot": {
+      "type": "http",
+      "url": "https://ssot.dev.loeyae.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${SSOT_API_KEY}"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "list_projects",
+        "get_project",
+        "list_documents",
+        "get_document",
+        "search_documents",
+        "retrieve_context",
+        "get_revision_file"
+      ]
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@1.6.0"],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
