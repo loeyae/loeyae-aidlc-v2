@@ -8,6 +8,7 @@ import tempfile
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TOOL = os.path.join(REPO_ROOT, "core", "tools", "aidlc-evidence.ts")
+ORCHESTRATE = os.path.join(REPO_ROOT, "core", "tools", "aidlc-orchestrate.ts")
 
 
 def run_producer(project: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -21,6 +22,75 @@ def run_producer(project: str, *args: str) -> subprocess.CompletedProcess[str]:
         *args,
     ]
     return subprocess.run(command, cwd=project, capture_output=True, text=True)
+
+
+def run_orchestrate(project: str, *args: str) -> dict:
+    result = subprocess.run(
+        ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", ORCHESTRATE, *args],
+        cwd=project,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def create_declared_artifacts(project: str, produces: list[str]) -> None:
+    for pattern in produces:
+        if pattern.startswith(".aidlc/evidence/"):
+            continue
+        path = pattern[:-1] + "artifact.md" if pattern.endswith("/") else pattern
+        target = os.path.join(project, path)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w") as handle:
+            handle.write("# Generated artifact\n\nREQ-E2E-001\n")
+
+
+def reach_stage(project: str, target: str) -> dict:
+    initialized = run_orchestrate(project, "next", "--scope", "feature")
+    assert initialized["kind"] == "print"
+    for _ in range(20):
+        directive = run_orchestrate(project, "next")
+        if directive.get("kind") == "run-stage":
+            stage = directive["stage"]
+            if stage == target:
+                return directive
+            create_declared_artifacts(project, directive.get("produces", []))
+            report = run_orchestrate(project, "report", "--stage", stage, "--result", "completed")
+            assert report["kind"] == "print", report
+        else:
+            raise AssertionError(f"could not reach {target}: {directive}")
+    raise AssertionError(f"stage {target} was not reached")
+
+
+def write_prd_checker_config(project: str) -> None:
+    payload = {
+        "status": "passed",
+        "prd_path": "docs/aidlc/ideation/prd.md",
+        "required_sections": ["overview", "goals", "features", "non-goals", "questions", "sources"],
+        "functional_requirements": 1,
+        "acceptance_criteria_complete": True,
+        "non_goals_complete": True,
+        "pending_questions_indexed": True,
+        "source_index_complete": True,
+        "clarification_consistency": "passed",
+        "business_flow_validation": "passed",
+        "unresolved_blockers": 0,
+    }
+    payload_text = json.dumps(payload, separators=(",", ":"))
+    config = {
+        "version": "1",
+        "stage": "prd-generation",
+        "commands": [{
+            "id": "prd-checker",
+            "role": "semantic",
+            "sensor": "prd-completeness",
+            "argv": ["node", "-e", f"process.stdout.write({json.dumps(payload_text)})"],
+        }],
+    }
+    os.makedirs(os.path.join(project, ".aidlc"), exist_ok=True)
+    with open(os.path.join(project, ".aidlc", "evidence-commands.json"), "w") as handle:
+        json.dump(config, handle)
 
 
 def write_config(project: str, test_output: str = "22 passed, 0 failed") -> None:
@@ -155,10 +225,39 @@ def test_semantic_checker_cannot_forge_common_fields() -> None:
         shutil.rmtree(project)
 
 
+def test_producer_output_passes_orchestrate_gate() -> None:
+    project = tempfile.mkdtemp(prefix="aidlc-producer-orchestrate-e2e-")
+    try:
+        directive = reach_stage(project, "prd-generation")
+        assert directive["sensors"] == ["prd-completeness", "no-todo", "traceability"]
+        prd_path = os.path.join(project, "docs", "aidlc", "ideation", "prd.md")
+        os.makedirs(os.path.dirname(prd_path), exist_ok=True)
+        with open(prd_path, "w") as handle:
+            handle.write("# Product Requirements\n\nREQ-E2E-001\n")
+        write_prd_checker_config(project)
+
+        produced = run_producer(project, "run", "--stage", "prd-generation", "--sensor", "prd-completeness")
+        assert produced.returncode == 0, produced.stderr
+        evidence_path = os.path.join(project, ".aidlc", "evidence", "prd-generation", "prd-completeness.json")
+        with open(evidence_path) as handle:
+            evidence = json.load(handle)
+        assert evidence["producer"]["mode"] == "controlled"
+        assert evidence["checker"]["id"] == "prd-checker"
+
+        reported = run_orchestrate(project, "report", "--stage", "prd-generation", "--result", "completed")
+        assert reported["kind"] == "print", reported
+        with open(os.path.join(project, "docs", "aidlc", "aidlc-state.json")) as handle:
+            state = json.load(handle)
+        assert "prd-generation" in state["completed_stages"]
+    finally:
+        shutil.rmtree(project)
+
+
 if __name__ == "__main__":
     test_successful_production()
     test_failed_run_does_not_replace_existing_evidence()
     test_command_selection_cannot_escape_allowlist()
     test_semantic_checker_production()
     test_semantic_checker_cannot_forge_common_fields()
-    print("5 evidence producer tests passed")
+    test_producer_output_passes_orchestrate_gate()
+    print("6 evidence producer tests passed")
