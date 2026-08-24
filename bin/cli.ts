@@ -6,6 +6,7 @@
  *   orchestrate <next|report|park> [flags]  — Run the workflow engine
  *   evidence run [flags]                    — Produce controlled build/test evidence
  *   check --sensor <name>                  — Run a deterministic semantic checker
+ *   diagram-provider run [flags]              — Run Chrome DevTools diagram validation
  *   install --harness <name>                — Deploy skill to target platform
  *   build --harness <name> | --all          — Compile dist output
  *   graph <compile|validate>                — Stage graph operations
@@ -164,6 +165,7 @@ Commands:
   orchestrate <next|report|park> [flags]   Run the workflow engine
   evidence run [flags]                   Produce controlled build/test evidence
   check --sensor <name>                  Run a deterministic semantic checker
+  diagram-provider run [options]         Run Chrome DevTools diagram validation
   install [options]                         Deploy skill to platform(s)
   build --harness <name> | --all           Compile dist output
   graph <compile|validate>                 Stage graph operations
@@ -211,6 +213,9 @@ switch (cmd) {
     break;
   case "check":
     run("core/tools/aidlc-semantic-checks.ts", rest);
+    break;
+  case "diagram-provider":
+    run("core/tools/aidlc-diagram-provider.ts", rest);
     break;
   case "install":
     install(rest);

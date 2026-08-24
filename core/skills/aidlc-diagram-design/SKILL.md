@@ -33,7 +33,7 @@ Independent Capability — not an AIDLC phase.
 
 ## 执行
 
-按加载的设计标准执行完整的图表设计流程：图型选择、节点/边提取、SVG 源生成、可选 `.diagram.json` 语义伴随清单生成、Provider Request 生成和源级验证。具体步骤和验收矩阵以加载的两份规则文件为准，本文件不复制。
+按加载的设计标准执行完整的图表设计流程：图型选择、节点/边提取、SVG 源生成、可选 `.diagram.json` 语义伴随清单生成、Provider Request 生成和源级验证。具体步骤和验收矩阵以加载的两份规则文件为准，本文件不复制。当 `target_operations` 包含 `preview` 或浏览器侧 `render` 时，源级 `diagram-contract` evidence 通过后调用 `loeyae-aidlc diagram-provider run --request <provider-request.json> --evidence <diagram-contract.json>`；该运行器负责实际浏览器证据采集和 evidence 状态更新，`export` 不由 Chrome DevTools Provider 承担。
 
 ## 输出
 
