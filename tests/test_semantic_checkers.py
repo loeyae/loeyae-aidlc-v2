@@ -109,7 +109,21 @@ Clarification consistency: passed
                 "semanticModes": ["process-flow"],
                 "visualSemantics": [],
                 "legendDecision": {"status": "not-needed", "reason": "只有一种有向连线视觉语义且没有复用差异"},
-                "splitDecision": {"status": "not-needed", "reason": "图只表达一个短流程目标"}
+                "splitDecision": {"status": "not-needed", "reason": "图只表达一个短流程目标"},
+                "layout": {
+                    "direction": "LR",
+                    "mainAxis": 65,
+                    "layerTolerance": 24,
+                    "symmetryGroups": [],
+                    "mergeNodes": [],
+                    "branchLayerExceptions": [],
+                    "branchPortExceptions": [],
+                    "readabilityEvidence": {
+                        "normal": {"status": "UNVERIFIED", "evidence": "source-only fixture"},
+                        "fit": {"status": "UNVERIFIED", "evidence": "source-only fixture"},
+                        "zoom": {"status": "UNVERIFIED", "evidence": "source-only fixture"}
+                    }
+                }
             }
         }]
     }))
@@ -133,6 +147,16 @@ def test_all_checkers_pass_on_realistic_fixture() -> None:
             assert result.returncode == 0, f"{sensor}: {result.stderr}"
             payload = json.loads(result.stdout)
             assert payload["status"] in ("passed", "verified", "not_applicable"), sensor
+            if sensor == "diagram-contract":
+                assert payload["geometry_status"] == "passed"
+                assert payload["render_preflight_status"] == "passed"
+                assert payload["render_status"] == "unverified"
+                assert payload["layout_contract_valid"] is True
+                assert payload["annotation_mapping_valid"] is True
+                assert payload["risk"]["level"] == "LOW"
+                assert payload["risk"]["score"] == 1
+                assert payload["risk"]["reasons"] == ["browser-sensitive SVG features"]
+
     finally:
         shutil.rmtree(project)
 
@@ -166,8 +190,200 @@ def test_checker_rejects_legacy_diagram_without_structured_contract() -> None:
         shutil.rmtree(project)
 
 
+def diagram_manifest_path(project: str) -> str:
+    return os.path.join(project, "docs", "aidlc", "inception", "requirements", "business-flows.diagram.json")
+
+
+def mutate_diagram(project: str, mutation) -> None:
+    path = diagram_manifest_path(project)
+    with open(path) as handle:
+        manifest = json.load(handle)
+    mutation(manifest["diagrams"][0], project)
+    with open(path, "w") as handle:
+        json.dump(manifest, handle)
+
+
+def test_diagram_geometry_gates_fail_closed() -> None:
+    cases = [
+        ("node collision", lambda diagram, _: diagram["nodes"].__setitem__(1, {**diagram["nodes"][1], "x": 100}), "geometric collision"),
+        ("edge collision", lambda diagram, _: diagram["nodes"].append({"id": "middle", "shape": "rect", "label": "中间", "x": 180, "y": 40, "width": 40, "height": 50}), "collides with non-endpoint node middle"),
+        ("edge crossing", lambda diagram, _: (
+            diagram["nodes"][0].update({"y": 125}),
+            diagram["nodes"][1].update({"y": 125}),
+            diagram["nodes"].extend([
+                {"id": "top", "shape": "rect", "label": "上", "x": 180, "y": 40, "width": 40, "height": 50},
+                {"id": "bottom", "shape": "rect", "label": "下", "x": 180, "y": 240, "width": 40, "height": 50},
+            ]),
+            diagram["edges"][0].update({"points": [[140, 150], [260, 150]]}),
+            diagram["edges"].append({"id": "vertical", "from": "top", "fromPort": "bottom", "to": "bottom", "toPort": "top", "kind": "directed", "points": [[200, 90], [200, 240]]}),
+            diagram["canvas"].update({"height": 340}),
+        ), "EDGE_CROSSING"),
+        ("label collision", lambda diagram, _: (
+            diagram["nodes"].append({"id": "middle", "shape": "rect", "label": "中间", "x": 180, "y": 20, "width": 40, "height": 30}),
+            diagram["edges"][0]["label"].update({"x": 200, "y": 50}),
+        ), "LABEL_COLLISION"),
+        ("group containment", lambda diagram, _: diagram.update({"groups": [
+            {"id": "a", "semanticType": "exclusive", "members": ["start"], "x": 20, "y": 20, "width": 80, "height": 80},
+        ]}), "GROUP_CONTAINMENT"),
+        ("group overlap", lambda diagram, _: diagram.update({
+            "canvas": {"width": 440, "height": 300},
+            "groups": [
+                {"id": "a", "semanticType": "exclusive", "members": ["start"], "x": 16, "y": 16, "width": 180, "height": 100},
+                {"id": "b", "semanticType": "exclusive", "members": ["done"], "x": 160, "y": 16, "width": 224, "height": 100},
+            ],
+        }), "groups a and b have geometric overlap"),
+        ("legend coverage", lambda diagram, _: diagram.update({
+            "legend": {"placement": "bottom", "items": [{"id": "directed-edge", "label": "流程", "meaning": "有向关系", "sample": {"kind": "edge", "ref": "start-done"}, "targets": [{"kind": "edge", "ref": "start-done"}]}]},
+            "designNotes": {**diagram["designNotes"], "legendDecision": {"status": "required", "reason": "有向关系需要图例"}},
+        }), "SVG legend coverage is incomplete"),
+        ("sequence lifeline coordinate", lambda diagram, project: (
+            diagram.update({"diagramType": "sequence"}),
+            diagram["designNotes"].update({"semanticModes": ["process-flow"]}),
+            write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox=\"0 0 400 300\" width=\"400\" height=\"300\" role=\"img\"><title>Requirements sequence</title><desc>FR-001 sequence</desc><g><rect data-node=\"start\" x=\"40\" y=\"40\" width=\"100\" height=\"50\"/><rect data-node=\"done\" x=\"260\" y=\"40\" width=\"100\" height=\"50\"/><line data-lifeline-for=\"start\" x1=\"100\" x2=\"100\" y1=\"90\" y2=\"260\"/><line data-lifeline-for=\"done\" x1=\"310\" x2=\"310\" y1=\"90\" y2=\"260\"/><path data-edge=\"start-done\" data-edge-arrow=\"start-done\" data-arrow-target=\"done:left\" d=\"M140 65 L260 65\" marker-end=\"url(#arrow)\"/><text>FR-001</text></g></svg>"""),
+        ), "sequence lifeline coordinate is invalid"),
+        ("endpoint mismatch", lambda diagram, _: diagram["edges"][0].update({"points": [[143, 65], [260, 65]]}), "first point does not match fromPort"),
+        ("non-orthogonal path", lambda diagram, _: diagram["edges"][0].update({"points": [[140, 65], [200, 80], [260, 65]]}), "is not orthogonal"),
+        ("viewport overflow", lambda diagram, _: diagram["nodes"][1].update({"x": 350}), "is outside the canvas"),
+        ("canvas too empty", lambda diagram, _: diagram["canvas"].update({"width": 2000, "height": 2000}), "CANVAS_TOO_EMPTY"),
+    ]
+    for name, mutation, expected in cases:
+        project = tempfile.mkdtemp(prefix=f"aidlc-diagram-geometry-{name.replace(' ', '-')}-")
+        try:
+            fixture(project)
+            mutate_diagram(project, mutation)
+            result = run_checker(project, "diagram-contract")
+            assert result.returncode != 0, name
+            assert expected in result.stderr, f"{name}: {result.stderr}"
+        finally:
+            shutil.rmtree(project)
+
+
+def test_diagram_geometry_gates_pass_on_valid_sequence() -> None:
+    project = tempfile.mkdtemp(prefix="aidlc-diagram-geometry-valid-")
+    try:
+        fixture(project)
+        mutate_diagram(project, lambda diagram, project: (
+            diagram.update({"diagramType": "sequence"}),
+            diagram["designNotes"].update({"semanticModes": ["process-flow"]}),
+            write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox=\"0 0 400 300\" width=\"400\" height=\"300\" role=\"img\"><title>Requirements sequence</title><desc>FR-001 sequence</desc><g><rect data-node=\"start\" x=\"40\" y=\"40\" width=\"100\" height=\"50\"/><rect data-node=\"done\" x=\"260\" y=\"40\" width=\"100\" height=\"50\"/><line data-lifeline-for=\"start\" x1=\"90\" x2=\"90\" y1=\"90\" y2=\"260\"/><line data-lifeline-for=\"done\" x1=\"310\" x2=\"310\" y1=\"90\" y2=\"260\"/><path data-edge=\"start-done\" data-edge-arrow=\"start-done\" data-arrow-target=\"done:left\" d=\"M140 65 L260 65\" marker-end=\"url(#arrow)\"/><text>FR-001</text></g></svg>""")
+        ))
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode == 0, result.stderr
+    finally:
+        shutil.rmtree(project)
+
+
+
+def test_diagram_risk_assessment() -> None:
+    project = tempfile.mkdtemp(prefix="aidlc-diagram-risk-")
+    try:
+        fixture(project)
+        mutate_diagram(project, lambda diagram, _: diagram["edges"][0].update({"points": [[140, 65], [180, 65], [220, 65], [260, 65]]}))
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["risk"]["level"] == "MEDIUM"
+        assert payload["risk"]["score"] == 3
+        assert payload["risk"]["reasons"] == ["browser-sensitive SVG features", "complex edge routing"]
+    finally:
+        shutil.rmtree(project)
+
+def directional_fixture(project: str, direction: str) -> None:
+    if direction == "TB":
+        nodes = [
+            {"id": "oms", "shape": "rect", "label": "OMS", "x": 260, "y": 40, "width": 100, "height": 50},
+            {"id": "dmall", "shape": "rect", "label": "E-Fulfilment", "x": 800, "y": 40, "width": 100, "height": 50},
+            {"id": "receive", "shape": "rect", "label": "接收", "x": 530, "y": 160, "width": 100, "height": 50},
+            {"id": "decision", "shape": "diamond", "label": "启用条件", "x": 530, "y": 300, "width": 100, "height": 80},
+            {"id": "active", "shape": "round", "label": "ACTIVE", "x": 650, "y": 700, "width": 100, "height": 50},
+            {"id": "pending", "shape": "round", "label": "PENDING", "x": 310, "y": 700, "width": 100, "height": 50},
+        ]
+        edges = [
+            {"id": "oms-receive", "from": "oms", "fromPort": "right", "to": "receive", "toPort": "left", "kind": "directed", "points": [[360, 65], [440, 65], [440, 185], [530, 185]]},
+            {"id": "dmall-receive", "from": "dmall", "fromPort": "left", "to": "receive", "toPort": "right", "kind": "directed", "points": [[800, 65], [720, 65], [720, 185], [630, 185]]},
+            {"id": "receive-decision", "from": "receive", "fromPort": "bottom", "to": "decision", "toPort": "top", "kind": "directed", "points": [[580, 210], [580, 300]]},
+            {"id": "decision-active", "from": "decision", "fromPort": "right", "to": "active", "toPort": "top", "kind": "directed", "points": [[630, 340], [700, 340], [700, 700]]},
+            {"id": "decision-pending", "from": "decision", "fromPort": "left", "to": "pending", "toPort": "top", "kind": "directed", "points": [[530, 340], [360, 340], [360, 700]]},
+        ]
+        canvas = {"width": 1000, "height": 840}
+        layout = {"direction": "TB", "mainAxis": 580, "layerTolerance": 24, "symmetryGroups": [{"nodeIds": ["oms", "dmall"], "tolerance": 1}], "mergeNodes": [{"nodeId": "receive", "reason": "OMS 与 E-Fulfilment 输入汇合后进入云 Mall"}], "branchLayerExceptions": [], "branchPortExceptions": []}
+    else:
+        nodes = [
+            {"id": "start", "shape": "round", "label": "完成定店", "x": 40, "y": 225, "width": 100, "height": 50},
+            {"id": "decision", "shape": "diamond", "label": "商品类型", "x": 300, "y": 200, "width": 100, "height": 100},
+            {"id": "physical", "shape": "rect", "label": "实物加入购物车", "x": 500, "y": 100, "width": 100, "height": 50},
+            {"id": "virtual", "shape": "rect", "label": "虚拟商品直接购买", "x": 500, "y": 350, "width": 100, "height": 50},
+            {"id": "checkout", "shape": "rect", "label": "结算提交订单", "x": 700, "y": 225, "width": 100, "height": 50},
+        ]
+        edges = [
+            {"id": "start-decision", "from": "start", "fromPort": "right", "to": "decision", "toPort": "left", "kind": "directed", "points": [[140, 250], [300, 250]]},
+            {"id": "decision-physical", "from": "decision", "fromPort": "top", "to": "physical", "toPort": "left", "kind": "directed", "points": [[350, 200], [450, 200], [450, 125], [500, 125]]},
+            {"id": "decision-virtual", "from": "decision", "fromPort": "bottom", "to": "virtual", "toPort": "left", "kind": "directed", "points": [[350, 300], [450, 300], [450, 375], [500, 375]]},
+            {"id": "physical-checkout", "from": "physical", "fromPort": "right", "to": "checkout", "toPort": "top", "kind": "directed", "points": [[600, 125], [650, 125], [650, 225], [750, 225]]},
+            {"id": "virtual-checkout", "from": "virtual", "fromPort": "right", "to": "checkout", "toPort": "bottom", "kind": "directed", "points": [[600, 375], [650, 375], [650, 275], [750, 275]]},
+        ]
+        canvas = {"width": 840, "height": 520}
+        layout = {"direction": "LR", "mainAxis": 250, "layerTolerance": 24, "symmetryGroups": [], "mergeNodes": [{"nodeId": "checkout", "reason": "两个商品分支在结算提交订单处汇合"}], "branchLayerExceptions": [], "branchPortExceptions": []}
+    layout["readabilityEvidence"] = {
+        "normal": {"status": "UNVERIFIED", "evidence": "source-only regression fixture"},
+        "fit": {"status": "UNVERIFIED", "evidence": "source-only regression fixture"},
+        "zoom": {"status": "UNVERIFIED", "evidence": "source-only regression fixture"},
+    }
+    svg_nodes = "".join(f'<rect data-node="{node["id"]}" x="{node["x"]}" y="{node["y"]}" width="{node["width"]}" height="{node["height"]}"/>' for node in nodes)
+    svg_edges = "".join(f'<path data-edge="{edge["id"]}" data-edge-arrow="{edge["id"]}" data-arrow-target="{edge["to"]}:{edge["toPort"]}" d="M{edge["points"][0][0]} {edge["points"][0][1]} ' + " ".join(f'L{point[0]} {point[1]}' for point in edge["points"][1:]) + '"/>' for edge in edges)
+    svg = f'<svg viewBox="0 0 {canvas["width"]} {canvas["height"]}" width="{canvas["width"]}" height="{canvas["height"]}" role="img"><title>Directional regression</title><desc>FR-002 directional regression</desc>{svg_nodes}{svg_edges}<g data-legend-item="flow"><text>流程</text></g><g data-note="layout-note"><text>布局说明</text></g></svg>'
+    manifest = {"version": 1, "document": "docs/aidlc/inception/requirements/business-flows.md", "diagrams": [{"id": f"diagram-{direction.lower()}", "output": "business-flows.svg", "title": "Directional regression", "description": "Directional regression", "diagramType": "flowchart", "canvas": canvas, "nodes": nodes, "edges": edges, "annotations": [{"id": "layout-note", "text": "布局说明", "x": canvas["width"] / 2, "y": canvas["height"] - 50}], "legend": {"placement": "bottom", "items": [{"id": "flow", "label": "流程", "meaning": "业务流程", "sample": {"kind": "edge", "ref": edges[0]["id"]}, "targets": [{"kind": "edge", "ref": edges[0]["id"]}]}]}, "designNotes": {"intent": "验证主阅读方向和业务层级", "semanticModes": ["process-flow"], "visualSemantics": [{"channel": "node-shape", "role": "semantic", "reason": "矩形、菱形和圆角节点分别表达步骤、判断和状态结果"}], "legendDecision": {"status": "required", "reason": "回归夹具显式验证图例顺序"}, "splitDecision": {"status": "not-needed", "reason": "单一流程回归夹具"}, "layout": layout}}]}
+    write(project, "docs/aidlc/inception/requirements/business-flows.md", "# Business flows\n\nFR-002\n")
+    write(project, "docs/aidlc/inception/requirements/business-flows.diagram.json", json.dumps(manifest))
+    write(project, "docs/aidlc/inception/requirements/business-flows.svg", svg)
+
+
+def test_directional_layout_contracts() -> None:
+    for direction in ("TB", "LR"):
+        project = tempfile.mkdtemp(prefix=f"aidlc-directional-{direction.lower()}-")
+        try:
+            directional_fixture(project, direction)
+            result = run_checker(project, "diagram-contract")
+            assert result.returncode == 0, f"{direction}: {result.stderr}"
+        finally:
+            shutil.rmtree(project)
+
+    cases = [
+        ("tb-asymmetry", "TB", lambda diagram, _: (diagram["nodes"][0].update({"x": 300}), diagram["edges"][0].update({"points": [[400, 65], [440, 65], [440, 185], [530, 185]]})), "LAYOUT_SYMMETRY"),
+        ("tb-branch-layer", "TB", lambda diagram, _: (diagram["nodes"][4].update({"y": 650}), diagram["edges"][3].update({"points": [[630, 340], [700, 340], [700, 650]]})), "BRANCH_LAYER"),
+        ("tb-branch-port", "TB", lambda diagram, _: (diagram["edges"][3].update({"toPort": "right", "points": [[630, 340], [750, 340], [750, 725]]})), "BRANCH_PORT"),
+        ("lr-branch-layer", "LR", lambda diagram, _: (diagram["nodes"][3].update({"x": 550}), diagram["edges"][2].update({"points": [[350, 300], [500, 300], [500, 375], [550, 375]]}), diagram["edges"][4].update({"points": [[650, 375], [680, 375], [680, 275], [750, 275]]})), "BRANCH_LAYER"),
+        ("lr-branch-port", "LR", lambda diagram, _: (diagram["edges"][1].update({"toPort": "right", "points": [[350, 200], [450, 200], [450, 125], [600, 125]]})), "BRANCH_PORT"),
+        ("annotation-order", "TB", lambda diagram, _: diagram["annotations"].__getitem__(0).update({"y": 400}), "ANNOTATION_ORDER"),
+    ]
+    for name, direction, mutation, expected in cases:
+        project = tempfile.mkdtemp(prefix=f"aidlc-directional-{name}-")
+        try:
+            directional_fixture(project, direction)
+            mutate_diagram(project, mutation)
+            result = run_checker(project, "diagram-contract")
+            assert result.returncode != 0, name
+            assert expected in result.stderr, f"{name}: {result.stderr}"
+        finally:
+            shutil.rmtree(project)
+
+    project = tempfile.mkdtemp(prefix="aidlc-annotation-mapping-")
+    try:
+        directional_fixture(project, "TB")
+        write(project, "docs/aidlc/inception/requirements/business-flows.svg", open(os.path.join(project, "docs/aidlc/inception/requirements/business-flows.svg")).read().replace('data-note="layout-note"', 'data-note="merged-note"'))
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode != 0
+        assert "ANNOTATION_MAPPING" in result.stderr
+    finally:
+        shutil.rmtree(project)
+
+
 if __name__ == "__main__":
     test_all_checkers_pass_on_realistic_fixture()
     test_checker_fails_closed_when_required_artifact_is_removed()
     test_checker_rejects_legacy_diagram_without_structured_contract()
-    print("17 semantic checker tests passed")
+    test_diagram_geometry_gates_fail_closed()
+    test_diagram_geometry_gates_pass_on_valid_sequence()
+    test_diagram_risk_assessment()
+    test_directional_layout_contracts()
+    print("21 semantic checker tests passed")

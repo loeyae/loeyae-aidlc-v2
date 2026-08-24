@@ -8,7 +8,7 @@ evidence_path: .aidlc/evidence/<stage-slug>/diagram-contract.json
 # diagram-contract
 
 ## 目的
-验证需求流程图和应用设计图遵循 V1 SVG/Diagram 契约：稳定 ID、端口、方向、连通性、图例、分组、viewBox、FR 映射和 Provider 状态均有结构化证据。
+验证需求流程图和应用设计图遵循 V1 SVG/Diagram 契约：稳定 ID、主阅读方向、主轴、业务层级、端口、分支、连通性、图例、注释、分组、viewBox、FR 映射和 Provider 状态均有结构化证据。纵向滚动允许，水平溢出、裁切、对象越界和不可读失败。
 
 ## Evidence 路径
 
@@ -35,8 +35,13 @@ evidence_path: .aidlc/evidence/<stage-slug>/diagram-contract.json
   "target_operation_required": false,
   "fr_mapping_complete": true,
   "design_notes_valid": true,
+  "layout_contract_valid": true,
+  "annotation_mapping_valid": true,
   "migration_status": "passed",
   "port_paths_valid": true,
+  "geometry_status": "passed",
+  "render_preflight_status": "passed",
+  "render_status": "unverified",
   "unresolved": 0
 }
 ```
@@ -63,7 +68,14 @@ Provider Request 使用 version `1`，最小结构如下：
   "provider": "chrome-devtools",
   "target_operation": "preview",
   "stage": "requirements-methods",
-  "target_reading_environment": { "viewport": { "width": 1280, "height": 720 } },
+  "target_reading_environment": {
+    "viewport": { "width": 1280, "height": 720 },
+    "viewports": {
+      "normal": { "width": 1280, "height": 720 },
+      "fit": { "width": 1024, "height": 768 },
+      "zoom": { "width": 1600, "height": 1200 }
+    }
+  },
   "diagrams": [{
     "id": "requirements-flow",
     "source_path": "docs/aidlc/inception/requirements/assets/requirements-flow.svg",

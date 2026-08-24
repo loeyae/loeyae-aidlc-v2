@@ -285,6 +285,8 @@ function diagramContract(): Record<string, unknown> {
   const processTypes = new Set(["flowchart", "pipeline", "sequence", "state"]);
   const unsafeSvg = /<\s*(?:script|foreignObject|image|style)\b|<[^>]*\b(?:href|on[a-zA-Z]+|style)\s*=|<[^>]*url\s*\(\s*(?!#)[^)]*\)/i;
   let diagramsChecked = 0;
+  let riskScore = 0;
+  const riskReasons = new Set<string>();
 
   const targetKey = (target: Record<string, unknown>): string => `${target.kind}:${target.ref}`;
   const requireString = (value: unknown, field: string): string => {
@@ -326,6 +328,72 @@ function diagramContract(): Record<string, unknown> {
     const previous = points[index - 1] as unknown[];
     return Array.isArray(current) && Array.isArray(previous) && current[0] === previous[0] || Array.isArray(current) && Array.isArray(previous) && current[1] === previous[1];
   });
+  type Rectangle = { left: number; top: number; right: number; bottom: number };
+  const rectangleOf = (item: Record<string, any>, field: string): Rectangle | null => {
+    const values = [item.x, item.y, item.width, item.height];
+    if (values.every((value) => typeof value === "number" && Number.isFinite(value))) {
+      if (item.width <= 0 || item.height <= 0) fail(`${field} has invalid dimensions`);
+      return { left: item.x, top: item.y, right: item.x + item.width, bottom: item.y + item.height };
+    }
+    if (values.every((value) => value === undefined)) return null;
+    fail(`${field} must define x, y, width, and height together`);
+  };
+  const rectanglesOverlap = (first: Rectangle, second: Rectangle): boolean => first.left < second.right && first.right > second.left && first.top < second.bottom && first.bottom > second.top;
+  const segmentIntersectsRectangle = (first: [number, number], second: [number, number], rectangle: Rectangle): boolean => {
+    const dx = second[0] - first[0];
+    const dy = second[1] - first[1];
+    let entering = 0;
+    let leaving = 1;
+    for (const [origin, delta, minimum, maximum] of [[first[0], dx, rectangle.left, rectangle.right], [first[1], dy, rectangle.top, rectangle.bottom]] as Array<[number, number, number, number]>) {
+      if (delta === 0) {
+        if (origin <= minimum || origin >= maximum) return false;
+        continue;
+      }
+      const near = (minimum - origin) / delta;
+      const far = (maximum - origin) / delta;
+      const low = Math.min(near, far);
+      const high = Math.max(near, far);
+      entering = Math.max(entering, low);
+      leaving = Math.min(leaving, high);
+      if (entering > leaving) return false;
+    }
+    return entering < leaving && leaving > 0 && entering < 1;
+  };
+  const pointEqual = (first: [number, number], second: [number, number]): boolean => Math.abs(first[0] - second[0]) <= 1 && Math.abs(first[1] - second[1]) <= 1;
+  const orientation = (first: [number, number], second: [number, number], third: [number, number]): number => (second[0] - first[0]) * (third[1] - first[1]) - (second[1] - first[1]) * (third[0] - first[0]);
+  const onSegment = (first: [number, number], second: [number, number], point: [number, number]): boolean => Math.abs(orientation(first, second, point)) <= 1e-9 && point[0] >= Math.min(first[0], second[0]) - 1e-9 && point[0] <= Math.max(first[0], second[0]) + 1e-9 && point[1] >= Math.min(first[1], second[1]) - 1e-9 && point[1] <= Math.max(first[1], second[1]) + 1e-9;
+  const segmentsIntersect = (first: [number, number], second: [number, number], third: [number, number], fourth: [number, number]): boolean => {
+    const firstOrientation = orientation(first, second, third);
+    const secondOrientation = orientation(first, second, fourth);
+    const thirdOrientation = orientation(third, fourth, first);
+    const fourthOrientation = orientation(third, fourth, second);
+    if ((firstOrientation > 0 && secondOrientation < 0 || firstOrientation < 0 && secondOrientation > 0) && (thirdOrientation > 0 && fourthOrientation < 0 || thirdOrientation < 0 && fourthOrientation > 0)) return true;
+    const candidates: Array<[number, number]> = [[first[0], first[1]], [second[0], second[1]], [third[0], third[1]], [fourth[0], fourth[1]]];
+    return candidates.some((point, index) => {
+      const onOther = index < 2 ? onSegment(third, fourth, point) : onSegment(first, second, point);
+      const isEndpoint = index === 0 || index === 1 ? pointEqual(point, first) || pointEqual(point, second) : pointEqual(point, third) || pointEqual(point, fourth);
+      return onOther && !isEndpoint;
+    });
+  };
+  const textRectangle = (label: Record<string, any>, field: string): Rectangle => {
+    const text = requireString(label.text, `${field}.text`);
+    const x = requireFinite(label.x, `${field}.x`);
+    const y = requireFinite(label.y, `${field}.y`);
+    const width = Math.max(8, text.length * 8) + 16;
+    const height = 16 + 8;
+    return { left: x - width / 2, top: y - height / 2, right: x + width / 2, bottom: y + height / 2 };
+  };
+  const layoutExceptionIds = (layout: Record<string, any>, field: string): Set<string> => {
+    const exceptions = layout[field] === undefined ? [] : layout[field];
+    if (!Array.isArray(exceptions)) fail(`diagram layout ${field} must be an array`);
+    const ids = new Set<string>();
+    for (const exception of exceptions) {
+      if (!exception || !Array.isArray(exception.edgeIds) || exception.edgeIds.length === 0) fail(`diagram layout ${field} requires edgeIds`);
+      requireString(exception.reason, `diagram layout ${field}.reason`);
+      for (const edgeId of exception.edgeIds) ids.add(requireString(edgeId, `diagram layout ${field}.edgeId`));
+    }
+    return ids;
+  };
 
   for (const manifestPath of manifests) {
     const manifest = jsonFile(manifestPath) as Record<string, any>;
@@ -365,6 +433,40 @@ function diagramContract(): Record<string, unknown> {
         declarations.set(declaration.channel, declaration);
       }
 
+      const layout = notes.layout;
+      if (processTypes.has(diagram.diagramType)) {
+        if (!layout || typeof layout !== "object" || Array.isArray(layout)) fail(`MIGRATION_REQUIRED: diagram ${id} lacks designNotes.layout`);
+        if (!new Set(["TB", "LR"]).has(layout.direction)) fail(`LAYOUT_AXIS: diagram ${id}.layout.direction must be TB or LR`);
+        requireFinite(layout.mainAxis, `diagram ${id}.layout.mainAxis`);
+        const layerTolerance = layout.layerTolerance === undefined ? 24 : requireFinite(layout.layerTolerance, `diagram ${id}.layout.layerTolerance`);
+        if (layerTolerance <= 0) fail(`diagram ${id}.layout.layerTolerance must be positive`);
+        if (!Array.isArray(layout.symmetryGroups || [])) fail(`diagram ${id}.layout.symmetryGroups must be an array`);
+        for (const symmetry of layout.symmetryGroups || []) {
+          if (!symmetry || !Array.isArray(symmetry.nodeIds) || symmetry.nodeIds.length < 2) fail(`diagram ${id}.layout.symmetryGroups requires at least two nodeIds`);
+          const tolerance = symmetry.tolerance === undefined ? 1 : requireFinite(symmetry.tolerance, `diagram ${id}.layout.symmetryGroups.tolerance`);
+          if (tolerance < 0) fail(`diagram ${id}.layout.symmetryGroups.tolerance must be non-negative`);
+          for (const nodeId of symmetry.nodeIds) requireString(nodeId, `diagram ${id}.layout.symmetryGroups.nodeId`);
+        }
+        const mergeNodes = layout.mergeNodes === undefined ? [] : layout.mergeNodes;
+        if (!Array.isArray(mergeNodes)) fail(`diagram ${id}.layout.mergeNodes must be an array`);
+        for (const merge of mergeNodes) {
+          requireString(merge.nodeId, `diagram ${id}.layout.mergeNodes.nodeId`);
+          requireString(merge.reason, `diagram ${id}.layout.mergeNodes.reason`);
+        }
+        for (const state of ["normal", "fit", "zoom"]) {
+          const evidence = layout.readabilityEvidence?.[state];
+          if (!evidence || !["PASS", "FAIL", "UNVERIFIED"].includes(evidence.status) || typeof evidence.evidence !== "string") fail(`diagram ${id}.layout.readabilityEvidence.${state} is invalid`);
+          if (evidence.status === "FAIL") fail(`diagram ${id}.layout.readabilityEvidence.${state} records FAIL`);
+        }
+        layoutExceptionIds(layout, "branchLayerExceptions");
+        layoutExceptionIds(layout, "branchPortExceptions");
+      }
+      const layoutDirection = processTypes.has(diagram.diagramType) ? String(layout.direction) : "";
+      const layoutMainAxis = processTypes.has(diagram.diagramType) ? Number(layout.mainAxis) : 0;
+      const layoutTolerance = processTypes.has(diagram.diagramType) ? Number(layout.layerTolerance === undefined ? 24 : layout.layerTolerance) : 24;
+      const branchLayerExceptions = processTypes.has(diagram.diagramType) ? layoutExceptionIds(layout, "branchLayerExceptions") : new Set<string>();
+      const branchPortExceptions = processTypes.has(diagram.diagramType) ? layoutExceptionIds(layout, "branchPortExceptions") : new Set<string>();
+
       const nodes = new Map<string, Record<string, any>>();
       for (const node of diagram.nodes) {
         const nodeId = requireString(node.id, `diagram ${id} node.id`);
@@ -374,6 +476,26 @@ function diagramContract(): Record<string, unknown> {
         if (node.width <= 0 || node.height <= 0 || node.x < 0 || node.y < 0 || node.x + node.width > diagram.canvas.width || node.y + node.height > diagram.canvas.height) fail(`diagram ${id} node ${nodeId} is outside the canvas`);
       }
 
+      const nodeRectangles = new Map<string, Rectangle>();
+      for (const [nodeId, node] of nodes) {
+        const rectangle = rectangleOf(node, `diagram ${id} node ${nodeId}`);
+        if (rectangle) nodeRectangles.set(nodeId, rectangle);
+      }
+      const annotationRectangles = new Map<string, Rectangle>();
+      const annotations = Array.isArray(diagram.annotations) ? diagram.annotations : [];
+      for (const annotation of annotations) {
+        const annotationId = requireString(annotation.id, `diagram ${id} annotation.id`);
+        if (!/^[a-z0-9-]+$/.test(annotationId) || annotationRectangles.has(annotationId) || nodes.has(annotationId)) fail(`diagram ${id} has an invalid or duplicated annotation: ${annotationId}`);
+        annotationRectangles.set(annotationId, textRectangle(annotation, `diagram ${id} annotation ${annotationId}`));
+      }
+      const nodeEntries = [...nodeRectangles.entries()];
+      for (let first = 0; first < nodeEntries.length; first++) {
+        for (let second = first + 1; second < nodeEntries.length; second++) {
+          if (rectanglesOverlap(nodeEntries[first][1], nodeEntries[second][1])) fail(`diagram ${id} nodes ${nodeEntries[first][0]} and ${nodeEntries[second][0]} have geometric collision`);
+        }
+      }
+
+      const labelRectangles = new Map<string, Rectangle>();
       const edges = new Map<string, Record<string, any>>();
       for (const edge of diagram.edges) {
         const edgeId = requireString(edge.id, `diagram ${id} edge.id`);
@@ -389,7 +511,80 @@ function diagramContract(): Record<string, unknown> {
         if (diagram.diagramType === "flowchart" || diagram.diagramType === "pipeline") {
           if (!isOrthogonal(points)) fail(`diagram ${id} process edge ${edgeId} is not orthogonal`);
         }
-        edges.set(edgeId, edge);      }
+        if (edge.label && typeof edge.label === "object" && !Array.isArray(edge.label)) labelRectangles.set(edgeId, textRectangle(edge.label, `diagram ${id} edge ${edgeId}.label`));
+        const edgePoints = edge.points as [number, number][];
+        for (const [nodeId, rectangle] of nodeRectangles) {
+          if (nodeId === edge.from || nodeId === edge.to) continue;
+          for (let pointIndex = 1; pointIndex < edgePoints.length; pointIndex++) {
+            if (segmentIntersectsRectangle(edgePoints[pointIndex - 1], edgePoints[pointIndex], rectangle)) fail(`EDGE_NODE_COLLISION: diagram ${id} edge ${edgeId} collides with non-endpoint node ${nodeId}`);
+          }
+        }
+        edges.set(edgeId, edge);
+      }
+      const edgeEntries = [...edges.entries()];
+      const incomingEdges = new Map<string, string[]>();
+      for (const [edgeId, edge] of edgeEntries) incomingEdges.set(edge.to, [...(incomingEdges.get(edge.to) || []), edgeId]);
+      const declaredMergeNodes = new Set<string>((layout?.mergeNodes || []).map((merge: Record<string, any>) => String(merge.nodeId)));
+      for (const [nodeId, incoming] of incomingEdges) if (incoming.length > 1 && processTypes.has(diagram.diagramType) && !declaredMergeNodes.has(nodeId)) fail(`MERGE_DECLARATION: diagram ${id} node ${nodeId} has multiple incoming branches without explicit merge semantics`);
+      for (const symmetry of layout?.symmetryGroups || []) {
+        const centers: Array<{ layer: number; cross: number }> = symmetry.nodeIds.map((nodeId: string) => {
+          const node = nodes.get(nodeId);
+          if (!node) fail(`LAYOUT_SYMMETRY: diagram ${id} symmetry group references missing node ${nodeId}`);
+          return { layer: layoutDirection === "TB" ? node.y + node.height / 2 : node.x + node.width / 2, cross: layoutDirection === "TB" ? node.x + node.width / 2 : node.y + node.height / 2 };
+        });
+        const tolerance = symmetry.tolerance === undefined ? 1 : Number(symmetry.tolerance);
+        if (Math.max(...centers.map((center) => center.layer)) - Math.min(...centers.map((center) => center.layer)) > layoutTolerance) fail(`LAYOUT_LAYER: diagram ${id} symmetry group is not on one business layer`);
+        for (const center of centers) {
+          const mirror = centers.find((candidate) => Math.abs(candidate.cross - (2 * layoutMainAxis - center.cross)) <= tolerance);
+          if (!mirror) fail(`LAYOUT_SYMMETRY: diagram ${id} symmetry group is not uniformly distributed around mainAxis`);
+        }
+      }
+      for (const [nodeId, node] of nodes) {
+        if (node.shape !== "diamond") continue;
+        const branchEdges = edgeEntries.filter(([, edge]) => edge.from === nodeId);
+        if (branchEdges.length < 2) continue;
+        const layers = branchEdges.map(([, edge]) => {
+          const target = nodes.get(edge.to)!;
+          return layoutDirection === "TB" ? target.y + target.height / 2 : target.x + target.width / 2;
+        });
+        if (Math.max(...layers) - Math.min(...layers) > layoutTolerance && !branchEdges.every(([edgeId]) => branchLayerExceptions.has(edgeId))) fail(`BRANCH_LAYER: diagram ${id} decision ${nodeId} branch targets are not on the same business layer`);
+        if (branchEdges.length === 2 && !branchEdges.every(([edgeId]) => branchPortExceptions.has(edgeId))) {
+          const expectedSources = layoutDirection === "TB" ? new Set(["right", "left"]) : new Set(["top", "bottom"]);
+          if (new Set(branchEdges.map(([, edge]) => edge.fromPort)).size !== 2 || !branchEdges.every(([, edge]) => expectedSources.has(edge.fromPort))) fail(`BRANCH_PORT: diagram ${id} decision ${nodeId} branches must leave through the declared side ports`);
+        }
+        for (const [edgeId, edge] of branchEdges) {
+          if (branchPortExceptions.has(edgeId)) continue;
+          const expectedTarget = layoutDirection === "TB" ? "top" : "left";
+          if (edge.toPort !== expectedTarget) fail(`BRANCH_PORT: diagram ${id} branch ${edgeId} must enter target through ${expectedTarget}`);
+          const points = edge.points as [number, number][];
+          const last = points[points.length - 1];
+          const previous = points[points.length - 2];
+          if (layoutDirection === "TB" && Math.abs(last[0] - previous[0]) > 1) fail(`BRANCH_PORT: diagram ${id} branch ${edgeId} final segment must enter vertically`);
+          if (layoutDirection === "LR" && Math.abs(last[1] - previous[1]) > 1) fail(`BRANCH_PORT: diagram ${id} branch ${edgeId} final segment must enter horizontally`);
+        }
+      }
+
+      for (let first = 0; first < edgeEntries.length; first++) {
+        const [firstId, firstEdge] = edgeEntries[first];
+        const firstPoints = firstEdge.points as [number, number][];
+        for (let second = first + 1; second < edgeEntries.length; second++) {
+          const [secondId, secondEdge] = edgeEntries[second];
+          const secondPoints = secondEdge.points as [number, number][];
+          for (let firstPoint = 1; firstPoint < firstPoints.length; firstPoint++) {
+            for (let secondPoint = 1; secondPoint < secondPoints.length; secondPoint++) {
+              if (segmentsIntersect(firstPoints[firstPoint - 1], firstPoints[firstPoint], secondPoints[secondPoint - 1], secondPoints[secondPoint])) fail(`EDGE_CROSSING: diagram ${id} edges ${firstId} and ${secondId} intersect outside a shared endpoint`);
+            }
+          }
+          if (firstEdge.from === secondEdge.from && firstEdge.fromPort === secondEdge.fromPort && Math.hypot(firstPoints[0][0] - secondPoints[0][0], firstPoints[0][1] - secondPoints[0][1]) < 24) fail(`INSUFFICIENT_GAP: diagram ${id} edges ${firstId} and ${secondId} share a port with less than 24 units of separation`);
+          if (firstEdge.to === secondEdge.to && firstEdge.toPort === secondEdge.toPort && Math.hypot(firstPoints[firstPoints.length - 1][0] - secondPoints[secondPoints.length - 1][0], firstPoints[firstPoints.length - 1][1] - secondPoints[secondPoints.length - 1][1]) < 24) fail(`INSUFFICIENT_GAP: diagram ${id} edges ${firstId} and ${secondId} share a target port with less than 24 units of separation`);
+        }
+      }
+      const labelEntries = [...labelRectangles.entries()];
+      for (const [labelId, label] of labelEntries) {
+        const edge = edges.get(labelId)!;
+        for (const [nodeId, rectangle] of nodeRectangles) if (nodeId !== edge.from && nodeId !== edge.to && rectanglesOverlap(label, rectangle)) fail(`LABEL_COLLISION: diagram ${id} label ${labelId} overlaps unrelated node ${nodeId}`);
+      }
+      for (let first = 0; first < labelEntries.length; first++) for (let second = first + 1; second < labelEntries.length; second++) if (rectanglesOverlap(labelEntries[first][1], labelEntries[second][1])) fail(`LABEL_COLLISION: diagram ${id} labels ${labelEntries[first][0]} and ${labelEntries[second][0]} overlap`);
 
       const groups = new Map<string, Record<string, any>>();
       for (const group of diagram.groups || []) {
@@ -403,6 +598,59 @@ function diagramContract(): Record<string, unknown> {
         groups.set(groupId, group);
       }
       for (const group of groups.values()) if (group.semanticType === "nested" && !groups.has(group.parent)) fail(`diagram ${id} group ${group.id} references missing parent ${group.parent}`);
+      const groupRectangles = new Map<string, Rectangle>();
+      for (const [groupId, group] of groups) {
+        const rectangle = rectangleOf(group, `diagram ${id} group ${groupId}`);
+        if (rectangle) groupRectangles.set(groupId, rectangle);
+      }
+      const isNestedRelation = (first: Record<string, any>, second: Record<string, any>): boolean => {
+        let current = first;
+        while (current.semanticType === "nested" && typeof current.parent === "string") {
+          if (current.parent === second.id) return true;
+          const parent = groups.get(current.parent);
+          if (!parent) return false;
+          current = parent;
+        }
+        return false;
+      };
+      const groupEntries = [...groupRectangles.entries()];
+      for (let first = 0; first < groupEntries.length; first++) {
+        for (let second = first + 1; second < groupEntries.length; second++) {
+          const firstGroup = groups.get(groupEntries[first][0])!;
+          const secondGroup = groups.get(groupEntries[second][0])!;
+          if (firstGroup.semanticType === "overlay" || firstGroup.semanticType === "cross-cutting" || secondGroup.semanticType === "overlay" || secondGroup.semanticType === "cross-cutting") continue;
+          if (!isNestedRelation(firstGroup, secondGroup) && !isNestedRelation(secondGroup, firstGroup) && rectanglesOverlap(groupEntries[first][1], groupEntries[second][1])) {
+            fail(`diagram ${id} groups ${groupEntries[first][0]} and ${groupEntries[second][0]} have geometric overlap`);
+          }
+        }
+      }
+
+      for (const [groupId, group] of groups) {
+        const rectangle = groupRectangles.get(groupId);
+        if (!rectangle) continue;
+        for (const member of group.members) {
+          const memberRectangle = nodeRectangles.get(member);
+          if (!memberRectangle || memberRectangle.left < rectangle.left || memberRectangle.top < rectangle.top || memberRectangle.right > rectangle.right || memberRectangle.bottom > rectangle.bottom) fail(`GROUP_CONTAINMENT: diagram ${id} group ${groupId} does not contain member ${member}`);
+          const padding = Math.min(memberRectangle.left - rectangle.left, memberRectangle.top - rectangle.top, rectangle.right - memberRectangle.right, rectangle.bottom - memberRectangle.bottom);
+          if (padding < 24) fail(`INSUFFICIENT_GAP: diagram ${id} group ${groupId} has less than 24 units of member padding`);
+        }
+      }
+      const edgePoints = edgeEntries.flatMap(([, edge]) => edge.points as [number, number][]);
+      const businessRectangles = [...nodeRectangles.values(), ...groupRectangles.values(), ...labelRectangles.values()];
+      const businessBottom = Math.max(...businessRectangles.map((rectangle) => rectangle.bottom), ...edgePoints.map((point) => point[1]));
+      for (const [annotationId, annotation] of annotationRectangles) if (annotation.top < businessBottom) fail(`ANNOTATION_ORDER: diagram ${id} annotation ${annotationId} must be below the business body`);
+      const contentRectangles = [...businessRectangles, ...annotationRectangles.values()];
+      const contentLeft = Math.min(...contentRectangles.map((rectangle) => rectangle.left), ...edgePoints.map((point) => point[0]));
+      const contentTop = Math.min(...contentRectangles.map((rectangle) => rectangle.top), ...edgePoints.map((point) => point[1]));
+      const contentRight = Math.max(...contentRectangles.map((rectangle) => rectangle.right), ...edgePoints.map((point) => point[0]));
+      const contentBottom = Math.max(...contentRectangles.map((rectangle) => rectangle.bottom), ...edgePoints.map((point) => point[1]));
+      const contentWidth = contentRight - contentLeft;
+      const contentHeight = contentBottom - contentTop;
+      const canvasWidth = diagram.canvas.width;
+      const canvasHeight = diagram.canvas.height;
+      if (contentLeft < 0 || contentTop < 0 || contentRight > canvasWidth || contentBottom > canvasHeight) fail(`CANVAS_CLIPPING: diagram ${id} contentBBox exceeds canvas`);
+      if (contentWidth / canvasWidth < 0.1 || contentHeight / canvasHeight < 0.1) fail(`CANVAS_TOO_EMPTY: diagram ${id} contentBBox occupies too little of the canvas`);
+      if (Math.min(contentLeft, contentTop, canvasWidth - contentRight, canvasHeight - contentBottom) < 24) fail(`INSUFFICIENT_GAP: diagram ${id} contentBBox has less than 24 units of canvas padding`);
 
       const observed = observedChannelValues(diagram);
       const semanticChannels: string[] = [];
@@ -422,6 +670,7 @@ function diagramContract(): Record<string, unknown> {
       if (legendDecision.status === "exempt" && (diagram.legend || legendDecision.noReusedSymbol !== true || !Array.isArray(legendDecision.inlineSemanticEvidence) || legendDecision.inlineSemanticEvidence.length === 0)) fail(`diagram ${id} legend exemption is incomplete`);
       if (legendDecision.status === "not-needed" && (semanticChannels.length > 0 || diagram.legend)) fail(`diagram ${id} legendDecision not-needed conflicts with semantic visual differences`);
       if (diagram.legend) {
+        if (diagram.legend.placement !== "bottom") fail(`LAYOUT_AXIS: diagram ${id} legend placement must be bottom`);
         const legendIds = new Set<string>();
         const explained = new Set<string>();
         for (const item of diagram.legend.items) {
@@ -466,23 +715,59 @@ function diagramContract(): Record<string, unknown> {
       if ([...svg.matchAll(/\bdata-node=["']([^"']+)["']/g)].length !== nodes.size || [...svg.matchAll(/\bdata-edge=["']([^"']+)["']/g)].length !== edges.size) fail(`diagram ${id} SVG node/edge mapping does not match structured source`);
       const directedEdgeCount = diagram.edges.filter((edge: Record<string, any>) => (edge.kind || "directed") !== "undirected").length;
       if ([...svg.matchAll(/\bdata-edge-arrow=["']/g)].length < directedEdgeCount || [...svg.matchAll(/\bdata-arrow-target=["']/g)].length < directedEdgeCount) fail(`diagram ${id} SVG arrow overlay mapping is incomplete`);
-      if ([...svg.matchAll(/\bdata-legend-item=["']/g)].length !== (diagram.legend?.items?.length || 0)) fail(`diagram ${id} SVG legend mapping does not match structured source`);
+      const renderedLegendIds = [...svg.matchAll(/\bdata-legend-item=["']([^"']+)["']/g)].map((match) => match[1]);
+      if (new Set(renderedLegendIds).size !== renderedLegendIds.length) fail(`diagram ${id} SVG legend mapping contains duplicate IDs`);
+      if (renderedLegendIds.length !== (diagram.legend?.items?.length || 0)) fail(`diagram ${id} SVG legend coverage is incomplete`);
+      if (diagram.legend && diagram.legend.items.some((item: Record<string, any>) => !renderedLegendIds.includes(item.id))) fail(`diagram ${id} SVG legend coverage is incomplete`);
+      const renderedNoteIds = [...svg.matchAll(/\bdata-note=["']([^"']+)["']/g)].map((match) => match[1]);
+      if (new Set(renderedNoteIds).size !== renderedNoteIds.length || renderedNoteIds.length !== annotationRectangles.size || annotationRectangles.size !== annotations.length || annotations.some((annotation: Record<string, any>) => !renderedNoteIds.includes(annotation.id))) fail(`ANNOTATION_MAPPING: diagram ${id} SVG annotation mapping does not match structured source`);
+      if (renderedLegendIds.length > 0 && renderedNoteIds.length > 0) {
+        const firstLegend = svg.search(/\bdata-legend-item=["']/);
+        const lastLegend = Math.max(...[...svg.matchAll(/\bdata-legend-item=["']/g)].map((match) => match.index || 0));
+        const firstNote = svg.search(/\bdata-note=["']/);
+        if (firstNote < lastLegend || firstNote < firstLegend) fail(`ANNOTATION_ORDER: diagram ${id} SVG annotations must follow the legend`);
+      }
       if (diagram.groups?.length && !diagram.groups.every((group: Record<string, any>) => svg.includes(`group-${group.id}`))) fail(`diagram ${id} SVG group mapping is incomplete`);
       if (diagram.diagramType === "sequence") {
-        for (const nodeId of nodes.keys()) if (!svg.includes(`data-lifeline-for="${nodeId}"`) && !svg.includes(`data-lifeline-for='${nodeId}'`)) fail(`diagram ${id} sequence lifeline mapping is missing for ${nodeId}`);
+        for (const [nodeId, node] of nodes) {
+          const lifeline = svg.match(new RegExp(`<[^>]*data-lifeline-for=["']${nodeId}["'][^>]*>`, "i"))?.[0];
+          if (!lifeline) fail(`diagram ${id} sequence lifeline mapping is missing for ${nodeId}`);
+          const x1 = Number(lifeline.match(/\bx1=["']([0-9.+-]+)["']/i)?.[1]);
+          const x2 = Number(lifeline.match(/\bx2=["']([0-9.+-]+)["']/i)?.[1]);
+          const expectedX = node.x + node.width / 2;
+          if (!Number.isFinite(x1) || !Number.isFinite(x2) || Math.abs(x1 - x2) > 1 || Math.abs(x1 - expectedX) > 1) fail(`diagram ${id} sequence lifeline coordinate is invalid for ${nodeId}`);
+        }
       }
       const adjacentMarkdown = textIfExists(svgPath.replace(/\.svg$/i, ".md"));
       if (!/\b(?:FR|REQ)-\d+\b/i.test(svg) && !/\b(?:FR|REQ)-\d+\b/i.test(adjacentMarkdown)) fail(`diagram ${id} has no FR/REQ mapping evidence`);
+      const nodeCount = diagram.nodes.length;
+      const edgeCount = diagram.edges.length;
+      const groupCount = (diagram.groups || []).length;
+      if (nodeCount > 20) { riskScore += 1; riskReasons.add("nodes > 20"); }
+      if (edgeCount > 30) { riskScore += 1; riskReasons.add("edges > 30"); }
+      if (diagram.edges.some((edge: Record<string, any>) => Array.isArray(edge.points) && edge.points.length > 2)) { riskScore += 2; riskReasons.add("complex edge routing"); }
+      if (diagram.edges.some((edge: Record<string, any>) => diagram.edges.some((other: Record<string, any>) => other !== edge && other.from === edge.from && other.fromPort === edge.fromPort))) { riskScore += 2; riskReasons.add("multiple edges share a source port"); }
+      if (diagram.diagramType === "sequence") { riskScore += 1; riskReasons.add("sequence diagram"); }
+      if (diagram.diagramType === "flowchart" && edgeCount > 12) { riskScore += 2; riskReasons.add("complex flowchart"); }
+      if (groupCount > 0 && (diagram.groups || []).some((group: Record<string, any>) => group.semanticType === "nested" && group.parent && (diagram.groups || []).some((parent: Record<string, any>) => parent.id === group.parent && parent.parent))) { riskScore += 2; riskReasons.add("nested groups"); }
+      if (diagram.legend?.items?.length > 3) { riskScore += 1; riskReasons.add("complex legend"); }
+      if (/\btransform\s*=|\bmarker-end\s*=|<text\b/i.test(svg)) { riskScore += 1; riskReasons.add("browser-sensitive SVG features"); }
       diagramsChecked += 1;
     }
   }
 
+  const riskLevel = riskScore >= 6 ? "HIGH" : riskScore >= 3 ? "MEDIUM" : "LOW";
   return {
     status: "passed", source_format: "svg", diagrams_checked: diagramsChecked,
     ids_unique: true, ports_valid: true, direction_consistent: true, legend_valid: true,
     groups_valid: true, viewbox_valid: true, provider_status: "unverified",
     target_operation_required: false, fr_mapping_complete: true,
-    design_notes_valid: true, migration_status: "passed", port_paths_valid: true,
+    design_notes_valid: true, layout_contract_valid: true, annotation_mapping_valid: true, migration_status: "passed", port_paths_valid: true,
+    geometry_status: "passed",
+    render_preflight_status: "passed",
+    render_status: "unverified",
+    render_status_reason: "no static SVG renderer is configured",
+    risk: { level: riskLevel, score: riskScore, reasons: [...riskReasons].sort() },
     unresolved: 0,
   };
 }

@@ -18,6 +18,9 @@ interface Viewport {
   height: number;
 }
 
+type ReadingView = "normal" | "fit" | "zoom";
+type ReadingViewports = Record<ReadingView, Viewport>;
+
 interface DiagramRequest {
   id: string;
   source_path?: string;
@@ -33,16 +36,33 @@ interface ProviderRequest {
   provider: "chrome-devtools";
   target_operation: TargetOperation;
   stage: string;
-  target_reading_environment?: { viewport?: Viewport };
+  target_reading_environment?: { viewport?: Viewport; viewports?: ReadingViewports };
   diagrams: DiagramRequest[];
 }
 
 interface ExpectedContract {
   nodeIds: string[];
+  nodeCenters: Record<string, number>;
+  nodeCenterPoints: Record<string, { x: number; y: number }>;
   edgeIds: string[];
+  edgeEndpoints: Record<string, { from: string; to: string }>;
   groupIds: string[];
+  groupTypes: Record<string, { semanticType: string; parent?: string }>;
+  legendIds: string[];
+  annotationIds: string[];
+  readingDirection?: "TB" | "LR";
+  layerTolerance: number;
+  symmetryGroups: Array<{ nodeIds: string[]; tolerance: number }>;
+  branchGroups: Array<{ targetIds: string[]; direction: "TB" | "LR"; tolerance: number }>;
   lifelineIds: string[];
   directedEdgeCount: number;
+}
+
+interface GeometryBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
 }
 
 interface InspectionResult {
@@ -55,8 +75,16 @@ interface InspectionResult {
   nodeIds: string[];
   edgeIds: string[];
   arrowTargets: string[];
+  groupIds: string[];
+  legendIds: string[];
+  noteIds: string[];
+  legendBeforeNotes: boolean;
+  nodeCenters: Record<string, { x: number; y: number }>;
   lifelineIds: string[];
-  legendCount: number;
+  lifelineCoordinates: Record<string, number>;
+  nodeCollisionPairs: string[];
+  edgeNodeCollisionPairs: string[];
+  groupOverlapPairs: string[];
   unsafeCount: number;
   outsideViewportCount: number;
 }
@@ -154,6 +182,13 @@ function parseRequest(path: string): ProviderRequest {
   if (!Array.isArray(value.diagrams) || value.diagrams.length === 0) fail("request.diagrams must be a non-empty array");
   const environment = value.target_reading_environment === undefined ? undefined : record(value.target_reading_environment, "request.target_reading_environment");
   const defaultViewport = environment?.viewport === undefined ? { width: 1280, height: 720 } : validateViewport(environment.viewport, "request.target_reading_environment.viewport");
+  let viewports: ReadingViewports | undefined;
+  if (environment?.viewports !== undefined) {
+    const rawViewports = record(environment.viewports, "request.target_reading_environment.viewports");
+    const requiredViews: ReadingView[] = ["normal", "fit", "zoom"];
+    for (const view of requiredViews) if (rawViewports[view] === undefined) fail(`request.target_reading_environment.viewports.${view} is required`);
+    viewports = Object.fromEntries(requiredViews.map((view) => [view, validateViewport(rawViewports[view], `request.target_reading_environment.viewports.${view}`)])) as ReadingViewports;
+  }
   const diagrams: DiagramRequest[] = value.diagrams.map((rawItem, index) => {
     const item = record(rawItem, `diagrams[${index}]`);
     const result: DiagramRequest = { id: nonEmpty(item.id, `diagrams[${index}].id`) };
@@ -169,7 +204,7 @@ function parseRequest(path: string): ProviderRequest {
     if (result.manifest_path) projectPath(result.manifest_path, `diagrams[${index}].manifest_path`);
     return result;
   });
-  return { version: "1", provider: "chrome-devtools", target_operation: targetOperation, stage, target_reading_environment: { viewport: defaultViewport }, diagrams };
+  return { version: "1", provider: "chrome-devtools", target_operation: targetOperation, stage, target_reading_environment: { viewport: defaultViewport, ...(viewports ? { viewports } : {}) }, diagrams };
 }
 
 function parseJsonOutput(stdout: string): unknown {
@@ -234,19 +269,43 @@ function loadExpected(item: DiagramRequest): ExpectedContract | undefined {
   const matches = manifest.diagrams.filter((entry) => record(entry, "diagram").id === item.id);
   if (matches.length !== 1) fail(`diagram manifest must contain exactly one diagram with id ${item.id}`);
   const diagram = record(matches[0], `diagram ${item.id}`);
-  const nodes = Array.isArray(diagram.nodes) ? diagram.nodes.map((entry) => nonEmpty(record(entry, "node").id, "node.id")) : [];
-  const edges = Array.isArray(diagram.edges) ? diagram.edges.map((entry) => record(entry, "edge")) : [];
-  const groups = Array.isArray(diagram.groups) ? diagram.groups.map((entry) => nonEmpty(record(entry, "group").id, "group.id")) : [];
+  const nodeRecords = Array.isArray(diagram.nodes) ? diagram.nodes.map((entry: unknown) => record(entry, "node")) : [];
+  const nodes = nodeRecords.map((entry) => nonEmpty(entry.id, "node.id"));
+  const nodeCenters = Object.fromEntries(nodeRecords.map((entry) => [String(entry.id), Number(entry.x) + Number(entry.width) / 2]));
+  const nodeCenterPoints = Object.fromEntries(nodeRecords.map((entry) => [String(entry.id), { x: Number(entry.x) + Number(entry.width) / 2, y: Number(entry.y) + Number(entry.height) / 2 }]));
+  const nodeById = new Map(nodeRecords.map((entry) => [String(entry.id), entry]));
+  const edges = Array.isArray(diagram.edges) ? diagram.edges.map((entry: unknown) => record(entry, "edge")) : [];
+  const groups = Array.isArray(diagram.groups) ? diagram.groups.map((entry: unknown) => record(entry, "group")) : [];
+  const annotations = Array.isArray(diagram.annotations) ? diagram.annotations.map((entry: unknown) => record(entry, "annotation")) : [];
+  const designNotes = diagram.designNotes && typeof diagram.designNotes === "object" && !Array.isArray(diagram.designNotes) ? diagram.designNotes as Record<string, unknown> : undefined;
+  const layout = designNotes?.layout && typeof designNotes.layout === "object" ? designNotes.layout as Record<string, unknown> : undefined;
+  const branchGroups = [...nodeById.entries()].filter(([, node]) => node.shape === "diamond").map(([nodeId]) => {
+    const targets = edges.filter((edge) => edge.from === nodeId).map((edge) => String(edge.to));
+    return targets.length >= 2 ? { targetIds: targets, direction: String(layout?.direction || "TB") as "TB" | "LR", tolerance: Number(layout?.layerTolerance || 24) } : undefined;
+  }).filter((value): value is { targetIds: string[]; direction: "TB" | "LR"; tolerance: number } => value !== undefined);
+  const legend = diagram.legend && typeof diagram.legend === "object" && !Array.isArray(diagram.legend) ? diagram.legend as Record<string, unknown> : undefined;
+  const legendItems = legend && Array.isArray(legend.items) ? legend.items.map((entry: unknown) => record(entry, "legend item")) : [];
   return {
     nodeIds: nodes,
+    nodeCenters,
+    nodeCenterPoints,
     edgeIds: edges.map((edge) => nonEmpty(edge.id, "edge.id")),
-    groupIds: groups,
+    edgeEndpoints: Object.fromEntries(edges.map((edge) => [String(edge.id), { from: nonEmpty(edge.from, "edge.from"), to: nonEmpty(edge.to, "edge.to") }])),
+    groupIds: groups.map((entry) => nonEmpty(entry.id, "group.id")),
+    groupTypes: Object.fromEntries(groups.map((entry) => [String(entry.id), { semanticType: nonEmpty(entry.semanticType, "group.semanticType"), ...(entry.parent ? { parent: String(entry.parent) } : {}) }])),
+    legendIds: legendItems.map((entry) => nonEmpty(entry.id, "legend item.id")),
+    annotationIds: annotations.map((entry) => nonEmpty(entry.id, "annotation.id")),
+    readingDirection: layout?.direction === "TB" || layout?.direction === "LR" ? layout.direction : undefined,
+    layerTolerance: Number(layout?.layerTolerance || 24),
+    symmetryGroups: Array.isArray(layout?.symmetryGroups) ? layout.symmetryGroups.map((group: Record<string, any>) => ({ nodeIds: group.nodeIds.map(String), tolerance: Number(group.tolerance === undefined ? 1 : group.tolerance) })) : [],
+    branchGroups,
     lifelineIds: diagram.diagramType === "sequence" ? nodes : [],
     directedEdgeCount: edges.filter((edge) => (edge.kind || "directed") !== "undirected").length,
   };
 }
 
 const INSPECTION_SCRIPT = `() => {
+  try {
   const svg = document.querySelector('svg');
   const ids = (selector, attribute) => [...document.querySelectorAll(selector)].map((element) => element.getAttribute(attribute)).filter(Boolean);
   const bounds = (element) => {
@@ -255,12 +314,58 @@ const INSPECTION_SCRIPT = `() => {
       return { left: box.left, top: box.top, right: box.right, bottom: box.bottom, width: box.width, height: box.height };
     } catch (_) { return null; }
   };
-  const svgBounds = svg ? bounds(svg) : null;
-  const tracked = [...document.querySelectorAll('[data-node], [data-edge], [data-edge-arrow], [data-legend-item], [data-lifeline-for]')];
-  const outsideViewportCount = svgBounds ? tracked.filter((element) => {
+  const overlaps = (first, second) => first && second && first.left < second.right && first.right > second.left && first.top < second.bottom && first.bottom > second.top;
+  const nodeElements = [...document.querySelectorAll('[data-node]')];
+  const nodeBoxes = new Map(nodeElements.map((element) => [element.getAttribute('data-node'), bounds(element)]));
+  const nodeCollisionPairs = [];
+  const nodeEntries = [...nodeBoxes.entries()].filter((entry) => entry[0] && entry[1]);
+  for (let first = 0; first < nodeEntries.length; first++) for (let second = first + 1; second < nodeEntries.length; second++) {
+    if (overlaps(nodeEntries[first][1], nodeEntries[second][1])) nodeCollisionPairs.push(nodeEntries[first][0] + ':' + nodeEntries[second][0]);
+  }
+  const edgeNodeCollisionPairs = [];
+  for (const edge of [...document.querySelectorAll('[data-edge]')]) {
+    const edgeId = edge.getAttribute('data-edge');
+    if (!edgeId || typeof edge.getTotalLength !== 'function' || typeof edge.getPointAtLength !== 'function') continue;
+    const length = edge.getTotalLength();
+    const matrix = edge.getScreenCTM();
+    if (!matrix || length <= 0) continue;
+    const hitNodes = new Set();
+    for (let distance = 0; distance <= length; distance += Math.max(1, length / 100)) {
+      const point = edge.getPointAtLength(Math.min(distance, length));
+      const screen = new DOMPoint(point.x, point.y).matrixTransform(matrix);
+      for (const [nodeId, box] of nodeBoxes) if (box && screen.x >= box.left && screen.x <= box.right && screen.y >= box.top && screen.y <= box.bottom) hitNodes.add(nodeId);
+    }
+    for (const nodeId of hitNodes) edgeNodeCollisionPairs.push(edgeId + ':' + nodeId);
+  }
+  const groupElements = [...document.querySelectorAll('[id^="group-"]')];
+  const groupBoxes = new Map(groupElements.map((element) => [element.id.slice('group-'.length), bounds(element)]));
+  const groupOverlapPairs = [];
+  const groupEntries = [...groupBoxes.entries()].filter((entry) => entry[0] && entry[1]);
+  for (let first = 0; first < groupEntries.length; first++) for (let second = first + 1; second < groupEntries.length; second++) {
+    if (overlaps(groupEntries[first][1], groupEntries[second][1])) groupOverlapPairs.push(groupEntries[first][0] + ':' + groupEntries[second][0]);
+  }
+  const lifelineCoordinates = {};
+  for (const element of [...document.querySelectorAll('[data-lifeline-for]')]) {
+    const id = element.getAttribute('data-lifeline-for');
+    const x1 = Number(element.getAttribute('x1'));
+    const x2 = Number(element.getAttribute('x2'));
     const box = bounds(element);
-    return box && (box.left < svgBounds.left - 1 || box.top < svgBounds.top - 1 || box.right > svgBounds.right + 1 || box.bottom > svgBounds.bottom + 1);
-  }).length : 0;
+    if (id) lifelineCoordinates[id] = Number.isFinite(x1) ? (Number.isFinite(x2) ? (x1 + x2) / 2 : x1) : (box ? (box.left + box.right) / 2 : NaN);
+  }
+  const nodeCenterPoints = Object.fromEntries([...nodeBoxes.entries()].filter((entry) => entry[0] && entry[1]).map(([id, box]) => [id, { x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 }]));
+  const noteElements = [...document.querySelectorAll('[data-note]')];
+  const legendElements = [...document.querySelectorAll('[data-legend-item]')];
+  const orderedDecorations = [...document.querySelectorAll('[data-legend-item], [data-note]')];
+  const lastLegendIndex = Math.max(-1, ...legendElements.map((element) => orderedDecorations.indexOf(element)));
+  const firstNoteIndex = Math.min(orderedDecorations.length, ...noteElements.map((element) => orderedDecorations.indexOf(element)));
+  const legendBeforeNotes = lastLegendIndex < 0 || firstNoteIndex >= orderedDecorations.length || lastLegendIndex < firstNoteIndex;
+  const svgBounds = svg ? bounds(svg) : null;
+  const viewportBounds = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+  const tracked = [...document.querySelectorAll('[data-node], [data-edge], [data-edge-arrow], [data-legend-item], [data-note], [data-lifeline-for], [id^="group-"]')];
+  const outsideViewportCount = tracked.filter((element) => {
+    const box = bounds(element);
+    return box && (box.left < viewportBounds.left - 1 || box.right > viewportBounds.right + 1 || box.top < viewportBounds.top - 1);
+  }).length;
   return {
     role: svg?.getAttribute('role') ?? null,
     title: svg?.querySelector(':scope > title')?.textContent?.trim() ?? '',
@@ -271,17 +376,43 @@ const INSPECTION_SCRIPT = `() => {
     nodeIds: ids('[data-node]', 'data-node'),
     edgeIds: ids('[data-edge]', 'data-edge'),
     arrowTargets: ids('[data-arrow-target]', 'data-arrow-target'),
+    groupIds: [...groupBoxes.keys()],
+    legendIds: ids('[data-legend-item]', 'data-legend-item'),
+    noteIds: ids('[data-note]', 'data-note'),
+    legendBeforeNotes,
+    nodeCenters: nodeCenterPoints,
     lifelineIds: ids('[data-lifeline-for]', 'data-lifeline-for'),
-    legendCount: document.querySelectorAll('[data-legend-item]').length,
+    lifelineCoordinates,
+    nodeCollisionPairs,
+    edgeNodeCollisionPairs,
+    groupOverlapPairs,
     unsafeCount: document.querySelectorAll('script, foreignObject, iframe, object, embed').length,
     outsideViewportCount,
-  };
+    };
+  } catch (error) {
+    return { scriptError: String(error && error.stack || error) };
+  }
 }`;
 
 function inspection(payload: unknown): InspectionResult {
-  const value = record(payload, "evaluate_script response");
-  const result = value.result && typeof value.result === "object" ? value.result : value;
-  const data = record(result, "inspection result");
+  let candidate: unknown = payload;
+  for (let depth = 0; depth < 5; depth++) {
+    if (typeof candidate === "string") {
+      try { candidate = JSON.parse(candidate); continue; } catch { break; }
+    }
+    if (Array.isArray(candidate)) {
+      if (candidate.length !== 1) break;
+      candidate = candidate[0];
+      continue;
+    }
+    if (!candidate || typeof candidate !== "object") break;
+    const wrapper = candidate as Record<string, unknown>;
+    if (wrapper.result !== undefined) candidate = wrapper.result;
+    else if (wrapper.value !== undefined) candidate = wrapper.value;
+    else break;
+  }
+  const data = record(candidate, "inspection result");
+  if (typeof data.scriptError === "string") fail(`browser inspection script failed: ${data.scriptError}`);
   return {
     role: data.role === null ? null : String(data.role),
     title: String(data.title || ""),
@@ -292,8 +423,19 @@ function inspection(payload: unknown): InspectionResult {
     nodeIds: Array.isArray(data.nodeIds) ? data.nodeIds.map(String) : [],
     edgeIds: Array.isArray(data.edgeIds) ? data.edgeIds.map(String) : [],
     arrowTargets: Array.isArray(data.arrowTargets) ? data.arrowTargets.map(String) : [],
+    groupIds: Array.isArray(data.groupIds) ? data.groupIds.map(String) : [],
+    legendIds: Array.isArray(data.legendIds) ? data.legendIds.map(String) : [],
+    noteIds: Array.isArray(data.noteIds) ? data.noteIds.map(String) : [],
+    legendBeforeNotes: data.legendBeforeNotes !== false,
+    nodeCenters: data.nodeCenters && typeof data.nodeCenters === "object" ? Object.fromEntries(Object.entries(data.nodeCenters).map(([key, value]) => {
+      const center = record(value, `node center ${key}`);
+      return [key, { x: Number(center.x), y: Number(center.y) }];
+    })) : {},
     lifelineIds: Array.isArray(data.lifelineIds) ? data.lifelineIds.map(String) : [],
-    legendCount: Number(data.legendCount || 0),
+    lifelineCoordinates: data.lifelineCoordinates && typeof data.lifelineCoordinates === "object" ? Object.fromEntries(Object.entries(data.lifelineCoordinates).map(([key, value]) => [key, Number(value)])) : {},
+    nodeCollisionPairs: Array.isArray(data.nodeCollisionPairs) ? data.nodeCollisionPairs.map(String) : [],
+    edgeNodeCollisionPairs: Array.isArray(data.edgeNodeCollisionPairs) ? data.edgeNodeCollisionPairs.map(String) : [],
+    groupOverlapPairs: Array.isArray(data.groupOverlapPairs) ? data.groupOverlapPairs.map(String) : [],
     unsafeCount: Number(data.unsafeCount || 0),
     outsideViewportCount: Number(data.outsideViewportCount || 0),
   };
@@ -310,13 +452,55 @@ function validateInspection(result: InspectionResult, expected?: ExpectedContrac
   if (!result.description) errors.push("SVG desc is empty or missing");
   if (!result.viewBox) errors.push("SVG viewBox is missing");
   if (result.svgWidth <= 0 || result.svgHeight <= 0) errors.push("SVG has no visible browser bounds");
-  if (result.unsafeCount > 0) errors.push(`SVG contains ${result.unsafeCount} unsafe embedded element(s)`);
+  if (result.nodeCollisionPairs.length > 0) errors.push(`SVG node geometry collides: ${result.nodeCollisionPairs.join(", ")}`);
   if (result.outsideViewportCount > 0) errors.push(`SVG contains ${result.outsideViewportCount} tracked element(s) outside the viewport`);
+  if (result.unsafeCount > 0) errors.push(`SVG contains ${result.unsafeCount} unsafe embedded element(s)`);
   if (expected) {
     if (!equalIds(result.nodeIds, expected.nodeIds)) errors.push("browser node mapping does not match diagram manifest");
     if (!equalIds(result.edgeIds, expected.edgeIds)) errors.push("browser edge mapping does not match diagram manifest");
+    if (!equalIds(result.groupIds, expected.groupIds)) errors.push("browser group mapping does not match diagram manifest");
+    if (!equalIds(result.legendIds, expected.legendIds)) errors.push("browser legend coverage does not match diagram manifest");
+    if (!equalIds(result.noteIds, expected.annotationIds)) errors.push("browser annotation mapping does not match diagram manifest");
+    if (!result.legendBeforeNotes) errors.push("browser legend and annotations are in the wrong order");
+    for (const branch of expected.branchGroups) {
+      const values = branch.targetIds.map((targetId) => {
+        const center = result.nodeCenters[targetId];
+        return center ? (branch.direction === "TB" ? center.y : center.x) : NaN;
+      });
+      if (values.some((value) => !Number.isFinite(value)) || Math.max(...values) - Math.min(...values) > Math.max(1, branch.tolerance)) errors.push("browser branch targets are not on the same business layer");
+    }
     if (expected.directedEdgeCount > 0 && result.arrowTargets.length < expected.directedEdgeCount) errors.push("browser arrow target mapping is incomplete");
+    const unexpectedEdgeCollisions = result.edgeNodeCollisionPairs.filter((pair) => {
+      const separator = pair.indexOf(":");
+      const edgeId = separator < 0 ? pair : pair.slice(0, separator);
+      const nodeId = separator < 0 ? "" : pair.slice(separator + 1);
+      const endpoints = expected.edgeEndpoints[edgeId];
+      return !endpoints || (nodeId !== endpoints.from && nodeId !== endpoints.to);
+    });
+    if (unexpectedEdgeCollisions.length > 0) errors.push(`SVG edge geometry collides with non-endpoint nodes: ${unexpectedEdgeCollisions.join(", ")}`);
+    const isNestedRelation = (first: string, second: string): boolean => {
+      let current = expected.groupTypes[first];
+      while (current?.semanticType === "nested" && current.parent) {
+        if (current.parent === second) return true;
+        current = expected.groupTypes[current.parent];
+      }
+      return false;
+    };
+    const unexpectedGroupOverlaps = result.groupOverlapPairs.filter((pair) => {
+      const separator = pair.indexOf(":");
+      const first = separator < 0 ? pair : pair.slice(0, separator);
+      const second = separator < 0 ? "" : pair.slice(separator + 1);
+      const firstType = expected.groupTypes[first]?.semanticType;
+      const secondType = expected.groupTypes[second]?.semanticType;
+      return firstType && secondType && firstType !== "overlay" && firstType !== "cross-cutting" && secondType !== "overlay" && secondType !== "cross-cutting" && !isNestedRelation(first, second) && !isNestedRelation(second, first);
+    });
+    if (unexpectedGroupOverlaps.length > 0) errors.push(`SVG groups overlap unexpectedly: ${unexpectedGroupOverlaps.join(", ")}`);
     if (expected.lifelineIds.length > 0 && !equalIds(result.lifelineIds, expected.lifelineIds)) errors.push("browser sequence lifeline mapping does not match diagram manifest");
+    for (const lifelineId of expected.lifelineIds) {
+      const actual = result.lifelineCoordinates[lifelineId];
+      const expectedCenter = expected.nodeCenters[lifelineId];
+      if (!Number.isFinite(actual) || !Number.isFinite(expectedCenter) || Math.abs(actual - expectedCenter) > 1) errors.push(`browser sequence lifeline coordinate does not match node center for ${lifelineId}`);
+    }
   }
   return errors;
 }
@@ -388,20 +572,27 @@ async function main(): Promise<void> {
       const url = diagram.source_path
         ? localPreviewUrl(projectPath(diagram.source_path, `diagrams[${index}].source_path`), temporaryRoot, index, diagram.id)
         : sourceUrl(diagram, index);
-      const viewport = diagram.viewport || request.target_reading_environment?.viewport || { width: 1280, height: 720 };
+      const defaultViewport = diagram.viewport || request.target_reading_environment?.viewport || { width: 1280, height: 720 };
+      const viewEntries: Array<[ReadingView, Viewport]> = request.target_reading_environment?.viewports
+        ? (Object.entries(request.target_reading_environment.viewports) as Array<[ReadingView, Viewport]>)
+        : [["normal", defaultViewport]];
+      for (const [readingView, viewport] of viewEntries) {
       const pages = runChrome(["new_page", url, "--timeout", String(COMMAND_TIMEOUT_MS)]).payload;
       const pageId = selectPage(pages);
       runChrome(["select_page", String(pageId), "--bringToFront"]);
       runChrome(["resize_page", String(viewport.width), String(viewport.height)]);
       const inspected = inspection(runChrome(["evaluate_script", INSPECTION_SCRIPT]).payload);
       const errors = validateInspection(inspected, loadExpected(diagram));
-      const tempScreenshot = join(temporaryRoot, `${index}-${diagram.id}.png`);
-      const tempSnapshot = join(temporaryRoot, `${index}-${diagram.id}.snapshot.txt`);
+      const viewSuffix = request.target_reading_environment?.viewports ? `-${readingView}` : "";
+      const tempScreenshot = join(temporaryRoot, `${index}-${diagram.id}${viewSuffix}.png`);
+      const tempSnapshot = join(temporaryRoot, `${index}-${diagram.id}${viewSuffix}.snapshot.txt`);
       runChrome(["take_snapshot", "--filePath", tempSnapshot]);
       runChrome(["take_screenshot", "--fullPage", "--filePath", tempScreenshot]);
       const consolePayload = runChrome(["list_console_messages", "--pageSize", "200"]).payload;
-      const screenshot = artifactPath(diagram.screenshot_path, `.aidlc/evidence/${request.stage}/diagram-contract/${diagram.id}.png`, "screenshot_path");
-      const snapshot = artifactPath(diagram.snapshot_path, `.aidlc/evidence/${request.stage}/diagram-contract/${diagram.id}.snapshot.txt`, "snapshot_path");
+      const baseScreenshot = artifactPath(diagram.screenshot_path, `.aidlc/evidence/${request.stage}/diagram-contract/${diagram.id}.png`, "screenshot_path");
+      const baseSnapshot = artifactPath(diagram.snapshot_path, `.aidlc/evidence/${request.stage}/diagram-contract/${diagram.id}.snapshot.txt`, "snapshot_path");
+      const screenshot = request.target_reading_environment?.viewports ? baseScreenshot.replace(/\.png$/i, `-${readingView}.png`) : baseScreenshot;
+      const snapshot = request.target_reading_environment?.viewports ? baseSnapshot.replace(/\.snapshot\.txt$/i, `-${readingView}.snapshot.txt`) : baseSnapshot;
       if (!existsSync(tempScreenshot) || !existsSync(tempSnapshot)) errors.push("Chrome DevTools did not produce the requested screenshot or snapshot");
       if (errors.length === 0) {
         mkdirSync(dirname(screenshot), { recursive: true });
@@ -415,6 +606,7 @@ async function main(): Promise<void> {
         url,
         local_preview_fallback: diagram.source_path !== undefined,
         viewport,
+        reading_view: readingView,
         status: errors.length === 0 ? "passed" : "failed",
         errors,
         inspection: inspected,
@@ -422,7 +614,8 @@ async function main(): Promise<void> {
         snapshot_path: relativeArtifact(snapshot),
         console: consolePayload,
       });
-      if (errors.length > 0) fail(`browser validation failed for ${diagram.id}: ${errors.join("; ")}`);
+      if (errors.length > 0) fail(`browser validation failed for ${diagram.id} (${readingView}): ${errors.join("; ")}`);
+      }
     }
 
     const updatedEvidence = {
@@ -442,7 +635,7 @@ async function main(): Promise<void> {
       request: relativeArtifact(projectPath(options.request, "request")),
       results,
     });
-    console.log(JSON.stringify({ status: "passed", evidence: relativeArtifact(evidence), diagrams_checked: results.length }, null, 2));
+    console.log(JSON.stringify({ status: "passed", evidence: relativeArtifact(evidence), diagrams_checked: request.diagrams.length }, null, 2));
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true });
   }

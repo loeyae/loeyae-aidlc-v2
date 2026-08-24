@@ -31,8 +31,8 @@ Provider 生成的静态 SVG、PNG 或 PDF 是目标交付物，路径由目标�
 | 连线标签 | `label.text`、`label.x`、`label.y` | 标签属于其 `edge.id`，其稳定身份为 `<edge.id>#label`；`text` 为字符串或非空字符串数组，坐标是标签中心 |
 | 分组 | `groups[].id`、`groups[].label`、`x`、`y`、`width`、`height` | 表达系统、泳道、角色或信任边界；可选 `tone`；新建/调整图必须增加 `semanticType`、`members`，`nested` 分组还必须有 `parent`；范围必须包围其声明的内容与标题内边距 |
 | 图例 | `legend.items[]` | 可选；存在两种或以上语义化视觉编码时必填。每项必须有 `id`、`label`、`meaning`、`sample` 和 `targets`；`sample` 只引用实际节点、连线或分组，不接受 Provider 私有颜色/坐标字段 |
-| 图型与设计记录 | `diagramType`、`designNotes` | 新建/调整图必填；记录单一意图、语义模式、视觉语义角色、图例决定、分组解释和拆图决定；详细字段见下文 |
-| 注释 | `annotations[].text`、`x`、`y` | 只承载辅助说明；可选 `fontSize`、`lineHeight`、`anchor`、`weight`、`tone`；独立业务事实应建模为节点、连线或分组，而不是无 ID 注释 |
+| 图型与设计记录 | `diagramType`、`designNotes` | 新建/调整图必填；记录单一意图、语义模式、视觉语义角色、图例决定、分组解释、拆图决定和 `layout`；详细字段见下文 |
+| 注释 | `annotations[].id`、`text`、`x`、`y` | 每条注释必须有图内稳定唯一 ID；只承载辅助说明；可选 `fontSize`、`lineHeight`、`anchor`、`weight`、`tone`；独立业务事实应建模为节点、连线或分组，而不是无 ID 注释 |
 
 ### 端口偏移的 V1 兼容扩展
 
@@ -62,11 +62,29 @@ Provider 生成的静态 SVG、PNG 或 PDF 是目标交付物，路径由目标�
 
 本次只是 V1 的兼容增量，不静默修改仓库发布版本号；若将本次规范变化作为发布版本发布，应另按发布流程提出版本变更建议，默认评估 minor bump，且同步各平台事实入口后再执行。
 
+### 主轴布局与注释映射契约
+
+`designNotes.layout` 是 `.diagram.json` version `1` 的共享可选扩展；对新建或调整的 `flowchart`、`pipeline`、`sequence`、`state` 图变为必填，旧资产缺少时必须报告 `MIGRATION_REQUIRED`，不改变既有业务节点、边或稳定 ID。字段约束如下：
+
+- `direction` 为 `TB` 或 `LR`；`mainAxis` 和 `layerTolerance` 为有限正数；`TB` 的层级轴是 `y`，`LR` 的层级轴是 `x`。
+- `symmetryGroups` 为 `{ nodeIds: string[], tolerance?: number }[]`；每组至少两个节点，节点中心必须围绕 `mainAxis` 对称并处于同一层。
+- `mergeNodes` 为 `{ nodeId: string, reason: string }[]`；同一节点有多个入边时必须声明为汇合节点。汇合节点可以使用合法的 `top`/`bottom` 等端口，但不改变普通分支的默认端口规则。
+- `branchLayerExceptions` 和 `branchPortExceptions` 为 `{ edgeIds: string[], reason: string }[]`，只能用于跨组、显式换行、障碍避让或已确认的不同业务层级；不得用空理由绕过门禁。
+- `readabilityEvidence` 必须包含 `normal`、`fit`、`zoom`，每项为 `{ status: PASS|FAIL|UNVERIFIED, evidence: string }`。没有真实目标环境证据时只能为 `UNVERIFIED`。
+- `annotations[]` 若存在，每项必须有唯一小写 kebab-case `id`、字符串 `text`、有限 `x/y`；SVG 必须一一生成 `data-note="<id>"`。允许一个说明框承载一条注释的多行文本，不允许一个 `data-note` 代表多个结构化 ID。
+
+静态 checker 必须对上述源字段执行主轴、同层、首层对称、分支目标端口、分支最后一段方向、显式汇合和注释映射检查；Provider/浏览器必须额外检查真实边界、三视图可读性、图例/注释顺序和水平溢出。
+
 ### 语义映射与静态验证标识
+
+静态 checker 对布局契约使用稳定错误码，调用方不得只依赖自然语言：`LAYOUT_AXIS`（方向/图例顺序）、`LAYOUT_SYMMETRY`（主轴对称）、`LAYOUT_LAYER`（同层关系）、`BRANCH_PORT`（分支端口或末段方向）、`MERGE_DECLARATION`（未声明汇合）、`ANNOTATION_MAPPING`（注释 ID 映射）、`ANNOTATION_ORDER`（注释空间顺序）、`CANVAS_CLIPPING`（画布裁切）和 `CANVAS_TOO_EMPTY`（内容过度空白）。
+
 
 | 语义对象 | SVG 追溯标识 | 约束 |
 |---|---|---|
-| 图例 | `data-legend-item`、`data-legend-sample` | 每个结构化图例项都必须在 SVG 中有稳定可追溯标识；图例不计入业务节点/连线数量 |
+| 图例 | `legend.placement`、`data-legend-item`、`data-legend-sample` | `placement` 只能为 `bottom`；每个结构化图例项都必须在 SVG 中有稳定可追溯标识；图例不计入业务节点/连线数量；图例必须位于业务主体之外且默认在注释之前 |
+| 注释 | `annotations[].id`、`data-note` | 每个 `annotations[].id` 必须是图内稳定唯一的小写 kebab-case ID；SVG 中恰好存在一个对应的 `data-note`；JSON/SVG ID 集合和数量必须一致 |
+| 布局 | `designNotes.layout` | 新建/调整的过程图必须声明 `direction`、`mainAxis`、`layerTolerance`、`symmetryGroups`、`mergeNodes`、分支例外和 `readabilityEvidence`；这些是共享 V1 字段，不是 Provider 私有字段 |
 | 分组 | `group-<id>`、`data-group-role`、`data-group-members` | 分组 ID、语义类型和直接成员必须可由 SVG 反查；缺少新字段的旧资产只可标记迁移状态 |
 | 箭头尖端 | `data-edge-arrow`、`data-arrow-target`、`data-edge` | 每个箭头尖端必须能反查所属边和目标节点/端口；双向边的两个尖端分别记录各自目标 |
 | 生命线 | `data-lifeline-for`、生命线几何 `x` | `sequence` 图每个参与者生命线必须能反查参与者 ID；消息端点不得落在标题矩形，首末 `x` 必须与生命线一致 |
@@ -245,7 +263,12 @@ Kiro Power 无内置 SVG Provider 时，只能引用安装包中已有的静态 
 | 语义 | 源与 SVG 的节点/边数量、ID、形状、方向、端口、分支标签、状态转换和边界一致；图例文本与实际样式、边/节点/分组的业务含义一致；互斥分组无共享成员；贯穿关注点不会被表达为业务域成员；图型混合有拆图/保留单图决策 | 源—SVG 对照记录、Design Notes、已确认事实映射和图型/分组静态检查结果 |
 | 视觉 | 常规、适合窗口、放大三种状态下，图例、分组标签、连线标签及节点归属均可辨识，图例和业务主体不被裁切或遮挡 | 每种状态的目标环境、缩放、时间与截图/可定位观察记录；未执行 Provider/浏览器检查必须是 `UNVERIFIED` |
 
-### 回归状态和证据边界
+### 三视图与滚动验收
+
+当目标 Provider 可用时，必须在 `normal`、`fit`、`zoom` 三个视图分别检查主流程方向、同层节点关系、主轴/对称、分支目标端口、节点/文字/标签/箭头可读性以及图例和注释顺序。Provider Request 可用 `target_reading_environment.viewports` 声明三个 viewport；缺少任一视图时不能把三视图视觉检查标记为完整 `PASS`。
+
+页面纵向滚动是允许的：内容位于视口下方不构成失败，`fullPage` 截图或页面滚动后的实际目标边界仍可验证。以下情况才失败：内容被裁切、对象超出画布、内容产生水平溢出、文字或箭头不可读、图例/注释顺序错误。仅确认 DOM、SVG 尺寸或“没有滚动条”不能作为视觉 `PASS`；没有真实视图证据必须记录 `UNVERIFIED`。
+
 
 - `PASS` 只表示对应结构化源或实际目标产物的该项检查有证据；脚本返回成功不能覆盖未执行的目标视觉检查。
 - `MIGRATION_REQUIRED` 表示旧 V1 资产仍可解析，但缺少本次新增且对该图适用、必须补齐的端口偏移、完整路径、Sequence 生命线映射、图型/Design Notes、图例或分组结构化记录；可选偏移字段缺省并按 `0` 兼容时不单独触发迁移。它不是新规则的 `PASS`。源码仓渲染/验证命令遇到该状态必须返回非零迁移状态，不能让自动门禁把它当作成功。
