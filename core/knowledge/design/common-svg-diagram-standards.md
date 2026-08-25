@@ -284,3 +284,33 @@ Kiro Power 无内置 SVG Provider 时，只能引用安装包中已有的静态 
 - **NEEDS_CAPABILITY**：用户要求目标预览、渲染或导出，但没有可验证的目标 Provider；它不表示 SVG 源或语义清单不存在，也不是把未执行检查标为 `PASS` 的替代状态。
 
 仅交付源时可使用 `SOURCE_READY` 表示源和 Provider Request 已生成，同时保留适用的 `UNVERIFIED`。任一适用必查项为 FAIL 或 UNVERIFIED 时，不能将对应目标产物标记为完整通过；只有目标操作未被要求时，源交付可以在视觉项 `UNVERIFIED` 的情况下结束。
+
+
+### 过程图追踪字段与 SVG 映射扩展
+
+对新建或调整的过程图，`designNotes.layout` 除通用方向字段外必须包含：
+
+```json
+{
+  "mainFlow": {
+    "entryNodeId": "start",
+    "exitNodeIds": ["done"],
+    "nodeIds": ["start", "done"],
+    "edgeIds": ["start-done"]
+  },
+  "loopLanes": [
+    {"id": "retry-left", "side": "left", "laneOffset": 96, "reason": "失败回路绕过主流程", "edgeIds": ["retry"]}
+  ]
+}
+```
+
+`entryNodeId` 与 `entryNodeIds` 二选一；`mainFlow` 必须覆盖全部业务节点和流程边，并满足入口可达性与出口无未声明出边。`loopLanes` 的 `side` 只能为 `left`/`right`，`laneOffset` 至少为 `24`，每条回路边必须有非空标签并实际进入声明的独立外侧 lane。回路边不计入普通 merge 语义。
+
+过程图的 SVG 映射必须保持以下可反查属性：
+
+- 业务节点：`data-node`，判定节点另须显式 `data-node-shape="diamond"`；
+- 连线主体：`path[data-edge]`、`data-from`、`data-to`、`data-from-port`、`data-to-port`，有标签时使用 `data-edge-label`；
+- 箭头尖端：独立的 `[data-edge-arrow]` overlay，同时保留 `data-edge` 和 `data-arrow-target="<node-id>:<port>"`；箭头 overlay 不得作为连线主体几何重复采样；
+- marker 可以作为主体绘制机制，但不能替代可见的独立箭头映射；箭头必须有实际 bbox，且不能被无关节点、标签或分组遮挡。
+
+源级结果至少应分别记录 `main_flow_valid`、`loop_lanes_valid`、`decision_exit_valid`、`edge_intersection_status`、`collinear_overlap_status`、`target_port_direction_status` 和 `visible_arrow_mapping_status`。这些字段只证明对应检查层，不代表浏览器三视图已执行。

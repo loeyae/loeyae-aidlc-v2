@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1300 1040" width="1300" height="1040" role="img">
+  <title>履约模式选择与定店流程</title>
+  <desc>FR-003：用户选择配送或自提履约模式；配送定店失败时修改收货地址并重试。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#334155" />
+    </marker>
+  </defs>
+
+  <g data-node="choose-fulfillment-mode" data-node-shape="diamond">
+    <polygon points="580,60 680,110 580,160 480,110" fill="#fff7ed" stroke="#334155" stroke-width="2" />
+    <text data-text-id="node-choose-fulfillment-mode" x="580" y="115" text-anchor="middle" font-size="14">选择履约模式</text>
+  </g>
+  <g data-node="pickup-store" data-node-shape="rect">
+    <rect x="240" y="240" width="200" height="60" rx="8" fill="#f8fafc" stroke="#334155" stroke-width="2" />
+    <text data-text-id="node-pickup-store" x="340" y="276" text-anchor="middle" font-size="14">自提定店</text>
+  </g>
+  <g data-node="show-pickup-products" data-node-shape="rect">
+    <rect x="240" y="380" width="200" height="60" rx="8" fill="#f8fafc" stroke="#334155" stroke-width="2" />
+    <text data-text-id="node-show-pickup-products" x="340" y="416" text-anchor="middle" font-size="14">展示自提门店商品</text>
+  </g>
+  <g data-node="switch-pickup-store" data-node-shape="round">
+    <rect x="240" y="520" width="200" height="60" rx="30" fill="#ecfdf5" stroke="#334155" stroke-width="2" />
+    <text data-text-id="node-switch-pickup-store" x="340" y="556" text-anchor="middle" font-size="14">切换自提门店</text>
+  </g>
+  <g data-node="delivery-store" data-node-shape="rect">
+    <rect x="760" y="240" width="200" height="60" rx="8" fill="#f8fafc" stroke="#334155" stroke-width="2" />
+    <text data-text-id="node-delivery-store" x="860" y="276" text-anchor="middle" font-size="14">配送定店</text>
+  </g>
+  <g data-node="delivery-store-success" data-node-shape="diamond">
+    <polygon points="860,380 960,440 860,500 760,440" fill="#fff7ed" stroke="#334155" stroke-width="2" />
+    <text data-text-id="node-delivery-store-success" x="860" y="445" text-anchor="middle" font-size="14">配送定店成功？</text>
+  </g>
+  <g data-node="show-delivery-products" data-node-shape="rect">
+    <rect x="1000" y="560" width="200" height="60" rx="8" fill="#f8fafc" stroke="#334155" stroke-width="2" />
+    <text data-text-id="node-show-delivery-products" x="1100" y="596" text-anchor="middle" font-size="14">展示配送门店商品</text>
+  </g>
+  <g data-node="switch-delivery-address" data-node-shape="round">
+    <rect x="1000" y="720" width="200" height="60" rx="30" fill="#ecfdf5" stroke="#334155" stroke-width="2" />
+    <text data-text-id="node-switch-delivery-address" x="1100" y="756" text-anchor="middle" font-size="14">切换收货地址</text>
+  </g>
+  <g data-node="modify-delivery-address" data-node-shape="rect">
+    <rect x="600" y="560" width="200" height="60" rx="8" fill="#fff7ed" stroke="#334155" stroke-width="2" />
+    <text data-text-id="node-modify-delivery-address" x="700" y="596" text-anchor="middle" font-size="14">修改收货地址</text>
+  </g>
+
+  <path data-edge="choose-pickup" data-from="choose-fulfillment-mode" data-from-port="left" data-to="pickup-store" data-to-port="top" data-edge-label="choose-pickup" d="M480 110 L340 110 L340 240" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)" />
+  <path data-edge-arrow="choose-pickup" data-edge="choose-pickup" data-arrow-target="pickup-store:top" d="M332 228 L340 240 L348 228" fill="#334155" />
+  <g data-edge-label="choose-pickup"><text data-text-id="label-choose-pickup" x="410" y="92" text-anchor="middle" font-size="14">自提</text></g>
+
+  <path data-edge="choose-delivery" data-from="choose-fulfillment-mode" data-from-port="right" data-to="delivery-store" data-to-port="top" data-edge-label="choose-delivery" d="M680 110 L860 110 L860 240" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)" />
+  <path data-edge-arrow="choose-delivery" data-edge="choose-delivery" data-arrow-target="delivery-store:top" d="M852 228 L860 240 L868 228" fill="#334155" />
+  <g data-edge-label="choose-delivery"><text data-text-id="label-choose-delivery" x="770" y="92" text-anchor="middle" font-size="14">配送</text></g>
+
+  <path data-edge="pickup-store-products" data-from="pickup-store" data-from-port="bottom" data-to="show-pickup-products" data-to-port="top" d="M340 300 L340 380" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)" />
+  <path data-edge-arrow="pickup-store-products" data-edge="pickup-store-products" data-arrow-target="show-pickup-products:top" d="M332 368 L340 380 L348 368" fill="#334155" />
+
+  <path data-edge="pickup-products-switch" data-from="show-pickup-products" data-from-port="bottom" data-to="switch-pickup-store" data-to-port="top" d="M340 440 L340 520" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)" />
+  <path data-edge-arrow="pickup-products-switch" data-edge="pickup-products-switch" data-arrow-target="switch-pickup-store:top" d="M332 508 L340 520 L348 508" fill="#334155" />
+
+  <path data-edge="delivery-store-check" data-from="delivery-store" data-from-port="bottom" data-to="delivery-store-success" data-to-port="top" d="M860 300 L860 380" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)" />
+  <path data-edge-arrow="delivery-store-check" data-edge="delivery-store-check" data-arrow-target="delivery-store-success:top" d="M852 368 L860 380 L868 368" fill="#334155" />
+
+  <path data-edge="delivery-success" data-from="delivery-store-success" data-from-port="right" data-to="show-delivery-products" data-to-port="top" data-edge-label="delivery-success" d="M960 440 L1100 440 L1100 560" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)" />
+  <path data-edge-arrow="delivery-success" data-edge="delivery-success" data-arrow-target="show-delivery-products:top" d="M1092 548 L1100 560 L1108 548" fill="#334155" />
+  <g data-edge-label="delivery-success"><text data-text-id="label-delivery-success" x="1030" y="420" text-anchor="middle" font-size="14">成功</text></g>
+
+  <path data-edge="delivery-failure" data-from="delivery-store-success" data-from-port="left" data-to="modify-delivery-address" data-to-port="top" data-edge-label="delivery-failure" d="M760 440 L700 440 L700 560" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)" />
+  <path data-edge-arrow="delivery-failure" data-edge="delivery-failure" data-arrow-target="modify-delivery-address:top" d="M692 548 L700 560 L708 548" fill="#334155" />
+  <g data-edge-label="delivery-failure"><text data-text-id="label-delivery-failure" x="730" y="420" text-anchor="middle" font-size="14">失败</text></g>
+
+  <path data-edge="delivery-products-switch" data-from="show-delivery-products" data-from-port="bottom" data-to="switch-delivery-address" data-to-port="top" d="M1100 620 L1100 720" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)" />
+  <path data-edge-arrow="delivery-products-switch" data-edge="delivery-products-switch" data-arrow-target="switch-delivery-address:top" d="M1092 708 L1100 720 L1108 708" fill="#334155" />
+
+  <path data-edge="delivery-address-retry" data-from="modify-delivery-address" data-from-port="left" data-to="delivery-store" data-to-port="left" data-edge-label="delivery-address-retry" d="M600 590 L100 590 L100 640 L500 640 L500 270 L760 270" fill="none" stroke="#b45309" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#arrow)" />
+  <path data-edge-arrow="delivery-address-retry" data-edge="delivery-address-retry" data-arrow-target="delivery-store:left" d="M772 262 L760 270 L772 278" fill="#b45309" />
+  <g data-edge-label="delivery-address-retry"><text data-text-id="label-delivery-address-retry" x="300" y="630" text-anchor="middle" font-size="14">修改地址后重试</text></g>
+
+  <g data-legend-item="decision-shape" data-legend-sample="delivery-store-success">
+    <polygon points="500,850 530,865 500,880 470,865" fill="#fff7ed" stroke="#334155" stroke-width="2" />
+    <text data-text-id="legend-decision-shape" x="550" y="870" font-size="14">判定：菱形表示需要明确出口的业务判断</text>
+  </g>
+  <g data-note="diagram-003-loop-note"><text data-text-id="note-diagram-003-loop-note" x="650" y="980" text-anchor="middle" font-size="14">失败路径沿左侧独立 lane 回到配送定店。</text></g>
+</svg>

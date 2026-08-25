@@ -87,3 +87,26 @@ Provider Request 使用 version `1`，最小结构如下：
 运行器固定调用 `chrome-devtools-mcp@1.6.0` 的 CLI，执行页面导航、viewport 调整、DOM/属性/几何检查、可访问性快照、viewport 截图和控制台采集。源级 evidence 不存在或未通过时拒绝执行；浏览器检查失败时不修改既有 evidence；全部适用检查通过后，才原子更新 `provider_status: "passed"`、`target_operation_required: true`，并写入 `diagram-contract-provider.json`、截图和快照。`export` 不属于该 Provider 能力，必须返回 `NEEDS_CAPABILITY`。
 
 对本地 SVG，运行器会先验证源文件的静态安全约束；若 Chrome 将直接 `file://` SVG 呈现为 XML 查看器，则使用只包含当前 SVG 的临时本地 HTML wrapper 进行浏览器检查，wrapper 在运行结束后删除，不修改 SVG 源。无法启动或调用 Chrome DevTools 时保持原有 `UNVERIFIED` evidence，不得伪造通过。
+
+
+## 过程图严格契约与证据门禁
+
+对过程图新增或调整资产，Producer 生成的 evidence 必须保留以下源级结果字段，不能由 Agent 手写补齐：
+
+```json
+{
+  "main_flow_valid": true,
+  "loop_lanes_valid": true,
+  "decision_exit_valid": true,
+  "edge_intersection_status": "passed",
+  "collinear_overlap_status": "passed",
+  "target_port_direction_status": "passed",
+  "visible_arrow_mapping_status": "passed"
+}
+```
+
+Checker 必须验证 `designNotes.layout.mainFlow`（入口/出口、节点/边覆盖、可达性、出口无未声明出边）和 `loopLanes`（`left`/`right`、`laneOffset >= 24`、原因、标签、独立 lane）。过程图的分支节点必须是 `diamond`，每个出口必须有非空可见标签；菱形端口使用顶点且不得偏移。`EDGE_CROSSING`、`COLLINEAR_OVERLAP`、`EDGE_NODE_COLLISION`、`PORT_DIRECTION`、`DECISION_SHAPE`、`DECISION_EXIT`、`MAIN_FLOW_TRACE` 和 `LOOP_LANE` 是可定位的阻断错误码。
+
+### Chrome Provider 证据
+
+当 `target_operation_required` 为 `true` 时，受控 Provider 必须实际检查 DOM/SVG 的节点/边集合、sidecar 主流程/回路覆盖、判定 diamond/出口、edge-node/edge-edge 几何、共线重叠、端口方向、边 bbox、箭头 overlay 可见性和遮挡、文字/tspan bbox 越界与重叠、`contentBBox` 及水平溢出。Provider Request 必须提供 `target_reading_environment.viewports.normal`、`.fit`、`.zoom`；缺少任一视图、Chrome 不可用或任一实际检查失败时，不得把 evidence 更新为 `provider_status: "passed"`，应保持 `UNVERIFIED` 或返回 `NEEDS_CAPABILITY`。`--dry-run` 仅验证请求格式和计划。

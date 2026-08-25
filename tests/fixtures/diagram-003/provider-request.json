@@ -1,0 +1,21 @@
+{
+  "version": "1",
+  "provider": "chrome-devtools",
+  "target_operation": "preview",
+  "stage": "diagram-003-regression",
+  "target_reading_environment": {
+    "viewport": { "width": 1440, "height": 900 },
+    "viewports": {
+      "normal": { "width": 1440, "height": 900 },
+      "fit": { "width": 1400, "height": 900 },
+      "zoom": { "width": 1800, "height": 1200 }
+    }
+  },
+  "diagrams": [
+    {
+      "id": "diagram-003",
+      "source_path": "tests/fixtures/diagram-003/diagram-003.svg",
+      "manifest_path": "tests/fixtures/diagram-003/diagram-003.diagram.json"
+    }
+  ]
+}

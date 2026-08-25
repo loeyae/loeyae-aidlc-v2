@@ -123,7 +123,7 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
         {"id": "start", "shape": "round", "x": 40, "y": 40, "width": 100, "height": 50},
         {"id": "done", "shape": "round", "x": 260, "y": 40, "width": 100, "height": 50},
     ]
-    svg_nodes = '<rect data-node="start" x="40" y="40" width="100" height="50"/><rect data-node="done" x="260" y="40" width="100" height="50"/>'
+    svg_nodes = '<g data-node="start" data-node-shape="round"><rect x="40" y="40" width="100" height="50"/></g><g data-node="done" data-node-shape="round"><rect x="260" y="40" width="100" height="50"/></g>'
     groups = []
     svg_groups = ""
     legend = None
@@ -136,10 +136,10 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
     edge_end = 260
     if variant == "node-collision":
         nodes[1]["x"] = 100
-        svg_nodes = '<rect data-node="start" x="40" y="40" width="100" height="50"/><rect data-node="done" x="100" y="40" width="100" height="50"/>'
+        svg_nodes = '<g data-node="start" data-node-shape="round"><rect x="40" y="40" width="100" height="50"/></g><g data-node="done" data-node-shape="round"><rect x="100" y="40" width="100" height="50"/></g>'
     elif variant == "edge-collision":
         nodes.append({"id": "middle", "shape": "rect", "x": 180, "y": 40, "width": 40, "height": 50})
-        svg_nodes += '<rect data-node="middle" x="180" y="40" width="40" height="50"/>'
+        svg_nodes += '<g data-node="middle" data-node-shape="rect"><rect x="180" y="40" width="40" height="50"/></g>'
     elif variant == "group-overlap":
         groups = [
             {"id": "a", "semanticType": "exclusive", "members": ["start"], "x": 20, "y": 20, "width": 180, "height": 100},
@@ -152,19 +152,25 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
         diagram_type = "sequence"
         svg_extra = '<line data-lifeline-for="start" x1="100" x2="100" y1="90" y2="260"/><line data-lifeline-for="done" x1="310" x2="310" y1="90" y2="260"/>'
     elif variant == "vertical-scroll":
+        nodes[1]["x"] = 180
         nodes[1]["y"] = 500
-        svg_nodes = '<rect data-node="start" x="40" y="40" width="100" height="50"/><rect data-node="done" x="260" y="500" width="100" height="50"/>'
+        edge_end = 180
+        svg_nodes = '<g data-node="start" data-node-shape="round"><rect x="40" y="40" width="100" height="50"/></g><g data-node="done" data-node-shape="round"><rect x="180" y="500" width="100" height="50"/></g>'
         svg_extra = ""
+        svg_width = 320
         svg_height = 600
+        canvas_width = 320
         canvas_height = 600
     if variant == "viewport-overflow":
         viewport = (320, 240)
         nodes[1]["x"] = 1000
-        svg_nodes = '<rect data-node="start" x="40" y="40" width="100" height="50"/><rect data-node="done" x="1000" y="40" width="100" height="50"/>'
+        svg_nodes = '<g data-node="start" data-node-shape="round"><rect x="40" y="40" width="100" height="50"/></g><g data-node="done" data-node-shape="round"><rect x="1000" y="40" width="100" height="50"/></g>'
         svg_width = 1200
         canvas_width = 1200
         edge_end = 1000
-    svg = f'<svg viewBox="0 0 {svg_width} {svg_height}" width="{svg_width}" height="{svg_height}" role="img"><title>Geometry fixture</title><desc>FR-001 geometry fixture</desc>{svg_groups}{svg_nodes}{svg_extra}<path data-edge="start-done" data-edge-arrow="start-done" data-arrow-target="done:left" d="M140 65 L{edge_end} 65" marker-end="url(#arrow)"/><text>FR-001</text></svg>\n'
+    svg_edge = f'<path data-edge="start-done" data-from="start" data-from-port="right" data-to="done" data-to-port="left" d="M140 65 L{edge_end} 65" marker-end="url(#arrow)"/>'
+    svg_arrow = f'<path data-edge-arrow="start-done" data-edge="start-done" data-arrow-target="done:left" d="M{edge_end - 8} 57 L{edge_end} 65 L{edge_end - 8} 73"/>'
+    svg = f'<svg viewBox="0 0 {svg_width} {svg_height}" width="{svg_width}" height="{svg_height}" role="img"><title>Geometry fixture</title><desc>FR-001 geometry fixture</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs>{svg_groups}{svg_nodes}{svg_extra}{svg_edge}{svg_arrow}<text data-text-id="requirement-reference" x="200" y="150">FR-001</text></svg>\n'
     with open(os.path.join(project, "assets", "geometry.svg"), "w") as handle:
         handle.write(svg)
     manifest = {
@@ -195,7 +201,14 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
             "provider": "chrome-devtools",
             "target_operation": "preview",
             "stage": "requirements-methods",
-            "target_reading_environment": {"viewport": {"width": viewport[0], "height": viewport[1]}},
+            "target_reading_environment": {
+                "viewport": {"width": viewport[0], "height": viewport[1]},
+                "viewports": {
+                    "normal": {"width": viewport[0], "height": viewport[1]},
+                    "fit": {"width": viewport[0], "height": viewport[1]},
+                    "zoom": {"width": viewport[0], "height": viewport[1]},
+                },
+            },
             "diagrams": [{"id": "geometry", "source_path": "assets/geometry.svg", "manifest_path": "assets/geometry.diagram.json"}],
         }, handle)
 

@@ -91,7 +91,7 @@ Clarification consistency: passed
     write(project, "docs/aidlc/inception/ui-design/page-plan.md", "PAGE-001 Registration\n")
     write(project, "docs/aidlc/inception/ui-mock/web.html", """<html><style>.box { display: block; }</style><body>PAGE-001<div class="mock-box">condition visible</div></body></html>""")
     write(project, "docs/aidlc/inception/requirements/business-flows.md", "# Business flows\n\nREQ-001\n")
-    write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox="0 0 400 300" width="400" height="300" role="img"><title>Requirements flow</title><desc>FR-001 business flow</desc><g><rect data-node="start" x="40" y="40" width="100" height="50"/><rect data-node="done" x="260" y="40" width="100" height="50"/><path data-edge="start-done" data-edge-arrow="start-done" data-arrow-target="done:left" d="M140 65 L260 65" marker-end="url(#arrow)"/><text>FR-001</text></g></svg>""")
+    write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox="0 0 400 300" width="400" height="300" role="img"><title>Requirements flow</title><desc>FR-001 business flow</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs><g data-node="start" data-node-shape="round"><rect x="40" y="40" width="100" height="50"/><text data-text-id="node-start" x="90" y="70">开始</text></g><g data-node="done" data-node-shape="round"><rect x="260" y="40" width="100" height="50"/><text data-text-id="node-done" x="310" y="70">完成</text></g><path data-edge="start-done" data-from="start" data-from-port="right" data-to="done" data-to-port="left" data-edge-label="start-done" d="M140 65 L260 65" marker-end="url(#arrow)"/><path data-edge-arrow="start-done" data-edge="start-done" data-arrow-target="done:left" d="M252 57 L260 65 L252 73"/><g data-edge-label="start-done"><text data-text-id="label-start-done" x="200" y="50">完成</text></g><text data-text-id="requirement-reference" x="200" y="150">FR-001</text></svg>""")
     write(project, "docs/aidlc/inception/requirements/business-flows.diagram.json", json.dumps({
         "version": 1,
         "document": "docs/aidlc/inception/requirements/business-flows.md",
@@ -116,6 +116,8 @@ Clarification consistency: passed
                     "layerTolerance": 24,
                     "symmetryGroups": [],
                     "mergeNodes": [],
+                    "mainFlow": {"entryNodeId": "start", "exitNodeIds": ["done"], "nodeIds": ["start", "done"], "edgeIds": ["start-done"]},
+                    "loopLanes": [],
                     "branchLayerExceptions": [],
                     "branchPortExceptions": [],
                     "readabilityEvidence": {
@@ -190,6 +192,25 @@ def test_checker_rejects_legacy_diagram_without_structured_contract() -> None:
         shutil.rmtree(project)
 
 
+def test_diagram_003_fixed_regression() -> None:
+    project = tempfile.mkdtemp(prefix="aidlc-diagram-003-regression-")
+    try:
+        source = os.path.join(REPO_ROOT, "tests", "fixtures", "diagram-003")
+        shutil.copytree(source, project, dirs_exist_ok=True)
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["main_flow_valid"] is True
+        assert payload["loop_lanes_valid"] is True
+        assert payload["decision_exit_valid"] is True
+        assert payload["edge_intersection_status"] == "passed"
+        assert payload["collinear_overlap_status"] == "passed"
+        assert payload["target_port_direction_status"] == "passed"
+        assert payload["visible_arrow_mapping_status"] == "passed"
+    finally:
+        shutil.rmtree(project)
+
+
 def diagram_manifest_path(project: str) -> str:
     return os.path.join(project, "docs", "aidlc", "inception", "requirements", "business-flows.diagram.json")
 
@@ -206,7 +227,13 @@ def mutate_diagram(project: str, mutation) -> None:
 def test_diagram_geometry_gates_fail_closed() -> None:
     cases = [
         ("node collision", lambda diagram, _: diagram["nodes"].__setitem__(1, {**diagram["nodes"][1], "x": 100}), "geometric collision"),
-        ("edge collision", lambda diagram, _: diagram["nodes"].append({"id": "middle", "shape": "rect", "label": "中间", "x": 180, "y": 40, "width": 40, "height": 50}), "collides with non-endpoint node middle"),
+        ("edge collision", lambda diagram, _: diagram["nodes"].append({"id": "middle", "shape": "rect", "label": "中间", "x": 180, "y": 40, "width": 60, "height": 50}), "collides with non-endpoint node middle"),
+        ("collinear overlap", lambda diagram, _: (
+            diagram["nodes"].append({"id": "other", "shape": "rect", "label": "旁路", "x": 40, "y": 110, "width": 100, "height": 50}),
+            diagram["edges"].append({"id": "overlap", "from": "other", "fromPort": "right", "to": "done", "toPort": "left", "kind": "directed", "points": [[140, 135], [180, 135], [180, 65], [260, 65]]}),
+            diagram["designNotes"]["layout"]["mainFlow"].update({"entryNodeIds": ["start", "other"], "exitNodeIds": ["done"], "nodeIds": ["start", "done", "other"], "edgeIds": ["start-done", "overlap"]}),
+            diagram["designNotes"]["layout"]["mergeNodes"].append({"nodeId": "done", "reason": "负例显式允许重复入边以验证共线重叠门禁"}),
+        ), "COLLINEAR_OVERLAP"),
         ("edge crossing", lambda diagram, _: (
             diagram["nodes"][0].update({"y": 125}),
             diagram["nodes"][1].update({"y": 125}),
@@ -216,10 +243,12 @@ def test_diagram_geometry_gates_fail_closed() -> None:
             ]),
             diagram["edges"][0].update({"points": [[140, 150], [260, 150]]}),
             diagram["edges"].append({"id": "vertical", "from": "top", "fromPort": "bottom", "to": "bottom", "toPort": "top", "kind": "directed", "points": [[200, 90], [200, 240]]}),
+            diagram["designNotes"]["layout"]["mainFlow"].update({"entryNodeIds": ["start", "top"], "exitNodeIds": ["done", "bottom"], "nodeIds": ["start", "done", "top", "bottom"], "edgeIds": ["start-done", "vertical"]}),
             diagram["canvas"].update({"height": 340}),
         ), "EDGE_CROSSING"),
         ("label collision", lambda diagram, _: (
-            diagram["nodes"].append({"id": "middle", "shape": "rect", "label": "中间", "x": 180, "y": 20, "width": 40, "height": 30}),
+            diagram["nodes"].append({"id": "middle", "shape": "rect", "label": "中间", "x": 180, "y": 20, "width": 60, "height": 42}),
+            diagram["designNotes"]["layout"]["mainFlow"].update({"entryNodeIds": ["start", "middle"], "exitNodeIds": ["done", "middle"], "nodeIds": ["start", "done", "middle"]}),
             diagram["edges"][0]["label"].update({"x": 200, "y": 50}),
         ), "LABEL_COLLISION"),
         ("group containment", lambda diagram, _: diagram.update({"groups": [
@@ -239,7 +268,7 @@ def test_diagram_geometry_gates_fail_closed() -> None:
         ("sequence lifeline coordinate", lambda diagram, project: (
             diagram.update({"diagramType": "sequence"}),
             diagram["designNotes"].update({"semanticModes": ["process-flow"]}),
-            write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox=\"0 0 400 300\" width=\"400\" height=\"300\" role=\"img\"><title>Requirements sequence</title><desc>FR-001 sequence</desc><g><rect data-node=\"start\" x=\"40\" y=\"40\" width=\"100\" height=\"50\"/><rect data-node=\"done\" x=\"260\" y=\"40\" width=\"100\" height=\"50\"/><line data-lifeline-for=\"start\" x1=\"100\" x2=\"100\" y1=\"90\" y2=\"260\"/><line data-lifeline-for=\"done\" x1=\"310\" x2=\"310\" y1=\"90\" y2=\"260\"/><path data-edge=\"start-done\" data-edge-arrow=\"start-done\" data-arrow-target=\"done:left\" d=\"M140 65 L260 65\" marker-end=\"url(#arrow)\"/><text>FR-001</text></g></svg>"""),
+            write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox=\"0 0 400 300\" width=\"400\" height=\"300\" role=\"img\"><title>Requirements sequence</title><desc>FR-001 sequence</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs><g><rect data-node=\"start\" x=\"40\" y=\"40\" width=\"100\" height=\"50\"/><rect data-node=\"done\" x=\"260\" y=\"40\" width=\"100\" height=\"50\"/><line data-lifeline-for=\"start\" x1=\"100\" x2=\"100\" y1=\"90\" y2=\"260\"/><line data-lifeline-for=\"done\" x1=\"310\" x2=\"310\" y1=\"90\" y2=\"260\"/><path data-edge=\"start-done\" data-from=\"start\" data-from-port=\"right\" data-to=\"done\" data-to-port=\"left\" data-edge-label=\"start-done\" d=\"M140 65 L260 65\" marker-end=\"url(#arrow)\"/><path data-edge-arrow=\"start-done\" data-edge=\"start-done\" data-arrow-target=\"done:left\" d=\"M252 57 L260 65 L252 73\"/><g data-edge-label=\"start-done\"><text data-text-id=\"label-start-done\" x=\"200\" y=\"50\">完成</text></g><text data-text-id=\"requirement-reference\">FR-001</text></g></svg>"""),
         ), "sequence lifeline coordinate is invalid"),
         ("endpoint mismatch", lambda diagram, _: diagram["edges"][0].update({"points": [[143, 65], [260, 65]]}), "first point does not match fromPort"),
         ("non-orthogonal path", lambda diagram, _: diagram["edges"][0].update({"points": [[140, 65], [200, 80], [260, 65]]}), "is not orthogonal"),
@@ -265,7 +294,7 @@ def test_diagram_geometry_gates_pass_on_valid_sequence() -> None:
         mutate_diagram(project, lambda diagram, project: (
             diagram.update({"diagramType": "sequence"}),
             diagram["designNotes"].update({"semanticModes": ["process-flow"]}),
-            write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox=\"0 0 400 300\" width=\"400\" height=\"300\" role=\"img\"><title>Requirements sequence</title><desc>FR-001 sequence</desc><g><rect data-node=\"start\" x=\"40\" y=\"40\" width=\"100\" height=\"50\"/><rect data-node=\"done\" x=\"260\" y=\"40\" width=\"100\" height=\"50\"/><line data-lifeline-for=\"start\" x1=\"90\" x2=\"90\" y1=\"90\" y2=\"260\"/><line data-lifeline-for=\"done\" x1=\"310\" x2=\"310\" y1=\"90\" y2=\"260\"/><path data-edge=\"start-done\" data-edge-arrow=\"start-done\" data-arrow-target=\"done:left\" d=\"M140 65 L260 65\" marker-end=\"url(#arrow)\"/><text>FR-001</text></g></svg>""")
+            write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox=\"0 0 400 300\" width=\"400\" height=\"300\" role=\"img\"><title>Requirements sequence</title><desc>FR-001 sequence</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs><g><rect data-node=\"start\" x=\"40\" y=\"40\" width=\"100\" height=\"50\"/><rect data-node=\"done\" x=\"260\" y=\"40\" width=\"100\" height=\"50\"/><line data-lifeline-for=\"start\" x1=\"90\" x2=\"90\" y1=\"90\" y2=\"260\"/><line data-lifeline-for=\"done\" x1=\"310\" x2=\"310\" y1=\"90\" y2=\"260\"/><path data-edge=\"start-done\" data-from=\"start\" data-from-port=\"right\" data-to=\"done\" data-to-port=\"left\" data-edge-label=\"start-done\" d=\"M140 65 L260 65\" marker-end=\"url(#arrow)\"/><path data-edge-arrow=\"start-done\" data-edge=\"start-done\" data-arrow-target=\"done:left\" d=\"M252 57 L260 65 L252 73\"/><g data-edge-label=\"start-done\"><text data-text-id=\"label-start-done\" x=\"200\" y=\"50\">完成</text></g><text data-text-id=\"requirement-reference\">FR-001</text></g></svg>""")
         ))
         result = run_checker(project, "diagram-contract")
         assert result.returncode == 0, result.stderr
@@ -278,7 +307,7 @@ def test_diagram_risk_assessment() -> None:
     project = tempfile.mkdtemp(prefix="aidlc-diagram-risk-")
     try:
         fixture(project)
-        mutate_diagram(project, lambda diagram, _: diagram["edges"][0].update({"points": [[140, 65], [180, 65], [220, 65], [260, 65]]}))
+        mutate_diagram(project, lambda diagram, _: diagram["edges"][0].update({"points": [[140, 65], [180, 65], [180, 80], [240, 80], [240, 65], [260, 65]]}))
         result = run_checker(project, "diagram-contract")
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout)
@@ -292,7 +321,7 @@ def directional_fixture(project: str, direction: str) -> None:
     if direction == "TB":
         nodes = [
             {"id": "oms", "shape": "rect", "label": "OMS", "x": 260, "y": 40, "width": 100, "height": 50},
-            {"id": "dmall", "shape": "rect", "label": "E-Fulfilment", "x": 800, "y": 40, "width": 100, "height": 50},
+            {"id": "dmall", "shape": "rect", "label": "E-Fulfilment", "x": 760, "y": 40, "width": 180, "height": 50},
             {"id": "receive", "shape": "rect", "label": "接收", "x": 530, "y": 160, "width": 100, "height": 50},
             {"id": "decision", "shape": "diamond", "label": "启用条件", "x": 530, "y": 300, "width": 100, "height": 80},
             {"id": "active", "shape": "round", "label": "ACTIVE", "x": 650, "y": 700, "width": 100, "height": 50},
@@ -300,13 +329,13 @@ def directional_fixture(project: str, direction: str) -> None:
         ]
         edges = [
             {"id": "oms-receive", "from": "oms", "fromPort": "right", "to": "receive", "toPort": "left", "kind": "directed", "points": [[360, 65], [440, 65], [440, 185], [530, 185]]},
-            {"id": "dmall-receive", "from": "dmall", "fromPort": "left", "to": "receive", "toPort": "right", "kind": "directed", "points": [[800, 65], [720, 65], [720, 185], [630, 185]]},
+            {"id": "dmall-receive", "from": "dmall", "fromPort": "left", "to": "receive", "toPort": "right", "kind": "directed", "points": [[760, 65], [720, 65], [720, 185], [630, 185]]},
             {"id": "receive-decision", "from": "receive", "fromPort": "bottom", "to": "decision", "toPort": "top", "kind": "directed", "points": [[580, 210], [580, 300]]},
-            {"id": "decision-active", "from": "decision", "fromPort": "right", "to": "active", "toPort": "top", "kind": "directed", "points": [[630, 340], [700, 340], [700, 700]]},
-            {"id": "decision-pending", "from": "decision", "fromPort": "left", "to": "pending", "toPort": "top", "kind": "directed", "points": [[530, 340], [360, 340], [360, 700]]},
+            {"id": "decision-active", "from": "decision", "fromPort": "right", "to": "active", "toPort": "top", "kind": "directed", "points": [[630, 340], [700, 340], [700, 700]], "label": {"text": "通过", "x": 680, "y": 320}},
+            {"id": "decision-pending", "from": "decision", "fromPort": "left", "to": "pending", "toPort": "top", "kind": "directed", "points": [[530, 340], [360, 340], [360, 700]], "label": {"text": "未通过", "x": 450, "y": 320}},
         ]
         canvas = {"width": 1000, "height": 840}
-        layout = {"direction": "TB", "mainAxis": 580, "layerTolerance": 24, "symmetryGroups": [{"nodeIds": ["oms", "dmall"], "tolerance": 1}], "mergeNodes": [{"nodeId": "receive", "reason": "OMS 与 E-Fulfilment 输入汇合后进入云 Mall"}], "branchLayerExceptions": [], "branchPortExceptions": []}
+        layout = {"direction": "TB", "mainAxis": 580, "layerTolerance": 24, "symmetryGroups": [{"nodeIds": ["oms", "dmall"], "tolerance": 1}], "mergeNodes": [{"nodeId": "receive", "reason": "OMS 与 E-Fulfilment 输入汇合后进入云 Mall"}], "mainFlow": {"entryNodeIds": ["oms", "dmall"], "exitNodeIds": ["active", "pending"], "nodeIds": ["oms", "dmall", "receive", "decision", "active", "pending"], "edgeIds": ["oms-receive", "dmall-receive", "receive-decision", "decision-active", "decision-pending"]}, "loopLanes": [], "branchLayerExceptions": [], "branchPortExceptions": []}
     else:
         nodes = [
             {"id": "start", "shape": "round", "label": "完成定店", "x": 40, "y": 225, "width": 100, "height": 50},
@@ -317,21 +346,32 @@ def directional_fixture(project: str, direction: str) -> None:
         ]
         edges = [
             {"id": "start-decision", "from": "start", "fromPort": "right", "to": "decision", "toPort": "left", "kind": "directed", "points": [[140, 250], [300, 250]]},
-            {"id": "decision-physical", "from": "decision", "fromPort": "top", "to": "physical", "toPort": "left", "kind": "directed", "points": [[350, 200], [450, 200], [450, 125], [500, 125]]},
-            {"id": "decision-virtual", "from": "decision", "fromPort": "bottom", "to": "virtual", "toPort": "left", "kind": "directed", "points": [[350, 300], [450, 300], [450, 375], [500, 375]]},
-            {"id": "physical-checkout", "from": "physical", "fromPort": "right", "to": "checkout", "toPort": "top", "kind": "directed", "points": [[600, 125], [650, 125], [650, 225], [750, 225]]},
-            {"id": "virtual-checkout", "from": "virtual", "fromPort": "right", "to": "checkout", "toPort": "bottom", "kind": "directed", "points": [[600, 375], [650, 375], [650, 275], [750, 275]]},
+            {"id": "decision-physical", "from": "decision", "fromPort": "top", "to": "physical", "toPort": "left", "kind": "directed", "points": [[350, 200], [350, 150], [450, 150], [450, 125], [500, 125]], "label": {"text": "实物", "x": 420, "y": 180}},
+            {"id": "decision-virtual", "from": "decision", "fromPort": "bottom", "to": "virtual", "toPort": "left", "kind": "directed", "points": [[350, 300], [350, 325], [450, 325], [450, 375], [500, 375]], "label": {"text": "虚拟", "x": 420, "y": 320}},
+            {"id": "physical-checkout", "from": "physical", "fromPort": "right", "to": "checkout", "toPort": "top", "kind": "directed", "points": [[600, 125], [750, 125], [750, 225]]},
+            {"id": "virtual-checkout", "from": "virtual", "fromPort": "right", "to": "checkout", "toPort": "bottom", "kind": "directed", "points": [[600, 375], [750, 375], [750, 275]]},
         ]
         canvas = {"width": 840, "height": 520}
-        layout = {"direction": "LR", "mainAxis": 250, "layerTolerance": 24, "symmetryGroups": [], "mergeNodes": [{"nodeId": "checkout", "reason": "两个商品分支在结算提交订单处汇合"}], "branchLayerExceptions": [], "branchPortExceptions": []}
+        layout = {"direction": "LR", "mainAxis": 250, "layerTolerance": 24, "symmetryGroups": [], "mergeNodes": [{"nodeId": "checkout", "reason": "两个商品分支在结算提交订单处汇合"}], "mainFlow": {"entryNodeId": "start", "exitNodeIds": ["checkout"], "nodeIds": ["start", "decision", "physical", "virtual", "checkout"], "edgeIds": ["start-decision", "decision-physical", "decision-virtual", "physical-checkout", "virtual-checkout"]}, "loopLanes": [], "branchLayerExceptions": [], "branchPortExceptions": []}
     layout["readabilityEvidence"] = {
         "normal": {"status": "UNVERIFIED", "evidence": "source-only regression fixture"},
         "fit": {"status": "UNVERIFIED", "evidence": "source-only regression fixture"},
         "zoom": {"status": "UNVERIFIED", "evidence": "source-only regression fixture"},
     }
-    svg_nodes = "".join(f'<rect data-node="{node["id"]}" x="{node["x"]}" y="{node["y"]}" width="{node["width"]}" height="{node["height"]}"/>' for node in nodes)
-    svg_edges = "".join(f'<path data-edge="{edge["id"]}" data-edge-arrow="{edge["id"]}" data-arrow-target="{edge["to"]}:{edge["toPort"]}" d="M{edge["points"][0][0]} {edge["points"][0][1]} ' + " ".join(f'L{point[0]} {point[1]}' for point in edge["points"][1:]) + '"/>' for edge in edges)
-    svg = f'<svg viewBox="0 0 {canvas["width"]} {canvas["height"]}" width="{canvas["width"]}" height="{canvas["height"]}" role="img"><title>Directional regression</title><desc>FR-002 directional regression</desc>{svg_nodes}{svg_edges}<g data-legend-item="flow"><text>流程</text></g><g data-note="layout-note"><text>布局说明</text></g></svg>'
+    def arrow_path(edge: dict) -> str:
+        x, y = edge["points"][-1]
+        if edge["toPort"] == "top":
+            return f"M{x - 6} {y - 10} L{x} {y} L{x + 6} {y - 10}"
+        if edge["toPort"] == "bottom":
+            return f"M{x - 6} {y + 10} L{x} {y} L{x + 6} {y + 10}"
+        if edge["toPort"] == "left":
+            return f"M{x - 10} {y - 6} L{x} {y} L{x - 10} {y + 6}"
+        return f"M{x + 10} {y - 6} L{x} {y} L{x + 10} {y + 6}"
+
+    svg_nodes = "".join(f'<g data-node="{node["id"]}" data-node-shape="{node["shape"]}"><rect x="{node["x"]}" y="{node["y"]}" width="{node["width"]}" height="{node["height"]}"/><text data-text-id="node-{node["id"]}" x="{node["x"] + node["width"] / 2}" y="{node["y"] + node["height"] / 2 + 5}">{node["label"]}</text></g>' for node in nodes)
+    svg_edges = "".join(f'<path data-edge="{edge["id"]}" data-from="{edge["from"]}" data-from-port="{edge["fromPort"]}" data-to="{edge["to"]}" data-to-port="{edge["toPort"]}"' + (f' data-edge-label="{edge["id"]}"' if edge.get("label") else "") + f' d="M{edge["points"][0][0]} {edge["points"][0][1]} ' + " ".join(f'L{point[0]} {point[1]}' for point in edge["points"][1:]) + f'" marker-end="url(#arrow)"/><path data-edge-arrow="{edge["id"]}" data-edge="{edge["id"]}" data-arrow-target="{edge["to"]}:{edge["toPort"]}" d="{arrow_path(edge)}"/>' for edge in edges)
+    svg_labels = "".join(f'<g data-edge-label="{edge["id"]}"><text data-text-id="label-{edge["id"]}" x="{edge["label"]["x"]}" y="{edge["label"]["y"]}">{edge["label"]["text"]}</text></g>' for edge in edges if edge.get("label"))
+    svg = f'<svg viewBox="0 0 {canvas["width"]} {canvas["height"]}" width="{canvas["width"]}" height="{canvas["height"]}" role="img"><title>Directional regression</title><desc>FR-002 directional regression</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs>{svg_nodes}{svg_edges}{svg_labels}<g data-legend-item="flow"><text data-text-id="legend-flow">流程</text></g><g data-note="layout-note"><text data-text-id="note-layout">布局说明</text></g></svg>'
     manifest = {"version": 1, "document": "docs/aidlc/inception/requirements/business-flows.md", "diagrams": [{"id": f"diagram-{direction.lower()}", "output": "business-flows.svg", "title": "Directional regression", "description": "Directional regression", "diagramType": "flowchart", "canvas": canvas, "nodes": nodes, "edges": edges, "annotations": [{"id": "layout-note", "text": "布局说明", "x": canvas["width"] / 2, "y": canvas["height"] - 50}], "legend": {"placement": "bottom", "items": [{"id": "flow", "label": "流程", "meaning": "业务流程", "sample": {"kind": "edge", "ref": edges[0]["id"]}, "targets": [{"kind": "edge", "ref": edges[0]["id"]}]}]}, "designNotes": {"intent": "验证主阅读方向和业务层级", "semanticModes": ["process-flow"], "visualSemantics": [{"channel": "node-shape", "role": "semantic", "reason": "矩形、菱形和圆角节点分别表达步骤、判断和状态结果"}], "legendDecision": {"status": "required", "reason": "回归夹具显式验证图例顺序"}, "splitDecision": {"status": "not-needed", "reason": "单一流程回归夹具"}, "layout": layout}}]}
     write(project, "docs/aidlc/inception/requirements/business-flows.md", "# Business flows\n\nFR-002\n")
     write(project, "docs/aidlc/inception/requirements/business-flows.diagram.json", json.dumps(manifest))
@@ -351,9 +391,9 @@ def test_directional_layout_contracts() -> None:
     cases = [
         ("tb-asymmetry", "TB", lambda diagram, _: (diagram["nodes"][0].update({"x": 300}), diagram["edges"][0].update({"points": [[400, 65], [440, 65], [440, 185], [530, 185]]})), "LAYOUT_SYMMETRY"),
         ("tb-branch-layer", "TB", lambda diagram, _: (diagram["nodes"][4].update({"y": 650}), diagram["edges"][3].update({"points": [[630, 340], [700, 340], [700, 650]]})), "BRANCH_LAYER"),
-        ("tb-branch-port", "TB", lambda diagram, _: (diagram["edges"][3].update({"toPort": "right", "points": [[630, 340], [750, 340], [750, 725]]})), "BRANCH_PORT"),
-        ("lr-branch-layer", "LR", lambda diagram, _: (diagram["nodes"][3].update({"x": 550}), diagram["edges"][2].update({"points": [[350, 300], [500, 300], [500, 375], [550, 375]]}), diagram["edges"][4].update({"points": [[650, 375], [680, 375], [680, 275], [750, 275]]})), "BRANCH_LAYER"),
-        ("lr-branch-port", "LR", lambda diagram, _: (diagram["edges"][1].update({"toPort": "right", "points": [[350, 200], [450, 200], [450, 125], [600, 125]]})), "BRANCH_PORT"),
+        ("tb-branch-port", "TB", lambda diagram, _: (diagram["edges"][3].update({"toPort": "right", "points": [[630, 340], [800, 340], [800, 725], [750, 725]]})), "BRANCH_PORT"),
+        ("lr-branch-layer", "LR", lambda diagram, _: (diagram["nodes"][3].update({"x": 550}), diagram["edges"][2].update({"points": [[350, 300], [350, 325], [500, 325], [500, 375], [550, 375]]}), diagram["edges"][4].update({"points": [[650, 375], [750, 375], [750, 275]]})), "BRANCH_LAYER"),
+        ("lr-branch-port", "LR", lambda diagram, _: (diagram["edges"][1].update({"toPort": "right", "points": [[350, 200], [350, 150], [650, 150], [650, 125], [600, 125]]})), "BRANCH_PORT"),
         ("annotation-order", "TB", lambda diagram, _: diagram["annotations"].__getitem__(0).update({"y": 400}), "ANNOTATION_ORDER"),
     ]
     for name, direction, mutation, expected in cases:
@@ -382,8 +422,9 @@ if __name__ == "__main__":
     test_all_checkers_pass_on_realistic_fixture()
     test_checker_fails_closed_when_required_artifact_is_removed()
     test_checker_rejects_legacy_diagram_without_structured_contract()
+    test_diagram_003_fixed_regression()
     test_diagram_geometry_gates_fail_closed()
     test_diagram_geometry_gates_pass_on_valid_sequence()
     test_diagram_risk_assessment()
     test_directional_layout_contracts()
-    print("21 semantic checker tests passed")
+    print("22 semantic checker tests passed")
