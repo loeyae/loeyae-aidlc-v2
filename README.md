@@ -15,7 +15,7 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 固定到指定提交：
 
 ```bash
-npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/2ba85d1.tar.gz
+npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/89cc38e.tar.gz
 ```
 
 如果 Windows 的 `loeyae-aidlc` 仍指向旧的本地路径（例如 `E:\Work\repo\node\...`），先清理旧的全局安装和命令 shim，再重新安装：
@@ -27,21 +27,30 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 
 ### 部署到各平台
 
+#### 路径参数安全规则（重要）
+
+`--project` 和 `--target` 不是同一个参数：
+
+- `--project <项目根目录>`：用于 Kiro IDE/CLI 的项目级生命周期 Hook。它只创建或更新 `<项目根目录>/.kiro/hooks/loeyae-aidlc.json`，不会删除项目源码；项目根目录可以是已有的非空目录。
+- `--target <安装目录>`：用于把 harness 复制到一个专用安装目录。不要把业务项目根目录、源码目录或已有工程目录传给它。当前版本对普通 harness 的非空 `--target` 会直接拒绝；旧版本可能会递归删除该目录后再复制。
+- Claude Code 的 `--target` 是特殊用法：它表示项目根目录，安装器只操作该目录下的 `.claude/loeyae-aidlc-marketplace/`，不应将其用于 Kiro IDE/CLI。
+
+如果误用旧版本的 `--target` 删除了目录，应立即停止再次安装或写入该目录，优先从 Git、IDE Local History、Time Machine 或备份恢复；安装器无法恢复已删除源码。
+
+#### 全局安装
+
 ```bash
-# Kiro Crew Dashboard（默认，全局 skill）
+# Kiro Crew Dashboard（全局 skill）
 loeyae-aidlc install
 
-# Kiro IDE（全局 Power）
+# Kiro IDE（全局 Power；不会安装项目级 Hook）
 loeyae-aidlc install --harness kiro-ide
 
-# Kiro CLI（全局 agent skill）
+# Kiro CLI（全局 agent skill；不会安装项目级 Hook）
 loeyae-aidlc install --harness kiro-cli
 
-# Claude Code（全局 user-scope plugin；安装器会通过官方 CLI 注册 marketplace 并安装）
+# Claude Code（全局 user-scope plugin）
 loeyae-aidlc install --harness claude
-
-# Claude Code（显式项目级部署；写入目标项目的 .claude 配置）
-loeyae-aidlc install --harness claude --target ./my-project
 
 # OpenCode（全局 plugin）
 loeyae-aidlc install --harness opencode
@@ -53,7 +62,46 @@ loeyae-aidlc install --harness codex
 loeyae-aidlc install --all
 ```
 
-Kiro Crew 的默认安装还会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` MCP 服务按“只补缺失项、不覆盖同名现有配置”的规则合并到 `~/.kiro/settings/mcp.json`。`ssot` 使用环境变量 `SSOT_API_KEY`，不把密钥写入安装包或项目文件。项目级 `--target` 安装不会修改全局 MCP 配置。
+#### Kiro IDE 项目级安装
+
+Kiro IDE 的 Power 安装在用户级目录，但生命周期 Stop Hook 必须安装到每个业务项目中：
+
+```bash
+loeyae-aidlc install \
+  --harness kiro-ide \
+  --project /absolute/path/to/your-project
+```
+
+该命令的效果：
+
+- Power：`~/.kiro/powers/loeyae-aidlc/`
+- 项目 Hook：`/absolute/path/to/your-project/.kiro/hooks/loeyae-aidlc.json`
+- 不删除、不覆盖业务项目中的源码文件
+
+#### Kiro CLI 项目级安装
+
+Kiro CLI 的 Skill 安装在用户级目录，但项目级 Hook 同样必须显式安装：
+
+```bash
+loeyae-aidlc install \
+  --harness kiro-cli \
+  --project /absolute/path/to/your-project
+```
+
+该命令的效果：
+
+- Skill：`~/.kiro/skills/loeyae-aidlc/`
+- 项目 Hook：`/absolute/path/to/your-project/.kiro/hooks/loeyae-aidlc.json`
+- 不要使用 `--target /absolute/path/to/your-project`
+
+`--project` 可以重复执行，用于更新 Hook；它不会清空项目目录。安装前建议使用绝对路径并确认目标：
+
+```bash
+cd /absolute/path/to/your-project
+pwd
+```
+
+Kiro Crew 的默认安装还会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` MCP 服务按“只补缺失项、不覆盖同名现有配置”的规则合并到 `~/.kiro/settings/mcp.json`。`ssot` 使用环境变量 `SSOT_API_KEY`，不把密钥写入安装包或项目文件。
 
 Claude Code 的安装器会额外生成本地 marketplace，并调用官方 `claude plugin marketplace add`、`claude plugin install` 注册 user-scope 插件；不会直接编辑 `installed_plugins.json`。staging 文件位于 `~/.claude/plugins/loeyae-aidlc-marketplace/`，实际运行缓存和注册表由 Claude Code 管理。当前已打开的 Claude 会话需执行 `/reload-plugins`（如提示缓存变更则按提示使用 `--force`）或重新开会话；新会话会自动加载。
 
@@ -83,10 +131,14 @@ Claude Code 的安装器会额外生成本地 marketplace，并调用官方 `cla
 
 Hook 未安装或平台未触发时，不能降低引擎门禁要求；直接调用 `orchestrate report` 仍会执行完整的 `requires`、`condition`、`produces`、`sensors`、审批和当前阶段校验。
 
-自定义路径（项目级部署）：
+#### Claude Code 项目级部署
+
+Claude Code 的 `--target` 是专用例外：它接收项目根目录，并只在该目录下写入 `.claude/loeyae-aidlc-marketplace/`，不用于 Kiro IDE/CLI：
 
 ```bash
-loeyae-aidlc install --harness claude --target ./my-project
+loeyae-aidlc install \
+  --harness claude \
+  --target /absolute/path/to/your-project
 ```
 
 ### 升级

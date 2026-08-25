@@ -18,7 +18,7 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import { spawnSync } from "child_process";
-import { readFileSync, writeFileSync, existsSync, cpSync, mkdirSync, rmSync, renameSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, cpSync, mkdirSync, readdirSync, rmSync, renameSync } from "fs";
 import { mergeMcpServers } from "../core/tools/aidlc-mcp-config";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -164,6 +164,20 @@ function getClaudeDeployment(customTarget: string): ClaudeDeployment {
   };
 }
 
+function ensureCustomTargetIsSafe(harness: string, customTarget: string, target: string) {
+  if (!customTarget || harness === "claude" || !existsSync(target)) return;
+
+  try {
+    if (readdirSync(target).length === 0) return;
+  } catch {
+    throw new Error(`Refusing to replace --target path "${target}". Use a dedicated directory or --project for Kiro IDE/CLI.`);
+  }
+
+  throw new Error(
+    `Refusing to replace non-empty --target directory "${target}". Use --project <project-path> for Kiro IDE/CLI, or choose a dedicated empty install directory.`,
+  );
+}
+
 function registerClaudePlugin(deployment: ClaudeDeployment) {
   const marketplace = {
     name: CLAUDE_MARKETPLACE_NAME,
@@ -293,6 +307,7 @@ function installOne(harness: string, customTarget: string, projectTarget: string
     console.error(`Unknown harness "${harness}". Available: ${Object.keys(HARNESS_INSTALL_PATHS).join(", ")}`);
     process.exit(1);
   }
+  ensureCustomTargetIsSafe(harness, customTarget, target);
 
   // Map harness name to build harness (kiro-cli uses kiro-ide build)
   const buildHarness = getBuildHarness(harness);
@@ -386,8 +401,8 @@ Commands:
 
 Install options:
   --harness <name>   Target platform (default: kiro-crew)
-  --target <path>    Custom install path (overrides default)
-  --project <path>   Also install Kiro project lifecycle hooks under <path>/.kiro/hooks/
+  --target <path>    Dedicated install directory only; refuses non-empty paths
+  --project <path>   Install Kiro IDE/CLI project Stop Hook under <path>/.kiro/hooks/
   --all              Install to ALL platforms at once
   --list             Show available platforms and paths
 
@@ -402,9 +417,10 @@ Supported platforms:
 Install examples:
   loeyae-aidlc install                          # Kiro Crew (default)
   loeyae-aidlc install --harness claude         # Claude Code global
-  loeyae-aidlc install --harness kiro-cli       # Kiro CLI global
+  loeyae-aidlc install --harness kiro-ide --project /absolute/path/to/project  # Kiro IDE project hook
+  loeyae-aidlc install --harness kiro-cli --project /absolute/path/to/project  # Kiro CLI project hook
+  loeyae-aidlc install --harness claude --target /absolute/path/to/project  # Claude project marketplace
   loeyae-aidlc install --all                    # All platforms
-  loeyae-aidlc install --harness claude --target ./my-project  # Project-level
 
 Orchestrate examples:
   loeyae-aidlc orchestrate next --scope feature

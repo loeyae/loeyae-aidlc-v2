@@ -66,6 +66,19 @@ def main() -> None:
         assert project_hook.is_file()
         assert json.loads(project_hook.read_text()) == kiro_hook
 
+        unsafe_target = home / "existing-project"
+        unsafe_target.mkdir()
+        sentinel = unsafe_target / "source.ts"
+        sentinel.write_text("export const preserved = true;\n")
+        result = run_cli(
+            ["install", "--harness", "kiro-ide", "--target", str(unsafe_target)],
+            ROOT,
+            home,
+        )
+        assert result.returncode != 0
+        assert sentinel.read_text() == "export const preserved = true;\n"
+        assert "Refusing to replace non-empty --target directory" in result.stderr
+
         result = run_cli(["install", "--harness", "codex"], ROOT, home)
         assert result.returncode == 0, result.stdout + result.stderr
         registered = home / ".codex" / "hooks.json"
