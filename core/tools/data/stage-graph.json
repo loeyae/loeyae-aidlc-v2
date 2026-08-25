@@ -1,0 +1,1469 @@
+{
+  "version": "2.0.0",
+  "compiled_at": "2026-08-25T01:36:57.687Z",
+  "stages": [
+    {
+      "slug": "workspace-detection",
+      "number": "0.1",
+      "name": "工作区检测",
+      "phase": "inception",
+      "execution": "ALWAYS",
+      "lead_agent": "aidlc-architect-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic",
+        "express",
+        "workshop"
+      ],
+      "requires": [],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/inception/inception-workspace-detection.md"
+    },
+    {
+      "slug": "product-inception",
+      "number": "1.1",
+      "name": "产品 Inception",
+      "phase": "ideation",
+      "execution": "CONDITIONAL",
+      "lead_agent": "(orchestrator)",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "workspace-detection"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/ideation/product-inception.md"
+      ],
+      "sensors": [
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/ideation/product-inception.md"
+    },
+    {
+      "slug": "module-division",
+      "number": "1.2",
+      "name": "模块划分",
+      "phase": "ideation",
+      "execution": "CONDITIONAL",
+      "lead_agent": "(orchestrator)",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "product-inception"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/ideation/module-division.md"
+      ],
+      "sensors": [
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/ideation/product-module-division.md"
+    },
+    {
+      "slug": "product-contracts",
+      "number": "1.3",
+      "name": "产品契约",
+      "phase": "ideation",
+      "execution": "CONDITIONAL",
+      "lead_agent": "(orchestrator)",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/ideation/product-contracts.md"
+      ],
+      "sensors": [
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/ideation/product-contracts.md"
+    },
+    {
+      "slug": "prd-generation",
+      "number": "1.4",
+      "name": "PRD 生成",
+      "phase": "ideation",
+      "execution": "CONDITIONAL",
+      "lead_agent": "(orchestrator)",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "product-inception"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/ideation/prd.md",
+        ".aidlc/evidence/prd-generation/prd-completeness.json"
+      ],
+      "sensors": [
+        "prd-completeness",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/ideation/product-prd-generation.md"
+    },
+    {
+      "slug": "scenario-module-mapping",
+      "number": "1.5",
+      "name": "场景模块映射",
+      "phase": "ideation",
+      "execution": "CONDITIONAL",
+      "lead_agent": "(orchestrator)",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/ideation/scenario-module-mapping.md"
+      ],
+      "sensors": [
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/ideation/product-scenario-module-mapping.md"
+    },
+    {
+      "slug": "state-template",
+      "number": "2.0",
+      "name": "状态模板",
+      "phase": "inception",
+      "execution": "ALWAYS",
+      "lead_agent": "aidlc-architect-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic",
+        "express",
+        "workshop"
+      ],
+      "requires": [],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/inception/inception-state-template.md"
+    },
+    {
+      "slug": "reverse-engineering",
+      "number": "2.1",
+      "name": "逆向工程",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-developer-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "workspace-detection"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/inception/reverse-engineering.md"
+      ],
+      "sensors": [
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "has_legacy_code",
+      "approval": "notify",
+      "file": "stages/inception/inception-reverse-engineering.md"
+    },
+    {
+      "slug": "requirements-analysis",
+      "number": "2.2",
+      "name": "需求分析",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-product-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "workspace-detection"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/inception/requirements.md"
+      ],
+      "sensors": [
+        "traceability",
+        "no-todo"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/inception/inception-requirements-analysis.md"
+    },
+    {
+      "slug": "requirement-clarification",
+      "number": "2.2.1",
+      "name": "需求澄清",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-product-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "requirements-analysis"
+      ],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/inception/inception-requirement-clarification.md"
+    },
+    {
+      "slug": "requirements-data-model",
+      "number": "2.2.2",
+      "name": "需求数据模型",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-product-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "requirements-analysis"
+      ],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/inception/inception-requirements-data-model.md"
+    },
+    {
+      "slug": "requirements-methods",
+      "number": "2.2.3",
+      "name": "需求方法",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-product-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "requirements-analysis"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/inception/requirements/business-flows.md",
+        ".aidlc/evidence/requirements-methods/diagram-contract.json"
+      ],
+      "sensors": [
+        "diagram-contract",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/inception/inception-requirements-methods.md"
+    },
+    {
+      "slug": "requirements-prioritization",
+      "number": "2.2.4",
+      "name": "需求优先级",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-product-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "requirements-analysis"
+      ],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/inception/inception-requirements-prioritization.md"
+    },
+    {
+      "slug": "requirements-validation",
+      "number": "2.2.5",
+      "name": "需求验证",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-product-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "requirements-analysis"
+      ],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/inception/inception-requirements-validation.md"
+    },
+    {
+      "slug": "cross-validation",
+      "number": "2.3",
+      "name": "交叉验证",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-product-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "requirements-analysis"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/inception/cross-validation-report.md"
+      ],
+      "sensors": [
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/inception/inception-cross-validation.md"
+    },
+    {
+      "slug": "user-stories",
+      "number": "2.4",
+      "name": "用户故事",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-product-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "requirements-analysis"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/inception/user-stories.md"
+      ],
+      "sensors": [
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/inception/inception-user-stories.md"
+    },
+    {
+      "slug": "ui-mock",
+      "number": "2.5",
+      "name": "UI Mock 设计",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-design-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "user-stories"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/inception/ui-mock/"
+      ],
+      "sensors": [
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "has_ui_requirements",
+      "approval": "notify",
+      "file": "stages/inception/inception-ui-mock.md"
+    },
+    {
+      "slug": "ui-figma",
+      "number": "2.5.1",
+      "name": "Figma UI 设计",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-design-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "ui-mock"
+      ],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "condition": "has_ui_requirements",
+      "approval": "notify",
+      "file": "stages/inception/inception-ui-figma.md"
+    },
+    {
+      "slug": "ui-figma-generation",
+      "number": "2.5.2",
+      "name": "Figma 生成",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-design-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "ui-mock"
+      ],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "condition": "has_ui_requirements",
+      "approval": "notify",
+      "file": "stages/inception/inception-ui-figma-generation.md"
+    },
+    {
+      "slug": "ui-mock-workflow",
+      "number": "2.5.3",
+      "name": "Mock 工作流",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-design-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "ui-mock"
+      ],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "condition": "has_ui_requirements",
+      "approval": "notify",
+      "file": "stages/inception/inception-ui-mock-workflow.md"
+    },
+    {
+      "slug": "ui-mock-generation",
+      "number": "2.5.4",
+      "name": "Mock 生成",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-design-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "ui-mock"
+      ],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "condition": "has_ui_requirements",
+      "approval": "notify",
+      "file": "stages/inception/inception-ui-mock-generation.md"
+    },
+    {
+      "slug": "ui-mock-design-spec",
+      "number": "2.5.5",
+      "name": "Mock 设计规格",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-design-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "ui-mock"
+      ],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "condition": "has_ui_requirements",
+      "approval": "notify",
+      "file": "stages/inception/inception-ui-mock-design-spec.md"
+    },
+    {
+      "slug": "ui-mock-styles",
+      "number": "2.5.6",
+      "name": "Mock 样式",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-design-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "ui-mock"
+      ],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "condition": "has_ui_requirements",
+      "approval": "notify",
+      "file": "stages/inception/inception-ui-mock-styles.md"
+    },
+    {
+      "slug": "ui-mock-reasoning-principles",
+      "number": "2.5.7",
+      "name": "Mock 推理原则",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-design-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "ui-mock"
+      ],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "condition": "has_ui_requirements",
+      "approval": "notify",
+      "file": "stages/inception/inception-ui-mock-reasoning-principles.md"
+    },
+    {
+      "slug": "ui-page-planning",
+      "number": "2.5.8",
+      "name": "页面规划",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-design-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "ui-mock"
+      ],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "condition": "has_ui_requirements",
+      "approval": "notify",
+      "file": "stages/inception/inception-ui-page-planning.md"
+    },
+    {
+      "slug": "workflow-planning",
+      "number": "2.6",
+      "name": "工作流规划",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-architect-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "user-stories",
+        "cross-validation"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/inception/workflow-plan.md"
+      ],
+      "sensors": [
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/inception/inception-workflow-planning.md"
+    },
+    {
+      "slug": "application-design",
+      "number": "2.7",
+      "name": "应用设计",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-architect-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "user-stories"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/inception/application-design.md",
+        "docs/aidlc/inception/application-design/components.md",
+        "docs/aidlc/inception/application-design/component-methods.md",
+        "docs/aidlc/inception/application-design/application-services.md",
+        "docs/aidlc/inception/application-design/component-dependency.md",
+        ".aidlc/evidence/application-design/diagram-contract.json"
+      ],
+      "sensors": [
+        "diagram-contract",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "block",
+      "file": "stages/inception/inception-application-design.md"
+    },
+    {
+      "slug": "units-generation",
+      "number": "2.8",
+      "name": "单元生成",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-architect-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "application-design"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/inception/units.md",
+        "docs/aidlc/inception/application-design/unit-of-work.md",
+        "docs/aidlc/inception/application-design/unit-of-work-dependency.md",
+        "docs/aidlc/inception/application-design/unit-of-work-story-map.md",
+        ".aidlc/evidence/units-generation/design-intent-coverage.json"
+      ],
+      "sensors": [
+        "design-intent-coverage",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "multi_module",
+      "approval": "notify",
+      "file": "stages/inception/inception-units-generation.md"
+    },
+    {
+      "slug": "test-case-derivation",
+      "number": "2.8.1",
+      "name": "测试用例派生",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-product-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "application-design"
+      ],
+      "consumes": [
+        "docs/aidlc/inception/application-design.md",
+        "docs/aidlc/inception/user-stories.md"
+      ],
+      "produces": [
+        "docs/aidlc/inception/application-design/test-cases/"
+      ],
+      "sensors": [
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "has_test_case_sources",
+      "approval": "notify",
+      "file": "stages/inception/inception-test-case-derivation.md"
+    },
+    {
+      "slug": "functional-design",
+      "number": "3.1",
+      "name": "功能设计",
+      "phase": "construction",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-architect-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "units-generation"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/construction/functional-design.md",
+        "docs/aidlc/construction/{unit-name}/functional-design/business-logic-model.md",
+        "docs/aidlc/construction/{unit-name}/functional-design/business-rules.md",
+        "docs/aidlc/construction/{unit-name}/functional-design/domain-entities.md",
+        "docs/aidlc/construction/{unit-name}/functional-design/data-source-validation.md",
+        ".aidlc/evidence/functional-design/functional-design-completeness.json"
+      ],
+      "sensors": [
+        "doc-cascade",
+        "functional-design-completeness",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/construction/construction-functional-design.md"
+    },
+    {
+      "slug": "nfr-requirements",
+      "number": "3.2",
+      "name": "NFR 需求",
+      "phase": "construction",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-architect-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "functional-design"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/construction/nfr-requirements.md",
+        "docs/aidlc/construction/{unit-name}/nfr-requirements/nfr-requirements.md",
+        "docs/aidlc/construction/{unit-name}/nfr-requirements/tech-stack-decisions.md",
+        ".aidlc/evidence/nfr-requirements/nfr-coverage.json"
+      ],
+      "sensors": [
+        "nfr-coverage",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "has_nfr_needs",
+      "approval": "notify",
+      "file": "stages/construction/construction-nfr-requirements.md"
+    },
+    {
+      "slug": "nfr-design",
+      "number": "3.3",
+      "name": "NFR 设计",
+      "phase": "construction",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-architect-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "nfr-requirements"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/construction/nfr-design.md",
+        "docs/aidlc/construction/{unit-name}/nfr-design/nfr-design-patterns.md",
+        "docs/aidlc/construction/{unit-name}/nfr-design/logical-components.md",
+        ".aidlc/evidence/nfr-design/nfr-coverage.json"
+      ],
+      "sensors": [
+        "doc-cascade",
+        "nfr-coverage",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "has_nfr_needs",
+      "approval": "notify",
+      "file": "stages/construction/construction-nfr-design.md"
+    },
+    {
+      "slug": "infrastructure-design",
+      "number": "3.4",
+      "name": "基础设施设计",
+      "phase": "construction",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-architect-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "functional-design"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/construction/infrastructure-design.md",
+        "docs/aidlc/construction/{unit-name}/infrastructure-design/infrastructure-design.md",
+        "docs/aidlc/construction/{unit-name}/infrastructure-design/deployment-architecture.md",
+        ".aidlc/evidence/infrastructure-design/infrastructure-completeness.json"
+      ],
+      "sensors": [
+        "infrastructure-completeness",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "has_infra_needs",
+      "approval": "notify",
+      "file": "stages/construction/construction-infrastructure-design.md"
+    },
+    {
+      "slug": "shared-contract-baseline",
+      "number": "3.4.1",
+      "name": "共享契约基线",
+      "phase": "construction",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-architect-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "functional-design"
+      ],
+      "consumes": [],
+      "produces": [
+        ".aidlc/evidence/shared-contract-baseline/contract-baseline.json"
+      ],
+      "sensors": [
+        "contract-baseline",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "not_applicable",
+      "condition": "has_contract_dependencies",
+      "approval": "notify",
+      "file": "stages/construction/construction-shared-contract-baseline.md"
+    },
+    {
+      "slug": "code-generation",
+      "number": "3.5",
+      "name": "代码生成",
+      "phase": "construction",
+      "execution": "ALWAYS",
+      "lead_agent": "aidlc-developer-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic",
+        "express",
+        "workshop",
+        "bugfix",
+        "refactor"
+      ],
+      "requires": [
+        "functional-design"
+      ],
+      "consumes": [],
+      "produces": [
+        "src/",
+        "docs/aidlc/construction/plans/{unit-name}-code-generation-plan.md",
+        "docs/aidlc/construction/{unit-name}/implementation-summary.md"
+      ],
+      "sensors": [
+        "doc-cascade",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/construction/construction-code-generation.md"
+    },
+    {
+      "slug": "tdd",
+      "number": "3.5.1",
+      "name": "TDD 测试驱动开发",
+      "phase": "construction",
+      "execution": "ALWAYS",
+      "lead_agent": "aidlc-developer-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic",
+        "express",
+        "workshop",
+        "bugfix",
+        "refactor"
+      ],
+      "requires": [
+        "code-generation"
+      ],
+      "consumes": [],
+      "produces": [
+        "src/test/",
+        ".aidlc/evidence/tdd/test-quality.json"
+      ],
+      "sensors": [
+        "test-quality",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/construction/construction-tdd.md"
+    },
+    {
+      "slug": "subagent-execution",
+      "number": "3.5.2",
+      "name": "子代理执行",
+      "phase": "construction",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-developer-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "code-generation"
+      ],
+      "consumes": [],
+      "produces": [
+        ".aidlc/evidence/subagent-execution/subagent-evidence.json"
+      ],
+      "sensors": [
+        "subagent-evidence",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "not_applicable",
+      "condition": "has_subagent_support",
+      "approval": "notify",
+      "file": "stages/construction/construction-subagent-execution.md"
+    },
+    {
+      "slug": "loeyae-compliance",
+      "number": "3.5.3",
+      "name": "Loeyae 框架合规",
+      "phase": "construction",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-developer-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "code-generation"
+      ],
+      "consumes": [],
+      "produces": [
+        ".aidlc/evidence/loeyae-compliance/framework-compliance.json"
+      ],
+      "sensors": [
+        "framework-compliance",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "not_applicable",
+      "condition": "is_loeyae_boot",
+      "approval": "notify",
+      "file": "stages/construction/construction-loeyae-compliance.md"
+    },
+    {
+      "slug": "ui-implementation-bridge",
+      "number": "3.5.4",
+      "name": "UI 实现桥接",
+      "phase": "construction",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-developer-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "code-generation"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/frontend-platform-spec.md",
+        ".aidlc/evidence/ui-implementation-bridge/frontend-platform-spec.json"
+      ],
+      "sensors": [
+        "frontend-platform-spec",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "has_ui_requirements",
+      "approval": "notify",
+      "file": "stages/construction/construction-ui-implementation-bridge.md"
+    },
+    {
+      "slug": "code-review",
+      "number": "3.6",
+      "name": "代码审查",
+      "phase": "construction",
+      "execution": "ALWAYS",
+      "lead_agent": "aidlc-quality-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic",
+        "express",
+        "workshop",
+        "bugfix",
+        "refactor"
+      ],
+      "requires": [
+        "code-generation",
+        "tdd"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/construction/code-review.md",
+        "docs/aidlc/construction/audit/{unit-id}.md",
+        ".aidlc/evidence/code-review/review-evidence.json",
+        ".aidlc/evidence/code-review/ui-design-alignment.json"
+      ],
+      "sensors": [
+        "reviewer-required",
+        "review-evidence",
+        "ui-design-alignment",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/construction/construction-code-review.md"
+    },
+    {
+      "slug": "build-and-test",
+      "number": "3.7",
+      "name": "构建与测试",
+      "phase": "construction",
+      "execution": "ALWAYS",
+      "lead_agent": "aidlc-quality-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic",
+        "express",
+        "workshop",
+        "bugfix",
+        "refactor"
+      ],
+      "requires": [
+        "code-generation",
+        "tdd",
+        "code-review"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/construction/build-test-report.md",
+        "docs/aidlc/construction/build-and-test/build-and-test-summary.md",
+        ".aidlc/evidence/build-and-test/build-test-evidence.json"
+      ],
+      "sensors": [
+        "doc-cascade",
+        "build-test-evidence",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/construction/construction-build-and-test.md"
+    },
+    {
+      "slug": "build-and-test-templates",
+      "number": "3.7.1",
+      "name": "构建测试模板",
+      "phase": "construction",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-quality-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "build-and-test"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/construction/build-and-test/build-instructions.md",
+        "docs/aidlc/construction/build-and-test/unit-test-instructions.md",
+        ".aidlc/evidence/build-and-test-templates/template-completeness.json"
+      ],
+      "sensors": [
+        "template-completeness",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/construction/construction-build-and-test-templates.md"
+    },
+    {
+      "slug": "implementation-report",
+      "number": "3.8",
+      "name": "实现报告",
+      "phase": "construction",
+      "execution": "ALWAYS",
+      "lead_agent": "aidlc-developer-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic",
+        "express",
+        "workshop",
+        "bugfix",
+        "refactor"
+      ],
+      "requires": [
+        "build-and-test"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/construction/implementation-report.md",
+        "docs/aidlc/construction/{unit-name}/implementation-summary.md",
+        ".aidlc/evidence/implementation-report/implementation-report.json"
+      ],
+      "sensors": [
+        "doc-cascade",
+        "implementation-report",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/construction/construction-implementation-report.md"
+    },
+    {
+      "slug": "compact-recovery",
+      "number": "3.9",
+      "name": "压缩恢复",
+      "phase": "construction",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-developer-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [],
+      "consumes": [],
+      "produces": [
+        ".aidlc/evidence/compact-recovery/recovery-evidence.json"
+      ],
+      "sensors": [
+        "recovery-evidence",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "not_applicable",
+      "condition": "context_compacted",
+      "approval": "notify",
+      "file": "stages/construction/construction-compact-recovery.md"
+    },
+    {
+      "slug": "operations",
+      "number": "4.1",
+      "name": "部署运维",
+      "phase": "operation",
+      "execution": "CONDITIONAL",
+      "lead_agent": "(orchestrator)",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp"
+      ],
+      "requires": [
+        "build-and-test"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/operation/deployment-config.md"
+      ],
+      "sensors": [
+        "doc-cascade",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "block",
+      "file": "stages/operation/operations.md"
+    },
+    {
+      "slug": "operations-templates",
+      "number": "4.2",
+      "name": "运维模板",
+      "phase": "operation",
+      "execution": "CONDITIONAL",
+      "lead_agent": "(orchestrator)",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp"
+      ],
+      "requires": [
+        "operations"
+      ],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/operation/templates/"
+      ],
+      "sensors": [
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/operation/operations-templates.md"
+    }
+  ],
+  "stage_count": 46,
+  "scopes": [
+    "bugfix",
+    "classic",
+    "enterprise",
+    "express",
+    "feature",
+    "mvp",
+    "refactor",
+    "workshop"
+  ],
+  "conditions": [
+    "",
+    "context_compacted",
+    "has_contract_dependencies",
+    "has_infra_needs",
+    "has_legacy_code",
+    "has_nfr_needs",
+    "has_subagent_support",
+    "has_test_case_sources",
+    "has_ui_requirements",
+    "is_loeyae_boot",
+    "multi_module"
+  ]
+}

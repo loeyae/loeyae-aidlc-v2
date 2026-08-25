@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Loeyae AI-DLC stage gate",
+      "description": "Report the active stage through the deterministic engine before the agent stops.",
+      "trigger": "Stop",
+      "action": {
+        "type": "command",
+        "command": "loeyae-aidlc hook --format kiro"
+      },
+      "timeout": 30
+    }
+  ]
+}
