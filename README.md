@@ -28,8 +28,11 @@ loeyae-aidlc install --harness kiro-ide
 # Kiro CLI（全局 agent skill）
 loeyae-aidlc install --harness kiro-cli
 
-# Claude Code（全局 plugin）
+# Claude Code（全局 user-scope plugin；安装器会通过官方 CLI 注册 marketplace 并安装）
 loeyae-aidlc install --harness claude
+
+# Claude Code（显式项目级部署；写入目标项目的 .claude 配置）
+loeyae-aidlc install --harness claude --target ./my-project
 
 # OpenCode（全局 plugin）
 loeyae-aidlc install --harness opencode
@@ -43,6 +46,8 @@ loeyae-aidlc install --all
 
 Kiro Crew 的默认安装还会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` MCP 服务按“只补缺失项、不覆盖同名现有配置”的规则合并到 `~/.kiro/settings/mcp.json`。`ssot` 使用环境变量 `SSOT_API_KEY`，不把密钥写入安装包或项目文件。项目级 `--target` 安装不会修改全局 MCP 配置。
 
+Claude Code 的安装器会额外生成本地 marketplace，并调用官方 `claude plugin marketplace add`、`claude plugin install` 注册 user-scope 插件；不会直接编辑 `installed_plugins.json`。staging 文件位于 `~/.claude/plugins/loeyae-aidlc-marketplace/`，实际运行缓存和注册表由 Claude Code 管理。当前已打开的 Claude 会话需执行 `/reload-plugins`（如提示缓存变更则按提示使用 `--force`）或重新开会话；新会话会自动加载。
+
 各平台的全局安装路径：
 
 | 平台 | 安装路径 |
@@ -50,9 +55,24 @@ Kiro Crew 的默认安装还会将 V1 的 `loeyae-skills`、`awesome-design`、`
 | Kiro Crew | `~/.kiro/crew/skills/loeyae-aidlc/` |
 | Kiro IDE | `~/.kiro/powers/loeyae-aidlc/` |
 | Kiro CLI | `~/.kiro/skills/loeyae-aidlc/` |
-| Claude Code | `~/.claude/plugins/loeyae-aidlc/` |
-| OpenCode | `~/.config/opencode/plugins/loeyae-aidlc/` |
+| Claude Code | `~/.claude/plugins/loeyae-aidlc-marketplace/plugins/loeyae-aidlc/`（staging；运行时由 Claude Code 管理官方 cache 和注册表） |
+| OpenCode | `~/.config/opencode/plugins/loeyae-aidlc.js`（入口；资源位于同级 `loeyae-aidlc/`） |
 | Codex | `~/.agents/skills/loeyae-aidlc/` |
+
+### 平台生命周期门禁
+
+所有平台共用 `loeyae-aidlc orchestrate report` 作为唯一准出判定入口；平台 Hook 只负责在生命周期边界触发该命令，不直接修改 `docs/aidlc/aidlc-state.json` 或 `.aidlc/evidence/`。
+
+| 平台 | 原生机制 | 安装/激活方式 | 失败时行为 |
+|------|---------|---------------|------------|
+| Kiro IDE | `.kiro/hooks/` 的 `Stop` Hook | `loeyae-aidlc install --harness kiro-ide --project <project>` | 由 Kiro Hook 触发引擎检查；具体 Kiro 版本的 Stop 阻断能力以运行时为准 |
+| Kiro CLI | `.kiro/hooks/` 的 `Stop` Hook（支持该格式的版本） | `loeyae-aidlc install --harness kiro-cli --project <project>` | 由 Kiro Hook 触发引擎检查 |
+| Claude Code | 插件 `hooks/hooks.json` 的 `Stop` Hook | 随官方插件安装自动注册 | `decision:block` 阻止回合结束 |
+| OpenCode | 插件 `session.idle` 事件 | 全局插件安装自动加载 | 失败时通过插件继续提示 Agent 处理 |
+| Codex | 全局 `~/.codex/hooks.json` 的 `Stop` Hook | `loeyae-aidlc install --harness codex`，然后 `/hooks` 审查并信任 | `decision:block` 触发继续执行 |
+| Kiro Crew | 当前无公开生命周期 Hook | Skill 强制调用引擎；不能伪造完成 | 引擎拒绝 `report`，Skill 必须继续修复 |
+
+Hook 未安装或平台未触发时，不能降低引擎门禁要求；直接调用 `orchestrate report` 仍会执行完整的 `requires`、`condition`、`produces`、`sensors`、审批和当前阶段校验。
 
 自定义路径（项目级部署）：
 
@@ -85,7 +105,7 @@ loeyae-aidlc install --all
 | Kiro Crew | `kirocrew restart` 或重启桌面 App |
 | Kiro IDE | 重新打开项目 |
 | Kiro CLI | 新开 `kiro-cli chat` 会话 |
-| Claude Code | 新开对话 |
+| Claude Code | 执行 `/reload-plugins`，或新开对话 |
 | OpenCode | 重启 OpenCode |
 | Codex | 新开会话 |
 

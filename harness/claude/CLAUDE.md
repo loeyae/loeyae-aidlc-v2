@@ -1,3 +1,8 @@
+---
+name: loeyae-aidlc
+description: Use when the user asks to use AI-DLC, aidlc, or the Loeyae AI-DLC workflow; orchestrate work through the deterministic stage engine and its gates.
+---
+
 # Loeyae AI-DLC v2 — Claude Code 入口
 
 当用户消息包含 `AI-DLC` 或 `aidlc` 时进入 v2 引擎流程。先读取当前发布包中的 `stages/` 与 `knowledge/`，再在业务项目目录执行：

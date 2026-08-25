@@ -31,6 +31,7 @@ const manifest: HarnessManifest = {
   harnessFiles: [
     { src: "skills/loeyae-aidlc/SKILL.md", dst: "SKILL.md" },
     { src: "README.md", dst: "README.md" },
+    { src: "hooks/hooks.json", dst: "hooks/hooks.json" },
   ],
 };
 

@@ -8,7 +8,7 @@
 loeyae-aidlc install --harness codex
 ```
 
-Skill 会安装到 `~/.agents/skills/loeyae-aidlc/`。
+Skill 会安装到 `~/.agents/skills/loeyae-aidlc/`，并将 Codex 原生 Stop Hook 幂等合并到 `~/.codex/hooks.json`。首次启用或版本更新后，请在 Codex 中通过 `/hooks` 审查并信任该 Hook；未信任时 Codex 会跳过它。
 
 ## 使用
 

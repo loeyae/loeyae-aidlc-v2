@@ -23,6 +23,7 @@ const manifest: HarnessManifest = {
     { src: "knowledge", dst: "knowledge" },
     { src: "sensors", dst: "sensors" },
     { src: "skills", dst: "skills" },
+    { src: "hooks/kiro", dst: "hooks" },
   ],
 
   harnessFiles: [

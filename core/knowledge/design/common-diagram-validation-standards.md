@@ -51,7 +51,15 @@ FAIL → MIGRATION_REQUIRED → NEEDS_CAPABILITY → UNVERIFIED → SOURCE_READY
 
 只有所有被要求的目标操作均有证据时，交付才可为 `PASS`。源文件存在、脚本成功或配置存在不能单独产生 `PASS`。
 
-## Semantic QA
+## 上下文预算与恢复
+
+图表验证的模型上下文不是证据存储。原始 SVG、`.diagram.json`、截图、快照和 Provider stdout 必须保存在文件中，对话只读取当前验证层所需的紧凑摘要。
+
+- 默认一轮只处理一张图和一个目标操作；多图批量必须拆成独立会话或独立子任务；
+- 不读取截图 base64、完整浏览器 snapshot 或多张 SVG 的全文；使用 checker/Provider 输出的状态、错误码、bbox、证据路径和下一步摘要；
+- 按 `common-token-management.md` 的 60KB 预警执行，接近阈值即保存当前图、验证层、输入路径和证据路径并 compact；
+- `The context window overflowed` 后必须从新会话读取摘要恢复，不得重复注入完整历史；
+- 上下文不足返回 `NEEDS_CONTEXT`，不得通过跳过 Semantic/Geometry、压缩业务事实或伪造 Browser Evidence 放行。
 
 Semantic QA 是不启动浏览器的结构化检查，至少覆盖：
 

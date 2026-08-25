@@ -1,6 +1,14 @@
 # 安装 Loeyae AI-DLC v2 for OpenCode
 
-在 `opencode.json` 的 `plugin` 数组中添加：
+全局安装：
+
+```bash
+loeyae-aidlc install --harness opencode
+```
+
+全局安装会将入口放入 `~/.config/opencode/plugins/loeyae-aidlc.js`，并将引擎资源放入 `~/.config/opencode/loeyae-aidlc/`；OpenCode 启动时会自动加载该直接插件文件。
+
+项目级或手动安装也可以在 `opencode.json` 的 `plugin` 数组中添加：
 
 ```json
 {

@@ -11,8 +11,10 @@ import type { HarnessManifest } from "../../scripts/manifest-types.ts";
 
 const manifest: HarnessManifest = {
   name: "claude",
-  harnessDir: ".claude",
-  orchestratorSkillPath: ".claude/CLAUDE.md",
+  // Claude Code plugins resolve skills and plugin files from the plugin root;
+  // unlike project instructions, they must not be nested under .claude/.
+  harnessDir: ".",
+  orchestratorSkillPath: "skills/loeyae-aidlc/SKILL.md",
 
   coreDirs: [
     { src: "tools", dst: "tools" },
@@ -26,8 +28,9 @@ const manifest: HarnessManifest = {
   ],
 
   harnessFiles: [
-    { src: "CLAUDE.md", dst: "CLAUDE.md", projectRoot: true },
-    { src: "plugin.json", dst: "../.claude-plugin/plugin.json" },
+    { src: "CLAUDE.md", dst: "skills/loeyae-aidlc/SKILL.md" },
+    { src: "plugin.json", dst: ".claude-plugin/plugin.json" },
+    { src: "hooks/hooks.json", dst: "hooks/hooks.json" },
   ],
 
   plugin: { manifestDir: ".claude-plugin", kind: "claude" },
