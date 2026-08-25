@@ -16,12 +16,14 @@
 
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 import { spawnSync } from "child_process";
 import { readFileSync, writeFileSync, existsSync, cpSync, mkdirSync, rmSync, renameSync } from "fs";
 import { mergeMcpServers } from "../core/tools/aidlc-mcp-config";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
+const require = createRequire(import.meta.url);
 const PKG = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf-8"));
 
 /**
@@ -117,7 +119,7 @@ function registerCodexHooks(sourcePath: string) {
 
 
 function run(script: string, args: string[]) {
-  const tsx = resolve(ROOT, "node_modules/tsx/dist/cli.mjs");
+  const tsx = require.resolve("tsx/cli");
   const result = spawnSync(process.execPath, [tsx, resolve(ROOT, script), ...args], {
     stdio: "pipe",
     cwd: process.cwd(),
@@ -295,13 +297,19 @@ function installOne(harness: string, customTarget: string, projectTarget: string
   // Map harness name to build harness (kiro-cli uses kiro-ide build)
   const buildHarness = getBuildHarness(harness);
 
-  console.log(`🔧 Building harness: ${buildHarness} (for ${HARNESS_DESCRIPTIONS[harness] || harness})...`);
-  run("scripts/build.ts", ["--harness", buildHarness]);
+  // Published packages already contain the complete dist output. Rebuild only
+  // when running from a source checkout without a prebuilt harness directory.
+  const distRoot = resolve(ROOT, "dist", buildHarness);
+  if (existsSync(distRoot)) {
+    console.log(`📦 Using prebuilt harness: ${distRoot}`);
+  } else {
+    console.log(`🔨 Building harness: ${buildHarness} (for ${HARNESS_DESCRIPTIONS[harness] || harness})...`);
+    run("scripts/build.ts", ["--harness", buildHarness]);
+  }
 
   // Find the dist output — try known content root patterns
   const distSkillDir = resolve(ROOT, "dist", buildHarness, "skills/loeyae-aidlc");
   const distAgentsSkillDir = resolve(ROOT, "dist", buildHarness, ".agents/skills/loeyae-aidlc");
-  const distRoot = resolve(ROOT, "dist", buildHarness);
   const srcDir = harness === "claude" ? distRoot
     : existsSync(distSkillDir) ? distSkillDir
     : existsSync(distAgentsSkillDir) ? distAgentsSkillDir

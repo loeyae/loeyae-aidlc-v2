@@ -6,14 +6,23 @@
 
 ### 全局安装（从 GitHub，不需要 npm registry）
 
+npm 11.16.0 在 macOS 上通过 `git+https` 全局安装时，可能在处理 `fsevents` 后清理 Git 临时目录，导致 `esbuild` 报 `spawn /bin/sh ENOENT`。推荐使用 GitHub archive URL，它仍然直接从 GitHub 获取代码，但不经过该 Git 临时工作树路径：
+
 ```bash
-npm install -g git+https://github.com/loeyae/loeyae-aidlc-v2.git
+npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
 ```
 
-固定到指定版本：
+固定到指定提交：
 
 ```bash
-npm install -g git+https://github.com/loeyae/loeyae-aidlc-v2.git#v2.0.0
+npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/2ba85d1.tar.gz
+```
+
+如果 Windows 的 `loeyae-aidlc` 仍指向旧的本地路径（例如 `E:\Work\repo\node\...`），先清理旧的全局安装和命令 shim，再重新安装：
+
+```powershell
+npm uninstall -g loeyae-aidlc
+npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
 ```
 
 ### 部署到各平台
@@ -83,7 +92,7 @@ loeyae-aidlc install --harness claude --target ./my-project
 ### 升级
 
 ```bash
-npm install -g git+https://github.com/loeyae/loeyae-aidlc-v2.git
+npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
 loeyae-aidlc install        # 重新部署（或 --all 全部）
 ```
 
