@@ -186,12 +186,12 @@ Geometry QA 使用源坐标、路径点和结构化文本估算，不声称完�
 - `main_flow_valid`：主流程入口、出口、节点/边覆盖和可达性通过；
 - `loop_lanes_valid`：回路边有标签、声明了左右 lane 和原因，并实际离开主流程通道；
 - `decision_exit_valid`：所有判定节点为 diamond 且每个出口都有非空可见标签；
-- `edge_intersection_status`：无未声明 edge-edge 交叉；
+- `edge_intersection_status`：无未声明或不可读的 edge-edge 交叉；已声明的必要交叉必须保持主流程、文字、标签、箭头和端点零歧义。
 - `collinear_overlap_status`：无非预期非零共线重叠；
 - `target_port_direction_status`：连接器首末段方向与声明端口一致；
 - `visible_arrow_mapping_status`：箭头目标、marker/overlay 映射和可见性通过。
 
-确定性 checker 使用稳定错误码区分失败原因：`MAIN_FLOW_TRACE`、`LOOP_LANE`、`DECISION_SHAPE`、`DECISION_EXIT`、`PORT_DIRECTION`、`EDGE_CROSSING`、`COLLINEAR_OVERLAP`、`REDUNDANT_PATH_POINT` 和 `EDGE_NODE_COLLISION`。其中 `COLLINEAR_OVERLAP` 不得降级为普通交叉，端点接触也不能掩盖同一边对之间的非零共线重叠。
+确定性 checker 使用稳定错误码区分失败原因：`MAIN_FLOW_TRACE`、`LOOP_LANE`、`DECISION_SHAPE`、`DECISION_EXIT`、`PORT_DIRECTION`、`EDGE_CROSSING`、`COLLINEAR_OVERLAP`、`REDUNDANT_PATH_POINT` 和 `EDGE_NODE_COLLISION`。`EDGE_CROSSING` 仅针对未声明或未满足必要交叉可读性条件的交叉；`COLLINEAR_OVERLAP` 始终不得降级为普通交叉，端点接触也不能掩盖同一边对之间的非零共线重叠。
 
 当目标操作为 `preview` 或浏览器 `render` 时，Chrome DevTools Provider 必须对实际 DOM/SVG 几何执行：节点和边集合的精确映射、edge-node crossing、edge-edge intersection、共线重叠、端口首末方向、边 bbox、箭头 overlay bbox/无关节点遮挡、`text`/`tspan` bbox 越界与重叠、`contentBBox`、水平溢出、判定 diamond 和出口数量，以及 sidecar 声明的主流程和回路边覆盖。不能用源坐标结果代替这些浏览器检查。
 

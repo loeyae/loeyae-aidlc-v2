@@ -105,7 +105,9 @@ Provider Request 使用 version `1`，最小结构如下：
 }
 ```
 
-Checker 必须验证 `designNotes.layout.mainFlow`（入口/出口、节点/边覆盖、可达性、出口无未声明出边）和 `loopLanes`（`left`/`right`、`laneOffset >= 24`、原因、标签、独立 lane）。过程图的分支节点必须是 `diamond`，每个出口必须有非空可见标签；菱形端口使用顶点且不得偏移。`EDGE_CROSSING`、`COLLINEAR_OVERLAP`、`EDGE_NODE_COLLISION`、`PORT_DIRECTION`、`DECISION_SHAPE`、`DECISION_EXIT`、`MAIN_FLOW_TRACE` 和 `LOOP_LANE` 是可定位的阻断错误码。
+Checker 必须验证 `designNotes.layout.mainFlow`（入口/出口、节点/边覆盖、可达性、出口无未声明出边）和 `loopLanes`（`left`/`right`、`laneOffset >= 24`、原因、标签、独立 lane）。先按主轴排布主流程，再检查同层实体在垂直主轴方向的均匀分布；单一正向出边使用主轴前进方向，多出边先使用垂直主轴两侧，其余只在前向 180° 局域均分；源、目标在同侧时必须保持同侧通道。过程图的分支节点必须是 `diamond`，每个出口必须有非空可见标签；菱形端口使用顶点且不得偏移。
+
+`EDGE_CROSSING` 默认阻断，但 `designNotes.layout.crossingExceptions` 可为保持主轴、同层业务顺序或避免更差折返而声明一对必要交叉边；Producer 必须验证该交叉不触及节点、文字、标签、箭头或关键端点，且方向与语义可辨。`sideSwitchExceptions` 只允许记录真实避障或业务端口语义导致的跨轴例外，不能用于掩盖左右折返。`COLLINEAR_OVERLAP`、节点/文字/标签穿越和未声明或不可读的 `EDGE_CROSSING` 始终阻断；`PORT_DIRECTION`、`DECISION_SHAPE`、`DECISION_EXIT`、`MAIN_FLOW_TRACE` 和 `LOOP_LANE` 继续是可定位的阻断错误码。
 
 ### Chrome Provider 证据
 
