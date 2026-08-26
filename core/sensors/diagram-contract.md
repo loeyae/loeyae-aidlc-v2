@@ -84,9 +84,9 @@ Provider Request 使用 version `1`，最小结构如下：
 }
 ```
 
-运行器固定调用 `chrome-devtools-mcp@1.6.0` 的 CLI，执行页面导航、viewport 调整、DOM/属性/几何检查、可访问性快照、viewport 截图和控制台采集。源级 evidence 不存在或未通过时拒绝执行；浏览器检查失败时不修改既有 evidence；全部适用检查通过后，才原子更新 `provider_status: "passed"`、`target_operation_required: true`，并写入 `diagram-contract-provider.json`、截图和快照。`export` 不属于该 Provider 能力，必须返回 `NEEDS_CAPABILITY`。
+运行器固定调用 `chrome-devtools-mcp@1.6.0` 的 CLI，执行页面导航、viewport 调整、DOM/属性/几何检查、可访问性快照、viewport 截图和控制台采集。每次真实运行都会以唯一 `sessionId` 启动 `chrome-devtools start --isolated`，后续所有 CLI 调用复用该 daemon，并在运行器进程退出时只停止自身会话；它不依赖或停止 Kiro Crew Dashboard Browser 面板的默认会话。源级 evidence 不存在或未通过时拒绝执行；浏览器检查失败时不修改既有 evidence；全部适用检查通过后，才原子更新 `provider_status: "passed"`、`target_operation_required: true`，并写入 `diagram-contract-provider.json`、截图和快照。`export` 不属于该 Provider 能力，必须返回 `NEEDS_CAPABILITY`。
 
-对本地 SVG，运行器会先验证源文件的静态安全约束；若 Chrome 将直接 `file://` SVG 呈现为 XML 查看器，则使用只包含当前 SVG 的临时本地 HTML wrapper 进行浏览器检查，wrapper 在运行结束后删除，不修改 SVG 源。无法启动或调用 Chrome DevTools 时保持原有 `UNVERIFIED` evidence，不得伪造通过。
+对本地 SVG，运行器会先验证源文件的静态安全约束；若 Chrome 将直接 `file://` SVG 呈现为 XML 查看器，则使用只包含当前 SVG 的临时本地 HTML wrapper 进行浏览器检查，wrapper 在运行结束后删除，不修改 SVG 源。无法启动或调用 Chrome DevTools 时保持原有 `UNVERIFIED` evidence，不得伪造通过；若运行时明确报告 Chrome profile 被占用，返回稳定错误码 `BROWSER_PROFILE_CONFLICT`，不得误报为“Browser 面板未配置”。
 
 
 ## 过程图严格契约与证据门禁

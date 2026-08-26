@@ -83,6 +83,12 @@ def test_dry_run_validates_request() -> None:
         assert payload["status"] == "ready"
         assert payload["provider"] == "chrome-devtools-mcp@1.6.0"
         assert payload["plan"][0]["local_preview_fallback"] is True
+        with open(TOOL) as handle:
+            provider_source = handle.read()
+        assert '["start", "--isolated"]' in provider_source
+        assert '"--sessionId",\n    sessionId,' in provider_source
+        assert "BROWSER_PROFILE_CONFLICT" in provider_source
+        assert 'process.once("exit"' in provider_source
     finally:
         shutil.rmtree(project)
 
@@ -222,7 +228,7 @@ def test_browser_geometry_scenarios() -> None:
         ("legend-coverage", False, "browser legend coverage does not match", (800, 600)),
         ("sequence-lifeline", False, "sequence lifeline coordinate", (800, 600)),
         ("vertical-scroll", True, None, (320, 240)),
-        ("viewport-overflow", False, "outside the viewport", (320, 240)),
+        ("viewport-overflow", False, "outside the horizontal viewport", (320, 240)),
     ]
     for variant, should_pass, expected, viewport in cases:
         project = tempfile.mkdtemp(prefix=f"aidlc-provider-geometry-{variant}-")

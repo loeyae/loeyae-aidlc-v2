@@ -43,6 +43,17 @@ if (result.preserved.join(',') !== 'first') throw new Error('existing service wa
 if (result.config.mcpServers.existing.command !== 'user-configured') throw new Error('existing service changed');
 if (result.config.mcpServers.first.type !== 'custom') throw new Error('same-name service was overwritten');
 if (result.config.mcpServers.restored.url !== 'https://example.test/restored') throw new Error('restored service is wrong');
+const legacyChrome = mergeMcpServers(
+  {{ mcpServers: {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp@latest'], disabled: false, autoApprove: [] }} }} }},
+  {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp@1.6.0'], disabled: false, autoApprove: [] }} }}
+);
+if (legacyChrome.upgraded.join(',') !== 'chrome-devtools') throw new Error('legacy Chrome DevTools default was not upgraded');
+if (legacyChrome.config.mcpServers['chrome-devtools'].args[1] !== 'chrome-devtools-mcp@1.6.0') throw new Error('Chrome DevTools pin is wrong');
+const customChrome = mergeMcpServers(
+  {{ mcpServers: {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp@latest'], env: {{ CUSTOM_PROFILE: '1' }} }} }} }},
+  {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp@1.6.0'] }} }}
+);
+if (customChrome.upgraded.length !== 0 || customChrome.preserved.join(',') !== 'chrome-devtools') throw new Error('custom Chrome DevTools service was overwritten');
 """
     result = subprocess.run(
         ["npx", "--no-install", "--prefix", str(ROOT), "tsx", "--eval", script],

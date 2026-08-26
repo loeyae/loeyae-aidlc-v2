@@ -160,7 +160,7 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 - **会话恢复**：检查 state.json，存在则恢复，否则新建
 - **人工确认**：通过 `[OPTIONS: Approve | Request Changes]` 渲染
 - **证据目录**：业务项目的 `.aidlc/evidence/<stage-slug>/` 存放 sensor 证据
-- **MCP 能力**：默认安装会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` 只补缺失地合并到 Kiro Crew 全局配置；服务不可用时必须按对应流程的 `NEEDS_CAPABILITY` 或通用规范降级，不得伪造调用结果
+- **MCP 能力**：默认安装会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` 合并到 Kiro Crew 全局配置；除无自定义字段的旧 `chrome-devtools-mcp@latest` 默认项会安全收敛为 V2 固定的 `chrome-devtools-mcp@1.6.0` 外，同名现有配置均保留。服务不可用时必须按对应流程的 `NEEDS_CAPABILITY` 或通用规范降级，不得伪造调用结果
 
 ## 安装
 

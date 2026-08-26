@@ -72,7 +72,7 @@ function registerKiroMcp() {
     : {};
   const merged = mergeMcpServers(current, defaults.mcpServers);
 
-  if (merged.added.length === 0) {
+  if (merged.added.length === 0 && merged.upgraded.length === 0) {
     console.log(`🔌 Kiro MCP services already present; preserved: ${merged.preserved.join(", ") || "none"}`);
     return;
   }
@@ -81,7 +81,11 @@ function registerKiroMcp() {
   const temporaryPath = `${targetPath}.${process.pid}.tmp`;
   writeFileSync(temporaryPath, `${JSON.stringify(merged.config, null, 2)}\n`);
   renameSync(temporaryPath, targetPath);
-  console.log(`🔌 Added Kiro MCP services: ${merged.added.join(", ")}`);
+  const changes = [
+    ...(merged.added.length > 0 ? [`added: ${merged.added.join(", ")}`] : []),
+    ...(merged.upgraded.length > 0 ? [`upgraded: ${merged.upgraded.join(", ")}`] : []),
+  ];
+  console.log(`🔌 Updated Kiro MCP services (${changes.join("; ")})`);
 }
 function registerCodexHooks(sourcePath: string) {
   const defaults = JSON.parse(readFileSync(sourcePath, "utf-8"));

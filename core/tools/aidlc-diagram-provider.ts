@@ -244,8 +244,25 @@ function parseJsonOutput(stdout: string): unknown {
   }
 }
 
-function runChrome(args: string[]): CliResult {
-  const result = spawnSync("npx", ["-y", "--package", PROVIDER_PACKAGE, "chrome-devtools", ...args, "--output-format=json"], {
+const BROWSER_PROFILE_CONFLICT = "BROWSER_PROFILE_CONFLICT";
+let chromeSessionId: string | undefined;
+let chromeSessionExitHandlerRegistered = false;
+
+function isBrowserProfileConflict(detail: string): boolean {
+  return /browser is already running|user[ -]data[ -]dir(?:ectory)?.*(?:in use|already)|profile.*(?:in use|already running)/i.test(detail);
+}
+
+function runChromeCommand(args: string[], sessionId: string, expectsJson: boolean): CliResult {
+  const result = spawnSync("npx", [
+    "-y",
+    "--package",
+    PROVIDER_PACKAGE,
+    "chrome-devtools",
+    "--sessionId",
+    sessionId,
+    ...args,
+    ...(expectsJson ? ["--output-format=json"] : []),
+  ], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
     shell: false,
@@ -258,13 +275,42 @@ function runChrome(args: string[]): CliResult {
     },
     maxBuffer: 8 * 1024 * 1024,
   });
+  const stdout = typeof result.stdout === "string" ? result.stdout : String(result.stdout || "");
+  const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
   if (result.error || result.status !== 0) {
     const detail = result.error ? result.error.message : `exit code ${result.status}`;
-    const stderr = typeof result.stderr === "string" ? result.stderr.trim().slice(-1000) : "";
-    fail(`NEEDS_CAPABILITY: Chrome DevTools Provider unavailable while running ${args.join(" ")}: ${detail}${stderr ? `; ${stderr}` : ""}`);
+    const output = [stderr, stdout.trim()].filter(Boolean).join("; ").slice(-1000);
+    const code = isBrowserProfileConflict(output) ? BROWSER_PROFILE_CONFLICT : "NEEDS_CAPABILITY";
+    const reason = code === BROWSER_PROFILE_CONFLICT
+      ? "Chrome DevTools browser profile conflict"
+      : "Chrome DevTools Provider unavailable";
+    fail(`${code}: ${reason} while running ${args.join(" ")}: ${detail}${output ? `; ${output}` : ""}`);
   }
-  const stdout = typeof result.stdout === "string" ? result.stdout : String(result.stdout || "");
-  return { payload: parseJsonOutput(stdout), stdout };
+  return { payload: expectsJson ? parseJsonOutput(stdout) : undefined, stdout };
+}
+
+function stopChromeSession(sessionId: string): void {
+  try {
+    runChromeCommand(["stop"], sessionId, false);
+  } catch (error) {
+    console.error(`Chrome DevTools cleanup warning for isolated session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function ensureChromeSession(): string {
+  if (chromeSessionId) return chromeSessionId;
+  const sessionId = `loeyae-diagram-${process.pid}-${Date.now()}`;
+  chromeSessionId = sessionId;
+  if (!chromeSessionExitHandlerRegistered) {
+    chromeSessionExitHandlerRegistered = true;
+    process.once("exit", () => stopChromeSession(sessionId));
+  }
+  runChromeCommand(["start", "--isolated"], sessionId, false);
+  return sessionId;
+}
+
+function runChrome(args: string[]): CliResult {
+  return runChromeCommand(args, ensureChromeSession(), true);
 }
 
 function selectPage(payload: unknown): number {

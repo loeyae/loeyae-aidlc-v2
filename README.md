@@ -101,7 +101,7 @@ cd /absolute/path/to/your-project
 pwd
 ```
 
-Kiro Crew 的默认安装还会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` MCP 服务按“只补缺失项、不覆盖同名现有配置”的规则合并到 `~/.kiro/settings/mcp.json`。`ssot` 使用环境变量 `SSOT_API_KEY`，不把密钥写入安装包或项目文件。
+Kiro Crew 的默认安装会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` MCP 服务合并到 `~/.kiro/settings/mcp.json`，默认只补缺失项、不覆盖同名现有配置。唯一受控迁移是无自定义字段的旧 `chrome-devtools-mcp@latest` 默认项：安装器会将其收敛为 V2 使用的固定版本 `chrome-devtools-mcp@1.6.0`；带额外字段、环境变量、非默认参数或禁用状态的同名配置仍完整保留。`ssot` 使用环境变量 `SSOT_API_KEY`，不把密钥写入安装包或项目文件。
 
 Claude Code 的安装器会额外生成本地 marketplace，并调用官方 `claude plugin marketplace add`、`claude plugin install` 注册 user-scope 插件；不会直接编辑 `installed_plugins.json`。staging 文件位于 `~/.claude/plugins/loeyae-aidlc-marketplace/`，实际运行缓存和注册表由 Claude Code 管理。当前已打开的 Claude 会话需执行 `/reload-plugins`（如提示缓存变更则按提示使用 `--force`）或重新开会话；新会话会自动加载。
 

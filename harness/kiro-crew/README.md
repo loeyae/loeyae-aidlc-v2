@@ -8,7 +8,7 @@ Use the CLI installer so the skill and the V1 MCP capability set are installed t
 loeyae-aidlc install
 ```
 
-The installer copies the skill to `~/.kiro/crew/skills/loeyae-aidlc/` and merges missing `loeyae-skills`, `awesome-design`, `figma`, `ssot`, and `chrome-devtools` entries into `~/.kiro/settings/mcp.json`. Existing same-name entries are preserved. `--target` is only for a dedicated install directory; never pass a non-empty project or source directory. The current installer refuses non-empty custom targets, and custom target installs do not modify global MCP settings. `ssot` reads `SSOT_API_KEY` from the environment.
+The installer copies the skill to `~/.kiro/crew/skills/loeyae-aidlc/` and merges missing `loeyae-skills`, `awesome-design`, `figma`, `ssot`, and `chrome-devtools` entries into `~/.kiro/settings/mcp.json`. Existing same-name entries are preserved except for the uncustomized legacy `chrome-devtools-mcp@latest` default, which is safely upgraded to the V2-pinned `chrome-devtools-mcp@1.6.0`; entries with custom fields, environment variables, non-default arguments, or a disabled state remain untouched. `--target` is only for a dedicated install directory; never pass a non-empty project or source directory. The current installer refuses non-empty custom targets, and custom target installs do not modify global MCP settings. `ssot` reads `SSOT_API_KEY` from the environment.
 
 
 ## Usage

@@ -182,7 +182,9 @@ SVG 必须是静态、独立和安全的：
 - `points` 首点必须落在 `from` 节点声明端口和偏移对应的实际可连接边界，末点必须落在 `to` 节点对应边界；对 `sequence` 图，`from`/`to` 的语义节点仍是参与者，但首末点必须落在其 `data-lifeline-for` 对应的生命线，不得落在参与者标题矩形。实际落边、端口侧和偏移声明必须一致，端点误差不得超过 `1` 个 SVG 坐标单位。
 - 端点间距、边界合法性和碰撞检查必须使用实际节点形状；不得只用节点外接矩形替代圆角、椭圆、菱形、数据库或其他已声明形状的边界。无法执行可靠形状检查时，几何项只能为 `UNVERIFIED`。
 - 单条线可以连接节点某一侧的中点；同侧多条独立关系必须使用可区分的边界偏移位置，端点间距默认不小于 `max(24, 1.5 × 最小正文行高)` 个源坐标单位。相反方向的关系不得共享同一端口坐标；只有显式 `junction`、`bus` 或共享汇合语义可以共享端点，且必须有成员关系和分支方向证据。当前通用 V1 不接受 Provider 私有总线字段。
-- 不同业务关系的非端点路径段不得共享、重叠、交叉或共线混淆；共享汇合语义必须通过已有通用结构的显式汇合/关联节点、Design Notes 或拆图表达，不能用多条重叠路径伪造总线。
+- 不同业务关系的非端点路径段不得共享、重叠或共线混淆；共享汇合语义必须通过已有通用结构的显式汇合/关联节点、Design Notes 或拆图表达，不能用多条重叠路径伪造总线。交叉默认避免，但为保持主轴、同层业务顺序或避免更长的无意义折返而无法消除时，只允许保留已声明的必要交叉；它不得触及节点、文字、标签、箭头或关键端点，且两边的方向和语义必须可区分。
+- `designNotes.layout.crossingExceptions` 可选为 `{ edgeIds: [string, string], reason: string }[]`，仅记录上述必要交叉；`edgeIds` 必须是两个不同的现有边，`reason` 必须说明为何重排或绕行反而损害主流程可读性。`designNotes.layout.sideSwitchExceptions` 可选为 `{ edgeIds: string[], reason: string }[]`，仅记录同侧通道无法保持的业务端口或真实避障例外。没有对应声明的交叉、跨轴折返或 S 形换边均为失败。
+- 路由优先级固定为：主流程沿主轴直连 → 同侧关系保持同侧通道 → 判定的前两条分支沿垂直主轴两侧对称离开 → 其余分支在主轴前进方向的 180° 前向局域内均匀分布。`TB` 的前向方向为下方，`LR` 的前向方向为右方；单一正向出边分别优先使用 `bottom`/`right`，其正向入边分别优先使用 `top`/`left`。
 - 连线靠近节点时最后一段应尽量垂直进入目标边，禁止沿节点边界长距离平行后贴边进入；确需绕障碍时要记录原因并保留可读间距。
 - 连线内部路径不得穿过非源节点、非目标节点、节点文字、边标签、标签背景或图例；跨分组连线可以穿过所属分组边界，但不得穿过无关分组标题、节点或标签。
 - 回边、异常、重试和反馈边应沿图外侧路由，不参与正向流程层级和等距间隔计算；流程、Sequence、State 和 Pipeline 不得使用双向关系替代返回或回退。
@@ -219,7 +221,7 @@ SVG 必须是静态、独立和安全的：
 - `points` 首点落在 `from` 节点的合法实际边界，末点落在 `to` 节点的合法实际边界；
 - 实际落边与 `fromPort`/`toPort` 及端口偏移一致，端点误差不超过 `1` 个 SVG 坐标单位；
 - 无非端点路径段重叠；
-- 无非端点路径段交叉；允许的交点只能是明确声明的共享汇合端点，不能把普通关系误读为 junction/bus；
+- 无未声明、不可读或触及节点/文字/标签/箭头/关键端点的非端点路径段交叉；允许的交叉只能是已声明的必要交叉或明确声明的共享汇合端点，不能把普通关系误读为 junction/bus；
 - 无连线穿过无关节点、实际节点形状、节点文字、边标签或标签背景；
 - 无不必要直线折点；无不改变方向、绕障碍或完成端口连接的共线冗余路径点；
 - 无同侧多边使用同一精确端点；无相反方向边共享同一端口；
@@ -284,3 +286,33 @@ Kiro Power 无内置 SVG Provider 时，只能引用安装包中已有的静态 
 - **NEEDS_CAPABILITY**：用户要求目标预览、渲染或导出，但没有可验证的目标 Provider；它不表示 SVG 源或语义清单不存在，也不是把未执行检查标为 `PASS` 的替代状态。
 
 仅交付源时可使用 `SOURCE_READY` 表示源和 Provider Request 已生成，同时保留适用的 `UNVERIFIED`。任一适用必查项为 FAIL 或 UNVERIFIED 时，不能将对应目标产物标记为完整通过；只有目标操作未被要求时，源交付可以在视觉项 `UNVERIFIED` 的情况下结束。
+
+
+### 过程图追踪字段与 SVG 映射扩展
+
+对新建或调整的过程图，`designNotes.layout` 除通用方向字段外必须包含：
+
+```json
+{
+  "mainFlow": {
+    "entryNodeId": "start",
+    "exitNodeIds": ["done"],
+    "nodeIds": ["start", "done"],
+    "edgeIds": ["start-done"]
+  },
+  "loopLanes": [
+    {"id": "retry-left", "side": "left", "laneOffset": 96, "reason": "失败回路绕过主流程", "edgeIds": ["retry"]}
+  ]
+}
+```
+
+`entryNodeId` 与 `entryNodeIds` 二选一；`mainFlow` 必须覆盖全部业务节点和流程边，并满足入口可达性与出口无未声明出边。`loopLanes` 的 `side` 只能为 `left`/`right`，`laneOffset` 至少为 `24`，每条回路边必须有非空标签并实际进入声明的独立外侧 lane。回路边不计入普通 merge 语义。
+
+过程图的 SVG 映射必须保持以下可反查属性：
+
+- 业务节点：`data-node`，判定节点另须显式 `data-node-shape="diamond"`；
+- 连线主体：`path[data-edge]`、`data-from`、`data-to`、`data-from-port`、`data-to-port`，有标签时使用 `data-edge-label`；
+- 箭头尖端：独立的 `[data-edge-arrow]` overlay，同时保留 `data-edge` 和 `data-arrow-target="<node-id>:<port>"`；箭头 overlay 不得作为连线主体几何重复采样；
+- marker 可以作为主体绘制机制，但不能替代可见的独立箭头映射；箭头必须有实际 bbox，且不能被无关节点、标签或分组遮挡。
+
+源级结果至少应分别记录 `main_flow_valid`、`loop_lanes_valid`、`decision_exit_valid`、`edge_intersection_status`、`collinear_overlap_status`、`target_port_direction_status` 和 `visible_arrow_mapping_status`。这些字段只证明对应检查层，不代表浏览器三视图已执行。
