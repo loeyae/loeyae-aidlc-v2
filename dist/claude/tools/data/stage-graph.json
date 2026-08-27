@@ -1,6 +1,5 @@
 {
   "version": "2.0.0",
-  "compiled_at": "2026-08-25T01:36:57.687Z",
   "stages": [
     {
       "slug": "workspace-detection",

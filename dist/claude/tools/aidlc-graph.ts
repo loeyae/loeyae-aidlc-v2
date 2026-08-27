@@ -226,7 +226,6 @@ export function compile() {
   const nodes = scanStages();
   const graph = {
     version: "2.0.0",
-    compiled_at: new Date().toISOString(),
     stages: nodes,
     stage_count: nodes.length,
     scopes: [...new Set(nodes.flatMap((stage) => stage.scopes))].sort(),
@@ -253,7 +252,7 @@ export function validate() {
   if (errors.length > 0) {
     throw new Error(`Stage graph validation failed:\n${errors.map((error) => `  - ${error}`).join("\n")}`);
   }
-  console.log(`✅ Graph valid: ${graph.stage_count} stages, compiled at ${graph.compiled_at}`);
+  console.log(`✅ Graph valid: ${graph.stage_count} stages`);
 }
 
 if (resolve(process.argv[1] || "") === resolve(fileURLToPath(import.meta.url))) {

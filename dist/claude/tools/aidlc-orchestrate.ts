@@ -63,7 +63,6 @@ interface StageNode {
 
 interface StageGraph {
   version: string;
-  compiled_at: string;
   stages: StageNode[];
   stage_count: number;
 }
@@ -846,6 +845,19 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
           if (evidence.design_notes_valid !== true) errors.push("design_notes_valid must be true");
           if (evidence.migration_status !== "passed") errors.push('migration_status must be "passed"');
           if (evidence.port_paths_valid !== true) errors.push("port_paths_valid must be true");
+
+          const requiredTrueFields = [
+            "layout_contract_valid", "main_flow_valid", "loop_lanes_valid", "decision_exit_valid", "annotation_mapping_valid",
+          ];
+          for (const field of requiredTrueFields) if (evidence[field] !== true) errors.push(`${field} must be true`);
+          const requiredPassedFields = [
+            "geometry_status", "render_preflight_status", "edge_intersection_status", "collinear_overlap_status",
+            "target_port_direction_status", "target_port_approach_status", "routing_minimality_status", "side_switch_status",
+            "visible_arrow_mapping_status",
+          ];
+          for (const field of requiredPassedFields) if (evidence[field] !== "passed") errors.push(`${field} must be "passed"`);
+          if (!["passed", "not_applicable"].includes(String(evidence.change_impact_review_status))) errors.push('change_impact_review_status must be "passed" or "not_applicable"');
+          if (!["passed", "unverified"].includes(String(evidence.render_status))) errors.push('render_status must be "passed" or "unverified"');
           if (asNumber(evidence.unresolved) !== 0) errors.push("unresolved must be 0");
           return errors;
         });

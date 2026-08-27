@@ -63,7 +63,6 @@ interface StageNode {
 
 interface StageGraph {
   version: string;
-  compiled_at: string;
   stages: StageNode[];
   stage_count: number;
 }

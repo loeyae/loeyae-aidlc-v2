@@ -78,9 +78,10 @@ Semantic QA 是不启动浏览器的结构化检查，至少覆盖：
 Geometry QA 使用源坐标、路径点和结构化文本估算，不声称完成真实浏览器字体测量。当前检查覆盖：
 
 - 节点重叠和安全间距：`NODE_OVERLAP`、`INSUFFICIENT_GAP`；
-- 连线穿越节点、连线交叉和标签冲突：`EDGE_NODE_COLLISION`、`EDGE_CROSSING`、`LABEL_COLLISION`；
+- 连线穿越节点、连线交叉和标签冲突：`EDGE_NODE_COLLISION`、`EDGE_CROSSING`、`CROSSING_EXCEPTION`、`LABEL_COLLISION`；
+- 端口、首末端点、目标外侧接近与最少路径：`PORT_MISMATCH`、`EDGE_ENDPOINT_MISMATCH`、`PORT_DIRECTION`、`PORT_APPROACH`、`REDUNDANT_PATH_POINT`、`ROUTING_MINIMALITY`；
+- 主轴同侧通道与布局迁移复核：`SIDE_SWITCH`、`SIDE_SWITCH_EXCEPTION`、`CHANGE_IMPACT_REVIEW`；
 - 分组成员、父级和最小内边距：`GROUP_CONTAINMENT`；
-- 端口和首末端点一致性：`PORT_MISMATCH`、`EDGE_ENDPOINT_MISMATCH`；
 - 内容、路径点、标签和对象越界：`CANVAS_CLIPPING`；
 - 内容相对画布过小：`CANVAS_TOO_EMPTY`；
 - 不支持的复杂形状或生命线：`UNSUPPORTED_SHAPE_GEOMETRY`、`SEQUENCE_LIFELINE_MISSING`；
@@ -177,3 +178,26 @@ Geometry QA 使用源坐标、路径点和结构化文本估算，不声称完�
 - 不让 Agent 反复猜测可由坐标和路径算法确定的问题；
 - 不手工修改最终 SVG 掩盖源或验证器问题；
 - 本协议不替代 `diagram-contract` sensor、`aidlc-semantic-checks.ts` 或 `aidlc-diagram-provider.ts`，只定义它们共同遵循的验证层次和证据边界。
+
+
+## 流程可追踪性与浏览器实际几何门禁
+
+`diagram-contract` 的源级 PASS 不能只由 XML 合法、SVG 可加载、ID 存在或 `data-node`/`data-edge` 存在得出。过程图必须同时有以下独立结果：
+
+- `main_flow_valid`：主流程入口、出口、节点/边覆盖和可达性通过；
+- `loop_lanes_valid`：回路边有标签、声明了左右 lane 和原因，并实际离开主流程通道；
+- `decision_exit_valid`：所有判定节点为 diamond 且每个出口都有非空可见标签；
+- `edge_intersection_status`：无未声明或不可读的 edge-edge 交叉；已声明的必要交叉必须保持主流程、文字、标签、箭头和端点零歧义。
+- `collinear_overlap_status`：无非预期非零共线重叠；
+- `target_port_direction_status`：连接器首末段方向与声明端口一致；
+- `target_port_approach_status`：目标倒数第二有效点位于实际形状外部；
+- `routing_minimality_status`：不存在更短的无障碍直达或一折 Manhattan 路径；
+- `side_switch_status`：同侧通道未无声明跨轴折返；
+- `change_impact_review_status`：声明布局迁移时，所有移动节点的 incident edges 都有复核；
+- `visible_arrow_mapping_status`：箭头目标、marker/overlay 映射和可见性通过。
+
+确定性 checker 使用稳定错误码区分失败原因：`MAIN_FLOW_TRACE`、`LOOP_LANE`、`DECISION_SHAPE`、`DECISION_EXIT`、`PORT_DIRECTION`、`PORT_APPROACH`、`ROUTING_MINIMALITY`、`SIDE_SWITCH`、`SIDE_SWITCH_EXCEPTION`、`CHANGE_IMPACT_REVIEW`、`EDGE_CROSSING`、`CROSSING_EXCEPTION`、`COLLINEAR_OVERLAP`、`REDUNDANT_PATH_POINT` 和 `EDGE_NODE_COLLISION`。`EDGE_CROSSING` 仅针对未声明或未满足必要交叉可读性条件的交叉；`CROSSING_EXCEPTION` 处理缺失、重复、非法或未实际发生的例外；`COLLINEAR_OVERLAP` 始终不得降级为普通交叉，端点接触也不能掩盖同一边对之间的非零共线重叠。
+
+当目标操作为 `preview` 或浏览器 `render` 时，Chrome DevTools Provider 必须对实际 DOM/SVG 几何执行：节点和边集合的精确映射、edge-node crossing、edge-edge intersection（仅接受 sidecar 已声明且实际命中的必要交叉）、共线重叠、端口首末方向和目标外侧接近、边 bbox、同侧通道/跨轴折返、标签与无关边 bbox、箭头 overlay bbox 及其被无关节点、后绘制标签、图例或分组遮挡、`text`/`tspan` bbox 越界与重叠、`contentBBox`、水平溢出、判定 diamond 和出口数量，以及 sidecar 声明的主流程和回路边覆盖。不能用源坐标结果代替这些浏览器检查。
+
+Provider Request 的 `target_reading_environment.viewports` 必须同时声明 `normal`、`fit`、`zoom` 三个对象。实际运行缺少任何一个视图时必须阻断；只有三个视图全部检查成功，且截图/快照均已生成，才可以原子更新 `provider_status: "passed"`。页面纵向滚动允许，但水平溢出、对象越界、文字/箭头不可见或被遮挡都失败。dry-run 只验证请求和执行计划，不产生浏览器通过证据。
