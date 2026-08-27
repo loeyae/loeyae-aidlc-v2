@@ -101,14 +101,18 @@ Provider Request 使用 version `1`，最小结构如下：
   "edge_intersection_status": "passed",
   "collinear_overlap_status": "passed",
   "target_port_direction_status": "passed",
+  "target_port_approach_status": "passed",
+  "routing_minimality_status": "passed",
+  "side_switch_status": "passed",
+  "change_impact_review_status": "not_applicable",
   "visible_arrow_mapping_status": "passed"
 }
 ```
 
-Checker 必须验证 `designNotes.layout.mainFlow`（入口/出口、节点/边覆盖、可达性、出口无未声明出边）和 `loopLanes`（`left`/`right`、`laneOffset >= 24`、原因、标签、独立 lane）。先按主轴排布主流程，再检查同层实体在垂直主轴方向的均匀分布；单一正向出边使用主轴前进方向，多出边先使用垂直主轴两侧，其余只在前向 180° 局域均分；源、目标在同侧时必须保持同侧通道。过程图的分支节点必须是 `diamond`，每个出口必须有非空可见标签；菱形端口使用顶点且不得偏移。
+Checker 必须验证 `designNotes.layout.mainFlow`（入口/出口、节点/边覆盖、可达性；出口仅允许已声明 `loopLanes` 反馈边）和 `loopLanes`（`left`/`right`、`laneOffset >= 24`、原因、标签、独立 lane）。先按主轴排布主流程，再检查同层实体在垂直主轴方向的均匀分布；单一正向出边使用主轴前进方向，多出边先使用垂直主轴两侧，其余只在前向 180° 局域均分；源、目标在同侧时必须保持同侧通道。过程图的分支节点必须是 `diamond`，每个出口必须有非空可见标签；菱形端口使用顶点且不得偏移。
 
-`EDGE_CROSSING` 默认阻断，但 `designNotes.layout.crossingExceptions` 可为保持主轴、同层业务顺序或避免更差折返而声明一对必要交叉边；Producer 必须验证该交叉不触及节点、文字、标签、箭头或关键端点，且方向与语义可辨。`sideSwitchExceptions` 只允许记录真实避障或业务端口语义导致的跨轴例外，不能用于掩盖左右折返。`COLLINEAR_OVERLAP`、节点/文字/标签穿越和未声明或不可读的 `EDGE_CROSSING` 始终阻断；`PORT_DIRECTION`、`DECISION_SHAPE`、`DECISION_EXIT`、`MAIN_FLOW_TRACE` 和 `LOOP_LANE` 继续是可定位的阻断错误码。
+`EDGE_CROSSING` 默认阻断，但 `designNotes.layout.crossingExceptions` 可为保持主轴、同层业务顺序或避免更差折返而声明一对必要交叉边；Producer 必须验证声明边对存在、互异且恰好对应实际交叉，并确认交叉不触及节点、文字、标签、箭头或关键端点，且方向与语义可辨。`sideSwitchExceptions` 只允许记录真实避障或业务端口语义导致的跨轴例外，必须命中实际同侧折返或多次换边，不能用于掩盖左右折返。`PORT_APPROACH` 阻断从目标形状内部回折到端口，`ROUTING_MINIMALITY` 阻断存在更短无障碍直达/一折候选的流程路径；`changeImpactReview` 存在时必须覆盖移动节点的 incident edges。`COLLINEAR_OVERLAP`、节点/文字/标签穿越和未声明或不可读的 `EDGE_CROSSING` 始终阻断；`PORT_DIRECTION`、`DECISION_SHAPE`、`DECISION_EXIT`、`MAIN_FLOW_TRACE` 和 `LOOP_LANE` 继续是可定位的阻断错误码。
 
 ### Chrome Provider 证据
 
-当 `target_operation_required` 为 `true` 时，受控 Provider 必须实际检查 DOM/SVG 的节点/边集合、sidecar 主流程/回路覆盖、判定 diamond/出口、edge-node/edge-edge 几何、共线重叠、端口方向、边 bbox、箭头 overlay 可见性和遮挡、文字/tspan bbox 越界与重叠、`contentBBox` 及水平溢出。Provider Request 必须提供 `target_reading_environment.viewports.normal`、`.fit`、`.zoom`；缺少任一视图、Chrome 不可用或任一实际检查失败时，不得把 evidence 更新为 `provider_status: "passed"`，应保持 `UNVERIFIED` 或返回 `NEEDS_CAPABILITY`。`--dry-run` 仅验证请求格式和计划。
+当 `target_operation_required` 为 `true` 时，受控 Provider 必须实际检查 DOM/SVG 的节点/边集合、sidecar 主流程/回路/必要交叉覆盖、判定 diamond/出口、edge-node/edge-edge 几何、共线重叠、端口方向与目标外侧接近、同侧通道、边 bbox、标签与无关边 bbox、箭头 overlay 可见性及其被节点、后绘制标签、图例或分组遮挡、文字/tspan bbox 越界与重叠、`contentBBox` 及水平溢出。Provider Request 必须提供 `target_reading_environment.viewports.normal`、`.fit`、`.zoom`；缺少任一视图、Chrome 不可用或任一实际检查失败时，不得把 evidence 更新为 `provider_status: "passed"`，应保持 `UNVERIFIED` 或返回 `NEEDS_CAPABILITY`。`--dry-run` 仅验证请求格式和计划。

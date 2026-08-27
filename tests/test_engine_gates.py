@@ -145,7 +145,12 @@ class TestRunner:
                 "evidence_version": "1", "status": "passed", "source_format": "svg", "diagrams_checked": 1,
                 "ids_unique": True, "ports_valid": True, "direction_consistent": True, "legend_valid": True,
                 "groups_valid": True, "viewbox_valid": True, "provider_status": "unverified", "target_operation_required": False,
-                "fr_mapping_complete": True, "design_notes_valid": True, "migration_status": "passed", "port_paths_valid": True, "unresolved": 0,
+                "fr_mapping_complete": True, "design_notes_valid": True, "layout_contract_valid": True,
+                "main_flow_valid": True, "loop_lanes_valid": True, "decision_exit_valid": True, "annotation_mapping_valid": True,
+                "migration_status": "passed", "port_paths_valid": True, "geometry_status": "passed", "render_preflight_status": "passed",
+                "edge_intersection_status": "passed", "collinear_overlap_status": "passed", "target_port_direction_status": "passed",
+                "target_port_approach_status": "passed", "routing_minimality_status": "passed", "side_switch_status": "passed",
+                "change_impact_review_status": "not_applicable", "visible_arrow_mapping_status": "passed", "render_status": "unverified", "unresolved": 0,
             },
             "design-intent-coverage": {
                 "evidence_version": "1", "status": "passed", "intent_markers_found": 0,
@@ -511,6 +516,35 @@ def test_g_construction_evidence_gates():
     return t
 
 
+def test_i_diagram_source_status_gate():
+    """I: Detailed diagram source statuses are blocking orchestrator gates."""
+    print("\n--- I: Diagram source status gate ---")
+    t = TestRunner("/tmp/aidlc-test-i-diagram-status")
+    t.setup()
+    t.engine("next", "--scope feature")
+    reached = t.walk_to_stage("requirements-methods", PRODUCES_MAP)
+    t.ok(reached, "Reached requirements-methods")
+    if reached:
+        directive = t.nxt()
+        t.create_declared_produces(directive)
+        t.write_evidence("requirements-methods", directive.get("sensors", []))
+        path = os.path.join(t.test_dir, ".aidlc", "evidence", "requirements-methods", "diagram-contract.json")
+        with open(path) as handle:
+            payload = json.load(handle)
+        payload["target_port_approach_status"] = "failed"
+        with open(path, "w") as handle:
+            json.dump(payload, handle)
+        result = t.report("requirements-methods", "completed")
+        t.ok(result.get("kind") == "error" and "target_port_approach_status" in result.get("message", ""), "BLOCKED: failed source geometry status")
+
+        payload["target_port_approach_status"] = "passed"
+        with open(path, "w") as handle:
+            json.dump(payload, handle)
+        result = t.report("requirements-methods", "completed")
+        t.ok(result.get("kind") == "print", "PASSED: all detailed diagram source statuses satisfy the gate")
+    return t
+
+
 def test_h_automatic_common_sensors():
     """H: Every producing stage receives no-todo and traceability gates automatically."""
     print("\n--- H: Automatic no-todo and traceability coverage ---")
@@ -555,6 +589,7 @@ if __name__ == "__main__":
     results.append(test_f_gate_semantics())
     results.append(test_g_construction_evidence_gates())
     results.append(test_h_automatic_common_sensors())
+    results.append(test_i_diagram_source_status_gate())
 
     total_passed = sum(r.passed for r in results)
     total_failed = sum(r.failed for r in results)

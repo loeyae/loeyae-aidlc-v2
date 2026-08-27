@@ -103,7 +103,7 @@ Clarification consistency: passed
                 {"id": "start", "shape": "round", "label": "开始", "x": 40, "y": 40, "width": 100, "height": 50},
                 {"id": "done", "shape": "round", "label": "完成", "x": 260, "y": 40, "width": 100, "height": 50}
             ],
-            "edges": [{"id": "start-done", "from": "start", "fromPort": "right", "to": "done", "toPort": "left", "kind": "directed", "points": [[140, 65], [260, 65]], "label": {"text": "完成", "x": 200, "y": 50}}],
+            "edges": [{"id": "start-done", "from": "start", "fromPort": "right", "to": "done", "toPort": "left", "arrowTarget": "done:left", "kind": "directed", "points": [[140, 65], [260, 65]], "label": {"text": "完成", "x": 200, "y": 50}}],
             "designNotes": {
                 "intent": "展示需求从开始到完成的单一流程",
                 "semanticModes": ["process-flow"],
@@ -197,6 +197,19 @@ def test_diagram_003_fixed_regression() -> None:
     try:
         source = os.path.join(REPO_ROOT, "tests", "fixtures", "diagram-003")
         shutil.copytree(source, project, dirs_exist_ok=True)
+        manifest_path = os.path.join(project, "diagram-003.diagram.json")
+        with open(manifest_path) as handle:
+            diagram = json.load(handle)["diagrams"][0]
+        layout = diagram["designNotes"]["layout"]
+        assert layout["direction"] == "TB"
+        assert layout["mainAxis"] == 580
+        assert layout["mergeNodes"] == []
+        assert layout["sideSwitchExceptions"] == []
+        assert layout["crossingExceptions"] == []
+        assert all(edge["arrowTarget"] == f'{edge["to"]}:{edge["toPort"]}' for edge in diagram["edges"])
+        retry = next(edge for edge in diagram["edges"] if edge["id"] == "delivery-address-retry")
+        assert retry["points"] == [[600, 590], [180, 590], [180, 610], [500, 610], [500, 270], [760, 270]]
+        assert retry["label"]["y"] == 640
         result = run_checker(project, "diagram-contract")
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout)
@@ -206,6 +219,10 @@ def test_diagram_003_fixed_regression() -> None:
         assert payload["edge_intersection_status"] == "passed"
         assert payload["collinear_overlap_status"] == "passed"
         assert payload["target_port_direction_status"] == "passed"
+        assert payload["target_port_approach_status"] == "passed"
+        assert payload["routing_minimality_status"] == "passed"
+        assert payload["side_switch_status"] == "passed"
+        assert payload["change_impact_review_status"] == "not_applicable"
         assert payload["visible_arrow_mapping_status"] == "passed"
     finally:
         shutil.rmtree(project)
@@ -230,7 +247,7 @@ def test_diagram_geometry_gates_fail_closed() -> None:
         ("edge collision", lambda diagram, _: diagram["nodes"].append({"id": "middle", "shape": "rect", "label": "中间", "x": 180, "y": 40, "width": 60, "height": 50}), "collides with non-endpoint node middle"),
         ("collinear overlap", lambda diagram, _: (
             diagram["nodes"].append({"id": "other", "shape": "rect", "label": "旁路", "x": 40, "y": 110, "width": 100, "height": 50}),
-            diagram["edges"].append({"id": "overlap", "from": "other", "fromPort": "right", "to": "done", "toPort": "left", "kind": "directed", "points": [[140, 135], [180, 135], [180, 65], [260, 65]]}),
+            diagram["edges"].append({"id": "overlap", "from": "other", "fromPort": "right", "to": "done", "toPort": "left", "arrowTarget": "done:left", "kind": "directed", "points": [[140, 135], [180, 135], [180, 65], [260, 65]]}),
             diagram["designNotes"]["layout"]["mainFlow"].update({"entryNodeIds": ["start", "other"], "exitNodeIds": ["done"], "nodeIds": ["start", "done", "other"], "edgeIds": ["start-done", "overlap"]}),
             diagram["designNotes"]["layout"]["mergeNodes"].append({"nodeId": "done", "reason": "负例显式允许重复入边以验证共线重叠门禁"}),
         ), "COLLINEAR_OVERLAP"),
@@ -242,7 +259,7 @@ def test_diagram_geometry_gates_fail_closed() -> None:
                 {"id": "bottom", "shape": "rect", "label": "下", "x": 180, "y": 240, "width": 40, "height": 50},
             ]),
             diagram["edges"][0].update({"points": [[140, 150], [260, 150]]}),
-            diagram["edges"].append({"id": "vertical", "from": "top", "fromPort": "bottom", "to": "bottom", "toPort": "top", "kind": "directed", "points": [[200, 90], [200, 240]]}),
+            diagram["edges"].append({"id": "vertical", "from": "top", "fromPort": "bottom", "to": "bottom", "toPort": "top", "arrowTarget": "bottom:top", "kind": "directed", "points": [[200, 90], [200, 240]]}),
             diagram["designNotes"]["layout"]["mainFlow"].update({"entryNodeIds": ["start", "top"], "exitNodeIds": ["done", "bottom"], "nodeIds": ["start", "done", "top", "bottom"], "edgeIds": ["start-done", "vertical"]}),
             diagram["canvas"].update({"height": 340}),
         ), "EDGE_CROSSING"),
@@ -271,6 +288,7 @@ def test_diagram_geometry_gates_fail_closed() -> None:
             write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox=\"0 0 400 300\" width=\"400\" height=\"300\" role=\"img\"><title>Requirements sequence</title><desc>FR-001 sequence</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs><g><rect data-node=\"start\" x=\"40\" y=\"40\" width=\"100\" height=\"50\"/><rect data-node=\"done\" x=\"260\" y=\"40\" width=\"100\" height=\"50\"/><line data-lifeline-for=\"start\" x1=\"100\" x2=\"100\" y1=\"90\" y2=\"260\"/><line data-lifeline-for=\"done\" x1=\"310\" x2=\"310\" y1=\"90\" y2=\"260\"/><path data-edge=\"start-done\" data-from=\"start\" data-from-port=\"right\" data-to=\"done\" data-to-port=\"left\" data-edge-label=\"start-done\" d=\"M140 65 L260 65\" marker-end=\"url(#arrow)\"/><path data-edge-arrow=\"start-done\" data-edge=\"start-done\" data-arrow-target=\"done:left\" d=\"M252 57 L260 65 L252 73\"/><g data-edge-label=\"start-done\"><text data-text-id=\"label-start-done\" x=\"200\" y=\"50\">完成</text></g><text data-text-id=\"requirement-reference\">FR-001</text></g></svg>"""),
         ), "sequence lifeline coordinate is invalid"),
         ("endpoint mismatch", lambda diagram, _: diagram["edges"][0].update({"points": [[143, 65], [260, 65]]}), "first point does not match fromPort"),
+        ("sidecar arrow target", lambda diagram, _: diagram["edges"][0].update({"arrowTarget": "done:right"}), "ARROW_MAPPING"),
         ("non-orthogonal path", lambda diagram, _: diagram["edges"][0].update({"points": [[140, 65], [200, 80], [260, 65]]}), "is not orthogonal"),
         ("viewport overflow", lambda diagram, _: diagram["nodes"][1].update({"x": 350}), "is outside the canvas"),
         ("canvas too empty", lambda diagram, _: diagram["canvas"].update({"width": 2000, "height": 2000}), "CANVAS_TOO_EMPTY"),
@@ -307,7 +325,11 @@ def test_diagram_risk_assessment() -> None:
     project = tempfile.mkdtemp(prefix="aidlc-diagram-risk-")
     try:
         fixture(project)
-        mutate_diagram(project, lambda diagram, _: diagram["edges"][0].update({"points": [[140, 65], [180, 65], [180, 80], [240, 80], [240, 65], [260, 65]]}))
+        mutate_diagram(project, lambda diagram, _: (
+            diagram.update({"diagramType": "architecture"}),
+            diagram["designNotes"].update({"semanticModes": ["static-relation"]}),
+            diagram["edges"][0].update({"points": [[140, 65], [180, 65], [180, 80], [240, 80], [240, 65], [260, 65]]}),
+        ))
         result = run_checker(project, "diagram-contract")
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout)
@@ -346,13 +368,15 @@ def directional_fixture(project: str, direction: str) -> None:
         ]
         edges = [
             {"id": "start-decision", "from": "start", "fromPort": "right", "to": "decision", "toPort": "left", "kind": "directed", "points": [[140, 250], [300, 250]]},
-            {"id": "decision-physical", "from": "decision", "fromPort": "top", "to": "physical", "toPort": "left", "kind": "directed", "points": [[350, 200], [350, 150], [450, 150], [450, 125], [500, 125]], "label": {"text": "实物", "x": 420, "y": 180}},
-            {"id": "decision-virtual", "from": "decision", "fromPort": "bottom", "to": "virtual", "toPort": "left", "kind": "directed", "points": [[350, 300], [350, 325], [450, 325], [450, 375], [500, 375]], "label": {"text": "虚拟", "x": 420, "y": 320}},
+            {"id": "decision-physical", "from": "decision", "fromPort": "top", "to": "physical", "toPort": "left", "kind": "directed", "points": [[350, 200], [350, 125], [500, 125]], "label": {"text": "实物", "x": 420, "y": 180}},
+            {"id": "decision-virtual", "from": "decision", "fromPort": "bottom", "to": "virtual", "toPort": "left", "kind": "directed", "points": [[350, 300], [350, 375], [500, 375]], "label": {"text": "虚拟", "x": 420, "y": 320}},
             {"id": "physical-checkout", "from": "physical", "fromPort": "right", "to": "checkout", "toPort": "top", "kind": "directed", "points": [[600, 125], [750, 125], [750, 225]]},
             {"id": "virtual-checkout", "from": "virtual", "fromPort": "right", "to": "checkout", "toPort": "bottom", "kind": "directed", "points": [[600, 375], [750, 375], [750, 275]]},
         ]
         canvas = {"width": 840, "height": 520}
         layout = {"direction": "LR", "mainAxis": 250, "layerTolerance": 24, "symmetryGroups": [], "mergeNodes": [{"nodeId": "checkout", "reason": "两个商品分支在结算提交订单处汇合"}], "mainFlow": {"entryNodeId": "start", "exitNodeIds": ["checkout"], "nodeIds": ["start", "decision", "physical", "virtual", "checkout"], "edgeIds": ["start-decision", "decision-physical", "decision-virtual", "physical-checkout", "virtual-checkout"]}, "loopLanes": [], "branchLayerExceptions": [], "branchPortExceptions": []}
+    for edge in edges:
+        edge["arrowTarget"] = f'{edge["to"]}:{edge["toPort"]}'
     layout["readabilityEvidence"] = {
         "normal": {"status": "UNVERIFIED", "evidence": "source-only regression fixture"},
         "fit": {"status": "UNVERIFIED", "evidence": "source-only regression fixture"},
@@ -391,9 +415,9 @@ def test_directional_layout_contracts() -> None:
     cases = [
         ("tb-asymmetry", "TB", lambda diagram, _: (diagram["nodes"][0].update({"x": 300}), diagram["edges"][0].update({"points": [[400, 65], [440, 65], [440, 185], [530, 185]]})), "LAYOUT_SYMMETRY"),
         ("tb-branch-layer", "TB", lambda diagram, _: (diagram["nodes"][4].update({"y": 650}), diagram["edges"][3].update({"points": [[630, 340], [700, 340], [700, 650]]})), "BRANCH_LAYER"),
-        ("tb-branch-port", "TB", lambda diagram, _: (diagram["edges"][3].update({"toPort": "right", "points": [[630, 340], [800, 340], [800, 725], [750, 725]]})), "BRANCH_PORT"),
+        ("tb-branch-port", "TB", lambda diagram, _: (diagram["edges"][3].update({"toPort": "right", "arrowTarget": "active:right", "points": [[630, 340], [800, 340], [800, 725], [750, 725]]})), "BRANCH_PORT"),
         ("lr-branch-layer", "LR", lambda diagram, _: (diagram["nodes"][3].update({"x": 550}), diagram["edges"][2].update({"points": [[350, 300], [350, 325], [500, 325], [500, 375], [550, 375]]}), diagram["edges"][4].update({"points": [[650, 375], [750, 375], [750, 275]]})), "BRANCH_LAYER"),
-        ("lr-branch-port", "LR", lambda diagram, _: (diagram["edges"][1].update({"toPort": "right", "points": [[350, 200], [350, 150], [650, 150], [650, 125], [600, 125]]})), "BRANCH_PORT"),
+        ("lr-branch-port", "LR", lambda diagram, _: (diagram["edges"][1].update({"toPort": "right", "arrowTarget": "physical:right", "points": [[350, 200], [350, 150], [650, 150], [650, 125], [600, 125]]})), "BRANCH_PORT"),
         ("annotation-order", "TB", lambda diagram, _: diagram["annotations"].__getitem__(0).update({"y": 400}), "ANNOTATION_ORDER"),
     ]
     for name, direction, mutation, expected in cases:
@@ -417,6 +441,170 @@ def test_directional_layout_contracts() -> None:
     finally:
         shutil.rmtree(project)
 
+def test_diagram_contract_hardening() -> None:
+    project = tempfile.mkdtemp(prefix="aidlc-diagram-port-approach-")
+    try:
+        fixture(project)
+        mutate_diagram(project, lambda diagram, _: (
+            diagram.update({"diagramType": "state"}),
+            diagram["edges"][0].update({"points": [[140, 65], [300, 65], [260, 65]]}),
+        ))
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode != 0
+        assert "PORT_APPROACH" in result.stderr, result.stderr
+    finally:
+        shutil.rmtree(project)
+
+    project = tempfile.mkdtemp(prefix="aidlc-diagram-routing-minimality-")
+    try:
+        fixture(project)
+        mutate_diagram(project, lambda diagram, _: (
+            diagram["canvas"].update({"width": 500}),
+            diagram["edges"][0].update({"points": [[140, 65], [180, 65], [180, 140], [240, 140], [240, 65], [260, 65]]}),
+        ))
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode != 0
+        assert "ROUTING_MINIMALITY" in result.stderr, result.stderr
+    finally:
+        shutil.rmtree(project)
+
+    project = tempfile.mkdtemp(prefix="aidlc-diagram-label-edge-")
+    try:
+        fixture(project)
+        mutate_diagram(project, lambda diagram, _: (
+            diagram["nodes"].extend([
+                {"id": "top", "shape": "rect", "label": "上", "x": 180, "y": 80, "width": 40, "height": 50},
+                {"id": "bottom", "shape": "rect", "label": "下", "x": 180, "y": 180, "width": 40, "height": 50},
+            ]),
+            diagram["edges"].append({"id": "top-bottom", "from": "top", "fromPort": "bottom", "to": "bottom", "toPort": "top", "arrowTarget": "bottom:top", "kind": "directed", "points": [[200, 130], [200, 180]]}),
+            diagram["edges"][0]["label"].update({"y": 145}),
+            diagram["designNotes"]["layout"]["mainFlow"].update({"entryNodeIds": ["start", "top"], "exitNodeIds": ["done", "bottom"], "nodeIds": ["start", "done", "top", "bottom"], "edgeIds": ["start-done", "top-bottom"]}),
+        ))
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode != 0
+        assert "LABEL_COLLISION" in result.stderr
+        assert "intersects edge top-bottom" in result.stderr, result.stderr
+    finally:
+        shutil.rmtree(project)
+
+    project = tempfile.mkdtemp(prefix="aidlc-diagram-change-impact-")
+    try:
+        fixture(project)
+        mutate_diagram(project, lambda diagram, _: diagram["designNotes"]["layout"].update({
+            "changeImpactReview": {
+                "baseline": "git:before-layout-migration",
+                "movedNodeIds": ["start"],
+                "impactedEdgeIds": [],
+                "edgeReviews": [],
+            }
+        }))
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode != 0
+        assert "CHANGE_IMPACT_REVIEW" in result.stderr
+        assert "omits incident edge" in result.stderr
+    finally:
+        shutil.rmtree(project)
+
+    project = tempfile.mkdtemp(prefix="aidlc-diagram-exit-loop-")
+    try:
+        fixture(project)
+        def declared_exit_loop(diagram: dict, project_path: str) -> None:
+            loop_edge = {
+                "id": "done-retry", "from": "done", "fromPort": "bottom", "to": "start", "toPort": "bottom", "arrowTarget": "start:bottom", "kind": "directed",
+                "points": [[310, 90], [310, 160], [90, 160], [90, 90]],
+                "label": {"text": "重试", "x": 200, "y": 180},
+            }
+            diagram["edges"].append(loop_edge)
+            layout = diagram["designNotes"]["layout"]
+            layout["mainFlow"]["edgeIds"].append("done-retry")
+            layout["loopLanes"] = [{"id": "retry-right", "side": "right", "laneOffset": 80, "reason": "完成态用户重新触发已声明反馈回路", "edgeIds": ["done-retry"]}]
+            svg_path = os.path.join(project_path, "docs", "aidlc", "inception", "requirements", "business-flows.svg")
+            with open(svg_path) as handle:
+                svg = handle.read()
+            svg = svg.replace("</svg>", '<path data-edge="done-retry" data-from="done" data-from-port="bottom" data-to="start" data-to-port="bottom" data-edge-label="done-retry" d="M310 90 L310 160 L90 160 L90 90" marker-end="url(#arrow)"/><path data-edge-arrow="done-retry" data-edge="done-retry" data-arrow-target="start:bottom" d="M84 100 L90 90 L96 100"/><g data-edge-label="done-retry"><text data-text-id="label-done-retry" x="200" y="180">重试</text></g></svg>')
+            write(project_path, "docs/aidlc/inception/requirements/business-flows.svg", svg)
+        mutate_diagram(project, declared_exit_loop)
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode == 0, result.stderr
+    finally:
+        shutil.rmtree(project)
+
+    project = tempfile.mkdtemp(prefix="aidlc-diagram-untracked-exit-loop-")
+    try:
+        fixture(project)
+        mutate_diagram(project, lambda diagram, _: (
+            diagram["edges"].append({"id": "done-retry", "from": "done", "fromPort": "bottom", "to": "start", "toPort": "bottom", "arrowTarget": "start:bottom", "kind": "directed", "points": [[310, 90], [310, 160], [90, 160], [90, 90]], "label": {"text": "重试", "x": 200, "y": 180}}),
+            diagram["designNotes"]["layout"]["mainFlow"]["edgeIds"].append("done-retry"),
+        ))
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode != 0
+        assert "MAIN_FLOW_TRACE" in result.stderr
+        assert "outside declared loopLanes" in result.stderr
+    finally:
+        shutil.rmtree(project)
+
+    def crossing_fixture(project_path: str, declared: bool) -> None:
+        fixture(project_path)
+        manifest_path = diagram_manifest_path(project_path)
+        with open(manifest_path) as handle:
+            manifest = json.load(handle)
+        diagram = manifest["diagrams"][0]
+        diagram["canvas"] = {"width": 400, "height": 340}
+        diagram["nodes"] = [
+            {"id": "start", "shape": "rect", "label": "开始", "x": 40, "y": 125, "width": 100, "height": 50},
+            {"id": "done", "shape": "rect", "label": "完成", "x": 260, "y": 125, "width": 100, "height": 50},
+            {"id": "top", "shape": "rect", "label": "上", "x": 180, "y": 40, "width": 40, "height": 50},
+            {"id": "bottom", "shape": "rect", "label": "下", "x": 180, "y": 240, "width": 40, "height": 50},
+        ]
+        diagram["edges"] = [
+            {"id": "start-done", "from": "start", "fromPort": "right", "to": "done", "toPort": "left", "arrowTarget": "done:left", "kind": "directed", "points": [[140, 150], [260, 150]]},
+            {"id": "top-bottom", "from": "top", "fromPort": "bottom", "to": "bottom", "toPort": "top", "arrowTarget": "bottom:top", "kind": "directed", "points": [[200, 90], [200, 240]]},
+        ]
+        layout = diagram["designNotes"]["layout"]
+        layout.update({
+            "direction": "TB", "mainAxis": 200, "symmetryGroups": [], "mergeNodes": [],
+            "mainFlow": {"entryNodeIds": ["start", "top"], "exitNodeIds": ["done", "bottom"], "nodeIds": ["start", "done", "top", "bottom"], "edgeIds": ["start-done", "top-bottom"]},
+            "loopLanes": [], "branchLayerExceptions": [], "branchPortExceptions": [], "sideSwitchExceptions": [],
+            "crossingExceptions": ([{"edgeIds": ["start-done", "top-bottom"], "reason": "保持两个独立主方向，绕行会破坏层级"}] if declared else []),
+        })
+        with open(manifest_path, "w") as handle:
+            json.dump(manifest, handle)
+        write(project_path, "docs/aidlc/inception/requirements/business-flows.svg", '''<svg viewBox="0 0 400 340" width="400" height="340" role="img"><title>Crossing fixture</title><desc>FR-001 declared crossing fixture</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs><g data-node="start"><rect x="40" y="125" width="100" height="50"/><text x="90" y="155">开始</text></g><g data-node="done"><rect x="260" y="125" width="100" height="50"/><text x="310" y="155">完成</text></g><g data-node="top"><rect x="180" y="40" width="40" height="50"/><text x="200" y="70">上</text></g><g data-node="bottom"><rect x="180" y="240" width="40" height="50"/><text x="200" y="270">下</text></g><path data-edge="start-done" data-from="start" data-from-port="right" data-to="done" data-to-port="left" d="M140 150 L260 150" marker-end="url(#arrow)"/><path data-edge-arrow="start-done" data-edge="start-done" data-arrow-target="done:left" d="M252 142 L260 150 L252 158"/><path data-edge="top-bottom" data-from="top" data-from-port="bottom" data-to="bottom" data-to-port="top" d="M200 90 L200 240" marker-end="url(#arrow)"/><path data-edge-arrow="top-bottom" data-edge="top-bottom" data-arrow-target="bottom:top" d="M192 230 L200 240 L208 230"/></svg>''')
+
+    project = tempfile.mkdtemp(prefix="aidlc-diagram-crossing-declared-")
+    try:
+        crossing_fixture(project, True)
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode == 0, result.stderr
+    finally:
+        shutil.rmtree(project)
+
+    project = tempfile.mkdtemp(prefix="aidlc-diagram-crossing-undeclared-")
+    try:
+        crossing_fixture(project, False)
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode != 0
+        assert "EDGE_CROSSING" in result.stderr
+    finally:
+        shutil.rmtree(project)
+
+    project = tempfile.mkdtemp(prefix="aidlc-diagram-side-switch-")
+    try:
+        fixture(project)
+        def side_switch(diagram: dict, _: str) -> None:
+            diagram["nodes"][0].update({"y": 150})
+            diagram["nodes"][1].update({"y": 150})
+            diagram["edges"][0].update({"points": [[140, 175], [180, 175], [180, 30], [220, 30], [220, 175], [260, 175]], "label": {"text": "流程", "x": 200, "y": 175}})
+        mutate_diagram(project, side_switch)
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode != 0
+        assert "SIDE_SWITCH" in result.stderr
+        mutate_diagram(project, lambda diagram, _: diagram["designNotes"]["layout"].update({"sideSwitchExceptions": [{"edgeIds": ["start-done"], "reason": "验证已声明跨侧例外"}]}))
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode == 0, result.stderr
+    finally:
+        shutil.rmtree(project)
+
 
 if __name__ == "__main__":
     test_all_checkers_pass_on_realistic_fixture()
@@ -427,4 +615,5 @@ if __name__ == "__main__":
     test_diagram_geometry_gates_pass_on_valid_sequence()
     test_diagram_risk_assessment()
     test_directional_layout_contracts()
-    print("22 semantic checker tests passed")
+    test_diagram_contract_hardening()
+    print("semantic checker regression tests passed")

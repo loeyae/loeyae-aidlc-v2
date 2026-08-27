@@ -178,12 +178,12 @@ SVG 必须是静态、独立和安全的：
 
 - `from`、`to` 节点必须存在，`fromPort`、`toPort` 必须是有效的 `top`、`right`、`bottom` 或 `left`；新建/调整图必须显式声明端口和完整 `points`，旧资产缺失时只能进入 `MIGRATION_REQUIRED`。
 - 生成器必须先检测应用端口偏移后的源边界点到目标边界点的直线路径。对非交付型图，直线不穿越实际节点形状、文字、标签、图例、无关分组或其他连线时必须使用直线；对 `delivery-business-flow`，只有同时满足水平/垂直正交约束的合法直连才使用直线，否则使用最少拐角的 Manhattan 路径。
-- Manhattan 路径以最少拐角为目标；不改变方向、不绕过障碍、不完成端口连接的共线中间点必须删除。静态验证发现直线本可合法直连却使用冗余折线，或发现共线冗余点，必须 `FAIL`。
-- `points` 首点必须落在 `from` 节点声明端口和偏移对应的实际可连接边界，末点必须落在 `to` 节点对应边界；对 `sequence` 图，`from`/`to` 的语义节点仍是参与者，但首末点必须落在其 `data-lifeline-for` 对应的生命线，不得落在参与者标题矩形。实际落边、端口侧和偏移声明必须一致，端点误差不得超过 `1` 个 SVG 坐标单位。
+- Manhattan 路径以最少拐角为目标；不改变方向、不绕过障碍、不完成端口连接的共线中间点必须删除。对 `flowchart` 与 `pipeline`，静态验证还必须在实际节点、标签和无关边均无碰撞时比较合法直达与一折 Manhattan 候选；存在更短候选即为 `ROUTING_MINIMALITY` 失败。声明的 `loopLanes`、真实障碍或需要保持已声明交叉/跨侧语义的路径不得因这一比较被机械压缩。
+- `points` 首点必须落在 `from` 节点声明端口和偏移对应的实际可连接边界，末点必须落在 `to` 节点对应边界；对 `sequence` 图，`from`/`to` 的语义节点仍是参与者，但首末点必须落在其 `data-lifeline-for` 对应的生命线，不得落在参与者标题矩形。实际落边、端口侧和偏移声明必须一致，端点误差不得超过 `1` 个 SVG 坐标单位。目标端的倒数第二个有效路径点必须在目标实际形状外部，最后一段再沿 `toPort` 法向进入；从实体内部回折到边界即为 `PORT_APPROACH` 失败。
 - 端点间距、边界合法性和碰撞检查必须使用实际节点形状；不得只用节点外接矩形替代圆角、椭圆、菱形、数据库或其他已声明形状的边界。无法执行可靠形状检查时，几何项只能为 `UNVERIFIED`。
 - 单条线可以连接节点某一侧的中点；同侧多条独立关系必须使用可区分的边界偏移位置，端点间距默认不小于 `max(24, 1.5 × 最小正文行高)` 个源坐标单位。相反方向的关系不得共享同一端口坐标；只有显式 `junction`、`bus` 或共享汇合语义可以共享端点，且必须有成员关系和分支方向证据。当前通用 V1 不接受 Provider 私有总线字段。
 - 不同业务关系的非端点路径段不得共享、重叠或共线混淆；共享汇合语义必须通过已有通用结构的显式汇合/关联节点、Design Notes 或拆图表达，不能用多条重叠路径伪造总线。交叉默认避免，但为保持主轴、同层业务顺序或避免更长的无意义折返而无法消除时，只允许保留已声明的必要交叉；它不得触及节点、文字、标签、箭头或关键端点，且两边的方向和语义必须可区分。
-- `designNotes.layout.crossingExceptions` 可选为 `{ edgeIds: [string, string], reason: string }[]`，仅记录上述必要交叉；`edgeIds` 必须是两个不同的现有边，`reason` 必须说明为何重排或绕行反而损害主流程可读性。`designNotes.layout.sideSwitchExceptions` 可选为 `{ edgeIds: string[], reason: string }[]`，仅记录同侧通道无法保持的业务端口或真实避障例外。没有对应声明的交叉、跨轴折返或 S 形换边均为失败。
+- `designNotes.layout.crossingExceptions` 可选为 `{ edgeIds: [string, string], reason: string }[]`，仅记录上述必要交叉；`edgeIds` 必须是两个不同的现有边，`reason` 必须说明为何重排或绕行反而损害主流程可读性。每个声明必须恰好命中一对实际交叉边，未声明交叉为 `EDGE_CROSSING`，引用缺失、重复、非两边或未发生的声明为 `CROSSING_EXCEPTION`。`designNotes.layout.sideSwitchExceptions` 可选为 `{ edgeIds: string[], reason: string }[]`，仅记录同侧通道无法保持的业务端口或真实避障例外；同侧跨轴折返、多次换边、引用缺失或未发生的声明分别以 `SIDE_SWITCH` / `SIDE_SWITCH_EXCEPTION` 失败。没有对应声明的交叉、跨轴折返或 S 形换边均为失败。
 - 路由优先级固定为：主流程沿主轴直连 → 同侧关系保持同侧通道 → 判定的前两条分支沿垂直主轴两侧对称离开 → 其余分支在主轴前进方向的 180° 前向局域内均匀分布。`TB` 的前向方向为下方，`LR` 的前向方向为右方；单一正向出边分别优先使用 `bottom`/`right`，其正向入边分别优先使用 `top`/`left`。
 - 连线靠近节点时最后一段应尽量垂直进入目标边，禁止沿节点边界长距离平行后贴边进入；确需绕障碍时要记录原因并保留可读间距。
 - 连线内部路径不得穿过非源节点、非目标节点、节点文字、边标签、标签背景或图例；跨分组连线可以穿过所属分组边界，但不得穿过无关分组标题、节点或标签。
@@ -306,7 +306,9 @@ Kiro Power 无内置 SVG Provider 时，只能引用安装包中已有的静态 
 }
 ```
 
-`entryNodeId` 与 `entryNodeIds` 二选一；`mainFlow` 必须覆盖全部业务节点和流程边，并满足入口可达性与出口无未声明出边。`loopLanes` 的 `side` 只能为 `left`/`right`，`laneOffset` 至少为 `24`，每条回路边必须有非空标签并实际进入声明的独立外侧 lane。回路边不计入普通 merge 语义。
+`entryNodeId` 与 `entryNodeIds` 二选一；`mainFlow` 必须覆盖全部业务节点和流程边，并满足入口可达性。`exitNodeIds` 表示主链完成态：它们不得有未归入 `loopLanes` 的出边，但可具有带可见标签、独立 lane 和明确原因的已声明反馈/重试边；不得为通过门禁删除合法业务回路或伪造无出边终态。`loopLanes` 的 `side` 只能为 `left`/`right`，`laneOffset` 至少为 `24`，每条回路边必须有非空标签并实际进入声明的独立外侧 lane。回路边不计入普通 merge 语义。
+
+对既有图布局迁移，可选 `designNotes.layout.changeImpactReview`：`{ baseline, movedNodeIds, impactedEdgeIds, edgeReviews }`。它存在时必须覆盖每个移动节点的所有 incident edges；每条受影响边恰有一个 `recomputed` 或带 `unchangedReason` 的 `unchanged` 复核记录。新建图没有可靠 baseline 时不得伪造该字段。
 
 过程图的 SVG 映射必须保持以下可反查属性：
 
@@ -315,4 +317,4 @@ Kiro Power 无内置 SVG Provider 时，只能引用安装包中已有的静态 
 - 箭头尖端：独立的 `[data-edge-arrow]` overlay，同时保留 `data-edge` 和 `data-arrow-target="<node-id>:<port>"`；箭头 overlay 不得作为连线主体几何重复采样；
 - marker 可以作为主体绘制机制，但不能替代可见的独立箭头映射；箭头必须有实际 bbox，且不能被无关节点、标签或分组遮挡。
 
-源级结果至少应分别记录 `main_flow_valid`、`loop_lanes_valid`、`decision_exit_valid`、`edge_intersection_status`、`collinear_overlap_status`、`target_port_direction_status` 和 `visible_arrow_mapping_status`。这些字段只证明对应检查层，不代表浏览器三视图已执行。
+源级结果至少应分别记录 `main_flow_valid`、`loop_lanes_valid`、`decision_exit_valid`、`edge_intersection_status`、`collinear_overlap_status`、`target_port_direction_status`、`target_port_approach_status`、`routing_minimality_status`、`side_switch_status`、`change_impact_review_status` 和 `visible_arrow_mapping_status`。这些字段只证明对应检查层，不代表浏览器三视图已执行。

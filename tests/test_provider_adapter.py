@@ -135,6 +135,7 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
     legend = None
     diagram_type = "flowchart"
     svg_extra = ""
+    svg_after_arrow = ""
     svg_width = 400
     svg_height = 300
     canvas_width = 400
@@ -157,6 +158,10 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
     elif variant == "sequence-lifeline":
         diagram_type = "sequence"
         svg_extra = '<line data-lifeline-for="start" x1="100" x2="100" y1="90" y2="260"/><line data-lifeline-for="done" x1="310" x2="310" y1="90" y2="260"/>'
+    elif variant == "label-edge-collision":
+        svg_extra = '<g data-edge-label="unrelated-label"><rect x="185" y="55" width="30" height="20"/><text data-text-id="label-unrelated" x="200" y="70">注</text></g>'
+    elif variant == "arrow-label-occlusion":
+        svg_after_arrow = '<g data-edge-label="start-done"><rect x="248" y="55" width="20" height="20"/><text data-text-id="label-start-done" x="258" y="70">注</text></g>'
     elif variant == "vertical-scroll":
         nodes[1]["x"] = 180
         nodes[1]["y"] = 500
@@ -174,9 +179,12 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
         svg_width = 1200
         canvas_width = 1200
         edge_end = 1000
-    svg_edge = f'<path data-edge="start-done" data-from="start" data-from-port="right" data-to="done" data-to-port="left" d="M140 65 L{edge_end} 65" marker-end="url(#arrow)"/>'
+    edge_path = f'M140 65 L{edge_end} 65'
+    if variant == "target-port-approach":
+        edge_path = "M140 65 L300 65 L260 65"
+    svg_edge = f'<path data-edge="start-done" data-from="start" data-from-port="right" data-to="done" data-to-port="left" d="{edge_path}" marker-end="url(#arrow)"/>'
     svg_arrow = f'<path data-edge-arrow="start-done" data-edge="start-done" data-arrow-target="done:left" d="M{edge_end - 8} 57 L{edge_end} 65 L{edge_end - 8} 73"/>'
-    svg = f'<svg viewBox="0 0 {svg_width} {svg_height}" width="{svg_width}" height="{svg_height}" role="img"><title>Geometry fixture</title><desc>FR-001 geometry fixture</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs>{svg_groups}{svg_nodes}{svg_extra}{svg_edge}{svg_arrow}<text data-text-id="requirement-reference" x="200" y="150">FR-001</text></svg>\n'
+    svg = f'<svg viewBox="0 0 {svg_width} {svg_height}" width="{svg_width}" height="{svg_height}" role="img"><title>Geometry fixture</title><desc>FR-001 geometry fixture</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs>{svg_groups}{svg_nodes}{svg_extra}{svg_edge}{svg_arrow}{svg_after_arrow}<text data-text-id="requirement-reference" x="200" y="150">FR-001</text></svg>\n'
     with open(os.path.join(project, "assets", "geometry.svg"), "w") as handle:
         handle.write(svg)
     manifest = {
@@ -227,6 +235,9 @@ def test_browser_geometry_scenarios() -> None:
         ("group-overlap", False, "groups overlap unexpectedly", (800, 600)),
         ("legend-coverage", False, "browser legend coverage does not match", (800, 600)),
         ("sequence-lifeline", False, "sequence lifeline coordinate", (800, 600)),
+        ("label-edge-collision", False, "label geometry intersects unrelated edge geometry", (800, 600)),
+        ("arrow-label-occlusion", False, "arrow overlay is occluded by a later decoration", (800, 600)),
+        ("target-port-approach", False, "approaches a target from inside its visible shape", (800, 600)),
         ("vertical-scroll", True, None, (320, 240)),
         ("viewport-overflow", False, "outside the horizontal viewport", (320, 240)),
     ]
@@ -255,5 +266,5 @@ if __name__ == "__main__":
     test_file_url_cannot_escape_project()
     if os.environ.get("RUN_CHROME_PROVIDER_GEOMETRY") == "1":
         test_browser_geometry_scenarios()
-        print("8 Chrome DevTools geometry scenarios passed")
+        print("11 Chrome DevTools geometry scenarios passed")
     print("4 diagram provider adapter tests passed")

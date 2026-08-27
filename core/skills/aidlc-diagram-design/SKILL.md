@@ -75,8 +75,8 @@ Independent Capability — not an AIDLC phase.
 
 ## 过程图强制验收补充
 
-对于 `flowchart`、`pipeline`、`state` 等过程图，生成 `.diagram.json` 时必须同步生成 `designNotes.layout.mainFlow` 和 `designNotes.layout.loopLanes`。先按主阅读方向将连续主流程排在主轴上，再将同层实体在垂直主轴方向均匀分布；单一正向出边走主轴前进方向，多出边先占用垂直主轴的对称两侧，其余只在前向 180° 局域均分。源、目标位于主轴同侧的关系必须优先保持同侧通道，禁止无理由跨轴折返。主流程必须覆盖所有业务节点/流程边并可从入口追踪到出口；失败、重试、反馈边必须进入声明的左/右独立 lane 并带可见标签；判定节点必须是 diamond，且每个出口必须有可见分支标签。连接器必须保留 `from/to/port` DOM 属性和完整路径，箭头尖端使用独立 `data-edge-arrow` overlay。
+对于 `flowchart`、`pipeline`、`state` 等过程图，生成 `.diagram.json` 时必须同步生成 `designNotes.layout.mainFlow` 和 `designNotes.layout.loopLanes`。先按主阅读方向将连续主流程排在主轴上，再将同层实体在垂直主轴方向均匀分布；单一正向出边走主轴前进方向，多出边先占用垂直主轴的对称两侧，其余只在前向 180° 局域均分。源、目标位于主轴同侧的关系必须优先保持同侧通道，禁止无理由跨轴折返。主流程必须覆盖所有业务节点/流程边并可从入口追踪到出口；出口节点只允许已声明、带标签并实际进入独立 lane 的反馈/重试出边，不能因合法用户后续操作伪造无出边终态；失败、重试、反馈边必须进入声明的左/右独立 lane 并带可见标签；判定节点必须是 diamond，且每个出口必须有可见分支标签。连接器必须保留 `from/to/port` DOM 属性和完整路径，箭头尖端使用独立 `data-edge-arrow` overlay。节点位置、尺寸、端口、标签或分组变化后，先枚举全部 incident edges 与受影响通道，再重算主轴/净空并按直达 → 一折 Manhattan → 两折 Manhattan → 必要外侧 lane 重新路由；不得保留旧折线或只局部缩短。目标端倒数第二个有效点必须在实体外部，最后一段沿 `toPort` 法向进入。既有图布局迁移可提供 `changeImpactReview`；新图不得伪造 baseline。
 
-交叉默认避免，但不是机械零交叉目标：为保持主轴、同层业务顺序或避免更长的折返而必须保留的交叉，须在 `designNotes.layout.crossingExceptions` 声明具体边对与原因，并由浏览器确认不触及节点、文字、标签、箭头或关键端点且方向可读；未声明交叉、共线重叠、节点/文字/标签穿越仍然阻断。跨侧或多次换边须使用 `sideSwitchExceptions` 说明业务端口或真实避障原因。
+交叉默认避免，但不是机械零交叉目标：为保持主轴、同层业务顺序或避免更长的折返而必须保留的交叉，须在 `designNotes.layout.crossingExceptions` 声明具体、互异的边对与原因，且该声明必须命中实际交叉；由浏览器确认其不触及节点、文字、标签、箭头或关键端点且方向可读。未声明交叉、未发生的例外声明、共线重叠、节点/文字/标签穿越仍然阻断。跨侧或多次换边须使用 `sideSwitchExceptions` 说明业务端口或真实避障原因，并且同样必须命中实际路径。
 
 验证顺序不得跳过实际几何：先运行 `diagram-contract` checker，确认主流程、回路、判定出口、edge crossing、共线重叠、端口方向和箭头映射状态；目标操作要求 `preview`/浏览器 `render` 时，再使用 Provider 对实际 DOM 的 edge-node、edge-edge、bbox、文字、水平溢出和箭头遮挡执行检查。Provider Request 必须声明 `normal`、`fit`、`zoom`，三视图全部成功后才能记录浏览器 PASS；Provider 不可用时保留 `UNVERIFIED`/`NEEDS_CAPABILITY`，不得手写或修改 evidence 冒充 Producer 结果。

@@ -72,9 +72,9 @@
   <path data-edge="delivery-products-switch" data-from="show-delivery-products" data-from-port="bottom" data-to="switch-delivery-address" data-to-port="top" d="M1100 620 L1100 720" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)" />
   <path data-edge-arrow="delivery-products-switch" data-edge="delivery-products-switch" data-arrow-target="switch-delivery-address:top" d="M1092 708 L1100 720 L1108 708" fill="#334155" />
 
-  <path data-edge="delivery-address-retry" data-from="modify-delivery-address" data-from-port="left" data-to="delivery-store" data-to-port="left" data-edge-label="delivery-address-retry" d="M600 590 L100 590 L100 640 L500 640 L500 270 L760 270" fill="none" stroke="#b45309" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#arrow)" />
+  <path data-edge="delivery-address-retry" data-from="modify-delivery-address" data-from-port="left" data-to="delivery-store" data-to-port="left" data-edge-label="delivery-address-retry" d="M600 590 L180 590 L180 610 L500 610 L500 270 L760 270" fill="none" stroke="#b45309" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#arrow)" />
   <path data-edge-arrow="delivery-address-retry" data-edge="delivery-address-retry" data-arrow-target="delivery-store:left" d="M772 262 L760 270 L772 278" fill="#b45309" />
-  <g data-edge-label="delivery-address-retry"><text data-text-id="label-delivery-address-retry" x="300" y="630" text-anchor="middle" font-size="14">修改地址后重试</text></g>
+  <g data-edge-label="delivery-address-retry"><text data-text-id="label-delivery-address-retry" x="340" y="640" text-anchor="middle" font-size="14">修改地址后重试</text></g>
 
   <g data-legend-item="decision-shape" data-legend-sample="delivery-store-success">
     <polygon points="500,850 530,865 500,880 470,865" fill="#fff7ed" stroke="#334155" stroke-width="2" />
