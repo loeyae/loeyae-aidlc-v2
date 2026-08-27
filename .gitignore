@@ -1,5 +1,4 @@
 node_modules/
-dist/
 core/tools/data/
 *.tsbuildinfo
 .DS_Store
