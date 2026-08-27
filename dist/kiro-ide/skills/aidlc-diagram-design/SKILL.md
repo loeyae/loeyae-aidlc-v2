@@ -35,6 +35,42 @@ Independent Capability — not an AIDLC phase.
 
 按加载的设计标准执行完整的图表设计流程：先确定 `TB`/`LR` 主阅读方向、主轴、业务层级、首层对称组和判断分支端口，再提取节点/边、计算实际内容边界、生成 SVG 源、生成可选 `.diagram.json` 语义伴随清单、生成 Provider Request 并执行源级验证。每条 `annotations[]` 必须生成唯一稳定 `id`，并在 SVG 中生成一一对应的 `data-note`；不得为了排版合并注释 ID。生成器不得以固定窗口高度、整体缩放、缩小字号或压缩层级换取“一屏显示”，纵向图可以扩展画布并允许页面纵向滚动。具体步骤和验收矩阵以加载的两份规则文件为准，本文件不复制。当 `target_operations` 包含 `preview` 或浏览器侧 `render` 时，源级 `diagram-contract` evidence 通过后调用 `loeyae-aidlc diagram-provider run --request <provider-request.json> --evidence <diagram-contract.json>`；该运行器负责常规/适合窗口/放大视图的浏览器证据采集和 evidence 状态更新，`export` 不由 Chrome DevTools Provider 承担。
 
+## 已有图表的冗余连线修复模式
+
+当任务是修复已有 SVG 中“直达或一折即可到达、但当前使用多余折点或外侧回路”的连线时，使用本模式。它默认是**不改变语义的局部路由修复**，不是重新设计整张图。
+
+### 业务语义上下文
+
+业务语义必须根据 SVG 所属文档位置的上下文获取，不得只根据线条坐标、节点文字或边的当前走向反推业务含义。按以下顺序定位上下文：
+
+1. `.diagram.json` 的 `document`、图表输出路径和 `sourceBasis`（如有）；
+2. 引用该 SVG 的 Markdown 文件及其对应章节、图表标题和相邻正文；
+3. SVG/sidecar 所在文档目录中与该图明确关联的来源段落。
+
+开始修改前必须读取当前 SVG、sidecar、上述文档上下文和已加载的图表规范。文档引用不明确、同一 SVG 被多个文档以不同语义引用或来源上下文不足时返回 `NEEDS_CONTEXT`；不得把 SVG 路径本身当作业务事实来源。
+
+### 修复范围与受影响边清单
+
+默认不得改变节点/边的稳定 ID、业务节点集合、业务分支、边方向、节点位置或节点尺寸；不得通过重排节点掩盖单条连线问题。确需移动节点或改变布局时，必须使用 `designNotes.layout.changeImpactReview` 记录 baseline、移动节点、全部 incident edges 和逐边复核。
+
+修改前先建立受影响边清单，至少记录：edge ID、from/to、fromPort/toPort、当前 `points`、相关节点几何、当前问题、候选路径、最终路径，以及是否使用 `branchPortExceptions`。只修改目标边，不扩大到其他图表或无关业务语义。
+
+### 路径与例外
+
+每条受影响边按以下顺序选择合法路径：直达 → 一折 Manhattan → 最少折点 Manhattan → 必要外侧 lane。只有真实节点/标签/其他边/端口冲突、已声明回路或必须保持的业务端口语义，才允许保留更多折点或外道；保留外道必须说明具体原因。
+
+路径必须保持水平/垂直正交、无重复点、端点落在实际端口、首段和末段方向正确、目标倒数第二个有效点位于目标形状外部，并通过现有 `ROUTING_MINIMALITY`、`PORT_DIRECTION`、`PORT_APPROACH`、碰撞、交叉和共线重叠检查。`branchPortExceptions`、`sideSwitchExceptions` 和 `crossingExceptions` 必须位于 `designNotes.layout`，只能记录实际命中的业务或几何例外。
+
+### SVG/sidecar 同步与箭头契约
+
+每次修改边必须同步 SVG 的路径、端点属性、`data-arrow-target`、独立 `[data-edge-arrow]` overlay、标签文本/坐标和背景框，以及 sidecar 的 `points`、端口、`arrowTarget`、标签和适用例外。当前 V1 契约不增加 `arrowRef`：箭头身份使用 SVG 的 `data-edge-arrow`/`data-edge`，目标使用 `data-arrow-target`，sidecar 使用 `arrowTarget: "<to>:<toPort>"`；不得引入第二套互相竞争的箭头 ID。
+
+### 验收与输出
+
+先执行 JSON/SVG 结构、source checker 和几何检查；目标操作包含 `preview` 或浏览器 `render` 时，再执行 Provider 的 `normal`、`fit`、`zoom` 三视图。`source-only` 可以以源级通过加目标视觉 `UNVERIFIED` 交付为 `SOURCE_READY`；只有用户要求的目标操作全部有真实 Provider 证据时才可声明完整 `PASS`。Provider 不可用时标记 `NEEDS_CAPABILITY` 或 `UNVERIFIED`，不得伪造截图、快照或 evidence。
+
+最终报告至少列出图表 ID、来源文档上下文、修改 edge ID、最终端口和路径、保留外道理由、静态结果、Chrome 结果、未验证项、修改文件、证据路径和“未创建 Git commit”。
+
 ## 上下文预算与分段执行
 
 图表验证默认按**单图、单目标操作、单次 Provider 会话**执行，不得在同一上下文中批量加载多张 SVG、多个 `.diagram.json` 或多组截图/快照。

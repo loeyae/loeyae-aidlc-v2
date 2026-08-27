@@ -73,6 +73,16 @@ Semantic QA 是不启动浏览器的结构化检查，至少覆盖：
 
 缺少 V2 新结构化字段时返回 `MIGRATION_REQUIRED`；字段存在但值非法时返回 `FAIL`。不得把自然语言观察当作结构化证据。
 
+## 已有图表冗余连线修复的验证边界
+
+当任务明确是已有图表的冗余连线修复时，验证记录必须区分“局部路由修复”和“业务语义变更”。默认要求保留节点/边 ID、节点集合、业务分支、方向、节点几何和文档语义上下文；若发生节点或布局变化，必须提供 `changeImpactReview`，覆盖移动节点的全部 incident edges。没有 before/after baseline 时，checker 可以证明当前源契约和几何状态，但不能单独证明“未改变原始业务语义”或“检查了原图全部冗余边”，不得把这些结论伪装成自动 PASS。
+
+修复记录至少应列出受影响 edge ID、原端口和路径、候选直达/一折/最少 Manhattan 路径、最终路径、保留外道的实际原因及适用的 `branchPortExceptions`、`sideSwitchExceptions` 或 `crossingExceptions`。这些是可追溯的任务证据；现有 `routing_minimality_status`、端口方向/目标外侧、节点/边碰撞、交叉、共线重叠和箭头映射门禁继续作为最终 source gate，不新增平行的 `arrowRef` 契约。
+
+业务语义证据应引用 SVG 所属文档位置的 `document`、章节或相邻正文。SVG/sidecar 的几何不能替代业务来源；如果文档上下文不足，状态为 `NEEDS_CONTEXT`，而不是让 checker 根据坐标放行。
+
+`source-only` 只要求适用的源结构和几何证据通过，目标 Provider 状态可以是 `UNVERIFIED`，最终只能为 `SOURCE_READY`。当目标操作包含 `preview`、`render` 或 `export` 时，必须实际取得所要求的 Provider 证据；`normal`、`fit`、`zoom` 任一缺失、失败或 Provider 不可用时，保持 `UNVERIFIED`/`NEEDS_CAPABILITY`，不能声明完整 `PASS`。`git diff --check`、命令长度和“不创建 Git commit”属于执行流程检查，不是 diagram-contract 语义 evidence 字段。
+
 ## Geometry QA
 
 Geometry QA 使用源坐标、路径点和结构化文本估算，不声称完成真实浏览器字体测量。当前检查覆盖：
