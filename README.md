@@ -223,18 +223,16 @@ loeyae-aidlc-v2/
 │   │   ├── standards/          # 编码/设计标准
 │   │   ├── design/             # 图表/UI 标准
 │   │   └── tech/               # 技术栈规范
-│   ├── scopes/                  # Scope 定义
-│   ├── agents/                  # Agent persona
-│   ├── sensors/                 # 自动检查
-│   └── memory/                  # 分层规则
+│   └── sensors/                 # 自动检查
 ├── harness/                     # 各平台适配层
 │   ├── kiro-crew/              # Kiro Crew Dashboard
 │   ├── kiro-ide/               # Kiro IDE (Power)
+│   ├── kiro-cli/               # Kiro CLI
 │   ├── claude/                 # Claude Code
+│   ├── codex/                  # Codex
 │   └── opencode/               # OpenCode
 ├── dist/                        # 编译输出
 ├── scripts/                     # 构建脚本
-├── plugins/                     # 可插拔扩展
 └── tests/                       # 测试
 ```
 
@@ -311,8 +309,8 @@ allowlist 中的最小语义命令配置如下：
 | classic | 44 | 标准开发流程 |
 | express | 7 | 快速迭代 |
 | workshop | 7 | 工作坊/探索 |
-| bugfix | 7 | Bug 修复 |
-| refactor | 7 | 代码重构 |
+| bugfix | 5 | Bug 修复 |
+| refactor | 5 | 代码重构 |
 
 ## 从 v1 迁移
 

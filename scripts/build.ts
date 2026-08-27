@@ -18,7 +18,7 @@
 
 import { existsSync, mkdirSync, cpSync, rmSync, readdirSync } from "fs";
 import { join, resolve, dirname } from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { compile as compileGraph } from "../core/tools/aidlc-graph";
 import type { HarnessManifest } from "./manifest-types.ts";
 
@@ -52,7 +52,10 @@ async function buildHarness(name: string) {
     process.exit(1);
   }
 
-  const mod = await import(manifestPath);
+  // Windows: dynamic import() requires a file:// URL, not a bare Windows
+  // path (e.g. "E:\...\manifest.ts" → ERR_UNSUPPORTED_ESM_URL_SCHEME).
+  // pathToFileURL handles drive letters and backslashes portably.
+  const mod = await import(pathToFileURL(manifestPath).href);
   const manifest: HarnessManifest = mod.default;
   const outDir = join(DIST_DIR, name);
 
@@ -94,16 +97,6 @@ async function buildHarness(name: string) {
       harnessCount++;
     } else {
       throw new Error(`Harness file not found: ${file.src}`);
-    }
-  }
-
-  // Apply rulesRename (if any stage files use "rules/" paths)
-  if (manifest.rulesRename) {
-    const rulesDir = join(harnessOutDir, "rules");
-    const renamedDir = join(harnessOutDir, manifest.rulesRename);
-    if (existsSync(rulesDir)) {
-      cpSync(rulesDir, renamedDir, { recursive: true });
-      rmSync(rulesDir, { recursive: true });
     }
   }
 

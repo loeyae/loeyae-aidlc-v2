@@ -18,9 +18,12 @@ function scopeTable(): void {
   const graph = JSON.parse(readFileSync(GRAPH_PATH, "utf-8")) as StageGraph;
   const scopes = [...new Set(graph.stages.flatMap((stage) => stage.scopes))].sort();
   for (const scope of scopes) {
-    const count = graph.stages.filter(
-      (stage) => stage.execution === "ALWAYS" || stage.scopes.includes(scope),
-    ).length;
+    // A stage is a candidate for a scope iff the scope is listed in the
+    // stage's scopes[] array. ALWAYS stages are already enumerated in the
+    // relevant scopes[] arrays, so no separate ALWAYS special-case is needed
+    // (the previous `execution === "ALWAYS" ||` branch double-counted
+    // always-on stages into scopes that do not list them — e.g. bugfix/refactor).
+    const count = graph.stages.filter((stage) => stage.scopes.includes(scope)).length;
     console.log(`${scope}\t${count}`);
   }
 }

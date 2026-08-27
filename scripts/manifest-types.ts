@@ -41,8 +41,6 @@ export interface HarnessManifest {
   /** Harness-authored files (not from core/) to copy into dist */
   harnessFiles: HarnessFile[];
 
-  /** Optional: rename "rules" to another dir name (e.g. "steering" for Kiro) */
-  rulesRename?: string;
   /** Plugin configuration for this harness */
   plugin?: PluginConfig;
 }

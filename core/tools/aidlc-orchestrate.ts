@@ -19,7 +19,7 @@
  * with `approval: block`; all other stages auto-advance after gates pass.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, renameSync, unlinkSync } from "fs";
 import { join, dirname, resolve, relative } from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
@@ -164,7 +164,20 @@ function saveState(state: WorkflowState): void {
     mkdirSync(STATE_DIR, { recursive: true });
   }
   state.updated_at = new Date().toISOString();
-  writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+  // Atomic write: serialize to a temp file then rename onto the target.
+  // A crash mid-writeFileSync would corrupt aidlc-state.json and strand the
+  // workflow; rename is atomic on POSIX and on Windows NTFS for same-volume
+  // renames, so the state file is either fully old or fully new.
+  const tmpPath = `${STATE_PATH}.tmp`;
+  writeFileSync(tmpPath, JSON.stringify(state, null, 2));
+  try {
+    renameSync(tmpPath, STATE_PATH);
+  } catch (e) {
+    // renameSync can fail if a stale .tmp lingers from a prior crashed run
+    // (e.g. Windows EXISTS path). Clean up and retry once.
+    if (existsSync(tmpPath)) unlinkSync(tmpPath);
+    throw e;
+  }
 }
 
 function createInitialState(scope: string): WorkflowState {
@@ -1617,4 +1630,7 @@ async function main() {
   console.log(JSON.stringify(directive, null, 2));
 }
 
-main();
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

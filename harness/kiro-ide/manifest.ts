@@ -32,8 +32,6 @@ const manifest: HarnessManifest = {
     { src: "README.md", dst: "README.md", projectRoot: true },
   ],
 
-  rulesRename: "steering",
-
   plugin: { manifestDir: ".kiro-plugin", kind: "kiro" },
 };
 

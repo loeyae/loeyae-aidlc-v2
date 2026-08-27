@@ -15,6 +15,7 @@ triggers: aidlc, AI-DLC, 使用 AI-DLC, 继续上次的工作, 认领单元, 功
 
 门禁保证完整性，因此不需要人工审批阻断。引擎验证通过后自动推进到下一阶段。
 仅 2 个不可自动验证的决策点保留人工确认（架构决策 + 部署决策）。
+这 2 个审批点在 run-stage directive 中以 `gate: true` 标识；agent 必须完成产物与 sensor 后请用户确认，再 `report --result approved`。详见下文"Directive 类型"。
 
 ## 架构
 
@@ -47,6 +48,27 @@ Loop:
 | `done` | 工作流完成 |
 | `parked` | 工作流已暂停，下次 `--resume` 恢复 |
 
+### run-stage directive 附带字段
+
+除 `kind` 外，run-stage directive 还携带：
+
+| 字段 | 类型 | 含义 | agent 动作 |
+|------|------|------|-----------|
+| `gate` | boolean | `true` = 本 stage 为审批阻断点（approval:block） | 完成后必须 `report --result approved`，不得用 `completed`。引擎会拒绝 `completed` 并提示重报 |
+| `approval` | "block"\|"confirm"\|"notify" | 审批类型 | `block` 必须人工确认；`notify` 仅通知不阻断 |
+| `produces` | string[] | 准出需存在的产物路径 | report 前确保已生成 |
+| `sensors` | string[] | 准出需通过的 sensor | report 前确保 evidence 就绪 |
+| `mode` | "inline"\|... | 执行模式 | 参考 stage 文件 |
+| `consumes` | string[] | 上游产物输入 | 读取这些文件作为输入 |
+
+**审批点处理**：`gate:true`（即 application-design / operations）时，先完成产物与 sensor，再请用户确认，然后：
+
+```bash
+loeyae-aidlc orchestrate report --stage <slug> --result approved
+```
+
+误用 `--result completed` 会被引擎拒绝（error directive），按提示改用 `approved` 重报即可，不会损坏状态。
+
 ## 五层门禁体系
 
 ### 1. 准入：requires（依赖检查）
@@ -64,7 +86,7 @@ Stage frontmatter 声明 `condition: <expression>`。引擎在 `next` 时评估�
 - 支持条件：`has_legacy_code`、`has_ui_requirements`、`multi_module`、`has_nfr_needs`、`has_infra_needs`、`has_test_case_sources`、`has_contract_dependencies`、`has_subagent_support`、`is_loeyae_boot`
 - 未知条件 fail-closed（视为阻断而非放行）
 
-覆盖：14/46 stages
+覆盖：20/46 stages
 
 ### 3. 准出：produces（产物验证）
 
@@ -117,7 +139,8 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 | `no-todo` | 所有含 produces 的 stage（编译时自动注入） | 所有 produces 文件含 TODO/FIXME/HACK，或产物不可读取 |
 | `traceability` | 所有含 produces 的 stage（编译时自动注入） | 非 evidence produces 文件无 REQ-xxx/R-xxx；纯 evidence stage 必须声明 `traceability: not_applicable` |
 
-覆盖：21/46 stages（含 PRD、图表设计和 Construction 关键 stage）
+覆盖：frontmatter 手写 21 / 编译后 32（含自动注入的 no-todo + traceability）/ 46 stages。
+所有 `produces` 非空的 stage 在编译时自动追加 `no-todo` 与 `traceability` sensor，故实际准出 sensor 覆盖 = 32/46。下表列为 frontmatter 显式声明的 sensor；自动注入的两项见末两行。
 
 ### 5. 防跳步：current_stage
 
@@ -125,17 +148,18 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 
 ## Scope 过滤
 
-不同 scope 执行不同数量的 stages（总计 46 stages）：
+不同 scope 进入不同数量的候选 stages（总计 46 stages；实际执行数依项目条件动态减少）：
 
-| Scope | 约执行 | 典型场景 |
-|-------|--------|---------|
+| Scope | 候选 stages | 典型场景 |
+|-------|------------|---------|
 | feature | 46 | 完整功能开发 |
 | enterprise | 46 | 企业级完整流程 |
-| classic | ~44 | 标准开发流程 |
-| mvp | ~23 | 最小可行产品 |
+| mvp | 46 | 最小可行产品 |
+| classic | 44 | 标准开发流程 |
 | express | 7 | 快速迭代/小改动 |
-| bugfix | 7 | Bug 修复 |
-| refactor | 8 | 代码重构 |
+| workshop | 7 | 工作坊/探索 |
+| bugfix | 5 | Bug 修复 |
+| refactor | 5 | 代码重构 |
 
 ## 仅保留的 2 个人工确认点
 
@@ -161,6 +185,16 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 - **人工确认**：通过 `[OPTIONS: Approve | Request Changes]` 渲染
 - **证据目录**：业务项目的 `.aidlc/evidence/<stage-slug>/` 存放 sensor 证据
 - **MCP 能力**：默认安装会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` 合并到 Kiro Crew 全局配置；除无自定义字段的旧 `chrome-devtools-mcp@latest` 默认项会安全收敛为 V2 固定的 `chrome-devtools-mcp@1.6.0` 外，同名现有配置均保留。服务不可用时必须按对应流程的 `NEEDS_CAPABILITY` 或通用规范降级，不得伪造调用结果
+
+## Chrome DevTools 浏览器验收 Provider
+
+本 Skill 随附的 `chrome-devtools` MCP（`chrome-devtools-mcp@1.6.0`）仅用于 `diagram-contract` sensor 的浏览器几何验收：加载独立 SVG 或目标预览 URL，采集 DOM/属性、几何、viewport 截图和控制台证据。
+
+使用规则：
+- 不生成 SVG、`.diagram.json` 或 PNG/PDF，不重新布局，不替代源级 `diagram-contract` 检查
+- 独立 SVG 优先用 `file://` URL；若 Chrome 呈现为 XML 查看器，运行器用只含当前 SVG 的临时本地 HTML wrapper 检查，结束后删除
+- 无法启动 Chrome 或 MCP 时，记录 `NEEDS_CAPABILITY`，不得伪造浏览器验证通过
+- `UNVERIFIED` 等验收状态记录在外部 evidence 或验收报告中，不写入 SVG 图片内容
 
 ## 安装
 
