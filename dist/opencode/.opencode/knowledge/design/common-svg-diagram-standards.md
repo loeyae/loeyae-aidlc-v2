@@ -34,7 +34,30 @@ Provider 生成的静态 SVG、PNG 或 PDF 是目标交付物，路径由目标�
 | 图型与设计记录 | `diagramType`、`designNotes` | 新建/调整图必填；记录单一意图、语义模式、视觉语义角色、图例决定、分组解释、拆图决定和 `layout`；详细字段见下文 |
 | 注释 | `annotations[].id`、`text`、`x`、`y` | 每条注释必须有图内稳定唯一 ID；只承载辅助说明；可选 `fontSize`、`lineHeight`、`anchor`、`weight`、`tone`；独立业务事实应建模为节点、连线或分组，而不是无 ID 注释 |
 
-### 端口偏移的 V1 兼容扩展
+### expected contract、actual 和生成器闭环
+
+`.diagram.json`、SVG 和浏览器 inspection 都是 actual；它们相互一致不能替代独立业务期望。manifest 或 diagram entry 可以使用 `expected_contract_path`/`expectedContractPath` 作为文件引用，但不得把 manifest、SVG、sidecar、截图或 bbox 内容复制到 expected 文件。Provider Request 对每个图使用 `expected_contract_path`，没有该文件、文件不可解析或 source ref 不可追溯时，业务语义状态为 `UNVERIFIED`。
+
+expected contract 的 `route_contract.edge_intents` 是跨图型、跨 SVG/sidecar 结构的共享协议。每条 actual edge 都必须有 expected route intent；`kind` 表示 `direct`、`manhattan`、`branch`、`loop`、`feedback`、`relation` 或 `custom` 等路由语义，`bend_count` 及范围按连续有效路径段的方向变化计算，共线点不计数。expected 不得写入 actual 的坐标、`points`、实际几何 bbox、渲染像素或 Provider 结果。
+
+期望例外必须使用结构化字段：`object`、`type`、`business_reason`、`geometric_reason`、`scope`、`visual_evidence`。`object` 必须能定位实际边/边对/端口；`type` 必须与实际偏离类型相符；业务原因和几何原因都必须非空；scope 必须声明图表、视图或条件；`visual_evidence.required` 必须为 `true`。源 checker 验证对象和偏离，浏览器 Provider 验证实际几何、截图和快照，不能只验证字段存在。
+
+每个生成的 diagram entry 必须记录：
+
+```json
+{
+  "generation": {
+    "generator": {"name": "<name>", "version": "<version>"},
+    "config": {"summary": "<summary>", "digest": "sha256:<64-hex>"},
+    "source_refs": ["<business-source>"],
+    "outputs": ["<svg-output>", "<expected-contract>", "<other-derived-output>"]
+  }
+}
+```
+
+生成器或配置变更后，必须重新生成 outputs 中的全部派生产物并重新执行 source、geometry 和 browser 受影响视图；generation provenance 缺失、不一致或 output 不完整时不得产生 `STATIC_PASS`/`PASS`。
+
+
 
 本节只扩展 V1 的可选字段，不改变 `.diagram.json` 的 `version: 1`、`fromPort`/`toPort` 侧语义或既有业务含义：
 
@@ -70,7 +93,7 @@ Provider 生成的静态 SVG、PNG 或 PDF 是目标交付物，路径由目标�
 - `symmetryGroups` 为 `{ nodeIds: string[], tolerance?: number }[]`；每组至少两个节点，节点中心必须围绕 `mainAxis` 对称并处于同一层。
 - `mergeNodes` 为 `{ nodeId: string, reason: string }[]`；同一节点有多个入边时必须声明为汇合节点。汇合节点可以使用合法的 `top`/`bottom` 等端口，但不改变普通分支的默认端口规则。
 - `branchLayerExceptions` 和 `branchPortExceptions` 为 `{ edgeIds: string[], reason: string }[]`，只能用于跨组、显式换行、障碍避让或已确认的不同业务层级；不得用空理由绕过门禁。
-- `readabilityEvidence` 必须包含 `normal`、`fit`、`zoom`，每项为 `{ status: PASS|FAIL|UNVERIFIED, evidence: string }`。没有真实目标环境证据时只能为 `UNVERIFIED`。
+- `readabilityEvidence` 必须包含 `normal`、`fit`、`zoom`，每项为 `{ status: PASS|FAIL|UNVERIFIED, evidence: string }` 且 evidence 非空。源 checker 不能仅凭该字段接受 `PASS`；没有本次真实目标环境截图/快照和可追溯 Provider 记录时必须为 `UNVERIFIED`。
 - `annotations[]` 若存在，每项必须有唯一小写 kebab-case `id`、字符串 `text`、有限 `x/y`；SVG 必须一一生成 `data-note="<id>"`。允许一个说明框承载一条注释的多行文本，不允许一个 `data-note` 代表多个结构化 ID。
 
 静态 checker 必须对上述源字段执行主轴、同层、首层对称、分支目标端口、分支最后一段方向、显式汇合和注释映射检查；Provider/浏览器必须额外检查真实边界、三视图可读性、图例/注释顺序和水平溢出。
@@ -256,7 +279,7 @@ Kiro Power 无内置 SVG Provider 时，只能引用安装包中已有的静态 
 - **仅有 SVG 源**：可以对源结构、静态安全、事实映射、ID、方向、端口、连通性和声明路径执行检查；实际 Provider 几何、目标环境渲染和视觉检查标记 `UNVERIFIED`；
 - **已有 Provider 目标产物**：对 Provider 返回的静态 SVG/PNG/PDF 及其目标环境执行完整的结构、几何、语义和视觉矩阵。
 
-每张 SVG 源或 Provider 产物都必须分别完成下列适用验收，并在结果中逐项标记 **PASS**、**FAIL**、**UNVERIFIED**、**MIGRATION_REQUIRED** 或 **NEEDS_CAPABILITY**；后两者不是几何/视觉通过状态，具体含义见下文：
+每张 SVG 源或 Provider 产物都必须分别完成下列适用验收；层级检查可以记录 **PASS**、**FAIL**、**UNVERIFIED**、**MIGRATION_REQUIRED** 或 **NEEDS_CAPABILITY**，但 `MIGRATION_REQUIRED` 只表示迁移诊断，不是图表最终状态。图表最终状态只能写入统一的 `final_status`：`PASS`、`STATIC_PASS`、`UNVERIFIED`、`NEEDS_CAPABILITY` 或 `FAIL`：
 
 | 类别 | 必查项目 | PASS 的最低证据 |
 |---|---|---|
@@ -282,10 +305,10 @@ Kiro Power 无内置 SVG Provider 时，只能引用安装包中已有的静态 
 - **PASS**：有实际结构、语义或几何检查证据证明对应项目通过；没有目标 Provider/浏览器证据时，箭头可见性、字体、缩放可读性和最终视觉效果不得使用此状态；
 - **FAIL**：发现具体结构、语义、几何或视觉问题；必须修复源/适配并只重跑受影响检查；
 - **UNVERIFIED**：尚未执行、工具不可用、目标环境不可达，或当前检查无法对实际形状/渲染行为提供证据；不得被其他检查的通过结果覆盖；
-- **MIGRATION_REQUIRED**：旧 V1 资产仍可解析，但缺少本次新增且对该图适用、必须补齐的端口偏移、完整路径、Sequence 生命线映射、图型/Design Notes、图例或分组结构化记录；可选偏移字段缺省并按 `0` 兼容时不单独触发迁移。它不是新规则的 `PASS`，迁移完成前不能作为完整验收证据；
+- **MIGRATION_REQUIRED**：旧 V1 资产仍可解析，但缺少本次新增且对该图适用、必须补齐的端口偏移、完整路径、Sequence 生命线映射、图型/Design Notes、图例或分组结构化记录；可选偏移字段缺省并按 `0` 兼容时不单独触发迁移。它不是 `final_status`，迁移未完成时图表 `final_status` 必须为 `UNVERIFIED`，迁移完成后重新执行五态验收；
 - **NEEDS_CAPABILITY**：用户要求目标预览、渲染或导出，但没有可验证的目标 Provider；它不表示 SVG 源或语义清单不存在，也不是把未执行检查标为 `PASS` 的替代状态。
 
-仅交付源时可使用 `SOURCE_READY` 表示源和 Provider Request 已生成，同时保留适用的 `UNVERIFIED`。任一适用必查项为 FAIL 或 UNVERIFIED 时，不能将对应目标产物标记为完整通过；只有目标操作未被要求时，源交付可以在视觉项 `UNVERIFIED` 的情况下结束。
+仅交付源时使用 `final_status: "STATIC_PASS"` 表示 expected、源结构和几何已通过而浏览器尚未完成；保留 `UNVERIFIED` 的浏览器视图证据。任一适用必查项为 FAIL 或 UNVERIFIED 时，不能将对应目标产物标记为完整 `PASS`；只有三个真实浏览器视图均通过并有最新截图/快照时才可为 `PASS`。兼容读取旧 `SOURCE_READY` 时只映射为 `STATIC_PASS`，旧 `DELIVERED` 不自动映射为 `PASS`。
 
 
 ### 过程图追踪字段与 SVG 映射扩展

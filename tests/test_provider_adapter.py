@@ -206,6 +206,31 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
         json.dump(manifest, handle)
     with open(os.path.join(project, "geometry.md"), "w") as handle:
         handle.write("# Geometry\n\nFR-001\n")
+    expected = {
+        "version": "1",
+        "type": "diagram-expected-contract",
+        "source": {"kind": "approved-test-source", "ref": "geometry.md", "revision": "fixture", "digest": "sha256:" + "0" * 64},
+        "generator": {"name": "generic-test-generator", "version": "1.0.0", "config_summary": "generic geometry fixture", "config_digest": "sha256:" + "1" * 64, "source_refs": ["geometry.md"]},
+        "diagrams": [{
+            "id": "geometry",
+            "diagram_type": diagram_type,
+            "intent": "验证独立业务期望与浏览器实际几何一致",
+            "nodes": [{"id": node["id"], "shape": node["shape"]} for node in nodes],
+            "edges": [{"id": "start-done", "from": "start", "to": "done", "from_port": "right", "to_port": "left", "kind": "directed"}],
+            "groups": [{"id": group["id"], "semantic_type": group["semanticType"]} for group in groups],
+            "legend_ids": [item["id"] for item in (legend or {}).get("items", [])],
+            "annotation_ids": [],
+            "lifeline_ids": [node["id"] for node in nodes] if diagram_type == "sequence" else [],
+            "route_contract": {
+                "edge_intents": [{"edge_id": "start-done", "kind": "direct", "bend_count": 0, "label_required": False}],
+                "loop_lanes": [],
+                "branch_groups": [],
+                "exceptions": [],
+            },
+        }],
+    }
+    with open(os.path.join(project, "assets", "geometry.expected.json"), "w") as handle:
+        json.dump(expected, handle)
     os.makedirs(os.path.join(project, ".aidlc", "evidence", "requirements-methods"), exist_ok=True)
     with open(os.path.join(project, ".aidlc", "evidence", "requirements-methods", "diagram-contract.json"), "w") as handle:
         json.dump({"status": "passed"}, handle)
@@ -223,7 +248,7 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
                     "zoom": {"width": viewport[0], "height": viewport[1]},
                 },
             },
-            "diagrams": [{"id": "geometry", "source_path": "assets/geometry.svg", "manifest_path": "assets/geometry.diagram.json"}],
+            "diagrams": [{"id": "geometry", "source_path": "assets/geometry.svg", "manifest_path": "assets/geometry.diagram.json", "expected_contract_path": "assets/geometry.expected.json"}],
         }, handle)
 
 

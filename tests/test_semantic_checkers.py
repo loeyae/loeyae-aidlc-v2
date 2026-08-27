@@ -23,7 +23,7 @@ def write(project: str, path: str, content: str) -> None:
         handle.write(content)
 
 
-def fixture(project: str) -> None:
+def fixture(project: str, with_expected: bool = False) -> None:
     write(project, "docs/aidlc/construction/code-review.md", """Spec: passed
 Standards: passed
 reviewer: deterministic-checker
@@ -129,6 +129,40 @@ Clarification consistency: passed
             }
         }]
     }))
+    if not with_expected:
+        return
+    manifest_path = os.path.join(project, "docs/aidlc/inception/requirements/business-flows.diagram.json")
+    with open(manifest_path) as handle:
+        manifest = json.load(handle)
+    manifest["expected_contract_path"] = "docs/aidlc/inception/requirements/business-flows.expected.json"
+    manifest["diagrams"][0]["generation"] = {
+        "generator": {"name": "generic-test-generator", "version": "1.0.0"},
+        "config": {"summary": "generic semantic fixture", "digest": "sha256:" + "1" * 64},
+        "source_refs": ["docs/aidlc/inception/requirements/business-flows.md"],
+        "outputs": ["docs/aidlc/inception/requirements/business-flows.svg", "docs/aidlc/inception/requirements/business-flows.expected.json"],
+    }
+    with open(manifest_path, "w") as handle:
+        json.dump(manifest, handle)
+    write(project, "docs/aidlc/inception/requirements/business-flows.expected.json", json.dumps({
+        "version": "1",
+        "type": "diagram-expected-contract",
+        "source": {"kind": "approved-test-source", "ref": "docs/aidlc/inception/requirements/business-flows.md", "revision": "fixture", "digest": "sha256:" + "0" * 64},
+        "generator": {"name": "generic-test-generator", "version": "1.0.0", "config_summary": "generic semantic fixture", "config_digest": "sha256:" + "1" * 64, "source_refs": ["docs/aidlc/inception/requirements/business-flows.md"]},
+        "diagrams": [{
+            "id": "requirements-flow",
+            "diagram_type": "flowchart",
+            "intent": "验证业务期望、结构 actual 和正交路由的一致性",
+            "nodes": [{"id": "start", "shape": "round"}, {"id": "done", "shape": "round"}],
+            "edges": [{"id": "start-done", "from": "start", "to": "done", "from_port": "right", "to_port": "left", "kind": "directed"}],
+            "groups": [], "legend_ids": [], "annotation_ids": [], "lifeline_ids": [],
+            "route_contract": {
+                "direction": "LR",
+                "edge_intents": [{"edge_id": "start-done", "kind": "direct", "bend_count": 0, "label_required": True}],
+                "main_flow": {"entry_node_ids": ["start"], "exit_node_ids": ["done"], "node_ids": ["start", "done"], "edge_ids": ["start-done"]},
+                "loop_lanes": [], "branch_groups": [], "exceptions": [],
+            },
+        }],
+    }))
 
 
 def run_checker(project: str, sensor: str) -> subprocess.CompletedProcess[str]:
@@ -143,13 +177,17 @@ def run_checker(project: str, sensor: str) -> subprocess.CompletedProcess[str]:
 def test_all_checkers_pass_on_realistic_fixture() -> None:
     project = tempfile.mkdtemp(prefix="aidlc-semantic-checkers-")
     try:
-        fixture(project)
+        fixture(project, with_expected=True)
         for sensor in SENSORS:
             result = run_checker(project, sensor)
             assert result.returncode == 0, f"{sensor}: {result.stderr}"
             payload = json.loads(result.stdout)
             assert payload["status"] in ("passed", "verified", "not_applicable"), sensor
             if sensor == "diagram-contract":
+                assert payload["status"] == "passed"
+                assert payload["final_status"] == "STATIC_PASS"
+                assert payload["expected_contract_status"] == "passed"
+                assert payload["generation_status"] == "passed"
                 assert payload["geometry_status"] == "passed"
                 assert payload["render_preflight_status"] == "passed"
                 assert payload["render_status"] == "unverified"

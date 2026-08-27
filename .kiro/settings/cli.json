@@ -1,0 +1,12 @@
+{
+  "chat.modelDefaults": {
+    "gpt-5.6-luna": {
+      "reasoning": {
+        "effort": "max"
+      }
+    }
+  },
+  "toolSearch.enabled": true,
+  "toolSearch.minPct": 5,
+  "toolSearch.minTokens": 50000
+}

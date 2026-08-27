@@ -191,17 +191,17 @@ Blueprinter 关于“图中存在两种或以上箭头类型时必须提供图�
 
 ```json
 {
-  "direction": "TB",
-  "mainAxis": 580,
-  "layerTolerance": 24,
-  "symmetryGroups": [{"nodeIds": ["oms", "dmall"], "tolerance": 1}],
-  "mergeNodes": [{"nodeId": "checkout", "reason": "两个商品分支在结算提交订单处汇合"}],
+  "direction": "<TB-or-LR>",
+  "mainAxis": "<computed-axis>",
+  "layerTolerance": "<computed-tolerance>",
+  "symmetryGroups": [{"nodeIds": ["<node-id>", "<node-id>"], "tolerance": "<tolerance>"}],
+  "mergeNodes": [{"nodeId": "<node-id>", "reason": "<business-merge-reason>"}],
   "branchLayerExceptions": [],
   "branchPortExceptions": [],
   "readabilityEvidence": {
-    "normal": {"status": "UNVERIFIED", "evidence": ""},
-    "fit": {"status": "UNVERIFIED", "evidence": ""},
-    "zoom": {"status": "UNVERIFIED", "evidence": ""}
+    "normal": {"status": "UNVERIFIED", "evidence": "<provider-evidence-or-reason>"},
+    "fit": {"status": "UNVERIFIED", "evidence": "<provider-evidence-or-reason>"},
+    "zoom": {"status": "UNVERIFIED", "evidence": "<provider-evidence-or-reason>"}
   }
 }
 ```
@@ -228,12 +228,55 @@ Blueprinter 关于“图中存在两种或以上箭头类型时必须提供图�
 
 
 
-以下约束用于防止生成器为了适配一屏而破坏业务层级；它们是布局验收样例，不要求仓库读取或提交对应业务图文件：
+以下约束用于防止生成器为了适配一屏而破坏业务层级；它们是通用验收要求，不绑定任何项目节点、边 ID、业务路径或坐标：
 
-- `diagram-003`：按 `TB` 处理，主轴为 `x=580`；首层 OMS 中心 `x=310`、E-Fulfilment 中心 `x=850`，两者关于主轴等距；判断后的 ACTIVE/PENDING 必须同层 `y=700`；通过分支从判断右侧出线并进入 ACTIVE 的 `top`，未通过分支从左侧出线并进入 PENDING 的 `top`，最后一段均沿纵向进入目标；图例在主体下方，注释在图例下方；不足时扩展画布高度并允许纵向滚动。
-- `diagram-002`：按 `LR` 处理；业务层级由 `x` 表达；商品类型判断后的实物/虚拟分支必须同一 `x` 层，后续实物履约/虚拟交付也必须同一 `x` 层；分支目标优先从 `left` 进入；多个分支汇合时必须声明汇合节点并提供不同合法端口；路径保持最少拐角的水平/垂直正交路径；图例和注释按主体 → 图例 → 注释排列，必要时扩展画布高度。
+- 业务层级、同层对称、分支端口和回路 lane 必须从当前图的结构化设计记录中读取，并由 expected contract 指定的语义意图对照 actual 结构；不能把某个历史图的坐标或名称复制为默认规则。
+- 图例与注释固定按业务主体 → 图例 → 注释排列；不足时扩展画布并允许纵向滚动，不能用固定窗口压缩语义。
+- 每个 route contract 必须说明适用的边集合、路由 kind 和可接受折点范围；折点是连续有效线段的方向变化次数，不是 `points.length`。
 
-### 图例与注释的画布顺序
+
+### 独立 expected contract 与 route contract
+
+进入机器门禁的图表必须有独立于 SVG/sidecar 的 expected contract 文件。它是业务语义和验收意图的输入，不是 SVG、`.diagram.json`、浏览器 DOM 或其 bbox 的副本；不得从 actual 产物反向生成后再把结果当 expected。expected contract 的来源必须指向需求、批准的设计资料、代码结构或其他可追溯业务来源，且记录 source revision/digest、generator name/version、config summary/digest 和 source refs。source refs 不得是 SVG、sidecar、截图或浏览器输出。
+
+expected contract 使用通用 V1 协议，不绑定图表类型或 SVG 内部数据结构。以下代码块只展示协议形状；尖括号占位符必须由受控 Producer 替换后才能进入机器门禁，不能直接作为输入：
+
+```json
+{
+  "version": "1",
+  "type": "diagram-expected-contract",
+  "source": {"kind": "<approved-source>", "ref": "<business-source>", "revision": "<revision>", "digest": "sha256:<64-hex>"},
+  "generator": {"name": "<name>", "version": "<version>", "config_summary": "<summary>", "config_digest": "sha256:<64-hex>", "source_refs": ["<business-source>"]},
+  "diagrams": [{
+    "id": "<diagram-id>",
+    "diagram_type": "<diagram-type>",
+    "intent": "<single-business-intent>",
+    "nodes": [{"id": "<node-id>", "shape": "<optional-expected-shape>"}],
+    "edges": [{"id": "<edge-id>", "from": "<node-id>", "to": "<node-id>", "from_port": "<optional-port>", "to_port": "<optional-port>", "kind": "<optional-kind>"}],
+    "groups": [],
+    "legend_ids": [],
+    "annotation_ids": [],
+    "route_contract": {
+      "direction": "<TB-or-LR>",
+      "edge_intents": [{"edge_id": "<edge-id>", "kind": "<route-kind>", "bend_count": 0, "label_required": false}],
+      "main_flow": {"entry_node_ids": ["<node-id>"], "exit_node_ids": ["<node-id>"], "node_ids": ["<node-id>"], "edge_ids": ["<edge-id>"]},
+      "loop_lanes": [],
+      "branch_groups": [],
+      "exceptions": []
+    }
+  }]
+}
+```
+
+`route_contract` 是所有图型共享的路由意图层：`kind` 说明关系在业务中的路由角色，`bend_count`/`min_bend_count`/`max_bend_count` 约束实际连续有效线段的方向变化次数；共线中间点不增加折点，不能用 `points.length` 代替。`main_flow`、`loop_lanes` 和 `branch_groups` 仅在该图型有相应语义时声明；未声明不等于允许 checker 猜测。
+
+expected 与 actual 的比较至少覆盖节点/边集合、端点、端口、边类型、分组/图例/注释引用、业务主流程（如适用）和 route intent。SVG/sidecar 内部一致只能证明 actual 自洽，不能替代 expected 业务语义对照。expected 缺失、来源不可解析或 expected-vs-actual 无法完成时为 `UNVERIFIED`，不得升级为 `STATIC_PASS` 或 `PASS`。
+
+交叉、回路、端口例外和分支例外必须在 expected contract 中记录 `object`、`type`、`business_reason`、`geometric_reason`、`scope` 和 `visual_evidence.required: true`；checker 必须验证对象确实命中对应实际偏离，Provider 必须验证实际几何与截图/快照视觉证据。只存在字段、空理由、无适用范围或没有真实视觉证据均不构成通过。
+
+生成器变更必须重新生成 expected、sidecar、SVG 及其他声明的派生产物；actual manifest 的 `generation` 元数据必须列出 generator/version、config summary/digest、source refs 和 outputs。缺少或不一致时为 `UNVERIFIED` 或 `FAIL`，不得保留旧产物并宣称闭环完成。
+
+
 
 图例和注释都是画布内容，不是为了适配窗口可以牺牲的装饰层。默认空间顺序固定为：业务流程主体 → 图例 → 注释和待确认说明。图例位于业务主体外部，注释位于图例下方；注释可以多行，但每条 `annotations[]` 仍必须保留自己的稳定 ID，不得合并后丢失追溯关系。画布、`viewBox` 和滚动区域必须按节点、路径、箭头、标签、图例和注释的联合实际边界计算。
 
@@ -309,7 +352,7 @@ textWidth / diamondWidth + textHeight / diamondHeight ≤ 0.70
 
 - 分组、泳道和系统边界表达系统、职责、部署、信任或角色边界，不得只靠颜色表达关键语义；
 - 每个新建或调整的分组必须声明一种语义类型：`exclusive`（与同层其他分组互斥）、`nested`（明确的父子嵌套）、`cross-cutting`（贯穿关注点，不作为与业务域并列的成员容器）或 `overlay`（仅作辅助视图，不改变成员归属）；
-- 分组的直接成员必须以结构化 `members` 节点 ID 表达；`nested` 分组必须以 `parent` 分组 ID 表达层级。坐标包围不能替代成员声明；旧 V1 资产可继续读取，但缺少这些字段时只能标记为 `MIGRATION_REQUIRED`，不能作为新语义图的完整通过证据；
+- 分组的直接成员必须以结构化 `members` 节点 ID 表达；`nested` 分组必须以 `parent` 分组 ID 表达层级。坐标包围不能替代成员声明；旧 V1 资产可继续读取，但缺少这些字段时只能记录迁移诊断并保持图表 `final_status: "UNVERIFIED"`，不能作为新语义图的完整通过证据；
 - 未明确声明为 `nested`、`overlay` 或经 Design Notes 说明的 `cross-cutting` 的分组，不得发生面积交叠；显式 `nested` 只允许与声明的父级交叠，`overlay` 只作辅助交叠，`cross-cutting` 若确需穿越业务域必须显式声明、保持 `members` 为空，并在图例或正文/Design Notes 中解释不代表成员归属；
 - 对互斥分组，同一个节点不得同时属于两个互斥分组；分组背景、边界和标题不得相互覆盖；分组边界必须与节点、标签和连接器保持可读间距；
 - 贯穿关注点优先使用独立横向/纵向关注点带、注释层或带标签的关系边表达，不得通过与业务域容器重叠使其节点被误读为业务域成员；
@@ -341,7 +384,7 @@ textWidth / diamondWidth + textHeight / diamondHeight ≤ 0.70
 本仓图表默认由 AIDLC 交付**可审阅的 SVG 源、可选语义伴随清单和 Provider Request**，不默认交付或调用静态渲染器：
 
 1. SVG 源表达按 Blueprinter 规则组织后的节点、连线、文字、分组、图标和可访问性信息，是 AIDLC 的主要图表产物；
-2. `.diagram.json` 对进入 `diagram-contract` 门禁的新建或调整过程图是必需的语义伴随清单，用于稳定 ID、节点/边/端口、连通性、方向、箭头目标和事实映射的机器检查；独立 `source-only` 的静态关系图只有在不要求结构化门禁时才可省略。它不是默认本地渲染输入；过程图缺少适用清单时必须返回 `MIGRATION_REQUIRED`。
+2. `.diagram.json` 对进入 `diagram-contract` 门禁的新建或调整过程图是必需的语义伴随清单，用于稳定 ID、节点/边/端口、连通性、方向、箭头目标和事实映射的机器检查；独立 `source-only` 的静态关系图只有在不要求结构化门禁时才可省略。它不是默认本地渲染输入；过程图缺少适用清单时记录迁移诊断并保持 `final_status: "UNVERIFIED"`。
 3. 需要保存源文件或伴随清单时，优先放在目标 Markdown 同级 `assets/`，但是否提交静态交付物由目标产物和用户要求决定；
 4. Provider Request 记录目标操作（预览、渲染、导出）、目标环境、源路径、可选语义清单、期望验收项和已知能力状态；它可以作为结果中的结构化请求，不要求 AIDLC 绑定某个 Provider 或固定文件扩展名；
 5. 外部 Provider 负责实际文字测量、最终坐标和连线布局、SVG 预览/渲染、SVG 到 PNG/PDF 等导出以及目标环境视觉检查。AIDLC 不调用、安装或默认绑定 Kiro Preview、Claude runtime、OpenCode runtime、draw.io、浏览器或本仓脚本；

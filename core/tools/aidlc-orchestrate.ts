@@ -419,6 +419,17 @@ function asNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+const DIAGRAM_FINAL_STATUSES = new Set(["PASS", "STATIC_PASS", "UNVERIFIED", "NEEDS_CAPABILITY", "FAIL"]);
+
+function diagramFinalStatus(evidence: Evidence): { status: string; legacy: boolean } {
+  if (typeof evidence.final_status === "string") return { status: evidence.final_status, legacy: false };
+  if (evidence.delivery_status === "SOURCE_READY") return { status: "STATIC_PASS", legacy: true };
+  if (evidence.provider_status === "unavailable") return { status: "NEEDS_CAPABILITY", legacy: true };
+  if (evidence.status === "passed" && evidence.provider_status === "passed" && evidence.render_status === "passed") return { status: "PASS", legacy: true };
+  if (evidence.status === "passed" && ["unverified", "not_required"].includes(String(evidence.provider_status)) && evidence.geometry_status === "passed") return { status: "STATIC_PASS", legacy: true };
+  return { status: "UNVERIFIED", legacy: true };
+}
+
 function producedText(path: string): string | null {
   try {
     const content = readFileSync(path);
@@ -841,7 +852,9 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       case "diagram-contract": {
         const failure = validateEvidence(stage, sensor, (evidence) => {
           const errors: string[] = [];
-          if (evidence.status !== "passed") errors.push('status must be "passed"');
+          if (evidence.status !== "passed") errors.push('status must be "passed" (sensor envelope)');
+          const final = diagramFinalStatus(evidence);
+          if (!DIAGRAM_FINAL_STATUSES.has(final.status)) errors.push('final_status must be PASS, STATIC_PASS, UNVERIFIED, NEEDS_CAPABILITY or FAIL');
           if (evidence.source_format !== "svg") errors.push('source_format must be "svg"');
           const diagrams = asPositiveInt(evidence.diagrams_checked);
           if (diagrams === null || diagrams < 1) errors.push("diagrams_checked must be >= 1");
@@ -851,9 +864,8 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
           if (evidence.legend_valid !== true) errors.push("legend_valid must be true");
           if (evidence.groups_valid !== true) errors.push("groups_valid must be true");
           if (evidence.viewbox_valid !== true) errors.push("viewbox_valid must be true");
-          if (!["passed", "unverified", "not_required"].includes(String(evidence.provider_status))) errors.push('provider_status must be "passed", "unverified" or "not_required"');
+          if (!["passed", "unverified", "not_required", "unavailable"].includes(String(evidence.provider_status))) errors.push('provider_status must be "passed", "unverified", "not_required" or "unavailable"');
           if (typeof evidence.target_operation_required !== "boolean") errors.push("target_operation_required must be boolean");
-          if (evidence.target_operation_required === true && evidence.provider_status !== "passed") errors.push('provider_status must be "passed" when target_operation_required is true');
           if (evidence.fr_mapping_complete !== true) errors.push("fr_mapping_complete must be true");
           if (evidence.design_notes_valid !== true) errors.push("design_notes_valid must be true");
           if (evidence.migration_status !== "passed") errors.push('migration_status must be "passed"');
@@ -872,6 +884,33 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
           if (!["passed", "not_applicable"].includes(String(evidence.change_impact_review_status))) errors.push('change_impact_review_status must be "passed" or "not_applicable"');
           if (!["passed", "unverified"].includes(String(evidence.render_status))) errors.push('render_status must be "passed" or "unverified"');
           if (asNumber(evidence.unresolved) !== 0) errors.push("unresolved must be 0");
+
+          if (!final.legacy) {
+            if (!["passed", "unverified"].includes(String(evidence.expected_contract_status))) errors.push('expected_contract_status must be "passed" or "unverified"');
+            if (!["passed", "unverified"].includes(String(evidence.generation_status))) errors.push('generation_status must be "passed" or "unverified"');
+          }
+          if (final.status === "PASS") {
+            if (evidence.target_operation_required !== true) errors.push("PASS requires target_operation_required=true");
+            if (evidence.provider_status !== "passed") errors.push("PASS requires provider_status=passed");
+            if (evidence.render_status !== "passed" || evidence.browser_visual_status !== "passed") errors.push("PASS requires latest browser visual evidence");
+            if (!final.legacy && (evidence.expected_contract_status !== "passed" || evidence.generation_status !== "passed")) errors.push("PASS requires expected contract and generator closure");
+            const views = asRecord(asRecord(evidence.provider_validation)?.views);
+            for (const view of ["normal", "fit", "zoom"]) {
+              const entry = views ? asRecord(views[view]) : null;
+              if (!entry || entry.status !== "passed" || !asNonEmptyString(entry.screenshot_path) || !asNonEmptyString(entry.snapshot_path)) errors.push(`PASS requires latest ${view} screenshot and snapshot evidence`);
+            }
+          } else if (final.status === "STATIC_PASS") {
+            if (evidence.target_operation_required === true) errors.push("STATIC_PASS cannot satisfy a required browser operation");
+            if (!final.legacy && (evidence.expected_contract_status !== "passed" || evidence.generation_status !== "passed")) errors.push("STATIC_PASS requires expected contract and generator closure");
+            if (evidence.provider_status === "passed") errors.push("STATIC_PASS cannot claim provider passed");
+          } else if (final.status === "UNVERIFIED") {
+            errors.push("final_status=UNVERIFIED is not a completed diagram gate");
+          } else if (final.status === "NEEDS_CAPABILITY") {
+            errors.push("final_status=NEEDS_CAPABILITY requires the requested provider capability");
+          } else if (final.status === "FAIL") {
+            errors.push("final_status=FAIL contains blocking diagram findings");
+          }
+          if (evidence.target_operation_required === true && final.status !== "PASS") errors.push("required browser operation must finish with final_status=PASS");
           return errors;
         });
         if (failure) failures.push(failure);

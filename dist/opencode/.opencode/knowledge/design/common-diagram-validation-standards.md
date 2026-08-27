@@ -32,24 +32,37 @@ Final Delivery Status
 
 前一层失败时，不得用后一层证据掩盖源问题。Geometry 通过不代表 Render 通过；Render 通过不代表 Browser 通过。
 
-## 状态定义
+## 统一状态模型
 
-每一层必须独立记录 `status` 和 `issues`：
+最终状态只有以下五种，`final_status` 是图表验收的唯一权威字段：
 
-- `PASS`：该层有实际确定性或 Provider 证据通过；
-- `FAIL`：发现具体问题，修复后重跑受影响检查；
-- `UNVERIFIED`：未执行、工具不可用或当前工具无法证明；
-- `MIGRATION_REQUIRED`：旧资产可解析，但缺少 V2 结构化字段或证据；
-- `NEEDS_CAPABILITY`：用户要求目标 Provider 操作，但没有可验证 Provider；
-- `SOURCE_READY`：源和结构化验证已生成，目标环境仍可能为 `UNVERIFIED`。
+- `PASS`：业务语义、源与结构契约、几何和最新真实浏览器视觉证据全部通过；三视图 `normal`、`fit`、`zoom` 均有本次运行生成的截图与快照。
+- `STATIC_PASS`：业务语义、源与结构契约、几何均通过，但浏览器视觉尚未完成；它不是完整 `PASS`。
+- `UNVERIFIED`：来源、解析、expected-vs-actual、证据或某项必需验证缺失，当前不能作出通过结论。
+- `NEEDS_CAPABILITY`：用户要求的 Provider/目标操作没有可验证能力，不能伪造截图、快照或通过状态。
+- `FAIL`：发现具体语义、结构、几何或视觉问题。
 
-交付状态优先级为：
+旧 `SOURCE_READY` 仅作为外部兼容别名映射为 `STATIC_PASS`；旧 `DELIVERED` 不自动等于 `PASS`，必须重新满足上述四层条件。Evidence 外层历史 `status: "passed"` 只表示 producer 成功写入文件，不是最终状态；调用方必须读取 `final_status`。旧 evidence 没有 `final_status` 时可按兼容规则推导，但新 producer 必须写入它。
+
+状态优先级为：
 
 ```text
-FAIL → MIGRATION_REQUIRED → NEEDS_CAPABILITY → UNVERIFIED → SOURCE_READY/PASS
+FAIL > NEEDS_CAPABILITY > UNVERIFIED > STATIC_PASS > PASS
 ```
 
-只有所有被要求的目标操作均有证据时，交付才可为 `PASS`。源文件存在、脚本成功或配置存在不能单独产生 `PASS`。
+缺少任何一层的来源或证据都不能向右升级。`PASS` 不得由 source checker、SVG/sidecar 自洽、截图文件存在、字段布尔值或 Provider 配置存在单独产生。
+
+## 四层验收
+
+验收对象必须区分四层并分别记录结果：
+
+1. **业务语义层**：expected contract 的 source、intent、节点/边语义、主流程、分支/回路和例外是否来自可追溯业务来源；不能从坐标或 SVG 标题反推。
+2. **源与结构契约层**：actual SVG/sidecar/manifest 的 ID、端点、端口、图例、分组、注释、生成器 provenance 是否与 expected contract 一致；actual 自洽不等于业务正确。
+3. **几何层**：源坐标和路径的端口方向、目标外侧接近、碰撞、共线重叠、交叉、折点、同侧通道、画布边界和标签可读性是否通过。
+4. **真实浏览器渲染层**：目标 Provider 实际加载 actual，在 `normal`、`fit`、`zoom` 三视图检查 DOM、真实 bbox、文本、箭头、溢出、遮挡并保存截图/快照；静态几何结果不能代替该层。
+
+前一层失败时不得用后一层证据掩盖；浏览器证据必须引用本次 request、viewport、截图和快照路径。仅有字段、路径或 screenshot 文件名而没有真实执行结果时为 `UNVERIFIED`。
+
 
 ## 上下文预算与恢复
 
@@ -71,7 +84,7 @@ Semantic QA 是不启动浏览器的结构化检查，至少覆盖：
 - 方向、主轴、层级、分支端口、汇合声明和图例/注释顺序；
 - FR/REQ 与图表对象的追溯关系。
 
-缺少 V2 新结构化字段时返回 `MIGRATION_REQUIRED`；字段存在但值非法时返回 `FAIL`。不得把自然语言观察当作结构化证据。
+缺少 V2 新结构化字段时记录 `migration_status: "MIGRATION_REQUIRED"`，并将图表 `final_status` 保持为 `UNVERIFIED`；字段存在但值非法时 `final_status` 为 `FAIL`。不得把自然语言观察当作结构化证据。
 
 ## 已有图表冗余连线修复的验证边界
 
@@ -81,9 +94,26 @@ Semantic QA 是不启动浏览器的结构化检查，至少覆盖：
 
 业务语义证据应引用 SVG 所属文档位置的 `document`、章节或相邻正文。SVG/sidecar 的几何不能替代业务来源；如果文档上下文不足，状态为 `NEEDS_CONTEXT`，而不是让 checker 根据坐标放行。
 
-`source-only` 只要求适用的源结构和几何证据通过，目标 Provider 状态可以是 `UNVERIFIED`，最终只能为 `SOURCE_READY`。当目标操作包含 `preview`、`render` 或 `export` 时，必须实际取得所要求的 Provider 证据；`normal`、`fit`、`zoom` 任一缺失、失败或 Provider 不可用时，保持 `UNVERIFIED`/`NEEDS_CAPABILITY`，不能声明完整 `PASS`。`git diff --check`、命令长度和“不创建 Git commit”属于执行流程检查，不是 diagram-contract 语义 evidence 字段。
+`source-only` 只有在 expected contract、业务语义、源结构和几何证据均通过时才能为 `STATIC_PASS`；目标 Provider 状态可以是 `UNVERIFIED`，但不得宣称完整 `PASS`。当目标操作包含 `preview`、`render` 或 `export` 时，必须实际取得所要求的 Provider 证据；`normal`、`fit`、`zoom` 任一缺失、失败或 Provider 不可用时，保持 `UNVERIFIED`/`NEEDS_CAPABILITY`，不能声明完整 `PASS`。`git diff --check`、命令长度和“不创建 Git commit”属于执行流程检查，不是 diagram-contract 语义 evidence 字段。
 
-## Geometry QA
+### Expected-vs-actual 与 route contract 门禁
+
+`diagram-contract` 新建/调整图的业务期望来自独立 expected contract；Provider Request 使用 `expected_contract_path` 指向它，manifest 中的同名路径字段只能是引用，不能把 manifest 内容转换为 expected。expected 必须包含可追溯 source/generator provenance、每个节点和边的业务集合、端点/端口期望以及完整 `route_contract.edge_intents`；expected 不得包含 `x`、`y`、`width`、`height`、`points`、bbox 或浏览器测量值。
+
+Checker 依次比较 expected 与 actual：节点/边集合、端点、端口、边类型、图例/分组/注释、主流程/回路/分支和每条边的 route intent。route 的折点数按连续有效线段的方向变化计算；共线点不计数，`points.length` 不是折点数。若 SVG 与 sidecar 彼此一致但与 expected route 或业务端点不一致，必须返回 `FAIL`，不能用 actual 自洽掩盖 expected mismatch。
+
+交叉、回路、端口例外和分支例外必须验证以下内容，而不是只验证字段存在：
+
+- `object`：实际边、边对、节点或端口对象存在且与偏离对象一致；
+- `type`：例外类型与实际几何偏离一致；
+- `business_reason`：为什么业务语义、主轴或关系顺序不能采用普通路径；
+- `geometric_reason`：实际障碍、端口或可读间距原因；
+- `scope`：图表 ID、适用视图/阶段和条件；
+- `visual_evidence`：Provider 实际截图、快照和观察结果。没有最新真实证据时只能是 `UNVERIFIED`。
+
+生成器闭环要求 expected、sidecar、SVG、Provider Request 和声明的其他派生产物在同一次生成记录中列出 generator/version、config summary/digest、source refs 和 outputs。生成器或配置改变后必须重新生成全部派生产物并重新运行受影响的四层验收；旧 evidence 不得复用为最新 `PASS`。
+
+
 
 Geometry QA 使用源坐标、路径点和结构化文本估算，不声称完成真实浏览器字体测量。当前检查覆盖：
 
@@ -171,15 +201,17 @@ Geometry QA 使用源坐标、路径点和结构化文本估算，不声称完�
 
 适用时 Provider 必须分别保留 `normal`、`fit`、`zoom` 三种阅读视图，每个视图记录 viewport、状态、几何观察和截图/快照路径。纵向滚动允许，水平溢出、裁切和不可读失败。
 
-结果复用现有 Diagram Result，不创建第二套协议：
+结果记录使用统一 `final_status`，不把路由决策或截图路径当执行证据：
 
 ```json
 {
-  "status": "PASS",
-  "provider": "chrome-devtools",
+  "final_status": "PASS",
+  "provider": "<provider>",
   "reading_view": "normal",
   "geometry": { "contentBBox": {}, "canvasBBox": {}, "clipped": false },
-  "screenshots": []
+  "screenshots": ["<screenshot-path>"],
+  "snapshot": "<snapshot-path>",
+  "expected_contract": "<expected-contract-path>"
 }
 ```
 

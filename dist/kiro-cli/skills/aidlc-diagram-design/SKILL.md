@@ -16,7 +16,8 @@ Independent Capability — not an AIDLC phase.
 - **diagram intent**：图帮助读者理解什么；
 - **diagram_type**（可选）：偏好图型，默认 `auto`；
 - **output_location**：目标 Markdown 路径；SVG 源和可选语义伴随清单优先写入同级 `assets/`；
-- **target_operations**（可选）：`source-only`、`preview`、`render` 或 `export`；未要求时不主动调用 Provider；
+- **target_operations**（可选）：`source-only`、`preview`、`render` 或 `export`；未要求时不主动调用 Provider；未要求目标操作时最终最多为 `STATIC_PASS`，不能写成 `PASS`；
+- **expected_contract**：独立 expected contract 路径或受控 Producer 输入，必须来自业务/设计来源，不能从 SVG、sidecar 或浏览器 actual 生成；
 - **approved facts**：已确认的角色、步骤、系统、关系和业务规则；
 - **constraints**（可选）：`delivery-business-flow` 用于面向 PRD/业务方/客户交付的流程图；
 - **target_reading_environment**（可选）：目标浏览器、容器尺寸或交付环境。
@@ -33,7 +34,7 @@ Independent Capability — not an AIDLC phase.
 
 ## 执行
 
-按加载的设计标准执行完整的图表设计流程：先确定 `TB`/`LR` 主阅读方向、主轴、业务层级、首层对称组和判断分支端口，再提取节点/边、计算实际内容边界、生成 SVG 源、生成可选 `.diagram.json` 语义伴随清单、生成 Provider Request 并执行源级验证。每条 `annotations[]` 必须生成唯一稳定 `id`，并在 SVG 中生成一一对应的 `data-note`；不得为了排版合并注释 ID。生成器不得以固定窗口高度、整体缩放、缩小字号或压缩层级换取“一屏显示”，纵向图可以扩展画布并允许页面纵向滚动。具体步骤和验收矩阵以加载的两份规则文件为准，本文件不复制。当 `target_operations` 包含 `preview` 或浏览器侧 `render` 时，源级 `diagram-contract` evidence 通过后调用 `loeyae-aidlc diagram-provider run --request <provider-request.json> --evidence <diagram-contract.json>`；该运行器负责常规/适合窗口/放大视图的浏览器证据采集和 evidence 状态更新，`export` 不由 Chrome DevTools Provider 承担。
+按加载的设计标准执行完整的图表设计流程：先从可追溯业务来源生成独立 expected contract，再确定 `TB`/`LR` 主阅读方向、主轴、业务层级、首层对称组和判断分支端口；随后提取 actual 节点/边、计算实际内容边界、生成 SVG 源、`.diagram.json` 语义伴随清单、Provider Request 和 generation provenance，并执行 expected-vs-actual 源级验证。每条 `annotations[]` 必须生成唯一稳定 `id`，并在 SVG 中生成一一对应的 `data-note`；不得为了排版合并注释 ID。route contract 的折点按方向变化次数记录，不能使用 `points.length`。生成器或配置变更后必须重新生成 expected、sidecar、SVG、Provider Request 和其他声明的派生产物，记录 generator/version、config summary/digest、source refs/outputs，再重跑受影响验收。生成器不得以固定窗口高度、整体缩放、缩小字号或压缩层级换取“一屏显示”，纵向图可以扩展画布并允许页面纵向滚动。具体步骤和验收矩阵以加载的两份规则文件为准，本文件不复制。当 `target_operations` 包含 `preview` 或浏览器侧 `render` 时，源级 `diagram-contract` evidence 的业务、结构和几何层通过且 expected 存在后调用 `loeyae-aidlc diagram-provider run --request <provider-request.json> --evidence <diagram-contract.json>`；该运行器负责常规/适合窗口/放大视图的浏览器证据采集和 evidence 状态更新，`export` 不由 Chrome DevTools Provider 承担。
 
 ## 已有图表的冗余连线修复模式
 
@@ -67,7 +68,7 @@ Independent Capability — not an AIDLC phase.
 
 ### 验收与输出
 
-先执行 JSON/SVG 结构、source checker 和几何检查；目标操作包含 `preview` 或浏览器 `render` 时，再执行 Provider 的 `normal`、`fit`、`zoom` 三视图。`source-only` 可以以源级通过加目标视觉 `UNVERIFIED` 交付为 `SOURCE_READY`；只有用户要求的目标操作全部有真实 Provider 证据时才可声明完整 `PASS`。Provider 不可用时标记 `NEEDS_CAPABILITY` 或 `UNVERIFIED`，不得伪造截图、快照或 evidence。
+先执行 JSON/SVG 结构、expected-vs-actual、source checker 和几何检查；目标操作包含 `preview` 或浏览器 `render` 时，再执行 Provider 的 `normal`、`fit`、`zoom` 三视图。`source-only` 只有在 expected、业务、结构和几何通过时才能以 `STATIC_PASS` 交付；只有用户要求的目标操作全部有最新真实 Provider 证据时才可声明 `PASS`。Provider 不可用时标记 `NEEDS_CAPABILITY`，来源/解析/证据缺失时标记 `UNVERIFIED`，发现问题标记 `FAIL`，不得伪造截图、快照或 evidence。
 
 最终报告至少列出图表 ID、来源文档上下文、修改 edge ID、最终端口和路径、保留外道理由、静态结果、Chrome 结果、未验证项、修改文件、证据路径和“未创建 Git commit”。
 
@@ -92,7 +93,7 @@ Independent Capability — not an AIDLC phase.
 - SVG 源路径；可选 `.diagram.json` 路径；Provider Request；
 - Design Notes；
 - Validation Matrix（源结构/几何/语义/目标视觉）；
-- Delivery Status：`SOURCE_READY`、`DELIVERED`、`NEEDS_CAPABILITY` 或 `DEGRADED_TO_TEXT_TABLE`。
+- **Output Status**：`PASS`、`STATIC_PASS`、`UNVERIFIED`、`NEEDS_CAPABILITY` 或 `FAIL`；旧 `SOURCE_READY` 仅映射为 `STATIC_PASS`，旧 `DELIVERED` 不自动映射为 `PASS`。
 
 ## 禁止事项
 
@@ -113,6 +114,6 @@ Independent Capability — not an AIDLC phase.
 
 对于 `flowchart`、`pipeline`、`state` 等过程图，生成 `.diagram.json` 时必须同步生成 `designNotes.layout.mainFlow` 和 `designNotes.layout.loopLanes`。先按主阅读方向将连续主流程排在主轴上，再将同层实体在垂直主轴方向均匀分布；单一正向出边走主轴前进方向，多出边先占用垂直主轴的对称两侧，其余只在前向 180° 局域均分。源、目标位于主轴同侧的关系必须优先保持同侧通道，禁止无理由跨轴折返。主流程必须覆盖所有业务节点/流程边并可从入口追踪到出口；出口节点只允许已声明、带标签并实际进入独立 lane 的反馈/重试出边，不能因合法用户后续操作伪造无出边终态；失败、重试、反馈边必须进入声明的左/右独立 lane 并带可见标签；判定节点必须是 diamond，且每个出口必须有可见分支标签。连接器必须保留 `from/to/port` DOM 属性和完整路径，箭头尖端使用独立 `data-edge-arrow` overlay。节点位置、尺寸、端口、标签或分组变化后，先枚举全部 incident edges 与受影响通道，再重算主轴/净空并按直达 → 一折 Manhattan → 两折 Manhattan → 必要外侧 lane 重新路由；不得保留旧折线或只局部缩短。目标端倒数第二个有效点必须在实体外部，最后一段沿 `toPort` 法向进入。既有图布局迁移可提供 `changeImpactReview`；新图不得伪造 baseline。
 
-交叉优化的优先级低于业务语义与主流程主轴连续性、业务层级/同层均衡、源/目标就近合法端口和合法最少折点 Manhattan 路径。交叉默认应尽量减少，但不是机械零交叉目标：为保持更高优先级约束或避免更长、更复杂的无意义折返而必须保留的交叉，须在 `designNotes.layout.crossingExceptions` 声明具体、互异的边对与原因，且该声明必须命中实际交叉；由浏览器确认其不触及节点、文字、标签、箭头或关键端点且方向可读。未声明交叉、未发生的例外声明、共线重叠、节点/文字/标签穿越仍然阻断。跨侧或多次换边须使用 `sideSwitchExceptions` 说明业务端口或真实避障原因，并且同样必须命中实际路径。
+交叉、回路、端口例外和分支例外必须逐项验证 `object`、`type`、`business_reason`、`geometric_reason`、`scope` 和真实 `visual_evidence`；空理由、未命中实际偏离、适用范围不明或只有截图字段名都应阻断或保持 `UNVERIFIED`。
 
 验证顺序不得跳过实际几何：先运行 `diagram-contract` checker，确认主流程、回路、判定出口、edge crossing、共线重叠、端口方向和箭头映射状态；目标操作要求 `preview`/浏览器 `render` 时，再使用 Provider 对实际 DOM 的 edge-node、edge-edge、bbox、文字、水平溢出和箭头遮挡执行检查。Provider Request 必须声明 `normal`、`fit`、`zoom`，三视图全部成功后才能记录浏览器 PASS；Provider 不可用时保留 `UNVERIFIED`/`NEEDS_CAPABILITY`，不得手写或修改 evidence 冒充 Producer 结果。
