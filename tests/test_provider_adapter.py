@@ -140,6 +140,8 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
     svg_height = 300
     canvas_width = 400
     canvas_height = 300
+    fit_viewport = viewport
+    zoom_viewport = viewport
     edge_end = 260
     if variant == "node-collision":
         nodes[1]["x"] = 100
@@ -172,6 +174,8 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
         svg_height = 600
         canvas_width = 320
         canvas_height = 600
+        fit_viewport = (320, 720)
+        zoom_viewport = (320, 720)
     if variant == "viewport-overflow":
         viewport = (320, 240)
         nodes[1]["x"] = 1000
@@ -244,8 +248,8 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
                 "viewport": {"width": viewport[0], "height": viewport[1]},
                 "viewports": {
                     "normal": {"width": viewport[0], "height": viewport[1]},
-                    "fit": {"width": viewport[0], "height": viewport[1]},
-                    "zoom": {"width": viewport[0], "height": viewport[1]},
+                    "fit": {"width": fit_viewport[0], "height": fit_viewport[1]},
+                    "zoom": {"width": zoom_viewport[0], "height": zoom_viewport[1]},
                 },
             },
             "diagrams": [{"id": "geometry", "source_path": "assets/geometry.svg", "manifest_path": "assets/geometry.diagram.json", "expected_contract_path": "assets/geometry.expected.json"}],
@@ -260,7 +264,7 @@ def test_browser_geometry_scenarios() -> None:
         ("group-overlap", False, "groups overlap unexpectedly", (800, 600)),
         ("legend-coverage", False, "browser legend coverage does not match", (800, 600)),
         ("sequence-lifeline", False, "sequence lifeline coordinate", (800, 600)),
-        ("label-edge-collision", False, "label geometry intersects unrelated edge geometry", (800, 600)),
+        ("label-edge-collision", False, "SVG label geometry intersects edge geometry", (800, 600)),
         ("arrow-label-occlusion", False, "arrow overlay is occluded by a later decoration", (800, 600)),
         ("target-port-approach", False, "approaches a target from inside its visible shape", (800, 600)),
         ("vertical-scroll", True, None, (320, 240)),

@@ -68,9 +68,9 @@
           "sideSwitchExceptions": [],
           "crossingExceptions": [],
           "readabilityEvidence": {
-            "normal": { "status": "UNVERIFIED", "evidence": "固定回归 fixture，需由 Provider 生成浏览器证据。" },
-            "fit": { "status": "UNVERIFIED", "evidence": "固定回归 fixture，需由 Provider 生成浏览器证据。" },
-            "zoom": { "status": "UNVERIFIED", "evidence": "固定回归 fixture，需由 Provider 生成浏览器证据。" }
+            "normal": { "status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.normal" },
+            "fit": { "status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.fit" },
+            "zoom": { "status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.zoom" }
           }
         }
       }

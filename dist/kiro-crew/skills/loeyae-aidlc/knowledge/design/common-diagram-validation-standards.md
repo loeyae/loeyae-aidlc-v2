@@ -100,7 +100,7 @@ Semantic QA 是不启动浏览器的结构化检查，至少覆盖：
 
 `diagram-contract` 新建/调整图的业务期望来自独立 expected contract；Provider Request 使用 `expected_contract_path` 指向它，manifest 中的同名路径字段只能是引用，不能把 manifest 内容转换为 expected。expected 必须包含可追溯 source/generator provenance、每个节点和边的业务集合、端点/端口期望以及完整 `route_contract.edge_intents`；expected 不得包含 `x`、`y`、`width`、`height`、`points`、bbox 或浏览器测量值。
 
-Checker 依次比较 expected 与 actual：节点/边集合、端点、端口、边类型、图例/分组/注释、主流程/回路/分支和每条边的 route intent。route 的折点数按连续有效线段的方向变化计算；共线点不计数，`points.length` 不是折点数。若 SVG 与 sidecar 彼此一致但与 expected route 或业务端点不一致，必须返回 `FAIL`，不能用 actual 自洽掩盖 expected mismatch。
+Checker 依次比较 expected 与 actual：节点/边集合、端点、端口、边类型、箭头目标、图例/分组/注释、主流程/回路/分支和每条边的 route intent。route 的折点数按连续有效线段的方向变化计算；共线点不计数，`points.length` 不是折点数。route intent 可声明 `arrow_target`、`label_text` 和 `topology`；topology 使用 `orthogonal`、可选 `segment_count` 和 `directions`，direction 只能为 `left`、`right`、`up`、`down`。`affected_edge_ids` 定义 zoom 必须覆盖的边集合。若 SVG 与 sidecar 彼此一致但与 expected route、箭头或业务端点不一致，必须返回 `FAIL`，不能用 actual 自洽掩盖 expected mismatch。
 
 交叉、回路、端口例外和分支例外必须验证以下内容，而不是只验证字段存在：
 
@@ -109,9 +109,9 @@ Checker 依次比较 expected 与 actual：节点/边集合、端点、端口、
 - `business_reason`：为什么业务语义、主轴或关系顺序不能采用普通路径；
 - `geometric_reason`：实际障碍、端口或可读间距原因；
 - `scope`：图表 ID、适用视图/阶段和条件；
-- `visual_evidence`：Provider 实际截图、快照和观察结果。没有最新真实证据时只能是 `UNVERIFIED`。
+- `visual_evidence`：Provider 实际截图、快照和观察结果，`required` 必须为 `true` 且 `refs` 非空。sidecar 使用 `edgeIds`、`businessReason`、`geometricReason`、`visualEvidence.required/refs`；expected 使用 `object`、`business_reason`、`geometric_reason`、`visual_evidence.required/refs`。没有最新真实证据时只能是 `UNVERIFIED`；crossing exception 只能豁免所声明的那一对 edge IDs，不能覆盖其他交叉、节点穿越、标签碰撞或箭头遮挡。
 
-生成器闭环要求 expected、sidecar、SVG、Provider Request 和声明的其他派生产物在同一次生成记录中列出 generator/version、config summary/digest、source refs 和 outputs。生成器或配置改变后必须重新生成全部派生产物并重新运行受影响的四层验收；旧 evidence 不得复用为最新 `PASS`。
+生成器闭环要求 expected、sidecar、SVG、Provider Request 和声明的其他派生产物在同一次生成记录中列出 generator/version、config summary/digest、`route_config`、source refs、outputs、`command_argv` 和可选 cwd。Checker 必须实际以 `shell: false` 执行命令，通过 `AIDLC_DIAGRAM_ID`、`AIDLC_ROUTE_CONFIG_JSON`、`AIDLC_EXPECTED_CONTRACT_PATH` 传入当前上下文，重读 SVG/sidecar，并拒绝未列入允许 outputs 的项目文件变更；`route_config`、实际命令、cwd、changed files、`reloaded` 和 `/tmp` generator/config 路径必须进入 generation closure。生成器或配置改变后必须重新生成全部派生产物并重新运行受影响的四层验收；旧 evidence 不得复用为最新 `PASS`。
 
 
 
@@ -199,9 +199,9 @@ Geometry QA 使用源坐标、路径点和结构化文本估算，不声称完�
 4. Semantic 或 Geometry 未通过时先修复源，不执行浏览器掩盖问题；
 5. Chrome 未实际执行时保持 `executed=false` 和 `status=UNVERIFIED`；要求能力但不可用时为 `NEEDS_CAPABILITY`。
 
-适用时 Provider 必须分别保留 `normal`、`fit`、`zoom` 三种阅读视图，每个视图记录 viewport、状态、几何观察和截图/快照路径。纵向滚动允许，水平溢出、裁切和不可读失败。
+适用时 Provider 必须分别保留 `normal`、`fit`、`zoom` 三种阅读视图，每个视图记录 viewport、状态、几何观察和截图/快照路径。normal 必须从 `(0,0)` 开始，fit 必须完整显示 content bbox，zoom 必须覆盖 `affected_edge_ids`；三视图任一缺失、失败或未实际执行，都不能输出 `VISUAL_PASS`/`OVERALL_PASS`。纵向滚动允许，水平溢出、裁切和不可读失败。
 
-结果记录使用统一 `final_status`，不把路由决策或截图路径当执行证据：
+结果记录使用统一 `final_status`，并区分 `STRUCTURE_PASS`、`ROUTE_CONTRACT_PASS`、`GEOMETRY_PASS`、`VISUAL_PASS` 和 `OVERALL_PASS`；只有真实四层均通过时才可输出 `OVERALL_PASS`，不把路由决策或截图路径当执行证据：
 
 ```json
 {

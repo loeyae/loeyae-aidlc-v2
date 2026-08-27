@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "document": "diagram-009.md",
+  "expected_contract_path": "diagram-009.expected.json",
+  "diagrams": [
+    {
+      "id": "diagram-009",
+      "output": "diagram-009.svg",
+      "title": "订单支付与配送路径",
+      "description": "REQ-009 订单支付与配送路径",
+      "diagramType": "flowchart",
+      "canvas": {"width": 1100, "height": 1050},
+      "nodes": [
+        {"id": "oms-a", "shape": "rect", "label": "订单系统 A", "x": 400, "y": 80, "width": 120, "height": 60},
+        {"id": "oms-b", "shape": "rect", "label": "订单系统 B", "x": 400, "y": 650, "width": 120, "height": 60},
+        {"id": "cart", "shape": "rect", "label": "购物车", "x": 100, "y": 900, "width": 120, "height": 60},
+        {"id": "store", "shape": "rect", "label": "配送方式", "x": 900, "y": 80, "width": 120, "height": 60},
+        {"id": "payment-a", "shape": "rect", "label": "支付服务 A", "x": 700, "y": 400, "width": 120, "height": 60},
+        {"id": "pending-payment", "shape": "rect", "label": "待支付", "x": 900, "y": 760, "width": 120, "height": 60},
+        {"id": "checkout", "shape": "rect", "label": "结算", "x": 500, "y": 900, "width": 120, "height": 60},
+        {"id": "delivery", "shape": "rect", "label": "送货", "x": 700, "y": 180, "width": 120, "height": 60}
+      ],
+      "edges": [
+        {"id": "edge-005", "from": "oms-a", "fromPort": "left", "to": "payment-a", "toPort": "left", "arrowTarget": "payment-a:left", "kind": "directed", "points": [[400, 110], [60, 110], [60, 430], [700, 430]]},
+        {"id": "edge-048", "from": "oms-b", "fromPort": "left", "to": "pending-payment", "toPort": "left", "arrowTarget": "pending-payment:left", "kind": "directed", "points": [[400, 680], [60, 680], [60, 790], [900, 790]]},
+        {"id": "edge-008", "from": "cart", "fromPort": "right", "to": "checkout", "toPort": "left", "arrowTarget": "checkout:left", "kind": "directed", "points": [[220, 930], [500, 930]]},
+        {"id": "edge-041", "from": "pending-payment", "fromPort": "bottom", "to": "checkout", "toPort": "right", "arrowTarget": "checkout:right", "kind": "directed", "points": [[960, 820], [960, 930], [620, 930]], "label": {"text": "待支付", "x": 1050, "y": 550}},
+        {"id": "edge-015", "from": "store", "fromPort": "left", "to": "delivery", "toPort": "top", "arrowTarget": "delivery:top", "kind": "directed", "points": [[900, 110], [760, 110], [760, 180]], "label": {"text": "送货上门", "x": 840, "y": 165}}
+      ],
+      "designNotes": {
+        "intent": "验证订单入口、配送方式、支付服务和待支付回路的独立业务路径",
+        "semanticModes": ["process-flow"],
+        "visualSemantics": [],
+        "legendDecision": {"status": "not-needed", "reason": "所有节点和边使用单一视觉语义，不复用需要解释的符号"},
+        "splitDecision": {"status": "not-needed", "reason": "图只表达一个订单路径目标"},
+        "layout": {
+          "direction": "TB",
+          "mainAxis": 600,
+          "layerTolerance": 24,
+          "symmetryGroups": [],
+          "mergeNodes": [{"nodeId": "checkout", "reason": "直达结算和待支付回路在结算节点合流", "edgeIds": ["edge-008", "edge-041"], "ports": {"edge-008": "left", "edge-041": "right"}}],
+          "mainFlow": {"entryNodeIds": ["cart", "store", "oms-a", "oms-b"], "exitNodeIds": ["checkout", "delivery", "payment-a"], "nodeIds": ["oms-a", "oms-b", "cart", "store", "payment-a", "pending-payment", "checkout", "delivery"], "edgeIds": ["edge-005", "edge-048", "edge-008", "edge-041", "edge-015"]},
+          "loopLanes": [{"id": "pending-payment", "side": "right", "laneOffset": 200, "reason": "待支付回路沿主轴右侧独立通道返回结算，避免穿越主业务节点", "edgeIds": ["edge-041"]}],
+          "branchLayerExceptions": [],
+          "branchPortExceptions": [],
+          "sideSwitchExceptions": [],
+          "crossingExceptions": [],
+          "readabilityEvidence": {
+            "normal": {"status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.normal"},
+            "fit": {"status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.fit"},
+            "zoom": {"status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.zoom"}
+          }
+        }
+      },
+      "generation": {
+        "generator": {"name": "diagram-009-generator", "version": "1.0.0"},
+        "config": {"summary": "订单支付与配送路径 route contract", "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+        "route_config": {"diagram_id": "diagram-009", "affected_edge_ids": ["edge-005", "edge-048", "edge-008", "edge-041", "edge-015"]},
+        "source_refs": ["diagram-009.md"],
+        "outputs": ["diagram-009.svg", "diagram-009.expected.json"],
+        "command_argv": ["python3", "diagram-009-generator.py"]
+      }
+    }
+  ]
+}

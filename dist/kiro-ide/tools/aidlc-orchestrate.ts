@@ -864,7 +864,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
           if (evidence.legend_valid !== true) errors.push("legend_valid must be true");
           if (evidence.groups_valid !== true) errors.push("groups_valid must be true");
           if (evidence.viewbox_valid !== true) errors.push("viewbox_valid must be true");
-          if (!["passed", "unverified", "not_required", "unavailable"].includes(String(evidence.provider_status))) errors.push('provider_status must be "passed", "unverified", "not_required" or "unavailable"');
+          if (!["passed", "unverified", "not_required", "unavailable", "failed"].includes(String(evidence.provider_status))) errors.push('provider_status must be "passed", "unverified", "not_required", "unavailable" or "failed"');
           if (typeof evidence.target_operation_required !== "boolean") errors.push("target_operation_required must be boolean");
           if (evidence.fr_mapping_complete !== true) errors.push("fr_mapping_complete must be true");
           if (evidence.design_notes_valid !== true) errors.push("design_notes_valid must be true");
@@ -882,9 +882,19 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
           ];
           for (const field of requiredPassedFields) if (evidence[field] !== "passed") errors.push(`${field} must be "passed"`);
           if (!["passed", "not_applicable"].includes(String(evidence.change_impact_review_status))) errors.push('change_impact_review_status must be "passed" or "not_applicable"');
-          if (!["passed", "unverified"].includes(String(evidence.render_status))) errors.push('render_status must be "passed" or "unverified"');
+          if (!['passed', 'unverified'].includes(String(evidence.render_status))) errors.push('render_status must be "passed" or "unverified"');
           if (asNumber(evidence.unresolved) !== 0) errors.push("unresolved must be 0");
-
+          const gateStatuses = asRecord(evidence.gate_statuses);
+          if (!final.legacy && !gateStatuses) errors.push("gate_statuses is required for the new diagram contract producer");
+          if (gateStatuses) {
+            if (gateStatuses.structure !== "STRUCTURE_PASS") errors.push("gate_statuses.structure must be STRUCTURE_PASS");
+            if (gateStatuses.route_contract !== "ROUTE_CONTRACT_PASS") errors.push("gate_statuses.route_contract must be ROUTE_CONTRACT_PASS");
+            if (gateStatuses.geometry !== "GEOMETRY_PASS") errors.push("gate_statuses.geometry must be GEOMETRY_PASS");
+            if (!["VISUAL_PASS", "UNVERIFIED", "FAIL"].includes(String(gateStatuses.visual))) errors.push("gate_statuses.visual must be VISUAL_PASS, UNVERIFIED or FAIL");
+            if (final.status === "PASS" && gateStatuses.visual !== "VISUAL_PASS") errors.push("PASS requires gate_statuses.visual=VISUAL_PASS");
+            if (final.status === "PASS" && gateStatuses.overall !== "OVERALL_PASS") errors.push("PASS requires gate_statuses.overall=OVERALL_PASS");
+            if (final.status === "STATIC_PASS" && gateStatuses.overall !== "STATIC_PASS") errors.push("STATIC_PASS requires gate_statuses.overall=STATIC_PASS");
+          }
           if (!final.legacy) {
             if (!["passed", "unverified"].includes(String(evidence.expected_contract_status))) errors.push('expected_contract_status must be "passed" or "unverified"');
             if (!["passed", "unverified"].includes(String(evidence.generation_status))) errors.push('generation_status must be "passed" or "unverified"');

@@ -1,0 +1,118 @@
+{
+  "version": "1",
+  "type": "diagram-expected-contract",
+  "source": {
+    "kind": "approved-business-source",
+    "ref": "diagram-009.md",
+    "revision": "diagram-009-route-v1",
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "generator": {
+    "name": "diagram-009-generator",
+    "version": "1.0.0",
+    "config_summary": "订单支付与配送路径 route contract",
+    "config_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "source_refs": ["diagram-009.md"]
+  },
+  "diagrams": [
+    {
+      "id": "diagram-009",
+      "diagram_type": "flowchart",
+      "intent": "验证订单入口、配送方式、支付服务和待支付回路的独立业务路径",
+      "nodes": [
+        {"id": "oms-a", "shape": "rect"},
+        {"id": "oms-b", "shape": "rect"},
+        {"id": "cart", "shape": "rect"},
+        {"id": "store", "shape": "rect"},
+        {"id": "payment-a", "shape": "rect"},
+        {"id": "pending-payment", "shape": "rect"},
+        {"id": "checkout", "shape": "rect"},
+        {"id": "delivery", "shape": "rect"}
+      ],
+      "edges": [
+        {"id": "edge-005", "from": "oms-a", "to": "payment-a", "from_port": "left", "to_port": "left", "arrow_target": "payment-a:left", "kind": "directed"},
+        {"id": "edge-048", "from": "oms-b", "to": "pending-payment", "from_port": "left", "to_port": "left", "arrow_target": "pending-payment:left", "kind": "directed"},
+        {"id": "edge-008", "from": "cart", "to": "checkout", "from_port": "right", "to_port": "left", "arrow_target": "checkout:left", "kind": "directed"},
+        {"id": "edge-041", "from": "pending-payment", "to": "checkout", "from_port": "bottom", "to_port": "right", "arrow_target": "checkout:right", "kind": "directed"},
+        {"id": "edge-015", "from": "store", "to": "delivery", "from_port": "left", "to_port": "top", "arrow_target": "delivery:top", "kind": "directed"}
+      ],
+      "groups": [],
+      "legend_ids": [],
+      "annotation_ids": [],
+      "lifeline_ids": [],
+      "route_contract": {
+        "direction": "TB",
+        "affected_edge_ids": ["edge-005", "edge-048", "edge-008", "edge-041", "edge-015"],
+        "edge_intents": [
+          {
+            "edge_id": "edge-005",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": false,
+            "arrow_target": "payment-a:left",
+            "topology": {"orthogonal": true, "segment_count": 3, "directions": ["left", "down", "right"]}
+          },
+          {
+            "edge_id": "edge-048",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": false,
+            "arrow_target": "pending-payment:left",
+            "topology": {"orthogonal": true, "segment_count": 3, "directions": ["left", "down", "right"]}
+          },
+          {
+            "edge_id": "edge-008",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "checkout:left",
+            "topology": {"orthogonal": true, "segment_count": 1, "directions": ["right"]}
+          },
+          {
+            "edge_id": "edge-041",
+            "kind": "loop",
+            "bend_count": 1,
+            "label_required": true,
+            "lane_id": "pending-payment",
+            "arrow_target": "checkout:right",
+            "label_text": "待支付",
+            "topology": {"orthogonal": true, "segment_count": 2, "directions": ["down", "left"]}
+          },
+          {
+            "edge_id": "edge-015",
+            "kind": "manhattan",
+            "bend_count": 1,
+            "label_required": true,
+            "arrow_target": "delivery:top",
+            "label_text": "送货上门",
+            "topology": {"orthogonal": true, "segment_count": 2, "directions": ["left", "down"]}
+          }
+        ],
+        "main_flow": {
+          "entry_node_ids": ["cart", "store", "oms-a", "oms-b"],
+          "exit_node_ids": ["checkout", "delivery", "payment-a"],
+          "node_ids": ["oms-a", "oms-b", "cart", "store", "payment-a", "pending-payment", "checkout", "delivery"],
+          "edge_ids": ["edge-005", "edge-048", "edge-008", "edge-041", "edge-015"]
+        },
+        "loop_lanes": [
+          {
+            "id": "pending-payment",
+            "side": "right",
+            "lane_offset": 200,
+            "edge_ids": ["edge-041"],
+            "reason": "待支付回路沿主轴右侧独立通道返回结算，避免穿越主业务节点"
+          }
+        ],
+        "merge_nodes": [
+          {
+            "node_id": "checkout",
+            "edge_ids": ["edge-008", "edge-041"],
+            "ports": {"edge-008": "left", "edge-041": "right"}
+          }
+        ],
+        "branch_groups": [],
+        "exceptions": []
+      }
+    }
+  ]
+}

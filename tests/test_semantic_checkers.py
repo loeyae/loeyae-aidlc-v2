@@ -121,9 +121,9 @@ Clarification consistency: passed
                     "branchLayerExceptions": [],
                     "branchPortExceptions": [],
                     "readabilityEvidence": {
-                        "normal": {"status": "UNVERIFIED", "evidence": "source-only fixture"},
-                        "fit": {"status": "UNVERIFIED", "evidence": "source-only fixture"},
-                        "zoom": {"status": "UNVERIFIED", "evidence": "source-only fixture"}
+                        "normal": {"status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.normal"},
+                        "fit": {"status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.fit"},
+                        "zoom": {"status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.zoom"}
                     }
                 }
             }
@@ -138,11 +138,27 @@ Clarification consistency: passed
     manifest["diagrams"][0]["generation"] = {
         "generator": {"name": "generic-test-generator", "version": "1.0.0"},
         "config": {"summary": "generic semantic fixture", "digest": "sha256:" + "1" * 64},
+        "route_config": {"diagram_id": "requirements-flow", "edges": {"start-done": {"arrow_target": "done:left", "label_text": "完成", "topology": {"orthogonal": True, "segment_count": 1, "directions": ["right"]}}}},
         "source_refs": ["docs/aidlc/inception/requirements/business-flows.md"],
         "outputs": ["docs/aidlc/inception/requirements/business-flows.svg", "docs/aidlc/inception/requirements/business-flows.expected.json"],
+        "command_argv": ["python3", "generator.py"],
     }
     with open(manifest_path, "w") as handle:
         json.dump(manifest, handle)
+    write(project, "generator.py", """import json
+import os
+from pathlib import Path
+
+assert os.environ["AIDLC_DIAGRAM_ID"] == "requirements-flow"
+route_config = json.loads(os.environ["AIDLC_ROUTE_CONFIG_JSON"])
+assert route_config["edges"]["start-done"]["arrow_target"] == "done:left"
+assert Path(os.environ["AIDLC_EXPECTED_CONTRACT_PATH"]).exists()
+manifest_path = Path("docs/aidlc/inception/requirements/business-flows.diagram.json")
+manifest = json.loads(manifest_path.read_text())
+manifest["diagrams"][0]["generation"]["route_config"] = route_config
+manifest_path.write_text(json.dumps(manifest))
+print("route-config=", json.dumps(route_config, sort_keys=True))
+""")
     write(project, "docs/aidlc/inception/requirements/business-flows.expected.json", json.dumps({
         "version": "1",
         "type": "diagram-expected-contract",
@@ -157,7 +173,7 @@ Clarification consistency: passed
             "groups": [], "legend_ids": [], "annotation_ids": [], "lifeline_ids": [],
             "route_contract": {
                 "direction": "LR",
-                "edge_intents": [{"edge_id": "start-done", "kind": "direct", "bend_count": 0, "label_required": True}],
+                "edge_intents": [{"edge_id": "start-done", "kind": "direct", "bend_count": 0, "label_required": True, "arrow_target": "done:left", "label_text": "完成", "topology": {"orthogonal": True, "segment_count": 1, "directions": ["right"]}}],
                 "main_flow": {"entry_node_ids": ["start"], "exit_node_ids": ["done"], "node_ids": ["start", "done"], "edge_ids": ["start-done"]},
                 "loop_lanes": [], "branch_groups": [], "exceptions": [],
             },
@@ -287,7 +303,7 @@ def test_diagram_geometry_gates_fail_closed() -> None:
             diagram["nodes"].append({"id": "other", "shape": "rect", "label": "旁路", "x": 40, "y": 110, "width": 100, "height": 50}),
             diagram["edges"].append({"id": "overlap", "from": "other", "fromPort": "right", "to": "done", "toPort": "left", "arrowTarget": "done:left", "kind": "directed", "points": [[140, 135], [180, 135], [180, 65], [260, 65]]}),
             diagram["designNotes"]["layout"]["mainFlow"].update({"entryNodeIds": ["start", "other"], "exitNodeIds": ["done"], "nodeIds": ["start", "done", "other"], "edgeIds": ["start-done", "overlap"]}),
-            diagram["designNotes"]["layout"]["mergeNodes"].append({"nodeId": "done", "reason": "负例显式允许重复入边以验证共线重叠门禁"}),
+            diagram["designNotes"]["layout"]["mergeNodes"].append({"nodeId": "done", "reason": "负例显式允许重复入边以验证共线重叠门禁", "edgeIds": ["start-done", "overlap"], "ports": {"start-done": "left", "overlap": "left"}}),
         ), "COLLINEAR_OVERLAP"),
         ("edge crossing", lambda diagram, _: (
             diagram["nodes"][0].update({"y": 125}),
@@ -395,7 +411,7 @@ def directional_fixture(project: str, direction: str) -> None:
             {"id": "decision-pending", "from": "decision", "fromPort": "left", "to": "pending", "toPort": "top", "kind": "directed", "points": [[530, 340], [360, 340], [360, 700]], "label": {"text": "未通过", "x": 450, "y": 320}},
         ]
         canvas = {"width": 1000, "height": 840}
-        layout = {"direction": "TB", "mainAxis": 580, "layerTolerance": 24, "symmetryGroups": [{"nodeIds": ["oms", "dmall"], "tolerance": 1}], "mergeNodes": [{"nodeId": "receive", "reason": "OMS 与 E-Fulfilment 输入汇合后进入云 Mall"}], "mainFlow": {"entryNodeIds": ["oms", "dmall"], "exitNodeIds": ["active", "pending"], "nodeIds": ["oms", "dmall", "receive", "decision", "active", "pending"], "edgeIds": ["oms-receive", "dmall-receive", "receive-decision", "decision-active", "decision-pending"]}, "loopLanes": [], "branchLayerExceptions": [], "branchPortExceptions": []}
+        layout = {"direction": "TB", "mainAxis": 580, "layerTolerance": 24, "symmetryGroups": [{"nodeIds": ["oms", "dmall"], "tolerance": 1}], "mergeNodes": [{"nodeId": "receive", "reason": "OMS 与 E-Fulfilment 输入汇合后进入云 Mall", "edgeIds": ["oms-receive", "dmall-receive"], "ports": {"oms-receive": "left", "dmall-receive": "right"}}], "mainFlow": {"entryNodeIds": ["oms", "dmall"], "exitNodeIds": ["active", "pending"], "nodeIds": ["oms", "dmall", "receive", "decision", "active", "pending"], "edgeIds": ["oms-receive", "dmall-receive", "receive-decision", "decision-active", "decision-pending"]}, "loopLanes": [], "branchLayerExceptions": [], "branchPortExceptions": []}
     else:
         nodes = [
             {"id": "start", "shape": "round", "label": "完成定店", "x": 40, "y": 225, "width": 100, "height": 50},
@@ -412,13 +428,13 @@ def directional_fixture(project: str, direction: str) -> None:
             {"id": "virtual-checkout", "from": "virtual", "fromPort": "right", "to": "checkout", "toPort": "bottom", "kind": "directed", "points": [[600, 375], [750, 375], [750, 275]]},
         ]
         canvas = {"width": 840, "height": 520}
-        layout = {"direction": "LR", "mainAxis": 250, "layerTolerance": 24, "symmetryGroups": [], "mergeNodes": [{"nodeId": "checkout", "reason": "两个商品分支在结算提交订单处汇合"}], "mainFlow": {"entryNodeId": "start", "exitNodeIds": ["checkout"], "nodeIds": ["start", "decision", "physical", "virtual", "checkout"], "edgeIds": ["start-decision", "decision-physical", "decision-virtual", "physical-checkout", "virtual-checkout"]}, "loopLanes": [], "branchLayerExceptions": [], "branchPortExceptions": []}
+        layout = {"direction": "LR", "mainAxis": 250, "layerTolerance": 24, "symmetryGroups": [], "mergeNodes": [{"nodeId": "checkout", "reason": "两个商品分支在结算提交订单处汇合", "edgeIds": ["physical-checkout", "virtual-checkout"], "ports": {"physical-checkout": "top", "virtual-checkout": "bottom"}}], "mainFlow": {"entryNodeId": "start", "exitNodeIds": ["checkout"], "nodeIds": ["start", "decision", "physical", "virtual", "checkout"], "edgeIds": ["start-decision", "decision-physical", "decision-virtual", "physical-checkout", "virtual-checkout"]}, "loopLanes": [], "branchLayerExceptions": [], "branchPortExceptions": []}
     for edge in edges:
         edge["arrowTarget"] = f'{edge["to"]}:{edge["toPort"]}'
     layout["readabilityEvidence"] = {
-        "normal": {"status": "UNVERIFIED", "evidence": "source-only regression fixture"},
-        "fit": {"status": "UNVERIFIED", "evidence": "source-only regression fixture"},
-        "zoom": {"status": "UNVERIFIED", "evidence": "source-only regression fixture"},
+        "normal": {"status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.normal"},
+        "fit": {"status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.fit"},
+        "zoom": {"status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.zoom"},
     }
     def arrow_path(edge: dict) -> str:
         x, y = edge["points"][-1]
@@ -603,7 +619,7 @@ def test_diagram_contract_hardening() -> None:
             "direction": "TB", "mainAxis": 200, "symmetryGroups": [], "mergeNodes": [],
             "mainFlow": {"entryNodeIds": ["start", "top"], "exitNodeIds": ["done", "bottom"], "nodeIds": ["start", "done", "top", "bottom"], "edgeIds": ["start-done", "top-bottom"]},
             "loopLanes": [], "branchLayerExceptions": [], "branchPortExceptions": [], "sideSwitchExceptions": [],
-            "crossingExceptions": ([{"edgeIds": ["start-done", "top-bottom"], "reason": "保持两个独立主方向，绕行会破坏层级"}] if declared else []),
+            "crossingExceptions": ([{"edgeIds": ["start-done", "top-bottom"], "businessReason": "保持两个独立主方向，绕行会破坏层级", "geometricReason": "两条正交路径在业务节点之间形成唯一真实交点", "visualEvidence": {"required": True, "refs": [".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.normal"]}}] if declared else []),
         })
         with open(manifest_path, "w") as handle:
             json.dump(manifest, handle)
@@ -644,6 +660,70 @@ def test_diagram_contract_hardening() -> None:
         shutil.rmtree(project)
 
 
+def diagram009_expected_path(project: str) -> str:
+    return os.path.join(project, "diagram-009.expected.json")
+
+
+def mutate_diagram009_expected(project: str, mutation) -> None:
+    path = diagram009_expected_path(project)
+    with open(path) as handle:
+        expected = json.load(handle)
+    mutation(expected["diagrams"][0])
+    with open(path, "w") as handle:
+        json.dump(expected, handle)
+
+
+def diagram009_intent(expected_diagram: dict, edge_id: str) -> dict:
+    return next(intent for intent in expected_diagram["route_contract"]["edge_intents"] if intent["edge_id"] == edge_id)
+
+
+def diagram009_edge(expected_diagram: dict, edge_id: str) -> dict:
+    return next(edge for edge in expected_diagram["edges"] if edge["id"] == edge_id)
+
+
+def test_diagram_009_route_contract() -> None:
+    project = tempfile.mkdtemp(prefix="aidlc-diagram-009-route-contract-")
+    try:
+        source = os.path.join(REPO_ROOT, "tests", "fixtures", "diagram-009")
+        shutil.copytree(source, project, dirs_exist_ok=True)
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["final_status"] == "STATIC_PASS"
+        assert payload["gate_statuses"] == {
+            "structure": "STRUCTURE_PASS",
+            "route_contract": "ROUTE_CONTRACT_PASS",
+            "geometry": "GEOMETRY_PASS",
+            "visual": "UNVERIFIED",
+            "overall": "STATIC_PASS",
+        }
+        assert payload["generation_closure"][0]["reloaded"] is True
+        assert payload["generation_closure"][0]["route_config"]["diagram_id"] == "diagram-009"
+        assert payload["loop_lanes_valid"] is True
+    finally:
+        shutil.rmtree(project)
+
+    cases = [
+        ("endpoint", lambda diagram: (diagram009_edge(diagram, "edge-005").update({"to": "delivery", "arrow_target": "delivery:left"}), diagram009_intent(diagram, "edge-005").update({"arrow_target": "delivery:left"})), "ROUTE_ENDPOINT_DIFF"),
+        ("port", lambda diagram: diagram009_edge(diagram, "edge-048").update({"from_port": "right"}), "ROUTE_PORT_DIFF"),
+        ("arrow", lambda diagram: (diagram009_edge(diagram, "edge-008").pop("to_port"), diagram009_edge(diagram, "edge-008").pop("arrow_target"), diagram["route_contract"]["merge_nodes"][0].update({"edge_ids": ["edge-041"], "ports": {"edge-041": "right"}}), diagram009_intent(diagram, "edge-008").update({"arrow_target": "checkout:right"})), "ROUTE_ARROW_TARGET_DIFF"),
+        ("bend", lambda diagram: diagram009_intent(diagram, "edge-005").update({"bend_count": 1}), "ROUTE_BEND_DIFF"),
+        ("topology", lambda diagram: diagram009_intent(diagram, "edge-048").update({"topology": {"orthogonal": True, "segment_count": 3, "directions": ["left", "up", "right"]}}), "ROUTE_TOPOLOGY"),
+        ("label", lambda diagram: diagram009_intent(diagram, "edge-015").update({"label_text": "到店自提"}), "ROUTE_LABEL_DIFF"),
+    ]
+    for name, mutation, expected_error in cases:
+        project = tempfile.mkdtemp(prefix=f"aidlc-diagram-009-{name}-")
+        try:
+            source = os.path.join(REPO_ROOT, "tests", "fixtures", "diagram-009")
+            shutil.copytree(source, project, dirs_exist_ok=True)
+            mutate_diagram009_expected(project, mutation)
+            result = run_checker(project, "diagram-contract")
+            assert result.returncode != 0, name
+            assert expected_error in result.stderr, f"{name}: {result.stderr}"
+        finally:
+            shutil.rmtree(project)
+
+
 if __name__ == "__main__":
     test_all_checkers_pass_on_realistic_fixture()
     test_checker_fails_closed_when_required_artifact_is_removed()
@@ -654,4 +734,5 @@ if __name__ == "__main__":
     test_diagram_risk_assessment()
     test_directional_layout_contracts()
     test_diagram_contract_hardening()
+    test_diagram_009_route_contract()
     print("semantic checker regression tests passed")

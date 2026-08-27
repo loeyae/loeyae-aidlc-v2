@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { parseExpectedContract, routeBendCount } from "../core/tools/diagram-contract.js";
+import { parseExpectedContract, routeBendCount, routeDirectionTokens, routeIntentErrors } from "../core/tools/diagram-contract.js";
 
 const digest = (character: string) => `sha256:${character.repeat(64)}`;
 
@@ -48,3 +48,10 @@ withIncompleteException.diagrams[0].route_contract.exceptions = [{
 assert.throws(() => parseExpectedContract(withIncompleteException, "diagram"), /business_reason|object/);
 
 console.log("diagram contract protocol tests passed");
+
+assert.deepEqual(routeDirectionTokens([[0, 0], [20, 0], [20, 10], [40, 10]]), ["right", "down", "right"]);
+assert.deepEqual(routeIntentErrors({ edgeId: "edge-a", kind: "manhattan", bendCount: 1, labelRequired: true, arrowTarget: "node-b:left", labelText: "完成", topology: { orthogonal: true, segmentCount: 2, directions: ["right", "down"] } }, [[0, 0], [20, 0], [20, 10]], true, "node-b:right", "错误"), [
+  "ROUTE_ARROW_TARGET_DIFF: route edge-a arrowTarget is node-b:right, expected node-b:left",
+  "ROUTE_LABEL_DIFF: route edge-a label is \"错误\", expected \"完成\"",
+]);
+assert.ok(routeIntentErrors({ edgeId: "edge-diagonal", kind: "manhattan", bendCount: 1, labelRequired: false, topology: { orthogonal: true } }, [[0, 0], [20, 10]], false).some((error) => error.startsWith("NON_MANHATTAN:")));

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "crypto";
+import { spawnSync } from "child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, resolve } from "path";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
@@ -8,6 +9,7 @@ import {
   expectedContractPath,
   parseExpectedContract,
   routeBendCount,
+  routeDirectionTokens,
   routeGeometryKind,
   routeIntentErrors,
 } from "./diagram-contract.js";
@@ -296,6 +298,8 @@ function diagramContract(): Record<string, unknown> {
   let diagramsChecked = 0;
   let expectedContractsChecked = 0;
   let generationContractsChecked = 0;
+  const generationClosures: Record<string, unknown>[] = [];
+  const routeContractReports: Record<string, unknown>[] = [];
   let changeImpactReviewsChecked = 0;
   let riskScore = 0;
   const riskReasons = new Set<string>();
@@ -457,7 +461,10 @@ function diagramContract(): Record<string, unknown> {
       const first = requireString(exception.edgeIds[0], "diagram layout crossingExceptions.edgeId");
       const second = requireString(exception.edgeIds[1], "diagram layout crossingExceptions.edgeId");
       if (first === second) fail("CROSSING_EXCEPTION: diagram layout crossingExceptions requires two distinct edgeIds");
-      requireString(exception.reason, "diagram layout crossingExceptions.reason");
+      requireString(exception.businessReason, "diagram layout crossingExceptions.businessReason");
+      requireString(exception.geometricReason, "diagram layout crossingExceptions.geometricReason");
+      const visualEvidence = exception.visualEvidence;
+      if (!visualEvidence || typeof visualEvidence !== "object" || Array.isArray(visualEvidence) || visualEvidence.required !== true || !Array.isArray(visualEvidence.refs) || visualEvidence.refs.length === 0 || !visualEvidence.refs.every((ref: unknown) => typeof ref === "string" && ref.trim().length > 0)) fail("CROSSING_EXCEPTION: diagram layout crossingExceptions.visualEvidence must contain required=true and non-empty refs");
       const key = edgePairKey(first, second);
       if (pairs.has(key)) fail(`CROSSING_EXCEPTION: diagram layout crossingExceptions duplicates ${first}/${second}`);
       pairs.set(key, [first, second]);
@@ -490,22 +497,91 @@ function diagramContract(): Record<string, unknown> {
     }
   };
 
-  const validateGeneration = (diagram: Record<string, unknown>, expected: ExpectedContract, expectedPath: string, svgPath: string, id: string): void => {
+  const snapshotProjectFiles = (): Map<string, string> => {
+    const files = new Map<string, string>();
+    const skipped = new Set([".git", "node_modules", "dist", "build", "out", "target"]);
+    const visit = (directory: string): void => {
+      for (const entry of readdirSync(directory)) {
+        if (skipped.has(entry)) continue;
+        const path = join(directory, entry);
+        const relativeName = relative(ROOT, path);
+        if (relativeName === ".aidlc/evidence" || relativeName.startsWith(`.aidlc${process.platform === "win32" ? "\\\\" : "/"}evidence${process.platform === "win32" ? "\\\\" : "/"}`)) continue;
+        const info = statSync(path);
+        if (info.isDirectory()) visit(path);
+        else if (info.isFile()) files.set(path, createHash("sha256").update(readFileSync(path)).digest("hex"));
+      }
+    };
+    visit(ROOT);
+    return files;
+  };
+
+  const changedFiles = (before: Map<string, string>, after: Map<string, string>): string[] => {
+    const paths = new Set([...before.keys(), ...after.keys()]);
+    return [...paths].filter((path) => before.get(path) !== after.get(path)).sort();
+  };
+
+  const validateGeneration = (manifestPath: string, diagram: Record<string, unknown>, expected: ExpectedContract, expectedPath: string, svgPath: string, id: string): Record<string, unknown> => {
     const generation = diagram.generation;
     if (!generation || typeof generation !== "object" || Array.isArray(generation)) fail(`GENERATOR_CLOSED_LOOP: diagram ${id} generation metadata is missing`);
-    const record = generation as Record<string, unknown>;
-    const generator = record.generator && typeof record.generator === "object" && !Array.isArray(record.generator) ? record.generator as Record<string, unknown> : undefined;
+    const metadata = generation as Record<string, unknown>;
+    const generator = metadata.generator && typeof metadata.generator === "object" && !Array.isArray(metadata.generator) ? metadata.generator as Record<string, unknown> : undefined;
     if (!generator) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.generator is required`);
     if (requireString(generator.name, `diagram ${id}.generation.generator.name`) !== expected.generator.name || requireString(generator.version, `diagram ${id}.generation.generator.version`) !== expected.generator.version) fail(`GENERATOR_CLOSED_LOOP: diagram ${id} generator identity does not match expected contract`);
-    const config = record.config && typeof record.config === "object" && !Array.isArray(record.config) ? record.config as Record<string, unknown> : undefined;
+    const config = metadata.config && typeof metadata.config === "object" && !Array.isArray(metadata.config) ? metadata.config as Record<string, unknown> : undefined;
     if (!config) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.config is required`);
     requireString(config.summary, `diagram ${id}.generation.config.summary`);
     if (requireString(config.digest, `diagram ${id}.generation.config.digest`) !== expected.generator.configDigest) fail(`GENERATOR_CLOSED_LOOP: diagram ${id} generator config digest does not match expected contract`);
-    const sourceRefs = stringArray(record.source_refs, `diagram ${id}.generation.source_refs`);
+    const routeConfig = metadata.route_config && typeof metadata.route_config === "object" && !Array.isArray(metadata.route_config) ? metadata.route_config as Record<string, unknown> : undefined;
+    if (!routeConfig || Object.keys(routeConfig).length === 0) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.route_config must be a non-empty object`);
+    const sourceRefs = stringArray(metadata.source_refs, `diagram ${id}.generation.source_refs`);
     for (const sourceRef of sourceRefs) projectReference(sourceRef, `diagram ${id}.generation.source_refs`);
-    const outputs = stringArray(record.outputs, `diagram ${id}.generation.outputs`);
+    const outputs = stringArray(metadata.outputs, `diagram ${id}.generation.outputs`);
     const requiredOutputs = [relativePath(svgPath), relativePath(expectedPath)];
     for (const output of requiredOutputs) if (!outputs.includes(output)) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.outputs must include ${output}`);
+    const command = metadata.command_argv;
+    if (!Array.isArray(command) || command.length === 0 || !command.every((value) => typeof value === "string" && value.trim().length > 0)) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.command_argv must be a non-empty argv array`);
+    const commandArgv = (command as string[]).map((value) => value.trim());
+    const configuredCwd = metadata.cwd === undefined ? ROOT : resolve(ROOT, requireString(metadata.cwd, `diagram ${id}.generation.cwd`));
+    if (!existsSync(configuredCwd) || !statSync(configuredCwd).isDirectory()) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.cwd does not exist: ${configuredCwd}`);
+    const before = snapshotProjectFiles();
+    const result = spawnSync(commandArgv[0], commandArgv.slice(1), {
+      cwd: configuredCwd,
+      shell: false,
+      encoding: "utf8",
+      timeout: 120_000,
+      maxBuffer: 4 * 1024 * 1024,
+      env: { ...process.env, AIDLC_DIAGRAM_ID: id, AIDLC_ROUTE_CONFIG_JSON: JSON.stringify(routeConfig), AIDLC_EXPECTED_CONTRACT_PATH: expectedPath },
+    });
+    if (result.error || result.status !== 0) {
+      const stdout = typeof result.stdout === "string" ? result.stdout.trim() : "";
+      const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
+      const detail = result.error?.message || `exit code ${result.status}`;
+      const output = stderr || stdout;
+      fail(`GENERATOR_CLOSED_LOOP: diagram ${id} generator failed: ${detail}${output ? `; ${output}` : ""}`);
+    }
+    const after = snapshotProjectFiles();
+    const allowed = new Set([resolve(svgPath), resolve(manifestPath)]);
+    const unexpected = changedFiles(before, after).filter((path) => !allowed.has(resolve(path)));
+    if (unexpected.length > 0) fail(`GENERATOR_CLOSED_LOOP: diagram ${id} generator changed non-target files: ${unexpected.map(relativePath).join(", ")}`);
+    if (!existsSync(svgPath) || !existsSync(manifestPath)) fail(`GENERATOR_CLOSED_LOOP: diagram ${id} generator did not leave target SVG and sidecar readable`);
+    const refreshedManifest = jsonFile(manifestPath) as Record<string, any>;
+    const matches = Array.isArray(refreshedManifest.diagrams) ? refreshedManifest.diagrams.filter((entry: unknown) => entry && typeof entry === "object" && !Array.isArray(entry) && (entry as Record<string, unknown>).id === id) : [];
+    if (matches.length !== 1) fail(`GENERATOR_CLOSED_LOOP: diagram ${id} sidecar cannot be re-read after generation`);
+    const refreshedDiagram = matches[0] as Record<string, unknown>;
+    const refreshedGeneration = refreshedDiagram.generation;
+    if (!refreshedGeneration || typeof refreshedGeneration !== "object" || Array.isArray(refreshedGeneration)) fail(`GENERATOR_CLOSED_LOOP: diagram ${id} regenerated sidecar lost generation metadata`);
+    Object.assign(diagram, refreshedDiagram);
+    return {
+      status: "passed",
+      command: commandArgv,
+      cwd: relativePath(configuredCwd) || ".",
+      external_generator: commandArgv.some((value) => value.startsWith("/tmp/") || value.includes("/tmp/")) || configuredCwd.startsWith("/tmp/"),
+      route_config: routeConfig,
+      changed_files: changedFiles(before, after).map(relativePath),
+      allowed_changed_files: [relativePath(svgPath), relativePath(manifestPath)],
+      reloaded: true,
+      stdout_tail: typeof result.stdout === "string" ? result.stdout.trim().slice(-1000) : "",
+    };
   };
 
   const compareIds = (actual: string[], expected: string[], field: string, id: string): void => {
@@ -531,6 +607,12 @@ function diagramContract(): Record<string, unknown> {
       const outputName = requireString(diagram.output, `diagram ${id}.output`);
       if (!/^[a-z0-9-]+\.svg$/.test(outputName) || outputs.has(outputName)) fail(`diagram output is invalid or duplicated: ${outputName}`);
       outputs.add(outputName);
+      const svgPath = join(manifestDir, outputName);
+      if (expected && expectedInfo.path) {
+        const closure = validateGeneration(manifestPath, diagram, expected, expectedInfo.path, svgPath, id);
+        generationClosures.push({ diagram_id: id, ...closure });
+        generationContractsChecked += 1;
+      }
       requireString(diagram.title, `diagram ${id}.title`);
       requireString(diagram.description, `diagram ${id}.description`);
       if (!diagram.canvas || requireFinite(diagram.canvas.width, `diagram ${id}.canvas.width`) <= 0 || requireFinite(diagram.canvas.height, `diagram ${id}.canvas.height`) <= 0) fail(`diagram ${id} canvas is invalid`);
@@ -572,10 +654,14 @@ function diagramContract(): Record<string, unknown> {
         for (const merge of mergeNodes) {
           requireString(merge.nodeId, `diagram ${id}.layout.mergeNodes.nodeId`);
           requireString(merge.reason, `diagram ${id}.layout.mergeNodes.reason`);
+          if (!Array.isArray(merge.edgeIds) || merge.edgeIds.length < 2 || !merge.edgeIds.every((edgeId: unknown) => typeof edgeId === "string" && edgeId.trim().length > 0)) fail(`MERGE_DECLARATION: diagram ${id}.layout.mergeNodes.${merge.nodeId} must declare at least two edgeIds`);
+          if (!merge.ports || typeof merge.ports !== "object" || Array.isArray(merge.ports)) fail(`MERGE_DECLARATION: diagram ${id}.layout.mergeNodes.${merge.nodeId}.ports is required`);
+          for (const edgeId of merge.edgeIds) requireString(merge.ports[edgeId], `diagram ${id}.layout.mergeNodes.${merge.nodeId}.ports.${edgeId}`);
         }
         for (const state of ["normal", "fit", "zoom"]) {
           const evidence = layout.readabilityEvidence?.[state];
           if (!evidence || !["PASS", "FAIL", "UNVERIFIED"].includes(evidence.status) || typeof evidence.evidence !== "string" || evidence.evidence.trim().length === 0) fail(`diagram ${id}.layout.readabilityEvidence.${state} is invalid`);
+          if (!/^\.aidlc\/evidence\/[^#]+\/diagram-contract-provider\.json#views\.(?:normal|fit|zoom)$/.test(evidence.evidence.trim())) fail(`READABILITY_EVIDENCE: diagram ${id}.layout.readabilityEvidence.${state} must reference the current provider evidence view`);
           if (evidence.status === "FAIL") fail(`diagram ${id}.layout.readabilityEvidence.${state} records FAIL`);
           if (evidence.status === "PASS") fail(`UNVERIFIED: diagram ${id}.layout.readabilityEvidence.${state} claims PASS without controlled browser evidence`);
         }
@@ -665,6 +751,21 @@ function diagramContract(): Record<string, unknown> {
         }
         edges.set(edgeId, edge);
       }
+      const edgeEntries = [...edges.entries()];
+      if (processTypes.has(diagram.diagramType)) {
+        for (const merge of (Array.isArray(layout.mergeNodes) ? layout.mergeNodes : []) as Record<string, any>[]) {
+          const incoming = edgeEntries.filter(([, edge]) => edge.to === merge.nodeId);
+          if (incoming.length < 2) fail(`MERGE_DECLARATION: diagram ${id} merge node ${merge.nodeId} does not have real multiple incoming edges`);
+          compareIds(incoming.map(([edgeId]) => edgeId), merge.edgeIds.map(String), `merge node ${merge.nodeId} incoming edges`, id);
+          for (const [edgeId, edge] of incoming) if (edge.toPort !== merge.ports[edgeId]) fail(`MERGE_PORT_DIFF: diagram ${id} merge node ${merge.nodeId} edge ${edgeId} enters via ${edge.toPort}, expected ${merge.ports[edgeId]}`);
+        }
+        for (const edgeId of branchPortExceptions) {
+          const edge = edges.get(edgeId);
+          if (!edge) fail(`BRANCH_PORT_EXCEPTION: diagram ${id} references missing edge ${edgeId}`);
+          const branchSourceEdges = edgeEntries.filter(([, candidate]) => candidate.from === edge.from);
+          if (branchSourceEdges.length < 2) fail(`BRANCH_PORT_EXCEPTION: diagram ${id} edge ${edgeId} is not an actual branch edge`);
+        }
+      }
       if (expected) {
         compareIds([...nodes.keys()], expected.nodeIds, "node IDs", id);
         compareIds([...edges.keys()], expected.edgeIds, "edge IDs", id);
@@ -672,21 +773,53 @@ function diagramContract(): Record<string, unknown> {
         compareIds(diagram.legend?.items?.map((item: Record<string, any>) => String(item.id)) || [], expected.legendIds, "legend IDs", id);
         compareIds((diagram.annotations || []).map((annotation: Record<string, any>) => String(annotation.id)), expected.annotationIds, "annotation IDs", id);
         for (const [nodeId, shape] of Object.entries(expected.nodeShapes)) if (shape && nodes.get(nodeId)?.shape !== shape) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} node ${nodeId} shape differs from independent expected contract`);
+        const routeDifferences = {
+          endpoint: [] as string[],
+          port: [] as string[],
+          arrowTarget: [] as string[],
+          bends: [] as string[],
+          pointsTopology: [] as string[],
+        };
         for (const edgeId of expected.edgeIds) {
           const actual = edges.get(edgeId)!;
           const endpoints = expected.edgeEndpoints[edgeId];
-          if (!endpoints || actual.from !== endpoints.from || actual.to !== endpoints.to) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} edge ${edgeId} endpoints differ from independent expected contract`);
+          if (!endpoints || actual.from !== endpoints.from || actual.to !== endpoints.to) {
+            routeDifferences.endpoint.push(edgeId);
+            fail(`ROUTE_ENDPOINT_DIFF: diagram ${id} edge ${edgeId} endpoints are ${actual.from}->${actual.to}, expected ${endpoints?.from}->${endpoints?.to}`);
+          }
           const ports = expected.edgePorts[edgeId];
-          if (ports?.fromPort && actual.fromPort !== ports.fromPort || ports?.toPort && actual.toPort !== ports.toPort) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} edge ${edgeId} ports differ from independent expected contract`);
+          if (ports?.fromPort && actual.fromPort !== ports.fromPort || ports?.toPort && actual.toPort !== ports.toPort) {
+            routeDifferences.port.push(edgeId);
+            fail(`ROUTE_PORT_DIFF: diagram ${id} edge ${edgeId} ports are ${actual.fromPort}->${actual.toPort}, expected ${ports?.fromPort}->${ports?.toPort}`);
+          }
           const expectedKind = expected.edgeKinds[edgeId];
           if (expectedKind && (actual.kind || "directed") !== expectedKind) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} edge ${edgeId} kind differs from independent expected contract`);
           const intent = expected.routeContract.edgeIntents.find((candidate) => candidate.edgeId === edgeId);
           if (!intent) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} route contract omits edge ${edgeId}`);
-          const routeErrors = routeIntentErrors(intent, actual.points, Boolean(actual.label && typeof actual.label === "object" && !Array.isArray(actual.label)));
-          if (routeErrors.length > 0) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} ${routeErrors.join("; ")}`);
+          const expectedArrowTarget = expected.edgeArrowTargets[edgeId] || intent.arrowTarget;
+          if (expectedArrowTarget !== undefined && actual.arrowTarget !== expectedArrowTarget) {
+            routeDifferences.arrowTarget.push(edgeId);
+            fail(`ROUTE_ARROW_TARGET_DIFF: diagram ${id} edge ${edgeId} arrowTarget is ${actual.arrowTarget}, expected ${expectedArrowTarget}`);
+          }
+          const actualLabelText = actual.label && typeof actual.label === "object" && !Array.isArray(actual.label) ? String(actual.label.text || "") : undefined;
+          const routeErrors = routeIntentErrors(intent, actual.points, Boolean(actual.label && typeof actual.label === "object" && !Array.isArray(actual.label)), actual.arrowTarget, actualLabelText);
+          for (const error of routeErrors) {
+            if (error.startsWith("ROUTE_BEND_DIFF")) routeDifferences.bends.push(edgeId);
+            if (error.startsWith("ROUTE_TOPOLOGY") || error.startsWith("NON_MANHATTAN")) routeDifferences.pointsTopology.push(edgeId);
+          }
+          if (routeErrors.length > 0) fail(`ROUTE_CONTRACT_FAIL: diagram ${id} ${routeErrors.join("; ")}`);
           if (intent.kind === "loop" && !expected.routeContract.loopLanes.some((lane) => lane.edgeIds.includes(edgeId))) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} loop route ${edgeId} is not assigned to an expected loop lane`);
           if (intent.kind === "branch" && expected.routeContract.branchGroups.length === 0) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branch route ${edgeId} lacks an expected branch group`);
         }
+        routeContractReports.push({
+          diagram_id: id,
+          expected_vs_actual: routeDifferences,
+          source_target_normal_errors: [],
+          non_manhattan_paths: [],
+          node_crossings: [],
+          unauthorized_crossings: [],
+          label_collisions: [],
+        });
         if (expected.routeContract.direction && layoutDirection && expected.routeContract.direction !== layoutDirection) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} reading direction differs from independent expected contract`);
         const expectedMain = expected.routeContract.mainFlow;
         if (expectedMain) {
@@ -699,13 +832,33 @@ function diagramContract(): Record<string, unknown> {
           compareIds(actualMain.edgeIds.map(String), expectedMain.edgeIds, "mainFlow edges", id);
         }
         const expectedLoopEdges = expected.routeContract.loopLanes.flatMap((lane) => lane.edgeIds).sort();
-        const actualLoopEdges = (Array.isArray(layout.loopLanes) ? layout.loopLanes : []).flatMap((lane: Record<string, any>) => Array.isArray(lane.edgeIds) ? lane.edgeIds.map(String) : []).sort();
+        const actualLoopLanes = Array.isArray(layout.loopLanes) ? layout.loopLanes as Record<string, any>[] : [];
+        const actualLoopEdges = actualLoopLanes.flatMap((lane: Record<string, any>) => Array.isArray(lane.edgeIds) ? lane.edgeIds.map(String) : []).sort();
         compareIds(actualLoopEdges, expectedLoopEdges, "loop lane edges", id);
+        for (const expectedLane of expected.routeContract.loopLanes) {
+          const actualLane = actualLoopLanes.find((lane) => String(lane.id) === expectedLane.id);
+          if (!actualLane) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} loop lane ${expectedLane.id} is missing from actual layout`);
+          if (actualLane.side !== expectedLane.side) fail(`LOOP_LANE_DIFF: diagram ${id} loop lane ${expectedLane.id} side is ${actualLane.side}, expected ${expectedLane.side}`);
+          if (Number(actualLane.laneOffset) !== expectedLane.laneOffset) fail(`LOOP_LANE_DIFF: diagram ${id} loop lane ${expectedLane.id} laneOffset is ${actualLane.laneOffset}, expected ${expectedLane.laneOffset}`);
+          if (String(actualLane.reason) !== expectedLane.reason) fail(`LOOP_LANE_DIFF: diagram ${id} loop lane ${expectedLane.id} reason differs from independent expected contract`);
+          compareIds((actualLane.edgeIds || []).map(String), expectedLane.edgeIds, `loop lane ${expectedLane.id} edge IDs`, id);
+        }
+        const actualMergeNodes = Array.isArray(layout.mergeNodes) ? layout.mergeNodes as Record<string, any>[] : [];
+        for (const expectedMerge of expected.routeContract.mergeNodes) {
+          const actualMerge = actualMergeNodes.find((merge) => String(merge.nodeId) === expectedMerge.nodeId);
+          if (!actualMerge) fail(`MERGE_DECLARATION: diagram ${id} merge node ${expectedMerge.nodeId} is missing from actual layout`);
+          const actualIncoming = edgeEntries.filter(([, edge]) => edge.to === expectedMerge.nodeId).map(([edgeId]) => edgeId);
+          if (actualIncoming.length < 2) fail(`MERGE_DECLARATION: diagram ${id} merge node ${expectedMerge.nodeId} does not have real multiple incoming edges`);
+          compareIds(actualIncoming, expectedMerge.edgeIds, `merge node ${expectedMerge.nodeId} incoming edges`, id);
+          for (const edgeId of expectedMerge.edgeIds) {
+            const actualEdge = edges.get(edgeId)!;
+            if (actualEdge.to !== expectedMerge.nodeId || actualEdge.toPort !== expectedMerge.ports[edgeId]) fail(`MERGE_PORT_DIFF: diagram ${id} merge node ${expectedMerge.nodeId} edge ${edgeId} enters via ${actualEdge.toPort}, expected ${expectedMerge.ports[edgeId]}`);
+          }
+        }
         const expectedCrossings = expected.routeContract.exceptions.filter((exception) => exception.type === "crossing").map((exception) => exception.edgeIds.slice().sort().join("\u0000")).sort();
         compareIds([...crossingExceptions.keys()].sort(), expectedCrossings, "crossing exception declarations", id);
         expectedContractsChecked += 1;
       }
-      const edgeEntries = [...edges.entries()];
       if (processTypes.has(diagram.diagramType) && layout.changeImpactReview !== undefined) {
         const review = layout.changeImpactReview;
         if (!review || typeof review !== "object" || Array.isArray(review)) fail(`CHANGE_IMPACT_REVIEW: diagram ${id} changeImpactReview must be an object`);
@@ -1113,12 +1266,7 @@ function diagramContract(): Record<string, unknown> {
         }
       }
 
-      const svgPath = join(manifestDir, outputName);
       if (!existsSync(svgPath)) fail(`diagram ${id} SVG output is missing: ${relativePath(svgPath)}`);
-      if (expected && expectedInfo.path) {
-        validateGeneration(diagram, expected, expectedInfo.path, svgPath, id);
-        generationContractsChecked += 1;
-      }
       const svg = text(svgPath);
       if (unsafeSvg.test(svg) || !/<svg\b[^>]*\bviewBox=["'][^"']+["']/i.test(svg) || !/\brole=["']img["']/i.test(svg) || !/<title\b/i.test(svg) || !/<desc\b/i.test(svg)) fail(`diagram ${id} SVG fails static safety or accessibility checks`);
       const renderedNodeIds = [...svg.matchAll(/\bdata-node=["']([^"']+)["']/g)].map((match) => match[1]);
@@ -1198,10 +1346,19 @@ function diagramContract(): Record<string, unknown> {
 
   const riskLevel = riskScore >= 6 ? "HIGH" : riskScore >= 3 ? "MEDIUM" : "LOW";
   const finalStatus = expectedContractsChecked === diagramsChecked ? "STATIC_PASS" : "UNVERIFIED";
+  const routeStatus = expectedContractsChecked === diagramsChecked ? "ROUTE_CONTRACT_PASS" : "UNVERIFIED";
   return {
     status: "passed", final_status: finalStatus, source_format: "svg", diagrams_checked: diagramsChecked,
+    structure_status: "STRUCTURE_PASS",
+    route_contract_status: routeStatus,
+    geometry_gate_status: "GEOMETRY_PASS",
+    visual_status: "UNVERIFIED",
+    overall_status: finalStatus,
+    gate_statuses: { structure: "STRUCTURE_PASS", route_contract: routeStatus, geometry: "GEOMETRY_PASS", visual: "UNVERIFIED", overall: finalStatus },
     expected_contract_status: expectedContractsChecked === diagramsChecked ? "passed" : "unverified",
     generation_status: generationContractsChecked === diagramsChecked ? "passed" : "unverified",
+    generation_closure: generationClosures,
+    route_contract_reports: routeContractReports,
     semantic_status: expectedContractsChecked === diagramsChecked ? "passed" : "unverified",
     ids_unique: true, ports_valid: true, direction_consistent: true, legend_valid: true,
     groups_valid: true, viewbox_valid: true, provider_status: "unverified",

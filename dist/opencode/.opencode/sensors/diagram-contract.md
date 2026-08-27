@@ -27,6 +27,18 @@ evidence_path: .aidlc/evidence/<stage-slug>/diagram-contract.json
   "checker": {"id": "<diagram-contract-checker>"},
   "status": "passed",
   "final_status": "STATIC_PASS",
+  "gate_statuses": {
+    "structure": "STRUCTURE_PASS",
+    "route_contract": "ROUTE_CONTRACT_PASS",
+    "geometry": "GEOMETRY_PASS",
+    "visual": "UNVERIFIED",
+    "overall": "STATIC_PASS"
+  },
+  "structure_status": "STRUCTURE_PASS",
+  "route_contract_status": "ROUTE_CONTRACT_PASS",
+  "geometry_gate_status": "GEOMETRY_PASS",
+  "visual_status": "UNVERIFIED",
+  "overall_status": "STATIC_PASS",
   "source_format": "svg",
   "diagrams_checked": 1,
   "expected_contract_status": "passed",
@@ -54,9 +66,27 @@ evidence_path: .aidlc/evidence/<stage-slug>/diagram-contract.json
 }
 ```
 
-`final_status` 只有 `PASS`、`STATIC_PASS`、`UNVERIFIED`、`NEEDS_CAPABILITY`、`FAIL`。`status: "passed"` 是受控 producer 的外层写入结果，不是最终验收状态。`PASS` 必须同时有 expected contract、业务语义、源结构、几何和本次真实 Provider 的 `normal`、`fit`、`zoom` 截图/快照；`STATIC_PASS` 不能替代 `PASS`。缺少来源、解析或证据为 `UNVERIFIED`；Provider 能力不可用为 `NEEDS_CAPABILITY`；发现问题为 `FAIL`。旧 `SOURCE_READY` 读取时只映射为 `STATIC_PASS`。
+`final_status` 只有 `PASS`、`STATIC_PASS`、`UNVERIFIED`、`NEEDS_CAPABILITY`、`FAIL`。`status: "passed"` 是受控 producer 的外层写入结果，不是最终验收状态。新格式必须同时输出 `gate_statuses.structure`、`gate_statuses.route_contract`、`gate_statuses.geometry`、`gate_statuses.visual` 和 `gate_statuses.overall`；源级通过时前三层分别为 `STRUCTURE_PASS`、`ROUTE_CONTRACT_PASS`、`GEOMETRY_PASS`，只有真实三视图成功时 visual 才能为 `VISUAL_PASS`，完整通过时 overall 才能为 `OVERALL_PASS`。`PASS` 必须同时有 expected contract、业务语义、源结构、几何和本次真实 Provider 的 `normal`、`fit`、`zoom` 截图/快照；`STATIC_PASS` 不能替代 `PASS`。缺少来源、解析或证据为 `UNVERIFIED`；Provider 能力不可用为 `NEEDS_CAPABILITY`；发现问题为 `FAIL`。旧 `SOURCE_READY` 读取时只映射为 `STATIC_PASS`。
 
 新建或调整图必须提供独立 expected contract、`diagramType`、`designNotes`、完整边 `points`、图例/分组语义、FR/REQ 映射和 generation provenance。旧 V1 资产缺少适用结构化字段时，Checker 必须 fail-closed，记录 `migration_status: "MIGRATION_REQUIRED"` 并将 `final_status` 保持为 `UNVERIFIED`；字段存在但非法时为 `FAIL`。`migration_status` 只有在迁移完成后才能为 `passed`。`port_paths_valid` 表示端口、偏移和路径点已完成源级检查。
+
+### Generation closure
+
+新建或调整图的 `generation` 至少包含以下字段：
+
+```json
+{
+  "generator": {"name": "<name>", "version": "<version>"},
+  "config": {"summary": "<summary>", "digest": "sha256:<64-hex>"},
+  "route_config": {"affected_edge_ids": ["<edge-id>"], "...": "generator input"},
+  "source_refs": ["<business-source>"],
+  "outputs": ["<svg-output>", "<expected-contract>"],
+  "command_argv": ["<executable>", "<arg>"],
+  "cwd": "<project-relative-cwd>"
+}
+```
+
+Checker 必须实际以 `shell: false` 执行 `command_argv`，通过 `AIDLC_DIAGRAM_ID`、`AIDLC_ROUTE_CONFIG_JSON`、`AIDLC_EXPECTED_CONTRACT_PATH` 传入当前上下文，重读 SVG/sidecar，并拒绝任何未列入允许 outputs 的项目文件变更。`route_config`、实际命令、cwd、changed files 和 `reloaded` 结果必须进入 `generation_closure`；命令或配置位于 `/tmp` 时也必须在验证输出中保留路径证据。生成器闭环失败时不得沿用旧 evidence 的 PASS。
 
 
 ## Chrome DevTools Provider 运行时适配
@@ -94,7 +124,7 @@ Provider Request 使用 version `1`，最小结构如下：
 ```
 
 
-运行器固定调用 `chrome-devtools-mcp@1.6.0` 的 CLI，执行页面导航、viewport 调整、DOM/属性/几何检查、可访问性快照、viewport 截图和控制台采集。每次真实运行都会以唯一 `sessionId` 启动 `chrome-devtools start --isolated`，后续所有 CLI 调用复用该 daemon，并在运行器进程退出时只停止自身会话；它不依赖或停止 Kiro Crew Dashboard Browser 面板的默认会话。源级 evidence 或 independent expected 不存在、未通过或不可解析时拒绝执行并保持 `UNVERIFIED`；浏览器检查失败时记录 `FAIL` 结果且不把旧 evidence 升级；全部适用检查通过后，且 `normal`、`fit`、`zoom` 三视图各自生成截图和快照，才原子更新 `provider_status: "passed"`、`browser_visual_status: "passed"`、`final_status: "PASS"`，并写入 `diagram-contract-provider.json`。Provider 能力不可用时写入 `final_status: "NEEDS_CAPABILITY"`，不得伪造通过；`export` 不属于该 Provider 能力。
+运行器固定调用 `chrome-devtools-mcp@1.6.0` 的 CLI，执行页面导航、viewport 调整、DOM/属性/几何检查、可访问性快照、viewport 截图和控制台采集。每次真实运行都会以唯一 `sessionId` 启动 `chrome-devtools start --isolated`，后续所有 CLI 调用复用该 daemon，并在运行器进程退出时只停止自身会话；它不依赖或停止 Kiro Crew Dashboard Browser 面板的默认会话。源级 evidence 或 independent expected 不存在、未通过或不可解析时拒绝执行并保持 `UNVERIFIED`；浏览器检查失败时记录当前 `FAIL` evidence 且不把旧 evidence 升级；normal 必须从 `(0,0)` 开始，fit 必须完整显示 content bbox，zoom 必须覆盖 expected `affected_edge_ids`。全部适用检查通过后，且 `normal`、`fit`、`zoom` 三视图各自生成截图和快照，才原子更新 `provider_status: "passed"`、`browser_visual_status: "passed"`、`gate_statuses.visual: "VISUAL_PASS"`、`gate_statuses.overall: "OVERALL_PASS"`、`final_status: "PASS"`，并写入 `diagram-contract-provider.json#views.<view>`。Provider 能力不可用时写入 `final_status: "NEEDS_CAPABILITY"`，不得伪造通过；`export` 不属于该 Provider 能力。
 
 
 对本地 SVG，运行器会先验证源文件的静态安全约束；若 Chrome 将直接 `file://` SVG 呈现为 XML 查看器，则使用只包含当前 SVG 的临时本地 HTML wrapper 进行浏览器检查，wrapper 在运行结束后删除，不修改 SVG 源。无法启动或调用 Chrome DevTools 时保持原有 `UNVERIFIED` evidence，不得伪造通过；若运行时明确报告 Chrome profile 被占用，返回稳定错误码 `BROWSER_PROFILE_CONFLICT`，不得误报为“Browser 面板未配置”。
@@ -120,7 +150,7 @@ Provider Request 使用 version `1`，最小结构如下：
 }
 ```
 
-Producer 还必须记录 `expected_contract_status`、`semantic_status`、`generation_status`、`browser_visual_status` 和 `final_status`。expected contract 与 SVG/sidecar 必须分别作为 expected/actual 输入；actual 自洽不构成业务语义通过。route contract 的折点按方向变化次数计算，不得以 `points.length` 代替。交叉、回路、端口和分支例外必须验证 object/type/business_reason/geometric_reason/scope，并在 Provider 层生成真实截图/快照视觉证据。
+Producer 还必须记录 `expected_contract_status`、`semantic_status`、`generation_status`、`browser_visual_status` 和 `final_status`。expected contract 与 SVG/sidecar 必须分别作为 expected/actual 输入；actual 自洽不构成业务语义通过。route contract 的折点按方向变化次数计算，不得以 `points.length` 代替；expected topology 还可声明正交性、有效线段数和方向序列。端点、端口、箭头目标、折点、points 拓扑、法向、非 Manhattan、节点穿越、未授权交叉和标签碰撞必须能区分 expected/actual 差异。交叉、回路、端口和分支例外必须验证 object/type/business_reason/geometric_reason/scope，并在 Provider 层生成真实截图/快照视觉证据；crossing exception 只能豁免所声明的那一对 edge IDs。
 
 先按主轴排布主流程，再检查同层实体在垂直主轴方向的均匀分布；单一正向出边使用主轴前进方向，多出边先使用垂直主轴两侧，其余只在前向 180° 局域均分；源、目标在同侧时必须保持同侧通道。过程图的分支节点必须是 `diamond`，每个出口必须有非空可见标签；菱形端口使用顶点且不得偏移。
 

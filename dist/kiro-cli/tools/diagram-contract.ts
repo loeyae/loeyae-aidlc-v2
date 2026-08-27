@@ -23,6 +23,14 @@ export interface ExpectedGenerator {
   sourceRefs: string[];
 }
 
+export type RouteDirection = "left" | "right" | "up" | "down";
+
+export interface ExpectedRouteTopology {
+  orthogonal: boolean;
+  segmentCount?: number;
+  directions?: RouteDirection[];
+}
+
 export interface ExpectedRouteIntent {
   edgeId: string;
   kind: "direct" | "manhattan" | "branch" | "loop" | "feedback" | "relation" | "custom";
@@ -31,6 +39,9 @@ export interface ExpectedRouteIntent {
   maxBendCount?: number;
   labelRequired: boolean;
   laneId?: string;
+  arrowTarget?: string;
+  labelText?: string;
+  topology?: ExpectedRouteTopology;
 }
 
 export interface ExpectedMainFlow {
@@ -43,7 +54,15 @@ export interface ExpectedMainFlow {
 export interface ExpectedLoopLane {
   id: string;
   side: "left" | "right";
+  laneOffset: number;
   edgeIds: string[];
+  reason: string;
+}
+
+export interface ExpectedMergeNode {
+  nodeId: string;
+  edgeIds: string[];
+  ports: Record<string, string>;
 }
 
 export type ExpectedExceptionType = "crossing" | "side-switch" | "branch-port" | "branch-layer";
@@ -66,9 +85,11 @@ export interface ExpectedBranchGroup {
 
 export interface ExpectedRouteContract {
   direction?: "TB" | "LR";
+  affectedEdgeIds: string[];
   edgeIntents: ExpectedRouteIntent[];
   mainFlow?: ExpectedMainFlow;
   loopLanes: ExpectedLoopLane[];
+  mergeNodes: ExpectedMergeNode[];
   branchGroups: ExpectedBranchGroup[];
   exceptions: ExpectedException[];
 }
@@ -84,6 +105,7 @@ export interface ExpectedContract {
   edgeIds: string[];
   edgeEndpoints: Record<string, { from: string; to: string }>;
   edgePorts: Record<string, { fromPort?: string; toPort?: string }>;
+  edgeArrowTargets: Record<string, string | undefined>;
   edgeKinds: Record<string, string | undefined>;
   groupIds: string[];
   groupTypes: Record<string, { semanticType: string; parent?: string }>;
@@ -156,6 +178,24 @@ function parseGenerator(value: unknown, field: string): ExpectedGenerator {
   };
 }
 
+function parseRouteTopology(value: unknown, field: string): ExpectedRouteTopology {
+  const topology = asRecord(value, field);
+  if (typeof topology.orthogonal !== "boolean") throw new Error(`${field}.orthogonal must be boolean`);
+  const segmentCount = topology.segment_count === undefined ? undefined : finiteNumber(topology.segment_count, `${field}.segment_count`, 1);
+  if (segmentCount !== undefined && !Number.isInteger(segmentCount)) throw new Error(`${field}.segment_count must be an integer`);
+  const rawDirections = topology.directions === undefined ? undefined : stringArray(topology.directions, `${field}.directions`);
+  const directions = rawDirections?.map((direction) => {
+    if (!["left", "right", "up", "down"].includes(direction)) throw new Error(`${field}.directions contains invalid direction ${direction}`);
+    return direction as RouteDirection;
+  });
+  if (segmentCount !== undefined && directions !== undefined && segmentCount !== directions.length) throw new Error(`${field}.segment_count must equal directions.length`);
+  return {
+    orthogonal: topology.orthogonal,
+    ...(segmentCount === undefined ? {} : { segmentCount }),
+    ...(directions === undefined ? {} : { directions }),
+  };
+}
+
 function parseExpectedException(value: unknown, index: number, diagramId: string, edgeIds: Set<string>): ExpectedException {
   const field = `route_contract.exceptions[${index}]`;
   const exception = asRecord(value, field);
@@ -173,7 +213,7 @@ function parseExpectedException(value: unknown, index: number, diagramId: string
   const appliesTo = stringArray(scope.applies_to, `${field}.scope.applies_to`);
   const visualEvidence = asRecord(exception.visual_evidence, `${field}.visual_evidence`);
   if (visualEvidence.required !== true) throw new Error(`${field}.visual_evidence.required must be true`);
-  const refs = visualEvidence.refs === undefined ? [] : stringArray(visualEvidence.refs, `${field}.visual_evidence.refs`, true);
+  const refs = stringArray(visualEvidence.refs, `${field}.visual_evidence.refs`);
   return {
     type,
     object: { kind, ids },
@@ -213,6 +253,10 @@ function parseRouteContract(value: unknown, diagramId: string, edgeIds: string[]
     if (bendCount !== undefined && ((minBendCount !== undefined && bendCount < minBendCount) || (maxBendCount !== undefined && bendCount > maxBendCount))) throw new Error(`${field}.bend_count is outside its declared range`);
     const laneId = intent.lane_id === undefined ? undefined : nonEmpty(intent.lane_id, `${field}.lane_id`);
     if (kind === "loop" && !laneId) throw new Error(`${field}.lane_id is required for loop routes`);
+    const arrowTarget = intent.arrow_target === undefined ? undefined : nonEmpty(intent.arrow_target, `${field}.arrow_target`);
+    if (arrowTarget !== undefined && !/^[^:]+:(?:top|right|bottom|left)$/.test(arrowTarget)) throw new Error(`${field}.arrow_target must use <node>:<port>`);
+    const labelText = intent.label_text === undefined ? undefined : nonEmpty(intent.label_text, `${field}.label_text`);
+    const topology = intent.topology === undefined ? undefined : parseRouteTopology(intent.topology, `${field}.topology`);
     return {
       edgeId,
       kind,
@@ -221,6 +265,9 @@ function parseRouteContract(value: unknown, diagramId: string, edgeIds: string[]
       maxBendCount,
       labelRequired: intent.label_required === true,
       ...(laneId ? { laneId } : {}),
+      ...(arrowTarget ? { arrowTarget } : {}),
+      ...(labelText ? { labelText } : {}),
+      ...(topology ? { topology } : {}),
     };
   });
   const mainFlowValue = route.main_flow;
@@ -246,10 +293,33 @@ function parseRouteContract(value: unknown, diagramId: string, edgeIds: string[]
     laneIds.add(id);
     const side = nonEmpty(lane.side, `${field}.side`) as "left" | "right";
     if (side !== "left" && side !== "right") throw new Error(`${field}.side must be left or right`);
+    const laneOffset = finiteNumber(lane.lane_offset, `${field}.lane_offset`, 24);
     const laneEdgeIds = stringArray(lane.edge_ids, `${field}.edge_ids`);
     for (const edgeId of laneEdgeIds) if (!edgeIdSet.has(edgeId)) throw new Error(`${field}.edge_ids references missing edge ${edgeId}`);
-    return { id, side, edgeIds: laneEdgeIds };
+    return { id, side, laneOffset, edgeIds: laneEdgeIds, reason: nonEmpty(lane.reason, `${field}.reason`) };
   });
+  const rawMerges = route.merge_nodes === undefined ? [] : route.merge_nodes;
+  if (!Array.isArray(rawMerges)) throw new Error("route_contract.merge_nodes must be an array");
+  const mergeNodeIds = new Set<string>();
+  const mergeNodes: ExpectedMergeNode[] = rawMerges.map((raw, index) => {
+    const field = `route_contract.merge_nodes[${index}]`;
+    const merge = asRecord(raw, field);
+    const nodeId = nonEmpty(merge.node_id, `${field}.node_id`);
+    if (mergeNodeIds.has(nodeId)) throw new Error(`${field}.node_id is duplicated`);
+    mergeNodeIds.add(nodeId);
+    const edgeIdsForMerge = stringArray(merge.edge_ids, `${field}.edge_ids`);
+    for (const edgeId of edgeIdsForMerge) if (!edgeIdSet.has(edgeId)) throw new Error(`${field}.edge_ids references missing edge ${edgeId}`);
+    const portsValue = asRecord(merge.ports, `${field}.ports`);
+    const ports: Record<string, string> = {};
+    for (const [edgeId, port] of Object.entries(portsValue)) {
+      if (!edgeIdsForMerge.includes(edgeId)) throw new Error(`${field}.ports references an edge not listed in edge_ids: ${edgeId}`);
+      ports[edgeId] = nonEmpty(port, `${field}.ports.${edgeId}`);
+    }
+    if (Object.keys(ports).length !== edgeIdsForMerge.length) throw new Error(`${field}.ports must declare every incoming edge port`);
+    return { nodeId, edgeIds: edgeIdsForMerge, ports };
+  });
+  const affectedEdgeIds = route.affected_edge_ids === undefined ? edgeIds.slice() : stringArray(route.affected_edge_ids, "route_contract.affected_edge_ids");
+  for (const edgeId of affectedEdgeIds) if (!edgeIdSet.has(edgeId)) throw new Error(`route_contract.affected_edge_ids references missing edge ${edgeId}`);
   const rawBranches = route.branch_groups === undefined ? [] : route.branch_groups;
   if (!Array.isArray(rawBranches)) throw new Error("route_contract.branch_groups must be an array");
   const branchGroups = rawBranches.map((raw, index) => {
@@ -266,7 +336,7 @@ function parseRouteContract(value: unknown, diagramId: string, edgeIds: string[]
   if (exceptionKeys.size !== exceptions.length) throw new Error("route_contract.exceptions contains duplicate objects");
   const direction = route.direction === undefined ? undefined : nonEmpty(route.direction, "route_contract.direction") as "TB" | "LR";
   if (direction !== undefined && direction !== "TB" && direction !== "LR") throw new Error("route_contract.direction must be TB or LR");
-  return { direction, edgeIntents, ...(mainFlow ? { mainFlow } : {}), loopLanes, branchGroups, exceptions };
+  return { direction, affectedEdgeIds, edgeIntents, ...(mainFlow ? { mainFlow } : {}), loopLanes, mergeNodes, branchGroups, exceptions };
 }
 
 export function parseExpectedContract(raw: unknown, diagramId: string): ExpectedContract {
@@ -295,6 +365,7 @@ export function parseExpectedContract(raw: unknown, diagramId: string): Expected
   const edgeIds: string[] = [];
   const edgeEndpoints: Record<string, { from: string; to: string }> = {};
   const edgePorts: Record<string, { fromPort?: string; toPort?: string }> = {};
+  const edgeArrowTargets: Record<string, string | undefined> = {};
   const edgeKinds: Record<string, string | undefined> = {};
   for (let index = 0; index < diagram.edges.length; index++) {
     const edge = asRecord(diagram.edges[index], `expected diagram ${diagramId}.edges[${index}]`);
@@ -310,6 +381,9 @@ export function parseExpectedContract(raw: unknown, diagramId: string): Expected
       ...(edge.from_port === undefined ? {} : { fromPort: nonEmpty(edge.from_port, `expected diagram ${diagramId}.edges[${index}].from_port`) }),
       ...(edge.to_port === undefined ? {} : { toPort: nonEmpty(edge.to_port, `expected diagram ${diagramId}.edges[${index}].to_port`) }),
     };
+    const edgeArrowTarget = edge.arrow_target === undefined ? undefined : nonEmpty(edge.arrow_target, `expected diagram ${diagramId}.edges[${index}].arrow_target`);
+    if (edgeArrowTarget !== undefined && !/^[^:]+:(?:top|right|bottom|left)$/.test(edgeArrowTarget)) throw new Error(`expected diagram ${diagramId}.edges[${index}].arrow_target must use <node>:<port>`);
+    edgeArrowTargets[id] = edgeArrowTarget;
     edgeKinds[id] = edge.kind === undefined ? undefined : nonEmpty(edge.kind, `expected diagram ${diagramId}.edges[${index}].kind`);
   }
   const groupValues = diagram.groups;
@@ -327,6 +401,19 @@ export function parseExpectedContract(raw: unknown, diagramId: string): Expected
   const legendIds = stringArray(diagram.legend_ids, `expected diagram ${diagramId}.legend_ids`, true);
   const annotationIds = stringArray(diagram.annotation_ids, `expected diagram ${diagramId}.annotation_ids`, true);
   const routeContract = parseRouteContract(diagram.route_contract, diagramId, edgeIds);
+  for (const intent of routeContract.edgeIntents) {
+    const endpoints = edgeEndpoints[intent.edgeId];
+    const ports = edgePorts[intent.edgeId];
+    const derivedArrowTarget = ports?.toPort ? `${endpoints.to}:${ports.toPort}` : undefined;
+    const declaredArrowTarget = edgeArrowTargets[intent.edgeId] || intent.arrowTarget;
+    if (declaredArrowTarget !== undefined && derivedArrowTarget !== undefined && declaredArrowTarget !== derivedArrowTarget) throw new Error(`expected diagram ${diagramId} route ${intent.edgeId}.arrow_target must equal ${derivedArrowTarget}`);
+    if (intent.arrowTarget !== undefined && edgeArrowTargets[intent.edgeId] !== undefined && intent.arrowTarget !== edgeArrowTargets[intent.edgeId]) throw new Error(`expected diagram ${diagramId} route ${intent.edgeId} has conflicting arrow_target declarations`);
+  }
+  for (const merge of routeContract.mergeNodes) {
+    if (!nodeIds.includes(merge.nodeId)) throw new Error(`expected diagram ${diagramId} merge node references missing node ${merge.nodeId}`);
+    for (const edgeId of merge.edgeIds) if (edgeEndpoints[edgeId].to !== merge.nodeId) throw new Error(`expected diagram ${diagramId} merge node ${merge.nodeId} references non-incoming edge ${edgeId}`);
+    for (const edgeId of merge.edgeIds) if (!edgePorts[edgeId].toPort || merge.ports[edgeId] !== edgePorts[edgeId].toPort) throw new Error(`expected diagram ${diagramId} merge node ${merge.nodeId} port for ${edgeId} does not match its expected edge port`);
+  }
   const decisionNodeIds = nodeIds.filter((id) => nodeShapes[id] === "diamond");
   const directedEdgeCount = edgeIds.filter((id) => edgeKinds[id] !== "undirected").length;
   const lifelineIds = diagram.lifeline_ids === undefined ? [] : stringArray(diagram.lifeline_ids, `expected diagram ${diagramId}.lifeline_ids`, true);
@@ -342,6 +429,7 @@ export function parseExpectedContract(raw: unknown, diagramId: string): Expected
     edgeIds,
     edgeEndpoints,
     edgePorts,
+    edgeArrowTargets,
     edgeKinds,
     groupIds,
     groupTypes,
@@ -366,6 +454,22 @@ function directionToken(first: [number, number], second: [number, number]): stri
   const dy = second[1] - first[1];
   if (Math.abs(dx) <= 1e-9 && Math.abs(dy) <= 1e-9) return null;
   return `${Math.sign(dx)},${Math.sign(dy)}`;
+}
+
+export function routeDirectionTokens(points: unknown): RouteDirection[] {
+  if (!Array.isArray(points) || points.length < 2) return [];
+  const directions: RouteDirection[] = [];
+  for (let index = 1; index < points.length; index++) {
+    const first = points[index - 1];
+    const second = points[index];
+    if (!Array.isArray(first) || !Array.isArray(second) || first.length !== 2 || second.length !== 2 || !first.every((value) => typeof value === "number" && Number.isFinite(value)) || !second.every((value) => typeof value === "number" && Number.isFinite(value))) return [];
+    const token = directionToken(first as [number, number], second as [number, number]);
+    if (!token) continue;
+    const direction = ({ "-1,0": "left", "1,0": "right", "0,-1": "up", "0,1": "down" } as Record<string, RouteDirection | undefined>)[token];
+    if (!direction) return [];
+    if (directions[directions.length - 1] !== direction) directions.push(direction);
+  }
+  return directions;
 }
 
 export function routeBendCount(points: unknown): number {
@@ -399,16 +503,27 @@ export function routeGeometryKind(points: unknown): "direct" | "manhattan" | "cu
   return "custom";
 }
 
-export function routeIntentErrors(intent: ExpectedRouteIntent, points: unknown, hasLabel: boolean): string[] {
+export function routeIntentErrors(intent: ExpectedRouteIntent, points: unknown, hasLabel: boolean, actualArrowTarget?: string, actualLabelText?: string): string[] {
   const errors: string[] = [];
   const bends = routeBendCount(points);
-  if (bends < 0) return [`route ${intent.edgeId} has no measurable path`];
-  if (intent.bendCount !== undefined && bends !== intent.bendCount) errors.push(`route ${intent.edgeId} bend count is ${bends}, expected ${intent.bendCount}`);
-  if (intent.minBendCount !== undefined && bends < intent.minBendCount) errors.push(`route ${intent.edgeId} bend count ${bends} is below ${intent.minBendCount}`);
-  if (intent.maxBendCount !== undefined && bends > intent.maxBendCount) errors.push(`route ${intent.edgeId} bend count ${bends} exceeds ${intent.maxBendCount}`);
-  if (intent.kind === "direct" && bends !== 0) errors.push(`route ${intent.edgeId} must be direct with zero direction changes`);
-  if (intent.kind === "manhattan" && !isOrthogonalRoute(points)) errors.push(`route ${intent.edgeId} must be orthogonal Manhattan geometry`);
-  if (intent.labelRequired && !hasLabel) errors.push(`route ${intent.edgeId} requires a visible label`);
+  const directions = routeDirectionTokens(points);
+  if (bends < 0) return [`ROUTE_TOPOLOGY: route ${intent.edgeId} has no measurable path`];
+  const orthogonal = isOrthogonalRoute(points);
+  if (directions.length === 0 && !orthogonal) return [`NON_MANHATTAN: route ${intent.edgeId} must be orthogonal Manhattan geometry`];
+  if (intent.bendCount !== undefined && bends !== intent.bendCount) errors.push(`ROUTE_BEND_DIFF: route ${intent.edgeId} bend count is ${bends}, expected ${intent.bendCount}`);
+  if (intent.minBendCount !== undefined && bends < intent.minBendCount) errors.push(`ROUTE_BEND_DIFF: route ${intent.edgeId} bend count ${bends} is below ${intent.minBendCount}`);
+  if (intent.maxBendCount !== undefined && bends > intent.maxBendCount) errors.push(`ROUTE_BEND_DIFF: route ${intent.edgeId} bend count ${bends} exceeds ${intent.maxBendCount}`);
+  if (intent.kind === "direct" && bends !== 0) errors.push(`ROUTE_TOPOLOGY: route ${intent.edgeId} must be direct with zero direction changes`);
+  if (intent.kind === "manhattan" && !isOrthogonalRoute(points)) errors.push(`NON_MANHATTAN: route ${intent.edgeId} must be orthogonal Manhattan geometry`);
+  if (intent.labelRequired && !hasLabel) errors.push(`LABEL_COLLISION: route ${intent.edgeId} requires a visible label`);
+  if (intent.arrowTarget !== undefined && actualArrowTarget !== undefined && actualArrowTarget !== intent.arrowTarget) errors.push(`ROUTE_ARROW_TARGET_DIFF: route ${intent.edgeId} arrowTarget is ${actualArrowTarget}, expected ${intent.arrowTarget}`);
+  if (intent.labelText !== undefined && actualLabelText !== undefined && actualLabelText !== intent.labelText) errors.push(`ROUTE_LABEL_DIFF: route ${intent.edgeId} label is ${JSON.stringify(actualLabelText)}, expected ${JSON.stringify(intent.labelText)}`);
+  if (intent.labelText !== undefined && actualLabelText === undefined) errors.push(`ROUTE_LABEL_DIFF: route ${intent.edgeId} expected label ${JSON.stringify(intent.labelText)} but actual label is missing`);
+  if (intent.topology) {
+    if (intent.topology.orthogonal && !isOrthogonalRoute(points)) errors.push(`ROUTE_TOPOLOGY: route ${intent.edgeId} points are not Manhattan orthogonal`);
+    if (intent.topology.segmentCount !== undefined && directions.length !== intent.topology.segmentCount) errors.push(`ROUTE_TOPOLOGY: route ${intent.edgeId} has ${directions.length} effective segments, expected ${intent.topology.segmentCount}`);
+    if (intent.topology.directions && (directions.length !== intent.topology.directions.length || directions.some((direction, index) => direction !== intent.topology!.directions![index]))) errors.push(`ROUTE_TOPOLOGY: route ${intent.edgeId} direction sequence is ${directions.join(",")}, expected ${intent.topology.directions.join(",")}`);
+  }
   return errors;
 }
 

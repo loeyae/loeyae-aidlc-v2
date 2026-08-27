@@ -38,9 +38,9 @@ Provider 生成的静态 SVG、PNG 或 PDF 是目标交付物，路径由目标�
 
 `.diagram.json`、SVG 和浏览器 inspection 都是 actual；它们相互一致不能替代独立业务期望。manifest 或 diagram entry 可以使用 `expected_contract_path`/`expectedContractPath` 作为文件引用，但不得把 manifest、SVG、sidecar、截图或 bbox 内容复制到 expected 文件。Provider Request 对每个图使用 `expected_contract_path`，没有该文件、文件不可解析或 source ref 不可追溯时，业务语义状态为 `UNVERIFIED`。
 
-expected contract 的 `route_contract.edge_intents` 是跨图型、跨 SVG/sidecar 结构的共享协议。每条 actual edge 都必须有 expected route intent；`kind` 表示 `direct`、`manhattan`、`branch`、`loop`、`feedback`、`relation` 或 `custom` 等路由语义，`bend_count` 及范围按连续有效路径段的方向变化计算，共线点不计数。expected 不得写入 actual 的坐标、`points`、实际几何 bbox、渲染像素或 Provider 结果。
+expected contract 的 `route_contract.edge_intents` 是跨图型、跨 SVG/sidecar 结构的共享协议。每条 actual edge 都必须有 expected route intent；`kind` 表示 `direct`、`manhattan`、`branch`、`loop`、`feedback`、`relation` 或 `custom` 等路由语义，`bend_count` 及范围按连续有效路径段的方向变化计算，共线点不计数；intent 可声明 `arrow_target`、`label_text`、`topology`，`topology` 可声明正交性、有效线段数和 `left/right/up/down` 方向序列，`affected_edge_ids` 定义 zoom 覆盖集合。expected 不得写入 actual 的坐标、`points`、实际几何 bbox、渲染像素或 Provider 结果。
 
-期望例外必须使用结构化字段：`object`、`type`、`business_reason`、`geometric_reason`、`scope`、`visual_evidence`。`object` 必须能定位实际边/边对/端口；`type` 必须与实际偏离类型相符；业务原因和几何原因都必须非空；scope 必须声明图表、视图或条件；`visual_evidence.required` 必须为 `true`。源 checker 验证对象和偏离，浏览器 Provider 验证实际几何、截图和快照，不能只验证字段存在。
+期望例外必须使用结构化字段：`object`、`type`、`business_reason`、`geometric_reason`、`scope`、`visual_evidence`。`object` 必须能定位实际边/边对/端口；`type` 必须与实际偏离类型相符；业务原因和几何原因都必须非空；scope 必须声明图表、视图或条件；`visual_evidence.required` 必须为 `true` 且 `refs` 非空。sidecar 使用 `edgeIds`、`businessReason`、`geometricReason`、`visualEvidence.required/refs`；crossing exception 只能豁免所声明的边对。源 checker 验证对象和偏离，浏览器 Provider 验证实际几何、截图和快照，不能只验证字段存在。
 
 每个生成的 diagram entry 必须记录：
 
@@ -49,13 +49,16 @@ expected contract 的 `route_contract.edge_intents` 是跨图型、跨 SVG/sidec
   "generation": {
     "generator": {"name": "<name>", "version": "<version>"},
     "config": {"summary": "<summary>", "digest": "sha256:<64-hex>"},
+    "route_config": {"affected_edge_ids": ["<edge-id>"], "...": "generator input"},
     "source_refs": ["<business-source>"],
-    "outputs": ["<svg-output>", "<expected-contract>", "<other-derived-output>"]
+    "outputs": ["<svg-output>", "<expected-contract>", "<other-derived-output>"],
+    "command_argv": ["<executable>", "<arg>"],
+    "cwd": "<project-relative-cwd>"
   }
 }
 ```
 
-生成器或配置变更后，必须重新生成 outputs 中的全部派生产物并重新执行 source、geometry 和 browser 受影响视图；generation provenance 缺失、不一致或 output 不完整时不得产生 `STATIC_PASS`/`PASS`。
+生成器或配置变更后，必须实际以 `shell: false` 执行 `command_argv`，通过 `AIDLC_DIAGRAM_ID`、`AIDLC_ROUTE_CONFIG_JSON`、`AIDLC_EXPECTED_CONTRACT_PATH` 接收上下文，重读 SVG/sidecar，并拒绝未列入 outputs 的项目文件变更；`route_config`、命令、cwd、changed files、`reloaded` 和 `/tmp` 路径证据必须进入 generation closure。然后重新生成 outputs 中的全部派生产物并重新执行 source、geometry 和 browser 受影响视图；generation provenance 缺失、不一致或 output 不完整时不得产生 `STATIC_PASS`/`PASS`。
 
 
 
