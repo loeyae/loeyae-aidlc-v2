@@ -1,0 +1,34 @@
+{
+  "version": "1",
+  "provider": "chrome-devtools",
+  "target_operation": "preview",
+  "stage": "diagram-020-migrated-preview",
+  "target_reading_environment": {
+    "viewport": {
+      "width": 1600,
+      "height": 900
+    },
+    "viewports": {
+      "normal": {
+        "width": 1600,
+        "height": 900
+      },
+      "fit": {
+        "width": 1800,
+        "height": 1400
+      },
+      "zoom": {
+        "width": 2200,
+        "height": 1800
+      }
+    }
+  },
+  "diagrams": [
+    {
+      "id": "diagram-020",
+      "source_path": "docs/草稿/方案设计/zhangyi/assets/diagram-020-migrated.svg",
+      "manifest_path": "docs/草稿/方案设计/zhangyi/assets/diagram-020-migrated.diagram.json",
+      "expected_contract_path": "docs/草稿/方案设计/zhangyi/assets/diagram-020-migrated.expected.json"
+    }
+  ]
+}

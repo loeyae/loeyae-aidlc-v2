@@ -218,7 +218,7 @@
 <text data-edge-label="edge-020" data-text-id="edge-020-label" x="1880" y="3109" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">是</text>
 <text data-edge-label="edge-024" data-text-id="edge-024-label" x="1230" y="3064" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">否</text>
 <text data-edge-label="edge-026" data-text-id="edge-026-label" x="990" y="2944" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">重新发起支付</text>
-<text data-edge-label="edge-027" data-text-id="edge-027-label" x="1394" y="3559" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">主动取消／支付超时15分钟未付</text>
+<text data-edge-label="edge-027" data-text-id="edge-027-label" x="1398.84" y="3559" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">主动取消／支付超时15分钟未付</text>
 <text data-edge-label="edge-031" data-text-id="edge-031-label" x="1880" y="5179" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">全部拣到</text>
 <text data-edge-label="edge-032" data-text-id="edge-032-label" x="2658" y="4339" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">部分缺货</text>
 <text data-edge-label="edge-033" data-text-id="edge-033-label" x="1160" y="4354" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">全部缺货</text>

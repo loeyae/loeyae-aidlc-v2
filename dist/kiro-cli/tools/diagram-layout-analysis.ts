@@ -1,5 +1,7 @@
 export type LayoutDirection = "TB" | "LR";
 
+import { measureDiagramText } from "./diagram-visual-style.js";
+
 export type LayoutStrategy =
   | "LR_SINGLE_ROW"
   | "LR_COMPACT_BRANCH"
@@ -137,19 +139,9 @@ function labelLines(label: string | string[] | undefined, fallback: string): str
   return lines.length > 0 ? lines : [fallback];
 }
 
-function characterWidth(character: string, fontSize: number): number {
-  if (/\s/.test(character)) return fontSize * 0.35;
-  if (character.codePointAt(0)! >= 0x2e80) return fontSize;
-  return fontSize * 0.56;
-}
-
-function measureText(text: string, fontSize: number): number {
-  return [...text].reduce((width, character) => width + characterWidth(character, fontSize), 0);
-}
-
 function measureNode(node: FlowNodeInput, options: Required<Pick<LayoutAnalysisOptions, "fontSize" | "nodeHorizontalPadding" | "nodeVerticalPadding" | "lineHeight" | "minNodeWidth" | "minNodeHeight">>): NodeMetric {
   const lines = labelLines(node.label, node.id);
-  const textWidth = Math.max(...lines.map((line) => measureText(line, options.fontSize)));
+  const textWidth = Math.max(...lines.map((line) => measureDiagramText(line, options.fontSize)));
   const width = Math.ceil(Math.max(options.minNodeWidth, textWidth + options.nodeHorizontalPadding * 2));
   const height = Math.ceil(Math.max(options.minNodeHeight, lines.length * options.lineHeight + options.nodeVerticalPadding * 2));
   if (node.shape === "diamond") return { width: Math.max(width, 180), height: Math.max(height, 120) };

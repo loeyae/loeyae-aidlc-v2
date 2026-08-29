@@ -9,7 +9,7 @@ import {
   expectedContractPath,
   parseExpectedContract,
 } from "./diagram-contract.js";
-import { DIAGRAM_VISUAL_STYLE } from "./diagram-visual-style.js";
+import { DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE } from "./diagram-visual-style.js";
 
 const PROJECT_ROOT = process.cwd();
 const PROVIDER_PACKAGE = "chrome-devtools-mcp";
@@ -47,10 +47,17 @@ interface ProviderRequest {
   diagrams: DiagramRequest[];
 }
 
+interface ActualGroupLayout {
+  members: string[];
+  label: string;
+  styleRole: string;
+}
+
 interface ActualLayout {
   readingDirection?: "TB" | "LR";
   mainAxis?: number;
   nodeCenters: Record<string, number>;
+  groups: Record<string, ActualGroupLayout>;
   readabilityEvidence?: Record<ReadingView, string>;
 }
 
@@ -110,6 +117,8 @@ interface InspectionResult {
   viewport: { width: number; height: number };
   contentFullyVisible: boolean;
   groupOverlapPairs: string[];
+  groupCapacityErrors: string[];
+  groupTitleErrors: string[];
   unsafeCount: number;
   outsideViewportCount: number;
 }
@@ -359,7 +368,7 @@ function loadExpected(item: DiagramRequest): ExpectedContract | undefined {
 }
 
 function loadActualLayout(item: DiagramRequest): ActualLayout {
-  if (!item.manifest_path) return { nodeCenters: {} };
+  if (!item.manifest_path) return { nodeCenters: {}, groups: {} };
   const manifestPath = projectPath(item.manifest_path, "manifest_path");
   if (!existsSync(manifestPath)) fail(`diagram manifest does not exist: ${relative(PROJECT_ROOT, manifestPath)}`);
   const manifest = record(JSON.parse(readFileSync(manifestPath, "utf8")), "diagram manifest");
@@ -368,7 +377,13 @@ function loadActualLayout(item: DiagramRequest): ActualLayout {
   if (matches.length !== 1) fail(`diagram manifest must contain exactly one diagram with id ${item.id}`);
   const diagram = record(matches[0], `diagram ${item.id}`);
   const nodeRecords = Array.isArray(diagram.nodes) ? diagram.nodes.map((entry: unknown) => record(entry, "node")) : [];
+  const groupRecords = Array.isArray(diagram.groups) ? diagram.groups.map((entry: unknown) => record(entry, "group")) : [];
   const nodeCenters = Object.fromEntries(nodeRecords.map((node) => [String(node.id), Number(node.x) + Number(node.width) / 2]));
+  const groups = Object.fromEntries(groupRecords.map((group) => [String(group.id), {
+    members: Array.isArray(group.members) ? group.members.map(String) : [],
+    label: typeof group.label === "string" ? group.label : "",
+    styleRole: typeof group.styleRole === "string" ? group.styleRole : "",
+  }]));
   const designNotes = diagram.designNotes && typeof diagram.designNotes === "object" && !Array.isArray(diagram.designNotes) ? diagram.designNotes as Record<string, unknown> : undefined;
   const layout = designNotes?.layout && typeof designNotes.layout === "object" && !Array.isArray(designNotes.layout) ? designNotes.layout as Record<string, unknown> : undefined;
   const readabilityEvidence = layout?.readabilityEvidence && typeof layout.readabilityEvidence === "object" && !Array.isArray(layout.readabilityEvidence)
@@ -378,6 +393,7 @@ function loadActualLayout(item: DiagramRequest): ActualLayout {
     readingDirection: layout?.direction === "TB" || layout?.direction === "LR" ? layout.direction : undefined,
     mainAxis: typeof layout?.mainAxis === "number" && Number.isFinite(layout.mainAxis) ? layout.mainAxis : undefined,
     nodeCenters,
+    groups,
     ...(readabilityEvidence ? { readabilityEvidence: readabilityEvidence as Record<ReadingView, string> } : {}),
   };
 }
@@ -386,6 +402,7 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
   try {
   const svg = document.querySelector('svg');
   const visualStyle = ${JSON.stringify(DIAGRAM_VISUAL_STYLE)};
+  const layoutMetrics = ${JSON.stringify(DIAGRAM_LAYOUT_METRICS)};
   if (contract.resetScroll === true) window.scrollTo(0, 0);
   const ids = (selector, attribute) => [...document.querySelectorAll(selector)].map((element) => element.getAttribute(attribute)).filter(Boolean);
   const bounds = (element) => {
@@ -676,12 +693,51 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     });
     if (!valid) labelPlacementErrors.push(labelId || 'unknown');
   }
-  const groupElements = [...document.querySelectorAll('[id^="group-"]')];
-  const groupBoxes = new Map(groupElements.map((element) => [element.id.slice('group-'.length), bounds(element)]));
+  const groupId = (element) => element.getAttribute('data-group') || (element.id && element.id.startsWith('group-') ? element.id.slice('group-'.length) : '');
+  const groupElements = [...new Set([...document.querySelectorAll('[data-group], [id^="group-"]')])];
+  const groupBoxes = new Map(groupElements.map((element) => [groupId(element), bounds(element)]));
   const groupOverlapPairs = [];
   const groupEntries = [...groupBoxes.entries()].filter((entry) => entry[0] && entry[1]);
   for (let first = 0; first < groupEntries.length; first++) for (let second = first + 1; second < groupEntries.length; second++) {
     if (overlaps(groupEntries[first][1], groupEntries[second][1])) groupOverlapPairs.push(groupEntries[first][0] + ':' + groupEntries[second][0]);
+  }
+  const groupCapacityErrors = [];
+  const groupTitleErrors = [];
+  const groupTitleElements = [...document.querySelectorAll('text[data-group-title]')];
+  const groupScaleMatrix = svg?.getScreenCTM();
+  const groupScale = groupScaleMatrix ? Math.max(0.01, Math.min(Math.hypot(groupScaleMatrix.a, groupScaleMatrix.b), Math.hypot(groupScaleMatrix.c, groupScaleMatrix.d))) : 1;
+  const groupDefinitions = contract.groups && typeof contract.groups === 'object' ? contract.groups : {};
+  const contains = (outer, inner) => Boolean(outer && inner && inner.left >= outer.left - 1 && inner.top >= outer.top - 1 && inner.right <= outer.right + 1 && inner.bottom <= outer.bottom + 1);
+  for (const [id, definition] of Object.entries(groupDefinitions)) {
+    const groupBox = groupBoxes.get(id);
+    if (!groupBox) continue;
+    const group = definition && typeof definition === 'object' ? definition : {};
+    const titles = groupTitleElements.filter((element) => element.getAttribute('data-group-title') === id);
+    if (titles.length !== 1 || titles[0].getAttribute('data-group-style-role') !== String(group.styleRole || '')) groupTitleErrors.push(id + ':mapping');
+    const memberIds = Array.isArray(group.members) ? group.members.map(String) : [];
+    const memberBoxes = memberIds.map((nodeId) => nodeBoxes.get(nodeId)).filter(Boolean);
+    if (memberBoxes.length === 0) continue;
+    const internalEdges = edgeSamples.filter((sample) => {
+      const edge = edgeRecords[sample.id];
+      return edge && memberIds.includes(edge.from) && memberIds.includes(edge.to);
+    });
+    const internalEdgeIds = new Set(internalEdges.map((sample) => sample.id));
+    const contentBoxes = [
+      ...memberBoxes,
+      ...internalEdges.map((sample) => bounds(sample.element)).filter(Boolean),
+      ...[...labelBoxes.entries()].filter(([edgeId]) => internalEdgeIds.has(edgeId)).map(([, label]) => label.box).filter(Boolean),
+    ];
+    const content = {
+      left: Math.min(...contentBoxes.map((box) => box.left)),
+      top: Math.min(...contentBoxes.map((box) => box.top)),
+      right: Math.max(...contentBoxes.map((box) => box.right)),
+      bottom: Math.max(...contentBoxes.map((box) => box.bottom)),
+    };
+    const titleBox = titles.length === 1 ? bounds(titles[0]) : null;
+    if (!titleBox || !contains(groupBox, titleBox) || overlaps(titleBox, content)) groupTitleErrors.push(id + ':placement');
+    if (!contains(groupBox, content)) groupCapacityErrors.push(id + ':containment');
+    if (content.top - groupBox.top < layoutMetrics.groupHeaderHeight * groupScale) groupCapacityErrors.push(id + ':header');
+    if (content.left - groupBox.left < layoutMetrics.groupHorizontalPadding * groupScale || groupBox.right - content.right < layoutMetrics.groupHorizontalPadding * groupScale || groupBox.bottom - content.bottom < layoutMetrics.groupBottomPadding * groupScale) groupCapacityErrors.push(id + ':padding');
   }
   const lifelineCoordinates = {};
   for (const element of [...document.querySelectorAll('[data-lifeline-for]')]) {
@@ -743,7 +799,7 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
   const decorativeBlockers = [
     ...labelElements.map((element) => ['label:' + (element.getAttribute('data-edge-label') || 'unknown'), element]),
     ...legendElements.map((element) => ['legend:' + (element.getAttribute('data-legend-item') || 'unknown'), element]),
-    ...groupElements.map((element) => ['group:' + element.id.slice('group-'.length), element]),
+    ...groupElements.map((element) => ['group:' + groupId(element), element]),
   ];
   for (const arrow of arrowElements) {
     const arrowId = arrow.getAttribute('data-edge-arrow') || '';
@@ -762,10 +818,14 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
   const textEntries = textElements.map((element, index) => ({ id: element.getAttribute('data-text-id') || String(index), element, box: bounds(element), owner: element.closest('[data-node], [data-edge], [data-edge-arrow], [data-edge-label], [data-note], [data-legend-item]') }));
   const visualStyleErrors = [];
   const black = (value) => value === 'rgb(0, 0, 0)' || value === '#000000' || value === '#000';
+  const structuralGray = (value) => value === 'rgb(102, 102, 102)' || value === 'rgb(102,102,102)' || value === '#666666' || value === '#666';
   const white = (value) => value === 'rgb(255, 255, 255)' || value === '#ffffff' || value === '#fff';
+  const structuralGroupFrame = (element) => element?.hasAttribute('data-group') && element.getAttribute('data-group-style-role') === 'structural';
+  const structuralGroupTitle = (element) => element?.hasAttribute('data-group-title') && element.getAttribute('data-group-style-role') === 'structural';
   const frameStyle = (element, id) => {
     const style = getComputedStyle(element);
-    if (style.fill !== 'none' || !black(style.stroke) || Math.abs(parseFloat(style.strokeWidth) - visualStyle.strokeWidth) > 0.01) visualStyleErrors.push(id);
+    const expectedInk = structuralGroupFrame(element) ? structuralGray : black;
+    if (style.fill !== 'none' || !expectedInk(style.stroke) || Math.abs(parseFloat(style.strokeWidth) - visualStyle.strokeWidth) > 0.01) visualStyleErrors.push(id);
   };
   const backgrounds = [...document.querySelectorAll('[data-canvas-background]')];
   if (backgrounds.length !== 1) visualStyleErrors.push('canvas-background-count');
@@ -775,7 +835,7 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
   }
   if (legendElements.length > 0 || noteElements.length > 0) visualStyleErrors.push('global-legend-or-note');
   for (const node of nodeElements) frameStyle(nodeOutline(node), 'node:' + (node.getAttribute('data-node') || 'unknown'));
-  for (const group of groupElements) frameStyle(nodeOutline(group), 'group:' + group.id);
+  for (const group of groupElements) frameStyle(nodeOutline(group), 'group:' + groupId(group));
   for (const edge of edgeElements) frameStyle(edge, 'edge:' + (edge.getAttribute('data-edge') || 'unknown'));
   for (const lifeline of document.querySelectorAll('[data-lifeline-for]')) frameStyle(lifeline, 'lifeline:' + (lifeline.getAttribute('data-lifeline-for') || 'unknown'));
   for (const label of labelElements) if (label.tagName.toLowerCase() !== 'text' || label.querySelector('rect, polygon, ellipse, circle, path')) visualStyleErrors.push('label-frame:' + (label.getAttribute('data-edge-label') || 'unknown'));
@@ -784,7 +844,8 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     const edgeLabel = entry.element.hasAttribute('data-edge-label');
     const firstFont = style.fontFamily.split(',')[0].replace(/["']/g, '').trim().toLowerCase();
     const expectedSize = edgeLabel ? visualStyle.edgeLabelFontSize : visualStyle.frameFontSize;
-    if ((firstFont !== 'microsoft yahei' && firstFont !== '微软雅黑') || Math.abs(parseFloat(style.fontSize) - expectedSize) > 0.01 || !black(style.fill)) visualStyleErrors.push('text:' + entry.id);
+    const expectedTextInk = structuralGroupTitle(entry.element) ? structuralGray : black;
+    if ((firstFont !== 'microsoft yahei' && firstFont !== '微软雅黑') || Math.abs(parseFloat(style.fontSize) - expectedSize) > 0.01 || !expectedTextInk(style.fill)) visualStyleErrors.push('text:' + entry.id);
     if (edgeLabel && (style.textAnchor !== 'middle' || !['middle', 'central'].includes(style.dominantBaseline))) visualStyleErrors.push('label-anchor:' + entry.id);
   }
   for (const marker of document.querySelectorAll('marker')) {
@@ -803,7 +864,7 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     if (firstOwner && secondOwner && firstOwner === secondOwner) continue;
     if (overlaps(textEntries[first].box, textEntries[second].box)) textOverlapPairs.push(textEntries[first].id + ':' + textEntries[second].id);
   }
-  const tracked = [...document.querySelectorAll('[data-node], path[data-edge], [data-edge-arrow], [data-legend-item], [data-note], [data-lifeline-for], [id^="group-"]')];
+  const tracked = [...new Set([...document.querySelectorAll('[data-node], path[data-edge], [data-edge-arrow], [data-legend-item], [data-note], [data-lifeline-for], [data-group], [data-group-title], [id^="group-"]')])];
   const visibleBoxes = tracked.map(bounds).filter(Boolean);
   const contentBBox = visibleBoxes.length > 0 ? {
     left: Math.min(...visibleBoxes.map((box) => box.left)),
@@ -867,6 +928,8 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     viewport: { width: window.innerWidth, height: window.innerHeight },
     contentFullyVisible,
     groupOverlapPairs,
+    groupCapacityErrors,
+    groupTitleErrors,
     unsafeCount: document.querySelectorAll('script, foreignObject, iframe, object, embed').length,
     outsideViewportCount,
     };
@@ -955,6 +1018,8 @@ function inspection(payload: unknown): InspectionResult {
     viewport: data.viewport && typeof data.viewport === "object" ? { width: Number((data.viewport as Record<string, unknown>).width || 0), height: Number((data.viewport as Record<string, unknown>).height || 0) } : { width: 0, height: 0 },
     contentFullyVisible: data.contentFullyVisible === true,
     groupOverlapPairs: Array.isArray(data.groupOverlapPairs) ? data.groupOverlapPairs.map(String) : [],
+    groupCapacityErrors: Array.isArray(data.groupCapacityErrors) ? data.groupCapacityErrors.map(String) : [],
+    groupTitleErrors: Array.isArray(data.groupTitleErrors) ? data.groupTitleErrors.map(String) : [],
     unsafeCount: Number(data.unsafeCount || 0),
     outsideViewportCount: Number(data.outsideViewportCount || 0),
   };
@@ -974,7 +1039,7 @@ function readingPathTrace(result: InspectionResult, expected: ExpectedContract):
   });
 }
 
-function validateInspection(result: InspectionResult, expected?: ExpectedContract, actualLayout: ActualLayout = { nodeCenters: {} }, readingView: ReadingView = "normal"): string[] {
+function validateInspection(result: InspectionResult, expected?: ExpectedContract, actualLayout: ActualLayout = { nodeCenters: {}, groups: {} }, readingView: ReadingView = "normal"): string[] {
   const errors: string[] = [];
   if (result.role !== "img") errors.push('SVG role must be "img"');
   if (!result.title) errors.push("SVG title is empty or missing");
@@ -1008,6 +1073,8 @@ function validateInspection(result: InspectionResult, expected?: ExpectedContrac
   if (result.labelArrowCollisionPairs.length > 0) errors.push(`SVG labels intersect arrow overlays: ${result.labelArrowCollisionPairs.join(", ")}`);
   if (result.textOverflowIds.length > 0) errors.push(`SVG text/tspan geometry exceeds the visible SVG bounds: ${result.textOverflowIds.join(", ")}`);
   if (result.textOverlapPairs.length > 0) errors.push(`SVG text/tspan geometry overlaps: ${result.textOverlapPairs.join(", ")}`);
+  if (result.groupTitleErrors.length > 0) errors.push(`SVG group titles are missing, mismatched, outside their group, or overlap content: ${result.groupTitleErrors.join(", ")}`);
+  if (result.groupCapacityErrors.length > 0) errors.push(`SVG group capacity is insufficient for members, internal routes, or labels: ${result.groupCapacityErrors.join(", ")}`);
   if (result.horizontalOverflow) errors.push("SVG has horizontal overflow beyond the viewport");
   if (result.outsideViewportCount > 0) errors.push(`SVG contains ${result.outsideViewportCount} tracked element(s) outside the horizontal viewport`);
   if (result.unsafeCount > 0) errors.push(`SVG contains ${result.unsafeCount} unsafe embedded element(s)`);
@@ -1234,6 +1301,7 @@ async function main(): Promise<void> {
       const browserContract = {
         readingDirection: actualLayout.readingDirection || expected.routeContract.direction,
         mainAxis: actualLayout.mainAxis,
+        groups: actualLayout.groups,
         loopEdges: expected.routeContract.loopLanes.flatMap((lane) => lane.edgeIds),
         sideSwitchExceptionEdgeIds: expected.routeContract.exceptions.filter((exception) => exception.type === "side-switch").flatMap((exception) => exception.edgeIds),
         resetScroll: true,

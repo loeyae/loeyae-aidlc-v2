@@ -39,7 +39,7 @@ Independent Capability — not an AIDLC phase.
 
 ## 统一视觉输出（强制）
 
-所有新建、调整和迁移图必须输出不透明 `#ffffff` 画布；除画布外所有框体 `fill="none"`；框体、连线、箭头和可见文字统一 `#000000`；字体统一 `Microsoft YaHei, 微软雅黑, sans-serif`；框体内文字统一 `16`，边标签统一 `14`；框体和连线线宽统一 `2`；marker 与独立箭头 overlay 统一 `10 × 10` 且 marker 使用 `markerUnits="userSpaceOnUse"`。边标签必须是直接 `<text data-edge-label>`，使用 `text-anchor="middle"`、`dominant-baseline="middle"`，位于所属线段中点并沿法向保持至少 `6` 个源单位净空，禁止背景框、填充、描边、遮罩和光晕。
+所有新建、调整和迁移图必须输出不透明 `#ffffff` 画布；除画布外所有框体 `fill="none"`；业务节点、业务边界、流程线、箭头、边标签和业务文字统一 `#000000`；仅非业务的 structural group / swimlane / phase region 可在 sidecar 声明 `styleRole: "structural"`，并在 SVG 框体使用匹配的 `data-group`、`data-group-role`、`data-group-style-role="structural"`、标题使用 `data-group-title` 后统一采用 `#666666`。`business-boundary` 和未声明对象不得使用灰色；颜色不得表达业务状态、责任、风险、确认或流程含义。字体统一 `Microsoft YaHei, 微软雅黑, sans-serif`；框体内文字统一 `16`，边标签统一 `14`；框体和连线线宽统一 `2`；marker 与独立箭头 overlay 统一 `10 × 10` 且 marker 使用 `markerUnits="userSpaceOnUse"`。边标签必须是直接 `<text data-edge-label>`，使用 `text-anchor="middle"`、`dominant-baseline="middle"`，位于所属线段中点并沿法向保持至少 `6` 个源单位净空，禁止背景框、填充、描边、遮罩和光晕。
 
 视觉差异必须由节点、边或分组的就地文字表达，不生成全局图例或全局备注层。有形状/线型语义差异时，`legendDecision.status` 使用 `exempt` 并提供 `inlineSemanticEvidence`；无差异时使用 `not-needed`；`required` 非法。source checker 的 `global_decorations_absent`、`visual_style_status`、`edge_label_placement_status` 必须通过；实际 Provider 还必须保证每个视图的 `visualStyleErrors` 和 `labelPlacementErrors` 为空。
 

@@ -25,9 +25,9 @@ SVG 是本仓图表的目标源格式，但本标准不规定 AIDLC 必须生成
 ```
 
 - 画布必须恰有一个覆盖完整 viewport 的不透明白色 `rect[data-canvas-background]`；只有该元素可使用白色填充。
-- 节点、判断、分组、泳道和系统边界统一显式使用 `fill="none" stroke="#000000" stroke-width="2"`；框体内部通过白色画布自然呈现，不得设置白色或其他填充。
+- 节点、判断和业务边界统一显式使用 `fill="none" stroke="#000000" stroke-width="2"`；泳道、阶段和区域框仅在其 `data-group-style-role="structural"`、同时存在 `data-group` 与 `data-group-role` 时可使用 `stroke="#666666"`。白色或其他填充一律禁止。
 - 连线、生命线和其他连接器统一显式使用 `fill="none" stroke="#000000" stroke-width="2"`；虚线仅增加 `stroke-dasharray`，不得改变颜色或线宽。
-- 所有可见文字显式声明 `font-family="Microsoft YaHei, 微软雅黑, sans-serif" fill="#000000"`。框体内文字、节点文字、分组/泳道标题统一 `font-size="16"`；边标签统一 `font-size="14"`。
+- 所有业务文字和边标签显式声明 `font-family="Microsoft YaHei, 微软雅黑, sans-serif" fill="#000000"`。结构性分组标题必须是 `<text data-group-title="<group-id>" data-group-style-role="structural" ... fill="#666666">`；框体内文字、节点文字和分组/泳道标题统一 `font-size="16"`，边标签统一 `font-size="14"`。
 - 边标签直接使用 `<text data-edge-label="<edge-id>" ... text-anchor="middle" dominant-baseline="middle">`；禁止用 `<g>` 包裹标签身份，禁止标签 `rect`、填充、描边、遮罩、滤镜或光晕。
 - 标签锚点位于所选线段中点并沿法向偏移；实际文字 bbox 与线段至少保持 `6` 个源坐标单位净空。横线标签只能位于上/下侧，竖线标签只能位于左/右侧；多折边选择最接近路径中部且可容纳文字的线段。
 - 每个 marker 和独立 `[data-edge-arrow]` overlay 的源 bbox 均为 `10 × 10`；marker 必须使用 `markerUnits="userSpaceOnUse"`，箭头统一黑色，不得按边单独缩放。
@@ -58,7 +58,7 @@ Provider 生成的静态 SVG、PNG 或 PDF 是目标交付物，路径由目标�
 | 节点 | `id`、`shape`、`label`、`x`、`y`、`width`、`height` | `shape` 只能为 `round`、`rect`、`diamond`、`ellipse`、`database`、`actor`、`note`；`label` 为字符串或非空字符串数组；可选 `details`；`fontSize` 如提供只能为 `16`；禁止 `tone` |
 | 连线 | `id`、`from`、`fromPort`、`to`、`toPort`、`kind` | `from`/`to` 引用节点 ID；端口只能为 `top`、`right`、`bottom`、`left`；`kind` 只能为 `directed`、`bidirectional`、`undirected`、`dashed`；可选 `fromPortOffset`/`toPortOffset`、`points` 与 `label`；新建/调整图的连线必须提供可审查的 `points` |
 | 连线标签 | `label.text`、`label.x`、`label.y` | 标签属于其 `edge.id`，稳定身份为 `<edge.id>#label`；`text` 为字符串或非空字符串数组，坐标是标签中心；`fontSize` 如提供只能为 `14`；必须位于线段中点并法向避线 |
-| 分组 | `groups[].id`、`groups[].label`、`x`、`y`、`width`、`height` | 表达系统、泳道、角色或信任边界；禁止 `tone`；新建/调整图必须增加 `semanticType`、`members`，`nested` 分组还必须有 `parent`；范围必须包围其声明的内容与标题内边距 |
+| 分组 | `groups[].id`、`groups[].label`、`groups[].styleRole`、`x`、`y`、`width`、`height` | 表达系统、泳道、角色或信任边界；禁止 `tone`；新建/调整图必须增加 `semanticType`、`members`、`styleRole`，其中 `styleRole` 只能为 `structural` 或 `business-boundary`；`nested` 分组还必须有 `parent`；范围必须包围标题区、声明成员、内部路径和内部标签的容量留白 |
 | 全局图例 | `legend` | 新建、调整和迁移图禁止；字段必须省略，expected 的 `legend_ids` 必须为空；视觉差异改用对象就地文字和 `inlineSemanticEvidence` |
 | 图型与设计记录 | `diagramType`、`designNotes` | 新建/调整图必填；记录单一意图、语义模式、就地视觉语义证据、分组解释、拆图决定和 `layout`；详细字段见下文 |
 | 全局备注 | `annotations[]` | 新建、调整和迁移图禁止；字段必须省略或为空，expected 的 `annotation_ids` 必须为空；说明写入相邻 Markdown/Design Notes/evidence |
@@ -110,7 +110,7 @@ expected contract 的 `route_contract.edge_intents` 是跨图型、跨 SVG/sidec
 - `designNotes.legendDecision`：保留字段名以兼容 V1，但不生成图例。`status` 只能实际使用 `exempt` 或 `not-needed`；出现语义化视觉差异时使用 `exempt` 并提供逐对象 `inlineSemanticEvidence`，表示语义已就地写明；不存在差异时使用 `not-needed`；`required` 直接失败。
 - `designNotes.splitDecision`：使用 `{ status, reason, relatedDiagramIds?, singleGoal?, staticBoundary?, processFlowDistinction?, readabilityEvidence? }`。`status` 为 `not-needed`、`split` 或 `kept-single`；Architecture/Context 与 Flowchart/Pipeline/数据流/过程依赖混合时不得为 `not-needed`。`kept-single` 必须填静态边界、过程区分和 `normal`、`fit`、`zoom` 三项阅读证据，每项为 `{ status: PASS|FAIL|UNVERIFIED, evidence }`。
 - `designNotes.groupExplanations`：对 `cross-cutting` 或 `overlay` 分组提供 `{ groupId, meaning }`；语义同时通过分组标题、就地文字或相邻正文表达，不能省略。
-- `groups[].semanticType`：限 `exclusive`、`nested`、`cross-cutting`、`overlay`；`members` 是直接节点 ID 数组，不得把坐标包围当作成员声明；`nested` 必须有 `parent`，且嵌套深度不超过两层；`cross-cutting` 与 `overlay` 的 `members` 必须为空。
+- `groups[].semanticType`：限 `exclusive`、`nested`、`cross-cutting`、`overlay`；`members` 是直接节点 ID 数组，不得把坐标包围当作成员声明；`nested` 必须有 `parent`，且嵌套深度不超过两层；`cross-cutting` 与 `overlay` 的 `members` 必须为空。`groups[].styleRole` 必须为 `structural` 或 `business-boundary`：前者仅可使对应 SVG 框体和标题使用 `#666666`，后者必须保持黑色；两者均不改变成员、端口、关系或业务状态语义。
 - `legend` 与 `annotations[]`：V1 解析器可识别这些历史字段，但新建、调整和迁移产物必须省略或为空；SVG 不得生成 `data-legend-item`、`data-legend-sample` 或 `data-note`；expected 的 `legend_ids`、`annotation_ids` 必须为空。
 
 这些字段属于 AI-DLC 的共享语义契约，不是某个 Provider 的私有渲染字段。Provider 必须消费分组语义和就地视觉语义证据，并拒绝全局图例/备注层；不得静默忽略后声称语义/视觉通过。未来若把可选字段改为所有历史资产的必填字段、改变既有字段含义或需要破坏旧消费者，必须定义 `version: 2` 并提供迁移，不得无版本化修改 V1。
@@ -140,7 +140,7 @@ expected contract 的 `route_contract.edge_intents` 是跨图型、跨 SVG/sidec
 | 全局图例 | `legend`、`data-legend-item`、`data-legend-sample` | sidecar 字段必须省略，SVG 标识必须不存在；expected `legend_ids` 必须为空 |
 | 全局备注 | `annotations[]`、`data-note` | sidecar 必须省略或为空，SVG 标识必须不存在；expected `annotation_ids` 必须为空 |
 | 布局 | `designNotes.layout` | 新建/调整的过程图必须声明 `direction`、`mainAxis`、`layerTolerance`、`symmetryGroups`、`mergeNodes`、分支例外和 `readabilityEvidence`；这些是共享 V1 字段，不是 Provider 私有字段 |
-| 分组 | `group-<id>`、`data-group-role`、`data-group-members` | 分组 ID、语义类型和直接成员必须可由 SVG 反查；缺少新字段的旧资产只可标记迁移状态 |
+| 分组 | `group-<id>`、`data-group`、`data-group-role`、`data-group-style-role`、`data-group-title`、`data-group-members` | 分组 ID、语义类型、样式角色、标题和直接成员必须可由 SVG 反查；`data-group-style-role="structural"` 的框体/标题必须成对使用 `#666666`，其余对象必须黑色；缺少新字段的旧资产只可标记迁移状态 |
 | 箭头尖端 | `data-edge-arrow`、`data-arrow-target`、`data-edge` | 每个箭头尖端必须能反查所属边和目标节点/端口；双向边的两个尖端分别记录各自目标 |
 | 生命线 | `data-lifeline-for`、生命线几何 `x` | `sequence` 图每个参与者生命线必须能反查参与者 ID；消息端点不得落在标题矩形，首末 `x` 必须与生命线一致 |
 | Design Notes | 结果记录或清单中的 `designNotes` | 源结构、图例决定、分组关系、图型混合和拆图证据必须能定位到同一图表 ID |
@@ -224,7 +224,7 @@ SVG 必须是静态、独立和安全的：
 
 ### 节点与决策文字
 
-- 节点 `width`、`height` 根据实际标签/详情的测量宽度、行数、行高与内边距计算，不能用统一固定尺寸；
+- 节点 `width`、`height` 根据实际标签/详情的 CJK 感知测量宽度、行数、`24` 行高与内边距计算，不能用统一固定尺寸；同一语义文本在布局预分析、sidecar 几何检查和 SVG 渲染前必须使用同一测量与换行结果；
 - 节点文字的可见包围盒必须完全位于节点形状的可读区域内，且与边界保留内边距；
 - 菱形文字除矩形包围盒检查外，还必须满足 `textWidth / diamondWidth + textHeight / diamondHeight ≤ 0.70`；不满足时扩展菱形、拆出说明或改用其他形状；
 - 文字必须作为 SVG 文本保留并以微软雅黑为首选字体；框体内文字只能为 `16`，边标签只能为 `14` 个源字体单位；不得通过减小字体代替布局调整。
@@ -247,6 +247,15 @@ SVG 必须是静态、独立和安全的：
 - 对 `sequence` 图，参与者标题矩形只显示名称，不是消息端点；消息必须连接源/目标生命线，且 SVG 中必须存在对应的 `data-lifeline-for` 生命线映射，消息首末点的源坐标 `x` 必须精确等于对应生命线的 `x`，Provider 输出允许不超过 `1` 个 SVG 坐标单位的误差。自调用从同一生命线出发并返回，请求和返回不得共享中间路径；消息文字不得压在线或覆盖其他消息。
 - 文本测量、换行结果和最终 `<text data-edge-label>` 渲染必须来自同一标签数据，不能在渲染阶段再次追加文本或生成背景框。
 
+
+### 分组容量、标题区与结构性视觉层级
+
+新建或调整的分组必须从实际内容反推 `x/y/width/height`，而不是预设固定框体后挤压流程。计算内容边界时，纳入直接成员节点、两端均为成员的内部连线路径、其边标签和箭头；跨组关系仅在所属边界处出入，不得被错误计为另一组的内部 corridor。
+
+- 分组标题区高度至少 `48` 个源坐标单位；成员、内部标签和内部路径不得进入该区域；
+- 内部内容到左右边界各至少 `40`，到底部至少 `32`；标题文字宽度加左右各 `24` 的标题内边距必须完全位于框内；
+- `GROUP_TITLE_OVERFLOW`、`GROUP_HEADER_CLEARANCE`、`GROUP_CAPACITY` 分别阻断标题不适配、内容侵入标题区，以及成员/内部路径/标签贴边或溢出；修复方式是扩展区域、增加局部 lane、重排或拆图，不能缩小文字或整体缩放；
+- 结构性区域必须在框体使用 `data-group="<id>" data-group-role="<semanticType>" data-group-style-role="structural"`，在标题使用匹配的 `data-group-title` 和 `data-group-style-role`。其框体和标题统一 `#666666`；`business-boundary` 及所有业务对象统一 `#000000`。
 
 ### 分组和混合图型的静态/人工边界
 

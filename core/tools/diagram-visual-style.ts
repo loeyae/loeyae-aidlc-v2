@@ -1,6 +1,7 @@
 export const DIAGRAM_VISUAL_STYLE = Object.freeze({
   canvasFill: "#ffffff",
   ink: "#000000",
+  structuralGroupInk: "#666666",
   fontFamily: "Microsoft YaHei, 微软雅黑, sans-serif",
   frameFontSize: 16,
   edgeLabelFontSize: 14,
@@ -8,6 +9,17 @@ export const DIAGRAM_VISUAL_STYLE = Object.freeze({
   arrowWidth: 10,
   arrowHeight: 10,
   labelClearance: 6,
+});
+
+/** Shared source-coordinate thresholds for text fit and structural group capacity. */
+export const DIAGRAM_LAYOUT_METRICS = Object.freeze({
+  nodeHorizontalPadding: 16,
+  nodeVerticalPadding: 12,
+  frameLineHeight: 24,
+  groupTitleHorizontalPadding: 24,
+  groupHeaderHeight: 48,
+  groupHorizontalPadding: 40,
+  groupBottomPadding: 32,
 });
 
 type SvgTag = { name: string; source: string };
@@ -29,7 +41,24 @@ function normalizedColor(value: string | undefined): string | undefined {
   const color = value.trim().toLowerCase();
   if (color === "#000" || color === "black" || color === "rgb(0,0,0)" || color === "rgb(0, 0, 0)") return DIAGRAM_VISUAL_STYLE.ink;
   if (color === "#fff" || color === "white" || color === "rgb(255,255,255)" || color === "rgb(255, 255, 255)") return DIAGRAM_VISUAL_STYLE.canvasFill;
+  if (color === "#666" || color === "rgb(102,102,102)" || color === "rgb(102, 102, 102)") return DIAGRAM_VISUAL_STYLE.structuralGroupInk;
   return color;
+}
+
+function isStructuralGroupFrame(tag: SvgTag): boolean {
+  return attribute(tag.source, "data-group") !== undefined && attribute(tag.source, "data-group-style-role") === "structural";
+}
+
+function isStructuralGroupTitle(tag: SvgTag): boolean {
+  return tag.name === "text" && attribute(tag.source, "data-group-title") !== undefined && attribute(tag.source, "data-group-style-role") === "structural";
+}
+
+function isStructuralGroupElement(tag: SvgTag): boolean {
+  return isStructuralGroupFrame(tag) || isStructuralGroupTitle(tag);
+}
+
+function expectedInk(tag: SvgTag): string {
+  return isStructuralGroupElement(tag) ? DIAGRAM_VISUAL_STYLE.structuralGroupInk : DIAGRAM_VISUAL_STYLE.ink;
 }
 
 function isNone(value: string | undefined): boolean {
@@ -46,9 +75,9 @@ function numericAttribute(tag: string, name: string): number {
   return Number(attribute(tag, name));
 }
 
-function requireFrameStyle(tag: SvgTag, identity: string, errors: string[]): void {
+function requireFrameStyle(tag: SvgTag, identity: string, errors: string[], ink = expectedInk(tag)): void {
   if (!isNone(attribute(tag.source, "fill"))) errors.push(`VISUAL_STYLE: ${identity} must use fill=none`);
-  if (normalizedColor(attribute(tag.source, "stroke")) !== DIAGRAM_VISUAL_STYLE.ink) errors.push(`VISUAL_STYLE: ${identity} stroke must be ${DIAGRAM_VISUAL_STYLE.ink}`);
+  if (normalizedColor(attribute(tag.source, "stroke")) !== ink) errors.push(`VISUAL_STYLE: ${identity} stroke must be ${ink}`);
   if (numericAttribute(tag.source, "stroke-width") !== DIAGRAM_VISUAL_STYLE.strokeWidth) errors.push(`VISUAL_STYLE: ${identity} stroke-width must be ${DIAGRAM_VISUAL_STYLE.strokeWidth}`);
 }
 
@@ -75,12 +104,36 @@ export function diagramVisualStyleErrors(svg: string): string[] {
 
   if (/\bdata-legend-item=["']|\bdata-note=["']/i.test(svg)) errors.push("VISUAL_STYLE: global legends and note layers are not allowed");
 
+  const groupFrames = elements.filter((tag) => attribute(tag.source, "data-group") !== undefined);
+  const groupTitles = elements.filter((tag) => tag.name === "text" && attribute(tag.source, "data-group-title") !== undefined);
+  const structuralGroupIds = new Set<string>();
+  for (const frame of groupFrames) {
+    const groupId = attribute(frame.source, "data-group") || "unknown";
+    const styleRole = attribute(frame.source, "data-group-style-role");
+    if (styleRole !== undefined && !["structural", "business-boundary"].includes(styleRole)) errors.push(`GROUP_STYLE: group ${groupId} has invalid data-group-style-role ${styleRole}`);
+    if (styleRole === "structural") {
+      if (!attribute(frame.source, "data-group-role")) errors.push(`GROUP_STYLE: structural group ${groupId} must declare data-group-role`);
+      structuralGroupIds.add(groupId);
+    }
+  }
+  for (const groupId of structuralGroupIds) {
+    const titles = groupTitles.filter((tag) => attribute(tag.source, "data-group-title") === groupId);
+    if (titles.length !== 1 || attribute(titles[0]?.source || "", "data-group-style-role") !== "structural") errors.push(`GROUP_STYLE: structural group ${groupId} must have one matching structural title`);
+  }
+  for (const title of groupTitles) {
+    const groupId = attribute(title.source, "data-group-title") || "unknown";
+    const styleRole = attribute(title.source, "data-group-style-role");
+    if (styleRole !== undefined && !["structural", "business-boundary"].includes(styleRole)) errors.push(`GROUP_STYLE: group title ${groupId} has invalid data-group-style-role ${styleRole}`);
+    if (styleRole === "structural" && !structuralGroupIds.has(groupId)) errors.push(`GROUP_STYLE: structural group title ${groupId} has no matching structural group frame`);
+  }
+
   for (const tag of elements) {
     for (const property of ["fill", "stroke", "color"]) {
       const raw = attribute(tag.source, property);
       if (raw === undefined || isNone(raw)) continue;
       const color = normalizedColor(raw);
-      if (color !== DIAGRAM_VISUAL_STYLE.ink && color !== DIAGRAM_VISUAL_STYLE.canvasFill) errors.push(`VISUAL_STYLE: ${tag.name} ${property} uses non-standard color ${raw}`);
+      const permitsStructuralInk = color === DIAGRAM_VISUAL_STYLE.structuralGroupInk && isStructuralGroupElement(tag);
+      if (color !== DIAGRAM_VISUAL_STYLE.ink && color !== DIAGRAM_VISUAL_STYLE.canvasFill && !permitsStructuralInk) errors.push(`VISUAL_STYLE: ${tag.name} ${property} uses non-standard color ${raw}`);
       if (color === DIAGRAM_VISUAL_STYLE.canvasFill && attribute(tag.source, "data-canvas-background") === undefined) errors.push(`VISUAL_STYLE: only the canvas background may use ${DIAGRAM_VISUAL_STYLE.canvasFill}`);
     }
     for (const property of ["opacity", "fill-opacity", "stroke-opacity"]) {
@@ -95,7 +148,7 @@ export function diagramVisualStyleErrors(svg: string): string[] {
     if (edgeLabel && (attribute(tag.source, "text-anchor") !== "middle" || attribute(tag.source, "dominant-baseline") !== "middle")) errors.push("LABEL_STYLE: edge labels must use centered text-anchor and dominant-baseline");
     if (!hasPrimaryFont(attribute(tag.source, "font-family"))) errors.push(`FONT_STYLE: text must declare ${DIAGRAM_VISUAL_STYLE.fontFamily} with Microsoft YaHei first`);
     if (numericAttribute(tag.source, "font-size") !== expectedSize) errors.push(`FONT_STYLE: ${edgeLabel ? "edge label" : "frame text"} font-size must be ${expectedSize}`);
-    if (normalizedColor(attribute(tag.source, "fill")) !== DIAGRAM_VISUAL_STYLE.ink) errors.push(`FONT_STYLE: text fill must be ${DIAGRAM_VISUAL_STYLE.ink}`);
+    if (normalizedColor(attribute(tag.source, "fill")) !== expectedInk(tag)) errors.push(`FONT_STYLE: text fill must be ${expectedInk(tag)}`);
   }
 
   const labelContainers = elements.filter((tag) => attribute(tag.source, "data-edge-label") !== undefined && !(tag.name === "path" && attribute(tag.source, "data-edge") !== undefined));
@@ -132,13 +185,28 @@ export function diagramVisualStyleErrors(svg: string): string[] {
   return [...new Set(errors)];
 }
 
-function labelBounds(label: Label): { width: number; height: number } {
-  const lines = Array.isArray(label.text) ? label.text : [label.text];
-  const size = label.fontSize ?? DIAGRAM_VISUAL_STYLE.edgeLabelFontSize;
+export function diagramTextLines(value: string | string[]): string[] {
+  const lines = (Array.isArray(value) ? value : [value]).flatMap((line) => String(line).split(/\r?\n/));
+  return lines.length > 0 ? lines : [""];
+}
+
+export function measureDiagramText(text: string, fontSize: number): number {
+  return [...text].reduce((width, character) => {
+    if (/\s/.test(character)) return width + fontSize * 0.35;
+    return width + (character.codePointAt(0)! >= 0x2e80 ? fontSize : fontSize * 0.56);
+  }, 0);
+}
+
+export function diagramTextBounds(text: string | string[], fontSize: number): { width: number; height: number } {
+  const lines = diagramTextLines(text);
   return {
-    width: Math.max(...lines.map((line) => line.length * size * 0.55)),
-    height: lines.length * size * 1.2,
+    width: Math.max(...lines.map((line) => measureDiagramText(line, fontSize))),
+    height: lines.length * DIAGRAM_LAYOUT_METRICS.frameLineHeight,
   };
+}
+
+function labelBounds(label: Label): { width: number; height: number } {
+  return diagramTextBounds(label.text, label.fontSize ?? DIAGRAM_VISUAL_STYLE.edgeLabelFontSize);
 }
 
 export function edgeLabelPlacementError(edgeId: string, points: Point[], label: Label): string | null {

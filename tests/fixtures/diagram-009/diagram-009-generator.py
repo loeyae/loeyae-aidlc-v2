@@ -194,8 +194,8 @@ def sha256(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def text_width(text: str) -> float:
-    return len(text) * 16 * 0.55
+def text_width(text: str, font_size: float = 16) -> float:
+    return sum(font_size * (0.35 if character.isspace() else 1 if ord(character) >= 0x2E80 else 0.56) for character in text)
 
 
 def compact(points):
@@ -297,14 +297,19 @@ def route_local(start, end, from_port, to_port, force_clearance=False, approach_
 
 
 def place_label(edge):
+    label_width = text_width(edge["labelText"], 14)
+    minimum_side_offset = label_width / 2 + 6
     if edge["id"] == "edge-027":
         source = edge["points"][0]
         target = edge["points"][-1]
-        return {"text": edge["labelText"], "x": source[0] + 100, "y": (source[1] + target[1]) / 2, "fontSize": 14}
+        return {"text": edge["labelText"], "x": source[0] + max(100, minimum_side_offset), "y": (source[1] + target[1]) / 2, "fontSize": 14}
     vertical = [(first, second) for first, second in zip(edge["points"], edge["points"][1:]) if first[0] == second[0] and first[1] != second[1]]
     if vertical:
         first, second = max(vertical, key=lambda segment: abs(segment[1][1] - segment[0][1]))
-        side_offset = LABEL_SIDE_OFFSETS.get(edge["id"], 64)
+        requested_side_offset = LABEL_SIDE_OFFSETS.get(edge["id"], 64)
+        side_offset = max(abs(requested_side_offset), minimum_side_offset)
+        if requested_side_offset < 0:
+            side_offset = -side_offset
         side = -side_offset if edge["fromPort"] in {"left", "bottom"} else side_offset
         return {"text": edge["labelText"], "x": first[0] + side, "y": (first[1] + second[1]) / 2, "fontSize": 14}
     first, second = edge["points"][0], edge["points"][1]
@@ -322,7 +327,7 @@ def translate_to_canvas(nodes, edges):
             min_y, max_y = min(min_y, y - 10), max(max_y, y + 10)
         if "label" in edge:
             label = edge["label"]
-            half_width = text_width(label["text"]) / 2 + 8
+            half_width = text_width(label["text"], 14) / 2 + 8
             min_x, max_x = min(min_x, label["x"] - half_width), max(max_x, label["x"] + half_width)
             min_y, max_y = min(min_y, label["y"] - 22), max(max_y, label["y"] + 22)
     padding = 64

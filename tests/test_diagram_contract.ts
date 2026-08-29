@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { parseExpectedContract, routeBendCount, routeDirectionTokens, routeIntentErrors } from "../core/tools/diagram-contract.js";
-import { diagramVisualStyleErrors, edgeLabelPlacementError } from "../core/tools/diagram-visual-style.js";
+import { DIAGRAM_LAYOUT_METRICS, diagramVisualStyleErrors, edgeLabelPlacementError, measureDiagramText } from "../core/tools/diagram-visual-style.js";
 
 const digest = (character: string) => `sha256:${character.repeat(64)}`;
 
@@ -57,6 +57,25 @@ const visualFailures: Array<[string, string, RegExp]> = [
   ["arrow-size", canonicalSvg.replace('M170 75 L180 80 L170 85', 'M172 76 L180 80 L172 84'), /arrow edge-a must be 10x10/],
 ];
 for (const [name, svg, expected] of visualFailures) {
+  assert.ok(diagramVisualStyleErrors(svg).some((error) => expected.test(error)), name);
+}
+
+assert.equal(measureDiagramText("中文", 16), 32);
+assert.equal(DIAGRAM_LAYOUT_METRICS.frameLineHeight, 24);
+
+const structuralGroupSvg = canonicalSvg.replace(
+  '  <g data-node="node-a"',
+  '  <rect id="group-lane" data-group="lane" data-group-role="exclusive" data-group-style-role="structural" x="10" y="10" width="180" height="100" fill="none" stroke="#666666" stroke-width="2" />\n  <text data-group-title="lane" data-group-style-role="structural" x="34" y="30" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#666666">阶段</text>\n  <g data-node="node-a"',
+);
+assert.deepEqual(diagramVisualStyleErrors(structuralGroupSvg), []);
+const structuralGroupFailures: Array<[string, string, RegExp]> = [
+  ["gray-node", structuralGroupSvg.replace('x="20" y="20" width="60" height="30" fill="none" stroke="#000000"', 'x="20" y="20" width="60" height="30" fill="none" stroke="#666666"'), /non-standard color|stroke must/],
+  ["gray-edge", structuralGroupSvg.replace('d="M20 80 L180 80" fill="none" stroke="#000000"', 'd="M20 80 L180 80" fill="none" stroke="#666666"'), /non-standard color|stroke must/],
+  ["light-gray", structuralGroupSvg.replace('stroke="#666666"', 'stroke="#999999"'), /non-standard color|stroke must/],
+  ["missing-group-role", structuralGroupSvg.replace('data-group-role="exclusive" ', ''), /GROUP_STYLE/],
+  ["missing-title-role", structuralGroupSvg.replace('data-group-title="lane" data-group-style-role="structural"', 'data-group-title="lane"'), /GROUP_STYLE|FONT_STYLE/],
+];
+for (const [name, svg, expected] of structuralGroupFailures) {
   assert.ok(diagramVisualStyleErrors(svg).some((error) => expected.test(error)), name);
 }
 

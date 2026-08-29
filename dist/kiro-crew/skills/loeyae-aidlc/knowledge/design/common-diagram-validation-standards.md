@@ -13,7 +13,7 @@
 
 ## 统一视觉门禁
 
-每个新建、调整和迁移图表必须同时通过以下固定基线：画布 `#ffffff` 且完全不透明；除画布外所有框体 `fill="none"`；框体、连线、箭头和文字 `#000000`；微软雅黑为首选字体；框体文字 `16`、边标签 `14`；框体与连线线宽 `2`；marker/overlay `10 × 10`；边标签无框、位于所属线段中点法向且实际 bbox 净空至少 `6`；不存在全局图例或全局备注层。
+每个新建、调整和迁移图表必须同时通过以下固定基线：画布 `#ffffff` 且完全不透明；除画布外所有框体 `fill="none"`；业务节点、业务边界、连线、箭头、边标签和业务文字 `#000000`；只有显式 `styleRole: structural` 且 SVG 具有匹配 `data-group`/`data-group-role`/`data-group-style-role`/`data-group-title` 的非业务分组框体及标题可为 `#666666`；微软雅黑为首选字体；框体文字 `16`、边标签 `14`；框体与连线线宽 `2`；marker/overlay `10 × 10`；边标签无框、位于所属线段中点法向且实际 bbox 净空至少 `6`；不存在全局图例或全局备注层。
 
 source checker 必须检查显式 SVG 属性、sidecar 禁用字段、标签源坐标与路径中点关系，并输出 `global_decorations_absent: true`、`visual_style_status: "passed"`、`edge_label_placement_status: "passed"` 后才可进入 `STATIC_PASS`。Chrome Provider 必须从真实 DOM 读取 computed style、`getBBox()` 与 `getScreenCTM()`，在三视图逐一复核相同约束；`visualStyleErrors` 或 `labelPlacementErrors` 非空必须阻断 `VISUAL_PASS`。source 与 Provider 任一层缺失均不得由另一层代替。
 
@@ -128,7 +128,8 @@ Geometry QA 使用源坐标、路径点和结构化文本估算，不声称完�
 - 连线穿越节点、连线交叉、标签冲突与标签位置：`EDGE_NODE_COLLISION`、`EDGE_CROSSING`、`CROSSING_EXCEPTION`、`LABEL_COLLISION`、`LABEL_PLACEMENT`；
 - 端口、首末端点、目标外侧接近与最少路径：`PORT_MISMATCH`、`EDGE_ENDPOINT_MISMATCH`、`PORT_DIRECTION`、`PORT_APPROACH`、`REDUNDANT_PATH_POINT`、`ROUTING_MINIMALITY`；
 - 主轴同侧通道与布局迁移复核：`SIDE_SWITCH`、`SIDE_SWITCH_EXCEPTION`、`CHANGE_IMPACT_REVIEW`；
-- 分组成员、父级和最小内边距：`GROUP_CONTAINMENT`；
+- 节点文字与尺寸：`LABEL_OVERFLOW`，使用 CJK 感知宽度、统一 `24` 行高、左右 `16`/上下 `12` 的最小内边距；
+- 分组成员、标题区、内部路径/标签和容量：`GROUP_CONTAINMENT`、`GROUP_TITLE_OVERFLOW`、`GROUP_HEADER_CLEARANCE`、`GROUP_CAPACITY`；
 - 内容、路径点、标签和对象越界：`CANVAS_CLIPPING`；
 - 内容相对画布过小：`CANVAS_TOO_EMPTY`；
 - 不支持的复杂形状或生命线：`UNSUPPORTED_SHAPE_GEOMETRY`、`SEQUENCE_LIFELINE_MISSING`；
@@ -148,7 +149,11 @@ Geometry QA 使用源坐标、路径点和结构化文本估算，不声称完�
 | `MIN_NODE_GAP` | 24 | 节点之间最低安全间距 |
 | `MIN_EDGE_GAP` | 12 | 连线与可读区域最低间距 |
 | `MIN_LABEL_GAP` | 8 | 标签与其他对象最低间距 |
-| `MIN_GROUP_PADDING` | 16 | 分组内容最低内边距 |
+| `NODE_HORIZONTAL_PADDING` / `NODE_VERTICAL_PADDING` | 16 / 12 | 节点文字到边界的最低内边距 |
+| `FRAME_LINE_HEIGHT` | 24 | 框体文字和标题的统一计算行高 |
+| `GROUP_TITLE_HEADER` | 48 | 分组顶部保留的标题区高度 |
+| `GROUP_HORIZONTAL_PADDING` | 40 | 分组内部内容到左右边界的最低净空 |
+| `GROUP_BOTTOM_PADDING` | 32 | 分组内部内容到底边的最低净空 |
 | `CANVAS_MARGIN` | 24 | 内容到画布边缘最低内边距 |
 | `POINT_TOLERANCE` | 1 | 端点比较允许误差 |
 | `FRAME_FONT_SIZE` | 16 | 所有框体内文字的唯一字号 |
@@ -251,13 +256,15 @@ Geometry QA 使用源坐标、路径点和结构化文本估算，不声称完�
 - `side_switch_status`：同侧通道未无声明跨轴折返；
 - `change_impact_review_status`：声明布局迁移时，所有移动节点的 incident edges 都有复核；
 - `visible_arrow_mapping_status`：箭头目标、marker/overlay 映射、`10 × 10` 尺寸和可见性通过；
+- `node_text_fit_status`：CJK 感知文字测量、行高和节点内边距证明标签完全位于可读区域；
+- `group_capacity_status`：分组标题、成员、内部路径和边标签满足标题区及左右/底部容量净空；
 - `global_decorations_absent`：无全局图例和全局备注层；
-- `visual_style_status`：白色不透明画布、无填充框体、黑色墨线、微软雅黑、`16/14` 字号和 `2` 线宽通过；
+- `visual_style_status`：白色不透明画布、无填充框体、业务对象黑色、结构性分组受控深灰、微软雅黑、`16/14` 字号和 `2` 线宽通过；
 - `edge_label_placement_status`：无框边标签位于所属线段中点法向且满足 `6` 单位净空。
 
 确定性 checker 使用稳定错误码区分失败原因：`MAIN_FLOW_TRACE`、`LOOP_LANE`、`DECISION_SHAPE`、`DECISION_EXIT`、`PORT_DIRECTION`、`PORT_APPROACH`、`ROUTING_MINIMALITY`、`SIDE_SWITCH`、`SIDE_SWITCH_EXCEPTION`、`CHANGE_IMPACT_REVIEW`、`EDGE_CROSSING`、`CROSSING_EXCEPTION`、`COLLINEAR_OVERLAP`、`REDUNDANT_PATH_POINT` 和 `EDGE_NODE_COLLISION`。`EDGE_CROSSING` 仅针对未声明或未满足必要交叉可读性条件的交叉；`CROSSING_EXCEPTION` 处理缺失、重复、非法或未实际发生的例外；`COLLINEAR_OVERLAP` 始终不得降级为普通交叉，端点接触也不能掩盖同一边对之间的非零共线重叠。
 
-当目标操作为 `preview` 或浏览器 `render` 时，Chrome DevTools Provider 必须对实际 DOM/SVG 执行：节点和边集合的精确映射、edge-node crossing、edge-edge intersection（仅接受 sidecar 已声明且实际命中的必要交叉）、共线重叠、端口首末方向和目标外侧接近、边 bbox、同侧通道/跨轴折返、标签与无关边 bbox、边标签中点法向净空、箭头 overlay `10 × 10` bbox 及其被无关节点、后绘制标签或分组边界遮挡、`text`/`tspan` bbox 越界与重叠、白色不透明画布、框体/连线 computed fill/stroke/strokeWidth、文字 computed font/fill/size、marker 尺寸、全局图例/备注缺失、`contentBBox`、水平溢出、判定 diamond 和出口数量，以及 sidecar 声明的主流程和回路边覆盖。不能用源坐标结果代替这些浏览器检查。
+当目标操作为 `preview` 或浏览器 `render` 时，Chrome DevTools Provider 必须对实际 DOM/SVG 执行：节点和边集合的精确映射、edge-node crossing、edge-edge intersection（仅接受 sidecar 已声明且实际命中的必要交叉）、共线重叠、端口首末方向和目标外侧接近、边 bbox、同侧通道/跨轴折返、标签与无关边 bbox、边标签中点法向净空、箭头 overlay `10 × 10` bbox 及其被无关节点、后绘制标签或分组边界遮挡、`text`/`tspan` bbox 越界与重叠、分组标题映射/标题区净空/成员与内部路径标签容量、白色不透明画布、框体/连线 computed fill/stroke/strokeWidth、文字 computed font/fill/size、marker 尺寸、全局图例/备注缺失、`contentBBox`、水平溢出、判定 diamond 和出口数量，以及 sidecar 声明的主流程和回路边覆盖。业务对象必须实际为黑色；只有匹配的结构性分组框体及标题允许实际为 `#666666`。不能用源坐标结果代替这些浏览器检查。
 
 Provider Request 的 `target_reading_environment.viewports` 必须同时声明 `normal`、`fit`、`zoom` 三个对象。实际运行缺少任何一个视图时必须阻断；只有三个视图全部检查成功，且截图/快照均已生成，才可以原子更新 `provider_status: "passed"`。页面纵向滚动允许，但水平溢出、对象越界、文字/箭头不可见或被遮挡都失败。dry-run 只验证请求和执行计划，不产生浏览器通过证据。
 

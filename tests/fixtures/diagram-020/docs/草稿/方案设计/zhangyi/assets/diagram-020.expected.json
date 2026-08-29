@@ -1,0 +1,1218 @@
+{
+  "version": "1",
+  "type": "diagram-expected-contract",
+  "source": {
+    "kind": "approved-formal-blueprint",
+    "ref": "docs/正式/20-需求文档/搜索域/蓝图-搜索和推荐V1.1.md",
+    "revision": "working-tree",
+    "digest": "sha256:80d7f9ed13878eeca5073d59e370f1ba2542f2727473ad9077cd63156406f109"
+  },
+  "generator": {
+    "name": "aidlc-diagram-design-manual",
+    "version": "1.0",
+    "config_summary": "search-domain operation flow with darkword and hotword configuration branches",
+    "config_digest": "sha256:592bfd22211dfddd851c29d454b92bb900a132dd747b577d72c88209ebc565ef",
+    "source_refs": [
+      "docs/正式/20-需求文档/搜索域/蓝图-搜索和推荐V1.1.md"
+    ]
+  },
+  "diagrams": [
+    {
+      "id": "diagram-020",
+      "diagram_type": "flowchart",
+      "intent": "表达 34 个业务节点和 35 条连接器组成的搜索域运营配置流程。",
+      "nodes": [
+        {
+          "id": "diagram-020-node-operator",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-cloud-admin",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-search-admin",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-darkword-page",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-darkword-edit",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-darkword-check",
+          "shape": "diamond"
+        },
+        {
+          "id": "diagram-020-node-darkword-error",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-darkword-save",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-darkword-status",
+          "shape": "diamond"
+        },
+        {
+          "id": "diagram-020-node-darkword-effective",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-darkword-inactive",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-hotword-page",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-hotword-edit",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-required-check",
+          "shape": "diamond"
+        },
+        {
+          "id": "diagram-020-node-validation-error",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-hotword-save",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-effective-check",
+          "shape": "diamond"
+        },
+        {
+          "id": "diagram-020-node-hotword-effective",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-hotword-inactive",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-operation-admin",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-blacklist-manage",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-blacklist-select",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-blacklist-edit",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-blacklist-confirm",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-blacklist-effective",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-whitelist-manage",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-whitelist-select",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-whitelist-edit",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-whitelist-confirm",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-whitelist-effective",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-sort-manage",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-sort-drag",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-sort-save",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-sort-effective",
+          "shape": "rect"
+        }
+      ],
+      "edges": [
+        {
+          "id": "diagram-020-edge-001",
+          "from": "diagram-020-node-operator",
+          "to": "diagram-020-node-search-admin",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-search-admin:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-002",
+          "from": "diagram-020-node-search-admin",
+          "to": "diagram-020-node-hotword-page",
+          "from_port": "left",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-hotword-page:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-003",
+          "from": "diagram-020-node-search-admin",
+          "to": "diagram-020-node-operation-admin",
+          "from_port": "right",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-operation-admin:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-004",
+          "from": "diagram-020-node-hotword-page",
+          "to": "diagram-020-node-hotword-edit",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-hotword-edit:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-005",
+          "from": "diagram-020-node-hotword-edit",
+          "to": "diagram-020-node-required-check",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-required-check:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-006",
+          "from": "diagram-020-node-required-check",
+          "to": "diagram-020-node-validation-error",
+          "from_port": "left",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-validation-error:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-007",
+          "from": "diagram-020-node-validation-error",
+          "to": "diagram-020-node-hotword-edit",
+          "from_port": "left",
+          "to_port": "left",
+          "arrow_target": "diagram-020-node-hotword-edit:left",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-008",
+          "from": "diagram-020-node-required-check",
+          "to": "diagram-020-node-hotword-save",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-hotword-save:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-009",
+          "from": "diagram-020-node-hotword-save",
+          "to": "diagram-020-node-effective-check",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-effective-check:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-010",
+          "from": "diagram-020-node-effective-check",
+          "to": "diagram-020-node-hotword-effective",
+          "from_port": "left",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-hotword-effective:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-011",
+          "from": "diagram-020-node-effective-check",
+          "to": "diagram-020-node-hotword-inactive",
+          "from_port": "right",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-hotword-inactive:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-012",
+          "from": "diagram-020-node-operation-admin",
+          "to": "diagram-020-node-blacklist-manage",
+          "from_port": "left",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-blacklist-manage:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-013",
+          "from": "diagram-020-node-operation-admin",
+          "to": "diagram-020-node-whitelist-manage",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-whitelist-manage:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-014",
+          "from": "diagram-020-node-operation-admin",
+          "to": "diagram-020-node-sort-manage",
+          "from_port": "right",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-sort-manage:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-015",
+          "from": "diagram-020-node-blacklist-manage",
+          "to": "diagram-020-node-blacklist-select",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-blacklist-select:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-016",
+          "from": "diagram-020-node-blacklist-select",
+          "to": "diagram-020-node-blacklist-edit",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-blacklist-edit:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-017",
+          "from": "diagram-020-node-blacklist-edit",
+          "to": "diagram-020-node-blacklist-confirm",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-blacklist-confirm:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-018",
+          "from": "diagram-020-node-blacklist-confirm",
+          "to": "diagram-020-node-blacklist-effective",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-blacklist-effective:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-019",
+          "from": "diagram-020-node-whitelist-manage",
+          "to": "diagram-020-node-whitelist-select",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-whitelist-select:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-020",
+          "from": "diagram-020-node-whitelist-select",
+          "to": "diagram-020-node-whitelist-edit",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-whitelist-edit:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-021",
+          "from": "diagram-020-node-whitelist-edit",
+          "to": "diagram-020-node-whitelist-confirm",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-whitelist-confirm:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-022",
+          "from": "diagram-020-node-whitelist-confirm",
+          "to": "diagram-020-node-whitelist-effective",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-whitelist-effective:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-023",
+          "from": "diagram-020-node-sort-manage",
+          "to": "diagram-020-node-sort-drag",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-sort-drag:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-024",
+          "from": "diagram-020-node-sort-drag",
+          "to": "diagram-020-node-sort-save",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-sort-save:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-025",
+          "from": "diagram-020-node-sort-save",
+          "to": "diagram-020-node-sort-effective",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-sort-effective:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-026",
+          "from": "diagram-020-node-operator",
+          "to": "diagram-020-node-cloud-admin",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-cloud-admin:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-027",
+          "from": "diagram-020-node-cloud-admin",
+          "to": "diagram-020-node-darkword-page",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-darkword-page:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-028",
+          "from": "diagram-020-node-darkword-page",
+          "to": "diagram-020-node-darkword-edit",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-darkword-edit:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-029",
+          "from": "diagram-020-node-darkword-edit",
+          "to": "diagram-020-node-darkword-check",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-darkword-check:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-030",
+          "from": "diagram-020-node-darkword-check",
+          "to": "diagram-020-node-darkword-error",
+          "from_port": "left",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-darkword-error:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-031",
+          "from": "diagram-020-node-darkword-error",
+          "to": "diagram-020-node-darkword-edit",
+          "from_port": "left",
+          "to_port": "left",
+          "arrow_target": "diagram-020-node-darkword-edit:left",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-032",
+          "from": "diagram-020-node-darkword-check",
+          "to": "diagram-020-node-darkword-save",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-darkword-save:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-033",
+          "from": "diagram-020-node-darkword-save",
+          "to": "diagram-020-node-darkword-status",
+          "from_port": "bottom",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-darkword-status:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-034",
+          "from": "diagram-020-node-darkword-status",
+          "to": "diagram-020-node-darkword-effective",
+          "from_port": "left",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-darkword-effective:top",
+          "kind": "directed"
+        },
+        {
+          "id": "diagram-020-edge-035",
+          "from": "diagram-020-node-darkword-status",
+          "to": "diagram-020-node-darkword-inactive",
+          "from_port": "right",
+          "to_port": "top",
+          "arrow_target": "diagram-020-node-darkword-inactive:top",
+          "kind": "directed"
+        }
+      ],
+      "groups": [
+        {
+          "id": "diagram-020-group-darkword",
+          "semantic_type": "exclusive"
+        },
+        {
+          "id": "diagram-020-group-hotword",
+          "semantic_type": "exclusive"
+        },
+        {
+          "id": "diagram-020-group-operation",
+          "semantic_type": "exclusive"
+        }
+      ],
+      "legend_ids": [],
+      "annotation_ids": [],
+      "lifeline_ids": [],
+      "route_contract": {
+        "direction": "TB",
+        "affected_edge_ids": [
+          "diagram-020-edge-001",
+          "diagram-020-edge-002",
+          "diagram-020-edge-003",
+          "diagram-020-edge-004",
+          "diagram-020-edge-005",
+          "diagram-020-edge-006",
+          "diagram-020-edge-007",
+          "diagram-020-edge-008",
+          "diagram-020-edge-009",
+          "diagram-020-edge-010",
+          "diagram-020-edge-011",
+          "diagram-020-edge-012",
+          "diagram-020-edge-013",
+          "diagram-020-edge-014",
+          "diagram-020-edge-015",
+          "diagram-020-edge-016",
+          "diagram-020-edge-017",
+          "diagram-020-edge-018",
+          "diagram-020-edge-019",
+          "diagram-020-edge-020",
+          "diagram-020-edge-021",
+          "diagram-020-edge-022",
+          "diagram-020-edge-023",
+          "diagram-020-edge-024",
+          "diagram-020-edge-025",
+          "diagram-020-edge-026",
+          "diagram-020-edge-027",
+          "diagram-020-edge-028",
+          "diagram-020-edge-029",
+          "diagram-020-edge-030",
+          "diagram-020-edge-031",
+          "diagram-020-edge-032",
+          "diagram-020-edge-033",
+          "diagram-020-edge-034",
+          "diagram-020-edge-035"
+        ],
+        "edge_intents": [
+          {
+            "edge_id": "diagram-020-edge-001",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-search-admin:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-002",
+            "kind": "manhattan",
+            "bend_count": 3,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-hotword-page:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 4
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-003",
+            "kind": "manhattan",
+            "bend_count": 3,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-operation-admin:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 4
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-004",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-hotword-edit:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-005",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-required-check:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-006",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-validation-error:top",
+            "label_text": "否",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3,
+              "directions": [
+                "left",
+                "down",
+                "right"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-007",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-hotword-edit:left",
+            "label_text": "返回编辑",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3,
+              "directions": [
+                "left",
+                "up",
+                "right"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-008",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-hotword-save:top",
+            "label_text": "是",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-009",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-effective-check:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-010",
+            "kind": "manhattan",
+            "bend_count": 3,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-hotword-effective:top",
+            "label_text": "是",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 4
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-011",
+            "kind": "manhattan",
+            "bend_count": 3,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-hotword-inactive:top",
+            "label_text": "否",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 4
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-012",
+            "kind": "manhattan",
+            "bend_count": 1,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-blacklist-manage:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 2,
+              "directions": [
+                "left",
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-013",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-whitelist-manage:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-014",
+            "kind": "manhattan",
+            "bend_count": 3,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-sort-manage:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 4
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-015",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-blacklist-select:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-016",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-blacklist-edit:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-017",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-blacklist-confirm:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-018",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-blacklist-effective:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-019",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-whitelist-select:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-020",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-whitelist-edit:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-021",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-whitelist-confirm:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-022",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-whitelist-effective:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-023",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-sort-drag:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-024",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-sort-save:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-025",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-sort-effective:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-026",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-cloud-admin:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-027",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-darkword-page:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-028",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-darkword-edit:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-029",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-darkword-check:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-030",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-darkword-error:top",
+            "label_text": "否",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3,
+              "directions": [
+                "left",
+                "down",
+                "right"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-031",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-darkword-edit:left",
+            "label_text": "返回编辑",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3,
+              "directions": [
+                "left",
+                "up",
+                "right"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-032",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-darkword-save:top",
+            "label_text": "是",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-033",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-darkword-status:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-034",
+            "kind": "manhattan",
+            "bend_count": 3,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-darkword-effective:top",
+            "label_text": "是",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 4
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-035",
+            "kind": "manhattan",
+            "bend_count": 3,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-darkword-inactive:top",
+            "label_text": "否",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 4
+            }
+          }
+        ],
+        "loop_lanes": [
+          {
+            "id": "diagram-020-loop-hotword-validation",
+            "side": "left",
+            "lane_offset": 40,
+            "edge_ids": [
+              "diagram-020-edge-007"
+            ],
+            "reason": "搜索热词校验失败返回编辑，沿热词分组左侧独立 lane。"
+          },
+          {
+            "id": "diagram-020-loop-darkword-validation",
+            "side": "left",
+            "lane_offset": 24,
+            "edge_ids": [
+              "diagram-020-edge-031"
+            ],
+            "reason": "暗纹词校验失败返回编辑，沿暗纹词分组最外侧独立 lane。"
+          }
+        ],
+        "merge_nodes": [
+          {
+            "node_id": "diagram-020-node-hotword-edit",
+            "edge_ids": [
+              "diagram-020-edge-004",
+              "diagram-020-edge-007"
+            ],
+            "ports": {
+              "diagram-020-edge-004": "top",
+              "diagram-020-edge-007": "left"
+            }
+          },
+          {
+            "node_id": "diagram-020-node-darkword-edit",
+            "edge_ids": [
+              "diagram-020-edge-028",
+              "diagram-020-edge-031"
+            ],
+            "ports": {
+              "diagram-020-edge-028": "top",
+              "diagram-020-edge-031": "left"
+            }
+          }
+        ],
+        "branch_groups": [
+          {
+            "target_ids": [
+              "diagram-020-node-darkword-error",
+              "diagram-020-node-darkword-save"
+            ],
+            "direction": "TB",
+            "tolerance": 24,
+            "decision_node_id": "diagram-020-node-darkword-check",
+            "edge_ids": [
+              "diagram-020-edge-030",
+              "diagram-020-edge-032"
+            ],
+            "reason": "菱形判断的出口分支在图内就地表达。",
+            "id": "diagram-020-node-darkword-check",
+            "depth": 0,
+            "mode": "inline"
+          },
+          {
+            "target_ids": [
+              "diagram-020-node-darkword-effective",
+              "diagram-020-node-darkword-inactive"
+            ],
+            "direction": "TB",
+            "tolerance": 24,
+            "decision_node_id": "diagram-020-node-darkword-status",
+            "edge_ids": [
+              "diagram-020-edge-034",
+              "diagram-020-edge-035"
+            ],
+            "reason": "菱形判断的出口分支在图内就地表达。",
+            "id": "diagram-020-node-darkword-status",
+            "depth": 0,
+            "mode": "inline"
+          },
+          {
+            "target_ids": [
+              "diagram-020-node-validation-error",
+              "diagram-020-node-hotword-save"
+            ],
+            "direction": "TB",
+            "tolerance": 24,
+            "decision_node_id": "diagram-020-node-required-check",
+            "edge_ids": [
+              "diagram-020-edge-006",
+              "diagram-020-edge-008"
+            ],
+            "reason": "菱形判断的出口分支在图内就地表达。",
+            "id": "diagram-020-node-required-check",
+            "depth": 0,
+            "mode": "inline"
+          },
+          {
+            "target_ids": [
+              "diagram-020-node-hotword-effective",
+              "diagram-020-node-hotword-inactive"
+            ],
+            "direction": "TB",
+            "tolerance": 24,
+            "decision_node_id": "diagram-020-node-effective-check",
+            "edge_ids": [
+              "diagram-020-edge-010",
+              "diagram-020-edge-011"
+            ],
+            "reason": "菱形判断的出口分支在图内就地表达。",
+            "id": "diagram-020-node-effective-check",
+            "depth": 0,
+            "mode": "inline"
+          }
+        ],
+        "exceptions": [],
+        "main_flow": {
+          "entry_node_ids": [
+            "diagram-020-node-operator"
+          ],
+          "exit_node_ids": [
+            "diagram-020-node-darkword-effective",
+            "diagram-020-node-darkword-inactive",
+            "diagram-020-node-hotword-effective",
+            "diagram-020-node-hotword-inactive",
+            "diagram-020-node-blacklist-effective",
+            "diagram-020-node-whitelist-effective",
+            "diagram-020-node-sort-effective"
+          ],
+          "node_ids": [
+            "diagram-020-node-operator",
+            "diagram-020-node-cloud-admin",
+            "diagram-020-node-search-admin",
+            "diagram-020-node-darkword-page",
+            "diagram-020-node-darkword-edit",
+            "diagram-020-node-darkword-check",
+            "diagram-020-node-darkword-error",
+            "diagram-020-node-darkword-save",
+            "diagram-020-node-darkword-status",
+            "diagram-020-node-darkword-effective",
+            "diagram-020-node-darkword-inactive",
+            "diagram-020-node-hotword-page",
+            "diagram-020-node-hotword-edit",
+            "diagram-020-node-required-check",
+            "diagram-020-node-validation-error",
+            "diagram-020-node-hotword-save",
+            "diagram-020-node-effective-check",
+            "diagram-020-node-hotword-effective",
+            "diagram-020-node-hotword-inactive",
+            "diagram-020-node-operation-admin",
+            "diagram-020-node-blacklist-manage",
+            "diagram-020-node-blacklist-select",
+            "diagram-020-node-blacklist-edit",
+            "diagram-020-node-blacklist-confirm",
+            "diagram-020-node-blacklist-effective",
+            "diagram-020-node-whitelist-manage",
+            "diagram-020-node-whitelist-select",
+            "diagram-020-node-whitelist-edit",
+            "diagram-020-node-whitelist-confirm",
+            "diagram-020-node-whitelist-effective",
+            "diagram-020-node-sort-manage",
+            "diagram-020-node-sort-drag",
+            "diagram-020-node-sort-save",
+            "diagram-020-node-sort-effective"
+          ],
+          "edge_ids": [
+            "diagram-020-edge-001",
+            "diagram-020-edge-002",
+            "diagram-020-edge-003",
+            "diagram-020-edge-004",
+            "diagram-020-edge-005",
+            "diagram-020-edge-006",
+            "diagram-020-edge-007",
+            "diagram-020-edge-008",
+            "diagram-020-edge-009",
+            "diagram-020-edge-010",
+            "diagram-020-edge-011",
+            "diagram-020-edge-012",
+            "diagram-020-edge-013",
+            "diagram-020-edge-014",
+            "diagram-020-edge-015",
+            "diagram-020-edge-016",
+            "diagram-020-edge-017",
+            "diagram-020-edge-018",
+            "diagram-020-edge-019",
+            "diagram-020-edge-020",
+            "diagram-020-edge-021",
+            "diagram-020-edge-022",
+            "diagram-020-edge-023",
+            "diagram-020-edge-024",
+            "diagram-020-edge-025",
+            "diagram-020-edge-026",
+            "diagram-020-edge-027",
+            "diagram-020-edge-028",
+            "diagram-020-edge-029",
+            "diagram-020-edge-030",
+            "diagram-020-edge-031",
+            "diagram-020-edge-032",
+            "diagram-020-edge-033",
+            "diagram-020-edge-034",
+            "diagram-020-edge-035"
+          ]
+        }
+      }
+    }
+  ]
+}

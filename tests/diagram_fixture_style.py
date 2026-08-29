@@ -105,17 +105,25 @@ def canonicalize_svg(content: str) -> str:
         name = _local_name(element)
         if name == "text":
             edge_label = element.get("data-edge-label") is not None
+            structural_group_title = (
+                element.get("data-group-title") is not None
+                and element.get("data-group-style-role") == "structural"
+            )
             element.set("font-family", "Microsoft YaHei, 微软雅黑, sans-serif")
             element.set("font-size", "14" if edge_label else "16")
-            element.set("fill", "#000000")
+            element.set("fill", "#666666" if structural_group_title else "#000000")
             if edge_label:
                 element.set("text-anchor", "middle")
                 element.set("dominant-baseline", "middle")
         if element is background or element in marker_shapes:
             continue
         if name in {"rect", "polygon", "ellipse", "circle", "line", "polyline"}:
+            structural_group_frame = (
+                element.get("data-group") is not None
+                and element.get("data-group-style-role") == "structural"
+            )
             element.set("fill", "none")
-            element.set("stroke", "#000000")
+            element.set("stroke", "#666666" if structural_group_frame else "#000000")
             element.set("stroke-width", "2")
         if (
             name == "path"

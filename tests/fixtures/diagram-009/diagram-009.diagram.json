@@ -1120,7 +1120,7 @@
           "arrowTarget": "cancel-release:top",
           "label": {
             "text": "主动取消／支付超时15分钟未付",
-            "x": 1394.0,
+            "x": 1398.8400000000001,
             "y": 3559.0,
             "fontSize": 14
           }

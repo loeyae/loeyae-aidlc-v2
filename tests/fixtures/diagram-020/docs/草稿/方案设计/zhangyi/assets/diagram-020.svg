@@ -1,0 +1,241 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1320" viewBox="0 0 2200 1320" role="img" aria-labelledby="diagram-020-title diagram-020-desc" data-diagram-id="diagram-020" data-diagram-type="flowchart">
+  <title id="diagram-020-title">图表 020｜搜索域运营流程</title>
+  <desc id="diagram-020-desc">运营经云Mall管理后台配置暗纹词和搜索热词，并在运营后台维护黑名单、白名单和排序；包含必填项校验、错误反馈、生效状态分支和配置管理流程。；保留的业务事实：来源 SVG 同时定义暗纹词、搜索热词、黑名单、白名单和排序管理；校验失败返回编辑，状态判断分别进入生效或失效。</desc>
+  <rect data-canvas-background="true" x="0" y="0" width="100%" height="100%" fill="#ffffff" stroke="none" />
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" viewBox="0 0 10 10" refX="10" refY="5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#000000" stroke="none" />
+    </marker>
+  </defs>
+  <g id="diagram-020-groups" data-layer="groups">
+    <rect class="group-box" x="20" y="200" width="530" height="900" rx="12" data-group="diagram-020-group-darkword" data-group-role="exclusive" fill="none" stroke="#000000" stroke-width="2" />
+    <text class="group-label" x="45" y="225" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">暗纹词配置流程</text>
+    <rect class="group-box" x="530" y="200" width="500" height="900" rx="12" data-group="diagram-020-group-hotword" data-group-role="exclusive" fill="none" stroke="#000000" stroke-width="2" />
+    <text class="group-label" x="555" y="225" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">搜索热词配置流程</text>
+    <rect class="group-box" x="1040" y="200" width="1120" height="700" rx="12" data-group="diagram-020-group-operation" data-group-role="exclusive" fill="none" stroke="#000000" stroke-width="2" />
+    <text class="group-label" x="1065" y="225" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">运营后台管理流程</text>
+  </g>
+  <g id="diagram-020-edges" data-layer="edges">
+    <path id="diagram-020-edge-001" class="edge" d="M1100 86V100H1200V120" data-edge="diagram-020-edge-001" data-from="diagram-020-node-operator" data-from-port="bottom" data-to="diagram-020-node-search-admin" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-search-admin:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-002" class="edge" d="M1050 148H950V200H750V230" data-edge="diagram-020-edge-002" data-from="diagram-020-node-search-admin" data-from-port="left" data-to="diagram-020-node-hotword-page" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-hotword-page:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-003" class="edge" d="M1350 148H1400V200H1470V230" data-edge="diagram-020-edge-003" data-from="diagram-020-node-search-admin" data-from-port="right" data-to="diagram-020-node-operation-admin" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-operation-admin:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-004" class="edge" d="M750 286V330" data-edge="diagram-020-edge-004" data-from="diagram-020-node-hotword-page" data-from-port="bottom" data-to="diagram-020-node-hotword-edit" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-hotword-edit:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-005" class="edge" d="M750 406V450" data-edge="diagram-020-edge-005" data-from="diagram-020-node-hotword-edit" data-from-port="bottom" data-to="diagram-020-node-required-check" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-required-check:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-006" class="edge" d="M620 515H580V630H620" data-edge="diagram-020-edge-006" data-from="diagram-020-node-required-check" data-from-port="left" data-to="diagram-020-node-validation-error" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-validation-error:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" data-edge-label="diagram-020-edge-006" />
+    <text class="edge-label" x="568.15" y="572.5" text-anchor="middle" data-edge-label="diagram-020-edge-006" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000" dominant-baseline="middle">否</text>
+    <path id="diagram-020-edge-007" class="edge" d="M540 655H510V368H570" data-edge="diagram-020-edge-007" data-from="diagram-020-node-validation-error" data-from-port="left" data-to="diagram-020-node-hotword-edit" data-to-port="left" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-hotword-edit:left" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" data-edge-label="diagram-020-edge-007" />
+    <text class="edge-label" x="486.6" y="511.5" text-anchor="middle" data-edge-label="diagram-020-edge-007" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000" dominant-baseline="middle">返回编辑</text>
+    <path id="diagram-020-edge-008" class="edge" d="M750 580V650" data-edge="diagram-020-edge-008" data-from="diagram-020-node-required-check" data-from-port="bottom" data-to="diagram-020-node-hotword-save" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-hotword-save:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" data-edge-label="diagram-020-edge-008" />
+    <text class="edge-label" x="775" y="615" text-anchor="middle" data-edge-label="diagram-020-edge-008" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000" dominant-baseline="middle">是</text>
+    <path id="diagram-020-edge-009" class="edge" d="M750 706V760" data-edge="diagram-020-edge-009" data-from="diagram-020-node-hotword-save" data-from-port="bottom" data-to="diagram-020-node-effective-check" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-effective-check:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-010" class="edge" d="M645 825H600V990H710V1020" data-edge="diagram-020-edge-010" data-from="diagram-020-node-effective-check" data-from-port="left" data-to="diagram-020-node-hotword-effective" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-hotword-effective:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" data-edge-label="diagram-020-edge-010" />
+    <text class="edge-label" x="588.15" y="907.5" text-anchor="middle" data-edge-label="diagram-020-edge-010" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000" dominant-baseline="middle">是</text>
+    <path id="diagram-020-edge-011" class="edge" d="M855 825H1000V990H960V1020" data-edge="diagram-020-edge-011" data-from="diagram-020-node-effective-check" data-from-port="right" data-to="diagram-020-node-hotword-inactive" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-hotword-inactive:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" data-edge-label="diagram-020-edge-011" />
+    <text class="edge-label" x="1011.85" y="907.5" text-anchor="middle" data-edge-label="diagram-020-edge-011" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000" dominant-baseline="middle">否</text>
+    <path id="diagram-020-edge-012" class="edge" d="M1320 258H1210V320V350" data-edge="diagram-020-edge-012" data-from="diagram-020-node-operation-admin" data-from-port="left" data-to="diagram-020-node-blacklist-manage" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-blacklist-manage:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-013" class="edge" d="M1470 286V320H1520V350" data-edge="diagram-020-edge-013" data-from="diagram-020-node-operation-admin" data-from-port="bottom" data-to="diagram-020-node-whitelist-manage" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-whitelist-manage:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-014" class="edge" d="M1620 258H1700V320H1870V350" data-edge="diagram-020-edge-014" data-from="diagram-020-node-operation-admin" data-from-port="right" data-to="diagram-020-node-sort-manage" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-sort-manage:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-015" class="edge" d="M1210 406V450" data-edge="diagram-020-edge-015" data-from="diagram-020-node-blacklist-manage" data-from-port="bottom" data-to="diagram-020-node-blacklist-select" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-blacklist-select:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-016" class="edge" d="M1210 506V550" data-edge="diagram-020-edge-016" data-from="diagram-020-node-blacklist-select" data-from-port="bottom" data-to="diagram-020-node-blacklist-edit" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-blacklist-edit:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-017" class="edge" d="M1210 606V650" data-edge="diagram-020-edge-017" data-from="diagram-020-node-blacklist-edit" data-from-port="bottom" data-to="diagram-020-node-blacklist-confirm" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-blacklist-confirm:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-018" class="edge" d="M1210 706V750" data-edge="diagram-020-edge-018" data-from="diagram-020-node-blacklist-confirm" data-from-port="bottom" data-to="diagram-020-node-blacklist-effective" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-blacklist-effective:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-019" class="edge" d="M1520 406V450" data-edge="diagram-020-edge-019" data-from="diagram-020-node-whitelist-manage" data-from-port="bottom" data-to="diagram-020-node-whitelist-select" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-whitelist-select:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-020" class="edge" d="M1520 506V550" data-edge="diagram-020-edge-020" data-from="diagram-020-node-whitelist-select" data-from-port="bottom" data-to="diagram-020-node-whitelist-edit" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-whitelist-edit:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-021" class="edge" d="M1520 606V650" data-edge="diagram-020-edge-021" data-from="diagram-020-node-whitelist-edit" data-from-port="bottom" data-to="diagram-020-node-whitelist-confirm" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-whitelist-confirm:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-022" class="edge" d="M1520 706V750" data-edge="diagram-020-edge-022" data-from="diagram-020-node-whitelist-confirm" data-from-port="bottom" data-to="diagram-020-node-whitelist-effective" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-whitelist-effective:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-023" class="edge" d="M1870 406V450" data-edge="diagram-020-edge-023" data-from="diagram-020-node-sort-manage" data-from-port="bottom" data-to="diagram-020-node-sort-drag" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-sort-drag:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-024" class="edge" d="M1870 506V550" data-edge="diagram-020-edge-024" data-from="diagram-020-node-sort-drag" data-from-port="bottom" data-to="diagram-020-node-sort-save" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-sort-save:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-025" class="edge" d="M1870 606V650" data-edge="diagram-020-edge-025" data-from="diagram-020-node-sort-save" data-from-port="bottom" data-to="diagram-020-node-sort-effective" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-sort-effective:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-026" class="edge" d="M1100 86V100H800V120" data-edge="diagram-020-edge-026" data-from="diagram-020-node-operator" data-from-port="bottom" data-to="diagram-020-node-cloud-admin" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-cloud-admin:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-027" class="edge" d="M800 176V200H230V230" data-edge="diagram-020-edge-027" data-from="diagram-020-node-cloud-admin" data-from-port="bottom" data-to="diagram-020-node-darkword-page" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-darkword-page:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-028" class="edge" d="M230 286V330" data-edge="diagram-020-edge-028" data-from="diagram-020-node-darkword-page" data-from-port="bottom" data-to="diagram-020-node-darkword-edit" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-darkword-edit:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-029" class="edge" d="M230 406V450" data-edge="diagram-020-edge-029" data-from="diagram-020-node-darkword-edit" data-from-port="bottom" data-to="diagram-020-node-darkword-check" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-darkword-check:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-030" class="edge" d="M100 515H60V630H120" data-edge="diagram-020-edge-030" data-from="diagram-020-node-darkword-check" data-from-port="left" data-to="diagram-020-node-darkword-error" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-darkword-error:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" data-edge-label="diagram-020-edge-030" />
+    <text class="edge-label" x="48.15" y="572.5" text-anchor="middle" data-edge-label="diagram-020-edge-030" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000" dominant-baseline="middle">否</text>
+    <path id="diagram-020-edge-031" class="edge" d="M40 655H10V368H50" data-edge="diagram-020-edge-031" data-from="diagram-020-node-darkword-error" data-from-port="left" data-to="diagram-020-node-darkword-edit" data-to-port="left" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-darkword-edit:left" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" data-edge-label="diagram-020-edge-031" />
+    <text class="edge-label" x="33.4" y="511.5" text-anchor="middle" data-edge-label="diagram-020-edge-031" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000" dominant-baseline="middle">返回编辑</text>
+    <path id="diagram-020-edge-032" class="edge" d="M230 580V650" data-edge="diagram-020-edge-032" data-from="diagram-020-node-darkword-check" data-from-port="bottom" data-to="diagram-020-node-darkword-save" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-darkword-save:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" data-edge-label="diagram-020-edge-032" />
+    <text class="edge-label" x="255" y="615" text-anchor="middle" data-edge-label="diagram-020-edge-032" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000" dominant-baseline="middle">是</text>
+    <path id="diagram-020-edge-033" class="edge" d="M230 706V760" data-edge="diagram-020-edge-033" data-from="diagram-020-node-darkword-save" data-from-port="bottom" data-to="diagram-020-node-darkword-status" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-darkword-status:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+    <path id="diagram-020-edge-034" class="edge" d="M125 825H80V990H190V1020" data-edge="diagram-020-edge-034" data-from="diagram-020-node-darkword-status" data-from-port="left" data-to="diagram-020-node-darkword-effective" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-darkword-effective:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" data-edge-label="diagram-020-edge-034" />
+    <text class="edge-label" x="68.15" y="907.5" text-anchor="middle" data-edge-label="diagram-020-edge-034" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000" dominant-baseline="middle">是</text>
+    <path id="diagram-020-edge-035" class="edge" d="M335 825H480V990H440V1020" data-edge="diagram-020-edge-035" data-from="diagram-020-node-darkword-status" data-from-port="right" data-to="diagram-020-node-darkword-inactive" data-to-port="top" data-direction="-&gt;&gt;" data-kind="directed" data-source-status="blueprint-supported" data-arrow-target="diagram-020-node-darkword-inactive:top" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" data-edge-label="diagram-020-edge-035" />
+    <text class="edge-label" x="491.85" y="907.5" text-anchor="middle" data-edge-label="diagram-020-edge-035" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000" dominant-baseline="middle">否</text>
+  </g>
+  <g id="diagram-020-nodes" data-layer="nodes">
+    <g data-node-group="diagram-020-node-operator">
+      <rect id="diagram-020-node-operator" class="actor" x="950" y="30" width="300" height="56" rx="9" data-node="diagram-020-node-operator" data-node-shape="rect" data-role="actor" data-source-status="blueprint-supported" data-label="运营" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1100" y="63" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">运营</text>
+    </g>
+    <g data-node-group="diagram-020-node-cloud-admin">
+      <rect id="diagram-020-node-cloud-admin" class="participant" x="650" y="120" width="300" height="56" rx="9" data-node="diagram-020-node-cloud-admin" data-node-shape="rect" data-role="admin" data-source-status="blueprint-supported" data-label="云Mall管理后台" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="800" y="153" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">云Mall管理后台</text>
+    </g>
+    <g data-node-group="diagram-020-node-search-admin">
+      <rect id="diagram-020-node-search-admin" class="participant" x="1050" y="120" width="300" height="56" rx="9" data-node="diagram-020-node-search-admin" data-node-shape="rect" data-role="admin" data-source-status="blueprint-supported" data-label="搜索管理后台" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1200" y="153" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">搜索管理后台</text>
+    </g>
+    <g data-node-group="diagram-020-node-darkword-page">
+      <rect id="diagram-020-node-darkword-page" class="activity" x="80" y="230" width="300" height="56" rx="9" data-node="diagram-020-node-darkword-page" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="暗纹词配置页面" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="230" y="263" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">暗纹词配置页面</text>
+    </g>
+    <g data-node-group="diagram-020-node-darkword-edit">
+      <rect id="diagram-020-node-darkword-edit" class="activity" x="50" y="330" width="360" height="76" rx="9" data-node="diagram-020-node-darkword-edit" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="新增/编辑/删除暗纹词" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="230" y="373" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">新增/编辑/删除暗纹词</text>
+    </g>
+    <g data-node-group="diagram-020-node-darkword-check">
+      <polygon id="diagram-020-node-darkword-check" class="decision" points="230,450 360,515 230,580 100,515" data-node="diagram-020-node-darkword-check" data-node-shape="diamond" data-role="decision" data-source-status="blueprint-supported" data-label="必填项校验通过?" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="230" y="520" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">必填项校验通过?</text>
+    </g>
+    <g data-node-group="diagram-020-node-darkword-error">
+      <rect id="diagram-020-node-darkword-error" class="activity" x="40" y="630" width="160" height="50" rx="9" data-node="diagram-020-node-darkword-error" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="提示错误位置" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="120" y="660" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">提示错误位置</text>
+    </g>
+    <g data-node-group="diagram-020-node-darkword-save">
+      <rect id="diagram-020-node-darkword-save" class="activity" x="140" y="650" width="180" height="56" rx="9" data-node="diagram-020-node-darkword-save" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="保存" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="230" y="683" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">保存</text>
+    </g>
+    <g data-node-group="diagram-020-node-darkword-status">
+      <polygon id="diagram-020-node-darkword-status" class="decision" points="230,760 335,825 230,890 125,825" data-node="diagram-020-node-darkword-status" data-node-shape="diamond" data-role="decision" data-source-status="blueprint-supported" data-label="状态是否生效?" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="230" y="830" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">状态是否生效?</text>
+    </g>
+    <g data-node-group="diagram-020-node-darkword-effective">
+      <rect id="diagram-020-node-darkword-effective" class="activity" x="80" y="1020" width="220" height="56" rx="9" data-node="diagram-020-node-darkword-effective" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="暗纹词生效" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="190" y="1053" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">暗纹词生效</text>
+    </g>
+    <g data-node-group="diagram-020-node-darkword-inactive">
+      <rect id="diagram-020-node-darkword-inactive" class="activity" x="330" y="1020" width="220" height="56" rx="9" data-node="diagram-020-node-darkword-inactive" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="暗纹词失效" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="440" y="1053" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">暗纹词失效</text>
+    </g>
+    <g data-node-group="diagram-020-node-hotword-page">
+      <rect id="diagram-020-node-hotword-page" class="activity" x="600" y="230" width="300" height="56" rx="9" data-node="diagram-020-node-hotword-page" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="搜索热词配置页面" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="750" y="263" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">搜索热词配置页面</text>
+    </g>
+    <g data-node-group="diagram-020-node-hotword-edit">
+      <rect id="diagram-020-node-hotword-edit" class="activity" x="570" y="330" width="360" height="76" rx="9" data-node="diagram-020-node-hotword-edit" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="新增/编辑/删除搜索热词" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="750" y="373" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">新增/编辑/删除搜索热词</text>
+    </g>
+    <g data-node-group="diagram-020-node-required-check">
+      <polygon id="diagram-020-node-required-check" class="decision" points="750,450 880,515 750,580 620,515" data-node="diagram-020-node-required-check" data-node-shape="diamond" data-role="decision" data-source-status="blueprint-supported" data-label="必填项校验通过?" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="750" y="520" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">必填项校验通过?</text>
+    </g>
+    <g data-node-group="diagram-020-node-validation-error">
+      <rect id="diagram-020-node-validation-error" class="activity" x="540" y="630" width="160" height="50" rx="9" data-node="diagram-020-node-validation-error" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="提示错误位置" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="620" y="660" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">提示错误位置</text>
+    </g>
+    <g data-node-group="diagram-020-node-hotword-save">
+      <rect id="diagram-020-node-hotword-save" class="activity" x="660" y="650" width="180" height="56" rx="9" data-node="diagram-020-node-hotword-save" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="保存" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="750" y="683" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">保存</text>
+    </g>
+    <g data-node-group="diagram-020-node-effective-check">
+      <polygon id="diagram-020-node-effective-check" class="decision" points="750,760 855,825 750,890 645,825" data-node="diagram-020-node-effective-check" data-node-shape="diamond" data-role="decision" data-source-status="blueprint-supported" data-label="状态是否生效?" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="750" y="830" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">状态是否生效?</text>
+    </g>
+    <g data-node-group="diagram-020-node-hotword-effective">
+      <rect id="diagram-020-node-hotword-effective" class="activity" x="600" y="1020" width="220" height="56" rx="9" data-node="diagram-020-node-hotword-effective" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="搜索热词生效" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="710" y="1053" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">搜索热词生效</text>
+    </g>
+    <g data-node-group="diagram-020-node-hotword-inactive">
+      <rect id="diagram-020-node-hotword-inactive" class="activity" x="850" y="1020" width="220" height="56" rx="9" data-node="diagram-020-node-hotword-inactive" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="搜索热词失效" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="960" y="1053" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">搜索热词失效</text>
+    </g>
+    <g data-node-group="diagram-020-node-operation-admin">
+      <rect id="diagram-020-node-operation-admin" class="activity" x="1320" y="230" width="300" height="56" rx="9" data-node="diagram-020-node-operation-admin" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="运营后台页面" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1470" y="263" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">运营后台页面</text>
+    </g>
+    <g data-node-group="diagram-020-node-blacklist-manage">
+      <rect id="diagram-020-node-blacklist-manage" class="activity" x="1120" y="350" width="180" height="56" rx="9" data-node="diagram-020-node-blacklist-manage" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="黑名单管理" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1210" y="383" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">黑名单管理</text>
+    </g>
+    <g data-node-group="diagram-020-node-blacklist-select">
+      <rect id="diagram-020-node-blacklist-select" class="activity" x="1120" y="450" width="180" height="56" rx="9" data-node="diagram-020-node-blacklist-select" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="选中商品" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1210" y="483" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">选中商品</text>
+    </g>
+    <g data-node-group="diagram-020-node-blacklist-edit">
+      <rect id="diagram-020-node-blacklist-edit" class="activity" x="1090" y="550" width="240" height="56" rx="9" data-node="diagram-020-node-blacklist-edit" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="添加/移除黑名单" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1210" y="583" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">添加/移除黑名单</text>
+    </g>
+    <g data-node-group="diagram-020-node-blacklist-confirm">
+      <rect id="diagram-020-node-blacklist-confirm" class="activity" x="1135" y="650" width="150" height="56" rx="9" data-node="diagram-020-node-blacklist-confirm" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="确定" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1210" y="683" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">确定</text>
+    </g>
+    <g data-node-group="diagram-020-node-blacklist-effective">
+      <rect id="diagram-020-node-blacklist-effective" class="activity" x="1135" y="750" width="150" height="56" rx="9" data-node="diagram-020-node-blacklist-effective" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="生效" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1210" y="783" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">生效</text>
+    </g>
+    <g data-node-group="diagram-020-node-whitelist-manage">
+      <rect id="diagram-020-node-whitelist-manage" class="activity" x="1430" y="350" width="180" height="56" rx="9" data-node="diagram-020-node-whitelist-manage" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="白名单管理" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1520" y="383" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">白名单管理</text>
+    </g>
+    <g data-node-group="diagram-020-node-whitelist-select">
+      <rect id="diagram-020-node-whitelist-select" class="activity" x="1430" y="450" width="180" height="56" rx="9" data-node="diagram-020-node-whitelist-select" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="选中商品" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1520" y="483" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">选中商品</text>
+    </g>
+    <g data-node-group="diagram-020-node-whitelist-edit">
+      <rect id="diagram-020-node-whitelist-edit" class="activity" x="1400" y="550" width="240" height="56" rx="9" data-node="diagram-020-node-whitelist-edit" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="添加/移除白名单" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1520" y="583" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">添加/移除白名单</text>
+    </g>
+    <g data-node-group="diagram-020-node-whitelist-confirm">
+      <rect id="diagram-020-node-whitelist-confirm" class="activity" x="1445" y="650" width="150" height="56" rx="9" data-node="diagram-020-node-whitelist-confirm" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="确定" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1520" y="683" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">确定</text>
+    </g>
+    <g data-node-group="diagram-020-node-whitelist-effective">
+      <rect id="diagram-020-node-whitelist-effective" class="activity" x="1445" y="750" width="150" height="56" rx="9" data-node="diagram-020-node-whitelist-effective" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="生效" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1520" y="783" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">生效</text>
+    </g>
+    <g data-node-group="diagram-020-node-sort-manage">
+      <rect id="diagram-020-node-sort-manage" class="activity" x="1780" y="350" width="180" height="56" rx="9" data-node="diagram-020-node-sort-manage" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="排序管理" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1870" y="383" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">排序管理</text>
+    </g>
+    <g data-node-group="diagram-020-node-sort-drag">
+      <rect id="diagram-020-node-sort-drag" class="activity" x="1750" y="450" width="240" height="56" rx="9" data-node="diagram-020-node-sort-drag" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="拖拽商品重新排序" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1870" y="483" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">拖拽商品重新排序</text>
+    </g>
+    <g data-node-group="diagram-020-node-sort-save">
+      <rect id="diagram-020-node-sort-save" class="activity" x="1815" y="550" width="110" height="56" rx="9" data-node="diagram-020-node-sort-save" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="保存" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1870" y="583" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">保存</text>
+    </g>
+    <g data-node-group="diagram-020-node-sort-effective">
+      <rect id="diagram-020-node-sort-effective" class="activity" x="1815" y="650" width="110" height="56" rx="9" data-node="diagram-020-node-sort-effective" data-node-shape="rect" data-role="activity" data-source-status="blueprint-supported" data-label="生效" fill="none" stroke="#000000" stroke-width="2" />
+      <text class="node-label" x="1870" y="683" text-anchor="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">生效</text>
+    </g>
+  </g>
+  <g id="diagram-020-arrows" data-layer="arrows">
+    </g>
+  <path data-edge-arrow="diagram-020-edge-001" data-edge="diagram-020-edge-001" data-arrow-target="diagram-020-node-search-admin:top" d="M 1200 120 L 1195 110 L 1205 110 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-002" data-edge="diagram-020-edge-002" data-arrow-target="diagram-020-node-hotword-page:top" d="M 750 230 L 745 220 L 755 220 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-003" data-edge="diagram-020-edge-003" data-arrow-target="diagram-020-node-operation-admin:top" d="M 1470 230 L 1465 220 L 1475 220 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-004" data-edge="diagram-020-edge-004" data-arrow-target="diagram-020-node-hotword-edit:top" d="M 750 330 L 745 320 L 755 320 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-005" data-edge="diagram-020-edge-005" data-arrow-target="diagram-020-node-required-check:top" d="M 750 450 L 745 440 L 755 440 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-006" data-edge="diagram-020-edge-006" data-arrow-target="diagram-020-node-validation-error:top" d="M 620 630 L 615 620 L 625 620 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-007" data-edge="diagram-020-edge-007" data-arrow-target="diagram-020-node-hotword-edit:left" d="M 570 368 L 560 363 L 560 373 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-008" data-edge="diagram-020-edge-008" data-arrow-target="diagram-020-node-hotword-save:top" d="M 750 650 L 745 640 L 755 640 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-009" data-edge="diagram-020-edge-009" data-arrow-target="diagram-020-node-effective-check:top" d="M 750 760 L 745 750 L 755 750 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-010" data-edge="diagram-020-edge-010" data-arrow-target="diagram-020-node-hotword-effective:top" d="M 710 1020 L 705 1010 L 715 1010 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-011" data-edge="diagram-020-edge-011" data-arrow-target="diagram-020-node-hotword-inactive:top" d="M 960 1020 L 955 1010 L 965 1010 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-012" data-edge="diagram-020-edge-012" data-arrow-target="diagram-020-node-blacklist-manage:top" d="M 1210 350 L 1205 340 L 1215 340 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-013" data-edge="diagram-020-edge-013" data-arrow-target="diagram-020-node-whitelist-manage:top" d="M 1520 350 L 1515 340 L 1525 340 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-014" data-edge="diagram-020-edge-014" data-arrow-target="diagram-020-node-sort-manage:top" d="M 1870 350 L 1865 340 L 1875 340 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-015" data-edge="diagram-020-edge-015" data-arrow-target="diagram-020-node-blacklist-select:top" d="M 1210 450 L 1205 440 L 1215 440 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-016" data-edge="diagram-020-edge-016" data-arrow-target="diagram-020-node-blacklist-edit:top" d="M 1210 550 L 1205 540 L 1215 540 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-017" data-edge="diagram-020-edge-017" data-arrow-target="diagram-020-node-blacklist-confirm:top" d="M 1210 650 L 1205 640 L 1215 640 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-018" data-edge="diagram-020-edge-018" data-arrow-target="diagram-020-node-blacklist-effective:top" d="M 1210 750 L 1205 740 L 1215 740 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-019" data-edge="diagram-020-edge-019" data-arrow-target="diagram-020-node-whitelist-select:top" d="M 1520 450 L 1515 440 L 1525 440 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-020" data-edge="diagram-020-edge-020" data-arrow-target="diagram-020-node-whitelist-edit:top" d="M 1520 550 L 1515 540 L 1525 540 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-021" data-edge="diagram-020-edge-021" data-arrow-target="diagram-020-node-whitelist-confirm:top" d="M 1520 650 L 1515 640 L 1525 640 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-022" data-edge="diagram-020-edge-022" data-arrow-target="diagram-020-node-whitelist-effective:top" d="M 1520 750 L 1515 740 L 1525 740 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-023" data-edge="diagram-020-edge-023" data-arrow-target="diagram-020-node-sort-drag:top" d="M 1870 450 L 1865 440 L 1875 440 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-024" data-edge="diagram-020-edge-024" data-arrow-target="diagram-020-node-sort-save:top" d="M 1870 550 L 1865 540 L 1875 540 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-025" data-edge="diagram-020-edge-025" data-arrow-target="diagram-020-node-sort-effective:top" d="M 1870 650 L 1865 640 L 1875 640 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-026" data-edge="diagram-020-edge-026" data-arrow-target="diagram-020-node-cloud-admin:top" d="M 800 120 L 795 110 L 805 110 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-027" data-edge="diagram-020-edge-027" data-arrow-target="diagram-020-node-darkword-page:top" d="M 230 230 L 225 220 L 235 220 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-028" data-edge="diagram-020-edge-028" data-arrow-target="diagram-020-node-darkword-edit:top" d="M 230 330 L 225 320 L 235 320 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-029" data-edge="diagram-020-edge-029" data-arrow-target="diagram-020-node-darkword-check:top" d="M 230 450 L 225 440 L 235 440 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-030" data-edge="diagram-020-edge-030" data-arrow-target="diagram-020-node-darkword-error:top" d="M 120 630 L 115 620 L 125 620 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-031" data-edge="diagram-020-edge-031" data-arrow-target="diagram-020-node-darkword-edit:left" d="M 50 368 L 40 363 L 40 373 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-032" data-edge="diagram-020-edge-032" data-arrow-target="diagram-020-node-darkword-save:top" d="M 230 650 L 225 640 L 235 640 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-033" data-edge="diagram-020-edge-033" data-arrow-target="diagram-020-node-darkword-status:top" d="M 230 760 L 225 750 L 235 750 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-034" data-edge="diagram-020-edge-034" data-arrow-target="diagram-020-node-darkword-effective:top" d="M 190 1020 L 185 1010 L 195 1010 Z" fill="#000000" stroke="none" />
+  <path data-edge-arrow="diagram-020-edge-035" data-edge="diagram-020-edge-035" data-arrow-target="diagram-020-node-darkword-inactive:top" d="M 440 1020 L 435 1010 L 445 1010 Z" fill="#000000" stroke="none" />
+</svg>

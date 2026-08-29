@@ -8,7 +8,7 @@
     </marker>
   </defs>
   <g data-node="choose-fulfillment-mode" data-node-shape="diamond">
-    <polygon points="580,60 680,110 580,160 480,110" fill="none" stroke="#000000" stroke-width="2" />
+    <polygon points="580,55 680,110 580,165 480,110" fill="none" stroke="#000000" stroke-width="2" />
     <text data-text-id="node-choose-fulfillment-mode" x="580" y="115" text-anchor="middle" font-size="16" font-family="Microsoft YaHei, 微软雅黑, sans-serif" fill="#000000">选择履约模式</text>
   </g>
   <g data-node="pickup-store" data-node-shape="rect">
@@ -28,7 +28,7 @@
     <text data-text-id="node-delivery-store" x="860" y="276" text-anchor="middle" font-size="16" font-family="Microsoft YaHei, 微软雅黑, sans-serif" fill="#000000">配送定店</text>
   </g>
   <g data-node="delivery-store-success" data-node-shape="diamond">
-    <polygon points="860,380 960,440 860,500 760,440" fill="none" stroke="#000000" stroke-width="2" />
+    <polygon points="860,350 960,440 860,530 760,440" fill="none" stroke="#000000" stroke-width="2" />
     <text data-text-id="node-delivery-store-success" x="860" y="445" text-anchor="middle" font-size="16" font-family="Microsoft YaHei, 微软雅黑, sans-serif" fill="#000000">配送定店成功？</text>
   </g>
   <g data-node="show-delivery-products" data-node-shape="rect">
@@ -53,8 +53,8 @@
   <path data-edge-arrow="pickup-store-products" data-edge="pickup-store-products" data-arrow-target="show-pickup-products:top" d="M335 370 L340 380 L345 370" fill="#000000" />
   <path data-edge="pickup-products-switch" data-from="show-pickup-products" data-from-port="bottom" data-to="switch-pickup-store" data-to-port="top" d="M340 440 L340 520" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
   <path data-edge-arrow="pickup-products-switch" data-edge="pickup-products-switch" data-arrow-target="switch-pickup-store:top" d="M335 510 L340 520 L345 510" fill="#000000" />
-  <path data-edge="delivery-store-check" data-from="delivery-store" data-from-port="bottom" data-to="delivery-store-success" data-to-port="top" d="M860 300 L860 380" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-  <path data-edge-arrow="delivery-store-check" data-edge="delivery-store-check" data-arrow-target="delivery-store-success:top" d="M855 370 L860 380 L865 370" fill="#000000" />
+  <path data-edge="delivery-store-check" data-from="delivery-store" data-from-port="bottom" data-to="delivery-store-success" data-to-port="top" d="M860 300 L860 350" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+  <path data-edge-arrow="delivery-store-check" data-edge="delivery-store-check" data-arrow-target="delivery-store-success:top" d="M855 340 L860 350 L865 340" fill="#000000" />
   <path data-edge="delivery-success" data-from="delivery-store-success" data-from-port="right" data-to="show-delivery-products" data-to-port="top" data-edge-label="delivery-success" d="M960 440 L1100 440 L1100 560" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
   <path data-edge-arrow="delivery-success" data-edge="delivery-success" data-arrow-target="show-delivery-products:top" d="M1095 550 L1100 560 L1105 550" fill="#000000" />
   <text data-text-id="label-delivery-success" x="1030" y="420" text-anchor="middle" font-size="14" data-edge-label="delivery-success" font-family="Microsoft YaHei, 微软雅黑, sans-serif" fill="#000000" dominant-baseline="middle">成功</text>

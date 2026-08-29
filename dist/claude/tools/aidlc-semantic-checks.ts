@@ -4,7 +4,7 @@ import { spawnSync } from "child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, resolve } from "path";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
-import { DIAGRAM_VISUAL_STYLE, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
+import { DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
 import {
   ExpectedContract,
   expectedContractPath,
@@ -443,9 +443,8 @@ function diagramContract(): Record<string, unknown> {
     const expectedFontSize = edgeLabel ? DIAGRAM_VISUAL_STYLE.edgeLabelFontSize : DIAGRAM_VISUAL_STYLE.frameFontSize;
     const fontSize = label.fontSize === undefined ? expectedFontSize : requireFinite(label.fontSize, `${field}.fontSize`);
     if (fontSize !== expectedFontSize) fail(`FONT_STYLE: ${field}.fontSize must be ${expectedFontSize}`);
-    const width = Math.max(1, ...lines.map((line) => line.length * fontSize * 0.55));
-    const height = lines.length * fontSize * 1.2;
-    return { left: x - width / 2, top: y - height / 2, right: x + width / 2, bottom: y + height / 2 };
+    const bounds = diagramTextBounds(lines, fontSize);
+    return { left: x - bounds.width / 2, top: y - bounds.height / 2, right: x + bounds.width / 2, bottom: y + bounds.height / 2 };
   };
   const layoutExceptionIds = (layout: Record<string, any>, field: string): Set<string> => {
     const exceptions = layout[field] === undefined ? [] : layout[field];
@@ -699,9 +698,9 @@ function diagramContract(): Record<string, unknown> {
         const labelLines = Array.isArray(rawLabel) ? rawLabel.map((line: unknown) => requireString(line, `diagram ${id} node ${nodeId}.label`)) : [requireString(rawLabel, `diagram ${id} node ${nodeId}.label`)];
         const nodeFontSize = node.fontSize === undefined ? DIAGRAM_VISUAL_STYLE.frameFontSize : requireFinite(node.fontSize, `diagram ${id} node ${nodeId}.fontSize`);
         if (nodeFontSize !== DIAGRAM_VISUAL_STYLE.frameFontSize) fail(`FONT_STYLE: diagram ${id} node ${nodeId}.fontSize must be ${DIAGRAM_VISUAL_STYLE.frameFontSize}`);
-        const textWidth = Math.max(...labelLines.map((line: string) => line.length * nodeFontSize * 0.55));
-        const textHeight = labelLines.length * nodeFontSize * 1.2;
-        if (textWidth + 32 > node.width || textHeight + 24 > node.height) fail(`LABEL_OVERFLOW: diagram ${id} node ${nodeId} label does not fit its node`);
+        const textWidth = Math.max(...labelLines.map((line: string) => measureDiagramText(line, nodeFontSize)));
+        const textHeight = labelLines.length * DIAGRAM_LAYOUT_METRICS.frameLineHeight;
+        if (textWidth + DIAGRAM_LAYOUT_METRICS.nodeHorizontalPadding * 2 > node.width || textHeight + DIAGRAM_LAYOUT_METRICS.nodeVerticalPadding * 2 > node.height) fail(`LABEL_OVERFLOW: diagram ${id} node ${nodeId} label does not fit its node`);
         if (node.shape === "diamond" && textWidth / node.width + textHeight / node.height > 0.70) fail(`LABEL_OVERFLOW: diagram ${id} decision ${nodeId} label exceeds the diamond readable area`);
       }
 
@@ -727,6 +726,11 @@ function diagramContract(): Record<string, unknown> {
         if (!ports.has(edge.fromPort) || !ports.has(edge.toPort) || !edgeKinds.has(edge.kind || "directed")) fail(`diagram ${id} edge ${edgeId} has invalid port or kind`);
         for (const offset of ["fromPortOffset", "toPortOffset"]) if (edge[offset] !== undefined) requireFinite(edge[offset], `diagram ${id} edge ${edgeId}.${offset}`);
         if ((nodes.get(edge.from)!.shape === "diamond" && Number(edge.fromPortOffset || 0) !== 0) || (nodes.get(edge.to)!.shape === "diamond" && Number(edge.toPortOffset || 0) !== 0)) fail(`PORT_MISMATCH: diagram ${id} edge ${edgeId} cannot offset a diamond vertex`);
+        for (const [node, port, offset, field] of [[nodes.get(edge.from)!, edge.fromPort, Number(edge.fromPortOffset || 0), "fromPortOffset"], [nodes.get(edge.to)!, edge.toPort, Number(edge.toPortOffset || 0), "toPortOffset"]] as const) {
+          if (node.shape === "diamond") continue;
+          const maximumOffset = port === "top" || port === "bottom" ? node.width / 2 : node.height / 2;
+          if (Math.abs(offset) > maximumOffset) fail(`PORT_MISMATCH: diagram ${id} edge ${edgeId}.${field} leaves the ${port} side of its rectangular node boundary`);
+        }
         if (!Array.isArray(edge.points) || edge.points.length < 2 || !edge.points.every((point: unknown) => Array.isArray(point) && point.length === 2 && point.every((value) => typeof value === "number" && Number.isFinite(value)))) fail(`MIGRATION_REQUIRED: diagram ${id} edge ${edgeId} lacks complete points`);
         const points = edge.points as unknown[];
         if (points.some((point) => (point as number[])[0] < 0 || (point as number[])[1] < 0 || (point as number[])[0] > diagram.canvas.width || (point as number[])[1] > diagram.canvas.height)) fail(`CANVAS_CLIPPING: diagram ${id} edge ${edgeId} has points outside the canvas`);
@@ -1239,10 +1243,13 @@ function diagramContract(): Record<string, unknown> {
       }
 
       const groups = new Map<string, Record<string, any>>();
+      const groupStyleRoles = new Set(["structural", "business-boundary"]);
       for (const group of diagram.groups || []) {
         const groupId = requireString(group.id, `diagram ${id} group.id`);
         if (groups.has(groupId) || nodes.has(groupId) || edges.has(groupId) || !groupTypes.has(group.semanticType)) fail(`MIGRATION_REQUIRED: diagram ${id} group ${groupId} lacks valid semanticType`);
         if (group.tone !== undefined) fail(`VISUAL_STYLE: diagram ${id} group ${groupId} must not define tone`);
+        requireString(group.label, `diagram ${id} group ${groupId}.label`);
+        if (!groupStyleRoles.has(group.styleRole)) fail(`MIGRATION_REQUIRED: diagram ${id} group ${groupId} lacks valid styleRole`);
         if (!Array.isArray(group.members)) fail(`MIGRATION_REQUIRED: diagram ${id} group ${groupId} lacks members`);
         if (group.semanticType === "nested" && typeof group.parent !== "string") fail(`diagram ${id} nested group ${groupId} lacks parent`);
         if (group.semanticType !== "nested" && group.parent !== undefined) fail(`diagram ${id} non-nested group ${groupId} must not declare parent`);
@@ -1281,12 +1288,30 @@ function diagramContract(): Record<string, unknown> {
       for (const [groupId, group] of groups) {
         const rectangle = groupRectangles.get(groupId);
         if (!rectangle) continue;
+        const groupWidth = rectangle.right - rectangle.left;
+        if (measureDiagramText(group.label, DIAGRAM_VISUAL_STYLE.frameFontSize) + DIAGRAM_LAYOUT_METRICS.groupTitleHorizontalPadding * 2 > groupWidth) fail(`GROUP_TITLE_OVERFLOW: diagram ${id} group ${groupId} label does not fit its title area`);
+
+        const memberIds = new Set(group.members.map(String));
+        const memberRectangles: Rectangle[] = [];
         for (const member of group.members) {
           const memberRectangle = nodeRectangles.get(member);
           if (!memberRectangle || memberRectangle.left < rectangle.left || memberRectangle.top < rectangle.top || memberRectangle.right > rectangle.right || memberRectangle.bottom > rectangle.bottom) fail(`GROUP_CONTAINMENT: diagram ${id} group ${groupId} does not contain member ${member}`);
-          const padding = Math.min(memberRectangle.left - rectangle.left, memberRectangle.top - rectangle.top, rectangle.right - memberRectangle.right, rectangle.bottom - memberRectangle.bottom);
-          if (padding < 24) fail(`INSUFFICIENT_GAP: diagram ${id} group ${groupId} has less than 24 units of member padding`);
+          memberRectangles.push(memberRectangle);
         }
+        if (memberRectangles.length === 0) continue;
+
+        const internalEdges = edgeEntries.filter(([, edge]) => memberIds.has(String(edge.from)) && memberIds.has(String(edge.to)));
+        const contentRectangles = [...memberRectangles, ...internalEdges.flatMap(([edgeId]) => {
+          const label = labelRectangles.get(edgeId);
+          return label ? [label] : [];
+        })];
+        const internalPoints = internalEdges.flatMap(([, edge]) => edge.points as [number, number][]);
+        const contentLeft = Math.min(...contentRectangles.map((entry) => entry.left), ...internalPoints.map((point) => point[0]));
+        const contentTop = Math.min(...contentRectangles.map((entry) => entry.top), ...internalPoints.map((point) => point[1]));
+        const contentRight = Math.max(...contentRectangles.map((entry) => entry.right), ...internalPoints.map((point) => point[0]));
+        const contentBottom = Math.max(...contentRectangles.map((entry) => entry.bottom), ...internalPoints.map((point) => point[1]));
+        if (contentTop - rectangle.top < DIAGRAM_LAYOUT_METRICS.groupHeaderHeight) fail(`GROUP_HEADER_CLEARANCE: diagram ${id} group ${groupId} content intrudes into the reserved title area`);
+        if (contentLeft - rectangle.left < DIAGRAM_LAYOUT_METRICS.groupHorizontalPadding || rectangle.right - contentRight < DIAGRAM_LAYOUT_METRICS.groupHorizontalPadding || rectangle.bottom - contentBottom < DIAGRAM_LAYOUT_METRICS.groupBottomPadding) fail(`GROUP_CAPACITY: diagram ${id} group ${groupId} lacks required content padding or contains an internal route outside its capacity`);
       }
       const edgePoints = edgeEntries.flatMap(([, edge]) => edge.points as [number, number][]);
       const businessRectangles = [...nodeRectangles.values(), ...groupRectangles.values(), ...labelRectangles.values()];
@@ -1387,6 +1412,15 @@ function diagramContract(): Record<string, unknown> {
         if (firstNote < lastLegend || firstNote < firstLegend) fail(`ANNOTATION_ORDER: diagram ${id} SVG annotations must follow the legend`);
       }
       if (diagram.groups?.length && !diagram.groups.every((group: Record<string, any>) => svg.includes(`group-${group.id}`))) fail(`diagram ${id} SVG group mapping is incomplete`);
+      for (const [groupId, group] of groups) {
+        const frame = [...svg.matchAll(/<[^>]*\bdata-group=["']([^"']+)["'][^>]*>/g)].map((match) => ({ id: match[1], tag: match[0] })).find((entry) => entry.id === groupId);
+        if (!frame) fail(`GROUP_MAPPING: diagram ${id} SVG frame is missing for group ${groupId}`);
+        const role = frame.tag.match(/\bdata-group-role=["']([^"']+)["']/i)?.[1];
+        const styleRole = frame.tag.match(/\bdata-group-style-role=["']([^"']+)["']/i)?.[1];
+        if (role !== group.semanticType || styleRole !== group.styleRole) fail(`GROUP_STYLE: diagram ${id} SVG frame does not match group ${groupId} semanticType/styleRole`);
+        const titles = [...svg.matchAll(/<text\b[^>]*\bdata-group-title=["']([^"']+)["'][^>]*>/g)].map((match) => ({ id: match[1], tag: match[0] })).filter((entry) => entry.id === groupId);
+        if (titles.length !== 1 || titles[0].tag.match(/\bdata-group-style-role=["']([^"']+)["']/i)?.[1] !== group.styleRole) fail(`GROUP_MAPPING: diagram ${id} SVG title does not match group ${groupId} styleRole`);
+      }
       if (diagram.diagramType === "sequence") {
         for (const [nodeId, node] of nodes) {
           const lifeline = svg.match(new RegExp(`<[^>]*data-lifeline-for=["']${nodeId}["'][^>]*>`, "i"))?.[0];
@@ -1434,7 +1468,7 @@ function diagramContract(): Record<string, unknown> {
     groups_valid: true, viewbox_valid: true, provider_status: "unverified",
     target_operation_required: false, fr_mapping_complete: true,
     design_notes_valid: true, layout_contract_valid: true, main_flow_valid: true, loop_lanes_valid: true, decision_exit_valid: true, annotation_mapping_valid: true, migration_status: "passed", port_paths_valid: true,
-    geometry_status: "passed", visual_style_status: "passed", edge_label_placement_status: "passed", edge_intersection_status: "passed", collinear_overlap_status: "passed", target_port_direction_status: "passed", target_port_approach_status: "passed", routing_minimality_status: "passed", side_switch_status: "passed", change_impact_review_status: changeImpactReviewsChecked > 0 ? "passed" : "not_applicable", visible_arrow_mapping_status: "passed",
+    geometry_status: "passed", node_text_fit_status: "passed", group_capacity_status: "passed", visual_style_status: "passed", edge_label_placement_status: "passed", edge_intersection_status: "passed", collinear_overlap_status: "passed", target_port_direction_status: "passed", target_port_approach_status: "passed", routing_minimality_status: "passed", side_switch_status: "passed", change_impact_review_status: changeImpactReviewsChecked > 0 ? "passed" : "not_applicable", visible_arrow_mapping_status: "passed",
     render_preflight_status: "passed",
     render_status: "unverified",
     render_status_reason: "no static SVG renderer is configured",

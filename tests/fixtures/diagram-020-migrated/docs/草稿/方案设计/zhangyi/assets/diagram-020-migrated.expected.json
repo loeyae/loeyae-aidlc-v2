@@ -1,0 +1,1900 @@
+{
+  "version": "1",
+  "type": "diagram-expected-contract",
+  "source": {
+    "kind": "approved-formal-blueprint",
+    "ref": "docs/正式/20-需求文档/搜索域/蓝图-搜索和推荐V1.1.md",
+    "revision": "working-tree",
+    "digest": "sha256:f0385cbd290de5cb73692fd557cd83f1726b53a9b6353e4a19b947f3f1d0a1f0"
+  },
+  "generator": {
+    "name": "diagram-020-migrated-generator",
+    "version": "1.0.0",
+    "config_summary": "diagram-020 迁移重绘：TB 多区域布局、组内独立 lane、CJK 感知节点尺寸、业务对象黑色与结构区域灰色",
+    "config_digest": "sha256:63c47ca9afbb861e0424604fa34799e3009b9bbaa04a13b4d2934f05b24c1a1f",
+    "source_refs": [
+      "docs/正式/20-需求文档/搜索域/蓝图-搜索和推荐V1.1.md"
+    ]
+  },
+  "diagrams": [
+    {
+      "id": "diagram-020",
+      "diagram_type": "flowchart",
+      "intent": "在不改变 34 个业务节点和 35 条连接器语义的前提下，清晰表达搜索域运营配置的责任边界、校验反馈和生效状态。",
+      "nodes": [
+        {
+          "id": "diagram-020-node-operator",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-cloud-admin",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-search-admin",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-darkword-page",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-darkword-edit",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-darkword-check",
+          "shape": "diamond"
+        },
+        {
+          "id": "diagram-020-node-darkword-error",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-darkword-save",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-darkword-status",
+          "shape": "diamond"
+        },
+        {
+          "id": "diagram-020-node-darkword-effective",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-darkword-inactive",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-hotword-page",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-hotword-edit",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-required-check",
+          "shape": "diamond"
+        },
+        {
+          "id": "diagram-020-node-validation-error",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-hotword-save",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-effective-check",
+          "shape": "diamond"
+        },
+        {
+          "id": "diagram-020-node-hotword-effective",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-hotword-inactive",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-operation-admin",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-blacklist-manage",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-blacklist-select",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-blacklist-edit",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-blacklist-confirm",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-blacklist-effective",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-whitelist-manage",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-whitelist-select",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-whitelist-edit",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-whitelist-confirm",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-whitelist-effective",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-sort-manage",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-sort-drag",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-sort-save",
+          "shape": "rect"
+        },
+        {
+          "id": "diagram-020-node-sort-effective",
+          "shape": "rect"
+        }
+      ],
+      "edges": [
+        {
+          "id": "diagram-020-edge-001",
+          "from": "diagram-020-node-operator",
+          "to": "diagram-020-node-search-admin",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-search-admin:top"
+        },
+        {
+          "id": "diagram-020-edge-002",
+          "from": "diagram-020-node-search-admin",
+          "to": "diagram-020-node-hotword-page",
+          "from_port": "left",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-hotword-page:top"
+        },
+        {
+          "id": "diagram-020-edge-003",
+          "from": "diagram-020-node-search-admin",
+          "to": "diagram-020-node-operation-admin",
+          "from_port": "right",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-operation-admin:top"
+        },
+        {
+          "id": "diagram-020-edge-004",
+          "from": "diagram-020-node-hotword-page",
+          "to": "diagram-020-node-hotword-edit",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-hotword-edit:top"
+        },
+        {
+          "id": "diagram-020-edge-005",
+          "from": "diagram-020-node-hotword-edit",
+          "to": "diagram-020-node-required-check",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-required-check:top"
+        },
+        {
+          "id": "diagram-020-edge-006",
+          "from": "diagram-020-node-required-check",
+          "to": "diagram-020-node-validation-error",
+          "from_port": "left",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-validation-error:top"
+        },
+        {
+          "id": "diagram-020-edge-007",
+          "from": "diagram-020-node-validation-error",
+          "to": "diagram-020-node-hotword-edit",
+          "from_port": "left",
+          "to_port": "left",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-hotword-edit:left"
+        },
+        {
+          "id": "diagram-020-edge-008",
+          "from": "diagram-020-node-required-check",
+          "to": "diagram-020-node-hotword-save",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-hotword-save:top"
+        },
+        {
+          "id": "diagram-020-edge-009",
+          "from": "diagram-020-node-hotword-save",
+          "to": "diagram-020-node-effective-check",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-effective-check:top"
+        },
+        {
+          "id": "diagram-020-edge-010",
+          "from": "diagram-020-node-effective-check",
+          "to": "diagram-020-node-hotword-effective",
+          "from_port": "left",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-hotword-effective:top"
+        },
+        {
+          "id": "diagram-020-edge-011",
+          "from": "diagram-020-node-effective-check",
+          "to": "diagram-020-node-hotword-inactive",
+          "from_port": "right",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-hotword-inactive:top"
+        },
+        {
+          "id": "diagram-020-edge-012",
+          "from": "diagram-020-node-operation-admin",
+          "to": "diagram-020-node-blacklist-manage",
+          "from_port": "left",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-blacklist-manage:top"
+        },
+        {
+          "id": "diagram-020-edge-013",
+          "from": "diagram-020-node-operation-admin",
+          "to": "diagram-020-node-whitelist-manage",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-whitelist-manage:top"
+        },
+        {
+          "id": "diagram-020-edge-014",
+          "from": "diagram-020-node-operation-admin",
+          "to": "diagram-020-node-sort-manage",
+          "from_port": "right",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-sort-manage:top"
+        },
+        {
+          "id": "diagram-020-edge-015",
+          "from": "diagram-020-node-blacklist-manage",
+          "to": "diagram-020-node-blacklist-select",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-blacklist-select:top"
+        },
+        {
+          "id": "diagram-020-edge-016",
+          "from": "diagram-020-node-blacklist-select",
+          "to": "diagram-020-node-blacklist-edit",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-blacklist-edit:top"
+        },
+        {
+          "id": "diagram-020-edge-017",
+          "from": "diagram-020-node-blacklist-edit",
+          "to": "diagram-020-node-blacklist-confirm",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-blacklist-confirm:top"
+        },
+        {
+          "id": "diagram-020-edge-018",
+          "from": "diagram-020-node-blacklist-confirm",
+          "to": "diagram-020-node-blacklist-effective",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-blacklist-effective:top"
+        },
+        {
+          "id": "diagram-020-edge-019",
+          "from": "diagram-020-node-whitelist-manage",
+          "to": "diagram-020-node-whitelist-select",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-whitelist-select:top"
+        },
+        {
+          "id": "diagram-020-edge-020",
+          "from": "diagram-020-node-whitelist-select",
+          "to": "diagram-020-node-whitelist-edit",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-whitelist-edit:top"
+        },
+        {
+          "id": "diagram-020-edge-021",
+          "from": "diagram-020-node-whitelist-edit",
+          "to": "diagram-020-node-whitelist-confirm",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-whitelist-confirm:top"
+        },
+        {
+          "id": "diagram-020-edge-022",
+          "from": "diagram-020-node-whitelist-confirm",
+          "to": "diagram-020-node-whitelist-effective",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-whitelist-effective:top"
+        },
+        {
+          "id": "diagram-020-edge-023",
+          "from": "diagram-020-node-sort-manage",
+          "to": "diagram-020-node-sort-drag",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-sort-drag:top"
+        },
+        {
+          "id": "diagram-020-edge-024",
+          "from": "diagram-020-node-sort-drag",
+          "to": "diagram-020-node-sort-save",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-sort-save:top"
+        },
+        {
+          "id": "diagram-020-edge-025",
+          "from": "diagram-020-node-sort-save",
+          "to": "diagram-020-node-sort-effective",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-sort-effective:top"
+        },
+        {
+          "id": "diagram-020-edge-026",
+          "from": "diagram-020-node-operator",
+          "to": "diagram-020-node-cloud-admin",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-cloud-admin:top"
+        },
+        {
+          "id": "diagram-020-edge-027",
+          "from": "diagram-020-node-cloud-admin",
+          "to": "diagram-020-node-darkword-page",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-darkword-page:top"
+        },
+        {
+          "id": "diagram-020-edge-028",
+          "from": "diagram-020-node-darkword-page",
+          "to": "diagram-020-node-darkword-edit",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-darkword-edit:top"
+        },
+        {
+          "id": "diagram-020-edge-029",
+          "from": "diagram-020-node-darkword-edit",
+          "to": "diagram-020-node-darkword-check",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-darkword-check:top"
+        },
+        {
+          "id": "diagram-020-edge-030",
+          "from": "diagram-020-node-darkword-check",
+          "to": "diagram-020-node-darkword-error",
+          "from_port": "left",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-darkword-error:top"
+        },
+        {
+          "id": "diagram-020-edge-031",
+          "from": "diagram-020-node-darkword-error",
+          "to": "diagram-020-node-darkword-edit",
+          "from_port": "left",
+          "to_port": "left",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-darkword-edit:left"
+        },
+        {
+          "id": "diagram-020-edge-032",
+          "from": "diagram-020-node-darkword-check",
+          "to": "diagram-020-node-darkword-save",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-darkword-save:top"
+        },
+        {
+          "id": "diagram-020-edge-033",
+          "from": "diagram-020-node-darkword-save",
+          "to": "diagram-020-node-darkword-status",
+          "from_port": "bottom",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-darkword-status:top"
+        },
+        {
+          "id": "diagram-020-edge-034",
+          "from": "diagram-020-node-darkword-status",
+          "to": "diagram-020-node-darkword-effective",
+          "from_port": "left",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-darkword-effective:top"
+        },
+        {
+          "id": "diagram-020-edge-035",
+          "from": "diagram-020-node-darkword-status",
+          "to": "diagram-020-node-darkword-inactive",
+          "from_port": "right",
+          "to_port": "top",
+          "kind": "directed",
+          "arrow_target": "diagram-020-node-darkword-inactive:top"
+        }
+      ],
+      "groups": [
+        {
+          "id": "diagram-020-group-darkword",
+          "semantic_type": "exclusive"
+        },
+        {
+          "id": "diagram-020-group-hotword",
+          "semantic_type": "exclusive"
+        },
+        {
+          "id": "diagram-020-group-operation",
+          "semantic_type": "exclusive"
+        }
+      ],
+      "legend_ids": [],
+      "annotation_ids": [],
+      "lifeline_ids": [],
+      "source_graph": {
+        "nodes": [
+          {
+            "source_id": "source-001",
+            "display_id": "diagram-020-node-operator",
+            "label": "运营",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-002",
+            "display_id": "diagram-020-node-cloud-admin",
+            "label": "云Mall管理后台",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-003",
+            "display_id": "diagram-020-node-search-admin",
+            "label": "搜索管理后台",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-004",
+            "display_id": "diagram-020-node-darkword-page",
+            "label": "暗纹词配置页面",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-005",
+            "display_id": "diagram-020-node-darkword-edit",
+            "label": "新增/编辑/删除暗纹词",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-006",
+            "display_id": "diagram-020-node-darkword-check",
+            "label": "必填项校验通过?",
+            "shape": "diamond"
+          },
+          {
+            "source_id": "source-007",
+            "display_id": "diagram-020-node-darkword-error",
+            "label": "提示错误位置",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-008",
+            "display_id": "diagram-020-node-darkword-save",
+            "label": "保存",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-009",
+            "display_id": "diagram-020-node-darkword-status",
+            "label": "状态是否生效?",
+            "shape": "diamond"
+          },
+          {
+            "source_id": "source-010",
+            "display_id": "diagram-020-node-darkword-effective",
+            "label": "暗纹词生效",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-011",
+            "display_id": "diagram-020-node-darkword-inactive",
+            "label": "暗纹词失效",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-012",
+            "display_id": "diagram-020-node-hotword-page",
+            "label": "搜索热词配置页面",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-013",
+            "display_id": "diagram-020-node-hotword-edit",
+            "label": "新增/编辑/删除搜索热词",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-014",
+            "display_id": "diagram-020-node-required-check",
+            "label": "必填项校验通过?",
+            "shape": "diamond"
+          },
+          {
+            "source_id": "source-015",
+            "display_id": "diagram-020-node-validation-error",
+            "label": "提示错误位置",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-016",
+            "display_id": "diagram-020-node-hotword-save",
+            "label": "保存",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-017",
+            "display_id": "diagram-020-node-effective-check",
+            "label": "状态是否生效?",
+            "shape": "diamond"
+          },
+          {
+            "source_id": "source-018",
+            "display_id": "diagram-020-node-hotword-effective",
+            "label": "搜索热词生效",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-019",
+            "display_id": "diagram-020-node-hotword-inactive",
+            "label": "搜索热词失效",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-020",
+            "display_id": "diagram-020-node-operation-admin",
+            "label": "运营后台页面",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-021",
+            "display_id": "diagram-020-node-blacklist-manage",
+            "label": "黑名单管理",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-022",
+            "display_id": "diagram-020-node-blacklist-select",
+            "label": "选中商品",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-023",
+            "display_id": "diagram-020-node-blacklist-edit",
+            "label": "添加/移除黑名单",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-024",
+            "display_id": "diagram-020-node-blacklist-confirm",
+            "label": "确定",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-025",
+            "display_id": "diagram-020-node-blacklist-effective",
+            "label": "生效",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-026",
+            "display_id": "diagram-020-node-whitelist-manage",
+            "label": "白名单管理",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-027",
+            "display_id": "diagram-020-node-whitelist-select",
+            "label": "选中商品",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-028",
+            "display_id": "diagram-020-node-whitelist-edit",
+            "label": "添加/移除白名单",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-029",
+            "display_id": "diagram-020-node-whitelist-confirm",
+            "label": "确定",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-030",
+            "display_id": "diagram-020-node-whitelist-effective",
+            "label": "生效",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-031",
+            "display_id": "diagram-020-node-sort-manage",
+            "label": "排序管理",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-032",
+            "display_id": "diagram-020-node-sort-drag",
+            "label": "拖拽商品重新排序",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-033",
+            "display_id": "diagram-020-node-sort-save",
+            "label": "保存",
+            "shape": "rect"
+          },
+          {
+            "source_id": "source-034",
+            "display_id": "diagram-020-node-sort-effective",
+            "label": "生效",
+            "shape": "rect"
+          }
+        ],
+        "relations": [
+          {
+            "source_ordinal": 1,
+            "from_source_id": "source-001",
+            "to_source_id": "source-003",
+            "display_edge_id": "diagram-020-edge-001",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 2,
+            "from_source_id": "source-003",
+            "to_source_id": "source-012",
+            "display_edge_id": "diagram-020-edge-002",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 3,
+            "from_source_id": "source-003",
+            "to_source_id": "source-020",
+            "display_edge_id": "diagram-020-edge-003",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 4,
+            "from_source_id": "source-012",
+            "to_source_id": "source-013",
+            "display_edge_id": "diagram-020-edge-004",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 5,
+            "from_source_id": "source-013",
+            "to_source_id": "source-014",
+            "display_edge_id": "diagram-020-edge-005",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 6,
+            "from_source_id": "source-014",
+            "to_source_id": "source-015",
+            "display_edge_id": "diagram-020-edge-006",
+            "kind": "directed",
+            "label": "否"
+          },
+          {
+            "source_ordinal": 7,
+            "from_source_id": "source-015",
+            "to_source_id": "source-013",
+            "display_edge_id": "diagram-020-edge-007",
+            "kind": "directed",
+            "label": "返回编辑"
+          },
+          {
+            "source_ordinal": 8,
+            "from_source_id": "source-014",
+            "to_source_id": "source-016",
+            "display_edge_id": "diagram-020-edge-008",
+            "kind": "directed",
+            "label": "是"
+          },
+          {
+            "source_ordinal": 9,
+            "from_source_id": "source-016",
+            "to_source_id": "source-017",
+            "display_edge_id": "diagram-020-edge-009",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 10,
+            "from_source_id": "source-017",
+            "to_source_id": "source-018",
+            "display_edge_id": "diagram-020-edge-010",
+            "kind": "directed",
+            "label": "是"
+          },
+          {
+            "source_ordinal": 11,
+            "from_source_id": "source-017",
+            "to_source_id": "source-019",
+            "display_edge_id": "diagram-020-edge-011",
+            "kind": "directed",
+            "label": "否"
+          },
+          {
+            "source_ordinal": 12,
+            "from_source_id": "source-020",
+            "to_source_id": "source-021",
+            "display_edge_id": "diagram-020-edge-012",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 13,
+            "from_source_id": "source-020",
+            "to_source_id": "source-026",
+            "display_edge_id": "diagram-020-edge-013",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 14,
+            "from_source_id": "source-020",
+            "to_source_id": "source-031",
+            "display_edge_id": "diagram-020-edge-014",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 15,
+            "from_source_id": "source-021",
+            "to_source_id": "source-022",
+            "display_edge_id": "diagram-020-edge-015",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 16,
+            "from_source_id": "source-022",
+            "to_source_id": "source-023",
+            "display_edge_id": "diagram-020-edge-016",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 17,
+            "from_source_id": "source-023",
+            "to_source_id": "source-024",
+            "display_edge_id": "diagram-020-edge-017",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 18,
+            "from_source_id": "source-024",
+            "to_source_id": "source-025",
+            "display_edge_id": "diagram-020-edge-018",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 19,
+            "from_source_id": "source-026",
+            "to_source_id": "source-027",
+            "display_edge_id": "diagram-020-edge-019",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 20,
+            "from_source_id": "source-027",
+            "to_source_id": "source-028",
+            "display_edge_id": "diagram-020-edge-020",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 21,
+            "from_source_id": "source-028",
+            "to_source_id": "source-029",
+            "display_edge_id": "diagram-020-edge-021",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 22,
+            "from_source_id": "source-029",
+            "to_source_id": "source-030",
+            "display_edge_id": "diagram-020-edge-022",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 23,
+            "from_source_id": "source-031",
+            "to_source_id": "source-032",
+            "display_edge_id": "diagram-020-edge-023",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 24,
+            "from_source_id": "source-032",
+            "to_source_id": "source-033",
+            "display_edge_id": "diagram-020-edge-024",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 25,
+            "from_source_id": "source-033",
+            "to_source_id": "source-034",
+            "display_edge_id": "diagram-020-edge-025",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 26,
+            "from_source_id": "source-001",
+            "to_source_id": "source-002",
+            "display_edge_id": "diagram-020-edge-026",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 27,
+            "from_source_id": "source-002",
+            "to_source_id": "source-004",
+            "display_edge_id": "diagram-020-edge-027",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 28,
+            "from_source_id": "source-004",
+            "to_source_id": "source-005",
+            "display_edge_id": "diagram-020-edge-028",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 29,
+            "from_source_id": "source-005",
+            "to_source_id": "source-006",
+            "display_edge_id": "diagram-020-edge-029",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 30,
+            "from_source_id": "source-006",
+            "to_source_id": "source-007",
+            "display_edge_id": "diagram-020-edge-030",
+            "kind": "directed",
+            "label": "否"
+          },
+          {
+            "source_ordinal": 31,
+            "from_source_id": "source-007",
+            "to_source_id": "source-005",
+            "display_edge_id": "diagram-020-edge-031",
+            "kind": "directed",
+            "label": "返回编辑"
+          },
+          {
+            "source_ordinal": 32,
+            "from_source_id": "source-006",
+            "to_source_id": "source-008",
+            "display_edge_id": "diagram-020-edge-032",
+            "kind": "directed",
+            "label": "是"
+          },
+          {
+            "source_ordinal": 33,
+            "from_source_id": "source-008",
+            "to_source_id": "source-009",
+            "display_edge_id": "diagram-020-edge-033",
+            "kind": "directed"
+          },
+          {
+            "source_ordinal": 34,
+            "from_source_id": "source-009",
+            "to_source_id": "source-010",
+            "display_edge_id": "diagram-020-edge-034",
+            "kind": "directed",
+            "label": "是"
+          },
+          {
+            "source_ordinal": 35,
+            "from_source_id": "source-009",
+            "to_source_id": "source-011",
+            "display_edge_id": "diagram-020-edge-035",
+            "kind": "directed",
+            "label": "否"
+          }
+        ]
+      },
+      "route_contract": {
+        "direction": "TB",
+        "affected_edge_ids": [
+          "diagram-020-edge-001",
+          "diagram-020-edge-002",
+          "diagram-020-edge-003",
+          "diagram-020-edge-004",
+          "diagram-020-edge-005",
+          "diagram-020-edge-006",
+          "diagram-020-edge-007",
+          "diagram-020-edge-008",
+          "diagram-020-edge-009",
+          "diagram-020-edge-010",
+          "diagram-020-edge-011",
+          "diagram-020-edge-012",
+          "diagram-020-edge-013",
+          "diagram-020-edge-014",
+          "diagram-020-edge-015",
+          "diagram-020-edge-016",
+          "diagram-020-edge-017",
+          "diagram-020-edge-018",
+          "diagram-020-edge-019",
+          "diagram-020-edge-020",
+          "diagram-020-edge-021",
+          "diagram-020-edge-022",
+          "diagram-020-edge-023",
+          "diagram-020-edge-024",
+          "diagram-020-edge-025",
+          "diagram-020-edge-026",
+          "diagram-020-edge-027",
+          "diagram-020-edge-028",
+          "diagram-020-edge-029",
+          "diagram-020-edge-030",
+          "diagram-020-edge-031",
+          "diagram-020-edge-032",
+          "diagram-020-edge-033",
+          "diagram-020-edge-034",
+          "diagram-020-edge-035"
+        ],
+        "edge_intents": [
+          {
+            "edge_id": "diagram-020-edge-001",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-search-admin:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-002",
+            "kind": "manhattan",
+            "bend_count": 1,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-hotword-page:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 2,
+              "directions": [
+                "left",
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-003",
+            "kind": "manhattan",
+            "bend_count": 1,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-operation-admin:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 2,
+              "directions": [
+                "right",
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-004",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-hotword-edit:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-005",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-required-check:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-006",
+            "kind": "branch",
+            "bend_count": 3,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-validation-error:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 4
+            },
+            "label_text": "否"
+          },
+          {
+            "edge_id": "diagram-020-edge-007",
+            "kind": "loop",
+            "bend_count": 2,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-hotword-edit:left",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3,
+              "directions": [
+                "left",
+                "up",
+                "right"
+              ]
+            },
+            "label_text": "返回编辑",
+            "lane_id": "diagram-020-loop-hotword-validation"
+          },
+          {
+            "edge_id": "diagram-020-edge-008",
+            "kind": "branch",
+            "bend_count": 2,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-hotword-save:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3
+            },
+            "label_text": "是"
+          },
+          {
+            "edge_id": "diagram-020-edge-009",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-effective-check:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-010",
+            "kind": "branch",
+            "bend_count": 3,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-hotword-effective:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 4
+            },
+            "label_text": "是"
+          },
+          {
+            "edge_id": "diagram-020-edge-011",
+            "kind": "branch",
+            "bend_count": 1,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-hotword-inactive:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 2,
+              "directions": [
+                "right",
+                "down"
+              ]
+            },
+            "label_text": "否"
+          },
+          {
+            "edge_id": "diagram-020-edge-012",
+            "kind": "manhattan",
+            "bend_count": 1,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-blacklist-manage:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 2,
+              "directions": [
+                "left",
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-013",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-whitelist-manage:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-014",
+            "kind": "manhattan",
+            "bend_count": 1,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-sort-manage:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 2,
+              "directions": [
+                "right",
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-015",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-blacklist-select:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-016",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-blacklist-edit:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-017",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-blacklist-confirm:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-018",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-blacklist-effective:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-019",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-whitelist-select:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-020",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-whitelist-edit:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-021",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-whitelist-confirm:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-022",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-whitelist-effective:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-023",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-sort-drag:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-024",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-sort-save:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-025",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-sort-effective:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-026",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-cloud-admin:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-027",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-darkword-page:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-028",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-darkword-edit:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-029",
+            "kind": "direct",
+            "bend_count": 0,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-darkword-check:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 1,
+              "directions": [
+                "down"
+              ]
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-030",
+            "kind": "branch",
+            "bend_count": 3,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-darkword-error:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 4
+            },
+            "label_text": "否"
+          },
+          {
+            "edge_id": "diagram-020-edge-031",
+            "kind": "loop",
+            "bend_count": 2,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-darkword-edit:left",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3,
+              "directions": [
+                "left",
+                "up",
+                "right"
+              ]
+            },
+            "label_text": "返回编辑",
+            "lane_id": "diagram-020-loop-darkword-validation"
+          },
+          {
+            "edge_id": "diagram-020-edge-032",
+            "kind": "branch",
+            "bend_count": 2,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-darkword-save:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3
+            },
+            "label_text": "是"
+          },
+          {
+            "edge_id": "diagram-020-edge-033",
+            "kind": "manhattan",
+            "bend_count": 2,
+            "label_required": false,
+            "arrow_target": "diagram-020-node-darkword-status:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 3
+            }
+          },
+          {
+            "edge_id": "diagram-020-edge-034",
+            "kind": "branch",
+            "bend_count": 3,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-darkword-effective:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 4
+            },
+            "label_text": "是"
+          },
+          {
+            "edge_id": "diagram-020-edge-035",
+            "kind": "branch",
+            "bend_count": 1,
+            "label_required": true,
+            "arrow_target": "diagram-020-node-darkword-inactive:top",
+            "topology": {
+              "orthogonal": true,
+              "segment_count": 2,
+              "directions": [
+                "right",
+                "down"
+              ]
+            },
+            "label_text": "否"
+          }
+        ],
+        "loop_lanes": [
+          {
+            "id": "diagram-020-loop-hotword-validation",
+            "side": "left",
+            "lane_offset": 40,
+            "edge_ids": [
+              "diagram-020-edge-007"
+            ],
+            "reason": "搜索热词校验失败沿热词分组左侧独立 lane 返回编辑。"
+          },
+          {
+            "id": "diagram-020-loop-darkword-validation",
+            "side": "left",
+            "lane_offset": 24,
+            "edge_ids": [
+              "diagram-020-edge-031"
+            ],
+            "reason": "暗纹词校验失败沿暗纹词分组左侧独立 lane 返回编辑。"
+          }
+        ],
+        "merge_nodes": [
+          {
+            "node_id": "diagram-020-node-hotword-edit",
+            "edge_ids": [
+              "diagram-020-edge-004",
+              "diagram-020-edge-007"
+            ],
+            "ports": {
+              "diagram-020-edge-004": "top",
+              "diagram-020-edge-007": "left"
+            }
+          },
+          {
+            "node_id": "diagram-020-node-darkword-edit",
+            "edge_ids": [
+              "diagram-020-edge-028",
+              "diagram-020-edge-031"
+            ],
+            "ports": {
+              "diagram-020-edge-028": "top",
+              "diagram-020-edge-031": "left"
+            }
+          }
+        ],
+        "branch_groups": [
+          {
+            "id": "diagram-020-node-darkword-check",
+            "decision_node_id": "diagram-020-node-darkword-check",
+            "edge_ids": [
+              "diagram-020-edge-030",
+              "diagram-020-edge-032"
+            ],
+            "target_ids": [
+              "diagram-020-node-darkword-error",
+              "diagram-020-node-darkword-save"
+            ],
+            "direction": "TB",
+            "tolerance": 24,
+            "depth": 0,
+            "mode": "inline",
+            "reason": "暗纹词必填项判断的失败与通过出口在同一业务层就地展开。"
+          },
+          {
+            "id": "diagram-020-node-darkword-status",
+            "decision_node_id": "diagram-020-node-darkword-status",
+            "edge_ids": [
+              "diagram-020-edge-034",
+              "diagram-020-edge-035"
+            ],
+            "target_ids": [
+              "diagram-020-node-darkword-effective",
+              "diagram-020-node-darkword-inactive"
+            ],
+            "direction": "TB",
+            "tolerance": 24,
+            "depth": 0,
+            "mode": "inline",
+            "reason": "暗纹词生效状态的两个出口在同一业务层对称展开。"
+          },
+          {
+            "id": "diagram-020-node-required-check",
+            "decision_node_id": "diagram-020-node-required-check",
+            "edge_ids": [
+              "diagram-020-edge-006",
+              "diagram-020-edge-008"
+            ],
+            "target_ids": [
+              "diagram-020-node-validation-error",
+              "diagram-020-node-hotword-save"
+            ],
+            "direction": "TB",
+            "tolerance": 24,
+            "depth": 0,
+            "mode": "inline",
+            "reason": "搜索热词必填项判断的失败与通过出口在同一业务层就地展开。"
+          },
+          {
+            "id": "diagram-020-node-effective-check",
+            "decision_node_id": "diagram-020-node-effective-check",
+            "edge_ids": [
+              "diagram-020-edge-010",
+              "diagram-020-edge-011"
+            ],
+            "target_ids": [
+              "diagram-020-node-hotword-effective",
+              "diagram-020-node-hotword-inactive"
+            ],
+            "direction": "TB",
+            "tolerance": 24,
+            "depth": 0,
+            "mode": "inline",
+            "reason": "搜索热词生效状态的两个出口在同一业务层对称展开。"
+          }
+        ],
+        "exceptions": [
+          {
+            "type": "branch-port",
+            "object": {
+              "kind": "edge",
+              "ids": [
+                "diagram-020-edge-006"
+              ]
+            },
+            "business_reason": "保留来源判断出口的稳定端口语义和对应业务结果。",
+            "geometric_reason": "TB 多区域布局中，判断节点的主流程出口继续使用 bottom，左右结果出口使用 left/right，并通过组内留白避免碰撞。",
+            "scope": {
+              "diagram_id": "diagram-020",
+              "applies_to": [
+                "source",
+                "browser"
+              ],
+              "condition": "仅适用于该判断出口的实际端口布局"
+            },
+            "visual_evidence": {
+              "required": true,
+              "refs": [
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.normal",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.fit",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.zoom"
+              ]
+            }
+          },
+          {
+            "type": "branch-port",
+            "object": {
+              "kind": "edge",
+              "ids": [
+                "diagram-020-edge-008"
+              ]
+            },
+            "business_reason": "保留来源判断出口的稳定端口语义和对应业务结果。",
+            "geometric_reason": "TB 多区域布局中，判断节点的主流程出口继续使用 bottom，左右结果出口使用 left/right，并通过组内留白避免碰撞。",
+            "scope": {
+              "diagram_id": "diagram-020",
+              "applies_to": [
+                "source",
+                "browser"
+              ],
+              "condition": "仅适用于该判断出口的实际端口布局"
+            },
+            "visual_evidence": {
+              "required": true,
+              "refs": [
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.normal",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.fit",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.zoom"
+              ]
+            }
+          },
+          {
+            "type": "branch-port",
+            "object": {
+              "kind": "edge",
+              "ids": [
+                "diagram-020-edge-010"
+              ]
+            },
+            "business_reason": "保留来源判断出口的稳定端口语义和对应业务结果。",
+            "geometric_reason": "TB 多区域布局中，判断节点的主流程出口继续使用 bottom，左右结果出口使用 left/right，并通过组内留白避免碰撞。",
+            "scope": {
+              "diagram_id": "diagram-020",
+              "applies_to": [
+                "source",
+                "browser"
+              ],
+              "condition": "仅适用于该判断出口的实际端口布局"
+            },
+            "visual_evidence": {
+              "required": true,
+              "refs": [
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.normal",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.fit",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.zoom"
+              ]
+            }
+          },
+          {
+            "type": "branch-port",
+            "object": {
+              "kind": "edge",
+              "ids": [
+                "diagram-020-edge-011"
+              ]
+            },
+            "business_reason": "保留来源判断出口的稳定端口语义和对应业务结果。",
+            "geometric_reason": "TB 多区域布局中，判断节点的主流程出口继续使用 bottom，左右结果出口使用 left/right，并通过组内留白避免碰撞。",
+            "scope": {
+              "diagram_id": "diagram-020",
+              "applies_to": [
+                "source",
+                "browser"
+              ],
+              "condition": "仅适用于该判断出口的实际端口布局"
+            },
+            "visual_evidence": {
+              "required": true,
+              "refs": [
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.normal",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.fit",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.zoom"
+              ]
+            }
+          },
+          {
+            "type": "branch-port",
+            "object": {
+              "kind": "edge",
+              "ids": [
+                "diagram-020-edge-030"
+              ]
+            },
+            "business_reason": "保留来源判断出口的稳定端口语义和对应业务结果。",
+            "geometric_reason": "TB 多区域布局中，判断节点的主流程出口继续使用 bottom，左右结果出口使用 left/right，并通过组内留白避免碰撞。",
+            "scope": {
+              "diagram_id": "diagram-020",
+              "applies_to": [
+                "source",
+                "browser"
+              ],
+              "condition": "仅适用于该判断出口的实际端口布局"
+            },
+            "visual_evidence": {
+              "required": true,
+              "refs": [
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.normal",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.fit",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.zoom"
+              ]
+            }
+          },
+          {
+            "type": "branch-port",
+            "object": {
+              "kind": "edge",
+              "ids": [
+                "diagram-020-edge-032"
+              ]
+            },
+            "business_reason": "保留来源判断出口的稳定端口语义和对应业务结果。",
+            "geometric_reason": "TB 多区域布局中，判断节点的主流程出口继续使用 bottom，左右结果出口使用 left/right，并通过组内留白避免碰撞。",
+            "scope": {
+              "diagram_id": "diagram-020",
+              "applies_to": [
+                "source",
+                "browser"
+              ],
+              "condition": "仅适用于该判断出口的实际端口布局"
+            },
+            "visual_evidence": {
+              "required": true,
+              "refs": [
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.normal",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.fit",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.zoom"
+              ]
+            }
+          },
+          {
+            "type": "branch-port",
+            "object": {
+              "kind": "edge",
+              "ids": [
+                "diagram-020-edge-034"
+              ]
+            },
+            "business_reason": "保留来源判断出口的稳定端口语义和对应业务结果。",
+            "geometric_reason": "TB 多区域布局中，判断节点的主流程出口继续使用 bottom，左右结果出口使用 left/right，并通过组内留白避免碰撞。",
+            "scope": {
+              "diagram_id": "diagram-020",
+              "applies_to": [
+                "source",
+                "browser"
+              ],
+              "condition": "仅适用于该判断出口的实际端口布局"
+            },
+            "visual_evidence": {
+              "required": true,
+              "refs": [
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.normal",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.fit",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.zoom"
+              ]
+            }
+          },
+          {
+            "type": "branch-port",
+            "object": {
+              "kind": "edge",
+              "ids": [
+                "diagram-020-edge-035"
+              ]
+            },
+            "business_reason": "保留来源判断出口的稳定端口语义和对应业务结果。",
+            "geometric_reason": "TB 多区域布局中，判断节点的主流程出口继续使用 bottom，左右结果出口使用 left/right，并通过组内留白避免碰撞。",
+            "scope": {
+              "diagram_id": "diagram-020",
+              "applies_to": [
+                "source",
+                "browser"
+              ],
+              "condition": "仅适用于该判断出口的实际端口布局"
+            },
+            "visual_evidence": {
+              "required": true,
+              "refs": [
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.normal",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.fit",
+                ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.zoom"
+              ]
+            }
+          }
+        ],
+        "main_flow": {
+          "entry_node_ids": [
+            "diagram-020-node-operator"
+          ],
+          "exit_node_ids": [
+            "diagram-020-node-darkword-effective",
+            "diagram-020-node-darkword-inactive",
+            "diagram-020-node-hotword-effective",
+            "diagram-020-node-hotword-inactive",
+            "diagram-020-node-blacklist-effective",
+            "diagram-020-node-whitelist-effective",
+            "diagram-020-node-sort-effective"
+          ],
+          "node_ids": [
+            "diagram-020-node-operator",
+            "diagram-020-node-cloud-admin",
+            "diagram-020-node-search-admin",
+            "diagram-020-node-darkword-page",
+            "diagram-020-node-darkword-edit",
+            "diagram-020-node-darkword-check",
+            "diagram-020-node-darkword-error",
+            "diagram-020-node-darkword-save",
+            "diagram-020-node-darkword-status",
+            "diagram-020-node-darkword-effective",
+            "diagram-020-node-darkword-inactive",
+            "diagram-020-node-hotword-page",
+            "diagram-020-node-hotword-edit",
+            "diagram-020-node-required-check",
+            "diagram-020-node-validation-error",
+            "diagram-020-node-hotword-save",
+            "diagram-020-node-effective-check",
+            "diagram-020-node-hotword-effective",
+            "diagram-020-node-hotword-inactive",
+            "diagram-020-node-operation-admin",
+            "diagram-020-node-blacklist-manage",
+            "diagram-020-node-blacklist-select",
+            "diagram-020-node-blacklist-edit",
+            "diagram-020-node-blacklist-confirm",
+            "diagram-020-node-blacklist-effective",
+            "diagram-020-node-whitelist-manage",
+            "diagram-020-node-whitelist-select",
+            "diagram-020-node-whitelist-edit",
+            "diagram-020-node-whitelist-confirm",
+            "diagram-020-node-whitelist-effective",
+            "diagram-020-node-sort-manage",
+            "diagram-020-node-sort-drag",
+            "diagram-020-node-sort-save",
+            "diagram-020-node-sort-effective"
+          ],
+          "edge_ids": [
+            "diagram-020-edge-001",
+            "diagram-020-edge-002",
+            "diagram-020-edge-003",
+            "diagram-020-edge-004",
+            "diagram-020-edge-005",
+            "diagram-020-edge-006",
+            "diagram-020-edge-007",
+            "diagram-020-edge-008",
+            "diagram-020-edge-009",
+            "diagram-020-edge-010",
+            "diagram-020-edge-011",
+            "diagram-020-edge-012",
+            "diagram-020-edge-013",
+            "diagram-020-edge-014",
+            "diagram-020-edge-015",
+            "diagram-020-edge-016",
+            "diagram-020-edge-017",
+            "diagram-020-edge-018",
+            "diagram-020-edge-019",
+            "diagram-020-edge-020",
+            "diagram-020-edge-021",
+            "diagram-020-edge-022",
+            "diagram-020-edge-023",
+            "diagram-020-edge-024",
+            "diagram-020-edge-025",
+            "diagram-020-edge-026",
+            "diagram-020-edge-027",
+            "diagram-020-edge-028",
+            "diagram-020-edge-029",
+            "diagram-020-edge-030",
+            "diagram-020-edge-031",
+            "diagram-020-edge-032",
+            "diagram-020-edge-033",
+            "diagram-020-edge-034",
+            "diagram-020-edge-035"
+          ]
+        }
+      }
+    }
+  ]
+}

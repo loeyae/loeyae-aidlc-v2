@@ -1,0 +1,531 @@
+{
+  "version": "1",
+  "type": "diagram-source-graph",
+  "source": {
+    "kind": "approved-formal-blueprint",
+    "ref": "docs/正式/20-需求文档/搜索域/蓝图-搜索和推荐V1.1.md",
+    "revision": "working-tree"
+  },
+  "diagram_id": "diagram-020",
+  "diagram_type": "flowchart",
+  "title": "图表 020｜搜索域运营流程",
+  "description": "运营经云Mall管理后台配置暗纹词和搜索热词，并在运营后台维护黑名单、白名单和排序；包含必填项校验、错误反馈、生效状态分支和配置管理流程。",
+  "nodes": [
+    {
+      "id": "diagram-020-node-operator",
+      "shape": "rect",
+      "label": "运营"
+    },
+    {
+      "id": "diagram-020-node-cloud-admin",
+      "shape": "rect",
+      "label": "云Mall管理后台"
+    },
+    {
+      "id": "diagram-020-node-search-admin",
+      "shape": "rect",
+      "label": "搜索管理后台"
+    },
+    {
+      "id": "diagram-020-node-darkword-page",
+      "shape": "rect",
+      "label": "暗纹词配置页面"
+    },
+    {
+      "id": "diagram-020-node-darkword-edit",
+      "shape": "rect",
+      "label": "新增/编辑/删除暗纹词"
+    },
+    {
+      "id": "diagram-020-node-darkword-check",
+      "shape": "diamond",
+      "label": "必填项校验通过?"
+    },
+    {
+      "id": "diagram-020-node-darkword-error",
+      "shape": "rect",
+      "label": "提示错误位置"
+    },
+    {
+      "id": "diagram-020-node-darkword-save",
+      "shape": "rect",
+      "label": "保存"
+    },
+    {
+      "id": "diagram-020-node-darkword-status",
+      "shape": "diamond",
+      "label": "状态是否生效?"
+    },
+    {
+      "id": "diagram-020-node-darkword-effective",
+      "shape": "rect",
+      "label": "暗纹词生效"
+    },
+    {
+      "id": "diagram-020-node-darkword-inactive",
+      "shape": "rect",
+      "label": "暗纹词失效"
+    },
+    {
+      "id": "diagram-020-node-hotword-page",
+      "shape": "rect",
+      "label": "搜索热词配置页面"
+    },
+    {
+      "id": "diagram-020-node-hotword-edit",
+      "shape": "rect",
+      "label": "新增/编辑/删除搜索热词"
+    },
+    {
+      "id": "diagram-020-node-required-check",
+      "shape": "diamond",
+      "label": "必填项校验通过?"
+    },
+    {
+      "id": "diagram-020-node-validation-error",
+      "shape": "rect",
+      "label": "提示错误位置"
+    },
+    {
+      "id": "diagram-020-node-hotword-save",
+      "shape": "rect",
+      "label": "保存"
+    },
+    {
+      "id": "diagram-020-node-effective-check",
+      "shape": "diamond",
+      "label": "状态是否生效?"
+    },
+    {
+      "id": "diagram-020-node-hotword-effective",
+      "shape": "rect",
+      "label": "搜索热词生效"
+    },
+    {
+      "id": "diagram-020-node-hotword-inactive",
+      "shape": "rect",
+      "label": "搜索热词失效"
+    },
+    {
+      "id": "diagram-020-node-operation-admin",
+      "shape": "rect",
+      "label": "运营后台页面"
+    },
+    {
+      "id": "diagram-020-node-blacklist-manage",
+      "shape": "rect",
+      "label": "黑名单管理"
+    },
+    {
+      "id": "diagram-020-node-blacklist-select",
+      "shape": "rect",
+      "label": "选中商品"
+    },
+    {
+      "id": "diagram-020-node-blacklist-edit",
+      "shape": "rect",
+      "label": "添加/移除黑名单"
+    },
+    {
+      "id": "diagram-020-node-blacklist-confirm",
+      "shape": "rect",
+      "label": "确定"
+    },
+    {
+      "id": "diagram-020-node-blacklist-effective",
+      "shape": "rect",
+      "label": "生效"
+    },
+    {
+      "id": "diagram-020-node-whitelist-manage",
+      "shape": "rect",
+      "label": "白名单管理"
+    },
+    {
+      "id": "diagram-020-node-whitelist-select",
+      "shape": "rect",
+      "label": "选中商品"
+    },
+    {
+      "id": "diagram-020-node-whitelist-edit",
+      "shape": "rect",
+      "label": "添加/移除白名单"
+    },
+    {
+      "id": "diagram-020-node-whitelist-confirm",
+      "shape": "rect",
+      "label": "确定"
+    },
+    {
+      "id": "diagram-020-node-whitelist-effective",
+      "shape": "rect",
+      "label": "生效"
+    },
+    {
+      "id": "diagram-020-node-sort-manage",
+      "shape": "rect",
+      "label": "排序管理"
+    },
+    {
+      "id": "diagram-020-node-sort-drag",
+      "shape": "rect",
+      "label": "拖拽商品重新排序"
+    },
+    {
+      "id": "diagram-020-node-sort-save",
+      "shape": "rect",
+      "label": "保存"
+    },
+    {
+      "id": "diagram-020-node-sort-effective",
+      "shape": "rect",
+      "label": "生效"
+    }
+  ],
+  "edges": [
+    {
+      "id": "diagram-020-edge-001",
+      "from": "diagram-020-node-operator",
+      "to": "diagram-020-node-search-admin",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-002",
+      "from": "diagram-020-node-search-admin",
+      "to": "diagram-020-node-hotword-page",
+      "fromPort": "left",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-003",
+      "from": "diagram-020-node-search-admin",
+      "to": "diagram-020-node-operation-admin",
+      "fromPort": "right",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-004",
+      "from": "diagram-020-node-hotword-page",
+      "to": "diagram-020-node-hotword-edit",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-005",
+      "from": "diagram-020-node-hotword-edit",
+      "to": "diagram-020-node-required-check",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-006",
+      "from": "diagram-020-node-required-check",
+      "to": "diagram-020-node-validation-error",
+      "fromPort": "left",
+      "toPort": "top",
+      "kind": "directed",
+      "label": "否"
+    },
+    {
+      "id": "diagram-020-edge-007",
+      "from": "diagram-020-node-validation-error",
+      "to": "diagram-020-node-hotword-edit",
+      "fromPort": "left",
+      "toPort": "left",
+      "kind": "directed",
+      "label": "返回编辑"
+    },
+    {
+      "id": "diagram-020-edge-008",
+      "from": "diagram-020-node-required-check",
+      "to": "diagram-020-node-hotword-save",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed",
+      "label": "是"
+    },
+    {
+      "id": "diagram-020-edge-009",
+      "from": "diagram-020-node-hotword-save",
+      "to": "diagram-020-node-effective-check",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-010",
+      "from": "diagram-020-node-effective-check",
+      "to": "diagram-020-node-hotword-effective",
+      "fromPort": "left",
+      "toPort": "top",
+      "kind": "directed",
+      "label": "是"
+    },
+    {
+      "id": "diagram-020-edge-011",
+      "from": "diagram-020-node-effective-check",
+      "to": "diagram-020-node-hotword-inactive",
+      "fromPort": "right",
+      "toPort": "top",
+      "kind": "directed",
+      "label": "否"
+    },
+    {
+      "id": "diagram-020-edge-012",
+      "from": "diagram-020-node-operation-admin",
+      "to": "diagram-020-node-blacklist-manage",
+      "fromPort": "left",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-013",
+      "from": "diagram-020-node-operation-admin",
+      "to": "diagram-020-node-whitelist-manage",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-014",
+      "from": "diagram-020-node-operation-admin",
+      "to": "diagram-020-node-sort-manage",
+      "fromPort": "right",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-015",
+      "from": "diagram-020-node-blacklist-manage",
+      "to": "diagram-020-node-blacklist-select",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-016",
+      "from": "diagram-020-node-blacklist-select",
+      "to": "diagram-020-node-blacklist-edit",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-017",
+      "from": "diagram-020-node-blacklist-edit",
+      "to": "diagram-020-node-blacklist-confirm",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-018",
+      "from": "diagram-020-node-blacklist-confirm",
+      "to": "diagram-020-node-blacklist-effective",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-019",
+      "from": "diagram-020-node-whitelist-manage",
+      "to": "diagram-020-node-whitelist-select",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-020",
+      "from": "diagram-020-node-whitelist-select",
+      "to": "diagram-020-node-whitelist-edit",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-021",
+      "from": "diagram-020-node-whitelist-edit",
+      "to": "diagram-020-node-whitelist-confirm",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-022",
+      "from": "diagram-020-node-whitelist-confirm",
+      "to": "diagram-020-node-whitelist-effective",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-023",
+      "from": "diagram-020-node-sort-manage",
+      "to": "diagram-020-node-sort-drag",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-024",
+      "from": "diagram-020-node-sort-drag",
+      "to": "diagram-020-node-sort-save",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-025",
+      "from": "diagram-020-node-sort-save",
+      "to": "diagram-020-node-sort-effective",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-026",
+      "from": "diagram-020-node-operator",
+      "to": "diagram-020-node-cloud-admin",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-027",
+      "from": "diagram-020-node-cloud-admin",
+      "to": "diagram-020-node-darkword-page",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-028",
+      "from": "diagram-020-node-darkword-page",
+      "to": "diagram-020-node-darkword-edit",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-029",
+      "from": "diagram-020-node-darkword-edit",
+      "to": "diagram-020-node-darkword-check",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-030",
+      "from": "diagram-020-node-darkword-check",
+      "to": "diagram-020-node-darkword-error",
+      "fromPort": "left",
+      "toPort": "top",
+      "kind": "directed",
+      "label": "否"
+    },
+    {
+      "id": "diagram-020-edge-031",
+      "from": "diagram-020-node-darkword-error",
+      "to": "diagram-020-node-darkword-edit",
+      "fromPort": "left",
+      "toPort": "left",
+      "kind": "directed",
+      "label": "返回编辑"
+    },
+    {
+      "id": "diagram-020-edge-032",
+      "from": "diagram-020-node-darkword-check",
+      "to": "diagram-020-node-darkword-save",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed",
+      "label": "是"
+    },
+    {
+      "id": "diagram-020-edge-033",
+      "from": "diagram-020-node-darkword-save",
+      "to": "diagram-020-node-darkword-status",
+      "fromPort": "bottom",
+      "toPort": "top",
+      "kind": "directed"
+    },
+    {
+      "id": "diagram-020-edge-034",
+      "from": "diagram-020-node-darkword-status",
+      "to": "diagram-020-node-darkword-effective",
+      "fromPort": "left",
+      "toPort": "top",
+      "kind": "directed",
+      "label": "是"
+    },
+    {
+      "id": "diagram-020-edge-035",
+      "from": "diagram-020-node-darkword-status",
+      "to": "diagram-020-node-darkword-inactive",
+      "fromPort": "right",
+      "toPort": "top",
+      "kind": "directed",
+      "label": "否"
+    }
+  ],
+  "groups": [
+    {
+      "id": "diagram-020-group-darkword",
+      "label": "暗纹词配置流程",
+      "semanticType": "exclusive",
+      "members": [
+        "diagram-020-node-darkword-page",
+        "diagram-020-node-darkword-edit",
+        "diagram-020-node-darkword-check",
+        "diagram-020-node-darkword-error",
+        "diagram-020-node-darkword-save",
+        "diagram-020-node-darkword-status",
+        "diagram-020-node-darkword-effective",
+        "diagram-020-node-darkword-inactive"
+      ]
+    },
+    {
+      "id": "diagram-020-group-hotword",
+      "label": "搜索热词配置流程",
+      "semanticType": "exclusive",
+      "members": [
+        "diagram-020-node-hotword-page",
+        "diagram-020-node-hotword-edit",
+        "diagram-020-node-required-check",
+        "diagram-020-node-validation-error",
+        "diagram-020-node-hotword-save",
+        "diagram-020-node-effective-check",
+        "diagram-020-node-hotword-effective",
+        "diagram-020-node-hotword-inactive"
+      ]
+    },
+    {
+      "id": "diagram-020-group-operation",
+      "label": "运营后台管理流程",
+      "semanticType": "exclusive",
+      "members": [
+        "diagram-020-node-operation-admin",
+        "diagram-020-node-blacklist-manage",
+        "diagram-020-node-blacklist-select",
+        "diagram-020-node-blacklist-edit",
+        "diagram-020-node-blacklist-confirm",
+        "diagram-020-node-blacklist-effective",
+        "diagram-020-node-whitelist-manage",
+        "diagram-020-node-whitelist-select",
+        "diagram-020-node-whitelist-edit",
+        "diagram-020-node-whitelist-confirm",
+        "diagram-020-node-whitelist-effective",
+        "diagram-020-node-sort-manage",
+        "diagram-020-node-sort-drag",
+        "diagram-020-node-sort-save",
+        "diagram-020-node-sort-effective"
+      ]
+    }
+  ]
+}

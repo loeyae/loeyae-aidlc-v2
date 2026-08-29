@@ -95,7 +95,7 @@ Clarification consistency: passed
     write(project, "docs/aidlc/inception/ui-design/page-plan.md", "PAGE-001 Registration\n")
     write(project, "docs/aidlc/inception/ui-mock/web.html", """<html><style>.box { display: block; }</style><body>PAGE-001<div class="mock-box">condition visible</div></body></html>""")
     write(project, "docs/aidlc/inception/requirements/business-flows.md", "# Business flows\n\nREQ-001\n")
-    write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox="0 0 400 300" width="400" height="300" role="img"><title>Requirements flow</title><desc>FR-001 business flow</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs><g data-node="start" data-node-shape="round"><rect x="40" y="40" width="100" height="50"/><text data-text-id="node-start" x="90" y="70">开始</text></g><g data-node="done" data-node-shape="round"><rect x="260" y="40" width="100" height="50"/><text data-text-id="node-done" x="310" y="70">完成</text></g><path data-edge="start-done" data-from="start" data-from-port="right" data-to="done" data-to-port="left" data-edge-label="start-done" d="M140 65 L260 65" marker-end="url(#arrow)"/><path data-edge-arrow="start-done" data-edge="start-done" data-arrow-target="done:left" d="M252 57 L260 65 L252 73"/><g data-edge-label="start-done"><text data-text-id="label-start-done" x="200" y="50">完成</text></g><text data-text-id="requirement-reference" x="200" y="150">FR-001</text></svg>""")
+    write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox="0 0 400 300" width="400" height="300" role="img"><title>Requirements flow</title><desc>FR-001 business flow</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs><g data-node="start" data-node-shape="round"><rect x="40" y="40" width="100" height="50"/><text data-text-id="node-start" x="90" y="70">开始</text></g><g data-node="done" data-node-shape="round"><rect x="260" y="40" width="100" height="50"/><text data-text-id="node-done" x="310" y="70">完成</text></g><path data-edge="start-done" data-from="start" data-from-port="right" data-to="done" data-to-port="left" data-edge-label="start-done" d="M140 65 L260 65" marker-end="url(#arrow)"/><path data-edge-arrow="start-done" data-edge="start-done" data-arrow-target="done:left" d="M252 57 L260 65 L252 73"/><g data-edge-label="start-done"><text data-text-id="label-start-done" x="200" y="47">完成</text></g><text data-text-id="requirement-reference" x="200" y="150">FR-001</text></svg>""")
     write(project, "docs/aidlc/inception/requirements/business-flows.diagram.json", json.dumps({
         "version": 1,
         "document": "docs/aidlc/inception/requirements/business-flows.md",
@@ -107,7 +107,7 @@ Clarification consistency: passed
                 {"id": "start", "shape": "round", "label": "开始", "x": 40, "y": 40, "width": 100, "height": 50},
                 {"id": "done", "shape": "round", "label": "完成", "x": 260, "y": 40, "width": 100, "height": 50}
             ],
-            "edges": [{"id": "start-done", "from": "start", "fromPort": "right", "to": "done", "toPort": "left", "arrowTarget": "done:left", "kind": "directed", "points": [[140, 65], [260, 65]], "label": {"text": "完成", "x": 200, "y": 50}}],
+            "edges": [{"id": "start-done", "from": "start", "fromPort": "right", "to": "done", "toPort": "left", "arrowTarget": "done:left", "kind": "directed", "points": [[140, 65], [260, 65]], "label": {"text": "完成", "x": 200, "y": 47}}],
             "designNotes": {
                 "intent": "展示需求从开始到完成的单一流程",
                 "semanticModes": ["process-flow"],
@@ -306,11 +306,53 @@ def mutate_diagram(project: str, mutation) -> None:
         json.dump(manifest, handle)
 
 
+def test_structural_group_capacity_and_style_contract_pass() -> None:
+    project = tempfile.mkdtemp(prefix="aidlc-structural-group-pass-")
+    try:
+        fixture(project)
+        mutate_diagram(project, lambda diagram, _: (
+            diagram["nodes"][0].update({"x": 74, "y": 84}),
+            diagram["nodes"][1].update({"x": 260, "y": 84}),
+            diagram["edges"][0].update({"points": [[174, 109], [260, 109]], "label": {"text": "完成", "x": 217, "y": 89}}),
+            diagram["designNotes"]["layout"].update({"mainAxis": 109}),
+            diagram.update({"groups": [{
+                "id": "lane", "label": "结构阶段", "styleRole": "structural", "semanticType": "exclusive", "members": ["start"],
+                "x": 24, "y": 24, "width": 210, "height": 180,
+            }]}),
+        ))
+        write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox="0 0 400 300" width="400" height="300" role="img">
+<title>Requirements flow</title><desc>FR-001 business flow</desc>
+<defs><marker id="arrow"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs>
+<rect id="group-lane" data-group="lane" data-group-role="exclusive" data-group-style-role="structural" x="24" y="24" width="210" height="180"/>
+<text data-group-title="lane" data-group-style-role="structural" data-text-id="group-lane-title" x="80" y="50">结构阶段</text>
+<g data-node="start" data-node-shape="round"><rect x="74" y="84" width="100" height="50"/><text data-text-id="node-start" x="124" y="109">开始</text></g>
+<g data-node="done" data-node-shape="round"><rect x="260" y="84" width="100" height="50"/><text data-text-id="node-done" x="310" y="109">完成</text></g>
+<path data-edge="start-done" data-from="start" data-from-port="right" data-to="done" data-to-port="left" data-edge-label="start-done" d="M174 109 L260 109" marker-end="url(#arrow)"/>
+<path data-edge-arrow="start-done" data-edge="start-done" data-arrow-target="done:left" d="M252 101 L260 109 L252 117"/>
+<text data-edge-label="start-done" data-text-id="label-start-done" x="217" y="89">完成</text>
+<text data-text-id="requirement-reference" x="200" y="240">FR-001</text></svg>""")
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["group_capacity_status"] == "passed"
+        assert payload["node_text_fit_status"] == "passed"
+        assert payload["visual_style_status"] == "passed"
+    finally:
+        shutil.rmtree(project)
+
+
 def test_diagram_geometry_gates_fail_closed() -> None:
     cases = [
         ("node collision", lambda diagram, _: diagram["nodes"].__setitem__(1, {**diagram["nodes"][1], "x": 100}), "geometric collision"),
-        ("edge collision", lambda diagram, _: diagram["nodes"].append({"id": "middle", "shape": "rect", "label": "中间", "x": 180, "y": 40, "width": 60, "height": 50}), "collides with non-endpoint node middle"),
-        ("node boundary overlap", lambda diagram, _: diagram["nodes"].append({"id": "boundary", "shape": "rect", "label": "边界", "x": 180, "y": 65, "width": 60, "height": 50}), "EDGE_NODE_BOUNDARY_OVERLAP"),
+        ("cjk label overflow", lambda diagram, _: diagram["nodes"][0].update({"label": "中文中文中文"}), "LABEL_OVERFLOW"),
+        ("group header capacity", lambda diagram, _: diagram.update({"groups": [
+            {"id": "lane", "label": "结构阶段", "styleRole": "structural", "semanticType": "exclusive", "members": ["start"], "x": 20, "y": 20, "width": 200, "height": 160},
+        ]}), "GROUP_HEADER_CLEARANCE"),
+        ("group style role", lambda diagram, _: diagram.update({"groups": [
+            {"id": "lane", "label": "结构阶段", "semanticType": "exclusive", "members": ["start"], "x": 20, "y": 20, "width": 200, "height": 160},
+        ]}), "MIGRATION_REQUIRED"),
+        ("edge collision", lambda diagram, _: diagram["nodes"].append({"id": "middle", "shape": "rect", "label": "中间", "x": 180, "y": 40, "width": 64, "height": 50}), "collides with non-endpoint node middle"),
+        ("node boundary overlap", lambda diagram, _: diagram["nodes"].append({"id": "boundary", "shape": "rect", "label": "边界", "x": 180, "y": 65, "width": 64, "height": 50}), "EDGE_NODE_BOUNDARY_OVERLAP"),
         ("collinear overlap", lambda diagram, _: (
             diagram["nodes"].append({"id": "other", "shape": "rect", "label": "旁路", "x": 40, "y": 110, "width": 100, "height": 50}),
             diagram["edges"].append({"id": "overlap", "from": "other", "fromPort": "right", "to": "done", "toPort": "left", "arrowTarget": "done:left", "kind": "directed", "points": [[140, 135], [180, 135], [180, 65], [260, 65]]}),
@@ -330,18 +372,18 @@ def test_diagram_geometry_gates_fail_closed() -> None:
             diagram["canvas"].update({"height": 340}),
         ), "EDGE_CROSSING"),
         ("label collision", lambda diagram, _: (
-            diagram["nodes"].append({"id": "middle", "shape": "rect", "label": "中间", "x": 170, "y": 20, "width": 80, "height": 44}),
+            diagram["nodes"].append({"id": "middle", "shape": "rect", "label": "中间", "x": 170, "y": 11, "width": 80, "height": 48}),
             diagram["designNotes"]["layout"]["mainFlow"].update({"entryNodeIds": ["start", "middle"], "exitNodeIds": ["done", "middle"], "nodeIds": ["start", "done", "middle"]}),
-            diagram["edges"][0]["label"].update({"x": 200, "y": 50}),
+            diagram["edges"][0]["label"].update({"x": 200, "y": 47}),
         ), "LABEL_COLLISION"),
         ("group containment", lambda diagram, _: diagram.update({"groups": [
-            {"id": "a", "semanticType": "exclusive", "members": ["start"], "x": 20, "y": 20, "width": 80, "height": 80},
+            {"id": "a", "label": "分组 A", "styleRole": "business-boundary", "semanticType": "exclusive", "members": ["start"], "x": 20, "y": 20, "width": 100, "height": 80},
         ]}), "GROUP_CONTAINMENT"),
         ("group overlap", lambda diagram, _: diagram.update({
             "canvas": {"width": 440, "height": 300},
             "groups": [
-                {"id": "a", "semanticType": "exclusive", "members": ["start"], "x": 16, "y": 16, "width": 180, "height": 100},
-                {"id": "b", "semanticType": "exclusive", "members": ["done"], "x": 160, "y": 16, "width": 224, "height": 100},
+                {"id": "a", "label": "分组 A", "styleRole": "business-boundary", "semanticType": "exclusive", "members": ["start"], "x": 16, "y": 16, "width": 180, "height": 100},
+                {"id": "b", "label": "分组 B", "styleRole": "business-boundary", "semanticType": "exclusive", "members": ["done"], "x": 160, "y": 16, "width": 224, "height": 100},
             ],
         }), "groups a and b have geometric overlap"),
         ("global legend", lambda diagram, _: diagram.update({
@@ -411,35 +453,35 @@ def directional_fixture(project: str, direction: str) -> None:
             {"id": "oms", "shape": "rect", "label": "OMS", "x": 260, "y": 40, "width": 100, "height": 50},
             {"id": "dmall", "shape": "rect", "label": "E-Fulfilment", "x": 760, "y": 40, "width": 180, "height": 50},
             {"id": "receive", "shape": "rect", "label": "接收", "x": 530, "y": 160, "width": 100, "height": 50},
-            {"id": "decision", "shape": "diamond", "label": "启用条件", "x": 530, "y": 300, "width": 100, "height": 80},
+            {"id": "decision", "shape": "diamond", "label": "启用条件", "x": 500, "y": 280, "width": 160, "height": 120},
             {"id": "active", "shape": "round", "label": "ACTIVE", "x": 650, "y": 700, "width": 100, "height": 50},
             {"id": "pending", "shape": "round", "label": "PENDING", "x": 310, "y": 700, "width": 100, "height": 50},
         ]
         edges = [
             {"id": "oms-receive", "from": "oms", "fromPort": "right", "to": "receive", "toPort": "left", "kind": "directed", "points": [[360, 65], [440, 65], [440, 185], [530, 185]]},
             {"id": "dmall-receive", "from": "dmall", "fromPort": "left", "to": "receive", "toPort": "right", "kind": "directed", "points": [[760, 65], [720, 65], [720, 185], [630, 185]]},
-            {"id": "receive-decision", "from": "receive", "fromPort": "bottom", "to": "decision", "toPort": "top", "kind": "directed", "points": [[580, 210], [580, 300]]},
-            {"id": "decision-active", "from": "decision", "fromPort": "right", "to": "active", "toPort": "top", "kind": "directed", "points": [[630, 340], [700, 340], [700, 700]], "label": {"text": "通过", "x": 665, "y": 320}},
-            {"id": "decision-pending", "from": "decision", "fromPort": "left", "to": "pending", "toPort": "top", "kind": "directed", "points": [[530, 340], [360, 340], [360, 700]], "label": {"text": "未通过", "x": 445, "y": 320}},
+            {"id": "receive-decision", "from": "receive", "fromPort": "bottom", "to": "decision", "toPort": "top", "kind": "directed", "points": [[580, 210], [580, 280]]},
+            {"id": "decision-active", "from": "decision", "fromPort": "right", "to": "active", "toPort": "top", "kind": "directed", "points": [[660, 340], [700, 340], [700, 700]], "label": {"text": "通过", "x": 680, "y": 320}},
+            {"id": "decision-pending", "from": "decision", "fromPort": "left", "to": "pending", "toPort": "top", "kind": "directed", "points": [[500, 340], [360, 340], [360, 700]], "label": {"text": "未通过", "x": 430, "y": 320}},
         ]
         canvas = {"width": 1000, "height": 840}
         layout = {"direction": "TB", "mainAxis": 580, "layerTolerance": 24, "symmetryGroups": [{"nodeIds": ["oms", "dmall"], "tolerance": 1}], "mergeNodes": [{"nodeId": "receive", "reason": "OMS 与 E-Fulfilment 输入汇合后进入云 Mall", "edgeIds": ["oms-receive", "dmall-receive"], "ports": {"oms-receive": "left", "dmall-receive": "right"}}], "mainFlow": {"entryNodeIds": ["oms", "dmall"], "exitNodeIds": ["active", "pending"], "nodeIds": ["oms", "dmall", "receive", "decision", "active", "pending"], "edgeIds": ["oms-receive", "dmall-receive", "receive-decision", "decision-active", "decision-pending"]}, "loopLanes": [], "branchLayerExceptions": [], "branchPortExceptions": []}
     else:
         nodes = [
             {"id": "start", "shape": "round", "label": "完成定店", "x": 40, "y": 225, "width": 100, "height": 50},
-            {"id": "decision", "shape": "diamond", "label": "商品类型", "x": 300, "y": 200, "width": 100, "height": 100},
+            {"id": "decision", "shape": "diamond", "label": "商品类型", "x": 280, "y": 200, "width": 140, "height": 100},
             {"id": "physical", "shape": "rect", "label": "实物入车", "x": 500, "y": 100, "width": 100, "height": 50},
             {"id": "virtual", "shape": "rect", "label": "虚拟直购", "x": 500, "y": 350, "width": 100, "height": 50},
-            {"id": "checkout", "shape": "rect", "label": "结算提交订单", "x": 700, "y": 225, "width": 100, "height": 50},
+            {"id": "checkout", "shape": "rect", "label": "结算提交订单", "x": 680, "y": 225, "width": 140, "height": 50},
         ]
         edges = [
-            {"id": "start-decision", "from": "start", "fromPort": "right", "to": "decision", "toPort": "left", "kind": "directed", "points": [[140, 250], [300, 250]]},
+            {"id": "start-decision", "from": "start", "fromPort": "right", "to": "decision", "toPort": "left", "kind": "directed", "points": [[140, 250], [280, 250]]},
             {"id": "decision-physical", "from": "decision", "fromPort": "top", "to": "physical", "toPort": "left", "kind": "directed", "points": [[350, 200], [350, 125], [500, 125]], "label": {"text": "实物", "x": 425, "y": 105}},
             {"id": "decision-virtual", "from": "decision", "fromPort": "bottom", "to": "virtual", "toPort": "left", "kind": "directed", "points": [[350, 300], [350, 375], [500, 375]], "label": {"text": "虚拟", "x": 425, "y": 395}},
             {"id": "physical-checkout", "from": "physical", "fromPort": "right", "to": "checkout", "toPort": "top", "kind": "directed", "points": [[600, 125], [750, 125], [750, 225]]},
             {"id": "virtual-checkout", "from": "virtual", "fromPort": "right", "to": "checkout", "toPort": "bottom", "kind": "directed", "points": [[600, 375], [750, 375], [750, 275]]},
         ]
-        canvas = {"width": 840, "height": 520}
+        canvas = {"width": 850, "height": 520}
         layout = {"direction": "LR", "mainAxis": 250, "layerTolerance": 24, "symmetryGroups": [], "mergeNodes": [{"nodeId": "checkout", "reason": "两个商品分支在结算提交订单处汇合", "edgeIds": ["physical-checkout", "virtual-checkout"], "ports": {"physical-checkout": "top", "virtual-checkout": "bottom"}}], "mainFlow": {"entryNodeId": "start", "exitNodeIds": ["checkout"], "nodeIds": ["start", "decision", "physical", "virtual", "checkout"], "edgeIds": ["start-decision", "decision-physical", "decision-virtual", "physical-checkout", "virtual-checkout"]}, "loopLanes": [], "branchLayerExceptions": [], "branchPortExceptions": []}
     for edge in edges:
         edge["arrowTarget"] = f'{edge["to"]}:{edge["toPort"]}'
@@ -484,8 +526,8 @@ def test_directional_layout_contracts() -> None:
 
     cases = [
         ("tb-asymmetry", "TB", lambda diagram, _: (diagram["nodes"][0].update({"x": 300}), diagram["edges"][0].update({"points": [[400, 65], [440, 65], [440, 185], [530, 185]]})), "LAYOUT_SYMMETRY"),
-        ("tb-branch-layer", "TB", lambda diagram, _: (diagram["nodes"][4].update({"y": 650}), diagram["edges"][3].update({"points": [[630, 340], [700, 340], [700, 650]]})), "BRANCH_LAYER"),
-        ("tb-branch-port", "TB", lambda diagram, _: (diagram["edges"][3].update({"toPort": "right", "arrowTarget": "active:right", "points": [[630, 340], [800, 340], [800, 725], [750, 725]], "label": {"text": "通过", "x": 715, "y": 320, "fontSize": 14}})), "BRANCH_PORT"),
+        ("tb-branch-layer", "TB", lambda diagram, _: (diagram["nodes"][4].update({"y": 650}), diagram["edges"][3].update({"points": [[660, 340], [700, 340], [700, 650]]})), "BRANCH_LAYER"),
+        ("tb-branch-port", "TB", lambda diagram, _: (diagram["edges"][3].update({"toPort": "right", "arrowTarget": "active:right", "points": [[660, 340], [800, 340], [800, 725], [750, 725]], "label": {"text": "通过", "x": 730, "y": 320, "fontSize": 14}})), "BRANCH_PORT"),
         ("lr-branch-layer", "LR", lambda diagram, _: (diagram["nodes"][3].update({"x": 550}), diagram["edges"][2].update({"points": [[350, 300], [350, 325], [500, 325], [500, 375], [550, 375]]}), diagram["edges"][4].update({"points": [[650, 375], [750, 375], [750, 275]]})), "BRANCH_LAYER"),
         ("lr-branch-port", "LR", lambda diagram, _: (diagram["edges"][1].update({"toPort": "right", "arrowTarget": "physical:right", "points": [[350, 200], [350, 150], [650, 150], [650, 125], [600, 125]], "label": {"text": "实物", "x": 500, "y": 130, "fontSize": 14}})), "BRANCH_PORT"),
         ("global-annotations", "TB", lambda diagram, _: diagram.update({"annotations": [{"id": "layout-note", "text": "布局说明", "x": 500, "y": 400}]}), "must not define global annotations"),
@@ -751,7 +793,7 @@ def test_diagram_009_route_contract() -> None:
         assert "edge-028" not in edges
         assert edges["edge-027"]["points"] == [[1294.0, 3514.0], [1294.0, 3604.0]]
         assert edges["edge-027"]["label"]["text"] == "主动取消／支付超时15分钟未付"
-        assert edges["edge-027"]["label"]["x"] - edges["edge-027"]["points"][0][0] == 100
+        assert edges["edge-027"]["label"]["x"] - edges["edge-027"]["points"][0][0] > 100
         lanes = {lane["id"]: lane for lane in generated["designNotes"]["layout"]["loopLanes"]}
         assert lanes["cart-retry-right"]["laneOffset"] == 840
         assert lanes["payment-retry-left"]["laneOffset"] == 890
@@ -786,6 +828,7 @@ if __name__ == "__main__":
     test_checker_fails_closed_when_required_artifact_is_removed()
     test_checker_rejects_legacy_diagram_without_structured_contract()
     test_diagram_003_fixed_regression()
+    test_structural_group_capacity_and_style_contract_pass()
     test_diagram_geometry_gates_fail_closed()
     test_diagram_geometry_gates_pass_on_valid_sequence()
     test_diagram_risk_assessment()

@@ -1,0 +1,2112 @@
+{
+  "version": 1,
+  "document": "docs/草稿/方案设计/zhangyi/蓝图方案-V1.1.md",
+  "expected_contract_path": "docs/草稿/方案设计/zhangyi/assets/diagram-020-migrated.expected.json",
+  "diagrams": [
+    {
+      "id": "diagram-020",
+      "output": "diagram-020-migrated.svg",
+      "title": "图表 020｜搜索域运营流程（迁移重绘版）",
+      "description": "运营经云Mall管理后台配置暗纹词和搜索热词，并在运营后台维护黑名单、白名单和排序；包含必填项校验、错误反馈、生效状态分支和配置管理流程。",
+      "diagramType": "flowchart",
+      "canvas": {
+        "width": 3200,
+        "height": 2200
+      },
+      "sourceBasis": [
+        {
+          "kind": "approved-formal-blueprint",
+          "path": "docs/正式/20-需求文档/搜索域/蓝图-搜索和推荐V1.1.md",
+          "digest": "sha256:f0385cbd290de5cb73692fd557cd83f1726b53a9b6353e4a19b947f3f1d0a1f0"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "diagram-020-node-operator",
+          "shape": "rect",
+          "label": "运营",
+          "x": 1420,
+          "y": 40,
+          "width": 260,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-cloud-admin",
+          "shape": "rect",
+          "label": "云Mall管理后台",
+          "x": 520,
+          "y": 160,
+          "width": 280,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-search-admin",
+          "shape": "rect",
+          "label": "搜索管理后台",
+          "x": 1830,
+          "y": 160,
+          "width": 300,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-darkword-page",
+          "shape": "rect",
+          "label": "暗纹词配置页面",
+          "x": 300,
+          "y": 450,
+          "width": 320,
+          "height": 72,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-darkword-edit",
+          "shape": "rect",
+          "label": "新增/编辑/删除暗纹词",
+          "x": 220,
+          "y": 650,
+          "width": 480,
+          "height": 96,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-darkword-check",
+          "shape": "diamond",
+          "label": "必填项校验通过?",
+          "x": 270,
+          "y": 900,
+          "width": 380,
+          "height": 180,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-darkword-error",
+          "shape": "rect",
+          "label": "提示错误位置",
+          "x": 160,
+          "y": 1160,
+          "width": 240,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-darkword-save",
+          "shape": "rect",
+          "label": "保存",
+          "x": 440,
+          "y": 1160,
+          "width": 220,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-darkword-status",
+          "shape": "diamond",
+          "label": "状态是否生效?",
+          "x": 270,
+          "y": 1400,
+          "width": 380,
+          "height": 180,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-darkword-effective",
+          "shape": "rect",
+          "label": "暗纹词生效",
+          "x": 150,
+          "y": 1690,
+          "width": 260,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-darkword-inactive",
+          "shape": "rect",
+          "label": "暗纹词失效",
+          "x": 620,
+          "y": 1690,
+          "width": 180,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-hotword-page",
+          "shape": "rect",
+          "label": "搜索热词配置页面",
+          "x": 1140,
+          "y": 450,
+          "width": 320,
+          "height": 72,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-hotword-edit",
+          "shape": "rect",
+          "label": "新增/编辑/删除搜索热词",
+          "x": 1060,
+          "y": 650,
+          "width": 480,
+          "height": 96,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-required-check",
+          "shape": "diamond",
+          "label": "必填项校验通过?",
+          "x": 1110,
+          "y": 900,
+          "width": 380,
+          "height": 180,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-validation-error",
+          "shape": "rect",
+          "label": "提示错误位置",
+          "x": 1000,
+          "y": 1160,
+          "width": 240,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-hotword-save",
+          "shape": "rect",
+          "label": "保存",
+          "x": 1280,
+          "y": 1160,
+          "width": 220,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-effective-check",
+          "shape": "diamond",
+          "label": "状态是否生效?",
+          "x": 1110,
+          "y": 1400,
+          "width": 380,
+          "height": 180,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-hotword-effective",
+          "shape": "rect",
+          "label": "搜索热词生效",
+          "x": 990,
+          "y": 1690,
+          "width": 280,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-hotword-inactive",
+          "shape": "rect",
+          "label": "搜索热词失效",
+          "x": 1500,
+          "y": 1690,
+          "width": 200,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-operation-admin",
+          "shape": "rect",
+          "label": "运营后台页面",
+          "x": 2280,
+          "y": 450,
+          "width": 280,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-blacklist-manage",
+          "shape": "rect",
+          "label": "黑名单管理",
+          "x": 1830,
+          "y": 650,
+          "width": 200,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-blacklist-select",
+          "shape": "rect",
+          "label": "选中商品",
+          "x": 1830,
+          "y": 880,
+          "width": 200,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-blacklist-edit",
+          "shape": "rect",
+          "label": "添加/移除黑名单",
+          "x": 1800,
+          "y": 1110,
+          "width": 260,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-blacklist-confirm",
+          "shape": "rect",
+          "label": "确定",
+          "x": 1840,
+          "y": 1340,
+          "width": 180,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-blacklist-effective",
+          "shape": "rect",
+          "label": "生效",
+          "x": 1840,
+          "y": 1570,
+          "width": 180,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-whitelist-manage",
+          "shape": "rect",
+          "label": "白名单管理",
+          "x": 2290,
+          "y": 650,
+          "width": 200,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-whitelist-select",
+          "shape": "rect",
+          "label": "选中商品",
+          "x": 2290,
+          "y": 880,
+          "width": 200,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-whitelist-edit",
+          "shape": "rect",
+          "label": "添加/移除白名单",
+          "x": 2260,
+          "y": 1110,
+          "width": 260,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-whitelist-confirm",
+          "shape": "rect",
+          "label": "确定",
+          "x": 2300,
+          "y": 1340,
+          "width": 180,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-whitelist-effective",
+          "shape": "rect",
+          "label": "生效",
+          "x": 2300,
+          "y": 1570,
+          "width": 180,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-sort-manage",
+          "shape": "rect",
+          "label": "排序管理",
+          "x": 2750,
+          "y": 650,
+          "width": 200,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-sort-drag",
+          "shape": "rect",
+          "label": "拖拽商品重新排序",
+          "x": 2720,
+          "y": 880,
+          "width": 260,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-sort-save",
+          "shape": "rect",
+          "label": "保存",
+          "x": 2790,
+          "y": 1110,
+          "width": 120,
+          "height": 80,
+          "fontSize": 16
+        },
+        {
+          "id": "diagram-020-node-sort-effective",
+          "shape": "rect",
+          "label": "生效",
+          "x": 2790,
+          "y": 1340,
+          "width": 120,
+          "height": 80,
+          "fontSize": 16
+        }
+      ],
+      "edges": [
+        {
+          "id": "diagram-020-edge-001",
+          "from": "diagram-020-node-operator",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-search-admin",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1610.0,
+              120
+            ],
+            [
+              1610.0,
+              140
+            ],
+            [
+              1980.0,
+              140
+            ],
+            [
+              1980.0,
+              160
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-search-admin:top",
+          "fromPortOffset": -60
+        },
+        {
+          "id": "diagram-020-edge-002",
+          "from": "diagram-020-node-search-admin",
+          "fromPort": "left",
+          "to": "diagram-020-node-hotword-page",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1830,
+              200.0
+            ],
+            [
+              1300.0,
+              200.0
+            ],
+            [
+              1300.0,
+              450
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-hotword-page:top"
+        },
+        {
+          "id": "diagram-020-edge-003",
+          "from": "diagram-020-node-search-admin",
+          "fromPort": "right",
+          "to": "diagram-020-node-operation-admin",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2130,
+              200.0
+            ],
+            [
+              2420.0,
+              200.0
+            ],
+            [
+              2420.0,
+              450
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-operation-admin:top"
+        },
+        {
+          "id": "diagram-020-edge-004",
+          "from": "diagram-020-node-hotword-page",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-hotword-edit",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1300.0,
+              522
+            ],
+            [
+              1300.0,
+              650
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-hotword-edit:top"
+        },
+        {
+          "id": "diagram-020-edge-005",
+          "from": "diagram-020-node-hotword-edit",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-required-check",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1300.0,
+              746
+            ],
+            [
+              1300.0,
+              900
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-required-check:top"
+        },
+        {
+          "id": "diagram-020-edge-006",
+          "from": "diagram-020-node-required-check",
+          "fromPort": "left",
+          "to": "diagram-020-node-validation-error",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1110,
+              990.0
+            ],
+            [
+              1030,
+              990.0
+            ],
+            [
+              1030,
+              1120
+            ],
+            [
+              1120.0,
+              1120
+            ],
+            [
+              1120.0,
+              1160
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-validation-error:top",
+          "label": {
+            "text": "否",
+            "x": 1100,
+            "y": 1055,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "diagram-020-edge-007",
+          "from": "diagram-020-node-validation-error",
+          "fromPort": "left",
+          "to": "diagram-020-node-hotword-edit",
+          "toPort": "left",
+          "kind": "directed",
+          "points": [
+            [
+              1000,
+              1200.0
+            ],
+            [
+              960,
+              1200.0
+            ],
+            [
+              960,
+              698.0
+            ],
+            [
+              1060,
+              698.0
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-hotword-edit:left",
+          "label": {
+            "text": "返回编辑",
+            "x": 1020,
+            "y": 949,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "diagram-020-edge-008",
+          "from": "diagram-020-node-required-check",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-hotword-save",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1300.0,
+              1080
+            ],
+            [
+              1300.0,
+              1120
+            ],
+            [
+              1390.0,
+              1120
+            ],
+            [
+              1390.0,
+              1160
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-hotword-save:top",
+          "label": {
+            "text": "是",
+            "x": 1345,
+            "y": 1060,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "diagram-020-edge-009",
+          "from": "diagram-020-node-hotword-save",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-effective-check",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1390.0,
+              1240
+            ],
+            [
+              1390.0,
+              1360
+            ],
+            [
+              1300.0,
+              1360
+            ],
+            [
+              1300.0,
+              1400
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-effective-check:top"
+        },
+        {
+          "id": "diagram-020-edge-010",
+          "from": "diagram-020-node-effective-check",
+          "fromPort": "left",
+          "to": "diagram-020-node-hotword-effective",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1110,
+              1490.0
+            ],
+            [
+              1040,
+              1490.0
+            ],
+            [
+              1040,
+              1650
+            ],
+            [
+              1130.0,
+              1650
+            ],
+            [
+              1130.0,
+              1690
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-hotword-effective:top",
+          "label": {
+            "text": "是",
+            "x": 985,
+            "y": 1570,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "diagram-020-edge-011",
+          "from": "diagram-020-node-effective-check",
+          "fromPort": "right",
+          "to": "diagram-020-node-hotword-inactive",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1490,
+              1490.0
+            ],
+            [
+              1600.0,
+              1490.0
+            ],
+            [
+              1600.0,
+              1690
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-hotword-inactive:top",
+          "label": {
+            "text": "否",
+            "x": 1545,
+            "y": 1420,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "diagram-020-edge-012",
+          "from": "diagram-020-node-operation-admin",
+          "fromPort": "left",
+          "to": "diagram-020-node-blacklist-manage",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2280,
+              490.0
+            ],
+            [
+              1930.0,
+              490.0
+            ],
+            [
+              1930.0,
+              650
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-blacklist-manage:top"
+        },
+        {
+          "id": "diagram-020-edge-013",
+          "from": "diagram-020-node-operation-admin",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-whitelist-manage",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2420.0,
+              530
+            ],
+            [
+              2420.0,
+              610
+            ],
+            [
+              2390.0,
+              610
+            ],
+            [
+              2390.0,
+              650
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-whitelist-manage:top"
+        },
+        {
+          "id": "diagram-020-edge-014",
+          "from": "diagram-020-node-operation-admin",
+          "fromPort": "right",
+          "to": "diagram-020-node-sort-manage",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2560,
+              490.0
+            ],
+            [
+              2850.0,
+              490.0
+            ],
+            [
+              2850.0,
+              650
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-sort-manage:top"
+        },
+        {
+          "id": "diagram-020-edge-015",
+          "from": "diagram-020-node-blacklist-manage",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-blacklist-select",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1930.0,
+              730
+            ],
+            [
+              1930.0,
+              880
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-blacklist-select:top"
+        },
+        {
+          "id": "diagram-020-edge-016",
+          "from": "diagram-020-node-blacklist-select",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-blacklist-edit",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1930.0,
+              960
+            ],
+            [
+              1930.0,
+              1110
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-blacklist-edit:top"
+        },
+        {
+          "id": "diagram-020-edge-017",
+          "from": "diagram-020-node-blacklist-edit",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-blacklist-confirm",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1930.0,
+              1190
+            ],
+            [
+              1930.0,
+              1340
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-blacklist-confirm:top"
+        },
+        {
+          "id": "diagram-020-edge-018",
+          "from": "diagram-020-node-blacklist-confirm",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-blacklist-effective",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1930.0,
+              1420
+            ],
+            [
+              1930.0,
+              1570
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-blacklist-effective:top"
+        },
+        {
+          "id": "diagram-020-edge-019",
+          "from": "diagram-020-node-whitelist-manage",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-whitelist-select",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2390.0,
+              730
+            ],
+            [
+              2390.0,
+              880
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-whitelist-select:top"
+        },
+        {
+          "id": "diagram-020-edge-020",
+          "from": "diagram-020-node-whitelist-select",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-whitelist-edit",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2390.0,
+              960
+            ],
+            [
+              2390.0,
+              1110
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-whitelist-edit:top"
+        },
+        {
+          "id": "diagram-020-edge-021",
+          "from": "diagram-020-node-whitelist-edit",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-whitelist-confirm",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2390.0,
+              1190
+            ],
+            [
+              2390.0,
+              1340
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-whitelist-confirm:top"
+        },
+        {
+          "id": "diagram-020-edge-022",
+          "from": "diagram-020-node-whitelist-confirm",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-whitelist-effective",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2390.0,
+              1420
+            ],
+            [
+              2390.0,
+              1570
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-whitelist-effective:top"
+        },
+        {
+          "id": "diagram-020-edge-023",
+          "from": "diagram-020-node-sort-manage",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-sort-drag",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2850.0,
+              730
+            ],
+            [
+              2850.0,
+              880
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-sort-drag:top"
+        },
+        {
+          "id": "diagram-020-edge-024",
+          "from": "diagram-020-node-sort-drag",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-sort-save",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2850.0,
+              960
+            ],
+            [
+              2850.0,
+              1110
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-sort-save:top"
+        },
+        {
+          "id": "diagram-020-edge-025",
+          "from": "diagram-020-node-sort-save",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-sort-effective",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2850.0,
+              1190
+            ],
+            [
+              2850.0,
+              1340
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-sort-effective:top"
+        },
+        {
+          "id": "diagram-020-edge-026",
+          "from": "diagram-020-node-operator",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-cloud-admin",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1490.0,
+              120
+            ],
+            [
+              1490.0,
+              140
+            ],
+            [
+              660.0,
+              140
+            ],
+            [
+              660.0,
+              160
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-cloud-admin:top",
+          "fromPortOffset": 60
+        },
+        {
+          "id": "diagram-020-edge-027",
+          "from": "diagram-020-node-cloud-admin",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-darkword-page",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              660.0,
+              240
+            ],
+            [
+              660.0,
+              400
+            ],
+            [
+              460.0,
+              400
+            ],
+            [
+              460.0,
+              450
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-darkword-page:top"
+        },
+        {
+          "id": "diagram-020-edge-028",
+          "from": "diagram-020-node-darkword-page",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-darkword-edit",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              460.0,
+              522
+            ],
+            [
+              460.0,
+              650
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-darkword-edit:top"
+        },
+        {
+          "id": "diagram-020-edge-029",
+          "from": "diagram-020-node-darkword-edit",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-darkword-check",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              460.0,
+              746
+            ],
+            [
+              460.0,
+              900
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-darkword-check:top"
+        },
+        {
+          "id": "diagram-020-edge-030",
+          "from": "diagram-020-node-darkword-check",
+          "fromPort": "left",
+          "to": "diagram-020-node-darkword-error",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              270,
+              990.0
+            ],
+            [
+              180,
+              990.0
+            ],
+            [
+              180,
+              1120
+            ],
+            [
+              280.0,
+              1120
+            ],
+            [
+              280.0,
+              1160
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-darkword-error:top",
+          "label": {
+            "text": "否",
+            "x": 225,
+            "y": 1055,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "diagram-020-edge-031",
+          "from": "diagram-020-node-darkword-error",
+          "fromPort": "left",
+          "to": "diagram-020-node-darkword-edit",
+          "toPort": "left",
+          "kind": "directed",
+          "points": [
+            [
+              160,
+              1200.0
+            ],
+            [
+              120,
+              1200.0
+            ],
+            [
+              120,
+              698.0
+            ],
+            [
+              220,
+              698.0
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-darkword-edit:left",
+          "label": {
+            "text": "返回编辑",
+            "x": 165,
+            "y": 949,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "diagram-020-edge-032",
+          "from": "diagram-020-node-darkword-check",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-darkword-save",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              460.0,
+              1080
+            ],
+            [
+              460.0,
+              1120
+            ],
+            [
+              550.0,
+              1120
+            ],
+            [
+              550.0,
+              1160
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-darkword-save:top",
+          "label": {
+            "text": "是",
+            "x": 505,
+            "y": 1060,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "diagram-020-edge-033",
+          "from": "diagram-020-node-darkword-save",
+          "fromPort": "bottom",
+          "to": "diagram-020-node-darkword-status",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              550.0,
+              1240
+            ],
+            [
+              550.0,
+              1360
+            ],
+            [
+              460.0,
+              1360
+            ],
+            [
+              460.0,
+              1400
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-darkword-status:top"
+        },
+        {
+          "id": "diagram-020-edge-034",
+          "from": "diagram-020-node-darkword-status",
+          "fromPort": "left",
+          "to": "diagram-020-node-darkword-effective",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              270,
+              1490.0
+            ],
+            [
+              220,
+              1490.0
+            ],
+            [
+              220,
+              1650
+            ],
+            [
+              280.0,
+              1650
+            ],
+            [
+              280.0,
+              1690
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-darkword-effective:top",
+          "label": {
+            "text": "是",
+            "x": 165,
+            "y": 1570,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "diagram-020-edge-035",
+          "from": "diagram-020-node-darkword-status",
+          "fromPort": "right",
+          "to": "diagram-020-node-darkword-inactive",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              650,
+              1490.0
+            ],
+            [
+              710.0,
+              1490.0
+            ],
+            [
+              710.0,
+              1690
+            ]
+          ],
+          "arrowTarget": "diagram-020-node-darkword-inactive:top",
+          "label": {
+            "text": "否",
+            "x": 680,
+            "y": 1420,
+            "fontSize": 14
+          }
+        }
+      ],
+      "groups": [
+        {
+          "id": "diagram-020-group-darkword",
+          "label": "暗纹词配置流程",
+          "semanticType": "exclusive",
+          "members": [
+            "diagram-020-node-darkword-page",
+            "diagram-020-node-darkword-edit",
+            "diagram-020-node-darkword-check",
+            "diagram-020-node-darkword-error",
+            "diagram-020-node-darkword-save",
+            "diagram-020-node-darkword-status",
+            "diagram-020-node-darkword-effective",
+            "diagram-020-node-darkword-inactive"
+          ],
+          "styleRole": "structural",
+          "x": 80,
+          "y": 330,
+          "width": 760,
+          "height": 1730,
+          "sourceStatus": "migrated-from-formal-blueprint"
+        },
+        {
+          "id": "diagram-020-group-hotword",
+          "label": "搜索热词配置流程",
+          "semanticType": "exclusive",
+          "members": [
+            "diagram-020-node-hotword-page",
+            "diagram-020-node-hotword-edit",
+            "diagram-020-node-required-check",
+            "diagram-020-node-validation-error",
+            "diagram-020-node-hotword-save",
+            "diagram-020-node-effective-check",
+            "diagram-020-node-hotword-effective",
+            "diagram-020-node-hotword-inactive"
+          ],
+          "styleRole": "structural",
+          "x": 920,
+          "y": 330,
+          "width": 820,
+          "height": 1730,
+          "sourceStatus": "migrated-from-formal-blueprint"
+        },
+        {
+          "id": "diagram-020-group-operation",
+          "label": "运营后台管理流程",
+          "semanticType": "exclusive",
+          "members": [
+            "diagram-020-node-operation-admin",
+            "diagram-020-node-blacklist-manage",
+            "diagram-020-node-blacklist-select",
+            "diagram-020-node-blacklist-edit",
+            "diagram-020-node-blacklist-confirm",
+            "diagram-020-node-blacklist-effective",
+            "diagram-020-node-whitelist-manage",
+            "diagram-020-node-whitelist-select",
+            "diagram-020-node-whitelist-edit",
+            "diagram-020-node-whitelist-confirm",
+            "diagram-020-node-whitelist-effective",
+            "diagram-020-node-sort-manage",
+            "diagram-020-node-sort-drag",
+            "diagram-020-node-sort-save",
+            "diagram-020-node-sort-effective"
+          ],
+          "styleRole": "structural",
+          "x": 1760,
+          "y": 330,
+          "width": 1320,
+          "height": 1500,
+          "sourceStatus": "migrated-from-formal-blueprint"
+        }
+      ],
+      "designNotes": {
+        "intent": "按正式搜索域来源表达暗纹词、搜索热词和运营后台管理的配置责任边界、校验反馈与生效状态。",
+        "semanticModes": [
+          "process-flow"
+        ],
+        "visualSemantics": [
+          {
+            "channel": "node-shape",
+            "role": "semantic",
+            "reason": "矩形表示页面/动作，菱形表示必填项或状态判断。"
+          },
+          {
+            "channel": "edge-kind",
+            "role": "semantic",
+            "reason": "所有连接器保留正式来源的有向关系，判断出口用就地文字标签表达。"
+          },
+          {
+            "channel": "group-role",
+            "role": "semantic",
+            "reason": "三个业务流程使用 structural 仅表达布局分区层级；节点、连接器和业务文字继续承担业务语义并保持黑色。"
+          }
+        ],
+        "legendDecision": {
+          "status": "exempt",
+          "reason": "统一视觉基线禁止全局图例；形状、业务边界和判断标签均在对象附近就地表达。",
+          "inlineSemanticEvidence": [
+            {
+              "object": "node-shape",
+              "meaning": "菱形节点和判断出口标签直接表达校验/状态分支。"
+            },
+            {
+              "object": "group-role",
+              "meaning": "分组标题与成员结构直接表达三个业务配置边界。"
+            }
+          ]
+        },
+        "splitDecision": {
+          "status": "kept-single",
+          "reason": "正式来源把三个运营配置流程定义为同一搜索域运营目标；迁移版通过分区域扩展画布而非压缩或删减语义。",
+          "singleGoal": "理解搜索域运营如何配置暗纹词、搜索热词和运营后台策略。",
+          "staticBoundary": "本图不固化后台字段、接口契约或实现协议。",
+          "processFlowDistinction": "仅表达按业务发生顺序的配置过程，不把业务边界颜色当作状态语义。",
+          "readabilityEvidence": {
+            "normal": {
+              "status": "UNVERIFIED",
+              "evidence": ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.normal"
+            },
+            "fit": {
+              "status": "UNVERIFIED",
+              "evidence": ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.fit"
+            },
+            "zoom": {
+              "status": "UNVERIFIED",
+              "evidence": ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.zoom"
+            }
+          }
+        },
+        "sourceRelationMerges": [],
+        "layout": {
+          "direction": "TB",
+          "mainAxis": 1550,
+          "layerTolerance": 24,
+          "symmetryGroups": [],
+          "mergeNodes": [
+            {
+              "nodeId": "diagram-020-node-hotword-edit",
+              "reason": "校验失败反馈和配置页面主流程在编辑节点合流。",
+              "edgeIds": [
+                "diagram-020-edge-004",
+                "diagram-020-edge-007"
+              ],
+              "ports": {
+                "diagram-020-edge-004": "top",
+                "diagram-020-edge-007": "left"
+              }
+            },
+            {
+              "nodeId": "diagram-020-node-darkword-edit",
+              "reason": "校验失败反馈和配置页面主流程在编辑节点合流。",
+              "edgeIds": [
+                "diagram-020-edge-028",
+                "diagram-020-edge-031"
+              ],
+              "ports": {
+                "diagram-020-edge-028": "top",
+                "diagram-020-edge-031": "left"
+              }
+            }
+          ],
+          "branchLayerExceptions": [],
+          "branchPortExceptions": [
+            {
+              "edgeIds": [
+                "diagram-020-edge-006"
+              ],
+              "reason": "失败分支从判断左侧出线并从错误提示顶部进入。"
+            },
+            {
+              "edgeIds": [
+                "diagram-020-edge-008"
+              ],
+              "reason": "校验通过继续主流程，从判断底部进入保存节点顶部。"
+            },
+            {
+              "edgeIds": [
+                "diagram-020-edge-010"
+              ],
+              "reason": "生效分支从判断左侧出线进入左侧生效节点顶部。"
+            },
+            {
+              "edgeIds": [
+                "diagram-020-edge-011"
+              ],
+              "reason": "失效分支从判断右侧出线进入右侧失效节点顶部。"
+            },
+            {
+              "edgeIds": [
+                "diagram-020-edge-030"
+              ],
+              "reason": "失败分支从判断左侧出线并从错误提示顶部进入。"
+            },
+            {
+              "edgeIds": [
+                "diagram-020-edge-032"
+              ],
+              "reason": "校验通过继续主流程，从判断底部进入保存节点顶部。"
+            },
+            {
+              "edgeIds": [
+                "diagram-020-edge-034"
+              ],
+              "reason": "生效分支从判断左侧出线进入左侧生效节点顶部。"
+            },
+            {
+              "edgeIds": [
+                "diagram-020-edge-035"
+              ],
+              "reason": "失效分支从判断右侧出线进入右侧失效节点顶部。"
+            }
+          ],
+          "sideSwitchExceptions": [],
+          "crossingExceptions": [],
+          "readabilityEvidence": {
+            "normal": {
+              "status": "UNVERIFIED",
+              "evidence": ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.normal"
+            },
+            "fit": {
+              "status": "UNVERIFIED",
+              "evidence": ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.fit"
+            },
+            "zoom": {
+              "status": "UNVERIFIED",
+              "evidence": ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.zoom"
+            }
+          },
+          "mainFlow": {
+            "type": "branching-process",
+            "entryNodeIds": [
+              "diagram-020-node-operator"
+            ],
+            "exitNodeIds": [
+              "diagram-020-node-darkword-effective",
+              "diagram-020-node-darkword-inactive",
+              "diagram-020-node-hotword-effective",
+              "diagram-020-node-hotword-inactive",
+              "diagram-020-node-blacklist-effective",
+              "diagram-020-node-whitelist-effective",
+              "diagram-020-node-sort-effective"
+            ],
+            "nodeIds": [
+              "diagram-020-node-operator",
+              "diagram-020-node-cloud-admin",
+              "diagram-020-node-search-admin",
+              "diagram-020-node-darkword-page",
+              "diagram-020-node-darkword-edit",
+              "diagram-020-node-darkword-check",
+              "diagram-020-node-darkword-error",
+              "diagram-020-node-darkword-save",
+              "diagram-020-node-darkword-status",
+              "diagram-020-node-darkword-effective",
+              "diagram-020-node-darkword-inactive",
+              "diagram-020-node-hotword-page",
+              "diagram-020-node-hotword-edit",
+              "diagram-020-node-required-check",
+              "diagram-020-node-validation-error",
+              "diagram-020-node-hotword-save",
+              "diagram-020-node-effective-check",
+              "diagram-020-node-hotword-effective",
+              "diagram-020-node-hotword-inactive",
+              "diagram-020-node-operation-admin",
+              "diagram-020-node-blacklist-manage",
+              "diagram-020-node-blacklist-select",
+              "diagram-020-node-blacklist-edit",
+              "diagram-020-node-blacklist-confirm",
+              "diagram-020-node-blacklist-effective",
+              "diagram-020-node-whitelist-manage",
+              "diagram-020-node-whitelist-select",
+              "diagram-020-node-whitelist-edit",
+              "diagram-020-node-whitelist-confirm",
+              "diagram-020-node-whitelist-effective",
+              "diagram-020-node-sort-manage",
+              "diagram-020-node-sort-drag",
+              "diagram-020-node-sort-save",
+              "diagram-020-node-sort-effective"
+            ],
+            "edgeIds": [
+              "diagram-020-edge-001",
+              "diagram-020-edge-002",
+              "diagram-020-edge-003",
+              "diagram-020-edge-004",
+              "diagram-020-edge-005",
+              "diagram-020-edge-006",
+              "diagram-020-edge-007",
+              "diagram-020-edge-008",
+              "diagram-020-edge-009",
+              "diagram-020-edge-010",
+              "diagram-020-edge-011",
+              "diagram-020-edge-012",
+              "diagram-020-edge-013",
+              "diagram-020-edge-014",
+              "diagram-020-edge-015",
+              "diagram-020-edge-016",
+              "diagram-020-edge-017",
+              "diagram-020-edge-018",
+              "diagram-020-edge-019",
+              "diagram-020-edge-020",
+              "diagram-020-edge-021",
+              "diagram-020-edge-022",
+              "diagram-020-edge-023",
+              "diagram-020-edge-024",
+              "diagram-020-edge-025",
+              "diagram-020-edge-026",
+              "diagram-020-edge-027",
+              "diagram-020-edge-028",
+              "diagram-020-edge-029",
+              "diagram-020-edge-030",
+              "diagram-020-edge-031",
+              "diagram-020-edge-032",
+              "diagram-020-edge-033",
+              "diagram-020-edge-034",
+              "diagram-020-edge-035"
+            ]
+          },
+          "branchGroups": [
+            {
+              "id": "diagram-020-node-darkword-check",
+              "decisionNodeId": "diagram-020-node-darkword-check",
+              "edgeIds": [
+                "diagram-020-edge-030",
+                "diagram-020-edge-032"
+              ],
+              "targetIds": [
+                "diagram-020-node-darkword-error",
+                "diagram-020-node-darkword-save"
+              ],
+              "direction": "TB",
+              "tolerance": 24,
+              "depth": 0,
+              "mode": "inline",
+              "reason": "暗纹词必填项判断的失败与通过出口在同一业务层就地展开。"
+            },
+            {
+              "id": "diagram-020-node-darkword-status",
+              "decisionNodeId": "diagram-020-node-darkword-status",
+              "edgeIds": [
+                "diagram-020-edge-034",
+                "diagram-020-edge-035"
+              ],
+              "targetIds": [
+                "diagram-020-node-darkword-effective",
+                "diagram-020-node-darkword-inactive"
+              ],
+              "direction": "TB",
+              "tolerance": 24,
+              "depth": 0,
+              "mode": "inline",
+              "reason": "暗纹词生效状态的两个出口在同一业务层对称展开。"
+            },
+            {
+              "id": "diagram-020-node-required-check",
+              "decisionNodeId": "diagram-020-node-required-check",
+              "edgeIds": [
+                "diagram-020-edge-006",
+                "diagram-020-edge-008"
+              ],
+              "targetIds": [
+                "diagram-020-node-validation-error",
+                "diagram-020-node-hotword-save"
+              ],
+              "direction": "TB",
+              "tolerance": 24,
+              "depth": 0,
+              "mode": "inline",
+              "reason": "搜索热词必填项判断的失败与通过出口在同一业务层就地展开。"
+            },
+            {
+              "id": "diagram-020-node-effective-check",
+              "decisionNodeId": "diagram-020-node-effective-check",
+              "edgeIds": [
+                "diagram-020-edge-010",
+                "diagram-020-edge-011"
+              ],
+              "targetIds": [
+                "diagram-020-node-hotword-effective",
+                "diagram-020-node-hotword-inactive"
+              ],
+              "direction": "TB",
+              "tolerance": 24,
+              "depth": 0,
+              "mode": "inline",
+              "reason": "搜索热词生效状态的两个出口在同一业务层对称展开。"
+            }
+          ],
+          "primaryFlow": {
+            "nodeIds": [
+              "diagram-020-node-operator"
+            ],
+            "edgeIds": [],
+            "reason": "入口主轴先分流到三个业务区域；各区域内部沿 TB 主轴连续推进。"
+          },
+          "loopLanes": [
+            {
+              "id": "diagram-020-loop-hotword-validation",
+              "side": "left",
+              "laneOffset": 40,
+              "edgeIds": [
+                "diagram-020-edge-007"
+              ],
+              "reason": "搜索热词校验失败沿热词分组左侧独立 lane 返回编辑。"
+            },
+            {
+              "id": "diagram-020-loop-darkword-validation",
+              "side": "left",
+              "laneOffset": 24,
+              "edgeIds": [
+                "diagram-020-edge-031"
+              ],
+              "reason": "暗纹词校验失败沿暗纹词分组左侧独立 lane 返回编辑。"
+            }
+          ],
+          "affectedEdgePlan": {
+            "affectedEdgeIds": [
+              "diagram-020-edge-001",
+              "diagram-020-edge-002",
+              "diagram-020-edge-003",
+              "diagram-020-edge-004",
+              "diagram-020-edge-005",
+              "diagram-020-edge-006",
+              "diagram-020-edge-007",
+              "diagram-020-edge-008",
+              "diagram-020-edge-009",
+              "diagram-020-edge-010",
+              "diagram-020-edge-011",
+              "diagram-020-edge-012",
+              "diagram-020-edge-013",
+              "diagram-020-edge-014",
+              "diagram-020-edge-015",
+              "diagram-020-edge-016",
+              "diagram-020-edge-017",
+              "diagram-020-edge-018",
+              "diagram-020-edge-019",
+              "diagram-020-edge-020",
+              "diagram-020-edge-021",
+              "diagram-020-edge-022",
+              "diagram-020-edge-023",
+              "diagram-020-edge-024",
+              "diagram-020-edge-025",
+              "diagram-020-edge-026",
+              "diagram-020-edge-027",
+              "diagram-020-edge-028",
+              "diagram-020-edge-029",
+              "diagram-020-edge-030",
+              "diagram-020-edge-031",
+              "diagram-020-edge-032",
+              "diagram-020-edge-033",
+              "diagram-020-edge-034",
+              "diagram-020-edge-035"
+            ],
+            "strategy": "multi-region-tb-with-local-lanes",
+            "review": "所有节点和 incident edges 均按新画布重新计算。"
+          },
+          "changeImpactReview": {
+            "baseline": "../diagram-020/docs/草稿/方案设计/zhangyi/assets/diagram-020.svg",
+            "baselineSha256": "36de3a43bd141cb7c25c887d721b7d2f8298248434a075ad4b3f3326ec798cd2",
+            "baselineStaticStatus": "expected-failure: raw metadata lacks canvas/styleRole/generation closure",
+            "movedNodeIds": [
+              "diagram-020-node-operator",
+              "diagram-020-node-cloud-admin",
+              "diagram-020-node-search-admin",
+              "diagram-020-node-darkword-page",
+              "diagram-020-node-darkword-edit",
+              "diagram-020-node-darkword-check",
+              "diagram-020-node-darkword-error",
+              "diagram-020-node-darkword-save",
+              "diagram-020-node-darkword-status",
+              "diagram-020-node-darkword-effective",
+              "diagram-020-node-darkword-inactive",
+              "diagram-020-node-hotword-page",
+              "diagram-020-node-hotword-edit",
+              "diagram-020-node-required-check",
+              "diagram-020-node-validation-error",
+              "diagram-020-node-hotword-save",
+              "diagram-020-node-effective-check",
+              "diagram-020-node-hotword-effective",
+              "diagram-020-node-hotword-inactive",
+              "diagram-020-node-operation-admin",
+              "diagram-020-node-blacklist-manage",
+              "diagram-020-node-blacklist-select",
+              "diagram-020-node-blacklist-edit",
+              "diagram-020-node-blacklist-confirm",
+              "diagram-020-node-blacklist-effective",
+              "diagram-020-node-whitelist-manage",
+              "diagram-020-node-whitelist-select",
+              "diagram-020-node-whitelist-edit",
+              "diagram-020-node-whitelist-confirm",
+              "diagram-020-node-whitelist-effective",
+              "diagram-020-node-sort-manage",
+              "diagram-020-node-sort-drag",
+              "diagram-020-node-sort-save",
+              "diagram-020-node-sort-effective"
+            ],
+            "impactedEdgeIds": [
+              "diagram-020-edge-001",
+              "diagram-020-edge-002",
+              "diagram-020-edge-003",
+              "diagram-020-edge-004",
+              "diagram-020-edge-005",
+              "diagram-020-edge-006",
+              "diagram-020-edge-007",
+              "diagram-020-edge-008",
+              "diagram-020-edge-009",
+              "diagram-020-edge-010",
+              "diagram-020-edge-011",
+              "diagram-020-edge-012",
+              "diagram-020-edge-013",
+              "diagram-020-edge-014",
+              "diagram-020-edge-015",
+              "diagram-020-edge-016",
+              "diagram-020-edge-017",
+              "diagram-020-edge-018",
+              "diagram-020-edge-019",
+              "diagram-020-edge-020",
+              "diagram-020-edge-021",
+              "diagram-020-edge-022",
+              "diagram-020-edge-023",
+              "diagram-020-edge-024",
+              "diagram-020-edge-025",
+              "diagram-020-edge-026",
+              "diagram-020-edge-027",
+              "diagram-020-edge-028",
+              "diagram-020-edge-029",
+              "diagram-020-edge-030",
+              "diagram-020-edge-031",
+              "diagram-020-edge-032",
+              "diagram-020-edge-033",
+              "diagram-020-edge-034",
+              "diagram-020-edge-035"
+            ],
+            "edgeReviews": [
+              {
+                "edgeId": "diagram-020-edge-001",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-002",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-003",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-004",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-005",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-006",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-007",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-008",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-009",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-010",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-011",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-012",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-013",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-014",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-015",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-016",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-017",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-018",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-019",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-020",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-021",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-022",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-023",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-024",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-025",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-026",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-027",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-028",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-029",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-030",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-031",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-032",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-033",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-034",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              },
+              {
+                "edgeId": "diagram-020-edge-035",
+                "status": "recomputed",
+                "reason": "节点迁移后按端口和局部 lane 重新生成"
+              }
+            ]
+          }
+        }
+      },
+      "mainFlow": {
+        "type": "branching-process",
+        "entryNodeIds": [
+          "diagram-020-node-operator"
+        ],
+        "exitNodeIds": [
+          "diagram-020-node-darkword-effective",
+          "diagram-020-node-darkword-inactive",
+          "diagram-020-node-hotword-effective",
+          "diagram-020-node-hotword-inactive",
+          "diagram-020-node-blacklist-effective",
+          "diagram-020-node-whitelist-effective",
+          "diagram-020-node-sort-effective"
+        ],
+        "nodeIds": [
+          "diagram-020-node-operator",
+          "diagram-020-node-cloud-admin",
+          "diagram-020-node-search-admin",
+          "diagram-020-node-darkword-page",
+          "diagram-020-node-darkword-edit",
+          "diagram-020-node-darkword-check",
+          "diagram-020-node-darkword-error",
+          "diagram-020-node-darkword-save",
+          "diagram-020-node-darkword-status",
+          "diagram-020-node-darkword-effective",
+          "diagram-020-node-darkword-inactive",
+          "diagram-020-node-hotword-page",
+          "diagram-020-node-hotword-edit",
+          "diagram-020-node-required-check",
+          "diagram-020-node-validation-error",
+          "diagram-020-node-hotword-save",
+          "diagram-020-node-effective-check",
+          "diagram-020-node-hotword-effective",
+          "diagram-020-node-hotword-inactive",
+          "diagram-020-node-operation-admin",
+          "diagram-020-node-blacklist-manage",
+          "diagram-020-node-blacklist-select",
+          "diagram-020-node-blacklist-edit",
+          "diagram-020-node-blacklist-confirm",
+          "diagram-020-node-blacklist-effective",
+          "diagram-020-node-whitelist-manage",
+          "diagram-020-node-whitelist-select",
+          "diagram-020-node-whitelist-edit",
+          "diagram-020-node-whitelist-confirm",
+          "diagram-020-node-whitelist-effective",
+          "diagram-020-node-sort-manage",
+          "diagram-020-node-sort-drag",
+          "diagram-020-node-sort-save",
+          "diagram-020-node-sort-effective"
+        ],
+        "edgeIds": [
+          "diagram-020-edge-001",
+          "diagram-020-edge-002",
+          "diagram-020-edge-003",
+          "diagram-020-edge-004",
+          "diagram-020-edge-005",
+          "diagram-020-edge-006",
+          "diagram-020-edge-007",
+          "diagram-020-edge-008",
+          "diagram-020-edge-009",
+          "diagram-020-edge-010",
+          "diagram-020-edge-011",
+          "diagram-020-edge-012",
+          "diagram-020-edge-013",
+          "diagram-020-edge-014",
+          "diagram-020-edge-015",
+          "diagram-020-edge-016",
+          "diagram-020-edge-017",
+          "diagram-020-edge-018",
+          "diagram-020-edge-019",
+          "diagram-020-edge-020",
+          "diagram-020-edge-021",
+          "diagram-020-edge-022",
+          "diagram-020-edge-023",
+          "diagram-020-edge-024",
+          "diagram-020-edge-025",
+          "diagram-020-edge-026",
+          "diagram-020-edge-027",
+          "diagram-020-edge-028",
+          "diagram-020-edge-029",
+          "diagram-020-edge-030",
+          "diagram-020-edge-031",
+          "diagram-020-edge-032",
+          "diagram-020-edge-033",
+          "diagram-020-edge-034",
+          "diagram-020-edge-035"
+        ]
+      },
+      "generation": {
+        "generator": {
+          "name": "diagram-020-migrated-generator",
+          "version": "1.0.0"
+        },
+        "config": {
+          "summary": "diagram-020 迁移重绘：TB 多区域布局、组内独立 lane、CJK 感知节点尺寸、业务对象黑色与结构区域灰色",
+          "digest": "sha256:63c47ca9afbb861e0424604fa34799e3009b9bbaa04a13b4d2934f05b24c1a1f"
+        },
+        "route_config": {
+          "diagram_id": "diagram-020",
+          "affected_edge_ids": [
+            "diagram-020-edge-001",
+            "diagram-020-edge-002",
+            "diagram-020-edge-003",
+            "diagram-020-edge-004",
+            "diagram-020-edge-005",
+            "diagram-020-edge-006",
+            "diagram-020-edge-007",
+            "diagram-020-edge-008",
+            "diagram-020-edge-009",
+            "diagram-020-edge-010",
+            "diagram-020-edge-011",
+            "diagram-020-edge-012",
+            "diagram-020-edge-013",
+            "diagram-020-edge-014",
+            "diagram-020-edge-015",
+            "diagram-020-edge-016",
+            "diagram-020-edge-017",
+            "diagram-020-edge-018",
+            "diagram-020-edge-019",
+            "diagram-020-edge-020",
+            "diagram-020-edge-021",
+            "diagram-020-edge-022",
+            "diagram-020-edge-023",
+            "diagram-020-edge-024",
+            "diagram-020-edge-025",
+            "diagram-020-edge-026",
+            "diagram-020-edge-027",
+            "diagram-020-edge-028",
+            "diagram-020-edge-029",
+            "diagram-020-edge-030",
+            "diagram-020-edge-031",
+            "diagram-020-edge-032",
+            "diagram-020-edge-033",
+            "diagram-020-edge-034",
+            "diagram-020-edge-035"
+          ],
+          "strategy": "multi-region-tb-with-local-lanes",
+          "source_relation_policy": "preserve-all-stable-edges"
+        },
+        "source_refs": [
+          "docs/正式/20-需求文档/搜索域/蓝图-搜索和推荐V1.1.md"
+        ],
+        "outputs": [
+          "docs/草稿/方案设计/zhangyi/assets/diagram-020-migrated.svg",
+          "docs/草稿/方案设计/zhangyi/assets/diagram-020-migrated.diagram.json",
+          "docs/草稿/方案设计/zhangyi/assets/diagram-020-migrated.expected.json"
+        ],
+        "command_argv": [
+          "python3",
+          "diagram-020-migrated-generator.py"
+        ],
+        "cwd": "."
+      }
+    }
+  ]
+}
