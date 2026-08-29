@@ -6,7 +6,7 @@
     "ssot": { "type": "http", "url": "https://ssot.dev.loeyae.com/mcp/" },
     "chrome-devtools": {
       "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@1.6.0"],
+      "args": ["-y", "chrome-devtools-mcp"],
       "disabled": false,
       "autoApprove": []
     }

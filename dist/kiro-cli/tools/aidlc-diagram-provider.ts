@@ -9,9 +9,10 @@ import {
   expectedContractPath,
   parseExpectedContract,
 } from "./diagram-contract.js";
+import { DIAGRAM_VISUAL_STYLE } from "./diagram-visual-style.js";
 
 const PROJECT_ROOT = process.cwd();
-const PROVIDER_PACKAGE = "chrome-devtools-mcp@1.6.0";
+const PROVIDER_PACKAGE = "chrome-devtools-mcp";
 const COMMAND_TIMEOUT_MS = 120_000;
 const MAX_VIEWPORT = { width: 3840, height: 2160 };
 const MIN_VIEWPORT = { width: 320, height: 240 };
@@ -95,6 +96,8 @@ interface InspectionResult {
   arrowOcclusionPairs: string[];
   arrowDecorationOcclusionPairs: string[];
   labelEdgeCollisionPairs: string[];
+  labelPlacementErrors: string[];
+  visualStyleErrors: string[];
   textOverflowIds: string[];
   textOverlapPairs: string[];
   contentBBox: GeometryBox | null;
@@ -382,6 +385,7 @@ function loadActualLayout(item: DiagramRequest): ActualLayout {
 const INSPECTION_SCRIPT = `(contract = {}) => {
   try {
   const svg = document.querySelector('svg');
+  const visualStyle = ${JSON.stringify(DIAGRAM_VISUAL_STYLE)};
   if (contract.resetScroll === true) window.scrollTo(0, 0);
   const ids = (selector, attribute) => [...document.querySelectorAll(selector)].map((element) => element.getAttribute(attribute)).filter(Boolean);
   const bounds = (element) => {
@@ -578,7 +582,16 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     if (!edgeId) continue;
     const geometry = edgeGeometry(edge);
     if (!geometry) continue;
-    edgeSamples.push({ id: edgeId, element: edge, points: geometry.points });
+    const rawSegments = parseLineSegments(edge);
+    const matrix = edge.getScreenCTM();
+    const screenSegments = rawSegments && matrix
+      ? rawSegments.map(([first, second]) => {
+        const firstScreen = new DOMPoint(first[0], first[1]).matrixTransform(matrix);
+        const secondScreen = new DOMPoint(second[0], second[1]).matrixTransform(matrix);
+        return [[firstScreen.x, firstScreen.y], [secondScreen.x, secondScreen.y]];
+      })
+      : geometry.points.slice(1).map((point, index) => [geometry.points[index], point]);
+    edgeSamples.push({ id: edgeId, element: edge, points: geometry.points, segments: screenSegments });
     edgeBendCounts[edgeId] = bendCount(geometry.points);
     edgeGeometryKinds[edgeId] = edgeBendCounts[edgeId] === 0 ? 'direct' : (isOrthogonal(edge, geometry.points) ? 'manhattan' : 'custom');
     if (geometry.box) edgeBBoxes[edgeId] = geometry.box;
@@ -590,7 +603,7 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     for (let pointIndex = geometry.points.length - 2; pointIndex >= 0; pointIndex--) if (!pointEqual(geometry.points[pointIndex], lastPoint)) { previousPoint = geometry.points[pointIndex]; break; }
     if (previousPoint && pointInside(previousPoint, targetBox)) portApproachErrors.push(edgeId);
     const hitNodes = new Set();
-    for (const screen of geometry.points) for (const [nodeId, box] of nodeBoxes) if (box && screen[0] >= box.left && screen[0] <= box.right && screen[1] >= box.top && screen[1] <= box.bottom) hitNodes.add(nodeId);
+    for (const screen of geometry.points) for (const [nodeId, box] of nodeBoxes) if (box && pointInside(screen, box)) hitNodes.add(nodeId);
     for (const nodeId of hitNodes) edgeNodeCollisionPairs.push(edgeId + ':' + nodeId);
   }
   for (let first = 0; first < edgeSamples.length; first++) for (let second = first + 1; second < edgeSamples.length; second++) {
@@ -598,12 +611,12 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     const secondEdge = edgeSamples[second];
     let hasIntersection = false;
     let hasOverlap = false;
-    for (let firstPoint = 1; firstPoint < firstEdge.points.length; firstPoint++) for (let secondPoint = 1; secondPoint < secondEdge.points.length; secondPoint++) {
-      const relation = segmentRelation(firstEdge.points[firstPoint - 1], firstEdge.points[firstPoint], secondEdge.points[secondPoint - 1], secondEdge.points[secondPoint]);
+    for (const firstSegment of firstEdge.segments) for (const secondSegment of secondEdge.segments) {
+      const relation = segmentRelation(firstSegment[0], firstSegment[1], secondSegment[0], secondSegment[1]);
       if (relation === 'overlap') hasOverlap = true;
       else if (relation === 'cross') hasIntersection = true;
       else if (relation === 'touch') {
-        const sharedEndpoint = [firstEdge.points[firstPoint - 1], firstEdge.points[firstPoint]].some((point) => [secondEdge.points[secondPoint - 1], secondEdge.points[secondPoint]].some((candidate) => pointEqual(point, candidate)));
+        const sharedEndpoint = [firstSegment[0], firstSegment[1]].some((point) => [secondSegment[0], secondSegment[1]].some((candidate) => pointEqual(point, candidate)));
         if (!sharedEndpoint) hasIntersection = true;
       }
     }
@@ -634,6 +647,35 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
       if (arrowId && overlaps(label.box, bounds(arrow))) labelArrowCollisionPairs.push(labelId + ':' + arrowId);
     }
   }
+  const labelPlacementErrors = [];
+  for (const [labelId, label] of labelBoxes) {
+    const edgeSample = edgeSamples.find((candidate) => candidate.id === labelId);
+    const localSegments = edgeSample ? parseLineSegments(edgeSample.element) : null;
+    const matrix = edgeSample?.element.getScreenCTM();
+    if (!label.box || !localSegments || !matrix) {
+      labelPlacementErrors.push(labelId || 'unknown');
+      continue;
+    }
+    const labelCenter = [(label.box.left + label.box.right) / 2, (label.box.top + label.box.bottom) / 2];
+    const scale = Math.max(0.01, Math.min(Math.hypot(matrix.a, matrix.b), Math.hypot(matrix.c, matrix.d)));
+    const valid = localSegments.some(([first, second]) => {
+      const firstScreen = new DOMPoint(first[0], first[1]).matrixTransform(matrix);
+      const secondScreen = new DOMPoint(second[0], second[1]).matrixTransform(matrix);
+      const dx = secondScreen.x - firstScreen.x;
+      const dy = secondScreen.y - firstScreen.y;
+      const length = Math.hypot(dx, dy);
+      if (length <= 0) return false;
+      const tangent = [dx / length, dy / length];
+      const normal = [-tangent[1], tangent[0]];
+      const midpoint = [(firstScreen.x + secondScreen.x) / 2, (firstScreen.y + secondScreen.y) / 2];
+      const offset = [labelCenter[0] - midpoint[0], labelCenter[1] - midpoint[1]];
+      const parallelDistance = Math.abs(offset[0] * tangent[0] + offset[1] * tangent[1]);
+      const perpendicularDistance = Math.abs(offset[0] * normal[0] + offset[1] * normal[1]);
+      const perpendicularRadius = Math.abs(normal[0]) * label.box.width / 2 + Math.abs(normal[1]) * label.box.height / 2;
+      return parallelDistance <= Math.max(2, scale * 2) && perpendicularDistance >= perpendicularRadius + visualStyle.labelClearance * scale;
+    });
+    if (!valid) labelPlacementErrors.push(labelId || 'unknown');
+  }
   const groupElements = [...document.querySelectorAll('[id^="group-"]')];
   const groupBoxes = new Map(groupElements.map((element) => [element.id.slice('group-'.length), bounds(element)]));
   const groupOverlapPairs = [];
@@ -653,11 +695,12 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
   const sideSwitchDetectedEdgeIds = [];
   const sideSwitchErrors = [];
   const viewBoxValues = svg?.viewBox?.baseVal;
-  const svgBoxForAxis = svg ? bounds(svg) : null;
-  if ((contract.readingDirection === 'TB' || contract.readingDirection === 'LR') && Number.isFinite(Number(contract.mainAxis)) && viewBoxValues && svgBoxForAxis && viewBoxValues.width > 0 && viewBoxValues.height > 0) {
-    const screenAxis = contract.readingDirection === 'TB'
-      ? svgBoxForAxis.left + (Number(contract.mainAxis) - viewBoxValues.x) / viewBoxValues.width * svgBoxForAxis.width
-      : svgBoxForAxis.top + (Number(contract.mainAxis) - viewBoxValues.y) / viewBoxValues.height * svgBoxForAxis.height;
+  const svgMatrixForAxis = svg?.getScreenCTM();
+  if ((contract.readingDirection === 'TB' || contract.readingDirection === 'LR') && Number.isFinite(Number(contract.mainAxis)) && viewBoxValues && svgMatrixForAxis && viewBoxValues.width > 0 && viewBoxValues.height > 0) {
+    const axisPoint = contract.readingDirection === 'TB'
+      ? new DOMPoint(Number(contract.mainAxis), viewBoxValues.y).matrixTransform(svgMatrixForAxis)
+      : new DOMPoint(viewBoxValues.x, Number(contract.mainAxis)).matrixTransform(svgMatrixForAxis);
+    const screenAxis = contract.readingDirection === 'TB' ? axisPoint.x : axisPoint.y;
     const sideOf = (point) => {
       const delta = (contract.readingDirection === 'TB' ? point[0] : point[1]) - screenAxis;
       return delta > 1 ? 1 : delta < -1 ? -1 : 0;
@@ -717,6 +760,42 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     return tspans.length > 0 ? tspans : [element];
   });
   const textEntries = textElements.map((element, index) => ({ id: element.getAttribute('data-text-id') || String(index), element, box: bounds(element), owner: element.closest('[data-node], [data-edge], [data-edge-arrow], [data-edge-label], [data-note], [data-legend-item]') }));
+  const visualStyleErrors = [];
+  const black = (value) => value === 'rgb(0, 0, 0)' || value === '#000000' || value === '#000';
+  const white = (value) => value === 'rgb(255, 255, 255)' || value === '#ffffff' || value === '#fff';
+  const frameStyle = (element, id) => {
+    const style = getComputedStyle(element);
+    if (style.fill !== 'none' || !black(style.stroke) || Math.abs(parseFloat(style.strokeWidth) - visualStyle.strokeWidth) > 0.01) visualStyleErrors.push(id);
+  };
+  const backgrounds = [...document.querySelectorAll('[data-canvas-background]')];
+  if (backgrounds.length !== 1) visualStyleErrors.push('canvas-background-count');
+  else {
+    const style = getComputedStyle(backgrounds[0]);
+    if (!white(style.fill) || style.stroke !== 'none' || Number(style.opacity) !== 1) visualStyleErrors.push('canvas-background-style');
+  }
+  if (legendElements.length > 0 || noteElements.length > 0) visualStyleErrors.push('global-legend-or-note');
+  for (const node of nodeElements) frameStyle(nodeOutline(node), 'node:' + (node.getAttribute('data-node') || 'unknown'));
+  for (const group of groupElements) frameStyle(nodeOutline(group), 'group:' + group.id);
+  for (const edge of edgeElements) frameStyle(edge, 'edge:' + (edge.getAttribute('data-edge') || 'unknown'));
+  for (const lifeline of document.querySelectorAll('[data-lifeline-for]')) frameStyle(lifeline, 'lifeline:' + (lifeline.getAttribute('data-lifeline-for') || 'unknown'));
+  for (const label of labelElements) if (label.tagName.toLowerCase() !== 'text' || label.querySelector('rect, polygon, ellipse, circle, path')) visualStyleErrors.push('label-frame:' + (label.getAttribute('data-edge-label') || 'unknown'));
+  for (const entry of textEntries) {
+    const style = getComputedStyle(entry.element);
+    const edgeLabel = entry.element.hasAttribute('data-edge-label');
+    const firstFont = style.fontFamily.split(',')[0].replace(/["']/g, '').trim().toLowerCase();
+    const expectedSize = edgeLabel ? visualStyle.edgeLabelFontSize : visualStyle.frameFontSize;
+    if ((firstFont !== 'microsoft yahei' && firstFont !== '微软雅黑') || Math.abs(parseFloat(style.fontSize) - expectedSize) > 0.01 || !black(style.fill)) visualStyleErrors.push('text:' + entry.id);
+    if (edgeLabel && (style.textAnchor !== 'middle' || !['middle', 'central'].includes(style.dominantBaseline))) visualStyleErrors.push('label-anchor:' + entry.id);
+  }
+  for (const marker of document.querySelectorAll('marker')) {
+    if (Number(marker.getAttribute('markerWidth')) !== visualStyle.arrowWidth || Number(marker.getAttribute('markerHeight')) !== visualStyle.arrowHeight || marker.getAttribute('markerUnits') !== 'userSpaceOnUse') visualStyleErrors.push('marker:' + (marker.id || 'unknown'));
+    const shape = marker.querySelector('path, polygon');
+    if (!shape || !black(getComputedStyle(shape).fill)) visualStyleErrors.push('marker-fill:' + (marker.id || 'unknown'));
+  }
+  for (const arrow of arrowElements) {
+    const box = typeof arrow.getBBox === 'function' ? arrow.getBBox() : null;
+    if (!box || Math.abs(box.width - visualStyle.arrowWidth) > 0.01 || Math.abs(box.height - visualStyle.arrowHeight) > 0.01 || !black(getComputedStyle(arrow).fill)) visualStyleErrors.push('arrow:' + (arrow.getAttribute('data-edge-arrow') || 'unknown'));
+  }
   for (const entry of textEntries) if (entry.box && svgBounds && (entry.box.left < svgBounds.left - 1 || entry.box.right > svgBounds.right + 1 || entry.box.top < svgBounds.top - 1 || entry.box.bottom > svgBounds.bottom + 1)) textOverflowIds.push(entry.id);
   for (let first = 0; first < textEntries.length; first++) for (let second = first + 1; second < textEntries.length; second++) {
     const firstOwner = textEntries[first].owner;
@@ -774,6 +853,8 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     arrowOcclusionPairs,
     arrowDecorationOcclusionPairs,
     labelEdgeCollisionPairs,
+    labelPlacementErrors,
+    visualStyleErrors,
     textOverflowIds,
     textOverlapPairs,
     contentBBox,
@@ -857,6 +938,8 @@ function inspection(payload: unknown): InspectionResult {
     arrowOcclusionPairs: Array.isArray(data.arrowOcclusionPairs) ? data.arrowOcclusionPairs.map(String) : [],
     arrowDecorationOcclusionPairs: Array.isArray(data.arrowDecorationOcclusionPairs) ? data.arrowDecorationOcclusionPairs.map(String) : [],
     labelEdgeCollisionPairs: Array.isArray(data.labelEdgeCollisionPairs) ? data.labelEdgeCollisionPairs.map(String) : [],
+    labelPlacementErrors: Array.isArray(data.labelPlacementErrors) ? data.labelPlacementErrors.map(String) : [],
+    visualStyleErrors: Array.isArray(data.visualStyleErrors) ? data.visualStyleErrors.map(String) : [],
     textOverflowIds: Array.isArray(data.textOverflowIds) ? data.textOverflowIds.map(String) : [],
     textOverlapPairs: Array.isArray(data.textOverlapPairs) ? data.textOverlapPairs.map(String) : [],
     contentBBox: data.contentBBox && typeof data.contentBBox === "object" ? (() => {
@@ -879,6 +962,16 @@ function inspection(payload: unknown): InspectionResult {
 
 function equalIds(actual: string[], expected: string[]): boolean {
   return actual.length === expected.length && expected.every((id) => actual.includes(id));
+}
+
+function readingPathTrace(result: InspectionResult, expected: ExpectedContract): Array<{ id: string; nodes_found: boolean; edges_found: boolean; labels_found: boolean; missing_nodes: string[]; missing_edges: string[]; missing_labels: string[] }> {
+  return (expected.sourceGraph?.readingPaths || []).map((path) => {
+    const missingNodes = path.nodeIds.filter((nodeId) => !result.nodeIds.includes(nodeId));
+    const missingEdges = path.edgeIds.filter((edgeId) => !result.edgeIds.includes(edgeId));
+    const visibleLabels = path.edgeIds.map((edgeId) => result.edgeLabels[edgeId] || "");
+    const missingLabels = path.requiredLabels.filter((label) => !visibleLabels.includes(label));
+    return { id: path.id, nodes_found: missingNodes.length === 0, edges_found: missingEdges.length === 0, labels_found: missingLabels.length === 0, missing_nodes: missingNodes, missing_edges: missingEdges, missing_labels: missingLabels };
+  });
 }
 
 function validateInspection(result: InspectionResult, expected?: ExpectedContract, actualLayout: ActualLayout = { nodeCenters: {} }, readingView: ReadingView = "normal"): string[] {
@@ -908,6 +1001,8 @@ function validateInspection(result: InspectionResult, expected?: ExpectedContrac
   if (result.arrowOcclusionPairs.length > 0) errors.push(`SVG arrow overlay is occluded: ${result.arrowOcclusionPairs.join(", ")}`);
   if (result.arrowDecorationOcclusionPairs.length > 0) errors.push(`SVG arrow overlay is occluded by a later decoration: ${result.arrowDecorationOcclusionPairs.join(", ")}`);
   if (result.labelEdgeCollisionPairs.length > 0) errors.push(`SVG label geometry intersects edge geometry: ${result.labelEdgeCollisionPairs.join(", ")}`);
+  if (result.labelPlacementErrors.length > 0) errors.push(`SVG edge labels are not centered and normally offset from their route segment: ${result.labelPlacementErrors.join(", ")}`);
+  if (result.visualStyleErrors.length > 0) errors.push(`SVG unified visual style is invalid: ${result.visualStyleErrors.join(", ")}`);
   if (result.labelNodeCollisionPairs.length > 0) errors.push(`SVG label geometry intersects node geometry: ${result.labelNodeCollisionPairs.join(", ")}`);
   if (result.labelLabelCollisionPairs.length > 0) errors.push(`SVG labels overlap: ${result.labelLabelCollisionPairs.join(", ")}`);
   if (result.labelArrowCollisionPairs.length > 0) errors.push(`SVG labels intersect arrow overlays: ${result.labelArrowCollisionPairs.join(", ")}`);
@@ -919,6 +1014,9 @@ function validateInspection(result: InspectionResult, expected?: ExpectedContrac
   if (readingView === "normal" && (Math.abs(result.scroll.x) > 1 || Math.abs(result.scroll.y) > 1)) errors.push(`NORMAL_SCROLL_ORIGIN: normal view started at scroll=(${result.scroll.x},${result.scroll.y}), expected (0,0)`);
   if (readingView === "fit" && !result.contentFullyVisible) errors.push("FIT_INCOMPLETE: fit view does not fully contain the rendered diagram content");
   if (!expected) return errors;
+  for (const trace of readingPathTrace(result, expected)) {
+    if (!trace.nodes_found || !trace.edges_found || !trace.labels_found) errors.push(`READING_PATH_TRACE: ${trace.id} is incomplete (nodes=${trace.missing_nodes.join(",") || "ok"}; edges=${trace.missing_edges.join(",") || "ok"}; labels=${trace.missing_labels.join(",") || "ok"})`);
+  }
   if (readingView === "zoom") {
     const uncovered = expected.routeContract.affectedEdgeIds.filter((edgeId) => {
       const box = result.edgeBBoxes[edgeId];
@@ -950,12 +1048,14 @@ function validateInspection(result: InspectionResult, expected?: ExpectedContrac
     if (expectedArrowTarget && (!actual || actual.arrowTarget !== expectedArrowTarget)) errors.push(`browser edge arrowTarget does not match expected contract for ${edgeId}`);
   }
   if (!result.legendBeforeNotes) errors.push("browser legend and annotations are in the wrong order");
+  const branchLayerExceptionEdgeIds = new Set(expected.routeContract.exceptions.filter((entry) => entry.type === "branch-layer").flatMap((entry) => entry.edgeIds));
   for (const branch of expected.routeContract.branchGroups) {
     const values = branch.targetIds.map((targetId) => {
       const center = result.nodeCenters[targetId];
       return center ? (branch.direction === "TB" ? center.y : center.x) : NaN;
     });
-    if (values.some((value) => !Number.isFinite(value)) || Math.max(...values) - Math.min(...values) > Math.max(1, branch.tolerance)) errors.push("browser expected branch targets are not on the same business layer");
+    const hasBranchLayerException = (branch.edgeIds || []).some((edgeId) => branchLayerExceptionEdgeIds.has(edgeId));
+    if (values.some((value) => !Number.isFinite(value)) || (!hasBranchLayerException && Math.max(...values) - Math.min(...values) > Math.max(1, branch.tolerance))) errors.push("browser expected branch targets are not on the same business layer");
   }
   if (expected.directedEdgeCount > 0 && result.arrowTargets.length < expected.directedEdgeCount) errors.push("browser arrow target mapping is incomplete");
   for (const intent of expected.routeContract.edgeIntents) {
@@ -1115,6 +1215,22 @@ async function main(): Promise<void> {
       const pageId = selectPage(pages);
       runChrome(["select_page", String(pageId), "--bringToFront"]);
       runChrome(["resize_page", String(viewport.width), String(viewport.height)]);
+      if (readingView !== "normal") {
+        runChrome(["evaluate_script", `() => {
+          const svg = document.querySelector('svg');
+          if (!svg) return false;
+          document.documentElement.style.width = '100vw';
+          document.documentElement.style.height = '100vh';
+          document.body.style.width = '100vw';
+          document.body.style.height = '100vh';
+          svg.style.width = '100vw';
+          svg.style.height = '100vh';
+          svg.style.maxWidth = 'none';
+          svg.style.maxHeight = 'none';
+          svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+          return true;
+        }`]);
+      }
       const browserContract = {
         readingDirection: actualLayout.readingDirection || expected.routeContract.direction,
         mainAxis: actualLayout.mainAxis,
@@ -1169,6 +1285,7 @@ async function main(): Promise<void> {
         status: errors.length === 0 ? "passed" : "failed",
         errors,
         inspection: inspected,
+        reading_path_trace: readingPathTrace(inspected, expected),
         route_actual: { edge_bend_counts: inspected.edgeBendCounts, edge_geometry_kinds: inspected.edgeGeometryKinds },
         exception_evidence: exceptionEvidence,
         screenshot_path: relativeArtifact(screenshot),
@@ -1198,7 +1315,7 @@ async function main(): Promise<void> {
       gate_statuses: { structure: "STRUCTURE_PASS", route_contract: "ROUTE_CONTRACT_PASS", geometry: "GEOMETRY_PASS", visual: "VISUAL_PASS", overall: "OVERALL_PASS" },
       render_status: "passed",
       expected_contract_status: "passed",
-      provider: { name: "chrome-devtools-mcp", version: "1.6.0", operation: request.target_operation },
+      provider: { name: "chrome-devtools-mcp", package: PROVIDER_PACKAGE, operation: request.target_operation },
       provider_validation: { status: "passed", request: relativeArtifact(projectPath(options.request, "request")), views: readingEvidence, results },
       timestamp: new Date().toISOString(),
     };

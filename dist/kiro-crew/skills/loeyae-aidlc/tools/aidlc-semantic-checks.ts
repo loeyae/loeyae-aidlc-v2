@@ -4,6 +4,7 @@ import { spawnSync } from "child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, resolve } from "path";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
+import { DIAGRAM_VISUAL_STYLE, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
 import {
   ExpectedContract,
   expectedContractPath,
@@ -287,7 +288,7 @@ function diagramContract(): Record<string, unknown> {
   const edgeKinds = new Set(["directed", "bidirectional", "undirected", "dashed"]);
   const diagramTypes = new Set(["architecture", "context", "container", "flowchart", "pipeline", "sequence", "state", "er", "deployment", "class", "component", "infrastructure"]);
   const semanticModes = new Set(["static-boundary", "static-relation", "process-flow", "data-flow", "dependency-flow", "constraint"]);
-  const visualChannels = new Set(["edge-kind", "node-shape", "tone", "group-role", "icon"]);
+  const visualChannels = new Set(["edge-kind", "node-shape", "group-role", "icon"]);
   const visualRoles = new Set(["semantic", "decorative"]);
   const groupTypes = new Set(["exclusive", "nested", "cross-cutting", "overlay"]);
   const legendStatuses = new Set(["required", "exempt", "not-needed"]);
@@ -304,7 +305,6 @@ function diagramContract(): Record<string, unknown> {
   let riskScore = 0;
   const riskReasons = new Set<string>();
 
-  const targetKey = (target: Record<string, unknown>): string => `${target.kind}:${target.ref}`;
   const requireString = (value: unknown, field: string): string => {
     if (typeof value !== "string" || value.trim().length === 0) fail(`${field} must be a non-empty string`);
     return value.trim();
@@ -320,7 +320,6 @@ function diagramContract(): Record<string, unknown> {
     const groups = Array.isArray(diagram.groups) ? diagram.groups : [];
     if (edges.length > 0) values.set("edge-kind", new Set(edges.map((edge) => edge.kind || "directed")));
     if (nodes.length > 0) values.set("node-shape", new Set(nodes.map((node) => node.shape || "rect")));
-    if (nodes.length > 0 || groups.length > 0) values.set("tone", new Set([...nodes, ...groups].map((item) => item.tone || "neutral")));
     const typedGroups = groups.filter((group) => group.semanticType);
     if (typedGroups.length > 0) values.set("group-role", new Set(typedGroups.map((group) => group.semanticType)));
     return values;
@@ -422,6 +421,12 @@ function diagramContract(): Record<string, unknown> {
     }
     return entering < leaving && leaving > 0 && entering < 1;
   };
+  const segmentOverlapsRectangleBoundary = (first: [number, number], second: [number, number], rectangle: Rectangle): boolean => {
+    const overlap = (firstLow: number, firstHigh: number, secondLow: number, secondHigh: number): boolean => Math.min(firstHigh, secondHigh) - Math.max(firstLow, secondLow) > 1e-6;
+    if (first[0] === second[0]) return (Math.abs(first[0] - rectangle.left) <= 1e-6 || Math.abs(first[0] - rectangle.right) <= 1e-6) && overlap(first[1], second[1], rectangle.top, rectangle.bottom);
+    if (first[1] === second[1]) return (Math.abs(first[1] - rectangle.top) <= 1e-6 || Math.abs(first[1] - rectangle.bottom) <= 1e-6) && overlap(first[0], second[0], rectangle.left, rectangle.right);
+    return false;
+  };
   const segmentsIntersect = (first: [number, number], second: [number, number], third: [number, number], fourth: [number, number]): boolean => {
     const relation = segmentRelation(first, second, third, fourth);
     if (relation === "cross" || relation === "overlap") return true;
@@ -434,10 +439,12 @@ function diagramContract(): Record<string, unknown> {
     const lines = Array.isArray(rawText) ? rawText.map((line) => requireString(line, `${field}.text`)) : [requireString(rawText, `${field}.text`)];
     const x = requireFinite(label.x, `${field}.x`);
     const y = requireFinite(label.y, `${field}.y`);
-    const fontSize = label.fontSize === undefined ? 14 : requireFinite(label.fontSize, `${field}.fontSize`);
-    if (fontSize < (field.includes("edge") ? 12 : 14)) fail(`${field}.fontSize is below the readable minimum`);
-    const width = Math.max(8, ...lines.map((line) => line.length * fontSize * 0.55)) + 16;
-    const height = lines.length * fontSize * 1.2 + 8;
+    const edgeLabel = field.includes("edge");
+    const expectedFontSize = edgeLabel ? DIAGRAM_VISUAL_STYLE.edgeLabelFontSize : DIAGRAM_VISUAL_STYLE.frameFontSize;
+    const fontSize = label.fontSize === undefined ? expectedFontSize : requireFinite(label.fontSize, `${field}.fontSize`);
+    if (fontSize !== expectedFontSize) fail(`FONT_STYLE: ${field}.fontSize must be ${expectedFontSize}`);
+    const width = Math.max(1, ...lines.map((line) => line.length * fontSize * 0.55));
+    const height = lines.length * fontSize * 1.2;
     return { left: x - width / 2, top: y - height / 2, right: x + width / 2, bottom: y + height / 2 };
   };
   const layoutExceptionIds = (layout: Record<string, any>, field: string): Set<string> => {
@@ -619,6 +626,8 @@ function diagramContract(): Record<string, unknown> {
       if (!Array.isArray(diagram.nodes) || diagram.nodes.length === 0) fail(`diagram ${id} must contain nodes`);
       if (!Array.isArray(diagram.edges)) fail(`diagram ${id}.edges must be an array`);
       if (!Array.isArray(diagram.groups || [])) fail(`diagram ${id}.groups must be an array`);
+      if (diagram.legend !== undefined) fail(`VISUAL_STYLE: diagram ${id} must not define a global legend`);
+      if (diagram.annotations !== undefined && (!Array.isArray(diagram.annotations) || diagram.annotations.length > 0)) fail(`VISUAL_STYLE: diagram ${id} must not define global annotations`);
 
       // New/adjusted diagrams must carry the v1 structured design contract.
       if (!diagramTypes.has(diagram.diagramType)) fail(`MIGRATION_REQUIRED: diagram ${id} lacks a valid diagramType`);
@@ -682,13 +691,14 @@ function diagramContract(): Record<string, unknown> {
       for (const node of diagram.nodes) {
         const nodeId = requireString(node.id, `diagram ${id} node.id`);
         if (nodes.has(nodeId) || !shapes.has(node.shape || "rect")) fail(`diagram ${id} has an invalid or duplicated node: ${nodeId}`);
+        if (node.tone !== undefined) fail(`VISUAL_STYLE: diagram ${id} node ${nodeId} must not define tone`);
         nodes.set(nodeId, node);
         for (const property of ["x", "y", "width", "height"]) requireFinite(node[property], `diagram ${id} node ${nodeId}.${property}`);
         if (node.width <= 0 || node.height <= 0 || node.x < 0 || node.y < 0 || node.x + node.width > diagram.canvas.width || node.y + node.height > diagram.canvas.height) fail(`diagram ${id} node ${nodeId} is outside the canvas`);
         const rawLabel = node.label;
         const labelLines = Array.isArray(rawLabel) ? rawLabel.map((line: unknown) => requireString(line, `diagram ${id} node ${nodeId}.label`)) : [requireString(rawLabel, `diagram ${id} node ${nodeId}.label`)];
-        const nodeFontSize = node.fontSize === undefined ? 14 : requireFinite(node.fontSize, `diagram ${id} node ${nodeId}.fontSize`);
-        if (nodeFontSize < 14) fail(`diagram ${id} node ${nodeId}.fontSize is below 14`);
+        const nodeFontSize = node.fontSize === undefined ? DIAGRAM_VISUAL_STYLE.frameFontSize : requireFinite(node.fontSize, `diagram ${id} node ${nodeId}.fontSize`);
+        if (nodeFontSize !== DIAGRAM_VISUAL_STYLE.frameFontSize) fail(`FONT_STYLE: diagram ${id} node ${nodeId}.fontSize must be ${DIAGRAM_VISUAL_STYLE.frameFontSize}`);
         const textWidth = Math.max(...labelLines.map((line: string) => line.length * nodeFontSize * 0.55));
         const textHeight = labelLines.length * nodeFontSize * 1.2;
         if (textWidth + 32 > node.width || textHeight + 24 > node.height) fail(`LABEL_OVERFLOW: diagram ${id} node ${nodeId} label does not fit its node`);
@@ -701,12 +711,7 @@ function diagramContract(): Record<string, unknown> {
         if (rectangle) nodeRectangles.set(nodeId, rectangle);
       }
       const annotationRectangles = new Map<string, Rectangle>();
-      const annotations = Array.isArray(diagram.annotations) ? diagram.annotations : [];
-      for (const annotation of annotations) {
-        const annotationId = requireString(annotation.id, `diagram ${id} annotation.id`);
-        if (!/^[a-z0-9-]+$/.test(annotationId) || annotationRectangles.has(annotationId) || nodes.has(annotationId)) fail(`diagram ${id} has an invalid or duplicated annotation: ${annotationId}`);
-        annotationRectangles.set(annotationId, textRectangle(annotation, `diagram ${id} annotation ${annotationId}`));
-      }
+      const annotations: Record<string, any>[] = [];
       const nodeEntries = [...nodeRectangles.entries()];
       for (let first = 0; first < nodeEntries.length; first++) {
         for (let second = first + 1; second < nodeEntries.length; second++) {
@@ -741,12 +746,21 @@ function diagramContract(): Record<string, unknown> {
             if (pointEqual(previous, current) || pointEqual(current, next) || (previous[0] === current[0] && current[0] === next[0]) || (previous[1] === current[1] && current[1] === next[1])) fail(`REDUNDANT_PATH_POINT: diagram ${id} edge ${edgeId} contains a redundant collinear point`);
           }
         }
-        if (edge.label && typeof edge.label === "object" && !Array.isArray(edge.label)) labelRectangles.set(edgeId, textRectangle(edge.label, `diagram ${id} edge ${edgeId}.label`));
+        if (edge.label && typeof edge.label === "object" && !Array.isArray(edge.label)) {
+          const placementError = edgeLabelPlacementError(edgeId, edge.points as [number, number][], edge.label);
+          if (placementError) fail(`diagram ${id} ${placementError}`);
+          labelRectangles.set(edgeId, textRectangle(edge.label, `diagram ${id} edge ${edgeId}.label`));
+        }
         const edgePoints = edge.points as [number, number][];
         for (const [nodeId, rectangle] of nodeRectangles) {
-          if (nodeId === edge.from || nodeId === edge.to) continue;
           for (let pointIndex = 1; pointIndex < edgePoints.length; pointIndex++) {
-            if (segmentIntersectsRectangle(edgePoints[pointIndex - 1], edgePoints[pointIndex], rectangle)) fail(`EDGE_NODE_COLLISION: diagram ${id} edge ${edgeId} collides with non-endpoint node ${nodeId}`);
+            const first = edgePoints[pointIndex - 1];
+            const second = edgePoints[pointIndex];
+            if (nodeId !== edge.from && nodeId !== edge.to && nodes.get(nodeId)?.shape !== "diamond" && segmentOverlapsRectangleBoundary(first, second, rectangle)) fail(`EDGE_NODE_BOUNDARY_OVERLAP: diagram ${id} edge ${edgeId} overlaps unrelated node boundary ${nodeId}`);
+            if (!segmentIntersectsRectangle(first, second, rectangle)) continue;
+            if (nodeId === edge.from) fail(`SOURCE_REENTRY: diagram ${id} edge ${edgeId} re-enters its source node ${nodeId}`);
+            if (nodeId === edge.to) fail(`TARGET_REENTRY: diagram ${id} edge ${edgeId} enters the interior of target node ${nodeId}`);
+            fail(`EDGE_NODE_COLLISION: diagram ${id} edge ${edgeId} collides with non-endpoint node ${nodeId}`);
           }
         }
         edges.set(edgeId, edge);
@@ -772,7 +786,33 @@ function diagramContract(): Record<string, unknown> {
         compareIds((diagram.groups || []).map((group: Record<string, any>) => String(group.id)), expected.groupIds, "group IDs", id);
         compareIds(diagram.legend?.items?.map((item: Record<string, any>) => String(item.id)) || [], expected.legendIds, "legend IDs", id);
         compareIds((diagram.annotations || []).map((annotation: Record<string, any>) => String(annotation.id)), expected.annotationIds, "annotation IDs", id);
-        for (const [nodeId, shape] of Object.entries(expected.nodeShapes)) if (shape && nodes.get(nodeId)?.shape !== shape) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} node ${nodeId} shape differs from independent expected contract`);
+        if (!expected.sourceGraph) for (const [nodeId, shape] of Object.entries(expected.nodeShapes)) if (shape && nodes.get(nodeId)?.shape !== shape) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} node ${nodeId} shape differs from independent expected contract`);
+        if (expected.sourceGraph) {
+          const sourceNodes = new Map(expected.sourceGraph.nodes.map((node) => [node.displayId, node]));
+          for (const [nodeId, sourceNode] of sourceNodes) {
+            const actualNode = nodes.get(nodeId)!;
+            if (actualNode.label !== sourceNode.label) fail(`SOURCE_NODE_FIDELITY: diagram ${id} node ${nodeId} label differs from source graph`);
+            if (actualNode.shape !== sourceNode.shape) fail(`SOURCE_NODE_FIDELITY: diagram ${id} node ${nodeId} shape differs from source graph`);
+          }
+          const sourceRelationsByEdge = new Map<string, typeof expected.sourceGraph.relations>();
+          for (const relation of expected.sourceGraph.relations) sourceRelationsByEdge.set(relation.displayEdgeId, [...(sourceRelationsByEdge.get(relation.displayEdgeId) || []), relation]);
+          for (const [edgeId, relations] of sourceRelationsByEdge) {
+            const actual = edges.get(edgeId)!;
+            const sourceKind = relations[0].kind;
+            if ((actual.kind || "directed") !== sourceKind) fail(`SOURCE_RELATION_FIDELITY: diagram ${id} edge ${edgeId} kind differs from source graph`);
+            const requiredLabel = relations.length === 1 ? relations[0].label : relations[0].displayLabel;
+            const actualLabel = actual.label && typeof actual.label === "object" && !Array.isArray(actual.label) ? String(actual.label.text || "") : undefined;
+            if (requiredLabel === undefined && actualLabel !== undefined) fail(`SOURCE_RELATION_FIDELITY: diagram ${id} edge ${edgeId} adds a label absent from source graph`);
+            if (requiredLabel !== undefined && actualLabel !== requiredLabel) fail(`SOURCE_RELATION_FIDELITY: diagram ${id} edge ${edgeId} label differs from source graph`);
+          }
+          for (const path of expected.sourceGraph.readingPaths) {
+            const labels = path.edgeIds.map((edgeId) => {
+              const edge = edges.get(edgeId)!;
+              return edge.label && typeof edge.label === "object" && !Array.isArray(edge.label) ? String(edge.label.text || "") : "";
+            });
+            for (const label of path.requiredLabels) if (!labels.includes(label)) fail(`READING_PATH_TRACE: diagram ${id} path ${path.id} is missing required label ${label}`);
+          }
+        }
         const routeDifferences = {
           endpoint: [] as string[],
           port: [] as string[],
@@ -831,6 +871,27 @@ function diagramContract(): Record<string, unknown> {
           compareIds(actualMain.nodeIds.map(String), expectedMain.nodeIds, "mainFlow nodes", id);
           compareIds(actualMain.edgeIds.map(String), expectedMain.edgeIds, "mainFlow edges", id);
         }
+        const expectedPrimary = expected.routeContract.primaryFlow;
+        if (expectedPrimary) {
+          const actualPrimary = layout.primaryFlow;
+          if (!actualPrimary || !Array.isArray(actualPrimary.nodeIds) || !Array.isArray(actualPrimary.edgeIds)) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} actual primaryFlow is missing`);
+          compareIds(actualPrimary.nodeIds.map(String), expectedPrimary.nodeIds, "primaryFlow nodes", id);
+          compareIds(actualPrimary.edgeIds.map(String), expectedPrimary.edgeIds, "primaryFlow edges", id);
+          if (String(actualPrimary.reason) !== expectedPrimary.reason) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} primaryFlow reason differs from independent expected contract`);
+        }
+        const structuredBranches = expected.routeContract.branchGroups.filter((branch) => branch.decisionNodeId && branch.edgeIds);
+        if (structuredBranches.length > 0) {
+          const actualBranches = Array.isArray(layout.branchGroups) ? layout.branchGroups as Record<string, any>[] : [];
+          for (const expectedBranch of structuredBranches) {
+            const actualBranch = actualBranches.find((branch) => (expectedBranch.id && String(branch.id) === expectedBranch.id) || String(branch.decisionNodeId) === expectedBranch.decisionNodeId);
+            if (!actualBranch) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} structured branch group ${expectedBranch.id || expectedBranch.decisionNodeId} is missing from actual layout`);
+            compareIds((actualBranch.edgeIds || []).map(String), expectedBranch.edgeIds || [], `branch group ${expectedBranch.id || expectedBranch.decisionNodeId} edge IDs`, id);
+            compareIds((actualBranch.targetIds || []).map(String), expectedBranch.targetIds, `branch group ${expectedBranch.id || expectedBranch.decisionNodeId} target IDs`, id);
+            if (expectedBranch.mergeNodeId !== undefined && String(actualBranch.mergeNodeId) !== expectedBranch.mergeNodeId) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branch group ${expectedBranch.id || expectedBranch.decisionNodeId} merge node differs from independent expected contract`);
+            if (expectedBranch.depth !== undefined && Number(actualBranch.depth) !== expectedBranch.depth) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branch group ${expectedBranch.id || expectedBranch.decisionNodeId} depth differs from independent expected contract`);
+            if (expectedBranch.mode !== undefined && String(actualBranch.mode) !== expectedBranch.mode) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branch group ${expectedBranch.id || expectedBranch.decisionNodeId} mode differs from independent expected contract`);
+          }
+        }
         const expectedLoopEdges = expected.routeContract.loopLanes.flatMap((lane) => lane.edgeIds).sort();
         const actualLoopLanes = Array.isArray(layout.loopLanes) ? layout.loopLanes as Record<string, any>[] : [];
         const actualLoopEdges = actualLoopLanes.flatMap((lane: Record<string, any>) => Array.isArray(lane.edgeIds) ? lane.edgeIds.map(String) : []).sort();
@@ -888,6 +949,7 @@ function diagramContract(): Record<string, unknown> {
       }
       const mainFlowNodeIds = new Set<string>();
       const mainFlowEdgeIds = new Set<string>();
+      const primaryFlowEdgeIds = new Set<string>();
       const loopEdgeIds = new Set<string>();
       if (processTypes.has(diagram.diagramType)) {
         const mainFlow = layout.mainFlow;
@@ -901,6 +963,10 @@ function diagramContract(): Record<string, unknown> {
         if (entryNodeIds.length === 0 || !Array.isArray(flowNodeIds) || flowNodeIds.length === 0 || !Array.isArray(flowEdgeIds) || flowEdgeIds.length === 0 || !Array.isArray(exitNodeIds) || exitNodeIds.length === 0) fail(`MIGRATION_REQUIRED: diagram ${id}.layout.mainFlow is incomplete`);
         for (const nodeId of flowNodeIds) mainFlowNodeIds.add(requireString(nodeId, `diagram ${id}.layout.mainFlow.nodeId`));
         for (const edgeId of flowEdgeIds) mainFlowEdgeIds.add(requireString(edgeId, `diagram ${id}.layout.mainFlow.edgeId`));
+        const actualPrimaryFlow = layout.primaryFlow;
+        if (actualPrimaryFlow && typeof actualPrimaryFlow === "object" && !Array.isArray(actualPrimaryFlow) && Array.isArray(actualPrimaryFlow.edgeIds)) {
+          for (const edgeId of actualPrimaryFlow.edgeIds) primaryFlowEdgeIds.add(requireString(edgeId, `diagram ${id}.layout.primaryFlow.edgeId`));
+        }
         const exitIds = exitNodeIds.map((nodeId: unknown) => requireString(nodeId, `diagram ${id}.layout.mainFlow.exitNodeId`));
         if (mainFlowNodeIds.size !== flowNodeIds.length || mainFlowEdgeIds.size !== flowEdgeIds.length || new Set(entryNodeIds).size !== entryNodeIds.length || new Set(exitIds).size !== exitIds.length) fail(`diagram ${id}.layout.mainFlow contains duplicate IDs`);
         if (entryNodeIds.some((entryNodeId) => !nodes.has(entryNodeId) || !mainFlowNodeIds.has(entryNodeId))) fail(`MAIN_FLOW_TRACE: diagram ${id} mainFlow entry node is not declared`);
@@ -936,8 +1002,9 @@ function diagramContract(): Record<string, unknown> {
             if (loopEdgeIds.has(edgeId)) fail(`LOOP_LANE: diagram ${id} loop edge ${edgeId} is assigned to more than one lane`);
             loopEdgeIds.add(edgeId);
             const edge = edges.get(edgeId)!;
-            if (!edge.label || typeof edge.label !== "object" || Array.isArray(edge.label)) fail(`LOOP_LANE: diagram ${id} loop edge ${edgeId} requires an explicit label`);
-            requireString(edge.label.text, `diagram ${id} loop edge ${edgeId}.label.text`);
+            const expectedIntent = expected?.routeContract.edgeIntents.find((intent) => intent.edgeId === edgeId);
+            if ((!edge.label || typeof edge.label !== "object" || Array.isArray(edge.label)) && expectedIntent?.labelRequired !== false) fail(`LOOP_LANE: diagram ${id} loop edge ${edgeId} requires an explicit source label`);
+            if (edge.label && typeof edge.label === "object" && !Array.isArray(edge.label)) requireString(edge.label.text, `diagram ${id} loop edge ${edgeId}.label.text`);
             const points = edge.points as [number, number][];
             const corridorPoints = points.length > 3 ? points.slice(1, -2) : points.slice(1, -1);
             const isOnDeclaredSide = (point: [number, number]): boolean => {
@@ -961,10 +1028,8 @@ function diagramContract(): Record<string, unknown> {
       }
       if (processTypes.has(diagram.diagramType)) {
         for (const [nodeId, node] of nodes) {
+          if (node.shape !== "diamond") continue;
           const outgoing = edgeEntries.filter(([, edge]) => edge.from === nodeId);
-          const decisionLike = outgoing.length >= 2 || node.shape === "diamond";
-          if (!decisionLike) continue;
-          if (node.shape !== "diamond") fail(`DECISION_SHAPE: diagram ${id} branching node ${nodeId} must use diamond`);
           if (outgoing.length < 2) fail(`DECISION_EXIT: diagram ${id} decision ${nodeId} must have at least two explicit exits`);
           for (const [edgeId, edge] of outgoing) {
             if (!edge.label || typeof edge.label !== "object" || Array.isArray(edge.label)) fail(`DECISION_EXIT: diagram ${id} decision ${nodeId} exit ${edgeId} lacks a visible label`);
@@ -987,25 +1052,36 @@ function diagramContract(): Record<string, unknown> {
       }
       for (const [nodeId, node] of nodes) {
         if (node.shape !== "diamond") continue;
-        const branchEdges = edgeEntries.filter(([, edge]) => edge.from === nodeId);
+        const branchEdges = edgeEntries.filter(([edgeId, edge]) => edge.from === nodeId && !loopEdgeIds.has(edgeId));
         if (branchEdges.length < 2) continue;
         const layers = branchEdges.map(([, edge]) => {
           const target = nodes.get(edge.to)!;
           return layoutDirection === "TB" ? target.y + target.height / 2 : target.x + target.width / 2;
         });
         if (Math.max(...layers) - Math.min(...layers) > layoutTolerance && !branchEdges.every(([edgeId]) => branchLayerExceptions.has(edgeId))) fail(`BRANCH_LAYER: diagram ${id} decision ${nodeId} branch targets are not on the same business layer`);
+        const localMergeSplit = branchEdges.length === 2 && branchEdges[0][1].to === branchEdges[1][1].to && declaredMergeNodes.has(branchEdges[0][1].to);
         if (branchEdges.length === 2 && !branchEdges.every(([edgeId]) => branchPortExceptions.has(edgeId))) {
-          const expectedSources = layoutDirection === "TB" ? new Set(["right", "left"]) : new Set(["top", "bottom"]);
-          if (new Set(branchEdges.map(([, edge]) => edge.fromPort)).size !== 2 || !branchEdges.every(([, edge]) => expectedSources.has(edge.fromPort))) fail(`BRANCH_PORT: diagram ${id} decision ${nodeId} branches must leave through the declared side ports`);
+          const primaryEdges = branchEdges.filter(([edgeId]) => primaryFlowEdgeIds.has(edgeId));
+          if (layoutDirection === "TB" && (primaryEdges.length === 1 || localMergeSplit)) {
+            const downward = localMergeSplit ? branchEdges.filter(([, edge]) => edge.fromPort === "bottom") : primaryEdges;
+            const downwardIds = new Set(downward.map(([edgeId]) => edgeId));
+            const lateralEdges = branchEdges.filter(([edgeId]) => !downwardIds.has(edgeId));
+            if (downward.length !== 1 || downward[0][1].fromPort !== "bottom" || lateralEdges.length !== 1 || !["left", "right"].includes(lateralEdges[0][1].fromPort)) fail(`BRANCH_PORT: diagram ${id} decision ${nodeId} must use bottom for its primary or direct merge exit and a side port for its local branch`);
+          } else {
+            const expectedSources = layoutDirection === "TB" ? new Set(["right", "left"]) : new Set(["top", "bottom"]);
+            if (new Set(branchEdges.map(([, edge]) => edge.fromPort)).size !== 2 || !branchEdges.every(([, edge]) => expectedSources.has(edge.fromPort))) fail(`BRANCH_PORT: diagram ${id} decision ${nodeId} branches must leave through the declared side ports`);
+          }
         }
         for (const [edgeId, edge] of branchEdges) {
           if (branchPortExceptions.has(edgeId)) continue;
-          const expectedTarget = layoutDirection === "TB" ? "top" : "left";
+          const isLocalMergeEntry = localMergeSplit && edge.to === branchEdges[0][1].to && edge.toPort !== "top";
+          const expectedTarget = isLocalMergeEntry ? edge.toPort : (layoutDirection === "TB" ? "top" : "left");
           if (edge.toPort !== expectedTarget) fail(`BRANCH_PORT: diagram ${id} branch ${edgeId} must enter target through ${expectedTarget}`);
           const points = edge.points as [number, number][];
           const last = points[points.length - 1];
           const previous = points[points.length - 2];
-          if (layoutDirection === "TB" && Math.abs(last[0] - previous[0]) > 1) fail(`BRANCH_PORT: diagram ${id} branch ${edgeId} final segment must enter vertically`);
+          if (layoutDirection === "TB" && expectedTarget === "top" && Math.abs(last[0] - previous[0]) > 1) fail(`BRANCH_PORT: diagram ${id} branch ${edgeId} final segment must enter vertically`);
+          if (layoutDirection === "TB" && ["left", "right"].includes(expectedTarget) && Math.abs(last[1] - previous[1]) > 1) fail(`BRANCH_PORT: diagram ${id} branch ${edgeId} final segment must enter horizontally`);
           if (layoutDirection === "LR" && Math.abs(last[1] - previous[1]) > 1) fail(`BRANCH_PORT: diagram ${id} branch ${edgeId} final segment must enter horizontally`);
         }
       }
@@ -1106,7 +1182,10 @@ function diagramContract(): Record<string, unknown> {
             if (nodeId === current.from || nodeId === current.to) continue;
             for (let pointIndex = 1; pointIndex < candidate.length; pointIndex++) if (segmentIntersectsRectangle(candidate[pointIndex - 1], candidate[pointIndex], rectangle)) return true;
           }
-          for (const [, label] of labelEntries) for (let pointIndex = 1; pointIndex < candidate.length; pointIndex++) if (segmentIntersectsRectangle(candidate[pointIndex - 1], candidate[pointIndex], label)) return true;
+          for (const [labelId, label] of labelEntries) {
+            if (labelId === currentId && loopEdgeIds.has(currentId)) continue;
+            for (let pointIndex = 1; pointIndex < candidate.length; pointIndex++) if (segmentIntersectsRectangle(candidate[pointIndex - 1], candidate[pointIndex], label)) return true;
+          }
           for (const [otherId, other] of edgeEntries) {
             if (otherId === currentId) continue;
             const otherPoints = other.points as [number, number][];
@@ -1124,15 +1203,30 @@ function diagramContract(): Record<string, unknown> {
           return false;
         };
         for (const [edgeId, edge] of edgeEntries) {
-          if (loopEdgeIds.has(edgeId)) continue;
           const points = edge.points as [number, number][];
           if (points.length <= 2) continue;
           const start = points[0];
           const end = points[points.length - 1];
           const candidates: [number, number][][] = [];
-          if (start[0] === end[0] || start[1] === end[1]) candidates.push([start, end]);
-          if (start[0] !== end[0] && start[1] !== end[1]) {
-            candidates.push([start, [start[0], end[1]], end], [start, [end[0], start[1]], end]);
+          const loopLane = loopEdgeIds.has(edgeId)
+            ? (Array.isArray(layout.loopLanes) ? layout.loopLanes as Record<string, any>[] : []).find((lane) => Array.isArray(lane.edgeIds) && lane.edgeIds.map(String).includes(edgeId))
+            : undefined;
+          if (loopLane) {
+            const laneOffset = Number(loopLane.laneOffset);
+            const laneCoordinates = new Set(points.slice(1, -1).map((point) => layoutDirection === "TB" ? point[0] : point[1]));
+            for (const coordinate of laneCoordinates) {
+              const distance = layoutDirection === "TB" ? layoutMainAxis - coordinate : layoutMainAxis - coordinate;
+              const isOnDeclaredSide = loopLane.side === "left" ? distance >= laneOffset : distance <= -laneOffset;
+              if (!isOnDeclaredSide) continue;
+              candidates.push(layoutDirection === "TB"
+                ? [start, [coordinate, start[1]], [coordinate, end[1]], end]
+                : [start, [start[0], coordinate], [end[0], coordinate], end]);
+            }
+          } else {
+            if (start[0] === end[0] || start[1] === end[1]) candidates.push([start, end]);
+            if (start[0] !== end[0] && start[1] !== end[1]) {
+              candidates.push([start, [start[0], end[1]], end], [start, [end[0], start[1]], end]);
+            }
           }
           const shortestLegal = candidates.some((candidate) => candidate.length < points.length
             && candidate.every((point, pointIndex) => pointIndex === 0 || !pointEqual(point, candidate[pointIndex - 1]))
@@ -1140,7 +1234,7 @@ function diagramContract(): Record<string, unknown> {
             && approachesTargetFromOutside(candidate, nodes.get(edge.to)!)
             && entersPort(candidate, edge.toPort)
             && !candidateHitsObstacle(candidate, edgeId, edge));
-          if (shortestLegal) fail(`ROUTING_MINIMALITY: diagram ${id} edge ${edgeId} has a shorter legal direct or one-bend Manhattan route`);
+          if (shortestLegal) fail(`ROUTING_MINIMALITY: diagram ${id} edge ${edgeId} has a shorter legal direct, one-bend, or lane-constrained Manhattan route`);
         }
       }
 
@@ -1148,6 +1242,7 @@ function diagramContract(): Record<string, unknown> {
       for (const group of diagram.groups || []) {
         const groupId = requireString(group.id, `diagram ${id} group.id`);
         if (groups.has(groupId) || nodes.has(groupId) || edges.has(groupId) || !groupTypes.has(group.semanticType)) fail(`MIGRATION_REQUIRED: diagram ${id} group ${groupId} lacks valid semanticType`);
+        if (group.tone !== undefined) fail(`VISUAL_STYLE: diagram ${id} group ${groupId} must not define tone`);
         if (!Array.isArray(group.members)) fail(`MIGRATION_REQUIRED: diagram ${id} group ${groupId} lacks members`);
         if (group.semanticType === "nested" && typeof group.parent !== "string") fail(`diagram ${id} nested group ${groupId} lacks parent`);
         if (group.semanticType !== "nested" && group.parent !== undefined) fail(`diagram ${id} non-nested group ${groupId} must not declare parent`);
@@ -1222,36 +1317,10 @@ function diagramContract(): Record<string, unknown> {
       const legendDecision = notes.legendDecision;
       if (!legendDecision || !legendStatuses.has(legendDecision.status)) fail(`diagram ${id} lacks a valid legendDecision`);
       requireString(legendDecision.reason, `diagram ${id}.legendDecision.reason`);
-      if (diagram.legend !== undefined && legendDecision.status !== "required") fail(`diagram ${id} has legend but legendDecision is not required`);
-      if (semanticChannels.length > 0 && !["required", "exempt"].includes(legendDecision.status)) fail(`diagram ${id} has semantic visual differences without a legend or exemption`);
-      if (legendDecision.status === "required" && (!diagram.legend || !Array.isArray(diagram.legend.items) || diagram.legend.items.length === 0)) fail(`diagram ${id} requires legend items`);
-      if (legendDecision.status === "exempt" && (diagram.legend || legendDecision.noReusedSymbol !== true || !Array.isArray(legendDecision.inlineSemanticEvidence) || legendDecision.inlineSemanticEvidence.length === 0)) fail(`diagram ${id} legend exemption is incomplete`);
-      if (legendDecision.status === "not-needed" && (semanticChannels.length > 0 || diagram.legend)) fail(`diagram ${id} legendDecision not-needed conflicts with semantic visual differences`);
-      if (diagram.legend) {
-        if (diagram.legend.placement !== "bottom") fail(`LAYOUT_AXIS: diagram ${id} legend placement must be bottom`);
-        const legendIds = new Set<string>();
-        const explained = new Set<string>();
-        for (const item of diagram.legend.items) {
-          const itemId = requireString(item.id, `diagram ${id} legend item.id`);
-          if (legendIds.has(itemId)) fail(`diagram ${id} legend item ${itemId} is duplicated`);
-          legendIds.add(itemId);
-          requireString(item.label, `diagram ${id} legend ${itemId}.label`);
-          requireString(item.meaning, `diagram ${id} legend ${itemId}.meaning`);
-          if (!item.sample || !Array.isArray(item.targets) || item.targets.length === 0) fail(`diagram ${id} legend ${itemId} lacks sample or targets`);
-          const sample = targetKey(item.sample);
-          let sampleFound = false;
-          for (const target of item.targets) {
-            if (!new Set(["node", "edge", "group"]).has(target.kind) || typeof target.ref !== "string") fail(`diagram ${id} legend ${itemId} has invalid target`);
-            const exists = target.kind === "node" ? nodes.has(target.ref) : target.kind === "edge" ? edges.has(target.ref) : groups.has(target.ref);
-            if (!exists) fail(`diagram ${id} legend ${itemId} references missing ${targetKey(target)}`);
-            const key = targetKey(target);
-            if (explained.has(key)) fail(`diagram ${id} legend target ${key} is explained more than once`);
-            explained.add(key);
-            if (key === sample) sampleFound = true;
-          }
-          if (!sampleFound) fail(`diagram ${id} legend ${itemId} sample is not included in targets`);
-        }
-      }
+      if (legendDecision.status === "required") fail(`VISUAL_STYLE: diagram ${id} must use inline text semantics instead of a global legend`);
+      if (semanticChannels.length > 0 && legendDecision.status !== "exempt") fail(`diagram ${id} semantic visual differences require an inline-only legend exemption`);
+      if (legendDecision.status === "exempt" && (!Array.isArray(legendDecision.inlineSemanticEvidence) || legendDecision.inlineSemanticEvidence.length === 0)) fail(`diagram ${id} inline semantic evidence is incomplete`);
+      if (legendDecision.status === "not-needed" && semanticChannels.length > 0) fail(`diagram ${id} legendDecision not-needed conflicts with semantic visual differences`);
 
       const splitDecision = notes.splitDecision;
       if (!splitDecision || !splitStatuses.has(splitDecision.status)) fail(`diagram ${id} lacks a valid splitDecision`);
@@ -1269,6 +1338,8 @@ function diagramContract(): Record<string, unknown> {
       if (!existsSync(svgPath)) fail(`diagram ${id} SVG output is missing: ${relativePath(svgPath)}`);
       const svg = text(svgPath);
       if (unsafeSvg.test(svg) || !/<svg\b[^>]*\bviewBox=["'][^"']+["']/i.test(svg) || !/\brole=["']img["']/i.test(svg) || !/<title\b/i.test(svg) || !/<desc\b/i.test(svg)) fail(`diagram ${id} SVG fails static safety or accessibility checks`);
+      const visualStyleErrors = diagramVisualStyleErrors(svg);
+      if (visualStyleErrors.length > 0) fail(`diagram ${id} ${visualStyleErrors.join("; ")}`);
       const renderedNodeIds = [...svg.matchAll(/\bdata-node=["']([^"']+)["']/g)].map((match) => match[1]);
       const renderedEdgeTags = [...svg.matchAll(/<[^>]*\bdata-edge=["']([^"']+)["'][^>]*>/g)].map((match) => ({ id: match[1], tag: match[0] }));
       const renderedEdgeElements = renderedEdgeTags.filter((entry) => !/\bdata-edge-arrow=["']/i.test(entry.tag));
@@ -1338,7 +1409,6 @@ function diagramContract(): Record<string, unknown> {
       if (diagram.diagramType === "sequence") { riskScore += 1; riskReasons.add("sequence diagram"); }
       if (diagram.diagramType === "flowchart" && edgeCount > 12) { riskScore += 2; riskReasons.add("complex flowchart"); }
       if (groupCount > 0 && (diagram.groups || []).some((group: Record<string, any>) => group.semanticType === "nested" && group.parent && (diagram.groups || []).some((parent: Record<string, any>) => parent.id === group.parent && parent.parent))) { riskScore += 2; riskReasons.add("nested groups"); }
-      if (diagram.legend?.items?.length > 3) { riskScore += 1; riskReasons.add("complex legend"); }
       if (/\btransform\s*=|\bmarker-end\s*=|<text\b/i.test(svg)) { riskScore += 1; riskReasons.add("browser-sensitive SVG features"); }
       diagramsChecked += 1;
     }
@@ -1360,11 +1430,11 @@ function diagramContract(): Record<string, unknown> {
     generation_closure: generationClosures,
     route_contract_reports: routeContractReports,
     semantic_status: expectedContractsChecked === diagramsChecked ? "passed" : "unverified",
-    ids_unique: true, ports_valid: true, direction_consistent: true, legend_valid: true,
+    ids_unique: true, ports_valid: true, direction_consistent: true, legend_valid: true, global_decorations_absent: true,
     groups_valid: true, viewbox_valid: true, provider_status: "unverified",
     target_operation_required: false, fr_mapping_complete: true,
     design_notes_valid: true, layout_contract_valid: true, main_flow_valid: true, loop_lanes_valid: true, decision_exit_valid: true, annotation_mapping_valid: true, migration_status: "passed", port_paths_valid: true,
-    geometry_status: "passed", edge_intersection_status: "passed", collinear_overlap_status: "passed", target_port_direction_status: "passed", target_port_approach_status: "passed", routing_minimality_status: "passed", side_switch_status: "passed", change_impact_review_status: changeImpactReviewsChecked > 0 ? "passed" : "not_applicable", visible_arrow_mapping_status: "passed",
+    geometry_status: "passed", visual_style_status: "passed", edge_label_placement_status: "passed", edge_intersection_status: "passed", collinear_overlap_status: "passed", target_port_direction_status: "passed", target_port_approach_status: "passed", routing_minimality_status: "passed", side_switch_status: "passed", change_impact_review_status: changeImpactReviewsChecked > 0 ? "passed" : "not_applicable", visible_arrow_mapping_status: "passed",
     render_preflight_status: "passed",
     render_status: "unverified",
     render_status_reason: "no static SVG renderer is configured",

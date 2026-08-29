@@ -15,7 +15,7 @@ def main() -> None:
     provider = config["mcpServers"]["chrome-devtools"]
     assert provider == {
         "command": "npx",
-        "args": ["-y", "chrome-devtools-mcp@1.6.0"],
+        "args": ["-y", "chrome-devtools-mcp"],
         "disabled": False,
         "autoApprove": [],
     }

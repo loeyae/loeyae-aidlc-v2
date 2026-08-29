@@ -27,6 +27,7 @@ def test_declares_v1_services() -> None:
         "get_design_tokens",
     ]
     assert servers["ssot"]["headers"]["Authorization"] == "Bearer ${SSOT_API_KEY}"
+    assert servers["chrome-devtools"]["args"] == ["-y", "chrome-devtools-mcp"]
 
 
 def test_merge_preserves_existing_and_adds_missing() -> None:
@@ -45,13 +46,18 @@ if (result.config.mcpServers.first.type !== 'custom') throw new Error('same-name
 if (result.config.mcpServers.restored.url !== 'https://example.test/restored') throw new Error('restored service is wrong');
 const legacyChrome = mergeMcpServers(
   {{ mcpServers: {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp@latest'], disabled: false, autoApprove: [] }} }} }},
-  {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp@1.6.0'], disabled: false, autoApprove: [] }} }}
+  {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp'], disabled: false, autoApprove: [] }} }}
 );
 if (legacyChrome.upgraded.join(',') !== 'chrome-devtools') throw new Error('legacy Chrome DevTools default was not upgraded');
-if (legacyChrome.config.mcpServers['chrome-devtools'].args[1] !== 'chrome-devtools-mcp@1.6.0') throw new Error('Chrome DevTools pin is wrong');
+if (legacyChrome.config.mcpServers['chrome-devtools'].args[1] !== 'chrome-devtools-mcp') throw new Error('Chrome DevTools package spec is wrong');
+const versionedChrome = mergeMcpServers(
+  {{ mcpServers: {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp@legacy-tag'], disabled: false, autoApprove: [] }} }} }},
+  {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp'] }} }}
+);
+if (versionedChrome.upgraded.join(',') !== 'chrome-devtools' || versionedChrome.config.mcpServers['chrome-devtools'].args[1] !== 'chrome-devtools-mcp') throw new Error('versioned Chrome DevTools package was not normalized');
 const customChrome = mergeMcpServers(
   {{ mcpServers: {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp@latest'], env: {{ CUSTOM_PROFILE: '1' }} }} }} }},
-  {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp@1.6.0'] }} }}
+  {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp'] }} }}
 );
 if (customChrome.upgraded.length !== 0 || customChrome.preserved.join(',') !== 'chrome-devtools') throw new Error('custom Chrome DevTools service was overwritten');
 """

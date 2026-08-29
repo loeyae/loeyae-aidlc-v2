@@ -184,11 +184,11 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 - **会话恢复**：检查 state.json，存在则恢复，否则新建
 - **人工确认**：通过 `[OPTIONS: Approve | Request Changes]` 渲染
 - **证据目录**：业务项目的 `.aidlc/evidence/<stage-slug>/` 存放 sensor 证据
-- **MCP 能力**：默认安装会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` 合并到 Kiro Crew 全局配置；除无自定义字段的旧 `chrome-devtools-mcp@latest` 默认项会安全收敛为 V2 固定的 `chrome-devtools-mcp@1.6.0` 外，同名现有配置均保留。服务不可用时必须按对应流程的 `NEEDS_CAPABILITY` 或通用规范降级，不得伪造调用结果
+- **MCP 能力**：默认安装会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` 合并到 Kiro Crew 全局配置；无自定义字段的旧版本化 Chrome DevTools 默认项会安全收敛为不指定版本的 `chrome-devtools-mcp`；带自定义字段、环境变量、非默认参数或禁用状态的同名配置均保留。服务不可用时必须按对应流程的 `NEEDS_CAPABILITY` 或通用规范降级，不得伪造调用结果
 
 ## Chrome DevTools 浏览器验收 Provider
 
-本 Skill 随附的 `chrome-devtools` MCP（`chrome-devtools-mcp@1.6.0`）仅用于 `diagram-contract` sensor 的浏览器几何验收：加载独立 SVG 或目标预览 URL，采集 DOM/属性、几何、viewport 截图和控制台证据。
+本 Skill 随附的 `chrome-devtools` MCP（不指定版本的 `chrome-devtools-mcp`）仅用于 `diagram-contract` sensor 的浏览器几何验收：加载独立 SVG 或目标预览 URL，采集 DOM/属性、几何、viewport 截图和控制台证据。
 
 使用规则：
 - 不生成 SVG、`.diagram.json` 或 PNG/PDF，不重新布局，不替代源级 `diagram-contract` 检查

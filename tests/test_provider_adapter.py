@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import tempfile
 
+from diagram_fixture_style import canonicalize_svg
+
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TOOL = os.path.join(REPO_ROOT, "core", "tools", "aidlc-diagram-provider.ts")
 
@@ -81,7 +83,7 @@ def test_dry_run_validates_request() -> None:
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout)
         assert payload["status"] == "ready"
-        assert payload["provider"] == "chrome-devtools-mcp@1.6.0"
+        assert payload["provider"] == "chrome-devtools-mcp"
         assert payload["plan"][0]["local_preview_fallback"] is True
         with open(TOOL) as handle:
             provider_source = handle.read()
@@ -89,6 +91,9 @@ def test_dry_run_validates_request() -> None:
         assert '"--sessionId",\n    sessionId,' in provider_source
         assert "BROWSER_PROFILE_CONFLICT" in provider_source
         assert 'process.once("exit"' in provider_source
+        assert "visualStyleErrors" in provider_source
+        assert "labelPlacementErrors" in provider_source
+        assert "getComputedStyle" in provider_source
     finally:
         shutil.rmtree(project)
 
@@ -132,7 +137,7 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
     svg_nodes = '<g data-node="start" data-node-shape="round"><rect x="40" y="40" width="100" height="50"/></g><g data-node="done" data-node-shape="round"><rect x="260" y="40" width="100" height="50"/></g>'
     groups = []
     svg_groups = ""
-    legend = None
+    global_decoration = False
     diagram_type = "flowchart"
     svg_extra = ""
     svg_after_arrow = ""
@@ -155,8 +160,8 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
             {"id": "b", "semanticType": "exclusive", "members": ["done"], "x": 160, "y": 20, "width": 180, "height": 100},
         ]
         svg_groups = '<rect id="group-a" x="20" y="20" width="180" height="100"/><rect id="group-b" x="160" y="20" width="180" height="100"/>'
-    elif variant == "legend-coverage":
-        legend = {"items": [{"id": "directed-edge", "label": "流程", "meaning": "有向关系", "sample": {"kind": "edge", "ref": "start-done"}, "targets": [{"kind": "edge", "ref": "start-done"}]}]}
+    elif variant == "global-decoration":
+        global_decoration = True
     elif variant == "sequence-lifeline":
         diagram_type = "sequence"
         svg_extra = '<line data-lifeline-for="start" x1="100" x2="100" y1="90" y2="260"/><line data-lifeline-for="done" x1="310" x2="310" y1="90" y2="260"/>'
@@ -188,7 +193,9 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
         edge_path = "M140 65 L300 65 L260 65"
     svg_edge = f'<path data-edge="start-done" data-from="start" data-from-port="right" data-to="done" data-to-port="left" d="{edge_path}" marker-end="url(#arrow)"/>'
     svg_arrow = f'<path data-edge-arrow="start-done" data-edge="start-done" data-arrow-target="done:left" d="M{edge_end - 8} 57 L{edge_end} 65 L{edge_end - 8} 73"/>'
-    svg = f'<svg viewBox="0 0 {svg_width} {svg_height}" width="{svg_width}" height="{svg_height}" role="img"><title>Geometry fixture</title><desc>FR-001 geometry fixture</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs>{svg_groups}{svg_nodes}{svg_extra}{svg_edge}{svg_arrow}{svg_after_arrow}<text data-text-id="requirement-reference" x="200" y="150">FR-001</text></svg>\n'
+    svg = canonicalize_svg(f'<svg viewBox="0 0 {svg_width} {svg_height}" width="{svg_width}" height="{svg_height}" role="img"><title>Geometry fixture</title><desc>FR-001 geometry fixture</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs>{svg_groups}{svg_nodes}{svg_extra}{svg_edge}{svg_arrow}{svg_after_arrow}<text data-text-id="requirement-reference" x="200" y="150">FR-001</text></svg>\n')
+    if global_decoration:
+        svg = svg.replace("</svg>", '<g data-note="global-note"></g></svg>')
     with open(os.path.join(project, "assets", "geometry.svg"), "w") as handle:
         handle.write(svg)
     manifest = {
@@ -203,7 +210,6 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
             "nodes": nodes,
             "edges": [{"id": "start-done", "from": "start", "fromPort": "right", "to": "done", "toPort": "left", "kind": "directed", "points": [[140, 65], [edge_end, 65]]}],
             "groups": groups,
-            **({"legend": legend} if legend else {}),
         }],
     }
     with open(os.path.join(project, "assets", "geometry.diagram.json"), "w") as handle:
@@ -222,7 +228,7 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
             "nodes": [{"id": node["id"], "shape": node["shape"]} for node in nodes],
             "edges": [{"id": "start-done", "from": "start", "to": "done", "from_port": "right", "to_port": "left", "kind": "directed"}],
             "groups": [{"id": group["id"], "semantic_type": group["semanticType"]} for group in groups],
-            "legend_ids": [item["id"] for item in (legend or {}).get("items", [])],
+            "legend_ids": [],
             "annotation_ids": [],
             "lifeline_ids": [node["id"] for node in nodes] if diagram_type == "sequence" else [],
             "route_contract": {
@@ -262,7 +268,7 @@ def test_browser_geometry_scenarios() -> None:
         ("node-collision", False, "node geometry collides", (800, 600)),
         ("edge-collision", False, "edge geometry collides with non-endpoint nodes", (800, 600)),
         ("group-overlap", False, "groups overlap unexpectedly", (800, 600)),
-        ("legend-coverage", False, "browser legend coverage does not match", (800, 600)),
+        ("global-decoration", False, "SVG unified visual style is invalid: global-legend-or-note", (800, 600)),
         ("sequence-lifeline", False, "sequence lifeline coordinate", (800, 600)),
         ("label-edge-collision", False, "SVG label geometry intersects edge geometry", (800, 600)),
         ("arrow-label-occlusion", False, "arrow overlay is occluded by a later decoration", (800, 600)),
@@ -295,5 +301,5 @@ if __name__ == "__main__":
     test_file_url_cannot_escape_project()
     if os.environ.get("RUN_CHROME_PROVIDER_GEOMETRY") == "1":
         test_browser_geometry_scenarios()
-        print("11 Chrome DevTools geometry scenarios passed")
+        print("11 Chrome DevTools geometry and visual-style scenarios passed")
     print("4 diagram provider adapter tests passed")

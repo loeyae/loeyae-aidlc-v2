@@ -40,13 +40,13 @@
 | 门禁 | 触发时机 | 阻断条件 |
 |------|----------|----------|
 | 业务流程图完整性 | I5 完成 | `business-flows.md` 缺失，或 FR 未映射到流程节点、分支或经批准的文字/表格步骤；图表适用时缺少 SVG 源语义检查、事实映射、连通性或拆分决策 |
-| SVG 源设计契约 | 生成或调整 SVG 源 | 缺少 Blueprinter 设计约束、稳定 ID/端口、方向/连通性检查、图例/分组/图型决策或 Provider Request |
+| SVG 源设计契约 | 生成或调整 SVG 源 | 缺少 Blueprinter 设计约束、稳定 ID/端口、方向/连通性检查、分组/图型决策、统一单色视觉、无全局图例/备注证明、标签中点法向净空或 Provider Request |
 | Provider SVG 验收 | 明确要求预览、渲染或导出 | 缺少源—目标产物追溯、Provider 能力证据或适用结构/几何/语义/视觉验收记录 |
 | 状态流转判定 | I5 完成 | 命中触发信号但无状态图，或无显式判定记录 |
 | 角色权限矩阵完整性 | I7 完成 | 矩阵缺失，或 `无权表现` 列存在空值，或角色无矩阵条目，或权限不适用 FR 缺少确认记录 |
 | PRD 自审清单 | I15 完成 | `product-prd-generation.md` 自审清单任一项未通过，或 `prd-completeness` evidence 缺失/失败 |
 | `prd-completeness` | prd-generation | PRD 章节、功能验收、非目标、待确认项、来源索引或一致性证据不完整 |
-| `diagram-contract` | requirements-methods, application-design | SVG 源或 `.diagram.json` 的 ID/端口/完整 `points`/方向/图例/分组语义/viewBox/FR 映射不完整，缺少 `diagramType`/`designNotes`/Sequence 生命线映射，或旧资产处于 `MIGRATION_REQUIRED` |
+| `diagram-contract` | requirements-methods, application-design | SVG 源或 `.diagram.json` 的 ID/端口/完整 `points`/方向/分组语义/viewBox/FR 映射不完整，视觉样式偏离白底、无填充、黑色、微软雅黑、`16/14` 字号、`2` 线宽、`10 × 10` 箭头或无框标签基线，存在全局图例/备注，缺少 `diagramType`/`designNotes`/Sequence 生命线映射，或旧资产处于 `MIGRATION_REQUIRED` |
 | `design-intent-coverage` | units-generation | 设计意图未被工作单元承接，或存在未覆盖意图 |
 
 ### 契约、配置与工作单元（条件）

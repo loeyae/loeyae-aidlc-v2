@@ -11,20 +11,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isChromeDevtoolsPackage(value: unknown, packageName: string): boolean {
+const CHROME_DEVTOOLS_PACKAGE = "chrome-devtools-mcp";
+
+function isChromeDevtoolsPackage(value: unknown, packageName = CHROME_DEVTOOLS_PACKAGE): boolean {
   if (!isRecord(value) || value.command !== "npx" || !Array.isArray(value.args)) return false;
   return value.args.length === 2 && value.args[0] === "-y" && value.args[1] === packageName;
 }
 
 function isMigratableLegacyChromeDevtools(value: unknown): boolean {
-  if (!isChromeDevtoolsPackage(value, "chrome-devtools-mcp@latest") || !isRecord(value)) return false;
+  if (!isRecord(value) || value.command !== "npx" || !Array.isArray(value.args) || value.args.length !== 2 || value.args[0] !== "-y") return false;
+  const packageSpec = value.args[1];
+  if (typeof packageSpec !== "string" || !packageSpec.startsWith(`${CHROME_DEVTOOLS_PACKAGE}@`)) return false;
   if (value.disabled !== undefined && value.disabled !== false) return false;
   if (value.autoApprove !== undefined && (!Array.isArray(value.autoApprove) || value.autoApprove.length !== 0)) return false;
   return Object.keys(value).every((key) => ["command", "args", "disabled", "autoApprove"].includes(key));
-}
-
-function isPinnedChromeDevtoolsDefault(value: unknown): boolean {
-  return isChromeDevtoolsPackage(value, "chrome-devtools-mcp@1.6.0");
 }
 
 export function mergeMcpServers(
@@ -49,7 +49,7 @@ export function mergeMcpServers(
     if (!Object.prototype.hasOwnProperty.call(servers, name)) {
       servers[name] = config;
       added.push(name);
-    } else if (name === "chrome-devtools" && isPinnedChromeDevtoolsDefault(config) && isMigratableLegacyChromeDevtools(servers[name])) {
+    } else if (name === "chrome-devtools" && isChromeDevtoolsPackage(config) && isMigratableLegacyChromeDevtools(servers[name])) {
       servers[name] = config;
       upgraded.push(name);
     } else {
