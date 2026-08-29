@@ -77,10 +77,53 @@ export interface ExpectedException {
   visualEvidence: { required: true; refs: string[] };
 }
 
+export interface ExpectedPrimaryFlow {
+  nodeIds: string[];
+  edgeIds: string[];
+  reason: string;
+}
+
 export interface ExpectedBranchGroup {
   targetIds: string[];
   direction: "TB" | "LR";
   tolerance: number;
+  id?: string;
+  decisionNodeId?: string;
+  edgeIds?: string[];
+  mergeNodeId?: string;
+  depth?: number;
+  mode?: "inline" | "local-lane";
+  reason?: string;
+}
+
+export interface ExpectedSourceNode {
+  sourceId: string;
+  displayId: string;
+  label: string;
+  shape: string;
+}
+
+export interface ExpectedSourceRelation {
+  sourceOrdinal: number;
+  fromSourceId: string;
+  toSourceId: string;
+  displayEdgeId: string;
+  kind: string;
+  label?: string;
+  displayLabel?: string;
+}
+
+export interface ExpectedReadingPath {
+  id: string;
+  nodeIds: string[];
+  edgeIds: string[];
+  requiredLabels: string[];
+}
+
+export interface ExpectedSourceGraph {
+  nodes: ExpectedSourceNode[];
+  relations: ExpectedSourceRelation[];
+  readingPaths: ExpectedReadingPath[];
 }
 
 export interface ExpectedRouteContract {
@@ -88,6 +131,7 @@ export interface ExpectedRouteContract {
   affectedEdgeIds: string[];
   edgeIntents: ExpectedRouteIntent[];
   mainFlow?: ExpectedMainFlow;
+  primaryFlow?: ExpectedPrimaryFlow;
   loopLanes: ExpectedLoopLane[];
   mergeNodes: ExpectedMergeNode[];
   branchGroups: ExpectedBranchGroup[];
@@ -115,6 +159,7 @@ export interface ExpectedContract {
   lifelineIds: string[];
   directedEdgeCount: number;
   routeContract: ExpectedRouteContract;
+  sourceGraph?: ExpectedSourceGraph;
 }
 
 function asRecord(value: unknown, field: string): Record<string, unknown> {
@@ -225,7 +270,84 @@ function parseExpectedException(value: unknown, index: number, diagramId: string
   };
 }
 
-function parseRouteContract(value: unknown, diagramId: string, edgeIds: string[]): ExpectedRouteContract {
+function parseSourceGraph(value: unknown, diagramId: string, nodeIds: string[], nodeShapes: Record<string, string | undefined>, edgeIds: string[], edgeEndpoints: Record<string, { from: string; to: string }>, edgeKinds: Record<string, string | undefined>): ExpectedSourceGraph {
+  const graph = asRecord(value, `expected diagram ${diagramId}.source_graph`);
+  if (!Array.isArray(graph.nodes) || graph.nodes.length === 0) throw new Error(`expected diagram ${diagramId}.source_graph.nodes must be non-empty`);
+  const sourceNodes = new Map<string, ExpectedSourceNode>();
+  const displayNodes = new Set<string>();
+  for (let index = 0; index < graph.nodes.length; index++) {
+    const field = `expected diagram ${diagramId}.source_graph.nodes[${index}]`;
+    const raw = asRecord(graph.nodes[index], field);
+    const sourceId = nonEmpty(raw.source_id, `${field}.source_id`);
+    const displayId = nonEmpty(raw.display_id, `${field}.display_id`);
+    const label = nonEmpty(raw.label, `${field}.label`);
+    const shape = nonEmpty(raw.shape, `${field}.shape`);
+    if (sourceNodes.has(sourceId) || displayNodes.has(displayId)) throw new Error(`${field} duplicates a source_id or display_id`);
+    if (!nodeIds.includes(displayId)) throw new Error(`${field}.display_id references missing expected node ${displayId}`);
+    if (nodeShapes[displayId] !== undefined && nodeShapes[displayId] !== shape) throw new Error(`${field}.shape must match expected node ${displayId}`);
+    sourceNodes.set(sourceId, { sourceId, displayId, label, shape });
+    displayNodes.add(displayId);
+  }
+  if (displayNodes.size !== nodeIds.length || nodeIds.some((id) => !displayNodes.has(id))) throw new Error(`expected diagram ${diagramId}.source_graph must map every expected node exactly once`);
+  if (!Array.isArray(graph.relations) || graph.relations.length === 0) throw new Error(`expected diagram ${diagramId}.source_graph.relations must be non-empty`);
+  const sourceOrdinals = new Set<number>();
+  const relations: ExpectedSourceRelation[] = [];
+  const byDisplay = new Map<string, ExpectedSourceRelation[]>();
+  for (let index = 0; index < graph.relations.length; index++) {
+    const field = `expected diagram ${diagramId}.source_graph.relations[${index}]`;
+    const raw = asRecord(graph.relations[index], field);
+    const sourceOrdinal = finiteNumber(raw.source_ordinal, `${field}.source_ordinal`, 1);
+    if (!Number.isInteger(sourceOrdinal) || sourceOrdinals.has(sourceOrdinal)) throw new Error(`${field}.source_ordinal must be a unique positive integer`);
+    sourceOrdinals.add(sourceOrdinal);
+    const fromSourceId = nonEmpty(raw.from_source_id, `${field}.from_source_id`);
+    const toSourceId = nonEmpty(raw.to_source_id, `${field}.to_source_id`);
+    const displayEdgeId = nonEmpty(raw.display_edge_id, `${field}.display_edge_id`);
+    const kind = nonEmpty(raw.kind, `${field}.kind`);
+    const label = raw.label === undefined || raw.label === null ? undefined : nonEmpty(raw.label, `${field}.label`);
+    const displayLabel = raw.display_label === undefined ? undefined : nonEmpty(raw.display_label, `${field}.display_label`);
+    if (!sourceNodes.has(fromSourceId) || !sourceNodes.has(toSourceId)) throw new Error(`${field} references a missing source node`);
+    if (!edgeIds.includes(displayEdgeId)) throw new Error(`${field}.display_edge_id references missing expected edge ${displayEdgeId}`);
+    const endpoints = edgeEndpoints[displayEdgeId];
+    if (endpoints.from !== sourceNodes.get(fromSourceId)!.displayId || endpoints.to !== sourceNodes.get(toSourceId)!.displayId) throw new Error(`SOURCE_RELATION_FIDELITY: ${field} endpoints do not match display edge ${displayEdgeId}`);
+    if (edgeKinds[displayEdgeId] !== undefined && edgeKinds[displayEdgeId] !== kind) throw new Error(`${field}.kind does not match expected edge ${displayEdgeId}`);
+    const relation = { sourceOrdinal, fromSourceId, toSourceId, displayEdgeId, kind, ...(label ? { label } : {}), ...(displayLabel ? { displayLabel } : {}) };
+    relations.push(relation);
+    byDisplay.set(displayEdgeId, [...(byDisplay.get(displayEdgeId) || []), relation]);
+  }
+  if (byDisplay.size !== edgeIds.length || edgeIds.some((id) => !byDisplay.has(id))) throw new Error(`expected diagram ${diagramId}.source_graph must cover every expected edge`);
+  for (const [displayEdgeId, mapped] of byDisplay) {
+    if (mapped.length === 1) {
+      if (mapped[0].displayLabel !== undefined) throw new Error(`expected diagram ${diagramId}.source_graph relation ${mapped[0].sourceOrdinal} must not define display_label without a merge`);
+      continue;
+    }
+    const first = mapped[0];
+    if (!first.displayLabel || mapped.some((relation) => relation.fromSourceId !== first.fromSourceId || relation.toSourceId !== first.toSourceId || relation.kind !== first.kind || relation.displayLabel !== first.displayLabel)) throw new Error(`DISPLAY_MERGE_VALIDITY: expected diagram ${diagramId}.source_graph merge for ${displayEdgeId} must preserve one source/target/kind and one display_label`);
+  }
+  const readingPaths: ExpectedReadingPath[] = [];
+  if (graph.reading_paths !== undefined) {
+    if (!Array.isArray(graph.reading_paths)) throw new Error(`expected diagram ${diagramId}.source_graph.reading_paths must be an array`);
+    const pathIds = new Set<string>();
+    for (let index = 0; index < graph.reading_paths.length; index++) {
+      const field = `expected diagram ${diagramId}.source_graph.reading_paths[${index}]`;
+      const raw = asRecord(graph.reading_paths[index], field);
+      const id = nonEmpty(raw.id, `${field}.id`);
+      if (pathIds.has(id)) throw new Error(`${field}.id is duplicated`);
+      pathIds.add(id);
+      const nodePath = stringArray(raw.node_ids, `${field}.node_ids`);
+      const edgePath = stringArray(raw.edge_ids, `${field}.edge_ids`);
+      if (edgePath.length !== nodePath.length - 1) throw new Error(`${field}.edge_ids must connect each adjacent node pair`);
+      for (let edgeIndex = 0; edgeIndex < edgePath.length; edgeIndex++) {
+        const endpoints = edgeEndpoints[edgePath[edgeIndex]];
+        if (!endpoints || endpoints.from !== nodePath[edgeIndex] || endpoints.to !== nodePath[edgeIndex + 1]) throw new Error(`${field} edge ${edgePath[edgeIndex]} does not connect the declared reading path`);
+      }
+      const requiredLabels = raw.required_labels === undefined ? [] : stringArray(raw.required_labels, `${field}.required_labels`, true);
+      readingPaths.push({ id, nodeIds: nodePath, edgeIds: edgePath, requiredLabels });
+    }
+  }
+  return { nodes: [...sourceNodes.values()], relations, readingPaths };
+}
+
+function parseRouteContract(value: unknown, diagramId: string, edgeIds: string[], edgeEndpoints: Record<string, { from: string; to: string }>): ExpectedRouteContract {
   const route = asRecord(value, "route_contract");
   const edgeIdSet = new Set(edgeIds);
   const rawIntents = route.edge_intents;
@@ -282,6 +404,22 @@ function parseRouteContract(value: unknown, diagramId: string, edgeIds: string[]
     };
     for (const edgeId of mainFlow.edgeIds) if (!edgeIdSet.has(edgeId)) throw new Error(`route_contract.main_flow references missing edge ${edgeId}`);
   }
+  const primaryFlowValue = route.primary_flow;
+  let primaryFlow: ExpectedPrimaryFlow | undefined;
+  if (primaryFlowValue !== undefined) {
+    const field = "route_contract.primary_flow";
+    const primary = asRecord(primaryFlowValue, field);
+    const nodeIds = stringArray(primary.node_ids, `${field}.node_ids`);
+    const primaryEdgeIds = stringArray(primary.edge_ids, `${field}.edge_ids`);
+    if (primaryEdgeIds.length !== nodeIds.length - 1) throw new Error(`${field}.edge_ids must contain exactly one edge between each adjacent primary node`);
+    for (let index = 0; index < primaryEdgeIds.length; index++) {
+      const edgeId = primaryEdgeIds[index];
+      if (!edgeIdSet.has(edgeId)) throw new Error(`${field}.edge_ids references missing edge ${edgeId}`);
+      const endpoints = edgeEndpoints[edgeId];
+      if (endpoints.from !== nodeIds[index] || endpoints.to !== nodeIds[index + 1]) throw new Error(`${field} edge ${edgeId} does not connect adjacent primary nodes`);
+    }
+    primaryFlow = { nodeIds, edgeIds: primaryEdgeIds, reason: nonEmpty(primary.reason, `${field}.reason`) };
+  }
   const rawLanes = route.loop_lanes === undefined ? [] : route.loop_lanes;
   if (!Array.isArray(rawLanes)) throw new Error("route_contract.loop_lanes must be an array");
   const laneIds = new Set<string>();
@@ -322,12 +460,43 @@ function parseRouteContract(value: unknown, diagramId: string, edgeIds: string[]
   for (const edgeId of affectedEdgeIds) if (!edgeIdSet.has(edgeId)) throw new Error(`route_contract.affected_edge_ids references missing edge ${edgeId}`);
   const rawBranches = route.branch_groups === undefined ? [] : route.branch_groups;
   if (!Array.isArray(rawBranches)) throw new Error("route_contract.branch_groups must be an array");
+  const branchGroupIds = new Set<string>();
   const branchGroups = rawBranches.map((raw, index) => {
     const field = `route_contract.branch_groups[${index}]`;
     const branch = asRecord(raw, field);
+    const targetIds = stringArray(branch.target_ids, `${field}.target_ids`);
     const direction = nonEmpty(branch.direction, `${field}.direction`) as "TB" | "LR";
     if (direction !== "TB" && direction !== "LR") throw new Error(`${field}.direction must be TB or LR`);
-    return { targetIds: stringArray(branch.target_ids, `${field}.target_ids`), direction, tolerance: finiteNumber(branch.tolerance === undefined ? 1 : branch.tolerance, `${field}.tolerance`, 0) };
+    const tolerance = finiteNumber(branch.tolerance === undefined ? 1 : branch.tolerance, `${field}.tolerance`, 0);
+    const id = branch.id === undefined ? undefined : nonEmpty(branch.id, `${field}.id`);
+    if (id && branchGroupIds.has(id)) throw new Error(`${field}.id is duplicated`);
+    if (id) branchGroupIds.add(id);
+    const structured = ["decision_node_id", "edge_ids", "merge_node_id", "depth", "mode", "reason"].some((key) => branch[key] !== undefined);
+    if (!structured) return { targetIds, direction, tolerance, ...(id ? { id } : {}) };
+    const decisionNodeId = nonEmpty(branch.decision_node_id, `${field}.decision_node_id`);
+    const branchEdgeIds = stringArray(branch.edge_ids, `${field}.edge_ids`);
+    for (const edgeId of branchEdgeIds) {
+      if (!edgeIdSet.has(edgeId)) throw new Error(`${field}.edge_ids references missing edge ${edgeId}`);
+      if (edgeEndpoints[edgeId].from !== decisionNodeId) throw new Error(`${field}.edge ${edgeId} does not leave decision node ${decisionNodeId}`);
+    }
+    const mergeNodeId = branch.merge_node_id === undefined ? undefined : nonEmpty(branch.merge_node_id, `${field}.merge_node_id`);
+    if (mergeNodeId && !branchEdgeIds.some((edgeId) => edgeEndpoints[edgeId].to === mergeNodeId)) throw new Error(`${field}.merge_node_id is not reached by a declared branch edge`);
+    const depth = branch.depth === undefined ? undefined : finiteNumber(branch.depth, `${field}.depth`, 0);
+    if (depth !== undefined && !Number.isInteger(depth)) throw new Error(`${field}.depth must be an integer`);
+    const mode = branch.mode === undefined ? undefined : nonEmpty(branch.mode, `${field}.mode`) as "inline" | "local-lane";
+    if (mode !== undefined && mode !== "inline" && mode !== "local-lane") throw new Error(`${field}.mode is invalid`);
+    return {
+      targetIds,
+      direction,
+      tolerance,
+      ...(id ? { id } : {}),
+      decisionNodeId,
+      edgeIds: branchEdgeIds,
+      ...(mergeNodeId ? { mergeNodeId } : {}),
+      ...(depth === undefined ? {} : { depth }),
+      ...(mode ? { mode } : {}),
+      reason: nonEmpty(branch.reason, `${field}.reason`),
+    };
   });
   const rawExceptions = route.exceptions === undefined ? [] : route.exceptions;
   if (!Array.isArray(rawExceptions)) throw new Error("route_contract.exceptions must be an array");
@@ -336,7 +505,7 @@ function parseRouteContract(value: unknown, diagramId: string, edgeIds: string[]
   if (exceptionKeys.size !== exceptions.length) throw new Error("route_contract.exceptions contains duplicate objects");
   const direction = route.direction === undefined ? undefined : nonEmpty(route.direction, "route_contract.direction") as "TB" | "LR";
   if (direction !== undefined && direction !== "TB" && direction !== "LR") throw new Error("route_contract.direction must be TB or LR");
-  return { direction, affectedEdgeIds, edgeIntents, ...(mainFlow ? { mainFlow } : {}), loopLanes, mergeNodes, branchGroups, exceptions };
+  return { direction, affectedEdgeIds, edgeIntents, ...(mainFlow ? { mainFlow } : {}), ...(primaryFlow ? { primaryFlow } : {}), loopLanes, mergeNodes, branchGroups, exceptions };
 }
 
 export function parseExpectedContract(raw: unknown, diagramId: string): ExpectedContract {
@@ -400,7 +569,10 @@ export function parseExpectedContract(raw: unknown, diagramId: string): Expected
   }
   const legendIds = stringArray(diagram.legend_ids, `expected diagram ${diagramId}.legend_ids`, true);
   const annotationIds = stringArray(diagram.annotation_ids, `expected diagram ${diagramId}.annotation_ids`, true);
-  const routeContract = parseRouteContract(diagram.route_contract, diagramId, edgeIds);
+  if (legendIds.length > 0) throw new Error(`expected diagram ${diagramId}.legend_ids must be empty because global legends are not allowed`);
+  if (annotationIds.length > 0) throw new Error(`expected diagram ${diagramId}.annotation_ids must be empty because global annotations are not allowed`);
+  const routeContract = parseRouteContract(diagram.route_contract, diagramId, edgeIds, edgeEndpoints);
+  const sourceGraph = diagram.source_graph === undefined ? undefined : parseSourceGraph(diagram.source_graph, diagramId, nodeIds, nodeShapes, edgeIds, edgeEndpoints, edgeKinds);
   for (const intent of routeContract.edgeIntents) {
     const endpoints = edgeEndpoints[intent.edgeId];
     const ports = edgePorts[intent.edgeId];
@@ -439,6 +611,7 @@ export function parseExpectedContract(raw: unknown, diagramId: string): Expected
     lifelineIds,
     directedEdgeCount,
     routeContract,
+    ...(sourceGraph ? { sourceGraph } : {}),
   };
 }
 

@@ -8,7 +8,7 @@
       "title": "履约模式选择与定店流程",
       "description": "展示配送与自提两条履约路径，以及配送定店失败后的地址修改回路。",
       "diagramType": "flowchart",
-      "canvas": { "width": 1300, "height": 1040 },
+      "canvas": { "width": 1300, "height": 840 },
       "nodes": [
         { "id": "choose-fulfillment-mode", "shape": "diamond", "label": "选择履约模式", "x": 480, "y": 60, "width": 200, "height": 100 },
         { "id": "pickup-store", "shape": "rect", "label": "自提定店", "x": 240, "y": 240, "width": 200, "height": 60 },
@@ -29,24 +29,15 @@
         { "id": "delivery-success", "from": "delivery-store-success", "fromPort": "right", "to": "show-delivery-products", "toPort": "top", "arrowTarget": "show-delivery-products:top", "kind": "directed", "points": [[960, 440], [1100, 440], [1100, 560]], "label": { "text": "成功", "x": 1030, "y": 420, "fontSize": 14 } },
         { "id": "delivery-failure", "from": "delivery-store-success", "fromPort": "left", "to": "modify-delivery-address", "toPort": "top", "arrowTarget": "modify-delivery-address:top", "kind": "directed", "points": [[760, 440], [700, 440], [700, 560]], "label": { "text": "失败", "x": 730, "y": 420, "fontSize": 14 } },
         { "id": "delivery-products-switch", "from": "show-delivery-products", "fromPort": "bottom", "to": "switch-delivery-address", "toPort": "top", "arrowTarget": "switch-delivery-address:top", "kind": "directed", "points": [[1100, 620], [1100, 720]] },
-        { "id": "delivery-address-retry", "from": "modify-delivery-address", "fromPort": "left", "to": "delivery-store", "toPort": "left", "arrowTarget": "delivery-store:left", "kind": "directed", "points": [[600, 590], [180, 590], [180, 610], [500, 610], [500, 270], [760, 270]], "label": { "text": "修改地址后重试", "x": 340, "y": 640, "fontSize": 14 } }
+        { "id": "delivery-address-retry", "from": "modify-delivery-address", "fromPort": "left", "to": "delivery-store", "toPort": "left", "arrowTarget": "delivery-store:left", "kind": "directed", "points": [[600, 590], [500, 590], [500, 270], [760, 270]], "label": { "text": "修改地址后重试", "x": 630, "y": 248, "fontSize": 14 } }
       ],
-      "annotations": [
-        { "id": "diagram-003-loop-note", "text": "失败路径沿左侧独立 lane 回到配送定店。", "x": 650, "y": 980, "fontSize": 14 }
-      ],
-      "legend": {
-        "placement": "bottom",
-        "items": [
-          { "id": "decision-shape", "label": "判定", "meaning": "菱形表示需要明确出口的业务判断。", "sample": { "kind": "node", "ref": "delivery-store-success" }, "targets": [{ "kind": "node", "ref": "choose-fulfillment-mode" }, { "kind": "node", "ref": "delivery-store-success" }] }
-        ]
-      },
       "designNotes": {
         "intent": "让读者追踪配送和自提的履约模式选择、定店结果与失败回路。",
         "semanticModes": ["process-flow"],
         "visualSemantics": [
           { "channel": "node-shape", "role": "semantic", "reason": "矩形表示步骤，菱形表示判定，圆角表示路径结束。" }
         ],
-        "legendDecision": { "status": "required", "reason": "菱形、矩形和圆角节点具有复用的语义差异。" },
+        "legendDecision": { "status": "exempt", "reason": "节点形状语义由节点文字和判定出口就地表达，不使用全局图例。", "inlineSemanticEvidence": ["choose-fulfillment-mode#label", "delivery-store-success#label", "switch-pickup-store#label", "switch-delivery-address#label"] },
         "splitDecision": { "status": "not-needed", "reason": "两条履约分支和失败回路共同构成一个不可拆分的履约模式选择目标。" },
         "layout": {
           "direction": "TB",
@@ -61,7 +52,7 @@
             "edgeIds": ["choose-pickup", "choose-delivery", "pickup-store-products", "pickup-products-switch", "delivery-store-check", "delivery-success", "delivery-failure", "delivery-products-switch", "delivery-address-retry"]
           },
           "loopLanes": [
-            { "id": "delivery-retry-left-lane", "side": "left", "laneOffset": 400, "edgeIds": ["delivery-address-retry"], "reason": "配送定店失败后修改收货地址，沿避开自提节点的左侧独立回路以最少必要折点返回配送定店。" }
+            { "id": "delivery-retry-left-lane", "side": "left", "laneOffset": 80, "edgeIds": ["delivery-address-retry"], "reason": "配送定店失败后修改收货地址，经避开自提节点的左侧独立 lane 以最少两折返回配送定店。" }
           ],
           "branchLayerExceptions": [],
           "branchPortExceptions": [],

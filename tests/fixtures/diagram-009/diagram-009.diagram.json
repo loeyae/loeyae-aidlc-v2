@@ -6,59 +6,2959 @@
     {
       "id": "diagram-009",
       "output": "diagram-009.svg",
-      "title": "订单支付与配送路径",
-      "description": "REQ-009 订单支付与配送路径",
+      "title": "图表 009｜门店自提订单履约流程",
+      "description": "从打开商城、门店自提结算、支付与库存处理，到拣货、换货、取货、取消和售后的完整订单履约流程。",
       "diagramType": "flowchart",
-      "canvas": {"width": 1100, "height": 1050},
+      "canvas": {
+        "width": 3608,
+        "height": 7268
+      },
+      "sourceBasis": [
+        {
+          "kind": "approved-mermaid",
+          "path": "diagram-009.mmd",
+          "digest": "sha256:c15fe673888f44f87d3cc33f123244f33a741de1f660734deeb39cc087bf3c24"
+        }
+      ],
       "nodes": [
-        {"id": "oms-a", "shape": "rect", "label": "订单系统 A", "x": 400, "y": 80, "width": 120, "height": 60},
-        {"id": "oms-b", "shape": "rect", "label": "订单系统 B", "x": 400, "y": 650, "width": 120, "height": 60},
-        {"id": "cart", "shape": "rect", "label": "购物车", "x": 100, "y": 900, "width": 120, "height": 60},
-        {"id": "store", "shape": "rect", "label": "配送方式", "x": 900, "y": 80, "width": 120, "height": 60},
-        {"id": "payment-a", "shape": "rect", "label": "支付服务 A", "x": 700, "y": 400, "width": 120, "height": 60},
-        {"id": "pending-payment", "shape": "rect", "label": "待支付", "x": 900, "y": 760, "width": 120, "height": 60},
-        {"id": "checkout", "shape": "rect", "label": "结算", "x": 500, "y": 900, "width": 120, "height": 60},
-        {"id": "delivery", "shape": "rect", "label": "送货", "x": 700, "y": 180, "width": 120, "height": 60}
+        {
+          "id": "open-store",
+          "shape": "rect",
+          "label": "打开商城",
+          "x": 1744.0,
+          "y": 64.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "switch-pickup",
+          "shape": "rect",
+          "label": "切换到店自提模式",
+          "x": 1744.0,
+          "y": 244.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "select-store",
+          "shape": "rect",
+          "label": "选择自提门店",
+          "x": 1744.0,
+          "y": 424.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "browse-products",
+          "shape": "rect",
+          "label": "浏览门店商品",
+          "x": 1744.0,
+          "y": 604.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "add-cart",
+          "shape": "rect",
+          "label": "加入购物车",
+          "x": 1744.0,
+          "y": 784.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "cart-checkout",
+          "shape": "rect",
+          "label": "购物车页点击结算",
+          "x": 1744.0,
+          "y": 964.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "minimum-order",
+          "shape": "diamond",
+          "label": "达到最低下单金额",
+          "x": 1784.0,
+          "y": 1114.0,
+          "width": 320,
+          "height": 180,
+          "fontSize": 16
+        },
+        {
+          "id": "checkout-blocked",
+          "shape": "rect",
+          "label": "购物车页提示不可结算",
+          "x": 2344.0,
+          "y": 1324.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "product-validation",
+          "shape": "rect",
+          "label": "校验商品可售 上下架 库存",
+          "x": 1744.0,
+          "y": 1324.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "checkout",
+          "shape": "rect",
+          "label": "进入结算页",
+          "x": 1744.0,
+          "y": 1504.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "pickup-time",
+          "shape": "rect",
+          "label": "选择自提时间",
+          "x": 1744.0,
+          "y": 1684.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "coupon",
+          "shape": "rect",
+          "label": "选择优惠券",
+          "x": 1744.0,
+          "y": 1864.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "amount-confirmation",
+          "shape": "rect",
+          "label": "确认金额明细",
+          "x": 1744.0,
+          "y": 2044.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "reserve-order",
+          "shape": "rect",
+          "label": "提交订单·预占库存",
+          "x": 1744.0,
+          "y": 2224.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "initiate-payment",
+          "shape": "rect",
+          "label": "发起支付",
+          "x": 1744.0,
+          "y": 2404.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "alcohol-check",
+          "shape": "diamond",
+          "label": "是否含酒品",
+          "x": 1784.0,
+          "y": 2554.0,
+          "width": 320,
+          "height": 180,
+          "fontSize": 16
+        },
+        {
+          "id": "age-confirmation",
+          "shape": "rect",
+          "label": "展示限酒令提示 确认满18岁",
+          "x": 2344.0,
+          "y": 2764.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "payment-success",
+          "shape": "diamond",
+          "label": "支付是否成功",
+          "x": 1784.0,
+          "y": 2914.0,
+          "width": 320,
+          "height": 180,
+          "fontSize": 16
+        },
+        {
+          "id": "deduct-inventory",
+          "shape": "rect",
+          "label": "扣减库存·核销优惠券",
+          "x": 1744.0,
+          "y": 3124.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "order-detail",
+          "shape": "rect",
+          "label": "进入订单详情页",
+          "x": 1744.0,
+          "y": 3304.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "fulfillment-progress",
+          "shape": "rect",
+          "label": "展示履约进度 预计时间 商品明细 金额明细",
+          "x": 1744.0,
+          "y": 3484.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "order-preparing",
+          "shape": "rect",
+          "label": "订单准备中",
+          "x": 1744.0,
+          "y": 3724.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "payment-pending",
+          "shape": "rect",
+          "label": "订单保持待付款·库存仍预占",
+          "x": 1094.0,
+          "y": 3124.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "pending-action",
+          "shape": "diamond",
+          "label": "待付款处理",
+          "x": 1134.0,
+          "y": 3334.0,
+          "width": 320,
+          "height": 180,
+          "fontSize": 16
+        },
+        {
+          "id": "cancel-release",
+          "shape": "rect",
+          "label": "取消订单·释放库存退券·订单关闭",
+          "x": 1094.0,
+          "y": 3604.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "store-accept",
+          "shape": "rect",
+          "label": "门店接单·开始拣货",
+          "x": 1744.0,
+          "y": 3964.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "picking-result",
+          "shape": "diamond",
+          "label": "拣货结果",
+          "x": 1784.0,
+          "y": 4174.0,
+          "width": 320,
+          "height": 180,
+          "fontSize": 16
+        },
+        {
+          "id": "stockout-strategy",
+          "shape": "diamond",
+          "label": "缺货处理方式",
+          "x": 2434.0,
+          "y": 4414.0,
+          "width": 320,
+          "height": 180,
+          "fontSize": 16
+        },
+        {
+          "id": "full-refund",
+          "shape": "rect",
+          "label": "整单退款·订单关闭",
+          "x": 1024.0,
+          "y": 4444.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "partial-refund",
+          "shape": "rect",
+          "label": "缺货部分退款·剩余继续履约",
+          "x": 2194.0,
+          "y": 4624.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "substitution-start",
+          "shape": "rect",
+          "label": "拣货员发起换品",
+          "x": 2744.0,
+          "y": 4624.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "substitution-recommend",
+          "shape": "rect",
+          "label": "系统推荐替代品",
+          "x": 2744.0,
+          "y": 4804.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "substitution-confirm",
+          "shape": "rect",
+          "label": "推送顾客确认换货",
+          "x": 2744.0,
+          "y": 4984.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "substitution-accepted",
+          "shape": "diamond",
+          "label": "顾客是否接受",
+          "x": 2784.0,
+          "y": 5134.0,
+          "width": 320,
+          "height": 180,
+          "fontSize": 16
+        },
+        {
+          "id": "substitute-picked",
+          "shape": "rect",
+          "label": "拣出替代品",
+          "x": 2744.0,
+          "y": 5344.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "substitute-available",
+          "shape": "diamond",
+          "label": "替代品是否拣到",
+          "x": 2784.0,
+          "y": 5494.0,
+          "width": 320,
+          "height": 180,
+          "fontSize": 16
+        },
+        {
+          "id": "order-amend",
+          "shape": "rect",
+          "label": "改单·替换商品行",
+          "x": 2344.0,
+          "y": 5704.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "refund-partial",
+          "shape": "rect",
+          "label": "缺货部分转退款",
+          "x": 3144.0,
+          "y": 5704.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "waiting-pickup",
+          "shape": "rect",
+          "label": "门店备货·等待自取",
+          "x": 1744.0,
+          "y": 6004.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "pickup-notification",
+          "shape": "rect",
+          "label": "收到到店通知与取货凭证",
+          "x": 1744.0,
+          "y": 6184.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "pickup-on-time",
+          "shape": "diamond",
+          "label": "是否按期到店取货",
+          "x": 1784.0,
+          "y": 6334.0,
+          "width": 320,
+          "height": 180,
+          "fontSize": 16
+        },
+        {
+          "id": "present-voucher",
+          "shape": "rect",
+          "label": "到店出示取货凭证",
+          "x": 1744.0,
+          "y": 6544.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "handoff",
+          "shape": "rect",
+          "label": "店员在 Dmall APP 核销签收",
+          "x": 1744.0,
+          "y": 6724.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "completed",
+          "shape": "rect",
+          "label": "提货完成·订单完成",
+          "x": 1744.0,
+          "y": 6904.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "reject",
+          "shape": "rect",
+          "label": "您已拒收 · 全额退款",
+          "x": 2394.0,
+          "y": 6544.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "overdue",
+          "shape": "rect",
+          "label": "超期訂單完成 · 不退款",
+          "x": 1094.0,
+          "y": 6544.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "cancel-request",
+          "shape": "diamond",
+          "label": "门店是否已开始拣货",
+          "x": 464.0,
+          "y": 3904.0,
+          "width": 320,
+          "height": 180,
+          "fontSize": 16
+        },
+        {
+          "id": "cancel-success",
+          "shape": "rect",
+          "label": "取消成功并退款",
+          "x": 64.0,
+          "y": 4144.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "cancel-blocked",
+          "shape": "rect",
+          "label": "不可取消·引导签收后申请退款",
+          "x": 784.0,
+          "y": 4144.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        },
+        {
+          "id": "after-sale",
+          "shape": "rect",
+          "label": "仅退款·售后有效期内",
+          "x": 1744.0,
+          "y": 7084.0,
+          "width": 400,
+          "height": 120,
+          "fontSize": 16
+        }
       ],
       "edges": [
-        {"id": "edge-005", "from": "oms-a", "fromPort": "left", "to": "payment-a", "toPort": "left", "arrowTarget": "payment-a:left", "kind": "directed", "points": [[400, 110], [60, 110], [60, 430], [700, 430]]},
-        {"id": "edge-048", "from": "oms-b", "fromPort": "left", "to": "pending-payment", "toPort": "left", "arrowTarget": "pending-payment:left", "kind": "directed", "points": [[400, 680], [60, 680], [60, 790], [900, 790]]},
-        {"id": "edge-008", "from": "cart", "fromPort": "right", "to": "checkout", "toPort": "left", "arrowTarget": "checkout:left", "kind": "directed", "points": [[220, 930], [500, 930]]},
-        {"id": "edge-041", "from": "pending-payment", "fromPort": "bottom", "to": "checkout", "toPort": "right", "arrowTarget": "checkout:right", "kind": "directed", "points": [[960, 820], [960, 930], [620, 930]], "label": {"text": "待支付", "x": 1050, "y": 550}},
-        {"id": "edge-015", "from": "store", "fromPort": "left", "to": "delivery", "toPort": "top", "arrowTarget": "delivery:top", "kind": "directed", "points": [[900, 110], [760, 110], [760, 180]], "label": {"text": "送货上门", "x": 840, "y": 165}}
+        {
+          "id": "edge-001",
+          "from": "open-store",
+          "fromPort": "bottom",
+          "to": "switch-pickup",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              184.0
+            ],
+            [
+              1944.0,
+              244.0
+            ]
+          ],
+          "arrowTarget": "switch-pickup:top"
+        },
+        {
+          "id": "edge-002",
+          "from": "switch-pickup",
+          "fromPort": "bottom",
+          "to": "select-store",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              364.0
+            ],
+            [
+              1944.0,
+              424.0
+            ]
+          ],
+          "arrowTarget": "select-store:top"
+        },
+        {
+          "id": "edge-003",
+          "from": "select-store",
+          "fromPort": "bottom",
+          "to": "browse-products",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              544.0
+            ],
+            [
+              1944.0,
+              604.0
+            ]
+          ],
+          "arrowTarget": "browse-products:top"
+        },
+        {
+          "id": "edge-004",
+          "from": "browse-products",
+          "fromPort": "bottom",
+          "to": "add-cart",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              724.0
+            ],
+            [
+              1944.0,
+              784.0
+            ]
+          ],
+          "arrowTarget": "add-cart:top"
+        },
+        {
+          "id": "edge-005",
+          "from": "add-cart",
+          "fromPort": "bottom",
+          "to": "cart-checkout",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              904.0
+            ],
+            [
+              1944.0,
+              964.0
+            ]
+          ],
+          "arrowTarget": "cart-checkout:top"
+        },
+        {
+          "id": "edge-006",
+          "from": "cart-checkout",
+          "fromPort": "bottom",
+          "to": "minimum-order",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              1084.0
+            ],
+            [
+              1944.0,
+              1114.0
+            ]
+          ],
+          "arrowTarget": "minimum-order:top"
+        },
+        {
+          "id": "edge-007",
+          "from": "minimum-order",
+          "fromPort": "right",
+          "to": "checkout-blocked",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2104.0,
+              1204.0
+            ],
+            [
+              2544.0,
+              1204.0
+            ],
+            [
+              2544.0,
+              1324.0
+            ]
+          ],
+          "arrowTarget": "checkout-blocked:top",
+          "label": {
+            "text": "否",
+            "x": 2608.0,
+            "y": 1264.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-008",
+          "from": "checkout-blocked",
+          "fromPort": "right",
+          "to": "add-cart",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2744.0,
+              1384.0
+            ],
+            [
+              2784.0,
+              1384.0
+            ],
+            [
+              2784.0,
+              754.0
+            ],
+            [
+              2104.0,
+              754.0
+            ],
+            [
+              2104.0,
+              784.0
+            ]
+          ],
+          "arrowTarget": "add-cart:top",
+          "toPortOffset": 160
+        },
+        {
+          "id": "edge-009",
+          "from": "minimum-order",
+          "fromPort": "bottom",
+          "to": "product-validation",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              1294.0
+            ],
+            [
+              1944.0,
+              1324.0
+            ]
+          ],
+          "arrowTarget": "product-validation:top",
+          "label": {
+            "text": "是",
+            "x": 1880.0,
+            "y": 1309.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-010",
+          "from": "product-validation",
+          "fromPort": "bottom",
+          "to": "checkout",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              1444.0
+            ],
+            [
+              1944.0,
+              1504.0
+            ]
+          ],
+          "arrowTarget": "checkout:top"
+        },
+        {
+          "id": "edge-011",
+          "from": "checkout",
+          "fromPort": "bottom",
+          "to": "pickup-time",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              1624.0
+            ],
+            [
+              1944.0,
+              1684.0
+            ]
+          ],
+          "arrowTarget": "pickup-time:top"
+        },
+        {
+          "id": "edge-012",
+          "from": "pickup-time",
+          "fromPort": "bottom",
+          "to": "coupon",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              1804.0
+            ],
+            [
+              1944.0,
+              1864.0
+            ]
+          ],
+          "arrowTarget": "coupon:top"
+        },
+        {
+          "id": "edge-013",
+          "from": "coupon",
+          "fromPort": "bottom",
+          "to": "amount-confirmation",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              1984.0
+            ],
+            [
+              1944.0,
+              2044.0
+            ]
+          ],
+          "arrowTarget": "amount-confirmation:top"
+        },
+        {
+          "id": "edge-014",
+          "from": "amount-confirmation",
+          "fromPort": "bottom",
+          "to": "reserve-order",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              2164.0
+            ],
+            [
+              1944.0,
+              2224.0
+            ]
+          ],
+          "arrowTarget": "reserve-order:top"
+        },
+        {
+          "id": "edge-015",
+          "from": "reserve-order",
+          "fromPort": "bottom",
+          "to": "initiate-payment",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              2344.0
+            ],
+            [
+              1944.0,
+              2404.0
+            ]
+          ],
+          "arrowTarget": "initiate-payment:top"
+        },
+        {
+          "id": "edge-016",
+          "from": "initiate-payment",
+          "fromPort": "bottom",
+          "to": "alcohol-check",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              2524.0
+            ],
+            [
+              1944.0,
+              2554.0
+            ]
+          ],
+          "arrowTarget": "alcohol-check:top"
+        },
+        {
+          "id": "edge-017",
+          "from": "alcohol-check",
+          "fromPort": "bottom",
+          "to": "payment-success",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              2734.0
+            ],
+            [
+              1944.0,
+              2914.0
+            ]
+          ],
+          "arrowTarget": "payment-success:top",
+          "label": {
+            "text": "否",
+            "x": 1880.0,
+            "y": 2824.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-018",
+          "from": "alcohol-check",
+          "fromPort": "right",
+          "to": "age-confirmation",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2104.0,
+              2644.0
+            ],
+            [
+              2544.0,
+              2644.0
+            ],
+            [
+              2544.0,
+              2764.0
+            ]
+          ],
+          "arrowTarget": "age-confirmation:top",
+          "label": {
+            "text": "是",
+            "x": 2608.0,
+            "y": 2704.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-019",
+          "from": "age-confirmation",
+          "fromPort": "left",
+          "to": "payment-success",
+          "toPort": "right",
+          "kind": "directed",
+          "points": [
+            [
+              2344.0,
+              2824.0
+            ],
+            [
+              2224.0,
+              2824.0
+            ],
+            [
+              2224.0,
+              3004.0
+            ],
+            [
+              2104.0,
+              3004.0
+            ]
+          ],
+          "arrowTarget": "payment-success:right"
+        },
+        {
+          "id": "edge-020",
+          "from": "payment-success",
+          "fromPort": "bottom",
+          "to": "deduct-inventory",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              3094.0
+            ],
+            [
+              1944.0,
+              3124.0
+            ]
+          ],
+          "arrowTarget": "deduct-inventory:top",
+          "label": {
+            "text": "是",
+            "x": 1880.0,
+            "y": 3109.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-021",
+          "from": "deduct-inventory",
+          "fromPort": "bottom",
+          "to": "order-detail",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              3244.0
+            ],
+            [
+              1944.0,
+              3304.0
+            ]
+          ],
+          "arrowTarget": "order-detail:top"
+        },
+        {
+          "id": "edge-022",
+          "from": "order-detail",
+          "fromPort": "bottom",
+          "to": "fulfillment-progress",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              3424.0
+            ],
+            [
+              1944.0,
+              3484.0
+            ]
+          ],
+          "arrowTarget": "fulfillment-progress:top"
+        },
+        {
+          "id": "edge-023",
+          "from": "fulfillment-progress",
+          "fromPort": "bottom",
+          "to": "order-preparing",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              3604.0
+            ],
+            [
+              1944.0,
+              3724.0
+            ]
+          ],
+          "arrowTarget": "order-preparing:top"
+        },
+        {
+          "id": "edge-024",
+          "from": "payment-success",
+          "fromPort": "left",
+          "to": "payment-pending",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1784.0,
+              3004.0
+            ],
+            [
+              1294.0,
+              3004.0
+            ],
+            [
+              1294.0,
+              3124.0
+            ]
+          ],
+          "arrowTarget": "payment-pending:top",
+          "label": {
+            "text": "否",
+            "x": 1230.0,
+            "y": 3064.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-025",
+          "from": "payment-pending",
+          "fromPort": "bottom",
+          "to": "pending-action",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1294.0,
+              3244.0
+            ],
+            [
+              1294.0,
+              3334.0
+            ]
+          ],
+          "arrowTarget": "pending-action:top"
+        },
+        {
+          "id": "edge-026",
+          "from": "pending-action",
+          "fromPort": "left",
+          "to": "initiate-payment",
+          "toPort": "left",
+          "kind": "directed",
+          "points": [
+            [
+              1134.0,
+              3424.0
+            ],
+            [
+              1054.0,
+              3424.0
+            ],
+            [
+              1054.0,
+              2464.0
+            ],
+            [
+              1744.0,
+              2464.0
+            ]
+          ],
+          "arrowTarget": "initiate-payment:left",
+          "label": {
+            "text": "重新发起支付",
+            "x": 990.0,
+            "y": 2944.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-027",
+          "from": "pending-action",
+          "fromPort": "bottom",
+          "to": "cancel-release",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1294.0,
+              3514.0
+            ],
+            [
+              1294.0,
+              3604.0
+            ]
+          ],
+          "arrowTarget": "cancel-release:top",
+          "label": {
+            "text": "主动取消／支付超时15分钟未付",
+            "x": 1394.0,
+            "y": 3559.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-029",
+          "from": "order-preparing",
+          "fromPort": "bottom",
+          "to": "store-accept",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              3844.0
+            ],
+            [
+              1944.0,
+              3964.0
+            ]
+          ],
+          "arrowTarget": "store-accept:top"
+        },
+        {
+          "id": "edge-030",
+          "from": "store-accept",
+          "fromPort": "bottom",
+          "to": "picking-result",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              4084.0
+            ],
+            [
+              1944.0,
+              4174.0
+            ]
+          ],
+          "arrowTarget": "picking-result:top"
+        },
+        {
+          "id": "edge-031",
+          "from": "picking-result",
+          "fromPort": "bottom",
+          "to": "waiting-pickup",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              4354.0
+            ],
+            [
+              1944.0,
+              6004.0
+            ]
+          ],
+          "arrowTarget": "waiting-pickup:top",
+          "label": {
+            "text": "全部拣到",
+            "x": 1880.0,
+            "y": 5179.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-032",
+          "from": "picking-result",
+          "fromPort": "right",
+          "to": "stockout-strategy",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2104.0,
+              4264.0
+            ],
+            [
+              2594.0,
+              4264.0
+            ],
+            [
+              2594.0,
+              4414.0
+            ]
+          ],
+          "arrowTarget": "stockout-strategy:top",
+          "label": {
+            "text": "部分缺货",
+            "x": 2658.0,
+            "y": 4339.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-033",
+          "from": "picking-result",
+          "fromPort": "left",
+          "to": "full-refund",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1784.0,
+              4264.0
+            ],
+            [
+              1224.0,
+              4264.0
+            ],
+            [
+              1224.0,
+              4444.0
+            ]
+          ],
+          "arrowTarget": "full-refund:top",
+          "label": {
+            "text": "全部缺货",
+            "x": 1160.0,
+            "y": 4354.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-034",
+          "from": "stockout-strategy",
+          "fromPort": "left",
+          "to": "partial-refund",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2434.0,
+              4504.0
+            ],
+            [
+              2394.0,
+              4504.0
+            ],
+            [
+              2394.0,
+              4624.0
+            ]
+          ],
+          "arrowTarget": "partial-refund:top",
+          "label": {
+            "text": "部分退款",
+            "x": 2330.0,
+            "y": 4564.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-035",
+          "from": "stockout-strategy",
+          "fromPort": "right",
+          "to": "substitution-start",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2754.0,
+              4504.0
+            ],
+            [
+              2944.0,
+              4504.0
+            ],
+            [
+              2944.0,
+              4624.0
+            ]
+          ],
+          "arrowTarget": "substitution-start:top",
+          "label": {
+            "text": "部分换货",
+            "x": 3008.0,
+            "y": 4564.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-036",
+          "from": "substitution-start",
+          "fromPort": "bottom",
+          "to": "substitution-recommend",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2944.0,
+              4744.0
+            ],
+            [
+              2944.0,
+              4804.0
+            ]
+          ],
+          "arrowTarget": "substitution-recommend:top"
+        },
+        {
+          "id": "edge-037",
+          "from": "substitution-recommend",
+          "fromPort": "bottom",
+          "to": "substitution-confirm",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2944.0,
+              4924.0
+            ],
+            [
+              2944.0,
+              4984.0
+            ]
+          ],
+          "arrowTarget": "substitution-confirm:top"
+        },
+        {
+          "id": "edge-038",
+          "from": "substitution-confirm",
+          "fromPort": "bottom",
+          "to": "substitution-accepted",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2944.0,
+              5104.0
+            ],
+            [
+              2944.0,
+              5134.0
+            ]
+          ],
+          "arrowTarget": "substitution-accepted:top"
+        },
+        {
+          "id": "edge-039",
+          "from": "substitution-accepted",
+          "fromPort": "left",
+          "to": "substitute-picked",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2784.0,
+              5224.0
+            ],
+            [
+              2712.0,
+              5224.0
+            ],
+            [
+              2712.0,
+              5314.0
+            ],
+            [
+              2944.0,
+              5314.0
+            ],
+            [
+              2944.0,
+              5344.0
+            ]
+          ],
+          "arrowTarget": "substitute-picked:top",
+          "label": {
+            "text": "接受",
+            "x": 2648.0,
+            "y": 5269.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-040",
+          "from": "substitution-accepted",
+          "fromPort": "right",
+          "to": "refund-partial",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              3104.0,
+              5224.0
+            ],
+            [
+              3376.0,
+              5224.0
+            ],
+            [
+              3376.0,
+              5704.0
+            ]
+          ],
+          "arrowTarget": "refund-partial:top",
+          "toPortOffset": 32,
+          "label": {
+            "text": "拒绝/超时未回应",
+            "x": 3440.0,
+            "y": 5464.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-042",
+          "from": "substitute-picked",
+          "fromPort": "bottom",
+          "to": "substitute-available",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2944.0,
+              5464.0
+            ],
+            [
+              2944.0,
+              5494.0
+            ]
+          ],
+          "arrowTarget": "substitute-available:top"
+        },
+        {
+          "id": "edge-043",
+          "from": "substitute-available",
+          "fromPort": "left",
+          "to": "order-amend",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2784.0,
+              5584.0
+            ],
+            [
+              2544.0,
+              5584.0
+            ],
+            [
+              2544.0,
+              5704.0
+            ]
+          ],
+          "arrowTarget": "order-amend:top",
+          "label": {
+            "text": "拣到",
+            "x": 2480.0,
+            "y": 5644.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-044",
+          "from": "substitute-available",
+          "fromPort": "right",
+          "to": "refund-partial",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              3104.0,
+              5584.0
+            ],
+            [
+              3312.0,
+              5584.0
+            ],
+            [
+              3312.0,
+              5704.0
+            ]
+          ],
+          "arrowTarget": "refund-partial:top",
+          "toPortOffset": -32,
+          "label": {
+            "text": "拣不到",
+            "x": 3248.0,
+            "y": 5644.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-045",
+          "from": "partial-refund",
+          "fromPort": "left",
+          "to": "waiting-pickup",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2194.0,
+              4684.0
+            ],
+            [
+              1984.0,
+              4684.0
+            ],
+            [
+              1984.0,
+              6004.0
+            ]
+          ],
+          "arrowTarget": "waiting-pickup:top",
+          "toPortOffset": 40
+        },
+        {
+          "id": "edge-046",
+          "from": "order-amend",
+          "fromPort": "bottom",
+          "to": "waiting-pickup",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2544.0,
+              5824.0
+            ],
+            [
+              2544.0,
+              5914.0
+            ],
+            [
+              2104.0,
+              5914.0
+            ],
+            [
+              2104.0,
+              6004.0
+            ]
+          ],
+          "arrowTarget": "waiting-pickup:top",
+          "toPortOffset": 160
+        },
+        {
+          "id": "edge-047",
+          "from": "refund-partial",
+          "fromPort": "left",
+          "to": "waiting-pickup",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              3144.0,
+              5764.0
+            ],
+            [
+              2784.0,
+              5764.0
+            ],
+            [
+              2784.0,
+              5974.0
+            ],
+            [
+              2134.0,
+              5974.0
+            ],
+            [
+              2134.0,
+              6004.0
+            ]
+          ],
+          "arrowTarget": "waiting-pickup:top",
+          "toPortOffset": 190
+        },
+        {
+          "id": "edge-048",
+          "from": "waiting-pickup",
+          "fromPort": "bottom",
+          "to": "pickup-notification",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              6124.0
+            ],
+            [
+              1944.0,
+              6184.0
+            ]
+          ],
+          "arrowTarget": "pickup-notification:top"
+        },
+        {
+          "id": "edge-049",
+          "from": "pickup-notification",
+          "fromPort": "bottom",
+          "to": "pickup-on-time",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              6304.0
+            ],
+            [
+              1944.0,
+              6334.0
+            ]
+          ],
+          "arrowTarget": "pickup-on-time:top"
+        },
+        {
+          "id": "edge-050",
+          "from": "pickup-on-time",
+          "fromPort": "bottom",
+          "to": "present-voucher",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              6514.0
+            ],
+            [
+              1944.0,
+              6544.0
+            ]
+          ],
+          "arrowTarget": "present-voucher:top",
+          "label": {
+            "text": "是",
+            "x": 1880.0,
+            "y": 6529.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-051",
+          "from": "present-voucher",
+          "fromPort": "bottom",
+          "to": "handoff",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              6664.0
+            ],
+            [
+              1944.0,
+              6724.0
+            ]
+          ],
+          "arrowTarget": "handoff:top"
+        },
+        {
+          "id": "edge-052",
+          "from": "handoff",
+          "fromPort": "bottom",
+          "to": "completed",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1944.0,
+              6844.0
+            ],
+            [
+              1944.0,
+              6904.0
+            ]
+          ],
+          "arrowTarget": "completed:top"
+        },
+        {
+          "id": "edge-053",
+          "from": "pickup-on-time",
+          "fromPort": "right",
+          "to": "reject",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              2104.0,
+              6424.0
+            ],
+            [
+              2594.0,
+              6424.0
+            ],
+            [
+              2594.0,
+              6544.0
+            ]
+          ],
+          "arrowTarget": "reject:top",
+          "label": {
+            "text": "到店后当面拒收",
+            "x": 2658.0,
+            "y": 6484.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-054",
+          "from": "pickup-on-time",
+          "fromPort": "left",
+          "to": "overdue",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              1784.0,
+              6424.0
+            ],
+            [
+              1294.0,
+              6424.0
+            ],
+            [
+              1294.0,
+              6544.0
+            ]
+          ],
+          "arrowTarget": "overdue:top",
+          "label": {
+            "text": "逾期未取",
+            "x": 1230.0,
+            "y": 6484.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-055",
+          "from": "order-preparing",
+          "fromPort": "left",
+          "to": "cancel-request",
+          "toPort": "top",
+          "kind": "dashed",
+          "points": [
+            [
+              1744.0,
+              3784.0
+            ],
+            [
+              624.0,
+              3784.0
+            ],
+            [
+              624.0,
+              3904.0
+            ]
+          ],
+          "arrowTarget": "cancel-request:top",
+          "label": {
+            "text": "发起取消",
+            "x": 560.0,
+            "y": 3844.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-056",
+          "from": "cancel-request",
+          "fromPort": "left",
+          "to": "cancel-success",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              464.0,
+              3994.0
+            ],
+            [
+              264.0,
+              3994.0
+            ],
+            [
+              264.0,
+              4144.0
+            ]
+          ],
+          "arrowTarget": "cancel-success:top",
+          "label": {
+            "text": "否·未开始拣货",
+            "x": 200.0,
+            "y": 4069.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-057",
+          "from": "cancel-request",
+          "fromPort": "right",
+          "to": "cancel-blocked",
+          "toPort": "top",
+          "kind": "directed",
+          "points": [
+            [
+              784.0,
+              3994.0
+            ],
+            [
+              984.0,
+              3994.0
+            ],
+            [
+              984.0,
+              4144.0
+            ]
+          ],
+          "arrowTarget": "cancel-blocked:top",
+          "label": {
+            "text": "是·已开始拣货",
+            "x": 1048.0,
+            "y": 4069.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-058",
+          "from": "cancel-blocked",
+          "fromPort": "bottom",
+          "to": "waiting-pickup",
+          "toPort": "top",
+          "kind": "dashed",
+          "points": [
+            [
+              984.0,
+              4264.0
+            ],
+            [
+              984.0,
+              5974.0
+            ],
+            [
+              1864.0,
+              5974.0
+            ],
+            [
+              1864.0,
+              6004.0
+            ]
+          ],
+          "arrowTarget": "waiting-pickup:top",
+          "toPortOffset": -80,
+          "label": {
+            "text": "继续履约",
+            "x": 920.0,
+            "y": 5119.0,
+            "fontSize": 14
+          }
+        },
+        {
+          "id": "edge-059",
+          "from": "completed",
+          "fromPort": "bottom",
+          "to": "after-sale",
+          "toPort": "top",
+          "kind": "dashed",
+          "points": [
+            [
+              1944.0,
+              7024.0
+            ],
+            [
+              1944.0,
+              7084.0
+            ]
+          ],
+          "arrowTarget": "after-sale:top",
+          "label": {
+            "text": "申请售后",
+            "x": 1880.0,
+            "y": 7054.0,
+            "fontSize": 14
+          }
+        }
       ],
+      "groups": [],
       "designNotes": {
-        "intent": "验证订单入口、配送方式、支付服务和待支付回路的独立业务路径",
-        "semanticModes": ["process-flow"],
-        "visualSemantics": [],
-        "legendDecision": {"status": "not-needed", "reason": "所有节点和边使用单一视觉语义，不复用需要解释的符号"},
-        "splitDecision": {"status": "not-needed", "reason": "图只表达一个订单路径目标"},
+        "intent": "让读者追踪门店自提订单从结算到履约、取消和售后的完整业务分支。",
+        "sourceRelationMerges": [
+          {
+            "display_edge_id": "edge-027",
+            "source_relation_ordinals": [
+              27,
+              28
+            ],
+            "source_relations": [
+              {
+                "from": "pending-action",
+                "to": "cancel-release",
+                "label": "主动取消"
+              },
+              {
+                "from": "pending-action",
+                "to": "cancel-release",
+                "label": "支付超时15分钟未付"
+              }
+            ],
+            "display_label": "主动取消／支付超时15分钟未付",
+            "reason": "两条 Mermaid 实线关系端点与线型相同；合并为同轴直连以保留条件并消除无业务必要的端口偏移和绕行。"
+          },
+          {
+            "display_edge_id": "edge-040",
+            "source_relation_ordinals": [
+              40,
+              41
+            ],
+            "source_relations": [
+              {
+                "from": "substitution-accepted",
+                "to": "refund-partial",
+                "label": "拒绝"
+              },
+              {
+                "from": "substitution-accepted",
+                "to": "refund-partial",
+                "label": "超时未回应"
+              }
+            ],
+            "display_label": "拒绝/超时未回应",
+            "reason": "不修改 Mermaid 来源；同一判断到同一退款目标的两条条件合并为一条可见连接。"
+          }
+        ],
+        "semanticModes": [
+          "process-flow"
+        ],
+        "visualSemantics": [
+          {
+            "channel": "node-shape",
+            "role": "semantic",
+            "reason": "菱形直接表达需要选择的业务判断。"
+          },
+          {
+            "channel": "edge-kind",
+            "role": "semantic",
+            "reason": "线型严格对应 Mermaid 来源关系；反馈路由角色不改变关系线型。"
+          }
+        ],
+        "legendDecision": {
+          "status": "exempt",
+          "reason": "判断、反馈和重试均由节点形状及相邻边标签就地说明。",
+          "inlineSemanticEvidence": [
+            {
+              "object": "minimum-order",
+              "meaning": "菱形和是/否标签表达最低金额判断"
+            },
+            {
+              "object": "edge-008",
+              "meaning": "外侧反馈 lane 表达最低金额失败回退，关系线型与标签保持 Mermaid 来源"
+            }
+          ]
+        },
+        "splitDecision": {
+          "status": "kept-single",
+          "reason": "支付、拣货、换货、取货、取消和售后是同一订单生命周期，拆分会损失回路与终态关系。",
+          "singleGoal": "追踪门店自提订单生命周期",
+          "staticBoundary": "不混入系统静态边界",
+          "processFlowDistinction": "仅表达有向业务过程流",
+          "readabilityEvidence": {
+            "normal": {
+              "status": "UNVERIFIED",
+              "evidence": ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.normal"
+            },
+            "fit": {
+              "status": "UNVERIFIED",
+              "evidence": ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.fit"
+            },
+            "zoom": {
+              "status": "UNVERIFIED",
+              "evidence": ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.zoom"
+            }
+          }
+        },
         "layout": {
           "direction": "TB",
-          "mainAxis": 600,
-          "layerTolerance": 24,
+          "mainAxis": 1944.0,
+          "layerTolerance": 220,
           "symmetryGroups": [],
-          "mergeNodes": [{"nodeId": "checkout", "reason": "直达结算和待支付回路在结算节点合流", "edgeIds": ["edge-008", "edge-041"], "ports": {"edge-008": "left", "edge-041": "right"}}],
-          "mainFlow": {"entryNodeIds": ["cart", "store", "oms-a", "oms-b"], "exitNodeIds": ["checkout", "delivery", "payment-a"], "nodeIds": ["oms-a", "oms-b", "cart", "store", "payment-a", "pending-payment", "checkout", "delivery"], "edgeIds": ["edge-005", "edge-048", "edge-008", "edge-041", "edge-015"]},
-          "loopLanes": [{"id": "pending-payment", "side": "right", "laneOffset": 200, "reason": "待支付回路沿主轴右侧独立通道返回结算，避免穿越主业务节点", "edgeIds": ["edge-041"]}],
-          "branchLayerExceptions": [],
+          "mergeNodes": [
+            {
+              "nodeId": "add-cart",
+              "reason": "Mermaid 业务分支在此汇合",
+              "edgeIds": [
+                "edge-004",
+                "edge-008"
+              ],
+              "ports": {
+                "edge-004": "top",
+                "edge-008": "top"
+              }
+            },
+            {
+              "nodeId": "initiate-payment",
+              "reason": "Mermaid 业务分支在此汇合",
+              "edgeIds": [
+                "edge-015",
+                "edge-026"
+              ],
+              "ports": {
+                "edge-015": "top",
+                "edge-026": "left"
+              }
+            },
+            {
+              "nodeId": "payment-success",
+              "reason": "Mermaid 业务分支在此汇合",
+              "edgeIds": [
+                "edge-017",
+                "edge-019"
+              ],
+              "ports": {
+                "edge-017": "top",
+                "edge-019": "right"
+              }
+            },
+            {
+              "nodeId": "waiting-pickup",
+              "reason": "Mermaid 业务分支在此汇合",
+              "edgeIds": [
+                "edge-031",
+                "edge-045",
+                "edge-046",
+                "edge-047",
+                "edge-058"
+              ],
+              "ports": {
+                "edge-031": "top",
+                "edge-045": "top",
+                "edge-046": "top",
+                "edge-047": "top",
+                "edge-058": "top"
+              }
+            },
+            {
+              "nodeId": "refund-partial",
+              "reason": "Mermaid 业务分支在此汇合",
+              "edgeIds": [
+                "edge-040",
+                "edge-044"
+              ],
+              "ports": {
+                "edge-040": "top",
+                "edge-044": "top"
+              }
+            }
+          ],
+          "branchLayerExceptions": [
+            {
+              "edgeIds": [
+                "edge-031",
+                "edge-032",
+                "edge-033",
+                "edge-039",
+                "edge-040"
+              ],
+              "reason": "跨阶段反馈或多步履约支路保持局部阅读顺序，避免破坏主干连续性。"
+            }
+          ],
           "branchPortExceptions": [],
           "sideSwitchExceptions": [],
           "crossingExceptions": [],
           "readabilityEvidence": {
-            "normal": {"status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.normal"},
-            "fit": {"status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.fit"},
-            "zoom": {"status": "UNVERIFIED", "evidence": ".aidlc/evidence/requirements-methods/diagram-contract-provider.json#views.zoom"}
+            "normal": {
+              "status": "UNVERIFIED",
+              "evidence": ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.normal"
+            },
+            "fit": {
+              "status": "UNVERIFIED",
+              "evidence": ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.fit"
+            },
+            "zoom": {
+              "status": "UNVERIFIED",
+              "evidence": ".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.zoom"
+            }
+          },
+          "mainFlow": {
+            "entryNodeId": "open-store",
+            "exitNodeIds": [
+              "cancel-release",
+              "full-refund",
+              "cancel-success",
+              "reject",
+              "overdue",
+              "after-sale"
+            ],
+            "nodeIds": [
+              "open-store",
+              "switch-pickup",
+              "select-store",
+              "browse-products",
+              "add-cart",
+              "cart-checkout",
+              "minimum-order",
+              "checkout-blocked",
+              "product-validation",
+              "checkout",
+              "pickup-time",
+              "coupon",
+              "amount-confirmation",
+              "reserve-order",
+              "initiate-payment",
+              "alcohol-check",
+              "age-confirmation",
+              "payment-success",
+              "deduct-inventory",
+              "order-detail",
+              "fulfillment-progress",
+              "order-preparing",
+              "payment-pending",
+              "pending-action",
+              "cancel-release",
+              "store-accept",
+              "picking-result",
+              "stockout-strategy",
+              "full-refund",
+              "partial-refund",
+              "substitution-start",
+              "substitution-recommend",
+              "substitution-confirm",
+              "substitution-accepted",
+              "substitute-picked",
+              "substitute-available",
+              "order-amend",
+              "refund-partial",
+              "waiting-pickup",
+              "pickup-notification",
+              "pickup-on-time",
+              "present-voucher",
+              "handoff",
+              "completed",
+              "reject",
+              "overdue",
+              "cancel-request",
+              "cancel-success",
+              "cancel-blocked",
+              "after-sale"
+            ],
+            "edgeIds": [
+              "edge-001",
+              "edge-002",
+              "edge-003",
+              "edge-004",
+              "edge-005",
+              "edge-006",
+              "edge-007",
+              "edge-008",
+              "edge-009",
+              "edge-010",
+              "edge-011",
+              "edge-012",
+              "edge-013",
+              "edge-014",
+              "edge-015",
+              "edge-016",
+              "edge-017",
+              "edge-018",
+              "edge-019",
+              "edge-020",
+              "edge-021",
+              "edge-022",
+              "edge-023",
+              "edge-024",
+              "edge-025",
+              "edge-026",
+              "edge-027",
+              "edge-029",
+              "edge-030",
+              "edge-031",
+              "edge-032",
+              "edge-033",
+              "edge-034",
+              "edge-035",
+              "edge-036",
+              "edge-037",
+              "edge-038",
+              "edge-039",
+              "edge-040",
+              "edge-042",
+              "edge-043",
+              "edge-044",
+              "edge-045",
+              "edge-046",
+              "edge-047",
+              "edge-048",
+              "edge-049",
+              "edge-050",
+              "edge-051",
+              "edge-052",
+              "edge-053",
+              "edge-054",
+              "edge-055",
+              "edge-056",
+              "edge-057",
+              "edge-058",
+              "edge-059"
+            ]
+          },
+          "branchGroups": [
+            {
+              "id": "alcohol-check",
+              "decisionNodeId": "alcohol-check",
+              "edgeIds": [
+                "edge-017",
+                "edge-018"
+              ],
+              "targetIds": [
+                "payment-success",
+                "age-confirmation"
+              ],
+              "direction": "TB",
+              "tolerance": 220,
+              "depth": 1,
+              "mode": "inline",
+              "reason": "酒品年龄判断分支在支付成功节点合流。"
+            },
+            {
+              "id": "cancel-request",
+              "decisionNodeId": "cancel-request",
+              "edgeIds": [
+                "edge-056",
+                "edge-057"
+              ],
+              "targetIds": [
+                "cancel-success",
+                "cancel-blocked"
+              ],
+              "direction": "TB",
+              "tolerance": 220,
+              "depth": 0,
+              "mode": "inline",
+              "reason": "取消请求按是否已开始拣货进入不同取消终态。"
+            },
+            {
+              "id": "minimum-order",
+              "decisionNodeId": "minimum-order",
+              "edgeIds": [
+                "edge-007",
+                "edge-009"
+              ],
+              "targetIds": [
+                "checkout-blocked",
+                "product-validation"
+              ],
+              "direction": "TB",
+              "tolerance": 220,
+              "depth": 1,
+              "mode": "inline",
+              "reason": "最低金额判断分为不可结算和继续履约两路。"
+            },
+            {
+              "id": "payment-success",
+              "decisionNodeId": "payment-success",
+              "edgeIds": [
+                "edge-020",
+                "edge-024"
+              ],
+              "targetIds": [
+                "deduct-inventory",
+                "payment-pending"
+              ],
+              "direction": "TB",
+              "tolerance": 220,
+              "depth": 1,
+              "mode": "inline",
+              "reason": "支付成功判断分为扣减库存和保持待付款两路。"
+            },
+            {
+              "id": "pending-action",
+              "decisionNodeId": "pending-action",
+              "edgeIds": [
+                "edge-026",
+                "edge-027"
+              ],
+              "targetIds": [
+                "initiate-payment",
+                "cancel-release"
+              ],
+              "direction": "TB",
+              "tolerance": 220,
+              "depth": 0,
+              "mode": "inline",
+              "reason": "待付款处理分为重新支付和受控合并的取消条件；合并边完整映射主动取消与支付超时。"
+            },
+            {
+              "id": "picking-result",
+              "decisionNodeId": "picking-result",
+              "edgeIds": [
+                "edge-031",
+                "edge-032",
+                "edge-033"
+              ],
+              "targetIds": [
+                "waiting-pickup",
+                "stockout-strategy",
+                "full-refund"
+              ],
+              "direction": "TB",
+              "tolerance": 1,
+              "depth": 3,
+              "mode": "local-lane",
+              "reason": "拣货结果分为继续取货、缺货策略和全额退款局部支路。"
+            },
+            {
+              "id": "pickup-on-time",
+              "decisionNodeId": "pickup-on-time",
+              "edgeIds": [
+                "edge-050",
+                "edge-053",
+                "edge-054"
+              ],
+              "targetIds": [
+                "present-voucher",
+                "reject",
+                "overdue"
+              ],
+              "direction": "TB",
+              "tolerance": 220,
+              "depth": 0,
+              "mode": "inline",
+              "reason": "到店取货判断分为正常交接、拒绝和逾期三路。"
+            },
+            {
+              "id": "stockout-strategy",
+              "decisionNodeId": "stockout-strategy",
+              "edgeIds": [
+                "edge-034",
+                "edge-035"
+              ],
+              "targetIds": [
+                "partial-refund",
+                "substitution-start"
+              ],
+              "direction": "TB",
+              "tolerance": 220,
+              "depth": 2,
+              "mode": "inline",
+              "reason": "缺货策略分为部分退款和换货流程两路。"
+            },
+            {
+              "id": "substitute-available",
+              "decisionNodeId": "substitute-available",
+              "edgeIds": [
+                "edge-043",
+                "edge-044"
+              ],
+              "targetIds": [
+                "order-amend",
+                "refund-partial"
+              ],
+              "direction": "TB",
+              "tolerance": 220,
+              "depth": 0,
+              "mode": "local-lane",
+              "reason": "换货可用判断分为订单修改和部分退款局部支路。"
+            },
+            {
+              "id": "substitution-accepted",
+              "decisionNodeId": "substitution-accepted",
+              "edgeIds": [
+                "edge-039",
+                "edge-040"
+              ],
+              "targetIds": [
+                "substitute-picked",
+                "refund-partial"
+              ],
+              "direction": "TB",
+              "tolerance": 1,
+              "depth": 1,
+              "mode": "local-lane",
+              "reason": "顾客接受换货后分为继续拣货和合并条件的部分退款。"
+            }
+          ],
+          "primaryFlow": {
+            "nodeIds": [
+              "open-store",
+              "switch-pickup",
+              "select-store",
+              "browse-products",
+              "add-cart",
+              "cart-checkout",
+              "minimum-order",
+              "product-validation",
+              "checkout",
+              "pickup-time",
+              "coupon",
+              "amount-confirmation",
+              "reserve-order",
+              "initiate-payment",
+              "alcohol-check",
+              "payment-success",
+              "deduct-inventory",
+              "order-detail",
+              "fulfillment-progress",
+              "order-preparing",
+              "store-accept",
+              "picking-result",
+              "waiting-pickup",
+              "pickup-notification",
+              "pickup-on-time",
+              "present-voucher",
+              "handoff",
+              "completed"
+            ],
+            "edgeIds": [
+              "edge-001",
+              "edge-002",
+              "edge-003",
+              "edge-004",
+              "edge-005",
+              "edge-006",
+              "edge-009",
+              "edge-010",
+              "edge-011",
+              "edge-012",
+              "edge-013",
+              "edge-014",
+              "edge-015",
+              "edge-016",
+              "edge-017",
+              "edge-020",
+              "edge-021",
+              "edge-022",
+              "edge-023",
+              "edge-029",
+              "edge-030",
+              "edge-031",
+              "edge-048",
+              "edge-049",
+              "edge-050",
+              "edge-051",
+              "edge-052"
+            ],
+            "reason": "来源 Mermaid 的正常履约主路径"
+          },
+          "loopLanes": [
+            {
+              "id": "cart-retry-right",
+              "side": "right",
+              "laneOffset": 840,
+              "reason": "最低金额不满足时使用紧邻不可结算节点的最窄合法右侧反馈 lane 返回购物车",
+              "edgeIds": [
+                "edge-008"
+              ]
+            },
+            {
+              "id": "payment-retry-left",
+              "side": "left",
+              "laneOffset": 890,
+              "reason": "待付款订单避开待付款节点左边界后使用最窄合法左侧反馈 lane 重新发起支付",
+              "edgeIds": [
+                "edge-026"
+              ]
+            },
+            {
+              "id": "cancel-continue-left",
+              "side": "left",
+              "laneOffset": 960,
+              "reason": "已开始拣货不可取消时沿左侧局部反馈 lane 继续履约",
+              "edgeIds": [
+                "edge-058"
+              ]
+            }
+          ],
+          "changeImpactReview": {
+            "baseline": "comparison-samples/diagram-009/2026-08-29-before-redraw/diagram-009.diagram.json",
+            "movedNodeIds": [
+              "open-store",
+              "switch-pickup",
+              "select-store",
+              "browse-products",
+              "add-cart",
+              "cart-checkout",
+              "minimum-order",
+              "checkout-blocked",
+              "product-validation",
+              "checkout",
+              "pickup-time",
+              "coupon",
+              "amount-confirmation",
+              "reserve-order",
+              "initiate-payment",
+              "alcohol-check",
+              "age-confirmation",
+              "payment-success",
+              "deduct-inventory",
+              "order-detail",
+              "fulfillment-progress",
+              "order-preparing",
+              "payment-pending",
+              "pending-action",
+              "cancel-release",
+              "store-accept",
+              "picking-result",
+              "stockout-strategy",
+              "full-refund",
+              "partial-refund",
+              "substitution-start",
+              "substitution-recommend",
+              "substitution-confirm",
+              "substitution-accepted",
+              "substitute-picked",
+              "substitute-available",
+              "order-amend",
+              "refund-partial",
+              "waiting-pickup",
+              "pickup-notification",
+              "pickup-on-time",
+              "present-voucher",
+              "handoff",
+              "completed",
+              "reject",
+              "overdue",
+              "cancel-request",
+              "cancel-success",
+              "cancel-blocked",
+              "after-sale"
+            ],
+            "impactedEdgeIds": [
+              "edge-001",
+              "edge-002",
+              "edge-003",
+              "edge-004",
+              "edge-005",
+              "edge-006",
+              "edge-007",
+              "edge-008",
+              "edge-009",
+              "edge-010",
+              "edge-011",
+              "edge-012",
+              "edge-013",
+              "edge-014",
+              "edge-015",
+              "edge-016",
+              "edge-017",
+              "edge-018",
+              "edge-019",
+              "edge-020",
+              "edge-021",
+              "edge-022",
+              "edge-023",
+              "edge-024",
+              "edge-025",
+              "edge-026",
+              "edge-027",
+              "edge-029",
+              "edge-030",
+              "edge-031",
+              "edge-032",
+              "edge-033",
+              "edge-034",
+              "edge-035",
+              "edge-036",
+              "edge-037",
+              "edge-038",
+              "edge-039",
+              "edge-040",
+              "edge-042",
+              "edge-043",
+              "edge-044",
+              "edge-045",
+              "edge-046",
+              "edge-047",
+              "edge-048",
+              "edge-049",
+              "edge-050",
+              "edge-051",
+              "edge-052",
+              "edge-053",
+              "edge-054",
+              "edge-055",
+              "edge-056",
+              "edge-057",
+              "edge-058",
+              "edge-059"
+            ],
+            "edgeReviews": [
+              {
+                "edgeId": "edge-001",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-002",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-003",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-004",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-005",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-006",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-007",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-008",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-009",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-010",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-011",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-012",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-013",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-014",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-015",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-016",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-017",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-018",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-019",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-020",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-021",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-022",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-023",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-024",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-025",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-026",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-027",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-029",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-030",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-031",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-032",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-033",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-034",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-035",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-036",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-037",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-038",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-039",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-040",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-042",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-043",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-044",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-045",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-046",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-047",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-048",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-049",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-050",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-051",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-052",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-053",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-054",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-055",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-056",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-057",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-058",
+                "status": "recomputed"
+              },
+              {
+                "edgeId": "edge-059",
+                "status": "recomputed"
+              }
+            ]
           }
         }
       },
       "generation": {
-        "generator": {"name": "diagram-009-generator", "version": "1.0.0"},
-        "config": {"summary": "订单支付与配送路径 route contract", "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
-        "route_config": {"diagram_id": "diagram-009", "affected_edge_ids": ["edge-005", "edge-048", "edge-008", "edge-041", "edge-015"]},
-        "source_refs": ["diagram-009.md"],
-        "outputs": ["diagram-009.svg", "diagram-009.expected.json"],
-        "command_argv": ["python3", "diagram-009-generator.py"]
+        "generator": {
+          "name": "diagram-009-mermaid-generator",
+          "version": "6.0.0"
+        },
+        "config": {
+          "summary": "按图表设计流程从冻结 Mermaid 来源重建门店自提订单履约流程：TB 主轴、局部分支 lane、受控关系合并与最短合法反馈回路",
+          "digest": "sha256:f3ee98944d5478ead923822e7487ef75cbe05273842193efd6565877be604aa2"
+        },
+        "route_config": {
+          "diagram_id": "diagram-009",
+          "affected_edge_ids": [
+            "edge-001",
+            "edge-002",
+            "edge-003",
+            "edge-004",
+            "edge-005",
+            "edge-006",
+            "edge-007",
+            "edge-008",
+            "edge-009",
+            "edge-010",
+            "edge-011",
+            "edge-012",
+            "edge-013",
+            "edge-014",
+            "edge-015",
+            "edge-016",
+            "edge-017",
+            "edge-018",
+            "edge-019",
+            "edge-020",
+            "edge-021",
+            "edge-022",
+            "edge-023",
+            "edge-024",
+            "edge-025",
+            "edge-026",
+            "edge-027",
+            "edge-029",
+            "edge-030",
+            "edge-031",
+            "edge-032",
+            "edge-033",
+            "edge-034",
+            "edge-035",
+            "edge-036",
+            "edge-037",
+            "edge-038",
+            "edge-039",
+            "edge-040",
+            "edge-042",
+            "edge-043",
+            "edge-044",
+            "edge-045",
+            "edge-046",
+            "edge-047",
+            "edge-048",
+            "edge-049",
+            "edge-050",
+            "edge-051",
+            "edge-052",
+            "edge-053",
+            "edge-054",
+            "edge-055",
+            "edge-056",
+            "edge-057",
+            "edge-058",
+            "edge-059"
+          ],
+          "strategy": "spine-first-local-routing",
+          "source_relation_merges": [
+            {
+              "display_edge_id": "edge-027",
+              "source_relation_ordinals": [
+                27,
+                28
+              ],
+              "source_relations": [
+                {
+                  "from": "pending-action",
+                  "to": "cancel-release",
+                  "label": "主动取消"
+                },
+                {
+                  "from": "pending-action",
+                  "to": "cancel-release",
+                  "label": "支付超时15分钟未付"
+                }
+              ],
+              "display_label": "主动取消／支付超时15分钟未付",
+              "reason": "两条 Mermaid 实线关系端点与线型相同；合并为同轴直连以保留条件并消除无业务必要的端口偏移和绕行。"
+            },
+            {
+              "display_edge_id": "edge-040",
+              "source_relation_ordinals": [
+                40,
+                41
+              ],
+              "source_relations": [
+                {
+                  "from": "substitution-accepted",
+                  "to": "refund-partial",
+                  "label": "拒绝"
+                },
+                {
+                  "from": "substitution-accepted",
+                  "to": "refund-partial",
+                  "label": "超时未回应"
+                }
+              ],
+              "display_label": "拒绝/超时未回应",
+              "reason": "不修改 Mermaid 来源；同一判断到同一退款目标的两条条件合并为一条可见连接。"
+            }
+          ]
+        },
+        "source_refs": [
+          "diagram-009.mmd"
+        ],
+        "outputs": [
+          "diagram-009.svg",
+          "diagram-009.diagram.json",
+          "diagram-009.expected.json"
+        ],
+        "command_argv": [
+          "python3",
+          "diagram-009-generator.py"
+        ],
+        "cwd": "."
       }
     }
   ]
