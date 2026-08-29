@@ -113,6 +113,13 @@ interface InspectionResult {
   lifelineCoordinates: Record<string, number>;
   nodeCollisionPairs: string[];
   edgeNodeCollisionPairs: string[];
+  entityGapErrors: string[];
+  axisGapErrors: string[];
+  axisAlignmentErrors: string[];
+  portGapErrors: string[];
+  obstacleGapErrors: string[];
+  labelObstacleGapErrors: string[];
+  laneGapErrors: string[];
   scroll: { x: number; y: number };
   viewport: { width: number; height: number };
   contentFullyVisible: boolean;
@@ -403,6 +410,7 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
   const svg = document.querySelector('svg');
   const visualStyle = ${JSON.stringify(DIAGRAM_VISUAL_STYLE)};
   const layoutMetrics = ${JSON.stringify(DIAGRAM_LAYOUT_METRICS)};
+  const geometryProfile = contract.geometryProfile && typeof contract.geometryProfile === 'object' ? contract.geometryProfile : null;
   if (contract.resetScroll === true) window.scrollTo(0, 0);
   const ids = (selector, attribute) => [...document.querySelectorAll(selector)].map((element) => element.getAttribute(attribute)).filter(Boolean);
   const bounds = (element) => {
@@ -481,7 +489,64 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
   const nodeBoxes = new Map(nodeElements.map((element) => [element.getAttribute('data-node'), bounds(element)]));
   const nodeOutlineBoxes = new Map(nodeElements.map((element) => [element.getAttribute('data-node'), bounds(nodeOutline(element))]));
   const nodeCollisionPairs = [];
+  const entityGapErrors = [];
+  const axisGapErrors = [];
+  const axisAlignmentErrors = [];
+  const portGapErrors = [];
+  const obstacleGapErrors = [];
+  const labelObstacleGapErrors = [];
+  const laneGapErrors = [];
   const nodeEntries = [...nodeBoxes.entries()].filter((entry) => entry[0] && entry[1]);
+  const nodeOutlineEntries = [...nodeOutlineBoxes.entries()].filter((entry) => entry[0] && entry[1]);
+  const geometryScaleMatrix = svg?.getScreenCTM();
+  const geometryScale = geometryScaleMatrix ? Math.max(0.01, Math.min(Math.hypot(geometryScaleMatrix.a, geometryScaleMatrix.b), Math.hypot(geometryScaleMatrix.c, geometryScaleMatrix.d))) : 1;
+  const geometryThreshold = (field) => geometryProfile ? Number(geometryProfile[field] || 0) * geometryScale : 0;
+  const axisGeometryThreshold = (field) => geometryProfile?.axisSpacing ? Number(geometryProfile.axisSpacing[field] || 0) * geometryScale : 0;
+  const boxGap = (first, second) => {
+    const horizontal = Math.max(0, first.left - second.right, second.left - first.right);
+    const vertical = Math.max(0, first.top - second.bottom, second.top - first.bottom);
+    return Math.hypot(horizontal, vertical);
+  };
+  const pointBoxDistance = (point, box) => {
+    const horizontal = point[0] < box.left ? box.left - point[0] : point[0] > box.right ? point[0] - box.right : 0;
+    const vertical = point[1] < box.top ? box.top - point[1] : point[1] > box.bottom ? point[1] - box.bottom : 0;
+    return Math.hypot(horizontal, vertical);
+  };
+  const segmentBoxDistance = (first, second, box) => {
+    if (segmentIntersectsBox(first, second, box)) return 0;
+    const dx = second[0] - first[0];
+    const dy = second[1] - first[1];
+    if (Math.abs(dx) <= 1e-6) {
+      const vertical = Math.max(box.top - Math.max(first[1], second[1]), Math.min(first[1], second[1]) - box.bottom, 0);
+      const horizontal = first[0] < box.left ? box.left - first[0] : first[0] > box.right ? first[0] - box.right : 0;
+      return Math.hypot(horizontal, vertical);
+    }
+    if (Math.abs(dy) <= 1e-6) {
+      const horizontal = Math.max(box.left - Math.max(first[0], second[0]), Math.min(first[0], second[0]) - box.right, 0);
+      const vertical = first[1] < box.top ? box.top - first[1] : first[1] > box.bottom ? first[1] - box.bottom : 0;
+      return Math.hypot(horizontal, vertical);
+    }
+    const count = Math.max(2, Math.ceil(Math.hypot(dx, dy) / 4));
+    let minimum = Infinity;
+    for (let index = 0; index <= count; index++) minimum = Math.min(minimum, pointBoxDistance([first[0] + dx * index / count, first[1] + dy * index / count], box));
+    return minimum;
+  };
+  if (geometryProfile) {
+    for (let first = 0; first < nodeOutlineEntries.length; first++) for (let second = first + 1; second < nodeOutlineEntries.length; second++) {
+      const gap = boxGap(nodeOutlineEntries[first][1], nodeOutlineEntries[second][1]);
+      if (gap < geometryThreshold('entityGap') - 0.5) entityGapErrors.push(nodeOutlineEntries[first][0] + ':' + nodeOutlineEntries[second][0]);
+    }
+  }
+  if (geometryProfile?.axisSpacing && (contract.readingDirection === 'TB' || contract.readingDirection === 'LR') && contract.primaryFlow && Array.isArray(contract.primaryFlow.nodeIds)) {
+    const minimumGap = contract.readingDirection === 'TB' ? axisGeometryThreshold('tbMinimumGap') : axisGeometryThreshold('lrMinimumGap');
+    const primaryNodes = contract.primaryFlow.nodeIds.map((nodeId) => [String(nodeId), nodeOutlineBoxes.get(String(nodeId))]).filter((entry) => entry[1]);
+    for (let index = 1; index < primaryNodes.length; index++) {
+      const previous = primaryNodes[index - 1][1];
+      const current = primaryNodes[index][1];
+      const gap = contract.readingDirection === 'TB' ? current.top - previous.bottom : current.left - previous.right;
+      if (gap < minimumGap - 0.5) axisGapErrors.push(primaryNodes[index - 1][0] + ':' + primaryNodes[index][0]);
+    }
+  }
   for (let first = 0; first < nodeEntries.length; first++) for (let second = first + 1; second < nodeEntries.length; second++) {
     if (overlaps(nodeEntries[first][1], nodeEntries[second][1])) nodeCollisionPairs.push(nodeEntries[first][0] + ':' + nodeEntries[second][0]);
   }
@@ -594,6 +659,7 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     if (port === 'bottom') return previous[1] > last[1] + 1;
     return previous[0] < last[0] - 1;
   };
+  const portEntries = [];
   for (const edge of edgeElements) {
     const edgeId = edge.getAttribute('data-edge');
     if (!edgeId) continue;
@@ -613,6 +679,8 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     edgeGeometryKinds[edgeId] = edgeBendCounts[edgeId] === 0 ? 'direct' : (isOrthogonal(edge, geometry.points) ? 'manhattan' : 'custom');
     if (geometry.box) edgeBBoxes[edgeId] = geometry.box;
     edgeRecords[edgeId] = { from: edge.getAttribute('data-from') || '', to: edge.getAttribute('data-to') || '', fromPort: edge.getAttribute('data-from-port') || '', toPort: edge.getAttribute('data-to-port') || '', arrowTarget: arrowTargetByEdge.get(edgeId) || '' };
+    if (edgeRecords[edgeId].from && edgeRecords[edgeId].fromPort) portEntries.push({ role: 'from', nodeId: edgeRecords[edgeId].from, port: edgeRecords[edgeId].fromPort, edgeId, point: geometry.points[0] });
+    if (edgeRecords[edgeId].to && edgeRecords[edgeId].toPort) portEntries.push({ role: 'to', nodeId: edgeRecords[edgeId].to, port: edgeRecords[edgeId].toPort, edgeId, point: geometry.points[geometry.points.length - 1] });
     if (!leavesPort(geometry.points, edgeRecords[edgeId].fromPort) || !entersPort(geometry.points, edgeRecords[edgeId].toPort)) portDirectionErrors.push(edgeId);
     const targetBox = nodeOutlineBoxes.get(edgeRecords[edgeId].to);
     const lastPoint = geometry.points[geometry.points.length - 1];
@@ -622,6 +690,36 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     const hitNodes = new Set();
     for (const screen of geometry.points) for (const [nodeId, box] of nodeBoxes) if (box && pointInside(screen, box)) hitNodes.add(nodeId);
     for (const nodeId of hitNodes) edgeNodeCollisionPairs.push(edgeId + ':' + nodeId);
+  }
+  if (geometryProfile?.axisSpacing && (contract.readingDirection === 'TB' || contract.readingDirection === 'LR') && contract.branchLayoutPlan && Array.isArray(contract.branchLayoutPlan.groups)) {
+    const loopEdges = new Set(Array.isArray(contract.loopEdges) ? contract.loopEdges.map(String) : []);
+    for (const group of contract.branchLayoutPlan.groups) {
+      const primaryEdgeId = group && group.primaryEdgeId ? String(group.primaryEdgeId) : '';
+      if (!primaryEdgeId || loopEdges.has(primaryEdgeId)) continue;
+      const edge = edgeRecords[primaryEdgeId];
+      const source = edge ? nodeOutlineBoxes.get(edge.from) : null;
+      const target = edge ? nodeOutlineBoxes.get(edge.to) : null;
+      if (!source || !target) continue;
+      const sourceCross = contract.readingDirection === 'TB' ? (source.left + source.right) / 2 : (source.top + source.bottom) / 2;
+      const targetCross = contract.readingDirection === 'TB' ? (target.left + target.right) / 2 : (target.top + target.bottom) / 2;
+      if (Math.abs(sourceCross - targetCross) > geometryScale + 0.5) axisAlignmentErrors.push(primaryEdgeId);
+    }
+  }
+  if (geometryProfile) {
+    for (let first = 0; first < portEntries.length; first++) for (let second = first + 1; second < portEntries.length; second++) {
+      const left = portEntries[first];
+      const right = portEntries[second];
+      if (left.role !== right.role || left.nodeId !== right.nodeId || left.port !== right.port) continue;
+      const distance = ['top', 'bottom'].includes(left.port) ? Math.abs(left.point[0] - right.point[0]) : Math.abs(left.point[1] - right.point[1]);
+      if (distance < geometryThreshold('portGap') - 0.5) portGapErrors.push(left.edgeId + ':' + right.edgeId);
+    }
+    for (const edgeSample of edgeSamples) {
+      const edge = edgeRecords[edgeSample.id];
+      for (const [nodeId, box] of nodeOutlineEntries) {
+        if (nodeId === edge?.from || nodeId === edge?.to) continue;
+        if (edgeSample.segments.some((segment) => segmentBoxDistance(segment[0], segment[1], box) < geometryThreshold('obstacleGap') - 0.5)) obstacleGapErrors.push(edgeSample.id + ':' + nodeId);
+      }
+    }
   }
   for (let first = 0; first < edgeSamples.length; first++) for (let second = first + 1; second < edgeSamples.length; second++) {
     const firstEdge = edgeSamples[first];
@@ -640,9 +738,32 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     if (hasOverlap) collinearOverlapPairs.push(firstEdge.id + ':' + secondEdge.id);
     if (hasIntersection) edgeIntersectionPairs.push(firstEdge.id + ':' + secondEdge.id);
   }
+  if (geometryProfile && Array.isArray(contract.loopLanes) && (contract.readingDirection === 'TB' || contract.readingDirection === 'LR')) {
+    const laneGeometry = contract.loopLanes.map((lane) => {
+      const coordinates = lane.edgeIds.flatMap((edgeId) => {
+        const sample = edgeSamples.find((candidate) => candidate.id === String(edgeId));
+        if (!sample) return [];
+        const points = sample.points.length > 2 ? sample.points.slice(1, -1) : sample.points;
+        return points.map((point) => contract.readingDirection === 'TB' ? point[0] : point[1]);
+      }).filter((value) => Number.isFinite(value));
+      if (coordinates.length === 0) return null;
+      return { id: String(lane.id), side: String(lane.side), coordinate: lane.side === 'left' ? Math.min(...coordinates) : Math.max(...coordinates) };
+    }).filter(Boolean);
+    for (let first = 0; first < laneGeometry.length; first++) for (let second = first + 1; second < laneGeometry.length; second++) {
+      if (laneGeometry[first].side === laneGeometry[second].side && Math.abs(laneGeometry[first].coordinate - laneGeometry[second].coordinate) < geometryThreshold('laneGap') - 0.5) laneGapErrors.push(laneGeometry[first].id + ':' + laneGeometry[second].id);
+    }
+  }
   const labelElements = [...document.querySelectorAll('[data-edge-label]')].filter((element) => !element.matches('path[data-edge]'));
   const labelBoxes = new Map(labelElements.map((element) => [element.getAttribute('data-edge-label') || '', { element, box: bounds(element) }]));
   const edgeLabels = Object.fromEntries(labelElements.map((element) => [element.getAttribute('data-edge-label') || '', element.textContent?.trim() || '']).filter(([id]) => Boolean(id)));
+  if (geometryProfile) for (const [labelId, label] of labelBoxes) {
+    const edge = edgeRecords[labelId];
+    if (!label.box || !edge) continue;
+    for (const [nodeId, nodeBox] of nodeOutlineEntries) {
+      if (nodeId === edge.from || nodeId === edge.to) continue;
+      if (boxGap(label.box, nodeBox) < geometryThreshold('obstacleGap') - 0.5) labelObstacleGapErrors.push(labelId + ':' + nodeId);
+    }
+  }
   const labelEdgeCollisionPairs = [];
   const labelNodeCollisionPairs = [];
   const labelLabelCollisionPairs = [];
@@ -924,6 +1045,13 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     lifelineCoordinates,
     nodeCollisionPairs,
     edgeNodeCollisionPairs,
+    entityGapErrors,
+    axisGapErrors,
+    axisAlignmentErrors,
+    portGapErrors,
+    obstacleGapErrors,
+    labelObstacleGapErrors,
+    laneGapErrors,
     scroll: { x: window.scrollX, y: window.scrollY },
     viewport: { width: window.innerWidth, height: window.innerHeight },
     contentFullyVisible,
@@ -1014,6 +1142,13 @@ function inspection(payload: unknown): InspectionResult {
     lifelineCoordinates: data.lifelineCoordinates && typeof data.lifelineCoordinates === "object" ? Object.fromEntries(Object.entries(data.lifelineCoordinates).map(([key, value]) => [key, Number(value)])) : {},
     nodeCollisionPairs: Array.isArray(data.nodeCollisionPairs) ? data.nodeCollisionPairs.map(String) : [],
     edgeNodeCollisionPairs: Array.isArray(data.edgeNodeCollisionPairs) ? data.edgeNodeCollisionPairs.map(String) : [],
+    entityGapErrors: Array.isArray(data.entityGapErrors) ? data.entityGapErrors.map(String) : [],
+    axisGapErrors: Array.isArray(data.axisGapErrors) ? data.axisGapErrors.map(String) : [],
+    axisAlignmentErrors: Array.isArray(data.axisAlignmentErrors) ? data.axisAlignmentErrors.map(String) : [],
+    portGapErrors: Array.isArray(data.portGapErrors) ? data.portGapErrors.map(String) : [],
+    obstacleGapErrors: Array.isArray(data.obstacleGapErrors) ? data.obstacleGapErrors.map(String) : [],
+    labelObstacleGapErrors: Array.isArray(data.labelObstacleGapErrors) ? data.labelObstacleGapErrors.map(String) : [],
+    laneGapErrors: Array.isArray(data.laneGapErrors) ? data.laneGapErrors.map(String) : [],
     scroll: data.scroll && typeof data.scroll === "object" ? { x: Number((data.scroll as Record<string, unknown>).x || 0), y: Number((data.scroll as Record<string, unknown>).y || 0) } : { x: 0, y: 0 },
     viewport: data.viewport && typeof data.viewport === "object" ? { width: Number((data.viewport as Record<string, unknown>).width || 0), height: Number((data.viewport as Record<string, unknown>).height || 0) } : { width: 0, height: 0 },
     contentFullyVisible: data.contentFullyVisible === true,
@@ -1047,6 +1182,13 @@ function validateInspection(result: InspectionResult, expected?: ExpectedContrac
   if (!result.viewBox) errors.push("SVG viewBox is missing");
   if (result.svgWidth <= 0 || result.svgHeight <= 0) errors.push("SVG has no visible browser bounds");
   if (result.nodeCollisionPairs.length > 0) errors.push(`SVG node geometry collides: ${result.nodeCollisionPairs.join(", ")}`);
+  if (result.entityGapErrors.length > 0) errors.push(`SVG entity gap is below the shared profile: ${result.entityGapErrors.join(", ")}`);
+  if (result.axisGapErrors.length > 0) errors.push(`SVG primary-flow axis gap is below the directional profile: ${result.axisGapErrors.join(", ")}`);
+  if (result.axisAlignmentErrors.length > 0) errors.push(`SVG primary branch is not aligned to the main axis: ${result.axisAlignmentErrors.join(", ")}`);
+  if (result.portGapErrors.length > 0) errors.push(`SVG port gap is below the shared profile: ${result.portGapErrors.join(", ")}`);
+  if (result.obstacleGapErrors.length > 0) errors.push(`SVG edge obstacle gap is below the shared profile: ${result.obstacleGapErrors.join(", ")}`);
+  if (result.labelObstacleGapErrors.length > 0) errors.push(`SVG label obstacle gap is below the shared profile: ${result.labelObstacleGapErrors.join(", ")}`);
+  if (result.laneGapErrors.length > 0) errors.push(`SVG feedback lanes are closer than the shared lane gap: ${result.laneGapErrors.join(", ")}`);
   const edgePairKey = (pair: string): string => pair.split(":").sort().join("\u0000");
   const actualCrossings = new Set(result.edgeIntersectionPairs.map(edgePairKey));
   const expectedCrossingExceptions = new Set(expected?.routeContract.exceptions.filter((exception) => exception.type === "crossing").map((exception) => exception.edgeIds.slice().sort().join("\u0000")) || []);
@@ -1303,6 +1445,10 @@ async function main(): Promise<void> {
         mainAxis: actualLayout.mainAxis,
         groups: actualLayout.groups,
         loopEdges: expected.routeContract.loopLanes.flatMap((lane) => lane.edgeIds),
+        loopLanes: expected.routeContract.loopLanes,
+        primaryFlow: expected.routeContract.primaryFlow,
+        branchLayoutPlan: expected.routeContract.branchLayoutPlan,
+        geometryProfile: expected.routeContract.geometryProfile,
         sideSwitchExceptionEdgeIds: expected.routeContract.exceptions.filter((exception) => exception.type === "side-switch").flatMap((exception) => exception.edgeIds),
         resetScroll: true,
       };

@@ -1,296 +1,296 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="3608" height="7268" viewBox="0 0 3608 7268" role="img" aria-labelledby="diagram-009-title diagram-009-desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="3648" height="10448" viewBox="0 0 3648 10448" role="img" aria-labelledby="diagram-009-title diagram-009-desc">
 <title id="diagram-009-title">图表 009｜门店自提订单履约流程</title>
 <desc id="diagram-009-desc">门店自提订单从商城、结算、支付到拣货、换货、取货、取消和售后的完整业务流程。</desc>
 <rect data-canvas-background="true" x="0" y="0" width="100%" height="100%" fill="#ffffff" stroke="none" />
 <defs><marker id="arrow" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" viewBox="0 0 10 10" refX="10" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#000000" /></marker></defs>
 
-<path data-edge="edge-001" data-from="open-store" data-from-port="bottom" data-to="switch-pickup" data-to-port="top" data-arrow-target="switch-pickup:top" d="M 1944 184 L 1944 244" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-002" data-from="switch-pickup" data-from-port="bottom" data-to="select-store" data-to-port="top" data-arrow-target="select-store:top" d="M 1944 364 L 1944 424" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-003" data-from="select-store" data-from-port="bottom" data-to="browse-products" data-to-port="top" data-arrow-target="browse-products:top" d="M 1944 544 L 1944 604" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-004" data-from="browse-products" data-from-port="bottom" data-to="add-cart" data-to-port="top" data-arrow-target="add-cart:top" d="M 1944 724 L 1944 784" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-005" data-from="add-cart" data-from-port="bottom" data-to="cart-checkout" data-to-port="top" data-arrow-target="cart-checkout:top" d="M 1944 904 L 1944 964" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-006" data-from="cart-checkout" data-from-port="bottom" data-to="minimum-order" data-to-port="top" data-arrow-target="minimum-order:top" d="M 1944 1084 L 1944 1114" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-007" data-from="minimum-order" data-from-port="right" data-to="checkout-blocked" data-to-port="top" data-arrow-target="checkout-blocked:top" data-edge-label="edge-007" d="M 2104 1204 L 2544 1204 L 2544 1324" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-008" data-from="checkout-blocked" data-from-port="right" data-to="add-cart" data-to-port="top" data-arrow-target="add-cart:top" data-to-port-offset="160" d="M 2744 1384 L 2784 1384 L 2784 754 L 2104 754 L 2104 784" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-009" data-from="minimum-order" data-from-port="bottom" data-to="product-validation" data-to-port="top" data-arrow-target="product-validation:top" data-edge-label="edge-009" d="M 1944 1294 L 1944 1324" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-010" data-from="product-validation" data-from-port="bottom" data-to="checkout" data-to-port="top" data-arrow-target="checkout:top" d="M 1944 1444 L 1944 1504" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-011" data-from="checkout" data-from-port="bottom" data-to="pickup-time" data-to-port="top" data-arrow-target="pickup-time:top" d="M 1944 1624 L 1944 1684" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-012" data-from="pickup-time" data-from-port="bottom" data-to="coupon" data-to-port="top" data-arrow-target="coupon:top" d="M 1944 1804 L 1944 1864" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-013" data-from="coupon" data-from-port="bottom" data-to="amount-confirmation" data-to-port="top" data-arrow-target="amount-confirmation:top" d="M 1944 1984 L 1944 2044" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-014" data-from="amount-confirmation" data-from-port="bottom" data-to="reserve-order" data-to-port="top" data-arrow-target="reserve-order:top" d="M 1944 2164 L 1944 2224" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-015" data-from="reserve-order" data-from-port="bottom" data-to="initiate-payment" data-to-port="top" data-arrow-target="initiate-payment:top" d="M 1944 2344 L 1944 2404" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-016" data-from="initiate-payment" data-from-port="bottom" data-to="alcohol-check" data-to-port="top" data-arrow-target="alcohol-check:top" d="M 1944 2524 L 1944 2554" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-017" data-from="alcohol-check" data-from-port="bottom" data-to="payment-success" data-to-port="top" data-arrow-target="payment-success:top" data-edge-label="edge-017" d="M 1944 2734 L 1944 2914" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-018" data-from="alcohol-check" data-from-port="right" data-to="age-confirmation" data-to-port="top" data-arrow-target="age-confirmation:top" data-edge-label="edge-018" d="M 2104 2644 L 2544 2644 L 2544 2764" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-019" data-from="age-confirmation" data-from-port="left" data-to="payment-success" data-to-port="right" data-arrow-target="payment-success:right" d="M 2344 2824 L 2224 2824 L 2224 3004 L 2104 3004" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-020" data-from="payment-success" data-from-port="bottom" data-to="deduct-inventory" data-to-port="top" data-arrow-target="deduct-inventory:top" data-edge-label="edge-020" d="M 1944 3094 L 1944 3124" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-021" data-from="deduct-inventory" data-from-port="bottom" data-to="order-detail" data-to-port="top" data-arrow-target="order-detail:top" d="M 1944 3244 L 1944 3304" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-022" data-from="order-detail" data-from-port="bottom" data-to="fulfillment-progress" data-to-port="top" data-arrow-target="fulfillment-progress:top" d="M 1944 3424 L 1944 3484" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-023" data-from="fulfillment-progress" data-from-port="bottom" data-to="order-preparing" data-to-port="top" data-arrow-target="order-preparing:top" d="M 1944 3604 L 1944 3724" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-024" data-from="payment-success" data-from-port="left" data-to="payment-pending" data-to-port="top" data-arrow-target="payment-pending:top" data-edge-label="edge-024" d="M 1784 3004 L 1294 3004 L 1294 3124" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-025" data-from="payment-pending" data-from-port="bottom" data-to="pending-action" data-to-port="top" data-arrow-target="pending-action:top" d="M 1294 3244 L 1294 3334" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-026" data-from="pending-action" data-from-port="left" data-to="initiate-payment" data-to-port="left" data-arrow-target="initiate-payment:left" data-edge-label="edge-026" d="M 1134 3424 L 1054 3424 L 1054 2464 L 1744 2464" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-027" data-from="pending-action" data-from-port="bottom" data-to="cancel-release" data-to-port="top" data-arrow-target="cancel-release:top" data-edge-label="edge-027" d="M 1294 3514 L 1294 3604" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-029" data-from="order-preparing" data-from-port="bottom" data-to="store-accept" data-to-port="top" data-arrow-target="store-accept:top" d="M 1944 3844 L 1944 3964" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-030" data-from="store-accept" data-from-port="bottom" data-to="picking-result" data-to-port="top" data-arrow-target="picking-result:top" d="M 1944 4084 L 1944 4174" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-031" data-from="picking-result" data-from-port="bottom" data-to="waiting-pickup" data-to-port="top" data-arrow-target="waiting-pickup:top" data-edge-label="edge-031" d="M 1944 4354 L 1944 6004" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-032" data-from="picking-result" data-from-port="right" data-to="stockout-strategy" data-to-port="top" data-arrow-target="stockout-strategy:top" data-edge-label="edge-032" d="M 2104 4264 L 2594 4264 L 2594 4414" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-033" data-from="picking-result" data-from-port="left" data-to="full-refund" data-to-port="top" data-arrow-target="full-refund:top" data-edge-label="edge-033" d="M 1784 4264 L 1224 4264 L 1224 4444" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-034" data-from="stockout-strategy" data-from-port="left" data-to="partial-refund" data-to-port="top" data-arrow-target="partial-refund:top" data-edge-label="edge-034" d="M 2434 4504 L 2394 4504 L 2394 4624" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-035" data-from="stockout-strategy" data-from-port="right" data-to="substitution-start" data-to-port="top" data-arrow-target="substitution-start:top" data-edge-label="edge-035" d="M 2754 4504 L 2944 4504 L 2944 4624" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-036" data-from="substitution-start" data-from-port="bottom" data-to="substitution-recommend" data-to-port="top" data-arrow-target="substitution-recommend:top" d="M 2944 4744 L 2944 4804" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-037" data-from="substitution-recommend" data-from-port="bottom" data-to="substitution-confirm" data-to-port="top" data-arrow-target="substitution-confirm:top" d="M 2944 4924 L 2944 4984" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-038" data-from="substitution-confirm" data-from-port="bottom" data-to="substitution-accepted" data-to-port="top" data-arrow-target="substitution-accepted:top" d="M 2944 5104 L 2944 5134" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-039" data-from="substitution-accepted" data-from-port="left" data-to="substitute-picked" data-to-port="top" data-arrow-target="substitute-picked:top" data-edge-label="edge-039" d="M 2784 5224 L 2712 5224 L 2712 5314 L 2944 5314 L 2944 5344" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-040" data-from="substitution-accepted" data-from-port="right" data-to="refund-partial" data-to-port="top" data-arrow-target="refund-partial:top" data-to-port-offset="32" data-edge-label="edge-040" d="M 3104 5224 L 3376 5224 L 3376 5704" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-042" data-from="substitute-picked" data-from-port="bottom" data-to="substitute-available" data-to-port="top" data-arrow-target="substitute-available:top" d="M 2944 5464 L 2944 5494" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-043" data-from="substitute-available" data-from-port="left" data-to="order-amend" data-to-port="top" data-arrow-target="order-amend:top" data-edge-label="edge-043" d="M 2784 5584 L 2544 5584 L 2544 5704" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-044" data-from="substitute-available" data-from-port="right" data-to="refund-partial" data-to-port="top" data-arrow-target="refund-partial:top" data-to-port-offset="-32" data-edge-label="edge-044" d="M 3104 5584 L 3312 5584 L 3312 5704" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-045" data-from="partial-refund" data-from-port="left" data-to="waiting-pickup" data-to-port="top" data-arrow-target="waiting-pickup:top" data-to-port-offset="40" d="M 2194 4684 L 1984 4684 L 1984 6004" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-046" data-from="order-amend" data-from-port="bottom" data-to="waiting-pickup" data-to-port="top" data-arrow-target="waiting-pickup:top" data-to-port-offset="160" d="M 2544 5824 L 2544 5914 L 2104 5914 L 2104 6004" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-047" data-from="refund-partial" data-from-port="left" data-to="waiting-pickup" data-to-port="top" data-arrow-target="waiting-pickup:top" data-to-port-offset="190" d="M 3144 5764 L 2784 5764 L 2784 5974 L 2134 5974 L 2134 6004" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-048" data-from="waiting-pickup" data-from-port="bottom" data-to="pickup-notification" data-to-port="top" data-arrow-target="pickup-notification:top" d="M 1944 6124 L 1944 6184" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-049" data-from="pickup-notification" data-from-port="bottom" data-to="pickup-on-time" data-to-port="top" data-arrow-target="pickup-on-time:top" d="M 1944 6304 L 1944 6334" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-050" data-from="pickup-on-time" data-from-port="bottom" data-to="present-voucher" data-to-port="top" data-arrow-target="present-voucher:top" data-edge-label="edge-050" d="M 1944 6514 L 1944 6544" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-051" data-from="present-voucher" data-from-port="bottom" data-to="handoff" data-to-port="top" data-arrow-target="handoff:top" d="M 1944 6664 L 1944 6724" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-052" data-from="handoff" data-from-port="bottom" data-to="completed" data-to-port="top" data-arrow-target="completed:top" d="M 1944 6844 L 1944 6904" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-053" data-from="pickup-on-time" data-from-port="right" data-to="reject" data-to-port="top" data-arrow-target="reject:top" data-edge-label="edge-053" d="M 2104 6424 L 2594 6424 L 2594 6544" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-054" data-from="pickup-on-time" data-from-port="left" data-to="overdue" data-to-port="top" data-arrow-target="overdue:top" data-edge-label="edge-054" d="M 1784 6424 L 1294 6424 L 1294 6544" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-055" data-from="order-preparing" data-from-port="left" data-to="cancel-request" data-to-port="top" data-arrow-target="cancel-request:top" data-edge-label="edge-055" d="M 1744 3784 L 624 3784 L 624 3904" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="8 6" />
-<path data-edge="edge-056" data-from="cancel-request" data-from-port="left" data-to="cancel-success" data-to-port="top" data-arrow-target="cancel-success:top" data-edge-label="edge-056" d="M 464 3994 L 264 3994 L 264 4144" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-057" data-from="cancel-request" data-from-port="right" data-to="cancel-blocked" data-to-port="top" data-arrow-target="cancel-blocked:top" data-edge-label="edge-057" d="M 784 3994 L 984 3994 L 984 4144" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
-<path data-edge="edge-058" data-from="cancel-blocked" data-from-port="bottom" data-to="waiting-pickup" data-to-port="top" data-arrow-target="waiting-pickup:top" data-to-port-offset="-80" data-edge-label="edge-058" d="M 984 4264 L 984 5974 L 1864 5974 L 1864 6004" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="8 6" />
-<path data-edge="edge-059" data-from="completed" data-from-port="bottom" data-to="after-sale" data-to-port="top" data-arrow-target="after-sale:top" data-edge-label="edge-059" d="M 1944 7024 L 1944 7084" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="8 6" />
+<path data-edge="edge-001" data-from="open-store" data-from-port="bottom" data-to="switch-pickup" data-to-port="top" data-arrow-target="switch-pickup:top" d="M 1584 184 L 1584 304" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-002" data-from="switch-pickup" data-from-port="bottom" data-to="select-store" data-to-port="top" data-arrow-target="select-store:top" d="M 1584 424 L 1584 544" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-003" data-from="select-store" data-from-port="bottom" data-to="browse-products" data-to-port="top" data-arrow-target="browse-products:top" d="M 1584 664 L 1584 784" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-004" data-from="browse-products" data-from-port="bottom" data-to="add-cart" data-to-port="top" data-arrow-target="add-cart:top" d="M 1584 904 L 1584 1024" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-005" data-from="add-cart" data-from-port="bottom" data-to="cart-checkout" data-to-port="top" data-arrow-target="cart-checkout:top" d="M 1584 1144 L 1584 1264" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-006" data-from="cart-checkout" data-from-port="bottom" data-to="minimum-order" data-to-port="top" data-arrow-target="minimum-order:top" d="M 1584 1384 L 1584 1504" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-007" data-from="minimum-order" data-from-port="right" data-to="checkout-blocked" data-to-port="top" data-arrow-target="checkout-blocked:top" data-edge-label="edge-007" d="M 1744 1594 L 2184 1594 L 2184 1804" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-008" data-from="checkout-blocked" data-from-port="right" data-to="add-cart" data-to-port="top" data-arrow-target="add-cart:top" data-to-port-offset="160" d="M 2384 1864 L 2424 1864 L 2424 994 L 1744 994 L 1744 1024" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-009" data-from="minimum-order" data-from-port="bottom" data-to="product-validation" data-to-port="top" data-arrow-target="product-validation:top" data-edge-label="edge-009" d="M 1584 1684 L 1584 1804" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-010" data-from="product-validation" data-from-port="bottom" data-to="checkout" data-to-port="top" data-arrow-target="checkout:top" d="M 1584 1924 L 1584 2044" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-011" data-from="checkout" data-from-port="bottom" data-to="pickup-time" data-to-port="top" data-arrow-target="pickup-time:top" d="M 1584 2164 L 1584 2284" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-012" data-from="pickup-time" data-from-port="bottom" data-to="coupon" data-to-port="top" data-arrow-target="coupon:top" d="M 1584 2404 L 1584 2524" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-013" data-from="coupon" data-from-port="bottom" data-to="amount-confirmation" data-to-port="top" data-arrow-target="amount-confirmation:top" d="M 1584 2644 L 1584 2764" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-014" data-from="amount-confirmation" data-from-port="bottom" data-to="reserve-order" data-to-port="top" data-arrow-target="reserve-order:top" d="M 1584 2884 L 1584 3004" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-015" data-from="reserve-order" data-from-port="bottom" data-to="initiate-payment" data-to-port="top" data-arrow-target="initiate-payment:top" d="M 1584 3124 L 1584 3244" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-016" data-from="initiate-payment" data-from-port="bottom" data-to="alcohol-check" data-to-port="top" data-arrow-target="alcohol-check:top" d="M 1584 3364 L 1584 3484" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-017" data-from="alcohol-check" data-from-port="bottom" data-to="payment-success" data-to-port="top" data-arrow-target="payment-success:top" data-edge-label="edge-017" d="M 1584 3664 L 1584 3784" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-018" data-from="alcohol-check" data-from-port="right" data-to="age-confirmation" data-to-port="top" data-arrow-target="age-confirmation:top" data-edge-label="edge-018" d="M 1744 3574 L 2184 3574 L 2184 3814" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-019" data-from="age-confirmation" data-from-port="left" data-to="payment-success" data-to-port="right" data-arrow-target="payment-success:right" d="M 1984 3874 L 1744 3874" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-020" data-from="payment-success" data-from-port="bottom" data-to="deduct-inventory" data-to-port="top" data-arrow-target="deduct-inventory:top" data-edge-label="edge-020" d="M 1584 3964 L 1584 4084" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-021" data-from="deduct-inventory" data-from-port="bottom" data-to="order-detail" data-to-port="top" data-arrow-target="order-detail:top" d="M 1584 4204 L 1584 4324" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-022" data-from="order-detail" data-from-port="bottom" data-to="fulfillment-progress" data-to-port="top" data-arrow-target="fulfillment-progress:top" d="M 1584 4444 L 1584 4864" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-023" data-from="fulfillment-progress" data-from-port="bottom" data-to="order-preparing" data-to-port="top" data-arrow-target="order-preparing:top" d="M 1584 4984 L 1584 5344" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-024" data-from="payment-success" data-from-port="left" data-to="payment-pending" data-to-port="top" data-arrow-target="payment-pending:top" data-edge-label="edge-024" d="M 1424 3874 L 934 3874 L 934 4084" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-025" data-from="payment-pending" data-from-port="bottom" data-to="pending-action" data-to-port="top" data-arrow-target="pending-action:top" d="M 934 4204 L 934 4564" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-026" data-from="pending-action" data-from-port="left" data-to="initiate-payment" data-to-port="left" data-arrow-target="initiate-payment:left" data-edge-label="edge-026" d="M 774 4654 L 694 4654 L 694 3304 L 1384 3304" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-027" data-from="pending-action" data-from-port="bottom" data-to="cancel-release" data-to-port="top" data-arrow-target="cancel-release:top" data-edge-label="edge-027" d="M 934 4744 L 934 5104" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-029" data-from="order-preparing" data-from-port="bottom" data-to="store-accept" data-to-port="top" data-arrow-target="store-accept:top" d="M 1584 5464 L 1584 5884" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-030" data-from="store-accept" data-from-port="bottom" data-to="picking-result" data-to-port="top" data-arrow-target="picking-result:top" d="M 1584 6004 L 1584 6364" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-031" data-from="picking-result" data-from-port="bottom" data-to="waiting-pickup" data-to-port="top" data-arrow-target="waiting-pickup:top" data-edge-label="edge-031" d="M 1584 6544 L 1584 8764" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-032" data-from="picking-result" data-from-port="right" data-to="stockout-strategy" data-to-port="top" data-arrow-target="stockout-strategy:top" data-edge-label="edge-032" d="M 1744 6454 L 2584 6454 L 2584 6664" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-033" data-from="picking-result" data-from-port="left" data-to="full-refund" data-to-port="top" data-arrow-target="full-refund:top" data-edge-label="edge-033" d="M 1424 6454 L 864 6454 L 864 6694" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-034" data-from="stockout-strategy" data-from-port="left" data-to="partial-refund" data-to-port="top" data-arrow-target="partial-refund:top" data-edge-label="edge-034" d="M 2424 6754 L 2034 6754 L 2034 6964" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-035" data-from="stockout-strategy" data-from-port="bottom" data-to="substitution-start" data-to-port="top" data-arrow-target="substitution-start:top" data-edge-label="edge-035" d="M 2584 6844 L 2584 6964" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-036" data-from="substitution-start" data-from-port="bottom" data-to="substitution-recommend" data-to-port="top" data-arrow-target="substitution-recommend:top" d="M 2584 7084 L 2584 7204" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-037" data-from="substitution-recommend" data-from-port="bottom" data-to="substitution-confirm" data-to-port="top" data-arrow-target="substitution-confirm:top" d="M 2584 7324 L 2584 7444" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-038" data-from="substitution-confirm" data-from-port="bottom" data-to="substitution-accepted" data-to-port="top" data-arrow-target="substitution-accepted:top" d="M 2584 7564 L 2584 7684" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-039" data-from="substitution-accepted" data-from-port="bottom" data-to="substitute-picked" data-to-port="top" data-arrow-target="substitute-picked:top" data-edge-label="edge-039" d="M 2584 7864 L 2584 7984" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-040" data-from="substitution-accepted" data-from-port="right" data-to="refund-partial" data-to-port="top" data-arrow-target="refund-partial:top" data-to-port-offset="32" data-edge-label="edge-040" d="M 2744 7774 L 3416 7774 L 3416 8524" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-042" data-from="substitute-picked" data-from-port="bottom" data-to="substitute-available" data-to-port="top" data-arrow-target="substitute-available:top" d="M 2584 8104 L 2584 8224" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-043" data-from="substitute-available" data-from-port="bottom" data-to="order-amend" data-to-port="top" data-arrow-target="order-amend:top" data-edge-label="edge-043" d="M 2584 8404 L 2584 8524" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-044" data-from="substitute-available" data-from-port="right" data-to="refund-partial" data-to-port="top" data-arrow-target="refund-partial:top" data-to-port-offset="-32" data-edge-label="edge-044" d="M 2744 8314 L 3352 8314 L 3352 8524" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-045" data-from="partial-refund" data-from-port="left" data-to="waiting-pickup" data-to-port="top" data-arrow-target="waiting-pickup:top" data-to-port-offset="40" d="M 1834 7024 L 1624 7024 L 1624 8764" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-046" data-from="order-amend" data-from-port="bottom" data-to="waiting-pickup" data-to-port="top" data-arrow-target="waiting-pickup:top" data-to-port-offset="160" d="M 2584 8644 L 2584 8704 L 1744 8704 L 1744 8764" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-047" data-from="refund-partial" data-from-port="left" data-to="waiting-pickup" data-to-port="top" data-arrow-target="waiting-pickup:top" data-to-port-offset="200" d="M 3184 8584 L 2824 8584 L 2824 8734 L 1784 8734 L 1784 8764" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-048" data-from="waiting-pickup" data-from-port="bottom" data-to="pickup-notification" data-to-port="top" data-arrow-target="pickup-notification:top" d="M 1584 8884 L 1584 9004" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-049" data-from="pickup-notification" data-from-port="bottom" data-to="pickup-on-time" data-to-port="top" data-arrow-target="pickup-on-time:top" d="M 1584 9124 L 1584 9244" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-050" data-from="pickup-on-time" data-from-port="bottom" data-to="present-voucher" data-to-port="top" data-arrow-target="present-voucher:top" data-edge-label="edge-050" d="M 1584 9424 L 1584 9544" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-051" data-from="present-voucher" data-from-port="bottom" data-to="handoff" data-to-port="top" data-arrow-target="handoff:top" d="M 1584 9664 L 1584 9784" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-052" data-from="handoff" data-from-port="bottom" data-to="completed" data-to-port="top" data-arrow-target="completed:top" d="M 1584 9904 L 1584 10024" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-053" data-from="pickup-on-time" data-from-port="right" data-to="reject" data-to-port="top" data-arrow-target="reject:top" data-edge-label="edge-053" d="M 1744 9334 L 2234 9334 L 2234 9544" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-054" data-from="pickup-on-time" data-from-port="left" data-to="overdue" data-to-port="top" data-arrow-target="overdue:top" data-edge-label="edge-054" d="M 1424 9334 L 934 9334 L 934 9544" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-055" data-from="order-preparing" data-from-port="left" data-to="cancel-request" data-to-port="top" data-arrow-target="cancel-request:top" data-edge-label="edge-055" d="M 1384 5404 L 264 5404 L 264 5584" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="8 6" />
+<path data-edge="edge-056" data-from="cancel-request" data-from-port="bottom" data-to="cancel-success" data-to-port="top" data-arrow-target="cancel-success:top" data-edge-label="edge-056" d="M 264 5764 L 264 6124" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-057" data-from="cancel-request" data-from-port="right" data-to="cancel-blocked" data-to-port="top" data-arrow-target="cancel-blocked:top" data-edge-label="edge-057" d="M 424 5674 L 744 5674 L 744 6124" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" />
+<path data-edge="edge-058" data-from="cancel-blocked" data-from-port="bottom" data-to="waiting-pickup" data-to-port="top" data-arrow-target="waiting-pickup:top" data-to-port-offset="-80" data-edge-label="edge-058" d="M 744 6244 L 744 6289 L 624 6289 L 624 8734 L 1504 8734 L 1504 8764" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="8 6" />
+<path data-edge="edge-059" data-from="completed" data-from-port="bottom" data-to="after-sale" data-to-port="top" data-arrow-target="after-sale:top" data-edge-label="edge-059" d="M 1584 10144 L 1584 10264" fill="none" stroke="#000000" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="8 6" />
 <g data-node="open-store" data-node-shape="rect">
-<rect x="1744" y="64" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="open-store-label" x="1944" y="130" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">打开商城</text></g>
+<rect x="1384" y="64" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="open-store-label" x="1584" y="130" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">打开商城</text></g>
 <g data-node="switch-pickup" data-node-shape="rect">
-<rect x="1744" y="244" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="switch-pickup-label" x="1944" y="310" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">切换到店自提模式</text></g>
+<rect x="1384" y="304" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="switch-pickup-label" x="1584" y="370" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">切换到店自提模式</text></g>
 <g data-node="select-store" data-node-shape="rect">
-<rect x="1744" y="424" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="select-store-label" x="1944" y="490" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">选择自提门店</text></g>
+<rect x="1384" y="544" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="select-store-label" x="1584" y="610" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">选择自提门店</text></g>
 <g data-node="browse-products" data-node-shape="rect">
-<rect x="1744" y="604" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="browse-products-label" x="1944" y="670" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">浏览门店商品</text></g>
+<rect x="1384" y="784" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="browse-products-label" x="1584" y="850" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">浏览门店商品</text></g>
 <g data-node="add-cart" data-node-shape="rect">
-<rect x="1744" y="784" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="add-cart-label" x="1944" y="850" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">加入购物车</text></g>
+<rect x="1384" y="1024" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="add-cart-label" x="1584" y="1090" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">加入购物车</text></g>
 <g data-node="cart-checkout" data-node-shape="rect">
-<rect x="1744" y="964" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="cart-checkout-label" x="1944" y="1030" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">购物车页点击结算</text></g>
+<rect x="1384" y="1264" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="cart-checkout-label" x="1584" y="1330" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">购物车页点击结算</text></g>
 <g data-node="minimum-order" data-node-shape="diamond">
-<polygon points="1944,1114 2104,1204 1944,1294 1784,1204" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="minimum-order-label" x="1944" y="1210" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">达到最低下单金额</text></g>
+<polygon points="1584,1504 1744,1594 1584,1684 1424,1594" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="minimum-order-label" x="1584" y="1600" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">达到最低下单金额</text></g>
 <g data-node="checkout-blocked" data-node-shape="rect">
-<rect x="2344" y="1324" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="checkout-blocked-label" x="2544" y="1390" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">购物车页提示不可结算</text></g>
+<rect x="1984" y="1804" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="checkout-blocked-label" x="2184" y="1870" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">购物车页提示不可结算</text></g>
 <g data-node="product-validation" data-node-shape="rect">
-<rect x="1744" y="1324" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="product-validation-label" x="1944" y="1390" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">校验商品可售 上下架 库存</text></g>
+<rect x="1384" y="1804" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="product-validation-label" x="1584" y="1870" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">校验商品可售 上下架 库存</text></g>
 <g data-node="checkout" data-node-shape="rect">
-<rect x="1744" y="1504" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="checkout-label" x="1944" y="1570" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">进入结算页</text></g>
+<rect x="1384" y="2044" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="checkout-label" x="1584" y="2110" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">进入结算页</text></g>
 <g data-node="pickup-time" data-node-shape="rect">
-<rect x="1744" y="1684" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="pickup-time-label" x="1944" y="1750" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">选择自提时间</text></g>
+<rect x="1384" y="2284" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="pickup-time-label" x="1584" y="2350" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">选择自提时间</text></g>
 <g data-node="coupon" data-node-shape="rect">
-<rect x="1744" y="1864" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="coupon-label" x="1944" y="1930" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">选择优惠券</text></g>
+<rect x="1384" y="2524" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="coupon-label" x="1584" y="2590" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">选择优惠券</text></g>
 <g data-node="amount-confirmation" data-node-shape="rect">
-<rect x="1744" y="2044" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="amount-confirmation-label" x="1944" y="2110" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">确认金额明细</text></g>
+<rect x="1384" y="2764" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="amount-confirmation-label" x="1584" y="2830" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">确认金额明细</text></g>
 <g data-node="reserve-order" data-node-shape="rect">
-<rect x="1744" y="2224" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="reserve-order-label" x="1944" y="2290" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">提交订单·预占库存</text></g>
+<rect x="1384" y="3004" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="reserve-order-label" x="1584" y="3070" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">提交订单·预占库存</text></g>
 <g data-node="initiate-payment" data-node-shape="rect">
-<rect x="1744" y="2404" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="initiate-payment-label" x="1944" y="2470" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">发起支付</text></g>
+<rect x="1384" y="3244" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="initiate-payment-label" x="1584" y="3310" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">发起支付</text></g>
 <g data-node="alcohol-check" data-node-shape="diamond">
-<polygon points="1944,2554 2104,2644 1944,2734 1784,2644" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="alcohol-check-label" x="1944" y="2650" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">是否含酒品</text></g>
+<polygon points="1584,3484 1744,3574 1584,3664 1424,3574" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="alcohol-check-label" x="1584" y="3580" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">是否含酒品</text></g>
 <g data-node="age-confirmation" data-node-shape="rect">
-<rect x="2344" y="2764" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="age-confirmation-label" x="2544" y="2830" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">展示限酒令提示 确认满18岁</text></g>
+<rect x="1984" y="3814" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="age-confirmation-label" x="2184" y="3880" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">展示限酒令提示 确认满18岁</text></g>
 <g data-node="payment-success" data-node-shape="diamond">
-<polygon points="1944,2914 2104,3004 1944,3094 1784,3004" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="payment-success-label" x="1944" y="3010" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">支付是否成功</text></g>
+<polygon points="1584,3784 1744,3874 1584,3964 1424,3874" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="payment-success-label" x="1584" y="3880" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">支付是否成功</text></g>
 <g data-node="deduct-inventory" data-node-shape="rect">
-<rect x="1744" y="3124" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="deduct-inventory-label" x="1944" y="3190" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">扣减库存·核销优惠券</text></g>
+<rect x="1384" y="4084" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="deduct-inventory-label" x="1584" y="4150" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">扣减库存·核销优惠券</text></g>
 <g data-node="order-detail" data-node-shape="rect">
-<rect x="1744" y="3304" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="order-detail-label" x="1944" y="3370" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">进入订单详情页</text></g>
+<rect x="1384" y="4324" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="order-detail-label" x="1584" y="4390" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">进入订单详情页</text></g>
 <g data-node="fulfillment-progress" data-node-shape="rect">
-<rect x="1744" y="3484" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="fulfillment-progress-label" x="1944" y="3550" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">展示履约进度 预计时间 商品明细 金额明细</text></g>
+<rect x="1384" y="4864" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="fulfillment-progress-label" x="1584" y="4930" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">展示履约进度 预计时间 商品明细 金额明细</text></g>
 <g data-node="order-preparing" data-node-shape="rect">
-<rect x="1744" y="3724" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="order-preparing-label" x="1944" y="3790" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">订单准备中</text></g>
+<rect x="1384" y="5344" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="order-preparing-label" x="1584" y="5410" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">订单准备中</text></g>
 <g data-node="payment-pending" data-node-shape="rect">
-<rect x="1094" y="3124" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="payment-pending-label" x="1294" y="3190" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">订单保持待付款·库存仍预占</text></g>
+<rect x="734" y="4084" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="payment-pending-label" x="934" y="4150" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">订单保持待付款·库存仍预占</text></g>
 <g data-node="pending-action" data-node-shape="diamond">
-<polygon points="1294,3334 1454,3424 1294,3514 1134,3424" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="pending-action-label" x="1294" y="3430" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">待付款处理</text></g>
+<polygon points="934,4564 1094,4654 934,4744 774,4654" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="pending-action-label" x="934" y="4660" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">待付款处理</text></g>
 <g data-node="cancel-release" data-node-shape="rect">
-<rect x="1094" y="3604" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="cancel-release-label" x="1294" y="3670" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">取消订单·释放库存退券·订单关闭</text></g>
+<rect x="734" y="5104" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="cancel-release-label" x="934" y="5170" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">取消订单·释放库存退券·订单关闭</text></g>
 <g data-node="store-accept" data-node-shape="rect">
-<rect x="1744" y="3964" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="store-accept-label" x="1944" y="4030" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">门店接单·开始拣货</text></g>
+<rect x="1384" y="5884" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="store-accept-label" x="1584" y="5950" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">门店接单·开始拣货</text></g>
 <g data-node="picking-result" data-node-shape="diamond">
-<polygon points="1944,4174 2104,4264 1944,4354 1784,4264" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="picking-result-label" x="1944" y="4270" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">拣货结果</text></g>
+<polygon points="1584,6364 1744,6454 1584,6544 1424,6454" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="picking-result-label" x="1584" y="6460" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">拣货结果</text></g>
 <g data-node="stockout-strategy" data-node-shape="diamond">
-<polygon points="2594,4414 2754,4504 2594,4594 2434,4504" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="stockout-strategy-label" x="2594" y="4510" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">缺货处理方式</text></g>
+<polygon points="2584,6664 2744,6754 2584,6844 2424,6754" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="stockout-strategy-label" x="2584" y="6760" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">缺货处理方式</text></g>
 <g data-node="full-refund" data-node-shape="rect">
-<rect x="1024" y="4444" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="full-refund-label" x="1224" y="4510" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">整单退款·订单关闭</text></g>
+<rect x="664" y="6694" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="full-refund-label" x="864" y="6760" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">整单退款·订单关闭</text></g>
 <g data-node="partial-refund" data-node-shape="rect">
-<rect x="2194" y="4624" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="partial-refund-label" x="2394" y="4690" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">缺货部分退款·剩余继续履约</text></g>
+<rect x="1834" y="6964" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="partial-refund-label" x="2034" y="7030" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">缺货部分退款·剩余继续履约</text></g>
 <g data-node="substitution-start" data-node-shape="rect">
-<rect x="2744" y="4624" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="substitution-start-label" x="2944" y="4690" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">拣货员发起换品</text></g>
+<rect x="2384" y="6964" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="substitution-start-label" x="2584" y="7030" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">拣货员发起换品</text></g>
 <g data-node="substitution-recommend" data-node-shape="rect">
-<rect x="2744" y="4804" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="substitution-recommend-label" x="2944" y="4870" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">系统推荐替代品</text></g>
+<rect x="2384" y="7204" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="substitution-recommend-label" x="2584" y="7270" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">系统推荐替代品</text></g>
 <g data-node="substitution-confirm" data-node-shape="rect">
-<rect x="2744" y="4984" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="substitution-confirm-label" x="2944" y="5050" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">推送顾客确认换货</text></g>
+<rect x="2384" y="7444" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="substitution-confirm-label" x="2584" y="7510" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">推送顾客确认换货</text></g>
 <g data-node="substitution-accepted" data-node-shape="diamond">
-<polygon points="2944,5134 3104,5224 2944,5314 2784,5224" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="substitution-accepted-label" x="2944" y="5230" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">顾客是否接受</text></g>
+<polygon points="2584,7684 2744,7774 2584,7864 2424,7774" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="substitution-accepted-label" x="2584" y="7780" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">顾客是否接受</text></g>
 <g data-node="substitute-picked" data-node-shape="rect">
-<rect x="2744" y="5344" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="substitute-picked-label" x="2944" y="5410" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">拣出替代品</text></g>
+<rect x="2384" y="7984" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="substitute-picked-label" x="2584" y="8050" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">拣出替代品</text></g>
 <g data-node="substitute-available" data-node-shape="diamond">
-<polygon points="2944,5494 3104,5584 2944,5674 2784,5584" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="substitute-available-label" x="2944" y="5590" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">替代品是否拣到</text></g>
+<polygon points="2584,8224 2744,8314 2584,8404 2424,8314" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="substitute-available-label" x="2584" y="8320" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">替代品是否拣到</text></g>
 <g data-node="order-amend" data-node-shape="rect">
-<rect x="2344" y="5704" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="order-amend-label" x="2544" y="5770" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">改单·替换商品行</text></g>
+<rect x="2384" y="8524" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="order-amend-label" x="2584" y="8590" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">改单·替换商品行</text></g>
 <g data-node="refund-partial" data-node-shape="rect">
-<rect x="3144" y="5704" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="refund-partial-label" x="3344" y="5770" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">缺货部分转退款</text></g>
+<rect x="3184" y="8524" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="refund-partial-label" x="3384" y="8590" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">缺货部分转退款</text></g>
 <g data-node="waiting-pickup" data-node-shape="rect">
-<rect x="1744" y="6004" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="waiting-pickup-label" x="1944" y="6070" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">门店备货·等待自取</text></g>
+<rect x="1384" y="8764" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="waiting-pickup-label" x="1584" y="8830" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">门店备货·等待自取</text></g>
 <g data-node="pickup-notification" data-node-shape="rect">
-<rect x="1744" y="6184" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="pickup-notification-label" x="1944" y="6250" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">收到到店通知与取货凭证</text></g>
+<rect x="1384" y="9004" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="pickup-notification-label" x="1584" y="9070" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">收到到店通知与取货凭证</text></g>
 <g data-node="pickup-on-time" data-node-shape="diamond">
-<polygon points="1944,6334 2104,6424 1944,6514 1784,6424" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="pickup-on-time-label" x="1944" y="6430" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">是否按期到店取货</text></g>
+<polygon points="1584,9244 1744,9334 1584,9424 1424,9334" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="pickup-on-time-label" x="1584" y="9340" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">是否按期到店取货</text></g>
 <g data-node="present-voucher" data-node-shape="rect">
-<rect x="1744" y="6544" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="present-voucher-label" x="1944" y="6610" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">到店出示取货凭证</text></g>
+<rect x="1384" y="9544" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="present-voucher-label" x="1584" y="9610" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">到店出示取货凭证</text></g>
 <g data-node="handoff" data-node-shape="rect">
-<rect x="1744" y="6724" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="handoff-label" x="1944" y="6790" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">店员在 Dmall APP 核销签收</text></g>
+<rect x="1384" y="9784" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="handoff-label" x="1584" y="9850" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">店员在 Dmall APP 核销签收</text></g>
 <g data-node="completed" data-node-shape="rect">
-<rect x="1744" y="6904" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="completed-label" x="1944" y="6970" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">提货完成·订单完成</text></g>
+<rect x="1384" y="10024" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="completed-label" x="1584" y="10090" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">提货完成·订单完成</text></g>
 <g data-node="reject" data-node-shape="rect">
-<rect x="2394" y="6544" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="reject-label" x="2594" y="6610" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">您已拒收 · 全额退款</text></g>
+<rect x="2034" y="9544" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="reject-label" x="2234" y="9610" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">您已拒收 · 全额退款</text></g>
 <g data-node="overdue" data-node-shape="rect">
-<rect x="1094" y="6544" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="overdue-label" x="1294" y="6610" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">超期訂單完成 · 不退款</text></g>
+<rect x="734" y="9544" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="overdue-label" x="934" y="9610" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">超期訂單完成 · 不退款</text></g>
 <g data-node="cancel-request" data-node-shape="diamond">
-<polygon points="624,3904 784,3994 624,4084 464,3994" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="cancel-request-label" x="624" y="4000" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">门店是否已开始拣货</text></g>
+<polygon points="264,5584 424,5674 264,5764 104,5674" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="cancel-request-label" x="264" y="5680" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">门店是否已开始拣货</text></g>
 <g data-node="cancel-success" data-node-shape="rect">
-<rect x="64" y="4144" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="cancel-success-label" x="264" y="4210" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">取消成功并退款</text></g>
+<rect x="64" y="6124" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="cancel-success-label" x="264" y="6190" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">取消成功并退款</text></g>
 <g data-node="cancel-blocked" data-node-shape="rect">
-<rect x="784" y="4144" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="cancel-blocked-label" x="984" y="4210" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">不可取消·引导签收后申请退款</text></g>
+<rect x="544" y="6124" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="cancel-blocked-label" x="744" y="6190" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">不可取消·引导签收后申请退款</text></g>
 <g data-node="after-sale" data-node-shape="rect">
-<rect x="1744" y="7084" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
-<text data-text-id="after-sale-label" x="1944" y="7150" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">仅退款·售后有效期内</text></g>
-<text data-edge-label="edge-007" data-text-id="edge-007-label" x="2608" y="1264" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">否</text>
-<text data-edge-label="edge-009" data-text-id="edge-009-label" x="1880" y="1309" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">是</text>
-<text data-edge-label="edge-017" data-text-id="edge-017-label" x="1880" y="2824" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">否</text>
-<text data-edge-label="edge-018" data-text-id="edge-018-label" x="2608" y="2704" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">是</text>
-<text data-edge-label="edge-020" data-text-id="edge-020-label" x="1880" y="3109" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">是</text>
-<text data-edge-label="edge-024" data-text-id="edge-024-label" x="1230" y="3064" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">否</text>
-<text data-edge-label="edge-026" data-text-id="edge-026-label" x="990" y="2944" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">重新发起支付</text>
-<text data-edge-label="edge-027" data-text-id="edge-027-label" x="1398.84" y="3559" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">主动取消／支付超时15分钟未付</text>
-<text data-edge-label="edge-031" data-text-id="edge-031-label" x="1880" y="5179" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">全部拣到</text>
-<text data-edge-label="edge-032" data-text-id="edge-032-label" x="2658" y="4339" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">部分缺货</text>
-<text data-edge-label="edge-033" data-text-id="edge-033-label" x="1160" y="4354" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">全部缺货</text>
-<text data-edge-label="edge-034" data-text-id="edge-034-label" x="2330" y="4564" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">部分退款</text>
-<text data-edge-label="edge-035" data-text-id="edge-035-label" x="3008" y="4564" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">部分换货</text>
-<text data-edge-label="edge-039" data-text-id="edge-039-label" x="2648" y="5269" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">接受</text>
-<text data-edge-label="edge-040" data-text-id="edge-040-label" x="3440" y="5464" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">拒绝/超时未回应</text>
-<text data-edge-label="edge-043" data-text-id="edge-043-label" x="2480" y="5644" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">拣到</text>
-<text data-edge-label="edge-044" data-text-id="edge-044-label" x="3248" y="5644" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">拣不到</text>
-<text data-edge-label="edge-050" data-text-id="edge-050-label" x="1880" y="6529" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">是</text>
-<text data-edge-label="edge-053" data-text-id="edge-053-label" x="2658" y="6484" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">到店后当面拒收</text>
-<text data-edge-label="edge-054" data-text-id="edge-054-label" x="1230" y="6484" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">逾期未取</text>
-<text data-edge-label="edge-055" data-text-id="edge-055-label" x="560" y="3844" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">发起取消</text>
-<text data-edge-label="edge-056" data-text-id="edge-056-label" x="200" y="4069" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">否·未开始拣货</text>
-<text data-edge-label="edge-057" data-text-id="edge-057-label" x="1048" y="4069" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">是·已开始拣货</text>
-<text data-edge-label="edge-058" data-text-id="edge-058-label" x="920" y="5119" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">继续履约</text>
-<text data-edge-label="edge-059" data-text-id="edge-059-label" x="1880" y="7054" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">申请售后</text>
-<path data-edge-arrow="edge-001" data-edge="edge-001" data-arrow-target="switch-pickup:top" d="M 1944.0 244.0 L 1939.0 234.0 L 1949.0 234.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-002" data-edge="edge-002" data-arrow-target="select-store:top" d="M 1944.0 424.0 L 1939.0 414.0 L 1949.0 414.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-003" data-edge="edge-003" data-arrow-target="browse-products:top" d="M 1944.0 604.0 L 1939.0 594.0 L 1949.0 594.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-004" data-edge="edge-004" data-arrow-target="add-cart:top" d="M 1944.0 784.0 L 1939.0 774.0 L 1949.0 774.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-005" data-edge="edge-005" data-arrow-target="cart-checkout:top" d="M 1944.0 964.0 L 1939.0 954.0 L 1949.0 954.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-006" data-edge="edge-006" data-arrow-target="minimum-order:top" d="M 1944.0 1114.0 L 1939.0 1104.0 L 1949.0 1104.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-007" data-edge="edge-007" data-arrow-target="checkout-blocked:top" d="M 2544.0 1324.0 L 2539.0 1314.0 L 2549.0 1314.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-008" data-edge="edge-008" data-arrow-target="add-cart:top" d="M 2104.0 784.0 L 2099.0 774.0 L 2109.0 774.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-009" data-edge="edge-009" data-arrow-target="product-validation:top" d="M 1944.0 1324.0 L 1939.0 1314.0 L 1949.0 1314.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-010" data-edge="edge-010" data-arrow-target="checkout:top" d="M 1944.0 1504.0 L 1939.0 1494.0 L 1949.0 1494.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-011" data-edge="edge-011" data-arrow-target="pickup-time:top" d="M 1944.0 1684.0 L 1939.0 1674.0 L 1949.0 1674.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-012" data-edge="edge-012" data-arrow-target="coupon:top" d="M 1944.0 1864.0 L 1939.0 1854.0 L 1949.0 1854.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-013" data-edge="edge-013" data-arrow-target="amount-confirmation:top" d="M 1944.0 2044.0 L 1939.0 2034.0 L 1949.0 2034.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-014" data-edge="edge-014" data-arrow-target="reserve-order:top" d="M 1944.0 2224.0 L 1939.0 2214.0 L 1949.0 2214.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-015" data-edge="edge-015" data-arrow-target="initiate-payment:top" d="M 1944.0 2404.0 L 1939.0 2394.0 L 1949.0 2394.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-016" data-edge="edge-016" data-arrow-target="alcohol-check:top" d="M 1944.0 2554.0 L 1939.0 2544.0 L 1949.0 2544.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-017" data-edge="edge-017" data-arrow-target="payment-success:top" d="M 1944.0 2914.0 L 1939.0 2904.0 L 1949.0 2904.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-018" data-edge="edge-018" data-arrow-target="age-confirmation:top" d="M 2544.0 2764.0 L 2539.0 2754.0 L 2549.0 2754.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-019" data-edge="edge-019" data-arrow-target="payment-success:right" d="M 2104.0 3004.0 L 2114.0 2999.0 L 2114.0 3009.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-020" data-edge="edge-020" data-arrow-target="deduct-inventory:top" d="M 1944.0 3124.0 L 1939.0 3114.0 L 1949.0 3114.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-021" data-edge="edge-021" data-arrow-target="order-detail:top" d="M 1944.0 3304.0 L 1939.0 3294.0 L 1949.0 3294.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-022" data-edge="edge-022" data-arrow-target="fulfillment-progress:top" d="M 1944.0 3484.0 L 1939.0 3474.0 L 1949.0 3474.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-023" data-edge="edge-023" data-arrow-target="order-preparing:top" d="M 1944.0 3724.0 L 1939.0 3714.0 L 1949.0 3714.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-024" data-edge="edge-024" data-arrow-target="payment-pending:top" d="M 1294.0 3124.0 L 1289.0 3114.0 L 1299.0 3114.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-025" data-edge="edge-025" data-arrow-target="pending-action:top" d="M 1294.0 3334.0 L 1289.0 3324.0 L 1299.0 3324.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-026" data-edge="edge-026" data-arrow-target="initiate-payment:left" d="M 1744.0 2464.0 L 1734.0 2459.0 L 1734.0 2469.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-027" data-edge="edge-027" data-arrow-target="cancel-release:top" d="M 1294.0 3604.0 L 1289.0 3594.0 L 1299.0 3594.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-029" data-edge="edge-029" data-arrow-target="store-accept:top" d="M 1944.0 3964.0 L 1939.0 3954.0 L 1949.0 3954.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-030" data-edge="edge-030" data-arrow-target="picking-result:top" d="M 1944.0 4174.0 L 1939.0 4164.0 L 1949.0 4164.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-031" data-edge="edge-031" data-arrow-target="waiting-pickup:top" d="M 1944.0 6004.0 L 1939.0 5994.0 L 1949.0 5994.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-032" data-edge="edge-032" data-arrow-target="stockout-strategy:top" d="M 2594.0 4414.0 L 2589.0 4404.0 L 2599.0 4404.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-033" data-edge="edge-033" data-arrow-target="full-refund:top" d="M 1224.0 4444.0 L 1219.0 4434.0 L 1229.0 4434.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-034" data-edge="edge-034" data-arrow-target="partial-refund:top" d="M 2394.0 4624.0 L 2389.0 4614.0 L 2399.0 4614.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-035" data-edge="edge-035" data-arrow-target="substitution-start:top" d="M 2944.0 4624.0 L 2939.0 4614.0 L 2949.0 4614.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-036" data-edge="edge-036" data-arrow-target="substitution-recommend:top" d="M 2944.0 4804.0 L 2939.0 4794.0 L 2949.0 4794.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-037" data-edge="edge-037" data-arrow-target="substitution-confirm:top" d="M 2944.0 4984.0 L 2939.0 4974.0 L 2949.0 4974.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-038" data-edge="edge-038" data-arrow-target="substitution-accepted:top" d="M 2944.0 5134.0 L 2939.0 5124.0 L 2949.0 5124.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-039" data-edge="edge-039" data-arrow-target="substitute-picked:top" d="M 2944.0 5344.0 L 2939.0 5334.0 L 2949.0 5334.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-040" data-edge="edge-040" data-arrow-target="refund-partial:top" d="M 3376.0 5704.0 L 3371.0 5694.0 L 3381.0 5694.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-042" data-edge="edge-042" data-arrow-target="substitute-available:top" d="M 2944.0 5494.0 L 2939.0 5484.0 L 2949.0 5484.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-043" data-edge="edge-043" data-arrow-target="order-amend:top" d="M 2544.0 5704.0 L 2539.0 5694.0 L 2549.0 5694.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-044" data-edge="edge-044" data-arrow-target="refund-partial:top" d="M 3312.0 5704.0 L 3307.0 5694.0 L 3317.0 5694.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-045" data-edge="edge-045" data-arrow-target="waiting-pickup:top" d="M 1984.0 6004.0 L 1979.0 5994.0 L 1989.0 5994.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-046" data-edge="edge-046" data-arrow-target="waiting-pickup:top" d="M 2104.0 6004.0 L 2099.0 5994.0 L 2109.0 5994.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-047" data-edge="edge-047" data-arrow-target="waiting-pickup:top" d="M 2134.0 6004.0 L 2129.0 5994.0 L 2139.0 5994.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-048" data-edge="edge-048" data-arrow-target="pickup-notification:top" d="M 1944.0 6184.0 L 1939.0 6174.0 L 1949.0 6174.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-049" data-edge="edge-049" data-arrow-target="pickup-on-time:top" d="M 1944.0 6334.0 L 1939.0 6324.0 L 1949.0 6324.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-050" data-edge="edge-050" data-arrow-target="present-voucher:top" d="M 1944.0 6544.0 L 1939.0 6534.0 L 1949.0 6534.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-051" data-edge="edge-051" data-arrow-target="handoff:top" d="M 1944.0 6724.0 L 1939.0 6714.0 L 1949.0 6714.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-052" data-edge="edge-052" data-arrow-target="completed:top" d="M 1944.0 6904.0 L 1939.0 6894.0 L 1949.0 6894.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-053" data-edge="edge-053" data-arrow-target="reject:top" d="M 2594.0 6544.0 L 2589.0 6534.0 L 2599.0 6534.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-054" data-edge="edge-054" data-arrow-target="overdue:top" d="M 1294.0 6544.0 L 1289.0 6534.0 L 1299.0 6534.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-055" data-edge="edge-055" data-arrow-target="cancel-request:top" d="M 624.0 3904.0 L 619.0 3894.0 L 629.0 3894.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-056" data-edge="edge-056" data-arrow-target="cancel-success:top" d="M 264.0 4144.0 L 259.0 4134.0 L 269.0 4134.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-057" data-edge="edge-057" data-arrow-target="cancel-blocked:top" d="M 984.0 4144.0 L 979.0 4134.0 L 989.0 4134.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-058" data-edge="edge-058" data-arrow-target="waiting-pickup:top" d="M 1864.0 6004.0 L 1859.0 5994.0 L 1869.0 5994.0 Z" fill="#000000" />
-<path data-edge-arrow="edge-059" data-edge="edge-059" data-arrow-target="after-sale:top" d="M 1944.0 7084.0 L 1939.0 7074.0 L 1949.0 7074.0 Z" fill="#000000" />
+<rect x="1384" y="10264" width="400" height="120" fill="none" stroke="#000000" stroke-width="2" />
+<text data-text-id="after-sale-label" x="1584" y="10330" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#000000">仅退款·售后有效期内</text></g>
+<text data-edge-label="edge-007" data-text-id="edge-007-label" x="2248" y="1699" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">否</text>
+<text data-edge-label="edge-009" data-text-id="edge-009-label" x="1520" y="1744" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">是</text>
+<text data-edge-label="edge-017" data-text-id="edge-017-label" x="1520" y="3724" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">否</text>
+<text data-edge-label="edge-018" data-text-id="edge-018-label" x="2248" y="3694" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">是</text>
+<text data-edge-label="edge-020" data-text-id="edge-020-label" x="1520" y="4024" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">是</text>
+<text data-edge-label="edge-024" data-text-id="edge-024-label" x="870" y="3979" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">否</text>
+<text data-edge-label="edge-026" data-text-id="edge-026-label" x="630" y="3979" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">重新发起支付</text>
+<text data-edge-label="edge-027" data-text-id="edge-027-label" x="1038.84" y="4924" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">主动取消／支付超时15分钟未付</text>
+<text data-edge-label="edge-031" data-text-id="edge-031-label" x="1520" y="7654" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">全部拣到</text>
+<text data-edge-label="edge-032" data-text-id="edge-032-label" x="2648" y="6559" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">部分缺货</text>
+<text data-edge-label="edge-033" data-text-id="edge-033-label" x="800" y="6574" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">全部缺货</text>
+<text data-edge-label="edge-034" data-text-id="edge-034-label" x="1970" y="6859" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">部分退款</text>
+<text data-edge-label="edge-035" data-text-id="edge-035-label" x="2520" y="6904" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">部分换货</text>
+<text data-edge-label="edge-039" data-text-id="edge-039-label" x="2520" y="7924" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">接受</text>
+<text data-edge-label="edge-040" data-text-id="edge-040-label" x="3480" y="8149" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">拒绝/超时未回应</text>
+<text data-edge-label="edge-043" data-text-id="edge-043-label" x="2520" y="8464" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">拣到</text>
+<text data-edge-label="edge-044" data-text-id="edge-044-label" x="3288" y="8419" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">拣不到</text>
+<text data-edge-label="edge-050" data-text-id="edge-050-label" x="1520" y="9484" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">是</text>
+<text data-edge-label="edge-053" data-text-id="edge-053-label" x="2298" y="9439" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">到店后当面拒收</text>
+<text data-edge-label="edge-054" data-text-id="edge-054-label" x="870" y="9439" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">逾期未取</text>
+<text data-edge-label="edge-055" data-text-id="edge-055-label" x="200" y="5494" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">发起取消</text>
+<text data-edge-label="edge-056" data-text-id="edge-056-label" x="200" y="5944" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">否·未开始拣货</text>
+<text data-edge-label="edge-057" data-text-id="edge-057-label" x="808" y="5899" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">是·已开始拣货</text>
+<text data-edge-label="edge-058" data-text-id="edge-058-label" x="560" y="7511.5" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">继续履约</text>
+<text data-edge-label="edge-059" data-text-id="edge-059-label" x="1520" y="10204" text-anchor="middle" dominant-baseline="middle" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="14" fill="#000000">申请售后</text>
+<path data-edge-arrow="edge-001" data-edge="edge-001" data-arrow-target="switch-pickup:top" d="M 1584.0 304.0 L 1579.0 294.0 L 1589.0 294.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-002" data-edge="edge-002" data-arrow-target="select-store:top" d="M 1584.0 544.0 L 1579.0 534.0 L 1589.0 534.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-003" data-edge="edge-003" data-arrow-target="browse-products:top" d="M 1584.0 784.0 L 1579.0 774.0 L 1589.0 774.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-004" data-edge="edge-004" data-arrow-target="add-cart:top" d="M 1584.0 1024.0 L 1579.0 1014.0 L 1589.0 1014.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-005" data-edge="edge-005" data-arrow-target="cart-checkout:top" d="M 1584.0 1264.0 L 1579.0 1254.0 L 1589.0 1254.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-006" data-edge="edge-006" data-arrow-target="minimum-order:top" d="M 1584.0 1504.0 L 1579.0 1494.0 L 1589.0 1494.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-007" data-edge="edge-007" data-arrow-target="checkout-blocked:top" d="M 2184.0 1804.0 L 2179.0 1794.0 L 2189.0 1794.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-008" data-edge="edge-008" data-arrow-target="add-cart:top" d="M 1744.0 1024.0 L 1739.0 1014.0 L 1749.0 1014.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-009" data-edge="edge-009" data-arrow-target="product-validation:top" d="M 1584.0 1804.0 L 1579.0 1794.0 L 1589.0 1794.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-010" data-edge="edge-010" data-arrow-target="checkout:top" d="M 1584.0 2044.0 L 1579.0 2034.0 L 1589.0 2034.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-011" data-edge="edge-011" data-arrow-target="pickup-time:top" d="M 1584.0 2284.0 L 1579.0 2274.0 L 1589.0 2274.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-012" data-edge="edge-012" data-arrow-target="coupon:top" d="M 1584.0 2524.0 L 1579.0 2514.0 L 1589.0 2514.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-013" data-edge="edge-013" data-arrow-target="amount-confirmation:top" d="M 1584.0 2764.0 L 1579.0 2754.0 L 1589.0 2754.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-014" data-edge="edge-014" data-arrow-target="reserve-order:top" d="M 1584.0 3004.0 L 1579.0 2994.0 L 1589.0 2994.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-015" data-edge="edge-015" data-arrow-target="initiate-payment:top" d="M 1584.0 3244.0 L 1579.0 3234.0 L 1589.0 3234.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-016" data-edge="edge-016" data-arrow-target="alcohol-check:top" d="M 1584.0 3484.0 L 1579.0 3474.0 L 1589.0 3474.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-017" data-edge="edge-017" data-arrow-target="payment-success:top" d="M 1584.0 3784.0 L 1579.0 3774.0 L 1589.0 3774.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-018" data-edge="edge-018" data-arrow-target="age-confirmation:top" d="M 2184.0 3814.0 L 2179.0 3804.0 L 2189.0 3804.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-019" data-edge="edge-019" data-arrow-target="payment-success:right" d="M 1744.0 3874.0 L 1754.0 3869.0 L 1754.0 3879.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-020" data-edge="edge-020" data-arrow-target="deduct-inventory:top" d="M 1584.0 4084.0 L 1579.0 4074.0 L 1589.0 4074.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-021" data-edge="edge-021" data-arrow-target="order-detail:top" d="M 1584.0 4324.0 L 1579.0 4314.0 L 1589.0 4314.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-022" data-edge="edge-022" data-arrow-target="fulfillment-progress:top" d="M 1584.0 4864.0 L 1579.0 4854.0 L 1589.0 4854.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-023" data-edge="edge-023" data-arrow-target="order-preparing:top" d="M 1584.0 5344.0 L 1579.0 5334.0 L 1589.0 5334.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-024" data-edge="edge-024" data-arrow-target="payment-pending:top" d="M 934.0 4084.0 L 929.0 4074.0 L 939.0 4074.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-025" data-edge="edge-025" data-arrow-target="pending-action:top" d="M 934.0 4564.0 L 929.0 4554.0 L 939.0 4554.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-026" data-edge="edge-026" data-arrow-target="initiate-payment:left" d="M 1384.0 3304.0 L 1374.0 3299.0 L 1374.0 3309.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-027" data-edge="edge-027" data-arrow-target="cancel-release:top" d="M 934.0 5104.0 L 929.0 5094.0 L 939.0 5094.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-029" data-edge="edge-029" data-arrow-target="store-accept:top" d="M 1584.0 5884.0 L 1579.0 5874.0 L 1589.0 5874.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-030" data-edge="edge-030" data-arrow-target="picking-result:top" d="M 1584.0 6364.0 L 1579.0 6354.0 L 1589.0 6354.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-031" data-edge="edge-031" data-arrow-target="waiting-pickup:top" d="M 1584.0 8764.0 L 1579.0 8754.0 L 1589.0 8754.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-032" data-edge="edge-032" data-arrow-target="stockout-strategy:top" d="M 2584.0 6664.0 L 2579.0 6654.0 L 2589.0 6654.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-033" data-edge="edge-033" data-arrow-target="full-refund:top" d="M 864.0 6694.0 L 859.0 6684.0 L 869.0 6684.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-034" data-edge="edge-034" data-arrow-target="partial-refund:top" d="M 2034.0 6964.0 L 2029.0 6954.0 L 2039.0 6954.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-035" data-edge="edge-035" data-arrow-target="substitution-start:top" d="M 2584.0 6964.0 L 2579.0 6954.0 L 2589.0 6954.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-036" data-edge="edge-036" data-arrow-target="substitution-recommend:top" d="M 2584.0 7204.0 L 2579.0 7194.0 L 2589.0 7194.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-037" data-edge="edge-037" data-arrow-target="substitution-confirm:top" d="M 2584.0 7444.0 L 2579.0 7434.0 L 2589.0 7434.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-038" data-edge="edge-038" data-arrow-target="substitution-accepted:top" d="M 2584.0 7684.0 L 2579.0 7674.0 L 2589.0 7674.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-039" data-edge="edge-039" data-arrow-target="substitute-picked:top" d="M 2584.0 7984.0 L 2579.0 7974.0 L 2589.0 7974.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-040" data-edge="edge-040" data-arrow-target="refund-partial:top" d="M 3416.0 8524.0 L 3411.0 8514.0 L 3421.0 8514.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-042" data-edge="edge-042" data-arrow-target="substitute-available:top" d="M 2584.0 8224.0 L 2579.0 8214.0 L 2589.0 8214.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-043" data-edge="edge-043" data-arrow-target="order-amend:top" d="M 2584.0 8524.0 L 2579.0 8514.0 L 2589.0 8514.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-044" data-edge="edge-044" data-arrow-target="refund-partial:top" d="M 3352.0 8524.0 L 3347.0 8514.0 L 3357.0 8514.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-045" data-edge="edge-045" data-arrow-target="waiting-pickup:top" d="M 1624.0 8764.0 L 1619.0 8754.0 L 1629.0 8754.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-046" data-edge="edge-046" data-arrow-target="waiting-pickup:top" d="M 1744.0 8764.0 L 1739.0 8754.0 L 1749.0 8754.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-047" data-edge="edge-047" data-arrow-target="waiting-pickup:top" d="M 1784.0 8764.0 L 1779.0 8754.0 L 1789.0 8754.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-048" data-edge="edge-048" data-arrow-target="pickup-notification:top" d="M 1584.0 9004.0 L 1579.0 8994.0 L 1589.0 8994.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-049" data-edge="edge-049" data-arrow-target="pickup-on-time:top" d="M 1584.0 9244.0 L 1579.0 9234.0 L 1589.0 9234.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-050" data-edge="edge-050" data-arrow-target="present-voucher:top" d="M 1584.0 9544.0 L 1579.0 9534.0 L 1589.0 9534.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-051" data-edge="edge-051" data-arrow-target="handoff:top" d="M 1584.0 9784.0 L 1579.0 9774.0 L 1589.0 9774.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-052" data-edge="edge-052" data-arrow-target="completed:top" d="M 1584.0 10024.0 L 1579.0 10014.0 L 1589.0 10014.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-053" data-edge="edge-053" data-arrow-target="reject:top" d="M 2234.0 9544.0 L 2229.0 9534.0 L 2239.0 9534.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-054" data-edge="edge-054" data-arrow-target="overdue:top" d="M 934.0 9544.0 L 929.0 9534.0 L 939.0 9534.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-055" data-edge="edge-055" data-arrow-target="cancel-request:top" d="M 264.0 5584.0 L 259.0 5574.0 L 269.0 5574.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-056" data-edge="edge-056" data-arrow-target="cancel-success:top" d="M 264.0 6124.0 L 259.0 6114.0 L 269.0 6114.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-057" data-edge="edge-057" data-arrow-target="cancel-blocked:top" d="M 744.0 6124.0 L 739.0 6114.0 L 749.0 6114.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-058" data-edge="edge-058" data-arrow-target="waiting-pickup:top" d="M 1504.0 8764.0 L 1499.0 8754.0 L 1509.0 8754.0 Z" fill="#000000" />
+<path data-edge-arrow="edge-059" data-edge="edge-059" data-arrow-target="after-sale:top" d="M 1584.0 10264.0 L 1579.0 10254.0 L 1589.0 10254.0 Z" fill="#000000" />
 </svg>

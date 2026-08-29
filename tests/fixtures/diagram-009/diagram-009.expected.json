@@ -9,7 +9,7 @@
   },
   "generator": {
     "name": "diagram-009-mermaid-generator",
-    "version": "6.0.0",
+    "version": "6.1.1",
     "config_summary": "按图表设计流程从冻结 Mermaid 来源重建门店自提订单履约流程：TB 主轴、局部分支 lane、受控关系合并与最短合法反馈回路",
     "config_digest": "sha256:f3ee98944d5478ead923822e7487ef75cbe05273842193efd6565877be604aa2",
     "source_refs": [
@@ -2176,6 +2176,294 @@
             "reason": "顾客接受换货后分为继续拣货和合并条件的部分退款。"
           }
         ],
+        "geometry_profile": {
+          "version": "1",
+          "entity_gap": 24,
+          "port_gap": 36,
+          "obstacle_gap": 12,
+          "lane_gap": 48,
+          "shape_base_sizes": {
+            "round": {
+              "min_width": 160,
+              "min_height": 72,
+              "boundary_model": "rectangle"
+            },
+            "rect": {
+              "min_width": 160,
+              "min_height": 72,
+              "boundary_model": "rectangle"
+            },
+            "diamond": {
+              "min_width": 180,
+              "min_height": 120,
+              "boundary_model": "diamond"
+            },
+            "ellipse": {
+              "min_width": 160,
+              "min_height": 96,
+              "boundary_model": "ellipse"
+            },
+            "database": {
+              "min_width": 180,
+              "min_height": 96,
+              "boundary_model": "database"
+            },
+            "actor": {
+              "min_width": 160,
+              "min_height": 120,
+              "boundary_model": "actor"
+            },
+            "note": {
+              "min_width": 180,
+              "min_height": 96,
+              "boundary_model": "note"
+            }
+          },
+          "axis_spacing": {
+            "reference_shape": "rect",
+            "reference_width": 400,
+            "reference_height": 120,
+            "reference_long_side": 400,
+            "reference_short_side": 120,
+            "lr_minimum_gap": 200,
+            "tb_minimum_gap": 120
+          }
+        },
+        "branch_layout_plan": {
+          "strategy": "primary-flow-then-longest-branch",
+          "frozen_order": [
+            "primary-flow",
+            "branch-alcohol-check",
+            "branch-cancel-request",
+            "branch-minimum-order",
+            "branch-payment-success",
+            "branch-pending-action",
+            "branch-picking-result",
+            "branch-pickup-on-time",
+            "branch-stockout-strategy",
+            "branch-substitute-available",
+            "branch-substitution-accepted"
+          ],
+          "baseline_gap": 48,
+          "groups": [
+            {
+              "id": "branch-alcohol-check",
+              "decision_node_id": "alcohol-check",
+              "edge_ids": [
+                "edge-017",
+                "edge-018"
+              ],
+              "target_ids": [
+                "payment-success",
+                "age-confirmation"
+              ],
+              "branch_order": [
+                "edge-017",
+                "edge-018"
+              ],
+              "layout_candidate_edge_id": "edge-018",
+              "primary_edge_id": "edge-017",
+              "depth": 1,
+              "mode": "inline",
+              "branch_gap": 48
+            },
+            {
+              "id": "branch-cancel-request",
+              "decision_node_id": "cancel-request",
+              "edge_ids": [
+                "edge-056",
+                "edge-057"
+              ],
+              "target_ids": [
+                "cancel-success",
+                "cancel-blocked"
+              ],
+              "branch_order": [
+                "edge-056",
+                "edge-057"
+              ],
+              "layout_candidate_edge_id": "edge-056",
+              "primary_edge_id": "edge-056",
+              "depth": 0,
+              "mode": "inline",
+              "branch_gap": 48
+            },
+            {
+              "id": "branch-minimum-order",
+              "decision_node_id": "minimum-order",
+              "edge_ids": [
+                "edge-007",
+                "edge-009"
+              ],
+              "target_ids": [
+                "product-validation",
+                "checkout-blocked"
+              ],
+              "branch_order": [
+                "edge-009",
+                "edge-007"
+              ],
+              "layout_candidate_edge_id": "edge-009",
+              "primary_edge_id": "edge-009",
+              "depth": 1,
+              "mode": "inline",
+              "branch_gap": 48
+            },
+            {
+              "id": "branch-payment-success",
+              "decision_node_id": "payment-success",
+              "edge_ids": [
+                "edge-020",
+                "edge-024"
+              ],
+              "target_ids": [
+                "deduct-inventory",
+                "payment-pending"
+              ],
+              "branch_order": [
+                "edge-020",
+                "edge-024"
+              ],
+              "layout_candidate_edge_id": "edge-020",
+              "primary_edge_id": "edge-020",
+              "depth": 1,
+              "mode": "inline",
+              "branch_gap": 48
+            },
+            {
+              "id": "branch-pending-action",
+              "decision_node_id": "pending-action",
+              "edge_ids": [
+                "edge-026",
+                "edge-027"
+              ],
+              "target_ids": [
+                "initiate-payment",
+                "cancel-release"
+              ],
+              "branch_order": [
+                "edge-026",
+                "edge-027"
+              ],
+              "layout_candidate_edge_id": "edge-026",
+              "primary_edge_id": "edge-026",
+              "depth": 0,
+              "mode": "inline",
+              "branch_gap": 48
+            },
+            {
+              "id": "branch-picking-result",
+              "decision_node_id": "picking-result",
+              "edge_ids": [
+                "edge-031",
+                "edge-032",
+                "edge-033"
+              ],
+              "target_ids": [
+                "waiting-pickup",
+                "stockout-strategy",
+                "full-refund"
+              ],
+              "branch_order": [
+                "edge-031",
+                "edge-032",
+                "edge-033"
+              ],
+              "layout_candidate_edge_id": "edge-032",
+              "primary_edge_id": "edge-031",
+              "depth": 3,
+              "mode": "local-lane",
+              "branch_gap": 48
+            },
+            {
+              "id": "branch-pickup-on-time",
+              "decision_node_id": "pickup-on-time",
+              "edge_ids": [
+                "edge-050",
+                "edge-053",
+                "edge-054"
+              ],
+              "target_ids": [
+                "present-voucher",
+                "reject",
+                "overdue"
+              ],
+              "branch_order": [
+                "edge-050",
+                "edge-053",
+                "edge-054"
+              ],
+              "layout_candidate_edge_id": "edge-050",
+              "primary_edge_id": "edge-050",
+              "depth": 0,
+              "mode": "inline",
+              "branch_gap": 48
+            },
+            {
+              "id": "branch-stockout-strategy",
+              "decision_node_id": "stockout-strategy",
+              "edge_ids": [
+                "edge-034",
+                "edge-035"
+              ],
+              "target_ids": [
+                "substitution-start",
+                "partial-refund"
+              ],
+              "branch_order": [
+                "edge-035",
+                "edge-034"
+              ],
+              "layout_candidate_edge_id": "edge-035",
+              "primary_edge_id": "edge-035",
+              "depth": 2,
+              "mode": "inline",
+              "branch_gap": 48
+            },
+            {
+              "id": "branch-substitute-available",
+              "decision_node_id": "substitute-available",
+              "edge_ids": [
+                "edge-043",
+                "edge-044"
+              ],
+              "target_ids": [
+                "order-amend",
+                "refund-partial"
+              ],
+              "branch_order": [
+                "edge-043",
+                "edge-044"
+              ],
+              "layout_candidate_edge_id": "edge-043",
+              "primary_edge_id": "edge-043",
+              "depth": 0,
+              "mode": "local-lane",
+              "branch_gap": 48
+            },
+            {
+              "id": "branch-substitution-accepted",
+              "decision_node_id": "substitution-accepted",
+              "edge_ids": [
+                "edge-039",
+                "edge-040"
+              ],
+              "target_ids": [
+                "substitute-picked",
+                "refund-partial"
+              ],
+              "branch_order": [
+                "edge-039",
+                "edge-040"
+              ],
+              "layout_candidate_edge_id": "edge-039",
+              "primary_edge_id": "edge-039",
+              "depth": 1,
+              "mode": "local-lane",
+              "branch_gap": 48
+            }
+          ]
+        },
         "exceptions": [
           {
             "type": "branch-layer",

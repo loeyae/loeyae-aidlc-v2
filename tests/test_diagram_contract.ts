@@ -32,6 +32,18 @@ assert.equal(routeBendCount([[0, 0], [20, 0], [20, 10]]), 1);
 assert.equal(routeBendCount([[0, 0], [10, 0], [20, 0]]), 0);
 assert.equal(routeBendCount([[0, 0], [10, 0], [10, 0], [10, 10], [10, 20]]), 1);
 assert.equal(parseExpectedContract(baseContract(), "diagram").routeContract.edgeIntents[0].bendCount, 1);
+const geometryContract = baseContract();
+(geometryContract.diagrams[0].route_contract as any).geometry_profile = {
+  version: "1",
+  entity_gap: 24,
+  port_gap: 36,
+  obstacle_gap: 12,
+  lane_gap: 48,
+  axis_spacing: { reference_shape: "rect", reference_width: 160, reference_height: 72, reference_long_side: 160, reference_short_side: 72, lr_minimum_gap: 80, tb_minimum_gap: 72 },
+  shape_base_sizes: { rect: { min_width: 160, min_height: 72, boundary_model: "rectangle" } },
+};
+assert.equal(parseExpectedContract(geometryContract, "diagram").routeContract.geometryProfile?.portGap, 36);
+assert.equal(parseExpectedContract(geometryContract, "diagram").routeContract.geometryProfile?.axisSpacing?.tbMinimumGap, 72);
 
 
 const canonicalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120" width="200" height="120" role="img">

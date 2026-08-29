@@ -10,8 +10,8 @@
       "description": "从打开商城、门店自提结算、支付与库存处理，到拣货、换货、取货、取消和售后的完整订单履约流程。",
       "diagramType": "flowchart",
       "canvas": {
-        "width": 3608,
-        "height": 7268
+        "width": 3648,
+        "height": 10448
       },
       "sourceBasis": [
         {
@@ -25,7 +25,7 @@
           "id": "open-store",
           "shape": "rect",
           "label": "打开商城",
-          "x": 1744.0,
+          "x": 1384.0,
           "y": 64.0,
           "width": 400,
           "height": 120,
@@ -35,8 +35,8 @@
           "id": "switch-pickup",
           "shape": "rect",
           "label": "切换到店自提模式",
-          "x": 1744.0,
-          "y": 244.0,
+          "x": 1384.0,
+          "y": 304.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -45,8 +45,8 @@
           "id": "select-store",
           "shape": "rect",
           "label": "选择自提门店",
-          "x": 1744.0,
-          "y": 424.0,
+          "x": 1384.0,
+          "y": 544.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -55,8 +55,8 @@
           "id": "browse-products",
           "shape": "rect",
           "label": "浏览门店商品",
-          "x": 1744.0,
-          "y": 604.0,
+          "x": 1384.0,
+          "y": 784.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -65,8 +65,8 @@
           "id": "add-cart",
           "shape": "rect",
           "label": "加入购物车",
-          "x": 1744.0,
-          "y": 784.0,
+          "x": 1384.0,
+          "y": 1024.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -75,8 +75,8 @@
           "id": "cart-checkout",
           "shape": "rect",
           "label": "购物车页点击结算",
-          "x": 1744.0,
-          "y": 964.0,
+          "x": 1384.0,
+          "y": 1264.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -85,8 +85,8 @@
           "id": "minimum-order",
           "shape": "diamond",
           "label": "达到最低下单金额",
-          "x": 1784.0,
-          "y": 1114.0,
+          "x": 1424.0,
+          "y": 1504.0,
           "width": 320,
           "height": 180,
           "fontSize": 16
@@ -95,8 +95,8 @@
           "id": "checkout-blocked",
           "shape": "rect",
           "label": "购物车页提示不可结算",
-          "x": 2344.0,
-          "y": 1324.0,
+          "x": 1984.0,
+          "y": 1804.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -105,8 +105,8 @@
           "id": "product-validation",
           "shape": "rect",
           "label": "校验商品可售 上下架 库存",
-          "x": 1744.0,
-          "y": 1324.0,
+          "x": 1384.0,
+          "y": 1804.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -115,8 +115,8 @@
           "id": "checkout",
           "shape": "rect",
           "label": "进入结算页",
-          "x": 1744.0,
-          "y": 1504.0,
+          "x": 1384.0,
+          "y": 2044.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -125,8 +125,8 @@
           "id": "pickup-time",
           "shape": "rect",
           "label": "选择自提时间",
-          "x": 1744.0,
-          "y": 1684.0,
+          "x": 1384.0,
+          "y": 2284.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -135,8 +135,8 @@
           "id": "coupon",
           "shape": "rect",
           "label": "选择优惠券",
-          "x": 1744.0,
-          "y": 1864.0,
+          "x": 1384.0,
+          "y": 2524.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -145,8 +145,8 @@
           "id": "amount-confirmation",
           "shape": "rect",
           "label": "确认金额明细",
-          "x": 1744.0,
-          "y": 2044.0,
+          "x": 1384.0,
+          "y": 2764.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -155,8 +155,8 @@
           "id": "reserve-order",
           "shape": "rect",
           "label": "提交订单·预占库存",
-          "x": 1744.0,
-          "y": 2224.0,
+          "x": 1384.0,
+          "y": 3004.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -165,8 +165,8 @@
           "id": "initiate-payment",
           "shape": "rect",
           "label": "发起支付",
-          "x": 1744.0,
-          "y": 2404.0,
+          "x": 1384.0,
+          "y": 3244.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -175,8 +175,8 @@
           "id": "alcohol-check",
           "shape": "diamond",
           "label": "是否含酒品",
-          "x": 1784.0,
-          "y": 2554.0,
+          "x": 1424.0,
+          "y": 3484.0,
           "width": 320,
           "height": 180,
           "fontSize": 16
@@ -185,8 +185,8 @@
           "id": "age-confirmation",
           "shape": "rect",
           "label": "展示限酒令提示 确认满18岁",
-          "x": 2344.0,
-          "y": 2764.0,
+          "x": 1984.0,
+          "y": 3814.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -195,8 +195,8 @@
           "id": "payment-success",
           "shape": "diamond",
           "label": "支付是否成功",
-          "x": 1784.0,
-          "y": 2914.0,
+          "x": 1424.0,
+          "y": 3784.0,
           "width": 320,
           "height": 180,
           "fontSize": 16
@@ -205,8 +205,8 @@
           "id": "deduct-inventory",
           "shape": "rect",
           "label": "扣减库存·核销优惠券",
-          "x": 1744.0,
-          "y": 3124.0,
+          "x": 1384.0,
+          "y": 4084.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -215,8 +215,8 @@
           "id": "order-detail",
           "shape": "rect",
           "label": "进入订单详情页",
-          "x": 1744.0,
-          "y": 3304.0,
+          "x": 1384.0,
+          "y": 4324.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -225,8 +225,8 @@
           "id": "fulfillment-progress",
           "shape": "rect",
           "label": "展示履约进度 预计时间 商品明细 金额明细",
-          "x": 1744.0,
-          "y": 3484.0,
+          "x": 1384.0,
+          "y": 4864.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -235,8 +235,8 @@
           "id": "order-preparing",
           "shape": "rect",
           "label": "订单准备中",
-          "x": 1744.0,
-          "y": 3724.0,
+          "x": 1384.0,
+          "y": 5344.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -245,8 +245,8 @@
           "id": "payment-pending",
           "shape": "rect",
           "label": "订单保持待付款·库存仍预占",
-          "x": 1094.0,
-          "y": 3124.0,
+          "x": 734.0,
+          "y": 4084.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -255,8 +255,8 @@
           "id": "pending-action",
           "shape": "diamond",
           "label": "待付款处理",
-          "x": 1134.0,
-          "y": 3334.0,
+          "x": 774.0,
+          "y": 4564.0,
           "width": 320,
           "height": 180,
           "fontSize": 16
@@ -265,8 +265,8 @@
           "id": "cancel-release",
           "shape": "rect",
           "label": "取消订单·释放库存退券·订单关闭",
-          "x": 1094.0,
-          "y": 3604.0,
+          "x": 734.0,
+          "y": 5104.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -275,8 +275,8 @@
           "id": "store-accept",
           "shape": "rect",
           "label": "门店接单·开始拣货",
-          "x": 1744.0,
-          "y": 3964.0,
+          "x": 1384.0,
+          "y": 5884.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -285,8 +285,8 @@
           "id": "picking-result",
           "shape": "diamond",
           "label": "拣货结果",
-          "x": 1784.0,
-          "y": 4174.0,
+          "x": 1424.0,
+          "y": 6364.0,
           "width": 320,
           "height": 180,
           "fontSize": 16
@@ -295,8 +295,8 @@
           "id": "stockout-strategy",
           "shape": "diamond",
           "label": "缺货处理方式",
-          "x": 2434.0,
-          "y": 4414.0,
+          "x": 2424.0,
+          "y": 6664.0,
           "width": 320,
           "height": 180,
           "fontSize": 16
@@ -305,8 +305,8 @@
           "id": "full-refund",
           "shape": "rect",
           "label": "整单退款·订单关闭",
-          "x": 1024.0,
-          "y": 4444.0,
+          "x": 664.0,
+          "y": 6694.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -315,8 +315,8 @@
           "id": "partial-refund",
           "shape": "rect",
           "label": "缺货部分退款·剩余继续履约",
-          "x": 2194.0,
-          "y": 4624.0,
+          "x": 1834.0,
+          "y": 6964.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -325,8 +325,8 @@
           "id": "substitution-start",
           "shape": "rect",
           "label": "拣货员发起换品",
-          "x": 2744.0,
-          "y": 4624.0,
+          "x": 2384.0,
+          "y": 6964.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -335,8 +335,8 @@
           "id": "substitution-recommend",
           "shape": "rect",
           "label": "系统推荐替代品",
-          "x": 2744.0,
-          "y": 4804.0,
+          "x": 2384.0,
+          "y": 7204.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -345,8 +345,8 @@
           "id": "substitution-confirm",
           "shape": "rect",
           "label": "推送顾客确认换货",
-          "x": 2744.0,
-          "y": 4984.0,
+          "x": 2384.0,
+          "y": 7444.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -355,8 +355,8 @@
           "id": "substitution-accepted",
           "shape": "diamond",
           "label": "顾客是否接受",
-          "x": 2784.0,
-          "y": 5134.0,
+          "x": 2424.0,
+          "y": 7684.0,
           "width": 320,
           "height": 180,
           "fontSize": 16
@@ -365,8 +365,8 @@
           "id": "substitute-picked",
           "shape": "rect",
           "label": "拣出替代品",
-          "x": 2744.0,
-          "y": 5344.0,
+          "x": 2384.0,
+          "y": 7984.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -375,8 +375,8 @@
           "id": "substitute-available",
           "shape": "diamond",
           "label": "替代品是否拣到",
-          "x": 2784.0,
-          "y": 5494.0,
+          "x": 2424.0,
+          "y": 8224.0,
           "width": 320,
           "height": 180,
           "fontSize": 16
@@ -385,8 +385,8 @@
           "id": "order-amend",
           "shape": "rect",
           "label": "改单·替换商品行",
-          "x": 2344.0,
-          "y": 5704.0,
+          "x": 2384.0,
+          "y": 8524.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -395,8 +395,8 @@
           "id": "refund-partial",
           "shape": "rect",
           "label": "缺货部分转退款",
-          "x": 3144.0,
-          "y": 5704.0,
+          "x": 3184.0,
+          "y": 8524.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -405,8 +405,8 @@
           "id": "waiting-pickup",
           "shape": "rect",
           "label": "门店备货·等待自取",
-          "x": 1744.0,
-          "y": 6004.0,
+          "x": 1384.0,
+          "y": 8764.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -415,8 +415,8 @@
           "id": "pickup-notification",
           "shape": "rect",
           "label": "收到到店通知与取货凭证",
-          "x": 1744.0,
-          "y": 6184.0,
+          "x": 1384.0,
+          "y": 9004.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -425,8 +425,8 @@
           "id": "pickup-on-time",
           "shape": "diamond",
           "label": "是否按期到店取货",
-          "x": 1784.0,
-          "y": 6334.0,
+          "x": 1424.0,
+          "y": 9244.0,
           "width": 320,
           "height": 180,
           "fontSize": 16
@@ -435,8 +435,8 @@
           "id": "present-voucher",
           "shape": "rect",
           "label": "到店出示取货凭证",
-          "x": 1744.0,
-          "y": 6544.0,
+          "x": 1384.0,
+          "y": 9544.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -445,8 +445,8 @@
           "id": "handoff",
           "shape": "rect",
           "label": "店员在 Dmall APP 核销签收",
-          "x": 1744.0,
-          "y": 6724.0,
+          "x": 1384.0,
+          "y": 9784.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -455,8 +455,8 @@
           "id": "completed",
           "shape": "rect",
           "label": "提货完成·订单完成",
-          "x": 1744.0,
-          "y": 6904.0,
+          "x": 1384.0,
+          "y": 10024.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -465,8 +465,8 @@
           "id": "reject",
           "shape": "rect",
           "label": "您已拒收 · 全额退款",
-          "x": 2394.0,
-          "y": 6544.0,
+          "x": 2034.0,
+          "y": 9544.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -475,8 +475,8 @@
           "id": "overdue",
           "shape": "rect",
           "label": "超期訂單完成 · 不退款",
-          "x": 1094.0,
-          "y": 6544.0,
+          "x": 734.0,
+          "y": 9544.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -485,8 +485,8 @@
           "id": "cancel-request",
           "shape": "diamond",
           "label": "门店是否已开始拣货",
-          "x": 464.0,
-          "y": 3904.0,
+          "x": 104.0,
+          "y": 5584.0,
           "width": 320,
           "height": 180,
           "fontSize": 16
@@ -496,7 +496,7 @@
           "shape": "rect",
           "label": "取消成功并退款",
           "x": 64.0,
-          "y": 4144.0,
+          "y": 6124.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -505,8 +505,8 @@
           "id": "cancel-blocked",
           "shape": "rect",
           "label": "不可取消·引导签收后申请退款",
-          "x": 784.0,
-          "y": 4144.0,
+          "x": 544.0,
+          "y": 6124.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -515,8 +515,8 @@
           "id": "after-sale",
           "shape": "rect",
           "label": "仅退款·售后有效期内",
-          "x": 1744.0,
-          "y": 7084.0,
+          "x": 1384.0,
+          "y": 10264.0,
           "width": 400,
           "height": 120,
           "fontSize": 16
@@ -532,12 +532,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
+              1584.0,
               184.0
             ],
             [
-              1944.0,
-              244.0
+              1584.0,
+              304.0
             ]
           ],
           "arrowTarget": "switch-pickup:top"
@@ -551,12 +551,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              364.0
+              1584.0,
+              424.0
             ],
             [
-              1944.0,
-              424.0
+              1584.0,
+              544.0
             ]
           ],
           "arrowTarget": "select-store:top"
@@ -570,12 +570,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              544.0
+              1584.0,
+              664.0
             ],
             [
-              1944.0,
-              604.0
+              1584.0,
+              784.0
             ]
           ],
           "arrowTarget": "browse-products:top"
@@ -589,12 +589,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              724.0
+              1584.0,
+              904.0
             ],
             [
-              1944.0,
-              784.0
+              1584.0,
+              1024.0
             ]
           ],
           "arrowTarget": "add-cart:top"
@@ -608,12 +608,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              904.0
+              1584.0,
+              1144.0
             ],
             [
-              1944.0,
-              964.0
+              1584.0,
+              1264.0
             ]
           ],
           "arrowTarget": "cart-checkout:top"
@@ -627,12 +627,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              1084.0
+              1584.0,
+              1384.0
             ],
             [
-              1944.0,
-              1114.0
+              1584.0,
+              1504.0
             ]
           ],
           "arrowTarget": "minimum-order:top"
@@ -646,23 +646,23 @@
           "kind": "directed",
           "points": [
             [
-              2104.0,
-              1204.0
+              1744.0,
+              1594.0
             ],
             [
-              2544.0,
-              1204.0
+              2184.0,
+              1594.0
             ],
             [
-              2544.0,
-              1324.0
+              2184.0,
+              1804.0
             ]
           ],
           "arrowTarget": "checkout-blocked:top",
           "label": {
             "text": "否",
-            "x": 2608.0,
-            "y": 1264.0,
+            "x": 2248.0,
+            "y": 1699.0,
             "fontSize": 14
           }
         },
@@ -675,24 +675,24 @@
           "kind": "directed",
           "points": [
             [
-              2744.0,
-              1384.0
+              2384.0,
+              1864.0
             ],
             [
-              2784.0,
-              1384.0
+              2424.0,
+              1864.0
             ],
             [
-              2784.0,
-              754.0
+              2424.0,
+              994.0
             ],
             [
-              2104.0,
-              754.0
+              1744.0,
+              994.0
             ],
             [
-              2104.0,
-              784.0
+              1744.0,
+              1024.0
             ]
           ],
           "arrowTarget": "add-cart:top",
@@ -707,19 +707,19 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              1294.0
+              1584.0,
+              1684.0
             ],
             [
-              1944.0,
-              1324.0
+              1584.0,
+              1804.0
             ]
           ],
           "arrowTarget": "product-validation:top",
           "label": {
             "text": "是",
-            "x": 1880.0,
-            "y": 1309.0,
+            "x": 1520.0,
+            "y": 1744.0,
             "fontSize": 14
           }
         },
@@ -732,12 +732,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              1444.0
+              1584.0,
+              1924.0
             ],
             [
-              1944.0,
-              1504.0
+              1584.0,
+              2044.0
             ]
           ],
           "arrowTarget": "checkout:top"
@@ -751,12 +751,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              1624.0
+              1584.0,
+              2164.0
             ],
             [
-              1944.0,
-              1684.0
+              1584.0,
+              2284.0
             ]
           ],
           "arrowTarget": "pickup-time:top"
@@ -770,12 +770,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              1804.0
+              1584.0,
+              2404.0
             ],
             [
-              1944.0,
-              1864.0
+              1584.0,
+              2524.0
             ]
           ],
           "arrowTarget": "coupon:top"
@@ -789,12 +789,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              1984.0
+              1584.0,
+              2644.0
             ],
             [
-              1944.0,
-              2044.0
+              1584.0,
+              2764.0
             ]
           ],
           "arrowTarget": "amount-confirmation:top"
@@ -808,12 +808,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              2164.0
+              1584.0,
+              2884.0
             ],
             [
-              1944.0,
-              2224.0
+              1584.0,
+              3004.0
             ]
           ],
           "arrowTarget": "reserve-order:top"
@@ -827,12 +827,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              2344.0
+              1584.0,
+              3124.0
             ],
             [
-              1944.0,
-              2404.0
+              1584.0,
+              3244.0
             ]
           ],
           "arrowTarget": "initiate-payment:top"
@@ -846,12 +846,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              2524.0
+              1584.0,
+              3364.0
             ],
             [
-              1944.0,
-              2554.0
+              1584.0,
+              3484.0
             ]
           ],
           "arrowTarget": "alcohol-check:top"
@@ -865,19 +865,19 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              2734.0
+              1584.0,
+              3664.0
             ],
             [
-              1944.0,
-              2914.0
+              1584.0,
+              3784.0
             ]
           ],
           "arrowTarget": "payment-success:top",
           "label": {
             "text": "否",
-            "x": 1880.0,
-            "y": 2824.0,
+            "x": 1520.0,
+            "y": 3724.0,
             "fontSize": 14
           }
         },
@@ -890,23 +890,23 @@
           "kind": "directed",
           "points": [
             [
-              2104.0,
-              2644.0
+              1744.0,
+              3574.0
             ],
             [
-              2544.0,
-              2644.0
+              2184.0,
+              3574.0
             ],
             [
-              2544.0,
-              2764.0
+              2184.0,
+              3814.0
             ]
           ],
           "arrowTarget": "age-confirmation:top",
           "label": {
             "text": "是",
-            "x": 2608.0,
-            "y": 2704.0,
+            "x": 2248.0,
+            "y": 3694.0,
             "fontSize": 14
           }
         },
@@ -919,20 +919,12 @@
           "kind": "directed",
           "points": [
             [
-              2344.0,
-              2824.0
+              1984.0,
+              3874.0
             ],
             [
-              2224.0,
-              2824.0
-            ],
-            [
-              2224.0,
-              3004.0
-            ],
-            [
-              2104.0,
-              3004.0
+              1744.0,
+              3874.0
             ]
           ],
           "arrowTarget": "payment-success:right"
@@ -946,19 +938,19 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              3094.0
+              1584.0,
+              3964.0
             ],
             [
-              1944.0,
-              3124.0
+              1584.0,
+              4084.0
             ]
           ],
           "arrowTarget": "deduct-inventory:top",
           "label": {
             "text": "是",
-            "x": 1880.0,
-            "y": 3109.0,
+            "x": 1520.0,
+            "y": 4024.0,
             "fontSize": 14
           }
         },
@@ -971,12 +963,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              3244.0
+              1584.0,
+              4204.0
             ],
             [
-              1944.0,
-              3304.0
+              1584.0,
+              4324.0
             ]
           ],
           "arrowTarget": "order-detail:top"
@@ -990,12 +982,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              3424.0
+              1584.0,
+              4444.0
             ],
             [
-              1944.0,
-              3484.0
+              1584.0,
+              4864.0
             ]
           ],
           "arrowTarget": "fulfillment-progress:top"
@@ -1009,12 +1001,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              3604.0
+              1584.0,
+              4984.0
             ],
             [
-              1944.0,
-              3724.0
+              1584.0,
+              5344.0
             ]
           ],
           "arrowTarget": "order-preparing:top"
@@ -1028,23 +1020,23 @@
           "kind": "directed",
           "points": [
             [
-              1784.0,
-              3004.0
+              1424.0,
+              3874.0
             ],
             [
-              1294.0,
-              3004.0
+              934.0,
+              3874.0
             ],
             [
-              1294.0,
-              3124.0
+              934.0,
+              4084.0
             ]
           ],
           "arrowTarget": "payment-pending:top",
           "label": {
             "text": "否",
-            "x": 1230.0,
-            "y": 3064.0,
+            "x": 870.0,
+            "y": 3979.0,
             "fontSize": 14
           }
         },
@@ -1057,12 +1049,12 @@
           "kind": "directed",
           "points": [
             [
-              1294.0,
-              3244.0
+              934.0,
+              4204.0
             ],
             [
-              1294.0,
-              3334.0
+              934.0,
+              4564.0
             ]
           ],
           "arrowTarget": "pending-action:top"
@@ -1076,27 +1068,27 @@
           "kind": "directed",
           "points": [
             [
-              1134.0,
-              3424.0
+              774.0,
+              4654.0
             ],
             [
-              1054.0,
-              3424.0
+              694.0,
+              4654.0
             ],
             [
-              1054.0,
-              2464.0
+              694.0,
+              3304.0
             ],
             [
-              1744.0,
-              2464.0
+              1384.0,
+              3304.0
             ]
           ],
           "arrowTarget": "initiate-payment:left",
           "label": {
             "text": "重新发起支付",
-            "x": 990.0,
-            "y": 2944.0,
+            "x": 630.0,
+            "y": 3979.0,
             "fontSize": 14
           }
         },
@@ -1109,19 +1101,19 @@
           "kind": "directed",
           "points": [
             [
-              1294.0,
-              3514.0
+              934.0,
+              4744.0
             ],
             [
-              1294.0,
-              3604.0
+              934.0,
+              5104.0
             ]
           ],
           "arrowTarget": "cancel-release:top",
           "label": {
             "text": "主动取消／支付超时15分钟未付",
-            "x": 1398.8400000000001,
-            "y": 3559.0,
+            "x": 1038.8400000000001,
+            "y": 4924.0,
             "fontSize": 14
           }
         },
@@ -1134,12 +1126,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              3844.0
+              1584.0,
+              5464.0
             ],
             [
-              1944.0,
-              3964.0
+              1584.0,
+              5884.0
             ]
           ],
           "arrowTarget": "store-accept:top"
@@ -1153,12 +1145,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              4084.0
+              1584.0,
+              6004.0
             ],
             [
-              1944.0,
-              4174.0
+              1584.0,
+              6364.0
             ]
           ],
           "arrowTarget": "picking-result:top"
@@ -1172,19 +1164,19 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              4354.0
+              1584.0,
+              6544.0
             ],
             [
-              1944.0,
-              6004.0
+              1584.0,
+              8764.0
             ]
           ],
           "arrowTarget": "waiting-pickup:top",
           "label": {
             "text": "全部拣到",
-            "x": 1880.0,
-            "y": 5179.0,
+            "x": 1520.0,
+            "y": 7654.0,
             "fontSize": 14
           }
         },
@@ -1197,23 +1189,23 @@
           "kind": "directed",
           "points": [
             [
-              2104.0,
-              4264.0
+              1744.0,
+              6454.0
             ],
             [
-              2594.0,
-              4264.0
+              2584.0,
+              6454.0
             ],
             [
-              2594.0,
-              4414.0
+              2584.0,
+              6664.0
             ]
           ],
           "arrowTarget": "stockout-strategy:top",
           "label": {
             "text": "部分缺货",
-            "x": 2658.0,
-            "y": 4339.0,
+            "x": 2648.0,
+            "y": 6559.0,
             "fontSize": 14
           }
         },
@@ -1226,23 +1218,23 @@
           "kind": "directed",
           "points": [
             [
-              1784.0,
-              4264.0
+              1424.0,
+              6454.0
             ],
             [
-              1224.0,
-              4264.0
+              864.0,
+              6454.0
             ],
             [
-              1224.0,
-              4444.0
+              864.0,
+              6694.0
             ]
           ],
           "arrowTarget": "full-refund:top",
           "label": {
             "text": "全部缺货",
-            "x": 1160.0,
-            "y": 4354.0,
+            "x": 800.0,
+            "y": 6574.0,
             "fontSize": 14
           }
         },
@@ -1255,52 +1247,48 @@
           "kind": "directed",
           "points": [
             [
-              2434.0,
-              4504.0
+              2424.0,
+              6754.0
             ],
             [
-              2394.0,
-              4504.0
+              2034.0,
+              6754.0
             ],
             [
-              2394.0,
-              4624.0
+              2034.0,
+              6964.0
             ]
           ],
           "arrowTarget": "partial-refund:top",
           "label": {
             "text": "部分退款",
-            "x": 2330.0,
-            "y": 4564.0,
+            "x": 1970.0,
+            "y": 6859.0,
             "fontSize": 14
           }
         },
         {
           "id": "edge-035",
           "from": "stockout-strategy",
-          "fromPort": "right",
+          "fromPort": "bottom",
           "to": "substitution-start",
           "toPort": "top",
           "kind": "directed",
           "points": [
             [
-              2754.0,
-              4504.0
+              2584.0,
+              6844.0
             ],
             [
-              2944.0,
-              4504.0
-            ],
-            [
-              2944.0,
-              4624.0
+              2584.0,
+              6964.0
             ]
           ],
           "arrowTarget": "substitution-start:top",
           "label": {
             "text": "部分换货",
-            "x": 3008.0,
-            "y": 4564.0,
+            "x": 2520.0,
+            "y": 6904.0,
             "fontSize": 14
           }
         },
@@ -1313,12 +1301,12 @@
           "kind": "directed",
           "points": [
             [
-              2944.0,
-              4744.0
+              2584.0,
+              7084.0
             ],
             [
-              2944.0,
-              4804.0
+              2584.0,
+              7204.0
             ]
           ],
           "arrowTarget": "substitution-recommend:top"
@@ -1332,12 +1320,12 @@
           "kind": "directed",
           "points": [
             [
-              2944.0,
-              4924.0
+              2584.0,
+              7324.0
             ],
             [
-              2944.0,
-              4984.0
+              2584.0,
+              7444.0
             ]
           ],
           "arrowTarget": "substitution-confirm:top"
@@ -1351,12 +1339,12 @@
           "kind": "directed",
           "points": [
             [
-              2944.0,
-              5104.0
+              2584.0,
+              7564.0
             ],
             [
-              2944.0,
-              5134.0
+              2584.0,
+              7684.0
             ]
           ],
           "arrowTarget": "substitution-accepted:top"
@@ -1364,37 +1352,25 @@
         {
           "id": "edge-039",
           "from": "substitution-accepted",
-          "fromPort": "left",
+          "fromPort": "bottom",
           "to": "substitute-picked",
           "toPort": "top",
           "kind": "directed",
           "points": [
             [
-              2784.0,
-              5224.0
+              2584.0,
+              7864.0
             ],
             [
-              2712.0,
-              5224.0
-            ],
-            [
-              2712.0,
-              5314.0
-            ],
-            [
-              2944.0,
-              5314.0
-            ],
-            [
-              2944.0,
-              5344.0
+              2584.0,
+              7984.0
             ]
           ],
           "arrowTarget": "substitute-picked:top",
           "label": {
             "text": "接受",
-            "x": 2648.0,
-            "y": 5269.0,
+            "x": 2520.0,
+            "y": 7924.0,
             "fontSize": 14
           }
         },
@@ -1407,24 +1383,24 @@
           "kind": "directed",
           "points": [
             [
-              3104.0,
-              5224.0
+              2744.0,
+              7774.0
             ],
             [
-              3376.0,
-              5224.0
+              3416.0,
+              7774.0
             ],
             [
-              3376.0,
-              5704.0
+              3416.0,
+              8524.0
             ]
           ],
           "arrowTarget": "refund-partial:top",
           "toPortOffset": 32,
           "label": {
             "text": "拒绝/超时未回应",
-            "x": 3440.0,
-            "y": 5464.0,
+            "x": 3480.0,
+            "y": 8149.0,
             "fontSize": 14
           }
         },
@@ -1437,12 +1413,12 @@
           "kind": "directed",
           "points": [
             [
-              2944.0,
-              5464.0
+              2584.0,
+              8104.0
             ],
             [
-              2944.0,
-              5494.0
+              2584.0,
+              8224.0
             ]
           ],
           "arrowTarget": "substitute-available:top"
@@ -1450,29 +1426,25 @@
         {
           "id": "edge-043",
           "from": "substitute-available",
-          "fromPort": "left",
+          "fromPort": "bottom",
           "to": "order-amend",
           "toPort": "top",
           "kind": "directed",
           "points": [
             [
-              2784.0,
-              5584.0
+              2584.0,
+              8404.0
             ],
             [
-              2544.0,
-              5584.0
-            ],
-            [
-              2544.0,
-              5704.0
+              2584.0,
+              8524.0
             ]
           ],
           "arrowTarget": "order-amend:top",
           "label": {
             "text": "拣到",
-            "x": 2480.0,
-            "y": 5644.0,
+            "x": 2520.0,
+            "y": 8464.0,
             "fontSize": 14
           }
         },
@@ -1485,24 +1457,24 @@
           "kind": "directed",
           "points": [
             [
-              3104.0,
-              5584.0
+              2744.0,
+              8314.0
             ],
             [
-              3312.0,
-              5584.0
+              3352.0,
+              8314.0
             ],
             [
-              3312.0,
-              5704.0
+              3352.0,
+              8524.0
             ]
           ],
           "arrowTarget": "refund-partial:top",
           "toPortOffset": -32,
           "label": {
             "text": "拣不到",
-            "x": 3248.0,
-            "y": 5644.0,
+            "x": 3288.0,
+            "y": 8419.0,
             "fontSize": 14
           }
         },
@@ -1515,16 +1487,16 @@
           "kind": "directed",
           "points": [
             [
-              2194.0,
-              4684.0
+              1834.0,
+              7024.0
             ],
             [
-              1984.0,
-              4684.0
+              1624.0,
+              7024.0
             ],
             [
-              1984.0,
-              6004.0
+              1624.0,
+              8764.0
             ]
           ],
           "arrowTarget": "waiting-pickup:top",
@@ -1539,20 +1511,20 @@
           "kind": "directed",
           "points": [
             [
-              2544.0,
-              5824.0
+              2584.0,
+              8644.0
             ],
             [
-              2544.0,
-              5914.0
+              2584.0,
+              8704.0
             ],
             [
-              2104.0,
-              5914.0
+              1744.0,
+              8704.0
             ],
             [
-              2104.0,
-              6004.0
+              1744.0,
+              8764.0
             ]
           ],
           "arrowTarget": "waiting-pickup:top",
@@ -1567,28 +1539,28 @@
           "kind": "directed",
           "points": [
             [
-              3144.0,
-              5764.0
+              3184.0,
+              8584.0
             ],
             [
-              2784.0,
-              5764.0
+              2824.0,
+              8584.0
             ],
             [
-              2784.0,
-              5974.0
+              2824.0,
+              8734.0
             ],
             [
-              2134.0,
-              5974.0
+              1784.0,
+              8734.0
             ],
             [
-              2134.0,
-              6004.0
+              1784.0,
+              8764.0
             ]
           ],
           "arrowTarget": "waiting-pickup:top",
-          "toPortOffset": 190
+          "toPortOffset": 200
         },
         {
           "id": "edge-048",
@@ -1599,12 +1571,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              6124.0
+              1584.0,
+              8884.0
             ],
             [
-              1944.0,
-              6184.0
+              1584.0,
+              9004.0
             ]
           ],
           "arrowTarget": "pickup-notification:top"
@@ -1618,12 +1590,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              6304.0
+              1584.0,
+              9124.0
             ],
             [
-              1944.0,
-              6334.0
+              1584.0,
+              9244.0
             ]
           ],
           "arrowTarget": "pickup-on-time:top"
@@ -1637,19 +1609,19 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              6514.0
+              1584.0,
+              9424.0
             ],
             [
-              1944.0,
-              6544.0
+              1584.0,
+              9544.0
             ]
           ],
           "arrowTarget": "present-voucher:top",
           "label": {
             "text": "是",
-            "x": 1880.0,
-            "y": 6529.0,
+            "x": 1520.0,
+            "y": 9484.0,
             "fontSize": 14
           }
         },
@@ -1662,12 +1634,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              6664.0
+              1584.0,
+              9664.0
             ],
             [
-              1944.0,
-              6724.0
+              1584.0,
+              9784.0
             ]
           ],
           "arrowTarget": "handoff:top"
@@ -1681,12 +1653,12 @@
           "kind": "directed",
           "points": [
             [
-              1944.0,
-              6844.0
+              1584.0,
+              9904.0
             ],
             [
-              1944.0,
-              6904.0
+              1584.0,
+              10024.0
             ]
           ],
           "arrowTarget": "completed:top"
@@ -1700,23 +1672,23 @@
           "kind": "directed",
           "points": [
             [
-              2104.0,
-              6424.0
+              1744.0,
+              9334.0
             ],
             [
-              2594.0,
-              6424.0
+              2234.0,
+              9334.0
             ],
             [
-              2594.0,
-              6544.0
+              2234.0,
+              9544.0
             ]
           ],
           "arrowTarget": "reject:top",
           "label": {
             "text": "到店后当面拒收",
-            "x": 2658.0,
-            "y": 6484.0,
+            "x": 2298.0,
+            "y": 9439.0,
             "fontSize": 14
           }
         },
@@ -1729,23 +1701,23 @@
           "kind": "directed",
           "points": [
             [
-              1784.0,
-              6424.0
+              1424.0,
+              9334.0
             ],
             [
-              1294.0,
-              6424.0
+              934.0,
+              9334.0
             ],
             [
-              1294.0,
-              6544.0
+              934.0,
+              9544.0
             ]
           ],
           "arrowTarget": "overdue:top",
           "label": {
             "text": "逾期未取",
-            "x": 1230.0,
-            "y": 6484.0,
+            "x": 870.0,
+            "y": 9439.0,
             "fontSize": 14
           }
         },
@@ -1758,52 +1730,48 @@
           "kind": "dashed",
           "points": [
             [
-              1744.0,
-              3784.0
+              1384.0,
+              5404.0
             ],
             [
-              624.0,
-              3784.0
+              264.0,
+              5404.0
             ],
             [
-              624.0,
-              3904.0
+              264.0,
+              5584.0
             ]
           ],
           "arrowTarget": "cancel-request:top",
           "label": {
             "text": "发起取消",
-            "x": 560.0,
-            "y": 3844.0,
+            "x": 200.0,
+            "y": 5494.0,
             "fontSize": 14
           }
         },
         {
           "id": "edge-056",
           "from": "cancel-request",
-          "fromPort": "left",
+          "fromPort": "bottom",
           "to": "cancel-success",
           "toPort": "top",
           "kind": "directed",
           "points": [
             [
-              464.0,
-              3994.0
+              264.0,
+              5764.0
             ],
             [
               264.0,
-              3994.0
-            ],
-            [
-              264.0,
-              4144.0
+              6124.0
             ]
           ],
           "arrowTarget": "cancel-success:top",
           "label": {
             "text": "否·未开始拣货",
             "x": 200.0,
-            "y": 4069.0,
+            "y": 5944.0,
             "fontSize": 14
           }
         },
@@ -1816,23 +1784,23 @@
           "kind": "directed",
           "points": [
             [
-              784.0,
-              3994.0
+              424.0,
+              5674.0
             ],
             [
-              984.0,
-              3994.0
+              744.0,
+              5674.0
             ],
             [
-              984.0,
-              4144.0
+              744.0,
+              6124.0
             ]
           ],
           "arrowTarget": "cancel-blocked:top",
           "label": {
             "text": "是·已开始拣货",
-            "x": 1048.0,
-            "y": 4069.0,
+            "x": 808.0,
+            "y": 5899.0,
             "fontSize": 14
           }
         },
@@ -1845,28 +1813,36 @@
           "kind": "dashed",
           "points": [
             [
-              984.0,
-              4264.0
+              744.0,
+              6244.0
             ],
             [
-              984.0,
-              5974.0
+              744.0,
+              6289.0
             ],
             [
-              1864.0,
-              5974.0
+              624.0,
+              6289.0
             ],
             [
-              1864.0,
-              6004.0
+              624.0,
+              8734.0
+            ],
+            [
+              1504.0,
+              8734.0
+            ],
+            [
+              1504.0,
+              8764.0
             ]
           ],
           "arrowTarget": "waiting-pickup:top",
           "toPortOffset": -80,
           "label": {
             "text": "继续履约",
-            "x": 920.0,
-            "y": 5119.0,
+            "x": 560.0,
+            "y": 7511.5,
             "fontSize": 14
           }
         },
@@ -1879,19 +1855,19 @@
           "kind": "dashed",
           "points": [
             [
-              1944.0,
-              7024.0
+              1584.0,
+              10144.0
             ],
             [
-              1944.0,
-              7084.0
+              1584.0,
+              10264.0
             ]
           ],
           "arrowTarget": "after-sale:top",
           "label": {
             "text": "申请售后",
-            "x": 1880.0,
-            "y": 7054.0,
+            "x": 1520.0,
+            "y": 10204.0,
             "fontSize": 14
           }
         }
@@ -1995,7 +1971,7 @@
         },
         "layout": {
           "direction": "TB",
-          "mainAxis": 1944.0,
+          "mainAxis": 1584.0,
           "layerTolerance": 220,
           "symmetryGroups": [],
           "mergeNodes": [
@@ -2484,6 +2460,295 @@
               ]
             }
           ],
+          "geometryProfile": {
+            "version": "1",
+            "entityGap": 24,
+            "portGap": 36,
+            "obstacleGap": 12,
+            "laneGap": 48,
+            "shapeBaseSizes": {
+              "round": {
+                "minWidth": 160,
+                "minHeight": 72,
+                "boundaryModel": "rectangle"
+              },
+              "rect": {
+                "minWidth": 160,
+                "minHeight": 72,
+                "boundaryModel": "rectangle"
+              },
+              "diamond": {
+                "minWidth": 180,
+                "minHeight": 120,
+                "boundaryModel": "diamond"
+              },
+              "ellipse": {
+                "minWidth": 160,
+                "minHeight": 96,
+                "boundaryModel": "ellipse"
+              },
+              "database": {
+                "minWidth": 180,
+                "minHeight": 96,
+                "boundaryModel": "database"
+              },
+              "actor": {
+                "minWidth": 160,
+                "minHeight": 120,
+                "boundaryModel": "actor"
+              },
+              "note": {
+                "minWidth": 180,
+                "minHeight": 96,
+                "boundaryModel": "note"
+              }
+            },
+            "axisSpacing": {
+              "referenceShape": "rect",
+              "referenceWidth": 400,
+              "referenceHeight": 120,
+              "referenceLongSide": 400,
+              "referenceShortSide": 120,
+              "lrMinimumGap": 200,
+              "tbMinimumGap": 120
+            }
+          },
+          "branchLayoutPlan": {
+            "status": "planned",
+            "strategy": "primary-flow-then-longest-branch",
+            "frozenOrder": [
+              "primary-flow",
+              "branch-alcohol-check",
+              "branch-cancel-request",
+              "branch-minimum-order",
+              "branch-payment-success",
+              "branch-pending-action",
+              "branch-picking-result",
+              "branch-pickup-on-time",
+              "branch-stockout-strategy",
+              "branch-substitute-available",
+              "branch-substitution-accepted"
+            ],
+            "baselineGap": 48,
+            "groups": [
+              {
+                "id": "branch-alcohol-check",
+                "decisionNodeId": "alcohol-check",
+                "edgeIds": [
+                  "edge-017",
+                  "edge-018"
+                ],
+                "targetNodeIds": [
+                  "payment-success",
+                  "age-confirmation"
+                ],
+                "branchOrder": [
+                  "edge-017",
+                  "edge-018"
+                ],
+                "layoutCandidateEdgeId": "edge-018",
+                "depth": 1,
+                "mode": "inline",
+                "branchGap": 48,
+                "primaryEdgeId": "edge-017"
+              },
+              {
+                "id": "branch-cancel-request",
+                "decisionNodeId": "cancel-request",
+                "edgeIds": [
+                  "edge-056",
+                  "edge-057"
+                ],
+                "targetNodeIds": [
+                  "cancel-success",
+                  "cancel-blocked"
+                ],
+                "branchOrder": [
+                  "edge-056",
+                  "edge-057"
+                ],
+                "layoutCandidateEdgeId": "edge-056",
+                "depth": 0,
+                "mode": "inline",
+                "branchGap": 48,
+                "primaryEdgeId": "edge-056"
+              },
+              {
+                "id": "branch-minimum-order",
+                "decisionNodeId": "minimum-order",
+                "edgeIds": [
+                  "edge-007",
+                  "edge-009"
+                ],
+                "targetNodeIds": [
+                  "product-validation",
+                  "checkout-blocked"
+                ],
+                "branchOrder": [
+                  "edge-009",
+                  "edge-007"
+                ],
+                "layoutCandidateEdgeId": "edge-009",
+                "depth": 1,
+                "mode": "inline",
+                "branchGap": 48,
+                "primaryEdgeId": "edge-009"
+              },
+              {
+                "id": "branch-payment-success",
+                "decisionNodeId": "payment-success",
+                "edgeIds": [
+                  "edge-020",
+                  "edge-024"
+                ],
+                "targetNodeIds": [
+                  "deduct-inventory",
+                  "payment-pending"
+                ],
+                "branchOrder": [
+                  "edge-020",
+                  "edge-024"
+                ],
+                "layoutCandidateEdgeId": "edge-020",
+                "depth": 1,
+                "mode": "inline",
+                "branchGap": 48,
+                "primaryEdgeId": "edge-020"
+              },
+              {
+                "id": "branch-pending-action",
+                "decisionNodeId": "pending-action",
+                "edgeIds": [
+                  "edge-026",
+                  "edge-027"
+                ],
+                "targetNodeIds": [
+                  "initiate-payment",
+                  "cancel-release"
+                ],
+                "branchOrder": [
+                  "edge-026",
+                  "edge-027"
+                ],
+                "layoutCandidateEdgeId": "edge-026",
+                "depth": 0,
+                "mode": "inline",
+                "branchGap": 48,
+                "primaryEdgeId": "edge-026"
+              },
+              {
+                "id": "branch-picking-result",
+                "decisionNodeId": "picking-result",
+                "edgeIds": [
+                  "edge-031",
+                  "edge-032",
+                  "edge-033"
+                ],
+                "targetNodeIds": [
+                  "waiting-pickup",
+                  "stockout-strategy",
+                  "full-refund"
+                ],
+                "branchOrder": [
+                  "edge-031",
+                  "edge-032",
+                  "edge-033"
+                ],
+                "layoutCandidateEdgeId": "edge-032",
+                "depth": 3,
+                "mode": "local-lane",
+                "branchGap": 48,
+                "primaryEdgeId": "edge-031"
+              },
+              {
+                "id": "branch-pickup-on-time",
+                "decisionNodeId": "pickup-on-time",
+                "edgeIds": [
+                  "edge-050",
+                  "edge-053",
+                  "edge-054"
+                ],
+                "targetNodeIds": [
+                  "present-voucher",
+                  "reject",
+                  "overdue"
+                ],
+                "branchOrder": [
+                  "edge-050",
+                  "edge-053",
+                  "edge-054"
+                ],
+                "layoutCandidateEdgeId": "edge-050",
+                "depth": 0,
+                "mode": "inline",
+                "branchGap": 48,
+                "primaryEdgeId": "edge-050"
+              },
+              {
+                "id": "branch-stockout-strategy",
+                "decisionNodeId": "stockout-strategy",
+                "edgeIds": [
+                  "edge-034",
+                  "edge-035"
+                ],
+                "targetNodeIds": [
+                  "substitution-start",
+                  "partial-refund"
+                ],
+                "branchOrder": [
+                  "edge-035",
+                  "edge-034"
+                ],
+                "layoutCandidateEdgeId": "edge-035",
+                "depth": 2,
+                "mode": "inline",
+                "branchGap": 48,
+                "primaryEdgeId": "edge-035"
+              },
+              {
+                "id": "branch-substitute-available",
+                "decisionNodeId": "substitute-available",
+                "edgeIds": [
+                  "edge-043",
+                  "edge-044"
+                ],
+                "targetNodeIds": [
+                  "order-amend",
+                  "refund-partial"
+                ],
+                "branchOrder": [
+                  "edge-043",
+                  "edge-044"
+                ],
+                "layoutCandidateEdgeId": "edge-043",
+                "depth": 0,
+                "mode": "local-lane",
+                "branchGap": 48,
+                "primaryEdgeId": "edge-043"
+              },
+              {
+                "id": "branch-substitution-accepted",
+                "decisionNodeId": "substitution-accepted",
+                "edgeIds": [
+                  "edge-039",
+                  "edge-040"
+                ],
+                "targetNodeIds": [
+                  "substitute-picked",
+                  "refund-partial"
+                ],
+                "branchOrder": [
+                  "edge-039",
+                  "edge-040"
+                ],
+                "layoutCandidateEdgeId": "edge-039",
+                "depth": 1,
+                "mode": "local-lane",
+                "branchGap": 48,
+                "primaryEdgeId": "edge-039"
+              }
+            ]
+          },
           "changeImpactReview": {
             "baseline": "comparison-samples/diagram-009/2026-08-29-before-redraw/diagram-009.diagram.json",
             "movedNodeIds": [
@@ -2833,7 +3098,7 @@
       "generation": {
         "generator": {
           "name": "diagram-009-mermaid-generator",
-          "version": "6.0.0"
+          "version": "6.1.1"
         },
         "config": {
           "summary": "按图表设计流程从冻结 Mermaid 来源重建门店自提订单履约流程：TB 主轴、局部分支 lane、受控关系合并与最短合法反馈回路",

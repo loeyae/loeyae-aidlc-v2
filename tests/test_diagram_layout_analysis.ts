@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import { analyzeAndChooseLayout, type FlowEdgeInput, type FlowNodeInput, type PrimaryFlowInput } from "../core/tools/diagram-layout-analysis.js";
+import { DIAGRAM_GEOMETRY_PROFILE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramShapeProfile } from "../core/tools/diagram-visual-style.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -27,6 +28,20 @@ assert.deepEqual(linear.analysis.entryNodeIds, ["a"]);
 assert.deepEqual(linear.analysis.exitNodeIds, ["c"]);
 assert.equal(linear.decision.strategy, "LR_SINGLE_ROW");
 assert.equal(linear.decision.direction, "LR");
+assert.equal(linear.analysis.branchLayoutPlan.status, "needs-context");
+assert.equal(linear.analysis.branchLayoutPlan.baselineGap, DIAGRAM_GEOMETRY_PROFILE.laneGap);
+assert.deepEqual(linear.analysis.axisSpacing, calculateDiagramAxisSpacing(160));
+assert.deepEqual(calculateDiagramAxisSpacing(240, 400), {
+  referenceShape: "rect",
+  referenceWidth: 240,
+  referenceHeight: 400,
+  referenceLongSide: 400,
+  referenceShortSide: 240,
+  lrMinimumGap: 200,
+  tbMinimumGap: 400,
+});
+assert.equal(diagramShapeProfile("diamond").boundaryModel, "diamond");
+assert.deepEqual(calculateDiagramNodeSize("diamond", "判断"), { width: 180, height: 120 });
 
 const shallowBranch = graph(
   [{ id: "a" }, { id: "decision", shape: "diamond" }, { id: "yes" }, { id: "no" }],
@@ -76,6 +91,20 @@ const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8")) as {
 };
 const expectedDiagram = expected.diagrams[0];
 const sidecarDiagram = sidecar.diagrams[0];
+const expectedRouteContract = expectedDiagram.route_contract as any;
+assert.equal(expectedRouteContract.geometry_profile.version, DIAGRAM_GEOMETRY_PROFILE.version);
+assert.equal(expectedRouteContract.geometry_profile.entity_gap, DIAGRAM_GEOMETRY_PROFILE.entityGap);
+assert.equal(expectedRouteContract.geometry_profile.port_gap, DIAGRAM_GEOMETRY_PROFILE.portGap);
+assert.equal(expectedRouteContract.geometry_profile.obstacle_gap, DIAGRAM_GEOMETRY_PROFILE.obstacleGap);
+assert.equal(expectedRouteContract.geometry_profile.lane_gap, DIAGRAM_GEOMETRY_PROFILE.laneGap);
+assert.deepEqual(expectedRouteContract.geometry_profile.axis_spacing, { reference_shape: "rect", reference_width: 400, reference_height: 120, reference_long_side: 400, reference_short_side: 120, lr_minimum_gap: 200, tb_minimum_gap: 120 });
+assert.equal(Object.keys(expectedRouteContract.geometry_profile.shape_base_sizes).length, 7);
+const sidecarLayout = sidecarDiagram.designNotes?.layout as any;
+assert.equal(sidecarLayout.geometryProfile.entityGap, DIAGRAM_GEOMETRY_PROFILE.entityGap);
+assert.equal(sidecarLayout.geometryProfile.portGap, DIAGRAM_GEOMETRY_PROFILE.portGap);
+assert.equal(sidecarLayout.geometryProfile.obstacleGap, DIAGRAM_GEOMETRY_PROFILE.obstacleGap);
+assert.equal(sidecarLayout.geometryProfile.laneGap, DIAGRAM_GEOMETRY_PROFILE.laneGap);
+assert.deepEqual(sidecarLayout.geometryProfile.axisSpacing, { referenceShape: "rect", referenceWidth: 400, referenceHeight: 120, referenceLongSide: 400, referenceShortSide: 120, lrMinimumGap: 200, tbMinimumGap: 120 });
 const labels = new Map(sidecarDiagram.nodes.map((node) => [node.id, node.label]));
 const edgeLabels = new Map(sidecarDiagram.edges.map((current) => [current.id, current.label?.text]));
 const primaryNodeIds = [
@@ -121,6 +150,26 @@ assert.equal(diagram009.decision.strategy, "TB_MAIN_AXIS");
 assert.equal(diagram009.decision.direction, "TB");
 assert.ok(diagram009.decision.reasons.includes("feedback-requires-tb"));
 assert.ok(diagram009.decision.reasons.includes("nested-branch-requires-tb"));
+assert.equal(diagram009.analysis.branchLayoutPlan.status, "planned");
+assert.equal(diagram009.analysis.branchLayoutPlan.strategy, "primary-flow-then-longest-branch");
+assert.equal(diagram009.analysis.branchLayoutPlan.baselineGap, DIAGRAM_GEOMETRY_PROFILE.laneGap);
+assert.deepEqual(diagram009.analysis.branchLayoutPlan.frozenOrder, [
+  "primary-flow",
+  ...diagram009.analysis.branchLayoutPlan.groups.map((group) => group.id),
+]);
+assert.equal(new Set(diagram009.analysis.branchLayoutPlan.groups.map((group) => group.id)).size, diagram009.analysis.branchLayoutPlan.groups.length);
+for (const group of diagram009.analysis.branchLayoutPlan.groups) {
+  assert.ok(group.edgeIds.length >= 2);
+  assert.equal(new Set(group.branchOrder).size, group.edgeIds.length);
+  assert.deepEqual([...group.branchOrder].sort(), [...group.edgeIds].sort());
+  assert.ok(group.layoutCandidateEdgeId && group.edgeIds.includes(group.layoutCandidateEdgeId));
+  assert.ok(group.primaryEdgeId && group.edgeIds.includes(group.primaryEdgeId));
+  assert.equal(group.branchGap, DIAGRAM_GEOMETRY_PROFILE.laneGap);
+}
+assert.equal(expectedRouteContract.branch_layout_plan.strategy, diagram009.analysis.branchLayoutPlan.strategy);
+assert.equal(sidecarLayout.branchLayoutPlan.strategy, diagram009.analysis.branchLayoutPlan.strategy);
+assert.equal(sidecarLayout.branchLayoutPlan.baselineGap, DIAGRAM_GEOMETRY_PROFILE.laneGap);
+assert.equal(sidecarLayout.branchLayoutPlan.groups.length, 10);
 
 const report = {
   diagramId: expectedDiagram.id,
@@ -155,6 +204,7 @@ const report = {
     cycleDetected: group.paths.some((path) => path.cycleDetected),
   })),
   decision: diagram009.decision,
+  branchLayoutPlan: diagram009.analysis.branchLayoutPlan,
 };
 console.log(JSON.stringify(report, null, 2));
 console.log("diagram layout analysis tests passed");

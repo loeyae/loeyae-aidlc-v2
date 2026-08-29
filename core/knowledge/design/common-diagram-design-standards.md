@@ -213,12 +213,14 @@ Architecture / Context 图用于表达“有哪些领域、边界在哪里、静
 
 #### 主轴优先、端口扇出与同侧通道
 
+布局完成后，实体间距不得被解释为全图等距。共享 geometry profile 必须同时声明方向性主轴净空：以当前布局的参考矩形长边和高度为基准，`LR` 图的主轴相邻实体边界净空至少为 `0.5 × referenceLongSide`，`TB` 图的主轴相邻实体边界净空至少为 `1.0 × referenceHeight`；形状尺寸、文本尺寸、分支整组外移和业务层级造成的更大间隔应保留。actual 使用 `designNotes.layout.geometryProfile.axisSpacing`（含参考矩形宽高、长短边和 LR/TB 最小值），expected 使用 `route_contract.geometry_profile.axis_spacing`，两者必须逐字段一致。该规则是方向性下限，不要求不同形状、不同层级或不同分支的间隔相等。
+
 布局和路由必须按以下优先级决策：先将连续主流程按主阅读方向排在主轴上，再将同一业务层的并列实体在垂直主轴方向对称、均匀分布，最后才计算分支、汇合、回路和例外边；不得为了消除一处交叉而破坏主流程顺序、主轴或同层关系。节点位置、尺寸、端口、标签、分组边界或画布变化后，必须枚举该对象全部 incident edges 和通道受影响的邻边，先重算主轴/层级/可用净空，再按直达 → 一折 Manhattan → 两折 Manhattan → 必要外侧 lane 重新选择路径；不得只缩短或平移旧折线。
 
 交叉控制属于上述路由决策的低优先级优化，不是机械的零交叉硬目标。在合法候选路径中，优先级依次为：业务语义与主流程主轴连续性 → 业务层级、同层均衡与已声明对称 → 源/目标的就近合法端口和实体外侧出入 → 直达/少折点的合法 Manhattan 路径 → 非端点交叉数量最少。不得为了消除单个交叉而破坏更高优先级的主轴、层级、就近出入或路径合法性。无法同时消除时，可以保留必要交叉，但必须使用 `designNotes.layout.crossingExceptions` 记录实际边对和理由，并确认交叉不触及节点、文字、标签、箭头或关键端点，且方向和业务语义可读。既有图的布局迁移可用 `changeImpactReview` 记录 baseline、移动节点、受影响边及逐边复核；新建图不要求伪造历史 baseline。
 
 - 单一正向出边优先从主轴前进方向离开：`TB` 使用 `bottom` 或菱形下顶点，`LR` 使用 `right` 或菱形右顶点；对应的单一正向入边分别优先经 `top` 与 `left` 进入。
-- 同一节点有多条正向出边时，前两条优先从垂直主轴的两侧对称离开：`TB` 为 `left/right`，`LR` 为 `top/bottom`。其余出边仅可在主轴前进方向的 180° 前向局域中，使用合法端口和边界偏移均匀展开；不得无理由占用节点背向主轴的半平面。
+- 分支布局计划必须为每个有多个正向出口的判断节点记录唯一 `primaryEdgeId`；该边表示该组的主流程出口。`TB` 图的 primary edge 优先从 `bottom` 或菱形下顶点离开，`LR` 图优先从 `right` 或菱形右顶点离开。其他分支边使用垂直主轴的侧端点：`TB` 为 `left/right`，`LR` 为 `top/bottom`；两个或以上其他分支必须在两侧分布并使用边界偏移区分端点。对没有 branch-port 例外的 primary edge，源节点中心与目标节点中心必须严格共享主轴：`TB` 的中心 `x` 相同，`LR` 的中心 `y` 相同。没有确认的 primary edge 时返回 `NEEDS_CONTEXT`，只有真实端口/障碍例外才可声明 `branchPortExceptions`，不得默认把所有出口放到两侧。
 - 需要偏离主轴的边遵循同侧通道优先：源、目标在主轴同一侧时，应从该侧离开、在该侧通行并从该侧进入；不得无障碍地从左侧绕到右侧后再回左侧，或形成上下/左右的 S 形折返。源、目标分居主轴两侧时，最多允许一次最短的跨轴过渡。
 - `loopLanes` 的边必须使用声明的外侧 lane，并在该侧和最小 lane 偏移约束内采用最少折点的合法回折路径；不得因已声明回路保留多余折点或外绕。跨侧、背向端口或更多折点只有在业务端口语义、真实障碍或可读间距无法满足时允许，并通过 `sideSwitchExceptions: [{ edgeIds, reason }]` 声明原因。
 - 连线交叉的目标是主流程零歧义而非机械零数量。交叉默认避免；若消除交叉会破坏主轴、同层业务顺序或造成更长、更难读的折返，可为每个声明边对保留必要交叉。它必须不触及节点、文字、标签、箭头或关键端点，边方向和语义可区分，且在 `crossingExceptions: [{ edgeIds: ["edge-a", "edge-b"], reason }]` 中声明。非零共线重叠、未声明交叉、节点/文字/标签穿越始终失败。
@@ -511,3 +513,14 @@ Mermaid、批准流程或其他业务来源是不可变语义事实。生成器�
 边标签必须位于其所属连接器的可辨识邻域：优先紧邻分歧点或最长可读路径段，并与该段居中附着；不得为躲避而把标签推到读者无法判断归属的远处。标签绕行前必须先评估受控 merge、局部 lane 和标签附近的合法空白。
 
 无关节点的可见边界同样属于障碍：连接器可以在自身 source/target 的端口处接触边界，但不得沿任何无关矩形、圆角矩形或椭圆节点的边框共线行走。边界重叠会让读者误读为节点的一部分；应将 corridor 外移到最小净空位置，而不是贴边通过。
+
+
+## 统一几何 profile 与布局计划（强制）
+
+所有新建、调整和迁移图表必须在布局前消费同一份项目无关的几何 profile；布局分析器、生成器、sidecar、expected contract、静态 checker 和目标 Provider 不得各自维护尺寸或间距常量。默认 profile 的 `entityGap` 为 `24`、`portGap` 为 `36`、`obstacleGap` 为 `12`、`laneGap` 为 `48`，并同时声明节点内边距、行高、画布边距和每种支持形状的基础尺寸/边界模型。`round`/`rect`、`diamond`、`ellipse`、`database`、`actor`、`note` 必须按其真实边界模型计算；菱形、椭圆和其他非矩形形状不得退化为矩形碰撞模型。
+
+actual `.diagram.json` 使用 `designNotes.layout.geometryProfile` 的 camelCase 字段；expected contract 使用 `route_contract.geometry_profile` 的 snake_case 字段。两者必须逐字段对照，且 `shapeBaseSizes`/`shape_base_sizes` 必须覆盖生成器声明支持的形状。节点基础尺寸和动态文本尺寸必须在同一测量结果上计算；节点、端口、连线、标签和回流 lane 的间距门禁均消费该 profile，不能通过图表名称、节点 ID、edge ID 或固定坐标特判。
+
+过程图必须先冻结来源确认的 `primaryFlow`，再生成 `branchLayoutPlan`。未提供业务确认的主流程时返回 `NEEDS_CONTEXT`，不得把最长路径自动升级为业务主干。计划使用确定性 `primary-flow-then-longest-branch` 策略：主流程边优先，其余分支按语义路径长度排序，同长度按稳定 edge ID 排序；该排序只是布局候选，不改变业务事实。分支组应作为整体外移或进入局部 lane，连同成员节点、incident edges、标签和受影响通道一起重算，不得按 edge ID 逐条堆叠坐标补丁。
+
+同侧多条反馈/重试 lane 必须先计算最窄合法 corridor，再按实际 lane 的中心偏移保持至少 `laneGap`；`laneOffset` 不是免除间距检查的理由。普通分支不得借用 `loopLanes`，回流 lane 也不得参与普通主流程层级和对称计算。

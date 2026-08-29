@@ -68,6 +68,8 @@ FAIL > NEEDS_CAPABILITY > UNVERIFIED > STATIC_PASS > PASS
 3. **几何层**：源坐标和路径的端口方向、目标外侧接近、碰撞、共线重叠、交叉、折点、同侧通道、画布边界和标签可读性是否通过。
 4. **真实浏览器渲染层**：目标 Provider 实际加载 actual，在 `normal`、`fit`、`zoom` 三视图检查 DOM、computed style、真实 bbox、文本、无框标签、`10 × 10` 箭头、不透明白色画布、溢出和遮挡并保存截图/快照；静态几何结果不能代替该层。
 
+几何层必须额外区分两类间距：`entityGap` 是全图形状边界的最低净空，`axisSpacing` 是沿主阅读方向的布局基准。对 `LR`，主轴相邻实体边界 gap 必须至少为 `0.5 × referenceLongSide`；对 `TB`，必须至少为 `1.0 × referenceHeight`。不得用“所有节点等距”替代该规则，也不得用全图最小 gap 通过掩盖主轴局部不足。每个有多个正向出口的判断节点还必须验证唯一 `primaryEdgeId`：primary edge 走 `bottom/right`，其他分支走两侧端点；primary edge 的中心线偏移使用 `BRANCH_AXIS_ALIGNMENT` 阻断，实际端口偏离使用 `BRANCH_PORT` 或 `BRANCH_PORT_EXCEPTION` 记录。
+
 前一层失败时不得用后一层证据掩盖；浏览器证据必须引用本次 request、viewport、截图和快照路径。仅有字段、路径或 screenshot 文件名而没有真实执行结果时为 `UNVERIFIED`。
 
 
@@ -88,7 +90,7 @@ Semantic QA 是不启动浏览器的结构化检查，至少覆盖：
 - 连线 ID、`from` / `to`、端口、类型、路径点、黑色 `2` 线宽、`10 × 10` 箭头和无框标签；
 - `diagramType`、`designNotes`、视觉语义和 `designNotes.layout`；
 - SVG 不存在 `data-legend-item`、`data-note`，expected 的 `legend_ids`、`annotation_ids` 均为空；
-- 方向、主轴、层级、分支端口、汇合声明、标签线段中点法向位置和至少 `6` 的净空；
+- 方向、主轴、层级、`axisSpacing` 方向性净空、primary edge/分支端口、汇合声明、标签线段中点法向位置和至少 `6` 的净空；
 - FR/REQ 与图表对象的追溯关系。
 
 缺少 V2 新结构化字段时记录 `migration_status: "MIGRATION_REQUIRED"`，并将图表 `final_status` 保持为 `UNVERIFIED`；字段存在但值非法时 `final_status` 为 `FAIL`。不得把自然语言观察当作结构化证据。
@@ -302,3 +304,14 @@ Provider Request 的 `target_reading_environment.viewports` 必须同时声明 `
 每个关系标签必须可由读者在局部确定所属边：检查标签是否位于连接器的近邻、是否沿目标路径段居中、是否在分歧/合并点附近保留足够关联线索。仅靠大 side offset 使标签避开碰撞不构成通过；应先修正路由、合并或局部间距。
 
 静态几何检查除“进入无关节点内部”外，还必须拒绝连接器与无关节点可见边界的非零长度共线重叠（`EDGE_NODE_BOUNDARY_OVERLAP`）。source/target 端口的单点接触仍合法；该例外不得用于无关节点或沿边界行走的 feedback corridor。
+
+
+## 共享几何 profile 的分层门禁（强制）
+
+新建或调整图表声明 `geometryProfile` 后，Semantic/Geometry QA 必须使用统一 profile 检查：节点实际形状基础尺寸和动态文本尺寸、实体边界之间至少 `entityGap`、同一节点同一侧同角色端口之间至少 `portGap`、连线到无关节点可见边界及边标签到无关节点至少 `obstacleGap`，以及同侧回流 lane 的实际中心偏移至少 `laneGap`。稳定错误码至少包括 `SHAPE_BASE_SIZE`、`ENTITY_GAP`、`INSUFFICIENT_GAP`、`OBSTACLE_GAP` 和 `LOOP_LANE_GAP`；缺少适用 profile 时保持迁移/未验证状态，不得假设通过。
+
+`route_contract.geometry_profile` 是独立 expected 意图，不能从 actual 坐标、sidecar 或 SVG 反向生成；`designNotes.layout.geometryProfile` 是 actual 声明，必须与 expected 逐字段匹配。`route_contract.branch_layout_plan` 与 actual `designNotes.layout.branchLayoutPlan` 同样必须比较策略、冻结顺序、基准间距、分支组、排序、布局候选边、已确认主流程边、局部 lane 模式和分支间距。Provider 不得只检查字段存在。
+
+Chrome DevTools Provider 在 `normal`、`fit`、`zoom` 每个实际视图中使用 `getBoundingClientRect()`、`getScreenCTM()`、路径采样和真实文本 bbox 重复上述门禁；阈值按当前 SVG 屏幕缩放换算。Provider 的 `entityGapErrors`、`portGapErrors`、`obstacleGapErrors`、`labelObstacleGapErrors` 或 `laneGapErrors` 非空时，当前视图失败且不得写入视觉通过证据。只有三视图全部通过，才能升级 `VISUAL_PASS`/`PASS`；未执行 Provider 仍只能是 `STATIC_PASS` 或 `UNVERIFIED`。
+
+分支布局计划的自动排序不构成业务确认，验证报告必须分别记录 `primaryFlow` 的来源确认状态与 branch layout candidate。分支组外移、节点尺寸变化或 lane 变化后，必须复核所有 incident edges、端口、标签、障碍净空和画布边界；不能只修复触发错误的单条边。

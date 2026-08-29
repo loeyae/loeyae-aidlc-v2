@@ -18,8 +18,38 @@ SVG = ROOT / "diagram-009.svg"
 EXPECTED = ROOT / "diagram-009.expected.json"
 FONT = "Microsoft YaHei, 微软雅黑, sans-serif"
 CONFIG_SUMMARY = "按图表设计流程从冻结 Mermaid 来源重建门店自提订单履约流程：TB 主轴、局部分支 lane、受控关系合并与最短合法反馈回路"
-GENERATOR_VERSION = "6.0.0"
+GENERATOR_VERSION = "6.1.1"
 CONFIG_DIGEST = "sha256:" + hashlib.sha256(CONFIG_SUMMARY.encode()).hexdigest()
+GEOMETRY_PROFILE = {
+    "version": "1",
+    "nodeHorizontalPadding": 16,
+    "nodeVerticalPadding": 12,
+    "frameLineHeight": 24,
+    "entityGap": 24,
+    "portGap": 36,
+    "obstacleGap": 12,
+    "laneGap": 48,
+    "canvasMargin": 24,
+}
+SHAPE_BASE_SIZES = {
+    "round": {"minWidth": 160, "minHeight": 72, "boundaryModel": "rectangle"},
+    "rect": {"minWidth": 160, "minHeight": 72, "boundaryModel": "rectangle"},
+    "diamond": {"minWidth": 180, "minHeight": 120, "boundaryModel": "diamond"},
+    "ellipse": {"minWidth": 160, "minHeight": 96, "boundaryModel": "ellipse"},
+    "database": {"minWidth": 180, "minHeight": 96, "boundaryModel": "database"},
+    "actor": {"minWidth": 160, "minHeight": 120, "boundaryModel": "actor"},
+    "note": {"minWidth": 180, "minHeight": 96, "boundaryModel": "note"},
+}
+
+AXIS_SPACING = {
+    "referenceShape": "rect",
+    "referenceWidth": 400,
+    "referenceHeight": 120,
+    "referenceLongSide": 400,
+    "referenceShortSide": 120,
+    "lrMinimumGap": 200,
+    "tbMinimumGap": 120,  # ceil(1.0 * referenceHeight)
+}
 
 # This model is the controlled semantic transcription of diagram-009.mmd.  It deliberately
 # contains business identities and relationships only; all coordinates/routes are generated below.
@@ -140,16 +170,16 @@ LAYOUT_PLAN = {
         "minimum-order": (0, 1200), "checkout-blocked": (600, 1380), "product-validation": (0, 1380),
         "checkout": (0, 1560), "pickup-time": (0, 1740), "coupon": (0, 1920),
         "amount-confirmation": (0, 2100), "reserve-order": (0, 2280), "initiate-payment": (0, 2460),
-        "alcohol-check": (0, 2640), "age-confirmation": (600, 2820), "payment-success": (0, 3000),
+        "alcohol-check": (0, 2640), "age-confirmation": (600, 3000), "payment-success": (0, 3000),
         "payment-pending": (-650, 3180), "deduct-inventory": (0, 3180), "order-detail": (0, 3360),
         "pending-action": (-650, 3420), "fulfillment-progress": (0, 3540), "cancel-release": (-650, 3660),
         "order-preparing": (0, 3780), "store-accept": (0, 4020), "cancel-request": (-1320, 3990),
-        "picking-result": (0, 4260), "cancel-success": (-1680, 4200), "cancel-blocked": (-960, 4200),
-        "stockout-strategy": (650, 4500), "full-refund": (-720, 4500), "partial-refund": (450, 4680),
+        "picking-result": (0, 4260), "cancel-success": (-1320, 4200), "cancel-blocked": (-840, 4200),
+        "stockout-strategy": (1000, 4500), "full-refund": (-720, 4500), "partial-refund": (450, 4680),
         "substitution-start": (1000, 4680), "substitution-recommend": (1000, 4860),
         "substitution-confirm": (1000, 5040), "substitution-accepted": (1000, 5220),
         "substitute-picked": (1000, 5400), "substitute-available": (1000, 5580),
-        "order-amend": (600, 5760), "refund-partial": (1400, 5760),
+        "order-amend": (1000, 5760), "refund-partial": (1800, 5760),
         "waiting-pickup": (0, 6060), "pickup-notification": (0, 6240), "pickup-on-time": (0, 6420),
         "present-voucher": (0, 6600), "handoff": (0, 6780), "completed": (0, 6960),
         "after-sale": (0, 7140), "reject": (650, 6600), "overdue": (-650, 6600),
@@ -175,6 +205,18 @@ BRANCH_GROUP_CONFIGS = [
     ("substitute-available", ["edge-043", "edge-044"], None, 0, "local-lane", "换货可用判断分为订单修改和部分退款局部支路。"),
     ("substitution-accepted", ["edge-039", "edge-040"], None, 1, "local-lane", "顾客接受换货后分为继续拣货和合并条件的部分退款。"),
 ]
+BRANCH_PRIMARY_EDGE_IDS = {
+    "alcohol-check": "edge-017",
+    "cancel-request": "edge-056",
+    "minimum-order": "edge-009",
+    "payment-success": "edge-020",
+    "picking-result": "edge-031",
+    "pickup-on-time": "edge-050",
+    "stockout-strategy": "edge-035",
+    "substitute-available": "edge-043",
+    "substitution-accepted": "edge-039",
+}
+
 LOCAL_APPROACH_GAPS = {}
 LOCAL_APPROACH_ABOVE_EDGES = set()
 LOCAL_CLEARANCE_DISTANCES = {"edge-047": 360}
@@ -183,7 +225,7 @@ LOCAL_CLEARANCE_EDGES = {"edge-047"}
 DECLARED_CROSSING_PAIRS = set()
 TARGET_OFFSETS = {
     "edge-004": 0, "edge-008": 160, "edge-015": 0,
-    "edge-040": 32, "edge-044": -32, "edge-045": 40, "edge-046": 160, "edge-047": 190,
+    "edge-040": 32, "edge-044": -32, "edge-045": 40, "edge-046": 160, "edge-047": 200,
     "edge-031": 0, "edge-058": -80,
 }
 # 这些是实际发生的跨业务层局部支路，不能用空声明掩盖；其余分支保持同层。
@@ -196,6 +238,71 @@ def sha256(path: Path) -> str:
 
 def text_width(text: str, font_size: float = 16) -> float:
     return sum(font_size * (0.35 if character.isspace() else 1 if ord(character) >= 0x2E80 else 0.56) for character in text)
+
+
+def node_size(label, shape):
+    lines = str(label).splitlines() or [""]
+    text_width_value = max(text_width(line) for line in lines)
+    base = SHAPE_BASE_SIZES[shape]
+    width = max(base["minWidth"], int(text_width_value + GEOMETRY_PROFILE["nodeHorizontalPadding"] * 2 + 0.999))
+    height = max(base["minHeight"], int(len(lines) * GEOMETRY_PROFILE["frameLineHeight"] + GEOMETRY_PROFILE["nodeVerticalPadding"] * 2 + 0.999))
+    if shape == "diamond":
+        return max(width, 320), max(height, 180)
+    return max(width, 400), max(height, 120)
+
+
+def spaced_node_centers(node_sizes):
+    """按原始业务层保留同层关系，并用方向性 TB 基准扩展层间净空。"""
+    raw_centers = LAYOUT_PLAN["node_centers"]
+    layers = sorted({center_y for _center_x, center_y in raw_centers.values()})
+    spaced_layers = {layers[0]: layers[0]}
+    for previous_layer, current_layer in zip(layers, layers[1:]):
+        previous_half_height = max(node_sizes[node_id][1] / 2 for node_id, center in raw_centers.items() if center[1] == previous_layer)
+        current_half_height = max(node_sizes[node_id][1] / 2 for node_id, center in raw_centers.items() if center[1] == current_layer)
+        spaced_layers[current_layer] = spaced_layers[previous_layer] + previous_half_height + AXIS_SPACING["tbMinimumGap"] + current_half_height
+    return {
+        node_id: (center_x, spaced_layers[center_y])
+        for node_id, (center_x, center_y) in raw_centers.items()
+    }
+
+
+def geometry_profile_actual():
+    return {
+        "version": GEOMETRY_PROFILE["version"],
+        "entityGap": GEOMETRY_PROFILE["entityGap"],
+        "portGap": GEOMETRY_PROFILE["portGap"],
+        "obstacleGap": GEOMETRY_PROFILE["obstacleGap"],
+        "laneGap": GEOMETRY_PROFILE["laneGap"],
+        "shapeBaseSizes": SHAPE_BASE_SIZES,
+        "axisSpacing": AXIS_SPACING,
+    }
+
+
+def geometry_profile_expected():
+    return {
+        "version": GEOMETRY_PROFILE["version"],
+        "entity_gap": GEOMETRY_PROFILE["entityGap"],
+        "port_gap": GEOMETRY_PROFILE["portGap"],
+        "obstacle_gap": GEOMETRY_PROFILE["obstacleGap"],
+        "lane_gap": GEOMETRY_PROFILE["laneGap"],
+        "shape_base_sizes": {
+            shape: {
+                "min_width": profile["minWidth"],
+                "min_height": profile["minHeight"],
+                "boundary_model": profile["boundaryModel"],
+            }
+            for shape, profile in SHAPE_BASE_SIZES.items()
+        },
+        "axis_spacing": {
+            "reference_shape": AXIS_SPACING["referenceShape"],
+            "reference_width": AXIS_SPACING["referenceWidth"],
+            "reference_height": AXIS_SPACING["referenceHeight"],
+            "reference_long_side": AXIS_SPACING["referenceLongSide"],
+            "reference_short_side": AXIS_SPACING["referenceShortSide"],
+            "lr_minimum_gap": AXIS_SPACING["lrMinimumGap"],
+            "tb_minimum_gap": AXIS_SPACING["tbMinimumGap"],
+        },
+    }
 
 
 def compact(points):
@@ -344,10 +451,12 @@ def translate_to_canvas(nodes, edges):
 
 
 def make_model():
+    node_sizes = {node_id: node_size(label, shape) for node_id, label, shape in NODES}
+    spaced_centers = spaced_node_centers(node_sizes)
     nodes = {}
     for node_id, label, shape in NODES:
-        width, height = (320, 180) if shape == "diamond" else (max(400, int(text_width(label) + 48)), 120)
-        center_x, center_y = LAYOUT_PLAN["node_centers"][node_id]
+        width, height = node_sizes[node_id]
+        center_x, center_y = spaced_centers[node_id]
         nodes[node_id] = {"id": node_id, "shape": shape, "label": label, "x": center_x - width / 2, "y": center_y - height / 2, "width": width, "height": height, "fontSize": 16}
 
     outgoing = {}
@@ -374,9 +483,7 @@ def make_model():
             # 主动取消与支付超时是同端点、同线型的受控来源合并；沿同轴主线直接进入取消释放节点。
             from_port, to_port = "bottom", "top"
         elif is_branch:
-            if edge_id == "edge-039":
-                from_port = "left"
-            elif edge_id in PRIMARY_FLOW_EDGE_IDS:
+            if edge_id == BRANCH_PRIMARY_EDGE_IDS.get(source) or edge_id in PRIMARY_FLOW_EDGE_IDS:
                 from_port = "bottom"
             else:
                 local_branch_edges = [candidate for candidate in outgoing[source] if candidate not in PRIMARY_FLOW_EDGE_IDS and candidate not in LOOP_EDGE_IDS]
@@ -538,6 +645,77 @@ def branch_groups(edges):
     return result
 
 
+def branch_layout_plan(edges):
+    edge_by_id = {edge["id"]: edge for edge in edges}
+    outgoing = {}
+    for edge in edges:
+        if edge["id"] not in LOOP_EDGE_IDS:
+            outgoing.setdefault(edge["from"], []).append(edge)
+
+    def path_score(node_id, visited):
+        if node_id in visited:
+            return 0
+        next_visited = visited | {node_id}
+        return max([0] + [1 + path_score(edge["to"], next_visited) for edge in outgoing.get(node_id, [])])
+
+    groups = []
+    for group_id, edge_ids, merge_node_id, depth, mode, _reason in BRANCH_GROUP_CONFIGS:
+        scores = {edge_id: path_score(edge_by_id[edge_id]["to"], {group_id}) for edge_id in edge_ids}
+        primary_edge_ids = [edge_id for edge_id in edge_ids if edge_id in PRIMARY_FLOW_EDGE_IDS]
+        primary_edge_id = primary_edge_ids[0] if primary_edge_ids else BRANCH_PRIMARY_EDGE_IDS.get(group_id) or sorted(edge_ids, key=lambda edge_id: (-scores[edge_id], edge_id))[0]
+        branch_order = sorted(edge_ids, key=lambda edge_id: (0 if edge_id == primary_edge_id else 1, -scores[edge_id], edge_id))
+        candidate = sorted(edge_ids, key=lambda edge_id: (-scores[edge_id], edge_id))[0]
+        target_ids = []
+        for edge_id in branch_order:
+            target_id = edge_by_id[edge_id]["to"]
+            if target_id not in target_ids:
+                target_ids.append(target_id)
+        group = {
+            "id": f"branch-{group_id}",
+            "decisionNodeId": group_id,
+            "edgeIds": list(edge_ids),
+            "targetNodeIds": target_ids,
+            "branchOrder": branch_order,
+            "layoutCandidateEdgeId": candidate,
+            "depth": depth,
+            "mode": mode,
+            "branchGap": GEOMETRY_PROFILE["laneGap"],
+        }
+        group["primaryEdgeId"] = primary_edge_id
+        if merge_node_id:
+            group["mergeNodeId"] = merge_node_id
+        groups.append(group)
+    return {
+        "status": "planned",
+        "strategy": "primary-flow-then-longest-branch",
+        "frozenOrder": ["primary-flow", *[group["id"] for group in groups]],
+        "baselineGap": GEOMETRY_PROFILE["laneGap"],
+        "groups": groups,
+    }
+
+
+def branch_layout_plan_expected(edges):
+    actual = branch_layout_plan(edges)
+    return {
+        "strategy": actual["strategy"],
+        "frozen_order": actual["frozenOrder"],
+        "baseline_gap": actual["baselineGap"],
+        "groups": [{
+            "id": group["id"],
+            "decision_node_id": group["decisionNodeId"],
+            "edge_ids": group["edgeIds"],
+            "target_ids": group["targetNodeIds"],
+            "branch_order": group["branchOrder"],
+            "layout_candidate_edge_id": group["layoutCandidateEdgeId"],
+            "primary_edge_id": group["primaryEdgeId"],
+            **({"merge_node_id": group["mergeNodeId"]} if "mergeNodeId" in group else {}),
+            "depth": group["depth"],
+            "mode": group["mode"],
+            "branch_gap": group["branchGap"],
+        } for group in actual["groups"]],
+    }
+
+
 def exceptions(edges):
     result = []
     unverified_visual_evidence = {
@@ -650,14 +828,14 @@ def build_expected():
         if edge["label"] is not None:
             intent["label_text"] = edge["label"]
         intents.append(intent)
-    return {"version": "1", "type": "diagram-expected-contract", "source": {"kind": "approved-mermaid-business-source", "ref": "diagram-009.mmd", "revision": "user-provided-mermaid-v1", "digest": sha256(MERMAID)}, "generator": {"name": "diagram-009-mermaid-generator", "version": GENERATOR_VERSION, "config_summary": CONFIG_SUMMARY, "config_digest": CONFIG_DIGEST, "source_refs": ["diagram-009.mmd"]}, "diagrams": [{"id": DIAGRAM_ID, "diagram_type": "flowchart", "intent": "验证从复杂门店自提订单 Mermaid 业务流到单色 SVG 的结构提取、分支、回路与履约绘制能力", "nodes": [{"id": node_id, "shape": shape} for node_id, _label, shape in NODES], "edges": [{"id": edge["id"], "from": edge["from"], "to": edge["to"], "kind": edge["kind"]} for edge in semantic], "source_graph": source_graph(), "groups": [], "legend_ids": [], "annotation_ids": [], "lifeline_ids": [], "route_contract": {"direction": "TB", "affected_edge_ids": [edge["id"] for edge in semantic], "edge_intents": intents, "main_flow": {"entry_node_ids": ["open-store"], "exit_node_ids": ["cancel-release", "full-refund", "cancel-success", "reject", "overdue", "after-sale"], "node_ids": [node_id for node_id, _label, _shape in NODES], "edge_ids": [edge["id"] for edge in semantic]}, "primary_flow": {"node_ids": primary["nodeIds"], "edge_ids": primary["edgeIds"], "reason": primary["reason"]}, "loop_lanes": loop_lanes, "merge_nodes": [], "branch_groups": [{"id": group["id"], "decision_node_id": group["decisionNodeId"], "edge_ids": group["edgeIds"], "target_ids": group["targetIds"], "direction": group["direction"], "tolerance": group["tolerance"], **({"merge_node_id": group["mergeNodeId"]} if "mergeNodeId" in group else {}), "depth": group["depth"], "mode": group["mode"], "reason": group["reason"]} for group in branches], "exceptions": expected_branch_layer_exceptions()}}]}
+    return {"version": "1", "type": "diagram-expected-contract", "source": {"kind": "approved-mermaid-business-source", "ref": "diagram-009.mmd", "revision": "user-provided-mermaid-v1", "digest": sha256(MERMAID)}, "generator": {"name": "diagram-009-mermaid-generator", "version": GENERATOR_VERSION, "config_summary": CONFIG_SUMMARY, "config_digest": CONFIG_DIGEST, "source_refs": ["diagram-009.mmd"]}, "diagrams": [{"id": DIAGRAM_ID, "diagram_type": "flowchart", "intent": "验证从复杂门店自提订单 Mermaid 业务流到单色 SVG 的结构提取、分支、回路与履约绘制能力", "nodes": [{"id": node_id, "shape": shape} for node_id, _label, shape in NODES], "edges": [{"id": edge["id"], "from": edge["from"], "to": edge["to"], "kind": edge["kind"]} for edge in semantic], "source_graph": source_graph(), "groups": [], "legend_ids": [], "annotation_ids": [], "lifeline_ids": [], "route_contract": {"direction": "TB", "affected_edge_ids": [edge["id"] for edge in semantic], "edge_intents": intents, "main_flow": {"entry_node_ids": ["open-store"], "exit_node_ids": ["cancel-release", "full-refund", "cancel-success", "reject", "overdue", "after-sale"], "node_ids": [node_id for node_id, _label, _shape in NODES], "edge_ids": [edge["id"] for edge in semantic]}, "primary_flow": {"node_ids": primary["nodeIds"], "edge_ids": primary["edgeIds"], "reason": primary["reason"]}, "loop_lanes": loop_lanes, "merge_nodes": [], "branch_groups": [{"id": group["id"], "decision_node_id": group["decisionNodeId"], "edge_ids": group["edgeIds"], "target_ids": group["targetIds"], "direction": group["direction"], "tolerance": group["tolerance"], **({"merge_node_id": group["mergeNodeId"]} if "mergeNodeId" in group else {}), "depth": group["depth"], "mode": group["mode"], "reason": group["reason"]} for group in branches], "geometry_profile": geometry_profile_expected(), "branch_layout_plan": branch_layout_plan_expected(semantic), "exceptions": expected_branch_layer_exceptions()}}]}
 
 
 def build_manifest(nodes, edges, canvas):
     loop_lanes = [{"id": lane_id, "side": side, "laneOffset": offset, "reason": reason, "edgeIds": [RELATION_EDGE_IDS[zero_index]]} for zero_index, (lane_id, side, offset, reason) in LOOP_EDGE_INDEXES.items()]
     branch_edges = sorted(BRANCH_LAYER_EXCEPTION_EDGE_IDS)
     route_config = json.loads(os.environ.get("AIDLC_ROUTE_CONFIG_JSON", json.dumps({"diagram_id": DIAGRAM_ID, "affected_edge_ids": [edge["id"] for edge in edges], "strategy": "spine-first-local-routing", "source_relation_merges": SOURCE_RELATION_MERGES})))
-    return {"version": 1, "document": "diagram-009.md", "expected_contract_path": "diagram-009.expected.json", "diagrams": [{"id": DIAGRAM_ID, "output": "diagram-009.svg", "title": "图表 009｜门店自提订单履约流程", "description": "从打开商城、门店自提结算、支付与库存处理，到拣货、换货、取货、取消和售后的完整订单履约流程。", "diagramType": "flowchart", "canvas": {"width": canvas["width"], "height": canvas["height"]}, "sourceBasis": [{"kind": "approved-mermaid", "path": "diagram-009.mmd", "digest": sha256(MERMAID)}], "nodes": list(nodes.values()), "edges": edges, "groups": [], "designNotes": {"intent": "让读者追踪门店自提订单从结算到履约、取消和售后的完整业务分支。", "sourceRelationMerges": SOURCE_RELATION_MERGES, "semanticModes": ["process-flow"], "visualSemantics": [{"channel": "node-shape", "role": "semantic", "reason": "菱形直接表达需要选择的业务判断。"}, {"channel": "edge-kind", "role": "semantic", "reason": "线型严格对应 Mermaid 来源关系；反馈路由角色不改变关系线型。"}], "legendDecision": {"status": "exempt", "reason": "判断、反馈和重试均由节点形状及相邻边标签就地说明。", "inlineSemanticEvidence": [{"object": "minimum-order", "meaning": "菱形和是/否标签表达最低金额判断"}, {"object": "edge-008", "meaning": "外侧反馈 lane 表达最低金额失败回退，关系线型与标签保持 Mermaid 来源"}]}, "splitDecision": {"status": "kept-single", "reason": "支付、拣货、换货、取货、取消和售后是同一订单生命周期，拆分会损失回路与终态关系。", "singleGoal": "追踪门店自提订单生命周期", "staticBoundary": "不混入系统静态边界", "processFlowDistinction": "仅表达有向业务过程流", "readabilityEvidence": {state: {"status": "UNVERIFIED", "evidence": f".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.{state}"} for state in ("normal", "fit", "zoom")}}, "layout": {"direction": "TB", "mainAxis": canvas["mainAxis"], "layerTolerance": 220, "symmetryGroups": [], "mergeNodes": merge_nodes(edges), "branchLayerExceptions": [{"edgeIds": branch_edges, "reason": "跨阶段反馈或多步履约支路保持局部阅读顺序，避免破坏主干连续性。"}], "branchPortExceptions": [{"edgeIds": item["object"]["ids"], "reason": item["geometric_reason"]} for item in exceptions(edges) if item["type"] == "branch-port"], "sideSwitchExceptions": [{"edgeIds": item["object"]["ids"], "reason": item["geometric_reason"]} for item in exceptions(edges) if item["type"] == "side-switch"], "crossingExceptions": [{"edgeIds": item["object"]["ids"], "businessReason": item["business_reason"], "geometricReason": item["geometric_reason"], "visualEvidence": item["visual_evidence"]} for item in exceptions(edges) if item["type"] == "crossing"], "readabilityEvidence": {state: {"status": "UNVERIFIED", "evidence": f".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.{state}"} for state in ("normal", "fit", "zoom")}, "mainFlow": {"entryNodeId": "open-store", "exitNodeIds": ["cancel-release", "full-refund", "cancel-success", "reject", "overdue", "after-sale"], "nodeIds": list(nodes), "edgeIds": [edge["id"] for edge in edges]}, "branchGroups": branch_groups(edges), "primaryFlow": {"nodeIds": primary_flow()["nodeIds"], "edgeIds": primary_flow()["edgeIds"], "reason": primary_flow()["reason"]}, "loopLanes": loop_lanes, "changeImpactReview": {"baseline": "comparison-samples/diagram-009/2026-08-29-before-redraw/diagram-009.diagram.json", "movedNodeIds": list(nodes), "impactedEdgeIds": [edge["id"] for edge in edges], "edgeReviews": [{"edgeId": edge["id"], "status": "recomputed"} for edge in edges]}}}, "generation": {"generator": {"name": "diagram-009-mermaid-generator", "version": GENERATOR_VERSION}, "config": {"summary": CONFIG_SUMMARY, "digest": CONFIG_DIGEST}, "route_config": route_config, "source_refs": ["diagram-009.mmd"], "outputs": ["diagram-009.svg", "diagram-009.diagram.json", "diagram-009.expected.json"], "command_argv": ["python3", "diagram-009-generator.py"], "cwd": "."}}]}
+    return {"version": 1, "document": "diagram-009.md", "expected_contract_path": "diagram-009.expected.json", "diagrams": [{"id": DIAGRAM_ID, "output": "diagram-009.svg", "title": "图表 009｜门店自提订单履约流程", "description": "从打开商城、门店自提结算、支付与库存处理，到拣货、换货、取货、取消和售后的完整订单履约流程。", "diagramType": "flowchart", "canvas": {"width": canvas["width"], "height": canvas["height"]}, "sourceBasis": [{"kind": "approved-mermaid", "path": "diagram-009.mmd", "digest": sha256(MERMAID)}], "nodes": list(nodes.values()), "edges": edges, "groups": [], "designNotes": {"intent": "让读者追踪门店自提订单从结算到履约、取消和售后的完整业务分支。", "sourceRelationMerges": SOURCE_RELATION_MERGES, "semanticModes": ["process-flow"], "visualSemantics": [{"channel": "node-shape", "role": "semantic", "reason": "菱形直接表达需要选择的业务判断。"}, {"channel": "edge-kind", "role": "semantic", "reason": "线型严格对应 Mermaid 来源关系；反馈路由角色不改变关系线型。"}], "legendDecision": {"status": "exempt", "reason": "判断、反馈和重试均由节点形状及相邻边标签就地说明。", "inlineSemanticEvidence": [{"object": "minimum-order", "meaning": "菱形和是/否标签表达最低金额判断"}, {"object": "edge-008", "meaning": "外侧反馈 lane 表达最低金额失败回退，关系线型与标签保持 Mermaid 来源"}]}, "splitDecision": {"status": "kept-single", "reason": "支付、拣货、换货、取货、取消和售后是同一订单生命周期，拆分会损失回路与终态关系。", "singleGoal": "追踪门店自提订单生命周期", "staticBoundary": "不混入系统静态边界", "processFlowDistinction": "仅表达有向业务过程流", "readabilityEvidence": {state: {"status": "UNVERIFIED", "evidence": f".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.{state}"} for state in ("normal", "fit", "zoom")}}, "layout": {"direction": "TB", "mainAxis": canvas["mainAxis"], "layerTolerance": 220, "symmetryGroups": [], "mergeNodes": merge_nodes(edges), "branchLayerExceptions": [{"edgeIds": branch_edges, "reason": "跨阶段反馈或多步履约支路保持局部阅读顺序，避免破坏主干连续性。"}], "branchPortExceptions": [{"edgeIds": item["object"]["ids"], "reason": item["geometric_reason"]} for item in exceptions(edges) if item["type"] == "branch-port"], "sideSwitchExceptions": [{"edgeIds": item["object"]["ids"], "reason": item["geometric_reason"]} for item in exceptions(edges) if item["type"] == "side-switch"], "crossingExceptions": [{"edgeIds": item["object"]["ids"], "businessReason": item["business_reason"], "geometricReason": item["geometric_reason"], "visualEvidence": item["visual_evidence"]} for item in exceptions(edges) if item["type"] == "crossing"], "readabilityEvidence": {state: {"status": "UNVERIFIED", "evidence": f".aidlc/evidence/diagram-contract/diagram-contract-provider.json#views.{state}"} for state in ("normal", "fit", "zoom")}, "mainFlow": {"entryNodeId": "open-store", "exitNodeIds": ["cancel-release", "full-refund", "cancel-success", "reject", "overdue", "after-sale"], "nodeIds": list(nodes), "edgeIds": [edge["id"] for edge in edges]}, "branchGroups": branch_groups(edges), "primaryFlow": {"nodeIds": primary_flow()["nodeIds"], "edgeIds": primary_flow()["edgeIds"], "reason": primary_flow()["reason"]}, "loopLanes": loop_lanes, "geometryProfile": geometry_profile_actual(), "branchLayoutPlan": branch_layout_plan(edges), "changeImpactReview": {"baseline": "comparison-samples/diagram-009/2026-08-29-before-redraw/diagram-009.diagram.json", "movedNodeIds": list(nodes), "impactedEdgeIds": [edge["id"] for edge in edges], "edgeReviews": [{"edgeId": edge["id"], "status": "recomputed"} for edge in edges]}}}, "generation": {"generator": {"name": "diagram-009-mermaid-generator", "version": GENERATOR_VERSION}, "config": {"summary": CONFIG_SUMMARY, "digest": CONFIG_DIGEST}, "route_config": route_config, "source_refs": ["diagram-009.mmd"], "outputs": ["diagram-009.svg", "diagram-009.diagram.json", "diagram-009.expected.json"], "command_argv": ["python3", "diagram-009-generator.py"], "cwd": "."}}]}
 
 
 def render_svg(nodes, edges, canvas):

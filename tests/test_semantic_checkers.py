@@ -791,7 +791,9 @@ def test_diagram_009_route_contract() -> None:
             generated = json.load(handle)["diagrams"][0]
         edges = {edge["id"]: edge for edge in generated["edges"]}
         assert "edge-028" not in edges
-        assert edges["edge-027"]["points"] == [[1294.0, 3514.0], [1294.0, 3604.0]]
+        assert len(edges["edge-027"]["points"]) == 2
+        assert edges["edge-027"]["points"][0][0] == edges["edge-027"]["points"][1][0]
+        assert edges["edge-027"]["points"][1][1] > edges["edge-027"]["points"][0][1]
         assert edges["edge-027"]["label"]["text"] == "主动取消／支付超时15分钟未付"
         assert edges["edge-027"]["label"]["x"] - edges["edge-027"]["points"][0][0] > 100
         lanes = {lane["id"]: lane for lane in generated["designNotes"]["layout"]["loopLanes"]}

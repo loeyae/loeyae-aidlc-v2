@@ -11,11 +11,63 @@ export const DIAGRAM_VISUAL_STYLE = Object.freeze({
   labelClearance: 6,
 });
 
-/** Shared source-coordinate thresholds for text fit and structural group capacity. */
-export const DIAGRAM_LAYOUT_METRICS = Object.freeze({
+export type DiagramShape = "round" | "rect" | "diamond" | "ellipse" | "database" | "actor" | "note";
+export type DiagramBoundaryModel = "rectangle" | "diamond" | "ellipse" | "database" | "actor" | "note";
+
+export interface DiagramShapeProfile {
+  minWidth: number;
+  minHeight: number;
+  boundaryModel: DiagramBoundaryModel;
+  textRegion: "centered";
+  portModel: "cardinal";
+}
+
+export interface DiagramAxisSpacing {
+  referenceShape: "rect";
+  referenceWidth: number;
+  referenceHeight: number;
+  referenceLongSide: number;
+  referenceShortSide: number;
+  lrMinimumGap: number;
+  tbMinimumGap: number;
+}
+
+/** Direction-aware main-axis spacing factors: LR uses half the long side, TB uses the rectangle height. */
+export const DIAGRAM_AXIS_SPACING_PROFILE = Object.freeze({
+  referenceShape: "rect" as const,
+  lrReference: "long-side" as const,
+  lrFactor: 0.5,
+  tbReference: "height" as const,
+  tbFactor: 1,
+});
+
+/** One shared geometry profile consumed by layout analysis, generators and gates. */
+export const DIAGRAM_GEOMETRY_PROFILE = Object.freeze({
+  version: "1",
   nodeHorizontalPadding: 16,
   nodeVerticalPadding: 12,
   frameLineHeight: 24,
+  entityGap: 24,
+  portGap: 36,
+  obstacleGap: 12,
+  laneGap: 48,
+  canvasMargin: 24,
+  axisSpacing: DIAGRAM_AXIS_SPACING_PROFILE,
+});
+
+export const DIAGRAM_SHAPE_PROFILES: Readonly<Record<DiagramShape, DiagramShapeProfile>> = Object.freeze({
+  round: { minWidth: 160, minHeight: 72, boundaryModel: "rectangle", textRegion: "centered", portModel: "cardinal" },
+  rect: { minWidth: 160, minHeight: 72, boundaryModel: "rectangle", textRegion: "centered", portModel: "cardinal" },
+  diamond: { minWidth: 180, minHeight: 120, boundaryModel: "diamond", textRegion: "centered", portModel: "cardinal" },
+  ellipse: { minWidth: 160, minHeight: 96, boundaryModel: "ellipse", textRegion: "centered", portModel: "cardinal" },
+  database: { minWidth: 180, minHeight: 96, boundaryModel: "database", textRegion: "centered", portModel: "cardinal" },
+  actor: { minWidth: 160, minHeight: 120, boundaryModel: "actor", textRegion: "centered", portModel: "cardinal" },
+  note: { minWidth: 180, minHeight: 96, boundaryModel: "note", textRegion: "centered", portModel: "cardinal" },
+});
+
+/** Shared source-coordinate thresholds for text fit and structural group capacity. */
+export const DIAGRAM_LAYOUT_METRICS = Object.freeze({
+  ...DIAGRAM_GEOMETRY_PROFILE,
   groupTitleHorizontalPadding: 24,
   groupHeaderHeight: 48,
   groupHorizontalPadding: 40,
@@ -195,6 +247,78 @@ export function measureDiagramText(text: string, fontSize: number): number {
     if (/\s/.test(character)) return width + fontSize * 0.35;
     return width + (character.codePointAt(0)! >= 0x2e80 ? fontSize : fontSize * 0.56);
   }, 0);
+}
+
+export function diagramShapeProfile(shape: string | undefined): DiagramShapeProfile {
+  const profile = DIAGRAM_SHAPE_PROFILES[shape as DiagramShape];
+  if (!profile) throw new Error(`unsupported diagram shape: ${shape}`);
+  return profile;
+}
+
+export function calculateDiagramAxisSpacing(referenceRectWidth: number, referenceRectHeight: number = DIAGRAM_SHAPE_PROFILES.rect.minHeight): DiagramAxisSpacing {
+  const width = Math.ceil(Math.max(DIAGRAM_SHAPE_PROFILES.rect.minWidth, Number.isFinite(referenceRectWidth) ? referenceRectWidth : DIAGRAM_SHAPE_PROFILES.rect.minWidth));
+  const height = Math.ceil(Math.max(DIAGRAM_SHAPE_PROFILES.rect.minHeight, Number.isFinite(referenceRectHeight) ? referenceRectHeight : DIAGRAM_SHAPE_PROFILES.rect.minHeight));
+  const longSide = Math.max(width, height);
+  const shortSide = Math.min(width, height);
+  return {
+    referenceShape: DIAGRAM_AXIS_SPACING_PROFILE.referenceShape,
+    referenceWidth: width,
+    referenceHeight: height,
+    referenceLongSide: longSide,
+    referenceShortSide: shortSide,
+    lrMinimumGap: Math.ceil(longSide * DIAGRAM_AXIS_SPACING_PROFILE.lrFactor),
+    tbMinimumGap: Math.ceil(height * DIAGRAM_AXIS_SPACING_PROFILE.tbFactor),
+  };
+}
+
+export function calculateDiagramNodeSize(
+  shape: string | undefined,
+  label: string | string[],
+  fontSize: number = DIAGRAM_VISUAL_STYLE.frameFontSize,
+  overrides: { horizontalPadding?: number; verticalPadding?: number; lineHeight?: number; minWidth?: number; minHeight?: number } = {},
+): { width: number; height: number } {
+  const profile = diagramShapeProfile(shape ?? "rect");
+  const lines = diagramTextLines(label);
+  const horizontalPadding = overrides.horizontalPadding ?? DIAGRAM_GEOMETRY_PROFILE.nodeHorizontalPadding;
+  const verticalPadding = overrides.verticalPadding ?? DIAGRAM_GEOMETRY_PROFILE.nodeVerticalPadding;
+  const lineHeight = overrides.lineHeight ?? DIAGRAM_GEOMETRY_PROFILE.frameLineHeight;
+  const textWidth = Math.max(...lines.map((line) => measureDiagramText(line, fontSize)));
+  const textHeight = lines.length * lineHeight;
+  const width = Math.ceil(Math.max(profile.minWidth, overrides.minWidth ?? 0, textWidth + horizontalPadding * 2));
+  const height = Math.ceil(Math.max(profile.minHeight, overrides.minHeight ?? 0, textHeight + verticalPadding * 2));
+  return profile.boundaryModel === "ellipse" && shape === "ellipse"
+    ? { width, height: Math.max(height, Math.ceil(width * 0.6)) }
+    : { width, height };
+}
+
+type DiagramNodeBox = { shape?: string; x: number; y: number; width: number; height: number };
+
+export function diagramShapeContainsPoint(node: DiagramNodeBox, point: [number, number]): boolean {
+  const profile = diagramShapeProfile(node.shape);
+  const centerX = node.x + node.width / 2;
+  const centerY = node.y + node.height / 2;
+  if (profile.boundaryModel === "diamond") {
+    return Math.abs(point[0] - centerX) / (node.width / 2) + Math.abs(point[1] - centerY) / (node.height / 2) < 1 - 1e-6;
+  }
+  if (profile.boundaryModel === "ellipse") {
+    return ((point[0] - centerX) / (node.width / 2)) ** 2 + ((point[1] - centerY) / (node.height / 2)) ** 2 < 1 - 1e-6;
+  }
+  return point[0] > node.x + 1e-6 && point[0] < node.x + node.width - 1e-6 && point[1] > node.y + 1e-6 && point[1] < node.y + node.height - 1e-6;
+}
+
+/** Conservative boundary distance: the AABB distance never grants less clearance than the visible bounds require. */
+export function diagramEntityGap(first: DiagramNodeBox, second: DiagramNodeBox): number {
+  const horizontal = Math.max(0, first.x - (second.x + second.width), second.x - (first.x + first.width));
+  const vertical = Math.max(0, first.y - (second.y + second.height), second.y - (first.y + first.height));
+  return Math.hypot(horizontal, vertical);
+}
+
+export function diagramShapeBaseSizes(): Record<DiagramShape, { minWidth: number; minHeight: number; boundaryModel: DiagramBoundaryModel }> {
+  return Object.fromEntries(Object.entries(DIAGRAM_SHAPE_PROFILES).map(([shape, profile]) => [shape, {
+    minWidth: profile.minWidth,
+    minHeight: profile.minHeight,
+    boundaryModel: profile.boundaryModel,
+  }])) as Record<DiagramShape, { minWidth: number; minHeight: number; boundaryModel: DiagramBoundaryModel }>;
 }
 
 export function diagramTextBounds(text: string | string[], fontSize: number): { width: number; height: number } {

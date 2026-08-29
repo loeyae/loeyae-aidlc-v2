@@ -1,6 +1,6 @@
 export type LayoutDirection = "TB" | "LR";
 
-import { measureDiagramText } from "./diagram-visual-style.js";
+import { calculateDiagramAxisSpacing, calculateDiagramNodeSize, DIAGRAM_GEOMETRY_PROFILE, diagramShapeProfile, type DiagramAxisSpacing } from "./diagram-visual-style.js";
 
 export type LayoutStrategy =
   | "LR_SINGLE_ROW"
@@ -29,6 +29,30 @@ export interface PrimaryFlowInput {
   reason?: string;
 }
 
+export type BranchLayoutMode = "inline" | "local-lane";
+
+export interface BranchLayoutGroup {
+  id: string;
+  decisionNodeId: string;
+  edgeIds: string[];
+  targetNodeIds: string[];
+  branchOrder: string[];
+  layoutCandidateEdgeId: string;
+  primaryEdgeId?: string;
+  mergeNodeId?: string;
+  depth: number;
+  mode: BranchLayoutMode;
+  branchGap: number;
+}
+
+export interface BranchLayoutPlan {
+  status: "planned" | "needs-context";
+  strategy: "primary-flow-then-longest-branch";
+  frozenOrder: string[];
+  baselineGap: number;
+  groups: BranchLayoutGroup[];
+}
+
 export interface LayoutAnalysisOptions {
   feedbackEdgeIds?: string[];
   primaryFlow?: PrimaryFlowInput;
@@ -40,6 +64,8 @@ export interface LayoutAnalysisOptions {
   lineHeight?: number;
   minNodeWidth?: number;
   minNodeHeight?: number;
+  referenceRectWidth?: number;
+  referenceRectHeight?: number;
 }
 
 export interface BranchPathSummary {
@@ -77,6 +103,8 @@ export interface LayoutAnalysis {
   hasCycle: boolean;
   primaryFlow?: PrimaryFlowInput;
   primaryFlowStatus: "provided" | "missing";
+  branchLayoutPlan: BranchLayoutPlan;
+  axisSpacing: DiagramAxisSpacing;
   estimatedWidth: number;
   estimatedHeight: number;
   estimatedLinearWidth: number;
@@ -117,13 +145,13 @@ interface PathState {
 }
 
 const DEFAULT_AVAILABLE_WIDTH = 1600;
-const DEFAULT_NODE_GAP = 48;
+const DEFAULT_NODE_GAP = DIAGRAM_GEOMETRY_PROFILE.laneGap;
 const DEFAULT_FONT_SIZE = 16;
-const DEFAULT_NODE_HORIZONTAL_PADDING = 32;
-const DEFAULT_NODE_VERTICAL_PADDING = 24;
-const DEFAULT_LINE_HEIGHT = 24;
-const DEFAULT_MIN_NODE_WIDTH = 160;
-const DEFAULT_MIN_NODE_HEIGHT = 72;
+const DEFAULT_NODE_HORIZONTAL_PADDING = DIAGRAM_GEOMETRY_PROFILE.nodeHorizontalPadding;
+const DEFAULT_NODE_VERTICAL_PADDING = DIAGRAM_GEOMETRY_PROFILE.nodeVerticalPadding;
+const DEFAULT_LINE_HEIGHT = DIAGRAM_GEOMETRY_PROFILE.frameLineHeight;
+const DEFAULT_MIN_NODE_WIDTH = diagramShapeProfile("rect").minWidth;
+const DEFAULT_MIN_NODE_HEIGHT = diagramShapeProfile("rect").minHeight;
 
 function compareIds(left: string, right: string): number {
   return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
@@ -140,12 +168,13 @@ function labelLines(label: string | string[] | undefined, fallback: string): str
 }
 
 function measureNode(node: FlowNodeInput, options: Required<Pick<LayoutAnalysisOptions, "fontSize" | "nodeHorizontalPadding" | "nodeVerticalPadding" | "lineHeight" | "minNodeWidth" | "minNodeHeight">>): NodeMetric {
-  const lines = labelLines(node.label, node.id);
-  const textWidth = Math.max(...lines.map((line) => measureDiagramText(line, options.fontSize)));
-  const width = Math.ceil(Math.max(options.minNodeWidth, textWidth + options.nodeHorizontalPadding * 2));
-  const height = Math.ceil(Math.max(options.minNodeHeight, lines.length * options.lineHeight + options.nodeVerticalPadding * 2));
-  if (node.shape === "diamond") return { width: Math.max(width, 180), height: Math.max(height, 120) };
-  return { width, height };
+  return calculateDiagramNodeSize(node.shape, labelLines(node.label, node.id), options.fontSize, {
+    horizontalPadding: options.nodeHorizontalPadding,
+    verticalPadding: options.nodeVerticalPadding,
+    lineHeight: options.lineHeight,
+    minWidth: options.minNodeWidth,
+    minHeight: options.minNodeHeight,
+  });
 }
 
 function normalizeGraph(nodes: FlowNodeInput[], edges: FlowEdgeInput[], feedbackEdgeIds: string[]): NormalizedGraph {
@@ -288,6 +317,57 @@ function branchPathSummaries(
   return paths;
 }
 
+function buildBranchLayoutPlan(branchGroups: BranchGroupSummary[], primaryFlow: PrimaryFlowInput | undefined, baselineGap: number): BranchLayoutPlan {
+  if (!primaryFlow) {
+    return {
+      status: "needs-context",
+      strategy: "primary-flow-then-longest-branch",
+      frozenOrder: [],
+      baselineGap,
+      groups: [],
+    };
+  }
+  const primaryEdges = new Set(primaryFlow.edgeIds);
+  const primaryNodeOrder = new Map(primaryFlow.nodeIds.map((nodeId, index) => [nodeId, index]));
+  const orderedGroups = [...branchGroups].sort((left, right) => {
+    const leftIndex = primaryNodeOrder.get(left.decisionNodeId) ?? Number.MAX_SAFE_INTEGER;
+    const rightIndex = primaryNodeOrder.get(right.decisionNodeId) ?? Number.MAX_SAFE_INTEGER;
+    return leftIndex - rightIndex || compareIds(left.decisionNodeId, right.decisionNodeId);
+  });
+  const groups = orderedGroups.map((group): BranchLayoutGroup => {
+    const pathLength = (edgeId: string): number => Math.max(0, ...group.paths.filter((path) => path.edgeId === edgeId).map((path) => path.nodeIds.length));
+    const candidate = [...group.edgeIds].sort((left, right) => pathLength(right) - pathLength(left) || compareIds(left, right))[0];
+    const primaryEdgeId = group.edgeIds.find((edgeId) => primaryEdges.has(edgeId)) ?? candidate;
+    const branchOrder = [...group.edgeIds].sort((left, right) => {
+      const leftPrimary = primaryEdgeId === left ? 0 : 1;
+      const rightPrimary = primaryEdgeId === right ? 0 : 1;
+      return leftPrimary - rightPrimary || pathLength(right) - pathLength(left) || compareIds(left, right);
+    });
+    const targetByEdge = new Map(group.paths.map((path) => [path.edgeId, path.targetNodeId]));
+    const targetNodeIds = branchOrder.map((edgeId) => targetByEdge.get(edgeId)).filter((nodeId): nodeId is string => nodeId !== undefined);
+    return {
+      id: `branch-${group.decisionNodeId}`,
+      decisionNodeId: group.decisionNodeId,
+      edgeIds: [...group.edgeIds],
+      targetNodeIds: [...new Set(targetNodeIds)],
+      branchOrder,
+      layoutCandidateEdgeId: candidate,
+      primaryEdgeId,
+      ...(group.mergeNodeId ? { mergeNodeId: group.mergeNodeId } : {}),
+      depth: group.branchDepth,
+      mode: group.branchDepth > 0 || group.paths.some((path) => path.nodeIds.length > 1) ? "local-lane" : "inline",
+      branchGap: baselineGap,
+    };
+  });
+  return {
+    status: "planned",
+    strategy: "primary-flow-then-longest-branch",
+    frozenOrder: ["primary-flow", ...groups.map((group) => group.id)],
+    baselineGap,
+    groups,
+  };
+}
+
 function longestPathMetrics(graph: NormalizedGraph, metrics: Map<string, NodeMetric>, nodeGap: number): { width: number; height: number } {
   const { order, hasCycle } = topologicalOrder(graph);
   if (hasCycle) {
@@ -339,6 +419,8 @@ export function analyzeFlowGraph(nodes: FlowNodeInput[], edges: FlowEdgeInput[],
       ...(mergeCandidates.length === 1 ? { mergeNodeId: mergeCandidates[0] } : {}),
     };
   });
+  const nodeGap = options.nodeGap ?? DEFAULT_NODE_GAP;
+  const branchLayoutPlan = buildBranchLayoutPlan(branchGroups, primaryFlow, Math.max(nodeGap, DIAGRAM_GEOMETRY_PROFILE.entityGap));
   const metricOptions = {
     fontSize: options.fontSize ?? DEFAULT_FONT_SIZE,
     nodeHorizontalPadding: options.nodeHorizontalPadding ?? DEFAULT_NODE_HORIZONTAL_PADDING,
@@ -348,7 +430,15 @@ export function analyzeFlowGraph(nodes: FlowNodeInput[], edges: FlowEdgeInput[],
     minNodeHeight: options.minNodeHeight ?? DEFAULT_MIN_NODE_HEIGHT,
   };
   const metrics = new Map(graph.nodes.map((node) => [node.id, measureNode(node, metricOptions)]));
-  const nodeGap = options.nodeGap ?? DEFAULT_NODE_GAP;
+  const referenceRectWidth = options.referenceRectWidth ?? Math.max(
+    metricOptions.minNodeWidth,
+    ...graph.nodes.filter((node) => !node.shape || node.shape === "rect").map((node) => metrics.get(node.id)!.width),
+  );
+  const referenceRectHeight = options.referenceRectHeight ?? Math.max(
+    metricOptions.minNodeHeight,
+    ...graph.nodes.filter((node) => !node.shape || node.shape === "rect").map((node) => metrics.get(node.id)!.height),
+  );
+  const axisSpacing = calculateDiagramAxisSpacing(referenceRectWidth, referenceRectHeight);
   const linear = longestPathMetrics(graph, metrics, nodeGap);
   const maxNodeWidth = Math.max(...[...metrics.values()].map((metric) => metric.width));
   const maxBranchWidth = Math.max(0, ...branchGroups.map((group) => group.paths.reduce((width, path) => width + (metrics.get(path.targetNodeId)?.width ?? maxNodeWidth), 0) + Math.max(0, group.paths.length - 1) * nodeGap));
@@ -374,6 +464,8 @@ export function analyzeFlowGraph(nodes: FlowNodeInput[], edges: FlowEdgeInput[],
     hasCycle,
     ...(primaryFlow ? { primaryFlow } : {}),
     primaryFlowStatus: primaryFlow ? "provided" : "missing",
+    branchLayoutPlan,
+    axisSpacing,
     estimatedWidth,
     estimatedHeight,
     estimatedLinearWidth: Math.ceil(linear.width),

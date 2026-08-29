@@ -119,7 +119,7 @@ Independent Capability — not an AIDLC phase.
 
 ## 过程图强制验收补充
 
-对于 `flowchart`、`pipeline`、`state` 等过程图，生成 `.diagram.json` 时必须同步生成 `designNotes.layout.mainFlow` 和 `designNotes.layout.loopLanes`。先按主阅读方向将连续主流程排在主轴上，再将同层实体在垂直主轴方向均匀分布；单一正向出边走主轴前进方向，多出边先占用垂直主轴的对称两侧，其余只在前向 180° 局域均分。源、目标位于主轴同侧的关系必须优先保持同侧通道，禁止无理由跨轴折返。主流程必须覆盖所有业务节点/流程边并可从入口追踪到出口；出口节点只允许已声明、带标签并实际进入独立 lane 的反馈/重试出边，不能因合法用户后续操作伪造无出边终态；真实失败、重试、反馈边必须进入声明的左/右独立 lane；只有来源已有标签时才显示标签，禁止补写业务标签。只有来源语义明确为判断的节点必须是 diamond，多个出口不能单独触发形状转换。连接器必须保留 `from/to/port` DOM 属性和完整路径，箭头尖端使用 `10 × 10` 独立 `data-edge-arrow` overlay；全部对象同时遵守统一单色视觉输出。节点位置、尺寸、端口、标签或分组变化后，先枚举全部 incident edges 与受影响通道，再重算主轴/净空并按直达 → 一折 Manhattan → 两折 Manhattan → 必要外侧 lane 重新路由；不得保留旧折线或只局部缩短。目标端倒数第二个有效点必须在实体外部，最后一段沿 `toPort` 法向进入。既有图布局迁移可提供 `changeImpactReview`；新图不得伪造 baseline。
+对于 `flowchart`、`pipeline`、`state` 等过程图，生成 `.diagram.json` 时必须同步生成 `designNotes.layout.mainFlow` 和 `designNotes.layout.loopLanes`。先按主阅读方向将连续主流程排在主轴上，再按参考矩形宽高计算长边/高度方向性主轴净空：`LR` 至少为 `0.5 × referenceLongSide`，`TB` 至少为 `1.0 × referenceHeight`；这不是把全图实体强制等距。同一分支组先冻结唯一 `primaryEdgeId`，主流程出线从主线方向的 `bottom/right` 端点出，其他分支流程使用 `left/right` 或 `top/bottom` 两侧端点；无例外时 primary edge 的源/目标中心必须严格同轴，并在移动节点后重算全部 incident edges。源、目标位于主轴同侧的关系必须优先保持同侧通道，禁止无理由跨轴折返。主流程必须覆盖所有业务节点/流程边并可从入口追踪到出口；出口节点只允许已声明、带标签并实际进入独立 lane 的反馈/重试出边，不能因合法用户后续操作伪造无出边终态；真实失败、重试、反馈边必须进入声明的左/右独立 lane；只有来源已有标签时才显示标签，禁止补写业务标签。只有来源语义明确为判断的节点必须是 diamond，多个出口不能单独触发形状转换。连接器必须保留 `from/to/port` DOM 属性和完整路径，箭头尖端使用 `10 × 10` 独立 `data-edge-arrow` overlay；全部对象同时遵守统一单色视觉输出。节点位置、尺寸、端口、标签或分组变化后，先枚举全部 incident edges 与受影响通道，再重算主轴/净空并按直达 → 一折 Manhattan → 两折 Manhattan → 必要外侧 lane 重新路由；不得保留旧折线或只局部缩短。目标端倒数第二个有效点必须在实体外部，最后一段沿 `toPort` 法向进入。既有图布局迁移可提供 `changeImpactReview`；新图不得伪造 baseline。
 
 交叉、回路、端口例外和分支例外必须逐项验证 `object`、`type`、`business_reason`、`geometric_reason`、`scope` 和真实 `visual_evidence`；空理由、未命中实际偏离、适用范围不明或只有截图字段名都应阻断或保持 `UNVERIFIED`。
 
@@ -171,3 +171,12 @@ expected contract 使用 `primary_flow`、结构化 `branch_groups`，actual `.d
 标签先放在分歧点附近或所属最长可读路径段的中部，法向偏移只用于最小净空。标签离开连接器可辨识邻域时，先修 merge、局部 corridor 或节点间距，禁止通过任意增大 side offset 解决。
 
 无关节点的边界不是可借用的走线通道。连线只可在自身 source/target 的端口单点接触节点；一旦与无关节点矩形、圆角矩形或椭圆边框存在非零长度共线段，必须将 corridor 外移到最小净空位置。
+
+
+## 共享几何 profile 与布局计划执行要求
+
+执行图表设计时，先从共享 `DIAGRAM_GEOMETRY_PROFILE` 和 `DIAGRAM_SHAPE_PROFILES` 计算形状基础尺寸、动态文本尺寸、方向性 `axisSpacing` 及 `entityGap`、`portGap`、`obstacleGap`、`laneGap`，再生成节点、端口、路径、标签和画布；不得为单张图另设尺寸常量或坐标特判。actual `designNotes.layout.geometryProfile` 与 expected `route_contract.geometry_profile` 必须同步生成并逐字段校验。
+
+过程图先冻结来源确认的 `primaryFlow`。没有确认主干时返回 `NEEDS_CONTEXT`；允许使用最长分支作为布局候选，但不得把它当作业务事实。随后生成确定性的 `branchLayoutPlan`，按主流程优先、路径长度、稳定 edge ID 排序；分支组必须整组外移或进入局部 lane，节点移动后重算全部 incident edges、端口、标签和障碍净空。真实反馈/重试关系才可进入 `loopLanes`，同侧 lane 按实际中心偏移满足共享 `laneGap`。
+
+验证闭环必须覆盖 expected、sidecar、SVG、静态 checker 和 Provider：静态层检查形状尺寸、实体/端口/障碍/lane gap 及 branch plan 对照；Provider 的 `normal`、`fit`、`zoom` 分别检查真实 DOM 边界和文本 bbox。未执行 Chrome Provider 的三视图时，最终状态不得写为完整 `PASS`。

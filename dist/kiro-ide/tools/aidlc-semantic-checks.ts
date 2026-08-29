@@ -4,7 +4,7 @@ import { spawnSync } from "child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, resolve } from "path";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
-import { DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
+import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
 import {
   ExpectedContract,
   expectedContractPath,
@@ -385,22 +385,13 @@ function diagramContract(): Record<string, unknown> {
     if (values.every((value) => value === undefined)) return null;
     fail(`${field} must define x, y, width, and height together`);
   };
-  const pointInsideNodeShape = (node: Record<string, any>, point: [number, number]): boolean => {
-    const centerX = node.x + node.width / 2;
-    const centerY = node.y + node.height / 2;
-    if (node.shape === "diamond") {
-      return Math.abs(point[0] - centerX) / (node.width / 2) + Math.abs(point[1] - centerY) / (node.height / 2) < 1 - 1e-6;
-    }
-    if (node.shape === "ellipse") {
-      return ((point[0] - centerX) / (node.width / 2)) ** 2 + ((point[1] - centerY) / (node.height / 2)) ** 2 < 1 - 1e-6;
-    }
-    return point[0] > node.x + 1e-6 && point[0] < node.x + node.width - 1e-6 && point[1] > node.y + 1e-6 && point[1] < node.y + node.height - 1e-6;
-  };
+  const pointInsideNodeShape = (node: Record<string, any>, point: [number, number]): boolean => diagramShapeContainsPoint(node as { shape?: string; x: number; y: number; width: number; height: number }, point);
   const approachesTargetFromOutside = (points: [number, number][], node: Record<string, any>): boolean => {
     const segment = nonZeroSegment(points, false);
     return Boolean(segment && !pointInsideNodeShape(node, segment[1]));
   };
   const rectanglesOverlap = (first: Rectangle, second: Rectangle): boolean => first.left < second.right && first.right > second.left && first.top < second.bottom && first.bottom > second.top;
+  const expandedRectangle = (rectangle: Rectangle, gap: number): Rectangle => ({ left: rectangle.left - gap, top: rectangle.top - gap, right: rectangle.right + gap, bottom: rectangle.bottom + gap });
   const segmentIntersectsRectangle = (first: [number, number], second: [number, number], rectangle: Rectangle): boolean => {
     const dx = second[0] - first[0];
     const dy = second[1] - first[1];
@@ -476,6 +467,45 @@ function diagramContract(): Record<string, unknown> {
       pairs.set(key, [first, second]);
     }
     return pairs;
+  };
+
+  const parseGeometryProfile = (layout: Record<string, any>, id: string): { version: string; entityGap: number; portGap: number; obstacleGap: number; laneGap: number; axisSpacing?: { referenceShape: "rect"; referenceWidth: number; referenceHeight: number; referenceLongSide: number; referenceShortSide: number; lrMinimumGap: number; tbMinimumGap: number } } | undefined => {
+    const raw = layout.geometryProfile;
+    if (raw === undefined) return undefined;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail(`GEOMETRY_PROFILE: diagram ${id}.layout.geometryProfile must be an object`);
+    if (raw.version !== DIAGRAM_GEOMETRY_PROFILE.version) fail(`GEOMETRY_PROFILE: diagram ${id} geometry profile version must be ${DIAGRAM_GEOMETRY_PROFILE.version}`);
+    const values = ["entityGap", "portGap", "obstacleGap", "laneGap"] as const;
+    for (const field of values) {
+      const actual = requireFinite(raw[field], `diagram ${id}.layout.geometryProfile.${field}`);
+      if (actual !== DIAGRAM_GEOMETRY_PROFILE[field]) fail(`GEOMETRY_PROFILE: diagram ${id}.${field} must use shared value ${DIAGRAM_GEOMETRY_PROFILE[field]}`);
+    }
+    const actualShapes = raw.shapeBaseSizes;
+    if (!actualShapes || typeof actualShapes !== "object" || Array.isArray(actualShapes)) fail(`GEOMETRY_PROFILE: diagram ${id}.layout.geometryProfile.shapeBaseSizes is required`);
+    const sharedShapes = diagramShapeBaseSizes();
+    for (const [shape, expected] of Object.entries(sharedShapes)) {
+      const actual = actualShapes[shape];
+      if (!actual || typeof actual !== "object" || Array.isArray(actual)) fail(`GEOMETRY_PROFILE: diagram ${id} shape profile ${shape} is missing`);
+      if (actual.minWidth !== expected.minWidth || actual.minHeight !== expected.minHeight || actual.boundaryModel !== expected.boundaryModel) fail(`GEOMETRY_PROFILE: diagram ${id} shape profile ${shape} differs from shared profile`);
+    }
+    let axisSpacing: { referenceShape: "rect"; referenceWidth: number; referenceHeight: number; referenceLongSide: number; referenceShortSide: number; lrMinimumGap: number; tbMinimumGap: number } | undefined;
+    if (raw.axisSpacing !== undefined) {
+      const axis = raw.axisSpacing;
+      if (!axis || typeof axis !== "object" || Array.isArray(axis)) fail(`GEOMETRY_PROFILE: diagram ${id}.axisSpacing must be an object`);
+      if (axis.referenceShape !== DIAGRAM_AXIS_SPACING_PROFILE.referenceShape) fail(`GEOMETRY_PROFILE: diagram ${id}.axisSpacing.referenceShape must be ${DIAGRAM_AXIS_SPACING_PROFILE.referenceShape}`);
+      const referenceWidth = requireFinite(axis.referenceWidth, `diagram ${id}.layout.geometryProfile.axisSpacing.referenceWidth`);
+      const referenceHeight = requireFinite(axis.referenceHeight, `diagram ${id}.layout.geometryProfile.axisSpacing.referenceHeight`);
+      const expectedAxis = calculateDiagramAxisSpacing(referenceWidth, referenceHeight);
+      if (axis.referenceLongSide !== expectedAxis.referenceLongSide || axis.referenceShortSide !== expectedAxis.referenceShortSide || axis.lrMinimumGap !== expectedAxis.lrMinimumGap || axis.tbMinimumGap !== expectedAxis.tbMinimumGap) fail(`GEOMETRY_PROFILE: diagram ${id}.axisSpacing must derive LR gap from the reference rectangle long side and TB gap from its height`);
+      axisSpacing = { referenceShape: "rect", referenceWidth, referenceHeight, referenceLongSide: Number(axis.referenceLongSide), referenceShortSide: Number(axis.referenceShortSide), lrMinimumGap: Number(axis.lrMinimumGap), tbMinimumGap: Number(axis.tbMinimumGap) };
+    }
+    return {
+      version: String(raw.version),
+      entityGap: Number(raw.entityGap),
+      portGap: Number(raw.portGap),
+      obstacleGap: Number(raw.obstacleGap),
+      laneGap: Number(raw.laneGap),
+      ...(axisSpacing ? { axisSpacing } : {}),
+    };
   };
 
   const projectReference = (value: string, field: string): string => {
@@ -678,6 +708,7 @@ function diagramContract(): Record<string, unknown> {
         layoutExceptionIds(layout, "sideSwitchExceptions");
         crossingExceptionPairs(layout);
       }
+      const geometryProfile = processTypes.has(diagram.diagramType) ? parseGeometryProfile(layout, id) : undefined;
       const layoutDirection = processTypes.has(diagram.diagramType) ? String(layout.direction) : "";
       const layoutMainAxis = processTypes.has(diagram.diagramType) ? Number(layout.mainAxis) : 0;
       const layoutTolerance = processTypes.has(diagram.diagramType) ? Number(layout.layerTolerance === undefined ? 24 : layout.layerTolerance) : 24;
@@ -700,6 +731,10 @@ function diagramContract(): Record<string, unknown> {
         if (nodeFontSize !== DIAGRAM_VISUAL_STYLE.frameFontSize) fail(`FONT_STYLE: diagram ${id} node ${nodeId}.fontSize must be ${DIAGRAM_VISUAL_STYLE.frameFontSize}`);
         const textWidth = Math.max(...labelLines.map((line: string) => measureDiagramText(line, nodeFontSize)));
         const textHeight = labelLines.length * DIAGRAM_LAYOUT_METRICS.frameLineHeight;
+        if (geometryProfile) {
+          const requiredSize = calculateDiagramNodeSize(node.shape, labelLines, nodeFontSize);
+          if (node.width < requiredSize.width || node.height < requiredSize.height) fail(`SHAPE_BASE_SIZE: diagram ${id} node ${nodeId} is ${node.width}x${node.height}, requires at least ${requiredSize.width}x${requiredSize.height} for ${node.shape}`);
+        }
         if (textWidth + DIAGRAM_LAYOUT_METRICS.nodeHorizontalPadding * 2 > node.width || textHeight + DIAGRAM_LAYOUT_METRICS.nodeVerticalPadding * 2 > node.height) fail(`LABEL_OVERFLOW: diagram ${id} node ${nodeId} label does not fit its node`);
         if (node.shape === "diamond" && textWidth / node.width + textHeight / node.height > 0.70) fail(`LABEL_OVERFLOW: diagram ${id} decision ${nodeId} label exceeds the diamond readable area`);
       }
@@ -715,6 +750,12 @@ function diagramContract(): Record<string, unknown> {
       for (let first = 0; first < nodeEntries.length; first++) {
         for (let second = first + 1; second < nodeEntries.length; second++) {
           if (rectanglesOverlap(nodeEntries[first][1], nodeEntries[second][1])) fail(`diagram ${id} nodes ${nodeEntries[first][0]} and ${nodeEntries[second][0]} have geometric collision`);
+          if (geometryProfile) {
+            const firstNode = nodes.get(nodeEntries[first][0])!;
+            const secondNode = nodes.get(nodeEntries[second][0])!;
+            const gap = diagramEntityGap(firstNode as { shape?: string; x: number; y: number; width: number; height: number }, secondNode as { shape?: string; x: number; y: number; width: number; height: number });
+            if (gap < geometryProfile.entityGap) fail(`ENTITY_GAP: diagram ${id} nodes ${nodeEntries[first][0]} and ${nodeEntries[second][0]} have ${gap} units of boundary gap, expected ${geometryProfile.entityGap}`);
+          }
         }
       }
 
@@ -761,6 +802,7 @@ function diagramContract(): Record<string, unknown> {
             const first = edgePoints[pointIndex - 1];
             const second = edgePoints[pointIndex];
             if (nodeId !== edge.from && nodeId !== edge.to && nodes.get(nodeId)?.shape !== "diamond" && segmentOverlapsRectangleBoundary(first, second, rectangle)) fail(`EDGE_NODE_BOUNDARY_OVERLAP: diagram ${id} edge ${edgeId} overlaps unrelated node boundary ${nodeId}`);
+            if (nodeId !== edge.from && nodeId !== edge.to && geometryProfile && segmentIntersectsRectangle(first, second, expandedRectangle(rectangle, geometryProfile.obstacleGap))) fail(`OBSTACLE_GAP: diagram ${id} edge ${edgeId} passes within ${geometryProfile.obstacleGap} units of unrelated node ${nodeId}`);
             if (!segmentIntersectsRectangle(first, second, rectangle)) continue;
             if (nodeId === edge.from) fail(`SOURCE_REENTRY: diagram ${id} edge ${edgeId} re-enters its source node ${nodeId}`);
             if (nodeId === edge.to) fail(`TARGET_REENTRY: diagram ${id} edge ${edgeId} enters the interior of target node ${nodeId}`);
@@ -816,6 +858,41 @@ function diagramContract(): Record<string, unknown> {
             });
             for (const label of path.requiredLabels) if (!labels.includes(label)) fail(`READING_PATH_TRACE: diagram ${id} path ${path.id} is missing required label ${label}`);
           }
+        }
+        const expectedGeometry = expected.routeContract.geometryProfile;
+        if (expectedGeometry) {
+          if (!geometryProfile) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} geometryProfile is missing from actual layout`);
+          for (const field of ["version", "entityGap", "portGap", "obstacleGap", "laneGap"] as const) {
+            if (String((layout.geometryProfile as Record<string, any>)[field]) !== String(expectedGeometry[field])) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} geometryProfile.${field} differs from independent expected contract`);
+          }
+          for (const [shape, expectedShape] of Object.entries(expectedGeometry.shapeBaseSizes)) {
+            const actualShape = (layout.geometryProfile as Record<string, any>).shapeBaseSizes?.[shape];
+            if (!actualShape || actualShape.minWidth !== expectedShape.minWidth || actualShape.minHeight !== expectedShape.minHeight || actualShape.boundaryModel !== expectedShape.boundaryModel) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} shape profile ${shape} differs from independent expected contract`);
+          }
+          if (expectedGeometry.axisSpacing) {
+            const actualAxis = (layout.geometryProfile as Record<string, any>).axisSpacing;
+            if (!actualAxis || actualAxis.referenceShape !== expectedGeometry.axisSpacing.referenceShape || Number(actualAxis.referenceWidth) !== expectedGeometry.axisSpacing.referenceWidth || Number(actualAxis.referenceHeight) !== expectedGeometry.axisSpacing.referenceHeight || Number(actualAxis.referenceLongSide) !== expectedGeometry.axisSpacing.referenceLongSide || Number(actualAxis.referenceShortSide) !== expectedGeometry.axisSpacing.referenceShortSide || Number(actualAxis.lrMinimumGap) !== expectedGeometry.axisSpacing.lrMinimumGap || Number(actualAxis.tbMinimumGap) !== expectedGeometry.axisSpacing.tbMinimumGap) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} axisSpacing differs from independent expected contract`);
+          } else if ((layout.geometryProfile as Record<string, any>).axisSpacing !== undefined) {
+            fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} actual layout declares axisSpacing without an independent expected profile`);
+          }
+        } else if (geometryProfile) {
+          fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} actual layout declares geometryProfile without an independent expected profile`);
+        }
+        const expectedBranchPlan = expected.routeContract.branchLayoutPlan;
+        if (expectedBranchPlan) {
+          const actualBranchPlan = layout.branchLayoutPlan;
+          if (!actualBranchPlan || typeof actualBranchPlan !== "object" || Array.isArray(actualBranchPlan)) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branchLayoutPlan is missing from actual layout`);
+          if (String(actualBranchPlan.strategy) !== expectedBranchPlan.strategy || Number(actualBranchPlan.baselineGap) !== expectedBranchPlan.baselineGap || JSON.stringify(actualBranchPlan.frozenOrder) !== JSON.stringify(expectedBranchPlan.frozenOrder)) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branchLayoutPlan header differs from independent expected contract`);
+          const actualGroups = Array.isArray(actualBranchPlan.groups) ? actualBranchPlan.groups as Record<string, any>[] : [];
+          for (const expectedGroup of expectedBranchPlan.groups) {
+            const actualGroup = actualGroups.find((group) => String(group.id) === expectedGroup.id);
+            if (!actualGroup) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branchLayoutPlan group ${expectedGroup.id} is missing`);
+            compareIds((actualGroup.edgeIds || []).map(String), expectedGroup.edgeIds, `branchLayoutPlan group ${expectedGroup.id} edges`, id);
+            compareIds((actualGroup.targetNodeIds || []).map(String), expectedGroup.targetIds, `branchLayoutPlan group ${expectedGroup.id} targets`, id);
+            if (JSON.stringify(actualGroup.branchOrder) !== JSON.stringify(expectedGroup.branchOrder) || String(actualGroup.layoutCandidateEdgeId) !== expectedGroup.layoutCandidateEdgeId || String(actualGroup.primaryEdgeId || "") !== String(expectedGroup.primaryEdgeId || "") || Number(actualGroup.depth) !== expectedGroup.depth || String(actualGroup.mode) !== expectedGroup.mode || Number(actualGroup.branchGap) !== expectedGroup.branchGap) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branchLayoutPlan group ${expectedGroup.id} differs from independent expected contract`);
+          }
+        } else if (layout.branchLayoutPlan !== undefined) {
+          fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} actual layout declares branchLayoutPlan without an independent expected plan`);
         }
         const routeDifferences = {
           endpoint: [] as string[],
@@ -954,6 +1031,7 @@ function diagramContract(): Record<string, unknown> {
       const mainFlowNodeIds = new Set<string>();
       const mainFlowEdgeIds = new Set<string>();
       const primaryFlowEdgeIds = new Set<string>();
+      const branchLayoutPrimaryEdgeIds = new Set<string>();
       const loopEdgeIds = new Set<string>();
       if (processTypes.has(diagram.diagramType)) {
         const mainFlow = layout.mainFlow;
@@ -970,6 +1048,23 @@ function diagramContract(): Record<string, unknown> {
         const actualPrimaryFlow = layout.primaryFlow;
         if (actualPrimaryFlow && typeof actualPrimaryFlow === "object" && !Array.isArray(actualPrimaryFlow) && Array.isArray(actualPrimaryFlow.edgeIds)) {
           for (const edgeId of actualPrimaryFlow.edgeIds) primaryFlowEdgeIds.add(requireString(edgeId, `diagram ${id}.layout.primaryFlow.edgeId`));
+        }
+        const actualBranchLayoutPlan = layout.branchLayoutPlan;
+        if (actualBranchLayoutPlan && typeof actualBranchLayoutPlan === "object" && !Array.isArray(actualBranchLayoutPlan) && Array.isArray(actualBranchLayoutPlan.groups)) {
+          for (const group of actualBranchLayoutPlan.groups) {
+            if (!group || typeof group !== "object" || Array.isArray(group) || group.primaryEdgeId === undefined) continue;
+            branchLayoutPrimaryEdgeIds.add(requireString(group.primaryEdgeId, `diagram ${id}.layout.branchLayoutPlan.primaryEdgeId`));
+          }
+        }
+        if (geometryProfile?.axisSpacing && actualPrimaryFlow && typeof actualPrimaryFlow === "object" && !Array.isArray(actualPrimaryFlow) && Array.isArray(actualPrimaryFlow.nodeIds)) {
+          const minimumGap = layoutDirection === "TB" ? geometryProfile.axisSpacing.tbMinimumGap : geometryProfile.axisSpacing.lrMinimumGap;
+          const primaryNodes = actualPrimaryFlow.nodeIds.map((nodeId: unknown) => nodes.get(requireString(nodeId, `diagram ${id}.layout.primaryFlow.nodeId`))).filter((node: unknown): node is Record<string, any> => Boolean(node));
+          for (let index = 1; index < primaryNodes.length; index++) {
+            const previous = primaryNodes[index - 1];
+            const current = primaryNodes[index];
+            const gap = layoutDirection === "TB" ? current.y - (previous.y + previous.height) : current.x - (previous.x + previous.width);
+            if (gap < minimumGap) fail(`LAYOUT_AXIS_GAP: diagram ${id} primary flow ${previous.id}->${current.id} has ${gap} units on the ${layoutDirection} main axis, expected at least ${minimumGap}`);
+          }
         }
         const exitIds = exitNodeIds.map((nodeId: unknown) => requireString(nodeId, `diagram ${id}.layout.mainFlow.exitNodeId`));
         if (mainFlowNodeIds.size !== flowNodeIds.length || mainFlowEdgeIds.size !== flowEdgeIds.length || new Set(entryNodeIds).size !== entryNodeIds.length || new Set(exitIds).size !== exitIds.length) fail(`diagram ${id}.layout.mainFlow contains duplicate IDs`);
@@ -1018,6 +1113,14 @@ function diagramContract(): Record<string, unknown> {
             if (corridorPoints.length === 0 || !corridorPoints.some(isOnDeclaredSide)) fail(`LOOP_LANE: diagram ${id} loop edge ${edgeId} does not use its declared independent lane`);
           }
         }
+        if (geometryProfile) {
+          const laneEntries = (loopLanes as Record<string, any>[]).map((lane) => ({ id: String(lane.id), side: String(lane.side), offset: Number(lane.laneOffset) }));
+          for (let first = 0; first < laneEntries.length; first++) {
+            for (let second = first + 1; second < laneEntries.length; second++) {
+              if (laneEntries[first].side === laneEntries[second].side && Math.abs(laneEntries[first].offset - laneEntries[second].offset) < geometryProfile.laneGap) fail(`LOOP_LANE_GAP: diagram ${id} lanes ${laneEntries[first].id} and ${laneEntries[second].id} are less than ${geometryProfile.laneGap} units apart`);
+            }
+          }
+        }
         for (const exitId of exitIds) {
           const untrackedOutgoing = edgeEntries.filter(([edgeId, edge]) => edge.from === exitId && !loopEdgeIds.has(edgeId));
           if (untrackedOutgoing.length > 0) fail(`MAIN_FLOW_TRACE: diagram ${id} mainFlow exit ${exitId} has outgoing edge(s) outside declared loopLanes: ${untrackedOutgoing.map(([edgeId]) => edgeId).join(", ")}`);
@@ -1064,13 +1167,29 @@ function diagramContract(): Record<string, unknown> {
         });
         if (Math.max(...layers) - Math.min(...layers) > layoutTolerance && !branchEdges.every(([edgeId]) => branchLayerExceptions.has(edgeId))) fail(`BRANCH_LAYER: diagram ${id} decision ${nodeId} branch targets are not on the same business layer`);
         const localMergeSplit = branchEdges.length === 2 && branchEdges[0][1].to === branchEdges[1][1].to && declaredMergeNodes.has(branchEdges[0][1].to);
-        if (branchEdges.length === 2 && !branchEdges.every(([edgeId]) => branchPortExceptions.has(edgeId))) {
-          const primaryEdges = branchEdges.filter(([edgeId]) => primaryFlowEdgeIds.has(edgeId));
-          if (layoutDirection === "TB" && (primaryEdges.length === 1 || localMergeSplit)) {
-            const downward = localMergeSplit ? branchEdges.filter(([, edge]) => edge.fromPort === "bottom") : primaryEdges;
+        if (!branchEdges.every(([edgeId]) => branchPortExceptions.has(edgeId))) {
+          const primaryEdges = branchEdges.filter(([edgeId]) => primaryFlowEdgeIds.has(edgeId) || branchLayoutPrimaryEdgeIds.has(edgeId));
+          if (primaryEdges.length === 1) {
+            const forwardPort = layoutDirection === "TB" ? "bottom" : "right";
+            const sidePorts = layoutDirection === "TB" ? new Set(["left", "right"]) : new Set(["top", "bottom"]);
+            const primaryEdgeId = primaryEdges[0][0];
+            const primaryEdge = primaryEdges[0][1];
+            if (geometryProfile?.axisSpacing && !loopEdgeIds.has(primaryEdgeId)) {
+              const source = nodes.get(primaryEdge.from)!;
+              const target = nodes.get(primaryEdge.to)!;
+              const sourceCross = layoutDirection === "TB" ? source.x + source.width / 2 : source.y + source.height / 2;
+              const targetCross = layoutDirection === "TB" ? target.x + target.width / 2 : target.y + target.height / 2;
+              if (Math.abs(sourceCross - targetCross) > 1) fail(`BRANCH_AXIS_ALIGNMENT: diagram ${id} primary edge ${primaryEdgeId} must keep source and target centers on the ${layoutDirection} main axis`);
+            }
+            const lateralEdges = branchEdges.filter(([edgeId]) => edgeId !== primaryEdgeId);
+            const lateralPorts = lateralEdges.map(([, edge]) => edge.fromPort);
+            const hasBothSides = lateralPorts.length < 2 || new Set(lateralPorts).size >= 2;
+            if (primaryEdges[0][1].fromPort !== forwardPort || lateralPorts.some((port) => !sidePorts.has(port)) || !hasBothSides) fail(`BRANCH_PORT: diagram ${id} decision ${nodeId} must use ${forwardPort} for its primary edge and the two perpendicular side ports for other branches`);
+          } else if (branchEdges.length === 2 && localMergeSplit) {
+            const downward = branchEdges.filter(([, edge]) => edge.fromPort === "bottom");
             const downwardIds = new Set(downward.map(([edgeId]) => edgeId));
             const lateralEdges = branchEdges.filter(([edgeId]) => !downwardIds.has(edgeId));
-            if (downward.length !== 1 || downward[0][1].fromPort !== "bottom" || lateralEdges.length !== 1 || !["left", "right"].includes(lateralEdges[0][1].fromPort)) fail(`BRANCH_PORT: diagram ${id} decision ${nodeId} must use bottom for its primary or direct merge exit and a side port for its local branch`);
+            if (layoutDirection === "TB" && (downward.length !== 1 || downward[0][1].fromPort !== "bottom" || lateralEdges.length !== 1 || !["left", "right"].includes(lateralEdges[0][1].fromPort))) fail(`BRANCH_PORT: diagram ${id} decision ${nodeId} must use bottom for its direct merge exit and a side port for its local branch`);
           } else {
             const expectedSources = layoutDirection === "TB" ? new Set(["right", "left"]) : new Set(["top", "bottom"]);
             if (new Set(branchEdges.map(([, edge]) => edge.fromPort)).size !== 2 || !branchEdges.every(([, edge]) => expectedSources.has(edge.fromPort))) fail(`BRANCH_PORT: diagram ${id} decision ${nodeId} branches must leave through the declared side ports`);
@@ -1158,8 +1277,8 @@ function diagramContract(): Record<string, unknown> {
             actualCrossingPairs.add(pairKey);
             if (!crossingExceptions.has(pairKey)) fail(`EDGE_CROSSING: diagram ${id} edges ${firstId} and ${secondId} intersect outside a declared shared endpoint`);
           }
-          if (firstEdge.from === secondEdge.from && firstEdge.fromPort === secondEdge.fromPort && Math.hypot(firstPoints[0][0] - secondPoints[0][0], firstPoints[0][1] - secondPoints[0][1]) < 24) fail(`INSUFFICIENT_GAP: diagram ${id} edges ${firstId} and ${secondId} share a port with less than 24 units of separation`);
-          if (firstEdge.to === secondEdge.to && firstEdge.toPort === secondEdge.toPort && Math.hypot(firstPoints[firstPoints.length - 1][0] - secondPoints[secondPoints.length - 1][0], firstPoints[firstPoints.length - 1][1] - secondPoints[secondPoints.length - 1][1]) < 24) fail(`INSUFFICIENT_GAP: diagram ${id} edges ${firstId} and ${secondId} share a target port with less than 24 units of separation`);
+          if (firstEdge.from === secondEdge.from && firstEdge.fromPort === secondEdge.fromPort && Math.hypot(firstPoints[0][0] - secondPoints[0][0], firstPoints[0][1] - secondPoints[0][1]) < (geometryProfile?.portGap ?? 24)) fail(`INSUFFICIENT_GAP: diagram ${id} edges ${firstId} and ${secondId} share a port with less than ${geometryProfile?.portGap ?? 24} units of separation`);
+          if (firstEdge.to === secondEdge.to && firstEdge.toPort === secondEdge.toPort && Math.hypot(firstPoints[firstPoints.length - 1][0] - secondPoints[secondPoints.length - 1][0], firstPoints[firstPoints.length - 1][1] - secondPoints[secondPoints.length - 1][1]) < (geometryProfile?.portGap ?? 24)) fail(`INSUFFICIENT_GAP: diagram ${id} edges ${firstId} and ${secondId} share a target port with less than ${geometryProfile?.portGap ?? 24} units of separation`);
         }
       }
       for (const [pairKey, [firstId, secondId]] of crossingExceptions) {
@@ -1168,7 +1287,11 @@ function diagramContract(): Record<string, unknown> {
       const labelEntries = [...labelRectangles.entries()];
       for (const [labelId, label] of labelEntries) {
         const edge = edges.get(labelId)!;
-        for (const [nodeId, rectangle] of nodeRectangles) if (nodeId !== edge.from && nodeId !== edge.to && rectanglesOverlap(label, rectangle)) fail(`LABEL_COLLISION: diagram ${id} label ${labelId} overlaps unrelated node ${nodeId}`);
+        for (const [nodeId, rectangle] of nodeRectangles) {
+          if (nodeId === edge.from || nodeId === edge.to) continue;
+          if (rectanglesOverlap(label, rectangle)) fail(`LABEL_COLLISION: diagram ${id} label ${labelId} overlaps unrelated node ${nodeId}`);
+          if (geometryProfile && rectanglesOverlap(label, expandedRectangle(rectangle, geometryProfile.obstacleGap))) fail(`OBSTACLE_GAP: diagram ${id} label ${labelId} is within ${geometryProfile.obstacleGap} units of unrelated node ${nodeId}`);
+        }
       }
       for (let first = 0; first < labelEntries.length; first++) for (let second = first + 1; second < labelEntries.length; second++) if (rectanglesOverlap(labelEntries[first][1], labelEntries[second][1])) fail(`LABEL_COLLISION: diagram ${id} labels ${labelEntries[first][0]} and ${labelEntries[second][0]} overlap`);
       for (const [labelId, label] of labelEntries) {

@@ -59,6 +59,53 @@ export interface ExpectedLoopLane {
   reason: string;
 }
 
+export interface ExpectedShapeBaseSize {
+  minWidth: number;
+  minHeight: number;
+  boundaryModel: string;
+}
+
+export interface ExpectedAxisSpacing {
+  referenceShape: "rect";
+  referenceWidth: number;
+  referenceHeight: number;
+  referenceLongSide: number;
+  referenceShortSide: number;
+  lrMinimumGap: number;
+  tbMinimumGap: number;
+}
+
+export interface ExpectedGeometryProfile {
+  version: string;
+  entityGap: number;
+  portGap: number;
+  obstacleGap: number;
+  laneGap: number;
+  shapeBaseSizes: Record<string, ExpectedShapeBaseSize>;
+  axisSpacing?: ExpectedAxisSpacing;
+}
+
+export interface ExpectedBranchLayoutGroup {
+  id: string;
+  decisionNodeId: string;
+  edgeIds: string[];
+  targetIds: string[];
+  branchOrder: string[];
+  layoutCandidateEdgeId: string;
+  primaryEdgeId?: string;
+  mergeNodeId?: string;
+  depth: number;
+  mode: "inline" | "local-lane";
+  branchGap: number;
+}
+
+export interface ExpectedBranchLayoutPlan {
+  strategy: string;
+  frozenOrder: string[];
+  baselineGap: number;
+  groups: ExpectedBranchLayoutGroup[];
+}
+
 export interface ExpectedMergeNode {
   nodeId: string;
   edgeIds: string[];
@@ -135,6 +182,8 @@ export interface ExpectedRouteContract {
   loopLanes: ExpectedLoopLane[];
   mergeNodes: ExpectedMergeNode[];
   branchGroups: ExpectedBranchGroup[];
+  geometryProfile?: ExpectedGeometryProfile;
+  branchLayoutPlan?: ExpectedBranchLayoutPlan;
   exceptions: ExpectedException[];
 }
 
@@ -347,6 +396,97 @@ function parseSourceGraph(value: unknown, diagramId: string, nodeIds: string[], 
   return { nodes: [...sourceNodes.values()], relations, readingPaths };
 }
 
+function parseGeometryProfile(value: unknown, field: string): ExpectedGeometryProfile {
+  const profile = asRecord(value, field);
+  const shapeBaseSizesValue = asRecord(profile.shape_base_sizes, `${field}.shape_base_sizes`);
+  const shapeBaseSizes: Record<string, ExpectedShapeBaseSize> = {};
+  for (const [shape, raw] of Object.entries(shapeBaseSizesValue)) {
+    const item = asRecord(raw, `${field}.shape_base_sizes.${shape}`);
+    shapeBaseSizes[shape] = {
+      minWidth: finiteNumber(item.min_width, `${field}.shape_base_sizes.${shape}.min_width`, 1),
+      minHeight: finiteNumber(item.min_height, `${field}.shape_base_sizes.${shape}.min_height`, 1),
+      boundaryModel: nonEmpty(item.boundary_model, `${field}.shape_base_sizes.${shape}.boundary_model`),
+    };
+  }
+  if (Object.keys(shapeBaseSizes).length === 0) throw new Error(`${field}.shape_base_sizes must not be empty`);
+  const axisSpacingValue = profile.axis_spacing;
+  let axisSpacing: ExpectedAxisSpacing | undefined;
+  if (axisSpacingValue !== undefined) {
+    const axis = asRecord(axisSpacingValue, `${field}.axis_spacing`);
+    const referenceShape = nonEmpty(axis.reference_shape, `${field}.axis_spacing.reference_shape`);
+    if (referenceShape !== "rect") throw new Error(`${field}.axis_spacing.reference_shape must be rect`);
+    axisSpacing = {
+      referenceShape: "rect",
+      referenceWidth: finiteNumber(axis.reference_width, `${field}.axis_spacing.reference_width`, 1),
+      referenceHeight: finiteNumber(axis.reference_height, `${field}.axis_spacing.reference_height`, 1),
+      referenceLongSide: finiteNumber(axis.reference_long_side, `${field}.axis_spacing.reference_long_side`, 1),
+      referenceShortSide: finiteNumber(axis.reference_short_side, `${field}.axis_spacing.reference_short_side`, 1),
+      lrMinimumGap: finiteNumber(axis.lr_minimum_gap, `${field}.axis_spacing.lr_minimum_gap`, 1),
+      tbMinimumGap: finiteNumber(axis.tb_minimum_gap, `${field}.axis_spacing.tb_minimum_gap`, 1),
+    };
+  }
+  return {
+    version: nonEmpty(profile.version, `${field}.version`),
+    entityGap: finiteNumber(profile.entity_gap, `${field}.entity_gap`, 0),
+    portGap: finiteNumber(profile.port_gap, `${field}.port_gap`, 0),
+    obstacleGap: finiteNumber(profile.obstacle_gap, `${field}.obstacle_gap`, 0),
+    laneGap: finiteNumber(profile.lane_gap, `${field}.lane_gap`, 0),
+    shapeBaseSizes,
+    ...(axisSpacing ? { axisSpacing } : {}),
+  };
+}
+
+function parseBranchLayoutPlan(value: unknown, field: string, edgeIds: Set<string>, edgeEndpoints: Record<string, { from: string; to: string }>): ExpectedBranchLayoutPlan {
+  const plan = asRecord(value, field);
+  const rawGroups = plan.groups;
+  if (!Array.isArray(rawGroups)) throw new Error(`${field}.groups must be an array`);
+  const groupIds = new Set<string>();
+  const groups: ExpectedBranchLayoutGroup[] = rawGroups.map((raw, index) => {
+    const groupField = `${field}.groups[${index}]`;
+    const group = asRecord(raw, groupField);
+    const id = nonEmpty(group.id, `${groupField}.id`);
+    if (groupIds.has(id)) throw new Error(`${groupField}.id is duplicated`);
+    groupIds.add(id);
+    const decisionNodeId = nonEmpty(group.decision_node_id, `${groupField}.decision_node_id`);
+    const branchEdgeIds = stringArray(group.edge_ids, `${groupField}.edge_ids`);
+    for (const edgeId of branchEdgeIds) {
+      if (!edgeIds.has(edgeId)) throw new Error(`${groupField}.edge_ids references missing edge ${edgeId}`);
+      if (edgeEndpoints[edgeId].from !== decisionNodeId) throw new Error(`${groupField}.edge_ids edge ${edgeId} does not leave ${decisionNodeId}`);
+    }
+    const targetIds = stringArray(group.target_ids, `${groupField}.target_ids`);
+    const branchOrder = stringArray(group.branch_order, `${groupField}.branch_order`);
+    if (branchOrder.length !== branchEdgeIds.length || branchOrder.some((edgeId) => !branchEdgeIds.includes(edgeId))) throw new Error(`${groupField}.branch_order must be a permutation of edge_ids`);
+    const layoutCandidateEdgeId = nonEmpty(group.layout_candidate_edge_id, `${groupField}.layout_candidate_edge_id`);
+    if (!branchEdgeIds.includes(layoutCandidateEdgeId)) throw new Error(`${groupField}.layout_candidate_edge_id must be listed in edge_ids`);
+    const primaryEdgeId = group.primary_edge_id === undefined ? undefined : nonEmpty(group.primary_edge_id, `${groupField}.primary_edge_id`);
+    if (primaryEdgeId !== undefined && !branchEdgeIds.includes(primaryEdgeId)) throw new Error(`${groupField}.primary_edge_id must be listed in edge_ids`);
+    const mergeNodeId = group.merge_node_id === undefined ? undefined : nonEmpty(group.merge_node_id, `${groupField}.merge_node_id`);
+    const depth = finiteNumber(group.depth, `${groupField}.depth`, 0);
+    if (!Number.isInteger(depth)) throw new Error(`${groupField}.depth must be an integer`);
+    const mode = nonEmpty(group.mode, `${groupField}.mode`) as "inline" | "local-lane";
+    if (mode !== "inline" && mode !== "local-lane") throw new Error(`${groupField}.mode is invalid`);
+    return {
+      id,
+      decisionNodeId,
+      edgeIds: branchEdgeIds,
+      targetIds,
+      branchOrder,
+      layoutCandidateEdgeId,
+      ...(primaryEdgeId ? { primaryEdgeId } : {}),
+      ...(mergeNodeId ? { mergeNodeId } : {}),
+      depth,
+      mode,
+      branchGap: finiteNumber(group.branch_gap, `${groupField}.branch_gap`, 0),
+    };
+  });
+  return {
+    strategy: nonEmpty(plan.strategy, `${field}.strategy`),
+    frozenOrder: stringArray(plan.frozen_order, `${field}.frozen_order`),
+    baselineGap: finiteNumber(plan.baseline_gap, `${field}.baseline_gap`, 0),
+    groups,
+  };
+}
+
 function parseRouteContract(value: unknown, diagramId: string, edgeIds: string[], edgeEndpoints: Record<string, { from: string; to: string }>): ExpectedRouteContract {
   const route = asRecord(value, "route_contract");
   const edgeIdSet = new Set(edgeIds);
@@ -498,6 +638,8 @@ function parseRouteContract(value: unknown, diagramId: string, edgeIds: string[]
       reason: nonEmpty(branch.reason, `${field}.reason`),
     };
   });
+  const geometryProfile = route.geometry_profile === undefined ? undefined : parseGeometryProfile(route.geometry_profile, "route_contract.geometry_profile");
+  const branchLayoutPlan = route.branch_layout_plan === undefined ? undefined : parseBranchLayoutPlan(route.branch_layout_plan, "route_contract.branch_layout_plan", edgeIdSet, edgeEndpoints);
   const rawExceptions = route.exceptions === undefined ? [] : route.exceptions;
   if (!Array.isArray(rawExceptions)) throw new Error("route_contract.exceptions must be an array");
   const exceptions = rawExceptions.map((raw, index) => parseExpectedException(raw, index, diagramId, edgeIdSet));
@@ -505,7 +647,19 @@ function parseRouteContract(value: unknown, diagramId: string, edgeIds: string[]
   if (exceptionKeys.size !== exceptions.length) throw new Error("route_contract.exceptions contains duplicate objects");
   const direction = route.direction === undefined ? undefined : nonEmpty(route.direction, "route_contract.direction") as "TB" | "LR";
   if (direction !== undefined && direction !== "TB" && direction !== "LR") throw new Error("route_contract.direction must be TB or LR");
-  return { direction, affectedEdgeIds, edgeIntents, ...(mainFlow ? { mainFlow } : {}), ...(primaryFlow ? { primaryFlow } : {}), loopLanes, mergeNodes, branchGroups, exceptions };
+  return {
+    direction,
+    affectedEdgeIds,
+    edgeIntents,
+    ...(mainFlow ? { mainFlow } : {}),
+    ...(primaryFlow ? { primaryFlow } : {}),
+    loopLanes,
+    mergeNodes,
+    branchGroups,
+    ...(geometryProfile ? { geometryProfile } : {}),
+    ...(branchLayoutPlan ? { branchLayoutPlan } : {}),
+    exceptions,
+  };
 }
 
 export function parseExpectedContract(raw: unknown, diagramId: string): ExpectedContract {

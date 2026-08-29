@@ -231,6 +231,13 @@ SVG 必须是静态、独立和安全的：
 
 ### 连线、端口与标签
 
+#### 方向性主轴净空与分支出口
+
+`.diagram.json` 的 `designNotes.layout.geometryProfile.axisSpacing` 使用 `{ referenceShape: "rect", referenceWidth, referenceHeight, referenceLongSide, referenceShortSide, lrMinimumGap, tbMinimumGap }`；expected contract 使用对应的 `route_contract.geometry_profile.axis_spacing` snake_case 字段。`lrMinimumGap` 必须为 `ceil(0.5 × referenceLongSide)`，`tbMinimumGap` 必须为 `ceil(1.0 × referenceHeight)`；`referenceLongSide` 和 `referenceShortSide` 均由参考矩形实际宽高计算，其中 `referenceShortSide` 仅作派生描述，不参与 TB 基准计算。`LR` 只对主轴连续实体的水平边界净空应用前者，`TB` 只对主轴连续实体的垂直边界净空应用后者；这是最小基准，不是全图等距命令。动态文本、菱形尺寸、局部 lane 和业务层级可以产生更大净空。
+
+`branchLayoutPlan.groups[].primaryEdgeId` 是端口选择的布局输入：`TB` primary edge 从 `bottom`/下顶点出，`LR` primary edge 从 `right`/右顶点出；非 primary 分支分别从 `left/right` 或 `top/bottom` 出。目标端仍按主阅读方向从 `top`（TB）或 `left`（LR）进入；无 branch-port 例外时，primary edge 的源/目标中心必须严格同轴，除非存在已声明、实际命中的 merge/branch-port 例外。SVG 的 `data-from-port`、sidecar 的 `fromPort`、expected 的可选 `from_port` 和 branch layout plan 必须能互相追溯。
+
+
 - `from`、`to` 节点必须存在，`fromPort`、`toPort` 必须是有效的 `top`、`right`、`bottom` 或 `left`；新建/调整图必须显式声明端口和完整 `points`，旧资产缺失时只能进入 `MIGRATION_REQUIRED`。
 - 生成器必须先检测应用端口偏移后的源边界点到目标边界点的直线路径。对非交付型图，直线不穿越实际节点形状、文字、标签、无关分组或其他连线时必须使用直线；对 `delivery-business-flow`，只有同时满足水平/垂直正交约束的合法直连才使用直线，否则使用最少拐角的 Manhattan 路径。
 - Manhattan 路径以最少拐角为目标；不改变方向、不绕过障碍、不完成端口连接的共线中间点必须删除。对 `flowchart` 与 `pipeline`，静态验证必须在实际节点、标签和无关边均无碰撞时比较合法直达、一折 Manhattan，以及已声明 `loopLanes` 内的最少折点候选；存在更短候选即为 `ROUTING_MINIMALITY` 失败。`loopLanes` 只约束候选必须保留的侧别和最小 lane 偏移，不豁免最少折点比较；真实障碍或需要保持已声明交叉/跨侧语义时，才允许保留更多折点。
@@ -239,7 +246,7 @@ SVG 必须是静态、独立和安全的：
 - 单条线可以连接节点某一侧的中点；同侧多条独立关系必须使用可区分的边界偏移位置，端点间距默认不小于 `max(24, 1.5 × 最小正文行高)` 个源坐标单位。相反方向的关系不得共享同一端口坐标；只有显式 `junction`、`bus` 或共享汇合语义可以共享端点，且必须有成员关系和分支方向证据。当前通用 V1 不接受 Provider 私有总线字段。
 - 不同业务关系的非端点路径段不得共享、重叠或共线混淆；共享汇合语义必须通过已有通用结构的显式汇合/关联节点、Design Notes 或拆图表达，不能用多条重叠路径伪造总线。交叉默认避免，但为保持主轴、同层业务顺序或避免更长的无意义折返而无法消除时，只允许保留已声明的必要交叉；它不得触及节点、文字、标签、箭头或关键端点，且两边的方向和语义必须可区分。
 - `designNotes.layout.crossingExceptions` 可选为 `{ edgeIds: [string, string], reason: string }[]`，仅记录上述必要交叉；`edgeIds` 必须是两个不同的现有边，`reason` 必须说明为何重排或绕行反而损害主流程可读性。每个声明必须恰好命中一对实际交叉边，未声明交叉为 `EDGE_CROSSING`，引用缺失、重复、非两边或未发生的声明为 `CROSSING_EXCEPTION`。`designNotes.layout.sideSwitchExceptions` 可选为 `{ edgeIds: string[], reason: string }[]`，仅记录同侧通道无法保持的业务端口或真实避障例外；同侧跨轴折返、多次换边、引用缺失或未发生的声明分别以 `SIDE_SWITCH` / `SIDE_SWITCH_EXCEPTION` 失败。没有对应声明的交叉、跨轴折返或 S 形换边均为失败。
-- 路由优先级固定为：主流程沿主轴直连 → 同侧关系保持同侧通道 → 判定的前两条分支沿垂直主轴两侧对称离开 → 其余分支在主轴前进方向的 180° 前向局域内均匀分布。`TB` 的前向方向为下方，`LR` 的前向方向为右方；单一正向出边分别优先使用 `bottom`/`right`，其正向入边分别优先使用 `top`/`left`。
+- 路由优先级固定为：主流程沿主轴直连 → 同侧关系保持同侧通道 → 每个分支组的 `primaryEdgeId` 沿主轴前向端点离开 → 其他分支在垂直主轴两侧分布 → 必要时才使用前向局部 lane。`TB` 的前向方向为下方，`LR` 的前向方向为右方；单一正向出边和 primary edge 分别优先使用 `bottom`/`right`，其正向入边分别优先使用 `top`/`left`。
 - 连线靠近节点时最后一段应尽量垂直进入目标边，禁止沿节点边界长距离平行后贴边进入；确需绕障碍时要记录原因并保留可读间距。
 - 连线内部路径不得穿过非源节点、非目标节点、节点文字或边标签；跨分组连线可以穿过所属分组边界，但不得穿过无关分组标题、节点或标签。
 - 回边、异常、重试和反馈边应沿图外侧路由，不参与正向流程层级和等距间隔计算；流程、Sequence、State 和 Pipeline 不得使用双向关系替代返回或回退。
@@ -419,3 +426,12 @@ Kiro Power 无内置 SVG Provider 时，只能引用安装包中已有的静态 
 生成器必须把 feedback lane 视为“最近合法 corridor”，而非固定外扩量。route plan 应记录来源端口到 lane 的清场距离、被避让的节点/标签/箭头，以及为什么更窄候选不合法。先前图或样品的宽 lane 不能作为新图的默认坐标。对相同来源、目标、线型的多条关系，先以 source ordinal 评估受控 display merge；合并后同轴直达时不得保留端口偏移或平行折线。
 
 实际标签必须关联到一条可识别 route segment：标签中心应沿该段居中，并保持最小法向净空；对分支/合并关系，优先放在来源分歧或合并后的首个可读段附近。标签远离任何路径段、仅靠固定大 side offset 才避免重叠时，应返回布局计划重新选择 merge、局部 corridor 或节点间距，而不是继续增大 offset。
+
+
+## V1 共享 geometry profile 与 branch layout plan
+
+`.diagram.json` 的 `designNotes.layout.geometryProfile` 使用 camelCase：`version`、`entityGap`、`portGap`、`obstacleGap`、`laneGap`、`shapeBaseSizes`；expected contract 的 `route_contract.geometry_profile` 使用 snake_case：`version`、`entity_gap`、`port_gap`、`obstacle_gap`、`lane_gap`、`shape_base_sizes`。它们是同一项目无关 profile 的 actual/expected 投影，不得写入图表特有坐标、实体名或 edge ID。`shapeBaseSizes` 必须记录支持形状的最小宽高和 `boundaryModel`，并与 SVG 实际节点形状一致。
+
+过程图 actual 的 `designNotes.layout.branchLayoutPlan` 对应 expected 的 `route_contract.branch_layout_plan`。计划至少记录 `strategy`、`frozenOrder`/`frozen_order`、`baselineGap`/`baseline_gap` 和分支组；每组记录判断节点、分支边、目标节点、稳定 `branchOrder`、布局候选边、可选已确认主流程边、深度、`inline`/`local-lane` 模式和 `branchGap`/`branch_gap`。expected 只表达布局意图，不得包含 `x`、`y`、`width`、`height`、`points`、bbox 或浏览器测量值。没有确认的 `primaryFlow` 时，生成器必须返回 `NEEDS_CONTEXT`，不能把算法选出的最长路径写成业务事实。
+
+所有布局器、生成器、sidecar、source checker 和 Provider 必须消费同一 profile。Provider 在真实 DOM 中按 `getScreenCTM()` 换算 `entityGap`、`portGap`、`obstacleGap` 和 `laneGap`，检查实际节点形状边界、同侧端点、无关节点/标签障碍及同侧反馈 lane；不能用 SVG 文件存在、sidecar 自洽或字段布尔值代替真实视图检查。
