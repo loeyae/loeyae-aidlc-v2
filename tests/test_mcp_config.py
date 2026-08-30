@@ -78,7 +78,7 @@ def test_node_launcher() -> None:
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert "loeyae-aidlc v2.0.1" in result.stdout
+    assert "loeyae-aidlc v2.0.2" in result.stdout
 
 
 def main() -> None:

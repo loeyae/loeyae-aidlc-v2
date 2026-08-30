@@ -1,6 +1,7 @@
 ---
 name: aidlc-reverse-engineering
 description: "分析存量代码库生成业务概述、架构发现和设计产物；不负责阶段路由和完成判定。"
+triggers: 逆向工程, 存量系统分析, 代码库分析, 架构发现, reverse engineering, 现有系统梳理
 ---
 
 # 逆向工程能力

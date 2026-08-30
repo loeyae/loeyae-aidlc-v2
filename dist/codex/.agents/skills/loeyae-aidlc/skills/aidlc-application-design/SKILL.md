@@ -1,6 +1,7 @@
 ---
 name: aidlc-application-design
 description: "识别主要功能组件、接口和应用服务并生成架构设计产物；不负责架构审批和阶段路由。"
+triggers: 架构设计, 应用设计, 组件设计, 服务设计, 应用服务设计, 系统分层
 ---
 
 # 应用设计能力

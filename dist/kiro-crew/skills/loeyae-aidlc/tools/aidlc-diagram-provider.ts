@@ -102,6 +102,15 @@ interface InspectionResult {
   arrowVisibilityErrors: string[];
   arrowOcclusionPairs: string[];
   arrowDecorationOcclusionPairs: string[];
+  structuralNodeIntersections: string[];
+  structuralEdgeIntersections: string[];
+  structuralLabelIntersections: string[];
+  structuralArrowIntersections: string[];
+  structuralFrameStyleErrors: string[];
+  structuralNodeFillErrors: string[];
+  structuralLayerOrderErrors: string[];
+  structuralMaskErrors: string[];
+  structuralMaskCoverageErrors: string[];
   labelEdgeCollisionPairs: string[];
   labelPlacementErrors: string[];
   visualStyleErrors: string[];
@@ -930,6 +939,139 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     for (const [nodeId, nodeBox] of nodeBoxes) if (nodeBox && nodeId && nodeId !== target && arrowBox && overlaps(arrowBox, nodeBox)) arrowOcclusionPairs.push(arrowId + ':' + nodeId);
     for (const [blockerId, blocker] of decorativeBlockers) if (arrowBox && overlaps(arrowBox, bounds(blocker)) && paintedAfter(blocker, arrow)) arrowDecorationOcclusionPairs.push(arrowId + ':' + blockerId);
   }
+  const structuralNodeIntersections = [];
+  const structuralEdgeIntersections = [];
+  const structuralLabelIntersections = [];
+  const structuralArrowIntersections = [];
+  const structuralFrameStyleErrors = [];
+  const structuralNodeFillErrors = [];
+  const structuralLayerOrderErrors = [];
+  const structuralMaskErrors = [];
+  const structuralMaskCoverageErrors = [];
+  const structuralFrames = [...document.querySelectorAll('[data-group][data-group-style-role="structural"]')];
+  const structuralWhite = (value) => value === 'rgb(255, 255, 255)' || value === '#ffffff' || value === '#fff';
+  const structuralFrameGray = (value) => value === 'rgb(102, 102, 102)' || value === 'rgb(102,102,102)' || value === '#666666' || value === '#666';
+  const transformPoint = (element, x, y) => {
+    const matrix = element.getScreenCTM();
+    if (!matrix) return null;
+    const point = new DOMPoint(x, y).matrixTransform(matrix);
+    return [point.x, point.y];
+  };
+  const structuralFrameSegments = (element) => {
+    const name = element.tagName.toLowerCase();
+    if (name === 'rect') {
+      const x = Number(element.getAttribute('x') || 0);
+      const y = Number(element.getAttribute('y') || 0);
+      const width = Number(element.getAttribute('width'));
+      const height = Number(element.getAttribute('height'));
+      if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return [];
+      const corners = [[x, y], [x + width, y], [x + width, y + height], [x, y + height]].map(([pointX, pointY]) => transformPoint(element, pointX, pointY));
+      if (corners.some((point) => !point)) return [];
+      return corners.map((point, index) => [point, corners[(index + 1) % corners.length]]);
+    }
+    if (name === 'line') {
+      const first = transformPoint(element, Number(element.getAttribute('x1')), Number(element.getAttribute('y1')));
+      const second = transformPoint(element, Number(element.getAttribute('x2')), Number(element.getAttribute('y2')));
+      return first && second ? [[first, second]] : [];
+    }
+    if (name === 'polygon' || name === 'polyline') {
+      const values = (element.getAttribute('points') || '').match(/[-+]?(?:\\d*\\.?\\d+)(?:[eE][-+]?\\d+)?/g) || [];
+      const points = [];
+      for (let index = 0; index + 1 < values.length; index += 2) points.push(transformPoint(element, Number(values[index]), Number(values[index + 1])));
+      if (points.some((point) => !point) || points.length < 2) return [];
+      const segments = points.slice(1).map((point, index) => [points[index], point]);
+      if (name === 'polygon') segments.push([points[points.length - 1], points[0]]);
+      return segments;
+    }
+    if (typeof element.getTotalLength === 'function' && typeof element.getPointAtLength === 'function') {
+      const length = element.getTotalLength();
+      const count = Math.max(4, Math.ceil(length / 4));
+      const points = [];
+      for (let index = 0; index <= count; index++) {
+        const point = element.getPointAtLength(length * index / count);
+        points.push(transformPoint(element, point.x, point.y));
+      }
+      if (points.some((point) => !point)) return [];
+      return points.slice(1).map((point, index) => [points[index], point]);
+    }
+    return [];
+  };
+  const boxBoundarySegments = (box) => [
+    [[box.left, box.top], [box.right, box.top]],
+    [[box.right, box.top], [box.right, box.bottom]],
+    [[box.right, box.bottom], [box.left, box.bottom]],
+    [[box.left, box.bottom], [box.left, box.top]],
+  ];
+  const segmentTouchesBox = (first, second, box) => Boolean(box && (segmentIntersectsBox(first, second, box) || boxBoundarySegments(box).some(([third, fourth]) => segmentRelation(first, second, third, fourth) !== 'none')));
+  const frameTouchesBox = (segments, box) => segments.some(([first, second]) => segmentTouchesBox(first, second, box));
+  const frameTouchesEdge = (segments, edgeSample) => segments.some(([first, second]) => edgeSample.segments.some(([third, fourth]) => segmentRelation(first, second, third, fourth) !== 'none'));
+  const elementBox = (element) => {
+    const box = bounds(element);
+    if (box && box.width > 0 && box.height > 0) return box;
+    if (typeof element.getBBox !== 'function' || !element.getScreenCTM()) return box;
+    const local = element.getBBox();
+    const matrix = element.getScreenCTM();
+    const points = [[local.x, local.y], [local.x + local.width, local.y], [local.x + local.width, local.y + local.height], [local.x, local.y + local.height]].map(([x, y]) => new DOMPoint(x, y).matrixTransform(matrix));
+    return { left: Math.min(...points.map((point) => point.x)), top: Math.min(...points.map((point) => point.y)), right: Math.max(...points.map((point) => point.x)), bottom: Math.max(...points.map((point) => point.y)), width: local.width, height: local.height };
+  };
+  const maskInfo = (frame, shape = frame) => {
+    const reference = frame?.getAttribute('mask') || shape?.getAttribute('mask') || '';
+    const maskId = reference.match(/url\\(#([^)]*)\\)/i)?.[1];
+    const mask = maskId ? document.getElementById(maskId) : null;
+    if (!mask) return { mask: null, cutouts: [] };
+    const style = getComputedStyle(mask);
+    const cutouts = [...mask.querySelectorAll('[fill-opacity="0"], [opacity="0"]')].filter((element) => {
+      const computed = getComputedStyle(element);
+      return Number(element.getAttribute('fill-opacity')) === 0 || Number(element.getAttribute('opacity')) === 0 || Number(computed.fillOpacity) === 0 || Number(computed.opacity) === 0;
+    });
+    if (mask.getAttribute('mask-type') !== 'alpha' || mask.getAttribute('maskUnits') !== 'userSpaceOnUse' || mask.getAttribute('maskContentUnits') !== 'userSpaceOnUse' || style.maskType !== 'alpha') structuralMaskErrors.push((frame.getAttribute('data-group') || 'unknown') + ':' + (maskId || 'missing-units'));
+    if (cutouts.length === 0) structuralMaskErrors.push((frame.getAttribute('data-group') || 'unknown') + ':' + (maskId || 'missing-cutout'));
+    return { mask, cutouts };
+  };
+  const maskCovers = (info, targetBox) => info.cutouts.some((cutout) => {
+    const cutoutBox = elementBox(cutout);
+    return overlaps(cutoutBox, targetBox);
+  });
+  for (const frame of structuralFrames) {
+    const groupId = frame.getAttribute('data-group') || 'unknown';
+    const frameShape = nodeOutline(frame);
+    const frameStyle = getComputedStyle(frameShape);
+    if (frameStyle.fill !== 'none' || !structuralFrameGray(frameStyle.stroke) || Math.abs(parseFloat(frameStyle.strokeWidth) - visualStyle.strokeWidth) > 0.01) structuralFrameStyleErrors.push(groupId);
+    const frameSegments = structuralFrameSegments(frameShape);
+    if (frameSegments.length === 0) {
+      structuralMaskErrors.push(groupId + ':unsupported-frame-geometry');
+      continue;
+    }
+    const info = maskInfo(frame, frameShape);
+    for (const [nodeId, nodeBox] of nodeBoxes) {
+      if (!nodeBox || !frameTouchesBox(frameSegments, nodeBox)) continue;
+      structuralNodeIntersections.push(groupId + ':' + nodeId);
+      const outline = nodeOutline(nodeElements.find((element) => element.getAttribute('data-node') === nodeId));
+      if (!outline || !structuralWhite(getComputedStyle(outline).fill)) structuralNodeFillErrors.push(groupId + ':' + nodeId);
+      if (!paintedAfter(nodeElements.find((element) => element.getAttribute('data-node') === nodeId), frameShape)) structuralLayerOrderErrors.push(groupId + ':node:' + nodeId);
+    }
+    for (const edgeSample of edgeSamples) {
+      if (!frameTouchesEdge(frameSegments, edgeSample)) continue;
+      const edgeId = edgeSample.id;
+      structuralEdgeIntersections.push(groupId + ':' + edgeId);
+      if (!paintedAfter(edgeSample.element, frameShape)) structuralLayerOrderErrors.push(groupId + ':edge:' + edgeId);
+      if (!info.mask || !maskCovers(info, elementBox(edgeSample.element))) structuralMaskCoverageErrors.push(groupId + ':edge:' + edgeId);
+    }
+    for (const [labelId, label] of labelBoxes) {
+      if (!label.box || !frameTouchesBox(frameSegments, label.box)) continue;
+      structuralLabelIntersections.push(groupId + ':' + labelId);
+      if (!paintedAfter(label.element, frameShape)) structuralLayerOrderErrors.push(groupId + ':label:' + labelId);
+      if (!info.mask || !maskCovers(info, label.box)) structuralMaskCoverageErrors.push(groupId + ':label:' + labelId);
+    }
+    for (const arrow of arrowElements) {
+      const arrowId = arrow.getAttribute('data-edge-arrow') || 'unknown';
+      const arrowBox = elementBox(arrow);
+      if (!arrowBox || !frameTouchesBox(frameSegments, arrowBox)) continue;
+      structuralArrowIntersections.push(groupId + ':' + arrowId);
+      if (!paintedAfter(arrow, frameShape)) structuralLayerOrderErrors.push(groupId + ':arrow:' + arrowId);
+      if (!info.mask || !maskCovers(info, arrowBox)) structuralMaskCoverageErrors.push(groupId + ':arrow:' + arrowId);
+    }
+  }
   const textOverflowIds = [];
   const textOverlapPairs = [];
   const textElements = [...document.querySelectorAll('svg text')].flatMap((element) => {
@@ -943,10 +1085,11 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
   const white = (value) => value === 'rgb(255, 255, 255)' || value === '#ffffff' || value === '#fff';
   const structuralGroupFrame = (element) => element?.hasAttribute('data-group') && element.getAttribute('data-group-style-role') === 'structural';
   const structuralGroupTitle = (element) => element?.hasAttribute('data-group-title') && element.getAttribute('data-group-style-role') === 'structural';
-  const frameStyle = (element, id) => {
+  const frameStyle = (element, id, allowWhite = false) => {
     const style = getComputedStyle(element);
     const expectedInk = structuralGroupFrame(element) ? structuralGray : black;
-    if (style.fill !== 'none' || !expectedInk(style.stroke) || Math.abs(parseFloat(style.strokeWidth) - visualStyle.strokeWidth) > 0.01) visualStyleErrors.push(id);
+    const validFill = style.fill === 'none' || (allowWhite && white(style.fill));
+    if (!validFill || !expectedInk(style.stroke) || Math.abs(parseFloat(style.strokeWidth) - visualStyle.strokeWidth) > 0.01) visualStyleErrors.push(id);
   };
   const backgrounds = [...document.querySelectorAll('[data-canvas-background]')];
   if (backgrounds.length !== 1) visualStyleErrors.push('canvas-background-count');
@@ -955,7 +1098,7 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     if (!white(style.fill) || style.stroke !== 'none' || Number(style.opacity) !== 1) visualStyleErrors.push('canvas-background-style');
   }
   if (legendElements.length > 0 || noteElements.length > 0) visualStyleErrors.push('global-legend-or-note');
-  for (const node of nodeElements) frameStyle(nodeOutline(node), 'node:' + (node.getAttribute('data-node') || 'unknown'));
+  for (const node of nodeElements) frameStyle(nodeOutline(node), 'node:' + (node.getAttribute('data-node') || 'unknown'), true);
   for (const group of groupElements) frameStyle(nodeOutline(group), 'group:' + groupId(group));
   for (const edge of edgeElements) frameStyle(edge, 'edge:' + (edge.getAttribute('data-edge') || 'unknown'));
   for (const lifeline of document.querySelectorAll('[data-lifeline-for]')) frameStyle(lifeline, 'lifeline:' + (lifeline.getAttribute('data-lifeline-for') || 'unknown'));
@@ -1034,6 +1177,15 @@ const INSPECTION_SCRIPT = `(contract = {}) => {
     arrowVisibilityErrors,
     arrowOcclusionPairs,
     arrowDecorationOcclusionPairs,
+    structuralNodeIntersections,
+    structuralEdgeIntersections,
+    structuralLabelIntersections,
+    structuralArrowIntersections,
+    structuralFrameStyleErrors,
+    structuralNodeFillErrors,
+    structuralLayerOrderErrors,
+    structuralMaskErrors,
+    structuralMaskCoverageErrors,
     labelEdgeCollisionPairs,
     labelPlacementErrors,
     visualStyleErrors,
@@ -1128,6 +1280,15 @@ function inspection(payload: unknown): InspectionResult {
     arrowVisibilityErrors: Array.isArray(data.arrowVisibilityErrors) ? data.arrowVisibilityErrors.map(String) : [],
     arrowOcclusionPairs: Array.isArray(data.arrowOcclusionPairs) ? data.arrowOcclusionPairs.map(String) : [],
     arrowDecorationOcclusionPairs: Array.isArray(data.arrowDecorationOcclusionPairs) ? data.arrowDecorationOcclusionPairs.map(String) : [],
+    structuralNodeIntersections: Array.isArray(data.structuralNodeIntersections) ? data.structuralNodeIntersections.map(String) : [],
+    structuralEdgeIntersections: Array.isArray(data.structuralEdgeIntersections) ? data.structuralEdgeIntersections.map(String) : [],
+    structuralLabelIntersections: Array.isArray(data.structuralLabelIntersections) ? data.structuralLabelIntersections.map(String) : [],
+    structuralArrowIntersections: Array.isArray(data.structuralArrowIntersections) ? data.structuralArrowIntersections.map(String) : [],
+    structuralFrameStyleErrors: Array.isArray(data.structuralFrameStyleErrors) ? data.structuralFrameStyleErrors.map(String) : [],
+    structuralNodeFillErrors: Array.isArray(data.structuralNodeFillErrors) ? data.structuralNodeFillErrors.map(String) : [],
+    structuralLayerOrderErrors: Array.isArray(data.structuralLayerOrderErrors) ? data.structuralLayerOrderErrors.map(String) : [],
+    structuralMaskErrors: Array.isArray(data.structuralMaskErrors) ? data.structuralMaskErrors.map(String) : [],
+    structuralMaskCoverageErrors: Array.isArray(data.structuralMaskCoverageErrors) ? data.structuralMaskCoverageErrors.map(String) : [],
     labelEdgeCollisionPairs: Array.isArray(data.labelEdgeCollisionPairs) ? data.labelEdgeCollisionPairs.map(String) : [],
     labelPlacementErrors: Array.isArray(data.labelPlacementErrors) ? data.labelPlacementErrors.map(String) : [],
     visualStyleErrors: Array.isArray(data.visualStyleErrors) ? data.visualStyleErrors.map(String) : [],
@@ -1181,8 +1342,8 @@ function validateInspection(result: InspectionResult, expected?: ExpectedContrac
   if (!result.description) errors.push("SVG desc is empty or missing");
   if (!result.viewBox) errors.push("SVG viewBox is missing");
   if (result.svgWidth <= 0 || result.svgHeight <= 0) errors.push("SVG has no visible browser bounds");
-  if (result.nodeCollisionPairs.length > 0) errors.push(`SVG node geometry collides: ${result.nodeCollisionPairs.join(", ")}`);
-  if (result.entityGapErrors.length > 0) errors.push(`SVG entity gap is below the shared profile: ${result.entityGapErrors.join(", ")}`);
+  if (result.nodeCollisionPairs.length > 0) errors.push(`NODE_OVERLAP: SVG node geometry collides: ${result.nodeCollisionPairs.join(", ")}`);
+  if (result.entityGapErrors.length > 0) errors.push(`INSUFFICIENT_GAP: SVG entity gap is below the shared profile: ${result.entityGapErrors.join(", ")}`);
   if (result.axisGapErrors.length > 0) errors.push(`SVG primary-flow axis gap is below the directional profile: ${result.axisGapErrors.join(", ")}`);
   if (result.axisAlignmentErrors.length > 0) errors.push(`SVG primary branch is not aligned to the main axis: ${result.axisAlignmentErrors.join(", ")}`);
   if (result.portGapErrors.length > 0) errors.push(`SVG port gap is below the shared profile: ${result.portGapErrors.join(", ")}`);
@@ -1193,20 +1354,25 @@ function validateInspection(result: InspectionResult, expected?: ExpectedContrac
   const actualCrossings = new Set(result.edgeIntersectionPairs.map(edgePairKey));
   const expectedCrossingExceptions = new Set(expected?.routeContract.exceptions.filter((exception) => exception.type === "crossing").map((exception) => exception.edgeIds.slice().sort().join("\u0000")) || []);
   const unexpectedCrossings = result.edgeIntersectionPairs.filter((pair) => !expectedCrossingExceptions.has(edgePairKey(pair)));
-  if (unexpectedCrossings.length > 0) errors.push(`SVG edge geometry intersects outside expected exceptions: ${unexpectedCrossings.join(", ")}`);
+  if (unexpectedCrossings.length > 0) errors.push(`EDGE_CROSSING: SVG edge geometry intersects outside expected exceptions: ${unexpectedCrossings.join(", ")}`);
   if (expected) {
     for (const exception of expected.routeContract.exceptions.filter((entry) => entry.type === "crossing")) {
       const pair = exception.edgeIds.slice().sort().join("\u0000");
-      if (!actualCrossings.has(pair)) errors.push(`SVG expected crossing exception is not observed: ${exception.edgeIds.join("/")}`);
+      if (!actualCrossings.has(pair)) errors.push(`CROSSING_EXCEPTION: SVG expected crossing exception is not observed: ${exception.edgeIds.join("/")}`);
     }
   }
-  if (result.collinearOverlapPairs.length > 0) errors.push(`SVG edges have non-declared collinear overlap: ${result.collinearOverlapPairs.join(", ")}`);
-  if (result.portDirectionErrors.length > 0) errors.push(`SVG edge port direction is invalid: ${result.portDirectionErrors.join(", ")}`);
-  if (result.portApproachErrors.length > 0) errors.push(`SVG edge approaches a target from inside its visible shape: ${result.portApproachErrors.join(", ")}`);
-  if (result.sideSwitchErrors.length > 0) errors.push(`SVG edge switches sides without an expected exception: ${result.sideSwitchErrors.join(", ")}`);
-  if (result.arrowVisibilityErrors.length > 0) errors.push(`SVG arrow overlay is not visible: ${result.arrowVisibilityErrors.join(", ")}`);
-  if (result.arrowOcclusionPairs.length > 0) errors.push(`SVG arrow overlay is occluded: ${result.arrowOcclusionPairs.join(", ")}`);
-  if (result.arrowDecorationOcclusionPairs.length > 0) errors.push(`SVG arrow overlay is occluded by a later decoration: ${result.arrowDecorationOcclusionPairs.join(", ")}`);
+  if (result.collinearOverlapPairs.length > 0) errors.push(`COLLINEAR_OVERLAP: SVG edges have non-declared collinear overlap: ${result.collinearOverlapPairs.join(", ")}`);
+  if (result.portDirectionErrors.length > 0) errors.push(`PORT_DIRECTION: SVG edge port direction is invalid: ${result.portDirectionErrors.join(", ")}`);
+  if (result.portApproachErrors.length > 0) errors.push(`PORT_APPROACH: SVG edge approaches a target from inside its visible shape: ${result.portApproachErrors.join(", ")}`);
+  if (result.sideSwitchErrors.length > 0) errors.push(`SIDE_SWITCH: SVG edge switches sides without an expected exception: ${result.sideSwitchErrors.join(", ")}`);
+  if (result.arrowVisibilityErrors.length > 0) errors.push(`VISIBLE_ARROW_MAPPING: SVG arrow overlay is not visible: ${result.arrowVisibilityErrors.join(", ")}`);
+  if (result.arrowOcclusionPairs.length > 0) errors.push(`VISIBLE_ARROW_MAPPING: SVG arrow overlay is occluded: ${result.arrowOcclusionPairs.join(", ")}`);
+  if (result.arrowDecorationOcclusionPairs.length > 0) errors.push(`VISIBLE_ARROW_MAPPING: SVG arrow overlay is occluded by a later decoration: ${result.arrowDecorationOcclusionPairs.join(", ")}`);
+  if (result.structuralFrameStyleErrors.length > 0) errors.push(`STRUCTURAL_FRAME_STYLE: SVG structural frame computed style is invalid: ${result.structuralFrameStyleErrors.join(", ")}`);
+  if (result.structuralNodeFillErrors.length > 0) errors.push(`STRUCTURAL_NODE_FILL: SVG structural intersection node fill is not opaque white: ${result.structuralNodeFillErrors.join(", ")}`);
+  if (result.structuralLayerOrderErrors.length > 0) errors.push(`STRUCTURAL_LAYER_ORDER: SVG structural frame is painted above a business foreground object: ${result.structuralLayerOrderErrors.join(", ")}`);
+  if (result.structuralMaskErrors.length > 0) errors.push(`STRUCTURAL_MASK: SVG structural occlusion mask is invalid: ${result.structuralMaskErrors.join(", ")}`);
+  if (result.structuralMaskCoverageErrors.length > 0) errors.push(`STRUCTURAL_MASK_COVERAGE: SVG structural occlusion mask does not cover an actual intersection: ${result.structuralMaskCoverageErrors.join(", ")}`);
   if (result.labelEdgeCollisionPairs.length > 0) errors.push(`SVG label geometry intersects edge geometry: ${result.labelEdgeCollisionPairs.join(", ")}`);
   if (result.labelPlacementErrors.length > 0) errors.push(`SVG edge labels are not centered and normally offset from their route segment: ${result.labelPlacementErrors.join(", ")}`);
   if (result.visualStyleErrors.length > 0) errors.push(`SVG unified visual style is invalid: ${result.visualStyleErrors.join(", ")}`);
@@ -1284,7 +1450,7 @@ function validateInspection(result: InspectionResult, expected?: ExpectedContrac
     if (intent.labelText !== undefined && result.edgeLabels[intent.edgeId] !== intent.labelText) errors.push(`browser route ${intent.edgeId} label text differs from expected`);
   }
   const expectedSideSwitches = expected.routeContract.exceptions.filter((entry) => entry.type === "side-switch").flatMap((entry) => entry.edgeIds);
-  for (const edgeId of expectedSideSwitches) if (!result.sideSwitchDetectedEdgeIds.includes(edgeId)) errors.push(`browser expected side-switch exception is not observed: ${edgeId}`);
+  for (const edgeId of expectedSideSwitches) if (!result.sideSwitchDetectedEdgeIds.includes(edgeId)) errors.push(`SIDE_SWITCH_EXCEPTION: browser expected side-switch exception is not observed: ${edgeId}`);
   const unexpectedEdgeCollisions = result.edgeNodeCollisionPairs.filter((pair) => {
     const separator = pair.indexOf(":");
     const edgeId = separator < 0 ? pair : pair.slice(0, separator);
@@ -1292,7 +1458,7 @@ function validateInspection(result: InspectionResult, expected?: ExpectedContrac
     const endpoints = expected.edgeEndpoints[edgeId];
     return !endpoints || (nodeId !== endpoints.from && nodeId !== endpoints.to);
   });
-  if (unexpectedEdgeCollisions.length > 0) errors.push(`SVG edge geometry collides with non-endpoint nodes: ${unexpectedEdgeCollisions.join(", ")}`);
+  if (unexpectedEdgeCollisions.length > 0) errors.push(`EDGE_NODE_COLLISION: SVG edge geometry collides with non-endpoint nodes: ${unexpectedEdgeCollisions.join(", ")}`);
   const isNestedRelation = (first: string, second: string): boolean => {
     let current = expected.groupTypes[first];
     while (current?.semanticType === "nested" && current.parent) {
@@ -1467,7 +1633,7 @@ async function main(): Promise<void> {
       const screenshot = request.target_reading_environment?.viewports ? baseScreenshot.replace(/\.png$/i, `-${readingView}.png`) : baseScreenshot;
       const snapshot = request.target_reading_environment?.viewports ? baseSnapshot.replace(/\.snapshot\.txt$/i, `-${readingView}.snapshot.txt`) : baseSnapshot;
       if (!existsSync(tempScreenshot) || !existsSync(tempSnapshot)) errors.push("Chrome DevTools did not produce the requested screenshot or snapshot");
-      if (errors.length === 0) {
+      else {
         mkdirSync(dirname(screenshot), { recursive: true });
         mkdirSync(dirname(snapshot), { recursive: true });
         copyFileSync(tempScreenshot, screenshot);
@@ -1499,6 +1665,7 @@ async function main(): Promise<void> {
         status: errors.length === 0 ? "passed" : "failed",
         errors,
         inspection: inspected,
+        structural_required: Object.values(actualLayout.groups).some((group) => group.styleRole === "structural"),
         reading_path_trace: readingPathTrace(inspected, expected),
         route_actual: { edge_bend_counts: inspected.edgeBendCounts, edge_geometry_kinds: inspected.edgeGeometryKinds },
         exception_evidence: exceptionEvidence,
@@ -1519,8 +1686,35 @@ async function main(): Promise<void> {
         evidence: entry.status === "passed" ? "real Chrome DevTools screenshot and accessibility snapshot" : "browser validation failed",
       }];
     }));
+    const structuralRequired = results.some((result) => result.structural_required === true);
+    const structuralArray = (field: string): string[] => results.flatMap((result) => {
+      const inspection = result.inspection;
+      if (!inspection || typeof inspection !== "object" || Array.isArray(inspection)) return [];
+      const value = (inspection as Record<string, unknown>)[field];
+      return Array.isArray(value) ? value.map(String) : [];
+    });
+    const structuralStatus = structuralRequired ? "passed" : "not_applicable";
+    const structuralEvidence = {
+      structural_occlusion_status: structuralStatus,
+      structural_node_intersections: structuralArray("structuralNodeIntersections"),
+      structural_edge_intersections: structuralArray("structuralEdgeIntersections"),
+      structural_label_intersections: structuralArray("structuralLabelIntersections"),
+      structural_arrow_intersections: structuralArray("structuralArrowIntersections"),
+      structural_frame_style_status: structuralStatus,
+      structural_node_fill_status: structuralStatus,
+      structural_layer_order_status: structuralStatus,
+      structural_mask_status: structuralStatus,
+      structural_mask_coverage_status: structuralStatus,
+      structural_visual_evidence: {
+        required: structuralRequired,
+        screenshots: structuralRequired ? results.map((result) => String(result.screenshot_path)) : [],
+        snapshots: structuralRequired ? results.map((result) => String(result.snapshot_path)) : [],
+        pixel_verified: false,
+      },
+    };
     const updatedEvidence = {
       ...sourceEvidence,
+      ...structuralEvidence,
       status: "passed",
       final_status: "PASS",
       provider_status: "passed",
@@ -1530,7 +1724,7 @@ async function main(): Promise<void> {
       render_status: "passed",
       expected_contract_status: "passed",
       provider: { name: "chrome-devtools-mcp", package: PROVIDER_PACKAGE, operation: request.target_operation },
-      provider_validation: { status: "passed", request: relativeArtifact(projectPath(options.request, "request")), views: readingEvidence, results },
+      provider_validation: { status: "passed", request: relativeArtifact(projectPath(options.request, "request")), views: readingEvidence, structural: structuralEvidence, results },
       timestamp: new Date().toISOString(),
     };
     writeJsonAtomic(evidence, updatedEvidence);
@@ -1542,6 +1736,7 @@ async function main(): Promise<void> {
       provider: updatedEvidence.provider,
       request: relativeArtifact(projectPath(options.request, "request")),
       views: readingEvidence,
+      structural: structuralEvidence,
       results,
     });
     console.log(JSON.stringify({ status: "passed", final_status: "PASS", evidence: relativeArtifact(evidence), diagrams_checked: request.diagrams.length }, null, 2));

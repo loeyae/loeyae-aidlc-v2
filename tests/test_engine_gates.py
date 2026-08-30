@@ -150,7 +150,12 @@ class TestRunner:
                 "migration_status": "passed", "port_paths_valid": True, "geometry_status": "passed", "render_preflight_status": "passed",
                 "edge_intersection_status": "passed", "collinear_overlap_status": "passed", "target_port_direction_status": "passed",
                 "target_port_approach_status": "passed", "routing_minimality_status": "passed", "side_switch_status": "passed",
-                "change_impact_review_status": "not_applicable", "visible_arrow_mapping_status": "passed", "render_status": "unverified", "unresolved": 0,
+                "change_impact_review_status": "not_applicable", "visible_arrow_mapping_status": "passed",
+                "structural_occlusion_status": "not_applicable", "structural_node_intersections": [], "structural_edge_intersections": [],
+                "structural_label_intersections": [], "structural_arrow_intersections": [], "structural_frame_style_status": "not_applicable",
+                "structural_node_fill_status": "not_applicable", "structural_layer_order_status": "not_applicable", "structural_mask_status": "not_applicable",
+                "structural_mask_coverage_status": "not_applicable", "structural_visual_evidence": {"required": False, "screenshots": [], "snapshots": [], "pixel_verified": False},
+                "render_status": "unverified", "unresolved": 0,
             },
             "design-intent-coverage": {
                 "evidence_version": "1", "status": "passed", "intent_markers_found": 0,

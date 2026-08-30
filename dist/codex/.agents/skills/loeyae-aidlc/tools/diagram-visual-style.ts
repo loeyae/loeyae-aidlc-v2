@@ -74,18 +74,37 @@ export const DIAGRAM_LAYOUT_METRICS = Object.freeze({
   groupBottomPadding: 32,
 });
 
-type SvgTag = { name: string; source: string };
+type SvgTag = { name: string; source: string; ancestors: SvgTag[] };
 type Label = { text: string | string[]; x: number; y: number; fontSize?: number };
 type Point = [number, number];
 
-const SVG_TAG = /<([A-Za-z][\w:-]*)\b[^>]*>/g;
+const SVG_TAG = /<!--[\s\S]*?-->|<\/?([A-Za-z][\w:-]*)\b[^>]*>/g;
+const SVG_VOID_ELEMENTS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
+const FRAME_ELEMENTS = new Set(["rect", "polygon", "ellipse", "circle", "line", "polyline"]);
+const NODE_SHAPE_ELEMENTS = new Set(["rect", "polygon", "ellipse", "circle", "path"]);
 
 function tags(svg: string): SvgTag[] {
-  return [...svg.matchAll(SVG_TAG)].map((match) => ({ name: match[1].toLowerCase(), source: match[0] }));
+  const result: SvgTag[] = [];
+  const stack: SvgTag[] = [];
+  for (const match of svg.matchAll(SVG_TAG)) {
+    const source = match[0];
+    if (source.startsWith("<!--")) continue;
+    const name = match[1]?.toLowerCase();
+    if (!name) continue;
+    if (source.startsWith("</")) {
+      const index = [...stack].map((entry) => entry.name).lastIndexOf(name);
+      if (index >= 0) stack.splice(index, stack.length - index);
+      continue;
+    }
+    const tag: SvgTag = { name, source, ancestors: [...stack] };
+    result.push(tag);
+    if (!source.trimEnd().endsWith("/>") && !SVG_VOID_ELEMENTS.has(name)) stack.push(tag);
+  }
+  return result;
 }
 
 function attribute(tag: string, name: string): string | undefined {
-  return tag.match(new RegExp(`\\b${name}=["']([^"']*)["']`, "i"))?.[1];
+  return tag.match(new RegExp(`(?:^|\\s)${name}\\s*=\\s*["']([^"']*)["']`, "i"))?.[1];
 }
 
 function normalizedColor(value: string | undefined): string | undefined {
@@ -109,6 +128,14 @@ function isStructuralGroupElement(tag: SvgTag): boolean {
   return isStructuralGroupFrame(tag) || isStructuralGroupTitle(tag);
 }
 
+function isInsideMask(tag: SvgTag): boolean {
+  return tag.ancestors.some((ancestor) => ancestor.name === "mask");
+}
+
+function isNodeShape(tag: SvgTag): boolean {
+  return NODE_SHAPE_ELEMENTS.has(tag.name) && (attribute(tag.source, "data-node") !== undefined || tag.ancestors.some((ancestor) => attribute(ancestor.source, "data-node") !== undefined));
+}
+
 function expectedInk(tag: SvgTag): string {
   return isStructuralGroupElement(tag) ? DIAGRAM_VISUAL_STYLE.structuralGroupInk : DIAGRAM_VISUAL_STYLE.ink;
 }
@@ -128,9 +155,39 @@ function numericAttribute(tag: string, name: string): number {
 }
 
 function requireFrameStyle(tag: SvgTag, identity: string, errors: string[], ink = expectedInk(tag)): void {
-  if (!isNone(attribute(tag.source, "fill"))) errors.push(`VISUAL_STYLE: ${identity} must use fill=none`);
+  const fill = normalizedColor(attribute(tag.source, "fill"));
+  const validNodeFill = isNodeShape(tag) && (fill === DIAGRAM_VISUAL_STYLE.canvasFill || isNone(attribute(tag.source, "fill")));
+  if (!validNodeFill && !isNone(attribute(tag.source, "fill"))) errors.push(`VISUAL_STYLE: ${identity} must use fill=none`);
   if (normalizedColor(attribute(tag.source, "stroke")) !== ink) errors.push(`VISUAL_STYLE: ${identity} stroke must be ${ink}`);
   if (numericAttribute(tag.source, "stroke-width") !== DIAGRAM_VISUAL_STYLE.strokeWidth) errors.push(`VISUAL_STYLE: ${identity} stroke-width must be ${DIAGRAM_VISUAL_STYLE.strokeWidth}`);
+}
+
+function structuralMaskErrors(elements: SvgTag[]): string[] {
+  const errors: string[] = [];
+  const masks = new Map(elements.filter((tag) => tag.name === "mask").map((tag) => [attribute(tag.source, "id") || "", tag]));
+  for (const tag of elements) {
+    const maskReference = attribute(tag.source, "mask");
+    if (maskReference === undefined) continue;
+    const structuralFrame = isStructuralGroupFrame(tag);
+    if (!structuralFrame) {
+      errors.push(`STRUCTURAL_OCCLUSION: mask may only attach to structural group frames (${tag.name})`);
+      continue;
+    }
+    const maskId = maskReference.match(/url\(#([^)]*)\)/i)?.[1];
+    const mask = maskId ? masks.get(maskId) : undefined;
+    if (!mask) {
+      errors.push(`STRUCTURAL_OCCLUSION: structural group ${attribute(tag.source, "data-group") || "unknown"} references a missing mask`);
+      continue;
+    }
+    if (attribute(mask.source, "mask-type") !== "alpha") errors.push(`STRUCTURAL_OCCLUSION: mask ${maskId} must declare mask-type=alpha`);
+    if (attribute(mask.source, "maskUnits") !== "userSpaceOnUse" || attribute(mask.source, "maskContentUnits") !== "userSpaceOnUse") errors.push(`STRUCTURAL_OCCLUSION: mask ${maskId} must use userSpaceOnUse units`);
+    const cutouts = elements.filter((candidate) => candidate.ancestors.includes(mask) && (attribute(candidate.source, "fill-opacity") === "0" || attribute(candidate.source, "opacity") === "0"));
+    if (cutouts.length === 0) errors.push(`STRUCTURAL_OCCLUSION: mask ${maskId} must contain a transparent cutout`);
+  }
+  for (const mask of masks.values()) {
+    if (attribute(mask.source, "mask-type") !== undefined && attribute(mask.source, "mask-type") !== "alpha") errors.push(`STRUCTURAL_OCCLUSION: mask ${attribute(mask.source, "id") || "unknown"} has an unsupported mask-type`);
+  }
+  return errors;
 }
 
 function pathBounds(path: string): { width: number; height: number } | null {
@@ -144,6 +201,7 @@ function pathBounds(path: string): { width: number; height: number } | null {
 export function diagramVisualStyleErrors(svg: string): string[] {
   const errors: string[] = [];
   const elements = tags(svg);
+  errors.push(...structuralMaskErrors(elements));
   const backgrounds = elements.filter((tag) => attribute(tag.source, "data-canvas-background") !== undefined);
   if (backgrounds.length !== 1 || backgrounds[0]?.name !== "rect") {
     errors.push("VISUAL_STYLE: SVG must contain exactly one rect[data-canvas-background]");
@@ -185,12 +243,14 @@ export function diagramVisualStyleErrors(svg: string): string[] {
       if (raw === undefined || isNone(raw)) continue;
       const color = normalizedColor(raw);
       const permitsStructuralInk = color === DIAGRAM_VISUAL_STYLE.structuralGroupInk && isStructuralGroupElement(tag);
-      if (color !== DIAGRAM_VISUAL_STYLE.ink && color !== DIAGRAM_VISUAL_STYLE.canvasFill && !permitsStructuralInk) errors.push(`VISUAL_STYLE: ${tag.name} ${property} uses non-standard color ${raw}`);
-      if (color === DIAGRAM_VISUAL_STYLE.canvasFill && attribute(tag.source, "data-canvas-background") === undefined) errors.push(`VISUAL_STYLE: only the canvas background may use ${DIAGRAM_VISUAL_STYLE.canvasFill}`);
+      const permitsWhite = color === DIAGRAM_VISUAL_STYLE.canvasFill && (attribute(tag.source, "data-canvas-background") !== undefined || isNodeShape(tag) || isInsideMask(tag));
+      if (color !== DIAGRAM_VISUAL_STYLE.ink && !permitsWhite && !permitsStructuralInk) errors.push(`VISUAL_STYLE: ${tag.name} ${property} uses non-standard color ${raw}`);
+      if (color === DIAGRAM_VISUAL_STYLE.canvasFill && !permitsWhite) errors.push(`VISUAL_STYLE: only the canvas background, business node shapes, or mask content may use ${DIAGRAM_VISUAL_STYLE.canvasFill}`);
     }
     for (const property of ["opacity", "fill-opacity", "stroke-opacity"]) {
       const raw = attribute(tag.source, property);
-      if (raw !== undefined && Number(raw) !== 1) errors.push(`VISUAL_STYLE: ${tag.name} ${property} must be 1 when declared`);
+      const transparentMaskCutout = isInsideMask(tag) && property === "fill-opacity" && Number(raw) === 0;
+      if (raw !== undefined && Number(raw) !== 1 && !transparentMaskCutout) errors.push(`VISUAL_STYLE: ${tag.name} ${property} must be 1 when declared`);
     }
   }
 
@@ -206,15 +266,15 @@ export function diagramVisualStyleErrors(svg: string): string[] {
   const labelContainers = elements.filter((tag) => attribute(tag.source, "data-edge-label") !== undefined && !(tag.name === "path" && attribute(tag.source, "data-edge") !== undefined));
   if (labelContainers.some((tag) => tag.name !== "text")) errors.push("LABEL_STYLE: edge labels must be direct text elements without a frame or background container");
 
-  for (const tag of elements.filter((entry) => ["rect", "polygon", "ellipse", "circle"].includes(entry.name) && attribute(entry.source, "data-canvas-background") === undefined)) {
+  for (const tag of elements.filter((entry) => FRAME_ELEMENTS.has(entry.name) && attribute(entry.source, "data-canvas-background") === undefined && !isInsideMask(entry))) {
     requireFrameStyle(tag, `${tag.name} frame`, errors);
   }
-  for (const tag of elements.filter((entry) => ["line", "polyline"].includes(entry.name))) requireFrameStyle(tag, tag.name, errors);
+  for (const tag of elements.filter((entry) => ["line", "polyline"].includes(entry.name) && !isInsideMask(entry))) requireFrameStyle(tag, tag.name, errors);
 
   const edgePaths = elements.filter((tag) => tag.name === "path" && attribute(tag.source, "data-edge") !== undefined && attribute(tag.source, "data-edge-arrow") === undefined);
   for (const tag of edgePaths) requireFrameStyle(tag, `edge ${attribute(tag.source, "data-edge") || "unknown"}`, errors);
 
-  const directPathFrames = elements.filter((tag) => tag.name === "path" && attribute(tag.source, "data-node") !== undefined);
+  const directPathFrames = elements.filter((tag) => tag.name === "path" && attribute(tag.source, "data-node") !== undefined && !isInsideMask(tag));
   for (const tag of directPathFrames) requireFrameStyle(tag, `node ${attribute(tag.source, "data-node") || "unknown"}`, errors);
 
   const arrowPaths = elements.filter((tag) => tag.name === "path" && attribute(tag.source, "data-edge-arrow") !== undefined);

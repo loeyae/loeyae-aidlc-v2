@@ -302,6 +302,8 @@ function diagramContract(): Record<string, unknown> {
   const generationClosures: Record<string, unknown>[] = [];
   const routeContractReports: Record<string, unknown>[] = [];
   let changeImpactReviewsChecked = 0;
+  let structuralDiagramsChecked = 0;
+  const structuralEvidenceReports: Record<string, unknown>[] = [];
   let riskScore = 0;
   const riskReasons = new Set<string>();
 
@@ -812,6 +814,66 @@ function diagramContract(): Record<string, unknown> {
         edges.set(edgeId, edge);
       }
       const edgeEntries = [...edges.entries()];
+      const actualEdgeIntersections = new Set<string>();
+      const actualCollinearOverlaps = new Set<string>();
+      for (let firstIndex = 0; firstIndex < edgeEntries.length; firstIndex++) {
+        const [firstId, firstEdge] = edgeEntries[firstIndex];
+        const firstPoints = firstEdge.points as [number, number][];
+        for (let secondIndex = firstIndex + 1; secondIndex < edgeEntries.length; secondIndex++) {
+          const [secondId, secondEdge] = edgeEntries[secondIndex];
+          const secondPoints = secondEdge.points as [number, number][];
+          let overlap = false;
+          let intersection = false;
+          for (let firstPointIndex = 1; firstPointIndex < firstPoints.length; firstPointIndex++) {
+            for (let secondPointIndex = 1; secondPointIndex < secondPoints.length; secondPointIndex++) {
+              const relation = segmentRelation(firstPoints[firstPointIndex - 1], firstPoints[firstPointIndex], secondPoints[secondPointIndex - 1], secondPoints[secondPointIndex]);
+              if (relation === "overlap") overlap = true;
+              else if (segmentsIntersect(firstPoints[firstPointIndex - 1], firstPoints[firstPointIndex], secondPoints[secondPointIndex - 1], secondPoints[secondPointIndex])) intersection = true;
+            }
+          }
+          const pair = [firstId, secondId].sort().join(":");
+          if (overlap) actualCollinearOverlaps.add(pair);
+          else if (intersection) actualEdgeIntersections.add(pair);
+        }
+      }
+      if (actualCollinearOverlaps.size > 0) fail(`COLLINEAR_OVERLAP: diagram ${id} contains non-zero collinear overlap between edge pair(s) ${[...actualCollinearOverlaps].join(", ")}`);
+      for (const pair of actualEdgeIntersections) if (!crossingExceptions.has(pair.split(":").join("\u0000"))) fail(`EDGE_CROSSING: diagram ${id} contains an undeclared edge crossing ${pair}`);
+      for (const [key, [firstEdgeId, secondEdgeId]] of crossingExceptions) {
+        if (!edges.has(firstEdgeId) || !edges.has(secondEdgeId)) fail(`CROSSING_EXCEPTION: diagram ${id} references missing edge(s) ${firstEdgeId}/${secondEdgeId}`);
+        const actualKey = [firstEdgeId, secondEdgeId].sort().join(":");
+        if (!actualEdgeIntersections.has(actualKey)) fail(`CROSSING_EXCEPTION: diagram ${id} declares an exception that does not match an actual crossing ${firstEdgeId}/${secondEdgeId}`);
+        if (key !== actualKey.split(":").join("\u0000")) fail(`CROSSING_EXCEPTION: diagram ${id} crossing exception identity is inconsistent for ${firstEdgeId}/${secondEdgeId}`);
+      }
+      if (processTypes.has(diagram.diagramType)) {
+        const sideOf = (node: Record<string, any>): number => {
+          const coordinate = layoutDirection === "TB" ? node.x + node.width / 2 : node.y + node.height / 2;
+          return coordinate > layoutMainAxis + 1 ? 1 : coordinate < layoutMainAxis - 1 ? -1 : 0;
+        };
+        const pointSide = (point: [number, number]): number => {
+          const coordinate = layoutDirection === "TB" ? point[0] : point[1];
+          return coordinate > layoutMainAxis + 1 ? 1 : coordinate < layoutMainAxis - 1 ? -1 : 0;
+        };
+        const loopEdges = new Set((Array.isArray(layout.loopLanes) ? layout.loopLanes : []).flatMap((lane: Record<string, any>) => Array.isArray(lane.edgeIds) ? lane.edgeIds.map(String) : []));
+        for (const [edgeId, edge] of edgeEntries) {
+          if (loopEdges.has(edgeId)) continue;
+          const source = nodes.get(edge.from)!;
+          const target = nodes.get(edge.to)!;
+          const sourceSide = sideOf(source);
+          const targetSide = sideOf(target);
+          const sides = (edge.points as [number, number][]).map(pointSide).filter((side) => side !== 0);
+          let invalid = sourceSide !== 0 && targetSide !== 0 && (sourceSide === targetSide
+            ? sides.some((side) => side !== sourceSide)
+            : sides.slice(1).some((side, index) => side !== sides[index]));
+          if (sourceSide !== 0 && targetSide !== 0 && sourceSide !== targetSide) {
+            let switches = 0;
+            for (let pointIndex = 1; pointIndex < sides.length; pointIndex++) if (sides[pointIndex] !== sides[pointIndex - 1]) switches++;
+            invalid = switches > 1;
+          }
+          if (invalid && !sideSwitchExceptions.has(edgeId)) fail(`SIDE_SWITCH: diagram ${id} edge ${edgeId} leaves its declared side channel or performs an unapproved cross-axis return`);
+          if (!invalid && sideSwitchExceptions.has(edgeId)) fail(`SIDE_SWITCH_EXCEPTION: diagram ${id} declares a side-switch exception that does not match edge ${edgeId}`);
+        }
+        for (const edgeId of sideSwitchExceptions) if (!edges.has(edgeId)) fail(`SIDE_SWITCH_EXCEPTION: diagram ${id} references missing edge ${edgeId}`);
+      }
       if (processTypes.has(diagram.diagramType)) {
         for (const merge of (Array.isArray(layout.mergeNodes) ? layout.mergeNodes : []) as Record<string, any>[]) {
           const incoming = edgeEntries.filter(([, edge]) => edge.to === merge.nodeId);
@@ -938,7 +1000,9 @@ function diagramContract(): Record<string, unknown> {
           source_target_normal_errors: [],
           non_manhattan_paths: [],
           node_crossings: [],
-          unauthorized_crossings: [],
+          unauthorized_crossings: [...actualEdgeIntersections].filter((pair) => !crossingExceptions.has(pair.split(":").sort().join("\u0000"))),
+          declared_crossings: [...crossingExceptions.keys()],
+          collinear_overlaps: [...actualCollinearOverlaps],
           label_collisions: [],
         });
         if (expected.routeContract.direction && layoutDirection && expected.routeContract.direction !== layoutDirection) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} reading direction differs from independent expected contract`);
@@ -1488,6 +1552,111 @@ function diagramContract(): Record<string, unknown> {
       if (unsafeSvg.test(svg) || !/<svg\b[^>]*\bviewBox=["'][^"']+["']/i.test(svg) || !/\brole=["']img["']/i.test(svg) || !/<title\b/i.test(svg) || !/<desc\b/i.test(svg)) fail(`diagram ${id} SVG fails static safety or accessibility checks`);
       const visualStyleErrors = diagramVisualStyleErrors(svg);
       if (visualStyleErrors.length > 0) fail(`diagram ${id} ${visualStyleErrors.join("; ")}`);
+      const structuralGroupIds = [...groups.entries()].filter(([, group]) => group.styleRole === "structural").map(([groupId]) => groupId);
+      const structuralNodeIntersections: string[] = [];
+      const structuralEdgeIntersections: string[] = [];
+      const structuralLabelIntersections: string[] = [];
+      const structuralArrowIntersections: string[] = [];
+      const structuralFrameErrors: string[] = [];
+      const structuralNodeFillErrors: string[] = [];
+      const structuralLayerErrors: string[] = [];
+      const structuralMaskErrors: string[] = [];
+      const structuralBoundary = (rectangle: Rectangle): Array<[[number, number], [number, number]]> => [
+        [[rectangle.left, rectangle.top], [rectangle.right, rectangle.top]],
+        [[rectangle.right, rectangle.top], [rectangle.right, rectangle.bottom]],
+        [[rectangle.right, rectangle.bottom], [rectangle.left, rectangle.bottom]],
+        [[rectangle.left, rectangle.bottom], [rectangle.left, rectangle.top]],
+      ];
+      const boundaryTouchesRectangle = (boundary: Array<[[number, number], [number, number]]>, rectangle: Rectangle): boolean => boundary.some(([first, second]) => segmentIntersectsRectangle(first, second, rectangle) || segmentOverlapsRectangleBoundary(first, second, rectangle));
+      const boundaryTouchesEdge = (boundary: Array<[[number, number], [number, number]]>, points: [number, number][]): boolean => boundary.some(([first, second]) => points.slice(1).some((_, index) => segmentRelation(first, second, points[index], points[index + 1]) !== "none"));
+      const groupFrameMatch = (groupId: string): RegExpMatchArray | undefined => [...svg.matchAll(/<[^>]*\bdata-group=["']([^"']+)["'][^>]*>/gi)].find((match) => match[1] === groupId && /data-group-style-role=["']structural["']/i.test(match[0]));
+      const tagMatch = (pattern: RegExp, value: string, exclude?: RegExp): RegExpMatchArray | undefined => [...svg.matchAll(pattern)].find((match) => match[1] === value && (!exclude || !exclude.test(match[0])));
+      const nodeFragment = (nodeId: string): string => {
+        const match = [...svg.matchAll(/<[^>]*\bdata-node=["']([^"']+)["'][^>]*>/gi)].find((candidate) => candidate[1] === nodeId);
+        if (!match || match.index === undefined) return "";
+        const end = svg.indexOf("</g>", match.index);
+        return svg.slice(match.index, end >= 0 ? end : match.index + match[0].length);
+      };
+      const whiteFill = (value: string | undefined): boolean => ["#fff", "#ffffff", "white", "rgb(255,255,255)", "rgb(255, 255, 255)"].includes(String(value || "").trim().toLowerCase());
+      const structuralErrors: string[] = [];
+      for (const groupId of structuralGroupIds) {
+        const rectangle = groupRectangles.get(groupId);
+        const frame = groupFrameMatch(groupId);
+        const frameSource = frame?.[0] || "";
+        const frameIndex = frame?.index ?? -1;
+        if (!rectangle || !frame) {
+          structuralFrameErrors.push(groupId + ":missing-frame-geometry");
+          continue;
+        }
+        if (!/\bfill=["']none["']/i.test(frameSource) || !/\bstroke=["']#666666["']/i.test(frameSource) || !/\bstroke-width=["']2(?:\.0+)?["']/i.test(frameSource)) structuralFrameErrors.push(groupId);
+        const boundary = structuralBoundary(rectangle);
+        for (const [nodeId, nodeRectangle] of nodeRectangles) {
+          if (!boundaryTouchesRectangle(boundary, nodeRectangle)) continue;
+          structuralNodeIntersections.push(`${groupId}:${nodeId}`);
+          const fragment = nodeFragment(nodeId);
+          const shapeFill = fragment.match(/<(?:rect|polygon|ellipse|circle|path)\b[^>]*\bfill=["']([^"']+)["']/i)?.[1];
+          if (!whiteFill(shapeFill)) structuralNodeFillErrors.push(`${groupId}:${nodeId}`);
+          const nodeIndex = [...svg.matchAll(/<[^>]*\bdata-node=["']([^"']+)["'][^>]*>/gi)].find((match) => match[1] === nodeId)?.index ?? -1;
+          if (frameIndex > nodeIndex) structuralLayerErrors.push(`${groupId}:node:${nodeId}`);
+        }
+        for (const [edgeId, edge] of edgeEntries) {
+          const points = edge.points as [number, number][];
+          if (!boundaryTouchesEdge(boundary, points)) continue;
+          structuralEdgeIntersections.push(`${groupId}:${edgeId}`);
+          const edgeTag = tagMatch(/<[^>]*\bdata-edge=["']([^"']+)["'][^>]*>/gi, edgeId, /data-edge-arrow=/i);
+          if ((frameIndex >= 0 && (edgeTag?.index ?? -1) >= 0 && frameIndex > (edgeTag?.index ?? -1))) structuralLayerErrors.push(`${groupId}:edge:${edgeId}`);
+        }
+        for (const [edgeId, label] of labelRectangles) {
+          if (!boundaryTouchesRectangle(boundary, label)) continue;
+          structuralLabelIntersections.push(`${groupId}:${edgeId}`);
+          const labelTag = tagMatch(/<text[^>]*\bdata-edge-label=["']([^"']+)["'][^>]*>/gi, edgeId);
+          if ((frameIndex >= 0 && (labelTag?.index ?? -1) >= 0 && frameIndex > (labelTag?.index ?? -1))) structuralLayerErrors.push(`${groupId}:label:${edgeId}`);
+        }
+        for (const [edgeId, edge] of edgeEntries) {
+          const target = nodes.get(edge.to)!;
+          const tip = portPoint(target, edge.toPort, edge.toPortOffset || 0);
+          const arrowRectangle: Rectangle = edge.toPort === "top"
+            ? { left: tip[0] - 5, top: tip[1] - 10, right: tip[0] + 5, bottom: tip[1] }
+            : edge.toPort === "bottom"
+              ? { left: tip[0] - 5, top: tip[1], right: tip[0] + 5, bottom: tip[1] + 10 }
+              : edge.toPort === "left"
+                ? { left: tip[0] - 10, top: tip[1] - 5, right: tip[0], bottom: tip[1] + 5 }
+                : { left: tip[0], top: tip[1] - 5, right: tip[0] + 10, bottom: tip[1] + 5 };
+          if (!boundaryTouchesRectangle(boundary, arrowRectangle)) continue;
+          structuralArrowIntersections.push(`${groupId}:${edgeId}`);
+          const arrowTag = tagMatch(/<[^>]*\bdata-edge-arrow=["']([^"']+)["'][^>]*>/gi, edgeId);
+          if ((frameIndex >= 0 && (arrowTag?.index ?? -1) >= 0 && frameIndex > (arrowTag?.index ?? -1))) structuralLayerErrors.push(`${groupId}:arrow:${edgeId}`);
+        }
+        const foregroundIntersectionCount = structuralEdgeIntersections.filter((value) => value.startsWith(`${groupId}:`)).length
+          + structuralLabelIntersections.filter((value) => value.startsWith(`${groupId}:`)).length
+          + structuralArrowIntersections.filter((value) => value.startsWith(`${groupId}:`)).length;
+        if (foregroundIntersectionCount > 0) {
+          const maskId = frameSource.match(/\bmask=["']url\(#([^)]*)\)["']/i)?.[1];
+          const maskFragment = maskId ? [...svg.matchAll(/<mask\b[^>]*\bid=["']([^"']+)["'][^>]*>[\s\S]*?<\/mask>/gi)].find((match) => match[1] === maskId)?.[0] || "" : "";
+          if (!maskId || !/\bmask-type=["']alpha["']/i.test(maskFragment) || !/\bmaskUnits=["']userSpaceOnUse["']/i.test(maskFragment) || !/\bmaskContentUnits=["']userSpaceOnUse["']/i.test(maskFragment) || !/\b(?:fill-opacity|opacity)=["']0["']/i.test(maskFragment)) structuralMaskErrors.push(`${groupId}:missing-valid-cutout`);
+        }
+      }
+      structuralErrors.push(...structuralFrameErrors.map((value) => `STRUCTURAL_FRAME_STYLE: diagram ${id} structural frame ${value} is invalid`));
+      structuralErrors.push(...structuralNodeFillErrors.map((value) => `STRUCTURAL_NODE_FILL: diagram ${id} structural intersection node ${value} is not opaque white`));
+      structuralErrors.push(...structuralLayerErrors.map((value) => `STRUCTURAL_LAYER_ORDER: diagram ${id} structural frame is painted above ${value}`));
+      structuralErrors.push(...structuralMaskErrors.map((value) => `STRUCTURAL_MASK: diagram ${id} structural mask ${value}`));
+      if (structuralErrors.length > 0) fail(structuralErrors.join("; "));
+      if (structuralGroupIds.length > 0) structuralDiagramsChecked += 1;
+      structuralEvidenceReports.push({
+        diagram_id: id,
+        status: structuralGroupIds.length > 0 ? "passed" : "not_applicable",
+        group_ids: structuralGroupIds,
+        node_intersections: structuralNodeIntersections,
+        edge_intersections: structuralEdgeIntersections,
+        label_intersections: structuralLabelIntersections,
+        arrow_intersections: structuralArrowIntersections,
+        frame_style_status: structuralGroupIds.length > 0 ? "passed" : "not_applicable",
+        node_fill_status: structuralGroupIds.length > 0 ? "passed" : "not_applicable",
+        layer_order_status: structuralGroupIds.length > 0 ? "passed" : "not_applicable",
+        mask_status: structuralMaskErrors.length > 0 ? "failed" : structuralGroupIds.length > 0 ? "passed" : "not_applicable",
+        mask_coverage_status: structuralGroupIds.length > 0 && (structuralEdgeIntersections.length > 0 || structuralLabelIntersections.length > 0 || structuralArrowIntersections.length > 0) ? "passed" : "not_applicable",
+        visual_evidence: { required: false, screenshots: [], snapshots: [], pixel_verified: false },
+      });
       const renderedNodeIds = [...svg.matchAll(/\bdata-node=["']([^"']+)["']/g)].map((match) => match[1]);
       const renderedEdgeTags = [...svg.matchAll(/<[^>]*\bdata-edge=["']([^"']+)["'][^>]*>/g)].map((match) => ({ id: match[1], tag: match[0] }));
       const renderedEdgeElements = renderedEdgeTags.filter((entry) => !/\bdata-edge-arrow=["']/i.test(entry.tag));
@@ -1592,6 +1761,18 @@ function diagramContract(): Record<string, unknown> {
     target_operation_required: false, fr_mapping_complete: true,
     design_notes_valid: true, layout_contract_valid: true, main_flow_valid: true, loop_lanes_valid: true, decision_exit_valid: true, annotation_mapping_valid: true, migration_status: "passed", port_paths_valid: true,
     geometry_status: "passed", node_text_fit_status: "passed", group_capacity_status: "passed", visual_style_status: "passed", edge_label_placement_status: "passed", edge_intersection_status: "passed", collinear_overlap_status: "passed", target_port_direction_status: "passed", target_port_approach_status: "passed", routing_minimality_status: "passed", side_switch_status: "passed", change_impact_review_status: changeImpactReviewsChecked > 0 ? "passed" : "not_applicable", visible_arrow_mapping_status: "passed",
+    structural_occlusion_status: structuralDiagramsChecked > 0 ? "passed" : "not_applicable",
+    structural_node_intersections: structuralEvidenceReports.flatMap((report) => Array.isArray(report.node_intersections) ? report.node_intersections : []),
+    structural_edge_intersections: structuralEvidenceReports.flatMap((report) => Array.isArray(report.edge_intersections) ? report.edge_intersections : []),
+    structural_label_intersections: structuralEvidenceReports.flatMap((report) => Array.isArray(report.label_intersections) ? report.label_intersections : []),
+    structural_arrow_intersections: structuralEvidenceReports.flatMap((report) => Array.isArray(report.arrow_intersections) ? report.arrow_intersections : []),
+    structural_frame_style_status: structuralDiagramsChecked > 0 ? "passed" : "not_applicable",
+    structural_node_fill_status: structuralDiagramsChecked > 0 ? "passed" : "not_applicable",
+    structural_layer_order_status: structuralDiagramsChecked > 0 ? "passed" : "not_applicable",
+    structural_mask_status: structuralDiagramsChecked > 0 ? "passed" : "not_applicable",
+    structural_mask_coverage_status: structuralDiagramsChecked > 0 ? "passed" : "not_applicable",
+    structural_visual_evidence: { required: false, screenshots: [], snapshots: [], pixel_verified: false },
+    structural_evidence_reports: structuralEvidenceReports,
     render_preflight_status: "passed",
     render_status: "unverified",
     render_status_reason: "no static SVG renderer is configured",

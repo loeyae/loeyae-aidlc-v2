@@ -33,6 +33,28 @@ def canonicalize_svg(content: str) -> str:
                 parent.remove(child)
 
     parent_by_child = {child: parent for parent in root.iter() for child in parent}
+
+    def ancestors(element: ET.Element):
+        current = parent_by_child.get(element)
+        while current is not None:
+            yield current
+            current = parent_by_child.get(current)
+
+    def ancestor_value(element: ET.Element, attribute: str):
+        return next((candidate.get(attribute) for candidate in ancestors(element) if candidate.get(attribute) is not None), None)
+
+    def inside_mask(element: ET.Element) -> bool:
+        return any(_local_name(candidate) == "mask" for candidate in ancestors(element))
+
+    def is_node_shape(element: ET.Element, name: str) -> bool:
+        return name in {"rect", "polygon", "ellipse", "circle", "path"} and (
+            element.get("data-node") is not None
+            or ancestor_value(element, "data-node") is not None
+        )
+
+    def node_white_fill(element: ET.Element) -> bool:
+        fills = [element.get("fill"), element.get("data-node-fill"), ancestor_value(element, "data-node-fill"), ancestor_value(element, "fill")]
+        return any(value is not None and value.strip().lower() in {"#fff", "#ffffff", "white", "rgb(255,255,255)", "rgb(255, 255, 255)"} for value in fills)
     label_containers = [
         element
         for element in root.iter()
@@ -103,6 +125,9 @@ def canonicalize_svg(content: str) -> str:
 
     for element in root.iter():
         name = _local_name(element)
+        if inside_mask(element):
+            # Mask base/cutout 的白色与透明度是 structural alpha 契约的一部分，不能按业务对象样式重写。
+            continue
         if name == "text":
             edge_label = element.get("data-edge-label") is not None
             structural_group_title = (
@@ -122,7 +147,8 @@ def canonicalize_svg(content: str) -> str:
                 element.get("data-group") is not None
                 and element.get("data-group-style-role") == "structural"
             )
-            element.set("fill", "none")
+            node_shape = is_node_shape(element, name)
+            element.set("fill", "#ffffff" if node_shape and node_white_fill(element) else "none")
             element.set("stroke", "#666666" if structural_group_frame else "#000000")
             element.set("stroke-width", "2")
         if (
@@ -133,8 +159,8 @@ def canonicalize_svg(content: str) -> str:
             element.set("fill", "none")
             element.set("stroke", "#000000")
             element.set("stroke-width", "2")
-        if name == "path" and element.get("data-node") is not None:
-            element.set("fill", "none")
+        if name == "path" and is_node_shape(element, name):
+            element.set("fill", "#ffffff" if node_white_fill(element) else "none")
             element.set("stroke", "#000000")
             element.set("stroke-width", "2")
 

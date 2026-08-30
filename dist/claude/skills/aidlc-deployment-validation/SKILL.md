@@ -1,6 +1,7 @@
 ---
 name: aidlc-deployment-validation
 description: "对生成的交付配置执行静态验证和可执行性检查；不负责实际部署和阶段完成判定。"
+triggers: 部署配置验证, 交付配置校验, 发布配置检查, deployment validation, 部署可执行性检查
 ---
 
 # 部署准备验证能力

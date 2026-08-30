@@ -4,7 +4,7 @@ description: >
   Loeyae AI-DLC v2 workflow orchestrator. Engine-driven development lifecycle
   with gate-enforced completeness (no manual approval gates). Activate with
   "使用 AI-DLC" or "aidlc" keywords.
-triggers: aidlc, AI-DLC, 使用 AI-DLC, 继续上次的工作, 认领单元, 功能设计, 用户故事, 架构设计, 单元生成, 代码审查, 逆向工程, 根因分析, 修改功能, 变更需求
+triggers: aidlc, AI-DLC, 使用 AI-DLC, 继续上次的工作, 认领单元, 功能设计, 用户故事, 用户场景, 验收标准, PRD, 产品需求文档, 需求文档合成, 架构设计, 应用设计, 组件设计, 服务设计, 单元生成, 工作单元, 单元拆分, 依赖矩阵, 代码审查, 代码评审, Code Review, 逆向工程, 存量系统分析, 代码库分析, 根因分析, 系统化调试, 故障定位, 测试用例派生, UC-D, 测试场景, 构建测试证据, 画图, 图表设计, 业务流程图, 系统架构图, 流程图, Figma, UI 原型, HTML Mock, 组件映射, 前端平台规范, 需求估算, 工作量估算, 人天估算, 功能点估算, 功能点分析, FPA, 项目排期, 粗粒度排期, 排期预测, 交付预测, 发布预测, 交付配置, 部署配置生成, 部署配置验证, 发布配置检查
 ---
 
 # Loeyae AI-DLC v2 Orchestrator (Kiro Crew Harness)

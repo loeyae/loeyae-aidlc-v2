@@ -1,6 +1,7 @@
 ---
 name: aidlc-user-story-generation
 description: "将已批准需求转化为以用户为中心的故事和验收标准；不负责 I7 路由和完成判定。"
+triggers: 用户故事, 故事生成, 验收标准, 用户场景, user story, acceptance criteria
 ---
 
 # 用户故事生成能力

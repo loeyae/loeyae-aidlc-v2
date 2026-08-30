@@ -1,6 +1,7 @@
 ---
 name: aidlc-build-test-evidence
 description: "执行真实构建和测试命令并生成结构化证据；不负责 C8 路由和完成判定。"
+triggers: 构建测试证据, 测试证据, 构建证据, 生成测试报告, build test evidence, 受控测试证据
 ---
 
 # 构建测试证据能力

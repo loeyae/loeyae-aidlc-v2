@@ -1,6 +1,7 @@
 ---
 name: aidlc-systematic-debugging
 description: "基于可复现失败和原始证据执行系统化根因分析并给出最小修复与验证结果；不负责故障路由和阶段决策。"
+triggers: 系统化调试, 根因分析, 故障定位, 问题排查, debugging, reproducible failure
 ---
 
 # 系统化调试能力

@@ -1,6 +1,7 @@
 ---
 name: aidlc-test-case-derivation
 description: "从已批准的产品行为或技术风险来源派生可执行 UC-D 测试用例；不负责 I13 路由、审批和完成判定。"
+triggers: 测试用例派生, UC-D, 测试场景, 验收测试设计, test case derivation, 测试用例设计
 ---
 
 # 测试用例派生能力

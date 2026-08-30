@@ -1,6 +1,7 @@
 ---
 name: aidlc-ui-mock-design
 description: "基于已批准 UI 页面计划生成 AI-DLC HTML Mock 骨架或完整内容；不负责 I9 路由和审批。"
+triggers: UI 原型, HTML Mock, 页面原型, 交互原型, UI mock, 页面 Mock
 ---
 
 # HTML UI Mock 设计能力

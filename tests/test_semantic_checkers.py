@@ -322,8 +322,8 @@ def test_structural_group_capacity_and_style_contract_pass() -> None:
         ))
         write(project, "docs/aidlc/inception/requirements/business-flows.svg", """<svg viewBox="0 0 400 300" width="400" height="300" role="img">
 <title>Requirements flow</title><desc>FR-001 business flow</desc>
-<defs><marker id="arrow"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs>
-<rect id="group-lane" data-group="lane" data-group-role="exclusive" data-group-style-role="structural" x="24" y="24" width="210" height="180"/>
+<defs><marker id="arrow"><path d="M0 0 L6 4 L0 8 Z"/></marker><mask id="lane-mask" mask-type="alpha" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse"><rect x="24" y="24" width="210" height="180" fill="#ffffff"/><rect x="230" y="100" width="8" height="18" fill="#ffffff" fill-opacity="0"/></mask></defs>
+<rect id="group-lane" data-group="lane" data-group-role="exclusive" data-group-style-role="structural" x="24" y="24" width="210" height="180" mask="url(#lane-mask)"/>
 <text data-group-title="lane" data-group-style-role="structural" data-text-id="group-lane-title" x="80" y="50">结构阶段</text>
 <g data-node="start" data-node-shape="round"><rect x="74" y="84" width="100" height="50"/><text data-text-id="node-start" x="124" y="109">开始</text></g>
 <g data-node="done" data-node-shape="round"><rect x="260" y="84" width="100" height="50"/><text data-text-id="node-done" x="310" y="109">完成</text></g>
@@ -529,7 +529,7 @@ def test_directional_layout_contracts() -> None:
         ("tb-branch-layer", "TB", lambda diagram, _: (diagram["nodes"][4].update({"y": 650}), diagram["edges"][3].update({"points": [[660, 340], [700, 340], [700, 650]]})), "BRANCH_LAYER"),
         ("tb-branch-port", "TB", lambda diagram, _: (diagram["edges"][3].update({"toPort": "right", "arrowTarget": "active:right", "points": [[660, 340], [800, 340], [800, 725], [750, 725]], "label": {"text": "通过", "x": 730, "y": 320, "fontSize": 14}})), "BRANCH_PORT"),
         ("lr-branch-layer", "LR", lambda diagram, _: (diagram["nodes"][3].update({"x": 550}), diagram["edges"][2].update({"points": [[350, 300], [350, 325], [500, 325], [500, 375], [550, 375]]}), diagram["edges"][4].update({"points": [[650, 375], [750, 375], [750, 275]]})), "BRANCH_LAYER"),
-        ("lr-branch-port", "LR", lambda diagram, _: (diagram["edges"][1].update({"toPort": "right", "arrowTarget": "physical:right", "points": [[350, 200], [350, 150], [650, 150], [650, 125], [600, 125]], "label": {"text": "实物", "x": 500, "y": 130, "fontSize": 14}})), "BRANCH_PORT"),
+        ("lr-branch-port", "LR", lambda diagram, _: (diagram["edges"][1].update({"toPort": "right", "arrowTarget": "physical:right", "points": [[350, 200], [350, 150], [650, 150], [650, 125], [600, 125]], "label": {"text": "实物", "x": 500, "y": 130, "fontSize": 14}})), "COLLINEAR_OVERLAP"),
         ("global-annotations", "TB", lambda diagram, _: diagram.update({"annotations": [{"id": "layout-note", "text": "布局说明", "x": 500, "y": 400}]}), "must not define global annotations"),
     ]
     for name, direction, mutation, expected in cases:

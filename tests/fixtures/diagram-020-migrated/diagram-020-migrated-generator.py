@@ -68,6 +68,13 @@ GROUP_LAYOUT = {
     "diagram-020-group-operation": (1760, 330, 1320, 1500),
 }
 
+# 仅覆盖业务连线穿越 structural 顶边的实际交点；不改变节点、边或标签几何。
+STRUCTURAL_MASK_CUTOUTS = {
+    "diagram-020-group-darkword": (656, 326, 8, 8),
+    "diagram-020-group-hotword": (1296, 326, 8, 8),
+    "diagram-020-group-operation": (2416, 326, 8, 8),
+}
+
 LABEL_PLACEMENTS = {
     "diagram-020-edge-006": (1100, 1055),
     "diagram-020-edge-007": (1020, 949),
@@ -416,15 +423,30 @@ def manifest(nodes: dict[str, dict], edges: list[dict]) -> dict:
     }
 
 
+def structural_mask_defs(groups: list[dict]) -> str:
+    masks = []
+    for group in groups:
+        x, y, width, height = group["x"], group["y"], group["width"], group["height"]
+        cutout_x, cutout_y, cutout_width, cutout_height = STRUCTURAL_MASK_CUTOUTS[group["id"]]
+        masks.append(
+            f'<mask id="{group["id"]}-mask" mask-type="alpha" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse">'
+            f'<rect data-structural-mask-base="true" x="{x:g}" y="{y:g}" width="{width:g}" height="{height:g}" fill="#ffffff" />'
+            f'<rect data-structural-cutout="true" x="{cutout_x:g}" y="{cutout_y:g}" width="{cutout_width:g}" height="{cutout_height:g}" fill="#ffffff" fill-opacity="0" />'
+            '</mask>'
+        )
+    return "".join(masks)
+
+
 def render_svg(nodes: dict[str, dict], edges: list[dict], groups: list[dict]) -> str:
     parts = [f'''<svg xmlns="http://www.w3.org/2000/svg" width="{CANVAS['width']}" height="{CANVAS['height']}" viewBox="0 0 {CANVAS['width']} {CANVAS['height']}" role="img" aria-labelledby="diagram-020-migrated-title diagram-020-migrated-desc" data-diagram-id="{DIAGRAM_ID}" data-diagram-type="flowchart">
 <title id="diagram-020-migrated-title">图表 020｜搜索域运营流程（迁移重绘版）</title>
 <desc id="diagram-020-migrated-desc">搜索域运营对暗纹词、搜索热词以及黑名单、白名单和排序策略的配置流程，包含校验反馈与生效状态判断。</desc>
 <rect data-canvas-background="true" x="0" y="0" width="100%" height="100%" fill="#ffffff" stroke="none" />
-<defs><marker id="arrow" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" viewBox="0 0 10 10" refX="10" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#000000" /></marker></defs>''']
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" viewBox="0 0 10 10" refX="10" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#000000" /></marker>{structural_mask_defs(groups)}</defs>''']
     for group in groups:
         x, y, w, h = group["x"], group["y"], group["width"], group["height"]
-        parts.append(f'<g id="group-{group["id"]}" data-group-container="{group["id"]}"><rect data-group="{group["id"]}" data-group-role="{group["semanticType"]}" data-group-style-role="{group["styleRole"]}" x="{x}" y="{y}" width="{w}" height="{h}" fill="none" stroke="#666666" stroke-width="2" /><text data-group-title="{group["id"]}" data-group-style-role="{group["styleRole"]}" x="{x + 24}" y="{y + 30}" text-anchor="start" dominant-baseline="middle" font-family="{FONT}" font-size="16" fill="#666666">{html.escape(group["label"])}</text></g>')
+        mask_attr = f' mask="url(#{group["id"]}-mask)"'
+        parts.append(f'<g id="group-{group["id"]}" data-group-container="{group["id"]}"><rect data-group="{group["id"]}" data-group-role="{group["semanticType"]}" data-group-style-role="{group["styleRole"]}" x="{x}" y="{y}" width="{w}" height="{h}" fill="none" stroke="#666666" stroke-width="2"{mask_attr} /><text data-group-title="{group["id"]}" data-group-style-role="{group["styleRole"]}" x="{x + 24}" y="{y + 30}" text-anchor="start" dominant-baseline="middle" font-family="{FONT}" font-size="16" fill="#666666">{html.escape(group["label"])}</text></g>')
     for edge in edges:
         path = "M " + " L ".join(f"{point[0]:g} {point[1]:g}" for point in edge["points"])
         label_attr = f' data-edge-label="{edge["id"]}"' if "label" in edge else ""

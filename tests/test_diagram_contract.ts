@@ -80,6 +80,20 @@ const structuralGroupSvg = canonicalSvg.replace(
   '  <rect id="group-lane" data-group="lane" data-group-role="exclusive" data-group-style-role="structural" x="10" y="10" width="180" height="100" fill="none" stroke="#666666" stroke-width="2" />\n  <text data-group-title="lane" data-group-style-role="structural" x="34" y="30" font-family="Microsoft YaHei, 微软雅黑, sans-serif" font-size="16" fill="#666666">阶段</text>\n  <g data-node="node-a"',
 );
 assert.deepEqual(diagramVisualStyleErrors(structuralGroupSvg), []);
+const whiteNodeSvg = canonicalSvg.replace('x="20" y="20" width="60" height="30" fill="none"', 'x="20" y="20" width="60" height="30" fill="#ffffff"');
+assert.deepEqual(diagramVisualStyleErrors(whiteNodeSvg), []);
+const maskedStructuralGroupSvg = structuralGroupSvg
+  .replace(
+    'x="10" y="10" width="180" height="100" fill="none" stroke="#666666" stroke-width="2"',
+    'x="10" y="10" width="180" height="100" fill="none" stroke="#666666" stroke-width="2" mask="url(#lane-mask)"',
+  )
+  .replace(
+    '<text data-group-title="lane"',
+    '<mask id="lane-mask" mask-type="alpha" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse"><rect x="10" y="10" width="180" height="100" fill="#ffffff" /><rect x="8" y="18" width="64" height="34" fill="#ffffff" fill-opacity="0" /></mask>\n  <text data-group-title="lane"',
+  );
+assert.deepEqual(diagramVisualStyleErrors(maskedStructuralGroupSvg), []);
+const invalidStructuralMask = maskedStructuralGroupSvg.replace('mask-type="alpha"', 'mask-type="luminance"');
+assert.ok(diagramVisualStyleErrors(invalidStructuralMask).some((error) => /STRUCTURAL_OCCLUSION/.test(error)));
 const structuralGroupFailures: Array<[string, string, RegExp]> = [
   ["gray-node", structuralGroupSvg.replace('x="20" y="20" width="60" height="30" fill="none" stroke="#000000"', 'x="20" y="20" width="60" height="30" fill="none" stroke="#666666"'), /non-standard color|stroke must/],
   ["gray-edge", structuralGroupSvg.replace('d="M20 80 L180 80" fill="none" stroke="#000000"', 'd="M20 80 L180 80" fill="none" stroke="#666666"'), /non-standard color|stroke must/],

@@ -1,6 +1,7 @@
 ---
 name: aidlc-prd-synthesis
 description: "基于 Discovery 和已有 Inception 产物合成面向业务方的 PRD 文档；不负责 PRD 审批和阶段完成判定。"
+triggers: PRD, 产品需求文档, 需求文档合成, 需求整理, PRD synthesis, 业务需求文档
 ---
 
 # PRD 合成能力

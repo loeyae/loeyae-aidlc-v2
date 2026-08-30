@@ -13,9 +13,15 @@
 
 ## 统一视觉门禁
 
-每个新建、调整和迁移图表必须同时通过以下固定基线：画布 `#ffffff` 且完全不透明；除画布外所有框体 `fill="none"`；业务节点、业务边界、连线、箭头、边标签和业务文字 `#000000`；只有显式 `styleRole: structural` 且 SVG 具有匹配 `data-group`/`data-group-role`/`data-group-style-role`/`data-group-title` 的非业务分组框体及标题可为 `#666666`；微软雅黑为首选字体；框体文字 `16`、边标签 `14`；框体与连线线宽 `2`；marker/overlay `10 × 10`；边标签无框、位于所属线段中点法向且实际 bbox 净空至少 `6`；不存在全局图例或全局备注层。
+每个新建、调整和迁移图表必须同时通过以下固定基线：画布 `#ffffff` 且完全不透明；structural 框体及标题 `fill="none" stroke="#666666"`，业务节点默认 `fill="none"`，但 structural 交点节点必须使用不透明 `fill="#ffffff"`；业务节点边框、业务边界、连线、箭头、边标签和业务文字 `#000000`；微软雅黑为首选字体；框体文字 `16`、边标签 `14`；框体与连线线宽 `2`；marker/overlay `10 × 10`；边标签无框、位于所属线段中点法向且实际 bbox 净空至少 `6`；不存在全局图例或全局备注层。structural 框体与连线、标签或箭头相交时必须按 [Structural Region Occlusion Contract](common-structural-region-occlusion-contract.md) 验证实际断口和绘制层级。
 
 source checker 必须检查显式 SVG 属性、sidecar 禁用字段、标签源坐标与路径中点关系，并输出 `global_decorations_absent: true`、`visual_style_status: "passed"`、`edge_label_placement_status: "passed"` 后才可进入 `STATIC_PASS`。Chrome Provider 必须从真实 DOM 读取 computed style、`getBBox()` 与 `getScreenCTM()`，在三视图逐一复核相同约束；`visualStyleErrors` 或 `labelPlacementErrors` 非空必须阻断 `VISUAL_PASS`。source 与 Provider 任一层缺失均不得由另一层代替。
+
+## Structural Region Occlusion 验收
+
+存在 `data-group-style-role="structural"` 时，source checker 必须单独记录 structural 遮挡结果：枚举框体与节点、连线、标签、箭头的实际交点；允许相交节点使用 `#ffffff`，禁止白色扩散到其他对象；检查 structural 框体/标题的 `#666666`、业务前景层级、alpha mask 单位和透明 cutout。mask 只能附着 structural 框体，不能附着业务连线或标签。源级通过不代表真实像素遮挡通过。
+
+Chrome Provider 在 `normal`、`fit`、`zoom` 中必须读取 computed style、实际 DOM bbox 和绘制顺序，验证相交节点白底、框体在业务对象下方不可见、标签法向净空至少 `6`、箭头不被框体遮挡，并保存包含实际交点的截图和 snapshot。不得只使用 `elementFromPoint` 判断 SVG mask；截图或实际像素证据缺失时保持 `UNVERIFIED`。任一视图的 structural 遮挡错误都必须阻断该视图和最终 `PASS`。
 
 ## 验证顺序
 
@@ -101,7 +107,7 @@ FAIL > NEEDS_CAPABILITY > UNVERIFIED > STATIC_PASS > PASS
 Semantic QA 是不启动浏览器的结构化检查，至少覆盖：
 
 - 图表 ID、标题、描述、画布、节点、连线和分组；并确认 `legend` 缺失、`annotations[]` 为空；
-- 节点 ID、形状、标签、坐标、尺寸、画布边界、稳定引用及 `fill="none"`、黑色描边、`stroke-width="2"`；
+- 节点 ID、形状、标签、坐标、尺寸、画布边界、稳定引用及默认 `fill="none"` 或 structural 交点要求的 `fill="#ffffff"`、黑色描边、`stroke-width="2"`；
 - 连线 ID、`from` / `to`、端口、类型、路径点、黑色 `2` 线宽、`10 × 10` 箭头和无框标签；
 - `diagramType`、`designNotes`、视觉语义和 `designNotes.layout`；
 - SVG 不存在 `data-legend-item`、`data-note`，expected 的 `legend_ids`、`annotation_ids` 均为空；
@@ -279,9 +285,9 @@ Geometry QA 使用源坐标、路径点和结构化文本估算，不声称完�
 - `visual_style_status`：白色不透明画布、无填充框体、业务对象黑色、结构性分组受控深灰、微软雅黑、`16/14` 字号和 `2` 线宽通过；
 - `edge_label_placement_status`：无框边标签位于所属线段中点法向且满足 `6` 单位净空。
 
-确定性 checker 使用稳定错误码区分失败原因：`MAIN_FLOW_TRACE`、`LOOP_LANE`、`DECISION_SHAPE`、`DECISION_EXIT`、`PORT_DIRECTION`、`PORT_APPROACH`、`ROUTING_MINIMALITY`、`SIDE_SWITCH`、`SIDE_SWITCH_EXCEPTION`、`CHANGE_IMPACT_REVIEW`、`EDGE_CROSSING`、`CROSSING_EXCEPTION`、`COLLINEAR_OVERLAP`、`REDUNDANT_PATH_POINT` 和 `EDGE_NODE_COLLISION`。`EDGE_CROSSING` 仅针对未声明或未满足必要交叉可读性条件的交叉；`CROSSING_EXCEPTION` 处理缺失、重复、非法或未实际发生的例外；`COLLINEAR_OVERLAP` 始终不得降级为普通交叉，端点接触也不能掩盖同一边对之间的非零共线重叠。
+确定性 checker 使用稳定错误码区分失败原因：`MAIN_FLOW_TRACE`、`LOOP_LANE`、`DECISION_SHAPE`、`DECISION_EXIT`、`PORT_DIRECTION`、`PORT_APPROACH`、`ROUTING_MINIMALITY`、`SIDE_SWITCH`、`SIDE_SWITCH_EXCEPTION`、`CHANGE_IMPACT_REVIEW`、`EDGE_CROSSING`、`CROSSING_EXCEPTION`、`COLLINEAR_OVERLAP`、`REDUNDANT_PATH_POINT`、`EDGE_NODE_COLLISION`、`STRUCTURAL_FRAME_STYLE`、`STRUCTURAL_NODE_FILL`、`STRUCTURAL_LAYER_ORDER`、`STRUCTURAL_MASK` 和 `STRUCTURAL_MASK_COVERAGE`。`EDGE_CROSSING` 仅针对未声明或未满足必要交叉可读性条件的交叉；`CROSSING_EXCEPTION` 处理缺失、重复、非法或未实际发生的例外；`COLLINEAR_OVERLAP` 始终不得降级为普通交叉，端点接触也不能掩盖同一边对之间的非零共线重叠。
 
-当目标操作为 `preview` 或浏览器 `render` 时，Chrome DevTools Provider 必须对实际 DOM/SVG 执行：节点和边集合的精确映射、edge-node crossing、edge-edge intersection（仅接受 sidecar 已声明且实际命中的必要交叉）、共线重叠、端口首末方向和目标外侧接近、边 bbox、同侧通道/跨轴折返、标签与无关边 bbox、边标签中点法向净空、箭头 overlay `10 × 10` bbox 及其被无关节点、后绘制标签或分组边界遮挡、`text`/`tspan` bbox 越界与重叠、分组标题映射/标题区净空/成员与内部路径标签容量、白色不透明画布、框体/连线 computed fill/stroke/strokeWidth、文字 computed font/fill/size、marker 尺寸、全局图例/备注缺失、`contentBBox`、水平溢出、判定 diamond 和出口数量，以及 sidecar 声明的主流程和回路边覆盖。业务对象必须实际为黑色；只有匹配的结构性分组框体及标题允许实际为 `#666666`。不能用源坐标结果代替这些浏览器检查。
+当目标操作为 `preview` 或浏览器 `render` 时，Chrome DevTools Provider 必须对实际 DOM/SVG 执行：节点和边集合的精确映射、edge-node crossing、edge-edge intersection（仅接受 sidecar 已声明且实际命中的必要交叉）、共线重叠、端口首末方向和目标外侧接近、边 bbox、同侧通道/跨轴折返、标签与无关边 bbox、边标签中点法向净空、箭头 overlay `10 × 10` bbox 及其被无关节点、后绘制标签或分组边界遮挡、structural 框体与节点/连线/标签/箭头交点、相交节点 computed `fill`、structural 框体 computed `stroke`、mask 单位和 cutout 覆盖、`text`/`tspan` bbox 越界与重叠、分组标题映射/标题区净空/成员与内部路径标签容量、白色不透明画布、框体/连线 computed fill/stroke/strokeWidth、文字 computed font/fill/size、marker 尺寸、全局图例/备注缺失、`contentBBox`、水平溢出、判定 diamond 和出口数量，以及 sidecar 声明的主流程和回路边覆盖。structural 遮挡必须结合最新截图或实际像素证据，不能只依赖 `elementFromPoint`；业务对象必须实际为黑色，只有相交节点允许不透明白底，只有匹配的结构性分组框体及标题允许实际为 `#666666`。不能用源坐标结果代替这些浏览器检查。
 
 Provider Request 的 `target_reading_environment.viewports` 必须同时声明 `normal`、`fit`、`zoom` 三个对象。实际运行缺少任何一个视图时必须阻断；只有三个视图全部检查成功，且截图/快照均已生成，才可以原子更新 `provider_status: "passed"`。页面纵向滚动允许，但水平溢出、对象越界、文字/箭头不可见或被遮挡都失败。dry-run 只验证请求和执行计划，不产生浏览器通过证据。
 

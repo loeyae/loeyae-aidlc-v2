@@ -1,7 +1,7 @@
 ---
 name: aidlc-diagram-design
 description: "独立图表设计能力：依据 Blueprinter SVG 设计规则，根据已确认语义交付可审阅的 SVG 源、可选语义伴随清单和 Provider Request；不负责阶段路由和完成判定。"
-triggers: 画图, 架构图, 流程图, 时序图, 状态图, ER 图, 部署图, diagram, architecture diagram, flowchart, sequence diagram, svg
+triggers: 画图, 图表设计, 业务流程图, 系统架构图, 架构图, 流程图, 泳道图, 时序图, 状态图, ER 图, 部署图, diagram, architecture diagram, flowchart, sequence diagram, svg
 ---
 
 # 图表设计能力
@@ -28,13 +28,14 @@ Independent Capability — not an AIDLC phase.
 
 1. 发布包中的 `knowledge/design/common-diagram-design-standards.md`；
 2. 发布包中的 `knowledge/design/common-svg-diagram-standards.md`；
-3. `constraints` 包含 `delivery-business-flow` 时，自动应用交付型流程约束。
+3. 发布包中的 `knowledge/design/common-structural-region-occlusion-contract.md`；
+4. `constraints` 包含 `delivery-business-flow` 时，自动应用交付型流程约束。
 
 历史 Mermaid 或二维文本图只在迁移时按需读取；不能作为新输出格式。
 
 ## 执行
 
-按加载的设计标准执行完整的图表设计流程：先从可追溯业务来源生成独立 expected contract，再确定 `TB`/`LR` 主阅读方向、主轴、业务层级、首层对称组和判断分支端口；随后提取 actual 节点/边、计算实际内容边界、生成 SVG 源、`.diagram.json` 语义伴随清单、Provider Request 和 generation provenance，并执行 expected-vs-actual 源级验证。`legend` 必须省略、`annotations[]` 必须省略或为空，SVG 不得生成 `data-legend-item` 或 `data-note`；较长说明写入相邻 Markdown、Design Notes 或 evidence。route contract 的折点按方向变化次数记录，不能使用 `points.length`。生成器或配置变更后必须重新生成 expected、sidecar、SVG、Provider Request 和其他声明的派生产物，记录 generator/version、config summary/digest、source refs/outputs，再重跑受影响验收。生成器不得以固定窗口高度、整体缩放、缩小字号或压缩层级换取“一屏显示”，纵向图可以扩展画布并允许页面纵向滚动。具体步骤和验收矩阵以加载的两份规则文件为准，本文件不复制。当 `target_operations` 包含 `preview` 或浏览器侧 `render` 时，源级 `diagram-contract` evidence 的业务、结构和几何层通过且 expected 存在后调用 `loeyae-aidlc diagram-provider run --request <provider-request.json> --evidence <diagram-contract.json>`；该运行器负责常规/适合窗口/放大视图的浏览器证据采集和 evidence 状态更新，`export` 不由 Chrome DevTools Provider 承担。
+按加载的设计标准执行完整的图表设计流程：先从可追溯业务来源生成独立 expected contract，再确定 `TB`/`LR` 主阅读方向、主轴、业务层级、首层对称组和判断分支端口；随后提取 actual 节点/边、计算实际内容边界、生成 SVG 源、`.diagram.json` 语义伴随清单、Provider Request 和 generation provenance，并执行 expected-vs-actual 源级验证。`legend` 必须省略、`annotations[]` 必须省略或为空，SVG 不得生成 `data-legend-item` 或 `data-note`；较长说明写入相邻 Markdown、Design Notes 或 evidence。route contract 的折点按方向变化次数记录，不能使用 `points.length`。生成器或配置变更后必须重新生成 expected、sidecar、SVG、Provider Request 和其他声明的派生产物，记录 generator/version、config summary/digest、source refs/outputs，再重跑受影响验收。生成器不得以固定窗口高度、整体缩放、缩小字号或压缩层级换取“一屏显示”，纵向图可以扩展画布并允许页面纵向滚动。具体步骤和验收矩阵以加载的三份规则文件为准，本文件不复制。当 structural / swimlane / phase region 存在时，必须先枚举其与节点、连线、标签和箭头的实际交点，再生成节点白底与框体 alpha 断口；目标操作包含 `preview` 或浏览器侧 `render` 时，Provider 必须保存三视图截图和 snapshot 作为可复核证据。当 `target_operations` 包含 `preview` 或浏览器侧 `render` 时，源级 `diagram-contract` evidence 的业务、结构和几何层通过且 expected 存在后调用 `loeyae-aidlc diagram-provider run --request <provider-request.json> --evidence <diagram-contract.json>`；该运行器负责常规/适合窗口/放大视图的浏览器证据采集和 evidence 状态更新，`export` 不由 Chrome DevTools Provider 承担。
 
 
 ## 连接线驱动布局执行流程
@@ -55,9 +56,9 @@ Independent Capability — not an AIDLC phase.
 
 ## 统一视觉输出（强制）
 
-所有新建、调整和迁移图必须输出不透明 `#ffffff` 画布；除画布外所有框体 `fill="none"`；业务节点、业务边界、流程线、箭头、边标签和业务文字统一 `#000000`；仅非业务的 structural group / swimlane / phase region 可在 sidecar 声明 `styleRole: "structural"`，并在 SVG 框体使用匹配的 `data-group`、`data-group-role`、`data-group-style-role="structural"`、标题使用 `data-group-title` 后统一采用 `#666666`。`business-boundary` 和未声明对象不得使用灰色；颜色不得表达业务状态、责任、风险、确认或流程含义。字体统一 `Microsoft YaHei, 微软雅黑, sans-serif`；框体内文字统一 `16`，边标签统一 `14`；框体和连线线宽统一 `2`；marker 与独立箭头 overlay 统一 `10 × 10` 且 marker 使用 `markerUnits="userSpaceOnUse"`。边标签必须是直接 `<text data-edge-label>`，使用 `text-anchor="middle"`、`dominant-baseline="middle"`，位于所属线段中点并沿法向保持至少 `6` 个源单位净空，禁止背景框、填充、描边、遮罩和光晕。
+所有新建、调整和迁移图必须输出不透明 `#ffffff` 画布；业务节点、判断和业务边界默认 `fill="none"`，只有与 structural 框边实际相交的业务节点形状可使用不透明 `fill="#ffffff"`；业务节点、业务边界、流程线、箭头、边标签和业务文字统一 `#000000`；仅非业务的 structural group / swimlane / phase region 可在 sidecar 声明 `styleRole: "structural"`，并在 SVG 框体使用匹配的 `data-group`、`data-group-role`、`data-group-style-role="structural"`、标题使用 `data-group-title` 后统一采用 `#666666`。节点白底只用于遮挡 structural 背景，不表达业务状态、责任、风险、确认或流程含义；`business-boundary` 和未声明对象不得使用灰色；颜色不得表达业务状态、责任、风险、确认或流程含义。字体统一 `Microsoft YaHei, 微软雅黑, sans-serif`；框体内文字统一 `16`，边标签统一 `14`；框体和连线线宽统一 `2`；marker 与独立箭头 overlay 统一 `10 × 10` 且 marker 使用 `markerUnits="userSpaceOnUse"`。边标签必须是直接 `<text data-edge-label>`，使用 `text-anchor="middle"`、`dominant-baseline="middle"`，位于所属线段中点并沿法向保持至少 `6` 个源单位净空，禁止背景框、填充、描边、遮罩和光晕。structural 框体与连线、标签或箭头相交时必须按 [Structural Region Occlusion Contract](../../knowledge/design/common-structural-region-occlusion-contract.md) 使用实际交点 alpha 断口或带间隙路径。
 
-视觉差异必须由节点、边或分组的就地文字表达，不生成全局图例或全局备注层。有形状/线型语义差异时，`legendDecision.status` 使用 `exempt` 并提供 `inlineSemanticEvidence`；无差异时使用 `not-needed`；`required` 非法。source checker 的 `global_decorations_absent`、`visual_style_status`、`edge_label_placement_status` 必须通过；实际 Provider 还必须保证每个视图的 `visualStyleErrors` 和 `labelPlacementErrors` 为空。
+视觉差异必须由节点、边或分组的就地文字表达，不生成全局图例或全局备注层。有形状/线型语义差异时，`legendDecision.status` 使用 `exempt` 并提供 `inlineSemanticEvidence`；无差异时使用 `not-needed`；`required` 非法。source checker 的 `global_decorations_absent`、`visual_style_status`、`edge_label_placement_status` 和（存在 structural 区域时）`structural_occlusion_status`、`structural_frame_style_status`、`structural_node_fill_status`、`structural_layer_order_status`、`structural_mask_status`、`structural_mask_coverage_status` 必须通过或明确为 `not_applicable`；实际 Provider 还必须保证每个视图的 `visualStyleErrors`、`labelPlacementErrors` 和 structural 错误数组为空，并保存交点截图和 snapshot。
 
 ## 已有图表的冗余连线修复模式
 
@@ -139,7 +140,7 @@ Independent Capability — not an AIDLC phase.
 
 交叉、回路、端口例外和分支例外必须逐项验证 `object`、`type`、`business_reason`、`geometric_reason`、`scope` 和真实 `visual_evidence`；空理由、未命中实际偏离、适用范围不明或只有截图字段名都应阻断或保持 `UNVERIFIED`。
 
-验证顺序不得跳过实际几何：先运行 `diagram-contract` checker，确认主流程、回路、判定出口、edge crossing、共线重叠、端口方向、统一视觉样式、边标签位置和箭头映射状态；目标操作要求 `preview`/浏览器 `render` 时，再使用 Provider 对实际 DOM 的 edge-node、edge-edge、computed style、bbox、标签中点法向净空、画布不透明度、文字、水平溢出和箭头遮挡执行检查。Provider Request 必须声明 `normal`、`fit`、`zoom`，三视图全部成功后才能记录浏览器 PASS；Provider 不可用时保留 `UNVERIFIED`/`NEEDS_CAPABILITY`，不得手写或修改 evidence 冒充 Producer 结果。
+验证顺序不得跳过实际几何：先运行 `diagram-contract` checker，确认主流程、回路、判定出口、edge crossing、共线重叠、端口方向、统一视觉样式、边标签位置、箭头映射和 structural 遮挡状态；目标操作要求 `preview`/浏览器 `render` 时，再使用 Provider 对实际 DOM 的 edge-node、edge-edge、structural 框体交点、相交节点 computed fill、mask 单位与 cutout 覆盖、绘制层级、computed style、bbox、标签中点法向净空、画布不透明度、文字、水平溢出和箭头遮挡执行检查，并以最新截图或实际像素证据复核 structural 框体未透过业务前景。Provider Request 必须声明 `normal`、`fit`、`zoom`，三视图全部成功且截图/快照均已生成后才能记录浏览器 PASS；Provider 不可用时保留 `UNVERIFIED`/`NEEDS_CAPABILITY`，不得手写或修改 evidence 冒充 Producer 结果。
 
 
 ## 过程图方向预分析与树干—树冠布局
@@ -195,4 +196,4 @@ expected contract 使用 `primary_flow`、结构化 `branch_groups`，actual `.d
 
 过程图先冻结来源确认的 `primaryFlow`。没有确认主干时返回 `NEEDS_CONTEXT`；允许使用最长分支作为布局候选，但不得把它当作业务事实。随后生成确定性的 `branchLayoutPlan`，按主流程优先、路径长度、稳定 edge ID 排序；分支组必须整组外移或进入局部 lane，节点移动后重算全部 incident edges、端口、标签和障碍净空。真实反馈/重试关系才可进入 `loopLanes`，同侧 lane 按实际中心偏移满足共享 `laneGap`。
 
-验证闭环必须覆盖 expected、sidecar、SVG、静态 checker 和 Provider：静态层检查形状尺寸、实体/端口/障碍/lane gap 及 branch plan 对照；Provider 的 `normal`、`fit`、`zoom` 分别检查真实 DOM 边界和文本 bbox。未执行 Chrome Provider 的三视图时，最终状态不得写为完整 `PASS`。
+验证闭环必须覆盖 expected、sidecar、SVG、静态 checker 和 Provider：静态层检查形状尺寸、实体/端口/障碍/lane gap、branch plan 和 structural 节点白底/框体 mask 对照；Provider 的 `normal`、`fit`、`zoom` 分别检查真实 DOM 边界、文本 bbox、structural 交点、computed fill/stroke、mask cutout 和截图像素证据。未执行 Chrome Provider 的三视图时，最终状态不得写为完整 `PASS`。

@@ -1,6 +1,7 @@
 ---
 name: aidlc-code-review
 description: "对指定变更执行 Spec/Standards 双轴或最终全局代码审查并返回可追溯报告；不负责 Construction 触发和完成判定。"
+triggers: 代码审查, 代码评审, Code Review, code review, Spec 审查, Standards 审查
 ---
 
 # 代码审查能力

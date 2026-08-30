@@ -1,6 +1,7 @@
 ---
 name: aidlc-figma-design
 description: "基于已批准 UI 页面计划创建 Figma 设计，或只读登记外部设计稿；不负责 I9 路由和审批。"
+triggers: Figma, Figma 设计, UI 设计稿, 外部设计稿, Figma 页面
 ---
 
 # Figma 设计能力

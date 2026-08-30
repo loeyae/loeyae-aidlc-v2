@@ -1,6 +1,7 @@
 ---
 name: aidlc-delivery-config-generation
 description: "基于确认的部署决策生成与目标环境匹配的交付配置文件；不负责部署审批和阶段路由。"
+triggers: 交付配置, 部署配置生成, 发布配置, deployment config, 生成部署文件
 ---
 
 # 交付配置生成能力

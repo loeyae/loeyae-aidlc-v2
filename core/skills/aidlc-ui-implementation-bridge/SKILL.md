@@ -1,6 +1,7 @@
 ---
 name: aidlc-ui-implementation-bridge
 description: "将 HTML Mock 或 Figma 设计翻译为目标平台代码的前端平台规范和组件映射；不负责 Construction 路由和代码审查。"
+triggers: Figma 转代码, Mock 转代码, 前端平台规范, 组件映射, 设计还原, UI 实现规范
 ---
 
 # UI 实现桥接能力

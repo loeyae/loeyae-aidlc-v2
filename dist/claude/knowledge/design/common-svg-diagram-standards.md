@@ -24,9 +24,9 @@ SVG 是本仓图表的目标源格式，但本标准不规定 AIDLC 必须生成
 </svg>
 ```
 
-- 画布必须恰有一个覆盖完整 viewport 的不透明白色 `rect[data-canvas-background]`；只有该元素可使用白色填充。
-- 节点、判断和业务边界统一显式使用 `fill="none" stroke="#000000" stroke-width="2"`；泳道、阶段和区域框仅在其 `data-group-style-role="structural"`、同时存在 `data-group` 与 `data-group-role` 时可使用 `stroke="#666666"`。白色或其他填充一律禁止。
-- 连线、生命线和其他连接器统一显式使用 `fill="none" stroke="#000000" stroke-width="2"`；虚线仅增加 `stroke-dasharray`，不得改变颜色或线宽。
+- 画布必须恰有一个覆盖完整 viewport 的不透明白色 `rect[data-canvas-background]`；业务节点形状在命中 structural 遮挡交点时也可使用白色填充，但其他业务对象不得使用白色。
+- 节点、判断和业务边界默认显式使用 `fill="none" stroke="#000000" stroke-width="2"`；当 structural 框边与节点相交、共线或穿越时，节点形状必须改为 `fill="#ffffff"`，节点边框和文字仍为黑色。泳道、阶段和区域框仅在其 `data-group-style-role="structural"`、同时存在 `data-group` 与 `data-group-role` 时可使用 `stroke="#666666"`。
+- 连线、生命线和其他连接器统一显式使用 `fill="none" stroke="#000000" stroke-width="2"`；虚线仅增加 `stroke-dasharray`，不得改变颜色或线宽。structural 框体与连线、标签或箭头相交时，框体必须使用按实际交点计算的 alpha mask 或带间隙路径让位。
 - 所有业务文字和边标签显式声明 `font-family="Microsoft YaHei, 微软雅黑, sans-serif" fill="#000000"`。结构性分组标题必须是 `<text data-group-title="<group-id>" data-group-style-role="structural" ... fill="#666666">`；框体内文字、节点文字和分组/泳道标题统一 `font-size="16"`，边标签统一 `font-size="14"`。
 - 边标签直接使用 `<text data-edge-label="<edge-id>" ... text-anchor="middle" dominant-baseline="middle">`；禁止用 `<g>` 包裹标签身份，禁止标签 `rect`、填充、描边、遮罩、滤镜或光晕。
 - 标签锚点位于所选线段中点并沿法向偏移；实际文字 bbox 与线段至少保持 `6` 个源坐标单位净空。横线标签只能位于上/下侧，竖线标签只能位于左/右侧；多折边选择最接近路径中部且可容纳文字的线段。
@@ -210,7 +210,8 @@ SVG 必须是静态、独立和安全的：
 
 - 布局完成后，以节点、分组边界、文字、无背景边标签、路径点和箭头尖端的联合边界计算 `canvas`；画布不能预先固定后再把内容强行塞入；
 - 所有可见元素必须落在 `viewBox` 内，并保留 `common-diagram-design-standards.md` 所定义的稳定内边距；
-- 绘制顺序固定为不透明白色画布 → 无填充分组/泳道边界 → 连线主体 → 无填充节点及节点文字 → 无背景边标签 → 箭头尖端 overlay。分组边界与标题只能使用预留留白，不能覆盖内部节点、文字、标签或箭头；
+- 绘制顺序固定为不透明白色画布 → structural 分组/泳道/阶段边界及标题 → 连线主体 → 业务节点及节点文字（相交节点使用不透明白底）→ 无背景边标签 → 箭头尖端 overlay。structural 框体属于背景层，不能覆盖或透过业务前景；与连线、标签或箭头相交时必须按 [Structural Region Occlusion Contract](common-structural-region-occlusion-contract.md) 生成实际交点断口。
+- structural 遮挡契约的 mask 只能附着于 structural 框体，使用 `mask-type="alpha"`、`maskUnits="userSpaceOnUse"` 和 `maskContentUnits="userSpaceOnUse"`；透明 cutout 必须根据实际交点、stroke bbox 或文字/箭头 bbox 计算，不能使用固定大范围遮挡。
 - 画布不得为全局图例或备注预留区域；发现对应元素即为 `VISUAL_STYLE` 失败；
 - 连接器必须位于白色画布之上；边标签没有背景框，文字实际 bbox 必须与所有连线保持净空；节点及其文字必须保持可读，不得被分组或无关标签遮挡；
 - 不得用整体缩放、负坐标裁切或把元素移出 `viewBox` 修复空间不足。应重算布局、扩展对象或拆图。
@@ -219,7 +220,7 @@ SVG 必须是静态、独立和安全的：
 
 - 箭头尖端必须作为 `10 × 10` 源坐标 overlay 独立绘制，并通过 `data-edge-arrow`、`data-edge` 和 `data-arrow-target="<node.id>:<port>"` 反查所属连线及目标端口；双向关系必须为两个方向分别追溯。
 - 箭头尖端必须落在目标端口的可连接边界方向上，与目标端口和 `points` 末点一致；箭头不得悬空、深入节点内部或因路径缩短产生方向误读。
-- 箭头尖端不得被节点边框、标签或无填充分组边界覆盖；静态源检查应验证绘制层，Provider/浏览器检查应验证实际可见性。
+- 箭头尖端不得被节点边框、标签或 structural 分组边界覆盖；structural 框边与箭头实际相交时必须按 Structural Region Occlusion Contract 使用交点 alpha 断口或带间隙路径让位；静态源检查应验证绘制层，Provider/浏览器检查应验证实际可见性和最新截图证据。
 - 如果 Provider 不支持独立箭头 overlay，必须通过缩短主体路径、调整 marker 参数或其他已验证方式保证箭头完整可见，并重新执行端点和碰撞检查；marker 只是绘制机制，不能取代 `data-edge-arrow` 追溯。Provider 必须将 marker 所属的连接器包在等价的 `data-edge-arrow` 追溯结构中，或返回 `NEEDS_CAPABILITY`；不得通过改变颜色、增加装饰层或放宽统一尺寸掩盖箭头遮挡。
 
 ### 节点与决策文字
@@ -262,7 +263,7 @@ SVG 必须是静态、独立和安全的：
 - 分组标题区高度至少 `48` 个源坐标单位；成员、内部标签和内部路径不得进入该区域；
 - 内部内容到左右边界各至少 `40`，到底部至少 `32`；标题文字宽度加左右各 `24` 的标题内边距必须完全位于框内；
 - `GROUP_TITLE_OVERFLOW`、`GROUP_HEADER_CLEARANCE`、`GROUP_CAPACITY` 分别阻断标题不适配、内容侵入标题区，以及成员/内部路径/标签贴边或溢出；修复方式是扩展区域、增加局部 lane、重排或拆图，不能缩小文字或整体缩放；
-- 结构性区域必须在框体使用 `data-group="<id>" data-group-role="<semanticType>" data-group-style-role="structural"`，在标题使用匹配的 `data-group-title` 和 `data-group-style-role`。其框体和标题统一 `#666666`；`business-boundary` 及所有业务对象统一 `#000000`。
+- 结构性区域必须在框体使用 `data-group="<id>" data-group-role="<semanticType>" data-group-style-role="structural"`，在标题使用匹配的 `data-group-title` 和 `data-group-style-role`。其框体和标题统一 `#666666`；`business-boundary` 及所有业务对象统一 `#000000`。框体与业务对象的交点必须遵守 [Structural Region Occlusion Contract](common-structural-region-occlusion-contract.md)；只有相交业务节点形状允许使用不透明 `#ffffff` 背景。
 
 ### 分组和混合图型的静态/人工边界
 
@@ -297,7 +298,7 @@ SVG 必须是静态、独立和安全的：
 - 无不必要直线折点；无不改变方向、绕障碍或完成端口连接的共线冗余路径点；
 - 无同侧多边使用同一精确端点；无相反方向边共享同一端口；
 - 无 `fromPort`/`toPort` 与实际几何不一致；
-- 无箭头尖端被节点边框、标签或无填充分组边界覆盖，且箭头不悬空、不深入节点内部；
+- 无箭头尖端被节点边框、标签或 structural 分组边界覆盖；structural 交点必须由节点白底或框体 alpha 断口/带间隙路径处理，且箭头不悬空、不深入节点内部；
 - 所有 Sequence 消息均连接到对应生命线，消息首末 `x` 与生命线 `x` 一致；
 - 所有可见对象，包括路径、文字、无背景边标签和箭头尖端，均位于 `viewBox` 内。
 
@@ -332,9 +333,9 @@ Kiro Power 无内置 SVG Provider 时，只能引用安装包中已有的静态 
 | 类别 | 必查项目 | PASS 的最低证据 |
 |---|---|---|
 | 结构 | SVG 可解析；`viewBox`/尺寸有效；存在唯一不透明白色画布；ID、端口引用和标签归属唯一有效；全局图例/备注不存在；分组 ID、语义类型、直接成员声明和层级关系有效；全部元素在画布内 | 实际解析/静态检查输出或可复查的脚本结果，且能从 SVG 标识反查源对象 |
-| 几何 | 节点和菱形文字未越界；路径无穿越；未声明 nested/overlay/cross-cutting 的分组不交叠；分组标题/边界不遮挡业务信息；无背景边标签位于线段中点法向且净空不少于 `6`；箭头为 `10 × 10`；无非预期重叠、裁切或空白 | 结构化几何检查、渲染器检查或可复查的手工测量；目标 Provider 几何未执行时标记 `UNVERIFIED` |
+| 几何 | 节点和菱形文字未越界；路径无穿越；未声明 nested/overlay/cross-cutting 的分组不交叠；分组标题/边界不遮挡业务信息，structural 交点有节点白底或框体断口；无背景边标签位于线段中点法向且净空不少于 `6`；箭头为 `10 × 10`；无非预期重叠、裁切或空白 | 结构化几何检查、渲染器检查或可复查的手工测量；目标 Provider 几何未执行时标记 `UNVERIFIED` |
 | 语义 | 源与 SVG 的节点/边数量、ID、形状、方向、端口、分支标签、状态转换和边界一致；视觉差异均有就地文字和 `inlineSemanticEvidence`；互斥分组无共享成员；贯穿关注点不会被表达为业务域成员；图型混合有拆图/保留单图决策 | 源—SVG 对照记录、Design Notes、已确认事实映射和图型/分组静态检查结果 |
-| 视觉 | 常规、适合窗口、放大三种状态下，白色画布不透明；框体无填充；线、箭头、文字为黑色；微软雅黑与 `16/14` 字号、`2` 线宽、无框标签和 `10 × 10` 箭头均可辨识，业务主体不被裁切或遮挡 | 每种状态的目标环境、缩放、时间与截图/可定位观察记录；未执行 Provider/浏览器检查必须是 `UNVERIFIED` |
+| 视觉 | 常规、适合窗口、放大三种状态下，白色画布不透明；structural 框体和标题为 `#666666`，相交节点使用不透明白底，线、箭头、标签和业务文字为黑色；微软雅黑与 `16/14` 字号、`2` 线宽、无框标签和 `10 × 10` 箭头均可辨识，业务主体不被裁切或遮挡 | 每种状态的目标环境、缩放、时间与截图/可定位观察记录；未执行 Provider/浏览器检查必须是 `UNVERIFIED` |
 
 ### 三视图与滚动验收
 

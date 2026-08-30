@@ -182,7 +182,7 @@ function saveState(state: WorkflowState): void {
 
 function createInitialState(scope: string): WorkflowState {
   return {
-    version: "2.0.1",
+    version: "2.0.2",
     scope,
     depth: "standard",
     current_phase: "ideation",
@@ -883,6 +883,11 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
           for (const field of requiredPassedFields) if (evidence[field] !== "passed") errors.push(`${field} must be "passed"`);
           if (!["passed", "not_applicable"].includes(String(evidence.change_impact_review_status))) errors.push('change_impact_review_status must be "passed" or "not_applicable"');
           if (!['passed', 'unverified'].includes(String(evidence.render_status))) errors.push('render_status must be "passed" or "unverified"');
+          const structuralStatusFields = ["structural_occlusion_status", "structural_frame_style_status", "structural_node_fill_status", "structural_layer_order_status", "structural_mask_status", "structural_mask_coverage_status"];
+          for (const field of structuralStatusFields) if (!["passed", "not_applicable"].includes(String(evidence[field]))) errors.push(`${field} must be "passed" or "not_applicable"`);
+          for (const field of ["structural_node_intersections", "structural_edge_intersections", "structural_label_intersections", "structural_arrow_intersections"]) if (!Array.isArray(evidence[field])) errors.push(`${field} must be an array`);
+          const structuralVisualEvidence = asRecord(evidence.structural_visual_evidence);
+          if (!structuralVisualEvidence || typeof structuralVisualEvidence.required !== "boolean" || !Array.isArray(structuralVisualEvidence.screenshots) || !Array.isArray(structuralVisualEvidence.snapshots) || typeof structuralVisualEvidence.pixel_verified !== "boolean") errors.push("structural_visual_evidence must contain required, screenshots, snapshots and pixel_verified");
           if (asNumber(evidence.unresolved) !== 0) errors.push("unresolved must be 0");
           const gateStatuses = asRecord(evidence.gate_statuses);
           if (!final.legacy && !gateStatuses) errors.push("gate_statuses is required for the new diagram contract producer");

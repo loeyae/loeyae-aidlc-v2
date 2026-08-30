@@ -8,7 +8,7 @@ evidence_path: .aidlc/evidence/<stage-slug>/diagram-contract.json
 # diagram-contract
 
 ## 目的
-验证需求流程图和应用设计图遵循 V1 SVG/Diagram 契约：稳定 ID、主阅读方向、主轴、业务层级、端口、分支、连通性、分组、统一单色视觉、无全局图例/备注、viewBox、FR 映射和 Provider 状态均有结构化证据。纵向滚动允许，水平溢出、裁切、对象越界、标签压线和不可读失败。
+验证需求流程图和应用设计图遵循 V1 SVG/Diagram 契约：稳定 ID、主阅读方向、主轴、业务层级、端口、分支、连通性、分组、统一单色视觉、structural / swimlane / phase region 遮挡、无全局图例/备注、viewBox、FR 映射和 Provider 状态均有结构化证据。纵向滚动允许，水平溢出、裁切、对象越界、标签压线、structural 背景穿透和不可读失败。
 
 ## Evidence 路径
 
@@ -60,6 +60,22 @@ evidence_path: .aidlc/evidence/<stage-slug>/diagram-contract.json
   "global_decorations_absent": true,
   "visual_style_status": "passed",
   "edge_label_placement_status": "passed",
+  "structural_occlusion_status": "not_applicable",
+  "structural_node_intersections": [],
+  "structural_edge_intersections": [],
+  "structural_label_intersections": [],
+  "structural_arrow_intersections": [],
+  "structural_frame_style_status": "not_applicable",
+  "structural_node_fill_status": "not_applicable",
+  "structural_layer_order_status": "not_applicable",
+  "structural_mask_status": "not_applicable",
+  "structural_mask_coverage_status": "not_applicable",
+  "structural_visual_evidence": {
+    "required": false,
+    "screenshots": [],
+    "snapshots": [],
+    "pixel_verified": false
+  },
   "migration_status": "passed",
   "port_paths_valid": true,
   "geometry_status": "passed",
@@ -69,7 +85,7 @@ evidence_path: .aidlc/evidence/<stage-slug>/diagram-contract.json
 }
 ```
 
-`legend_valid` 与 `annotation_mapping_valid` 是兼容输出字段：新契约中它们为 `true` 仅表示全局图例/备注完全不存在，不表示已生成或映射这些层。`global_decorations_absent`、`visual_style_status` 和 `edge_label_placement_status` 是新 source gate，缺失或失败时不能输出 `STATIC_PASS`。
+`legend_valid` 与 `annotation_mapping_valid` 是兼容输出字段：新契约中它们为 `true` 仅表示全局图例/备注完全不存在，不表示已生成或映射这些层。`global_decorations_absent`、`visual_style_status` 和 `edge_label_placement_status` 是新 source gate，缺失或失败时不能输出 `STATIC_PASS`。存在 `data-group-style-role="structural"` 时，`structural_occlusion_status` 及其交点数组必须由受控 checker 生成；`structural_node_fill_status`、`structural_frame_style_status`、`structural_layer_order_status`、`structural_mask_status` 和 `structural_mask_coverage_status` 必须分别记录节点白底、框体样式、绘制层级、mask 约束和实际交点 cutout 覆盖。没有 structural 框体时这些字段可为 `not_applicable`。源级状态不能替代 Provider 的最新截图/像素证据；目标操作要求 `preview`/浏览器 `render` 时，`structural_visual_evidence` 必须列出每个 `normal`、`fit`、`zoom` 的截图和 snapshot 路径，且 `pixel_verified` 只能由真实 Provider 运行写入。
 
 `final_status` 只有 `PASS`、`STATIC_PASS`、`UNVERIFIED`、`NEEDS_CAPABILITY`、`FAIL`。`status: "passed"` 是受控 producer 的外层写入结果，不是最终验收状态。新格式必须同时输出 `gate_statuses.structure`、`gate_statuses.route_contract`、`gate_statuses.geometry`、`gate_statuses.visual` 和 `gate_statuses.overall`；源级通过时前三层分别为 `STRUCTURE_PASS`、`ROUTE_CONTRACT_PASS`、`GEOMETRY_PASS`，只有真实三视图成功时 visual 才能为 `VISUAL_PASS`，完整通过时 overall 才能为 `OVERALL_PASS`。`PASS` 必须同时有 expected contract、业务语义、源结构、几何和本次真实 Provider 的 `normal`、`fit`、`zoom` 截图/快照；`STATIC_PASS` 不能替代 `PASS`。缺少来源、解析或证据为 `UNVERIFIED`；Provider 能力不可用为 `NEEDS_CAPABILITY`；发现问题为 `FAIL`。旧 `SOURCE_READY` 读取时只映射为 `STATIC_PASS`。
 
@@ -154,7 +170,23 @@ Provider Request 使用 version `1`，最小结构如下：
   "visible_arrow_mapping_status": "passed",
   "global_decorations_absent": true,
   "visual_style_status": "passed",
-  "edge_label_placement_status": "passed"
+  "edge_label_placement_status": "passed",
+  "structural_occlusion_status": "not_applicable",
+  "structural_node_intersections": [],
+  "structural_edge_intersections": [],
+  "structural_label_intersections": [],
+  "structural_arrow_intersections": [],
+  "structural_frame_style_status": "not_applicable",
+  "structural_node_fill_status": "not_applicable",
+  "structural_layer_order_status": "not_applicable",
+  "structural_mask_status": "not_applicable",
+  "structural_mask_coverage_status": "not_applicable",
+  "structural_visual_evidence": {
+    "required": false,
+    "screenshots": [],
+    "snapshots": [],
+    "pixel_verified": false
+  }
 }
 ```
 
@@ -166,4 +198,4 @@ Producer 还必须记录 `expected_contract_status`、`semantic_status`、`gener
 
 ### Chrome Provider 证据
 
-当 `target_operation_required` 为 `true` 时，受控 Provider 必须实际检查 DOM/SVG 的节点/边集合、sidecar 主流程/回路/必要交叉覆盖、判定 diamond/出口、edge-node/edge-edge 几何、共线重叠、端口方向与目标外侧接近、同侧通道、边 bbox、标签与无关边 bbox、标签中点法向净空、`10 × 10` 箭头 overlay 可见性及其被节点、后绘制标签或分组边界遮挡、文字/tspan bbox 越界与重叠、白色不透明画布、框体/连线/文字 computed style、marker 尺寸、全局图例/备注缺失、`contentBBox` 及水平溢出。Provider Request 必须提供 `target_reading_environment.viewports.normal`、`.fit`、`.zoom`；缺少任一视图、Chrome 不可用或任一实际检查失败时，不得把 evidence 更新为 `provider_status: "passed"`，应保持 `UNVERIFIED` 或返回 `NEEDS_CAPABILITY`。`--dry-run` 仅验证请求格式和计划。
+当 `target_operation_required` 为 `true` 时，受控 Provider 必须实际检查 DOM/SVG 的节点/边集合、sidecar 主流程/回路/必要交叉覆盖、判定 diamond/出口、edge-node/edge-edge 几何、共线重叠、端口方向与目标外侧接近、同侧通道、边 bbox、标签与无关边 bbox、标签中点法向净空、`10 × 10` 箭头 overlay 可见性及其被节点、后绘制标签或分组边界遮挡、structural 框体与节点/连线/标签/箭头实际交点、相交节点 computed `fill`、structural 框体 computed `stroke`/`fill`/`strokeWidth`、绘制层级、alpha mask 类型与两个 `userSpaceOnUse` 单位、透明 cutout 对实际交点的覆盖、文字/tspan bbox 越界与重叠、白色不透明画布、框体/连线/文字 computed style、marker 尺寸、全局图例/备注缺失、`contentBBox` 及水平溢出。structural 检查不得只依赖 DOM 顺序或 `elementFromPoint`，必须保存最新截图并以实际像素证据复核框体未透过业务前景；截图/快照或像素证据缺失时保持 structural 结果 `UNVERIFIED`。Provider Request 必须提供 `target_reading_environment.viewports.normal`、`.fit`、`.zoom`；缺少任一视图、Chrome 不可用或任一实际检查失败时，不得把 evidence 更新为 `provider_status: "passed"`，应保持 `UNVERIFIED` 或返回 `NEEDS_CAPABILITY`。`--dry-run` 仅验证请求格式和计划，不产生浏览器通过证据。
