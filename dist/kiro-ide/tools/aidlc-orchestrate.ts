@@ -182,7 +182,7 @@ function saveState(state: WorkflowState): void {
 
 function createInitialState(scope: string): WorkflowState {
   return {
-    version: "2.0.0",
+    version: "2.0.1",
     scope,
     depth: "standard",
     current_phase: "ideation",

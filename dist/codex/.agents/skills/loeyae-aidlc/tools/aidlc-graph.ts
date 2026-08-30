@@ -225,7 +225,7 @@ function validateGraph(graph: { stages: StageNode[]; stage_count: number }): str
 export function compile() {
   const nodes = scanStages();
   const graph = {
-    version: "2.0.0",
+    version: "2.0.1",
     stages: nodes,
     stage_count: nodes.length,
     scopes: [...new Set(nodes.flatMap((stage) => stage.scopes))].sort(),
