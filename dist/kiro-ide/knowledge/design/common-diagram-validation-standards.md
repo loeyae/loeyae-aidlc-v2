@@ -39,6 +39,21 @@ Final Delivery Status
 
 前一层失败时，不得用后一层证据掩盖源问题。Geometry 通过不代表 Render 通过；Render 通过不代表 Browser 通过。
 
+## 连接线驱动布局的验证闭环
+
+在解释图表检查结果前，验证器必须先完成输入和自身契约自检：
+
+1. 确认读取的是当前磁盘版本，且 SVG、sidecar、expected、Provider Request 属于同一 generation closure；
+2. 确认 `.diagram.json` 与 expected 的实际嵌套路径、字段名、大小写和数组层级；
+3. 确认 SVG 主连线、marker 和独立 `data-edge-arrow` overlay 被分层统计，不能把 overlay 当成第二条业务边；
+4. 确认 Provider SHA 比较使用正确的数据类型，计数没有重复计算 marker、箭头、标签或 `tspan`；
+5. 确认 checker 使用的 `data-*` 属性确实存在于真实 DOM/SVG；
+6. 将 `KeyError`、字段路径错误、类型错误、解析错误或筛选错误先归类为验证器输入/实现问题，不得直接报告为图表 `FAIL`。
+
+对连接线驱动布局，验证必须先检查候选的硬约束，再比较剩余候选的 Manhattan 总长度、折点、跨主轴边、外侧 lane、标签净空和障碍风险。验证报告应明确记录当前布局是否为 `route-infeasible`；不能用“当前路径正交”或“局部边通过”替代全局布局可行性判断。任何移动节点都必须闭包检查全部 incident edges、邻近通道、分支/回路 lane、标签、箭头和画布边界；`changeImpactReview` 只覆盖触发错误的边或缺少真实 baseline 时，不得视为迁移闭环通过。
+
+布局拓扑确定后才验证间距补齐。节点 gap、端口 gap、标签净空和箭头净空属于规范合规层，不能反向改变业务主轴、侧别或路径候选；验证报告必须分别列出连接线驱动布局调整和规范补齐调整。若发现验证器无法区分这两类结果，应先修复验证记录/实现，再继续判定图表状态。
+
 ## 统一状态模型
 
 最终状态只有以下五种，`final_status` 是图表验收的唯一权威字段：

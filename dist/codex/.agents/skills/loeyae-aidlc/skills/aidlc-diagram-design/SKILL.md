@@ -37,6 +37,22 @@ Independent Capability — not an AIDLC phase.
 按加载的设计标准执行完整的图表设计流程：先从可追溯业务来源生成独立 expected contract，再确定 `TB`/`LR` 主阅读方向、主轴、业务层级、首层对称组和判断分支端口；随后提取 actual 节点/边、计算实际内容边界、生成 SVG 源、`.diagram.json` 语义伴随清单、Provider Request 和 generation provenance，并执行 expected-vs-actual 源级验证。`legend` 必须省略、`annotations[]` 必须省略或为空，SVG 不得生成 `data-legend-item` 或 `data-note`；较长说明写入相邻 Markdown、Design Notes 或 evidence。route contract 的折点按方向变化次数记录，不能使用 `points.length`。生成器或配置变更后必须重新生成 expected、sidecar、SVG、Provider Request 和其他声明的派生产物，记录 generator/version、config summary/digest、source refs/outputs，再重跑受影响验收。生成器不得以固定窗口高度、整体缩放、缩小字号或压缩层级换取“一屏显示”，纵向图可以扩展画布并允许页面纵向滚动。具体步骤和验收矩阵以加载的两份规则文件为准，本文件不复制。当 `target_operations` 包含 `preview` 或浏览器侧 `render` 时，源级 `diagram-contract` evidence 的业务、结构和几何层通过且 expected 存在后调用 `loeyae-aidlc diagram-provider run --request <provider-request.json> --evidence <diagram-contract.json>`；该运行器负责常规/适合窗口/放大视图的浏览器证据采集和 evidence 状态更新，`export` 不由 Chrome DevTools Provider 承担。
 
 
+## 连接线驱动布局执行流程
+
+在最终生成或修改路径前，先将任务分为“局部路由修复”或“连接线驱动布局优化”：前者只在节点布局稳定且直达/一折可合法缩短时使用；后者适用于跨主轴超长边、多条长距离跨轴边、持续堆叠折点/外道、节点移动影响多条 incident edges，或局部路径已经无法消除结构性长边的情况。
+
+连接线驱动布局优化必须按以下顺序执行：
+
+1. 从业务来源和 expected contract 冻结 `mainFlow`、已确认的 `primaryFlow`、分支/合流/回路语义，并保存既有 SVG、sidecar、expected、Provider Request 和 generation provenance 的 baseline；
+2. 计算当前布局的 Manhattan 总长度、折点、跨主轴边、外侧 lane、标签净空和障碍风险；
+3. 比较保持侧别、左右/上下交换、节点组平移、分支组迁移、主轴对齐和必要的 TB/LR 方向候选；先淘汰语义、端口、碰撞、主轴或标签不可行的候选，再按总长度、折点和外道数量比较；
+4. 如果当前布局的最短合法路径仍需继续堆叠折点、宽外道或未声明例外，判定为 `route-infeasible`，回到节点组布局候选，不得继续逐边打补丁；
+5. 对选定的节点移动执行 `movedNodes → incident edges → 障碍通道 → lane → labels → arrows → actual/expected 复核` 闭包，并在已有图中写入真实 `changeImpactReview`；影响三条以上边时，先完成边计划表和节点组布局表再批量修改；
+6. 只有布局拓扑和最终路径确定后，才补齐节点、端口、标签和箭头间距。间距调整不得改变业务拓扑，也不得用来掩盖错误的侧别、主轴或回路；
+7. 最终报告分开列出 `connectionDrivenLayoutChanges` 与 `standardsComplianceChanges`，并分别说明被缩短的跨轴边、重算的 incident edges、间距补齐和仍未验证的 Provider 视图。
+
+上述流程只使用现有 `designNotes.layout`、`branchLayoutPlan`、`changeImpactReview`、expected route contract 和外部报告记录，不新增未经 checker/Provider 支持的 V1 字段。
+
 ## 统一视觉输出（强制）
 
 所有新建、调整和迁移图必须输出不透明 `#ffffff` 画布；除画布外所有框体 `fill="none"`；业务节点、业务边界、流程线、箭头、边标签和业务文字统一 `#000000`；仅非业务的 structural group / swimlane / phase region 可在 sidecar 声明 `styleRole: "structural"`，并在 SVG 框体使用匹配的 `data-group`、`data-group-role`、`data-group-style-role="structural"`、标题使用 `data-group-title` 后统一采用 `#666666`。`business-boundary` 和未声明对象不得使用灰色；颜色不得表达业务状态、责任、风险、确认或流程含义。字体统一 `Microsoft YaHei, 微软雅黑, sans-serif`；框体内文字统一 `16`，边标签统一 `14`；框体和连线线宽统一 `2`；marker 与独立箭头 overlay 统一 `10 × 10` 且 marker 使用 `markerUnits="userSpaceOnUse"`。边标签必须是直接 `<text data-edge-label>`，使用 `text-anchor="middle"`、`dominant-baseline="middle"`，位于所属线段中点并沿法向保持至少 `6` 个源单位净空，禁止背景框、填充、描边、遮罩和光晕。
