@@ -180,6 +180,8 @@ loeyae-aidlc install --all
 
 触发关键词：`aidlc`、`AI-DLC`、`使用 AI-DLC`、`继续上次的工作`、`功能设计`、`用户故事` 等。
 
+能力型关键词的适用场景、输入边界和实际提示词模板见 [AI-DLC 能力关键词与提示词指南](docs/ai-dlc-keyword-guide.md)，其中包含调整已有 SVG 流程图的完整示例。
+
 ### CLI 命令
 
 ```bash
