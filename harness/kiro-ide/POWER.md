@@ -1,7 +1,7 @@
 ---
 name: "loeyae-aidlc-v2"
 displayName: "Loeyae AI-DLC v2"
-version: "2.0.2"
+version: "2.0.3"
 description: "引擎驱动的 AI-DLC 生命周期，使用准入、准出和传感器门禁保证流程完整性。"
 keywords: ["aidlc", "AI-DLC", "使用 AI-DLC", "功能设计", "代码审查", "部署准备"]
 author: "Loeyae Team"
