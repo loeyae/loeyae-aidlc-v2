@@ -8,7 +8,10 @@ lead_agent: aidlc-architect-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
-consumes: []
+consumes:
+  - docs/aidlc/ideation/module-division.md
+  - docs/aidlc/inception/user-stories.md
+  - docs/aidlc/inception/application-design.md
 produces:
   - docs/aidlc/inception/units.md
   - docs/aidlc/inception/application-design/unit-of-work.md
@@ -200,7 +203,7 @@ condition: multi_module
 - 包含完整的审批提示文本
 
 ## 步骤 11：更新进度
-- 在 state.md 中标记单元规划完成
+- 在 handoff.md 中标记单元规划完成
 - 更新"当前状态"部分
 - 准备过渡到单元生成
 
@@ -221,7 +224,7 @@ condition: multi_module
 
 ## 步骤 14：更新进度
 - [ ] 在工作单元计划中将已完成步骤标记为 [x]
-- [ ] 更新 `docs/aidlc/state.md` 当前状态
+- [ ] 更新 `docs/aidlc/handoff.md` 当前状态
 - [ ] 保存所有生成的产物
 
 ## 步骤 15：继续或完成
@@ -264,8 +267,8 @@ condition: multi_module
 - [ ] 验证每个用户故事至少出现在一个单元切片中
 - [ ] 当共享契约索引非空时，验证 `shared-interfaces.md` 覆盖全部进程内共享声明，并仅索引跨进程机器契约
 
-**更新 state.md**：
-- [ ] 在 state.md 中记录"文档切片已完成"
+**更新 handoff.md**：
+- [ ] 在 handoff.md 中记录"文档切片已完成"
 - [ ] 更新"单元认领状态"表（团队协作模式）
 
 ## 步骤 16：设计意图覆盖检查（I14 审批前置门禁）
@@ -331,7 +334,7 @@ condition: multi_module
 >
 > 🔧 **请求修改** - 要求修改单元生成
 > ✅ **确认并继续** - 确认单元，进入 **CONSTRUCTION 阶段**
-> 📋 **新 Session 继续** - 复制 `state.md` 中的交接提示词到新对话继续
+> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
 ```
 
 **团队协作模式的完成消息**：
@@ -355,7 +358,7 @@ condition: multi_module
 >
 > 🔧 **请求修改** - 要求修改单元生成
 > ✅ **确认并继续** - 确认单元，进入 **工作流规划**
-> 📋 **新 Session 继续** - 复制 `state.md` 中的交接提示词到新对话继续
+> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
 >
 > **团队协作提示**：确认后请将产出物提交到主分支，开发者即可开始认领单元。
 ```
@@ -371,7 +374,7 @@ condition: multi_module
 - 清晰标记审批状态
 
 ## 步骤 20：更新进度
-- 在 `docs/aidlc/state.md` 中标记单元生成阶段完成
+- 在 `docs/aidlc/handoff.md` 中标记单元生成阶段完成
 - 更新"当前状态"部分
 - 准备过渡到 CONSTRUCTION 阶段
 
@@ -409,7 +412,7 @@ condition: multi_module
   - 切片质量验证通过（无遗漏）
 - **团队协作模式额外要求**：
   - `unit-of-work.md` 包含认领状态表
-  - state.md 中的"单元认领状态"已填充
+  - handoff.md 中的"单元认领状态"已填充
   - 每个单元的可认领条件已明确标注
 - **多单元共享契约额外要求**：
   - 每项共享契约均有稳定 ID、唯一 Owner、明确消费者、权威来源和目标代码路径

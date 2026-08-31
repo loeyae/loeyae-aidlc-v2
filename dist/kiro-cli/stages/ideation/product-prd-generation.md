@@ -3,9 +3,12 @@ slug: prd-generation
 number: "1.4"
 name: PRD 生成
 execution: CONDITIONAL
-lead: aidlc-product-agent
+lead_agent: aidlc-product-agent
 scopes: [feature, enterprise, mvp, classic]
-requires: [product-inception]
+requires: [product-contracts]
+consumes:
+  - docs/aidlc/ideation/module-division.md
+  - docs/aidlc/ideation/product-contracts.md
 produces:
   - docs/aidlc/ideation/prd.md
   - .aidlc/evidence/prd-generation/prd-completeness.json
@@ -54,7 +57,7 @@ sensors: [prd-completeness]
 **入口条件**：用户描述产品想法、功能需求或说"生成 PRD"。
 
 **SSOT 检索增强（条件）**：
-若 state.md 已绑定 SSOT 项目，在 Discovery 开始时：
+若 handoff.md 已绑定 SSOT 项目，在 Discovery 开始时：
 1. 用 `search_documents` 按用户描述的关键词检索相关文档（需求文档、会议纪要、调研报告）
 2. 用检索结果补充上下文，减少对用户的提问
 3. 引用来源记录为 `[来源: SSOT/<document_title>/<version_no>]`
@@ -110,7 +113,7 @@ sensors: [prd-completeness]
 ### Phase 3：PRD 生成
 
 **输出格式**：Markdown 文件，路径规则：
-- 多模块场景：`docs/aidlc/product/scenarios/<scenario-id>/prd.md`
+- 多模块场景：`docs/aidlc/ideation/prd.md`
 - 单模块/独立：`docs/aidlc/inception/prd.md`
 - 用户指定路径时从其指定
 
@@ -336,5 +339,5 @@ patch → draft（更新版本号）
 - [ ] 自审清单全部通过
 - [ ] 所有 `[待确认]` 项已汇总到"待确认问题"章节
 - [ ] PRD 已写入指定路径
-- [ ] state.md 已更新 PRD 状态
+- [ ] handoff.md 已更新 PRD 状态
 - [ ] 用户已确认 PRD 内容（或标记为 draft 等待确认）

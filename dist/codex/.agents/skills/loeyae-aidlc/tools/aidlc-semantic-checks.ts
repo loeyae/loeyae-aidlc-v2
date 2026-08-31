@@ -5,6 +5,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, resolve } from "path";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
+import { loadWorkflowState } from "./aidlc-state";
 import {
   ExpectedContract,
   expectedContractPath,
@@ -250,13 +251,20 @@ function templateCompleteness(): Record<string, unknown> {
 }
 
 function recoveryEvidence(): Record<string, unknown> {
-  const statePath = join(ROOT, "docs/aidlc/state.md");
   const markerPath = join(ROOT, ".aidlc/context-compacted");
-  const state = existsSync(statePath) ? text(statePath) : "";
-  if (!existsSync(markerPath) && !/context_compacted\s*[:：]\s*true|上下文压缩|compact recovery/i.test(state)) fail("context compaction was not detected");
-  const handoff = existing(["docs/aidlc/handoff.md", "docs/aidlc/construction/compact-recovery.md"]);
-  if (!existsSync(statePath) || handoff.length === 0) fail("state restoration or handoff evidence is missing");
-  return { status: "passed", state_restored: true, handoff_recorded: true };
+  const handoffPath = join(ROOT, "docs/aidlc/handoff.md");
+  const handoff = existsSync(handoffPath) ? text(handoffPath) : "";
+  if (!existsSync(markerPath) && !/context_compacted\s*[:：]\s*true|上下文压缩|compact recovery/i.test(handoff)) {
+    fail("context compaction was not detected");
+  }
+  let state;
+  try {
+    state = loadWorkflowState(ROOT);
+  } catch (error) {
+    fail(`signed machine state could not be restored: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!state || !existsSync(handoffPath) || handoff.trim().length === 0) fail("signed state restoration or derived handoff evidence is missing");
+  return { status: "passed", state_restored: true, handoff_recorded: true, state_revision: state.revision };
 }
 
 function prdCompleteness(): Record<string, unknown> {

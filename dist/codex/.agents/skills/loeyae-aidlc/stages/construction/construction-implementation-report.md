@@ -8,10 +8,10 @@ lead_agent: aidlc-developer-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
-consumes: []
+consumes:
+  - docs/aidlc/construction/{unit-name}/implementation-summary.md
 produces:
   - docs/aidlc/construction/implementation-report.md
-  - docs/aidlc/construction/{unit-name}/implementation-summary.md
   - .aidlc/evidence/implementation-report/implementation-report.json
 sensors: [doc-cascade, implementation-report]
 requires: [build-and-test]
@@ -239,7 +239,7 @@ pnpm lint:all
 2. **证据驱动**：构建验证和测试验证部分**必须包含实际命令输出**，不得写"应该通过"
 3. **汇总来源**：各单元的变更清单和规范对照结果从微型摘要中汇总，不得重新编造
 4. **验收结论不可省略**：必须明确给出"验收通过"或"需要修复"的结论
-5. **待优化项来源**：从代码审查中记录的"建议改进"项 + state.md 中的"待优化项"汇总
+5. **待优化项来源**：从代码审查中记录的"建议改进"项 + handoff.md 中的"待优化项"汇总
 
 ---
 
@@ -265,7 +265,7 @@ Per-Unit 循环：
 - 单元级微型摘要 = 步骤完成协议中代码生成步骤的"微型摘要"具体化
 - 阶段级完整报告 = Construction 阶段的最终输出物（在完成消息之前）
 
-### state.md 中的记录
+### handoff.md 中的记录
 
 ```markdown
 ## 实施报告状态

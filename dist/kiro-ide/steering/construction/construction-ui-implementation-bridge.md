@@ -32,7 +32,7 @@ condition: has_ui_requirements
 
 1. 项目包含前端代码生成
 2. 目标平台**非纯 Web**（即非 Vue3+ElementPlus 这类纯浏览器方案）
-3. 存在 UI 设计产物（state.md 的 `## UI 设计` 区块中 `UI 设计方式` 为 `html-mock` 或 `figma`）
+3. 存在 UI 设计产物（handoff.md 的 `## UI 设计` 区块中 `UI 设计方式` 为 `html-mock` 或 `figma`）
 
 **纯 Web 项目**（PC 端 Vue3、React SPA 等）：CSS 语义与设计产物一致，无需跨端翻译层（组件映射表 + frontend-platform-spec.md），跳过本流程的第一至第三部分。
 
@@ -204,8 +204,8 @@ figma 模式下"设计表现"列填写从 `get_design_context` 返回的 Tailwin
 ### 检查逻辑
 
 ```
-IF state.md 中"前端技术栈" ≠ 空
-AND state.md 中"前端类型" ∈ {跨端, 小程序, APP, 混合}（即非纯Web）
+IF handoff.md 中"前端技术栈" ≠ 空
+AND handoff.md 中"前端类型" ∈ {跨端, 小程序, APP, 混合}（即非纯Web）
 THEN:
   检查 docs/aidlc/frontend-platform-spec.md 是否存在
   

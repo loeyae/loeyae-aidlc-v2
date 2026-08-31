@@ -9,7 +9,7 @@
 3. 任一必需项失败或未验证时阻断；修复后重跑受影响检查。
 4. 不得擅自引入工具、改变需求、关闭检查或删除失败测试。
 5. 技术栈专属项仅在检测到可靠证据时加载；项目现有规范优先。
-6. state.md 保存结论和证据索引，详细结果留在阶段报告或外部平台。
+6. `docs/aidlc/aidlc-state.json` 是签名、revision/CAS 保护的唯一机器路由状态；`docs/aidlc/handoff.md` 只保存由成功 report 派生的人类结论和证据索引，不得反向改变 stage、skip、approval 或 revision。
 7. 平台生命周期 Hook 可以在 Agent 停止前调用 `orchestrate report`，但不能复制门禁、直接更新 state/audit、生成或修改 Evidence；Hook 未安装、未触发或平台不支持阻断时，不能降低引擎门禁要求。Hook 输出不能作为语义一致性、质量检查或任何 sensor 通过证据。
 8. 上游产品语义变化后，依赖旧语义的审查、设计、测试用例、代码和验证证据立即失效；完成受影响重审前不得继续使用旧通过结论。
 
@@ -17,7 +17,7 @@
 
 ### 工作区与基线
 
-- [ ] state.md 已创建或恢复，项目、协作、架构、审批模式和复杂度已记录
+- [ ] handoff.md 已创建或恢复，项目、协作、架构、审批模式和复杂度已记录
 - [ ] 现有代码、技术栈、真实构建/测试入口和 AI-DLC 产物状态已识别
 - [ ] 分布式能力已按证据记录；适用时系统基线路径、代码版本和新鲜度有效
 - [ ] 服务、运行时消费者、外部系统和数据 Owner 的未知项未被假设填补
@@ -70,14 +70,15 @@ Construction 各 sensor 验证的证据必须来自机器执行（CI 脚本、�
 | 格式 | 合法 JSON object，必须含 `evidence_version: "1"` |
 | 大小 | ≤ 512 KB |
 | 时效 | `timestamp` 字段为合法 ISO 日期，≤ 24 小时；超期拒绝，未来时间戳拒绝 |
-| 来源 | 由受控 evidence producer（CI 脚本、构建工具、测试 runner）写入；禁止 Agent 直接编辑通过证据 |
-| 完整性 | 每个字段按 sensor schema 严格校验；缺失、类型不匹配或值异常均阻断 |
+| 来源 | `producer.name` 必须为 `loeyae-aidlc-evidence`，`producer.mode` 为 `controlled`，且包含执行 ID；禁止 Agent 直接编辑通过证据 |
+| 来源指纹 | `source_revision.commit + dirty + worktree_digest` 必须与 report 时当前 Git 工作树完全一致 |
+| 完整性 | 顶层 `integrity` 必须通过当前 trust key 的 HMAC-SHA256 校验；每个字段仍按 sensor schema 严格校验 |
 
 证据文件路径约定：`.aidlc/evidence/<stage-slug>/<sensor-name>.json`
 
-`build-test-evidence` 的标准 Producer 入口为 `loeyae-aidlc evidence run --stage build-and-test`。它只读取业务项目 `.aidlc/evidence-commands.json` 中的 argv allowlist，使用 `shell: false` 执行 `build`、`test` 和 `check` 命令，采集真实退出码、耗时和测试输出，记录源 revision 与配置 artifact 的 SHA-256，并通过同目录临时文件加 rename 原子写入。任一命令失败、测试统计无法解析、artifact 缺失或配置越界时 fail-closed，既不生成通过证据，也不更新 state/audit。
+`build-test-evidence` 的标准 Producer 入口为 `loeyae-aidlc evidence run --stage build-and-test`。它要求宿主预先注入至少 32 字节的稳定 `AIDLC_TRUST_SECRET`，只读取业务项目 `.aidlc/evidence-commands.json` 中的 argv allowlist，使用 `shell: false` 执行 `build`、`test` 和 `check` 命令，采集真实退出码、耗时和测试输出。证据只保存 argv 的 SHA-256，不保存可能带 token/secret 的明文参数；stdout/stderr 尾部脱敏。Producer 记录 `commit + dirty + worktree_digest`、artifact SHA-256，通过覆盖整个执行窗口的同 sensor 锁、唯一临时文件、fsync 和 rename 原子写入。任一命令失败、测试统计无法解析、artifact 缺失、并发冲突、symlink/越界或配置非法时 fail-closed，既不生成通过证据，也不更新 state/audit。
 
-其他语义 sensor 使用同一入口并显式传入 `--sensor <sensor>`，allowlist 中必须存在唯一的 `role: "semantic"` 命令。仓库内置 checker 可通过 `loeyae-aidlc check --sensor <sensor>` 调用；项目也可以配置经过审计的等价 checker。该 checker 必须以退出码 0 在 stdout 返回一个 JSON object，只提供 sensor-specific 字段；`evidence_version`、`timestamp`、`producer`、`source_revision` 和 `checker` 由 Producer 注入，禁止 checker 伪造。引擎随后仍执行对应 sensor 的完整 schema 校验；checker 失败、输出非 JSON、输出包含受控字段或缺少 status 时不写 evidence。
+其他语义 sensor 使用同一入口并显式传入 `--sensor <sensor>`，allowlist 中必须存在唯一的 `role: "semantic"` 声明，argv 必须精确为 `loeyae-aidlc check --sensor <sensor>`。Producer 不执行项目声明的 Node/Python/shell 代码，而是固定调用发行包内 `aidlc-semantic-checks.ts`；内置 checker 只能在 stdout 返回 sensor-specific JSON。`evidence_version`、`timestamp`、`producer`、`source_revision`、`checker` 和 `integrity` 由 Producer 注入，checker 不得伪造。引擎随后仍执行对应 sensor 的完整 schema、签名和来源指纹校验；checker 失败、输出非 JSON、输出包含受控字段或缺少 status 时不写 evidence。
 
 语义 checker 的 allowlist 示例：
 
@@ -120,9 +121,11 @@ Construction 各 sensor 验证的证据必须来自机器执行（CI 脚本、�
 
 ### 审批原则
 
-- **仅 2 个 stage 保留 `approval: block`**：`application-design`（架构决策）和 `operations`（部署决策）
-- 其余 44 个 stage 门禁通过即自动推进（`notify` 级别仅做通知，不阻断流程）
-- 门禁（requires + produces + sensors）负责质量保证，取代了人工审批的质量验证职责
+- **仅 2 个 stage 保留 `approval: block`**：`application-design`（架构决策）和 `operations`（部署决策）。
+- `next` 生成绑定 workflow ID、stage 和随机 challenge 的审批请求；人类审阅后只能通过交互式 `loeyae-aidlc approve --stage <slug>` 或受信宿主 provider 签发最长 15 分钟的一次性 token。`approved` 缺 token、token 伪造、过期或重放均阻断。
+- 平台 Hook/Agent 不得自行签发 token；宿主未集成 provider 且无人类终端可用时按设计 fail-closed。
+- 14 个 `instruction_only` stage 必须在执行正文后以 `--instruction-ack <slug>` 显式报告；Stop Hook 不能代替该确认。
+- 公开 report 结果不包含 `skipped`。只有声明的 condition 为 false 时，引擎可记录内部 `condition_skipped`；门禁负责质量保证，不能由人工 skip 绕过。
 
 ### 单元实现
 
@@ -162,10 +165,10 @@ Construction 各 sensor 验证的证据必须来自机器执行（CI 脚本、�
 ### 不适用条件的记录
 
 当 stage 的 `condition` 评估为 false 时（如 `has_nfr_needs`、`has_infra_needs`、`has_contract_dependencies`）：
-- 引擎自动将该 stage 标记为 `skipped`，下游 `requires` 视其为满足
+- 引擎自动将该 stage 记录为内部 `condition_skipped`，下游 `requires` 视其为满足
 - 无需手动记录跳过原因——引擎 condition 评估结果即为充分依据
 - 下游 stage 的 `doc-cascade` sensor 感知跳过状态，不检查被跳过 stage 的产物
-- `implementation-report` sensor 的 `stages_completed` 只计实际执行的 stage，不含 skipped
+- `implementation-report` sensor 的 `stages_completed` 只计实际执行的 stage，不含 `condition_skipped`
 
 当检查项本身不适用时（如项目无 NFR 需求），在门禁结果中记录为「不适用」并附依据——但不得伪造通过。
 
@@ -190,4 +193,4 @@ Construction 各 sensor 验证的证据必须来自机器执行（CI 脚本、�
 结论：通过 / 阻断
 ```
 
-state.md 至少记录阶段、时间、结论、证据索引和阻断原因。失败后只重跑受影响门禁及其依赖检查。
+handoff.md 至少记录阶段、时间、结论、证据索引和阻断原因。失败后只重跑受影响门禁及其依赖检查。

@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []
 sensors: []
+completion_contract: instruction_only
 requires: [requirements-analysis]
 ---
 # 优先级排序（标准 + 全面深度）

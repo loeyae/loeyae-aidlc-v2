@@ -15,7 +15,9 @@ author: "Loeyae Team"
 loeyae-aidlc orchestrate next --scope <scope>
 ```
 
-按 directive 执行 `stages/` 中的阶段文件，完成后报告结果。`gate: true` 的阶段必须获得用户确认并报告 `approved`；`ALWAYS` 阶段禁止跳过。状态文件为业务项目的 `docs/aidlc/aidlc-state.json`。
+按 directive 执行 `stages/` 中的阶段文件，完成后报告结果。`gate: true` 不是口头确认：人类须在交互式终端运行 `loeyae-aidlc approve --stage <slug>`（或使用受信宿主 provider），再以一次性 `--approval-token` 报告 `approved`；Power、Agent 和 Stop Hook 不得自行签发，无 provider/TTY 时 fail-closed。`instruction_only` 阶段执行正文后必须显式 `--instruction-ack <slug>`。公开 report 不支持手动 skip，只有 condition=false 可记录内部 `condition_skipped`。
+
+`docs/aidlc/aidlc-state.json` 是 HMAC、workflow ID、revision/CAS 保护的唯一机器状态，外部 enrollment 绑定项目；`docs/aidlc/handoff.md` 仅为派生人类视图。Evidence 必须由受控 Producer 生成，绑定完整 source revision 并通过 HMAC 校验；需要 Evidence 时必须在第一次 `next` 前统一注入至少 32 字节的 `AIDLC_TRUST_SECRET`，semantic 只执行发行包内置 checker。
 
 阶段图、门禁和知识规则均来自本 Power 随附的 `steering/`、`tools/` 和 `knowledge/`，平台入口不复制流程规则。
 

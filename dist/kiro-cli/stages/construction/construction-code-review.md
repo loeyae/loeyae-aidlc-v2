@@ -8,7 +8,9 @@ lead_agent: aidlc-quality-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
-consumes: []
+consumes:
+  - src/
+  - src/test/
 produces:
   - docs/aidlc/construction/code-review.md
   - docs/aidlc/construction/audit/{unit-id}.md
@@ -57,7 +59,7 @@ requires: [code-generation, tdd]
 
 `FINAL_GLOBAL` 模式下，执行方必须逐项执行“最终全局审查清单”并给出 UC-D 覆盖统计结论；是否放行、是否生成对账产物、是否判定 Construction 完成由编排方决定。
 
-执行方只产出审查结论与证据，不写 `state.md` 或审计文件、不放行质量门禁、不判定单元或 Construction 完成。
+执行方只产出审查结论与证据，不写 `handoff.md` 或审计文件、不放行质量门禁、不判定单元或 Construction 完成。
 
 ## 审查模式选择
 
@@ -236,7 +238,7 @@ requires: [code-generation, tdd]
 - [ ] 进程内声明符合 `shared-interfaces.md` 的批准设计；跨进程字段仍以机器契约为权威
 - [ ] 消费者仅引用 Owner 的已验证声明，未重定义同职责契约
 
-### UI 设计合规（条件：该单元涉及前端页面且 state.md `UI 设计方式` 非"跳过"）
+### UI 设计合规（条件：该单元涉及前端页面且 handoff.md `UI 设计方式` 非"跳过"）
 
 比对基准按 `UI 设计方式` 确定：`html-mock` 对照 `docs/aidlc/inception/ui-mock/` 中的 mock-box；`figma` 对照页面对照表中 nodeId 对应的 Frame（通过 `get_design_context` / `get_screenshot` 获取）。
 
@@ -295,7 +297,7 @@ requires: [code-generation, tdd]
 **偏差**（实现与规格意图不符）：
 1. [具体偏差 + 期望行为 vs 实际行为]
 
-**UI 设计不一致**（条件：涉及前端页面且 state.md `UI 设计方式` 非"跳过"）：
+**UI 设计不一致**（条件：涉及前端页面且 handoff.md `UI 设计方式` 非"跳过"）：
 1. [具体不一致项 + 设计基准引用（HTML 文件+mock-box 或 Frame 名称+nodeId）+ 期望 vs 实际]
 
 **数据流缺陷**（数据空中楼阁）：

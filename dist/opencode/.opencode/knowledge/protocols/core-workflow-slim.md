@@ -9,4 +9,4 @@
 - 阶段顺序：Inception（规划）→ Construction（实现与实际验证）→ Operations（部署准备，条件）。
 - Inception 中 I3“场景分析与模块映射”始终执行；业务产物门禁完成后必须触发 PRD 决策检查点，选择产出时在 I11 前执行 I15 汇编和 I16 一致性审查，I16 未通过不得继续 I11 或 Construction。
 - Operations 不覆盖部署后的生产运营。
-- 只加载当前路由需要的 steering；恢复时以 `docs/aidlc/state.md` 为唯一状态源。
+- 只加载当前路由需要的 steering；恢复时以 `docs/aidlc/handoff.md` 为唯一状态源。

@@ -3,8 +3,10 @@ slug: product-contracts
 number: "1.3"
 name: 产品契约
 execution: CONDITIONAL
-lead: aidlc-architect-agent
+lead_agent: aidlc-architect-agent
 scopes: [feature, enterprise, mvp, classic]
+requires: [module-division]
+consumes: [docs/aidlc/ideation/module-division.md]
 produces: [docs/aidlc/ideation/product-contracts.md]
 ---
 
@@ -27,7 +29,7 @@ produces: [docs/aidlc/ideation/product-contracts.md]
 
 ## `contracts.md` 产物
 
-创建或更新 `docs/aidlc/product/contracts.md`：
+创建或更新 `docs/aidlc/ideation/product-contracts.md`：
 
 ```markdown
 # 产品级契约索引
@@ -82,4 +84,4 @@ produces: [docs/aidlc/ideation/product-contracts.md]
 - [ ] 提供方、消费者、Owner 和数据边界明确
 - [ ] 每个消费者有独立适配与验证状态
 - [ ] 机器契约与索引无冲突，或冲突已阻断并待确认
-- [ ] state.md 记录契约索引路径、新鲜度和未完成消费者
+- [ ] handoff.md 记录契约索引路径、新鲜度和未完成消费者

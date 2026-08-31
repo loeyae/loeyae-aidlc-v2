@@ -1,263 +1,375 @@
-"""Integration tests for the controlled build/test evidence producer."""
+"""Integration tests for the controlled and signed evidence producer."""
 
+import hashlib
+import hmac
 import json
 import os
 import shutil
 import subprocess
 import tempfile
+import time
+from pathlib import Path
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-TOOL = os.path.join(REPO_ROOT, "core", "tools", "aidlc-evidence.ts")
-ORCHESTRATE = os.path.join(REPO_ROOT, "core", "tools", "aidlc-orchestrate.ts")
-
-
-def run_producer(project: str, *args: str) -> subprocess.CompletedProcess[str]:
-    command = [
-        "npx",
-        "--no-install",
-        "--prefix",
-        REPO_ROOT,
-        "tsx",
-        TOOL,
-        *args,
-    ]
-    return subprocess.run(command, cwd=project, capture_output=True, text=True)
+REPO_ROOT = Path(__file__).resolve().parents[1]
+TOOL = REPO_ROOT / "core" / "tools" / "aidlc-evidence.ts"
+ORCHESTRATE = REPO_ROOT / "core" / "tools" / "aidlc-orchestrate.ts"
+SCRATCH_ROOT = Path(os.environ.get("KIROCREW_SCRATCH") or os.environ.get("TMPDIR") or tempfile.gettempdir())
+TRUST_SECRET = "aidlc-evidence-test-secret-at-least-32-bytes"
 
 
-def run_orchestrate(project: str, *args: str) -> dict:
-    result = subprocess.run(
-        ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", ORCHESTRATE, *args],
+def environment(project: Path, secret=TRUST_SECRET) -> dict:
+    env = os.environ.copy()
+    for key in ("npm_config_prefix", "npm_execpath", "npm_command"):
+        env.pop(key, None)
+    if secret is None:
+        env.pop("AIDLC_TRUST_SECRET", None)
+    else:
+        env["AIDLC_TRUST_SECRET"] = secret
+    env["AIDLC_TRUST_DIR"] = str(SCRATCH_ROOT / f"{project.name}-trust")
+    return env
+
+
+def new_project(prefix: str) -> Path:
+    project = Path(tempfile.mkdtemp(prefix=prefix, dir=str(SCRATCH_ROOT)))
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    subprocess.run(["git", "config", "user.email", "aidlc-tests@example.invalid"], cwd=project, check=True)
+    subprocess.run(["git", "config", "user.name", "AI-DLC Tests"], cwd=project, check=True)
+    subprocess.run(["git", "commit", "--allow-empty", "-qm", "baseline"], cwd=project, check=True)
+    return project
+
+
+def cleanup(project: Path) -> None:
+    shutil.rmtree(project, ignore_errors=True)
+    shutil.rmtree(SCRATCH_ROOT / f"{project.name}-trust", ignore_errors=True)
+
+
+def run_producer(project: Path, *args: str, secret=TRUST_SECRET) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["npx", "--no-install", "--prefix", str(REPO_ROOT), "tsx", str(TOOL), *args],
         cwd=project,
+        env=environment(project, secret),
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, result.stderr
+
+
+def run_orchestrate(project: Path, *args: str) -> dict:
+    result = subprocess.run(
+        ["npx", "--no-install", "--prefix", str(REPO_ROOT), "tsx", str(ORCHESTRATE), *args],
+        cwd=project,
+        env=environment(project),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout)
 
 
-def create_declared_artifacts(project: str, produces: list[str]) -> None:
-    for pattern in produces:
-        if pattern.startswith(".aidlc/evidence/"):
-            continue
-        path = pattern[:-1] + "artifact.md" if pattern.endswith("/") else pattern
-        target = os.path.join(project, path)
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        with open(target, "w") as handle:
-            handle.write("# Generated artifact\n\nREQ-E2E-001\n")
+def write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
 
 
-def reach_stage(project: str, target: str) -> dict:
-    initialized = run_orchestrate(project, "next", "--scope", "feature")
-    assert initialized["kind"] == "print"
-    for _ in range(20):
-        directive = run_orchestrate(project, "next")
-        if directive.get("kind") == "run-stage":
-            stage = directive["stage"]
-            if stage == target:
-                return directive
-            create_declared_artifacts(project, directive.get("produces", []))
-            report = run_orchestrate(project, "report", "--stage", stage, "--result", "completed")
-            assert report["kind"] == "print", report
-        else:
-            raise AssertionError(f"could not reach {target}: {directive}")
-    raise AssertionError(f"stage {target} was not reached")
-
-
-def write_prd_checker_config(project: str) -> None:
-    payload = {
-        "status": "passed",
-        "prd_path": "docs/aidlc/ideation/prd.md",
-        "required_sections": ["overview", "goals", "features", "non-goals", "questions", "sources"],
-        "functional_requirements": 1,
-        "acceptance_criteria_complete": True,
-        "non_goals_complete": True,
-        "pending_questions_indexed": True,
-        "source_index_complete": True,
-        "clarification_consistency": "passed",
-        "business_flow_validation": "passed",
-        "unresolved_blockers": 0,
-    }
-    payload_text = json.dumps(payload, separators=(",", ":"))
-    config = {
-        "version": "1",
-        "stage": "prd-generation",
-        "commands": [{
-            "id": "prd-checker",
-            "role": "semantic",
-            "sensor": "prd-completeness",
-            "argv": ["node", "-e", f"process.stdout.write({json.dumps(payload_text)})"],
-        }],
-    }
-    os.makedirs(os.path.join(project, ".aidlc"), exist_ok=True)
-    with open(os.path.join(project, ".aidlc", "evidence-commands.json"), "w") as handle:
-        json.dump(config, handle)
-
-
-def write_config(project: str, test_output: str = "22 passed, 0 failed") -> None:
-    os.makedirs(os.path.join(project, ".aidlc"), exist_ok=True)
+def write_build_config(project: Path, test_output="22 passed, 0 failed", secret_argument="") -> None:
+    suffix = [secret_argument] if secret_argument else []
     config = {
         "version": "1",
         "stage": "build-and-test",
         "commands": [
-            {"id": "build", "role": "build", "argv": ["node", "-e", "process.stdout.write('build ok')"]},
-            {"id": "test", "role": "test", "argv": ["node", "-e", f"process.stdout.write({test_output!r})"]},
-            {"id": "check", "role": "check", "argv": ["node", "-e", "process.stdout.write('lint passed')"]},
+            {"id": "build", "role": "build", "argv": ["node", "-e", "process.stdout.write('build ok')", *suffix]},
+            {"id": "test", "role": "test", "argv": ["node", "-e", f"process.stdout.write({test_output!r})", *suffix]},
+            {"id": "check", "role": "check", "argv": ["node", "-e", "process.stdout.write('lint passed')", *suffix]},
         ],
         "artifacts": [{"id": "bundle", "path": "dist/app.js"}],
     }
-    with open(os.path.join(project, ".aidlc", "evidence-commands.json"), "w") as handle:
-        json.dump(config, handle)
-    os.makedirs(os.path.join(project, "dist"), exist_ok=True)
-    with open(os.path.join(project, "dist", "app.js"), "w") as handle:
-        handle.write("artifact")
+    write(project / ".aidlc" / "evidence-commands.json", json.dumps(config))
+    write(project / "dist" / "app.js", "substantive build artifact")
 
 
-def test_successful_production() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-evidence-success-")
+def write_semantic_config(project: Path, stage: str, sensor: str, argv=None) -> None:
+    config = {
+        "version": "1",
+        "stage": stage,
+        "commands": [{
+            "id": f"{sensor}-checker",
+            "role": "semantic",
+            "sensor": sensor,
+            "argv": argv or ["loeyae-aidlc", "check", "--sensor", sensor],
+        }],
+    }
+    write(project / ".aidlc" / "evidence-commands.json", json.dumps(config))
+
+
+def evidence_path(project: Path, stage="build-and-test", sensor="build-test-evidence") -> Path:
+    return project / ".aidlc" / "evidence" / stage / f"{sensor}.json"
+
+
+def canonical(value):
+    if isinstance(value, dict):
+        return {key: canonical(item) for key, item in sorted(value.items()) if key != "integrity"}
+    if isinstance(value, list):
+        return [canonical(item) for item in value]
+    return value
+
+
+def verify_signature(payload: dict, secret=TRUST_SECRET) -> bool:
+    encoded = json.dumps(canonical(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    expected = hmac.new(secret.encode(), encoded, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, payload["integrity"]["signature"])
+
+
+def commit_all(project: Path, message="fixture") -> None:
+    subprocess.run(["git", "add", "-A"], cwd=project, check=True)
+    subprocess.run(["git", "commit", "-qm", message], cwd=project, check=True)
+
+
+def test_success_signature_and_secret_redaction() -> None:
+    project = new_project("aidlc-evidence-success-")
     try:
-        write_config(project)
+        marker = "api_key=TOP-SECRET-VALUE"
+        write_build_config(project, secret_argument=marker)
         result = run_producer(project, "run", "--stage", "build-and-test")
         assert result.returncode == 0, result.stderr
-        output = os.path.join(project, ".aidlc", "evidence", "build-and-test", "build-test-evidence.json")
-        assert os.path.isfile(output)
-        with open(output) as handle:
-            evidence = json.load(handle)
-        assert evidence["status"] == "passed"
-        assert evidence["producer"]["mode"] == "controlled"
-        assert evidence["tests"] == {"total": 22, "passed": 22, "failed": 0, "skipped": 0}
-        assert evidence["commands"][1]["exit_code"] == 0
-        assert evidence["artifacts"][0]["sha256"]
+        payload = json.loads(evidence_path(project).read_text())
+        assert payload["status"] == "passed"
+        assert payload["producer"]["name"] == "loeyae-aidlc-evidence"
+        assert payload["tests"] == {"total": 22, "passed": 22, "failed": 0, "skipped": 0}
+        assert payload["source_revision"]["worktree_digest"]
+        assert len(payload["commands"][0]["argv_digest"]) == 64
+        assert "argv" not in payload["commands"][0]
+        assert marker not in evidence_path(project).read_text()
+        assert verify_signature(payload)
+        tampered = dict(payload)
+        tampered["status"] = "failed"
+        assert not verify_signature(tampered)
     finally:
-        shutil.rmtree(project)
+        cleanup(project)
 
 
-def test_failed_run_does_not_replace_existing_evidence() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-evidence-failure-")
+def test_missing_and_short_secret_fail_closed() -> None:
+    for secret in (None, "too-short"):
+        project = new_project("aidlc-evidence-secret-")
+        try:
+            write_build_config(project)
+            result = run_producer(project, "run", "--stage", "build-and-test", secret=secret)
+            assert result.returncode == 2
+            assert "AIDLC_TRUST_SECRET" in result.stderr
+            assert not evidence_path(project).exists()
+        finally:
+            cleanup(project)
+
+
+def test_failed_run_preserves_existing_evidence() -> None:
+    project = new_project("aidlc-evidence-failure-")
     try:
-        write_config(project, "1 failed, 0 passed")
-        evidence_dir = os.path.join(project, ".aidlc", "evidence", "build-and-test")
-        os.makedirs(evidence_dir, exist_ok=True)
-        output = os.path.join(evidence_dir, "build-test-evidence.json")
-        with open(output, "w") as handle:
-            handle.write("existing evidence")
+        write_build_config(project, "1 failed, 0 passed")
+        output = evidence_path(project)
+        write(output, "existing evidence")
         result = run_producer(project, "run", "--stage", "build-and-test")
-        assert result.returncode != 0
-        with open(output) as handle:
-            assert handle.read() == "existing evidence"
-        assert not any(name.startswith("build-test-evidence.json.tmp-") for name in os.listdir(evidence_dir))
+        assert result.returncode == 2
+        assert output.read_text() == "existing evidence"
+        assert not any(".tmp-" in path.name for path in output.parent.iterdir())
     finally:
-        shutil.rmtree(project)
+        cleanup(project)
 
 
-def test_command_selection_cannot_escape_allowlist() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-evidence-allowlist-")
+def test_revision_clean_staged_unstaged_and_untracked() -> None:
+    project = new_project("aidlc-evidence-revision-")
     try:
-        write_config(project)
-        result = run_producer(project, "run", "--stage", "build-and-test", "--command-id", "not-allowed")
-        assert result.returncode != 0
-        assert "not in the allowlist" in result.stderr
+        write_build_config(project)
+        write(project / "src" / "base.txt", "baseline source\n")
+        commit_all(project)
+        assert subprocess.check_output(["git", "status", "--porcelain"], cwd=project, text=True) == ""
+
+        assert run_producer(project, "run", "--stage", "build-and-test").returncode == 0
+        clean = json.loads(evidence_path(project).read_text())["source_revision"]
+        assert clean["dirty"] is False
+
+        write(project / "src" / "base.txt", "staged source change\n")
+        subprocess.run(["git", "add", "src/base.txt"], cwd=project, check=True)
+        assert run_producer(project, "run", "--stage", "build-and-test").returncode == 0
+        staged = json.loads(evidence_path(project).read_text())["source_revision"]
+        assert staged["dirty"] is True and staged["worktree_digest"] != clean["worktree_digest"]
+
+        subprocess.run(["git", "reset", "--hard", "-q", "HEAD"], cwd=project, check=True)
+        write(project / "src" / "base.txt", "unstaged source change\n")
+        assert run_producer(project, "run", "--stage", "build-and-test").returncode == 0
+        unstaged = json.loads(evidence_path(project).read_text())["source_revision"]
+        assert unstaged["dirty"] is True and unstaged["worktree_digest"] != clean["worktree_digest"]
+
+        subprocess.run(["git", "reset", "--hard", "-q", "HEAD"], cwd=project, check=True)
+        write(project / "src" / "untracked.txt", "untracked source\n")
+        assert run_producer(project, "run", "--stage", "build-and-test").returncode == 0
+        untracked = json.loads(evidence_path(project).read_text())["source_revision"]
+        assert untracked["dirty"] is True and untracked["worktree_digest"] != clean["worktree_digest"]
     finally:
-        shutil.rmtree(project)
+        cleanup(project)
 
 
-def test_semantic_checker_production() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-evidence-semantic-")
+def test_builtin_semantic_checker_and_arbitrary_command_rejection() -> None:
+    project = new_project("aidlc-evidence-semantic-")
     try:
-        payload = {
-            "status": "passed",
-            "spec_axis": "passed",
-            "standards_axis": "passed",
-            "reviewer": "checker-agent",
-            "files_reviewed": ["src/main.ts"],
-            "issues_found": 1,
-            "issues_resolved": 1,
-            "issues_open": 0,
-        }
-        payload_text = json.dumps(payload, separators=(",", ":"))
-        config = {
-            "version": "1",
-            "stage": "code-review",
-            "commands": [{
-                "id": "review-checker",
-                "role": "semantic",
-                "sensor": "review-evidence",
-                "argv": ["node", "-e", f"process.stdout.write({json.dumps(payload_text)})"],
-            }],
-        }
-        os.makedirs(os.path.join(project, ".aidlc"), exist_ok=True)
-        with open(os.path.join(project, ".aidlc", "evidence-commands.json"), "w") as handle:
-            json.dump(config, handle)
+        write(
+            project / "docs" / "aidlc" / "construction" / "code-review.md",
+            "# Spec axis: passed\n# Standards axis: passed\nReviewer: quality-bot\n"
+            "issues_found: 1\nissues_resolved: 1\nissues_open: 0\nReviewed src/main.ts\n",
+        )
+        write_semantic_config(project, "code-review", "review-evidence")
         result = run_producer(project, "run", "--stage", "code-review", "--sensor", "review-evidence")
         assert result.returncode == 0, result.stderr
-        output = os.path.join(project, ".aidlc", "evidence", "code-review", "review-evidence.json")
-        with open(output) as handle:
-            evidence = json.load(handle)
-        assert evidence["producer"]["mode"] == "controlled"
-        assert evidence["checker"]["id"] == "review-checker"
-        assert evidence["spec_axis"] == "passed"
+        payload = json.loads(evidence_path(project, "code-review", "review-evidence").read_text())
+        assert payload["checker"]["id"] == "builtin:review-evidence"
+        assert payload["reviewer"] == "quality-bot"
+        assert verify_signature(payload)
+
+        write_semantic_config(
+            project,
+            "code-review",
+            "review-evidence",
+            ["node", "-e", "process.stdout.write('{}')"],
+        )
+        rejected = run_producer(project, "run", "--stage", "code-review", "--sensor", "review-evidence")
+        assert rejected.returncode == 2
+        assert "must declare the built-in command" in rejected.stderr
     finally:
-        shutil.rmtree(project)
+        cleanup(project)
 
 
-def test_semantic_checker_cannot_forge_common_fields() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-evidence-semantic-forge-")
+def test_symlink_boundaries() -> None:
+    # Config symlink.
+    project = new_project("aidlc-evidence-symlink-config-")
     try:
-        payload = {"status": "passed", "producer": {"mode": "controlled"}}
-        payload_text = json.dumps(payload, separators=(",", ":"))
-        config = {
-            "version": "1",
-            "stage": "code-review",
-            "commands": [{
-                "id": "review-checker",
-                "role": "semantic",
-                "sensor": "review-evidence",
-                "argv": ["node", "-e", f"process.stdout.write({json.dumps(payload_text)})"],
-            }],
-        }
-        os.makedirs(os.path.join(project, ".aidlc"), exist_ok=True)
-        with open(os.path.join(project, ".aidlc", "evidence-commands.json"), "w") as handle:
-            json.dump(config, handle)
-        result = run_producer(project, "run", "--stage", "code-review", "--sensor", "review-evidence")
-        assert result.returncode != 0
-        assert "producer-controlled field producer" in result.stderr
-        assert not os.path.exists(os.path.join(project, ".aidlc", "evidence", "code-review", "review-evidence.json"))
+        write_build_config(project)
+        real_config = project / ".aidlc" / "real-config.json"
+        real_config.write_text((project / ".aidlc" / "evidence-commands.json").read_text())
+        link = project / ".aidlc" / "config-link.json"
+        link.symlink_to(real_config)
+        result = run_producer(project, "run", "--stage", "build-and-test", "--config", ".aidlc/config-link.json")
+        assert result.returncode == 2 and "link" in result.stderr.lower()
     finally:
-        shutil.rmtree(project)
+        cleanup(project)
+
+    # CWD symlink.
+    project = new_project("aidlc-evidence-symlink-cwd-")
+    try:
+        write_build_config(project)
+        (project / "real-cwd").mkdir()
+        (project / "cwd-link").symlink_to(project / "real-cwd", target_is_directory=True)
+        config = json.loads((project / ".aidlc" / "evidence-commands.json").read_text())
+        config["commands"][0]["cwd"] = "cwd-link"
+        (project / ".aidlc" / "evidence-commands.json").write_text(json.dumps(config))
+        result = run_producer(project, "run", "--stage", "build-and-test")
+        assert result.returncode == 2 and "link" in result.stderr.lower()
+    finally:
+        cleanup(project)
+
+    # Artifact symlink.
+    project = new_project("aidlc-evidence-symlink-artifact-")
+    try:
+        write_build_config(project)
+        (project / "dist" / "app.js").unlink()
+        write(project / "real-artifact.js", "real artifact")
+        (project / "dist" / "app.js").symlink_to(project / "real-artifact.js")
+        result = run_producer(project, "run", "--stage", "build-and-test")
+        assert result.returncode == 2 and "link" in result.stderr.lower()
+    finally:
+        cleanup(project)
+
+    # Output directory symlink.
+    project = new_project("aidlc-evidence-symlink-output-")
+    external = Path(tempfile.mkdtemp(prefix="aidlc-evidence-output-", dir=str(SCRATCH_ROOT)))
+    try:
+        write_build_config(project)
+        target = project / ".aidlc" / "evidence" / "build-and-test"
+        target.parent.mkdir(parents=True)
+        target.symlink_to(external, target_is_directory=True)
+        result = run_producer(project, "run", "--stage", "build-and-test")
+        assert result.returncode == 2 and "link" in result.stderr.lower()
+        assert not (external / "build-test-evidence.json").exists()
+    finally:
+        cleanup(project)
+        shutil.rmtree(external, ignore_errors=True)
 
 
-def test_producer_output_passes_orchestrate_gate() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-producer-orchestrate-e2e-")
+def test_concurrent_producer_has_single_writer() -> None:
+    project = new_project("aidlc-evidence-concurrent-")
+    try:
+        write_build_config(project)
+        config_path = project / ".aidlc" / "evidence-commands.json"
+        config = json.loads(config_path.read_text())
+        config["commands"][0]["argv"] = ["node", "-e", "setTimeout(() => process.stdout.write('build ok'), 500)"]
+        config_path.write_text(json.dumps(config))
+        command = ["npx", "--no-install", "--prefix", str(REPO_ROOT), "tsx", str(TOOL), "run", "--stage", "build-and-test"]
+        first = subprocess.Popen(command, cwd=project, env=environment(project), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        time.sleep(0.15)
+        second = subprocess.Popen(command, cwd=project, env=environment(project), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        first.communicate()
+        second.communicate()
+        codes = sorted([first.returncode, second.returncode])
+        assert codes == [0, 2], codes
+        payload = json.loads(evidence_path(project).read_text())
+        assert verify_signature(payload)
+        assert not (Path(str(evidence_path(project)) + ".producer.lock")).exists()
+    finally:
+        cleanup(project)
+
+
+def create_declared_artifacts(project: Path, produces: list) -> None:
+    for pattern in produces:
+        if pattern.startswith(".aidlc/evidence/"):
+            continue
+        value = pattern.replace("{unit-name}", "test-unit").replace("{unit-id}", "test-unit")
+        if value.endswith("/"):
+            value += "artifact.md"
+        write(project / value, f"# Generated {value}\nREQ-E2E-001 provides substantive traceable workflow content.\n")
+
+
+def reach_stage(project: Path, target: str) -> dict:
+    assert run_orchestrate(project, "next", "--scope", "feature")["kind"] == "print"
+    for _ in range(20):
+        directive = run_orchestrate(project, "next")
+        assert directive["kind"] == "run-stage", directive
+        if directive["stage"] == target:
+            return directive
+        create_declared_artifacts(project, directive.get("produces", []))
+        args = ["report", "--stage", directive["stage"], "--result", "completed"]
+        if directive.get("completion_contract") == "instruction_only":
+            args.extend(["--instruction-ack", directive["stage"]])
+        report = run_orchestrate(project, *args)
+        assert report["kind"] == "print", report
+    raise AssertionError(f"stage {target} was not reached")
+
+
+def test_producer_output_passes_orchestrator() -> None:
+    project = new_project("aidlc-evidence-orchestrator-")
     try:
         directive = reach_stage(project, "prd-generation")
-        assert directive["sensors"] == ["prd-completeness", "no-todo", "traceability"]
-        prd_path = os.path.join(project, "docs", "aidlc", "ideation", "prd.md")
-        os.makedirs(os.path.dirname(prd_path), exist_ok=True)
-        with open(prd_path, "w") as handle:
-            handle.write("# Product Requirements\n\nREQ-E2E-001\n")
-        write_prd_checker_config(project)
-
+        assert "prd-completeness" in directive["sensors"]
+        write(
+            project / "docs" / "aidlc" / "ideation" / "prd.md",
+            "# Overview\nProduct context and verified scope.\n## Goals\nMeasurable delivery.\n"
+            "## Features\nFR-001 user authentication.\n### Acceptance Criteria\nValid users sign in.\n"
+            "## Non-goals\nBilling excluded.\n## Questions\nNone.\n## Sources\nStakeholder interview.\n"
+            "Clarification consistency passed.\nREQ-E2E-001 traces this complete product requirement.\n",
+        )
+        write_semantic_config(project, "prd-generation", "prd-completeness")
         produced = run_producer(project, "run", "--stage", "prd-generation", "--sensor", "prd-completeness")
         assert produced.returncode == 0, produced.stderr
-        evidence_path = os.path.join(project, ".aidlc", "evidence", "prd-generation", "prd-completeness.json")
-        with open(evidence_path) as handle:
-            evidence = json.load(handle)
-        assert evidence["producer"]["mode"] == "controlled"
-        assert evidence["checker"]["id"] == "prd-checker"
-
+        payload = json.loads(evidence_path(project, "prd-generation", "prd-completeness").read_text())
+        assert payload["checker"]["id"] == "builtin:prd-completeness"
         reported = run_orchestrate(project, "report", "--stage", "prd-generation", "--result", "completed")
         assert reported["kind"] == "print", reported
-        with open(os.path.join(project, "docs", "aidlc", "aidlc-state.json")) as handle:
-            state = json.load(handle)
-        assert "prd-generation" in state["completed_stages"]
     finally:
-        shutil.rmtree(project)
+        cleanup(project)
 
 
 if __name__ == "__main__":
-    test_successful_production()
-    test_failed_run_does_not_replace_existing_evidence()
-    test_command_selection_cannot_escape_allowlist()
-    test_semantic_checker_production()
-    test_semantic_checker_cannot_forge_common_fields()
-    test_producer_output_passes_orchestrate_gate()
-    print("6 evidence producer tests passed")
+    test_success_signature_and_secret_redaction()
+    test_missing_and_short_secret_fail_closed()
+    test_failed_run_preserves_existing_evidence()
+    test_revision_clean_staged_unstaged_and_untracked()
+    test_builtin_semantic_checker_and_arbitrary_command_rejection()
+    test_symlink_boundaries()
+    test_concurrent_producer_has_single_writer()
+    test_producer_output_passes_orchestrator()
+    print("8 evidence producer test groups passed")

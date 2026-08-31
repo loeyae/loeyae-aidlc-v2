@@ -18,7 +18,7 @@ loeyae-aidlc install --harness opencode
 
 重启 OpenCode 后输入 `使用 AI-DLC`。插件只负责注入 v2 引擎入口；阶段顺序、产物和门禁由 `tools/aidlc-orchestrate.ts`、`stages/` 和编译后的 `tools/data/stage-graph.json` 决定。
 
-业务项目中的状态文件为 `docs/aidlc/aidlc-state.json`。通过以下命令驱动流程：
+在业务项目目录通过以下命令驱动流程：
 
 ```bash
 loeyae-aidlc orchestrate next --scope feature
@@ -26,4 +26,6 @@ loeyae-aidlc orchestrate report --stage <slug> --result completed
 loeyae-aidlc orchestrate park
 ```
 
-当 directive 的 `gate` 为 `true` 时，用户确认后使用 `--result approved`；不得用 `completed` 绕过阻断审批。
+`gate: true` 时，聊天确认本身不是审批凭据。人类须在交互式终端执行 `loeyae-aidlc approve --stage <slug>`，或由受信宿主 provider 签发绑定 workflow/stage/challenge 的一次性 token，再以 `--result approved --approval-token <token>` 报告；插件和 Agent 不得自行签发，无 provider/TTY 时 fail-closed。`instruction_only` stage 执行正文后必须显式 `--instruction-ack <slug>`，idle gate 不会自动推进。公开 report 不支持手动 skip，仅 condition=false 可产生内部 `condition_skipped`。
+
+`docs/aidlc/aidlc-state.json` 是 HMAC、workflow ID、revision/CAS 保护的唯一机器状态，外部 enrollment 绑定项目；`docs/aidlc/handoff.md` 仅为派生人类视图。Evidence 只接受受控 Producer 的精确 provenance、当前 `commit + dirty + worktree_digest` 和 HMAC；命令只记录 `argv_digest`，semantic 固定执行发行包内置 checker。需要 Evidence 时必须在第一次 `next` 前向 orchestrator、Producer 和插件进程注入同一份至少 32 字节的 `AIDLC_TRUST_SECRET`。

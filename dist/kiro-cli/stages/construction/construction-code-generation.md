@@ -15,6 +15,7 @@ produces:
   - docs/aidlc/construction/{unit-name}/implementation-summary.md
 sensors: [doc-cascade]
 requires: [functional-design]
+scope_waived_requires: [functional-design]
 ---
 # 代码生成 - 详细步骤
 
@@ -58,7 +59,7 @@ requires: [functional-design]
 - 匹配现有代码风格，即使你会做不同选择
 - 注意到无关死代码时提一下，但不删除
 - 自己的改动产生的孤儿代码（未使用的 import、变量、函数）要清理
-- 审查"建议改进"项记录到 state.md 待优化项，不在当前单元修复
+- 审查"建议改进"项记录到 handoff.md 待优化项，不在当前单元修复
 - **测试**：每一行 diff 都应直接追溯到用户请求
 
 ---
@@ -83,7 +84,7 @@ requires: [functional-design]
 
 ## 步骤 1.5：前端平台规范门禁（跨端项目）
 
-> **触发条件**：state.md 中 `前端类型` ∈ {跨端, 小程序, APP, 混合}（即非纯 Web）
+> **触发条件**：handoff.md 中 `前端类型` ∈ {跨端, 小程序, APP, 混合}（即非纯 Web）
 > **跳过条件**：纯 Web 项目或无前端的纯后端单元
 
 - [ ] 检查 `docs/aidlc/frontend-platform-spec.md` 是否存在
@@ -99,7 +100,7 @@ requires: [functional-design]
 
 ## 步骤 2：技术规范与 MCP Skill 加载策略
 
-先读取 state.md 的技术适配标志。仅在工作区检测已有可靠证据时加载对应 `common-tech-*` 规则；检测到 Spring Cloud/Nacos 时加载 `common-tech-spring-cloud-nacos.md`，用于事实映射与真实命令发现，不替代项目规范。未检测到时不得套用。
+先读取 handoff.md 的技术适配标志。仅在工作区检测已有可靠证据时加载对应 `common-tech-*` 规则；检测到 Spring Cloud/Nacos 时加载 `common-tech-spring-cloud-nacos.md`，用于事实映射与真实命令发现，不替代项目规范。未检测到时不得套用。
 
 > ⚠️ **Loeyae Boot 项目强制**：加载 `construction-loeyae-compliance.md` 并按其规则调用 MCP Skill。非 Loeyae Boot 项目不得调用 `loeyae-*` MCP Skill。
 
@@ -126,7 +127,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 
 **前端代码**：
 1. PC端 → `common-tech-frontend-pc.md`；小程序/APP → `common-tech-frontend-uniapp.md`
-2. state.md 的 `## UI 设计` 区块中 `UI 设计方式` 为 `figma` → `common-figma-design-standards.md`
+2. handoff.md 的 `## UI 设计` 区块中 `UI 设计方式` 为 `figma` → `common-figma-design-standards.md`
 3. 读取项目 `.kiro/steering/structure.md`（如存在）
 4. 跨端项目 → 加载 `construction-ui-implementation-bridge.md` + 读取 `docs/aidlc/frontend-platform-spec.md`
 
@@ -175,7 +176,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 **时间压力下的正确响应是缩小范围（少做几个功能），而非跳步（做了但做错）。**
 
 ## 步骤 3：创建详细单元代码生成计划
-- [ ] 从 `docs/aidlc/state.md` 读取工作区根目录和项目类型
+- [ ] 从 `docs/aidlc/handoff.md` 读取工作区根目录和项目类型
 - [ ] 确定代码位置（参见关键规则的结构模式）
 - [ ] **仅存量项目**：审查逆向工程 code-structure.md 了解需修改的现有文件
 - [ ] 记录确切路径（绝对不在 docs/aidlc/ 中）
@@ -232,19 +233,19 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 
 ### 页面对照表规范（有 UI 设计的前端项目）
 
-**触发条件**：state.md 的 `## UI 设计` 区块中 `UI 设计方式` 为 `html-mock` 或 `figma`（为"跳过"时不生成本表）。设计单元的定位方式按模式区分：
+**触发条件**：handoff.md 的 `## UI 设计` 区块中 `UI 设计方式` 为 `html-mock` 或 `figma`（为"跳过"时不生成本表）。设计单元的定位方式按模式区分：
 
 | UI 设计方式 | 设计单元 | 来源 |
 |---------|---------|------|
 | `html-mock` | mock-box | `docs/aidlc/inception/ui-mock/{端}.html` + `{端}-page-specs.md` |
-| `figma` | Frame | state.md `产物位置` 中的唯一主文件链接；优先使用 `Figma 页面进度` 的 nodeId，缺失时通过 `get_metadata` 补齐 |
+| `figma` | Frame | handoff.md `产物位置` 中的唯一主文件链接；优先使用 `Figma 页面进度` 的 nodeId，缺失时通过 `get_metadata` 补齐 |
 
 **产出位置**：写入代码生成计划文档头部（与成功标准同级）
 
 **生成方式**：
 
 - **html-mock 模式**：读取 `{端}-page-specs.md` 的页面清单表，补全其中"待 Construction 确定"的目标代码文件列
-- **figma 模式**：读取 state.md 的唯一主文件链接和 `Figma 页面进度` 建立对照表；页面行缺少 nodeId 时才调用 `get_metadata` 补齐并回填 state。目标代码文件按项目路由规范推导
+- **figma 模式**：读取 handoff.md 的唯一主文件链接和 `Figma 页面进度` 建立对照表；页面行缺少 nodeId 时才调用 `get_metadata` 补齐并回填 state。目标代码文件按项目路由规范推导
 
 **步骤**：
 1. 获取设计单元清单（html-mock 读 page-specs.md；figma 调 `get_metadata`）
@@ -274,7 +275,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 ## 页面对照表
 
 > UI 设计方式: figma
-> Figma 文件: [state.md UI 设计区块的产物位置]
+> Figma 文件: [handoff.md UI 设计区块的产物位置]
 
 | # | Figma Page / Frame 名称 | nodeId | 关联 US | 目标代码文件 | 路由路径 | 类型 |
 |---|------------------------|--------|---------|-------------|---------|------|
@@ -334,7 +335,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 - [ ] 清晰标记审批状态
 
 ## 步骤 10：更新进度
-- [ ] 在 `state.md` 中标记代码规划完成
+- [ ] 在 `handoff.md` 中标记代码规划完成
 - [ ] 更新"当前状态"部分
 - [ ] 准备过渡到代码生成
 
@@ -417,7 +418,7 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 ## 步骤 13：更新进度
 - [ ] 在单元代码生成计划中将已完成步骤标记为 [x]
 - [ ] 当故事的生成完成时，将关联的单元故事标记为 [x]
-- [ ] 更新 `docs/aidlc/state.md` 当前状态
+- [ ] 更新 `docs/aidlc/handoff.md` 当前状态
 - [ ] **仅存量项目**：验证未创建重复文件（如 `ClassName_modified.java` 与 `ClassName.java` 并存）
 - [ ] 保存所有生成的产物
 
@@ -430,7 +431,7 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 - [ ] 内容必须包含：变更清单（文件路径+操作类型）、测试结果、规范合规状态
 - [ ] 测试结果必须来自实际执行的命令输出
 - [ ] 框架规范对照结果从步骤 5（代码审查）的对照结果汇总
-- [ ] 在 state.md 中记录微型摘要生成状态
+- [ ] 在 handoff.md 中记录微型摘要生成状态
 
 ## 步骤 15：展示完成消息
 - 按以下结构展示完成消息：
@@ -459,7 +460,7 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 
         - 从代码生成计划的页面对照表中提取
         - 仅列出本单元涉及的页面级文件（不含纯逻辑组件）
-        - 此映射同时写入 `state.md` 的当前单元交接信息中，确保跨 session 恢复时可用
+        - 此映射同时写入 `handoff.md` 的当前单元交接信息中，确保跨 session 恢复时可用
 
      4. **格式化工作流消息**（强制）：始终以此格式结尾：
 
@@ -477,7 +478,7 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 >
 > 🔧 **请求修改** - 根据审查结果要求修改生成的代码
 > ✅ **继续下一阶段** - 确认代码生成，进入**[下一单元/构建和测试]**
-> 📋 **新 Session 继续** - 复制 `state.md` 中的交接提示词到新对话继续
+> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
 
 ---
 ```
@@ -490,7 +491,7 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 ## 步骤 17：记录审批并更新进度
 - 在 audit.md 中记录审批及时间戳
 - 记录用户的审批回复及时间戳
-- 在 state.md 中标记此单元的代码生成阶段完成
+- 在 handoff.md 中标记此单元的代码生成阶段完成
 
 ---
 
@@ -500,7 +501,7 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 - 所有功能必须实现到位，不得省略或跳过
 - 如果某部分无法实现，必须明确告知用户原因并提出替代方案
 - **孤儿清理**：自己的改动产生的未使用 import/变量/函数必须清理
-- **不改进无关代码**：发现无关问题时记录到 state.md 的"待优化项"，不在当前单元修复
+- **不改进无关代码**：发现无关问题时记录到 handoff.md 的"待优化项"，不在当前单元修复
 
 ### 外部数据源字段来源约束
 
@@ -532,7 +533,7 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 ### 代码位置规则
 - **应用代码**：仅在工作区根目录（绝不在 docs/aidlc/ 中）
 - **文档**：仅在 docs/aidlc/（markdown 摘要）
-- 生成代码前从 state.md **读取工作区根目录**
+- 生成代码前从 handoff.md **读取工作区根目录**
 
 **按项目类型的结构模式**：
 - **存量项目**：使用现有结构（如 `src/main/java/`、`lib/`、`pkg/`）
@@ -567,5 +568,5 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 - 框架规范逐项对照已通过（仅 Loeyae Boot 项目）
 - 单元级微型摘要已生成（参见 `construction-implementation-report.md`）
 - 部署产物已生成
-- state.md 已更新（步骤完成强制协议）
+- handoff.md 已更新（步骤完成强制协议）
 - 完整单元已准备好进行构建和验证

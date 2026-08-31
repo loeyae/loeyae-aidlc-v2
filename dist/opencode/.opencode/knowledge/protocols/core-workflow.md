@@ -7,7 +7,7 @@
 1. 使用简体中文交互，并称呼用户为 Boss。
 2. 不确定时先提一个关键问题，不得用假设代替澄清。
 3. 禁止 TODO、FIXME、空实现和未经验证的完成声明。
-4. 每步完成执行 `common-step-completion-protocol.md`，以 `docs/aidlc/state.md` 为唯一恢复状态源。
+4. 每步先由 `orchestrate report` 更新签名机器状态 `docs/aidlc/aidlc-state.json`，再按 `common-step-completion-protocol.md` 派生更新 `docs/aidlc/handoff.md`。
 5. 下一步说明必须附可直接复制的执行提示词。
 
 ## 审批模式
@@ -29,7 +29,7 @@
 | I3 场景分析与模块映射 | `product-scenario-module-mapping.md` |
 | 用户选择产出 PRD 或独立生成 PRD | `product-prd-generation.md` |
 | I9 选择 Figma 模式 | `inception-ui-figma.md` |
-| state.md `UI 设计方式` 为 `figma` | `common-figma-design-standards.md` |
+| handoff.md `UI 设计方式` 为 `figma` | `common-figma-design-standards.md` |
 | 工作区检测后 | `common-complexity-assessment.md` |
 | 恢复会话 | `common-session-continuity.md` |
 | 变更请求 | `common-workflow-changes.md` + `change-request-process.md` |
@@ -43,7 +43,7 @@
 | 存量分布式系统 | 按需加载 `common-runtime-dependency-analysis.md`、`common-contract-governance.md`、`common-configuration-governance.md`、`common-distributed-consistency.md` |
 | 需要图表设计时 | `common-diagram-design-standards.md` |
 | 执行图表源级、几何或目标环境验证时 | `common-diagram-validation-standards.md` + `common-svg-diagram-standards.md` |
-| 检测到技术栈证据 | 按 state.md 加载对应的 `common-tech-*` 条件适配 |
+| 检测到技术栈证据 | 按 handoff.md 加载对应的 `common-tech-*` 条件适配 |
 
 禁止启动时预加载全部规则。目录、审计、协作、提问和交接分别按 `common-directory-structure.md`、`common-audit-logging.md`、`common-team-collaboration.md`、`common-question-format-guide.md`、`common-session-handoff.md` 按需加载。
 
@@ -74,7 +74,7 @@ Phase 产物需要图表时，按以下协议调用 `aidlc-diagram-design`（独
 
 ## 意图路由
 
-工作区检测后读取 `state.md` 并按下表路由；无法唯一判断时询问用户。
+工作区检测后读取 `handoff.md` 并按下表路由；无法唯一判断时询问用户。
 
 | 意图 | 判定 | 路由 |
 |------|------|------|
@@ -85,10 +85,10 @@ Phase 产物需要图表时，按以下协议调用 `aidlc-diagram-design`（独
 | 业务方 PRD 评审意见回流 | PRD 已发出且业务方提出内容变更 | 无代码基线按 `common-workflow-changes.md` 协调后通过 `product-prd-generation.md` Patch 模式更新 PRD；有代码基线按 CR1-CR5 |
 | 需求/契约变更 | 改变已有代码基线的行为、验收标准、接口契约或数据语义 | CR1-CR5（PR 模型） |
 | 合并历史 CR | 合并历史CR文档、清理遗留CR文件 | `change-request-process.md` §历史CR文档批量合并 |
-| 压缩 state | 压缩state、精简state | `inception-state-template.md` §state.md 压缩规则 |
+| 压缩 state | 压缩state、精简state | `inception-state-template.md` §handoff.md 压缩规则 |
 | 新增功能 | 新功能且现有产物中不存在 | Inception 追加模式 |
 | 生成 PRD | 生成PRD、写PRD、产品需求文档 | `product-prd-generation.md` |
-| 新项目 | 无 state.md | Inception |
+| 新项目 | 无 handoff.md | Inception |
 
 ## Inception 路由
 
@@ -113,7 +113,7 @@ Phase 产物需要图表时，按以下协议调用 `aidlc-diagram-design`（独
 | I13 | 测试用例派生 | 产品用例具备 I7+I12；或技术用例具备已批准风险来源与可执行锚点 | 🟡 | `test-case-derivation.md` |
 | I14 | 单元生成 | 需拆分多个工作单元 | 🟡 | `inception-units-generation.md` |
 
-业务产物门禁完成后，无论此前是否提及 PRD，都必须先询问用户是否产出 PRD，并将“需要 / 不需要”写入 state.md。该决策检查点位于 I15 之外：选择“需要”才执行 I15/I16；选择“不需要”则记录跳过依据并直接继续 I11，不创建 PRD 文件或占位目录。
+业务产物门禁完成后，无论此前是否提及 PRD，都必须先询问用户是否产出 PRD，并将“需要 / 不需要”写入 handoff.md。该决策检查点位于 I15 之外：选择“需要”才执行 I15/I16；选择“不需要”则记录跳过依据并直接继续 I11，不创建 PRD 文件或占位目录。
 
 I15 采用独立生成流程（`product-prd-generation.md`），支持 SSOT 优先检索和已有 Inception 产物增强，无硬性前置步骤依赖。I16 为可选审查步骤：用户要求审查时执行。
 
@@ -158,7 +158,7 @@ C5 条件前置：存在 `contract` 类型跨单元依赖时，先加载并完�
 | O2 | 交付配置生成 | O1 完成 | 🟡 | `operations-operations.md` + `operations-templates.md`（按需） |
 | O3 | 配置验证与部署文档 | O2 完成 | 🔴 | `operations-operations.md` + `common-quality-gates.md` |
 
-纯库、纯本地工具或用户明确不需要部署时跳过 Operations，并在 `state.md` 记录原因。
+纯库、纯本地工具或用户明确不需要部署时跳过 Operations，并在 `handoff.md` 记录原因。
 
 ## Change Request 路由
 
@@ -178,7 +178,7 @@ C5 条件前置：存在 `contract` 类型跨单元依赖时，先加载并完�
 
 | 范围 | 完成条件 |
 |------|----------|
-| Inception | 必需产物经用户确认，交叉审查通过，执行/跳过决定写入 state.md；选择产出 PRD 时 I16 已通过且 PRD 状态不低于 `consistency-checked` |
+| Inception | 必需产物经用户确认，交叉审查通过，执行/跳过决定写入 handoff.md；选择产出 PRD 时 I16 已通过且 PRD 状态不低于 `consistency-checked` |
 | Construction | TDD、适用审查、实际构建和测试均有证据且通过；触发 C7 时全局审查通过 |
 | Operations | 仅生成选定部署目标需要的文件，配置语法/静态验证通过，部署说明可执行 |
-| 会话连续性 | state.md、审计与下一步交接一致，可在三平台恢复 |
+| 会话连续性 | handoff.md、审计与下一步交接一致，可在三平台恢复 |

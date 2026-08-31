@@ -1,6 +1,6 @@
 ---
 slug: cross-validation
-number: "2.3"
+number: "2.5.9"
 name: 交叉验证
 phase: inception
 execution: CONDITIONAL
@@ -8,10 +8,12 @@ lead_agent: aidlc-product-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
-consumes: []
+consumes:
+  - docs/aidlc/inception/requirements.md
+  - docs/aidlc/inception/user-stories.md
 produces: [docs/aidlc/inception/cross-validation-report.md]
 sensors: []
-requires: [requirements-analysis]
+requires: [user-stories]
 ---
 # Inception 产物交叉验证（强制审查）
 
@@ -40,7 +42,7 @@ requires: [requirements-analysis]
 **执行条件**：存在逆向工程产物（`docs/aidlc/inception/reverse-engineering/`）
 
 **输入文件**：
-- `docs/aidlc/inception/requirements/requirements.md`
+- `docs/aidlc/inception/requirements.md`
 - `docs/aidlc/inception/reverse-engineering/architecture.md`
 - `docs/aidlc/inception/reverse-engineering/component-inventory.md`
 
@@ -68,7 +70,7 @@ requires: [requirements-analysis]
 **执行条件**：始终执行
 
 **输入文件**：
-- `docs/aidlc/inception/requirements/requirements.md`
+- `docs/aidlc/inception/requirements.md`
 - `docs/aidlc/inception/requirements/requirement-verification-questions.md`
 - `docs/aidlc/audit.md`（澄清问答部分）
 - 当前 inception 根下的 `requirements/business-flows.md`
@@ -101,10 +103,10 @@ requires: [requirements-analysis]
 **执行条件**：始终执行（用户故事完成后）
 
 **输入文件**：
-- `docs/aidlc/inception/user-stories/stories.md`
+- `docs/aidlc/inception/user-stories.md`
 - `docs/aidlc/inception/user-stories/personas.md`
 - `docs/aidlc/inception/user-stories/role-permission-matrix.md`
-- `docs/aidlc/inception/requirements/requirements.md`
+- `docs/aidlc/inception/requirements.md`
 - 当前场景 `scenario-manifest.md`
 
 **审查清单**：
@@ -133,9 +135,9 @@ requires: [requirements-analysis]
 **目的**：从用户故事角度**反向**验证需求文档的完整性。当用户故事描述了用户期望的行为，但需求文档中找不到对应支撑时，说明需求可能有遗漏。
 
 **输入文件**：
-- `docs/aidlc/inception/user-stories/stories.md`
+- `docs/aidlc/inception/user-stories.md`
 - `docs/aidlc/inception/user-stories/personas.md`
-- `docs/aidlc/inception/requirements/requirements.md`
+- `docs/aidlc/inception/requirements.md`
 
 **审查清单**：
 
@@ -162,10 +164,10 @@ requires: [requirements-analysis]
 **输入文件**：
 - 页面计划：单模块 `docs/aidlc/inception/ui-design/page-plan.md`；多模块为当前模块 `docs/aidlc/modules/{module-name}/inception/ui-design/page-plan.md`
 - HTML Mock 模式：`docs/aidlc/inception/ui-mock/*-page-specs.md` + 对应 HTML 文件（标准或大型模式）
-- Figma 模式：`state.md` 的 `## UI 设计` 区块 `产物位置` 中的唯一主 Figma 文件链接 + `Figma 页面进度`（通过 `get_metadata` / `get_screenshot` 验证）
-- `docs/aidlc/inception/user-stories/stories.md`
+- Figma 模式：`handoff.md` 的 `## UI 设计` 区块 `产物位置` 中的唯一主 Figma 文件链接 + `Figma 页面进度`（通过 `get_metadata` / `get_screenshot` 验证）
+- `docs/aidlc/inception/user-stories.md`
 - `docs/aidlc/inception/user-stories/role-permission-matrix.md`
-- `docs/aidlc/inception/requirements/requirements.md`
+- `docs/aidlc/inception/requirements.md`
 
 **审查清单**：
 
@@ -186,8 +188,8 @@ requires: [requirements-analysis]
 |---|--------|---------------|
 | F1 | Variable 使用 | 对每个受审 Frame 调用 `get_variable_defs`；所有可映射到已有 Variable 的颜色、间距、字体均使用 Variable。硬编码值逐项列出并标记“已修正”或给出合理例外 |
 | F2 | 组件化 | 同一结构在受审范围重复 ≥3 次时使用 Component/Instance；不组件化时逐项记录原因 |
-| F3 | Frame 可追溯 | state.md 页面进度中的每个 completed 页面均有唯一 nodeId，且 `get_metadata` 可定位 |
-| F4 | 视觉证据 | 每个页面或每批页面有 `get_screenshot` 验证结果并记录在 state.md |
+| F3 | Frame 可追溯 | handoff.md 页面进度中的每个 completed 页面均有唯一 nodeId，且 `get_metadata` 可定位 |
+| F4 | 视觉证据 | 每个页面或每批页面有 `get_screenshot` 验证结果并记录在 handoff.md |
 
 **Figma 证据表格式**：
 
@@ -201,9 +203,9 @@ requires: [requirements-analysis]
 
 **未通过处理**：
 1. 为每个不一致项分配冲突 ID，在交叉验证报告中记录需求、用户故事、UI 三方描述、影响范围和建议；不得把语义差异直接归因于任一方错误。
-2. 仅缺少证据、命名映射或 page-specs 对应关系的机械性问题可直接修正。涉及产品语义时，将 state.md `设计状态` 标记为 `blocked`、记录失败门禁，并按 `common-question-format-guide.md` 创建或更新 `docs/aidlc/inception/ui-mock/ui-conflict-questions.md`。
+2. 仅缺少证据、命名映射或 page-specs 对应关系的机械性问题可直接修正。涉及产品语义时，将 handoff.md `设计状态` 标记为 `blocked`、记录失败门禁，并按 `common-question-format-guide.md` 创建或更新 `docs/aidlc/inception/ui-mock/ui-conflict-questions.md`。
 3. 加载并执行 `common-workflow-changes.md` 的“产品产物一致性协调”；该规则统一定义用户裁决选项、禁止提前修改、代码基线分流、就地更新、下游失效和重审恢复。
-4. 未决冲突为零且适用审查全部通过后，才能将 state.md `设计状态` 更新为 `approved`，`下一操作` 更新为“进入 I11 工作流规划”。
+4. 未决冲突为零且适用审查全部通过后，才能将 handoff.md `设计状态` 更新为 `approved`，`下一操作` 更新为“进入 I11 工作流规划”。
 
 ---
 
@@ -246,7 +248,7 @@ requires: [requirements-analysis]
 **目的**：验证 PRD 内容质量，确保无臆造内容、关键信息完整、来源可追溯。
 
 **输入文件**：
-- PRD 文件（`docs/aidlc/inception/prd.md` 或 `docs/aidlc/product/scenarios/<scenario-id>/prd.md`）
+- PRD 文件（`docs/aidlc/ideation/prd.md`）
 - 已有 Inception 产物（如存在）
 - SSOT 检索记录（如使用）
 
@@ -309,8 +311,8 @@ requires: [requirements-analysis]
 
 ## 与步骤完成协议的关系
 
-- 审查步骤本身也是一个步骤，完成后必须执行步骤完成协议（更新 state.md、微型摘要、审计记录）
-- 审查步骤在 state.md 中记录为 `{步骤编号} 交叉验证 ✅/❌`
+- 审查步骤本身也是一个步骤，完成后必须执行步骤完成协议（更新 handoff.md、微型摘要、审计记录）
+- 审查步骤在 handoff.md 中记录为 `{步骤编号} 交叉验证 ✅/❌`
 - 如果审查未通过并修正后重新通过，在审计中记录"首次未通过 → 修正后通过"
 
 ---
@@ -327,7 +329,7 @@ requires: [requirements-analysis]
 > **🚀 Boss，下一步？**
 >
 > ✅ **确认并继续** - 进入 {下一步骤名}
-> 📋 **新 Session 继续** - 复制 `state.md` 中的交接提示词到新对话继续
+> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
 
 ---
 

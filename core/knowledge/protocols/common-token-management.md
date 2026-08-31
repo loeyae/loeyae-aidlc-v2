@@ -146,7 +146,7 @@ docs/aidlc/
 ### 恢复时的加载策略
 
 **必须立即加载（~5-8KB）**：
-- `state.md` — 全局进度和当前位置
+- `handoff.md` — 全局进度和当前位置
 - `audit-summary.md` — 关键决策时间线
 
 **按当前阶段决定是否加载**：
@@ -260,7 +260,7 @@ docs/aidlc/inception/application-design/
 
 ### 触发条件
 
-当 state.md 中 `架构模式 = 多模块` 时，启用模块隔离加载策略。
+当 handoff.md 中 `架构模式 = 多模块` 时，启用模块隔离加载策略。
 
 ### 加载规则
 
@@ -275,7 +275,7 @@ docs/aidlc/inception/application-design/
 ```
 恢复到模块 X 的 Inception：
 - core-workflow.md: ~15KB
-- state.md: ~3KB（只看模块进度）
+- handoff.md: ~3KB（只看模块进度）
 - audit-summary.md: ~2KB
 - product/contracts.md: ~3-5KB（模块间契约）
 - modules/X/inception/ 下的当前步骤产出物: ~5-10KB
@@ -286,7 +286,7 @@ docs/aidlc/inception/application-design/
 ```
 恢复到模块 X 的 Construction unit-N：
 - core-workflow.md: ~15KB
-- state.md: ~3KB
+- handoff.md: ~3KB
 - audit-summary.md: ~2KB
 - product/contracts.md: ~3-5KB
 - modules/X/inception/ 的需求切片: ~3KB
@@ -326,7 +326,7 @@ docs/aidlc/inception/application-design/
 
 ```
 加载：core-workflow.md（~15KB）
-加载：state.md（~3-5KB）
+加载：handoff.md（~3-5KB）
 加载：audit-summary.md（~2KB）
 加载：当前步骤的 steering 文件（~5-10KB）
 加载：前序步骤的 decision-summary.md（~2-3KB × N）
@@ -337,7 +337,7 @@ docs/aidlc/inception/application-design/
 
 ```
 加载：core-workflow.md（~15KB）
-加载：state.md（~3-5KB）
+加载：handoff.md（~3-5KB）
 加载：audit-summary.md（~2KB）
 加载：当前单元的需求切片（~3KB）
 加载：当前单元的故事切片（~2KB）
@@ -352,7 +352,7 @@ docs/aidlc/inception/application-design/
 
 ```
 加载：core-workflow.md（~15KB）
-加载：state.md（~3KB）
+加载：handoff.md（~3KB）
 加载：audit-summary.md（~2KB）
 加载：product/product-overview.md（~3KB）
 加载：product/modules.md（~3KB）
@@ -365,7 +365,7 @@ docs/aidlc/inception/application-design/
 
 ```
 加载：core-workflow.md（~15KB）
-加载：state.md（~3KB）
+加载：handoff.md（~3KB）
 加载：audit-summary.md（~2KB）
 加载：product/contracts.md（~3-5KB）
 加载：modules/{name}/inception/ 当前步骤产出物（~5-10KB）
@@ -377,7 +377,7 @@ docs/aidlc/inception/application-design/
 
 ```
 加载：core-workflow.md（~15KB）
-加载：state.md（~3KB）
+加载：handoff.md（~3KB）
 加载：audit-summary.md（~2KB）
 加载：product/contracts.md（~3-5KB）
 加载：modules/{name}/inception/ 需求切片（~3KB）
@@ -414,4 +414,4 @@ docs/aidlc/inception/application-design/
 每个单元完成并合并后：
 - 该单元的 audit 分段可以归档（移到 `archive/` 目录）
 - 该单元的设计切片不再需要加载
-- state.md 中标记为"已完成"的单元信息可以精简
+- handoff.md 中标记为"已完成"的单元信息可以精简

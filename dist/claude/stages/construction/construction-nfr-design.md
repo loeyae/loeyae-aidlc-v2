@@ -105,7 +105,7 @@ condition: has_nfr_needs
 >
 > 🔧 **请求修改** - 根据审查结果要求修改 NFR 设计
 > ✅ **继续下一阶段** - 确认 NFR 设计，进入**[下一阶段名称]**
-> 📋 **新 Session 继续** - 复制 `state.md` 中的交接提示词到新对话继续
+> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
 
 ---
 ```
@@ -118,4 +118,4 @@ condition: has_nfr_needs
 ### 步骤 9：记录审批并更新进度
 - 在 audit.md 中记录审批及时间戳
 - 记录用户的审批回复及时间戳
-- 在 state.md 中标记 NFR 设计阶段完成
+- 在 handoff.md 中标记 NFR 设计阶段完成

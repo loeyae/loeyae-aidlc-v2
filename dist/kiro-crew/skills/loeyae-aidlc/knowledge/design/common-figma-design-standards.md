@@ -2,7 +2,7 @@
 
 > **职责边界**：本文件定义 Construction 阶段**从 Figma 读取设计并还原为代码**的规范（读方向）。Inception 阶段**在 Figma 中创建设计**的流程（写方向）见 `inception-ui-figma.md`。
 >
-> **加载条件**：state.md 的 `## UI 设计` 区块中 `UI 设计方式` 为 `figma`。外部提供的 Figma 设计稿同样必须在 I9 登记为该方式。
+> **加载条件**：handoff.md 的 `## UI 设计` 区块中 `UI 设计方式` 为 `figma`。外部提供的 Figma 设计稿同样必须在 I9 登记为该方式。
 
 ## 核心原则
 

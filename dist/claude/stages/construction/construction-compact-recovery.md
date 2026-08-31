@@ -8,6 +8,7 @@ lead_agent: aidlc-developer-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
+requires: [workspace-detection]
 consumes: []
 produces: [.aidlc/evidence/compact-recovery/recovery-evidence.json]
 sensors: [recovery-evidence]
@@ -19,13 +20,13 @@ condition: context_compacted
 
 **职责**：定义 Construction 在上下文压缩或新会话后的断点恢复。统一入口和通用规则见 `common-session-continuity.md`。
 
-## 唯一状态源
+## 状态源
 
-`docs/aidlc/state.md` 是阶段、批次和单元进度的唯一事实来源。不得创建或优先读取独立 `progress.md`；单元级进度记录在 state.md 的“单元与批次进度”表中。
+`docs/aidlc/aidlc-state.json` 是阶段路由、当前 stage、完成、条件跳过和审批结果的唯一机器事实来源。先用编排器验证其签名和 revision，再读取 `docs/aidlc/handoff.md` 补充模块、批次、单元与协作上下文。两者冲突时阻断恢复，禁止由 handoff 反向覆盖机器状态。
 
 ## 恢复步骤
 
-1. 读取 state.md，确认当前阶段、模块、批次、单元及活跃变更请求。
+1. 读取 handoff.md，确认当前阶段、模块、批次、单元及活跃变更请求。
 2. 若当前阶段不是 Construction，返回 `common-session-continuity.md` 对应阶段路由。
 3. 重新加载当前单元的需求、故事、设计、共享接口和 Construction steering。
 4. 找到第一个状态不是 `complete` 的可执行单元。
@@ -34,7 +35,7 @@ condition: context_compacted
 
 ## 平台适配
 
-Kiro、Claude Code 和 OpenCode 均执行同一恢复步骤。平台 Hook、Workflow 或启动指令只能触发读取 state.md，不得引入第二套状态文件或覆盖 state.md。
+Kiro、Claude Code 和 OpenCode 均执行同一恢复步骤。平台 Hook、Workflow 或启动指令只能触发读取 handoff.md，不得引入第二套状态文件或覆盖 handoff.md。
 
 ## 恢复输出
 
@@ -47,6 +48,6 @@ Kiro、Claude Code 和 OpenCode 均执行同一恢复步骤。平台 Hook、Work
 
 ## 无法确定恢复点
 
-- state.md 缺失：停止并询问用户是重建状态还是退出 AI-DLC。
-- state.md 与产物冲突：列出冲突，标记 blocked，等待用户确认；不得根据文件存在推断测试或审查已通过。
+- handoff.md 缺失：停止并询问用户是重建状态还是退出 AI-DLC。
+- handoff.md 与产物冲突：列出冲突，标记 blocked，等待用户确认；不得根据文件存在推断测试或审查已通过。
 - 活跃变更请求存在：优先恢复 CR 路由，不直接继续代码生成。

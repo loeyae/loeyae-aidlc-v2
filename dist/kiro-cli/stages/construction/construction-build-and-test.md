@@ -8,7 +8,9 @@ lead_agent: aidlc-quality-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
-consumes: []
+consumes:
+  - src/
+  - docs/aidlc/construction/code-review.md
 produces:
   - docs/aidlc/construction/build-test-report.md
   - docs/aidlc/construction/build-and-test/build-and-test-summary.md
@@ -39,7 +41,7 @@ requires: [code-generation, tdd, code-review]
 
 ## 步骤 1：识别验证范围和命令
 
-1. 从变更文件、构建配置和 `state.md` 识别直接修改的模块、服务与工作单元；读取 I13 `test-cases/_index.md` 和“技术用例执行映射”，确保每个 ready UC-D 进入执行矩阵，I14 跳过时消费 `project/default` 范围。
+1. 从变更文件、构建配置和 `handoff.md` 识别直接修改的模块、服务与工作单元；读取 I13 `test-cases/_index.md` 和“技术用例执行映射”，确保每个 ready UC-D 进入执行矩阵，I14 跳过时消费 `project/default` 范围。
 2. 分布式项目加载 `common-runtime-dependency-analysis.md`，将构建依赖与运行时消费者闭包取并集，划分“必须构建 / 必须测试 / 仅观察”。
 3. 按受影响内容加载契约、配置和一致性治理规则，把消费者适配、版本组合、故障恢复和迁移用例加入矩阵。
 4. 按测试分层策略选择 L3 或 L4；选择 L3 时记录排除范围和依据。L4 可按服务批次执行，但不能遗漏运行时影响节点。
@@ -120,9 +122,9 @@ requires: [code-generation, tdd, code-review]
 - [ ] 条件测试已执行，或已记录不适用依据
 - [ ] `build-and-test-summary.md` 包含命令和结果证据
 - [ ] `construction-implementation-report.md` 已生成或更新
-- [ ] state.md、计划复选框和审计已同步
+- [ ] handoff.md、计划复选框和审计已同步
 
-因环境、凭据、外部服务或资源限制无法执行时，状态必须是“阻塞/未验证”，并列出用户可执行的精确命令；外部证据只有在包含稳定运行标识、不可变代码提交、适用的制品标识/摘要，且与 state.md 当前验证目标一致时才能完成。缺失、无法比较或不匹配时保持“未验证”。
+因环境、凭据、外部服务或资源限制无法执行时，状态必须是“阻塞/未验证”，并列出用户可执行的精确命令；外部证据只有在包含稳定运行标识、不可变代码提交、适用的制品标识/摘要，且与 handoff.md 当前验证目标一致时才能完成。缺失、无法比较或不匹配时保持“未验证”。
 
 ## 完成消息
 

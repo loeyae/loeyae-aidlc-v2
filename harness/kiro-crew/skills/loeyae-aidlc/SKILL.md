@@ -2,7 +2,7 @@
 name: loeyae-aidlc
 description: >
   Loeyae AI-DLC v2 workflow orchestrator. Engine-driven development lifecycle
-  with gate-enforced completeness (no manual approval gates). Activate with
+  with deterministic gates, signed provenance, and two token-bound human approval points. Activate with
   "使用 AI-DLC" or "aidlc" keywords.
 triggers: aidlc, AI-DLC, 使用 AI-DLC, 继续上次的工作, 认领单元, 功能设计, 用户故事, 用户场景, 验收标准, PRD, 产品需求文档, 需求文档合成, 架构设计, 应用设计, 组件设计, 服务设计, 单元生成, 工作单元, 单元拆分, 依赖矩阵, 代码审查, 代码评审, Code Review, 逆向工程, 存量系统分析, 代码库分析, 根因分析, 系统化调试, 故障定位, 测试用例派生, UC-D, 测试场景, 构建测试证据, 画图, 图表设计, 业务流程图, 系统架构图, 流程图, Figma, UI 原型, HTML Mock, 组件映射, 前端平台规范, 需求估算, 工作量估算, 人天估算, 功能点估算, 功能点分析, FPA, 项目排期, 粗粒度排期, 排期预测, 交付预测, 发布预测, 交付配置, 部署配置生成, 部署配置验证, 发布配置检查
 ---
@@ -13,9 +13,7 @@ triggers: aidlc, AI-DLC, 使用 AI-DLC, 继续上次的工作, 认领单元, 功
 
 **准入门禁（requires + condition）+ 准出门禁（produces + sensors）= 自动推进**
 
-门禁保证完整性，因此不需要人工审批阻断。引擎验证通过后自动推进到下一阶段。
-仅 2 个不可自动验证的决策点保留人工确认（架构决策 + 部署决策）。
-这 2 个审批点在 run-stage directive 中以 `gate: true` 标识；agent 必须完成产物与 sensor 后请用户确认，再 `report --result approved`。详见下文"Directive 类型"。
+门禁保证可机器验证的完整性；仅 2 个不可自动判定的决策点保留 `approval: block`（架构决策 + 部署决策）。`gate: true` 不是口头确认：完成产物与 sensor 后，人类必须在交互式终端签发绑定 workflow/stage/challenge、最长 15 分钟且消费后不可重放的 token。平台适配器和 Agent 不得自行签发；没有受信宿主 provider 且无人类 TTY 时按设计 fail-closed。
 
 ## 架构
 
@@ -33,7 +31,10 @@ Agent ←→ aidlc-orchestrate.ts park   → 保存状态供下次恢复
 Loop:
   1. directive = loeyae-aidlc orchestrate next
   2. 按 directive.kind 执行（见下表）
-  3. 执行完成后: loeyae-aidlc orchestrate report --stage <slug> --result completed
+  3. 执行完成后按契约报告：
+     - 普通 stage：`report --stage <slug> --result completed`
+     - instruction-only：追加 `--instruction-ack <slug>`
+     - approval:block：先由人类签发 token，再以 `--result approved --approval-token <token>` 报告
   4. 重复直到 directive.kind == done
 ```
 
@@ -54,30 +55,32 @@ Loop:
 
 | 字段 | 类型 | 含义 | agent 动作 |
 |------|------|------|-----------|
-| `gate` | boolean | `true` = 本 stage 为审批阻断点（approval:block） | 完成后必须 `report --result approved`，不得用 `completed`。引擎会拒绝 `completed` 并提示重报 |
-| `approval` | "block"\|"confirm"\|"notify" | 审批类型 | `block` 必须人工确认；`notify` 仅通知不阻断 |
+| `gate` | boolean | `true` = 本 stage 为审批阻断点（approval:block） | 完成后必须携带受信的一次性 token 报告 `approved`，不得使用 `completed` |
+| `approval` | "block"\|"confirm"\|"notify" | 审批类型 | `block` 必须由人类终端或受信宿主 provider 签发 token；`notify` 仅通知 |
+| `completion_contract` | "artifact"\|"evidence"\|"instruction_only" | 完成契约 | `instruction_only` 必须追加 `--instruction-ack <slug>`，Stop Hook 不得代确认 |
 | `produces` | string[] | 准出需存在的产物路径 | report 前确保已生成 |
 | `sensors` | string[] | 准出需通过的 sensor | report 前确保 evidence 就绪 |
 | `mode` | "inline"\|... | 执行模式 | 参考 stage 文件 |
 | `consumes` | string[] | 上游产物输入 | 读取这些文件作为输入 |
 
-**审批点处理**：`gate:true`（即 application-design / operations）时，先完成产物与 sensor，再请用户确认，然后：
+**审批点处理**：`gate:true`（仅 application-design / operations）时，先完成产物与 sensor，再请人类审阅。普通聊天中的“同意”不能直接变成 `approved`；人类需在业务项目的交互式终端执行：
 
 ```bash
-loeyae-aidlc orchestrate report --stage <slug> --result approved
+loeyae-aidlc approve --stage <slug>
+loeyae-aidlc orchestrate report --stage <slug> --result approved --approval-token <token>
 ```
 
-误用 `--result completed` 会被引擎拒绝（error directive），按提示改用 `approved` 重报即可，不会损坏状态。
+Token 绑定当前 workflow、stage 和 challenge，最长 15 分钟且成功消费后不可重放。误用 `completed`、缺 token、伪造、过期或重放都会返回 error directive；修复后重新获取 challenge/token，不得改 state 绕过。
 
 ## 五层门禁体系
 
 ### 1. 准入：requires（依赖检查）
 
 Stage frontmatter 声明 `requires: [slug1, slug2]`。引擎在 `next` 时验证：
-- 所有依赖 stage 必须已 completed 或 skipped
-- **Scope-aware**：被当前 scope 排除的依赖视为自动满足
+- 所有依赖 stage 必须已 completed，或由图谱 condition=false 记录为内部 `condition_skipped`
+- **Scope-aware**：被当前 scope 排除的依赖仅在图谱 scope closure/显式 waiver 合法时满足
 
-覆盖：41/46 stages
+覆盖：45/46 stages
 
 ### 2. 准入：condition（动态条件）
 
@@ -91,7 +94,8 @@ Stage frontmatter 声明 `condition: <expression>`。引擎在 `next` 时评估�
 ### 3. 准出：produces（产物验证）
 
 Stage frontmatter 声明 `produces: [path1, path2]`。引擎在 `report --result completed` 时检查：
-- 所有声明的文件必须存在且非空，声明的目录必须存在且包含非隐藏条目
+- 所有声明文件必须是项目根内的常规非 symlink 文件，逐段路径不得穿越 symlink，且至少 16 字节；目录必须安全存在并含非隐藏条目
+- `consumes` 在 `next` 与 `report` 都复核，防止阶段执行窗口内删除或替换上游产物
 - 不满足则 **拒绝完成**，返回 error directive
 
 覆盖：32/46 stages
@@ -106,7 +110,11 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 - 格式：合法 JSON object，含 `evidence_version: "1"`
 - 大小：≤ 512 KB
 - 时效：`timestamp` 为合法 ISO 日期，≤ 24 小时
-- 来源：由受控 evidence producer（CI 脚本、构建工具、测试 runner）写入；所有 evidence 必须带 `producer.mode: "controlled"`、执行 ID 和最近时间戳。`build-test-evidence` 使用 `loeyae-aidlc evidence run --stage build-and-test`；其他语义 sensor 使用 `--sensor <sensor>` 执行 allowlist 中唯一的 `role: "semantic"` checker。checker 只能在 stdout 返回 sensor-specific JSON，Producer 注入 provenance、时间戳和 checker 执行记录，不能由 Agent 直接编辑 evidence 文件。
+- 来源与完整性：`producer.name` 必须为 `loeyae-aidlc-evidence`，并带 `mode: "controlled"`、执行 ID、当前 `commit + dirty + worktree_digest` 以及合法 HMAC-SHA256 `integrity`
+- secret：需要 Evidence 的工作流必须在第一次 `next` 前由宿主注入至少 32 字节且跨 orchestrator/Producer/Hook 一致的 `AIDLC_TRUST_SECRET`
+- 构建证据：`loeyae-aidlc evidence run --stage build-and-test`；命令只持久化 `argv_digest`，stdout/stderr 尾部脱敏
+- 语义证据：`--sensor <sensor>` 的 allowlist 只能声明精确的 `loeyae-aidlc check --sensor <sensor>`；Producer 固定执行发行包内置 checker，拒绝项目 Node/Python/shell checker
+- 路径与并发：config/cwd/artifact/output 均做根边界和逐段 symlink 检查；同 stage/sensor 的锁覆盖完整执行及原子写窗口
 
 #### Inception Sensors
 
@@ -158,8 +166,9 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 | classic | 44 | 标准开发流程 |
 | express | 7 | 快速迭代/小改动 |
 | workshop | 7 | 工作坊/探索 |
-| bugfix | 5 | Bug 修复 |
-| refactor | 5 | 代码重构 |
+| bugfix | 7 | Bug 修复 |
+| refactor | 7 | 代码重构 |
+| poc | 7 | 概念验证 |
 
 ## 仅保留的 2 个人工确认点
 
@@ -172,17 +181,18 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 
 ## 不适用条件的处理
 
-- condition 评估为 false → 引擎自动标记 `skipped`，下游 requires 视为满足
-- 被跳过 stage 的 sensor 不触发，doc-cascade 感知跳过状态
-- 无需手动记录——引擎 condition 评估结果即为依据
+- condition 评估为 false → 引擎记录内部 `condition_skipped`，下游 requires 视为满足
+- 被条件排除 stage 的 sensor 不触发，doc-cascade 感知该内部状态
+- 公开 report 不接受 `skipped`；Agent/用户不得手工跳过，condition 结果本身即为依据
 
 ## Kiro Crew 适配
 
 - **引擎调用**：`loeyae-aidlc orchestrate next/report/park`（全局安装后）
 - **子代理派发**：通过 `spawn_run` MCP 工具
-- **状态持久化**：业务项目的 `docs/aidlc/aidlc-state.json`
-- **会话恢复**：检查 state.json，存在则恢复，否则新建
-- **人工确认**：通过 `[OPTIONS: Approve | Request Changes]` 渲染
+- **状态持久化**：`docs/aidlc/aidlc-state.json` 是 HMAC、workflow ID、单调 revision/CAS 保护的唯一机器状态；外部 enrollment 绑定项目路径
+- **会话恢复**：只从已验证签名 state 恢复；`docs/aidlc/handoff.md` 是派生人类视图，无权改变路由状态
+- **人工确认**：`[OPTIONS: Approve | Request Changes]` 只呈现审阅选择；Approve 后仍须由人类 TTY/受信 provider 签发 token，不能把聊天回答直接作为 token
+- **instruction-only**：执行正文后显式传 `--instruction-ack <slug>`；生命周期 Hook 不自动推进
 - **证据目录**：业务项目的 `.aidlc/evidence/<stage-slug>/` 存放 sensor 证据
 - **MCP 能力**：默认安装会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` 合并到 Kiro Crew 全局配置；无自定义字段的旧版本化 Chrome DevTools 默认项会安全收敛为不指定版本的 `chrome-devtools-mcp`；带自定义字段、环境变量、非默认参数或禁用状态的同名配置均保留。服务不可用时必须按对应流程的 `NEEDS_CAPABILITY` 或通用规范降级，不得伪造调用结果
 

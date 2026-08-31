@@ -19,10 +19,12 @@
         "workshop"
       ],
       "requires": [],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
       "sensors": [],
       "traceability": "required",
+      "completion_contract": "instruction_only",
       "condition": "",
       "approval": "notify",
       "file": "stages/inception/inception-workspace-detection.md"
@@ -33,7 +35,7 @@
       "name": "产品 Inception",
       "phase": "ideation",
       "execution": "CONDITIONAL",
-      "lead_agent": "(orchestrator)",
+      "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
       "scopes": [
@@ -45,6 +47,7 @@
       "requires": [
         "workspace-detection"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         "docs/aidlc/ideation/product-inception.md"
@@ -54,6 +57,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/ideation/product-inception.md"
@@ -64,7 +68,7 @@
       "name": "模块划分",
       "phase": "ideation",
       "execution": "CONDITIONAL",
-      "lead_agent": "(orchestrator)",
+      "lead_agent": "aidlc-architect-agent",
       "support_agents": [],
       "mode": "inline",
       "scopes": [
@@ -76,6 +80,7 @@
       "requires": [
         "product-inception"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         "docs/aidlc/ideation/module-division.md"
@@ -85,6 +90,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/ideation/product-module-division.md"
@@ -95,7 +101,7 @@
       "name": "产品契约",
       "phase": "ideation",
       "execution": "CONDITIONAL",
-      "lead_agent": "(orchestrator)",
+      "lead_agent": "aidlc-architect-agent",
       "support_agents": [],
       "mode": "inline",
       "scopes": [
@@ -104,8 +110,13 @@
         "mvp",
         "classic"
       ],
-      "requires": [],
-      "consumes": [],
+      "requires": [
+        "module-division"
+      ],
+      "scope_waived_requires": [],
+      "consumes": [
+        "docs/aidlc/ideation/module-division.md"
+      ],
       "produces": [
         "docs/aidlc/ideation/product-contracts.md"
       ],
@@ -114,6 +125,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/ideation/product-contracts.md"
@@ -124,7 +136,7 @@
       "name": "PRD 生成",
       "phase": "ideation",
       "execution": "CONDITIONAL",
-      "lead_agent": "(orchestrator)",
+      "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
       "scopes": [
@@ -134,9 +146,13 @@
         "classic"
       ],
       "requires": [
-        "product-inception"
+        "product-contracts"
       ],
-      "consumes": [],
+      "scope_waived_requires": [],
+      "consumes": [
+        "docs/aidlc/ideation/module-division.md",
+        "docs/aidlc/ideation/product-contracts.md"
+      ],
       "produces": [
         "docs/aidlc/ideation/prd.md",
         ".aidlc/evidence/prd-generation/prd-completeness.json"
@@ -147,6 +163,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/ideation/product-prd-generation.md"
@@ -157,7 +174,7 @@
       "name": "场景模块映射",
       "phase": "ideation",
       "execution": "CONDITIONAL",
-      "lead_agent": "(orchestrator)",
+      "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
       "scopes": [
@@ -166,8 +183,14 @@
         "mvp",
         "classic"
       ],
-      "requires": [],
-      "consumes": [],
+      "requires": [
+        "product-contracts"
+      ],
+      "scope_waived_requires": [],
+      "consumes": [
+        "docs/aidlc/ideation/module-division.md",
+        "docs/aidlc/ideation/product-contracts.md"
+      ],
       "produces": [
         "docs/aidlc/ideation/scenario-module-mapping.md"
       ],
@@ -176,6 +199,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/ideation/product-scenario-module-mapping.md"
@@ -197,11 +221,15 @@
         "express",
         "workshop"
       ],
-      "requires": [],
+      "requires": [
+        "workspace-detection"
+      ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
       "sensors": [],
       "traceability": "required",
+      "completion_contract": "instruction_only",
       "condition": "",
       "approval": "notify",
       "file": "stages/inception/inception-state-template.md"
@@ -224,6 +252,7 @@
       "requires": [
         "workspace-detection"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         "docs/aidlc/inception/reverse-engineering.md"
@@ -233,6 +262,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "has_legacy_code",
       "approval": "notify",
       "file": "stages/inception/inception-reverse-engineering.md"
@@ -255,7 +285,11 @@
       "requires": [
         "workspace-detection"
       ],
-      "consumes": [],
+      "scope_waived_requires": [],
+      "consumes": [
+        "docs/aidlc/ideation/prd.md",
+        "docs/aidlc/ideation/scenario-module-mapping.md"
+      ],
       "produces": [
         "docs/aidlc/inception/requirements.md"
       ],
@@ -264,6 +298,7 @@
         "no-todo"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/inception/inception-requirements-analysis.md"
@@ -286,10 +321,12 @@
       "requires": [
         "requirements-analysis"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
       "sensors": [],
       "traceability": "required",
+      "completion_contract": "instruction_only",
       "condition": "",
       "approval": "notify",
       "file": "stages/inception/inception-requirement-clarification.md"
@@ -312,10 +349,12 @@
       "requires": [
         "requirements-analysis"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
       "sensors": [],
       "traceability": "required",
+      "completion_contract": "instruction_only",
       "condition": "",
       "approval": "notify",
       "file": "stages/inception/inception-requirements-data-model.md"
@@ -338,6 +377,7 @@
       "requires": [
         "requirements-analysis"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         "docs/aidlc/inception/requirements/business-flows.md",
@@ -349,6 +389,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/inception/inception-requirements-methods.md"
@@ -371,10 +412,12 @@
       "requires": [
         "requirements-analysis"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
       "sensors": [],
       "traceability": "required",
+      "completion_contract": "instruction_only",
       "condition": "",
       "approval": "notify",
       "file": "stages/inception/inception-requirements-prioritization.md"
@@ -397,44 +440,15 @@
       "requires": [
         "requirements-analysis"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
       "sensors": [],
       "traceability": "required",
+      "completion_contract": "instruction_only",
       "condition": "",
       "approval": "notify",
       "file": "stages/inception/inception-requirements-validation.md"
-    },
-    {
-      "slug": "cross-validation",
-      "number": "2.3",
-      "name": "交叉验证",
-      "phase": "inception",
-      "execution": "CONDITIONAL",
-      "lead_agent": "aidlc-product-agent",
-      "support_agents": [],
-      "mode": "inline",
-      "scopes": [
-        "feature",
-        "enterprise",
-        "mvp",
-        "classic"
-      ],
-      "requires": [
-        "requirements-analysis"
-      ],
-      "consumes": [],
-      "produces": [
-        "docs/aidlc/inception/cross-validation-report.md"
-      ],
-      "sensors": [
-        "no-todo",
-        "traceability"
-      ],
-      "traceability": "required",
-      "condition": "",
-      "approval": "notify",
-      "file": "stages/inception/inception-cross-validation.md"
     },
     {
       "slug": "user-stories",
@@ -454,7 +468,10 @@
       "requires": [
         "requirements-analysis"
       ],
-      "consumes": [],
+      "scope_waived_requires": [],
+      "consumes": [
+        "docs/aidlc/inception/requirements.md"
+      ],
       "produces": [
         "docs/aidlc/inception/user-stories.md"
       ],
@@ -463,6 +480,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/inception/inception-user-stories.md"
@@ -485,6 +503,7 @@
       "requires": [
         "user-stories"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         "docs/aidlc/inception/ui-mock/"
@@ -494,6 +513,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "has_ui_requirements",
       "approval": "notify",
       "file": "stages/inception/inception-ui-mock.md"
@@ -516,10 +536,12 @@
       "requires": [
         "ui-mock"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
       "sensors": [],
       "traceability": "required",
+      "completion_contract": "instruction_only",
       "condition": "has_ui_requirements",
       "approval": "notify",
       "file": "stages/inception/inception-ui-figma.md"
@@ -542,10 +564,12 @@
       "requires": [
         "ui-mock"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
       "sensors": [],
       "traceability": "required",
+      "completion_contract": "instruction_only",
       "condition": "has_ui_requirements",
       "approval": "notify",
       "file": "stages/inception/inception-ui-figma-generation.md"
@@ -568,10 +592,12 @@
       "requires": [
         "ui-mock"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
       "sensors": [],
       "traceability": "required",
+      "completion_contract": "instruction_only",
       "condition": "has_ui_requirements",
       "approval": "notify",
       "file": "stages/inception/inception-ui-mock-workflow.md"
@@ -594,10 +620,12 @@
       "requires": [
         "ui-mock"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
       "sensors": [],
       "traceability": "required",
+      "completion_contract": "instruction_only",
       "condition": "has_ui_requirements",
       "approval": "notify",
       "file": "stages/inception/inception-ui-mock-generation.md"
@@ -620,10 +648,12 @@
       "requires": [
         "ui-mock"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
       "sensors": [],
       "traceability": "required",
+      "completion_contract": "instruction_only",
       "condition": "has_ui_requirements",
       "approval": "notify",
       "file": "stages/inception/inception-ui-mock-design-spec.md"
@@ -646,10 +676,12 @@
       "requires": [
         "ui-mock"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
       "sensors": [],
       "traceability": "required",
+      "completion_contract": "instruction_only",
       "condition": "has_ui_requirements",
       "approval": "notify",
       "file": "stages/inception/inception-ui-mock-styles.md"
@@ -672,10 +704,12 @@
       "requires": [
         "ui-mock"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
       "sensors": [],
       "traceability": "required",
+      "completion_contract": "instruction_only",
       "condition": "has_ui_requirements",
       "approval": "notify",
       "file": "stages/inception/inception-ui-mock-reasoning-principles.md"
@@ -698,13 +732,51 @@
       "requires": [
         "ui-mock"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
       "sensors": [],
       "traceability": "required",
+      "completion_contract": "instruction_only",
       "condition": "has_ui_requirements",
       "approval": "notify",
       "file": "stages/inception/inception-ui-page-planning.md"
+    },
+    {
+      "slug": "cross-validation",
+      "number": "2.5.9",
+      "name": "交叉验证",
+      "phase": "inception",
+      "execution": "CONDITIONAL",
+      "lead_agent": "aidlc-product-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "user-stories"
+      ],
+      "scope_waived_requires": [],
+      "consumes": [
+        "docs/aidlc/inception/requirements.md",
+        "docs/aidlc/inception/user-stories.md"
+      ],
+      "produces": [
+        "docs/aidlc/inception/cross-validation-report.md"
+      ],
+      "sensors": [
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "completion_contract": "gated",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/inception/inception-cross-validation.md"
     },
     {
       "slug": "workflow-planning",
@@ -725,6 +797,7 @@
         "user-stories",
         "cross-validation"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         "docs/aidlc/inception/workflow-plan.md"
@@ -734,6 +807,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/inception/inception-workflow-planning.md"
@@ -754,9 +828,13 @@
         "classic"
       ],
       "requires": [
-        "user-stories"
+        "cross-validation"
       ],
-      "consumes": [],
+      "scope_waived_requires": [],
+      "consumes": [
+        "docs/aidlc/inception/requirements.md",
+        "docs/aidlc/inception/user-stories.md"
+      ],
       "produces": [
         "docs/aidlc/inception/application-design.md",
         "docs/aidlc/inception/application-design/components.md",
@@ -771,6 +849,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "block",
       "file": "stages/inception/inception-application-design.md"
@@ -793,7 +872,12 @@
       "requires": [
         "application-design"
       ],
-      "consumes": [],
+      "scope_waived_requires": [],
+      "consumes": [
+        "docs/aidlc/ideation/module-division.md",
+        "docs/aidlc/inception/user-stories.md",
+        "docs/aidlc/inception/application-design.md"
+      ],
       "produces": [
         "docs/aidlc/inception/units.md",
         "docs/aidlc/inception/application-design/unit-of-work.md",
@@ -807,6 +891,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "multi_module",
       "approval": "notify",
       "file": "stages/inception/inception-units-generation.md"
@@ -829,6 +914,7 @@
       "requires": [
         "application-design"
       ],
+      "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/inception/application-design.md",
         "docs/aidlc/inception/user-stories.md"
@@ -841,6 +927,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "has_test_case_sources",
       "approval": "notify",
       "file": "stages/inception/inception-test-case-derivation.md"
@@ -863,7 +950,10 @@
       "requires": [
         "units-generation"
       ],
-      "consumes": [],
+      "scope_waived_requires": [],
+      "consumes": [
+        "docs/aidlc/inception/application-design.md"
+      ],
       "produces": [
         "docs/aidlc/construction/functional-design.md",
         "docs/aidlc/construction/{unit-name}/functional-design/business-logic-model.md",
@@ -879,6 +969,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/construction/construction-functional-design.md"
@@ -901,6 +992,7 @@
       "requires": [
         "functional-design"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         "docs/aidlc/construction/nfr-requirements.md",
@@ -914,6 +1006,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "has_nfr_needs",
       "approval": "notify",
       "file": "stages/construction/construction-nfr-requirements.md"
@@ -936,6 +1029,7 @@
       "requires": [
         "nfr-requirements"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         "docs/aidlc/construction/nfr-design.md",
@@ -950,6 +1044,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "has_nfr_needs",
       "approval": "notify",
       "file": "stages/construction/construction-nfr-design.md"
@@ -972,6 +1067,7 @@
       "requires": [
         "functional-design"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         "docs/aidlc/construction/infrastructure-design.md",
@@ -985,6 +1081,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "has_infra_needs",
       "approval": "notify",
       "file": "stages/construction/construction-infrastructure-design.md"
@@ -1007,6 +1104,7 @@
       "requires": [
         "functional-design"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         ".aidlc/evidence/shared-contract-baseline/contract-baseline.json"
@@ -1017,6 +1115,7 @@
         "traceability"
       ],
       "traceability": "not_applicable",
+      "completion_contract": "gated",
       "condition": "has_contract_dependencies",
       "approval": "notify",
       "file": "stages/construction/construction-shared-contract-baseline.md"
@@ -1043,6 +1142,9 @@
       "requires": [
         "functional-design"
       ],
+      "scope_waived_requires": [
+        "functional-design"
+      ],
       "consumes": [],
       "produces": [
         "src/",
@@ -1055,6 +1157,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/construction/construction-code-generation.md"
@@ -1081,7 +1184,10 @@
       "requires": [
         "code-generation"
       ],
-      "consumes": [],
+      "scope_waived_requires": [],
+      "consumes": [
+        "src/"
+      ],
       "produces": [
         "src/test/",
         ".aidlc/evidence/tdd/test-quality.json"
@@ -1092,6 +1198,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/construction/construction-tdd.md"
@@ -1114,6 +1221,7 @@
       "requires": [
         "code-generation"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         ".aidlc/evidence/subagent-execution/subagent-evidence.json"
@@ -1124,6 +1232,7 @@
         "traceability"
       ],
       "traceability": "not_applicable",
+      "completion_contract": "gated",
       "condition": "has_subagent_support",
       "approval": "notify",
       "file": "stages/construction/construction-subagent-execution.md"
@@ -1146,6 +1255,7 @@
       "requires": [
         "code-generation"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         ".aidlc/evidence/loeyae-compliance/framework-compliance.json"
@@ -1156,6 +1266,7 @@
         "traceability"
       ],
       "traceability": "not_applicable",
+      "completion_contract": "gated",
       "condition": "is_loeyae_boot",
       "approval": "notify",
       "file": "stages/construction/construction-loeyae-compliance.md"
@@ -1178,6 +1289,7 @@
       "requires": [
         "code-generation"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         "docs/aidlc/frontend-platform-spec.md",
@@ -1189,6 +1301,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "has_ui_requirements",
       "approval": "notify",
       "file": "stages/construction/construction-ui-implementation-bridge.md"
@@ -1216,7 +1329,11 @@
         "code-generation",
         "tdd"
       ],
-      "consumes": [],
+      "scope_waived_requires": [],
+      "consumes": [
+        "src/",
+        "src/test/"
+      ],
       "produces": [
         "docs/aidlc/construction/code-review.md",
         "docs/aidlc/construction/audit/{unit-id}.md",
@@ -1231,6 +1348,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/construction/construction-code-review.md"
@@ -1259,7 +1377,11 @@
         "tdd",
         "code-review"
       ],
-      "consumes": [],
+      "scope_waived_requires": [],
+      "consumes": [
+        "src/",
+        "docs/aidlc/construction/code-review.md"
+      ],
       "produces": [
         "docs/aidlc/construction/build-test-report.md",
         "docs/aidlc/construction/build-and-test/build-and-test-summary.md",
@@ -1272,6 +1394,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/construction/construction-build-and-test.md"
@@ -1294,6 +1417,7 @@
       "requires": [
         "build-and-test"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         "docs/aidlc/construction/build-and-test/build-instructions.md",
@@ -1306,6 +1430,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/construction/construction-build-and-test-templates.md"
@@ -1332,10 +1457,12 @@
       "requires": [
         "build-and-test"
       ],
-      "consumes": [],
+      "scope_waived_requires": [],
+      "consumes": [
+        "docs/aidlc/construction/{unit-name}/implementation-summary.md"
+      ],
       "produces": [
         "docs/aidlc/construction/implementation-report.md",
-        "docs/aidlc/construction/{unit-name}/implementation-summary.md",
         ".aidlc/evidence/implementation-report/implementation-report.json"
       ],
       "sensors": [
@@ -1345,6 +1472,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/construction/construction-implementation-report.md"
@@ -1364,7 +1492,10 @@
         "mvp",
         "classic"
       ],
-      "requires": [],
+      "requires": [
+        "workspace-detection"
+      ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         ".aidlc/evidence/compact-recovery/recovery-evidence.json"
@@ -1375,6 +1506,7 @@
         "traceability"
       ],
       "traceability": "not_applicable",
+      "completion_contract": "gated",
       "condition": "context_compacted",
       "approval": "notify",
       "file": "stages/construction/construction-compact-recovery.md"
@@ -1385,7 +1517,7 @@
       "name": "部署运维",
       "phase": "operation",
       "execution": "CONDITIONAL",
-      "lead_agent": "(orchestrator)",
+      "lead_agent": "aidlc-operations-agent",
       "support_agents": [],
       "mode": "inline",
       "scopes": [
@@ -1394,11 +1526,18 @@
         "mvp"
       ],
       "requires": [
-        "build-and-test"
+        "implementation-report"
       ],
-      "consumes": [],
+      "scope_waived_requires": [],
+      "consumes": [
+        "docs/aidlc/construction/build-test-report.md",
+        "docs/aidlc/construction/implementation-report.md"
+      ],
       "produces": [
-        "docs/aidlc/operation/deployment-config.md"
+        "docs/aidlc/operation/operations-plan.md",
+        "docs/aidlc/operation/deployment-config.md",
+        "docs/aidlc/operation/deployment-guide.md",
+        "docs/aidlc/operation/operations-summary.md"
       ],
       "sensors": [
         "doc-cascade",
@@ -1406,6 +1545,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "block",
       "file": "stages/operation/operations.md"
@@ -1416,7 +1556,7 @@
       "name": "运维模板",
       "phase": "operation",
       "execution": "CONDITIONAL",
-      "lead_agent": "(orchestrator)",
+      "lead_agent": "aidlc-operations-agent",
       "support_agents": [],
       "mode": "inline",
       "scopes": [
@@ -1427,6 +1567,7 @@
       "requires": [
         "operations"
       ],
+      "scope_waived_requires": [],
       "consumes": [],
       "produces": [
         "docs/aidlc/operation/templates/"
@@ -1436,6 +1577,7 @@
         "traceability"
       ],
       "traceability": "required",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/operation/operations-templates.md"
@@ -1449,6 +1591,7 @@
     "express",
     "feature",
     "mvp",
+    "poc",
     "refactor",
     "workshop"
   ],

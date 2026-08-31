@@ -142,7 +142,7 @@ CREATE TABLE IF NOT EXISTS `module_table_name` (
 
 ## 框架专有 Entity 模板
 
-> **注意**：以下内容仅在 `state.md` 中 `后端框架 = Loeyae Boot` 时适用。
+> **注意**：以下内容仅在 `handoff.md` 中 `后端框架 = Loeyae Boot` 时适用。
 > 详细 Entity 注解和模板通过 MCP Skill `loeyae-database-design` 获取。
 
 如果项目使用 Loeyae Boot Framework，Entity 类需要使用框架提供的自动填充注解（`@InsertFillTime`、`@InsertFillData` 等）。具体用法在代码生成阶段通过 MCP 加载。

@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic, express, workshop]
 consumes: []
 produces: []
 sensors: []
+completion_contract: instruction_only
 ---
 # 工作区检测
 
@@ -18,7 +19,7 @@ sensors: []
 
 ## 步骤 1：检查现有 AI-DLC 项目
 
-检查 `docs/aidlc/state.md` 是否存在：
+检查 `docs/aidlc/handoff.md` 是否存在：
 - **存在**：先检查 `状态模式版本` 和分布式治理字段。版本缺失/低于 2，或缺少 `分布式系统`、`系统基线`、`代码版本标识` 时，保存原阶段位置并执行定向 I1 检测；若发现分布式能力，再执行 I4 的系统级基线回填。迁移成功后必须原位补齐全部字段、写入 `状态模式版本: 2` 和迁移证据，再解除“阻塞恢复”并返回原路由；写回失败时不得继续。
 - **存在且模式有效**：执行**意图路由**（参见 `core-workflow.md` 的“意图路由”章节）
   - **继续开发** → 判断架构模式和协作模式并恢复（下方逻辑）
@@ -26,10 +27,10 @@ sensors: []
   - **新增功能** → 进入新增功能追加流程（`core-workflow.md` 的"新增功能追加流程"）
   
   **恢复逻辑（继续开发）**：
-  - 检查 state.md 中的"架构模式"字段
+  - 检查 handoff.md 中的"架构模式"字段
   - **多模块模式**：进入步骤 1.2（多模块恢复）
   - **单模块模式**：继续检查协作模式
-    - 检查 state.md 中是否标记"协作模式：团队协作"
+    - 检查 handoff.md 中是否标记"协作模式：团队协作"
     - **团队协作模式**：进入步骤 1.1（团队模式判断）
     - **单人模式**：从上次阶段恢复（加载之前阶段的上下文）
 - **不存在**：继续进行新项目评估
@@ -39,18 +40,18 @@ sensors: []
 检查当前项目的 Inception 和 Construction 状态，确定进入哪种子模式：
 
 **A) 接力模式（Inception 阶段未完成）**：
-- 读取 state.md 中的"Inception 进度"表
+- 读取 handoff.md 中的"Inception 进度"表
 - 确定哪些步骤已完成、由谁完成
 - 确定下一个待执行的步骤
 - 展示接力恢复提示（参见步骤 7）
 
 **B) 认领模式（Inception 阶段已完成，Construction 待开始或进行中）**：
-- 读取 state.md 中的"单元认领状态"表
+- 读取 handoff.md 中的"单元认领状态"表
 - 确定哪些单元待认领、哪些已被认领
 - 展示认领提示（参见步骤 8）
 
 **C) 继续开发模式（已认领单元，Construction 进行中）**：
-- 读取 state.md 确认当前用户已认领的单元
+- 读取 handoff.md 确认当前用户已认领的单元
 - 只加载该单元相关的最小上下文
 - 从上次中断处继续 Construction 流程
 
@@ -59,16 +60,16 @@ sensors: []
 检查产品级和模块级状态：
 
 **A) 产品级 Inception 未完成**：
-- 读取 state.md 中的"产品级进度"表
+- 读取 handoff.md 中的"产品级进度"表
 - 确定下一个待执行的步骤
 - 加载 `product-inception.md`，从中断处继续
 
 **B) 产品级 Inception 已完成，进入模块选择**：
-- 读取 state.md 中的"模块进度总览"
-- 检查 `docs/aidlc/product/contracts.md` 的变更日志
+- 读取 handoff.md 中的"模块进度总览"
+- 检查 `docs/aidlc/ideation/product-contracts.md` 的变更日志
 - 展示模块菜单（参见 core-workflow.md 的"模块选择"步骤）
 
-**C) 已有活跃模块（state.md 中"活跃模块"非空）**：
+**C) 已有活跃模块（handoff.md 中"活跃模块"非空）**：
 - 读取活跃模块名称
 - 加载该模块的上下文：`product/contracts.md` + `modules/{name}/` 下的产出物
 - 检查契约变更日志中是否有影响当前模块的未同步变更
@@ -110,7 +111,7 @@ sensors: []
 - 远程/共享配置及其消费者；
 - 多数据所有权边界和外部系统接入。
 
-发现任一能力时，在 state.md 记录 `分布式系统: 是`、检测证据和待确认项，并按需加载 `common-runtime-dependency-analysis.md`。检测到契约、配置或跨边界写入时，再分别加载对应通用治理规则。
+发现任一能力时，在 handoff.md 记录 `分布式系统: 是`、检测证据和待确认项，并按需加载 `common-runtime-dependency-analysis.md`。检测到契约、配置或跨边界写入时，再分别加载对应通用治理规则。
 
 检测到 Spring Cloud 或 Nacos 的可靠工作区证据时，记录 `技术适配: Spring Cloud/Nacos` 并加载 `common-tech-spring-cloud-nacos.md`；未检测到则不得套用。构建工具只记录实际入口，不预设 Maven 或 Gradle。
 
@@ -159,7 +160,7 @@ sensors: []
 
 **检查流程**：
 1. 检查 `docs/aidlc/frontend-platform-spec.md` 是否存在
-2. **存在** → 记录到 state.md：`前端平台规范: 已就绪`
+2. **存在** → 记录到 handoff.md：`前端平台规范: 已就绪`
 3. **不存在** → 在步骤 5 的完成消息中追加提示：
 
 ```markdown
@@ -171,7 +172,7 @@ sensors: []
 ```
 
 4. 用户选择 A → 按 `construction-ui-implementation-bridge.md` 第一部分的创建引导流程执行
-5. 用户选择 B → 记录到 state.md：`前端平台规范: 待创建（应用设计阶段）`，继续后续流程
+5. 用户选择 B → 记录到 handoff.md：`前端平台规范: 待创建（应用设计阶段）`，继续后续流程
 
 **纯 Web 项目**：跳过此检查，不需要 frontend-platform-spec.md。
 
@@ -218,7 +219,7 @@ sensors: []
 
 ## 步骤 4：创建初始状态文件
 
-**询问协作模式**：在创建 state.md 之前，询问用户：
+**询问协作模式**：在创建 handoff.md 之前，询问用户：
 
 ```markdown
 **请选择工作模式：**
@@ -245,9 +246,9 @@ B) 多模块模式 — 产品规模较大，需要按业务域拆分为多个独
 [回答]:
 ```
 
-创建 `docs/aidlc/state.md`：
+创建 `docs/aidlc/handoff.md`：
 
-> **加载模板**：加载 `inception-state-template.md` 获取 state.md 的完整初始化模板，按模板内容创建文件并根据工作区检测结果填充占位符。
+> **加载模板**：加载 `inception-state-template.md` 获取 handoff.md 的完整初始化模板，按模板内容创建文件并根据工作区检测结果填充占位符。
 
 ## 步骤 5：展示完成消息
 
@@ -312,7 +313,7 @@ B) 多模块模式 — 产品规模较大，需要按业务域拆分为多个独
 **Inception 进度：**
 | 步骤 | 状态 | 负责人 |
 |------|------|--------|
-[从 state.md 读取并展示]
+[从 handoff.md 读取并展示]
 
 **下一步**：[下一个待执行的步骤]
 
@@ -326,7 +327,7 @@ C) 回顾已完成的步骤
 ```
 
 选择角色后：
-1. 更新 state.md 中的"当前操作人"
+1. 更新 handoff.md 中的"当前操作人"
 2. 只加载与当前步骤相关的前序产出物（不加载完整 audit）
 3. 加载前序步骤的决策摘要（decision-summary.md）
 4. 进入对应步骤
@@ -341,7 +342,7 @@ C) 回顾已完成的步骤
 **单元认领状态：**
 | 单元 | 状态 | 认领人 | 前置依赖 |
 |------|------|--------|----------|
-[从 state.md / unit-of-work.md 读取并展示]
+[从 handoff.md / unit-of-work.md 读取并展示]
 
 **你想认领哪个单元？**
 
@@ -352,7 +353,7 @@ C) 回顾已完成的步骤
 
 认领后：
 1. 更新 `unit-of-work.md` 中该单元的状态为"已认领"
-2. 更新 state.md 中的"单元认领状态"表
+2. 更新 handoff.md 中的"单元认领状态"表
 3. 记录认领人和特性分支名
 4. 只加载该单元相关的最小上下文（参见 common-team-collaboration.md）
 5. 创建特性分支（如用户确认）

@@ -49,7 +49,7 @@ condition: has_ui_requirements
 
 ## 跳过处理
 
-用户明确跳过时，在 state.md 的 `UI 设计（I9 条件）` 中记录：
+用户明确跳过时，在 handoff.md 的 `UI 设计（I9 条件）` 中记录：
 
 - `UI 设计方式：跳过`；
 - `Figma 来源：不适用`；
@@ -64,7 +64,7 @@ condition: has_ui_requirements
 
 ### 1. 建立页面计划
 
-加载 `inception-ui-page-planning.md`，生成跨模式唯一页面计划。将路径和 `draft` 状态写入 state.md，提交用户确认；确认后把 `页面计划状态` 更新为 `approved`。未确认前不得调用生成 Skill。
+加载 `inception-ui-page-planning.md`，生成跨模式唯一页面计划。将路径和 `draft` 状态写入 handoff.md，提交用户确认；确认后把 `页面计划状态` 更新为 `approved`。未确认前不得调用生成 Skill。
 
 ### 2. 确定视觉来源
 
@@ -84,7 +84,7 @@ condition: has_ui_requirements
 
 ### 5. I9 状态交接
 
-HTML Mock 用户审核完成后，在 state.md 中记录：
+HTML Mock 用户审核完成后，在 handoff.md 中记录：
 
 - `UI 设计方式：html-mock`；
 - `Figma 来源：不适用`；

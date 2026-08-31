@@ -25,9 +25,10 @@ The skill triggers on keywords: `aidlc`, `AI-DLC`, `使用 AI-DLC`, etc.
 
 The engine (`tools/aidlc-orchestrate.ts`) drives the workflow:
 
-1. Agent calls `next` → engine returns a `run-stage` directive
-2. Agent reads the stage file, executes it, presents the gate
-3. Agent calls `report --stage <slug> --result completed`
-4. Repeat until `done`
+1. Agent 调用 `next` → 引擎返回 `run-stage` directive
+2. Agent 读取并执行 stage 文件，生成受门禁约束的产物/Evidence
+3. 普通 stage 使用 `report --result completed`；`instruction_only` 必须追加 `--instruction-ack <slug>`
+4. `approval:block` 必须由人类 TTY 或受信 provider 筍发一次性 token，再使用 `report --result approved --approval-token <token>`
+5. 重复直到 `done`
 
-The agent cannot skip steps — the engine validates every transition.
+聊天确认、Skill 或生命周期适配器都不能自行签发审批 token。公开 report 不支持手动 skip，只有图谱 condition=false 可记录内部 `condition_skipped`。`docs/aidlc/aidlc-state.json` 是签名且 revision/CAS 保护的唯一机器状态，外部 enrollment 绑定项目；handoff 仅为派生人类视图。

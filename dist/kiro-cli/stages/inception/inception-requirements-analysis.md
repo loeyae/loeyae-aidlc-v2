@@ -9,7 +9,9 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 requires: [workspace-detection]
-consumes: []
+consumes:
+  - docs/aidlc/ideation/prd.md
+  - docs/aidlc/ideation/scenario-module-mapping.md
 produces: [docs/aidlc/inception/requirements.md]
 sensors: [traceability]
 ---
@@ -243,7 +245,7 @@ sensors: [traceability]
 
 ## 步骤 11：生成需求文档
 
-创建 `docs/aidlc/inception/requirements/requirements.md`，包含：
+创建 `docs/aidlc/inception/requirements.md`，包含：
 - 意图分析摘要
 - 业务流程图引用：显式引用 `requirements/business-flows.md`，每个 FR 标注所属流程节点
 - 状态流转判定：记录触发及状态图引用，或“不涉及状态流转”及依据
@@ -262,7 +264,7 @@ sensors: [traceability]
 
 ## 步骤 12：更新状态跟踪
 
-更新 `docs/aidlc/state.md` 标记需求分析完成。
+更新 `docs/aidlc/handoff.md` 标记需求分析完成。
 
 ## 步骤 13：记录并继续
 
@@ -272,14 +274,14 @@ sensors: [traceability]
 # 🔍 需求分析完成
 
 > **📋 <u>**需要审查：**</u>**
-> 请检查需求文档：`docs/aidlc/inception/requirements/requirements.md`
+> 请检查需求文档：`docs/aidlc/inception/requirements.md`
 
 > **🚀 Boss，<u>**下一步？**</u>**
 >
 > 🔧 **请求修改** - 根据审查结果要求修改需求
 > 🔄 **重新验证** - 对修改后的需求重新执行 5 维度验证（标准+全面深度时可用）
 > ✅ **确认并继续** - 确认需求，进入**交叉验证（需求审查）**
-> 📋 **新 Session 继续** - 复制 `state.md` 中的交接提示词到新对话继续
+> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
 
 ---
 
@@ -305,7 +307,7 @@ sensors: [traceability]
 
 | 深度 | 产出物 | 路径 |
 |------|--------|------|
-| 所有 | 需求文档 | `docs/aidlc/inception/requirements/requirements.md` |
+| 所有 | 需求文档 | `docs/aidlc/inception/requirements.md` |
 | 所有 | 业务流程图 | `docs/aidlc/inception/requirements/business-flows.md` |
 | 所有 | 澄清问题记录 | `docs/aidlc/inception/requirements/requirement-verification-questions.md` |
 | 条件（状态触发）/全面 | 状态模型或完整数据模型 | `docs/aidlc/inception/requirements/data-model.md` |

@@ -18,7 +18,7 @@ condition: is_loeyae_boot
 
 # Loeyae Boot 编码规范加载与合规验证
 
-> **加载条件**：仅当 state.md 中 `后端框架 = Loeyae Boot` 时加载本文件。
+> **加载条件**：仅当 handoff.md 中 `后端框架 = Loeyae Boot` 时加载本文件。
 > **加载时机**：Construction 代码生成步骤 2（MCP Skill 加载）时。
 > **非 Loeyae Boot 项目完全不需要本文件。**
 
@@ -65,7 +65,7 @@ MCP Skill 服务已升级为渐进式披露版本，遵循**三层加载**原则
 
 ### 前置条件检查
 
-1. 从 `docs/aidlc/state.md` 读取 `后端框架` 字段
+1. 从 `docs/aidlc/handoff.md` 读取 `后端框架` 字段
 2. **仅当 `后端框架 = Loeyae Boot` 时**，才执行下方加载
 3. 否则跳过本文件所有内容
 
@@ -119,7 +119,7 @@ MCP 服务不可达时：
 | 数据库命名 | `get_skill_outline("loeyae-database-naming")` → 按需 `get_skill_section` | 表/字段命名规范 |
 | 项目结构 | `get_skill_outline("loeyae-project-structure")` → 按需 `get_skill_section` | 模块目录、包结构 |
 
-### 低代码开发（仅 state.md 中 `低代码模式 = 是`）
+### 低代码开发（仅 handoff.md 中 `低代码模式 = 是`）
 | 代码类型 | MCP Skill | 常用章节 |
 |---------|-----------|---------|
 | 低代码入门 | `get_skill_outline("loeyae-lowcode-getting-started")` → 按需 `get_skill_section` | 快速上手 |

@@ -8,7 +8,7 @@ lead_agent: aidlc-product-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
-consumes: []
+consumes: [docs/aidlc/inception/requirements.md]
 produces: [docs/aidlc/inception/user-stories.md]
 sensors: []
 requires: [requirements-analysis]
@@ -307,7 +307,7 @@ Scenario: [场景名，描述行为而非实现]
 
 ## 步骤 17：更新进度
 - [ ] 在故事生成计划中将已完成步骤标记为 [x]
-- [ ] 更新 `docs/aidlc/state.md` 当前状态
+- [ ] 更新 `docs/aidlc/handoff.md` 当前状态
 - [ ] 保存所有生成的产物
 
 ## 步骤 18：继续或完成生成
@@ -339,7 +339,7 @@ Scenario: [场景名，描述行为而非实现]
 
 ```markdown
 > **📋 <u>**需要审查：**</u>**
-> 请检查用户故事、画像和角色权限矩阵：`docs/aidlc/inception/user-stories/stories.md`、`docs/aidlc/inception/user-stories/personas.md` 和 `docs/aidlc/inception/user-stories/role-permission-matrix.md`
+> 请检查用户故事、画像和角色权限矩阵：`docs/aidlc/inception/user-stories.md`、`docs/aidlc/inception/user-stories/personas.md` 和 `docs/aidlc/inception/user-stories/role-permission-matrix.md`
 
 
 
@@ -349,7 +349,7 @@ Scenario: [场景名，描述行为而非实现]
 >
 > 🔧 **请求修改** - 根据审查结果要求修改故事或画像
 > ✅ **确认并继续** - 确认用户故事，进入**用户故事交叉验证**
-> 📋 **新 Session 继续** - 复制 `state.md` 中的交接提示词到新对话继续
+> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
 
 ---
 
@@ -370,7 +370,7 @@ Scenario: [场景名，描述行为而非实现]
 - 清晰标记审批状态
 
 ## 步骤 23：更新进度
-- 在 `state.md` 中标记用户故事阶段完成
+- 在 `handoff.md` 中标记用户故事阶段完成
 - 更新"当前状态"部分
 - 准备过渡到下一阶段
 

@@ -32,7 +32,7 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 `--project` 和 `--target` 不是同一个参数：
 
 - `--project <项目根目录>`：用于 Kiro IDE/CLI 的项目级生命周期 Hook。它只创建或更新 `<项目根目录>/.kiro/hooks/loeyae-aidlc.json`，不会删除项目源码；项目根目录可以是已有的非空目录。
-- `--target <安装目录>`：用于把 harness 复制到一个专用安装目录。不要把业务项目根目录、源码目录或已有工程目录传给它。当前版本对普通 harness 的非空 `--target` 会直接拒绝；旧版本可能会递归删除该目录后再复制。
+- `--target <安装目录>`：用于把 harness 复制到专用安装目录。不要把业务项目根目录、源码目录或已有工程目录传给它。安装器只会升级带外部所有权清单且内容未被修改的目标；空目录可以首次安装，非空且未受管目标会 fail-closed，绝不会递归清空。
 - Claude Code 的 `--target` 是特殊用法：它表示项目根目录，安装器只操作该目录下的 `.claude/loeyae-aidlc-marketplace/`，不应将其用于 Kiro IDE/CLI。
 
 如果误用旧版本的 `--target` 删除了目录，应立即停止再次安装或写入该目录，优先从 Git、IDE Local History、Time Machine 或备份恢复；安装器无法恢复已删除源码。
@@ -101,7 +101,7 @@ cd /absolute/path/to/your-project
 pwd
 ```
 
-Kiro Crew 的默认安装会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` MCP 服务合并到 `~/.kiro/settings/mcp.json`，默认只补缺失；无自定义字段的旧版本化 Chrome DevTools 默认项会收敛为不指定版本的 `chrome-devtools-mcp`；带额外字段、环境变量、非默认参数或禁用状态的同名配置仍完整保留。`ssot` 使用环境变量 `SSOT_API_KEY`，不把密钥写入安装包或项目文件。
+Kiro Crew 的默认安装会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` MCP 服务合并到 `~/.kiro/settings/mcp.json`，通过跨进程锁与原子替换避免并发丢更新。默认只补缺失；仅无自定义字段的已知旧默认 `chrome-devtools-mcp@1.6.0` 会收敛为不指定版本的 `chrome-devtools-mcp`。用户主动设置的其他版本/tag pin、额外字段、环境变量、非默认参数或禁用状态均完整保留。`ssot` 使用环境变量 `SSOT_API_KEY`，不把密钥写入安装包或项目文件。
 
 Claude Code 的安装器会额外生成本地 marketplace，并调用官方 `claude plugin marketplace add`、`claude plugin install` 注册 user-scope 插件；不会直接编辑 `installed_plugins.json`。staging 文件位于 `~/.claude/plugins/loeyae-aidlc-marketplace/`，实际运行缓存和注册表由 Claude Code 管理。当前已打开的 Claude 会话需执行 `/reload-plugins`（如提示缓存变更则按提示使用 `--force`）或重新开会话；新会话会自动加载。
 
@@ -147,6 +147,30 @@ loeyae-aidlc install \
 npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
 loeyae-aidlc install        # 重新部署（或 --all 全部）
 ```
+
+安装器先在目标同级目录 staging，校验后以 rename 交换；平台激活失败或测试 failpoint 触发时会恢复旧受管资产。每次安装在 `~/.config/loeyae-aidlc/installations/` 保存外部所有权清单，记录每个受管文件的 SHA-256。升级和卸载前都会复核清单：文件被用户修改、目标缺失、出现额外文件或目标没有所有权清单时均 fail-closed，不会覆盖或删除。
+
+文件资产与 ownership manifest 受同一安装锁和回滚流程保护，但 Claude 官方 CLI 的插件注册表/cache、Codex 的共享 Hook 配置等宿主外部副作用无法与本地 manifest 做跨进程原子提交。若宿主已接受 activate/deactivate，而随后 manifest 写入或宿主的后续子步骤失败，安装器会恢复受管文件，但可能需要按错误输出重新运行安装/卸载或使用宿主官方命令核对注册状态；不得将文件回滚等同于真实宿主注册表已回滚。
+
+从没有所有权清单的旧安装升级时，先将旧目录重命名为备份，再执行安装；不要让新安装器“接管”无法验证来源的目录。例如：
+
+```bash
+mv ~/.kiro/powers/loeyae-aidlc ~/.kiro/powers/loeyae-aidlc.pre-managed-backup
+loeyae-aidlc install --harness kiro-ide
+```
+
+确认新版本正常后再自行处理备份。项目 Hook 同样不会覆盖既有未受管的 `.kiro/hooks/loeyae-aidlc.json`。
+
+### 卸载
+
+```bash
+loeyae-aidlc uninstall --harness kiro-crew
+loeyae-aidlc uninstall --harness kiro-ide --project /absolute/path/to/project
+loeyae-aidlc uninstall --harness opencode
+loeyae-aidlc uninstall --all
+```
+
+卸载只删除所有权清单中且哈希仍匹配的资产。Codex 仅移除稳定 ID `loeyae-aidlc-stop-gate-v1` 对应的 Hook；其他 Hook 保留。共享 Kiro MCP 项默认保留，因为可能仍被其他安装使用。`install --all` 和 `uninstall --all` 会继续处理所有平台，但只要任一平台失败，最终退出码即为非零。
 
 ### 开发模式（从本地仓库）
 
@@ -194,7 +218,12 @@ loeyae-aidlc graph compile
 # 直接调用引擎（在业务项目目录下执行）
 loeyae-aidlc orchestrate next --scope feature
 loeyae-aidlc orchestrate next --status
+loeyae-aidlc orchestrate report --stage workspace-detection --result completed --instruction-ack workspace-detection
 loeyae-aidlc orchestrate report --stage requirements-analysis --result completed
+
+# approval:block 阶段：由人类在交互式终端审阅后签发15分钟一次性 token
+loeyae-aidlc approve --stage application-design
+loeyae-aidlc orchestrate report --stage application-design --result approved --approval-token <token>
 loeyae-aidlc orchestrate park
 
 # 使用业务项目中的受控命令清单生成构建测试证据
@@ -248,30 +277,47 @@ Agent ←→ aidlc-orchestrate.ts report → 记录结果，推进状态
 Agent ←→ aidlc-orchestrate.ts park   → 保存状态供下次恢复
 ```
 
-Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活跃 stage，否则拒绝。
+Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活跃 stage，否则拒绝。公开结果协议不包含 `skipped`；只有图谱声明的 `condition` 求值为 false 时，引擎才能写入内部 `condition_skipped` 历史。
+
+### 签名状态与恢复边界
+
+- `docs/aidlc/aidlc-state.json` 是唯一机器路由状态，使用 schema v2、`workflow_id`、单调 `revision`、HMAC-SHA256 和跨进程 CAS 原子更新。
+- `docs/aidlc/handoff.md` 只是派生的人类协作视图，不能改变 stage、skip、approval 或 revision；冲突时以签名机器状态为准。
+- enrollment 位于项目外的 `~/.config/loeyae-aidlc/trust/enrollments/`。已 enrollment 的项目若 state 缺失、未签名、签名无效或 workflow ID 不匹配，CLI 与生命周期 Hook 都会 fail-closed。
+- 默认 key 位于 `~/.config/loeyae-aidlc/trust/trust.key`（`0600`）；宿主也可在启动所有相关进程前提供至少 32 字节的 `AIDLC_TRUST_SECRET`，测试/隔离环境可设置 `AIDLC_TRUST_DIR`。需要生成 Evidence 的工作流必须在第一次 `next` 前配置稳定的 `AIDLC_TRUST_SECRET`，并由 CI/宿主安全注入相同值。
+
+该机制防止“只能写业务项目、不能访问用户 trust store”的 Agent 直接伪造 state/Evidence；它不能防御拥有同一 OS 用户任意文件读写权或能控制宿主进程环境的恶意进程，不应表述为同 UID 下绝对不可伪造。
+
+### 审批与 instruction-only
+
+仅 `application-design` 和 `operations` 使用 `approval: block`。`next` 为其创建绑定 `workflow_id + stage + challenge` 的随机 challenge；人类在交互式终端审阅最终产物后运行 `loeyae-aidlc approve --stage <slug>`，得到最长 15 分钟、消费后不可重放的 token，再以 `--result approved --approval-token <token>` 报告。平台适配器不会自行签发 token；没有 Kiro Crew Dashboard、Claude、Codex 或 OpenCode 宿主 token provider 且没有可用人类终端时，这两个阶段会按设计 fail-closed。宿主集成可把 token 作为 `--approval-token` 或一次性 `AIDLC_APPROVAL_TOKEN` 传给引擎，但不得暴露普通非交互 token generator。
+
+14 个不产生机器可验证产物的阶段显式标记为 `instruction_only`，执行正文后必须用 `--instruction-ack <stage-slug>` 报告。Stop Hook 不携带该确认，因此不能自动推进这些阶段。
 
 ### 五层门禁
 
 | 层 | 机制 | 时机 | 覆盖 |
 |----|------|------|------|
-| requires | 前置 stage 依赖检查（scope-aware） | `next` | 41/46 |
-| condition | 动态条件评估（false 时自动跳过） | `next` | 14/46 |
-| produces | 产物文件存在且非空 | `report` | 32/46 |
-| sensors | 结构化证据校验（evidence 协议） | `report` | 21/46 |
+| requires | 前置 stage 依赖检查（scope-aware） | `next` | 45/46 |
+| condition | 动态条件评估（false 时自动跳过） | `next` | 20/46 |
+| produces | 产物存在、路径安全且每个文件至少 16 字节 | `report` | 32/46 |
+| sensors | 结构化证据或内置质量校验 | `report` | 32/46 |
 | current_stage | 防跳步 | `report` | 46/46 |
 
-仅 `application-design`（架构决策）和 `operations`（部署决策）保留 `approval: block`；其余 44 stage 门禁通过即自动推进。
+仅 `application-design`（架构决策）和 `operations`（部署决策）保留 `approval: block`；14 个 instruction-only stage 需要显式 ack；其余 stage 在声明门禁通过后推进。
 
 ### Evidence 协议（Construction）
 
 Construction sensors 从 `.aidlc/evidence/<stage-slug>/<sensor>.json` 读取机器生成的结构化证据。证据文件必须：
 - 包含 `evidence_version: "1"` 和合法 ISO `timestamp`（≤ 24h）
-- 由 CI/构建工具/测试 runner 写入（非手写）
+- 包含 `producer.name: "loeyae-aidlc-evidence"`、HMAC-SHA256 `integrity` 和当前 `commit + dirty + worktree_digest`
+- 由受控 Producer、CI、构建工具或测试 runner 生成（非手写），且生成时提供至少 32 字节的 `AIDLC_TRUST_SECRET`
+- 命令只记录 `argv_digest`，不把可能含 token/secret 的完整 argv 写入证据；stdout/stderr 尾部继续脱敏
 - ≤ 512 KB，按 sensor schema 严格校验
 
 详见 `core/knowledge/protocols/common-quality-gates.md`。
 
-受控 Producer 使用业务项目根目录的 `.aidlc/evidence-commands.json` 作为命令 allowlist。构建测试使用 `build`、`test`、`check` 角色；其他语义 sensor 使用 `role: "semantic"` 并绑定 `sensor`：
+受控 Producer 使用业务项目根目录的 `.aidlc/evidence-commands.json` 作为命令 allowlist。构建测试使用 `build`、`test`、`check` 角色；其他语义 sensor 使用 `role: "semantic"` 并绑定 `sensor`。semantic 声明只能是 `loeyae-aidlc check --sensor <sensor>`；Producer 实际固定执行发行包内的内置 checker，项目配置中的任意 `node -e`、Python、shell 或绝对路径 checker 都会被拒绝：
 
 ```bash
 loeyae-aidlc evidence run --stage code-review --sensor review-evidence
@@ -311,8 +357,9 @@ allowlist 中的最小语义命令配置如下：
 | classic | 44 | 标准开发流程 |
 | express | 7 | 快速迭代 |
 | workshop | 7 | 工作坊/探索 |
-| bugfix | 5 | Bug 修复 |
-| refactor | 5 | 代码重构 |
+| bugfix | 7 | Bug 修复 |
+| refactor | 7 | 代码重构 |
+| poc | 7 | 概念验证 |
 
 ## 从 v1 迁移
 

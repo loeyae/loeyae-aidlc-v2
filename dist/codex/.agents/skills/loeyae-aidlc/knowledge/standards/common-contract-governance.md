@@ -79,4 +79,4 @@ I14 只建立该分类及其输入事实；`contract_ready` 是后续基线状�
 - [ ] 多单元共享声明有稳定 ID、唯一 Owner、明确消费者、权威来源和目标代码路径
 - [ ] 依赖矩阵按 `contract`、`implementation`、`runtime`、`none` 分类，且未把设计完成误判为 `contract_ready`
 - [ ] 跨进程完整字段仍只存在于机器契约；Markdown 与进程内代码仅保留适用的索引或实现边界
-- [ ] `state.md` 记录本次受影响契约、阻断项和证据引用
+- [ ] `handoff.md` 记录本次受影响契约、阻断项和证据引用

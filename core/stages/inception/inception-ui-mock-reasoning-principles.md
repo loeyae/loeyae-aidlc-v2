@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []
 sensors: []
+completion_contract: instruction_only
 requires: [ui-mock]
 condition: has_ui_requirements
 ---

@@ -3,10 +3,17 @@ slug: operations
 number: "4.1"
 name: 部署运维
 execution: CONDITIONAL
-lead: aidlc-operations-agent
+lead_agent: aidlc-operations-agent
 scopes: [feature, enterprise, mvp]
-requires: [build-and-test]
-produces: [docs/aidlc/operation/deployment-config.md]
+requires: [implementation-report]
+consumes:
+  - docs/aidlc/construction/build-test-report.md
+  - docs/aidlc/construction/implementation-report.md
+produces:
+  - docs/aidlc/operation/operations-plan.md
+  - docs/aidlc/operation/deployment-config.md
+  - docs/aidlc/operation/deployment-guide.md
+  - docs/aidlc/operation/operations-summary.md
 approval: block
 sensors: [doc-cascade]
 ---
@@ -20,14 +27,14 @@ sensors: [doc-cascade]
 ## 前置条件
 
 - Construction 的实际构建和测试已通过并有证据
-- state.md 已记录技术栈、构建方式和项目类型
+- handoff.md 已记录技术栈、构建方式和项目类型
 - 项目是可部署服务，或用户明确要求部署准备
 
-纯库、纯本地工具或用户明确不需要部署时跳过，并在 state.md 记录理由。
+纯库、纯本地工具或用户明确不需要部署时跳过，并在 handoff.md 记录理由。
 
 ## 步骤 1：分析部署需求
 
-读取 state.md、构建配置和 Construction 证据，识别：
+读取 handoff.md、构建配置和 Construction 证据，识别：
 
 - 运行制品及启动方式
 - 外部依赖、端口、健康检查和数据迁移
@@ -44,7 +51,7 @@ sensors: [doc-cascade]
 4. 容器：是否需要镜像、仓库和标签策略。
 5. 网络与运行参数：端口、域名、健康检查、资源、Secret 来源。
 
-将确认结果保存到 `docs/aidlc/operations/plans/operations-plan.md`，经用户确认后再生成配置。
+将确认结果保存到 `docs/aidlc/operation/plans/operations-plan.md`，经用户确认后再生成配置。
 
 ## 步骤 3：生成目标相关配置
 
@@ -85,7 +92,7 @@ sensors: [doc-cascade]
 
 ## 步骤 5：生成部署文档
 
-在 `docs/aidlc/operations/` 生成：
+在 `docs/aidlc/operation/` 生成：
 
 ### `deployment-guide.md`
 
@@ -112,6 +119,6 @@ sensors: [doc-cascade]
 - [ ] 所有占位符已替换或登记为部署参数
 - [ ] 适用语法/静态验证已实际执行并记录证据
 - [ ] 部署指南可从已通过构建的制品开始执行
-- [ ] state.md、审计和下一步交接已更新
+- [ ] handoff.md、审计和下一步交接已更新
 
 本阶段为🔴强制审批。存在未验证项时必须明确展示，由用户决定补齐环境后继续或接受"部署准备未验证"状态；后者不得标记为完全通过。

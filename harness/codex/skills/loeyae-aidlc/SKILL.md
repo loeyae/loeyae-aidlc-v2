@@ -26,12 +26,13 @@ loeyae-aidlc orchestrate next --scope <scope>
 loeyae-aidlc orchestrate report --stage <slug> --result completed
 ```
 
-`gate: true` 时，只有用户明确确认后才使用 `--result approved`。不得跳过 `ALWAYS` stage，不得自行修改 stage 顺序。
+`gate: true` 时，用户聊天确认本身不是审批凭据。人类须在交互式终端执行 `loeyae-aidlc approve --stage <slug>`，或由受信宿主 provider 签发 token，再以 `--result approved --approval-token <token>` 报告；token 绑定 workflow/stage/challenge、最长 15 分钟且不可重放。Skill、Agent 和 Stop Hook 不得自行签发，无 provider/TTY 时 fail-closed。`instruction_only` stage 必须在执行正文后显式传 `--instruction-ack <slug>`，Stop Hook 不得代确认。公开 report 不接受手动 `skipped`；仅 condition=false 可记录内部 `condition_skipped`。
 
 ## Codex 适配
 
-- 状态保存在业务项目的 `docs/aidlc/aidlc-state.json`；
-- evidence 位于业务项目的 `.aidlc/evidence/<stage-slug>/`；
+- `docs/aidlc/aidlc-state.json` 是 HMAC、workflow ID、revision/CAS 保护的唯一机器状态；外部 enrollment 绑定项目，`docs/aidlc/handoff.md` 仅为派生人类视图；
+- evidence 位于业务项目的 `.aidlc/evidence/<stage-slug>/`，只接受受控 Producer 的精确 producer、当前 `commit + dirty + worktree_digest` 和 HMAC；命令只记录 `argv_digest`；
+- 需要 Evidence 时，必须在第一次 `next` 前向 orchestrator、Producer 和 Hook 注入同一份至少 32 字节的 `AIDLC_TRUST_SECRET`；semantic 只执行发行包内置 checker；
 - 需要子 Agent 时，只使用当前 Codex 会话实际提供的子 Agent 能力；不可用时按阶段规则串行执行；
 - MCP、Skill 和项目规则按 Codex 当前会话的可用能力加载；不可用时返回 `NEEDS_CONTEXT` 或 `NEEDS_CAPABILITY`；
 - 不把 Skill 入口、阶段执行结果或用户回答伪造成 evidence。

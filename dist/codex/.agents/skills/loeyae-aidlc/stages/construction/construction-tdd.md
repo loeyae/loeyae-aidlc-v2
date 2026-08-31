@@ -8,7 +8,7 @@ lead_agent: aidlc-developer-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
-consumes: []
+consumes: [src/]
 produces:
   - src/test/
   - .aidlc/evidence/tdd/test-quality.json

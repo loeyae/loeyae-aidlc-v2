@@ -19,10 +19,19 @@
  * with `approval: block`; all other stages auto-advance after gates pass.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, renameSync, unlinkSync } from "fs";
-import { join, dirname, resolve, relative } from "path";
+import { randomBytes } from "crypto";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "fs";
+import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
-import { execSync } from "child_process";
+import { readEnrollment, verifyApprovalToken, verifyRecord } from "./aidlc-trust";
+import { readSourceRevision } from "./aidlc-revision";
+import {
+  createInitialState,
+  loadWorkflowState,
+  saveWorkflowState,
+  type HistoryEntry,
+  type WorkflowState,
+} from "./aidlc-state";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -32,10 +41,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENGINE_ROOT = resolve(__dirname, "..");
 const GRAPH_PATH = join(__dirname, "data", "stage-graph.json");
 
-// State file lives in the user's project (CWD-relative)
-const PROJECT_ROOT = process.cwd();
-const STATE_DIR = join(PROJECT_ROOT, "docs", "aidlc");
-const STATE_PATH = join(STATE_DIR, "aidlc-state.json");
+// State lives in the user's project; realpath prevents lexical containment bypasses.
+const PROJECT_ROOT = realpathSync(process.cwd());
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,10 +59,12 @@ interface StageNode {
   mode: string;
   scopes: string[];
   requires: string[];
+  scope_waived_requires: string[];
   consumes: string[];
   produces: string[];
   sensors: string[];
   traceability: "required" | "not_applicable";
+  completion_contract: "gated" | "instruction_only";
   condition: string;
   approval: "block" | "confirm" | "notify";
   file: string;
@@ -65,27 +74,6 @@ interface StageGraph {
   version: string;
   stages: StageNode[];
   stage_count: number;
-}
-
-interface WorkflowState {
-  version: string;
-  scope: string;
-  depth: string;
-  current_phase: string;
-  current_stage: string;
-  status: "running" | "parked" | "done";
-  completed_stages: string[];
-  skipped_stages: string[];
-  history: HistoryEntry[];
-  created_at: string;
-  updated_at: string;
-}
-
-interface HistoryEntry {
-  stage: string;
-  result: string;
-  timestamp: string;
-  user_input?: string;
 }
 
 interface Directive {
@@ -140,7 +128,7 @@ const VALID_SCOPES = new Set([
 const SUBCOMMANDS = ["next", "continue", "report", "park"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
-const VALID_RESULTS = ["completed", "approved", "rejected", "revised", "skipped"] as const;
+const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
 type StageResult = (typeof VALID_RESULTS)[number];
 
 // ---------------------------------------------------------------------------
@@ -155,45 +143,11 @@ function loadGraph(): StageGraph {
 }
 
 function loadState(): WorkflowState | null {
-  if (!existsSync(STATE_PATH)) return null;
-  return JSON.parse(readFileSync(STATE_PATH, "utf-8"));
+  return loadWorkflowState(PROJECT_ROOT);
 }
 
 function saveState(state: WorkflowState): void {
-  if (!existsSync(STATE_DIR)) {
-    mkdirSync(STATE_DIR, { recursive: true });
-  }
-  state.updated_at = new Date().toISOString();
-  // Atomic write: serialize to a temp file then rename onto the target.
-  // A crash mid-writeFileSync would corrupt aidlc-state.json and strand the
-  // workflow; rename is atomic on POSIX and on Windows NTFS for same-volume
-  // renames, so the state file is either fully old or fully new.
-  const tmpPath = `${STATE_PATH}.tmp`;
-  writeFileSync(tmpPath, JSON.stringify(state, null, 2));
-  try {
-    renameSync(tmpPath, STATE_PATH);
-  } catch (e) {
-    // renameSync can fail if a stale .tmp lingers from a prior crashed run
-    // (e.g. Windows EXISTS path). Clean up and retry once.
-    if (existsSync(tmpPath)) unlinkSync(tmpPath);
-    throw e;
-  }
-}
-
-function createInitialState(scope: string): WorkflowState {
-  return {
-    version: "2.0.2",
-    scope,
-    depth: "standard",
-    current_phase: "ideation",
-    current_stage: "",
-    status: "running",
-    completed_stages: [],
-    skipped_stages: [],
-    history: [],
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
+  saveWorkflowState(PROJECT_ROOT, state);
 }
 
 /**
@@ -223,16 +177,36 @@ function checkRequires(
   return stage.requires.filter((dep) => executableSlugs.has(dep) && !done.has(dep));
 }
 
+function assertProjectPath(path: string): string {
+  const candidate = resolve(path);
+  const rel = relative(PROJECT_ROOT, candidate);
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error(`artifact path escapes project root: ${path}`);
+  }
+  if (existsSync(candidate)) {
+    const stat = lstatSync(candidate);
+    if (stat.isSymbolicLink()) throw new Error(`artifact path is a symbolic link: ${path}`);
+    const real = realpathSync(candidate);
+    const realRel = relative(PROJECT_ROOT, real);
+    if (realRel === ".." || realRel.startsWith(`..${sep}`) || isAbsolute(realRel)) {
+      throw new Error(`artifact path resolves outside project root: ${path}`);
+    }
+  }
+  return candidate;
+}
+
 function collectFiles(path: string): string[] {
-  if (!existsSync(path)) return [];
-  const stat = statSync(path);
-  if (stat.isFile()) return [path];
+  const safe = assertProjectPath(path);
+  if (!existsSync(safe)) return [];
+  const stat = lstatSync(safe);
+  if (stat.isSymbolicLink()) throw new Error(`artifact path is a symbolic link: ${safe}`);
+  if (stat.isFile()) return [safe];
   if (!stat.isDirectory()) return [];
 
   const files: string[] = [];
-  for (const entry of readdirSync(path)) {
+  for (const entry of readdirSync(safe)) {
     if (entry.startsWith(".")) continue;
-    files.push(...collectFiles(join(path, entry)));
+    files.push(...collectFiles(join(safe, entry)));
   }
   return files;
 }
@@ -271,6 +245,8 @@ function resolveProducePaths(pattern: string): string[] {
 /**
  * Check if produces files exist (including directories and dynamic unit paths).
  */
+const MIN_ARTIFACT_BYTES = 16;
+
 function checkProduces(stage: StageNode): string[] {
   if (!stage.produces || stage.produces.length === 0) return [];
   const missing: string[] = [];
@@ -282,14 +258,40 @@ function checkProduces(stage: StageNode): string[] {
     }
 
     if (pattern.endsWith("/") || paths.some((path) => statSync(path).isDirectory())) {
-      const hasNonEmptyFile = paths.some((path) => statSync(path).size > 0);
-      if (!hasNonEmptyFile) missing.push(pattern);
+      const hasSubstantiveFile = paths.some((path) => statSync(path).size >= MIN_ARTIFACT_BYTES);
+      if (!hasSubstantiveFile) missing.push(pattern);
       continue;
     }
 
-    if (paths.some((path) => statSync(path).size === 0)) missing.push(pattern);
+    if (paths.some((path) => statSync(path).size < MIN_ARTIFACT_BYTES)) missing.push(pattern);
   }
   return missing;
+}
+
+function checkConsumes(stage: StageNode, state: WorkflowState, graph: StageGraph): string[] {
+  const failures: string[] = [];
+  for (const pattern of stage.consumes || []) {
+    let paths: string[] = [];
+    try {
+      paths = resolveProducePaths(pattern);
+    } catch (error) {
+      failures.push(`${pattern}: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    if (paths.length === 0 || paths.some((path) => lstatSync(path).isFile() && lstatSync(path).size < MIN_ARTIFACT_BYTES)) {
+      failures.push(`${pattern}: missing or smaller than ${MIN_ARTIFACT_BYTES} bytes`);
+      continue;
+    }
+    const producers = graph.stages.filter((candidate) => (candidate.produces || []).includes(pattern));
+    if (producers.length === 0) {
+      failures.push(`${pattern}: no stage declares this canonical produce`);
+      continue;
+    }
+    if (!producers.some((producer) => state.completed_stages.includes(producer.slug))) {
+      failures.push(`${pattern}: producer not completed (${producers.map((producer) => producer.slug).join(", ")})`);
+    }
+  }
+  return failures;
 }
 
 // ---------------------------------------------------------------------------
@@ -379,15 +381,50 @@ function validateEvidence(
 ): SensorResult | null {
   const loaded = loadEvidence(stage, sensor);
   if (loaded.failure) return loaded.failure;
-  const errors = required(loaded.value as Evidence);
-  const producer = asRecord((loaded.value as Evidence).producer);
+  const evidence = loaded.value as Evidence;
+  const errors = required(evidence);
+
+  const integrityError = verifyRecord(evidence);
+  if (integrityError) errors.push(`integrity: ${integrityError}`);
+
+  const producer = asRecord(evidence.producer);
   if (!producer) {
     errors.push("producer object is required for controlled evidence provenance");
   } else {
-    if (!asNonEmptyString(producer.name)) errors.push("producer.name must identify the controlled producer");
+    if (producer.name !== "loeyae-aidlc-evidence") errors.push('producer.name must be "loeyae-aidlc-evidence"');
     if (producer.mode !== "controlled") errors.push('producer.mode must be "controlled"');
     if (!asNonEmptyString(producer.execution_id)) errors.push("producer.execution_id is required");
   }
+
+  const sourceRevision = asRecord(evidence.source_revision);
+  if (!sourceRevision) {
+    errors.push("source_revision object is required");
+  } else {
+    const commit = asNonEmptyString(sourceRevision.commit);
+    if (!commit) errors.push("source_revision.commit is required");
+    const activeRevision = readSourceRevision(PROJECT_ROOT);
+    if (commit && commit !== activeRevision.commit) errors.push(`source_revision.commit ${commit} does not match current HEAD ${activeRevision.commit}`);
+    if (sourceRevision.dirty !== null && typeof sourceRevision.dirty !== "boolean") errors.push("source_revision.dirty must be boolean or null");
+    if (sourceRevision.dirty !== activeRevision.dirty) errors.push("source_revision.dirty no longer matches the current worktree");
+    if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.worktree_digest || ""))) {
+      errors.push("source_revision.worktree_digest must be a SHA-256 digest");
+    } else if (sourceRevision.worktree_digest !== activeRevision.worktree_digest) {
+      errors.push("source_revision.worktree_digest no longer matches the current worktree");
+    }
+  }
+
+  if (sensor !== "build-test-evidence") {
+    const checker = asRecord(evidence.checker);
+    if (!checker) {
+      errors.push("checker object is required for semantic evidence");
+    } else {
+      if (checker.id !== `builtin:${sensor}`) errors.push(`checker.id must be builtin:${sensor}`);
+      if (checker.sensor !== sensor) errors.push(`checker.sensor must be ${sensor}`);
+      if (!/^[a-f0-9]{64}$/.test(String(checker.argv_digest || ""))) errors.push("checker.argv_digest must be a SHA-256 digest");
+      if (asNumber(checker.exit_code) !== 0 || checker.status !== "passed") errors.push("checker execution must have passed with exit_code 0");
+    }
+  }
+
   if (errors.length > 0) {
     return {
       sensor,
@@ -475,7 +512,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
               unreadableFiles.push(artifactLabel(filePath));
               continue;
             }
-            if (/\b(TODO|FIXME|HACK)\b/.test(content)) {
+            if (/(?:^|\n)\s*(?:(?:\/\/|#|<!--|\*|-)\s*)?\b(?:TODO|FIXME|HACK)\b\s*(?::|\(|\[|$)/im.test(content)) {
               todoFiles.push(artifactLabel(filePath));
             }
           }
@@ -541,7 +578,10 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
             unreadableFiles.push(artifactLabel(filePath));
             continue;
           }
-          if (!/\b(REQ-[A-Z0-9][A-Z0-9_-]*|R-[0-9]+)\b/i.test(content)) {
+          const requirementPattern = /\b(REQ-[A-Z0-9][A-Z0-9_-]*|R-[0-9]+)\b/gi;
+          const matches = content.match(requirementPattern) || [];
+          const semanticBody = content.replace(requirementPattern, "").replace(/[#*_`>\-\s]/g, "");
+          if (matches.length === 0 || semanticBody.length < 20) {
             untraced.push(artifactLabel(filePath));
           }
         }
@@ -563,7 +603,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
 
-          // Commands validation — each must have cmd, exit_code=0, status=passed
+          // Commands validation — each command is provenance-bound without persisting secret-bearing argv.
           const commands = Array.isArray(evidence.commands) ? evidence.commands : [];
           if (commands.length === 0) errors.push("commands must contain at least one executed command");
           for (let i = 0; i < commands.length; i++) {
@@ -572,7 +612,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
               errors.push(`commands[${i}] must be an object`);
               continue;
             }
-            if (!asNonEmptyString(record.cmd)) errors.push(`commands[${i}].cmd must be a non-empty string`);
+            if (!/^[a-f0-9]{64}$/.test(String(record.argv_digest || ""))) errors.push(`commands[${i}].argv_digest must be a SHA-256 digest`);
             if (asNumber(record.exit_code) !== 0) errors.push(`commands[${i}].exit_code must be 0 (got ${record.exit_code})`);
             if (record.status !== "passed") errors.push(`commands[${i}].status must be "passed"`);
             if (typeof record.duration_ms !== "number") errors.push(`commands[${i}].duration_ms must be a number`);
@@ -1123,15 +1163,31 @@ function buildConditionContext(): ConditionContext {
   const reverseEngineeringPath = join(PROJECT_ROOT, "docs", "aidlc", "inception", "reverse-engineering.md");
   const has_reverse_output = existsSync(reverseEngineeringPath);
 
-  // multi_module: units.md has >1 unit section (## headings)
+  // multi_module is derived only from upstream facts; never from units-generation's own output.
   let multi_module = false;
-  const unitsPath = join(PROJECT_ROOT, "docs", "aidlc", "inception", "units.md");
-  if (existsSync(unitsPath)) {
+  const workspaceFactsPath = join(PROJECT_ROOT, ".aidlc", "workspace-facts.json");
+  const moduleDivisionPath = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "module-division.md");
+  if (existsSync(workspaceFactsPath)) {
     try {
-      const content = readFileSync(unitsPath, "utf-8");
-      const unitHeadings = content.match(/^## /gm);
-      multi_module = (unitHeadings?.length ?? 0) > 1;
+      const facts = JSON.parse(readFileSync(workspaceFactsPath, "utf-8")) as Record<string, unknown>;
+      multi_module = Array.isArray(facts.modules) && facts.modules.length > 1;
+    } catch { /* invalid facts are ignored and upstream document detection is used */ }
+  }
+  if (!multi_module && existsSync(moduleDivisionPath)) {
+    try {
+      const content = readFileSync(moduleDivisionPath, "utf-8");
+      const moduleHeadings = content.match(/^##\s+(?!摘要|概述|Summary)/gim);
+      multi_module = (moduleHeadings?.length ?? 0) > 1;
     } catch { /* unreadable */ }
+  }
+  if (!multi_module) {
+    try {
+      const packageJsonPath = join(PROJECT_ROOT, "package.json");
+      if (existsSync(packageJsonPath)) {
+        const pkg = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as Record<string, unknown>;
+        multi_module = Array.isArray(pkg.workspaces) || (pkg.workspaces !== null && typeof pkg.workspaces === "object");
+      }
+    } catch { /* invalid package metadata */ }
   }
 
   const contextDocs = [
@@ -1269,7 +1325,7 @@ function findNextStage(
         state.skipped_stages.push(s.slug);
         state.history.push({
           stage: s.slug,
-          result: "skipped",
+          result: "condition_skipped",
           timestamp: new Date().toISOString(),
           user_input: `Auto-skipped: condition "${s.condition}" evaluated to false`,
         });
@@ -1361,8 +1417,11 @@ async function handleNext(args: string[]): Promise<Directive> {
         ask_type: "scope-selection",
       } as unknown as Directive;
     }
-    // Initialize new workflow
-    state = createInitialState(scopeFlag);
+    // Initialize a new workflow, or resume an interrupted first commit that
+    // already created a pending project enrollment.
+    const enrollment = readEnrollment(PROJECT_ROOT);
+    const pendingWorkflowId = enrollment?.status === "pending" ? enrollment.workflow_id : undefined;
+    state = createInitialState(scopeFlag, "2.0.2", pendingWorkflowId);
     saveState(state);
     return {
       kind: "print",
@@ -1431,14 +1490,22 @@ async function handleNext(args: string[]): Promise<Directive> {
     };
   }
 
-  // Update current stage pointer (next is read-mostly but updates the cursor for resume)
+  const consumeFailures = checkConsumes(nextStage, state, graph);
+  if (consumeFailures.length > 0) {
+    return {
+      kind: "error",
+      message: `🚫 Stage "${nextStage.slug}" is missing canonical consumed artifacts:\n${consumeFailures.map((failure) => `  ❌ ${failure}`).join("\n")}`,
+    };
+  }
+
   state.current_stage = nextStage.slug;
   state.current_phase = nextStage.phase;
+  const gate = nextStage.approval === "block";
+  if (gate && !state.approval_challenges[nextStage.slug]) {
+    state.approval_challenges[nextStage.slug] = `${Date.now()}.${randomBytes(24).toString("hex")}`;
+  }
   saveState(state);
 
-  const gate = nextStage.approval === "block";
-
-  // Build the run-stage directive
   return {
     kind: "run-stage",
     stage: nextStage.slug,
@@ -1451,6 +1518,8 @@ async function handleNext(args: string[]): Promise<Directive> {
     mode: nextStage.mode,
     gate,
     approval: nextStage.approval,
+    completion_contract: nextStage.completion_contract,
+    approval_challenge: gate ? state.approval_challenges[nextStage.slug] : undefined,
     consumes: nextStage.consumes,
     produces: nextStage.produces,
     sensors: nextStage.sensors,
@@ -1466,7 +1535,7 @@ async function handleReport(args: string[]): Promise<Directive> {
   const stageSlug = flags.stage;
   const result = flags.result as StageResult;
   const userInput = flags["user-input"];
-  const reason = flags.reason;
+  const approvalTokenValue = flags["approval-token"] || process.env.AIDLC_APPROVAL_TOKEN;
 
   // Validate required fields
   if (!stageSlug) {
@@ -1502,11 +1571,31 @@ async function handleReport(args: string[]): Promise<Directive> {
   if (!stageNode) {
     return { kind: "error", message: `Unknown stage "${stageSlug}".` };
   }
-  if (result === "skipped" && stageNode.execution === "ALWAYS") {
-    return { kind: "error", message: `Stage "${stageSlug}" is ALWAYS and cannot be skipped.` };
-  }
   if (result === "completed" && stageNode.approval === "block") {
-    return { kind: "error", message: `Stage "${stageSlug}" requires explicit approval. Re-report with --result approved after the decision is confirmed.` };
+    return { kind: "error", message: `Stage "${stageSlug}" requires trusted approval. Supply the host-issued one-time token with --result approved --approval-token <token>.` };
+  }
+  if (result === "approved") {
+    if (stageNode.approval !== "block") {
+      return { kind: "error", message: `Stage "${stageSlug}" is not an approval gate and cannot use --result approved.` };
+    }
+    const challenge = state.approval_challenges[stageSlug];
+    if (!challenge) return { kind: "error", message: `No active approval challenge for stage "${stageSlug}". Run next to obtain one.` };
+    const issuedAt = Number(challenge.split(".", 1)[0]);
+    if (!Number.isFinite(issuedAt) || Date.now() - issuedAt > 15 * 60 * 1000 || issuedAt > Date.now() + 60 * 1000) {
+      delete state.approval_challenges[stageSlug];
+      saveState(state);
+      return { kind: "error", message: `Approval challenge for stage "${stageSlug}" expired. Run next to obtain a new challenge.` };
+    }
+    if (!approvalTokenValue) return { kind: "error", message: `Stage "${stageSlug}" requires --approval-token from a trusted human approval channel.` };
+    if (!verifyApprovalToken(state.workflow_id, stageSlug, challenge, approvalTokenValue)) {
+      return { kind: "error", message: `Invalid or stale approval token for stage "${stageSlug}".` };
+    }
+  }
+  if (stageNode.completion_contract === "instruction_only" && result === "completed" && flags["instruction-ack"] !== stageSlug) {
+    return {
+      kind: "error",
+      message: `Stage "${stageSlug}" is instruction-only and cannot be auto-completed by a lifecycle Hook. After executing its body, report again with --instruction-ack ${stageSlug}.`,
+    };
   }
 
   // Record history entry
@@ -1517,8 +1606,17 @@ async function handleReport(args: string[]): Promise<Directive> {
   };
   if (userInput) entry.user_input = userInput;
 
-  // --- P0 Gate: Validate produces before allowing completion ---
+  // --- P0 Gate: Validate consumes and produces before allowing completion ---
   if (result === "completed" || result === "approved") {
+      const consumeFailures = checkConsumes(stageNode, state, graph);
+      if (consumeFailures.length > 0) {
+        return {
+          kind: "error",
+          message: `🚫 Cannot complete stage "${stageSlug}" — canonical consumed artifacts are no longer valid:\n` +
+            consumeFailures.map((failure) => `  ❌ ${failure}`).join("\n"),
+        };
+      }
+
       // Check produces (准出 — artifact existence)
       const missingProduces = checkProduces(stageNode);
       if (missingProduces.length > 0) {
@@ -1549,23 +1647,14 @@ async function handleReport(args: string[]): Promise<Directive> {
     case "completed":
     case "approved":
       state.completed_stages.push(stageSlug);
-      state.current_stage = ""; // cleared — next `next` will find the successor
-      break;
-
-    case "skipped":
-      if (!reason) {
-        return { kind: "error", message: "Skipping a stage requires --reason <explanation>" };
-      }
-      state.skipped_stages.push(stageSlug);
       state.current_stage = "";
+      if (result === "approved") delete state.approval_challenges[stageSlug];
       break;
 
     case "rejected":
-      // Stage stays current — agent must revise and re-report
       break;
 
     case "revised":
-      // After revision, stays current for re-completion attempt
       break;
   }
 
@@ -1578,11 +1667,6 @@ async function handleReport(args: string[]): Promise<Directive> {
       return {
         kind: "print",
         message: `✅ Stage "${stageSlug}" ${result}. Run 'next' for the next stage.`,
-      };
-    case "skipped":
-      return {
-        kind: "print",
-        message: `⏭️ Stage "${stageSlug}" skipped: ${reason}. Run 'next' for the next stage.`,
       };
     case "rejected":
       return {
@@ -1682,9 +1766,13 @@ async function main() {
   }
 
   console.log(JSON.stringify(directive, null, 2));
+  if (directive.kind === "error") process.exitCode = 2;
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
+main().catch((error) => {
+  console.error(JSON.stringify({
+    kind: "error",
+    message: error instanceof Error ? error.message : String(error),
+  }, null, 2));
+  process.exit(2);
 });

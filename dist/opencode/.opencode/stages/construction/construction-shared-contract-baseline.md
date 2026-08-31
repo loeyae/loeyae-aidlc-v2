@@ -32,7 +32,7 @@ condition: has_contract_dependencies
 2. `unit-of-work-dependency.md` 中存在 `contract` 类型依赖；
 3. 对应共享契约已在 I14 产物中完成设计。
 
-以下情况跳过基线物化，并在 `state.md` 记录原因后继续 C5：
+以下情况跳过基线物化，并在 `handoff.md` 记录原因后继续 C5：
 
 - 单单元项目；
 - 不存在 `contract` 类型跨单元依赖；
@@ -49,7 +49,7 @@ condition: has_contract_dependencies
 - `shared-interfaces.md`（进程内声明设计，适用时）；
 - 跨进程机器契约（OpenAPI、Proto、AsyncAPI、Schema 等，适用时）；
 - 工作区现有代码和实际构建入口；
-- `state.md` 中已有的共享契约基线状态（适用时）。
+- `handoff.md` 中已有的共享契约基线状态（适用时）。
 
 每项待物化契约必须具备稳定 ID、类型、边界、唯一 Owner、非空消费者、权威来源、目标模块和目标代码路径。缺少任一项、存在未解决设计问题或消费者未知时：
 
@@ -140,7 +140,7 @@ condition: has_contract_dependencies
 
 ## 基线状态与证据
 
-`state.md` 的可选共享契约基线区块使用以下状态：
+`handoff.md` 的可选共享契约基线区块使用以下状态：
 
 | 状态 | 含义 | 对 `contract` 依赖的影响 |
 |------|------|--------------------------|
@@ -156,7 +156,7 @@ condition: has_contract_dependencies
 - `in_progress` → `blocked`；
 - `verified` → `change_requested` → `in_progress` 或 `blocked`。
 
-每次状态更新至少记录基线 ID、范围、契约清单、代码版本、实际验证证据和阻断原因。`contract_ready` 仅由相关基线为 `verified` 推导，不在 `state.md` 创建第二份独立状态。
+每次状态更新至少记录基线 ID、范围、契约清单、代码版本、实际验证证据和阻断原因。`contract_ready` 仅由相关基线为 `verified` 推导，不在 `handoff.md` 创建第二份独立状态。
 
 ## Git 与团队记录
 
@@ -182,4 +182,4 @@ condition: has_contract_dependencies
 
 ## 平台适配一致性检查
 
-修改本文件的门禁规则、状态转换或依赖就绪判定逻辑后，必须检查 `.claude/workflows/aidlc-construction-batch.js` 中的 `deriveReadiness` 函数是否仍与共享规则一致。不一致时同步更新该适配器，或在 `state.md` 记录待同步项。
+修改本文件的门禁规则、状态转换或依赖就绪判定逻辑后，必须检查 `.claude/workflows/aidlc-construction-batch.js` 中的 `deriveReadiness` 函数是否仍与共享规则一致。不一致时同步更新该适配器，或在 `handoff.md` 记录待同步项。

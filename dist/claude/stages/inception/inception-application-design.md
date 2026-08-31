@@ -8,7 +8,9 @@ lead_agent: aidlc-architect-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
-consumes: []
+consumes:
+  - docs/aidlc/inception/requirements.md
+  - docs/aidlc/inception/user-stories.md
 produces:
   - docs/aidlc/inception/application-design.md
   - docs/aidlc/inception/application-design/components.md
@@ -17,7 +19,7 @@ produces:
   - docs/aidlc/inception/application-design/component-dependency.md
   - .aidlc/evidence/application-design/diagram-contract.json
 sensors: [diagram-contract]
-requires: [user-stories]
+requires: [cross-validation]
 approval: block
 ---
 # 应用设计 - 详细步骤
@@ -42,7 +44,7 @@ approval: block
 ## 逐步执行
 
 ### 1. 分析上下文
-- 读取 `docs/aidlc/inception/requirements/requirements.md` 和 `docs/aidlc/inception/user-stories/stories.md`
+- 读取 `docs/aidlc/inception/requirements.md` 和 `docs/aidlc/inception/user-stories.md`
 - 识别关键业务能力和功能领域
 - 确定设计范围和复杂度
 
@@ -86,10 +88,10 @@ approval: block
     - 全局状态 vs 局部状态
     - Store 间依赖关系
   - [ ] **前端平台规范**（跨端项目必须）：生成 `docs/aidlc/frontend-platform-spec.md`
-    - 触发条件：前端目标平台为跨端（Taro/RN/Flutter/UniApp 跨端模式等），且该文件尚不存在或 state.md 标记为"待创建"
-    - 跳过条件：纯 Web 项目（PC 端 Vue3/React SPA），或文件已存在且 state.md 标记为"已就绪"
+    - 触发条件：前端目标平台为跨端（Taro/RN/Flutter/UniApp 跨端模式等），且该文件尚不存在或 handoff.md 标记为"待创建"
+    - 跳过条件：纯 Web 项目（PC 端 Vue3/React SPA），或文件已存在且 handoff.md 标记为"已就绪"
     - 执行方式：按 `construction-ui-implementation-bridge.md` 第一部分的创建引导流程
-    - 产出后更新 state.md：`前端平台规范: 已就绪`
+    - 产出后更新 handoff.md：`前端平台规范: 已就绪`
 
 ### 4. 生成上下文相关的问题
 **指令**：分析需求和故事，仅生成与此特定应用设计相关的问题。使用以下类别作为灵感，而非强制清单。如不适用则跳过整个类别。
@@ -205,14 +207,14 @@ approval: block
   - Store 间依赖关系
 
 **前端平台规范**（跨端项目，按条件执行）：
-- 条件：state.md 中 `前端平台规范` ≠ `已就绪`，且前端目标平台为跨端
+- 条件：handoff.md 中 `前端平台规范` ≠ `已就绪`，且前端目标平台为跨端
 - 按 `construction-ui-implementation-bridge.md` 第一部分执行创建引导
 - 创建 `docs/aidlc/frontend-platform-spec.md`，包含：
   - 平台声明（运行时、组件库、样式方案）
   - 布局原语映射表
   - 组件映射参考表
   - CSS/样式约束清单
-- 产出后更新 state.md：`前端平台规范: 已就绪`
+- 产出后更新 handoff.md：`前端平台规范: 已就绪`
 
 ### 10.5 过渡：测试用例派生
 
@@ -243,7 +245,7 @@ approval: block
 > [如果单元生成被跳过：]
 > 📝 **添加单元生成** - 选择包含**单元生成**步骤（当前已跳过）
 > ✅ **确认并继续** - 确认设计，进入**[单元生成/CONSTRUCTION 阶段]**
-> 📋 **新 Session 继续** - 复制 `state.md` 中的交接提示词到新对话继续
+> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
 ```
 
 ### 13. 等待明确审批
@@ -257,7 +259,7 @@ approval: block
 - 清晰标记审批状态
 
 ### 15. 更新进度
-- 在 `docs/aidlc/state.md` 中标记应用设计阶段完成
+- 在 `docs/aidlc/handoff.md` 中标记应用设计阶段完成
 - 更新"当前状态"部分
 - 准备过渡到下一阶段
 

@@ -17,7 +17,9 @@ The agent presents them using the `[OPTIONS:]` line or `ask_question` MCP tool.
 [OPTIONS: Option A | Option B | Option C]
 ```
 
-### Confirmation gate (approval)
+### Confirmation gate (approval review)
+
+This card records the user's review choice only; it is not an approval credential. If the user selects Approve, a human must still run `loeyae-aidlc approve --stage <slug>` in an interactive terminal (or use a trusted host provider), then pass the one-time token to `orchestrate report`.
 
 ```
 Stage "[stage name]" is ready for review.

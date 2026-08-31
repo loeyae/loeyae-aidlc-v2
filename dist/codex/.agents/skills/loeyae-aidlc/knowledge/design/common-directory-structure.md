@@ -6,7 +6,7 @@
 
 - 应用代码、测试和部署配置位于工作区正常项目结构中，不放入 `docs/aidlc/`。
 - AI-DLC 需求、设计、计划、审计和报告仅放入 `docs/aidlc/`。
-- `docs/aidlc/state.md` 是三平台唯一恢复状态源。
+- `docs/aidlc/handoff.md` 是三平台唯一恢复状态源。
 - 未执行的条件步骤不创建空目录或占位文件。
 - 系统基线只保存索引、关系和证据引用，不复制 Secret、完整机器契约或外部平台数据。
 - 多模块项目只加载当前模块产物、产品级契约和相关系统基线切片。
@@ -14,7 +14,7 @@
 ## CR 与变更文档约束
 
 - `construction/` 仅存实现计划、审查记录、构建测试和实施报告；禁止创建 `CR-*`、`change-*`、`bug-*` 变更档案。
-- L1/L2 变更和缺陷修复不创建独立文件；通过 state.md 活跃行和 Git commit 记录。
+- L1/L2 变更和缺陷修复不创建独立文件；通过 handoff.md 活跃行和 Git commit 记录。
 - L3+ 的 CR 暂态文件仅位于 `docs/aidlc/change-requests/`（单模块）或 `docs/aidlc/modules/<module>/change-requests/`（多模块）。
 - CR 完成后暂态文件必须删除；Git 历史是唯一长期档案。
 - 禁止创建 `{artifact}.backup.{timestamp}` 时间戳备份副本；Git 历史保留所有旧版本。
@@ -34,7 +34,7 @@
 <workspace>/
 ├── <project source and tests>
 └── docs/aidlc/
-    ├── state.md
+    ├── handoff.md
     ├── audit-summary.md
     ├── change-requests/               # 仅 L3+ CR 暂态文件；完成后删除
     ├── inception/
@@ -73,7 +73,7 @@
 <workspace>/
 ├── <project source and tests>
 └── docs/aidlc/
-    ├── state.md
+    ├── handoff.md
     ├── audit-summary.md
     ├── product/
     │   ├── product-overview.md
@@ -100,4 +100,4 @@
 - 服务目录和运行时关系只在产品级系统基线维护，模块级产物引用相关切片。
 - 模块级 Inception/Construction 结构与单模块对应阶段一致，但不重复系统基线。
 - Operations 是项目级部署准备；只有独立部署模块明确需要单独交付时，才在其模块目录生成部署补充说明。
-- 切换模块前先更新 state.md 的活跃模块、活跃服务/单元、当前步骤、基线新鲜度和下一步交接。
+- 切换模块前先更新 handoff.md 的活跃模块、活跃服务/单元、当前步骤、基线新鲜度和下一步交接。

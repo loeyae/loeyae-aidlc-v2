@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 
 from diagram_fixture_style import canonicalize_svg
 
@@ -16,6 +17,38 @@ SENSORS = [
     "framework-compliance", "subagent-evidence", "template-completeness", "recovery-evidence",
     "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
 ]
+
+SCRATCH_ROOT = os.environ.get("KIROCREW_SCRATCH") or os.environ.get("TMPDIR") or tempfile.gettempdir()
+TRUST_SECRET = "aidlc-semantic-test-secret-at-least-32-bytes"
+
+
+def make_temp(*, prefix: str) -> str:
+    return tempfile.mkdtemp(prefix=prefix, dir=SCRATCH_ROOT)
+
+
+def checker_environment(project: str) -> dict:
+    env = os.environ.copy()
+    env["AIDLC_TRUST_SECRET"] = TRUST_SECRET
+    env["AIDLC_TRUST_DIR"] = os.path.join(project, ".aidlc", "test-trust")
+    return env
+
+
+def write_signed_state(project: str) -> None:
+    state_uri = (Path(REPO_ROOT) / "core" / "tools" / "aidlc-state.ts").as_uri()
+    script = f"""
+import {{ createInitialState, saveWorkflowState }} from {json.dumps(state_uri)};
+const state = createInitialState('feature');
+state.current_stage = 'compact-recovery';
+saveWorkflowState(process.cwd(), state);
+"""
+    result = subprocess.run(
+        ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", "--eval", script],
+        cwd=project,
+        env=checker_environment(project),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def write(project: str, path: str, content: str) -> None:
@@ -78,8 +111,8 @@ CSS constraints: spacing, responsive, tokens
     write(project, "docs/aidlc/construction/build-and-test/build-instructions.md", "Build instructions with environment and commands. This is complete.\n")
     write(project, "docs/aidlc/construction/build-and-test/unit-test-instructions.md", "Unit test instructions with scope and commands. This is complete.\n")
     write(project, ".aidlc/context-compacted", "true\n")
-    write(project, "docs/aidlc/state.md", "context_compacted: true\n")
     write(project, "docs/aidlc/handoff.md", "State restored and handoff recorded.\n")
+    write_signed_state(project)
     write(project, "docs/aidlc/ideation/prd.md", """# Overview
 # Goals
 # Features
@@ -189,13 +222,14 @@ def run_checker(project: str, sensor: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", CHECKER, "--sensor", sensor],
         cwd=project,
+        env=checker_environment(project),
         capture_output=True,
         text=True,
     )
 
 
 def test_all_checkers_pass_on_realistic_fixture() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-semantic-checkers-")
+    project = make_temp(prefix="aidlc-semantic-checkers-")
     try:
         fixture(project, with_expected=True)
         for sensor in SENSORS:
@@ -225,7 +259,7 @@ def test_all_checkers_pass_on_realistic_fixture() -> None:
 
 
 def test_checker_fails_closed_when_required_artifact_is_removed() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-semantic-checkers-fail-")
+    project = make_temp(prefix="aidlc-semantic-checkers-fail-")
     try:
         fixture(project)
         os.remove(os.path.join(project, "docs/aidlc/ideation/prd.md"))
@@ -237,7 +271,7 @@ def test_checker_fails_closed_when_required_artifact_is_removed() -> None:
 
 
 def test_checker_rejects_legacy_diagram_without_structured_contract() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-semantic-checkers-migration-")
+    project = make_temp(prefix="aidlc-semantic-checkers-migration-")
     try:
         fixture(project)
         manifest_path = os.path.join(project, "docs/aidlc/inception/requirements/business-flows.diagram.json")
@@ -254,7 +288,7 @@ def test_checker_rejects_legacy_diagram_without_structured_contract() -> None:
 
 
 def test_diagram_003_fixed_regression() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-diagram-003-regression-")
+    project = make_temp(prefix="aidlc-diagram-003-regression-")
     try:
         source = os.path.join(REPO_ROOT, "tests", "fixtures", "diagram-003")
         shutil.copytree(source, project, dirs_exist_ok=True)
@@ -307,7 +341,7 @@ def mutate_diagram(project: str, mutation) -> None:
 
 
 def test_structural_group_capacity_and_style_contract_pass() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-structural-group-pass-")
+    project = make_temp(prefix="aidlc-structural-group-pass-")
     try:
         fixture(project)
         mutate_diagram(project, lambda diagram, _: (
@@ -402,7 +436,7 @@ def test_diagram_geometry_gates_fail_closed() -> None:
         ("canvas too empty", lambda diagram, _: diagram["canvas"].update({"width": 2000, "height": 2000}), "CANVAS_TOO_EMPTY"),
     ]
     for name, mutation, expected in cases:
-        project = tempfile.mkdtemp(prefix=f"aidlc-diagram-geometry-{name.replace(' ', '-')}-")
+        project = make_temp(prefix=f"aidlc-diagram-geometry-{name.replace(' ', '-')}-")
         try:
             fixture(project)
             mutate_diagram(project, mutation)
@@ -414,7 +448,7 @@ def test_diagram_geometry_gates_fail_closed() -> None:
 
 
 def test_diagram_geometry_gates_pass_on_valid_sequence() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-diagram-geometry-valid-")
+    project = make_temp(prefix="aidlc-diagram-geometry-valid-")
     try:
         fixture(project)
         mutate_diagram(project, lambda diagram, project: (
@@ -430,7 +464,7 @@ def test_diagram_geometry_gates_pass_on_valid_sequence() -> None:
 
 
 def test_diagram_risk_assessment() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-diagram-risk-")
+    project = make_temp(prefix="aidlc-diagram-risk-")
     try:
         fixture(project)
         mutate_diagram(project, lambda diagram, _: (
@@ -516,7 +550,7 @@ def directional_fixture(project: str, direction: str) -> None:
 
 def test_directional_layout_contracts() -> None:
     for direction in ("TB", "LR"):
-        project = tempfile.mkdtemp(prefix=f"aidlc-directional-{direction.lower()}-")
+        project = make_temp(prefix=f"aidlc-directional-{direction.lower()}-")
         try:
             directional_fixture(project, direction)
             result = run_checker(project, "diagram-contract")
@@ -533,7 +567,7 @@ def test_directional_layout_contracts() -> None:
         ("global-annotations", "TB", lambda diagram, _: diagram.update({"annotations": [{"id": "layout-note", "text": "布局说明", "x": 500, "y": 400}]}), "must not define global annotations"),
     ]
     for name, direction, mutation, expected in cases:
-        project = tempfile.mkdtemp(prefix=f"aidlc-directional-{name}-")
+        project = make_temp(prefix=f"aidlc-directional-{name}-")
         try:
             directional_fixture(project, direction)
             mutate_diagram(project, mutation)
@@ -543,7 +577,7 @@ def test_directional_layout_contracts() -> None:
         finally:
             shutil.rmtree(project)
 
-    project = tempfile.mkdtemp(prefix="aidlc-global-note-")
+    project = make_temp(prefix="aidlc-global-note-")
     try:
         directional_fixture(project, "TB")
         svg_path = os.path.join(project, "docs/aidlc/inception/requirements/business-flows.svg")
@@ -558,7 +592,7 @@ def test_directional_layout_contracts() -> None:
         shutil.rmtree(project)
 
 def test_diagram_contract_hardening() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-diagram-port-approach-")
+    project = make_temp(prefix="aidlc-diagram-port-approach-")
     try:
         fixture(project)
         mutate_diagram(project, lambda diagram, _: (
@@ -571,7 +605,7 @@ def test_diagram_contract_hardening() -> None:
     finally:
         shutil.rmtree(project)
 
-    project = tempfile.mkdtemp(prefix="aidlc-diagram-routing-minimality-")
+    project = make_temp(prefix="aidlc-diagram-routing-minimality-")
     try:
         fixture(project)
         mutate_diagram(project, lambda diagram, _: (
@@ -584,7 +618,7 @@ def test_diagram_contract_hardening() -> None:
     finally:
         shutil.rmtree(project)
 
-    project = tempfile.mkdtemp(prefix="aidlc-diagram-label-edge-")
+    project = make_temp(prefix="aidlc-diagram-label-edge-")
     try:
         fixture(project)
         mutate_diagram(project, lambda diagram, _: (
@@ -603,7 +637,7 @@ def test_diagram_contract_hardening() -> None:
     finally:
         shutil.rmtree(project)
 
-    project = tempfile.mkdtemp(prefix="aidlc-diagram-change-impact-")
+    project = make_temp(prefix="aidlc-diagram-change-impact-")
     try:
         fixture(project)
         mutate_diagram(project, lambda diagram, _: diagram["designNotes"]["layout"].update({
@@ -621,7 +655,7 @@ def test_diagram_contract_hardening() -> None:
     finally:
         shutil.rmtree(project)
 
-    project = tempfile.mkdtemp(prefix="aidlc-diagram-exit-loop-")
+    project = make_temp(prefix="aidlc-diagram-exit-loop-")
     try:
         fixture(project)
         def declared_exit_loop(diagram: dict, project_path: str) -> None:
@@ -645,7 +679,7 @@ def test_diagram_contract_hardening() -> None:
     finally:
         shutil.rmtree(project)
 
-    project = tempfile.mkdtemp(prefix="aidlc-diagram-loop-routing-minimality-")
+    project = make_temp(prefix="aidlc-diagram-loop-routing-minimality-")
     try:
         fixture(project)
         def redundant_declared_exit_loop(diagram: dict, project_path: str) -> None:
@@ -670,7 +704,7 @@ def test_diagram_contract_hardening() -> None:
     finally:
         shutil.rmtree(project)
 
-    project = tempfile.mkdtemp(prefix="aidlc-diagram-untracked-exit-loop-")
+    project = make_temp(prefix="aidlc-diagram-untracked-exit-loop-")
     try:
         fixture(project)
         mutate_diagram(project, lambda diagram, _: (
@@ -712,7 +746,7 @@ def test_diagram_contract_hardening() -> None:
             json.dump(manifest, handle)
         write(project_path, "docs/aidlc/inception/requirements/business-flows.svg", '''<svg viewBox="0 0 400 340" width="400" height="340" role="img"><title>Crossing fixture</title><desc>FR-001 declared crossing fixture</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4"><path d="M0 0 L6 4 L0 8 Z"/></marker></defs><g data-node="start"><rect x="40" y="125" width="100" height="50"/><text x="90" y="155">开始</text></g><g data-node="done"><rect x="260" y="125" width="100" height="50"/><text x="310" y="155">完成</text></g><g data-node="top"><rect x="170" y="40" width="60" height="50"/><text x="200" y="70">上</text></g><g data-node="bottom"><rect x="170" y="240" width="60" height="50"/><text x="200" y="270">下</text></g><path data-edge="start-done" data-from="start" data-from-port="right" data-to="done" data-to-port="left" d="M140 150 L260 150" marker-end="url(#arrow)"/><path data-edge-arrow="start-done" data-edge="start-done" data-arrow-target="done:left" d="M252 142 L260 150 L252 158"/><path data-edge="top-bottom" data-from="top" data-from-port="bottom" data-to="bottom" data-to-port="top" d="M200 90 L200 240" marker-end="url(#arrow)"/><path data-edge-arrow="top-bottom" data-edge="top-bottom" data-arrow-target="bottom:top" d="M192 230 L200 240 L208 230"/></svg>''')
 
-    project = tempfile.mkdtemp(prefix="aidlc-diagram-crossing-declared-")
+    project = make_temp(prefix="aidlc-diagram-crossing-declared-")
     try:
         crossing_fixture(project, True)
         result = run_checker(project, "diagram-contract")
@@ -720,7 +754,7 @@ def test_diagram_contract_hardening() -> None:
     finally:
         shutil.rmtree(project)
 
-    project = tempfile.mkdtemp(prefix="aidlc-diagram-crossing-undeclared-")
+    project = make_temp(prefix="aidlc-diagram-crossing-undeclared-")
     try:
         crossing_fixture(project, False)
         result = run_checker(project, "diagram-contract")
@@ -729,7 +763,7 @@ def test_diagram_contract_hardening() -> None:
     finally:
         shutil.rmtree(project)
 
-    project = tempfile.mkdtemp(prefix="aidlc-diagram-side-switch-")
+    project = make_temp(prefix="aidlc-diagram-side-switch-")
     try:
         fixture(project)
         def side_switch(diagram: dict, _: str) -> None:
@@ -769,7 +803,7 @@ def diagram009_edge(expected_diagram: dict, edge_id: str) -> dict:
 
 
 def test_diagram_009_route_contract() -> None:
-    project = tempfile.mkdtemp(prefix="aidlc-diagram-009-route-contract-")
+    project = make_temp(prefix="aidlc-diagram-009-route-contract-")
     try:
         source = os.path.join(REPO_ROOT, "tests", "fixtures", "diagram-009")
         shutil.copytree(source, project, dirs_exist_ok=True)
@@ -813,7 +847,7 @@ def test_diagram_009_route_contract() -> None:
         ("label", lambda diagram: diagram009_intent(diagram, "edge-007").update({"label_text": "到店自提"}), "ROUTE_LABEL_DIFF"),
     ]
     for name, mutation, expected_error in cases:
-        project = tempfile.mkdtemp(prefix=f"aidlc-diagram-009-{name}-")
+        project = make_temp(prefix=f"aidlc-diagram-009-{name}-")
         try:
             source = os.path.join(REPO_ROOT, "tests", "fixtures", "diagram-009")
             shutil.copytree(source, project, dirs_exist_ok=True)

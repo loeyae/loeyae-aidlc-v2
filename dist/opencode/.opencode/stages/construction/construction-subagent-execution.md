@@ -53,7 +53,7 @@ condition: has_subagent_support
 
 选定模式后，编排方按 `construction-code-review.md` 的“输入要求”提供完整输入并发起审查。子 Agent 或单 Agent 只负责执行该能力：集成模式使用一个审查上下文，独立模式使用两个审查视角；实现者自审不能替代正式双轴检查。审查返回 `NEEDS_CONTEXT` 时，编排方补齐缺失输入后重新发起，不得以输入不足为由跳过审查或标记单元完成。
 
-在工作区检测阶段记录到 state.md：
+在工作区检测阶段记录到 handoff.md：
 ```markdown
 执行模式: 子Agent模式 | 单Agent模式
 审查模式: 集成双轴审查 | 独立双轴审查
@@ -97,7 +97,7 @@ condition: has_subagent_support
 
 ### 共享契约基线与带类型依赖上下文（条件）
 
-派发实现者前，主 Agent 必须读取 `unit-of-work-dependency.md`、`state.md` 和适用的 `construction-shared-contract-baseline.md`，并以 `common-context-optimization.md` 为带类型依赖就绪与调度处理的唯一详细规则来源。
+派发实现者前，主 Agent 必须读取 `unit-of-work-dependency.md`、`handoff.md` 和适用的 `construction-shared-contract-baseline.md`，并以 `common-context-optimization.md` 为带类型依赖就绪与调度处理的唯一详细规则来源。
 
 本文件只规定子 Agent 的上下文传递：调度方提供共享规则已判定的当前就绪结论、原因、下一调度动作及其适用证据；适用的共享契约还必须提供契约 ID、基线 ID、Owner 目标代码路径、代码版本和验证证据。实现者不得自行重述或改写依赖门禁；发现状态或证据变化时，返回 `NEEDS_CONTEXT` 或 `BLOCKED`，由调度方按共享规则重新取得结论后再决定后续动作。
 
@@ -182,7 +182,7 @@ condition: has_subagent_support
 - 问题定位与严重度、修复建议、复审结果
 - 证据不足或技术阻断项
 
-状态为 `NEEDS_CONTEXT` 或 `BLOCKED` 时不得给出通过结论；不写 `state.md`、审计文件，也不判定完成。编排方按以下方式处理：`NEEDS_CONTEXT` 补齐缺失输入后重新发起；`BLOCKED` 按“处理实现者状态”表中 BLOCKED 的同一策略评估原因，解决后重新发起，不得跳过审查或标记单元完成。
+状态为 `NEEDS_CONTEXT` 或 `BLOCKED` 时不得给出通过结论；不写 `handoff.md`、审计文件，也不判定完成。编排方按以下方式处理：`NEEDS_CONTEXT` 补齐缺失输入后重新发起；`BLOCKED` 按“处理实现者状态”表中 BLOCKED 的同一策略评估原因，解决后重新发起，不得跳过审查或标记单元完成。
 ```
 
 ### 处理实现者状态
@@ -257,7 +257,7 @@ condition: has_subagent_support
 
 **不要在任务之间暂停询问用户。** 连续执行计划中的所有任务。
 
-**例外**：如果 state.md 中审批模式为`严格`，则在 `core-workflow.md` 定义的 🔴 强制审批点仍需等待用户确认。
+**例外**：如果 handoff.md 中审批模式为`严格`，则在 `core-workflow.md` 定义的 🔴 强制审批点仍需等待用户确认。
 
 唯一停止的理由：
 - BLOCKED 状态且无法自行解决
@@ -300,9 +300,9 @@ Construction 阶段：
 | 内容 | 来源 |
 |------|------|
 | 任务完整文本 | 代码生成计划 |
-| 接口契约 | `docs/aidlc/product/contracts.md` 或应用设计 |
-| 带类型依赖与就绪结论 | `unit-of-work-dependency.md` + state.md |
-| 共享契约基线上下文（适用时） | state.md 的基线表 + `construction-shared-contract-baseline.md` |
+| 接口契约 | `docs/aidlc/ideation/product-contracts.md` 或应用设计 |
+| 带类型依赖与就绪结论 | `unit-of-work-dependency.md` + handoff.md |
+| 共享契约基线上下文（适用时） | handoff.md 的基线表 + `construction-shared-contract-baseline.md` |
 | 编码规范 | MCP Skill（如适用）或 steering 文件 |
 | 相关现有代码 | 工作区扫描结果 |
 | TDD 执行序列 | 代码生成计划中的 TDD 规划 |

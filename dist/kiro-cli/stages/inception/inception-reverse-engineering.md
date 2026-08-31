@@ -380,7 +380,7 @@ condition: has_legacy_code
 
 ## 步骤 12：更新状态跟踪
 
-更新 `docs/aidlc/state.md`：
+更新 `docs/aidlc/handoff.md`：
 
 ```markdown
 ## 逆向工程状态
@@ -404,7 +404,7 @@ condition: has_legacy_code
 >
 > 🔧 **请求修改** - 如需修改逆向工程分析结果
 > ✅ **确认并继续** - 确认分析结果，进入**需求分析**
-> 📋 **新 Session 继续** - 复制 `state.md` 中的交接提示词到新对话继续
+> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
 ```
 
 ## 步骤 14：等待用户确认

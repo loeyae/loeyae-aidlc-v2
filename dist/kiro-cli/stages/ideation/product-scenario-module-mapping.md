@@ -3,8 +3,12 @@ slug: scenario-module-mapping
 number: "1.5"
 name: 场景模块映射
 execution: CONDITIONAL
-lead: aidlc-product-agent
+lead_agent: aidlc-product-agent
 scopes: [feature, enterprise, mvp, classic]
+requires: [product-contracts]
+consumes:
+  - docs/aidlc/ideation/module-division.md
+  - docs/aidlc/ideation/product-contracts.md
 produces: [docs/aidlc/ideation/scenario-module-mapping.md]
 ---
 
@@ -16,10 +20,12 @@ produces: [docs/aidlc/ideation/scenario-module-mapping.md]
 
 I3 始终执行。单模块项目跳过模块归属审批，但仍确认场景边界、登记在途 PRD 并生成装配清单。
 
-| 项目类型 | 装配清单路径 |
-|----------|--------------|
-| 单模块 | `docs/aidlc/inception/scenario-manifest.md` |
-| 多模块 | `docs/aidlc/product/scenarios/<scenario-id>/scenario-manifest.md` |
+| 项目类型 | 权威装配索引路径 |
+|----------|------------------|
+| 单模块 | `docs/aidlc/ideation/scenario-module-mapping.md` |
+| 多模块 | `docs/aidlc/ideation/scenario-module-mapping.md` |
+
+多模块需要逐场景明细时，可在索引中链接补充文件；补充文件不是独立状态源，也不替代上述准出产物。
 
 场景目录只保存 `scenario-manifest.md` 和条件产物 `prd.md`；I5-I10 产物按模块归档，禁止在场景目录复制需求、故事或页面规格。
 
@@ -33,7 +39,7 @@ I3 始终执行。单模块项目跳过模块归属审批，但仍确认场景�
 | 4 | 等待用户确认或修正模块归属 | 跳过 |
 | 5 | 识别并登记在途或历史 PRD | 执行 |
 | 6 | 生成或增量更新场景装配清单 | 执行 |
-| 7 | 按步骤完成协议更新 state.md 与审计 | 执行 |
+| 7 | 按步骤完成协议更新 handoff.md 与审计 | 执行 |
 
 ## 主模块判定
 
@@ -154,4 +160,4 @@ I5 生成状态、字段、数值和枚举定位键，I6 审查；I7 生成权�
 - [ ] 多模块场景的主次模块、理由、备选方案和契约挂接已确认
 - [ ] 在途 PRD 按 R1-R5 登记
 - [ ] 九个区块齐全且未用空表冒充完成
-- [ ] state.md 与审计已更新
+- [ ] handoff.md 与审计已更新

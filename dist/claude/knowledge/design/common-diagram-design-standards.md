@@ -4,7 +4,7 @@
 
 本文件定义图表设计的决策规则：何时需要图、表达什么语义、选择什么图型、如何控制粒度、布局和可读性。新图表的 SVG 设计规则以开源 [Blueprinter](https://github.com/SonicBotMan/blueprinter) 为唯一设计层参考，重点吸收其[图型与设计规则](https://github.com/SonicBotMan/blueprinter/blob/main/skill/references/svg-styles/diagram-types-and-rules.md)、[布局最佳实践](https://github.com/SonicBotMan/blueprinter/blob/main/skill/references/svg-styles/svg-layout-best-practices.md)、[生成策略](https://github.com/SonicBotMan/blueprinter/blob/main/skill/references/svg-styles/svg-generation-strategy.md)和[图标规则](https://github.com/SonicBotMan/blueprinter/blob/main/skill/references/svg-styles/icons.md)。AIDLC 只将这些规则作为 SVG 源设计约束使用，不内置或运行 Blueprinter；SVG 源字段、Provider 适配、静态安全和验收契约由 `common-svg-diagram-standards.md` 定义。
 
-本文件可被 AI-DLC 流程按需调用，也可独立使用。独立使用时不要求任何 AIDLC 状态（state.md、audit.md、审批流程）。涉及 structural / swimlane / phase region 框体时，必须同时遵守 `common-structural-region-occlusion-contract.md`。
+本文件可被 AI-DLC 流程按需调用，也可独立使用。独立使用时不要求任何 AIDLC 状态（handoff.md、audit.md、审批流程）。涉及 structural / swimlane / phase region 框体时，必须同时遵守 `common-structural-region-occlusion-contract.md`。
 
 
 ## 统一单色视觉基线（强制）
@@ -469,7 +469,7 @@ Mermaid fenced block 与二维 ASCII/Unicode 图已不再是本仓的新图表�
 
 ## 调用边界
 
-独立调用时不更新 `state.md` 或审计，也不代替用户审批；AIDLC 内调用时，调用方提供已确认语义上下文并负责将 SVG 产物纳入自身流程。图表能力不得自行创造业务事实、修改代码、提交 Git 或宣布 AIDLC 阶段完成。
+独立调用时不更新 `handoff.md` 或审计，也不代替用户审批；AIDLC 内调用时，调用方提供已确认语义上下文并负责将 SVG 产物纳入自身流程。图表能力不得自行创造业务事实、修改代码、提交 Git 或宣布 AIDLC 阶段完成。
 
 
 ## 流程图主流程追踪与回路 lane 契约

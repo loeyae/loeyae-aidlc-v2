@@ -28,9 +28,9 @@ AI-DLC 产出物按**功能/单元**维度组织，但前端页面可能被多�
 2. 打开对应模块 HTML 文件，搜索页面名称定位 mock-box
 
 **figma 模式下的定位规则**：
-1. 整个项目只允许一个主 Figma 文件；从 state.md `## UI 设计` 区块的 `产物位置` 获取唯一链接
+1. 整个项目只允许一个主 Figma 文件；从 handoff.md `## UI 设计` 区块的 `产物位置` 获取唯一链接
 2. 多模块按 `{module}-{endpoint}` 定位 Page，单模块按端定位 Page
-3. 优先查阅 state.md 的 `Figma 页面进度` 或代码生成计划中的页面对照表，按页面名称取得 nodeId
+3. 优先查阅 handoff.md 的 `Figma 页面进度` 或代码生成计划中的页面对照表，按页面名称取得 nodeId
 4. 记录缺失时，调用 `get_metadata` 获取 Page 列表 → 定位对应 Page → 再获取其 Frame 清单并回填 state
 5. 页面对应 Page 下的顶层 Frame；弹窗/抽屉作为独立 Frame 与所属页面并列
 

@@ -3,7 +3,7 @@ slug: module-division
 number: "1.2"
 name: 模块划分
 execution: CONDITIONAL
-lead: aidlc-architect-agent
+lead_agent: aidlc-architect-agent
 scopes: [feature, enterprise, mvp, classic]
 requires: [product-inception]
 produces: [docs/aidlc/ideation/module-division.md]
@@ -89,7 +89,7 @@ produces: [docs/aidlc/ideation/module-division.md]
 1. 进入 CR，更新 `modules.md`；
 2. 更新服务目录、运行时依赖和契约消费者状态；
 3. 评估数据迁移、配置、版本并存与部署顺序；
-4. 更新受影响模块的 Inception 产物和 state.md。
+4. 更新受影响模块的 Inception 产物和 handoff.md。
 
 已完成代码是否重构由 CR 风险与批准计划决定，不默认推迟，也不顺手扩大范围。
 

@@ -3,7 +3,7 @@ slug: operations-templates
 number: "4.2"
 name: 运维模板
 execution: CONDITIONAL
-lead: aidlc-operations-agent
+lead_agent: aidlc-operations-agent
 scopes: [feature, enterprise, mvp]
 requires: [operations]
 produces: [docs/aidlc/operation/templates/]

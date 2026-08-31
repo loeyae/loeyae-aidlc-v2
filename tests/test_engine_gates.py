@@ -18,7 +18,15 @@ import json
 import os
 import shutil
 import sys
+import shlex
+import hashlib
+import hmac
+import tempfile
+from pathlib import Path
 from datetime import datetime, timezone
+
+SCRATCH_ROOT = Path(os.environ.get("KIROCREW_SCRATCH") or os.environ.get("TMPDIR") or tempfile.gettempdir())
+TRUST_SECRET = "aidlc-test-secret-32-bytes-minimum-value"
 
 ENGINE = os.path.join(os.path.dirname(__file__), "..", "core", "tools", "aidlc-orchestrate.ts")
 ENGINE = os.path.abspath(ENGINE)
@@ -27,47 +35,129 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 class TestRunner:
     def __init__(self, test_dir: str):
-        self.test_dir = test_dir
+        name = os.path.basename(test_dir.rstrip(os.sep))
+        self.test_dir = str(SCRATCH_ROOT / name)
+        self.trust_dir = str(SCRATCH_ROOT / f"{name}-trust")
         self.passed = 0
         self.failed = 0
         self.errors: list[str] = []
 
-    def setup(self):
-        if os.path.exists(self.test_dir):
-            shutil.rmtree(self.test_dir)
-        os.makedirs(self.test_dir)
-
-    def engine(self, subcmd: str, args: str = "") -> dict:
-        cmd = f"npx --no-install --prefix {REPO_ROOT} tsx {ENGINE} {subcmd} {args}"
+    def environment(self) -> dict[str, str]:
         env = os.environ.copy()
         for key in ("npm_config_prefix", "npm_execpath", "npm_command"):
             env.pop(key, None)
+        env["AIDLC_TRUST_SECRET"] = TRUST_SECRET
+        env["AIDLC_TRUST_DIR"] = self.trust_dir
+        return env
+
+    def setup(self):
+        for directory in (self.test_dir, self.trust_dir):
+            if os.path.exists(directory):
+                shutil.rmtree(directory)
+        os.makedirs(self.test_dir)
+        subprocess.run(["git", "init", "-q"], cwd=self.test_dir, check=True)
+        subprocess.run(["git", "config", "user.email", "aidlc-tests@example.invalid"], cwd=self.test_dir, check=True)
+        subprocess.run(["git", "config", "user.name", "AI-DLC Tests"], cwd=self.test_dir, check=True)
+        subprocess.run(["git", "commit", "--allow-empty", "-qm", "test baseline"], cwd=self.test_dir, check=True)
+
+    def command(self, subcmd: str, args: str = "") -> list[str]:
+        return ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", ENGINE, subcmd, *shlex.split(args)]
+
+    def engine(self, subcmd: str, args: str = "") -> dict:
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, cwd=self.test_dir, env=env
+            self.command(subcmd, args), capture_output=True, text=True, cwd=self.test_dir, env=self.environment()
         )
-        out = result.stdout.strip()
-        if "{" in out:
-            json_start = out.index("{")
-            return json.loads(out[json_start:])
-        return {"raw": out, "err": result.stderr}
+        payload = None
+        for output in (result.stdout.strip(), result.stderr.strip()):
+            if "{" not in output:
+                continue
+            candidate = output[output.index("{"):]
+            try:
+                payload = json.loads(candidate)
+                break
+            except json.JSONDecodeError:
+                continue
+        if payload is None:
+            payload = {"raw": result.stdout.strip(), "err": result.stderr.strip()}
+        payload["_returncode"] = result.returncode
+        return payload
 
     def nxt(self, args: str = "") -> dict:
         return self.engine("next", args)
 
     def report(self, stage: str, result: str, **kwargs) -> dict:
-        extra = ""
+        arguments = ["--stage", stage, "--result", result]
         if "reason" in kwargs:
-            extra += f' --reason "{kwargs["reason"]}"'
+            arguments.extend(["--reason", kwargs["reason"]])
         if "user_input" in kwargs:
-            extra += f' --user-input "{kwargs["user_input"]}"'
-        return self.engine("report", f"--stage {stage} --result {result}{extra}")
+            arguments.extend(["--user-input", kwargs["user_input"]])
+        if kwargs.get("approval_token"):
+            arguments.extend(["--approval-token", kwargs["approval_token"]])
+        if kwargs.get("instruction_ack"):
+            arguments.extend(["--instruction-ack", stage])
+        return self.engine("report", " ".join(shlex.quote(value) for value in arguments))
 
-    def mkfile(self, path: str):
+    def source_revision(self) -> dict:
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.test_dir, text=True).strip()
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd=self.test_dir
+        ).decode().split("\0")
+        def excluded(value: str) -> bool:
+            value = value.replace("\\", "/")
+            return value == ".aidlc" or value.startswith(".aidlc/") or value == "docs/aidlc/aidlc-state.json"
+        dirty = any(not excluded((entry[3:].split(" -> ")[-1] if len(entry) >= 3 else "")) for entry in status if entry)
+        paths = subprocess.check_output(
+            ["git", "ls-files", "-co", "--exclude-standard", "-z"], cwd=self.test_dir
+        ).decode().split("\0")
+        digest = hashlib.sha256()
+        for relative in sorted(value.replace("\\", "/") for value in paths if value and not excluded(value)):
+            absolute = os.path.join(self.test_dir, relative)
+            if not os.path.lexists(absolute):
+                continue
+            digest.update(relative.encode())
+            digest.update(b"\0")
+            if os.path.islink(absolute):
+                digest.update(b"symlink\0")
+                digest.update(os.readlink(absolute).encode())
+                digest.update(b"\0")
+            elif os.path.isfile(absolute):
+                digest.update(b"file\0")
+                with open(absolute, "rb") as handle:
+                    digest.update(hashlib.sha256(handle.read()).digest())
+                digest.update(b"\0")
+        return {"commit": commit, "dirty": dirty, "worktree_digest": digest.hexdigest()}
+
+    @staticmethod
+    def canonical(value):
+        if isinstance(value, dict):
+            return {key: TestRunner.canonical(item) for key, item in sorted(value.items()) if key != "integrity"}
+        if isinstance(value, list):
+            return [TestRunner.canonical(item) for item in value]
+        return value
+
+    def sign(self, payload: dict) -> dict:
+        unsigned = self.canonical(payload)
+        encoded = json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        key = TRUST_SECRET.encode()
+        payload["integrity"] = {
+            "algorithm": "hmac-sha256",
+            "key_id": hashlib.sha256(key).hexdigest()[:16],
+            "signature": hmac.new(key, encoded, hashlib.sha256).hexdigest(),
+        }
+        return payload
+
+    def approval_token(self, directive: dict) -> str:
+        with open(os.path.join(self.test_dir, "docs", "aidlc", "aidlc-state.json")) as handle:
+            workflow_id = json.load(handle)["workflow_id"]
+        message = f"aidlc-approval-v1\n{workflow_id}\n{directive['stage']}\n{directive['approval_challenge']}"
+        return hmac.new(TRUST_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
+
+    def mkfile(self, path: str, content=None):
         full = os.path.join(self.test_dir, path)
         os.makedirs(os.path.dirname(full), exist_ok=True)
-        content = f"# {path}\nREQ-TEST-001\n"
+        value = content or f"# Generated artifact: {path}\n\nREQ-TEST-001 traces substantive verified workflow content.\n"
         with open(full, "w") as f:
-            f.write(content)
+            f.write(value)
 
     def write_evidence(self, stage: str, sensors: list[str]):
         payloads = {
@@ -171,10 +261,32 @@ class TestRunner:
             path = os.path.join(self.test_dir, ".aidlc", "evidence", stage, f"{sensor}.json")
             os.makedirs(os.path.dirname(path), exist_ok=True)
             payload = dict(payloads[sensor])
-            payload.setdefault("producer", {"name": "test-controlled-producer", "mode": "controlled", "execution_id": f"test-run-{stage}-{sensor}"})
+            payload["producer"] = {
+                "name": "loeyae-aidlc-evidence",
+                "mode": "controlled",
+                "execution_id": f"test-run-{stage}-{sensor}",
+            }
+            payload["source_revision"] = self.source_revision()
+            if sensor == "build-test-evidence":
+                payload["commands"] = [{
+                    "argv_digest": hashlib.sha256(b"test-command").hexdigest(),
+                    "exit_code": 0,
+                    "status": "passed",
+                    "duration_ms": 1,
+                }]
+            else:
+                payload["checker"] = {
+                    "id": f"builtin:{sensor}",
+                    "sensor": sensor,
+                    "argv_digest": hashlib.sha256(f"builtin:{sensor}".encode()).hexdigest(),
+                    "exit_code": 0,
+                    "status": "passed",
+                    "duration_ms": 1,
+                }
             payload["timestamp"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            self.sign(payload)
             with open(path, "w") as f:
-                json.dump(payload, f)
+                json.dump(payload, f, ensure_ascii=False)
 
     def create_declared_produces(self, directive: dict):
         for pattern in directive.get("produces", []):
@@ -210,8 +322,6 @@ class TestRunner:
             if slug in produces_map:
                 self.mkfile(produces_map[slug])
             self.create_declared_produces(d)
-            # Auto-create sensor prerequisite files
-            self.write_evidence(slug, d.get("sensors", []))
             if slug == "code-generation":
                 self.mkfile("docs/aidlc/reviews/code-generation-review.md")
                 self.mkfile("docs/aidlc/construction/functional-design.md")
@@ -222,7 +332,15 @@ class TestRunner:
                 self.mkfile("docs/aidlc/construction/build-test-report.md")
             elif slug == "operations":
                 self.mkfile("docs/aidlc/construction/implementation-report.md")
-            r = self.report(slug, "approved" if d.get("gate") else "completed")
+            # Evidence is bound to the final source/worktree state for this report.
+            self.write_evidence(slug, d.get("sensors", []))
+            outcome = "approved" if d.get("gate") else "completed"
+            r = self.report(
+                slug,
+                outcome,
+                approval_token=self.approval_token(d) if d.get("gate") else None,
+                instruction_ack=d.get("completion_contract") == "instruction_only",
+            )
             if r.get("kind") == "error":
                 self.ok(False, f"Stage {slug} unexpectedly blocked: {r.get('message', '')}")
                 return False
@@ -243,8 +361,6 @@ class TestRunner:
             if slug in produces_map:
                 self.mkfile(produces_map[slug])
             self.create_declared_produces(d)
-            # Auto-create sensor prerequisite files
-            self.write_evidence(slug, d.get("sensors", []))
             if slug == "code-generation":
                 self.mkfile("docs/aidlc/reviews/code-generation-review.md")
                 self.mkfile("docs/aidlc/construction/functional-design.md")
@@ -255,7 +371,15 @@ class TestRunner:
                 self.mkfile("docs/aidlc/construction/build-test-report.md")
             elif slug == "operations":
                 self.mkfile("docs/aidlc/construction/implementation-report.md")
-            r = self.report(slug, "approved" if d.get("gate") else "completed")
+            # Evidence is bound to the final source/worktree state for this report.
+            self.write_evidence(slug, d.get("sensors", []))
+            outcome = "approved" if d.get("gate") else "completed"
+            r = self.report(
+                slug,
+                outcome,
+                approval_token=self.approval_token(d) if d.get("gate") else None,
+                instruction_ack=d.get("completion_contract") == "instruction_only",
+            )
             if r.get("kind") == "error":
                 self.ok(False, f"Stage {slug} unexpectedly blocked: {r.get('message', '')}")
                 return steps, False
@@ -302,13 +426,21 @@ def test_f_gate_semantics():
     reached = t.walk_to_stage("application-design", PRODUCES_MAP)
     t.ok(reached, "Reached blocking application-design stage")
     if reached:
+        directive = t.nxt()
         t.mkfile(PRODUCES_MAP["application-design"])
-        t.create_declared_produces(t.nxt())
-        t.write_evidence("application-design", t.nxt().get("sensors", []))
+        t.create_declared_produces(directive)
+        t.write_evidence("application-design", directive.get("sensors", []))
         r = t.report("application-design", "completed")
-        t.ok(r.get("kind") == "error" and "approved" in r.get("message", ""), "BLOCKED: completed cannot bypass approval")
+        t.ok(r.get("kind") == "error" and "approval" in r.get("message", "").lower(), "BLOCKED: completed cannot bypass approval")
         r = t.report("application-design", "approved")
-        t.ok(r.get("kind") == "print", "PASSED: explicit approval advances the stage")
+        t.ok(r.get("kind") == "error" and "token" in r.get("message", "").lower(), "BLOCKED: approval without host token")
+        r = t.report("application-design", "approved", approval_token="0" * 64)
+        t.ok(r.get("kind") == "error" and "invalid" in r.get("message", "").lower(), "BLOCKED: forged approval token")
+        token = t.approval_token(directive)
+        r = t.report("application-design", "approved", approval_token=token)
+        t.ok(r.get("kind") == "print", "PASSED: trusted one-time approval advances the stage")
+        replay = t.report("application-design", "approved", approval_token=token)
+        t.ok(replay.get("kind") == "error", "BLOCKED: consumed approval token cannot be replayed")
 
     t2 = TestRunner("/tmp/aidlc-test-f2")
     t2.setup()
@@ -319,7 +451,7 @@ def test_f_gate_semantics():
     t2.ok(reached, "Reached mandatory code-generation stage")
     if reached:
         r = t2.report("code-generation", "skipped", reason="test bypass")
-        t2.ok(r.get("kind") == "error" and "ALWAYS" in r.get("message", ""), "BLOCKED: ALWAYS stage cannot be skipped")
+        t2.ok(r.get("kind") == "error" and "invalid result" in r.get("message", "").lower(), "BLOCKED: manual skip is not a public result")
     t.passed += t2.passed
     t.failed += t2.failed
     t.errors.extend(t2.errors)
@@ -418,11 +550,11 @@ def test_c_stage_mismatch():
     r = t.report(current, "invalid-result")
     t.ok(r.get("kind") == "error", "Rejected: invalid result type")
 
-    # Try to skip without reason
+    # Manual skip is not part of the public report protocol.
     r = t.report(current, "skipped")
     t.ok(
-        r.get("kind") == "error" and ("reason" in r.get("message", "").lower() or "always" in r.get("message", "").lower()),
-        "Rejected: skip without --reason",
+        r.get("kind") == "error" and "invalid result" in r.get("message", "").lower(),
+        "Rejected: manual skip result",
     )
 
     return t
@@ -456,10 +588,18 @@ def test_e_requires_dependency():
     t.setup()
     t.engine("next", "--scope feature")
 
-    # Walk to first stage, complete it
+    # Complete the first stage through all declared contracts.
     d = t.nxt()
     first = d.get("stage", "")
-    t.report(first, "completed")
+    t.create_declared_produces(d)
+    t.write_evidence(first, d.get("sensors", []))
+    completed = t.report(
+        first,
+        "approved" if d.get("gate") else "completed",
+        approval_token=t.approval_token(d) if d.get("gate") else None,
+        instruction_ack=d.get("completion_contract") == "instruction_only",
+    )
+    t.ok(completed.get("kind") == "print", "First stage completed before park/resume")
 
     # Get second stage
     d = t.nxt()
@@ -537,12 +677,14 @@ def test_i_diagram_source_status_gate():
         with open(path) as handle:
             payload = json.load(handle)
         payload["target_port_approach_status"] = "failed"
+        t.sign(payload)
         with open(path, "w") as handle:
             json.dump(payload, handle)
         result = t.report("requirements-methods", "completed")
         t.ok(result.get("kind") == "error" and "target_port_approach_status" in result.get("message", ""), "BLOCKED: failed source geometry status")
 
         payload["target_port_approach_status"] = "passed"
+        t.sign(payload)
         with open(path, "w") as handle:
             json.dump(payload, handle)
         result = t.report("requirements-methods", "completed")
@@ -572,13 +714,204 @@ def test_h_automatic_common_sensors():
         t.ok(r.get("kind") == "error" and "no-todo" in r.get("message", ""), "BLOCKED: TODO marker detected")
 
         with open(path, "w") as handle:
-            handle.write("# product inception\nREQ-TEST-001\n")
+            handle.write("# product inception\nREQ-TEST-001 validates substantive product scope and measurable user outcomes.\n")
         r = t.report("product-inception", "completed")
         t.ok(r.get("kind") == "print", "PASSED: common sensors pass after cleanup")
 
     return t
 
 
+def test_j_state_integrity_and_missing_state_hook():
+    """J: Enrolled projects reject tampered or deleted machine state."""
+    print("\n--- J: Signed state integrity and fail-closed Hook ---")
+    t = TestRunner("aidlc-test-j-state")
+    t.setup()
+    initialized = t.engine("next", "--scope feature")
+    t.ok(initialized.get("kind") == "print", "Initialized signed workflow state")
+    state_path = os.path.join(t.test_dir, "docs", "aidlc", "aidlc-state.json")
+    with open(state_path) as handle:
+        original = json.load(handle)
+    tampered = dict(original)
+    tampered["scope"] = "express"
+    with open(state_path, "w") as handle:
+        json.dump(tampered, handle)
+    rejected = t.nxt("--status")
+    t.ok(rejected.get("kind") == "error" and rejected.get("_returncode") == 2, "BLOCKED: direct state tampering")
+
+    with open(state_path, "w") as handle:
+        json.dump(original, handle)
+    os.remove(state_path)
+    hook = subprocess.run(
+        ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", os.path.join(REPO_ROOT, "core", "tools", "aidlc-platform-hook.ts"), "--format", "claude"],
+        cwd=t.test_dir,
+        env=t.environment(),
+        capture_output=True,
+        text=True,
+    )
+    decision = json.loads(hook.stdout)
+    t.ok(hook.returncode == 0 and decision.get("decision") == "block" and "missing" in decision.get("reason", "").lower(), "BLOCKED: enrolled project with deleted state")
+    return t
+
+
+def test_k_instruction_ack_and_concurrent_cas():
+    """K: Instruction-only stages require explicit acknowledgement and stale writers lose CAS."""
+    print("\n--- K: Instruction acknowledgement and concurrent CAS ---")
+    t = TestRunner("aidlc-test-k-cas")
+    t.setup()
+    t.engine("next", "--scope feature")
+    directive = t.nxt()
+    t.ok(directive.get("completion_contract") == "instruction_only", "First stage exposes instruction-only contract")
+    blocked = t.report(directive["stage"], "completed")
+    t.ok(blocked.get("kind") == "error" and "instruction-ack" in blocked.get("message", ""), "BLOCKED: lifecycle-style completion without instruction ack")
+
+    args = f"--stage {directive['stage']} --result completed --instruction-ack {directive['stage']}"
+    processes = [
+        subprocess.Popen(t.command("report", args), cwd=t.test_dir, env=t.environment(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        for _ in range(2)
+    ]
+    results = [process.communicate() + (process.returncode,) for process in processes]
+    codes = sorted(item[2] for item in results)
+    t.ok(codes == [0, 2], f"Exactly one concurrent report committed (return codes {codes})")
+    status = t.nxt("--status")
+    t.ok(status.get("kind") == "print" and "Completed: 1/" in status.get("message", ""), "Signed state remains valid with one committed completion")
+    return t
+
+
+def test_l_short_artifact_and_consumes_recheck():
+    """L: Placeholder artifacts and deleted canonical inputs cannot pass report."""
+    print("\n--- L: Substantive artifact and consumes recheck ---")
+    t = TestRunner("aidlc-test-l-artifacts")
+    t.setup()
+    t.engine("next", "--scope feature")
+    workspace = t.nxt()
+    t.report(workspace["stage"], "completed", instruction_ack=True)
+    directive = t.nxt()
+    t.mkfile("docs/aidlc/ideation/product-inception.md", "REQ-1\n")
+    short = t.report(directive["stage"], "completed")
+    t.ok(short.get("kind") == "error" and "product-inception.md" in short.get("message", ""), "BLOCKED: six-byte placeholder artifact")
+
+    t2 = TestRunner("aidlc-test-l-consumes")
+    t2.setup()
+    t2.engine("next", "--scope feature")
+    reached = t2.walk_to_stage("product-contracts", PRODUCES_MAP)
+    t2.ok(reached, "Reached product-contracts after canonical producer")
+    if reached:
+        directive = t2.nxt()
+        t2.create_declared_produces(directive)
+        t2.write_evidence("product-contracts", directive.get("sensors", []))
+        os.remove(os.path.join(t2.test_dir, "docs", "aidlc", "ideation", "module-division.md"))
+        rejected = t2.report("product-contracts", "completed")
+        t2.ok(rejected.get("kind") == "error" and "consumed artifacts" in rejected.get("message", ""), "BLOCKED: consumed artifact deleted after next")
+    t.passed += t2.passed
+    t.failed += t2.failed
+    t.errors.extend(t2.errors)
+    return t
+
+
+def test_m_scope_counts():
+    """M: Runtime and utility agree on quick-scope candidate counts."""
+    print("\n--- M: Scope count parity ---")
+    t = TestRunner("aidlc-test-m-scope")
+    result = subprocess.run(
+        ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", os.path.join(REPO_ROOT, "core", "tools", "aidlc-utility.ts"), "scope-table"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    counts = {line.split("\t")[0]: int(line.split("\t")[1]) for line in result.stdout.splitlines() if "\t" in line}
+    for scope in ("bugfix", "refactor", "poc"):
+        t.ok(counts.get(scope) == 7, f"{scope} exposes 7 candidate stages")
+    return t
+
+
+
+
+def test_n_enrollment_recovery_and_expired_approval_cleanup():
+    """N: Interrupted first commits recover through pending enrollment; approve clears expired challenges."""
+    print("\n--- N: Enrollment crash recovery and approval expiry cleanup ---")
+    t = TestRunner("aidlc-test-n-enrollment")
+    t.setup()
+
+    env = t.environment()
+    env["AIDLC_STATE_FAILPOINT"] = "after-enrollment"
+    interrupted = subprocess.run(
+        t.command("next", "--scope feature"), cwd=t.test_dir, env=env, capture_output=True, text=True
+    )
+    state_path = os.path.join(t.test_dir, "docs", "aidlc", "aidlc-state.json")
+    enrollment_id = hashlib.sha256(os.path.realpath(t.test_dir).encode()).hexdigest()
+    enrollment_path = os.path.join(t.trust_dir, "enrollments", f"{enrollment_id}.json")
+    with open(enrollment_path) as handle:
+        pending = json.load(handle)
+    t.ok(
+        interrupted.returncode == 2 and not os.path.exists(state_path) and pending.get("status") == "pending",
+        "Interrupted pre-state commit leaves only a signed pending enrollment",
+    )
+
+    recovered = t.engine("next", "--scope feature")
+    with open(state_path) as handle:
+        recovered_state = json.load(handle)
+    with open(enrollment_path) as handle:
+        active = json.load(handle)
+    t.ok(
+        recovered.get("kind") == "print"
+        and active.get("status") == "active"
+        and active.get("workflow_id") == pending.get("workflow_id") == recovered_state.get("workflow_id"),
+        "Pending enrollment resumes with the same workflow ID and activates after state commit",
+    )
+
+    t2 = TestRunner("aidlc-test-n-after-state")
+    t2.setup()
+    env2 = t2.environment()
+    env2["AIDLC_STATE_FAILPOINT"] = "after-state"
+    interrupted_after_state = subprocess.run(
+        t2.command("next", "--scope feature"), cwd=t2.test_dir, env=env2, capture_output=True, text=True
+    )
+    recovered_status = t2.nxt("--status")
+    enrollment_id2 = hashlib.sha256(os.path.realpath(t2.test_dir).encode()).hexdigest()
+    with open(os.path.join(t2.trust_dir, "enrollments", f"{enrollment_id2}.json")) as handle:
+        active_after_state = json.load(handle)
+    t.ok(
+        interrupted_after_state.returncode == 2
+        and recovered_status.get("kind") == "print"
+        and active_after_state.get("status") == "active",
+        "Signed state plus pending enrollment finalizes safely after a post-rename crash",
+    )
+
+    state = recovered_state
+    state["current_stage"] = "application-design"
+    state["current_phase"] = "inception"
+    state["approval_challenges"] = {
+        "application-design": f"{int((datetime.now(timezone.utc).timestamp() - 3600) * 1000)}.expired-test"
+    }
+    state.pop("integrity", None)
+    t.sign(state)
+    with open(state_path, "w") as handle:
+        json.dump(state, handle)
+
+    approve = subprocess.run(
+        [
+            "npx", "--no-install", "--prefix", REPO_ROOT, "tsx",
+            os.path.join(REPO_ROOT, "core", "tools", "aidlc-approve.ts"),
+            "--stage", "application-design",
+        ],
+        cwd=t.test_dir,
+        env=t.environment(),
+        capture_output=True,
+        text=True,
+    )
+    with open(state_path) as handle:
+        cleaned = json.load(handle)
+    t.ok(
+        approve.returncode == 2
+        and "expired" in approve.stderr.lower()
+        and "application-design" not in cleaned.get("approval_challenges", {}),
+        "Approve removes and persists an expired challenge before enforcing token issuance",
+    )
+
+    t.passed += t2.passed
+    t.failed += t2.failed
+    t.errors.extend(t2.errors)
+    return t
 # === Run all tests ===
 if __name__ == "__main__":
     print("=" * 60)
@@ -595,6 +928,11 @@ if __name__ == "__main__":
     results.append(test_g_construction_evidence_gates())
     results.append(test_h_automatic_common_sensors())
     results.append(test_i_diagram_source_status_gate())
+    results.append(test_j_state_integrity_and_missing_state_hook())
+    results.append(test_k_instruction_ack_and_concurrent_cas())
+    results.append(test_l_short_artifact_and_consumes_recheck())
+    results.append(test_m_scope_counts())
+    results.append(test_n_enrollment_recovery_and_expired_approval_cleanup())
 
     total_passed = sum(r.passed for r in results)
     total_failed = sum(r.failed for r in results)
@@ -606,6 +944,7 @@ if __name__ == "__main__":
     if total_failed > 0:
         print("\nFailed assertions:")
         for r in results:
+
             for e in r.errors:
                 print(f"  - {e}")
         sys.exit(1)

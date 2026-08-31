@@ -11,20 +11,22 @@ scopes: [feature, enterprise, mvp, classic, express, workshop]
 consumes: []
 produces: []
 sensors: []
+completion_contract: instruction_only
+requires: [workspace-detection]
 ---
-# state.md 初始化模板
+# handoff.md 派生视图模板
 
-> 仅在 `inception-workspace-detection.md` 首次创建 `docs/aidlc/state.md` 时加载。恢复场景不得覆盖现有状态。
+> `docs/aidlc/aidlc-state.json` 是唯一机器状态。本模板只创建或更新 `docs/aidlc/handoff.md` 的人类协作视图；不得直接编辑机器 state，不得用 handoff 覆盖 stage、revision、审批或完成结果。恢复场景不得覆盖已有协作细节。
 
 ```markdown
-# AI-DLC 状态跟踪
+# AI-DLC 协作交接视图
 
 - **状态模式版本**：2
 
 ## 下一步交接
 | 范围 | 更新时间 | 提示词 |
 |------|----------|--------|
-| {项目名} | {ISO时间} | `使用 AI-DLC，继续 {项目名}。请读取 docs/aidlc/state.md，从 {下一步骤} 恢复。` |
+| {项目名} | {ISO时间} | `使用 AI-DLC，继续 {项目名}。请读取 docs/aidlc/handoff.md，从 {下一步骤} 恢复。` |
 
 ## 项目信息
 - **项目类型**：{全新项目/存量项目}
@@ -57,7 +59,7 @@ sensors: []
 
 ## 活跃产品协调（条件）
 
-需求、用户故事、UI 或其他设计存在未决/协调中的语义差异时创建；全部重审通过后移入阶段审计，并从 state.md 移除本区块。
+需求、用户故事、UI 或其他设计存在未决/协调中的语义差异时创建；全部重审通过后移入阶段审计，并从 handoff.md 移除本区块。
 
 | 协调 ID | 阶段/范围 | 差异摘要 | 状态 | 用户决策 | 重审范围 |
 |---------|-----------|----------|------|----------|----------|
@@ -121,7 +123,7 @@ I9 路由判定后立即创建本区块，包括明确跳过的场景。
 | {SCB-范围标识} | {Owner 模块/范围} | {CT-xxx 列表} | {pending/in_progress/verified/blocked/change_requested} | {不可变代码版本} | {实际命令与结果/未验证} | {原因/-} |
 
 - 状态含义、转换、验证与记录要求以 `construction-shared-contract-baseline.md` 为准；不得在此创建第二套状态机。
-- `contract_ready` 仅由相关基线为 `verified` 派生，不在 state.md 单独持久化。
+- `contract_ready` 仅由相关基线为 `verified` 派生，不在 handoff.md 单独持久化。
 
 ## 阶段进度
 | 路由 | 步骤 | 状态 | 完成时间 | 产物/证据 |
@@ -155,9 +157,9 @@ I9 路由判定后立即创建本区块，包括明确跳过的场景。
 无
 ```
 
-## state.md 压缩规则（汇总替换）
+## handoff.md 压缩规则（汇总替换）
 
-`state.md` 只保留当前活跃状态；已完成的历史通过汇总行压缩。Git 历史和审计文件保留逐条明细。`场景与模块映射`、`在途 PRD 参考资料`、`PRD 状态` 是长期索引，**不参与压缩**。
+`handoff.md` 只保留当前活跃状态；已完成的历史通过汇总行压缩。Git 历史和审计文件保留逐条明细。`场景与模块映射`、`在途 PRD 参考资料`、`PRD 状态` 是长期索引，**不参与压缩**。
 
 ### 自动压缩触发
 
@@ -203,7 +205,7 @@ I9 路由判定后立即创建本区块，包括明确跳过的场景。
 
 - 压缩前确认所有被压缩行状态为 `completed`/通过；不压缩 `blocked`、`pending` 或 `in_progress`。
 - 汇总行必须保留 Git commit 范围，支持 `git log {首}..{末}` 追溯明细。
-- 压缩操作本身作为一次 Git commit（消息：`chore: 压缩 state.md 已完成进度`）。
+- 压缩操作本身作为一次 Git commit（消息：`chore: 压缩 handoff.md 已完成进度`）。
 - 审计文件 `docs/aidlc/construction/audit/` 中的逐单元明细不受压缩影响。
 
 ## 填充规则
@@ -215,8 +217,8 @@ I9 路由判定后立即创建本区块，包括明确跳过的场景。
 - `单元与批次进度` 在 I14 完成后填充；I14 跳过时创建 `project/default` 行承接 I13 用例和 C8 证据。每个单元必须有服务归属或“不适用”。
 - `UI 设计` 区块在 I9 路由判定后立即填充。`UI 设计方式` 只能取 `html-mock`、`figma`、`跳过` 三值之一；`Figma 来源` 仅在 figma 模式取 `流程创建` 或 `外部提供`。`页面计划` 必须指向跨模式唯一的 `page-plan.md`，`页面计划状态` 由 I9 编排层在用户确认前后维护为 `draft/approved`；跳过时两项均写“不适用”。Construction 阶段据此选择页面对照表格式和还原规范，取值错误会导致代码生成断裂。
 - I3 完成后立即维护 `场景与模块映射` 和 `在途 PRD 参考资料`。选择产出 PRD 时增量维护 `PRD 状态`，状态流转为 `draft → reviewed → approved`。
-- 任何步骤发现产品语义差异时创建或更新 `活跃产品协调`；未决时为 `pending_decision`，用户确认基准并开始同步产物后为 `reconciling`。未决协调为零且受影响审查全部通过后，移入阶段审计并从 state.md 活跃状态移除。
+- 任何步骤发现产品语义差异时创建或更新 `活跃产品协调`；未决时为 `pending_decision`，用户确认基准并开始同步产物后为 `reconciling`。未决协调为零且受影响审查全部通过后，移入阶段审计并从 handoff.md 活跃状态移除。
 - I10 发现产品语义差异时，`设计状态` 必须为 `blocked`；协调开始后改为 `reconcile_in_progress`，全部适用审查通过后才能改为 `approved`。
 - 上游语义变化后，将所有依赖旧语义且尚无代码基线的单元标记为 `rework_required`，并清除或标记失效的旧验证证据。受影响范围是否已有代码基线，以存量实现证据或对应 C8 通过证据判定，不新增脱离证据的全局布尔值。
 - Figma 模式必须增量更新 `设计状态`、`当前批次`、`下一操作` 和 `Figma 页面进度`；创建文件或验证外部链接后立即记录唯一主文件 URL，不得等 I9 全部完成后一次性写入。
-- state.md 是阶段、批次和单元恢复的唯一状态源。
+- handoff.md 是阶段、批次和单元恢复的唯一状态源。

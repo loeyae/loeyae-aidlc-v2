@@ -3,6 +3,7 @@
   "hooks": {
     "Stop": [
       {
+        "id": "loeyae-aidlc-stop-gate-v1",
         "hooks": [
           {
             "type": "command",

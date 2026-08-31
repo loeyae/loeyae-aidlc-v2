@@ -259,7 +259,7 @@ describe('useCounter', () => {
 
 ## 框架专有测试工具
 
-> **注意**：以下内容仅在 `state.md` 中 `后端框架 = Loeyae Boot` 时适用。
+> **注意**：以下内容仅在 `handoff.md` 中 `后端框架 = Loeyae Boot` 时适用。
 > 详细 API 通过 MCP Skill `loeyae-test` 获取。
 
 如果项目使用 Loeyae Boot Framework，在代码生成阶段通过 MCP 加载以下 skill：

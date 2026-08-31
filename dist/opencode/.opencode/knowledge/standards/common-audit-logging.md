@@ -9,7 +9,7 @@
 - `docs/aidlc/audit-summary.md` — 极简时间线（每次恢复必加载，控制在 ~2KB）
 - `docs/aidlc/inception/audit-inception.md` — Inception 阶段完整审计
 - `docs/aidlc/construction/audit-construction-{unit-name}.md` — 各单元的审计
-- `docs/aidlc/operations/audit-operations.md` — Operations 阶段审计
+- `docs/aidlc/operation/audit-operations.md` — Operations 阶段审计
 
 ---
 

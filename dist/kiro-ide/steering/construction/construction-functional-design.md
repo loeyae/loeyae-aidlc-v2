@@ -8,7 +8,7 @@ lead_agent: aidlc-architect-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
-consumes: []
+consumes: [docs/aidlc/inception/application-design.md]
 produces:
   - docs/aidlc/construction/functional-design.md
   - docs/aidlc/construction/{unit-name}/functional-design/business-logic-model.md
@@ -188,7 +188,7 @@ requires: [units-generation]
 >
 > 🔧 **请求修改** - 根据审查结果要求修改功能设计
 > ✅ **继续下一阶段** - 确认功能设计，进入**[下一阶段名称]**
-> 📋 **新 Session 继续** - 复制 `state.md` 中的交接提示词到新对话继续
+> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
 
 ---
 [按 common-session-handoff.md 规则动态生成的提示词]
@@ -203,4 +203,4 @@ requires: [units-generation]
 ### 步骤 9：记录审批并更新进度
 - 在 audit.md 中记录审批及时间戳
 - 记录用户的审批回复及时间戳
-- 在 state.md 中标记功能设计阶段完成
+- 在 handoff.md 中标记功能设计阶段完成

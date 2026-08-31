@@ -1,27 +1,14 @@
-#!/usr/bin/env node
-/**
- * Platform lifecycle adapter for AI-DLC.
- *
- * A platform invokes this adapter before allowing an agent turn to finish.
- * The adapter never edits workflow state directly; it asks the deterministic
- * orchestrator to report the active stage and relays the result in the
- * platform's native blocking format.
- */
-
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, realpathSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
+import { loadWorkflowState, statePath } from "./aidlc-state";
+import { readEnrollment } from "./aidlc-trust";
 
 interface HookInput {
   cwd?: string;
   hook_event_name?: string;
   event?: string;
-}
-
-interface WorkflowState {
-  status?: string;
-  current_stage?: string;
 }
 
 interface Directive {
@@ -70,14 +57,17 @@ function allow(): never {
   process.exit(0);
 }
 
-function loadState(root: string): WorkflowState | null {
-  const path = resolve(root, "docs/aidlc/aidlc-state.json");
-  if (!existsSync(path)) return null;
-  try {
-    return JSON.parse(readFileSync(path, "utf-8")) as WorkflowState;
-  } catch {
-    fail(`AI-DLC gate state is invalid: ${path}`);
+function parseDirective(stdout: string, stderr: string): Directive | null {
+  for (const candidate of [stdout, stderr]) {
+    const value = candidate.trim();
+    if (!value) continue;
+    try {
+      return JSON.parse(value) as Directive;
+    } catch {
+      continue;
+    }
   }
+  return null;
 }
 
 function runReport(root: string, stage: string): string | null {
@@ -85,28 +75,48 @@ function runReport(root: string, stage: string): string | null {
     cwd: root,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"],
+    env: process.env,
   });
 
   if (result.error) return `Unable to execute AI-DLC gate engine: ${result.error.message}`;
+  const directive = parseDirective(result.stdout || "", result.stderr || "");
+  if (directive?.kind === "error") return directive.message || "AI-DLC gate rejected stage completion.";
   if (result.status !== 0) {
     return `AI-DLC gate engine exited with code ${result.status}: ${(result.stderr || result.stdout || "unknown error").trim()}`;
   }
-
-  try {
-    const directive = JSON.parse((result.stdout || "").trim()) as Directive;
-    if (directive.kind === "error") return directive.message || "AI-DLC gate rejected stage completion.";
-    return null;
-  } catch {
-    return `AI-DLC gate engine returned invalid JSON: ${(result.stdout || result.stderr || "").trim()}`;
-  }
+  if (!directive) return `AI-DLC gate engine returned invalid JSON: ${(result.stdout || result.stderr || "").trim()}`;
+  return null;
 }
 
 const input = readInput();
-const root = typeof input.cwd === "string" && input.cwd.length > 0 ? resolve(input.cwd) : projectRoot;
-const state = loadState(root);
+const requestedRoot = typeof input.cwd === "string" && input.cwd.length > 0 ? resolve(input.cwd) : projectRoot;
+if (!existsSync(requestedRoot)) fail(`AI-DLC project root does not exist: ${requestedRoot}`);
+const root = realpathSync(requestedRoot);
 
-if (!state || state.status === "done" || state.status === "parked" || !state.current_stage) allow();
+let enrollment;
+try {
+  enrollment = readEnrollment(root);
+} catch (error) {
+  fail(error instanceof Error ? error.message : String(error));
+}
 
-const failure = runReport(root, state.current_stage as string);
+const path = statePath(root);
+if (!existsSync(path)) {
+  if (enrollment) fail(`AI-DLC enrolled project is missing its signed state: ${path}`);
+  allow();
+}
+
+let state;
+try {
+  state = loadWorkflowState(root);
+} catch (error) {
+  fail(`AI-DLC gate state is invalid: ${error instanceof Error ? error.message : String(error)}`);
+}
+if (!state) fail(`AI-DLC state disappeared while evaluating the lifecycle gate: ${path}`);
+if (enrollment && enrollment.workflow_id !== state.workflow_id) fail("AI-DLC state workflow_id does not match project enrollment");
+if (state.status === "done" || state.status === "parked") allow();
+if (state.status !== "running" || !state.current_stage) fail("AI-DLC running state has no active current_stage");
+
+const failure = runReport(root, state.current_stage);
 if (failure) fail(`AI-DLC stage "${state.current_stage}" cannot finish: ${failure}`);
 allow();

@@ -116,7 +116,7 @@ requires: [user-stories, cross-validation]
 
 ### 2.5 系统级影响分析（条件）
 
-当 state.md 标记为分布式系统或存在外部运行时依赖时：
+当 handoff.md 标记为分布式系统或存在外部运行时依赖时：
 1. 加载 `common-runtime-dependency-analysis.md`，基于消费者反向索引计算“必须修改 / 必须验证 / 仅观察”范围，不以构建依赖代替运行时依赖。
 2. 按实际变更加载契约、配置和一致性治理规则，识别消费者适配、版本并存、数据迁移、外部系统与部署顺序。
 3. 将风险映射到 L1-L5：L1 单组件局部，L2 单服务行为，L3 兼容的跨边界变化，L4 破坏性契约/共享配置/跨边界写入，L5 系统级高风险或影响未知。
@@ -355,7 +355,7 @@ Kiro Power 形态降级为直接加载 `common-diagram-design-standards.md` 执�
 
 ## 步骤 8：初始化状态跟踪
 
-更新 `docs/aidlc/state.md`：
+更新 `docs/aidlc/handoff.md`：
 
 ```markdown
 # AI-DLC 状态跟踪
@@ -457,7 +457,7 @@ Kiro Power 形态降级为直接加载 `common-diagram-design-standards.md` 执�
 > [如有阶段被跳过：]
 > 📝 **添加跳过的阶段** - 选择包含当前标记为跳过的阶段
 > ✅ **确认并继续** - 确认计划，进入**[下一阶段名称]**
-> 📋 **新 Session 继续** - 复制 `state.md` 中的交接提示词到新对话继续
+> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
 ```
 
 ## 步骤 10：处理用户回复

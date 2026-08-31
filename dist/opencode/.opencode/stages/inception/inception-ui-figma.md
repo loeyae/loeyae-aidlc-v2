@@ -11,6 +11,7 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []
 sensors: []
+completion_contract: instruction_only
 requires: [ui-mock]
 condition: has_ui_requirements
 ---
@@ -28,7 +29,7 @@ condition: has_ui_requirements
 
 ## 1. 初始化状态
 
-立即在 state.md 记录：
+立即在 handoff.md 记录：
 
 - `UI 设计方式：figma`；
 - `Figma 来源`；
@@ -40,14 +41,14 @@ condition: has_ui_requirements
 
 调用 `whoami` 确认认证和 seat。配置存在或认证成功均不能替代运行时能力验证：
 
-- `流程创建`：`create_new_file` 创建的验证目标必须直接作为唯一主文件，立即把 URL 写入 state.md；在该文件内用 `use_figma` 完成最小写入验证，后续设计必须复用同一文件，不得另建正式文件；
+- `流程创建`：`create_new_file` 创建的验证目标必须直接作为唯一主文件，立即把 URL 写入 handoff.md；在该文件内用 `use_figma` 完成最小写入验证，后续设计必须复用同一文件，不得另建正式文件；
 - `外部提供`：必须用 `get_metadata` 验证目标文件可读取，且后续不得调用写入工具。
 
 客户端、seat、权限或工具不满足时标记 blocked，向用户提供“修复 Figma 能力后重试”与“切换 HTML Mock”选项。未经用户选择不得自动切换模式。
 
 ## 3. 建立页面计划
 
-加载 `inception-ui-page-planning.md` 生成跨模式唯一页面计划，将路径和 `draft` 状态写入 state.md，并提交用户确认。确认后把 `页面计划状态` 更新为 `approved`；未确认前不得调用 Figma 设计 Skill。
+加载 `inception-ui-page-planning.md` 生成跨模式唯一页面计划，将路径和 `draft` 状态写入 handoff.md，并提交用户确认。确认后把 `页面计划状态` 更新为 `approved`；未确认前不得调用 Figma 设计 Skill。
 
 外部提供模式还必须将计划项与现有 Page/Frame 对照。缺失页面、无法定位或语义冲突时阻断并请用户或设计方修正，不得静默写入外部文件。
 
@@ -66,7 +67,7 @@ condition: has_ui_requirements
 调用 `aidlc-figma-design`，传入：
 
 - 已批准页面计划；
-- 规范化来源：state.md `流程创建` 映射为 `source=created`，`外部提供` 映射为 `source=external`；
+- 规范化来源：handoff.md `流程创建` 映射为 `source=created`，`外部提供` 映射为 `source=external`；
 - 已验证的读写能力结果；
 - 已登记的唯一主文件 URL；
 - 设计资源和当前批次。
@@ -83,7 +84,7 @@ condition: has_ui_requirements
 
 ## 7. I9 状态交接
 
-全部计划页面完成并经用户审核后，核对 state.md：
+全部计划页面完成并经用户审核后，核对 handoff.md：
 
 - 唯一主文件 URL；
 - 页面计划路径和 `approved`；

@@ -7,12 +7,12 @@
 
 - **MCP 端点**:`https://ssot.dev.loeyae.com/mcp/`(streamable HTTP),配置在各平台 MCP 客户端(Kiro `mcp.json`、Claude Code `.claude-plugin/plugin.json`、OpenCode 插件)。
 - **API Key**:经环境变量 `SSOT_API_KEY` 提供,在 MCP 客户端配置为 `Authorization: Bearer ${SSOT_API_KEY}` 请求头。
-- **禁止**:API Key 不得写入 `state.md`、审计、提示词、日志或任何工具入参(NFR-003/DEC-018)。
+- **禁止**:API Key 不得写入 `handoff.md`、审计、提示词、日志或任何工具入参(NFR-003/DEC-018)。
 - **项目绑定(单项目锁定)**:
-  - 每个业务项目的 `state.md` 必须在 `## SSOT 连接` 小节写明 `绑定项目: <project_id>`。
-  - **Session 内所有 SSOT 工具调用只允许使用 state.md 中绑定的 project_id**,禁止对其他项目发起检索。
-  - 未绑定时(state.md 缺少绑定项目或值为"不适用"):先调 `list_projects` 展示列表,**请用户选择一个项目**,确认后写入 state.md,后续锁定该项目。
-  - 切换项目:用户显式要求时才可更改 state.md 中的绑定项目;agent 不得自行切换。
+  - 每个业务项目的 `handoff.md` 必须在 `## SSOT 连接` 小节写明 `绑定项目: <project_id>`。
+  - **Session 内所有 SSOT 工具调用只允许使用 handoff.md 中绑定的 project_id**,禁止对其他项目发起检索。
+  - 未绑定时(handoff.md 缺少绑定项目或值为"不适用"):先调 `list_projects` 展示列表,**请用户选择一个项目**,确认后写入 handoff.md,后续锁定该项目。
+  - 切换项目:用户显式要求时才可更改 handoff.md 中的绑定项目;agent 不得自行切换。
   - **禁止**:同一 session 内对多个 project_id 做检索。
 - **未配置 SSOT**:不加载本文件,流程与改造前完全一致(零影响)。
 
@@ -20,9 +20,9 @@
 
 每次调用任何 SSOT 工具前,必须执行以下断言检查:
 
-1. **读取 state.md**:读取 `docs/aidlc/state.md` 的 `## SSOT 连接` 小节。
+1. **读取 handoff.md**:读取 `docs/aidlc/handoff.md` 的 `## SSOT 连接` 小节。
 2. **绑定检查**:
-   - 若 `绑定项目` 字段缺失或为"不适用" → **阻断所有 SSOT 工具调用**,执行绑定流程(`list_projects` → 用户选择 → 写入 state.md)。
+   - 若 `绑定项目` 字段缺失或为"不适用" → **阻断所有 SSOT 工具调用**,执行绑定流程(`list_projects` → 用户选择 → 写入 handoff.md)。
    - 若 `绑定项目` 字段已有 project_id → 所有工具调用的 `project_id` 参数必须与绑定值严格一致,不得使用其他值。
 3. **违反后果**:违反此断言等同于"禁止 TODO/空实现"级别的硬性约束,视为流程错误。
 
@@ -105,7 +105,7 @@ list_documents({ project_id: 1, title: "支付" })
 - 鉴权/权限拒绝不得通过换工具或重试绕过。
 - 关闭 SSOT 连接即回纯本地流程,不影响本地产物。
 
-## 五、state.md(保持 v2)
+## 五、handoff.md(保持 v2)
 
 启用 SSOT 时新增可选小节(不含密钥);未启用时省略或写"不适用":
 
