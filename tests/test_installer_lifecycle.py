@@ -368,8 +368,9 @@ def test_new_plugin_host_lifecycles() -> None:
             assert installed.returncode == 0, installed.stdout + installed.stderr
         codebuddy_project_lines = Path(host_env["CODEBUDDY_LOG"]).read_text().splitlines()
         qoder_project_lines = Path(host_env["QODER_LOG"]).read_text().splitlines()
-        assert any(line.startswith(f"{project}|") and "--scope project" in line for line in codebuddy_project_lines)
-        assert any(line.startswith(f"{project}|") and "--scope project" in line for line in qoder_project_lines)
+        project_cwd = str(project.resolve())
+        assert any(line.startswith(f"{project_cwd}|") and "--scope project" in line for line in codebuddy_project_lines)
+        assert any(line.startswith(f"{project_cwd}|") and "--scope project" in line for line in qoder_project_lines)
         assert len(list((home / ".config" / "loeyae-aidlc" / "host-assets" / "codebuddy").glob("project-*"))) == 1
         assert len(list((home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder").glob("project-*"))) == 1
 
