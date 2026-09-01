@@ -397,33 +397,40 @@ def test_install_all_detects_hosts_and_uninstall_all_uses_ownership() -> None:
         fake_bin = root / "bin"
         home.mkdir()
         fake_bin.mkdir()
+        local_app_data = root / "LocalAppData"
+        kiro_crew_executable = local_app_data / "Programs" / "KiroCrew" / "KiroCrew.exe"
+        kiro_crew_executable.parent.mkdir(parents=True)
+        kiro_crew_executable.write_text("fake Windows KiroCrew desktop executable")
         for command in ["claude", "kiro", "kiro-cli"]:
             write_fake_host_command(fake_bin, command)
         env = isolated_host_env(root, fake_bin)
+        env["LOCALAPPDATA"] = str(local_app_data)
 
         installed = run_cli(home, ["install", "--all"], env)
         assert installed.returncode == 0, installed.stdout + installed.stderr
         output = installed.stdout + installed.stderr
         detected_line = next(line for line in output.splitlines() if "Detected supported hosts:" in line)
-        assert all(harness in detected_line for harness in ["kiro-ide", "kiro-cli", "claude"])
-        assert all(harness not in detected_line for harness in ["kiro-crew", "opencode", "codex", "codebuddy", "qoder", "zcode"])
+        assert all(harness in detected_line for harness in ["kiro-crew", "kiro-ide", "kiro-cli", "claude"])
+        assert f"kiro-crew ({kiro_crew_executable})" in detected_line
+        assert all(harness not in detected_line for harness in ["opencode", "codex", "codebuddy", "qoder", "zcode"])
         assert "Skipping unavailable hosts:" in output
+        assert (home / ".kiro" / "crew" / "skills" / "loeyae-aidlc").is_dir()
         assert (home / ".kiro" / "powers" / "loeyae-aidlc").is_dir()
         assert (home / ".kiro" / "skills" / "loeyae-aidlc").is_dir()
         assert (home / ".claude" / "plugins" / "loeyae-aidlc-marketplace" / "plugins" / "loeyae-aidlc").is_dir()
-        assert not (home / ".kiro" / "crew" / "skills" / "loeyae-aidlc").exists()
         assert not (home / ".config" / "opencode" / "plugins" / "loeyae-aidlc.js").exists()
         assert not (home / ".agents" / "skills" / "loeyae-aidlc").exists()
         assert not (home / ".config" / "loeyae-aidlc" / "host-assets").exists()
         assert not (home / ".zcode" / "skills" / "loeyae-aidlc").exists()
         state = home / ".config" / "loeyae-aidlc" / "installations"
-        assert len(list(state.glob("*.json"))) == 3
+        assert len(list(state.glob("*.json"))) == 4
 
         removed = run_cli(home, ["uninstall", "--all"], env)
         assert removed.returncode == 0, removed.stdout + removed.stderr
         removed_output = removed.stdout + removed.stderr
-        assert "Installer-owned global installations: kiro-ide, kiro-cli, claude" in removed_output
-        assert "Uninstalled 3 installer-owned global platform installations" in removed_output
+        assert "Installer-owned global installations: kiro-crew, kiro-ide, kiro-cli, claude" in removed_output
+        assert "Uninstalled 4 installer-owned global platform installations" in removed_output
+        assert not (home / ".kiro" / "crew" / "skills" / "loeyae-aidlc").exists()
         assert not (home / ".kiro" / "powers" / "loeyae-aidlc").exists()
         assert not (home / ".kiro" / "skills" / "loeyae-aidlc").exists()
         assert not (home / ".claude" / "plugins" / "loeyae-aidlc-marketplace" / "plugins" / "loeyae-aidlc").exists()

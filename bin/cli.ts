@@ -167,6 +167,19 @@ function codeBuddyKnownCliPaths(): string[] {
   );
 }
 
+function kiroCrewKnownPaths(): string[] {
+  const dataHome = process.env.KIROCREW_HOME?.trim() || resolve(HOME, ".kiro/crew");
+  const venvRoot = process.env.KIROCREW_VENV?.trim() || resolve(HOME, ".kiro/crew-venv");
+  const localAppData = process.env.LOCALAPPDATA?.trim();
+  return [
+    ...(localAppData ? [resolve(localAppData, "Programs/KiroCrew/KiroCrew.exe")] : []),
+    resolve(dataHome, "channel"),
+    resolve(venvRoot, "Scripts/kirocrew.exe"),
+    resolve(venvRoot, "Scripts/kirocrew"),
+    resolve(venvRoot, "bin/kirocrew"),
+  ];
+}
+
 function discoverHostCli(environmentVariable: string, command: string, knownPaths: string[] = []): string | undefined {
   const configured = process.env[environmentVariable]?.trim();
   if (configured) {
@@ -179,7 +192,9 @@ function discoverHostCli(environmentVariable: string, command: string, knownPath
 function hostEvidence(harness: string): string | undefined {
   switch (harness) {
     case "kiro-crew":
-      return commandOnPath("kirocrew") || firstExistingPath(applicationPaths("KiroCrew.app"));
+      return commandOnPath("kirocrew")
+        || firstExistingPath(kiroCrewKnownPaths())
+        || firstExistingPath(applicationPaths("KiroCrew.app"));
     case "kiro-ide":
       return commandOnPath("kiro") || firstExistingPath(applicationPaths("Kiro.app"));
     case "kiro-cli":
