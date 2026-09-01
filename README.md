@@ -67,7 +67,7 @@ loeyae-aidlc install --harness qoder
 # ZCode（用户 Skill + 用户 Hook/MCP；同时构建可 UI 导入的 marketplace）
 loeyae-aidlc install --harness zcode
 
-# 一次性安装到所有平台；CodeBuddy/Qoder CLI 不存在时会记录失败并继续其他平台
+# 自动检测当前环境中的宿主并只安装对应平台
 loeyae-aidlc install --all
 ```
 
@@ -186,7 +186,9 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 loeyae-aidlc install        # 重新部署（或 --all 全部）
 ```
 
-`install --all` 会先统一检查九个平台的预构建产物；只要有任一产物缺失或过期，就执行一次全平台构建，再依次安装，不再因 graph 时间戳刷新而逐平台重复重建。
+`install --all` 会先检测当前环境，只安装实际存在的宿主：CLI 类宿主通过 PATH（CodeBuddy/Qoder 也支持 `CODEBUDDY_CLI`/`QODER_CLI`）发现，macOS GUI 宿主同时检查标准 `/Applications` 和用户 `~/Applications` App bundle。未检测到的平台会明确列出并跳过；非标准安装位置或自动检测遗漏时，仍可使用 `--harness <name>` 显式安装。
+
+检测完成后只检查选中平台的预构建产物；若任一选中产物缺失或过期，仍执行一次全平台构建以保持共享 graph 和 distribution parity 一致，不会因 graph 时间戳刷新而逐平台重复重建。
 
 安装器先在目标同级目录 staging，校验后以 rename 交换；平台激活失败或测试 failpoint 触发时会恢复旧受管资产。每次安装在 `~/.config/loeyae-aidlc/installations/` 保存外部所有权清单，记录每个受管文件的 SHA-256。升级和卸载前都会复核清单：文件被用户修改、目标缺失、出现额外文件或目标没有所有权清单时均 fail-closed，不会覆盖或删除。
 
@@ -223,7 +225,7 @@ loeyae-aidlc uninstall --harness zcode
 loeyae-aidlc uninstall --all
 ```
 
-卸载只删除所有权清单中且哈希仍匹配的资产。Codex 仅移除稳定 ID `loeyae-aidlc-stop-gate-v1` 对应的 Hook；其他 Hook 保留。CodeBuddy/Qoder 先通过官方 CLI 注销对应 scope，再删除项目外的受管源。ZCode 只移除精确匹配的 Loeyae Stop Hook，其他用户 Hook 和共享 MCP 项保留。共享 Kiro MCP 项同样默认保留，因为可能仍被其他安装使用。`install --all` 和 `uninstall --all` 会继续处理所有平台，但只要任一平台失败，最终退出码即为非零。
+卸载只删除所有权清单中且哈希仍匹配的资产。`uninstall --all` 只处理当前 `~/.config/loeyae-aidlc/installations/` 中有 ownership manifest 的全局/user-scope 平台，并跳过从未安装或不受当前安装器管理的平台；CodeBuddy/Qoder 的 project scope 仍需显式传入 `--harness` 和 `--project`，因为仅凭哈希目录无法安全恢复原项目上下文。Codex 仅移除稳定 ID `loeyae-aidlc-stop-gate-v1` 对应的 Hook；其他 Hook 保留。CodeBuddy/Qoder 先通过官方 CLI 注销对应 scope，再删除项目外的受管源。ZCode 只移除精确匹配的 Loeyae Stop Hook，其他用户 Hook 和共享 MCP 项保留。共享 Kiro MCP 项同样默认保留，因为可能仍被其他安装使用。批量命令会继续处理所有已选平台，但只要任一平台失败，最终退出码即为非零。
 
 ### 开发模式（从本地仓库）
 

@@ -325,6 +325,18 @@ export function installManagedAssets(
   }
 }
 
+export function hasManagedInstallation(owner: string, targets: string[]): boolean {
+  const normalizedTargets = targets.map((target) => path.resolve(target));
+  const manifestFile = manifestPath(owner, normalizedTargets);
+  if (!existsSync(manifestFile)) return false;
+  const manifest = parseManifest(manifestFile);
+  if (manifest.owner !== owner) throw new Error(`installation owner mismatch: ${manifestFile}`);
+  if (JSON.stringify(manifest.assets.map((asset) => asset.target).sort()) !== JSON.stringify([...normalizedTargets].sort())) {
+    throw new Error(`installation targets do not match ownership manifest: ${manifestFile}`);
+  }
+  return true;
+}
+
 export function uninstallManagedAssets(owner: string, targets: string[], deactivate?: () => void): boolean {
   const normalizedTargets = targets.map((target) => path.resolve(target));
   const manifestFile = manifestPath(owner, normalizedTargets);

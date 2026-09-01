@@ -21,6 +21,7 @@ import {
 import { tmpdir } from "os";
 import { updateMcpConfig } from "../core/tools/aidlc-mcp-config";
 import {
+  hasManagedInstallation,
   installManagedAssets,
   type LegacyInstallBackup,
   type ManagedAsset,
@@ -33,6 +34,12 @@ const ROOT = resolve(__dirname, "..");
 const require = createRequire(import.meta.url);
 const PKG = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
 const HOME = process.env.HOME || process.env.USERPROFILE || "~";
+const APPLICATION_ROOTS = process.platform === "darwin"
+  ? [...new Set([
+      process.env.AIDLC_APPLICATIONS_ROOT ? resolve(process.env.AIDLC_APPLICATIONS_ROOT) : "/Applications",
+      resolve(HOME, "Applications"),
+    ])]
+  : [];
 const CLAUDE_MARKETPLACE_NAME = "loeyae-aidlc";
 const CLAUDE_GLOBAL_MARKETPLACE_ROOT = resolve(HOME, ".claude/plugins/loeyae-aidlc-marketplace");
 const CLAUDE_GLOBAL_PLUGIN_ROOT = resolve(CLAUDE_GLOBAL_MARKETPLACE_ROOT, "plugins/loeyae-aidlc");
@@ -143,6 +150,68 @@ function commandOnPath(command: string): string | undefined {
     }
   }
   return undefined;
+}
+
+function firstExistingPath(candidates: string[]): string | undefined {
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
+function applicationPaths(...relativePaths: string[]): string[] {
+  return APPLICATION_ROOTS.flatMap((root) => relativePaths.map((relativePath) => resolve(root, relativePath)));
+}
+
+function codeBuddyKnownCliPaths(): string[] {
+  return applicationPaths(
+    "WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
+    "CodeBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
+  );
+}
+
+function discoverHostCli(environmentVariable: string, command: string, knownPaths: string[] = []): string | undefined {
+  const configured = process.env[environmentVariable]?.trim();
+  if (configured) {
+    if (existsSync(configured)) return resolve(configured);
+    return commandOnPath(configured);
+  }
+  return commandOnPath(command) || firstExistingPath(knownPaths);
+}
+
+function hostEvidence(harness: string): string | undefined {
+  switch (harness) {
+    case "kiro-crew":
+      return commandOnPath("kirocrew") || firstExistingPath(applicationPaths("KiroCrew.app"));
+    case "kiro-ide":
+      return commandOnPath("kiro") || firstExistingPath(applicationPaths("Kiro.app"));
+    case "kiro-cli":
+      return commandOnPath("kiro-cli");
+    case "claude":
+      return commandOnPath("claude");
+    case "opencode":
+      return commandOnPath("opencode") || firstExistingPath(applicationPaths("OpenCode.app"));
+    case "codex":
+      return commandOnPath("codex") || firstExistingPath(applicationPaths("Codex.app"));
+    case "codebuddy":
+      return discoverHostCli("CODEBUDDY_CLI", "codebuddy", codeBuddyKnownCliPaths());
+    case "qoder":
+      return discoverHostCli("QODER_CLI", "qoder");
+    case "zcode":
+      return commandOnPath("zcode") || firstExistingPath(applicationPaths("ZCode.app", "Zcode.app"));
+    default:
+      return undefined;
+  }
+}
+
+function detectAvailableHarnesses(): string[] {
+  const available: Array<{ harness: string; evidence: string }> = [];
+  const unavailable: string[] = [];
+  for (const harness of Object.keys(HARNESS_INSTALL_PATHS)) {
+    const evidence = hostEvidence(harness);
+    if (evidence) available.push({ harness, evidence });
+    else unavailable.push(harness);
+  }
+  console.log(`🔎 Detected supported hosts: ${available.length ? available.map(({ harness, evidence }) => `${harness} (${evidence})`).join(", ") : "none"}`);
+  if (unavailable.length) console.log(`⏭️  Skipping unavailable hosts: ${unavailable.join(", ")}`);
+  return available.map(({ harness }) => harness);
 }
 
 function resolveHostCli(environmentVariable: string, command: string, knownPaths: string[] = []): string {
@@ -266,8 +335,9 @@ function ensureDist(harness: string): string {
   return status.distRoot;
 }
 
-function ensureAllDist(): Map<string, string> {
-  const statuses = Object.keys(HARNESS_INSTALL_PATHS).map(inspectDist);
+function ensureAllDist(harnesses: string[] = Object.keys(HARNESS_INSTALL_PATHS)): Map<string, string> {
+  const statuses = harnesses.map(inspectDist);
+  if (statuses.length === 0) return new Map();
   const missing = statuses.filter((status) => status.missing).map((status) => status.harness);
   const stale = statuses.filter((status) => status.stale).map((status) => status.harness);
   if (missing.length || stale.length) {
@@ -278,7 +348,7 @@ function ensureAllDist(): Map<string, string> {
     console.log(`♻️  Harness set requires rebuild; building all once (${reasons.join("; ")})`);
     run("scripts/build.ts", ["--all"]);
   } else {
-    console.log(`📦 Using current prebuilt harness set (${statuses.length} platforms).`);
+    console.log(`📦 Using current prebuilt harness set (${statuses.length} selected platform${statuses.length === 1 ? "" : "s"}).`);
   }
   for (const status of statuses) {
     if (!existsSync(status.distRoot)) throw new Error(`build output not found: ${status.distRoot}`);
@@ -463,10 +533,7 @@ function createCodeBuddyMarketplaceSource(distRoot: string, marketplaceName: str
 }
 
 function codeBuddyCli(): string {
-  return resolveHostCli("CODEBUDDY_CLI", "codebuddy", [
-    "/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
-    "/Applications/CodeBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
-  ]);
+  return resolveHostCli("CODEBUDDY_CLI", "codebuddy", codeBuddyKnownCliPaths());
 }
 
 function registerCodeBuddyPlugin(deployment: CodeBuddyDeployment): void {
@@ -798,41 +865,53 @@ function installOne(harness: string, customTarget: string, projectTarget: string
   console.log(`✅ Installed loeyae-aidlc v${PKG.version} (${harness}) → ${target}`);
 }
 
+function managedTargetsFor(harness: string, customTarget: string, projectTarget: string): string[] {
+  if (harness === "codebuddy" && !customTarget) return [getCodeBuddyDeployment(projectTarget).marketplaceRoot];
+  if (harness === "qoder" && !customTarget) return [getQoderDeployment(projectTarget).pluginRoot];
+  if (harness === "zcode" && !customTarget) return [ZCODE_GLOBAL_SKILL_ROOT];
+  if (harness === "opencode" && !customTarget) return [OPENCODE_GLOBAL_ASSET_ROOT, OPENCODE_GLOBAL_PLUGIN_PATH];
+  if (harness === "claude") {
+    const deployment = getClaudeDeployment(customTarget);
+    return [deployment.pluginRoot, deployment.catalogPath];
+  }
+  return [customTarget ? resolve(customTarget) : HARNESS_INSTALL_PATHS[harness]];
+}
+
 function uninstallOne(harness: string, customTarget: string, projectTarget: string): void {
   const owner = `loeyae-aidlc:${harness}`;
+  const targets = managedTargetsFor(harness, customTarget, projectTarget);
   if (harness === "codebuddy" && !customTarget) {
     const deployment = getCodeBuddyDeployment(projectTarget);
-    const removed = uninstallManagedAssets(owner, [deployment.marketplaceRoot], () => unregisterCodeBuddyPlugin(deployment));
+    const removed = uninstallManagedAssets(owner, targets, () => unregisterCodeBuddyPlugin(deployment));
     console.log(removed ? `✅ Uninstalled ${harness} (${deployment.scope})` : `ℹ️  ${harness} is not owned by this installer; preserved existing files.`);
     return;
   }
   if (harness === "qoder" && !customTarget) {
     const deployment = getQoderDeployment(projectTarget);
-    const removed = uninstallManagedAssets(owner, [deployment.pluginRoot], () => unregisterQoderPlugin(deployment));
+    const removed = uninstallManagedAssets(owner, targets, () => unregisterQoderPlugin(deployment));
     console.log(removed ? `✅ Uninstalled ${harness} (${deployment.scope})` : `ℹ️  ${harness} is not owned by this installer; preserved existing files.`);
     return;
   }
   if (harness === "zcode" && !customTarget) {
-    const removed = uninstallManagedAssets(owner, [ZCODE_GLOBAL_SKILL_ROOT], unregisterZcodeConfig);
+    const removed = uninstallManagedAssets(owner, targets, unregisterZcodeConfig);
     console.log(removed ? `✅ Uninstalled ${harness}` : `ℹ️  ${harness} is not owned by this installer; preserved existing files.`);
     return;
   }
   if (harness === "opencode" && !customTarget) {
-    const removed = uninstallManagedAssets(owner, [OPENCODE_GLOBAL_ASSET_ROOT, OPENCODE_GLOBAL_PLUGIN_PATH]);
+    const removed = uninstallManagedAssets(owner, targets);
     console.log(removed ? `✅ Uninstalled ${harness}` : `ℹ️  ${harness} is not owned by this installer; preserved existing files.`);
     return;
   }
   if (harness === "claude") {
     const deployment = getClaudeDeployment(customTarget);
-    const targets = [deployment.pluginRoot, deployment.catalogPath];
     const removed = uninstallManagedAssets(owner, targets, () => unregisterClaudePlugin(deployment));
     console.log(removed ? `✅ Uninstalled ${harness}` : `ℹ️  ${harness} is not owned by this installer; preserved existing files.`);
     return;
   }
-  const target = customTarget ? resolve(customTarget) : HARNESS_INSTALL_PATHS[harness];
+  const target = targets[0];
   const removed = uninstallManagedAssets(
     owner,
-    [target],
+    targets,
     harness === "codex" && !customTarget ? unregisterCodexHooks : undefined,
   );
   if (projectTarget) uninstallProjectHook(harness, projectTarget);
@@ -857,9 +936,41 @@ function deploy(args: string[], operation: "install" | "uninstall"): void {
     return;
   }
   if (options.all) {
+    const allHarnesses = Object.keys(HARNESS_INSTALL_PATHS);
     const failures: string[] = [];
-    const preparedDist = operation === "install" ? ensureAllDist() : undefined;
-    for (const harness of Object.keys(HARNESS_INSTALL_PATHS)) {
+    let harnesses: string[];
+    let preparedDist: Map<string, string> | undefined;
+
+    if (operation === "install") {
+      harnesses = detectAvailableHarnesses();
+      if (harnesses.length === 0) {
+        console.log("ℹ️  No supported host tools were detected; nothing to install. Use --harness to install a platform explicitly.");
+        return;
+      }
+      preparedDist = ensureAllDist(harnesses);
+    } else {
+      harnesses = [];
+      const detectionFailures = new Set<string>();
+      for (const harness of allHarnesses) {
+        try {
+          if (hasManagedInstallation(`loeyae-aidlc:${harness}`, managedTargetsFor(harness, "", ""))) harnesses.push(harness);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          detectionFailures.add(harness);
+          failures.push(`${harness}: ${message}`);
+          console.error(`❌ ${harness}: ${message}`);
+        }
+      }
+      console.log(`🔎 Installer-owned global installations: ${harnesses.join(", ") || "none"}`);
+      const skipped = allHarnesses.filter((harness) => !harnesses.includes(harness) && !detectionFailures.has(harness));
+      if (skipped.length) console.log(`⏭️  Skipping platforms without ownership manifests: ${skipped.join(", ")}`);
+      if (harnesses.length === 0 && failures.length === 0) {
+        console.log("ℹ️  No installer-owned global platform installations were found.");
+        return;
+      }
+    }
+
+    for (const harness of harnesses) {
       try {
         if (operation === "install") installOne(harness, "", "", options.migrateLegacy, preparedDist?.get(harness));
         else uninstallOne(harness, "", "");
@@ -870,7 +981,9 @@ function deploy(args: string[], operation: "install" | "uninstall"): void {
       }
     }
     if (failures.length) throw new Error(`${operation} --all failed for ${failures.length} platform(s): ${failures.join("; ")}`);
-    console.log(operation === "install" ? "⚠️  Restart affected platforms to activate." : "✅ Uninstalled all installer-owned platform assets.");
+    console.log(operation === "install"
+      ? "⚠️  Restart affected platforms to activate."
+      : `✅ Uninstalled ${harnesses.length} installer-owned global platform installation${harnesses.length === 1 ? "" : "s"}.`);
     return;
   }
   const harness = options.harness || "kiro-crew";
@@ -904,7 +1017,7 @@ Install/uninstall options:
   --harness <name>  Target platform (default: kiro-crew)
   --target <path>   Dedicated bundle directory; Claude interprets it as project root
   --project <path>  Kiro project Hook root, or CodeBuddy/Qoder project plugin scope
-  --all             Process every platform and return nonzero if any platform fails
+  --all             Install detected hosts, or uninstall installer-owned global/user installs
   --list            Show available platforms (install only)
   --migrate-legacy  Preserve and replace recognized pre-manifest installs (install only)
 
@@ -916,6 +1029,7 @@ Examples:
   loeyae-aidlc uninstall --harness kiro-ide --project /absolute/path/to/project
   loeyae-aidlc install --all
   loeyae-aidlc install --all --migrate-legacy
+  loeyae-aidlc uninstall --all
   loeyae-aidlc approve --stage application-design
   loeyae-aidlc orchestrate report --stage application-design --result approved --approval-token <token>
 `);

@@ -3,12 +3,14 @@
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-NODE = os.environ.get("NODE", "node")
+NODE_COMMAND = os.environ.get("NODE", "node")
+NODE = shutil.which(NODE_COMMAND) or NODE_COMMAND
 SCRATCH_ROOT = Path(os.environ.get("KIROCREW_SCRATCH") or os.environ.get("TMPDIR") or tempfile.gettempdir())
 
 
@@ -25,6 +27,22 @@ def run_cli(home: Path, args: list, extra_env=None) -> subprocess.CompletedProce
         capture_output=True,
         text=True,
     )
+
+
+def write_fake_host_command(directory: Path, name: str, exit_code: int = 0) -> Path:
+    command = directory / name
+    command.write_text(f"#!/bin/sh\nexit {exit_code}\n")
+    command.chmod(0o755)
+    return command
+
+
+def isolated_host_env(root: Path, fake_bin: Path) -> dict:
+    applications = root / "Applications"
+    applications.mkdir(exist_ok=True)
+    return {
+        "PATH": f"{fake_bin}{os.pathsep}/usr/bin:/bin",
+        "AIDLC_APPLICATIONS_ROOT": str(applications),
+    }
 
 
 def tree_digest(root: Path) -> str:
@@ -372,6 +390,50 @@ def test_new_plugin_host_lifecycles() -> None:
         assert not (failed_qoder_home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc").exists()
 
 
+def test_install_all_detects_hosts_and_uninstall_all_uses_ownership() -> None:
+    with tempfile.TemporaryDirectory(prefix="aidlc-installer-detected-all-", dir=str(SCRATCH_ROOT)) as directory:
+        root = Path(directory)
+        home = root / "home"
+        fake_bin = root / "bin"
+        home.mkdir()
+        fake_bin.mkdir()
+        for command in ["claude", "kiro", "kiro-cli"]:
+            write_fake_host_command(fake_bin, command)
+        env = isolated_host_env(root, fake_bin)
+
+        installed = run_cli(home, ["install", "--all"], env)
+        assert installed.returncode == 0, installed.stdout + installed.stderr
+        output = installed.stdout + installed.stderr
+        detected_line = next(line for line in output.splitlines() if "Detected supported hosts:" in line)
+        assert all(harness in detected_line for harness in ["kiro-ide", "kiro-cli", "claude"])
+        assert all(harness not in detected_line for harness in ["kiro-crew", "opencode", "codex", "codebuddy", "qoder", "zcode"])
+        assert "Skipping unavailable hosts:" in output
+        assert (home / ".kiro" / "powers" / "loeyae-aidlc").is_dir()
+        assert (home / ".kiro" / "skills" / "loeyae-aidlc").is_dir()
+        assert (home / ".claude" / "plugins" / "loeyae-aidlc-marketplace" / "plugins" / "loeyae-aidlc").is_dir()
+        assert not (home / ".kiro" / "crew" / "skills" / "loeyae-aidlc").exists()
+        assert not (home / ".config" / "opencode" / "plugins" / "loeyae-aidlc.js").exists()
+        assert not (home / ".agents" / "skills" / "loeyae-aidlc").exists()
+        assert not (home / ".config" / "loeyae-aidlc" / "host-assets").exists()
+        assert not (home / ".zcode" / "skills" / "loeyae-aidlc").exists()
+        state = home / ".config" / "loeyae-aidlc" / "installations"
+        assert len(list(state.glob("*.json"))) == 3
+
+        removed = run_cli(home, ["uninstall", "--all"], env)
+        assert removed.returncode == 0, removed.stdout + removed.stderr
+        removed_output = removed.stdout + removed.stderr
+        assert "Installer-owned global installations: kiro-ide, kiro-cli, claude" in removed_output
+        assert "Uninstalled 3 installer-owned global platform installations" in removed_output
+        assert not (home / ".kiro" / "powers" / "loeyae-aidlc").exists()
+        assert not (home / ".kiro" / "skills" / "loeyae-aidlc").exists()
+        assert not (home / ".claude" / "plugins" / "loeyae-aidlc-marketplace" / "plugins" / "loeyae-aidlc").exists()
+        assert not list(state.glob("*.json"))
+
+        empty = run_cli(home, ["uninstall", "--all"], env)
+        assert empty.returncode == 0, empty.stdout + empty.stderr
+        assert "No installer-owned global platform installations were found" in empty.stdout
+
+
 def test_install_all_aggregates_failures_and_continues() -> None:
     with tempfile.TemporaryDirectory(prefix="aidlc-installer-all-", dir=str(SCRATCH_ROOT)) as directory:
         root = Path(directory)
@@ -381,14 +443,14 @@ def test_install_all_aggregates_failures_and_continues() -> None:
         fake_bin.mkdir()
         legacy_target = home / ".kiro" / "powers" / "loeyae-aidlc"
         legacy_marker = write_recognized_legacy_runtime(legacy_target, "all migration backup")
-        claude = fake_bin / "claude"
-        claude.write_text("#!/bin/sh\nexit 23\n")
-        claude.chmod(0o755)
-        path = f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"
+        for command in ["kiro", "opencode", "codex", "zcode"]:
+            write_fake_host_command(fake_bin, command)
+        write_fake_host_command(fake_bin, "claude", 23)
+        path_env = isolated_host_env(root, fake_bin)
         host_env = write_fake_plugin_hosts(root)
         result = run_cli(home, ["install", "--all", "--migrate-legacy"], {
+            **path_env,
             **host_env,
-            "PATH": path,
         })
         assert result.returncode != 0
         assert "install --all failed" in result.stderr
@@ -413,5 +475,6 @@ if __name__ == "__main__":
     test_opencode_multi_asset_transaction_and_uninstall()
     test_claude_activation_refreshes_existing_plugin()
     test_new_plugin_host_lifecycles()
+    test_install_all_detects_hosts_and_uninstall_all_uses_ownership()
     test_install_all_aggregates_failures_and_continues()
     print("Installer lifecycle tests passed")
