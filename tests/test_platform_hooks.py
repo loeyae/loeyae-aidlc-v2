@@ -21,13 +21,14 @@ def environment(home: Path, trust: Path = None) -> dict:
     return env
 
 
-def run_cli(args: list, cwd: Path, home: Path, trust: Path = None) -> subprocess.CompletedProcess:
+def run_cli(args: list, cwd: Path, home: Path, trust: Path = None, input_data: str = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         [NODE, str(ROOT / "bin" / "cli.js"), *args],
         cwd=cwd,
         env=environment(home, trust),
         capture_output=True,
         text=True,
+        input=input_data,
     )
 
 
@@ -59,6 +60,17 @@ def main() -> None:
 
     claude_hooks = json.loads((ROOT / "harness" / "claude" / "hooks" / "hooks.json").read_text())
     assert claude_hooks["hooks"]["Stop"][0]["hooks"][0]["args"] == ["hook", "--format", "claude"]
+
+    codebuddy_hooks = json.loads((ROOT / "harness" / "codebuddy" / "hooks" / "hooks.json").read_text())
+    assert codebuddy_hooks["hooks"]["Stop"][0]["hooks"][0]["command"] == "loeyae-aidlc hook --format codebuddy"
+
+    qoder_hooks = json.loads((ROOT / "harness" / "qoder" / "hooks" / "hooks.json").read_text())
+    assert qoder_hooks["hooks"]["Stop"][0]["hooks"][0]["command"] == "loeyae-aidlc hook --format qoder-cli"
+
+    zcode_hooks = json.loads((ROOT / "harness" / "zcode" / "hooks" / "hooks.json").read_text())
+    zcode_process = zcode_hooks["hooks"]["Stop"][0]["hooks"][0]
+    assert zcode_process["type"] == "process"
+    assert zcode_process["args"] == ["hook", "--format", "zcode"]
 
     codex_hooks = json.loads((ROOT / "harness" / "codex" / "hooks" / "hooks.json").read_text())
     codex_group = codex_hooks["hooks"]["Stop"][0]
@@ -131,6 +143,26 @@ def main() -> None:
         decision = json.loads(result.stdout)
         assert decision["decision"] == "block"
         assert "Unknown stage" in decision["reason"]
+
+        for hook_format in ["codebuddy", "zcode"]:
+            platform_result = run_cli(["hook", "--format", hook_format], blocked_project, home, home / "trust-blocked")
+            assert platform_result.returncode == 0
+            platform_decision = json.loads(platform_result.stdout)
+            assert platform_decision["decision"] == "block"
+            assert "Unknown stage" in platform_decision["reason"]
+
+        qoder_result = run_cli(["hook", "--format", "qoder-cli"], blocked_project, home, home / "trust-blocked")
+        assert qoder_result.returncode == 2
+        assert qoder_result.stdout == "" and "Unknown stage" in qoder_result.stderr
+
+        qoder_retry = run_cli(
+            ["hook", "--format", "qoder-cli"],
+            blocked_project,
+            home,
+            home / "trust-blocked",
+            json.dumps({"stop_hook_active": True}),
+        )
+        assert qoder_retry.returncode == 0 and qoder_retry.stdout == "" and qoder_retry.stderr == ""
 
         # Tampering a signed state fails closed.
         state_path = blocked_project / "docs" / "aidlc" / "aidlc-state.json"

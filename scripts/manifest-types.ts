@@ -1,8 +1,8 @@
 /**
  * Harness manifest types — defines the contract for each platform distribution.
  *
- * Each harness (kiro-crew, kiro-ide, kiro-cli, claude, opencode) implements this interface
- * to declare how core/ artifacts map into that platform's filesystem layout.
+ * Each harness implements this interface to declare how core/ artifacts map
+ * into that platform's filesystem layout.
  */
 
 export interface CoreDirMapping {
@@ -29,7 +29,7 @@ export interface PluginConfig {
 }
 
 export interface HarnessManifest {
-  /** Harness identifier (kiro-crew, kiro-ide, kiro-cli, claude, opencode, codex) */
+  /** Harness identifier (for example kiro-cli, claude, codebuddy, qoder, or zcode) */
   name: string;
   /** Target directory name in the user's project (e.g. .kiro, .claude) */
   harnessDir: string;

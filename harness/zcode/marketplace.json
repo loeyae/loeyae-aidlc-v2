@@ -1,0 +1,16 @@
+{
+  "name": "loeyae-aidlc",
+  "description": "Loeyae AI-DLC v2 plugin marketplace for ZCode.",
+  "pluginRoot": "plugins",
+  "plugins": [
+    {
+      "name": "loeyae-aidlc",
+      "source": "./loeyae-aidlc",
+      "description": "Loeyae AI-DLC v2 engine-driven lifecycle with enforced stage gates.",
+      "version": "2.0.4",
+      "category": "developer-tools",
+      "tags": ["aidlc", "workflow", "gates"],
+      "strict": true
+    }
+  ]
+}

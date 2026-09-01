@@ -31,9 +31,9 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 
 `--project` 和 `--target` 不是同一个参数：
 
-- `--project <项目根目录>`：用于 Kiro IDE/CLI 的项目级生命周期 Hook。它只创建或更新 `<项目根目录>/.kiro/hooks/loeyae-aidlc.json`，不会删除项目源码；项目根目录可以是已有的非空目录。
-- `--target <安装目录>`：用于把 harness 复制到专用安装目录。不要把业务项目根目录、源码目录或已有工程目录传给它。安装器只会升级带外部所有权清单且内容未被修改的目标；空目录可以首次安装，非空且未受管目标会 fail-closed，绝不会递归清空。
-- Claude Code 的 `--target` 是特殊用法：它表示项目根目录，安装器只操作该目录下的 `.claude/loeyae-aidlc-marketplace/`，不应将其用于 Kiro IDE/CLI。
+- `--project <项目根目录>`：Kiro IDE/CLI 用它安装项目 Stop Hook；CodeBuddy/Qoder CLI 用它调用宿主官方 CLI 的 project scope。它不会把整个 harness 覆盖到业务项目根目录。ZCode 当前不接受 `--project`，因为其项目级 Hook 不执行。
+- `--target <安装目录>`：用于把 harness 或插件 bundle 复制到专用安装目录，不执行 CodeBuddy/Qoder/ZCode 的宿主注册。不要把业务项目根目录、源码目录或已有工程目录传给它。安装器只会升级带外部所有权清单且内容未被修改的目标；空目录可以首次安装，非空且未受管目标会 fail-closed，绝不会递归清空。
+- Claude Code 的 `--target` 是特殊用法：它表示项目根目录，安装器只操作该目录下的 `.claude/loeyae-aidlc-marketplace/`，不应将其用于其他 harness。
 
 如果误用旧版本的 `--target` 删除了目录，应立即停止再次安装或写入该目录，优先从 Git、IDE Local History、Time Machine 或备份恢复；安装器无法恢复已删除源码。
 
@@ -58,7 +58,16 @@ loeyae-aidlc install --harness opencode
 # Codex（全局 agent）
 loeyae-aidlc install --harness codex
 
-# 一次性安装到所有平台
+# WorkBuddy Enterprise / CodeBuddy（官方 user-scope plugin）
+loeyae-aidlc install --harness codebuddy
+
+# Qoder CLI（官方 user-scope plugin）
+loeyae-aidlc install --harness qoder
+
+# ZCode（用户 Skill + 用户 Hook/MCP；同时构建可 UI 导入的 marketplace）
+loeyae-aidlc install --harness zcode
+
+# 一次性安装到所有平台；CodeBuddy/Qoder CLI 不存在时会记录失败并继续其他平台
 loeyae-aidlc install --all
 ```
 
@@ -101,9 +110,32 @@ cd /absolute/path/to/your-project
 pwd
 ```
 
+#### CodeBuddy 与 Qoder CLI 项目级安装
+
+CodeBuddy 和 Qoder CLI 通过各自官方 CLI 写入 project scope；Loeyae 只管理项目外的插件源副本和 ownership manifest，不直接编辑宿主 registry/cache：
+
+```bash
+loeyae-aidlc install --harness codebuddy --project /absolute/path/to/your-project
+loeyae-aidlc install --harness qoder --project /absolute/path/to/your-project
+```
+
+项目级安装使用项目哈希隔离宿主源目录和 CodeBuddy marketplace 名称，卸载一个项目不会移除其他项目或 user scope 的安装。CodeBuddy 的完整扩展契约来自 WorkBuddy Enterprise 中的 CodeBuddy Agent/CLI；这里不宣称覆盖 WorkBuddy 的其他模块。
+
+#### ZCode 安装边界
+
+ZCode 当前没有公开的非交互插件注册命令，并且项目配置中的 Hook 不执行。因此默认命令会：
+
+- 安装用户 Skill 到 `~/.zcode/skills/loeyae-aidlc/`；
+- 精确合并用户 Stop Hook 到 `~/.zcode/cli/config.json`；
+- 只补缺失的用户 MCP 服务，保留已有同名服务；卸载时保留这些共享 MCP 项。
+
+`dist/zcode/` 同时是原生 ZCode marketplace。如需完整插件形态，在 **Settings → Plugins → Create → Add marketplace** 中选择该目录，再安装并启用插件。插件注册和卸载需在 ZCode UI 完成。
+
 Kiro Crew 的默认安装会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` MCP 服务合并到 `~/.kiro/settings/mcp.json`，通过跨进程锁与原子替换避免并发丢更新。默认只补缺失；仅无自定义字段的已知旧默认 `chrome-devtools-mcp@1.6.0` 会收敛为不指定版本的 `chrome-devtools-mcp`。用户主动设置的其他版本/tag pin、额外字段、环境变量、非默认参数或禁用状态均完整保留。`ssot` 使用环境变量 `SSOT_API_KEY`，不把密钥写入安装包或项目文件。
 
 Claude Code 的安装器会额外生成本地 marketplace，并调用官方 `claude plugin marketplace add`、`claude plugin install` 注册 user-scope 插件；不会直接编辑 `installed_plugins.json`。staging 文件位于 `~/.claude/plugins/loeyae-aidlc-marketplace/`，实际运行缓存和注册表由 Claude Code 管理。当前已打开的 Claude 会话需执行 `/reload-plugins`（如提示缓存变更则按提示使用 `--force`）或重新开会话；新会话会自动加载。
+
+CodeBuddy 安装器同样只调用官方 `codebuddy plugin` 命令。优先使用 PATH 中的 `codebuddy`，macOS 也能发现 WorkBuddy/CodeBuddy App 内嵌 CLI；其他位置可通过 `CODEBUDDY_CLI` 指定。Qoder 使用 PATH 中的 `qoder`，也可通过 `QODER_CLI` 指定。两者都会先校验插件，再安装、刷新并启用；不会直接修改宿主内部数据库。
 
 各平台的全局安装路径：
 
@@ -115,6 +147,9 @@ Claude Code 的安装器会额外生成本地 marketplace，并调用官方 `cla
 | Claude Code | `~/.claude/plugins/loeyae-aidlc-marketplace/plugins/loeyae-aidlc/`（staging；运行时由 Claude Code 管理官方 cache 和注册表） |
 | OpenCode | `~/.config/opencode/plugins/loeyae-aidlc.js`（入口；资源位于同级 `loeyae-aidlc/`） |
 | Codex | `~/.agents/skills/loeyae-aidlc/` |
+| WorkBuddy / CodeBuddy | `~/.config/loeyae-aidlc/host-assets/codebuddy/user/`（受管 marketplace source；运行时 cache 由 CodeBuddy 管理） |
+| Qoder CLI | `~/.config/loeyae-aidlc/host-assets/qoder/user/loeyae-aidlc/`（受管 plugin source；运行时 cache 由 Qoder 管理） |
+| ZCode | `~/.zcode/skills/loeyae-aidlc/`（默认直接用户集成） |
 
 ### 平台生命周期门禁
 
@@ -127,6 +162,9 @@ Claude Code 的安装器会额外生成本地 marketplace，并调用官方 `cla
 | Claude Code | 插件 `hooks/hooks.json` 的 `Stop` Hook | 随官方插件安装自动注册 | `decision:block` 阻止回合结束 |
 | OpenCode | 插件 `session.idle` 事件 | 全局插件安装自动加载 | 失败时通过插件继续提示 Agent 处理 |
 | Codex | 全局 `~/.codex/hooks.json` 的 `Stop` Hook | `loeyae-aidlc install --harness codex`，然后 `/hooks` 审查并信任 | `decision:block` 触发继续执行 |
+| WorkBuddy / CodeBuddy | 插件 `hooks/hooks.json` 的 `Stop` Hook | 官方 CodeBuddy CLI 自动注册 user/project scope | Claude-compatible `decision:block` 继续 Agent |
+| Qoder CLI | 插件 `Stop` Hook | 官方 `qoder plugins` 自动安装 user/project scope | 退出码 2 阻断；`stop_hook_active` 重入时不重复阻断，签名状态仍保持 running |
+| ZCode | 用户配置或插件 `Stop` Hook | 默认自动合并用户 Hook；完整插件需 UI 导入 | `decision:block`，宿主最多连续继续 3 次 |
 | Kiro Crew | 当前无公开生命周期 Hook | Skill 强制调用引擎；不能伪造完成 | 引擎拒绝 `report`，Skill 必须继续修复 |
 
 Hook 未安装或平台未触发时，不能降低引擎门禁要求；直接调用 `orchestrate report` 仍会执行完整的 `requires`、`condition`、`produces`、`sensors`、审批和当前阶段校验。
@@ -148,11 +186,11 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 loeyae-aidlc install        # 重新部署（或 --all 全部）
 ```
 
-`install --all` 会先统一检查六个平台的预构建产物；只要有任一产物缺失或过期，就执行一次全平台构建，再依次安装，不再因 graph 时间戳刷新而逐平台重复重建。
+`install --all` 会先统一检查九个平台的预构建产物；只要有任一产物缺失或过期，就执行一次全平台构建，再依次安装，不再因 graph 时间戳刷新而逐平台重复重建。
 
 安装器先在目标同级目录 staging，校验后以 rename 交换；平台激活失败或测试 failpoint 触发时会恢复旧受管资产。每次安装在 `~/.config/loeyae-aidlc/installations/` 保存外部所有权清单，记录每个受管文件的 SHA-256。升级和卸载前都会复核清单：文件被用户修改、目标缺失、出现额外文件或目标没有所有权清单时均 fail-closed，不会覆盖或删除。
 
-文件资产与 ownership manifest 受同一安装锁和回滚流程保护，但 Claude 官方 CLI 的插件注册表/cache、Codex 的共享 Hook 配置等宿主外部副作用无法与本地 manifest 做跨进程原子提交。若宿主已接受 activate/deactivate，而随后 manifest 写入或宿主的后续子步骤失败，安装器会恢复受管文件，但可能需要按错误输出重新运行安装/卸载或使用宿主官方命令核对注册状态；不得将文件回滚等同于真实宿主注册表已回滚。
+文件资产与 ownership manifest 受同一安装锁和回滚流程保护，但 Claude、CodeBuddy、Qoder 的官方插件注册表/cache，以及 Codex/ZCode 的共享配置等宿主外部副作用无法与本地 manifest 做跨进程原子提交。若宿主已接受 activate/deactivate，而随后 manifest 写入或宿主的后续子步骤失败，安装器会恢复受管文件，并对首次 CodeBuddy 注册执行尽力补偿，但仍可能需要按错误输出重新运行安装/卸载或使用宿主官方命令核对注册状态；不得将文件回滚等同于真实宿主注册表已回滚。
 
 从没有 ownership manifest 的旧版 v2 安装升级时，使用显式迁移参数：
 
@@ -179,10 +217,13 @@ loeyae-aidlc install --harness kiro-ide
 loeyae-aidlc uninstall --harness kiro-crew
 loeyae-aidlc uninstall --harness kiro-ide --project /absolute/path/to/project
 loeyae-aidlc uninstall --harness opencode
+loeyae-aidlc uninstall --harness codebuddy
+loeyae-aidlc uninstall --harness qoder --project /absolute/path/to/project
+loeyae-aidlc uninstall --harness zcode
 loeyae-aidlc uninstall --all
 ```
 
-卸载只删除所有权清单中且哈希仍匹配的资产。Codex 仅移除稳定 ID `loeyae-aidlc-stop-gate-v1` 对应的 Hook；其他 Hook 保留。共享 Kiro MCP 项默认保留，因为可能仍被其他安装使用。`install --all` 和 `uninstall --all` 会继续处理所有平台，但只要任一平台失败，最终退出码即为非零。
+卸载只删除所有权清单中且哈希仍匹配的资产。Codex 仅移除稳定 ID `loeyae-aidlc-stop-gate-v1` 对应的 Hook；其他 Hook 保留。CodeBuddy/Qoder 先通过官方 CLI 注销对应 scope，再删除项目外的受管源。ZCode 只移除精确匹配的 Loeyae Stop Hook，其他用户 Hook 和共享 MCP 项保留。共享 Kiro MCP 项同样默认保留，因为可能仍被其他安装使用。`install --all` 和 `uninstall --all` 会继续处理所有平台，但只要任一平台失败，最终退出码即为非零。
 
 ### 开发模式（从本地仓库）
 
@@ -205,6 +246,9 @@ loeyae-aidlc install --all
 | Claude Code | 执行 `/reload-plugins`，或新开对话 |
 | OpenCode | 重启 OpenCode |
 | Codex | 新开会话 |
+| WorkBuddy / CodeBuddy | 执行 `/reload-plugins`，或新开会话 |
+| Qoder CLI | 执行 `/plugins reload`，或重启 Qoder CLI |
+| ZCode | 新开会话；完整插件注册/启用在 Settings → Plugins 中完成 |
 
 ## 使用
 
@@ -272,6 +316,9 @@ loeyae-aidlc-v2/
 │   ├── kiro-ide/               # Kiro IDE (Power)
 │   ├── kiro-cli/               # Kiro CLI
 │   ├── claude/                 # Claude Code
+│   ├── codebuddy/              # WorkBuddy Enterprise / CodeBuddy
+│   ├── qoder/                  # Qoder CLI
+│   ├── zcode/                  # ZCode user integration + plugin marketplace
 │   ├── codex/                  # Codex
 │   └── opencode/               # OpenCode
 ├── dist/                        # 编译输出
@@ -302,7 +349,7 @@ Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活
 
 ### 审批与 instruction-only
 
-仅 `application-design` 和 `operations` 使用 `approval: block`。`next` 为其创建绑定 `workflow_id + stage + challenge` 的随机 challenge；人类在交互式终端审阅最终产物后运行 `loeyae-aidlc approve --stage <slug>`，得到最长 15 分钟、消费后不可重放的 token，再以 `--result approved --approval-token <token>` 报告。平台适配器不会自行签发 token；没有 Kiro Crew Dashboard、Claude、Codex 或 OpenCode 宿主 token provider 且没有可用人类终端时，这两个阶段会按设计 fail-closed。宿主集成可把 token 作为 `--approval-token` 或一次性 `AIDLC_APPROVAL_TOKEN` 传给引擎，但不得暴露普通非交互 token generator。
+仅 `application-design` 和 `operations` 使用 `approval: block`。`next` 为其创建绑定 `workflow_id + stage + challenge` 的随机 challenge；人类在交互式终端审阅最终产物后运行 `loeyae-aidlc approve --stage <slug>`，得到最长 15 分钟、消费后不可重放的 token，再以 `--result approved --approval-token <token>` 报告。平台适配器不会自行签发 token；没有 Kiro Crew Dashboard、Claude、CodeBuddy、Qoder、ZCode、Codex 或 OpenCode 宿主 token provider 且没有可用人类终端时，这两个阶段会按设计 fail-closed。宿主集成可把 token 作为 `--approval-token` 或一次性 `AIDLC_APPROVAL_TOKEN` 传给引擎，但不得暴露普通非交互 token generator。
 
 14 个不产生机器可验证产物的阶段显式标记为 `instruction_only`，执行正文后必须用 `--instruction-ack <stage-slug>` 报告。Stop Hook 不携带该确认，因此不能自动推进这些阶段。
 
@@ -387,6 +434,7 @@ v1 源码在 `loeyae-aidlc` 仓库。v2 的所有 steering 内容已从 v1 迁�
 - Node.js ≥ 20
 - npm 或 bun（安装用）
 - Kiro Crew Desktop（使用 Kiro Crew harness 时）
+- 需要阻断审批的宿主（Kiro Crew Dashboard、Claude、CodeBuddy、Qoder、ZCode、Codex 或 OpenCode）仍必须使用受信 token provider 或可用人类终端；两个 approval 阶段按设计 fail-closed。
 
 ## License
 

@@ -9,6 +9,7 @@ interface HookInput {
   cwd?: string;
   hook_event_name?: string;
   event?: string;
+  stop_hook_active?: boolean;
 }
 
 interface Directive {
@@ -41,11 +42,11 @@ function output(value: Record<string, unknown>): void {
 }
 
 function fail(reason: string): never {
-  if (format === "claude" || format === "codex") {
+  if (["claude", "codex", "codebuddy", "zcode"].includes(format)) {
     output({ decision: "block", reason });
     process.exit(0);
   }
-  if (format === "opencode") {
+  if (format === "opencode" || format === "qoder-cli") {
     process.stderr.write(`${reason}\n`);
     process.exit(2);
   }
@@ -89,6 +90,11 @@ function runReport(root: string, stage: string): string | null {
 }
 
 const input = readInput();
+// Qoder marks a retry caused by a previous Stop block. Its contract requires
+// hooks to stop blocking on that retry so a malformed workflow cannot create
+// an unbounded host loop; the signed AI-DLC state remains running and resumes
+// in the next session if the Agent did not complete the stage.
+if (format === "qoder-cli" && input.stop_hook_active === true) allow();
 const requestedRoot = typeof input.cwd === "string" && input.cwd.length > 0 ? resolve(input.cwd) : projectRoot;
 if (!existsSync(requestedRoot)) fail(`AI-DLC project root does not exist: ${requestedRoot}`);
 const root = realpathSync(requestedRoot);

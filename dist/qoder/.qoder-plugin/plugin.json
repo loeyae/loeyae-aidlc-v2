@@ -1,0 +1,11 @@
+{
+  "name": "loeyae-aidlc",
+  "version": "2.0.4",
+  "displayName": "Loeyae AI-DLC v2",
+  "description": "Loeyae AI-DLC v2 engine-driven lifecycle with enforced stage gates.",
+  "author": { "name": "Loeyae Team" },
+  "homepage": "https://github.com/loeyae/loeyae-aidlc-v2",
+  "repository": "https://github.com/loeyae/loeyae-aidlc-v2.git",
+  "license": "MIT",
+  "keywords": ["aidlc", "AI-DLC", "workflow", "gates"]
+}

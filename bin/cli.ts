@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Loeyae AI-DLC command line entry point. */
 
+import { createHash } from "crypto";
 import path, { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
@@ -40,6 +41,13 @@ const OPENCODE_GLOBAL_PLUGIN_PATH = resolve(OPENCODE_GLOBAL_CONFIG_ROOT, "plugin
 const OPENCODE_GLOBAL_ASSET_ROOT = resolve(OPENCODE_GLOBAL_CONFIG_ROOT, "loeyae-aidlc");
 const CODEX_GLOBAL_HOOKS_PATH = resolve(HOME, ".codex/hooks.json");
 const CODEX_HOOK_ID = "loeyae-aidlc-stop-gate-v1";
+const PLUGIN_NAME = "loeyae-aidlc";
+const PLUGIN_MARKETPLACE_NAME = "loeyae-aidlc";
+const HOST_ASSET_ROOT = resolve(HOME, ".config/loeyae-aidlc/host-assets");
+const CODEBUDDY_USER_MARKETPLACE_ROOT = resolve(HOST_ASSET_ROOT, "codebuddy/user");
+const QODER_USER_PLUGIN_ROOT = resolve(HOST_ASSET_ROOT, "qoder/user/loeyae-aidlc");
+const ZCODE_GLOBAL_SKILL_ROOT = resolve(HOME, ".zcode/skills/loeyae-aidlc");
+const ZCODE_GLOBAL_CONFIG_PATH = resolve(HOME, ".zcode/cli/config.json");
 
 const HARNESS_INSTALL_PATHS: Record<string, string> = {
   "kiro-crew": resolve(HOME, ".kiro/crew/skills/loeyae-aidlc"),
@@ -48,6 +56,9 @@ const HARNESS_INSTALL_PATHS: Record<string, string> = {
   claude: CLAUDE_GLOBAL_PLUGIN_ROOT,
   opencode: OPENCODE_GLOBAL_PLUGIN_PATH,
   codex: resolve(HOME, ".agents/skills/loeyae-aidlc"),
+  codebuddy: CODEBUDDY_USER_MARKETPLACE_ROOT,
+  qoder: QODER_USER_PLUGIN_ROOT,
+  zcode: ZCODE_GLOBAL_SKILL_ROOT,
 };
 
 const HARNESS_DESCRIPTIONS: Record<string, string> = {
@@ -57,6 +68,9 @@ const HARNESS_DESCRIPTIONS: Record<string, string> = {
   claude: "Claude Code (official user/project plugin)",
   opencode: "OpenCode (global plugin)",
   codex: "Codex (global skill)",
+  codebuddy: "WorkBuddy Enterprise / CodeBuddy (official plugin)",
+  qoder: "Qoder CLI (official plugin)",
+  zcode: "ZCode (user skill + user Hook/MCP; plugin marketplace also built)",
 };
 
 interface DeployOptions {
@@ -76,16 +90,32 @@ interface ClaudeDeployment {
   cwd: string;
 }
 
+interface CodeBuddyDeployment {
+  marketplaceRoot: string;
+  marketplaceName: string;
+  pluginRoot: string;
+  pluginRef: string;
+  scope: "user" | "project";
+  cwd: string;
+}
+
+interface QoderDeployment {
+  pluginRoot: string;
+  scope: "user" | "project";
+  cwd: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function run(script: string, args: string[]): never | void {
+function run(script: string, args: string[], input?: string): never | void {
   const tsx = require.resolve("tsx/cli");
   const result = spawnSync(process.execPath, [tsx, resolve(ROOT, script), ...args], {
     stdio: "pipe",
     cwd: process.cwd(),
     encoding: "utf8",
+    input,
   });
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
@@ -100,6 +130,60 @@ function runExternal(command: string, args: string[], cwd: string): number {
     return 1;
   }
   return result.status ?? 1;
+}
+
+function commandOnPath(command: string): string | undefined {
+  const extensions = process.platform === "win32"
+    ? (process.env.PATHEXT || ".EXE;.CMD;.BAT;.COM").split(";")
+    : [""];
+  for (const directory of (process.env.PATH || "").split(path.delimiter).filter(Boolean)) {
+    for (const extension of extensions) {
+      const candidate = resolve(directory, `${command}${extension}`);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return undefined;
+}
+
+function resolveHostCli(environmentVariable: string, command: string, knownPaths: string[] = []): string {
+  const configured = process.env[environmentVariable]?.trim();
+  if (configured) return configured;
+  const discovered = commandOnPath(command);
+  if (discovered) return discovered;
+  const known = knownPaths.find((candidate) => existsSync(candidate));
+  if (known) return known;
+  throw new Error(`${command} CLI not found; install the host CLI or set ${environmentVariable} to its executable path`);
+}
+
+function runExternalJson(command: string, args: string[], cwd: string, description: string): unknown {
+  const result = spawnSync(command, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  if (result.error) throw new Error(`${description} failed: ${result.error.message}`);
+  if ((result.status ?? 1) !== 0) {
+    throw new Error(`${description} failed with code ${result.status ?? 1}: ${(result.stderr || result.stdout || "unknown error").trim()}`);
+  }
+  const output = (result.stdout || "").trim();
+  if (!output) return [];
+  try {
+    return JSON.parse(output);
+  } catch {
+    throw new Error(`${description} returned invalid JSON: ${output}`);
+  }
+}
+
+function jsonHasNamedEntry(value: unknown, name: string): boolean {
+  if (Array.isArray(value)) return value.some((entry) => jsonHasNamedEntry(entry, name));
+  if (!isRecord(value)) return false;
+  if (value.name === name || value.id === name) return true;
+  return Object.values(value).some((entry) => typeof entry === "object" && entry !== null && jsonHasNamedEntry(entry, name));
+}
+
+function jsonHasPlugin(value: unknown, name: string, source: string): boolean {
+  const reference = `${name}@${source}`;
+  if (typeof value === "string") return value === name || value === reference;
+  if (Array.isArray(value)) return value.some((entry) => jsonHasPlugin(entry, name, source));
+  if (!isRecord(value)) return false;
+  if (value.id === reference || value.pluginId === reference || value.name === name) return true;
+  return Object.values(value).some((entry) => jsonHasPlugin(entry, name, source));
 }
 
 function parseDeployOptions(args: string[], allowList: boolean): DeployOptions {
@@ -133,8 +217,8 @@ function parseDeployOptions(args: string[], allowList: boolean): DeployOptions {
   if (options.harness && !HARNESS_INSTALL_PATHS[options.harness]) {
     throw new Error(`unknown harness "${options.harness}"; available: ${Object.keys(HARNESS_INSTALL_PATHS).join(", ")}`);
   }
-  if (options.project && !["kiro-ide", "kiro-cli"].includes(options.harness)) {
-    throw new Error("--project requires --harness kiro-ide or --harness kiro-cli");
+  if (options.project && !["kiro-ide", "kiro-cli", "codebuddy", "qoder"].includes(options.harness)) {
+    throw new Error("--project requires --harness kiro-ide, kiro-cli, codebuddy, or qoder");
   }
   return options;
 }
@@ -205,7 +289,16 @@ function ensureAllDist(): Map<string, string> {
 function findInstallSource(harness: string, distRoot: string): string {
   const skill = resolve(distRoot, "skills/loeyae-aidlc");
   const agentSkill = resolve(distRoot, ".agents/skills/loeyae-aidlc");
-  const source = harness === "claude" ? distRoot : existsSync(skill) ? skill : existsSync(agentSkill) ? agentSkill : distRoot;
+  const pluginRoot = resolve(distRoot, "plugins/loeyae-aidlc");
+  const source = harness === "claude" || harness === "qoder" || harness === "codebuddy"
+    ? distRoot
+    : harness === "zcode"
+      ? pluginRoot
+      : existsSync(skill)
+        ? skill
+        : existsSync(agentSkill)
+          ? agentSkill
+          : distRoot;
   if (!existsSync(source)) throw new Error(`build output not found: ${source}`);
   return source;
 }
@@ -331,6 +424,201 @@ function unregisterClaudePlugin(deployment: ClaudeDeployment): void {
   if (removeStatus !== 0) throw new Error(`Claude Code marketplace unregister failed: ${CLAUDE_MARKETPLACE_NAME}`);
 }
 
+function requireProjectDirectory(projectTarget: string): string {
+  const project = resolve(projectTarget);
+  if (!existsSync(project) || !lstatSync(project).isDirectory() || lstatSync(project).isSymbolicLink()) {
+    throw new Error(`--project must be an existing, non-symlink directory: ${project}`);
+  }
+  return project;
+}
+
+function projectDeploymentKey(project: string): string {
+  return createHash("sha256").update(project).digest("hex").slice(0, 12);
+}
+
+function getCodeBuddyDeployment(projectTarget: string): CodeBuddyDeployment {
+  const project = projectTarget ? requireProjectDirectory(projectTarget) : "";
+  const key = project ? `project-${projectDeploymentKey(project)}` : "user";
+  const marketplaceName = project ? `${PLUGIN_MARKETPLACE_NAME}-${projectDeploymentKey(project)}` : PLUGIN_MARKETPLACE_NAME;
+  const marketplaceRoot = project ? resolve(HOST_ASSET_ROOT, `codebuddy/${key}`) : CODEBUDDY_USER_MARKETPLACE_ROOT;
+  return {
+    marketplaceRoot,
+    marketplaceName,
+    pluginRoot: resolve(marketplaceRoot, "plugins/loeyae-aidlc"),
+    pluginRef: `${PLUGIN_NAME}@${marketplaceName}`,
+    scope: project ? "project" : "user",
+    cwd: project || process.cwd(),
+  };
+}
+
+function createCodeBuddyMarketplaceSource(distRoot: string, marketplaceName: string): { temporaryRoot: string; source: string } {
+  const temporaryRoot = mkdtempSync(resolve(process.env.TMPDIR || tmpdir(), "loeyae-aidlc-codebuddy-"));
+  const source = resolve(temporaryRoot, "marketplace");
+  cpSync(distRoot, source, { recursive: true });
+  const catalogPath = resolve(source, ".codebuddy-plugin/marketplace.json");
+  const catalog = JSON.parse(readFileSync(catalogPath, "utf8"));
+  catalog.name = marketplaceName;
+  writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`, { mode: 0o600 });
+  return { temporaryRoot, source };
+}
+
+function codeBuddyCli(): string {
+  return resolveHostCli("CODEBUDDY_CLI", "codebuddy", [
+    "/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
+    "/Applications/CodeBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
+  ]);
+}
+
+function registerCodeBuddyPlugin(deployment: CodeBuddyDeployment): void {
+  const cli = codeBuddyCli();
+  if (runExternal(cli, ["plugin", "validate", deployment.pluginRoot], deployment.cwd) !== 0) {
+    throw new Error(`CodeBuddy plugin validation failed: ${deployment.pluginRoot}`);
+  }
+  const marketplaces = runExternalJson(cli, ["plugin", "marketplace", "list"], deployment.cwd, "CodeBuddy marketplace list");
+  const alreadyRegistered = jsonHasNamedEntry(marketplaces, deployment.marketplaceName);
+  if (alreadyRegistered) {
+    if (runExternal(cli, ["plugin", "marketplace", "update", deployment.marketplaceName], deployment.cwd) !== 0) {
+      throw new Error(`CodeBuddy marketplace update failed: ${deployment.marketplaceName}`);
+    }
+  } else if (runExternal(cli, ["plugin", "marketplace", "add", deployment.marketplaceRoot, "--name", deployment.marketplaceName], deployment.cwd) !== 0) {
+    throw new Error(`CodeBuddy marketplace registration failed: ${deployment.marketplaceRoot}`);
+  }
+
+  const installStatus = runExternal(cli, ["plugin", "install", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd);
+  const updateStatus = runExternal(cli, ["plugin", "update", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd);
+  if (updateStatus !== 0) {
+    if (installStatus === 0) runExternal(cli, ["plugin", "uninstall", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd);
+    if (!alreadyRegistered) runExternal(cli, ["plugin", "marketplace", "remove", deployment.marketplaceName], deployment.cwd);
+    throw new Error(`CodeBuddy plugin install/update failed: ${deployment.pluginRef}`);
+  }
+  if (runExternal(cli, ["plugin", "enable", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd) !== 0) {
+    if (installStatus === 0) runExternal(cli, ["plugin", "uninstall", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd);
+    if (!alreadyRegistered) runExternal(cli, ["plugin", "marketplace", "remove", deployment.marketplaceName], deployment.cwd);
+    throw new Error(`CodeBuddy plugin enable failed: ${deployment.pluginRef}`);
+  }
+  console.log(`🔌 CodeBuddy plugin registered and refreshed (${deployment.scope} scope): ${deployment.pluginRef}`);
+}
+
+function unregisterCodeBuddyPlugin(deployment: CodeBuddyDeployment): void {
+  const cli = codeBuddyCli();
+  const plugins = runExternalJson(cli, ["plugin", "list", "--json"], deployment.cwd, "CodeBuddy plugin list");
+  if (jsonHasPlugin(plugins, PLUGIN_NAME, deployment.marketplaceName)) {
+    const status = runExternal(cli, ["plugin", "uninstall", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd);
+    if (status !== 0) throw new Error(`CodeBuddy plugin unregister failed: ${deployment.pluginRef}`);
+  }
+  const marketplaces = runExternalJson(cli, ["plugin", "marketplace", "list"], deployment.cwd, "CodeBuddy marketplace list");
+  if (jsonHasNamedEntry(marketplaces, deployment.marketplaceName)) {
+    const status = runExternal(cli, ["plugin", "marketplace", "remove", deployment.marketplaceName], deployment.cwd);
+    if (status !== 0) throw new Error(`CodeBuddy marketplace unregister failed: ${deployment.marketplaceName}`);
+  }
+}
+
+function getQoderDeployment(projectTarget: string): QoderDeployment {
+  const project = projectTarget ? requireProjectDirectory(projectTarget) : "";
+  const key = project ? `project-${projectDeploymentKey(project)}` : "user";
+  return {
+    pluginRoot: project ? resolve(HOST_ASSET_ROOT, `qoder/${key}/loeyae-aidlc`) : QODER_USER_PLUGIN_ROOT,
+    scope: project ? "project" : "user",
+    cwd: project || process.cwd(),
+  };
+}
+
+function qoderCli(): string {
+  return resolveHostCli("QODER_CLI", "qoder");
+}
+
+function registerQoderPlugin(deployment: QoderDeployment): void {
+  const cli = qoderCli();
+  if (runExternal(cli, ["plugins", "validate", deployment.pluginRoot], deployment.cwd) !== 0) {
+    throw new Error(`Qoder CLI plugin validation failed: ${deployment.pluginRoot}`);
+  }
+  const pluginsBefore = runExternalJson(cli, ["plugins", "list", "--json"], deployment.cwd, "Qoder CLI plugin list");
+  const alreadyInstalled = jsonHasPlugin(pluginsBefore, PLUGIN_NAME, "local");
+  if (runExternal(cli, ["plugins", "install", deployment.pluginRoot, "--scope", deployment.scope], deployment.cwd) !== 0) {
+    throw new Error(`Qoder CLI plugin install failed: ${deployment.pluginRoot}`);
+  }
+  if (runExternal(cli, ["plugins", "enable", PLUGIN_NAME, "--scope", deployment.scope], deployment.cwd) !== 0) {
+    if (!alreadyInstalled) runExternal(cli, ["plugins", "uninstall", PLUGIN_NAME, "--scope", deployment.scope], deployment.cwd);
+    throw new Error(`Qoder CLI plugin enable failed: ${PLUGIN_NAME}`);
+  }
+  console.log(`🔌 Qoder CLI plugin installed and enabled (${deployment.scope} scope): ${PLUGIN_NAME}@local`);
+}
+
+function unregisterQoderPlugin(deployment: QoderDeployment): void {
+  const cli = qoderCli();
+  const plugins = runExternalJson(cli, ["plugins", "list", "--json"], deployment.cwd, "Qoder CLI plugin list");
+  if (!jsonHasPlugin(plugins, PLUGIN_NAME, "local")) return;
+  const status = runExternal(cli, ["plugins", "uninstall", PLUGIN_NAME, "--scope", deployment.scope], deployment.cwd);
+  if (status !== 0) throw new Error(`Qoder CLI plugin unregister failed: ${PLUGIN_NAME}`);
+}
+
+function isZcodeHookGroup(group: unknown): boolean {
+  if (!isRecord(group) || !Array.isArray(group.hooks)) return false;
+  return group.hooks.some((hook) => isRecord(hook)
+    && hook.command === "loeyae-aidlc"
+    && Array.isArray(hook.args)
+    && JSON.stringify(hook.args) === JSON.stringify(["hook", "--format", "zcode"]));
+}
+
+function registerZcodeConfig(pluginRoot: string): void {
+  const hookDefaults = JSON.parse(readFileSync(resolve(pluginRoot, "hooks/hooks.json"), "utf8"));
+  const mcpDefaults = JSON.parse(readFileSync(resolve(pluginRoot, ".mcp.json"), "utf8"));
+  const desiredGroups = Array.isArray(hookDefaults?.hooks?.Stop) ? hookDefaults.hooks.Stop : [];
+  const desiredServers = isRecord(mcpDefaults.mcpServers) ? mcpDefaults.mcpServers : {};
+  const result = updateSharedJson(ZCODE_GLOBAL_CONFIG_PATH, (current) => {
+    if (current.hooks !== undefined && !isRecord(current.hooks)) throw new Error(`ZCode hooks config must be an object: ${ZCODE_GLOBAL_CONFIG_PATH}`);
+    const hooks = isRecord(current.hooks) ? { ...current.hooks } : {};
+    if (hooks.events !== undefined && !isRecord(hooks.events)) throw new Error(`ZCode hook events must be an object: ${ZCODE_GLOBAL_CONFIG_PATH}`);
+    const events = isRecord(hooks.events) ? { ...hooks.events } : {};
+    const existingStop = Array.isArray(events.Stop) ? events.Stop : [];
+    const retainedStop = existingStop.filter((group) => !isZcodeHookGroup(group));
+    const nextStop = [...retainedStop, ...desiredGroups];
+    events.Stop = nextStop;
+
+    if (current.mcp !== undefined && !isRecord(current.mcp)) throw new Error(`ZCode MCP config must be an object: ${ZCODE_GLOBAL_CONFIG_PATH}`);
+    const mcp = isRecord(current.mcp) ? { ...current.mcp } : {};
+    if (mcp.servers !== undefined && !isRecord(mcp.servers)) throw new Error(`ZCode MCP servers must be an object: ${ZCODE_GLOBAL_CONFIG_PATH}`);
+    const servers = isRecord(mcp.servers) ? { ...mcp.servers } : {};
+    const added: string[] = [];
+    const preserved: string[] = [];
+    for (const [name, server] of Object.entries(desiredServers)) {
+      if (servers[name] === undefined) {
+        servers[name] = server;
+        added.push(name);
+      } else {
+        preserved.push(name);
+      }
+    }
+    return {
+      value: { ...current, hooks: { ...hooks, enabled: true, events }, mcp: { ...mcp, servers } },
+      result: { hookChanged: JSON.stringify(existingStop) !== JSON.stringify(nextStop) || hooks.enabled !== true, added, preserved },
+    };
+  });
+  console.log(result.hookChanged ? "🔒 Registered ZCode user Stop Hook." : "🔒 ZCode user Stop Hook already current.");
+  console.log(result.added.length
+    ? `🔌 Added ZCode MCP services: ${result.added.join(", ")}`
+    : `🔌 ZCode MCP services already present; preserved: ${result.preserved.join(", ") || "none"}`);
+}
+
+function unregisterZcodeConfig(): void {
+  if (!existsSync(ZCODE_GLOBAL_CONFIG_PATH)) return;
+  const removed = updateSharedJson(ZCODE_GLOBAL_CONFIG_PATH, (current) => {
+    if (!isRecord(current.hooks)) return { value: current, result: 0 };
+    const hooks = { ...current.hooks };
+    if (!isRecord(hooks.events)) return { value: current, result: 0 };
+    const events = { ...hooks.events };
+    const existingStop = Array.isArray(events.Stop) ? events.Stop : [];
+    const retainedStop = existingStop.filter((group) => !isZcodeHookGroup(group));
+    const count = existingStop.length - retainedStop.length;
+    if (retainedStop.length) events.Stop = retainedStop;
+    else delete events.Stop;
+    if (Object.keys(events).length) hooks.events = events;
+    else delete hooks.events;
+    return { value: { ...current, hooks }, result: count };
+  });
+  if (removed) console.log("🔓 Removed ZCode user Stop Hook; shared MCP services were preserved.");
+}
+
 function registerKiroMcp(): void {
   const sourcePath = resolve(ROOT, "harness/kiro-crew/mcp.json");
   const targetPath = resolve(HOME, ".kiro/settings/mcp.json");
@@ -442,6 +730,37 @@ function installOne(harness: string, customTarget: string, projectTarget: string
     onLegacyBackup: reportLegacyBackup,
   };
 
+  if (harness === "codebuddy" && !customTarget) {
+    const deployment = getCodeBuddyDeployment(projectTarget);
+    const marketplace = createCodeBuddyMarketplaceSource(distRoot, deployment.marketplaceName);
+    try {
+      installManagedAssets(owner, [
+        { source: marketplace.source, target: deployment.marketplaceRoot, kind: "directory" },
+      ], () => registerCodeBuddyPlugin(deployment), migrationOptions);
+    } finally {
+      rmSync(marketplace.temporaryRoot, { recursive: true, force: true });
+    }
+    console.log(`✅ Installed loeyae-aidlc v${PKG.version} (${harness}, ${deployment.scope}) → ${deployment.marketplaceRoot}`);
+    return;
+  }
+
+  if (harness === "qoder" && !customTarget) {
+    const deployment = getQoderDeployment(projectTarget);
+    installManagedAssets(owner, [
+      { source, target: deployment.pluginRoot, kind: "directory" },
+    ], () => registerQoderPlugin(deployment), migrationOptions);
+    console.log(`✅ Installed loeyae-aidlc v${PKG.version} (${harness}, ${deployment.scope}) → ${deployment.pluginRoot}`);
+    return;
+  }
+
+  if (harness === "zcode" && !customTarget) {
+    installManagedAssets(owner, [
+      { source, target: ZCODE_GLOBAL_SKILL_ROOT, kind: "directory" },
+    ], () => registerZcodeConfig(ZCODE_GLOBAL_SKILL_ROOT), migrationOptions);
+    console.log(`✅ Installed loeyae-aidlc v${PKG.version} (${harness}) → ${ZCODE_GLOBAL_SKILL_ROOT}`);
+    return;
+  }
+
   if (harness === "opencode" && !customTarget) {
     const sourceRoot = resolve(distRoot, ".opencode");
     const pluginSource = resolve(sourceRoot, "plugins/loeyae-aidlc.js");
@@ -481,6 +800,23 @@ function installOne(harness: string, customTarget: string, projectTarget: string
 
 function uninstallOne(harness: string, customTarget: string, projectTarget: string): void {
   const owner = `loeyae-aidlc:${harness}`;
+  if (harness === "codebuddy" && !customTarget) {
+    const deployment = getCodeBuddyDeployment(projectTarget);
+    const removed = uninstallManagedAssets(owner, [deployment.marketplaceRoot], () => unregisterCodeBuddyPlugin(deployment));
+    console.log(removed ? `✅ Uninstalled ${harness} (${deployment.scope})` : `ℹ️  ${harness} is not owned by this installer; preserved existing files.`);
+    return;
+  }
+  if (harness === "qoder" && !customTarget) {
+    const deployment = getQoderDeployment(projectTarget);
+    const removed = uninstallManagedAssets(owner, [deployment.pluginRoot], () => unregisterQoderPlugin(deployment));
+    console.log(removed ? `✅ Uninstalled ${harness} (${deployment.scope})` : `ℹ️  ${harness} is not owned by this installer; preserved existing files.`);
+    return;
+  }
+  if (harness === "zcode" && !customTarget) {
+    const removed = uninstallManagedAssets(owner, [ZCODE_GLOBAL_SKILL_ROOT], unregisterZcodeConfig);
+    console.log(removed ? `✅ Uninstalled ${harness}` : `ℹ️  ${harness} is not owned by this installer; preserved existing files.`);
+    return;
+  }
   if (harness === "opencode" && !customTarget) {
     const removed = uninstallManagedAssets(owner, [OPENCODE_GLOBAL_ASSET_ROOT, OPENCODE_GLOBAL_PLUGIN_PATH]);
     console.log(removed ? `✅ Uninstalled ${harness}` : `ℹ️  ${harness} is not owned by this installer; preserved existing files.`);
@@ -566,8 +902,8 @@ Commands:
 
 Install/uninstall options:
   --harness <name>  Target platform (default: kiro-crew)
-  --target <path>   Dedicated install directory; Claude interprets it as project root
-  --project <path>  Kiro IDE/CLI project Hook root (requires an explicit Kiro harness)
+  --target <path>   Dedicated bundle directory; Claude interprets it as project root
+  --project <path>  Kiro project Hook root, or CodeBuddy/Qoder project plugin scope
   --all             Process every platform and return nonzero if any platform fails
   --list            Show available platforms (install only)
   --migrate-legacy  Preserve and replace recognized pre-manifest installs (install only)
@@ -575,6 +911,8 @@ Install/uninstall options:
 Examples:
   loeyae-aidlc install
   loeyae-aidlc install --harness kiro-ide --project /absolute/path/to/project
+  loeyae-aidlc install --harness codebuddy --project /absolute/path/to/project
+  loeyae-aidlc install --harness qoder --project /absolute/path/to/project
   loeyae-aidlc uninstall --harness kiro-ide --project /absolute/path/to/project
   loeyae-aidlc install --all
   loeyae-aidlc install --all --migrate-legacy
@@ -591,7 +929,7 @@ function main(): void {
     case "evidence": run("core/tools/aidlc-evidence.ts", rest); break;
     case "check": run("core/tools/aidlc-semantic-checks.ts", rest); break;
     case "diagram-provider": run("core/tools/aidlc-diagram-provider.ts", rest); break;
-    case "hook": run("core/tools/aidlc-platform-hook.ts", rest); break;
+    case "hook": run("core/tools/aidlc-platform-hook.ts", rest, readFileSync(0, "utf8")); break;
     case "install": deploy(rest, "install"); break;
     case "uninstall": deploy(rest, "uninstall"); break;
     case "build": run("scripts/build.ts", rest); break;

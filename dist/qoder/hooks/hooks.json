@@ -1,0 +1,16 @@
+{
+  "description": "Loeyae AI-DLC deterministic stage completion gate",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "loeyae-aidlc hook --format qoder-cli",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

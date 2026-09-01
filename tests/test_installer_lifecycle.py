@@ -49,6 +49,60 @@ def write_recognized_legacy_runtime(target: Path, note: str = "preserve legacy c
     return marker
 
 
+def write_fake_plugin_hosts(root: Path) -> dict:
+    fake_bin = root / "plugin-host-bin"
+    fake_bin.mkdir(exist_ok=True)
+    codebuddy_log = root / "codebuddy-commands.log"
+    codebuddy_market_state = root / "codebuddy-market-state"
+    codebuddy_plugin_state = root / "codebuddy-plugin-state"
+    codebuddy = fake_bin / "codebuddy"
+    codebuddy.write_text(
+        "#!/bin/sh\n"
+        "printf '%s|%s\\n' \"$PWD\" \"$*\" >> \"$CODEBUDDY_LOG\"\n"
+        "if [ \"$1\" = plugin ] && [ \"$2\" = marketplace ] && [ \"$3\" = list ]; then\n"
+        "  if [ -f \"$CODEBUDDY_MARKET_STATE\" ]; then name=$(cat \"$CODEBUDDY_MARKET_STATE\"); printf '[{\"name\":\"%s\"}]\\n' \"$name\"; else printf '[]\\n'; fi\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = plugin ] && [ \"$2\" = marketplace ] && [ \"$3\" = add ]; then printf '%s' \"$6\" > \"$CODEBUDDY_MARKET_STATE\"; fi\n"
+        "if [ \"$1\" = plugin ] && [ \"$2\" = marketplace ] && [ \"$3\" = remove ]; then rm -f \"$CODEBUDDY_MARKET_STATE\"; fi\n"
+        "if [ \"$1\" = plugin ] && [ \"$2\" = list ]; then\n"
+        "  if [ -f \"$CODEBUDDY_PLUGIN_STATE\" ]; then ref=$(cat \"$CODEBUDDY_PLUGIN_STATE\"); printf '[\"%s\"]\\n' \"$ref\"; else printf '[]\\n'; fi\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = plugin ] && [ \"$2\" = install ]; then printf '%s' \"$3\" > \"$CODEBUDDY_PLUGIN_STATE\"; fi\n"
+        "if [ \"$1\" = plugin ] && [ \"$2\" = update ] && [ \"${CODEBUDDY_UPDATE_FAIL:-}\" = 1 ]; then exit 31; fi\n"
+        "if [ \"$1\" = plugin ] && [ \"$2\" = uninstall ]; then rm -f \"$CODEBUDDY_PLUGIN_STATE\"; fi\n"
+        "exit 0\n"
+    )
+    codebuddy.chmod(0o755)
+
+    qoder_log = root / "qoder-commands.log"
+    qoder_plugin_state = root / "qoder-plugin-state"
+    qoder = fake_bin / "qoder"
+    qoder.write_text(
+        "#!/bin/sh\n"
+        "printf '%s|%s\\n' \"$PWD\" \"$*\" >> \"$QODER_LOG\"\n"
+        "if [ \"$1\" = plugins ] && [ \"$2\" = list ]; then\n"
+        "  if [ -f \"$QODER_PLUGIN_STATE\" ]; then printf '[\"loeyae-aidlc@local\"]\\n'; else printf '[]\\n'; fi\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = plugins ] && [ \"$2\" = install ] && [ \"${QODER_INSTALL_FAIL:-}\" = 1 ]; then exit 32; fi\n"
+        "if [ \"$1\" = plugins ] && [ \"$2\" = install ]; then : > \"$QODER_PLUGIN_STATE\"; fi\n"
+        "if [ \"$1\" = plugins ] && [ \"$2\" = uninstall ]; then rm -f \"$QODER_PLUGIN_STATE\"; fi\n"
+        "exit 0\n"
+    )
+    qoder.chmod(0o755)
+    return {
+        "CODEBUDDY_CLI": str(codebuddy),
+        "CODEBUDDY_LOG": str(codebuddy_log),
+        "CODEBUDDY_MARKET_STATE": str(codebuddy_market_state),
+        "CODEBUDDY_PLUGIN_STATE": str(codebuddy_plugin_state),
+        "QODER_CLI": str(qoder),
+        "QODER_LOG": str(qoder_log),
+        "QODER_PLUGIN_STATE": str(qoder_plugin_state),
+    }
+
+
 def test_managed_upgrade_rollback_and_uninstall() -> None:
     with tempfile.TemporaryDirectory(prefix="aidlc-installer-managed-", dir=str(SCRATCH_ROOT)) as directory:
         home = Path(directory) / "home"
@@ -149,6 +203,7 @@ def test_unowned_targets_and_argument_contracts() -> None:
             ["install", "--all", "--harness", "kiro-crew"],
             ["install", "--harness", "kiro-ide", "--target", str(target), "--project", str(target)],
             ["install", "--project", str(target)],
+            ["install", "--harness", "zcode", "--project", str(target)],
             ["install", "--harness", "kiro-crew", "--harness", "kiro-cli"],
             ["install", "--list", "--migrate-legacy"],
             ["install", "--migrate-legacy", "--migrate-legacy"],
@@ -226,6 +281,97 @@ def test_claude_activation_refreshes_existing_plugin() -> None:
         assert not list(state.glob("*.json"))
 
 
+def test_new_plugin_host_lifecycles() -> None:
+    with tempfile.TemporaryDirectory(prefix="aidlc-installer-new-hosts-", dir=str(SCRATCH_ROOT)) as directory:
+        root = Path(directory)
+        home = root / "home"
+        project = root / "project"
+        home.mkdir()
+        project.mkdir()
+        host_env = write_fake_plugin_hosts(root)
+
+        zcode_config_path = home / ".zcode" / "cli" / "config.json"
+        zcode_config_path.parent.mkdir(parents=True)
+        custom_hook = {"hooks": [{"type": "process", "command": "user-hook", "args": []}]}
+        custom_figma = {"type": "http", "url": "https://example.test/custom-figma"}
+        zcode_config_path.write_text(json.dumps({
+            "userSetting": "preserve",
+            "hooks": {"enabled": False, "events": {"Stop": [custom_hook]}},
+            "mcp": {"servers": {"figma": custom_figma}},
+        }))
+
+        for harness in ["codebuddy", "qoder", "zcode"]:
+            first = run_cli(home, ["install", "--harness", harness], host_env)
+            assert first.returncode == 0, first.stdout + first.stderr
+            second = run_cli(home, ["install", "--harness", harness], host_env)
+            assert second.returncode == 0, second.stdout + second.stderr
+
+        codebuddy_log = Path(host_env["CODEBUDDY_LOG"]).read_text().splitlines()
+        assert any("plugin marketplace add " in line for line in codebuddy_log)
+        assert any("plugin marketplace update loeyae-aidlc" in line for line in codebuddy_log)
+        assert sum("plugin update loeyae-aidlc@loeyae-aidlc --scope user" in line for line in codebuddy_log) == 2
+        assert sum("plugin enable loeyae-aidlc@loeyae-aidlc --scope user" in line for line in codebuddy_log) == 2
+
+        qoder_log = Path(host_env["QODER_LOG"]).read_text().splitlines()
+        assert sum("plugins install " in line and "--scope user" in line for line in qoder_log) == 2
+        assert sum("plugins enable loeyae-aidlc --scope user" in line for line in qoder_log) == 2
+
+        zcode_config = json.loads(zcode_config_path.read_text())
+        stop_groups = zcode_config["hooks"]["events"]["Stop"]
+        assert custom_hook in stop_groups
+        assert sum(
+            group.get("hooks", [{}])[0].get("args") == ["hook", "--format", "zcode"]
+            for group in stop_groups
+        ) == 1
+        assert zcode_config["hooks"]["enabled"] is True
+        assert zcode_config["mcp"]["servers"]["figma"] == custom_figma
+        assert set(zcode_config["mcp"]["servers"]) == {"loeyae-skills", "awesome-design", "figma", "ssot"}
+        assert zcode_config["userSetting"] == "preserve"
+
+        for harness in ["codebuddy", "qoder", "zcode"]:
+            removed = run_cli(home, ["uninstall", "--harness", harness], host_env)
+            assert removed.returncode == 0, removed.stdout + removed.stderr
+
+        assert not (home / ".config" / "loeyae-aidlc" / "host-assets" / "codebuddy" / "user").exists()
+        assert not (home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc").exists()
+        assert not (home / ".zcode" / "skills" / "loeyae-aidlc").exists()
+        zcode_after = json.loads(zcode_config_path.read_text())
+        assert zcode_after["hooks"]["events"]["Stop"] == [custom_hook]
+        assert set(zcode_after["mcp"]["servers"]) == {"loeyae-skills", "awesome-design", "figma", "ssot"}
+
+        for harness in ["codebuddy", "qoder"]:
+            installed = run_cli(home, ["install", "--harness", harness, "--project", str(project)], host_env)
+            assert installed.returncode == 0, installed.stdout + installed.stderr
+        codebuddy_project_lines = Path(host_env["CODEBUDDY_LOG"]).read_text().splitlines()
+        qoder_project_lines = Path(host_env["QODER_LOG"]).read_text().splitlines()
+        assert any(line.startswith(f"{project}|") and "--scope project" in line for line in codebuddy_project_lines)
+        assert any(line.startswith(f"{project}|") and "--scope project" in line for line in qoder_project_lines)
+        assert len(list((home / ".config" / "loeyae-aidlc" / "host-assets" / "codebuddy").glob("project-*"))) == 1
+        assert len(list((home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder").glob("project-*"))) == 1
+
+        for harness in ["codebuddy", "qoder"]:
+            removed = run_cli(home, ["uninstall", "--harness", harness, "--project", str(project)], host_env)
+            assert removed.returncode == 0, removed.stdout + removed.stderr
+
+        failed_codebuddy_home = root / "failed-codebuddy-home"
+        failed_codebuddy_home.mkdir()
+        failed_codebuddy = run_cli(failed_codebuddy_home, ["install", "--harness", "codebuddy"], {
+            **host_env,
+            "CODEBUDDY_UPDATE_FAIL": "1",
+        })
+        assert failed_codebuddy.returncode != 0 and "install/update failed" in failed_codebuddy.stderr
+        assert not (failed_codebuddy_home / ".config" / "loeyae-aidlc" / "host-assets" / "codebuddy" / "user").exists()
+
+        failed_qoder_home = root / "failed-qoder-home"
+        failed_qoder_home.mkdir()
+        failed_qoder = run_cli(failed_qoder_home, ["install", "--harness", "qoder"], {
+            **host_env,
+            "QODER_INSTALL_FAIL": "1",
+        })
+        assert failed_qoder.returncode != 0 and "plugin install failed" in failed_qoder.stderr
+        assert not (failed_qoder_home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc").exists()
+
+
 def test_install_all_aggregates_failures_and_continues() -> None:
     with tempfile.TemporaryDirectory(prefix="aidlc-installer-all-", dir=str(SCRATCH_ROOT)) as directory:
         root = Path(directory)
@@ -239,7 +385,11 @@ def test_install_all_aggregates_failures_and_continues() -> None:
         claude.write_text("#!/bin/sh\nexit 23\n")
         claude.chmod(0o755)
         path = f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"
-        result = run_cli(home, ["install", "--all", "--migrate-legacy"], {"PATH": path})
+        host_env = write_fake_plugin_hosts(root)
+        result = run_cli(home, ["install", "--all", "--migrate-legacy"], {
+            **host_env,
+            "PATH": path,
+        })
         assert result.returncode != 0
         assert "install --all failed" in result.stderr
         assert "claude" in result.stderr
@@ -252,6 +402,9 @@ def test_install_all_aggregates_failures_and_continues() -> None:
         # Later platforms still ran after the Claude failure.
         assert (home / ".config" / "opencode" / "plugins" / "loeyae-aidlc.js").is_file()
         assert (home / ".agents" / "skills" / "loeyae-aidlc").is_dir()
+        assert (home / ".config" / "loeyae-aidlc" / "host-assets" / "codebuddy" / "user").is_dir()
+        assert (home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc").is_dir()
+        assert (home / ".zcode" / "skills" / "loeyae-aidlc").is_dir()
 
 
 if __name__ == "__main__":
@@ -259,5 +412,6 @@ if __name__ == "__main__":
     test_unowned_targets_and_argument_contracts()
     test_opencode_multi_asset_transaction_and_uninstall()
     test_claude_activation_refreshes_existing_plugin()
+    test_new_plugin_host_lifecycles()
     test_install_all_aggregates_failures_and_continues()
     print("Installer lifecycle tests passed")
