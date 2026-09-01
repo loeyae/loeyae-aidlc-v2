@@ -5,13 +5,13 @@
     "url": "https://github.com/loeyae"
   },
   "description": "Loeyae AI-DLC v2 plugin marketplace for CodeBuddy.",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "plugins": [
     {
       "name": "loeyae-aidlc",
       "source": "./plugins/loeyae-aidlc",
       "description": "Loeyae AI-DLC v2 engine-driven lifecycle with enforced stage gates.",
-      "version": "2.1.2"
+      "version": "2.1.3"
     }
   ]
 }
