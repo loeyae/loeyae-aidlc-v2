@@ -171,7 +171,13 @@ function kiroCrewKnownPaths(): string[] {
   const dataHome = process.env.KIROCREW_HOME?.trim() || resolve(HOME, ".kiro/crew");
   const venvRoot = process.env.KIROCREW_VENV?.trim() || resolve(HOME, ".kiro/crew-venv");
   const localAppData = process.env.LOCALAPPDATA?.trim();
+  const programFilesRoots = [
+    process.env.ProgramW6432?.trim(),
+    process.env.ProgramFiles?.trim(),
+    process.env["ProgramFiles(x86)"]?.trim(),
+  ].filter((root): root is string => Boolean(root));
   return [
+    ...programFilesRoots.map((root) => resolve(root, "KiroCrew/KiroCrew.exe")),
     ...(localAppData ? [resolve(localAppData, "Programs/KiroCrew/KiroCrew.exe")] : []),
     resolve(dataHome, "channel"),
     resolve(venvRoot, "Scripts/kirocrew.exe"),

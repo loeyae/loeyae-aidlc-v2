@@ -186,7 +186,7 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 loeyae-aidlc install        # 重新部署（或 --all 全部）
 ```
 
-`install --all` 会先检测当前环境，只安装实际存在的宿主：CLI 类宿主通过 PATH（CodeBuddy/Qoder 也支持 `CODEBUDDY_CLI`/`QODER_CLI`）发现，macOS GUI 宿主同时检查标准 `/Applications` 和用户 `~/Applications` App bundle。Windows KiroCrew 桌面安装还会检查 `%LOCALAPPDATA%\Programs\KiroCrew\KiroCrew.exe`；KiroCrew CLI 安装则检查 `~/.kiro/crew/channel` 及 `~/.kiro/crew-venv`（并遵循 `KIROCREW_HOME`/`KIROCREW_VENV`）。未检测到的平台会明确列出并跳过；非标准安装位置或自动检测遗漏时，仍可使用 `--harness <name>` 显式安装。
+`install --all` 会先检测当前环境，只安装实际存在的宿主：CLI 类宿主通过 PATH（CodeBuddy/Qoder 也支持 `CODEBUDDY_CLI`/`QODER_CLI`）发现，macOS GUI 宿主同时检查标准 `/Applications` 和用户 `~/Applications` App bundle。Windows KiroCrew 桌面安装会检查 `%ProgramFiles%\KiroCrew\KiroCrew.exe`、`%ProgramW6432%\KiroCrew\KiroCrew.exe` 及 per-user `%LOCALAPPDATA%\Programs\KiroCrew\KiroCrew.exe`；KiroCrew CLI 安装则检查 `~/.kiro/crew/channel` 及 `~/.kiro/crew-venv`（并遵循 `KIROCREW_HOME`/`KIROCREW_VENV`）。未检测到的平台会明确列出并跳过；非标准安装位置或自动检测遗漏时，仍可使用 `--harness <name>` 显式安装。
 
 检测完成后只检查选中平台的预构建产物；若任一选中产物缺失或过期，仍执行一次全平台构建以保持共享 graph 和 distribution parity 一致，不会因 graph 时间戳刷新而逐平台重复重建。
 

@@ -42,6 +42,12 @@ def isolated_host_env(root: Path, fake_bin: Path) -> dict:
     return {
         "PATH": f"{fake_bin}{os.pathsep}/usr/bin:/bin",
         "AIDLC_APPLICATIONS_ROOT": str(applications),
+        "KIROCREW_HOME": "",
+        "KIROCREW_VENV": "",
+        "LOCALAPPDATA": "",
+        "ProgramW6432": "",
+        "ProgramFiles": "",
+        "ProgramFiles(x86)": "",
     }
 
 
@@ -390,6 +396,29 @@ def test_new_plugin_host_lifecycles() -> None:
         assert not (failed_qoder_home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc").exists()
 
 
+def test_install_all_detects_machine_wide_windows_kiro_crew() -> None:
+    with tempfile.TemporaryDirectory(prefix="aidlc-installer-windows-crew-", dir=str(SCRATCH_ROOT)) as directory:
+        root = Path(directory)
+        home = root / "home"
+        fake_bin = root / "bin"
+        program_files = root / "Program Files"
+        kiro_crew_executable = program_files / "KiroCrew" / "KiroCrew.exe"
+        home.mkdir()
+        fake_bin.mkdir()
+        kiro_crew_executable.parent.mkdir(parents=True)
+        kiro_crew_executable.write_text("fake machine-wide Windows KiroCrew executable")
+        env = isolated_host_env(root, fake_bin)
+        env["ProgramFiles"] = str(program_files)
+
+        installed = run_cli(home, ["install", "--all"], env)
+        assert installed.returncode == 0, installed.stdout + installed.stderr
+        detected_line = next(line for line in installed.stdout.splitlines() if "Detected supported hosts:" in line)
+        assert f"kiro-crew ({kiro_crew_executable})" in detected_line
+        assert (home / ".kiro" / "crew" / "skills" / "loeyae-aidlc").is_dir()
+        state = home / ".config" / "loeyae-aidlc" / "installations"
+        assert len(list(state.glob("*.json"))) == 1
+
+
 def test_install_all_detects_hosts_and_uninstall_all_uses_ownership() -> None:
     with tempfile.TemporaryDirectory(prefix="aidlc-installer-detected-all-", dir=str(SCRATCH_ROOT)) as directory:
         root = Path(directory)
@@ -482,6 +511,7 @@ if __name__ == "__main__":
     test_opencode_multi_asset_transaction_and_uninstall()
     test_claude_activation_refreshes_existing_plugin()
     test_new_plugin_host_lifecycles()
+    test_install_all_detects_machine_wide_windows_kiro_crew()
     test_install_all_detects_hosts_and_uninstall_all_uses_ownership()
     test_install_all_aggregates_failures_and_continues()
     print("Installer lifecycle tests passed")
