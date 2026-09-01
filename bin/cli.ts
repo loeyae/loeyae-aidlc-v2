@@ -21,7 +21,8 @@ import { tmpdir } from "os";
 import { updateMcpConfig } from "../core/tools/aidlc-mcp-config";
 import {
   installManagedAssets,
-  ManagedAsset,
+  type LegacyInstallBackup,
+  type ManagedAsset,
   uninstallManagedAssets,
   updateSharedJson,
 } from "../core/tools/aidlc-installer";
@@ -64,6 +65,7 @@ interface DeployOptions {
   project: string;
   all: boolean;
   list: boolean;
+  migrateLegacy: boolean;
 }
 
 interface ClaudeDeployment {
@@ -101,7 +103,7 @@ function runExternal(command: string, args: string[], cwd: string): number {
 }
 
 function parseDeployOptions(args: string[], allowList: boolean): DeployOptions {
-  const options: DeployOptions = { harness: "", target: "", project: "", all: false, list: false };
+  const options: DeployOptions = { harness: "", target: "", project: "", all: false, list: false, migrateLegacy: false };
   const seen = new Set<string>();
   for (let index = 0; index < args.length; index++) {
     const argument = args[index];
@@ -113,17 +115,19 @@ function parseDeployOptions(args: string[], allowList: boolean): DeployOptions {
       if (argument === "--harness") options.harness = value;
       if (argument === "--target") options.target = value;
       if (argument === "--project") options.project = value;
-    } else if (argument === "--all" || argument === "--list") {
+    } else if (["--all", "--list", "--migrate-legacy"].includes(argument)) {
       if (seen.has(argument)) throw new Error(`duplicate option: ${argument}`);
       seen.add(argument);
       if (argument === "--all") options.all = true;
       if (argument === "--list") options.list = true;
+      if (argument === "--migrate-legacy") options.migrateLegacy = true;
     } else {
       throw new Error(`unknown deploy option: ${argument}`);
     }
   }
   if (options.list && !allowList) throw new Error("--list is only valid with install");
-  if (options.list && (options.harness || options.target || options.project || options.all)) throw new Error("--list cannot be combined with other install options");
+  if (options.migrateLegacy && !allowList) throw new Error("--migrate-legacy is only valid with install");
+  if (options.list && (options.harness || options.target || options.project || options.all || options.migrateLegacy)) throw new Error("--list cannot be combined with other install options");
   if (options.all && (options.harness || options.target || options.project)) throw new Error("--all cannot be combined with --harness, --target, or --project");
   if (options.target && options.project) throw new Error("--target and --project cannot be used together");
   if (options.harness && !HARNESS_INSTALL_PATHS[options.harness]) {
@@ -139,6 +143,13 @@ function getBuildHarness(harness: string): string {
   return harness;
 }
 
+interface DistStatus {
+  harness: string;
+  distRoot: string;
+  missing: boolean;
+  stale: boolean;
+}
+
 function newestMtime(target: string): number {
   if (!existsSync(target)) return 0;
   const stat = lstatSync(target);
@@ -149,20 +160,46 @@ function newestMtime(target: string): number {
   return newest;
 }
 
-function ensureDist(harness: string): string {
+function inspectDist(harness: string): DistStatus {
   const buildHarness = getBuildHarness(harness);
   const distRoot = resolve(ROOT, "dist", buildHarness);
   const sourcePaths = [resolve(ROOT, "core"), resolve(ROOT, "harness", buildHarness), resolve(ROOT, "scripts/build.ts")];
   const sourceCheckout = sourcePaths.every((entry) => existsSync(entry));
-  const stale = sourceCheckout && newestMtime(distRoot) + 1 < Math.max(...sourcePaths.map(newestMtime));
-  if (!existsSync(distRoot) || stale) {
-    console.log(`${stale ? "♻️  Prebuilt harness is stale; rebuilding" : "🔨 Building harness"}: ${buildHarness}`);
-    run("scripts/build.ts", ["--harness", buildHarness]);
+  const missing = !existsSync(distRoot);
+  const stale = !missing && sourceCheckout && newestMtime(distRoot) + 1 < Math.max(...sourcePaths.map(newestMtime));
+  return { harness: buildHarness, distRoot, missing, stale };
+}
+
+function ensureDist(harness: string): string {
+  const status = inspectDist(harness);
+  if (status.missing || status.stale) {
+    console.log(`${status.stale ? "♻️  Prebuilt harness is stale; rebuilding" : "🔨 Building harness"}: ${status.harness}`);
+    run("scripts/build.ts", ["--harness", status.harness]);
   } else {
-    console.log(`📦 Using current prebuilt harness: ${distRoot}`);
+    console.log(`📦 Using current prebuilt harness: ${status.distRoot}`);
   }
-  if (!existsSync(distRoot)) throw new Error(`build output not found: ${distRoot}`);
-  return distRoot;
+  if (!existsSync(status.distRoot)) throw new Error(`build output not found: ${status.distRoot}`);
+  return status.distRoot;
+}
+
+function ensureAllDist(): Map<string, string> {
+  const statuses = Object.keys(HARNESS_INSTALL_PATHS).map(inspectDist);
+  const missing = statuses.filter((status) => status.missing).map((status) => status.harness);
+  const stale = statuses.filter((status) => status.stale).map((status) => status.harness);
+  if (missing.length || stale.length) {
+    const reasons = [
+      ...(missing.length ? [`missing: ${missing.join(", ")}`] : []),
+      ...(stale.length ? [`stale: ${stale.join(", ")}`] : []),
+    ];
+    console.log(`♻️  Harness set requires rebuild; building all once (${reasons.join("; ")})`);
+    run("scripts/build.ts", ["--all"]);
+  } else {
+    console.log(`📦 Using current prebuilt harness set (${statuses.length} platforms).`);
+  }
+  for (const status of statuses) {
+    if (!existsSync(status.distRoot)) throw new Error(`build output not found: ${status.distRoot}`);
+  }
+  return new Map(statuses.map((status) => [status.harness, status.distRoot]));
 }
 
 function findInstallSource(harness: string, distRoot: string): string {
@@ -171,6 +208,72 @@ function findInstallSource(harness: string, distRoot: string): string {
   const source = harness === "claude" ? distRoot : existsSync(skill) ? skill : existsSync(agentSkill) ? agentSkill : distRoot;
   if (!existsSync(source)) throw new Error(`build output not found: ${source}`);
   return source;
+}
+
+function readLegacyJson(file: string): Record<string, unknown> | undefined {
+  try {
+    const stat = lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 2 * 1024 * 1024) return undefined;
+    const value = JSON.parse(readFileSync(file, "utf8"));
+    return isRecord(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isLegacyRuntimeDirectory(target: string): boolean {
+  const graph = readLegacyJson(resolve(target, "tools/data/stage-graph.json"));
+  if (!graph || typeof graph.version !== "string" || !/^2\.\d+\.\d+(?:[-+].*)?$/.test(graph.version)) return false;
+  return Array.isArray(graph.stages) && graph.stages.some((stage) => isRecord(stage) && stage.slug === "workspace-detection");
+}
+
+function isLegacyClaudeCatalog(target: string): boolean {
+  const catalog = readLegacyJson(target);
+  if (!catalog || catalog.name !== CLAUDE_MARKETPLACE_NAME || !Array.isArray(catalog.plugins)) return false;
+  return catalog.plugins.some((plugin) => isRecord(plugin)
+    && plugin.name === "loeyae-aidlc"
+    && plugin.source === "./plugins/loeyae-aidlc"
+    && typeof plugin.version === "string"
+    && /^2\.\d+\.\d+(?:[-+].*)?$/.test(plugin.version));
+}
+
+function isLegacyKiroHook(target: string): boolean {
+  const hookConfig = readLegacyJson(target);
+  if (!hookConfig || hookConfig.version !== "v1" || !Array.isArray(hookConfig.hooks)) return false;
+  return hookConfig.hooks.some((hook) => isRecord(hook)
+    && isRecord(hook.action)
+    && hook.action.command === "loeyae-aidlc hook --format kiro");
+}
+
+function isLegacyOpenCodePlugin(target: string): boolean {
+  try {
+    const stat = lstatSync(target);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) return false;
+    const source = readFileSync(target, "utf8");
+    return source.includes("Loeyae AI-DLC v2")
+      && source.includes("aidlc-orchestrate.ts")
+      && source.includes("loeyae-aidlc");
+  } catch {
+    return false;
+  }
+}
+
+function assertRecognizedLegacyTarget(asset: ManagedAsset): void {
+  const name = path.basename(asset.target);
+  const recognized = asset.kind === "directory"
+    ? isLegacyRuntimeDirectory(asset.target)
+    : name === "marketplace.json"
+      ? isLegacyClaudeCatalog(asset.target)
+      : name === "loeyae-aidlc.json"
+        ? isLegacyKiroHook(asset.target)
+        : name === "loeyae-aidlc.js" && isLegacyOpenCodePlugin(asset.target);
+  if (!recognized) {
+    throw new Error(`unowned target is not a recognized Loeyae AI-DLC v2 legacy install; refusing migration: ${asset.target}`);
+  }
+}
+
+function reportLegacyBackup(backup: LegacyInstallBackup): void {
+  console.log(`🛟 Preserved legacy install backup: ${backup.target} → ${backup.backup}`);
 }
 
 function getClaudeDeployment(customTarget: string): ClaudeDeployment {
@@ -213,13 +316,11 @@ function registerClaudePlugin(deployment: ClaudeDeployment): void {
   if (addStatus !== 0) throw new Error(`Claude Code marketplace registration failed: ${deployment.marketplaceRoot}`);
   const pluginRef = `loeyae-aidlc@${CLAUDE_MARKETPLACE_NAME}`;
   const installStatus = runExternal("claude", ["plugin", "install", pluginRef, "--scope", deployment.scope], deployment.cwd);
-  if (installStatus === 0) {
-    console.log(`🔌 Claude Code plugin registered and installed (${deployment.scope} scope): ${pluginRef}`);
-    return;
-  }
   const updateStatus = runExternal("claude", ["plugin", "update", pluginRef, "--scope", deployment.scope], deployment.cwd);
   if (updateStatus !== 0) throw new Error(`Claude Code plugin install/update failed: ${pluginRef}`);
-  console.log(`🔌 Claude Code plugin marketplace refreshed (${deployment.scope} scope): ${pluginRef}`);
+  console.log(installStatus === 0
+    ? `🔌 Claude Code plugin registered and refreshed (${deployment.scope} scope): ${pluginRef}`
+    : `🔌 Claude Code existing plugin refreshed (${deployment.scope} scope): ${pluginRef}`);
 }
 
 function unregisterClaudePlugin(deployment: ClaudeDeployment): void {
@@ -312,10 +413,14 @@ function projectHookAsset(harness: string, projectRoot: string, distRoot: string
   return { source, target: resolve(project, ".kiro/hooks/loeyae-aidlc.json"), kind: "file" };
 }
 
-function installProjectHook(harness: string, projectRoot: string, distRoot: string): void {
+function installProjectHook(harness: string, projectRoot: string, distRoot: string, migrateLegacy: boolean): void {
   const asset = projectHookAsset(harness, projectRoot, distRoot);
   if (!asset) return;
-  installManagedAssets("loeyae-aidlc:kiro-project-hook", [asset]);
+  installManagedAssets("loeyae-aidlc:kiro-project-hook", [asset], undefined, {
+    migrateLegacy,
+    validateLegacyTarget: assertRecognizedLegacyTarget,
+    onLegacyBackup: reportLegacyBackup,
+  });
   console.log(`🔒 Installed ${harness} project Stop Hook → ${asset.target}`);
 }
 
@@ -326,10 +431,16 @@ function uninstallProjectHook(harness: string, projectRoot: string): void {
   console.log(removed ? `🔓 Removed project Stop Hook → ${target}` : `ℹ️  Project Stop Hook is not owned by this installer; preserved: ${target}`);
 }
 
-function installOne(harness: string, customTarget: string, projectTarget: string): void {
-  const distRoot = ensureDist(harness);
+function installOne(harness: string, customTarget: string, projectTarget: string, migrateLegacy: boolean, preparedDistRoot = ""): void {
+  const distRoot = preparedDistRoot || ensureDist(harness);
+  if (!existsSync(distRoot)) throw new Error(`build output not found: ${distRoot}`);
   const source = findInstallSource(harness, distRoot);
   const owner = `loeyae-aidlc:${harness}`;
+  const migrationOptions = {
+    migrateLegacy,
+    validateLegacyTarget: assertRecognizedLegacyTarget,
+    onLegacyBackup: reportLegacyBackup,
+  };
 
   if (harness === "opencode" && !customTarget) {
     const sourceRoot = resolve(distRoot, ".opencode");
@@ -338,7 +449,7 @@ function installOne(harness: string, customTarget: string, projectTarget: string
     installManagedAssets(owner, [
       { source: sourceRoot, target: OPENCODE_GLOBAL_ASSET_ROOT, kind: "directory" },
       { source: pluginSource, target: OPENCODE_GLOBAL_PLUGIN_PATH, kind: "file" },
-    ]);
+    ], undefined, migrationOptions);
     console.log(`✅ Installed loeyae-aidlc v${PKG.version} (${harness}) → ${OPENCODE_GLOBAL_PLUGIN_PATH}`);
     return;
   }
@@ -350,7 +461,7 @@ function installOne(harness: string, customTarget: string, projectTarget: string
       installManagedAssets(owner, [
         { source, target: deployment.pluginRoot, kind: "directory" },
         { source: catalog.file, target: deployment.catalogPath, kind: "file" },
-      ], () => registerClaudePlugin(deployment));
+      ], () => registerClaudePlugin(deployment), migrationOptions);
     } finally {
       rmSync(catalog.root, { recursive: true, force: true });
     }
@@ -363,8 +474,8 @@ function installOne(harness: string, customTarget: string, projectTarget: string
     if ((harness === "kiro-crew" || harness === "kiro-cli") && !customTarget) registerKiroMcp();
     if (harness === "codex" && !customTarget) registerCodexHooks(resolve(source, "hooks/hooks.json"));
   };
-  installManagedAssets(owner, [{ source, target, kind: "directory" }], activate);
-  if (projectTarget) installProjectHook(harness, projectTarget, distRoot);
+  installManagedAssets(owner, [{ source, target, kind: "directory" }], activate, migrationOptions);
+  if (projectTarget) installProjectHook(harness, projectTarget, distRoot, migrateLegacy);
   console.log(`✅ Installed loeyae-aidlc v${PKG.version} (${harness}) → ${target}`);
 }
 
@@ -411,9 +522,10 @@ function deploy(args: string[], operation: "install" | "uninstall"): void {
   }
   if (options.all) {
     const failures: string[] = [];
+    const preparedDist = operation === "install" ? ensureAllDist() : undefined;
     for (const harness of Object.keys(HARNESS_INSTALL_PATHS)) {
       try {
-        if (operation === "install") installOne(harness, "", "");
+        if (operation === "install") installOne(harness, "", "", options.migrateLegacy, preparedDist?.get(harness));
         else uninstallOne(harness, "", "");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -426,7 +538,7 @@ function deploy(args: string[], operation: "install" | "uninstall"): void {
     return;
   }
   const harness = options.harness || "kiro-crew";
-  if (operation === "install") installOne(harness, options.target, options.project);
+  if (operation === "install") installOne(harness, options.target, options.project, options.migrateLegacy);
   else uninstallOne(harness, options.target, options.project);
 }
 
@@ -458,12 +570,14 @@ Install/uninstall options:
   --project <path>  Kiro IDE/CLI project Hook root (requires an explicit Kiro harness)
   --all             Process every platform and return nonzero if any platform fails
   --list            Show available platforms (install only)
+  --migrate-legacy  Preserve and replace recognized pre-manifest installs (install only)
 
 Examples:
   loeyae-aidlc install
   loeyae-aidlc install --harness kiro-ide --project /absolute/path/to/project
   loeyae-aidlc uninstall --harness kiro-ide --project /absolute/path/to/project
   loeyae-aidlc install --all
+  loeyae-aidlc install --all --migrate-legacy
   loeyae-aidlc approve --stage application-design
   loeyae-aidlc orchestrate report --stage application-design --result approved --approval-token <token>
 `);

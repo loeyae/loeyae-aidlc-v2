@@ -25,6 +25,17 @@ export interface ManagedAsset {
   kind: "file" | "directory";
 }
 
+export interface LegacyInstallBackup {
+  target: string;
+  backup: string;
+}
+
+export interface ManagedInstallOptions {
+  migrateLegacy?: boolean;
+  validateLegacyTarget?: (asset: ManagedAsset) => void;
+  onLegacyBackup?: (backup: LegacyInstallBackup) => void;
+}
+
 interface ManagedEntry {
   path: string;
   kind: "file" | "directory";
@@ -194,13 +205,29 @@ function validateAssets(assets: ManagedAsset[]): ManagedAsset[] {
   return normalized;
 }
 
-export function installManagedAssets(owner: string, inputAssets: ManagedAsset[], activate?: () => void): string {
+function legacyBackupPath(target: string): string {
+  const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const candidate = `${target}.pre-managed-backup-${timestamp}-${randomBytes(4).toString("hex")}`;
+    if (!existsSync(candidate)) return candidate;
+  }
+  throw new Error(`could not allocate a legacy backup path for: ${target}`);
+}
+
+export function installManagedAssets(
+  owner: string,
+  inputAssets: ManagedAsset[],
+  activate?: () => void,
+  options: ManagedInstallOptions = {},
+): string {
   const assets = validateAssets(inputAssets);
   const manifestFile = manifestPath(owner, assets.map((asset) => asset.target));
   const lock = acquireGlobalLock();
   const stages: string[] = [];
-  const backups = new Map<string, string>();
+  const backups = new Map<string, { path: string; preserve: boolean }>();
   const committed: string[] = [];
+  const legacyTargets = new Set<string>();
+  const preservedLegacyBackups: LegacyInstallBackup[] = [];
   const previousManifest = existsSync(manifestFile) ? readFileSync(manifestFile, "utf8") : undefined;
   let manifestChanged = false;
   try {
@@ -215,8 +242,15 @@ export function installManagedAssets(owner: string, inputAssets: ManagedAsset[],
       for (const asset of assets) {
         if (!existsSync(asset.target)) continue;
         const stat = lstatSync(asset.target);
-        const isEmptyDirectory = stat.isDirectory() && !stat.isSymbolicLink() && readdirSync(asset.target).length === 0;
-        if (!isEmptyDirectory) throw new Error(`refusing to replace unowned install target: ${asset.target}`);
+        if (stat.isSymbolicLink()) throw new Error(`refusing to migrate symlinked install target: ${asset.target}`);
+        const isEmptyDirectory = stat.isDirectory() && readdirSync(asset.target).length === 0;
+        if (isEmptyDirectory) continue;
+        if (!options.migrateLegacy) {
+          throw new Error(`refusing to replace unowned install target: ${asset.target}; rerun install with --migrate-legacy to preserve a recognized legacy installation as a backup`);
+        }
+        if (!options.validateLegacyTarget) throw new Error(`legacy migration validator is required for: ${asset.target}`);
+        options.validateLegacyTarget(asset);
+        legacyTargets.add(asset.target);
       }
     }
 
@@ -234,9 +268,13 @@ export function installManagedAssets(owner: string, inputAssets: ManagedAsset[],
 
     assets.forEach((asset) => {
       if (!existsSync(asset.target)) return;
-      const backup = path.join(dirname(asset.target), `.${path.basename(asset.target)}.loeyae-backup-${process.pid}-${randomBytes(4).toString("hex")}`);
+      const preserve = legacyTargets.has(asset.target);
+      const backup = preserve
+        ? legacyBackupPath(asset.target)
+        : path.join(dirname(asset.target), `.${path.basename(asset.target)}.loeyae-backup-${process.pid}-${randomBytes(4).toString("hex")}`);
       renameSync(asset.target, backup);
-      backups.set(asset.target, backup);
+      backups.set(asset.target, { path: backup, preserve });
+      if (preserve) preservedLegacyBackups.push({ target: asset.target, backup });
     });
     if (process.env.AIDLC_INSTALL_FAILPOINT === "after-backup") throw new Error("installer failpoint after-backup");
     assets.forEach((asset, index) => {
@@ -255,19 +293,21 @@ export function installManagedAssets(owner: string, inputAssets: ManagedAsset[],
     atomicWrite(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
     manifestChanged = true;
     for (const backup of backups.values()) {
+      if (backup.preserve) continue;
       try {
-        rmSync(backup, { recursive: true, force: true });
+        rmSync(backup.path, { recursive: true, force: true });
       } catch (error) {
-        process.stderr.write(`Warning: installed successfully but could not remove backup ${backup}: ${String(error)}\n`);
+        process.stderr.write(`Warning: installed successfully but could not remove backup ${backup.path}: ${String(error)}\n`);
       }
     }
+    for (const backup of preservedLegacyBackups) options.onLegacyBackup?.(backup);
     return manifestFile;
   } catch (error) {
     for (const target of committed.reverse()) {
       if (existsSync(target)) rmSync(target, { recursive: true, force: true });
     }
     for (const [target, backup] of backups) {
-      if (existsSync(backup) && !existsSync(target)) renameSync(backup, target);
+      if (existsSync(backup.path) && !existsSync(target)) renameSync(backup.path, target);
     }
     for (const stage of stages) {
       if (existsSync(stage)) rmSync(stage, { recursive: true, force: true });

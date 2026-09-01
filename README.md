@@ -148,18 +148,30 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 loeyae-aidlc install        # 重新部署（或 --all 全部）
 ```
 
+`install --all` 会先统一检查六个平台的预构建产物；只要有任一产物缺失或过期，就执行一次全平台构建，再依次安装，不再因 graph 时间戳刷新而逐平台重复重建。
+
 安装器先在目标同级目录 staging，校验后以 rename 交换；平台激活失败或测试 failpoint 触发时会恢复旧受管资产。每次安装在 `~/.config/loeyae-aidlc/installations/` 保存外部所有权清单，记录每个受管文件的 SHA-256。升级和卸载前都会复核清单：文件被用户修改、目标缺失、出现额外文件或目标没有所有权清单时均 fail-closed，不会覆盖或删除。
 
 文件资产与 ownership manifest 受同一安装锁和回滚流程保护，但 Claude 官方 CLI 的插件注册表/cache、Codex 的共享 Hook 配置等宿主外部副作用无法与本地 manifest 做跨进程原子提交。若宿主已接受 activate/deactivate，而随后 manifest 写入或宿主的后续子步骤失败，安装器会恢复受管文件，但可能需要按错误输出重新运行安装/卸载或使用宿主官方命令核对注册状态；不得将文件回滚等同于真实宿主注册表已回滚。
 
-从没有所有权清单的旧安装升级时，先将旧目录重命名为备份，再执行安装；不要让新安装器“接管”无法验证来源的目录。例如：
+从没有 ownership manifest 的旧版 v2 安装升级时，使用显式迁移参数：
+
+```bash
+# 迁移全部全局平台
+loeyae-aidlc install --all --migrate-legacy
+
+# 或只迁移一个平台
+loeyae-aidlc install --harness kiro-ide --migrate-legacy
+```
+
+迁移只接受能通过稳定 v2 标记识别的旧 Loeyae AI-DLC 目标；任意非空目录、未知文件和符号链接仍会 fail-closed。每个旧目标先以同目录原子 rename 保存为带时间戳的 `*.pre-managed-backup-*`，成功后保留备份并生成 ownership manifest；安装或激活失败时则自动把备份恢复到原路径。即使旧安装中的文件曾被修改，也不会丢失，修改内容会完整留在备份中。确认新版本正常后再自行处理备份，安装器不会自动删除这些 legacy 备份。项目 Hook 同样只有在显式使用 `--migrate-legacy` 且内容可识别时才会迁移。
+
+如果旧目标无法识别，不要绕过检查或直接删除；先手工将它重命名为备份，再执行普通安装。例如：
 
 ```bash
 mv ~/.kiro/powers/loeyae-aidlc ~/.kiro/powers/loeyae-aidlc.pre-managed-backup
 loeyae-aidlc install --harness kiro-ide
 ```
-
-确认新版本正常后再自行处理备份。项目 Hook 同样不会覆盖既有未受管的 `.kiro/hooks/loeyae-aidlc.json`。
 
 ### 卸载
 
