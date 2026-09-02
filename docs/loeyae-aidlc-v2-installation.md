@@ -120,12 +120,12 @@ loeyae-aidlc version
 
 Kiro IDE 集成由两部分组成：
 
-1. **全局 Power**：安装到用户目录，使 Kiro IDE 能加载 Loeyae AI-DLC v2 的 `POWER.md`、阶段规则、知识规则和工具。
+1. **全局 Agent Skill**：安装到 Kiro 官方全局发现目录，使 Kiro IDE 加载 `SKILL.md`、阶段规则、知识规则和工具。Kiro IDE 与 Kiro CLI 共用这一份 Skill。
 2. **项目级 Stop Hook**：安装到当前业务项目，使 Kiro IDE 在停止边界触发 AI-DLC 准出检查。
 
-两部分都建议安装。只安装全局 Power 不会自动为每个业务项目创建 Hook。
+两部分都建议安装。只安装全局 Agent Skill 不会自动为每个业务项目创建 Hook。
 
-### 4.1 安装全局 Power
+### 4.1 安装全局 Agent Skill
 
 在 macOS Terminal 或 Windows PowerShell 执行：
 
@@ -135,10 +135,10 @@ loeyae-aidlc install --harness kiro-ide
 
 默认安装位置：
 
-- macOS：`/Users/<用户名>/.kiro/powers/loeyae-aidlc/`
-- Windows：`C:\Users\<用户名>\.kiro\powers\loeyae-aidlc\`
+- macOS：`/Users/<用户名>/.kiro/skills/loeyae-aidlc/`
+- Windows：`C:\Users\<用户名>\.kiro\skills\loeyae-aidlc\`
 
-该安装包含 Kiro IDE 的 `POWER.md`、`steering/`、`knowledge/`、`tools/` 和内置的 `chrome-devtools` Provider 配置。Provider 仅用于图表浏览器验收，不生成 SVG、`.diagram.json` 或 PNG/PDF。
+入口文件是 `SKILL.md`，其 frontmatter `name` 为 `loeyae-aidlc`，与目录名一致；`description` 包含 `AI-DLC`、`使用 AI-DLC`、`继续上次的工作`、`功能设计`、`用户故事`、`代码审查` 和 `部署准备` 等激活语义。安装器还会把共享 Kiro MCP 默认项合并到用户级配置；其中 `chrome-devtools` Provider 仅用于图表浏览器验收，不生成 SVG、`.diagram.json` 或 PNG/PDF。
 
 ### 4.2 为业务项目安装项目级 Stop Hook
 
@@ -211,13 +211,13 @@ C:\Users\<用户名>\work\my-project\.kiro\hooks\loeyae-aidlc.json
 每个阶段完成后生成要求的产物和证据，不要跳过 ALWAYS 阶段；需要人工确认时先停下来说明决策内容。
 ```
 
-4. Kiro IDE 中的 AI-DLC Power 会在业务项目根目录调用确定性引擎，典型入口为：
+4. Kiro IDE 中的 AI-DLC Skill 会在业务项目根目录调用确定性引擎，典型入口为：
 
 ```bash
 loeyae-aidlc orchestrate next --scope feature
 ```
 
-5. Agent 按引擎返回的 `run-stage` directive 执行当前阶段，读取对应的 `steering/` 和 `knowledge/` 规则，生成阶段要求的业务产物。
+5. Agent 按引擎返回的 `run-stage` directive 执行当前阶段，读取对应的 `stages/` 和 `knowledge/` 规则，生成阶段要求的业务产物。
 6. 阶段完成后，Agent 使用类似命令报告：
 
 ```bash
@@ -293,7 +293,7 @@ Chrome Provider 不负责重新布局。它只加载 SVG 或目标预览 URL，�
 
 ## 7. 升级 Loeyae AI-DLC v2
 
-升级全局 CLI 后，需要重新部署 Kiro IDE Power，并为需要的业务项目重新写入项目 Hook：
+升级全局 CLI 后，需要重新部署 Kiro 全局 Agent Skill，并为需要的业务项目重新写入项目 Hook：
 
 ```bash
 npm install --global https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
@@ -323,14 +323,26 @@ loeyae-aidlc install --harness kiro-ide --project (Get-Location).Path
 
 确认 `node --version` 和 `npm --version` 可用，然后执行 `npm prefix --global`，将对应的 npm 全局可执行目录加入 PATH，并重新打开终端和 Kiro IDE。
 
-### Kiro IDE 没有加载 Power
+### Kiro IDE 没有发现或激活 Skill
 
-确认全局安装命令执行成功，并检查以下目录是否存在：
+先确认标准全局入口存在：
 
-- macOS：`/Users/<用户名>/.kiro/powers/loeyae-aidlc/POWER.md`
-- Windows：`C:\Users\<用户名>\.kiro\powers\loeyae-aidlc\POWER.md`
+- macOS：`/Users/<用户名>/.kiro/skills/loeyae-aidlc/SKILL.md`
+- Windows：`C:\Users\<用户名>\.kiro\skills\loeyae-aidlc\SKILL.md`
 
-然后关闭并重新打开 Kiro IDE 项目。
+然后关闭并重新打开 Kiro IDE 项目，在 **Agent Steering & Skills** 中确认 `loeyae-aidlc` 可见，并在 Chat 中输入 `/loeyae-aidlc` 验证显式激活。自动激活可使用 `使用 AI-DLC`、`功能设计`、`用户故事` 或 `代码审查` 等描述中的关键词。
+
+如果当前使用的是 custom agent，它默认不会加载全局 Skill；需要在该 agent 的 `resources` 中加入：
+
+```json
+{
+  "resources": [
+    "skill://~/.kiro/skills/*/SKILL.md"
+  ]
+}
+```
+
+目录存在或安装命令成功本身不等于宿主已发现并激活 Skill；最终应以 UI 可见、`/loeyae-aidlc` 可选和关键词实际触发为准。
 
 ### Stop Hook 没有触发
 
@@ -339,7 +351,7 @@ loeyae-aidlc install --harness kiro-ide --project (Get-Location).Path
 - macOS：`/Users/<用户名>/work/my-project/.kiro/hooks/loeyae-aidlc.json`
 - Windows：`C:\Users\<用户名>\work\my-project\.kiro\hooks\loeyae-aidlc.json`
 
-全局 Power 目录中的 Hook 不会自动成为每个业务项目的项目 Hook。具体 Kiro IDE 版本对 Stop Hook 的阻断能力可能不同，但这不能降低引擎的 `report` 门禁要求。
+全局 Skill 中随附的 Hook 源文件不会自动成为每个业务项目的项目 Hook。具体 Kiro IDE 版本对 Stop Hook 的阻断能力可能不同，但这不能降低引擎的 `report` 门禁要求。
 
 ### macOS 安装时报 `spawn /bin/sh ENOENT`
 
@@ -359,7 +371,9 @@ npm install --global https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/head
 - [ ] `node --version` 满足 `>=20.0.0`。
 - [ ] `npm --version` 可以执行。
 - [ ] `loeyae-aidlc version` 可以执行。
-- [ ] 全局 Power 已安装到用户的 Kiro Power 目录。
+- [ ] 全局 Agent Skill 已安装到用户的 Kiro Skills 目录，入口为 `SKILL.md`。
+- [ ] Kiro IDE 的 **Agent Steering & Skills** 中可见 `loeyae-aidlc`。
+- [ ] `/loeyae-aidlc` 可显式激活，且至少一个描述关键词可自动触发。
 - [ ] 业务项目存在 `.kiro/hooks/loeyae-aidlc.json`。
 - [ ] Kiro IDE 已重新打开业务项目。
 - [ ] Chat 请求能够触发 AI-DLC 阶段流程。

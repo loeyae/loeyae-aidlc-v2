@@ -43,7 +43,7 @@ requires: [requirements-analysis]
 - `target artifact`：`<inception-root>/requirements/business-flows.md`；
 - `constraints`：`delivery-business-flow`。
 
-Kiro Power 形态降级为直接加载 `common-diagram-design-standards.md` 与 `common-svg-diagram-standards.md` 执行。Phase 不重复定义图类型选择、SVG 源格式或布局规则；没有已验证 Provider 时返回 `NEEDS_CAPABILITY` 或经用户同意使用文字/表格。
+若宿主未独立发现 `aidlc-diagram-design` capability，则直接加载随附的 `skills/aidlc-diagram-design/SKILL.md` 执行。Phase 不重复定义图类型选择、SVG 源格式或布局规则；没有已验证 Provider 时返回 `NEEDS_CAPABILITY` 或经用户同意使用文字/表格。
 
 内容约束：
 

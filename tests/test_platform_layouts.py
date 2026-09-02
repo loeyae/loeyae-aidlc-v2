@@ -57,16 +57,23 @@ def main() -> None:
         package_version = json.loads((ROOT / "package.json").read_text())["version"]
 
         run_install("kiro-ide", home)
-        kiro_power = home / ".kiro" / "powers" / "loeyae-aidlc"
-        assert (kiro_power / "POWER.md").is_file()
-        assert (kiro_power / "mcp.json").is_file()
-        assert (kiro_power / "steering").is_dir()
+        kiro_skill = home / ".kiro" / "skills" / "loeyae-aidlc"
+        skill_entry = kiro_skill / "SKILL.md"
+        assert skill_entry.is_file()
+        assert not (kiro_skill / "POWER.md").exists()
+        assert (kiro_skill / "stages").is_dir()
+        assert not (home / ".kiro" / "powers" / "loeyae-aidlc").exists()
+        assert (home / ".kiro" / "settings" / "mcp.json").is_file()
+        skill_text = skill_entry.read_text()
+        assert skill_text.startswith("---\nname: loeyae-aidlc\n")
+        assert "Kiro IDE or CLI" in skill_text.split("---", 2)[1]
+        assert all(keyword in skill_text.split("---", 2)[1] for keyword in ["AI-DLC", "使用 AI-DLC", "功能设计", "代码审查"])
 
         run_install("kiro-cli", home)
-        kiro_skill = home / ".kiro" / "skills" / "loeyae-aidlc"
-        assert (kiro_skill / "SKILL.md").is_file()
-        assert not (kiro_skill / "POWER.md").exists()
-        assert (home / ".kiro" / "settings" / "mcp.json").is_file()
+        assert skill_entry.is_file()
+        manifests = list((home / ".config" / "loeyae-aidlc" / "installations").glob("*.json"))
+        assert len(manifests) == 1
+        assert json.loads(manifests[0].read_text())["owner"] == "loeyae-aidlc:kiro-global-skill"
 
         run_install("opencode", home)
         opencode_config = home / ".config" / "opencode"

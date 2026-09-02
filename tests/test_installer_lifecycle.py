@@ -131,11 +131,11 @@ def test_managed_upgrade_rollback_and_uninstall() -> None:
     with tempfile.TemporaryDirectory(prefix="aidlc-installer-managed-", dir=str(SCRATCH_ROOT)) as directory:
         home = Path(directory) / "home"
         home.mkdir()
-        target = Path(directory) / "managed-power"
+        target = Path(directory) / "managed-skill"
 
         installed = run_cli(home, ["install", "--harness", "kiro-ide", "--target", str(target)])
         assert installed.returncode == 0, installed.stdout + installed.stderr
-        assert (target / "POWER.md").is_file()
+        assert (target / "SKILL.md").is_file()
         manifests = list((home / ".config" / "loeyae-aidlc" / "installations").glob("*.json"))
         assert len(manifests) == 1
         manifest = json.loads(manifests[0].read_text())
@@ -160,20 +160,72 @@ def test_managed_upgrade_rollback_and_uninstall() -> None:
         assert uninstall_rollback.returncode != 0
         assert tree_digest(target) == before
 
-        power = target / "POWER.md"
-        original = power.read_text()
-        power.write_text(original + "\nuser modification\n")
+        skill = target / "SKILL.md"
+        original = skill.read_text()
+        skill.write_text(original + "\nuser modification\n")
         refused = run_cli(home, ["install", "--harness", "kiro-ide", "--target", str(target)])
         assert refused.returncode != 0 and "was modified" in refused.stderr
         refused = run_cli(home, ["uninstall", "--harness", "kiro-ide", "--target", str(target)])
         assert refused.returncode != 0 and "was modified" in refused.stderr
-        assert power.read_text().endswith("user modification\n")
+        assert skill.read_text().endswith("user modification\n")
 
-        power.write_text(original)
+        skill.write_text(original)
         removed = run_cli(home, ["uninstall", "--harness", "kiro-ide", "--target", str(target)])
         assert removed.returncode == 0, removed.stdout + removed.stderr
         assert not target.exists()
         assert not manifests[0].exists()
+
+
+def test_shared_kiro_global_skill_lifecycle() -> None:
+    with tempfile.TemporaryDirectory(prefix="aidlc-installer-shared-kiro-", dir=str(SCRATCH_ROOT)) as directory:
+        home = Path(directory) / "home"
+        home.mkdir()
+        shared_skill = home / ".kiro" / "skills" / "loeyae-aidlc"
+        legacy_power = home / ".kiro" / "powers" / "loeyae-aidlc"
+        state = home / ".config" / "loeyae-aidlc" / "installations"
+
+        legacy_cli = run_cli(home, ["install", "--harness", "kiro-cli", "--target", str(shared_skill)])
+        assert legacy_cli.returncode == 0, legacy_cli.stdout + legacy_cli.stderr
+        manifests = list(state.glob("*.json"))
+        assert len(manifests) == 1
+        assert json.loads(manifests[0].read_text())["owner"] == "loeyae-aidlc:kiro-cli"
+
+        adopted = run_cli(home, ["install", "--harness", "kiro-ide"])
+        assert adopted.returncode == 0, adopted.stdout + adopted.stderr
+        assert "Adopted legacy Kiro CLI ownership" in adopted.stdout
+        assert (shared_skill / "SKILL.md").is_file()
+        assert not legacy_power.exists()
+        manifests = list(state.glob("*.json"))
+        assert len(manifests) == 1
+        manifest = json.loads(manifests[0].read_text())
+        assert manifest["owner"] == "loeyae-aidlc:kiro-global-skill"
+        assert manifest["assets"][0]["target"] == str(shared_skill.resolve())
+
+        before = tree_digest(shared_skill)
+        repeated = run_cli(home, ["install", "--harness", "kiro-cli"])
+        assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+        assert tree_digest(shared_skill) == before
+        assert len(list(state.glob("*.json"))) == 1
+
+        removed = run_cli(home, ["uninstall", "--harness", "kiro-cli"])
+        assert removed.returncode == 0, removed.stdout + removed.stderr
+        assert not shared_skill.exists()
+        assert not list(state.glob("*.json"))
+
+        old_power = run_cli(home, ["install", "--harness", "kiro-ide", "--target", str(legacy_power)])
+        assert old_power.returncode == 0, old_power.stdout + old_power.stderr
+        assert legacy_power.is_dir()
+        migrated = run_cli(home, ["install", "--harness", "kiro-ide"])
+        assert migrated.returncode == 0, migrated.stdout + migrated.stderr
+        assert "Removed installer-owned legacy Kiro IDE Power" in migrated.stdout
+        assert not legacy_power.exists()
+        assert (shared_skill / "SKILL.md").is_file()
+        assert len(list(state.glob("*.json"))) == 1
+
+        removed_all = run_cli(home, ["uninstall", "--all"])
+        assert removed_all.returncode == 0, removed_all.stdout + removed_all.stderr
+        assert not shared_skill.exists()
+        assert not list(state.glob("*.json"))
 
 
 def test_unowned_targets_and_argument_contracts() -> None:
@@ -211,11 +263,11 @@ def test_unowned_targets_and_argument_contracts() -> None:
         assert modified.returncode != 0 and "was modified" in modified.stderr
         assert len(list(legacy_target.parent.glob(f"{legacy_target.name}.pre-managed-backup-*"))) == 1
 
-        rollback_target = home / ".kiro" / "powers" / "loeyae-aidlc"
+        rollback_target = Path(directory) / "rollback-skill"
         rollback_marker = write_recognized_legacy_runtime(rollback_target, "restore me")
         rolled_back = run_cli(
             home,
-            ["install", "--harness", "kiro-ide", "--migrate-legacy"],
+            ["install", "--harness", "kiro-ide", "--target", str(rollback_target), "--migrate-legacy"],
             {"AIDLC_INSTALL_FAILPOINT": "after-assets"},
         )
         assert rolled_back.returncode != 0 and "after-assets" in rolled_back.stderr
@@ -445,21 +497,21 @@ def test_install_all_detects_hosts_and_uninstall_all_uses_ownership() -> None:
         assert all(harness not in detected_line for harness in ["opencode", "codex", "codebuddy", "qoder", "zcode"])
         assert "Skipping unavailable hosts:" in output
         assert (home / ".kiro" / "crew" / "skills" / "loeyae-aidlc").is_dir()
-        assert (home / ".kiro" / "powers" / "loeyae-aidlc").is_dir()
-        assert (home / ".kiro" / "skills" / "loeyae-aidlc").is_dir()
+        assert not (home / ".kiro" / "powers" / "loeyae-aidlc").exists()
+        assert (home / ".kiro" / "skills" / "loeyae-aidlc" / "SKILL.md").is_file()
         assert (home / ".claude" / "plugins" / "loeyae-aidlc-marketplace" / "plugins" / "loeyae-aidlc").is_dir()
         assert not (home / ".config" / "opencode" / "plugins" / "loeyae-aidlc.js").exists()
         assert not (home / ".agents" / "skills" / "loeyae-aidlc").exists()
         assert not (home / ".config" / "loeyae-aidlc" / "host-assets").exists()
         assert not (home / ".zcode" / "skills" / "loeyae-aidlc").exists()
         state = home / ".config" / "loeyae-aidlc" / "installations"
-        assert len(list(state.glob("*.json"))) == 4
+        assert len(list(state.glob("*.json"))) == 3
 
         removed = run_cli(home, ["uninstall", "--all"], env)
         assert removed.returncode == 0, removed.stdout + removed.stderr
         removed_output = removed.stdout + removed.stderr
-        assert "Installer-owned global installations: kiro-crew, kiro-ide, kiro-cli, claude" in removed_output
-        assert "Uninstalled 4 installer-owned global platform installations" in removed_output
+        assert "Installer-owned global installations: kiro-crew, kiro-ide, claude" in removed_output
+        assert "Uninstalled 3 installer-owned global platform installations" in removed_output
         assert not (home / ".kiro" / "crew" / "skills" / "loeyae-aidlc").exists()
         assert not (home / ".kiro" / "powers" / "loeyae-aidlc").exists()
         assert not (home / ".kiro" / "skills" / "loeyae-aidlc").exists()
@@ -478,7 +530,7 @@ def test_install_all_aggregates_failures_and_continues() -> None:
         fake_bin = root / "bin"
         home.mkdir()
         fake_bin.mkdir()
-        legacy_target = home / ".kiro" / "powers" / "loeyae-aidlc"
+        legacy_target = home / ".kiro" / "skills" / "loeyae-aidlc"
         legacy_marker = write_recognized_legacy_runtime(legacy_target, "all migration backup")
         for command in ["kiro", "opencode", "codex", "zcode"]:
             write_fake_host_command(fake_bin, command)
@@ -508,6 +560,7 @@ def test_install_all_aggregates_failures_and_continues() -> None:
 
 if __name__ == "__main__":
     test_managed_upgrade_rollback_and_uninstall()
+    test_shared_kiro_global_skill_lifecycle()
     test_unowned_targets_and_argument_contracts()
     test_opencode_multi_asset_transaction_and_uninstall()
     test_claude_activation_refreshes_existing_plugin()

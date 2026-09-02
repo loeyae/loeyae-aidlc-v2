@@ -23,6 +23,7 @@ import { updateMcpConfig } from "../core/tools/aidlc-mcp-config";
 import {
   hasManagedInstallation,
   installManagedAssets,
+  migrateManagedOwnership,
   type LegacyInstallBackup,
   type ManagedAsset,
   uninstallManagedAssets,
@@ -55,11 +56,16 @@ const CODEBUDDY_USER_MARKETPLACE_ROOT = resolve(HOST_ASSET_ROOT, "codebuddy/user
 const QODER_USER_PLUGIN_ROOT = resolve(HOST_ASSET_ROOT, "qoder/user/loeyae-aidlc");
 const ZCODE_GLOBAL_SKILL_ROOT = resolve(HOME, ".zcode/skills/loeyae-aidlc");
 const ZCODE_GLOBAL_CONFIG_PATH = resolve(HOME, ".zcode/cli/config.json");
+const KIRO_GLOBAL_SKILL_ROOT = resolve(HOME, ".kiro/skills/loeyae-aidlc");
+const KIRO_GLOBAL_SKILL_OWNER = "loeyae-aidlc:kiro-global-skill";
+const KIRO_LEGACY_CLI_SKILL_OWNER = "loeyae-aidlc:kiro-cli";
+const KIRO_LEGACY_IDE_POWER_ROOT = resolve(HOME, ".kiro/powers/loeyae-aidlc");
+const KIRO_LEGACY_IDE_POWER_OWNER = "loeyae-aidlc:kiro-ide";
 
 const HARNESS_INSTALL_PATHS: Record<string, string> = {
   "kiro-crew": resolve(HOME, ".kiro/crew/skills/loeyae-aidlc"),
-  "kiro-ide": resolve(HOME, ".kiro/powers/loeyae-aidlc"),
-  "kiro-cli": resolve(HOME, ".kiro/skills/loeyae-aidlc"),
+  "kiro-ide": KIRO_GLOBAL_SKILL_ROOT,
+  "kiro-cli": KIRO_GLOBAL_SKILL_ROOT,
   claude: CLAUDE_GLOBAL_PLUGIN_ROOT,
   opencode: OPENCODE_GLOBAL_PLUGIN_PATH,
   codex: resolve(HOME, ".agents/skills/loeyae-aidlc"),
@@ -70,8 +76,8 @@ const HARNESS_INSTALL_PATHS: Record<string, string> = {
 
 const HARNESS_DESCRIPTIONS: Record<string, string> = {
   "kiro-crew": "Kiro Crew Dashboard (global skill)",
-  "kiro-ide": "Kiro IDE (global Power)",
-  "kiro-cli": "Kiro CLI (global agent skill)",
+  "kiro-ide": "Kiro IDE (shared global Agent Skill)",
+  "kiro-cli": "Kiro CLI (shared global Agent Skill)",
   claude: "Claude Code (official user/project plugin)",
   opencode: "OpenCode (global plugin)",
   codex: "Codex (global skill)",
@@ -233,6 +239,12 @@ function detectAvailableHarnesses(): string[] {
   console.log(`🔎 Detected supported hosts: ${available.length ? available.map(({ harness, evidence }) => `${harness} (${evidence})`).join(", ") : "none"}`);
   if (unavailable.length) console.log(`⏭️  Skipping unavailable hosts: ${unavailable.join(", ")}`);
   return available.map(({ harness }) => harness);
+}
+
+function deduplicateSharedKiroHarnesses(harnesses: string[], operation: "install" | "uninstall"): string[] {
+  if (!harnesses.includes("kiro-ide") || !harnesses.includes("kiro-cli")) return harnesses;
+  console.log(`♻️  Kiro IDE and Kiro CLI share one global Agent Skill; ${operation}ing it once via kiro-ide.`);
+  return harnesses.filter((harness) => harness !== "kiro-cli");
 }
 
 function resolveHostCli(environmentVariable: string, command: string, knownPaths: string[] = []): string {
@@ -807,11 +819,28 @@ function uninstallProjectHook(harness: string, projectRoot: string): void {
   console.log(removed ? `🔓 Removed project Stop Hook → ${target}` : `ℹ️  Project Stop Hook is not owned by this installer; preserved: ${target}`);
 }
 
+function isSharedKiroGlobalSkill(harness: string, customTarget: string): boolean {
+  return !customTarget && (harness === "kiro-ide" || harness === "kiro-cli");
+}
+
+function installationOwner(harness: string, customTarget: string): string {
+  return isSharedKiroGlobalSkill(harness, customTarget) ? KIRO_GLOBAL_SKILL_OWNER : `loeyae-aidlc:${harness}`;
+}
+
+function migrateKiroGlobalSkillOwnership(): boolean {
+  return migrateManagedOwnership(KIRO_LEGACY_CLI_SKILL_OWNER, KIRO_GLOBAL_SKILL_OWNER, [KIRO_GLOBAL_SKILL_ROOT]);
+}
+
+function removeManagedLegacyKiroIdePower(): boolean {
+  if (!hasManagedInstallation(KIRO_LEGACY_IDE_POWER_OWNER, [KIRO_LEGACY_IDE_POWER_ROOT])) return false;
+  return uninstallManagedAssets(KIRO_LEGACY_IDE_POWER_OWNER, [KIRO_LEGACY_IDE_POWER_ROOT]);
+}
+
 function installOne(harness: string, customTarget: string, projectTarget: string, migrateLegacy: boolean, preparedDistRoot = ""): void {
   const distRoot = preparedDistRoot || ensureDist(harness);
   if (!existsSync(distRoot)) throw new Error(`build output not found: ${distRoot}`);
   const source = findInstallSource(harness, distRoot);
-  const owner = `loeyae-aidlc:${harness}`;
+  const owner = installationOwner(harness, customTarget);
   const migrationOptions = {
     migrateLegacy,
     validateLegacyTarget: assertRecognizedLegacyTarget,
@@ -877,12 +906,27 @@ function installOne(harness: string, customTarget: string, projectTarget: string
   }
 
   const target = customTarget ? resolve(customTarget) : HARNESS_INSTALL_PATHS[harness];
+  if (isSharedKiroGlobalSkill(harness, customTarget) && migrateKiroGlobalSkillOwnership()) {
+    console.log(`♻️  Adopted legacy Kiro CLI ownership for the shared global Agent Skill → ${target}`);
+  }
   const activate = (): void => {
-    if ((harness === "kiro-crew" || harness === "kiro-cli") && !customTarget) registerKiroMcp();
+    if ((harness === "kiro-crew" || harness === "kiro-ide" || harness === "kiro-cli") && !customTarget) registerKiroMcp();
     if (harness === "codex" && !customTarget) registerCodexHooks(resolve(source, "hooks/hooks.json"));
   };
   installManagedAssets(owner, [{ source, target, kind: "directory" }], activate, migrationOptions);
   if (projectTarget) installProjectHook(harness, projectTarget, distRoot, migrateLegacy);
+  if (harness === "kiro-ide" && !customTarget) {
+    try {
+      if (removeManagedLegacyKiroIdePower()) {
+        console.log(`🧹 Removed installer-owned legacy Kiro IDE Power → ${KIRO_LEGACY_IDE_POWER_ROOT}`);
+      } else if (existsSync(KIRO_LEGACY_IDE_POWER_ROOT)) {
+        console.warn(`⚠️  Preserved legacy Kiro IDE Power without a matching ownership manifest: ${KIRO_LEGACY_IDE_POWER_ROOT}`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`⚠️  Shared Agent Skill installed, but the legacy Kiro IDE Power was preserved: ${message}`);
+    }
+  }
   console.log(`✅ Installed loeyae-aidlc v${PKG.version} (${harness}) → ${target}`);
 }
 
@@ -898,8 +942,19 @@ function managedTargetsFor(harness: string, customTarget: string, projectTarget:
   return [customTarget ? resolve(customTarget) : HARNESS_INSTALL_PATHS[harness]];
 }
 
+function hasManagedHarnessInstallation(harness: string): boolean {
+  const targets = managedTargetsFor(harness, "", "");
+  if (harness === "kiro-ide" || harness === "kiro-cli") {
+    if (hasManagedInstallation(KIRO_GLOBAL_SKILL_OWNER, targets)) return true;
+    if (hasManagedInstallation(KIRO_LEGACY_CLI_SKILL_OWNER, targets)) return true;
+    return harness === "kiro-ide"
+      && hasManagedInstallation(KIRO_LEGACY_IDE_POWER_OWNER, [KIRO_LEGACY_IDE_POWER_ROOT]);
+  }
+  return hasManagedInstallation(installationOwner(harness, ""), targets);
+}
+
 function uninstallOne(harness: string, customTarget: string, projectTarget: string): void {
-  const owner = `loeyae-aidlc:${harness}`;
+  const owner = installationOwner(harness, customTarget);
   const targets = managedTargetsFor(harness, customTarget, projectTarget);
   if (harness === "codebuddy" && !customTarget) {
     const deployment = getCodeBuddyDeployment(projectTarget);
@@ -929,6 +984,21 @@ function uninstallOne(harness: string, customTarget: string, projectTarget: stri
     console.log(removed ? `✅ Uninstalled ${harness}` : `ℹ️  ${harness} is not owned by this installer; preserved existing files.`);
     return;
   }
+  if (isSharedKiroGlobalSkill(harness, customTarget)) {
+    if (migrateKiroGlobalSkillOwnership()) {
+      console.log(`♻️  Adopted legacy Kiro CLI ownership before uninstalling the shared global Agent Skill.`);
+    }
+    const target = targets[0];
+    const removed = uninstallManagedAssets(owner, targets);
+    let removedLegacyPower = false;
+    if (harness === "kiro-ide") removedLegacyPower = removeManagedLegacyKiroIdePower();
+    if (projectTarget) uninstallProjectHook(harness, projectTarget);
+    console.log("ℹ️  Shared Kiro MCP entries were preserved; they may be used by other installations.");
+    console.log(removed || removedLegacyPower
+      ? `✅ Uninstalled shared Kiro Agent Skill${removedLegacyPower ? " and legacy IDE Power" : ""} → ${target}`
+      : `ℹ️  Shared Kiro Agent Skill is not owned by this installer; preserved: ${target}`);
+    return;
+  }
   const target = targets[0];
   const removed = uninstallManagedAssets(
     owner,
@@ -936,7 +1006,7 @@ function uninstallOne(harness: string, customTarget: string, projectTarget: stri
     harness === "codex" && !customTarget ? unregisterCodexHooks : undefined,
   );
   if (projectTarget) uninstallProjectHook(harness, projectTarget);
-  if ((harness === "kiro-crew" || harness === "kiro-cli") && !customTarget) {
+  if ((harness === "kiro-crew" || harness === "kiro-ide" || harness === "kiro-cli") && !customTarget) {
     console.log("ℹ️  Shared Kiro MCP entries were preserved; they may be used by other installations.");
   }
   console.log(removed ? `✅ Uninstalled ${harness} → ${target}` : `ℹ️  ${harness} target is not owned by this installer; preserved: ${target}`);
@@ -963,7 +1033,7 @@ function deploy(args: string[], operation: "install" | "uninstall"): void {
     let preparedDist: Map<string, string> | undefined;
 
     if (operation === "install") {
-      harnesses = detectAvailableHarnesses();
+      harnesses = deduplicateSharedKiroHarnesses(detectAvailableHarnesses(), operation);
       if (harnesses.length === 0) {
         console.log("ℹ️  No supported host tools were detected; nothing to install. Use --harness to install a platform explicitly.");
         return;
@@ -972,9 +1042,10 @@ function deploy(args: string[], operation: "install" | "uninstall"): void {
     } else {
       harnesses = [];
       const detectionFailures = new Set<string>();
-      for (const harness of allHarnesses) {
+      const ownershipCandidates = deduplicateSharedKiroHarnesses(allHarnesses, operation);
+      for (const harness of ownershipCandidates) {
         try {
-          if (hasManagedInstallation(`loeyae-aidlc:${harness}`, managedTargetsFor(harness, "", ""))) harnesses.push(harness);
+          if (hasManagedHarnessInstallation(harness)) harnesses.push(harness);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           detectionFailures.add(harness);
@@ -983,7 +1054,7 @@ function deploy(args: string[], operation: "install" | "uninstall"): void {
         }
       }
       console.log(`🔎 Installer-owned global installations: ${harnesses.join(", ") || "none"}`);
-      const skipped = allHarnesses.filter((harness) => !harnesses.includes(harness) && !detectionFailures.has(harness));
+      const skipped = ownershipCandidates.filter((harness) => !harnesses.includes(harness) && !detectionFailures.has(harness));
       if (skipped.length) console.log(`⏭️  Skipping platforms without ownership manifests: ${skipped.join(", ")}`);
       if (harnesses.length === 0 && failures.length === 0) {
         console.log("ℹ️  No installer-owned global platform installations were found.");

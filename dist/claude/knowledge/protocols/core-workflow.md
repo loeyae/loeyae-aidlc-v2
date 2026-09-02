@@ -47,7 +47,7 @@
 
 禁止启动时预加载全部规则。目录、审计、协作、提问和交接分别按 `common-directory-structure.md`、`common-audit-logging.md`、`common-team-collaboration.md`、`common-question-format-guide.md`、`common-session-handoff.md` 按需加载。
 
-规则中出现的 `aidlc-*` 能力调用只是平台入口。当前平台不提供 Skill 发现能力时（例如 Kiro Power 形态只装载 `core/knowledge/`），直接加载该能力对应的 steering 执行，输入要求、输出内容和质量门禁均不变。能力入口缺失不构成跳过步骤的理由。
+规则中出现的 `aidlc-*` 能力调用只是平台入口。当前宿主未独立发现随附的 capability Skill 时，直接加载本分发中的 `skills/<capability>/SKILL.md` 及其引用规则执行，输入要求、输出内容和质量门禁均不变。能力入口缺失不构成跳过步骤的理由。
 
 ## Diagram Invocation Protocol
 

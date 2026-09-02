@@ -43,7 +43,7 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 # Kiro Crew Dashboard（全局 skill）
 loeyae-aidlc install
 
-# Kiro IDE（全局 Power；不会安装项目级 Hook）
+# Kiro IDE（共享全局 Agent Skill；不会安装项目级 Hook）
 loeyae-aidlc install --harness kiro-ide
 
 # Kiro CLI（全局 agent skill；不会安装项目级 Hook）
@@ -73,7 +73,7 @@ loeyae-aidlc install --all
 
 #### Kiro IDE 项目级安装
 
-Kiro IDE 的 Power 安装在用户级目录，但生命周期 Stop Hook 必须安装到每个业务项目中：
+Kiro IDE 与 Kiro CLI 共用用户级 Agent Skill，但生命周期 Stop Hook 必须安装到每个业务项目中：
 
 ```bash
 loeyae-aidlc install \
@@ -83,13 +83,13 @@ loeyae-aidlc install \
 
 该命令的效果：
 
-- Power：`~/.kiro/powers/loeyae-aidlc/`
+- Agent Skill：`~/.kiro/skills/loeyae-aidlc/SKILL.md`（与 Kiro CLI 共用）
 - 项目 Hook：`/absolute/path/to/your-project/.kiro/hooks/loeyae-aidlc.json`
 - 不删除、不覆盖业务项目中的源码文件
 
 #### Kiro CLI 项目级安装
 
-Kiro CLI 的 Skill 安装在用户级目录，但项目级 Hook 同样必须显式安装：
+Kiro CLI 使用与 Kiro IDE 相同的用户级 Agent Skill；项目级 Hook 同样必须显式安装：
 
 ```bash
 loeyae-aidlc install \
@@ -99,7 +99,7 @@ loeyae-aidlc install \
 
 该命令的效果：
 
-- Skill：`~/.kiro/skills/loeyae-aidlc/`
+- Skill：`~/.kiro/skills/loeyae-aidlc/SKILL.md`（与 Kiro IDE 共用）
 - 项目 Hook：`/absolute/path/to/your-project/.kiro/hooks/loeyae-aidlc.json`
 - 不要使用 `--target /absolute/path/to/your-project`
 
@@ -142,8 +142,8 @@ CodeBuddy 安装器同样只调用官方 `codebuddy plugin` 命令。优先使�
 | 平台 | 安装路径 |
 |------|---------|
 | Kiro Crew | `~/.kiro/crew/skills/loeyae-aidlc/` |
-| Kiro IDE | `~/.kiro/powers/loeyae-aidlc/` |
-| Kiro CLI | `~/.kiro/skills/loeyae-aidlc/` |
+| Kiro IDE | `~/.kiro/skills/loeyae-aidlc/`（与 Kiro CLI 共用） |
+| Kiro CLI | `~/.kiro/skills/loeyae-aidlc/`（与 Kiro IDE 共用） |
 | Claude Code | `~/.claude/plugins/loeyae-aidlc-marketplace/plugins/loeyae-aidlc/`（staging；运行时由 Claude Code 管理官方 cache 和注册表） |
 | OpenCode | `~/.config/opencode/plugins/loeyae-aidlc.js`（入口；资源位于同级 `loeyae-aidlc/`） |
 | Codex | `~/.agents/skills/loeyae-aidlc/` |
@@ -186,7 +186,7 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 loeyae-aidlc install        # 重新部署（或 --all 全部）
 ```
 
-`install --all` 会先检测当前环境，只安装实际存在的宿主：CLI 类宿主通过 PATH（CodeBuddy/Qoder 也支持 `CODEBUDDY_CLI`/`QODER_CLI`）发现，macOS GUI 宿主同时检查标准 `/Applications` 和用户 `~/Applications` App bundle。Windows KiroCrew 桌面安装会检查 `%ProgramFiles%\KiroCrew\KiroCrew.exe`、`%ProgramW6432%\KiroCrew\KiroCrew.exe` 及 per-user `%LOCALAPPDATA%\Programs\KiroCrew\KiroCrew.exe`；KiroCrew CLI 安装则检查 `~/.kiro/crew/channel` 及 `~/.kiro/crew-venv`（并遵循 `KIROCREW_HOME`/`KIROCREW_VENV`）。未检测到的平台会明确列出并跳过；非标准安装位置或自动检测遗漏时，仍可使用 `--harness <name>` 显式安装。
+`install --all` 检测到 Kiro IDE 与 Kiro CLI 时，会把两者视为同一个全局 Agent Skill，只生成一份 `~/.kiro/skills/loeyae-aidlc/` 资产和一个 canonical ownership manifest；两个宿主仍可分别安装各自项目的 Hook。CLI 类宿主通过 PATH（CodeBuddy/Qoder 也支持 `CODEBUDDY_CLI`/`QODER_CLI`）发现，macOS GUI 宿主同时检查标准 `/Applications` 和用户 `~/Applications` App bundle。Windows KiroCrew 桌面安装会检查 `%ProgramFiles%\KiroCrew\KiroCrew.exe`、`%ProgramW6432%\KiroCrew\KiroCrew.exe` 及 per-user `%LOCALAPPDATA%\Programs\KiroCrew\KiroCrew.exe`；KiroCrew CLI 安装则检查 `~/.kiro/crew/channel` 及 `~/.kiro/crew-venv`（并遵循 `KIROCREW_HOME`/`KIROCREW_VENV`）。未检测到的平台会明确列出并跳过；非标准安装位置或自动检测遗漏时，仍可使用 `--harness <name>` 显式安装。
 
 检测完成后只检查选中平台的预构建产物；若任一选中产物缺失或过期，仍执行一次全平台构建以保持共享 graph 和 distribution parity 一致，不会因 graph 时间戳刷新而逐平台重复重建。
 
@@ -206,7 +206,9 @@ loeyae-aidlc install --harness kiro-ide --migrate-legacy
 
 迁移只接受能通过稳定 v2 标记识别的旧 Loeyae AI-DLC 目标；任意非空目录、未知文件和符号链接仍会 fail-closed。每个旧目标先以同目录原子 rename 保存为带时间戳的 `*.pre-managed-backup-*`，成功后保留备份并生成 ownership manifest；安装或激活失败时则自动把备份恢复到原路径。即使旧安装中的文件曾被修改，也不会丢失，修改内容会完整留在备份中。确认新版本正常后再自行处理备份，安装器不会自动删除这些 legacy 备份。项目 Hook 同样只有在显式使用 `--migrate-legacy` 且内容可识别时才会迁移。
 
-如果旧目标无法识别，不要绕过检查或直接删除；先手工将它重命名为备份，再执行普通安装。例如：
+升级时，安装器会先校验并接管旧 `loeyae-aidlc:kiro-cli` ownership，再以单一共享 owner 管理 Agent Skill。旧 `~/.kiro/powers/loeyae-aidlc/` 只有在存在当前安装器的 ownership manifest 且文件哈希全部匹配时才自动删除；无清单或已修改的旧 Power 会保留并给出警告，不会因目录名称相似而删除。
+
+如果无法识别没有 ownership manifest 的旧目标，不要绕过检查或直接删除；先手工将它重命名为备份，再执行普通安装。例如，旧 Kiro IDE Power 可使用：
 
 ```bash
 mv ~/.kiro/powers/loeyae-aidlc ~/.kiro/powers/loeyae-aidlc.pre-managed-backup
@@ -225,7 +227,7 @@ loeyae-aidlc uninstall --harness zcode
 loeyae-aidlc uninstall --all
 ```
 
-卸载只删除所有权清单中且哈希仍匹配的资产。`uninstall --all` 只处理当前 `~/.config/loeyae-aidlc/installations/` 中有 ownership manifest 的全局/user-scope 平台，并跳过从未安装或不受当前安装器管理的平台；CodeBuddy/Qoder 的 project scope 仍需显式传入 `--harness` 和 `--project`，因为仅凭哈希目录无法安全恢复原项目上下文。Codex 仅移除稳定 ID `loeyae-aidlc-stop-gate-v1` 对应的 Hook；其他 Hook 保留。CodeBuddy/Qoder 先通过官方 CLI 注销对应 scope，再删除项目外的受管源。ZCode 只移除精确匹配的 Loeyae Stop Hook，其他用户 Hook 和共享 MCP 项保留。共享 Kiro MCP 项同样默认保留，因为可能仍被其他安装使用。批量命令会继续处理所有已选平台，但只要任一平台失败，最终退出码即为非零。
+卸载只删除所有权清单中且哈希仍匹配的资产。Kiro IDE 与 Kiro CLI 的任一默认卸载命令都会移除两者共用的全局 Agent Skill；`uninstall --all` 对该共享目标只执行一次。`uninstall --all` 只处理当前 `~/.config/loeyae-aidlc/installations/` 中有 ownership manifest 的全局/user-scope 平台，并跳过从未安装或不受当前安装器管理的平台；CodeBuddy/Qoder 的 project scope 仍需显式传入 `--harness` 和 `--project`，因为仅凭哈希目录无法安全恢复原项目上下文。Codex 仅移除稳定 ID `loeyae-aidlc-stop-gate-v1` 对应的 Hook；其他 Hook 保留。CodeBuddy/Qoder 先通过官方 CLI 注销对应 scope，再删除项目外的受管源。ZCode 只移除精确匹配的 Loeyae Stop Hook，其他用户 Hook 和共享 MCP 项保留。共享 Kiro MCP 项同样默认保留，因为可能仍被其他安装使用。批量命令会继续处理所有已选平台，但只要任一平台失败，最终退出码即为非零。
 
 ### 开发模式（从本地仓库）
 
@@ -315,7 +317,7 @@ loeyae-aidlc-v2/
 │   └── sensors/                 # 自动检查
 ├── harness/                     # 各平台适配层
 │   ├── kiro-crew/              # Kiro Crew Dashboard
-│   ├── kiro-ide/               # Kiro IDE (Power)
+│   ├── kiro-ide/               # Kiro IDE (Agent Skill)
 │   ├── kiro-cli/               # Kiro CLI
 │   ├── claude/                 # Claude Code
 │   ├── codebuddy/              # WorkBuddy Enterprise / CodeBuddy

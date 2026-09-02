@@ -337,6 +337,52 @@ export function hasManagedInstallation(owner: string, targets: string[]): boolea
   return true;
 }
 
+export function migrateManagedOwnership(previousOwner: string, nextOwner: string, targets: string[]): boolean {
+  if (previousOwner === nextOwner) return false;
+  const normalizedTargets = targets.map((target) => path.resolve(target));
+  if (normalizedTargets.length === 0) throw new Error("at least one managed target is required");
+  const previousManifestFile = manifestPath(previousOwner, normalizedTargets);
+  const nextManifestFile = manifestPath(nextOwner, normalizedTargets);
+  const lock = acquireGlobalLock();
+  let wroteNextManifest = false;
+  try {
+    if (!existsSync(previousManifestFile)) return false;
+    const previous = parseManifest(previousManifestFile);
+    if (previous.owner !== previousOwner) throw new Error(`installation owner mismatch: ${previousManifestFile}`);
+    if (JSON.stringify(previous.assets.map((asset) => asset.target).sort()) !== JSON.stringify([...normalizedTargets].sort())) {
+      throw new Error(`installation targets do not match ownership manifest: ${previousManifestFile}`);
+    }
+    previous.assets.forEach(verifyRecord);
+
+    if (existsSync(nextManifestFile)) {
+      const next = parseManifest(nextManifestFile);
+      if (next.owner !== nextOwner) throw new Error(`installation owner mismatch: ${nextManifestFile}`);
+      if (JSON.stringify(next.assets.map((asset) => asset.target).sort()) !== JSON.stringify([...normalizedTargets].sort())) {
+        throw new Error(`installation targets do not match ownership manifest: ${nextManifestFile}`);
+      }
+      next.assets.forEach(verifyRecord);
+      if (JSON.stringify(previous.assets) !== JSON.stringify(next.assets)) {
+        throw new Error(`conflicting installation ownership manifests: ${previousManifestFile}, ${nextManifestFile}`);
+      }
+      unlinkSync(previousManifestFile);
+      return true;
+    }
+
+    const migrated: OwnershipManifest = { ...previous, owner: nextOwner };
+    atomicWrite(nextManifestFile, `${JSON.stringify(migrated, null, 2)}\n`);
+    wroteNextManifest = true;
+    unlinkSync(previousManifestFile);
+    return true;
+  } catch (error) {
+    if (wroteNextManifest && existsSync(previousManifestFile) && existsSync(nextManifestFile)) {
+      unlinkSync(nextManifestFile);
+    }
+    throw error;
+  } finally {
+    releaseGlobalLock(lock);
+  }
+}
+
 export function uninstallManagedAssets(owner: string, targets: string[], deactivate?: () => void): boolean {
   const normalizedTargets = targets.map((target) => path.resolve(target));
   const manifestFile = manifestPath(owner, normalizedTargets);

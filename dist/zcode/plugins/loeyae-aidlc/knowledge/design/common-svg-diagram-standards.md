@@ -182,7 +182,7 @@ node scripts/render-delivery-business-flow-svg.mjs
 node scripts/validate-svg-diagrams.mjs
 ```
 
-对应的 npm 命令（如 `render:svg-diagrams`、`validate:svg-diagrams`）只在源码仓具备脚本和依赖时使用，且必须由用户或维护流程明确选择。它们可以帮助维护现有 `.diagram.json`—SVG 资产对，并执行本标准列出的新增源级全局说明层缺失、就地视觉语义、分组和图型检查；其 PASS 只证明本地脚本执行了声明的检查，不证明任何外部 Provider、目标浏览器或平台运行时已验证 SVG 的字体、真实边界、窗口适配或视觉可读性。缺少新语义字段的旧资产会显示 `MIGRATION_REQUIRED`，不等同于新图完整通过。Kiro Power 安装产物不携带 `scripts/`，因此不能据此宣称安装后能自行生成、预览或重渲染 SVG。
+对应的 npm 命令（如 `render:svg-diagrams`、`validate:svg-diagrams`）只在源码仓具备脚本和依赖时使用，且必须由用户或维护流程明确选择。它们可以帮助维护现有 `.diagram.json`—SVG 资产对，并执行本标准列出的新增源级全局说明层缺失、就地视觉语义、分组和图型检查；其 PASS 只证明本地脚本执行了声明的检查，不证明任何外部 Provider、目标浏览器或平台运行时已验证 SVG 的字体、真实边界、窗口适配或视觉可读性。缺少新语义字段的旧资产会显示 `MIGRATION_REQUIRED`，不等同于新图完整通过。Kiro Agent Skill 安装产物不携带源码仓 `scripts/`，因此不能据此宣称安装后能自行生成、预览或重渲染 SVG。
 
 ## 静态安全与可访问性
 
@@ -319,7 +319,7 @@ AIDLC 负责：
 
 只有实际执行成功且范围明确的 Provider 才能被标为“已验证”。本仓可选回归脚本的通过结果不能代替 Kiro Preview、Claude Code、OpenCode、draw.io、浏览器或其他目标环境的验证。Provider 不可用时：若用户只要求源或设计，交付源并将目标几何/视觉状态标记为 `UNVERIFIED`；若用户明确要求目标渲染、预览或导出，返回 `NEEDS_CAPABILITY`，并保留已生成的源和检查结果；不得静默安装工具或回退为 Mermaid/ASCII 图。
 
-Kiro Power 无内置 SVG Provider 时，只能引用安装包中已有的静态 SVG；需要新图或重渲染时必须由已验证 Provider、源码仓可选命令或用户提供的工具完成。相关状态必须如实记录为“UNVERIFIED”。
+Kiro Agent Skill 不内置 SVG 生成或重渲染 Provider；需要新图或重渲染时必须由已验证 Provider、源码仓可选命令或用户提供的工具完成。相关状态必须如实记录为“UNVERIFIED”。
 
 ## 验收顺序与证据
 

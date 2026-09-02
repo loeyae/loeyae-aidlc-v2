@@ -18,7 +18,7 @@ condition: has_legacy_code
 
 **目的**：分析现有代码库，生成全面的设计产物
 
-本文要求的图表通过调用 `aidlc-diagram-design` 生成；每张具有不同语义目的的图单独调用，传入逆向工程已验证的事实作为 approved facts。Kiro Power 形态降级为直接加载 `common-diagram-design-standards.md` 执行。本文件只定义各产物需要表达的业务和架构关系，不定义图类型选择、Mermaid 语法或布局规则。
+本文要求的图表通过调用 `aidlc-diagram-design` 生成；每张具有不同语义目的的图单独调用，传入逆向工程已验证的事实作为 approved facts。若宿主未独立发现该 capability，则直接加载随附的 `skills/aidlc-diagram-design/SKILL.md` 执行。本文件只定义各产物需要表达的业务和架构关系，不定义图类型选择、Mermaid 语法或布局规则。
 
 **执行条件**：检测到存量项目（工作区中发现现有代码）
 

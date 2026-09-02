@@ -248,7 +248,7 @@ requires: [user-stories, cross-validation]
 - `output_format`：`svg`（SVG 源）；
 - `target_operations`：按执行计划实际要求填写 `source-only`、`preview`、`render` 或 `export`。
 
-Kiro Power 形态降级为直接加载 `common-diagram-design-standards.md` 执行。
+若宿主未独立发现 `aidlc-diagram-design` capability，则直接加载随附的 `skills/aidlc-diagram-design/SKILL.md` 执行。
 
 如果计划仅为简单线性顺序且无条件分支，可使用编号列表代替图表，不强制生成。
 

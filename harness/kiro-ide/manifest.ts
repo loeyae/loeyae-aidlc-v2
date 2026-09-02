@@ -1,10 +1,10 @@
 /**
- * harness/kiro-ide/manifest.ts — Kiro IDE (Power) distribution.
+ * harness/kiro-ide/manifest.ts — Kiro IDE Agent Skill distribution.
  *
- * Projects core/ into the Kiro Power format:
- *   - POWER.md as entry point
- *   - steering/ auto-loaded by IDE
- *   - mcp.json declares MCP services
+ * Kiro IDE and Kiro CLI discover the same global Skill layout:
+ *   - SKILL.md as entry point
+ *   - stages/ and knowledge/ loaded progressively by the Skill
+ *   - hooks/ retained as the source for explicit project Hook installation
  */
 
 import type { HarnessManifest } from "../../scripts/manifest-types.ts";
@@ -12,14 +12,14 @@ import type { HarnessManifest } from "../../scripts/manifest-types.ts";
 const manifest: HarnessManifest = {
   name: "kiro-ide",
   harnessDir: ".",
-  orchestratorSkillPath: "POWER.md",
+  orchestratorSkillPath: "SKILL.md",
 
   coreDirs: [
     { src: "tools", dst: "tools" },
-    { src: "stages/ideation", dst: "steering/ideation" },
-    { src: "stages/inception", dst: "steering/inception" },
-    { src: "stages/construction", dst: "steering/construction" },
-    { src: "stages/operation", dst: "steering/operation" },
+    { src: "stages/ideation", dst: "stages/ideation" },
+    { src: "stages/inception", dst: "stages/inception" },
+    { src: "stages/construction", dst: "stages/construction" },
+    { src: "stages/operation", dst: "stages/operation" },
     { src: "knowledge", dst: "knowledge" },
     { src: "sensors", dst: "sensors" },
     { src: "skills", dst: "skills" },
@@ -27,12 +27,9 @@ const manifest: HarnessManifest = {
   ],
 
   harnessFiles: [
-    { src: "POWER.md", dst: "POWER.md" },
-    { src: "mcp.json", dst: "mcp.json" },
-    { src: "README.md", dst: "README.md", projectRoot: true },
+    { src: "SKILL.md", dst: "SKILL.md" },
+    { src: "README.md", dst: "README.md" },
   ],
-
-  plugin: { manifestDir: ".kiro-plugin", kind: "kiro" },
 };
 
 export default manifest;
