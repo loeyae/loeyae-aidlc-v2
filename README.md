@@ -289,9 +289,28 @@ loeyae-aidlc orchestrate park
 # 使用业务项目中的受控命令清单生成构建测试证据
 loeyae-aidlc evidence run --stage build-and-test
 
+# 导出 Markdown 和 SVG
+loeyae-aidlc export md /absolute/path/document.md --to docx --toc
+loeyae-aidlc export md /absolute/path/document.md --to pdf
+loeyae-aidlc export svg /absolute/path/diagram.svg --to png --scale 2
+
 # 构建某个 harness 的发布产物
 loeyae-aidlc build --harness kiro-crew
 loeyae-aidlc build --all
+```
+
+#### 文档与图表导出
+
+`export` 提供三种严格映射：Markdown → DOCX、Markdown → PDF、SVG → PNG。未指定 `--output` 时写入输入文件同目录并使用相同主文件名；已有输出默认拒绝覆盖，只有显式 `--force` 才替换。
+
+DOCX 导出将标题、正文、粗体、删除线、行内代码、引用、列表、表格和图片转换为 Word 原生结构，并按中英文显示宽度分配表格列宽。可重复使用 `--strip <关键字>` 剥离内部章节，使用 `--toc` 生成目录，或用 `--template /absolute/path/template.docx` 导入模板样式与页面设置。Mermaid fenced block 和本地 SVG 会转成高分辨率 PNG 后嵌入。
+
+PDF 导出使用本机 Chrome、Chromium 或 Edge 打印静态 HTML；浏览器可通过 `--browser /absolute/path/to/browser` 或 `AIDLC_CHROME_BIN` 指定。Mermaid 使用发行包固定版本的本地脚本预渲染，不访问 CDN。SVG → PNG 使用固定版本 Resvg，可用 `--scale`、`--width`、`--dpi`、`--background` 和可重复的 `--font-dir` 控制输出。
+
+导出器不下载远程图片，不读取 SVG 外部资源。浏览器、Mermaid、图片或格式校验失败时返回非零退出码，不生成降级格式或半成品。完整参数见：
+
+```bash
+loeyae-aidlc export --help
 ```
 
 ## 架构
@@ -308,6 +327,7 @@ loeyae-aidlc-v2/
 │   ├── tools/                   # 确定性 TS 工具链
 │   │   ├── aidlc-orchestrate.ts # 核心状态机引擎
 │   │   ├── aidlc-graph.ts      # Stage graph 编译器
+│   │   ├── aidlc-export.ts     # Markdown/DOCX/PDF 与 SVG/PNG 导出器
 │   │   └── data/               # 编译产物
 │   ├── knowledge/               # 规则与参考文档 (45 files)
 │   │   ├── protocols/          # 流程协议

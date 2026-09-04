@@ -1096,6 +1096,7 @@ Commands:
   evidence run [flags]                    Produce controlled build/test evidence
   check --sensor <name>                   Run a deterministic semantic checker
   diagram-provider run [options]          Run Chrome DevTools diagram validation
+  export <md|svg> <file> --to <format>    Export Markdown to DOCX/PDF or SVG to PNG
   hook --format <platform>                Enforce the active AI-DLC stage gate
   install [options]                       Transactionally deploy installer-owned assets
   uninstall [options]                     Remove only verified installer-owned assets
@@ -1124,6 +1125,9 @@ Examples:
   loeyae-aidlc uninstall --all
   loeyae-aidlc approve --stage application-design
   loeyae-aidlc orchestrate report --stage application-design --result approved --approval-token <token>
+  loeyae-aidlc export md /absolute/path/document.md --to docx --toc
+  loeyae-aidlc export md /absolute/path/document.md --to pdf
+  loeyae-aidlc export svg /absolute/path/diagram.svg --to png --scale 2
 `);
 }
 
@@ -1135,6 +1139,7 @@ function main(): void {
     case "evidence": run("core/tools/aidlc-evidence.ts", rest); break;
     case "check": run("core/tools/aidlc-semantic-checks.ts", rest); break;
     case "diagram-provider": run("core/tools/aidlc-diagram-provider.ts", rest); break;
+    case "export": run("core/tools/aidlc-export.ts", rest); break;
     case "hook": run("core/tools/aidlc-platform-hook.ts", rest, readFileSync(0, "utf8")); break;
     case "install": deploy(rest, "install"); break;
     case "uninstall": deploy(rest, "uninstall"); break;
