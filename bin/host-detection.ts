@@ -60,3 +60,27 @@ export function codeBuddyKnownCliPaths(
     path.resolve(root, "CodeBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy"),
   ]);
 }
+
+export function codeBuddyConfigDirForCli(
+  cliPath: string,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const configured = env.CODEBUDDY_CONFIG_DIR?.trim();
+  if (configured) return configured;
+
+  const normalized = cliPath.replace(/\\/g, "/").toLowerCase();
+  const isWorkBuddyCli = (
+    normalized.includes("/workbuddy.app/contents/resources/")
+    || normalized.includes("/workbuddy/resources/")
+  ) && /\/cli\/bin\/codebuddy(?:\.exe|\.cmd)?$/.test(normalized);
+  if (!isWorkBuddyCli) return undefined;
+
+  const workBuddyConfig = env.WORKBUDDY_CONFIG_DIR?.trim();
+  if (workBuddyConfig) return workBuddyConfig;
+  const home = env.HOME?.trim() || env.USERPROFILE?.trim();
+  if (!home) return undefined;
+  const dataFolderName = env.WORKBUDDY_DATA_FOLDER_NAME?.trim() || ".workbuddy";
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
+  return pathApi.resolve(home, dataFolderName);
+}

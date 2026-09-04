@@ -82,7 +82,7 @@ def write_fake_plugin_hosts(root: Path) -> dict:
     codebuddy = fake_bin / "codebuddy"
     codebuddy.write_text(
         "#!/bin/sh\n"
-        "printf '%s|%s\\n' \"$PWD\" \"$*\" >> \"$CODEBUDDY_LOG\"\n"
+        "printf '%s|%s|%s\\n' \"$PWD\" \"${CODEBUDDY_CONFIG_DIR:-}\" \"$*\" >> \"$CODEBUDDY_LOG\"\n"
         "if [ \"$1\" = plugin ] && [ \"$2\" = marketplace ] && [ \"$3\" = list ]; then\n"
         "  if [ -f \"$CODEBUDDY_MARKET_STATE\" ]; then name=$(cat \"$CODEBUDDY_MARKET_STATE\"); printf '[{\"name\":\"%s\"}]\\n' \"$name\"; else printf '[]\\n'; fi\n"
         "  exit 0\n"
@@ -449,6 +449,34 @@ def test_new_plugin_host_lifecycles() -> None:
         assert not (failed_qoder_home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc").exists()
 
 
+def test_workbuddy_embedded_cli_uses_workbuddy_config_dir() -> None:
+    with tempfile.TemporaryDirectory(prefix="aidlc-installer-workbuddy-home-", dir=str(SCRATCH_ROOT)) as directory:
+        root = Path(directory)
+        home = root / "home"
+        home.mkdir()
+        host_env = write_fake_plugin_hosts(root)
+        embedded_cli = (
+            root
+            / "Applications"
+            / "WorkBuddy.app"
+            / "Contents"
+            / "Resources"
+            / "app.asar.unpacked"
+            / "cli"
+            / "bin"
+            / "codebuddy"
+        )
+        embedded_cli.parent.mkdir(parents=True)
+        shutil.copy2(host_env["CODEBUDDY_CLI"], embedded_cli)
+        host_env["CODEBUDDY_CLI"] = str(embedded_cli)
+
+        installed = run_cli(home, ["install", "--harness", "codebuddy"], host_env)
+        assert installed.returncode == 0, installed.stdout + installed.stderr
+        lines = Path(host_env["CODEBUDDY_LOG"]).read_text().splitlines()
+        config_dirs = {line.split("|", 2)[1] for line in lines}
+        assert config_dirs == {str(home / ".workbuddy")}, lines
+
+
 def test_install_all_detects_machine_wide_windows_kiro_crew() -> None:
     with tempfile.TemporaryDirectory(prefix="aidlc-installer-windows-crew-", dir=str(SCRATCH_ROOT)) as directory:
         root = Path(directory)
@@ -565,6 +593,7 @@ if __name__ == "__main__":
     test_opencode_multi_asset_transaction_and_uninstall()
     test_claude_activation_refreshes_existing_plugin()
     test_new_plugin_host_lifecycles()
+    test_workbuddy_embedded_cli_uses_workbuddy_config_dir()
     test_install_all_detects_machine_wide_windows_kiro_crew()
     test_install_all_detects_hosts_and_uninstall_all_uses_ownership()
     test_install_all_aggregates_failures_and_continues()

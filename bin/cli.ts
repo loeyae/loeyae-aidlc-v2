@@ -14,6 +14,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -29,7 +30,7 @@ import {
   uninstallManagedAssets,
   updateSharedJson,
 } from "../core/tools/aidlc-installer";
-import { codeBuddyKnownCliPaths } from "./host-detection";
+import { codeBuddyConfigDirForCli, codeBuddyKnownCliPaths } from "./host-detection";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -137,8 +138,8 @@ function run(script: string, args: string[], input?: string): never | void {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-function runExternal(command: string, args: string[], cwd: string): number {
-  const result = spawnSync(command, args, { stdio: "inherit", cwd });
+function runExternal(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env): number {
+  const result = spawnSync(command, args, { stdio: "inherit", cwd, env });
   if (result.error) {
     console.error(`❌ Failed to run ${command}: ${result.error.message}`);
     return 1;
@@ -251,8 +252,14 @@ function resolveHostCli(environmentVariable: string, command: string, knownPaths
   throw new Error(`${command} CLI not found; install the host CLI or set ${environmentVariable} to its executable path`);
 }
 
-function runExternalJson(command: string, args: string[], cwd: string, description: string): unknown {
-  const result = spawnSync(command, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+function runExternalJson(
+  command: string,
+  args: string[],
+  cwd: string,
+  description: string,
+  env: NodeJS.ProcessEnv = process.env,
+): unknown {
+  const result = spawnSync(command, args, { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   if (result.error) throw new Error(`${description} failed: ${result.error.message}`);
   if ((result.status ?? 1) !== 0) {
     throw new Error(`${description} failed with code ${result.status ?? 1}: ${(result.stderr || result.stdout || "unknown error").trim()}`);
@@ -559,50 +566,65 @@ function createCodeBuddyMarketplaceSource(distRoot: string, marketplaceName: str
   return { temporaryRoot, source };
 }
 
-function codeBuddyCli(): string {
-  return resolveHostCli("CODEBUDDY_CLI", "codebuddy", codeBuddyKnownCliPaths());
+function codeBuddyCli(): { command: string; env: NodeJS.ProcessEnv } {
+  const command = resolveHostCli("CODEBUDDY_CLI", "codebuddy", codeBuddyKnownCliPaths());
+  const candidate = existsSync(command) ? resolve(command) : commandOnPath(command);
+  let executableIdentity = candidate || command;
+  if (candidate) {
+    try {
+      executableIdentity = realpathSync(candidate);
+    } catch {
+      // Keep the resolved path for environment detection if canonicalization fails.
+    }
+  }
+  const configDir = codeBuddyConfigDirForCli(executableIdentity)
+    || codeBuddyConfigDirForCli(command);
+  return {
+    command,
+    env: configDir ? { ...process.env, CODEBUDDY_CONFIG_DIR: configDir } : process.env,
+  };
 }
 
 function registerCodeBuddyPlugin(deployment: CodeBuddyDeployment): void {
-  const cli = codeBuddyCli();
-  if (runExternal(cli, ["plugin", "validate", deployment.pluginRoot], deployment.cwd) !== 0) {
+  const { command: cli, env } = codeBuddyCli();
+  if (runExternal(cli, ["plugin", "validate", deployment.pluginRoot], deployment.cwd, env) !== 0) {
     throw new Error(`CodeBuddy plugin validation failed: ${deployment.pluginRoot}`);
   }
-  const marketplaces = runExternalJson(cli, ["plugin", "marketplace", "list"], deployment.cwd, "CodeBuddy marketplace list");
+  const marketplaces = runExternalJson(cli, ["plugin", "marketplace", "list"], deployment.cwd, "CodeBuddy marketplace list", env);
   const alreadyRegistered = jsonHasNamedEntry(marketplaces, deployment.marketplaceName);
   if (alreadyRegistered) {
-    if (runExternal(cli, ["plugin", "marketplace", "update", deployment.marketplaceName], deployment.cwd) !== 0) {
+    if (runExternal(cli, ["plugin", "marketplace", "update", deployment.marketplaceName], deployment.cwd, env) !== 0) {
       throw new Error(`CodeBuddy marketplace update failed: ${deployment.marketplaceName}`);
     }
-  } else if (runExternal(cli, ["plugin", "marketplace", "add", deployment.marketplaceRoot, "--name", deployment.marketplaceName], deployment.cwd) !== 0) {
+  } else if (runExternal(cli, ["plugin", "marketplace", "add", deployment.marketplaceRoot, "--name", deployment.marketplaceName], deployment.cwd, env) !== 0) {
     throw new Error(`CodeBuddy marketplace registration failed: ${deployment.marketplaceRoot}`);
   }
 
-  const installStatus = runExternal(cli, ["plugin", "install", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd);
-  const updateStatus = runExternal(cli, ["plugin", "update", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd);
+  const installStatus = runExternal(cli, ["plugin", "install", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd, env);
+  const updateStatus = runExternal(cli, ["plugin", "update", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd, env);
   if (updateStatus !== 0) {
-    if (installStatus === 0) runExternal(cli, ["plugin", "uninstall", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd);
-    if (!alreadyRegistered) runExternal(cli, ["plugin", "marketplace", "remove", deployment.marketplaceName], deployment.cwd);
+    if (installStatus === 0) runExternal(cli, ["plugin", "uninstall", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd, env);
+    if (!alreadyRegistered) runExternal(cli, ["plugin", "marketplace", "remove", deployment.marketplaceName], deployment.cwd, env);
     throw new Error(`CodeBuddy plugin install/update failed: ${deployment.pluginRef}`);
   }
-  if (runExternal(cli, ["plugin", "enable", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd) !== 0) {
-    if (installStatus === 0) runExternal(cli, ["plugin", "uninstall", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd);
-    if (!alreadyRegistered) runExternal(cli, ["plugin", "marketplace", "remove", deployment.marketplaceName], deployment.cwd);
+  if (runExternal(cli, ["plugin", "enable", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd, env) !== 0) {
+    if (installStatus === 0) runExternal(cli, ["plugin", "uninstall", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd, env);
+    if (!alreadyRegistered) runExternal(cli, ["plugin", "marketplace", "remove", deployment.marketplaceName], deployment.cwd, env);
     throw new Error(`CodeBuddy plugin enable failed: ${deployment.pluginRef}`);
   }
   console.log(`🔌 CodeBuddy plugin registered and refreshed (${deployment.scope} scope): ${deployment.pluginRef}`);
 }
 
 function unregisterCodeBuddyPlugin(deployment: CodeBuddyDeployment): void {
-  const cli = codeBuddyCli();
-  const plugins = runExternalJson(cli, ["plugin", "list", "--json"], deployment.cwd, "CodeBuddy plugin list");
+  const { command: cli, env } = codeBuddyCli();
+  const plugins = runExternalJson(cli, ["plugin", "list", "--json"], deployment.cwd, "CodeBuddy plugin list", env);
   if (jsonHasPlugin(plugins, PLUGIN_NAME, deployment.marketplaceName)) {
-    const status = runExternal(cli, ["plugin", "uninstall", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd);
+    const status = runExternal(cli, ["plugin", "uninstall", deployment.pluginRef, "--scope", deployment.scope], deployment.cwd, env);
     if (status !== 0) throw new Error(`CodeBuddy plugin unregister failed: ${deployment.pluginRef}`);
   }
-  const marketplaces = runExternalJson(cli, ["plugin", "marketplace", "list"], deployment.cwd, "CodeBuddy marketplace list");
+  const marketplaces = runExternalJson(cli, ["plugin", "marketplace", "list"], deployment.cwd, "CodeBuddy marketplace list", env);
   if (jsonHasNamedEntry(marketplaces, deployment.marketplaceName)) {
-    const status = runExternal(cli, ["plugin", "marketplace", "remove", deployment.marketplaceName], deployment.cwd);
+    const status = runExternal(cli, ["plugin", "marketplace", "remove", deployment.marketplaceName], deployment.cwd, env);
     if (status !== 0) throw new Error(`CodeBuddy marketplace unregister failed: ${deployment.marketplaceName}`);
   }
 }
