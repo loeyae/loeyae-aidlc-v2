@@ -268,6 +268,8 @@ loeyae-aidlc install --all
 
 ### CLI 命令
 
+完整命令、参数组合、环境变量、脚本调用约定和故障排查见 [loeyae-aidlc CLI 使用手册](docs/loeyae-aidlc-cli-guide.md)。
+
 ```bash
 # 查看版本
 loeyae-aidlc version
