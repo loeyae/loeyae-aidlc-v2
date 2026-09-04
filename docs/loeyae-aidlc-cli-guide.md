@@ -164,7 +164,7 @@ loeyae-aidlc install --all --migrate-legacy
 loeyae-aidlc install --harness kiro-ide --migrate-legacy
 ```
 
-CodeBuddy 和 Qoder CLI 不在 PATH 时，可以分别设置 `CODEBUDDY_CLI` 和 `QODER_CLI` 为宿主可执行文件路径。
+CodeBuddy 和 Qoder CLI 不在 PATH 时，可以分别设置 `CODEBUDDY_CLI` 和 `QODER_CLI` 为宿主可执行文件路径。Windows 的 `codebuddy` 自动探测还会检查 `%LOCALAPPDATA%\Programs`、`%LOCALAPPDATA%`、`%ProgramW6432%`、`%ProgramFiles%` 和 `%ProgramFiles(x86)%` 下的 WorkBuddy/CodeBuddy 内嵌 CLI。
 
 ### 4.3 卸载语法
 

@@ -89,8 +89,12 @@ def main() -> None:
         assert (codebuddy_plugin / "skills" / "loeyae-aidlc" / "SKILL.md").is_file()
         assert (codebuddy_plugin / "hooks" / "hooks.json").is_file()
         assert (codebuddy_plugin / ".mcp.json").is_file()
-        assert json.loads((codebuddy_marketplace / ".codebuddy-plugin" / "marketplace.json").read_text())["version"] == package_version
-        assert json.loads((codebuddy_plugin / ".codebuddy-plugin" / "plugin.json").read_text())["version"] == package_version
+        codebuddy_marketplace_manifest = json.loads((codebuddy_marketplace / ".codebuddy-plugin" / "marketplace.json").read_text())
+        codebuddy_plugin_manifest = json.loads((codebuddy_plugin / ".codebuddy-plugin" / "plugin.json").read_text())
+        assert codebuddy_marketplace_manifest["version"] == package_version
+        assert codebuddy_plugin_manifest["version"] == package_version
+        assert codebuddy_marketplace_manifest["plugins"][0]["skills"] == ["./plugins/loeyae-aidlc/skills/loeyae-aidlc"]
+        assert codebuddy_plugin_manifest["skills"] == ["./skills/loeyae-aidlc"]
 
         run_install("qoder", home, host_env)
         qoder_plugin = home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc"

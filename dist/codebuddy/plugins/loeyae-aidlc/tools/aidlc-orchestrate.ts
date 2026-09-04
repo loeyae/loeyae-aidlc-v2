@@ -1421,7 +1421,7 @@ async function handleNext(args: string[]): Promise<Directive> {
     // already created a pending project enrollment.
     const enrollment = readEnrollment(PROJECT_ROOT);
     const pendingWorkflowId = enrollment?.status === "pending" ? enrollment.workflow_id : undefined;
-    state = createInitialState(scopeFlag, "2.1.5", pendingWorkflowId);
+    state = createInitialState(scopeFlag, "2.1.6", pendingWorkflowId);
     saveState(state);
     return {
       kind: "print",

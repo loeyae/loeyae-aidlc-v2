@@ -7,7 +7,7 @@
       "name": "loeyae-aidlc",
       "source": "./loeyae-aidlc",
       "description": "Loeyae AI-DLC v2 engine-driven lifecycle with enforced stage gates.",
-      "version": "2.1.5",
+      "version": "2.1.6",
       "category": "developer-tools",
       "tags": ["aidlc", "workflow", "gates"],
       "strict": true

@@ -92,7 +92,8 @@ updateMcpConfig({json.dumps(str(target))}, {{ {name}: {{ type: 'http', url: 'htt
 def test_node_launcher() -> None:
     result = subprocess.run(["node", str(ROOT / "bin" / "cli.js"), "version"], cwd=ROOT, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    assert "loeyae-aidlc v2.1.5" in result.stdout
+    package_version = json.loads((ROOT / "package.json").read_text())["version"]
+    assert f"loeyae-aidlc v{package_version}" in result.stdout
 
 
 def main() -> None:

@@ -158,7 +158,7 @@ function migrateLegacyState(value: unknown, workflowId: string = randomUUID()): 
   const now = new Date().toISOString();
   return validateWorkflowState({
     schema_version: 2,
-    version: typeof value.version === "string" && value.version ? value.version : "2.1.5",
+    version: typeof value.version === "string" && value.version ? value.version : "2.1.6",
     workflow_id: workflowId,
     revision: 0,
     scope,
@@ -179,7 +179,7 @@ export function statePath(projectRoot: string): string {
   return resolve(projectRoot, "docs", "aidlc", "aidlc-state.json");
 }
 
-export function createInitialState(scope: string, version = "2.1.5", workflowId: string = randomUUID()): WorkflowState {
+export function createInitialState(scope: string, version = "2.1.6", workflowId: string = randomUUID()): WorkflowState {
   if (!VALID_SCOPES.has(scope)) throw new Error(`invalid workflow scope: ${scope}`);
   if (!workflowId) throw new Error("workflow ID must be non-empty");
   const now = new Date().toISOString();

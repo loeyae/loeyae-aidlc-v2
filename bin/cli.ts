@@ -29,6 +29,7 @@ import {
   uninstallManagedAssets,
   updateSharedJson,
 } from "../core/tools/aidlc-installer";
+import { codeBuddyKnownCliPaths } from "./host-detection";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -164,13 +165,6 @@ function firstExistingPath(candidates: string[]): string | undefined {
 
 function applicationPaths(...relativePaths: string[]): string[] {
   return APPLICATION_ROOTS.flatMap((root) => relativePaths.map((relativePath) => resolve(root, relativePath)));
-}
-
-function codeBuddyKnownCliPaths(): string[] {
-  return applicationPaths(
-    "WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
-    "CodeBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
-  );
 }
 
 function kiroCrewKnownPaths(): string[] {
