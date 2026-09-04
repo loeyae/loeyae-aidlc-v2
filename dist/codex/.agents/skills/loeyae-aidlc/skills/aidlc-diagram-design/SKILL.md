@@ -8,6 +8,8 @@ triggers: 画图, 图表设计, 业务流程图, 系统架构图, 架构图, 流
 
 Independent Capability — not an AIDLC phase.
 
+本能力只处理已由 `core-workflow.md` 判定为 SVG 的请求。文档创建或优化的默认 Mermaid 输出由调用 Phase 直接按 Mermaid 标准写入，不调用本能力。
+
 ## 输入
 
 调用方提供：
@@ -15,6 +17,7 @@ Independent Capability — not an AIDLC phase.
 - **source/context**：用户描述、代码路径、文档路径或已有设计产物；
 - **diagram intent**：图帮助读者理解什么；
 - **diagram_type**（可选）：偏好图型，默认 `auto`；
+- **output_format**：必须为 `svg`；缺失或为 `mermaid` 时返回调用方重新执行格式路由；
 - **output_location**：目标 Markdown 路径；SVG 源和可选语义伴随清单优先写入同级 `assets/`；
 - **target_operations**（可选）：`source-only`、`preview`、`render` 或 `export`；未要求时不主动调用 Provider；未要求目标操作时最终最多为 `STATIC_PASS`，不能写成 `PASS`；
 - **expected_contract**：独立 expected contract 路径或受控 Producer 输入，必须来自业务/设计来源，不能从 SVG、sidecar 或浏览器 actual 生成；
@@ -31,7 +34,7 @@ Independent Capability — not an AIDLC phase.
 3. 发布包中的 `knowledge/design/common-structural-region-occlusion-contract.md`；
 4. `constraints` 包含 `delivery-business-flow` 时，自动应用交付型流程约束。
 
-历史 Mermaid 或二维文本图只在迁移时按需读取；不能作为新输出格式。
+Mermaid 可作为文档默认输出，但不由本 SVG Capability 生成；已有 Mermaid 仅在当前请求已明确选择 SVG 迁移时作为业务语义来源读取。二维文本图只用于遗留语义识别。
 
 ## 执行
 
@@ -131,7 +134,7 @@ Independent Capability — not an AIDLC phase.
 - 宣布任何 AIDLC 阶段完成；
 - 伪造 diagram-contract evidence；
 - 声称目标渲染/预览/导出成功而无 Provider 证据；
-- 回退到 Mermaid 或 ASCII 图。
+- 因 SVG 生成、验证或 Provider 失败而静默切换到 Mermaid 或 ASCII 图。
 
 
 ## 过程图强制验收补充

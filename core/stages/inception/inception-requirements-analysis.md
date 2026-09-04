@@ -297,9 +297,9 @@ sensors: [traceability]
 
 ## 可视化标准
 
-业务流程、状态和关系图按 `core-workflow.md` 的 Diagram Invocation Protocol 调用 `aidlc-diagram-design`，并加载 `common-diagram-design-standards.md` 与 `common-svg-diagram-standards.md`。新图表遵循 Blueprinter SVG 设计规则，默认交付可审阅的 SVG 源、可选 `.diagram.json` 语义伴随清单和 Provider Request；静态 SVG、预览或导出只有在外部 Provider 实际生成并提供证据后才作为目标交付物。具体图型选择、语义拆分、布局、字段契约和验收均由共享规范定义，AIDLC 不默认调用本地渲染器。
+业务流程、状态和关系图先按 `core-workflow.md` 的“文档图表格式决策”选择格式。普通文档创建或优化默认写入 Mermaid；用户明确指定 SVG、目标文档已有有效 SVG 引用，或后续 `requirements-methods` 的 `diagram-contract` 契约要求 SVG 时，调用 `aidlc-diagram-design` 并加载 SVG 标准。格式选择、图型语义、拆图和验证均由共享规范定义，不得因工具失败静默切换格式。
 
-图表不能清晰表达或事实不足时，使用文字/表格并记录 `NEEDS_CONTEXT`；事实充分且只要求源时交付 SVG 源/`SOURCE_READY`，将目标几何和视觉标记为 `UNVERIFIED`；只有用户明确要求目标 `preview`、`render` 或 `export` 且没有可验证 Provider 时返回 `NEEDS_CAPABILITY`，经用户同意才可降级为文字/表格。不得把源不存在与 Provider 能力缺失混为一谈，也不得回退为 Mermaid 或二维 ASCII 图。
+图表不能清晰表达或事实不足时，使用文字/表格并记录 `NEEDS_CONTEXT`。Mermaid 模式执行语法与正文一致性检查；SVG 模式在只要求源时交付 SVG 源并将未执行的目标几何/视觉标记为 `UNVERIFIED`，只有明确要求 `preview`、`render` 或 `export` 且没有可验证 Provider 时返回 `NEEDS_CAPABILITY`。不得把源不存在与 Provider 能力缺失混为一谈。
 
 ---
 

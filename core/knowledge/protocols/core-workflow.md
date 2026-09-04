@@ -41,36 +41,47 @@
 | 多模块项目执行审计、自检、交叉验证或批量修复 | `common-module-scope-guard.md` |
 | TDD、构建测试 | `common-test-execution-strategy.md` |
 | 存量分布式系统 | 按需加载 `common-runtime-dependency-analysis.md`、`common-contract-governance.md`、`common-configuration-governance.md`、`common-distributed-consistency.md` |
-| 需要图表设计时 | `common-diagram-design-standards.md` |
-| 执行图表源级、几何或目标环境验证时 | `common-diagram-validation-standards.md` + `common-svg-diagram-standards.md` |
+| 创建或优化文档且需要新图表时 | `common-diagram-design-standards.md`；默认 Mermaid 时再加载 `common-mermaid-diagram-standards.md` + `common-mermaid-syntax-rules.md` |
+| 用户明确要求 SVG、目标文档已有有效 SVG 引用，或阶段契约明确要求 SVG 时 | `common-diagram-design-standards.md` + `common-svg-diagram-standards.md` |
+| 执行 SVG 源级、几何或目标环境验证时 | `common-diagram-validation-standards.md` + `common-svg-diagram-standards.md` |
 | 检测到技术栈证据 | 按 handoff.md 加载对应的 `common-tech-*` 条件适配 |
 
 禁止启动时预加载全部规则。目录、审计、协作、提问和交接分别按 `common-directory-structure.md`、`common-audit-logging.md`、`common-team-collaboration.md`、`common-question-format-guide.md`、`common-session-handoff.md` 按需加载。
 
 规则中出现的 `aidlc-*` 能力调用只是平台入口。当前宿主未独立发现随附的 capability Skill 时，直接加载本分发中的 `skills/<capability>/SKILL.md` 及其引用规则执行，输入要求、输出内容和质量门禁均不变。能力入口缺失不构成跳过步骤的理由。
 
+## 文档图表格式决策（强制）
+
+创建或优化 Markdown 及其他文档产物时，必须先读取目标文档并在生成图表前按以下优先级确定格式：
+
+1. 用户明确指定 Mermaid 或 SVG 时，使用用户指定格式；
+2. 用户未指定且目标文档已经通过有效 Markdown/HTML 引用使用 SVG 时，延续 SVG；同目录存在未引用的 `.svg` 文件不构成依据；
+3. 阶段的 `produces`、sensor 或目标产物契约明确要求 SVG 时，将其视为显式 SVG 要求；
+4. 其余文档创建或优化场景默认选择 `mermaid`，以目标 Markdown 内的 fenced block 交付。
+
+格式一经确定不得因生成、解析或 Provider 失败而静默切换。需要变更格式时，必须重新满足上述优先级或取得用户明确指示。Mermaid 模式不得额外生成 `.svg`、`.diagram.json`、expected contract 或 Provider Request；SVG 模式不得用 Mermaid 代码块冒充 SVG 门禁产物。
+
 ## Diagram Invocation Protocol
 
-Phase 产物需要图表时，按以下协议调用 `aidlc-diagram-design`（独立 Capability，不是 Phase）：
-
-1. Phase 判断当前产物是否需要图——复杂结构、多组件依赖、分支/循环、多方时序、状态迁移、层级关系、图明显优于文字/表格或用户明确要求时，才考虑调用；
-2. Phase 准备 Diagram Request：
+1. Phase 先判断是否需要图——复杂结构、多组件依赖、分支/循环、多方时序、状态迁移、层级关系、图明显优于文字/表格或用户明确要求时才生成；简单字段列表、两实体简单关系、纯线性步骤或事实不足时使用文字/表格。
+2. 按“文档图表格式决策”确定 `output_format`。
+3. `output_format: mermaid` 时：
+   - 加载 `common-mermaid-diagram-standards.md` 与 `common-mermaid-syntax-rules.md`；
+   - 直接在目标 Markdown 中生成或优化 `mermaid` fenced block，保持相邻正文为业务事实来源；
+   - 使用项目已具备的 Mermaid parser/CLI 执行真实语法解析；能力不可用时明确记录“未执行真实语法解析”，不得伪造通过或静默安装工具；
+   - 不调用仅处理 SVG 的 `aidlc-diagram-design` Capability。
+4. `output_format: svg` 时，Phase 准备 Diagram Request 并调用 `aidlc-diagram-design`：
    - `source/context`：当前 Phase 已确认的语义上下文；
    - `diagram intent`：这张图帮助读者理解什么（一句话）；
-   - `approved facts`：已确认的组件、实体、关系和规则；Diagram Capability 不得自行创造业务事实；
-   - `target artifact`：图所服务的目标 Markdown 路径；若要求保存源，SVG 源和可选 `.diagram.json` 语义伴随清单优先写入该路径同级 `assets/`，但不强制生成静态 SVG；
-   - `diagram_type`（可选）：偏好 SVG 场景语义，默认 `auto`；
-   - `output_format`（可选）：`svg`，表示 SVG 源，默认且唯一的新图表格式；
-   - `target_operations`（可选）：`source-only`、`preview`、`render`、`export` 中用户或目标产物实际要求的操作；
-   - `target_reading_environment`（可选）：目标浏览器、编辑器、容器尺寸或交付环境；未提供时不得假设目标 Preview 可用；
-   - `constraints`（可选）：当前阶段特殊约束。
-3. 调用 `aidlc-diagram-design`，传入上述 Request；能力按 Blueprinter 设计规则生成 SVG 源，可选生成语义伴随清单，并生成 Provider Request，不调用或默认绑定本地渲染器。
-4. 接收 Diagram Result：SVG 源路径、可选 `.diagram.json` 路径、Provider Request、Design Notes、源/语义 Validation、目标 Provider Validation（如有）和 Delivery Status。
-5. Phase 仅在目标产物需要时引用 SVG 源；只有外部 Provider 实际返回静态 SVG/预览/导出物并有对应证据时，才能引用或声明该目标交付物已完成。没有 Provider 时保留源检查结果，将目标几何/视觉标为 `UNVERIFIED`；用户明确要求目标操作而无可验证 Provider 时返回 `NEEDS_CAPABILITY`，它不表示源不存在。
+   - `approved facts`：已确认的组件、实体、关系和规则；
+   - `target artifact`：图所服务的目标 Markdown 路径；
+   - `diagram_type`：默认 `auto`；
+   - `output_format`：固定为 `svg`；
+   - `target_operations`：用户或目标产物实际要求的 `source-only`、`preview`、`render`、`export`；
+   - `target_reading_environment` 与 `constraints`：仅在有明确事实时传入。
+5. SVG Result 包含 SVG 源路径、可选 `.diagram.json`、Provider Request、Design Notes、Validation 和 Delivery Status。只有外部 Provider 实际返回目标产物并提供证据时，才能声明预览、渲染或导出完成；无 Provider 时将目标几何/视觉标为 `UNVERIFIED`，明确要求目标操作但能力缺失时返回 `NEEDS_CAPABILITY`。
 
-每张具有不同语义目的的图应单独调用，不要在一次调用中合并多个独立语义视角。不需要图表时（简单字段列表、两实体简单关系、纯线性步骤、事实不足）正常使用文字或表格，不强制调用。
-
-图类型选择、节点识别、语义拆分、粒度、布局、QA、结构化源和 SVG 验收由 Diagram Capability 及其加载的 steering 规则负责，Phase 不得重复定义。没有已验证目标 Provider 时，不得声称目标环境预览、渲染或导出成功；不得改用 Mermaid 或二维 ASCII 图。
+每张具有不同语义目的的图独立处理。Phase 不得重复定义图型语义，也不得把一种格式的检查结果当作另一种格式的验收证据。
 
 ## 意图路由
 

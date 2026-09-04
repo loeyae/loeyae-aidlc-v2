@@ -1,5 +1,19 @@
 # 内容验证规则
 
+## 图表格式决策（强制）
+
+创建或优化文档中的图表前，先按 `core-workflow.md` 判定格式：用户明确指定格式优先；目标文档已有有效 SVG 引用时延续 SVG；阶段契约明确要求 SVG 时使用 SVG；其他情况默认 Mermaid。不得以同目录孤立资产、其他文档格式、工具偏好或当前格式失败为理由切换。
+
+## Mermaid 图表写入前验证
+
+创建或修改 Mermaid fenced block 前，必须加载 `common-diagram-design-standards.md`、`common-mermaid-diagram-standards.md` 与 `common-mermaid-syntax-rules.md`，并确认：
+
+1. 图表目的、节点、关系、方向、标签和分组均来自已确认事实，并与相邻正文一致；
+2. fenced block 闭合、语言标识为 `mermaid`、图类型明确，节点与关系引用完整，标签和特殊字符符合可移植语法；
+3. 项目或宿主已有 Mermaid parser/CLI 时执行真实解析；不可用时记录“未执行真实语法解析”，不得伪造渲染通过或静默安装工具；
+4. 不生成 `.svg`、`.diagram.json`、expected contract 或 Provider Request 作为 Mermaid 模式的伴随资产；
+5. 关键业务事实在正文中可追溯，图表渲染失败不会使唯一事实丢失。
+
 ## SVG 图表写入前验证
 
 创建或修改 SVG 源或图表资产前，必须加载 `common-diagram-design-standards.md` 与 `common-svg-diagram-standards.md`，并确认：
@@ -16,13 +30,13 @@
 
 ## 图表验收记录（强制）
 
-每张新建或调整的 SVG 源必须记录源结构、事实映射、语义契约和适用几何检查的证据；若存在 Provider 目标产物，还必须引用 `common-svg-diagram-standards.md`“验收顺序与证据”中的完整验收矩阵，并记录 Provider、目标环境和证据位置。本文件只验证记录是否存在、是否对应目标源/产物与目标 Markdown，以及失败后是否按源—Provider—验收顺序处理；不重复定义字段、几何、状态或浏览器检查标准。
+Mermaid 模式记录业务语义检查、真实 parser 执行状态和目标阅读环境验证状态；无 parser 时必须明确未执行，不得写成通过。SVG 模式记录源结构、事实映射、语义契约和适用几何检查；存在 Provider 目标产物时还必须引用 `common-svg-diagram-standards.md` 的完整验收矩阵，并记录 Provider、目标环境和证据位置。两种格式的证据不得互相替代。
 
 仅交付 SVG 源时，必须明确记录目标环境几何和视觉为 `UNVERIFIED`，这不等于源设计失败；只有目标操作被要求且 Provider 不可用时才返回 `NEEDS_CAPABILITY`。不得把不存在的 Provider 目标产物或视觉验收描述为已通过。
 
-## 遗留文本图边界
+## 图表格式边界
 
-不得新建 Mermaid fenced block 或二维 ASCII/Unicode 图作为正式图表。历史图迁移时，保留其业务语义、日期和结论；目录树、命令、单行状态和普通文字不属于 SVG 图表迁移范围。
+默认 Mermaid 可作为正式文档图表；显式 SVG 模式继续使用 SVG 源和对应契约。任一格式失败都不得静默切换。二维 ASCII/Unicode 图只用于遗留内容识别；目录树、命令、单行状态和普通文字不属于图表迁移范围。
 
 ## 通用内容验证
 

@@ -2,12 +2,21 @@
 
 ## 目的与边界
 
-本文件定义图表设计的决策规则：何时需要图、表达什么语义、选择什么图型、如何控制粒度、布局和可读性。新图表的 SVG 设计规则以开源 [Blueprinter](https://github.com/SonicBotMan/blueprinter) 为唯一设计层参考，重点吸收其[图型与设计规则](https://github.com/SonicBotMan/blueprinter/blob/main/skill/references/svg-styles/diagram-types-and-rules.md)、[布局最佳实践](https://github.com/SonicBotMan/blueprinter/blob/main/skill/references/svg-styles/svg-layout-best-practices.md)、[生成策略](https://github.com/SonicBotMan/blueprinter/blob/main/skill/references/svg-styles/svg-generation-strategy.md)和[图标规则](https://github.com/SonicBotMan/blueprinter/blob/main/skill/references/svg-styles/icons.md)。AIDLC 只将这些规则作为 SVG 源设计约束使用，不内置或运行 Blueprinter；SVG 源字段、Provider 适配、静态安全和验收契约由 `common-svg-diagram-standards.md` 定义。
+本文件定义图表设计的共享决策规则：何时需要图、表达什么语义、选择什么图型、如何控制粒度、布局和可读性。输出格式必须先按 `core-workflow.md` 的“文档图表格式决策”确定；Mermaid 模式由 `common-mermaid-diagram-standards.md` 与 `common-mermaid-syntax-rules.md` 约束，SVG 模式才使用 Blueprinter 设计规则与 `common-svg-diagram-standards.md`。AIDLC 不内置或运行 Blueprinter。
 
 本文件可被 AI-DLC 流程按需调用，也可独立使用。独立使用时不要求任何 AIDLC 状态（handoff.md、audit.md、审批流程）。涉及 structural / swimlane / phase region 框体时，必须同时遵守 `common-structural-region-occlusion-contract.md`。
 
+## 输出格式选择（强制）
 
-## 统一单色视觉基线（强制）
+文档创建或优化中的图表默认使用 Mermaid。只有用户明确指定 SVG、目标文档已经通过有效引用使用 SVG，或当前阶段/目标产物契约明确要求 SVG 时，才进入 SVG 模式。同目录存在孤立 SVG、其他文档使用 SVG 或 Agent 偏好均不能改变默认选择。
+
+- **Mermaid 模式**：在目标 Markdown 内维护 `mermaid` fenced block；不创建 SVG 伴随资产、`.diagram.json`、expected contract 或 Provider Request；执行 Mermaid 语法与业务语义验证。
+- **SVG 模式**：调用 `aidlc-diagram-design`，并应用本文件的 SVG 专项规则、`common-svg-diagram-standards.md`、结构化契约和 Provider 证据边界。
+- **禁止静默换格式**：任一模式失败都应修复当前格式或报告能力/验证缺口，不得把失败当作切换格式的理由。
+
+除“是否需要图”“图的目的”“图类型选择”“信息真实性与边界”等格式无关章节外，本文件中涉及画布、坐标、端口、SVG DOM、`.diagram.json`、expected contract 或 Provider 的要求只适用于 SVG 模式。
+
+## SVG 模式统一单色视觉基线（强制）
 
 本节是所有新建、调整和迁移图表的统一视觉事实来源，优先于 Blueprinter 中关于配色、填充、图例和装饰性注释的可选建议。业务语义只能由文字、形状、边界、方向和线型共同表达，不能依赖颜色。
 
@@ -30,17 +39,17 @@ SVG 内禁止全局图例和全局备注说明层，不生成 `legend`、`annota
 
 ## 加载条件
 
-需要图表设计时加载本文件、`common-svg-diagram-standards.md` 和（存在 structural / swimlane / phase region 时）`common-structural-region-occlusion-contract.md`。下列文件只用于迁移已有遗留内容，不是新图表输出路径：
+需要图表设计时先加载本文件，再按已确定格式加载：
 
-- `common-mermaid-diagram-standards.md`：Mermaid 遗留内容的语义提取与迁移说明；
-- `common-mermaid-syntax-rules.md`：历史语法到 SVG 场景的映射；
-- `common-ascii-diagram-standards.md`：二维文本图的迁移边界。
+- Mermaid 模式：`common-mermaid-diagram-standards.md` + `common-mermaid-syntax-rules.md`；
+- SVG 模式：`common-svg-diagram-standards.md`，存在 structural / swimlane / phase region 时再加载 `common-structural-region-occlusion-contract.md`；
+- `common-ascii-diagram-standards.md` 仅用于识别遗留二维文本，不是新图表输出路径。
 
-本文件不复制下层格式、端口或渲染规则。
+本文件不复制下层格式、端口、语法或渲染规则。
 
 ## 是否需要图
 
-不是所有信息都需要图表。以下条件满足任一时考虑 SVG 图：
+不是所有信息都需要图表。以下条件满足任一时考虑图表：
 
 - 存在三个以上实体之间的关系需要表达；
 - 存在非线性的分支或循环流程；
@@ -49,7 +58,7 @@ SVG 内禁止全局图例和全局备注说明层，不生成 `legend`、`annota
 - 存在层级结构需要可视化；
 - 用户明确要求图表。
 
-以下条件下优先使用表格或文字，不生成 SVG：
+以下条件下优先使用表格或文字，不生成图表：
 
 - 仅两个实体之间的简单关系；
 - 线性无分支步骤；
@@ -71,7 +80,7 @@ SVG 内禁止全局图例和全局备注说明层，不生成 `legend`、`annota
 
 基于表达目的选择图型语义，不基于历史渲染器的语法限制：
 
-| 表达目的 | SVG 场景语义 | 适用示例 |
+| 表达目的 | 图型语义 | 适用示例 |
 |---|---|---|
 | 系统整体结构和边界 | Architecture / Context / Container | 系统上下文、容器架构 |
 | 业务步骤、决策、循环 | Flowchart | 审批流程、数据处理管线 |
@@ -113,11 +122,11 @@ Architecture / Context 图用于表达“有哪些领域、边界在哪里、静
 4. 当前 AIDLC 已批准产物（仅在 AIDLC 上下文中）；
 5. 用户明确声明的假设。
 
-## SVG 所属文档位置上下文
+## 图表所属文档位置上下文
 
-图表的业务语义默认从 SVG 所属文档位置的上下文获取，而不是从 SVG 坐标、当前折线路径或节点短标题推断。来源解析顺序为：`.diagram.json` 的 `document`/`sourceBasis`（如有）、引用该 SVG 的 Markdown 文件及对应章节、SVG/sidecar 所在文档目录中明确关联的相邻正文。SVG 路径只是定位信息，不是业务事实来源。
+图表的业务语义默认从目标文档对应章节和相邻正文获取，不得从图形布局、短标题或渲染结果猜测。Mermaid 模式读取目标 Markdown 中的 fenced block 及相邻正文；SVG 模式按 `.diagram.json` 的 `document`/`sourceBasis`、引用该 SVG 的 Markdown 章节、SVG/sidecar 所在目录中的明确关联正文依次解析。文件路径只是定位信息，不是业务事实来源。
 
-开始新建或调整图表前，应读取 SVG、sidecar、所属文档的对应章节和已加载的图表规范。若同一 SVG 被多个文档引用，必须以当前目标文档或 sidecar 明确声明的文档为准；若无法唯一确定上下文，返回 `NEEDS_CONTEXT`，不得根据几何形状猜测业务关系、流程状态、回路语义或分支含义。
+开始新建或调整图表前，应读取目标文档对应章节、当前图表源和已加载的格式规范。无法唯一确定上下文时返回 `NEEDS_CONTEXT`，不得根据几何形状猜测业务关系、流程状态、回路语义或分支含义。
 
 
 优化布局、拆图、换行或应用视觉风格时，**不得**删除业务动作、改变边方向、合并语义不同节点、调换状态含义，或省略决策分支。完整语义以结构化源和相邻正文为准，视觉效果只能服务于语义。
@@ -426,14 +435,14 @@ textWidth / diamondWidth + textHeight / diamondHeight ≤ 0.70
 
 ## SVG 源与 Provider 交付模式
 
-本仓图表默认由 AIDLC 交付**可审阅的 SVG 源、可选语义伴随清单和 Provider Request**，不默认交付或调用静态渲染器：
+格式决策为 SVG 时，AIDLC 交付**可审阅的 SVG 源、可选语义伴随清单和 Provider Request**，不默认交付或调用静态渲染器：
 
 1. SVG 源表达按 Blueprinter 规则组织后的节点、连线、文字、分组、图标和可访问性信息，是 AIDLC 的主要图表产物；
 2. `.diagram.json` 对进入 `diagram-contract` 门禁的新建或调整过程图是必需的语义伴随清单，用于稳定 ID、节点/边/端口、连通性、方向、箭头目标和事实映射的机器检查；独立 `source-only` 的静态关系图只有在不要求结构化门禁时才可省略。它不是默认本地渲染输入；过程图缺少适用清单时记录迁移诊断并保持 `final_status: "UNVERIFIED"`。
 3. 需要保存源文件或伴随清单时，优先放在目标 Markdown 同级 `assets/`，但是否提交静态交付物由目标产物和用户要求决定；
 4. Provider Request 记录目标操作（预览、渲染、导出）、目标环境、源路径、可选语义清单、期望验收项和已知能力状态；它可以作为结果中的结构化请求，不要求 AIDLC 绑定某个 Provider 或固定文件扩展名；
 5. 外部 Provider 负责实际文字测量、最终坐标和连线布局、SVG 预览/渲染、SVG 到 PNG/PDF 等导出以及目标环境视觉检查。AIDLC 不调用、安装或默认绑定 Kiro Preview、Claude runtime、OpenCode runtime、draw.io、浏览器或本仓脚本；
-6. Markdown 只有在目标环境需要时才引用 SVG 源或 Provider 生成的静态 SVG；引用本身不证明目标环境已渲染成功。没有 Provider 时仍可交付 SVG 源和语义检查结果，并在外部验收证据中记录视觉状态为 `UNVERIFIED`；不得把该状态渲染为 SVG 内的可见文字、注解、图例、角标或水印。只有用户要求目标渲染/导出而没有可验证 Provider 时才返回 `NEEDS_CAPABILITY`；不得回退为 Mermaid、ASCII 图或伪造渲染成功。
+6. Markdown 只有在目标环境需要时才引用 SVG 源或 Provider 生成的静态 SVG；引用本身不证明目标环境已渲染成功。没有 Provider 时仍可交付 SVG 源和语义检查结果，并在外部验收证据中记录视觉状态为 `UNVERIFIED`；不得把该状态渲染为 SVG 内的可见文字、注解、图例、角标或水印。只有用户要求目标渲染/导出而没有可验证 Provider 时才返回 `NEEDS_CAPABILITY`；不得因 SVG 生成或 Provider 失败而静默切换为 Mermaid/ASCII，也不得伪造渲染成功。
 
 ## 交付型业务流程图
 
@@ -463,13 +472,13 @@ textWidth / diamondWidth + textHeight / diamondHeight ≤ 0.70
 
 正式 SVG 的字段、静态安全、结构、几何、语义、视觉检查和 `PASS` / `FAIL` / `UNVERIFIED` 状态只按 `common-svg-diagram-standards.md` 的“验收顺序与证据”执行。本文件不重复定义该矩阵；Design Notes 必须包含该矩阵要求的决策和证据索引。
 
-## 遗留兼容边界
+## Mermaid 与遗留文本边界
 
-Mermaid fenced block 与二维 ASCII/Unicode 图已不再是本仓的新图表输出格式。它们只能作为历史文档的语义输入，按对应遗留说明迁移为 SVG；目录树、命令、单行状态和其他可复制文本仍保持文本形式。
+按格式决策选择 Mermaid 时，`mermaid` fenced block 是正式文档图表源，必须遵守 Mermaid 图表标准和真实语法解析边界。选择 SVG 时不得用 Mermaid 块替代 SVG 契约，也不得因 SVG 验证失败静默回退。二维 ASCII/Unicode 图只用于遗留内容识别；目录树、命令、单行状态和其他可复制文本仍保持文本形式。
 
 ## 调用边界
 
-独立调用时不更新 `handoff.md` 或审计，也不代替用户审批；AIDLC 内调用时，调用方提供已确认语义上下文并负责将 SVG 产物纳入自身流程。图表能力不得自行创造业务事实、修改代码、提交 Git 或宣布 AIDLC 阶段完成。
+独立调用时不更新 `handoff.md` 或审计，也不代替用户审批；AIDLC 内调用时，调用方提供已确认语义上下文并负责将已选格式的产物纳入自身流程。图表能力不得自行创造业务事实、修改代码、提交 Git 或宣布 AIDLC 阶段完成。
 
 
 ## 流程图主流程追踪与回路 lane 契约
