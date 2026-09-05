@@ -1139,6 +1139,7 @@ Commands:
   check --sensor <name>                   Run a deterministic semantic checker
   diagram-provider run [options]          Run Chrome DevTools diagram validation
   export <md|svg> <file> --to <format>    Export Markdown to DOCX/PDF or SVG to PNG
+  docx <inspect|beautify|validate> [args]  Inspect or conservatively restyle DOCX files
   hook --format <platform>                Enforce the active AI-DLC stage gate
   install [options]                       Transactionally deploy installer-owned assets
   uninstall [options]                     Remove only verified installer-owned assets
@@ -1170,6 +1171,9 @@ Examples:
   loeyae-aidlc export md /absolute/path/document.md --to docx --toc
   loeyae-aidlc export md /absolute/path/document.md --to pdf
   loeyae-aidlc export svg /absolute/path/diagram.svg --to png --scale 2
+  loeyae-aidlc docx inspect /absolute/path/document.docx --json
+  loeyae-aidlc docx beautify /absolute/path/document.docx --dry-run --json
+  loeyae-aidlc docx validate /absolute/path/polished.docx --against /absolute/path/document.docx --json
 `);
 }
 
@@ -1182,6 +1186,7 @@ function main(): void {
     case "check": run("core/tools/aidlc-semantic-checks.ts", rest); break;
     case "diagram-provider": run("core/tools/aidlc-diagram-provider.ts", rest); break;
     case "export": run("core/tools/aidlc-export.ts", rest); break;
+    case "docx": run("core/tools/aidlc-docx.ts", rest); break;
     case "hook": run("core/tools/aidlc-platform-hook.ts", rest, readFileSync(0, "utf8")); break;
     case "install": deploy(rest, "install"); break;
     case "uninstall": deploy(rest, "uninstall"); break;

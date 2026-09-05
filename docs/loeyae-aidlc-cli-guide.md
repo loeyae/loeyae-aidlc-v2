@@ -22,6 +22,9 @@
 | 导出 Markdown 为 Word | `loeyae-aidlc export md <file.md> --to docx` |
 | 导出 Markdown 为 PDF | `loeyae-aidlc export md <file.md> --to pdf` |
 | 导出 SVG 为 PNG | `loeyae-aidlc export svg <file.svg> --to png` |
+| 只读检查已有 DOCX | `loeyae-aidlc docx inspect <file.docx> --json` |
+| 预估 DOCX 美化覆盖率 | `loeyae-aidlc docx beautify <file.docx> --dry-run --json` |
+| 验证 DOCX styles-only 输出 | `loeyae-aidlc docx validate <output.docx> --against <input.docx>` |
 | 构建单个平台分发物 | `loeyae-aidlc build --harness <name>` |
 | 验证阶段图谱 | `loeyae-aidlc graph validate` |
 
@@ -66,10 +69,11 @@ loeyae-aidlc -h
 loeyae-aidlc
 ```
 
-总帮助列出公开命令和安装参数。导出命令另提供完整子命令帮助：
+总帮助列出公开命令和安装参数。导出命令和 DOCX 独立能力另提供完整子命令帮助：
 
 ```bash
 loeyae-aidlc export --help
+loeyae-aidlc docx --help
 ```
 
 ### 3.2 版本
@@ -653,7 +657,103 @@ loeyae-aidlc export svg /absolute/path/diagram.svg --to png --dpi 200
 - PDF 或含 Mermaid 的导出可通过 `--browser`、`AIDLC_CHROME_BIN` 或 `CHROME_BIN` 指定浏览器。
 - 导出成功只证明格式和结构检查通过。包含关键图表时仍应打开最终 DOCX/PDF，检查图片、箭头、虚线和文字的真实可见性。
 
-## 11. 构建分发物：`build`
+## 11. 已有 Word 文档检查与保守美化：`docx`
+
+`docx` 是 Independent Capability，不调用或推进 46-stage AI-DLC 主状态机，也不更新 state、audit 或 Evidence。处理顺序应为 `inspect → beautify --dry-run → beautify --output → validate --against`。
+
+### 11.1 只读检查
+
+```bash
+loeyae-aidlc docx inspect "/absolute/path/input.docx" --json
+```
+
+`inspect` 不修改输入，也不访问外部 relationship。报告包含 OPC Part、正文/表格/媒体/批注/修订统计、样式定义、直接默认字体、`default_font_refs` 和 relationship-resolved `theme_fonts`。
+
+### 11.2 Dry-run 与写入
+
+```bash
+# 必须先查看角色映射、跳过项和预计有效覆盖率
+loeyae-aidlc docx beautify "/absolute/path/input.docx" \
+  --preset professional-zh \
+  --dry-run \
+  --json
+
+# 输出必须与输入不同；默认拒绝覆盖已有文件
+loeyae-aidlc docx beautify "/absolute/path/input.docx" \
+  --output "/absolute/path/output.docx" \
+  --preset professional-zh \
+  --json
+```
+
+| 参数 | 说明 |
+|---|---|
+| `--preset professional-zh` | 使用内置中文专业文档样式；当前唯一内置 preset |
+| `--style-spec <json>` | 使用严格 allowlist 自定义 Style Spec；与 `--preset` 互斥 |
+| `--dry-run` | 不写文件，仅输出样式映射、直接格式影响和 coverage |
+| `--output <docx>` | 实际写入时必填，且不能与输入为同一路径或 hardlink |
+| `--force` | 事务替换已有普通输出文件；不能与 `--dry-run` 同用 |
+| `--json` | 输出 schema version 为 `1` 的机器可读报告 |
+
+自定义 Style Spec 可声明 `schema_version`、`id`、`fonts`、`styles`、`table` 和 `style_map`。其中样式属性只允许预定义的字体、字号、颜色、粗斜体、段落间距/缩进/对齐、分页控制、outline level，以及表格边框/边距/首行底色；未知字段、任意 XML 和超出范围的值均拒绝。
+
+最小示例：
+
+```json
+{
+  "schema_version": "1",
+  "id": "company-zh",
+  "fonts": {
+    "latin": "Arial",
+    "east_asia": "Microsoft YaHei"
+  },
+  "styles": {
+    "normal": {
+      "size_pt": 10.5,
+      "color": "262626",
+      "line_spacing": 1.5,
+      "space_after_pt": 6
+    },
+    "heading1": {
+      "size_pt": 18,
+      "color": "17365D",
+      "bold": true,
+      "keep_next": true,
+      "outline_level": 0
+    }
+  },
+  "table": {
+    "border_color": "B4C6E7",
+    "header_fill": "D9EAF7",
+    "header_bold": true
+  }
+}
+```
+
+```bash
+loeyae-aidlc docx beautify "/absolute/path/input.docx" \
+  --output "/absolute/path/output.docx" \
+  --style-spec "/absolute/path/company-zh.json" \
+  --json
+```
+
+### 11.3 静态验证
+
+```bash
+loeyae-aidlc docx validate "/absolute/path/output.docx" \
+  --against "/absolute/path/input.docx" \
+  --json
+```
+
+验证要求 Part 集合相同，除 relationship 解析出的 styles Part 外所有 Part 字节完全相同，`document.xml` 和正文文本不变。写入和 validate 通过时状态为 `STATIC_PASS`、`visual_validation` 为 `not_run`；只有 Microsoft Word 或 LibreOffice 的真实打开/渲染另行通过后，才能报告视觉 PASS。
+
+### 11.4 安全边界
+
+- 只修改 styles Part，保留直接格式，不执行 semantic rewrite 或 `document.xml` normalize；
+- 不通过 DOCX→Markdown→DOCX 或整包文档模型重建；
+- 宏、数字签名、强制文档保护、危险 ZIP/XML、输出 symlink 和原地覆盖均 fail-closed；
+- 输出通过同目录临时文件、静态复核、fsync 和原子 rename 提交；`--force` 失败时恢复旧输出或保留备份。
+
+## 12. 构建分发物：`build`
 
 该命令面向本仓库开发和发布，不是业务项目日常命令。
 
@@ -672,7 +772,7 @@ loeyae-aidlc build --all
 
 `--harness` 接受第 4.1 节列出的 harness 名称。构建会先编译 stage graph，并重新生成目标 `dist/<harness>/`；`--all` 重建全部平台分发物。
 
-## 12. 阶段图谱：`graph`
+## 13. 阶段图谱：`graph`
 
 ```bash
 # 从 core/stages 编译图谱
@@ -684,7 +784,7 @@ loeyae-aidlc graph validate
 
 编译产物位于发行包的 `core/tools/data/stage-graph.json`。`validate` 发现图谱过期时会提示先运行 `compile`。
 
-## 13. Scope 统计：`scope-table`
+## 14. Scope 统计：`scope-table`
 
 ```bash
 loeyae-aidlc scope-table
@@ -701,7 +801,7 @@ feature   46
 
 候选阶段数是 condition 求值前的图谱数量，实际执行阶段可能更少。
 
-## 14. 生命周期 Hook：`hook`（内部命令）
+## 15. 生命周期 Hook：`hook`（内部命令）
 
 ```text
 loeyae-aidlc hook --format <platform>
@@ -721,7 +821,7 @@ loeyae-aidlc hook --format <platform>
 
 不同宿主的阻断协议不同：Claude-compatible 平台用 JSON `decision: block`，OpenCode/Qoder 使用非零退出码，Kiro 使用普通错误退出。因此自动化不能只用统一退出码解释所有 Hook 结果。
 
-## 15. 环境变量
+## 16. 环境变量
 
 | 变量 | 用途 |
 |---|---|
@@ -737,12 +837,12 @@ loeyae-aidlc hook --format <platform>
 
 不要把 trust secret、审批 token 或宿主凭据写入项目文件、命令文档或提交历史。
 
-## 16. 退出状态和脚本调用
+## 17. 退出状态和脚本调用
 
 - 成功命令通常返回 `0`。
 - `orchestrate` 始终输出 JSON；`kind: error` 时返回非零状态。
 - `approve` 和 `evidence` 被门禁阻断时返回非零状态并输出原因。
-- `check`、`diagram-provider`、`export`、`build`、`graph`、`install` 和 `uninstall` 失败时返回非零状态。
+- `check`、`diagram-provider`、`export`、`docx`、`build`、`graph`、`install` 和 `uninstall` 失败时返回非零状态。
 - `install --all` 和 `uninstall --all` 会继续处理其他已选平台，但任一平台失败时最终整体返回非零状态。
 - `hook` 遵循宿主协议；Claude-compatible Hook 即使输出 `decision: block` 也可能返回 `0`。
 
@@ -755,7 +855,7 @@ printf '%s\n' "$result"
 
 不要通过脚本直接修改 `docs/aidlc/aidlc-state.json` 或 `.aidlc/evidence/` 来模拟成功。
 
-## 17. 常见问题
+## 18. 常见问题
 
 ### 没有活动工作流
 

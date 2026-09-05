@@ -300,6 +300,13 @@ loeyae-aidlc export md /absolute/path/document.md --to docx --toc
 loeyae-aidlc export md /absolute/path/document.md --to pdf
 loeyae-aidlc export svg /absolute/path/diagram.svg --to png --scale 2
 
+# 检查和保守美化已有 DOCX（独立能力，不推进 AI-DLC Stage）
+loeyae-aidlc docx inspect /absolute/path/input.docx --json
+loeyae-aidlc docx beautify /absolute/path/input.docx --dry-run --preset professional-zh --json
+loeyae-aidlc docx beautify /absolute/path/input.docx --output /absolute/path/output.docx --preset professional-zh --json
+loeyae-aidlc docx beautify /absolute/path/input.docx --output /absolute/path/custom.docx --style-spec /absolute/path/style-spec.json --json
+loeyae-aidlc docx validate /absolute/path/output.docx --against /absolute/path/input.docx --json
+
 # 构建某个 harness 的发布产物
 loeyae-aidlc build --harness kiro-crew
 loeyae-aidlc build --all
@@ -318,6 +325,16 @@ PDF 导出使用本机 Chrome、Chromium 或 Edge 打印静态 HTML；浏览器�
 ```bash
 loeyae-aidlc export --help
 ```
+
+#### 已有 DOCX 的检查与保守美化
+
+`docx` 是 Independent Capability，不接入或推进 46-stage AI-DLC 状态机。`inspect` 只读报告 OPC 结构、正文、样式、直接字体和 theme-font 引用；`beautify --dry-run` 先报告样式角色映射及直接格式影响后的预计覆盖率；实际写入要求显式、不同于源文件的 `--output`。可使用内置 `professional-zh` preset，或通过 `--style-spec` 提供严格 allowlist JSON；两者互斥。已有输出默认拒绝替换，只有明确使用 `--force` 才执行事务替换。`beautify` 只修改主文档 relationship 解析出的 styles Part，保留 `document.xml`、relationships、媒体、批注和修订等所有其他 Part 的原始字节。
+
+```bash
+loeyae-aidlc docx --help
+```
+
+写入后应使用 `docx validate <output> --against <input>` 做静态不变量验证。通过状态为 `STATIC_PASS`；没有 Microsoft Word 或 LibreOffice 真实打开/渲染证据时，不能宣称视觉 PASS。
 
 ## 架构
 

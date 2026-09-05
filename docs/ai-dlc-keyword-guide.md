@@ -8,7 +8,7 @@
 
 ### 独立能力请求
 
-当只需要一次估算、一次代码审查、一次图表调整或一次调试分析时，直接描述能力和目标即可：
+当只需要一次估算、一次代码审查、一次图表调整、一次 DOCX 检查/保守美化或一次调试分析时，直接描述能力和目标即可：
 
 ```text
 请做一次代码审查，检查 /Users/andy/work/my-project/src/order-service.ts
@@ -55,6 +55,7 @@
 | 用户故事 | `用户故事`、`故事生成`、`验收标准`、`用户场景`、`user story`、`acceptance criteria` | 将已批准需求转成用户中心的故事和验收标准 | 已批准需求、角色、目标和业务约束 |
 | 应用/架构设计 | `架构设计`、`应用设计`、`组件设计`、`服务设计`、`应用服务设计`、`系统分层` | 识别功能组件、接口、应用服务和系统分层 | 已确认需求、边界、技术约束和非功能要求 |
 | 图表设计 | `画图`、`图表设计`、`业务流程图`、`系统架构图`、`架构图`、`流程图`、`泳道图`、`时序图`、`状态图`、`ER 图`、`部署图`、`diagram`、`architecture diagram`、`flowchart`、`sequence diagram`、`svg` | 创建新图、迁移图表或调整已有 SVG 的布局和路径 | 业务/设计来源、图表目的、输出位置；已有图还应提供 SVG、sidecar、expected contract 和来源文档 |
+| DOCX 检查与保守美化 | `DOCX 美化`、`Word 美化`、`文档美化`、`DOCX 检查`、`Word 样式`、`docx inspect`、`docx beautify`、`docx validate`、`professional-zh` | 只读检查已有 DOCX，或仅通过 styles Part 做保守样式美化 | 输入 DOCX 绝对路径；写入时提供不同于源文件的显式输出路径，以及 preset 或严格 Style Spec |
 | 工作单元 | `工作单元`、`单元拆分`、`依赖矩阵`、`故事映射`、`工作单元规划`、`开发单元` | 将系统拆成可独立实现的单元并建立依赖关系 | 已批准需求、用户故事、设计意图和技术边界 |
 | UI Mock | `UI 原型`、`HTML Mock`、`页面原型`、`交互原型`、`UI mock`、`页面 Mock` | 根据已批准页面计划生成 HTML Mock | 页面计划、用户流程、组件/布局约束和目标平台 |
 | Figma 设计 | `Figma`、`Figma 设计`、`UI 设计稿`、`外部设计稿`、`Figma 页面` | 创建 Figma 设计或登记外部设计稿 | 已批准页面计划、Figma 文件/节点信息或外部设计稿链接 |
@@ -76,6 +77,7 @@
 - “生成**构建测试证据**”比“运行测试”更明确；
 - “做**部署配置验证**”比“检查部署”更明确；
 - “调整已有 **SVG 流程图**”比“优化一下图”更明确；
+- “先对这个 Word 做 **DOCX 美化 dry-run**，再写入新文件并 validate”比“把文档弄好看点”更明确；
 - “做**需求估算**，项目模式为 `legacy-modification`”比“这个要多久”更明确。
 
 “构建”“测试”“设计”“部署”“代码”这些单独的宽泛词不应被当作可靠路由表达。尤其是构建测试 evidence 需要真实命令和受控 Producer，关键词不能替代 evidence 协议。
@@ -86,6 +88,7 @@
 
 - 估算没有说明项目模式，无法区分全新建设、标品扩展和存量改造；
 - 图表没有业务来源或 expected contract，只能看到一张 SVG；
+- DOCX 写入没有提供不同于源文件的输出路径，或未说明使用 preset 还是自定义 Style Spec；
 - 调试没有可复现命令和原始失败证据；
 - 代码审查没有指定变更范围、需求或规范；
 - Figma/UI 请求没有页面计划、目标平台或可访问设计稿；
@@ -169,6 +172,39 @@ Provider Request：/Users/andy/work/my-project/docs/design/assets/order-flow.pro
 这句话缺少目标文件、来源、修改范围和验收目标，Agent 可能无法区分局部路径修复、连接线驱动布局优化和完整重绘。应明确“哪一张图、哪条边/哪个节点、保持什么不变、需要 source-only 还是三视图 preview”。
 
 ## 5. 其他常用提示词模板
+
+### DOCX 检查与保守美化
+
+DOCX 能力是 Independent Capability，不启动或推进 46-stage AI-DLC。推荐一次性明确输入、输出、preset、是否授权写入，以及静态/视觉验收边界。
+
+只读检查示例：
+
+```text
+请使用 DOCX 检查能力，只读检查以下文件：
+/absolute/path/input.docx
+
+输出 JSON，报告 OPC Parts、正文/表格/媒体、样式、直接格式和 theme-font 引用。
+不要访问外部 relationship，不修改源文件，不更新 AI-DLC state/audit，不创建 Git commit。
+```
+
+保守美化示例：
+
+```text
+请使用 DOCX 保守美化能力处理：
+输入：/absolute/path/input.docx
+输出：/absolute/path/output.docx
+Preset：professional-zh
+
+严格按 inspect → dry-run → beautify → validate 执行：
+1. 先报告样式角色映射、直接格式影响和预计有效覆盖率；
+2. 只修改 relationship 解析出的 styles Part，保留 document.xml、relationships、媒体、批注和修订的原始字节；
+3. 不覆盖或修改源文件，不清理直接格式，不做 semantic rewrite；
+4. 写入后使用 validate --against 验证；
+5. 没有 Microsoft Word 或 LibreOffice 真实渲染证据时，只报告 STATIC_PASS，不宣称视觉 PASS；
+6. 不更新 AI-DLC state/audit，不创建 Git commit。
+```
+
+使用自定义 Style Spec 时，将 preset 行替换为 JSON 文件绝对路径，并明确使用 `--style-spec`。目标已存在时，只有明确授权事务替换才使用 `--force`。
 
 ### 需求估算与排期
 
