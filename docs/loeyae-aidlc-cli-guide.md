@@ -168,7 +168,7 @@ loeyae-aidlc install --all --migrate-legacy
 loeyae-aidlc install --harness kiro-ide --migrate-legacy
 ```
 
-Qoder CN IDE、Qoder Desktop 与 CLI 共用插件资产，但 MCP 配置不同。安装器仍通过官方 `qoder plugins` 完成插件注册；随后把直接 HTTP 配置合并到 `~/.qoder/settings.json`，并把使用固定 `mcp-remote@0.8.3` STDIO bridge 的 CN 配置合并到 Windows `%APPDATA%\Qoder\SharedClientCache\mcp.json`（macOS/Linux 使用对应 Application Support/XDG 路径）。同名用户服务始终保留，不会被默认值覆盖；卸载时共享 MCP 服务也保留。
+Qoder CN IDE、Qoder Desktop 与 CLI 共用插件资产，但 MCP 配置不同。安装器仍通过官方 `qoder plugins` 完成插件注册；随后把直接 HTTP 配置合并到 `~/.qoder/settings.json`，并把使用固定 `mcp-remote@0.8.3` STDIO bridge 的 CN 配置合并到 Windows `%USERPROFILE%\.qoder-cn\mcp.json`（macOS/Linux 继续使用对应 Application Support/XDG 默认路径）。同名用户服务始终保留，不会被默认值覆盖；卸载时共享 MCP 服务也保留。
 
 Qoder CN IDE 官方仅声明支持 STDIO/SSE，要求 2.5.0 或更高版本，并且 MCP 仅在 Agent 模式配合 Qwen3 使用。升级后必须完全退出并重启，在头像菜单 **Your Settings → MCP tools** 中确认 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 可见。Figma 需单独完成 OAuth；SSOT 要求启动宿主前设置 `SSOT_API_KEY`。Desktop/CLI 分别使用 **Settings → MCP**（新版 **Extensions → Connectors**）和 `/mcp` 验证。只有检测到官方 `qoder` CLI 或设置了 `QODER_CLI` 才执行自动安装；非标准配置路径可用 `QODER_CONFIG_DIR`、`QODER_CN_MCP_CONFIG` 覆盖。CodeBuddy 不在 PATH 时可设置 `CODEBUDDY_CLI`；Windows 的 `codebuddy` 自动探测还会检查 `%LOCALAPPDATA%\Programs`、`%LOCALAPPDATA%`、`%ProgramW6432%`、`%ProgramFiles%` 和 `%ProgramFiles(x86)%` 下的 WorkBuddy/CodeBuddy 内嵌 CLI。
 
@@ -835,7 +835,7 @@ loeyae-aidlc hook --format <platform>
 | `CODEBUDDY_CLI` | 指定 CodeBuddy CLI 路径或命令名 |
 | `QODER_CLI` | 指定用于 Qoder CN IDE/Desktop/CLI 插件注册的官方 `qoder` CLI 路径或命令名 |
 | `QODER_CONFIG_DIR` | 覆盖 Qoder Desktop/CLI 配置目录；MCP 写入其中的 `settings.json` |
-| `QODER_CN_MCP_CONFIG` | 覆盖 Qoder CN IDE 的 `mcp.json` 完整文件路径 |
+| `QODER_CN_MCP_CONFIG` | 覆盖 Qoder CN IDE 的 `mcp.json` 完整文件路径；Windows 默认 `%USERPROFILE%\.qoder-cn\mcp.json` |
 | `KIROCREW_HOME` | 覆盖 Kiro Crew 数据目录，用于宿主检测 |
 | `KIROCREW_VENV` | 覆盖 Kiro Crew 托管虚拟环境目录，用于宿主检测 |
 

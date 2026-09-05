@@ -6,6 +6,7 @@ import {
   codeBuddyConfigDirForCli,
   codeBuddyKnownCliPaths,
   hostCliInvocation,
+  qoderCnMcpConfigPath,
   type WindowsDesktopHarness,
   windowsDesktopHostPaths,
 } from "../bin/host-detection";
@@ -35,6 +36,17 @@ const windowsEnvironment: NodeJS.ProcessEnv = {
   ProgramFiles: "C:\\Program Files",
   "ProgramFiles(x86)": "C:\\Program Files (x86)",
 };
+assert.equal(
+  qoderCnMcpConfigPath("win32", { USERPROFILE: "C:\\Users\\loeye" }),
+  "C:\\Users\\loeye\\.qoder-cn\\mcp.json",
+);
+assert.equal(
+  qoderCnMcpConfigPath("win32", {
+    USERPROFILE: "C:\\Users\\loeye",
+    QODER_CN_MCP_CONFIG: "D:\\Qoder Data\\mcp.json",
+  }),
+  "D:\\Qoder Data\\mcp.json",
+);
 const windowsPaths = codeBuddyKnownCliPaths("win32", windowsEnvironment, () => undefined);
 
 assert(windowsPaths.includes("C:\\Users\\andy\\AppData\\Local\\Programs\\WorkBuddy\\resources\\app.asar.unpacked\\cli\\bin\\codebuddy.exe"));

@@ -34,6 +34,7 @@ import {
   codeBuddyConfigDirForCli,
   codeBuddyKnownCliPaths,
   hostCliInvocation,
+  qoderCnMcpConfigPath,
   type WindowsDesktopHarness,
   windowsDesktopHostPaths,
 } from "./host-detection";
@@ -66,23 +67,7 @@ const QODER_CONFIG_ROOT = process.env.QODER_CONFIG_DIR?.trim()
   ? resolve(process.env.QODER_CONFIG_DIR.trim())
   : resolve(HOME, ".qoder");
 const QODER_SETTINGS_PATH = resolve(QODER_CONFIG_ROOT, "settings.json");
-const QODER_CN_MCP_CONFIG_PATH = (() => {
-  const configured = process.env.QODER_CN_MCP_CONFIG?.trim();
-  if (configured) return resolve(configured);
-  if (process.platform === "win32") {
-    return resolve(
-      process.env.APPDATA || resolve(HOME, "AppData/Roaming"),
-      "Qoder/SharedClientCache/mcp.json",
-    );
-  }
-  if (process.platform === "darwin") {
-    return resolve(HOME, "Library/Application Support/Qoder/SharedClientCache/mcp.json");
-  }
-  return resolve(
-    process.env.XDG_CONFIG_HOME || resolve(HOME, ".config"),
-    "Qoder/SharedClientCache/mcp.json",
-  );
-})();
+const QODER_CN_MCP_CONFIG_PATH = qoderCnMcpConfigPath();
 const ZCODE_GLOBAL_SKILL_ROOT = resolve(HOME, ".zcode/skills/loeyae-aidlc");
 const ZCODE_GLOBAL_CONFIG_PATH = resolve(HOME, ".zcode/cli/config.json");
 const KIRO_GLOBAL_SKILL_ROOT = resolve(HOME, ".kiro/skills/loeyae-aidlc");

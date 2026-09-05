@@ -5,7 +5,7 @@
 正式安装由 `loeyae-aidlc install --harness qoder` 调用官方 `qoder plugins` 命令注册并启用 `loeyae-aidlc@local`，同时以“只补缺失、保留同名用户配置”的方式更新：
 
 - Qoder Desktop/CLI：`~/.qoder/settings.json`，直接使用 Streamable HTTP；
-- Qoder CN IDE：Windows `%APPDATA%\Qoder\SharedClientCache\mcp.json`、macOS `~/Library/Application Support/Qoder/SharedClientCache/mcp.json`、Linux `~/.config/Qoder/SharedClientCache/mcp.json`。
+- Qoder CN IDE：Windows `%USERPROFILE%\.qoder-cn\mcp.json`（真实宿主实测）、macOS `~/Library/Application Support/Qoder/SharedClientCache/mcp.json`、Linux `~/.config/Qoder/SharedClientCache/mcp.json`。
 
 Qoder CN IDE 官方仅声明支持 STDIO/SSE，因此 CN 配置使用固定版本 `mcp-remote@0.8.3`，把 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 的 Streamable HTTP 服务转换为本地 STDIO。可用 `QODER_CN_MCP_CONFIG` 指定非标准 CN 配置文件；`QODER_CONFIG_DIR` 继续覆盖 Desktop/CLI 配置目录。卸载插件时共享 MCP 条目会保留，避免删除用户或其他安装仍在使用的服务。
 

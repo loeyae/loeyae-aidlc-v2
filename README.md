@@ -137,7 +137,7 @@ Claude Code 的安装器会额外生成本地 marketplace，并调用官方 `cla
 
 CodeBuddy 安装器同样只调用官方 `codebuddy plugin` 命令。优先使用 PATH 中的 `codebuddy`；macOS 能发现 WorkBuddy/CodeBuddy App 内嵌 CLI。Windows 优先从 `App Paths` 和卸载注册表动态读取 WorkBuddy/CodeBuddy 的真实安装根目录，因此支持用户自定义安装位置；per-user 的 `%LOCALAPPDATA%\Programs`、`%LOCALAPPDATA%` 和 machine-wide 的 `%ProgramW6432%`、`%ProgramFiles%`、`%ProgramFiles(x86)%` 仅作为兼容回退。检测到 WorkBuddy 内嵌 CLI 时，安装器会通过 `CODEBUDDY_CONFIG_DIR` 指向 WorkBuddy 自己的 `~/.workbuddy` app home，避免把插件误注册到独立 CodeBuddy 默认使用的 `~/.codebuddy`。其他位置可通过 `CODEBUDDY_CLI` 指定；显式设置的 `CODEBUDDY_CONFIG_DIR` 会被保留。
 
-Qoder CN IDE、Qoder Desktop 和 Qoder CLI 共用 `loeyae-aidlc` 插件资产，但 MCP 存储与传输能力不同。安装器先使用 PATH 中的 `qoder`（或 `QODER_CLI`）调用官方 `qoder plugins` 注册并启用 user/project scope 的 `loeyae-aidlc@local`，再以只补缺失、保留同名用户配置的方式写入两套宿主配置：Desktop/CLI 的 `~/.qoder/settings.json` 使用原生 Streamable HTTP；Qoder CN IDE 的 Windows `%APPDATA%\Qoder\SharedClientCache\mcp.json`（macOS/Linux 对应 Application Support/XDG 路径）使用固定的 `mcp-remote@0.8.3` STDIO bridge，因为 CN IDE 官方只声明支持 STDIO/SSE。非标准路径可分别用 `QODER_CONFIG_DIR`、`QODER_CN_MCP_CONFIG` 覆盖。
+Qoder CN IDE、Qoder Desktop 和 Qoder CLI 共用 `loeyae-aidlc` 插件资产，但 MCP 存储与传输能力不同。安装器先使用 PATH 中的 `qoder`（或 `QODER_CLI`）调用官方 `qoder plugins` 注册并启用 user/project scope 的 `loeyae-aidlc@local`，再以只补缺失、保留同名用户配置的方式写入两套宿主配置：Desktop/CLI 的 `~/.qoder/settings.json` 使用原生 Streamable HTTP；Qoder CN IDE 在 Windows 实际读取 `%USERPROFILE%\.qoder-cn\mcp.json`，该文件使用固定的 `mcp-remote@0.8.3` STDIO bridge，因为 CN IDE 官方只声明支持 STDIO/SSE。macOS/Linux 继续使用对应 Application Support/XDG 默认路径；非标准路径可分别用 `QODER_CONFIG_DIR`、`QODER_CN_MCP_CONFIG` 覆盖。
 
 Qoder CN IDE 要求 2.5.0 或更高版本；安装后必须完全退出并重启，在头像菜单 **Your Settings → MCP tools** 中确认 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 可见。MCP 仅在 Agent 模式配合 Qwen3 使用，最多同时连接 10 个服务。Figma 首次连接仍需 OAuth；SSOT 要求启动 Qoder CN IDE 前向宿主进程提供 `SSOT_API_KEY`。Desktop 应在 **Settings → Plugins → User → Custom** 和 **Settings → MCP**（新版为 **Extensions → Connectors**）核对；CLI 可依次执行 `/plugins reload`、`/mcp reload`，再用 `/plugins`、`/hooks`、`/mcp` 检查。卸载插件时共享 MCP 条目保留，避免删除用户或其他安装仍在使用的服务。
 
@@ -154,7 +154,7 @@ Qoder CN IDE 要求 2.5.0 或更高版本；安装后必须完全退出并重启
 | OpenCode | `~/.config/opencode/plugins/loeyae-aidlc.js`（入口；资源位于同级 `loeyae-aidlc/`） |
 | Codex | `~/.agents/skills/loeyae-aidlc/` |
 | WorkBuddy / CodeBuddy | `~/.config/loeyae-aidlc/host-assets/codebuddy/user/`（受管 marketplace source；运行时 cache 由 CodeBuddy 管理） |
-| Qoder CN IDE / Desktop / CLI | `~/.config/loeyae-aidlc/host-assets/qoder/user/loeyae-aidlc/`（受管插件源）；CN IDE MCP 位于平台 `Qoder/SharedClientCache/mcp.json`，Desktop/CLI MCP 位于 `~/.qoder/settings.json` |
+| Qoder CN IDE / Desktop / CLI | `~/.config/loeyae-aidlc/host-assets/qoder/user/loeyae-aidlc/`（受管插件源）；CN IDE MCP 在 Windows 位于 `%USERPROFILE%\.qoder-cn\mcp.json`，Desktop/CLI MCP 位于 `~/.qoder/settings.json` |
 | ZCode | `~/.zcode/skills/loeyae-aidlc/`（默认直接用户集成） |
 
 ### 平台生命周期门禁

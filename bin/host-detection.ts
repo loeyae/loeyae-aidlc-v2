@@ -44,6 +44,27 @@ export function hostCliInvocation(
     : direct;
 }
 
+export function qoderCnMcpConfigPath(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const configured = env.QODER_CN_MCP_CONFIG?.trim();
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
+  if (configured) return pathApi.resolve(configured);
+
+  const home = platform === "win32"
+    ? env.USERPROFILE?.trim() || env.HOME?.trim() || "~"
+    : env.HOME?.trim() || env.USERPROFILE?.trim() || "~";
+  if (platform === "win32") return path.win32.resolve(home, ".qoder-cn", "mcp.json");
+  if (platform === "darwin") {
+    return path.posix.resolve(home, "Library/Application Support/Qoder/SharedClientCache/mcp.json");
+  }
+  return path.posix.resolve(
+    env.XDG_CONFIG_HOME?.trim() || path.posix.resolve(home, ".config"),
+    "Qoder/SharedClientCache/mcp.json",
+  );
+}
+
 const WINDOWS_APP_NAMES: Array<{ host: CodeBuddyHost; relativePath: string }> = [
   { host: "workbuddy", relativePath: "WorkBuddy" },
   { host: "codebuddy", relativePath: "CodeBuddy" },
