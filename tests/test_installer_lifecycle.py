@@ -124,6 +124,8 @@ def write_fake_plugin_hosts(root: Path) -> dict:
         "QODER_CLI": str(qoder),
         "QODER_LOG": str(qoder_log),
         "QODER_PLUGIN_STATE": str(qoder_plugin_state),
+        "QODER_CONFIG_DIR": str(root / "qoder-config"),
+        "QODER_CN_MCP_CONFIG": str(root / "qoder-cn" / "mcp.json"),
     }
 
 
@@ -375,12 +377,22 @@ def test_new_plugin_host_lifecycles() -> None:
             "hooks": {"enabled": False, "events": {"Stop": [custom_hook]}},
             "mcp": {"servers": {"figma": custom_figma}},
         }))
+        qoder_mcp_config_paths = [
+            Path(host_env["QODER_CONFIG_DIR"]) / "settings.json",
+            Path(host_env["QODER_CN_MCP_CONFIG"]),
+        ]
+        for config_path in qoder_mcp_config_paths:
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text(json.dumps({
+                "userSetting": "preserve",
+                "mcpServers": {"figma": custom_figma},
+            }))
 
         for harness in ["codebuddy", "qoder", "zcode"]:
             first = run_cli(home, ["install", "--harness", harness], host_env)
             assert first.returncode == 0, first.stdout + first.stderr
             if harness == "qoder":
-                assert "Qoder plugin installed and enabled for Desktop / CLI" in first.stdout
+                assert "Qoder plugin installed and enabled for CN IDE / Desktop / CLI" in first.stdout
             second = run_cli(home, ["install", "--harness", harness], host_env)
             assert second.returncode == 0, second.stdout + second.stderr
 
@@ -393,6 +405,12 @@ def test_new_plugin_host_lifecycles() -> None:
         qoder_log = Path(host_env["QODER_LOG"]).read_text().splitlines()
         assert sum("plugins install " in line and "--scope user" in line for line in qoder_log) == 2
         assert sum("plugins enable loeyae-aidlc --scope user" in line for line in qoder_log) == 2
+        expected_qoder_mcp = {"loeyae-skills", "awesome-design", "figma", "ssot"}
+        for config_path in qoder_mcp_config_paths:
+            config = json.loads(config_path.read_text())
+            assert config["userSetting"] == "preserve"
+            assert config["mcpServers"]["figma"] == custom_figma
+            assert set(config["mcpServers"]) == expected_qoder_mcp
 
         zcode_config = json.loads(zcode_config_path.read_text())
         stop_groups = zcode_config["hooks"]["events"]["Stop"]
@@ -416,6 +434,10 @@ def test_new_plugin_host_lifecycles() -> None:
         zcode_after = json.loads(zcode_config_path.read_text())
         assert zcode_after["hooks"]["events"]["Stop"] == [custom_hook]
         assert set(zcode_after["mcp"]["servers"]) == {"loeyae-skills", "awesome-design", "figma", "ssot"}
+        for config_path in qoder_mcp_config_paths:
+            config = json.loads(config_path.read_text())
+            assert config["mcpServers"]["figma"] == custom_figma
+            assert set(config["mcpServers"]) == expected_qoder_mcp
 
         for harness in ["codebuddy", "qoder"]:
             installed = run_cli(home, ["install", "--harness", harness, "--project", str(project)], host_env)

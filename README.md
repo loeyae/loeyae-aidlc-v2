@@ -61,7 +61,7 @@ loeyae-aidlc install --harness codex
 # WorkBuddy Enterprise / CodeBuddy（官方 user-scope plugin）
 loeyae-aidlc install --harness codebuddy
 
-# Qoder Desktop / CLI（官方 user-scope 本地插件；通过 `qoder` CLI 注册）
+# Qoder CN IDE / Desktop / CLI（user-scope 本地插件 + 宿主 MCP 配置）
 loeyae-aidlc install --harness qoder
 
 # ZCode（用户 Skill + 用户 Hook/MCP；同时构建可 UI 导入的 marketplace）
@@ -137,7 +137,11 @@ Claude Code 的安装器会额外生成本地 marketplace，并调用官方 `cla
 
 CodeBuddy 安装器同样只调用官方 `codebuddy plugin` 命令。优先使用 PATH 中的 `codebuddy`；macOS 能发现 WorkBuddy/CodeBuddy App 内嵌 CLI。Windows 优先从 `App Paths` 和卸载注册表动态读取 WorkBuddy/CodeBuddy 的真实安装根目录，因此支持用户自定义安装位置；per-user 的 `%LOCALAPPDATA%\Programs`、`%LOCALAPPDATA%` 和 machine-wide 的 `%ProgramW6432%`、`%ProgramFiles%`、`%ProgramFiles(x86)%` 仅作为兼容回退。检测到 WorkBuddy 内嵌 CLI 时，安装器会通过 `CODEBUDDY_CONFIG_DIR` 指向 WorkBuddy 自己的 `~/.workbuddy` app home，避免把插件误注册到独立 CodeBuddy 默认使用的 `~/.codebuddy`。其他位置可通过 `CODEBUDDY_CLI` 指定；显式设置的 `CODEBUDDY_CONFIG_DIR` 会被保留。
 
-Qoder Desktop 和 Qoder CLI 采用一致的 Skill/插件模型。安装器使用 PATH 中的 `qoder`（或 `QODER_CLI`）调用官方 `qoder plugins`，注册并启用 user/project scope 的 `loeyae-aidlc@local`；插件 manifest 显式声明完整 `skills/` 目录、Stop Hook 和 `.mcp.json`，避免只发现 Skill 而遗漏其他组件。Windows Qoder Desktop 已真实验证可以加载并触发 user-scope Skill；修复后的 MCP/Hook 仍应在目标 Windows 宿主复验。桌面版应在 **Settings → Plugins → User → Custom** 核对插件，并在 **Settings → MCP**（新版界面为 **Extensions → Connectors**）确认 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 均标记为来自该插件。Qoder CLI 可依次执行 `/plugins reload`、`/mcp reload`，再用 `/plugins`、`/hooks`、`/mcp` 核对。本地插件不一定显示在 Marketplace 的 Installed 过滤结果中。自动安装仍要求官方 `qoder` CLI 可调用；仅发现 Qoder Desktop 安装目录不会被当作可安装证据。CodeBuddy 与 Qoder 都会先校验插件，再安装、刷新并启用；不会直接修改宿主内部数据库。
+Qoder CN IDE、Qoder Desktop 和 Qoder CLI 共用 `loeyae-aidlc` 插件资产，但 MCP 存储与传输能力不同。安装器先使用 PATH 中的 `qoder`（或 `QODER_CLI`）调用官方 `qoder plugins` 注册并启用 user/project scope 的 `loeyae-aidlc@local`，再以只补缺失、保留同名用户配置的方式写入两套宿主配置：Desktop/CLI 的 `~/.qoder/settings.json` 使用原生 Streamable HTTP；Qoder CN IDE 的 Windows `%APPDATA%\Qoder\SharedClientCache\mcp.json`（macOS/Linux 对应 Application Support/XDG 路径）使用固定的 `mcp-remote@0.8.3` STDIO bridge，因为 CN IDE 官方只声明支持 STDIO/SSE。非标准路径可分别用 `QODER_CONFIG_DIR`、`QODER_CN_MCP_CONFIG` 覆盖。
+
+Qoder CN IDE 要求 2.5.0 或更高版本；安装后必须完全退出并重启，在头像菜单 **Your Settings → MCP tools** 中确认 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 可见。MCP 仅在 Agent 模式配合 Qwen3 使用，最多同时连接 10 个服务。Figma 首次连接仍需 OAuth；SSOT 要求启动 Qoder CN IDE 前向宿主进程提供 `SSOT_API_KEY`。Desktop 应在 **Settings → Plugins → User → Custom** 和 **Settings → MCP**（新版为 **Extensions → Connectors**）核对；CLI 可依次执行 `/plugins reload`、`/mcp reload`，再用 `/plugins`、`/hooks`、`/mcp` 检查。卸载插件时共享 MCP 条目保留，避免删除用户或其他安装仍在使用的服务。
+
+自动安装仍要求官方 `qoder` CLI 可调用；仅发现 Qoder CN IDE/Desktop 安装目录不会被当作可安装证据。CodeBuddy 仍只通过官方 CLI 管理宿主注册；Qoder 除官方插件注册外会原子合并上述 MCP JSON，不直接修改宿主数据库。
 
 各平台的全局安装路径：
 
@@ -150,7 +154,7 @@ Qoder Desktop 和 Qoder CLI 采用一致的 Skill/插件模型。安装器使用
 | OpenCode | `~/.config/opencode/plugins/loeyae-aidlc.js`（入口；资源位于同级 `loeyae-aidlc/`） |
 | Codex | `~/.agents/skills/loeyae-aidlc/` |
 | WorkBuddy / CodeBuddy | `~/.config/loeyae-aidlc/host-assets/codebuddy/user/`（受管 marketplace source；运行时 cache 由 CodeBuddy 管理） |
-| Qoder Desktop / CLI | `~/.config/loeyae-aidlc/host-assets/qoder/user/loeyae-aidlc/`（受管 `@local` plugin source；运行时注册和 cache 由 Qoder 管理） |
+| Qoder CN IDE / Desktop / CLI | `~/.config/loeyae-aidlc/host-assets/qoder/user/loeyae-aidlc/`（受管插件源）；CN IDE MCP 位于平台 `Qoder/SharedClientCache/mcp.json`，Desktop/CLI MCP 位于 `~/.qoder/settings.json` |
 | ZCode | `~/.zcode/skills/loeyae-aidlc/`（默认直接用户集成） |
 
 ### 平台生命周期门禁
@@ -165,7 +169,7 @@ Qoder Desktop 和 Qoder CLI 采用一致的 Skill/插件模型。安装器使用
 | OpenCode | 插件 `session.idle` 事件 | 全局插件安装自动加载 | 失败时通过插件继续提示 Agent 处理 |
 | Codex | 全局 `~/.codex/hooks.json` 的 `Stop` Hook | `loeyae-aidlc install --harness codex`，然后 `/hooks` 审查并信任 | `decision:block` 触发继续执行 |
 | WorkBuddy / CodeBuddy | 插件 `hooks/hooks.json` 的 `Stop` Hook | 官方 CodeBuddy CLI 自动注册 user/project scope | Claude-compatible `decision:block` 继续 Agent |
-| Qoder Desktop / CLI | 插件 `Stop` Hook | 官方 `qoder plugins` 自动安装 user/project scope | 退出码 2 阻断；`stop_hook_active` 重入时不重复阻断，签名状态仍保持 running；桌面版 Hook 阻断能力以运行时为准 |
+| Qoder CN IDE / Desktop / CLI | 插件 `Stop` Hook | 官方 `qoder plugins` 安装插件；安装器另行合并宿主 MCP 配置 | 退出码 2 阻断；`stop_hook_active` 重入时不重复阻断，签名状态仍保持 running；CN IDE/Desktop Hook 阻断能力以运行时为准 |
 | ZCode | 用户配置或插件 `Stop` Hook | 默认自动合并用户 Hook；完整插件需 UI 导入 | `decision:block`，宿主最多连续继续 3 次 |
 | Kiro Crew | 当前无公开生命周期 Hook | Skill 强制调用引擎；不能伪造完成 | 引擎拒绝 `report`，Skill 必须继续修复 |
 
@@ -255,7 +259,7 @@ loeyae-aidlc install --all
 | OpenCode | 重启 OpenCode |
 | Codex | 新开会话 |
 | WorkBuddy / CodeBuddy | 执行 `/reload-plugins`，或新开会话 |
-| Qoder Desktop / CLI | 重启 Qoder Desktop；CLI 执行 `/plugins reload` 或重新启动 |
+| Qoder CN IDE / Desktop / CLI | 完全退出并重启 Qoder CN IDE/Desktop；CLI 执行 `/plugins reload`、`/mcp reload` 或重新启动 |
 | ZCode | 新开会话；完整插件注册/启用在 Settings → Plugins 中完成 |
 
 ## 使用
@@ -364,7 +368,7 @@ loeyae-aidlc-v2/
 │   ├── kiro-cli/               # Kiro CLI
 │   ├── claude/                 # Claude Code
 │   ├── codebuddy/              # WorkBuddy Enterprise / CodeBuddy
-│   ├── qoder/                  # Qoder Desktop / CLI shared local plugin
+│   ├── qoder/                  # Qoder CN IDE / Desktop / CLI shared local plugin
 │   ├── zcode/                  # ZCode user integration + plugin marketplace
 │   ├── codex/                  # Codex
 │   └── opencode/               # OpenCode

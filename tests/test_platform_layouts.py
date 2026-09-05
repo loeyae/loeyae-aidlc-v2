@@ -53,6 +53,8 @@ def main() -> None:
         host_env = {
             "CODEBUDDY_CLI": str(codebuddy),
             "QODER_CLI": str(qoder),
+            "QODER_CONFIG_DIR": str(root / "qoder-config"),
+            "QODER_CN_MCP_CONFIG": str(root / "qoder-cn" / "mcp.json"),
         }
         package_version = json.loads((ROOT / "package.json").read_text())["version"]
 
@@ -102,13 +104,25 @@ def main() -> None:
         assert (qoder_plugin / "skills" / "loeyae-aidlc" / "SKILL.md").is_file()
         assert (qoder_plugin / "hooks" / "hooks.json").is_file()
         assert (qoder_plugin / ".mcp.json").is_file()
+        assert (qoder_plugin / "mcp-cn.json").is_file()
         qoder_plugin_manifest = json.loads((qoder_plugin / ".qoder-plugin" / "plugin.json").read_text())
         qoder_mcp_manifest = json.loads((qoder_plugin / ".mcp.json").read_text())
+        qoder_settings = json.loads((root / "qoder-config" / "settings.json").read_text())
+        qoder_cn_config = json.loads((root / "qoder-cn" / "mcp.json").read_text())
         assert qoder_plugin_manifest["version"] == package_version
         assert qoder_plugin_manifest["skills"] == "./skills"
         assert qoder_plugin_manifest["hooks"] == "./hooks/hooks.json"
         assert qoder_plugin_manifest["mcpServers"] == "./.mcp.json"
-        assert set(qoder_mcp_manifest["mcpServers"]) == {"loeyae-skills", "awesome-design", "figma", "ssot"}
+        expected_qoder_mcp = {"loeyae-skills", "awesome-design", "figma", "ssot"}
+        assert set(qoder_mcp_manifest["mcpServers"]) == expected_qoder_mcp
+        assert set(qoder_settings["mcpServers"]) == expected_qoder_mcp
+        assert set(qoder_cn_config["mcpServers"]) == expected_qoder_mcp
+        for server in qoder_cn_config["mcpServers"].values():
+            assert server["command"] == "npx"
+            assert server["args"][:2] == ["-y", "mcp-remote@0.8.3"]
+            assert server["args"][-2:] == ["--transport", "http-only"] or server["args"][-4:-2] == ["--transport", "http-only"]
+        ssot_args = qoder_cn_config["mcpServers"]["ssot"]["args"]
+        assert ssot_args[-2:] == ["--header", "Authorization: Bearer ${SSOT_API_KEY}"]
 
         run_install("zcode", home)
         zcode_skill = home / ".zcode" / "skills" / "loeyae-aidlc"

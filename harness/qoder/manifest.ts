@@ -21,6 +21,7 @@ const manifest: HarnessManifest = {
     { src: "plugin.json", dst: ".qoder-plugin/plugin.json" },
     { src: "hooks/hooks.json", dst: "hooks/hooks.json" },
     { src: ".mcp.json", dst: ".mcp.json" },
+    { src: "mcp-cn.json", dst: "mcp-cn.json" },
     { src: "README.md", dst: "README.md" },
   ],
 

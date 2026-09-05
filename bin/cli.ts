@@ -62,6 +62,27 @@ const PLUGIN_MARKETPLACE_NAME = "loeyae-aidlc";
 const HOST_ASSET_ROOT = resolve(HOME, ".config/loeyae-aidlc/host-assets");
 const CODEBUDDY_USER_MARKETPLACE_ROOT = resolve(HOST_ASSET_ROOT, "codebuddy/user");
 const QODER_USER_PLUGIN_ROOT = resolve(HOST_ASSET_ROOT, "qoder/user/loeyae-aidlc");
+const QODER_CONFIG_ROOT = process.env.QODER_CONFIG_DIR?.trim()
+  ? resolve(process.env.QODER_CONFIG_DIR.trim())
+  : resolve(HOME, ".qoder");
+const QODER_SETTINGS_PATH = resolve(QODER_CONFIG_ROOT, "settings.json");
+const QODER_CN_MCP_CONFIG_PATH = (() => {
+  const configured = process.env.QODER_CN_MCP_CONFIG?.trim();
+  if (configured) return resolve(configured);
+  if (process.platform === "win32") {
+    return resolve(
+      process.env.APPDATA || resolve(HOME, "AppData/Roaming"),
+      "Qoder/SharedClientCache/mcp.json",
+    );
+  }
+  if (process.platform === "darwin") {
+    return resolve(HOME, "Library/Application Support/Qoder/SharedClientCache/mcp.json");
+  }
+  return resolve(
+    process.env.XDG_CONFIG_HOME || resolve(HOME, ".config"),
+    "Qoder/SharedClientCache/mcp.json",
+  );
+})();
 const ZCODE_GLOBAL_SKILL_ROOT = resolve(HOME, ".zcode/skills/loeyae-aidlc");
 const ZCODE_GLOBAL_CONFIG_PATH = resolve(HOME, ".zcode/cli/config.json");
 const KIRO_GLOBAL_SKILL_ROOT = resolve(HOME, ".kiro/skills/loeyae-aidlc");
@@ -90,7 +111,7 @@ const HARNESS_DESCRIPTIONS: Record<string, string> = {
   opencode: "OpenCode (global plugin)",
   codex: "Codex (global skill)",
   codebuddy: "WorkBuddy Enterprise / CodeBuddy (official plugin)",
-  qoder: "Qoder Desktop / CLI (official plugin; registered via qoder CLI)",
+  qoder: "Qoder CN IDE / Desktop / CLI (official plugin + host MCP config)",
   zcode: "ZCode (user skill + user Hook/MCP; plugin marketplace also built)",
 };
 
@@ -683,7 +704,7 @@ function registerQoderPlugin(deployment: QoderDeployment): void {
     if (!alreadyInstalled) runExternal(cli, ["plugins", "uninstall", PLUGIN_NAME, "--scope", deployment.scope], deployment.cwd);
     throw new Error(`Qoder CLI plugin enable failed: ${PLUGIN_NAME}`);
   }
-  console.log(`🔌 Qoder plugin installed and enabled for Desktop / CLI (${deployment.scope} scope): ${PLUGIN_NAME}@local`);
+  console.log(`🔌 Qoder plugin installed and enabled for CN IDE / Desktop / CLI (${deployment.scope} scope): ${PLUGIN_NAME}@local`);
 }
 
 function unregisterQoderPlugin(deployment: QoderDeployment): void {
@@ -692,6 +713,36 @@ function unregisterQoderPlugin(deployment: QoderDeployment): void {
   if (!jsonHasPlugin(plugins, PLUGIN_NAME, "local")) return;
   const status = runExternal(cli, ["plugins", "uninstall", PLUGIN_NAME, "--scope", deployment.scope], deployment.cwd);
   if (status !== 0) throw new Error(`Qoder CLI plugin unregister failed: ${PLUGIN_NAME}`);
+}
+
+function updateQoderMcpConfig(sourcePath: string, targetPath: string, hostLabel: string): void {
+  const defaults = JSON.parse(readFileSync(sourcePath, "utf8"));
+  if (!isRecord(defaults.mcpServers)) {
+    throw new Error(`Qoder MCP defaults must contain mcpServers: ${sourcePath}`);
+  }
+  const merged = updateMcpConfig(targetPath, defaults.mcpServers);
+  if (merged.added.length === 0 && merged.upgraded.length === 0) {
+    console.log(`🔌 ${hostLabel} MCP services already present; preserved: ${merged.preserved.join(", ") || "none"}`);
+    return;
+  }
+  const changes = [
+    ...(merged.added.length ? [`added: ${merged.added.join(", ")}`] : []),
+    ...(merged.upgraded.length ? [`upgraded: ${merged.upgraded.join(", ")}`] : []),
+  ];
+  console.log(`🔌 Updated ${hostLabel} MCP services (${changes.join("; ")}) → ${targetPath}`);
+}
+
+function registerQoderMcpConfigs(pluginRoot: string): void {
+  updateQoderMcpConfig(
+    resolve(pluginRoot, ".mcp.json"),
+    QODER_SETTINGS_PATH,
+    "Qoder Desktop / CLI",
+  );
+  updateQoderMcpConfig(
+    resolve(pluginRoot, "mcp-cn.json"),
+    QODER_CN_MCP_CONFIG_PATH,
+    "Qoder CN IDE",
+  );
 }
 
 function isZcodeHookGroup(group: unknown): boolean {
@@ -907,7 +958,10 @@ function installOne(harness: string, customTarget: string, projectTarget: string
     const deployment = getQoderDeployment(projectTarget);
     installManagedAssets(owner, [
       { source, target: deployment.pluginRoot, kind: "directory" },
-    ], () => registerQoderPlugin(deployment), migrationOptions);
+    ], () => {
+      registerQoderPlugin(deployment);
+      registerQoderMcpConfigs(deployment.pluginRoot);
+    }, migrationOptions);
     console.log(`✅ Installed loeyae-aidlc v${PKG.version} (${harness}, ${deployment.scope}) → ${deployment.pluginRoot}`);
     return;
   }
@@ -1007,6 +1061,7 @@ function uninstallOne(harness: string, customTarget: string, projectTarget: stri
   if (harness === "qoder" && !customTarget) {
     const deployment = getQoderDeployment(projectTarget);
     const removed = uninstallManagedAssets(owner, targets, () => unregisterQoderPlugin(deployment));
+    if (removed) console.log("ℹ️  Shared Qoder MCP services were preserved in host configuration.");
     console.log(removed ? `✅ Uninstalled ${harness} (${deployment.scope})` : `ℹ️  ${harness} is not owned by this installer; preserved existing files.`);
     return;
   }

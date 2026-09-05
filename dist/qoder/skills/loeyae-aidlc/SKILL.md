@@ -1,11 +1,11 @@
 ---
 name: loeyae-aidlc
-description: Use when the user asks to use AI-DLC, aidlc, requirements, design, implementation, review, debugging, or deployment through the deterministic Loeyae AI-DLC workflow in Qoder Desktop or CLI.
+description: Use when the user asks to use AI-DLC, aidlc, requirements, design, implementation, review, debugging, or deployment through the deterministic Loeyae AI-DLC workflow in Qoder CN IDE, Desktop, or CLI.
 ---
 
-# Loeyae AI-DLC v2 for Qoder Desktop / CLI
+# Loeyae AI-DLC v2 for Qoder CN IDE / Desktop / CLI
 
-Qoder Desktop 或 CLI 是 AI-DLC 的平台入口，不自行决定阶段顺序。在业务项目目录调用：
+Qoder CN IDE、Qoder Desktop 或 CLI 是 AI-DLC 的平台入口，不自行决定阶段顺序。在业务项目目录调用：
 
 ```bash
 loeyae-aidlc orchestrate next --scope <scope>

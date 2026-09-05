@@ -1,0 +1,46 @@
+{
+  "mcpServers": {
+    "loeyae-skills": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@0.8.3",
+        "https://mcp-skills.allbelieves.com/mcp",
+        "--transport",
+        "http-only"
+      ]
+    },
+    "awesome-design": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@0.8.3",
+        "https://mcp-design.allbelieves.com/mcp",
+        "--transport",
+        "http-only"
+      ]
+    },
+    "figma": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@0.8.3",
+        "https://mcp.figma.com/mcp",
+        "--transport",
+        "http-only"
+      ]
+    },
+    "ssot": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@0.8.3",
+        "https://ssot.dev.loeyae.com/mcp/",
+        "--transport",
+        "http-only",
+        "--header",
+        "Authorization: Bearer ${SSOT_API_KEY}"
+      ]
+    }
+  }
+}

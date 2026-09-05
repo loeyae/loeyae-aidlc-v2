@@ -105,7 +105,7 @@ loeyae-aidlc install --list
 | `opencode` | OpenCode 全局插件 |
 | `codex` | Codex 全局 Skill 和生命周期 Hook |
 | `codebuddy` | WorkBuddy Enterprise / CodeBuddy 官方插件 |
-| `qoder` | Qoder Desktop / CLI 官方本地插件（通过 `qoder` CLI 注册） |
+| `qoder` | Qoder CN IDE / Desktop / CLI 本地插件，并合并对应宿主 MCP 配置 |
 | `zcode` | ZCode 用户 Skill、Hook 和 MCP 配置 |
 
 ### 4.2 安装语法
@@ -168,7 +168,9 @@ loeyae-aidlc install --all --migrate-legacy
 loeyae-aidlc install --harness kiro-ide --migrate-legacy
 ```
 
-Qoder Desktop 与 CLI 共用 Skill/插件模型，但非交互安装仍需调用官方 `qoder plugins`。当 PATH 中没有对应命令时，可通过 `QODER_CLI` 指定；仅发现 Qoder Desktop 安装目录不足以作为自动安装证据。Qoder manifest 显式声明整个 `skills/` 目录、`hooks/hooks.json` 和 `.mcp.json`。升级后应重启 Desktop；CLI 会话可依次执行 `/plugins reload`、`/mcp reload`，并通过 `/plugins`、`/hooks`、`/mcp` 检查三个组件。在 Desktop 的 **Settings → MCP**（新版为 **Extensions → Connectors**）中，`loeyae-skills`、`awesome-design`、`figma`、`ssot` 应标记为来自 `loeyae-aidlc` 插件。MCP 可见不等于认证成功，Figma OAuth、SSOT 认证及网络连接仍需分别验证。CodeBuddy 不在 PATH 时可设置 `CODEBUDDY_CLI`；Windows 的 `codebuddy` 自动探测还会检查 `%LOCALAPPDATA%\Programs`、`%LOCALAPPDATA%`、`%ProgramW6432%`、`%ProgramFiles%` 和 `%ProgramFiles(x86)%` 下的 WorkBuddy/CodeBuddy 内嵌 CLI。
+Qoder CN IDE、Qoder Desktop 与 CLI 共用插件资产，但 MCP 配置不同。安装器仍通过官方 `qoder plugins` 完成插件注册；随后把直接 HTTP 配置合并到 `~/.qoder/settings.json`，并把使用固定 `mcp-remote@0.8.3` STDIO bridge 的 CN 配置合并到 Windows `%APPDATA%\Qoder\SharedClientCache\mcp.json`（macOS/Linux 使用对应 Application Support/XDG 路径）。同名用户服务始终保留，不会被默认值覆盖；卸载时共享 MCP 服务也保留。
+
+Qoder CN IDE 官方仅声明支持 STDIO/SSE，要求 2.5.0 或更高版本，并且 MCP 仅在 Agent 模式配合 Qwen3 使用。升级后必须完全退出并重启，在头像菜单 **Your Settings → MCP tools** 中确认 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 可见。Figma 需单独完成 OAuth；SSOT 要求启动宿主前设置 `SSOT_API_KEY`。Desktop/CLI 分别使用 **Settings → MCP**（新版 **Extensions → Connectors**）和 `/mcp` 验证。只有检测到官方 `qoder` CLI 或设置了 `QODER_CLI` 才执行自动安装；非标准配置路径可用 `QODER_CONFIG_DIR`、`QODER_CN_MCP_CONFIG` 覆盖。CodeBuddy 不在 PATH 时可设置 `CODEBUDDY_CLI`；Windows 的 `codebuddy` 自动探测还会检查 `%LOCALAPPDATA%\Programs`、`%LOCALAPPDATA%`、`%ProgramW6432%`、`%ProgramFiles%` 和 `%ProgramFiles(x86)%` 下的 WorkBuddy/CodeBuddy 内嵌 CLI。
 
 ### 4.3 卸载语法
 
@@ -831,7 +833,9 @@ loeyae-aidlc hook --format <platform>
 | `AIDLC_CHROME_BIN` | 为 PDF 和 Mermaid 导出指定浏览器 |
 | `CHROME_BIN` | 浏览器路径兼容变量；优先级低于 `--browser` 和 `AIDLC_CHROME_BIN` |
 | `CODEBUDDY_CLI` | 指定 CodeBuddy CLI 路径或命令名 |
-| `QODER_CLI` | 指定用于 Qoder Desktop/CLI 插件注册的官方 `qoder` CLI 路径或命令名 |
+| `QODER_CLI` | 指定用于 Qoder CN IDE/Desktop/CLI 插件注册的官方 `qoder` CLI 路径或命令名 |
+| `QODER_CONFIG_DIR` | 覆盖 Qoder Desktop/CLI 配置目录；MCP 写入其中的 `settings.json` |
+| `QODER_CN_MCP_CONFIG` | 覆盖 Qoder CN IDE 的 `mcp.json` 完整文件路径 |
 | `KIROCREW_HOME` | 覆盖 Kiro Crew 数据目录，用于宿主检测 |
 | `KIROCREW_VENV` | 覆盖 Kiro Crew 托管虚拟环境目录，用于宿主检测 |
 
