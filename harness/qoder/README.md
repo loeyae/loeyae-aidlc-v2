@@ -10,4 +10,12 @@
 loeyae-aidlc install --harness qoder --project /absolute/path/to/project
 ```
 
-安装或升级后，重启 Qoder Desktop；Qoder CLI 可执行 `/plugins reload` 或重新启动。本地 `@local` 插件应在桌面版 **Settings → Plugins → User → Custom** 中核对，不一定显示在 Marketplace 的 Installed 过滤结果中。本 harness 不声称自动注册 Qoder JetBrains 插件。
+安装或升级后，重启 Qoder Desktop；Qoder CLI 可依次执行 `/plugins reload` 和 `/mcp reload`，再用 `/plugins`、`/hooks`、`/mcp` 核对组件。插件 manifest 显式声明整个 `skills/` 目录、`hooks/hooks.json` 和 `.mcp.json`，避免只加载 Skill 而漏掉 Stop Hook 或 MCP。
+
+桌面版应同时满足：
+
+- **Settings → Plugins → User → Custom** 中 `loeyae-aidlc@local` 已启用；
+- **Settings → MCP**（新版界面为 **Extensions → Connectors**）中可见 `loeyae-skills`、`awesome-design`、`figma`、`ssot`，并标记为来自 `loeyae-aidlc` 插件；
+- 新会话中可触发 `loeyae-aidlc` Skill，已 enrollment 且仍为 running 的业务项目会执行 Stop Hook。
+
+本地 `@local` 插件不一定显示在 Marketplace 的 Installed 过滤结果中。本 harness 不声称自动注册 Qoder JetBrains 插件。MCP 出现在列表中只表示插件声明已加载；Figma OAuth、SSOT 认证和各服务网络连通性仍须分别验收。

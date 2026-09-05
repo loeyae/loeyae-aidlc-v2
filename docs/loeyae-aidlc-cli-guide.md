@@ -168,7 +168,7 @@ loeyae-aidlc install --all --migrate-legacy
 loeyae-aidlc install --harness kiro-ide --migrate-legacy
 ```
 
-Qoder Desktop 与 CLI 共用 Skill/插件模型，但非交互安装仍需调用官方 `qoder plugins`。当 PATH 中没有对应命令时，可通过 `QODER_CLI` 指定；仅发现 Qoder Desktop 安装目录不足以作为自动安装证据。CodeBuddy 不在 PATH 时可设置 `CODEBUDDY_CLI`；Windows 的 `codebuddy` 自动探测还会检查 `%LOCALAPPDATA%\Programs`、`%LOCALAPPDATA%`、`%ProgramW6432%`、`%ProgramFiles%` 和 `%ProgramFiles(x86)%` 下的 WorkBuddy/CodeBuddy 内嵌 CLI。
+Qoder Desktop 与 CLI 共用 Skill/插件模型，但非交互安装仍需调用官方 `qoder plugins`。当 PATH 中没有对应命令时，可通过 `QODER_CLI` 指定；仅发现 Qoder Desktop 安装目录不足以作为自动安装证据。Qoder manifest 显式声明整个 `skills/` 目录、`hooks/hooks.json` 和 `.mcp.json`。升级后应重启 Desktop；CLI 会话可依次执行 `/plugins reload`、`/mcp reload`，并通过 `/plugins`、`/hooks`、`/mcp` 检查三个组件。在 Desktop 的 **Settings → MCP**（新版为 **Extensions → Connectors**）中，`loeyae-skills`、`awesome-design`、`figma`、`ssot` 应标记为来自 `loeyae-aidlc` 插件。MCP 可见不等于认证成功，Figma OAuth、SSOT 认证及网络连接仍需分别验证。CodeBuddy 不在 PATH 时可设置 `CODEBUDDY_CLI`；Windows 的 `codebuddy` 自动探测还会检查 `%LOCALAPPDATA%\Programs`、`%LOCALAPPDATA%`、`%ProgramW6432%`、`%ProgramFiles%` 和 `%ProgramFiles(x86)%` 下的 WorkBuddy/CodeBuddy 内嵌 CLI。
 
 ### 4.3 卸载语法
 

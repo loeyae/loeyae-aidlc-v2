@@ -137,7 +137,7 @@ Claude Code 的安装器会额外生成本地 marketplace，并调用官方 `cla
 
 CodeBuddy 安装器同样只调用官方 `codebuddy plugin` 命令。优先使用 PATH 中的 `codebuddy`；macOS 能发现 WorkBuddy/CodeBuddy App 内嵌 CLI。Windows 优先从 `App Paths` 和卸载注册表动态读取 WorkBuddy/CodeBuddy 的真实安装根目录，因此支持用户自定义安装位置；per-user 的 `%LOCALAPPDATA%\Programs`、`%LOCALAPPDATA%` 和 machine-wide 的 `%ProgramW6432%`、`%ProgramFiles%`、`%ProgramFiles(x86)%` 仅作为兼容回退。检测到 WorkBuddy 内嵌 CLI 时，安装器会通过 `CODEBUDDY_CONFIG_DIR` 指向 WorkBuddy 自己的 `~/.workbuddy` app home，避免把插件误注册到独立 CodeBuddy 默认使用的 `~/.codebuddy`。其他位置可通过 `CODEBUDDY_CLI` 指定；显式设置的 `CODEBUDDY_CONFIG_DIR` 会被保留。
 
-Qoder Desktop 和 Qoder CLI 采用一致的 Skill/插件模型。安装器使用 PATH 中的 `qoder`（或 `QODER_CLI`）调用官方 `qoder plugins`，注册并启用 user/project scope 的 `loeyae-aidlc@local`；Windows Qoder Desktop 已真实验证可以加载并触发该 user scope 插件。本地插件应在桌面版 **Settings → Plugins → User → Custom** 中核对，不一定显示在 Marketplace 的 Installed 过滤结果中。自动安装仍要求官方 `qoder` CLI 可调用；仅发现 Qoder Desktop 安装目录不会被当作可安装证据。CodeBuddy 与 Qoder 都会先校验插件，再安装、刷新并启用；不会直接修改宿主内部数据库。
+Qoder Desktop 和 Qoder CLI 采用一致的 Skill/插件模型。安装器使用 PATH 中的 `qoder`（或 `QODER_CLI`）调用官方 `qoder plugins`，注册并启用 user/project scope 的 `loeyae-aidlc@local`；插件 manifest 显式声明完整 `skills/` 目录、Stop Hook 和 `.mcp.json`，避免只发现 Skill 而遗漏其他组件。Windows Qoder Desktop 已真实验证可以加载并触发 user-scope Skill；修复后的 MCP/Hook 仍应在目标 Windows 宿主复验。桌面版应在 **Settings → Plugins → User → Custom** 核对插件，并在 **Settings → MCP**（新版界面为 **Extensions → Connectors**）确认 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 均标记为来自该插件。Qoder CLI 可依次执行 `/plugins reload`、`/mcp reload`，再用 `/plugins`、`/hooks`、`/mcp` 核对。本地插件不一定显示在 Marketplace 的 Installed 过滤结果中。自动安装仍要求官方 `qoder` CLI 可调用；仅发现 Qoder Desktop 安装目录不会被当作可安装证据。CodeBuddy 与 Qoder 都会先校验插件，再安装、刷新并启用；不会直接修改宿主内部数据库。
 
 各平台的全局安装路径：
 

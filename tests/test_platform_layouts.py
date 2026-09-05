@@ -102,7 +102,13 @@ def main() -> None:
         assert (qoder_plugin / "skills" / "loeyae-aidlc" / "SKILL.md").is_file()
         assert (qoder_plugin / "hooks" / "hooks.json").is_file()
         assert (qoder_plugin / ".mcp.json").is_file()
-        assert json.loads((qoder_plugin / ".qoder-plugin" / "plugin.json").read_text())["version"] == package_version
+        qoder_plugin_manifest = json.loads((qoder_plugin / ".qoder-plugin" / "plugin.json").read_text())
+        qoder_mcp_manifest = json.loads((qoder_plugin / ".mcp.json").read_text())
+        assert qoder_plugin_manifest["version"] == package_version
+        assert qoder_plugin_manifest["skills"] == "./skills"
+        assert qoder_plugin_manifest["hooks"] == "./hooks/hooks.json"
+        assert qoder_plugin_manifest["mcpServers"] == "./.mcp.json"
+        assert set(qoder_mcp_manifest["mcpServers"]) == {"loeyae-skills", "awesome-design", "figma", "ssot"}
 
         run_install("zcode", home)
         zcode_skill = home / ".zcode" / "skills" / "loeyae-aidlc"
