@@ -30,7 +30,13 @@ import {
   uninstallManagedAssets,
   updateSharedJson,
 } from "../core/tools/aidlc-installer";
-import { codeBuddyConfigDirForCli, codeBuddyKnownCliPaths, hostCliInvocation } from "./host-detection";
+import {
+  codeBuddyConfigDirForCli,
+  codeBuddyKnownCliPaths,
+  hostCliInvocation,
+  type WindowsDesktopHarness,
+  windowsDesktopHostPaths,
+} from "./host-detection";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -169,6 +175,10 @@ function applicationPaths(...relativePaths: string[]): string[] {
   return APPLICATION_ROOTS.flatMap((root) => relativePaths.map((relativePath) => resolve(root, relativePath)));
 }
 
+function windowsDesktopEvidence(harness: WindowsDesktopHarness): string | undefined {
+  return firstExistingPath(windowsDesktopHostPaths(harness));
+}
+
 function kiroCrewKnownPaths(): string[] {
   const dataHome = process.env.KIROCREW_HOME?.trim() || resolve(HOME, ".kiro/crew");
   const venvRoot = process.env.KIROCREW_VENV?.trim() || resolve(HOME, ".kiro/crew-venv");
@@ -202,23 +212,32 @@ function hostEvidence(harness: string): string | undefined {
     case "kiro-crew":
       return commandOnPath("kirocrew")
         || firstExistingPath(kiroCrewKnownPaths())
+        || windowsDesktopEvidence("kiro-crew")
         || firstExistingPath(applicationPaths("KiroCrew.app"));
     case "kiro-ide":
-      return commandOnPath("kiro") || firstExistingPath(applicationPaths("Kiro.app"));
+      return commandOnPath("kiro")
+        || windowsDesktopEvidence("kiro-ide")
+        || firstExistingPath(applicationPaths("Kiro.app"));
     case "kiro-cli":
       return commandOnPath("kiro-cli");
     case "claude":
       return commandOnPath("claude");
     case "opencode":
-      return commandOnPath("opencode") || firstExistingPath(applicationPaths("OpenCode.app"));
+      return commandOnPath("opencode")
+        || windowsDesktopEvidence("opencode")
+        || firstExistingPath(applicationPaths("OpenCode.app"));
     case "codex":
-      return commandOnPath("codex") || firstExistingPath(applicationPaths("Codex.app"));
+      return commandOnPath("codex")
+        || windowsDesktopEvidence("codex")
+        || firstExistingPath(applicationPaths("Codex.app"));
     case "codebuddy":
       return discoverHostCli("CODEBUDDY_CLI", "codebuddy", codeBuddyKnownCliPaths());
     case "qoder":
       return discoverHostCli("QODER_CLI", "qoder");
     case "zcode":
-      return commandOnPath("zcode") || firstExistingPath(applicationPaths("ZCode.app", "Zcode.app"));
+      return commandOnPath("zcode")
+        || windowsDesktopEvidence("zcode")
+        || firstExistingPath(applicationPaths("ZCode.app", "Zcode.app"));
     default:
       return undefined;
   }

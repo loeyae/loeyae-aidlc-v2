@@ -83,6 +83,19 @@ const WINDOWS_APP_PATHS: Array<{ host: CodeBuddyHost; key: string }> = [
 
 const WINDOWS_REGISTRY_VIEWS = ["/reg:64", "/reg:32"];
 
+export type WindowsDesktopHarness = "kiro-crew" | "kiro-ide" | "opencode" | "codex" | "zcode";
+
+const WINDOWS_DESKTOP_APPLICATIONS: Record<WindowsDesktopHarness, {
+  displayNames: string[];
+  executableNames: string[];
+}> = {
+  "kiro-crew": { displayNames: ["KiroCrew", "Kiro Crew"], executableNames: ["KiroCrew.exe"] },
+  "kiro-ide": { displayNames: ["Kiro", "Kiro IDE"], executableNames: ["Kiro.exe"] },
+  opencode: { displayNames: ["OpenCode"], executableNames: ["OpenCode.exe", "opencode.exe"] },
+  codex: { displayNames: ["Codex"], executableNames: ["Codex.exe", "codex.exe"] },
+  zcode: { displayNames: ["ZCode"], executableNames: ["ZCode.exe", "zcode.exe"] },
+};
+
 function unique(values: string[]): string[] {
   return [...new Set(values)];
 }
@@ -179,15 +192,12 @@ function hostFromDisplayName(displayName: string | undefined): CodeBuddyHost | u
   return undefined;
 }
 
-function rootsFromRegistryValues(
+function registryRootPaths(
   output: string,
   env: NodeJS.ProcessEnv,
-  expectedHost?: CodeBuddyHost,
-): WindowsApplicationRoot[] {
+  includeAnyExecutable = false,
+): string[] {
   const values = windowsRegistryValues(output);
-  const host = expectedHost || hostFromDisplayName(values.get("displayname"));
-  if (!host) return [];
-
   const roots: string[] = [];
   const installLocation = values.get("installlocation");
   if (installLocation) {
@@ -198,7 +208,7 @@ function rootsFromRegistryValues(
     const executable = windowsExecutablePath(values.get(valueName) || "", env);
     if (executable) roots.push(path.win32.dirname(executable));
   }
-  if (expectedHost) {
+  if (includeAnyExecutable) {
     const executable = [...values.values()]
       .map((value) => windowsExecutablePath(value, env))
       .find(nonEmpty);
@@ -211,7 +221,18 @@ function rootsFromRegistryValues(
       }
     }
   }
-  return uniqueWindowsPaths(roots).map((root) => ({ host, root }));
+  return uniqueWindowsPaths(roots);
+}
+
+function rootsFromRegistryValues(
+  output: string,
+  env: NodeJS.ProcessEnv,
+  expectedHost?: CodeBuddyHost,
+): WindowsApplicationRoot[] {
+  const values = windowsRegistryValues(output);
+  const host = expectedHost || hostFromDisplayName(values.get("displayname"));
+  if (!host) return [];
+  return registryRootPaths(output, env, Boolean(expectedHost)).map((root) => ({ host, root }));
 }
 
 function queryWindowsRegistry(args: string[]): string | undefined {
@@ -264,6 +285,72 @@ function registeredWindowsApplicationRoots(
   const discovered = uniqueWindowsApplicationRoots(roots);
   if (cacheable) registeredWindowsApplicationsCache = discovered;
   return discovered;
+}
+
+function matchesDisplayName(actual: string | undefined, expectedNames: string[]): boolean {
+  const normalized = actual?.trim().toLowerCase() || "";
+  return expectedNames.some((name) => {
+    const expected = name.toLowerCase();
+    if (normalized === expected) return true;
+    const suffix = normalized.slice(expected.length);
+    return normalized.startsWith(expected) && /^\s*(?:\(|v?\d)/.test(suffix);
+  });
+}
+
+const windowsDesktopHostPathsCache = new Map<WindowsDesktopHarness, string[]>();
+
+export function windowsDesktopHostPaths(
+  harness: WindowsDesktopHarness,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  registryQuery: WindowsRegistryQuery = queryWindowsRegistry,
+): string[] {
+  if (platform !== "win32") return [];
+  const cacheable = env === process.env && registryQuery === queryWindowsRegistry;
+  const cached = cacheable ? windowsDesktopHostPathsCache.get(harness) : undefined;
+  if (cached) return cached;
+
+  const descriptor = WINDOWS_DESKTOP_APPLICATIONS[harness];
+  const roots: string[] = [];
+  for (const registryHive of ["HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE"]) {
+    for (const executableName of descriptor.executableNames) {
+      const key = `${registryHive}\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${executableName}`;
+      for (const registryView of WINDOWS_REGISTRY_VIEWS) {
+        const output = registryQuery(["query", key, registryView]);
+        if (output) roots.push(...registryRootPaths(output, env, true));
+      }
+    }
+  }
+
+  const matchingKeys = new Map<string, string>();
+  for (const registryRoot of WINDOWS_UNINSTALL_REGISTRY_ROOTS) {
+    for (const registryView of WINDOWS_REGISTRY_VIEWS) {
+      for (const displayName of descriptor.displayNames) {
+        const output = registryQuery(["query", registryRoot, "/s", "/f", displayName, "/d", registryView]);
+        if (!output) continue;
+        for (const key of windowsRegistryKeys(output)) matchingKeys.set(`${registryView}:${key}`, registryView);
+      }
+    }
+  }
+  for (const [identity, registryView] of matchingKeys) {
+    const key = identity.slice(registryView.length + 1);
+    const output = registryQuery(["query", key, registryView]);
+    if (!output) continue;
+    const displayName = windowsRegistryValues(output).get("displayname");
+    if (matchesDisplayName(displayName, descriptor.displayNames)) {
+      roots.push(...registryRootPaths(output, env));
+    }
+  }
+
+  const registeredRoots = uniqueWindowsPaths(roots);
+  const candidates = uniqueWindowsPaths([
+    ...registeredRoots.flatMap((root) =>
+      descriptor.executableNames.map((executableName) => path.win32.join(root, executableName)),
+    ),
+    ...registeredRoots,
+  ]);
+  if (cacheable) windowsDesktopHostPathsCache.set(harness, candidates);
+  return candidates;
 }
 
 function cliPathsForWindowsRoots(roots: WindowsApplicationRoot[]): string[] {

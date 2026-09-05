@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { codeBuddyConfigDirForCli, codeBuddyKnownCliPaths, hostCliInvocation } from "../bin/host-detection";
+import {
+  codeBuddyConfigDirForCli,
+  codeBuddyKnownCliPaths,
+  hostCliInvocation,
+  type WindowsDesktopHarness,
+  windowsDesktopHostPaths,
+} from "../bin/host-detection";
 
 const scratchRoot = process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir();
 const launcherRoot = mkdtempSync(path.join(scratchRoot, "aidlc-host-cli-"));
@@ -74,6 +80,66 @@ assert(registryQueries.some((args) => args[1] === uninstallKey));
 assert.equal(
   codeBuddyConfigDirForCli(customWorkBuddyCli, "win32", customWindowsEnvironment, registryQuery),
   "C:\\Users\\andy\\.workbuddy",
+);
+
+const desktopApplications: Array<{
+  displayName: string;
+  executableName: string;
+  harness: WindowsDesktopHarness;
+  root: string;
+}> = [
+  { harness: "kiro-crew", displayName: "KiroCrew", executableName: "KiroCrew.exe", root: "D:\\Desktop Hosts\\KiroCrew Custom" },
+  { harness: "kiro-ide", displayName: "Kiro", executableName: "Kiro.exe", root: "D:\\Desktop Hosts\\Kiro Custom" },
+  { harness: "opencode", displayName: "OpenCode", executableName: "OpenCode.exe", root: "D:\\Desktop Hosts\\OpenCode Custom" },
+  { harness: "codex", displayName: "Codex", executableName: "Codex.exe", root: "D:\\Desktop Hosts\\Codex Custom" },
+  { harness: "zcode", displayName: "ZCode", executableName: "ZCode.exe", root: "D:\\Desktop Hosts\\ZCode Custom" },
+];
+const desktopRegistryQuery = (args: string[]): string | undefined => {
+  for (const application of desktopApplications) {
+    const key = `${uninstallRoot}\\${application.harness}`;
+    if (args[0] === "query" && args[1] === uninstallRoot && args.includes(application.displayName)) {
+      return `${key}\r\n    DisplayName    REG_SZ    ${application.displayName}\r\n`;
+    }
+    if (args[0] === "query" && args[1] === key) {
+      return [
+        key,
+        `    DisplayName    REG_SZ    ${application.displayName}`,
+        `    InstallLocation    REG_SZ    ${application.root}`,
+        "",
+      ].join("\r\n");
+    }
+  }
+  return undefined;
+};
+for (const application of desktopApplications) {
+  const paths = windowsDesktopHostPaths(
+    application.harness,
+    "win32",
+    customWindowsEnvironment,
+    desktopRegistryQuery,
+  );
+  assert.equal(paths[0], `${application.root}\\${application.executableName}`);
+  assert(paths.includes(application.root));
+}
+
+const kiroCrewRegistryKey = `${uninstallRoot}\\kiro-crew-only`;
+const kiroCrewOnlyQuery = (args: string[]): string | undefined => {
+  if (args[0] === "query" && args[1] === uninstallRoot && args.includes("Kiro")) {
+    return `${kiroCrewRegistryKey}\r\n    DisplayName    REG_SZ    Kiro Crew\r\n`;
+  }
+  if (args[0] === "query" && args[1] === kiroCrewRegistryKey) {
+    return [
+      kiroCrewRegistryKey,
+      "    DisplayName    REG_SZ    Kiro Crew",
+      "    InstallLocation    REG_SZ    D:\\Desktop Hosts\\Kiro Crew Only",
+      "",
+    ].join("\r\n");
+  }
+  return undefined;
+};
+assert.deepEqual(
+  windowsDesktopHostPaths("kiro-ide", "win32", customWindowsEnvironment, kiroCrewOnlyQuery),
+  [],
 );
 
 const macWorkBuddyCli = "/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy";

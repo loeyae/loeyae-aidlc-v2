@@ -186,7 +186,7 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 loeyae-aidlc install        # 重新部署（或 --all 全部）
 ```
 
-`install --all` 检测到 Kiro IDE 与 Kiro CLI 时，会把两者视为同一个全局 Agent Skill，只生成一份 `~/.kiro/skills/loeyae-aidlc/` 资产和一个 canonical ownership manifest；两个宿主仍可分别安装各自项目的 Hook。CLI 类宿主通过 PATH（CodeBuddy/Qoder 也支持 `CODEBUDDY_CLI`/`QODER_CLI`）发现，macOS GUI 宿主同时检查标准 `/Applications` 和用户 `~/Applications` App bundle。Windows KiroCrew 桌面安装会检查 `%ProgramFiles%\KiroCrew\KiroCrew.exe`、`%ProgramW6432%\KiroCrew\KiroCrew.exe` 及 per-user `%LOCALAPPDATA%\Programs\KiroCrew\KiroCrew.exe`；KiroCrew CLI 安装则检查 `~/.kiro/crew/channel` 及 `~/.kiro/crew-venv`（并遵循 `KIROCREW_HOME`/`KIROCREW_VENV`）。未检测到的平台会明确列出并跳过；非标准安装位置或自动检测遗漏时，仍可使用 `--harness <name>` 显式安装。
+`install --all` 检测到 Kiro IDE 与 Kiro CLI 时，会把两者视为同一个全局 Agent Skill，只生成一份 `~/.kiro/skills/loeyae-aidlc/` 资产和一个 canonical ownership manifest；两个宿主仍可分别安装各自项目的 Hook。宿主的公开 CLI 入口优先通过 PATH（CodeBuddy/Qoder 也支持 `CODEBUDDY_CLI`/`QODER_CLI`）发现；macOS GUI 宿主检查标准 `/Applications` 和用户 `~/Applications` App bundle。Windows 的 KiroCrew、Kiro IDE、OpenCode、Codex 和 ZCode 桌面宿主优先通过 `App Paths` 与 HKCU/HKLM 卸载注册表读取真实安装根目录，因此支持自定义位置；KiroCrew 另外保留 `%ProgramFiles%`、`%LOCALAPPDATA%\Programs`、`~/.kiro/crew/channel` 和托管 venv 作为兼容回退。WorkBuddy/CodeBuddy 使用同类注册表发现后继续定位其内嵌 CodeBuddy CLI。未检测到的平台会明确列出并跳过；非标准安装位置或自动检测遗漏时，仍可使用 `--harness <name>` 显式安装。
 
 检测完成后只检查选中平台的预构建产物；若任一选中产物缺失或过期，仍执行一次全平台构建以保持共享 graph 和 distribution parity 一致，不会因 graph 时间戳刷新而逐平台重复重建。
 
