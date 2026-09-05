@@ -169,6 +169,8 @@ Qoder Desktop 和 Qoder CLI 采用一致的 Skill/插件模型。安装器使用
 | ZCode | 用户配置或插件 `Stop` Hook | 默认自动合并用户 Hook；完整插件需 UI 导入 | `decision:block`，宿主最多连续继续 3 次 |
 | Kiro Crew | 当前无公开生命周期 Hook | Skill 强制调用引擎；不能伪造完成 | 引擎拒绝 `report`，Skill 必须继续修复 |
 
+WorkBuddy/CodeBuddy 的 user-scope Stop Hook 会由宿主在每次会话停止时调用；Hook 被调用不表示当前任务主动使用了 AI-DLC。当前 `cwd` 没有 enrollment/state，或具有签名有效的 `done`/`parked` state 时，Hook 会以退出码 0 静默放行；同一项目仍有 `running` 工作流时，即使当前会话只处理 DOCX 等无关任务，也会继续执行门禁，以防通过新会话绕过未完成阶段。临时处理无关任务前可运行 `loeyae-aidlc orchestrate park`，之后用 `loeyae-aidlc orchestrate next --resume` 恢复。已 enrollment 但 state 缺失或签名无效仍按设计 fail-closed。
+
 Hook 未安装或平台未触发时，不能降低引擎门禁要求；直接调用 `orchestrate report` 仍会执行完整的 `requires`、`condition`、`produces`、`sensors`、审批和当前阶段校验。
 
 #### Claude Code 项目级部署

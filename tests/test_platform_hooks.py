@@ -127,6 +127,31 @@ def main() -> None:
         remaining = json.loads(codex_path.read_text())["hooks"]["Stop"]
         assert remaining == [custom_group]
 
+        # A global CodeBuddy Stop Hook must silently allow unrelated work when no AI-DLC state exists.
+        inactive_project = home / "inactive"
+        inactive_project.mkdir()
+        result = run_cli(
+            ["hook", "--format", "codebuddy"],
+            ROOT,
+            home,
+            home / "trust-inactive",
+            json.dumps({"cwd": str(inactive_project)}),
+        )
+        assert result.returncode == 0 and result.stdout == "" and result.stderr == ""
+
+        # A deliberately parked workflow must also leave unrelated sessions untouched.
+        parked_project = home / "parked"
+        parked_project.mkdir()
+        save_state(parked_project, home, status="parked")
+        result = run_cli(
+            ["hook", "--format", "codebuddy"],
+            ROOT,
+            home,
+            home / "trust-parked",
+            json.dumps({"cwd": str(parked_project)}),
+        )
+        assert result.returncode == 0 and result.stdout == "" and result.stderr == ""
+
         # Valid signed done state allows stopping.
         done_project = home / "done"
         done_project.mkdir()

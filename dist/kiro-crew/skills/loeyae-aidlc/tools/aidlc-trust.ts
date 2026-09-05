@@ -154,8 +154,16 @@ export function verifyRecord(value: Record<string, unknown>): string | null {
   return null;
 }
 
+export function normalizeProjectIdentityRoot(
+  root: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform !== "win32" || !/^[a-zA-Z]:[\\/]/.test(root)) return root;
+  return `${root[0].toUpperCase()}${root.slice(1)}`;
+}
+
 function projectIdentity(projectRoot: string): { root: string; id: string } {
-  const root = realpathSync(resolve(projectRoot));
+  const root = normalizeProjectIdentityRoot(realpathSync(resolve(projectRoot)));
   return { root, id: createHash("sha256").update(root).digest("hex") };
 }
 
