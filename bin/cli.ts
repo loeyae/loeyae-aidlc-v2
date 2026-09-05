@@ -30,7 +30,7 @@ import {
   uninstallManagedAssets,
   updateSharedJson,
 } from "../core/tools/aidlc-installer";
-import { codeBuddyConfigDirForCli, codeBuddyKnownCliPaths } from "./host-detection";
+import { codeBuddyConfigDirForCli, codeBuddyKnownCliPaths, hostCliInvocation } from "./host-detection";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -139,7 +139,8 @@ function run(script: string, args: string[], input?: string): never | void {
 }
 
 function runExternal(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env): number {
-  const result = spawnSync(command, args, { stdio: "inherit", cwd, env });
+  const invocation = hostCliInvocation(command);
+  const result = spawnSync(invocation.command, [...invocation.argsPrefix, ...args], { stdio: "inherit", cwd, env });
   if (result.error) {
     console.error(`❌ Failed to run ${command}: ${result.error.message}`);
     return 1;
@@ -259,7 +260,13 @@ function runExternalJson(
   description: string,
   env: NodeJS.ProcessEnv = process.env,
 ): unknown {
-  const result = spawnSync(command, args, { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const invocation = hostCliInvocation(command);
+  const result = spawnSync(invocation.command, [...invocation.argsPrefix, ...args], {
+    cwd,
+    env,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   if (result.error) throw new Error(`${description} failed: ${result.error.message}`);
   if ((result.status ?? 1) !== 0) {
     throw new Error(`${description} failed with code ${result.status ?? 1}: ${(result.stderr || result.stdout || "unknown error").trim()}`);

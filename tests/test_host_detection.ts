@@ -1,5 +1,26 @@
 import assert from "node:assert/strict";
-import { codeBuddyConfigDirForCli, codeBuddyKnownCliPaths } from "../bin/host-detection";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { codeBuddyConfigDirForCli, codeBuddyKnownCliPaths, hostCliInvocation } from "../bin/host-detection";
+
+const scratchRoot = process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir();
+const launcherRoot = mkdtempSync(path.join(scratchRoot, "aidlc-host-cli-"));
+try {
+  const nodeLauncher = path.join(launcherRoot, "codebuddy");
+  const nodeExecutable = "C:\\Program Files\\nodejs\\node.exe";
+  writeFileSync(nodeLauncher, "#!/usr/bin/env node\nconsole.log('codebuddy');\n");
+  assert.deepEqual(hostCliInvocation(nodeLauncher, "win32", nodeExecutable), {
+    command: nodeExecutable,
+    argsPrefix: [nodeLauncher],
+  });
+  assert.deepEqual(hostCliInvocation(nodeLauncher, "darwin", nodeExecutable), {
+    command: nodeLauncher,
+    argsPrefix: [],
+  });
+} finally {
+  rmSync(launcherRoot, { recursive: true, force: true });
+}
 
 const windowsEnvironment: NodeJS.ProcessEnv = {
   LOCALAPPDATA: "C:\\Users\\andy\\AppData\\Local",

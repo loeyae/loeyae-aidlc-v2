@@ -1,4 +1,5 @@
 import { spawnSync } from "child_process";
+import { closeSync, existsSync, openSync, readSync } from "fs";
 import path from "path";
 
 type CodeBuddyHost = "workbuddy" | "codebuddy";
@@ -7,6 +8,40 @@ type WindowsRegistryQuery = (args: string[]) => string | undefined;
 interface WindowsApplicationRoot {
   host: CodeBuddyHost;
   root: string;
+}
+
+export interface HostCliInvocation {
+  argsPrefix: string[];
+  command: string;
+}
+
+function hasNodeShebang(filePath: string): boolean {
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(filePath, "r");
+    const prefix = Buffer.alloc(256);
+    const bytesRead = readSync(descriptor, prefix, 0, prefix.length, 0);
+    return /^\uFEFF?#![^\r\n]*\bnode(?:\.exe)?\b/i.test(prefix.toString("utf8", 0, bytesRead));
+  } catch {
+    return false;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+export function hostCliInvocation(
+  cliPath: string,
+  platform: NodeJS.Platform = process.platform,
+  nodeExecutable: string = process.execPath,
+): HostCliInvocation {
+  const direct = { command: cliPath, argsPrefix: [] };
+  if (platform !== "win32" || !existsSync(cliPath)) return direct;
+  const extension = path.win32.extname(cliPath).toLowerCase();
+  const isNodeScript = [".js", ".cjs", ".mjs"].includes(extension)
+    || (!extension && hasNodeShebang(cliPath));
+  return isNodeScript
+    ? { command: nodeExecutable, argsPrefix: [cliPath] }
+    : direct;
 }
 
 const WINDOWS_APP_NAMES: Array<{ host: CodeBuddyHost; relativePath: string }> = [
