@@ -63,6 +63,8 @@ const PLUGIN_MARKETPLACE_NAME = "loeyae-aidlc";
 const HOST_ASSET_ROOT = resolve(HOME, ".config/loeyae-aidlc/host-assets");
 const CODEBUDDY_USER_MARKETPLACE_ROOT = resolve(HOST_ASSET_ROOT, "codebuddy/user");
 const QODER_USER_PLUGIN_ROOT = resolve(HOST_ASSET_ROOT, "qoder/user/loeyae-aidlc");
+const QODER_CN_USER_SKILL_ROOT = resolve(HOME, ".qoder-cn/skills/loeyae-aidlc");
+const QODER_CN_SKILL_OWNER = "loeyae-aidlc:qoder-cn-skill";
 const QODER_CONFIG_ROOT = process.env.QODER_CONFIG_DIR?.trim()
   ? resolve(process.env.QODER_CONFIG_DIR.trim())
   : resolve(HOME, ".qoder");
@@ -96,7 +98,7 @@ const HARNESS_DESCRIPTIONS: Record<string, string> = {
   opencode: "OpenCode (global plugin)",
   codex: "Codex (global skill)",
   codebuddy: "WorkBuddy Enterprise / CodeBuddy (official plugin)",
-  qoder: "Qoder CN IDE / Desktop / CLI (official plugin + host MCP config)",
+  qoder: "Qoder CN IDE / Desktop / CLI (native Skill + optional official plugin + host MCP config)",
   zcode: "ZCode (user skill + user Hook/MCP; plugin marketplace also built)",
 };
 
@@ -206,6 +208,8 @@ function kiroCrewKnownPaths(): string[] {
 
 function qoderDesktopKnownPaths(): string[] {
   const localAppData = process.env.LOCALAPPDATA?.trim();
+  const userProfile = process.env.USERPROFILE?.trim() || process.env.HOME?.trim();
+  const configuredMcpPath = process.env.QODER_CN_MCP_CONFIG?.trim();
   const programFilesRoots = [
     process.env.ProgramW6432?.trim(),
     process.env.ProgramFiles?.trim(),
@@ -219,6 +223,10 @@ function qoderDesktopKnownPaths(): string[] {
       : []),
     ...programFilesRoots.flatMap((root) =>
       executablePaths.map((relativePath) => resolve(root, relativePath))),
+    ...(configuredMcpPath ? [resolve(configuredMcpPath)] : []),
+    ...(userProfile
+      ? [resolve(userProfile, ".qoder-cn/mcp.json"), resolve(userProfile, ".qoder-cn")]
+      : []),
   ];
 }
 
@@ -475,6 +483,43 @@ function isLegacyRuntimeDirectory(target: string): boolean {
   const graph = readLegacyJson(resolve(target, "tools/data/stage-graph.json"));
   if (!graph || typeof graph.version !== "string" || !/^2\.\d+\.\d+(?:[-+].*)?$/.test(graph.version)) return false;
   return Array.isArray(graph.stages) && graph.stages.some((stage) => isRecord(stage) && stage.slug === "workspace-detection");
+}
+
+function isQoderCnSkillDirectory(target: string): boolean {
+  try {
+    const targetStat = lstatSync(target);
+    if (!targetStat.isDirectory() || targetStat.isSymbolicLink()) return false;
+    const entries = readdirSync(target);
+    if (entries.length !== 1 || entries[0] !== "SKILL.md") return false;
+    const skillPath = resolve(target, "SKILL.md");
+    const skillStat = lstatSync(skillPath);
+    if (!skillStat.isFile() || skillStat.isSymbolicLink() || skillStat.size > 1024 * 1024) return false;
+    const skill = readFileSync(skillPath, "utf8");
+    return /^---\s*\r?\nname:\s*loeyae-aidlc\s*$/m.test(skill)
+      && skill.includes("Loeyae AI-DLC v2 for Qoder CN IDE / Desktop / CLI")
+      && skill.includes("loeyae-aidlc orchestrate next");
+  } catch {
+    return false;
+  }
+}
+
+function assertRecognizedQoderCnSkillTarget(asset: ManagedAsset): void {
+  if (resolve(asset.target) !== QODER_CN_USER_SKILL_ROOT || !isQoderCnSkillDirectory(asset.target)) {
+    throw new Error(`unowned target is not a recognized Qoder CN Loeyae Skill; refusing migration: ${asset.target}`);
+  }
+}
+
+function assertQoderCnUserSkillInstallable(migrateLegacy: boolean): void {
+  if (!existsSync(QODER_CN_USER_SKILL_ROOT)) return;
+  if (hasManagedInstallation(QODER_CN_SKILL_OWNER, [QODER_CN_USER_SKILL_ROOT])) return;
+  if (!migrateLegacy) {
+    throw new Error(`refusing to replace unowned install target: ${QODER_CN_USER_SKILL_ROOT}; rerun install with --migrate-legacy to preserve the recognized Qoder CN Skill as a backup`);
+  }
+  assertRecognizedQoderCnSkillTarget({
+    source: QODER_CN_USER_SKILL_ROOT,
+    target: QODER_CN_USER_SKILL_ROOT,
+    kind: "directory",
+  });
 }
 
 function isLegacyClaudeCatalog(target: string): boolean {
@@ -969,16 +1014,30 @@ function installOne(harness: string, customTarget: string, projectTarget: string
     if (!cli && deployment.scope === "project") {
       throw new Error("Qoder project-scope installation requires the qoder CLI; set QODER_CLI or use user scope for Qoder CN Desktop");
     }
+    if (deployment.scope === "user") assertQoderCnUserSkillInstallable(migrateLegacy);
     installManagedAssets(owner, [
       { source, target: deployment.pluginRoot, kind: "directory" },
     ], () => {
       if (cli) {
         registerQoderPlugin(deployment, cli);
       } else {
-        console.log("ℹ️  Qoder CN Desktop detected without qoder CLI; skipped plugin/Stop Hook registration and continued with host MCP configuration.");
+        console.log("ℹ️  Qoder CN Desktop detected without qoder CLI; skipped plugin/Stop Hook registration and continued with native Skill + host MCP configuration.");
       }
       registerQoderMcpConfigs(deployment.pluginRoot);
     }, migrationOptions);
+    if (deployment.scope === "user") {
+      installManagedAssets(
+        QODER_CN_SKILL_OWNER,
+        [{
+          source: resolve(deployment.pluginRoot, "skills/loeyae-aidlc"),
+          target: QODER_CN_USER_SKILL_ROOT,
+          kind: "directory",
+        }],
+        undefined,
+        { ...migrationOptions, validateLegacyTarget: assertRecognizedQoderCnSkillTarget },
+      );
+      console.log(`🧩 Installed Qoder CN user Skill → ${QODER_CN_USER_SKILL_ROOT}`);
+    }
     console.log(`✅ Installed loeyae-aidlc v${PKG.version} (${harness}, ${deployment.scope}) → ${deployment.pluginRoot}`);
     return;
   }
@@ -1063,6 +1122,10 @@ function hasManagedHarnessInstallation(harness: string): boolean {
     return harness === "kiro-ide"
       && hasManagedInstallation(KIRO_LEGACY_IDE_POWER_OWNER, [KIRO_LEGACY_IDE_POWER_ROOT]);
   }
+  if (harness === "qoder") {
+    if (hasManagedInstallation(installationOwner(harness, ""), targets)) return true;
+    return hasManagedInstallation(QODER_CN_SKILL_OWNER, [QODER_CN_USER_SKILL_ROOT]);
+  }
   return hasManagedInstallation(installationOwner(harness, ""), targets);
 }
 
@@ -1078,11 +1141,16 @@ function uninstallOne(harness: string, customTarget: string, projectTarget: stri
   if (harness === "qoder" && !customTarget) {
     const deployment = getQoderDeployment(projectTarget);
     const cli = qoderCli();
-    const removed = uninstallManagedAssets(
+    const removedPlugin = uninstallManagedAssets(
       owner,
       targets,
       cli ? () => unregisterQoderPlugin(deployment, cli) : undefined,
     );
+    const removedSkill = deployment.scope === "user"
+      ? uninstallManagedAssets(QODER_CN_SKILL_OWNER, [QODER_CN_USER_SKILL_ROOT])
+      : false;
+    const removed = removedPlugin || removedSkill;
+    if (removedSkill) console.log(`🧹 Removed Qoder CN user Skill → ${QODER_CN_USER_SKILL_ROOT}`);
     if (removed) console.log("ℹ️  Shared Qoder MCP services were preserved in host configuration.");
     console.log(removed ? `✅ Uninstalled ${harness} (${deployment.scope})` : `ℹ️  ${harness} is not owned by this installer; preserved existing files.`);
     return;

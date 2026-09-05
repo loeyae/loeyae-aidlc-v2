@@ -405,6 +405,9 @@ def test_new_plugin_host_lifecycles() -> None:
         qoder_log = Path(host_env["QODER_LOG"]).read_text().splitlines()
         assert sum("plugins install " in line and "--scope user" in line for line in qoder_log) == 2
         assert sum("plugins enable loeyae-aidlc --scope user" in line for line in qoder_log) == 2
+        qoder_cn_skill = home / ".qoder-cn" / "skills" / "loeyae-aidlc" / "SKILL.md"
+        assert qoder_cn_skill.is_file()
+        assert "Qoder CN IDE / Desktop / CLI" in qoder_cn_skill.read_text()
         expected_qoder_mcp = {"loeyae-skills", "awesome-design", "figma", "ssot"}
         for config_path in qoder_mcp_config_paths:
             config = json.loads(config_path.read_text())
@@ -430,6 +433,7 @@ def test_new_plugin_host_lifecycles() -> None:
 
         assert not (home / ".config" / "loeyae-aidlc" / "host-assets" / "codebuddy" / "user").exists()
         assert not (home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc").exists()
+        assert not qoder_cn_skill.exists()
         assert not (home / ".zcode" / "skills" / "loeyae-aidlc").exists()
         zcode_after = json.loads(zcode_config_path.read_text())
         assert zcode_after["hooks"]["events"]["Stop"] == [custom_hook]
@@ -449,6 +453,7 @@ def test_new_plugin_host_lifecycles() -> None:
         assert any(line.startswith(f"{project_cwd}|") and "--scope project" in line for line in qoder_project_lines)
         assert len(list((home / ".config" / "loeyae-aidlc" / "host-assets" / "codebuddy").glob("project-*"))) == 1
         assert len(list((home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder").glob("project-*"))) == 1
+        assert not qoder_cn_skill.exists()
 
         for harness in ["codebuddy", "qoder"]:
             removed = run_cli(home, ["uninstall", "--harness", harness, "--project", str(project)], host_env)
@@ -471,6 +476,7 @@ def test_new_plugin_host_lifecycles() -> None:
         })
         assert failed_qoder.returncode != 0 and "plugin install failed" in failed_qoder.stderr
         assert not (failed_qoder_home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc").exists()
+        assert not (failed_qoder_home / ".qoder-cn" / "skills" / "loeyae-aidlc").exists()
 
 
 def test_workbuddy_embedded_cli_uses_workbuddy_config_dir() -> None:
@@ -530,7 +536,10 @@ def test_install_all_detects_qoder_cn_desktop_without_cli() -> None:
         assert set(json.loads(qoder_cn_config.read_text())["mcpServers"]) == expected_mcp
         assert set(json.loads((home / ".qoder" / "settings.json").read_text())["mcpServers"]) == expected_mcp
         qoder_assets = home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc"
+        qoder_cn_skill = home / ".qoder-cn" / "skills" / "loeyae-aidlc" / "SKILL.md"
         assert (qoder_assets / "mcp-cn.json").is_file()
+        assert qoder_cn_skill.is_file()
+        assert "Qoder CN IDE / Desktop / CLI" in qoder_cn_skill.read_text()
 
         repeated = run_cli(home, ["install", "--all"], env)
         assert repeated.returncode == 0, repeated.stdout + repeated.stderr
@@ -545,7 +554,74 @@ def test_install_all_detects_qoder_cn_desktop_without_cli() -> None:
         removed = run_cli(home, ["uninstall", "--all"], env)
         assert removed.returncode == 0, removed.stdout + removed.stderr
         assert not qoder_assets.exists()
+        assert not qoder_cn_skill.exists()
         assert set(json.loads(qoder_cn_config.read_text())["mcpServers"]) == expected_mcp
+
+
+def test_install_all_detects_qoder_cn_profile_without_cli() -> None:
+    with tempfile.TemporaryDirectory(prefix="aidlc-installer-qoder-cn-profile-", dir=str(SCRATCH_ROOT)) as directory:
+        root = Path(directory)
+        home = root / "home"
+        fake_bin = root / "bin"
+        qoder_cn_config = home / ".qoder-cn" / "mcp.json"
+        home.mkdir()
+        fake_bin.mkdir()
+        qoder_cn_config.parent.mkdir(parents=True)
+        qoder_cn_config.write_text(json.dumps({"preserved": True, "mcpServers": {}}))
+        env = isolated_host_env(root, fake_bin)
+        env.update({
+            "USERPROFILE": str(home),
+            "QODER_CONFIG_DIR": str(home / ".qoder"),
+            "QODER_CN_MCP_CONFIG": str(qoder_cn_config),
+        })
+
+        installed = run_cli(home, ["install", "--all"], env)
+        assert installed.returncode == 0, installed.stdout + installed.stderr
+        output = installed.stdout + installed.stderr
+        detected_line = next(line for line in output.splitlines() if "Detected supported hosts:" in line)
+        assert f"qoder ({qoder_cn_config})" in detected_line
+        assert "Qoder CN Desktop detected without qoder CLI" in output
+        config = json.loads(qoder_cn_config.read_text())
+        assert config["preserved"] is True
+        assert set(config["mcpServers"]) == {"loeyae-skills", "awesome-design", "figma", "ssot"}
+        assert (home / ".qoder-cn" / "skills" / "loeyae-aidlc" / "SKILL.md").is_file()
+
+
+def test_qoder_cn_native_skill_migration() -> None:
+    with tempfile.TemporaryDirectory(prefix="aidlc-installer-qoder-cn-skill-migration-", dir=str(SCRATCH_ROOT)) as directory:
+        root = Path(directory)
+        home = root / "home"
+        fake_bin = root / "bin"
+        native_skill = home / ".qoder-cn" / "skills" / "loeyae-aidlc"
+        home.mkdir()
+        fake_bin.mkdir()
+        native_skill.mkdir(parents=True)
+        skill_source = ROOT / "dist" / "qoder" / "skills" / "loeyae-aidlc" / "SKILL.md"
+        native_skill.joinpath("SKILL.md").write_text(skill_source.read_text() + "\nmanual-probe-copy\n")
+        env = isolated_host_env(root, fake_bin)
+        env.update({
+            "QODER_CONFIG_DIR": str(home / ".qoder"),
+            "QODER_CN_MCP_CONFIG": str(home / ".qoder-cn" / "mcp.json"),
+        })
+
+        blocked = run_cli(home, ["install", "--harness", "qoder"], env)
+        assert blocked.returncode != 0
+        assert "rerun install with --migrate-legacy" in blocked.stderr
+        assert "manual-probe-copy" in native_skill.joinpath("SKILL.md").read_text()
+        assert not (home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc").exists()
+
+        installed = run_cli(home, ["install", "--harness", "qoder", "--migrate-legacy"], env)
+        assert installed.returncode == 0, installed.stdout + installed.stderr
+        assert "Installed Qoder CN user Skill" in installed.stdout
+        assert "manual-probe-copy" not in native_skill.joinpath("SKILL.md").read_text()
+        backups = list(native_skill.parent.glob("loeyae-aidlc.pre-managed-backup-*"))
+        assert len(backups) == 1
+        assert "manual-probe-copy" in backups[0].joinpath("SKILL.md").read_text()
+
+        removed = run_cli(home, ["uninstall", "--harness", "qoder"], env)
+        assert removed.returncode == 0, removed.stdout + removed.stderr
+        assert not native_skill.exists()
+        assert backups[0].is_dir()
 
 
 def test_install_all_detects_machine_wide_windows_kiro_crew() -> None:
@@ -666,6 +742,8 @@ if __name__ == "__main__":
     test_new_plugin_host_lifecycles()
     test_workbuddy_embedded_cli_uses_workbuddy_config_dir()
     test_install_all_detects_qoder_cn_desktop_without_cli()
+    test_install_all_detects_qoder_cn_profile_without_cli()
+    test_qoder_cn_native_skill_migration()
     test_install_all_detects_machine_wide_windows_kiro_crew()
     test_install_all_detects_hosts_and_uninstall_all_uses_ownership()
     test_install_all_aggregates_failures_and_continues()
