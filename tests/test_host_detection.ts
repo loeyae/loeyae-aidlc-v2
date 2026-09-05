@@ -8,13 +8,52 @@ const windowsEnvironment: NodeJS.ProcessEnv = {
   ProgramFiles: "C:\\Program Files",
   "ProgramFiles(x86)": "C:\\Program Files (x86)",
 };
-const windowsPaths = codeBuddyKnownCliPaths("win32", windowsEnvironment);
+const windowsPaths = codeBuddyKnownCliPaths("win32", windowsEnvironment, () => undefined);
 
 assert(windowsPaths.includes("C:\\Users\\andy\\AppData\\Local\\Programs\\WorkBuddy\\resources\\app.asar.unpacked\\cli\\bin\\codebuddy.exe"));
 assert(windowsPaths.includes("C:\\Users\\andy\\AppData\\Local\\Tencent\\WorkBuddy\\resources\\app.asar.unpacked\\cli\\bin\\codebuddy.exe"));
 assert(windowsPaths.includes("C:\\Program Files\\WorkBuddy\\resources\\app.asar.unpacked\\cli\\bin\\codebuddy.exe"));
 assert(windowsPaths.includes("C:\\Program Files (x86)\\Tencent\\CodeBuddy\\resources\\app.asar.unpacked\\cli\\bin\\codebuddy.exe"));
 assert.equal(new Set(windowsPaths).size, windowsPaths.length);
+
+const customRoot = "D:\\Company Tools\\Desktop Agent";
+const customWorkBuddyCli = `${customRoot}\\resources\\app.asar.unpacked\\cli\\bin\\codebuddy.exe`;
+const uninstallRoot = "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
+const uninstallKey = `${uninstallRoot}\\workbuddy-enterprise`;
+const registryQueries: string[][] = [];
+const customWindowsEnvironment: NodeJS.ProcessEnv = {
+  ...windowsEnvironment,
+  CUSTOM_WORKBUDDY_ROOT: customRoot,
+};
+const registryQuery = (args: string[]): string | undefined => {
+  registryQueries.push(args);
+  if (
+    args[0] === "query"
+    && args[1] === uninstallRoot
+    && args.includes("/f")
+    && args.includes("WorkBuddy")
+  ) {
+    return `${uninstallKey}\r\n    DisplayName    REG_SZ    WorkBuddy Enterprise\r\n`;
+  }
+  if (args[0] === "query" && args[1] === uninstallKey) {
+    return [
+      uninstallKey,
+      "    DisplayName    REG_SZ    WorkBuddy Enterprise",
+      "    InstallLocation    REG_EXPAND_SZ    %CUSTOM_WORKBUDDY_ROOT%",
+      `    DisplayIcon    REG_SZ    "${customRoot}\\WorkBuddy.exe",0`,
+      "",
+    ].join("\r\n");
+  }
+  return undefined;
+};
+const customWindowsPaths = codeBuddyKnownCliPaths("win32", customWindowsEnvironment, registryQuery);
+assert.equal(customWindowsPaths[0], customWorkBuddyCli);
+assert(registryQueries.some((args) => args[1] === uninstallRoot && args.includes("WorkBuddy")));
+assert(registryQueries.some((args) => args[1] === uninstallKey));
+assert.equal(
+  codeBuddyConfigDirForCli(customWorkBuddyCli, "win32", customWindowsEnvironment, registryQuery),
+  "C:\\Users\\andy\\.workbuddy",
+);
 
 const macWorkBuddyCli = "/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy";
 const macCodeBuddyCli = "/Users/andy/Applications/CodeBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy";
@@ -26,7 +65,7 @@ assert.equal(codeBuddyConfigDirForCli(macCodeBuddyCli, "darwin", { HOME: "/Users
 
 const windowsWorkBuddyCli = "C:\\Users\\andy\\AppData\\Local\\Programs\\WorkBuddy\\resources\\app.asar.unpacked\\cli\\bin\\codebuddy.exe";
 assert.equal(
-  codeBuddyConfigDirForCli(windowsWorkBuddyCli, "win32", { USERPROFILE: "C:\\Users\\andy" }),
+  codeBuddyConfigDirForCli(windowsWorkBuddyCli, "win32", { USERPROFILE: "C:\\Users\\andy" }, () => undefined),
   "C:\\Users\\andy\\.workbuddy",
 );
 assert.equal(
