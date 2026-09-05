@@ -501,6 +501,53 @@ def test_workbuddy_embedded_cli_uses_workbuddy_config_dir() -> None:
         assert config_dirs == {str(home / ".workbuddy")}, lines
 
 
+def test_install_all_detects_qoder_cn_desktop_without_cli() -> None:
+    with tempfile.TemporaryDirectory(prefix="aidlc-installer-qoder-cn-desktop-", dir=str(SCRATCH_ROOT)) as directory:
+        root = Path(directory)
+        home = root / "home"
+        fake_bin = root / "bin"
+        local_app_data = root / "LocalAppData"
+        qoder_executable = local_app_data / "Programs" / "Qoder" / "Qoder.exe"
+        home.mkdir()
+        fake_bin.mkdir()
+        qoder_executable.parent.mkdir(parents=True)
+        qoder_executable.write_text("fake Qoder CN Desktop executable")
+        qoder_cn_config = home / ".qoder-cn" / "mcp.json"
+        env = isolated_host_env(root, fake_bin)
+        env.update({
+            "LOCALAPPDATA": str(local_app_data),
+            "QODER_CONFIG_DIR": str(home / ".qoder"),
+            "QODER_CN_MCP_CONFIG": str(qoder_cn_config),
+        })
+
+        installed = run_cli(home, ["install", "--all"], env)
+        assert installed.returncode == 0, installed.stdout + installed.stderr
+        output = installed.stdout + installed.stderr
+        detected_line = next(line for line in output.splitlines() if "Detected supported hosts:" in line)
+        assert f"qoder ({qoder_executable})" in detected_line
+        assert "Qoder CN Desktop detected without qoder CLI" in output
+        expected_mcp = {"loeyae-skills", "awesome-design", "figma", "ssot"}
+        assert set(json.loads(qoder_cn_config.read_text())["mcpServers"]) == expected_mcp
+        assert set(json.loads((home / ".qoder" / "settings.json").read_text())["mcpServers"]) == expected_mcp
+        qoder_assets = home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc"
+        assert (qoder_assets / "mcp-cn.json").is_file()
+
+        repeated = run_cli(home, ["install", "--all"], env)
+        assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+        assert "MCP services already present" in repeated.stdout
+
+        project = root / "project"
+        project.mkdir()
+        project_install = run_cli(home, ["install", "--harness", "qoder", "--project", str(project)], env)
+        assert project_install.returncode != 0
+        assert "project-scope installation requires the qoder CLI" in project_install.stderr
+
+        removed = run_cli(home, ["uninstall", "--all"], env)
+        assert removed.returncode == 0, removed.stdout + removed.stderr
+        assert not qoder_assets.exists()
+        assert set(json.loads(qoder_cn_config.read_text())["mcpServers"]) == expected_mcp
+
+
 def test_install_all_detects_machine_wide_windows_kiro_crew() -> None:
     with tempfile.TemporaryDirectory(prefix="aidlc-installer-windows-crew-", dir=str(SCRATCH_ROOT)) as directory:
         root = Path(directory)
@@ -618,6 +665,7 @@ if __name__ == "__main__":
     test_claude_activation_refreshes_existing_plugin()
     test_new_plugin_host_lifecycles()
     test_workbuddy_embedded_cli_uses_workbuddy_config_dir()
+    test_install_all_detects_qoder_cn_desktop_without_cli()
     test_install_all_detects_machine_wide_windows_kiro_crew()
     test_install_all_detects_hosts_and_uninstall_all_uses_ownership()
     test_install_all_aggregates_failures_and_continues()

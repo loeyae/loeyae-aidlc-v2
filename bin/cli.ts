@@ -204,6 +204,24 @@ function kiroCrewKnownPaths(): string[] {
   ];
 }
 
+function qoderDesktopKnownPaths(): string[] {
+  const localAppData = process.env.LOCALAPPDATA?.trim();
+  const programFilesRoots = [
+    process.env.ProgramW6432?.trim(),
+    process.env.ProgramFiles?.trim(),
+    process.env["ProgramFiles(x86)"]?.trim(),
+  ].filter((root): root is string => Boolean(root));
+  const executablePaths = ["Qoder/Qoder.exe", "Qoder CN/Qoder.exe", "Lingma/Lingma.exe"];
+  return [
+    ...(localAppData
+      ? [resolve(localAppData, "Programs"), resolve(localAppData)]
+        .flatMap((root) => executablePaths.map((relativePath) => resolve(root, relativePath)))
+      : []),
+    ...programFilesRoots.flatMap((root) =>
+      executablePaths.map((relativePath) => resolve(root, relativePath))),
+  ];
+}
+
 function discoverHostCli(environmentVariable: string, command: string, knownPaths: string[] = []): string | undefined {
   const configured = process.env[environmentVariable]?.trim();
   if (configured) {
@@ -239,7 +257,10 @@ function hostEvidence(harness: string): string | undefined {
     case "codebuddy":
       return discoverHostCli("CODEBUDDY_CLI", "codebuddy", codeBuddyKnownCliPaths());
     case "qoder":
-      return discoverHostCli("QODER_CLI", "qoder");
+      return discoverHostCli("QODER_CLI", "qoder")
+        || windowsDesktopEvidence("qoder")
+        || firstExistingPath(qoderDesktopKnownPaths())
+        || firstExistingPath(applicationPaths("Qoder.app", "Qoder CN.app", "Lingma.app"));
     case "zcode":
       return commandOnPath("zcode")
         || windowsDesktopEvidence("zcode")
@@ -671,12 +692,16 @@ function getQoderDeployment(projectTarget: string): QoderDeployment {
   };
 }
 
-function qoderCli(): string {
-  return resolveHostCli("QODER_CLI", "qoder");
+function qoderCli(): string | undefined {
+  const configured = process.env.QODER_CLI?.trim();
+  const cli = discoverHostCli("QODER_CLI", "qoder");
+  if (configured && !cli) {
+    throw new Error(`qoder CLI not found at QODER_CLI=${configured}`);
+  }
+  return cli;
 }
 
-function registerQoderPlugin(deployment: QoderDeployment): void {
-  const cli = qoderCli();
+function registerQoderPlugin(deployment: QoderDeployment, cli: string): void {
   if (runExternal(cli, ["plugins", "validate", deployment.pluginRoot], deployment.cwd) !== 0) {
     throw new Error(`Qoder CLI plugin validation failed: ${deployment.pluginRoot}`);
   }
@@ -692,8 +717,7 @@ function registerQoderPlugin(deployment: QoderDeployment): void {
   console.log(`🔌 Qoder plugin installed and enabled for CN IDE / Desktop / CLI (${deployment.scope} scope): ${PLUGIN_NAME}@local`);
 }
 
-function unregisterQoderPlugin(deployment: QoderDeployment): void {
-  const cli = qoderCli();
+function unregisterQoderPlugin(deployment: QoderDeployment, cli: string): void {
   const plugins = runExternalJson(cli, ["plugins", "list", "--json"], deployment.cwd, "Qoder CLI plugin list");
   if (!jsonHasPlugin(plugins, PLUGIN_NAME, "local")) return;
   const status = runExternal(cli, ["plugins", "uninstall", PLUGIN_NAME, "--scope", deployment.scope], deployment.cwd);
@@ -941,10 +965,18 @@ function installOne(harness: string, customTarget: string, projectTarget: string
 
   if (harness === "qoder" && !customTarget) {
     const deployment = getQoderDeployment(projectTarget);
+    const cli = qoderCli();
+    if (!cli && deployment.scope === "project") {
+      throw new Error("Qoder project-scope installation requires the qoder CLI; set QODER_CLI or use user scope for Qoder CN Desktop");
+    }
     installManagedAssets(owner, [
       { source, target: deployment.pluginRoot, kind: "directory" },
     ], () => {
-      registerQoderPlugin(deployment);
+      if (cli) {
+        registerQoderPlugin(deployment, cli);
+      } else {
+        console.log("ℹ️  Qoder CN Desktop detected without qoder CLI; skipped plugin/Stop Hook registration and continued with host MCP configuration.");
+      }
       registerQoderMcpConfigs(deployment.pluginRoot);
     }, migrationOptions);
     console.log(`✅ Installed loeyae-aidlc v${PKG.version} (${harness}, ${deployment.scope}) → ${deployment.pluginRoot}`);
@@ -1045,7 +1077,12 @@ function uninstallOne(harness: string, customTarget: string, projectTarget: stri
   }
   if (harness === "qoder" && !customTarget) {
     const deployment = getQoderDeployment(projectTarget);
-    const removed = uninstallManagedAssets(owner, targets, () => unregisterQoderPlugin(deployment));
+    const cli = qoderCli();
+    const removed = uninstallManagedAssets(
+      owner,
+      targets,
+      cli ? () => unregisterQoderPlugin(deployment, cli) : undefined,
+    );
     if (removed) console.log("ℹ️  Shared Qoder MCP services were preserved in host configuration.");
     console.log(removed ? `✅ Uninstalled ${harness} (${deployment.scope})` : `ℹ️  ${harness} is not owned by this installer; preserved existing files.`);
     return;

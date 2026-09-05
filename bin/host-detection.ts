@@ -104,7 +104,7 @@ const WINDOWS_APP_PATHS: Array<{ host: CodeBuddyHost; key: string }> = [
 
 const WINDOWS_REGISTRY_VIEWS = ["/reg:64", "/reg:32"];
 
-export type WindowsDesktopHarness = "kiro-crew" | "kiro-ide" | "opencode" | "codex" | "zcode";
+export type WindowsDesktopHarness = "kiro-crew" | "kiro-ide" | "opencode" | "codex" | "qoder" | "zcode";
 
 const WINDOWS_DESKTOP_APPLICATIONS: Record<WindowsDesktopHarness, {
   displayNames: string[];
@@ -114,6 +114,10 @@ const WINDOWS_DESKTOP_APPLICATIONS: Record<WindowsDesktopHarness, {
   "kiro-ide": { displayNames: ["Kiro", "Kiro IDE"], executableNames: ["Kiro.exe"] },
   opencode: { displayNames: ["OpenCode"], executableNames: ["OpenCode.exe", "opencode.exe"] },
   codex: { displayNames: ["Codex"], executableNames: ["Codex.exe", "codex.exe"] },
+  qoder: {
+    displayNames: ["Qoder", "Qoder CN", "Tongyi Lingma", "Lingma", "通义灵码"],
+    executableNames: ["Qoder.exe", "qoder.exe", "Lingma.exe", "lingma.exe"],
+  },
   zcode: { displayNames: ["ZCode"], executableNames: ["ZCode.exe", "zcode.exe"] },
 };
 

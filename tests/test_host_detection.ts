@@ -104,6 +104,7 @@ const desktopApplications: Array<{
   { harness: "kiro-ide", displayName: "Kiro", executableName: "Kiro.exe", root: "D:\\Desktop Hosts\\Kiro Custom" },
   { harness: "opencode", displayName: "OpenCode", executableName: "OpenCode.exe", root: "D:\\Desktop Hosts\\OpenCode Custom" },
   { harness: "codex", displayName: "Codex", executableName: "Codex.exe", root: "D:\\Desktop Hosts\\Codex Custom" },
+  { harness: "qoder", displayName: "Qoder CN", executableName: "Qoder.exe", root: "D:\\Desktop Hosts\\Qoder CN Custom" },
   { harness: "zcode", displayName: "ZCode", executableName: "ZCode.exe", root: "D:\\Desktop Hosts\\ZCode Custom" },
 ];
 const desktopRegistryQuery = (args: string[]): string | undefined => {

@@ -137,11 +137,11 @@ Claude Code 的安装器会额外生成本地 marketplace，并调用官方 `cla
 
 CodeBuddy 安装器同样只调用官方 `codebuddy plugin` 命令。优先使用 PATH 中的 `codebuddy`；macOS 能发现 WorkBuddy/CodeBuddy App 内嵌 CLI。Windows 优先从 `App Paths` 和卸载注册表动态读取 WorkBuddy/CodeBuddy 的真实安装根目录，因此支持用户自定义安装位置；per-user 的 `%LOCALAPPDATA%\Programs`、`%LOCALAPPDATA%` 和 machine-wide 的 `%ProgramW6432%`、`%ProgramFiles%`、`%ProgramFiles(x86)%` 仅作为兼容回退。检测到 WorkBuddy 内嵌 CLI 时，安装器会通过 `CODEBUDDY_CONFIG_DIR` 指向 WorkBuddy 自己的 `~/.workbuddy` app home，避免把插件误注册到独立 CodeBuddy 默认使用的 `~/.codebuddy`。其他位置可通过 `CODEBUDDY_CLI` 指定；显式设置的 `CODEBUDDY_CONFIG_DIR` 会被保留。
 
-Qoder CN IDE、Qoder Desktop 和 Qoder CLI 共用 `loeyae-aidlc` 插件资产，但 MCP 存储与传输能力不同。安装器先使用 PATH 中的 `qoder`（或 `QODER_CLI`）调用官方 `qoder plugins` 注册并启用 user/project scope 的 `loeyae-aidlc@local`，再以只补缺失、保留同名用户配置的方式写入两套宿主配置：Desktop/CLI 的 `~/.qoder/settings.json` 使用原生 Streamable HTTP；Qoder CN IDE 在 Windows 实际读取 `%USERPROFILE%\.qoder-cn\mcp.json`，该文件使用固定的 `mcp-remote@0.8.3` STDIO bridge，因为 CN IDE 官方只声明支持 STDIO/SSE。macOS/Linux 继续使用对应 Application Support/XDG 默认路径；非标准路径可分别用 `QODER_CONFIG_DIR`、`QODER_CN_MCP_CONFIG` 覆盖。
+Qoder CN IDE、Qoder Desktop 和 Qoder CLI 共用发行资产，但自动集成分为两种模式。检测到 PATH 中的 `qoder`（或 `QODER_CLI`）时，安装器调用官方 `qoder plugins` 注册并启用 user/project scope 的 `loeyae-aidlc@local`，随后写入宿主 MCP 配置；仅检测到 Qoder CN Desktop 时，不再因缺少 CLI 跳过或失败，而是跳过插件/Stop Hook 注册并直接合并 MCP。Desktop/CLI 的 `~/.qoder/settings.json` 使用原生 Streamable HTTP；Qoder CN IDE 在 Windows 实际读取 `%USERPROFILE%\.qoder-cn\mcp.json`，该文件使用固定的 `mcp-remote@0.8.3` STDIO bridge，因为 CN IDE 官方只声明支持 STDIO/SSE。所有合并都只补缺失并保留同名用户配置；macOS/Linux 继续使用对应 Application Support/XDG 默认路径，非标准路径可分别用 `QODER_CONFIG_DIR`、`QODER_CN_MCP_CONFIG` 覆盖。
 
 Qoder CN IDE 要求 2.5.0 或更高版本；安装后必须完全退出并重启，在头像菜单 **Your Settings → MCP tools** 中确认 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 可见。MCP 仅在 Agent 模式配合 Qwen3 使用，最多同时连接 10 个服务。Figma 首次连接仍需 OAuth；SSOT 要求启动 Qoder CN IDE 前向宿主进程提供 `SSOT_API_KEY`。Desktop 应在 **Settings → Plugins → User → Custom** 和 **Settings → MCP**（新版为 **Extensions → Connectors**）核对；CLI 可依次执行 `/plugins reload`、`/mcp reload`，再用 `/plugins`、`/hooks`、`/mcp` 检查。卸载插件时共享 MCP 条目保留，避免删除用户或其他安装仍在使用的服务。
 
-自动安装仍要求官方 `qoder` CLI 可调用；仅发现 Qoder CN IDE/Desktop 安装目录不会被当作可安装证据。CodeBuddy 仍只通过官方 CLI 管理宿主注册；Qoder 除官方插件注册外会原子合并上述 MCP JSON，不直接修改宿主数据库。
+`install --all` 会独立探测 Qoder CN Desktop。Windows 优先读取 `App Paths` 与 HKCU/HKLM 卸载注册表，并兼容 `%LOCALAPPDATA%`、`%ProgramFiles%` 等默认位置；macOS 检查标准 App bundle。仅发现 Desktop 时执行 user-scope MCP 直接集成；项目 scope、官方插件和 Stop Hook 注册仍要求可调用的 `qoder` CLI。Qoder CN 能读取 `%USERPROFILE%\.agents\skills\loeyae-aidlc\SKILL.md` 只说明共享 Skill 可见，不代表 Qoder harness 已被 `install --all` 选中或 MCP 已注册。CodeBuddy 仍只通过官方 CLI 管理宿主注册。
 
 各平台的全局安装路径：
 
@@ -169,7 +169,7 @@ Qoder CN IDE 要求 2.5.0 或更高版本；安装后必须完全退出并重启
 | OpenCode | 插件 `session.idle` 事件 | 全局插件安装自动加载 | 失败时通过插件继续提示 Agent 处理 |
 | Codex | 全局 `~/.codex/hooks.json` 的 `Stop` Hook | `loeyae-aidlc install --harness codex`，然后 `/hooks` 审查并信任 | `decision:block` 触发继续执行 |
 | WorkBuddy / CodeBuddy | 插件 `hooks/hooks.json` 的 `Stop` Hook | 官方 CodeBuddy CLI 自动注册 user/project scope | Claude-compatible `decision:block` 继续 Agent |
-| Qoder CN IDE / Desktop / CLI | 插件 `Stop` Hook | 官方 `qoder plugins` 安装插件；安装器另行合并宿主 MCP 配置 | 退出码 2 阻断；`stop_hook_active` 重入时不重复阻断，签名状态仍保持 running；CN IDE/Desktop Hook 阻断能力以运行时为准 |
+| Qoder CN IDE / Desktop / CLI | CLI 插件模式提供 `Stop` Hook；desktop-only 模式不注册 Hook | 有 `qoder` CLI 时官方插件安装；仅 CN Desktop 时只直接合并 MCP | 插件模式退出码 2 阻断；`stop_hook_active` 重入时不重复阻断；desktop-only 模式无 Hook，不能宣称生命周期门禁已激活 |
 | ZCode | 用户配置或插件 `Stop` Hook | 默认自动合并用户 Hook；完整插件需 UI 导入 | `decision:block`，宿主最多连续继续 3 次 |
 | Kiro Crew | 当前无公开生命周期 Hook | Skill 强制调用引擎；不能伪造完成 | 引擎拒绝 `report`，Skill 必须继续修复 |
 
@@ -194,7 +194,7 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 loeyae-aidlc install        # 重新部署（或 --all 全部）
 ```
 
-`install --all` 检测到 Kiro IDE 与 Kiro CLI 时，会把两者视为同一个全局 Agent Skill，只生成一份 `~/.kiro/skills/loeyae-aidlc/` 资产和一个 canonical ownership manifest；两个宿主仍可分别安装各自项目的 Hook。宿主的公开 CLI 入口优先通过 PATH（CodeBuddy/Qoder 也支持 `CODEBUDDY_CLI`/`QODER_CLI`）发现；Qoder Desktop 的非交互注册仍以可调用的 `qoder` CLI 为证据，注册后的 user scope 本地插件由 Desktop 与 CLI 共用。macOS GUI 宿主检查标准 `/Applications` 和用户 `~/Applications` App bundle。Windows 的 KiroCrew、Kiro IDE、OpenCode、Codex 和 ZCode 桌面宿主优先通过 `App Paths` 与 HKCU/HKLM 卸载注册表读取真实安装根目录，因此支持自定义位置；KiroCrew 另外保留 `%ProgramFiles%`、`%LOCALAPPDATA%\Programs`、`~/.kiro/crew/channel` 和托管 venv 作为兼容回退。WorkBuddy/CodeBuddy 使用同类注册表发现后继续定位其内嵌 CodeBuddy CLI。未检测到的平台会明确列出并跳过；非标准安装位置或自动检测遗漏时，仍可使用 `--harness <name>` 显式安装。
+`install --all` 检测到 Kiro IDE 与 Kiro CLI 时，会把两者视为同一个全局 Agent Skill，只生成一份 `~/.kiro/skills/loeyae-aidlc/` 资产和一个 canonical ownership manifest；两个宿主仍可分别安装各自项目的 Hook。宿主的公开 CLI 入口优先通过 PATH（CodeBuddy/Qoder 也支持 `CODEBUDDY_CLI`/`QODER_CLI`）发现；Qoder Desktop 的官方插件注册仍要求可调用的 `qoder` CLI，但 Qoder CN Desktop 本身可作为 user-scope MCP 直接集成证据。macOS GUI 宿主检查标准 `/Applications` 和用户 `~/Applications` App bundle。Windows 的 KiroCrew、Kiro IDE、OpenCode、Codex、Qoder CN 和 ZCode 桌面宿主优先通过 `App Paths` 与 HKCU/HKLM 卸载注册表读取真实安装根目录，因此支持自定义位置；KiroCrew 与 Qoder CN 另外保留 `%ProgramFiles%`、`%LOCALAPPDATA%\Programs` 等默认位置作为兼容回退。WorkBuddy/CodeBuddy 使用同类注册表发现后继续定位其内嵌 CodeBuddy CLI。未检测到的平台会明确列出并跳过；非标准安装位置或自动检测遗漏时，仍可使用 `--harness <name>` 显式安装。
 
 检测完成后只检查选中平台的预构建产物；若任一选中产物缺失或过期，仍执行一次全平台构建以保持共享 graph 和 distribution parity 一致，不会因 graph 时间戳刷新而逐平台重复重建。
 
@@ -235,7 +235,7 @@ loeyae-aidlc uninstall --harness zcode
 loeyae-aidlc uninstall --all
 ```
 
-卸载只删除所有权清单中且哈希仍匹配的资产。Kiro IDE 与 Kiro CLI 的任一默认卸载命令都会移除两者共用的全局 Agent Skill；`uninstall --all` 对该共享目标只执行一次。`uninstall --all` 只处理当前 `~/.config/loeyae-aidlc/installations/` 中有 ownership manifest 的全局/user-scope 平台，并跳过从未安装或不受当前安装器管理的平台；CodeBuddy/Qoder 的 project scope 仍需显式传入 `--harness` 和 `--project`，因为仅凭哈希目录无法安全恢复原项目上下文。Codex 仅移除稳定 ID `loeyae-aidlc-stop-gate-v1` 对应的 Hook；其他 Hook 保留。CodeBuddy/Qoder 先通过官方 CLI 注销对应 scope，再删除项目外的受管源。ZCode 只移除精确匹配的 Loeyae Stop Hook，其他用户 Hook 和共享 MCP 项保留。共享 Kiro MCP 项同样默认保留，因为可能仍被其他安装使用。批量命令会继续处理所有已选平台，但只要任一平台失败，最终退出码即为非零。
+卸载只删除所有权清单中且哈希仍匹配的资产。Kiro IDE 与 Kiro CLI 的任一默认卸载命令都会移除两者共用的全局 Agent Skill；`uninstall --all` 对该共享目标只执行一次。`uninstall --all` 只处理当前 `~/.config/loeyae-aidlc/installations/` 中有 ownership manifest 的全局/user-scope 平台，并跳过从未安装或不受当前安装器管理的平台；CodeBuddy/Qoder 的 project scope 仍需显式传入 `--harness` 和 `--project`，因为仅凭哈希目录无法安全恢复原项目上下文。Codex 仅移除稳定 ID `loeyae-aidlc-stop-gate-v1` 对应的 Hook；其他 Hook 保留。CodeBuddy 通过官方 CLI 注销对应 scope；Qoder 仅在 CLI 可用时注销插件，desktop-only 模式直接删除受管 staging。ZCode 只移除精确匹配的 Loeyae Stop Hook，其他用户 Hook 和共享 MCP 项保留。共享 Kiro 和 Qoder MCP 项同样默认保留，因为可能仍被其他安装使用。批量命令会继续处理所有已选平台，但只要任一平台失败，最终退出码即为非零。
 
 ### 开发模式（从本地仓库）
 
