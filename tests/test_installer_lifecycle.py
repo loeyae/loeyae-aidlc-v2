@@ -379,6 +379,8 @@ def test_new_plugin_host_lifecycles() -> None:
         for harness in ["codebuddy", "qoder", "zcode"]:
             first = run_cli(home, ["install", "--harness", harness], host_env)
             assert first.returncode == 0, first.stdout + first.stderr
+            if harness == "qoder":
+                assert "Qoder plugin installed and enabled for Desktop / CLI" in first.stdout
             second = run_cli(home, ["install", "--harness", harness], host_env)
             assert second.returncode == 0, second.stdout + second.stderr
 

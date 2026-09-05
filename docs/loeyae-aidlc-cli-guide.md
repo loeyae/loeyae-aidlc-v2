@@ -101,7 +101,7 @@ loeyae-aidlc install --list
 | `opencode` | OpenCode 全局插件 |
 | `codex` | Codex 全局 Skill 和生命周期 Hook |
 | `codebuddy` | WorkBuddy Enterprise / CodeBuddy 官方插件 |
-| `qoder` | Qoder CLI 官方插件 |
+| `qoder` | Qoder Desktop / CLI 官方本地插件（通过 `qoder` CLI 注册） |
 | `zcode` | ZCode 用户 Skill、Hook 和 MCP 配置 |
 
 ### 4.2 安装语法
@@ -164,7 +164,7 @@ loeyae-aidlc install --all --migrate-legacy
 loeyae-aidlc install --harness kiro-ide --migrate-legacy
 ```
 
-CodeBuddy 和 Qoder CLI 不在 PATH 时，可以分别设置 `CODEBUDDY_CLI` 和 `QODER_CLI` 为宿主可执行文件路径。Windows 的 `codebuddy` 自动探测还会检查 `%LOCALAPPDATA%\Programs`、`%LOCALAPPDATA%`、`%ProgramW6432%`、`%ProgramFiles%` 和 `%ProgramFiles(x86)%` 下的 WorkBuddy/CodeBuddy 内嵌 CLI。
+Qoder Desktop 与 CLI 共用 Skill/插件模型，但非交互安装仍需调用官方 `qoder plugins`。当 PATH 中没有对应命令时，可通过 `QODER_CLI` 指定；仅发现 Qoder Desktop 安装目录不足以作为自动安装证据。CodeBuddy 不在 PATH 时可设置 `CODEBUDDY_CLI`；Windows 的 `codebuddy` 自动探测还会检查 `%LOCALAPPDATA%\Programs`、`%LOCALAPPDATA%`、`%ProgramW6432%`、`%ProgramFiles%` 和 `%ProgramFiles(x86)%` 下的 WorkBuddy/CodeBuddy 内嵌 CLI。
 
 ### 4.3 卸载语法
 
@@ -731,7 +731,7 @@ loeyae-aidlc hook --format <platform>
 | `AIDLC_CHROME_BIN` | 为 PDF 和 Mermaid 导出指定浏览器 |
 | `CHROME_BIN` | 浏览器路径兼容变量；优先级低于 `--browser` 和 `AIDLC_CHROME_BIN` |
 | `CODEBUDDY_CLI` | 指定 CodeBuddy CLI 路径或命令名 |
-| `QODER_CLI` | 指定 Qoder CLI 路径或命令名 |
+| `QODER_CLI` | 指定用于 Qoder Desktop/CLI 插件注册的官方 `qoder` CLI 路径或命令名 |
 | `KIROCREW_HOME` | 覆盖 Kiro Crew 数据目录，用于宿主检测 |
 | `KIROCREW_VENV` | 覆盖 Kiro Crew 托管虚拟环境目录，用于宿主检测 |
 

@@ -1,6 +1,6 @@
 {
   "name": "loeyae-aidlc",
-  "version": "2.1.6",
+  "version": "2.1.7",
   "displayName": "Loeyae AI-DLC v2",
   "description": "Loeyae AI-DLC v2 engine-driven lifecycle with enforced stage gates.",
   "author": { "name": "Loeyae Team" },

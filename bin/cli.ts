@@ -90,7 +90,7 @@ const HARNESS_DESCRIPTIONS: Record<string, string> = {
   opencode: "OpenCode (global plugin)",
   codex: "Codex (global skill)",
   codebuddy: "WorkBuddy Enterprise / CodeBuddy (official plugin)",
-  qoder: "Qoder CLI (official plugin)",
+  qoder: "Qoder Desktop / CLI (official plugin; registered via qoder CLI)",
   zcode: "ZCode (user skill + user Hook/MCP; plugin marketplace also built)",
 };
 
@@ -683,7 +683,7 @@ function registerQoderPlugin(deployment: QoderDeployment): void {
     if (!alreadyInstalled) runExternal(cli, ["plugins", "uninstall", PLUGIN_NAME, "--scope", deployment.scope], deployment.cwd);
     throw new Error(`Qoder CLI plugin enable failed: ${PLUGIN_NAME}`);
   }
-  console.log(`🔌 Qoder CLI plugin installed and enabled (${deployment.scope} scope): ${PLUGIN_NAME}@local`);
+  console.log(`🔌 Qoder plugin installed and enabled for Desktop / CLI (${deployment.scope} scope): ${PLUGIN_NAME}@local`);
 }
 
 function unregisterQoderPlugin(deployment: QoderDeployment): void {

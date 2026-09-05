@@ -31,7 +31,7 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 
 `--project` 和 `--target` 不是同一个参数：
 
-- `--project <项目根目录>`：Kiro IDE/CLI 用它安装项目 Stop Hook；CodeBuddy/Qoder CLI 用它调用宿主官方 CLI 的 project scope。它不会把整个 harness 覆盖到业务项目根目录。ZCode 当前不接受 `--project`，因为其项目级 Hook 不执行。
+- `--project <项目根目录>`：Kiro IDE/CLI 用它安装项目 Stop Hook；CodeBuddy/Qoder 用它调用宿主官方 CLI 的 project scope。它不会把整个 harness 覆盖到业务项目根目录。ZCode 当前不接受 `--project`，因为其项目级 Hook 不执行。
 - `--target <安装目录>`：用于把 harness 或插件 bundle 复制到专用安装目录，不执行 CodeBuddy/Qoder/ZCode 的宿主注册。不要把业务项目根目录、源码目录或已有工程目录传给它。安装器只会升级带外部所有权清单且内容未被修改的目标；空目录可以首次安装，非空且未受管目标会 fail-closed，绝不会递归清空。
 - Claude Code 的 `--target` 是特殊用法：它表示项目根目录，安装器只操作该目录下的 `.claude/loeyae-aidlc-marketplace/`，不应将其用于其他 harness。
 
@@ -61,7 +61,7 @@ loeyae-aidlc install --harness codex
 # WorkBuddy Enterprise / CodeBuddy（官方 user-scope plugin）
 loeyae-aidlc install --harness codebuddy
 
-# Qoder CLI（官方 user-scope plugin）
+# Qoder Desktop / CLI（官方 user-scope 本地插件；通过 `qoder` CLI 注册）
 loeyae-aidlc install --harness qoder
 
 # ZCode（用户 Skill + 用户 Hook/MCP；同时构建可 UI 导入的 marketplace）
@@ -110,9 +110,9 @@ cd /absolute/path/to/your-project
 pwd
 ```
 
-#### CodeBuddy 与 Qoder CLI 项目级安装
+#### CodeBuddy 与 Qoder 项目级安装
 
-CodeBuddy 和 Qoder CLI 通过各自官方 CLI 写入 project scope；Loeyae 只管理项目外的插件源副本和 ownership manifest，不直接编辑宿主 registry/cache：
+CodeBuddy 和 Qoder 通过各自官方 CLI 写入 project scope；Loeyae 只管理项目外的插件源副本和 ownership manifest，不直接编辑宿主 registry/cache：
 
 ```bash
 loeyae-aidlc install --harness codebuddy --project /absolute/path/to/your-project
@@ -135,7 +135,9 @@ Kiro Crew 的默认安装会将 V1 的 `loeyae-skills`、`awesome-design`、`fig
 
 Claude Code 的安装器会额外生成本地 marketplace，并调用官方 `claude plugin marketplace add`、`claude plugin install` 注册 user-scope 插件；不会直接编辑 `installed_plugins.json`。staging 文件位于 `~/.claude/plugins/loeyae-aidlc-marketplace/`，实际运行缓存和注册表由 Claude Code 管理。当前已打开的 Claude 会话需执行 `/reload-plugins`（如提示缓存变更则按提示使用 `--force`）或重新开会话；新会话会自动加载。
 
-CodeBuddy 安装器同样只调用官方 `codebuddy plugin` 命令。优先使用 PATH 中的 `codebuddy`；macOS 能发现 WorkBuddy/CodeBuddy App 内嵌 CLI。Windows 优先从 `App Paths` 和卸载注册表动态读取 WorkBuddy/CodeBuddy 的真实安装根目录，因此支持用户自定义安装位置；per-user 的 `%LOCALAPPDATA%\Programs`、`%LOCALAPPDATA%` 和 machine-wide 的 `%ProgramW6432%`、`%ProgramFiles%`、`%ProgramFiles(x86)%` 仅作为兼容回退。检测到 WorkBuddy 内嵌 CLI 时，安装器会通过 `CODEBUDDY_CONFIG_DIR` 指向 WorkBuddy 自己的 `~/.workbuddy` app home，避免把插件误注册到独立 CodeBuddy 默认使用的 `~/.codebuddy`。其他位置可通过 `CODEBUDDY_CLI` 指定；显式设置的 `CODEBUDDY_CONFIG_DIR` 会被保留。Qoder 使用 PATH 中的 `qoder`，也可通过 `QODER_CLI` 指定。两者都会先校验插件，再安装、刷新并启用；不会直接修改宿主内部数据库。
+CodeBuddy 安装器同样只调用官方 `codebuddy plugin` 命令。优先使用 PATH 中的 `codebuddy`；macOS 能发现 WorkBuddy/CodeBuddy App 内嵌 CLI。Windows 优先从 `App Paths` 和卸载注册表动态读取 WorkBuddy/CodeBuddy 的真实安装根目录，因此支持用户自定义安装位置；per-user 的 `%LOCALAPPDATA%\Programs`、`%LOCALAPPDATA%` 和 machine-wide 的 `%ProgramW6432%`、`%ProgramFiles%`、`%ProgramFiles(x86)%` 仅作为兼容回退。检测到 WorkBuddy 内嵌 CLI 时，安装器会通过 `CODEBUDDY_CONFIG_DIR` 指向 WorkBuddy 自己的 `~/.workbuddy` app home，避免把插件误注册到独立 CodeBuddy 默认使用的 `~/.codebuddy`。其他位置可通过 `CODEBUDDY_CLI` 指定；显式设置的 `CODEBUDDY_CONFIG_DIR` 会被保留。
+
+Qoder Desktop 和 Qoder CLI 采用一致的 Skill/插件模型。安装器使用 PATH 中的 `qoder`（或 `QODER_CLI`）调用官方 `qoder plugins`，注册并启用 user/project scope 的 `loeyae-aidlc@local`；Windows Qoder Desktop 已真实验证可以加载并触发该 user scope 插件。本地插件应在桌面版 **Settings → Plugins → User → Custom** 中核对，不一定显示在 Marketplace 的 Installed 过滤结果中。自动安装仍要求官方 `qoder` CLI 可调用；仅发现 Qoder Desktop 安装目录不会被当作可安装证据。CodeBuddy 与 Qoder 都会先校验插件，再安装、刷新并启用；不会直接修改宿主内部数据库。
 
 各平台的全局安装路径：
 
@@ -148,7 +150,7 @@ CodeBuddy 安装器同样只调用官方 `codebuddy plugin` 命令。优先使�
 | OpenCode | `~/.config/opencode/plugins/loeyae-aidlc.js`（入口；资源位于同级 `loeyae-aidlc/`） |
 | Codex | `~/.agents/skills/loeyae-aidlc/` |
 | WorkBuddy / CodeBuddy | `~/.config/loeyae-aidlc/host-assets/codebuddy/user/`（受管 marketplace source；运行时 cache 由 CodeBuddy 管理） |
-| Qoder CLI | `~/.config/loeyae-aidlc/host-assets/qoder/user/loeyae-aidlc/`（受管 plugin source；运行时 cache 由 Qoder 管理） |
+| Qoder Desktop / CLI | `~/.config/loeyae-aidlc/host-assets/qoder/user/loeyae-aidlc/`（受管 `@local` plugin source；运行时注册和 cache 由 Qoder 管理） |
 | ZCode | `~/.zcode/skills/loeyae-aidlc/`（默认直接用户集成） |
 
 ### 平台生命周期门禁
@@ -163,7 +165,7 @@ CodeBuddy 安装器同样只调用官方 `codebuddy plugin` 命令。优先使�
 | OpenCode | 插件 `session.idle` 事件 | 全局插件安装自动加载 | 失败时通过插件继续提示 Agent 处理 |
 | Codex | 全局 `~/.codex/hooks.json` 的 `Stop` Hook | `loeyae-aidlc install --harness codex`，然后 `/hooks` 审查并信任 | `decision:block` 触发继续执行 |
 | WorkBuddy / CodeBuddy | 插件 `hooks/hooks.json` 的 `Stop` Hook | 官方 CodeBuddy CLI 自动注册 user/project scope | Claude-compatible `decision:block` 继续 Agent |
-| Qoder CLI | 插件 `Stop` Hook | 官方 `qoder plugins` 自动安装 user/project scope | 退出码 2 阻断；`stop_hook_active` 重入时不重复阻断，签名状态仍保持 running |
+| Qoder Desktop / CLI | 插件 `Stop` Hook | 官方 `qoder plugins` 自动安装 user/project scope | 退出码 2 阻断；`stop_hook_active` 重入时不重复阻断，签名状态仍保持 running；桌面版 Hook 阻断能力以运行时为准 |
 | ZCode | 用户配置或插件 `Stop` Hook | 默认自动合并用户 Hook；完整插件需 UI 导入 | `decision:block`，宿主最多连续继续 3 次 |
 | Kiro Crew | 当前无公开生命周期 Hook | Skill 强制调用引擎；不能伪造完成 | 引擎拒绝 `report`，Skill 必须继续修复 |
 
@@ -186,7 +188,7 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 loeyae-aidlc install        # 重新部署（或 --all 全部）
 ```
 
-`install --all` 检测到 Kiro IDE 与 Kiro CLI 时，会把两者视为同一个全局 Agent Skill，只生成一份 `~/.kiro/skills/loeyae-aidlc/` 资产和一个 canonical ownership manifest；两个宿主仍可分别安装各自项目的 Hook。宿主的公开 CLI 入口优先通过 PATH（CodeBuddy/Qoder 也支持 `CODEBUDDY_CLI`/`QODER_CLI`）发现；macOS GUI 宿主检查标准 `/Applications` 和用户 `~/Applications` App bundle。Windows 的 KiroCrew、Kiro IDE、OpenCode、Codex 和 ZCode 桌面宿主优先通过 `App Paths` 与 HKCU/HKLM 卸载注册表读取真实安装根目录，因此支持自定义位置；KiroCrew 另外保留 `%ProgramFiles%`、`%LOCALAPPDATA%\Programs`、`~/.kiro/crew/channel` 和托管 venv 作为兼容回退。WorkBuddy/CodeBuddy 使用同类注册表发现后继续定位其内嵌 CodeBuddy CLI。未检测到的平台会明确列出并跳过；非标准安装位置或自动检测遗漏时，仍可使用 `--harness <name>` 显式安装。
+`install --all` 检测到 Kiro IDE 与 Kiro CLI 时，会把两者视为同一个全局 Agent Skill，只生成一份 `~/.kiro/skills/loeyae-aidlc/` 资产和一个 canonical ownership manifest；两个宿主仍可分别安装各自项目的 Hook。宿主的公开 CLI 入口优先通过 PATH（CodeBuddy/Qoder 也支持 `CODEBUDDY_CLI`/`QODER_CLI`）发现；Qoder Desktop 的非交互注册仍以可调用的 `qoder` CLI 为证据，注册后的 user scope 本地插件由 Desktop 与 CLI 共用。macOS GUI 宿主检查标准 `/Applications` 和用户 `~/Applications` App bundle。Windows 的 KiroCrew、Kiro IDE、OpenCode、Codex 和 ZCode 桌面宿主优先通过 `App Paths` 与 HKCU/HKLM 卸载注册表读取真实安装根目录，因此支持自定义位置；KiroCrew 另外保留 `%ProgramFiles%`、`%LOCALAPPDATA%\Programs`、`~/.kiro/crew/channel` 和托管 venv 作为兼容回退。WorkBuddy/CodeBuddy 使用同类注册表发现后继续定位其内嵌 CodeBuddy CLI。未检测到的平台会明确列出并跳过；非标准安装位置或自动检测遗漏时，仍可使用 `--harness <name>` 显式安装。
 
 检测完成后只检查选中平台的预构建产物；若任一选中产物缺失或过期，仍执行一次全平台构建以保持共享 graph 和 distribution parity 一致，不会因 graph 时间戳刷新而逐平台重复重建。
 
@@ -251,7 +253,7 @@ loeyae-aidlc install --all
 | OpenCode | 重启 OpenCode |
 | Codex | 新开会话 |
 | WorkBuddy / CodeBuddy | 执行 `/reload-plugins`，或新开会话 |
-| Qoder CLI | 执行 `/plugins reload`，或重启 Qoder CLI |
+| Qoder Desktop / CLI | 重启 Qoder Desktop；CLI 执行 `/plugins reload` 或重新启动 |
 | ZCode | 新开会话；完整插件注册/启用在 Settings → Plugins 中完成 |
 
 ## 使用
@@ -343,7 +345,7 @@ loeyae-aidlc-v2/
 │   ├── kiro-cli/               # Kiro CLI
 │   ├── claude/                 # Claude Code
 │   ├── codebuddy/              # WorkBuddy Enterprise / CodeBuddy
-│   ├── qoder/                  # Qoder CLI
+│   ├── qoder/                  # Qoder Desktop / CLI shared local plugin
 │   ├── zcode/                  # ZCode user integration + plugin marketplace
 │   ├── codex/                  # Codex
 │   └── opencode/               # OpenCode
