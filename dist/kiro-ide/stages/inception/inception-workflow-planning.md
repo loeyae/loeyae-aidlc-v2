@@ -3,13 +3,14 @@ slug: workflow-planning
 number: "2.6"
 name: 工作流规划
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-architect-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: [docs/aidlc/inception/workflow-plan.md]
+produces: [docs/aidlc/modules/{module-id}/inception/workflow-plan.md]
 sensors: []
 requires: [user-stories, cross-validation]
 ---
@@ -123,6 +124,19 @@ requires: [user-stories, cross-validation]
 4. L3-L5 必须在执行计划中列出系统基线版本、外部证据要求和回滚条件；影响未知时不得降级。
 
 ## 步骤 3：阶段确定
+
+### 3.0 机器路由决策表（强制）
+
+`workflow-plan.md` 必须包含以下表格，并为每行填写唯一的 `execute` 或 `skip`；理由必须引用需求、风险、复杂度或用户明确指示。引擎优先读取该表，缺失时仅为旧工作流使用保守证据推断。
+
+| stage | decision | evidence |
+|-------|----------|----------|
+| `application-design` | execute / skip | 新接口、组件、跨边界或系统级风险依据 |
+| `units-generation` | execute / skip | 多工作单元、跨服务协调或单次执行范围依据 |
+| `functional-design` | execute / skip | 新数据模型、≥3 条业务规则、状态机或复杂算法依据 |
+| `operations` | execute / skip | 可部署服务、明确部署目标或用户要求；纯库/本地工具填 skip |
+
+不得用自然语言中的“可能、按需、建议”替代该表。用户强制包含或排除条件 Stage 时，先更新此表及 evidence，再由后续 `condition` 读取；不得手改 state 或 condition-skip 记录。
 
 ### 3.1 用户故事 — 已执行还是跳过？
 **已执行**：进入下一个确定
@@ -244,7 +258,7 @@ requires: [user-stories, cross-validation]
 - `diagram intent`：展示执行计划的阶段顺序、依赖和关键分支；
 - `approved facts`：已确定的待执行阶段、跳过阶段及其原因、依赖关系；
 - `diagram_type`：Flowchart SVG 场景；
-- `target artifact`：`docs/aidlc/inception/plans/execution-plan.md`；需要保存时，SVG 源和可选 `.diagram.json` 语义伴随清单优先写入其同级 `assets/`，静态 SVG 只有在目标产物明确要求且由外部 Provider 实际生成后才记录；
+- `target artifact`：`docs/aidlc/modules/{module-id}/inception/plans/execution-plan.md`；需要保存时，SVG 源和可选 `.diagram.json` 语义伴随清单优先写入其同级 `assets/`，静态 SVG 只有在目标产物明确要求且由外部 Provider 实际生成后才记录；
 - `output_format`：`svg`（SVG 源）；
 - `target_operations`：按执行计划实际要求填写 `source-only`、`preview`、`render` 或 `export`。
 
@@ -262,7 +276,7 @@ requires: [user-stories, cross-validation]
 
 ## 步骤 7：创建执行计划文档
 
-创建 `docs/aidlc/inception/plans/execution-plan.md`：
+创建 `docs/aidlc/modules/{module-id}/inception/plans/execution-plan.md`：
 
 ````markdown
 # 执行计划
@@ -447,7 +461,7 @@ requires: [user-stories, cross-validation]
 **预估时间线**：[时长]
 
 > **📋 <u>**需要审查：**</u>**
-> 请检查执行计划：`docs/aidlc/inception/plans/execution-plan.md`
+> 请检查执行计划：`docs/aidlc/modules/{module-id}/inception/plans/execution-plan.md`
 
 > **🚀 <u>**下一步？**</u>**
 >

@@ -3,6 +3,7 @@ slug: ui-mock-design-spec
 number: "2.5.5"
 name: Mock 设计规格
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-design-agent
 support_agents: []
@@ -12,8 +13,8 @@ consumes: []
 produces: []
 sensors: []
 completion_contract: instruction_only
-requires: [ui-mock]
-condition: has_ui_requirements
+requires: [ui-mock-workflow]
+condition: ui_mode_html_mock
 ---
 inclusion: fileMatch
 fileMatchPattern: "**/*.html"

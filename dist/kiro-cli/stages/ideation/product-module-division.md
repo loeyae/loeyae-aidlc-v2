@@ -6,12 +6,18 @@ execution: CONDITIONAL
 lead_agent: aidlc-architect-agent
 scopes: [feature, enterprise, mvp, classic]
 requires: [product-inception]
-produces: [docs/aidlc/ideation/module-division.md]
+produces:
+  - docs/aidlc/ideation/module-division.md
+  - docs/aidlc/ideation/module-manifest.json
 ---
 
 # 产品模块划分规则
 
 **职责**：定义产品级业务模块及其与部署服务的映射。服务、模块和工作单元的术语以 `common-terminology.md` 为准。
+
+## 单模块精简路径
+
+签名架构 choice 为 `single-module` 时，本 Stage 仍生成统一路由所需的 `module-division.md` 和只含一个模块的 `module-manifest.json`，但跳过模块拆分、主次模块归属和跨模块依赖审批。唯一模块只记录稳定 `module_id`、职责、服务归属（未知时为“待设计”）和 Owner；不得为了满足模板虚构第二个模块。多模块 choice 才执行下述完整划分流程。
 
 ## 划分原则
 

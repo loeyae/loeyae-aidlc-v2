@@ -10,7 +10,7 @@ mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes:
   - src/
-  - docs/aidlc/construction/code-review.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md
 produces:
   - docs/aidlc/construction/build-test-report.md
   - docs/aidlc/construction/build-and-test/build-and-test-summary.md
@@ -33,7 +33,7 @@ requires: [code-generation, tdd, code-review]
 
 进入本步骤前，编排方必须验证以下证据存在且结论为通过：
 
-1. **每单元双轴审查记录**：`docs/aidlc/construction/audit/{unit-id}.md` 中包含 Spec 结果 + Standards 结果，且修复状态为"已修复并复审通过"或"无需修复"。
+1. **每单元双轴审查记录**：`docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md` 中包含 Spec 结果 + Standards 结果，且修复状态为"已修复并复审通过"或"无需修复"。
 2. **最终全局审查记录**（C7 触发时）：审计文件中包含 `FINAL_GLOBAL` 模式审查结论且状态为通过。
 3. **缺失任一记录或结论非通过时，C8 不得开始**——返回缺失步骤并告知用户原因。
 

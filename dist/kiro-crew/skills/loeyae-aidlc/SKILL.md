@@ -13,7 +13,7 @@ triggers: aidlc, AI-DLC, 使用 AI-DLC, 继续上次的工作, 认领单元, 功
 
 **准入门禁（requires + condition）+ 准出门禁（produces + sensors）= 自动推进**
 
-门禁保证可机器验证的完整性；仅 2 个不可自动判定的决策点保留 `approval: block`（架构决策 + 部署决策）。`gate: true` 不是口头确认：完成产物与 sensor 后，人类必须在交互式终端签发绑定 workflow/stage/challenge、最长 15 分钟且消费后不可重放的 token。平台适配器和 Agent 不得自行签发；没有受信宿主 provider 且无人类 TTY 时按设计 fail-closed。
+门禁保证可机器验证的完整性；仅 2 个不可自动判定的决策点保留 `approval: block`（架构决策 + 部署决策），且只在对应 condition=true 时出现。`gate: true` 不是口头确认：完成当前实例产物与 sensor 后，人类必须在交互式终端签发绑定 workflow/stage_instance/challenge、最长 15 分钟且消费后不可重放的 token。模块级 `application-design` 每个模块实例分别审批。平台适配器和 Agent 不得自行签发；没有受信宿主 provider 且无人类 TTY 时按设计 fail-closed。
 
 ## 架构
 
@@ -30,7 +30,7 @@ Agent ←→ aidlc-orchestrate.ts park   → 保存状态供下次恢复
 ```
 Loop:
   1. directive = loeyae-aidlc orchestrate next
-  2. 按 directive.kind 执行（见下表）
+  2. 按 directive.kind 执行（见下表）；run-stage 必须使用已解析的实例上下文和路径，禁止跨模块/单元复用产物或 Evidence
   3. 执行完成后按契约报告：
      - 普通 stage：`report --stage <slug> --result completed`
      - instruction-only：追加 `--instruction-ack <slug>`
@@ -55,6 +55,10 @@ Loop:
 
 | 字段 | 类型 | 含义 | agent 动作 |
 |------|------|------|-----------|
+| `stage_instance` | string | 当前机器执行实例 ID | 报告、审批与 Evidence 均绑定此实例，不得只按 slug 推断 |
+| `axis` | "project"\|"module"\|"unit" | 实例化范围 | 按对应上下文执行 |
+| `module_id` / `unit_id` | string\|null | 当前稳定上下文 ID | 非空时只读写该上下文 |
+| `artifact_root` / `evidence_root` | string | 当前实例规范根目录 | 所有产物和 Evidence 写入该目录 |
 | `gate` | boolean | `true` = 本 stage 为审批阻断点（approval:block） | 完成后必须携带受信的一次性 token 报告 `approved`，不得使用 `completed` |
 | `approval` | "block"\|"confirm"\|"notify" | 审批类型 | `block` 必须由人类终端或受信宿主 provider 签发 token；`notify` 仅通知 |
 | `completion_contract` | "artifact"\|"evidence"\|"instruction_only" | 完成契约 | `instruction_only` 必须追加 `--instruction-ack <slug>`，Stop Hook 不得代确认 |
@@ -70,7 +74,7 @@ loeyae-aidlc approve --stage <slug>
 loeyae-aidlc orchestrate report --stage <slug> --result approved --approval-token <token>
 ```
 
-Token 绑定当前 workflow、stage 和 challenge，最长 15 分钟且成功消费后不可重放。误用 `completed`、缺 token、伪造、过期或重放都会返回 error directive；修复后重新获取 challenge/token，不得改 state 绕过。
+Token 绑定当前 workflow、stage_instance 和 challenge，最长 15 分钟且成功消费后不可重放。误用 `completed`、缺 token、上下文不匹配、伪造、过期或重放都会返回 error directive；修复后重新获取 challenge/token，不得改 state 绕过。
 
 ## 五层门禁体系
 
@@ -86,10 +90,10 @@ Stage frontmatter 声明 `requires: [slug1, slug2]`。引擎在 `next` 时验证
 
 Stage frontmatter 声明 `condition: <expression>`。引擎在 `next` 时评估：
 - 条件为 false 时 stage 自动跳过（不阻断，不需要人工介入）
-- 支持条件：`has_legacy_code`、`has_ui_requirements`、`multi_module`、`has_nfr_needs`、`has_infra_needs`、`has_test_case_sources`、`has_contract_dependencies`、`has_subagent_support`、`is_loeyae_boot`
+- 支持条件：`has_legacy_code`、`has_ui_requirements`、`ui_design_selected`、`ui_mode_html_mock`、`ui_mode_figma`、`multi_module`、`has_product_contract_needs`、`has_application_design_needs`、`has_unit_generation_needs`、`has_test_case_sources`、`has_functional_design_needs`、`has_nfr_needs`、`has_infra_needs`、`has_contract_dependencies`、`has_subagent_support`、`is_loeyae_boot`、`needs_ui_implementation_bridge`、`context_compacted`、`has_deployment_needs`、`has_operations_template_needs`
 - 未知条件 fail-closed（视为阻断而非放行）
 
-覆盖：20/46 stages
+覆盖：26/46 stages
 
 ### 3. 准出：produces（产物验证）
 
@@ -104,7 +108,7 @@ Stage frontmatter 声明 `produces: [path1, path2]`。引擎在 `report --result
 
 Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执行。
 
-**Evidence 协议**：所有 evidence-based sensor 从 `.aidlc/evidence/<stage-slug>/<sensor>.json` 读取机器生成的结构化证据，不接受手写或 agent 直接编辑的证据文件。
+**Evidence 协议**：所有 evidence-based sensor 按当前实例读取机器生成的结构化证据：project 为 `.aidlc/evidence/<stage-slug>/<sensor>.json`，module 追加 `<module-id>/`，unit 再追加 `<unit-id>/`。不接受手写、agent 直接编辑或其他模块/单元的证据文件。
 
 证据文件约束：
 - 格式：合法 JSON object，含 `evidence_version: "1"`
@@ -156,19 +160,27 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 
 ## Scope 过滤
 
-不同 scope 进入不同数量的候选 stages（总计 46 stages；实际执行数依项目条件动态减少）：
+不同 scope 进入不同数量的默认候选 stages（总计 46 stages；`prd-generation` 为用户选择 Stage，未选择时不进入实例；实际执行数还会依项目条件动态减少）：
 
 | Scope | 候选 stages | 典型场景 |
 |-------|------------|---------|
-| feature | 46 | 完整功能开发 |
-| enterprise | 46 | 企业级完整流程 |
-| mvp | 46 | 最小可行产品 |
-| classic | 44 | 标准开发流程 |
+| feature | 45（`--with-prd` 时 46） | 完整功能开发 |
+| enterprise | 45（`--with-prd` 时 46） | 企业级完整流程 |
+| mvp | 45（`--with-prd` 时 46） | 最小可行产品 |
+| classic | 43（`--with-prd` 时 44） | 标准开发流程 |
 | express | 7 | 快速迭代/小改动 |
 | workshop | 7 | 工作坊/探索 |
 | bugfix | 7 | Bug 修复 |
 | refactor | 7 | 代码重构 |
 | poc | 7 | 概念验证 |
+
+`prd-generation` 不是 Inception 强制门禁。只有用户明确选择 PRD 时，初始化完整 scope 才使用 `loeyae-aidlc orchestrate next --scope <scope> --with-prd`；选择写入签名状态且活动工作流中不可变。未选择时不生成占位文件，后续 Inception 正常继续。用户也可通过 `aidlc-prd-synthesis` 独立生成 PRD。
+
+完整 scope 的 `workspace-detection` 也是运行时 choice：directive 返回 `choice_required: true` 时，必须向用户展示 `single-module`、`multi-module`，并以 `report --stage workspace-detection --result completed --instruction-ack workspace-detection --user-input <choice>` 写入签名 history。单模块跳过产品级 Inception 但仍登记唯一模块；产品契约仅在多模块或存在跨边界事实时执行。快速 scope 不要求该 choice；不得从 `handoff.md` 推断或改变机器路由。
+
+I9 UI 设计不是初始化选项，而是运行时 choice。`ui-mock` directive 返回 `choice_required: true` 时，必须向用户展示 `choices`，并以 `report --stage ui-mock --result completed --instruction-ack ui-mock --user-input <choice>` 记录 `html-mock`、`figma-create`、`figma-existing`、`skip` 中唯一值。`skip` 不创建 UI 产物，HTML/Figma 分支互斥；不得从 `handoff.md` 推断或改变机器路由。
+
+`application-design`、`units-generation`、`functional-design` 和 `operations` 根据 `workflow-plan.md` 的 `execute / skip + evidence` 自动路由；旧计划缺行时才保守推断。I14 跳过后使用 `default` 单元；I14 执行时，新签名 `unit-manifest.json` 必须为每个单元声明 `conditional_stages`（允许空数组），防止其他单元的 NFR、基础设施、契约、框架或 UI 事实扩散，旧清单缺字段时保守回退。Operations condition=false 不出现审批；`operations-templates` 只在明确要求保留可复用模板时执行。
 
 ## 仅保留的 2 个人工确认点
 
@@ -177,7 +189,7 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 | application-design | 架构决策——影响全局，不可自动验证正确性 |
 | operations | 部署决策——影响生产环境 |
 
-其余 44 个 stage 全部门禁通过即自动推进（notify 仅通知，不阻断）。
+进入签名工作流的非审批 stage 在各自门禁通过后自动推进（notify 仅通知，不阻断）；用户未选择的 PRD Stage 不属于当前工作流。
 
 ## 不适用条件的处理
 

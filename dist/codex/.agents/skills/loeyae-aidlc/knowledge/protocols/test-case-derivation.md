@@ -26,7 +26,7 @@ I7 的 Gherkin 是产品语义唯一基线：
 
 ## 产物路径与组织
 
-路径：`docs/aidlc/inception/application-design/test-cases/`
+路径：`docs/aidlc/modules/{module-id}/inception/application-design/test-cases/`。`{module-id}` 必须取当前 directive 的 `module_id`，不得读取或写入其他模块目录。
 
 - 用例不超过 20 个时，推荐每个场景一个 `UC-D-{编号}-{名称}.md`。
 - 用例较多或同源强耦合时，可按故事、契约、配置或一致性场景聚合，内部仍以独立 UC-D 分隔。

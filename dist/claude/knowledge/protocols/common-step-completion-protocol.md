@@ -43,7 +43,7 @@
 
 ### ② 记录审计（强制）
 
-在单元审计文件中追加记录（路径：`docs/aidlc/construction/audit/{unit-id}.md`；格式见 `common-audit-logging.md`）。
+在当前 stage instance 的审计文件中追加记录（路径：`<directive.artifact_root>/audit.md`；格式见 `common-audit-logging.md`）。记录必须包含 `stage_instance`，以及适用的 `module_id`、`unit_id`。
 
 ### ③ 验证更新（强制，不可跳过）
 

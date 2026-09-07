@@ -3,13 +3,14 @@ slug: user-stories
 number: "2.4"
 name: 用户故事
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-product-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
-consumes: [docs/aidlc/inception/requirements.md]
-produces: [docs/aidlc/inception/user-stories.md]
+consumes: [docs/aidlc/modules/{module-id}/inception/requirements.md]
+produces: [docs/aidlc/modules/{module-id}/inception/user-stories.md]
 sensors: []
 requires: [requirements-analysis]
 ---
@@ -120,7 +121,7 @@ Scenario: [场景名，描述行为而非实现]
    - 全面 / 标准 / 精简
 
 3. **记录深度决策**：
-   - 创建 `docs/aidlc/inception/plans/user-stories-assessment.md`
+   - 创建 `docs/aidlc/modules/{module-id}/inception/plans/user-stories-assessment.md`
    - 包含选择该深度的理由
    - 引用适用的具体评估标准
    - 说明预期产出（画像数量、故事粒度）
@@ -228,7 +229,7 @@ Scenario: [场景名，描述行为而非实现]
 - 允许混合方式，并提供清晰的决策标准
 
 ## 步骤 6：保存故事计划
-- 将包含嵌入问题的完整故事计划保存到 `docs/aidlc/inception/plans/` 目录
+- 将包含嵌入问题的完整故事计划保存到 `docs/aidlc/modules/{module-id}/inception/plans/` 目录
 - 文件名：`story-generation-plan.md`
 - 包含所有 [回答]: 标签供用户输入
 - 确保计划全面覆盖所有故事开发方面
@@ -295,7 +296,7 @@ Scenario: [场景名，描述行为而非实现]
 # 第二部分：生成
 
 ## 步骤 15：加载故事生成计划
-- [ ] 从 `docs/aidlc/inception/plans/story-generation-plan.md` 读取完整故事计划
+- [ ] 从 `docs/aidlc/modules/{module-id}/inception/plans/story-generation-plan.md` 读取完整故事计划
 - [ ] 识别下一个未完成的步骤（第一个 [ ] 复选框）
 - [ ] 加载该步骤的上下文和需求
 
@@ -339,7 +340,7 @@ Scenario: [场景名，描述行为而非实现]
 
 ```markdown
 > **📋 <u>**需要审查：**</u>**
-> 请检查用户故事、画像和角色权限矩阵：`docs/aidlc/inception/user-stories.md`、`docs/aidlc/inception/user-stories/personas.md` 和 `docs/aidlc/inception/user-stories/role-permission-matrix.md`
+> 请检查用户故事、画像和角色权限矩阵：`docs/aidlc/modules/{module-id}/inception/user-stories.md`、`docs/aidlc/modules/{module-id}/inception/user-stories/personas.md` 和 `docs/aidlc/modules/{module-id}/inception/user-stories/role-permission-matrix.md`
 
 
 

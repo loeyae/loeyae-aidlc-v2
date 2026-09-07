@@ -3,6 +3,7 @@ slug: ui-mock-styles
 number: "2.5.6"
 name: Mock 样式
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-design-agent
 support_agents: []
@@ -12,8 +13,8 @@ consumes: []
 produces: []
 sensors: []
 completion_contract: instruction_only
-requires: [ui-mock]
-condition: has_ui_requirements
+requires: [ui-mock-design-spec]
+condition: ui_mode_html_mock
 ---
 
 > **加载时机**：仅在 `inception-ui-mock-generation.md` 生成或修改 HTML Mock 时加载。

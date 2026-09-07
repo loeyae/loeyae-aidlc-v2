@@ -18,6 +18,8 @@ import { spawnSync } from "child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { signRecord } from "./aidlc-trust";
+import { loadWorkflowState, type WorkflowState } from "./aidlc-state";
+import { evidenceRelativePath } from "./aidlc-execution-context";
 import { readSourceRevision } from "./aidlc-revision";
 
 type CommandRole = "build" | "test" | "check" | "semantic";
@@ -141,16 +143,29 @@ function requireDirectory(path: string, field: string): string {
   return safe;
 }
 
-function evidenceOutput(stage: string, sensor: string, value?: string): string {
+function evidenceOutput(stage: string, sensor: string, value: string | undefined, state: WorkflowState): string {
   const safeStage = nonEmptyString(stage, "stage");
   const safeSensor = nonEmptyString(sensor, "sensor");
   if (!/^[a-z0-9][a-z0-9-]*$/.test(safeStage) || !/^[a-z0-9][a-z0-9-]*$/.test(safeSensor)) {
     fail("stage and sensor must contain only lowercase letters, digits, and hyphens");
   }
-  const expected = resolve(PROJECT_ROOT, ".aidlc", "evidence", safeStage, `${safeSensor}.json`);
+  const axis = state.current_unit ? "unit" : state.current_module ? "module" : "project";
+  const relativeOutput = state.routing_model === "module-unit-v1"
+    ? evidenceRelativePath(safeStage, safeSensor, axis, { module_id: state.current_module, unit_id: state.current_unit })
+    : join(".aidlc", "evidence", safeStage, `${safeSensor}.json`);
+  const expected = resolve(PROJECT_ROOT, relativeOutput);
   const output = value ? safeProjectPath(value, "output") : safeProjectPath(expected, "output");
   if (output !== expected) fail(`output must be ${expected}`);
   return output;
+}
+
+function executionContext(state: WorkflowState): Record<string, unknown> {
+  if (state.routing_model !== "module-unit-v1") return {};
+  return {
+    stage_instance: state.current_stage_instance,
+    module_id: state.current_module || null,
+    unit_id: state.current_unit || null,
+  };
 }
 
 function redact(value: string): string {
@@ -346,14 +361,18 @@ function signedEvidence(unsigned: Record<string, unknown>): Record<string, unkno
   return { ...unsigned, integrity: signRecord(unsigned, false) };
 }
 
-function runSemanticCommand(sensor: string, timeoutMs: number): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
+function runSemanticCommand(sensor: string, timeoutMs: number, state: WorkflowState): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
   const tsx = require.resolve("tsx/cli");
   const checker = resolve(TOOL_DIR, "aidlc-semantic-checks.ts");
   const argv = [process.execPath, tsx, checker, "--sensor", sensor];
   const started = Date.now();
   const result = spawnSync(argv[0], argv.slice(1), {
     cwd: PROJECT_ROOT,
-    env: process.env,
+    env: {
+      ...process.env,
+      AIDLC_ACTIVE_MODULE: state.current_module || "",
+      AIDLC_ACTIVE_UNIT: state.current_unit || "",
+    },
     encoding: "utf8",
     shell: false,
     timeout: timeoutMs,
@@ -392,16 +411,17 @@ function runSemanticCommand(sensor: string, timeoutMs: number): { payload: Recor
   };
 }
 
-function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig): void {
+function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig, state: WorkflowState): void {
   const sensor = options.sensor;
   if (!sensor || sensor === "build-test-evidence") fail("semantic producer requires --sensor with a semantic sensor name");
   if (options.commandIds.length > 0) fail("--command-id is only supported for build/test evidence");
   const declarations = config.commands.filter((command) => command.role === "semantic" && command.sensor === sensor);
   if (declarations.length !== 1) fail(`allowlist must declare exactly one built-in semantic checker for ${sensor}`);
-  const result = runSemanticCommand(sensor, declarations[0].timeout_ms || 10 * 60 * 1000);
-  const output = options.output || evidenceOutput(options.stage, sensor);
+  const result = runSemanticCommand(sensor, declarations[0].timeout_ms || 10 * 60 * 1000, state);
+  const output = options.output || evidenceOutput(options.stage, sensor, undefined, state);
   const unsigned = {
     ...result.payload,
+    ...executionContext(state),
     evidence_version: "1",
     timestamp: new Date().toISOString(),
     producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() },
@@ -446,12 +466,11 @@ function parseArgs(args: string[]): ProducerOptions {
   }
   if (!stage) fail("--stage is required");
   if (sensor && sensor !== "build-test-evidence" && !SEMANTIC_SENSORS.has(sensor)) fail(`unsupported semantic sensor: ${sensor}`);
-  const outputSensor = sensor || "build-test-evidence";
   return {
     stage,
     sensor,
     config: safeProjectPath(config, "config", true),
-    output: output ? evidenceOutput(stage, outputSensor, output) : undefined,
+    output,
     commandIds,
   };
 }
@@ -482,13 +501,18 @@ function runProducer(args: string[]): void {
     fail("AIDLC_TRUST_SECRET must contain at least 32 bytes for evidence production");
   }
   const options = parseArgs(args);
+  const state = loadWorkflowState(PROJECT_ROOT);
+  if (!state || state.status !== "running") fail("evidence production requires an active signed running workflow");
+  if (state.current_stage !== options.stage) {
+    fail(`stage ${options.stage} is not active; current stage is ${state.current_stage || "(none)"}`);
+  }
   const outputSensor = options.sensor || "build-test-evidence";
-  const output = options.output || evidenceOutput(options.stage, outputSensor);
+  const output = evidenceOutput(options.stage, outputSensor, options.output, state);
   withProducerLock(output, () => {
     const lockedOptions = { ...options, output };
     const config = parseConfig(lockedOptions.config, lockedOptions.stage);
     if (lockedOptions.sensor && lockedOptions.sensor !== "build-test-evidence") {
-      runSemanticProducer(lockedOptions, config);
+      runSemanticProducer(lockedOptions, config, state);
       return;
     }
     if (lockedOptions.stage !== "build-and-test") fail('controlled producer currently supports only stage "build-and-test"');
@@ -514,6 +538,7 @@ function runProducer(args: string[]): void {
 
     const artifacts = (config.artifacts || []).map(hashArtifact);
     const unsigned = {
+      ...executionContext(state),
       evidence_version: "1",
       timestamp: new Date().toISOString(),
       status: "passed",

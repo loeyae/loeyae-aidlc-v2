@@ -3,21 +3,23 @@ slug: functional-design
 number: "3.1"
 name: 功能设计
 phase: construction
+axis: unit
 execution: CONDITIONAL
 lead_agent: aidlc-architect-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
-consumes: [docs/aidlc/inception/application-design.md]
+consumes: [docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work.md]
 produces:
-  - docs/aidlc/construction/functional-design.md
-  - docs/aidlc/construction/{unit-name}/functional-design/business-logic-model.md
-  - docs/aidlc/construction/{unit-name}/functional-design/business-rules.md
-  - docs/aidlc/construction/{unit-name}/functional-design/domain-entities.md
-  - docs/aidlc/construction/{unit-name}/functional-design/data-source-validation.md
-  - .aidlc/evidence/functional-design/functional-design-completeness.json
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-logic-model.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-rules.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/domain-entities.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/data-source-validation.md
+  - .aidlc/evidence/functional-design/{module-id}/{unit-id}/functional-design-completeness.json
 sensors: [doc-cascade, functional-design-completeness]
 requires: [units-generation]
+condition: has_functional_design_needs
 ---
 
 # 功能设计
@@ -31,13 +33,13 @@ requires: [units-generation]
 - 详细的业务规则、校验逻辑和约束
 - 技术无关的设计（不涉及基础设施关注点）
 
-**注意**：此阶段基于应用设计（INCEPTION 阶段）的高层组件设计
+**注意**：此阶段以 I14 的工作单元定义为硬输入；应用设计若已触发则作为高层组件增强输入，按条件跳过时不得因此阻断功能设计。
 
 ## 前置条件
 - 单元生成必须完成
 - 工作单元产物必须可用
-- 建议完成应用设计（提供高层组件结构）
-- 执行计划必须指示功能设计阶段应执行
+- 建议完成应用设计（提供高层组件结构）；未触发时使用需求、故事与工作单元定义
+- 执行计划必须将 `functional-design` 标记为 `execute`
 
 ## 概述
 为单元设计详细的业务逻辑，技术无关，纯粹聚焦于业务功能。
@@ -45,8 +47,8 @@ requires: [units-generation]
 ## 执行步骤
 
 ### 步骤 1：分析单元上下文
-- 从 `docs/aidlc/inception/application-design/unit-of-work.md` 读取单元定义
-- 从 `docs/aidlc/inception/application-design/unit-of-work-story-map.md` 读取分配的故事
+- 从 `docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work.md` 读取单元定义
+- 从 `docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-story-map.md` 读取分配的故事
 - 理解单元职责和边界
 
 ### 步骤 2：创建功能设计计划
@@ -89,7 +91,7 @@ requires: [units-generation]
 - **组件间通信设计** — props/emit/provide-inject/Store 通信模式
 
 ### 步骤 4：保存计划
-- 保存为 `docs/aidlc/construction/plans/{unit-name}-functional-design-plan.md`
+- 保存为 `docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/functional-design-plan.md`
 - 包含所有 [回答]: 标签供用户输入
 
 ### 步骤 5：收集和分析答案
@@ -101,10 +103,10 @@ requires: [units-generation]
 - **在所有歧义解决前不得继续**
 
 ### 步骤 6：生成功能设计产物
-- 创建 `docs/aidlc/construction/{unit-name}/functional-design/business-logic-model.md`
-- 创建 `docs/aidlc/construction/{unit-name}/functional-design/business-rules.md`
-- 创建 `docs/aidlc/construction/{unit-name}/functional-design/domain-entities.md`
-- 创建 `docs/aidlc/construction/{unit-name}/functional-design/data-source-validation.md`（数据源现实性验证）
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-logic-model.md`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-rules.md`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/domain-entities.md`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/data-source-validation.md`（数据源现实性验证）
 
 **数据源现实性验证产物格式**（`data-source-validation.md`）：
 
@@ -155,9 +157,9 @@ requires: [units-generation]
 2. 如果"字段映射表"中存在🚨不存在项，必须标注解决方案（补充字段/调整接口/修改设计）或由用户明确知悉风险后方可放行；未标注方案且未经用户确认的🚨项视为阻断。
 
 **前端功能设计产物**（如为前端单元）：
-- 创建 `docs/aidlc/construction/{unit-name}/functional-design/page-state-flow.md`（页面状态流转）
-- 创建 `docs/aidlc/construction/{unit-name}/functional-design/form-validation.md`（表单校验逻辑）
-- 创建 `docs/aidlc/construction/{unit-name}/functional-design/interaction-design.md`（交互行为设计）
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/page-state-flow.md`（页面状态流转）
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/form-validation.md`（表单校验逻辑）
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/interaction-design.md`（交互行为设计）
 
 ### 步骤 7：展示完成消息
 - 按以下结构展示完成消息：
@@ -178,7 +180,7 @@ requires: [units-generation]
 
 ```markdown
 > **📋 <u>**需要审查：**</u>**
-> 请检查功能设计产物：`docs/aidlc/construction/[unit-name]/functional-design/`
+> 请检查功能设计产物：`docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/`
 
 
 

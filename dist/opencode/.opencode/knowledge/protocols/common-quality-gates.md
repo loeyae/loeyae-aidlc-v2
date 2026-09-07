@@ -44,8 +44,8 @@
 | Provider SVG 验收 | 明确要求预览、渲染或导出 | 缺少源—目标产物追溯、Provider 能力证据或适用结构/几何/语义/视觉验收记录 |
 | 状态流转判定 | I5 完成 | 命中触发信号但无状态图，或无显式判定记录 |
 | 角色权限矩阵完整性 | I7 完成 | 矩阵缺失，或 `无权表现` 列存在空值，或角色无矩阵条目，或权限不适用 FR 缺少确认记录 |
-| PRD 自审清单 | I15 完成 | `product-prd-generation.md` 自审清单任一项未通过，或 `prd-completeness` evidence 缺失/失败 |
-| `prd-completeness` | prd-generation | PRD 章节、功能验收、非目标、待确认项、来源索引或一致性证据不完整 |
+| PRD 自审清单 | 用户选择 I15 后完成 | `product-prd-generation.md` 自审清单任一项未通过，或 `prd-completeness` evidence 缺失/失败；未选择 I15 时不适用 |
+| `prd-completeness` | prd-generation（仅用户选择时） | PRD 章节、功能验收、非目标、待确认项、来源索引或一致性证据不完整 |
 | `diagram-contract` | requirements-methods, application-design | SVG 源或 `.diagram.json` 的 ID/端口/完整 `points`/方向/分组语义/viewBox/FR 映射不完整，视觉样式偏离白底、无填充、黑色、微软雅黑、`16/14` 字号、`2` 线宽、`10 × 10` 箭头或无框标签基线，存在全局图例/备注，缺少 `diagramType`/`designNotes`/Sequence 生命线映射，或旧资产处于 `MIGRATION_REQUIRED` |
 | `design-intent-coverage` | units-generation | 设计意图未被工作单元承接，或存在未覆盖意图 |
 
@@ -63,7 +63,13 @@
 
 ### Evidence 协议
 
-Construction 各 sensor 验证的证据必须来自机器执行（CI 脚本、构建工具、自动化测试），而非手写或 agent 直接编辑。引擎从 `.aidlc/evidence/<stage-slug>/<sensor>.json` 读取结构化证据文件，执行以下约束：
+Construction 各 sensor 验证的证据必须来自机器执行（CI 脚本、构建工具、自动化测试），而非手写或 agent 直接编辑。引擎按当前 Stage 实例读取结构化证据：
+
+- 项目级：`.aidlc/evidence/<stage-slug>/<sensor>.json`
+- 模块级：`.aidlc/evidence/<stage-slug>/<module-id>/<sensor>.json`
+- 单元级：`.aidlc/evidence/<stage-slug>/<module-id>/<unit-id>/<sensor>.json`
+
+Evidence 顶层同时携带当前 `stage_instance`、`module_id`、`unit_id`（项目级上下文为 `null`），并执行以下约束：
 
 | 约束 | 规则 |
 |------|------|
@@ -74,7 +80,7 @@ Construction 各 sensor 验证的证据必须来自机器执行（CI 脚本、�
 | 来源指纹 | `source_revision.commit + dirty + worktree_digest` 必须与 report 时当前 Git 工作树完全一致 |
 | 完整性 | 顶层 `integrity` 必须通过当前 trust key 的 HMAC-SHA256 校验；每个字段仍按 sensor schema 严格校验 |
 
-证据文件路径约定：`.aidlc/evidence/<stage-slug>/<sensor-name>.json`
+证据文件路径以 `orchestrate next` 返回的 `evidence_root` 为准。模块 A 的 Evidence 不得满足模块 B，单元 A 的 Evidence 不得满足单元 B；语义 checker 只扫描当前模块/单元的 AI-DLC 产物。
 
 `build-test-evidence` 的标准 Producer 入口为 `loeyae-aidlc evidence run --stage build-and-test`。它要求宿主预先注入至少 32 字节的稳定 `AIDLC_TRUST_SECRET`，只读取业务项目 `.aidlc/evidence-commands.json` 中的 argv allowlist，使用 `shell: false` 执行 `build`、`test` 和 `check` 命令，采集真实退出码、耗时和测试输出。证据只保存 argv 的 SHA-256，不保存可能带 token/secret 的明文参数；stdout/stderr 尾部脱敏。Producer 记录 `commit + dirty + worktree_digest`、artifact SHA-256，通过覆盖整个执行窗口的同 sensor 锁、唯一临时文件、fsync 和 rename 原子写入。任一命令失败、测试统计无法解析、artifact 缺失、并发冲突、symlink/越界或配置非法时 fail-closed，既不生成通过证据，也不更新 state/audit。
 
@@ -121,8 +127,8 @@ Construction 各 sensor 验证的证据必须来自机器执行（CI 脚本、�
 
 ### 审批原则
 
-- **仅 2 个 stage 保留 `approval: block`**：`application-design`（架构决策）和 `operations`（部署决策）。
-- `next` 生成绑定 workflow ID、stage 和随机 challenge 的审批请求；人类审阅后只能通过交互式 `loeyae-aidlc approve --stage <slug>` 或受信宿主 provider 签发最长 15 分钟的一次性 token。`approved` 缺 token、token 伪造、过期或重放均阻断。
+- **仅 2 个 stage 保留 `approval: block`**：`application-design`（架构决策）和 `operations`（部署决策）；两者都先评估 condition，condition=false 时直接记录签名 `condition_skipped`，不创建审批 challenge。
+- `next` 生成绑定 workflow ID、`stage_instance` 和随机 challenge 的审批请求；人类审阅后只能通过交互式 `loeyae-aidlc approve --stage <slug>` 或受信宿主 provider 签发最长 15 分钟的一次性 token。模块级 `application-design` 的每个实例分别审批；`approved` 缺 token、上下文不匹配、token 伪造、过期或重放均阻断。
 - 平台 Hook/Agent 不得自行签发 token；宿主未集成 provider 且无人类终端可用时按设计 fail-closed。
 - 14 个 `instruction_only` stage 必须在执行正文后以 `--instruction-ack <slug>` 显式报告；Stop Hook 不能代替该确认。
 - 公开 report 结果不包含 `skipped`。只有声明的 condition 为 false 时，引擎可记录内部 `condition_skipped`；门禁负责质量保证，不能由人工 skip 绕过。
@@ -164,7 +170,8 @@ Construction 各 sensor 验证的证据必须来自机器执行（CI 脚本、�
 
 ### 不适用条件的记录
 
-当 stage 的 `condition` 评估为 false 时（如 `has_nfr_needs`、`has_infra_needs`、`has_contract_dependencies`）：
+当 stage 的 `condition` 评估为 false 时（如 `multi_module`、`has_product_contract_needs`、`has_application_design_needs`、`has_unit_generation_needs`、`has_functional_design_needs`、`has_nfr_needs`、`has_infra_needs`、`has_contract_dependencies`、`needs_ui_implementation_bridge`、`has_deployment_needs`）：
+- 对 unit 轴条件，新签名工作流优先读取当前 `unit-manifest.json` 条目的 `conditional_stages`；不得用其他单元的 NFR、基础设施、契约、框架或 UI 事实强迫当前单元执行。旧签名清单缺字段时才保守回退模块级事实
 - 引擎自动将该 stage 记录为内部 `condition_skipped`，下游 `requires` 视其为满足
 - 无需手动记录跳过原因——引擎 condition 评估结果即为充分依据
 - 下游 stage 的 `doc-cascade` sensor 感知跳过状态，不检查被跳过 stage 的产物
@@ -173,6 +180,8 @@ Construction 各 sensor 验证的证据必须来自机器执行（CI 脚本、�
 当检查项本身不适用时（如项目无 NFR 需求），在门禁结果中记录为「不适用」并附依据——但不得伪造通过。
 
 ## Operations 门禁（部署准备）
+
+只有 `has_deployment_needs=true` 时才进入 Operations 并创建阻断审批；纯库、纯本地工具或计划明确 `skip` 不产生审批。普通目标配置在 Operations 内按需使用模板；只有 Operations 产物明确要求生成、保留或归档可复用模板时，才进入 `operations-templates` 的独立产物门禁。
 
 - [ ] 只生成用户确认目标所需配置，无多余平台文件
 - [ ] 无硬编码密钥、私有绝对路径或未经确认的生产自动发布

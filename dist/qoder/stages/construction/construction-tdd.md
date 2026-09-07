@@ -3,6 +3,7 @@ slug: tdd
 number: "3.5.1"
 name: TDD 测试驱动开发
 phase: construction
+axis: unit
 execution: ALWAYS
 lead_agent: aidlc-developer-agent
 support_agents: []
@@ -11,7 +12,7 @@ scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: [src/]
 produces:
   - src/test/
-  - .aidlc/evidence/tdd/test-quality.json
+  - .aidlc/evidence/tdd/{module-id}/{unit-id}/test-quality.json
 sensors: [test-quality]
 requires: [code-generation]
 ---
@@ -54,7 +55,7 @@ requires: [code-generation]
 ```
 
 **规则**：
-- 每个新增/修改的公共方法，其测试**必须**关联到 `docs/aidlc/inception/application-design/test-cases/` 中的某个 UC-D-xxx
+- 每个新增/修改的公共方法，其测试**必须**关联到 `docs/aidlc/modules/{module-id}/inception/application-design/test-cases/` 中的某个 UC-D-xxx
 - 关联方式：测试方法名或注解/标签携带用例点编号
 
 **后端示例**（Java/Kotlin）：

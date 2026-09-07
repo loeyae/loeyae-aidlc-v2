@@ -1,8 +1,9 @@
 ---
 slug: ui-figma-generation
-number: "2.5.2"
+number: "2.5.3"
 name: Figma 生成
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-design-agent
 support_agents: []
@@ -12,8 +13,8 @@ consumes: []
 produces: []
 sensors: []
 completion_contract: instruction_only
-requires: [ui-mock]
-condition: has_ui_requirements
+requires: [ui-figma]
+condition: ui_mode_figma
 ---
 
 ## 职责

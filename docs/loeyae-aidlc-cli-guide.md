@@ -12,6 +12,7 @@
 | 安装 Kiro Crew | `loeyae-aidlc install` |
 | 自动安装已检测平台 | `loeyae-aidlc install --all` |
 | 启动 AI-DLC 工作流 | `loeyae-aidlc orchestrate next --scope feature` |
+| 启动并选择生成 PRD | `loeyae-aidlc orchestrate next --scope feature --with-prd` |
 | 获取当前阶段 | `loeyae-aidlc orchestrate next` |
 | 查看工作流状态 | `loeyae-aidlc orchestrate next --status` |
 | 报告阶段完成 | `loeyae-aidlc orchestrate report --stage <slug> --result completed` |
@@ -205,7 +206,7 @@ loeyae-aidlc uninstall --all
 ### 5.1 子命令
 
 ```text
-loeyae-aidlc orchestrate next [--scope <scope>] [--status] [--resume]
+loeyae-aidlc orchestrate next [--scope <scope>] [--with-prd] [--status] [--resume]
 loeyae-aidlc orchestrate report --stage <slug> --result <result> [options]
 loeyae-aidlc orchestrate park
 ```
@@ -221,6 +222,8 @@ loeyae-aidlc orchestrate park
 | `parked` | 工作流已暂停 |
 | `done` | 工作流已完成 |
 
+运行时 choice Stage 还会返回 `choices: string[]` 和 `choice_required: true`。这不是初始化参数；必须向用户展示这些值，并在完成当前 Stage 时用 `--user-input` 精确回传其中一个。
+
 ### 5.2 Scope
 
 首次创建工作流时使用 `--scope`：
@@ -233,17 +236,27 @@ loeyae-aidlc orchestrate next --scope feature
 
 | Scope | 当前候选阶段数 | 典型用途 |
 |---|---:|---|
-| `feature` | 46 | 完整功能开发 |
-| `enterprise` | 46 | 企业级完整流程 |
-| `mvp` | 46 | 最小可行产品 |
-| `classic` | 44 | 标准开发流程 |
+| `feature` | 45 | 完整功能开发 |
+| `enterprise` | 45 | 企业级完整流程 |
+| `mvp` | 45 | 最小可行产品 |
+| `classic` | 43 | 标准开发流程 |
 | `express` | 7 | 快速迭代或小改动 |
 | `workshop` | 7 | 工作坊或探索 |
 | `bugfix` | 7 | Bug 修复 |
 | `refactor` | 7 | 代码重构 |
 | `poc` | 7 | 概念验证 |
 
-阶段数以当前图谱为准，可随版本调整。随时运行以下命令查看当前值：
+阶段数以当前图谱为准，可随版本调整。表中为未选择 PRD 的默认数量；在 `feature`、`enterprise`、`mvp`、`classic` 新建工作流时添加 `--with-prd`，会额外选择 `prd-generation`：
+
+```bash
+loeyae-aidlc orchestrate next --scope feature --with-prd
+```
+
+PRD 默认不进入工作流，也不阻断 Inception。选择结果写入签名状态的 `selected_optional_stages`，只能在初始化时确定；活动工作流不能中途添加或移除。未启动工作流时，用户也可以直接调用 `aidlc-prd-synthesis` 独立生成 PRD。
+
+不要混用三类路由决定：PRD 是新工作流初始化选项；架构模式是完整 scope 到达 `workspace-detection` 后报告的 `single-module / multi-module` choice；UI choice 只在引擎实际返回 `ui-mock` directive 后报告。两种运行时 choice 都通过当前 Stage 的 `report --user-input` 写入签名 history。
+
+随时运行以下命令查看默认值：
 
 ```bash
 loeyae-aidlc scope-table
@@ -274,6 +287,8 @@ loeyae-aidlc orchestrate next
 
 ```text
 loeyae-aidlc orchestrate report --stage <slug> --result <result>
+                                [--module <module-id>]
+                                [--unit <unit-id>]
                                 [--instruction-ack <slug>]
                                 [--approval-token <token>]
                                 [--user-input <text>]
@@ -296,7 +311,7 @@ loeyae-aidlc orchestrate report \
   --result completed
 ```
 
-instruction-only 阶段必须确认已实际执行正文：
+instruction-only 阶段必须确认已实际执行正文。以下是不要求架构 choice 的快速 scope `workspace-detection` 示例；完整 scope 使用下方带 `--user-input` 的命令：
 
 ```bash
 loeyae-aidlc orchestrate report \
@@ -304,6 +319,42 @@ loeyae-aidlc orchestrate report \
   --result completed \
   --instruction-ack workspace-detection
 ```
+
+完整 scope 的第一个 Stage `workspace-detection` 要求签名架构 choice：
+
+| `--user-input` | 产品级路由 |
+|---|---|
+| `single-module` | 跳过产品级 Inception，登记唯一模块；仅有跨边界事实时执行产品契约 |
+| `multi-module` | 执行产品级 Inception、模块划分和产品契约 |
+
+```bash
+loeyae-aidlc orchestrate report \
+  --stage workspace-detection \
+  --result completed \
+  --instruction-ack workspace-detection \
+  --user-input single-module
+```
+
+`express`、`workshop`、`bugfix`、`refactor`、`poc` 不包含产品级路由，因此该 Stage 返回空 `choices`，只需 instruction ack，不强迫无关选择。旧签名工作流缺少架构 choice 时，才从模块清单和已经执行的产品分支保守推断。
+
+I9 `ui-mock` 同时是 instruction-only runtime choice Stage。允许值及路由如下：
+
+| `--user-input` | 后续路由 |
+|---|---|
+| `html-mock` | 共同页面规划后只执行 HTML Mock 分支 |
+| `figma-create` | 共同页面规划后创建 Figma |
+| `figma-existing` | 共同页面规划后使用已有 Figma |
+| `skip` | 不生成 UI 产物，跳过页面规划及两个生成分支 |
+
+```bash
+loeyae-aidlc orchestrate report \
+  --stage ui-mock \
+  --result completed \
+  --instruction-ack ui-mock \
+  --user-input skip
+```
+
+缺少 `--user-input` 或传入 directive `choices` 之外的值会被拒绝。选择写入受 HMAC、workflow ID、revision/CAS 保护的签名 history；不得用 `handoff.md` 或手工 state 修改切换分支。
 
 记录用户输入或审阅原因时，对含空格文本使用引号：
 
@@ -317,7 +368,11 @@ loeyae-aidlc orchestrate report \
 loeyae-aidlc orchestrate report --stage application-design --result revised
 ```
 
-`--stage` 必须等于签名状态中的当前阶段。公开结果不支持手工 `skipped`；只有图谱 condition 为 false 时，引擎才会自动记录内部 condition skip。
+`--stage` 必须等于签名状态中的当前逻辑 Stage，且引擎始终以 `current_stage_instance` 校验真实上下文。`--module` / `--unit` 可选；提供时必须与当前实例完全一致，适合 CI 防止把报告提交到同 slug 的其他模块/单元。公开结果不支持手工 `skipped`；只有图谱 condition 为 false 时，引擎才会自动记录内部 condition skip。
+
+`workflow-plan.md` 必须为 `application-design`、`units-generation`、`functional-design` 和 `operations` 写入 `execute / skip` 与 evidence。引擎优先使用这些机器决策；旧工作流缺行时才按项目证据保守推断。跳过 I14 时使用确定性的 `default` 单元。I14 执行时，新签名工作流的 `unit-manifest.json` 必须为每个单元提供 `conditional_stages`（允许空数组），只让当前单元适用的功能设计、NFR、基础设施、共享契约、子代理、框架合规和 UI Bridge 条件 Stage 执行；旧清单缺字段时保守回退模块级条件。Operations condition=false 时不出现审批；`operations-templates` 仅在明确要求保留可复用模板时执行。
+
+`run-stage` directive 会返回 `stage_instance`、`axis`、`module_id`、`unit_id`、`artifact_root`、已替换占位符的 `consumes`/`produces` 及 `evidence_root`。自动化和 Agent 应直接使用这些字段，不要从 Stage 正文中的抽象路径自行猜测上下文。
 
 ### 5.5 暂停和恢复
 
@@ -341,7 +396,7 @@ loeyae-aidlc orchestrate continue <token>
 
 ## 6. 人工审批：`approve`
 
-只有 `application-design` 和 `operations` 是阻断审批阶段。
+只有 condition 判定需要执行的 `application-design` 和 `operations` 实例是阻断审批阶段；condition=false 的实例会先写入 `condition_skipped`，不会创建 challenge。
 
 ```text
 loeyae-aidlc approve --stage <slug>
@@ -372,9 +427,9 @@ AIDLC_APPROVAL_TOKEN=<token> \
 
 约束：
 
-- stage 必须是当前活动阶段，并已由 `orchestrate next` 创建 challenge。
+- Stage slug 必须是当前活动逻辑 Stage，并已由 `orchestrate next` 为当前 `stage_instance` 创建 challenge。
 - challenge/token 最长有效 15 分钟。
-- token 绑定 workflow、stage 和 challenge，成功消费后不可重放。
+- token 绑定 workflow、`stage_instance` 和 challenge；模块级 `application-design` 的每个实例单独审批，成功消费后不可重放。
 - 非交互终端不能签发 token。
 - 普通聊天中的“同意”不能替代 token。
 
@@ -473,7 +528,7 @@ loeyae-aidlc evidence run \
 }
 ```
 
-默认输出为 `.aidlc/evidence/<stage>/<sensor>.json`。`--output` 仅用于显式确认这个规范路径，不能把 Evidence 写到任意位置。
+默认输出由当前签名状态决定：项目级为 `.aidlc/evidence/<stage>/<sensor>.json`，模块级为 `.aidlc/evidence/<stage>/<module-id>/<sensor>.json`，单元级为 `.aidlc/evidence/<stage>/<module-id>/<unit-id>/<sensor>.json`。`--output` 仅用于显式确认当前实例的规范路径，不能把 Evidence 写到任意位置。Producer 会拒绝 `--stage` 与当前活动 Stage 不一致的调用，并把 `stage_instance`、`module_id`、`unit_id` 写入 Evidence。
 
 ### 7.4 支持的语义 sensor
 
@@ -525,7 +580,7 @@ loeyae-aidlc diagram-provider run --request <path>
 | 参数 | 说明 |
 |---|---|
 | `--request <path>` | 必填，项目根目录内的 Provider Request JSON |
-| `--evidence <path>` | 可选，必须位于项目的 `.aidlc/evidence/` 内；默认根据 request stage 定位 `diagram-contract.json` |
+| `--evidence <path>` | 可选；必须精确等于当前活动 Stage 实例的规范 `diagram-contract.json` 路径；默认从签名 state 的 module/unit 上下文定位 |
 | `--dry-run` | 只解析 request 并输出执行计划，不启动浏览器、不写视觉验证结果 |
 
 示例：

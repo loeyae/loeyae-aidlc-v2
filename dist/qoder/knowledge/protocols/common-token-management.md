@@ -189,28 +189,28 @@ AI 在以下情况下主动读取延迟加载的文件：
 
 **需求文档切片**：
 ```
-docs/aidlc/inception/requirements/
-├── index.md                      ← 需求索引（极简）
-├── shared-requirements.md        ← 跨单元共享需求（NFR、全局约束）
-├── unit-{name}-requirements.md   ← 各单元的需求子集
+docs/aidlc/modules/{module-id}/inception/requirements/
+├── index.md                      ← 当前模块需求索引（极简）
+├── shared-requirements.md        ← 当前模块内跨单元共享需求（NFR、约束）
+├── unit-{unit-id}-requirements.md ← 各单元的需求子集
 └── decision-summary.md           ← 决策摘要
 ```
 
 **用户故事切片**：
 ```
-docs/aidlc/inception/user-stories/
-├── index.md                      ← 故事索引
-├── shared-stories.md             ← 跨单元共享故事（如有）
-├── unit-{name}-stories.md        ← 各单元映射的故事
+docs/aidlc/modules/{module-id}/inception/user-stories/
+├── index.md                      ← 当前模块故事索引
+├── shared-stories.md             ← 当前模块内跨单元共享故事（如有）
+├── unit-{unit-id}-stories.md     ← 各单元映射的故事
 └── decision-summary.md           ← 决策摘要
 ```
 
 **应用设计切片**：
 ```
-docs/aidlc/inception/application-design/
-├── index.md                      ← 设计索引
-├── shared-interfaces.md          ← 跨单元接口契约
-├── unit-{name}-design.md         ← 各单元的组件/服务设计
+docs/aidlc/modules/{module-id}/inception/application-design/
+├── index.md                      ← 当前模块设计索引
+├── shared-interfaces.md          ← 当前模块内跨单元接口契约
+├── unit-{unit-id}-design.md      ← 各单元的组件/服务设计
 ├── unit-of-work.md               ← 保留（含认领状态表）
 ├── unit-of-work-dependency.md    ← 保留
 ├── unit-of-work-story-map.md     ← 保留

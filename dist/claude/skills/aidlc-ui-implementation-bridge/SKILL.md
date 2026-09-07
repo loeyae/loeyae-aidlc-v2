@@ -14,7 +14,8 @@ triggers: Figma 转代码, Mock 转代码, 前端平台规范, 组件映射, 设
 
 - UI 设计产物路径（HTML Mock 或 Figma 设计稿）；
 - 目标平台及框架（Taro/RN/Flutter/UniApp 等）；
-- 项目级 `frontend-platform-spec.md` 路径（存在时）；
+- 当前 directive 的 `module_id`、`unit_id` 和 `artifact_root`；
+- 当前单元的 `frontend-platform-spec.md` 路径（存在时）；
 - 当前工作单元范围。
 
 缺少任一输入时返回 `NEEDS_CONTEXT`。纯 Web 项目（Vue3+ElementPlus 等纯浏览器方案）不需要本能力。
@@ -25,7 +26,7 @@ triggers: Figma 转代码, Mock 转代码, 前端平台规范, 组件映射, 设
 
 ## 输出
 
-返回生成或更新的 `docs/aidlc/frontend-platform-spec.md` 路径、布局原语映射表、组件映射表、CSS 约束禁止列表和未解决问题。
+返回生成或更新的 `docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md` 路径、布局原语映射表、组件映射表、CSS 约束禁止列表和未解决问题。
 
 ## 禁止事项
 

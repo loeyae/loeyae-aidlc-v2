@@ -6,17 +6,48 @@ import os
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 
 from diagram_fixture_style import canonicalize_svg
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TOOL = os.path.join(REPO_ROOT, "core", "tools", "aidlc-diagram-provider.ts")
+TRUST_SECRET = "aidlc-provider-test-secret-at-least-32-bytes"
+
+
+def provider_environment(project: str) -> dict:
+    env = os.environ.copy()
+    env["AIDLC_TRUST_SECRET"] = TRUST_SECRET
+    env["AIDLC_TRUST_DIR"] = os.path.join(project, ".aidlc", "test-trust")
+    return env
+
+
+def initialize_state(project: str) -> None:
+    state_uri = (Path(REPO_ROOT) / "core" / "tools" / "aidlc-state.ts").as_uri()
+    script = f"""
+import {{ createInitialState, saveWorkflowState }} from {json.dumps(state_uri)};
+const state = createInitialState('feature');
+state.current_stage = 'requirements-methods';
+state.current_phase = 'inception';
+state.current_stage_instance = 'requirements-methods@module:test-module';
+state.current_module = 'test-module';
+saveWorkflowState(process.cwd(), state);
+"""
+    result = subprocess.run(
+        ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", "--eval", script],
+        cwd=project,
+        env=provider_environment(project),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def run_adapter(project: str, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", TOOL, *args],
         cwd=project,
+        env=provider_environment(project),
         capture_output=True,
         text=True,
     )
@@ -24,6 +55,7 @@ def run_adapter(project: str, *args: str) -> subprocess.CompletedProcess[str]:
 
 def fixture() -> tuple[str, str]:
     project = tempfile.mkdtemp(prefix="aidlc-provider-adapter-")
+    initialize_state(project)
     os.makedirs(os.path.join(project, "assets"), exist_ok=True)
     with open(os.path.join(project, "assets", "flow.svg"), "w") as handle:
         handle.write('<svg viewBox="0 0 100 80" width="100" height="80" role="img"><title>Flow</title><desc>Flow</desc></svg>\n')
@@ -129,6 +161,7 @@ def test_file_url_cannot_escape_project() -> None:
 
 
 def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> None:
+    initialize_state(project)
     os.makedirs(os.path.join(project, "assets"), exist_ok=True)
     nodes = [
         {"id": "start", "shape": "round", "x": 40, "y": 40, "width": 100, "height": 50},
@@ -241,8 +274,9 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
     }
     with open(os.path.join(project, "assets", "geometry.expected.json"), "w") as handle:
         json.dump(expected, handle)
-    os.makedirs(os.path.join(project, ".aidlc", "evidence", "requirements-methods"), exist_ok=True)
-    with open(os.path.join(project, ".aidlc", "evidence", "requirements-methods", "diagram-contract.json"), "w") as handle:
+    evidence_dir = os.path.join(project, ".aidlc", "evidence", "requirements-methods", "test-module")
+    os.makedirs(evidence_dir, exist_ok=True)
+    with open(os.path.join(evidence_dir, "diagram-contract.json"), "w") as handle:
         json.dump({"status": "passed"}, handle)
     with open(os.path.join(project, "request.json"), "w") as handle:
         json.dump({
@@ -285,7 +319,7 @@ def test_browser_geometry_scenarios() -> None:
                 raise AssertionError(f"{variant}: Chrome DevTools capability unavailable: {result.stderr}")
             if should_pass:
                 assert result.returncode == 0, result.stderr
-                with open(os.path.join(project, ".aidlc", "evidence", "requirements-methods", "diagram-contract.json")) as handle:
+                with open(os.path.join(project, ".aidlc", "evidence", "requirements-methods", "test-module", "diagram-contract.json")) as handle:
                     assert json.load(handle)["provider_status"] == "passed"
             else:
                 assert result.returncode != 0, variant

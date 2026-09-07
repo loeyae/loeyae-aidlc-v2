@@ -3,6 +3,7 @@ slug: requirements-prioritization
 number: "2.2.4"
 name: 需求优先级
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-product-agent
 support_agents: []

@@ -10,12 +10,15 @@ import {
   parseExpectedContract,
 } from "./diagram-contract.js";
 import { DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE } from "./diagram-visual-style.js";
+import { loadWorkflowState } from "./aidlc-state";
+import { evidenceRelativePath } from "./aidlc-execution-context";
 
 const PROJECT_ROOT = process.cwd();
 const PROVIDER_PACKAGE = "chrome-devtools-mcp";
 const COMMAND_TIMEOUT_MS = 120_000;
 const MAX_VIEWPORT = { width: 3840, height: 2160 };
 const MIN_VIEWPORT = { width: 320, height: 240 };
+let activeEvidenceDirectory: string | undefined;
 
 type TargetOperation = "preview" | "render";
 
@@ -199,20 +202,38 @@ function sourceUrl(item: DiagramRequest, index: number): string {
   return pathToFileURL(source).toString();
 }
 
+function configureEvidenceDirectory(stage: string): string {
+  const state = loadWorkflowState(PROJECT_ROOT);
+  if (!state || state.status !== "running" || state.current_stage !== stage) {
+    fail(`diagram provider stage ${stage} is not the active running stage`);
+  }
+  const axis = state.current_unit ? "unit" : state.current_module ? "module" : "project";
+  const canonicalEvidence = state.routing_model === "module-unit-v1"
+    ? evidenceRelativePath(stage, "diagram-contract", axis, { module_id: state.current_module, unit_id: state.current_unit })
+    : `.aidlc/evidence/${stage}/diagram-contract.json`;
+  activeEvidenceDirectory = dirname(resolve(PROJECT_ROOT, canonicalEvidence));
+  return activeEvidenceDirectory;
+}
+
 function evidencePath(stage: string, explicit?: string): string {
-  const path = explicit ? projectPath(explicit, "evidence") : resolve(PROJECT_ROOT, ".aidlc", "evidence", stage, "diagram-contract.json");
-  const evidenceRoot = resolve(PROJECT_ROOT, ".aidlc", "evidence");
-  const rel = relative(evidenceRoot, path);
-  if (rel === ".." || rel.startsWith(`..${requirePathSeparator()}`) || rel.startsWith("/")) fail("evidence must stay inside .aidlc/evidence");
+  const directory = activeEvidenceDirectory || configureEvidenceDirectory(stage);
+  const expected = resolve(directory, "diagram-contract.json");
+  const path = explicit ? projectPath(explicit, "evidence") : expected;
+  if (path !== expected) fail(`evidence must be the active stage instance path: ${relativeArtifact(expected)}`);
   return path;
 }
 
 function artifactPath(value: string | undefined, defaultPath: string, field: string): string {
+  if (!activeEvidenceDirectory) fail("active evidence context is not configured");
   const path = projectPath(value || defaultPath, field);
-  const evidenceRoot = resolve(PROJECT_ROOT, ".aidlc", "evidence");
-  const rel = relative(evidenceRoot, path);
-  if (rel === ".." || rel.startsWith(`..${requirePathSeparator()}`) || rel.startsWith("/")) fail(`${field} must stay inside .aidlc/evidence`);
+  const rel = relative(activeEvidenceDirectory, path);
+  if (rel === ".." || rel.startsWith(`..${requirePathSeparator()}`) || rel.startsWith("/")) fail(`${field} must stay inside the active stage instance evidence directory`);
   return path;
+}
+
+function defaultDiagramArtifact(diagramId: string, suffix: string): string {
+  if (!activeEvidenceDirectory) fail("active evidence context is not configured");
+  return resolve(activeEvidenceDirectory, "diagram-contract", `${diagramId}${suffix}`);
 }
 
 function parseRequest(path: string): ProviderRequest {
@@ -1550,6 +1571,7 @@ function localPreviewUrl(source: string, temporaryRoot: string, index: number, d
 async function main(): Promise<void> {
   const options = parseOptions(process.argv.slice(2));
   const request = parseRequest(options.request);
+  configureEvidenceDirectory(request.stage);
   const plan = request.diagrams.map((diagram, index) => ({
     id: diagram.id,
     url: sourceUrl(diagram, index),
@@ -1557,8 +1579,8 @@ async function main(): Promise<void> {
     viewport: diagram.viewport,
     manifest_path: diagram.manifest_path,
     expected_contract_path: declaredExpectedPath(diagram),
-    screenshot_path: relativeArtifact(artifactPath(diagram.screenshot_path, `.aidlc/evidence/${request.stage}/diagram-contract/${diagram.id}.png`, "screenshot_path")),
-    snapshot_path: relativeArtifact(artifactPath(diagram.snapshot_path, `.aidlc/evidence/${request.stage}/diagram-contract/${diagram.id}.snapshot.txt`, "snapshot_path")),
+    screenshot_path: relativeArtifact(artifactPath(diagram.screenshot_path, defaultDiagramArtifact(diagram.id, ".png"), "screenshot_path")),
+    snapshot_path: relativeArtifact(artifactPath(diagram.snapshot_path, defaultDiagramArtifact(diagram.id, ".snapshot.txt"), "snapshot_path")),
   }));
   if (options.dryRun) {
     console.log(JSON.stringify({ status: "ready", provider: PROVIDER_PACKAGE, target_operation: request.target_operation, plan }, null, 2));
@@ -1628,8 +1650,8 @@ async function main(): Promise<void> {
       runChrome(["take_snapshot", "--filePath", tempSnapshot]);
       runChrome(["take_screenshot", "--fullPage", "--filePath", tempScreenshot]);
       const consolePayload = runChrome(["list_console_messages", "--pageSize", "200"]).payload;
-      const baseScreenshot = artifactPath(diagram.screenshot_path, `.aidlc/evidence/${request.stage}/diagram-contract/${diagram.id}.png`, "screenshot_path");
-      const baseSnapshot = artifactPath(diagram.snapshot_path, `.aidlc/evidence/${request.stage}/diagram-contract/${diagram.id}.snapshot.txt`, "snapshot_path");
+      const baseScreenshot = artifactPath(diagram.screenshot_path, defaultDiagramArtifact(diagram.id, ".png"), "screenshot_path");
+      const baseSnapshot = artifactPath(diagram.snapshot_path, defaultDiagramArtifact(diagram.id, ".snapshot.txt"), "snapshot_path");
       const screenshot = request.target_reading_environment?.viewports ? baseScreenshot.replace(/\.png$/i, `-${readingView}.png`) : baseScreenshot;
       const snapshot = request.target_reading_environment?.viewports ? baseSnapshot.replace(/\.snapshot\.txt$/i, `-${readingView}.snapshot.txt`) : baseSnapshot;
       if (!existsSync(tempScreenshot) || !existsSync(tempSnapshot)) errors.push("Chrome DevTools did not produce the requested screenshot or snapshot");

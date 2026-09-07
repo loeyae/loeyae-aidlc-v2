@@ -3,15 +3,16 @@ slug: cross-validation
 number: "2.5.9"
 name: 交叉验证
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-product-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes:
-  - docs/aidlc/inception/requirements.md
-  - docs/aidlc/inception/user-stories.md
-produces: [docs/aidlc/inception/cross-validation-report.md]
+  - docs/aidlc/modules/{module-id}/inception/requirements.md
+  - docs/aidlc/modules/{module-id}/inception/user-stories.md
+produces: [docs/aidlc/modules/{module-id}/inception/cross-validation-report.md]
 sensors: []
 requires: [user-stories]
 ---
@@ -39,12 +40,12 @@ requires: [user-stories]
 
 ## 审查项 a：需求文档 ↔ 逆向工程
 
-**执行条件**：存在逆向工程产物（`docs/aidlc/inception/reverse-engineering/`）
+**执行条件**：存在逆向工程产物（`docs/aidlc/modules/{module-id}/inception/reverse-engineering/`）
 
 **输入文件**：
-- `docs/aidlc/inception/requirements.md`
-- `docs/aidlc/inception/reverse-engineering/architecture.md`
-- `docs/aidlc/inception/reverse-engineering/component-inventory.md`
+- `docs/aidlc/modules/{module-id}/inception/requirements.md`
+- `docs/aidlc/modules/{module-id}/inception/reverse-engineering/architecture.md`
+- `docs/aidlc/modules/{module-id}/inception/reverse-engineering/component-inventory.md`
 
 **审查清单**：
 
@@ -70,8 +71,8 @@ requires: [user-stories]
 **执行条件**：始终执行
 
 **输入文件**：
-- `docs/aidlc/inception/requirements.md`
-- `docs/aidlc/inception/requirements/requirement-verification-questions.md`
+- `docs/aidlc/modules/{module-id}/inception/requirements.md`
+- `docs/aidlc/modules/{module-id}/inception/requirements/requirement-verification-questions.md`
 - `docs/aidlc/audit.md`（澄清问答部分）
 - 当前 inception 根下的 `requirements/business-flows.md`
 - 条件适用的 `requirements/data-model.md`
@@ -103,10 +104,10 @@ requires: [user-stories]
 **执行条件**：始终执行（用户故事完成后）
 
 **输入文件**：
-- `docs/aidlc/inception/user-stories.md`
-- `docs/aidlc/inception/user-stories/personas.md`
-- `docs/aidlc/inception/user-stories/role-permission-matrix.md`
-- `docs/aidlc/inception/requirements.md`
+- `docs/aidlc/modules/{module-id}/inception/user-stories.md`
+- `docs/aidlc/modules/{module-id}/inception/user-stories/personas.md`
+- `docs/aidlc/modules/{module-id}/inception/user-stories/role-permission-matrix.md`
+- `docs/aidlc/modules/{module-id}/inception/requirements.md`
 - 当前场景 `scenario-manifest.md`
 
 **审查清单**：
@@ -135,9 +136,9 @@ requires: [user-stories]
 **目的**：从用户故事角度**反向**验证需求文档的完整性。当用户故事描述了用户期望的行为，但需求文档中找不到对应支撑时，说明需求可能有遗漏。
 
 **输入文件**：
-- `docs/aidlc/inception/user-stories.md`
-- `docs/aidlc/inception/user-stories/personas.md`
-- `docs/aidlc/inception/requirements.md`
+- `docs/aidlc/modules/{module-id}/inception/user-stories.md`
+- `docs/aidlc/modules/{module-id}/inception/user-stories/personas.md`
+- `docs/aidlc/modules/{module-id}/inception/requirements.md`
 
 **审查清单**：
 
@@ -162,12 +163,12 @@ requires: [user-stories]
 **执行条件**：执行了 UI 设计步骤后（HTML Mock 模式或 Figma 模式均适用）
 
 **输入文件**：
-- 页面计划：单模块 `docs/aidlc/inception/ui-design/page-plan.md`；多模块为当前模块 `docs/aidlc/modules/{module-name}/inception/ui-design/page-plan.md`
-- HTML Mock 模式：`docs/aidlc/inception/ui-mock/*-page-specs.md` + 对应 HTML 文件（标准或大型模式）
+- 页面计划：当前模块 `docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md`
+- HTML Mock 模式：`docs/aidlc/modules/{module-id}/inception/ui-mock/*-page-specs.md` + 对应 HTML 文件（标准或大型模式）
 - Figma 模式：`handoff.md` 的 `## UI 设计` 区块 `产物位置` 中的唯一主 Figma 文件链接 + `Figma 页面进度`（通过 `get_metadata` / `get_screenshot` 验证）
-- `docs/aidlc/inception/user-stories.md`
-- `docs/aidlc/inception/user-stories/role-permission-matrix.md`
-- `docs/aidlc/inception/requirements.md`
+- `docs/aidlc/modules/{module-id}/inception/user-stories.md`
+- `docs/aidlc/modules/{module-id}/inception/user-stories/role-permission-matrix.md`
+- `docs/aidlc/modules/{module-id}/inception/requirements.md`
 
 **审查清单**：
 
@@ -203,7 +204,7 @@ requires: [user-stories]
 
 **未通过处理**：
 1. 为每个不一致项分配冲突 ID，在交叉验证报告中记录需求、用户故事、UI 三方描述、影响范围和建议；不得把语义差异直接归因于任一方错误。
-2. 仅缺少证据、命名映射或 page-specs 对应关系的机械性问题可直接修正。涉及产品语义时，将 handoff.md `设计状态` 标记为 `blocked`、记录失败门禁，并按 `common-question-format-guide.md` 创建或更新 `docs/aidlc/inception/ui-mock/ui-conflict-questions.md`。
+2. 仅缺少证据、命名映射或 page-specs 对应关系的机械性问题可直接修正。涉及产品语义时，将 handoff.md `设计状态` 标记为 `blocked`、记录失败门禁，并按 `common-question-format-guide.md` 创建或更新 `docs/aidlc/modules/{module-id}/inception/ui-mock/ui-conflict-questions.md`。
 3. 加载并执行 `common-workflow-changes.md` 的“产品产物一致性协调”；该规则统一定义用户裁决选项、禁止提前修改、代码基线分流、就地更新、下游失效和重审恢复。
 4. 未决冲突为零且适用审查全部通过后，才能将 handoff.md `设计状态` 更新为 `approved`，`下一操作` 更新为“进入 I11 工作流规划”。
 
@@ -256,13 +257,13 @@ requires: [user-stories]
 
 | # | 检查点 | 通过标准 | 未通过处理 |
 |---|--------|----------|-----------|
-| 1 | 无臆造业务规则 | 所有 `[待确认]` 已汇总；无未标记的不确定内容 | 标记为 `[待确认]` 或删除 |
+| 1 | 无臆造业务规则 | 所有 `[待确认: PQ-NNN]` 已唯一索引；无未标记的不确定内容 | 分配 PQ-ID、登记待确认问题或删除臆造内容 |
 | 2 | 功能需求有验收标准 | 每个功能点至少一条可验证的验收标准 | 补充验收标准 |
 | 3 | 非目标明确 | 至少有 1 条排除项 | 与用户确认边界 |
 | 4 | 来源索引完整 | 每章在来源索引表中有对应记录 | 补充来源标注 |
 | 5 | 无技术实现细节泄露 | 不含 URL 路径、数据库表结构、API 设计、代码片段 | 移除或移至技术设计文档 |
 | 6 | 与已有产物无冲突（条件：有 Inception 产物时） | PRD 描述与已有需求/故事/UI 产物无语义矛盾 | 按已有产物修正或标记差异待用户裁决 |
-| 7 | 待确认问题可操作 | 每个待确认项有负责方和是否阻断标记 | 补充缺失信息 |
+| 7 | 待确认问题可操作 | 每个 PQ-ID 有具体问题、负责方和是否阻断标记，且阻断项为 0 | 补充缺失信息或先解决阻断项 |
 
 ### 审查执行方式
 

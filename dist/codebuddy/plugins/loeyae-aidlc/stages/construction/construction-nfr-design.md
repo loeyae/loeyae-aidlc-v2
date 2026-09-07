@@ -3,6 +3,7 @@ slug: nfr-design
 number: "3.3"
 name: NFR 设计
 phase: construction
+axis: unit
 execution: CONDITIONAL
 lead_agent: aidlc-architect-agent
 support_agents: []
@@ -10,10 +11,10 @@ mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces:
-  - docs/aidlc/construction/nfr-design.md
-  - docs/aidlc/construction/{unit-name}/nfr-design/nfr-design-patterns.md
-  - docs/aidlc/construction/{unit-name}/nfr-design/logical-components.md
-  - .aidlc/evidence/nfr-design/nfr-coverage.json
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-design.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-design/nfr-design-patterns.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-design/logical-components.md
+  - .aidlc/evidence/nfr-design/{module-id}/{unit-id}/nfr-coverage.json
 sensors: [doc-cascade, nfr-coverage]
 requires: [nfr-requirements]
 condition: has_nfr_needs
@@ -32,7 +33,7 @@ condition: has_nfr_needs
 ## 执行步骤
 
 ### 步骤 1：分析 NFR 需求
-- 从 `docs/aidlc/construction/{unit-name}/nfr-requirements/` 读取 NFR 需求
+- 从 `docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements/` 读取 NFR 需求
 - 理解可扩展性、性能、可用性、安全需求
 
 ### 步骤 2：创建 NFR 设计计划
@@ -61,7 +62,7 @@ condition: has_nfr_needs
 - **缓存策略** — API 响应缓存、组件缓存（keep-alive）、Store 持久化
 
 ### 步骤 4：保存计划
-- 保存为 `docs/aidlc/construction/plans/{unit-name}-nfr-design-plan.md`
+- 保存为 `docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/nfr-design-plan.md`
 - 包含所有 [回答]: 标签供用户输入
 
 ### 步骤 5：收集和分析答案
@@ -70,11 +71,11 @@ condition: has_nfr_needs
 - 如需要则添加后续问题
 
 ### 步骤 6：生成 NFR 设计产物
-- 创建 `docs/aidlc/construction/{unit-name}/nfr-design/nfr-design-patterns.md`
-- 创建 `docs/aidlc/construction/{unit-name}/nfr-design/logical-components.md`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-design/nfr-design-patterns.md`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-design/logical-components.md`
 
 **前端 NFR 设计产物**（如为前端单元）：
-- 创建 `docs/aidlc/construction/{unit-name}/nfr-design/frontend-performance-patterns.md`（前端性能模式）
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-design/frontend-performance-patterns.md`（前端性能模式）
 
 ### 步骤 7：展示完成消息
 - 按以下结构展示完成消息：
@@ -95,7 +96,7 @@ condition: has_nfr_needs
 
 ```markdown
 > **📋 <u>**需要审查：**</u>**
-> 请检查 NFR 设计：`docs/aidlc/construction/[unit-name]/nfr-design/`
+> 请检查 NFR 设计：`docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-design/`
 
 
 

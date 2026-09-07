@@ -3,14 +3,17 @@ slug: ui-mock
 number: "2.5"
 name: UI Mock 设计
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-design-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: [docs/aidlc/inception/ui-mock/]
+produces: []
 sensors: []
+completion_contract: instruction_only
+choices: [html-mock, figma-create, figma-existing, skip]
 requires: [user-stories]
 condition: has_ui_requirements
 ---
@@ -37,6 +40,17 @@ condition: has_ui_requirements
 - **使用已有 Figma 设计稿**：验证外部文件并登记为正式设计基准；
 - **HTML Mock 模式**：生成可离线浏览的结构化 HTML 原型；
 - **跳过 UI 设计**：仅适用于无界面需求或用户明确不需要设计基准。
+
+向引擎报告本 Stage 时必须把选择写入签名 history，取值固定为：
+
+| 用户选择 | `--user-input` |
+|----------|----------------|
+| HTML Mock | `html-mock` |
+| 创建 Figma | `figma-create` |
+| 使用已有 Figma | `figma-existing` |
+| 跳过 UI 设计 | `skip` |
+
+示例：`orchestrate report --stage ui-mock --result completed --instruction-ack ui-mock --user-input skip`。不得只修改 handoff.md 或用聊天文本改变后续分支。
 
 路由：
 

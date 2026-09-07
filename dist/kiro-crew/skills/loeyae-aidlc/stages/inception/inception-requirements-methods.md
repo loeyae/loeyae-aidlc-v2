@@ -3,6 +3,7 @@ slug: requirements-methods
 number: "2.2.3"
 name: 需求方法
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-product-agent
 support_agents: []
@@ -10,8 +11,8 @@ mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces:
-  - docs/aidlc/inception/requirements/business-flows.md
-  - .aidlc/evidence/requirements-methods/diagram-contract.json
+  - docs/aidlc/modules/{module-id}/inception/requirements/business-flows.md
+  - .aidlc/evidence/requirements-methods/{module-id}/diagram-contract.json
 sensors: [diagram-contract]
 requires: [requirements-analysis]
 ---

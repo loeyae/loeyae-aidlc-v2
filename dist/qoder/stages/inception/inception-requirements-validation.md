@@ -3,6 +3,7 @@ slug: requirements-validation
 number: "2.2.5"
 name: 需求验证
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-product-agent
 support_agents: []

@@ -84,8 +84,8 @@ I9 路由判定后立即创建本区块，包括明确跳过的场景。
 
 - **UI 设计方式**：{html-mock/figma/跳过}
 - **Figma 来源**：{流程创建/外部提供/不适用}
-- **产物位置**：{docs/aidlc/inception/ui-mock/ 或唯一主 Figma 文件链接/不适用}
-- **页面计划**：{docs/aidlc/inception/ui-design/page-plan.md 或模块级路径/不适用}
+- **产物位置**：{docs/aidlc/modules/{module-id}/inception/ui-mock/ 或唯一主 Figma 文件链接/不适用}
+- **页面计划**：{docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md 或模块级路径/不适用}
 - **页面计划状态**：{draft/approved/不适用}
 - **设计状态**：{selected/file_created/designing/review_pending/blocked/reconcile_in_progress/approved/skipped}
 - **当前批次**：{正整数/不适用}
@@ -206,7 +206,7 @@ I9 路由判定后立即创建本区块，包括明确跳过的场景。
 - 压缩前确认所有被压缩行状态为 `completed`/通过；不压缩 `blocked`、`pending` 或 `in_progress`。
 - 汇总行必须保留 Git commit 范围，支持 `git log {首}..{末}` 追溯明细。
 - 压缩操作本身作为一次 Git commit（消息：`chore: 压缩 handoff.md 已完成进度`）。
-- 审计文件 `docs/aidlc/construction/audit/` 中的逐单元明细不受压缩影响。
+- 每个 stage instance 的 `<directive.artifact_root>/audit.md` 中的明细不受压缩影响；模块和单元实例的审计不得跨上下文合并。
 
 ## 填充规则
 

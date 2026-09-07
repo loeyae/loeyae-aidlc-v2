@@ -1290,7 +1290,7 @@ Commands:
   uninstall [options]                     Remove only verified installer-owned assets
   build --harness <name> | --all          Compile dist output
   graph <compile|validate>                Stage graph operations
-  scope-table                             Show executable stage counts by scope
+  scope-table                             Show default executable stage counts by scope
   version                                 Print version
   help                                    Show this message
 
@@ -1311,6 +1311,8 @@ Examples:
   loeyae-aidlc install --all
   loeyae-aidlc install --all --migrate-legacy
   loeyae-aidlc uninstall --all
+  loeyae-aidlc orchestrate next --scope feature
+  loeyae-aidlc orchestrate next --scope feature --with-prd
   loeyae-aidlc approve --stage application-design
   loeyae-aidlc orchestrate report --stage application-design --result approved --approval-token <token>
   loeyae-aidlc export md /absolute/path/document.md --to docx --toc

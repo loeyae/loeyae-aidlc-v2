@@ -6,7 +6,13 @@
       "number": "0.1",
       "name": "工作区检测",
       "phase": "inception",
+      "axis": "project",
       "execution": "ALWAYS",
+      "selection": "automatic",
+      "choices": [
+        "single-module",
+        "multi-module"
+      ],
       "lead_agent": "aidlc-architect-agent",
       "support_agents": [],
       "mode": "inline",
@@ -34,7 +40,10 @@
       "number": "1.1",
       "name": "产品 Inception",
       "phase": "ideation",
+      "axis": "project",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
@@ -58,7 +67,7 @@
       ],
       "traceability": "required",
       "completion_contract": "gated",
-      "condition": "",
+      "condition": "multi_module",
       "approval": "notify",
       "file": "stages/ideation/product-inception.md"
     },
@@ -67,7 +76,10 @@
       "number": "1.2",
       "name": "模块划分",
       "phase": "ideation",
+      "axis": "project",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-architect-agent",
       "support_agents": [],
       "mode": "inline",
@@ -83,7 +95,8 @@
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
-        "docs/aidlc/ideation/module-division.md"
+        "docs/aidlc/ideation/module-division.md",
+        "docs/aidlc/ideation/module-manifest.json"
       ],
       "sensors": [
         "no-todo",
@@ -100,7 +113,10 @@
       "number": "1.3",
       "name": "产品契约",
       "phase": "ideation",
+      "axis": "project",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-architect-agent",
       "support_agents": [],
       "mode": "inline",
@@ -126,7 +142,7 @@
       ],
       "traceability": "required",
       "completion_contract": "gated",
-      "condition": "",
+      "condition": "has_product_contract_needs",
       "approval": "notify",
       "file": "stages/ideation/product-contracts.md"
     },
@@ -135,7 +151,10 @@
       "number": "1.4",
       "name": "PRD 生成",
       "phase": "ideation",
+      "axis": "project",
       "execution": "CONDITIONAL",
+      "selection": "user",
+      "choices": [],
       "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
@@ -150,8 +169,7 @@
       ],
       "scope_waived_requires": [],
       "consumes": [
-        "docs/aidlc/ideation/module-division.md",
-        "docs/aidlc/ideation/product-contracts.md"
+        "docs/aidlc/ideation/module-division.md"
       ],
       "produces": [
         "docs/aidlc/ideation/prd.md",
@@ -173,7 +191,10 @@
       "number": "1.5",
       "name": "场景模块映射",
       "phase": "ideation",
+      "axis": "project",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
@@ -188,8 +209,7 @@
       ],
       "scope_waived_requires": [],
       "consumes": [
-        "docs/aidlc/ideation/module-division.md",
-        "docs/aidlc/ideation/product-contracts.md"
+        "docs/aidlc/ideation/module-division.md"
       ],
       "produces": [
         "docs/aidlc/ideation/scenario-module-mapping.md"
@@ -209,7 +229,10 @@
       "number": "2.0",
       "name": "状态模板",
       "phase": "inception",
+      "axis": "project",
       "execution": "ALWAYS",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-architect-agent",
       "support_agents": [],
       "mode": "inline",
@@ -239,7 +262,10 @@
       "number": "2.1",
       "name": "逆向工程",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-developer-agent",
       "support_agents": [],
       "mode": "inline",
@@ -255,7 +281,7 @@
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
-        "docs/aidlc/inception/reverse-engineering.md"
+        "docs/aidlc/modules/{module-id}/inception/reverse-engineering.md"
       ],
       "sensors": [
         "no-todo",
@@ -272,7 +298,10 @@
       "number": "2.2",
       "name": "需求分析",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
@@ -287,11 +316,10 @@
       ],
       "scope_waived_requires": [],
       "consumes": [
-        "docs/aidlc/ideation/prd.md",
         "docs/aidlc/ideation/scenario-module-mapping.md"
       ],
       "produces": [
-        "docs/aidlc/inception/requirements.md"
+        "docs/aidlc/modules/{module-id}/inception/requirements.md"
       ],
       "sensors": [
         "traceability",
@@ -308,7 +336,10 @@
       "number": "2.2.1",
       "name": "需求澄清",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
@@ -336,7 +367,10 @@
       "number": "2.2.2",
       "name": "需求数据模型",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
@@ -364,7 +398,10 @@
       "number": "2.2.3",
       "name": "需求方法",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
@@ -380,8 +417,8 @@
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
-        "docs/aidlc/inception/requirements/business-flows.md",
-        ".aidlc/evidence/requirements-methods/diagram-contract.json"
+        "docs/aidlc/modules/{module-id}/inception/requirements/business-flows.md",
+        ".aidlc/evidence/requirements-methods/{module-id}/diagram-contract.json"
       ],
       "sensors": [
         "diagram-contract",
@@ -399,7 +436,10 @@
       "number": "2.2.4",
       "name": "需求优先级",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
@@ -427,7 +467,10 @@
       "number": "2.2.5",
       "name": "需求验证",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
@@ -455,7 +498,10 @@
       "number": "2.4",
       "name": "用户故事",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
@@ -470,10 +516,10 @@
       ],
       "scope_waived_requires": [],
       "consumes": [
-        "docs/aidlc/inception/requirements.md"
+        "docs/aidlc/modules/{module-id}/inception/requirements.md"
       ],
       "produces": [
-        "docs/aidlc/inception/user-stories.md"
+        "docs/aidlc/modules/{module-id}/inception/user-stories.md"
       ],
       "sensors": [
         "no-todo",
@@ -490,7 +536,15 @@
       "number": "2.5",
       "name": "UI Mock 设计",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [
+        "html-mock",
+        "figma-create",
+        "figma-existing",
+        "skip"
+      ],
       "lead_agent": "aidlc-design-agent",
       "support_agents": [],
       "mode": "inline",
@@ -505,25 +559,23 @@
       ],
       "scope_waived_requires": [],
       "consumes": [],
-      "produces": [
-        "docs/aidlc/inception/ui-mock/"
-      ],
-      "sensors": [
-        "no-todo",
-        "traceability"
-      ],
+      "produces": [],
+      "sensors": [],
       "traceability": "required",
-      "completion_contract": "gated",
+      "completion_contract": "instruction_only",
       "condition": "has_ui_requirements",
       "approval": "notify",
       "file": "stages/inception/inception-ui-mock.md"
     },
     {
-      "slug": "ui-figma",
+      "slug": "ui-page-planning",
       "number": "2.5.1",
-      "name": "Figma UI 设计",
+      "name": "页面规划",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-design-agent",
       "support_agents": [],
       "mode": "inline",
@@ -542,16 +594,50 @@
       "sensors": [],
       "traceability": "required",
       "completion_contract": "instruction_only",
-      "condition": "has_ui_requirements",
+      "condition": "ui_design_selected",
+      "approval": "notify",
+      "file": "stages/inception/inception-ui-page-planning.md"
+    },
+    {
+      "slug": "ui-figma",
+      "number": "2.5.2",
+      "name": "Figma UI 设计",
+      "phase": "inception",
+      "axis": "module",
+      "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
+      "lead_agent": "aidlc-design-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "ui-page-planning"
+      ],
+      "scope_waived_requires": [],
+      "consumes": [],
+      "produces": [],
+      "sensors": [],
+      "traceability": "required",
+      "completion_contract": "instruction_only",
+      "condition": "ui_mode_figma",
       "approval": "notify",
       "file": "stages/inception/inception-ui-figma.md"
     },
     {
       "slug": "ui-figma-generation",
-      "number": "2.5.2",
+      "number": "2.5.3",
       "name": "Figma 生成",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-design-agent",
       "support_agents": [],
       "mode": "inline",
@@ -562,7 +648,7 @@
         "classic"
       ],
       "requires": [
-        "ui-mock"
+        "ui-figma"
       ],
       "scope_waived_requires": [],
       "consumes": [],
@@ -570,16 +656,19 @@
       "sensors": [],
       "traceability": "required",
       "completion_contract": "instruction_only",
-      "condition": "has_ui_requirements",
+      "condition": "ui_mode_figma",
       "approval": "notify",
       "file": "stages/inception/inception-ui-figma-generation.md"
     },
     {
       "slug": "ui-mock-workflow",
-      "number": "2.5.3",
+      "number": "2.5.4",
       "name": "Mock 工作流",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-design-agent",
       "support_agents": [],
       "mode": "inline",
@@ -590,7 +679,7 @@
         "classic"
       ],
       "requires": [
-        "ui-mock"
+        "ui-page-planning"
       ],
       "scope_waived_requires": [],
       "consumes": [],
@@ -598,44 +687,19 @@
       "sensors": [],
       "traceability": "required",
       "completion_contract": "instruction_only",
-      "condition": "has_ui_requirements",
+      "condition": "ui_mode_html_mock",
       "approval": "notify",
       "file": "stages/inception/inception-ui-mock-workflow.md"
-    },
-    {
-      "slug": "ui-mock-generation",
-      "number": "2.5.4",
-      "name": "Mock 生成",
-      "phase": "inception",
-      "execution": "CONDITIONAL",
-      "lead_agent": "aidlc-design-agent",
-      "support_agents": [],
-      "mode": "inline",
-      "scopes": [
-        "feature",
-        "enterprise",
-        "mvp",
-        "classic"
-      ],
-      "requires": [
-        "ui-mock"
-      ],
-      "scope_waived_requires": [],
-      "consumes": [],
-      "produces": [],
-      "sensors": [],
-      "traceability": "required",
-      "completion_contract": "instruction_only",
-      "condition": "has_ui_requirements",
-      "approval": "notify",
-      "file": "stages/inception/inception-ui-mock-generation.md"
     },
     {
       "slug": "ui-mock-design-spec",
       "number": "2.5.5",
       "name": "Mock 设计规格",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-design-agent",
       "support_agents": [],
       "mode": "inline",
@@ -646,7 +710,7 @@
         "classic"
       ],
       "requires": [
-        "ui-mock"
+        "ui-mock-workflow"
       ],
       "scope_waived_requires": [],
       "consumes": [],
@@ -654,7 +718,7 @@
       "sensors": [],
       "traceability": "required",
       "completion_contract": "instruction_only",
-      "condition": "has_ui_requirements",
+      "condition": "ui_mode_html_mock",
       "approval": "notify",
       "file": "stages/inception/inception-ui-mock-design-spec.md"
     },
@@ -663,7 +727,10 @@
       "number": "2.5.6",
       "name": "Mock 样式",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-design-agent",
       "support_agents": [],
       "mode": "inline",
@@ -674,7 +741,7 @@
         "classic"
       ],
       "requires": [
-        "ui-mock"
+        "ui-mock-design-spec"
       ],
       "scope_waived_requires": [],
       "consumes": [],
@@ -682,7 +749,7 @@
       "sensors": [],
       "traceability": "required",
       "completion_contract": "instruction_only",
-      "condition": "has_ui_requirements",
+      "condition": "ui_mode_html_mock",
       "approval": "notify",
       "file": "stages/inception/inception-ui-mock-styles.md"
     },
@@ -691,7 +758,10 @@
       "number": "2.5.7",
       "name": "Mock 推理原则",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-design-agent",
       "support_agents": [],
       "mode": "inline",
@@ -702,7 +772,7 @@
         "classic"
       ],
       "requires": [
-        "ui-mock"
+        "ui-mock-styles"
       ],
       "scope_waived_requires": [],
       "consumes": [],
@@ -710,16 +780,19 @@
       "sensors": [],
       "traceability": "required",
       "completion_contract": "instruction_only",
-      "condition": "has_ui_requirements",
+      "condition": "ui_mode_html_mock",
       "approval": "notify",
       "file": "stages/inception/inception-ui-mock-reasoning-principles.md"
     },
     {
-      "slug": "ui-page-planning",
+      "slug": "ui-mock-generation",
       "number": "2.5.8",
-      "name": "页面规划",
+      "name": "Mock 生成",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-design-agent",
       "support_agents": [],
       "mode": "inline",
@@ -730,24 +803,32 @@
         "classic"
       ],
       "requires": [
-        "ui-mock"
+        "ui-mock-reasoning-principles"
       ],
       "scope_waived_requires": [],
       "consumes": [],
-      "produces": [],
-      "sensors": [],
+      "produces": [
+        "docs/aidlc/modules/{module-id}/inception/ui-mock/"
+      ],
+      "sensors": [
+        "no-todo",
+        "traceability"
+      ],
       "traceability": "required",
-      "completion_contract": "instruction_only",
-      "condition": "has_ui_requirements",
+      "completion_contract": "gated",
+      "condition": "ui_mode_html_mock",
       "approval": "notify",
-      "file": "stages/inception/inception-ui-page-planning.md"
+      "file": "stages/inception/inception-ui-mock-generation.md"
     },
     {
       "slug": "cross-validation",
       "number": "2.5.9",
       "name": "交叉验证",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
@@ -762,11 +843,11 @@
       ],
       "scope_waived_requires": [],
       "consumes": [
-        "docs/aidlc/inception/requirements.md",
-        "docs/aidlc/inception/user-stories.md"
+        "docs/aidlc/modules/{module-id}/inception/requirements.md",
+        "docs/aidlc/modules/{module-id}/inception/user-stories.md"
       ],
       "produces": [
-        "docs/aidlc/inception/cross-validation-report.md"
+        "docs/aidlc/modules/{module-id}/inception/cross-validation-report.md"
       ],
       "sensors": [
         "no-todo",
@@ -783,7 +864,10 @@
       "number": "2.6",
       "name": "工作流规划",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-architect-agent",
       "support_agents": [],
       "mode": "inline",
@@ -800,7 +884,7 @@
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
-        "docs/aidlc/inception/workflow-plan.md"
+        "docs/aidlc/modules/{module-id}/inception/workflow-plan.md"
       ],
       "sensors": [
         "no-todo",
@@ -817,7 +901,10 @@
       "number": "2.7",
       "name": "应用设计",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-architect-agent",
       "support_agents": [],
       "mode": "inline",
@@ -832,16 +919,16 @@
       ],
       "scope_waived_requires": [],
       "consumes": [
-        "docs/aidlc/inception/requirements.md",
-        "docs/aidlc/inception/user-stories.md"
+        "docs/aidlc/modules/{module-id}/inception/requirements.md",
+        "docs/aidlc/modules/{module-id}/inception/user-stories.md"
       ],
       "produces": [
-        "docs/aidlc/inception/application-design.md",
-        "docs/aidlc/inception/application-design/components.md",
-        "docs/aidlc/inception/application-design/component-methods.md",
-        "docs/aidlc/inception/application-design/application-services.md",
-        "docs/aidlc/inception/application-design/component-dependency.md",
-        ".aidlc/evidence/application-design/diagram-contract.json"
+        "docs/aidlc/modules/{module-id}/inception/application-design.md",
+        "docs/aidlc/modules/{module-id}/inception/application-design/components.md",
+        "docs/aidlc/modules/{module-id}/inception/application-design/component-methods.md",
+        "docs/aidlc/modules/{module-id}/inception/application-design/application-services.md",
+        "docs/aidlc/modules/{module-id}/inception/application-design/component-dependency.md",
+        ".aidlc/evidence/application-design/{module-id}/diagram-contract.json"
       ],
       "sensors": [
         "diagram-contract",
@@ -850,7 +937,7 @@
       ],
       "traceability": "required",
       "completion_contract": "gated",
-      "condition": "",
+      "condition": "has_application_design_needs",
       "approval": "block",
       "file": "stages/inception/inception-application-design.md"
     },
@@ -859,7 +946,10 @@
       "number": "2.8",
       "name": "单元生成",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-architect-agent",
       "support_agents": [],
       "mode": "inline",
@@ -874,16 +964,16 @@
       ],
       "scope_waived_requires": [],
       "consumes": [
-        "docs/aidlc/ideation/module-division.md",
-        "docs/aidlc/inception/user-stories.md",
-        "docs/aidlc/inception/application-design.md"
+        "docs/aidlc/ideation/module-manifest.json",
+        "docs/aidlc/modules/{module-id}/inception/user-stories.md"
       ],
       "produces": [
-        "docs/aidlc/inception/units.md",
-        "docs/aidlc/inception/application-design/unit-of-work.md",
-        "docs/aidlc/inception/application-design/unit-of-work-dependency.md",
-        "docs/aidlc/inception/application-design/unit-of-work-story-map.md",
-        ".aidlc/evidence/units-generation/design-intent-coverage.json"
+        "docs/aidlc/modules/{module-id}/inception/units.md",
+        "docs/aidlc/modules/{module-id}/inception/unit-manifest.json",
+        "docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work.md",
+        "docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-dependency.md",
+        "docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-story-map.md",
+        ".aidlc/evidence/units-generation/{module-id}/design-intent-coverage.json"
       ],
       "sensors": [
         "design-intent-coverage",
@@ -892,7 +982,7 @@
       ],
       "traceability": "required",
       "completion_contract": "gated",
-      "condition": "multi_module",
+      "condition": "has_unit_generation_needs",
       "approval": "notify",
       "file": "stages/inception/inception-units-generation.md"
     },
@@ -901,7 +991,10 @@
       "number": "2.8.1",
       "name": "测试用例派生",
       "phase": "inception",
+      "axis": "module",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-product-agent",
       "support_agents": [],
       "mode": "inline",
@@ -916,11 +1009,11 @@
       ],
       "scope_waived_requires": [],
       "consumes": [
-        "docs/aidlc/inception/application-design.md",
-        "docs/aidlc/inception/user-stories.md"
+        "docs/aidlc/modules/{module-id}/inception/application-design.md",
+        "docs/aidlc/modules/{module-id}/inception/user-stories.md"
       ],
       "produces": [
-        "docs/aidlc/inception/application-design/test-cases/"
+        "docs/aidlc/modules/{module-id}/inception/application-design/test-cases/"
       ],
       "sensors": [
         "no-todo",
@@ -937,7 +1030,10 @@
       "number": "3.1",
       "name": "功能设计",
       "phase": "construction",
+      "axis": "unit",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-architect-agent",
       "support_agents": [],
       "mode": "inline",
@@ -952,15 +1048,15 @@
       ],
       "scope_waived_requires": [],
       "consumes": [
-        "docs/aidlc/inception/application-design.md"
+        "docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work.md"
       ],
       "produces": [
-        "docs/aidlc/construction/functional-design.md",
-        "docs/aidlc/construction/{unit-name}/functional-design/business-logic-model.md",
-        "docs/aidlc/construction/{unit-name}/functional-design/business-rules.md",
-        "docs/aidlc/construction/{unit-name}/functional-design/domain-entities.md",
-        "docs/aidlc/construction/{unit-name}/functional-design/data-source-validation.md",
-        ".aidlc/evidence/functional-design/functional-design-completeness.json"
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-logic-model.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-rules.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/domain-entities.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/data-source-validation.md",
+        ".aidlc/evidence/functional-design/{module-id}/{unit-id}/functional-design-completeness.json"
       ],
       "sensors": [
         "doc-cascade",
@@ -970,7 +1066,7 @@
       ],
       "traceability": "required",
       "completion_contract": "gated",
-      "condition": "",
+      "condition": "has_functional_design_needs",
       "approval": "notify",
       "file": "stages/construction/construction-functional-design.md"
     },
@@ -979,7 +1075,10 @@
       "number": "3.2",
       "name": "NFR 需求",
       "phase": "construction",
+      "axis": "unit",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-architect-agent",
       "support_agents": [],
       "mode": "inline",
@@ -995,10 +1094,10 @@
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
-        "docs/aidlc/construction/nfr-requirements.md",
-        "docs/aidlc/construction/{unit-name}/nfr-requirements/nfr-requirements.md",
-        "docs/aidlc/construction/{unit-name}/nfr-requirements/tech-stack-decisions.md",
-        ".aidlc/evidence/nfr-requirements/nfr-coverage.json"
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements/nfr-requirements.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements/tech-stack-decisions.md",
+        ".aidlc/evidence/nfr-requirements/{module-id}/{unit-id}/nfr-coverage.json"
       ],
       "sensors": [
         "nfr-coverage",
@@ -1016,7 +1115,10 @@
       "number": "3.3",
       "name": "NFR 设计",
       "phase": "construction",
+      "axis": "unit",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-architect-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1032,10 +1134,10 @@
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
-        "docs/aidlc/construction/nfr-design.md",
-        "docs/aidlc/construction/{unit-name}/nfr-design/nfr-design-patterns.md",
-        "docs/aidlc/construction/{unit-name}/nfr-design/logical-components.md",
-        ".aidlc/evidence/nfr-design/nfr-coverage.json"
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-design.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-design/nfr-design-patterns.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-design/logical-components.md",
+        ".aidlc/evidence/nfr-design/{module-id}/{unit-id}/nfr-coverage.json"
       ],
       "sensors": [
         "doc-cascade",
@@ -1054,7 +1156,10 @@
       "number": "3.4",
       "name": "基础设施设计",
       "phase": "construction",
+      "axis": "unit",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-architect-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1070,10 +1175,10 @@
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
-        "docs/aidlc/construction/infrastructure-design.md",
-        "docs/aidlc/construction/{unit-name}/infrastructure-design/infrastructure-design.md",
-        "docs/aidlc/construction/{unit-name}/infrastructure-design/deployment-architecture.md",
-        ".aidlc/evidence/infrastructure-design/infrastructure-completeness.json"
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design/infrastructure-design.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design/deployment-architecture.md",
+        ".aidlc/evidence/infrastructure-design/{module-id}/{unit-id}/infrastructure-completeness.json"
       ],
       "sensors": [
         "infrastructure-completeness",
@@ -1091,7 +1196,10 @@
       "number": "3.4.1",
       "name": "共享契约基线",
       "phase": "construction",
+      "axis": "unit",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-architect-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1107,7 +1215,7 @@
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
-        ".aidlc/evidence/shared-contract-baseline/contract-baseline.json"
+        ".aidlc/evidence/shared-contract-baseline/{module-id}/{unit-id}/contract-baseline.json"
       ],
       "sensors": [
         "contract-baseline",
@@ -1125,7 +1233,10 @@
       "number": "3.5",
       "name": "代码生成",
       "phase": "construction",
+      "axis": "unit",
       "execution": "ALWAYS",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-developer-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1148,8 +1259,8 @@
       "consumes": [],
       "produces": [
         "src/",
-        "docs/aidlc/construction/plans/{unit-name}-code-generation-plan.md",
-        "docs/aidlc/construction/{unit-name}/implementation-summary.md"
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md"
       ],
       "sensors": [
         "doc-cascade",
@@ -1167,7 +1278,10 @@
       "number": "3.5.1",
       "name": "TDD 测试驱动开发",
       "phase": "construction",
+      "axis": "unit",
       "execution": "ALWAYS",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-developer-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1190,7 +1304,7 @@
       ],
       "produces": [
         "src/test/",
-        ".aidlc/evidence/tdd/test-quality.json"
+        ".aidlc/evidence/tdd/{module-id}/{unit-id}/test-quality.json"
       ],
       "sensors": [
         "test-quality",
@@ -1208,7 +1322,10 @@
       "number": "3.5.2",
       "name": "子代理执行",
       "phase": "construction",
+      "axis": "unit",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-developer-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1224,7 +1341,7 @@
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
-        ".aidlc/evidence/subagent-execution/subagent-evidence.json"
+        ".aidlc/evidence/subagent-execution/{module-id}/{unit-id}/subagent-evidence.json"
       ],
       "sensors": [
         "subagent-evidence",
@@ -1242,7 +1359,10 @@
       "number": "3.5.3",
       "name": "Loeyae 框架合规",
       "phase": "construction",
+      "axis": "unit",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-developer-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1258,7 +1378,7 @@
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
-        ".aidlc/evidence/loeyae-compliance/framework-compliance.json"
+        ".aidlc/evidence/loeyae-compliance/{module-id}/{unit-id}/framework-compliance.json"
       ],
       "sensors": [
         "framework-compliance",
@@ -1276,7 +1396,10 @@
       "number": "3.5.4",
       "name": "UI 实现桥接",
       "phase": "construction",
+      "axis": "unit",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-developer-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1292,8 +1415,8 @@
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
-        "docs/aidlc/frontend-platform-spec.md",
-        ".aidlc/evidence/ui-implementation-bridge/frontend-platform-spec.json"
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md",
+        ".aidlc/evidence/ui-implementation-bridge/{module-id}/{unit-id}/frontend-platform-spec.json"
       ],
       "sensors": [
         "frontend-platform-spec",
@@ -1302,7 +1425,7 @@
       ],
       "traceability": "required",
       "completion_contract": "gated",
-      "condition": "has_ui_requirements",
+      "condition": "needs_ui_implementation_bridge",
       "approval": "notify",
       "file": "stages/construction/construction-ui-implementation-bridge.md"
     },
@@ -1311,7 +1434,10 @@
       "number": "3.6",
       "name": "代码审查",
       "phase": "construction",
+      "axis": "unit",
       "execution": "ALWAYS",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-quality-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1335,10 +1461,10 @@
         "src/test/"
       ],
       "produces": [
-        "docs/aidlc/construction/code-review.md",
-        "docs/aidlc/construction/audit/{unit-id}.md",
-        ".aidlc/evidence/code-review/review-evidence.json",
-        ".aidlc/evidence/code-review/ui-design-alignment.json"
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/audit.md",
+        ".aidlc/evidence/code-review/{module-id}/{unit-id}/review-evidence.json",
+        ".aidlc/evidence/code-review/{module-id}/{unit-id}/ui-design-alignment.json"
       ],
       "sensors": [
         "reviewer-required",
@@ -1358,7 +1484,10 @@
       "number": "3.7",
       "name": "构建与测试",
       "phase": "construction",
+      "axis": "project",
       "execution": "ALWAYS",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-quality-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1380,7 +1509,7 @@
       "scope_waived_requires": [],
       "consumes": [
         "src/",
-        "docs/aidlc/construction/code-review.md"
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md"
       ],
       "produces": [
         "docs/aidlc/construction/build-test-report.md",
@@ -1404,7 +1533,10 @@
       "number": "3.7.1",
       "name": "构建测试模板",
       "phase": "construction",
+      "axis": "project",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-quality-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1440,7 +1572,10 @@
       "number": "3.8",
       "name": "实现报告",
       "phase": "construction",
+      "axis": "project",
       "execution": "ALWAYS",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-developer-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1459,7 +1594,7 @@
       ],
       "scope_waived_requires": [],
       "consumes": [
-        "docs/aidlc/construction/{unit-name}/implementation-summary.md"
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md"
       ],
       "produces": [
         "docs/aidlc/construction/implementation-report.md",
@@ -1482,7 +1617,10 @@
       "number": "3.9",
       "name": "压缩恢复",
       "phase": "construction",
+      "axis": "project",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-developer-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1516,7 +1654,10 @@
       "number": "4.1",
       "name": "部署运维",
       "phase": "operation",
+      "axis": "project",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-operations-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1546,7 +1687,7 @@
       ],
       "traceability": "required",
       "completion_contract": "gated",
-      "condition": "",
+      "condition": "has_deployment_needs",
       "approval": "block",
       "file": "stages/operation/operations.md"
     },
@@ -1555,7 +1696,10 @@
       "number": "4.2",
       "name": "运维模板",
       "phase": "operation",
+      "axis": "project",
       "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
       "lead_agent": "aidlc-operations-agent",
       "support_agents": [],
       "mode": "inline",
@@ -1578,7 +1722,7 @@
       ],
       "traceability": "required",
       "completion_contract": "gated",
-      "condition": "",
+      "condition": "has_operations_template_needs",
       "approval": "notify",
       "file": "stages/operation/operations-templates.md"
     }
@@ -1598,14 +1742,24 @@
   "conditions": [
     "",
     "context_compacted",
+    "has_application_design_needs",
     "has_contract_dependencies",
+    "has_deployment_needs",
+    "has_functional_design_needs",
     "has_infra_needs",
     "has_legacy_code",
     "has_nfr_needs",
+    "has_operations_template_needs",
+    "has_product_contract_needs",
     "has_subagent_support",
     "has_test_case_sources",
     "has_ui_requirements",
+    "has_unit_generation_needs",
     "is_loeyae_boot",
-    "multi_module"
+    "multi_module",
+    "needs_ui_implementation_bridge",
+    "ui_design_selected",
+    "ui_mode_figma",
+    "ui_mode_html_mock"
   ]
 }

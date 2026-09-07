@@ -11,7 +11,15 @@ Codex 是 V2 的平台入口，不自行决定阶段顺序。使用已安装 Ski
 loeyae-aidlc orchestrate next --scope <scope>
 ```
 
-严格按 directive 执行：
+PRD 默认不进入工作流。仅当用户明确选择生成 PRD 时，对 `feature`、`enterprise`、`mvp` 或 `classic` 初始化命令追加 `--with-prd`；选择写入签名状态，活动工作流中不可变。
+
+完整 scope 的 `workspace-detection` 也是运行时 choice：directive 返回 `choice_required: true` 时，必须向用户展示 `single-module`、`multi-module`，并以 `report --stage workspace-detection --result completed --instruction-ack workspace-detection --user-input <choice>` 写入签名 history。单模块跳过产品级 Inception 但仍登记唯一模块；产品契约仅在多模块或存在跨边界事实时执行。快速 scope 不要求该 choice；不得从 `handoff.md` 推断或改变机器路由。
+
+I9 UI 设计不是初始化选项，而是运行时 choice。`ui-mock` directive 返回 `choice_required: true` 时，必须向用户展示 `choices`，并以 `report --stage ui-mock --result completed --instruction-ack ui-mock --user-input <choice>` 记录 `html-mock`、`figma-create`、`figma-existing`、`skip` 中唯一值。`skip` 不创建 UI 产物，HTML/Figma 分支互斥；不得从 `handoff.md` 推断或改变机器路由。
+
+`application-design`、`units-generation`、`functional-design` 和 `operations` 根据 `workflow-plan.md` 的 `execute / skip + evidence` 自动路由；旧计划缺行时才保守推断。I14 跳过后使用 `default` 单元；I14 执行时，新签名 `unit-manifest.json` 必须为每个单元声明 `conditional_stages`（允许空数组），防止其他单元的 NFR、基础设施、契约、框架或 UI 事实扩散，旧清单缺字段时保守回退。Operations condition=false 不出现审批；`operations-templates` 只在明确要求保留可复用模板时执行。
+
+严格按 directive 执行。`run-stage` 中的 `stage_instance`、`axis`、`module_id`、`unit_id`、`artifact_root`、已解析 `consumes`/`produces` 和 `evidence_root` 是当前机器上下文，不得跨模块/单元复用产物或 Evidence：
 
 - `run-stage`：读取同一 Skill 目录下的 `stages/` 和 `knowledge/`，执行当前阶段；
 - `ask`：用普通文本向用户展示问题和选项，等待用户回答；
@@ -26,12 +34,12 @@ loeyae-aidlc orchestrate next --scope <scope>
 loeyae-aidlc orchestrate report --stage <slug> --result completed
 ```
 
-`gate: true` 时，用户聊天确认本身不是审批凭据。人类须在交互式终端执行 `loeyae-aidlc approve --stage <slug>`，或由受信宿主 provider 签发 token，再以 `--result approved --approval-token <token>` 报告；token 绑定 workflow/stage/challenge、最长 15 分钟且不可重放。Skill、Agent 和 Stop Hook 不得自行签发，无 provider/TTY 时 fail-closed。`instruction_only` stage 必须在执行正文后显式传 `--instruction-ack <slug>`，Stop Hook 不得代确认。公开 report 不接受手动 `skipped`；仅 condition=false 可记录内部 `condition_skipped`。
+`gate: true` 时，用户聊天确认本身不是审批凭据。人类须在交互式终端执行 `loeyae-aidlc approve --stage <slug>`，或由受信宿主 provider 签发 token，再以 `--result approved --approval-token <token>` 报告；token 绑定 workflow/stage_instance/challenge、最长 15 分钟且不可重放。Skill、Agent 和 Stop Hook 不得自行签发，无 provider/TTY 时 fail-closed。`instruction_only` stage 必须在执行正文后显式传 `--instruction-ack <slug>`，Stop Hook 不得代确认。公开 report 不接受手动 `skipped`；仅 condition=false 可记录内部 `condition_skipped`。
 
 ## Codex 适配
 
 - `docs/aidlc/aidlc-state.json` 是 HMAC、workflow ID、revision/CAS 保护的唯一机器状态；外部 enrollment 绑定项目，`docs/aidlc/handoff.md` 仅为派生人类视图；
-- evidence 位于业务项目的 `.aidlc/evidence/<stage-slug>/`，只接受受控 Producer 的精确 producer、当前 `commit + dirty + worktree_digest` 和 HMAC；命令只记录 `argv_digest`；
+- evidence 按当前实例隔离：project 为 `.aidlc/evidence/<stage-slug>/`，module 追加 `<module-id>/`，unit 再追加 `<unit-id>/`；只接受受控 Producer 的精确 producer、当前 `commit + dirty + worktree_digest` 和 HMAC，命令只记录 `argv_digest`；
 - 需要 Evidence 时，必须在第一次 `next` 前向 orchestrator、Producer 和 Hook 注入同一份至少 32 字节的 `AIDLC_TRUST_SECRET`；semantic 只执行发行包内置 checker；
 - 需要子 Agent 时，只使用当前 Codex 会话实际提供的子 Agent 能力；不可用时按阶段规则串行执行；
 - MCP、Skill 和项目规则按 Codex 当前会话的可用能力加载；不可用时返回 `NEEDS_CONTEXT` 或 `NEEDS_CAPABILITY`；

@@ -3,6 +3,7 @@ slug: nfr-requirements
 number: "3.2"
 name: NFR 需求
 phase: construction
+axis: unit
 execution: CONDITIONAL
 lead_agent: aidlc-architect-agent
 support_agents: []
@@ -10,10 +11,10 @@ mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces:
-  - docs/aidlc/construction/nfr-requirements.md
-  - docs/aidlc/construction/{unit-name}/nfr-requirements/nfr-requirements.md
-  - docs/aidlc/construction/{unit-name}/nfr-requirements/tech-stack-decisions.md
-  - .aidlc/evidence/nfr-requirements/nfr-coverage.json
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements/nfr-requirements.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements/tech-stack-decisions.md
+  - .aidlc/evidence/nfr-requirements/{module-id}/{unit-id}/nfr-coverage.json
 sensors: [nfr-coverage]
 requires: [functional-design]
 condition: has_nfr_needs
@@ -32,7 +33,7 @@ condition: has_nfr_needs
 ## 执行步骤
 
 ### 步骤 1：分析功能设计
-- 从 `docs/aidlc/construction/{unit-name}/functional-design/` 读取功能设计产物
+- 从 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/` 读取功能设计产物
 - 理解业务逻辑复杂度和需求
 
 ### 步骤 2：创建 NFR 需求计划
@@ -67,7 +68,7 @@ condition: has_nfr_needs
 - **国际化需求** — 多语言支持、RTL 布局、日期/数字格式
 
 ### 步骤 4：保存计划
-- 保存为 `docs/aidlc/construction/plans/{unit-name}-nfr-requirements-plan.md`
+- 保存为 `docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/nfr-requirements-plan.md`
 - 包含所有 [回答]: 标签供用户输入
 
 ### 步骤 5：收集和分析答案
@@ -79,8 +80,8 @@ condition: has_nfr_needs
 - **在所有歧义解决前不得继续**
 
 ### 步骤 6：生成 NFR 需求产物
-- 创建 `docs/aidlc/construction/{unit-name}/nfr-requirements/nfr-requirements.md`
-- 创建 `docs/aidlc/construction/{unit-name}/nfr-requirements/tech-stack-decisions.md`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements/nfr-requirements.md`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements/tech-stack-decisions.md`
 
 ### 步骤 7：展示完成消息
 - 按以下结构展示完成消息：
@@ -101,7 +102,7 @@ condition: has_nfr_needs
 
 ```markdown
 > **📋 <u>**需要审查：**</u>**
-> 请检查 NFR 需求：`docs/aidlc/construction/[unit-name]/nfr-requirements/`
+> 请检查 NFR 需求：`docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements/`
 
 
 

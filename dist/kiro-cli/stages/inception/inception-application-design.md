@@ -3,23 +3,25 @@ slug: application-design
 number: "2.7"
 name: 应用设计
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-architect-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes:
-  - docs/aidlc/inception/requirements.md
-  - docs/aidlc/inception/user-stories.md
+  - docs/aidlc/modules/{module-id}/inception/requirements.md
+  - docs/aidlc/modules/{module-id}/inception/user-stories.md
 produces:
-  - docs/aidlc/inception/application-design.md
-  - docs/aidlc/inception/application-design/components.md
-  - docs/aidlc/inception/application-design/component-methods.md
-  - docs/aidlc/inception/application-design/application-services.md
-  - docs/aidlc/inception/application-design/component-dependency.md
-  - .aidlc/evidence/application-design/diagram-contract.json
+  - docs/aidlc/modules/{module-id}/inception/application-design.md
+  - docs/aidlc/modules/{module-id}/inception/application-design/components.md
+  - docs/aidlc/modules/{module-id}/inception/application-design/component-methods.md
+  - docs/aidlc/modules/{module-id}/inception/application-design/application-services.md
+  - docs/aidlc/modules/{module-id}/inception/application-design/component-dependency.md
+  - .aidlc/evidence/application-design/{module-id}/diagram-contract.json
 sensors: [diagram-contract]
 requires: [cross-validation]
+condition: has_application_design_needs
 approval: block
 ---
 # 应用设计 - 详细步骤
@@ -44,7 +46,7 @@ approval: block
 ## 逐步执行
 
 ### 1. 分析上下文
-- 读取 `docs/aidlc/inception/requirements.md` 和 `docs/aidlc/inception/user-stories.md`
+- 读取 `docs/aidlc/modules/{module-id}/inception/requirements.md` 和 `docs/aidlc/modules/{module-id}/inception/user-stories.md`
 - 识别关键业务能力和功能领域
 - 确定设计范围和复杂度
 
@@ -87,11 +89,11 @@ approval: block
     - Pinia Store 划分策略
     - 全局状态 vs 局部状态
     - Store 间依赖关系
-  - [ ] **前端平台规范**（跨端项目必须）：生成 `docs/aidlc/frontend-platform-spec.md`
-    - 触发条件：前端目标平台为跨端（Taro/RN/Flutter/UniApp 跨端模式等），且该文件尚不存在或 handoff.md 标记为"待创建"
-    - 跳过条件：纯 Web 项目（PC 端 Vue3/React SPA），或文件已存在且 handoff.md 标记为"已就绪"
-    - 执行方式：按 `construction-ui-implementation-bridge.md` 第一部分的创建引导流程
-    - 产出后更新 handoff.md：`前端平台规范: 已就绪`
+  - [ ] **前端平台决策**（跨端项目必须）：在当前模块应用设计中记录运行时、组件库、样式方案和限制
+    - 触发条件：前端目标平台为跨端（Taro/RN/Flutter/UniApp 跨端模式等）
+    - 跳过条件：纯 Web 项目（PC 端 Vue3/React SPA）
+    - Construction 根据这些事实为每个单元生成隔离的 `frontend-platform-spec.md`
+    - 禁止在新 `module-unit-v1` 工作流中创建 `docs/aidlc/frontend-platform-spec.md`
 
 ### 4. 生成上下文相关的问题
 **指令**：分析需求和故事，仅生成与此特定应用设计相关的问题。使用以下类别作为灵感，而非强制清单。如不适用则跳过整个类别。
@@ -111,7 +113,7 @@ approval: block
 - **状态管理策略** — 仅当 Store 划分或状态管理方式不清楚时
 
 ### 5. 保存应用设计计划
-- 保存为 `docs/aidlc/inception/plans/application-design-plan.md`
+- 保存为 `docs/aidlc/modules/{module-id}/inception/plans/application-design-plan.md`
 - 包含所有 [回答]: 标签供用户输入
 - 确保计划覆盖所有设计方面
 
@@ -146,20 +148,20 @@ approval: block
 
 ### 10. 生成应用设计产物
 - 执行批准的计划生成设计产物
-- 创建 `docs/aidlc/inception/application-design/components.md`，包含：
+- 创建 `docs/aidlc/modules/{module-id}/inception/application-design/components.md`，包含：
   - 组件名称和用途
   - 组件职责
   - 组件接口
-- 创建 `docs/aidlc/inception/application-design/component-methods.md`，包含：
+- 创建 `docs/aidlc/modules/{module-id}/inception/application-design/component-methods.md`，包含：
   - 每个组件的方法签名
   - 每个方法的高层用途
   - 输入/输出类型
   - 注意：详细业务规则将在功能设计中定义（按单元，CONSTRUCTION 阶段）
-- 创建 `docs/aidlc/inception/application-design/application-services.md`，包含：
+- 创建 `docs/aidlc/modules/{module-id}/inception/application-design/application-services.md`，包含：
   - 应用服务/编排器定义
   - 边界内编排职责
   - 组件交互和用例编排
-- 创建 `docs/aidlc/inception/application-design/component-dependency.md`，包含：
+- 创建 `docs/aidlc/modules/{module-id}/inception/application-design/component-dependency.md`，包含：
   - 显示关系的依赖矩阵（表格）
   - 组件间通信模式
   - 组件依赖图和数据流图——调用 `aidlc-diagram-design`：
@@ -189,32 +191,27 @@ approval: block
 - 标记用于 I14 设计意图覆盖检查的锚点；未标记的条目不纳入覆盖检查
 
 **前端设计产物**（如项目包含前端）：
-- 创建 `docs/aidlc/inception/application-design/frontend-components.md`，包含：
+- 创建 `docs/aidlc/modules/{module-id}/inception/application-design/frontend-components.md`，包含：
   - 页面组件拆分方案
   - 组件层级关系图——调用 `aidlc-diagram-design`：`intent` = 展示前端组件层级和复用关系；`approved facts` = 已确认的页面和组件列表
   - 公共组件复用策略
-- 创建 `docs/aidlc/inception/application-design/frontend-routes.md`，包含：
+- 创建 `docs/aidlc/modules/{module-id}/inception/application-design/frontend-routes.md`，包含：
   - 路由结构设计
   - 路由守卫配置
   - 动态路由方案
-- 创建 `docs/aidlc/inception/application-design/api-contracts.md`，包含：
+- 创建 `docs/aidlc/modules/{module-id}/inception/application-design/api-contracts.md`，包含：
   - 前后端接口契约定义
   - 请求/响应数据结构
   - 错误码和状态码约定
-- 创建 `docs/aidlc/inception/application-design/state-management.md`，包含：
+- 创建 `docs/aidlc/modules/{module-id}/inception/application-design/state-management.md`，包含：
   - Pinia Store 划分方案
   - 状态管理模式
   - Store 间依赖关系
 
-**前端平台规范**（跨端项目，按条件执行）：
-- 条件：handoff.md 中 `前端平台规范` ≠ `已就绪`，且前端目标平台为跨端
-- 按 `construction-ui-implementation-bridge.md` 第一部分执行创建引导
-- 创建 `docs/aidlc/frontend-platform-spec.md`，包含：
-  - 平台声明（运行时、组件库、样式方案）
-  - 布局原语映射表
-  - 组件映射参考表
-  - CSS/样式约束清单
-- 产出后更新 handoff.md：`前端平台规范: 已就绪`
+**前端平台决策**（跨端项目，按条件执行）：
+- 在 `docs/aidlc/modules/{module-id}/inception/application-design.md` 中记录平台声明（运行时、组件库、样式方案）、布局原语约束和已知 CSS 限制
+- 这些模块级事实由 Construction 的每个单元读取，并生成 `docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md`
+- 旧 `docs/aidlc/frontend-platform-spec.md` 仅可作为 legacy-global 只读输入，新工作流不得写入
 
 ### 10.5 过渡：测试用例派生
 
@@ -235,7 +232,7 @@ approval: block
 [AI 生成的应用设计产物摘要，使用要点列表]
 
 > **📋 <u>**需要审查：**</u>**
-> 请检查应用设计产物：`docs/aidlc/inception/application-design/`
+> 请检查应用设计产物：`docs/aidlc/modules/{module-id}/inception/application-design/`
 
 > **🚀 <u>**下一步？**</u>**
 >

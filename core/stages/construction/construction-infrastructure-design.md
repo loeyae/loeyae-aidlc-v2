@@ -3,6 +3,7 @@ slug: infrastructure-design
 number: "3.4"
 name: 基础设施设计
 phase: construction
+axis: unit
 execution: CONDITIONAL
 lead_agent: aidlc-architect-agent
 support_agents: []
@@ -10,10 +11,10 @@ mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces:
-  - docs/aidlc/construction/infrastructure-design.md
-  - docs/aidlc/construction/{unit-name}/infrastructure-design/infrastructure-design.md
-  - docs/aidlc/construction/{unit-name}/infrastructure-design/deployment-architecture.md
-  - .aidlc/evidence/infrastructure-design/infrastructure-completeness.json
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design/infrastructure-design.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design/deployment-architecture.md
+  - .aidlc/evidence/infrastructure-design/{module-id}/{unit-id}/infrastructure-completeness.json
 sensors: [infrastructure-completeness]
 requires: [functional-design]
 condition: has_infra_needs
@@ -32,8 +33,8 @@ condition: has_infra_needs
 ## 执行步骤
 
 ### 步骤 1：分析设计产物
-- 从 `docs/aidlc/construction/{unit-name}/functional-design/` 读取功能设计
-- 从 `docs/aidlc/construction/{unit-name}/nfr-design/` 读取 NFR 设计（如存在）
+- 从 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/` 读取功能设计
+- 从 `docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-design/` 读取 NFR 设计（如存在）
 - 识别需要基础设施的逻辑组件
 
 ### 步骤 2：创建基础设施设计计划
@@ -63,7 +64,7 @@ condition: has_infra_needs
 - **环境变量管理** — .env 文件配置、环境区分（dev/staging/prod）
 
 ### 步骤 4：保存计划
-- 保存为 `docs/aidlc/construction/plans/{unit-name}-infrastructure-design-plan.md`
+- 保存为 `docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/infrastructure-design-plan.md`
 - 包含所有 [回答]: 标签供用户输入
 
 ### 步骤 5：收集和分析答案
@@ -72,13 +73,13 @@ condition: has_infra_needs
 - 如需要则添加后续问题
 
 ### 步骤 6：生成基础设施设计产物
-- 创建 `docs/aidlc/construction/{unit-name}/infrastructure-design/infrastructure-design.md`
-- 创建 `docs/aidlc/construction/{unit-name}/infrastructure-design/deployment-architecture.md`
-- 如有共享基础设施：创建 `docs/aidlc/construction/shared-infrastructure.md`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design/infrastructure-design.md`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design/deployment-architecture.md`
+- 如有共享基础设施：创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/shared-infrastructure.md`
 
 **前端基础设施产物**（如为前端单元）：
-- 创建 `docs/aidlc/construction/{unit-name}/infrastructure-design/frontend-build-config.md`（前端构建配置）
-- 创建 `docs/aidlc/construction/{unit-name}/infrastructure-design/frontend-deployment.md`（前端部署方案）
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design/frontend-build-config.md`（前端构建配置）
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design/frontend-deployment.md`（前端部署方案）
 
 ### 步骤 7：展示完成消息
 - 按以下结构展示完成消息：
@@ -99,7 +100,7 @@ condition: has_infra_needs
 
 ```markdown
 > **📋 <u>**需要审查：**</u>**
-> 请检查基础设施设计：`docs/aidlc/construction/[unit-name]/infrastructure-design/`
+> 请检查基础设施设计：`docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design/`
 
 
 

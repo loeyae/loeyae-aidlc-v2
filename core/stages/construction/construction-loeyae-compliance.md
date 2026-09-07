@@ -3,13 +3,14 @@ slug: loeyae-compliance
 number: "3.5.3"
 name: Loeyae 框架合规
 phase: construction
+axis: unit
 execution: CONDITIONAL
 lead_agent: aidlc-developer-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: [.aidlc/evidence/loeyae-compliance/framework-compliance.json]
+produces: [.aidlc/evidence/loeyae-compliance/{module-id}/{unit-id}/framework-compliance.json]
 sensors: [framework-compliance]
 traceability: not_applicable
 requires: [code-generation]
@@ -18,7 +19,7 @@ condition: is_loeyae_boot
 
 # Loeyae Boot 编码规范加载与合规验证
 
-> **加载条件**：仅当 handoff.md 中 `后端框架 = Loeyae Boot` 时加载本文件。
+> **加载条件**：仅当当前 unit Stage directive 由机器条件 `is_loeyae_boot` 路由为适用时加载；新签名工作流还要求当前单元的 `conditional_stages` 包含 `loeyae-compliance`。`handoff.md` 只展示派生结果，不是路由来源。
 > **加载时机**：Construction 代码生成步骤 2（MCP Skill 加载）时。
 > **非 Loeyae Boot 项目完全不需要本文件。**
 

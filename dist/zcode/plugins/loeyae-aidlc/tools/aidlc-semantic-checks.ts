@@ -17,6 +17,40 @@ import {
 } from "./diagram-contract.js";
 
 const ROOT = process.cwd();
+let workflowState: ReturnType<typeof loadWorkflowState> | undefined;
+try {
+  workflowState = loadWorkflowState(ROOT);
+} catch {
+  workflowState = undefined;
+}
+const ACTIVE_MODULE = process.env.AIDLC_ACTIVE_MODULE?.trim() || workflowState?.current_module;
+const ACTIVE_UNIT = process.env.AIDLC_ACTIVE_UNIT?.trim() || workflowState?.current_unit;
+
+function contextual(relativePath: string): string {
+  if (ACTIVE_UNIT && ACTIVE_MODULE && relativePath.startsWith("docs/aidlc/construction")) {
+    return relativePath.replace("docs/aidlc/construction", `docs/aidlc/modules/${ACTIVE_MODULE}/construction/${ACTIVE_UNIT}`);
+  }
+  if (ACTIVE_MODULE && relativePath.startsWith("docs/aidlc/inception")) {
+    return relativePath.replace("docs/aidlc/inception", `docs/aidlc/modules/${ACTIVE_MODULE}/inception`);
+  }
+  return relativePath;
+}
+
+function frontendPlatformSpecRelativePath(): string {
+  if (ACTIVE_MODULE && ACTIVE_UNIT) return `docs/aidlc/modules/${ACTIVE_MODULE}/construction/${ACTIVE_UNIT}/frontend-platform-spec.md`;
+  return "docs/aidlc/frontend-platform-spec.md";
+}
+
+function contextAllows(path: string): boolean {
+  if (!ACTIVE_MODULE) return true;
+  const label = relative(ROOT, path).replace(/\\/g, "/");
+  if (label.startsWith("docs/aidlc/inception/") || label.startsWith("docs/aidlc/construction/")) return false;
+  if (!label.startsWith("docs/aidlc/modules/")) return true;
+  if (label.startsWith(`docs/aidlc/modules/${ACTIVE_MODULE}/inception/`)) return true;
+  if (ACTIVE_UNIT && label.startsWith(`docs/aidlc/modules/${ACTIVE_MODULE}/construction/${ACTIVE_UNIT}/`)) return true;
+  return !ACTIVE_UNIT && label.startsWith(`docs/aidlc/modules/${ACTIVE_MODULE}/`);
+}
+
 const SENSOR_NAMES = new Set([
   "review-evidence", "test-quality", "contract-baseline", "functional-design-completeness",
   "nfr-coverage", "infrastructure-completeness", "implementation-report", "frontend-platform-spec",
@@ -27,9 +61,9 @@ const SENSOR_NAMES = new Set([
 function fail(message: string): never { throw new Error(message); }
 function text(path: string): string { return readFileSync(path, "utf8"); }
 function textIfExists(path: string): string { return existsSync(path) ? text(path) : ""; }
-function existing(paths: string[]): string[] { return paths.map((path) => join(ROOT, path)).filter(existsSync); }
+function existing(paths: string[]): string[] { return paths.map((path) => join(ROOT, contextual(path))).filter((path) => existsSync(path) && contextAllows(path)); }
 function allFiles(base: string, pattern: RegExp): string[] {
-  const root = join(ROOT, base);
+  const root = join(ROOT, contextual(base));
   if (!existsSync(root)) return [];
   const result: string[] = [];
   const visit = (directory: string): void => {
@@ -38,7 +72,7 @@ function allFiles(base: string, pattern: RegExp): string[] {
       const path = join(directory, entry);
       const info = statSync(path);
       if (info.isDirectory()) visit(path);
-      else if (pattern.test(path)) result.push(path);
+      else if (pattern.test(path) && contextAllows(path)) result.push(path);
     }
   };
   visit(root);
@@ -52,6 +86,66 @@ function count(value: string, pattern: RegExp): number { return [...value.matchA
 function section(value: string, patterns: RegExp[]): boolean { return patterns.some((pattern) => pattern.test(value)); }
 function noUnresolved(value: string): void {
   if (/\b(TODO|FIXME|TBD|HACK|NotImplemented)\b|待确认|待定|未解决|未定义|阻断/i.test(value)) fail("unresolved marker found in project artifact");
+}
+
+function markdownTableCells(line: string): string[] | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|")) return null;
+  return trimmed.replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
+
+function validatePrdPendingQuestions(path: string, content: string): { pendingQuestions: number } {
+  const pathLabel = relativePath(path).replace(/\\/g, "/");
+  const lines = content.split(/\r?\n/);
+  const markers = new Map<string, number>();
+  const rows = new Map<string, number>();
+
+  for (const [index, line] of lines.entries()) {
+    if (/\b(TODO|FIXME|TBD|HACK|NotImplemented)\b|待定|未解决|未定义/i.test(line)) {
+      fail(`${pathLabel}:${index + 1} contains an unresolved marker`);
+    }
+    for (const match of line.matchAll(/\[待确认(?:\s*[:：]\s*([^\]]+))?\]/gi)) {
+      const id = match[1]?.trim().toUpperCase();
+      if (!id || !/^PQ-\d{3,}$/.test(id)) {
+        fail(`${pathLabel}:${index + 1} pending questions must use [待确认: PQ-NNN]`);
+      }
+      if (!markers.has(id)) markers.set(id, index + 1);
+    }
+  }
+
+  for (let index = 0; index < lines.length; index++) {
+    const header = markdownTableCells(lines[index]);
+    if (!header) continue;
+    const idIndex = header.findIndex((cell) => /^(?:ID|#|编号)$/i.test(cell));
+    const questionIndex = header.findIndex((cell) => /^(?:问题|question)$/i.test(cell));
+    const ownerIndex = header.findIndex((cell) => /^(?:负责方|owner)$/i.test(cell));
+    const blockerIndex = header.findIndex((cell) => /^(?:是否阻断|blocking|blocker)$/i.test(cell));
+    if ([idIndex, questionIndex, ownerIndex, blockerIndex].some((value) => value < 0)) continue;
+
+    for (let rowIndex = index + 1; rowIndex < lines.length; rowIndex++) {
+      const cells = markdownTableCells(lines[rowIndex]);
+      if (!cells) break;
+      if (cells.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
+      const id = (cells[idIndex] || "").trim().toUpperCase();
+      if (!/^PQ-\d{3,}$/.test(id)) continue;
+      if (rows.has(id)) fail(`${pathLabel}:${rowIndex + 1} duplicates pending question ${id}`);
+      const question = (cells[questionIndex] || "").trim();
+      const owner = (cells[ownerIndex] || "").trim();
+      const blocker = (cells[blockerIndex] || "").trim();
+      if (!question || /^(?:-|—|待确认|TBD)$/i.test(question)) fail(`${pathLabel}:${rowIndex + 1} pending question ${id} must describe the question`);
+      if (!owner || /^(?:-|—|待确认|待定|TBD)$/i.test(owner)) fail(`${pathLabel}:${rowIndex + 1} pending question ${id} must name an owner`);
+      if (/^(?:是|yes|true|阻断|blocking)$/i.test(blocker)) fail(`${pathLabel}:${rowIndex + 1} pending question ${id} blocks PRD completion`);
+      if (!/^(?:否|no|false|不阻断|non[- ]?blocking)$/i.test(blocker)) {
+        fail(`${pathLabel}:${rowIndex + 1} pending question ${id} must declare whether it blocks completion`);
+      }
+      rows.set(id, rowIndex + 1);
+    }
+  }
+
+  for (const [id, line] of markers) {
+    if (!rows.has(id)) fail(`${pathLabel}:${line} pending question ${id} is not indexed in the pending-questions table`);
+  }
+  return { pendingQuestions: rows.size };
 }
 function jsonFile(path: string): Record<string, unknown> {
   let value: unknown;
@@ -186,7 +280,7 @@ function infrastructure(): Record<string, unknown> {
 }
 
 function implementationReport(): Record<string, unknown> {
-  const path = join(ROOT, "docs/aidlc/construction/implementation-report.md");
+  const path = join(ROOT, contextual("docs/aidlc/construction/implementation-report.md"));
   if (!existsSync(path)) fail("implementation report is missing");
   const content = text(path);
   noUnresolved(content);
@@ -202,7 +296,7 @@ function implementationReport(): Record<string, unknown> {
 }
 
 function frontendPlatform(): Record<string, unknown> {
-  const path = join(ROOT, "docs/aidlc/frontend-platform-spec.md");
+  const path = join(ROOT, frontendPlatformSpecRelativePath());
   if (!existsSync(path)) fail("frontend platform specification is missing");
   const content = text(path);
   noUnresolved(content);
@@ -239,7 +333,7 @@ function subagentEvidence(): Record<string, unknown> {
 }
 
 function templateCompleteness(): Record<string, unknown> {
-  const directory = join(ROOT, "docs/aidlc/construction/build-and-test");
+  const directory = join(ROOT, contextual("docs/aidlc/construction/build-and-test"));
   const expected = ["build-instructions.md", "unit-test-instructions.md"];
   const templates = expected.map((name) => join(directory, name));
   if (templates.some((path) => !existsSync(path))) fail("build/test template files are incomplete");
@@ -268,12 +362,10 @@ function recoveryEvidence(): Record<string, unknown> {
 }
 
 function prdCompleteness(): Record<string, unknown> {
-  const candidates = ["docs/aidlc/ideation/prd.md", "docs/aidlc/inception/prd.md", ...allFiles("docs/aidlc/product/scenarios", /prd\.md$/).map(relativePath)];
-  const paths = existing(candidates);
-  if (paths.length === 0) fail("PRD artifact is missing");
-  const path = paths[0];
+  const path = join(ROOT, "docs/aidlc/ideation/prd.md");
+  if (!existsSync(path) || !contextAllows(path)) fail("PRD artifact is missing at docs/aidlc/ideation/prd.md");
   const content = text(path);
-  noUnresolved(content);
+  const pending = validatePrdPendingQuestions(path, content);
   const required: Array<[string, RegExp]> = [
     ["overview", /概述|overview|背景/i], ["goals", /目标|goals?/i], ["features", /功能|features?/i],
     ["non-goals", /非目标|non[- ]?goals?/i], ["questions", /待确认|问题|questions?/i], ["sources", /来源|source index|sources?/i],
@@ -284,7 +376,7 @@ function prdCompleteness(): Record<string, unknown> {
   if (requirements.length < 1 || !/验收|acceptance|acceptance criteria/i.test(content)) fail("PRD lacks functional requirements or acceptance criteria");
   if (!/clarification|澄清|一致性|consistency|通过|passed/i.test(content)) fail("PRD clarification consistency evidence is missing");
   const flow = projectFiles(/business-flows?\.md$/i).length > 0 ? "passed" : "not_applicable";
-  return { status: "passed", prd_path: relativePath(path), required_sections: required.map(([name]) => name), functional_requirements: requirements.length, acceptance_criteria_complete: true, non_goals_complete: true, pending_questions_indexed: true, source_index_complete: true, clarification_consistency: "passed", business_flow_validation: flow, unresolved_blockers: 0 };
+  return { status: "passed", prd_path: relativePath(path), required_sections: required.map(([name]) => name), functional_requirements: requirements.length, acceptance_criteria_complete: true, non_goals_complete: true, pending_questions: pending.pendingQuestions, pending_questions_indexed: true, source_index_complete: true, clarification_consistency: "passed", business_flow_validation: flow, unresolved_blockers: 0 };
 }
 
 function diagramContract(): Record<string, unknown> {
@@ -1820,7 +1912,7 @@ function uiAlignment(): Record<string, unknown> {
   if (missing.length > 0) fail(`HTML Mock is missing planned pages: ${missing.join(", ")}`);
   const elements = count(html, /mock-box|<button\b|<input\b|<select\b|<table\b|<dialog\b/gi);
   if (elements < 1 || !/<style\b|\.css\b/i.test(html)) fail("HTML Mock has no verifiable components or styles");
-  const frontend = existing(["docs/aidlc/frontend-platform-spec.md"]);
+  const frontend = existing([frontendPlatformSpecRelativePath()]);
   return { status: "passed", design_mode: "html-mock", pages_checked: pages.length, elements_checked: elements, unmapped_elements: 0, extra_elements: 0, styles_aligned: true, conditional_visibility_aligned: /显示|隐藏|visible|hidden|condition/i.test(html), platform_constraints_respected: frontend.length > 0 };
 }
 

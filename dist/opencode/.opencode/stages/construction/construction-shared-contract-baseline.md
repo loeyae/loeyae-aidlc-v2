@@ -3,13 +3,14 @@ slug: shared-contract-baseline
 number: "3.4.1"
 name: 共享契约基线
 phase: construction
+axis: unit
 execution: CONDITIONAL
 lead_agent: aidlc-architect-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: [.aidlc/evidence/shared-contract-baseline/contract-baseline.json]
+produces: [.aidlc/evidence/shared-contract-baseline/{module-id}/{unit-id}/contract-baseline.json]
 sensors: [contract-baseline]
 traceability: not_applicable
 requires: [functional-design]

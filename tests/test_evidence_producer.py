@@ -29,12 +29,14 @@ def environment(project: Path, secret=TRUST_SECRET) -> dict:
     return env
 
 
-def new_project(prefix: str) -> Path:
+def new_project(prefix: str, active_stage="build-and-test") -> Path:
     project = Path(tempfile.mkdtemp(prefix=prefix, dir=str(SCRATCH_ROOT)))
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
     subprocess.run(["git", "config", "user.email", "aidlc-tests@example.invalid"], cwd=project, check=True)
     subprocess.run(["git", "config", "user.name", "AI-DLC Tests"], cwd=project, check=True)
     subprocess.run(["git", "commit", "--allow-empty", "-qm", "baseline"], cwd=project, check=True)
+    if active_stage:
+        activate_stage(project, active_stage)
     return project
 
 
@@ -101,7 +103,15 @@ def write_semantic_config(project: Path, stage: str, sensor: str, argv=None) -> 
 
 
 def evidence_path(project: Path, stage="build-and-test", sensor="build-test-evidence") -> Path:
-    return project / ".aidlc" / "evidence" / stage / f"{sensor}.json"
+    path = project / ".aidlc" / "evidence" / stage
+    state_path = project / "docs" / "aidlc" / "aidlc-state.json"
+    if state_path.exists():
+        state = json.loads(state_path.read_text())
+        if state.get("routing_model") == "module-unit-v1" and state.get("current_module"):
+            path /= state["current_module"]
+        if state.get("routing_model") == "module-unit-v1" and state.get("current_unit"):
+            path /= state["current_unit"]
+    return path / f"{sensor}.json"
 
 
 def canonical(value):
@@ -116,6 +126,44 @@ def verify_signature(payload: dict, secret=TRUST_SECRET) -> bool:
     encoded = json.dumps(canonical(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     expected = hmac.new(secret.encode(), encoded, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, payload["integrity"]["signature"])
+
+
+def sign_payload(payload: dict, secret=TRUST_SECRET) -> dict:
+    payload.pop("integrity", None)
+    encoded = json.dumps(canonical(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    key = secret.encode()
+    payload["integrity"] = {
+        "algorithm": "hmac-sha256",
+        "key_id": hashlib.sha256(key).hexdigest()[:16],
+        "signature": hmac.new(key, encoded, hashlib.sha256).hexdigest(),
+    }
+    return payload
+
+
+def activate_stage(project: Path, stage: str) -> None:
+    state_path = project / "docs" / "aidlc" / "aidlc-state.json"
+    if not state_path.exists():
+        assert run_orchestrate(project, "next", "--scope", "feature")["kind"] == "print"
+    state = json.loads(state_path.read_text())
+    graph = json.loads((REPO_ROOT / "core" / "tools" / "data" / "stage-graph.json").read_text())
+    node = next(item for item in graph["stages"] if item["slug"] == stage)
+    axis = node.get("axis", "project")
+    state["status"] = "running"
+    state["current_stage"] = stage
+    state["current_phase"] = node["phase"]
+    if axis == "project":
+        state["current_stage_instance"] = stage
+        state.pop("current_module", None)
+        state.pop("current_unit", None)
+    elif axis == "module":
+        state["current_stage_instance"] = f"{stage}@module:test-module"
+        state["current_module"] = "test-module"
+        state.pop("current_unit", None)
+    else:
+        state["current_stage_instance"] = f"{stage}@module:test-module@unit:test-unit"
+        state["current_module"] = "test-module"
+        state["current_unit"] = "test-unit"
+    state_path.write_text(json.dumps(sign_payload(state), indent=2))
 
 
 def commit_all(project: Path, message="fixture") -> None:
@@ -209,8 +257,9 @@ def test_revision_clean_staged_unstaged_and_untracked() -> None:
 def test_builtin_semantic_checker_and_arbitrary_command_rejection() -> None:
     project = new_project("aidlc-evidence-semantic-")
     try:
+        activate_stage(project, "code-review")
         write(
-            project / "docs" / "aidlc" / "construction" / "code-review.md",
+            project / "docs" / "aidlc" / "modules" / "test-module" / "construction" / "test-unit" / "code-review.md",
             "# Spec axis: passed\n# Standards axis: passed\nReviewer: quality-bot\n"
             "issues_found: 1\nissues_resolved: 1\nissues_open: 0\nReviewed src/main.ts\n",
         )
@@ -318,14 +367,31 @@ def create_declared_artifacts(project: Path, produces: list) -> None:
     for pattern in produces:
         if pattern.startswith(".aidlc/evidence/"):
             continue
-        value = pattern.replace("{unit-name}", "test-unit").replace("{unit-id}", "test-unit")
+        value = pattern.replace("{module-id}", "test-module").replace("{unit-name}", "test-unit").replace("{unit-id}", "test-unit")
+        if value.endswith("module-manifest.json"):
+            write(project / value, json.dumps({
+                "schema_version": 1,
+                "requirement_ids": ["REQ-E2E-001"],
+                "description": "REQ-E2E-001 defines verified module routing context.",
+                "modules": [{"module_id": "test-module", "name": "Test Module", "service_id": "test-service"}],
+            }))
+            continue
+        if value.endswith("unit-manifest.json"):
+            write(project / value, json.dumps({
+                "schema_version": 1,
+                "module_id": "test-module",
+                "requirement_ids": ["REQ-E2E-001"],
+                "description": "REQ-E2E-001 defines verified unit routing context.",
+                "units": [{"unit_id": "test-unit", "name": "Test Unit", "service_id": "test-service"}],
+            }))
+            continue
         if value.endswith("/"):
             value += "artifact.md"
         write(project / value, f"# Generated {value}\nREQ-E2E-001 provides substantive traceable workflow content.\n")
 
 
 def reach_stage(project: Path, target: str) -> dict:
-    assert run_orchestrate(project, "next", "--scope", "feature")["kind"] == "print"
+    assert run_orchestrate(project, "next", "--scope", "feature", "--with-prd")["kind"] == "print"
     for _ in range(20):
         directive = run_orchestrate(project, "next")
         assert directive["kind"] == "run-stage", directive
@@ -341,7 +407,7 @@ def reach_stage(project: Path, target: str) -> dict:
 
 
 def test_producer_output_passes_orchestrator() -> None:
-    project = new_project("aidlc-evidence-orchestrator-")
+    project = new_project("aidlc-evidence-orchestrator-", active_stage=None)
     try:
         directive = reach_stage(project, "prd-generation")
         assert "prd-completeness" in directive["sensors"]

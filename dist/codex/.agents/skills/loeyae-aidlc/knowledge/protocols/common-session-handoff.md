@@ -6,6 +6,12 @@
 - 用户在新 session 中继续工作（避免单 session 过长导致 token 浪费）
 - 团队协作时接手人直接从 handoff.md 获取交接信息
 
+## 机器状态边界
+
+`docs/aidlc/aidlc-state.json` 是唯一机器路由事实。handoff 只能展示成功 `report` 后派生的状态，不能自行改变 Stage、skip、approval、revision、当前模块或当前单元。恢复会话时先验证签名 state，再使用 handoff 补充人类说明。
+
+handoff 的活跃记录必须包含 directive/state 中的 `stage_instance`、`module_id` 和 `unit_id`（不适用时写 `-`）。模块/单元名称用于阅读，稳定 ID 用于恢复；两者冲突时以签名 state 和 manifest 为准。
+
 ## 机制
 
 ### 1. 完成消息中展示
@@ -29,9 +35,9 @@
 ```markdown
 ## 下一步交接
 
-| 范围 | 更新时间 | 提示词 |
-|------|----------|--------|
-| {范围名} | {ISO日期} | `使用 AI-DLC，继续 {描述}...` |
+| 范围 | Stage 实例 | Module ID | Unit ID | 更新时间 | 提示词 |
+|------|------------|-----------|---------|----------|--------|
+| {范围名} | {stage_instance} | {module_id 或 -} | {unit_id 或 -} | {ISO日期} | `使用 AI-DLC，继续 {描述}...` |
 ```
 
 **范围命名规则**：
@@ -123,9 +129,9 @@
 ```markdown
 ## 下一步交接
 
-| 范围 | 更新时间 | 提示词 |
-|------|----------|--------|
-| 订单管理系统 | 2025-01-15 | `使用 AI-DLC，继续订单管理系统的 Construction。已完成：order-service 单元，下一步：order-query 单元。请读取 handoff.md 恢复上下文。` |
+| 范围 | Stage 实例 | Module ID | Unit ID | 更新时间 | 提示词 |
+|------|------------|-----------|---------|----------|--------|
+| 订单管理系统 | functional-design@module:order@unit:order-query | order | order-query | 2025-01-15 | `使用 AI-DLC，继续订单管理系统的 Construction。已完成：order-service 单元，下一步：order-query 单元。请读取 handoff.md 恢复上下文。` |
 ```
 
 #### 多模块 + 团队协作
@@ -133,11 +139,11 @@
 ```markdown
 ## 下一步交接
 
-| 范围 | 更新时间 | 提示词 |
-|------|----------|--------|
-| 产品级 | 2025-01-15 | `使用 AI-DLC，继续模块开发。产品级 Inception 已完成，请读取 handoff.md 展示模块选择菜单。` |
-| base 模块 | 2025-01-16 | `使用 AI-DLC，继续 base 模块的 Construction。已完成：security-service 单元，下一步：common-service 单元。请读取 handoff.md 恢复上下文。` |
-| order 模块 | 2025-01-16 | `使用 AI-DLC，继续 order 模块的 Inception。已完成：需求分析，下一步：用户故事。请读取 handoff.md 恢复上下文。` |
+| 范围 | Stage 实例 | Module ID | Unit ID | 更新时间 | 提示词 |
+|------|------------|-----------|---------|----------|--------|
+| 产品级 | build-and-test | - | - | 2025-01-15 | `使用 AI-DLC，继续模块开发。产品级 Inception 已完成，请读取 handoff.md 展示模块选择菜单。` |
+| base 模块 | functional-design@module:base@unit:common-service | base | common-service | 2025-01-16 | `使用 AI-DLC，继续 base 模块的 Construction。已完成：security-service 单元，下一步：common-service 单元。请读取 handoff.md 恢复上下文。` |
+| order 模块 | user-stories@module:order | order | - | 2025-01-16 | `使用 AI-DLC，继续 order 模块的 Inception。已完成：需求分析，下一步：用户故事。请读取 handoff.md 恢复上下文。` |
 ```
 
 ## 注意事项

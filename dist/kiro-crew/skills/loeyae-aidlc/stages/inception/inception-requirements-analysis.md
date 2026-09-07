@@ -3,6 +3,7 @@ slug: requirements-analysis
 number: "2.2"
 name: 需求分析
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-product-agent
 support_agents: []
@@ -10,9 +11,8 @@ mode: inline
 scopes: [feature, enterprise, mvp, classic]
 requires: [workspace-detection]
 consumes:
-  - docs/aidlc/ideation/prd.md
   - docs/aidlc/ideation/scenario-module-mapping.md
-produces: [docs/aidlc/inception/requirements.md]
+produces: [docs/aidlc/modules/{module-id}/inception/requirements.md]
 sensors: [traceability]
 ---
 # 需求分析（自适应）
@@ -26,6 +26,7 @@ sensors: [traceability]
 ## 前置条件
 - 工作区检测必须完成
 - 逆向工程必须完成（如为存量项目）
+- `docs/aidlc/ideation/prd.md` 仅在用户选择生成且文件存在时作为增强输入；缺失 PRD 不阻断需求分析
 
 ---
 
@@ -60,10 +61,10 @@ sensors: [traceability]
 ## 步骤 1：加载逆向工程上下文（如可用）
 
 **如果是存量项目**：
-- 加载 `docs/aidlc/inception/reverse-engineering/architecture.md`
-- 加载 `docs/aidlc/inception/reverse-engineering/component-inventory.md`
-- 加载 `docs/aidlc/inception/reverse-engineering/technology-stack.md`
-- 加载 `docs/aidlc/inception/reverse-engineering/frontend-architecture.md`（如存在）
+- 加载 `docs/aidlc/modules/{module-id}/inception/reverse-engineering/architecture.md`
+- 加载 `docs/aidlc/modules/{module-id}/inception/reverse-engineering/component-inventory.md`
+- 加载 `docs/aidlc/modules/{module-id}/inception/reverse-engineering/technology-stack.md`
+- 加载 `docs/aidlc/modules/{module-id}/inception/reverse-engineering/frontend-architecture.md`（如存在）
 
 ## 步骤 2：分析用户请求（意图分析）
 
@@ -146,7 +147,7 @@ sensors: [traceability]
 4. 如有后续歧义则追问（同一角色内最多追问 1 次）
 5. 进入下一角色轮次
 
-**问题文件**：`docs/aidlc/inception/requirements/requirement-verification-questions.md`
+**问题文件**：`docs/aidlc/modules/{module-id}/inception/requirements/requirement-verification-questions.md`
 
 ---
 
@@ -245,7 +246,7 @@ sensors: [traceability]
 
 ## 步骤 11：生成需求文档
 
-创建 `docs/aidlc/inception/requirements.md`，包含：
+创建 `docs/aidlc/modules/{module-id}/inception/requirements.md`，包含：
 - 意图分析摘要
 - 业务流程图引用：显式引用 `requirements/business-flows.md`，每个 FR 标注所属流程节点
 - 状态流转判定：记录触发及状态图引用，或“不涉及状态流转”及依据
@@ -274,7 +275,7 @@ sensors: [traceability]
 # 🔍 需求分析完成
 
 > **📋 <u>**需要审查：**</u>**
-> 请检查需求文档：`docs/aidlc/inception/requirements.md`
+> 请检查需求文档：`docs/aidlc/modules/{module-id}/inception/requirements.md`
 
 > **🚀 Boss，<u>**下一步？**</u>**
 >
@@ -307,11 +308,11 @@ sensors: [traceability]
 
 | 深度 | 产出物 | 路径 |
 |------|--------|------|
-| 所有 | 需求文档 | `docs/aidlc/inception/requirements.md` |
-| 所有 | 业务流程图 | `docs/aidlc/inception/requirements/business-flows.md` |
-| 所有 | 澄清问题记录 | `docs/aidlc/inception/requirements/requirement-verification-questions.md` |
-| 条件（状态触发）/全面 | 状态模型或完整数据模型 | `docs/aidlc/inception/requirements/data-model.md` |
-| 团队模式 | 决策摘要 | `docs/aidlc/inception/requirements/decision-summary.md` |
+| 所有 | 需求文档 | `docs/aidlc/modules/{module-id}/inception/requirements.md` |
+| 所有 | 业务流程图 | `docs/aidlc/modules/{module-id}/inception/requirements/business-flows.md` |
+| 所有 | 澄清问题记录 | `docs/aidlc/modules/{module-id}/inception/requirements/requirement-verification-questions.md` |
+| 条件（状态触发）/全面 | 状态模型或完整数据模型 | `docs/aidlc/modules/{module-id}/inception/requirements/data-model.md` |
+| 团队模式 | 决策摘要 | `docs/aidlc/modules/{module-id}/inception/requirements/decision-summary.md` |
 
 ## SSOT 集成(可选)
 

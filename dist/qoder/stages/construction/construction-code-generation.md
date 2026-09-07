@@ -3,6 +3,7 @@ slug: code-generation
 number: "3.5"
 name: 代码生成
 phase: construction
+axis: unit
 execution: ALWAYS
 lead_agent: aidlc-developer-agent
 support_agents: []
@@ -11,8 +12,8 @@ scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
 produces:
   - src/
-  - docs/aidlc/construction/plans/{unit-name}-code-generation-plan.md
-  - docs/aidlc/construction/{unit-name}/implementation-summary.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md
 sensors: [doc-cascade]
 requires: [functional-design]
 scope_waived_requires: [functional-design]
@@ -87,7 +88,7 @@ scope_waived_requires: [functional-design]
 > **触发条件**：handoff.md 中 `前端类型` ∈ {跨端, 小程序, APP, 混合}（即非纯 Web）
 > **跳过条件**：纯 Web 项目或无前端的纯后端单元
 
-- [ ] 检查 `docs/aidlc/frontend-platform-spec.md` 是否存在
+- [ ] 检查 `docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md` 是否存在
 - [ ] 验证文件包含四个必填章节（平台声明 / 布局原语 / 组件映射参考 / CSS 约束）
 - [ ] 验证各章节非空（布局原语 ≥3 行、组件映射 ≥5 行、CSS 约束 ≥3 条）
 
@@ -129,7 +130,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 1. PC端 → `common-tech-frontend-pc.md`；小程序/APP → `common-tech-frontend-uniapp.md`
 2. handoff.md 的 `## UI 设计` 区块中 `UI 设计方式` 为 `figma` → `common-figma-design-standards.md`
 3. 读取项目 `.kiro/steering/structure.md`（如存在）
-4. 跨端项目 → 加载 `construction-ui-implementation-bridge.md` + 读取 `docs/aidlc/frontend-platform-spec.md`
+4. 跨端项目 → 加载 `construction-ui-implementation-bridge.md` + 读取 `docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md`
 
 **测试代码**：
 1. 加载 `common-tech-testing.md`
@@ -237,7 +238,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 
 | UI 设计方式 | 设计单元 | 来源 |
 |---------|---------|------|
-| `html-mock` | mock-box | `docs/aidlc/inception/ui-mock/{端}.html` + `{端}-page-specs.md` |
+| `html-mock` | mock-box | `docs/aidlc/modules/{module-id}/inception/ui-mock/{端}.html` + `{端}-page-specs.md` |
 | `figma` | Frame | handoff.md `产物位置` 中的唯一主文件链接；优先使用 `Figma 页面进度` 的 nodeId，缺失时通过 `get_metadata` 补齐 |
 
 **产出位置**：写入代码生成计划文档头部（与成功标准同级）
@@ -259,8 +260,8 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 ## 页面对照表
 
 > UI 设计方式: html-mock
-> Mock 来源: docs/aidlc/inception/ui-mock/{端}.html
-> page-specs: docs/aidlc/inception/ui-mock/{端}-page-specs.md
+> Mock 来源: docs/aidlc/modules/{module-id}/inception/ui-mock/{端}.html
+> page-specs: docs/aidlc/modules/{module-id}/inception/ui-mock/{端}-page-specs.md
 
 | # | Mock-box 标题 | page-specs 序号 | 关联 US | 目标代码文件 | 路由路径 | 类型 |
 |---|--------------|----------------|---------|-------------|---------|------|
@@ -306,7 +307,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
   - 服务边界和职责
 
 ## 步骤 5：创建单元计划文档
-- [ ] 将完整计划保存为 `docs/aidlc/construction/plans/{unit-name}-code-generation-plan.md`
+- [ ] 将完整计划保存为 `docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md`
 - [ ] 包含步骤编号（步骤 1、步骤 2 等）
 - [ ] 包含单元上下文和依赖
 - [ ] 包含故事可追溯性
@@ -320,7 +321,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 - [ ] 注明总步骤数和预估范围
 
 ## 步骤 7：记录审批提示
-- [ ] 在请求审批前，在 `docs/aidlc/construction/audit/{unit-name}.md` 中记录提示及时间戳
+- [ ] 在请求审批前，在 `docs/aidlc/modules/{module-id}/construction/{unit-id}/audit.md` 中记录提示及时间戳
 - [ ] 包含对完整单元代码生成计划的引用
 - [ ] 使用 ISO 8601 时间戳格式
 
@@ -330,7 +331,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 - [ ] 如用户请求修改，更新计划并重复审批流程
 
 ## 步骤 9：记录审批回复
-- [ ] 在 `docs/aidlc/construction/audit/{unit-name}.md` 中记录用户的审批回复及时间戳
+- [ ] 在 `docs/aidlc/modules/{module-id}/construction/{unit-id}/audit.md` 中记录用户的审批回复及时间戳
 - [ ] 包含用户的确切回复文本
 - [ ] 清晰标记审批状态
 
@@ -344,7 +345,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 # 第二部分：生成
 
 ## 步骤 11：加载单元代码生成计划
-- [ ] 从 `docs/aidlc/construction/plans/{unit-name}-code-generation-plan.md` 读取完整计划
+- [ ] 从 `docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md` 读取完整计划
 - [ ] 识别下一个未完成的步骤（第一个 [ ] 复选框）
 - [ ] 加载该步骤的上下文（单元、依赖、故事）
 
@@ -363,7 +364,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 - 如果当前文件不在对照表中（纯逻辑组件、工具函数等）→ 跳过本规则
 
 **2. 加载 Mock 内容**：
-- 读取 `docs/aidlc/inception/ui-mock/{端}.html` 中对应序号的 mock-box 完整内容
+- 读取 `docs/aidlc/modules/{module-id}/inception/ui-mock/{端}.html` 中对应序号的 mock-box 完整内容
 - 提取以下信息作为生成约束：
   - 页面布局结构（各区域从上到下的顺序）
   - 表单字段列表（名称、类型、必填标记）
@@ -410,7 +411,7 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
   - **如果文件不存在**：创建新文件
 - [ ] 写入正确位置：
   - **应用代码**：按项目结构写入工作区根目录
-  - **文档**：`docs/aidlc/construction/{unit-name}/code/`（仅 markdown）
+  - **文档**：`docs/aidlc/modules/{module-id}/construction/{unit-id}/code/`（仅 markdown）
   - **构建/配置文件**：工作区根目录
 - [ ] 遵循单元故事需求
 - [ ] 尊重依赖和接口
@@ -427,7 +428,7 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 - [ ] 如果所有步骤完成，进入生成微型摘要
 
 ## 步骤 14.5：生成单元级微型摘要
-- [ ] 按 `construction-implementation-report.md` 的格式，生成 `docs/aidlc/construction/{unit-name}/implementation-summary.md`
+- [ ] 按 `construction-implementation-report.md` 的格式，生成 `docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md`
 - [ ] 内容必须包含：变更清单（文件路径+操作类型）、测试结果、规范合规状态
 - [ ] 测试结果必须来自实际执行的命令输出
 - [ ] 框架规范对照结果从步骤 5（代码审查）的对照结果汇总
@@ -468,7 +469,7 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 > **📋 <u>**需要审查：**</u>**
 > 请检查生成的代码：
 > - **应用代码**：`[实际工作区路径]`
-> - **文档**：`docs/aidlc/construction/[unit-name]/code/`
+> - **文档**：`docs/aidlc/modules/{module-id}/construction/{unit-id}/code/`
 
 
 

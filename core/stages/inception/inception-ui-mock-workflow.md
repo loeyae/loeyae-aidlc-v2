@@ -1,8 +1,9 @@
 ---
 slug: ui-mock-workflow
-number: "2.5.3"
+number: "2.5.4"
 name: Mock 工作流
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-design-agent
 support_agents: []
@@ -12,8 +13,8 @@ consumes: []
 produces: []
 sensors: []
 completion_contract: instruction_only
-requires: [ui-mock]
-condition: has_ui_requirements
+requires: [ui-page-planning]
+condition: ui_mode_html_mock
 ---
 inclusion: manual
 ---
@@ -48,7 +49,7 @@ inclusion: manual
 
 ### 输入
 
-- 已批准的 `docs/aidlc/inception/ui-design/page-plan.md` 或模块级等价路径
+- 已批准的 `docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md` 或模块级等价路径
 - 现有代码（局部改动页面必须读取）
 - 调用方已确定的视觉来源
 

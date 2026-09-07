@@ -9,6 +9,21 @@
 3. 禁止 TODO、FIXME、空实现和未经验证的完成声明。
 4. 每步先由 `orchestrate report` 更新签名机器状态 `docs/aidlc/aidlc-state.json`，再按 `common-step-completion-protocol.md` 派生更新 `docs/aidlc/handoff.md`。
 5. 下一步说明必须附可直接复制的执行提示词。
+6. `orchestrate next` 返回的 `stage_instance`、`axis`、`module_id`、`unit_id`、`artifact_root`、已解析 `consumes`/`produces` 和 `evidence_root` 是当前执行的机器事实；正文中的抽象路径示例不得覆盖 directive。
+
+## 声明式执行轴与顺序
+
+每个 Stage 在图谱中声明一个执行轴：
+
+- `project`：产品级 Ideation、项目聚合构建测试、实施报告和 Operations，只执行一个实例。
+- `module`：Inception 按 `docs/aidlc/ideation/module-manifest.json` 中的每个 `module_id` 独立执行。
+- `unit`：Construction 按各模块 `inception/unit-manifest.json` 中的每个 `unit_id` 独立执行。
+
+机器顺序固定为：项目级 Ideation → 模块 A 完整 Inception → 模块 B 完整 Inception → 模块 A/单元 1 完整 Construction → 模块 A/单元 2 完整 Construction → 模块 B/单元 1 完整 Construction → 项目级聚合与 Operations。连续的 module/unit 轴按上下文优先展开，禁止同一 Stage 扫过所有模块后再进入下一 Stage。
+
+实例 ID 约定：项目级为 `<stage-slug>`；模块级为 `<stage-slug>@module:<module-id>`；单元级为 `<stage-slug>@module:<module-id>@unit:<unit-id>`。`docs/aidlc/aidlc-state.json` 中的 instance 数组和当前上下文负责真实路由，逻辑级 `completed_stages`/`skipped_stages` 仅作兼容摘要。
+
+模块或单元上下文非空时，禁止把 Inception/Construction 产物写回旧的全局目录。新工作流即使只有一个模块，也必须在 module manifest 中声明该模块，并为其声明至少一个工作单元。
 
 ## 审批模式
 
@@ -107,30 +122,38 @@
 
 | # | 步骤 | 条件 | 审批 | 加载文件 |
 |---|------|------|------|----------|
-| I1 | 工作区检测 | 始终 | 🟢 | `inception-workspace-detection.md` + `common-complexity-assessment.md` |
-| I2 | 产品级 Inception | 多模块且尚未完成 | 🔴 | `product-inception.md` + `product-module-division.md` + `product-contracts.md` |
+| I1 | 工作区检测与架构 choice | 始终；完整 scope 必须签名选择 `single-module` 或 `multi-module`，快速 scope 不要求 | 🟢 | `inception-workspace-detection.md` + `common-complexity-assessment.md` |
+| I2a | 产品级 Inception | 签名架构 choice 为 `multi-module` | 🔴 | `product-inception.md` |
+| I2b | 模块清单 | 完整 scope 始终执行；单模块只登记唯一模块，不做模块归属审批 | 🔴 | `product-module-division.md` |
+| I2c | 产品契约 | 多模块，或存在跨进程、异步事件、前后端接口、外部系统交换等事实 | 🔴 | `product-contracts.md` |
 | I3 | 场景分析与模块映射 | 始终 | 🔴 | `product-inception.md` + `product-scenario-module-mapping.md` |
 | I4 | 逆向工程 | 存量项目且无有效逆向产物 | 🟡 | `inception-reverse-engineering.md` |
 | I5 | 需求分析 | 标准/完整流程 | 🔴 | `inception-requirements-analysis.md` |
 | I6 | 需求审查 | I5 完成 | 🔴 | `inception-cross-validation.md`（a/b） |
 | I7 | 用户故事 | 已生成需求文档 | 🔴 | `inception-user-stories.md` |
 | I8 | 用户故事审查 | I7 完成 | 🔴 | `inception-cross-validation.md`（c/d） |
-| I9 | UI 设计 | 用户选择且存在界面需求 | 🔴 | `inception-ui-mock.md`（路由入口）→ Figma 模式加载 `inception-ui-figma.md` |
+| I9 | UI 设计 | 存在界面需求时，由用户在 `html-mock`、`figma-create`、`figma-existing`、`skip` 中选择一个运行时分支 | 🔴 | `inception-ui-mock.md`（choice router）→ 仅加载所选 HTML/Figma 分支 |
 | I10 | UI 设计审查 | I9 已执行 | 🔴 | `inception-cross-validation.md`（e） |
-| I15 | PRD 生成 | 用户选择产出 PRD | 🔴 | `product-prd-generation.md` |
+| I15 | PRD 生成 | 初始化完整 scope 时用户显式选择 `--with-prd`，或独立提出生成请求 | 🔴 | `product-prd-generation.md` |
 | I16 | PRD 审查 | I15 已执行且用户要求审查 | 🔴 | `inception-cross-validation.md`（g） |
 | I11 | 工作流规划 | 标准/完整流程，且（未选择产出 PRD 或 I16 已通过） | 🔴 | `inception-workflow-planning.md` |
-| I12 | 应用设计 | 新接口、跨模块/服务、多端、复杂业务规则，或契约/共享配置/迁移/一致性/外部故障行为变化 | 🟡 | `inception-application-design.md` |
+| I12 | 应用设计 | `workflow-plan.md` 决策为 `execute`；旧计划才按新接口、跨模块/服务、多端、复杂业务规则等证据推断 | 🟡 | `inception-application-design.md` |
 | I13 | 测试用例派生 | 产品用例具备 I7+I12；或技术用例具备已批准风险来源与可执行锚点 | 🟡 | `test-case-derivation.md` |
-| I14 | 单元生成 | 需拆分多个工作单元 | 🟡 | `inception-units-generation.md` |
+| I14 | 单元生成与单元清单 | `workflow-plan.md` 决策为 `execute`；多单元、跨服务协调或功能设计需要单元定义时执行 | 🟡 | `inception-units-generation.md` |
 
-业务产物门禁完成后，无论此前是否提及 PRD，都必须先询问用户是否产出 PRD，并将“需要 / 不需要”写入 handoff.md。该决策检查点位于 I15 之外：选择“需要”才执行 I15/I16；选择“不需要”则记录跳过依据并直接继续 I11，不创建 PRD 文件或占位目录。
+完整 scope 在 `workspace-detection` directive 中必须向用户展示 `single-module / multi-module`，并以 `report --stage workspace-detection --result completed --instruction-ack workspace-detection --user-input <choice>` 写入签名 history。单模块会把 `product-inception` 记录为 `condition_skipped`，但仍执行精简模块清单和 I3；`product-contracts` 仅在 `has_product_contract_needs=true` 时生成。快速 scope 不包含这些产品级 Stage，因此不得强迫架构选择。旧签名工作流缺少该 choice 时才根据模块清单或已进入的产品分支保守推断，handoff 不是机器路由来源。
 
-I15 采用独立生成流程（`product-prd-generation.md`），支持 SSOT 优先检索和已有 Inception 产物增强，无硬性前置步骤依赖。I16 为可选审查步骤：用户要求审查时执行。
+完整 scope 初始化时，编排方必须把 PRD 作为明确选项呈现给用户。只有用户选择生成时才传入 `--with-prd`；未选择时签名状态记录空的 `selected_optional_stages`，`prd-generation` 不进入可执行实例，不创建 PRD 文件或占位目录，也不阻断后续 Inception。
 
-I15/I16 的执行时机为业务产物门禁完成后、I11 之前，不按编号顺序执行。业务产物门禁完成 = I8 已通过，且执行了 I9 时 I10 也已通过；I9 不适用时记录不适用依据。
+I9 与 PRD 的初始化选择不同：当 `ui-mock` directive 返回 `choice_required: true` 时，编排方必须展示其 `choices`，并把唯一选择通过 `report --stage ui-mock --result completed --instruction-ack ui-mock --user-input <choice>` 写入签名 history。`skip` 不创建 UI 产物；`html-mock` 与两个 Figma choice 只进入各自互斥分支。后续条件只读取签名 history，`handoff.md` 只能展示派生结果。
 
-PRD 也可独立于 Inception 流程执行：用户直接要求"生成 PRD"时，通过意图路由进入 `product-prd-generation.md`，无需前置 I5-I10。
+I11 的 `workflow-plan.md` 必须为 `application-design`、`units-generation`、`functional-design` 和 `operations` 分别写入 `execute / skip` 与 evidence。引擎优先使用该机器决策表；同一项目的多模块计划中任一模块明确 `execute` 即执行项目级 Operations，全部明确 `skip` 才跳过。旧工作流缺少对应行时才按保守项目证据推断。
+
+I14 执行时，新签名工作流必须在每个 `unit-manifest.json` 条目中声明 `conditional_stages`，把功能设计、NFR、基础设施、共享契约、子代理、框架合规和 UI Bridge 的适用性限制到当前单元；空数组表示这些条件 Stage 对该单元均不适用。数组值由 I14 的需求/故事/依赖/计划事实推导，不是用户交互 choice。旧签名清单缺字段时继续按模块级事实保守执行，避免升级时误跳过质量路径。
+
+I15 的编排内路径在产品契约完成或由 condition=false 签名跳过后执行；模块清单是硬输入，产品契约只在已生成时作为增强输入，继续使用原有 produces 和 `prd-completeness` 准出门禁。选择在工作流初始化时写入签名状态，活动工作流中不得通过 handoff、聊天确认或手工改 state 增删该选择。I16 仍为可选审查步骤：用户要求审查时执行。
+
+PRD 也可独立于 Inception 流程执行：用户直接要求“生成 PRD”时，通过 `aidlc-prd-synthesis` 加载 `product-prd-generation.md`，无需启动工作流或具备 I5-I10；已有产品契约和 Inception 产物仅作为增强输入。
 
 快速通道的最小需求确认和跳过条件以 `common-complexity-assessment.md` 为准。多模块的模块级产物路径以 `common-directory-structure.md` 为准。
 
@@ -165,11 +188,12 @@ C5 条件前置：存在 `contract` 类型跨单元依赖时，先加载并完�
 
 | # | 步骤 | 条件 | 审批 | 加载文件 |
 |---|------|------|------|----------|
-| O1 | 部署需求与目标确认 | 独立服务、需部署或用户明确要求 | 🔴 | `operations-operations.md` |
-| O2 | 交付配置生成 | O1 完成 | 🟡 | `operations-operations.md` + `operations-templates.md`（按需） |
+| O1 | 部署需求与目标确认 | `workflow-plan.md` 的 `operations` 决策为 `execute`，或旧计划有独立服务/部署目标等事实 | 🔴 | `operations-operations.md` |
+| O2 | 交付配置生成 | O1 完成；仅生成选定目标配置 | 🟡 | `operations-operations.md`；模板只按需读取 |
 | O3 | 配置验证与部署文档 | O2 完成 | 🔴 | `operations-operations.md` + `common-quality-gates.md` |
+| O4 | 可复用模板归档 | Operations 产物明确要求生成、保留或归档模板 | 🟡 | `operations-templates.md` |
 
-纯库、纯本地工具或用户明确不需要部署时跳过 Operations，并在 `handoff.md` 记录原因。
+纯库、纯本地工具或计划明确无需部署时，引擎在签名 state/history 中记录 Operations 的 `condition_skipped`，不创建 `approval: block` challenge。`handoff.md` 只能派生展示该结果，不能作为路由依据。普通 Docker/Kubernetes 目标配置属于 O2，不自动触发 O4 的模板目录门禁。
 
 ## Change Request 路由
 
@@ -189,7 +213,7 @@ C5 条件前置：存在 `contract` 类型跨单元依赖时，先加载并完�
 
 | 范围 | 完成条件 |
 |------|----------|
-| Inception | 必需产物经用户确认，交叉审查通过，执行/跳过决定写入 handoff.md；选择产出 PRD 时 I16 已通过且 PRD 状态不低于 `consistency-checked` |
-| Construction | TDD、适用审查、实际构建和测试均有证据且通过；触发 C7 时全局审查通过 |
+| Inception | `module-manifest.json` 中每个模块的必需实例均已完成/条件跳过；I14 执行时各模块 `unit-manifest.json` 合法，I14 跳过时路由到确定性的 `default` 单元；适用产物经确认和交叉审查 |
+| Construction | 每个 module/unit 实例均完成设计、TDD、代码生成和单元审查；随后项目级实际构建测试与实施报告有证据且通过 |
 | Operations | 仅生成选定部署目标需要的文件，配置语法/静态验证通过，部署说明可执行 |
 | 会话连续性 | handoff.md、审计与下一步交接一致，可在三平台恢复 |

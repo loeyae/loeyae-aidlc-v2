@@ -3,6 +3,7 @@ slug: requirement-clarification
 number: "2.2.1"
 name: 需求澄清
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-product-agent
 support_agents: []
@@ -96,7 +97,7 @@ Q3: [核心问题3]（依赖 Q2 答案）
 
 ### 步骤 3：记录澄清结果
 
-将澄清结果记录到 `docs/aidlc/inception/requirements/requirement-clarification.md`：
+将澄清结果记录到 `docs/aidlc/modules/{module-id}/inception/requirements/requirement-clarification.md`：
 
 ```markdown
 # 需求澄清记录

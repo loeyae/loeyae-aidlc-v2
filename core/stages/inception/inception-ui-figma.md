@@ -1,8 +1,9 @@
 ---
 slug: ui-figma
-number: "2.5.1"
+number: "2.5.2"
 name: Figma UI 设计
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-design-agent
 support_agents: []
@@ -12,8 +13,8 @@ consumes: []
 produces: []
 sensors: []
 completion_contract: instruction_only
-requires: [ui-mock]
-condition: has_ui_requirements
+requires: [ui-page-planning]
+condition: ui_mode_figma
 ---
 
 ## 目的

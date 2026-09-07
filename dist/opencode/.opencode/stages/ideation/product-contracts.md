@@ -8,6 +8,7 @@ scopes: [feature, enterprise, mvp, classic]
 requires: [module-division]
 consumes: [docs/aidlc/ideation/module-division.md]
 produces: [docs/aidlc/ideation/product-contracts.md]
+condition: has_product_contract_needs
 ---
 
 # 产品级契约索引

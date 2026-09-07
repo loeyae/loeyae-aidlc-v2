@@ -3,6 +3,7 @@ slug: code-review
 number: "3.6"
 name: 代码审查
 phase: construction
+axis: unit
 execution: ALWAYS
 lead_agent: aidlc-quality-agent
 support_agents: []
@@ -12,10 +13,10 @@ consumes:
   - src/
   - src/test/
 produces:
-  - docs/aidlc/construction/code-review.md
-  - docs/aidlc/construction/audit/{unit-id}.md
-  - .aidlc/evidence/code-review/review-evidence.json
-  - .aidlc/evidence/code-review/ui-design-alignment.json
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/audit.md
+  - .aidlc/evidence/code-review/{module-id}/{unit-id}/review-evidence.json
+  - .aidlc/evidence/code-review/{module-id}/{unit-id}/ui-design-alignment.json
 sensors: [reviewer-required, review-evidence, ui-design-alignment]
 requires: [code-generation, tdd]
 ---
@@ -240,7 +241,7 @@ requires: [code-generation, tdd]
 
 ### UI 设计合规（条件：该单元涉及前端页面且 handoff.md `UI 设计方式` 非"跳过"）
 
-比对基准按 `UI 设计方式` 确定：`html-mock` 对照 `docs/aidlc/inception/ui-mock/` 中的 mock-box；`figma` 对照页面对照表中 nodeId 对应的 Frame（通过 `get_design_context` / `get_screenshot` 获取）。
+比对基准按 `UI 设计方式` 确定：`html-mock` 对照 `docs/aidlc/modules/{module-id}/inception/ui-mock/` 中的 mock-box；`figma` 对照页面对照表中 nodeId 对应的 Frame（通过 `get_design_context` / `get_screenshot` 获取）。
 
 - [ ] 页面结构与设计基准的布局一致
 - [ ] 表单字段（名称、类型、必填标记）与设计基准定义一致
@@ -421,7 +422,7 @@ requires: [code-generation, tdd]
 - 测试失败：修复实现，不是改测试期望
 - 用例点 blocked：回 I13 待产品决策清单，不得绕过
 
-**对账产物**：生成 `docs/aidlc/construction/audit/test-case-reconciliation.md`，列出每个 UC-D 的覆盖状态（已覆盖/缺测试/测试失败/blocked），作为 Construction 完成证据。
+**对账产物**：生成 `docs/aidlc/modules/{module-id}/construction/{unit-id}/audit/test-case-reconciliation.md`，列出每个 UC-D 的覆盖状态（已覆盖/缺测试/测试失败/blocked），作为 Construction 完成证据。
 
 **机器校验辅助**（推荐实施，降低纯纪律门禁风险）：
 
@@ -433,7 +434,7 @@ requires: [code-generation, tdd]
 # 用途：对比 _index.md 中的 UC-D 清单与测试文件中的标记，输出差集
 
 # 1. 从 _index.md 提取所有 UC-D 编号
-INDEX_FILE="docs/aidlc/inception/application-design/test-cases/_index.md"
+INDEX_FILE="docs/aidlc/modules/{module-id}/inception/application-design/test-cases/_index.md"
 EXPECTED=$(grep -oP 'UC-D-\d+' "$INDEX_FILE" | sort -u)
 
 # 2. 从测试文件中提取所有已标记的 UC-D 编号
@@ -515,7 +516,7 @@ echo "已覆盖: $HIT / $TOTAL"
 
 ### 审查记录
 
-审查结果记录到单元审计文件 `docs/aidlc/construction/audit/{unit-id}.md`（每单元一份，包含 Spec Axis / Standards Axis / 修复与复审 / 验证证据索引四个章节）：
+审查结果记录到单元审计文件 `docs/aidlc/modules/{module-id}/construction/{unit-id}/audit/{unit-id}.md`（每单元一份，包含 Spec Axis / Standards Axis / 修复与复审 / 验证证据索引四个章节）：
 
 ```markdown
 ## 代码审查 — 单元 X

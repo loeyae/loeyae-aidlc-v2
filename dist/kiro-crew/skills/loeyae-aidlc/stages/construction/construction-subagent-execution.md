@@ -3,13 +3,14 @@ slug: subagent-execution
 number: "3.5.2"
 name: 子代理执行
 phase: construction
+axis: unit
 execution: CONDITIONAL
 lead_agent: aidlc-developer-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: [.aidlc/evidence/subagent-execution/subagent-evidence.json]
+produces: [.aidlc/evidence/subagent-execution/{module-id}/{unit-id}/subagent-evidence.json]
 sensors: [subagent-evidence]
 traceability: not_applicable
 requires: [code-generation]

@@ -12,6 +12,7 @@ consumes: []
 produces: []
 sensors: []
 completion_contract: instruction_only
+choices: [single-module, multi-module]
 ---
 # 工作区检测
 
@@ -27,7 +28,7 @@ completion_contract: instruction_only
   - **新增功能** → 进入新增功能追加流程（`core-workflow.md` 的"新增功能追加流程"）
   
   **恢复逻辑（继续开发）**：
-  - 检查 handoff.md 中的"架构模式"字段
+  - 优先读取签名 history 中 `workspace-detection` 的 `single-module` / `multi-module` choice；旧工作流缺少签名 choice 时才把 handoff.md 的“架构模式”作为兼容展示信息，并由已有模块清单或已执行分支保守推断
   - **多模块模式**：进入步骤 1.2（多模块恢复）
   - **单模块模式**：继续检查协作模式
     - 检查 handoff.md 中是否标记"协作模式：团队协作"
@@ -159,20 +160,19 @@ completion_contract: instruction_only
 **触发条件**：前端代码扫描检测到非纯 Web 技术栈（即技术栈非 Vue3+ElementPlus / React+AntDesign 等纯浏览器方案），如检测到 Taro、React Native、UniApp（跨端模式）、Flutter、duxapp 等跨端框架。
 
 **检查流程**：
-1. 检查 `docs/aidlc/frontend-platform-spec.md` 是否存在
-2. **存在** → 记录到 handoff.md：`前端平台规范: 已就绪`
+1. 检查当前模块应用设计中是否已有前端平台决策；旧 `docs/aidlc/frontend-platform-spec.md` 仅作为 legacy-global 只读参考
+2. **已有决策或 legacy 参考** → 记录到 handoff.md：`前端平台事实: 已收集`
 3. **不存在** → 在步骤 5 的完成消息中追加提示：
 
 ```markdown
-• ⚠️ **前端平台规范缺失**：检测到跨端前端项目（{框架名}），但未找到 `docs/aidlc/frontend-platform-spec.md`。
-  此文档用于约束 UI 设计 → 代码的翻译（组件选择、CSS 限制等），Construction 阶段代码生成前会强制检查。
-  建议在 Inception 的应用设计阶段创建，或现在就建立：
-  A) 我来基于 package.json 和组件库文档生成初稿，你审核
-  B) 稍后在应用设计阶段再创建
+• ⚠️ **前端平台事实缺失**：检测到跨端前端项目（{框架名}），但当前模块尚未记录平台、组件库和样式限制。
+  Construction 会为每个单元生成隔离的 `frontend-platform-spec.md`；请先补充模块级平台决策：
+  A) 我来基于 package.json 和组件库文档整理平台事实，你审核
+  B) 稍后在应用设计阶段补充
 ```
 
-4. 用户选择 A → 按 `construction-ui-implementation-bridge.md` 第一部分的创建引导流程执行
-5. 用户选择 B → 记录到 handoff.md：`前端平台规范: 待创建（应用设计阶段）`，继续后续流程
+4. 用户选择 A → 收集平台事实并写入当前模块的 workspace/application-design 输入，不创建新工作流的旧全局规范路径
+5. 用户选择 B → 记录到 handoff.md：`前端平台事实: 待补充（应用设计阶段）`，继续后续流程
 
 **纯 Web 项目**：跳过此检查，不需要 frontend-platform-spec.md。
 
@@ -204,7 +204,7 @@ completion_contract: instruction_only
 **如果工作区为空（无现有代码）**：
 - 设置标志：`brownfield = false`
 - **多模块模式**：下一阶段为产品级 Inception
-- **单模块模式**：下一阶段为需求分析
+- **单模块模式**：下一阶段为模块清单登记（不执行产品级 Inception 或模块归属审批），随后进入场景边界确认与需求分析
 
 **如果工作区有现有代码**：
 - 设置标志：`brownfield = true`
@@ -213,9 +213,9 @@ completion_contract: instruction_only
   - **如果产品级产出物存在**：进入模块选择菜单
   - **如果无产品级产出物**：下一阶段为产品级 Inception
 - **单模块模式**：
-  - 检查 `docs/aidlc/inception/reverse-engineering/` 中是否存在逆向工程产物
-  - **如果逆向工程产物存在**：加载它们，跳到需求分析
-  - **如果无逆向工程产物**：下一阶段为逆向工程
+  - 登记唯一模块的 `module-manifest.json`，不执行产品级 Inception 或模块归属审批
+  - **如果逆向工程产物存在**：加载它们，进入场景边界确认后继续需求分析
+  - **如果无逆向工程产物**：完成模块清单和场景边界确认后进入逆向工程
 
 ## 步骤 4：创建初始状态文件
 
@@ -230,13 +230,13 @@ B) 团队协作模式 — 多人按角色分工协作
 [回答]:
 ```
 
-**询问架构模式**：
+**询问架构模式（完整 scope 的机器路由 choice）**：
 
 ```markdown
 **请选择架构模式：**
 
-A) 单模块模式 — 产品规模较小，一个模块即可覆盖
-B) 多模块模式 — 产品规模较大，需要按业务域拆分为多个独立模块并行开发
+A) 单模块模式 — 产品规模较小，一个模块即可覆盖（机器值：`single-module`）
+B) 多模块模式 — 产品规模较大，需要按业务域拆分为多个独立模块并行开发（机器值：`multi-module`）
 
 **选择建议**：
 - 如果需求可以在 1-2 周内由一个人完成 → 单模块
@@ -245,6 +245,15 @@ B) 多模块模式 — 产品规模较大，需要按业务域拆分为多个独
 
 [回答]:
 ```
+
+`feature`、`enterprise`、`mvp`、`classic` 必须把唯一选择通过以下报告写入签名 history；快速 scope 不要求该 choice：
+
+```bash
+loeyae-aidlc orchestrate report --stage workspace-detection --result completed \
+  --instruction-ack workspace-detection --user-input single-module
+```
+
+协作模式继续记录在 handoff 中，但不改变 Stage 集合；架构模式不得只写 handoff 或依靠聊天记忆改变机器路由。
 
 创建 `docs/aidlc/handoff.md`：
 
@@ -298,8 +307,7 @@ B) 多模块模式 — 产品规模较大，需要按业务域拆分为多个独
 - 自动进入下一阶段：
   - **多模块模式（无产品级产出物）**：产品级 Inception
   - **多模块模式（有产品级产出物）**：模块选择菜单
-  - **单模块 + 存量项目**：逆向工程（如无现有产物）或需求分析（如产物已存在）
-  - **单模块 + 全新项目**：需求分析
+  - **单模块**：模块清单登记（无产品级 Inception/模块归属审批）→ 场景边界确认 → 逆向工程（存量且需要时）或需求分析
 
 ---
 

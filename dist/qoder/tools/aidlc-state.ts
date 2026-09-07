@@ -26,6 +26,9 @@ export interface HistoryEntry {
   stage: string;
   result: string;
   timestamp: string;
+  instance_id?: string;
+  module_id?: string;
+  unit_id?: string;
   user_input?: string;
 }
 
@@ -45,6 +48,13 @@ export interface WorkflowState extends Record<string, unknown> {
   history: HistoryEntry[];
   created_at: string;
   updated_at: string;
+  routing_model?: "module-unit-v1";
+  current_stage_instance?: string;
+  current_module?: string;
+  current_unit?: string;
+  completed_stage_instances?: string[];
+  skipped_stage_instances?: string[];
+  selected_optional_stages?: string[];
   integrity?: Record<string, unknown>;
 }
 
@@ -52,6 +62,7 @@ const LOCK_WAIT_MS = 3000;
 const LOCK_STALE_MS = 30000;
 const VALID_STATUS = new Set(["running", "parked", "done"]);
 const VALID_SCOPES = new Set(["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor", "poc"]);
+const PRD_ELIGIBLE_SCOPES = new Set(["feature", "enterprise", "mvp", "classic"]);
 const ALLOWED_KEYS = new Set([
   "schema_version",
   "version",
@@ -68,6 +79,13 @@ const ALLOWED_KEYS = new Set([
   "history",
   "created_at",
   "updated_at",
+  "routing_model",
+  "current_stage_instance",
+  "current_module",
+  "current_unit",
+  "completed_stage_instances",
+  "skipped_stage_instances",
+  "selected_optional_stages",
   "integrity",
 ]);
 
@@ -98,13 +116,16 @@ function validateHistory(value: unknown): HistoryEntry[] {
   if (!Array.isArray(value)) throw new Error("history must be an array");
   return value.map((item, index) => {
     if (!isRecord(item)) throw new Error(`history[${index}] must be an object`);
-    const allowed = new Set(["stage", "result", "timestamp", "user_input"]);
+    const allowed = new Set(["stage", "result", "timestamp", "instance_id", "module_id", "unit_id", "user_input"]);
     for (const key of Object.keys(item)) if (!allowed.has(key)) throw new Error(`history[${index}] has unknown field ${key}`);
     const entry: HistoryEntry = {
       stage: nonEmptyString(item.stage, `history[${index}].stage`),
       result: nonEmptyString(item.result, `history[${index}].result`),
       timestamp: isoDate(item.timestamp, `history[${index}].timestamp`),
     };
+    if (item.instance_id !== undefined) entry.instance_id = nonEmptyString(item.instance_id, `history[${index}].instance_id`);
+    if (item.module_id !== undefined) entry.module_id = nonEmptyString(item.module_id, `history[${index}].module_id`);
+    if (item.unit_id !== undefined) entry.unit_id = nonEmptyString(item.unit_id, `history[${index}].unit_id`);
     if (item.user_input !== undefined) entry.user_input = nonEmptyString(item.user_input, `history[${index}].user_input`);
     return entry;
   });
@@ -144,6 +165,31 @@ export function validateWorkflowState(value: unknown, requireIntegrity = true): 
     created_at: isoDate(value.created_at, "state.created_at"),
     updated_at: isoDate(value.updated_at, "state.updated_at"),
   } as WorkflowState;
+  if (value.routing_model !== undefined && value.routing_model !== "module-unit-v1") {
+    throw new Error(`invalid state.routing_model: ${String(value.routing_model)}`);
+  }
+  if (value.current_stage_instance !== undefined) state.current_stage_instance = nonEmptyString(value.current_stage_instance, "state.current_stage_instance");
+  if (value.current_module !== undefined) state.current_module = nonEmptyString(value.current_module, "state.current_module");
+  if (value.current_unit !== undefined) state.current_unit = nonEmptyString(value.current_unit, "state.current_unit");
+  if (value.completed_stage_instances !== undefined) state.completed_stage_instances = stringArray(value.completed_stage_instances, "state.completed_stage_instances");
+  if (value.skipped_stage_instances !== undefined) state.skipped_stage_instances = stringArray(value.skipped_stage_instances, "state.skipped_stage_instances");
+  if (value.selected_optional_stages !== undefined) {
+    state.selected_optional_stages = stringArray(value.selected_optional_stages, "state.selected_optional_stages");
+    for (const stage of state.selected_optional_stages) {
+      if (stage !== "prd-generation") throw new Error(`invalid selected optional stage: ${stage}`);
+      if (!PRD_ELIGIBLE_SCOPES.has(scope)) throw new Error(`optional stage ${stage} is not available for scope ${scope}`);
+    }
+  }
+  if (state.current_unit && !state.current_module) throw new Error("state.current_unit requires state.current_module");
+  if (state.routing_model === "module-unit-v1") {
+    if (!state.completed_stage_instances || !state.skipped_stage_instances) {
+      throw new Error("module-unit-v1 state requires completed_stage_instances and skipped_stage_instances");
+    }
+    if (state.current_stage && !state.current_stage_instance) throw new Error("active module-unit-v1 state requires current_stage_instance");
+    if (!state.current_stage && (state.current_stage_instance || state.current_module || state.current_unit)) {
+      throw new Error("inactive module-unit-v1 state cannot retain execution context");
+    }
+  }
   if (requireIntegrity) {
     const integrityError = verifyRecord(state);
     if (integrityError) throw new Error(`state integrity failed: ${integrityError}`);
@@ -179,8 +225,17 @@ export function statePath(projectRoot: string): string {
   return resolve(projectRoot, "docs", "aidlc", "aidlc-state.json");
 }
 
-export function createInitialState(scope: string, version = "2.2.0", workflowId: string = randomUUID()): WorkflowState {
+export function createInitialState(
+  scope: string,
+  version = "2.2.0",
+  workflowId: string = randomUUID(),
+  selectedOptionalStages: string[] = [],
+): WorkflowState {
   if (!VALID_SCOPES.has(scope)) throw new Error(`invalid workflow scope: ${scope}`);
+  if (selectedOptionalStages.some((stage) => stage !== "prd-generation")) throw new Error("invalid selected optional stage");
+  if (selectedOptionalStages.length > 0 && !PRD_ELIGIBLE_SCOPES.has(scope)) {
+    throw new Error(`optional PRD stage is not available for scope ${scope}`);
+  }
   if (!workflowId) throw new Error("workflow ID must be non-empty");
   const now = new Date().toISOString();
   return {
@@ -195,6 +250,10 @@ export function createInitialState(scope: string, version = "2.2.0", workflowId:
     status: "running",
     completed_stages: [],
     skipped_stages: [],
+    routing_model: "module-unit-v1",
+    completed_stage_instances: [],
+    skipped_stage_instances: [],
+    selected_optional_stages: [...selectedOptionalStages],
     approval_challenges: {},
     history: [],
     created_at: now,

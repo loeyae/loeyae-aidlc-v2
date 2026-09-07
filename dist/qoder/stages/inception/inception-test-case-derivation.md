@@ -3,14 +3,17 @@ slug: test-case-derivation
 number: "2.8.1"
 name: 测试用例派生
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-product-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 requires: [application-design]
-consumes: [docs/aidlc/inception/application-design.md, docs/aidlc/inception/user-stories.md]
-produces: [docs/aidlc/inception/application-design/test-cases/]
+consumes:
+  - docs/aidlc/modules/{module-id}/inception/application-design.md
+  - docs/aidlc/modules/{module-id}/inception/user-stories.md
+produces: [docs/aidlc/modules/{module-id}/inception/application-design/test-cases/]
 sensors: []
 condition: has_test_case_sources
 approval: notify
@@ -26,7 +29,7 @@ approval: notify
 2. 对每个来源派生至少一个可执行 UC-D；每个用例必须包含 `id`、`source_ref`、`scenario_ref`、`type`、`status`、`service_ids` 和覆盖映射。
 3. 产品 Gherkin 必须原样保留，不得用技术用例引入未经批准的业务语义。
 4. 无法执行的用例标记 `blocked` 并记录待决策项，不得伪造通过。
-5. 在 `docs/aidlc/inception/application-design/test-cases/` 生成 `_index.md`，列出用例、来源、类型、服务、状态和证据位置。
+5. 在 `docs/aidlc/modules/{module-id}/inception/application-design/test-cases/` 生成 `_index.md`，列出用例、来源、类型、服务、状态和证据位置。
 6. 任何来源未覆盖、执行锚点不真实或必填字段缺失时，不得报告完成。
 
 ## 完成标准

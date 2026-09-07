@@ -3,6 +3,7 @@ slug: ui-implementation-bridge
 number: "3.5.4"
 name: UI 实现桥接
 phase: construction
+axis: unit
 execution: CONDITIONAL
 lead_agent: aidlc-developer-agent
 support_agents: []
@@ -10,11 +11,11 @@ mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces:
-  - docs/aidlc/frontend-platform-spec.md
-  - .aidlc/evidence/ui-implementation-bridge/frontend-platform-spec.json
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md
+  - .aidlc/evidence/ui-implementation-bridge/{module-id}/{unit-id}/frontend-platform-spec.json
 sensors: [frontend-platform-spec]
 requires: [code-generation]
-condition: has_ui_requirements
+condition: needs_ui_implementation_bridge
 ---
 # UI 实现桥接 — UI 设计到平台代码的翻译流程
 
@@ -22,7 +23,7 @@ condition: has_ui_requirements
 
 定义从 UI 设计产物（HTML Mock 或 Figma 设计稿）到目标平台代码的翻译流程。解决设计产物使用 Web 语义（HTML/CSS 或 Tailwind）而目标平台（Taro/RN/Flutter 等）语义不同导致的实现偏离问题。
 
-**本文件定义流程（做什么），不定义具体框架内容（用什么组件）。** 框架特定内容由项目级 `docs/aidlc/frontend-platform-spec.md` 提供。
+**本文件定义流程（做什么），不定义具体框架内容（用什么组件）。** 框架特定内容由当前单元的 `docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md` 提供；不同单元不得复用彼此的门禁产物。
 
 ---
 
@@ -32,7 +33,7 @@ condition: has_ui_requirements
 
 1. 项目包含前端代码生成
 2. 目标平台**非纯 Web**（即非 Vue3+ElementPlus 这类纯浏览器方案）
-3. 存在 UI 设计产物（handoff.md 的 `## UI 设计` 区块中 `UI 设计方式` 为 `html-mock` 或 `figma`）
+3. 当前模块签名 history 中的 I9 choice 为 `html-mock`、`figma-create` 或 `figma-existing`；`skip` 或无选择不触发
 
 **纯 Web 项目**（PC 端 Vue3、React SPA 等）：CSS 语义与设计产物一致，无需跨端翻译层（组件映射表 + frontend-platform-spec.md），跳过本流程的第一至第三部分。
 
@@ -49,10 +50,10 @@ condition: has_ui_requirements
 ### 文件位置（三工具通用）
 
 ```
-目标项目/docs/aidlc/frontend-platform-spec.md
+目标项目/docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md
 ```
 
-此文件由 Kiro / Claude Code / OpenCode 三入口共同读写，不依赖任何工具私有路径。
+此文件由 Kiro / Claude Code / OpenCode 三入口共同读写，不依赖任何工具私有路径，并绑定当前 `stage_instance` 的模块和单元。
 
 ### 创建时机
 
@@ -146,7 +147,7 @@ frontend-platform-spec.md **必须**包含以下四个章节，缺少任何一�
 写入代码生成计划文档的头部：
 
 ```
-docs/aidlc/construction/plans/{unit-name}-code-generation-plan.md
+docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md
 ```
 
 ### 格式
@@ -156,9 +157,9 @@ docs/aidlc/construction/plans/{unit-name}-code-generation-plan.md
 ```markdown
 ## 组件映射表
 
-> 依据: docs/aidlc/frontend-platform-spec.md
+> 依据: docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md
 > UI 设计方式: html-mock
-> 设计来源: docs/aidlc/inception/ui-mock/{端}.html
+> 设计来源: docs/aidlc/modules/{module-id}/inception/ui-mock/{端}.html
 
 | # | 设计区域/元素 | 设计表现 (HTML/CSS) | 目标组件 | Props/样式 | 可见性 |
 |---|--------------|--------------------|---------|-----------|--------|
@@ -171,7 +172,7 @@ docs/aidlc/construction/plans/{unit-name}-code-generation-plan.md
 ```markdown
 ## 组件映射表
 
-> 依据: docs/aidlc/frontend-platform-spec.md
+> 依据: docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md
 > UI 设计方式: figma
 > 设计来源: [Figma 文件链接] / Frame: [Frame 名称] (nodeId: x:xxx)
 
@@ -207,7 +208,7 @@ figma 模式下"设计表现"列填写从 `get_design_context` 返回的 Tailwin
 IF handoff.md 中"前端技术栈" ≠ 空
 AND handoff.md 中"前端类型" ∈ {跨端, 小程序, APP, 混合}（即非纯Web）
 THEN:
-  检查 docs/aidlc/frontend-platform-spec.md 是否存在
+  检查 docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md 是否存在
   
   IF 不存在:
     ❌ 阻断代码生成

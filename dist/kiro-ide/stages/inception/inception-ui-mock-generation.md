@@ -1,19 +1,19 @@
 ---
 slug: ui-mock-generation
-number: "2.5.4"
+number: "2.5.8"
 name: Mock 生成
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-design-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: []
+produces: [docs/aidlc/modules/{module-id}/inception/ui-mock/]
 sensors: []
-completion_contract: instruction_only
-requires: [ui-mock]
-condition: has_ui_requirements
+requires: [ui-mock-reasoning-principles]
+condition: ui_mode_html_mock
 ---
 
 ## 职责
@@ -59,7 +59,7 @@ condition: has_ui_requirements
 
 ## 输出
 
-单模块输出到 `docs/aidlc/inception/ui-mock/`；多模块输出到对应模块的 `inception/ui-mock/`。输出包括 page-specs、骨架或完整 HTML，以及大型模式导航页。
+单模块输出到 `docs/aidlc/modules/{module-id}/inception/ui-mock/`；多模块输出到对应模块的 `inception/ui-mock/`。输出包括 page-specs、骨架或完整 HTML，以及大型模式导航页。
 
 ## 自检
 

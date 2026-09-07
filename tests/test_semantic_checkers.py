@@ -38,7 +38,9 @@ def write_signed_state(project: str) -> None:
     script = f"""
 import {{ createInitialState, saveWorkflowState }} from {json.dumps(state_uri)};
 const state = createInitialState('feature');
+state.current_phase = 'construction';
 state.current_stage = 'compact-recovery';
+state.current_stage_instance = 'compact-recovery';
 saveWorkflowState(process.cwd(), state);
 """
     result = subprocess.run(
@@ -218,14 +220,39 @@ print("route-config=", json.dumps(route_config, sort_keys=True))
     }))
 
 
-def run_checker(project: str, sensor: str) -> subprocess.CompletedProcess[str]:
+def run_checker(project: str, sensor: str, module_id: str = "", unit_id: str = "") -> subprocess.CompletedProcess[str]:
+    env = checker_environment(project)
+    if module_id:
+        env["AIDLC_ACTIVE_MODULE"] = module_id
+    if unit_id:
+        env["AIDLC_ACTIVE_UNIT"] = unit_id
     return subprocess.run(
         ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", CHECKER, "--sensor", sensor],
         cwd=project,
-        env=checker_environment(project),
+        env=env,
         capture_output=True,
         text=True,
     )
+
+
+def prd_document(feature_note: str = "", pending_section: str = "无待确认问题。") -> str:
+    return f"""# 概述
+面向业务用户的完整产品背景。
+# 目标
+提供可衡量的业务目标。
+# 功能需求
+FR-001 用户注册。{feature_note}
+## 验收标准
+注册操作成功并返回明确结果。
+# 非目标
+不支持匿名管理操作。
+# 待确认问题
+{pending_section}
+# 来源索引
+用户输入与已批准产品契约。
+# 一致性检查
+通过。
+"""
 
 
 def test_all_checkers_pass_on_realistic_fixture() -> None:
@@ -266,6 +293,55 @@ def test_checker_fails_closed_when_required_artifact_is_removed() -> None:
         result = run_checker(project, "prd-completeness")
         assert result.returncode != 0
         assert "PRD artifact is missing" in result.stderr
+    finally:
+        shutil.rmtree(project)
+
+
+def test_prd_checker_rejects_noncanonical_artifacts() -> None:
+    project = make_temp(prefix="aidlc-prd-canonical-path-")
+    try:
+        fixture(project)
+        os.remove(os.path.join(project, "docs/aidlc/ideation/prd.md"))
+        write(project, "docs/aidlc/inception/prd.md", prd_document())
+        write(project, "docs/aidlc/product/scenarios/example/prd.md", prd_document())
+        result = run_checker(project, "prd-completeness")
+        assert result.returncode != 0
+        assert "missing at docs/aidlc/ideation/prd.md" in result.stderr
+    finally:
+        shutil.rmtree(project)
+
+
+def test_prd_pending_questions_contract() -> None:
+    project = make_temp(prefix="aidlc-prd-pending-questions-")
+    try:
+        fixture(project)
+        path = "docs/aidlc/ideation/prd.md"
+        table = """| ID | 问题 | 负责方 | 是否阻断 |
+|----|------|--------|----------|
+| PQ-001 | 确认退款时限 | 产品负责人 | 否 |"""
+        write(project, path, prd_document(" [待确认: PQ-001]", table))
+        result = run_checker(project, "prd-completeness")
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["pending_questions"] == 1
+        assert payload["unresolved_blockers"] == 0
+
+        write(project, path, prd_document(" [待确认: PQ-001]", "无待确认问题。"))
+        result = run_checker(project, "prd-completeness")
+        assert result.returncode != 0
+        assert "pending question PQ-001 is not indexed" in result.stderr
+        assert "prd.md:" in result.stderr
+
+        blocking = table.replace("| 否 |", "| 是 |")
+        write(project, path, prd_document(" [待确认: PQ-001]", blocking))
+        result = run_checker(project, "prd-completeness")
+        assert result.returncode != 0
+        assert "pending question PQ-001 blocks PRD completion" in result.stderr
+
+        write(project, path, prd_document(" [待确认]", "无待确认问题。"))
+        result = run_checker(project, "prd-completeness")
+        assert result.returncode != 0
+        assert "must use [待确认: PQ-NNN]" in result.stderr
     finally:
         shutil.rmtree(project)
 
@@ -859,9 +935,56 @@ def test_diagram_009_route_contract() -> None:
             shutil.rmtree(project)
 
 
+def test_module_unit_context_isolation() -> None:
+    project = make_temp(prefix="aidlc-semantic-context-")
+    review = """Spec: passed
+Standards: passed
+reviewer: context-checker
+issues_found: 0
+issues_resolved: 0
+issues_open: 0
+Reviewed files: src/main.ts
+Conclusion: passed
+"""
+    try:
+        write(project, "docs/aidlc/modules/module-b/construction/unit-b/code-review.md", review)
+        isolated = run_checker(project, "review-evidence", "module-a", "unit-a")
+        assert isolated.returncode != 0
+        assert "no code review record found" in isolated.stderr
+
+        write(project, "docs/aidlc/modules/module-a/construction/unit-a/code-review.md", review)
+        current = run_checker(project, "review-evidence", "module-a", "unit-a")
+        assert current.returncode == 0, current.stderr
+        assert json.loads(current.stdout)["status"] == "passed"
+
+        platform_spec = """# 前端平台实现规范
+## 1. 平台声明
+运行时: UniApp；组件库: test-ui。
+## 2. 布局原语
+stack grid container flex row column。
+## 3. 组件映射参考
+button form table dialog navigation list input。
+## 4. CSS/样式约束
+spacing responsive tokens 间距 响应式 设计令牌。
+"""
+        write(project, "docs/aidlc/modules/module-b/construction/unit-b/frontend-platform-spec.md", platform_spec)
+        isolated_platform = run_checker(project, "frontend-platform-spec", "module-a", "unit-a")
+        assert isolated_platform.returncode != 0
+        assert "frontend platform specification is missing" in isolated_platform.stderr
+
+        write(project, "docs/aidlc/modules/module-a/construction/unit-a/frontend-platform-spec.md", platform_spec)
+        current_platform = run_checker(project, "frontend-platform-spec", "module-a", "unit-a")
+        assert current_platform.returncode == 0, current_platform.stderr
+        assert json.loads(current_platform.stdout)["status"] == "passed"
+    finally:
+        shutil.rmtree(project)
+
+
 if __name__ == "__main__":
     test_all_checkers_pass_on_realistic_fixture()
     test_checker_fails_closed_when_required_artifact_is_removed()
+    test_prd_checker_rejects_noncanonical_artifacts()
+    test_prd_pending_questions_contract()
     test_checker_rejects_legacy_diagram_without_structured_contract()
     test_diagram_003_fixed_regression()
     test_structural_group_capacity_and_style_contract_pass()
@@ -871,4 +994,5 @@ if __name__ == "__main__":
     test_directional_layout_contracts()
     test_diagram_contract_hardening()
     test_diagram_009_route_contract()
+    test_module_unit_context_isolation()
     print("semantic checker regression tests passed")

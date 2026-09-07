@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { dirname, isAbsolute, join, normalize, resolve } from "path";
 import { fileURLToPath } from "url";
+import type { ExecutionAxis } from "./aidlc-execution-context";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../..");
@@ -12,7 +13,10 @@ interface StageNode {
   number: string;
   name: string;
   phase: string;
+  axis: ExecutionAxis;
   execution: "ALWAYS" | "CONDITIONAL";
+  selection: "automatic" | "user";
+  choices: string[];
   lead_agent: string;
   support_agents: string[];
   mode: string;
@@ -46,7 +50,7 @@ function parseFrontmatter(content: string): Record<string, unknown> | null {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return null;
   const fm: Record<string, unknown> = {};
-  const listKeys = new Set(["support_agents", "scopes", "requires", "scope_waived_requires", "consumes", "produces", "sensors"]);
+  const listKeys = new Set(["support_agents", "scopes", "requires", "scope_waived_requires", "consumes", "produces", "sensors", "choices"]);
   let currentListKey: string | null = null;
   for (const line of match[1].split("\n")) {
     const trimmed = line.trim();
@@ -96,7 +100,10 @@ function scanStages(): StageNode[] {
         number: (fm.number as string) || "",
         name: (fm.name as string) || fm.slug as string,
         phase,
+        axis: ((fm.axis as string) || "project") as ExecutionAxis,
         execution: (fm.execution as StageNode["execution"]) || "CONDITIONAL",
+        selection: ((fm.selection as string) || "automatic") as StageNode["selection"],
+        choices: (fm.choices as string[]) || [],
         lead_agent: (fm.lead_agent as string) || "(orchestrator)",
         support_agents: (fm.support_agents as string[]) || [],
         mode: (fm.mode as string) || "inline",
@@ -117,13 +124,14 @@ function scanStages(): StageNode[] {
   return nodes.sort((left, right) => left.number.localeCompare(right.number, undefined, { numeric: true }));
 }
 
-const VALID_CONDITIONS = new Set([
-  "", "has_legacy_code", "has_ui_requirements", "has_reverse_output", "multi_module", "has_nfr_needs",
+const POSITIVE_CONDITIONS = [
+  "has_legacy_code", "has_ui_requirements", "has_reverse_output", "multi_module", "has_product_contract_needs", "has_nfr_needs",
   "has_infra_needs", "has_test_case_sources", "has_contract_dependencies", "has_subagent_support",
-  "is_loeyae_boot", "context_compacted", "!has_legacy_code", "!has_ui_requirements", "!has_reverse_output",
-  "!multi_module", "!has_nfr_needs", "!has_infra_needs", "!has_test_case_sources",
-  "!has_contract_dependencies", "!has_subagent_support", "!is_loeyae_boot", "!context_compacted",
-]);
+  "is_loeyae_boot", "context_compacted", "ui_design_selected", "ui_mode_html_mock", "ui_mode_figma",
+  "has_application_design_needs", "has_unit_generation_needs", "has_functional_design_needs",
+  "needs_ui_implementation_bridge", "has_deployment_needs", "has_operations_template_needs",
+];
+const VALID_CONDITIONS = new Set(["", ...POSITIVE_CONDITIONS, ...POSITIVE_CONDITIONS.map((condition) => `!${condition}`)]);
 
 const VALID_SENSORS = new Set([
   "no-todo", "build-success", "test-pass", "traceability", "doc-cascade", "reviewer-required",
@@ -142,6 +150,34 @@ function validateArtifactPath(path: string, label: string): string | null {
   const normalized = normalize(path).replace(/\\/g, "/");
   if (normalized === ".." || normalized.startsWith("../")) return `${label} escapes project root: ${path}`;
   return null;
+}
+
+function artifactPlaceholders(path: string): string[] {
+  return [...path.matchAll(/\{([^{}]+)\}/g)].map((match) => match[1]);
+}
+
+function validateArtifactContextPath(stage: StageNode, path: string, kind: "produce" | "consume"): string[] {
+  const errors: string[] = [];
+  const label = `${kind} on ${stage.slug}`;
+  const placeholders = artifactPlaceholders(path);
+  const withoutPlaceholders = path.replace(/\{[^{}]+\}/g, "");
+  if (/[{}]/.test(withoutPlaceholders)) errors.push(`malformed artifact placeholder in ${label}: ${path}`);
+
+  const allowed = kind === "produce"
+    ? stage.axis === "project" ? new Set<string>() : stage.axis === "module" ? new Set(["module-id"]) : new Set(["module-id", "unit-id"])
+    : stage.axis === "module" ? new Set(["module-id"]) : new Set(["module-id", "unit-id"]);
+  for (const placeholder of placeholders) {
+    if (!allowed.has(placeholder)) errors.push(`unknown or invalid context placeholder {${placeholder}} in ${label}: ${path}`);
+  }
+  if (kind === "produce" && path.includes("*")) errors.push(`produce paths cannot contain wildcards on ${stage.slug}: ${path}`);
+
+  if (kind === "produce" && stage.axis === "module" && path.startsWith("docs/aidlc/") && !path.startsWith("docs/aidlc/modules/{module-id}/inception/")) {
+    errors.push(`module-axis produce must live under docs/aidlc/modules/{module-id}/inception on ${stage.slug}: ${path}`);
+  }
+  if (kind === "produce" && stage.axis === "unit" && path.startsWith("docs/aidlc/") && !path.startsWith("docs/aidlc/modules/{module-id}/construction/{unit-id}/")) {
+    errors.push(`unit-axis produce must live under docs/aidlc/modules/{module-id}/construction/{unit-id} on ${stage.slug}: ${path}`);
+  }
+  return errors;
 }
 
 function detectCycles(stages: StageNode[]): string[] {
@@ -178,8 +214,16 @@ export function validateGraph(graph: { stages: StageNode[]; stage_count: number;
     numbers.add(stage.number);
     if (!stage.number || !stage.name || !stage.file) errors.push(`missing identity metadata: ${stage.slug || "<unknown>"}`);
     if (!PHASE_ORDER.has(stage.phase)) errors.push(`invalid phase on ${stage.slug}: ${stage.phase}`);
+    if (!["project", "module", "unit"].includes(stage.axis)) errors.push(`invalid execution axis on ${stage.slug}: ${stage.axis}`);
     if (!VALID_CONDITIONS.has(stage.condition)) errors.push(`unknown condition on ${stage.slug}: ${stage.condition}`);
     if (!["ALWAYS", "CONDITIONAL"].includes(stage.execution)) errors.push(`invalid execution on ${stage.slug}: ${stage.execution}`);
+    if (!["automatic", "user"].includes(stage.selection)) errors.push(`invalid selection on ${stage.slug}: ${stage.selection}`);
+    if (stage.selection === "user" && stage.execution === "ALWAYS") errors.push(`user-selected stage cannot declare execution ALWAYS: ${stage.slug}`);
+    if (new Set(stage.choices).size !== stage.choices.length) errors.push(`duplicate choice on ${stage.slug}`);
+    if (stage.choices.some((choice) => !/^[a-z0-9][a-z0-9-]*$/.test(choice))) errors.push(`invalid choice value on ${stage.slug}: ${stage.choices.join(", ")}`);
+    if (stage.choices.length === 1) errors.push(`choice stage must declare at least two values: ${stage.slug}`);
+    if (stage.choices.length > 0 && stage.completion_contract !== "instruction_only") errors.push(`choice stage must be instruction_only: ${stage.slug}`);
+    if (stage.choices.length > 0 && stage.selection === "user") errors.push(`runtime choice stage cannot also use initialization selection: ${stage.slug}`);
     if (!["block", "confirm", "notify"].includes(stage.approval)) errors.push(`invalid approval on ${stage.slug}: ${stage.approval}`);
     if (!["required", "not_applicable"].includes(stage.traceability)) errors.push(`invalid traceability mode on ${stage.slug}: ${stage.traceability}`);
     if (!["gated", "instruction_only"].includes(stage.completion_contract)) errors.push(`invalid completion_contract on ${stage.slug}`);
@@ -198,21 +242,38 @@ export function validateGraph(graph: { stages: StageNode[]; stage_count: number;
     for (const path of stage.produces) {
       const pathError = validateArtifactPath(path, `produce on ${stage.slug}`);
       if (pathError) errors.push(pathError);
+      errors.push(...validateArtifactContextPath(stage, path, "produce"));
+      if (path.startsWith(".aidlc/evidence/") && stage.axis !== "project") {
+        if (!path.includes("{module-id}")) errors.push(`${stage.axis}-axis evidence must include {module-id} on ${stage.slug}: ${path}`);
+        if (stage.axis === "unit" && !path.includes("{unit-id}")) errors.push(`unit-axis evidence must include {unit-id} on ${stage.slug}: ${path}`);
+      }
       producers.set(path, [...(producers.get(path) || []), stage.slug]);
     }
     for (const path of stage.consumes) {
       const pathError = validateArtifactPath(path, `consume on ${stage.slug}`);
       if (pathError) errors.push(pathError);
+      errors.push(...validateArtifactContextPath(stage, path, "consume"));
     }
   }
 
   for (const stage of graph.stages) {
     const roots = stage.requires.length === 0;
     if (roots && !ALLOWED_ROOTS.has(stage.slug)) errors.push(`unexpected structural root: ${stage.slug}`);
+    for (const dependency of stage.requires) {
+      const producer = bySlug.get(dependency);
+      if (stage.selection === "automatic" && producer?.selection === "user") {
+        errors.push(`automatic stage ${stage.slug} cannot require user-selected stage ${dependency}`);
+      }
+    }
     for (const consume of stage.consumes) {
       const owners = producers.get(consume) || [];
       if (owners.length === 0) errors.push(`consume has no producer on ${stage.slug}: ${consume}`);
       if (owners.length > 1) errors.push(`consume has ambiguous producers on ${stage.slug}: ${consume} <- ${owners.join(", ")}`);
+      for (const owner of owners) {
+        if (stage.selection === "automatic" && bySlug.get(owner)?.selection === "user") {
+          errors.push(`automatic stage ${stage.slug} cannot consume artifact from user-selected stage ${owner}: ${consume}`);
+        }
+      }
     }
     for (const scope of VALID_SCOPES) {
       if (!executableForScope(stage, scope)) continue;

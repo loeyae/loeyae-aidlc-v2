@@ -6,7 +6,7 @@
 
 - 应用代码、测试和部署配置位于工作区正常项目结构中，不放入 `docs/aidlc/`。
 - AI-DLC 需求、设计、计划、审计和报告仅放入 `docs/aidlc/`。
-- `docs/aidlc/handoff.md` 是三平台唯一恢复状态源。
+- `docs/aidlc/aidlc-state.json` 是唯一机器路由状态；`docs/aidlc/handoff.md` 是由成功 report 派生的跨平台人类恢复视图。
 - 未执行的条件步骤不创建空目录或占位文件。
 - 系统基线只保存索引、关系和证据引用，不复制 Secret、完整机器契约或外部平台数据。
 - 多模块项目只加载当前模块产物、产品级契约和相关系统基线切片。
@@ -15,89 +15,67 @@
 
 - `construction/` 仅存实现计划、审查记录、构建测试和实施报告；禁止创建 `CR-*`、`change-*`、`bug-*` 变更档案。
 - L1/L2 变更和缺陷修复不创建独立文件；通过 handoff.md 活跃行和 Git commit 记录。
-- L3+ 的 CR 暂态文件仅位于 `docs/aidlc/change-requests/`（单模块）或 `docs/aidlc/modules/<module>/change-requests/`（多模块）。
+- L3+ 的 CR 暂态文件位于 `docs/aidlc/modules/<module-id>/change-requests/`；跨模块 CR 的协调索引可位于 `docs/aidlc/ideation/change-requests/`。
 - CR 完成后暂态文件必须删除；Git 历史是唯一长期档案。
 - 禁止创建 `{artifact}.backup.{timestamp}` 时间戳备份副本；Git 历史保留所有旧版本。
 
-## 系统基线根目录
+## 统一目录结构（module-unit-v1）
 
-| 架构 | `<system-baseline-root>` |
-|------|--------------------------|
-| 单模块 | `docs/aidlc/inception/system-baseline/` |
-| 多模块/多服务 | `docs/aidlc/product/system-baseline/` |
-
-仅在检测到分布式能力或外部运行时依赖时创建。可包含 `service-catalog.md`、`runtime-dependencies.md`、`external-systems.md`、`configuration-inventory.md`、`consistency-scenarios.md` 和 `customization-baseline.md`；实际文件按触发条件生成。
-
-## 单模块结构
+新工作流不再按“单模块写全局目录、多模块写 modules 目录”分叉。单模块项目也声明一个模块和至少一个工作单元，以保证状态、审批、Evidence 和产物路径使用同一模型。
 
 ```text
 <workspace>/
 ├── <project source and tests>
 └── docs/aidlc/
-    ├── handoff.md
+    ├── aidlc-state.json                         # 签名机器状态，唯一机器路由事实
+    ├── handoff.md                               # 派生的人类交接视图
     ├── audit-summary.md
-    ├── change-requests/               # 仅 L3+ CR 暂态文件；完成后删除
-    ├── inception/
-    │   ├── scenario-manifest.md        # I3 产物
-    │   ├── prd.md                      # 条件，I15 产物
-    │   ├── plans/
-    │   ├── reverse-engineering/
-    │   ├── system-baseline/            # 条件
-    │   ├── requirements/
-    │   │   └── business-flows.md       # I5 强制产物
-    │   ├── user-stories/
-    │   │   └── role-permission-matrix.md # I7 强制产物
-    │   ├── ui-mock/                  # HTML Mock 条件；每端必须含 {端}-page-specs.md + 对应 HTML
-    │   └── application-design/
-    │       ├── test-cases/
-    │       ├── unit-of-work.md
-    │       ├── unit-of-work-dependency.md
-    │       └── unit-of-work-story-map.md
-    ├── construction/
-    │   ├── plans/
-    │   ├── audit/
-    │   ├── <unit-name>/
+    ├── ideation/                                # project axis
+    │   ├── module-division.md
+    │   ├── module-manifest.json                 # schema_version=1，至少一个 module
+    │   └── ...
+    ├── modules/
+    │   └── <module-id>/
+    │       ├── inception/                       # module axis
+    │       │   ├── requirements.md
+    │       │   ├── user-stories.md
+    │       │   ├── application-design.md
+    │       │   ├── unit-manifest.json           # schema_version=1，至少一个 unit；新签名工作流含逐单元 conditional_stages
+    │       │   ├── plans/
+    │       │   ├── requirements/
+    │       │   ├── application-design/
+    │       │   └── ...
+    │       ├── construction/
+    │       │   └── <unit-id>/                   # unit axis
+    │       │       ├── plans/
+    │       │       ├── audit/
+    │       │       ├── functional-design.md
+    │       │       ├── implementation-summary.md
+    │       │       └── ...
+    │       └── change-requests/                 # 仅 L3+ 暂态文件
+    ├── construction/                            # project 聚合 axis
     │   ├── build-and-test/
+    │   ├── build-test-report.md
     │   └── implementation-report.md
-    └── operations/
+    └── operations/                              # project axis
         ├── plans/operations-plan.md
         ├── deployment-guide.md
         └── operations-summary.md
 ```
 
-步骤的实际文件名由对应 steering 定义；本图只规定目录职责。
+步骤的实际文件名由对应 Stage frontmatter 和 directive 定义。`orchestrate next` 返回的已解析 `artifact_root`、`consumes` 和 `produces` 优先于正文中的抽象示例。
 
-## 多模块结构
+## 路径与隔离规则
 
-```text
-<workspace>/
-├── <project source and tests>
-└── docs/aidlc/
-    ├── handoff.md
-    ├── audit-summary.md
-    ├── product/
-    │   ├── product-overview.md
-    │   ├── modules.md
-    │   ├── contracts.md
-    │   ├── decision-summary.md
-    │   ├── scenarios/
-    │   │   └── <scenario-id>/
-    │   │       ├── scenario-manifest.md
-    │   │       └── prd.md              # 条件，I15 产物
-    │   └── system-baseline/            # 条件，产品级唯一维护
-    ├── modules/
-    │   └── <module-name>/
-    │       ├── inception/
-    │       └── construction/
-    └── operations/
-```
+- 模块清单固定为 `docs/aidlc/ideation/module-manifest.json`；每项必须有稳定、小写短横线格式的 `module_id`、名称和服务映射。
+- 单元清单固定为 `docs/aidlc/modules/<module-id>/inception/unit-manifest.json`；其 `module_id` 必须匹配目录，且至少包含一个稳定 `unit_id`。新签名工作流由 I14 为每个单元写入 `conditional_stages`（允许空数组），只控制该单元的 unit 轴条件 Stage；旧清单缺字段时引擎保守使用模块级条件事实。
+- 模块级 Inception 只读写 `docs/aidlc/modules/<module-id>/inception/`；不得用另一个模块的产物满足当前实例门禁。
+- 单元级 Construction 只读写 `docs/aidlc/modules/<module-id>/construction/<unit-id>/`；共享源码仍按项目正常源码目录修改，但设计、计划、审查和摘要必须归档到当前单元。
+- 构建测试、实施报告和 Operations 是项目级聚合；只有全部相关单元实例完成/跳过后才能执行。
+- 场景和跨模块契约继续由项目级产物维护；模块产物引用它们，不复制权威事实。
+- 系统基线属于产品级事实，统一位于 `docs/aidlc/ideation/system-baseline/`；模块目录只保存相关引用或切片。
+- 切换上下文前先通过成功的 `report` 更新签名 state；handoff 只能派生展示，不能自行改变当前模块、单元或 Stage。
 
-## 多模块规则
+## 旧状态兼容
 
-- 场景目录仅存放跨模块视图产物（`scenario-manifest.md`、`prd.md`）；I5-I10 产物一律按模块归档，禁止按场景归档。
-- PRD 是汇编视图而非基线；禁止在场景目录保存与模块级产物内容重复的需求、故事或页面规格文件。
-- 产品边界和跨边界契约索引只在 `product/contracts.md` 维护；完整机器契约留在项目既有事实来源。
-- 服务目录和运行时关系只在产品级系统基线维护，模块级产物引用相关切片。
-- 模块级 Inception/Construction 结构与单模块对应阶段一致，但不重复系统基线。
-- Operations 是项目级部署准备；只有独立部署模块明确需要单独交付时，才在其模块目录生成部署补充说明。
-- 切换模块前先更新 handoff.md 的活跃模块、活跃服务/单元、当前步骤、基线新鲜度和下一步交接。
+缺少 `routing_model` 的已签名旧状态继续使用 legacy-global 路由和旧目录，避免破坏签名与在途流程。新状态一律使用上述 module-unit-v1 目录；不得在执行中通过复制旧全局产物绕过当前上下文门禁。

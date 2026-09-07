@@ -6,10 +6,13 @@
 
 ## 文件结构
 
-- `docs/aidlc/audit-summary.md` — 极简时间线（每次恢复必加载，控制在 ~2KB）
-- `docs/aidlc/inception/audit-inception.md` — Inception 阶段完整审计
-- `docs/aidlc/construction/audit-construction-{unit-name}.md` — 各单元的审计
-- `docs/aidlc/operation/audit-operations.md` — Operations 阶段审计
+- `docs/aidlc/audit-summary.md` — 项目级极简时间线（每次恢复按需加载，控制在 ~2KB）
+- `<directive.artifact_root>/audit.md` — 当前 stage instance 的完整审计：
+  - module axis：`docs/aidlc/modules/{module-id}/inception/audit.md`
+  - unit axis：`docs/aidlc/modules/{module-id}/construction/{unit-id}/audit.md`
+  - project axis：当前阶段项目目录下的 `audit.md`
+
+审计条目必须记录 `stage_instance`，并在适用时同时记录 `module_id`、`unit_id`。不得把一个模块或单元的审计写入另一个上下文。
 
 ---
 
@@ -81,9 +84,4 @@
 
 ## core-workflow 中的审计指令说明
 
-core-workflow.md 中所有"在 audit.md 中记录"的指令，实际写入对应的分段文件：
-- Inception 阶段 → `audit-inception.md`
-- Construction 阶段 → `audit-construction-{unit-name}.md`
-- Operations 阶段 → `audit-operations.md`
-
-同时同步更新 `audit-summary.md`。
+core-workflow.md 中所有“在 audit.md 中记录”的指令，实际写入当前 directive 返回的 `<artifact_root>/audit.md`，并同步更新 `docs/aidlc/audit-summary.md`。旧签名 legacy-global 工作流若已存在旧分段审计文件，可继续追加，但不得在新 `module-unit-v1` 工作流中创建旧全局 Inception/Construction 审计路径。

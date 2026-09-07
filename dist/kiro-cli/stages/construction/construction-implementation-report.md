@@ -9,7 +9,7 @@ support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes:
-  - docs/aidlc/construction/{unit-name}/implementation-summary.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md
 produces:
   - docs/aidlc/construction/implementation-report.md
   - .aidlc/evidence/implementation-report/implementation-report.json
@@ -25,7 +25,7 @@ requires: [build-and-test]
 
 | 级别 | 触发时机 | 输出位置 | 大小 |
 |------|----------|----------|------|
-| **单元级微型摘要** | 每个单元代码生成 + 审查通过后 | `docs/aidlc/construction/{unit-name}/implementation-summary.md` | 5-15 行 |
+| **单元级微型摘要** | 每个单元代码生成 + 审查通过后 | `docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md` | 5-15 行 |
 | **阶段级完整报告** | Construction 构建和测试通过后 | `docs/aidlc/construction/implementation-report.md` | 完整 |
 
 ---

@@ -8,7 +8,6 @@ scopes: [feature, enterprise, mvp, classic]
 requires: [product-contracts]
 consumes:
   - docs/aidlc/ideation/module-division.md
-  - docs/aidlc/ideation/product-contracts.md
 produces: [docs/aidlc/ideation/scenario-module-mapping.md]
 ---
 
@@ -18,7 +17,7 @@ produces: [docs/aidlc/ideation/scenario-module-mapping.md]
 
 ## 执行条件与路径
 
-I3 始终执行。单模块项目跳过模块归属审批，但仍确认场景边界、登记在途 PRD 并生成装配清单。
+I3 始终执行。单模块项目跳过模块归属审批，但仍确认场景边界、登记在途 PRD 并生成装配清单。`product-contracts` 已执行时引用其契约 ID；该 Stage 按条件跳过时，不创建占位契约索引，契约点标记为不适用或留待后续已批准设计补充。
 
 | 项目类型 | 权威装配索引路径 |
 |----------|------------------|

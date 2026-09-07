@@ -3,24 +3,25 @@ slug: units-generation
 number: "2.8"
 name: 单元生成
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-architect-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes:
-  - docs/aidlc/ideation/module-division.md
-  - docs/aidlc/inception/user-stories.md
-  - docs/aidlc/inception/application-design.md
+  - docs/aidlc/ideation/module-manifest.json
+  - docs/aidlc/modules/{module-id}/inception/user-stories.md
 produces:
-  - docs/aidlc/inception/units.md
-  - docs/aidlc/inception/application-design/unit-of-work.md
-  - docs/aidlc/inception/application-design/unit-of-work-dependency.md
-  - docs/aidlc/inception/application-design/unit-of-work-story-map.md
-  - .aidlc/evidence/units-generation/design-intent-coverage.json
+  - docs/aidlc/modules/{module-id}/inception/units.md
+  - docs/aidlc/modules/{module-id}/inception/unit-manifest.json
+  - docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work.md
+  - docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-dependency.md
+  - docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-story-map.md
+  - .aidlc/evidence/units-generation/{module-id}/design-intent-coverage.json
 sensors: [design-intent-coverage]
 requires: [application-design]
-condition: multi_module
+condition: has_unit_generation_needs
 ---
 # 单元生成 - 详细步骤
 
@@ -36,6 +37,7 @@ condition: multi_module
 每个工作单元必须记录：
 - `unit_id` 与职责；
 - `service_id`（归属服务；非分布式项目写“不适用”）；
+- `conditional_stages`：只列该单元确实适用的 unit 轴条件 Stage；允许空数组；
 - 需求/故事/技术用例来源；
 - 允许修改的代码与配置范围；
 - 契约、配置、数据和外部系统依赖；
@@ -47,8 +49,8 @@ condition: multi_module
 - 上下文评估必须完成
 - 建议完成需求评估（提供功能范围）
 - 建议完成故事开发（故事映射到单元）
-- 应用设计阶段**必须完成**（确定组件、方法和服务）
-- 执行计划必须指示设计阶段应执行
+- 应用设计触发时必须已完成；应用设计按条件跳过时，从需求、故事和产品契约建立最小单元上下文，不得伪造应用设计产物
+- 执行计划必须明确将 `units-generation` 标记为 `execute`
 
 ---
 
@@ -61,14 +63,48 @@ condition: multi_module
 
 ## 步骤 2：在计划中包含强制单元产物
 **始终**在单元计划中包含这些强制产物：
-- [ ] 生成 `docs/aidlc/inception/application-design/unit-of-work.md`，包含单元定义、职责、`service_id`、允许修改范围和验证检查点
-- [ ] 生成 `docs/aidlc/inception/application-design/unit-of-work-dependency.md`，包含带类型的依赖矩阵
-- [ ] 生成 `docs/aidlc/inception/application-design/unit-of-work-story-map.md`，映射故事到单元
+- [ ] 生成 `docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work.md`，包含单元定义、职责、`service_id`、允许修改范围和验证检查点
+- [ ] 生成 `docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-dependency.md`，包含带类型的依赖矩阵
+- [ ] 生成 `docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-story-map.md`，映射故事到单元
+- [ ] 在 `unit-manifest.json` 的每个单元写入 `conditional_stages`，只允许：`functional-design`、`nfr-requirements`、`nfr-design`、`infrastructure-design`、`shared-contract-baseline`、`subagent-execution`、`loeyae-compliance`、`ui-implementation-bridge`
+- [ ] 每个 `conditional_stages` 选择必须能追溯到当前单元的需求、故事、技术用例、允许修改范围、依赖矩阵或已批准执行计划；不得把另一个单元的事实复制为本单元选择
+- [ ] `nfr-requirements` 与 `nfr-design` 必须同时选择，且 NFR 或基础设施设计适用时必须同时选择 `functional-design`
 - [ ] **多单元且存在共享契约时**：在 `unit-of-work.md` 生成跨单元共享契约索引，并在 `shared-interfaces.md` 记录其完整设计；不适用时不得创建空表或空文件
 - [ ] **仅全新项目**：在 `unit-of-work.md` 中记录代码组织策略（沿用目标技术栈和项目现有约定；目录边界见 `common-directory-structure.md`）
 - [ ] 验证单元边界和依赖
 - [ ] 确保所有故事已分配到单元
 - [ ] **团队协作模式**：在 `unit-of-work.md` 中为每个单元添加认领状态表
+
+**`unit-manifest.json` 条件路由示例**：
+
+```json
+{
+  "schema_version": 1,
+  "module_id": "orders",
+  "units": [
+    {
+      "unit_id": "order-api",
+      "name": "Order API",
+      "service_id": "orders-service",
+      "conditional_stages": [
+        "functional-design",
+        "nfr-requirements",
+        "nfr-design",
+        "infrastructure-design",
+        "shared-contract-baseline"
+      ]
+    },
+    {
+      "unit_id": "order-copy",
+      "name": "Static copy update",
+      "service_id": "orders-service",
+      "conditional_stages": []
+    }
+  ]
+}
+```
+
+`conditional_stages` 是机器路由输入，不是让用户逐项选择的交互清单。新签名工作流执行本 Stage 时，每个单元都必须显式提供该数组；旧签名工作流的既有清单缺少该字段时，引擎才按模块级事实保守回退，避免升级时跳过原本会执行的质量路径。
 
 **团队协作模式的认领状态表**（在 unit-of-work.md 末尾添加）：
 ```markdown
@@ -161,7 +197,7 @@ condition: multi_module
 - **前后端拆分策略** — 仅当前后端单元的划分粒度不清楚时
 
 ## 步骤 4：保存工作单元计划
-- 保存为 `docs/aidlc/inception/plans/unit-of-work-plan.md`
+- 保存为 `docs/aidlc/modules/{module-id}/inception/plans/unit-of-work-plan.md`
 - 包含所有 [回答]: 标签供用户输入
 - 确保计划覆盖系统分解的所有方面
 
@@ -194,7 +230,7 @@ condition: multi_module
   - "你提到'取决于复杂度' — 如何定义复杂度级别？"
 
 ## 步骤 9：请求审批
-- 询问："**工作单元计划完成。请审查 docs/aidlc/inception/plans/unit-of-work-plan.md 中的计划。准备好进入生成了吗？**"
+- 询问："**工作单元计划完成。请审查 docs/aidlc/modules/{module-id}/inception/plans/unit-of-work-plan.md 中的计划。准备好进入生成了吗？**"
 - 在用户确认前不得继续
 
 ## 步骤 10：记录审批
@@ -212,7 +248,7 @@ condition: multi_module
 # 第二部分：生成
 
 ## 步骤 12：加载工作单元计划
-- [ ] 从 `docs/aidlc/inception/plans/unit-of-work-plan.md` 读取完整计划
+- [ ] 从 `docs/aidlc/modules/{module-id}/inception/plans/unit-of-work-plan.md` 读取完整计划
 - [ ] 识别下一个未完成的步骤（第一个 [ ] 复选框）
 - [ ] 加载该步骤的上下文和需求
 
@@ -326,7 +362,7 @@ condition: multi_module
 [AI 生成的单元和分解摘要，使用要点列表]
 
 > **📋 <u>**需要审查：**</u>**
-> 请检查单元生成产物：`docs/aidlc/inception/application-design/`
+> 请检查单元生成产物：`docs/aidlc/modules/{module-id}/inception/application-design/`
 
 > **🚀 <u>**下一步？**</u>**
 >
@@ -350,7 +386,7 @@ condition: multi_module
 [从 unit-of-work.md 读取并展示]
 
 > **📋 <u>**需要审查：**</u>**
-> 请检查单元生成产物：`docs/aidlc/inception/application-design/`
+> 请检查单元生成产物：`docs/aidlc/modules/{module-id}/inception/application-design/`
 
 > **🚀 <u>**下一步？**</u>**
 >

@@ -26,6 +26,19 @@ import { fileURLToPath } from "url";
 import { readEnrollment, verifyApprovalToken, verifyRecord } from "./aidlc-trust";
 import { readSourceRevision } from "./aidlc-revision";
 import {
+  evidenceRelativePath,
+  moduleInceptionRoot,
+  readModuleManifest,
+  readUnitManifest,
+  stageInstanceId,
+  substituteArtifactPattern,
+  unitConstructionRoot,
+  type ExecutionAxis,
+  type ExecutionContext,
+  type ModuleDescriptor,
+  type UnitDescriptor,
+} from "./aidlc-execution-context";
+import {
   createInitialState,
   loadWorkflowState,
   saveWorkflowState,
@@ -53,7 +66,10 @@ interface StageNode {
   number: string;
   name: string;
   phase: string;
+  axis: ExecutionAxis;
   execution: "ALWAYS" | "CONDITIONAL";
+  selection: "automatic" | "user";
+  choices: string[];
   lead_agent: string;
   support_agents: string[];
   mode: string;
@@ -74,6 +90,12 @@ interface StageGraph {
   version: string;
   stages: StageNode[];
   stage_count: number;
+}
+
+interface StageInstance extends ExecutionContext {
+  stage: StageNode;
+  axis: ExecutionAxis;
+  instance_id: string;
 }
 
 interface Directive {
@@ -100,6 +122,7 @@ interface ConditionContext {
   has_ui_requirements: boolean;
   has_reverse_output: boolean;
   multi_module: boolean;
+  has_product_contract_needs: boolean;
   has_nfr_needs: boolean;
   has_infra_needs: boolean;
   has_test_case_sources: boolean;
@@ -107,6 +130,15 @@ interface ConditionContext {
   has_subagent_support: boolean;
   is_loeyae_boot: boolean;
   context_compacted: boolean;
+  ui_design_selected: boolean;
+  ui_mode_html_mock: boolean;
+  ui_mode_figma: boolean;
+  has_application_design_needs: boolean;
+  has_unit_generation_needs: boolean;
+  has_functional_design_needs: boolean;
+  needs_ui_implementation_bridge: boolean;
+  has_deployment_needs: boolean;
+  has_operations_template_needs: boolean;
 }
 
 const VALID_SCOPES = new Set([
@@ -120,6 +152,9 @@ const VALID_SCOPES = new Set([
   "refactor",
   "poc",
 ]);
+
+const FULL_WORKFLOW_SCOPES = new Set(["feature", "enterprise", "mvp", "classic"]);
+const PRD_ELIGIBLE_SCOPES = new Set(FULL_WORKFLOW_SCOPES);
 
 // ---------------------------------------------------------------------------
 // Subcommands
@@ -150,31 +185,192 @@ function saveState(state: WorkflowState): void {
   saveWorkflowState(PROJECT_ROOT, state);
 }
 
-/**
- * Filter stages by scope: a stage executes if its scopes array includes
- * the workflow's active scope, OR if its execution is ALWAYS.
- */
-function getExecutableStages(graph: StageGraph, scope: string): StageNode[] {
-  return graph.stages.filter(
-    (s) => s.execution === "ALWAYS" || s.scopes.includes(scope)
-  );
+function runtimeChoices(stage: StageNode, state: WorkflowState): string[] {
+  if (stage.slug === "workspace-detection" && !FULL_WORKFLOW_SCOPES.has(state.scope)) return [];
+  return stage.choices || [];
 }
 
 /**
- * Check if a stage's requires dependencies are all satisfied.
- * Only checks dependencies that are in the executable stages list —
- * a requires pointing to a stage that's not in scope is auto-satisfied
- * (the scope intentionally skips that prerequisite).
+ * Filter stages by scope and the immutable user selections captured in signed
+ * workflow state. User-selected stages never enter the default path.
  */
-function checkRequires(
-  stage: StageNode,
-  completedSlugs: string[],
-  skippedSlugs: string[],
-  executableSlugs: Set<string>
-): string[] {
-  if (!stage.requires || stage.requires.length === 0) return [];
-  const done = new Set([...completedSlugs, ...skippedSlugs]);
-  return stage.requires.filter((dep) => executableSlugs.has(dep) && !done.has(dep));
+function getExecutableStages(
+  graph: StageGraph,
+  scope: string,
+  selectedOptionalStages: string[] = [],
+): StageNode[] {
+  const selected = new Set(selectedOptionalStages);
+  return graph.stages.filter((stage) =>
+    (stage.execution === "ALWAYS" || stage.scopes.includes(scope))
+    && (stage.selection !== "user" || selected.has(stage.slug))
+  );
+}
+
+const DEFAULT_MODULE: ModuleDescriptor = { module_id: "project", name: "Project", service_id: "not-applicable" };
+const DEFAULT_UNIT: UnitDescriptor = { unit_id: "default", name: "Default", service_id: "not-applicable" };
+
+function selectedOptionalStages(state: WorkflowState): string[] {
+  if (state.selected_optional_stages !== undefined) return state.selected_optional_stages;
+  const legacyPrdWasResolved = state.completed_stages.includes("prd-generation")
+    || state.skipped_stages.includes("prd-generation");
+  const legacyPrdIsActive = state.current_stage === "prd-generation";
+  return legacyPrdWasResolved || legacyPrdIsActive ? ["prd-generation"] : [];
+}
+
+const ARCHITECTURE_CHOICES = new Set(["single-module", "multi-module"]);
+const UI_DESIGN_CHOICES = new Set(["html-mock", "figma-create", "figma-existing", "skip"]);
+const FIGMA_ROUTE_STAGES = new Set(["ui-figma", "ui-figma-generation"]);
+const HTML_MOCK_ROUTE_STAGES = new Set([
+  "ui-mock-workflow",
+  "ui-mock-design-spec",
+  "ui-mock-styles",
+  "ui-mock-reasoning-principles",
+  "ui-mock-generation",
+]);
+
+function recordedStageChoice(state: WorkflowState, stageSlug: string, moduleId?: string): string | undefined {
+  return [...state.history].reverse().find((entry) =>
+    entry.stage === stageSlug
+    && (entry.result === "completed" || entry.result === "approved")
+    && (!moduleId || entry.module_id === moduleId)
+    && typeof entry.user_input === "string"
+  )?.user_input;
+}
+
+function architectureChoice(state: WorkflowState): string | undefined {
+  const recorded = recordedStageChoice(state, "workspace-detection");
+  return recorded && ARCHITECTURE_CHOICES.has(recorded) ? recorded : undefined;
+}
+
+function uiDesignChoice(state: WorkflowState, moduleId?: string): string | undefined {
+  const recorded = recordedStageChoice(state, "ui-mock", moduleId);
+  if (recorded && UI_DESIGN_CHOICES.has(recorded)) return recorded;
+
+  // Compatibility for signed workflows created before runtime choices were
+  // recorded. Preserve an already active/resolved branch rather than changing
+  // its route during upgrade; new workflows must always record the choice.
+  const matchingLegacyStage = (slug: string): boolean => {
+    if (state.current_stage === slug && (!moduleId || state.current_module === moduleId)) return true;
+    return state.history.some((entry) => entry.stage === slug && (!moduleId || entry.module_id === moduleId));
+  };
+  if ([...FIGMA_ROUTE_STAGES].some(matchingLegacyStage)) return "figma-create";
+  if ([...HTML_MOCK_ROUTE_STAGES].some(matchingLegacyStage)) return "html-mock";
+
+  const htmlRoot = moduleId
+    ? join(PROJECT_ROOT, "docs", "aidlc", "modules", moduleId, "inception", "ui-mock")
+    : join(PROJECT_ROOT, "docs", "aidlc", "inception", "ui-mock");
+  return existsSync(htmlRoot) ? "html-mock" : undefined;
+}
+
+function completedInstanceIds(state: WorkflowState): string[] {
+  return state.completed_stage_instances || state.completed_stages;
+}
+
+function skippedInstanceIds(state: WorkflowState): string[] {
+  return state.skipped_stage_instances || state.skipped_stages;
+}
+
+function isInstanceResolved(state: WorkflowState, instanceId: string): boolean {
+  return completedInstanceIds(state).includes(instanceId) || skippedInstanceIds(state).includes(instanceId);
+}
+
+function makeInstance(stage: StageNode, axis: ExecutionAxis, context: ExecutionContext = {}): StageInstance {
+  return { stage, axis, ...context, instance_id: stageInstanceId(stage.slug, axis, context) };
+}
+
+function routingModules(state: WorkflowState): ModuleDescriptor[] {
+  if (state.routing_model !== "module-unit-v1") return [DEFAULT_MODULE];
+  if (!state.completed_stages.includes("module-division")) return [DEFAULT_MODULE];
+  return readModuleManifest(PROJECT_ROOT);
+}
+
+function routingUnits(state: WorkflowState, modules: ModuleDescriptor[]): Array<{ module: ModuleDescriptor; unit: UnitDescriptor }> {
+  if (state.routing_model !== "module-unit-v1") return [{ module: DEFAULT_MODULE, unit: DEFAULT_UNIT }];
+  return modules.flatMap((module) => {
+    const unitsStage = stageInstanceId("units-generation", "module", { module_id: module.module_id });
+    if (completedInstanceIds(state).includes(unitsStage)) {
+      return readUnitManifest(PROJECT_ROOT, module.module_id).map((unit) => ({ module, unit }));
+    }
+    // A condition-skipped I14 intentionally uses one deterministic default
+    // unit; it must not require a unit-manifest that the skipped Stage did not
+    // produce.
+    return [{ module, unit: DEFAULT_UNIT }];
+  });
+}
+
+/**
+ * Expand the static graph into deterministic project/module/unit instances.
+ * Consecutive module stages run module-major; consecutive unit stages run unit-major.
+ */
+function expandStageInstances(graph: StageGraph, state: WorkflowState): StageInstance[] {
+  const stages = getExecutableStages(graph, state.scope, selectedOptionalStages(state));
+  if (state.routing_model !== "module-unit-v1") return stages.map((stage) => makeInstance(stage, "project"));
+
+  const modules = routingModules(state);
+  const units = routingUnits(state, modules);
+  const instances: StageInstance[] = [];
+  for (let index = 0; index < stages.length;) {
+    const axis = stages[index].axis;
+    let end = index + 1;
+    while (end < stages.length && stages[end].axis === axis) end++;
+    const segment = stages.slice(index, end);
+    if (axis === "project") {
+      instances.push(...segment.map((stage) => makeInstance(stage, "project")));
+    } else if (axis === "module") {
+      for (const module of modules) {
+        instances.push(...segment.map((stage) => makeInstance(stage, "module", { module_id: module.module_id })));
+      }
+    } else {
+      for (const { module, unit } of units) {
+        instances.push(...segment.map((stage) => makeInstance(stage, "unit", { module_id: module.module_id, unit_id: unit.unit_id })));
+      }
+    }
+    index = end;
+  }
+  return instances;
+}
+
+function dependencyInstances(instance: StageInstance, dependency: string, instances: StageInstance[]): StageInstance[] {
+  const candidates = instances.filter((candidate) => candidate.stage.slug === dependency);
+  if (instance.axis === "project") return candidates;
+  if (instance.axis === "module") {
+    return candidates.filter((candidate) => candidate.axis === "project" || candidate.module_id === instance.module_id);
+  }
+  return candidates.filter((candidate) => {
+    if (candidate.axis === "project") return true;
+    if (candidate.module_id !== instance.module_id) return false;
+    return candidate.axis === "module" || candidate.unit_id === instance.unit_id;
+  });
+}
+
+function checkRequires(instance: StageInstance, instances: StageInstance[], state: WorkflowState): string[] {
+  const missing: string[] = [];
+  for (const dependency of instance.stage.requires || []) {
+    const required = dependencyInstances(instance, dependency, instances);
+    if (required.length === 0) {
+      if (!instance.stage.scope_waived_requires.includes(dependency)) missing.push(dependency);
+      continue;
+    }
+    for (const candidate of required) if (!isInstanceResolved(state, candidate.instance_id)) missing.push(candidate.instance_id);
+  }
+  return missing;
+}
+
+function reconcileStageSummaries(state: WorkflowState, instances: StageInstance[]): void {
+  if (state.routing_model !== "module-unit-v1") return;
+  for (const stage of getExecutableStages(loadGraph(), state.scope, selectedOptionalStages(state))) {
+    const stageInstances = instances.filter((instance) => instance.stage.slug === stage.slug);
+    if (stageInstances.length === 0) continue;
+    const completed = new Set(completedInstanceIds(state));
+    const skipped = new Set(skippedInstanceIds(state));
+    const allResolved = stageInstances.every((instance) => completed.has(instance.instance_id) || skipped.has(instance.instance_id));
+    if (!allResolved) continue;
+    if (stageInstances.every((instance) => skipped.has(instance.instance_id))) {
+      if (!state.skipped_stages.includes(stage.slug)) state.skipped_stages.push(stage.slug);
+    } else if (!state.completed_stages.includes(stage.slug)) {
+      state.completed_stages.push(stage.slug);
+    }
+  }
 }
 
 function assertProjectPath(path: string): string {
@@ -211,35 +407,66 @@ function collectFiles(path: string): string[] {
   return files;
 }
 
-function resolveProducePaths(pattern: string): string[] {
-  const marker = pattern.match(/\{[^}]+\}/);
-  if (marker && marker.index !== undefined) {
-    const prefix = pattern.slice(0, marker.index);
-    const suffix = pattern.slice(marker.index + marker[0].length);
-    const base = join(PROJECT_ROOT, prefix);
-    if (!existsSync(base) || !statSync(base).isDirectory()) return [];
+function legacyArtifactPattern(pattern: string): string {
+  return pattern
+    .replace("docs/aidlc/ideation/module-manifest.json", "docs/aidlc/ideation/module-division.md")
+    .replace(/docs\/aidlc\/modules\/\{module-id\}\/inception/g, "docs/aidlc/inception")
+    .replace(/docs\/aidlc\/modules\/\{module-id\}\/construction\/\{unit-id\}/g, "docs/aidlc/construction/{unit-name}")
+    .replace(/(\.aidlc\/evidence\/[^/]+)\/\{module-id\}\/\{unit-id\}/g, "$1")
+    .replace(/(\.aidlc\/evidence\/[^/]+)\/\{module-id\}/g, "$1");
+}
 
-    const paths: string[] = [];
-    for (const entry of readdirSync(base)) {
-      if (entry.startsWith(".")) continue;
-      if (!suffix.startsWith("/") && !entry.endsWith(suffix)) continue;
-      const candidate = suffix.startsWith("/")
-        ? join(base, entry, suffix)
-        : join(base, entry);
-      paths.push(...collectFiles(candidate));
-    }
-    return paths;
+function artifactPlaceholderNames(pattern: string): string[] {
+  return [...pattern.matchAll(/\{([^{}]+)\}/g)].map((match) => match[1]);
+}
+
+function isLegacyArtifactInstance(instance?: StageInstance): boolean {
+  return Boolean(instance && instance.axis === "project" && instance.stage.axis !== "project");
+}
+
+function allowsProjectAggregate(instance: StageInstance | undefined, allowProjectAggregate: boolean): boolean {
+  return Boolean(allowProjectAggregate && instance && instance.axis === "project" && instance.stage.axis === "project");
+}
+
+function instanceArtifactPattern(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string {
+  if (!instance) return pattern;
+  const legacy = isLegacyArtifactInstance(instance);
+  const resolved = legacy ? legacyArtifactPattern(pattern) : substituteArtifactPattern(pattern, instance);
+  const placeholders = artifactPlaceholderNames(resolved);
+  const allowed = legacy
+    ? new Set(["unit-name"])
+    : allowsProjectAggregate(instance, allowProjectAggregate)
+      ? new Set(["module-id", "unit-id"])
+      : new Set<string>();
+  const invalid = placeholders.filter((placeholder) => !allowed.has(placeholder));
+  if (invalid.length > 0) {
+    throw new Error(`Unresolved artifact placeholder(s) ${invalid.map((name) => `{${name}}`).join(", ")} for stage instance "${instance.instance_id}": ${pattern}`);
   }
+  return resolved;
+}
 
-  const target = join(PROJECT_ROOT, pattern);
-  if (!pattern.includes("*")) return collectFiles(target);
+function escapeExpression(value: string): string {
+  return value.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+}
 
-  const wildcardIndex = pattern.search(/[\\*]/);
-  const slashIndex = pattern.lastIndexOf("/", wildcardIndex);
-  const base = join(PROJECT_ROOT, slashIndex >= 0 ? pattern.slice(0, slashIndex) : ".");
-  if (!existsSync(base)) return [];
-  const expression = new RegExp(`^${pattern.slice(slashIndex + 1).replace(/[.+^${}()|[\\]\\\\]/g, "\\\\$&").replace(/\\*/g, ".*")}$`);
-  return collectFiles(base).filter((path) => expression.test(path.slice(join(PROJECT_ROOT, slashIndex >= 0 ? pattern.slice(0, slashIndex) : ".").length + 1)));
+function resolveProducePaths(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string[] {
+  const contextual = instanceArtifactPattern(pattern, instance, allowProjectAggregate).replace(/\\/g, "/");
+  const expansionAllowed = isLegacyArtifactInstance(instance) || allowsProjectAggregate(instance, allowProjectAggregate);
+  if (contextual.includes("*") && !expansionAllowed) {
+    throw new Error(`Artifact wildcards are not allowed for stage instance "${instance?.instance_id || "unknown"}": ${pattern}`);
+  }
+  const target = join(PROJECT_ROOT, contextual);
+  if (!contextual.includes("*") && !/\{[^}]+\}/.test(contextual)) return collectFiles(target);
+
+  const wildcard = contextual.replace(/\{(?:module-id|unit-id|unit-name)\}/g, "*");
+  const wildcardIndex = wildcard.indexOf("*");
+  const slashIndex = wildcard.lastIndexOf("/", wildcardIndex);
+  const basePattern = slashIndex >= 0 ? wildcard.slice(0, slashIndex) : ".";
+  const base = join(PROJECT_ROOT, basePattern);
+  if (!existsSync(base) || !statSync(base).isDirectory()) return [];
+  const relativePattern = wildcard.slice(slashIndex + 1);
+  const expression = new RegExp(`^${escapeExpression(relativePattern).replace(/\*/g, "[^/]+")}$`);
+  return collectFiles(base).filter((path) => expression.test(relative(base, path).replace(/\\/g, "/")));
 }
 
 /**
@@ -247,48 +474,57 @@ function resolveProducePaths(pattern: string): string[] {
  */
 const MIN_ARTIFACT_BYTES = 16;
 
-function checkProduces(stage: StageNode): string[] {
+function checkProduces(instance: StageInstance): string[] {
+  const stage = instance.stage;
   if (!stage.produces || stage.produces.length === 0) return [];
   const missing: string[] = [];
   for (const pattern of stage.produces) {
-    const paths = resolveProducePaths(pattern);
+    const paths = resolveProducePaths(pattern, instance);
     if (paths.length === 0) {
-      missing.push(pattern);
+      missing.push(instanceArtifactPattern(pattern, instance));
       continue;
     }
 
     if (pattern.endsWith("/") || paths.some((path) => statSync(path).isDirectory())) {
       const hasSubstantiveFile = paths.some((path) => statSync(path).size >= MIN_ARTIFACT_BYTES);
-      if (!hasSubstantiveFile) missing.push(pattern);
+      if (!hasSubstantiveFile) missing.push(instanceArtifactPattern(pattern, instance));
       continue;
     }
 
-    if (paths.some((path) => statSync(path).size < MIN_ARTIFACT_BYTES)) missing.push(pattern);
+    if (paths.some((path) => statSync(path).size < MIN_ARTIFACT_BYTES)) missing.push(instanceArtifactPattern(pattern, instance));
   }
   return missing;
 }
 
-function checkConsumes(stage: StageNode, state: WorkflowState, graph: StageGraph): string[] {
+function checkConsumes(instance: StageInstance, state: WorkflowState, graph: StageGraph, instances: StageInstance[]): string[] {
+  const stage = instance.stage;
   const failures: string[] = [];
   for (const pattern of stage.consumes || []) {
+    const resolvedPattern = instanceArtifactPattern(pattern, instance, true);
     let paths: string[] = [];
     try {
-      paths = resolveProducePaths(pattern);
+      paths = resolveProducePaths(pattern, instance, true);
     } catch (error) {
-      failures.push(`${pattern}: ${error instanceof Error ? error.message : String(error)}`);
+      failures.push(`${resolvedPattern}: ${error instanceof Error ? error.message : String(error)}`);
       continue;
     }
     if (paths.length === 0 || paths.some((path) => lstatSync(path).isFile() && lstatSync(path).size < MIN_ARTIFACT_BYTES)) {
-      failures.push(`${pattern}: missing or smaller than ${MIN_ARTIFACT_BYTES} bytes`);
+      failures.push(`${resolvedPattern}: missing or smaller than ${MIN_ARTIFACT_BYTES} bytes`);
       continue;
     }
     const producers = graph.stages.filter((candidate) => (candidate.produces || []).includes(pattern));
     if (producers.length === 0) {
-      failures.push(`${pattern}: no stage declares this canonical produce`);
+      failures.push(`${resolvedPattern}: no stage declares this canonical produce`);
       continue;
     }
-    if (!producers.some((producer) => state.completed_stages.includes(producer.slug))) {
-      failures.push(`${pattern}: producer not completed (${producers.map((producer) => producer.slug).join(", ")})`);
+    const completed = new Set(completedInstanceIds(state));
+    const producerCompleted = producers.some((producer) => {
+      if (state.routing_model !== "module-unit-v1") return state.completed_stages.includes(producer.slug);
+      const required = dependencyInstances(instance, producer.slug, instances);
+      return required.length > 0 && required.every((candidate) => completed.has(candidate.instance_id));
+    });
+    if (!producerCompleted) {
+      failures.push(`${resolvedPattern}: producer not completed (${producers.map((producer) => producer.slug).join(", ")})`);
     }
   }
   return failures;
@@ -312,12 +548,15 @@ const MAX_EVIDENCE_BYTES = 512 * 1024;
 /** Maximum evidence staleness: 24 hours. Older evidence is rejected. */
 const MAX_EVIDENCE_AGE_MS = 24 * 60 * 60 * 1000;
 
-function evidencePath(stage: StageNode, sensor: string): string {
-  return join(PROJECT_ROOT, ".aidlc", "evidence", stage.slug, `${sensor}.json`);
+function evidencePath(stage: StageNode, sensor: string, instance?: StageInstance): string {
+  if (!instance || (instance.axis === "project" && stage.axis !== "project")) {
+    return join(PROJECT_ROOT, ".aidlc", "evidence", stage.slug, `${sensor}.json`);
+  }
+  return join(PROJECT_ROOT, evidenceRelativePath(stage.slug, sensor, instance.axis, instance));
 }
 
-function loadEvidence(stage: StageNode, sensor: string): { value?: Evidence; failure?: SensorResult } {
-  const path = evidencePath(stage, sensor);
+function loadEvidence(stage: StageNode, sensor: string, instance?: StageInstance): { value?: Evidence; failure?: SensorResult } {
+  const path = evidencePath(stage, sensor, instance);
   if (!existsSync(path)) {
     return {
       failure: {
@@ -377,9 +616,10 @@ function loadEvidence(stage: StageNode, sensor: string): { value?: Evidence; fai
 function validateEvidence(
   stage: StageNode,
   sensor: string,
+  instance: StageInstance,
   required: (value: Evidence) => string[],
 ): SensorResult | null {
-  const loaded = loadEvidence(stage, sensor);
+  const loaded = loadEvidence(stage, sensor, instance);
   if (loaded.failure) return loaded.failure;
   const evidence = loaded.value as Evidence;
   const errors = required(evidence);
@@ -429,7 +669,7 @@ function validateEvidence(
     return {
       sensor,
       passed: false,
-      message: `Evidence rejected at ${evidencePath(stage, sensor)}: ${errors.join("; ")}`,
+      message: `Evidence rejected at ${evidencePath(stage, sensor, instance)}: ${errors.join("; ")}`,
     };
   }
   return null;
@@ -495,7 +735,8 @@ function isEvidenceArtifact(path: string): boolean {
  *
  * Returns list of failed sensor results.
  */
-async function checkSensors(stage: StageNode, state: WorkflowState): Promise<SensorResult[]> {
+async function checkSensors(instance: StageInstance, state: WorkflowState): Promise<SensorResult[]> {
+  const stage = instance.stage;
   if (!stage.sensors || stage.sensors.length === 0) return [];
 
   const failures: SensorResult[] = [];
@@ -506,7 +747,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
         const todoFiles: string[] = [];
         const unreadableFiles: string[] = [];
         for (const pattern of stage.produces || []) {
-          for (const filePath of resolveProducePaths(pattern)) {
+          for (const filePath of resolveProducePaths(pattern, instance)) {
             const content = producedText(filePath);
             if (content === null) {
               unreadableFiles.push(artifactLabel(filePath));
@@ -560,7 +801,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
         const untraced: string[] = [];
         const unreadableFiles: string[] = [];
         const targets = [...new Set((stage.produces || [])
-          .flatMap((pattern) => resolveProducePaths(pattern))
+          .flatMap((pattern) => resolveProducePaths(pattern, instance))
           .filter((filePath) => !isEvidenceArtifact(filePath)))];
 
         if (targets.length === 0) {
@@ -599,7 +840,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "build-test-evidence": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
 
@@ -643,7 +884,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "review-evidence": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
           if (evidence.spec_axis !== "passed") errors.push('spec_axis must be "passed" (design conformance)');
@@ -673,7 +914,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "test-quality": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
           if (evidence.green_seen !== true) errors.push("green_seen must be true (tests passing observed)");
@@ -713,7 +954,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "contract-baseline": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "verified") errors.push('status must be "verified"');
           if (!asNonEmptyString(evidence.contract_id)) errors.push("contract_id is required (non-empty string)");
@@ -737,7 +978,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "functional-design-completeness": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
           if (evidence.data_source_validation !== "passed") errors.push('data_source_validation must be "passed"');
@@ -763,7 +1004,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "nfr-coverage": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
           const covered = asPositiveInt(evidence.requirements_covered);
@@ -795,7 +1036,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "infrastructure-completeness": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
           const requiredSections = ["deployment", "resources", "migration", "rollback", "runtime_dependencies"];
@@ -835,7 +1076,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "implementation-report": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
           if (evidence.summary_complete !== true) errors.push("summary_complete must be true");
@@ -869,7 +1110,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "prd-completeness": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
           if (!asNonEmptyString(evidence.prd_path)) errors.push("prd_path is required");
@@ -890,7 +1131,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "diagram-contract": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed" (sensor envelope)');
           const final = diagramFinalStatus(evidence);
@@ -973,7 +1214,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "design-intent-coverage": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
           if (evidence.coverage_complete !== true) errors.push("coverage_complete must be true");
@@ -988,7 +1229,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "ui-design-alignment": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (!["passed", "not_applicable"].includes(String(evidence.status))) errors.push('status must be "passed" or "not_applicable"');
           if (evidence.status === "not_applicable") return errors;
@@ -1005,7 +1246,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "frontend-platform-spec": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
           const layout = asStringArray(evidence.layout_primitives);
@@ -1021,7 +1262,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "framework-compliance": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
           if (evidence.skills_loaded !== true) errors.push("skills_loaded must be true");
@@ -1034,7 +1275,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "subagent-evidence": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
           const agents = asStringArray(evidence.agents);
@@ -1048,7 +1289,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "template-completeness": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
           const templates = asStringArray(evidence.templates);
@@ -1061,7 +1302,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
       }
 
       case "recovery-evidence": {
-        const failure = validateEvidence(stage, sensor, (evidence) => {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
           if (evidence.state_restored !== true) errors.push("state_restored must be true");
@@ -1076,18 +1317,24 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
         // Verify document cascade: current stage's produces should have
         // prior chain documents existing
         const skipped = new Set(state.skipped_stages);
+        const executable = new Set(
+          getExecutableStages(loadGraph(), state.scope, selectedOptionalStages(state)).map((candidate) => candidate.slug)
+        );
         const cascadeDependencies: Record<string, Array<[string, string]>> = {
-          "functional-design": [["application-design", "docs/aidlc/inception/application-design.md"], ["units-generation", "docs/aidlc/inception/units.md"]],
-          "nfr-design": [["nfr-requirements", "docs/aidlc/construction/nfr-requirements.md"]],
-          "code-generation": [["functional-design", "docs/aidlc/construction/functional-design.md"]],
-          "build-and-test": [["code-review", "docs/aidlc/construction/code-review.md"]],
+          "functional-design": [
+            ["application-design", "docs/aidlc/modules/{module-id}/inception/application-design.md"],
+            ["units-generation", "docs/aidlc/modules/{module-id}/inception/unit-manifest.json"],
+          ],
+          "nfr-design": [["nfr-requirements", "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements.md"]],
+          "code-generation": [["functional-design", "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design.md"]],
+          "build-and-test": [["code-review", "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md"]],
           "implementation-report": [["build-and-test", "docs/aidlc/construction/build-test-report.md"]],
           "operations": [["implementation-report", "docs/aidlc/construction/implementation-report.md"]],
         };
         const requiredDocs = (cascadeDependencies[stage.slug] || [])
-          .filter(([dependency]) => !skipped.has(dependency))
+          .filter(([dependency]) => executable.has(dependency) && !skipped.has(dependency))
           .map(([, document]) => document);
-        const missingDocs = requiredDocs.filter((d) => !existsSync(join(PROJECT_ROOT, d)));
+        const missingDocs = requiredDocs.filter((document) => resolveProducePaths(document, instance, true).length === 0);
         if (missingDocs.length > 0) {
           failures.push({
             sensor: "doc-cascade",
@@ -1102,7 +1349,7 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
         // The review stage must produce a non-empty review record itself.
         const reviewProduces = (stage.produces || []).filter((pattern) => !pattern.endsWith("/"));
         const missingReview = reviewProduces.filter((pattern) => {
-          const resolved = resolveProducePaths(pattern);
+          const resolved = resolveProducePaths(pattern, instance);
           return resolved.length === 0 || resolved.some((path) => statSync(path).size === 0);
         });
         if (reviewProduces.length === 0 || missingReview.length > 0) {
@@ -1138,7 +1385,59 @@ async function checkSensors(stage: StageNode, state: WorkflowState): Promise<Sen
 /**
  * Build condition context by inspecting project state.
  */
-function buildConditionContext(): ConditionContext {
+function contextualConditionPath(relativePath: string, instance?: StageInstance): string {
+  if (!instance || !instance.module_id || (instance.axis === "project" && instance.stage.axis !== "project")) {
+    return join(PROJECT_ROOT, relativePath);
+  }
+  return join(PROJECT_ROOT, relativePath.replace("docs/aidlc/inception", moduleInceptionRoot(instance.module_id)));
+}
+
+function unitConditionalStageSelections(instance?: StageInstance): Set<string> | undefined {
+  if (instance?.axis !== "unit" || !instance.module_id || !instance.unit_id) return undefined;
+  const manifestPath = join(PROJECT_ROOT, moduleInceptionRoot(instance.module_id), "unit-manifest.json");
+  if (!existsSync(manifestPath)) return undefined;
+  const unit = readUnitManifest(PROJECT_ROOT, instance.module_id)
+    .find((candidate) => candidate.unit_id === instance.unit_id);
+  if (!unit) throw new Error(`unit manifest does not contain active unit ${instance.module_id}/${instance.unit_id}`);
+  return unit.conditional_stages === undefined ? undefined : new Set(unit.conditional_stages);
+}
+
+function readConditionText(path: string): string {
+  if (!existsSync(path)) return "";
+  try {
+    return readFileSync(path, "utf-8");
+  } catch {
+    return "";
+  }
+}
+
+function plannedStageDecision(plan: string, stageSlug: string): boolean | undefined {
+  if (!plan) return undefined;
+  const escaped = stageSlug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rows = [...plan.matchAll(new RegExp(`\\|\\s*\`?${escaped}\`?\\s*\\|\\s*(execute|skip|执行|跳过)\\s*\\|`, "gi"))];
+  if (rows.length === 0) return undefined;
+  return rows.some((row) => /^(execute|执行)$/i.test(row[1]));
+}
+
+function projectModuleConditionText(relativePaths: string[]): string {
+  const manifest = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "module-manifest.json");
+  if (!existsSync(manifest)) return "";
+  try {
+    return readModuleManifest(PROJECT_ROOT).flatMap((module) => relativePaths.map((relativePath) =>
+      readConditionText(join(PROJECT_ROOT, moduleInceptionRoot(module.module_id), relativePath))
+    )).join("\n");
+  } catch {
+    return "";
+  }
+}
+
+function rootBuildMetadata(): string {
+  return ["package.json", "pom.xml", "build.gradle", "build.gradle.kts", "pubspec.yaml"]
+    .map((file) => readConditionText(join(PROJECT_ROOT, file)))
+    .join("\n");
+}
+
+function buildConditionContext(state: WorkflowState, instance?: StageInstance): ConditionContext {
   // has_legacy_code: src/ has >10 files pre-existing
   let has_legacy_code = false;
   const srcDir = join(PROJECT_ROOT, "src");
@@ -1150,89 +1449,168 @@ function buildConditionContext(): ConditionContext {
   }
 
   // has_ui_requirements: user-stories.md contains 'UI' or '界面'
-  let has_ui_requirements = false;
-  const userStoriesPath = join(PROJECT_ROOT, "docs", "aidlc", "inception", "user-stories.md");
-  if (existsSync(userStoriesPath)) {
-    try {
-      const content = readFileSync(userStoriesPath, "utf-8");
-      has_ui_requirements = /\bUI\b|界面/.test(content);
-    } catch { /* unreadable */ }
-  }
+  const userStoriesPath = contextualConditionPath("docs/aidlc/inception/user-stories.md", instance);
+  const userStoriesText = readConditionText(userStoriesPath);
+  const has_ui_requirements = /\bUI\b|界面/.test(userStoriesText);
 
   // has_reverse_output: reverse-engineering.md exists
-  const reverseEngineeringPath = join(PROJECT_ROOT, "docs", "aidlc", "inception", "reverse-engineering.md");
+  const reverseEngineeringPath = contextualConditionPath("docs/aidlc/inception/reverse-engineering.md", instance);
   const has_reverse_output = existsSync(reverseEngineeringPath);
 
-  // multi_module is derived only from upstream facts; never from units-generation's own output.
-  let multi_module = false;
+  // multi_module first honors the signed workspace architecture choice. Older
+  // signed workflows without that choice fall back to canonical project facts.
+  const signedArchitecture = architectureChoice(state);
+  const architectureChoiceKnown = signedArchitecture !== undefined;
+  let architectureEvidenceAvailable = architectureChoiceKnown;
+  let multi_module = signedArchitecture === "multi-module";
+  const moduleManifestPath = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "module-manifest.json");
+  if (!architectureChoiceKnown && existsSync(moduleManifestPath)) {
+    try {
+      multi_module = readModuleManifest(PROJECT_ROOT).length > 1;
+      architectureEvidenceAvailable = true;
+    } catch { /* invalid manifests are rejected by the module-division report gate */ }
+  }
   const workspaceFactsPath = join(PROJECT_ROOT, ".aidlc", "workspace-facts.json");
   const moduleDivisionPath = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "module-division.md");
-  if (existsSync(workspaceFactsPath)) {
+  if (!architectureChoiceKnown && existsSync(workspaceFactsPath)) {
     try {
       const facts = JSON.parse(readFileSync(workspaceFactsPath, "utf-8")) as Record<string, unknown>;
-      multi_module = Array.isArray(facts.modules) && facts.modules.length > 1;
+      if (Array.isArray(facts.modules)) {
+        multi_module = facts.modules.length > 1;
+        architectureEvidenceAvailable = true;
+      }
     } catch { /* invalid facts are ignored and upstream document detection is used */ }
   }
-  if (!multi_module && existsSync(moduleDivisionPath)) {
+  if (!architectureChoiceKnown && !architectureEvidenceAvailable && existsSync(moduleDivisionPath)) {
     try {
       const content = readFileSync(moduleDivisionPath, "utf-8");
       const moduleHeadings = content.match(/^##\s+(?!摘要|概述|Summary)/gim);
-      multi_module = (moduleHeadings?.length ?? 0) > 1;
+      if ((moduleHeadings?.length ?? 0) > 0) {
+        multi_module = (moduleHeadings?.length ?? 0) > 1;
+        architectureEvidenceAvailable = true;
+      }
     } catch { /* unreadable */ }
   }
-  if (!multi_module) {
+  if (!architectureChoiceKnown && !architectureEvidenceAvailable) {
     try {
       const packageJsonPath = join(PROJECT_ROOT, "package.json");
       if (existsSync(packageJsonPath)) {
         const pkg = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as Record<string, unknown>;
-        multi_module = Array.isArray(pkg.workspaces) || (pkg.workspaces !== null && typeof pkg.workspaces === "object");
+        if (Array.isArray(pkg.workspaces) || (pkg.workspaces !== null && typeof pkg.workspaces === "object")) {
+          multi_module = true;
+          architectureEvidenceAvailable = true;
+        }
       }
     } catch { /* invalid package metadata */ }
   }
+  if (!architectureChoiceKnown && !architectureEvidenceAvailable) {
+    const productInceptionInstance = "product-inception";
+    const legacyMultiRoute = state.current_stage === "product-inception"
+      || completedInstanceIds(state).includes(productInceptionInstance)
+      || state.history.some((entry) => entry.stage === "product-inception");
+    // Before workspace choices existed, every complete workflow entered the
+    // product route. Preserve that conservative behavior only for signed legacy
+    // workflows that already resolved workspace-detection.
+    if (legacyMultiRoute || isInstanceResolved(state, "workspace-detection")) multi_module = true;
+  }
 
   const contextDocs = [
-    join(PROJECT_ROOT, "docs", "aidlc", "inception", "requirements.md"),
-    join(PROJECT_ROOT, "docs", "aidlc", "inception", "application-design.md"),
-    join(PROJECT_ROOT, "docs", "aidlc", "inception", "workflow-plan.md"),
+    contextualConditionPath("docs/aidlc/inception/requirements.md", instance),
+    contextualConditionPath("docs/aidlc/inception/application-design.md", instance),
+    contextualConditionPath("docs/aidlc/inception/workflow-plan.md", instance),
+    userStoriesPath,
   ];
-  const contextText = contextDocs
-    .filter((path) => existsSync(path))
-    .map((path) => readFileSync(path, "utf-8"))
-    .join("\n");
-  const has_nfr_needs = /NFR|非功能|性能|安全|可用性|可靠性|恢复|扩展性/i.test(contextText);
-  const has_infra_needs = /基础设施|infrastructure|部署|容器|Kubernetes|Docker|Nacos|数据库|缓存|消息队列|分布式|外部系统/i.test(contextText);
-  const has_test_case_sources = existsSync(join(PROJECT_ROOT, "docs", "aidlc", "inception", "application-design.md")) && (
-    existsSync(join(PROJECT_ROOT, "docs", "aidlc", "inception", "user-stories.md")) || has_nfr_needs || has_infra_needs
-  );
-
-  // has_contract_dependencies: design references shared contract, API contract, or inter-module interface
-  const has_contract_dependencies = /共享契约|shared.?contract|API.?contract|接口契约|proto|protobuf|OpenAPI|swagger/i.test(contextText);
-
-  // has_subagent_support: workflow plan mentions subagent or parallel execution
-  const workflowPlanPath = join(PROJECT_ROOT, "docs", "aidlc", "inception", "workflow-plan.md");
-  let has_subagent_support = false;
-  if (existsSync(workflowPlanPath)) {
-    try {
-      const wpContent = readFileSync(workflowPlanPath, "utf-8");
-      has_subagent_support = /subagent|sub-agent|parallel|并行|mob/i.test(wpContent);
-    } catch { /* unreadable */ }
+  let contextText = contextDocs.map(readConditionText).join("\n");
+  let workflowPlanText = readConditionText(contextualConditionPath("docs/aidlc/inception/workflow-plan.md", instance));
+  if (instance?.axis === "project") {
+    const moduleText = projectModuleConditionText(["requirements.md", "application-design.md", "workflow-plan.md", "user-stories.md"]);
+    const modulePlans = projectModuleConditionText(["workflow-plan.md"]);
+    contextText = `${contextText}\n${moduleText}`;
+    workflowPlanText = `${workflowPlanText}\n${modulePlans}`;
   }
 
-  // is_loeyae_boot: pom.xml or build.gradle references loeyae-boot framework
-  let is_loeyae_boot = false;
-  const pomPath = join(PROJECT_ROOT, "pom.xml");
-  const gradlePath = join(PROJECT_ROOT, "build.gradle");
-  if (existsSync(pomPath)) {
-    try {
-      is_loeyae_boot = /loeyae-boot|loeyae\.boot/i.test(readFileSync(pomPath, "utf-8"));
-    } catch { /* unreadable */ }
-  } else if (existsSync(gradlePath)) {
-    try {
-      is_loeyae_boot = /loeyae-boot|loeyae\.boot/i.test(readFileSync(gradlePath, "utf-8"));
-    } catch { /* unreadable */ }
-  }
+  const unitStageSelections = unitConditionalStageSelections(instance);
+  const selectedForUnit = (stageSlug: string, legacyFallback: boolean): boolean =>
+    unitStageSelections === undefined ? legacyFallback : unitStageSelections.has(stageSlug);
 
-  // context_compacted: state indicates context window compaction occurred (marker file)
+  const moduleHasNfrNeeds = /NFR|非功能|性能|安全|可用性|可靠性|恢复|扩展性/i.test(contextText);
+  const has_nfr_needs = unitStageSelections === undefined
+    ? moduleHasNfrNeeds
+    : unitStageSelections.has("nfr-requirements") && unitStageSelections.has("nfr-design");
+  const moduleHasInfraNeeds = /基础设施|infrastructure|部署拓扑|容器|Kubernetes|Docker|Nacos|缓存|消息队列|分布式|外部系统/i.test(contextText);
+  const has_infra_needs = selectedForUnit("infrastructure-design", moduleHasInfraNeeds);
+  const applicationInstance = instance?.module_id
+    ? stageInstanceId("application-design", "module", { module_id: instance.module_id })
+    : "application-design";
+  const applicationDesignCompleted = completedInstanceIds(state).includes(applicationInstance)
+    || (state.routing_model !== "module-unit-v1" && state.completed_stages.includes("application-design"));
+  const has_test_case_sources = applicationDesignCompleted && (existsSync(userStoriesPath) || has_nfr_needs || has_infra_needs);
+  const moduleHasContractDependencies = /共享契约|shared.?contract|API.?contract|接口契约|proto|protobuf|OpenAPI|swagger/i.test(contextText);
+  const has_contract_dependencies = selectedForUnit("shared-contract-baseline", moduleHasContractDependencies);
+
+  const applicationDecision = plannedStageDecision(workflowPlanText, "application-design");
+  const applicationEvidence = /新接口|新组件|应用服务|编排器|跨模块|跨服务|多端|复杂业务规则|共享配置|数据迁移|一致性|外部故障|数据 Owner|runtime consumer/i.test(contextText);
+  const has_application_design_needs = applicationDecision ?? (multi_module || applicationEvidence);
+
+  const functionalDecision = plannedStageDecision(workflowPlanText, "functional-design");
+  const functionalEvidence = /新数据模型|新 schema|schema 变化|业务规则.{0,20}(3|三)条|状态机变化|复杂算法|领域模型/i.test(contextText);
+  const has_functional_design_needs = selectedForUnit("functional-design", functionalDecision ?? functionalEvidence);
+
+  const unitDecision = plannedStageDecision(workflowPlanText, "units-generation");
+  const unitEvidence = /多个工作单元|多单元|跨服务协调|多个包|多个模块|并行开发|工作量超出单次执行/i.test(contextText);
+  const has_unit_generation_needs = unitDecision ?? (multi_module || has_functional_design_needs || unitEvidence);
+
+  // has_subagent_support means the approved workflow plan selected delegated/parallel execution.
+  const moduleHasSubagentSupport = /subagent|sub-agent|parallel|并行|mob/i.test(workflowPlanText);
+  const has_subagent_support = moduleHasSubagentSupport
+    && selectedForUnit("subagent-execution", true);
+
+  const buildMetadata = rootBuildMetadata();
+  const productContractText = [
+    readConditionText(moduleDivisionPath),
+    readConditionText(workspaceFactsPath),
+    readConditionText(join(PROJECT_ROOT, "docs", "aidlc", "ideation", "product-inception.md")),
+    buildMetadata,
+  ].join("\n");
+  const has_product_contract_needs = multi_module
+    || /跨模块|跨服务|跨进程|异步事件|事件\s*(?:schema|契约)|前后端接口|API\s*契约|接口契约|OpenAPI|swagger|webhook|消息队列|外部系统交换/i.test(productContractText);
+
+  // is_loeyae_boot: build metadata references loeyae-boot framework.
+  const projectUsesLoeyaeBoot = /loeyae-boot|loeyae\.boot/i.test(buildMetadata);
+  const is_loeyae_boot = projectUsesLoeyaeBoot
+    && selectedForUnit("loeyae-compliance", true);
+
+  // Runtime UI mode is taken from signed history, never from handoff.md.
+  const uiChoice = uiDesignChoice(state, instance?.module_id);
+  const ui_mode_html_mock = uiChoice === "html-mock";
+  const ui_mode_figma = uiChoice === "figma-create" || uiChoice === "figma-existing";
+  const ui_design_selected = ui_mode_html_mock || ui_mode_figma;
+  const crossPlatformTarget = /Taro|React Native|Flutter|UniApp|uni-app|跨端|小程序|@tarojs|react-native/i.test(`${contextText}\n${buildMetadata}`);
+  const needs_ui_implementation_bridge = ui_design_selected
+    && crossPlatformTarget
+    && selectedForUnit("ui-implementation-bridge", true);
+
+  const implementationText = readConditionText(join(PROJECT_ROOT, "docs", "aidlc", "construction", "implementation-report.md"));
+  const deploymentText = `${contextText}\n${implementationText}\n${buildMetadata}`;
+  const operationsDecision = plannedStageDecision(workflowPlanText, "operations");
+  const explicitlyNoDeployment = /无需部署|不需要部署|纯库|library only|纯本地工具|local-only/i.test(deploymentText);
+  const deploymentFilesExist = ["Dockerfile", "compose.yml", "docker-compose.yml", "Procfile", "Jenkinsfile"]
+    .some((file) => existsSync(join(PROJECT_ROOT, file)))
+    || ["k8s", "kubernetes", "helm"].some((directory) => existsSync(join(PROJECT_ROOT, directory)));
+  const deploymentEvidence = /独立服务|可部署服务|需要部署|部署目标|容器化|Kubernetes|Docker Compose|平台托管|生产发布|deployment target/i.test(deploymentText);
+  const packageHasRuntimeStart = /"(start|serve)"\s*:/.test(readConditionText(join(PROJECT_ROOT, "package.json")));
+  const inferredDeploymentNeed = deploymentFilesExist || deploymentEvidence || packageHasRuntimeStart;
+  const has_deployment_needs = operationsDecision ?? (!explicitlyNoDeployment && inferredDeploymentNeed);
+
+  const operationsText = [
+    "docs/aidlc/operation/operations-plan.md",
+    "docs/aidlc/operation/plans/operations-plan.md",
+    "docs/aidlc/operation/deployment-config.md",
+    "docs/aidlc/operation/operations-summary.md",
+  ].map((path) => readConditionText(join(PROJECT_ROOT, path))).join("\n");
+  const has_operations_template_needs = has_deployment_needs
+    && /(?:可复用|归档|保留|生成).{0,16}(?:模板|template)|(?:模板|template).{0,16}(?:Dockerfile|Docker Compose|Jenkins|Kubernetes|Helm|Kustomize|Nginx)/i.test(operationsText);
+
   const context_compacted = existsSync(join(PROJECT_ROOT, ".aidlc", "context-compacted"));
 
   return {
@@ -1240,6 +1618,7 @@ function buildConditionContext(): ConditionContext {
     has_ui_requirements,
     has_reverse_output,
     multi_module,
+    has_product_contract_needs,
     has_nfr_needs,
     has_infra_needs,
     has_test_case_sources,
@@ -1247,6 +1626,15 @@ function buildConditionContext(): ConditionContext {
     has_subagent_support,
     is_loeyae_boot,
     context_compacted,
+    ui_design_selected,
+    ui_mode_html_mock,
+    ui_mode_figma,
+    has_application_design_needs,
+    has_unit_generation_needs,
+    has_functional_design_needs,
+    needs_ui_implementation_bridge,
+    has_deployment_needs,
+    has_operations_template_needs,
   };
 }
 
@@ -1294,60 +1682,64 @@ function evaluateCondition(condition: string, context: ConditionContext): boolea
  * dependencies are all satisfied, condition evaluates to true,
  * and not yet completed or skipped.
  */
-function findNextStage(
-  executableStages: StageNode[],
-  completedSlugs: string[],
-  skippedSlugs: string[],
+function findNextInstance(
+  instances: StageInstance[],
   state: WorkflowState
 ): {
-  stage: StageNode | null;
-  blocked?: { stage: StageNode; unsatisfied: string[] };
-  conditionError?: { stage: StageNode; condition: string };
-  skippedByCondition?: { stage: StageNode; reason: string }[];
+  instance: StageInstance | null;
+  blocked?: { instance: StageInstance; unsatisfied: string[] };
+  conditionError?: { instance: StageInstance; condition: string };
+  skippedByCondition?: { instance: StageInstance; reason: string }[];
 } {
-  const done = new Set([...completedSlugs, ...skippedSlugs]);
-  const executableSlugs = new Set(executableStages.map((s) => s.slug));
-  const conditionContext = buildConditionContext();
-  const conditionSkips: { stage: StageNode; reason: string }[] = [];
+  const conditionSkips: { instance: StageInstance; reason: string }[] = [];
 
-  for (const s of executableStages) {
-    if (done.has(s.slug)) continue;
+  for (const instance of instances) {
+    if (isInstanceResolved(state, instance.instance_id)) continue;
+    const stage = instance.stage;
 
-    // Evaluate condition — if false, auto-skip
-    if (s.condition && s.condition.trim() !== "") {
-      const conditionResult = evaluateCondition(s.condition, conditionContext);
+    if (stage.condition && stage.condition.trim() !== "") {
+      const conditionResult = evaluateCondition(stage.condition, buildConditionContext(state, instance));
       if (conditionResult === undefined) {
-        return { stage: null, conditionError: { stage: s, condition: s.condition }, skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined };
+        return {
+          instance: null,
+          conditionError: { instance, condition: stage.condition },
+          skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined,
+        };
       }
       if (!conditionResult) {
-        conditionSkips.push({ stage: s, reason: "condition not met" });
-        // Add to skipped in state (caller must persist)
-        state.skipped_stages.push(s.slug);
+        conditionSkips.push({ instance, reason: "condition not met" });
+        if (state.routing_model === "module-unit-v1") {
+          state.skipped_stage_instances!.push(instance.instance_id);
+        } else if (!state.skipped_stages.includes(stage.slug)) {
+          state.skipped_stages.push(stage.slug);
+        }
         state.history.push({
-          stage: s.slug,
+          stage: stage.slug,
+          instance_id: state.routing_model === "module-unit-v1" ? instance.instance_id : undefined,
+          module_id: instance.module_id,
+          unit_id: instance.unit_id,
           result: "condition_skipped",
           timestamp: new Date().toISOString(),
-          user_input: `Auto-skipped: condition "${s.condition}" evaluated to false`,
+          user_input: `Auto-skipped: condition "${stage.condition}" evaluated to false`,
         });
-        done.add(s.slug);
+        reconcileStageSummaries(state, instances);
         continue;
       }
     }
 
-    // Check requires dependencies (only those in scope)
-    const effectiveSkipped = [
-      ...skippedSlugs,
-      ...conditionSkips.map((item) => item.stage.slug),
-    ];
-    const unsatisfied = checkRequires(s, completedSlugs, effectiveSkipped, executableSlugs);
+    const unsatisfied = checkRequires(instance, instances, state);
     if (unsatisfied.length > 0) {
-      return { stage: null, blocked: { stage: s, unsatisfied }, skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined };
+      return {
+        instance: null,
+        blocked: { instance, unsatisfied },
+        skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined,
+      };
     }
 
-    return { stage: s, skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined };
+    return { instance, skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined };
   }
 
-  return { stage: null, skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined };
+  return { instance: null, skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined };
 }
 
 function parseFlags(args: string[]): Record<string, string> {
@@ -1365,6 +1757,31 @@ function parseFlags(args: string[]): Record<string, string> {
   return flags;
 }
 
+function activeApprovalKey(state: WorkflowState, instance: StageInstance): string {
+  return state.routing_model === "module-unit-v1" ? instance.instance_id : instance.stage.slug;
+}
+
+function clearActiveContext(state: WorkflowState): void {
+  state.current_stage = "";
+  delete state.current_stage_instance;
+  delete state.current_module;
+  delete state.current_unit;
+}
+
+function artifactRoot(instance: StageInstance): string {
+  if (instance.axis === "module" && instance.module_id) return moduleInceptionRoot(instance.module_id);
+  if (instance.axis === "unit" && instance.module_id && instance.unit_id) return unitConstructionRoot(instance.module_id, instance.unit_id);
+  const phaseDirectory = instance.stage.phase === "operation" ? "operations" : instance.stage.phase;
+  return `docs/aidlc/${phaseDirectory}`;
+}
+
+function evidenceRoot(instance: StageInstance): string {
+  const parts = [".aidlc", "evidence", instance.stage.slug];
+  if (instance.axis !== "project" && instance.module_id) parts.push(instance.module_id);
+  if (instance.axis === "unit" && instance.unit_id) parts.push(instance.unit_id);
+  return parts.join("/");
+}
+
 // ---------------------------------------------------------------------------
 // next — compute the next directive without mutating state
 // ---------------------------------------------------------------------------
@@ -1372,6 +1789,12 @@ function parseFlags(args: string[]): Record<string, string> {
 async function handleNext(args: string[]): Promise<Directive> {
   const graph = loadGraph();
   const flags = parseFlags(args);
+
+  // PRD is a user-selected workflow option, never a default Inception gate.
+  const withPrd = "with-prd" in flags;
+  if (withPrd && flags["with-prd"] !== "true") {
+    return { kind: "error", message: "--with-prd is a boolean flag and does not accept a value" };
+  }
 
   // Check for --resume flag
   const isResume = "resume" in flags;
@@ -1385,27 +1808,42 @@ async function handleNext(args: string[]): Promise<Directive> {
     };
   }
 
+  if (withPrd && (!scopeFlag || !PRD_ELIGIBLE_SCOPES.has(scopeFlag))) {
+    return {
+      kind: "error",
+      message: "--with-prd is only valid when initializing feature, enterprise, mvp, or classic scope",
+    };
+  }
+
   // Check for --status flag
   if ("status" in flags) {
     const state = loadState();
     if (!state) {
       return { kind: "print", message: "No active workflow. Start with: aidlc-orchestrate next --scope <scope> \"<description>\"" };
     }
-    const exec = getExecutableStages(graph, state.scope);
-    const remaining = exec.filter((s) => !state.completed_stages.includes(s.slug) && !state.skipped_stages.includes(s.slug));
+    const instances = expandStageInstances(graph, state);
+    const remaining = instances.filter((instance) => !isInstanceResolved(state, instance.instance_id));
+    const completedCount = instances.filter((instance) => completedInstanceIds(state).includes(instance.instance_id)).length;
+    const skippedCount = instances.filter((instance) => skippedInstanceIds(state).includes(instance.instance_id)).length;
     return {
       kind: "print",
       message: `📊 Workflow Status\n` +
         `  Scope: ${state.scope} | Phase: ${state.current_phase} | Status: ${state.status}\n` +
-        `  Current stage: ${state.current_stage || "(none)"}\n` +
-        `  Completed: ${state.completed_stages.length}/${exec.length} stages\n` +
-        `  Skipped: ${state.skipped_stages.length}\n` +
-        `  Remaining: ${remaining.length} (${remaining.map((s) => s.slug).join(", ")})`,
+        `  PRD option: ${selectedOptionalStages(state).includes("prd-generation") ? "selected" : "not selected"}\n` +
+        `  Current stage: ${state.current_stage_instance || state.current_stage || "(none)"}\n` +
+        `  Context: module=${state.current_module || "-"}, unit=${state.current_unit || "-"}\n` +
+        `  Completed: ${completedCount}/${instances.length} stage instances\n` +
+        `  Skipped: ${skippedCount}\n` +
+        `  Remaining: ${remaining.length} (${remaining.map((instance) => instance.instance_id).join(", ")})`,
     };
   }
 
   // Load or create state
   let state = loadState();
+
+  if (state && withPrd) {
+    return { kind: "error", message: "--with-prd can only be selected when initializing a new workflow" };
+  }
 
   if (!state) {
     // No workflow exists — need scope to initialize
@@ -1421,12 +1859,14 @@ async function handleNext(args: string[]): Promise<Directive> {
     // already created a pending project enrollment.
     const enrollment = readEnrollment(PROJECT_ROOT);
     const pendingWorkflowId = enrollment?.status === "pending" ? enrollment.workflow_id : undefined;
-    state = createInitialState(scopeFlag, "2.2.0", pendingWorkflowId);
+    const selectedOptionalStages = withPrd ? ["prd-generation"] : [];
+    state = createInitialState(scopeFlag, "2.2.0", pendingWorkflowId, selectedOptionalStages);
     saveState(state);
     return {
       kind: "print",
       message: `✅ Workflow initialized with scope: ${scopeFlag}\n` +
-        `  Executable stages: ${getExecutableStages(graph, scopeFlag).length}/${graph.stage_count}\n` +
+        `  PRD option: ${withPrd ? "selected" : "not selected"}\n` +
+        `  Executable stages: ${getExecutableStages(graph, scopeFlag, selectedOptionalStages).length}/${graph.stage_count}\n` +
         `  Run 'next' again to get the first stage directive.`,
     };
   }
@@ -1450,65 +1890,77 @@ async function handleNext(args: string[]): Promise<Directive> {
     return { kind: "done", message: "Workflow is already complete." };
   }
 
-  // Find next executable stage (with condition evaluation)
-  const executableStages = getExecutableStages(graph, state.scope);
-  const { stage: nextStage, blocked, conditionError, skippedByCondition } = findNextStage(executableStages, state.completed_stages, state.skipped_stages, state);
+  // Expand the static graph into the currently known execution instances.
+  const instances = expandStageInstances(graph, state);
+  const { instance: nextInstance, blocked, conditionError, skippedByCondition } = findNextInstance(instances, state);
 
-  // Persist any condition-based skips
-  if (skippedByCondition && skippedByCondition.length > 0) {
-    saveState(state);
-  }
+  if (skippedByCondition && skippedByCondition.length > 0) saveState(state);
 
   if (conditionError) {
     return {
       kind: "error",
-      message: `🚫 Unknown stage condition "${conditionError.condition}" on "${conditionError.stage.slug}". Register the condition in the engine before continuing.`,
+      message: `🚫 Unknown stage condition "${conditionError.condition}" on "${conditionError.instance.instance_id}". Register the condition in the engine before continuing.`,
     };
   }
 
   if (blocked) {
-    // Stage exists but dependencies not met — report blocker
     return {
       kind: "error",
-      message: `🚫 Stage "${blocked.stage.slug}" (${blocked.stage.name}) is blocked.\n` +
+      message: `🚫 Stage instance "${blocked.instance.instance_id}" (${blocked.instance.stage.name}) is blocked.\n` +
         `  Unsatisfied requires: ${blocked.unsatisfied.join(", ")}\n` +
-        `  These stages must be completed first.` +
+        `  These stage instances must be completed first.` +
         (skippedByCondition && skippedByCondition.length > 0
-          ? `\n  ⏭️ Auto-skipped by condition: ${skippedByCondition.map((s) => s.stage.slug).join(", ")}`
+          ? `\n  ⏭️ Auto-skipped by condition: ${skippedByCondition.map((item) => item.instance.instance_id).join(", ")}`
           : ""),
     };
   }
 
-  if (!nextStage) {
-    // All stages done
+  if (!nextInstance) {
+    reconcileStageSummaries(state, instances);
     state.status = "done";
-    state.current_stage = "";
+    clearActiveContext(state);
     saveState(state);
     return {
       kind: "done",
-      message: `🎉 All ${state.completed_stages.length} stages complete. Workflow finished.`,
+      message: `🎉 All ${instances.length} stage instances resolved. Workflow finished.`,
     };
   }
 
-  const consumeFailures = checkConsumes(nextStage, state, graph);
+  const nextStage = nextInstance.stage;
+  const consumeFailures = checkConsumes(nextInstance, state, graph, instances);
   if (consumeFailures.length > 0) {
     return {
       kind: "error",
-      message: `🚫 Stage "${nextStage.slug}" is missing canonical consumed artifacts:\n${consumeFailures.map((failure) => `  ❌ ${failure}`).join("\n")}`,
+      message: `🚫 Stage instance "${nextInstance.instance_id}" is missing canonical consumed artifacts:\n${consumeFailures.map((failure) => `  ❌ ${failure}`).join("\n")}`,
     };
   }
 
   state.current_stage = nextStage.slug;
   state.current_phase = nextStage.phase;
+  if (state.routing_model === "module-unit-v1") {
+    state.current_stage_instance = nextInstance.instance_id;
+    if (nextInstance.module_id) state.current_module = nextInstance.module_id;
+    else delete state.current_module;
+    if (nextInstance.unit_id) state.current_unit = nextInstance.unit_id;
+    else delete state.current_unit;
+  }
   const gate = nextStage.approval === "block";
-  if (gate && !state.approval_challenges[nextStage.slug]) {
-    state.approval_challenges[nextStage.slug] = `${Date.now()}.${randomBytes(24).toString("hex")}`;
+  const approvalKey = activeApprovalKey(state, nextInstance);
+  if (gate && !state.approval_challenges[approvalKey]) {
+    state.approval_challenges[approvalKey] = `${Date.now()}.${randomBytes(24).toString("hex")}`;
   }
   saveState(state);
 
+  const directiveChoices = runtimeChoices(nextStage, state);
   return {
     kind: "run-stage",
     stage: nextStage.slug,
+    stage_instance: nextInstance.instance_id,
+    axis: nextInstance.axis,
+    module_id: nextInstance.module_id || null,
+    unit_id: nextInstance.unit_id || null,
+    artifact_root: artifactRoot(nextInstance),
+    evidence_root: evidenceRoot(nextInstance),
     stage_file: join("core", nextStage.file),
     name: nextStage.name,
     number: nextStage.number,
@@ -1519,10 +1971,12 @@ async function handleNext(args: string[]): Promise<Directive> {
     gate,
     approval: nextStage.approval,
     completion_contract: nextStage.completion_contract,
-    approval_challenge: gate ? state.approval_challenges[nextStage.slug] : undefined,
-    consumes: nextStage.consumes,
-    produces: nextStage.produces,
+    approval_challenge: gate ? state.approval_challenges[approvalKey] : undefined,
+    consumes: nextStage.consumes.map((pattern) => instanceArtifactPattern(pattern, nextInstance, true)),
+    produces: nextStage.produces.map((pattern) => instanceArtifactPattern(pattern, nextInstance)),
     sensors: nextStage.sensors,
+    choices: directiveChoices,
+    choice_required: directiveChoices.length > 0,
   };
 }
 
@@ -1571,6 +2025,23 @@ async function handleReport(args: string[]): Promise<Directive> {
   if (!stageNode) {
     return { kind: "error", message: `Unknown stage "${stageSlug}".` };
   }
+  const instances = expandStageInstances(graph, state);
+  const currentInstance = state.routing_model === "module-unit-v1"
+    ? instances.find((instance) => instance.instance_id === state.current_stage_instance)
+    : makeInstance(stageNode, "project");
+  if (!currentInstance || currentInstance.stage.slug !== stageSlug) {
+    return {
+      kind: "error",
+      message: `Active stage instance "${state.current_stage_instance || stageSlug}" no longer exists in the declared module/unit manifests. Restore the signed routing manifests before reporting.`,
+    };
+  }
+  if (flags.module && flags.module !== currentInstance.module_id) {
+    return { kind: "error", message: `Module mismatch: active module is "${currentInstance.module_id || "(none)"}", but report specified "${flags.module}".` };
+  }
+  if (flags.unit && flags.unit !== currentInstance.unit_id) {
+    return { kind: "error", message: `Unit mismatch: active unit is "${currentInstance.unit_id || "(none)"}", but report specified "${flags.unit}".` };
+  }
+  const approvalKey = activeApprovalKey(state, currentInstance);
   if (result === "completed" && stageNode.approval === "block") {
     return { kind: "error", message: `Stage "${stageSlug}" requires trusted approval. Supply the host-issued one-time token with --result approved --approval-token <token>.` };
   }
@@ -1578,17 +2049,17 @@ async function handleReport(args: string[]): Promise<Directive> {
     if (stageNode.approval !== "block") {
       return { kind: "error", message: `Stage "${stageSlug}" is not an approval gate and cannot use --result approved.` };
     }
-    const challenge = state.approval_challenges[stageSlug];
-    if (!challenge) return { kind: "error", message: `No active approval challenge for stage "${stageSlug}". Run next to obtain one.` };
+    const challenge = state.approval_challenges[approvalKey];
+    if (!challenge) return { kind: "error", message: `No active approval challenge for stage instance "${currentInstance.instance_id}". Run next to obtain one.` };
     const issuedAt = Number(challenge.split(".", 1)[0]);
     if (!Number.isFinite(issuedAt) || Date.now() - issuedAt > 15 * 60 * 1000 || issuedAt > Date.now() + 60 * 1000) {
-      delete state.approval_challenges[stageSlug];
+      delete state.approval_challenges[approvalKey];
       saveState(state);
-      return { kind: "error", message: `Approval challenge for stage "${stageSlug}" expired. Run next to obtain a new challenge.` };
+      return { kind: "error", message: `Approval challenge for stage instance "${currentInstance.instance_id}" expired. Run next to obtain a new challenge.` };
     }
-    if (!approvalTokenValue) return { kind: "error", message: `Stage "${stageSlug}" requires --approval-token from a trusted human approval channel.` };
-    if (!verifyApprovalToken(state.workflow_id, stageSlug, challenge, approvalTokenValue)) {
-      return { kind: "error", message: `Invalid or stale approval token for stage "${stageSlug}".` };
+    if (!approvalTokenValue) return { kind: "error", message: `Stage instance "${currentInstance.instance_id}" requires --approval-token from a trusted human approval channel.` };
+    if (!verifyApprovalToken(state.workflow_id, approvalKey, challenge, approvalTokenValue)) {
+      return { kind: "error", message: `Invalid or stale approval token for stage instance "${currentInstance.instance_id}".` };
     }
   }
   if (stageNode.completion_contract === "instruction_only" && result === "completed" && flags["instruction-ack"] !== stageSlug) {
@@ -1597,10 +2068,22 @@ async function handleReport(args: string[]): Promise<Directive> {
       message: `Stage "${stageSlug}" is instruction-only and cannot be auto-completed by a lifecycle Hook. After executing its body, report again with --instruction-ack ${stageSlug}.`,
     };
   }
+  const runtimeChoiceValues = runtimeChoices(stageNode, state);
+  if ((result === "completed" || result === "approved") && runtimeChoiceValues.length > 0) {
+    if (!userInput || !runtimeChoiceValues.includes(userInput)) {
+      return {
+        kind: "error",
+        message: `Stage "${stageSlug}" requires --user-input with one of: ${runtimeChoiceValues.join(", ")}. The choice is stored in signed workflow history.`,
+      };
+    }
+  }
 
   // Record history entry
   const entry: HistoryEntry = {
     stage: stageSlug,
+    instance_id: state.routing_model === "module-unit-v1" ? currentInstance.instance_id : undefined,
+    module_id: currentInstance.module_id,
+    unit_id: currentInstance.unit_id,
     result,
     timestamp: new Date().toISOString(),
   };
@@ -1608,28 +2091,45 @@ async function handleReport(args: string[]): Promise<Directive> {
 
   // --- P0 Gate: Validate consumes and produces before allowing completion ---
   if (result === "completed" || result === "approved") {
-      const consumeFailures = checkConsumes(stageNode, state, graph);
+      const consumeFailures = checkConsumes(currentInstance, state, graph, instances);
       if (consumeFailures.length > 0) {
         return {
           kind: "error",
-          message: `🚫 Cannot complete stage "${stageSlug}" — canonical consumed artifacts are no longer valid:\n` +
+          message: `🚫 Cannot complete stage instance "${currentInstance.instance_id}" — canonical consumed artifacts are no longer valid:\n` +
             consumeFailures.map((failure) => `  ❌ ${failure}`).join("\n"),
         };
       }
 
-      // Check produces (准出 — artifact existence)
-      const missingProduces = checkProduces(stageNode);
+      const missingProduces = checkProduces(currentInstance);
       if (missingProduces.length > 0) {
         return {
           kind: "error",
-          message: `🚫 Cannot complete stage "${stageSlug}" — required produces not found:\n` +
-            missingProduces.map((p) => `  ❌ ${p}`).join("\n") +
+          message: `🚫 Cannot complete stage instance "${currentInstance.instance_id}" — required produces not found:\n` +
+            missingProduces.map((path) => `  ❌ ${path}`).join("\n") +
             `\n\nGenerate these artifacts first, then report again.`,
         };
       }
 
-      // Check sensors (准出 — quality gates)
-      const sensorFailures = await checkSensors(stageNode, state);
+      if (state.routing_model === "module-unit-v1" && stageSlug === "module-division") {
+        readModuleManifest(PROJECT_ROOT);
+      }
+      if (state.routing_model === "module-unit-v1" && stageSlug === "units-generation") {
+        if (!currentInstance.module_id) throw new Error("units-generation requires an active module context");
+        const units = readUnitManifest(PROJECT_ROOT, currentInstance.module_id);
+        if (architectureChoice(state)) {
+          const missingSelections = units
+            .filter((unit) => unit.conditional_stages === undefined)
+            .map((unit) => unit.unit_id);
+          if (missingSelections.length > 0) {
+            return {
+              kind: "error",
+              message: `🚫 Cannot complete stage instance "${currentInstance.instance_id}" — new signed workflows require conditional_stages for every unit; missing: ${missingSelections.join(", ")}.`,
+            };
+          }
+        }
+      }
+
+      const sensorFailures = await checkSensors(currentInstance, state);
       if (sensorFailures.length > 0) {
         return {
           kind: "error",
@@ -1646,9 +2146,14 @@ async function handleReport(args: string[]): Promise<Directive> {
   switch (result) {
     case "completed":
     case "approved":
-      state.completed_stages.push(stageSlug);
-      state.current_stage = "";
-      if (result === "approved") delete state.approval_challenges[stageSlug];
+      if (state.routing_model === "module-unit-v1") {
+        state.completed_stage_instances!.push(currentInstance.instance_id);
+        reconcileStageSummaries(state, instances);
+      } else if (!state.completed_stages.includes(stageSlug)) {
+        state.completed_stages.push(stageSlug);
+      }
+      clearActiveContext(state);
+      if (result === "approved") delete state.approval_challenges[approvalKey];
       break;
 
     case "rejected":

@@ -287,9 +287,16 @@ loeyae-aidlc graph compile
 
 # 直接调用引擎（在业务项目目录下执行）
 loeyae-aidlc orchestrate next --scope feature
+# 仅当用户明确选择生成 PRD 时
+loeyae-aidlc orchestrate next --scope feature --with-prd
 loeyae-aidlc orchestrate next --status
-loeyae-aidlc orchestrate report --stage workspace-detection --result completed --instruction-ack workspace-detection
+loeyae-aidlc orchestrate report --stage workspace-detection --result completed \
+  --instruction-ack workspace-detection --user-input single-module
 loeyae-aidlc orchestrate report --stage requirements-analysis --result completed
+
+# I9 UI 设计是运行时选择；只能报告 directive.choices 中的一个值
+loeyae-aidlc orchestrate report --stage ui-mock --result completed \
+  --instruction-ack ui-mock --user-input html-mock
 
 # approval:block 阶段：由人类在交互式终端审阅后签发15分钟一次性 token
 loeyae-aidlc approve --stage application-design
@@ -387,7 +394,15 @@ Agent ←→ aidlc-orchestrate.ts report → 记录结果，推进状态
 Agent ←→ aidlc-orchestrate.ts park   → 保存状态供下次恢复
 ```
 
-Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活跃 stage，否则拒绝。公开结果协议不包含 `skipped`；只有图谱声明的 `condition` 求值为 false 时，引擎才能写入内部 `condition_skipped` 历史。
+Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活跃 stage 实例，否则拒绝。公开结果协议不包含 `skipped`；只有图谱声明的 `condition` 求值为 false 时，引擎才能写入内部 `condition_skipped` 历史。
+
+`workspace-detection` 是完整 scope 的运行时架构 choice router：directive 返回 `single-module`、`multi-module`；选择写入签名 history。单模块跳过产品级 Inception，但仍生成唯一模块清单；产品契约仅在多模块或存在跨进程、异步事件、前后端接口、外部系统等事实时执行。快速 scope 不要求架构 choice。当前 46-stage 图谱共有 2 个 choice Stage：`workspace-detection` 与 `ui-mock`。
+
+`prd-generation` 是初始化级用户选择，只能在新建完整 scope 时通过 `--with-prd` 写入签名状态。I9 `ui-mock` 是运行时 choice router：directive 返回 `choices` 与 `choice_required`，用户必须在 `html-mock`、`figma-create`、`figma-existing`、`skip` 中选择一个，并通过 `report ... --user-input <choice>` 写入签名 history。`skip` 不生成 UI 产物，HTML 与 Figma 分支互斥；后续机器路由只读取签名状态，不读取 `handoff.md`。
+
+`workflow-plan.md` 的机器决策表为 `application-design`、`units-generation`、`functional-design` 和 `operations` 分别记录 `execute / skip` 与 evidence。引擎优先执行该表；缺表的旧工作流才保守地根据项目证据推断。I14 被跳过时 Construction 使用确定性的 `default` 单元；I14 执行时，新签名工作流在 `unit-manifest.json` 为每个单元声明 `conditional_stages`，防止某个单元的 NFR、基础设施、契约、框架或 UI 事实扩散为所有单元的强制流程，旧清单缺字段时保守回退模块级条件。Operations 条件为 false 时不会出现部署审批，模板归档也仅在明确要求保留可复用模板时执行。
+
+图谱通过 `axis: project | module | unit` 声明实例化范围。新工作流固定按“项目级 Ideation → 每个模块完整 Inception → 每个模块/单元完整 Construction → 项目级构建测试、实施报告与 Operations”执行。模块由 `docs/aidlc/ideation/module-manifest.json` 声明；每个模块的工作单元由 `docs/aidlc/modules/<module-id>/inception/unit-manifest.json` 声明。单模块项目同样声明一个模块和至少一个单元。
 
 ### 签名状态与恢复边界
 
@@ -400,7 +415,7 @@ Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活
 
 ### 审批与 instruction-only
 
-仅 `application-design` 和 `operations` 使用 `approval: block`。`next` 为其创建绑定 `workflow_id + stage + challenge` 的随机 challenge；人类在交互式终端审阅最终产物后运行 `loeyae-aidlc approve --stage <slug>`，得到最长 15 分钟、消费后不可重放的 token，再以 `--result approved --approval-token <token>` 报告。平台适配器不会自行签发 token；没有 Kiro Crew Dashboard、Claude、CodeBuddy、Qoder、ZCode、Codex 或 OpenCode 宿主 token provider 且没有可用人类终端时，这两个阶段会按设计 fail-closed。宿主集成可把 token 作为 `--approval-token` 或一次性 `AIDLC_APPROVAL_TOKEN` 传给引擎，但不得暴露普通非交互 token generator。
+只有条件判定需要执行的 `application-design` 和 `operations` 实例使用 `approval: block`。`next` 为其创建绑定 `workflow_id + stage_instance + challenge` 的随机 challenge；模块级 `application-design` 的每个模块实例分别审批。人类在交互式终端审阅当前实例产物后运行 `loeyae-aidlc approve --stage <slug>`，得到最长 15 分钟、消费后不可重放的 token，再以 `--result approved --approval-token <token>` 报告。condition=false 的实例先自动记录 `condition_skipped`，不会创建审批 challenge。平台适配器不会自行签发 token；没有 Kiro Crew Dashboard、Claude、CodeBuddy、Qoder、ZCode、Codex 或 OpenCode 宿主 token provider 且没有可用人类终端时，这两个阶段会按设计 fail-closed。宿主集成可把 token 作为 `--approval-token` 或一次性 `AIDLC_APPROVAL_TOKEN` 传给引擎，但不得暴露普通非交互 token generator。
 
 14 个不产生机器可验证产物的阶段显式标记为 `instruction_only`，执行正文后必须用 `--instruction-ack <stage-slug>` 报告。Stop Hook 不携带该确认，因此不能自动推进这些阶段。
 
@@ -409,16 +424,16 @@ Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活
 | 层 | 机制 | 时机 | 覆盖 |
 |----|------|------|------|
 | requires | 前置 stage 依赖检查（scope-aware） | `next` | 45/46 |
-| condition | 动态条件评估（false 时自动跳过） | `next` | 20/46 |
+| condition | 动态条件评估（false 时自动跳过） | `next` | 26/46 |
 | produces | 产物存在、路径安全且每个文件至少 16 字节 | `report` | 32/46 |
 | sensors | 结构化证据或内置质量校验 | `report` | 32/46 |
-| current_stage | 防跳步 | `report` | 46/46 |
+| current_stage_instance | 防逻辑 Stage 相同但模块/单元上下文不同的跳步 | `report` | 所有实例 |
 
-仅 `application-design`（架构决策）和 `operations`（部署决策）保留 `approval: block`；14 个 instruction-only stage 需要显式 ack；其余 stage 在声明门禁通过后推进。
+仅 `application-design`（架构决策）和 `operations`（部署决策）保留 `approval: block`，且只在各自 condition=true 时出现；14 个 instruction-only stage 需要显式 ack；其余 stage 在声明门禁通过后推进。
 
 ### Evidence 协议（Construction）
 
-Construction sensors 从 `.aidlc/evidence/<stage-slug>/<sensor>.json` 读取机器生成的结构化证据。证据文件必须：
+Construction sensors 按当前执行实例读取机器生成的结构化证据：项目级 `.aidlc/evidence/<stage-slug>/<sensor>.json`，模块级 `.aidlc/evidence/<stage-slug>/<module-id>/<sensor>.json`，单元级 `.aidlc/evidence/<stage-slug>/<module-id>/<unit-id>/<sensor>.json`。模块/单元 Evidence 不能跨上下文复用。证据文件必须：
 - 包含 `evidence_version: "1"` 和合法 ISO `timestamp`（≤ 24h）
 - 包含 `producer.name: "loeyae-aidlc-evidence"`、HMAC-SHA256 `integrity` 和当前 `commit + dirty + worktree_digest`
 - 由受控 Producer、CI、构建工具或测试 runner 生成（非手写），且生成时提供至少 32 字节的 `AIDLC_TRUST_SECRET`
@@ -457,14 +472,14 @@ allowlist 中的最小语义命令配置如下：
 
 ### Scope 过滤
 
-不同 scope 执行不同数量的 stages（以下为条件判断前的候选数量；实际数量会因项目证据自动跳过条件阶段）：
+不同 scope 执行不同数量的默认 stages（以下为条件判断前且未选择可选 PRD 的候选数量；实际数量会因项目证据自动跳过条件阶段）。`feature`、`enterprise`、`mvp`、`classic` 初始化时显式使用 `--with-prd` 会增加 `prd-generation` 这 1 个用户选择阶段：
 
 | Scope | 候选 stages | 典型场景 |
 |-------|------------|---------|
-| feature | 46 | 完整功能开发 |
-| enterprise | 46 | 企业级完整流程 |
-| mvp | 46 | 最小可行产品 |
-| classic | 44 | 标准开发流程 |
+| feature | 45 | 完整功能开发 |
+| enterprise | 45 | 企业级完整流程 |
+| mvp | 45 | 最小可行产品 |
+| classic | 43 | 标准开发流程 |
 | express | 7 | 快速迭代 |
 | workshop | 7 | 工作坊/探索 |
 | bugfix | 7 | Bug 修复 |

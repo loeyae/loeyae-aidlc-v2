@@ -7,6 +7,7 @@ lead_agent: aidlc-product-agent
 scopes: [feature, enterprise, mvp, classic]
 produces: [docs/aidlc/ideation/product-inception.md]
 requires: [workspace-detection]
+condition: multi_module
 ---
 
 # 产品级 Inception

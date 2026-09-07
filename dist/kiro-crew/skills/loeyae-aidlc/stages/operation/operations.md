@@ -15,6 +15,7 @@ produces:
   - docs/aidlc/operation/deployment-guide.md
   - docs/aidlc/operation/operations-summary.md
 approval: block
+condition: has_deployment_needs
 sensors: [doc-cascade]
 ---
 

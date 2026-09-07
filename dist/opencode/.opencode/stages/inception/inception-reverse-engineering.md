@@ -3,13 +3,14 @@ slug: reverse-engineering
 number: "2.1"
 name: 逆向工程
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-developer-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
-produces: [docs/aidlc/inception/reverse-engineering.md]
+produces: [docs/aidlc/modules/{module-id}/inception/reverse-engineering.md]
 sensors: []
 requires: [workspace-detection]
 condition: has_legacy_code
@@ -82,7 +83,7 @@ condition: has_legacy_code
 
 ## 步骤 2：生成业务概述文档
 
-创建 `docs/aidlc/inception/reverse-engineering/business-overview.md`：
+创建 `docs/aidlc/modules/{module-id}/inception/reverse-engineering/business-overview.md`：
 
 ```markdown
 # 业务概述
@@ -103,7 +104,7 @@ condition: has_legacy_code
 
 ## 步骤 3：生成架构文档
 
-创建 `docs/aidlc/inception/reverse-engineering/architecture.md`：
+创建 `docs/aidlc/modules/{module-id}/inception/reverse-engineering/architecture.md`：
 
 ```markdown
 # 系统架构
@@ -137,7 +138,7 @@ condition: has_legacy_code
 
 ## 步骤 4：生成代码结构文档
 
-创建 `docs/aidlc/inception/reverse-engineering/code-structure.md`：
+创建 `docs/aidlc/modules/{module-id}/inception/reverse-engineering/code-structure.md`：
 
 ```markdown
 # 代码结构
@@ -170,7 +171,7 @@ condition: has_legacy_code
 
 ## 步骤 5：生成 API 文档
 
-创建 `docs/aidlc/inception/reverse-engineering/api-documentation.md`：
+创建 `docs/aidlc/modules/{module-id}/inception/reverse-engineering/api-documentation.md`：
 
 ```markdown
 # API 文档
@@ -198,7 +199,7 @@ condition: has_legacy_code
 
 ## 步骤 6：生成前端架构文档
 
-创建 `docs/aidlc/inception/reverse-engineering/frontend-architecture.md`：
+创建 `docs/aidlc/modules/{module-id}/inception/reverse-engineering/frontend-architecture.md`：
 
 ```markdown
 # 前端架构
@@ -240,7 +241,7 @@ condition: has_legacy_code
 
 ## 步骤 7：生成组件清单
 
-创建 `docs/aidlc/inception/reverse-engineering/component-inventory.md`：
+创建 `docs/aidlc/modules/{module-id}/inception/reverse-engineering/component-inventory.md`：
 
 ```markdown
 # 组件清单
@@ -271,7 +272,7 @@ condition: has_legacy_code
 
 ## 步骤 8：生成技术栈文档
 
-创建 `docs/aidlc/inception/reverse-engineering/technology-stack.md`：
+创建 `docs/aidlc/modules/{module-id}/inception/reverse-engineering/technology-stack.md`：
 
 ```markdown
 # 技术栈
@@ -297,7 +298,7 @@ condition: has_legacy_code
 
 ## 步骤 9：生成依赖文档
 
-创建 `docs/aidlc/inception/reverse-engineering/dependencies.md`：
+创建 `docs/aidlc/modules/{module-id}/inception/reverse-engineering/dependencies.md`：
 
 ```markdown
 # 依赖关系
@@ -318,7 +319,7 @@ condition: has_legacy_code
 
 ## 步骤 10：生成代码质量评估
 
-创建 `docs/aidlc/inception/reverse-engineering/code-quality-assessment.md`：
+创建 `docs/aidlc/modules/{module-id}/inception/reverse-engineering/code-quality-assessment.md`：
 
 ```markdown
 # 代码质量评估
@@ -356,7 +357,7 @@ condition: has_legacy_code
 
 ## 步骤 11：创建时间戳文件
 
-创建 `docs/aidlc/inception/reverse-engineering/reverse-engineering-timestamp.md`：
+创建 `docs/aidlc/modules/{module-id}/inception/reverse-engineering/reverse-engineering-timestamp.md`：
 
 ```markdown
 # 逆向工程元数据
@@ -385,7 +386,7 @@ condition: has_legacy_code
 ```markdown
 ## 逆向工程状态
 - [x] 逆向工程 - 完成于 [时间戳]
-- **产物位置**：docs/aidlc/inception/reverse-engineering/
+- **产物位置**：docs/aidlc/modules/{module-id}/inception/reverse-engineering/
 ```
 
 ## 步骤 13：向用户展示完成消息
@@ -396,7 +397,7 @@ condition: has_legacy_code
 [AI 生成的分析关键发现摘要，使用要点列表]
 
 > **📋 <u>**需要审查：**</u>**
-> 请检查逆向工程产物：`docs/aidlc/inception/reverse-engineering/`
+> 请检查逆向工程产物：`docs/aidlc/modules/{module-id}/inception/reverse-engineering/`
 
 > **🚀 <u>**下一步？**</u>**
 >

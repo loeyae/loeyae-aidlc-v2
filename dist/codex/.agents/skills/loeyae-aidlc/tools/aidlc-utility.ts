@@ -11,7 +11,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const GRAPH_PATH = join(ROOT, "core", "tools", "data", "stage-graph.json");
 
 interface StageGraph {
-  stages: Array<{ scopes: string[]; execution: string }>;
+  stages: Array<{ scopes: string[]; execution: string; selection?: string }>;
 }
 
 function scopeTable(): void {
@@ -19,7 +19,9 @@ function scopeTable(): void {
   const declared = graph.stages.flatMap((stage) => stage.scopes);
   const scopes = [...new Set([...declared, "poc"])].sort();
   for (const scope of scopes) {
-    const count = graph.stages.filter((stage) => stage.execution === "ALWAYS" || stage.scopes.includes(scope)).length;
+    const count = graph.stages.filter(
+      (stage) => (stage.execution === "ALWAYS" || stage.scopes.includes(scope)) && stage.selection !== "user"
+    ).length;
     console.log(`${scope}\t${count}`);
   }
 }

@@ -14,6 +14,15 @@
 - 每个步骤有特定的前置条件、执行步骤和输出
 - 步骤可以是"始终执行"或"条件执行"
 
+**执行轴（Execution Axis）**：Stage 的实例化范围
+- `project`：项目级唯一实例
+- `module`：每个 `module_id` 一个实例
+- `unit`：每个 `module_id + unit_id` 一个实例
+
+**Stage 实例（Stage Instance）**：逻辑 Stage 在具体上下文中的机器执行实体。模块级示例为 `application-design@module:order`，单元级示例为 `code-review@module:order@unit:refund-api`。审批、历史、完成/跳过状态与 Evidence 都绑定 Stage 实例，而不是只绑定逻辑 slug。
+
+**模块 ID / 单元 ID**：manifest 中稳定、机器可读的路由标识；名称只用于展示。ID 必须使用小写字母、数字和短横线，重命名展示名称不得改变 ID。
+
 **用法示例**：
 - ✅ "CONSTRUCTION 阶段包含 7 个步骤"
 - ✅ "代码规划步骤始终执行"
@@ -21,12 +30,18 @@
 - ❌ "需求分析阶段"（应该是"步骤"）
 - ❌ "CONSTRUCTION 步骤"（应该是"阶段"）
 
-## 三阶段生命周期
+## 四阶段生命周期
+
+### IDEATION 阶段
+**目的**：维护产品范围、场景、模块划分、服务映射和跨模块契约
+**位置**：`docs/aidlc/ideation/`（project axis）
+
+**输出**：产品级基线、`module-manifest.json`、场景映射与跨模块契约
 
 ### INCEPTION 阶段
 **目的**：规划和架构决策
 **关注点**：确定做什么以及为什么做
-**位置**：`inception/` 目录
+**位置**：`docs/aidlc/modules/<module-id>/inception/`（module axis）
 
 **步骤**：
 - 工作区检测（始终执行）
@@ -42,7 +57,7 @@
 ### CONSTRUCTION 阶段
 **目的**：详细设计和实现
 **关注点**：确定怎么做
-**位置**：`construction/` 目录
+**位置**：`docs/aidlc/modules/<module-id>/construction/<unit-id>/`（unit axis）；项目级聚合报告位于 `docs/aidlc/construction/`
 
 **步骤**：
 - 功能设计（条件执行，按工作单元）
@@ -58,7 +73,7 @@
 ### OPERATIONS 阶段
 **目的**：CI/CD 配置和部署
 **关注点**：确定如何运行和维护
-**位置**：`operations/` 目录
+**位置**：`docs/aidlc/operations/`（project axis）
 
 **步骤**：
 - 部署需求分析（始终执行）
@@ -211,7 +226,7 @@
 团队的 Java 后端开发框架。基于 Spring Boot 构建，提供统一的项目结构、通用组件和开发规范。
 
 ### Per-Unit 循环
-Construction 阶段中对每个工作单元执行的设计-代码循环。包括功能设计、非功能需求、非功能设计、基础设施设计、代码规划、代码生成和构建测试等步骤的完整迭代。
+Construction 阶段中对每个工作单元执行的设计—TDD—代码生成—单元审查循环。所有单元实例完成后，再执行项目级构建测试和实施报告聚合。
 
 ## 常用缩写
 

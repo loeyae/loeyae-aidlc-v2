@@ -3,6 +3,7 @@ slug: ui-mock-reasoning-principles
 number: "2.5.7"
 name: Mock 推理原则
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-design-agent
 support_agents: []
@@ -12,8 +13,8 @@ consumes: []
 produces: []
 sensors: []
 completion_contract: instruction_only
-requires: [ui-mock]
-condition: has_ui_requirements
+requires: [ui-mock-styles]
+condition: ui_mode_html_mock
 ---
 inclusion: fileMatch
 fileMatchPattern: "**/*.html"

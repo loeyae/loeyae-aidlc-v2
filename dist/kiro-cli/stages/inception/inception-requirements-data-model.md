@@ -3,6 +3,7 @@ slug: requirements-data-model
 number: "2.2.2"
 name: 需求数据模型
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-product-agent
 support_agents: []
@@ -88,7 +89,7 @@ requires: [requirements-analysis]
 4. 向用户确认适用的数据与状态模型。
 5. 向用户确认适用的数据与状态模型。
 
-**产出**：触发状态建模或执行全面数据建模时写入 `docs/aidlc/inception/requirements/data-model.md`；未触发且非全面深度时不创建空文件。
+**产出**：触发状态建模或执行全面数据建模时写入 `docs/aidlc/modules/{module-id}/inception/requirements/data-model.md`；未触发且非全面深度时不创建空文件。
 
 ---
 

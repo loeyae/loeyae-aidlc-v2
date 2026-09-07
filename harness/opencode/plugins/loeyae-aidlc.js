@@ -19,7 +19,7 @@ function requireRuntime() {
 }
 
 function bootstrap() {
-  return `<EXTREMELY_IMPORTANT>\nLoeyae AI-DLC v2 已启用。使用 ${enginePath} 的确定性引擎获取下一阶段；不得自行跳步。阶段规则位于 ${stagePath}。完成后必须报告结果，所有准入、准出和传感器门禁必须通过。\n</EXTREMELY_IMPORTANT>`;
+  return `<EXTREMELY_IMPORTANT>\nLoeyae AI-DLC v2 已启用。使用 ${enginePath} 的确定性引擎获取下一阶段；不得自行跳步。阶段规则位于 ${stagePath}。完成后必须报告结果，所有准入、准出和传感器门禁必须通过。\nPRD 只在初始化时由用户通过 --with-prd 选择。完整 scope 的 workspace-detection 是运行时架构 choice：choice_required=true 时展示 single-module、multi-module，并用 --instruction-ack workspace-detection --user-input <choice> 写入签名 history；单模块仍登记唯一模块，product-inception 被条件跳过，product-contracts 仅在多模块或存在跨边界事实时执行；快速 scope 不要求该 choice。ui-mock 也是运行时 choice：choice_required=true 时展示 choices，并用 --instruction-ack ui-mock --user-input <choice> 记录 html-mock、figma-create、figma-existing 或 skip；不得并行执行分支或从 handoff.md 改变路由。application-design、units-generation、functional-design、operations 按 workflow-plan.md 的 execute/skip + evidence 自动路由；I14 执行时新签名 unit-manifest.json 必须逐单元声明 conditional_stages，旧清单缺字段时保守回退模块级条件；Operations condition=false 不产生审批，operations-templates 仅在明确要求归档可复用模板时执行。\n</EXTREMELY_IMPORTANT>`;
 }
 
 async function enforceIdleGate(client, sessionId) {

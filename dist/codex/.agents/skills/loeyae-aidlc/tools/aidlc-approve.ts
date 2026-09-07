@@ -18,18 +18,19 @@ async function main(): Promise<void> {
   if (!state || state.status !== "running" || state.current_stage !== stage) {
     throw new Error(`stage ${stage} is not the active running stage`);
   }
-  const challenge = state.approval_challenges[stage];
-  if (!challenge) throw new Error(`stage ${stage} has no active approval challenge; run orchestrate next first`);
+  const approvalStage = state.current_stage_instance || stage;
+  const challenge = state.approval_challenges[approvalStage];
+  if (!challenge) throw new Error(`stage instance ${approvalStage} has no active approval challenge; run orchestrate next first`);
   const issuedAt = Number(challenge.split(".", 1)[0]);
   if (!Number.isFinite(issuedAt) || Date.now() - issuedAt > 15 * 60 * 1000 || issuedAt > Date.now() + 60 * 1000) {
-    delete state.approval_challenges[stage];
+    delete state.approval_challenges[approvalStage];
     saveWorkflowState(root, state);
     throw new Error("approval challenge expired; run orchestrate next again");
   }
 
   if (!stdin.isTTY || !stdout.isTTY) throw new Error("approval token issuance requires an interactive human terminal");
-  const phrase = `APPROVE ${stage} ${challenge.slice(-8)}`;
-  stdout.write(`Review the stage artifacts and decision before approving.\nType exactly: ${phrase}\n`);
+  const phrase = `APPROVE ${approvalStage} ${challenge.slice(-8)}`;
+  stdout.write(`Review the stage artifacts and decision before approving.\nActive context: module=${state.current_module || "-"}, unit=${state.current_unit || "-"}\nType exactly: ${phrase}\n`);
   const reader = createInterface({ input: stdin, output: stdout });
   try {
     const response = await reader.question("> ");
@@ -37,7 +38,7 @@ async function main(): Promise<void> {
   } finally {
     reader.close();
   }
-  stdout.write(`${JSON.stringify({ stage, approval_token: approvalToken(state.workflow_id, stage, challenge), expires_in_seconds: Math.max(0, Math.floor((issuedAt + 15 * 60 * 1000 - Date.now()) / 1000)) }, null, 2)}\n`);
+  stdout.write(`${JSON.stringify({ stage, stage_instance: approvalStage, module_id: state.current_module || null, unit_id: state.current_unit || null, approval_token: approvalToken(state.workflow_id, approvalStage, challenge), expires_in_seconds: Math.max(0, Math.floor((issuedAt + 15 * 60 * 1000 - Date.now()) / 1000)) }, null, 2)}\n`);
 }
 
 main().catch((error) => {

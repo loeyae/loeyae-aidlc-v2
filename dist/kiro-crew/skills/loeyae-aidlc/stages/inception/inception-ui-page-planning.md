@@ -1,8 +1,9 @@
 ---
 slug: ui-page-planning
-number: "2.5.8"
+number: "2.5.1"
 name: 页面规划
 phase: inception
+axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-design-agent
 support_agents: []
@@ -13,7 +14,7 @@ produces: []
 sensors: []
 completion_contract: instruction_only
 requires: [ui-mock]
-condition: has_ui_requirements
+condition: ui_design_selected
 ---
 
 ## 目的
@@ -38,11 +39,11 @@ condition: has_ui_requirements
 
 单模块路径：
 
-`docs/aidlc/inception/ui-design/page-plan.md`
+`docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md`
 
 多模块路径：
 
-`docs/aidlc/modules/{module-name}/inception/ui-design/page-plan.md`
+`docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md`
 
 页面计划至少包含：
 
