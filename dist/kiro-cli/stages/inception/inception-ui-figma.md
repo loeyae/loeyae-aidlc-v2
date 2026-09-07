@@ -30,7 +30,7 @@ condition: ui_mode_figma
 
 ## 1. 初始化状态
 
-立即在 handoff.md 记录：
+签名 I9 choice 写入 history 后，立即在 handoff.md 派生展示：
 
 - `UI 设计方式：figma`；
 - `Figma 来源`；
@@ -42,14 +42,14 @@ condition: ui_mode_figma
 
 调用 `whoami` 确认认证和 seat。配置存在或认证成功均不能替代运行时能力验证：
 
-- `流程创建`：`create_new_file` 创建的验证目标必须直接作为唯一主文件，立即把 URL 写入 handoff.md；在该文件内用 `use_figma` 完成最小写入验证，后续设计必须复用同一文件，不得另建正式文件；
-- `外部提供`：必须用 `get_metadata` 验证目标文件可读取，且后续不得调用写入工具。
+- `流程创建`：`create_new_file` 创建的验证目标必须直接作为唯一主文件；在该文件内用 `use_figma` 完成最小写入验证，后续设计必须复用同一文件，不得另建正式文件。工具返回的 URL 必须进入本次 `figma-manifest.json`，handoff.md 只能镜像展示；
+- `外部提供`：必须用 `get_metadata` 验证目标文件可读取，且后续不得调用写入工具；URL 必须以 `source=external`、`external_read_only=true` 写入 manifest。
 
 客户端、seat、权限或工具不满足时标记 blocked，向用户提供“修复 Figma 能力后重试”与“切换 HTML Mock”选项。未经用户选择不得自动切换模式。
 
 ## 3. 建立页面计划
 
-加载 `inception-ui-page-planning.md` 生成跨模式唯一页面计划，将路径和 `draft` 状态写入 handoff.md，并提交用户确认。确认后把 `页面计划状态` 更新为 `approved`；未确认前不得调用 Figma 设计 Skill。
+加载 `inception-ui-page-planning.md` 生成跨模式唯一 `page-plan.md`，通过该 Stage 的 `ui-artifact-consistency` 后再提交用户确认。handoff.md 可派生展示路径和审核进度，但不得替代页面计划或 Evidence；未确认前不得调用 Figma 设计 Skill。
 
 外部提供模式还必须将计划项与现有 Page/Frame 对照。缺失页面、无法定位或语义冲突时阻断并请用户或设计方修正，不得静默写入外部文件。
 
@@ -68,7 +68,7 @@ condition: ui_mode_figma
 调用 `aidlc-figma-design`，传入：
 
 - 已批准页面计划；
-- 规范化来源：handoff.md `流程创建` 映射为 `source=created`，`外部提供` 映射为 `source=external`；
+- 规范化来源：签名 choice `figma-create` 映射为 `source=created`，`figma-existing` 映射为 `source=external`；
 - 已验证的读写能力结果；
 - 已登记的唯一主文件 URL；
 - 设计资源和当前批次。
@@ -85,13 +85,15 @@ condition: ui_mode_figma
 
 ## 7. I9 状态交接
 
-全部计划页面完成并经用户审核后，核对 handoff.md：
+全部计划页面完成并经用户审核后，先核对当前模块 canonical `figma-manifest.json`：
 
-- 唯一主文件 URL；
-- 页面计划路径和 `approved`；
-- `Figma 页面进度` 中每个页面的唯一 nodeId、完成状态和截图证据；
-- `设计状态：review_pending`；
-- `下一操作：执行 I10 UI 设计交叉验证`。
+- `file_url` 与签名 source 一致；
+- manifest 的 `page_plan` 指向已验证页面计划；
+- 每个 PAGE 都有唯一 Page/Frame/nodeId 和截图引用；
+- Variables、Components、Auto Layout、screenshots 以及外部只读状态均通过；
+- `unresolved` 为空。
+
+随后运行受控 `ui-artifact-consistency` Producer。只有 manifest 与 Evidence 均通过后，才能把上述状态派生展示到 handoff.md，并将下一操作写为“执行 I10 UI 设计交叉验证”。
 
 执行 `common-step-completion-protocol.md`，然后进入 I10。不得在 I10 前写入 `approved`。
 

@@ -215,7 +215,18 @@ pnpm lint:all
 
 ---
 
-## 6. 已知限制与待优化项
+## 6. 选择性流程完整性（强制）
+
+报告必须逐项引用以下实际 Evidence 路径：
+
+- 每个模块的 `.aidlc/evidence/cross-validation/{module-id}/inception-consistency.json`；
+- 仅当初始化签名选择 PRD 时，引用 `.aidlc/evidence/prd-generation/prd-completeness.json`，并证明所有 PRD FR 已映射到至少一个模块交叉验证报告；
+- 仅当模块签名 I9 choice 选择 UI 时，引用该模块的页面计划 Evidence、HTML/Figma 分支 Evidence，以及至少一个 `status=passed` 的单元级 `ui-design-alignment` Evidence；
+- PRD 未选、UI condition false 或 `skip` 时，不得伪造占位 Evidence，也不要求这些可选产物。
+
+多模块报告必须覆盖 `module-manifest.json` 中全部模块，不能用一个模块的 Evidence 替代另一个模块。
+
+## 7. 已知限制与待优化项
 
 | # | 类别 | 描述 | 来源 | 优先级 |
 |---|------|------|------|--------|
@@ -223,7 +234,7 @@ pnpm lint:all
 
 ---
 
-## 7. 验收结论
+## 8. 验收结论
 
 - **实施完整性**：✅ 所有需求已实现 | ❌ {缺失项}
 - **测试充分性**：✅ 测试覆盖充分 | ⚠️ {不足项}

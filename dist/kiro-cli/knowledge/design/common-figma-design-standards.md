@@ -2,7 +2,7 @@
 
 > **职责边界**：本文件定义 Construction 阶段**从 Figma 读取设计并还原为代码**的规范（读方向）。Inception 阶段**在 Figma 中创建设计**的流程（写方向）见 `inception-ui-figma.md`。
 >
-> **加载条件**：handoff.md 的 `## UI 设计` 区块中 `UI 设计方式` 为 `figma`。外部提供的 Figma 设计稿同样必须在 I9 登记为该方式。
+> **加载条件**：当前模块签名 history 中 I9 choice 为 `figma-create` 或 `figma-existing`。外部提供的 Figma 设计稿也必须由 `figma-existing` choice 登记。加载后先读取当前模块 canonical `figma-manifest.json` 的 `file_url` 与 PAGE/Frame/nodeId 映射；handoff.md 仅作人类进度展示。
 
 ## 核心原则
 

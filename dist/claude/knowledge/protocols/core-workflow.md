@@ -44,7 +44,7 @@
 | I3 场景分析与模块映射 | `product-scenario-module-mapping.md` |
 | 用户选择产出 PRD 或独立生成 PRD | `product-prd-generation.md` |
 | I9 选择 Figma 模式 | `inception-ui-figma.md` |
-| handoff.md `UI 设计方式` 为 `figma` | `common-figma-design-standards.md` |
+| 当前模块签名 I9 choice 为 `figma-create` 或 `figma-existing` | `common-figma-design-standards.md` |
 | 工作区检测后 | `common-complexity-assessment.md` |
 | 恢复会话 | `common-session-continuity.md` |
 | 变更请求 | `common-workflow-changes.md` + `change-request-process.md` |
@@ -59,7 +59,7 @@
 | 创建或优化文档且需要新图表时 | `common-diagram-design-standards.md`；默认 Mermaid 时再加载 `common-mermaid-diagram-standards.md` + `common-mermaid-syntax-rules.md` |
 | 用户明确要求 SVG、目标文档已有有效 SVG 引用，或阶段契约明确要求 SVG 时 | `common-diagram-design-standards.md` + `common-svg-diagram-standards.md` |
 | 执行 SVG 源级、几何或目标环境验证时 | `common-diagram-validation-standards.md` + `common-svg-diagram-standards.md` |
-| 检测到技术栈证据 | 按 handoff.md 加载对应的 `common-tech-*` 条件适配 |
+| 检测到技术栈证据 | 按签名当前模块/单元与 canonical 项目产物加载对应的 `common-tech-*` 条件适配；handoff 仅作提示 |
 
 禁止启动时预加载全部规则。目录、审计、协作、提问和交接分别按 `common-directory-structure.md`、`common-audit-logging.md`、`common-team-collaboration.md`、`common-question-format-guide.md`、`common-session-handoff.md` 按需加载。
 
@@ -100,7 +100,7 @@
 
 ## 意图路由
 
-工作区检测后读取 `handoff.md` 并按下表路由；无法唯一判断时询问用户。
+先通过编排器验证并读取签名 `aidlc-state.json`，再把用户意图与当前 `stage_instance`、模块、单元和 canonical 产物对照后按下表路由；`handoff.md` 只补充人类协作说明。无法唯一判断时询问用户，不能由 handoff 改变机器游标或选择。
 
 | 意图 | 判定 | 路由 |
 |------|------|------|
@@ -114,7 +114,7 @@
 | 压缩 state | 压缩state、精简state | `inception-state-template.md` §handoff.md 压缩规则 |
 | 新增功能 | 新功能且现有产物中不存在 | Inception 追加模式 |
 | 生成 PRD | 生成PRD、写PRD、产品需求文档 | `product-prd-generation.md` |
-| 新项目 | 无 handoff.md | Inception |
+| 新项目 | 无有效 enrollment/签名 state | Inception |
 
 ## Inception 路由
 
@@ -145,13 +145,13 @@
 
 完整 scope 初始化时，编排方必须把 PRD 作为明确选项呈现给用户。只有用户选择生成时才传入 `--with-prd`；未选择时签名状态记录空的 `selected_optional_stages`，`prd-generation` 不进入可执行实例，不创建 PRD 文件或占位目录，也不阻断后续 Inception。
 
-I9 与 PRD 的初始化选择不同：当 `ui-mock` directive 返回 `choice_required: true` 时，编排方必须展示其 `choices`，并把唯一选择通过 `report --stage ui-mock --result completed --instruction-ack ui-mock --user-input <choice>` 写入签名 history。`skip` 不创建 UI 产物；`html-mock` 与两个 Figma choice 只进入各自互斥分支。后续条件只读取签名 history，`handoff.md` 只能展示派生结果。
+I9 与 PRD 的初始化选择不同：当 `ui-mock` directive 返回 `choice_required: true` 时，编排方必须展示其 `choices`，并把唯一选择通过 `report --stage ui-mock --result completed --instruction-ack ui-mock --user-input <choice>` 写入签名 history。`skip` 不创建 UI 产物，也不触发 UI Evidence；`html-mock` 与两个 Figma choice 只进入各自互斥分支。页面计划、HTML skeleton/content 或 Figma manifest 分别通过 `ui-artifact-consistency` 对齐前序需求和故事。后续条件只读取签名 history，`handoff.md` 只能展示派生结果。
 
 I11 的 `workflow-plan.md` 必须为 `application-design`、`units-generation`、`functional-design` 和 `operations` 分别写入 `execute / skip` 与 evidence。引擎优先使用该机器决策表；同一项目的多模块计划中任一模块明确 `execute` 即执行项目级 Operations，全部明确 `skip` 才跳过。旧工作流缺少对应行时才按保守项目证据推断。
 
 I14 执行时，新签名工作流必须在每个 `unit-manifest.json` 条目中声明 `conditional_stages`，把功能设计、NFR、基础设施、共享契约、子代理、框架合规和 UI Bridge 的适用性限制到当前单元；空数组表示这些条件 Stage 对该单元均不适用。数组值由 I14 的需求/故事/依赖/计划事实推导，不是用户交互 choice。旧签名清单缺字段时继续按模块级事实保守执行，避免升级时误跳过质量路径。
 
-I15 的编排内路径在产品契约完成或由 condition=false 签名跳过后执行；模块清单是硬输入，产品契约只在已生成时作为增强输入，继续使用原有 produces 和 `prd-completeness` 准出门禁。选择在工作流初始化时写入签名状态，活动工作流中不得通过 handoff、聊天确认或手工改 state 增删该选择。I16 仍为可选审查步骤：用户要求审查时执行。
+I15 的编排内路径在产品契约完成或由 condition=false 签名跳过后执行；模块清单是硬输入，产品契约只在已生成时作为增强输入，继续使用原有 produces 和 `prd-completeness` 准出门禁。选择在工作流初始化时写入签名状态，活动工作流中不得通过 handoff、聊天确认或手工改 state 增删该选择。后续每个模块的 `cross-validation` 通过 `inception-consistency` 动态纳入已选 PRD；未选择 PRD 时既不读取也不要求 PRD。最终 `implementation-report` 必须汇总所有模块并证明 PRD 条目至少映射到一个模块报告。I16 的额外人类评审仍按用户要求执行，但不替代机器一致性门禁。
 
 PRD 也可独立于 Inception 流程执行：用户直接要求“生成 PRD”时，通过 `aidlc-prd-synthesis` 加载 `product-prd-generation.md`，无需启动工作流或具备 I5-I10；已有产品契约和 Inception 产物仅作为增强输入。
 
@@ -213,7 +213,7 @@ C5 条件前置：存在 `contract` 类型跨单元依赖时，先加载并完�
 
 | 范围 | 完成条件 |
 |------|----------|
-| Inception | `module-manifest.json` 中每个模块的必需实例均已完成/条件跳过；I14 执行时各模块 `unit-manifest.json` 合法，I14 跳过时路由到确定性的 `default` 单元；适用产物经确认和交叉审查 |
+| Inception | `module-manifest.json` 中每个模块的必需实例均已完成/条件跳过；I14 执行时各模块 `unit-manifest.json` 合法，I14 跳过时路由到确定性的 `default` 单元；需求/故事始终通过 `inception-consistency`，签名选择的 PRD/UI canonical 产物动态纳入模块交叉验证，未选分支不产生门禁 |
 | Construction | 每个 module/unit 实例均完成设计、TDD、代码生成和单元审查；随后项目级实际构建测试与实施报告有证据且通过 |
 | Operations | 仅生成选定部署目标需要的文件，配置语法/静态验证通过，部署说明可执行 |
 | 会话连续性 | handoff.md、审计与下一步交接一致，可在三平台恢复 |

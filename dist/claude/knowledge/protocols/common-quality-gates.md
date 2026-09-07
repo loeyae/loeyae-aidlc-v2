@@ -46,6 +46,8 @@
 | 角色权限矩阵完整性 | I7 完成 | 矩阵缺失，或 `无权表现` 列存在空值，或角色无矩阵条目，或权限不适用 FR 缺少确认记录 |
 | PRD 自审清单 | 用户选择 I15 后完成 | `product-prd-generation.md` 自审清单任一项未通过，或 `prd-completeness` evidence 缺失/失败；未选择 I15 时不适用 |
 | `prd-completeness` | prd-generation（仅用户选择时） | PRD 章节、功能验收、非目标、待确认项、来源索引或一致性证据不完整 |
+| `ui-artifact-consistency` | ui-page-planning, ui-mock-generation, ui-figma-generation（仅签名 UI choice 选择设计时） | 页面计划未对齐需求/故事；HTML skeleton/content 页面集合不一致；Figma 来源、Page/Frame/nodeId/截图或只读约束不一致 |
+| `inception-consistency` | cross-validation | 需求与故事不一致，或签名选择的 PRD/UI canonical 产物未纳入当前模块交叉验证；未选分支不适用 |
 | `diagram-contract` | requirements-methods, application-design | SVG 源或 `.diagram.json` 的 ID/端口/完整 `points`/方向/分组语义/viewBox/FR 映射不完整，视觉样式偏离白底、无填充、黑色、微软雅黑、`16/14` 字号、`2` 线宽、`10 × 10` 箭头或无框标签基线，存在全局图例/备注，缺少 `diagramType`/`designNotes`/Sequence 生命线映射，或旧资产处于 `MIGRATION_REQUIRED` |
 | `design-intent-coverage` | units-generation | 设计意图未被工作单元承接，或存在未覆盖意图 |
 
@@ -115,13 +117,13 @@ Evidence 顶层同时携带当前 `stage_instance`、`module_id`、`unit_id`（�
 | `review-evidence` | code-review | 始终 | 审查未通过(spec_axis/standards_axis)、存在未关闭 issue、缺少 reviewer 身份、files_reviewed 为空 |
 | `reviewer-required` | code-review | 始终 | produces 中不含审查记录文件 |
 | `build-test-evidence` | build-and-test | 始终 | 构建命令 exit_code≠0、测试 failed>0 或 total<1、静态检查 checks.status≠passed |
-| `implementation-report` | implementation-report | 始终 | 证据引用指向不存在的文件、all_gates_passed≠true、scope/stages_completed 缺失 |
+| `implementation-report` | implementation-report | 始终 | 证据引用指向不存在的文件、all_gates_passed≠true、scope/stages_completed 缺失，或未覆盖所有模块及签名选择的 PRD/UI 一致性 Evidence |
 | `frontend-platform-spec` | ui-implementation-bridge | 适用跨端项目 | layout_primitives、component_mapping 或 css_constraints 不完整 |
 | `framework-compliance` | loeyae-compliance | condition: is_loeyae_boot | skills 未加载、检查失败或无有效检查 |
 | `subagent-evidence` | subagent-execution | condition: has_subagent_support | agent/task evidence 缺失或存在失败 |
 | `template-completeness` | build-and-test-templates | 始终 | 模板清单为空或存在未解决项 |
 | `recovery-evidence` | compact-recovery | condition: context_compacted | state 未恢复或交接未记录 |
-| `ui-design-alignment` | code-review | 始终 | HTML Mock/Figma 页面或组件未映射、存在多余 UI、样式/可见性/平台约束不一致 |
+| `ui-design-alignment` | code-review | 当前模块签名 UI choice 已选择设计；仅含页面映射的单元要求 passed | 页面映射无 PAGE ID/目标代码、HTML Mock/Figma canonical 产物未映射、存在多余 UI、样式/可见性/平台约束不一致；未选 UI 时 sensor 与 Evidence 均不进入 directive |
 | `no-todo` | 所有含 `produces` 声明的 stage（自动注入） | 始终 | 所有静态、目录和动态 produces 文件中发现 TODO/FIXME/HACK，或产物不可读取 |
 | `traceability` | 所有含 `produces` 声明的 stage（自动注入） | 始终；纯 evidence stage 必须显式 `traceability: not_applicable` | 非 evidence 产物中无需求 ID（REQ-xxx 或 R-xxx），或产物不可读取 |
 
@@ -130,7 +132,7 @@ Evidence 顶层同时携带当前 `stage_instance`、`module_id`、`unit_id`（�
 - **仅 2 个 stage 保留 `approval: block`**：`application-design`（架构决策）和 `operations`（部署决策）；两者都先评估 condition，condition=false 时直接记录签名 `condition_skipped`，不创建审批 challenge。
 - `next` 生成绑定 workflow ID、`stage_instance` 和随机 challenge 的审批请求；人类审阅后只能通过交互式 `loeyae-aidlc approve --stage <slug>` 或受信宿主 provider 签发最长 15 分钟的一次性 token。模块级 `application-design` 的每个实例分别审批；`approved` 缺 token、上下文不匹配、token 伪造、过期或重放均阻断。
 - 平台 Hook/Agent 不得自行签发 token；宿主未集成 provider 且无人类终端可用时按设计 fail-closed。
-- 14 个 `instruction_only` stage 必须在执行正文后以 `--instruction-ack <slug>` 显式报告；Stop Hook 不能代替该确认。
+- 12 个 `instruction_only` stage 必须在执行正文后以 `--instruction-ack <slug>` 显式报告；Stop Hook 不能代替该确认。
 - 公开 report 结果不包含 `skipped`。只有声明的 condition 为 false 时，引擎可记录内部 `condition_skipped`；门禁负责质量保证，不能由人工 skip 绕过。
 
 ### 单元实现

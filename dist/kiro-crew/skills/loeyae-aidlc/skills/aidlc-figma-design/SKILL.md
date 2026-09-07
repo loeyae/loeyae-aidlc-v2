@@ -26,7 +26,9 @@ triggers: Figma, Figma 设计, UI 设计稿, 外部设计稿, Figma 页面
 
 ## 输出
 
-返回主文件 URL、页面与 nodeId、设计资源使用结果、截图证据和未解决问题。外部提供模式只读。
+返回当前模块 canonical `docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json` 的路径和完整内容：主文件 URL、每个 PAGE 对应的 Page/Frame/nodeId、设计资源验证、截图引用和未解决问题。`source=created` 必须记录 `external_read_only=false`；`source=external` 必须只读并记录 `external_read_only=true`。
+
+本能力不生成 Evidence；调用方必须按签名 I9 choice 校验 source，并在当前 Stage 实例中通过受控 Producer 运行 `ui-artifact-consistency`。未选择 Figma、UI condition=false 或选择 `skip` 时不得调用本能力、创建 manifest 或要求占位 Evidence。
 
 ## 禁止事项
 

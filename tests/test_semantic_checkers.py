@@ -1,4 +1,5 @@
 """Integration tests for all deterministic semantic checkers."""
+from __future__ import annotations
 
 import json
 import os
@@ -38,9 +39,13 @@ def write_signed_state(project: str) -> None:
     script = f"""
 import {{ createInitialState, saveWorkflowState }} from {json.dumps(state_uri)};
 const state = createInitialState('feature');
+delete state.routing_model;
+delete state.completed_stage_instances;
+delete state.skipped_stage_instances;
+delete state.selected_optional_stages;
 state.current_phase = 'construction';
 state.current_stage = 'compact-recovery';
-state.current_stage_instance = 'compact-recovery';
+delete state.current_stage_instance;
 saveWorkflowState(process.cwd(), state);
 """
     result = subprocess.run(
@@ -980,6 +985,401 @@ spacing responsive tokens 间距 响应式 设计令牌。
         shutil.rmtree(project)
 
 
+def write_module_manifest(project: str, module_ids=("module-a",)) -> None:
+    write(project, "docs/aidlc/ideation/module-manifest.json", json.dumps({
+        "schema_version": 1,
+        "modules": [
+            {"module_id": module_id, "name": module_id.title(), "service_id": f"{module_id}-service"}
+            for module_id in module_ids
+        ],
+    }, ensure_ascii=False, indent=2))
+
+
+def write_module_state(
+    project: str,
+    stage: str,
+    routes: dict[str, str | None],
+    *,
+    with_prd: bool = False,
+    current_module: str | None = "module-a",
+    current_unit: str | None = None,
+) -> None:
+    state_path = Path(project) / "docs" / "aidlc" / "aidlc-state.json"
+    state_path.unlink(missing_ok=True)
+    shutil.rmtree(Path(project) / ".aidlc" / "test-trust", ignore_errors=True)
+    history = [{
+        "stage": "workspace-detection",
+        "instance_id": "workspace-detection",
+        "result": "completed",
+        "user_input": "multi-module" if len(routes) > 1 else "single-module",
+        "timestamp": "2025-01-01T00:00:00.000Z",
+    }]
+    for module_id, route in routes.items():
+        entry = {
+            "stage": "ui-mock",
+            "instance_id": f"ui-mock@module:{module_id}",
+            "module_id": module_id,
+            "result": "condition_skipped" if route is None else "completed",
+            "timestamp": "2025-01-01T00:00:01.000Z",
+        }
+        if route is not None:
+            entry["user_input"] = route
+        history.append(entry)
+    instance = stage
+    if current_module:
+        instance += f"@module:{current_module}"
+    if current_unit:
+        instance += f"@unit:{current_unit}"
+    phase = "construction" if stage in ("code-review", "implementation-report") else "inception"
+    state_uri = (Path(REPO_ROOT) / "core" / "tools" / "aidlc-state.ts").as_uri()
+    script = f"""
+import {{ createInitialState, saveWorkflowState }} from {json.dumps(state_uri)};
+const state = createInitialState('feature');
+state.current_phase = {json.dumps(phase)};
+state.current_stage = {json.dumps(stage)};
+state.current_stage_instance = {json.dumps(instance)};
+state.selected_optional_stages = {json.dumps(["prd-generation"] if with_prd else [])};
+state.history = {json.dumps(history)};
+{f"state.current_module = {json.dumps(current_module)};" if current_module else "delete state.current_module;"}
+{f"state.current_unit = {json.dumps(current_unit)};" if current_unit else "delete state.current_unit;"}
+saveWorkflowState(process.cwd(), state);
+"""
+    result = subprocess.run(
+        ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", "--eval", script],
+        cwd=project,
+        env=checker_environment(project),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def write_ui_base(project: str, module_id: str = "module-a") -> None:
+    root = f"docs/aidlc/modules/{module_id}/inception"
+    write(project, f"{root}/requirements.md", "# Requirements\nFR-001 用户可以注册。\nREQ-NFR-001 注册响应应稳定。\n")
+    write(project, f"{root}/user-stories.md", "# User stories\nUS-001 覆盖 FR-001：用户完成注册。\n")
+    write(project, f"{root}/ui-design/page-plan.md", """# 页面计划
+## 页面清单
+| PAGE ID | 来源 |
+|---|---|
+| PAGE-001 | FR-001, US-001 |
+## 页面内容契约
+PAGE-001 包含注册表单与提交操作。
+## 操作闭环
+PAGE-001 从输入到提交再到成功反馈形成闭环。
+## 未决项
+无
+""")
+
+
+def html_manifest(project: str, module_id: str = "module-a") -> dict:
+    root = f"docs/aidlc/modules/{module_id}/inception"
+    specs = f"{root}/ui-mock/pages/PAGE-001/web-page-specs.md"
+    html = f"{root}/ui-mock/pages/PAGE-001/web.html"
+    write(project, specs, "# PAGE-001\n注册页面规格，映射 FR-001 与 US-001。\n")
+    write(project, html, '<main data-page-id="PAGE-001"><button id="mock-PAGE-001">注册</button></main>\n')
+    manifest = {
+        "schema_version": "1",
+        "design_mode": "html-mock",
+        "page_plan": f"{root}/ui-design/page-plan.md",
+        "phases": {
+            "skeleton": {"status": "validated", "page_ids": ["PAGE-001"], "reviewed_at": "2025-01-01T00:00:00Z"},
+            "content": {"status": "validated", "page_ids": ["PAGE-001"], "reviewed_at": "2025-01-01T00:01:00Z"},
+        },
+        "pages": [{
+            "page_id": "PAGE-001",
+            "page_specs": specs,
+            "html": html,
+            "mock_box_id": "mock-PAGE-001",
+            "requirements": ["FR-001"],
+            "stories": ["US-001"],
+        }],
+        "unresolved": [],
+    }
+    write(project, f"{root}/ui-mock/ui-mock-manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+    return manifest
+
+
+def figma_manifest(project: str, route: str, module_id: str = "module-a") -> dict:
+    root = f"docs/aidlc/modules/{module_id}/inception"
+    external = route == "figma-existing"
+    manifest = {
+        "schema_version": "1",
+        "design_mode": "figma",
+        "source": "external" if external else "created",
+        "file_url": "https://www.figma.com/design/test-file/module-a",
+        "page_plan": f"{root}/ui-design/page-plan.md",
+        "pages": [{
+            "page_id": "PAGE-001",
+            "page": "module-web",
+            "frame": "Registration",
+            "node_id": "1:234",
+            "screenshot": "figma://screenshot/1:234",
+            "requirements": ["FR-001"],
+            "stories": ["US-001"],
+        }],
+        "validation": {
+            "variables": "passed",
+            "components": "passed",
+            "auto_layout": "passed",
+            "screenshots": "passed",
+            "external_read_only": external,
+        },
+        "unresolved": [],
+    }
+    write(project, f"{root}/ui-design/figma-manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+    return manifest
+
+
+def write_cross_validation_inputs(
+    project: str,
+    module_id: str,
+    *,
+    prd_selected: bool,
+    ui_route: str,
+) -> None:
+    root = f"docs/aidlc/modules/{module_id}/inception"
+    write(project, f"{root}/requirements.md", "# Requirements\nFR-001 用户可以注册。\nREQ-NFR-001 注册响应应稳定。\n")
+    write(project, f"{root}/user-stories.md", "# User stories\nUS-001 覆盖 FR-001：用户完成注册。\n")
+    checked = ["FR-001", "REQ-NFR-001", "US-001"]
+    if prd_selected:
+        checked.append("FR-PRD-001")
+    if ui_route in ("html-mock", "figma-create", "figma-existing"):
+        checked.append("PAGE-001")
+    write(project, f"{root}/cross-validation-report.md", f"""# Cross validation
+## Machine consistency summary
+- status: passed
+- unresolved_conflicts: 0
+- prd_route: {'selected' if prd_selected else 'not-selected'}
+- ui_route: {ui_route}
+## Checked identifiers
+{' '.join(checked)}
+""")
+
+
+def test_ui_artifact_consistency_contracts() -> None:
+    project = make_temp(prefix="aidlc-ui-artifact-consistency-")
+    try:
+        write_module_manifest(project, ("module-a", "module-b"))
+        write_ui_base(project)
+
+        write_module_state(project, "ui-page-planning", {"module-a": "html-mock"})
+        planned = run_checker(project, "ui-artifact-consistency", "module-a")
+        assert planned.returncode == 0, planned.stderr
+        assert json.loads(planned.stdout)["phases_verified"] == ["page-plan"]
+
+        plan_path = Path(project) / "docs/aidlc/modules/module-a/inception/ui-design/page-plan.md"
+        valid_plan = plan_path.read_text()
+        plan_path.write_text(valid_plan.replace("FR-001, US-001", "FR-999, US-001"))
+        unknown_source = run_checker(project, "ui-artifact-consistency", "module-a")
+        assert unknown_source.returncode != 0
+        assert "unknown source IDs" in unknown_source.stderr
+        plan_path.write_text(valid_plan)
+
+        manifest = html_manifest(project)
+        write_module_state(project, "ui-mock-generation", {"module-a": "html-mock"})
+        html_ok = run_checker(project, "ui-artifact-consistency", "module-a")
+        assert html_ok.returncode == 0, html_ok.stderr
+        assert json.loads(html_ok.stdout)["phases_verified"] == ["page-plan", "skeleton", "content"]
+
+        manifest_path = Path(project) / "docs/aidlc/modules/module-a/inception/ui-mock/ui-mock-manifest.json"
+        phase_mismatch = json.loads(json.dumps(manifest))
+        phase_mismatch["phases"]["content"]["page_ids"] = ["PAGE-999"]
+        manifest_path.write_text(json.dumps(phase_mismatch))
+        mismatch = run_checker(project, "ui-artifact-consistency", "module-a")
+        assert mismatch.returncode != 0
+        assert "must exactly match page plan IDs" in mismatch.stderr
+
+        cross_module = json.loads(json.dumps(manifest))
+        cross_module["pages"][0]["page_specs"] = "docs/aidlc/modules/module-b/inception/ui-mock/pages/PAGE-001/web-page-specs.md"
+        write(project, cross_module["pages"][0]["page_specs"], "# PAGE-001\nCross-module artifact.\n")
+        manifest_path.write_text(json.dumps(cross_module))
+        isolated = run_checker(project, "ui-artifact-consistency", "module-a")
+        assert isolated.returncode != 0
+        assert "crosses active module boundary" in isolated.stderr
+
+        write_ui_base(project)
+        figma = figma_manifest(project, "figma-existing")
+        write_module_state(project, "ui-figma-generation", {"module-a": "figma-existing"})
+        figma_ok = run_checker(project, "ui-artifact-consistency", "module-a")
+        assert figma_ok.returncode == 0, figma_ok.stderr
+        assert json.loads(figma_ok.stdout)["design_mode"] == "figma-existing"
+
+        figma_path = Path(project) / "docs/aidlc/modules/module-a/inception/ui-design/figma-manifest.json"
+        writable_external = json.loads(json.dumps(figma))
+        writable_external["validation"]["external_read_only"] = False
+        figma_path.write_text(json.dumps(writable_external))
+        writable = run_checker(project, "ui-artifact-consistency", "module-a")
+        assert writable.returncode != 0
+        assert "external_read_only=true" in writable.stderr
+
+        figma_path.write_text(json.dumps(figma))
+        write_module_state(project, "ui-figma-generation", {"module-a": "figma-create"})
+        wrong_source = run_checker(project, "ui-artifact-consistency", "module-a")
+        assert wrong_source.returncode != 0
+        assert "source must be created" in wrong_source.stderr
+    finally:
+        shutil.rmtree(project)
+
+
+def test_inception_consistency_optional_routes() -> None:
+    project = make_temp(prefix="aidlc-inception-consistency-")
+    try:
+        write_module_manifest(project)
+        write(project, "docs/aidlc/modules/module-a/inception/ui-mock/stale.html", "stale HTML must not activate a signed route\n")
+        write_cross_validation_inputs(project, "module-a", prd_selected=False, ui_route="skip")
+        write_module_state(project, "cross-validation", {"module-a": "skip"})
+        skipped = run_checker(project, "inception-consistency", "module-a")
+        assert skipped.returncode == 0, skipped.stderr
+        skipped_payload = json.loads(skipped.stdout)
+        assert skipped_payload["prd_selected"] is False
+        assert skipped_payload["ui_route"] == "skip"
+        assert skipped_payload["ui_pages_checked"] == 0
+
+        write(project, "docs/aidlc/ideation/prd.md", "# PRD\nFR-PRD-001 平台支持注册业务。\n")
+        write_cross_validation_inputs(project, "module-a", prd_selected=True, ui_route="skip")
+        write_module_state(project, "cross-validation", {"module-a": "skip"}, with_prd=True)
+        with_prd = run_checker(project, "inception-consistency", "module-a")
+        assert with_prd.returncode == 0, with_prd.stderr
+        assert json.loads(with_prd.stdout)["prd_items_checked"] == 1
+
+        (Path(project) / "docs/aidlc/ideation/prd.md").unlink()
+        missing_prd = run_checker(project, "inception-consistency", "module-a")
+        assert missing_prd.returncode != 0
+        assert "signed PRD selection requires" in missing_prd.stderr
+
+        write_ui_base(project)
+        html_manifest(project)
+        write_cross_validation_inputs(project, "module-a", prd_selected=False, ui_route="html-mock")
+        write_module_state(project, "cross-validation", {"module-a": "html-mock"})
+        html = run_checker(project, "inception-consistency", "module-a")
+        assert html.returncode == 0, html.stderr
+        assert json.loads(html.stdout)["ui_pages_checked"] == 1
+
+        report_path = Path(project) / "docs/aidlc/modules/module-a/inception/cross-validation-report.md"
+        complete_report = report_path.read_text()
+        report_path.write_text(complete_report.replace("PAGE-001", "PAGE-999"))
+        missing_page = run_checker(project, "inception-consistency", "module-a")
+        assert missing_page.returncode != 0
+        assert "omits selected UI pages" in missing_page.stderr
+
+        write_ui_base(project)
+        figma_manifest(project, "figma-create")
+        write_cross_validation_inputs(project, "module-a", prd_selected=False, ui_route="figma-create")
+        write_module_state(project, "cross-validation", {"module-a": "figma-create"})
+        figma = run_checker(project, "inception-consistency", "module-a")
+        assert figma.returncode == 0, figma.stderr
+        assert json.loads(figma.stdout)["ui_route"] == "figma-create"
+    finally:
+        shutil.rmtree(project)
+
+
+def test_ui_alignment_uses_signed_route_and_code_traceability() -> None:
+    project = make_temp(prefix="aidlc-ui-alignment-")
+    try:
+        write_module_manifest(project)
+        write_ui_base(project)
+        html_manifest(project)
+        write_module_state(project, "code-review", {"module-a": None}, current_unit="unit-a")
+        not_selected = run_checker(project, "ui-design-alignment", "module-a", "unit-a")
+        assert not_selected.returncode == 0, not_selected.stderr
+        assert json.loads(not_selected.stdout) == {
+            "status": "not_applicable",
+            "reason": "signed UI route is not-selected",
+        }
+
+        write_module_state(project, "code-review", {"module-a": "html-mock"}, current_unit="unit-a")
+        plan_path = "docs/aidlc/modules/module-a/construction/unit-a/plans/code-generation-plan.md"
+        write(project, plan_path, """# Code generation plan
+## 页面对照表
+| PAGE ID | Target |
+|---|---|
+| PAGE-001 | src/pages/registration.tsx |
+""")
+        write(project, "src/pages/registration.tsx", "// PAGE-001\nexport const Registration = () => 'registration';\n")
+        html_aligned = run_checker(project, "ui-design-alignment", "module-a", "unit-a")
+        assert html_aligned.returncode == 0, html_aligned.stderr
+        assert json.loads(html_aligned.stdout)["status"] == "passed"
+
+        write(project, "src/pages/registration.tsx", "export const Registration = () => 'registration';\n")
+        no_trace = run_checker(project, "ui-design-alignment", "module-a", "unit-a")
+        assert no_trace.returncode != 0
+        assert "omits PAGE traceability markers" in no_trace.stderr
+
+        write(project, "src/pages/registration.tsx", "// PAGE-001\nexport const Registration = () => 'registration';\n")
+        figma_manifest(project, "figma-existing")
+        write_module_state(project, "code-review", {"module-a": "figma-existing"}, current_unit="unit-a")
+        no_node = run_checker(project, "ui-design-alignment", "module-a", "unit-a")
+        assert no_node.returncode != 0
+        assert "lacks nodeId" in no_node.stderr
+
+        write(project, plan_path, """# Code generation plan
+## 页面对照表
+| PAGE ID | Figma nodeId | Target |
+|---|---|---|
+| PAGE-001 | 1:234 | src/pages/registration.tsx |
+""")
+        figma_aligned = run_checker(project, "ui-design-alignment", "module-a", "unit-a")
+        assert figma_aligned.returncode == 0, figma_aligned.stderr
+        assert json.loads(figma_aligned.stdout)["design_mode"] == "figma"
+    finally:
+        shutil.rmtree(project)
+
+
+def test_implementation_report_aggregates_selected_artifacts() -> None:
+    project = make_temp(prefix="aidlc-implementation-aggregation-")
+    try:
+        write_module_manifest(project, ("module-a", "module-b"))
+        write_module_state(
+            project,
+            "implementation-report",
+            {"module-a": "html-mock", "module-b": "skip"},
+            with_prd=True,
+            current_module=None,
+        )
+        write(project, "docs/aidlc/ideation/prd.md", "# PRD\nFR-PRD-001 平台支持注册业务。\n")
+        write_cross_validation_inputs(project, "module-a", prd_selected=True, ui_route="html-mock")
+        write_cross_validation_inputs(project, "module-b", prd_selected=True, ui_route="skip")
+
+        references = [
+            ".aidlc/evidence/cross-validation/module-a/inception-consistency.json",
+            ".aidlc/evidence/cross-validation/module-b/inception-consistency.json",
+            ".aidlc/evidence/ui-page-planning/module-a/ui-artifact-consistency.json",
+            ".aidlc/evidence/ui-mock-generation/module-a/ui-artifact-consistency.json",
+            ".aidlc/evidence/code-review/module-a/unit-a/ui-design-alignment.json",
+            ".aidlc/evidence/prd-generation/prd-completeness.json",
+        ]
+        for reference in references:
+            status = "passed"
+            write(project, reference, json.dumps({"status": status, "evidence_version": "1"}))
+        report_path = "docs/aidlc/construction/implementation-report.md"
+
+        def report_content(items: list[str]) -> str:
+            return "# Implementation report\nall_gates_passed: true\nscope: feature\nstages_completed: 46\n" + "\n".join(items) + "\n"
+
+        write(project, report_path, report_content(references))
+        complete = run_checker(project, "implementation-report")
+        assert complete.returncode == 0, complete.stderr
+        payload = json.loads(complete.stdout)
+        assert payload["modules_verified"] == 2
+        assert payload["prd_verified"] is True
+        assert payload["ui_modules_verified"] == ["module-a"]
+
+        write(project, report_path, report_content([item for item in references if "module-b/inception" not in item]))
+        missing_module = run_checker(project, "implementation-report")
+        assert missing_module.returncode != 0
+        assert "omits selected consistency evidence" in missing_module.stderr
+
+        write(project, report_path, report_content(references))
+        alignment_path = ".aidlc/evidence/code-review/module-a/unit-a/ui-design-alignment.json"
+        write(project, alignment_path, json.dumps({"status": "not_applicable", "reason": "not a UI unit"}))
+        no_passed_alignment = run_checker(project, "implementation-report")
+        assert no_passed_alignment.returncode != 0
+        assert "has no passed code-review" in no_passed_alignment.stderr
+    finally:
+        shutil.rmtree(project)
+
+
 if __name__ == "__main__":
     test_all_checkers_pass_on_realistic_fixture()
     test_checker_fails_closed_when_required_artifact_is_removed()
@@ -995,4 +1395,8 @@ if __name__ == "__main__":
     test_diagram_contract_hardening()
     test_diagram_009_route_contract()
     test_module_unit_context_isolation()
+    test_ui_artifact_consistency_contracts()
+    test_inception_consistency_optional_routes()
+    test_ui_alignment_uses_signed_route_and_code_traceability()
+    test_implementation_report_aggregates_selected_artifacts()
     print("semantic checker regression tests passed")

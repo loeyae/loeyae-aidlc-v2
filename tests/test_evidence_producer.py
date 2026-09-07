@@ -401,6 +401,10 @@ def reach_stage(project: Path, target: str) -> dict:
         args = ["report", "--stage", directive["stage"], "--result", "completed"]
         if directive.get("completion_contract") == "instruction_only":
             args.extend(["--instruction-ack", directive["stage"]])
+        if directive.get("choice_required"):
+            choices = directive.get("choices", [])
+            choice = "single-module" if "single-module" in choices else choices[0]
+            args.extend(["--user-input", choice])
         report = run_orchestrate(project, *args)
         assert report["kind"] == "print", report
     raise AssertionError(f"stage {target} was not reached")
@@ -429,6 +433,125 @@ def test_producer_output_passes_orchestrator() -> None:
         cleanup(project)
 
 
+def set_signed_ui_route(project: Path, route: str) -> None:
+    state_path = project / "docs" / "aidlc" / "aidlc-state.json"
+    state = json.loads(state_path.read_text())
+    state["history"] = [
+        entry for entry in state.get("history", [])
+        if entry.get("stage") not in ("workspace-detection", "ui-mock")
+    ]
+    timestamp = state["updated_at"]
+    state["history"].extend([
+        {
+            "stage": "workspace-detection",
+            "instance_id": "workspace-detection",
+            "result": "completed",
+            "user_input": "single-module",
+            "timestamp": timestamp,
+        },
+        {
+            "stage": "ui-mock",
+            "instance_id": "ui-mock@module:test-module",
+            "module_id": "test-module",
+            "result": "completed",
+            "user_input": route,
+            "timestamp": timestamp,
+        },
+    ])
+    state_path.write_text(json.dumps(sign_payload(state), indent=2))
+
+
+def test_optional_consistency_sensors_use_controlled_producer() -> None:
+    project = new_project("aidlc-evidence-optional-consistency-", active_stage=None)
+    try:
+        root = project / "docs" / "aidlc" / "modules" / "test-module" / "inception"
+        write(root / "requirements.md", "# Requirements\nFR-001 用户可以注册。\nREQ-NFR-001 注册响应应稳定。\n")
+        write(root / "user-stories.md", "# Stories\nUS-001 覆盖 FR-001：用户完成注册。\n")
+        write(root / "ui-design" / "page-plan.md", """# 页面计划
+## 页面清单
+| PAGE ID | 来源 |
+|---|---|
+| PAGE-001 | FR-001, US-001 |
+## 页面内容契约
+PAGE-001 包含注册表单。
+## 操作闭环
+PAGE-001 从输入到成功反馈形成闭环。
+## 未决项
+无
+""")
+
+        activate_stage(project, "ui-page-planning")
+        set_signed_ui_route(project, "html-mock")
+        write_semantic_config(project, "ui-page-planning", "ui-artifact-consistency")
+        page_result = run_producer(
+            project, "run", "--stage", "ui-page-planning", "--sensor", "ui-artifact-consistency",
+        )
+        assert page_result.returncode == 0, page_result.stderr
+        page_payload = json.loads(evidence_path(project, "ui-page-planning", "ui-artifact-consistency").read_text())
+        assert page_payload["stage"] == "ui-page-planning"
+        assert page_payload["module_id"] == "test-module"
+        assert page_payload["phases_verified"] == ["page-plan"]
+        assert verify_signature(page_payload)
+
+        specs = "docs/aidlc/modules/test-module/inception/ui-mock/pages/PAGE-001/web-page-specs.md"
+        html = "docs/aidlc/modules/test-module/inception/ui-mock/pages/PAGE-001/web.html"
+        write(project / specs, "# PAGE-001\n注册规格，映射 FR-001 与 US-001。\n")
+        write(project / html, '<main data-page-id="PAGE-001"><button id="mock-PAGE-001">注册</button></main>\n')
+        write(root / "ui-mock" / "ui-mock-manifest.json", json.dumps({
+            "schema_version": "1",
+            "design_mode": "html-mock",
+            "page_plan": "docs/aidlc/modules/test-module/inception/ui-design/page-plan.md",
+            "phases": {
+                "skeleton": {"status": "validated", "page_ids": ["PAGE-001"], "reviewed_at": "2025-01-01T00:00:00Z"},
+                "content": {"status": "validated", "page_ids": ["PAGE-001"], "reviewed_at": "2025-01-01T00:01:00Z"},
+            },
+            "pages": [{
+                "page_id": "PAGE-001",
+                "page_specs": specs,
+                "html": html,
+                "mock_box_id": "mock-PAGE-001",
+                "requirements": ["FR-001"],
+                "stories": ["US-001"],
+            }],
+            "unresolved": [],
+        }, ensure_ascii=False))
+
+        activate_stage(project, "ui-mock-generation")
+        set_signed_ui_route(project, "html-mock")
+        write_semantic_config(project, "ui-mock-generation", "ui-artifact-consistency")
+        html_result = run_producer(
+            project, "run", "--stage", "ui-mock-generation", "--sensor", "ui-artifact-consistency",
+        )
+        assert html_result.returncode == 0, html_result.stderr
+        html_payload = json.loads(evidence_path(project, "ui-mock-generation", "ui-artifact-consistency").read_text())
+        assert html_payload["phases_verified"] == ["page-plan", "skeleton", "content"]
+        assert verify_signature(html_payload)
+
+        write(root / "cross-validation-report.md", """# Cross validation
+## Machine consistency summary
+- status: passed
+- unresolved_conflicts: 0
+- prd_route: not-selected
+- ui_route: html-mock
+## Checked identifiers
+FR-001 REQ-NFR-001 US-001 PAGE-001
+""")
+        activate_stage(project, "cross-validation")
+        set_signed_ui_route(project, "html-mock")
+        write_semantic_config(project, "cross-validation", "inception-consistency")
+        cross_result = run_producer(
+            project, "run", "--stage", "cross-validation", "--sensor", "inception-consistency",
+        )
+        assert cross_result.returncode == 0, cross_result.stderr
+        cross_payload = json.loads(evidence_path(project, "cross-validation", "inception-consistency").read_text())
+        assert cross_payload["ui_route"] == "html-mock"
+        assert cross_payload["ui_pages_checked"] == 1
+        assert cross_payload["prd_selected"] is False
+        assert verify_signature(cross_payload)
+    finally:
+        cleanup(project)
+
+
 if __name__ == "__main__":
     test_success_signature_and_secret_redaction()
     test_missing_and_short_secret_fail_closed()
@@ -438,4 +561,5 @@ if __name__ == "__main__":
     test_symlink_boundaries()
     test_concurrent_producer_has_single_writer()
     test_producer_output_passes_orchestrator()
-    print("8 evidence producer test groups passed")
+    test_optional_consistency_sensors_use_controlled_producer()
+    print("9 evidence producer test groups passed")

@@ -9,9 +9,13 @@ lead_agent: aidlc-design-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
-consumes: []
-produces: [docs/aidlc/modules/{module-id}/inception/ui-mock/]
-sensors: []
+consumes:
+  - docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md
+produces:
+  - docs/aidlc/modules/{module-id}/inception/ui-mock/
+  - docs/aidlc/modules/{module-id}/inception/ui-mock/ui-mock-manifest.json
+  - .aidlc/evidence/ui-mock-generation/{module-id}/ui-artifact-consistency.json
+sensors: [ui-artifact-consistency]
 requires: [ui-mock-reasoning-principles]
 condition: ui_mode_html_mock
 ---
@@ -59,7 +63,32 @@ condition: ui_mode_html_mock
 
 ## 输出
 
-单模块输出到 `docs/aidlc/modules/{module-id}/inception/ui-mock/`；多模块输出到对应模块的 `inception/ui-mock/`。输出包括 page-specs、骨架或完整 HTML，以及大型模式导航页。
+单模块输出到 `docs/aidlc/modules/{module-id}/inception/ui-mock/`；多模块输出到对应模块的 `inception/ui-mock/`。输出包括 page-specs、骨架或完整 HTML、大型模式导航页，以及 `ui-mock-manifest.json`。
+
+`ui-mock-manifest.json` 是两段流程的机器闭环，最小结构如下：
+
+```json
+{
+  "schema_version": "1",
+  "design_mode": "html-mock",
+  "page_plan": "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md",
+  "phases": {
+    "skeleton": { "status": "validated", "page_ids": ["PAGE-001"], "reviewed_at": "<ISO-8601>" },
+    "content": { "status": "validated", "page_ids": ["PAGE-001"], "reviewed_at": "<ISO-8601>" }
+  },
+  "pages": [{
+    "page_id": "PAGE-001",
+    "page_specs": "docs/aidlc/modules/{module-id}/inception/ui-mock/web-page-specs.md",
+    "html": "docs/aidlc/modules/{module-id}/inception/ui-mock/web.html",
+    "mock_box_id": "mock-PAGE-001",
+    "requirements": ["REQ-UI-001"],
+    "stories": ["US-001"]
+  }],
+  "unresolved": []
+}
+```
+
+`skeleton` 与 `content` 的页面集合必须分别与 `page-plan.md` 完全一致；manifest 中引用的 page-specs、HTML、mock-box 和来源 ID 必须存在且属于当前模块。`ui-artifact-consistency` 在 report 时复核这些约束，不能用 handoff.md 或口头确认替代。
 
 ## 自检
 

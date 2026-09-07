@@ -26,6 +26,11 @@
 ```text
 <workspace>/
 ├── <project source and tests>
+├── .aidlc/evidence/                              # 受控 Producer 输出；按 project/module/unit 隔离
+│   ├── ui-page-planning/<module-id>/ui-artifact-consistency.json
+│   ├── ui-mock-generation/<module-id>/ui-artifact-consistency.json
+│   ├── ui-figma-generation/<module-id>/ui-artifact-consistency.json
+│   └── cross-validation/<module-id>/inception-consistency.json
 └── docs/aidlc/
     ├── aidlc-state.json                         # 签名机器状态，唯一机器路由事实
     ├── handoff.md                               # 派生的人类交接视图
@@ -33,6 +38,7 @@
     ├── ideation/                                # project axis
     │   ├── module-division.md
     │   ├── module-manifest.json                 # schema_version=1，至少一个 module
+    │   ├── prd.md                               # 仅签名 --with-prd 选择时存在
     │   └── ...
     ├── modules/
     │   └── <module-id>/
@@ -41,6 +47,12 @@
     │       │   ├── user-stories.md
     │       │   ├── application-design.md
     │       │   ├── unit-manifest.json           # schema_version=1，至少一个 unit；新签名工作流含逐单元 conditional_stages
+    │       │   ├── ui-design/
+    │       │   │   ├── page-plan.md             # 仅签名 UI choice 选择设计时存在
+    │       │   │   └── figma-manifest.json      # 仅 figma-create/figma-existing
+    │       │   ├── ui-mock/
+    │       │   │   └── ui-mock-manifest.json    # 仅 html-mock；闭合 skeleton/content
+    │       │   ├── cross-validation-report.md
     │       │   ├── plans/
     │       │   ├── requirements/
     │       │   ├── application-design/

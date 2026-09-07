@@ -72,13 +72,12 @@ handoff 的活跃记录必须包含 directive/state 中的 `stage_instance`、`m
 使用 AI-DLC，继续 {项目名} 的 Figma UI 设计。
 
 当前状态：
-- 阶段：INCEPTION / I9
-- 主文件：读取 handoff.md「UI 设计」区块的唯一链接
-- 设计状态：{file_created/designing/review_pending}
-- 当前批次：{N}
-- 下一操作：{handoff.md 中的下一操作}
+- 阶段：由 `loeyae-aidlc orchestrate next --status` 验证为 INCEPTION / I9
+- 主文件：读取当前模块 `figma-manifest.json` 的 `file_url`
+- 签名 choice：`figma-create` 或 `figma-existing`
+- 下一操作：按签名当前 Stage directive 执行
 
-请读取 handoff.md 的 Figma 页面进度，从第一条 pending/in_progress 页面恢复；不得创建新主文件或重复 Frame。
+请先验证签名 state，再读取 `page-plan.md` 和 `figma-manifest.json`，从 manifest 中第一条尚未完成验证的 PAGE/Frame 恢复；handoff.md 只补充人类摘要。不得创建新主文件、重复 Frame，或用 handoff 补齐 nodeId。
 ```
 
 #### Construction 单元完成 → 下一单元

@@ -41,6 +41,8 @@ const SEMANTIC_SENSORS = new Set([
   "diagram-contract",
   "design-intent-coverage",
   "ui-design-alignment",
+  "ui-artifact-consistency",
+  "inception-consistency",
 ]);
 
 interface CommandSpec {

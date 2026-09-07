@@ -9,10 +9,13 @@ lead_agent: aidlc-design-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
-consumes: []
-produces: []
-sensors: []
-completion_contract: instruction_only
+consumes:
+  - docs/aidlc/modules/{module-id}/inception/requirements.md
+  - docs/aidlc/modules/{module-id}/inception/user-stories.md
+produces:
+  - docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md
+  - .aidlc/evidence/ui-page-planning/{module-id}/ui-artifact-consistency.json
+sensors: [ui-artifact-consistency]
 requires: [ui-mock]
 condition: ui_design_selected
 ---
@@ -37,13 +40,11 @@ condition: ui_design_selected
 
 ## 唯一产物
 
-单模块路径：
+多模块与单模块均使用同一模块隔离路径：
 
 `docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md`
 
-多模块路径：
-
-`docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md`
+报告阶段完成前必须运行 `ui-artifact-consistency`。该 sensor 只在签名 I9 choice 选择 HTML Mock 或 Figma 时出现，并验证当前模块的需求、用户故事与页面计划来源引用；未选择 UI 或选择 `skip` 时本 Stage 不实例化，也不要求页面计划或 Evidence。
 
 页面计划至少包含：
 

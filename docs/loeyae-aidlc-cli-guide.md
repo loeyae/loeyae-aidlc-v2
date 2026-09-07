@@ -356,6 +356,8 @@ loeyae-aidlc orchestrate report \
 
 缺少 `--user-input` 或传入 directive `choices` 之外的值会被拒绝。选择写入受 HMAC、workflow ID、revision/CAS 保护的签名 history；不得用 `handoff.md` 或手工 state 修改切换分支。
 
+选择 `html-mock`、`figma-create` 或 `figma-existing` 后，directive 会依次要求当前模块的 `page-plan.md` 与 `ui-artifact-consistency` Evidence，再要求 `ui-mock-manifest.json`（skeleton/content 均 validated）或 `figma-manifest.json` 及对应 Evidence。`cross-validation` 会按签名选择动态加入这些 canonical 产物；选择 PRD 时还会加入 `prd.md` 与 `prd-completeness` Evidence。未选择 PRD/UI、UI condition=false 或选择 `skip` 时，这些 consumes、produces、sensor 和 Evidence 均不出现。`code-review` 同样只在已选 UI 模块保留 `ui-design-alignment`；最终 `implementation-report` 必须显式覆盖全部模块和所有已选 PRD/UI Evidence。
+
 记录用户输入或审阅原因时，对含空格文本使用引号：
 
 ```bash
@@ -548,6 +550,8 @@ loeyae-aidlc evidence run \
 - `diagram-contract`
 - `design-intent-coverage`
 - `ui-design-alignment`
+- `ui-artifact-consistency`
+- `inception-consistency`
 
 ## 8. 直接语义检查：`check`
 
@@ -565,7 +569,7 @@ loeyae-aidlc check --sensor review-evidence
 
 该命令从当前业务项目读取规范产物并输出 checker JSON，适合本地诊断。它本身不生成带完整来源签名的最终 Evidence；正式门禁证据应通过 `evidence run --sensor <name>` 生成。
 
-`check` 支持的 sensor 与上一节的 16 个语义 sensor 相同；`build-test-evidence` 由受控 Evidence Producer 处理，不属于该命令。
+`check` 支持的 sensor 与上一节的 18 个语义 sensor 相同；`build-test-evidence` 由受控 Evidence Producer 处理，不属于该命令。
 
 ## 9. 图表浏览器验证：`diagram-provider`
 

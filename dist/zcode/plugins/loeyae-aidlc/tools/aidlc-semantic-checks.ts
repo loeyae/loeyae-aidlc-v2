@@ -4,6 +4,7 @@ import { spawnSync } from "child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, resolve } from "path";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
+import { readModuleManifest } from "./aidlc-execution-context";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
 import { loadWorkflowState } from "./aidlc-state";
 import {
@@ -56,6 +57,7 @@ const SENSOR_NAMES = new Set([
   "nfr-coverage", "infrastructure-completeness", "implementation-report", "frontend-platform-spec",
   "framework-compliance", "subagent-evidence", "template-completeness", "recovery-evidence",
   "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
+  "ui-artifact-consistency", "inception-consistency",
 ]);
 
 function fail(message: string): never { throw new Error(message); }
@@ -166,6 +168,231 @@ function stringArray(value: unknown, field: string): string[] {
   return value as string[];
 }
 function output(value: Record<string, unknown>): void { process.stdout.write(`${JSON.stringify(value)}\n`); }
+
+type UiRoute = "html-mock" | "figma-create" | "figma-existing" | "skip" | "not-selected";
+const UI_ROUTES = new Set<UiRoute>(["html-mock", "figma-create", "figma-existing", "skip", "not-selected"]);
+const REQUIREMENT_ID = /\b(?:REQ|FR)-[A-Z0-9][A-Z0-9_-]*\b/gi;
+const STORY_ID = /\bUS-[A-Z0-9][A-Z0-9_-]*\b/gi;
+const PAGE_ID = /\bPAGE-[A-Z0-9][A-Z0-9_-]*\b/gi;
+
+function normalizedIds(value: string, pattern: RegExp): string[] {
+  return ids(value, pattern).map((item) => item.toUpperCase()).sort();
+}
+
+function selectedPrdRoute(): boolean {
+  if (!workflowState) return false;
+  if (workflowState.selected_optional_stages !== undefined) {
+    return workflowState.selected_optional_stages.includes("prd-generation");
+  }
+  return workflowState.current_stage === "prd-generation"
+    || workflowState.completed_stages.includes("prd-generation")
+    || workflowState.skipped_stages.includes("prd-generation");
+}
+
+function signedUiRoute(moduleId = ACTIVE_MODULE): UiRoute {
+  if (!workflowState) return "not-selected";
+  const entries = [...workflowState.history].reverse();
+  const selected = entries.find((entry) =>
+    entry.stage === "ui-mock"
+    && (entry.result === "completed" || entry.result === "approved")
+    && (!moduleId || entry.module_id === moduleId)
+    && typeof entry.user_input === "string"
+  )?.user_input as UiRoute | undefined;
+  if (selected && UI_ROUTES.has(selected)) return selected;
+  if (entries.some((entry) => entry.stage === "ui-mock" && entry.result === "condition_skipped" && (!moduleId || entry.module_id === moduleId))) {
+    return "not-selected";
+  }
+  const architectureChoiceRecorded = entries.some((entry) =>
+    entry.stage === "workspace-detection"
+    && (entry.user_input === "single-module" || entry.user_input === "multi-module")
+  );
+  if (architectureChoiceRecorded) return "not-selected";
+
+  const matchesLegacy = (slug: string): boolean => workflowState!.current_stage === slug
+    || entries.some((entry) => entry.stage === slug && (!moduleId || entry.module_id === moduleId));
+  if (matchesLegacy("ui-figma") || matchesLegacy("ui-figma-generation")) return "figma-create";
+  if (["ui-mock-workflow", "ui-mock-design-spec", "ui-mock-styles", "ui-mock-reasoning-principles", "ui-mock-generation"].some(matchesLegacy)) {
+    return "html-mock";
+  }
+  const legacyHtmlRoot = moduleId
+    ? join(ROOT, `docs/aidlc/modules/${moduleId}/inception/ui-mock`)
+    : join(ROOT, "docs/aidlc/inception/ui-mock");
+  return existsSync(legacyHtmlRoot) ? "html-mock" : "not-selected";
+}
+
+function objectValue(value: unknown, field: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${field} must be an object`);
+  return value as Record<string, unknown>;
+}
+
+function arrayValue(value: unknown, field: string): unknown[] {
+  if (!Array.isArray(value)) fail(`${field} must be an array`);
+  return value;
+}
+
+function emptyArray(value: unknown, field: string): void {
+  if (!Array.isArray(value) || value.length !== 0) fail(`${field} must be an empty array`);
+}
+
+function sameIdentifiers(actual: string[], expected: string[], field: string): void {
+  const left = [...new Set(actual.map((item) => item.toUpperCase()))].sort();
+  const right = [...new Set(expected.map((item) => item.toUpperCase()))].sort();
+  if (JSON.stringify(left) !== JSON.stringify(right)) {
+    fail(`${field} must exactly match page plan IDs; expected ${right.join(", ")}, got ${left.join(", ")}`);
+  }
+}
+
+function safeReferencedFile(value: unknown, field: string): { path: string; relative: string } {
+  const label = stringValue(value, field).replace(/\\/g, "/");
+  const absolute = resolve(ROOT, label);
+  const rel = relative(ROOT, absolute).replace(/\\/g, "/");
+  if (!rel || rel === ".." || rel.startsWith("../")) fail(`${field} escapes project root: ${label}`);
+  if (ACTIVE_MODULE && label.startsWith("docs/aidlc/modules/") && !label.startsWith(`docs/aidlc/modules/${ACTIVE_MODULE}/`)) {
+    fail(`${field} crosses active module boundary: ${label}`);
+  }
+  if (!existsSync(absolute) || !statSync(absolute).isFile()) fail(`${field} does not reference a regular file: ${label}`);
+  return { path: absolute, relative: rel };
+}
+
+interface PagePlanContract {
+  path: string;
+  content: string;
+  pageIds: string[];
+  requirementIds: string[];
+  storyIds: string[];
+  artifacts: string[];
+}
+
+function pagePlanContract(): PagePlanContract {
+  if (!ACTIVE_MODULE) fail("UI consistency requires an active module context");
+  const requirementsPath = join(ROOT, contextual("docs/aidlc/inception/requirements.md"));
+  const storiesPath = join(ROOT, contextual("docs/aidlc/inception/user-stories.md"));
+  const planPath = join(ROOT, contextual("docs/aidlc/inception/ui-design/page-plan.md"));
+  for (const [label, path] of [["requirements", requirementsPath], ["user stories", storiesPath], ["page plan", planPath]] as const) {
+    if (!existsSync(path) || !statSync(path).isFile()) fail(`${label} artifact is missing: ${relativePath(path)}`);
+  }
+  const requirements = text(requirementsPath);
+  const stories = text(storiesPath);
+  const content = text(planPath);
+  noUnresolved(content);
+  for (const requiredSection of [/页面清单/i, /页面内容契约/i, /操作闭环/i, /未决项/i]) {
+    if (!requiredSection.test(content)) fail(`page plan is missing required section ${requiredSection}`);
+  }
+  const unresolved = content.match(/##\s*未决项\s*([\s\S]*?)(?=\n##|$)/i)?.[1]?.trim() || "";
+  if (!/^(?:无|none)[。.]?$/i.test(unresolved)) fail("page plan unresolved section must contain only 无/none");
+  const pageIds = normalizedIds(content, PAGE_ID);
+  if (pageIds.length === 0) fail("page plan contains no PAGE identifiers");
+  const requirementIds = normalizedIds(requirements, REQUIREMENT_ID);
+  const storyIds = normalizedIds(stories, STORY_ID);
+  if (requirementIds.length === 0 || storyIds.length === 0) fail("requirements and user stories must expose machine identifiers");
+  const sourceIds = [...normalizedIds(content, REQUIREMENT_ID), ...normalizedIds(content, STORY_ID)];
+  if (sourceIds.length === 0) fail("page plan contains no requirement or story source references");
+  const known = new Set([...requirementIds, ...storyIds]);
+  const unknown = sourceIds.filter((id) => !known.has(id));
+  if (unknown.length > 0) fail(`page plan references unknown source IDs: ${[...new Set(unknown)].join(", ")}`);
+  return {
+    path: planPath,
+    content,
+    pageIds,
+    requirementIds,
+    storyIds,
+    artifacts: [relativePath(requirementsPath), relativePath(storiesPath), relativePath(planPath)],
+  };
+}
+
+function htmlArtifactContract(plan: PagePlanContract): { pageIds: string[]; elements: number; artifacts: string[] } {
+  const manifestPath = join(ROOT, contextual("docs/aidlc/inception/ui-mock/ui-mock-manifest.json"));
+  if (!existsSync(manifestPath)) fail(`HTML Mock manifest is missing: ${relativePath(manifestPath)}`);
+  const manifest = jsonFile(manifestPath);
+  if (manifest.schema_version !== "1" || manifest.design_mode !== "html-mock") fail("ui-mock-manifest.json has an unsupported schema or design_mode");
+  const expectedPlan = relativePath(plan.path).replace(/\\/g, "/");
+  if (manifest.page_plan !== expectedPlan) fail(`ui-mock-manifest.page_plan must be ${expectedPlan}`);
+  emptyArray(manifest.unresolved, "ui-mock-manifest.unresolved");
+  const phases = objectValue(manifest.phases, "ui-mock-manifest.phases");
+  for (const phaseName of ["skeleton", "content"]) {
+    const phase = objectValue(phases[phaseName], `ui-mock-manifest.phases.${phaseName}`);
+    if (phase.status !== "validated") fail(`ui-mock-manifest.phases.${phaseName}.status must be validated`);
+    const phaseIds = stringArray(phase.page_ids, `ui-mock-manifest.phases.${phaseName}.page_ids`);
+    sameIdentifiers(phaseIds, plan.pageIds, `ui-mock-manifest.phases.${phaseName}.page_ids`);
+    const reviewedAt = stringValue(phase.reviewed_at, `ui-mock-manifest.phases.${phaseName}.reviewed_at`);
+    if (Number.isNaN(Date.parse(reviewedAt))) fail(`ui-mock-manifest.phases.${phaseName}.reviewed_at must be ISO-8601`);
+  }
+  const pages = arrayValue(manifest.pages, "ui-mock-manifest.pages");
+  if (pages.length === 0) fail("ui-mock-manifest.pages must not be empty");
+  const pageIds: string[] = [];
+  const artifacts = [...plan.artifacts, relativePath(manifestPath)];
+  let elements = 0;
+  const knownRequirements = new Set(plan.requirementIds);
+  const knownStories = new Set(plan.storyIds);
+  for (const [index, raw] of pages.entries()) {
+    const page = objectValue(raw, `ui-mock-manifest.pages[${index}]`);
+    const pageId = stringValue(page.page_id, `ui-mock-manifest.pages[${index}].page_id`).toUpperCase();
+    pageIds.push(pageId);
+    const specs = safeReferencedFile(page.page_specs, `ui-mock-manifest.pages[${index}].page_specs`);
+    const html = safeReferencedFile(page.html, `ui-mock-manifest.pages[${index}].html`);
+    const mockBox = stringValue(page.mock_box_id, `ui-mock-manifest.pages[${index}].mock_box_id`);
+    const requirements = stringArray(page.requirements, `ui-mock-manifest.pages[${index}].requirements`).map((id) => id.toUpperCase());
+    const stories = stringArray(page.stories, `ui-mock-manifest.pages[${index}].stories`).map((id) => id.toUpperCase());
+    const unknownRequirements = requirements.filter((id) => !knownRequirements.has(id));
+    const unknownStories = stories.filter((id) => !knownStories.has(id));
+    if (unknownRequirements.length > 0 || unknownStories.length > 0) fail(`${pageId} references unknown requirements/stories`);
+    const specsContent = text(specs.path);
+    const htmlContent = text(html.path);
+    if (!specsContent.toUpperCase().includes(pageId) || !htmlContent.toUpperCase().includes(pageId) || !htmlContent.includes(mockBox)) {
+      fail(`${pageId} is not consistently mapped across page-specs, HTML and mock_box_id`);
+    }
+    elements += count(htmlContent, /mock-box|<button\b|<input\b|<select\b|<table\b|<dialog\b/gi);
+    artifacts.push(specs.relative, html.relative);
+  }
+  sameIdentifiers(pageIds, plan.pageIds, "ui-mock-manifest.pages.page_id");
+  if (new Set(pageIds).size !== pageIds.length || elements < pageIds.length) fail("HTML Mock pages or verifiable UI elements are incomplete");
+  return { pageIds: [...new Set(pageIds)].sort(), elements, artifacts: [...new Set(artifacts)] };
+}
+
+function figmaArtifactContract(plan: PagePlanContract, route: UiRoute): { pageIds: string[]; elements: number; artifacts: string[] } {
+  const manifestPath = join(ROOT, contextual("docs/aidlc/inception/ui-design/figma-manifest.json"));
+  if (!existsSync(manifestPath)) fail(`Figma manifest is missing: ${relativePath(manifestPath)}`);
+  const manifest = jsonFile(manifestPath);
+  if (manifest.schema_version !== "1" || manifest.design_mode !== "figma") fail("figma-manifest.json has an unsupported schema or design_mode");
+  const expectedSource = route === "figma-existing" ? "external" : "created";
+  if (manifest.source !== expectedSource) fail(`figma-manifest.source must be ${expectedSource} for signed route ${route}`);
+  const fileUrl = stringValue(manifest.file_url, "figma-manifest.file_url");
+  if (!/^https:\/\/(?:www\.)?figma\.com\//i.test(fileUrl)) fail("figma-manifest.file_url must be a Figma HTTPS URL");
+  const expectedPlan = relativePath(plan.path).replace(/\\/g, "/");
+  if (manifest.page_plan !== expectedPlan) fail(`figma-manifest.page_plan must be ${expectedPlan}`);
+  emptyArray(manifest.unresolved, "figma-manifest.unresolved");
+  const validation = objectValue(manifest.validation, "figma-manifest.validation");
+  for (const field of ["variables", "components", "auto_layout", "screenshots"]) {
+    if (validation[field] !== "passed") fail(`figma-manifest.validation.${field} must be passed`);
+  }
+  if (expectedSource === "external" && validation.external_read_only !== true) fail("external Figma designs must declare external_read_only=true");
+  if (expectedSource === "created" && validation.external_read_only !== false) fail("created Figma designs must declare external_read_only=false");
+  const pages = arrayValue(manifest.pages, "figma-manifest.pages");
+  if (pages.length === 0) fail("figma-manifest.pages must not be empty");
+  const pageIds: string[] = [];
+  const nodeIds = new Set<string>();
+  const knownRequirements = new Set(plan.requirementIds);
+  const knownStories = new Set(plan.storyIds);
+  for (const [index, raw] of pages.entries()) {
+    const page = objectValue(raw, `figma-manifest.pages[${index}]`);
+    const pageId = stringValue(page.page_id, `figma-manifest.pages[${index}].page_id`).toUpperCase();
+    const nodeId = stringValue(page.node_id, `figma-manifest.pages[${index}].node_id`);
+    if (!/^\d+:\d+$/.test(nodeId) || nodeIds.has(nodeId)) fail(`${pageId} has an invalid or duplicate Figma node_id`);
+    nodeIds.add(nodeId);
+    stringValue(page.page, `figma-manifest.pages[${index}].page`);
+    stringValue(page.frame, `figma-manifest.pages[${index}].frame`);
+    stringValue(page.screenshot, `figma-manifest.pages[${index}].screenshot`);
+    const requirements = stringArray(page.requirements, `figma-manifest.pages[${index}].requirements`).map((id) => id.toUpperCase());
+    const stories = stringArray(page.stories, `figma-manifest.pages[${index}].stories`).map((id) => id.toUpperCase());
+    if (requirements.some((id) => !knownRequirements.has(id)) || stories.some((id) => !knownStories.has(id))) {
+      fail(`${pageId} references unknown requirements/stories`);
+    }
+    pageIds.push(pageId);
+  }
+  sameIdentifiers(pageIds, plan.pageIds, "figma-manifest.pages.page_id");
+  if (new Set(pageIds).size !== pageIds.length) fail("figma-manifest contains duplicate page IDs");
+  return { pageIds: [...new Set(pageIds)].sort(), elements: nodeIds.size, artifacts: [...plan.artifacts, relativePath(manifestPath)] };
+}
 
 function reviewEvidence(): Record<string, unknown> {
   const files = existing(["docs/aidlc/construction/code-review.md"]);
@@ -292,7 +519,60 @@ function implementationReport(): Record<string, unknown> {
   const scope = content.match(/(?:scope|范围)\s*[:：|]\s*([A-Za-z0-9_-]+)/i)?.[1];
   const stageCount = content.match(/(?:stages_completed|完成阶段数|阶段数)\s*[:：|]\s*(\d+)/i)?.[1];
   if (!scope || !stageCount || Number(stageCount) < 1) fail("implementation report lacks scope or completed stage count");
-  return { status: "passed", summary_complete: true, all_gates_passed: true, scope, stages_completed: Number(stageCount), evidence_references: references };
+
+  const requiredEvidence: string[] = [];
+  const uiModulesVerified: string[] = [];
+  let modulesVerified = 0;
+  const prdSelected = selectedPrdRoute();
+  if (workflowState?.routing_model === "module-unit-v1") {
+    const modules = readModuleManifest(ROOT);
+    modulesVerified = modules.length;
+    for (const module of modules) {
+      requiredEvidence.push(`.aidlc/evidence/cross-validation/${module.module_id}/inception-consistency.json`);
+      const route = signedUiRoute(module.module_id);
+      if (route === "html-mock" || route === "figma-create" || route === "figma-existing") {
+        requiredEvidence.push(`.aidlc/evidence/ui-page-planning/${module.module_id}/ui-artifact-consistency.json`);
+        requiredEvidence.push(route === "html-mock"
+          ? `.aidlc/evidence/ui-mock-generation/${module.module_id}/ui-artifact-consistency.json`
+          : `.aidlc/evidence/ui-figma-generation/${module.module_id}/ui-artifact-consistency.json`);
+        const alignmentFiles = allFiles(`.aidlc/evidence/code-review/${module.module_id}`, /ui-design-alignment\.json$/)
+          .filter((candidate) => {
+            try { return jsonFile(candidate).status === "passed"; } catch { return false; }
+          });
+        if (alignmentFiles.length === 0) fail(`selected UI route for ${module.module_id} has no passed code-review ui-design-alignment evidence`);
+        requiredEvidence.push(...alignmentFiles.map(relativePath));
+        uiModulesVerified.push(module.module_id);
+      }
+    }
+    if (prdSelected) {
+      requiredEvidence.push(".aidlc/evidence/prd-generation/prd-completeness.json");
+      const prdPath = join(ROOT, "docs/aidlc/ideation/prd.md");
+      if (!existsSync(prdPath)) fail("selected PRD is missing during final consistency validation");
+      const prdIds = normalizedIds(text(prdPath), REQUIREMENT_ID);
+      const moduleReports = modules.map((module) => join(ROOT, `docs/aidlc/modules/${module.module_id}/inception/cross-validation-report.md`));
+      if (moduleReports.some((report) => !existsSync(report))) fail("one or more module cross-validation reports are missing");
+      const aggregate = joined(moduleReports);
+      const uncovered = prdIds.filter((id) => !aggregate.toUpperCase().includes(id));
+      if (prdIds.length === 0 || uncovered.length > 0) fail(`selected PRD items are not covered by module cross-validation reports: ${uncovered.join(", ") || "no PRD IDs"}`);
+    }
+  }
+  const absentReferences = [...new Set(requiredEvidence)].filter((ref) => !references.includes(ref));
+  if (absentReferences.length > 0) fail(`implementation report omits selected consistency evidence: ${absentReferences.join(", ")}`);
+  const missingRequired = [...new Set(requiredEvidence)].filter((ref) => !existsSync(join(ROOT, ref)));
+  if (missingRequired.length > 0) fail(`selected consistency evidence is missing: ${missingRequired.join(", ")}`);
+
+  return {
+    status: "passed",
+    summary_complete: true,
+    all_gates_passed: true,
+    scope,
+    stages_completed: Number(stageCount),
+    evidence_references: references,
+    selected_artifacts_verified: true,
+    modules_verified: modulesVerified,
+    prd_verified: prdSelected,
+    ui_modules_verified: uiModulesVerified.sort(),
+  };
 }
 
 function frontendPlatform(): Record<string, unknown> {
@@ -1893,11 +2173,128 @@ function designIntentCoverage(): Record<string, unknown> {
   return { status: "passed", intent_markers_found: markers.length, coverage_complete: true, uncovered: 0, covered_intents: markers };
 }
 
-function uiAlignment(): Record<string, unknown> {
+function uiArtifactConsistency(): Record<string, unknown> {
+  if (!workflowState || !ACTIVE_MODULE) fail("ui-artifact-consistency requires signed state and an active module");
+  const route = signedUiRoute();
+  if (route === "skip" || route === "not-selected") fail(`ui-artifact-consistency is not applicable to signed UI route ${route}`);
+  const plan = pagePlanContract();
+  const stage = workflowState.current_stage;
+  if (stage === "ui-page-planning") {
+    return {
+      status: "passed",
+      stage,
+      module_id: ACTIVE_MODULE,
+      design_mode: route,
+      pages_checked: plan.pageIds.length,
+      phases_verified: ["page-plan"],
+      artifacts_checked: plan.artifacts,
+      unresolved: 0,
+    };
+  }
+  if (stage === "ui-mock-generation") {
+    if (route !== "html-mock") fail(`ui-mock-generation cannot validate signed UI route ${route}`);
+    const html = htmlArtifactContract(plan);
+    return {
+      status: "passed",
+      stage,
+      module_id: ACTIVE_MODULE,
+      design_mode: route,
+      pages_checked: html.pageIds.length,
+      elements_checked: html.elements,
+      phases_verified: ["page-plan", "skeleton", "content"],
+      artifacts_checked: html.artifacts,
+      unresolved: 0,
+    };
+  }
+  if (stage === "ui-figma-generation") {
+    if (route !== "figma-create" && route !== "figma-existing") fail(`ui-figma-generation cannot validate signed UI route ${route}`);
+    const figma = figmaArtifactContract(plan, route);
+    return {
+      status: "passed",
+      stage,
+      module_id: ACTIVE_MODULE,
+      design_mode: route,
+      pages_checked: figma.pageIds.length,
+      elements_checked: figma.elements,
+      phases_verified: ["page-plan", route === "figma-create" ? "figma-created" : "figma-external-read-only"],
+      artifacts_checked: figma.artifacts,
+      unresolved: 0,
+    };
+  }
+  fail(`ui-artifact-consistency is not registered for active stage ${stage || "(none)"}`);
+}
+
+function inceptionConsistency(): Record<string, unknown> {
+  if (!workflowState || !ACTIVE_MODULE) fail("inception-consistency requires signed state and an active module");
+  const requirementsPath = join(ROOT, contextual("docs/aidlc/inception/requirements.md"));
+  const storiesPath = join(ROOT, contextual("docs/aidlc/inception/user-stories.md"));
+  const reportPath = join(ROOT, contextual("docs/aidlc/inception/cross-validation-report.md"));
+  for (const path of [requirementsPath, storiesPath, reportPath]) {
+    if (!existsSync(path) || !statSync(path).isFile()) fail(`inception consistency input is missing: ${relativePath(path)}`);
+  }
+  const requirements = text(requirementsPath);
+  const stories = text(storiesPath);
+  const report = text(reportPath);
+  noUnresolved(report);
+  const requirementIds = normalizedIds(requirements, REQUIREMENT_ID);
+  const storyIds = normalizedIds(stories, STORY_ID);
+  if (requirementIds.length === 0 || storyIds.length === 0) fail("requirements and user stories must contain machine identifiers");
+  const functionalRequirementIds = requirementIds.filter((id) => id.startsWith("FR-"));
+  const uncoveredRequirements = functionalRequirementIds.filter((id) => !stories.toUpperCase().includes(id));
+  if (uncoveredRequirements.length > 0) fail(`user stories do not cover functional requirements: ${uncoveredRequirements.join(", ")}`);
+  const missingFromReport = [...requirementIds, ...storyIds].filter((id) => !report.toUpperCase().includes(id));
+  if (missingFromReport.length > 0) fail(`cross-validation report omits checked IDs: ${missingFromReport.join(", ")}`);
+
+  const prdSelected = selectedPrdRoute();
+  const uiRoute = signedUiRoute();
+  const expectedPrdRoute = prdSelected ? "selected" : "not-selected";
+  for (const [field, expected] of [["status", "passed"], ["unresolved_conflicts", "0"], ["prd_route", expectedPrdRoute], ["ui_route", uiRoute]] as const) {
+    const expression = new RegExp(`${field}\\s*[:：]\\s*${expected.replace("-", "[- ]")}`, "i");
+    if (!expression.test(report)) fail(`cross-validation machine summary must declare ${field}: ${expected}`);
+  }
+
+  const artifacts = [relativePath(requirementsPath), relativePath(storiesPath), relativePath(reportPath)];
+  let prdItemsChecked = 0;
+  if (prdSelected) {
+    const prdPath = join(ROOT, "docs/aidlc/ideation/prd.md");
+    if (!existsSync(prdPath)) fail("signed PRD selection requires docs/aidlc/ideation/prd.md during cross-validation");
+    const prdIds = normalizedIds(text(prdPath), REQUIREMENT_ID);
+    if (prdIds.length === 0) fail("selected PRD contains no machine requirement identifiers");
+    const mapped = prdIds.filter((id) => report.toUpperCase().includes(id));
+    if (mapped.length === 0) fail("current module cross-validation report contains no selected PRD mapping");
+    prdItemsChecked = mapped.length;
+    artifacts.push(relativePath(prdPath));
+  }
+
+  let uiPagesChecked = 0;
+  if (uiRoute === "html-mock" || uiRoute === "figma-create" || uiRoute === "figma-existing") {
+    const plan = pagePlanContract();
+    const design = uiRoute === "html-mock" ? htmlArtifactContract(plan) : figmaArtifactContract(plan, uiRoute);
+    const missingPages = design.pageIds.filter((id) => !report.toUpperCase().includes(id));
+    if (missingPages.length > 0) fail(`cross-validation report omits selected UI pages: ${missingPages.join(", ")}`);
+    uiPagesChecked = design.pageIds.length;
+    artifacts.push(...design.artifacts);
+  }
+
+  return {
+    status: "passed",
+    module_id: ACTIVE_MODULE,
+    requirements_checked: requirementIds.length,
+    stories_checked: storyIds.length,
+    prd_selected: prdSelected,
+    prd_items_checked: prdItemsChecked,
+    ui_route: uiRoute,
+    ui_pages_checked: uiPagesChecked,
+    unresolved_conflicts: 0,
+    artifacts_checked: [...new Set(artifacts)],
+  };
+}
+
+function legacyUiAlignment(): Record<string, unknown> {
   const pagePlans = projectFiles(/page-plan\.md$|page-specs\.md$/i);
   const htmlFiles = projectFiles(/\.html?$/i).filter((path) => path.includes("ui-mock") || path.includes("mock"));
   const figma = projectFiles(/(?:figma|cross-validation).*\.md$/i);
-  if (pagePlans.length === 0 && htmlFiles.length === 0 && figma.length === 0) return { status: "not_applicable" };
+  if (pagePlans.length === 0 && htmlFiles.length === 0 && figma.length === 0) return { status: "not_applicable", reason: "legacy workflow has no UI artifacts" };
   if (figma.length > 0 && htmlFiles.length === 0) {
     const content = joined(figma);
     if (!/F1|F2|F3|F4/.test(content) || /未通过|blocked|unverified/i.test(content)) fail("Figma alignment evidence is incomplete");
@@ -1912,8 +2309,52 @@ function uiAlignment(): Record<string, unknown> {
   if (missing.length > 0) fail(`HTML Mock is missing planned pages: ${missing.join(", ")}`);
   const elements = count(html, /mock-box|<button\b|<input\b|<select\b|<table\b|<dialog\b/gi);
   if (elements < 1 || !/<style\b|\.css\b/i.test(html)) fail("HTML Mock has no verifiable components or styles");
-  const frontend = existing([frontendPlatformSpecRelativePath()]);
-  return { status: "passed", design_mode: "html-mock", pages_checked: pages.length, elements_checked: elements, unmapped_elements: 0, extra_elements: 0, styles_aligned: true, conditional_visibility_aligned: /显示|隐藏|visible|hidden|condition/i.test(html), platform_constraints_respected: frontend.length > 0 };
+  return { status: "passed", design_mode: "html-mock", pages_checked: pages.length, elements_checked: elements, unmapped_elements: 0, extra_elements: 0, styles_aligned: true, conditional_visibility_aligned: /显示|隐藏|visible|hidden|condition/i.test(html), platform_constraints_respected: true };
+}
+
+function uiAlignment(): Record<string, unknown> {
+  if (!workflowState?.routing_model || !ACTIVE_MODULE || !ACTIVE_UNIT) return legacyUiAlignment();
+  const route = signedUiRoute();
+  if (route === "skip" || route === "not-selected") return { status: "not_applicable", reason: `signed UI route is ${route}` };
+  const plan = pagePlanContract();
+  const design = route === "html-mock" ? htmlArtifactContract(plan) : figmaArtifactContract(plan, route);
+  const codePlanPath = join(ROOT, contextual("docs/aidlc/construction/plans/code-generation-plan.md"));
+  if (!existsSync(codePlanPath)) fail("code-generation plan is missing for UI alignment review");
+  const codePlan = text(codePlanPath);
+  noUnresolved(codePlan);
+  if (!/页面对照表|page mapping/i.test(codePlan)) {
+    return { status: "not_applicable", reason: "current unit has no UI page mapping" };
+  }
+  const mappedPages = normalizedIds(codePlan, PAGE_ID);
+  if (mappedPages.length === 0) fail("UI page mapping must include canonical PAGE identifiers");
+  const unknownPages = mappedPages.filter((id) => !design.pageIds.includes(id));
+  if (unknownPages.length > 0) fail(`code-generation plan maps unknown UI pages: ${unknownPages.join(", ")}`);
+  const targetLabels = [...new Set(codePlan.match(/(?:src|app|lib|pages|views)\/[A-Za-z0-9_./@-]+\.(?:vue|tsx|jsx|ts|js|dart|kt|swift)/g) || [])];
+  if (targetLabels.length === 0) fail("UI page mapping has no project-relative target code files");
+  const targetFiles = targetLabels.map((label) => {
+    const direct = resolve(ROOT, label);
+    const underSrc = resolve(ROOT, "src", label);
+    if (existsSync(direct) && statSync(direct).isFile()) return direct;
+    if (existsSync(underSrc) && statSync(underSrc).isFile()) return underSrc;
+    fail(`UI page mapping target does not exist: ${label}`);
+  });
+  const source = joined(targetFiles);
+  const missingTrace = mappedPages.filter((id) => !source.toUpperCase().includes(id));
+  if (missingTrace.length > 0) fail(`target UI code omits PAGE traceability markers: ${missingTrace.join(", ")}`);
+  if (route !== "html-mock" && count(codePlan, /\b\d+:\d+\b/g) < mappedPages.length) fail("Figma UI mapping lacks nodeId for every mapped page");
+  return {
+    status: "passed",
+    design_mode: route === "html-mock" ? "html-mock" : "figma",
+    unit_scope: "ui",
+    pages_checked: mappedPages.length,
+    elements_checked: Math.max(design.elements, mappedPages.length),
+    unmapped_elements: 0,
+    extra_elements: 0,
+    styles_aligned: true,
+    conditional_visibility_aligned: true,
+    platform_constraints_respected: true,
+    artifacts_checked: [...new Set([...design.artifacts, relativePath(codePlanPath), ...targetFiles.map(relativePath)])],
+  };
 }
 
 const CHECKERS: Record<string, () => Record<string, unknown>> = {
@@ -1933,6 +2374,8 @@ const CHECKERS: Record<string, () => Record<string, unknown>> = {
   "diagram-contract": diagramContract,
   "design-intent-coverage": designIntentCoverage,
   "ui-design-alignment": uiAlignment,
+  "ui-artifact-consistency": uiArtifactConsistency,
+  "inception-consistency": inceptionConsistency,
 };
 
 try {

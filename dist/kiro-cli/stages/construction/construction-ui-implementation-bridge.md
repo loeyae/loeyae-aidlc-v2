@@ -205,9 +205,11 @@ figma 模式下"设计表现"列填写从 `get_design_context` 返回的 Tailwin
 ### 检查逻辑
 
 ```
-IF handoff.md 中"前端技术栈" ≠ 空
-AND handoff.md 中"前端类型" ∈ {跨端, 小程序, APP, 混合}（即非纯Web）
+IF 当前 unit 的签名执行序列实例化了 ui-implementation-bridge
+AND 当前模块签名 I9 choice ∈ {html-mock, figma-create, figma-existing}
 THEN:
+  # 引擎的 needs_ui_implementation_bridge 已用 canonical 项目目标事实确认非纯 Web；
+  # handoff.md 只展示结果，不参与本门禁判断。
   检查 docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md 是否存在
   
   IF 不存在:

@@ -239,9 +239,11 @@ requires: [code-generation, tdd]
 - [ ] 进程内声明符合 `shared-interfaces.md` 的批准设计；跨进程字段仍以机器契约为权威
 - [ ] 消费者仅引用 Owner 的已验证声明，未重定义同职责契约
 
-### UI 设计合规（条件：该单元涉及前端页面且 handoff.md `UI 设计方式` 非"跳过"）
+### UI 设计合规（条件：当前模块签名 I9 choice 已选择设计，且本单元代码生成计划含页面对照表）
 
-比对基准按 `UI 设计方式` 确定：`html-mock` 对照 `docs/aidlc/modules/{module-id}/inception/ui-mock/` 中的 mock-box；`figma` 对照页面对照表中 nodeId 对应的 Frame（通过 `get_design_context` / `get_screenshot` 获取）。
+未触发 UI、选择 `skip` 或无签名 UI choice 时，运行时 directive 会同时移除 `ui-design-alignment` sensor 和对应 Evidence produce，代码审查不得要求 UI 文件。已选择 UI 但当前单元不含页面对照表时，checker 返回带原因的 `not_applicable`；最终实施报告仍要求该模块至少有一个单元产生 `passed` 的 UI 对齐 Evidence。
+
+比对基准按签名 choice 确定：`html-mock` 对照当前模块 `ui-mock-manifest.json`、page-specs 和 HTML mock-box；`figma-create` / `figma-existing` 对照 `figma-manifest.json` 中 nodeId 对应的 Frame。页面对照表必须包含 PAGE ID 和项目相对目标代码路径，目标代码须保留可搜索的 PAGE 追溯标记。
 
 - [ ] 页面结构与设计基准的布局一致
 - [ ] 表单字段（名称、类型、必填标记）与设计基准定义一致
@@ -298,7 +300,7 @@ requires: [code-generation, tdd]
 **偏差**（实现与规格意图不符）：
 1. [具体偏差 + 期望行为 vs 实际行为]
 
-**UI 设计不一致**（条件：涉及前端页面且 handoff.md `UI 设计方式` 非"跳过"）：
+**UI 设计不一致**（条件：当前模块签名 I9 choice 为 `html-mock`、`figma-create` 或 `figma-existing`，且当前单元页面映射适用）：
 1. [具体不一致项 + 设计基准引用（HTML 文件+mock-box 或 Frame 名称+nodeId）+ 期望 vs 实际]
 
 **数据流缺陷**（数据空中楼阁）：

@@ -16,8 +16,8 @@
 
 | 场景 | 识别信号 | 处理 |
 |------|---------|------|
-| 新项目启动 | 无 `docs/aidlc/handoff.md` | 正常启动流程，不执行本检查点 |
-| 正常会话恢复 | 检测到 handoff.md + 用户说"继续" | 执行本检查点 → 恢复流程 |
+| 新项目启动 | 无有效 enrollment/签名 state | 正常启动流程，不执行恢复检查点 |
+| 正常会话恢复 | 存在有效签名 state + 用户说"继续" | 执行本检查点 → 恢复流程 |
 | Context Compact 恢复 | 会话摘要中有 compact 标记 或 AI 检测到上下文被压缩 | 执行本检查点（**额外纪律**） |
 | 跨会话交接 | 用户粘贴 handoff.md 中的交接提示词 | 执行本检查点 → 交接流程 |
 | 团队协作接手 | handoff.md 显示协作模式 + 新角色 | 执行本检查点 → 协作恢复流程 |
@@ -30,12 +30,10 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Step 1: 读取 handoff.md                                       │
-│ - 确认当前阶段（INCEPTION / CONSTRUCTION / OPERATIONS）     │
-│ - 确认当前步骤                                              │
-│ - 确认活跃模块（如适用）                                     │
-│ - 确认活跃单元（如适用）                                     │
-│ - 确认活跃变更请求（如适用）                                 │
+│ Step 1: 验证签名 state，再读取 handoff.md 人类摘要               │
+│ - 运行 orchestrate next --status 确认阶段和 current_stage_instance│
+│ - 从签名 state 确认当前模块、单元、choice 与 condition skip     │
+│ - handoff 只补充活跃协调、批次、协作者和变更请求说明            │
 │ - handoff.md 存在“活跃产品协调”，或 UI `设计状态` 为            │
 │   `blocked`/`reconcile_in_progress` 时，读取协调表和问题文件， │
 │   加载 `common-workflow-changes.md`，不得跳到后续步骤          │
@@ -67,7 +65,7 @@
 ┌─────────────────────────────────────────────────────────────┐
 │ Step 4: 按场景继续                                          │
 │ - 正常恢复 → 展示"欢迎回来"提示，等待用户选择               │
-│ - Compact 恢复 → 直接从 handoff.md 的下一步继续              │
+│ - Compact 恢复 → 直接从签名当前 directive 继续              │
 │ - 交接恢复 → 从交接提示词指定的步骤继续                     │
 │ - 协作恢复 → 展示协作恢复提示，等待角色选择                 │
 │ - 模块恢复 → 展示模块恢复提示或直接继续活跃模块             │
@@ -82,8 +80,8 @@
 
 **额外规则**：
 1. **检查状态模式** — `状态模式版本` 缺失/低于 2，或缺少分布式治理字段时，保存原恢复位置，先执行定向 I1 检测与必要的 I4 系统基线回填；完成后再恢复原步骤。
-2. **不信任会话摘要中的任务列表** — 会话摘要可能不准确，不能替代 handoff.md。
-3. **以 handoff.md 为唯一事实来源** — 当前阶段、当前步骤、下一步操作全部从 handoff.md 读取。
+2. **不信任会话摘要或 handoff 的机器游标** — 两者都不能替代签名 state。
+3. **以签名 `aidlc-state.json` 为唯一机器路由事实** — 当前阶段、`stage_instance`、模块、单元、choice 与跳过结果由编排器验证；handoff.md 只补充人类协作摘要。
 4. **重新加载当前步骤的 steering 文件** — 不依赖压缩前的上下文，确保执行规则完整。
 5. **检查活跃协调状态** — handoff.md 存在“活跃产品协调”、UI 为 `blocked`/`reconcile_in_progress`，或存在 `rework_required` 单元时，优先按 `common-workflow-changes.md` 恢复冲突裁决、产物同步和失效传播，不得按原下一步骤或原单元继续。
 6. **检查“下一步交接”表格** — 不存在活跃协调状态时，优先按其中提示词恢复。
@@ -93,13 +91,13 @@
 ```
 Compact 恢复
     ↓
-读取 handoff.md
+运行 orchestrate next --status，验证签名 state/current_stage_instance
+    ↓
+读取 handoff.md 补充活跃协调与人类交接摘要
     ↓
 ├── 有活跃协调状态？
-│     是 → 加载 common-workflow-changes.md 恢复协调
-│     否 → 检查"下一步交接"提示词
-│            有 → 按提示词恢复（跳过欢迎提示，直接继续）
-│            无 → 按 handoff.md 的"当前步骤"恢复
+│     是 → 加载 common-workflow-changes.md 恢复协调；不得改变签名游标
+│     否 → 按签名当前 directive 恢复
     ↓
 激活对应 skill + 宣布恢复状态
     ↓
@@ -109,7 +107,7 @@ Compact 恢复
 **Compact 恢复的宣布格式**：
 
 ```markdown
-Boss，检测到会话上下文被压缩。已从 handoff.md 恢复：
+Boss，检测到会话上下文被压缩。已验证签名 state，并从 handoff.md 补充人类摘要：
 
 - **阶段**：{当前阶段}
 - **步骤**：{当前步骤}
@@ -122,7 +120,7 @@ Boss，检测到会话上下文被压缩。已从 handoff.md 恢复：
 
 - ❌ **不要直接从会话摘要的 Pending Tasks 继续编码** — 会话摘要是 AI 生成的，可能不准确
 - ❌ **不要跳过 skill 激活直接读取代码文件** — skill 包含必要的执行规则
-- ❌ **不要假设阶段状态** — 必须从 handoff.md 确认
+- ❌ **不要假设阶段状态** — 必须由编排器验证签名 state/current_stage_instance；handoff 不能代替
 - ❌ **不要跳过宣布恢复状态** — 这是团队协作和审计的必要记录
 - ❌ **不要在恢复后立即大量加载前序产出物** — 按延迟加载策略按需读取
 
@@ -151,7 +149,7 @@ Boss，检测到会话上下文被压缩。已从 handoff.md 恢复：
 ```markdown
 **欢迎回来！我发现您有一个正在进行中的 AI-DLC 项目。**
 
-根据您的 handoff.md，以下是您当前的状态：
+根据已验证的签名 state（handoff.md 仅补充协作摘要），以下是您当前的状态：
 - **项目**：[project-name]
 - **当前阶段**：[INCEPTION/CONSTRUCTION/OPERATIONS]
 - **当前步骤**：[Stage Name]
@@ -167,8 +165,8 @@ B) 回顾之前的阶段（[显示可用阶段]）
 ```
 
 ## 强制要求：会话连续性指令
-1. **检测到现有项目时，始终先读取 handoff.md**
-2. **从工作流文件中解析当前状态**以填充提示内容
+1. **检测到现有项目时，始终先运行编排器状态检查，再读取 handoff.md 补充人类上下文**
+2. **从签名 state/current directive 解析机器状态**以填充提示内容
 3. **延迟加载产出物**（参见 `common-token-management.md`）— 不再预加载所有前序产物：
 
    **必须立即加载（~5-8KB）**：
@@ -218,16 +216,12 @@ B) 回顾之前的阶段（[显示可用阶段]）
 4. 该页面的实际代码文件
 
 **加载方法**：
-- 先读 handoff.md 的 `## UI 设计` 区块确定 `UI 设计方式`，再按模式定位设计基准：
-  - `html-mock` 标准模式：直接搜索 `ui-mock/{端名}.html` 中的页面名称
-  - `html-mock` 大型模式：先查看 `ui-mock/{端名}/index.html` 确定模块，再搜索对应模块文件
-  - `figma` 模式：读取唯一主文件链接和 `设计状态`；优先从 `Figma 页面进度` 或代码生成计划取得 nodeId，再调用 `get_design_context` + `get_screenshot`
-    - `selected`：从身份与能力确认继续
-    - `file_created`：从 Page/Frame 结构准备继续
-    - `designing`：从第一条 `pending` 或 `in_progress` 页面继续
-    - `review_pending`：恢复等待反馈或执行 I10
-    - `approved`：进入 Construction，不重新执行 I9
-  - figma 页面进度缺失时才用 `get_metadata` 逐层定位并回填 state；不得重新创建主文件或同名 Frame
+- 先由编排器验证签名 state/history 中的 I9 choice，再按模式定位 canonical 设计基准：
+  - `html-mock` 标准模式：读取当前模块 `ui-mock-manifest.json`，再按其中路径搜索 HTML 页面
+  - `html-mock` 大型模式：同样以 manifest 的 PAGE→文件映射定位，不从 handoff 推断目录
+  - `figma-create` / `figma-existing`：读取当前模块 `figma-manifest.json` 的 `file_url`、PAGE/Frame/nodeId，再调用 `get_design_context` + `get_screenshot`
+    - handoff 中的 `selected/file_created/designing/review_pending/approved` 仅用于向人类展示进度，不能改变签名 choice 或补齐 manifest
+  - manifest 页面进度缺失时阻断并重新执行对应 UI Stage/`ui-artifact-consistency`；不得从 handoff 或临时 `get_metadata` 结果静默回填机器事实，也不得重新创建主文件或同名 Frame
 - 在需求文档中搜索页面名称，定位相关段落
 - 在用户故事文件中搜索页面名称，收集所有相关故事
 - 如果 handoff.md 中记录了历史变更（含该页面），加载变更记录确认最新状态

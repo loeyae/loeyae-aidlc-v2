@@ -400,6 +400,8 @@ Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活
 
 `prd-generation` 是初始化级用户选择，只能在新建完整 scope 时通过 `--with-prd` 写入签名状态。I9 `ui-mock` 是运行时 choice router：directive 返回 `choices` 与 `choice_required`，用户必须在 `html-mock`、`figma-create`、`figma-existing`、`skip` 中选择一个，并通过 `report ... --user-input <choice>` 写入签名 history。`skip` 不生成 UI 产物，HTML 与 Figma 分支互斥；后续机器路由只读取签名状态，不读取 `handoff.md`。
 
+选择 UI 后，当前模块必须依次通过 `page-plan.md`、`ui-mock-manifest.json`（含 skeleton/content 两段）或 `figma-manifest.json`、以及模块级 `inception-consistency` Evidence；每段都与需求、故事和前序 canonical 产物做机器一致性验证。未选择 PRD/UI、UI condition=false 或选择 `skip` 时，不实例化对应 Stage，不读取分支文件，也不要求占位 Evidence。后续 code review 仅对已选 UI 模块/适用单元要求 `ui-design-alignment`，项目级 implementation report 必须聚合全部模块以及所有已选 PRD/UI Evidence。
+
 `workflow-plan.md` 的机器决策表为 `application-design`、`units-generation`、`functional-design` 和 `operations` 分别记录 `execute / skip` 与 evidence。引擎优先执行该表；缺表的旧工作流才保守地根据项目证据推断。I14 被跳过时 Construction 使用确定性的 `default` 单元；I14 执行时，新签名工作流在 `unit-manifest.json` 为每个单元声明 `conditional_stages`，防止某个单元的 NFR、基础设施、契约、框架或 UI 事实扩散为所有单元的强制流程，旧清单缺字段时保守回退模块级条件。Operations 条件为 false 时不会出现部署审批，模板归档也仅在明确要求保留可复用模板时执行。
 
 图谱通过 `axis: project | module | unit` 声明实例化范围。新工作流固定按“项目级 Ideation → 每个模块完整 Inception → 每个模块/单元完整 Construction → 项目级构建测试、实施报告与 Operations”执行。模块由 `docs/aidlc/ideation/module-manifest.json` 声明；每个模块的工作单元由 `docs/aidlc/modules/<module-id>/inception/unit-manifest.json` 声明。单模块项目同样声明一个模块和至少一个单元。
@@ -417,7 +419,7 @@ Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活
 
 只有条件判定需要执行的 `application-design` 和 `operations` 实例使用 `approval: block`。`next` 为其创建绑定 `workflow_id + stage_instance + challenge` 的随机 challenge；模块级 `application-design` 的每个模块实例分别审批。人类在交互式终端审阅当前实例产物后运行 `loeyae-aidlc approve --stage <slug>`，得到最长 15 分钟、消费后不可重放的 token，再以 `--result approved --approval-token <token>` 报告。condition=false 的实例先自动记录 `condition_skipped`，不会创建审批 challenge。平台适配器不会自行签发 token；没有 Kiro Crew Dashboard、Claude、CodeBuddy、Qoder、ZCode、Codex 或 OpenCode 宿主 token provider 且没有可用人类终端时，这两个阶段会按设计 fail-closed。宿主集成可把 token 作为 `--approval-token` 或一次性 `AIDLC_APPROVAL_TOKEN` 传给引擎，但不得暴露普通非交互 token generator。
 
-14 个不产生机器可验证产物的阶段显式标记为 `instruction_only`，执行正文后必须用 `--instruction-ack <stage-slug>` 报告。Stop Hook 不携带该确认，因此不能自动推进这些阶段。
+12 个不产生机器可验证产物的阶段显式标记为 `instruction_only`，执行正文后必须用 `--instruction-ack <stage-slug>` 报告。Stop Hook 不携带该确认，因此不能自动推进这些阶段。
 
 ### 五层门禁
 
@@ -425,11 +427,11 @@ Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活
 |----|------|------|------|
 | requires | 前置 stage 依赖检查（scope-aware） | `next` | 45/46 |
 | condition | 动态条件评估（false 时自动跳过） | `next` | 26/46 |
-| produces | 产物存在、路径安全且每个文件至少 16 字节 | `report` | 32/46 |
-| sensors | 结构化证据或内置质量校验 | `report` | 32/46 |
+| produces | 产物存在、路径安全且每个文件至少 16 字节 | `report` | 34/46 |
+| sensors | 结构化证据或内置质量校验 | `report` | 34/46 |
 | current_stage_instance | 防逻辑 Stage 相同但模块/单元上下文不同的跳步 | `report` | 所有实例 |
 
-仅 `application-design`（架构决策）和 `operations`（部署决策）保留 `approval: block`，且只在各自 condition=true 时出现；14 个 instruction-only stage 需要显式 ack；其余 stage 在声明门禁通过后推进。
+仅 `application-design`（架构决策）和 `operations`（部署决策）保留 `approval: block`，且只在各自 condition=true 时出现；12 个 instruction-only stage 需要显式 ack；其余 stage 在声明门禁通过后推进。
 
 ### Evidence 协议（Construction）
 

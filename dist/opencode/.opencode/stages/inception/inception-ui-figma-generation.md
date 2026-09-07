@@ -9,10 +9,12 @@ lead_agent: aidlc-design-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
-consumes: []
-produces: []
-sensors: []
-completion_contract: instruction_only
+consumes:
+  - docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md
+produces:
+  - docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json
+  - .aidlc/evidence/ui-figma-generation/{module-id}/ui-artifact-consistency.json
+sensors: [ui-artifact-consistency]
 requires: [ui-figma]
 condition: ui_mode_figma
 ---
@@ -60,9 +62,40 @@ condition: ui_mode_figma
 
 工具是否可调用由编排层提供的能力结果决定，本文件不把配置存在视为可用。
 
+除能力返回值外，编排层必须把结果写入当前模块的 canonical `docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json`：
+
+```json
+{
+  "schema_version": "1",
+  "design_mode": "figma",
+  "source": "created",
+  "file_url": "https://www.figma.com/design/...",
+  "page_plan": "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md",
+  "pages": [{
+    "page_id": "PAGE-001",
+    "page": "module-web",
+    "frame": "Rule List",
+    "node_id": "1:234",
+    "screenshot": "figma://screenshot/1:234",
+    "requirements": ["REQ-UI-001"],
+    "stories": ["US-001"]
+  }],
+  "validation": {
+    "variables": "passed",
+    "components": "passed",
+    "auto_layout": "passed",
+    "screenshots": "passed",
+    "external_read_only": false
+  },
+  "unresolved": []
+}
+```
+
+`figma-create` 必须写 `source=created`；`figma-existing` 必须写 `source=external` 且 `external_read_only=true`。每个页面计划项必须恰有一个 Page/Frame/nodeId 和截图引用，页面集合及来源 ID 与 `page-plan.md` 完全一致。report 前运行 `ui-artifact-consistency`；handoff.md 仅展示派生进度，不能替代此 manifest。
+
 ## 输出
 
-返回：
+返回并持久化：
 
 - 唯一主文件 URL；
 - 页面 ID、Page、Frame 和 nodeId 映射；

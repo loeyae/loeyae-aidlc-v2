@@ -1,5 +1,5 @@
 {
-  "version": "2.2.0",
+  "version": "2.3.0",
   "stages": [
     {
       "slug": "workspace-detection",
@@ -589,11 +589,21 @@
         "ui-mock"
       ],
       "scope_waived_requires": [],
-      "consumes": [],
-      "produces": [],
-      "sensors": [],
+      "consumes": [
+        "docs/aidlc/modules/{module-id}/inception/requirements.md",
+        "docs/aidlc/modules/{module-id}/inception/user-stories.md"
+      ],
+      "produces": [
+        "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md",
+        ".aidlc/evidence/ui-page-planning/{module-id}/ui-artifact-consistency.json"
+      ],
+      "sensors": [
+        "ui-artifact-consistency",
+        "no-todo",
+        "traceability"
+      ],
       "traceability": "required",
-      "completion_contract": "instruction_only",
+      "completion_contract": "gated",
       "condition": "ui_design_selected",
       "approval": "notify",
       "file": "stages/inception/inception-ui-page-planning.md"
@@ -651,11 +661,20 @@
         "ui-figma"
       ],
       "scope_waived_requires": [],
-      "consumes": [],
-      "produces": [],
-      "sensors": [],
+      "consumes": [
+        "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md"
+      ],
+      "produces": [
+        "docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json",
+        ".aidlc/evidence/ui-figma-generation/{module-id}/ui-artifact-consistency.json"
+      ],
+      "sensors": [
+        "ui-artifact-consistency",
+        "no-todo",
+        "traceability"
+      ],
       "traceability": "required",
-      "completion_contract": "instruction_only",
+      "completion_contract": "gated",
       "condition": "ui_mode_figma",
       "approval": "notify",
       "file": "stages/inception/inception-ui-figma-generation.md"
@@ -806,11 +825,16 @@
         "ui-mock-reasoning-principles"
       ],
       "scope_waived_requires": [],
-      "consumes": [],
+      "consumes": [
+        "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md"
+      ],
       "produces": [
-        "docs/aidlc/modules/{module-id}/inception/ui-mock/"
+        "docs/aidlc/modules/{module-id}/inception/ui-mock/",
+        "docs/aidlc/modules/{module-id}/inception/ui-mock/ui-mock-manifest.json",
+        ".aidlc/evidence/ui-mock-generation/{module-id}/ui-artifact-consistency.json"
       ],
       "sensors": [
+        "ui-artifact-consistency",
         "no-todo",
         "traceability"
       ],
@@ -847,9 +871,11 @@
         "docs/aidlc/modules/{module-id}/inception/user-stories.md"
       ],
       "produces": [
-        "docs/aidlc/modules/{module-id}/inception/cross-validation-report.md"
+        "docs/aidlc/modules/{module-id}/inception/cross-validation-report.md",
+        ".aidlc/evidence/cross-validation/{module-id}/inception-consistency.json"
       ],
       "sensors": [
+        "inception-consistency",
         "no-todo",
         "traceability"
       ],

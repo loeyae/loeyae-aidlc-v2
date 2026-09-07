@@ -12,15 +12,29 @@ scopes: [feature, enterprise, mvp, classic]
 consumes:
   - docs/aidlc/modules/{module-id}/inception/requirements.md
   - docs/aidlc/modules/{module-id}/inception/user-stories.md
-produces: [docs/aidlc/modules/{module-id}/inception/cross-validation-report.md]
-sensors: []
+produces:
+  - docs/aidlc/modules/{module-id}/inception/cross-validation-report.md
+  - .aidlc/evidence/cross-validation/{module-id}/inception-consistency.json
+sensors: [inception-consistency]
 requires: [user-stories]
 ---
 # Inception 产物交叉验证（强制审查）
 
 **目的**：确保 Inception 阶段各产物之间保持一致性，问题发现越早成本越低。
 
-**执行时机**：每个产物完成后立即执行对应的审查项，不等待所有产物完成。
+**执行时机**：每个产物完成后立即执行对应的审查项，不等待所有产物完成。Stage report 时，`inception-consistency` 对最终报告再做一次模块级机器复核：需求与故事始终验证；仅在签名状态选择 PRD 或 UI 分支时，动态加入对应 canonical 产物和上游 Evidence。未选择 PRD、未触发 UI 或选择 `skip` 时，不读取也不要求这些产物。
+
+交叉验证报告必须包含以下机器摘要，并列出所有被检查的 REQ/FR、US、PRD FR 与 PAGE ID：
+
+```markdown
+## Machine consistency summary
+- status: passed
+- unresolved_conflicts: 0
+- prd_route: selected | not-selected
+- ui_route: html-mock | figma-create | figma-existing | skip | not-selected
+```
+
+`inception-consistency` 按当前 `{module-id}` 隔离读取，禁止借用其他模块的需求、页面计划、Mock、Figma manifest 或交叉验证报告。
 
 ---
 
@@ -165,7 +179,7 @@ requires: [user-stories]
 **输入文件**：
 - 页面计划：当前模块 `docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md`
 - HTML Mock 模式：`docs/aidlc/modules/{module-id}/inception/ui-mock/*-page-specs.md` + 对应 HTML 文件（标准或大型模式）
-- Figma 模式：`handoff.md` 的 `## UI 设计` 区块 `产物位置` 中的唯一主 Figma 文件链接 + `Figma 页面进度`（通过 `get_metadata` / `get_screenshot` 验证）
+- Figma 模式：当前模块 `docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json` 中的唯一主文件 URL、Page/Frame/nodeId 与截图引用（必要时通过 `get_metadata` / `get_screenshot` 复核）
 - `docs/aidlc/modules/{module-id}/inception/user-stories.md`
 - `docs/aidlc/modules/{module-id}/inception/user-stories/role-permission-matrix.md`
 - `docs/aidlc/modules/{module-id}/inception/requirements.md`
@@ -189,8 +203,8 @@ requires: [user-stories]
 |---|--------|---------------|
 | F1 | Variable 使用 | 对每个受审 Frame 调用 `get_variable_defs`；所有可映射到已有 Variable 的颜色、间距、字体均使用 Variable。硬编码值逐项列出并标记“已修正”或给出合理例外 |
 | F2 | 组件化 | 同一结构在受审范围重复 ≥3 次时使用 Component/Instance；不组件化时逐项记录原因 |
-| F3 | Frame 可追溯 | handoff.md 页面进度中的每个 completed 页面均有唯一 nodeId，且 `get_metadata` 可定位 |
-| F4 | 视觉证据 | 每个页面或每批页面有 `get_screenshot` 验证结果并记录在 handoff.md |
+| F3 | Frame 可追溯 | `figma-manifest.json` 中每个页面计划项均有唯一 nodeId，且 `get_metadata` 可定位 |
+| F4 | 视觉证据 | 每个页面或每批页面有 `get_screenshot` 验证结果，并写入 `figma-manifest.json` 的截图引用及当前 `ui-artifact-consistency` Evidence；handoff.md 仅派生展示摘要 |
 
 **Figma 证据表格式**：
 

@@ -102,7 +102,7 @@ Stage frontmatter 声明 `produces: [path1, path2]`。引擎在 `report --result
 - `consumes` 在 `next` 与 `report` 都复核，防止阶段执行窗口内删除或替换上游产物
 - 不满足则 **拒绝完成**，返回 error directive
 
-覆盖：32/46 stages
+覆盖：34/46 stages
 
 ### 4. 准出：sensors（自动检查）
 
@@ -127,6 +127,8 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 | `prd-completeness` | prd-generation | PRD 章节、功能验收、非目标、待确认项、来源索引或一致性不完整 |
 | `diagram-contract` | requirements-methods, application-design | SVG 源 ID/端口/方向/图例/分组/viewBox/FR 映射不完整 |
 | `design-intent-coverage` | units-generation | 设计意图未被工作单元承接，或存在未覆盖意图 |
+| `ui-artifact-consistency` | ui-page-planning, ui-mock-generation, ui-figma-generation | 当前模块页面计划未对齐需求/故事，HTML skeleton/content 集合不一致，或 Figma 来源、Page/Frame/nodeId/截图/只读约束不一致 |
+| `inception-consistency` | cross-validation | 需求与故事不一致，或签名选择的 PRD/UI canonical 产物未纳入当前模块最终交叉验证 |
 
 #### Construction Sensors
 
@@ -141,7 +143,7 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 | `review-evidence` | code-review | 双轴审查未通过、存在未关闭 issue、缺少 reviewer |
 | `reviewer-required` | code-review | produces 中不含审查记录文件 |
 | `build-test-evidence` | build-and-test | 构建 exit_code≠0、测试 failed>0、静态检查未通过 |
-| `implementation-report` | implementation-report | 证据引用不存在、all_gates_passed≠true |
+| `implementation-report` | implementation-report | 证据引用不存在、all_gates_passed≠true、模块未全部覆盖，或已选 PRD/UI Evidence 未聚合 |
 | `frontend-platform-spec` | ui-implementation-bridge | 缺少布局原语、组件映射或 CSS 约束 |
 | `framework-compliance` | loeyae-compliance | 框架 skill 未加载、检查失败或检查数为 0 |
 | `subagent-evidence` | subagent-execution | 无执行 agent、任务未完成或存在失败 |
@@ -151,8 +153,8 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 | `no-todo` | 所有含 produces 的 stage（编译时自动注入） | 所有 produces 文件含 TODO/FIXME/HACK，或产物不可读取 |
 | `traceability` | 所有含 produces 的 stage（编译时自动注入） | 非 evidence produces 文件无 REQ-xxx/R-xxx；纯 evidence stage 必须声明 `traceability: not_applicable` |
 
-覆盖：frontmatter 手写 21 / 编译后 32（含自动注入的 no-todo + traceability）/ 46 stages。
-所有 `produces` 非空的 stage 在编译时自动追加 `no-todo` 与 `traceability` sensor，故实际准出 sensor 覆盖 = 32/46。下表列为 frontmatter 显式声明的 sensor；自动注入的两项见末两行。
+覆盖：frontmatter 手写 25 / 编译后 34（含自动注入的 no-todo + traceability）/ 46 stages。
+所有 `produces` 非空的 stage 在编译时自动追加 `no-todo` 与 `traceability` sensor，故实际准出 sensor 覆盖 = 34/46。下表列为 frontmatter 显式声明的 sensor；自动注入的两项见末两行。
 
 ### 5. 防跳步：current_stage
 
@@ -178,7 +180,7 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 
 完整 scope 的 `workspace-detection` 也是运行时 choice：directive 返回 `choice_required: true` 时，必须向用户展示 `single-module`、`multi-module`，并以 `report --stage workspace-detection --result completed --instruction-ack workspace-detection --user-input <choice>` 写入签名 history。单模块跳过产品级 Inception 但仍登记唯一模块；产品契约仅在多模块或存在跨边界事实时执行。快速 scope 不要求该 choice；不得从 `handoff.md` 推断或改变机器路由。
 
-I9 UI 设计不是初始化选项，而是运行时 choice。`ui-mock` directive 返回 `choice_required: true` 时，必须向用户展示 `choices`，并以 `report --stage ui-mock --result completed --instruction-ack ui-mock --user-input <choice>` 记录 `html-mock`、`figma-create`、`figma-existing`、`skip` 中唯一值。`skip` 不创建 UI 产物，HTML/Figma 分支互斥；不得从 `handoff.md` 推断或改变机器路由。
+I9 UI 设计不是初始化选项，而是运行时 choice。`ui-mock` directive 返回 `choice_required: true` 时，必须向用户展示 `choices`，并以 `report --stage ui-mock --result completed --instruction-ack ui-mock --user-input <choice>` 记录 `html-mock`、`figma-create`、`figma-existing`、`skip` 中唯一值。`skip` 不创建 UI 产物，HTML/Figma 分支互斥；不得从 `handoff.md` 推断或改变机器路由。选择设计后，页面计划、HTML 两段或 Figma manifest、模块交叉验证、适用单元代码审查和最终项目报告必须逐层纳入 canonical 产物与 Evidence；未选择时这些门禁不得出现。
 
 `application-design`、`units-generation`、`functional-design` 和 `operations` 根据 `workflow-plan.md` 的 `execute / skip + evidence` 自动路由；旧计划缺行时才保守推断。I14 跳过后使用 `default` 单元；I14 执行时，新签名 `unit-manifest.json` 必须为每个单元声明 `conditional_stages`（允许空数组），防止其他单元的 NFR、基础设施、契约、框架或 UI 事实扩散，旧清单缺字段时保守回退。Operations condition=false 不出现审批；`operations-templates` 只在明确要求保留可复用模板时执行。
 

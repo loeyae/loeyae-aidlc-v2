@@ -270,6 +270,8 @@ class TestRunner:
                 "evidence_version": "1", "status": "passed", "summary_complete": True,
                 "evidence_references": [".aidlc/evidence/build-and-test/build-test-evidence.json"],
                 "all_gates_passed": True, "scope": "feature", "stages_completed": 1,
+                "selected_artifacts_verified": True, "modules_verified": 1,
+                "prd_verified": False, "ui_modules_verified": [],
             },
             "prd-completeness": {
                 "evidence_version": "1", "status": "passed", "prd_path": "docs/aidlc/ideation/prd.md",
@@ -299,7 +301,20 @@ class TestRunner:
                 "coverage_complete": True, "uncovered": 0, "skip_reason": "no structural change intent markers",
             },
             "ui-design-alignment": {
-                "evidence_version": "1", "status": "not_applicable",
+                "evidence_version": "1", "status": "not_applicable", "reason": "current unit has no UI page mapping",
+            },
+            "ui-artifact-consistency": {
+                "evidence_version": "1", "status": "passed", "stage": stage,
+                "module_id": None, "design_mode": "html-mock", "pages_checked": 1,
+                "elements_checked": 1, "phases_verified": ["page-plan"],
+                "artifacts_checked": ["requirements.md", "user-stories.md", "page-plan.md"], "unresolved": 0,
+            },
+            "inception-consistency": {
+                "evidence_version": "1", "status": "passed", "module_id": None,
+                "requirements_checked": 1, "stories_checked": 1, "prd_selected": False,
+                "prd_items_checked": 0, "ui_route": "not-selected", "ui_pages_checked": 0,
+                "unresolved_conflicts": 0,
+                "artifacts_checked": ["requirements.md", "user-stories.md", "cross-validation-report.md"],
             },
         }
         for sensor in sensors:
@@ -309,6 +324,39 @@ class TestRunner:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             payload = dict(payloads[sensor])
             state = self.state()
+            if sensor == "ui-artifact-consistency":
+                route = next((entry.get("user_input") for entry in reversed(state.get("history", []))
+                              if entry.get("stage") == "ui-mock"
+                              and entry.get("result") in ("completed", "approved")
+                              and entry.get("user_input") in ("html-mock", "figma-create", "figma-existing", "skip")
+                              and entry.get("module_id") == state.get("current_module")), "html-mock")
+                phases = ["page-plan"]
+                if stage == "ui-mock-generation":
+                    phases.extend(["skeleton", "content"])
+                elif stage == "ui-figma-generation":
+                    phases.append("figma-external-read-only" if route == "figma-existing" else "figma-created")
+                payload.update({"stage": stage, "module_id": state.get("current_module"), "design_mode": route, "phases_verified": phases})
+            elif sensor == "inception-consistency":
+                route = next((entry.get("user_input") for entry in reversed(state.get("history", []))
+                              if entry.get("stage") == "ui-mock"
+                              and entry.get("result") in ("completed", "approved")
+                              and entry.get("user_input") in ("html-mock", "figma-create", "figma-existing", "skip")
+                              and entry.get("module_id") == state.get("current_module")), "not-selected")
+                prd_selected = "prd-generation" in state.get("selected_optional_stages", [])
+                payload.update({
+                    "module_id": state.get("current_module"), "prd_selected": prd_selected,
+                    "prd_items_checked": 1 if prd_selected else 0, "ui_route": route,
+                    "ui_pages_checked": 1 if route in ("html-mock", "figma-create", "figma-existing") else 0,
+                })
+            elif sensor == "implementation-report":
+                ui_modules = sorted({entry.get("module_id") for entry in state.get("history", [])
+                                     if entry.get("stage") == "ui-mock" and entry.get("user_input") in ("html-mock", "figma-create", "figma-existing")
+                                     and entry.get("module_id")})
+                payload.update({
+                    "modules_verified": len(self.modules),
+                    "prd_verified": "prd-generation" in state.get("selected_optional_stages", []),
+                    "ui_modules_verified": ui_modules,
+                })
             if state.get("routing_model") == "module-unit-v1":
                 payload.update({
                     "stage_instance": state.get("current_stage_instance"),
@@ -1247,8 +1295,15 @@ def test_r_ui_runtime_choice_routing():
     if html_directive:
         html.report("ui-mock", "completed", instruction_ack=True, user_input="html-mock")
         page = html.nxt()
-        html.ok(page.get("stage") == "ui-page-planning", "HTML choice enters shared page planning first")
-        html.report("ui-page-planning", "completed", instruction_ack=True)
+        html.ok(
+            page.get("stage") == "ui-page-planning"
+            and "ui-artifact-consistency" in page.get("sensors", [])
+            and any(path.endswith("/ui-design/page-plan.md") for path in page.get("produces", [])),
+            "HTML choice enters gated shared page planning first",
+        )
+        html.create_declared_produces(page)
+        html.write_evidence("ui-page-planning", page.get("sensors", []))
+        html.report("ui-page-planning", "completed")
         html_branch = html.nxt()
         html.ok(html_branch.get("stage") == "ui-mock-workflow", "HTML choice skips both Figma stages")
 
@@ -1256,7 +1311,9 @@ def test_r_ui_runtime_choice_routing():
     if figma_directive:
         figma.report("ui-mock", "completed", instruction_ack=True, user_input="figma-existing")
         page = figma.nxt()
-        figma.report("ui-page-planning", "completed", instruction_ack=True)
+        figma.create_declared_produces(page)
+        figma.write_evidence("ui-page-planning", page.get("sensors", []))
+        figma.report("ui-page-planning", "completed")
         figma_branch = figma.nxt()
         figma.ok(page.get("stage") == "ui-page-planning" and figma_branch.get("stage") == "ui-figma", "Figma choice skips the HTML branch and preserves shared planning")
 
@@ -1779,6 +1836,226 @@ Use parallel subagents for selected units.
     return t
 
 
+def test_w_optional_artifact_runtime_contracts():
+    """W: Signed PRD/UI choices drive runtime artifacts without cross-module leakage."""
+    print("\n--- W: Optional artifact runtime contracts ---")
+
+    def complete(runner: TestRunner, directive: dict, user_input=None) -> dict:
+        runner.create_declared_produces(directive)
+        if directive.get("stage") == "user-stories" and user_input == "__ui_fixture__":
+            for produced in directive.get("produces", []):
+                runner.mkfile(produced, "# UI stories\n\nREQ-UI-001 requires a user interface and screen workflow.\n")
+            user_input = None
+        runner.write_evidence(directive.get("stage", ""), directive.get("sensors", []))
+        return runner.report(
+            directive.get("stage", ""),
+            "approved" if directive.get("gate") else "completed",
+            approval_token=runner.approval_token(directive) if directive.get("gate") else None,
+            instruction_ack=directive.get("completion_contract") == "instruction_only",
+            user_input=user_input if user_input is not None else runner.choice_input(directive),
+        )
+
+    def reach_router(name: str) -> tuple[TestRunner, dict]:
+        runner = TestRunner(name)
+        runner.setup()
+        runner.engine("next", "--scope feature")
+        for _ in range(120):
+            directive = runner.nxt()
+            if directive.get("stage") == "ui-mock":
+                return runner, directive
+            if directive.get("kind") in ("done", "error") or not directive.get("stage"):
+                break
+            fixture = "__ui_fixture__" if directive.get("stage") == "user-stories" else None
+            result = complete(runner, directive, fixture)
+            if result.get("kind") == "error":
+                runner.ok(False, f"Failed before UI router at {directive.get('stage')}: {result.get('message', '')}")
+                break
+        return runner, {}
+
+    off = TestRunner("aidlc-test-w-optional-off")
+    off.setup()
+    off.mkfile(
+        "docs/aidlc/modules/test-module/inception/ui-mock/stale.html",
+        "stale HTML artifact must not activate a signed new workflow route\n",
+    )
+    off.engine("next", "--scope feature")
+    reached_off = off.walk_to_stage("cross-validation", PRODUCES_MAP)
+    off_cross = off.nxt() if reached_off else {}
+    off_consumes = off_cross.get("consumes", [])
+    off.ok(
+        reached_off
+        and "inception-consistency" in off_cross.get("sensors", [])
+        and "docs/aidlc/ideation/prd.md" not in off_consumes
+        and not any("ui-design/page-plan.md" in path or "ui-mock/" in path or "figma-manifest.json" in path for path in off_consumes),
+        "PRD/UI off keeps cross-validation free of optional artifacts despite stale UI files",
+    )
+    skipped_choice = next((
+        entry for entry in off.state().get("history", [])
+        if entry.get("stage") == "ui-mock" and entry.get("module_id") == "test-module"
+    ), {})
+    off.ok(
+        skipped_choice.get("result") == "condition_skipped"
+        and str(skipped_choice.get("user_input", "")).startswith("Auto-skipped:"),
+        "UI condition false is recorded in signed history as a condition result, not a route choice",
+    )
+
+    prd = TestRunner("aidlc-test-w-prd-on")
+    prd.setup()
+    prd.engine("next", "--scope feature --with-prd")
+    reached_prd = prd.walk_to_stage("cross-validation", PRODUCES_MAP)
+    prd_cross = prd.nxt() if reached_prd else {}
+    prd_consumes = prd_cross.get("consumes", [])
+    off.ok(
+        reached_prd
+        and "docs/aidlc/ideation/prd.md" in prd_consumes
+        and ".aidlc/evidence/prd-generation/prd-completeness.json" in prd_consumes,
+        "Signed PRD selection adds canonical PRD and completeness Evidence to cross-validation",
+    )
+
+    html, html_router = reach_router("aidlc-test-w-html")
+    if html_router:
+        html.report("ui-mock", "completed", instruction_ack=True, user_input="html-mock")
+        reached_generation = html.walk_to_stage("ui-mock-generation", PRODUCES_MAP)
+        generation = html.nxt() if reached_generation else {}
+        html.ok(
+            reached_generation
+            and "docs/aidlc/modules/test-module/inception/ui-design/page-plan.md" in generation.get("consumes", [])
+            and "docs/aidlc/modules/test-module/inception/ui-mock/ui-mock-manifest.json" in generation.get("produces", [])
+            and ".aidlc/evidence/ui-mock-generation/test-module/ui-artifact-consistency.json" in generation.get("produces", [])
+            and "ui-artifact-consistency" in generation.get("sensors", []),
+            "HTML generation is gated by page-plan and canonical manifest consistency",
+        )
+        if reached_generation:
+            complete(html, generation)
+            reached_cross = html.walk_to_stage("cross-validation", PRODUCES_MAP)
+            cross = html.nxt() if reached_cross else {}
+            consumes = cross.get("consumes", [])
+            html.ok(
+                reached_cross
+                and "docs/aidlc/modules/test-module/inception/ui-mock/" in consumes
+                and ".aidlc/evidence/ui-page-planning/test-module/ui-artifact-consistency.json" in consumes
+                and ".aidlc/evidence/ui-mock-generation/test-module/ui-artifact-consistency.json" in consumes
+                and not any("figma-manifest.json" in path for path in consumes),
+                "HTML-selected cross-validation consumes only the canonical HTML branch",
+            )
+
+    figma, figma_router = reach_router("aidlc-test-w-figma")
+    if figma_router:
+        figma.report("ui-mock", "completed", instruction_ack=True, user_input="figma-existing")
+        reached_generation = figma.walk_to_stage("ui-figma-generation", PRODUCES_MAP)
+        generation = figma.nxt() if reached_generation else {}
+        figma.ok(
+            reached_generation
+            and "docs/aidlc/modules/test-module/inception/ui-design/page-plan.md" in generation.get("consumes", [])
+            and "docs/aidlc/modules/test-module/inception/ui-design/figma-manifest.json" in generation.get("produces", [])
+            and ".aidlc/evidence/ui-figma-generation/test-module/ui-artifact-consistency.json" in generation.get("produces", [])
+            and "ui-artifact-consistency" in generation.get("sensors", []),
+            "Figma generation is gated by page-plan and canonical manifest consistency",
+        )
+        if reached_generation:
+            complete(figma, generation)
+            reached_cross = figma.walk_to_stage("cross-validation", PRODUCES_MAP)
+            cross = figma.nxt() if reached_cross else {}
+            consumes = cross.get("consumes", [])
+            figma.ok(
+                reached_cross
+                and "docs/aidlc/modules/test-module/inception/ui-design/figma-manifest.json" in consumes
+                and ".aidlc/evidence/ui-figma-generation/test-module/ui-artifact-consistency.json" in consumes
+                and not any("ui-mock/" in path for path in consumes),
+                "Figma-selected cross-validation consumes only the canonical Figma branch",
+            )
+
+    if reached_off:
+        completed_cross = complete(off, off_cross)
+        reached_review = completed_cross.get("kind") != "error" and off.walk_to_stage("code-review", PRODUCES_MAP)
+        review = off.nxt() if reached_review else {}
+        off.ok(
+            reached_review
+            and "ui-design-alignment" not in review.get("sensors", [])
+            and not any(path.endswith("/ui-design-alignment.json") for path in review.get("produces", [])),
+            "Code review removes UI sensor and Evidence when no signed UI route was selected",
+        )
+        if reached_review:
+            complete(off, review)
+            reached_final = off.walk_to_stage("implementation-report", PRODUCES_MAP)
+            final = off.nxt() if reached_final else {}
+            if reached_final:
+                off.create_declared_produces(final)
+                off.write_evidence("implementation-report", final.get("sensors", []))
+                evidence_path = Path(off.evidence_path("implementation-report", "implementation-report"))
+                payload = json.loads(evidence_path.read_text())
+                payload.pop("ui_modules_verified", None)
+                off.sign(payload)
+                evidence_path.write_text(json.dumps(payload))
+                rejected = off.report("implementation-report", "completed")
+                off.ok(
+                    rejected.get("kind") == "error" and "ui_modules_verified" in rejected.get("message", ""),
+                    "Final report requires an explicit empty UI module aggregation when UI was not selected",
+                )
+                off.write_evidence("implementation-report", final.get("sensors", []))
+                accepted = off.report("implementation-report", "completed")
+                off.ok(
+                    accepted.get("kind") == "print",
+                    "Final report accepts complete module and selected-artifact aggregation",
+                )
+            else:
+                off.ok(False, "Reached final implementation report after no-UI code review")
+
+    multi = TestRunner("aidlc-test-w-multi-module-isolation")
+    multi.runtime_choices["workspace-detection"] = "multi-module"
+    multi.modules = [
+        {"module_id": "module-a", "name": "Module A", "service_id": "service-a"},
+        {"module_id": "module-b", "name": "Module B", "service_id": "service-b"},
+    ]
+    multi.units = {
+        "module-a": [{"unit_id": "unit-a", "name": "Unit A", "service_id": "service-a"}],
+        "module-b": [{"unit_id": "unit-b", "name": "Unit B", "service_id": "service-b"}],
+    }
+    multi.setup()
+    multi.engine("next", "--scope feature")
+    module_a_checked = False
+    module_b_checked = False
+    for _ in range(240):
+        directive = multi.nxt()
+        slug = directive.get("stage", "")
+        module_id = directive.get("module_id")
+        if directive.get("kind") in ("done", "error") or not slug:
+            break
+        if slug == "cross-validation" and module_id == "module-a":
+            consumes = directive.get("consumes", [])
+            module_a_checked = (
+                "docs/aidlc/modules/module-a/inception/ui-mock/" in consumes
+                and all("module-b" not in path for path in consumes)
+            )
+            complete(multi, directive)
+            continue
+        if slug == "cross-validation" and module_id == "module-b":
+            consumes = directive.get("consumes", [])
+            module_b_checked = (
+                not any("module-a" in path for path in consumes)
+                and not any("ui-design/page-plan.md" in path or "ui-mock/" in path or "figma-manifest.json" in path for path in consumes)
+            )
+            break
+        if slug == "user-stories":
+            result = complete(multi, directive, "__ui_fixture__")
+        elif slug == "ui-mock":
+            result = complete(multi, directive, "html-mock" if module_id == "module-a" else "skip")
+        else:
+            result = complete(multi, directive)
+        if result.get("kind") == "error":
+            multi.ok(False, f"Multi-module route blocked at {slug}: {result.get('message', '')}")
+            break
+    multi.ok(
+        module_a_checked and module_b_checked,
+        "Multi-module cross-validation isolates Module A HTML artifacts from Module B skip route",
+    )
+
+    off.passed += prd.passed + html.passed + figma.passed + multi.passed
+    off.failed += prd.failed + html.failed + figma.failed + multi.failed
+    off.errors.extend(prd.errors + html.errors + figma.errors + multi.errors)
+    return off
+
+
 # === Run all tests ===
 if __name__ == "__main__":
     print("=" * 60)
@@ -1808,6 +2085,7 @@ if __name__ == "__main__":
     results.append(test_t_ui_implementation_bridge_routing())
     results.append(test_u_architecture_and_product_contract_routing())
     results.append(test_v_unit_condition_isolation())
+    results.append(test_w_optional_artifact_runtime_contracts())
 
     total_passed = sum(r.passed for r in results)
     total_failed = sum(r.failed for r in results)

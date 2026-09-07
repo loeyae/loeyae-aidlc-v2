@@ -26,7 +26,9 @@ triggers: UI 原型, HTML Mock, 页面原型, 交互原型, UI mock, 页面 Mock
 
 ## 输出
 
-返回生成或修改的文件路径、页面计划对账结果、内容自检结果和未解决问题。
+返回生成或修改的 page-specs/HTML 路径，以及当前模块 canonical `ui-mock-manifest.json` 的路径和完整内容。manifest 必须把 `skeleton`、`content` 两段分别标记为 `validated`，两段 PAGE 集合与已批准 `page-plan.md` 完全一致，并记录每页 page-specs、HTML、mock-box、REQ/FR 与 US 映射。另返回页面计划对账结果、内容自检结果和未解决问题。
+
+本能力不生成 Evidence；调用方必须在当前签名 `html-mock` Stage 实例中通过受控 Producer 运行 `ui-artifact-consistency`。未选择 HTML、UI condition=false 或选择 `skip` 时不得调用本能力、创建 manifest 或要求占位 Evidence。
 
 ## 禁止事项
 

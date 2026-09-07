@@ -128,7 +128,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 
 **前端代码**：
 1. PC端 → `common-tech-frontend-pc.md`；小程序/APP → `common-tech-frontend-uniapp.md`
-2. handoff.md 的 `## UI 设计` 区块中 `UI 设计方式` 为 `figma` → `common-figma-design-standards.md`
+2. 当前模块签名 history 中 I9 choice 为 `figma-create` 或 `figma-existing` → `common-figma-design-standards.md`
 3. 读取项目 `.kiro/steering/structure.md`（如存在）
 4. 跨端项目 → 加载 `construction-ui-implementation-bridge.md` + 读取 `docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md`
 
@@ -234,25 +234,26 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 
 ### 页面对照表规范（有 UI 设计的前端项目）
 
-**触发条件**：handoff.md 的 `## UI 设计` 区块中 `UI 设计方式` 为 `html-mock` 或 `figma`（为"跳过"时不生成本表）。设计单元的定位方式按模式区分：
+**触发条件**：当前模块签名 history 中 I9 choice 为 `html-mock`、`figma-create` 或 `figma-existing`（`skip` 或 condition false 时不生成本表）。设计单元的定位方式按模式区分：
 
 | UI 设计方式 | 设计单元 | 来源 |
 |---------|---------|------|
 | `html-mock` | mock-box | `docs/aidlc/modules/{module-id}/inception/ui-mock/{端}.html` + `{端}-page-specs.md` |
-| `figma` | Frame | handoff.md `产物位置` 中的唯一主文件链接；优先使用 `Figma 页面进度` 的 nodeId，缺失时通过 `get_metadata` 补齐 |
+| `figma-create` / `figma-existing` | Frame | `docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json` 中的唯一主文件 URL、Page/Frame 与 nodeId |
 
 **产出位置**：写入代码生成计划文档头部（与成功标准同级）
 
 **生成方式**：
 
 - **html-mock 模式**：读取 `{端}-page-specs.md` 的页面清单表，补全其中"待 Construction 确定"的目标代码文件列
-- **figma 模式**：读取 handoff.md 的唯一主文件链接和 `Figma 页面进度` 建立对照表；页面行缺少 nodeId 时才调用 `get_metadata` 补齐并回填 state。目标代码文件按项目路由规范推导
+- **figma 模式**：读取 canonical `figma-manifest.json` 建立对照表；manifest 缺少页面、nodeId 或截图证据时停止，不得从 handoff.md 补齐机器输入。目标代码文件按项目路由规范推导
 
 **步骤**：
-1. 获取设计单元清单（html-mock 读 page-specs.md；figma 调 `get_metadata`）
+1. 获取设计单元清单（html-mock 读 page-specs.md；figma 读 canonical `figma-manifest.json` 的 PAGE/Frame/nodeId 映射，并仅用其中 nodeId 调用 `get_metadata` 复核）
 2. 改造页面：目标代码文件已在 Inception 阶段确定（= 改造基础路径），直接引用
 3. 新增页面：根据项目路由规范和目录结构推导目标文件路径，补全该列
-4. 将结果写入代码生成计划；html-mock 模式需**回写更新** `{端}-page-specs.md` 中对应行的"目标代码文件"列
+4. 将 PAGE ID 作为可搜索注释或等价元数据写入对应目标代码文件；`ui-design-alignment` 必须能从页面对照表追踪到真实代码文件
+5. 将结果写入代码生成计划；html-mock 模式需**回写更新** `{端}-page-specs.md` 中对应行的"目标代码文件"列
 
 **格式 — html-mock 模式**：
 
@@ -263,11 +264,11 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 > Mock 来源: docs/aidlc/modules/{module-id}/inception/ui-mock/{端}.html
 > page-specs: docs/aidlc/modules/{module-id}/inception/ui-mock/{端}-page-specs.md
 
-| # | Mock-box 标题 | page-specs 序号 | 关联 US | 目标代码文件 | 路由路径 | 类型 |
-|---|--------------|----------------|---------|-------------|---------|------|
-| 1 | 规则列表 | #1 | US-03 | views/rule/list.vue | /rule/list | 局部改动 |
-| 2 | 新增规则弹窗 | #2 | US-05 | views/rule/components/RuleDialog.vue | —（弹窗） | 新增 |
-| 3 | 规则详情 | #3 | US-07 | views/rule/detail.vue | /rule/:id | 新增页面 |
+| PAGE ID | Mock-box 标题 | page-specs 序号 | 关联 US | 目标代码文件 | 路由路径 | 类型 |
+|---------|----------------|----------------|---------|-------------|---------|------|
+| PAGE-001 | 规则列表 | #1 | US-03 | src/views/rule/list.vue | /rule/list | 局部改动 |
+| PAGE-002 | 新增规则弹窗 | #2 | US-05 | src/views/rule/components/RuleDialog.vue | —（弹窗） | 新增 |
+| PAGE-003 | 规则详情 | #3 | US-07 | src/views/rule/detail.vue | /rule/:id | 新增页面 |
 ```
 
 **格式 — figma 模式**：
@@ -276,13 +277,13 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 ## 页面对照表
 
 > UI 设计方式: figma
-> Figma 文件: [handoff.md UI 设计区块的产物位置]
+> Figma 文件: [figma-manifest.json 的 file_url]
 
-| # | Figma Page / Frame 名称 | nodeId | 关联 US | 目标代码文件 | 路由路径 | 类型 |
-|---|------------------------|--------|---------|-------------|---------|------|
-| 1 | 平台后台 / 规则列表 | 1:234 | US-03 | views/rule/list.vue | /rule/list | 局部改动 |
-| 2 | 平台后台 / 新增规则弹窗 | 1:256 | US-05 | views/rule/components/RuleDialog.vue | —（弹窗） | 新增 |
-| 3 | 平台后台 / 规则详情 | 1:278 | US-07 | views/rule/detail.vue | /rule/:id | 新增页面 |
+| PAGE ID | Figma Page / Frame 名称 | nodeId | 关联 US | 目标代码文件 | 路由路径 | 类型 |
+|---------|---------------------------|--------|---------|-------------|---------|------|
+| PAGE-001 | 平台后台 / 规则列表 | 1:234 | US-03 | src/views/rule/list.vue | /rule/list | 局部改动 |
+| PAGE-002 | 平台后台 / 新增规则弹窗 | 1:256 | US-05 | src/views/rule/components/RuleDialog.vue | —（弹窗） | 新增 |
+| PAGE-003 | 平台后台 / 规则详情 | 1:278 | US-07 | src/views/rule/detail.vue | /rule/:id | 新增页面 |
 ```
 
 **nodeId 必填**：figma 模式下 nodeId 是后续调用 `get_design_context` / `get_screenshot` 的唯一入参，缺失将导致无法还原设计。

@@ -1,6 +1,6 @@
 # 长任务分段执行
 
-**职责**：定义 Construction 多单元任务的分批、上下文传递和进度更新。恢复规则见 `common-session-continuity.md`，唯一状态源是 `docs/aidlc/handoff.md`。
+**职责**：定义 Construction 多单元任务的分批、上下文传递和进度更新。恢复规则见 `common-session-continuity.md`；`docs/aidlc/aidlc-state.json` 是阶段/模块/单元的唯一机器状态源，`docs/aidlc/handoff.md` 仅保存派生的批次与人类协作摘要。
 
 ## 分段策略
 

@@ -25,7 +25,7 @@ triggers: PRD, 产品需求文档, 需求文档合成, 需求整理, PRD synthes
 
 ## 输出
 
-返回生成的 PRD 文件路径（`docs/aidlc/ideation/prd.md`）、待确认项索引、来源索引、澄清一致性结论和业务流程图状态。
+返回生成的 canonical PRD 文件路径（`docs/aidlc/ideation/prd.md`）、待确认项索引、来源索引、澄清一致性结论和业务流程图状态。编排内仅在签名 `selected_optional_stages` 包含 `prd-generation` 时写入该路径，并由调用方运行受控 `prd-completeness` Producer；本能力不生成或伪造 Evidence。独立调用只返回文档结果，不实例化 AI-DLC Stage、state 或占位 Evidence。
 
 ## 禁止事项
 

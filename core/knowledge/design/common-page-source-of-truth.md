@@ -28,10 +28,10 @@ AI-DLC 产出物按**功能/单元**维度组织，但前端页面可能被多�
 2. 打开对应模块 HTML 文件，搜索页面名称定位 mock-box
 
 **figma 模式下的定位规则**：
-1. 整个项目只允许一个主 Figma 文件；从 handoff.md `## UI 设计` 区块的 `产物位置` 获取唯一链接
-2. 多模块按 `{module}-{endpoint}` 定位 Page，单模块按端定位 Page
-3. 优先查阅 handoff.md 的 `Figma 页面进度` 或代码生成计划中的页面对照表，按页面名称取得 nodeId
-4. 记录缺失时，调用 `get_metadata` 获取 Page 列表 → 定位对应 Page → 再获取其 Frame 清单并回填 state
+1. 从当前模块 `docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json` 读取唯一 `file_url`；不得从 handoff.md 补齐或改写机器输入
+2. 多模块按 manifest 中记录的 Page 定位 `{module}-{endpoint}`，单模块按端定位 Page
+3. 以 manifest 的 `page_id → Page/Frame/node_id` 映射为唯一定位索引；代码生成计划中的页面对照表只能派生引用该映射
+4. manifest 缺少页面或 nodeId 时阻断并重新执行 `ui-figma-generation`；可以用已登记 nodeId 调用 `get_metadata` 复核，但不得从 handoff 或临时扫描结果静默回填并绕过 `ui-artifact-consistency`
 5. 页面对应 Page 下的顶层 Frame；弹窗/抽屉作为独立 Frame 与所属页面并列
 
 ## 判定标准：何时触发回写

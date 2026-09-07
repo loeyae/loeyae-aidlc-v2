@@ -139,6 +139,7 @@ const VALID_SENSORS = new Set([
   "functional-design-completeness", "nfr-coverage", "infrastructure-completeness", "implementation-report",
   "frontend-platform-spec", "framework-compliance", "subagent-evidence", "template-completeness",
   "recovery-evidence", "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
+  "ui-artifact-consistency", "inception-consistency",
 ]);
 
 function executableForScope(stage: StageNode, scope: string): boolean {
@@ -305,7 +306,7 @@ export function validateGraph(graph: { stages: StageNode[]; stage_count: number;
 function sourceGraph(): StageGraph {
   const stages = scanStages();
   return {
-    version: "2.2.0",
+    version: "2.3.0",
     stages,
     stage_count: stages.length,
     scopes: [...VALID_SCOPES].sort(),

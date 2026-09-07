@@ -246,9 +246,20 @@ function uiDesignChoice(state: WorkflowState, moduleId?: string): string | undef
   const recorded = recordedStageChoice(state, "ui-mock", moduleId);
   if (recorded && UI_DESIGN_CHOICES.has(recorded)) return recorded;
 
+  const routerResolvedWithoutChoice = state.history.some((entry) =>
+    entry.stage === "ui-mock"
+    && entry.result === "condition_skipped"
+    && (!moduleId || entry.module_id === moduleId)
+  );
+  // A current signed architecture choice identifies the new routing contract.
+  // Missing/condition-skipped UI choices in that contract mean "not selected";
+  // stale files must never reactivate a branch. Filesystem fallback is retained
+  // only for older signed workflows that predate runtime UI choices.
+  if (routerResolvedWithoutChoice || architectureChoice(state)) return undefined;
+
   // Compatibility for signed workflows created before runtime choices were
   // recorded. Preserve an already active/resolved branch rather than changing
-  // its route during upgrade; new workflows must always record the choice.
+  // its route during upgrade.
   const matchingLegacyStage = (slug: string): boolean => {
     if (state.current_stage === slug && (!moduleId || state.current_module === moduleId)) return true;
     return state.history.some((entry) => entry.stage === slug && (!moduleId || entry.module_id === moduleId));
@@ -260,6 +271,60 @@ function uiDesignChoice(state: WorkflowState, moduleId?: string): string | undef
     ? join(PROJECT_ROOT, "docs", "aidlc", "modules", moduleId, "inception", "ui-mock")
     : join(PROJECT_ROOT, "docs", "aidlc", "inception", "ui-mock");
   return existsSync(htmlRoot) ? "html-mock" : undefined;
+}
+
+function runtimeStage(instance: StageInstance, state: WorkflowState): StageNode {
+  const stage = instance.stage;
+  let consumes = [...stage.consumes];
+  let produces = [...stage.produces];
+  let sensors = [...stage.sensors];
+
+  if (stage.slug === "cross-validation" && instance.module_id) {
+    if (selectedOptionalStages(state).includes("prd-generation")) {
+      consumes.push(
+        "docs/aidlc/ideation/prd.md",
+        ".aidlc/evidence/prd-generation/prd-completeness.json",
+      );
+    }
+    const choice = uiDesignChoice(state, instance.module_id);
+    if (choice === "html-mock" || choice === "figma-create" || choice === "figma-existing") {
+      consumes.push(
+        "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md",
+        ".aidlc/evidence/ui-page-planning/{module-id}/ui-artifact-consistency.json",
+      );
+      if (choice === "html-mock") {
+        consumes.push(
+          "docs/aidlc/modules/{module-id}/inception/ui-mock/",
+          ".aidlc/evidence/ui-mock-generation/{module-id}/ui-artifact-consistency.json",
+        );
+      } else {
+        consumes.push(
+          "docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json",
+          ".aidlc/evidence/ui-figma-generation/{module-id}/ui-artifact-consistency.json",
+        );
+      }
+    }
+  }
+
+  if (stage.slug === "code-review") {
+    const choice = uiDesignChoice(state, instance.module_id);
+    const uiSelected = choice === "html-mock" || choice === "figma-create" || choice === "figma-existing";
+    if (!uiSelected) {
+      sensors = sensors.filter((sensor) => sensor !== "ui-design-alignment");
+      produces = produces.filter((pattern) => !pattern.endsWith("/ui-design-alignment.json"));
+    }
+  }
+
+  return {
+    ...stage,
+    consumes: [...new Set(consumes)],
+    produces: [...new Set(produces)],
+    sensors: [...new Set(sensors)],
+  };
+}
+
+function runtimeInstance(instance: StageInstance, state: WorkflowState): StageInstance {
+  return { ...instance, stage: runtimeStage(instance, state) };
 }
 
 function completedInstanceIds(state: WorkflowState): string[] {
@@ -1103,6 +1168,24 @@ async function checkSensors(instance: StageInstance, state: WorkflowState): Prom
             errors.push("stages_completed must be >= 1");
           }
 
+          if (state.routing_model === "module-unit-v1") {
+            const modules = readModuleManifest(PROJECT_ROOT).map((module) => module.module_id).sort();
+            if (evidence.selected_artifacts_verified !== true) errors.push("selected_artifacts_verified must be true");
+            if (asNumber(evidence.modules_verified) !== modules.length) errors.push(`modules_verified must be ${modules.length}`);
+            const expectedPrd = selectedOptionalStages(state).includes("prd-generation");
+            if (evidence.prd_verified !== expectedPrd) errors.push(`prd_verified must be ${expectedPrd}`);
+            const expectedUiModules = modules.filter((moduleId) => {
+              const choice = uiDesignChoice(state, moduleId);
+              return choice === "html-mock" || choice === "figma-create" || choice === "figma-existing";
+            });
+            const actualUiModules = asStringArray(evidence.ui_modules_verified);
+            if (!actualUiModules) {
+              errors.push("ui_modules_verified must be an array (empty when no module selected UI)");
+            } else if (JSON.stringify([...actualUiModules].sort()) !== JSON.stringify(expectedUiModules)) {
+              errors.push(`ui_modules_verified must match signed UI selections: ${expectedUiModules.join(", ") || "(none)"}`);
+            }
+          }
+
           return errors;
         });
         if (failure) failures.push(failure);
@@ -1228,11 +1311,69 @@ async function checkSensors(instance: StageInstance, state: WorkflowState): Prom
         break;
       }
 
+      case "ui-artifact-consistency": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (evidence.status !== "passed") errors.push('status must be "passed"');
+          if (evidence.stage !== stage.slug) errors.push(`stage must be ${stage.slug}`);
+          if (evidence.module_id !== instance.module_id) errors.push(`module_id must be ${instance.module_id || "(none)"}`);
+          const expectedChoice = uiDesignChoice(state, instance.module_id);
+          if (evidence.design_mode !== expectedChoice) errors.push(`design_mode must match signed UI choice ${expectedChoice || "not-selected"}`);
+          if (asPositiveInt(evidence.pages_checked) === null || (evidence.pages_checked as number) < 1) errors.push("pages_checked must be >= 1");
+          const phases = asStringArray(evidence.phases_verified);
+          if (!phases || phases.length === 0) errors.push("phases_verified must list validated phases");
+          const artifacts = asStringArray(evidence.artifacts_checked);
+          if (!artifacts || artifacts.length < 3) errors.push("artifacts_checked must include canonical upstream and current artifacts");
+          if (asNumber(evidence.unresolved) !== 0) errors.push("unresolved must be 0");
+          if (stage.slug === "ui-mock-generation" && (!phases?.includes("skeleton") || !phases?.includes("content"))) {
+            errors.push("HTML Mock consistency must verify skeleton and content phases");
+          }
+          if (stage.slug === "ui-figma-generation" && asPositiveInt(evidence.elements_checked) === null) {
+            errors.push("Figma consistency must report elements_checked");
+          }
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "inception-consistency": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (evidence.status !== "passed") errors.push('status must be "passed"');
+          if (evidence.module_id !== instance.module_id) errors.push(`module_id must be ${instance.module_id || "(none)"}`);
+          if (asPositiveInt(evidence.requirements_checked) === null || (evidence.requirements_checked as number) < 1) errors.push("requirements_checked must be >= 1");
+          if (asPositiveInt(evidence.stories_checked) === null || (evidence.stories_checked as number) < 1) errors.push("stories_checked must be >= 1");
+          const expectedPrd = selectedOptionalStages(state).includes("prd-generation");
+          if (evidence.prd_selected !== expectedPrd) errors.push(`prd_selected must be ${expectedPrd}`);
+          const prdItems = asNumber(evidence.prd_items_checked);
+          if (prdItems === null || (expectedPrd ? prdItems < 1 : prdItems !== 0)) errors.push(`prd_items_checked is inconsistent with selected PRD route`);
+          const expectedUiRoute = uiDesignChoice(state, instance.module_id) || "not-selected";
+          if (evidence.ui_route !== expectedUiRoute) errors.push(`ui_route must match signed UI choice ${expectedUiRoute}`);
+          const uiPages = asNumber(evidence.ui_pages_checked);
+          const uiSelected = expectedUiRoute === "html-mock" || expectedUiRoute === "figma-create" || expectedUiRoute === "figma-existing";
+          if (uiPages === null || (uiSelected ? uiPages < 1 : uiPages !== 0)) errors.push("ui_pages_checked is inconsistent with signed UI route");
+          if (asNumber(evidence.unresolved_conflicts) !== 0) errors.push("unresolved_conflicts must be 0");
+          const artifacts = asStringArray(evidence.artifacts_checked);
+          if (!artifacts || artifacts.length < 3) errors.push("artifacts_checked must list canonical consistency inputs");
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
       case "ui-design-alignment": {
         const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (!["passed", "not_applicable"].includes(String(evidence.status))) errors.push('status must be "passed" or "not_applicable"');
-          if (evidence.status === "not_applicable") return errors;
+          const selectedChoice = uiDesignChoice(state, instance.module_id);
+          const uiSelected = selectedChoice === "html-mock" || selectedChoice === "figma-create" || selectedChoice === "figma-existing";
+          if (evidence.status === "not_applicable") {
+            if (uiSelected && !asNonEmptyString(evidence.reason)) errors.push("selected UI routes require a reason when the current unit is not applicable");
+            return errors;
+          }
+          const expectedMode = selectedChoice === "html-mock" ? "html-mock" : "figma";
+          if (uiSelected && evidence.design_mode !== expectedMode) errors.push(`design_mode must be ${expectedMode} for signed choice ${selectedChoice}`);
           if (!["html-mock", "figma"].includes(String(evidence.design_mode))) errors.push('design_mode must be "html-mock" or "figma"');
           for (const field of ["styles_aligned", "conditional_visibility_aligned", "platform_constraints_respected"]) if (evidence[field] !== true) errors.push(`${field} must be true`);
           if (asNumber(evidence.unmapped_elements) !== 0) errors.push("unmapped_elements must be 0");
@@ -1860,7 +2001,7 @@ async function handleNext(args: string[]): Promise<Directive> {
     const enrollment = readEnrollment(PROJECT_ROOT);
     const pendingWorkflowId = enrollment?.status === "pending" ? enrollment.workflow_id : undefined;
     const selectedOptionalStages = withPrd ? ["prd-generation"] : [];
-    state = createInitialState(scopeFlag, "2.2.0", pendingWorkflowId, selectedOptionalStages);
+    state = createInitialState(scopeFlag, "2.3.0", pendingWorkflowId, selectedOptionalStages);
     saveState(state);
     return {
       kind: "print",
@@ -1926,8 +2067,9 @@ async function handleNext(args: string[]): Promise<Directive> {
     };
   }
 
-  const nextStage = nextInstance.stage;
-  const consumeFailures = checkConsumes(nextInstance, state, graph, instances);
+  const effectiveNextInstance = runtimeInstance(nextInstance, state);
+  const nextStage = effectiveNextInstance.stage;
+  const consumeFailures = checkConsumes(effectiveNextInstance, state, graph, instances);
   if (consumeFailures.length > 0) {
     return {
       kind: "error",
@@ -1945,7 +2087,7 @@ async function handleNext(args: string[]): Promise<Directive> {
     else delete state.current_unit;
   }
   const gate = nextStage.approval === "block";
-  const approvalKey = activeApprovalKey(state, nextInstance);
+  const approvalKey = activeApprovalKey(state, effectiveNextInstance);
   if (gate && !state.approval_challenges[approvalKey]) {
     state.approval_challenges[approvalKey] = `${Date.now()}.${randomBytes(24).toString("hex")}`;
   }
@@ -1955,12 +2097,12 @@ async function handleNext(args: string[]): Promise<Directive> {
   return {
     kind: "run-stage",
     stage: nextStage.slug,
-    stage_instance: nextInstance.instance_id,
-    axis: nextInstance.axis,
-    module_id: nextInstance.module_id || null,
-    unit_id: nextInstance.unit_id || null,
-    artifact_root: artifactRoot(nextInstance),
-    evidence_root: evidenceRoot(nextInstance),
+    stage_instance: effectiveNextInstance.instance_id,
+    axis: effectiveNextInstance.axis,
+    module_id: effectiveNextInstance.module_id || null,
+    unit_id: effectiveNextInstance.unit_id || null,
+    artifact_root: artifactRoot(effectiveNextInstance),
+    evidence_root: evidenceRoot(effectiveNextInstance),
     stage_file: join("core", nextStage.file),
     name: nextStage.name,
     number: nextStage.number,
@@ -1972,8 +2114,8 @@ async function handleNext(args: string[]): Promise<Directive> {
     approval: nextStage.approval,
     completion_contract: nextStage.completion_contract,
     approval_challenge: gate ? state.approval_challenges[approvalKey] : undefined,
-    consumes: nextStage.consumes.map((pattern) => instanceArtifactPattern(pattern, nextInstance, true)),
-    produces: nextStage.produces.map((pattern) => instanceArtifactPattern(pattern, nextInstance)),
+    consumes: nextStage.consumes.map((pattern) => instanceArtifactPattern(pattern, effectiveNextInstance, true)),
+    produces: nextStage.produces.map((pattern) => instanceArtifactPattern(pattern, effectiveNextInstance)),
     sensors: nextStage.sensors,
     choices: directiveChoices,
     choice_required: directiveChoices.length > 0,
@@ -2026,15 +2168,16 @@ async function handleReport(args: string[]): Promise<Directive> {
     return { kind: "error", message: `Unknown stage "${stageSlug}".` };
   }
   const instances = expandStageInstances(graph, state);
-  const currentInstance = state.routing_model === "module-unit-v1"
+  const declaredCurrentInstance = state.routing_model === "module-unit-v1"
     ? instances.find((instance) => instance.instance_id === state.current_stage_instance)
     : makeInstance(stageNode, "project");
-  if (!currentInstance || currentInstance.stage.slug !== stageSlug) {
+  if (!declaredCurrentInstance || declaredCurrentInstance.stage.slug !== stageSlug) {
     return {
       kind: "error",
       message: `Active stage instance "${state.current_stage_instance || stageSlug}" no longer exists in the declared module/unit manifests. Restore the signed routing manifests before reporting.`,
     };
   }
+  const currentInstance = runtimeInstance(declaredCurrentInstance, state);
   if (flags.module && flags.module !== currentInstance.module_id) {
     return { kind: "error", message: `Module mismatch: active module is "${currentInstance.module_id || "(none)"}", but report specified "${flags.module}".` };
   }

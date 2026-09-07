@@ -25,13 +25,13 @@
 
 | 事件 | handoff.md 必须更新 |
 |------|------------------|
-| 主文件创建/外部链接验证成功 | `产物位置`、`Figma 来源`、`设计状态: file_created` |
-| Frame 创建 | 页面进度中的页面名、nodeId、`in_progress` |
-| 页面验证完成 | 对应行 `completed`、最后验证 |
+| 主文件创建/外部链接验证成功 | 从 `figma-manifest.json` 派生展示 `产物位置`、`Figma 来源`、`设计状态` |
+| Frame 创建 | 从 manifest 页面项派生展示页面名、nodeId、进度 |
+| 页面验证完成 | 从 manifest screenshot/validation 派生展示 `completed`、最后验证 |
 | 批次提交审核 | 当前批次、`review_pending`、下一操作 |
 | 用户要求修改 | `designing`、待修改页面状态、下一操作 |
 
-更新后立即读取 handoff.md 验证；缺少唯一主文件链接或 nodeId 时不得切换会话。
+更新前必须先读取并验证当前模块 `figma-manifest.json`；缺少唯一 `file_url`、PAGE/nodeId、截图引用或对应 `ui-artifact-consistency` Evidence 时不得切换会话。handoff.md 只能镜像已验证结果。
 
 **最小更新格式**（快速通道也必须执行）：
 ```markdown
