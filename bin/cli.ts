@@ -152,6 +152,16 @@ function run(script: string, args: string[], input?: string): never | void {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
+function runInteractive(script: string, args: string[]): never | void {
+  const tsx = require.resolve("tsx/cli");
+  const result = spawnSync(process.execPath, [tsx, resolve(ROOT, script), ...args], {
+    stdio: "inherit",
+    cwd: process.cwd(),
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
 function runExternal(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env): number {
   const invocation = hostCliInvocation(command);
   const result = spawnSync(invocation.command, [...invocation.argsPrefix, ...args], { stdio: "inherit", cwd, env });
@@ -1328,7 +1338,7 @@ function main(): void {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
     case "orchestrate": run("core/tools/aidlc-orchestrate.ts", rest); break;
-    case "approve": run("core/tools/aidlc-approve.ts", rest); break;
+    case "approve": runInteractive("core/tools/aidlc-approve.ts", rest); break;
     case "evidence": run("core/tools/aidlc-evidence.ts", rest); break;
     case "check": run("core/tools/aidlc-semantic-checks.ts", rest); break;
     case "diagram-provider": run("core/tools/aidlc-diagram-provider.ts", rest); break;

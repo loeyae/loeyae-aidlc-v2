@@ -2056,6 +2056,91 @@ def test_w_optional_artifact_runtime_contracts():
     return off
 
 
+def test_x_cli_approval_inherits_terminal():
+    """X: The packaged CLI preserves a human terminal for approval while pipes remain blocked."""
+    print("\n--- X: CLI approval terminal inheritance ---")
+    t = TestRunner("aidlc-test-x-cli-approval")
+    t.setup()
+    t.engine("next", "--scope feature")
+
+    state = t.state()
+    approval_instance = "application-design@module:test-module"
+    challenge = f"{int(datetime.now(timezone.utc).timestamp() * 1000)}.cli-tty-test"
+    state["current_stage"] = "application-design"
+    state["current_stage_instance"] = approval_instance
+    state["current_module"] = "test-module"
+    state.pop("current_unit", None)
+    state["current_phase"] = "inception"
+    state["approval_challenges"] = {approval_instance: challenge}
+    state.pop("integrity", None)
+    t.sign(state)
+    Path(t.test_dir, "docs", "aidlc", "aidlc-state.json").write_text(json.dumps(state))
+
+    command = ["node", os.path.join(REPO_ROOT, "bin", "cli.js"), "approve", "--stage", "application-design"]
+    blocked = subprocess.run(command, cwd=t.test_dir, env=t.environment(), capture_output=True, text=True)
+    t.ok(
+        blocked.returncode == 2 and "interactive human terminal" in blocked.stderr,
+        "BLOCKED: packaged CLI still rejects non-interactive approval",
+    )
+
+    if os.name == "nt":
+        source = Path(REPO_ROOT, "bin", "cli.ts").read_text()
+        t.ok(
+            'case "approve": runInteractive(' in source and 'stdio: "inherit"' in source,
+            "Windows CLI approval delegates through inherited terminal handles",
+        )
+        return t
+
+    import pty
+    import select
+    import time
+
+    master_fd, slave_fd = pty.openpty()
+    process = subprocess.Popen(
+        command,
+        cwd=t.test_dir,
+        env=t.environment(),
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        close_fds=True,
+    )
+    os.close(slave_fd)
+    phrase = f"APPROVE {approval_instance} {challenge[-8:]}"
+    expected_prompt = f"Type exactly: {phrase}".encode()
+    output = bytearray()
+    response_sent = False
+    deadline = time.monotonic() + 20
+    try:
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([master_fd], [], [], 0.1)
+            if ready:
+                try:
+                    chunk = os.read(master_fd, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output.extend(chunk)
+                if not response_sent and expected_prompt in output:
+                    os.write(master_fd, f"{phrase}\n".encode())
+                    response_sent = True
+            if process.poll() is not None and not ready:
+                break
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=5)
+    finally:
+        os.close(master_fd)
+
+    rendered = output.decode(errors="replace")
+    t.ok(
+        process.returncode == 0 and response_sent and '"approval_token"' in rendered,
+        "PASSED: packaged CLI preserves a real terminal and issues a human-confirmed token",
+    )
+    return t
+
+
 # === Run all tests ===
 if __name__ == "__main__":
     print("=" * 60)
@@ -2086,6 +2171,7 @@ if __name__ == "__main__":
     results.append(test_u_architecture_and_product_contract_routing())
     results.append(test_v_unit_condition_isolation())
     results.append(test_w_optional_artifact_runtime_contracts())
+    results.append(test_x_cli_approval_inherits_terminal())
 
     total_passed = sum(r.passed for r in results)
     total_failed = sum(r.failed for r in results)
