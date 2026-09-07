@@ -204,7 +204,7 @@ function migrateLegacyState(value: unknown, workflowId: string = randomUUID()): 
   const now = new Date().toISOString();
   return validateWorkflowState({
     schema_version: 2,
-    version: typeof value.version === "string" && value.version ? value.version : "2.3.0",
+    version: typeof value.version === "string" && value.version ? value.version : "2.3.1",
     workflow_id: workflowId,
     revision: 0,
     scope,
@@ -227,7 +227,7 @@ export function statePath(projectRoot: string): string {
 
 export function createInitialState(
   scope: string,
-  version = "2.3.0",
+  version = "2.3.1",
   workflowId: string = randomUUID(),
   selectedOptionalStages: string[] = [],
 ): WorkflowState {

@@ -822,6 +822,7 @@ def test_h_automatic_common_sensors():
     """H: Every producing stage receives no-todo and traceability gates automatically."""
     print("\n--- H: Automatic no-todo and traceability coverage ---")
     t = TestRunner("/tmp/aidlc-test-h")
+    t.runtime_choices["workspace-detection"] = "multi-module"
     t.setup()
     t.engine("next", "--scope feature")
     reached = t.walk_to_stage("product-inception", PRODUCES_MAP)
@@ -1826,6 +1827,25 @@ Use parallel subagents for selected units.
             "description": "REQ-UNIT-001 isolates conditional stages by unit.",
             "units": t.units["module-a"],
         }),
+    )
+    units_path = "docs/aidlc/modules/module-a/inception/units.md"
+    t.mkfile(
+        units_path,
+        "# Units\n\nSubstantive work-unit responsibilities are documented without a requirement reference.\n",
+    )
+    t.write_evidence("units-generation", units_directive.get("sensors", []))
+    missing_requirement = t.report("units-generation", "completed", module="module-a")
+    missing_requirement_message = missing_requirement.get("message", "")
+    t.ok(
+        missing_requirement.get("kind") == "error"
+        and "traceability" in missing_requirement_message
+        and units_path in missing_requirement_message
+        and "design-intent-coverage.json" not in missing_requirement_message,
+        "Mixed units-generation Stage checks business artifacts but excludes Evidence from traceability",
+    )
+    t.mkfile(
+        units_path,
+        "# Units\n\nREQ-UNIT-001 traces substantive work-unit responsibilities to the approved requirement.\n",
     )
     t.write_evidence("units-generation", units_directive.get("sensors", []))
     accepted_slice = t.report("units-generation", "completed", module="module-a")

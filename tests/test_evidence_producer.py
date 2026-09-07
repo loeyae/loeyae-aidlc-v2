@@ -461,6 +461,40 @@ def set_signed_ui_route(project: Path, route: str) -> None:
     state_path.write_text(json.dumps(sign_payload(state), indent=2))
 
 
+def test_design_intent_coverage_uses_controlled_producer() -> None:
+    project = new_project("aidlc-evidence-design-intent-", active_stage="units-generation")
+    try:
+        write(
+            project / "docs" / "aidlc" / "modules" / "test-module" / "inception" / "application-design" / "component-design.md",
+            "# Component design\n\nREQ-DESIGN-001 records a stable design without structural intent markers.\n",
+        )
+        write_semantic_config(project, "units-generation", "design-intent-coverage")
+        result = run_producer(
+            project, "run", "--stage", "units-generation", "--sensor", "design-intent-coverage",
+        )
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(evidence_path(project, "units-generation", "design-intent-coverage").read_text())
+        assert payload["status"] == "passed"
+        assert payload["coverage_complete"] is True
+        assert payload["uncovered"] == 0
+        assert payload["stage_instance"] == "units-generation@module:test-module"
+        assert payload["module_id"] == "test-module"
+        assert payload["producer"]["name"] == "loeyae-aidlc-evidence"
+        assert payload["producer"]["mode"] == "controlled"
+        assert payload["producer"]["execution_id"]
+        assert payload["source_revision"]["commit"]
+        assert payload["source_revision"]["worktree_digest"]
+        assert payload["checker"]["id"] == "builtin:design-intent-coverage"
+        assert payload["checker"]["sensor"] == "design-intent-coverage"
+        assert len(payload["checker"]["argv_digest"]) == 64
+        assert payload["checker"]["exit_code"] == 0
+        assert payload["checker"]["status"] == "passed"
+        assert "trace_id" not in payload
+        assert verify_signature(payload)
+    finally:
+        cleanup(project)
+
+
 def test_optional_consistency_sensors_use_controlled_producer() -> None:
     project = new_project("aidlc-evidence-optional-consistency-", active_stage=None)
     try:
@@ -561,5 +595,6 @@ if __name__ == "__main__":
     test_symlink_boundaries()
     test_concurrent_producer_has_single_writer()
     test_producer_output_passes_orchestrator()
+    test_design_intent_coverage_uses_controlled_producer()
     test_optional_consistency_sensors_use_controlled_producer()
-    print("9 evidence producer test groups passed")
+    print("10 evidence producer test groups passed")

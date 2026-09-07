@@ -27,7 +27,9 @@ import { readEnrollment, verifyApprovalToken, verifyRecord } from "./aidlc-trust
 import { readSourceRevision } from "./aidlc-revision";
 import {
   evidenceRelativePath,
+  isEvidenceArtifactLabel,
   moduleInceptionRoot,
+  normalizeArtifactLabel,
   readModuleManifest,
   readUnitManifest,
   stageInstanceId,
@@ -783,11 +785,11 @@ function producedText(path: string): string | null {
 }
 
 function artifactLabel(path: string): string {
-  return relative(PROJECT_ROOT, path) || path;
+  return normalizeArtifactLabel(relative(PROJECT_ROOT, path) || path);
 }
 
 function isEvidenceArtifact(path: string): boolean {
-  return artifactLabel(path).startsWith(".aidlc/evidence/");
+  return isEvidenceArtifactLabel(artifactLabel(path));
 }
 
 /**
@@ -2001,7 +2003,7 @@ async function handleNext(args: string[]): Promise<Directive> {
     const enrollment = readEnrollment(PROJECT_ROOT);
     const pendingWorkflowId = enrollment?.status === "pending" ? enrollment.workflow_id : undefined;
     const selectedOptionalStages = withPrd ? ["prd-generation"] : [];
-    state = createInitialState(scopeFlag, "2.3.0", pendingWorkflowId, selectedOptionalStages);
+    state = createInitialState(scopeFlag, "2.3.1", pendingWorkflowId, selectedOptionalStages);
     saveState(state);
     return {
       kind: "print",

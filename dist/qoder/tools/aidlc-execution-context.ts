@@ -1,6 +1,14 @@
 import { existsSync, lstatSync, readFileSync } from "fs";
 import { join } from "path";
 
+export function normalizeArtifactLabel(label: string): string {
+  return label.replace(/\\/g, "/");
+}
+
+export function isEvidenceArtifactLabel(label: string): boolean {
+  return normalizeArtifactLabel(label).startsWith(".aidlc/evidence/");
+}
+
 export type ExecutionAxis = "project" | "module" | "unit";
 
 export interface ExecutionContext {
