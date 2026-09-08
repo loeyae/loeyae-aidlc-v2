@@ -15,6 +15,8 @@
 | 启动并选择生成 PRD | `loeyae-aidlc orchestrate next --scope feature --with-prd` |
 | 获取当前阶段 | `loeyae-aidlc orchestrate next` |
 | 查看工作流状态 | `loeyae-aidlc orchestrate next --status` |
+| 只读检查 state/enrollment 信任链 | `loeyae-aidlc recover inspect` |
+| 预演受控 re-enroll | `loeyae-aidlc recover re-enroll` |
 | 报告阶段完成 | `loeyae-aidlc orchestrate report --stage <slug> --result completed` |
 | 暂停工作流 | `loeyae-aidlc orchestrate park` |
 | 恢复工作流 | `loeyae-aidlc orchestrate next --resume` |
@@ -42,6 +44,7 @@
 以下命令依赖当前工作目录代表业务项目根目录：
 
 - `orchestrate`
+- `recover`
 - `approve`
 - `evidence`
 - `check`
@@ -395,6 +398,75 @@ loeyae-aidlc orchestrate continue <token>
 ```
 
 `continue` 是兼容旧 steering chain 的内部传输命令，只确认 token 并提示 Agent 直接加载 stage 文件。普通用户和自动化脚本不应依赖它推进工作流。
+
+### 5.7 受控信任链恢复：`recover`
+
+当签名 state 使用旧 trust key，而当前主机 enrollment 使用另一 key，或二者 `workflow_id` 不一致时，普通 orchestrator 会按设计 fail-closed。禁止手工修改 state、删除 enrollment、复制签名字段或直接调用内部签名函数。`recover` 只提供以下两个受限入口：
+
+```bash
+# 只读检查；不写 state、enrollment 或 recovery audit
+loeyae-aidlc recover inspect
+
+# 验证旧签名并生成 dry-run 计划；默认不写任何文件
+loeyae-aidlc recover re-enroll
+```
+
+`inspect` 报告 state/enrollment workflow ID、key ID、SHA-256、活动 key 验证结果及 mismatch；不输出 secret 或完整签名。如果已设置 recovery key，它还报告旧签名是否验证通过。`re-enroll` 则必须取得旧签名的密码学证明。只允许通过环境变量提供，secret 永远不能放进 CLI 参数：
+
+```bash
+# 原工作流由 AIDLC_TRUST_SECRET 签名时
+export AIDLC_RECOVERY_SECRET='<original-secret-from-secure-store>'
+
+# 原工作流由 trust.key 签名时：使用安全导出的原 base64 文件
+chmod 600 /secure/path/original-trust.key
+export AIDLC_RECOVERY_KEY_FILE=/secure/path/original-trust.key
+
+# 同时导出原主机上与 state workflow 相同、由旧 key 签名的 active enrollment
+export AIDLC_RECOVERY_ENROLLMENT_FILE=/secure/path/original-enrollment.json
+```
+
+前两个 key 来源只能设置一个；`AIDLC_RECOVERY_ENROLLMENT_FILE` 对新事务始终必需。key 文件和 enrollment proof 都必须是绝对规范路径和普通非符号链接文件；POSIX 上 key 文件不得允许 group/other 访问。工具会用旧 key 同时验证 state 和 source enrollment，要求二者 workflow 一致且 source enrollment 为 `active`。state 本身不含项目路径，因此只有旧 key、key ID 或 state 文件都不足以证明它曾属于哪个项目。
+
+source enrollment 中的签名 `project_root` 可以与当前 canonical root 不同，以支持 Windows→macOS 等受控跨主机迁移；dry-run 会显示源/目标 root SHA，`--apply` 的真人短语同时绑定两者。当前活动 key 仍由 `AIDLC_TRUST_SECRET` 或当前 `AIDLC_TRUST_DIR/trust.key` 提供，必须已存在；恢复不会隐式生成新活动 key。
+
+实际恢复只接受 `status=parked` 的签名 state。先在原受信主机 park；running 工作流、被篡改 state、无/错误旧 key、缺失或与 state workflow 不一致的 source enrollment、非 active source enrollment、非法 JSON、符号链接、无效当前 enrollment 和已经一致的信任链都会被拒绝。
+
+先运行 dry-run，把输出 `required_apply_flags` 中的值逐项复制到执行命令：
+
+```bash
+loeyae-aidlc recover re-enroll \
+  --expect-workflow <state-workflow-id> \
+  --expect-state-sha256 <state-file-sha256> \
+  --expect-source-key <old-key-id> \
+  --expect-source-enrollment-sha256 <old-enrollment-sha256> \
+  --expect-source-root-sha256 <old-project-root-sha256> \
+  --expect-active-key <current-key-id> \
+  --expect-enrollment-workflow <current-workflow-id-or-none> \
+  --expect-enrollment-sha256 <current-enrollment-sha256-or-none> \
+  --reason "跨主机迁移旧签名 parked 工作流" \
+  --apply
+```
+
+`--apply` 还要求真人交互式终端输入绑定 workflow、state SHA 前缀、source/target project-root SHA 和当前 enrollment 的精确确认短语。没有 `--yes`、非交互确认或 secret CLI 参数。任一期望值在锁内复检不一致时均拒绝写入。
+
+成功事务会：
+
+1. 在当前 trust store 的 `recovery-audit/<project-id>/<recovery-id>/` 创建 `0700` 审计目录；
+2. 以 `0600` 保存原 state、当前 enrollment、source enrollment 的原始字节、目标 state、带 `recovery_id` 的 pending enrollment、active enrollment 和活动 key 签名的 `plan.json`；
+3. 使用 recovery 专用 pending enrollment 协议提交；普通 loader、Hook 和 state 保存路径看到 `recovery_id` 时继续 fail-closed，不会替 recovery 命令自动激活；
+4. 保留 workflow ID、scope、stage、status、history 等业务语义，清除瞬时 approval challenge，并递增 revision/更新时间；
+5. 调用正式 `loadWorkflowState` 验证后写入活动 key 签名的 `result.json`，其中记录原因、before/after SHA、key ID、workflow ID、备份路径和完成时间。
+
+如果进程在 pending enrollment 或 state rename 后中断，不要删除 audit、state 或 enrollment，也不要手工回滚。保留旧 key，重新运行相同 dry-run；输出会显示 `transaction_status: incomplete` 和同一个 recovery ID。随后以原来的完整 `--apply` 命令和确认短语继续。此时普通 loader/Hook 会明确拒绝未完成 recovery，不会自动激活 enrollment 或允许恢复工作流。
+
+re-enroll 不修改或批量重签旧 Evidence。旧 key 签名的 Evidence 在新活动 key 下仍会被拒绝；后续阶段需要时，必须通过受控 Producer 重新生成。
+
+完成后清除 recovery 环境变量，再用正式入口复核：
+
+```bash
+unset AIDLC_RECOVERY_SECRET AIDLC_RECOVERY_KEY_FILE AIDLC_RECOVERY_ENROLLMENT_FILE
+loeyae-aidlc orchestrate next --status
+```
 
 ## 6. 人工审批：`approve`
 
@@ -888,6 +960,9 @@ loeyae-aidlc hook --format <platform>
 |---|---|
 | `AIDLC_TRUST_SECRET` | 至少 32 字节的稳定签名 secret；Evidence 工作流必须由宿主或 CI 安全注入 |
 | `AIDLC_TRUST_DIR` | 覆盖项目外 trust store 目录，适用于隔离测试或受控宿主 |
+| `AIDLC_RECOVERY_SECRET` | 仅在受控 re-enroll 中证明原 UTF-8 trust secret；与 `AIDLC_RECOVERY_KEY_FILE` 互斥 |
+| `AIDLC_RECOVERY_KEY_FILE` | 原 base64 `trust.key` 的绝对路径；必须是普通非符号链接文件，POSIX 权限不得宽于 `0600` |
+| `AIDLC_RECOVERY_ENROLLMENT_FILE` | 原主机上同 workflow、由旧 key 签名的 active enrollment JSON 绝对路径；用于证明源项目绑定 |
 | `AIDLC_APPROVAL_TOKEN` | 向 `orchestrate report --result approved` 传递一次性审批 token |
 | `AIDLC_CHROME_BIN` | 为 PDF 和 Mermaid 导出指定浏览器 |
 | `CHROME_BIN` | 浏览器路径兼容变量；优先级低于 `--browser` 和 `AIDLC_CHROME_BIN` |
@@ -904,7 +979,7 @@ loeyae-aidlc hook --format <platform>
 
 - 成功命令通常返回 `0`。
 - `orchestrate` 始终输出 JSON；`kind: error` 时返回非零状态。
-- `approve` 和 `evidence` 被门禁阻断时返回非零状态并输出原因。
+- `approve`、`recover` 和 `evidence` 被门禁阻断时返回非零状态并输出原因；`recover re-enroll --apply` 不能用于非交互脚本。
 - `check`、`diagram-provider`、`export`、`docx`、`build`、`graph`、`install` 和 `uninstall` 失败时返回非零状态。
 - `install --all` 和 `uninstall --all` 会继续处理其他已选平台，但任一平台失败时最终整体返回非零状态。
 - `hook` 遵循宿主协议；Claude-compatible Hook 即使输出 `decision: block` 也可能返回 `0`。
@@ -960,7 +1035,7 @@ loeyae-aidlc orchestrate report \
 
 ### Evidence 提示 trust secret 缺失或过短
 
-由宿主、CI 或安全环境注入至少 32 字节的 `AIDLC_TRUST_SECRET`，并确保所有相关进程使用同一个值。若工作流已用另一个 secret 初始化，不要直接切换；应恢复原 secret 或按受控恢复流程处理。
+由宿主、CI 或安全环境注入至少 32 字节的 `AIDLC_TRUST_SECRET`，并确保所有相关进程使用同一个值。若工作流已用另一个 secret 初始化，不要直接切换、手改 state 或删除 enrollment：先在原受信主机 park，随后运行 `loeyae-aidlc recover inspect`。能够安全取得原 key 以及同 workflow、旧 key 签名的 active source enrollment 时，按 5.7 节先执行 `recover re-enroll` dry-run，再由真人终端使用全部精确预期值执行 `--apply`；无法同时证明旧 state 和源项目绑定时继续保持 fail-closed。
 
 ### PDF 或 Mermaid 导出找不到浏览器
 

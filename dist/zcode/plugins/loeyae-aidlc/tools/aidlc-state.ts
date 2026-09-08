@@ -204,7 +204,7 @@ function migrateLegacyState(value: unknown, workflowId: string = randomUUID()): 
   const now = new Date().toISOString();
   return validateWorkflowState({
     schema_version: 2,
-    version: typeof value.version === "string" && value.version ? value.version : "2.3.1",
+    version: typeof value.version === "string" && value.version ? value.version : "2.4.0",
     workflow_id: workflowId,
     revision: 0,
     scope,
@@ -227,7 +227,7 @@ export function statePath(projectRoot: string): string {
 
 export function createInitialState(
   scope: string,
-  version = "2.3.1",
+  version = "2.4.0",
   workflowId: string = randomUUID(),
   selectedOptionalStages: string[] = [],
 ): WorkflowState {
@@ -264,6 +264,9 @@ export function createInitialState(
 export function loadWorkflowState(projectRoot: string): WorkflowState | null {
   const path = statePath(projectRoot);
   const enrollment = readEnrollment(projectRoot);
+  if (enrollment?.recovery_id) {
+    throw new Error(`recovery transaction ${enrollment.recovery_id} is incomplete; rerun recover re-enroll`);
+  }
   if (!existsSync(path)) {
     if (enrollment && enrollment.status !== "pending") {
       throw new Error(`enrolled project is missing its signed state: ${path}`);
@@ -331,6 +334,9 @@ export function saveWorkflowState(projectRoot: string, state: WorkflowState): vo
   let temporary = "";
   try {
     const enrollment = readEnrollment(projectRoot);
+    if (enrollment?.recovery_id) {
+      throw new Error(`recovery transaction ${enrollment.recovery_id} is incomplete; rerun recover re-enroll`);
+    }
     const onDiskRevision = currentRevision(path, enrollment);
     if (onDiskRevision !== null && onDiskRevision !== state.revision) {
       throw new Error(`state revision conflict: expected ${state.revision}, found ${onDiskRevision}`);

@@ -4,7 +4,7 @@ import { spawnSync } from "child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, resolve } from "path";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
-import { readModuleManifest } from "./aidlc-execution-context";
+import { portableDirname, readModuleManifest } from "./aidlc-execution-context";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
 import { loadWorkflowState } from "./aidlc-state";
 import {
@@ -1013,7 +1013,7 @@ function diagramContract(): Record<string, unknown> {
     if (!documentPath || !existsSync(documentPath)) fail(`${relativePath(manifestPath)} references a missing document`);
     const diagramIds = new Set<string>();
     const outputs = new Set<string>();
-    const manifestDir = manifestPath.slice(0, manifestPath.lastIndexOf("/"));
+    const manifestDir = portableDirname(manifestPath);
 
     for (const diagram of manifest.diagrams as Record<string, any>[]) {
       const id = requireString(diagram.id, `${relativePath(manifestPath)} diagram.id`);

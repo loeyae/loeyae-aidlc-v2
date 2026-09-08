@@ -1,8 +1,12 @@
 import { existsSync, lstatSync, readFileSync } from "fs";
-import { join } from "path";
+import { dirname, join, win32 } from "path";
 
 export function normalizeArtifactLabel(label: string): string {
   return label.replace(/\\/g, "/");
+}
+
+export function portableDirname(path: string): string {
+  return path.includes("\\") ? win32.dirname(path) : dirname(path);
 }
 
 export function isEvidenceArtifactLabel(label: string): boolean {

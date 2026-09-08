@@ -461,6 +461,35 @@ def set_signed_ui_route(project: Path, route: str) -> None:
     state_path.write_text(json.dumps(sign_payload(state), indent=2))
 
 
+def test_diagram_contract_uses_controlled_producer() -> None:
+    project = new_project("aidlc-evidence-diagram-contract-", active_stage="requirements-methods")
+    try:
+        shutil.copytree(REPO_ROOT / "tests" / "fixtures" / "diagram-003", project, dirs_exist_ok=True)
+        write_semantic_config(project, "requirements-methods", "diagram-contract")
+        result = run_producer(
+            project, "run", "--stage", "requirements-methods", "--sensor", "diagram-contract",
+        )
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(evidence_path(project, "requirements-methods", "diagram-contract").read_text())
+        assert payload["status"] == "passed"
+        assert payload["stage_instance"] == "requirements-methods@module:test-module"
+        assert payload["module_id"] == "test-module"
+        assert payload["producer"]["name"] == "loeyae-aidlc-evidence"
+        assert payload["producer"]["mode"] == "controlled"
+        assert payload["producer"]["execution_id"]
+        assert payload["source_revision"]["commit"]
+        assert payload["source_revision"]["worktree_digest"]
+        assert payload["checker"]["id"] == "builtin:diagram-contract"
+        assert payload["checker"]["sensor"] == "diagram-contract"
+        assert len(payload["checker"]["argv_digest"]) == 64
+        assert payload["checker"]["exit_code"] == 0
+        assert payload["checker"]["status"] == "passed"
+        assert "trace_id" not in payload
+        assert verify_signature(payload)
+    finally:
+        cleanup(project)
+
+
 def test_design_intent_coverage_uses_controlled_producer() -> None:
     project = new_project("aidlc-evidence-design-intent-", active_stage="units-generation")
     try:
@@ -581,6 +610,7 @@ FR-001 REQ-NFR-001 US-001 PAGE-001
         assert cross_payload["ui_route"] == "html-mock"
         assert cross_payload["ui_pages_checked"] == 1
         assert cross_payload["prd_selected"] is False
+        assert "trace_id" not in cross_payload
         assert verify_signature(cross_payload)
     finally:
         cleanup(project)
@@ -595,6 +625,7 @@ if __name__ == "__main__":
     test_symlink_boundaries()
     test_concurrent_producer_has_single_writer()
     test_producer_output_passes_orchestrator()
+    test_diagram_contract_uses_controlled_producer()
     test_design_intent_coverage_uses_controlled_producer()
     test_optional_consistency_sensors_use_controlled_producer()
-    print("10 evidence producer test groups passed")
+    print("11 evidence producer test groups passed")

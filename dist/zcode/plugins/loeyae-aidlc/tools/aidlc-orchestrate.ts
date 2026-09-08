@@ -2003,7 +2003,7 @@ async function handleNext(args: string[]): Promise<Directive> {
     const enrollment = readEnrollment(PROJECT_ROOT);
     const pendingWorkflowId = enrollment?.status === "pending" ? enrollment.workflow_id : undefined;
     const selectedOptionalStages = withPrd ? ["prd-generation"] : [];
-    state = createInitialState(scopeFlag, "2.3.1", pendingWorkflowId, selectedOptionalStages);
+    state = createInitialState(scopeFlag, "2.4.0", pendingWorkflowId, selectedOptionalStages);
     saveState(state);
     return {
       kind: "print",

@@ -269,6 +269,8 @@ def test_all_checkers_pass_on_realistic_fixture() -> None:
             assert result.returncode == 0, f"{sensor}: {result.stderr}"
             payload = json.loads(result.stdout)
             assert payload["status"] in ("passed", "verified", "not_applicable"), sensor
+            if sensor in ("diagram-contract", "design-intent-coverage"):
+                assert "trace_id" not in payload
             if sensor == "diagram-contract":
                 assert payload["status"] == "passed"
                 assert payload["final_status"] == "STATIC_PASS"
@@ -1235,6 +1237,7 @@ def test_inception_consistency_optional_routes() -> None:
         assert skipped_payload["prd_selected"] is False
         assert skipped_payload["ui_route"] == "skip"
         assert skipped_payload["ui_pages_checked"] == 0
+        assert "trace_id" not in skipped_payload
 
         write(project, "docs/aidlc/ideation/prd.md", "# PRD\nFR-PRD-001 平台支持注册业务。\n")
         write_cross_validation_inputs(project, "module-a", prd_selected=True, ui_route="skip")

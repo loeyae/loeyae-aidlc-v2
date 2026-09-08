@@ -1289,6 +1289,7 @@ Usage:
 
 Commands:
   orchestrate <next|report|park> [flags]  Run the workflow engine
+  recover <inspect|re-enroll> [flags]     Inspect or repair a proven parked trust chain
   approve --stage <slug>                  Issue a short-lived token in an interactive human terminal
   evidence run [flags]                    Produce controlled build/test evidence
   check --sensor <name>                   Run a deterministic semantic checker
@@ -1312,6 +1313,13 @@ Install/uninstall options:
   --list            Show available platforms (install only)
   --migrate-legacy  Preserve and replace recognized pre-manifest installs (install only)
 
+Recovery safety:
+  recover re-enroll is dry-run unless --apply is present. Apply requires a parked state,
+  old-key proof from AIDLC_RECOVERY_SECRET or AIDLC_RECOVERY_KEY_FILE, the original signed
+  enrollment from AIDLC_RECOVERY_ENROLLMENT_FILE, exact workflow/state/key/enrollment/root
+  values, a reason, and an interactive confirmation phrase.
+  Secrets are never accepted as CLI arguments and there is no --yes override.
+
 Examples:
   loeyae-aidlc install
   loeyae-aidlc install --harness kiro-ide --project /absolute/path/to/project
@@ -1323,6 +1331,8 @@ Examples:
   loeyae-aidlc uninstall --all
   loeyae-aidlc orchestrate next --scope feature
   loeyae-aidlc orchestrate next --scope feature --with-prd
+  loeyae-aidlc recover inspect
+  loeyae-aidlc recover re-enroll
   loeyae-aidlc approve --stage application-design
   loeyae-aidlc orchestrate report --stage application-design --result approved --approval-token <token>
   loeyae-aidlc export md /absolute/path/document.md --to docx --toc
@@ -1338,6 +1348,7 @@ function main(): void {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
     case "orchestrate": run("core/tools/aidlc-orchestrate.ts", rest); break;
+    case "recover": runInteractive("core/tools/aidlc-recover.ts", rest); break;
     case "approve": runInteractive("core/tools/aidlc-approve.ts", rest); break;
     case "evidence": run("core/tools/aidlc-evidence.ts", rest); break;
     case "check": run("core/tools/aidlc-semantic-checks.ts", rest); break;

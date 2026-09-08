@@ -303,6 +303,10 @@ loeyae-aidlc approve --stage application-design
 loeyae-aidlc orchestrate report --stage application-design --result approved --approval-token <token>
 loeyae-aidlc orchestrate park
 
+# 只读检查 state/enrollment 信任链；re-enroll 默认仅生成 dry-run 计划
+loeyae-aidlc recover inspect
+loeyae-aidlc recover re-enroll
+
 # 使用业务项目中的受控命令清单生成构建测试证据
 loeyae-aidlc evidence run --stage build-and-test
 
@@ -412,6 +416,8 @@ Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活
 - `docs/aidlc/handoff.md` 只是派生的人类协作视图，不能改变 stage、skip、approval 或 revision；冲突时以签名机器状态为准。
 - enrollment 位于项目外的 `~/.config/loeyae-aidlc/trust/enrollments/`。已 enrollment 的项目若 state 缺失、未签名、签名无效或 workflow ID 不匹配，CLI 与生命周期 Hook 都会 fail-closed。
 - 默认 key 位于 `~/.config/loeyae-aidlc/trust/trust.key`（`0600`）；宿主也可在启动所有相关进程前提供至少 32 字节的 `AIDLC_TRUST_SECRET`，测试/隔离环境可设置 `AIDLC_TRUST_DIR`。需要生成 Evidence 的工作流必须在第一次 `next` 前配置稳定的 `AIDLC_TRUST_SECRET`，并由 CI/宿主安全注入相同值。
+- 信任链冲突只能先用 `loeyae-aidlc recover inspect` 只读检查，再对 `parked` state 执行 `recover re-enroll`。后者必须用 `AIDLC_RECOVERY_SECRET` 或受限的 `AIDLC_RECOVERY_KEY_FILE` 证明旧 state，并用 `AIDLC_RECOVERY_ENROLLMENT_FILE` 提供同一 workflow、旧 key 签名的 active enrollment 以证明源项目绑定；跨主机路径变化由源/目标 root SHA 和真人短语显式确认。默认 dry-run，实际写入还要求 state/current enrollment/source enrollment SHA、旧/新 key ID、workflow ID 和原因，没有 `--yes` 或 secret CLI 参数。
+- recovery 在项目外 trust store 保存原 state、当前 enrollment 和源 enrollment 的原始字节、活动 key 签名的 plan/result audit，并使用带 `recovery_id` 的 pending enrollment + state lock 实现可续跑事务。事务未完成时普通 loader/Hook 继续 fail-closed；中断后重新运行同一命令继续，不得手工改 state、删 enrollment、任意重签或删除未决 audit。旧 key 签名的 Evidence 不会被批量重签，后续门禁需要时必须由受控 Producer 重新生成。
 
 该机制防止“只能写业务项目、不能访问用户 trust store”的 Agent 直接伪造 state/Evidence；它不能防御拥有同一 OS 用户任意文件读写权或能控制宿主进程环境的恶意进程，不应表述为同 UID 下绝对不可伪造。
 
