@@ -382,17 +382,28 @@ loeyae-aidlc orchestrate report --stage application-design --result revised
 
 `run-stage` directive 会返回 `stage_instance`、`axis`、`module_id`、`unit_id`、`artifact_root`、已替换占位符的 `consumes`/`produces` 及 `evidence_root`。自动化和 Agent 应直接使用这些字段，不要从 Stage 正文中的抽象路径自行猜测上下文。
 
-### 5.5 暂停和恢复
+### 5.5 连续工作、主动冻结和恢复
+
+成功的 `next`、`report`、条件跳过和审批状态变化都会在返回前保存签名 checkpoint。running workflow 在新会话中可直接查询并继续，不需要为了交接先执行 park：
 
 ```bash
-# 保存当前状态并暂停
-loeyae-aidlc orchestrate park
+loeyae-aidlc orchestrate next --status
+loeyae-aidlc orchestrate next
+```
 
-# 在之后的会话恢复
+只有用户明确要求冻结整个 workflow 时才使用：
+
+```bash
+loeyae-aidlc orchestrate park
+```
+
+已 parked 的工作流在没有 `--resume` 时只返回 `parked` directive。用户明确继续后恢复：
+
+```bash
 loeyae-aidlc orchestrate next --resume
 ```
 
-已 parked 的工作流在没有 `--resume` 时只返回 `parked` directive。
+`parked` 仍是当前跨 trust-domain `recover re-enroll` 的安全前提；“日常交接不要求 park”不能用于绕过 recovery 证明。schema v2 只支持单游标串行续接，不表示多人排他认领已经实现。自然语言“继续上次工作”“接手当前项目”“在这台设备继续”由 `aidlc-continuity` 处理；`aidlc-handoff` 是旧交接关键词的兼容别名。
 
 ### 5.6 内部 `continue`
 

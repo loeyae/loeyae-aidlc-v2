@@ -270,7 +270,7 @@ loeyae-aidlc install --all
 使用 AI-DLC 开发用户认证模块
 ```
 
-触发关键词：`aidlc`、`AI-DLC`、`使用 AI-DLC`、`继续上次的工作`、`审批当前阶段`、`确认架构方案`、`批准部署方案`、`功能设计`、`用户故事` 等。
+触发关键词：`aidlc`、`AI-DLC`、`使用 AI-DLC`、`继续上次的工作`、`接手当前项目`、`查看可接手任务`、`在这台设备继续`、`审批当前阶段`、`确认架构方案`、`批准部署方案`、`功能设计`、`用户故事` 等。
 
 能力型关键词的适用场景、输入边界和实际提示词模板见 [AI-DLC 能力关键词与提示词指南](docs/ai-dlc-keyword-guide.md)，其中包含调整已有 SVG 流程图的完整示例。
 
@@ -395,8 +395,10 @@ v2 使用确定性状态机取代 v1 的 agent 自路由：
 ```
 Agent ←→ aidlc-orchestrate.ts next   → 返回下一步的 JSON directive
 Agent ←→ aidlc-orchestrate.ts report → 记录结果，推进状态
-Agent ←→ aidlc-orchestrate.ts park   → 保存状态供下次恢复
+Agent ←→ aidlc-orchestrate.ts park   → 主动冻结 workflow（不是可交接性的前提）
 ```
+
+每次成功的状态转换都会在返回 directive 前持久化签名 checkpoint。新会话中的 running workflow 通过 `aidlc-continuity` 直接执行 `next --status` / `next` 续接，不要求预先 park；`aidlc-handoff` 仅保留旧交接关键词兼容。只有用户明确要求冻结整个 workflow 时才执行 park，且只有 parked workflow 才使用 `next --resume`。
 
 Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活跃 stage 实例，否则拒绝。公开结果协议不包含 `skipped`；只有图谱声明的 `condition` 求值为 false 时，引擎才能写入内部 `condition_skipped` 历史。
 

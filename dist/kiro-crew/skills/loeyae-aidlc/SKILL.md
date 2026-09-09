@@ -4,7 +4,7 @@ description: >
   Loeyae AI-DLC v2 workflow orchestrator. Engine-driven development lifecycle
   with deterministic gates, signed provenance, and two token-bound human approval points. Activate with
   "使用 AI-DLC" or "aidlc" keywords.
-triggers: aidlc, AI-DLC, 使用 AI-DLC, 继续上次的工作, 认领单元, 审批当前阶段, 确认架构方案, 批准架构方案, 批准部署方案, 驳回当前方案, 功能设计, 用户故事, 用户场景, 验收标准, PRD, 产品需求文档, 需求文档合成, 架构设计, 应用设计, 组件设计, 服务设计, 单元生成, 工作单元, 单元拆分, 依赖矩阵, 代码审查, 代码评审, Code Review, 逆向工程, 存量系统分析, 代码库分析, 根因分析, 系统化调试, 故障定位, 测试用例派生, UC-D, 测试场景, 构建测试证据, 画图, 图表设计, 业务流程图, 系统架构图, 流程图, Figma, UI 原型, HTML Mock, 组件映射, 前端平台规范, 需求估算, 工作量估算, 人天估算, 功能点估算, 功能点分析, FPA, 项目排期, 粗粒度排期, 排期预测, 交付预测, 发布预测, 交付配置, 部署配置生成, 部署配置验证, 发布配置检查
+triggers: aidlc, AI-DLC, 使用 AI-DLC, 继续上次的工作, 接手当前项目, 查看当前进度, 查看可接手任务, 在这台设备继续, 暂停并交接, 认领单元, 审批当前阶段, 确认架构方案, 批准架构方案, 批准部署方案, 驳回当前方案, 功能设计, 用户故事, 用户场景, 验收标准, PRD, 产品需求文档, 需求文档合成, 架构设计, 应用设计, 组件设计, 服务设计, 单元生成, 工作单元, 单元拆分, 依赖矩阵, 代码审查, 代码评审, Code Review, 逆向工程, 存量系统分析, 代码库分析, 根因分析, 系统化调试, 故障定位, 测试用例派生, UC-D, 测试场景, 构建测试证据, 画图, 图表设计, 业务流程图, 系统架构图, 流程图, Figma, UI 原型, HTML Mock, 组件映射, 前端平台规范, 需求估算, 工作量估算, 人天估算, 功能点估算, 功能点分析, FPA, 项目排期, 粗粒度排期, 排期预测, 交付预测, 发布预测, 交付配置, 部署配置生成, 部署配置验证, 发布配置检查
 ---
 
 # Loeyae AI-DLC v2 Orchestrator (Kiro Crew Harness)
@@ -22,7 +22,7 @@ triggers: aidlc, AI-DLC, 使用 AI-DLC, 继续上次的工作, 认领单元, 审
 ```
 Agent ←→ aidlc-orchestrate.ts next   → 返回下一步 JSON directive
 Agent ←→ aidlc-orchestrate.ts report → 验证门禁 + 记录结果 + 自动推进
-Agent ←→ aidlc-orchestrate.ts park   → 保存状态供下次恢复
+Agent ←→ aidlc-orchestrate.ts park   → 主动冻结 workflow（非日常交接前提）
 ```
 
 ## 转发循环
@@ -205,6 +205,7 @@ I9 UI 设计不是初始化选项，而是运行时 choice。`ui-mock` directive
 - **子代理派发**：通过 `spawn_run` MCP 工具
 - **状态持久化**：`docs/aidlc/aidlc-state.json` 是 HMAC、workflow ID、单调 revision/CAS 保护的唯一机器状态；外部 enrollment 绑定项目路径
 - **会话恢复**：只从已验证签名 state 恢复；`docs/aidlc/handoff.md` 是派生人类视图，无权改变路由状态
+- **连续工作**：继续、接手、查看进度或换设备请求加载 `skills/aidlc-continuity/SKILL.md`；`aidlc-handoff` 仅为兼容别名，日常交接不自动 park
 - **人工确认**：`[OPTIONS: Approve | Request Changes]` 只呈现审阅选择；Approve 后仍须由人类 TTY/受信 provider 签发 token，不能把聊天回答直接作为 token
 - **instruction-only**：执行正文后显式传 `--instruction-ack <slug>`；生命周期 Hook 不自动推进
 - **证据目录**：业务项目的 `.aidlc/evidence/<stage-slug>/` 存放 sensor 证据

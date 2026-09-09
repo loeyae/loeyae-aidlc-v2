@@ -19,7 +19,7 @@ In any Kiro Crew session, say:
 使用 AI-DLC 开发用户认证模块
 ```
 
-The skill triggers on keywords: `aidlc`, `AI-DLC`, `使用 AI-DLC`, etc.
+The skill triggers on keywords: `aidlc`, `AI-DLC`, `使用 AI-DLC`, `继续上次工作`, `接手当前项目`, `查看可接手任务`, `在这台设备继续`, etc. Continue/takeover requests load `aidlc-continuity`; `aidlc-handoff` is a compatibility alias. A running workflow already has signed checkpoints and does not need to be parked before an ordinary session handoff.
 
 ## How it works
 
