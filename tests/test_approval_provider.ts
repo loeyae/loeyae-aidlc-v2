@@ -1,8 +1,12 @@
 import { strict as assert } from "assert";
 import { createHmac } from "crypto";
+import { existsSync, mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
   approvalConfirmationPhrase,
   buildApprovalProviderRequest,
+  createLocalApprovalProviderResponse,
   validateApprovalConversationConfirmation,
   validateApprovalProviderResponse,
   type ApprovalConversationConfirmation,
@@ -10,8 +14,12 @@ import {
 } from "../core/tools/aidlc-approval-provider";
 import type { WorkflowState } from "../core/tools/aidlc-state";
 
+const originalSecret = process.env.AIDLC_TRUST_SECRET;
+const originalTrustDirectory = process.env.AIDLC_TRUST_DIR;
+const scratch = mkdtempSync(join(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir(), "aidlc-approval-provider-"));
 const secret = "approval-provider-test-secret-32-bytes";
 process.env.AIDLC_TRUST_SECRET = secret;
+process.env.AIDLC_TRUST_DIR = join(scratch, "legacy-trust");
 
 const issuedAt = Date.parse("2026-09-09T00:00:00.000Z");
 const stageInstance = "application-design@module:module-a";
@@ -131,4 +139,36 @@ assert.throws(
   /challenge expired/,
 );
 
-console.log("Approval request, conversation confirmation, and provider contract tests passed");
+delete process.env.AIDLC_TRUST_SECRET;
+const localTrust = join(scratch, "local-provider-trust");
+process.env.AIDLC_TRUST_DIR = localTrust;
+const localResponse = createLocalApprovalProviderResponse(
+  request,
+  "trusted-host-local-device",
+  "human-event-local-001",
+  issuedAt + 3000,
+);
+const localValidated = validateApprovalProviderResponse(
+  JSON.stringify(localResponse),
+  request,
+  issuedAt + 4000,
+);
+assert.equal(localValidated.provider_id, "trusted-host-local-device");
+assert.equal(localValidated.human_event_id, "human-event-local-001");
+assert.equal(existsSync(join(localTrust, "trust.key")), false);
+assert.equal(existsSync(join(localTrust, "device-signing-key.json")), true);
+
+process.env.AIDLC_TRUST_DIR = join(scratch, "another-device-trust");
+assert.throws(
+  () => validateApprovalProviderResponse(JSON.stringify(localResponse), request, issuedAt + 4000),
+  /token is invalid or stale/,
+  "a trusted-host response is intentionally scoped to the device that issued its one-time token",
+);
+
+if (originalSecret === undefined) delete process.env.AIDLC_TRUST_SECRET;
+else process.env.AIDLC_TRUST_SECRET = originalSecret;
+if (originalTrustDirectory === undefined) delete process.env.AIDLC_TRUST_DIR;
+else process.env.AIDLC_TRUST_DIR = originalTrustDirectory;
+rmSync(scratch, { recursive: true, force: true });
+
+console.log("Approval request, conversation confirmation, and local-device provider contract tests passed");

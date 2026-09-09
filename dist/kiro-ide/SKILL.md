@@ -27,9 +27,9 @@ loeyae-aidlc orchestrate report --stage <slug> --result completed
 
 当 directive 的 `gate` 为 `true` 时，加载 `aidlc-approval`，读取并展示 request 的随机 `confirmation_phrase` 后结束回合；只有用户下一条真实消息完整匹配，才能通过 `--approval-confirmation-stdin` 定向报告。普通“同意”、预填按钮、Agent 代填、旧消息或同一回合自动提交无效。Provider 是可选增强，真人 TTY 是备用路径。`completion_contract: instruction_only` 必须在执行正文后追加 `--instruction-ack <slug>`，Stop Hook 不能代替确认。公开 report 不支持手动 `skipped`；仅图谱 condition=false 可写内部 `condition_skipped`。
 
-阶段规则和知识文件位于本 Skill 随附的 `stages/`、`knowledge/` 和 `tools/`；阶段顺序、准入准出门禁和传感器以 `tools/aidlc-orchestrate.ts` 为准。`docs/aidlc/aidlc-state.json` 是 HMAC、workflow ID、revision/CAS 保护的唯一机器状态，外部 enrollment 绑定项目路径；`docs/aidlc/handoff.md` 只是派生人类视图。暂停使用 `loeyae-aidlc orchestrate park`，恢复使用 `loeyae-aidlc orchestrate next --resume`。
+阶段规则和知识文件位于本 Skill 随附的 `stages/`、`knowledge/` 和 `tools/`；阶段顺序、准入准出门禁和传感器以 `tools/aidlc-orchestrate.ts` 为准。`docs/aidlc/aidlc-state.json` 是 schema v3 设备签名 append-only event、workflow ID、revision/CAS 保护的唯一机器状态；`docs/aidlc/handoff.md` 只是派生人类视图。每台设备自动生成独立 Ed25519 credential，不配置、传递或共享 `AIDLC_TRUST_SECRET`。若 `next` 返回 `team-enrollment-confirmation` ask，展示完整 `JOIN ...` 短语后必须结束回合；仅用户下一条真实消息精确匹配后通过 strict `--team-enrollment-confirmation-stdin` 完成本机 enrollment。不得代填、同回合提交或复制 private key。enrollment 记录已接受 event head，rollback/fork fail-closed；Provider/SCM 权限仍决定共享流写入资格。暂停使用 `loeyae-aidlc orchestrate park`，恢复使用 `loeyae-aidlc orchestrate next --resume`。
 
-Evidence 必须由受控 Producer 生成并携带精确 producer、`commit + dirty + worktree_digest` 和 HMAC 完整性；命令只记录 `argv_digest`。需要 Evidence 时，宿主须在第一次 `next` 前向 orchestrator、Producer 和 Hook 注入同一份至少 32 字节的 `AIDLC_TRUST_SECRET`。semantic allowlist 只能声明内置 checker，不能执行项目 Node/Python/shell checker。
+Evidence 必须由受控 Producer 生成并携带精确 producer、`commit + dirty + worktree_digest` 和 schema 对应完整性：v3 自动设备 Ed25519，v2 legacy HMAC；命令只记录 `argv_digest`。`AIDLC_TRUST_SECRET` 仅用于 schema v2/HMAC/recovery legacy。同 stage 多个活动实例时必须传 `--instance`；semantic allowlist 只能声明内置 checker，不能执行项目 Node/Python/shell checker。
 
 ## Chrome DevTools 浏览器验收 Provider
 

@@ -52,6 +52,7 @@ const originalEnvironment = {
   collaboration: process.env.AIDLC_COLLABORATION_V3,
 };
 const root = mkdtempSync(join(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir(), "aidlc-coordination-v3-"));
+process.env.AIDLC_TRUST_DIR = join(root, "default-trust");
 process.env.AIDLC_COLLABORATION_V3 = "1";
 process.env.AIDLC_TRUST_SECRET = "coordination-v3-test-secret-at-least-32-bytes";
 

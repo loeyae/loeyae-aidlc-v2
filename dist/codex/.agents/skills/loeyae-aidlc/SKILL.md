@@ -38,9 +38,11 @@ loeyae-aidlc orchestrate report --stage <slug> --result completed
 
 ## Codex 适配
 
-- `docs/aidlc/aidlc-state.json` 是 HMAC、workflow ID、revision/CAS 保护的唯一机器状态；外部 enrollment 绑定项目，`docs/aidlc/handoff.md` 仅为派生人类视图；
-- evidence 按当前实例隔离：project 为 `.aidlc/evidence/<stage-slug>/`，module 追加 `<module-id>/`，unit 再追加 `<unit-id>/`；只接受受控 Producer 的精确 producer、当前 `commit + dirty + worktree_digest` 和 HMAC，命令只记录 `argv_digest`；
-- 需要 Evidence 时，必须在第一次 `next` 前向 orchestrator、Producer 和 Hook 注入同一份至少 32 字节的 `AIDLC_TRUST_SECRET`；semantic 只执行发行包内置 checker；
+- `docs/aidlc/aidlc-state.json` 是 schema v3 设备签名 append-only event、workflow ID、revision/CAS 保护的唯一机器状态；每台设备使用独立 Ed25519 credential，`docs/aidlc/handoff.md` 仅为派生人类视图；
+- `next` 返回 `team-enrollment-confirmation` ask 时，必须展示完整 `JOIN ...` 短语并结束回合；仅用户下一条真实消息精确匹配后通过 strict `--team-enrollment-confirmation-stdin` 完成本机 enrollment。不得代填、同回合提交、复制 private key 或要求共享 `AIDLC_TRUST_SECRET`；
+- enrollment 记录已接受 event head，rollback/fork fail-closed；Provider/SCM 权限仍决定共享流写入资格，设备签名不是完整成员授权 PKI；
+- evidence 按当前实例隔离：project 为 `.aidlc/evidence/<stage-slug>/`，module 追加 `<module-id>/`，unit 再追加 `<unit-id>/`；只接受受控 Producer 的精确 producer、当前 `commit + dirty + worktree_digest` 和 schema 对应完整性（v3 自动设备 Ed25519，v2 legacy HMAC），命令只记录 `argv_digest`；多个活动实例必须传精确 `--instance`；
+- `AIDLC_TRUST_SECRET` 只用于 schema v2/HMAC/recovery legacy，不是 v3 团队配置；semantic 只执行发行包内置 checker；
 - 需要子 Agent 时，只使用当前 Codex 会话实际提供的子 Agent 能力；不可用时按阶段规则串行执行；
 - MCP、Skill 和项目规则按 Codex 当前会话的可用能力加载；不可用时返回 `NEEDS_CONTEXT` 或 `NEEDS_CAPABILITY`；
 - 不把 Skill 入口、阶段执行结果或用户回答伪造成 evidence。

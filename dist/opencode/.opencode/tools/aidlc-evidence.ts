@@ -17,10 +17,14 @@ import {
 import { spawnSync } from "child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
-import { signRecord } from "./aidlc-trust";
-import { loadWorkflowState, type WorkflowState } from "./aidlc-state";
+import { signRecord, signTeamRecord } from "./aidlc-trust";
+import { loadWorkflowState, statePath, type WorkflowState } from "./aidlc-state";
+import { loadWorkflowStateV3 } from "./aidlc-state-v3-store";
+import type { WorkflowStateV3 } from "./aidlc-state-v3";
 import { evidenceRelativePath } from "./aidlc-execution-context";
 import { readSourceRevision } from "./aidlc-revision";
+
+type ProducerState = WorkflowState | WorkflowStateV3;
 
 type CommandRole = "build" | "test" | "check" | "semantic";
 
@@ -145,14 +149,14 @@ function requireDirectory(path: string, field: string): string {
   return safe;
 }
 
-function evidenceOutput(stage: string, sensor: string, value: string | undefined, state: WorkflowState): string {
+function evidenceOutput(stage: string, sensor: string, value: string | undefined, state: ProducerState): string {
   const safeStage = nonEmptyString(stage, "stage");
   const safeSensor = nonEmptyString(sensor, "sensor");
   if (!/^[a-z0-9][a-z0-9-]*$/.test(safeStage) || !/^[a-z0-9][a-z0-9-]*$/.test(safeSensor)) {
     fail("stage and sensor must contain only lowercase letters, digits, and hyphens");
   }
   const axis = state.current_unit ? "unit" : state.current_module ? "module" : "project";
-  const relativeOutput = state.routing_model === "module-unit-v1"
+  const relativeOutput = state.routing_model === "module-unit-v1" || state.routing_model === "collaboration-v3"
     ? evidenceRelativePath(safeStage, safeSensor, axis, { module_id: state.current_module, unit_id: state.current_unit })
     : join(".aidlc", "evidence", safeStage, `${safeSensor}.json`);
   const expected = resolve(PROJECT_ROOT, relativeOutput);
@@ -161,8 +165,8 @@ function evidenceOutput(stage: string, sensor: string, value: string | undefined
   return output;
 }
 
-function executionContext(state: WorkflowState): Record<string, unknown> {
-  if (state.routing_model !== "module-unit-v1") return {};
+function executionContext(state: ProducerState): Record<string, unknown> {
+  if (state.routing_model !== "module-unit-v1" && state.routing_model !== "collaboration-v3") return {};
   return {
     stage_instance: state.current_stage_instance,
     module_id: state.current_module || null,
@@ -359,11 +363,14 @@ function writeAtomic(path: string, value: string): void {
   }
 }
 
-function signedEvidence(unsigned: Record<string, unknown>): Record<string, unknown> {
-  return { ...unsigned, integrity: signRecord(unsigned, false) };
+function signedEvidence(unsigned: Record<string, unknown>, state: ProducerState): Record<string, unknown> {
+  return {
+    ...unsigned,
+    integrity: state.schema_version === 3 ? signTeamRecord(unsigned) : signRecord(unsigned, false),
+  };
 }
 
-function runSemanticCommand(sensor: string, timeoutMs: number, state: WorkflowState): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
+function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerState): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
   const tsx = require.resolve("tsx/cli");
   const checker = resolve(TOOL_DIR, "aidlc-semantic-checks.ts");
   const argv = [process.execPath, tsx, checker, "--sensor", sensor];
@@ -413,7 +420,7 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: WorkflowSt
   };
 }
 
-function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig, state: WorkflowState): void {
+function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig, state: ProducerState): void {
   const sensor = options.sensor;
   if (!sensor || sensor === "build-test-evidence") fail("semantic producer requires --sensor with a semantic sensor name");
   if (options.commandIds.length > 0) fail("--command-id is only supported for build/test evidence");
@@ -430,12 +437,13 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig, s
     source_revision: readSourceRevision(PROJECT_ROOT),
     checker: result.execution,
   };
-  writeAtomic(output, `${JSON.stringify(signedEvidence(unsigned), null, 2)}\n`);
+  writeAtomic(output, `${JSON.stringify(signedEvidence(unsigned, state), null, 2)}\n`);
   console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}` }, null, 2));
 }
 
 interface ProducerOptions {
   stage: string;
+  instance?: string;
   sensor?: string;
   config: string;
   output?: string;
@@ -443,24 +451,26 @@ interface ProducerOptions {
 }
 
 function parseArgs(args: string[]): ProducerOptions {
-  if (args[0] !== "run") fail("usage: aidlc-evidence.ts run --stage <stage> [--sensor <sensor>] [--config <path>] [--output <path>] [--command-id <id> ...]");
+  if (args[0] !== "run") fail("usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance>] [--sensor <sensor>] [--config <path>] [--output <path>] [--command-id <id> ...]");
   let stage = "";
+  let instance: string | undefined;
   let sensor: string | undefined;
   let config = DEFAULT_CONFIG;
   let output: string | undefined;
   const commandIds: string[] = [];
   for (let i = 1; i < args.length; i++) {
     const arg = args[i];
-    if (["--stage", "--sensor", "--config", "--output", "--command-id"].includes(arg)) {
+    if (["--stage", "--instance", "--sensor", "--config", "--output", "--command-id"].includes(arg)) {
       const value = args[++i];
       if (!value) fail(`${arg} requires a value`);
       if (arg === "--stage") stage = value;
+      if (arg === "--instance") instance = value;
       if (arg === "--sensor") sensor = value;
       if (arg === "--config") config = value;
       if (arg === "--output") output = value;
       if (arg === "--command-id") commandIds.push(value);
     } else if (arg === "--help" || arg === "-h") {
-      console.log("Usage: aidlc-evidence.ts run --stage <stage> [--sensor <sensor>] [--config <path>] [--output <path>] [--command-id <id> ...]");
+      console.log("Usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance>] [--sensor <sensor>] [--config <path>] [--output <path>] [--command-id <id> ...]");
       process.exit(0);
     } else {
       fail(`unknown argument: ${arg}`);
@@ -470,6 +480,7 @@ function parseArgs(args: string[]): ProducerOptions {
   if (sensor && sensor !== "build-test-evidence" && !SEMANTIC_SENSORS.has(sensor)) fail(`unsupported semantic sensor: ${sensor}`);
   return {
     stage,
+    ...(instance ? { instance } : {}),
     sensor,
     config: safeProjectPath(config, "config", true),
     output,
@@ -497,14 +508,50 @@ function withProducerLock(output: string, action: () => void): void {
   }
 }
 
-function runProducer(args: string[]): void {
-  const secret = process.env.AIDLC_TRUST_SECRET;
-  if (secret === undefined || Buffer.byteLength(secret, "utf8") < 32) {
-    fail("AIDLC_TRUST_SECRET must contain at least 32 bytes for evidence production");
+function loadProducerState(options: ProducerOptions): ProducerState | null {
+  const path = statePath(PROJECT_ROOT);
+  if (!existsSync(path)) return null;
+  const stat = lstatSync(path);
+  if (!stat.isFile() || stat.isSymbolicLink()) fail(`state must be a regular non-symlink file: ${path}`);
+  const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  if (parsed.schema_version !== 3) return loadWorkflowState(PROJECT_ROOT);
+
+  const state = loadWorkflowStateV3(PROJECT_ROOT);
+  if (!state) return null;
+  const activeInstances = Object.values(state.instances).filter(
+    (instance) => instance.stage === options.stage && instance.status === "in_progress",
+  );
+  const selected = options.instance
+    ? state.instances[options.instance]
+    : activeInstances.length === 1
+      ? activeInstances[0]
+      : undefined;
+  if (options.instance && (!selected || selected.stage !== options.stage || selected.status !== "in_progress")) {
+    fail(`stage instance ${options.instance} is not an active ${options.stage} instance`);
   }
+  if (!options.instance && activeInstances.length > 1) {
+    fail(`multiple active ${options.stage} instances; pass --instance <stage-instance>`);
+  }
+  if (!selected) return state;
+  return {
+    ...state,
+    current_stage: selected.stage,
+    current_stage_instance: selected.stage_instance,
+    ...(selected.module_id ? { current_module: selected.module_id } : {}),
+    ...(selected.unit_id ? { current_unit: selected.unit_id } : {}),
+  };
+}
+
+function runProducer(args: string[]): void {
   const options = parseArgs(args);
-  const state = loadWorkflowState(PROJECT_ROOT);
+  const state = loadProducerState(options);
   if (!state || state.status !== "running") fail("evidence production requires an active signed running workflow");
+  if (state.schema_version !== 3) {
+    const secret = process.env.AIDLC_TRUST_SECRET;
+    if (secret === undefined || Buffer.byteLength(secret, "utf8") < 32) {
+      fail("legacy schema v2 evidence production requires AIDLC_TRUST_SECRET with at least 32 bytes");
+    }
+  }
   if (state.current_stage !== options.stage) {
     fail(`stage ${options.stage} is not active; current stage is ${state.current_stage || "(none)"}`);
   }
@@ -551,7 +598,7 @@ function runProducer(args: string[]): void {
       checks: { status: "passed", command_ids: commands.filter((command) => command.role === "check").map((command) => command.id) },
       artifacts,
     };
-    writeAtomic(output, `${JSON.stringify(signedEvidence(unsigned), null, 2)}\n`);
+    writeAtomic(output, `${JSON.stringify(signedEvidence(unsigned, state), null, 2)}\n`);
     console.log(JSON.stringify({ status: "passed", output, tests, commands: commands.length, artifacts: artifacts.length }, null, 2));
   });
 }

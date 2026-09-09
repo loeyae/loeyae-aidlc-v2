@@ -300,6 +300,46 @@ loeyae-aidlc orchestrate next
 
 新 workflow 默认 schema v3。`next --status` 返回稳定排序的 `ready_instances`、active 和 resolved 聚合，但不 claim；实际 `next` 要求 actor/device/client identity，可由参数或 `AIDLC_ACTOR_ID`、`AIDLC_DEVICE_ID`、`AIDLC_CLIENT_ID` 注入。Local Provider 只协调同一工作树；Git Provider 通过 `--coordination-provider git --coordination-remote <remote>` 在专用 coordination ref 上做远端 CAS。已有 schema v2 state 自动走单游标兼容引擎，不会隐式迁移。
 
+schema v3 自动在项目外 trust root 创建本机 Ed25519 device credential，不创建共享 `trust.key`，团队成员不配置、传递或共享 `AIDLC_TRUST_SECRET`。新设备首次打开已有 team state 且本机没有有效 enrollment 时，`next` 返回：
+
+```json
+{
+  "kind": "ask",
+  "ask_type": "team-enrollment-confirmation",
+  "workflow_id": "...",
+  "request_id": "...",
+  "state_sha256": "...",
+  "event_head_hash": "...",
+  "device_key_id": "...",
+  "confirmation_phrase": "JOIN ...",
+  "expires_at": "..."
+}
+```
+
+Agent 必须展示完整随机 `JOIN ...` 短语并结束当前回合。用户下一条真实消息必须精确输入该短语；Agent 才能把这条新消息包装为严格 envelope（不得代填、近似、追加空格或加入未知字段）：
+
+```json
+{
+  "schema_version": 1,
+  "kind": "aidlc.team.enrollment.confirmation",
+  "request_id": "<active-request-id>",
+  "confirmation_phrase": "<exact-next-user-message>"
+}
+```
+
+然后通过安全 stdin 继续同一个 `next`：
+
+```bash
+cat team-enrollment-confirmation.json \
+  | loeyae-aidlc orchestrate next \
+      --actor-id actor:alice \
+      --device-id device:new-laptop \
+      --client-id client:new-session \
+      --team-enrollment-confirmation-stdin
+```
+
+request 绑定 canonical project root、workflow、state SHA、event head、本机 device key、随机 challenge 和 15 分钟 TTL。过期、旧 request、request 后 state/head 改变或精确文本不匹配均拒绝。enrollment 保存本机已接受 event head；后续只接受扩展该 head 的状态，rollback/fork fail-closed。
+
 ### 5.4 报告阶段结果
 
 ```text
@@ -384,7 +424,7 @@ cat claim-receipt.json | loeyae-aidlc orchestrate report \
   --claim-receipt-stdin
 ```
 
-缺少 `--user-input` 或传入 directive `choices` 之外的值会被拒绝。选择写入受 HMAC、workflow ID、revision/CAS 保护的签名 history；不得用 `handoff.md` 或手工 state 修改切换分支。
+缺少 `--user-input` 或传入 directive `choices` 之外的值会被拒绝。选择写入受 schema 对应完整性 envelope（v3 自动设备 Ed25519；v2 legacy HMAC）、workflow ID、revision/CAS 保护的签名 history；不得用 `handoff.md` 或手工 state 修改切换分支。
 
 选择 `html-mock`、`figma-create` 或 `figma-existing` 后，directive 会依次要求当前模块的 `page-plan.md` 与 `ui-artifact-consistency` Evidence，再要求 `ui-mock-manifest.json`（skeleton/content 均 validated）或 `figma-manifest.json` 及对应 Evidence。`cross-validation` 会按签名选择动态加入这些 canonical 产物；选择 PRD 时还会加入 `prd.md` 与 `prd-completeness` Evidence。未选择 PRD/UI、UI condition=false 或选择 `skip` 时，这些 consumes、produces、sensor 和 Evidence 均不出现。`code-review` 同样只在已选 UI 模块保留 `ui-design-alignment`；最终 `implementation-report` 必须显式覆盖全部模块和所有已选 PRD/UI Evidence。
 
@@ -458,9 +498,15 @@ loeyae-aidlc state migrate-v3 --apply \
   --actor-id actor:alice --device-id device:laptop --client-id client:session-1
 ```
 
-命令不接受 secret argv。迁移保持 workflow ID、enrollment、history、choice、completed/skipped 与 approval challenge；active v2 instance 会成为绑定该 identity 的 compatibility lock。锁内验证或原子 rename 失败时原 state 字节保持不变。
+命令不接受 secret argv。迁移保持 workflow ID、history、choice、completed/skipped 与 approval challenge；active v2 instance 会成为绑定该 identity 的 compatibility lock。最终 state/event 重建为 Ed25519 chain，并建立本机 `device-signature-v1` enrollment。锁内验证或原子 rename 失败时原 state 字节保持不变。
 
-### 5.8 受控信任链恢复：`recover`
+### 5.8 Legacy HMAC v3 自动转签与受控恢复边界
+
+升级前已是 schema v3 但仍使用 HMAC 的 state，不走下述 v2 re-enroll：能验证旧 key 的原受信客户端第一次打开时会保留 workflow/event 业务字段、重建 previous hash，并将 checkpoint/event chain 转为本机 Ed25519 device signature；完全丢失旧 key 时仍 fail-closed。旧 HMAC Git coordination log 在原受信客户端第一次**成功 mutation** 中通过远端 CAS 原子重签整链，活动旧 receipt 可由该客户端续租并换取新 Ed25519 receipt；无旧 key 的新设备在迁移前会收到明确拒绝。旧 HMAC Evidence 不自动批量重签，门禁需要时必须由受控 Producer 重新生成。
+
+以下 `recover` 流程仅用于 schema v2/HMAC legacy 信任链恢复，不是 v3 新设备加入流程。v3 新设备必须使用 5.3 的 `team-enrollment-confirmation`，不得用 recovery 绕过 event-head 绑定。
+
+### 5.9 受控信任链恢复：`recover`
 
 当签名 state 使用旧 trust key，而当前主机 enrollment 使用另一 key，或二者 `workflow_id` 不一致时，普通 orchestrator 会按设计 fail-closed。禁止手工修改 state、删除 enrollment、复制签名字段或直接调用内部签名函数。`recover` 只提供以下两个受限入口：
 
@@ -569,7 +615,7 @@ conversation-confirmation-envelope \
 
 schema v2 不需要 claim receipt，直接把 `aidlc.approval.confirmation` 对象通过 `--approval-confirmation-stdin` 传给兼容引擎。两种 schema 都由引擎精确校验 request ID、确认语、challenge TTL 和实例，并在内部生成及立即消费 token；token 不进入聊天、stdin envelope、argv 或项目文件。
 
-受信宿主 Provider 仍可作为可选一键增强。schema v3 的 Provider response 与 claim receipt 使用 `{"claim_receipt": {...}, "approval_response": {...}}` envelope 和 `--approval-response-stdin`；它不是默认审批的前置条件。真人交互式终端同样保留为备用路径：
+同一设备的受信宿主 Provider 仍可作为可选一键增强。schema v3 的 Provider response 与 claim receipt 使用 `{"claim_receipt": {...}, "approval_response": {...}}` envelope 和 `--approval-response-stdin`；一次性 token 由发起设备的本机 device credential 内部派生，用户与团队成员不配置或共享 `AIDLC_TRUST_SECRET`。该通道不是远程跨设备 Provider 协议，也不是默认审批的前置条件。真人交互式终端同样保留为备用路径：
 
 ```bash
 loeyae-aidlc approve --stage application-design --instance application-design@module:module-a
@@ -596,13 +642,14 @@ cat claim-receipt.json | loeyae-aidlc orchestrate report \
 
 ```text
 loeyae-aidlc evidence run --stage <stage>
+                           [--instance <stage-instance>]
                            [--sensor <sensor>]
                            [--config <path>]
                            [--output <canonical-path>]
                            [--command-id <id> ...]
 ```
 
-默认配置文件是业务项目根目录的 `.aidlc/evidence-commands.json`。Evidence 工作流必须在第一次 `orchestrate next` 前安全注入至少 32 字节的稳定 `AIDLC_TRUST_SECRET`，并保证 orchestrator、Producer、Hook 或 CI 使用相同值。不要把 secret 写入仓库。
+默认配置文件是业务项目根目录的 `.aidlc/evidence-commands.json`。Producer 读取当前签名 state：schema v3 自动使用本机 `device-signing-key.json` 生成可跨设备验证的 Ed25519 Evidence，不创建 `trust.key`，也不要求 `AIDLC_TRUST_SECRET`；schema v2 legacy 继续要求至少 32 字节的稳定 secret。团队成员不得为 v3 配置、传递或共享 secret。若同一 stage 存在多个 `in_progress` 实例，必须显式传 `--instance <stage-instance>`，否则 Producer fail-closed，避免 Evidence 落入错误模块/单元。
 
 ### 7.2 构建和测试证据
 
@@ -1041,8 +1088,8 @@ loeyae-aidlc hook --format <platform>
 
 | 变量 | 用途 |
 |---|---|
-| `AIDLC_TRUST_SECRET` | 至少 32 字节的稳定签名 secret；Evidence 工作流必须由宿主或 CI 安全注入 |
-| `AIDLC_TRUST_DIR` | 覆盖项目外 trust store 目录，适用于隔离测试或受控宿主 |
+| `AIDLC_TRUST_SECRET` | 仅 schema v2、旧 HMAC v3 验证/转签和 recovery 兼容使用的至少 32 字节 secret；schema v3 团队不得共享或要求配置 |
+| `AIDLC_TRUST_DIR` | 覆盖项目外 trust store 目录；v3 自动设备 key 位于其 `device-signing-key.json`，适用于隔离测试或受控宿主 |
 | `AIDLC_RECOVERY_SECRET` | 仅在受控 re-enroll 中证明原 UTF-8 trust secret；与 `AIDLC_RECOVERY_KEY_FILE` 互斥 |
 | `AIDLC_RECOVERY_KEY_FILE` | 原 base64 `trust.key` 的绝对路径；必须是普通非符号链接文件，POSIX 权限不得宽于 `0600` |
 | `AIDLC_RECOVERY_ENROLLMENT_FILE` | 原主机上同 workflow、由旧 key 签名的 active enrollment JSON 绝对路径；用于证明源项目绑定 |
@@ -1060,7 +1107,7 @@ loeyae-aidlc hook --format <platform>
 | `KIROCREW_HOME` | 覆盖 Kiro Crew 数据目录，用于宿主检测 |
 | `KIROCREW_VENV` | 覆盖 Kiro Crew 托管虚拟环境目录，用于宿主检测 |
 
-不要把 trust secret、审批 token 或宿主凭据写入项目文件、命令文档或提交历史。
+不要把 legacy trust/recovery secret、设备 private key、审批 token 或宿主凭据写入项目文件、命令文档或提交历史。
 
 ## 17. 退出状态和脚本调用
 
@@ -1124,7 +1171,13 @@ cat claim-receipt.json | loeyae-aidlc orchestrate report \
 
 ### Evidence 提示 trust secret 缺失或过短
 
-由宿主、CI 或安全环境注入至少 32 字节的 `AIDLC_TRUST_SECRET`，并确保所有相关进程使用同一个值。若工作流已用另一个 secret 初始化，不要直接切换、手改 state 或删除 enrollment：先在原受信主机 park，随后运行 `loeyae-aidlc recover inspect`。能够安全取得原 key 以及同 workflow、旧 key 签名的 active source enrollment 时，按 5.8 节先执行 `recover re-enroll` dry-run，再由真人终端使用全部精确预期值执行 `--apply`；无法同时证明旧 state 和源项目绑定时继续保持 fail-closed。
+schema v3 不应要求 `AIDLC_TRUST_SECRET`：确认 state 为 schema 3、当前设备已完成 team enrollment，并使用当前 3.0.0 Producer；它会自动创建/使用本机 `device-signing-key.json`。不要为消除该错误而在团队间共享 secret。
+
+若 state 为 schema v2，或属于尚未由原受信客户端转签的旧 HMAC v3，缺少/过短提示属于 legacy fail-closed。schema v2 由宿主、CI 或安全环境注入原来的至少 32 字节 secret；旧 HMAC v3 必须先由能验证旧 key 的原受信客户端打开。若 legacy workflow 已用另一 secret 初始化，不要直接切换、手改 state 或删除 enrollment：先在原受信主机 park，随后运行 `loeyae-aidlc recover inspect`。只有能安全取得原 key 以及同 workflow、旧 key 签名的 active source enrollment 时，才按 5.9 节先执行 `recover re-enroll` dry-run，再由真人终端使用全部精确预期值执行 `--apply`；无法同时证明旧 state 和源项目绑定时继续保持 fail-closed。
+
+### 新设备返回 team-enrollment-confirmation
+
+这是正常的 v3 加入门禁，不是缺 key。Agent 展示完整 `JOIN ...` 短语后必须结束回合；用户下一条真实消息精确输入，再按 5.3 节通过 `--team-enrollment-confirmation-stdin` 提交。不得复制其他设备私钥、共享 `AIDLC_TRUST_SECRET`、代填短语或删除 enrollment。
 
 ### PDF 或 Mermaid 导出找不到浏览器
 

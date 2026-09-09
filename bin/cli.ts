@@ -1315,7 +1315,7 @@ Commands:
   state migrate-v3 [flags]               Dry-run or atomically apply controlled v2→v3 migration
   recover <inspect|re-enroll> [flags]     Inspect or repair a proven parked trust chain
   approve --stage <slug> --instance <id> [--request]  Show exact conversation confirmation; TTY remains optional
-  evidence run [flags]                    Produce controlled build/test evidence
+  evidence run --stage <slug> [--instance <id>] [flags]  Produce controlled signed evidence
   check --sensor <name>                   Run a deterministic semantic checker
   diagram-provider run [options]          Run Chrome DevTools diagram validation
   export <md|svg> <file> --to <format>    Export Markdown to DOCX/PDF or SVG to PNG
@@ -1336,6 +1336,22 @@ Install/uninstall options:
   --all             Install detected hosts, or uninstall installer-owned global/user installs
   --list            Show available platforms (install only)
   --migrate-legacy  Preserve and replace recognized pre-manifest installs (install only)
+
+Collaboration v3 trust:
+  Schema v3 automatically creates a private Ed25519 device key in AIDLC_TRUST_DIR;
+  team members do not configure or share AIDLC_TRUST_SECRET, and private keys are never
+  written to the project or shown by the CLI. On a new device, orchestrate next returns
+  a team-enrollment-confirmation ask bound to workflow/state/event head and a 15-minute TTL.
+  The Agent must show its exact random phrase and end the turn. The user's next real message
+  is wrapped in the strict confirmation envelope and submitted only through
+  orchestrate next --team-enrollment-confirmation-stdin. Accepted event heads advance
+  locally and stale rollback/fork state is rejected. Schema v2 HMAC and recovery remain
+  legacy compatibility paths.
+
+Approval Provider boundary:
+  --approval-response-stdin is for a trusted host integration on the same device. Its
+  one-time token is derived internally from that device credential; neither the user nor
+  the Provider shares AIDLC_TRUST_SECRET. It is not a remote cross-device Provider protocol.
 
 Recovery and migration safety:
   state migrate-v3 is dry-run unless --apply is present and requires explicit
@@ -1359,6 +1375,11 @@ Examples:
     --actor-id actor:alice --device-id device:laptop --client-id client:session-1
   loeyae-aidlc orchestrate next --scope feature --with-prd \
     --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+  # New device: display the returned JOIN phrase, end the turn, then submit the user's
+  # exact next message in the strict aidlc.team.enrollment.confirmation envelope:
+  team-enrollment-confirmation-envelope | loeyae-aidlc orchestrate next \
+    --actor-id actor:alice --device-id device:new-laptop --client-id client:session-2 \
+    --team-enrollment-confirmation-stdin
   loeyae-aidlc state migrate-v3 --actor-id actor:alice --device-id device:laptop --client-id client:session-1
   loeyae-aidlc recover inspect
   loeyae-aidlc recover re-enroll
@@ -1372,6 +1393,7 @@ Examples:
   claim-receipt-json | loeyae-aidlc orchestrate report --stage application-design \
     --instance application-design@module:module-a --result approved \
     --claim-receipt-stdin --approval-token <token>
+  loeyae-aidlc evidence run --stage build-and-test --instance build-and-test
   loeyae-aidlc export md /absolute/path/document.md --to docx --toc
   loeyae-aidlc export md /absolute/path/document.md --to pdf
   loeyae-aidlc export svg /absolute/path/diagram.svg --to png --scale 2
@@ -1385,7 +1407,8 @@ function main(): void {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
     case "orchestrate": {
-      const stdinRequired = rest.includes("--approval-confirmation-stdin")
+      const stdinRequired = rest.includes("--team-enrollment-confirmation-stdin")
+        || rest.includes("--approval-confirmation-stdin")
         || rest.includes("--approval-response-stdin")
         || rest.includes("--claim-receipt-stdin");
       run(orchestrationScript(), rest, stdinRequired ? readFileSync(0, "utf8") : undefined);

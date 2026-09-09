@@ -29,7 +29,10 @@ def main() -> None:
         "--instance",
         "--claim-receipt-stdin",
         "NEEDS_CONFIRMATION",
-        "可选兼容通道",
+        "可选本机通道",
+        "同一设备",
+        "AIDLC_TRUST_SECRET",
+        "不是远程跨设备 Provider 协议",
         "真人交互式终端仍是备用路径",
     )
     assert "NEEDS_TRUSTED_APPROVAL" not in skill
@@ -57,6 +60,10 @@ def main() -> None:
         "approval_confirmation",
         "--approval-confirmation-stdin",
         "可选 Provider 响应",
+        "同一受信设备",
+        "本机 device credential",
+        "不是远程跨设备 Provider 协议",
+        "不配置、传递或共享 `AIDLC_TRUST_SECRET`",
         "不得要求用户另开终端",
     )
     assert "NEEDS_HOST_CAPABILITY" not in kiro

@@ -80,11 +80,11 @@ Evidence 顶层同时携带当前 `stage_instance`、`module_id`、`unit_id`（�
 | 时效 | `timestamp` 字段为合法 ISO 日期，≤ 24 小时；超期拒绝，未来时间戳拒绝 |
 | 来源 | `producer.name` 必须为 `loeyae-aidlc-evidence`，`producer.mode` 为 `controlled`，且包含执行 ID；禁止 Agent 直接编辑通过证据 |
 | 来源指纹 | `source_revision.commit + dirty + worktree_digest` 必须与 report 时当前 Git 工作树完全一致 |
-| 完整性 | 顶层 `integrity` 必须通过当前 trust key 的 HMAC-SHA256 校验；每个字段仍按 sensor schema 严格校验 |
+| 完整性 | 顶层 `integrity` 必须与 workflow schema 一致并通过校验：schema v3 使用本机自动管理、可跨设备验证的 Ed25519 envelope；schema v2 legacy 使用当前 trust key 的 HMAC-SHA256。每个字段仍按 sensor schema 严格校验 |
 
 证据文件路径以 `orchestrate next` 返回的 `evidence_root` 为准。模块 A 的 Evidence 不得满足模块 B，单元 A 的 Evidence 不得满足单元 B；语义 checker 只扫描当前模块/单元的 AI-DLC 产物。
 
-`build-test-evidence` 的标准 Producer 入口为 `loeyae-aidlc evidence run --stage build-and-test`。它要求宿主预先注入至少 32 字节的稳定 `AIDLC_TRUST_SECRET`，只读取业务项目 `.aidlc/evidence-commands.json` 中的 argv allowlist，使用 `shell: false` 执行 `build`、`test` 和 `check` 命令，采集真实退出码、耗时和测试输出。证据只保存 argv 的 SHA-256，不保存可能带 token/secret 的明文参数；stdout/stderr 尾部脱敏。Producer 记录 `commit + dirty + worktree_digest`、artifact SHA-256，通过覆盖整个执行窗口的同 sensor 锁、唯一临时文件、fsync 和 rename 原子写入。任一命令失败、测试统计无法解析、artifact 缺失、并发冲突、symlink/越界或配置非法时 fail-closed，既不生成通过证据，也不更新 state/audit。
+`build-test-evidence` 的标准 Producer 入口为 `loeyae-aidlc evidence run --stage build-and-test`；同一 stage 有多个 `in_progress` 实例时必须再传 `--instance <stage-instance>`，防止 Evidence 写入错误模块/单元。Producer 读取签名 workflow schema：schema v3 自动使用本机 `device-signing-key.json` 生成 Ed25519 Evidence，不创建 `trust.key`，也不要求配置、传递或共享 `AIDLC_TRUST_SECRET`；schema v2 legacy 仍要求宿主安全注入至少 32 字节的稳定 `AIDLC_TRUST_SECRET`。它只读取业务项目 `.aidlc/evidence-commands.json` 中的 argv allowlist，使用 `shell: false` 执行 `build`、`test` 和 `check` 命令，采集真实退出码、耗时和测试输出。证据只保存 argv 的 SHA-256，不保存可能带 token/secret 的明文参数；stdout/stderr 尾部脱敏。Producer 记录 `commit + dirty + worktree_digest`、artifact SHA-256，通过覆盖整个执行窗口的同 sensor 锁、唯一临时文件、fsync 和 rename 原子写入。任一命令失败、测试统计无法解析、artifact 缺失、并发冲突、symlink/越界、实例歧义或配置非法时 fail-closed，既不生成通过证据，也不更新 state/audit。
 
 其他语义 sensor 使用同一入口并显式传入 `--sensor <sensor>`，allowlist 中必须存在唯一的 `role: "semantic"` 声明，argv 必须精确为 `loeyae-aidlc check --sensor <sensor>`。Producer 不执行项目声明的 Node/Python/shell 代码，而是固定调用发行包内 `aidlc-semantic-checks.ts`；内置 checker 只能在 stdout 返回 sensor-specific JSON。`evidence_version`、`timestamp`、`producer`、`source_revision`、`checker` 和 `integrity` 由 Producer 注入，checker 不得伪造。引擎随后仍执行对应 sensor 的完整 schema、签名和来源指纹校验；checker 失败、输出非 JSON、输出包含受控字段或缺少 status 时不写 evidence。
 

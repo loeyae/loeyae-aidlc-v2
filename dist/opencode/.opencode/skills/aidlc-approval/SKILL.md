@@ -71,11 +71,11 @@ triggers: 审批当前阶段, 确认架构方案, 批准架构方案, 批准部�
 7. phrase 不匹配、request 已变化或过期时返回 `BLOCKED`，重新执行 `next`/`approve --request` 获取当前确认语，不得复用旧消息。
 8. 驳回不需要确认语，但必须由 lease holder 以 `report --instance <id> --claim-receipt-stdin --result rejected --user-input "<原因>"` 记录审阅意见。
 
-## 可选兼容通道
+## 可选本机通道
 
-- 受信宿主 Approval Provider 可以提供额外的一键审批和宿主审计，但不是默认审批的前置依赖；其 response 继续通过 `--approval-response-stdin`。
-- 真人交互式终端仍是备用路径：直接运行 `loeyae-aidlc approve --stage <slug> --instance <stage-instance>`，再使用一次性 token 报告。
-- 任一操作只能选择对话确认、Provider response 或 TTY token 中一个通道，混用必须 fail-closed。
+- 同一设备的受信宿主 Approval Provider 可以提供额外的一键审批和宿主审计，但不是默认审批的前置依赖；其 response 通过 `--approval-response-stdin`。一次性 token 由本机 device credential 内部派生，用户与团队成员不得配置或共享 `AIDLC_TRUST_SECRET`。该 response 不是远程跨设备 Provider 协议。
+- 真人交互式终端仍是备用路径：直接运行 `loeyae-aidlc approve --stage <slug> --instance <stage-instance>`，再使用本设备的一次性 token 报告。
+- 任一操作只能选择对话确认、同设备 Provider response 或 TTY token 中一个通道，混用必须 fail-closed。
 
 ## KiroCrew 与其他宿主边界
 
@@ -91,6 +91,7 @@ triggers: 审批当前阶段, 确认架构方案, 批准架构方案, 批准部�
 - 在展示确认语的同一 Agent 回合调用 approved report；
 - 用 Agent 生成内容、旧用户消息、近似文本或按钮选择替代新的精确用户输入；
 - 在聊天、日志、文件或命令参数中回显 token 或 claim receipt；
+- 将本机 Provider token 转发到其他设备，或要求成员共享 `AIDLC_TRUST_SECRET` 以实现远程审批；
 - 修改 `aidlc-state.json`、challenge、integrity 或 enrollment；
 - 跳过 produces、sensors、实例匹配、TTL 或 replay 校验；
 - 为非审批 Stage 创造确认门禁。

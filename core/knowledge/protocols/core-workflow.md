@@ -114,7 +114,7 @@
 | 压缩 state | 压缩state、精简state | `inception-state-template.md` §handoff.md 压缩规则 |
 | 新增功能 | 新功能且现有产物中不存在 | Inception 追加模式 |
 | 生成 PRD | 生成PRD、写PRD、产品需求文档 | `product-prd-generation.md` |
-| 新项目 | 无有效 enrollment/签名 state | Inception |
+| 新项目 | 无 `docs/aidlc/aidlc-state.json` | Inception |
 
 ## Inception 路由
 

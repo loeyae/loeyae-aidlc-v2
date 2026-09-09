@@ -200,6 +200,28 @@ export function validateApprovalConversationConfirmation(
   };
 }
 
+export function createLocalApprovalProviderResponse(
+  request: ApprovalProviderRequest,
+  providerIdValue: string,
+  humanEventIdValue: string,
+  approvedAt = Date.now(),
+): ApprovalProviderResponse {
+  assertChallengeCurrent(request.challenge, approvedAt);
+  const expiresAt = Date.parse(request.expires_at);
+  if (!Number.isFinite(expiresAt) || approvedAt > expiresAt) {
+    throw new Error("approval provider request is expired");
+  }
+  return {
+    schema_version: 1,
+    kind: "aidlc.approval.response",
+    request_id: request.request_id,
+    provider_id: nonEmptyString(providerIdValue, "approval provider response provider_id"),
+    human_event_id: nonEmptyString(humanEventIdValue, "approval provider response human_event_id"),
+    approved_at: new Date(approvedAt).toISOString(),
+    approval_token: approvalToken(request.workflow_id, request.stage_instance, request.challenge),
+  };
+}
+
 export function validateApprovalProviderResponse(
   raw: string,
   request: ApprovalProviderRequest,

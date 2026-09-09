@@ -117,9 +117,11 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 - 格式：合法 JSON object，含 `evidence_version: "1"`
 - 大小：≤ 512 KB
 - 时效：`timestamp` 为合法 ISO 日期，≤ 24 小时
-- 来源与完整性：`producer.name` 必须为 `loeyae-aidlc-evidence`，并带 `mode: "controlled"`、执行 ID、当前 `commit + dirty + worktree_digest` 以及合法 HMAC-SHA256 `integrity`
-- secret：需要 Evidence 的工作流必须在第一次 `next` 前由宿主注入至少 32 字节且跨 orchestrator/Producer/Hook 一致的 `AIDLC_TRUST_SECRET`
-- 构建证据：`loeyae-aidlc evidence run --stage build-and-test`；命令只持久化 `argv_digest`，stdout/stderr 尾部脱敏
+- 来源与完整性：`producer.name` 必须为 `loeyae-aidlc-evidence`，并带 `mode: "controlled"`、执行 ID、当前 `commit + dirty + worktree_digest` 以及 schema 对应完整性；v3 自动设备 Ed25519，v2 legacy HMAC-SHA256
+- 设备信任：每台设备自动生成独立 Ed25519 credential；v3 不配置、传递或共享 `AIDLC_TRUST_SECRET`。`next` 返回 `team-enrollment-confirmation` ask 时，Agent 展示完整 `JOIN ...` 短语后必须结束回合；仅用户下一条真实消息精确匹配后通过 strict `--team-enrollment-confirmation-stdin` 完成本机 enrollment。不得代填、同回合提交或复制 private key
+- 防回滚与授权边界：enrollment 保存已接受 event head，rollback/fork fail-closed；Provider/SCM 权限仍决定共享流写入资格，设备签名不是完整成员授权 PKI
+- legacy：`AIDLC_TRUST_SECRET` 仅用于 schema v2/HMAC/recovery；旧 HMAC Evidence 需要时由受控 Producer 重新生成
+- 构建证据：`loeyae-aidlc evidence run --stage build-and-test`；同 stage 多个活动实例时必须传精确 `--instance`；命令只持久化 `argv_digest`，stdout/stderr 尾部脱敏
 - 语义证据：`--sensor <sensor>` 的 allowlist 只能声明精确的 `loeyae-aidlc check --sensor <sensor>`；Producer 固定执行发行包内置 checker，拒绝项目 Node/Python/shell checker
 - 路径与并发：config/cwd/artifact/output 均做根边界和逐段 symlink 检查；同 stage/sensor 的锁覆盖完整执行及原子写窗口
 

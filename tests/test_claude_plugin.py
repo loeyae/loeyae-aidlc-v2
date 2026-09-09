@@ -32,7 +32,7 @@ def test_official_plugin_layout() -> None:
     assert diagram_skill.is_file()
     assert approval_skill.is_file()
     assert approval_command.is_file()
-    assert "Slash Command 本身不是安全凭据" in approval_command.read_text()
+    assert "Slash Command 本身不是批准" in approval_command.read_text()
     assert not (DIST / ".claude").exists()
 
     manifest = json.loads(manifest_path.read_text())

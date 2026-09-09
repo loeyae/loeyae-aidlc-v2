@@ -55,6 +55,7 @@ import {
 } from "./aidlc-approval-provider";
 import { readEnrollment, verifyApprovalToken } from "./aidlc-trust";
 import { readModuleManifest, readUnitManifest } from "./aidlc-execution-context";
+import { teamEnrollmentGate } from "./aidlc-team-enrollment-v3";
 import type { WorkflowState } from "./aidlc-state";
 
 const PROJECT_ROOT = realpathSync(process.cwd());
@@ -368,11 +369,17 @@ async function handleNext(args: string[]): Promise<Directive> {
   const withPrd = booleanFlag(flags, "with-prd");
   const resume = booleanFlag(flags, "resume");
   const statusOnly = booleanFlag(flags, "status");
+  const enrollmentConfirmationStdin = booleanFlag(flags, "team-enrollment-confirmation-stdin");
   const scope = flags.scope;
   if (scope && !VALID_SCOPES.has(scope)) throw new Error(`unknown scope ${scope}`);
   if (withPrd && (!scope || !PRD_ELIGIBLE_SCOPES.has(scope))) {
     throw new Error("--with-prd is only valid when initializing feature, enterprise, mvp, or classic scope");
   }
+  const enrollmentDirective = teamEnrollmentGate(
+    PROJECT_ROOT,
+    enrollmentConfirmationStdin ? readFileSync(0, "utf8") : undefined,
+  );
+  if (enrollmentDirective) return enrollmentDirective as unknown as Directive;
 
   let state = loadWorkflowStateV3(PROJECT_ROOT);
   if (!state) {
@@ -534,6 +541,9 @@ function readReportStdin(flags: Record<string, string>): StdinPayload {
 
 async function handleReport(args: string[]): Promise<Directive> {
   const flags = parseFlags(args);
+  if ("team-enrollment-confirmation-stdin" in flags) {
+    throw new Error("--team-enrollment-confirmation-stdin is only valid with orchestrate next");
+  }
   const stageSlug = flags.stage;
   const instanceId = flags.instance;
   const result = flags.result;
