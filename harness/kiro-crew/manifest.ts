@@ -30,6 +30,7 @@ const manifest: HarnessManifest = {
   harnessFiles: [
     { src: "skills/loeyae-aidlc/SKILL.md", dst: "SKILL.md" },
     { src: "skills/loeyae-aidlc/question-rendering.md", dst: "question-rendering.md" },
+    { src: "skills/loeyae-aidlc/trusted-approval-provider.md", dst: "trusted-approval-provider.md" },
     { src: "mcp.json", dst: "mcp.json" },
     { src: "README.md", dst: "README.md", projectRoot: true },
   ],

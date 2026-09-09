@@ -28,7 +28,7 @@ The engine (`tools/aidlc-orchestrate.ts`) drives the workflow:
 1. Agent 调用 `next` → 引擎返回 `run-stage` directive
 2. Agent 读取并执行 stage 文件，生成受门禁约束的产物/Evidence
 3. 普通 stage 使用 `report --result completed`；`instruction_only` 必须追加 `--instruction-ack <slug>`
-4. `approval:block` 必须由人类 TTY 或受信 provider 筍发一次性 token，再使用 `report --result approved --approval-token <token>`
+4. `approval:block` 先加载 `aidlc-approval`；只有受信 KiroCrew Provider 或人类 TTY 能签发一次性 token，随后使用 `report --result approved --approval-response-stdin` 或 TTY fallback 的 `--approval-token`
 5. 重复直到 `done`
 
 聊天确认、Skill 或生命周期适配器都不能自行签发审批 token。公开 report 不支持手动 skip，只有图谱 condition=false 可记录内部 `condition_skipped`。`docs/aidlc/aidlc-state.json` 是签名且 revision/CAS 保护的唯一机器状态，外部 enrollment 绑定项目；handoff 仅为派生人类视图。

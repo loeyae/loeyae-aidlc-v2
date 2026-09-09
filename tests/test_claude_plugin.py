@@ -24,10 +24,15 @@ def test_official_plugin_layout() -> None:
     manifest_path = DIST / ".claude-plugin" / "plugin.json"
     orchestrator_skill = DIST / "skills" / "loeyae-aidlc" / "SKILL.md"
     diagram_skill = DIST / "skills" / "aidlc-diagram-design" / "SKILL.md"
+    approval_skill = DIST / "skills" / "aidlc-approval" / "SKILL.md"
+    approval_command = DIST / "commands" / "aidlc-approve.md"
 
     assert manifest_path.is_file()
     assert orchestrator_skill.is_file()
     assert diagram_skill.is_file()
+    assert approval_skill.is_file()
+    assert approval_command.is_file()
+    assert "Slash Command 本身不是安全凭据" in approval_command.read_text()
     assert not (DIST / ".claude").exists()
 
     manifest = json.loads(manifest_path.read_text())

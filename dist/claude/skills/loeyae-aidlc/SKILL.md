@@ -25,7 +25,7 @@ I9 UI 设计不是初始化选项，而是运行时 choice。`ui-mock` directive
 loeyae-aidlc orchestrate report --stage <slug> --result completed
 ```
 
-当 directive 的 `gate` 为 `true` 时，聊天确认本身不是审批凭据。人类须在交互式终端执行 `loeyae-aidlc approve --stage <slug>`，或由受信 Claude 宿主 provider 签发绑定 workflow/stage/challenge 的 token，再以 `--result approved --approval-token <token>` 报告；token 最长 15 分钟且不可重放。插件、Agent 与 Stop Hook 不得自行签发；无 provider/TTY 时 fail-closed。`instruction_only` stage 必须在执行正文后显式追加 `--instruction-ack <slug>`。公开 report 不支持手动 `skipped`，仅 condition=false 可产生内部 `condition_skipped`。
+当 directive 的 `gate` 为 `true` 时，聊天确认本身不是审批凭据。用户可调用 `/aidlc-approve`，该命令只负责加载 `skills/aidlc-approval/SKILL.md`、读取 challenge-bound request 并路由受信 Claude 宿主 Provider；Slash Command 本身不能签发 token。Provider response 必须通过 `--approval-response-stdin` 直接交给引擎，不能暴露给 Agent。没有受信 Provider 时，人类须在交互式终端执行 `loeyae-aidlc approve --stage <slug>`，再以 `--result approved --approval-token <token>` 报告。token 最长 15 分钟且不可重放；插件、Agent 与 Stop Hook 不得自行签发。无 Provider/TTY 时 fail-closed。`instruction_only` stage 必须在执行正文后显式追加 `--instruction-ack <slug>`。公开 report 不支持手动 `skipped`，仅 condition=false 可产生内部 `condition_skipped`。
 
 `docs/aidlc/aidlc-state.json` 是 HMAC、workflow ID、revision/CAS 保护的唯一机器状态，外部 enrollment 绑定项目；`docs/aidlc/handoff.md` 只是派生人类视图。Evidence 只接受受控 Producer 的精确 provenance、当前 `commit + dirty + worktree_digest` 与 HMAC；命令只记录 `argv_digest`，semantic 固定执行发行包内置 checker。需要 Evidence 时必须在第一次 `next` 前向 orchestrator、Producer 和 Hook 注入同一份至少 32 字节的 `AIDLC_TRUST_SECRET`。暂停使用 `loeyae-aidlc orchestrate park`，恢复使用 `next --resume`。
 

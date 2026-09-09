@@ -270,7 +270,7 @@ loeyae-aidlc install --all
 使用 AI-DLC 开发用户认证模块
 ```
 
-触发关键词：`aidlc`、`AI-DLC`、`使用 AI-DLC`、`继续上次的工作`、`功能设计`、`用户故事` 等。
+触发关键词：`aidlc`、`AI-DLC`、`使用 AI-DLC`、`继续上次的工作`、`审批当前阶段`、`确认架构方案`、`批准部署方案`、`功能设计`、`用户故事` 等。
 
 能力型关键词的适用场景、输入边界和实际提示词模板见 [AI-DLC 能力关键词与提示词指南](docs/ai-dlc-keyword-guide.md)，其中包含调整已有 SVG 流程图的完整示例。
 
@@ -425,7 +425,7 @@ Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活
 
 ### 审批与 instruction-only
 
-只有条件判定需要执行的 `application-design` 和 `operations` 实例使用 `approval: block`。`next` 为其创建绑定 `workflow_id + stage_instance + challenge` 的随机 challenge；模块级 `application-design` 的每个模块实例分别审批。人类在交互式终端审阅当前实例产物后运行 `loeyae-aidlc approve --stage <slug>`，得到最长 15 分钟、消费后不可重放的 token，再以 `--result approved --approval-token <token>` 报告。condition=false 的实例先自动记录 `condition_skipped`，不会创建审批 challenge。平台适配器不会自行签发 token；没有 Kiro Crew Dashboard、Claude、CodeBuddy、Qoder、ZCode、Codex 或 OpenCode 宿主 token provider 且没有可用人类终端时，这两个阶段会按设计 fail-closed。宿主集成可把 token 作为 `--approval-token` 或一次性 `AIDLC_APPROVAL_TOKEN` 传给引擎，但不得暴露普通非交互 token generator。
+只有条件判定需要执行的 `application-design` 和 `operations` 实例使用 `approval: block`。`next` 为其创建绑定 `workflow_id + stage_instance + challenge` 的随机 challenge；模块级 `application-design` 的每个模块实例分别审批。用户可通过 `aidlc-approval` Skill、自然语言关键词或 Claude `/aidlc-approve` 进入审阅；这些入口只负责读取 `approve --request` 的绑定上下文并路由受信宿主 Provider，普通聊天或 Slash Command 本身不是审批凭据。Provider response 通过 `--approval-response-stdin` 直接交给引擎，不应进入 Agent 上下文或 argv。没有受信 Provider 时，人类仍在交互式终端运行 `loeyae-aidlc approve --stage <slug>`，取得最长 15 分钟、消费后不可重放的 token，再以 `--result approved --approval-token <token>` 报告。condition=false 的实例先自动记录 `condition_skipped`，不会创建 challenge。没有受信宿主 Provider 且没有可用人类终端时，这两个阶段按设计 fail-closed；不得暴露普通非交互 token generator。KiroCrew 安全审批卡的宿主要求见 `trusted-approval-provider.md`，普通问答卡不能替代。
 
 12 个不产生机器可验证产物的阶段显式标记为 `instruction_only`，执行正文后必须用 `--instruction-ack <stage-slug>` 报告。Stop Hook 不携带该确认，因此不能自动推进这些阶段。
 

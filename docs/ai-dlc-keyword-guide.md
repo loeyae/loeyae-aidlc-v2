@@ -48,6 +48,7 @@
 
 | 能力 | 推荐关键词 | 适合场景 | 最小输入 |
 |------|------------|----------|----------|
+| AI-DLC 人工审批 | `审批当前阶段`、`确认架构方案`、`批准架构方案`、`批准部署方案`、`驳回当前方案`、`aidlc approve` | 审阅当前 `application-design` 或 `operations` 阻断门禁 | 有效签名 workflow、当前 approval request、canonical 产物/Evidence；批准还需要受信宿主 Provider 或真人 TTY |
 | 需求估算 | `需求估算`、`工作量估算`、`人天估算`、`功能点估算`、`功能点分析`、`FPA`、`规模估算`、`effort estimation` | 在详细设计前估算规模、工作量和不确定性 | 需求清单；项目模式必须为 `greenfield`、`product-extension` 或 `legacy-modification` 之一 |
 | 粗粒度排期 | `项目排期`、`粗粒度排期`、`排期预测`、`交付预测`、`发布预测`、`里程碑预测`、`release forecast` | 根据需求范围、依赖和团队假设给出 Phase/里程碑时间范围 | 需求或估算结果、团队容量、关键依赖和明确假设 |
 | PRD 合成 | `PRD`、`产品需求文档`、`需求文档合成`、`需求整理`、`PRD synthesis`、`业务需求文档` | 将 Discovery 和 Inception 产物整理成业务方可读的 PRD | 已有 Discovery、需求和相关 Inception 产物 |
