@@ -97,12 +97,12 @@ function identity(value: CoordinationIdentityV3, field = "identity"): Coordinati
   };
 }
 
-function receiptDigest(receipt: ClaimReceiptV3): string {
+export function claimReceiptDigestV3(receipt: ClaimReceiptV3): string {
   return createHash("sha256").update(canonicalPayload(receipt)).digest("hex");
 }
 
-function issueReceipt(
-  state: WorkflowStateV3,
+export function issueClaimReceiptV3(
+  workflowId: string,
   stageInstance: string,
   claimId: string,
   holder: CoordinationIdentityV3,
@@ -114,7 +114,7 @@ function issueReceipt(
   const unsigned: Record<string, unknown> = {
     schema_version: 1,
     kind: "aidlc.claim.receipt",
-    workflow_id: state.workflow_id,
+    workflow_id: workflowId,
     stage_instance: stageInstance,
     claim_id: claimId,
     actor_id: holder.actor_id,
@@ -186,7 +186,7 @@ export function assertClaimReceiptForStateV3(
   if (claim.lease_expires_at !== receipt.lease_expires_at) {
     throw new Error(`claim receipt lease is stale for ${stageInstance}`);
   }
-  if (claim.provider_receipt_digest !== receiptDigest(receipt)) {
+  if (claim.provider_receipt_digest !== claimReceiptDigestV3(receipt)) {
     throw new Error(`claim receipt digest does not match the active claim for ${stageInstance}`);
   }
   return receipt;
@@ -258,13 +258,13 @@ export function claimInstanceV3(
   const issuedAt = timestamp(occurredAt, "claim occurred_at");
   const leaseExpiresAt = new Date(Date.parse(issuedAt) + duration).toISOString();
   const claimId = randomUUID();
-  const receipt = issueReceipt(state, stageInstance, claimId, holder, text(providerId, "provider_id"), issuedAt, leaseExpiresAt, 1);
+  const receipt = issueClaimReceiptV3(state.workflow_id, stageInstance, claimId, holder, text(providerId, "provider_id"), issuedAt, leaseExpiresAt, 1);
   state = append(state, "instance_claimed", stageInstance, issuedAt, {
     claim: {
       claim_id: claimId,
       ...holder,
       provider_id: providerId,
-      provider_receipt_digest: receiptDigest(receipt),
+      provider_receipt_digest: claimReceiptDigestV3(receipt),
       claimed_at: issuedAt,
       renewed_at: issuedAt,
       lease_expires_at: leaseExpiresAt,
@@ -285,8 +285,8 @@ export function heartbeatClaimV3(
   const receipt = assertClaimReceiptForStateV3(state, receiptValue, receiptValue.stage_instance, now);
   const duration = leaseDuration(leaseMs);
   const leaseExpiresAt = new Date(now + duration).toISOString();
-  const nextReceipt = issueReceipt(
-    state,
+  const nextReceipt = issueClaimReceiptV3(
+    state.workflow_id,
     receipt.stage_instance,
     receipt.claim_id,
     identity(receipt, "claim receipt holder"),
@@ -297,7 +297,7 @@ export function heartbeatClaimV3(
   );
   const next = append(state, "claim_renewed", receipt.stage_instance, occurredAt, {
     lease_expires_at: leaseExpiresAt,
-    provider_receipt_digest: receiptDigest(nextReceipt),
+    provider_receipt_digest: claimReceiptDigestV3(nextReceipt),
   });
   return { state: next, receipt: nextReceipt };
 }
@@ -333,8 +333,8 @@ export function transferClaimV3(
   const duration = leaseDuration(leaseMs);
   const leaseExpiresAt = new Date(Date.parse(occurredAt) + duration).toISOString();
   const claimId = randomUUID();
-  const nextReceipt = issueReceipt(
-    state,
+  const nextReceipt = issueClaimReceiptV3(
+    state.workflow_id,
     receipt.stage_instance,
     claimId,
     nextHolder,
@@ -348,7 +348,7 @@ export function transferClaimV3(
       claim_id: claimId,
       ...nextHolder,
       provider_id: receipt.provider_id,
-      provider_receipt_digest: receiptDigest(nextReceipt),
+      provider_receipt_digest: claimReceiptDigestV3(nextReceipt),
       claimed_at: occurredAt,
       renewed_at: occurredAt,
       lease_expires_at: leaseExpiresAt,
