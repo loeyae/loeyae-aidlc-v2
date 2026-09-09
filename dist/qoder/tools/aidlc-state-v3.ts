@@ -177,6 +177,8 @@ export interface V2MigrationOptions {
   identity?: V2MigrationIdentity;
   occurred_at?: string;
   require_feature_flag?: boolean;
+  /** Immutable stage-instance dependencies resolved from the active stage graph. */
+  instance_requires?: Record<string, string[]>;
 }
 
 const VALID_SCOPES = new Set(["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor", "poc"]);
@@ -1013,6 +1015,7 @@ export function migrateWorkflowStateV2ToV3(stateValue: WorkflowState, options: V
   const current = state.current_stage_instance || state.current_stage;
   for (const instanceId of migrationInstanceIds(state)) {
     const parsed = parseStageInstance(instanceId);
+    const requires = options.instance_requires?.[instanceId] ?? [];
     addMigrationEvent(events, {
       event_type: "instance_registered",
       stage_instance: instanceId,
@@ -1022,7 +1025,7 @@ export function migrateWorkflowStateV2ToV3(stateValue: WorkflowState, options: V
         axis: parsed.axis,
         module_id: parsed.module_id,
         unit_id: parsed.unit_id,
-        requires: [],
+        requires: [...new Set(requires)],
         initial_status: "ready",
       },
     }, state.workflow_id);
@@ -1173,6 +1176,104 @@ export function migrateWorkflowStateFileV2ToV3(
     temporary = "";
     registerTeamEnrollment(root, migrated.workflow_id, migrated.event_head.event_hash, "active");
     return migrated;
+  } finally {
+    if (lockFd !== undefined) {
+      closeSync(lockFd);
+      if (existsSync(lockPath)) unlinkSync(lockPath);
+    }
+    if (temporary && existsSync(temporary)) unlinkSync(temporary);
+  }
+}
+
+
+function legacyStateForMigrationRepair(stateValue: WorkflowStateV3): WorkflowState {
+  const state = validateWorkflowStateV3(stateValue, true);
+  const migration = state.events[0];
+  if (migration.event_type !== "workflow_migrated") {
+    throw new Error("v3 migration repair requires a state created by workflow_migrated");
+  }
+  const occurredAt = migration.occurred_at;
+  for (const event of state.events.slice(1)) {
+    if (event.occurred_at !== occurredAt) {
+      throw new Error("v3 migration repair refuses a state with post-migration events");
+    }
+    const payload = event.payload || {};
+    if (event.event_type === "instance_completed" && payload.migration !== true) {
+      throw new Error("v3 migration repair refuses a non-migration completion event");
+    }
+    if (event.event_type === "instance_skipped" && payload.source !== "migration") {
+      throw new Error("v3 migration repair refuses a non-migration skip event");
+    }
+    if (event.event_type === "instance_claimed") {
+      const claim = payload.claim;
+      if (!claim || typeof claim !== "object" || (claim as Record<string, unknown>).compatibility_lock !== true) {
+        throw new Error("v3 migration repair refuses a non-compatibility claim");
+      }
+    }
+    if (!new Set([
+      "instance_registered",
+      "instance_completed",
+      "instance_skipped",
+      "instance_claimed",
+      "instance_started",
+      "approval_requested",
+    ]).has(event.event_type)) {
+      throw new Error(`v3 migration repair refuses post-migration event ${event.event_type}`);
+    }
+  }
+  return projectMigratedWorkflowV3ToV2(state);
+}
+
+export function repairableLegacyStateFromV3Migration(stateValue: WorkflowStateV3): WorkflowState {
+  return legacyStateForMigrationRepair(stateValue);
+}
+
+/**
+ * Rebuild only a freshly migrated v3 state whose event stream contains no
+ * post-migration business event. The replacement is still atomic and the
+ * corrected stream is signed from the original v2 source state.
+ */
+export function repairWorkflowStateFileV3Migration(
+  projectRoot: string,
+  options: V2MigrationOptions = {},
+): WorkflowStateV3 {
+  if (options.require_feature_flag !== false) assertCollaborationV3Enabled();
+  const root = resolve(projectRoot);
+  const path = statePath(root);
+  if (!existsSync(path)) throw new Error(`schema v3 state is missing: ${path}`);
+  const stat = lstatSync(path);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`state must be a regular non-symlink file: ${path}`);
+  const lockPath = `${path}.lock`;
+  let lockFd: number | undefined;
+  let temporary = "";
+  try {
+    lockFd = openSync(lockPath, "wx", 0o600);
+    const original = readFileSync(path);
+    const parsed = JSON.parse(original.toString("utf8")) as unknown;
+    const current = validateWorkflowStateV3(parsed, true);
+    const legacy = legacyStateForMigrationRepair(current);
+    const enrollment = readEnrollment(root);
+    if (!enrollment || enrollment.status !== "active") throw new Error("v3 migration repair requires an active project enrollment");
+    if (enrollment.recovery_id) throw new Error(`recovery transaction ${enrollment.recovery_id} is incomplete; rerun recover re-enroll`);
+    if (enrollment.workflow_id !== current.workflow_id) throw new Error("workflow_id does not match the enrolled project workflow");
+    const repaired = migrateWorkflowStateV2ToV3(legacy, options);
+    temporary = `${path}.v3-repair-${process.pid}-${Date.now()}-${randomUUID()}`;
+    const fd = openSync(temporary, "wx", 0o600);
+    try {
+      writeSync(fd, `${JSON.stringify(repaired, null, 2)}\n`, undefined, "utf8");
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    validateWorkflowStateV3(JSON.parse(readFileSync(temporary, "utf8")) as unknown, true);
+    if (process.env.AIDLC_V3_MIGRATION_FAILPOINT === "before-rename") {
+      throw new Error("state v3 migration repair failpoint before-rename");
+    }
+    if (!readFileSync(path).equals(original)) throw new Error("state changed concurrently during schema v3 migration repair");
+    renameSync(temporary, path);
+    temporary = "";
+    registerTeamEnrollment(root, repaired.workflow_id, repaired.event_head.event_hash, "active");
+    return repaired;
   } finally {
     if (lockFd !== undefined) {
       closeSync(lockFd);
