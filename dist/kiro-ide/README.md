@@ -11,4 +11,4 @@ loeyae-aidlc install --harness kiro-ide --project /absolute/path/to/project
 loeyae-aidlc install --harness kiro-cli --project /absolute/path/to/project
 ```
 
-该 Hook 在 Agent 停止前调用 `loeyae-aidlc orchestrate report --stage <current> --result completed`；所有门禁仍由确定性引擎执行。Hook 不签发审批 token、不携带 `--instruction-ack`、不生成/修改 Evidence，因此不能自动推进 `approval:block` 或 `instruction_only` stage。具体 Kiro 版本若不支持阻断 Stop，仍不能绕过引擎门禁；需要继续处理时必须修复失败并重新报告。
+schema v3 中，该 Hook 只验证签名 workflow 状态；因为 Stop 事件不携带 owning client 的 actor/device/client identity 与安全 claim receipt，它会 fail-closed 并提示 lease holder 执行定向 `report --instance <id> --claim-receipt-stdin`，不会读取 stored receipt 代替协作者完成实例。schema v2 兼容 workflow 仍走旧单游标门禁。Hook 不签发审批 token、不生成/修改 Evidence；具体 Kiro 版本若不支持阻断 Stop，仍不能绕过直接调用引擎时的门禁。

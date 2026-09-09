@@ -2084,11 +2084,11 @@ def test_x_cli_approval_inherits_terminal():
     t.engine("next", "--scope feature")
 
     state = t.state()
-    approval_instance = "application-design@module:test-module"
+    approval_instance = "application-design@module:project"
     challenge = f"{int(datetime.now(timezone.utc).timestamp() * 1000)}.cli-tty-test"
     state["current_stage"] = "application-design"
     state["current_stage_instance"] = approval_instance
-    state["current_module"] = "test-module"
+    state["current_module"] = "project"
     state.pop("current_unit", None)
     state["current_phase"] = "inception"
     state["approval_challenges"] = {approval_instance: challenge}
@@ -2097,6 +2097,47 @@ def test_x_cli_approval_inherits_terminal():
     Path(t.test_dir, "docs", "aidlc", "aidlc-state.json").write_text(json.dumps(state))
 
     command = ["node", os.path.join(REPO_ROOT, "bin", "cli.js"), "approve", "--stage", "application-design"]
+    request_result = subprocess.run(
+        [*command, "--request"], cwd=t.test_dir, env=t.environment(), capture_output=True, text=True
+    )
+    try:
+        request_payload = json.loads(request_result.stdout)
+    except json.JSONDecodeError:
+        request_payload = {}
+    t.ok(
+        request_result.returncode == 0
+        and request_payload.get("kind") == "aidlc.approval.request"
+        and request_payload.get("stage_instance") == approval_instance
+        and "approval_token" not in request_payload,
+        "PASSED: non-interactive request exposes bound context without issuing a token",
+    )
+
+    invalid_provider_response = {
+        "schema_version": 1,
+        "kind": "aidlc.approval.response",
+        "request_id": "0" * 64,
+        "provider_id": "test-host",
+        "human_event_id": "event-001",
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+        "approval_token": "f" * 64,
+    }
+    provider_report = subprocess.run(
+        [
+            "node", os.path.join(REPO_ROOT, "bin", "cli.js"), "orchestrate", "report",
+            "--stage", "application-design", "--result", "approved", "--approval-response-stdin",
+        ],
+        input=json.dumps(invalid_provider_response),
+        cwd=t.test_dir,
+        env=t.environment(),
+        capture_output=True,
+        text=True,
+    )
+    t.ok(
+        provider_report.returncode == 2
+        and "request_id does not match" in (provider_report.stdout + provider_report.stderr),
+        "BLOCKED: provider stdin response must match the active approval request",
+    )
+
     blocked = subprocess.run(command, cwd=t.test_dir, env=t.environment(), capture_output=True, text=True)
     t.ok(
         blocked.returncode == 2 and "interactive human terminal" in blocked.stderr,

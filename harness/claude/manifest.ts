@@ -29,6 +29,7 @@ const manifest: HarnessManifest = {
 
   harnessFiles: [
     { src: "CLAUDE.md", dst: "skills/loeyae-aidlc/SKILL.md" },
+    { src: "commands/aidlc-approve.md", dst: "commands/aidlc-approve.md" },
     { src: "plugin.json", dst: ".claude-plugin/plugin.json" },
     { src: "hooks/hooks.json", dst: "hooks/hooks.json" },
   ],

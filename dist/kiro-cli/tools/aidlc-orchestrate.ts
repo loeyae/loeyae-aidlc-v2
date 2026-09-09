@@ -24,6 +24,7 @@ import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSyn
 import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
 import { readEnrollment, verifyApprovalToken, verifyRecord } from "./aidlc-trust";
+import { buildApprovalProviderRequest, validateApprovalProviderResponse } from "./aidlc-approval-provider";
 import { readSourceRevision } from "./aidlc-revision";
 import {
   evidenceRelativePath,
@@ -63,7 +64,7 @@ const PROJECT_ROOT = realpathSync(process.cwd());
 // Types
 // ---------------------------------------------------------------------------
 
-interface StageNode {
+export interface StageNode {
   slug: string;
   number: string;
   name: string;
@@ -88,19 +89,19 @@ interface StageNode {
   file: string;
 }
 
-interface StageGraph {
+export interface StageGraph {
   version: string;
   stages: StageNode[];
   stage_count: number;
 }
 
-interface StageInstance extends ExecutionContext {
+export interface StageInstance extends ExecutionContext {
   stage: StageNode;
   axis: ExecutionAxis;
   instance_id: string;
 }
 
-interface Directive {
+export interface Directive {
   kind: "load-steering" | "run-stage" | "ask" | "print" | "error" | "done" | "parked";
   stage?: string;
   stage_file?: string;
@@ -119,7 +120,7 @@ interface Directive {
   [key: string]: unknown;
 }
 
-interface ConditionContext {
+export interface ConditionContext {
   has_legacy_code: boolean;
   has_ui_requirements: boolean;
   has_reverse_output: boolean;
@@ -172,7 +173,7 @@ type StageResult = (typeof VALID_RESULTS)[number];
 // Helpers
 // ---------------------------------------------------------------------------
 
-function loadGraph(): StageGraph {
+export function loadGraph(): StageGraph {
   if (!existsSync(GRAPH_PATH)) {
     throw new Error(`Stage graph not found at ${GRAPH_PATH}. Run 'aidlc-graph.ts compile' first.`);
   }
@@ -187,7 +188,7 @@ function saveState(state: WorkflowState): void {
   saveWorkflowState(PROJECT_ROOT, state);
 }
 
-function runtimeChoices(stage: StageNode, state: WorkflowState): string[] {
+export function runtimeChoices(stage: StageNode, state: WorkflowState): string[] {
   if (stage.slug === "workspace-detection" && !FULL_WORKFLOW_SCOPES.has(state.scope)) return [];
   return stage.choices || [];
 }
@@ -196,7 +197,7 @@ function runtimeChoices(stage: StageNode, state: WorkflowState): string[] {
  * Filter stages by scope and the immutable user selections captured in signed
  * workflow state. User-selected stages never enter the default path.
  */
-function getExecutableStages(
+export function getExecutableStages(
   graph: StageGraph,
   scope: string,
   selectedOptionalStages: string[] = [],
@@ -211,7 +212,7 @@ function getExecutableStages(
 const DEFAULT_MODULE: ModuleDescriptor = { module_id: "project", name: "Project", service_id: "not-applicable" };
 const DEFAULT_UNIT: UnitDescriptor = { unit_id: "default", name: "Default", service_id: "not-applicable" };
 
-function selectedOptionalStages(state: WorkflowState): string[] {
+export function selectedOptionalStages(state: WorkflowState): string[] {
   if (state.selected_optional_stages !== undefined) return state.selected_optional_stages;
   const legacyPrdWasResolved = state.completed_stages.includes("prd-generation")
     || state.skipped_stages.includes("prd-generation");
@@ -239,7 +240,7 @@ function recordedStageChoice(state: WorkflowState, stageSlug: string, moduleId?:
   )?.user_input;
 }
 
-function architectureChoice(state: WorkflowState): string | undefined {
+export function architectureChoice(state: WorkflowState): string | undefined {
   const recorded = recordedStageChoice(state, "workspace-detection");
   return recorded && ARCHITECTURE_CHOICES.has(recorded) ? recorded : undefined;
 }
@@ -325,7 +326,7 @@ function runtimeStage(instance: StageInstance, state: WorkflowState): StageNode 
   };
 }
 
-function runtimeInstance(instance: StageInstance, state: WorkflowState): StageInstance {
+export function runtimeInstance(instance: StageInstance, state: WorkflowState): StageInstance {
   return { ...instance, stage: runtimeStage(instance, state) };
 }
 
@@ -341,7 +342,7 @@ function isInstanceResolved(state: WorkflowState, instanceId: string): boolean {
   return completedInstanceIds(state).includes(instanceId) || skippedInstanceIds(state).includes(instanceId);
 }
 
-function makeInstance(stage: StageNode, axis: ExecutionAxis, context: ExecutionContext = {}): StageInstance {
+export function makeInstance(stage: StageNode, axis: ExecutionAxis, context: ExecutionContext = {}): StageInstance {
   return { stage, axis, ...context, instance_id: stageInstanceId(stage.slug, axis, context) };
 }
 
@@ -369,7 +370,7 @@ function routingUnits(state: WorkflowState, modules: ModuleDescriptor[]): Array<
  * Expand the static graph into deterministic project/module/unit instances.
  * Consecutive module stages run module-major; consecutive unit stages run unit-major.
  */
-function expandStageInstances(graph: StageGraph, state: WorkflowState): StageInstance[] {
+export function expandStageInstances(graph: StageGraph, state: WorkflowState): StageInstance[] {
   const stages = getExecutableStages(graph, state.scope, selectedOptionalStages(state));
   if (state.routing_model !== "module-unit-v1") return stages.map((stage) => makeInstance(stage, "project"));
 
@@ -397,7 +398,7 @@ function expandStageInstances(graph: StageGraph, state: WorkflowState): StageIns
   return instances;
 }
 
-function dependencyInstances(instance: StageInstance, dependency: string, instances: StageInstance[]): StageInstance[] {
+export function dependencyInstances(instance: StageInstance, dependency: string, instances: StageInstance[]): StageInstance[] {
   const candidates = instances.filter((candidate) => candidate.stage.slug === dependency);
   if (instance.axis === "project") return candidates;
   if (instance.axis === "module") {
@@ -495,7 +496,7 @@ function allowsProjectAggregate(instance: StageInstance | undefined, allowProjec
   return Boolean(allowProjectAggregate && instance && instance.axis === "project" && instance.stage.axis === "project");
 }
 
-function instanceArtifactPattern(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string {
+export function instanceArtifactPattern(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string {
   if (!instance) return pattern;
   const legacy = isLegacyArtifactInstance(instance);
   const resolved = legacy ? legacyArtifactPattern(pattern) : substituteArtifactPattern(pattern, instance);
@@ -541,7 +542,7 @@ function resolveProducePaths(pattern: string, instance?: StageInstance, allowPro
  */
 const MIN_ARTIFACT_BYTES = 16;
 
-function checkProduces(instance: StageInstance): string[] {
+export function checkProduces(instance: StageInstance): string[] {
   const stage = instance.stage;
   if (!stage.produces || stage.produces.length === 0) return [];
   const missing: string[] = [];
@@ -563,7 +564,7 @@ function checkProduces(instance: StageInstance): string[] {
   return missing;
 }
 
-function checkConsumes(instance: StageInstance, state: WorkflowState, graph: StageGraph, instances: StageInstance[]): string[] {
+export function checkConsumes(instance: StageInstance, state: WorkflowState, graph: StageGraph, instances: StageInstance[]): string[] {
   const stage = instance.stage;
   const failures: string[] = [];
   for (const pattern of stage.consumes || []) {
@@ -601,7 +602,7 @@ function checkConsumes(instance: StageInstance, state: WorkflowState, graph: Sta
 // Sensors — 准出 quality gates (machine-verifiable checks)
 // ---------------------------------------------------------------------------
 
-interface SensorResult {
+export interface SensorResult {
   sensor: string;
   passed: boolean;
   message: string;
@@ -802,7 +803,7 @@ function isEvidenceArtifact(path: string): boolean {
  *
  * Returns list of failed sensor results.
  */
-async function checkSensors(instance: StageInstance, state: WorkflowState): Promise<SensorResult[]> {
+export async function checkSensors(instance: StageInstance, state: WorkflowState): Promise<SensorResult[]> {
   const stage = instance.stage;
   if (!stage.sensors || stage.sensors.length === 0) return [];
 
@@ -1580,7 +1581,7 @@ function rootBuildMetadata(): string {
     .join("\n");
 }
 
-function buildConditionContext(state: WorkflowState, instance?: StageInstance): ConditionContext {
+export function buildConditionContext(state: WorkflowState, instance?: StageInstance): ConditionContext {
   // has_legacy_code: src/ has >10 files pre-existing
   let has_legacy_code = false;
   const srcDir = join(PROJECT_ROOT, "src");
@@ -1808,7 +1809,7 @@ function countFilesRecursive(dir: string): number {
  *   - 'multi_module'
  *   - '' (empty string — always true)
  */
-function evaluateCondition(condition: string, context: ConditionContext): boolean | undefined {
+export function evaluateCondition(condition: string, context: ConditionContext): boolean | undefined {
   if (!condition || condition.trim() === "") return true;
 
   const trimmed = condition.trim();
@@ -1911,14 +1912,14 @@ function clearActiveContext(state: WorkflowState): void {
   delete state.current_unit;
 }
 
-function artifactRoot(instance: StageInstance): string {
+export function artifactRoot(instance: StageInstance): string {
   if (instance.axis === "module" && instance.module_id) return moduleInceptionRoot(instance.module_id);
   if (instance.axis === "unit" && instance.module_id && instance.unit_id) return unitConstructionRoot(instance.module_id, instance.unit_id);
   const phaseDirectory = instance.stage.phase === "operation" ? "operations" : instance.stage.phase;
   return `docs/aidlc/${phaseDirectory}`;
 }
 
-function evidenceRoot(instance: StageInstance): string {
+export function evidenceRoot(instance: StageInstance): string {
   const parts = [".aidlc", "evidence", instance.stage.slug];
   if (instance.axis !== "project" && instance.module_id) parts.push(instance.module_id);
   if (instance.axis === "unit" && instance.unit_id) parts.push(instance.unit_id);
@@ -2133,7 +2134,8 @@ async function handleReport(args: string[]): Promise<Directive> {
   const stageSlug = flags.stage;
   const result = flags.result as StageResult;
   const userInput = flags["user-input"];
-  const approvalTokenValue = flags["approval-token"] || process.env.AIDLC_APPROVAL_TOKEN;
+  let approvalTokenValue = flags["approval-token"] || process.env.AIDLC_APPROVAL_TOKEN;
+  const approvalResponseFromStdin = "approval-response-stdin" in flags;
 
   // Validate required fields
   if (!stageSlug) {
@@ -2144,6 +2146,12 @@ async function handleReport(args: string[]): Promise<Directive> {
   }
   if (!VALID_RESULTS.includes(result)) {
     return { kind: "error", message: `Invalid result "${result}". Valid: ${VALID_RESULTS.join(", ")}` };
+  }
+  if (approvalResponseFromStdin && flags["approval-response-stdin"] !== "true") {
+    return { kind: "error", message: "--approval-response-stdin is a boolean flag and does not accept a value" };
+  }
+  if (approvalResponseFromStdin && result !== "approved") {
+    return { kind: "error", message: "--approval-response-stdin is only valid with --result approved" };
   }
 
   // Load state
@@ -2202,7 +2210,17 @@ async function handleReport(args: string[]): Promise<Directive> {
       saveState(state);
       return { kind: "error", message: `Approval challenge for stage instance "${currentInstance.instance_id}" expired. Run next to obtain a new challenge.` };
     }
-    if (!approvalTokenValue) return { kind: "error", message: `Stage instance "${currentInstance.instance_id}" requires --approval-token from a trusted human approval channel.` };
+    if (approvalResponseFromStdin) {
+      if (flags["approval-token"] || process.env.AIDLC_APPROVAL_TOKEN) {
+        return { kind: "error", message: "Use exactly one approval channel: provider response stdin, --approval-token, or AIDLC_APPROVAL_TOKEN." };
+      }
+      const request = buildApprovalProviderRequest(state, stageSlug);
+      const providerResponse = validateApprovalProviderResponse(readFileSync(0, "utf8"), request);
+      approvalTokenValue = providerResponse.approval_token;
+    }
+    if (!approvalTokenValue) {
+      return { kind: "error", message: `Stage instance "${currentInstance.instance_id}" requires a trusted provider response or --approval-token from a trusted human approval channel.` };
+    }
     if (!verifyApprovalToken(state.workflow_id, approvalKey, challenge, approvalTokenValue)) {
       return { kind: "error", message: `Invalid or stale approval token for stage instance "${currentInstance.instance_id}".` };
     }
@@ -2419,10 +2437,12 @@ async function main() {
   if (directive.kind === "error") process.exitCode = 2;
 }
 
-main().catch((error) => {
-  console.error(JSON.stringify({
-    kind: "error",
-    message: error instanceof Error ? error.message : String(error),
-  }, null, 2));
-  process.exit(2);
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(JSON.stringify({
+      kind: "error",
+      message: error instanceof Error ? error.message : String(error),
+    }, null, 2));
+    process.exit(2);
+  });
+}

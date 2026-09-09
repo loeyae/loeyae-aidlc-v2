@@ -138,6 +138,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function workflowSchemaVersion(projectRoot = process.cwd()): 2 | 3 | undefined {
+  const filename = resolve(projectRoot, "docs/aidlc/aidlc-state.json");
+  if (!existsSync(filename)) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(filename, "utf8"));
+  } catch {
+    throw new Error(`workflow state is not valid JSON: ${filename}`);
+  }
+  if (!isRecord(value) || (value.schema_version !== 2 && value.schema_version !== 3)) {
+    throw new Error(`workflow state has unsupported schema_version: ${filename}`);
+  }
+  return value.schema_version;
+}
+
+function orchestrationScript(): string {
+  const schema = workflowSchemaVersion();
+  if (schema === 2 || (schema === undefined && process.env.AIDLC_COLLABORATION_V3 === "0")) {
+    return "core/tools/aidlc-orchestrate.ts";
+  }
+  return "core/tools/aidlc-orchestrate-v3.ts";
+}
+
 function run(script: string, args: string[], input?: string): never | void {
   const tsx = require.resolve("tsx/cli");
   const result = spawnSync(process.execPath, [tsx, resolve(ROOT, script), ...args], {
@@ -1288,9 +1311,10 @@ Usage:
   loeyae-aidlc <command> [options]
 
 Commands:
-  orchestrate <next|report|park> [flags]  Run the workflow engine
+  orchestrate <next|report|park> [flags]  Run the schema-aware workflow engine
+  state migrate-v3 [flags]               Dry-run or atomically apply controlled v2→v3 migration
   recover <inspect|re-enroll> [flags]     Inspect or repair a proven parked trust chain
-  approve --stage <slug>                  Issue a short-lived token in an interactive human terminal
+  approve --stage <slug> --instance <id> [--request]  Review via trusted host or human TTY
   evidence run [flags]                    Produce controlled build/test evidence
   check --sensor <name>                   Run a deterministic semantic checker
   diagram-provider run [options]          Run Chrome DevTools diagram validation
@@ -1313,7 +1337,9 @@ Install/uninstall options:
   --list            Show available platforms (install only)
   --migrate-legacy  Preserve and replace recognized pre-manifest installs (install only)
 
-Recovery safety:
+Recovery and migration safety:
+  state migrate-v3 is dry-run unless --apply is present and requires explicit
+  --actor-id, --device-id, and --client-id. It never accepts secret arguments.
   recover re-enroll is dry-run unless --apply is present. Apply requires a parked state,
   old-key proof from AIDLC_RECOVERY_SECRET or AIDLC_RECOVERY_KEY_FILE, the original signed
   enrollment from AIDLC_RECOVERY_ENROLLMENT_FILE, exact workflow/state/key/enrollment/root
@@ -1329,12 +1355,21 @@ Examples:
   loeyae-aidlc install --all
   loeyae-aidlc install --all --migrate-legacy
   loeyae-aidlc uninstall --all
-  loeyae-aidlc orchestrate next --scope feature
-  loeyae-aidlc orchestrate next --scope feature --with-prd
+  loeyae-aidlc orchestrate next --scope feature \
+    --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+  loeyae-aidlc orchestrate next --scope feature --with-prd \
+    --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+  loeyae-aidlc state migrate-v3 --actor-id actor:alice --device-id device:laptop --client-id client:session-1
   loeyae-aidlc recover inspect
   loeyae-aidlc recover re-enroll
   loeyae-aidlc approve --stage application-design
-  loeyae-aidlc orchestrate report --stage application-design --result approved --approval-token <token>
+  loeyae-aidlc approve --stage application-design --request
+  trusted-host-envelope | loeyae-aidlc orchestrate report --stage application-design \
+    --instance application-design@module:module-a --result approved \
+    --claim-receipt-stdin --approval-response-stdin
+  claim-receipt-json | loeyae-aidlc orchestrate report --stage application-design \
+    --instance application-design@module:module-a --result approved \
+    --claim-receipt-stdin --approval-token <token>
   loeyae-aidlc export md /absolute/path/document.md --to docx --toc
   loeyae-aidlc export md /absolute/path/document.md --to pdf
   loeyae-aidlc export svg /absolute/path/diagram.svg --to png --scale 2
@@ -1347,7 +1382,15 @@ Examples:
 function main(): void {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
-    case "orchestrate": run("core/tools/aidlc-orchestrate.ts", rest); break;
+    case "orchestrate": {
+      const stdinRequired = rest.includes("--approval-response-stdin") || rest.includes("--claim-receipt-stdin");
+      run(orchestrationScript(), rest, stdinRequired ? readFileSync(0, "utf8") : undefined);
+      break;
+    }
+    case "state":
+      if (rest[0] !== "migrate-v3") throw new Error("usage: loeyae-aidlc state migrate-v3 [--apply] --actor-id <id> --device-id <id> --client-id <id>");
+      run("core/tools/aidlc-state-v3-migrate.ts", rest.slice(1));
+      break;
     case "recover": runInteractive("core/tools/aidlc-recover.ts", rest); break;
     case "approve": runInteractive("core/tools/aidlc-approve.ts", rest); break;
     case "evidence": run("core/tools/aidlc-evidence.ts", rest); break;

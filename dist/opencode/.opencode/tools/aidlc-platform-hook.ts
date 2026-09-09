@@ -3,6 +3,7 @@ import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
 import { loadWorkflowState, statePath } from "./aidlc-state";
+import { loadWorkflowStateV3 } from "./aidlc-state-v3-store";
 import { readEnrollment } from "./aidlc-trust";
 
 interface HookInput {
@@ -111,6 +112,41 @@ if (!existsSync(path)) {
   if (enrollment) fail(`AI-DLC enrolled project is missing its signed state: ${path}`);
   allow();
 }
+
+let schemaVersion: unknown;
+try {
+  schemaVersion = (JSON.parse(readFileSync(path, "utf8")) as { schema_version?: unknown }).schema_version;
+} catch (error) {
+  fail(`AI-DLC gate state is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+}
+if (schemaVersion === 3) {
+  let collaborative;
+  try {
+    collaborative = loadWorkflowStateV3(root);
+  } catch (error) {
+    fail(`AI-DLC gate state v3 is invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!collaborative) fail(`AI-DLC state v3 disappeared while evaluating the lifecycle gate: ${path}`);
+  if (enrollment && enrollment.workflow_id !== collaborative.workflow_id) fail("AI-DLC state v3 workflow_id does not match project enrollment");
+  if (collaborative.status === "done" || collaborative.status === "parked") allow();
+  if (collaborative.status !== "running") fail(`AI-DLC workflow has unsupported status: ${collaborative.status}`);
+  const active = Object.values(collaborative.instances)
+    .filter((instance) => ["claimed", "in_progress", "submitted", "rejected"].includes(instance.status))
+    .map((instance) => instance.stage_instance)
+    .sort();
+  const ready = Object.values(collaborative.instances)
+    .filter((instance) => instance.status === "ready")
+    .map((instance) => instance.stage_instance)
+    .sort();
+  const focus = active[0] || ready[0];
+  const action = active.length > 0
+    ? `The owning client must run receipt-bound report for: ${active.join(", ")}.`
+    : ready.length > 0
+      ? `Claim a ready instance with orchestrate next; ready: ${ready.join(", ")}.`
+      : "Run orchestrate next --status to inspect blocked or remotely claimed instances.";
+  fail(`AI-DLC collaborative workflow is still running${focus ? ` (focus: ${focus})` : ""}. ${action} The lifecycle Hook cannot invent actor/device/client identity or expose a stored claim receipt.`);
+}
+if (schemaVersion !== 2) fail(`AI-DLC gate state uses unsupported schema_version: ${String(schemaVersion)}`);
 
 let state;
 try {

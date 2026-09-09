@@ -11,15 +11,16 @@
 | 列出支持平台 | `loeyae-aidlc install --list` |
 | 安装 Kiro Crew | `loeyae-aidlc install` |
 | 自动安装已检测平台 | `loeyae-aidlc install --all` |
-| 启动 AI-DLC 工作流 | `loeyae-aidlc orchestrate next --scope feature` |
-| 启动并选择生成 PRD | `loeyae-aidlc orchestrate next --scope feature --with-prd` |
-| 获取当前阶段 | `loeyae-aidlc orchestrate next` |
+| 启动 AI-DLC 工作流 | `loeyae-aidlc orchestrate next --scope feature --actor-id <actor> --device-id <device> --client-id <client>` |
+| 启动并选择生成 PRD | `loeyae-aidlc orchestrate next --scope feature --with-prd --actor-id <actor> --device-id <device> --client-id <client>` |
+| 获取/认领 ready 实例 | `loeyae-aidlc orchestrate next --actor-id <actor> --device-id <device> --client-id <client>` |
 | 查看工作流状态 | `loeyae-aidlc orchestrate next --status` |
 | 只读检查 state/enrollment 信任链 | `loeyae-aidlc recover inspect` |
 | 预演受控 re-enroll | `loeyae-aidlc recover re-enroll` |
-| 报告阶段完成 | `loeyae-aidlc orchestrate report --stage <slug> --result completed` |
-| 暂停工作流 | `loeyae-aidlc orchestrate park` |
-| 恢复工作流 | `loeyae-aidlc orchestrate next --resume` |
+| 报告阶段完成 | `... | loeyae-aidlc orchestrate report --stage <slug> --instance <id> --result completed --claim-receipt-stdin` |
+| 冻结整个工作流 | `loeyae-aidlc orchestrate park` |
+| 恢复冻结工作流 | `loeyae-aidlc orchestrate next --resume` |
+| 预演 schema v2→v3 迁移 | `loeyae-aidlc state migrate-v3 --actor-id <actor> --device-id <device> --client-id <client>` |
 | 生成构建测试证据 | `loeyae-aidlc evidence run --stage build-and-test` |
 | 运行内置语义检查 | `loeyae-aidlc check --sensor <name>` |
 | 导出 Markdown 为 Word | `loeyae-aidlc export md <file.md> --to docx` |
@@ -44,6 +45,7 @@
 以下命令依赖当前工作目录代表业务项目根目录：
 
 - `orchestrate`
+- `state`
 - `recover`
 - `approve`
 - `evidence`
@@ -55,7 +57,8 @@
 
 ```bash
 cd /absolute/path/to/business-project
-loeyae-aidlc orchestrate next --scope feature
+loeyae-aidlc orchestrate next --scope feature \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
 ```
 
 `export` 根据输入文件位置解析 Markdown 内的相对图片路径；仍建议传入绝对输入路径，以避免从错误目录导出同名文件。
@@ -210,8 +213,13 @@ loeyae-aidlc uninstall --all
 
 ```text
 loeyae-aidlc orchestrate next [--scope <scope>] [--with-prd] [--status] [--resume]
-loeyae-aidlc orchestrate report --stage <slug> --result <result> [options]
-loeyae-aidlc orchestrate park
+                              [--instance <stage-instance>]
+                              [--actor-id <id> --device-id <id> --client-id <id>]
+                              [--coordination-provider local|git]
+                              [--coordination-remote <url-or-path>]
+loeyae-aidlc orchestrate report --stage <slug> --instance <stage-instance>
+                                --result <result> --claim-receipt-stdin [options]
+loeyae-aidlc orchestrate park [--reason <text>]
 ```
 
 `orchestrate` 输出 JSON directive。常见 `kind` 包括：
@@ -222,17 +230,18 @@ loeyae-aidlc orchestrate park
 | `ask` | 需要用户输入，例如首次未指定 scope |
 | `print` | 状态或操作成功信息 |
 | `error` | 门禁失败或参数错误；修复后重试，不能改 state 绕过 |
-| `parked` | 工作流已暂停 |
+| `parked` | 整个工作流被冻结；不是普通交接或单实例 release |
 | `done` | 工作流已完成 |
 
 运行时 choice Stage 还会返回 `choices: string[]` 和 `choice_required: true`。这不是初始化参数；必须向用户展示这些值，并在完成当前 Stage 时用 `--user-input` 精确回传其中一个。
 
 ### 5.2 Scope
 
-首次创建工作流时使用 `--scope`：
+首次创建工作流时使用 `--scope`，并提供本 client 的稳定 identity（也可由对应环境变量注入）：
 
 ```bash
-loeyae-aidlc orchestrate next --scope feature
+loeyae-aidlc orchestrate next --scope feature \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
 ```
 
 合法 scope：
@@ -252,7 +261,8 @@ loeyae-aidlc orchestrate next --scope feature
 阶段数以当前图谱为准，可随版本调整。表中为未选择 PRD 的默认数量；在 `feature`、`enterprise`、`mvp`、`classic` 新建工作流时添加 `--with-prd`，会额外选择 `prd-generation`：
 
 ```bash
-loeyae-aidlc orchestrate next --scope feature --with-prd
+loeyae-aidlc orchestrate next --scope feature --with-prd \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
 ```
 
 PRD 默认不进入工作流，也不阻断 Inception。选择结果写入签名状态的 `selected_optional_stages`，只能在初始化时确定；活动工作流不能中途添加或移除。未启动工作流时，用户也可以直接调用 `aidlc-prd-synthesis` 独立生成 PRD。
@@ -268,8 +278,10 @@ loeyae-aidlc scope-table
 首次 `next --scope` 初始化状态后，再运行一次 `next` 获取第一条 `run-stage` directive：
 
 ```bash
-loeyae-aidlc orchestrate next --scope feature
-loeyae-aidlc orchestrate next
+loeyae-aidlc orchestrate next --scope feature \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+loeyae-aidlc orchestrate next \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
 ```
 
 如果省略 scope 且没有现有工作流，引擎返回 `ask` directive，不会自行选择。
@@ -286,14 +298,20 @@ loeyae-aidlc orchestrate next
 
 工作流机器状态位于业务项目的 `docs/aidlc/aidlc-state.json`。该文件具有签名、workflow ID 和 revision 保护，不应手工编辑。
 
+新 workflow 默认 schema v3。`next --status` 返回稳定排序的 `ready_instances`、active 和 resolved 聚合，但不 claim；实际 `next` 要求 actor/device/client identity，可由参数或 `AIDLC_ACTOR_ID`、`AIDLC_DEVICE_ID`、`AIDLC_CLIENT_ID` 注入。Local Provider 只协调同一工作树；Git Provider 通过 `--coordination-provider git --coordination-remote <remote>` 在专用 coordination ref 上做远端 CAS。已有 schema v2 state 自动走单游标兼容引擎，不会隐式迁移。
+
 ### 5.4 报告阶段结果
 
 ```text
-loeyae-aidlc orchestrate report --stage <slug> --result <result>
+loeyae-aidlc orchestrate report --stage <slug> --instance <stage-instance>
+                                --result <result>
+                                --claim-receipt-stdin
                                 [--module <module-id>]
                                 [--unit <unit-id>]
                                 [--instruction-ack <slug>]
                                 [--approval-token <token>]
+                                [--approval-response-stdin]
+                                [--coordination-remote <url-or-path>]
                                 [--user-input <text>]
 ```
 
@@ -306,21 +324,25 @@ loeyae-aidlc orchestrate report --stage <slug> --result <result>
 | `rejected` | 记录审阅拒绝，当前阶段保持活动状态 |
 | `revised` | 记录已修订，当前阶段保持活动状态，之后仍需报告 `completed` 或 `approved` |
 
-普通阶段：
+schema v3 的 `claim_receipt` 由 `next` directive 返回，属于提交能力：不得放进 argv、handoff 或普通聊天。以下示例中的 `claim-receipt.json` 代表当前 client 通过安全通道持有的原始 JSON：
 
 ```bash
-loeyae-aidlc orchestrate report \
+cat claim-receipt.json | loeyae-aidlc orchestrate report \
   --stage requirements-analysis \
-  --result completed
+  --instance requirements-analysis@module:module-a \
+  --result completed \
+  --claim-receipt-stdin
 ```
 
 instruction-only 阶段必须确认已实际执行正文。以下是不要求架构 choice 的快速 scope `workspace-detection` 示例；完整 scope 使用下方带 `--user-input` 的命令：
 
 ```bash
-loeyae-aidlc orchestrate report \
+cat claim-receipt.json | loeyae-aidlc orchestrate report \
   --stage workspace-detection \
+  --instance workspace-detection \
   --result completed \
-  --instruction-ack workspace-detection
+  --instruction-ack workspace-detection \
+  --claim-receipt-stdin
 ```
 
 完整 scope 的第一个 Stage `workspace-detection` 要求签名架构 choice：
@@ -331,11 +353,13 @@ loeyae-aidlc orchestrate report \
 | `multi-module` | 执行产品级 Inception、模块划分和产品契约 |
 
 ```bash
-loeyae-aidlc orchestrate report \
+cat claim-receipt.json | loeyae-aidlc orchestrate report \
   --stage workspace-detection \
+  --instance workspace-detection \
   --result completed \
   --instruction-ack workspace-detection \
-  --user-input single-module
+  --user-input single-module \
+  --claim-receipt-stdin
 ```
 
 `express`、`workshop`、`bugfix`、`refactor`、`poc` 不包含产品级路由，因此该 Stage 返回空 `choices`，只需 instruction ack，不强迫无关选择。旧签名工作流缺少架构 choice 时，才从模块清单和已经执行的产品分支保守推断。
@@ -350,11 +374,13 @@ I9 `ui-mock` 同时是 instruction-only runtime choice Stage。允许值及路�
 | `skip` | 不生成 UI 产物，跳过页面规划及两个生成分支 |
 
 ```bash
-loeyae-aidlc orchestrate report \
+cat claim-receipt.json | loeyae-aidlc orchestrate report \
   --stage ui-mock \
+  --instance ui-mock@module:module-a \
   --result completed \
   --instruction-ack ui-mock \
-  --user-input skip
+  --user-input skip \
+  --claim-receipt-stdin
 ```
 
 缺少 `--user-input` 或传入 directive `choices` 之外的值会被拒绝。选择写入受 HMAC、workflow ID、revision/CAS 保护的签名 history；不得用 `handoff.md` 或手工 state 修改切换分支。
@@ -364,32 +390,50 @@ loeyae-aidlc orchestrate report \
 记录用户输入或审阅原因时，对含空格文本使用引号：
 
 ```bash
-loeyae-aidlc orchestrate report \
+cat claim-receipt.json | loeyae-aidlc orchestrate report \
   --stage application-design \
+  --instance application-design@module:module-a \
   --result rejected \
-  --user-input "需要补充回滚边界"
+  --user-input "需要补充回滚边界" \
+  --claim-receipt-stdin
 
-# 完成修改后记录已修订，再按阶段类型完成或审批
-loeyae-aidlc orchestrate report --stage application-design --result revised
+# 修订后以同一有效 lease 报 revised；实例随后回到 ready，必须重新 claim
+cat claim-receipt.json | loeyae-aidlc orchestrate report \
+  --stage application-design \
+  --instance application-design@module:module-a \
+  --result revised \
+  --claim-receipt-stdin
 ```
 
-`--stage` 必须等于签名状态中的当前逻辑 Stage，且引擎始终以 `current_stage_instance` 校验真实上下文。`--module` / `--unit` 可选；提供时必须与当前实例完全一致，适合 CI 防止把报告提交到同 slug 的其他模块/单元。公开结果不支持手工 `skipped`；只有图谱 condition 为 false 时，引擎才会自动记录内部 condition skip。
+`--stage` 与 `--instance` 必须共同匹配签名 instance map；同一 slug 可以有多个 module/unit 实例，不存在 workflow 级全局游标授权。`--module` / `--unit` 可选；提供时仍须与目标实例完全一致。receipt 必须匹配 workflow、instance、actor/device/client、Provider、generation 和有效期；伪造、过期、旧 generation 或已消费 receipt 都会被拒绝。公开结果不支持手工 `skipped`；只有图谱 condition 为 false 时，引擎才会自动记录内部 condition skip。
 
 `workflow-plan.md` 必须为 `application-design`、`units-generation`、`functional-design` 和 `operations` 写入 `execute / skip` 与 evidence。引擎优先使用这些机器决策；旧工作流缺行时才按项目证据保守推断。跳过 I14 时使用确定性的 `default` 单元。I14 执行时，新签名工作流的 `unit-manifest.json` 必须为每个单元提供 `conditional_stages`（允许空数组），只让当前单元适用的功能设计、NFR、基础设施、共享契约、子代理、框架合规和 UI Bridge 条件 Stage 执行；旧清单缺字段时保守回退模块级条件。Operations condition=false 时不出现审批；`operations-templates` 仅在明确要求保留可复用模板时执行。
 
 `run-stage` directive 会返回 `stage_instance`、`axis`、`module_id`、`unit_id`、`artifact_root`、已替换占位符的 `consumes`/`produces` 及 `evidence_root`。自动化和 Agent 应直接使用这些字段，不要从 Stage 正文中的抽象路径自行猜测上下文。
 
-### 5.5 暂停和恢复
+### 5.5 连续工作、主动冻结和恢复
+
+成功的 `next`、`report`、条件跳过和审批状态变化都会在返回前保存签名 checkpoint。running workflow 在新会话中可直接查询并继续，不需要为了交接先执行 park：
 
 ```bash
-# 保存当前状态并暂停
-loeyae-aidlc orchestrate park
+loeyae-aidlc orchestrate next --status
+loeyae-aidlc orchestrate next \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+```
 
-# 在之后的会话恢复
+`park` 在 schema v3 中冻结整个 workflow，影响所有协作者；它不释放单个 execution lease，也不是临时换会话的手段。单实例交接应通过 Provider 的 release、transfer 或 lease expiry。
+
+```bash
+loeyae-aidlc orchestrate park
+```
+
+已 parked 的工作流在没有 `--resume` 时只返回 `parked` directive。用户明确继续后恢复：
+
+```bash
 loeyae-aidlc orchestrate next --resume
 ```
 
-已 parked 的工作流在没有 `--resume` 时只返回 `parked` directive。
+`parked` 仍是当前跨 trust-domain `recover re-enroll` 的安全前提；“日常交接不要求 park”不能用于绕过 recovery 证明。schema v3 的日常接手从 ready/claimed instance 与 lease 恢复；schema v2 仅保留单游标兼容路径。自然语言“继续上次工作”“接手当前项目”“在这台设备继续”由 `aidlc-continuity` 处理；`aidlc-handoff` 是旧交接关键词的兼容别名。
 
 ### 5.6 内部 `continue`
 
@@ -399,7 +443,23 @@ loeyae-aidlc orchestrate continue <token>
 
 `continue` 是兼容旧 steering chain 的内部传输命令，只确认 token 并提示 Agent 直接加载 stage 文件。普通用户和自动化脚本不应依赖它推进工作流。
 
-### 5.7 受控信任链恢复：`recover`
+### 5.7 schema v2→v3 受控迁移
+
+已有 schema v2 workflow 不会自动升级。迁移要求显式绑定 compatibility holder 的 actor/device/client：
+
+```bash
+# 默认 dry-run，只输出 source/target schema、revision、active instance 和 event count
+loeyae-aidlc state migrate-v3 \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+
+# 审阅计划后才原子写入
+loeyae-aidlc state migrate-v3 --apply \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+```
+
+命令不接受 secret argv。迁移保持 workflow ID、enrollment、history、choice、completed/skipped 与 approval challenge；active v2 instance 会成为绑定该 identity 的 compatibility lock。锁内验证或原子 rename 失败时原 state 字节保持不变。
+
+### 5.8 受控信任链恢复：`recover`
 
 当签名 state 使用旧 trust key，而当前主机 enrollment 使用另一 key，或二者 `workflow_id` 不一致时，普通 orchestrator 会按设计 fail-closed。禁止手工修改 state、删除 enrollment、复制签名字段或直接调用内部签名函数。`recover` 只提供以下两个受限入口：
 
@@ -473,35 +533,55 @@ loeyae-aidlc orchestrate next --status
 只有 condition 判定需要执行的 `application-design` 和 `operations` 实例是阻断审批阶段；condition=false 的实例会先写入 `condition_skipped`，不会创建 challenge。
 
 ```text
-loeyae-aidlc approve --stage <slug>
+loeyae-aidlc approve --stage <slug> --instance <stage-instance> [--request]
 ```
 
-审批必须在业务项目根目录的交互式人类终端中执行：
+schema v3 必须明确 `--instance`。`--request` 是只读、可非交互调用的宿主协议入口。它输出绑定当前 workflow、`stage_instance`、challenge、TTL、artifact root 和 evidence root 的 `aidlc.approval.request` JSON，但不会签发 token。schema v3 同时需要 claim receipt 和 Provider response 时，stdin 使用严格 envelope：`{"claim_receipt": {...}, "approval_response": {...}}`。受信宿主负责在 Agent 上下文之外组合 envelope，再执行：
+
+```bash
+trusted-host-envelope \
+  | loeyae-aidlc orchestrate report \
+      --stage application-design \
+      --instance application-design@module:module-a \
+      --result approved \
+      --claim-receipt-stdin \
+      --approval-response-stdin
+```
+
+上例中的 `trusted-host-envelope` 只是宿主能力名称示意，不是本包提供的非交互 token generator。响应必须包含匹配的 `request_id`、Provider ID、人类事件 ID、审批时间和合法 challenge-bound token；错请求、过期、伪造、未知字段或与 `--approval-token`/`AIDLC_APPROVAL_TOKEN` 混用都会被拒绝。普通 Agent 或聊天消息不能构造该响应。
+
+没有受信宿主 Provider 时，审批必须在业务项目根目录的交互式人类终端中执行：
 
 ```bash
 loeyae-aidlc orchestrate next
-loeyae-aidlc approve --stage application-design
+loeyae-aidlc approve --stage application-design --instance application-design@module:module-a
 ```
 
 命令会显示一条必须精确输入的确认短语。通过后输出 JSON，其中包含 `approval_token` 和剩余有效秒数。把 token 用于当前阶段：
 
 ```bash
-loeyae-aidlc orchestrate report \
+cat claim-receipt.json | loeyae-aidlc orchestrate report \
   --stage application-design \
+  --instance application-design@module:module-a \
   --result approved \
-  --approval-token <token>
+  --approval-token <token> \
+  --claim-receipt-stdin
 ```
 
 也可以由受信宿主通过一次性环境变量传递：
 
 ```bash
-AIDLC_APPROVAL_TOKEN=<token> \
-  loeyae-aidlc orchestrate report --stage application-design --result approved
+cat claim-receipt.json | AIDLC_APPROVAL_TOKEN=<token> \
+  loeyae-aidlc orchestrate report \
+    --stage application-design \
+    --instance application-design@module:module-a \
+    --result approved \
+    --claim-receipt-stdin
 ```
 
 约束：
 
-- Stage slug 必须是当前活动逻辑 Stage，并已由 `orchestrate next` 为当前 `stage_instance` 创建 challenge。
+- Stage slug 与 `--instance` 必须匹配当前 active instance，并已由 `orchestrate next` 为该实例创建 challenge。
 - challenge/token 最长有效 15 分钟。
 - token 绑定 workflow、`stage_instance` 和 challenge；模块级 `application-design` 的每个实例单独审批，成功消费后不可重放。
 - 非交互终端不能签发 token。
@@ -950,7 +1030,7 @@ loeyae-aidlc hook --format <platform>
 - `opencode`
 - `qoder-cli`
 
-该命令由宿主生命周期配置自动调用，从标准输入读取宿主 JSON，并尝试对当前活动阶段执行完整 `orchestrate report` 门禁。普通用户不应手工执行；安装项目 Hook 或插件后由平台负责触发。
+该命令由宿主生命周期配置自动调用，从标准输入读取宿主 JSON。schema v2 时保留原单游标准出检查；schema v3 时，Hook 没有当前 holder 的 actor/device/client identity 和安全 receipt 通道，因此只验证签名 state 并 fail-closed 提示 owning client 执行定向 report。Hook 不得从 state 暴露 receipt、替另一协作者提交或把普通聊天当作身份。普通用户不应手工执行。
 
 不同宿主的阻断协议不同：Claude-compatible 平台用 JSON `decision: block`，OpenCode/Qoder 使用非零退出码，Kiro 使用普通错误退出。因此自动化不能只用统一退出码解释所有 Hook 结果。
 
@@ -963,7 +1043,11 @@ loeyae-aidlc hook --format <platform>
 | `AIDLC_RECOVERY_SECRET` | 仅在受控 re-enroll 中证明原 UTF-8 trust secret；与 `AIDLC_RECOVERY_KEY_FILE` 互斥 |
 | `AIDLC_RECOVERY_KEY_FILE` | 原 base64 `trust.key` 的绝对路径；必须是普通非符号链接文件，POSIX 权限不得宽于 `0600` |
 | `AIDLC_RECOVERY_ENROLLMENT_FILE` | 原主机上同 workflow、由旧 key 签名的 active enrollment JSON 绝对路径；用于证明源项目绑定 |
-| `AIDLC_APPROVAL_TOKEN` | 向 `orchestrate report --result approved` 传递一次性审批 token |
+| `AIDLC_ACTOR_ID` / `AIDLC_DEVICE_ID` / `AIDLC_CLIENT_ID` | schema v3 `next` 的 holder identity；等价于对应 CLI 参数 |
+| `AIDLC_COORDINATION_PROVIDER` | `local`（默认）或 `git` |
+| `AIDLC_COORDINATION_REMOTE` | Git Provider 的远端 URL/路径；coordination 使用专用 ref |
+| `AIDLC_COLLABORATION_V3` | 仅值 `0` 时允许无 state 场景创建 schema v2 兼容 workflow；已有 state 仍按落盘 schema 分流 |
+| `AIDLC_APPROVAL_TOKEN` | 向定向 `orchestrate report --result approved` 传递一次性审批 token；仍必须经 stdin 提供 claim receipt |
 | `AIDLC_CHROME_BIN` | 为 PDF 和 Mermaid 导出指定浏览器 |
 | `CHROME_BIN` | 浏览器路径兼容变量；优先级低于 `--browser` 和 `AIDLC_CHROME_BIN` |
 | `CODEBUDDY_CLI` | 指定 CodeBuddy CLI 路径或命令名 |
@@ -1010,32 +1094,34 @@ loeyae-aidlc orchestrate next --resume
 
 ### report 提示 stage mismatch
 
-先查看状态，并使用当前 stage：
+先查看 ready/active set；随后只使用 directive 指定的 stage instance 和当前 client receipt：
 
 ```bash
 loeyae-aidlc orchestrate next --status
 ```
 
-不能对非活动 stage 补报或越级 report。
+不能对未持有 lease 的实例补报或越级 report。
 
 ### instruction-only 阶段不能完成
 
 执行 stage 正文后，传入与 stage 相同的确认值：
 
 ```bash
-loeyae-aidlc orchestrate report \
+cat claim-receipt.json | loeyae-aidlc orchestrate report \
   --stage <slug> \
+  --instance <stage-instance> \
   --result completed \
-  --instruction-ack <slug>
+  --instruction-ack <slug> \
+  --claim-receipt-stdin
 ```
 
 ### 审批 challenge 过期
 
-重新运行 `orchestrate next` 获取有效 challenge，然后在交互式终端重新执行 `approve --stage <slug>`。不要重放旧 token。
+重新运行带 identity 的 `orchestrate next` 获取有效 challenge，然后在交互式终端重新执行 `approve --stage <slug> --instance <stage-instance>`。不要重放旧 token。
 
 ### Evidence 提示 trust secret 缺失或过短
 
-由宿主、CI 或安全环境注入至少 32 字节的 `AIDLC_TRUST_SECRET`，并确保所有相关进程使用同一个值。若工作流已用另一个 secret 初始化，不要直接切换、手改 state 或删除 enrollment：先在原受信主机 park，随后运行 `loeyae-aidlc recover inspect`。能够安全取得原 key 以及同 workflow、旧 key 签名的 active source enrollment 时，按 5.7 节先执行 `recover re-enroll` dry-run，再由真人终端使用全部精确预期值执行 `--apply`；无法同时证明旧 state 和源项目绑定时继续保持 fail-closed。
+由宿主、CI 或安全环境注入至少 32 字节的 `AIDLC_TRUST_SECRET`，并确保所有相关进程使用同一个值。若工作流已用另一个 secret 初始化，不要直接切换、手改 state 或删除 enrollment：先在原受信主机 park，随后运行 `loeyae-aidlc recover inspect`。能够安全取得原 key 以及同 workflow、旧 key 签名的 active source enrollment 时，按 5.8 节先执行 `recover re-enroll` dry-run，再由真人终端使用全部精确预期值执行 `--apply`；无法同时证明旧 state 和源项目绑定时继续保持 fail-closed。
 
 ### PDF 或 Mermaid 导出找不到浏览器
 
