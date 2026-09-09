@@ -217,6 +217,37 @@ function readEnrollmentSnapshot(root: string): {
 	return { record, raw };
 }
 
+function readRecoveryEnrollmentSnapshot(root: string): {
+	record: EnrollmentRecord | null;
+	raw: Buffer | null;
+} {
+	const path = enrollmentPath(root);
+	if (!existsSync(path)) return { record: null, raw: null };
+	const stat = lstatSync(path);
+	if (!stat.isFile() || stat.isSymbolicLink())
+		throw new Error(`AI-DLC enrollment is not a regular file: ${path}`);
+	const raw = readRegularFile(path, "project enrollment", MAX_ENROLLMENT_BYTES);
+	const value = parseRecord(raw, "project enrollment");
+	const { root: projectRoot } = projectIdentity(root);
+	if (
+		value.schema_version !== 1 ||
+		value.project_root !== projectRoot ||
+		typeof value.workflow_id !== "string" ||
+		(value.status !== undefined &&
+			value.status !== "pending" &&
+			value.status !== "active") ||
+		(value.recovery_id !== undefined &&
+			(value.status !== "pending" ||
+				typeof value.recovery_id !== "string" ||
+				value.recovery_id.trim().length === 0))
+	) {
+		throw new Error(
+			`AI-DLC enrollment schema mismatch: ${enrollmentPath(root)}`,
+		);
+	}
+	return { record: value as EnrollmentRecord, raw };
+}
+
 function validateSourceEnrollmentProof(
 	raw: Buffer,
 	label: string,
@@ -306,16 +337,21 @@ function recoveryContext(
 			`controlled re-enrollment requires state.status=parked; found ${state.status}`,
 		);
 	}
-	const enrollment = readEnrollmentSnapshot(root);
+	const enrollment = readRecoveryEnrollmentSnapshot(root);
 	if (enrollment.record?.status === "pending") {
 		throw new Error(
 			"a pending enrollment exists without a matching recovery transaction; refusing to overwrite it",
 		);
 	}
 	const activeError = verifyRecordWithKey(record, activeKey);
+	const activeEnrollmentError =
+		enrollment.record === null
+			? null
+			: verifyRecordWithKey(enrollment.record, activeKey);
 	const enrollmentWorkflowId = enrollment.record?.workflow_id ?? null;
 	const enrollmentActive =
 		enrollment.record !== null &&
+		activeEnrollmentError === null &&
 		(enrollment.record.status ?? "active") === "active";
 	const recoveryRequired =
 		activeError !== null ||
@@ -327,6 +363,17 @@ function recoveryContext(
 		if (sourceError)
 			throw new Error(`source state signature proof failed: ${sourceError}`);
 		sourceEnrollment = readSourceEnrollmentProof(state.workflow_id, sourceKey);
+		if (enrollment.record !== null && activeEnrollmentError !== null) {
+			const sourceEnrollmentError = verifyRecordWithKey(
+				enrollment.record,
+				sourceKey,
+			);
+			if (sourceEnrollmentError) {
+				throw new Error(
+					`AI-DLC enrollment integrity failed: current enrollment is verified by neither the active nor source trust key (${activeEnrollmentError}; source: ${sourceEnrollmentError})`,
+				);
+			}
+		}
 	}
 	return {
 		projectRoot: root,

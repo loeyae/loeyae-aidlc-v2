@@ -137,7 +137,13 @@ class Assertions:
 
 
 class Fixture:
-    def __init__(self, name: str, parked: bool = True, mismatched_enrollment: bool = True):
+    def __init__(
+        self,
+        name: str,
+        parked: bool = True,
+        mismatched_enrollment: bool = True,
+        source_signed_current_enrollment: bool = False,
+    ):
         self.base = Path(tempfile.mkdtemp(prefix=f"{name}-", dir=SCRATCH_ROOT))
         self.project = self.base / "project"
         self.old_trust = self.base / "old-trust"
@@ -160,9 +166,14 @@ class Fixture:
         self.original_state_record = json.loads(self.original_state)
         self.source_enrollment_path = self.enrollment_file(self.old_trust)
         self.source_enrollment = self.source_enrollment_path.read_bytes()
-        if mismatched_enrollment:
-            self.write_enrollment(self.new_trust, ORPHAN_WORKFLOW, NEW_SECRET)
         self.enrollment_path = self.enrollment_file(self.new_trust)
+        if mismatched_enrollment:
+            if source_signed_current_enrollment:
+                self.enrollment_path.parent.mkdir(mode=0o700, exist_ok=True)
+                self.enrollment_path.write_bytes(self.source_enrollment)
+                os.chmod(self.enrollment_path, 0o600)
+            else:
+                self.write_enrollment(self.new_trust, ORPHAN_WORKFLOW, NEW_SECRET)
         self.original_enrollment = self.enrollment_path.read_bytes() if self.enrollment_path.exists() else None
 
     def clean_env(self) -> dict[str, str]:
@@ -457,6 +468,45 @@ def test_success_and_refusals(assertions: Assertions):
             and next_rotation_plan["active_trust"]["key_id"] == key_id(THIRD_SECRET),
             "a completed audit remains verifiable by the next source key and does not block a later rotation",
         )
+
+        stale = Fixture(
+            "aidlc-recovery-source-signed-current-enrollment",
+            source_signed_current_enrollment=True,
+        )
+        try:
+            stale_state_before = stale.state_path.read_bytes()
+            stale_enrollment_before = stale.enrollment_path.read_bytes()
+            stale_dry_result, stale_plan = stale.dry_plan()
+            assertions.ok(
+                stale_dry_result.returncode == 0
+                and stale_plan["recovery_required"] is True
+                and stale_plan["current_enrollment"]["workflow_id"]
+                == stale.original_state_record["workflow_id"]
+                and stale_plan["current_enrollment"]["sha256"]
+                == sha256(stale.source_enrollment)
+                and stale.state_path.read_bytes() == stale_state_before
+                and stale.enrollment_path.read_bytes() == stale_enrollment_before,
+                "a source-signed current enrollment supports a zero-write re-enrollment dry-run after active-key rotation",
+            )
+            stale_code, stale_output, stale_sent = pty_run(
+                RECOVER,
+                stale.apply_args(stale_plan),
+                stale.project,
+                stale.active_env(),
+                stale.phrase(stale_plan),
+            )
+            stale_state_after = json.loads(stale.state_path.read_bytes())
+            stale_enrollment_after = json.loads(stale.enrollment_path.read_bytes())
+            assertions.ok(
+                stale_code == 0
+                and stale_sent
+                and '"status": "completed"' in stale_output
+                and stale_state_after["integrity"]["key_id"] == key_id(NEW_SECRET)
+                and verify(stale_enrollment_after, NEW_SECRET),
+                "human-confirmed re-enrollment replaces the source-signed current enrollment with the active trust chain",
+            )
+        finally:
+            stale.close()
     finally:
         fixture.close()
 
