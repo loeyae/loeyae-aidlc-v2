@@ -1312,7 +1312,7 @@ Usage:
 
 Commands:
   orchestrate <next|report|park> [flags]  Run the schema-aware workflow engine
-  state migrate-v3 [flags]               Dry-run or atomically apply controlled v2→v3 migration
+  state migrate-v3 [flags]               Dry-run or atomically apply controlled v2→v3 migration; --repair may rebuild a fresh migration-only v3 state
   recover <inspect|re-enroll> [flags]     Inspect or repair a proven parked trust chain
   approve --stage <slug> --instance <id> [--request]  Show exact conversation confirmation; TTY remains optional
   evidence run --stage <slug> [--instance <id>] [flags]  Produce controlled signed evidence
@@ -1415,7 +1415,7 @@ function main(): void {
       break;
     }
     case "state":
-      if (rest[0] !== "migrate-v3") throw new Error("usage: loeyae-aidlc state migrate-v3 [--apply] --actor-id <id> --device-id <id> --client-id <id>");
+      if (rest[0] !== "migrate-v3") throw new Error("usage: loeyae-aidlc state migrate-v3 [--repair] [--apply] --actor-id <id> --device-id <id> --client-id <id>");
       run("core/tools/aidlc-state-v3-migrate.ts", rest.slice(1));
       break;
     case "recover": runInteractive("core/tools/aidlc-recover.ts", rest); break;

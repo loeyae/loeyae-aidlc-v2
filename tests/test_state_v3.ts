@@ -9,6 +9,7 @@ import {
   migrateWorkflowStateFileV2ToV3,
   migrateWorkflowStateV2ToV3,
   projectMigratedWorkflowV3ToV2,
+  repairWorkflowStateFileV3Migration,
   validateWorkflowStateV3,
   type WorkflowStateV3,
 } from "../core/tools/aidlc-state-v3";
@@ -92,9 +93,14 @@ try {
   process.env.AIDLC_COLLABORATION_V3 = "1";
   const { state: source } = fixture("migration-success", "workflow-v3-migration-success");
   const sourceCanonical = canonicalPayload(source);
+  const migrationRequires = {
+    "workspace-detection": [],
+    "application-design@module:module-a": ["workspace-detection"],
+  };
   const migrated = migrateWorkflowStateV2ToV3(source, {
     identity: migrationIdentity,
     occurred_at: migrationTime,
+    instance_requires: migrationRequires,
   });
 
   assert.equal(migrated.schema_version, 3);
@@ -110,6 +116,7 @@ try {
   assert.equal(migrated.instances["workspace-detection"].status, "completed");
   const active = migrated.instances["application-design@module:module-a"];
   assert.equal(active.status, "in_progress");
+  assert.deepEqual(active.requires, ["workspace-detection"]);
   assert.equal(active.claim?.actor_id, migrationIdentity.actor_id);
   assert.equal(active.claim?.device_id, migrationIdentity.device_id);
   assert.equal(active.claim?.client_id, migrationIdentity.client_id);
@@ -244,6 +251,7 @@ try {
   const fileMigrated = migrateWorkflowStateFileV2ToV3(interrupted.project, {
     identity: migrationIdentity,
     occurred_at: migrationTime,
+    instance_requires: migrationRequires,
   });
   const persisted = JSON.parse(readFileSync(statePath(interrupted.project), "utf8")) as WorkflowStateV3;
   assert.equal(persisted.schema_version, 3);
@@ -255,6 +263,15 @@ try {
   assert.equal(enrollment?.trust_mode, "device-signature-v1");
   assert.equal(enrollment?.event_head_hash, fileMigrated.event_head.event_hash);
   assert.equal(enrollment?.device_key_id, persisted.integrity?.key_id);
+
+  const repaired = repairWorkflowStateFileV3Migration(interrupted.project, {
+    identity: migrationIdentity,
+    occurred_at: migrationTime,
+    instance_requires: migrationRequires,
+  });
+  assert.equal(repaired.schema_version, 3);
+  assert.equal(repaired.instances["application-design@module:module-a"].requires?.[0], "workspace-detection");
+  assert.equal(validateWorkflowStateV3(repaired, true).workflow_id, interrupted.state.workflow_id);
 
   console.log("State v3 reducer and migration tests passed");
 } finally {
