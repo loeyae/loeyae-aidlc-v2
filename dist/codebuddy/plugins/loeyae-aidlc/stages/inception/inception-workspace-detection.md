@@ -18,6 +18,8 @@ choices: [single-module, multi-module]
 
 **目的**：确定工作区状态，检查是否存在 AI-DLC 项目
 
+> **协作能力边界**：schema v2 中，本 Stage 展示的角色、模块和单元认领来自 `handoff.md` / `unit-of-work.md`，仅用于团队协调，不是签名机器 claim。它不能覆盖编排器的唯一 `current_stage_instance`，也不能证明跨设备排他所有权。协作状态 v3 启用后，认领必须先由 Coordination Provider 原子确认并返回 claim receipt，才能进入对应实例。
+
 ## 步骤 1：检查现有 AI-DLC 项目
 
 检查 `docs/aidlc/handoff.md` 是否存在：

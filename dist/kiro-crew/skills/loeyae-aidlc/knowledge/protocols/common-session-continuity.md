@@ -9,6 +9,14 @@
 - 恢复时先执行 `loeyae-aidlc orchestrate next --status` 验证机器状态，再读取 handoff；两者冲突时立即阻断，以签名机器状态为准并重新生成 handoff。
 - 如果状态检查因 key ID、签名或 enrollment workflow mismatch 失败，Agent 最多执行只读 `loeyae-aidlc recover inspect` 并报告结果；不得读取/索要/输出 trust secret，不得调用 `recover re-enroll --apply`，不得手改 state、删除 enrollment 或复制签名。持有旧 key 以及同 workflow、旧 key 签名 active source enrollment 的真人必须先确认 state 已 parked，再在独立交互终端完成 dry-run 和绑定 source/target root 摘要的精确短语确认；之后 Agent 重新运行正式状态检查。
 
+## 自动 Checkpoint 与接手语义
+
+- 每次成功 `next`、`report`、条件跳过和审批状态变化都必须先完成签名、revision 递增与原子持久化，再向调用方返回成功。
+- Stage instance 成功完成本身就是稳定交接点，不要求用户额外执行“暂停并交接”。其他会话应从已验证 state 发现当前位置或后继工作。
+- schema v2 只能提供单游标串行续接；`handoff.md` 中的多人认领信息不构成机器级排他 claim。
+- `park` 在兼容期仍可暂停 workflow，也仍是现有跨 trust-domain re-enroll 的安全前提，但不再是同一信任域内日常会话交接的前提。
+- 未完成实例的接手不能仅依据部分产物或聊天声明。协作状态 v3 启用后，必须通过 execution lease 的 release、transfer 或 expiry。
+
 ## 统一恢复检查点（所有上下文流转场景）
 
 **本章节是所有会话恢复场景的强制入口点。** 无论是正常恢复、Context Compact 恢复、跨会话交接还是团队协作接手，都必须先执行此检查点。

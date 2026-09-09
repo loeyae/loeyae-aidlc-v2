@@ -412,6 +412,8 @@ Agent 不能跳步——引擎验证每次 `report` 的 stage 必须是当前活
 
 ### 签名状态与恢复边界
 
+> schema v2 当前仍是单全局游标：module/unit 实例可以确定性展开，但只有一个 `current_stage_instance`，本地 revision CAS 也不能裁决两台机器从同一远端版本发起的并发认领。现有 handoff/认领表属于人类协作视图。多人、多设备目标模型及安全边界见 [AI-DLC 协作状态 v3 契约](docs/aidlc-collaboration-v3-contract.md)。
+
 - `docs/aidlc/aidlc-state.json` 是唯一机器路由状态，使用 schema v2、`workflow_id`、单调 `revision`、HMAC-SHA256 和跨进程 CAS 原子更新。
 - `docs/aidlc/handoff.md` 只是派生的人类协作视图，不能改变 stage、skip、approval 或 revision；冲突时以签名机器状态为准。
 - enrollment 位于项目外的 `~/.config/loeyae-aidlc/trust/enrollments/`。已 enrollment 的项目若 state 缺失、未签名、签名无效或 workflow ID 不匹配，CLI 与生命周期 Hook 都会 fail-closed。

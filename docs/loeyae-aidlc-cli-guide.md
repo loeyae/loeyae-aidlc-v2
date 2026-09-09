@@ -286,6 +286,8 @@ loeyae-aidlc orchestrate next
 
 工作流机器状态位于业务项目的 `docs/aidlc/aidlc-state.json`。该文件具有签名、workflow ID 和 revision 保护，不应手工编辑。
 
+当前 schema v2 的状态查询只展示一个全局 `current_stage_instance`。模块/单元实例虽已展开，但 `handoff.md` 中的认领人和分支仍是人类协调信息，不是跨机器 claim 或 lease。协作状态 v3 的目标契约、Provider CAS 和迁移边界见 [AI-DLC 协作状态 v3 契约](aidlc-collaboration-v3-contract.md)。
+
 ### 5.4 报告阶段结果
 
 ```text

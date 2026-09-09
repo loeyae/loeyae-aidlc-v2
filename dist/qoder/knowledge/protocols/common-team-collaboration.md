@@ -6,13 +6,25 @@ AI-DLC 支持团队协作开发，采用**分阶段协作模型**：
 - **Inception 阶段**：接力模式 — 不同角色按步骤接力完成
 - **Construction 阶段**：认领模式 — 开发者自主认领单元，独立开发
 
+## 当前实现边界
+
+schema v2 已能展开 project/module/unit Stage 实例并在每次状态变化后写入签名 checkpoint，但全局仍只有一个 `current_stage_instance`。当前 `handoff.md`、`unit-of-work.md` 与 Git 提交记录属于人类协调视图，尚不能提供跨设备、跨工作树的机器级排他认领。
+
+因此，在协作状态 v3 和 Coordination Provider 启用前：
+
+- 本文的“认领”表示团队约定，不表示引擎已经签发 claim receipt；
+- 不得把 `handoff.md` 中的负责人或分支字段当作机器授权；
+- 不得宣称多个模块或单元可由同一签名 workflow 在机器层并行 report；
+- 同一工作单元的并发冲突仍需项目管理工具或团队 Git 流程裁决；
+- 目标状态、安全不变量和迁移边界见 `docs/aidlc-collaboration-v3-contract.md`。
+
 ## 协作原则
 
 1. **Inception 集中产出，Construction 分布执行**
-2. **Git 是协调工具** — 不在 AI-DLC 内部重新发明项目管理
+2. **项目管理工具负责任员安排，AI-DLC 协调层负责机器门禁** — Git 可承载持久化和审计，但普通业务分支不充当分布式锁
 3. **产出物即契约** — Inception 产出物是团队共享的开发契约
 4. **最小上下文加载** — 每个角色只加载自己需要的上下文，控制 token 消耗
-5. **认领而非分配** — 单元由开发者自主认领，先到先得
+5. **先原子认领再执行** — v3 中由 Coordination Provider 以 CAS 签发 claim receipt；v2 中只能作为团队约定使用
 
 ---
 
