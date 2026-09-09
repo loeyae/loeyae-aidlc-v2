@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "crypto";
-import { canonicalPayload, signRecord, verifyRecord, type IntegrityEnvelope } from "./aidlc-trust";
+import { canonicalPayload, signTeamRecord, verifyRecord, type IntegrityEnvelope } from "./aidlc-trust";
 import {
   appendWorkflowEventV3,
   validateWorkflowStateV3,
@@ -125,7 +125,7 @@ export function issueClaimReceiptV3(
     lease_expires_at: leaseExpiresAt,
     generation,
   };
-  return validateClaimReceiptV3({ ...unsigned, integrity: signRecord(unsigned, true) }, true);
+  return validateClaimReceiptV3({ ...unsigned, integrity: signTeamRecord(unsigned) }, true);
 }
 
 export function validateClaimReceiptV3(value: unknown, requireIntegrity = true): ClaimReceiptV3 {

@@ -34,13 +34,15 @@ I9 UI 设计不是初始化选项，而是运行时 choice。`ui-mock` directive
 loeyae-aidlc orchestrate report --stage <slug> --result completed
 ```
 
-`gate: true` 时，用户聊天确认本身不是审批凭据。人类须在交互式终端执行 `loeyae-aidlc approve --stage <slug>`，或由受信宿主 provider 签发 token，再以 `--result approved --approval-token <token>` 报告；token 绑定 workflow/stage_instance/challenge、最长 15 分钟且不可重放。Skill、Agent 和 Stop Hook 不得自行签发，无 provider/TTY 时 fail-closed。`instruction_only` stage 必须在执行正文后显式传 `--instruction-ack <slug>`，Stop Hook 不得代确认。公开 report 不接受手动 `skipped`；仅 condition=false 可记录内部 `condition_skipped`。
+`gate: true` 时，加载 `aidlc-approval` 并读取 request 的随机 `confirmation_phrase`；Agent 展示产物/Evidence 和完整短语后必须结束回合，只有用户下一条真实消息精确匹配，才能通过 `--approval-confirmation-stdin` 定向报告。普通“同意”、预填按钮、Agent 代填、旧消息或同一回合自动提交无效。引擎内部派生并消费 token；Provider 是可选增强，真人 TTY 是备用路径。`instruction_only` stage 必须在执行正文后显式传 `--instruction-ack <slug>`，Stop Hook 不得代确认。公开 report 不接受手动 `skipped`；仅 condition=false 可记录内部 `condition_skipped`。
 
 ## Codex 适配
 
-- `docs/aidlc/aidlc-state.json` 是 HMAC、workflow ID、revision/CAS 保护的唯一机器状态；外部 enrollment 绑定项目，`docs/aidlc/handoff.md` 仅为派生人类视图；
-- evidence 按当前实例隔离：project 为 `.aidlc/evidence/<stage-slug>/`，module 追加 `<module-id>/`，unit 再追加 `<unit-id>/`；只接受受控 Producer 的精确 producer、当前 `commit + dirty + worktree_digest` 和 HMAC，命令只记录 `argv_digest`；
-- 需要 Evidence 时，必须在第一次 `next` 前向 orchestrator、Producer 和 Hook 注入同一份至少 32 字节的 `AIDLC_TRUST_SECRET`；semantic 只执行发行包内置 checker；
+- `docs/aidlc/aidlc-state.json` 是 schema v3 设备签名 append-only event、workflow ID、revision/CAS 保护的唯一机器状态；每台设备使用独立 Ed25519 credential，`docs/aidlc/handoff.md` 仅为派生人类视图；
+- `next` 返回 `team-enrollment-confirmation` ask 时，必须展示完整 `JOIN ...` 短语并结束回合；仅用户下一条真实消息精确匹配后通过 strict `--team-enrollment-confirmation-stdin` 完成本机 enrollment。不得代填、同回合提交、复制 private key 或要求共享 `AIDLC_TRUST_SECRET`；
+- enrollment 记录已接受 event head，rollback/fork fail-closed；Provider/SCM 权限仍决定共享流写入资格，设备签名不是完整成员授权 PKI；
+- evidence 按当前实例隔离：project 为 `.aidlc/evidence/<stage-slug>/`，module 追加 `<module-id>/`，unit 再追加 `<unit-id>/`；只接受受控 Producer 的精确 producer、当前 `commit + dirty + worktree_digest` 和 schema 对应完整性（v3 自动设备 Ed25519，v2 legacy HMAC），命令只记录 `argv_digest`；多个活动实例必须传精确 `--instance`；
+- `AIDLC_TRUST_SECRET` 只用于 schema v2/HMAC/recovery legacy，不是 v3 团队配置；semantic 只执行发行包内置 checker；
 - 需要子 Agent 时，只使用当前 Codex 会话实际提供的子 Agent 能力；不可用时按阶段规则串行执行；
 - MCP、Skill 和项目规则按 Codex 当前会话的可用能力加载；不可用时返回 `NEEDS_CONTEXT` 或 `NEEDS_CAPABILITY`；
 - 不把 Skill 入口、阶段执行结果或用户回答伪造成 evidence。

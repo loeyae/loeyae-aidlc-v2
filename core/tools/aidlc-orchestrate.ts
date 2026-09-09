@@ -24,7 +24,11 @@ import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSyn
 import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
 import { readEnrollment, verifyApprovalToken, verifyRecord } from "./aidlc-trust";
-import { buildApprovalProviderRequest, validateApprovalProviderResponse } from "./aidlc-approval-provider";
+import {
+  buildApprovalProviderRequest,
+  validateApprovalConversationConfirmation,
+  validateApprovalProviderResponse,
+} from "./aidlc-approval-provider";
 import { readSourceRevision } from "./aidlc-revision";
 import {
   evidenceRelativePath,
@@ -2136,6 +2140,7 @@ async function handleReport(args: string[]): Promise<Directive> {
   const userInput = flags["user-input"];
   let approvalTokenValue = flags["approval-token"] || process.env.AIDLC_APPROVAL_TOKEN;
   const approvalResponseFromStdin = "approval-response-stdin" in flags;
+  const approvalConfirmationFromStdin = "approval-confirmation-stdin" in flags;
 
   // Validate required fields
   if (!stageSlug) {
@@ -2150,8 +2155,14 @@ async function handleReport(args: string[]): Promise<Directive> {
   if (approvalResponseFromStdin && flags["approval-response-stdin"] !== "true") {
     return { kind: "error", message: "--approval-response-stdin is a boolean flag and does not accept a value" };
   }
-  if (approvalResponseFromStdin && result !== "approved") {
-    return { kind: "error", message: "--approval-response-stdin is only valid with --result approved" };
+  if (approvalConfirmationFromStdin && flags["approval-confirmation-stdin"] !== "true") {
+    return { kind: "error", message: "--approval-confirmation-stdin is a boolean flag and does not accept a value" };
+  }
+  if (approvalResponseFromStdin && approvalConfirmationFromStdin) {
+    return { kind: "error", message: "Use exactly one approval stdin channel: --approval-confirmation-stdin or --approval-response-stdin." };
+  }
+  if ((approvalResponseFromStdin || approvalConfirmationFromStdin) && result !== "approved") {
+    return { kind: "error", message: "Approval stdin is only valid with --result approved" };
   }
 
   // Load state
@@ -2196,7 +2207,7 @@ async function handleReport(args: string[]): Promise<Directive> {
   }
   const approvalKey = activeApprovalKey(state, currentInstance);
   if (result === "completed" && stageNode.approval === "block") {
-    return { kind: "error", message: `Stage "${stageSlug}" requires trusted approval. Supply the host-issued one-time token with --result approved --approval-token <token>.` };
+    return { kind: "error", message: `Stage "${stageSlug}" requires explicit approval. Supply the exact active conversation confirmation with --result approved --approval-confirmation-stdin.` };
   }
   if (result === "approved") {
     if (stageNode.approval !== "block") {
@@ -2210,19 +2221,27 @@ async function handleReport(args: string[]): Promise<Directive> {
       saveState(state);
       return { kind: "error", message: `Approval challenge for stage instance "${currentInstance.instance_id}" expired. Run next to obtain a new challenge.` };
     }
+    if (approvalConfirmationFromStdin) {
+      if (flags["approval-token"] || process.env.AIDLC_APPROVAL_TOKEN) {
+        return { kind: "error", message: "Use exactly one approval channel: conversation confirmation stdin, provider response stdin, --approval-token, or AIDLC_APPROVAL_TOKEN." };
+      }
+      const request = buildApprovalProviderRequest(state, stageSlug);
+      const confirmation = validateApprovalConversationConfirmation(readFileSync(0, "utf8"), request);
+      approvalTokenValue = confirmation.approval_token;
+    }
     if (approvalResponseFromStdin) {
       if (flags["approval-token"] || process.env.AIDLC_APPROVAL_TOKEN) {
-        return { kind: "error", message: "Use exactly one approval channel: provider response stdin, --approval-token, or AIDLC_APPROVAL_TOKEN." };
+        return { kind: "error", message: "Use exactly one approval channel: conversation confirmation stdin, provider response stdin, --approval-token, or AIDLC_APPROVAL_TOKEN." };
       }
       const request = buildApprovalProviderRequest(state, stageSlug);
       const providerResponse = validateApprovalProviderResponse(readFileSync(0, "utf8"), request);
       approvalTokenValue = providerResponse.approval_token;
     }
     if (!approvalTokenValue) {
-      return { kind: "error", message: `Stage instance "${currentInstance.instance_id}" requires a trusted provider response or --approval-token from a trusted human approval channel.` };
+      return { kind: "error", message: `Stage instance "${currentInstance.instance_id}" requires an exact conversation confirmation, trusted provider response, or --approval-token from the TTY fallback.` };
     }
     if (!verifyApprovalToken(state.workflow_id, approvalKey, challenge, approvalTokenValue)) {
-      return { kind: "error", message: `Invalid or stale approval token for stage instance "${currentInstance.instance_id}".` };
+      return { kind: "error", message: `Invalid or stale approval confirmation/token for stage instance "${currentInstance.instance_id}".` };
     }
   }
   if (stageNode.completion_contract === "instruction_only" && result === "completed" && flags["instruction-ack"] !== stageSlug) {

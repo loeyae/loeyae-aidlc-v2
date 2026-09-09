@@ -1,6 +1,6 @@
 ---
 name: aidlc-approval
-description: "安全审阅并批准当前 AI-DLC 架构或部署门禁；只通过受信宿主 Provider 或真人 TTY 取得一次性 token。"
+description: "安全审阅并批准当前 AI-DLC 架构或部署门禁；默认要求用户在下一条对话消息中完整输入实例绑定的随机确认语。"
 triggers: 审批当前阶段, 确认架构方案, 批准架构方案, 批准部署方案, 驳回当前方案, aidlc approve, AI-DLC 审批
 ---
 
@@ -8,7 +8,7 @@ triggers: 审批当前阶段, 确认架构方案, 批准架构方案, 批准部�
 
 开始时宣布：“使用 aidlc-approval 审阅当前 AI-DLC 审批门禁”。
 
-本 Skill 是审批 UX 和路由入口，不是 token 生成器。普通聊天、Agent 自述、选项按钮或复制确认短语都不能证明真实人类审批。
+本 Skill 负责审批 UX 和确定性路由。默认审批凭据来自引擎生成、绑定当前 request 的随机确认语；“同意”“批准”、Agent 自述、预填按钮或 Slash Command 被调用本身都不能批准。
 
 ## 适用范围
 
@@ -19,7 +19,7 @@ triggers: 审批当前阶段, 确认架构方案, 批准架构方案, 批准部�
 
 其他 Stage 请求审批时返回 `NOT_APPROVAL_GATE`，不得创造额外阻断点。
 
-## 安全流程
+## 默认对话审批流程
 
 1. 在业务项目根目录执行 `loeyae-aidlc orchestrate next --status`，验证签名 state、workflow 和当前实例。
 2. 执行：
@@ -28,52 +28,80 @@ triggers: 审批当前阶段, 确认架构方案, 批准架构方案, 批准部�
    loeyae-aidlc approve --stage <slug> --instance <stage-instance> --request
    ```
 
-   读取 `aidlc.approval.request`，确认其中的 `workflow_id`、`stage_instance`、challenge TTL、`artifact_root` 和 `evidence_root`。
+   读取 `aidlc.approval.request`，确认其中的 `request_id`、`workflow_id`、`stage_instance`、challenge TTL、`artifact_root`、`evidence_root` 和 `confirmation_phrase`。
 3. 读取并摘要当前实例的 canonical 产物和 Evidence。只展示实际读取到的内容，不把 Agent 总结当作产物本身。
-4. 如果宿主明确提供受信 Approval Provider：
-   - 把完整 request 交给宿主安全界面；
-   - 由宿主验证真实用户事件并生成 `aidlc.approval.response`；
-   - Provider response 与当前 claim receipt 由宿主在 Agent 上下文之外组合为严格 stdin envelope；
-   - envelope 直接交给 `orchestrate report --stage <slug> --instance <id> --result approved --claim-receipt-stdin --approval-response-stdin`；
-   - Agent 不读取、复制、回显或持久化 response token/claim receipt。
-5. 如果宿主没有受信 Provider，返回 `NEEDS_TRUSTED_APPROVAL` 并提示真人在独立交互终端执行：
+4. 向用户显示审批对象、关键决策、风险、有效期及 `confirmation_phrase`，明确要求用户在**下一条新的用户消息**中只输入完整确认语：
+   - 不提供预填 Approve 按钮或可一键发送该文本的选项；
+   - 不接受“同意”“继续”“批准”等近似表达；
+   - 不把 Agent 自己复制、推测或生成的文本当作用户确认；
+   - 显示确认语后立即结束当前 Agent 回合，不调用 report。
+5. 下一条消息到达后，只有当去除消息外围换行后的完整正文与 `confirmation_phrase` 精确一致，才构造：
 
-   ```bash
-   loeyae-aidlc approve --stage <slug> --instance <stage-instance>
-   claim-receipt.json | loeyae-aidlc orchestrate report \
-     --stage <slug> --instance <stage-instance> --result approved \
-     --approval-token <token> --claim-receipt-stdin
+   ```json
+   {
+     "schema_version": 1,
+     "kind": "aidlc.approval.confirmation",
+     "request_id": "<active-request-id>",
+     "confirmation_phrase": "<exact-user-message>"
+   }
    ```
 
-6. 驳回仍不需要审批 token，但必须由 lease holder 以 `report --instance <id> --claim-receipt-stdin --result rejected --user-input "<原因>"` 记录审阅意见。
+6. schema v3 中，将上述对象与 owning client 当前 claim receipt 组成严格 stdin envelope：
 
-## KiroCrew 边界
+   ```json
+   {
+     "claim_receipt": { "...": "signed Provider receipt" },
+     "approval_confirmation": {
+       "schema_version": 1,
+       "kind": "aidlc.approval.confirmation",
+       "request_id": "<active-request-id>",
+       "confirmation_phrase": "<exact-user-message>"
+     }
+   }
+   ```
 
-- 普通 `ask_question`、`[OPTIONS:]` 或聊天按钮只可收集“继续审阅/请求修改”等意图，不能生成 `approved`。
-- 只有 KiroCrew 宿主实现并声明受信 Approval Provider 时，才可显示安全审批卡并提交 Provider response。
-- 宿主能力不存在时必须显示 TTY fallback，不得模拟卡片成功。
+   直接交给：
 
-## Claude Code 边界
+   ```bash
+   loeyae-aidlc orchestrate report --stage <slug> --instance <stage-instance> \
+     --result approved --claim-receipt-stdin --approval-confirmation-stdin
+   ```
 
-`/aidlc-approve` 只是显式审批入口。Slash Command 本身不是安全凭据；仍必须由受信 Claude Provider 生成响应，或使用真人 TTY fallback。
+   envelope 不进入 argv、聊天、项目文件或持久化日志。引擎负责精确匹配 request/phrase、校验 TTL/instance/receipt，并在内部生成和立即消费 token；Agent 不读取 token。
+7. phrase 不匹配、request 已变化或过期时返回 `BLOCKED`，重新执行 `next`/`approve --request` 获取当前确认语，不得复用旧消息。
+8. 驳回不需要确认语，但必须由 lease holder 以 `report --instance <id> --claim-receipt-stdin --result rejected --user-input "<原因>"` 记录审阅意见。
+
+## 可选本机通道
+
+- 同一设备的受信宿主 Approval Provider 可以提供额外的一键审批和宿主审计，但不是默认审批的前置依赖；其 response 通过 `--approval-response-stdin`。一次性 token 由本机 device credential 内部派生，用户与团队成员不得配置或共享 `AIDLC_TRUST_SECRET`。该 response 不是远程跨设备 Provider 协议。
+- 真人交互式终端仍是备用路径：直接运行 `loeyae-aidlc approve --stage <slug> --instance <stage-instance>`，再使用本设备的一次性 token 报告。
+- 任一操作只能选择对话确认、同设备 Provider response 或 TTY token 中一个通道，混用必须 fail-closed。
+
+## KiroCrew 与其他宿主边界
+
+- KiroCrew 不需要实现专用安全审批卡；Agent 在普通对话中展示随机确认语并等待下一条真实用户消息。
+- `ask_question`、`[OPTIONS:]` 或聊天按钮不得预填/代发确认语；它们可用于请求修改、取消或继续审阅。
+- Claude `/aidlc-approve` 等入口只负责加载本 Skill；Slash Command 本身不是批准，但其后新的精确用户消息可以完成默认确认流程。
+- Stop Hook、后台任务和无新用户回合的自动化不得提交 `approval_confirmation`。
 
 ## 禁止事项
 
 不得：
 
-- 调用普通问答卡后自行构造 Provider response；
-- 在聊天、日志、文件或命令参数中回显宿主 token 或 claim receipt；
-- 提供或执行非交互 token generator；
+- 在展示确认语的同一 Agent 回合调用 approved report；
+- 用 Agent 生成内容、旧用户消息、近似文本或按钮选择替代新的精确用户输入；
+- 在聊天、日志、文件或命令参数中回显 token 或 claim receipt；
+- 将本机 Provider token 转发到其他设备，或要求成员共享 `AIDLC_TRUST_SECRET` 以实现远程审批；
 - 修改 `aidlc-state.json`、challenge、integrity 或 enrollment；
 - 跳过 produces、sensors、实例匹配、TTL 或 replay 校验；
-- 在 Provider 不可用时把“同意”解释为批准。
+- 为非审批 Stage 创造确认门禁。
 
 ## 输出
 
 返回以下之一：
 
-- `APPROVED`：引擎已验证并消费受信响应；
+- `NEEDS_CONFIRMATION`：已展示当前随机确认语，必须结束回合等待用户输入；
+- `APPROVED`：引擎已验证精确确认并消费内部凭据；
 - `REJECTED`：已记录驳回原因；
-- `NEEDS_TRUSTED_APPROVAL`：需要宿主 Provider 或真人 TTY；
 - `NOT_APPROVAL_GATE`：当前实例不是阻断审批 Stage；
-- `BLOCKED`：签名、上下文、产物、Evidence、TTL 或 Provider 响应校验失败。
+- `BLOCKED`：签名、上下文、产物、Evidence、TTL、receipt 或确认语校验失败。

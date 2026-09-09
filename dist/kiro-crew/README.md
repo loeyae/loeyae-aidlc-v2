@@ -29,7 +29,7 @@ The engine (`tools/aidlc-orchestrate.ts`) drives the workflow:
 2. Agent 读取并执行 stage 文件，生成受门禁约束的产物/Evidence
 3. 新 workflow 默认 schema v3：使用 actor/device/client identity 执行 `next`，Provider ACK 后才返回包含 `stage_instance` 与 `claim_receipt` 的 directive
 4. 普通 stage 使用定向 `report --instance <id> --claim-receipt-stdin --result completed`；`instruction_only` 还必须追加 `--instruction-ack <slug>`
-5. `approval:block` 先加载 `aidlc-approval`；只有受信 KiroCrew Provider 或人类 TTY 能签发一次性 token，随后与 receipt 一起定向报告
+5. `approval:block` 先加载 `aidlc-approval`；Agent 展示 request 的随机确认语后结束回合，用户下一条真实消息精确匹配时，与 receipt 组成严格 stdin envelope 定向报告；Provider/TTY 仅为可选兼容
 6. 重复直到 `done`
 
-聊天确认、Skill 或生命周期适配器都不能自行签发审批 token 或 claim receipt。公开 report 不支持手动 skip，只有图谱 condition=false 可记录内部 `condition_skipped`。`docs/aidlc/aidlc-state.json` 的签名 event/instance map/lease 是唯一机器状态，外部 enrollment 绑定项目；handoff 仅为派生人类视图。Local Provider 只协调同一工作树，跨工作树/设备使用 Git Provider 专用 ref 或具体 External Provider；业务 main/master 不是锁。`park` 只冻结整个 workflow，日常交接不需要 park。
+普通“同意”、预填按钮、Agent 代填、旧消息或同一回合自动提交不能替代随机确认；Skill 或生命周期适配器也不能自行生成 claim receipt。公开 report 不支持手动 skip，只有图谱 condition=false 可记录内部 `condition_skipped`。`docs/aidlc/aidlc-state.json` 的签名 event/instance map/lease 是唯一机器状态，外部 enrollment 绑定项目；handoff 仅为派生人类视图。Local Provider 只协调同一工作树，跨工作树/设备使用 Git Provider 专用 ref 或具体 External Provider；业务 main/master 不是锁。`park` 只冻结整个 workflow，日常交接不需要 park。

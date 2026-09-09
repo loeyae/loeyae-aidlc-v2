@@ -48,9 +48,14 @@ import {
   type CoordinationIdentityV3,
 } from "./aidlc-coordination-local-v3";
 import { GitCoordinationProviderV3 } from "./aidlc-coordination-git-v3";
-import { buildApprovalProviderRequest, validateApprovalProviderResponse } from "./aidlc-approval-provider";
+import {
+  buildApprovalProviderRequest,
+  validateApprovalConversationConfirmation,
+  validateApprovalProviderResponse,
+} from "./aidlc-approval-provider";
 import { readEnrollment, verifyApprovalToken } from "./aidlc-trust";
 import { readModuleManifest, readUnitManifest } from "./aidlc-execution-context";
+import { teamEnrollmentGate } from "./aidlc-team-enrollment-v3";
 import type { WorkflowState } from "./aidlc-state";
 
 const PROJECT_ROOT = realpathSync(process.cwd());
@@ -364,11 +369,17 @@ async function handleNext(args: string[]): Promise<Directive> {
   const withPrd = booleanFlag(flags, "with-prd");
   const resume = booleanFlag(flags, "resume");
   const statusOnly = booleanFlag(flags, "status");
+  const enrollmentConfirmationStdin = booleanFlag(flags, "team-enrollment-confirmation-stdin");
   const scope = flags.scope;
   if (scope && !VALID_SCOPES.has(scope)) throw new Error(`unknown scope ${scope}`);
   if (withPrd && (!scope || !PRD_ELIGIBLE_SCOPES.has(scope))) {
     throw new Error("--with-prd is only valid when initializing feature, enterprise, mvp, or classic scope");
   }
+  const enrollmentDirective = teamEnrollmentGate(
+    PROJECT_ROOT,
+    enrollmentConfirmationStdin ? readFileSync(0, "utf8") : undefined,
+  );
+  if (enrollmentDirective) return enrollmentDirective as unknown as Directive;
 
   let state = loadWorkflowStateV3(PROJECT_ROOT);
   if (!state) {
@@ -491,12 +502,17 @@ async function handleNext(args: string[]): Promise<Directive> {
 interface StdinPayload {
   claimReceipt: ClaimReceiptV3;
   approvalResponseRaw?: string;
+  approvalConfirmationRaw?: string;
 }
 
 function readReportStdin(flags: Record<string, string>): StdinPayload {
   const claimStdin = booleanFlag(flags, "claim-receipt-stdin");
   const approvalStdin = booleanFlag(flags, "approval-response-stdin");
+  const confirmationStdin = booleanFlag(flags, "approval-confirmation-stdin");
   if (!claimStdin) throw new Error("schema v3 report requires --claim-receipt-stdin");
+  if (approvalStdin && confirmationStdin) {
+    throw new Error("use exactly one approval stdin channel: --approval-confirmation-stdin or --approval-response-stdin");
+  }
   const raw = readFileSync(0, "utf8");
   let value: unknown;
   try {
@@ -504,15 +520,20 @@ function readReportStdin(flags: Record<string, string>): StdinPayload {
   } catch {
     throw new Error("claim receipt stdin must be valid JSON");
   }
-  if (approvalStdin) {
+  if (approvalStdin || confirmationStdin) {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("combined report stdin must be an object");
     const envelope = value as Record<string, unknown>;
+    const approvalKey = confirmationStdin ? "approval_confirmation" : "approval_response";
     for (const key of Object.keys(envelope)) {
-      if (key !== "claim_receipt" && key !== "approval_response") throw new Error(`combined report stdin has unknown field ${key}`);
+      if (key !== "claim_receipt" && key !== approvalKey) throw new Error(`combined report stdin has unknown field ${key}`);
     }
+    if (!("claim_receipt" in envelope)) throw new Error("combined report stdin requires claim_receipt");
+    if (!(approvalKey in envelope)) throw new Error(`combined report stdin requires ${approvalKey}`);
     return {
       claimReceipt: validateClaimReceiptV3(envelope.claim_receipt, true),
-      approvalResponseRaw: JSON.stringify(envelope.approval_response),
+      ...(confirmationStdin
+        ? { approvalConfirmationRaw: JSON.stringify(envelope.approval_confirmation) }
+        : { approvalResponseRaw: JSON.stringify(envelope.approval_response) }),
     };
   }
   return { claimReceipt: validateClaimReceiptV3(value, true) };
@@ -520,12 +541,18 @@ function readReportStdin(flags: Record<string, string>): StdinPayload {
 
 async function handleReport(args: string[]): Promise<Directive> {
   const flags = parseFlags(args);
+  if ("team-enrollment-confirmation-stdin" in flags) {
+    throw new Error("--team-enrollment-confirmation-stdin is only valid with orchestrate next");
+  }
   const stageSlug = flags.stage;
   const instanceId = flags.instance;
   const result = flags.result;
   if (!stageSlug) throw new Error("report requires --stage <slug>");
   if (!instanceId) throw new Error("schema v3 report requires --instance <stage-instance>");
   if (!result || !VALID_RESULTS.has(result)) throw new Error("report requires --result completed|approved|rejected|revised");
+  if ((booleanFlag(flags, "approval-response-stdin") || booleanFlag(flags, "approval-confirmation-stdin")) && result !== "approved") {
+    throw new Error("approval stdin is only valid with --result approved");
+  }
   const input = readReportStdin(flags);
   const state = loadWorkflowStateV3(PROJECT_ROOT);
   if (!state) throw new Error("no schema v3 workflow state found");
@@ -544,7 +571,7 @@ async function handleReport(args: string[]): Promise<Directive> {
   let approvalProviderId = "";
   let approvalHumanEventId = "";
   if (result === "completed" && instance.stage.approval === "block") {
-    throw new Error(`stage ${stageSlug} requires --result approved with a trusted approval token`);
+    throw new Error(`stage ${stageSlug} requires --result approved with the exact active approval confirmation`);
   }
   if (result === "approved") {
     if (instance.stage.approval !== "block") throw new Error(`stage ${stageSlug} is not an approval gate`);
@@ -555,8 +582,16 @@ async function handleReport(args: string[]): Promise<Directive> {
       throw new Error(`approval challenge expired for ${instanceId}; run next to obtain a new challenge`);
     }
     let token = flags["approval-token"] || process.env.AIDLC_APPROVAL_TOKEN;
+    if (input.approvalConfirmationRaw) {
+      if (token) throw new Error("use exactly one approval channel: conversation confirmation stdin, provider response stdin, --approval-token, or AIDLC_APPROVAL_TOKEN");
+      const request = buildApprovalProviderRequest(compatibility, stageSlug);
+      const confirmation = validateApprovalConversationConfirmation(input.approvalConfirmationRaw, request);
+      token = confirmation.approval_token;
+      approvalProviderId = confirmation.provider_id;
+      approvalHumanEventId = confirmation.human_event_id;
+    }
     if (input.approvalResponseRaw) {
-      if (token) throw new Error("use exactly one approval channel: provider response stdin, --approval-token, or AIDLC_APPROVAL_TOKEN");
+      if (token) throw new Error("use exactly one approval channel: conversation confirmation stdin, provider response stdin, --approval-token, or AIDLC_APPROVAL_TOKEN");
       const request = buildApprovalProviderRequest(compatibility, stageSlug);
       const response = validateApprovalProviderResponse(input.approvalResponseRaw, request);
       token = response.approval_token;
@@ -564,7 +599,7 @@ async function handleReport(args: string[]): Promise<Directive> {
       approvalHumanEventId = response.human_event_id;
     }
     if (!token || !verifyApprovalToken(state.workflow_id, instanceId, challenge, token)) {
-      throw new Error(`invalid or stale approval token for ${instanceId}`);
+      throw new Error(`invalid or stale approval confirmation/token for ${instanceId}`);
     }
     if (!approvalProviderId) {
       approvalProviderId = "human-tty";

@@ -294,6 +294,11 @@ loeyae-aidlc orchestrate next --scope feature --with-prd \
 loeyae-aidlc orchestrate next --status
 loeyae-aidlc orchestrate next \
   --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+# 新设备若收到 team-enrollment-confirmation ask：Agent 展示 JOIN 短语并结束回合；
+# 用户下一条真实消息精确输入后，再将 strict confirmation envelope 通过 stdin 提交
+team-enrollment-confirmation-envelope | loeyae-aidlc orchestrate next \
+  --actor-id actor:alice --device-id device:new-laptop --client-id client:session-2 \
+  --team-enrollment-confirmation-stdin
 # directive.claim_receipt 必须经安全 stdin 回传，不放进 argv/聊天
 claim-receipt.json | loeyae-aidlc orchestrate report \
   --stage workspace-detection --instance workspace-detection --result completed \
@@ -307,11 +312,12 @@ claim-receipt.json | loeyae-aidlc orchestrate report \
   --stage ui-mock --instance ui-mock@module:module-a --result completed \
   --instruction-ack ui-mock --user-input html-mock --claim-receipt-stdin
 
-# approval:block：request/TTY 都绑定明确实例；普通聊天或 Slash Command 不是凭据
-loeyae-aidlc approve --stage application-design --instance application-design@module:module-a
-claim-receipt.json | loeyae-aidlc orchestrate report \
+# approval:block：Agent 展示 request 的随机确认语并停止；用户下一条消息必须精确输入
+loeyae-aidlc approve --stage application-design \
+  --instance application-design@module:module-a --request
+conversation-confirmation-envelope | loeyae-aidlc orchestrate report \
   --stage application-design --instance application-design@module:module-a \
-  --result approved --approval-token <token> --claim-receipt-stdin
+  --result approved --claim-receipt-stdin --approval-confirmation-stdin
 loeyae-aidlc orchestrate park
 
 # schema v2 只走兼容引擎；显式迁移默认 dry-run，--apply 才原子写入
@@ -435,16 +441,19 @@ Agent 不能跳步——schema v3 的每次 `report` 必须绑定确定的 `stag
 - Local Provider 只裁决同一工作树内进程；Git Provider 在专用 `refs/heads/aidlc/coordination/<workflow-id>` 上以远端 CAS 支持跨工作树/设备，不把业务 `main`/`master` 当锁；External Provider 当前是通用接口和内存 reference implementation，不代表已有 Jira/TAPD/Linear 连接器。
 - actor/device/client 共同标识 lease holder；assignment 只是长期负责人关系。不同 ready 实例可并行 claim，同一实例同时最多一个有效 lease。
 - `docs/aidlc/handoff.md` 只是派生的人类协作视图，不能改变 stage、skip、approval、claim 或 revision；冲突时以签名机器状态为准。
-- enrollment 位于项目外的 `~/.config/loeyae-aidlc/trust/enrollments/`。已 enrollment 的项目若 state 缺失、未签名、签名无效或 workflow ID 不匹配，CLI 与生命周期 Hook 都会 fail-closed。
-- 默认 key 位于 `~/.config/loeyae-aidlc/trust/trust.key`（`0600`）；宿主也可在启动所有相关进程前提供至少 32 字节的 `AIDLC_TRUST_SECRET`，测试/隔离环境可设置 `AIDLC_TRUST_DIR`。需要生成 Evidence 的工作流必须在第一次 `next` 前配置稳定的 `AIDLC_TRUST_SECRET`，并由 CI/宿主安全注入相同值。
-- 信任链冲突只能先用 `loeyae-aidlc recover inspect` 只读检查，再对 `parked` state 执行 `recover re-enroll`。后者必须用 `AIDLC_RECOVERY_SECRET` 或受限的 `AIDLC_RECOVERY_KEY_FILE` 证明旧 state，并用 `AIDLC_RECOVERY_ENROLLMENT_FILE` 提供同一 workflow、旧 key 签名的 active enrollment 以证明源项目绑定；跨主机路径变化由源/目标 root SHA 和真人短语显式确认。默认 dry-run，实际写入还要求 state/current enrollment/source enrollment SHA、旧/新 key ID、workflow ID 和原因，没有 `--yes` 或 secret CLI 参数。
-- recovery 在项目外 trust store 保存原 state、当前 enrollment 和源 enrollment 的原始字节、活动 key 签名的 plan/result audit，并使用带 `recovery_id` 的 pending enrollment + state lock 实现可续跑事务。事务未完成时普通 loader/Hook 继续 fail-closed；中断后重新运行同一命令继续，不得手工改 state、删 enrollment、任意重签或删除未决 audit。旧 key 签名的 Evidence 不会被批量重签，后续门禁需要时必须由受控 Producer 重新生成。
+- enrollment 位于项目外的 `~/.config/loeyae-aidlc/trust/enrollments/`，设备私钥位于同一 trust root 的 `device-signing-key.json`（POSIX `0600`、非符号链接）。私钥不写入项目、不输出，也不在成员间复制；state、event、claim receipt、Git coordination event、External Provider receipt 和 v3 Evidence 携带可跨设备验证的 Ed25519 public key/signature envelope。
+- 新 workflow 与 v3 Evidence 不要求配置、传递或共享 `AIDLC_TRUST_SECRET`。新 enrollment 使用 `trust_mode: "device-signature-v1"`。测试/隔离环境仍可通过 `AIDLC_TRUST_DIR` 指定独立 trust root；`AIDLC_TRUST_SECRET` 与 `trust.key` 仅保留给 schema v2/HMAC/recovery 兼容路径。
+- 新设备首次打开已有 v3 team state 时，`orchestrate next` 返回绑定 workflow、canonical project root、state SHA、event head、设备 key、随机 challenge 和 15 分钟 TTL 的 `team-enrollment-confirmation` ask。Agent 必须展示完整 `JOIN ...` 短语并结束当前回合；只有用户下一条真实消息精确匹配后，才能通过 strict `--team-enrollment-confirmation-stdin` 完成本机 enrollment。Agent 代填、近似输入、尾随空格、旧 request、过期 request 或 request 后 state/head 变化均拒绝。
+- enrollment 保存本机已接受的 event head。后续 state 必须扩展该 head；回滚、丢失已接受历史或 fork 会 fail-closed。接收其他设备合法追加后，本机 head 自动前进。Provider/SCM/本地访问控制仍决定谁能向共享流写入；当前实现不是带成员角色注册表和 per-device revoke event 的完整授权 PKI。
+- 旧 HMAC v3 state 只能由能验证旧 key 的原受信客户端先打开一次，随后自动转签为设备签名链；完全丢失旧 key 时不会绕过验证。旧 HMAC Git coordination log 会在原受信客户端第一次成功 mutation 中通过远端 CAS 原子重签整链，活动 legacy receipt 可由该客户端续租并换取新 Ed25519 receipt；新设备在迁移前明确拒绝。旧 HMAC Evidence 不会批量重签，门禁需要时必须由受控 Producer 重新生成。
+- schema v2 信任链冲突仍只能先用 `loeyae-aidlc recover inspect` 只读检查，再对 `parked` state 执行 `recover re-enroll`。后者必须用 `AIDLC_RECOVERY_SECRET` 或受限的 `AIDLC_RECOVERY_KEY_FILE` 证明旧 state，并用 `AIDLC_RECOVERY_ENROLLMENT_FILE` 提供同一 workflow、旧 key 签名的 active enrollment 以证明源项目绑定；跨主机路径变化由源/目标 root SHA 和真人短语显式确认。默认 dry-run，实际写入还要求 state/current enrollment/source enrollment SHA、旧/新 key ID、workflow ID 和原因，没有 `--yes` 或 secret CLI 参数。
+- legacy recovery 在项目外 trust store 保存原 state、当前 enrollment 和源 enrollment 的原始字节、活动 key 签名的 plan/result audit，并使用带 `recovery_id` 的 pending enrollment + state lock 实现可续跑事务。事务未完成时普通 loader/Hook 继续 fail-closed；中断后重新运行同一命令继续，不得手工改 state、删 enrollment、任意重签或删除未决 audit。
 
 该机制防止“只能写业务项目、不能访问用户 trust store”的 Agent 直接伪造 state/Evidence；它不能防御拥有同一 OS 用户任意文件读写权或能控制宿主进程环境的恶意进程，不应表述为同 UID 下绝对不可伪造。
 
 ### 审批与 instruction-only
 
-只有条件判定需要执行的 `application-design` 和 `operations` 实例使用 `approval: block`。`next` 为其创建绑定 `workflow_id + stage_instance + challenge` 的随机 challenge；模块级 `application-design` 的每个模块实例分别审批。用户可通过 `aidlc-approval` Skill、自然语言关键词或 Claude `/aidlc-approve` 进入审阅；这些入口只负责读取 `approve --stage <slug> --instance <id> --request` 的绑定上下文并路由受信宿主 Provider，普通聊天或 Slash Command 本身不是审批凭据。schema v3 中 Provider response 与 claim receipt 由宿主在 Agent 上下文外组合为严格 stdin envelope。没有受信 Provider 时，人类仍在交互式终端运行 `loeyae-aidlc approve --stage <slug> --instance <id>`，取得最长 15 分钟、消费后不可重放的 token，再与安全 stdin receipt 一起定向报告。condition=false 的实例先自动记录 `condition_skipped`，不会创建 challenge。没有受信宿主 Provider 且没有可用人类终端时，这两个阶段按设计 fail-closed；不得暴露普通非交互 token generator。KiroCrew 安全审批卡的宿主要求见 `trusted-approval-provider.md`，普通问答卡不能替代。
+只有条件判定需要执行的 `application-design` 和 `operations` 实例使用 `approval: block`。`next` 为其创建绑定 `workflow_id + stage_instance + challenge` 的随机 challenge；模块级 `application-design` 的每个模块实例分别审批。用户通过 `aidlc-approval` Skill、自然语言关键词或 Claude `/aidlc-approve` 进入审阅；`approve --stage <slug> --instance <id> --request` 返回绑定当前 request 的随机 `confirmation_phrase`。Agent 展示 canonical 产物/Evidence 摘要和完整短语后必须结束回合；只有用户在下一条真实消息中手工输入完全一致的正文，Agent 才能将 `aidlc.approval.confirmation` 与当前 claim receipt 组成严格 stdin envelope，通过 `--approval-confirmation-stdin` 定向报告。普通“同意”、预填按钮、Agent 复制文本、旧消息或同一回合自动提交均无效。引擎在内部生成并立即消费最长 15 分钟的一次性 token，仍校验 request、TTL、instance、receipt、produces、sensors 和 replay。同一设备的受信宿主 Provider 可通过本机设备凭据派生的一次性 token 提供可选一键增强，不接收或共享 `AIDLC_TRUST_SECRET`，也不是远程跨设备 Provider 协议；真人 TTY 仅是备用路径。默认流程不要求专用安全审批卡或另开终端。condition=false 的实例先自动记录 `condition_skipped`，不会创建 challenge。
 
 12 个不产生机器可验证产物的阶段显式标记为 `instruction_only`，执行正文后必须用 `--instruction-ack <stage-slug>` 报告。Stop Hook 不携带该确认，因此不能自动推进这些阶段。
 
@@ -464,8 +473,8 @@ Agent 不能跳步——schema v3 的每次 `report` 必须绑定确定的 `stag
 
 Construction sensors 按当前执行实例读取机器生成的结构化证据：项目级 `.aidlc/evidence/<stage-slug>/<sensor>.json`，模块级 `.aidlc/evidence/<stage-slug>/<module-id>/<sensor>.json`，单元级 `.aidlc/evidence/<stage-slug>/<module-id>/<unit-id>/<sensor>.json`。模块/单元 Evidence 不能跨上下文复用。证据文件必须：
 - 包含 `evidence_version: "1"` 和合法 ISO `timestamp`（≤ 24h）
-- 包含 `producer.name: "loeyae-aidlc-evidence"`、HMAC-SHA256 `integrity` 和当前 `commit + dirty + worktree_digest`
-- 由受控 Producer、CI、构建工具或测试 runner 生成（非手写），且生成时提供至少 32 字节的 `AIDLC_TRUST_SECRET`
+- 包含 `producer.name: "loeyae-aidlc-evidence"`、当前 `commit + dirty + worktree_digest`，且完整性与 workflow schema 一致：v3 为自动设备 Ed25519，v2 legacy 为 HMAC-SHA256
+- 由受控 Producer、CI、构建工具或测试 runner 生成（非手写）；v3 不要求 `AIDLC_TRUST_SECRET`，v2 legacy 仍要求至少 32 字节的稳定 secret
 - 命令只记录 `argv_digest`，不把可能含 token/secret 的完整 argv 写入证据；stdout/stderr 尾部继续脱敏
 - ≤ 512 KB，按 sensor schema 严格校验
 
@@ -529,7 +538,7 @@ v1 源码在 `loeyae-aidlc` 仓库。v2 的所有 steering 内容已从 v1 迁�
 - Node.js ≥ 20
 - npm 或 bun（安装用）
 - Kiro Crew Desktop（使用 Kiro Crew harness 时）
-- 需要阻断审批的宿主（Kiro Crew Dashboard、Claude、CodeBuddy、Qoder、ZCode、Codex 或 OpenCode）仍必须使用受信 token provider 或可用人类终端；两个 approval 阶段按设计 fail-closed。
+- 两个阻断审批阶段默认要求用户在新的对话消息中精确输入引擎随机确认语；受信宿主 Provider 和真人 TTY 均为可选增强/备用通道。
 
 ## License
 

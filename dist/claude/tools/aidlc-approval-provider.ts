@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { moduleInceptionRoot, unitConstructionRoot } from "./aidlc-execution-context";
-import { canonicalPayload, verifyApprovalToken } from "./aidlc-trust";
+import { approvalToken, canonicalPayload, verifyApprovalToken } from "./aidlc-trust";
 import type { WorkflowState } from "./aidlc-state";
 
 export interface ApprovalProviderRequest {
@@ -13,6 +13,7 @@ export interface ApprovalProviderRequest {
   module_id: string | null;
   unit_id: string | null;
   challenge: string;
+  confirmation_phrase: string;
   issued_at: string;
   expires_at: string;
   artifact_root: string;
@@ -29,11 +30,25 @@ export interface ApprovalProviderResponse {
   approval_token: string;
 }
 
+export interface ApprovalConversationConfirmation {
+  schema_version: 1;
+  kind: "aidlc.approval.confirmation";
+  request_id: string;
+  confirmation_phrase: string;
+}
+
 export interface ValidatedApprovalProviderResponse {
   approval_token: string;
   provider_id: string;
   human_event_id: string;
   approved_at: string;
+  request_id: string;
+}
+
+export interface ValidatedApprovalConversationConfirmation {
+  approval_token: string;
+  provider_id: "conversation-confirmation";
+  human_event_id: string;
   request_id: string;
 }
 
@@ -48,6 +63,12 @@ const RESPONSE_KEYS = new Set([
   "human_event_id",
   "approved_at",
   "approval_token",
+]);
+const CONVERSATION_CONFIRMATION_KEYS = new Set([
+  "schema_version",
+  "kind",
+  "request_id",
+  "confirmation_phrase",
 ]);
 
 function nonEmptyString(value: unknown, field: string): string {
@@ -68,6 +89,10 @@ function assertChallengeCurrent(challenge: string, now: number): number {
   if (issuedAt > now + CLOCK_SKEW_MS) throw new Error("approval challenge timestamp is in the future");
   if (now - issuedAt > CHALLENGE_TTL_MS) throw new Error("approval challenge expired; run orchestrate next again");
   return issuedAt;
+}
+
+export function approvalConfirmationPhrase(stageInstance: string, challenge: string): string {
+  return `APPROVE ${stageInstance} ${challenge.slice(-8)}`;
 }
 
 function requestArtifactRoot(state: WorkflowState): string {
@@ -106,6 +131,7 @@ export function buildApprovalProviderRequest(
     module_id: state.current_module || null,
     unit_id: state.current_unit || null,
     challenge,
+    confirmation_phrase: approvalConfirmationPhrase(stageInstance, challenge),
     issued_at: new Date(issuedAt).toISOString(),
     expires_at: new Date(issuedAt + CHALLENGE_TTL_MS).toISOString(),
     artifact_root: requestArtifactRoot(state),
@@ -117,24 +143,83 @@ export function buildApprovalProviderRequest(
   return { ...unsigned, request_id: requestId };
 }
 
-function parseResponseJson(raw: string): Record<string, unknown> {
+function parseStrictJsonObject(raw: string, label: string, allowedKeys: Set<string>): Record<string, unknown> {
   if (Buffer.byteLength(raw, "utf8") > MAX_RESPONSE_BYTES) {
-    throw new Error(`approval provider response exceeds ${MAX_RESPONSE_BYTES} bytes`);
+    throw new Error(`${label} exceeds ${MAX_RESPONSE_BYTES} bytes`);
   }
   let value: unknown;
   try {
     value = JSON.parse(raw);
   } catch {
-    throw new Error("approval provider response must be valid JSON");
+    throw new Error(`${label} must be valid JSON`);
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("approval provider response must be a JSON object");
+    throw new Error(`${label} must be a JSON object`);
   }
-  const response = value as Record<string, unknown>;
-  for (const key of Object.keys(response)) {
-    if (!RESPONSE_KEYS.has(key)) throw new Error(`approval provider response has unknown field ${key}`);
+  const parsed = value as Record<string, unknown>;
+  for (const key of Object.keys(parsed)) {
+    if (!allowedKeys.has(key)) throw new Error(`${label} has unknown field ${key}`);
   }
-  return response;
+  return parsed;
+}
+
+export function validateApprovalConversationConfirmation(
+  raw: string,
+  request: ApprovalProviderRequest,
+): ValidatedApprovalConversationConfirmation {
+  const confirmation = parseStrictJsonObject(
+    raw,
+    "approval conversation confirmation",
+    CONVERSATION_CONFIRMATION_KEYS,
+  );
+  if (confirmation.schema_version !== 1) {
+    throw new Error("approval conversation confirmation schema_version must be 1");
+  }
+  if (confirmation.kind !== "aidlc.approval.confirmation") {
+    throw new Error('approval conversation confirmation kind must be "aidlc.approval.confirmation"');
+  }
+  const requestId = nonEmptyString(confirmation.request_id, "approval conversation confirmation request_id");
+  if (requestId !== request.request_id) {
+    throw new Error("approval conversation confirmation request_id does not match the active request");
+  }
+  const phrase = nonEmptyString(
+    confirmation.confirmation_phrase,
+    "approval conversation confirmation confirmation_phrase",
+  );
+  if (phrase !== request.confirmation_phrase) {
+    throw new Error("approval conversation confirmation phrase did not match exactly");
+  }
+  const eventDigest = createHash("sha256")
+    .update(canonicalPayload({ request_id: requestId, confirmation_phrase: phrase }))
+    .digest("hex");
+  return {
+    approval_token: approvalToken(request.workflow_id, request.stage_instance, request.challenge),
+    provider_id: "conversation-confirmation",
+    human_event_id: `conversation-${eventDigest.slice(0, 24)}`,
+    request_id: requestId,
+  };
+}
+
+export function createLocalApprovalProviderResponse(
+  request: ApprovalProviderRequest,
+  providerIdValue: string,
+  humanEventIdValue: string,
+  approvedAt = Date.now(),
+): ApprovalProviderResponse {
+  assertChallengeCurrent(request.challenge, approvedAt);
+  const expiresAt = Date.parse(request.expires_at);
+  if (!Number.isFinite(expiresAt) || approvedAt > expiresAt) {
+    throw new Error("approval provider request is expired");
+  }
+  return {
+    schema_version: 1,
+    kind: "aidlc.approval.response",
+    request_id: request.request_id,
+    provider_id: nonEmptyString(providerIdValue, "approval provider response provider_id"),
+    human_event_id: nonEmptyString(humanEventIdValue, "approval provider response human_event_id"),
+    approved_at: new Date(approvedAt).toISOString(),
+    approval_token: approvalToken(request.workflow_id, request.stage_instance, request.challenge),
+  };
 }
 
 export function validateApprovalProviderResponse(
@@ -142,7 +227,7 @@ export function validateApprovalProviderResponse(
   request: ApprovalProviderRequest,
   now = Date.now(),
 ): ValidatedApprovalProviderResponse {
-  const response = parseResponseJson(raw);
+  const response = parseStrictJsonObject(raw, "approval provider response", RESPONSE_KEYS);
   if (response.schema_version !== 1) throw new Error("approval provider response schema_version must be 1");
   if (response.kind !== "aidlc.approval.response") {
     throw new Error('approval provider response kind must be "aidlc.approval.response"');

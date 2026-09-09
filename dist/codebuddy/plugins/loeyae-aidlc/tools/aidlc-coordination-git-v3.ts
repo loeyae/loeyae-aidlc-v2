@@ -10,7 +10,7 @@ import {
   type ClaimReceiptV3,
   type CoordinationIdentityV3,
 } from "./aidlc-coordination-local-v3";
-import { canonicalPayload, signRecord, verifyRecord, type IntegrityEnvelope } from "./aidlc-trust";
+import { canonicalPayload, signTeamRecord, verifyRecord, type IntegrityEnvelope } from "./aidlc-trust";
 
 export type GitCoordinationEventTypeV3 =
   | "instance_claimed"
@@ -204,7 +204,67 @@ function createEvent(
     occurred_at: occurredAt,
     payload,
   };
-  return validateGitCoordinationEventV3({ ...unsigned, integrity: signRecord(unsigned, true) }, true);
+  return validateGitCoordinationEventV3({ ...unsigned, integrity: signTeamRecord(unsigned) }, true);
+}
+
+function requiresTeamResign(events: readonly GitCoordinationEventV3[]): boolean {
+  return events.some((event) => {
+    if (event.integrity.algorithm !== "ed25519") return true;
+    const receipt = event.payload.receipt;
+    return isRecord(receipt)
+      && isRecord(receipt.integrity)
+      && receipt.integrity.algorithm !== "ed25519";
+  });
+}
+
+function resignClaimReceiptForTeam(value: unknown): ClaimReceiptV3 {
+  const receipt = validateClaimReceiptV3(value, true);
+  if (receipt.integrity.algorithm === "ed25519") return receipt;
+  const unsigned = { ...receipt } as Record<string, unknown>;
+  delete unsigned.integrity;
+  return validateClaimReceiptV3({ ...unsigned, integrity: signTeamRecord(unsigned) }, true);
+}
+
+export function resignGitCoordinationEventsForTeamV3(
+  workflowId: string,
+  values: readonly GitCoordinationEventV3[],
+): GitCoordinationEventV3[] {
+  if (!requiresTeamResign(values)) return [...values];
+  reduceGitCoordinationEventsV3(workflowId, values);
+
+  const migrated: GitCoordinationEventV3[] = [];
+  const activeReceiptDigests = new Map<string, string>();
+  for (const value of values) {
+    const event = validateGitCoordinationEventV3(value, true);
+    let payload: Record<string, unknown>;
+    if (
+      event.event_type === "instance_claimed"
+      || event.event_type === "claim_renewed"
+      || event.event_type === "claim_transferred"
+    ) {
+      const receipt = resignClaimReceiptForTeam(event.payload.receipt);
+      payload = { receipt };
+      activeReceiptDigests.set(event.stage_instance, claimReceiptDigestV3(receipt));
+    } else {
+      const receiptDigest = activeReceiptDigests.get(event.stage_instance);
+      if (!receiptDigest) throw new Error(`cannot migrate ${event.event_type} without an active receipt for ${event.stage_instance}`);
+      payload = { ...event.payload, receipt_digest: receiptDigest };
+      activeReceiptDigests.delete(event.stage_instance);
+    }
+
+    const unsigned = {
+      ...event,
+      previous_event_hash: migrated.length > 0 ? eventHash(migrated[migrated.length - 1]) : null,
+      payload,
+    } as Record<string, unknown>;
+    delete unsigned.integrity;
+    migrated.push(validateGitCoordinationEventV3({
+      ...unsigned,
+      integrity: signTeamRecord(unsigned),
+    }, true));
+  }
+  reduceGitCoordinationEventsV3(workflowId, migrated);
+  return migrated;
 }
 
 export function reduceGitCoordinationEventsV3(
@@ -327,10 +387,19 @@ function parseLog(content: string): GitCoordinationEventV3[] {
   if (Buffer.byteLength(content, "utf8") > MAX_LOG_BYTES) throw new Error("Git coordination event log exceeds size limit");
   const lines = content.split("\n").filter((line) => line.length > 0);
   return lines.map((line, index) => {
+    let parsed: unknown;
     try {
-      return validateGitCoordinationEventV3(JSON.parse(line) as unknown, true);
+      parsed = JSON.parse(line) as unknown;
+      return validateGitCoordinationEventV3(parsed, true);
     } catch (error) {
-      throw new Error(`invalid Git coordination log line ${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      const legacyHmac = isRecord(parsed)
+        && isRecord(parsed.integrity)
+        && parsed.integrity.algorithm === "hmac-sha256";
+      const migration = legacyHmac
+        ? "; legacy HMAC coordination logs must first be opened and mutated once by an original trusted client running the upgraded AI-DLC version"
+        : "";
+      throw new Error(`invalid Git coordination log line ${index + 1}: ${message}${migration}`);
     }
   });
 }
@@ -338,6 +407,14 @@ function parseLog(content: string): GitCoordinationEventV3[] {
 interface FetchedLog {
   head: string | null;
   events: GitCoordinationEventV3[];
+}
+
+function sameClaimReceiptSemantics(left: ClaimReceiptV3, right: ClaimReceiptV3): boolean {
+  const leftUnsigned = { ...left } as Record<string, unknown>;
+  const rightUnsigned = { ...right } as Record<string, unknown>;
+  delete leftUnsigned.integrity;
+  delete rightUnsigned.integrity;
+  return canonicalPayload(leftUnsigned) === canonicalPayload(rightUnsigned);
 }
 
 export class GitCoordinationProviderV3 {
@@ -407,11 +484,14 @@ export class GitCoordinationProviderV3 {
     const directory = this.workspace();
     try {
       const fetched = this.fetch(directory);
-      const snapshot = reduceGitCoordinationEventsV3(this.workflow_id, fetched.events);
+      const baseEvents = requiresTeamResign(fetched.events)
+        ? resignGitCoordinationEventsForTeamV3(this.workflow_id, fetched.events)
+        : fetched.events;
+      const snapshot = reduceGitCoordinationEventsV3(this.workflow_id, baseEvents);
       const built = builder(snapshot);
-      if (built.events.length <= fetched.events.length) throw new Error("Git coordination update must append at least one event");
-      for (let index = 0; index < fetched.events.length; index++) {
-        if (JSON.stringify(built.events[index]) !== JSON.stringify(fetched.events[index])) {
+      if (built.events.length <= baseEvents.length) throw new Error("Git coordination update must append at least one event");
+      for (let index = 0; index < baseEvents.length; index++) {
+        if (JSON.stringify(built.events[index]) !== JSON.stringify(baseEvents[index])) {
           throw new Error(`Git coordination update rewrote event sequence ${index + 1}`);
         }
       }
@@ -607,7 +687,13 @@ export class GitCoordinationProviderV3 {
     if (Date.parse(receipt.lease_expires_at) <= now) throw new Error(`remote claim receipt expired for ${receipt.stage_instance}`);
     const active = snapshot.claims[receipt.stage_instance];
     if (!active) throw new Error(`no active remote claim for ${receipt.stage_instance}`);
-    if (active.receipt.claim_id !== receipt.claim_id || active.receipt_digest !== claimReceiptDigestV3(receipt)) {
+    const suppliedDigest = claimReceiptDigestV3(receipt);
+    const migratedLegacyReceipt = receipt.integrity.algorithm === "hmac-sha256"
+      && sameClaimReceiptSemantics(receipt, active.receipt);
+    if (
+      active.receipt.claim_id !== receipt.claim_id
+      || (active.receipt_digest !== suppliedDigest && !migratedLegacyReceipt)
+    ) {
       throw new Error(`remote claim receipt is stale for ${receipt.stage_instance}`);
     }
     return active;

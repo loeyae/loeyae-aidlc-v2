@@ -1,14 +1,25 @@
 import { strict as assert } from "assert";
 import { createHmac } from "crypto";
+import { existsSync, mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
+  approvalConfirmationPhrase,
   buildApprovalProviderRequest,
+  createLocalApprovalProviderResponse,
+  validateApprovalConversationConfirmation,
   validateApprovalProviderResponse,
+  type ApprovalConversationConfirmation,
   type ApprovalProviderResponse,
 } from "../core/tools/aidlc-approval-provider";
 import type { WorkflowState } from "../core/tools/aidlc-state";
 
+const originalSecret = process.env.AIDLC_TRUST_SECRET;
+const originalTrustDirectory = process.env.AIDLC_TRUST_DIR;
+const scratch = mkdtempSync(join(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir(), "aidlc-approval-provider-"));
 const secret = "approval-provider-test-secret-32-bytes";
 process.env.AIDLC_TRUST_SECRET = secret;
+process.env.AIDLC_TRUST_DIR = join(scratch, "legacy-trust");
 
 const issuedAt = Date.parse("2026-09-09T00:00:00.000Z");
 const stageInstance = "application-design@module:module-a";
@@ -43,16 +54,47 @@ assert.equal(request.module_id, "module-a");
 assert.equal(request.unit_id, null);
 assert.equal(request.artifact_root, "docs/aidlc/modules/module-a/inception");
 assert.equal(request.evidence_root, ".aidlc/evidence/application-design/module-a");
+assert.equal(request.confirmation_phrase, approvalConfirmationPhrase(stageInstance, challenge));
+assert.equal(request.confirmation_phrase, `APPROVE ${stageInstance} ${challenge.slice(-8)}`);
 assert.match(request.request_id, /^[a-f0-9]{64}$/);
 assert.deepEqual(
   buildApprovalProviderRequest(state, "application-design", issuedAt + 2000),
   request,
-  "the same active challenge must produce a stable request",
+  "the same active challenge must produce a stable request and confirmation phrase",
 );
 
 const token = createHmac("sha256", Buffer.from(secret, "utf8"))
   .update(`aidlc-approval-v1\n${state.workflow_id}\n${stageInstance}\n${challenge}`)
   .digest("hex");
+
+const conversationConfirmation: ApprovalConversationConfirmation = {
+  schema_version: 1,
+  kind: "aidlc.approval.confirmation",
+  request_id: request.request_id,
+  confirmation_phrase: request.confirmation_phrase,
+};
+const validatedConversation = validateApprovalConversationConfirmation(
+  JSON.stringify(conversationConfirmation),
+  request,
+);
+assert.equal(validatedConversation.approval_token, token);
+assert.equal(validatedConversation.provider_id, "conversation-confirmation");
+assert.match(validatedConversation.human_event_id, /^conversation-[a-f0-9]{24}$/);
+
+function conversationRejected(mutate: (value: Record<string, unknown>) => void, message: RegExp): void {
+  const value = { ...conversationConfirmation } as Record<string, unknown>;
+  mutate(value);
+  assert.throws(
+    () => validateApprovalConversationConfirmation(JSON.stringify(value), request),
+    message,
+  );
+}
+
+conversationRejected((value) => { value.request_id = "0".repeat(64); }, /request_id does not match/);
+conversationRejected((value) => { value.confirmation_phrase = `${request.confirmation_phrase} `; }, /did not match exactly/);
+conversationRejected((value) => { value.kind = "aidlc.approval.response"; }, /kind must be/);
+conversationRejected((value) => { value.unexpected = true; }, /unknown field unexpected/);
+
 const response: ApprovalProviderResponse = {
   schema_version: 1,
   kind: "aidlc.approval.response",
@@ -97,4 +139,36 @@ assert.throws(
   /challenge expired/,
 );
 
-console.log("Approval provider contract tests passed");
+delete process.env.AIDLC_TRUST_SECRET;
+const localTrust = join(scratch, "local-provider-trust");
+process.env.AIDLC_TRUST_DIR = localTrust;
+const localResponse = createLocalApprovalProviderResponse(
+  request,
+  "trusted-host-local-device",
+  "human-event-local-001",
+  issuedAt + 3000,
+);
+const localValidated = validateApprovalProviderResponse(
+  JSON.stringify(localResponse),
+  request,
+  issuedAt + 4000,
+);
+assert.equal(localValidated.provider_id, "trusted-host-local-device");
+assert.equal(localValidated.human_event_id, "human-event-local-001");
+assert.equal(existsSync(join(localTrust, "trust.key")), false);
+assert.equal(existsSync(join(localTrust, "device-signing-key.json")), true);
+
+process.env.AIDLC_TRUST_DIR = join(scratch, "another-device-trust");
+assert.throws(
+  () => validateApprovalProviderResponse(JSON.stringify(localResponse), request, issuedAt + 4000),
+  /token is invalid or stale/,
+  "a trusted-host response is intentionally scoped to the device that issued its one-time token",
+);
+
+if (originalSecret === undefined) delete process.env.AIDLC_TRUST_SECRET;
+else process.env.AIDLC_TRUST_SECRET = originalSecret;
+if (originalTrustDirectory === undefined) delete process.env.AIDLC_TRUST_DIR;
+else process.env.AIDLC_TRUST_DIR = originalTrustDirectory;
+rmSync(scratch, { recursive: true, force: true });
+
+console.log("Approval request, conversation confirmation, and local-device provider contract tests passed");

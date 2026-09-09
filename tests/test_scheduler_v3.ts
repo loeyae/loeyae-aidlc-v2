@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
   claimInstanceV3,
   type ClaimOperationV3,
@@ -18,6 +21,9 @@ import {
 
 const originalFlag = process.env.AIDLC_COLLABORATION_V3;
 const originalSecret = process.env.AIDLC_TRUST_SECRET;
+const originalTrustDirectory = process.env.AIDLC_TRUST_DIR;
+const root = mkdtempSync(join(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir(), "aidlc-scheduler-v3-"));
+process.env.AIDLC_TRUST_DIR = join(root, "trust");
 process.env.AIDLC_COLLABORATION_V3 = "1";
 process.env.AIDLC_TRUST_SECRET = "scheduler-v3-test-secret-at-least-32-bytes";
 
@@ -197,4 +203,7 @@ try {
   else process.env.AIDLC_COLLABORATION_V3 = originalFlag;
   if (originalSecret === undefined) delete process.env.AIDLC_TRUST_SECRET;
   else process.env.AIDLC_TRUST_SECRET = originalSecret;
+  if (originalTrustDirectory === undefined) delete process.env.AIDLC_TRUST_DIR;
+  else process.env.AIDLC_TRUST_DIR = originalTrustDirectory;
+  rmSync(root, { recursive: true, force: true });
 }

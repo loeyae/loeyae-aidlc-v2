@@ -7,7 +7,8 @@
 - `docs/aidlc/aidlc-state.json` 是唯一机器路由状态。schema v3 由签名 append-only events 归约出 instance map、ready set、claim/lease 和单调 revision，并通过 CAS 原子更新；Agent 和协议文档不得直接编辑。
 - `docs/aidlc/handoff.md` 是从机器状态及协作产物派生的人类交接视图，可记录模块、单元、UI 和 CR 细节，但不能改变实例完成、跳过、审批、assignment、claim、lease 或 ready set。
 - 恢复时先执行 `loeyae-aidlc orchestrate next --status` 验证机器状态，再读取 handoff；两者冲突时立即阻断，以签名机器状态为准并重新生成 handoff。
-- 如果状态检查因 key ID、签名或 enrollment workflow mismatch 失败，Agent 最多执行只读 `loeyae-aidlc recover inspect` 并报告结果；不得读取/索要/输出 trust secret，不得调用 `recover re-enroll --apply`，不得手改 state、删除 enrollment 或复制签名。持有旧 key 以及同 workflow、旧 key 签名 active source enrollment 的真人必须先确认 state 已 parked，再在独立交互终端完成 dry-run 和绑定 source/target root 摘要的精确短语确认；之后 Agent 重新运行正式状态检查。
+- 如果 `next --status` 返回 `team-enrollment-confirmation` ask，这表示当前设备尚未 enrollment，不是 legacy key mismatch。Agent 展示完整 `JOIN ...` 短语和 TTL 后必须结束当前回合；只在用户下一条真实消息全文精确匹配时通过 strict `--team-enrollment-confirmation-stdin` 提交。不得代填、共享 secret/private key 或改用 recovery。
+- 只有 schema v2/HMAC legacy 状态检查因 key ID、签名或 enrollment workflow mismatch 失败时，Agent 才最多执行只读 `loeyae-aidlc recover inspect` 并报告结果；不得读取/索要/输出 trust secret，不得调用 `recover re-enroll --apply`，不得手改 state、删除 enrollment 或复制签名。持有旧 key 以及同 workflow、旧 key 签名 active source enrollment 的真人必须先确认 state 已 parked，再在独立交互终端完成 dry-run 和绑定 source/target root 摘要的精确短语确认；之后 Agent 重新运行正式状态检查。
 
 ## 自动 Checkpoint 与接手语义
 
@@ -26,8 +27,9 @@
 
 | 场景 | 识别信号 | 处理 |
 |------|---------|------|
-| 新项目启动 | 无有效 enrollment/签名 state | 正常启动流程，不执行恢复检查点 |
-| 信任链冲突 | state key/signature 或 enrollment workflow mismatch | fail-closed；只读 `recover inspect`，由真人终端按受控 re-enroll 流程处理 |
+| 新项目启动 | 无 state | 正常启动流程，不执行恢复检查点 |
+| v3 新设备加入 | 有效 team state，但本机无 enrollment；引擎返回 `team-enrollment-confirmation` | 展示随机短语并结束回合；下一条精确用户消息经 strict stdin 完成 enrollment |
+| legacy 信任链冲突 | schema v2/HMAC state key/signature 或 enrollment workflow mismatch | fail-closed；只读 `recover inspect`，由真人终端按受控 re-enroll 流程处理 |
 | 正常会话恢复 | 存在有效签名 state + 用户说"继续" | 执行本检查点 → 恢复流程 |
 | Context Compact 恢复 | 会话摘要中有 compact 标记 或 AI 检测到上下文被压缩 | 执行本检查点（**额外纪律**） |
 | 跨会话交接 | 用户粘贴 handoff.md 中的交接提示词 | 执行本检查点 → 交接流程 |
@@ -43,6 +45,8 @@
 ┌─────────────────────────────────────────────────────────────┐
 │ Step 1: 验证签名 state，再读取 handoff.md 人类摘要               │
 │ - 运行 orchestrate next --status 确认 ready/active/resolved instances │
+│ - 若返回 team-enrollment-confirmation：展示完整短语并结束回合；  │
+│   下一条用户消息精确匹配后用 strict stdin 提交，再重启 Step 1  │
 │ - 取得 actor/device/client identity 后再用 next 恢复或 claim focus  │
 │ - 从签名 state 确认当前模块、单元、choice 与 condition skip     │
 │ - handoff 只补充活跃协调、批次、协作者和变更请求说明            │
@@ -135,7 +139,8 @@ Boss，检测到会话上下文被压缩。已验证签名 state，并从 handof
 - ❌ **不要假设阶段状态** — 必须由编排器验证签名 state、ready set、stage_instance 与 lease；handoff 不能代替
 - ❌ **不要跳过宣布恢复状态** — 这是团队协作和审计的必要记录
 - ❌ **不要在恢复后立即大量加载前序产出物** — 按延迟加载策略按需读取
-- ❌ **不要用手改 state、删除 enrollment、任意重签或非交互参数修复信任链** — 只允许真人终端执行受控 `recover re-enroll`
+- ❌ **不要用手改 state、删除 enrollment、任意重签或非交互参数修复 legacy 信任链** — schema v2/HMAC 只允许真人终端执行受控 `recover re-enroll`
+- ❌ **不要把 v3 新设备 enrollment 当作 recovery** — 不得代填 `JOIN` 短语、同回合提交、复制其他设备 private key 或要求团队共享 `AIDLC_TRUST_SECRET`
 
 ### 恢复后的上下文加载
 

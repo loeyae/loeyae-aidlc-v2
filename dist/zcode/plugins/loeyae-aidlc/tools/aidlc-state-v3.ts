@@ -19,7 +19,15 @@ import {
   type HistoryEntry,
   type WorkflowState,
 } from "./aidlc-state";
-import { canonicalPayload, readEnrollment, signRecord, verifyRecord, type IntegrityEnvelope } from "./aidlc-trust";
+import {
+  canonicalPayload,
+  isTeamSignedRecord,
+  readEnrollment,
+  registerTeamEnrollment,
+  signTeamRecord,
+  verifyRecord,
+  type IntegrityEnvelope,
+} from "./aidlc-trust";
 
 export const COLLABORATION_V3_FLAG = "AIDLC_COLLABORATION_V3";
 
@@ -548,7 +556,7 @@ export function createWorkflowEventV3(
     payload: input.payload || {},
   };
   if (input.stage_instance) unsigned.stage_instance = input.stage_instance;
-  const event = { ...unsigned, integrity: signRecord(unsigned, true) } as WorkflowEventV3;
+  const event = { ...unsigned, integrity: signTeamRecord(unsigned) } as WorkflowEventV3;
   return validateWorkflowEventV3(event, true);
 }
 
@@ -900,8 +908,29 @@ export function materializeWorkflowStateV3(
   const projection = reduceWorkflowEventsV3(workflowId, events, materializationRevision);
   return {
     ...projection,
-    integrity: signRecord(projection as unknown as Record<string, unknown>, true) as unknown as Record<string, unknown>,
+    integrity: signTeamRecord(projection as unknown as Record<string, unknown>) as unknown as Record<string, unknown>,
   };
+}
+
+export function resignWorkflowStateV3ForTeam(stateValue: WorkflowStateV3): WorkflowStateV3 {
+  const state = validateWorkflowStateV3(stateValue, true);
+  if (isTeamSignedRecord(state as unknown as Record<string, unknown>)
+    && state.events.every((event) => isTeamSignedRecord(event))) {
+    return state;
+  }
+  const events: WorkflowEventV3[] = [];
+  for (const event of state.events) {
+    const resigned = createWorkflowEventV3({
+      workflow_id: event.workflow_id,
+      event_type: event.event_type,
+      ...(event.stage_instance ? { stage_instance: event.stage_instance } : {}),
+      occurred_at: event.occurred_at,
+      event_id: event.event_id,
+      payload: clone(event.payload),
+    }, events.at(-1));
+    events.push(resigned);
+  }
+  return materializeWorkflowStateV3(state.workflow_id, events, state.revision);
 }
 
 export function validateWorkflowStateV3(value: unknown, requireIntegrity = true): WorkflowStateV3 {
@@ -1142,6 +1171,7 @@ export function migrateWorkflowStateFileV2ToV3(
     if (!readFileSync(path).equals(original)) throw new Error("state changed concurrently during schema v3 migration");
     renameSync(temporary, path);
     temporary = "";
+    registerTeamEnrollment(root, migrated.workflow_id, migrated.event_head.event_hash, "active");
     return migrated;
   } finally {
     if (lockFd !== undefined) {

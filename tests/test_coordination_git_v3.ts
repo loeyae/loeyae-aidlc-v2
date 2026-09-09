@@ -1,14 +1,22 @@
 import assert from "node:assert/strict";
+import { createHash, randomUUID } from "crypto";
 import { spawn, spawnSync } from "child_process";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import {
   GitCoordinationProviderV3,
   gitCoordinationRef,
+  validateGitCoordinationEventV3,
   type GitClaimResultV3,
+  type GitCoordinationEventV3,
 } from "../core/tools/aidlc-coordination-git-v3";
+import {
+  claimReceiptDigestV3,
+  type ClaimReceiptV3,
+} from "../core/tools/aidlc-coordination-local-v3";
+import { canonicalPayload, signRecord } from "../core/tools/aidlc-trust";
 
 const workerIndex = process.argv.indexOf("--git-claim-worker");
 if (workerIndex >= 0) {
@@ -31,8 +39,10 @@ if (workerIndex >= 0) {
 }
 
 const originalSecret = process.env.AIDLC_TRUST_SECRET;
+const originalTrustDirectory = process.env.AIDLC_TRUST_DIR;
 process.env.AIDLC_TRUST_SECRET = "git-coordination-test-secret-at-least-32-bytes";
 const root = mkdtempSync(join(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir(), "aidlc-git-provider-"));
+process.env.AIDLC_TRUST_DIR = join(root, "trust");
 
 function git(cwd: string, args: string[]): string {
   const result = spawnSync("git", args, {
@@ -56,6 +66,75 @@ function bare(name: string): string {
   mkdirSync(path, { recursive: true });
   git(path, ["init", "--bare", "--quiet"]);
   return path;
+}
+
+function legacyHmacLog(workflowId: string, providerId: string): { events: GitCoordinationEventV3[]; receipt: ClaimReceiptV3 } {
+  const receiptUnsigned: Record<string, unknown> = {
+    schema_version: 1,
+    kind: "aidlc.claim.receipt",
+    workflow_id: workflowId,
+    stage_instance: "legacy-task",
+    claim_id: randomUUID(),
+    actor_id: "actor:legacy-owner",
+    device_id: "device:legacy-owner",
+    client_id: "client:legacy-owner",
+    provider_id: providerId,
+    issued_at: "2027-01-02T00:00:00.000Z",
+    lease_expires_at: "2027-01-02T00:01:00.000Z",
+    generation: 1,
+  };
+  const receipt = {
+    ...receiptUnsigned,
+    integrity: signRecord(receiptUnsigned, true),
+  } as ClaimReceiptV3;
+  const claimedUnsigned: Record<string, unknown> = {
+    schema_version: 1,
+    kind: "aidlc.git-coordination.event",
+    workflow_id: workflowId,
+    sequence: 1,
+    event_id: randomUUID(),
+    previous_event_hash: null,
+    event_type: "instance_claimed",
+    stage_instance: "legacy-task",
+    occurred_at: "2027-01-02T00:00:00.000Z",
+    payload: { receipt },
+  };
+  const claimed = validateGitCoordinationEventV3({
+    ...claimedUnsigned,
+    integrity: signRecord(claimedUnsigned, true),
+  }, true);
+  const releasedUnsigned: Record<string, unknown> = {
+    schema_version: 1,
+    kind: "aidlc.git-coordination.event",
+    workflow_id: workflowId,
+    sequence: 2,
+    event_id: randomUUID(),
+    previous_event_hash: createHash("sha256").update(canonicalPayload(claimed)).digest("hex"),
+    event_type: "instance_released",
+    stage_instance: "legacy-task",
+    occurred_at: "2027-01-02T00:00:01.000Z",
+    payload: {
+      claim_id: receipt.claim_id,
+      receipt_digest: claimReceiptDigestV3(receipt),
+      reason: "legacy handoff complete",
+    },
+  };
+  const released = validateGitCoordinationEventV3({
+    ...releasedUnsigned,
+    integrity: signRecord(releasedUnsigned, true),
+  }, true);
+  return { events: [claimed, released], receipt };
+}
+
+function pushCoordinationLog(remote: string, workflowId: string, events: readonly GitCoordinationEventV3[], name: string): void {
+  const work = join(root, name);
+  mkdirSync(work);
+  git(work, ["init", "--quiet"]);
+  git(work, ["remote", "add", "origin", remote]);
+  writeFileSync(join(work, "events.ndjson"), `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
+  git(work, ["add", "events.ndjson"]);
+  git(work, ["commit", "--quiet", "-m", "legacy coordination log"]);
+  git(work, ["push", "--quiet", "origin", `HEAD:${gitCoordinationRef(workflowId)}`]);
 }
 
 interface ChildResult {
@@ -205,9 +284,103 @@ try {
   git(tamperWork, ["push", "--quiet", "--force", "origin", `HEAD:${gitCoordinationRef(tamperedWorkflow)}`]);
   assert.throws(() => tamperedProvider.snapshot(), /integrity failed/);
 
-  console.log("Git coordination provider CAS, ACK, ref isolation, and tamper tests passed");
+  const legacyRemote = bare("legacy-hmac.git");
+  const legacyWorkflow = "workflow-git-legacy-hmac";
+  const ownerTrust = join(root, "legacy-owner-trust");
+  const memberTrust = join(root, "legacy-member-trust");
+  process.env.AIDLC_TRUST_SECRET = "git-coordination-test-secret-at-least-32-bytes";
+  process.env.AIDLC_TRUST_DIR = ownerTrust;
+  const legacyProvider = new GitCoordinationProviderV3({
+    remote: legacyRemote,
+    workflow_id: legacyWorkflow,
+    scratch_root: root,
+    default_lease_ms: 30_000,
+  });
+  const legacy = legacyHmacLog(legacyWorkflow, legacyProvider.provider_id);
+  assert.ok(legacy.events.every((event) => event.integrity.algorithm === "hmac-sha256"));
+  pushCoordinationLog(legacyRemote, legacyWorkflow, legacy.events, "legacy-hmac-work");
+
+  delete process.env.AIDLC_TRUST_SECRET;
+  process.env.AIDLC_TRUST_DIR = memberTrust;
+  const unenrolledMember = new GitCoordinationProviderV3({
+    remote: legacyRemote,
+    workflow_id: legacyWorkflow,
+    scratch_root: root,
+  });
+  assert.throws(
+    () => unenrolledMember.snapshot(),
+    /legacy HMAC coordination logs must first be opened and mutated once by an original trusted client/,
+  );
+
+  process.env.AIDLC_TRUST_SECRET = "git-coordination-test-secret-at-least-32-bytes";
+  process.env.AIDLC_TRUST_DIR = ownerTrust;
+  const upgradedOwner = new GitCoordinationProviderV3({
+    remote: legacyRemote,
+    workflow_id: legacyWorkflow,
+    scratch_root: root,
+    default_lease_ms: 30_000,
+  });
+  upgradedOwner.claim("team-task", {
+    actor_id: "actor:owner",
+    device_id: "device:owner",
+    client_id: "client:owner",
+  }, 30_000, "2027-01-02T00:00:02.000Z");
+  assert.equal(existsSync(join(ownerTrust, "trust.key")), false);
+
+  delete process.env.AIDLC_TRUST_SECRET;
+  process.env.AIDLC_TRUST_DIR = memberTrust;
+  const migratedSnapshot = new GitCoordinationProviderV3({
+    remote: legacyRemote,
+    workflow_id: legacyWorkflow,
+    scratch_root: root,
+  }).snapshot();
+  assert.equal(migratedSnapshot.events.length, 3);
+  assert.deepEqual(
+    migratedSnapshot.events.slice(0, 2).map((event) => event.event_id),
+    legacy.events.map((event) => event.event_id),
+    "migration must preserve legacy event identities and business semantics",
+  );
+  assert.ok(migratedSnapshot.events.every((event) => event.integrity.algorithm === "ed25519"));
+  assert.equal(
+    ((migratedSnapshot.events[0].payload.receipt as ClaimReceiptV3).integrity).algorithm,
+    "ed25519",
+  );
+  assert.ok(migratedSnapshot.claims["team-task"]);
+  assert.equal(existsSync(join(memberTrust, "trust.key")), false);
+
+  const activeLegacyRemote = bare("legacy-active-hmac.git");
+  const activeLegacyWorkflow = "workflow-git-legacy-active-hmac";
+  const activeOwnerTrust = join(root, "legacy-active-owner-trust");
+  process.env.AIDLC_TRUST_SECRET = "git-coordination-test-secret-at-least-32-bytes";
+  process.env.AIDLC_TRUST_DIR = activeOwnerTrust;
+  const activeOwner = new GitCoordinationProviderV3({
+    remote: activeLegacyRemote,
+    workflow_id: activeLegacyWorkflow,
+    scratch_root: root,
+    default_lease_ms: 30_000,
+  });
+  const activeLegacy = legacyHmacLog(activeLegacyWorkflow, activeOwner.provider_id);
+  pushCoordinationLog(activeLegacyRemote, activeLegacyWorkflow, activeLegacy.events.slice(0, 1), "legacy-active-hmac-work");
+  const renewedLegacy = activeOwner.heartbeat(activeLegacy.receipt, 30_000, "2027-01-02T00:00:10.000Z");
+  assert.equal(renewedLegacy.receipt.integrity.algorithm, "ed25519");
+  assert.equal(renewedLegacy.receipt.generation, 2);
+
+  delete process.env.AIDLC_TRUST_SECRET;
+  process.env.AIDLC_TRUST_DIR = join(root, "legacy-active-member-trust");
+  const activeMigratedSnapshot = new GitCoordinationProviderV3({
+    remote: activeLegacyRemote,
+    workflow_id: activeLegacyWorkflow,
+    scratch_root: root,
+  }).snapshot();
+  assert.equal(activeMigratedSnapshot.events.length, 2);
+  assert.ok(activeMigratedSnapshot.events.every((event) => event.integrity.algorithm === "ed25519"));
+  assert.equal(activeMigratedSnapshot.claims["legacy-task"].receipt.generation, 2);
+
+  console.log("Git coordination provider CAS, ACK, legacy migration, ref isolation, and tamper tests passed");
 } finally {
   if (originalSecret === undefined) delete process.env.AIDLC_TRUST_SECRET;
   else process.env.AIDLC_TRUST_SECRET = originalSecret;
+  if (originalTrustDirectory === undefined) delete process.env.AIDLC_TRUST_DIR;
+  else process.env.AIDLC_TRUST_DIR = originalTrustDirectory;
   rmSync(root, { recursive: true, force: true });
 }

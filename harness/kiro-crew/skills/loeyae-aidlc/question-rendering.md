@@ -19,16 +19,18 @@ The agent presents them using the `[OPTIONS:]` line or `ask_question` MCP tool.
 
 ### Confirmation gate (approval review)
 
-This card records the user's review choice only; it is not an approval credential. If the user selects Approve, a human must still run `loeyae-aidlc approve --stage <slug>` in an interactive terminal (or use a trusted host provider), then pass the one-time token to `orchestrate report`.
+Do not render approval as an options card. Load `aidlc-approval`, show the reviewed Stage instance, artifact/Evidence summary, expiry, and the exact engine-generated `confirmation_phrase`, then end the Agent turn. The user must manually type that full phrase in the next message; a button must not prefill or submit it.
 
 ```
-Stage "[stage name]" is ready for review.
+Stage "[stage instance]" is ready for review.
 
-1. ✅ Approve — proceed to next stage
-2. 🔄 Request Changes — describe what needs revision
+[artifact and Evidence summary]
 
-[OPTIONS: Approve | Request Changes]
+To approve, type exactly in your next message:
+[confirmation_phrase]
 ```
+
+A normal “Approve”, an old message, Agent-copied text, or same-turn submission is not valid. Request Changes may still be collected as ordinary free text and reported as `rejected` by the lease holder.
 
 ### Free-text with options
 
@@ -51,6 +53,6 @@ If the user picks "Other", prompt for their input in a follow-up turn.
 - Always number options starting from 1
 - Keep option labels concise (≤ 50 chars)
 - Include a brief description after the label when helpful
-- Gate questions (approve/reject) always have exactly 2 options
+- Approval confirmation never uses `[OPTIONS:]`; display the exact random phrase and wait for manual free-text input in the next user turn
 - Never present more than 6 options in a single question
 - The `[OPTIONS:]` line is the LAST line — nothing after it

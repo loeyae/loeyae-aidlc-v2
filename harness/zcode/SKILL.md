@@ -25,8 +25,8 @@ I9 UI 设计不是初始化选项，而是运行时 choice。`ui-mock` directive
 loeyae-aidlc orchestrate report --stage <slug> --result completed
 ```
 
-`gate: true` 阶段只能使用受信任的人类审批 token；Skill、Agent 和 Stop Hook 不得自行签发。`instruction_only` 阶段必须在执行正文后传入 `--instruction-ack <slug>`。公开 report 不支持手动 `skipped`，只有图谱条件为 false 时引擎才能记录内部 `condition_skipped`。
+`gate: true` 阶段先加载 `aidlc-approval`，展示 request 的随机 `confirmation_phrase` 后结束回合；只有用户下一条真实消息完整匹配，才能通过 `--approval-confirmation-stdin` 定向报告。普通“同意”、预填按钮、Agent 代填、旧消息或同一回合自动提交无效。Provider 是可选增强，真人 TTY 是备用路径。`instruction_only` 阶段必须在执行正文后传入 `--instruction-ack <slug>`。公开 report 不支持手动 `skipped`，只有图谱条件为 false 时引擎才能记录内部 `condition_skipped`。
 
 Stop Hook 返回 ZCode 原生 `decision: block` 反馈。ZCode 最多连续继续主模型三次，因此生命周期反馈有宿主上限；未完成阶段仍保留在签名工作流状态中，后续会话必须继续。Hook 不直接修改 `docs/aidlc/aidlc-state.json` 或 `.aidlc/evidence/`。
 
-状态、Evidence、审批、前置依赖、产物和 sensors 均以随 Skill/插件发布的 `tools/`、`stages/`、`knowledge/` 和 `sensors/` 为准。需要 Evidence 时，必须在第一次 `next` 前向 ZCode、CLI、Producer 和 Hook 注入同一份至少 32 字节的 `AIDLC_TRUST_SECRET`。
+状态、Evidence、审批、前置依赖、产物和 sensors 均以随 Skill/插件发布的 `tools/`、`stages/`、`knowledge/` 和 `sensors/` 为准。schema v3 为每台设备自动生成独立 Ed25519 credential，成员不配置、传递或共享 `AIDLC_TRUST_SECRET`。若 `next` 返回 `team-enrollment-confirmation` ask，Agent 展示完整 `JOIN ...` 短语后必须结束回合；仅用户下一条真实消息精确匹配后通过 strict `--team-enrollment-confirmation-stdin` 完成本机 enrollment。不得代填、同回合提交或复制 private key。enrollment 记录已接受 event head，rollback/fork fail-closed；Provider/SCM 权限仍决定共享流写入资格。v3 Evidence 自动设备签名；schema v2/HMAC/recovery legacy 才使用 `AIDLC_TRUST_SECRET`。同 stage 多个活动实例时 Producer 必须传精确 `--instance`。

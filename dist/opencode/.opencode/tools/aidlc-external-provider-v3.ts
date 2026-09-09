@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "crypto";
 import type { CoordinationIdentityV3 } from "./aidlc-coordination-local-v3";
-import { canonicalPayload, signRecord, verifyRecord, type IntegrityEnvelope } from "./aidlc-trust";
+import { canonicalPayload, signTeamRecord, verifyRecord, type IntegrityEnvelope } from "./aidlc-trust";
 
 export type ExternalWorkStatusV3 = "ready" | "claimed" | "completed";
 export type ExternalProviderOperationV3 = "claim" | "renew" | "release" | "transfer" | "complete";
@@ -297,7 +297,7 @@ function createReceipt(
     issued_at: occurredAt,
     provider_event_id: randomUUID(),
   };
-  return validateExternalProviderReceiptV3({ ...unsigned, integrity: signRecord(unsigned, true) }, true);
+  return validateExternalProviderReceiptV3({ ...unsigned, integrity: signTeamRecord(unsigned) }, true);
 }
 
 export class InMemoryExternalWorkManagementProviderV3 implements ExternalWorkManagementProviderV3 {

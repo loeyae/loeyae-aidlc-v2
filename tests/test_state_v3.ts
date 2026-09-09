@@ -28,6 +28,7 @@ const originalEnvironment = {
   failpoint: process.env.AIDLC_V3_MIGRATION_FAILPOINT,
 };
 const root = mkdtempSync(join(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir(), "aidlc-state-v3-"));
+process.env.AIDLC_TRUST_DIR = join(root, "default-trust");
 process.env.AIDLC_TRUST_SECRET = "state-v3-contract-test-secret-at-least-32-bytes";
 process.env.AIDLC_COLLABORATION_V3 = "1";
 
@@ -75,7 +76,11 @@ function resignState(value: WorkflowStateV3): WorkflowStateV3 {
 try {
   delete process.env.AIDLC_COLLABORATION_V3;
   assert.equal(collaborationV3Enabled(), true, "schema v3 is the 3.0 default");
-  assert.equal(createInitialWorkflowStateV3("express").schema_version, 3);
+  const defaultV3 = createInitialWorkflowStateV3("express");
+  assert.equal(defaultV3.schema_version, 3);
+  assert.equal(defaultV3.integrity?.algorithm, "ed25519");
+  assert.ok(defaultV3.events.length > 0);
+  assert.ok(defaultV3.events.every((event) => event.integrity?.algorithm === "ed25519"));
   assert.equal(createInitialState("express").schema_version, 2, "the explicit v2 compatibility constructor remains available");
   process.env.AIDLC_COLLABORATION_V3 = "0";
   assert.equal(collaborationV3Enabled(), false);
@@ -100,6 +105,8 @@ try {
   assert.deepEqual(migrated.skipped_stage_instances, source.skipped_stage_instances);
   assert.deepEqual(migrated.history, source.history);
   assert.equal(migrated.event_head.sequence, migrated.events.length);
+  assert.equal(migrated.integrity?.algorithm, "ed25519");
+  assert.ok(migrated.events.every((event) => event.integrity?.algorithm === "ed25519"));
   assert.equal(migrated.instances["workspace-detection"].status, "completed");
   const active = migrated.instances["application-design@module:module-a"];
   assert.equal(active.status, "in_progress");
@@ -238,9 +245,16 @@ try {
     identity: migrationIdentity,
     occurred_at: migrationTime,
   });
-  assert.equal(JSON.parse(readFileSync(statePath(interrupted.project), "utf8")).schema_version, 3);
+  const persisted = JSON.parse(readFileSync(statePath(interrupted.project), "utf8")) as WorkflowStateV3;
+  assert.equal(persisted.schema_version, 3);
+  assert.equal(persisted.integrity?.algorithm, "ed25519");
+  assert.ok(persisted.events.every((event) => event.integrity?.algorithm === "ed25519"));
   assert.equal(validateWorkflowStateV3(fileMigrated, true).workflow_id, interrupted.state.workflow_id);
-  assert.equal(readEnrollment(interrupted.project)?.workflow_id, interrupted.state.workflow_id);
+  const enrollment = readEnrollment(interrupted.project);
+  assert.equal(enrollment?.workflow_id, interrupted.state.workflow_id);
+  assert.equal(enrollment?.trust_mode, "device-signature-v1");
+  assert.equal(enrollment?.event_head_hash, fileMigrated.event_head.event_hash);
+  assert.equal(enrollment?.device_key_id, persisted.integrity?.key_id);
 
   console.log("State v3 reducer and migration tests passed");
 } finally {

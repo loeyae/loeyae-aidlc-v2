@@ -27,6 +27,14 @@ def main() -> None:
         "execution lease",
         "--claim-receipt-stdin",
         "Local Provider",
+        "team-enrollment-confirmation",
+        "--team-enrollment-confirmation-stdin",
+        "结束当前回合",
+        "ENROLLMENT_CONFIRMATION_REQUIRED",
+        "独立、不可共享",
+        "event head",
+        "完整成员授权 PKI",
+        "AIDLC_TRUST_SECRET",
     ):
         assert required in continuity, f"continuity contract missing: {required}"
     assert "自动执行 `park`" in continuity

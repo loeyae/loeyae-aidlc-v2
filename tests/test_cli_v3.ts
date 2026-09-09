@@ -143,7 +143,7 @@ try {
     }];
     const created = createInitialWorkflowStateV3("feature", "3.0.0", "workflow-cli-v3-approval");
     initializeWorkflowStateV3(approvalProject, synchronizeWorkflowInstancesV3(created, approvalPlans));
-    new LocalCoordinationProviderV3(approvalProject).claim(approvalInstance, {
+    const approvalClaim = new LocalCoordinationProviderV3(approvalProject).claim(approvalInstance, {
       actor_id: "actor:approver",
       device_id: "device:approver",
       client_id: "client:approver",
@@ -163,6 +163,34 @@ try {
     ]);
     assert.equal(approvalRequest.kind, "aidlc.approval.request");
     assert.equal(approvalRequest.stage_instance, approvalInstance);
+    const confirmationPhrase = String(approvalRequest.confirmation_phrase);
+    assert.equal(confirmationPhrase, `APPROVE ${approvalInstance} ${String(approvalRequest.challenge).slice(-8)}`);
+    const confirmationEnvelope = (phrase: string): string => JSON.stringify({
+      claim_receipt: approvalClaim.receipt,
+      approval_confirmation: {
+        schema_version: 1,
+        kind: "aidlc.approval.confirmation",
+        request_id: approvalRequest.request_id,
+        confirmation_phrase: phrase,
+      },
+    });
+    const invalidTransportEnvelope = JSON.parse(confirmationEnvelope(`${confirmationPhrase} `)) as Record<string, unknown>;
+    invalidTransportEnvelope.unexpected = true;
+    const rejectedConversationTransport = run(approvalProject, approvalTrust, [
+      "orchestrate", "report", "--stage", "application-design", "--instance", approvalInstance,
+      "--result", "approved", "--claim-receipt-stdin", "--approval-confirmation-stdin",
+    ], JSON.stringify(invalidTransportEnvelope));
+    assert.notEqual(rejectedConversationTransport.status, 0);
+    assert.match(rejectedConversationTransport.stderr, /combined report stdin has unknown field unexpected/);
+
+    const acceptedConversationTransport = run(approvalProject, approvalTrust, [
+      "orchestrate", "report", "--stage", "application-design", "--instance", approvalInstance,
+      "--result", "approved", "--claim-receipt-stdin", "--approval-confirmation-stdin",
+    ], confirmationEnvelope(confirmationPhrase));
+    assert.notEqual(acceptedConversationTransport.status, 0);
+    assert.doesNotMatch(acceptedConversationTransport.stderr, /claim receipt stdin|combined report stdin|approval confirmation/i);
+    assert.match(acceptedConversationTransport.stderr, /stage\/instance mismatch or unknown instance/);
+
     const nonTty = run(approvalProject, approvalTrust, [
       "approve", "--stage", "application-design", "--instance", approvalInstance,
     ]);

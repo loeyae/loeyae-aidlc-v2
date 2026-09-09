@@ -2108,8 +2108,53 @@ def test_x_cli_approval_inherits_terminal():
         request_result.returncode == 0
         and request_payload.get("kind") == "aidlc.approval.request"
         and request_payload.get("stage_instance") == approval_instance
+        and request_payload.get("confirmation_phrase") == f"APPROVE {approval_instance} {challenge[-8:]}"
         and "approval_token" not in request_payload,
-        "PASSED: non-interactive request exposes bound context without issuing a token",
+        "PASSED: non-interactive request exposes a bound random confirmation without issuing a token",
+    )
+
+    conversation_confirmation = {
+        "schema_version": 1,
+        "kind": "aidlc.approval.confirmation",
+        "request_id": request_payload.get("request_id"),
+        "confirmation_phrase": request_payload.get("confirmation_phrase"),
+    }
+    wrong_confirmation = dict(conversation_confirmation)
+    wrong_confirmation["confirmation_phrase"] = f"{conversation_confirmation['confirmation_phrase']} "
+    wrong_conversation_report = subprocess.run(
+        [
+            "node", os.path.join(REPO_ROOT, "bin", "cli.js"), "orchestrate", "report",
+            "--stage", "application-design", "--result", "approved", "--approval-confirmation-stdin",
+        ],
+        input=json.dumps(wrong_confirmation),
+        cwd=t.test_dir,
+        env=t.environment(),
+        capture_output=True,
+        text=True,
+    )
+    t.ok(
+        wrong_conversation_report.returncode == 2
+        and "phrase did not match exactly" in (wrong_conversation_report.stdout + wrong_conversation_report.stderr),
+        "BLOCKED: conversation approval requires the exact active random phrase",
+    )
+
+    accepted_conversation_report = subprocess.run(
+        [
+            "node", os.path.join(REPO_ROOT, "bin", "cli.js"), "orchestrate", "report",
+            "--stage", "application-design", "--result", "approved", "--approval-confirmation-stdin",
+        ],
+        input=json.dumps(conversation_confirmation),
+        cwd=t.test_dir,
+        env=t.environment(),
+        capture_output=True,
+        text=True,
+    )
+    accepted_output = accepted_conversation_report.stdout + accepted_conversation_report.stderr
+    t.ok(
+        accepted_conversation_report.returncode == 2
+        and "approval conversation" not in accepted_output.lower()
+        and ("canonical consumed artifacts" in accepted_output or "required produces" in accepted_output),
+        "PASSED: exact conversation approval reaches the existing artifact gates without exposing a token",
     )
 
     invalid_provider_response = {
