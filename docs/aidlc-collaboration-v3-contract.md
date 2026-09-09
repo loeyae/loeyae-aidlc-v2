@@ -81,6 +81,8 @@ v2.4.0 尚不具备：
 - AI-DLC 负责依赖、execution lease、门禁、Evidence 与审批；
 - 适配器必须使用外部版本号、ETag 或等价 CAS，不能只读页面文本后假定认领成功。
 
+当前仓库提供 `ExternalWorkManagementProviderV3` 契约、严格 Provider receipt 校验和基于内存的 reference contract implementation，用于验证 `listReady / claim / renew / release / transfer / complete` 语义。它不是 Jira、TAPD、Linear 或其他具体产品的连接器；在选择目标工具、认证方式和远端 API 前，不得宣称这些厂商集成已经完成。
+
 ## v3 状态投影
 
 v3 的签名快照至少包含：
