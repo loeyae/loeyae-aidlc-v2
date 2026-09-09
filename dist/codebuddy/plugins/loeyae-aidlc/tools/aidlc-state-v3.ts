@@ -36,6 +36,9 @@ export type WorkflowInstanceStatusV3 =
 export type WorkflowEventTypeV3 =
   | "workflow_initialized"
   | "workflow_migrated"
+  | "workflow_frozen"
+  | "workflow_resumed"
+  | "workflow_completed"
   | "instance_registered"
   | "instance_ready"
   | "assignment_set"
@@ -60,6 +63,7 @@ export interface WorkflowClaimV3 extends Record<string, unknown> {
   client_id: string;
   provider_id: string;
   provider_receipt_digest: string;
+  provider_receipt?: Record<string, unknown>;
   claimed_at: string;
   renewed_at: string;
   lease_expires_at: string | null;
@@ -181,6 +185,9 @@ const VALID_STATUSES = new Set<WorkflowInstanceStatusV3>([
 const EVENT_TYPES = new Set<WorkflowEventTypeV3>([
   "workflow_initialized",
   "workflow_migrated",
+  "workflow_frozen",
+  "workflow_resumed",
+  "workflow_completed",
   "instance_registered",
   "instance_ready",
   "assignment_set",
@@ -198,6 +205,14 @@ const EVENT_TYPES = new Set<WorkflowEventTypeV3>([
   "approval_requested",
   "approval_granted",
 ]);
+const WORKFLOW_EVENT_TYPES = new Set<WorkflowEventTypeV3>([
+  "workflow_initialized",
+  "workflow_migrated",
+  "workflow_frozen",
+  "workflow_resumed",
+  "workflow_completed",
+]);
+const BOOTSTRAP_EVENT_TYPES = new Set<WorkflowEventTypeV3>(["workflow_initialized", "workflow_migrated"]);
 const EVENT_KEYS = new Set([
   "schema_version",
   "kind",
@@ -297,12 +312,12 @@ function hashRecord(value: Record<string, unknown>): string {
 }
 
 export function collaborationV3Enabled(environment: NodeJS.ProcessEnv = process.env): boolean {
-  return environment[COLLABORATION_V3_FLAG] === "1";
+  return environment[COLLABORATION_V3_FLAG] !== "0";
 }
 
 export function assertCollaborationV3Enabled(environment: NodeJS.ProcessEnv = process.env): void {
   if (!collaborationV3Enabled(environment)) {
-    throw new Error(`${COLLABORATION_V3_FLAG}=1 is required for collaborative state v3`);
+    throw new Error(`${COLLABORATION_V3_FLAG}=0 explicitly disables collaborative state v3`);
   }
 }
 
@@ -319,6 +334,7 @@ function validateClaim(value: unknown, field: string): WorkflowClaimV3 {
     "client_id",
     "provider_id",
     "provider_receipt_digest",
+    "provider_receipt",
     "claimed_at",
     "renewed_at",
     "lease_expires_at",
@@ -335,6 +351,7 @@ function validateClaim(value: unknown, field: string): WorkflowClaimV3 {
     client_id: text(claim.client_id, `${field}.client_id`),
     provider_id: text(claim.provider_id, `${field}.provider_id`),
     provider_receipt_digest: digest(claim.provider_receipt_digest, `${field}.provider_receipt_digest`),
+    ...(claim.provider_receipt !== undefined ? { provider_receipt: clone(record(claim.provider_receipt, `${field}.provider_receipt`)) } : {}),
     claimed_at: iso(claim.claimed_at, `${field}.claimed_at`),
     renewed_at: iso(claim.renewed_at, `${field}.renewed_at`),
     lease_expires_at: lease,
@@ -377,6 +394,14 @@ function validateEventPayload(eventType: WorkflowEventTypeV3, payloadValue: unkn
       digest(payload.source_state_digest, "workflow_migrated.source_state_digest");
       break;
     }
+    case "workflow_frozen":
+      exact(["reason"]);
+      text(payload.reason, "workflow_frozen.reason");
+      break;
+    case "workflow_resumed":
+    case "workflow_completed":
+      exact([]);
+      break;
     case "instance_registered": {
       exact(["stage", "axis", "module_id", "unit_id", "requires", "initial_status"]);
       text(payload.stage, "instance_registered.stage");
@@ -422,9 +447,10 @@ function validateEventPayload(eventType: WorkflowEventTypeV3, payloadValue: unkn
       exact([]);
       break;
     case "claim_renewed":
-      exact(["lease_expires_at", "provider_receipt_digest"]);
+      exact(["lease_expires_at", "provider_receipt_digest", "provider_receipt"]);
       iso(payload.lease_expires_at, "claim_renewed.lease_expires_at");
       digest(payload.provider_receipt_digest, "claim_renewed.provider_receipt_digest");
+      if (payload.provider_receipt !== undefined) record(payload.provider_receipt, "claim_renewed.provider_receipt");
       break;
     case "instance_released":
       exact(["reason", "target_status"]);
@@ -474,10 +500,10 @@ export function validateWorkflowEventV3(value: unknown, requireIntegrity = true)
   const eventType = text(event.event_type, "workflow event.event_type") as WorkflowEventTypeV3;
   if (!EVENT_TYPES.has(eventType)) throw new Error(`unknown workflow event type: ${eventType}`);
   const stageInstance = event.stage_instance === undefined ? undefined : text(event.stage_instance, "workflow event.stage_instance");
-  if ((eventType === "workflow_initialized" || eventType === "workflow_migrated") && stageInstance !== undefined) {
+  if (WORKFLOW_EVENT_TYPES.has(eventType) && stageInstance !== undefined) {
     throw new Error(`${eventType} cannot target a stage instance`);
   }
-  if (eventType !== "workflow_initialized" && eventType !== "workflow_migrated" && stageInstance === undefined) {
+  if (!WORKFLOW_EVENT_TYPES.has(eventType) && stageInstance === undefined) {
     throw new Error(`${eventType} requires stage_instance`);
   }
   const previousHash = event.previous_event_hash === null
@@ -681,6 +707,7 @@ function applyInstanceEvent(state: Omit<WorkflowStateV3, "integrity">, event: Wo
       if (!instance.claim || instance.claim.compatibility_lock) throw new Error(`claim_renewed requires a renewable claim for ${instanceId}`);
       instance.claim.lease_expires_at = iso(payload.lease_expires_at, "claim_renewed.lease_expires_at");
       instance.claim.provider_receipt_digest = digest(payload.provider_receipt_digest, "claim_renewed.provider_receipt_digest");
+      if (payload.provider_receipt !== undefined) instance.claim.provider_receipt = clone(record(payload.provider_receipt, "claim_renewed.provider_receipt"));
       instance.claim.renewed_at = event.occurred_at;
       touch(instance, event);
       break;
@@ -789,6 +816,36 @@ function applyInstanceEvent(state: Omit<WorkflowStateV3, "integrity">, event: Wo
   }
 }
 
+function applyWorkflowEvent(state: Omit<WorkflowStateV3, "integrity">, event: WorkflowEventV3): void {
+  switch (event.event_type) {
+    case "workflow_frozen":
+      if (state.status !== "running") throw new Error(`workflow_frozen requires running status, found ${state.status}`);
+      state.status = "parked";
+      state.current_stage = "";
+      delete state.current_stage_instance;
+      delete state.current_module;
+      delete state.current_unit;
+      break;
+    case "workflow_resumed":
+      if (state.status !== "parked") throw new Error(`workflow_resumed requires parked status, found ${state.status}`);
+      state.status = "running";
+      break;
+    case "workflow_completed":
+      if (state.status !== "running") throw new Error(`workflow_completed requires running status, found ${state.status}`);
+      if (Object.keys(state.instances).length === 0 || !Object.values(state.instances).every((instance) => instance.status === "completed" || instance.status === "skipped")) {
+        throw new Error("workflow_completed requires every registered instance to be resolved");
+      }
+      state.status = "done";
+      state.current_stage = "";
+      delete state.current_stage_instance;
+      delete state.current_module;
+      delete state.current_unit;
+      break;
+    default:
+      throw new Error(`unsupported workflow event: ${event.event_type}`);
+  }
+}
+
 export function reduceWorkflowEventsV3(
   workflowId: string,
   eventValues: readonly WorkflowEventV3[],
@@ -809,14 +866,15 @@ export function reduceWorkflowEventsV3(
     if (eventIds.has(event.event_id)) throw new Error(`duplicate workflow event_id: ${event.event_id}`);
     eventIds.add(event.event_id);
 
-    if (event.event_type === "workflow_initialized" || event.event_type === "workflow_migrated") {
+    if (BOOTSTRAP_EVENT_TYPES.has(event.event_type)) {
       if (state !== null || event.sequence !== 1) throw new Error(`${event.event_type} must be the first and only bootstrap event`);
       state = event.event_type === "workflow_initialized"
         ? stateFromInitialization(workflowId, event)
         : stateFromMigration(workflowId, event);
     } else {
       if (!state) throw new Error("workflow event stream must start with workflow_initialized or workflow_migrated");
-      applyInstanceEvent(state, event);
+      if (WORKFLOW_EVENT_TYPES.has(event.event_type)) applyWorkflowEvent(state, event);
+      else applyInstanceEvent(state, event);
     }
 
     state.events.push(event);
@@ -1018,8 +1076,8 @@ export function projectMigratedWorkflowV3ToV2(stateValue: WorkflowStateV3): Work
 
 export function createInitialWorkflowStateV3(
   scope: string,
-  version = "2.4.0",
-  workflowId = randomUUID(),
+  version = "3.0.0",
+  workflowId: string = randomUUID(),
   selectedOptionalStages: string[] = [],
   occurredAt = new Date().toISOString(),
 ): WorkflowStateV3 {

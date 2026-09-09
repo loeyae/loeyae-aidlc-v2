@@ -25,7 +25,7 @@ triggers: 审批当前阶段, 确认架构方案, 批准架构方案, 批准部�
 2. 执行：
 
    ```bash
-   loeyae-aidlc approve --stage <slug> --request
+   loeyae-aidlc approve --stage <slug> --instance <stage-instance> --request
    ```
 
    读取 `aidlc.approval.request`，确认其中的 `workflow_id`、`stage_instance`、challenge TTL、`artifact_root` 和 `evidence_root`。
@@ -33,16 +33,19 @@ triggers: 审批当前阶段, 确认架构方案, 批准架构方案, 批准部�
 4. 如果宿主明确提供受信 Approval Provider：
    - 把完整 request 交给宿主安全界面；
    - 由宿主验证真实用户事件并生成 `aidlc.approval.response`；
-   - 响应直接通过标准输入交给 `orchestrate report --result approved --approval-response-stdin`；
-   - Agent 不读取、复制、回显或持久化 response 中的 token。
+   - Provider response 与当前 claim receipt 由宿主在 Agent 上下文之外组合为严格 stdin envelope；
+   - envelope 直接交给 `orchestrate report --stage <slug> --instance <id> --result approved --claim-receipt-stdin --approval-response-stdin`；
+   - Agent 不读取、复制、回显或持久化 response token/claim receipt。
 5. 如果宿主没有受信 Provider，返回 `NEEDS_TRUSTED_APPROVAL` 并提示真人在独立交互终端执行：
 
    ```bash
-   loeyae-aidlc approve --stage <slug>
-   loeyae-aidlc orchestrate report --stage <slug> --result approved --approval-token <token>
+   loeyae-aidlc approve --stage <slug> --instance <stage-instance>
+   claim-receipt.json | loeyae-aidlc orchestrate report \
+     --stage <slug> --instance <stage-instance> --result approved \
+     --approval-token <token> --claim-receipt-stdin
    ```
 
-6. 驳回时不需要审批 token，使用 `report --result rejected --user-input "<原因>"` 记录审阅意见。
+6. 驳回仍不需要审批 token，但必须由 lease holder 以 `report --instance <id> --claim-receipt-stdin --result rejected --user-input "<原因>"` 记录审阅意见。
 
 ## KiroCrew 边界
 
@@ -59,7 +62,7 @@ triggers: 审批当前阶段, 确认架构方案, 批准架构方案, 批准部�
 不得：
 
 - 调用普通问答卡后自行构造 Provider response；
-- 在聊天、日志、文件或命令参数中回显宿主 token；
+- 在聊天、日志、文件或命令参数中回显宿主 token 或 claim receipt；
 - 提供或执行非交互 token generator；
 - 修改 `aidlc-state.json`、challenge、integrity 或 enrollment；
 - 跳过 produces、sensors、实例匹配、TTL 或 replay 校验；

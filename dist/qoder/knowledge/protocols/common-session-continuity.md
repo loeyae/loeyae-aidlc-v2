@@ -4,8 +4,8 @@
 
 ## 状态源边界
 
-- `docs/aidlc/aidlc-state.json` 是唯一机器路由状态，由编排器签名、加 revision 并通过 CAS 更新；Agent 和协议文档不得直接编辑。
-- `docs/aidlc/handoff.md` 是从机器状态及协作产物派生的人类交接视图，可记录模块、单元、UI 和 CR 细节，但不能改变 stage 完成、跳过、审批或当前游标。
+- `docs/aidlc/aidlc-state.json` 是唯一机器路由状态。schema v3 由签名 append-only events 归约出 instance map、ready set、claim/lease 和单调 revision，并通过 CAS 原子更新；Agent 和协议文档不得直接编辑。
+- `docs/aidlc/handoff.md` 是从机器状态及协作产物派生的人类交接视图，可记录模块、单元、UI 和 CR 细节，但不能改变实例完成、跳过、审批、assignment、claim、lease 或 ready set。
 - 恢复时先执行 `loeyae-aidlc orchestrate next --status` 验证机器状态，再读取 handoff；两者冲突时立即阻断，以签名机器状态为准并重新生成 handoff。
 - 如果状态检查因 key ID、签名或 enrollment workflow mismatch 失败，Agent 最多执行只读 `loeyae-aidlc recover inspect` 并报告结果；不得读取/索要/输出 trust secret，不得调用 `recover re-enroll --apply`，不得手改 state、删除 enrollment 或复制签名。持有旧 key 以及同 workflow、旧 key 签名 active source enrollment 的真人必须先确认 state 已 parked，再在独立交互终端完成 dry-run 和绑定 source/target root 摘要的精确短语确认；之后 Agent 重新运行正式状态检查。
 
@@ -13,8 +13,9 @@
 
 - 每次成功 `next`、`report`、条件跳过和审批状态变化都必须先完成签名、revision 递增与原子持久化，再向调用方返回成功。
 - Stage instance 成功完成本身就是稳定交接点，不要求用户额外执行“暂停并交接”。其他会话应从已验证 state 发现当前位置或后继工作。
-- schema v2 只能提供单游标串行续接；`handoff.md` 中的多人认领信息不构成机器级排他 claim。
-- `park` 在兼容期仍可暂停 workflow，也仍是现有跨 trust-domain re-enroll 的安全前提，但不再是同一信任域内日常会话交接的前提。
+- schema v3 可同时暴露多个稳定排序的 ready instance；恢复时以 actor/device/client identity 取得或恢复当前 client focus 和 execution lease。schema v2 仅保留单游标兼容路径。
+- claim receipt 是提交能力，只能通过安全 stdin 用于 `report --instance ... --claim-receipt-stdin`；不得放入 handoff、聊天或 argv。
+- `park` 在 schema v3 中冻结整个 workflow，也仍是现有跨 trust-domain re-enroll 的安全前提，但不是同一信任域内日常会话交接或单实例 release 的手段。
 - 未完成实例的接手不能仅依据部分产物或聊天声明。协作状态 v3 启用后，必须通过 execution lease 的 release、transfer 或 expiry。
 
 ## 统一恢复检查点（所有上下文流转场景）
@@ -41,7 +42,8 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ Step 1: 验证签名 state，再读取 handoff.md 人类摘要               │
-│ - 运行 orchestrate next --status 确认阶段和 current_stage_instance│
+│ - 运行 orchestrate next --status 确认 ready/active/resolved instances │
+│ - 取得 actor/device/client identity 后再用 next 恢复或 claim focus  │
 │ - 从签名 state 确认当前模块、单元、choice 与 condition skip     │
 │ - handoff 只补充活跃协调、批次、协作者和变更请求说明            │
 │ - handoff.md 存在“活跃产品协调”，或 UI `设计状态` 为            │
@@ -91,7 +93,7 @@
 **额外规则**：
 1. **检查状态模式** — `状态模式版本` 缺失/低于 2，或缺少分布式治理字段时，保存原恢复位置，先执行定向 I1 检测与必要的 I4 系统基线回填；完成后再恢复原步骤。
 2. **不信任会话摘要或 handoff 的机器游标** — 两者都不能替代签名 state。
-3. **以签名 `aidlc-state.json` 为唯一机器路由事实** — 当前阶段、`stage_instance`、模块、单元、choice 与跳过结果由编排器验证；handoff.md 只补充人类协作摘要。
+3. **以签名 `aidlc-state.json` 为唯一机器路由事实** — ready/active/resolved instances、client focus、模块、单元、choice 与跳过结果由编排器验证；handoff.md 只补充人类协作摘要。
 4. **重新加载当前步骤的 steering 文件** — 不依赖压缩前的上下文，确保执行规则完整。
 5. **检查活跃协调状态** — handoff.md 存在“活跃产品协调”、UI 为 `blocked`/`reconcile_in_progress`，或存在 `rework_required` 单元时，优先按 `common-workflow-changes.md` 恢复冲突裁决、产物同步和失效传播，不得按原下一步骤或原单元继续。
 6. **检查“下一步交接”表格** — 不存在活跃协调状态时，优先按其中提示词恢复。
@@ -101,7 +103,7 @@
 ```
 Compact 恢复
     ↓
-运行 orchestrate next --status，验证签名 state/current_stage_instance
+运行 orchestrate next --status，验证签名 state/ready set/active leases
     ↓
 读取 handoff.md 补充活跃协调与人类交接摘要
     ↓
@@ -130,7 +132,7 @@ Boss，检测到会话上下文被压缩。已验证签名 state，并从 handof
 
 - ❌ **不要直接从会话摘要的 Pending Tasks 继续编码** — 会话摘要是 AI 生成的，可能不准确
 - ❌ **不要跳过 skill 激活直接读取代码文件** — skill 包含必要的执行规则
-- ❌ **不要假设阶段状态** — 必须由编排器验证签名 state/current_stage_instance；handoff 不能代替
+- ❌ **不要假设阶段状态** — 必须由编排器验证签名 state、ready set、stage_instance 与 lease；handoff 不能代替
 - ❌ **不要跳过宣布恢复状态** — 这是团队协作和审计的必要记录
 - ❌ **不要在恢复后立即大量加载前序产出物** — 按延迟加载策略按需读取
 - ❌ **不要用手改 state、删除 enrollment、任意重签或非交互参数修复信任链** — 只允许真人终端执行受控 `recover re-enroll`

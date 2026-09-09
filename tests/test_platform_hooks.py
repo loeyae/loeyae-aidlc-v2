@@ -18,6 +18,9 @@ def environment(home: Path, trust: Path = None) -> dict:
     env["AIDLC_TRUST_SECRET"] = TRUST_SECRET
     env["AIDLC_TRUST_DIR"] = str(trust or home / "trust")
     env["AIDLC_INSTALL_STATE_DIR"] = str(home / ".config" / "loeyae-aidlc" / "installations")
+    # This suite preserves the legacy single-cursor Hook contract. Schema v3 Hook
+    # identity/receipt behavior is covered by tests/test_cli_v3.ts.
+    env["AIDLC_COLLABORATION_V3"] = "0"
     return env
 
 
@@ -39,6 +42,7 @@ import {{ createInitialState, saveWorkflowState }} from {json.dumps(state_uri)};
 const state = createInitialState('feature');
 state.status = {json.dumps(status)};
 state.current_stage = {json.dumps(current_stage)};
+if (state.current_stage) state.current_stage_instance = state.current_stage;
 state.current_phase = 'inception';
 saveWorkflowState(process.cwd(), state);
 """

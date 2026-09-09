@@ -9,6 +9,7 @@ import {
   assertClaimReceiptForStateV3,
   claimInstanceV3,
   clearAssignmentV3,
+  claimReceiptFromStateV3,
   expireClaimsV3,
   heartbeatClaimV3,
   releaseClaimV3,
@@ -82,7 +83,7 @@ const otherActor: CoordinationIdentityV3 = {
 };
 
 function initialState(workflowId: string, instancePlans = plans): WorkflowStateV3 {
-  const created = createInitialWorkflowStateV3("feature", "2.4.0", workflowId, [], tick());
+  const created = createInitialWorkflowStateV3("feature", "3.0.0", workflowId, [], tick());
   return synchronizeWorkflowInstancesV3(created, instancePlans, tick());
 }
 
@@ -144,6 +145,7 @@ try {
   state = transferred.state;
   assert.equal(state.instances["task-a"].claim?.device_id, actorDeviceB.device_id);
   assert.equal(state.instances["task-a"].claim?.actor_id, actorDeviceA.actor_id);
+  assert.deepEqual(claimReceiptFromStateV3(state, "task-a"), transferred.receipt);
   assert.throws(
     () => assertClaimReceiptForStateV3(state, heartbeat.receipt, "task-a", now),
     /holder does not match|lease is stale|digest does not match/,
@@ -215,6 +217,7 @@ try {
   assert.ok(persisted);
   assert.equal(persisted.instances["parallel-task"].status, "in_progress");
   assert.equal(persisted.instances["parallel-task"].claim?.device_id, winningReceipt.device_id);
+  assert.deepEqual(claimReceiptFromStateV3(persisted, "parallel-task"), winningReceipt);
   assert.equal(persisted.revision, 2, "initialization and exactly one atomic claim must each advance revision once");
 
   console.log("Local coordination claims, leases, identity, and race tests passed");

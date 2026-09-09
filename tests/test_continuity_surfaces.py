@@ -22,6 +22,11 @@ def main() -> None:
         "recover inspect",
         "TRUST_BLOCKED",
         "schema v2 不提供多人排他 claim",
+        "actor/device/client",
+        "ready set",
+        "execution lease",
+        "--claim-receipt-stdin",
+        "Local Provider",
     ):
         assert required in continuity, f"continuity contract missing: {required}"
     assert "自动执行 `park`" in continuity
@@ -33,6 +38,7 @@ def main() -> None:
         "skills/aidlc-continuity/SKILL.md",
         "不执行 `park`",
         "明确要求冻结整个 workflow",
+        "release/transfer/expiry",
     ):
         assert required in handoff, f"handoff alias missing: {required}"
 

@@ -7,7 +7,7 @@
 Skill 通过以下只读命令取得 `aidlc.approval.request`：
 
 ```bash
-loeyae-aidlc approve --stage <slug> --request
+loeyae-aidlc approve --stage <slug> --instance <stage-instance> --request
 ```
 
 宿主必须原样绑定：
@@ -41,10 +41,20 @@ loeyae-aidlc approve --stage <slug> --request
 }
 ```
 
-响应必须直接写入 report 子进程标准输入，不进入聊天、Agent 上下文、项目文件、argv 或持久化日志：
+schema v3 中，宿主还必须从 owning client 的安全通道取得当前 claim receipt，并在 Agent 上下文之外生成严格 envelope：
+
+```json
+{
+  "claim_receipt": { "...": "signed Provider receipt" },
+  "approval_response": { "...": "aidlc.approval.response" }
+}
+```
+
+完整 envelope 必须直接写入 report 子进程标准输入，不进入聊天、Agent 上下文、项目文件、argv 或持久化日志：
 
 ```bash
-loeyae-aidlc orchestrate report --stage <slug> --result approved --approval-response-stdin
+loeyae-aidlc orchestrate report --stage <slug> --instance <stage-instance> \
+  --result approved --claim-receipt-stdin --approval-response-stdin
 ```
 
 ## 能力检测
@@ -61,7 +71,7 @@ KiroCrew 宿主实现必须负责：
 - request/Stage 产物摘要绑定；
 - challenge TTL；
 - 单次人类事件与 replay 防护；
-- token 的安全生成和零暴露传输；
+- token 与 claim receipt 的安全生成/取得和零暴露传输；
 - 审批审计记录；
 - 取消、超时和请求失效。
 

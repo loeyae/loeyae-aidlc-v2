@@ -4,6 +4,8 @@
 
 关键词的作用是**发现能力**，不是替代阶段路由、审批、门禁、状态记录或 evidence 协议。能力 Skill 可以独立运行，但仍必须满足自身的输入要求和治理边界。
 
+新 workflow 默认使用 schema v3。继续/接手关键词只会路由到签名 state 检查：实际执行仍要求 actor/device/client identity，由 Coordination Provider ACK claim 后返回 directive；`report` 必须绑定明确 instance 和安全 stdin 中的 receipt。关键词、普通聊天和 Slash Command 既不能生成 claim receipt，也不能生成审批凭据。`park` 只冻结整个 workflow，不是日常交接步骤。
+
 ## 1. 先判断：独立能力还是完整流程
 
 ### 独立能力请求
@@ -49,7 +51,7 @@
 | 能力 | 推荐关键词 | 适合场景 | 最小输入 |
 |------|------------|----------|----------|
 | AI-DLC 人工审批 | `审批当前阶段`、`确认架构方案`、`批准架构方案`、`批准部署方案`、`驳回当前方案`、`aidlc approve` | 审阅当前 `application-design` 或 `operations` 阻断门禁 | 有效签名 workflow、当前 approval request、canonical 产物/Evidence；批准还需要受信宿主 Provider 或真人 TTY |
-| AI-DLC 连续工作 | `继续上次工作`、`接手当前项目`、`查看可接手任务`、`在这台设备继续`、`暂停并交接` | 从签名 checkpoint 继续、查看或兼容旧交接入口；日常续接不要求 park | 业务项目目录和有效签名 state；信任冲突时只读 `recover inspect` |
+| AI-DLC 连续工作 | `继续上次工作`、`接手当前项目`、`查看可接手任务`、`在这台设备继续`、`暂停并交接` | 从签名 checkpoint 和 ready/claimed set 继续、查看或兼容旧交接入口；日常续接不要求 park | 业务项目目录、有效签名 state 和 actor/device/client identity；跨工作树需配置 Git/External Provider，信任冲突时只读 `recover inspect` |
 | 需求估算 | `需求估算`、`工作量估算`、`人天估算`、`功能点估算`、`功能点分析`、`FPA`、`规模估算`、`effort estimation` | 在详细设计前估算规模、工作量和不确定性 | 需求清单；项目模式必须为 `greenfield`、`product-extension` 或 `legacy-modification` 之一 |
 | 粗粒度排期 | `项目排期`、`粗粒度排期`、`排期预测`、`交付预测`、`发布预测`、`里程碑预测`、`release forecast` | 根据需求范围、依赖和团队假设给出 Phase/里程碑时间范围 | 需求或估算结果、团队容量、关键依赖和明确假设 |
 | PRD 合成 | `PRD`、`产品需求文档`、`需求文档合成`、`需求整理`、`PRD synthesis`、`业务需求文档` | 将 Discovery 和 Inception 产物整理成业务方可读的 PRD | 已有 Discovery、需求和相关 Inception 产物 |

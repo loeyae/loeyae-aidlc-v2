@@ -192,6 +192,20 @@ export function assertClaimReceiptForStateV3(
   return receipt;
 }
 
+export function claimReceiptFromStateV3(
+  stateValue: WorkflowStateV3,
+  stageInstance: string,
+): ClaimReceiptV3 {
+  const state = validateWorkflowStateV3(stateValue, true);
+  const claim = state.instances[stageInstance]?.claim;
+  if (!claim?.provider_receipt) throw new Error(`active claim receipt is unavailable for ${stageInstance}`);
+  const receipt = validateClaimReceiptV3(claim.provider_receipt, true);
+  if (claim.provider_receipt_digest !== claimReceiptDigestV3(receipt)) {
+    throw new Error(`stored claim receipt digest mismatch for ${stageInstance}`);
+  }
+  return receipt;
+}
+
 function append(
   state: WorkflowStateV3,
   eventType: "assignment_set" | "assignment_cleared" | "instance_claimed" | "instance_started" | "claim_renewed" | "instance_released" | "claim_transferred",
@@ -265,6 +279,7 @@ export function claimInstanceV3(
       ...holder,
       provider_id: providerId,
       provider_receipt_digest: claimReceiptDigestV3(receipt),
+      provider_receipt: receipt,
       claimed_at: issuedAt,
       renewed_at: issuedAt,
       lease_expires_at: leaseExpiresAt,
@@ -298,6 +313,7 @@ export function heartbeatClaimV3(
   const next = append(state, "claim_renewed", receipt.stage_instance, occurredAt, {
     lease_expires_at: leaseExpiresAt,
     provider_receipt_digest: claimReceiptDigestV3(nextReceipt),
+    provider_receipt: nextReceipt,
   });
   return { state: next, receipt: nextReceipt };
 }
@@ -349,6 +365,7 @@ export function transferClaimV3(
       ...nextHolder,
       provider_id: receipt.provider_id,
       provider_receipt_digest: claimReceiptDigestV3(nextReceipt),
+      provider_receipt: nextReceipt,
       claimed_at: occurredAt,
       renewed_at: occurredAt,
       lease_expires_at: leaseExpiresAt,

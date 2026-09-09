@@ -562,6 +562,23 @@ export class GitCoordinationProviderV3 {
     }).commit;
   }
 
+  receiptTerminalStatus(receiptValue: ClaimReceiptV3): "completed" | "released" | "expired" | null {
+    const supplied = validateClaimReceiptV3(receiptValue, true);
+    if (supplied.workflow_id !== this.workflow_id || supplied.provider_id !== this.provider_id) {
+      throw new Error("claim receipt is bound to a different Git coordination provider or workflow");
+    }
+    const snapshot = this.snapshot();
+    const receiptDigest = claimReceiptDigestV3(supplied);
+    for (const event of [...snapshot.events].reverse()) {
+      if (event.stage_instance !== supplied.stage_instance) continue;
+      if (event.payload.claim_id !== supplied.claim_id || event.payload.receipt_digest !== receiptDigest) continue;
+      if (event.event_type === "instance_completed") return "completed";
+      if (event.event_type === "instance_released") return "released";
+      if (event.event_type === "lease_expired") return "expired";
+    }
+    return null;
+  }
+
   currentReceipt(stageInstanceValue: string, expectedHolder?: CoordinationIdentityV3): ClaimReceiptV3 | null {
     const stageInstance = text(stageInstanceValue, "stage_instance");
     const active = this.snapshot().claims[stageInstance];

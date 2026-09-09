@@ -74,11 +74,14 @@ function resignState(value: WorkflowStateV3): WorkflowStateV3 {
 
 try {
   delete process.env.AIDLC_COLLABORATION_V3;
+  assert.equal(collaborationV3Enabled(), true, "schema v3 is the 3.0 default");
+  assert.equal(createInitialWorkflowStateV3("express").schema_version, 3);
+  assert.equal(createInitialState("express").schema_version, 2, "the explicit v2 compatibility constructor remains available");
+  process.env.AIDLC_COLLABORATION_V3 = "0";
   assert.equal(collaborationV3Enabled(), false);
-  assert.equal(createInitialState("express").schema_version, 2, "v2 remains the default state schema");
   assert.throws(
     () => createInitialWorkflowStateV3("express"),
-    /AIDLC_COLLABORATION_V3=1 is required/,
+    /explicitly disables collaborative state v3/,
   );
 
   process.env.AIDLC_COLLABORATION_V3 = "1";
@@ -137,7 +140,7 @@ try {
 
   const initial = createInitialWorkflowStateV3(
     "express",
-    "2.4.0",
+    "3.0.0",
     "workflow-v3-illegal-transition",
     [],
     "2026-10-10T11:00:00.000Z",
@@ -163,6 +166,58 @@ try {
       payload: { result: "completed" },
     }),
     /illegal instance_completed transition/,
+  );
+
+  const frozen = appendWorkflowEventV3(initial, {
+    event_type: "workflow_frozen",
+    occurred_at: "2026-10-10T11:01:00.000Z",
+    payload: { reason: "Explicit integration freeze" },
+  });
+  assert.equal(frozen.status, "parked");
+  const resumed = appendWorkflowEventV3(frozen, {
+    event_type: "workflow_resumed",
+    occurred_at: "2026-10-10T11:02:00.000Z",
+    payload: {},
+  });
+  assert.equal(resumed.status, "running");
+  const unresolved = appendWorkflowEventV3(resumed, {
+    event_type: "instance_registered",
+    stage_instance: "freeze-contract-stage",
+    occurred_at: "2026-10-10T11:03:00.000Z",
+    payload: {
+      stage: "freeze-contract-stage",
+      axis: "project",
+      requires: [],
+      initial_status: "blocked",
+    },
+  });
+  assert.throws(
+    () => appendWorkflowEventV3(unresolved, {
+      event_type: "workflow_completed",
+      occurred_at: "2026-10-10T11:04:00.000Z",
+      payload: {},
+    }),
+    /every registered instance to be resolved/,
+  );
+  const resolved = appendWorkflowEventV3(unresolved, {
+    event_type: "instance_skipped",
+    stage_instance: "freeze-contract-stage",
+    occurred_at: "2026-10-10T11:05:00.000Z",
+    payload: { reason: "condition=false", source: "condition" },
+  });
+  const completedWorkflow = appendWorkflowEventV3(resolved, {
+    event_type: "workflow_completed",
+    occurred_at: "2026-10-10T11:06:00.000Z",
+    payload: {},
+  });
+  assert.equal(completedWorkflow.status, "done");
+  assert.throws(
+    () => appendWorkflowEventV3(completedWorkflow, {
+      event_type: "workflow_resumed",
+      occurred_at: "2026-10-10T11:07:00.000Z",
+      payload: {},
+    }),
+    /workflow_resumed requires parked status/,
   );
 
   const interrupted = fixture("migration-interrupted", "workflow-v3-migration-interrupted");

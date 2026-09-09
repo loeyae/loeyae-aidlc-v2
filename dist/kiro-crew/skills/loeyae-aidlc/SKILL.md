@@ -1,8 +1,8 @@
 ---
 name: loeyae-aidlc
 description: >
-  Loeyae AI-DLC v2 workflow orchestrator. Engine-driven development lifecycle
-  with deterministic gates, signed provenance, and two token-bound human approval points. Activate with
+  Loeyae AI-DLC v2 workflow orchestrator with collaborative schema v3 by default. Engine-driven development lifecycle
+  with deterministic multi-instance gates, signed provenance, and two token-bound human approval points. Activate with
   "使用 AI-DLC" or "aidlc" keywords.
 triggers: aidlc, AI-DLC, 使用 AI-DLC, 继续上次的工作, 接手当前项目, 查看当前进度, 查看可接手任务, 在这台设备继续, 暂停并交接, 认领单元, 审批当前阶段, 确认架构方案, 批准架构方案, 批准部署方案, 驳回当前方案, 功能设计, 用户故事, 用户场景, 验收标准, PRD, 产品需求文档, 需求文档合成, 架构设计, 应用设计, 组件设计, 服务设计, 单元生成, 工作单元, 单元拆分, 依赖矩阵, 代码审查, 代码评审, Code Review, 逆向工程, 存量系统分析, 代码库分析, 根因分析, 系统化调试, 故障定位, 测试用例派生, UC-D, 测试场景, 构建测试证据, 画图, 图表设计, 业务流程图, 系统架构图, 流程图, Figma, UI 原型, HTML Mock, 组件映射, 前端平台规范, 需求估算, 工作量估算, 人天估算, 功能点估算, 功能点分析, FPA, 项目排期, 粗粒度排期, 排期预测, 交付预测, 发布预测, 交付配置, 部署配置生成, 部署配置验证, 发布配置检查
 ---
@@ -29,12 +29,12 @@ Agent ←→ aidlc-orchestrate.ts park   → 主动冻结 workflow（非日常�
 
 ```
 Loop:
-  1. directive = loeyae-aidlc orchestrate next
-  2. 按 directive.kind 执行（见下表）；run-stage 必须使用已解析的实例上下文和路径，禁止跨模块/单元复用产物或 Evidence
-  3. 执行完成后按契约报告：
-     - 普通 stage：`report --stage <slug> --result completed`
+  1. directive = loeyae-aidlc orchestrate next --actor-id <actor> --device-id <device> --client-id <client>
+  2. 按 directive.kind 执行；run-stage 只操作其 stage_instance/artifact_root/evidence_root
+  3. 执行完成后按契约报告（receipt 只走安全 stdin）：
+     - 普通 stage：`... | report --stage <slug> --instance <id> --result completed --claim-receipt-stdin`
      - instruction-only：追加 `--instruction-ack <slug>`
-     - approval:block：先由人类签发 token，再以 `--result approved --approval-token <token>` 报告
+     - approval:block：先由受信 Provider/真人 TTY 签发 instance-bound token，再与 receipt 一起定向报告
   4. 重复直到 directive.kind == done
 ```
 
@@ -56,6 +56,8 @@ Loop:
 | 字段 | 类型 | 含义 | agent 动作 |
 |------|------|------|-----------|
 | `stage_instance` | string | 当前机器执行实例 ID | 报告、审批与 Evidence 均绑定此实例，不得只按 slug 推断 |
+| `claim_receipt` | object | Provider ACK 后签发并写入签名 state 的当前 lease 回执 | 只通过安全 stdin 回传，不写 argv、handoff 或聊天 |
+| `ready_instances` / `client_focus` | string[] / string | 稳定 ready set 与当前 client 的局部 focus | 不得改写为 workflow 全局游标 |
 | `axis` | "project"\|"module"\|"unit" | 实例化范围 | 按对应上下文执行 |
 | `module_id` / `unit_id` | string\|null | 当前稳定上下文 ID | 非空时只读写该上下文 |
 | `artifact_root` / `evidence_root` | string | 当前实例规范根目录 | 所有产物和 Evidence 写入该目录 |
@@ -67,11 +69,13 @@ Loop:
 | `mode` | "inline"\|... | 执行模式 | 参考 stage 文件 |
 | `consumes` | string[] | 上游产物输入 | 读取这些文件作为输入 |
 
-**审批点处理**：`gate:true`（仅 application-design / operations）时，先完成产物与 sensor，再加载 `skills/aidlc-approval/SKILL.md`。该 Skill 先用 `loeyae-aidlc approve --stage <slug> --request` 生成只读请求；只有宿主明确提供符合 `trusted-approval-provider.md` 的受信 Provider 时，才能把 response 通过 `--approval-response-stdin` 直接提交。普通聊天、`ask_question`、`[OPTIONS:]` 和 Agent 复制确认语都不能生成 `approved`。宿主 Provider 不可用时，由人类在业务项目的交互式终端执行：
+**审批点处理**：`gate:true`（仅 application-design / operations）时，先完成产物与 sensor，再加载 `skills/aidlc-approval/SKILL.md`。schema v3 的 request/TTY 均必须传 `--instance`；只有宿主明确提供符合 `trusted-approval-provider.md` 的受信 Provider 时，才能在 Agent 上下文之外组合 claim receipt 与 approval response stdin envelope。普通聊天、`ask_question`、`[OPTIONS:]` 和 Agent 复制确认语都不能生成 `approved`。宿主 Provider 不可用时，由人类在业务项目的交互式终端执行：
 
 ```bash
-loeyae-aidlc approve --stage <slug>
-loeyae-aidlc orchestrate report --stage <slug> --result approved --approval-token <token>
+loeyae-aidlc approve --stage <slug> --instance <stage-instance>
+claim-receipt.json | loeyae-aidlc orchestrate report \
+  --stage <slug> --instance <stage-instance> --result approved \
+  --approval-token <token> --claim-receipt-stdin
 ```
 
 Token 绑定当前 workflow、stage_instance 和 challenge，最长 15 分钟且成功消费后不可重放。误用 `completed`、缺 token、上下文不匹配、伪造、过期或重放都会返回 error directive；修复后重新获取 challenge/token，不得改 state 绕过。
@@ -156,9 +160,9 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 覆盖：frontmatter 手写 25 / 编译后 34（含自动注入的 no-todo + traceability）/ 46 stages。
 所有 `produces` 非空的 stage 在编译时自动追加 `no-todo` 与 `traceability` sensor，故实际准出 sensor 覆盖 = 34/46。下表列为 frontmatter 显式声明的 sensor；自动注入的两项见末两行。
 
-### 5. 防跳步：current_stage
+### 5. 防跳步：instance + receipt
 
-`report` 验证 `--stage` 必须等于当前活跃 stage。不能越阶汇报。覆盖：46/46 stages (100%)
+schema v3 `report` 同时验证 `--stage`、`--instance` 和当前有效 claim receipt。相同 slug 的不同 module/unit 实例可并行，但任一 client 只能凭自己 actor/device/client lease 提交。覆盖：所有 v3 实例。
 
 ## Scope 过滤
 
@@ -203,7 +207,9 @@ I9 UI 设计不是初始化选项，而是运行时 choice。`ui-mock` directive
 
 - **引擎调用**：`loeyae-aidlc orchestrate next/report/park`（全局安装后）
 - **子代理派发**：通过 `spawn_run` MCP 工具
-- **状态持久化**：`docs/aidlc/aidlc-state.json` 是 HMAC、workflow ID、单调 revision/CAS 保护的唯一机器状态；外部 enrollment 绑定项目路径
+- **状态持久化**：新 workflow 默认 schema v3；签名 event/instance map/ready set/claim receipt 是唯一机器状态，外部 enrollment 绑定项目路径
+- **协调 Provider**：Local 仅同工作树；Git 用专用 coordination ref 远端 CAS；External 当前仅通用接口/reference implementation，不虚构厂商连接器
+- **定向 report**：必须绑定 `stage_instance` 和安全 stdin receipt；assignment、handoff、聊天或 Slash Command 都不能授权
 - **会话恢复**：只从已验证签名 state 恢复；`docs/aidlc/handoff.md` 是派生人类视图，无权改变路由状态
 - **连续工作**：继续、接手、查看进度或换设备请求加载 `skills/aidlc-continuity/SKILL.md`；`aidlc-handoff` 仅为兼容别名，日常交接不自动 park
 - **人工确认**：`[OPTIONS: Approve | Request Changes]` 只呈现审阅选择；Approve 后仍须由人类 TTY/受信 provider 签发 token，不能把聊天回答直接作为 token

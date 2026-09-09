@@ -21,6 +21,10 @@ def main() -> None:
         "name: aidlc-approval",
         "--request",
         "--approval-response-stdin",
+        "--instance",
+        "--claim-receipt-stdin",
+        "claim receipt",
+        "stdin envelope",
         "NEEDS_TRUSTED_APPROVAL",
         "普通聊天",
         "真人 TTY",
@@ -32,6 +36,8 @@ def main() -> None:
         "description:",
         "skills/aidlc-approval/SKILL.md",
         "--approval-response-stdin",
+        "--instance",
+        "--claim-receipt-stdin",
         "Slash Command 本身不是安全凭据",
     )
     assert "AIDLC_APPROVAL_TOKEN=" not in command
@@ -42,6 +48,8 @@ def main() -> None:
         "NEEDS_HOST_CAPABILITY",
         "Agent 上下文",
         "真人 TTY fallback",
+        "claim_receipt",
+        "approval_response",
     )
     assert "不实现 Dashboard 后端" in kiro
 

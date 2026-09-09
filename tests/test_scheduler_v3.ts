@@ -105,12 +105,29 @@ function complete(state: WorkflowStateV3, stageInstance: string): WorkflowStateV
 try {
   let state = createInitialWorkflowStateV3(
     "feature",
-    "2.4.0",
+    "3.0.0",
     "workflow-scheduler-v3",
     [],
     new Date(clock).toISOString(),
   );
   state = synchronizeWorkflowInstancesV3(state, plans, timestamp());
+
+  let frontier = createInitialWorkflowStateV3(
+    "feature",
+    "3.0.0",
+    "workflow-scheduler-ready-frontier-v3",
+    [],
+    timestamp(),
+  );
+  frontier = synchronizeWorkflowInstancesV3(frontier, plans, timestamp(), { registration: "ready-frontier" });
+  assert.deepEqual(Object.keys(frontier.instances), ["workspace-detection"]);
+  frontier = complete(frontier, "workspace-detection");
+  frontier = synchronizeWorkflowInstancesV3(frontier, plans, timestamp(), { registration: "ready-frontier" });
+  assert.deepEqual(
+    Object.keys(frontier.instances),
+    ["workspace-detection", "application-design@module:module-a", "application-design@module:module-b"],
+    "frontier mode must not persist unit/project placeholders before their explicit dependencies resolve",
+  );
 
   assert.deepEqual(findReadyInstances(state, plans).map((item) => item.stage_instance), ["workspace-detection"]);
   assert.equal(state.instances["implementation-report"].status, "blocked");

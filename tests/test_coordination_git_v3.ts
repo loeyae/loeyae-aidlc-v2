@@ -120,6 +120,7 @@ try {
   assert.equal(transferred.receipt.device_id, "device:desktop");
   assert.notEqual(transferred.receipt.claim_id, renewed.receipt.claim_id);
   provider.release(transferred.receipt, "handoff complete", "2027-01-01T00:00:05.000Z");
+  assert.equal(provider.receiptTerminalStatus(transferred.receipt), "released");
   assert.equal(provider.currentReceipt("module-a@unit:unit-a"), null);
 
   const completing = provider.claim("module-a@unit:unit-a", {
@@ -128,6 +129,7 @@ try {
     client_id: "client:desktop-session-2",
   }, 30_000, "2027-01-01T00:00:06.000Z");
   provider.complete(completing.receipt, "2027-01-01T00:00:07.000Z");
+  assert.equal(provider.receiptTerminalStatus(completing.receipt), "completed");
   assert.ok(provider.snapshot().completed_instances.includes("module-a@unit:unit-a"));
   assert.throws(
     () => provider.claim("module-a@unit:unit-a", {

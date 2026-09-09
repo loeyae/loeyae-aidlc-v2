@@ -18,7 +18,7 @@ choices: [single-module, multi-module]
 
 **目的**：确定工作区状态，检查是否存在 AI-DLC 项目
 
-> **协作能力边界**：schema v2 中，本 Stage 展示的角色、模块和单元认领来自 `handoff.md` / `unit-of-work.md`，仅用于团队协调，不是签名机器 claim。它不能覆盖编排器的唯一 `current_stage_instance`，也不能证明跨设备排他所有权。协作状态 v3 启用后，认领必须先由 Coordination Provider 原子确认并返回 claim receipt，才能进入对应实例。
+> **协作能力边界**：新 workflow 默认 schema v3。工作区恢复必须先读取签名 instance map/ready set；assignment、`handoff.md` 和 `unit-of-work.md` 只补充人类上下文。进入某个实例前，Coordination Provider 必须先原子接受 actor/device/client claim，并返回可持久化的 receipt；Local 仅同工作树，跨工作树/设备使用 Git 或具体 External Provider。schema v2 只保留单游标兼容路径。
 
 ## 步骤 1：检查现有 AI-DLC 项目
 
@@ -43,20 +43,19 @@ choices: [single-module, multi-module]
 检查当前项目的 Inception 和 Construction 状态，确定进入哪种子模式：
 
 **A) 接力模式（Inception 阶段未完成）**：
-- 读取 handoff.md 中的"Inception 进度"表
-- 确定哪些步骤已完成、由谁完成
-- 确定下一个待执行的步骤
+- 先以 `orchestrate next --status` 验证签名 state 的 ready/active/resolved instances，再读取 handoff.md 中的“Inception 进度”作为人类展示
+- 使用当前 actor/device/client identity 取得或恢复目标实例 lease
+- 从 directive 的稳定 `stage_instance` 确定下一工作，不从负责人表猜测
 - 展示接力恢复提示（参见步骤 7）
 
 **B) 认领模式（Inception 阶段已完成，Construction 待开始或进行中）**：
-- 读取 handoff.md 中的"单元认领状态"表
-- 确定哪些单元待认领、哪些已被认领
-- 展示认领提示（参见步骤 8）
+- 从签名 ready set 查看可认领实例与依赖；handoff 的“单元认领状态”仅作展示
+- 由 Coordination Provider 原子 claim，只有 ACK 后才展示可执行 directive
 
 **C) 继续开发模式（已认领单元，Construction 进行中）**：
-- 读取 handoff.md 确认当前用户已认领的单元
-- 只加载该单元相关的最小上下文
-- 从上次中断处继续 Construction 流程
+- 从签名 claim/receipt 验证当前 actor/device/client 是否持有该实例 lease
+- 只加载 directive 指定实例的最小上下文
+- 没有有效 lease 时执行 claim/transfer/release/expiry 流程，不从 handoff 推断所有权
 
 ### 步骤 1.2：多模块恢复（仅多模块模式）
 
@@ -251,8 +250,10 @@ B) 多模块模式 — 产品规模较大，需要按业务域拆分为多个独
 `feature`、`enterprise`、`mvp`、`classic` 必须把唯一选择通过以下报告写入签名 history；快速 scope 不要求该 choice：
 
 ```bash
-loeyae-aidlc orchestrate report --stage workspace-detection --result completed \
-  --instruction-ack workspace-detection --user-input single-module
+claim-receipt.json | loeyae-aidlc orchestrate report \
+  --stage workspace-detection --instance workspace-detection --result completed \
+  --instruction-ack workspace-detection --user-input single-module \
+  --claim-receipt-stdin
 ```
 
 协作模式继续记录在 handoff 中，但不改变 Stage 集合；架构模式不得只写 handoff 或依靠聊天记忆改变机器路由。

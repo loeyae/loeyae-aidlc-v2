@@ -1,25 +1,25 @@
 # AI-DLC 协作状态 v3 契约
 
-本文定义 Loeyae AI-DLC 从 schema v2 单游标执行模型迁移到多人、多设备协作模型时必须保持的机器契约。本文是实现约束，不代表 v2.4.0 已具备下述全部能力。
+本文定义 Loeyae AI-DLC 3.0.0 的多人、多设备协作机器契约。新 workflow 默认使用 schema v3；schema v2 仅作为单游标兼容路径保留，并且不会被隐式迁移。
 
 ## 当前能力边界
 
-v2.4.0 已具备：
+3.0.0 已具备：
 
-- project/module/unit Stage 实例展开；
-- 签名 state、workflow ID、单调 revision 与单工作树 CAS；
-- 每次成功 `next`、`report`、条件跳过、park/resume 后的原子持久化；
-- 绑定 workflow、Stage 实例和 challenge 的一次性人工审批 token。
+- 签名 append-only event、确定性 reducer、instance map、workflow ID、单调 revision 与跨进程 CAS；
+- 稳定排序的多实例 DAG ready set，以及 project/module/unit 定向 `next` / `report`；
+- actor/device/client 身份、assignment 与短期 execution lease 分离、签名 claim receipt；
+- Local Provider 的同工作树原子 claim/renew/release/transfer/complete；
+- Git Provider 在专用 coordination ref 上的远端 CAS，并且只在远端接受后返回 receipt；
+- External Work Management Provider 通用接口、严格 ETag/version CAS 与内存 reference implementation；
+- workflow-wide freeze/resume/completion，以及 receipt-bound report 和 challenge-bound 人工审批。
 
-v2.4.0 尚不具备：
+仍需明确的边界：
 
-- 多个全局活跃 Stage 实例；
-- 受签名机器状态保护的 assignment、claim 或 execution lease；
-- 跨设备、跨工作树或跨分支的远端原子认领；
-- 对项目管理工具中的分配状态进行机器 CAS；
-- 多写者 state 的自动合并。
-
-因此，v2 文档中的 `handoff.md`、`unit-of-work.md` 和 Git 认领表仅为人类协调视图，不能证明机器级排他所有权。
+- Local Provider 不提供跨工作树或跨设备互斥；这类协调使用 Git Provider 或后续具体 External Provider 连接器；
+- 当前 External Provider 不是 Jira、TAPD、Linear 等厂商连接器；
+- `handoff.md`、`unit-of-work.md`、普通业务分支和聊天文本都不能替代 Provider ACK、claim receipt 或审批凭据；
+- schema v2 保持单全局游标，只能通过显式 `state migrate-v3` 受控迁移。
 
 ## 术语
 
@@ -41,7 +41,7 @@ v2.4.0 尚不具备：
 
 1. 每次成功状态事件都必须在命令返回成功前完成签名和原子持久化。
 2. Stage instance 成功完成后立即成为稳定交接点，其满足依赖的后继实例自动进入 `ready`。
-3. 日常接手不依赖显式 `park`。`park` 在兼容期保留，v3 中只表示 workflow freeze 或管理员维护状态。
+3. `park` 在 v3 中只表示冻结整个 workflow；它不是日常接手前提，也不是单实例 release。
 4. 尚未完成的实例不能仅因存在部分产物而视为已交接；接手必须通过 lease release、transfer 或 expiry。
 5. `handoff.md` 始终是派生的人类视图，不能改变 checkpoint、依赖、claim、approval 或 revision。
 
@@ -107,16 +107,17 @@ ready/claimed/in_progress -> skipped 仅允许由确定性 condition 或受控�
 
 ## 事件与归约
 
-协调历史采用签名 append-only 事件，至少覆盖：
+协调与 workflow 历史采用签名 append-only 事件，至少覆盖：
 
-- `instance_ready`
+- `workflow_initialized` / `workflow_migrated`
+- `workflow_frozen` / `workflow_resumed` / `workflow_completed`
+- `instance_registered` / `instance_ready` / `instance_skipped`
 - `instance_claimed`
 - `claim_renewed`
 - `instance_released`
 - `claim_transferred`
-- `instance_submitted`
-- `instance_completed`
-- `instance_blocked`
+- `instance_started` / `instance_submitted`
+- `instance_completed` / `instance_rejected` / `instance_blocked`
 - `approval_requested`
 - `approval_granted`
 
@@ -124,17 +125,18 @@ ready/claimed/in_progress -> skipped 仅允许由确定性 condition 或受控�
 
 ## v2 兼容与迁移
 
-1. v3 正式启用前，新实现必须由显式能力开关隔离，v2 工作流行为保持不变。
-2. v2 的 completed/skipped 实例、history、choice 和 approval challenge 必须无损迁移。
-3. v2 存在 current 实例时，只能迁移为一个明确的兼容 active/claimed 实例，不能静默释放给其他 actor。
-4. 迁移必须保持 workflow ID、enrollment 绑定和签名验证；失败时原 state 字节不变。
-5. v2 recovery/re-enroll 的安全要求不会因协作 UX 简化而降低。
-6. 每个迁移版本必须有 round-trip fixture、篡改测试和中断恢复测试。
+1. 新 workflow 默认创建 schema v3；仅显式设置 `AIDLC_COLLABORATION_V3=0` 时创建 schema v2 兼容 workflow。
+2. 已存在的 schema v2 state 始终分流到旧单游标引擎，不因升级或环境默认值自动迁移。
+3. `loeyae-aidlc state migrate-v3 --actor-id ... --device-id ... --client-id ...` 默认只输出计划；只有 `--apply` 才在锁内原子替换。
+4. v2 的 completed/skipped 实例、history、choice 和 approval challenge 无损迁移；active current 实例成为绑定迁移身份的明确 compatibility lock，不能静默释放。
+5. 迁移保持 workflow ID、enrollment 绑定和签名验证；失败、中断或 failpoint 触发时原 state 字节不变。
+6. v2 recovery/re-enroll 的 parked、旧 key、source enrollment 与真人 TTY 证明要求不会因迁移降低。
+7. 迁移 fixture 必须继续覆盖 round-trip、篡改、序号断裂和中断恢复。
 
-## 分阶段启用条件
+## 3.0.0 启用状态
 
-- 受信审批 UX 可在 schema v2 上独立启用。
-- continuity Skill 可在 v2 上提供串行恢复，但必须明确不代表多人并行。
-- 多实例调度只在 v3 reducer、迁移和定向 report 通过测试后启用。
-- 远端认领只在 Provider CAS、lease 和并发竞态测试通过后启用。
-- v3 成为默认模型前，所有 harness、文档、CLI、Hook、Evidence 和 recovery 必须完成分发一致性回归。
+- 受信审批 UX、continuity Skill、v3 reducer、DAG scheduler、Local/Git/External Provider 契约均已进入 canonical source 和全 harness 分发。
+- 顶层 CLI 依据落盘 `schema_version` 分流：不存在 state 时默认 v3，schema 3 走协作编排器，schema 2 走兼容编排器。
+- `next` 的 directive 包含稳定 `stage_instance` 和 Provider ACK 后的 receipt；`report` 必须从安全 stdin 取得 receipt。
+- 生命周期 Hook 在没有 holder identity/receipt 安全通道时 fail-closed，不代替另一协作者提交实例。
+- 新 Provider 或厂商连接器仍必须先通过 CAS、receipt、lease 和并发竞态契约测试，不能只靠 UX 文案宣称可用。

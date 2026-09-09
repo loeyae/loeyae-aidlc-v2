@@ -23,6 +23,10 @@ export interface WorkflowInstancePlanV3 {
   condition_met?: boolean;
 }
 
+export interface WorkflowSynchronizationOptionsV3 {
+  registration?: "all" | "ready-frontier";
+}
+
 export interface ReadyInstanceV3 {
   stage_instance: string;
   stage: string;
@@ -117,6 +121,7 @@ export function synchronizeWorkflowInstancesV3(
   stateValue: WorkflowStateV3,
   plans: readonly WorkflowInstancePlanV3[],
   occurredAt = new Date().toISOString(),
+  options: WorkflowSynchronizationOptionsV3 = {},
 ): WorkflowStateV3 {
   assertCollaborationV3Enabled();
   let state = validateWorkflowStateV3(stateValue, true);
@@ -136,6 +141,7 @@ export function synchronizeWorkflowInstancesV3(
       }
       continue;
     }
+    if (options.registration === "ready-frontier" && !dependenciesResolved(state, plan)) continue;
     state = append(state, "instance_registered", plan.stage_instance, occurredAt, {
       stage: plan.stage,
       axis: plan.axis,

@@ -8,15 +8,13 @@ AI-DLC 支持团队协作开发，采用**分阶段协作模型**：
 
 ## 当前实现边界
 
-schema v2 已能展开 project/module/unit Stage 实例并在每次状态变化后写入签名 checkpoint，但全局仍只有一个 `current_stage_instance`。当前 `handoff.md`、`unit-of-work.md` 与 Git 提交记录属于人类协调视图，尚不能提供跨设备、跨工作树的机器级排他认领。
+schema v3 是新 workflow 的默认机器模型。确定性 DAG 可同时暴露多个 ready project/module/unit Stage instance；assignment、claim 与 execution lease 分离，并由 actor/device/client 标识 holder。`handoff.md`、`unit-of-work.md` 与 Git 提交记录仍只是人类协调视图，不能授权 `report`。
 
-因此，在协作状态 v3 和 Coordination Provider 启用前：
-
-- 本文的“认领”表示团队约定，不表示引擎已经签发 claim receipt；
-- 不得把 `handoff.md` 中的负责人或分支字段当作机器授权；
-- 不得宣称多个模块或单元可由同一签名 workflow 在机器层并行 report；
-- 同一工作单元的并发冲突仍需项目管理工具或团队 Git 流程裁决；
-- 目标状态、安全不变量和迁移边界见 `docs/aidlc-collaboration-v3-contract.md`。
+- Local Provider 只保证同一工作树内的原子协调；
+- Git Provider 使用 `refs/heads/aidlc/coordination/<workflow-id>` 做远端 CAS，不 checkout 或更新业务 main/master；
+- External Provider 当前只提供通用接口和内存 reference implementation，不代表已有 Jira/TAPD/Linear 连接器；
+- Provider 必须先接受 claim，再返回 signed receipt/directive；失败、冲突或不可达时 fail-closed；
+- schema v2 工作流继续走单游标兼容引擎，只有显式 `state migrate-v3` 才迁移。
 
 ## 协作原则
 
@@ -24,7 +22,7 @@ schema v2 已能展开 project/module/unit Stage 实例并在每次状态变化�
 2. **项目管理工具负责任员安排，AI-DLC 协调层负责机器门禁** — Git 可承载持久化和审计，但普通业务分支不充当分布式锁
 3. **产出物即契约** — Inception 产出物是团队共享的开发契约
 4. **最小上下文加载** — 每个角色只加载自己需要的上下文，控制 token 消耗
-5. **先原子认领再执行** — v3 中由 Coordination Provider 以 CAS 签发 claim receipt；v2 中只能作为团队约定使用
+5. **先原子认领再执行** — Coordination Provider 以 CAS 签发 claim receipt；没有 ACK/有效 receipt 不得开始或 report。
 
 ---
 
@@ -149,23 +147,23 @@ Inception 完成后，所有单元处于"待认领"状态。开发者启动 AI-D
 ### 认领规则
 
 1. **无依赖的单元**：随时可认领。
-2. **`contract` 依赖**：仅当每个关联共享契约基线在 `handoff.md` 中为 `verified` 时可认领；“接口已定义”、Markdown 设计或消费者私有副本均不等于可认领。
+2. **`contract` 依赖**：仅当 canonical 共享契约基线及其机器 Evidence 为 `verified`，并被签名调度条件接受时才可认领；handoff 中的镜像状态、“接口已定义”、Markdown 设计或消费者私有副本均不足以授权。
 3. **`implementation` 依赖**：仅当提供方单元为 `complete` 且验证证据完整时可认领；已验证契约不替代实现完成。
 4. **`runtime` 依赖**：可认领不依赖该运行时的工作，但真实服务、数据或环境就绪前不得将相应集成验证标记完成。
 5. **互相依赖的单元**：建议同一人认领，或两人协商后各自开发；无法按依赖类型判定时标记 `blocked` 并返回 I14 澄清。
-6. **冲突解决**：Git 先到先得 — 谁先把认领信息推送到主分支，谁就拿到该单元。
+6. **冲突解决**：以 Coordination Provider 的原子 CAS 结果为准。Git 模式只有专用 coordination ref 的远端 conditional push 成功才算 ACK；业务 main/master、普通 PR 先后顺序或 handoff 表格都不能充当锁。
 
 依赖类型、所需状态和调度处理以 `common-context-optimization.md` 为准；共享契约基线的状态和证据以 `construction-shared-contract-baseline.md` 为准。
 
 ### 认领流程
 
-1. 开发者拉取最新主分支
-2. 启动 AI-DLC，工作区检测识别为"认领模式"
-3. AI 展示可认领的单元列表（含依赖信息）
-4. 开发者选择单元
-5. AI 更新 `unit-of-work.md` 中的认领状态
-6. 开发者提交认领信息到主分支（或约定分支）
-7. 创建特性分支，开始 Construction 流程
+1. 开发者先同步业务代码和 canonical 产物；该同步不产生机器 claim
+2. 使用 actor/device/client identity 运行 `orchestrate next`，查看稳定 ready set
+3. 可定向选择实例；引擎向配置的 Coordination Provider 发起原子 claim
+4. Provider ACK 后，引擎持久化 receipt/lease 并返回 directive
+5. 开发者只执行 directive 指定的 instance、artifact root 和 evidence root
+6. `report` 必须绑定 `--instance`，并从安全 stdin 回传当前 receipt
+7. 换设备或换人时使用 renew/release/transfer/expiry；不得用 `park` 代替单实例交接
 
 ### 认领后的上下文加载策略
 
@@ -230,7 +228,7 @@ main（主分支）
 ### 提交约定
 
 - **Inception 产出物**：直接提交到主分支（或通过短生命周期的 PR）
-- **认领信息**：提交到主分支（更新 unit-of-work.md 的认领状态）
+- **认领展示信息**：可提交到业务分支供人阅读，但不产生/延长 execution lease，也不替代 Provider receipt
 - **Construction 代码**：在特性分支开发，通过 PR 合并
 
 ### 冲突预防
@@ -265,7 +263,7 @@ main（主分支）
 当只有一个人使用 AI-DLC 时，团队协作机制自动退化为单人模式：
 - 不需要填写负责人信息
 - 不需要生成决策摘要（因为同一人继续）
-- 不需要认领流程（直接按顺序开发单元）
+- 不需要手工认领表流程，但引擎仍会为执行实例取得 Local Provider lease
 - 工作流行为与改动前完全一致
 
 **判断条件**：工作区检测时，如果 handoff.md 不存在或未标记"协作模式"，则按单人模式运行。
