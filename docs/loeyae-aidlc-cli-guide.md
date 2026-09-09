@@ -296,6 +296,7 @@ loeyae-aidlc orchestrate report --stage <slug> --result <result>
                                 [--unit <unit-id>]
                                 [--instruction-ack <slug>]
                                 [--approval-token <token>]
+                                [--approval-response-stdin]
                                 [--user-input <text>]
 ```
 
@@ -475,10 +476,22 @@ loeyae-aidlc orchestrate next --status
 只有 condition 判定需要执行的 `application-design` 和 `operations` 实例是阻断审批阶段；condition=false 的实例会先写入 `condition_skipped`，不会创建 challenge。
 
 ```text
-loeyae-aidlc approve --stage <slug>
+loeyae-aidlc approve --stage <slug> [--request]
 ```
 
-审批必须在业务项目根目录的交互式人类终端中执行：
+`--request` 是只读、可非交互调用的宿主协议入口。它输出绑定当前 workflow、`stage_instance`、challenge、TTL、artifact root 和 evidence root 的 `aidlc.approval.request` JSON，但不会签发 token。受信宿主在独立审批界面确认真实人类事件后，可生成与该请求绑定的 `aidlc.approval.response`，并通过标准输入提交，避免 token 出现在 argv：
+
+```bash
+trusted-host-provider --request-json /secure/host/request.json \
+  | loeyae-aidlc orchestrate report \
+      --stage application-design \
+      --result approved \
+      --approval-response-stdin
+```
+
+上例中的 `trusted-host-provider` 只是宿主能力名称示意，不是本包提供的非交互 token generator。响应必须包含匹配的 `request_id`、Provider ID、人类事件 ID、审批时间和合法 challenge-bound token；错请求、过期、伪造、未知字段或与 `--approval-token`/`AIDLC_APPROVAL_TOKEN` 混用都会被拒绝。普通 Agent 或聊天消息不能构造该响应。
+
+没有受信宿主 Provider 时，审批必须在业务项目根目录的交互式人类终端中执行：
 
 ```bash
 loeyae-aidlc orchestrate next

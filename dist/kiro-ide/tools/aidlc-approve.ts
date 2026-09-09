@@ -2,12 +2,17 @@ import { createInterface } from "readline/promises";
 import { stdin, stdout } from "process";
 import { realpathSync } from "fs";
 import { approvalToken } from "./aidlc-trust";
+import { buildApprovalProviderRequest } from "./aidlc-approval-provider";
 import { loadWorkflowState, saveWorkflowState } from "./aidlc-state";
 
 function flag(name: string): string | undefined {
   const args = process.argv.slice(2);
   const index = args.indexOf(`--${name}`);
   return index >= 0 ? args[index + 1] : undefined;
+}
+
+function hasFlag(name: string): boolean {
+  return process.argv.slice(2).includes(`--${name}`);
 }
 
 async function main(): Promise<void> {
@@ -28,9 +33,15 @@ async function main(): Promise<void> {
     throw new Error("approval challenge expired; run orchestrate next again");
   }
 
+  const request = buildApprovalProviderRequest(state, stage);
+  if (hasFlag("request")) {
+    stdout.write(`${JSON.stringify(request, null, 2)}\n`);
+    return;
+  }
+
   if (!stdin.isTTY || !stdout.isTTY) throw new Error("approval token issuance requires an interactive human terminal");
-  const phrase = `APPROVE ${approvalStage} ${challenge.slice(-8)}`;
-  stdout.write(`Review the stage artifacts and decision before approving.\nActive context: module=${state.current_module || "-"}, unit=${state.current_unit || "-"}\nType exactly: ${phrase}\n`);
+  const phrase = `APPROVE ${request.stage_instance} ${request.challenge.slice(-8)}`;
+  stdout.write(`Review the stage artifacts and decision before approving.\nActive context: module=${request.module_id || "-"}, unit=${request.unit_id || "-"}\nType exactly: ${phrase}\n`);
   const reader = createInterface({ input: stdin, output: stdout });
   try {
     const response = await reader.question("> ");
@@ -38,7 +49,7 @@ async function main(): Promise<void> {
   } finally {
     reader.close();
   }
-  stdout.write(`${JSON.stringify({ stage, stage_instance: approvalStage, module_id: state.current_module || null, unit_id: state.current_unit || null, approval_token: approvalToken(state.workflow_id, approvalStage, challenge), expires_in_seconds: Math.max(0, Math.floor((issuedAt + 15 * 60 * 1000 - Date.now()) / 1000)) }, null, 2)}\n`);
+  stdout.write(`${JSON.stringify({ stage, stage_instance: request.stage_instance, module_id: request.module_id, unit_id: request.unit_id, approval_token: approvalToken(request.workflow_id, request.stage_instance, request.challenge), expires_in_seconds: Math.max(0, Math.floor((new Date(request.expires_at).getTime() - Date.now()) / 1000)) }, null, 2)}\n`);
 }
 
 main().catch((error) => {

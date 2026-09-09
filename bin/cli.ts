@@ -1290,7 +1290,7 @@ Usage:
 Commands:
   orchestrate <next|report|park> [flags]  Run the workflow engine
   recover <inspect|re-enroll> [flags]     Inspect or repair a proven parked trust chain
-  approve --stage <slug>                  Issue a short-lived token in an interactive human terminal
+  approve --stage <slug> [--request]      Review in a TTY or emit a read-only host approval request
   evidence run [flags]                    Produce controlled build/test evidence
   check --sensor <name>                   Run a deterministic semantic checker
   diagram-provider run [options]          Run Chrome DevTools diagram validation
@@ -1334,6 +1334,8 @@ Examples:
   loeyae-aidlc recover inspect
   loeyae-aidlc recover re-enroll
   loeyae-aidlc approve --stage application-design
+  loeyae-aidlc approve --stage application-design --request
+  trusted-host-provider | loeyae-aidlc orchestrate report --stage application-design --result approved --approval-response-stdin
   loeyae-aidlc orchestrate report --stage application-design --result approved --approval-token <token>
   loeyae-aidlc export md /absolute/path/document.md --to docx --toc
   loeyae-aidlc export md /absolute/path/document.md --to pdf
@@ -1347,7 +1349,11 @@ Examples:
 function main(): void {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
-    case "orchestrate": run("core/tools/aidlc-orchestrate.ts", rest); break;
+    case "orchestrate": run(
+      "core/tools/aidlc-orchestrate.ts",
+      rest,
+      rest.includes("--approval-response-stdin") ? readFileSync(0, "utf8") : undefined,
+    ); break;
     case "recover": runInteractive("core/tools/aidlc-recover.ts", rest); break;
     case "approve": runInteractive("core/tools/aidlc-approve.ts", rest); break;
     case "evidence": run("core/tools/aidlc-evidence.ts", rest); break;
