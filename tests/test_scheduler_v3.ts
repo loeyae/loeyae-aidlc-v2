@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { createHash } from "crypto";
+import {
+  claimInstanceV3,
+  type ClaimOperationV3,
+} from "../core/tools/aidlc-coordination-local-v3";
 import {
   findReadyInstances,
   nextReadyInstanceV3,
@@ -9,7 +12,6 @@ import {
   type WorkflowInstancePlanV3,
 } from "../core/tools/aidlc-scheduler-v3";
 import {
-  appendWorkflowEventV3,
   createInitialWorkflowStateV3,
   type WorkflowStateV3,
 } from "../core/tools/aidlc-state-v3";
@@ -79,40 +81,25 @@ function timestamp(): string {
   return new Date(clock).toISOString();
 }
 
-function begin(state: WorkflowStateV3, stageInstance: string): WorkflowStateV3 {
-  const claimedAt = timestamp();
-  const receipt = createHash("sha256").update(`scheduler-test\n${stageInstance}\n${claimedAt}`).digest("hex");
-  let next = appendWorkflowEventV3(state, {
-    event_type: "instance_claimed",
-    stage_instance: stageInstance,
-    occurred_at: claimedAt,
-    payload: {
-      claim: {
-        claim_id: `claim-${receipt.slice(0, 20)}`,
-        actor_id: "actor:scheduler-test",
-        device_id: "device:scheduler-test",
-        client_id: `client:${stageInstance}`,
-        provider_id: "test-local-provider",
-        provider_receipt_digest: receipt,
-        claimed_at: claimedAt,
-        renewed_at: claimedAt,
-        lease_expires_at: new Date(clock + 60_000).toISOString(),
-      },
+function begin(state: WorkflowStateV3, stageInstance: string): ClaimOperationV3 {
+  return claimInstanceV3(
+    state,
+    stageInstance,
+    {
+      actor_id: "actor:scheduler-test",
+      device_id: "device:scheduler-test",
+      client_id: `client:${stageInstance}`,
     },
-  });
-  next = appendWorkflowEventV3(next, {
-    event_type: "instance_started",
-    stage_instance: stageInstance,
-    occurred_at: timestamp(),
-    payload: {},
-  });
-  return next;
+    "test-local-provider",
+    60_000,
+    timestamp(),
+  );
 }
 
 function complete(state: WorkflowStateV3, stageInstance: string): WorkflowStateV3 {
-  let next = begin(state, stageInstance);
-  next = submitInstanceV3(next, plans, stageInstance, timestamp());
-  return reportInstanceV3(next, plans, stageInstance, "completed", timestamp());
+  const claimed = begin(state, stageInstance);
+  const submitted = submitInstanceV3(claimed.state, plans, stageInstance, claimed.receipt, timestamp());
+  return reportInstanceV3(submitted, plans, stageInstance, claimed.receipt, "completed", timestamp());
 }
 
 try {
@@ -145,8 +132,16 @@ try {
     () => nextReadyInstanceV3(state, plans, "implementation-report"),
     /requested stage instance is not ready/,
   );
+  const premature = begin(state, "application-design@module:module-a");
   assert.throws(
-    () => reportInstanceV3(state, plans, "application-design@module:module-a", "completed", timestamp()),
+    () => reportInstanceV3(
+      premature.state,
+      plans,
+      "application-design@module:module-a",
+      premature.receipt,
+      "completed",
+      timestamp(),
+    ),
     /requires a submitted stage instance/,
   );
 

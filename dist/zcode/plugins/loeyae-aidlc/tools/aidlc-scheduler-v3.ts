@@ -1,5 +1,9 @@
 import type { ExecutionAxis } from "./aidlc-execution-context";
 import {
+  assertClaimReceiptForStateV3,
+  type ClaimReceiptV3,
+} from "./aidlc-coordination-local-v3";
+import {
   appendWorkflowEventV3,
   assertCollaborationV3Enabled,
   validateWorkflowStateV3,
@@ -221,12 +225,14 @@ export function submitInstanceV3(
   stateValue: WorkflowStateV3,
   plans: readonly WorkflowInstancePlanV3[],
   stageInstance: string,
+  receipt: ClaimReceiptV3,
   occurredAt = new Date().toISOString(),
 ): WorkflowStateV3 {
   assertCollaborationV3Enabled();
   const state = validateWorkflowStateV3(stateValue, true);
   const planned = planMap(plans).get(nonEmpty(stageInstance, "stage_instance"));
   if (!planned) throw new Error(`stage instance is not in the workflow plan: ${stageInstance}`);
+  assertClaimReceiptForStateV3(state, receipt, stageInstance, Date.parse(occurredAt));
   if (state.instances[stageInstance]?.status !== "in_progress") {
     throw new Error(`stage instance must be in_progress before submission: ${stageInstance}`);
   }
@@ -237,6 +243,7 @@ export function reportInstanceV3(
   stateValue: WorkflowStateV3,
   plans: readonly WorkflowInstancePlanV3[],
   stageInstance: string,
+  receipt: ClaimReceiptV3,
   result: TargetedReportResultV3,
   occurredAt = new Date().toISOString(),
   userInput?: string,
@@ -245,6 +252,7 @@ export function reportInstanceV3(
   const state = validateWorkflowStateV3(stateValue, true);
   const planned = planMap(plans).get(nonEmpty(stageInstance, "stage_instance"));
   if (!planned) throw new Error(`stage instance is not in the workflow plan: ${stageInstance}`);
+  assertClaimReceiptForStateV3(state, receipt, stageInstance, Date.parse(occurredAt));
   if (state.instances[stageInstance]?.status !== "submitted") {
     throw new Error(`targeted report requires a submitted stage instance: ${stageInstance}`);
   }

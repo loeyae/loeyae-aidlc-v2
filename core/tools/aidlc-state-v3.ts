@@ -38,6 +38,8 @@ export type WorkflowEventTypeV3 =
   | "workflow_migrated"
   | "instance_registered"
   | "instance_ready"
+  | "assignment_set"
+  | "assignment_cleared"
   | "instance_claimed"
   | "instance_started"
   | "claim_renewed"
@@ -64,6 +66,13 @@ export interface WorkflowClaimV3 extends Record<string, unknown> {
   compatibility_lock?: true;
 }
 
+export interface WorkflowAssignmentV3 extends Record<string, unknown> {
+  actor_id: string;
+  provider_id: string;
+  assigned_at: string;
+  external_work_item_id?: string;
+}
+
 export interface WorkflowApprovalV3 extends Record<string, unknown> {
   challenge: string;
   requested_at: string;
@@ -82,6 +91,7 @@ export interface WorkflowInstanceV3 extends Record<string, unknown> {
   status: WorkflowInstanceStatusV3;
   revision: number;
   updated_at: string;
+  assignment?: WorkflowAssignmentV3;
   claim?: WorkflowClaimV3;
   approval?: WorkflowApprovalV3;
   result?: "completed" | "approved";
@@ -173,6 +183,8 @@ const EVENT_TYPES = new Set<WorkflowEventTypeV3>([
   "workflow_migrated",
   "instance_registered",
   "instance_ready",
+  "assignment_set",
+  "assignment_cleared",
   "instance_claimed",
   "instance_started",
   "claim_renewed",
@@ -330,6 +342,19 @@ function validateClaim(value: unknown, field: string): WorkflowClaimV3 {
   };
 }
 
+function validateAssignment(value: unknown, field: string): WorkflowAssignmentV3 {
+  const assignment = record(value, field);
+  exactKeys(assignment, new Set(["actor_id", "provider_id", "assigned_at", "external_work_item_id"]), field);
+  return {
+    actor_id: text(assignment.actor_id, `${field}.actor_id`),
+    provider_id: text(assignment.provider_id, `${field}.provider_id`),
+    assigned_at: iso(assignment.assigned_at, `${field}.assigned_at`),
+    ...(assignment.external_work_item_id !== undefined
+      ? { external_work_item_id: text(assignment.external_work_item_id, `${field}.external_work_item_id`) }
+      : {}),
+  };
+}
+
 function validateEventPayload(eventType: WorkflowEventTypeV3, payloadValue: unknown): Record<string, unknown> {
   const payload = record(payloadValue, `event ${eventType} payload`);
   const exact = (keys: string[]): void => exactKeys(payload, new Set(keys), `event ${eventType} payload`);
@@ -378,6 +403,14 @@ function validateEventPayload(eventType: WorkflowEventTypeV3, payloadValue: unkn
     case "instance_ready":
       exact(["reason"]);
       if (payload.reason !== undefined) text(payload.reason, "instance_ready.reason");
+      break;
+    case "assignment_set":
+      exact(["assignment"]);
+      validateAssignment(payload.assignment, "assignment_set.assignment");
+      break;
+    case "assignment_cleared":
+      exact(["reason"]);
+      text(payload.reason, "assignment_cleared.reason");
       break;
     case "instance_claimed":
     case "claim_transferred":
@@ -620,6 +653,18 @@ function applyInstanceEvent(state: Omit<WorkflowStateV3, "integrity">, event: Wo
       delete instance.claim;
       touch(instance, event);
       break;
+    case "assignment_set":
+      if (instance.status === "completed" || instance.status === "skipped") {
+        throw new Error(`cannot assign resolved instance ${instanceId}`);
+      }
+      instance.assignment = validateAssignment(payload.assignment, "assignment_set.assignment");
+      touch(instance, event);
+      break;
+    case "assignment_cleared":
+      if (!instance.assignment) throw new Error(`assignment_cleared requires an assignment for ${instanceId}`);
+      delete instance.assignment;
+      touch(instance, event);
+      break;
     case "instance_claimed":
       expectStatus(instance, event, ["ready"]);
       instance.claim = validateClaim(payload.claim, "instance_claimed.claim");
@@ -640,7 +685,7 @@ function applyInstanceEvent(state: Omit<WorkflowStateV3, "integrity">, event: Wo
       touch(instance, event);
       break;
     case "instance_released":
-      expectStatus(instance, event, ["claimed", "in_progress", "rejected"]);
+      expectStatus(instance, event, ["claimed", "in_progress", "submitted", "rejected"]);
       delete instance.claim;
       instance.status = payload.target_status as "ready" | "blocked";
       touch(instance, event);
