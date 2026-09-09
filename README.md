@@ -307,11 +307,12 @@ claim-receipt.json | loeyae-aidlc orchestrate report \
   --stage ui-mock --instance ui-mock@module:module-a --result completed \
   --instruction-ack ui-mock --user-input html-mock --claim-receipt-stdin
 
-# approval:block：request/TTY 都绑定明确实例；普通聊天或 Slash Command 不是凭据
-loeyae-aidlc approve --stage application-design --instance application-design@module:module-a
-claim-receipt.json | loeyae-aidlc orchestrate report \
+# approval:block：Agent 展示 request 的随机确认语并停止；用户下一条消息必须精确输入
+loeyae-aidlc approve --stage application-design \
+  --instance application-design@module:module-a --request
+conversation-confirmation-envelope | loeyae-aidlc orchestrate report \
   --stage application-design --instance application-design@module:module-a \
-  --result approved --approval-token <token> --claim-receipt-stdin
+  --result approved --claim-receipt-stdin --approval-confirmation-stdin
 loeyae-aidlc orchestrate park
 
 # schema v2 只走兼容引擎；显式迁移默认 dry-run，--apply 才原子写入
@@ -444,7 +445,7 @@ Agent 不能跳步——schema v3 的每次 `report` 必须绑定确定的 `stag
 
 ### 审批与 instruction-only
 
-只有条件判定需要执行的 `application-design` 和 `operations` 实例使用 `approval: block`。`next` 为其创建绑定 `workflow_id + stage_instance + challenge` 的随机 challenge；模块级 `application-design` 的每个模块实例分别审批。用户可通过 `aidlc-approval` Skill、自然语言关键词或 Claude `/aidlc-approve` 进入审阅；这些入口只负责读取 `approve --stage <slug> --instance <id> --request` 的绑定上下文并路由受信宿主 Provider，普通聊天或 Slash Command 本身不是审批凭据。schema v3 中 Provider response 与 claim receipt 由宿主在 Agent 上下文外组合为严格 stdin envelope。没有受信 Provider 时，人类仍在交互式终端运行 `loeyae-aidlc approve --stage <slug> --instance <id>`，取得最长 15 分钟、消费后不可重放的 token，再与安全 stdin receipt 一起定向报告。condition=false 的实例先自动记录 `condition_skipped`，不会创建 challenge。没有受信宿主 Provider 且没有可用人类终端时，这两个阶段按设计 fail-closed；不得暴露普通非交互 token generator。KiroCrew 安全审批卡的宿主要求见 `trusted-approval-provider.md`，普通问答卡不能替代。
+只有条件判定需要执行的 `application-design` 和 `operations` 实例使用 `approval: block`。`next` 为其创建绑定 `workflow_id + stage_instance + challenge` 的随机 challenge；模块级 `application-design` 的每个模块实例分别审批。用户通过 `aidlc-approval` Skill、自然语言关键词或 Claude `/aidlc-approve` 进入审阅；`approve --stage <slug> --instance <id> --request` 返回绑定当前 request 的随机 `confirmation_phrase`。Agent 展示 canonical 产物/Evidence 摘要和完整短语后必须结束回合；只有用户在下一条真实消息中手工输入完全一致的正文，Agent 才能将 `aidlc.approval.confirmation` 与当前 claim receipt 组成严格 stdin envelope，通过 `--approval-confirmation-stdin` 定向报告。普通“同意”、预填按钮、Agent 复制文本、旧消息或同一回合自动提交均无效。引擎在内部生成并立即消费最长 15 分钟的一次性 token，仍校验 request、TTL、instance、receipt、produces、sensors 和 replay。受信宿主 Provider 仅是可选一键增强，真人 TTY 仅是备用路径；默认流程不要求专用安全审批卡或另开终端。condition=false 的实例先自动记录 `condition_skipped`，不会创建 challenge。
 
 12 个不产生机器可验证产物的阶段显式标记为 `instruction_only`，执行正文后必须用 `--instruction-ack <stage-slug>` 报告。Stop Hook 不携带该确认，因此不能自动推进这些阶段。
 
@@ -529,7 +530,7 @@ v1 源码在 `loeyae-aidlc` 仓库。v2 的所有 steering 内容已从 v1 迁�
 - Node.js ≥ 20
 - npm 或 bun（安装用）
 - Kiro Crew Desktop（使用 Kiro Crew harness 时）
-- 需要阻断审批的宿主（Kiro Crew Dashboard、Claude、CodeBuddy、Qoder、ZCode、Codex 或 OpenCode）仍必须使用受信 token provider 或可用人类终端；两个 approval 阶段按设计 fail-closed。
+- 两个阻断审批阶段默认要求用户在新的对话消息中精确输入引擎随机确认语；受信宿主 Provider 和真人 TTY 均为可选增强/备用通道。
 
 ## License
 

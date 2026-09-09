@@ -309,6 +309,7 @@ loeyae-aidlc orchestrate report --stage <slug> --instance <stage-instance>
                                 [--module <module-id>]
                                 [--unit <unit-id>]
                                 [--instruction-ack <slug>]
+                                [--approval-confirmation-stdin]
                                 [--approval-token <token>]
                                 [--approval-response-stdin]
                                 [--coordination-remote <url-or-path>]
@@ -320,7 +321,7 @@ loeyae-aidlc orchestrate report --stage <slug> --instance <stage-instance>
 | Result | 用途 |
 |---|---|
 | `completed` | 普通阶段完成；引擎校验 consumes、produces 和 sensors 后推进 |
-| `approved` | 仅用于 `approval: block` 阶段；必须提供有效一次性 token |
+| `approved` | 仅用于 `approval: block` 阶段；默认提供当前 request 的精确对话确认，Provider response/TTY token 为兼容通道 |
 | `rejected` | 记录审阅拒绝，当前阶段保持活动状态 |
 | `revised` | 记录已修订，当前阶段保持活动状态，之后仍需报告 `completed` 或 `approved` |
 
@@ -536,30 +537,42 @@ loeyae-aidlc orchestrate next --status
 loeyae-aidlc approve --stage <slug> --instance <stage-instance> [--request]
 ```
 
-schema v3 必须明确 `--instance`。`--request` 是只读、可非交互调用的宿主协议入口。它输出绑定当前 workflow、`stage_instance`、challenge、TTL、artifact root 和 evidence root 的 `aidlc.approval.request` JSON，但不会签发 token。schema v3 同时需要 claim receipt 和 Provider response 时，stdin 使用严格 envelope：`{"claim_receipt": {...}, "approval_response": {...}}`。受信宿主负责在 Agent 上下文之外组合 envelope，再执行：
+schema v3 必须明确 `--instance`。`--request` 是只读、可非交互调用的默认审批入口。它输出绑定当前 workflow、`stage_instance`、challenge、TTL、artifact root 和 evidence root 的 `aidlc.approval.request` JSON，并包含引擎生成的 `confirmation_phrase`，但不会输出 token。
+
+Agent 必须展示当前实例产物/Evidence 摘要和完整 `confirmation_phrase`，随后结束当前回合。用户在下一条新的用户消息中只输入完整确认语；普通“同意”、近似文本、预填按钮、Agent 复制文本、旧消息或同一回合自动提交均无效。
+
+schema v3 将精确用户输入包装为 `aidlc.approval.confirmation`，再与 owning client 的 claim receipt 组成严格 envelope：
+
+```json
+{
+  "claim_receipt": { "...": "signed Provider receipt" },
+  "approval_confirmation": {
+    "schema_version": 1,
+    "kind": "aidlc.approval.confirmation",
+    "request_id": "<active-request-id>",
+    "confirmation_phrase": "<exact-user-message>"
+  }
+}
+```
+
+通过安全 stdin 提交：
 
 ```bash
-trusted-host-envelope \
+conversation-confirmation-envelope \
   | loeyae-aidlc orchestrate report \
       --stage application-design \
       --instance application-design@module:module-a \
       --result approved \
       --claim-receipt-stdin \
-      --approval-response-stdin
+      --approval-confirmation-stdin
 ```
 
-上例中的 `trusted-host-envelope` 只是宿主能力名称示意，不是本包提供的非交互 token generator。响应必须包含匹配的 `request_id`、Provider ID、人类事件 ID、审批时间和合法 challenge-bound token；错请求、过期、伪造、未知字段或与 `--approval-token`/`AIDLC_APPROVAL_TOKEN` 混用都会被拒绝。普通 Agent 或聊天消息不能构造该响应。
+schema v2 不需要 claim receipt，直接把 `aidlc.approval.confirmation` 对象通过 `--approval-confirmation-stdin` 传给兼容引擎。两种 schema 都由引擎精确校验 request ID、确认语、challenge TTL 和实例，并在内部生成及立即消费 token；token 不进入聊天、stdin envelope、argv 或项目文件。
 
-没有受信宿主 Provider 时，审批必须在业务项目根目录的交互式人类终端中执行：
+受信宿主 Provider 仍可作为可选一键增强。schema v3 的 Provider response 与 claim receipt 使用 `{"claim_receipt": {...}, "approval_response": {...}}` envelope 和 `--approval-response-stdin`；它不是默认审批的前置条件。真人交互式终端同样保留为备用路径：
 
 ```bash
-loeyae-aidlc orchestrate next
 loeyae-aidlc approve --stage application-design --instance application-design@module:module-a
-```
-
-命令会显示一条必须精确输入的确认短语。通过后输出 JSON，其中包含 `approval_token` 和剩余有效秒数。把 token 用于当前阶段：
-
-```bash
 cat claim-receipt.json | loeyae-aidlc orchestrate report \
   --stage application-design \
   --instance application-design@module:module-a \
@@ -568,24 +581,14 @@ cat claim-receipt.json | loeyae-aidlc orchestrate report \
   --claim-receipt-stdin
 ```
 
-也可以由受信宿主通过一次性环境变量传递：
-
-```bash
-cat claim-receipt.json | AIDLC_APPROVAL_TOKEN=<token> \
-  loeyae-aidlc orchestrate report \
-    --stage application-design \
-    --instance application-design@module:module-a \
-    --result approved \
-    --claim-receipt-stdin
-```
-
 约束：
 
 - Stage slug 与 `--instance` 必须匹配当前 active instance，并已由 `orchestrate next` 为该实例创建 challenge。
-- challenge/token 最长有效 15 分钟。
-- token 绑定 workflow、`stage_instance` 和 challenge；模块级 `application-design` 的每个实例单独审批，成功消费后不可重放。
-- 非交互终端不能签发 token。
-- 普通聊天中的“同意”不能替代 token。
+- challenge/确认语最长有效 15 分钟。
+- 确认语绑定 workflow、`stage_instance`、challenge 和 request ID；模块级 `application-design` 的每个实例单独审批，成功消费后不可重放。
+- Agent 展示确认语后必须结束回合；没有新的精确用户消息不得调用 approved report。
+- 对话确认、Provider response、`--approval-token`/`AIDLC_APPROVAL_TOKEN` 三类通道只能选择一个，混用或未知字段均拒绝。
+- TTY token 发行仍要求交互式终端，但默认对话确认不要求用户打开终端。
 
 ## 7. Evidence Producer：`evidence run`
 

@@ -26,6 +26,6 @@ loeyae-aidlc orchestrate report --stage <slug> --result completed
 loeyae-aidlc orchestrate park
 ```
 
-`gate: true` 时，聊天确认本身不是审批凭据。人类须在交互式终端执行 `loeyae-aidlc approve --stage <slug>`，或由受信宿主 provider 签发绑定 workflow/stage/challenge 的一次性 token，再以 `--result approved --approval-token <token>` 报告；插件和 Agent 不得自行签发，无 provider/TTY 时 fail-closed。`instruction_only` stage 执行正文后必须显式 `--instruction-ack <slug>`，idle gate 不会自动推进。公开 report 不支持手动 skip，仅 condition=false 可产生内部 `condition_skipped`。
+`gate: true` 时，加载 `aidlc-approval`，读取并展示 request 的随机 `confirmation_phrase` 后结束回合；只有用户下一条真实消息完整匹配，才能通过 `--approval-confirmation-stdin` 定向报告。普通“同意”、预填按钮、Agent 代填、旧消息或同一回合自动提交无效。Provider 是可选增强，真人 TTY 是备用路径。`instruction_only` stage 执行正文后必须显式 `--instruction-ack <slug>`，idle gate 不会自动推进。公开 report 不支持手动 skip，仅 condition=false 可产生内部 `condition_skipped`。
 
 `docs/aidlc/aidlc-state.json` 是 HMAC、workflow ID、revision/CAS 保护的唯一机器状态，外部 enrollment 绑定项目；`docs/aidlc/handoff.md` 仅为派生人类视图。Evidence 只接受受控 Producer 的精确 provenance、当前 `commit + dirty + worktree_digest` 和 HMAC；命令只记录 `argv_digest`，semantic 固定执行发行包内置 checker。需要 Evidence 时必须在第一次 `next` 前向 orchestrator、Producer 和插件进程注入同一份至少 32 字节的 `AIDLC_TRUST_SECRET`。

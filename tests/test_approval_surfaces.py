@@ -20,38 +20,46 @@ def main() -> None:
         ROOT / "core" / "skills" / "aidlc-approval" / "SKILL.md",
         "name: aidlc-approval",
         "--request",
-        "--approval-response-stdin",
+        "confirmation_phrase",
+        "下一条新的用户消息",
+        "结束当前 Agent 回合",
+        "aidlc.approval.confirmation",
+        "approval_confirmation",
+        "--approval-confirmation-stdin",
         "--instance",
         "--claim-receipt-stdin",
-        "claim receipt",
-        "stdin envelope",
-        "NEEDS_TRUSTED_APPROVAL",
-        "普通聊天",
-        "真人 TTY",
+        "NEEDS_CONFIRMATION",
+        "可选兼容通道",
+        "真人交互式终端仍是备用路径",
     )
-    assert "非交互 token generator" in skill
+    assert "NEEDS_TRUSTED_APPROVAL" not in skill
+    assert "预填 Approve 按钮" in skill
 
     command = require(
         ROOT / "harness" / "claude" / "commands" / "aidlc-approve.md",
         "description:",
         "skills/aidlc-approval/SKILL.md",
-        "--approval-response-stdin",
+        "confirmation_phrase",
+        "下一条新的用户消息",
+        "--approval-confirmation-stdin",
         "--instance",
         "--claim-receipt-stdin",
-        "Slash Command 本身不是安全凭据",
+        "Slash Command 本身不是批准",
+        "可选的一键审批增强",
     )
     assert "AIDLC_APPROVAL_TOKEN=" not in command
 
     kiro = require(
         ROOT / "harness" / "kiro-crew" / "skills" / "loeyae-aidlc" / "trusted-approval-provider.md",
-        "ask_question",
-        "NEEDS_HOST_CAPABILITY",
-        "Agent 上下文",
-        "真人 TTY fallback",
-        "claim_receipt",
-        "approval_response",
+        "默认 AI-DLC 审批不依赖 KiroCrew 专用安全卡",
+        "confirmation_phrase",
+        "下一条真实用户消息",
+        "approval_confirmation",
+        "--approval-confirmation-stdin",
+        "可选 Provider 响应",
+        "不得要求用户另开终端",
     )
-    assert "不实现 Dashboard 后端" in kiro
+    assert "NEEDS_HOST_CAPABILITY" not in kiro
 
     claude_manifest = require(
         ROOT / "harness" / "claude" / "manifest.ts",

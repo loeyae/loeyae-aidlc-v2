@@ -56,11 +56,12 @@
 
 ## 审批安全边界
 
-1. Skill、关键词、Slash Command 和审批卡片只负责 UX 与路由。
-2. 普通聊天文本不能作为审批凭据，Agent 不能代填确认短语或自行签发 token。
-3. 受信宿主事件必须绑定 workflow ID、Stage instance、challenge、产物摘要、TTL 和 replay 状态。
-4. 宿主 Provider 不可用时，只能回退到现有真人 TTY 命令；不得降级为聊天确认。
-5. `application-design` 和 `operations` 继续是仅有的阻断审批 Stage。
+1. `approve --request` 生成绑定 workflow ID、Stage instance、challenge、产物根、Evidence 根和 TTL 的随机 `confirmation_phrase`。
+2. Agent 必须展示审批摘要和完整确认语后结束当前回合；只有下一条真实用户消息的完整正文精确匹配，才能构造 `aidlc.approval.confirmation`。
+3. 普通“同意”、近似文本、预填按钮、Agent 复制文本、旧消息、Slash Command 被调用或同一回合自动提交均不能批准。
+4. schema v3 的对话确认必须与 owning client claim receipt 组成严格 stdin envelope；引擎内部生成并立即消费 token，继续校验 request、TTL、instance、receipt、produces、sensors 和 replay。
+5. 受信宿主 Provider 是可选的一键审批与额外审计增强，真人 TTY 是备用路径；默认流程不依赖专用审批卡或外部终端。
+6. `application-design` 和 `operations` 继续是仅有的阻断审批 Stage。
 
 ## 协调 Provider 边界
 

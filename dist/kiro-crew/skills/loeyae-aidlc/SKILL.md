@@ -13,7 +13,7 @@ triggers: aidlc, AI-DLC, 使用 AI-DLC, 继续上次的工作, 接手当前项�
 
 **准入门禁（requires + condition）+ 准出门禁（produces + sensors）= 自动推进**
 
-门禁保证可机器验证的完整性；仅 2 个不可自动判定的决策点保留 `approval: block`（架构决策 + 部署决策），且只在对应 condition=true 时出现。`gate: true` 不是口头确认：完成当前实例产物与 sensor 后，人类必须在交互式终端签发绑定 workflow/stage_instance/challenge、最长 15 分钟且消费后不可重放的 token。模块级 `application-design` 每个模块实例分别审批。平台适配器和 Agent 不得自行签发；没有受信宿主 provider 且无人类 TTY 时按设计 fail-closed。
+门禁保证可机器验证的完整性；仅 2 个不可自动判定的决策点保留 `approval: block`（架构决策 + 部署决策），且只在对应 condition=true 时出现。`gate: true` 不是口头“同意”：完成当前实例产物与 sensor 后，引擎生成绑定 workflow/stage_instance/challenge、最长 15 分钟的随机确认语；Agent 展示后必须结束回合，只有用户在下一条真实消息中完整输入该短语，才能通过安全 stdin 继续审批。模块级 `application-design` 每个模块实例分别确认。Provider 是可选增强，真人 TTY 是备用路径，二者都不是默认流程的前置条件。
 
 ## 架构
 
@@ -34,7 +34,7 @@ Loop:
   3. 执行完成后按契约报告（receipt 只走安全 stdin）：
      - 普通 stage：`... | report --stage <slug> --instance <id> --result completed --claim-receipt-stdin`
      - instruction-only：追加 `--instruction-ack <slug>`
-     - approval:block：先由受信 Provider/真人 TTY 签发 instance-bound token，再与 receipt 一起定向报告
+     - approval:block：读取 request，展示随机确认语并结束回合；下一条用户消息精确匹配后，与 receipt 组成严格 stdin envelope 定向报告
   4. 重复直到 directive.kind == done
 ```
 
@@ -61,24 +61,23 @@ Loop:
 | `axis` | "project"\|"module"\|"unit" | 实例化范围 | 按对应上下文执行 |
 | `module_id` / `unit_id` | string\|null | 当前稳定上下文 ID | 非空时只读写该上下文 |
 | `artifact_root` / `evidence_root` | string | 当前实例规范根目录 | 所有产物和 Evidence 写入该目录 |
-| `gate` | boolean | `true` = 本 stage 为审批阻断点（approval:block） | 完成后必须携带受信的一次性 token 报告 `approved`，不得使用 `completed` |
-| `approval` | "block"\|"confirm"\|"notify" | 审批类型 | `block` 必须由人类终端或受信宿主 provider 签发 token；`notify` 仅通知 |
+| `gate` | boolean | `true` = 本 stage 为审批阻断点（approval:block） | 展示 request 的随机确认语并等待下一条精确用户消息，不得使用 `completed` |
+| `approval` | "block"\|"confirm"\|"notify" | 审批类型 | `block` 默认走跨回合对话确认；Provider/TTY 仅为可选兼容通道；`notify` 仅通知 |
 | `completion_contract` | "artifact"\|"evidence"\|"instruction_only" | 完成契约 | `instruction_only` 必须追加 `--instruction-ack <slug>`，Stop Hook 不得代确认 |
 | `produces` | string[] | 准出需存在的产物路径 | report 前确保已生成 |
 | `sensors` | string[] | 准出需通过的 sensor | report 前确保 evidence 就绪 |
 | `mode` | "inline"\|... | 执行模式 | 参考 stage 文件 |
 | `consumes` | string[] | 上游产物输入 | 读取这些文件作为输入 |
 
-**审批点处理**：`gate:true`（仅 application-design / operations）时，先完成产物与 sensor，再加载 `skills/aidlc-approval/SKILL.md`。schema v3 的 request/TTY 均必须传 `--instance`；只有宿主明确提供符合 `trusted-approval-provider.md` 的受信 Provider 时，才能在 Agent 上下文之外组合 claim receipt 与 approval response stdin envelope。普通聊天、`ask_question`、`[OPTIONS:]` 和 Agent 复制确认语都不能生成 `approved`。宿主 Provider 不可用时，由人类在业务项目的交互式终端执行：
+**审批点处理**：`gate:true`（仅 application-design / operations）时，先完成产物与 sensor，再加载 `skills/aidlc-approval/SKILL.md`。schema v3 request 必须传明确 `--instance`；`approve --request` 返回绑定当前 request 的 `confirmation_phrase`。Agent 展示产物摘要和完整短语后必须结束当前回合；只有下一条真实用户消息的完整正文精确匹配，才能把 `aidlc.approval.confirmation` 与 owning client receipt 组成严格 stdin envelope：
 
 ```bash
-loeyae-aidlc approve --stage <slug> --instance <stage-instance>
-claim-receipt.json | loeyae-aidlc orchestrate report \
+conversation-confirmation-envelope | loeyae-aidlc orchestrate report \
   --stage <slug> --instance <stage-instance> --result approved \
-  --approval-token <token> --claim-receipt-stdin
+  --claim-receipt-stdin --approval-confirmation-stdin
 ```
 
-Token 绑定当前 workflow、stage_instance 和 challenge，最长 15 分钟且成功消费后不可重放。误用 `completed`、缺 token、上下文不匹配、伪造、过期或重放都会返回 error directive；修复后重新获取 challenge/token，不得改 state 绕过。
+普通“同意”、预填按钮、Agent 复制文本、旧消息或同一回合自动提交均不能批准。引擎在内部派生并立即消费 token，仍校验 request、TTL、instance、receipt、produces 和 sensors。受信 Provider 是可选增强，真人 TTY 是备用路径；误用 `completed`、短语不匹配、上下文不匹配、过期或重放都会返回 error directive。
 
 ## 五层门禁体系
 
@@ -212,7 +211,7 @@ I9 UI 设计不是初始化选项，而是运行时 choice。`ui-mock` directive
 - **定向 report**：必须绑定 `stage_instance` 和安全 stdin receipt；assignment、handoff、聊天或 Slash Command 都不能授权
 - **会话恢复**：只从已验证签名 state 恢复；`docs/aidlc/handoff.md` 是派生人类视图，无权改变路由状态
 - **连续工作**：继续、接手、查看进度或换设备请求加载 `skills/aidlc-continuity/SKILL.md`；`aidlc-handoff` 仅为兼容别名，日常交接不自动 park
-- **人工确认**：`[OPTIONS: Approve | Request Changes]` 只呈现审阅选择；Approve 后仍须由人类 TTY/受信 provider 签发 token，不能把聊天回答直接作为 token
+- **人工确认**：Agent 展示引擎生成的完整随机确认语后结束回合；用户必须在下一条消息中手工精确输入。不得使用预填 `[OPTIONS:]`/按钮代发确认语；Provider 仅是可选增强
 - **instruction-only**：执行正文后显式传 `--instruction-ack <slug>`；生命周期 Hook 不自动推进
 - **证据目录**：业务项目的 `.aidlc/evidence/<stage-slug>/` 存放 sensor 证据
 - **MCP 能力**：默认安装会将 V1 的 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 和 `chrome-devtools` 合并到 Kiro Crew 全局配置；无自定义字段的旧版本化 Chrome DevTools 默认项会安全收敛为不指定版本的 `chrome-devtools-mcp`；带自定义字段、环境变量、非默认参数或禁用状态的同名配置均保留。服务不可用时必须按对应流程的 `NEEDS_CAPABILITY` 或通用规范降级，不得伪造调用结果

@@ -25,7 +25,7 @@ I9 UI 设计不是初始化选项，而是运行时 choice。`ui-mock` directive
 loeyae-aidlc orchestrate report --stage <slug> --result completed
 ```
 
-当 directive 的 `gate` 为 `true` 时，聊天中的用户确认本身不是审批凭据。人类审阅后须在交互式终端运行 `loeyae-aidlc approve --stage <slug>`，再以 `--result approved --approval-token <token>` 报告；token 绑定 workflow/stage_instance/challenge、最长 15 分钟且不可重放。Skill、Agent 和 Stop Hook 不得自行签发；无受信 provider/TTY 时 fail-closed。`completion_contract: instruction_only` 必须在执行正文后追加 `--instruction-ack <slug>`，Stop Hook 不能代替确认。公开 report 不支持手动 `skipped`；仅图谱 condition=false 可写内部 `condition_skipped`。
+当 directive 的 `gate` 为 `true` 时，加载 `aidlc-approval`，读取并展示 request 的随机 `confirmation_phrase` 后结束回合；只有用户下一条真实消息完整匹配，才能通过 `--approval-confirmation-stdin` 定向报告。普通“同意”、预填按钮、Agent 代填、旧消息或同一回合自动提交无效。Provider 是可选增强，真人 TTY 是备用路径。`completion_contract: instruction_only` 必须在执行正文后追加 `--instruction-ack <slug>`，Stop Hook 不能代替确认。公开 report 不支持手动 `skipped`；仅图谱 condition=false 可写内部 `condition_skipped`。
 
 阶段规则和知识文件位于本 Skill 随附的 `stages/`、`knowledge/` 和 `tools/`；阶段顺序、准入准出门禁和传感器以 `tools/aidlc-orchestrate.ts` 为准。`docs/aidlc/aidlc-state.json` 是 HMAC、workflow ID、revision/CAS 保护的唯一机器状态，外部 enrollment 绑定项目路径；`docs/aidlc/handoff.md` 只是派生人类视图。暂停使用 `loeyae-aidlc orchestrate park`，恢复使用 `loeyae-aidlc orchestrate next --resume`。
 

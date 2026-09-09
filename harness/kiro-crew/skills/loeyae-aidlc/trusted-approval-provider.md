@@ -1,33 +1,53 @@
-# KiroCrew 受信审批 Provider 契约
+# KiroCrew 可选受信审批 Provider 契约
 
-本文描述 KiroCrew Dashboard 为 `aidlc-approval` 提供安全审批卡片时必须满足的宿主契约。该文件不实现 Dashboard 后端，也不把普通聊天卡片升级为安全凭据。
+默认 AI-DLC 审批不依赖 KiroCrew 专用安全卡。Agent 读取 request 中的随机 `confirmation_phrase`，展示产物和 Evidence 后结束回合；用户在下一条真实消息中完整输入该短语，再通过 `--approval-confirmation-stdin` 完成审批。
 
-## 请求
+本文只描述 KiroCrew Dashboard 如需提供一键审批、额外身份权限或集中审计时可实现的增强 Provider。该文件不实现 Dashboard 后端，也不改变默认对话确认流程。
 
-Skill 通过以下只读命令取得 `aidlc.approval.request`：
+## 默认对话确认
+
+Skill 通过只读命令取得 `aidlc.approval.request`：
 
 ```bash
 loeyae-aidlc approve --stage <slug> --instance <stage-instance> --request
 ```
 
-宿主必须原样绑定：
+request 包含：
 
 - `request_id`
 - `workflow_id`
 - `stage_instance`
 - `challenge`
+- `confirmation_phrase`
 - `issued_at` / `expires_at`
 - `artifact_root` / `evidence_root`
 
-## 受信用户事件
+Agent 必须展示精确 `confirmation_phrase` 并停止当前回合。只有下一条真实用户消息完整匹配时，才将确认对象与当前 claim receipt 组成严格 envelope：
 
-安全卡片必须由 Dashboard 自身呈现，并由已认证用户在独立输入控件中完成 challenge 派生确认。Agent 不能访问该控件的原始输入，也不能代表用户触发确认。
+```json
+{
+  "claim_receipt": { "...": "signed Provider receipt" },
+  "approval_confirmation": {
+    "schema_version": 1,
+    "kind": "aidlc.approval.confirmation",
+    "request_id": "<active-request-id>",
+    "confirmation_phrase": "<exact-user-message>"
+  }
+}
+```
 
-`ask_question`、普通聊天消息、`[OPTIONS:]` 和 Agent 生成的按钮不符合此要求。
+该 envelope 直接写入：
 
-## 响应
+```bash
+loeyae-aidlc orchestrate report --stage <slug> --instance <stage-instance> \
+  --result approved --claim-receipt-stdin --approval-confirmation-stdin
+```
 
-宿主生成严格的 `aidlc.approval.response`：
+KiroCrew 无需为此实现专用审批卡。普通“同意”消息、预填按钮、Agent 复制文本、旧用户消息或同一 Agent 回合自动提交均不符合默认确认协议。
+
+## 可选 Provider 响应
+
+如果 KiroCrew 需要一键批准或更强的宿主审计，可由宿主生成严格 `aidlc.approval.response`：
 
 ```json
 {
@@ -41,31 +61,11 @@ loeyae-aidlc approve --stage <slug> --instance <stage-instance> --request
 }
 ```
 
-schema v3 中，宿主还必须从 owning client 的安全通道取得当前 claim receipt，并在 Agent 上下文之外生成严格 envelope：
+schema v3 中，宿主将其与 owning client receipt 组成 `claim_receipt + approval_response` envelope，并通过 `--approval-response-stdin` 提交。Provider token、receipt 和完整 envelope 不进入聊天、Agent 上下文、项目文件、argv 或持久化日志。
 
-```json
-{
-  "claim_receipt": { "...": "signed Provider receipt" },
-  "approval_response": { "...": "aidlc.approval.response" }
-}
-```
+## 可选 Provider 后端责任
 
-完整 envelope 必须直接写入 report 子进程标准输入，不进入聊天、Agent 上下文、项目文件、argv 或持久化日志：
-
-```bash
-loeyae-aidlc orchestrate report --stage <slug> --instance <stage-instance> \
-  --result approved --claim-receipt-stdin --approval-response-stdin
-```
-
-## 能力检测
-
-- 宿主明确提供并认证该 Provider：Skill 可以请求安全卡片。
-- 宿主没有该 Provider：返回 `NEEDS_HOST_CAPABILITY`，转真人 TTY fallback。
-- 不允许把未知 MCP 工具、普通卡片或自然语言确认当作兼容实现。
-
-## 后端责任
-
-KiroCrew 宿主实现必须负责：
+实现增强 Provider 时，KiroCrew 宿主负责：
 
 - 已登录用户身份和权限；
 - request/Stage 产物摘要绑定；
@@ -75,4 +75,4 @@ KiroCrew 宿主实现必须负责：
 - 审批审计记录；
 - 取消、超时和请求失效。
 
-缺少任一责任时应保持 TTY fallback，不得报告审批完成。
+Provider 不可用时继续使用默认对话随机确认语，不得要求用户另开终端。真人 TTY 仅作为可选备用通道。

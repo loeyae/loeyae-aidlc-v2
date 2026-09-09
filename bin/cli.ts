@@ -1314,7 +1314,7 @@ Commands:
   orchestrate <next|report|park> [flags]  Run the schema-aware workflow engine
   state migrate-v3 [flags]               Dry-run or atomically apply controlled v2→v3 migration
   recover <inspect|re-enroll> [flags]     Inspect or repair a proven parked trust chain
-  approve --stage <slug> --instance <id> [--request]  Review via trusted host or human TTY
+  approve --stage <slug> --instance <id> [--request]  Show exact conversation confirmation; TTY remains optional
   evidence run [flags]                    Produce controlled build/test evidence
   check --sensor <name>                   Run a deterministic semantic checker
   diagram-provider run [options]          Run Chrome DevTools diagram validation
@@ -1362,8 +1362,10 @@ Examples:
   loeyae-aidlc state migrate-v3 --actor-id actor:alice --device-id device:laptop --client-id client:session-1
   loeyae-aidlc recover inspect
   loeyae-aidlc recover re-enroll
-  loeyae-aidlc approve --stage application-design
-  loeyae-aidlc approve --stage application-design --request
+  loeyae-aidlc approve --stage application-design --instance application-design@module:module-a --request
+  conversation-confirmation-envelope | loeyae-aidlc orchestrate report --stage application-design \
+    --instance application-design@module:module-a --result approved \
+    --claim-receipt-stdin --approval-confirmation-stdin
   trusted-host-envelope | loeyae-aidlc orchestrate report --stage application-design \
     --instance application-design@module:module-a --result approved \
     --claim-receipt-stdin --approval-response-stdin
@@ -1383,7 +1385,9 @@ function main(): void {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
     case "orchestrate": {
-      const stdinRequired = rest.includes("--approval-response-stdin") || rest.includes("--claim-receipt-stdin");
+      const stdinRequired = rest.includes("--approval-confirmation-stdin")
+        || rest.includes("--approval-response-stdin")
+        || rest.includes("--claim-receipt-stdin");
       run(orchestrationScript(), rest, stdinRequired ? readFileSync(0, "utf8") : undefined);
       break;
     }

@@ -97,7 +97,7 @@ async function main(): Promise<void> {
   }
 
   if (!stdin.isTTY || !stdout.isTTY) throw new Error("approval token issuance requires an interactive human terminal");
-  const phrase = `APPROVE ${request.stage_instance} ${request.challenge.slice(-8)}`;
+  const phrase = request.confirmation_phrase;
   stdout.write(`Review the stage artifacts and decision before approving.\nActive context: module=${request.module_id || "-"}, unit=${request.unit_id || "-"}\nType exactly: ${phrase}\n`);
   const reader = createInterface({ input: stdin, output: stdout });
   try {

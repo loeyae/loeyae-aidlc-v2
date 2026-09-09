@@ -1,8 +1,11 @@
 import { strict as assert } from "assert";
 import { createHmac } from "crypto";
 import {
+  approvalConfirmationPhrase,
   buildApprovalProviderRequest,
+  validateApprovalConversationConfirmation,
   validateApprovalProviderResponse,
+  type ApprovalConversationConfirmation,
   type ApprovalProviderResponse,
 } from "../core/tools/aidlc-approval-provider";
 import type { WorkflowState } from "../core/tools/aidlc-state";
@@ -43,16 +46,47 @@ assert.equal(request.module_id, "module-a");
 assert.equal(request.unit_id, null);
 assert.equal(request.artifact_root, "docs/aidlc/modules/module-a/inception");
 assert.equal(request.evidence_root, ".aidlc/evidence/application-design/module-a");
+assert.equal(request.confirmation_phrase, approvalConfirmationPhrase(stageInstance, challenge));
+assert.equal(request.confirmation_phrase, `APPROVE ${stageInstance} ${challenge.slice(-8)}`);
 assert.match(request.request_id, /^[a-f0-9]{64}$/);
 assert.deepEqual(
   buildApprovalProviderRequest(state, "application-design", issuedAt + 2000),
   request,
-  "the same active challenge must produce a stable request",
+  "the same active challenge must produce a stable request and confirmation phrase",
 );
 
 const token = createHmac("sha256", Buffer.from(secret, "utf8"))
   .update(`aidlc-approval-v1\n${state.workflow_id}\n${stageInstance}\n${challenge}`)
   .digest("hex");
+
+const conversationConfirmation: ApprovalConversationConfirmation = {
+  schema_version: 1,
+  kind: "aidlc.approval.confirmation",
+  request_id: request.request_id,
+  confirmation_phrase: request.confirmation_phrase,
+};
+const validatedConversation = validateApprovalConversationConfirmation(
+  JSON.stringify(conversationConfirmation),
+  request,
+);
+assert.equal(validatedConversation.approval_token, token);
+assert.equal(validatedConversation.provider_id, "conversation-confirmation");
+assert.match(validatedConversation.human_event_id, /^conversation-[a-f0-9]{24}$/);
+
+function conversationRejected(mutate: (value: Record<string, unknown>) => void, message: RegExp): void {
+  const value = { ...conversationConfirmation } as Record<string, unknown>;
+  mutate(value);
+  assert.throws(
+    () => validateApprovalConversationConfirmation(JSON.stringify(value), request),
+    message,
+  );
+}
+
+conversationRejected((value) => { value.request_id = "0".repeat(64); }, /request_id does not match/);
+conversationRejected((value) => { value.confirmation_phrase = `${request.confirmation_phrase} `; }, /did not match exactly/);
+conversationRejected((value) => { value.kind = "aidlc.approval.response"; }, /kind must be/);
+conversationRejected((value) => { value.unexpected = true; }, /unknown field unexpected/);
+
 const response: ApprovalProviderResponse = {
   schema_version: 1,
   kind: "aidlc.approval.response",
@@ -97,4 +131,4 @@ assert.throws(
   /challenge expired/,
 );
 
-console.log("Approval provider contract tests passed");
+console.log("Approval request, conversation confirmation, and provider contract tests passed");

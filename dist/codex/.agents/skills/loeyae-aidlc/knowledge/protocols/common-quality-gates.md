@@ -130,8 +130,8 @@ Evidence 顶层同时携带当前 `stage_instance`、`module_id`、`unit_id`（�
 ### 审批原则
 
 - **仅 2 个 stage 保留 `approval: block`**：`application-design`（架构决策）和 `operations`（部署决策）；两者都先评估 condition，condition=false 时直接记录签名 `condition_skipped`，不创建审批 challenge。
-- `next` 生成绑定 workflow ID、`stage_instance` 和随机 challenge 的审批请求；人类审阅后只能通过交互式 `loeyae-aidlc approve --stage <slug>` 或受信宿主 provider 签发最长 15 分钟的一次性 token。模块级 `application-design` 的每个实例分别审批；`approved` 缺 token、上下文不匹配、token 伪造、过期或重放均阻断。
-- 平台 Hook/Agent 不得自行签发 token；宿主未集成 provider 且无人类终端可用时按设计 fail-closed。
+- `next` 生成绑定 workflow ID、`stage_instance` 和随机 challenge 的审批请求；`approve --request` 返回随机 `confirmation_phrase`。Agent 展示摘要和完整短语后必须结束回合，只有下一条真实用户消息精确匹配，才能通过 `--approval-confirmation-stdin` 提交；引擎内部派生最长 15 分钟的一次性 token。模块级 `application-design` 的每个实例分别审批；错 request、近似文本、过期、重放或缺 receipt 均阻断。
+- Agent 不得代填确认语或在同一回合自动提交；受信宿主 Provider 仅是可选增强，真人 TTY 仅是备用路径，默认审批不依赖二者。
 - 12 个 `instruction_only` stage 必须在执行正文后以 `--instruction-ack <slug>` 显式报告；Stop Hook 不能代替该确认。
 - 公开 report 结果不包含 `skipped`。只有声明的 condition 为 false 时，引擎可记录内部 `condition_skipped`；门禁负责质量保证，不能由人工 skip 绕过。
 

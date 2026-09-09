@@ -34,7 +34,7 @@ I9 UI 设计不是初始化选项，而是运行时 choice。`ui-mock` directive
 loeyae-aidlc orchestrate report --stage <slug> --result completed
 ```
 
-`gate: true` 时，用户聊天确认本身不是审批凭据。人类须在交互式终端执行 `loeyae-aidlc approve --stage <slug>`，或由受信宿主 provider 签发 token，再以 `--result approved --approval-token <token>` 报告；token 绑定 workflow/stage_instance/challenge、最长 15 分钟且不可重放。Skill、Agent 和 Stop Hook 不得自行签发，无 provider/TTY 时 fail-closed。`instruction_only` stage 必须在执行正文后显式传 `--instruction-ack <slug>`，Stop Hook 不得代确认。公开 report 不接受手动 `skipped`；仅 condition=false 可记录内部 `condition_skipped`。
+`gate: true` 时，加载 `aidlc-approval` 并读取 request 的随机 `confirmation_phrase`；Agent 展示产物/Evidence 和完整短语后必须结束回合，只有用户下一条真实消息精确匹配，才能通过 `--approval-confirmation-stdin` 定向报告。普通“同意”、预填按钮、Agent 代填、旧消息或同一回合自动提交无效。引擎内部派生并消费 token；Provider 是可选增强，真人 TTY 是备用路径。`instruction_only` stage 必须在执行正文后显式传 `--instruction-ack <slug>`，Stop Hook 不得代确认。公开 report 不接受手动 `skipped`；仅 condition=false 可记录内部 `condition_skipped`。
 
 ## Codex 适配
 
