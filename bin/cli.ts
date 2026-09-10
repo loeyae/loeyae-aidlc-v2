@@ -1338,15 +1338,21 @@ Install/uninstall options:
   --migrate-legacy  Preserve and replace recognized pre-manifest installs (install only)
 
 Collaboration v3 trust:
-  Schema v3 automatically creates a private Ed25519 device key in AIDLC_TRUST_DIR;
-  team members do not configure or share AIDLC_TRUST_SECRET, and private keys are never
-  written to the project or shown by the CLI. On a new device, orchestrate next returns
-  a team-enrollment-confirmation ask bound to workflow/state/event head and a 15-minute TTL.
-  The Agent must show its exact random phrase and end the turn. The user's next real message
-  is wrapped in the strict confirmation envelope and submitted only through
-  orchestrate next --team-enrollment-confirmation-stdin. Accepted event heads advance
-  locally and stale rollback/fork state is rejected. Schema v2 HMAC and recovery remain
-  legacy compatibility paths.
+  Schema v3 automatically creates a private Ed25519 device key in the persistent
+  user trust root (~/.config/loeyae-aidlc/trust by default). AIDLC_TRUST_DIR is only
+  an override for isolated tests or hosts without a stable HOME. Team members do not
+  configure or share AIDLC_TRUST_SECRET, and private keys are never written to the
+  project or shown by the CLI. On a new device, orchestrate next returns a
+  team-enrollment-confirmation ask bound to workflow/state/event head and a 15-minute
+  TTL. The Agent must show its exact JOIN phrase and end the turn. The user's next real
+  message is submitted only through --team-enrollment-confirmation-stdin.
+  A v2→v3 active instance may carry a permanent migration compatibility lock without a
+  receipt. After enrollment, next returns a separate migration-claim-recovery-confirmation
+  ask. The same actor must type its exact TAKEOVER phrase in the next message, submitted
+  through --migration-claim-recovery-confirmation-stdin, before the engine atomically
+  creates a finite Local/Git Provider lease for the new device/client. JOIN never implies
+  TAKEOVER. Accepted event heads advance locally and stale rollback/fork state is rejected.
+  Schema v2 HMAC and recovery remain legacy compatibility paths.
 
 Approval Provider boundary:
   --approval-response-stdin is for a trusted host integration on the same device. Its
@@ -1380,6 +1386,12 @@ Examples:
   team-enrollment-confirmation-envelope | loeyae-aidlc orchestrate next \
     --actor-id actor:alice --device-id device:new-laptop --client-id client:session-2 \
     --team-enrollment-confirmation-stdin
+  # If that command returns migration-claim-recovery-confirmation, display TAKEOVER,
+  # end the turn, then submit the same actor's exact next message:
+  migration-claim-recovery-envelope | loeyae-aidlc orchestrate next \
+    --instance application-design@module:module-a \
+    --actor-id actor:alice --device-id device:new-laptop --client-id client:session-2 \
+    --migration-claim-recovery-confirmation-stdin
   loeyae-aidlc state migrate-v3 --actor-id actor:alice --device-id device:laptop --client-id client:session-1
   loeyae-aidlc recover inspect
   loeyae-aidlc recover re-enroll
@@ -1408,6 +1420,7 @@ function main(): void {
   switch (command) {
     case "orchestrate": {
       const stdinRequired = rest.includes("--team-enrollment-confirmation-stdin")
+        || rest.includes("--migration-claim-recovery-confirmation-stdin")
         || rest.includes("--approval-confirmation-stdin")
         || rest.includes("--approval-response-stdin")
         || rest.includes("--claim-receipt-stdin");

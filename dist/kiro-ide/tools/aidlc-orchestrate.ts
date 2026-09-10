@@ -1176,7 +1176,12 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           }
 
           if (state.routing_model === "module-unit-v1") {
-            const modules = readModuleManifest(PROJECT_ROOT).map((module) => module.module_id).sort();
+            const moduleManifestPath = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "module-manifest.json");
+            const modules = existsSync(moduleManifestPath)
+              ? readModuleManifest(PROJECT_ROOT).map((module) => module.module_id).sort()
+              : FULL_WORKFLOW_SCOPES.has(state.scope)
+                ? readModuleManifest(PROJECT_ROOT).map((module) => module.module_id).sort()
+                : ["default"];
             if (evidence.selected_artifacts_verified !== true) errors.push("selected_artifacts_verified must be true");
             if (asNumber(evidence.modules_verified) !== modules.length) errors.push(`modules_verified must be ${modules.length}`);
             const expectedPrd = selectedOptionalStages(state).includes("prd-generation");

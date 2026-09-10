@@ -448,10 +448,30 @@ function validateEventPayload(eventType: WorkflowEventTypeV3, payloadValue: unkn
       text(payload.reason, "assignment_cleared.reason");
       break;
     case "instance_claimed":
-    case "claim_transferred":
       exact(["claim"]);
       validateClaim(payload.claim, `${eventType}.claim`);
       break;
+    case "claim_transferred": {
+      exact(["claim", "recovery_request_id", "previous_claim_id", "previous_claim_digest", "reason"]);
+      validateClaim(payload.claim, `${eventType}.claim`);
+      const recoveryFields = [
+        payload.recovery_request_id,
+        payload.previous_claim_id,
+        payload.previous_claim_digest,
+        payload.reason,
+      ];
+      const recoveryFieldCount = recoveryFields.filter((value) => value !== undefined).length;
+      if (recoveryFieldCount !== 0 && recoveryFieldCount !== recoveryFields.length) {
+        throw new Error("claim_transferred migration recovery audit fields must be provided together");
+      }
+      if (recoveryFieldCount > 0) {
+        digest(payload.recovery_request_id, "claim_transferred.recovery_request_id");
+        text(payload.previous_claim_id, "claim_transferred.previous_claim_id");
+        digest(payload.previous_claim_digest, "claim_transferred.previous_claim_digest");
+        text(payload.reason, "claim_transferred.reason");
+      }
+      break;
+    }
     case "instance_started":
     case "instance_submitted":
       exact([]);

@@ -43,7 +43,10 @@ import {
   assertClaimReceiptForStateV3,
   claimReceiptDigestV3,
   claimReceiptFromStateV3,
+  recoverMigrationCompatibilityClaimV3,
+  recoverMigrationCompatibilityClaimWithReceiptV3,
   validateClaimReceiptV3,
+  type ClaimOperationV3,
   type ClaimReceiptV3,
   type CoordinationIdentityV3,
 } from "./aidlc-coordination-local-v3";
@@ -56,6 +59,12 @@ import {
 import { readEnrollment, verifyApprovalToken } from "./aidlc-trust";
 import { readModuleManifest, readUnitManifest } from "./aidlc-execution-context";
 import { teamEnrollmentGate } from "./aidlc-team-enrollment-v3";
+import {
+  migrationClaimRecoveryGate,
+  selectMigrationClaimRecoveryInstanceV3,
+  type MigrationClaimRecoveryDirective,
+  type MigrationClaimRecoveryRequest,
+} from "./aidlc-migration-claim-v3";
 import type { WorkflowState } from "./aidlc-state";
 
 const PROJECT_ROOT = realpathSync(process.cwd());
@@ -294,6 +303,88 @@ function claimSelected(
   return { state: mirrored, receipt };
 }
 
+function migrationLockedInstances(
+  state: WorkflowStateV3,
+  plans: readonly WorkflowInstancePlanV3[],
+): string[] {
+  return plans
+    .map((plan) => plan.stage_instance)
+    .filter((stageInstance) => {
+      const instance = state.instances[stageInstance];
+      const claim = instance?.claim;
+      return instance?.status === "in_progress"
+        && claim?.compatibility_lock === true
+        && claim.lease_expires_at === null
+        && claim.provider_id.startsWith("migration:")
+        && claim.provider_receipt === undefined;
+    });
+}
+
+function recoverMigrationSelected(
+  state: WorkflowStateV3,
+  selected: string,
+  identity: CoordinationIdentityV3,
+  flags: Record<string, string>,
+  confirmationRaw?: string,
+): MigrationClaimRecoveryDirective | ClaimOperationV3 {
+  const mode = providerMode(flags);
+  const localProvider = mode === "local" ? new LocalCoordinationProviderV3(PROJECT_ROOT) : undefined;
+  const remoteProvider = mode === "git" ? gitProvider(flags, state.workflow_id) : undefined;
+  const providerId = localProvider?.provider_id || remoteProvider!.provider_id;
+  return migrationClaimRecoveryGate<ClaimOperationV3>(
+    PROJECT_ROOT,
+    selected,
+    identity,
+    providerId,
+    confirmationRaw,
+    (request: MigrationClaimRecoveryRequest) => {
+      const occurredAt = new Date().toISOString();
+      if (localProvider) {
+        let operation: ClaimOperationV3 | undefined;
+        const updated = mutateWorkflowStateV3(PROJECT_ROOT, (current) => {
+          operation = recoverMigrationCompatibilityClaimV3(
+            current,
+            selected,
+            identity,
+            localProvider.provider_id,
+            localProvider.default_lease_ms,
+            request.previous_claim_id,
+            request.previous_claim_digest,
+            request.request_id,
+            occurredAt,
+          );
+          return operation.state;
+        });
+        if (!operation) throw new Error("local migration claim recovery did not produce a receipt");
+        return { state: updated, receipt: operation.receipt };
+      }
+      let receipt = remoteProvider!.currentReceipt(selected);
+      if (receipt && Date.parse(receipt.lease_expires_at) > Date.parse(occurredAt)) {
+        if (!sameHolder(receipt, identity)) {
+          throw new Error(`active remote claim belongs to a different holder for ${selected}`);
+        }
+      } else {
+        receipt = remoteProvider!.claim(selected, identity, undefined, occurredAt).receipt;
+      }
+      let operation: ClaimOperationV3 | undefined;
+      const updated = mutateWorkflowStateV3(PROJECT_ROOT, (current) => {
+        operation = recoverMigrationCompatibilityClaimWithReceiptV3(
+          current,
+          selected,
+          receipt!,
+          request.previous_claim_id,
+          request.previous_claim_digest,
+          request.request_id,
+          occurredAt,
+        );
+        return operation.state;
+      });
+      if (!operation) throw new Error("Git migration claim recovery did not produce a receipt");
+      return { state: updated, receipt: operation.receipt };
+    },
+  );
+}
+
 function ensureApprovalChallenge(
   stage: StageInstance,
   stateValue: WorkflowStateV3,
@@ -370,6 +461,16 @@ async function handleNext(args: string[]): Promise<Directive> {
   const resume = booleanFlag(flags, "resume");
   const statusOnly = booleanFlag(flags, "status");
   const enrollmentConfirmationStdin = booleanFlag(flags, "team-enrollment-confirmation-stdin");
+  const migrationRecoveryConfirmationStdin = booleanFlag(flags, "migration-claim-recovery-confirmation-stdin");
+  if (enrollmentConfirmationStdin && migrationRecoveryConfirmationStdin) {
+    throw new Error("use exactly one next confirmation channel: team enrollment or migration claim recovery");
+  }
+  if (statusOnly && (enrollmentConfirmationStdin || migrationRecoveryConfirmationStdin)) {
+    throw new Error("--status cannot consume an enrollment or migration claim recovery confirmation");
+  }
+  const confirmationRaw = enrollmentConfirmationStdin || migrationRecoveryConfirmationStdin
+    ? readFileSync(0, "utf8")
+    : undefined;
   const scope = flags.scope;
   if (scope && !VALID_SCOPES.has(scope)) throw new Error(`unknown scope ${scope}`);
   if (withPrd && (!scope || !PRD_ELIGIBLE_SCOPES.has(scope))) {
@@ -377,12 +478,18 @@ async function handleNext(args: string[]): Promise<Directive> {
   }
   const enrollmentDirective = teamEnrollmentGate(
     PROJECT_ROOT,
-    enrollmentConfirmationStdin ? readFileSync(0, "utf8") : undefined,
+    enrollmentConfirmationStdin ? confirmationRaw : undefined,
   );
-  if (enrollmentDirective) return enrollmentDirective as unknown as Directive;
+  if (enrollmentDirective) {
+    if (migrationRecoveryConfirmationStdin) {
+      throw new Error("complete team enrollment before submitting a migration claim recovery confirmation");
+    }
+    return enrollmentDirective as unknown as Directive;
+  }
 
   let state = loadWorkflowStateV3(PROJECT_ROOT);
   if (!state) {
+    if (migrationRecoveryConfirmationStdin) throw new Error("migration claim recovery requires an existing schema v3 workflow");
     if (!scope) {
       return {
         kind: "ask",
@@ -418,11 +525,12 @@ async function handleNext(args: string[]): Promise<Directive> {
   state = new LocalCoordinationProviderV3(PROJECT_ROOT).expire(new Date().toISOString());
   state = syncReadyFrontier(graph);
   let plan = buildPlan(state, graph);
-  const ready = findReadyInstances(state, plan.plans);
+  let ready = findReadyInstances(state, plan.plans);
   const active = plan.plans.filter((candidate) => {
     const instance = state!.instances[candidate.stage_instance];
     return instance?.status === "in_progress" && instance.claim?.provider_receipt;
   });
+  const migrationLocked = migrationLockedInstances(state, plan.plans);
 
   if (statusOnly) {
     return {
@@ -433,17 +541,47 @@ async function handleNext(args: string[]): Promise<Directive> {
       revision: state.revision,
       ready_instances: ready.map((item) => item.stage_instance),
       active_instances: active.map((item) => item.stage_instance),
+      migration_locked_instances: migrationLocked,
       completed_instances: [...state.completed_stage_instances],
       skipped_instances: [...state.skipped_stage_instances],
-      message: `Schema v3 workflow: ${ready.length} ready, ${active.length} active, ${state.completed_stage_instances.length} completed.`,
+      message: `Schema v3 workflow: ${ready.length} ready, ${active.length} active, ${migrationLocked.length} migration-locked, ${state.completed_stage_instances.length} completed.`,
     };
   }
 
   const identity = identityFromFlags(flags);
   const requested = flags.instance;
+  const migrationSelected = selectMigrationClaimRecoveryInstanceV3(
+    migrationLocked.map((stageInstance) => ({
+      stage_instance: stageInstance,
+      actor_id: state!.instances[stageInstance]!.claim!.actor_id,
+    })),
+    identity.actor_id,
+    requested,
+  );
   let selectedId: string | undefined;
   let receipt: ClaimReceiptV3 | undefined;
-  if (requested) {
+
+  if (migrationSelected) {
+    const recovered = recoverMigrationSelected(
+      state,
+      migrationSelected,
+      identity,
+      flags,
+      migrationRecoveryConfirmationStdin ? confirmationRaw : undefined,
+    );
+    if ((recovered as MigrationClaimRecoveryDirective).ask_type === "migration-claim-recovery-confirmation") {
+      return recovered as unknown as Directive;
+    }
+    state = (recovered as ClaimOperationV3).state;
+    receipt = (recovered as ClaimOperationV3).receipt;
+    selectedId = migrationSelected;
+    plan = buildPlan(state, graph);
+    ready = findReadyInstances(state, plan.plans);
+  } else if (migrationRecoveryConfirmationStdin) {
+    throw new Error("no recoverable migration compatibility lock matches the requested instance and actor");
+  }
+
+  if (!selectedId && requested) {
     const current = state.instances[requested];
     if (current?.status === "in_progress" && current.claim?.provider_receipt) {
       const stored = claimReceiptFromStateV3(state, requested);
@@ -453,7 +591,7 @@ async function handleNext(args: string[]): Promise<Directive> {
     } else {
       selectedId = nextReadyInstanceV3(state, plan.plans, requested).selected.stage_instance;
     }
-  } else {
+  } else if (!selectedId) {
     const owned = active
       .map((item) => ({ item, receipt: claimReceiptFromStateV3(state!, item.stage_instance) }))
       .find((item) => sameHolder(item.receipt, identity));
@@ -480,7 +618,10 @@ async function handleNext(args: string[]): Promise<Directive> {
       schema_version: 3,
       ready_instances: [],
       active_instances: active.map((item) => item.stage_instance),
-      message: "No unclaimed ready instance is available. Wait for an active lease to complete, transfer, release, or expire.",
+      migration_locked_instances: migrationLocked,
+      message: migrationLocked.length > 0
+        ? "No claimable ready instance is available. A migration compatibility lock exists; use the original actor identity and follow the TAKEOVER confirmation flow."
+        : "No unclaimed ready instance is available. Wait for an active lease to complete, transfer, release, or expire.",
     };
   }
 
@@ -541,8 +682,8 @@ function readReportStdin(flags: Record<string, string>): StdinPayload {
 
 async function handleReport(args: string[]): Promise<Directive> {
   const flags = parseFlags(args);
-  if ("team-enrollment-confirmation-stdin" in flags) {
-    throw new Error("--team-enrollment-confirmation-stdin is only valid with orchestrate next");
+  if ("team-enrollment-confirmation-stdin" in flags || "migration-claim-recovery-confirmation-stdin" in flags) {
+    throw new Error("team enrollment and migration claim recovery confirmation stdin are only valid with orchestrate next");
   }
   const stageSlug = flags.stage;
   const instanceId = flags.instance;

@@ -375,6 +375,123 @@ export function transferClaimV3(
   return { state, receipt: nextReceipt };
 }
 
+export function migrationCompatibilityClaimDigestV3(
+  stateValue: WorkflowStateV3,
+  stageInstance: string,
+): string {
+  const state = validateWorkflowStateV3(stateValue, true);
+  const instance = state.instances[stageInstance];
+  const claim = instance?.claim;
+  if (
+    instance?.status !== "in_progress"
+    || !claim
+    || claim.compatibility_lock !== true
+    || claim.lease_expires_at !== null
+    || !claim.provider_id.startsWith("migration:")
+    || claim.provider_receipt !== undefined
+  ) {
+    throw new Error(`stage instance is not protected by a recoverable migration compatibility lock: ${stageInstance}`);
+  }
+  return createHash("sha256").update(canonicalPayload(claim as unknown as Record<string, unknown>)).digest("hex");
+}
+
+export function recoverMigrationCompatibilityClaimWithReceiptV3(
+  stateValue: WorkflowStateV3,
+  stageInstance: string,
+  receiptValue: ClaimReceiptV3,
+  previousClaimId: string,
+  previousClaimDigest: string,
+  recoveryRequestId: string,
+  occurredAt = new Date().toISOString(),
+): ClaimOperationV3 {
+  let state = validateWorkflowStateV3(stateValue, true);
+  const instance = state.instances[stageInstance];
+  const claim = instance?.claim;
+  const expectedDigest = migrationCompatibilityClaimDigestV3(state, stageInstance);
+  if (!claim) throw new Error(`migration compatibility claim is missing for ${stageInstance}`);
+  if (claim.claim_id !== text(previousClaimId, "previous migration claim id")) {
+    throw new Error(`migration compatibility claim changed for ${stageInstance}`);
+  }
+  if (!/^[a-f0-9]{64}$/.test(previousClaimDigest) || previousClaimDigest !== expectedDigest) {
+    throw new Error(`migration compatibility claim digest changed for ${stageInstance}`);
+  }
+  if (!/^[a-f0-9]{64}$/.test(recoveryRequestId)) throw new Error("migration claim recovery request id must be a SHA-256 digest");
+  const receipt = validateClaimReceiptV3(receiptValue, true);
+  const at = timestamp(occurredAt, "migration claim recovery occurred_at");
+  if (receipt.workflow_id !== state.workflow_id || receipt.stage_instance !== stageInstance) {
+    throw new Error("migration claim recovery receipt targets another workflow or stage instance");
+  }
+  if (receipt.actor_id !== claim.actor_id) {
+    throw new Error(`migration claim belongs to actor ${claim.actor_id}, not ${receipt.actor_id}`);
+  }
+  if (instance.assignment && instance.assignment.actor_id !== receipt.actor_id) {
+    throw new Error(`stage instance is assigned to ${instance.assignment.actor_id}, not ${receipt.actor_id}`);
+  }
+  if (receipt.provider_id.startsWith("migration:")) {
+    throw new Error("migration claim recovery receipt must come from a runtime coordination provider");
+  }
+  if (Date.parse(receipt.lease_expires_at) <= Date.parse(at)) {
+    throw new Error(`migration claim recovery receipt is already expired for ${stageInstance}`);
+  }
+  state = append(state, "claim_transferred", stageInstance, at, {
+    claim: {
+      claim_id: receipt.claim_id,
+      actor_id: receipt.actor_id,
+      device_id: receipt.device_id,
+      client_id: receipt.client_id,
+      provider_id: receipt.provider_id,
+      provider_receipt_digest: claimReceiptDigestV3(receipt),
+      provider_receipt: receipt,
+      claimed_at: receipt.issued_at,
+      renewed_at: receipt.issued_at,
+      lease_expires_at: receipt.lease_expires_at,
+    },
+    recovery_request_id: recoveryRequestId,
+    previous_claim_id: claim.claim_id,
+    previous_claim_digest: previousClaimDigest,
+    reason: "Conversation-confirmed migration compatibility claim recovery",
+  });
+  state = append(state, "instance_started", stageInstance, at, {});
+  return { state, receipt };
+}
+
+export function recoverMigrationCompatibilityClaimV3(
+  stateValue: WorkflowStateV3,
+  stageInstance: string,
+  nextHolderValue: CoordinationIdentityV3,
+  providerId: string,
+  leaseMs: number,
+  previousClaimId: string,
+  previousClaimDigest: string,
+  recoveryRequestId: string,
+  occurredAt = new Date().toISOString(),
+): ClaimOperationV3 {
+  const state = validateWorkflowStateV3(stateValue, true);
+  const holder = identity(nextHolderValue, "migration claim recovery identity");
+  const duration = leaseDuration(leaseMs);
+  const issuedAt = timestamp(occurredAt, "migration claim recovery occurred_at");
+  const leaseExpiresAt = new Date(Date.parse(issuedAt) + duration).toISOString();
+  const receipt = issueClaimReceiptV3(
+    state.workflow_id,
+    stageInstance,
+    randomUUID(),
+    holder,
+    text(providerId, "provider_id"),
+    issuedAt,
+    leaseExpiresAt,
+    1,
+  );
+  return recoverMigrationCompatibilityClaimWithReceiptV3(
+    state,
+    stageInstance,
+    receipt,
+    previousClaimId,
+    previousClaimDigest,
+    recoveryRequestId,
+    issuedAt,
+  );
+}
+
 export function expireClaimsV3(
   stateValue: WorkflowStateV3,
   occurredAt = new Date().toISOString(),

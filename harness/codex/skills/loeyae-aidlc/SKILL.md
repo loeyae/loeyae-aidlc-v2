@@ -39,7 +39,7 @@ loeyae-aidlc orchestrate report --stage <slug> --result completed
 ## Codex 适配
 
 - `docs/aidlc/aidlc-state.json` 是 schema v3 设备签名 append-only event、workflow ID、revision/CAS 保护的唯一机器状态；每台设备使用独立 Ed25519 credential，`docs/aidlc/handoff.md` 仅为派生人类视图；
-- `next` 返回 `team-enrollment-confirmation` ask 时，必须展示完整 `JOIN ...` 短语并结束回合；仅用户下一条真实消息精确匹配后通过 strict `--team-enrollment-confirmation-stdin` 完成本机 enrollment。不得代填、同回合提交、复制 private key 或要求共享 `AIDLC_TRUST_SECRET`；
+- `next` 返回 `team-enrollment-confirmation` ask 时，必须展示完整 `JOIN ...` 短语并结束回合；仅用户下一条真实消息精确匹配后通过 strict `--team-enrollment-confirmation-stdin` 完成本机 enrollment。完成 enrollment 后若返回 `migration-claim-recovery-confirmation`，只允许旧 claim 的同一 actor；展示完整 `TAKEOVER ...` 并再次结束回合，下一条精确消息才可经 strict `--migration-claim-recovery-confirmation-stdin` 换取当前 device/client 的有限期 Local/Git receipt。JOIN、TAKEOVER、APPROVE 必须使用独立请求和回合；不得自动接管、跨 actor 接管或改用 `recover re-enroll`。不得代填、同回合提交、复制 private key 或要求共享 `AIDLC_TRUST_SECRET`；
 - enrollment 记录已接受 event head，rollback/fork fail-closed；Provider/SCM 权限仍决定共享流写入资格，设备签名不是完整成员授权 PKI；
 - evidence 按当前实例隔离：project 为 `.aidlc/evidence/<stage-slug>/`，module 追加 `<module-id>/`，unit 再追加 `<unit-id>/`；只接受受控 Producer 的精确 producer、当前 `commit + dirty + worktree_digest` 和 schema 对应完整性（v3 自动设备 Ed25519，v2 legacy HMAC），命令只记录 `argv_digest`；多个活动实例必须传精确 `--instance`；
 - `AIDLC_TRUST_SECRET` 只用于 schema v2/HMAC/recovery legacy，不是 v3 团队配置；semantic 只执行发行包内置 checker；

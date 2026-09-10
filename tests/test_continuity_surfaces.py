@@ -29,6 +29,12 @@ def main() -> None:
         "Local Provider",
         "team-enrollment-confirmation",
         "--team-enrollment-confirmation-stdin",
+        "migration-claim-recovery-confirmation",
+        "--migration-claim-recovery-confirmation-stdin",
+        "TAKEOVER",
+        "MIGRATION_CLAIM_CONFIRMATION_REQUIRED",
+        "同一 actor",
+        "有限期 receipt",
         "结束当前回合",
         "ENROLLMENT_CONFIRMATION_REQUIRED",
         "独立、不可共享",
@@ -39,6 +45,20 @@ def main() -> None:
         assert required in continuity, f"continuity contract missing: {required}"
     assert "自动执行 `park`" in continuity
     assert "recover re-enroll --apply" in continuity
+
+    protocol = text(
+        ROOT / "core" / "knowledge" / "protocols" / "common-session-continuity.md"
+    )
+    for required in (
+        "migration_locked_instances",
+        "migration-claim-recovery-confirmation",
+        "TAKEOVER",
+        "--migration-claim-recovery-confirmation-stdin",
+        "同一 actor",
+        "有限期 receipt",
+        "JOIN 不自动夺取 claim",
+    ):
+        assert required in protocol, f"continuity protocol missing: {required}"
 
     handoff = text(ROOT / "core" / "skills" / "aidlc-handoff" / "SKILL.md")
     for required in (

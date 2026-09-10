@@ -118,7 +118,7 @@ Stage frontmatter 声明 `sensors: [name1, name2]`。引擎在 `report` 时执�
 - 大小：≤ 512 KB
 - 时效：`timestamp` 为合法 ISO 日期，≤ 24 小时
 - 来源与完整性：`producer.name` 必须为 `loeyae-aidlc-evidence`，并带 `mode: "controlled"`、执行 ID、当前 `commit + dirty + worktree_digest` 以及 schema 对应完整性；v3 自动设备 Ed25519，v2 legacy HMAC-SHA256
-- 设备信任：每台设备自动生成独立 Ed25519 credential；v3 不配置、传递或共享 `AIDLC_TRUST_SECRET`。`next` 返回 `team-enrollment-confirmation` ask 时，Agent 展示完整 `JOIN ...` 短语后必须结束回合；仅用户下一条真实消息精确匹配后通过 strict `--team-enrollment-confirmation-stdin` 完成本机 enrollment。不得代填、同回合提交或复制 private key
+- 设备信任：每台设备自动生成独立 Ed25519 credential；v3 不配置、传递或共享 `AIDLC_TRUST_SECRET`。`next` 返回 `team-enrollment-confirmation` ask 时，Agent 展示完整 `JOIN ...` 短语后必须结束回合；仅用户下一条真实消息精确匹配后通过 strict `--team-enrollment-confirmation-stdin` 完成本机 enrollment。完成 enrollment 后若返回 `migration-claim-recovery-confirmation`，只允许旧 claim 的同一 actor；展示完整 `TAKEOVER ...` 并再次结束回合，下一条精确消息才可经 strict `--migration-claim-recovery-confirmation-stdin` 换取当前 device/client 的有限期 Local/Git receipt。JOIN、TAKEOVER、APPROVE 必须使用独立请求和回合；不得自动接管、跨 actor 接管或改用 `recover re-enroll`。不得代填、同回合提交或复制 private key
 - 防回滚与授权边界：enrollment 保存已接受 event head，rollback/fork fail-closed；Provider/SCM 权限仍决定共享流写入资格，设备签名不是完整成员授权 PKI
 - legacy：`AIDLC_TRUST_SECRET` 仅用于 schema v2/HMAC/recovery；旧 HMAC Evidence 需要时由受控 Producer 重新生成
 - 构建证据：`loeyae-aidlc evidence run --stage build-and-test`；同 stage 多个活动实例时必须传精确 `--instance`；命令只持久化 `argv_digest`，stdout/stderr 尾部脱敏

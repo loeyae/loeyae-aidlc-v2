@@ -340,6 +340,64 @@ cat team-enrollment-confirmation.json \
 
 request 绑定 canonical project root、workflow、state SHA、event head、本机 device key、随机 challenge 和 15 分钟 TTL。过期、旧 request、request 后 state/head 改变或精确文本不匹配均拒绝。enrollment 保存本机已接受 event head；后续只接受扩展该 head 的状态，rollback/fork fail-closed。
 
+#### 5.3.1 不同工具接手 v2→v3 migration lock
+
+迁移时仍为 active 的任意 v2 instance 会成为永久 migration compatibility lock。它保留旧 actor/device/client 和迁移审计，但没有正常 Provider receipt，因此不能直接 report、等待过期或使用 `recover re-enroll`。`next --status` 会把这类实例列在 `migration_locked_instances`。
+
+同一自然人从 Kiro Crew 切换到 Claude Code、Kiro CLI 或另一台设备时，必须保持相同 `actor_id`，但应使用新工具自己的 `device_id`、`client_id` 和 Ed25519 device key。新工具先完成上节 JOIN；随后普通 `next` 会优先处理唯一的同 actor migration lock，也可显式指定：
+
+```bash
+loeyae-aidlc orchestrate next \
+  --instance application-design@module:module-a \
+  --actor-id actor:alice \
+  --device-id device:new-tool \
+  --client-id client:new-session
+```
+
+引擎返回：
+
+```json
+{
+  "kind": "ask",
+  "ask_type": "migration-claim-recovery-confirmation",
+  "stage_instance": "application-design@module:module-a",
+  "request_id": "...",
+  "state_sha256": "...",
+  "event_head_hash": "...",
+  "previous_claim_digest": "...",
+  "device_key_id": "...",
+  "confirmation_phrase": "TAKEOVER ...",
+  "expires_at": "..."
+}
+```
+
+Agent 展示完整 `TAKEOVER ...` 后必须结束回合。用户下一条真实消息逐字输入后，构造严格 envelope：
+
+```json
+{
+  "schema_version": 1,
+  "kind": "aidlc.migration-claim.recovery.confirmation",
+  "request_id": "<active-request-id>",
+  "confirmation_phrase": "<exact-next-user-message>"
+}
+```
+
+通过安全 stdin 提交：
+
+```bash
+cat migration-claim-recovery-confirmation.json \
+  | loeyae-aidlc orchestrate next \
+      --instance application-design@module:module-a \
+      --actor-id actor:alice \
+      --device-id device:new-tool \
+      --client-id client:new-session \
+      --migration-claim-recovery-confirmation-stdin
+```
+
+成功后同一命令返回正常 `run-stage` directive 和属于新 device/client 的有限期 Ed25519 receipt。Local Provider 在 state lock 内转换；Git Provider 先在专用 coordination ref 完成远端 CAS，再镜像本地 state。旧 migration claim 事件不会被改写，新增 `claim_transferred` 审计事件记录旧 claim、恢复 request 和原因。
+
+JOIN、TAKEOVER、APPROVE 是三个独立授权：JOIN 只登记设备，TAKEOVER 只转换同 actor migration lock，APPROVE 只批准当前审批 request。不得复用短语或转发旧 receipt/token。不同 actor 不能使用此入口接管；当前成员授权仍由 Provider/SCM 权限决定。
+
 ### 5.4 报告阶段结果
 
 ```text
@@ -498,7 +556,19 @@ loeyae-aidlc state migrate-v3 --apply \
   --actor-id actor:alice --device-id device:laptop --client-id client:session-1
 ```
 
-命令不接受 secret argv。迁移保持 workflow ID、history、choice、completed/skipped 与 approval challenge；active v2 instance 会成为绑定该 identity 的 compatibility lock。最终 state/event 重建为 Ed25519 chain，并建立本机 `device-signature-v1` enrollment。锁内验证或原子 rename 失败时原 state 字节保持不变。
+命令不接受 secret argv。迁移保持 workflow ID、history、choice、completed/skipped 与 approval challenge；active v2 instance 会成为绑定该 actor 的 compatibility lock。最终 state/event 重建为 Ed25519 chain，并建立本机 `device-signature-v1` enrollment。锁内验证或原子 rename 失败时原 state 字节保持不变。
+
+3.1.0 的 `--repair` 只用于尚无迁移后业务事件的 migration-only v3 state，例如补正基于当前 graph 解析的 instance dependencies 或重新生成迁移 projection：
+
+```bash
+loeyae-aidlc state migrate-v3 --repair \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+
+loeyae-aidlc state migrate-v3 --repair --apply \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+```
+
+它默认 dry-run，并拒绝已有迁移后业务事件的 state。修复后 active instance 仍是无 receipt 的 compatibility lock；实际继续执行必须按 5.3.1 取得正常 Local/Git Provider lease。`recover re-enroll` 不处理 execution claim。
 
 ### 5.8 Legacy HMAC v3 自动转签与受控恢复边界
 
@@ -1089,7 +1159,7 @@ loeyae-aidlc hook --format <platform>
 | 变量 | 用途 |
 |---|---|
 | `AIDLC_TRUST_SECRET` | 仅 schema v2、旧 HMAC v3 验证/转签和 recovery 兼容使用的至少 32 字节 secret；schema v3 团队不得共享或要求配置 |
-| `AIDLC_TRUST_DIR` | 覆盖项目外 trust store 目录；v3 自动设备 key 位于其 `device-signing-key.json`，适用于隔离测试或受控宿主 |
+| `AIDLC_TRUST_DIR` | 可选覆盖项目外 trust store；默认使用 `~/.config/loeyae-aidlc/trust`。v3 自动设备 key 位于其 `device-signing-key.json`；仅隔离测试、临时沙箱或没有稳定 HOME/USERPROFILE 的受控宿主需要显式配置持久目录 |
 | `AIDLC_RECOVERY_SECRET` | 仅在受控 re-enroll 中证明原 UTF-8 trust secret；与 `AIDLC_RECOVERY_KEY_FILE` 互斥 |
 | `AIDLC_RECOVERY_KEY_FILE` | 原 base64 `trust.key` 的绝对路径；必须是普通非符号链接文件，POSIX 权限不得宽于 `0600` |
 | `AIDLC_RECOVERY_ENROLLMENT_FILE` | 原主机上同 workflow、由旧 key 签名的 active enrollment JSON 绝对路径；用于证明源项目绑定 |
@@ -1178,6 +1248,12 @@ schema v3 不应要求 `AIDLC_TRUST_SECRET`：确认 state 为 schema 3、当前
 ### 新设备返回 team-enrollment-confirmation
 
 这是正常的 v3 加入门禁，不是缺 key。Agent 展示完整 `JOIN ...` 短语后必须结束回合；用户下一条真实消息精确输入，再按 5.3 节通过 `--team-enrollment-confirmation-stdin` 提交。不得复制其他设备私钥、共享 `AIDLC_TRUST_SECRET`、代填短语或删除 enrollment。
+
+### Enrollment 后返回 migration-claim-recovery-confirmation
+
+这表示当前活动实例来自 v2→v3 迁移，仍持有无 receipt 的永久 compatibility lock。保持与旧 claim 相同的 `actor_id`，使用当前工具自己的 device/client identity，展示完整 `TAKEOVER ...` 后结束回合；用户下一条消息精确输入，再按 5.3.1 节通过 `--migration-claim-recovery-confirmation-stdin` 提交。不要改用 `recover re-enroll`、转发旧 receipt、等待该锁过期或把 JOIN 短语当作 TAKEOVER。
+
+若提示 actor 不匹配，当前入口不会跨 actor 强制接管。先由团队通过 Provider/SCM 明确调整 assignment/授权；当前设备签名模型不是 owner PKI。
 
 ### PDF 或 Mermaid 导出找不到浏览器
 

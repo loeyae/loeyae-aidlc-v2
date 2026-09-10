@@ -11,6 +11,7 @@
 - actor/device/client 身份、assignment 与短期 execution lease 分离、签名 claim receipt；
 - 每台设备自动生成独立 Ed25519 凭据，state、event、claim receipt、Git/External Provider event/receipt 和 v3 Evidence 可跨设备验签；
 - 新设备通过绑定 workflow、state SHA、event head、设备 key、随机 challenge 与 15 分钟 TTL 的跨回合确认语完成本机 enrollment，无需配置、传递或共享 `AIDLC_TRUST_SECRET`；
+- v2→v3 活动实例的永久 compatibility lock 可由同一 actor 在新工具完成 enrollment 后，通过独立、同样绑定 state/head/旧 claim/新 device-client/Provider 的 `TAKEOVER ...` 跨回合确认，转换为正常有限期 Local/Git Provider lease；
 - enrollment 记录本机已接受 event head，后续只接受扩展该 head 的状态，rollback、历史丢失与 fork 均 fail-closed；
 - Local Provider 的同工作树原子 claim/renew/release/transfer/complete；
 - Git Provider 在专用 coordination ref 上的远端 CAS，并且只在远端接受后返回 receipt；
@@ -53,7 +54,7 @@
 
 ## 设备信任与 Team Enrollment
 
-1. schema v3 默认在 `<AIDLC_TRUST_DIR>/device-signing-key.json` 自动生成每设备独立 Ed25519 key；POSIX 权限必须为 `0600`，文件不得是符号链接，公私钥必须匹配。private key 不进入项目、state、聊天或 Provider payload。
+1. schema v3 默认在持久用户 trust root 的 `device-signing-key.json` 自动生成每设备独立 Ed25519 key；默认 trust root 为 `~/.config/loeyae-aidlc/trust`，`AIDLC_TRUST_DIR` 仅用于隔离测试或没有稳定 HOME 的受控宿主。POSIX 权限必须为 `0600`，文件不得是符号链接，公私钥必须匹配。private key 不进入项目、state、聊天或 Provider payload。
 2. v3 完整性 envelope 自包含 `algorithm: "ed25519"`、`key_id`、SPKI `public_key` 和 signature，因此其他设备无需共享对称 secret 即可验证。`AIDLC_TRUST_SECRET` / `trust.key` 仅为 schema v2、旧 HMAC v3 和 recovery 兼容输入。
 3. 新设备没有当前 workflow enrollment 时，`orchestrate next` 只能返回 `team-enrollment-confirmation` ask。request 必须绑定 canonical project root、workflow ID、state SHA-256、event-head SHA-256、本机 device key、24-byte 随机 challenge、签发时间和 15 分钟 TTL。
 4. Agent 展示完整 `JOIN ...` 确认语后必须结束当前回合。只有用户下一条真实消息精确输入，才能构造无未知字段的 `aidlc.team.enrollment.confirmation` 并通过 `--team-enrollment-confirmation-stdin` 提交；Agent 不得代填或同回合自动确认。
@@ -69,13 +70,17 @@
 4. 同一 actor 可在另一 device 恢复自己的 assignment，但必须取得或转移 execution lease。
 5. `report` 必须绑定 `stage_instance` 和有效 claim receipt；仅有 Stage slug、聊天声明或 handoff 表格不足以授权提交。
 6. Provider 不可达且不存在有效 lease 时，新认领必须 fail-closed。
+7. v2→v3 迁移留下的 `compatibility_lock=true + lease_expires_at=null + provider_id=migration:v2` 没有可用于 report 的 receipt，不能等待过期、静默释放或用 legacy `recover re-enroll` 处理。`next --status` 必须把它列入 `migration_locked_instances`。
+8. 新工具接手该实例时，先完成自己的 `JOIN ...` enrollment；随后使用与旧 claim 相同的 `actor_id` 调用 `next`。引擎返回绑定 project/workflow/state SHA/event head/stage instance/旧 claim digest/新 device-client/Provider/15 分钟 TTL 的 `migration-claim-recovery-confirmation` ask。Agent 展示完整 `TAKEOVER ...` 后结束回合，用户下一条消息精确输入，再通过 `--migration-claim-recovery-confirmation-stdin` 提交。
+9. JOIN 只授权设备 enrollment，不能自动夺取 claim；TAKEOVER 只将目标 migration lock 转为该 actor 在当前 device/client 上的正常有限期 lease。Local 转换使用 state lock，Git 转换先取得远端 coordination ref CAS receipt，再幂等写入本地 state。旧 migration claim 事件保持不变，新 `claim_transferred` 事件记录旧 claim ID/digest、恢复 request ID 和原因。
+10. 不同 actor 不能仅凭 enrollment 或 TAKEOVER 文本接管 migration claim。当前没有 owner PKI；跨 actor 变更仍由 Provider/SCM assignment 与访问控制决定，不得伪造成密码学 owner 证明。
 
 ## 审批安全边界
 
 1. `approve --request` 生成绑定 workflow ID、Stage instance、challenge、产物根、Evidence 根和 TTL 的随机 `confirmation_phrase`。
 2. Agent 必须展示审批摘要和完整确认语后结束当前回合；只有下一条真实用户消息的完整正文精确匹配，才能构造 `aidlc.approval.confirmation`。
 3. 普通“同意”、近似文本、预填按钮、Agent 复制文本、旧消息、Slash Command 被调用或同一回合自动提交均不能批准。
-4. schema v3 的对话确认必须与 owning client claim receipt 组成严格 stdin envelope；引擎内部生成并立即消费 token，继续校验 request、TTL、instance、receipt、produces、sensors 和 replay。
+4. schema v3 的对话确认必须与 owning client claim receipt 组成严格 stdin envelope；引擎内部生成并立即消费 token，继续校验 request、TTL、instance、receipt、produces、sensors 和 replay。禁止跨设备是指禁止复制 private key、共享 secret、转发旧 receipt/token；同一 actor 在新工具完成 JOIN 和独立 TAKEOVER 后取得属于新 device/client 的 receipt，再按本节执行审批，是合法连续工作路径。
 5. 受信宿主 Provider 是可选的一键审批与额外审计增强：它必须运行在发起审批的同一受信设备，通过本机 device credential 内部派生一次性 token，并经 `--approval-response-stdin` 提交；用户和团队成员不处理 `AIDLC_TRUST_SECRET`。该响应不是远程跨设备 Provider 协议。真人 TTY 是备用路径；默认流程不依赖专用审批卡或外部终端。
 6. `application-design` 和 `operations` 继续是仅有的阻断审批 Stage。
 
@@ -146,7 +151,7 @@ ready/claimed/in_progress -> skipped 仅允许由确定性 condition 或受控�
 1. 新 workflow 默认创建 schema v3 与 `device-signature-v1` enrollment；仅显式设置 `AIDLC_COLLABORATION_V3=0` 时创建 schema v2 兼容 workflow。
 2. 已存在的 schema v2 state 始终分流到旧单游标引擎，不因升级或环境默认值自动迁移。
 3. `loeyae-aidlc state migrate-v3 --actor-id ... --device-id ... --client-id ...` 默认只输出计划；只有 `--apply` 才在锁内原子替换并建立本机 device-signature enrollment。
-4. v2 的 completed/skipped 实例、history、choice 和 approval challenge 无损迁移；active current 实例成为绑定迁移身份的明确 compatibility lock，不能静默释放。
+4. v2 的 completed/skipped 实例、history、choice 和 approval challenge 无损迁移；active current 实例成为绑定迁移 actor 的明确 compatibility lock，不能静默释放。迁移 identity 的 device/client 失联时，同一 actor 按 Assignment、Claim 与 Lease 第 7–10 条执行独立 TAKEOVER 恢复；`state migrate-v3 --repair` 只修复无迁移后业务事件的 migration-only projection，不替代 receipt 恢复。
 5. 迁移保持 workflow ID、history 与业务语义；新 event chain/checkpoint 使用 Ed25519。失败、中断或 failpoint 触发时原 state 字节不变。
 6. 升级前已是 schema v3 但仍使用 HMAC 的 state，必须先在持有旧 key 的原受信客户端打开；引擎验证旧链后自动保持事件业务字段并重建 Ed25519 hash/signature chain。完全丢失旧 key 时不得绕过。
 7. 旧 HMAC Git coordination log 遵循 Git Provider 的首次成功 mutation 原子迁移规则；旧 HMAC Evidence 不自动批量重签，后续门禁需要时由受控 Producer 重新生成。

@@ -299,6 +299,12 @@ loeyae-aidlc orchestrate next \
 team-enrollment-confirmation-envelope | loeyae-aidlc orchestrate next \
   --actor-id actor:alice --device-id device:new-laptop --client-id client:session-2 \
   --team-enrollment-confirmation-stdin
+# 若 enrollment 后返回 migration-claim-recovery-confirmation：展示 TAKEOVER 并再次结束回合；
+# 用户下一条消息精确输入后，把 strict envelope 通过 stdin 提交，同一 actor 获得新 receipt
+migration-claim-recovery-envelope | loeyae-aidlc orchestrate next \
+  --instance application-design@module:module-a \
+  --actor-id actor:alice --device-id device:new-laptop --client-id client:session-2 \
+  --migration-claim-recovery-confirmation-stdin
 # directive.claim_receipt 必须经安全 stdin 回传，不放进 argv/聊天
 claim-receipt.json | loeyae-aidlc orchestrate report \
   --stage workspace-detection --instance workspace-detection --result completed \
@@ -442,8 +448,9 @@ Agent 不能跳步——schema v3 的每次 `report` 必须绑定确定的 `stag
 - actor/device/client 共同标识 lease holder；assignment 只是长期负责人关系。不同 ready 实例可并行 claim，同一实例同时最多一个有效 lease。
 - `docs/aidlc/handoff.md` 只是派生的人类协作视图，不能改变 stage、skip、approval、claim 或 revision；冲突时以签名机器状态为准。
 - enrollment 位于项目外的 `~/.config/loeyae-aidlc/trust/enrollments/`，设备私钥位于同一 trust root 的 `device-signing-key.json`（POSIX `0600`、非符号链接）。私钥不写入项目、不输出，也不在成员间复制；state、event、claim receipt、Git coordination event、External Provider receipt 和 v3 Evidence 携带可跨设备验证的 Ed25519 public key/signature envelope。
-- 新 workflow 与 v3 Evidence 不要求配置、传递或共享 `AIDLC_TRUST_SECRET`。新 enrollment 使用 `trust_mode: "device-signature-v1"`。测试/隔离环境仍可通过 `AIDLC_TRUST_DIR` 指定独立 trust root；`AIDLC_TRUST_SECRET` 与 `trust.key` 仅保留给 schema v2/HMAC/recovery 兼容路径。
+- 新 workflow 与 v3 Evidence 不要求配置、传递或共享 `AIDLC_TRUST_SECRET`。新 enrollment 使用 `trust_mode: "device-signature-v1"`。默认 trust root 为 `~/.config/loeyae-aidlc/trust`；测试、临时沙箱或没有稳定 HOME 的受控宿主可通过 `AIDLC_TRUST_DIR` 指定持久隔离目录。`AIDLC_TRUST_SECRET` 与 `trust.key` 仅保留给 schema v2/HMAC/recovery 兼容路径。
 - 新设备首次打开已有 v3 team state 时，`orchestrate next` 返回绑定 workflow、canonical project root、state SHA、event head、设备 key、随机 challenge 和 15 分钟 TTL 的 `team-enrollment-confirmation` ask。Agent 必须展示完整 `JOIN ...` 短语并结束当前回合；只有用户下一条真实消息精确匹配后，才能通过 strict `--team-enrollment-confirmation-stdin` 完成本机 enrollment。Agent 代填、近似输入、尾随空格、旧 request、过期 request 或 request 后 state/head 变化均拒绝。
+- v2→v3 迁移时仍 active 的实例保留无 receipt、永不过期的 compatibility lock。新工具完成 JOIN 后，必须保持相同 `actor_id`，再按独立 `migration-claim-recovery-confirmation` 的 `TAKEOVER ...` 跨回合确认，通过 `--migration-claim-recovery-confirmation-stdin` 把旧锁转换为当前 device/client 的有限期 Local/Git Provider receipt。JOIN 不自动夺取 claim，legacy `recover re-enroll` 不处理该路径，不同 actor 不能仅凭 enrollment 接管。
 - enrollment 保存本机已接受的 event head。后续 state 必须扩展该 head；回滚、丢失已接受历史或 fork 会 fail-closed。接收其他设备合法追加后，本机 head 自动前进。Provider/SCM/本地访问控制仍决定谁能向共享流写入；当前实现不是带成员角色注册表和 per-device revoke event 的完整授权 PKI。
 - 旧 HMAC v3 state 只能由能验证旧 key 的原受信客户端先打开一次，随后自动转签为设备签名链；完全丢失旧 key 时不会绕过验证。旧 HMAC Git coordination log 会在原受信客户端第一次成功 mutation 中通过远端 CAS 原子重签整链，活动 legacy receipt 可由该客户端续租并换取新 Ed25519 receipt；新设备在迁移前明确拒绝。旧 HMAC Evidence 不会批量重签，门禁需要时必须由受控 Producer 重新生成。
 - schema v2 信任链冲突仍只能先用 `loeyae-aidlc recover inspect` 只读检查，再对 `parked` state 执行 `recover re-enroll`。后者必须用 `AIDLC_RECOVERY_SECRET` 或受限的 `AIDLC_RECOVERY_KEY_FILE` 证明旧 state，并用 `AIDLC_RECOVERY_ENROLLMENT_FILE` 提供同一 workflow、旧 key 签名的 active enrollment 以证明源项目绑定；跨主机路径变化由源/目标 root SHA 和真人短语显式确认。默认 dry-run，实际写入还要求 state/current enrollment/source enrollment SHA、旧/新 key ID、workflow ID 和原因，没有 `--yes` 或 secret CLI 参数。

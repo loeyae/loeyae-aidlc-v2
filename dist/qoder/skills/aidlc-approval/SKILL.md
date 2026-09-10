@@ -21,7 +21,7 @@ triggers: 审批当前阶段, 确认架构方案, 批准架构方案, 批准部�
 
 ## 默认对话审批流程
 
-1. 在业务项目根目录执行 `loeyae-aidlc orchestrate next --status`，验证签名 state、workflow 和当前实例。
+1. 在业务项目根目录执行 `loeyae-aidlc orchestrate next --status`，验证签名 state、workflow 和当前实例。若目标实例出现在 `migration_locked_instances`，先加载 `aidlc-continuity`：新工具完成自己的 JOIN，再由同一 `actor_id` 通过独立 `TAKEOVER ...` 跨回合确认取得当前 device/client 的有限期 receipt；未取得新 receipt 前不得创建或提交审批。
 2. 执行：
 
    ```bash
@@ -74,6 +74,7 @@ triggers: 审批当前阶段, 确认架构方案, 批准架构方案, 批准部�
 ## 可选本机通道
 
 - 同一设备的受信宿主 Approval Provider 可以提供额外的一键审批和宿主审计，但不是默认审批的前置依赖；其 response 通过 `--approval-response-stdin`。一次性 token 由本机 device credential 内部派生，用户与团队成员不得配置或共享 `AIDLC_TRUST_SECRET`。该 response 不是远程跨设备 Provider 协议。
+- “禁止跨设备”是禁止复制 private key、共享 secret、转发旧 receipt/token。合法跨工具连续工作必须由同一 actor 在新工具完成 JOIN 和独立 TAKEOVER，取得属于新 device/client 的 receipt 后重新发起当前审批；不是把旧设备凭据搬到新设备。
 - 真人交互式终端仍是备用路径：直接运行 `loeyae-aidlc approve --stage <slug> --instance <stage-instance>`，再使用本设备的一次性 token 报告。
 - 任一操作只能选择对话确认、同设备 Provider response 或 TTY token 中一个通道，混用必须 fail-closed。
 
@@ -91,7 +92,7 @@ triggers: 审批当前阶段, 确认架构方案, 批准架构方案, 批准部�
 - 在展示确认语的同一 Agent 回合调用 approved report；
 - 用 Agent 生成内容、旧用户消息、近似文本或按钮选择替代新的精确用户输入；
 - 在聊天、日志、文件或命令参数中回显 token 或 claim receipt；
-- 将本机 Provider token 转发到其他设备，或要求成员共享 `AIDLC_TRUST_SECRET` 以实现远程审批；
+- 将本机 Provider token 或旧 claim receipt 转发到其他设备，要求成员共享 `AIDLC_TRUST_SECRET`，或把 JOIN/TAKEOVER 短语当作 APPROVE；
 - 修改 `aidlc-state.json`、challenge、integrity 或 enrollment；
 - 跳过 produces、sensors、实例匹配、TTL 或 replay 校验；
 - 为非审批 Stage 创造确认门禁。
