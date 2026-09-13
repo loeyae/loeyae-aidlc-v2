@@ -18,13 +18,14 @@ import { spawnSync } from "child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { signRecord, signTeamRecord } from "./aidlc-trust";
-import { loadWorkflowState, statePath, type WorkflowState } from "./aidlc-state";
-import { loadWorkflowStateV3 } from "./aidlc-state-v3-store";
-import type { WorkflowStateV3 } from "./aidlc-state-v3";
+import {
+  loadWorkflowStateBySchema,
+  type AnyWorkflowState,
+} from "./aidlc-state-schema";
 import { evidenceRelativePath } from "./aidlc-execution-context";
 import { readSourceRevision } from "./aidlc-revision";
 
-type ProducerState = WorkflowState | WorkflowStateV3;
+type ProducerState = AnyWorkflowState;
 
 type CommandRole = "build" | "test" | "check" | "semantic";
 
@@ -509,15 +510,8 @@ function withProducerLock(output: string, action: () => void): void {
 }
 
 function loadProducerState(options: ProducerOptions): ProducerState | null {
-  const path = statePath(PROJECT_ROOT);
-  if (!existsSync(path)) return null;
-  const stat = lstatSync(path);
-  if (!stat.isFile() || stat.isSymbolicLink()) fail(`state must be a regular non-symlink file: ${path}`);
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-  if (parsed.schema_version !== 3) return loadWorkflowState(PROJECT_ROOT);
-
-  const state = loadWorkflowStateV3(PROJECT_ROOT);
-  if (!state) return null;
+  const state = loadWorkflowStateBySchema(PROJECT_ROOT);
+  if (!state || state.schema_version !== 3) return state;
   const activeInstances = Object.values(state.instances).filter(
     (instance) => instance.stage === options.stage && instance.status === "in_progress",
   );

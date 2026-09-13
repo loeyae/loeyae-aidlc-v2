@@ -30,6 +30,7 @@ import {
 } from "./aidlc-trust";
 
 export const COLLABORATION_V3_FLAG = "AIDLC_COLLABORATION_V3";
+export const MAX_V1_REGENERATION_SOURCE_BYTES = 2 * 1024 * 1024;
 
 export type WorkflowInstanceStatusV3 =
   | "blocked"
@@ -43,6 +44,7 @@ export type WorkflowInstanceStatusV3 =
 
 export type WorkflowEventTypeV3 =
   | "workflow_initialized"
+  | "workflow_regenerated"
   | "workflow_migrated"
   | "workflow_frozen"
   | "workflow_resumed"
@@ -181,7 +183,32 @@ export interface V2MigrationOptions {
   instance_requires?: Record<string, string[]>;
 }
 
+export interface V1RegenerationSource {
+  path: string;
+  sha256: string;
+  bytes: number;
+  state_mode_version: number | null;
+  package_version: string | null;
+  project_type: string;
+  execution_path: string | null;
+  current_phase: string | null;
+  current_step: string | null;
+}
+
+export interface V1RegenerationOptions {
+  identity: V2MigrationIdentity;
+  source: V1RegenerationSource;
+  source_bytes: Uint8Array;
+  scope: string;
+  version?: string;
+  workflow_id?: string;
+  selected_optional_stages?: string[];
+  occurred_at?: string;
+  require_feature_flag?: boolean;
+}
+
 const VALID_SCOPES = new Set(["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor", "poc"]);
+const PRD_ELIGIBLE_SCOPES = new Set(["feature", "enterprise", "mvp", "classic"]);
 const VALID_STATUSES = new Set<WorkflowInstanceStatusV3>([
   "blocked",
   "ready",
@@ -194,6 +221,7 @@ const VALID_STATUSES = new Set<WorkflowInstanceStatusV3>([
 ]);
 const EVENT_TYPES = new Set<WorkflowEventTypeV3>([
   "workflow_initialized",
+  "workflow_regenerated",
   "workflow_migrated",
   "workflow_frozen",
   "workflow_resumed",
@@ -217,12 +245,17 @@ const EVENT_TYPES = new Set<WorkflowEventTypeV3>([
 ]);
 const WORKFLOW_EVENT_TYPES = new Set<WorkflowEventTypeV3>([
   "workflow_initialized",
+  "workflow_regenerated",
   "workflow_migrated",
   "workflow_frozen",
   "workflow_resumed",
   "workflow_completed",
 ]);
-const BOOTSTRAP_EVENT_TYPES = new Set<WorkflowEventTypeV3>(["workflow_initialized", "workflow_migrated"]);
+const BOOTSTRAP_EVENT_TYPES = new Set<WorkflowEventTypeV3>([
+  "workflow_initialized",
+  "workflow_regenerated",
+  "workflow_migrated",
+]);
 const EVENT_KEYS = new Set([
   "schema_version",
   "kind",
@@ -335,6 +368,24 @@ export function workflowEventHashV3(event: WorkflowEventV3): string {
   return hashRecord(event);
 }
 
+export type WorkflowInitializationKindV3 = "workflow_initialized" | "workflow_regenerated";
+
+export function workflowInitializationDigestV3(state: WorkflowStateV3): string {
+  const event = validateWorkflowEventV3(state.events[0], true);
+  if (event.event_type !== "workflow_initialized" && event.event_type !== "workflow_regenerated") {
+    throw new Error("workflow initialization intent requires an initialized or regenerated bootstrap event");
+  }
+  const payload = { ...event.payload };
+  delete payload.created_at;
+  return createHash("sha256").update(canonicalPayload({
+    schema_version: 1,
+    kind: "aidlc.workflow.initialization-intent",
+    workflow_id: event.workflow_id,
+    event_type: event.event_type,
+    payload,
+  })).digest("hex");
+}
+
 function validateClaim(value: unknown, field: string): WorkflowClaimV3 {
   const claim = record(value, field);
   exactKeys(claim, new Set([
@@ -394,6 +445,94 @@ function validateEventPayload(eventType: WorkflowEventTypeV3, payloadValue: unkn
       text(payload.depth, "workflow_initialized.depth");
       iso(payload.created_at, "workflow_initialized.created_at");
       strings(payload.selected_optional_stages, "workflow_initialized.selected_optional_stages");
+      break;
+    }
+    case "workflow_regenerated": {
+      exact([
+        "version",
+        "scope",
+        "depth",
+        "created_at",
+        "selected_optional_stages",
+        "source",
+        "regenerated_by",
+        "progress_imported",
+      ]);
+      text(payload.version, "workflow_regenerated.version");
+      const scope = text(payload.scope, "workflow_regenerated.scope");
+      if (!VALID_SCOPES.has(scope)) throw new Error(`invalid workflow scope: ${scope}`);
+      text(payload.depth, "workflow_regenerated.depth");
+      iso(payload.created_at, "workflow_regenerated.created_at");
+      const selected = strings(payload.selected_optional_stages, "workflow_regenerated.selected_optional_stages");
+      if (selected.some((stage) => stage !== "prd-generation") || new Set(selected).size !== selected.length) {
+        throw new Error("workflow_regenerated selected_optional_stages is invalid");
+      }
+      if (selected.length > 0 && !PRD_ELIGIBLE_SCOPES.has(scope)) {
+        throw new Error(`optional PRD stage is not available for scope ${scope}`);
+      }
+      const source = record(payload.source, "workflow_regenerated.source");
+      exactKeys(source, new Set([
+        "generation",
+        "format",
+        "path",
+        "sha256",
+        "bytes",
+        "state_mode_version",
+        "package_version",
+        "project_type",
+        "execution_path",
+        "current_phase",
+        "current_step",
+      ]), "workflow_regenerated.source");
+      if (source.generation !== "v1") throw new Error('workflow_regenerated.source.generation must be "v1"');
+      if (source.format !== "aidlc-state-markdown") {
+        throw new Error('workflow_regenerated.source.format must be "aidlc-state-markdown"');
+      }
+      const sourcePath = text(source.path, "workflow_regenerated.source.path");
+      const sourceSegments = sourcePath.split("/");
+      if (
+        sourcePath.includes("\\")
+        || sourcePath.includes("\0")
+        || sourcePath.startsWith("/")
+        || /^[A-Za-z]:\//.test(sourcePath)
+        || sourceSegments.some((segment) => segment === "" || segment === "." || segment === "..")
+      ) {
+        throw new Error("workflow_regenerated.source.path must be a canonical project-relative POSIX path");
+      }
+      digest(source.sha256, "workflow_regenerated.source.sha256");
+      const sourceBytes = integer(source.bytes, "workflow_regenerated.source.bytes");
+      if (sourceBytes < 1 || sourceBytes > MAX_V1_REGENERATION_SOURCE_BYTES) {
+        throw new Error(`workflow_regenerated.source.bytes must be between 1 and ${MAX_V1_REGENERATION_SOURCE_BYTES}`);
+      }
+      if (source.state_mode_version !== null) {
+        const stateModeVersion = integer(source.state_mode_version, "workflow_regenerated.source.state_mode_version");
+        if (stateModeVersion < 1) throw new Error("workflow_regenerated.source.state_mode_version must be positive");
+      }
+      if (source.package_version !== null) {
+        const packageVersion = text(source.package_version, "workflow_regenerated.source.package_version");
+        if (packageVersion.length > 128) throw new Error("workflow_regenerated.source.package_version must be at most 128 characters");
+      }
+      const projectType = text(source.project_type, "workflow_regenerated.source.project_type");
+      if (projectType.length > 512) {
+        throw new Error("workflow_regenerated.source.project_type must be at most 512 characters");
+      }
+      if (/[{}]/.test(projectType)) {
+        throw new Error("workflow_regenerated.source.project_type must be concrete");
+      }
+      for (const field of ["execution_path", "current_phase", "current_step"] as const) {
+        if (source[field] !== null) {
+          const hint = text(source[field], `workflow_regenerated.source.${field}`);
+          if (hint.length > 512) throw new Error(`workflow_regenerated.source.${field} must be at most 512 characters`);
+        }
+      }
+      const regeneratedBy = record(payload.regenerated_by, "workflow_regenerated.regenerated_by");
+      exactKeys(regeneratedBy, new Set(["actor_id", "device_id", "client_id"]), "workflow_regenerated.regenerated_by");
+      text(regeneratedBy.actor_id, "workflow_regenerated.regenerated_by.actor_id");
+      text(regeneratedBy.device_id, "workflow_regenerated.regenerated_by.device_id");
+      text(regeneratedBy.client_id, "workflow_regenerated.regenerated_by.client_id");
+      if (payload.progress_imported !== false) {
+        throw new Error("workflow_regenerated.progress_imported must be false");
+      }
       break;
     }
     case "workflow_migrated": {
@@ -613,6 +752,34 @@ function stateFromInitialization(workflowId: string, event: WorkflowEventV3): Om
     completed_stage_instances: [],
     skipped_stage_instances: [],
     selected_optional_stages: strings(payload.selected_optional_stages, "workflow_initialized.selected_optional_stages"),
+    instances: {},
+    events: [],
+    event_head: { sequence: event.sequence, event_id: event.event_id, event_hash: workflowEventHashV3(event) },
+  };
+}
+
+function stateFromRegeneration(workflowId: string, event: WorkflowEventV3): Omit<WorkflowStateV3, "integrity"> {
+  const payload = event.payload;
+  return {
+    schema_version: 3,
+    version: text(payload.version, "workflow_regenerated.version"),
+    workflow_id: workflowId,
+    revision: 0,
+    scope: text(payload.scope, "workflow_regenerated.scope"),
+    depth: text(payload.depth, "workflow_regenerated.depth"),
+    current_phase: "ideation",
+    current_stage: "",
+    status: "running",
+    completed_stages: [],
+    skipped_stages: [],
+    approval_challenges: {},
+    history: [],
+    created_at: iso(payload.created_at, "workflow_regenerated.created_at"),
+    updated_at: event.occurred_at,
+    routing_model: "collaboration-v3",
+    completed_stage_instances: [],
+    skipped_stage_instances: [],
+    selected_optional_stages: strings(payload.selected_optional_stages, "workflow_regenerated.selected_optional_stages"),
     instances: {},
     events: [],
     event_head: { sequence: event.sequence, event_id: event.event_id, event_hash: workflowEventHashV3(event) },
@@ -898,11 +1065,17 @@ export function reduceWorkflowEventsV3(
 
     if (BOOTSTRAP_EVENT_TYPES.has(event.event_type)) {
       if (state !== null || event.sequence !== 1) throw new Error(`${event.event_type} must be the first and only bootstrap event`);
-      state = event.event_type === "workflow_initialized"
-        ? stateFromInitialization(workflowId, event)
-        : stateFromMigration(workflowId, event);
+      if (event.event_type === "workflow_initialized") {
+        state = stateFromInitialization(workflowId, event);
+      } else if (event.event_type === "workflow_regenerated") {
+        state = stateFromRegeneration(workflowId, event);
+      } else {
+        state = stateFromMigration(workflowId, event);
+      }
     } else {
-      if (!state) throw new Error("workflow event stream must start with workflow_initialized or workflow_migrated");
+      if (!state) {
+        throw new Error("workflow event stream must start with workflow_initialized, workflow_regenerated, or workflow_migrated");
+      }
       if (WORKFLOW_EVENT_TYPES.has(event.event_type)) applyWorkflowEvent(state, event);
       else applyInstanceEvent(state, event);
     }
@@ -1148,6 +1321,74 @@ export function createInitialWorkflowStateV3(
     },
   });
   return materializeWorkflowStateV3(workflowId, [event], 0);
+}
+
+interface RegenerationDefinition {
+  workflowId: string;
+  occurredAt: string;
+  payload: Record<string, unknown>;
+}
+
+function regenerationDefinition(options: V1RegenerationOptions): RegenerationDefinition {
+  if (options.require_feature_flag !== false) assertCollaborationV3Enabled();
+  const scope = text(options.scope, "regeneration scope");
+  if (!VALID_SCOPES.has(scope)) throw new Error(`invalid workflow scope: ${scope}`);
+  const selectedOptionalStages = [...(options.selected_optional_stages || [])];
+  if (selectedOptionalStages.some((stage) => stage !== "prd-generation")
+    || new Set(selectedOptionalStages).size !== selectedOptionalStages.length) {
+    throw new Error("invalid selected optional stage for V1 regeneration");
+  }
+  if (selectedOptionalStages.length > 0 && !PRD_ELIGIBLE_SCOPES.has(scope)) {
+    throw new Error(`optional PRD stage is not available for scope ${scope}`);
+  }
+  const occurredAt = options.occurred_at || new Date().toISOString();
+  iso(occurredAt, "regeneration occurred_at");
+  const workflowId = text(options.workflow_id || randomUUID(), "regeneration workflow_id");
+  const identity = {
+    actor_id: text(options.identity.actor_id, "regeneration identity.actor_id"),
+    device_id: text(options.identity.device_id, "regeneration identity.device_id"),
+    client_id: text(options.identity.client_id, "regeneration identity.client_id"),
+  };
+  const sourceBytes = Buffer.from(options.source_bytes);
+  if (sourceBytes.length !== options.source.bytes) {
+    throw new Error("regeneration source byte count does not match source_bytes");
+  }
+  const sourceDigest = createHash("sha256").update(sourceBytes).digest("hex");
+  if (sourceDigest !== options.source.sha256.toLowerCase()) {
+    throw new Error("regeneration source SHA-256 does not match source_bytes");
+  }
+  const payload: Record<string, unknown> = {
+    version: options.version || "3.0.0",
+    scope,
+    depth: "standard",
+    created_at: occurredAt,
+    selected_optional_stages: selectedOptionalStages,
+    source: {
+      ...options.source,
+      generation: "v1",
+      format: "aidlc-state-markdown",
+    },
+    regenerated_by: identity,
+    progress_imported: false,
+  };
+  validateEventPayload("workflow_regenerated", payload);
+  return { workflowId, occurredAt, payload };
+}
+
+export function validateV1RegenerationOptions(options: V1RegenerationOptions): void {
+  regenerationDefinition(options);
+}
+
+export function createRegeneratedWorkflowStateV3(options: V1RegenerationOptions): WorkflowStateV3 {
+  const definition = regenerationDefinition(options);
+  const event = createWorkflowEventV3({
+    workflow_id: definition.workflowId,
+    event_type: "workflow_regenerated",
+    event_id: deterministicEventId(definition.workflowId, 1, "workflow_regenerated"),
+    occurred_at: definition.occurredAt,
+    payload: definition.payload,
+  });
+  return validateWorkflowStateV3(materializeWorkflowStateV3(definition.workflowId, [event], 0), true);
 }
 
 export function appendWorkflowEventV3(stateValue: WorkflowStateV3, input: Omit<NewWorkflowEventV3, "workflow_id">): WorkflowStateV3 {

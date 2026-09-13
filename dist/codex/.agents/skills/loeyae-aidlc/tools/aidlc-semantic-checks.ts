@@ -6,7 +6,10 @@ import { join, relative, resolve } from "path";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
 import { portableDirname, readModuleManifest } from "./aidlc-execution-context";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
-import { loadWorkflowState } from "./aidlc-state";
+import {
+  loadWorkflowStateBySchema,
+  type AnyWorkflowState,
+} from "./aidlc-state-schema";
 import {
   ExpectedContract,
   expectedContractPath,
@@ -18,14 +21,59 @@ import {
 } from "./diagram-contract.js";
 
 const ROOT = process.cwd();
-let workflowState: ReturnType<typeof loadWorkflowState> | undefined;
+let workflowState: AnyWorkflowState | null = null;
+let workflowStateError: string | null = null;
 try {
-  workflowState = loadWorkflowState(ROOT);
-} catch {
-  workflowState = undefined;
+  workflowState = loadWorkflowStateBySchema(ROOT, {
+    allowPublicV3Read: true,
+    requireState: true,
+  });
+} catch (error) {
+  workflowStateError = error instanceof Error ? error.message : String(error);
 }
-const ACTIVE_MODULE = process.env.AIDLC_ACTIVE_MODULE?.trim() || workflowState?.current_module;
-const ACTIVE_UNIT = process.env.AIDLC_ACTIVE_UNIT?.trim() || workflowState?.current_unit;
+
+const activeV3Instances = workflowState?.schema_version === 3
+  ? Object.values(workflowState.instances).filter((instance) => instance.status === "in_progress")
+  : [];
+const activeV3Modules = [...new Set(activeV3Instances.map((instance) => instance.module_id).filter((value): value is string => Boolean(value)))];
+const activeV3Units = [...new Set(activeV3Instances.map((instance) => instance.unit_id).filter((value): value is string => Boolean(value)))];
+const ACTIVE_MODULE = process.env.AIDLC_ACTIVE_MODULE?.trim()
+  || workflowState?.current_module
+  || (activeV3Modules.length === 1 ? activeV3Modules[0] : undefined);
+const ACTIVE_UNIT = process.env.AIDLC_ACTIVE_UNIT?.trim()
+  || workflowState?.current_unit
+  || (activeV3Units.length === 1 ? activeV3Units[0] : undefined);
+const CONTROLLED_CONTEXT_REQUESTED = Object.prototype.hasOwnProperty.call(process.env, "AIDLC_ACTIVE_MODULE")
+  || Object.prototype.hasOwnProperty.call(process.env, "AIDLC_ACTIVE_UNIT");
+
+const MODULE_CONTEXT_SENSORS = new Set([
+  "diagram-contract",
+  "design-intent-coverage",
+  "ui-artifact-consistency",
+  "inception-consistency",
+  "review-evidence",
+  "test-quality",
+  "contract-baseline",
+  "functional-design-completeness",
+  "nfr-coverage",
+  "infrastructure-completeness",
+  "frontend-platform-spec",
+  "framework-compliance",
+  "subagent-evidence",
+  "ui-design-alignment",
+]);
+const UNIT_CONTEXT_SENSORS = new Set([
+  "review-evidence",
+  "test-quality",
+  "contract-baseline",
+  "functional-design-completeness",
+  "nfr-coverage",
+  "infrastructure-completeness",
+  "frontend-platform-spec",
+  "framework-compliance",
+  "subagent-evidence",
+  "ui-design-alignment",
+]);
 
 function contextual(relativePath: string): string {
   if (ACTIVE_UNIT && ACTIVE_MODULE && relativePath.startsWith("docs/aidlc/construction")) {
@@ -61,6 +109,23 @@ const SENSOR_NAMES = new Set([
 ]);
 
 function fail(message: string): never { throw new Error(message); }
+function requiredWorkflowState(): AnyWorkflowState {
+  if (workflowStateError) fail(`signed workflow state could not be loaded: ${workflowStateError}`);
+  if (!workflowState) fail("signed workflow state is missing");
+  return workflowState;
+}
+function assertSemanticContext(sensor: string): void {
+  const state = requiredWorkflowState();
+  const strictContext = state.schema_version === 3
+    || state.routing_model === "module-unit-v1"
+    || CONTROLLED_CONTEXT_REQUESTED;
+  if (strictContext && MODULE_CONTEXT_SENSORS.has(sensor) && !ACTIVE_MODULE) {
+    fail(`active module is required for semantic sensor ${sensor}`);
+  }
+  if (strictContext && UNIT_CONTEXT_SENSORS.has(sensor) && !ACTIVE_UNIT) {
+    fail(`active unit is required for semantic sensor ${sensor}`);
+  }
+}
 function text(path: string): string { return readFileSync(path, "utf8"); }
 function textIfExists(path: string): string { return existsSync(path) ? text(path) : ""; }
 function existing(paths: string[]): string[] { return paths.map((path) => join(ROOT, contextual(path))).filter((path) => existsSync(path) && contextAllows(path)); }
@@ -631,13 +696,8 @@ function recoveryEvidence(): Record<string, unknown> {
   if (!existsSync(markerPath) && !/context_compacted\s*[:：]\s*true|上下文压缩|compact recovery/i.test(handoff)) {
     fail("context compaction was not detected");
   }
-  let state;
-  try {
-    state = loadWorkflowState(ROOT);
-  } catch (error) {
-    fail(`signed machine state could not be restored: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (!state || !existsSync(handoffPath) || handoff.trim().length === 0) fail("signed state restoration or derived handoff evidence is missing");
+  const state = requiredWorkflowState();
+  if (!existsSync(handoffPath) || handoff.trim().length === 0) fail("signed state restoration or derived handoff evidence is missing");
   return { status: "passed", state_restored: true, handoff_recorded: true, state_revision: state.revision };
 }
 
@@ -2383,6 +2443,7 @@ try {
   const sensorIndex = args.indexOf("--sensor");
   const sensor = sensorIndex >= 0 ? args[sensorIndex + 1] : undefined;
   if (!sensor || !SENSOR_NAMES.has(sensor) || !CHECKERS[sensor]) fail("usage: aidlc-semantic-checks.ts --sensor <semantic-sensor>");
+  assertSemanticContext(sensor);
   output(CHECKERS[sensor]());
 } catch (error) {
   console.error(`Semantic checker blocked: ${error instanceof Error ? error.message : String(error)}`);

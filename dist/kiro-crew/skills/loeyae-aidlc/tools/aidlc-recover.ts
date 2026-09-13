@@ -25,6 +25,12 @@ import {
 	validateWorkflowState,
 } from "./aidlc-state";
 import {
+	readWorkflowStateSnapshot,
+	validateWorkflowStateBySchema,
+	validateWorkflowStateV3EnrollmentReadOnly,
+	type WorkflowStateSnapshot,
+} from "./aidlc-state-schema";
+import {
 	type EnrollmentRecord,
 	createEnrollmentRecord,
 	enrollmentPath,
@@ -193,14 +199,20 @@ function readState(root: string): {
 	raw: Buffer;
 	record: Record<string, unknown>;
 } {
-	const raw = readRegularFile(
-		statePath(root),
-		"workflow state",
-		MAX_STATE_BYTES,
-	);
-	const record = parseRecord(raw, "workflow state");
-	const state = validateWorkflowState(record, false);
-	return { state, raw, record };
+	const snapshot = readWorkflowStateSnapshot(root, false);
+	if (!snapshot) {
+		throw new Error(`workflow state is missing: ${statePath(root)}`);
+	}
+	if (snapshot.state.schema_version !== 2) {
+		throw new Error(
+			"controlled re-enrollment supports only schema v2 HMAC state; schema v3 must use JOIN, TAKEOVER when applicable, and continuity",
+		);
+	}
+	return {
+		state: snapshot.state,
+		raw: snapshot.raw,
+		record: snapshot.record,
+	};
 }
 
 function readEnrollmentSnapshot(root: string): {
@@ -1254,10 +1266,14 @@ function parseReEnrollOptions(args: string[]): ReEnrollOptions {
 	return options;
 }
 
-function inspect(): void {
-	const root = canonicalProjectRoot();
+function inspectV2(root: string, snapshot: WorkflowStateSnapshot): void {
+	if (snapshot.state.schema_version !== 2) {
+		throw new Error("internal recovery inspection schema mismatch");
+	}
 	const activeKey = getTrustKey(false);
-	const { state, raw, record } = readState(root);
+	const state = snapshot.state;
+	const raw = snapshot.raw;
+	const record = snapshot.record;
 	const enrollment = readEnrollmentSnapshot(root);
 	let sourceVerification: Record<string, unknown> = {
 		supplied: false,
@@ -1298,10 +1314,12 @@ function inspect(): void {
 				project_root: root,
 				state: {
 					path: statePath(root),
+					schema_version: 2,
 					workflow_id: state.workflow_id,
 					status: state.status,
 					revision: state.revision,
 					sha256: sha256(raw),
+					integrity_algorithm: "hmac-sha256",
 					key_id: integrityKeyId(record, "workflow state"),
 					active_key_verified: activeError === null,
 					active_key_error: activeError,
@@ -1314,7 +1332,10 @@ function inspect(): void {
 							workflow_id: enrollment.record.workflow_id,
 							status: enrollment.record.status ?? "active",
 							key_id: integrityKeyId(
-								parseRecord(enrollment.raw as Buffer, "project enrollment"),
+								parseRecord(
+									enrollment.raw as Buffer,
+									"project enrollment",
+								),
 								"project enrollment",
 							),
 							sha256: sha256(enrollment.raw as Buffer),
@@ -1334,9 +1355,116 @@ function inspect(): void {
 	);
 }
 
+function inspectV3(root: string, snapshot: WorkflowStateSnapshot): void {
+	const state = validateWorkflowStateBySchema(snapshot.record, true);
+	if (state.schema_version !== 3) {
+		throw new Error("internal recovery inspection schema mismatch");
+	}
+	const enrollment = validateWorkflowStateV3EnrollmentReadOnly(root, state);
+	const enrollmentRaw = enrollment
+		? readRegularFile(
+				enrollmentPath(root),
+				"project enrollment",
+				MAX_ENROLLMENT_BYTES,
+			)
+		: null;
+	const integrity = snapshot.record.integrity;
+	if (!isRecord(integrity) || typeof integrity.algorithm !== "string") {
+		throw new Error("workflow state has no integrity.algorithm");
+	}
+	const legacyHmac = integrity.algorithm === "hmac-sha256";
+	console.log(
+		JSON.stringify(
+			{
+				kind: "recovery-inspection",
+				project_root: root,
+				state: {
+					path: snapshot.path,
+					schema_version: 3,
+					workflow_id: state.workflow_id,
+					status: state.status,
+					revision: state.revision,
+					sha256: sha256(snapshot.raw),
+					integrity_algorithm: integrity.algorithm,
+					key_id: integrityKeyId(snapshot.record, "workflow state"),
+					signature_verified: true,
+					event_chain_verified: true,
+					events: state.events.length,
+					event_head: state.event_head,
+					source_key: { applicable: false, supplied: false },
+				},
+				active_trust: {
+					mode: enrollment?.trust_mode ?? (legacyHmac ? "legacy-hmac" : null),
+					device_key_id: enrollment?.device_key_id ?? null,
+				},
+				enrollment: enrollment && enrollmentRaw
+					? {
+							path: enrollmentPath(root),
+							workflow_id: enrollment.workflow_id,
+							status: enrollment.status ?? "active",
+							trust_mode: enrollment.trust_mode ?? "legacy-hmac",
+							device_key_id: enrollment.device_key_id ?? null,
+							accepted_event_head: enrollment.event_head_hash ?? null,
+							accepted_head_verified:
+								enrollment.trust_mode === "device-signature-v1",
+							key_id: integrityKeyId(
+								parseRecord(enrollmentRaw, "project enrollment"),
+								"project enrollment",
+							),
+							sha256: sha256(enrollmentRaw),
+						}
+					: null,
+				mismatches: {
+					state_key: false,
+					workflow: false,
+					enrollment_missing: enrollment === null,
+					accepted_event_head: false,
+				},
+				recovery: {
+					re_enroll_supported: false,
+					next_action: legacyHmac
+						? "Open the workflow once with the original trusted client so the normal v3 loader can transition it to device signatures."
+						: enrollment
+							? "Use aidlc-continuity; use a separate TAKEOVER confirmation only for a migration compatibility lock."
+							: "Run orchestrate next and complete the JOIN confirmation, then continue with aidlc-continuity.",
+				},
+			},
+			null,
+			2,
+		),
+	);
+}
+
+function inspect(): void {
+	const root = canonicalProjectRoot();
+	const snapshot = readWorkflowStateSnapshot(root, false);
+	if (!snapshot) {
+		throw new Error(`workflow state is missing: ${statePath(root)}`);
+	}
+	if (snapshot.state.schema_version === 3) {
+		inspectV3(root, snapshot);
+		return;
+	}
+	inspectV2(root, snapshot);
+}
+
 async function reEnroll(args: string[]): Promise<void> {
 	const options = parseReEnrollOptions(args);
 	const root = canonicalProjectRoot();
+	const snapshot = readWorkflowStateSnapshot(root, false);
+	if (!snapshot) {
+		throw new Error(`workflow state is missing: ${statePath(root)}`);
+	}
+	if (snapshot.state.schema_version === 3) {
+		const state = validateWorkflowStateBySchema(snapshot.record, true);
+		if (state.schema_version !== 3) {
+			throw new Error("internal recovery schema dispatch mismatch");
+		}
+		validateWorkflowStateV3EnrollmentReadOnly(root, state);
+		throw new Error(
+			"recover re-enroll supports only schema v2 HMAC workflows. Schema v3 must use orchestrate next with team enrollment (JOIN), use the separate migration claim recovery confirmation (TAKEOVER) only for a same-actor migration compatibility lock, then continue through aidlc-continuity; recovery never restores or bypasses a v3 claim receipt",
+		);
+	}
 	const sourceKey = getRecoveryTrustKey();
 	const activeKey = getTrustKey(false);
 	const sourceKeyId = keyIdentifier(sourceKey);
@@ -1499,12 +1627,17 @@ function printHelp(): void {
   loeyae-aidlc recover inspect
   loeyae-aidlc recover re-enroll [--apply] [confirmation flags]
 
-Source proof (secret via exactly one key source; enrollment proof is also required for a new transaction):
+Schema behavior:
+  schema v2  inspect verifies the HMAC state/enrollment chain; re-enroll remains the controlled HMAC recovery path.
+  schema v3  inspect performs a read-only signature, event-chain, event-head, and local enrollment check.
+              re-enroll is refused: use orchestrate next for JOIN, a separate same-actor TAKEOVER only for a migration compatibility lock, then aidlc-continuity.
+
+Source proof for schema v2 re-enroll (secret via exactly one key source; enrollment proof is also required for a new transaction):
   AIDLC_RECOVERY_SECRET          Original UTF-8 AIDLC_TRUST_SECRET value
   AIDLC_RECOVERY_KEY_FILE        Absolute path to the original base64 trust.key (0600 on POSIX)
   AIDLC_RECOVERY_ENROLLMENT_FILE Absolute path to the original signed active enrollment JSON
 
-Apply confirmation flags (copy exact values from the dry-run output):
+Apply confirmation flags (copy exact values from the schema v2 dry-run output):
   --expect-workflow <id>
   --expect-state-sha256 <sha256>
   --expect-source-key <key-id>
@@ -1516,7 +1649,7 @@ Apply confirmation flags (copy exact values from the dry-run output):
   --reason <10-500 character explanation>
   --apply
 
-The state must be parked. --apply also requires an interactive human terminal and an exact phrase; there is no --yes override.`);
+Schema v2 state must be parked. --apply also requires an interactive human terminal and an exact phrase; there is no --yes override.`);
 }
 
 async function main(): Promise<void> {

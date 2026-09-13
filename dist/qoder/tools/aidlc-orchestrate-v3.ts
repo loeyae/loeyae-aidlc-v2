@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "crypto";
-import { readFileSync, realpathSync } from "fs";
+import { lstatSync, readFileSync, realpathSync } from "fs";
 import { join } from "path";
 import {
   architectureChoice,
@@ -72,6 +72,20 @@ const VALID_SCOPES = new Set(["feature", "enterprise", "mvp", "classic", "expres
 const PRD_ELIGIBLE_SCOPES = new Set(["feature", "enterprise", "mvp", "classic"]);
 const VALID_RESULTS = new Set(["completed", "approved", "rejected", "revised"]);
 const APPROVAL_TTL_MS = 15 * 60 * 1000;
+const LEGACY_V1_STATE_PATH = join(PROJECT_ROOT, "docs", "aidlc", "state.md");
+
+function legacyV1StateExists(): boolean {
+  try {
+    const stat = lstatSync(LEGACY_V1_STATE_PATH);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error(`legacy V1 state candidate must be a regular non-symlink file: ${LEGACY_V1_STATE_PATH}`);
+    }
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
 
 function parseFlags(args: string[]): Record<string, string> {
   const flags: Record<string, string> = {};
@@ -489,6 +503,15 @@ async function handleNext(args: string[]): Promise<Directive> {
 
   let state = loadWorkflowStateV3(PROJECT_ROOT);
   if (!state) {
+    if (legacyV1StateExists()) {
+      return {
+        kind: "error",
+        error_code: "V1_REGENERATION_REQUIRED",
+        source_path: "docs/aidlc/state.md",
+        progress_imported: false,
+        message: "V1_REGENERATION_REQUIRED: unsigned V1 state.md cannot initialize or advance trusted progress. Run state regenerate-v3 dry-run with an explicit scope and actor/device/client identity, review its source SHA-256, then rerun with --apply.",
+      };
+    }
     if (migrationRecoveryConfirmationStdin) throw new Error("migration claim recovery requires an existing schema v3 workflow");
     if (!scope) {
       return {

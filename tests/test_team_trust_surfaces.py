@@ -35,6 +35,9 @@ def main() -> None:
         "完整成员授权 PKI",
         "旧 HMAC Git coordination log",
         "旧 HMAC Evidence",
+        "workflow_regenerated",
+        "state regenerate-v3",
+        "progress_imported",
     )
     assert "共享 `AIDLC_TRUST_SECRET`" in contract
 
@@ -51,6 +54,9 @@ def main() -> None:
         "Provider/SCM",
         "v3 Evidence 不要求",
         "schema v2/HMAC/recovery",
+        "state regenerate-v3",
+        "workflow_regenerated",
+        "progress_imported",
     )
     require(
         "docs/loeyae-aidlc-cli-guide.md",
@@ -63,6 +69,9 @@ def main() -> None:
         "rollback/fork fail-closed",
         "schema v3 不应要求 `AIDLC_TRUST_SECRET`",
         "不是远程跨设备 Provider 协议",
+        "state regenerate-v3",
+        "progress_imported",
+        "dry-run 不写项目或 trust store",
     )
     require(
         "bin/cli.ts",
@@ -74,6 +83,8 @@ def main() -> None:
         "configure or share AIDLC_TRUST_SECRET",
         "Schema v2 HMAC and recovery remain",
         "not a remote cross-device Provider protocol",
+        "state regenerate-v3",
+        "unsigned V1 completion claims are not imported",
     )
     require(
         "core/knowledge/protocols/common-quality-gates.md",

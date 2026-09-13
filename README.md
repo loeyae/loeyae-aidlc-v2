@@ -330,6 +330,12 @@ loeyae-aidlc orchestrate park
 loeyae-aidlc state migrate-v3 \
   --actor-id actor:alice --device-id device:laptop --client-id client:session-1
 
+# V1 只有 docs/aidlc/state.md 时，先审阅来源摘要，再生成空进度签名 V3
+loeyae-aidlc state regenerate-v3 --scope feature --source-version 1.37.5 \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+loeyae-aidlc state regenerate-v3 --scope feature --source-version 1.37.5 --apply \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+
 # 只读检查 state/enrollment 信任链；re-enroll 默认仅生成 dry-run 计划
 loeyae-aidlc recover inspect
 loeyae-aidlc recover re-enroll
@@ -449,6 +455,7 @@ Agent 不能跳步——schema v3 的每次 `report` 必须绑定确定的 `stag
 - `docs/aidlc/handoff.md` 只是派生的人类协作视图，不能改变 stage、skip、approval、claim 或 revision；冲突时以签名机器状态为准。
 - enrollment 位于项目外的 `~/.config/loeyae-aidlc/trust/enrollments/`，设备私钥位于同一 trust root 的 `device-signing-key.json`（POSIX `0600`、非符号链接）。私钥不写入项目、不输出，也不在成员间复制；state、event、claim receipt、Git coordination event、External Provider receipt 和 v3 Evidence 携带可跨设备验证的 Ed25519 public key/signature envelope。
 - 新 workflow 与 v3 Evidence 不要求配置、传递或共享 `AIDLC_TRUST_SECRET`。新 enrollment 使用 `trust_mode: "device-signature-v1"`。默认 trust root 为 `~/.config/loeyae-aidlc/trust`；测试、临时沙箱或没有稳定 HOME 的受控宿主可通过 `AIDLC_TRUST_DIR` 指定持久隔离目录。`AIDLC_TRUST_SECRET` 与 `trust.key` 仅保留给 schema v2/HMAC/recovery 兼容路径。
+- 旧 V1 项目只有未签名的 `docs/aidlc/state.md` 时，可用 `state regenerate-v3` 生成新的 schema v3。命令默认 dry-run，要求显式 scope 和 actor/device/client；`--apply` 只在不存在任何机器 state 时创建 `workflow_regenerated` event、checkpoint 与本机 enrollment，唯一例外是完成同一设备、同一 source/scope/options/identity 所绑定的 pending 初始化事务。签名事件记录 V1 来源的项目内相对路径、SHA-256、字节数、可选版本和只读提示，但明确 `progress_imported: false`；旧 Markdown 中的 completed/skipped/approval 不能升级为受信事件，必须重新通过当前门禁。来源与 state 目标父目录逐段拒绝 symlink，初始化使用 owner/inode 校验的 state lock、no-replace 提交和目录 fsync；源文件不修改，越界、非 UTF-8、未知格式、不同 intent/device 的 pending 或任意其他已有机器 state 均 fail-closed。
 - 新设备首次打开已有 v3 team state 时，`orchestrate next` 返回绑定 workflow、canonical project root、state SHA、event head、设备 key、随机 challenge 和 15 分钟 TTL 的 `team-enrollment-confirmation` ask。Agent 必须展示完整 `JOIN ...` 短语并结束当前回合；只有用户下一条真实消息精确匹配后，才能通过 strict `--team-enrollment-confirmation-stdin` 完成本机 enrollment。Agent 代填、近似输入、尾随空格、旧 request、过期 request 或 request 后 state/head 变化均拒绝。
 - v2→v3 迁移时仍 active 的实例保留无 receipt、永不过期的 compatibility lock。新工具完成 JOIN 后，必须保持相同 `actor_id`，再按独立 `migration-claim-recovery-confirmation` 的 `TAKEOVER ...` 跨回合确认，通过 `--migration-claim-recovery-confirmation-stdin` 把旧锁转换为当前 device/client 的有限期 Local/Git Provider receipt。JOIN 不自动夺取 claim，legacy `recover re-enroll` 不处理该路径，不同 actor 不能仅凭 enrollment 接管。
 - enrollment 保存本机已接受的 event head。后续 state 必须扩展该 head；回滚、丢失已接受历史或 fork 会 fail-closed。接收其他设备合法追加后，本机 head 自动前进。Provider/SCM/本地访问控制仍决定谁能向共享流写入；当前实现不是带成员角色注册表和 per-device revoke event 的完整授权 PKI。
@@ -533,7 +540,25 @@ allowlist 中的最小语义命令配置如下：
 
 ## 从 v1 迁移
 
-v1 源码在 `loeyae-aidlc` 仓库。v2 的所有 steering 内容已从 v1 迁移：
+v1 源码在 `loeyae-aidlc` 仓库。v2 的 stage/knowledge 内容已经从原 steering 迁入当前确定性引擎；业务项目的 V1 `docs/aidlc/state.md` 则是未签名的人类账本，不能直接证明已完成、跳过或批准过当前 V3 Stage。
+
+没有 `docs/aidlc/aidlc-state.json` 的 V1 项目可在项目根目录执行：
+
+```bash
+# 默认 dry-run：只输出来源 SHA-256、旧提示、目标 workflow ID 和 schema
+loeyae-aidlc state regenerate-v3 --scope feature --source-version 1.37.5 \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+
+# 审阅来源和显式 scope 后才落盘
+loeyae-aidlc state regenerate-v3 --scope feature --source-version 1.37.5 --apply \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+```
+
+`--source` 默认是 `docs/aidlc/state.md`，只能指向项目根内的 UTF-8 常规非 symlink 文件，大小上限 2 MiB。命令保留原 Markdown 字节不变，在签名 `workflow_regenerated` event 中记录相对路径、SHA-256、字节数、状态模式版本、可选 V1 包版本和操作者 identity，并建立本机 `device-signature-v1` enrollment。生成的 V3 从空进度开始，`progress_imported` 固定为 `false`；旧文档与产物仍可作为重新执行当前门禁时的输入，但不能自动成为完成 Evidence。
+
+若任何机器 state 已存在，命令拒绝覆盖：schema v2 使用 `state migrate-v3` 无损迁移受信进度，schema v3 使用 `aidlc-continuity`。初始化在 pending enrollment 后或 state no-replace 提交后中断时，只有同一设备且 source digest、scope、选项和 actor/device/client identity 完全相同的 `--apply` 可续跑；后者只激活已写入的同一 state，不重写其字节。其他已有 state 或不匹配的 pending intent 一律拒绝。
+
+源码内容映射仍为：
 
 - v1 的 46 个 `steering/inception-*.md` / `construction-*.md` / `operations-*.md` / `product-*.md`
   → v2 的 `core/stages/` 带 frontmatter

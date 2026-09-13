@@ -41,6 +41,9 @@ def main() -> None:
         "event head",
         "完整成员授权 PKI",
         "AIDLC_TRUST_SECRET",
+        "V1_REGENERATION_REQUIRED",
+        "state regenerate-v3",
+        "旧 Markdown 进度不得转成 completed/skipped/approval",
     ):
         assert required in continuity, f"continuity contract missing: {required}"
     assert "自动执行 `park`" in continuity
@@ -57,6 +60,8 @@ def main() -> None:
         "同一 actor",
         "有限期 receipt",
         "JOIN 不自动夺取 claim",
+        "state regenerate-v3",
+        "workflow_regenerated.progress_imported",
     ):
         assert required in protocol, f"continuity protocol missing: {required}"
 

@@ -12,6 +12,7 @@ import {
 } from "crypto";
 import {
   closeSync,
+  constants,
   existsSync,
   fsyncSync,
   lstatSync,
@@ -50,7 +51,14 @@ export interface EnrollmentRecord extends Record<string, unknown> {
   trust_mode?: "device-signature-v1";
   event_head_hash?: string;
   device_key_id?: string;
+  initialization_kind?: "workflow_initialized" | "workflow_regenerated";
+  initialization_digest?: string;
   integrity: IntegrityEnvelope;
+}
+
+export interface TeamInitializationBinding {
+  kind: "workflow_initialized" | "workflow_regenerated";
+  digest: string;
 }
 
 interface DeviceSigningKeyFile {
@@ -109,6 +117,16 @@ function deviceKeyPath(): string {
   return resolve(trustRootPath(), "device-signing-key.json");
 }
 
+function fsyncDirectory(path: string): void {
+  if (process.platform === "win32") return;
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_DIRECTORY || 0));
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function writeAtomic(path: string, content: string, mode = 0o600): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.tmp-${process.pid}-${Date.now()}-${randomBytes(6).toString("hex")}`;
@@ -120,6 +138,7 @@ function writeAtomic(path: string, content: string, mode = 0o600): void {
     closeSync(fd);
     fd = undefined;
     renameSync(temporary, path);
+    fsyncDirectory(dirname(path));
   } finally {
     if (fd !== undefined) closeSync(fd);
     if (existsSync(temporary)) unlinkSync(temporary);
@@ -368,6 +387,15 @@ function validatedEnrollment(projectRoot: string, value: unknown): EnrollmentRec
   const { root } = projectIdentity(projectRoot);
   const teamMode = value.trust_mode === "device-signature-v1";
   const integrity = isRecord(value.integrity) ? value.integrity : {};
+  const hasInitializationKind = value.initialization_kind !== undefined;
+  const hasInitializationDigest = value.initialization_digest !== undefined;
+  const initializationBindingValid = !hasInitializationKind && !hasInitializationDigest
+    || (hasInitializationKind
+      && hasInitializationDigest
+      && teamMode
+      && value.status === "pending"
+      && (value.initialization_kind === "workflow_initialized" || value.initialization_kind === "workflow_regenerated")
+      && DIGEST_PATTERN.test(String(value.initialization_digest)));
   if (
     value.schema_version !== 1 ||
     value.project_root !== root ||
@@ -376,6 +404,7 @@ function validatedEnrollment(projectRoot: string, value: unknown): EnrollmentRec
     (value.recovery_id !== undefined &&
       (value.status !== "pending" || typeof value.recovery_id !== "string" || value.recovery_id.trim().length === 0)) ||
     (value.trust_mode !== undefined && !teamMode) ||
+    !initializationBindingValid ||
     (teamMode && (!DIGEST_PATTERN.test(String(value.event_head_hash || ""))
       || typeof value.device_key_id !== "string"
       || value.device_key_id !== integrity.key_id
@@ -415,9 +444,14 @@ export function createTeamEnrollmentRecord(
   eventHeadHash: string,
   status: "pending" | "active" = "active",
   enrolledAt = new Date().toISOString(),
+  initialization?: TeamInitializationBinding,
 ): EnrollmentRecord {
   if (!workflowId.trim()) throw new Error("workflow ID must be non-empty");
   if (!DIGEST_PATTERN.test(eventHeadHash)) throw new Error("team enrollment event head must be a SHA-256 digest");
+  if (initialization && status !== "pending") throw new Error("initialization binding is only allowed on pending team enrollment");
+  if (initialization && !DIGEST_PATTERN.test(initialization.digest)) {
+    throw new Error("team enrollment initialization digest must be a SHA-256 digest");
+  }
   const { root } = projectIdentity(projectRoot);
   const unsigned: Record<string, unknown> = {
     schema_version: 1,
@@ -428,6 +462,10 @@ export function createTeamEnrollmentRecord(
     trust_mode: "device-signature-v1",
     event_head_hash: eventHeadHash.toLowerCase(),
     device_key_id: deviceSigningKeyId(),
+    ...(initialization ? {
+      initialization_kind: initialization.kind,
+      initialization_digest: initialization.digest.toLowerCase(),
+    } : {}),
   };
   return { ...unsigned, integrity: signTeamRecord(unsigned) } as EnrollmentRecord;
 }
@@ -454,8 +492,12 @@ export function registerTeamEnrollment(
   workflowId: string,
   eventHeadHash: string,
   status: "pending" | "active" = "active",
+  initialization?: TeamInitializationBinding,
 ): void {
-  writeEnrollmentRecord(projectRoot, createTeamEnrollmentRecord(projectRoot, workflowId, eventHeadHash, status));
+  writeEnrollmentRecord(
+    projectRoot,
+    createTeamEnrollmentRecord(projectRoot, workflowId, eventHeadHash, status, new Date().toISOString(), initialization),
+  );
 }
 
 export function readEnrollment(projectRoot: string): EnrollmentRecord | null {

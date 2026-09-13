@@ -1313,6 +1313,7 @@ Usage:
 Commands:
   orchestrate <next|report|park> [flags]  Run the schema-aware workflow engine
   state migrate-v3 [flags]               Dry-run or atomically apply controlled v2→v3 migration; --repair may rebuild a fresh migration-only v3 state
+  state regenerate-v3 [flags]            Dry-run or atomically create a fresh v3 state from a fingerprinted V1 docs/aidlc/state.md
   recover <inspect|re-enroll> [flags]     Inspect or repair a proven parked trust chain
   approve --stage <slug> --instance <id> [--request]  Show exact conversation confirmation; TTY remains optional
   evidence run --stage <slug> [--instance <id>] [flags]  Produce controlled signed evidence
@@ -1362,6 +1363,10 @@ Approval Provider boundary:
 Recovery and migration safety:
   state migrate-v3 is dry-run unless --apply is present and requires explicit
   --actor-id, --device-id, and --client-id. It never accepts secret arguments.
+  state regenerate-v3 is the V1 Markdown bridge. It requires an explicit scope and
+  actor/device/client identity, fingerprints a regular in-project docs/aidlc/state.md,
+  and refuses to overwrite any machine state. --apply creates a fresh signed v3 event
+  chain and enrollment atomically; unsigned V1 completion claims are not imported.
   recover re-enroll is dry-run unless --apply is present. Apply requires a parked state,
   old-key proof from AIDLC_RECOVERY_SECRET or AIDLC_RECOVERY_KEY_FILE, the original signed
   enrollment from AIDLC_RECOVERY_ENROLLMENT_FILE, exact workflow/state/key/enrollment/root
@@ -1393,6 +1398,10 @@ Examples:
     --actor-id actor:alice --device-id device:new-laptop --client-id client:session-2 \
     --migration-claim-recovery-confirmation-stdin
   loeyae-aidlc state migrate-v3 --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+  loeyae-aidlc state regenerate-v3 --scope feature --source-version 1.37.5 \
+    --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+  loeyae-aidlc state regenerate-v3 --scope feature --source-version 1.37.5 --apply \
+    --actor-id actor:alice --device-id device:laptop --client-id client:session-1
   loeyae-aidlc recover inspect
   loeyae-aidlc recover re-enroll
   loeyae-aidlc approve --stage application-design --instance application-design@module:module-a --request
@@ -1428,8 +1437,15 @@ function main(): void {
       break;
     }
     case "state":
-      if (rest[0] !== "migrate-v3") throw new Error("usage: loeyae-aidlc state migrate-v3 [--repair] [--apply] --actor-id <id> --device-id <id> --client-id <id>");
-      run("core/tools/aidlc-state-v3-migrate.ts", rest.slice(1));
+      if (rest[0] === "migrate-v3") {
+        run("core/tools/aidlc-state-v3-migrate.ts", rest.slice(1));
+      } else if (rest[0] === "regenerate-v3") {
+        run("core/tools/aidlc-state-v3-regenerate.ts", rest.slice(1));
+      } else {
+        throw new Error(
+          "usage: loeyae-aidlc state <migrate-v3|regenerate-v3> [options]; run 'loeyae-aidlc help' for details",
+        );
+      }
       break;
     case "recover": runInteractive("core/tools/aidlc-recover.ts", rest); break;
     case "approve": runInteractive("core/tools/aidlc-approve.ts", rest); break;

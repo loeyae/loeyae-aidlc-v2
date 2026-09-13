@@ -226,6 +226,8 @@ print("route-config=", json.dumps(route_config, sort_keys=True))
 
 
 def run_checker(project: str, sensor: str, module_id: str = "", unit_id: str = "") -> subprocess.CompletedProcess[str]:
+    if not os.path.exists(os.path.join(project, "docs", "aidlc", "aidlc-state.json")):
+        write_signed_state(project)
     env = checker_environment(project)
     if module_id:
         env["AIDLC_ACTIVE_MODULE"] = module_id

@@ -21,6 +21,7 @@
 | 冻结整个工作流 | `loeyae-aidlc orchestrate park` |
 | 恢复冻结工作流 | `loeyae-aidlc orchestrate next --resume` |
 | 预演 schema v2→v3 迁移 | `loeyae-aidlc state migrate-v3 --actor-id <actor> --device-id <device> --client-id <client>` |
+| 预演 V1 `state.md`→新 schema v3 | `loeyae-aidlc state regenerate-v3 --scope <scope> --actor-id <actor> --device-id <device> --client-id <client>` |
 | 生成构建测试证据 | `loeyae-aidlc evidence run --stage build-and-test` |
 | 运行内置语义检查 | `loeyae-aidlc check --sensor <name>` |
 | 导出 Markdown 为 Word | `loeyae-aidlc export md <file.md> --to docx` |
@@ -542,6 +543,31 @@ loeyae-aidlc orchestrate continue <token>
 
 `continue` 是兼容旧 steering chain 的内部传输命令，只确认 token 并提示 Agent 直接加载 stage 文件。普通用户和自动化脚本不应依赖它推进工作流。
 
+### 5.6.1 V1 `state.md`→schema v3 再生成
+
+V1 业务项目只有未签名的 `docs/aidlc/state.md`，没有可验证的 machine state 时，使用独立 regeneration 入口。命令不会把 Markdown 中的完成、跳过或审批文字升级为受信事件；它只建立带 V1 来源指纹的新 V3 信任根，随后从当前门禁重新执行：
+
+```bash
+# 默认 dry-run，不创建 state、enrollment 或 device key
+loeyae-aidlc state regenerate-v3 --scope feature --source-version 1.37.5 \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+
+# 审阅 source_path/source_sha256/legacy_hints/workflow_id 后显式应用
+loeyae-aidlc state regenerate-v3 --scope feature --source-version 1.37.5 --apply \
+  --actor-id actor:alice --device-id device:laptop --client-id client:session-1
+```
+
+参数与行为：
+
+- `--scope` 和 actor/device/client 必填；工具不从自由文本猜测 V3 scope。
+- `--source <path>` 默认 `docs/aidlc/state.md`；来源必须位于项目根内、逐段非 symlink、有效 UTF-8、≤ 2 MiB，并具有 V1 状态标题、项目信息和进度区块。
+- `--source-version <version>` 可选，只作为签名来源元数据；不参与阶段完成判断。
+- `--with-prd` 是显式 V3 初始化选择，只允许完整 scope；不会根据旧 Markdown 自动选择。
+- dry-run 不写项目或 trust store，并执行与 apply 相同的无副作用 feature flag、identity、来源 schema 和目标目录安全校验。`--apply` 使用带 PID/inode 所有权的 state lock、绑定初始化 intent 的 pending enrollment、fsync 临时文件/目录和 no-replace state 提交创建 revision 1 的 schema v3。
+- 首个 `workflow_regenerated` event 记录来源相对路径、SHA-256、字节数、旧状态模式、可选包版本、旧提示和操作者 identity；`progress_imported` 永远为 `false`。
+- 原 `state.md` 字节不修改。存在任意 `aidlc-state.json` 时直接拒绝覆盖：schema v2 必须使用 `state migrate-v3`，schema v3 使用 continuity；仅允许完成已经持久化且 intent 完全匹配的 pending regeneration 初始化。
+- workflow ID 由 canonical project root、来源摘要、scope 和显式选项确定。pending enrollment 另行签名绑定 initialization kind/digest、设备 key、来源、scope、选项和 actor/device/client；在 enrollment 后或 state 提交后中断时，只有相同参数与同一设备可安全续跑。state 已写入的续跑只激活 enrollment，不重写 state。
+
 ### 5.7 schema v2→v3 受控迁移
 
 已有 schema v2 workflow 不会自动升级。迁移要求显式绑定 compatibility holder 的 actor/device/client：
@@ -574,7 +600,14 @@ loeyae-aidlc state migrate-v3 --repair --apply \
 
 升级前已是 schema v3 但仍使用 HMAC 的 state，不走下述 v2 re-enroll：能验证旧 key 的原受信客户端第一次打开时会保留 workflow/event 业务字段、重建 previous hash，并将 checkpoint/event chain 转为本机 Ed25519 device signature；完全丢失旧 key 时仍 fail-closed。旧 HMAC Git coordination log 在原受信客户端第一次**成功 mutation** 中通过远端 CAS 原子重签整链，活动旧 receipt 可由该客户端续租并换取新 Ed25519 receipt；无旧 key 的新设备在迁移前会收到明确拒绝。旧 HMAC Evidence 不自动批量重签，门禁需要时必须由受控 Producer 重新生成。
 
-以下 `recover` 流程仅用于 schema v2/HMAC legacy 信任链恢复，不是 v3 新设备加入流程。v3 新设备必须使用 5.3 的 `team-enrollment-confirmation`，不得用 recovery 绕过 event-head 绑定。
+`recover` 的 v2/v3 行为矩阵如下：
+
+| State | `recover inspect` | `recover re-enroll` | 正确后续路径 |
+|---|---|---|---|
+| schema v2 / HMAC | 只读校验 state、活动 enrollment、active/source key mismatch | 支持既有 parked + source proof + 真人 TTY 的受控 HMAC re-enroll | re-enroll 完成后重新运行正式 loader |
+| schema v3 / device Ed25519 | 只读校验 checkpoint signature、全部 event signature、event chain、event head；有本机 enrollment 时额外校验 workflow 和 accepted head，缺 enrollment 时只做公开签名验证 | **不支持并明确 fail-closed**；不会读取 recovery secret、重签历史、覆盖 event chain 或恢复 receipt | 新设备运行 `orchestrate next` 完成 `JOIN`；migration compatibility lock 仅同一 actor 独立完成 `TAKEOVER`；随后使用 `aidlc-continuity` |
+
+因此，下述 `re-enroll` 流程仅用于 schema v2/HMAC legacy 信任链恢复。schema v3 新设备不得用 recovery 绕过 event-head 绑定，migration claim lock 也不得由 recovery 接管。`recover inspect` 对两种 schema 都是只读操作，不推进 revision、不追加 event、不更新 accepted head。
 
 ### 5.9 受控信任链恢复：`recover`
 
@@ -588,7 +621,7 @@ loeyae-aidlc recover inspect
 loeyae-aidlc recover re-enroll
 ```
 
-`inspect` 报告 state/enrollment workflow ID、key ID、SHA-256、活动 key 验证结果及 mismatch；不输出 secret 或完整签名。如果已设置 recovery key，它还报告旧签名是否验证通过。`re-enroll` 则必须取得旧签名的密码学证明。只允许通过环境变量提供，secret 永远不能放进 CLI 参数：
+`inspect` 会先按 `schema_version` 使用统一 loader 分流。v2 输出 state/enrollment workflow ID、key ID、SHA-256、活动 key 验证结果及 mismatch；如果已设置 recovery key，还报告旧签名是否验证通过。v3 不读取或要求 `AIDLC_TRUST_SECRET` / recovery key，只输出签名算法和 key ID、state SHA、revision、event 数量、event head、公开签名/事件链验证结果，以及本机 enrollment 的 accepted-head 结果；不输出 secret、private key、receipt 或完整签名。`re-enroll` 只接受 schema v2，并必须取得旧签名的密码学证明。只允许通过环境变量提供，secret 永远不能放进 CLI 参数：
 
 ```bash
 # 原工作流由 AIDLC_TRUST_SECRET 签名时

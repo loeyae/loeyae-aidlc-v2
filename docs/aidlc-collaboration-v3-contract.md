@@ -132,7 +132,7 @@ ready/claimed/in_progress -> skipped 仅允许由确定性 condition 或受控�
 
 协调与 workflow 历史采用签名 append-only 事件，至少覆盖：
 
-- `workflow_initialized` / `workflow_migrated`
+- `workflow_initialized` / `workflow_regenerated` / `workflow_migrated`
 - `workflow_frozen` / `workflow_resumed` / `workflow_completed`
 - `instance_registered` / `instance_ready` / `instance_skipped`
 - `instance_claimed`
@@ -146,7 +146,9 @@ ready/claimed/in_progress -> skipped 仅允许由确定性 condition 或受控�
 
 确定性 reducer 从有序事件生成 materialized snapshot。相同事件序列必须产生字节语义等价的状态投影；未知事件类型、非法转换、签名错误或序号断裂必须 fail-closed。
 
-## Legacy HMAC、v2 兼容与迁移
+## Legacy HMAC、V1/V2 兼容与迁移
+
+V1 `docs/aidlc/state.md` 是未签名的人类账本，不具备 V2 machine state 的迁移证明。`state regenerate-v3` 仅在不存在任何机器 state 时，从项目内常规 UTF-8 Markdown 的 SHA-256 来源指纹创建 `workflow_regenerated` bootstrap event；唯一的已有-state 例外是完成已经 no-replace 提交、且与本机签名 pending initialization intent 完全匹配的同一事务。scope 与 actor/device/client 必须显式提供，`progress_imported` 固定为 `false`。dry-run 执行完整无副作用校验且不写项目或 trust store；`--apply` 通过逐段安全目标目录、PID/inode owner lock、绑定 kind/digest/device/identity 的 pending enrollment、文件与目录 fsync 以及 no-replace state 提交创建空进度 Ed25519 V3。enrollment 后或 state 提交后的中断只允许同一参数、同一设备续跑，已提交 state 不重写。旧文档不修改，越界/symlink/未知格式/并发 state、不同 intent/device pending 或其他 schema v2/v3 state 一律 fail-closed；schema v2 仍使用下列无损迁移路径。
 
 1. 新 workflow 默认创建 schema v3 与 `device-signature-v1` enrollment；仅显式设置 `AIDLC_COLLABORATION_V3=0` 时创建 schema v2 兼容 workflow。
 2. 已存在的 schema v2 state 始终分流到旧单游标引擎，不因升级或环境默认值自动迁移。

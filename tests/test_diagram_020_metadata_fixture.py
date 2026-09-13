@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import tempfile
 
+from semantic_checker_fixture import TSX, checker_environment, write_signed_checker_state
+
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 FIXTURE_ROOT = os.path.join(REPO_ROOT, "tests", "fixtures", "diagram-020")
 ASSET_DIR = os.path.join("docs", "草稿", "方案设计", "zhangyi", "assets")
@@ -22,8 +24,9 @@ def load_json(root: str, relative_path: str) -> dict:
 
 def run_checker(project: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", CHECKER, "--sensor", "diagram-contract"],
+        ["node", TSX, CHECKER, "--sensor", "diagram-contract"],
         cwd=project,
+        env=checker_environment(project),
         capture_output=True,
         text=True,
     )
@@ -70,6 +73,7 @@ def test_diagram_020_raw_metadata_fails_closed_in_source_checker() -> None:
     project = tempfile.mkdtemp(prefix="aidlc-diagram-020-metadata-")
     try:
         shutil.copytree(FIXTURE_ROOT, project, dirs_exist_ok=True)
+        write_signed_checker_state(project)
         result = run_checker(project)
         assert result.returncode != 0
         assert "diagram diagram-020 canvas is invalid" in result.stderr

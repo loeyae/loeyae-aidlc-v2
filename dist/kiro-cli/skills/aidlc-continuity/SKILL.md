@@ -19,7 +19,8 @@ triggers: 继续上次工作, 继续上次的工作, 接手当前项目, 查看�
    ```
 
 2. 根据结果处理：
-   - 无 workflow：返回 `NO_WORKFLOW`，提示用户明确启动范围；
+   - 无 machine workflow 且存在可识别的 V1 `docs/aidlc/state.md`：返回 `V1_REGENERATION_REQUIRED`，展示 `state regenerate-v3 --scope <scope> --actor-id ... --device-id ... --client-id ...` 的 dry-run；scope 必须由用户明确选择。审阅来源 SHA-256 和旧提示后才能加 `--apply`。旧 Markdown 进度不得转成 completed/skipped/approval，生成后从当前门禁重新执行；
+   - 无 workflow 且不存在 V1 状态：返回 `NO_WORKFLOW`，提示用户明确启动范围；
    - `ask_type: "team-enrollment-confirmation"`：展示 directive 的完整随机 `confirmation_phrase` 和过期时间，明确要求用户下一条消息只输入该短语，然后**结束当前回合**。收到下一条真实用户消息后，仅在全文精确匹配时构造 strict `aidlc.team.enrollment.confirmation` envelope，通过 `orchestrate next ... --team-enrollment-confirmation-stdin` 提交；不得代填、近似匹配、同回合确认或改走 recovery；
    - `ask_type: "migration-claim-recovery-confirmation"`：这是 v2→v3 活动实例留下的无 receipt 永久 compatibility lock。确认当前调用使用与旧 claim 相同的 `actor_id`，展示完整 `TAKEOVER ...` 和过期时间后**结束当前回合**。用户下一条消息全文精确匹配时，构造 strict `aidlc.migration-claim.recovery.confirmation` envelope，通过 `orchestrate next --instance <id> ... --migration-claim-recovery-confirmation-stdin` 提交。成功后只使用返回的新 device/client receipt；不得复用 JOIN、转发旧 receipt 或调用 `recover re-enroll`；
    - `migration_locked_instances` 非空但尚未返回 ask：使用同一 actor 的稳定 identity 执行定向 `next --instance <id>`，由引擎创建上述 TAKEOVER request；不同 actor 不得强制接管；
@@ -60,6 +61,7 @@ triggers: 继续上次工作, 继续上次的工作, 接手当前项目, 查看�
 - 代填 team enrollment 或 migration claim recovery 确认语、在展示短语的同一回合提交、复制其他设备 private key、转发旧 claim receipt 或要求团队共享 `AIDLC_TRUST_SECRET`；
 - 用 JOIN 自动夺取 claim、用 `recover re-enroll` 处理 v3 migration lock，或让不同 actor 仅凭 enrollment/TAKEOVER 接管；
 - 宣称 schema v2 已支持多人并行认领；
+- 将 V1 `state.md` 中的 completed/skipped/approval 文本直接写成 V3 受信事件，或在已有机器 state 时运行 regeneration 覆盖；
 - 自动执行 `recover re-enroll --apply`；
 - 读取、索要或输出 trust/recovery secret；
 - 在状态校验失败后继续执行 Stage。
@@ -73,6 +75,7 @@ triggers: 继续上次工作, 继续上次的工作, 接手当前项目, 查看�
 - `READY_TO_CONTINUE`：已验证 running workflow 并取得 directive；
 - `FROZEN`：workflow parked，等待用户明确恢复；
 - `WORKFLOW_DONE`：workflow 已完成；
-- `NO_WORKFLOW`：当前目录没有 workflow；
+- `V1_REGENERATION_REQUIRED`：没有机器 state，但发现 V1 `state.md`；已提供只读 dry-run，等待用户确认 scope 和 `--apply`；
+- `NO_WORKFLOW`：当前目录没有 workflow 或可识别的 V1 状态；
 - `TRUST_BLOCKED`：信任链失败，只附 `recover inspect` 的脱敏诊断；
 - `BLOCKED`：canonical 产物、依赖或门禁阻断。
