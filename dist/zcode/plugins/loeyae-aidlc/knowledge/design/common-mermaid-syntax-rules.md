@@ -40,6 +40,15 @@ flowchart TD
 - 默认不使用 HTML 标签、click、动画或外部资源。
 - Mermaid frontmatter 和初始化 directive 可在目标 Mermaid 版本支持时使用。
 
+### Flowchart 稳定 edge ID 与边级 curve
+
+- 需要单独路由的边，在连接符前声明稳定 edge ID：`edgeId@-->`；带标签时使用 `edgeId@-->|"标签"| target`。edge ID 必须以 ASCII 字母开头，仅包含字母、数字和下划线，并在同一 fenced block 内唯一。
+- edge ID 一旦用于已有图的路由调整，不得因节点重排、标签修改或重新渲染而改名；无关边不应为了编号连续而重命名。
+- 边级 curve 使用独立配置语句，紧邻同一 fenced block 的边定义，例如：`mbBack@{ curve: stepBefore }`。它只作用于同 ID 的边，不等价于全局 `flowchart.curve`。
+- `stepBefore`、`stepAfter` 和 `linear` 都必须按当前目标 Mermaid 版本解析并实际渲染验证；配置名称本身不能作为路径、拐点或端口方向的断言。
+- 单条边修复不得通过全局 `%%{init: ...}%%` curve、整图方向切换、隐形连线、透明图片节点或渲染后 SVG 坐标覆盖实现；版本敏感遗留语法必须在相邻说明中标明例外范围。
+- 边级属性、标签和节点语义必须留在正式 Markdown fenced block 中；不得把路由事实迁移到 SVG、sidecar、expected contract 或 Provider Request。
+
 ## Sequence Diagram
 
 安全骨架：

@@ -14,6 +14,14 @@
 4. 不生成 `.svg`、`.diagram.json`、expected contract 或 Provider Request 作为 Mermaid 模式的伴随资产；
 5. 关键业务事实在正文中可追溯，图表渲染失败不会使唯一事实丢失。
 
+### Mermaid 已有图优化与直接渲染验收
+
+- 优化已有 Mermaid 时必须保持节点、边、图表方向、分支条件和业务语义不变，只调整明确受影响的连线路由；单条边使用稳定 edge ID 和边级 curve，不得改全局 curve、整图 `TD`/`LR` 或无关节点。
+- 回流边优先走主体外侧的正交最短可读通道，禁止穿越节点、文字、标签、箭头或无关连线；目标箭头前最后一段必须按目标连接面法线水平或垂直进入。
+- `stepBefore`、`stepAfter`、`linear` 只能作为候选，必须检查正式 fenced block 的实际输出；语法解析通过不等于视觉通过。
+- 涉及回流、端口方向或正交路径时，从正式 Markdown fenced block 直接渲染 PNG，并检查末段方向、箭头、拐点、碰撞、交叉、标签和裁切。禁止以写死 SVG 坐标的 `themeCSS`、`nth-child` 偏移、透明图片节点、不可见连线或渲染后手工改图替代。
+- 无法执行真实渲染时，必须将目标视觉/几何状态标为 `UNVERIFIED`，不得仅凭源码或 parser 声称通过。
+
 ## SVG 图表写入前验证
 
 创建或修改 SVG 源或图表资产前，必须加载 `common-diagram-design-standards.md` 与 `common-svg-diagram-standards.md`，并确认：
