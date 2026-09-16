@@ -282,7 +282,7 @@ sensors: [traceability]
 > 🔧 **请求修改** - 根据审查结果要求修改需求
 > 🔄 **重新验证** - 对修改后的需求重新执行 5 维度验证（标准+全面深度时可用）
 > ✅ **确认并继续** - 确认需求，进入**交叉验证（需求审查）**
-> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
+> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时先验证签名 state 并读取 `docs/aidlc/handoff.md`。
 
 ---
 

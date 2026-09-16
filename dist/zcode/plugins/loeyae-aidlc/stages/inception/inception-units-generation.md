@@ -370,7 +370,7 @@ condition: has_unit_generation_needs
 >
 > 🔧 **请求修改** - 要求修改单元生成
 > ✅ **确认并继续** - 确认单元，进入 **CONSTRUCTION 阶段**
-> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
+> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时先验证签名 state 并读取 `docs/aidlc/handoff.md`。
 ```
 
 **团队协作模式的完成消息**：
@@ -394,7 +394,7 @@ condition: has_unit_generation_needs
 >
 > 🔧 **请求修改** - 要求修改单元生成
 > ✅ **确认并继续** - 确认单元，进入 **工作流规划**
-> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
+> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时先验证签名 state 并读取 `docs/aidlc/handoff.md`。
 >
 > **团队协作提示**：确认后请将产出物提交到主分支，开发者即可开始认领单元。
 ```

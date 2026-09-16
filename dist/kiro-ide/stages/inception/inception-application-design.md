@@ -242,7 +242,7 @@ approval: block
 > [如果单元生成被跳过：]
 > 📝 **添加单元生成** - 选择包含**单元生成**步骤（当前已跳过）
 > ✅ **确认并继续** - 确认设计，进入**[单元生成/CONSTRUCTION 阶段]**
-> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
+> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时先验证签名 state 并读取 `docs/aidlc/handoff.md`。
 ```
 
 ### 13. 等待明确审批

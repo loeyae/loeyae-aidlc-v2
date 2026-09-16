@@ -234,6 +234,14 @@ loeyae-aidlc orchestrate park [--reason <text>]
 | `parked` | 整个工作流被冻结；不是普通交接或单实例 release |
 | `done` | 工作流已完成 |
 
+### 5.1.1 下一步交接提示词（schema v3）
+
+schema v3 的 `orchestrate next` 在 `run-stage` JSON directive 中返回 `handoff_prompt`；成功的 `orchestrate report` 同样返回该字段，并在签名 state 成功持久化后更新业务项目的 `docs/aidlc/handoff.md` 的“下一步交接”表。
+
+Agent/宿主应原样展示 `handoff_prompt` 作为可复制的人类接手提示，并读取 `handoff_status`：`updated` 表示派生表已写入，`unverified` 表示提示词可用但 handoff 写入失败，必须展示 `handoff_error`。提示词不包含 claim receipt、private key、`AIDLC_TRUST_SECRET` 或其他敏感凭据，不能替代带 `--instance` 和安全 stdin receipt 的 `report`。
+
+V1/V2 迁移仍使用受控入口：V1 `state.md` 只能通过 `state regenerate-v3` 从空进度重新过当前门禁；schema v2 只能通过显式 `state migrate-v3`，活动实例的无 receipt compatibility lock 还必须由同一 actor 完成 JOIN→TAKEOVER 后取得新 lease。handoff 文本不能直接迁移机器完成状态或 claim 权限。
+
 运行时 choice Stage 还会返回 `choices: string[]` 和 `choice_required: true`。这不是初始化参数；必须向用户展示这些值，并在完成当前 Stage 时用 `--user-input` 精确回传其中一个。
 
 ### 5.2 Scope

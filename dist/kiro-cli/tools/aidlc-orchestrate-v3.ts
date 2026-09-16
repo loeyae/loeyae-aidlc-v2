@@ -66,6 +66,12 @@ import {
   type MigrationClaimRecoveryRequest,
 } from "./aidlc-migration-claim-v3";
 import type { WorkflowState } from "./aidlc-state";
+import {
+  buildHandoffPrompt,
+  updateDerivedHandoff,
+  type HandoffPromptContext,
+  type HandoffStageRef,
+} from "./aidlc-handoff";
 
 const PROJECT_ROOT = realpathSync(process.cwd());
 const VALID_SCOPES = new Set(["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor", "poc"]);
@@ -85,6 +91,49 @@ function legacyV1StateExists(): boolean {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw error;
   }
+}
+
+function handoffStageRef(instance: StageInstance): HandoffStageRef {
+  let moduleName = instance.module_id;
+  let unitName = instance.unit_id;
+  if (instance.module_id) {
+    try {
+      moduleName = readModuleManifest(PROJECT_ROOT).find((module) => module.module_id === instance.module_id)?.name || instance.module_id;
+      if (instance.unit_id) {
+        unitName = readUnitManifest(PROJECT_ROOT, instance.module_id).find((unit) => unit.unit_id === instance.unit_id)?.name || instance.unit_id;
+      }
+    } catch {
+      // Handoff is derived context; stable IDs remain the safe fallback when manifests are unavailable.
+    }
+  }
+  return {
+    stage_instance: instance.instance_id,
+    stage: instance.stage.slug,
+    name: instance.stage.name,
+    phase: instance.stage.phase,
+    axis: instance.axis,
+    ...(instance.module_id ? { module_id: instance.module_id, module_name: moduleName } : {}),
+    ...(instance.unit_id ? { unit_id: instance.unit_id, unit_name: unitName } : {}),
+  };
+}
+
+function handoffContext(
+  state: WorkflowStateV3,
+  compatibility: WorkflowState,
+  completedStage: StageInstance | undefined,
+  nextStage: StageInstance | undefined,
+  readyStages: StageInstance[],
+  mode: HandoffPromptContext["mode"],
+): HandoffPromptContext {
+  return {
+    project_root: PROJECT_ROOT,
+    ...(completedStage ? { completed_stage: handoffStageRef(completedStage) } : {}),
+    ...(nextStage ? { next_stage: handoffStageRef(nextStage) } : {}),
+    ready_stages: readyStages.map(handoffStageRef),
+    ...(architectureChoice(compatibility) ? { architecture_mode: architectureChoice(compatibility) } : {}),
+    collaboration_mode: state.routing_model === "collaboration-v3" ? "团队认领" : undefined,
+    mode,
+  };
 }
 
 function parseFlags(args: string[]): Record<string, string> {
@@ -465,6 +514,14 @@ function directiveFor(
     client_focus: instance.instance_id,
     claim_receipt: receipt,
     report_transport: "Pass claim_receipt through --claim-receipt-stdin; do not substitute chat text.",
+    handoff_prompt: buildHandoffPrompt(handoffContext(
+      state,
+      compatibility,
+      undefined,
+      instanceValue,
+      allInstances.filter((instance) => readyInstances.includes(instance.instance_id)),
+      "before-stage",
+    )),
   };
 }
 
@@ -856,6 +913,24 @@ async function handleReport(args: string[]): Promise<Directive> {
     }
   }
 
+  let handoffResult: ReturnType<typeof updateDerivedHandoff> | undefined;
+  if (result === "completed" || result === "approved") {
+    const after = buildPlan(next, graph);
+    const readyAfter = next.status === "running"
+      ? findReadyInstances(next, after.plans)
+        .map((readyInstance) => after.instances.find((candidate) => candidate.instance_id === readyInstance.stage_instance))
+        .filter((candidate): candidate is StageInstance => Boolean(candidate))
+      : [];
+    handoffResult = updateDerivedHandoff(handoffContext(
+      next,
+      compatibilityState(next, instance, after.instances),
+      instance,
+      readyAfter[0],
+      readyAfter,
+      "after-report",
+    ));
+  }
+
   return {
     kind: "print",
     schema_version: 3,
@@ -863,6 +938,13 @@ async function handleReport(args: string[]): Promise<Directive> {
     stage_instance: instanceId,
     result,
     revision: next.revision,
+    ...(handoffResult
+      ? {
+        handoff_prompt: handoffResult.prompt,
+        handoff_status: handoffResult.status,
+        ...(handoffResult.error ? { handoff_error: handoffResult.error } : {}),
+      }
+      : {}),
     message: next.status === "done"
       ? `🎉 Stage instance ${instanceId} ${result}; all workflow instances are resolved.`
       : result === "revised"

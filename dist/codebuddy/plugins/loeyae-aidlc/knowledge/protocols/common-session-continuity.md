@@ -5,7 +5,7 @@
 ## 状态源边界
 
 - `docs/aidlc/aidlc-state.json` 是唯一机器路由状态。schema v3 由签名 append-only events 归约出 instance map、ready set、claim/lease 和单调 revision，并通过 CAS 原子更新；Agent 和协议文档不得直接编辑。
-- `docs/aidlc/handoff.md` 是从机器状态及协作产物派生的人类交接视图，可记录模块、单元、UI 和 CR 细节，但不能改变实例完成、跳过、审批、assignment、claim、lease 或 ready set。
+- `handoff_prompt` 是由签名 state 和当前 ready set 派生的可复制提示词；Agent 必须原样展示它，但不得把它当作 claim、assignment 或 report 授权。
 - 恢复时先执行 `loeyae-aidlc orchestrate next --status` 验证机器状态，再读取 handoff；两者冲突时立即阻断，以签名机器状态为准并重新生成 handoff。
 - 如果没有机器 state，但存在可识别的 V1 `docs/aidlc/state.md`，不得把它当成签名游标或静默初始化。先运行 `state regenerate-v3 --scope ... --actor-id ... --device-id ... --client-id ...` dry-run，展示来源 SHA-256 和旧提示；用户确认显式 scope 后才加 `--apply`。`workflow_regenerated.progress_imported` 固定为 `false`，旧完成/跳过/审批必须重新通过当前门禁。
 - 如果 `next --status` 返回 `team-enrollment-confirmation` ask，这表示当前设备尚未 enrollment，不是 legacy key mismatch。Agent 展示完整 `JOIN ...` 短语和 TTL 后必须结束当前回合；只在用户下一条真实消息全文精确匹配时通过 strict `--team-enrollment-confirmation-stdin` 提交。不得代填、共享 secret/private key 或改用 recovery。

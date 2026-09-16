@@ -30,6 +30,8 @@ triggers: 继续上次工作, 继续上次的工作, 接手当前项目, 查看�
    - legacy schema v2/HMAC 的签名、key ID、enrollment workflow mismatch：最多运行只读 `loeyae-aidlc recover inspect`，返回 `TRUST_BLOCKED`；正常 v3 新设备加入不得使用 recover。
 3. state 验证成功后，按需读取 `handoff.md`、decision summary 和当前实例 canonical 产物，只补充协作者、决策和未解决问题。
 4. 宣布当前 workflow、稳定 ready set、当前 client focus、Stage instance、module/unit、lease 到期时间和下一动作。
+   - 如果 `next` 或 `report` directive 含 `handoff_prompt`，必须原样展示为 `📋 下一步工作提示词` 可复制代码块；`handoff_status` 为 `unverified` 时同时展示原因。
+   - `handoff_prompt` 只是从签名 state 派生的人类提示，不是路由授权；不得把 claim receipt、private key、trust/recovery secret 放入其中，也不能用它替代 `next/report`。
 5. 执行引擎返回的 directive；不得从 handoff 或聊天猜测下一阶段。
 
 ## 自动 Checkpoint 语义

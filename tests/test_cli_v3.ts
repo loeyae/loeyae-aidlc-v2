@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 import type { ClaimReceiptV3 } from "../core/tools/aidlc-coordination-local-v3";
@@ -67,6 +67,8 @@ try {
   assert.equal(first.stage_instance, "workspace-detection");
   const firstReceipt = first.claim_receipt as ClaimReceiptV3;
   assert.equal(firstReceipt.client_id, "client:session-a");
+  assert.match(String(first.handoff_prompt), /当前待执行|下一步/);
+  assert.doesNotMatch(String(first.handoff_prompt), /claim_receipt|private key|AIDLC_TRUST_SECRET/);
 
   const second = success(collaborativeProject, collaborativeTrust, [
     "orchestrate", "next",
@@ -99,6 +101,10 @@ try {
     "--result", "completed", "--instruction-ack", "workspace-detection", "--claim-receipt-stdin",
   ], JSON.stringify(firstReceipt));
   assert.equal(completed.result, "completed");
+  assert.equal(completed.handoff_status, "updated");
+  assert.match(String(completed.handoff_prompt), /下一步/);
+  assert.ok(existsSync(join(collaborativeProject, "docs", "aidlc", "handoff.md")));
+  assert.match(readFileSync(join(collaborativeProject, "docs", "aidlc", "handoff.md"), "utf8"), /下一步交接/);
 
   const stale = run(collaborativeProject, collaborativeTrust, [
     "orchestrate", "report", "--stage", "workspace-detection", "--instance", "workspace-detection",

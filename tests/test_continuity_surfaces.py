@@ -25,6 +25,10 @@ def main() -> None:
         "actor/device/client",
         "ready set",
         "execution lease",
+        "handoff_prompt",
+        "下一步工作提示词",
+        "handoff_status",
+        "claim receipt",
         "--claim-receipt-stdin",
         "Local Provider",
         "team-enrollment-confirmation",
@@ -48,6 +52,23 @@ def main() -> None:
         assert required in continuity, f"continuity contract missing: {required}"
     assert "自动执行 `park`" in continuity
     assert "recover re-enroll --apply" in continuity
+
+    stale_prompt = "复制 `handoff.md` 中的交接提示词到新对话继续"
+    stale_files = [path for path in (ROOT / "core" / "stages").rglob("*.md") if stale_prompt in path.read_text()]
+    assert not stale_files, f"legacy copy-handoff prompt remains in: {stale_files}"
+
+    collaboration_contract = text(ROOT / "docs" / "aidlc-collaboration-v3-contract.md")
+    for required in (
+        "handoff_prompt",
+        "兼容迁移矩阵",
+        "V1 `docs/aidlc/state.md`",
+        "schema v2 machine state",
+        "schema v3 signed state",
+        "progress_imported",
+        "JOIN 后独立 TAKEOVER",
+        "不能替代 Provider ACK",
+    ):
+        assert required in collaboration_contract, f"v3 migration contract missing: {required}"
 
     protocol = text(
         ROOT / "core" / "knowledge" / "protocols" / "common-session-continuity.md"

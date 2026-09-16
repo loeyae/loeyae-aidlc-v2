@@ -18,15 +18,17 @@ requires: [workspace-detection]
 
 > `docs/aidlc/aidlc-state.json` 是唯一机器状态。本模板只创建或更新 `docs/aidlc/handoff.md` 的人类协作视图；不得直接编辑机器 state，不得用 handoff 覆盖 stage、revision、审批或完成结果。恢复场景不得覆盖已有协作细节。
 
+> v3 的“下一步交接”由成功 `orchestrate report` 自动生成。模板中的提示词只是字段形状示例，不能手工替代 `handoff_prompt` 或修改机器 state。
+
 ```markdown
 # AI-DLC 协作交接视图
 
-- **状态模式版本**：2
+- **状态模式版本**：3（人类派生视图；机器 schema 以 `aidlc-state.json` 为准）
 
 ## 下一步交接
-| 范围 | 更新时间 | 提示词 |
-|------|----------|--------|
-| {项目名} | {ISO时间} | `使用 AI-DLC，继续 {项目名}。请读取 docs/aidlc/handoff.md，从 {下一步骤} 恢复。` |
+| 范围 | Stage 实例 | Module ID | Unit ID | 更新时间 | 提示词 |
+|------|------------|-----------|---------|----------|--------|
+| {范围名} | {stage_instance} | {module-id 或 -} | {unit-id 或 -} | {ISO时间} | `{handoff_prompt}` |
 
 ## 项目信息
 - **项目类型**：{全新项目/存量项目}

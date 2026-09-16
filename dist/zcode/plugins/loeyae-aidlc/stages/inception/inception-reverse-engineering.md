@@ -405,7 +405,7 @@ condition: has_legacy_code
 >
 > 🔧 **请求修改** - 如需修改逆向工程分析结果
 > ✅ **确认并继续** - 确认分析结果，进入**需求分析**
-> 📋 **新 Session 继续** - 复制 `handoff.md` 中的交接提示词到新对话继续
+> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时先验证签名 state 并读取 `docs/aidlc/handoff.md`。
 ```
 
 ## 步骤 14：等待用户确认

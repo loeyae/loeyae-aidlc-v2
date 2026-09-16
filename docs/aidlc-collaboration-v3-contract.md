@@ -160,6 +160,20 @@ V1 `docs/aidlc/state.md` 是未签名的人类账本，不具备 V2 machine stat
 8. v2 recovery/re-enroll 的 parked、旧 key、source enrollment 与真人 TTY 证明要求不会因迁移降低。
 9. 迁移 fixture 必须继续覆盖 round-trip、篡改、序号断裂、中断恢复、跨设备验签与 event-head rollback 拒绝。
 
+## 派生交接视图与兼容迁移矩阵
+
+`handoff.md` 和 `handoff_prompt` 是从签名 state、Stage instance 和 ready set 派生的人类协作视图。`orchestrate next` 在 `run-stage` directive 中返回 `handoff_prompt`；成功 `orchestrate report` 在 state 持久化后更新当前范围的 `## 下一步交接` 行，并返回相同提示词。它们不携带 claim receipt、private key、trust/recovery secret，也不能授权 `report`、改变 Stage 或替代 Provider ACK。
+
+“V1/V2 无缝迁移”在本契约中的含义是：不要求成员手工重写 state，不丢失可验证的 workflow/history/choice 语义，并通过当前 V3 identity、lease 和门禁继续工作；不意味着把未签名的人类文字或失联的旧 claim 静默当作 V3 完成或授权。
+
+| 来源状态 | 唯一入口 | 可保留内容 | 不可直接继承 | V3 结果 |
+|---|---|---|---|---|
+| V1 `docs/aidlc/state.md` | `state regenerate-v3 --scope ...`，先 dry-run，确认后 `--apply` | 来源 SHA-256、项目事实、只读摘要 | completed/skipped/approval、旧游标、旧负责人 | 空进度的签名 V3；从当前门禁重新执行 |
+| schema v2 machine state | `state migrate-v3`，默认 dry-run，`--apply` 才写入 | workflow ID、history、completed/skipped、choice、approval 业务记录 | 活动实例的无 receipt claim 不能直接 report | 同 actor 的 compatibility lock；JOIN 后独立 TAKEOVER 取得新 device/client receipt |
+| schema v3 signed state | `aidlc-continuity` / `orchestrate next` | instance map、ready set、lease、event head、Evidence 语义 | handoff 文本不能覆盖签名 state | 直接恢复或认领当前 ready instance |
+
+V1 regeneration、V2 migration、V3 continuity 都必须由当前编排器返回 directive；禁止通过 handoff、聊天、旧提示词或手工复制 receipt 跨版本迁移机器权限。
+
 ## 3.0.0 启用状态
 
 - 受信审批 UX、每设备 Ed25519 trust、跨回合 team enrollment、event-head 防回滚、continuity Skill、v3 reducer、DAG scheduler、Local/Git/External Provider 契约均已进入 canonical source 和全 harness 分发。

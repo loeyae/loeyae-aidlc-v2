@@ -120,6 +120,9 @@ export interface Directive {
   produces?: string[];
   sensors?: string[];
   message?: string;
+  handoff_prompt?: string;
+  handoff_status?: "updated" | "unverified";
+  handoff_error?: string;
   rules_content?: string[];
   [key: string]: unknown;
 }

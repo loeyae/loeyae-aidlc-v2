@@ -4,7 +4,7 @@
 
 关键词的作用是**发现能力**，不是替代阶段路由、审批、门禁、状态记录或 evidence 协议。能力 Skill 可以独立运行，但仍必须满足自身的输入要求和治理边界。
 
-新 workflow 默认使用 schema v3。继续/接手关键词只会路由到签名 state 检查：实际执行仍要求 actor/device/client identity，由 Coordination Provider ACK claim 后返回 directive；`report` 必须绑定明确 instance 和安全 stdin 中的 receipt。关键词、handoff 和 Slash Command 不能生成 claim receipt；审批关键词只会展示引擎随机确认语，必须等待下一条真实用户消息精确输入后才能批准。`park` 只冻结整个 workflow，不是日常交接步骤。
+新 workflow 默认使用 schema v3。继续/接手关键词只会路由到签名 state 检查：实际执行仍要求 actor/device/client identity，由 Coordination Provider ACK claim 后返回 directive；`next`/成功 `report` 可返回派生的 `handoff_prompt`，并由 report 更新 `docs/aidlc/handoff.md`，但 `report` 必须绑定明确 instance 和安全 stdin 中的 receipt。关键词、handoff_prompt 和 Slash Command 不能生成 claim receipt；审批关键词只会展示引擎随机确认语，必须等待下一条真实用户消息精确输入后才能批准。`park` 只冻结整个 workflow，不是日常交接步骤。
 
 ## 1. 先判断：独立能力还是完整流程
 

@@ -18,6 +18,12 @@ handoff 的活跃记录必须包含 directive/state 中的 `stage_instance`、`m
 
 每个阶段的完成消息模板已内置 `📋 新 Session 继续` 选项（无需额外加载本文件）。
 
+### v3 引擎派生交接
+
+schema v3 的 `orchestrate next` 在 `run-stage` directive 中返回 `handoff_prompt`，成功的 `orchestrate report` 返回同一交接提示，并在签名 state 成功持久化后更新 `docs/aidlc/handoff.md` 的“下一步交接”表。该表和提示词都是人类协作视图，不能改变 state、stage、assignment、claim、lease 或 revision。
+
+Agent 必须把返回的 `handoff_prompt` 原样展示为可复制代码块，并保留 `handoff_status: "unverified"` 与错误原因；不得把 claim receipt、private key、`AIDLC_TRUST_SECRET` 或其他 trust/recovery secret 放入提示词。没有 handoff 写入能力时，提示词仍可作为当前回合的交接文本，但不能声称 handoff 已更新。
+
 ### 2. 写入 handoff.md
 
 **每个阶段完成时，必须同步更新 `handoff.md` 的"下一步交接"表格。**

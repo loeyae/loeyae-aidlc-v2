@@ -38,6 +38,9 @@ Loop:
   4. 重复直到 directive.kind == done
 ```
 
+每次 `next` 或 `report` 返回 `handoff_prompt` 时，必须原样展示为 `📋 下一步工作提示词` 可复制代码块；`handoff_status: "unverified"` 必须连同原因展示。该提示词只供人类接手，不含 claim receipt、private key 或 trust/recovery secret，也不能替代机器 `next/report`。
+
+
 ## Directive 类型
 
 | kind | 动作 |
