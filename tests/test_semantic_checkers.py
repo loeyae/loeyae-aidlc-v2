@@ -20,7 +20,6 @@ SENSORS = [
 ]
 
 SCRATCH_ROOT = os.environ.get("KIROCREW_SCRATCH") or os.environ.get("TMPDIR") or tempfile.gettempdir()
-TRUST_SECRET = "aidlc-semantic-test-secret-at-least-32-bytes"
 
 
 def make_temp(*, prefix: str) -> str:
@@ -28,24 +27,16 @@ def make_temp(*, prefix: str) -> str:
 
 
 def checker_environment(project: str) -> dict:
-    env = os.environ.copy()
-    env["AIDLC_TRUST_SECRET"] = TRUST_SECRET
-    env["AIDLC_TRUST_DIR"] = os.path.join(project, ".aidlc", "test-trust")
-    return env
+    return os.environ.copy()
 
 
-def write_signed_state(project: str) -> None:
-    state_uri = (Path(REPO_ROOT) / "core" / "tools" / "aidlc-state.ts").as_uri()
+def write_checker_state(project: str) -> None:
+    state_uri = (Path(REPO_ROOT) / "core" / "tools" / "aidlc-light-state.ts").as_uri()
     script = f"""
 import {{ createInitialState, saveWorkflowState }} from {json.dumps(state_uri)};
-const state = createInitialState('feature');
-delete state.routing_model;
-delete state.completed_stage_instances;
-delete state.skipped_stage_instances;
-delete state.selected_optional_stages;
+const state = createInitialState('feature', '4.0.0', 'semantic-checker-fixture', [], 'semantic checker fixture');
 state.current_phase = 'construction';
 state.current_stage = 'compact-recovery';
-delete state.current_stage_instance;
 saveWorkflowState(process.cwd(), state);
 """
     result = subprocess.run(
@@ -119,7 +110,7 @@ CSS constraints: spacing, responsive, tokens
     write(project, "docs/aidlc/construction/build-and-test/unit-test-instructions.md", "Unit test instructions with scope and commands. This is complete.\n")
     write(project, ".aidlc/context-compacted", "true\n")
     write(project, "docs/aidlc/handoff.md", "State restored and handoff recorded.\n")
-    write_signed_state(project)
+    write_checker_state(project)
     write(project, "docs/aidlc/ideation/prd.md", """# Overview
 # Goals
 # Features
@@ -226,8 +217,8 @@ print("route-config=", json.dumps(route_config, sort_keys=True))
 
 
 def run_checker(project: str, sensor: str, module_id: str = "", unit_id: str = "") -> subprocess.CompletedProcess[str]:
-    if not os.path.exists(os.path.join(project, "docs", "aidlc", "aidlc-state.json")):
-        write_signed_state(project)
+    if not os.path.exists(os.path.join(project, "aidlc", "active", "aidlc-state.md")):
+        write_checker_state(project)
     env = checker_environment(project)
     if module_id:
         env["AIDLC_ACTIVE_MODULE"] = module_id
@@ -355,7 +346,7 @@ def test_prd_pending_questions_contract() -> None:
         shutil.rmtree(project)
 
 
-def test_checker_rejects_legacy_diagram_without_structured_contract() -> None:
+def test_checker_rejects_incomplete_diagram_without_structured_contract() -> None:
     project = make_temp(prefix="aidlc-semantic-checkers-migration-")
     try:
         fixture(project)
@@ -1008,9 +999,8 @@ def write_module_state(
     current_module: str | None = "module-a",
     current_unit: str | None = None,
 ) -> None:
-    state_path = Path(project) / "docs" / "aidlc" / "aidlc-state.json"
+    state_path = Path(project) / "aidlc" / "active" / "aidlc-state.md"
     state_path.unlink(missing_ok=True)
-    shutil.rmtree(Path(project) / ".aidlc" / "test-trust", ignore_errors=True)
     history = [{
         "stage": "workspace-detection",
         "instance_id": "workspace-detection",
@@ -1035,14 +1025,13 @@ def write_module_state(
     if current_unit:
         instance += f"@unit:{current_unit}"
     phase = "construction" if stage in ("code-review", "implementation-report") else "inception"
-    state_uri = (Path(REPO_ROOT) / "core" / "tools" / "aidlc-state.ts").as_uri()
+    state_uri = (Path(REPO_ROOT) / "core" / "tools" / "aidlc-light-state.ts").as_uri()
     script = f"""
 import {{ createInitialState, saveWorkflowState }} from {json.dumps(state_uri)};
-const state = createInitialState('feature');
+const state = createInitialState('feature', '4.0.0', 'module-semantic-fixture', {json.dumps(["prd-generation"] if with_prd else [])}, 'module semantic checker fixture');
 state.current_phase = {json.dumps(phase)};
 state.current_stage = {json.dumps(stage)};
 state.current_stage_instance = {json.dumps(instance)};
-state.selected_optional_stages = {json.dumps(["prd-generation"] if with_prd else [])};
 state.history = {json.dumps(history)};
 {f"state.current_module = {json.dumps(current_module)};" if current_module else "delete state.current_module;"}
 {f"state.current_unit = {json.dumps(current_unit)};" if current_unit else "delete state.current_unit;"}
@@ -1230,7 +1219,7 @@ def test_inception_consistency_optional_routes() -> None:
     project = make_temp(prefix="aidlc-inception-consistency-")
     try:
         write_module_manifest(project)
-        write(project, "docs/aidlc/modules/module-a/inception/ui-mock/stale.html", "stale HTML must not activate a signed route\n")
+        write(project, "docs/aidlc/modules/module-a/inception/ui-mock/stale.html", "stale HTML must not activate a selected route\n")
         write_cross_validation_inputs(project, "module-a", prd_selected=False, ui_route="skip")
         write_module_state(project, "cross-validation", {"module-a": "skip"})
         skipped = run_checker(project, "inception-consistency", "module-a")
@@ -1251,7 +1240,7 @@ def test_inception_consistency_optional_routes() -> None:
         (Path(project) / "docs/aidlc/ideation/prd.md").unlink()
         missing_prd = run_checker(project, "inception-consistency", "module-a")
         assert missing_prd.returncode != 0
-        assert "signed PRD selection requires" in missing_prd.stderr
+        assert "selected PRD requires" in missing_prd.stderr
 
         write_ui_base(project)
         html_manifest(project)
@@ -1279,7 +1268,7 @@ def test_inception_consistency_optional_routes() -> None:
         shutil.rmtree(project)
 
 
-def test_ui_alignment_uses_signed_route_and_code_traceability() -> None:
+def test_ui_alignment_uses_selected_route_and_code_traceability() -> None:
     project = make_temp(prefix="aidlc-ui-alignment-")
     try:
         write_module_manifest(project)
@@ -1290,7 +1279,7 @@ def test_ui_alignment_uses_signed_route_and_code_traceability() -> None:
         assert not_selected.returncode == 0, not_selected.stderr
         assert json.loads(not_selected.stdout) == {
             "status": "not_applicable",
-            "reason": "signed UI route is not-selected",
+            "reason": "selected UI route is not-selected",
         }
 
         write_module_state(project, "code-review", {"module-a": "html-mock"}, current_unit="unit-a")
@@ -1390,7 +1379,7 @@ if __name__ == "__main__":
     test_checker_fails_closed_when_required_artifact_is_removed()
     test_prd_checker_rejects_noncanonical_artifacts()
     test_prd_pending_questions_contract()
-    test_checker_rejects_legacy_diagram_without_structured_contract()
+    test_checker_rejects_incomplete_diagram_without_structured_contract()
     test_diagram_003_fixed_regression()
     test_structural_group_capacity_and_style_contract_pass()
     test_diagram_geometry_gates_fail_closed()
@@ -1402,6 +1391,6 @@ if __name__ == "__main__":
     test_module_unit_context_isolation()
     test_ui_artifact_consistency_contracts()
     test_inception_consistency_optional_routes()
-    test_ui_alignment_uses_signed_route_and_code_traceability()
+    test_ui_alignment_uses_selected_route_and_code_traceability()
     test_implementation_report_aggregates_selected_artifacts()
     print("semantic checker regression tests passed")

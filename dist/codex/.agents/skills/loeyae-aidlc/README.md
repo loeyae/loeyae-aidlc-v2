@@ -1,23 +1,11 @@
-# Loeyae AI-DLC v2 — Codex
+# Loeyae AI-DLC for Codex
 
-## 安装
-
-全局安装后执行：
+使用明确工作描述启动当前 Markdown workflow：
 
 ```bash
-loeyae-aidlc install --harness codex
+loeyae-aidlc orchestrate next --scope feature --work "实现订单导出重试"
 ```
 
-Skill 会安装到 `~/.agents/skills/loeyae-aidlc/`，并将 Codex 原生 Stop Hook 幂等合并到 `~/.codex/hooks.json`。首次启用或版本更新后，请在 Codex 中通过 `/hooks` 审查并信任该 Hook；未信任时 Codex 会跳过它。
+状态与审计位于 `aidlc/active/aidlc-state.md` 和 `aidlc/active/audit.md`。Agent 调用 `orchestrate next` 获取 directive 并展示 `handoff_prompt`；成员通过 `unit select` 记录分工。
 
-## 使用
-
-在 Codex 新对话中输入：
-
-```
-使用 AI-DLC 开发用户认证模块
-```
-
-引擎通过 `loeyae-aidlc orchestrate next/report/park` 命令驱动；阶段顺序、产物和门禁由 `tools/aidlc-orchestrate.ts`、`stages/` 和编译后的 `tools/data/stage-graph.json` 决定。
-
-`docs/aidlc/aidlc-state.json` 是 schema v3 每设备 Ed25519 签名、workflow ID、append-only event 与 revision/CAS 保护的唯一机器状态；本机 enrollment 记录已接受 event head，`docs/aidlc/handoff.md` 仅为派生人类视图。新设备若收到 `team-enrollment-confirmation` ask，Agent 必须展示完整短语并结束回合，等待下一条精确用户消息经 strict stdin enrollment；不得共享 `AIDLC_TRUST_SECRET` 或复制 private key。Codex Stop Hook 不签发审批 token、不携带 `--instruction-ack`、不生成或修改 Evidence，因此不能自动推进 `approval:block` 或 `instruction_only` stage。
+阶段交付以产物、review、构建、测试和 merge plan 为准。应用设计和部署决策在用户明确批准后以 `--user-input Approve` 报告。

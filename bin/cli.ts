@@ -57,7 +57,7 @@ const OPENCODE_GLOBAL_CONFIG_ROOT = resolve(HOME, ".config/opencode");
 const OPENCODE_GLOBAL_PLUGIN_PATH = resolve(OPENCODE_GLOBAL_CONFIG_ROOT, "plugins/loeyae-aidlc.js");
 const OPENCODE_GLOBAL_ASSET_ROOT = resolve(OPENCODE_GLOBAL_CONFIG_ROOT, "loeyae-aidlc");
 const CODEX_GLOBAL_HOOKS_PATH = resolve(HOME, ".codex/hooks.json");
-const CODEX_HOOK_ID = "loeyae-aidlc-stop-gate-v1";
+const CODEX_HOOK_ID = "loeyae-aidlc-stop-gate";
 const PLUGIN_NAME = "loeyae-aidlc";
 const PLUGIN_MARKETPLACE_NAME = "loeyae-aidlc";
 const HOST_ASSET_ROOT = resolve(HOME, ".config/loeyae-aidlc/host-assets");
@@ -138,27 +138,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function workflowSchemaVersion(projectRoot = process.cwd()): 2 | 3 | undefined {
-  const filename = resolve(projectRoot, "docs/aidlc/aidlc-state.json");
-  if (!existsSync(filename)) return undefined;
-  let value: unknown;
-  try {
-    value = JSON.parse(readFileSync(filename, "utf8"));
-  } catch {
-    throw new Error(`workflow state is not valid JSON: ${filename}`);
-  }
-  if (!isRecord(value) || (value.schema_version !== 2 && value.schema_version !== 3)) {
-    throw new Error(`workflow state has unsupported schema_version: ${filename}`);
-  }
-  return value.schema_version;
-}
-
 function orchestrationScript(): string {
-  const schema = workflowSchemaVersion();
-  if (schema === 2 || (schema === undefined && process.env.AIDLC_COLLABORATION_V3 === "0")) {
-    return "core/tools/aidlc-orchestrate.ts";
-  }
-  return "core/tools/aidlc-orchestrate-v3.ts";
+  return "core/tools/aidlc-orchestrate.ts";
 }
 
 function run(script: string, args: string[], input?: string): never | void {
@@ -529,7 +510,7 @@ function isQoderCnSkillDirectory(target: string): boolean {
     if (!skillStat.isFile() || skillStat.isSymbolicLink() || skillStat.size > 1024 * 1024) return false;
     const skill = readFileSync(skillPath, "utf8");
     return /^---\s*\r?\nname:\s*loeyae-aidlc\s*$/m.test(skill)
-      && skill.includes("Loeyae AI-DLC v2 for Qoder CN IDE / Desktop / CLI")
+      && skill.includes("Markdown state/audit")
       && skill.includes("loeyae-aidlc orchestrate next");
   } catch {
     return false;
@@ -567,7 +548,7 @@ function isLegacyClaudeCatalog(target: string): boolean {
 
 function isLegacyKiroHook(target: string): boolean {
   const hookConfig = readLegacyJson(target);
-  if (!hookConfig || hookConfig.version !== "v1" || !Array.isArray(hookConfig.hooks)) return false;
+  if (!hookConfig || hookConfig.version !== "1" || !Array.isArray(hookConfig.hooks)) return false;
   return hookConfig.hooks.some((hook) => isRecord(hook)
     && isRecord(hook.action)
     && hook.action.command === "loeyae-aidlc hook --format kiro");
@@ -627,11 +608,11 @@ function createClaudeCatalogSource(): { root: string; file: string } {
   const marketplace = {
     name: CLAUDE_MARKETPLACE_NAME,
     owner: { name: "Loeyae Team", url: "https://github.com/loeyae" },
-    description: "Loeyae AI-DLC v2 plugin marketplace",
+    description: "AWS-style lightweight AI-DLC plugin marketplace",
     plugins: [{
       name: "loeyae-aidlc",
       source: "./plugins/loeyae-aidlc",
-      description: "Loeyae AI-DLC v2 engine-driven lifecycle with enforced stage gates.",
+      description: "AWS-style lightweight AI-DLC workflow with Markdown state/audit, unit selection, review, build and test.",
       version: PKG.version,
     }],
   };
@@ -1305,131 +1286,46 @@ function deploy(args: string[], operation: "install" | "uninstall"): void {
 
 function help(): void {
   console.log(`
-loeyae-aidlc v${PKG.version} — AI-DLC Engine CLI
+loeyae-aidlc v${PKG.version} — AWS-style Lightweight AI-DLC
 
 Usage:
   loeyae-aidlc <command> [options]
 
-Commands:
-  orchestrate <next|report|park> [flags]  Run the schema-aware workflow engine
-  state migrate-v3 [flags]               Dry-run or atomically apply controlled v2→v3 migration; --repair may rebuild a fresh migration-only v3 state
-  state regenerate-v3 [flags]            Dry-run or atomically create a fresh v3 state from a fingerprinted V1 docs/aidlc/state.md
-  recover <inspect|re-enroll> [flags]     Inspect or repair a proven parked trust chain
-  approve --stage <slug> --instance <id> [--request]  Show exact conversation confirmation; TTY remains optional
-  evidence run --stage <slug> [--instance <id>] [flags]  Produce controlled signed evidence
-  attest/attestation resolve [flags]      Resolve read-only commit/diff unit attestations
-  runtime <summary|doctor> [flags]        Inspect a derived, non-authoritative schema v3 runtime view
-  extension <validate|compose|status> ... Validate or compose a restricted additive extension
-  worktree <prepare|verify|merge-plan> ... Prepare or verify a receipt-bound v3 worktree
-  check --sensor <name>                   Run a deterministic semantic checker
-  diagram-provider run [options]          Run Chrome DevTools diagram validation
-  export <md|svg> <file> --to <format>    Export Markdown to DOCX/PDF or SVG to PNG
-  docx <inspect|beautify|validate> [args]  Inspect or conservatively restyle DOCX files
-  hook --format <platform>                Enforce the active AI-DLC stage gate
-  install [options]                       Transactionally deploy installer-owned assets
-  uninstall [options]                     Remove only verified installer-owned assets
-  build --harness <name> | --all          Compile dist output
-  graph <compile|validate>                Stage graph operations
-  scope-table                             Show default executable stage counts by scope
-  version                                 Print version
-  help                                    Show this message
+Workflow:
+  orchestrate next --scope <scope> --work <description>  Start a new Markdown workflow
+  orchestrate next                                      Read the next directive
+  orchestrate report --stage <slug> --result completed  Report a completed stage
+  orchestrate park                                      Park the active Markdown workflow
+  unit list|select [flags]                              List or self-select a development unit
+  runtime summary|doctor                                Inspect the active Markdown workflow
+  worktree prepare|verify|merge-plan [flags]            Prepare or verify a member worktree
 
-Install/uninstall options:
-  --harness <name>  Target platform (default: kiro-crew)
-  --target <path>   Dedicated bundle directory; Claude interprets it as project root
-  --project <path>  Kiro project Hook root, or CodeBuddy/Qoder project plugin scope
-  --all             Install detected hosts, or uninstall installer-owned global/user installs
-  --list            Show available platforms (install only)
-  --migrate-legacy  Preserve and replace recognized pre-manifest installs (install only)
+Quality and utilities:
+  evidence run --stage <slug> [flags]       Produce controlled build/test/check evidence
+  attest resolve [flags]                     Read-only commit/diff attribution
+  extension validate|compose|status [flags] Restricted additive extension metadata
+  check --sensor <name>                      Run a deterministic semantic checker
+  diagram-provider run [options]            Run diagram validation
+  export <md|svg> <file> --to <format>      Export Markdown or SVG
+  docx <inspect|beautify|validate> [args]   Inspect or conservatively restyle DOCX
 
-Collaboration v3 trust:
-  Schema v3 automatically creates a private Ed25519 device key in the persistent
-  user trust root (~/.config/loeyae-aidlc/trust by default). AIDLC_TRUST_DIR is only
-  an override for isolated tests or hosts without a stable HOME. Team members do not
-  configure or share AIDLC_TRUST_SECRET, and private keys are never written to the
-  project or shown by the CLI. On a new device, orchestrate next returns a
-  team-enrollment-confirmation ask bound to workflow/state/event head and a 15-minute
-  TTL. The Agent must show its exact JOIN phrase and end the turn. The user's next real
-  message is submitted only through --team-enrollment-confirmation-stdin.
-  A v2→v3 active instance may carry a permanent migration compatibility lock without a
-  receipt. After enrollment, next returns a separate migration-claim-recovery-confirmation
-  ask. The same actor must type its exact TAKEOVER phrase in the next message, submitted
-  through --migration-claim-recovery-confirmation-stdin, before the engine atomically
-  creates a finite Local/Git Provider lease for the new device/client. JOIN never implies
-  TAKEOVER. Accepted event heads advance locally and stale rollback/fork state is rejected.
-  Schema v2 HMAC and recovery remain legacy compatibility paths.
+Platform:
+  install [options]                         Deploy installer-owned assets
+  uninstall [options]                       Remove verified installer-owned assets
+  build --harness <name> | --all            Compile dist output
+  graph <compile|validate>                  Stage graph operations
+  version | help                            Version or this help
 
-Approval Provider boundary:
-  --approval-response-stdin is for a trusted host integration on the same device. Its
-  one-time token is derived internally from that device credential; neither the user nor
-  the Provider shares AIDLC_TRUST_SECRET. It is not a remote cross-device Provider protocol.
-
-Recovery and migration safety:
-  state migrate-v3 is dry-run unless --apply is present and requires explicit
-  --actor-id, --device-id, and --client-id. It never accepts secret arguments.
-  state regenerate-v3 is the V1 Markdown bridge. It requires an explicit scope and
-  actor/device/client identity, fingerprints a regular in-project docs/aidlc/state.md,
-  and refuses to overwrite any machine state. --apply creates a fresh signed v3 event
-  chain and enrollment atomically; unsigned V1 completion claims are not imported.
-  recover re-enroll is dry-run unless --apply is present. Apply requires a parked state,
-  old-key proof from AIDLC_RECOVERY_SECRET or AIDLC_RECOVERY_KEY_FILE, the original signed
-  enrollment from AIDLC_RECOVERY_ENROLLMENT_FILE, exact workflow/state/key/enrollment/root
-  values, a reason, and an interactive confirmation phrase.
-  Secrets are never accepted as CLI arguments and there is no --yes override.
+Lightweight workflow:
+  Markdown workflow state and audit are stored in aidlc/active/.
+  Team members select units directly; review, build, test and merge-plan provide delivery evidence.
 
 Examples:
-  loeyae-aidlc install
-  loeyae-aidlc install --harness kiro-ide --project /absolute/path/to/project
-  loeyae-aidlc install --harness codebuddy --project /absolute/path/to/project
-  loeyae-aidlc install --harness qoder --project /absolute/path/to/project
-  loeyae-aidlc uninstall --harness kiro-ide --project /absolute/path/to/project
-  loeyae-aidlc install --all
-  loeyae-aidlc install --all --migrate-legacy
-  loeyae-aidlc uninstall --all
-  loeyae-aidlc orchestrate next --scope feature \
-    --actor-id actor:alice --device-id device:laptop --client-id client:session-1
-  loeyae-aidlc orchestrate next --scope feature --with-prd \
-    --actor-id actor:alice --device-id device:laptop --client-id client:session-1
-  # New device: display the returned JOIN phrase, end the turn, then submit the user's
-  # exact next message in the strict aidlc.team.enrollment.confirmation envelope:
-  team-enrollment-confirmation-envelope | loeyae-aidlc orchestrate next \
-    --actor-id actor:alice --device-id device:new-laptop --client-id client:session-2 \
-    --team-enrollment-confirmation-stdin
-  # If that command returns migration-claim-recovery-confirmation, display TAKEOVER,
-  # end the turn, then submit the same actor's exact next message:
-  migration-claim-recovery-envelope | loeyae-aidlc orchestrate next \
-    --instance application-design@module:module-a \
-    --actor-id actor:alice --device-id device:new-laptop --client-id client:session-2 \
-    --migration-claim-recovery-confirmation-stdin
-  loeyae-aidlc state migrate-v3 --actor-id actor:alice --device-id device:laptop --client-id client:session-1
-  loeyae-aidlc state regenerate-v3 --scope feature --source-version 1.37.5 \
-    --actor-id actor:alice --device-id device:laptop --client-id client:session-1
-  loeyae-aidlc state regenerate-v3 --scope feature --source-version 1.37.5 --apply \
-    --actor-id actor:alice --device-id device:laptop --client-id client:session-1
-  loeyae-aidlc recover inspect
-  loeyae-aidlc recover re-enroll
-  loeyae-aidlc approve --stage application-design --instance application-design@module:module-a --request
-  conversation-confirmation-envelope | loeyae-aidlc orchestrate report --stage application-design \
-    --instance application-design@module:module-a --result approved \
-    --claim-receipt-stdin --approval-confirmation-stdin
-  trusted-host-envelope | loeyae-aidlc orchestrate report --stage application-design \
-    --instance application-design@module:module-a --result approved \
-    --claim-receipt-stdin --approval-response-stdin
-  claim-receipt-json | loeyae-aidlc orchestrate report --stage application-design \
-    --instance application-design@module:module-a --result approved \
-    --claim-receipt-stdin --approval-token <token>
-  loeyae-aidlc evidence run --stage build-and-test --instance build-and-test
-  loeyae-aidlc attest resolve --base <base-ref> --head <head-ref> --path src/example.ts
-  loeyae-aidlc runtime summary
-  loeyae-aidlc runtime doctor
-  loeyae-aidlc extension validate /absolute/path/to/extension
-  receipt.json | loeyae-aidlc worktree prepare --instance <id> --path /absolute/path/to/worktree --claim-receipt-stdin
-  loeyae-aidlc export md /absolute/path/document.md --to docx --toc
-  loeyae-aidlc export md /absolute/path/document.md --to pdf
-  loeyae-aidlc export svg /absolute/path/diagram.svg --to png --scale 2
-  loeyae-aidlc docx inspect /absolute/path/document.docx --json
-  loeyae-aidlc docx beautify /absolute/path/document.docx --dry-run --json
-  loeyae-aidlc docx validate /absolute/path/polished.docx --against /absolute/path/document.docx --json
+  loeyae-aidlc orchestrate next --scope feature --work "Fix order export timeout"
+  loeyae-aidlc unit select --module module-a --unit unit-a --member alice --branch feat/unit-a
+  loeyae-aidlc worktree prepare --instance code-generation@module:module-a@unit:unit-a --member alice --path /absolute/path/to/unit-a
+  loeyae-aidlc worktree merge-plan --instance code-generation@module:module-a@unit:unit-a --member alice --path /absolute/path/to/unit-a --review-evidence .aidlc/review.json
+  loeyae-aidlc orchestrate report --stage application-design --result approved --user-input Approve
 `);
 }
 
@@ -1437,33 +1333,19 @@ function main(): void {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
     case "orchestrate": {
-      const stdinRequired = rest.includes("--team-enrollment-confirmation-stdin")
-        || rest.includes("--migration-claim-recovery-confirmation-stdin")
-        || rest.includes("--approval-confirmation-stdin")
-        || rest.includes("--approval-response-stdin")
-        || rest.includes("--claim-receipt-stdin");
-      run(orchestrationScript(), rest, stdinRequired ? readFileSync(0, "utf8") : undefined);
+      run(orchestrationScript(), rest);
       break;
     }
-    case "state":
-      if (rest[0] === "migrate-v3") {
-        run("core/tools/aidlc-state-v3-migrate.ts", rest.slice(1));
-      } else if (rest[0] === "regenerate-v3") {
-        run("core/tools/aidlc-state-v3-regenerate.ts", rest.slice(1));
-      } else {
-        throw new Error(
-          "usage: loeyae-aidlc state <migrate-v3|regenerate-v3> [options]; run 'loeyae-aidlc help' for details",
-        );
-      }
-      break;
-    case "recover": runInteractive("core/tools/aidlc-recover.ts", rest); break;
-    case "approve": runInteractive("core/tools/aidlc-approve.ts", rest); break;
+    case "state": throw new Error("The workflow control plane is Markdown only. Start work with orchestrate next --scope <scope> --work <description>.");
+    case "recover": throw new Error("Use orchestrate next to continue the active Markdown workflow, or start a new workflow with an explicit work description.");
+    case "approve": throw new Error("Use orchestrate report --result approved --user-input Approve for lightweight approval.");
     case "evidence": run("core/tools/aidlc-evidence.ts", rest); break;
+    case "unit": run("core/tools/aidlc-team-light.ts", rest); break;
     case "attest":
     case "attestation": run("core/tools/aidlc-attestation-resolver.ts", rest); break;
-    case "runtime": run("core/tools/aidlc-runtime-v3.ts", rest); break;
+    case "runtime": run("core/tools/aidlc-runtime-light.ts", rest); break;
     case "extension": run("core/tools/aidlc-extension.ts", rest); break;
-    case "worktree": run("core/tools/aidlc-worktree-v3.ts", rest, rest.includes("--claim-receipt-stdin") ? readFileSync(0, "utf8") : undefined); break;
+    case "worktree": run("core/tools/aidlc-worktree-light.ts", rest); break;
     case "check": run("core/tools/aidlc-semantic-checks.ts", rest); break;
     case "diagram-provider": run("core/tools/aidlc-diagram-provider.ts", rest); break;
     case "export": run("core/tools/aidlc-export.ts", rest); break;

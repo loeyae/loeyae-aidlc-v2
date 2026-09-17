@@ -33,7 +33,7 @@ condition: needs_ui_implementation_bridge
 
 1. 项目包含前端代码生成
 2. 目标平台**非纯 Web**（即非 Vue3+ElementPlus 这类纯浏览器方案）
-3. 当前模块签名 history 中的 I9 choice 为 `html-mock`、`figma-create` 或 `figma-existing`；`skip` 或无选择不触发
+3. 当前模块 Markdown history 中的 I9 choice 为 `html-mock`、`figma-create` 或 `figma-existing`；`skip` 或无选择不触发
 
 **纯 Web 项目**（PC 端 Vue3、React SPA 等）：CSS 语义与设计产物一致，无需跨端翻译层（组件映射表 + frontend-platform-spec.md），跳过本流程的第一至第三部分。
 

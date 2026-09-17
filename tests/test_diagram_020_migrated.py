@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import tempfile
 
-from semantic_checker_fixture import TSX, checker_environment, write_signed_checker_state
+from semantic_checker_fixture import TSX, checker_environment, write_checker_state
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 FIXTURE_ROOT = os.path.join(REPO_ROOT, "tests", "fixtures", "diagram-020-migrated")
@@ -80,11 +80,11 @@ def test_migrated_fixture_preserves_semantics_and_has_capacity_contract() -> Non
     assert set(request["target_reading_environment"]["viewports"]) == {"normal", "fit", "zoom"}
 
 
-def test_migrated_fixture_reaches_static_pass_without_browser_claim() -> None:
+def test_migrated_fixture_reaches_static_pass_without_browser_evidence() -> None:
     project = tempfile.mkdtemp(prefix="aidlc-diagram-020-migrated-")
     try:
         shutil.copytree(FIXTURE_ROOT, project, dirs_exist_ok=True)
-        write_signed_checker_state(project)
+        write_checker_state(project)
         result = run_checker(project)
         assert result.returncode == 0, result.stderr
         report = json.loads(result.stdout)
@@ -102,5 +102,5 @@ def test_migrated_fixture_reaches_static_pass_without_browser_claim() -> None:
 
 if __name__ == "__main__":
     test_migrated_fixture_preserves_semantics_and_has_capacity_contract()
-    test_migrated_fixture_reaches_static_pass_without_browser_claim()
+    test_migrated_fixture_reaches_static_pass_without_browser_evidence()
     print("diagram-020 migrated tests passed")

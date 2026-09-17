@@ -471,7 +471,7 @@ requires: [user-stories, cross-validation]
 > [如有阶段被跳过：]
 > 📝 **添加跳过的阶段** - 选择包含当前标记为跳过的阶段
 > ✅ **确认并继续** - 确认计划，进入**[下一阶段名称]**
-> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时先验证签名 state 并读取 `docs/aidlc/handoff.md`。
+> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时读取 `aidlc/active/aidlc-state.md` 和 `aidlc/active/audit.md`。
 ```
 
 ## 步骤 10：处理用户回复

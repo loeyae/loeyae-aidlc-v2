@@ -407,7 +407,7 @@ def test_new_plugin_host_lifecycles() -> None:
         assert sum("plugins enable loeyae-aidlc --scope user" in line for line in qoder_log) == 2
         qoder_cn_skill = home / ".qoder-cn" / "skills" / "loeyae-aidlc" / "SKILL.md"
         assert qoder_cn_skill.is_file()
-        assert "Qoder CN IDE / Desktop / CLI" in qoder_cn_skill.read_text()
+        assert "Markdown state/audit" in qoder_cn_skill.read_text()
         expected_qoder_mcp = {"loeyae-skills", "awesome-design", "figma", "ssot"}
         for config_path in qoder_mcp_config_paths:
             config = json.loads(config_path.read_text())
@@ -539,7 +539,7 @@ def test_install_all_detects_qoder_cn_desktop_without_cli() -> None:
         qoder_cn_skill = home / ".qoder-cn" / "skills" / "loeyae-aidlc" / "SKILL.md"
         assert (qoder_assets / "mcp-cn.json").is_file()
         assert qoder_cn_skill.is_file()
-        assert "Qoder CN IDE / Desktop / CLI" in qoder_cn_skill.read_text()
+        assert "Markdown state/audit" in qoder_cn_skill.read_text()
 
         repeated = run_cli(home, ["install", "--all"], env)
         assert repeated.returncode == 0, repeated.stdout + repeated.stderr

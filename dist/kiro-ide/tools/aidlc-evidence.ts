@@ -17,15 +17,11 @@ import {
 import { spawnSync } from "child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
-import { signRecord, signTeamRecord } from "./aidlc-trust";
-import {
-  loadWorkflowStateBySchema,
-  type AnyWorkflowState,
-} from "./aidlc-state-schema";
 import { evidenceRelativePath } from "./aidlc-execution-context";
 import { readSourceRevision } from "./aidlc-revision";
+import { loadWorkflowState, type WorkflowState } from "./aidlc-light-state";
 
-type ProducerState = AnyWorkflowState;
+type ProducerState = WorkflowState;
 
 type CommandRole = "build" | "test" | "check" | "semantic";
 
@@ -157,9 +153,7 @@ function evidenceOutput(stage: string, sensor: string, value: string | undefined
     fail("stage and sensor must contain only lowercase letters, digits, and hyphens");
   }
   const axis = state.current_unit ? "unit" : state.current_module ? "module" : "project";
-  const relativeOutput = state.routing_model === "module-unit-v1" || state.routing_model === "collaboration-v3"
-    ? evidenceRelativePath(safeStage, safeSensor, axis, { module_id: state.current_module, unit_id: state.current_unit })
-    : join(".aidlc", "evidence", safeStage, `${safeSensor}.json`);
+  const relativeOutput = evidenceRelativePath(safeStage, safeSensor, axis, { module_id: state.current_module, unit_id: state.current_unit });
   const expected = resolve(PROJECT_ROOT, relativeOutput);
   const output = value ? safeProjectPath(value, "output") : safeProjectPath(expected, "output");
   if (output !== expected) fail(`output must be ${expected}`);
@@ -167,9 +161,8 @@ function evidenceOutput(stage: string, sensor: string, value: string | undefined
 }
 
 function executionContext(state: ProducerState): Record<string, unknown> {
-  if (state.routing_model !== "module-unit-v1" && state.routing_model !== "collaboration-v3") return {};
   return {
-    stage_instance: state.current_stage_instance,
+    stage_instance: state.current_stage_instance || null,
     module_id: state.current_module || null,
     unit_id: state.current_unit || null,
   };
@@ -364,11 +357,8 @@ function writeAtomic(path: string, value: string): void {
   }
 }
 
-function signedEvidence(unsigned: Record<string, unknown>, state: ProducerState): Record<string, unknown> {
-  return {
-    ...unsigned,
-    integrity: state.schema_version === 3 ? signTeamRecord(unsigned) : signRecord(unsigned, false),
-  };
+function producedEvidence(unsigned: Record<string, unknown>): Record<string, unknown> {
+  return unsigned;
 }
 
 function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerState): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
@@ -404,7 +394,7 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) fail(`built-in semantic checker ${sensor} must return a JSON object`);
   const payload = parsed as Record<string, unknown>;
-  for (const field of ["evidence_version", "timestamp", "producer", "source_revision", "checker", "integrity"]) {
+  for (const field of ["evidence_version", "timestamp", "producer", "source_revision", "checker"]) {
     if (field in payload) fail(`semantic checker must not provide producer-controlled field ${field}`);
   }
   if (typeof payload.status !== "string" || payload.status.trim().length === 0) fail(`semantic checker ${sensor} must provide a non-empty status`);
@@ -438,7 +428,7 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig, s
     source_revision: readSourceRevision(PROJECT_ROOT),
     checker: result.execution,
   };
-  writeAtomic(output, `${JSON.stringify(signedEvidence(unsigned, state), null, 2)}\n`);
+  writeAtomic(output, `${JSON.stringify(producedEvidence(unsigned), null, 2)}\n`);
   console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}` }, null, 2));
 }
 
@@ -510,42 +500,18 @@ function withProducerLock(output: string, action: () => void): void {
 }
 
 function loadProducerState(options: ProducerOptions): ProducerState | null {
-  const state = loadWorkflowStateBySchema(PROJECT_ROOT);
-  if (!state || state.schema_version !== 3) return state;
-  const activeInstances = Object.values(state.instances).filter(
-    (instance) => instance.stage === options.stage && instance.status === "in_progress",
-  );
-  const selected = options.instance
-    ? state.instances[options.instance]
-    : activeInstances.length === 1
-      ? activeInstances[0]
-      : undefined;
-  if (options.instance && (!selected || selected.stage !== options.stage || selected.status !== "in_progress")) {
-    fail(`stage instance ${options.instance} is not an active ${options.stage} instance`);
+  const state = loadWorkflowState(PROJECT_ROOT);
+  if (!state) return null;
+  if (options.instance && options.instance !== state.current_stage_instance) {
+    fail(`stage instance ${options.instance} is not active`);
   }
-  if (!options.instance && activeInstances.length > 1) {
-    fail(`multiple active ${options.stage} instances; pass --instance <stage-instance>`);
-  }
-  if (!selected) return state;
-  return {
-    ...state,
-    current_stage: selected.stage,
-    current_stage_instance: selected.stage_instance,
-    ...(selected.module_id ? { current_module: selected.module_id } : {}),
-    ...(selected.unit_id ? { current_unit: selected.unit_id } : {}),
-  };
+  return state;
 }
 
 function runProducer(args: string[]): void {
   const options = parseArgs(args);
   const state = loadProducerState(options);
-  if (!state || state.status !== "running") fail("evidence production requires an active signed running workflow");
-  if (state.schema_version !== 3) {
-    const secret = process.env.AIDLC_TRUST_SECRET;
-    if (secret === undefined || Buffer.byteLength(secret, "utf8") < 32) {
-      fail("legacy schema v2 evidence production requires AIDLC_TRUST_SECRET with at least 32 bytes");
-    }
-  }
+  if (!state || state.status !== "running") fail("evidence production requires an active lightweight workflow");
   if (state.current_stage !== options.stage) {
     fail(`stage ${options.stage} is not active; current stage is ${state.current_stage || "(none)"}`);
   }
@@ -592,7 +558,7 @@ function runProducer(args: string[]): void {
       checks: { status: "passed", command_ids: commands.filter((command) => command.role === "check").map((command) => command.id) },
       artifacts,
     };
-    writeAtomic(output, `${JSON.stringify(signedEvidence(unsigned, state), null, 2)}\n`);
+    writeAtomic(output, `${JSON.stringify(producedEvidence(unsigned), null, 2)}\n`);
     console.log(JSON.stringify({ status: "passed", output, tests, commands: commands.length, artifacts: artifacts.length }, null, 2));
   });
 }

@@ -370,7 +370,7 @@ condition: has_unit_generation_needs
 >
 > 🔧 **请求修改** - 要求修改单元生成
 > ✅ **确认并继续** - 确认单元，进入 **CONSTRUCTION 阶段**
-> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时先验证签名 state 并读取 `docs/aidlc/handoff.md`。
+> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时读取 `aidlc/active/aidlc-state.md` 和 `aidlc/active/audit.md`。
 ```
 
 **团队协作模式的完成消息**：
@@ -394,9 +394,9 @@ condition: has_unit_generation_needs
 >
 > 🔧 **请求修改** - 要求修改单元生成
 > ✅ **确认并继续** - 确认单元，进入 **工作流规划**
-> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时先验证签名 state 并读取 `docs/aidlc/handoff.md`。
+> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时读取 `aidlc/active/aidlc-state.md` 和 `aidlc/active/audit.md`。
 >
-> **团队协作提示**：确认后请将产出物提交到主分支，开发者即可开始认领单元。
+> **团队协作提示**：确认后请将产出物提交到主分支，开发者即可选择单元并开始实现。
 ```
 
 ## 步骤 18：等待明确审批

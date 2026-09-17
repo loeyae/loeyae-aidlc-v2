@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import { verifyRecord } from "./aidlc-trust";
 
 export const ATTESTATION_STATUSES = [
   "verified",
@@ -57,13 +56,11 @@ export interface AttestationAuthority {
   module_id: string;
   unit_id: string;
   stage_instance: string;
-  integrity_algorithm: string | null;
-  integrity_key_id: string | null;
   coverage: "files_reviewed" | "changed_paths" | "artifacts" | "path_digests" | "none";
 }
 
-export interface UnitAttestationClaim {
-  claim_id: string;
+export interface UnitAttestation {
+  attestation_id: string;
   module_id: string;
   unit_id: string;
   stage_instance: string;
@@ -76,7 +73,7 @@ export interface UnitAttestationClaim {
 export interface ChangedPathAttestation {
   path: string;
   status: AttestationStatus;
-  unit_claims: UnitAttestationClaim[];
+  unit_attestations: UnitAttestation[];
   trust_basis: string[];
 }
 
@@ -95,7 +92,7 @@ export interface AttestationResolution {
   status: AttestationStatus;
   history: AttestationHistory;
   changed_paths: ChangedPathAttestation[];
-  unit_claims: UnitAttestationClaim[];
+  unit_attestations: UnitAttestation[];
   summary: AttestationSummary;
   trust_basis: string[];
   errors: string[];
@@ -205,11 +202,11 @@ function worstStatus(values: readonly AttestationStatus[], fallback: Attestation
 }
 
 function excludedFromWorktreeDigest(path: string): boolean {
-  return path === ".aidlc" || path.startsWith(".aidlc/") || path === "docs/aidlc/aidlc-state.json";
+  return path === ".aidlc" || path.startsWith(".aidlc/") || path === "aidlc" || path.startsWith("aidlc/");
 }
 
 function isGeneratedAttestationPath(path: string): boolean {
-  return path === ".aidlc" || path.startsWith(".aidlc/") || path === "docs/aidlc/aidlc-state.json";
+  return path === ".aidlc" || path.startsWith(".aidlc/") || path === "aidlc" || path.startsWith("aidlc/") || path === "docs/aidlc/aidlc-state.json";
 }
 
 function stringArray(value: unknown, field: string, required = false): string[] {
@@ -230,14 +227,6 @@ function integer(value: unknown, field: string, minimum = 0): number {
     throw new Error(`${field} must be an integer >= ${minimum}`);
   }
   return value;
-}
-
-function authorityKey(value: Record<string, unknown>): { algorithm: string | null; keyId: string | null } {
-  const integrity = isRecord(value.integrity) ? value.integrity : undefined;
-  return {
-    algorithm: typeof integrity?.algorithm === "string" ? integrity.algorithm : null,
-    keyId: typeof integrity?.key_id === "string" ? integrity.key_id : null,
-  };
 }
 
 function stageInstance(context: Pick<UnitContext, "stage" | "module_id" | "unit_id">): string {
@@ -488,28 +477,15 @@ function inspectCandidate(
     }
   }
 
-  let signatureError: string | null = null;
-  let authority: AttestationAuthority | undefined;
-  if (record) {
-    try {
-      signatureError = verifyRecord(record);
-    } catch (error) {
-      signatureError = error instanceof Error ? error.message : String(error);
-    }
-    const key = authorityKey(record);
-    authority = {
-      evidence_path: context.evidence_path,
-      sensor: context.sensor,
-      module_id: context.module_id,
-      unit_id: context.unit_id,
-      stage_instance: context.stage_instance,
-      integrity_algorithm: key.algorithm,
-      integrity_key_id: key.keyId,
-      coverage: coverage[0]?.source || "none",
-    };
-    if (signatureError) errors.push(`integrity: ${signatureError}`);
-    else basis.push(`integrity signature verified with ${key.algorithm || "unknown"}`);
-  }
+  const authority: AttestationAuthority | undefined = record ? {
+    evidence_path: context.evidence_path,
+    sensor: context.sensor,
+    module_id: context.module_id,
+    unit_id: context.unit_id,
+    stage_instance: context.stage_instance,
+    coverage: coverage[0]?.source || "none",
+  } : undefined;
+  if (record) basis.push("controlled evidence format and context binding were validated");
 
   let source: SourceCheck | undefined;
   if (record && errors.length === 0) {
@@ -536,7 +512,7 @@ function inspectCandidate(
   else status = worstStatus([source?.status || "unverifiable", content?.status || "verified"], "verified");
   if (status === "verified") {
     basis.push(coverage.length > 0
-      ? `unit claim declares exact coverage for ${coverage.length} repository path(s)`
+      ? `unit attestation declares exact coverage for ${coverage.length} repository path(s)`
       : "unit evidence has no changed-path coverage declaration");
   }
   if (errors.length > 0) basis.push(`trust is withheld because ${errors.join("; ")}`);
@@ -734,13 +710,13 @@ function applyHistoryStatus(
     ...item,
     status: historyStatus,
     trust_basis: [...item.trust_basis, ...historyBasis, "a definitive path conclusion was withheld because history completeness was not established"],
-    unit_claims: item.unit_claims.map((claim) => claim.status === "verified" || claim.status === "unattested"
+    unit_attestations: item.unit_attestations.map((attestation) => attestation.status === "verified" || attestation.status === "unattested"
       ? {
-        ...claim,
+        ...attestation,
         status: historyStatus,
-        trust_basis: [...claim.trust_basis, ...historyBasis, "a definitive unit claim was withheld because history completeness was not established"],
+        trust_basis: [...attestation.trust_basis, ...historyBasis, "a definitive unit attestation was withheld because history completeness was not established"],
       }
-      : claim),
+      : attestation),
   };
 }
 
@@ -748,7 +724,7 @@ function invalidPathResult(path: string, reason: string): ChangedPathAttestation
   return {
     path,
     status: "unverifiable",
-    unit_claims: [],
+    unit_attestations: [],
     trust_basis: ["changed path validation failed", reason, "no authority was inferred from an invalid path"],
   };
 }
@@ -756,11 +732,11 @@ function invalidPathResult(path: string, reason: string): ChangedPathAttestation
 function buildUnitClaim(
   candidate: EvidenceCandidate,
   changedPath: string,
-): UnitAttestationClaim {
+): UnitAttestation {
   const covered = candidate.coverage.filter((item) => item.path === changedPath);
   const authority = candidate.authorities.map((item) => ({ ...item, coverage: covered[0]?.source || item.coverage }));
   return {
-    claim_id: `${candidate.context.stage_instance}:${candidate.context.sensor}:${candidate.context.evidence_path}`,
+    attestation_id: `${candidate.context.stage_instance}:${candidate.context.sensor}:${candidate.context.evidence_path}`,
     module_id: candidate.context.module_id,
     unit_id: candidate.context.unit_id,
     stage_instance: candidate.context.stage_instance,
@@ -782,7 +758,7 @@ function resolveChangedPath(
     const result: ChangedPathAttestation = {
       path,
       status: "unattested",
-      unit_claims: [],
+      unit_attestations: [],
       trust_basis: [
         "path is present in the inspected commit diff",
         "no unit-scoped signed review or controlled Evidence declares exact coverage for this path",
@@ -792,17 +768,17 @@ function resolveChangedPath(
     return applyHistoryStatus(result, historyStatus, historyBasis);
   }
 
-  const claims = matching.map((candidate) => buildUnitClaim(candidate, path));
-  const distinctUnits = new Set(claims.map((claim) => `${claim.module_id}/${claim.unit_id}`));
-  let status = worstStatus(claims.map((claim) => claim.status), "verified");
+  const attestations = matching.map((candidate) => buildUnitClaim(candidate, path));
+  const distinctUnits = new Set(attestations.map((attestation) => `${attestation.module_id}/${attestation.unit_id}`));
+  let status = worstStatus(attestations.map((attestation) => attestation.status), "verified");
   const basis = ["path is present in the inspected commit diff"];
   if (distinctUnits.size > 1 && status === "verified") {
     status = "indeterminate";
-    basis.push("multiple independently scoped unit claims cover the same path; ownership is ambiguous");
+    basis.push("multiple independently scoped unit attestations cover the same path; ownership is ambiguous");
   }
-  if (status === "verified") basis.push("all matching unit claims passed signature, schema, source revision, and exact path checks");
+  if (status === "verified") basis.push("all matching unit attestations passed signature, schema, source revision, and exact path checks");
   else basis.push(`at least one matching authority yielded ${status}; the resolver does not elevate weaker checks`);
-  return applyHistoryStatus({ path, status, unit_claims: claims, trust_basis: basis }, historyStatus, historyBasis);
+  return applyHistoryStatus({ path, status, unit_attestations: attestations, trust_basis: basis }, historyStatus, historyBasis);
 }
 
 function emptyHistory(): AttestationHistory {
@@ -826,10 +802,10 @@ function failureResolution(status: AttestationStatus, history: AttestationHistor
     status,
     history,
     changed_paths: [],
-    unit_claims: [],
+    unit_attestations: [],
     summary: summarize([]),
     trust_basis: [
-      "resolver is read-only and did not write workflow state, enrollment, claim receipts, Evidence, or approval state",
+      "resolver is read-only and did not write workflow state, controlled Evidence, or approval state",
       "no attestation conclusion was upgraded after Git resolution failed",
     ],
     errors: [error],
@@ -885,7 +861,7 @@ export function resolveCommitDiffAttestations(options: AttestationResolverOption
             explicitPaths.push({
               path,
               status: "indeterminate",
-              unit_claims: [],
+              unit_attestations: [],
               trust_basis: [
                 "explicit path is not present in the Git diff from merge base to head",
                 "the resolver will not treat an unobserved path as changed or verified",
@@ -961,19 +937,19 @@ export function resolveCommitDiffAttestations(options: AttestationResolverOption
       ...explicitPaths,
       ...requestedPaths.map((path) => resolveChangedPath(path, candidates, historyStatus, historyBasis)),
     ].sort((left, right) => left.path.localeCompare(right.path));
-    const unitClaims = new Map<string, UnitAttestationClaim>();
+    const unitClaims = new Map<string, UnitAttestation>();
     for (const item of resolved) {
-      for (const claim of item.unit_claims) {
-        const existing = unitClaims.get(claim.claim_id);
+      for (const attestation of item.unit_attestations) {
+        const existing = unitClaims.get(attestation.attestation_id);
         if (!existing) {
-          unitClaims.set(claim.claim_id, { ...claim, covered_paths: [...claim.covered_paths] });
+          unitClaims.set(attestation.attestation_id, { ...attestation, covered_paths: [...attestation.covered_paths] });
           continue;
         }
-        existing.status = worstStatus([existing.status, claim.status], "verified");
-        existing.covered_paths = [...new Set([...existing.covered_paths, ...claim.covered_paths])].sort();
-        existing.authorities = [...existing.authorities, ...claim.authorities]
+        existing.status = worstStatus([existing.status, attestation.status], "verified");
+        existing.covered_paths = [...new Set([...existing.covered_paths, ...attestation.covered_paths])].sort();
+        existing.authorities = [...existing.authorities, ...attestation.authorities]
           .filter((authority, index, authorities) => authorities.findIndex((candidate) => candidate.evidence_path === authority.evidence_path) === index);
-        existing.trust_basis = [...new Set([...existing.trust_basis, ...claim.trust_basis])];
+        existing.trust_basis = [...new Set([...existing.trust_basis, ...attestation.trust_basis])];
       }
     }
     const summary = summarize(resolved);
@@ -993,7 +969,7 @@ export function resolveCommitDiffAttestations(options: AttestationResolverOption
       status: globalStatus,
       history,
       changed_paths: resolved,
-      unit_claims: [...unitClaims.values()].sort((left, right) => left.claim_id.localeCompare(right.claim_id)),
+      unit_attestations: [...unitClaims.values()].sort((left, right) => left.attestation_id.localeCompare(right.attestation_id)),
       summary,
       trust_basis: [
         "changed paths were derived from a read-only merge-base-to-head Git diff",

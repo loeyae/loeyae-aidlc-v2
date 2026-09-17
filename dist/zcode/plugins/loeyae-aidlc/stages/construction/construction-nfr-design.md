@@ -106,7 +106,7 @@ condition: has_nfr_needs
 >
 > 🔧 **请求修改** - 根据审查结果要求修改 NFR 设计
 > ✅ **继续下一阶段** - 确认 NFR 设计，进入**[下一阶段名称]**
-> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时先验证签名 state 并读取 `docs/aidlc/handoff.md`。
+> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时读取 `aidlc/active/aidlc-state.md` 和 `aidlc/active/audit.md`。
 
 ---
 ```

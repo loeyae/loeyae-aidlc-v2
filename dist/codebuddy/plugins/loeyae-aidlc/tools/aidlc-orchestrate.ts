@@ -8,7 +8,7 @@
  *   report [flags]    — Record stage outcome, advance state machine
  *   park              — Park workflow at current inter-stage boundary
  *
- * State file: <project>/docs/aidlc/aidlc-state.json
+ * State file: <project>/aidlc/active/aidlc-state.md
  * Stage graph: <engine>/core/tools/data/stage-graph.json
  *
  * This tool is DETERMINISTIC: same state → same directive.
@@ -19,16 +19,9 @@
  * with `approval: block`; all other stages auto-advance after gates pass.
  */
 
-import { randomBytes } from "crypto";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "fs";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
-import { readEnrollment, verifyApprovalToken, verifyRecord } from "./aidlc-trust";
-import {
-  buildApprovalProviderRequest,
-  validateApprovalConversationConfirmation,
-  validateApprovalProviderResponse,
-} from "./aidlc-approval-provider";
 import { readSourceRevision } from "./aidlc-revision";
 import {
   evidenceRelativePath,
@@ -51,7 +44,7 @@ import {
   saveWorkflowState,
   type HistoryEntry,
   type WorkflowState,
-} from "./aidlc-state";
+} from "./aidlc-light-state";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -175,6 +168,8 @@ type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
 type StageResult = (typeof VALID_RESULTS)[number];
+const NEXT_FLAGS = new Set(["scope", "work", "with-prd", "resume", "status", "text"]);
+const REPORT_FLAGS = new Set(["stage", "result", "user-input", "instruction-ack", "module", "unit"]);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -201,7 +196,7 @@ export function runtimeChoices(stage: StageNode, state: WorkflowState): string[]
 }
 
 /**
- * Filter stages by scope and the immutable user selections captured in signed
+ * Filter stages by scope and the immutable user selections captured in Markdown workflow history.
  * workflow state. User-selected stages never enter the default path.
  */
 export function getExecutableStages(
@@ -220,24 +215,11 @@ const DEFAULT_MODULE: ModuleDescriptor = { module_id: "project", name: "Project"
 const DEFAULT_UNIT: UnitDescriptor = { unit_id: "default", name: "Default", service_id: "not-applicable" };
 
 export function selectedOptionalStages(state: WorkflowState): string[] {
-  if (state.selected_optional_stages !== undefined) return state.selected_optional_stages;
-  const legacyPrdWasResolved = state.completed_stages.includes("prd-generation")
-    || state.skipped_stages.includes("prd-generation");
-  const legacyPrdIsActive = state.current_stage === "prd-generation";
-  return legacyPrdWasResolved || legacyPrdIsActive ? ["prd-generation"] : [];
+  return state.selected_optional_stages;
 }
 
 const ARCHITECTURE_CHOICES = new Set(["single-module", "multi-module"]);
 const UI_DESIGN_CHOICES = new Set(["html-mock", "figma-create", "figma-existing", "skip"]);
-const FIGMA_ROUTE_STAGES = new Set(["ui-figma", "ui-figma-generation"]);
-const HTML_MOCK_ROUTE_STAGES = new Set([
-  "ui-mock-workflow",
-  "ui-mock-design-spec",
-  "ui-mock-styles",
-  "ui-mock-reasoning-principles",
-  "ui-mock-generation",
-]);
-
 function recordedStageChoice(state: WorkflowState, stageSlug: string, moduleId?: string): string | undefined {
   return [...state.history].reverse().find((entry) =>
     entry.stage === stageSlug
@@ -254,33 +236,7 @@ export function architectureChoice(state: WorkflowState): string | undefined {
 
 function uiDesignChoice(state: WorkflowState, moduleId?: string): string | undefined {
   const recorded = recordedStageChoice(state, "ui-mock", moduleId);
-  if (recorded && UI_DESIGN_CHOICES.has(recorded)) return recorded;
-
-  const routerResolvedWithoutChoice = state.history.some((entry) =>
-    entry.stage === "ui-mock"
-    && entry.result === "condition_skipped"
-    && (!moduleId || entry.module_id === moduleId)
-  );
-  // A current signed architecture choice identifies the new routing contract.
-  // Missing/condition-skipped UI choices in that contract mean "not selected";
-  // stale files must never reactivate a branch. Filesystem fallback is retained
-  // only for older signed workflows that predate runtime UI choices.
-  if (routerResolvedWithoutChoice || architectureChoice(state)) return undefined;
-
-  // Compatibility for signed workflows created before runtime choices were
-  // recorded. Preserve an already active/resolved branch rather than changing
-  // its route during upgrade.
-  const matchingLegacyStage = (slug: string): boolean => {
-    if (state.current_stage === slug && (!moduleId || state.current_module === moduleId)) return true;
-    return state.history.some((entry) => entry.stage === slug && (!moduleId || entry.module_id === moduleId));
-  };
-  if ([...FIGMA_ROUTE_STAGES].some(matchingLegacyStage)) return "figma-create";
-  if ([...HTML_MOCK_ROUTE_STAGES].some(matchingLegacyStage)) return "html-mock";
-
-  const htmlRoot = moduleId
-    ? join(PROJECT_ROOT, "docs", "aidlc", "modules", moduleId, "inception", "ui-mock")
-    : join(PROJECT_ROOT, "docs", "aidlc", "inception", "ui-mock");
-  return existsSync(htmlRoot) ? "html-mock" : undefined;
+  return recorded && UI_DESIGN_CHOICES.has(recorded) ? recorded : undefined;
 }
 
 function runtimeStage(instance: StageInstance, state: WorkflowState): StageNode {
@@ -354,13 +310,11 @@ export function makeInstance(stage: StageNode, axis: ExecutionAxis, context: Exe
 }
 
 function routingModules(state: WorkflowState): ModuleDescriptor[] {
-  if (state.routing_model !== "module-unit-v1") return [DEFAULT_MODULE];
   if (!state.completed_stages.includes("module-division")) return [DEFAULT_MODULE];
   return readModuleManifest(PROJECT_ROOT);
 }
 
 function routingUnits(state: WorkflowState, modules: ModuleDescriptor[]): Array<{ module: ModuleDescriptor; unit: UnitDescriptor }> {
-  if (state.routing_model !== "module-unit-v1") return [{ module: DEFAULT_MODULE, unit: DEFAULT_UNIT }];
   return modules.flatMap((module) => {
     const unitsStage = stageInstanceId("units-generation", "module", { module_id: module.module_id });
     if (completedInstanceIds(state).includes(unitsStage)) {
@@ -379,7 +333,6 @@ function routingUnits(state: WorkflowState, modules: ModuleDescriptor[]): Array<
  */
 export function expandStageInstances(graph: StageGraph, state: WorkflowState): StageInstance[] {
   const stages = getExecutableStages(graph, state.scope, selectedOptionalStages(state));
-  if (state.routing_model !== "module-unit-v1") return stages.map((stage) => makeInstance(stage, "project"));
 
   const modules = routingModules(state);
   const units = routingUnits(state, modules);
@@ -432,7 +385,6 @@ function checkRequires(instance: StageInstance, instances: StageInstance[], stat
 }
 
 function reconcileStageSummaries(state: WorkflowState, instances: StageInstance[]): void {
-  if (state.routing_model !== "module-unit-v1") return;
   for (const stage of getExecutableStages(loadGraph(), state.scope, selectedOptionalStages(state))) {
     const stageInstances = instances.filter((instance) => instance.stage.slug === stage.slug);
     if (stageInstances.length === 0) continue;
@@ -482,37 +434,21 @@ function collectFiles(path: string): string[] {
   return files;
 }
 
-function legacyArtifactPattern(pattern: string): string {
-  return pattern
-    .replace("docs/aidlc/ideation/module-manifest.json", "docs/aidlc/ideation/module-division.md")
-    .replace(/docs\/aidlc\/modules\/\{module-id\}\/inception/g, "docs/aidlc/inception")
-    .replace(/docs\/aidlc\/modules\/\{module-id\}\/construction\/\{unit-id\}/g, "docs/aidlc/construction/{unit-name}")
-    .replace(/(\.aidlc\/evidence\/[^/]+)\/\{module-id\}\/\{unit-id\}/g, "$1")
-    .replace(/(\.aidlc\/evidence\/[^/]+)\/\{module-id\}/g, "$1");
-}
-
 function artifactPlaceholderNames(pattern: string): string[] {
   return [...pattern.matchAll(/\{([^{}]+)\}/g)].map((match) => match[1]);
-}
-
-function isLegacyArtifactInstance(instance?: StageInstance): boolean {
-  return Boolean(instance && instance.axis === "project" && instance.stage.axis !== "project");
 }
 
 function allowsProjectAggregate(instance: StageInstance | undefined, allowProjectAggregate: boolean): boolean {
   return Boolean(allowProjectAggregate && instance && instance.axis === "project" && instance.stage.axis === "project");
 }
 
-export function instanceArtifactPattern(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string {
+function instanceArtifactPattern(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string {
   if (!instance) return pattern;
-  const legacy = isLegacyArtifactInstance(instance);
-  const resolved = legacy ? legacyArtifactPattern(pattern) : substituteArtifactPattern(pattern, instance);
+  const resolved = substituteArtifactPattern(pattern, instance);
   const placeholders = artifactPlaceholderNames(resolved);
-  const allowed = legacy
-    ? new Set(["unit-name"])
-    : allowsProjectAggregate(instance, allowProjectAggregate)
-      ? new Set(["module-id", "unit-id"])
-      : new Set<string>();
+  const allowed = allowsProjectAggregate(instance, allowProjectAggregate)
+    ? new Set(["module-id", "unit-id"])
+    : new Set<string>();
   const invalid = placeholders.filter((placeholder) => !allowed.has(placeholder));
   if (invalid.length > 0) {
     throw new Error(`Unresolved artifact placeholder(s) ${invalid.map((name) => `{${name}}`).join(", ")} for stage instance "${instance.instance_id}": ${pattern}`);
@@ -526,14 +462,14 @@ function escapeExpression(value: string): string {
 
 function resolveProducePaths(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string[] {
   const contextual = instanceArtifactPattern(pattern, instance, allowProjectAggregate).replace(/\\/g, "/");
-  const expansionAllowed = isLegacyArtifactInstance(instance) || allowsProjectAggregate(instance, allowProjectAggregate);
+  const expansionAllowed = allowsProjectAggregate(instance, allowProjectAggregate);
   if (contextual.includes("*") && !expansionAllowed) {
     throw new Error(`Artifact wildcards are not allowed for stage instance "${instance?.instance_id || "unknown"}": ${pattern}`);
   }
   const target = join(PROJECT_ROOT, contextual);
   if (!contextual.includes("*") && !/\{[^}]+\}/.test(contextual)) return collectFiles(target);
 
-  const wildcard = contextual.replace(/\{(?:module-id|unit-id|unit-name)\}/g, "*");
+  const wildcard = contextual.replace(/\{(?:module-id|unit-id)\}/g, "*");
   const wildcardIndex = wildcard.indexOf("*");
   const slashIndex = wildcard.lastIndexOf("/", wildcardIndex);
   const basePattern = slashIndex >= 0 ? wildcard.slice(0, slashIndex) : ".";
@@ -594,7 +530,6 @@ export function checkConsumes(instance: StageInstance, state: WorkflowState, gra
     }
     const completed = new Set(completedInstanceIds(state));
     const producerCompleted = producers.some((producer) => {
-      if (state.routing_model !== "module-unit-v1") return state.completed_stages.includes(producer.slug);
       const required = dependencyInstances(instance, producer.slug, instances);
       return required.length > 0 && required.every((candidate) => completed.has(candidate.instance_id));
     });
@@ -698,9 +633,6 @@ function validateEvidence(
   if (loaded.failure) return loaded.failure;
   const evidence = loaded.value as Evidence;
   const errors = required(evidence);
-
-  const integrityError = verifyRecord(evidence);
-  if (integrityError) errors.push(`integrity: ${integrityError}`);
 
   const producer = asRecord(evidence.producer);
   if (!producer) {
@@ -1178,7 +1110,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
             errors.push("stages_completed must be >= 1");
           }
 
-          if (state.routing_model === "module-unit-v1") {
+          {
             const moduleManifestPath = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "module-manifest.json");
             const modules = existsSync(moduleManifestPath)
               ? readModuleManifest(PROJECT_ROOT).map((module) => module.module_id).sort()
@@ -1197,7 +1129,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
             if (!actualUiModules) {
               errors.push("ui_modules_verified must be an array (empty when no module selected UI)");
             } else if (JSON.stringify([...actualUiModules].sort()) !== JSON.stringify(expectedUiModules)) {
-              errors.push(`ui_modules_verified must match signed UI selections: ${expectedUiModules.join(", ") || "(none)"}`);
+              errors.push(`ui_modules_verified must match selected UI choices: ${expectedUiModules.join(", ") || "(none)"}`);
             }
           }
 
@@ -1296,7 +1228,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           } else if (final.status === "STATIC_PASS") {
             if (evidence.target_operation_required === true) errors.push("STATIC_PASS cannot satisfy a required browser operation");
             if (!final.legacy && (evidence.expected_contract_status !== "passed" || evidence.generation_status !== "passed")) errors.push("STATIC_PASS requires expected contract and generator closure");
-            if (evidence.provider_status === "passed") errors.push("STATIC_PASS cannot claim provider passed");
+            if (evidence.provider_status === "passed") errors.push("STATIC_PASS cannot report provider passed");
           } else if (final.status === "UNVERIFIED") {
             errors.push("final_status=UNVERIFIED is not a completed diagram gate");
           } else if (final.status === "NEEDS_CAPABILITY") {
@@ -1333,7 +1265,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           if (evidence.stage !== stage.slug) errors.push(`stage must be ${stage.slug}`);
           if (evidence.module_id !== instance.module_id) errors.push(`module_id must be ${instance.module_id || "(none)"}`);
           const expectedChoice = uiDesignChoice(state, instance.module_id);
-          if (evidence.design_mode !== expectedChoice) errors.push(`design_mode must match signed UI choice ${expectedChoice || "not-selected"}`);
+          if (evidence.design_mode !== expectedChoice) errors.push(`design_mode must match selected UI choice ${expectedChoice || "not-selected"}`);
           if (asPositiveInt(evidence.pages_checked) === null || (evidence.pages_checked as number) < 1) errors.push("pages_checked must be >= 1");
           const phases = asStringArray(evidence.phases_verified);
           if (!phases || phases.length === 0) errors.push("phases_verified must list validated phases");
@@ -1364,10 +1296,10 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           const prdItems = asNumber(evidence.prd_items_checked);
           if (prdItems === null || (expectedPrd ? prdItems < 1 : prdItems !== 0)) errors.push(`prd_items_checked is inconsistent with selected PRD route`);
           const expectedUiRoute = uiDesignChoice(state, instance.module_id) || "not-selected";
-          if (evidence.ui_route !== expectedUiRoute) errors.push(`ui_route must match signed UI choice ${expectedUiRoute}`);
+          if (evidence.ui_route !== expectedUiRoute) errors.push(`ui_route must match selected UI choice ${expectedUiRoute}`);
           const uiPages = asNumber(evidence.ui_pages_checked);
           const uiSelected = expectedUiRoute === "html-mock" || expectedUiRoute === "figma-create" || expectedUiRoute === "figma-existing";
-          if (uiPages === null || (uiSelected ? uiPages < 1 : uiPages !== 0)) errors.push("ui_pages_checked is inconsistent with signed UI route");
+          if (uiPages === null || (uiSelected ? uiPages < 1 : uiPages !== 0)) errors.push("ui_pages_checked is inconsistent with selected UI route");
           if (asNumber(evidence.unresolved_conflicts) !== 0) errors.push("unresolved_conflicts must be 0");
           const artifacts = asStringArray(evidence.artifacts_checked);
           if (!artifacts || artifacts.length < 3) errors.push("artifacts_checked must list canonical consistency inputs");
@@ -1388,7 +1320,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
             return errors;
           }
           const expectedMode = selectedChoice === "html-mock" ? "html-mock" : "figma";
-          if (uiSelected && evidence.design_mode !== expectedMode) errors.push(`design_mode must be ${expectedMode} for signed choice ${selectedChoice}`);
+          if (uiSelected && evidence.design_mode !== expectedMode) errors.push(`design_mode must be ${expectedMode} for selected choice ${selectedChoice}`);
           if (!["html-mock", "figma"].includes(String(evidence.design_mode))) errors.push('design_mode must be "html-mock" or "figma"');
           for (const field of ["styles_aligned", "conditional_visibility_aligned", "platform_constraints_respected"]) if (evidence[field] !== true) errors.push(`${field} must be true`);
           if (asNumber(evidence.unmapped_elements) !== 0) errors.push("unmapped_elements must be 0");
@@ -1613,61 +1545,13 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
   const reverseEngineeringPath = contextualConditionPath("docs/aidlc/inception/reverse-engineering.md", instance);
   const has_reverse_output = existsSync(reverseEngineeringPath);
 
-  // multi_module first honors the signed workspace architecture choice. Older
-  // signed workflows without that choice fall back to canonical project facts.
-  const signedArchitecture = architectureChoice(state);
-  const architectureChoiceKnown = signedArchitecture !== undefined;
-  let architectureEvidenceAvailable = architectureChoiceKnown;
-  let multi_module = signedArchitecture === "multi-module";
+  const selectedArchitecture = architectureChoice(state);
+  let multi_module = selectedArchitecture === "multi-module";
   const moduleManifestPath = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "module-manifest.json");
-  if (!architectureChoiceKnown && existsSync(moduleManifestPath)) {
+  if (!selectedArchitecture && existsSync(moduleManifestPath)) {
     try {
       multi_module = readModuleManifest(PROJECT_ROOT).length > 1;
-      architectureEvidenceAvailable = true;
     } catch { /* invalid manifests are rejected by the module-division report gate */ }
-  }
-  const workspaceFactsPath = join(PROJECT_ROOT, ".aidlc", "workspace-facts.json");
-  const moduleDivisionPath = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "module-division.md");
-  if (!architectureChoiceKnown && existsSync(workspaceFactsPath)) {
-    try {
-      const facts = JSON.parse(readFileSync(workspaceFactsPath, "utf-8")) as Record<string, unknown>;
-      if (Array.isArray(facts.modules)) {
-        multi_module = facts.modules.length > 1;
-        architectureEvidenceAvailable = true;
-      }
-    } catch { /* invalid facts are ignored and upstream document detection is used */ }
-  }
-  if (!architectureChoiceKnown && !architectureEvidenceAvailable && existsSync(moduleDivisionPath)) {
-    try {
-      const content = readFileSync(moduleDivisionPath, "utf-8");
-      const moduleHeadings = content.match(/^##\s+(?!摘要|概述|Summary)/gim);
-      if ((moduleHeadings?.length ?? 0) > 0) {
-        multi_module = (moduleHeadings?.length ?? 0) > 1;
-        architectureEvidenceAvailable = true;
-      }
-    } catch { /* unreadable */ }
-  }
-  if (!architectureChoiceKnown && !architectureEvidenceAvailable) {
-    try {
-      const packageJsonPath = join(PROJECT_ROOT, "package.json");
-      if (existsSync(packageJsonPath)) {
-        const pkg = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as Record<string, unknown>;
-        if (Array.isArray(pkg.workspaces) || (pkg.workspaces !== null && typeof pkg.workspaces === "object")) {
-          multi_module = true;
-          architectureEvidenceAvailable = true;
-        }
-      }
-    } catch { /* invalid package metadata */ }
-  }
-  if (!architectureChoiceKnown && !architectureEvidenceAvailable) {
-    const productInceptionInstance = "product-inception";
-    const legacyMultiRoute = state.current_stage === "product-inception"
-      || completedInstanceIds(state).includes(productInceptionInstance)
-      || state.history.some((entry) => entry.stage === "product-inception");
-    // Before workspace choices existed, every complete workflow entered the
-    // product route. Preserve that conservative behavior only for signed legacy
-    // workflows that already resolved workspace-detection.
-    if (legacyMultiRoute || isInstanceResolved(state, "workspace-detection")) multi_module = true;
   }
 
   const contextDocs = [
@@ -1686,8 +1570,8 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
   }
 
   const unitStageSelections = unitConditionalStageSelections(instance);
-  const selectedForUnit = (stageSlug: string, legacyFallback: boolean): boolean =>
-    unitStageSelections === undefined ? legacyFallback : unitStageSelections.has(stageSlug);
+  const selectedForUnit = (stageSlug: string, defaultValue: boolean): boolean =>
+    unitStageSelections === undefined ? defaultValue : unitStageSelections.has(stageSlug);
 
   const moduleHasNfrNeeds = /NFR|非功能|性能|安全|可用性|可靠性|恢复|扩展性/i.test(contextText);
   const has_nfr_needs = unitStageSelections === undefined
@@ -1698,8 +1582,7 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
   const applicationInstance = instance?.module_id
     ? stageInstanceId("application-design", "module", { module_id: instance.module_id })
     : "application-design";
-  const applicationDesignCompleted = completedInstanceIds(state).includes(applicationInstance)
-    || (state.routing_model !== "module-unit-v1" && state.completed_stages.includes("application-design"));
+  const applicationDesignCompleted = completedInstanceIds(state).includes(applicationInstance);
   const has_test_case_sources = applicationDesignCompleted && (existsSync(userStoriesPath) || has_nfr_needs || has_infra_needs);
   const moduleHasContractDependencies = /共享契约|shared.?contract|API.?contract|接口契约|proto|protobuf|OpenAPI|swagger/i.test(contextText);
   const has_contract_dependencies = selectedForUnit("shared-contract-baseline", moduleHasContractDependencies);
@@ -1723,8 +1606,6 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
 
   const buildMetadata = rootBuildMetadata();
   const productContractText = [
-    readConditionText(moduleDivisionPath),
-    readConditionText(workspaceFactsPath),
     readConditionText(join(PROJECT_ROOT, "docs", "aidlc", "ideation", "product-inception.md")),
     buildMetadata,
   ].join("\n");
@@ -1736,7 +1617,7 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
   const is_loeyae_boot = projectUsesLoeyaeBoot
     && selectedForUnit("loeyae-compliance", true);
 
-  // Runtime UI mode is taken from signed history, never from handoff.md.
+  // Runtime UI mode is taken from Markdown workflow history, never from handoff text.
   const uiChoice = uiDesignChoice(state, instance?.module_id);
   const ui_mode_html_mock = uiChoice === "html-mock";
   const ui_mode_figma = uiChoice === "figma-create" || uiChoice === "figma-existing";
@@ -1864,14 +1745,10 @@ function findNextInstance(
       }
       if (!conditionResult) {
         conditionSkips.push({ instance, reason: "condition not met" });
-        if (state.routing_model === "module-unit-v1") {
-          state.skipped_stage_instances!.push(instance.instance_id);
-        } else if (!state.skipped_stages.includes(stage.slug)) {
-          state.skipped_stages.push(stage.slug);
-        }
+        state.skipped_stage_instances.push(instance.instance_id);
         state.history.push({
           stage: stage.slug,
-          instance_id: state.routing_model === "module-unit-v1" ? instance.instance_id : undefined,
+          instance_id: instance.instance_id,
           module_id: instance.module_id,
           unit_id: instance.unit_id,
           result: "condition_skipped",
@@ -1913,8 +1790,18 @@ function parseFlags(args: string[]): Record<string, string> {
   return flags;
 }
 
-function activeApprovalKey(state: WorkflowState, instance: StageInstance): string {
-  return state.routing_model === "module-unit-v1" ? instance.instance_id : instance.stage.slug;
+function unsupportedFlag(flags: Record<string, string>, allowed: ReadonlySet<string>): string | undefined {
+  return Object.keys(flags).find((flag) => !allowed.has(flag));
+}
+
+function lightweightNextPrompt(state: WorkflowState, instance: StageInstance): string {
+  const unit = instance.module_id && instance.unit_id
+    ? `当前单元：${instance.module_id}/${instance.unit_id}。团队成员可用 unit select 声明负责人与分支。`
+    : "当前阶段不要求成员选择单元；按产物、review、构建和测试门禁推进。";
+  const artifacts = instance.stage.produces.length
+    ? instance.stage.produces.map((pattern) => instanceArtifactPattern(pattern, instance)).join("、")
+    : "本阶段没有声明文件产物";
+  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。\n下一步：完成后运行 orchestrate report。`;
 }
 
 function clearActiveContext(state: WorkflowState): void {
@@ -1945,6 +1832,8 @@ export function evidenceRoot(instance: StageInstance): string {
 async function handleNext(args: string[]): Promise<Directive> {
   const graph = loadGraph();
   const flags = parseFlags(args);
+  const invalidFlag = unsupportedFlag(flags, NEXT_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported AWS-style workflow option: --${invalidFlag}` };
 
   // PRD is a user-selected workflow option, never a default Inception gate.
   const withPrd = "with-prd" in flags;
@@ -2002,25 +1891,28 @@ async function handleNext(args: string[]): Promise<Directive> {
   }
 
   if (!state) {
-    // No workflow exists — need scope to initialize
     if (!scopeFlag) {
       return {
         kind: "ask",
-        question: "No active workflow found. Which scope should this workflow use?",
+        question: "No active AWS-style lightweight workflow found. Which scope should this work use?",
         options: ["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor", "poc"],
         ask_type: "scope-selection",
       } as unknown as Directive;
     }
-    // Initialize a new workflow, or resume an interrupted first commit that
-    // already created a pending project enrollment.
-    const enrollment = readEnrollment(PROJECT_ROOT);
-    const pendingWorkflowId = enrollment?.status === "pending" ? enrollment.workflow_id : undefined;
+    const workDescription = flags.work || flags.text;
+    if (!workDescription) {
+      return {
+        kind: "ask",
+        question: "Describe the work this new lightweight workflow should perform.",
+        ask_type: "work-description",
+      } as unknown as Directive;
+    }
     const selectedOptionalStages = withPrd ? ["prd-generation"] : [];
-    state = createInitialState(scopeFlag, "2.4.0", pendingWorkflowId, selectedOptionalStages);
+    state = createInitialState(scopeFlag, "4.0.0", undefined, selectedOptionalStages, workDescription);
     saveState(state);
     return {
       kind: "print",
-      message: `✅ Workflow initialized with scope: ${scopeFlag}\n` +
+      message: `✅ AWS-style lightweight workflow initialized for: ${workDescription}\n` +
         `  PRD option: ${withPrd ? "selected" : "not selected"}\n` +
         `  Executable stages: ${getExecutableStages(graph, scopeFlag, selectedOptionalStages).length}/${graph.stage_count}\n` +
         `  Run 'next' again to get the first stage directive.`,
@@ -2094,18 +1986,12 @@ async function handleNext(args: string[]): Promise<Directive> {
 
   state.current_stage = nextStage.slug;
   state.current_phase = nextStage.phase;
-  if (state.routing_model === "module-unit-v1") {
-    state.current_stage_instance = nextInstance.instance_id;
-    if (nextInstance.module_id) state.current_module = nextInstance.module_id;
-    else delete state.current_module;
-    if (nextInstance.unit_id) state.current_unit = nextInstance.unit_id;
-    else delete state.current_unit;
-  }
+  state.current_stage_instance = nextInstance.instance_id;
+  if (nextInstance.module_id) state.current_module = nextInstance.module_id;
+  else delete state.current_module;
+  if (nextInstance.unit_id) state.current_unit = nextInstance.unit_id;
+  else delete state.current_unit;
   const gate = nextStage.approval === "block";
-  const approvalKey = activeApprovalKey(state, effectiveNextInstance);
-  if (gate && !state.approval_challenges[approvalKey]) {
-    state.approval_challenges[approvalKey] = `${Date.now()}.${randomBytes(24).toString("hex")}`;
-  }
   saveState(state);
 
   const directiveChoices = runtimeChoices(nextStage, state);
@@ -2128,12 +2014,10 @@ async function handleNext(args: string[]): Promise<Directive> {
     gate,
     approval: nextStage.approval,
     completion_contract: nextStage.completion_contract,
-    approval_challenge: gate ? state.approval_challenges[approvalKey] : undefined,
     consumes: nextStage.consumes.map((pattern) => instanceArtifactPattern(pattern, effectiveNextInstance, true)),
     produces: nextStage.produces.map((pattern) => instanceArtifactPattern(pattern, effectiveNextInstance)),
     sensors: nextStage.sensors,
-    choices: directiveChoices,
-    choice_required: directiveChoices.length > 0,
+    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance),
   };
 }
 
@@ -2143,12 +2027,11 @@ async function handleNext(args: string[]): Promise<Directive> {
 
 async function handleReport(args: string[]): Promise<Directive> {
   const flags = parseFlags(args);
+  const invalidFlag = unsupportedFlag(flags, REPORT_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported AWS-style report option: --${invalidFlag}` };
   const stageSlug = flags.stage;
   const result = flags.result as StageResult;
   const userInput = flags["user-input"];
-  let approvalTokenValue = flags["approval-token"] || process.env.AIDLC_APPROVAL_TOKEN;
-  const approvalResponseFromStdin = "approval-response-stdin" in flags;
-  const approvalConfirmationFromStdin = "approval-confirmation-stdin" in flags;
 
   // Validate required fields
   if (!stageSlug) {
@@ -2159,18 +2042,6 @@ async function handleReport(args: string[]): Promise<Directive> {
   }
   if (!VALID_RESULTS.includes(result)) {
     return { kind: "error", message: `Invalid result "${result}". Valid: ${VALID_RESULTS.join(", ")}` };
-  }
-  if (approvalResponseFromStdin && flags["approval-response-stdin"] !== "true") {
-    return { kind: "error", message: "--approval-response-stdin is a boolean flag and does not accept a value" };
-  }
-  if (approvalConfirmationFromStdin && flags["approval-confirmation-stdin"] !== "true") {
-    return { kind: "error", message: "--approval-confirmation-stdin is a boolean flag and does not accept a value" };
-  }
-  if (approvalResponseFromStdin && approvalConfirmationFromStdin) {
-    return { kind: "error", message: "Use exactly one approval stdin channel: --approval-confirmation-stdin or --approval-response-stdin." };
-  }
-  if ((approvalResponseFromStdin || approvalConfirmationFromStdin) && result !== "approved") {
-    return { kind: "error", message: "Approval stdin is only valid with --result approved" };
   }
 
   // Load state
@@ -2197,13 +2068,11 @@ async function handleReport(args: string[]): Promise<Directive> {
     return { kind: "error", message: `Unknown stage "${stageSlug}".` };
   }
   const instances = expandStageInstances(graph, state);
-  const declaredCurrentInstance = state.routing_model === "module-unit-v1"
-    ? instances.find((instance) => instance.instance_id === state.current_stage_instance)
-    : makeInstance(stageNode, "project");
+  const declaredCurrentInstance = instances.find((instance) => instance.instance_id === state.current_stage_instance);
   if (!declaredCurrentInstance || declaredCurrentInstance.stage.slug !== stageSlug) {
     return {
       kind: "error",
-      message: `Active stage instance "${state.current_stage_instance || stageSlug}" no longer exists in the declared module/unit manifests. Restore the signed routing manifests before reporting.`,
+      message: `Active stage instance "${state.current_stage_instance || stageSlug}" no longer exists in the declared module/unit manifests. Restore the current Markdown workflow manifests before reporting.`,
     };
   }
   const currentInstance = runtimeInstance(declaredCurrentInstance, state);
@@ -2213,43 +2082,15 @@ async function handleReport(args: string[]): Promise<Directive> {
   if (flags.unit && flags.unit !== currentInstance.unit_id) {
     return { kind: "error", message: `Unit mismatch: active unit is "${currentInstance.unit_id || "(none)"}", but report specified "${flags.unit}".` };
   }
-  const approvalKey = activeApprovalKey(state, currentInstance);
   if (result === "completed" && stageNode.approval === "block") {
-    return { kind: "error", message: `Stage "${stageSlug}" requires explicit approval. Supply the exact active conversation confirmation with --result approved --approval-confirmation-stdin.` };
+    return { kind: "error", message: `Stage "${stageSlug}" requires explicit approval. Report --result approved --user-input Approve after presenting the decision summary.` };
   }
   if (result === "approved") {
     if (stageNode.approval !== "block") {
       return { kind: "error", message: `Stage "${stageSlug}" is not an approval gate and cannot use --result approved.` };
     }
-    const challenge = state.approval_challenges[approvalKey];
-    if (!challenge) return { kind: "error", message: `No active approval challenge for stage instance "${currentInstance.instance_id}". Run next to obtain one.` };
-    const issuedAt = Number(challenge.split(".", 1)[0]);
-    if (!Number.isFinite(issuedAt) || Date.now() - issuedAt > 15 * 60 * 1000 || issuedAt > Date.now() + 60 * 1000) {
-      delete state.approval_challenges[approvalKey];
-      saveState(state);
-      return { kind: "error", message: `Approval challenge for stage instance "${currentInstance.instance_id}" expired. Run next to obtain a new challenge.` };
-    }
-    if (approvalConfirmationFromStdin) {
-      if (flags["approval-token"] || process.env.AIDLC_APPROVAL_TOKEN) {
-        return { kind: "error", message: "Use exactly one approval channel: conversation confirmation stdin, provider response stdin, --approval-token, or AIDLC_APPROVAL_TOKEN." };
-      }
-      const request = buildApprovalProviderRequest(state, stageSlug);
-      const confirmation = validateApprovalConversationConfirmation(readFileSync(0, "utf8"), request);
-      approvalTokenValue = confirmation.approval_token;
-    }
-    if (approvalResponseFromStdin) {
-      if (flags["approval-token"] || process.env.AIDLC_APPROVAL_TOKEN) {
-        return { kind: "error", message: "Use exactly one approval channel: conversation confirmation stdin, provider response stdin, --approval-token, or AIDLC_APPROVAL_TOKEN." };
-      }
-      const request = buildApprovalProviderRequest(state, stageSlug);
-      const providerResponse = validateApprovalProviderResponse(readFileSync(0, "utf8"), request);
-      approvalTokenValue = providerResponse.approval_token;
-    }
-    if (!approvalTokenValue) {
-      return { kind: "error", message: `Stage instance "${currentInstance.instance_id}" requires an exact conversation confirmation, trusted provider response, or --approval-token from the TTY fallback.` };
-    }
-    if (!verifyApprovalToken(state.workflow_id, approvalKey, challenge, approvalTokenValue)) {
-      return { kind: "error", message: `Invalid or stale approval confirmation/token for stage instance "${currentInstance.instance_id}".` };
+    if (userInput !== "Approve") {
+      return { kind: "error", message: `Stage "${stageSlug}" requires --user-input Approve.` };
     }
   }
   if (stageNode.completion_contract === "instruction_only" && result === "completed" && flags["instruction-ack"] !== stageSlug) {
@@ -2263,7 +2104,7 @@ async function handleReport(args: string[]): Promise<Directive> {
     if (!userInput || !runtimeChoiceValues.includes(userInput)) {
       return {
         kind: "error",
-        message: `Stage "${stageSlug}" requires --user-input with one of: ${runtimeChoiceValues.join(", ")}. The choice is stored in signed workflow history.`,
+        message: `Stage "${stageSlug}" requires --user-input with one of: ${runtimeChoiceValues.join(", ")}. The choice is stored in Markdown workflow history.`,
       };
     }
   }
@@ -2271,7 +2112,7 @@ async function handleReport(args: string[]): Promise<Directive> {
   // Record history entry
   const entry: HistoryEntry = {
     stage: stageSlug,
-    instance_id: state.routing_model === "module-unit-v1" ? currentInstance.instance_id : undefined,
+    instance_id: currentInstance.instance_id,
     module_id: currentInstance.module_id,
     unit_id: currentInstance.unit_id,
     result,
@@ -2300,10 +2141,10 @@ async function handleReport(args: string[]): Promise<Directive> {
         };
       }
 
-      if (state.routing_model === "module-unit-v1" && stageSlug === "module-division") {
+      if (stageSlug === "module-division") {
         readModuleManifest(PROJECT_ROOT);
       }
-      if (state.routing_model === "module-unit-v1" && stageSlug === "units-generation") {
+      if (stageSlug === "units-generation") {
         if (!currentInstance.module_id) throw new Error("units-generation requires an active module context");
         const units = readUnitManifest(PROJECT_ROOT, currentInstance.module_id);
         if (architectureChoice(state)) {
@@ -2313,7 +2154,7 @@ async function handleReport(args: string[]): Promise<Directive> {
           if (missingSelections.length > 0) {
             return {
               kind: "error",
-              message: `🚫 Cannot complete stage instance "${currentInstance.instance_id}" — new signed workflows require conditional_stages for every unit; missing: ${missingSelections.join(", ")}.`,
+              message: `🚫 Cannot complete stage instance "${currentInstance.instance_id}" — each unit must declare conditional_stages; missing: ${missingSelections.join(", ")}.`,
             };
           }
         }
@@ -2336,14 +2177,9 @@ async function handleReport(args: string[]): Promise<Directive> {
   switch (result) {
     case "completed":
     case "approved":
-      if (state.routing_model === "module-unit-v1") {
-        state.completed_stage_instances!.push(currentInstance.instance_id);
-        reconcileStageSummaries(state, instances);
-      } else if (!state.completed_stages.includes(stageSlug)) {
-        state.completed_stages.push(stageSlug);
-      }
+      state.completed_stage_instances.push(currentInstance.instance_id);
+      reconcileStageSummaries(state, instances);
       clearActiveContext(state);
-      if (result === "approved") delete state.approval_challenges[approvalKey];
       break;
 
     case "rejected":
@@ -2362,6 +2198,7 @@ async function handleReport(args: string[]): Promise<Directive> {
       return {
         kind: "print",
         message: `✅ Stage "${stageSlug}" ${result}. Run 'next' for the next stage.`,
+        handoff_prompt: `工作目标：${state.work_description}\n当前阶段：${stageSlug} 已完成。\n下一步：运行 orchestrate next 获取新的 directive，并按其产物、review、构建、测试和 sensor 要求继续。`,
       };
     case "rejected":
       return {
@@ -2404,7 +2241,7 @@ async function handlePark(): Promise<Directive> {
 // ---------------------------------------------------------------------------
 
 async function handleContinue(token: string): Promise<Directive> {
-  // In v2, load-steering chains are simplified:
+  // Load-steering chains are simplified:
   // The agent loads stage files directly. This is a passthrough.
   return {
     kind: "print",

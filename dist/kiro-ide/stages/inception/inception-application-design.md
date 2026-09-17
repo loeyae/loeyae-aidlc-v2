@@ -93,7 +93,7 @@ approval: block
     - 触发条件：前端目标平台为跨端（Taro/RN/Flutter/UniApp 跨端模式等）
     - 跳过条件：纯 Web 项目（PC 端 Vue3/React SPA）
     - Construction 根据这些事实为每个单元生成隔离的 `frontend-platform-spec.md`
-    - 禁止在新 `module-unit-v1` 工作流中创建 `docs/aidlc/frontend-platform-spec.md`
+    - 禁止在当前 module/unit workflow 中创建 `docs/aidlc/frontend-platform-spec.md`
 
 ### 4. 生成上下文相关的问题
 **指令**：分析需求和故事，仅生成与此特定应用设计相关的问题。使用以下类别作为灵感，而非强制清单。如不适用则跳过整个类别。
@@ -242,7 +242,7 @@ approval: block
 > [如果单元生成被跳过：]
 > 📝 **添加单元生成** - 选择包含**单元生成**步骤（当前已跳过）
 > ✅ **确认并继续** - 确认设计，进入**[单元生成/CONSTRUCTION 阶段]**
-> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时先验证签名 state 并读取 `docs/aidlc/handoff.md`。
+> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时读取 `aidlc/active/aidlc-state.md` 和 `aidlc/active/audit.md`。
 ```
 
 ### 13. 等待明确审批

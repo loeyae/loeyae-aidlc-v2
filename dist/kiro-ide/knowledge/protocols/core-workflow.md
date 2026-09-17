@@ -1,219 +1,64 @@
-# AI-DLC 主工作流路由
+# AI-DLC 核心工作流
 
-> 本文件只定义阶段路由、执行条件、审批级别和按需加载入口。步骤详情由对应 steering 文件定义。
+## 启动
 
-## 强制规则
+每个新 workflow 从用户明确的工作描述开始：
 
-1. 使用简体中文交互，并称呼用户为 Boss。
-2. 不确定时先提一个关键问题，不得用假设代替澄清。
-3. 禁止 TODO、FIXME、空实现和未经验证的完成声明。
-4. 每步先由 `orchestrate report` 更新签名机器状态 `docs/aidlc/aidlc-state.json`，再按 `common-step-completion-protocol.md` 派生更新 `docs/aidlc/handoff.md`。
-5. 下一步说明必须附可直接复制的执行提示词。
-6. `orchestrate next` 返回的 `stage_instance`、`axis`、`module_id`、`unit_id`、`artifact_root`、已解析 `consumes`/`produces` 和 `evidence_root` 是当前执行的机器事实；正文中的抽象路径示例不得覆盖 directive。
+```bash
+loeyae-aidlc orchestrate next --scope <scope> --work "<明确工作目标>"
+```
 
-## 声明式执行轴与顺序
+控制面仅为：
 
-每个 Stage 在图谱中声明一个执行轴：
+```text
+aidlc/active/aidlc-state.md
+aidlc/active/audit.md
+```
 
-- `project`：产品级 Ideation、项目聚合构建测试、实施报告和 Operations，只执行一个实例。
-- `module`：Inception 按 `docs/aidlc/ideation/module-manifest.json` 中的每个 `module_id` 独立执行。
-- `unit`：Construction 按各模块 `inception/unit-manifest.json` 中的每个 `unit_id` 独立执行。
+`next` 返回一个当前 directive；Agent 读取其阶段文件、产物要求与 `handoff_prompt` 后执行当前工作。
 
-机器顺序固定为：项目级 Ideation → 模块 A 完整 Inception → 模块 B 完整 Inception → 模块 A/单元 1 完整 Construction → 模块 A/单元 2 完整 Construction → 模块 B/单元 1 完整 Construction → 项目级聚合与 Operations。连续的 module/unit 轴按上下文优先展开，禁止同一 Stage 扫过所有模块后再进入下一 Stage。
+## 路由与实例
 
-实例 ID 约定：项目级为 `<stage-slug>`；模块级为 `<stage-slug>@module:<module-id>`；单元级为 `<stage-slug>@module:<module-id>@unit:<unit-id>`。`docs/aidlc/aidlc-state.json` 中的 instance 数组和当前上下文负责真实路由，逻辑级 `completed_stages`/`skipped_stages` 仅作兼容摘要。
+阶段图定义 project、module 和 unit 轴的依赖。完整 scope 的 `workspace-detection` 要求用户选择 `single-module` 或 `multi-module`，通过：
 
-模块或单元上下文非空时，禁止把 Inception/Construction 产物写回旧的全局目录。新工作流即使只有一个模块，也必须在 module manifest 中声明该模块，并为其声明至少一个工作单元。
+```bash
+loeyae-aidlc orchestrate report \
+  --stage workspace-detection \
+  --result completed \
+  --instruction-ack workspace-detection \
+  --user-input <choice>
+```
 
-## 审批模式
+module manifest 与 unit manifest 生成后，成员使用 `unit select` 记录开发分工。当前 state 中的阶段 history、module/unit 上下文和 manifests 决定路由。
 
-| 模式 | 等待规则 | 适用场景 |
-|------|----------|----------|
-| 严格 | 🔴、🟡均等待 | 团队协作、高风险项目 |
-| 标准（默认） | 仅🔴等待 | 单人开发、中等复杂度 |
-| 自主 | 仅需求确认、架构与安全决策等待 | 低风险迭代 |
+## 阶段完成
 
-团队协作自动使用严格模式；新项目首次 Inception 不得低于标准模式。🟢步骤仅通知，任何模式下均不得跳过其验证。
+普通阶段：
 
-## 按需加载
+```bash
+loeyae-aidlc orchestrate report --stage <slug> --result completed
+```
 
-| 时机 | 加载文件 |
-|------|----------|
-| 启动 | 本文件；首次启动再加载 `common-welcome-message.md` |
-| 配置了 SSOT 连接时 | `common-ssot-integration.md` |
-| I3 场景分析与模块映射 | `product-scenario-module-mapping.md` |
-| 用户选择产出 PRD 或独立生成 PRD | `product-prd-generation.md` |
-| I9 选择 Figma 模式 | `inception-ui-figma.md` |
-| 当前模块签名 I9 choice 为 `figma-create` 或 `figma-existing` | `common-figma-design-standards.md` |
-| 工作区检测后 | `common-complexity-assessment.md` |
-| 恢复会话 | `common-session-continuity.md` |
-| 变更请求 | `common-workflow-changes.md` + `change-request-process.md` |
-| 进入步骤 | 路由表指定文件 |
-| 创建文件 | `common-content-validation.md` |
-| 执行门禁 | `common-quality-gates.md` |
-| 生成澄清问题或分析用户回答 | `common-overconfidence-prevention.md` |
-| 声明完成、验证结果，或出现跳步与合理化倾向 | `common-persuasion-defense.md` |
-| 多模块项目执行审计、自检、交叉验证或批量修复 | `common-module-scope-guard.md` |
-| TDD、构建测试 | `common-test-execution-strategy.md` |
-| 存量分布式系统 | 按需加载 `common-runtime-dependency-analysis.md`、`common-contract-governance.md`、`common-configuration-governance.md`、`common-distributed-consistency.md` |
-| 创建或优化文档且需要新图表时 | `common-diagram-design-standards.md`；默认 Mermaid 时再加载 `common-mermaid-diagram-standards.md` + `common-mermaid-syntax-rules.md` |
-| 用户明确要求 SVG、目标文档已有有效 SVG 引用，或阶段契约明确要求 SVG 时 | `common-diagram-design-standards.md` + `common-svg-diagram-standards.md` |
-| 执行 SVG 源级、几何或目标环境验证时 | `common-diagram-validation-standards.md` + `common-svg-diagram-standards.md` |
-| 检测到技术栈证据 | 按签名当前模块/单元与 canonical 项目产物加载对应的 `common-tech-*` 条件适配；handoff 仅作提示 |
+instruction-only 阶段：
 
-禁止启动时预加载全部规则。目录、审计、协作、提问和交接分别按 `common-directory-structure.md`、`common-audit-logging.md`、`common-team-collaboration.md`、`common-question-format-guide.md`、`common-session-handoff.md` 按需加载。
+```bash
+loeyae-aidlc orchestrate report \
+  --stage <slug> --result completed --instruction-ack <slug>
+```
 
-规则中出现的 `aidlc-*` 能力调用只是平台入口。当前宿主未独立发现随附的 capability Skill 时，直接加载本分发中的 `skills/<capability>/SKILL.md` 及其引用规则执行，输入要求、输出内容和质量门禁均不变。能力入口缺失不构成跳过步骤的理由。
+应用设计和部署决策：
 
-## 文档图表格式决策（强制）
+```bash
+loeyae-aidlc orchestrate report \
+  --stage <slug> --result approved --user-input Approve
+```
 
-创建或优化 Markdown 及其他文档产物时，必须先读取目标文档并在生成图表前按以下优先级确定格式：
+完成前必须满足 consumes、produces、requires、condition 和 sensor。条件不适用的阶段由引擎记录为 `condition_skipped`。
 
-1. 用户明确指定 Mermaid 或 SVG 时，使用用户指定格式；
-2. 用户未指定且目标文档已经通过有效 Markdown/HTML 引用使用 SVG 时，延续 SVG；同目录存在未引用的 `.svg` 文件不构成依据；
-3. 阶段的 `produces`、sensor 或目标产物契约明确要求 SVG 时，将其视为显式 SVG 要求；
-4. 其余文档创建或优化场景默认选择 `mermaid`，以目标 Markdown 内的 fenced block 交付。
+## Evidence 与交付
 
-格式一经确定不得因生成、解析或 Provider 失败而静默切换。需要变更格式时，必须重新满足上述优先级或取得用户明确指示。Mermaid 模式不得额外生成 `.svg`、`.diagram.json`、expected contract 或 Provider Request；SVG 模式不得用 Mermaid 代码块冒充 SVG 门禁产物。
+受控 Evidence 记录 source revision、执行结果和 sensor 输出。review evidence 必须覆盖实际改动路径；build/test evidence 必须来自真实命令。worktree merge plan 只提供人工合并建议，绝不自动 merge 或 push。
 
-## Diagram Invocation Protocol
+## 交接与暂停
 
-1. Phase 先判断是否需要图——复杂结构、多组件依赖、分支/循环、多方时序、状态迁移、层级关系、图明显优于文字/表格或用户明确要求时才生成；简单字段列表、两实体简单关系、纯线性步骤或事实不足时使用文字/表格。
-2. 按“文档图表格式决策”确定 `output_format`。
-3. `output_format: mermaid` 时：
-   - 加载 `common-mermaid-diagram-standards.md` 与 `common-mermaid-syntax-rules.md`；
-   - 直接在目标 Markdown 中生成或优化 `mermaid` fenced block，保持相邻正文为业务事实来源；
-   - 使用项目已具备的 Mermaid parser/CLI 执行真实语法解析；能力不可用时明确记录“未执行真实语法解析”，不得伪造通过或静默安装工具；
-   - 不调用仅处理 SVG 的 `aidlc-diagram-design` Capability。
-4. `output_format: svg` 时，Phase 准备 Diagram Request 并调用 `aidlc-diagram-design`：
-   - `source/context`：当前 Phase 已确认的语义上下文；
-   - `diagram intent`：这张图帮助读者理解什么（一句话）；
-   - `approved facts`：已确认的组件、实体、关系和规则；
-   - `target artifact`：图所服务的目标 Markdown 路径；
-   - `diagram_type`：默认 `auto`；
-   - `output_format`：固定为 `svg`；
-   - `target_operations`：用户或目标产物实际要求的 `source-only`、`preview`、`render`、`export`；
-   - `target_reading_environment` 与 `constraints`：仅在有明确事实时传入。
-5. SVG Result 包含 SVG 源路径、可选 `.diagram.json`、Provider Request、Design Notes、Validation 和 Delivery Status。只有外部 Provider 实际返回目标产物并提供证据时，才能声明预览、渲染或导出完成；无 Provider 时将目标几何/视觉标为 `UNVERIFIED`，明确要求目标操作但能力缺失时返回 `NEEDS_CAPABILITY`。
-
-每张具有不同语义目的的图独立处理。Phase 不得重复定义图型语义，也不得把一种格式的检查结果当作另一种格式的验收证据。
-
-## 意图路由
-
-先通过编排器验证并读取签名 `aidlc-state.json`，再把用户意图与当前 `stage_instance`、模块、单元和 canonical 产物对照后按下表路由；`handoff.md` 只补充人类协作说明。无法唯一判断时询问用户，不能由 handoff 改变机器游标或选择。
-
-| 意图 | 判定 | 路由 |
-|------|------|------|
-| 继续开发 | 继续、恢复、接着做 | `common-session-continuity.md` |
-| 缺陷修复 | 修复已批准需求/故事/契约中的错误实现，不改变产品语义 | 受影响 Construction 步骤（不进入 CR） |
-| 无行为重构 | 不改变外部行为，仅改善内部结构 | 受影响 Construction 步骤 + 影响域验证（不进入 CR） |
-| 在途产品协调 | 需求、故事、UI 或设计存在差异，且受影响范围尚无代码基线 | `common-workflow-changes.md`（用户裁决、就地协调、受影响步骤重审） |
-| 业务方 PRD 评审意见回流 | PRD 已发出且业务方提出内容变更 | 无代码基线按 `common-workflow-changes.md` 协调后通过 `product-prd-generation.md` Patch 模式更新 PRD；有代码基线按 CR1-CR5 |
-| 需求/契约变更 | 改变已有代码基线的行为、验收标准、接口契约或数据语义 | CR1-CR5（PR 模型） |
-| 合并历史 CR | 合并历史CR文档、清理遗留CR文件 | `change-request-process.md` §历史CR文档批量合并 |
-| 压缩 state | 压缩state、精简state | `inception-state-template.md` §handoff.md 压缩规则 |
-| 新增功能 | 新功能且现有产物中不存在 | Inception 追加模式 |
-| 生成 PRD | 生成PRD、写PRD、产品需求文档 | `product-prd-generation.md` |
-| 新项目 | 无 `docs/aidlc/aidlc-state.json` | Inception |
-
-## Inception 路由
-
-> 目标：确认开发什么、为什么开发以及如何验收。具体方法、产物和回退规则均在加载文件中定义。
-
-| # | 步骤 | 条件 | 审批 | 加载文件 |
-|---|------|------|------|----------|
-| I1 | 工作区检测与架构 choice | 始终；完整 scope 必须签名选择 `single-module` 或 `multi-module`，快速 scope 不要求 | 🟢 | `inception-workspace-detection.md` + `common-complexity-assessment.md` |
-| I2a | 产品级 Inception | 签名架构 choice 为 `multi-module` | 🔴 | `product-inception.md` |
-| I2b | 模块清单 | 完整 scope 始终执行；单模块只登记唯一模块，不做模块归属审批 | 🔴 | `product-module-division.md` |
-| I2c | 产品契约 | 多模块，或存在跨进程、异步事件、前后端接口、外部系统交换等事实 | 🔴 | `product-contracts.md` |
-| I3 | 场景分析与模块映射 | 始终 | 🔴 | `product-inception.md` + `product-scenario-module-mapping.md` |
-| I4 | 逆向工程 | 存量项目且无有效逆向产物 | 🟡 | `inception-reverse-engineering.md` |
-| I5 | 需求分析 | 标准/完整流程 | 🔴 | `inception-requirements-analysis.md` |
-| I6 | 需求审查 | I5 完成 | 🔴 | `inception-cross-validation.md`（a/b） |
-| I7 | 用户故事 | 已生成需求文档 | 🔴 | `inception-user-stories.md` |
-| I8 | 用户故事审查 | I7 完成 | 🔴 | `inception-cross-validation.md`（c/d） |
-| I9 | UI 设计 | 存在界面需求时，由用户在 `html-mock`、`figma-create`、`figma-existing`、`skip` 中选择一个运行时分支 | 🔴 | `inception-ui-mock.md`（choice router）→ 仅加载所选 HTML/Figma 分支 |
-| I10 | UI 设计审查 | I9 已执行 | 🔴 | `inception-cross-validation.md`（e） |
-| I15 | PRD 生成 | 初始化完整 scope 时用户显式选择 `--with-prd`，或独立提出生成请求 | 🔴 | `product-prd-generation.md` |
-| I16 | PRD 审查 | I15 已执行且用户要求审查 | 🔴 | `inception-cross-validation.md`（g） |
-| I11 | 工作流规划 | 标准/完整流程，且（未选择产出 PRD 或 I16 已通过） | 🔴 | `inception-workflow-planning.md` |
-| I12 | 应用设计 | `workflow-plan.md` 决策为 `execute`；旧计划才按新接口、跨模块/服务、多端、复杂业务规则等证据推断 | 🟡 | `inception-application-design.md` |
-| I13 | 测试用例派生 | 产品用例具备 I7+I12；或技术用例具备已批准风险来源与可执行锚点 | 🟡 | `test-case-derivation.md` |
-| I14 | 单元生成与单元清单 | `workflow-plan.md` 决策为 `execute`；多单元、跨服务协调或功能设计需要单元定义时执行 | 🟡 | `inception-units-generation.md` |
-
-完整 scope 在 `workspace-detection` directive 中必须向用户展示 `single-module / multi-module`，并以 `report --stage workspace-detection --result completed --instruction-ack workspace-detection --user-input <choice>` 写入签名 history。单模块会把 `product-inception` 记录为 `condition_skipped`，但仍执行精简模块清单和 I3；`product-contracts` 仅在 `has_product_contract_needs=true` 时生成。快速 scope 不包含这些产品级 Stage，因此不得强迫架构选择。旧签名工作流缺少该 choice 时才根据模块清单或已进入的产品分支保守推断，handoff 不是机器路由来源。
-
-完整 scope 初始化时，编排方必须把 PRD 作为明确选项呈现给用户。只有用户选择生成时才传入 `--with-prd`；未选择时签名状态记录空的 `selected_optional_stages`，`prd-generation` 不进入可执行实例，不创建 PRD 文件或占位目录，也不阻断后续 Inception。
-
-I9 与 PRD 的初始化选择不同：当 `ui-mock` directive 返回 `choice_required: true` 时，编排方必须展示其 `choices`，并把唯一选择通过 `report --stage ui-mock --result completed --instruction-ack ui-mock --user-input <choice>` 写入签名 history。`skip` 不创建 UI 产物，也不触发 UI Evidence；`html-mock` 与两个 Figma choice 只进入各自互斥分支。页面计划、HTML skeleton/content 或 Figma manifest 分别通过 `ui-artifact-consistency` 对齐前序需求和故事。后续条件只读取签名 history，`handoff.md` 只能展示派生结果。
-
-I11 的 `workflow-plan.md` 必须为 `application-design`、`units-generation`、`functional-design` 和 `operations` 分别写入 `execute / skip` 与 evidence。引擎优先使用该机器决策表；同一项目的多模块计划中任一模块明确 `execute` 即执行项目级 Operations，全部明确 `skip` 才跳过。旧工作流缺少对应行时才按保守项目证据推断。
-
-I14 执行时，新签名工作流必须在每个 `unit-manifest.json` 条目中声明 `conditional_stages`，把功能设计、NFR、基础设施、共享契约、子代理、框架合规和 UI Bridge 的适用性限制到当前单元；空数组表示这些条件 Stage 对该单元均不适用。数组值由 I14 的需求/故事/依赖/计划事实推导，不是用户交互 choice。旧签名清单缺字段时继续按模块级事实保守执行，避免升级时误跳过质量路径。
-
-I15 的编排内路径在产品契约完成或由 condition=false 签名跳过后执行；模块清单是硬输入，产品契约只在已生成时作为增强输入，继续使用原有 produces 和 `prd-completeness` 准出门禁。选择在工作流初始化时写入签名状态，活动工作流中不得通过 handoff、聊天确认或手工改 state 增删该选择。后续每个模块的 `cross-validation` 通过 `inception-consistency` 动态纳入已选 PRD；未选择 PRD 时既不读取也不要求 PRD。最终 `implementation-report` 必须汇总所有模块并证明 PRD 条目至少映射到一个模块报告。I16 的额外人类评审仍按用户要求执行，但不替代机器一致性门禁。
-
-PRD 也可独立于 Inception 流程执行：用户直接要求“生成 PRD”时，通过 `aidlc-prd-synthesis` 加载 `product-prd-generation.md`，无需启动工作流或具备 I5-I10；已有产品契约和 Inception 产物仅作为增强输入。
-
-快速通道的最小需求确认和跳过条件以 `common-complexity-assessment.md` 为准。多模块的模块级产物路径以 `common-directory-structure.md` 为准。
-
-## Construction 入场门禁
-
-若存在新接口、跨模块/服务调用、多端改动、复杂业务规则，或契约、共享配置、数据迁移、一致性、外部故障行为变化，I12 必须完成；若工作量超出单次执行范围、需多个工作单元或跨服务协调，I14 必须完成。缺失时阻断并返回对应 Inception 步骤。
-
-## Construction 路由
-
-> 目标：按单元完成设计、TDD 实现、审查和可复现验证。所有条件阈值由 `common-complexity-assessment.md` 定义。
-
-| # | 步骤 | 条件 | 审批 | 加载文件 |
-|---|------|------|------|----------|
-| C1 | 功能设计 | 新数据模型或业务规则达到阈值 | 🟡 | `construction-functional-design.md` |
-| C2 | NFR 需求 | 明确性能指标或新增安全机制 | 🟡 | `construction-nfr-requirements.md` |
-| C3 | NFR 设计 | C2 识别出特殊模式 | 🟡 | `construction-nfr-design.md` |
-| C4 | 基础设施设计 | 新基础设施组件或部署架构变更 | 🟡 | `construction-infrastructure-design.md` |
-| C5 | TDD 代码生成与自适应审查 | 始终 | 🔴 | `construction-shared-contract-baseline.md`（条件） + `construction-code-generation.md` + `construction-tdd.md` + `construction-code-review.md` + `construction-subagent-execution.md` |
-| C6 | 系统化调试 | 出现技术失败 | — | `common-systematic-debugging.md` |
-| C7 | 最终全局审查 | 多单元、复杂/高风险，或跨组件/服务、契约、共享配置、数据所有权、安全边界 | 🟢 | `construction-code-review.md` |
-| C8 | 实际构建和测试 | 始终；C5 审查通过 + C7 审查通过（触发时） | 🔴 | `construction-build-and-test.md` + `construction-implementation-report.md` |
-
-每个单元必须完成“设计（条件）→ TDD → Spec/Standards 双轴检查 → 影响域验证”；快速通道可在一次集成审查中完成双轴检查，其他路径独立执行两轴审查。C8 未取得实际命令证据时，Construction 不得标记完成。
-
-**C8 硬性前置依赖**：C8 开始前，编排方必须确认每单元审计文件中双轴审查记录存在且通过；C7 触发时还须确认最终全局审查记录通过。缺失审查证据时 C8 不得启动，返回 C5/C7 补齐。详见 `construction-build-and-test.md`“审查证据阻断”章节。
-
-C5 条件前置：存在 `contract` 类型跨单元依赖时，先加载并完成 `construction-shared-contract-baseline.md`；相关基线未 `verified` 时阻断消费者代码生成。单单元或无 `contract` 依赖时记录跳过原因后继续 C5。
-
-## Operations 路由（部署准备，条件）
-
-> 目标：为需要部署的项目生成与已确认目标环境匹配的交付配置和可执行部署说明；不覆盖部署后的生产运营。
-
-| # | 步骤 | 条件 | 审批 | 加载文件 |
-|---|------|------|------|----------|
-| O1 | 部署需求与目标确认 | `workflow-plan.md` 的 `operations` 决策为 `execute`，或旧计划有独立服务/部署目标等事实 | 🔴 | `operations-operations.md` |
-| O2 | 交付配置生成 | O1 完成；仅生成选定目标配置 | 🟡 | `operations-operations.md`；模板只按需读取 |
-| O3 | 配置验证与部署文档 | O2 完成 | 🔴 | `operations-operations.md` + `common-quality-gates.md` |
-| O4 | 可复用模板归档 | Operations 产物明确要求生成、保留或归档模板 | 🟡 | `operations-templates.md` |
-
-纯库、纯本地工具或计划明确无需部署时，引擎在签名 state/history 中记录 Operations 的 `condition_skipped`，不创建 `approval: block` challenge。`handoff.md` 只能派生展示该结果，不能作为路由依据。普通 Docker/Kubernetes 目标配置属于 O2，不自动触发 O4 的模板目录门禁。
-
-## Change Request 路由
-
-> CR 是暂态差异，不是永久档案。正式基线就地更新，Git 历史为唯一长期档案。CR 完成 = 基线已更新 + 暂态文件已删除。变更分流详见 `change-request-process.md`。
-
-| # | 步骤 | 条件 | 审批 | 加载文件 |
-|---|------|------|------|----------|
-| CR1 | 变更范围定位 | 始终 | 🟢 | `change-request-process.md` |
-| CR2 | 影响评估 | 始终 | 🔴 | `change-request-process.md` |
-| CR3 | 变更计划 | CR2 已确认 | 🔴 | `change-request-process.md` |
-| CR4 | 执行变更与就地基线更新 | CR3 已确认 | 按受影响步骤 | 对应阶段 steering |
-| CR5 | 合并门禁与完成 | CR4 完成 | 🟢 | `change-request-process.md` + `inception-cross-validation.md` |
-
-新增功能采用追加模式，从 I5 开始，仅追加受影响产物并对新增/受影响单元执行 Construction。已有代码基线的产品语义或接口契约变化进入 CR；尚无代码基线时就地协调并重审。代码基线与混合成熟度判定见 `change-request-process.md`，在途协调见 `common-workflow-changes.md`。
-
-## 完成标准
-
-| 范围 | 完成条件 |
-|------|----------|
-| Inception | `module-manifest.json` 中每个模块的必需实例均已完成/条件跳过；I14 执行时各模块 `unit-manifest.json` 合法，I14 跳过时路由到确定性的 `default` 单元；需求/故事始终通过 `inception-consistency`，签名选择的 PRD/UI canonical 产物动态纳入模块交叉验证，未选分支不产生门禁 |
-| Construction | 每个 module/unit 实例均完成设计、TDD、代码生成和单元审查；随后项目级实际构建测试与实施报告有证据且通过 |
-| Operations | 仅生成选定部署目标需要的文件，配置语法/静态验证通过，部署说明可执行 |
-| 会话连续性 | handoff.md、审计与下一步交接一致，可在三平台恢复 |
+每个 directive 和成功 report 返回 `handoff_prompt`。必须原样展示它。用户明确要求暂停时执行 `orchestrate park`；使用 `next --resume` 恢复。

@@ -1,161 +1,27 @@
 # Session 交接提示词
 
-## 目的
+`handoff_prompt` 是当前工作流的面向人的交接文本。它来自 `orchestrate next` 与成功的 `orchestrate report`，Agent 必须原样展示。
 
-在阶段/步骤完成时，生成可复制的提示词并写入 handoff.md，方便：
-- 用户在新 session 中继续工作（避免单 session 过长导致 token 浪费）
-- 团队协作时接手人直接从 handoff.md 获取交接信息
+## 内容要求
 
-## 机器状态边界
+提示词必须清楚说明：
 
-`docs/aidlc/aidlc-state.json` 是唯一机器路由事实。handoff 只能展示成功 `report` 后派生的状态，不能自行改变 Stage、skip、approval、revision、当前模块或当前单元。恢复会话时先验证签名 state，再使用 handoff 补充人类说明。
+- 工作目标；
+- 当前阶段和 stage instance；
+- 当前 module/unit（适用时）；
+- 需要生成或验证的产物；
+- review、构建、测试与报告的下一步。
 
-handoff 的活跃记录必须包含 directive/state 中的 `stage_instance`、`module_id` 和 `unit_id`（不适用时写 `-`）。模块/单元名称用于阅读，稳定 ID 用于恢复；两者冲突时以签名 state 和 manifest 为准。
+## 使用方式
 
-## 机制
+恢复工作时先运行：
 
-### 1. 完成消息中展示
-
-每个阶段的完成消息模板已内置 `📋 新 Session 继续` 选项（无需额外加载本文件）。
-
-### v3 引擎派生交接
-
-schema v3 的 `orchestrate next` 在 `run-stage` directive 中返回 `handoff_prompt`，成功的 `orchestrate report` 返回同一交接提示，并在签名 state 成功持久化后更新 `docs/aidlc/handoff.md` 的“下一步交接”表。该表和提示词都是人类协作视图，不能改变 state、stage、assignment、claim、lease 或 revision。
-
-Agent 必须把返回的 `handoff_prompt` 原样展示为可复制代码块，并保留 `handoff_status: "unverified"` 与错误原因；不得把 claim receipt、private key、`AIDLC_TRUST_SECRET` 或其他 trust/recovery secret 放入提示词。没有 handoff 写入能力时，提示词仍可作为当前回合的交接文本，但不能声称 handoff 已更新。
-
-### 2. 写入 handoff.md
-
-**每个阶段完成时，必须同步更新 `handoff.md` 的"下一步交接"表格。**
-
-写入位置：`handoff.md` 的 `## 下一步交接` section（紧跟 `# AI-DLC 状态跟踪` 标题之后，`## 项目信息` 之前）。
-
-**写入规则**：
-- **单人模式**：表格中只维护一行（范围 = 项目名）
-- **团队协作 + 单模块模式**：按当前操作人的角色/单元维护行（追加或更新对应行）
-- **多模块模式**：按模块维护行（每个模块一行），另有一行"产品级"
-- **更新而非覆盖**：如果表格中已有对应范围的行，更新该行；否则追加新行
-
-### 3. handoff.md 中的格式
-
-```markdown
-## 下一步交接
-
-| 范围 | Stage 实例 | Module ID | Unit ID | 更新时间 | 提示词 |
-|------|------------|-----------|---------|----------|--------|
-| {范围名} | {stage_instance} | {module_id 或 -} | {unit_id 或 -} | {ISO日期} | `使用 AI-DLC，继续 {描述}...` |
+```bash
+loeyae-aidlc orchestrate next
 ```
 
-**范围命名规则**：
-- 单人模式：`项目名`
-- 产品级 Inception：`产品级`
-- 模块级：`{module-name} 模块`
-- 单元级：`{unit-name} 单元`
+再读取返回的 `handoff_prompt` 和 `aidlc/active/aidlc-state.md`。提示词帮助成员理解下一步，但不能替代命令、改变阶段或跳过质量门禁。
 
-### 4. 提示词生成规则
+## 团队交接
 
-根据当前实际进度动态填充提示词内容：
-
-#### 通用格式
-
-```
-使用 AI-DLC，继续 {项目/模块名} 的开发。
-
-当前状态：
-- 阶段：{INCEPTION/CONSTRUCTION}
-- 已完成：{上一步骤名}
-- 下一步：{下一步骤名}
-- 架构模式：{单模块/多模块}
-{多模块时} - 活跃模块：{模块名}
-{团队模式时} - 协作模式：{接力/认领}
-
-请读取 handoff.md 恢复上下文，从「{下一步骤名}」开始。
-```
-
-#### Figma I9 中途交接
-
-```text
-使用 AI-DLC，继续 {项目名} 的 Figma UI 设计。
-
-当前状态：
-- 阶段：由 `loeyae-aidlc orchestrate next --status` 验证为 INCEPTION / I9
-- 主文件：读取当前模块 `figma-manifest.json` 的 `file_url`
-- 签名 choice：`figma-create` 或 `figma-existing`
-- 下一操作：按签名当前 Stage directive 执行
-
-请先验证签名 state，再读取 `page-plan.md` 和 `figma-manifest.json`，从 manifest 中第一条尚未完成验证的 PAGE/Frame 恢复；handoff.md 只补充人类摘要。不得创建新主文件、重复 Frame，或用 handoff 补齐 nodeId。
-```
-
-#### Construction 单元完成 → 下一单元
-
-```
-使用 AI-DLC，继续 {项目名} 的 Construction 阶段。
-
-当前状态：
-- 阶段：CONSTRUCTION
-- 已完成单元：{unit-name}（代码生成+审查通过）
-- 下一单元：{next-unit-name}
-- 单元进度：{已完成 X/Y 个单元}
-
-请读取 handoff.md 恢复上下文，开始单元「{next-unit-name}」的开发。
-```
-
-#### 所有单元完成 → 构建和测试
-
-```
-使用 AI-DLC，继续 {项目名} 的最终阶段。
-
-当前状态：
-- 阶段：CONSTRUCTION
-- 已完成：所有单元代码生成和审查
-- 下一步：最终全局审查 + 构建和测试
-
-请读取 handoff.md 恢复上下文，执行最终全局审查和构建测试。
-```
-
-#### 产品级 Inception 完成 → 模块开发
-
-```
-使用 AI-DLC，继续 {项目名} 的模块开发。
-
-当前状态：
-- 阶段：模块选择
-- 架构模式：多模块
-- 已完成：产品级 Inception（模块划分 + 接口契约）
-- 可用模块：{模块列表}
-
-请读取 handoff.md 恢复上下文，展示模块选择菜单。
-```
-
-### 5. 示例
-
-#### 单人模式
-
-```markdown
-## 下一步交接
-
-| 范围 | Stage 实例 | Module ID | Unit ID | 更新时间 | 提示词 |
-|------|------------|-----------|---------|----------|--------|
-| 订单管理系统 | functional-design@module:order@unit:order-query | order | order-query | 2025-01-15 | `使用 AI-DLC，继续订单管理系统的 Construction。已完成：order-service 单元，下一步：order-query 单元。请读取 handoff.md 恢复上下文。` |
-```
-
-#### 多模块 + 团队协作
-
-```markdown
-## 下一步交接
-
-| 范围 | Stage 实例 | Module ID | Unit ID | 更新时间 | 提示词 |
-|------|------------|-----------|---------|----------|--------|
-| 产品级 | build-and-test | - | - | 2025-01-15 | `使用 AI-DLC，继续模块开发。产品级 Inception 已完成，请读取 handoff.md 展示模块选择菜单。` |
-| base 模块 | functional-design@module:base@unit:common-service | base | common-service | 2025-01-16 | `使用 AI-DLC，继续 base 模块的 Construction。已完成：security-service 单元，下一步：common-service 单元。请读取 handoff.md 恢复上下文。` |
-| order 模块 | user-stories@module:order | order | - | 2025-01-16 | `使用 AI-DLC，继续 order 模块的 Inception。已完成：需求分析，下一步：用户故事。请读取 handoff.md 恢复上下文。` |
-```
-
-## 注意事项
-
-1. **提示词必须自包含** — 新 session 的 AI 仅凭提示词 + handoff.md 就能恢复工作
-2. **不要在提示词中包含大段上下文** — handoff.md 和 decision-summary 已经记录了关键信息
-3. **保持简洁** — 表格中的提示词控制在 1-2 行以内（用户复制后可展开使用）
-4. **确保 handoff.md 已更新** — 生成提示词前，当前步骤的完成状态必须已写入 handoff.md
-5. **团队协作场景** — 接手人无需依赖上一人的聊天记录，直接查看 handoff.md 即可获取交接提示词
-6. **Git 冲突最小化** — 各人/模块各自维护自己的行，追加行而非修改同一行，降低合并冲突概率
+成员可补充简短的人类说明，例如已完成的 review、待处理风险或目标分支。单元分工以 Markdown state 中的 unit selection 为准，交付以 review、构建、测试和 merge plan 为准。

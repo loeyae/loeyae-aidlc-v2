@@ -1,4 +1,4 @@
-# Loeyae AI-DLC v2 for Qoder CN IDE / Desktop / CLI
+# Loeyae AI-DLC for Qoder CN IDE / Desktop / CLI
 
 本目录是 Qoder 本地插件与 CN Desktop 直接集成的共享发行资产，包含全部 Skills、Stop Hook 和两套 MCP 声明。user scope 始终把原生 Skill 受管安装到 `~/.qoder-cn/skills/loeyae-aidlc/`。检测到 `qoder` CLI 时，`loeyae-aidlc install --harness qoder` 还会调用官方 `qoder plugins` 注册并启用 `loeyae-aidlc@local`；仅检测到 Qoder CN Desktop 时，则跳过插件/Stop Hook 注册，只安装原生 Skill 并直接更新 MCP。两种模式都以“只补缺失、保留同名用户配置”的方式更新：
 

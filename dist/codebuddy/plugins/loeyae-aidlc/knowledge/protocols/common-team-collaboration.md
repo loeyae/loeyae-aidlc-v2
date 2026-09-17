@@ -1,343 +1,59 @@
-# 团队协作模型
+# 团队轻量协作模型
 
-## 概述
+AI-DLC 使用 AWS-style 轻量协作：明确工作描述、Markdown workflow、成员自主选择 unit、Git 分支、review、构建、测试和人工 merge。
 
-AI-DLC 支持团队协作开发，采用**分阶段协作模型**：
-- **Inception 阶段**：接力模式 — 不同角色按步骤接力完成
-- **Construction 阶段**：认领模式 — 开发者自主认领单元，独立开发
+## 控制面
 
-## 当前实现边界
+工作流只由以下文件控制：
 
-schema v3 是新 workflow 的默认机器模型。确定性 DAG 可同时暴露多个 ready project/module/unit Stage instance；assignment、claim 与 execution lease 分离，并由 actor/device/client 标识 holder。`handoff.md`、`unit-of-work.md` 与 Git 提交记录仍只是人类协调视图，不能授权 `report`。
-
-- Local Provider 只保证同一工作树内的原子协调；
-- Git Provider 使用 `refs/heads/aidlc/coordination/<workflow-id>` 做远端 CAS，不 checkout 或更新业务 main/master；
-- External Provider 当前只提供通用接口和内存 reference implementation，不代表已有 Jira/TAPD/Linear 连接器；
-- Provider 必须先接受 claim，再返回 signed receipt/directive；失败、冲突或不可达时 fail-closed；
-- schema v2 工作流继续走单游标兼容引擎，只有显式 `state migrate-v3` 才迁移。
-
-## 协作原则
-
-1. **Inception 集中产出，Construction 分布执行**
-2. **项目管理工具负责任员安排，AI-DLC 协调层负责机器门禁** — Git 可承载持久化和审计，但普通业务分支不充当分布式锁
-3. **产出物即契约** — Inception 产出物是团队共享的开发契约
-4. **最小上下文加载** — 每个角色只加载自己需要的上下文，控制 token 消耗
-5. **先原子认领再执行** — Coordination Provider 以 CAS 签发 claim receipt；没有 ACK/有效 receipt 不得开始或 report。
-
----
-
-## 团队角色定义
-
-### 产品经理（PM）
-**职责范围**：
-- 需求分析（主导）
-- 用户故事（主导）
-- 工作流规划（参与 — 确认优先级）
-
-**审批权限**：
-- 需求文档的最终审批
-- 用户故事的最终审批
-- 应用设计的需求符合性确认
-
-### 架构师（Architect）
-**职责范围**：
-- 应用设计（主导）
-- 单元生成（主导）
-- 工作流规划（主导）
-- 需求分析（参与 — 技术可行性评估）
-
-**审批权限**：
-- 应用设计的最终审批
-- 单元划分的最终审批
-- 技术方案的最终决策
-
-### 开发者（Developer）
-**职责范围**：
-- Construction 阶段的全部步骤（主导）
-- 用户故事（参与 — 工作量估算）
-- 单元生成（参与 — 认领意向）
-
-**审批权限**：
-- 自己负责单元的代码生成计划审批
-- 代码审查（互审）
-
----
-
-## Inception 阶段：接力模式
-
-### 工作原理
-
-Inception 阶段的步骤由不同角色按职责接力完成。每个步骤完成后，产出物提交到主分支，下一个角色拉取后继续。
-
-```
-PM 的会话                      Architect 的会话
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-工作区检测 ─┐
-需求分析 ───┤
-用户故事 ───┘── 提交到主分支 ──→ 拉取产出物
-                                应用设计
-                                单元生成
-                                工作流规划
-                                ──── 提交到主分支 ──→ 开发者认领
+```text
+aidlc/active/aidlc-state.md
+aidlc/active/audit.md
 ```
 
-### 步骤与角色映射
+状态记录工作目标、scope、阶段、实例、已完成项、unit 选择与历史；audit 追加每次状态变化。新工作必须由用户明确描述后启动：
 
-| 步骤 | 主导角色 | 前置产出物 |
-|------|----------|-----------|
-| 工作区检测 | PM 或 Architect | 无 |
-| 逆向工程 | Architect | 工作区检测 |
-| 需求分析 | PM | 工作区检测（+ 逆向工程产物，如有） |
-| 用户故事 | PM | 需求分析 |
-| 应用设计 | Architect | 需求分析 + 用户故事 |
-| 单元生成 | Architect | 应用设计 |
-| 工作流规划 | Architect | 单元生成 |
-
-### 接力交接协议
-
-当一个角色完成自己负责的步骤后，必须：
-
-1. **生成决策摘要**：在步骤产出物目录下创建 `decision-summary.md`
-2. **更新 handoff.md**：成功 `orchestrate report` 会自动更新当前范围的“下一步交接”行；Agent 原样展示返回的 `handoff_prompt`，人工只补充负责人和协作说明，不改写机器状态。
-3. **提交到主分支**：确保产出物可被下一个角色获取
-
-### 决策摘要格式
-
-每个步骤完成时，强制生成决策摘要（位于该步骤的产出物目录下）：
-
-```markdown
-# [步骤名称] - 决策摘要
-
-**负责人**：[角色 - 姓名]
-**完成时间**：[ISO 时间戳]
-
-## 关键决策
-- [决策1]：[选择的方案]，原因：[理由]
-- [决策2]：[选择的方案]，原因：[理由]
-
-## 约束条件
-- [约束1]
-- [约束2]
-
-## 注意事项（给下一个接手人）
-- [需要特别注意的点]
-- [隐含假设]
-
-## 未解决问题
-- [问题1]：建议由 [角色] 在 [步骤] 中决定
+```bash
+loeyae-aidlc orchestrate next --scope feature --work "实现门店库存同步失败重试"
 ```
 
----
+## 单元协作
 
-## Construction 阶段：认领模式
+成员在 module manifest 和 unit manifest 已就绪后自行选择工作单元：
 
-### 工作原理
-
-Inception 完成后，所有单元处于"待认领"状态。开发者启动 AI-DLC 时，选择要认领的单元，在自己的特性分支上独立完成 Construction 流程。
-
-### 单元状态定义
-
-| 状态 | 含义 |
-|------|------|
-| 🔓 待认领 | 无人认领，可自由选择 |
-| ✅ 已认领 | 已有人认领，正在开发中 |
-| 🚫 已阻塞 | 前置依赖未满足，暂不可认领 |
-| ✔️ 已完成 | 开发完成，已合并 |
-
-### 认领规则
-
-1. **无依赖的单元**：随时可认领。
-2. **`contract` 依赖**：仅当 canonical 共享契约基线及其机器 Evidence 为 `verified`，并被签名调度条件接受时才可认领；handoff 中的镜像状态、“接口已定义”、Markdown 设计或消费者私有副本均不足以授权。
-3. **`implementation` 依赖**：仅当提供方单元为 `complete` 且验证证据完整时可认领；已验证契约不替代实现完成。
-4. **`runtime` 依赖**：可认领不依赖该运行时的工作，但真实服务、数据或环境就绪前不得将相应集成验证标记完成。
-5. **互相依赖的单元**：建议同一人认领，或两人协商后各自开发；无法按依赖类型判定时标记 `blocked` 并返回 I14 澄清。
-6. **冲突解决**：以 Coordination Provider 的原子 CAS 结果为准。Git 模式只有专用 coordination ref 的远端 conditional push 成功才算 ACK；业务 main/master、普通 PR 先后顺序或 handoff 表格都不能充当锁。
-
-依赖类型、所需状态和调度处理以 `common-context-optimization.md` 为准；共享契约基线的状态和证据以 `construction-shared-contract-baseline.md` 为准。
-
-### 认领流程
-
-1. 开发者先同步业务代码和 canonical 产物；该同步不产生机器 claim
-2. 使用 actor/device/client identity 运行 `orchestrate next`，查看稳定 ready set
-3. 可定向选择实例；引擎向配置的 Coordination Provider 发起原子 claim
-4. Provider ACK 后，引擎持久化 receipt/lease 并返回 directive
-5. 开发者只执行 directive 指定的 instance、artifact root 和 evidence root
-6. `report` 必须绑定 `--instance`，并从安全 stdin 回传当前 receipt
-7. 换设备或换人时使用 renew/release/transfer/expiry；不得用 `park` 代替单实例交接
-
-### 认领后的上下文加载策略
-
-开发者认领单元后，AI 只加载与该单元相关的最小上下文：
-
-**必须加载**：
-- `handoff.md`（全局状态概览）
-- 该单元在 `unit-of-work.md` 中的定义
-- 该单元在 `unit-of-work-dependency.md` 中的依赖关系
-- 该单元在 `unit-of-work-story-map.md` 中映射的用户故事
-- 依赖单元的接口契约摘要（不是完整设计）
-- 需求分析的决策摘要
-
-**按需加载**：
-- 完整需求文档（仅在需要理解业务背景时）
-- 应用设计的完整产物（仅在需要理解组件关系时）
-- 其他单元的设计（仅在处理跨单元交互时）
-
----
-
-## handoff.md 团队协作扩展
-
-### 增加的字段
-
-```markdown
-## 团队信息
-- **协作模式**：团队协作
-- **Inception 负责人**：[PM 姓名] → [Architect 姓名]
-
-## Inception 进度
-| 步骤 | 状态 | 负责人 | 完成时间 |
-|------|------|--------|----------|
-| 工作区检测 | ✅ 完成 | [姓名] | [时间] |
-| 需求分析 | ✅ 完成 | [姓名] | [时间] |
-| 用户故事 | ✅ 完成 | [姓名] | [时间] |
-| 应用设计 | ✅ 完成 | [姓名] | [时间] |
-| 单元生成 | ✅ 完成 | [姓名] | [时间] |
-| 工作流规划 | ✅ 完成 | [姓名] | [时间] |
-
-## 单元认领状态
-| 单元 | 状态 | 认领人 | 分支 | 前置依赖 |
-|------|------|--------|------|----------|
-| [unit-1] | 🔓 待认领 | - | - | 无 |
-| [unit-2] | ✅ 已认领 | [姓名] | feat/[unit-2] | [unit-1]（接口） |
-| [unit-3] | 🔓 待认领 | - | - | 无 |
+```bash
+loeyae-aidlc unit list
+loeyae-aidlc unit select \
+  --module module-a \
+  --unit unit-a \
+  --member alice \
+  --branch feat/module-a-unit-a
 ```
 
----
+选择是公开协作记录，不是锁。重复选择由成员沟通；达成一致后可使用 `--replace` 更新记录。
 
-## Git 工作流集成
+## 交付标准
 
-### 分支策略
+1. 读取当前 directive 的 `handoff_prompt`、依赖和产物要求。
+2. 在个人分支或 worktree 完成代码、文档和测试。
+3. 完成 review，review evidence 覆盖实际改动路径。
+4. 运行适用的构建、测试和语义检查。
+5. 使用 merge plan 汇总分支、review 和变更覆盖，再由具备仓库权限的成员人工合并。
 
-```
-main（主分支）
-├── Inception 产出物（PM 和 Architect 直接提交）
-├── feat/[unit-name-1]（开发者 A）
-├── feat/[unit-name-2]（开发者 B）
-└── feat/[unit-name-3]（开发者 C）
-```
-
-### 提交约定
-
-- **Inception 产出物**：直接提交到主分支（或通过短生命周期的 PR）
-- **认领展示信息**：可提交到业务分支供人阅读，但不产生/延长 execution lease，也不替代 Provider receipt
-- **Construction 代码**：在特性分支开发，通过 PR 合并
-
-### 冲突预防
-
-- Inception 阶段已定义好所有单元的接口契约，减少跨单元冲突
-- 每个开发者只修改自己单元范围内的文件
-- 共享文件（如路由配置、全局类型）的修改通过 PR 审查协调
-
----
-
-## 最佳实践
-
-### 对产品经理
-1. 需求分析时考虑技术可行性，必要时邀请架构师参与讨论
-2. 决策摘要中明确记录"放弃了什么"和"为什么放弃"
-3. 用户故事的验收标准要具体到可测试
-
-### 对架构师
-1. 应用设计时确保接口契约足够详细，让开发者可以独立开发
-2. 单元划分时考虑团队成员的技能分布
-3. 依赖关系尽量单向，避免循环依赖
-
-### 对开发者
-1. 认领前评估自己的技能是否匹配该单元的技术要求
-2. 开发过程中如果发现接口契约有问题，及时在主分支提 Issue
-3. 完成后的 PR 描述中引用对应的用户故事和设计文档
-
----
-
-## 单人模式兼容
-
-当只有一个人使用 AI-DLC 时，团队协作机制自动退化为单人模式：
-- 不需要填写负责人信息
-- 不需要生成决策摘要（因为同一人继续）
-- 不需要手工认领表流程，但引擎仍会为执行实例取得 Local Provider lease
-- 工作流行为与改动前完全一致
-
-**判断条件**：工作区检测时，如果 handoff.md 不存在或未标记"协作模式"，则按单人模式运行。
-
----
-
-## 多模块协作模型
-
-### 概述
-
-多模块模式下，团队协作的粒度从"单元"提升为"模块"：
-- **产品级 Inception**：团队一起完成（1-2 次会话），确定模块划分和接口契约
-- **模块级开发**：不同人/会话可以同时推进不同模块，完全独立
-
-### 与单模块协作的区别
-
-| 维度 | 单模块协作 | 多模块协作 |
-|------|-----------|-----------|
-| 并行粒度 | Construction 阶段的单元 | 模块级（Inception + Construction 都可并行） |
-| 协作方式 | 接力 + 认领 | 产品级协商 + 模块级独立 |
-| 上下文隔离 | 同一产出物，按需加载 | 物理隔离，各模块独立目录 |
-| 冲突风险 | 高（共享 Inception 产出物） | 低（模块间只通过契约交互） |
-| 适用场景 | 中小项目，3-5 个单元 | 大项目，多个业务域 |
-
-### 多模块协作流程
-
-```
-产品级 Inception（团队一起，PM + Architect）
-    │
-    │  确定模块划分和接口契约
-    │
-    ├── 开发者 A：base-infrastructure（独立会话）
-    │   └── 模块级 Inception + Construction
-    │
-    ├── 开发者 B：user-management（独立会话）
-    │   └── 模块级 Inception + Construction
-    │
-    ├── 开发者 C：order-management（独立会话）
-    │   └── 模块级 Inception + Construction
-    │
-    └── 开发者 D：payment（等 base Inception 完成后开始）
-        └── 模块级 Inception + Construction
+```bash
+loeyae-aidlc worktree merge-plan \
+  --instance code-generation@module:module-a@unit:unit-a \
+  --member alice \
+  --path /absolute/path/to/module-a-unit-a \
+  --review-evidence .aidlc/review.json
 ```
 
-### 模块认领规则
+`merge-plan` 不会自动 merge 或 push。
 
-1. **基础模块**：建议由架构师或最资深的开发者认领
-2. **业务模块**：开发者自主认领，先到先得
-3. **有依赖的模块**：依赖模块的 Inception 完成（接口已定义）后即可认领
-4. **模块内部**：如果单个模块足够大，模块内部仍然可以用单元认领机制
+## 阶段门禁
 
-### 模块认领流程
+`requires`、`condition`、`consumes`、`produces` 和 sensor 继续生效。instruction-only 阶段需要 `--instruction-ack`；应用设计和部署决策需要显式 `--user-input Approve`。Evidence 必须来自受控 producer，并与当前 source revision、checker 或构建测试结果相符。
 
-1. 开发者拉取最新主分支
-2. 启动 AI-DLC，工作区检测识别为多模块模式
-3. 展示模块菜单，开发者选择模块
-4. 更新 handoff.md 中的模块进度总览（标记为"进行中"）
-5. 提交 handoff.md 变更到主分支
-6. 创建特性分支 `feat/{module-name}`
-7. 开始模块级 Inception + Construction
+## 交接
 
-### 模块间协调
-
-- **接口变更**：通过 `contracts.md` 的变更日志通知
-- **冲突预防**：每个模块只修改自己目录下的文件
-- **共享文件**：只有 `handoff.md` 和 `contracts.md` 是跨模块共享的
-- **合并策略**：模块完成后通过 PR 合并到主分支
-
-### 产品级 Inception 的角色分工
-
-| 步骤 | 主导角色 | 说明 |
-|------|---------|------|
-| 产品需求概览 | PM | 梳理业务域和优先级 |
-| 模块划分 | Architect | 确定模块边界和依赖 |
-| 模块间接口契约 | Architect | 定义接口签名 |
-
-产品级 Inception 完成后，PM 和 Architect 的工作基本结束，开发者接手各模块的模块级开发。
+每个 `run-stage` directive 和成功 report 都返回 `handoff_prompt`。Agent 必须原样展示它，使下一位成员了解工作目标、当前阶段、单元、产物以及后续 review/build/test 动作。

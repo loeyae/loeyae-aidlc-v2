@@ -1,25 +1,12 @@
 import { existsSync, readFileSync, realpathSync } from "fs";
-import { dirname, resolve } from "path";
-import { fileURLToPath } from "url";
-import { spawnSync } from "child_process";
-import { loadWorkflowState, statePath } from "./aidlc-state";
-import { loadWorkflowStateV3 } from "./aidlc-state-v3-store";
-import { readEnrollment } from "./aidlc-trust";
+import { resolve } from "path";
+import { loadWorkflowState } from "./aidlc-light-state";
 
 interface HookInput {
   cwd?: string;
-  hook_event_name?: string;
-  event?: string;
   stop_hook_active?: boolean;
 }
 
-interface Directive {
-  kind?: string;
-  message?: string;
-}
-
-const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const cliPath = resolve(packageRoot, "bin", "cli.js");
 const projectRoot = process.cwd();
 const format = readFlag("format") || "plain";
 
@@ -31,20 +18,20 @@ function readFlag(name: string): string | undefined {
 
 function readInput(): HookInput {
   try {
-    const raw = readFileSync(0, "utf-8").trim();
+    const raw = readFileSync(0, "utf8").trim();
     return raw ? JSON.parse(raw) as HookInput : {};
   } catch {
     return {};
   }
 }
 
-function output(value: Record<string, unknown>): void {
-  process.stdout.write(`${JSON.stringify(value)}\n`);
+function allow(): never {
+  process.exit(0);
 }
 
-function fail(reason: string): never {
+function block(reason: string): never {
   if (["claude", "codex", "codebuddy", "zcode"].includes(format)) {
-    output({ decision: "block", reason });
+    process.stdout.write(`${JSON.stringify({ decision: "block", reason })}\n`);
     process.exit(0);
   }
   if (format === "opencode" || format === "qoder-cli") {
@@ -55,110 +42,18 @@ function fail(reason: string): never {
   process.exit(1);
 }
 
-function allow(): never {
-  process.exit(0);
-}
-
-function parseDirective(stdout: string, stderr: string): Directive | null {
-  for (const candidate of [stdout, stderr]) {
-    const value = candidate.trim();
-    if (!value) continue;
-    try {
-      return JSON.parse(value) as Directive;
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
-function runReport(root: string, stage: string): string | null {
-  const result = spawnSync(process.execPath, [cliPath, "orchestrate", "report", "--stage", stage, "--result", "completed"], {
-    cwd: root,
-    encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"],
-    env: process.env,
-  });
-
-  if (result.error) return `Unable to execute AI-DLC gate engine: ${result.error.message}`;
-  const directive = parseDirective(result.stdout || "", result.stderr || "");
-  if (directive?.kind === "error") return directive.message || "AI-DLC gate rejected stage completion.";
-  if (result.status !== 0) {
-    return `AI-DLC gate engine exited with code ${result.status}: ${(result.stderr || result.stdout || "unknown error").trim()}`;
-  }
-  if (!directive) return `AI-DLC gate engine returned invalid JSON: ${(result.stdout || result.stderr || "").trim()}`;
-  return null;
-}
-
 const input = readInput();
-// Qoder marks a retry caused by a previous Stop block. Its contract requires
-// hooks to stop blocking on that retry so a malformed workflow cannot create
-// an unbounded host loop; the signed AI-DLC state remains running and resumes
-// in the next session if the Agent did not complete the stage.
 if (format === "qoder-cli" && input.stop_hook_active === true) allow();
-const requestedRoot = typeof input.cwd === "string" && input.cwd.length > 0 ? resolve(input.cwd) : projectRoot;
-if (!existsSync(requestedRoot)) fail(`AI-DLC project root does not exist: ${requestedRoot}`);
+const requestedRoot = typeof input.cwd === "string" && input.cwd.trim() ? resolve(input.cwd) : projectRoot;
+if (!existsSync(requestedRoot)) block(`AI-DLC project root does not exist: ${requestedRoot}`);
 const root = realpathSync(requestedRoot);
 
-let enrollment;
 try {
-  enrollment = readEnrollment(root);
+  const state = loadWorkflowState(root);
+  if (!state || state.status === "done" || state.status === "parked") allow();
+  if (state.status !== "running") block(`AWS-style lightweight workflow has unsupported status: ${state.status}`);
+  const current = state.current_stage_instance || state.current_stage || "workflow planning";
+  block(`AWS-style lightweight workflow is still running for: ${state.work_description || "current work"}. Continue ${current}, or explicitly park the workflow. Team members may select a unit with 'loeyae-aidlc unit select'.`);
 } catch (error) {
-  fail(error instanceof Error ? error.message : String(error));
+  block(`AWS-style lightweight workflow state is invalid: ${error instanceof Error ? error.message : String(error)}`);
 }
-
-const path = statePath(root);
-if (!existsSync(path)) {
-  if (enrollment) fail(`AI-DLC enrolled project is missing its signed state: ${path}`);
-  allow();
-}
-
-let schemaVersion: unknown;
-try {
-  schemaVersion = (JSON.parse(readFileSync(path, "utf8")) as { schema_version?: unknown }).schema_version;
-} catch (error) {
-  fail(`AI-DLC gate state is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
-}
-if (schemaVersion === 3) {
-  let collaborative;
-  try {
-    collaborative = loadWorkflowStateV3(root);
-  } catch (error) {
-    fail(`AI-DLC gate state v3 is invalid: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (!collaborative) fail(`AI-DLC state v3 disappeared while evaluating the lifecycle gate: ${path}`);
-  if (enrollment && enrollment.workflow_id !== collaborative.workflow_id) fail("AI-DLC state v3 workflow_id does not match project enrollment");
-  if (collaborative.status === "done" || collaborative.status === "parked") allow();
-  if (collaborative.status !== "running") fail(`AI-DLC workflow has unsupported status: ${collaborative.status}`);
-  const active = Object.values(collaborative.instances)
-    .filter((instance) => ["claimed", "in_progress", "submitted", "rejected"].includes(instance.status))
-    .map((instance) => instance.stage_instance)
-    .sort();
-  const ready = Object.values(collaborative.instances)
-    .filter((instance) => instance.status === "ready")
-    .map((instance) => instance.stage_instance)
-    .sort();
-  const focus = active[0] || ready[0];
-  const action = active.length > 0
-    ? `The owning client must run receipt-bound report for: ${active.join(", ")}.`
-    : ready.length > 0
-      ? `Claim a ready instance with orchestrate next; ready: ${ready.join(", ")}.`
-      : "Run orchestrate next --status to inspect blocked or remotely claimed instances.";
-  fail(`AI-DLC collaborative workflow is still running${focus ? ` (focus: ${focus})` : ""}. ${action} The lifecycle Hook cannot invent actor/device/client identity or expose a stored claim receipt.`);
-}
-if (schemaVersion !== 2) fail(`AI-DLC gate state uses unsupported schema_version: ${String(schemaVersion)}`);
-
-let state;
-try {
-  state = loadWorkflowState(root);
-} catch (error) {
-  fail(`AI-DLC gate state is invalid: ${error instanceof Error ? error.message : String(error)}`);
-}
-if (!state) fail(`AI-DLC state disappeared while evaluating the lifecycle gate: ${path}`);
-if (enrollment && enrollment.workflow_id !== state.workflow_id) fail("AI-DLC state workflow_id does not match project enrollment");
-if (state.status === "done" || state.status === "parked") allow();
-if (state.status !== "running" || !state.current_stage) fail("AI-DLC running state has no active current_stage");
-
-const failure = runReport(root, state.current_stage);
-if (failure) fail(`AI-DLC stage "${state.current_stage}" cannot finish: ${failure}`);
-allow();

@@ -6,10 +6,7 @@ import { join, relative, resolve } from "path";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
 import { portableDirname, readModuleManifest } from "./aidlc-execution-context";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
-import {
-  loadWorkflowStateBySchema,
-  type AnyWorkflowState,
-} from "./aidlc-state-schema";
+import { loadWorkflowState, type WorkflowState } from "./aidlc-light-state";
 import {
   ExpectedContract,
   expectedContractPath,
@@ -20,29 +17,19 @@ import {
   routeIntentErrors,
 } from "./diagram-contract.js";
 
+type SemanticWorkflowState = WorkflowState;
+
 const ROOT = process.cwd();
-let workflowState: AnyWorkflowState | null = null;
+let workflowState: SemanticWorkflowState | null = null;
 let workflowStateError: string | null = null;
 try {
-  workflowState = loadWorkflowStateBySchema(ROOT, {
-    allowPublicV3Read: true,
-    requireState: true,
-  });
+  workflowState = loadWorkflowState(ROOT);
 } catch (error) {
   workflowStateError = error instanceof Error ? error.message : String(error);
 }
 
-const activeV3Instances = workflowState?.schema_version === 3
-  ? Object.values(workflowState.instances).filter((instance) => instance.status === "in_progress")
-  : [];
-const activeV3Modules = [...new Set(activeV3Instances.map((instance) => instance.module_id).filter((value): value is string => Boolean(value)))];
-const activeV3Units = [...new Set(activeV3Instances.map((instance) => instance.unit_id).filter((value): value is string => Boolean(value)))];
-const ACTIVE_MODULE = process.env.AIDLC_ACTIVE_MODULE?.trim()
-  || workflowState?.current_module
-  || (activeV3Modules.length === 1 ? activeV3Modules[0] : undefined);
-const ACTIVE_UNIT = process.env.AIDLC_ACTIVE_UNIT?.trim()
-  || workflowState?.current_unit
-  || (activeV3Units.length === 1 ? activeV3Units[0] : undefined);
+const ACTIVE_MODULE = process.env.AIDLC_ACTIVE_MODULE?.trim() || workflowState?.current_module;
+const ACTIVE_UNIT = process.env.AIDLC_ACTIVE_UNIT?.trim() || workflowState?.current_unit;
 const CONTROLLED_CONTEXT_REQUESTED = Object.prototype.hasOwnProperty.call(process.env, "AIDLC_ACTIVE_MODULE")
   || Object.prototype.hasOwnProperty.call(process.env, "AIDLC_ACTIVE_UNIT");
 
@@ -109,16 +96,14 @@ const SENSOR_NAMES = new Set([
 ]);
 
 function fail(message: string): never { throw new Error(message); }
-function requiredWorkflowState(): AnyWorkflowState {
-  if (workflowStateError) fail(`signed workflow state could not be loaded: ${workflowStateError}`);
-  if (!workflowState) fail("signed workflow state is missing");
+function requiredWorkflowState(): SemanticWorkflowState {
+  if (workflowStateError) fail(`lightweight workflow state could not be loaded: ${workflowStateError}`);
+  if (!workflowState) fail("lightweight workflow state is missing");
   return workflowState;
 }
 function assertSemanticContext(sensor: string): void {
   const state = requiredWorkflowState();
-  const strictContext = state.schema_version === 3
-    || state.routing_model === "module-unit-v1"
-    || CONTROLLED_CONTEXT_REQUESTED;
+  const strictContext = CONTROLLED_CONTEXT_REQUESTED || Boolean(state.current_module || state.current_unit);
   if (strictContext && MODULE_CONTEXT_SENSORS.has(sensor) && !ACTIVE_MODULE) {
     fail(`active module is required for semantic sensor ${sensor}`);
   }
@@ -245,44 +230,18 @@ function normalizedIds(value: string, pattern: RegExp): string[] {
 }
 
 function selectedPrdRoute(): boolean {
-  if (!workflowState) return false;
-  if (workflowState.selected_optional_stages !== undefined) {
-    return workflowState.selected_optional_stages.includes("prd-generation");
-  }
-  return workflowState.current_stage === "prd-generation"
-    || workflowState.completed_stages.includes("prd-generation")
-    || workflowState.skipped_stages.includes("prd-generation");
+  return workflowState?.selected_optional_stages.includes("prd-generation") || false;
 }
 
-function signedUiRoute(moduleId = ACTIVE_MODULE): UiRoute {
+function selectedUiRoute(moduleId = ACTIVE_MODULE): UiRoute {
   if (!workflowState) return "not-selected";
-  const entries = [...workflowState.history].reverse();
-  const selected = entries.find((entry) =>
+  const selected = [...workflowState.history].reverse().find((entry) =>
     entry.stage === "ui-mock"
     && (entry.result === "completed" || entry.result === "approved")
     && (!moduleId || entry.module_id === moduleId)
     && typeof entry.user_input === "string"
   )?.user_input as UiRoute | undefined;
-  if (selected && UI_ROUTES.has(selected)) return selected;
-  if (entries.some((entry) => entry.stage === "ui-mock" && entry.result === "condition_skipped" && (!moduleId || entry.module_id === moduleId))) {
-    return "not-selected";
-  }
-  const architectureChoiceRecorded = entries.some((entry) =>
-    entry.stage === "workspace-detection"
-    && (entry.user_input === "single-module" || entry.user_input === "multi-module")
-  );
-  if (architectureChoiceRecorded) return "not-selected";
-
-  const matchesLegacy = (slug: string): boolean => workflowState!.current_stage === slug
-    || entries.some((entry) => entry.stage === slug && (!moduleId || entry.module_id === moduleId));
-  if (matchesLegacy("ui-figma") || matchesLegacy("ui-figma-generation")) return "figma-create";
-  if (["ui-mock-workflow", "ui-mock-design-spec", "ui-mock-styles", "ui-mock-reasoning-principles", "ui-mock-generation"].some(matchesLegacy)) {
-    return "html-mock";
-  }
-  const legacyHtmlRoot = moduleId
-    ? join(ROOT, `docs/aidlc/modules/${moduleId}/inception/ui-mock`)
-    : join(ROOT, "docs/aidlc/inception/ui-mock");
-  return existsSync(legacyHtmlRoot) ? "html-mock" : "not-selected";
+  return selected && UI_ROUTES.has(selected) ? selected : "not-selected";
 }
 
 function objectValue(value: unknown, field: string): Record<string, unknown> {
@@ -589,12 +548,12 @@ function implementationReport(): Record<string, unknown> {
   const uiModulesVerified: string[] = [];
   let modulesVerified = 0;
   const prdSelected = selectedPrdRoute();
-  if (workflowState?.routing_model === "module-unit-v1") {
+  if (workflowState?.current_module || existsSync(join(ROOT, "docs", "aidlc", "ideation", "module-manifest.json"))) {
     const modules = readModuleManifest(ROOT);
     modulesVerified = modules.length;
     for (const module of modules) {
       requiredEvidence.push(`.aidlc/evidence/cross-validation/${module.module_id}/inception-consistency.json`);
-      const route = signedUiRoute(module.module_id);
+      const route = selectedUiRoute(module.module_id);
       if (route === "html-mock" || route === "figma-create" || route === "figma-existing") {
         requiredEvidence.push(`.aidlc/evidence/ui-page-planning/${module.module_id}/ui-artifact-consistency.json`);
         requiredEvidence.push(route === "html-mock"
@@ -697,7 +656,7 @@ function recoveryEvidence(): Record<string, unknown> {
     fail("context compaction was not detected");
   }
   const state = requiredWorkflowState();
-  if (!existsSync(handoffPath) || handoff.trim().length === 0) fail("signed state restoration or derived handoff evidence is missing");
+  if (!existsSync(handoffPath) || handoff.trim().length === 0) fail("Markdown workflow restoration or handoff evidence is missing");
   return { status: "passed", state_restored: true, handoff_recorded: true, state_revision: state.revision };
 }
 
@@ -2234,9 +2193,9 @@ function designIntentCoverage(): Record<string, unknown> {
 }
 
 function uiArtifactConsistency(): Record<string, unknown> {
-  if (!workflowState || !ACTIVE_MODULE) fail("ui-artifact-consistency requires signed state and an active module");
-  const route = signedUiRoute();
-  if (route === "skip" || route === "not-selected") fail(`ui-artifact-consistency is not applicable to signed UI route ${route}`);
+  if (!workflowState || !ACTIVE_MODULE) fail("ui-artifact-consistency requires a Markdown workflow and an active module");
+  const route = selectedUiRoute();
+  if (route === "skip" || route === "not-selected") fail(`ui-artifact-consistency is not applicable to selected UI route ${route}`);
   const plan = pagePlanContract();
   const stage = workflowState.current_stage;
   if (stage === "ui-page-planning") {
@@ -2285,7 +2244,7 @@ function uiArtifactConsistency(): Record<string, unknown> {
 }
 
 function inceptionConsistency(): Record<string, unknown> {
-  if (!workflowState || !ACTIVE_MODULE) fail("inception-consistency requires signed state and an active module");
+  if (!workflowState || !ACTIVE_MODULE) fail("inception-consistency requires a Markdown workflow and an active module");
   const requirementsPath = join(ROOT, contextual("docs/aidlc/inception/requirements.md"));
   const storiesPath = join(ROOT, contextual("docs/aidlc/inception/user-stories.md"));
   const reportPath = join(ROOT, contextual("docs/aidlc/inception/cross-validation-report.md"));
@@ -2306,7 +2265,7 @@ function inceptionConsistency(): Record<string, unknown> {
   if (missingFromReport.length > 0) fail(`cross-validation report omits checked IDs: ${missingFromReport.join(", ")}`);
 
   const prdSelected = selectedPrdRoute();
-  const uiRoute = signedUiRoute();
+  const uiRoute = selectedUiRoute();
   const expectedPrdRoute = prdSelected ? "selected" : "not-selected";
   for (const [field, expected] of [["status", "passed"], ["unresolved_conflicts", "0"], ["prd_route", expectedPrdRoute], ["ui_route", uiRoute]] as const) {
     const expression = new RegExp(`${field}\\s*[:：]\\s*${expected.replace("-", "[- ]")}`, "i");
@@ -2317,7 +2276,7 @@ function inceptionConsistency(): Record<string, unknown> {
   let prdItemsChecked = 0;
   if (prdSelected) {
     const prdPath = join(ROOT, "docs/aidlc/ideation/prd.md");
-    if (!existsSync(prdPath)) fail("signed PRD selection requires docs/aidlc/ideation/prd.md during cross-validation");
+    if (!existsSync(prdPath)) fail("selected PRD requires docs/aidlc/ideation/prd.md during cross-validation");
     const prdIds = normalizedIds(text(prdPath), REQUIREMENT_ID);
     if (prdIds.length === 0) fail("selected PRD contains no machine requirement identifiers");
     const mapped = prdIds.filter((id) => report.toUpperCase().includes(id));
@@ -2350,32 +2309,12 @@ function inceptionConsistency(): Record<string, unknown> {
   };
 }
 
-function legacyUiAlignment(): Record<string, unknown> {
-  const pagePlans = projectFiles(/page-plan\.md$|page-specs\.md$/i);
-  const htmlFiles = projectFiles(/\.html?$/i).filter((path) => path.includes("ui-mock") || path.includes("mock"));
-  const figma = projectFiles(/(?:figma|cross-validation).*\.md$/i);
-  if (pagePlans.length === 0 && htmlFiles.length === 0 && figma.length === 0) return { status: "not_applicable", reason: "legacy workflow has no UI artifacts" };
-  if (figma.length > 0 && htmlFiles.length === 0) {
-    const content = joined(figma);
-    if (!/F1|F2|F3|F4/.test(content) || /未通过|blocked|unverified/i.test(content)) fail("Figma alignment evidence is incomplete");
-    return { status: "passed", design_mode: "figma", pages_checked: count(content, /F\d+/g), elements_checked: count(content, /Frame|组件|element/gi), unmapped_elements: 0, extra_elements: 0, styles_aligned: true, conditional_visibility_aligned: true, platform_constraints_respected: true };
-  }
-  if (pagePlans.length === 0 || htmlFiles.length === 0) fail("HTML Mock alignment requires both page plan and HTML Mock artifacts");
-  const plan = joined(pagePlans);
-  const html = joined(htmlFiles);
-  const pages = ids(plan, /(?:PAGE|Page|页面)[-_ ]?[A-Za-z0-9_-]+/g).slice(0, 100);
-  if (pages.length === 0) fail("page plan contains no page identifiers");
-  const missing = pages.filter((page) => !html.includes(page));
-  if (missing.length > 0) fail(`HTML Mock is missing planned pages: ${missing.join(", ")}`);
-  const elements = count(html, /mock-box|<button\b|<input\b|<select\b|<table\b|<dialog\b/gi);
-  if (elements < 1 || !/<style\b|\.css\b/i.test(html)) fail("HTML Mock has no verifiable components or styles");
-  return { status: "passed", design_mode: "html-mock", pages_checked: pages.length, elements_checked: elements, unmapped_elements: 0, extra_elements: 0, styles_aligned: true, conditional_visibility_aligned: /显示|隐藏|visible|hidden|condition/i.test(html), platform_constraints_respected: true };
-}
-
 function uiAlignment(): Record<string, unknown> {
-  if (!workflowState?.routing_model || !ACTIVE_MODULE || !ACTIVE_UNIT) return legacyUiAlignment();
-  const route = signedUiRoute();
-  if (route === "skip" || route === "not-selected") return { status: "not_applicable", reason: `signed UI route is ${route}` };
+  if (!workflowState || !ACTIVE_MODULE || !ACTIVE_UNIT) {
+    return { status: "not_applicable", reason: "no active Markdown workflow unit context" };
+  }
+  const route = selectedUiRoute();
+  if (route === "skip" || route === "not-selected") return { status: "not_applicable", reason: `selected UI route is ${route}` };
   const plan = pagePlanContract();
   const design = route === "html-mock" ? htmlArtifactContract(plan) : figmaArtifactContract(plan, route);
   const codePlanPath = join(ROOT, contextual("docs/aidlc/construction/plans/code-generation-plan.md"));

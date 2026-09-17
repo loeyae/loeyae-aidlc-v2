@@ -41,7 +41,7 @@ condition: has_ui_requirements
 - **HTML Mock 模式**：生成可离线浏览的结构化 HTML 原型；
 - **跳过 UI 设计**：仅适用于无界面需求或用户明确不需要设计基准。
 
-向引擎报告本 Stage 时必须把选择写入签名 history，取值固定为：
+向引擎报告本 Stage 时必须把选择写入 Markdown history，取值固定为：
 
 | 用户选择 | `--user-input` |
 |----------|----------------|

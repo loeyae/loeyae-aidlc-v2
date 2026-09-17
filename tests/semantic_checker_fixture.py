@@ -1,4 +1,4 @@
-"""Cross-platform signed state fixture for direct semantic checker tests."""
+"""Cross-platform Markdown workflow fixture for direct semantic checker tests."""
 from __future__ import annotations
 
 import json
@@ -7,7 +7,6 @@ import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TRUST_SECRET = "semantic-checker-fixture-secret-at-least-32-bytes"
 TSX = subprocess.check_output(
     ["node", "-p", "require.resolve('tsx/cli')"],
     cwd=REPO_ROOT,
@@ -17,22 +16,16 @@ TSX = subprocess.check_output(
 
 def checker_environment(project: str) -> dict[str, str]:
     env = os.environ.copy()
-    env["AIDLC_TRUST_SECRET"] = TRUST_SECRET
-    env["AIDLC_TRUST_DIR"] = os.path.join(project, ".aidlc", "semantic-trust")
     env.pop("AIDLC_ACTIVE_MODULE", None)
     env.pop("AIDLC_ACTIVE_UNIT", None)
     return env
 
 
-def write_signed_checker_state(project: str) -> None:
-    state_uri = (REPO_ROOT / "core" / "tools" / "aidlc-state.ts").as_uri()
+def write_checker_state(project: str) -> None:
+    state_uri = (REPO_ROOT / "core" / "tools" / "aidlc-light-state.ts").as_uri()
     script = f"""
 import {{ createInitialState, saveWorkflowState }} from {json.dumps(state_uri)};
-const state = createInitialState('feature', '3.2.0', 'semantic-checker-fixture');
-delete state.routing_model;
-delete state.completed_stage_instances;
-delete state.skipped_stage_instances;
-delete state.selected_optional_stages;
+const state = createInitialState('feature', '4.0.0', 'semantic-checker-fixture', [], 'semantic checker fixture');
 state.current_phase = 'inception';
 state.current_stage = 'requirements-methods';
 saveWorkflowState(process.cwd(), state);

@@ -10,7 +10,7 @@ import {
   parseExpectedContract,
 } from "./diagram-contract.js";
 import { DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE } from "./diagram-visual-style.js";
-import { loadWorkflowState } from "./aidlc-state";
+import { loadWorkflowState } from "./aidlc-light-state";
 import { evidenceRelativePath } from "./aidlc-execution-context";
 
 const PROJECT_ROOT = process.cwd();
@@ -208,9 +208,7 @@ function configureEvidenceDirectory(stage: string): string {
     fail(`diagram provider stage ${stage} is not the active running stage`);
   }
   const axis = state.current_unit ? "unit" : state.current_module ? "module" : "project";
-  const canonicalEvidence = state.routing_model === "module-unit-v1"
-    ? evidenceRelativePath(stage, "diagram-contract", axis, { module_id: state.current_module, unit_id: state.current_unit })
-    : `.aidlc/evidence/${stage}/diagram-contract.json`;
+  const canonicalEvidence = evidenceRelativePath(stage, "diagram-contract", axis, { module_id: state.current_module, unit_id: state.current_unit });
   activeEvidenceDirectory = dirname(resolve(PROJECT_ROOT, canonicalEvidence));
   return activeEvidenceDirectory;
 }

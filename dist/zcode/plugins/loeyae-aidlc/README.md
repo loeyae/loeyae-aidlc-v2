@@ -1,4 +1,4 @@
-# Loeyae AI-DLC v2 for ZCode
+# Loeyae AI-DLC for ZCode
 
 `dist/zcode` 是可由 **Settings → Plugins → Create → Add marketplace** 导入的本地 marketplace。由于 ZCode 当前没有公开的 CLI 插件注册命令，`loeyae-aidlc install --harness zcode` 默认采用可自动管理的用户集成：
 

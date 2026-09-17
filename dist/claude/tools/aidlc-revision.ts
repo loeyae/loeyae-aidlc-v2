@@ -15,7 +15,7 @@ function normalized(path: string): string {
 
 function excluded(path: string): boolean {
   const value = normalized(path);
-  return value === ".aidlc" || value.startsWith(".aidlc/") || value === "docs/aidlc/aidlc-state.json";
+  return value === ".aidlc" || value.startsWith(".aidlc/") || value === "aidlc" || value.startsWith("aidlc/");
 }
 
 export function readSourceRevision(projectRoot: string): SourceRevision {

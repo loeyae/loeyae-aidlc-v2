@@ -12,21 +12,17 @@ from diagram_fixture_style import canonicalize_svg
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TOOL = os.path.join(REPO_ROOT, "core", "tools", "aidlc-diagram-provider.ts")
-TRUST_SECRET = "aidlc-provider-test-secret-at-least-32-bytes"
 
 
 def provider_environment(project: str) -> dict:
-    env = os.environ.copy()
-    env["AIDLC_TRUST_SECRET"] = TRUST_SECRET
-    env["AIDLC_TRUST_DIR"] = os.path.join(project, ".aidlc", "test-trust")
-    return env
+    return os.environ.copy()
 
 
 def initialize_state(project: str) -> None:
-    state_uri = (Path(REPO_ROOT) / "core" / "tools" / "aidlc-state.ts").as_uri()
+    state_uri = (Path(REPO_ROOT) / "core" / "tools" / "aidlc-light-state.ts").as_uri()
     script = f"""
 import {{ createInitialState, saveWorkflowState }} from {json.dumps(state_uri)};
-const state = createInitialState('feature');
+const state = createInitialState('feature', '4.0.0', 'diagram-provider-fixture', [], 'diagram provider fixture');
 state.current_stage = 'requirements-methods';
 state.current_phase = 'inception';
 state.current_stage_instance = 'requirements-methods@module:test-module';

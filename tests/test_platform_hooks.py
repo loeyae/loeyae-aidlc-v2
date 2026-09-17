@@ -9,18 +9,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 NODE = os.environ.get("NODE", "node")
-TRUST_SECRET = "aidlc-platform-test-secret-at-least-32-bytes"
-
 
 def environment(home: Path, trust: Path = None) -> dict:
     env = os.environ.copy()
     env["HOME"] = str(home)
-    env["AIDLC_TRUST_SECRET"] = TRUST_SECRET
-    env["AIDLC_TRUST_DIR"] = str(trust or home / "trust")
     env["AIDLC_INSTALL_STATE_DIR"] = str(home / ".config" / "loeyae-aidlc" / "installations")
-    # This suite preserves the legacy single-cursor Hook contract. Schema v3 Hook
-    # identity/receipt behavior is covered by tests/test_cli_v3.ts.
-    env["AIDLC_COLLABORATION_V3"] = "0"
     return env
 
 
@@ -36,10 +29,10 @@ def run_cli(args: list, cwd: Path, home: Path, trust: Path = None, input_data: s
 
 
 def save_state(project: Path, home: Path, status="running", current_stage="") -> None:
-    state_uri = (ROOT / "core" / "tools" / "aidlc-state.ts").as_uri()
+    state_uri = (ROOT / "core" / "tools" / "aidlc-light-state.ts").as_uri()
     script = f"""
 import {{ createInitialState, saveWorkflowState }} from {json.dumps(state_uri)};
-const state = createInitialState('feature');
+const state = createInitialState('feature', '4.0.0', undefined, [], 'platform hook test');
 state.status = {json.dumps(status)};
 state.current_stage = {json.dumps(current_stage)};
 if (state.current_stage) state.current_stage_instance = state.current_stage;
@@ -58,7 +51,7 @@ saveWorkflowState(process.cwd(), state);
 
 def main() -> None:
     kiro_hook = json.loads((ROOT / "core" / "hooks" / "kiro" / "aidlc-gates.json").read_text())
-    assert kiro_hook["version"] == "v1"
+    assert kiro_hook["version"] == "1"
     assert kiro_hook["hooks"][0]["trigger"] == "Stop"
     assert "loeyae-aidlc hook --format kiro" in kiro_hook["hooks"][0]["action"]["command"]
 
@@ -78,7 +71,7 @@ def main() -> None:
 
     codex_hooks = json.loads((ROOT / "harness" / "codex" / "hooks" / "hooks.json").read_text())
     codex_group = codex_hooks["hooks"]["Stop"][0]
-    assert codex_group["id"] == "loeyae-aidlc-stop-gate-v1"
+    assert codex_group["id"] == "loeyae-aidlc-stop-gate"
     assert "--format codex" in codex_group["hooks"][0]["command"]
 
     plugin = (ROOT / "harness" / "opencode" / "plugins" / "loeyae-aidlc.js").read_text()
@@ -124,7 +117,7 @@ def main() -> None:
             result = run_cli(["install", "--harness", "codex"], ROOT, home)
             assert result.returncode == 0, result.stdout + result.stderr
         registered = json.loads(codex_path.read_text())["hooks"]["Stop"]
-        assert sum(group.get("id") == "loeyae-aidlc-stop-gate-v1" for group in registered) == 1
+        assert sum(group.get("id") == "loeyae-aidlc-stop-gate" for group in registered) == 1
         assert custom_group in registered
         result = run_cli(["uninstall", "--harness", "codex"], ROOT, home)
         assert result.returncode == 0, result.stdout + result.stderr
@@ -156,14 +149,14 @@ def main() -> None:
         )
         assert result.returncode == 0 and result.stdout == "" and result.stderr == ""
 
-        # Valid signed done state allows stopping.
+        # Valid lightweight done state allows stopping.
         done_project = home / "done"
         done_project.mkdir()
         save_state(done_project, home, status="done")
         result = run_cli(["hook", "--format", "claude"], done_project, home, home / "trust-done")
         assert result.returncode == 0 and result.stdout == "", result.stdout + result.stderr
 
-        # Valid signed running state with an unknown stage exercises nonzero JSON error parsing.
+        # Running lightweight state blocks with an explicit continuation prompt.
         blocked_project = home / "blocked"
         blocked_project.mkdir()
         save_state(blocked_project, home, current_stage="missing-stage")
@@ -171,18 +164,18 @@ def main() -> None:
         assert result.returncode == 0
         decision = json.loads(result.stdout)
         assert decision["decision"] == "block"
-        assert "Unknown stage" in decision["reason"]
+        assert "still running" in decision["reason"]
 
         for hook_format in ["codebuddy", "zcode"]:
             platform_result = run_cli(["hook", "--format", hook_format], blocked_project, home, home / "trust-blocked")
             assert platform_result.returncode == 0
             platform_decision = json.loads(platform_result.stdout)
             assert platform_decision["decision"] == "block"
-            assert "Unknown stage" in platform_decision["reason"]
+            assert "still running" in platform_decision["reason"]
 
         qoder_result = run_cli(["hook", "--format", "qoder-cli"], blocked_project, home, home / "trust-blocked")
         assert qoder_result.returncode == 2
-        assert qoder_result.stdout == "" and "Unknown stage" in qoder_result.stderr
+        assert qoder_result.stdout == "" and "still running" in qoder_result.stderr
 
         qoder_retry = run_cli(
             ["hook", "--format", "qoder-cli"],
@@ -193,31 +186,23 @@ def main() -> None:
         )
         assert qoder_retry.returncode == 0 and qoder_retry.stdout == "" and qoder_retry.stderr == ""
 
-        # Tampering a signed state fails closed.
-        state_path = blocked_project / "docs" / "aidlc" / "aidlc-state.json"
-        state = json.loads(state_path.read_text())
-        state["current_stage"] = "workspace-detection"
-        state_path.write_text(json.dumps(state))
+        # Invalid Markdown state fails closed.
+        state_path = blocked_project / "aidlc" / "active" / "aidlc-state.md"
+        state_path.write_text("not a workflow\n")
         result = run_cli(["hook", "--format", "claude"], blocked_project, home, home / "trust-blocked")
         assert json.loads(result.stdout)["decision"] == "block"
-        assert "integrity" in json.loads(result.stdout)["reason"]
+        assert "invalid" in json.loads(result.stdout)["reason"]
 
-        # Enrolled state deletion also fails closed.
-        state_path.unlink()
-        result = run_cli(["hook", "--format", "claude"], blocked_project, home, home / "trust-blocked")
-        assert json.loads(result.stdout)["decision"] == "block"
-        assert "missing its signed state" in json.loads(result.stdout)["reason"]
-
-        # Stop Hook cannot auto-complete instruction-only stages.
+        # Stop Hook observes but never auto-completes instruction-only stages.
         instruction_project = home / "instruction"
         instruction_project.mkdir()
-        init = run_cli(["orchestrate", "next", "--scope", "feature"], instruction_project, home, home / "trust-instruction")
+        init = run_cli(["orchestrate", "next", "--scope", "feature", "--work", "hook instruction test"], instruction_project, home, home / "trust-instruction")
         assert init.returncode == 0
         directive = run_cli(["orchestrate", "next"], instruction_project, home, home / "trust-instruction")
         assert json.loads(directive.stdout)["completion_contract"] == "instruction_only"
         result = run_cli(["hook", "--format", "claude"], instruction_project, home, home / "trust-instruction")
         decision = json.loads(result.stdout)
-        assert decision["decision"] == "block" and "instruction-ack" in decision["reason"]
+        assert decision["decision"] == "block" and "still running" in decision["reason"]
 
         shutil.rmtree(home / "trust", ignore_errors=True)
 

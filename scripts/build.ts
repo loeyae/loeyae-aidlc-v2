@@ -106,7 +106,7 @@ async function buildHarness(name: string) {
 async function main() {
   compileGraph();
   const { harnesses } = parseArgs();
-  console.log(`🏗️  Loeyae AI-DLC v2 Builder`);
+  console.log(`🏗️  Loeyae AI-DLC Builder`);
   console.log(`   Harnesses: ${harnesses.join(", ")}`);
 
   for (const h of harnesses) {

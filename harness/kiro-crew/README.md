@@ -1,35 +1,38 @@
-# Loeyae AI-DLC — Kiro Crew Installation
+# Loeyae AI-DLC for Kiro Crew
 
-## Install
+此分发物提供 AWS-style 轻量 AI-DLC Skill：用户明确工作目标后，由 Markdown workflow 协调阶段、单元分工、review、构建、测试和人工 merge。
 
-Use the CLI installer so the skill and the V1 MCP capability set are installed together:
+## 使用方式
 
 ```bash
-loeyae-aidlc install
+loeyae-aidlc orchestrate next --scope feature --work "修复订单导出超时"
+loeyae-aidlc orchestrate next
 ```
 
-The installer copies the skill to `~/.kiro/crew/skills/loeyae-aidlc/` and merges missing `loeyae-skills`, `awesome-design`, `figma`, `ssot`, and `chrome-devtools` entries into `~/.kiro/settings/mcp.json`. Existing same-name entries are preserved except for the uncustomized legacy versioned `chrome-devtools-mcp` default, which is safely normalized to the unversioned `chrome-devtools-mcp` package; entries with custom fields, environment variables, non-default arguments, or a disabled state remain untouched. `--target` is only for a dedicated install directory; never pass a non-empty project or source directory. The current installer refuses non-empty custom targets, and custom target installs do not modify global MCP settings. `ssot` reads `SSOT_API_KEY` from the environment.
+控制面：
 
-
-## Usage
-
-In any Kiro Crew session, say:
-
-```
-使用 AI-DLC 开发用户认证模块
+```text
+aidlc/active/aidlc-state.md
+aidlc/active/audit.md
 ```
 
-The skill triggers on keywords: `aidlc`, `AI-DLC`, `使用 AI-DLC`, `继续上次工作`, `接手当前项目`, `查看可接手任务`, `在这台设备继续`, etc. Continue/takeover requests load `aidlc-continuity`; `aidlc-handoff` is a compatibility alias. A running workflow already has signed checkpoints and does not need to be parked before an ordinary session handoff.
+Agent 应原样展示每个 directive 的 `handoff_prompt`。该提示词包含工作目标、当前阶段、单元、产物和下一步质量动作。
 
-## How it works
+## 团队开发
 
-The engine (`tools/aidlc-orchestrate.ts`) drives the workflow:
+```bash
+loeyae-aidlc unit list
+loeyae-aidlc unit select --module module-a --unit unit-a --member alice --branch feat/unit-a
+```
 
-1. Agent 调用 `next` → 引擎返回 `run-stage` directive
-2. Agent 读取并执行 stage 文件，生成受门禁约束的产物/Evidence
-3. 新 workflow 默认 schema v3：使用 actor/device/client identity 执行 `next`，Provider ACK 后才返回包含 `stage_instance` 与 `claim_receipt` 的 directive
-4. 普通 stage 使用定向 `report --instance <id> --claim-receipt-stdin --result completed`；`instruction_only` 还必须追加 `--instruction-ack <slug>`
-5. `approval:block` 先加载 `aidlc-approval`；Agent 展示 request 的随机确认语后结束回合，用户下一条真实消息精确匹配时，与 receipt 组成严格 stdin envelope 定向报告；Provider/TTY 仅为可选兼容
-6. 重复直到 `done`
+成员选择是协作记录；review、构建、测试和 merge plan 才是交付依据。
 
-普通“同意”、预填按钮、Agent 代填、旧消息或同一回合自动提交不能替代随机确认；Skill 或生命周期适配器也不能自行生成 claim receipt。公开 report 不支持手动 skip，只有图谱 condition=false 可记录内部 `condition_skipped`。`docs/aidlc/aidlc-state.json` 的签名 event/instance map/lease 是唯一机器状态，外部 enrollment 绑定项目；handoff 仅为派生人类视图。Local Provider 只协调同一工作树，跨工作树/设备使用 Git Provider 专用 ref 或具体 External Provider；业务 main/master 不是锁。`park` 只冻结整个 workflow，日常交接不需要 park。
+## 审批与交付
+
+应用设计和部署决策使用：
+
+```bash
+loeyae-aidlc orchestrate report --stage <slug> --result approved --user-input Approve
+```
+
+完成分支工作后生成 merge plan，并由具有仓库权限的成员人工执行 merge。

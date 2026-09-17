@@ -128,7 +128,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 
 **前端代码**：
 1. PC端 → `common-tech-frontend-pc.md`；小程序/APP → `common-tech-frontend-uniapp.md`
-2. 当前模块签名 history 中 I9 choice 为 `figma-create` 或 `figma-existing` → `common-figma-design-standards.md`
+2. 当前模块 Markdown history 中 I9 choice 为 `figma-create` 或 `figma-existing` → `common-figma-design-standards.md`
 3. 读取项目 `.kiro/steering/structure.md`（如存在）
 4. 跨端项目 → 加载 `construction-ui-implementation-bridge.md` + 读取 `docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md`
 
@@ -234,7 +234,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 
 ### 页面对照表规范（有 UI 设计的前端项目）
 
-**触发条件**：当前模块签名 history 中 I9 choice 为 `html-mock`、`figma-create` 或 `figma-existing`（`skip` 或 condition false 时不生成本表）。设计单元的定位方式按模式区分：
+**触发条件**：当前模块 Markdown history 中 I9 choice 为 `html-mock`、`figma-create` 或 `figma-existing`（`skip` 或 condition false 时不生成本表）。设计单元的定位方式按模式区分：
 
 | UI 设计方式 | 设计单元 | 来源 |
 |---------|---------|------|
@@ -480,7 +480,7 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 >
 > 🔧 **请求修改** - 根据审查结果要求修改生成的代码
 > ✅ **继续下一阶段** - 确认代码生成，进入**[下一单元/构建和测试]**
-> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时先验证签名 state 并读取 `docs/aidlc/handoff.md`。
+> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时读取 `aidlc/active/aidlc-state.md` 和 `aidlc/active/audit.md`。
 
 ---
 ```

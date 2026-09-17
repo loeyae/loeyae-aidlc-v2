@@ -69,7 +69,7 @@ try {
   const status = inspectRestrictedExtension("quality-pack", project) as { status: string; projection: Record<string, unknown> };
   assert.equal(status.status, "current");
   assert.equal(status.projection.authoritative, false);
-  assert.match(JSON.stringify(status.projection.restrictions), /does not modify canonical state/);
+  assert.match(JSON.stringify(status.projection.restrictions), /does not modify workflow state/);
 
   const cliResult = spawnSync(process.execPath, [tsx, cli, "extension", "status", "quality-pack", "--project", project], {
     cwd: project,

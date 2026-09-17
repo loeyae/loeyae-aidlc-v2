@@ -4,14 +4,14 @@
     "name": "Loeyae Team",
     "url": "https://github.com/loeyae"
   },
-  "description": "Loeyae AI-DLC v2 plugin marketplace for CodeBuddy.",
-  "version": "3.5.0",
+  "description": "AWS-style lightweight AI-DLC plugin marketplace for CodeBuddy.",
+  "version": "4.0.0",
   "plugins": [
     {
       "name": "loeyae-aidlc",
       "source": "./plugins/loeyae-aidlc",
-      "description": "Loeyae AI-DLC v2 engine-driven lifecycle with enforced stage gates.",
-      "version": "3.5.0",
+      "description": "AWS-style lightweight AI-DLC workflow with Markdown state/audit, unit selection, review, build and test.",
+      "version": "4.0.0",
       "skills": ["./plugins/loeyae-aidlc/skills/loeyae-aidlc"]
     }
   ]

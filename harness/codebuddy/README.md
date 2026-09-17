@@ -1,4 +1,4 @@
-# Loeyae AI-DLC v2 for WorkBuddy Enterprise / CodeBuddy
+# Loeyae AI-DLC for WorkBuddy Enterprise / CodeBuddy
 
 本目录构建为 CodeBuddy 本地 marketplace，包含 Skill、Stop Hook 和 MCP 声明。正式安装由 `loeyae-aidlc install --harness codebuddy` 调用 CodeBuddy 官方 CLI 完成，不直接编辑宿主 registry 或 cache。
 
