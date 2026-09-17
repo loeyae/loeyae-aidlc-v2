@@ -23,6 +23,13 @@
 | 预演 schema v2→v3 迁移 | `loeyae-aidlc state migrate-v3 --actor-id <actor> --device-id <device> --client-id <client>` |
 | 预演 V1 `state.md`→新 schema v3 | `loeyae-aidlc state regenerate-v3 --scope <scope> --actor-id <actor> --device-id <device> --client-id <client>` |
 | 生成构建测试证据 | `loeyae-aidlc evidence run --stage build-and-test` |
+| 解析 commit/diff 级 unit claims | `loeyae-aidlc attest resolve --base <ref> --head <ref>` |
+| 查看 V3 派生运行时视图 | `loeyae-aidlc runtime summary` |
+| 检查 V3 派生运行时视图 | `loeyae-aidlc runtime doctor` |
+| 校验受限 extension bundle | `loeyae-aidlc extension validate <source>` |
+| 受管组合受限 extension bundle | `loeyae-aidlc extension compose <source>` |
+| 创建 receipt-bound V3 worktree | `loeyae-aidlc worktree prepare --instance <id> --path <path>` |
+| 生成 receipt-bound merge plan | `loeyae-aidlc worktree merge-plan --instance <id> --path <path>` |
 | 运行内置语义检查 | `loeyae-aidlc check --sensor <name>` |
 | 导出 Markdown 为 Word | `loeyae-aidlc export md <file.md> --to docx` |
 | 导出 Markdown 为 PDF | `loeyae-aidlc export md <file.md> --to pdf` |
@@ -50,6 +57,10 @@
 - `recover`
 - `approve`
 - `evidence`
+- `attest` / `attestation`
+- `runtime`
+- `extension`
+- `worktree`
 - `check`
 - `diagram-provider`
 - `hook`（由宿主自动调用）
@@ -865,6 +876,112 @@ loeyae-aidlc evidence run \
 - `ui-design-alignment`
 - `ui-artifact-consistency`
 - `inception-consistency`
+
+### 7.5 Commit/diff 级 Attestation Resolver：`attest resolve`
+
+该命令只读检查一个 Git merge-base 到 head 的变更集，把 changed paths 映射到 head commit tree 中的 unit-scoped signed review 或 controlled Evidence。它不写入工作流 state、enrollment、claim receipt、Evidence、routing、authorization 或 approval:block 状态，也不创建新的签名 authority。
+
+```text
+loeyae-aidlc attest resolve --base <ref> [--head <ref>] [--repo <path>]
+                            [--path <changed-path> ...]
+                            [--as-of <ISO-8601>] [--max-age-ms <n>]
+```
+
+`--base` 和 `--head` 先按安全的 Git revision 规则解析，随后必须得到唯一 merge base；默认 `--head` 为 `HEAD`。resolver 只使用 `git rev-parse`、`merge-base`、`ls-tree`、`diff` 和 blob object 读取，禁止把任意 shell 文本交给 Git。`--path` 只能筛选实际 diff 中的路径；不在实际 diff 中的显式路径会返回 `indeterminate`，不会被当作已变更。
+
+输出始终是一个机器可读 JSON 对象，顶层和每个 changed path 都有以下五态之一：
+
+- `verified`：签名有效、review/Evidence schema 通过、source revision 与 head 和 tree digest 匹配，并且该 path 被 unit claim 精确列出。
+- `drifted`：签名材料仍可解析，但 Evidence 的 commit、dirty 状态、tree digest、文件 digest 或 freshness 已与当前检查范围不一致。
+- `unattested`：Git diff 和完整历史可读取，但没有 unit-scoped signed review 或 controlled Evidence 精确覆盖该 path。
+- `unverifiable`：非法 revision/path、缺失 Git object/tree、签名失败、Evidence 不受控、内容无法解析或 merge base 无法建立。
+- `indeterminate`：浅克隆、多个 merge base、显式 path 不在 diff 中或 unit ownership 无法唯一确定。
+
+聚合 `status` 使用最弱的实际 path 结论，不会因为另一个 unit 已通过而升级 `drifted`、`unattested`、`unverifiable` 或 `indeterminate`。每个 path 和 unit claim 都包含 `trust_basis`，`history` 则记录 merge base、shallow/complete 状态和所使用的 Git 边界。对于 schema v3，既有 Ed25519 verifier 负责检查 Evidence integrity；旧 HMAC 只有在现有 trust key 可验证时才会被识别，resolver 不会创建或重签任何记录。
+
+示例：
+
+```bash
+loeyae-aidlc attest resolve \
+  --base origin/main \
+  --head HEAD \
+  --path src/orders/order-service.ts
+```
+
+### 7.6 V3 Runtime Projection：`runtime`
+
+`runtime` 只读构建当前 schema v3 workflow 的派生诊断视图；它从已验证的签名 state、event head、实例投影和 `.aidlc/evidence/` 索引读取数据，不写入 state、enrollment、claim receipt、Evidence、routing 或审批状态。输出中的 `authoritative: false` 是强制边界：该视图只供诊断、Dashboard 或交接展示，不能替代 `orchestrate next/report` 的签名 state。
+
+```text
+loeyae-aidlc runtime summary [--project <path>] [--as-of <ISO-8601>]
+loeyae-aidlc runtime doctor  [--project <path>] [--as-of <ISO-8601>]
+```
+
+`summary` 输出 workflow ID、scope、状态、revision、event head、实例状态分布、事件类型统计和 Evidence 索引。claim 仅投影 actor/device/client、provider、receipt digest 与 lease 时间，绝不输出 provider receipt 或私钥。
+
+`doctor` 在 `summary` 基础上列出不可读或 integrity 失败的 Evidence 以及已过期 lease；它不执行或推进任何 stage，也不会因为缺少非当前阶段的 Evidence 自动修改 workflow。示例：
+
+```bash
+loeyae-aidlc runtime summary
+loeyae-aidlc runtime doctor --project /absolute/path/to/project
+```
+
+### 7.7 Restricted Additive Extension：`extension`
+
+`extension` 提供受限的 additive extension foundation。它只读取 bundle 中的 manifest、Markdown stage/knowledge 内容和 advisory sensor 描述，使用 project-local 受管 projection 保存内容哈希与 ownership；它不会执行 extension 代码，也不会直接把 extension stage 注入 canonical workflow graph。
+
+```text
+loeyae-aidlc extension validate <source>
+loeyae-aidlc extension compose <source> [--project <path>]
+loeyae-aidlc extension status <name> [--project <path>]
+```
+
+bundle 根目录必须包含 `aidlc-extension.json`，且只允许 `stages/`、`knowledge/` Markdown 内容。manifest 的 `name`、stage slug、advisory sensor ID 必须使用 extension 自身的 kebab-case namespace；extension 产生的 artifact 必须位于 `.aidlc/extensions/<name>/`。
+
+`compose` 先执行 schema、路径、symlink、namespace 与 producer/consumer closure 校验，然后在 `.aidlc/extensions/<name>/` 使用 staging + rename 创建受管 projection、source hash 与 ownership record。已受管且未修改的同一 source hash 返回 `unchanged`；任何手工修改、额外文件或非受管目标都会 fail-closed。当前 P3 projection 明确标记 `authoritative: false`，不能影响 state、enrollment、claim receipt、approval、completion contract 或受控 semantic Evidence。
+
+extension 可描述 additive `produces`、`consumes`、`sensors` 与文档 fragments；它不能声明 `approval`、`completion_contract`、`condition`、`requires`、`trust`、`enrollment`、`claim_receipt`、命令或脚本。extension sensor 永远是 advisory，不能成为 `evidence run` 的可信 Producer。
+
+```bash
+loeyae-aidlc extension validate /absolute/path/to/quality-pack
+loeyae-aidlc extension compose /absolute/path/to/quality-pack \
+  --project /absolute/path/to/business-project
+loeyae-aidlc extension status quality-pack \
+  --project /absolute/path/to/business-project
+```
+
+### 7.8 Receipt-bound V3 Worktree：`worktree`
+
+`worktree` 是 schema v3 的显式 Git worktree adapter。它只允许当前 `in_progress` instance 的有效 claim receipt 创建一个新 branch/worktree，并把 workflow、instance、receipt digest、base commit 与 source digest 写入签名 metadata。metadata 是审计和校验材料，不是 state authority，也不会推进 workflow。
+
+```text
+claim-receipt.json | loeyae-aidlc worktree prepare \
+  --instance <stage-instance> --path <absolute-worktree-path> \
+  [--branch aidlc-worktree/<safe-name>] [--project <project-root>] \
+  --claim-receipt-stdin
+
+claim-receipt.json | loeyae-aidlc worktree verify \
+  --instance <stage-instance> --path <absolute-worktree-path> \
+  --review-evidence <worktree-relative-evidence-path> \
+  [--project <project-root>] --claim-receipt-stdin
+```
+
+`merge-plan` 与 `verify` 使用相同参数，都会验证：当前 receipt 未过期且仍对应 active claim、worktree 注册与 branch/base metadata 一致、worktree 源码变更已提交、head 是 base 的后代、以及签名 dual-axis review Evidence 的 `files_reviewed` 覆盖所有提交后的变更路径。
+
+该命令**不会自动 merge、push、release claim、删除 worktree 或 report completed**。通过校验后只输出 `authorized: false` 的 merge plan 和建议的 `git merge --no-ff` 命令；实际合并仍必须由拥有仓库权限的用户明确执行，并在合并后走正常的 code review/Evidence/report 流程。
+
+```bash
+claim-receipt.json | loeyae-aidlc worktree prepare \
+  --instance code-generation@module:module-a@unit:unit-a \
+  --path /absolute/path/to/module-a-unit-a-worktree \
+  --claim-receipt-stdin
+
+claim-receipt.json | loeyae-aidlc worktree merge-plan \
+  --instance code-generation@module:module-a@unit:unit-a \
+  --path /absolute/path/to/module-a-unit-a-worktree \
+  --review-evidence .aidlc/evidence/code-review/module-a/unit-a/review-evidence.json \
+  --claim-receipt-stdin
+```
 
 ## 8. 直接语义检查：`check`
 

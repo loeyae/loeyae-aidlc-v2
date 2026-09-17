@@ -343,6 +343,28 @@ loeyae-aidlc recover re-enroll
 # 使用业务项目中的受控命令清单生成构建测试证据
 loeyae-aidlc evidence run --stage build-and-test
 
+# P1：只读解析 commit/diff 到签名 unit Evidence；不修改 state 或 receipt
+loeyae-aidlc attest resolve --base origin/main --head HEAD --path src/example.ts
+
+# P2：从签名 V3 state/Evidence 生成非权威诊断投影
+loeyae-aidlc runtime summary
+loeyae-aidlc runtime doctor
+
+# P3：校验并受管组合仅含 additive 数据/Markdown 的 extension bundle
+loeyae-aidlc extension validate /absolute/path/to/quality-pack
+loeyae-aidlc extension compose /absolute/path/to/quality-pack --project /absolute/path/to/business-project
+
+# P4：使用当前有效 receipt 建立 worktree；merge-plan 只验证并输出建议命令，不会自动 merge 或 push
+claim-receipt.json | loeyae-aidlc worktree prepare \
+  --instance code-generation@module:module-a@unit:unit-a \
+  --path /absolute/path/to/module-a-unit-a-worktree \
+  --claim-receipt-stdin
+claim-receipt.json | loeyae-aidlc worktree merge-plan \
+  --instance code-generation@module:module-a@unit:unit-a \
+  --path /absolute/path/to/module-a-unit-a-worktree \
+  --review-evidence .aidlc/evidence/code-review/module-a/unit-a/review-evidence.json \
+  --claim-receipt-stdin
+
 # 导出 Markdown 和 SVG
 loeyae-aidlc export md /absolute/path/document.md --to docx --toc
 loeyae-aidlc export md /absolute/path/document.md --to pdf

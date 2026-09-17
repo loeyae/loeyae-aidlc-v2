@@ -1317,6 +1317,10 @@ Commands:
   recover <inspect|re-enroll> [flags]     Inspect or repair a proven parked trust chain
   approve --stage <slug> --instance <id> [--request]  Show exact conversation confirmation; TTY remains optional
   evidence run --stage <slug> [--instance <id>] [flags]  Produce controlled signed evidence
+  attest/attestation resolve [flags]      Resolve read-only commit/diff unit attestations
+  runtime <summary|doctor> [flags]        Inspect a derived, non-authoritative schema v3 runtime view
+  extension <validate|compose|status> ... Validate or compose a restricted additive extension
+  worktree <prepare|verify|merge-plan> ... Prepare or verify a receipt-bound v3 worktree
   check --sensor <name>                   Run a deterministic semantic checker
   diagram-provider run [options]          Run Chrome DevTools diagram validation
   export <md|svg> <file> --to <format>    Export Markdown to DOCX/PDF or SVG to PNG
@@ -1415,6 +1419,11 @@ Examples:
     --instance application-design@module:module-a --result approved \
     --claim-receipt-stdin --approval-token <token>
   loeyae-aidlc evidence run --stage build-and-test --instance build-and-test
+  loeyae-aidlc attest resolve --base <base-ref> --head <head-ref> --path src/example.ts
+  loeyae-aidlc runtime summary
+  loeyae-aidlc runtime doctor
+  loeyae-aidlc extension validate /absolute/path/to/extension
+  receipt.json | loeyae-aidlc worktree prepare --instance <id> --path /absolute/path/to/worktree --claim-receipt-stdin
   loeyae-aidlc export md /absolute/path/document.md --to docx --toc
   loeyae-aidlc export md /absolute/path/document.md --to pdf
   loeyae-aidlc export svg /absolute/path/diagram.svg --to png --scale 2
@@ -1450,6 +1459,11 @@ function main(): void {
     case "recover": runInteractive("core/tools/aidlc-recover.ts", rest); break;
     case "approve": runInteractive("core/tools/aidlc-approve.ts", rest); break;
     case "evidence": run("core/tools/aidlc-evidence.ts", rest); break;
+    case "attest":
+    case "attestation": run("core/tools/aidlc-attestation-resolver.ts", rest); break;
+    case "runtime": run("core/tools/aidlc-runtime-v3.ts", rest); break;
+    case "extension": run("core/tools/aidlc-extension.ts", rest); break;
+    case "worktree": run("core/tools/aidlc-worktree-v3.ts", rest, rest.includes("--claim-receipt-stdin") ? readFileSync(0, "utf8") : undefined); break;
     case "check": run("core/tools/aidlc-semantic-checks.ts", rest); break;
     case "diagram-provider": run("core/tools/aidlc-diagram-provider.ts", rest); break;
     case "export": run("core/tools/aidlc-export.ts", rest); break;
