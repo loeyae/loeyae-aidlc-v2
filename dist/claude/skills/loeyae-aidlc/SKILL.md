@@ -53,3 +53,7 @@ loeyae-aidlc worktree merge-plan \
 ```
 
 merge plan 只提供建议；不会自动 merge 或 push。
+
+## Agent execution
+
+当 directive 包含 `agent_execution` 时，加载 `agents/<primary.id>.md` 与 `skills/aidlc-agent-execution/SKILL.md`。对 `delegate`、`pipeline`、`mob` 和 `review` 使用宿主原生 subagent 能力；若不可用，明确回退 inline。只有 conductor 可以 `orchestrate report`、更新 state/audit、批准或 merge。

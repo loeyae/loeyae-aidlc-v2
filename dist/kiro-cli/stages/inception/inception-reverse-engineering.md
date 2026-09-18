@@ -6,8 +6,8 @@ phase: inception
 axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-developer-agent
-support_agents: []
-mode: inline
+support_agents: [aidlc-architect-agent]
+mode: pipeline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: [docs/aidlc/modules/{module-id}/inception/reverse-engineering.md]

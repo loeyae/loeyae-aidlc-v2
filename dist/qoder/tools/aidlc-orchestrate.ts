@@ -22,6 +22,7 @@
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "fs";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
+import { planAgentExecution, type AgentExecutionPlan } from "./aidlc-agent-runtime";
 import { readSourceRevision } from "./aidlc-revision";
 import {
   evidenceRelativePath,
@@ -73,6 +74,7 @@ export interface StageNode {
   lead_agent: string;
   support_agents: string[];
   mode: string;
+  reviewer_agent?: string;
   scopes: string[];
   requires: string[];
   scope_waived_requires: string[];
@@ -108,6 +110,7 @@ export interface Directive {
   lead_agent?: string;
   support_agents?: string[];
   mode?: string;
+  agent_execution?: AgentExecutionPlan;
   gate?: boolean;
   consumes?: string[];
   produces?: string[];
@@ -900,6 +903,11 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
           // Reviewer identity required
           if (!asNonEmptyString(evidence.reviewer)) errors.push("reviewer must identify who/what performed the review");
+          if (stage.mode === "review") {
+            if (evidence.reviewer_agent !== stage.reviewer_agent) errors.push(`reviewer_agent must be ${stage.reviewer_agent}`);
+            if (evidence.execution_context !== "isolated") errors.push('execution_context must be "isolated" for review mode');
+            if (evidence.review_only !== true) errors.push("review_only must be true for review mode");
+          }
 
           // Files reviewed must be non-empty
           const filesReviewed = asStringArray(evidence.files_reviewed);
@@ -1794,14 +1802,14 @@ function unsupportedFlag(flags: Record<string, string>, allowed: ReadonlySet<str
   return Object.keys(flags).find((flag) => !allowed.has(flag));
 }
 
-function lightweightNextPrompt(state: WorkflowState, instance: StageInstance): string {
+function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, agentExecution: AgentExecutionPlan): string {
   const unit = instance.module_id && instance.unit_id
     ? `当前单元：${instance.module_id}/${instance.unit_id}。团队成员可用 unit select 声明负责人与分支。`
     : "当前阶段不要求成员选择单元；按产物、review、构建和测试门禁推进。";
   const artifacts = instance.stage.produces.length
     ? instance.stage.produces.map((pattern) => instanceArtifactPattern(pattern, instance)).join("、")
     : "本阶段没有声明文件产物";
-  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。\n下一步：完成后运行 orchestrate report。`;
+  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；状态、审批和 merge 权限仅属于 conductor。\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。\n下一步：完成后将结构化结果交回 conductor，再运行 orchestrate report。`;
 }
 
 function clearActiveContext(state: WorkflowState): void {
@@ -1908,7 +1916,7 @@ async function handleNext(args: string[]): Promise<Directive> {
       } as unknown as Directive;
     }
     const selectedOptionalStages = withPrd ? ["prd-generation"] : [];
-    state = createInitialState(scopeFlag, "4.0.0", undefined, selectedOptionalStages, workDescription);
+    state = createInitialState(scopeFlag, "4.1.0", undefined, selectedOptionalStages, workDescription);
     saveState(state);
     return {
       kind: "print",
@@ -1995,6 +2003,7 @@ async function handleNext(args: string[]): Promise<Directive> {
   saveState(state);
 
   const directiveChoices = runtimeChoices(nextStage, state);
+  const agentExecution = planAgentExecution(nextStage);
   return {
     kind: "run-stage",
     stage: nextStage.slug,
@@ -2011,13 +2020,14 @@ async function handleNext(args: string[]): Promise<Directive> {
     lead_agent: nextStage.lead_agent,
     support_agents: nextStage.support_agents,
     mode: nextStage.mode,
+    agent_execution: agentExecution,
     gate,
     approval: nextStage.approval,
     completion_contract: nextStage.completion_contract,
     consumes: nextStage.consumes.map((pattern) => instanceArtifactPattern(pattern, effectiveNextInstance, true)),
     produces: nextStage.produces.map((pattern) => instanceArtifactPattern(pattern, effectiveNextInstance)),
     sensors: nextStage.sensors,
-    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance),
+    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, agentExecution),
   };
 }
 

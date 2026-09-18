@@ -19,6 +19,7 @@ const manifest: HarnessManifest = {
 
   coreDirs: [
     { src: "tools", dst: "tools" },
+    { src: "agents", dst: "agents" },
     { src: "stages/ideation", dst: "stages/ideation" },
     { src: "stages/inception", dst: "stages/inception" },
     { src: "stages/construction", dst: "stages/construction" },

@@ -39,6 +39,10 @@ try {
   const next = success(["orchestrate", "next"]);
   assert.equal(next.kind, "run-stage");
   assert.equal("claim_receipt" in next, false);
+  const agentExecution = next.agent_execution as Record<string, unknown>;
+  assert.equal(agentExecution.mode, "inline");
+  assert.equal(agentExecution.state_authority, "conductor-only");
+  assert.equal((agentExecution.primary as Record<string, unknown>).id, "aidlc-architect-agent");
   const handoff = String(next.handoff_prompt || "");
   assert.match(handoff, /工作目标：Fix checkout validation failure/);
   assert.match(handoff, /当前阶段：/);

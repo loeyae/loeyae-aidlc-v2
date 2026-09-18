@@ -141,7 +141,7 @@ export function lightAuditPath(projectRoot: string): string {
   return resolve(projectRoot, "aidlc", "active", "audit.md");
 }
 
-export function createInitialState(scope: string, version = "4.0.0", workflowId = randomUUID(), selectedOptionalStages: string[] = [], workDescription = ""): WorkflowState {
+export function createInitialState(scope: string, version = "4.1.0", workflowId = randomUUID(), selectedOptionalStages: string[] = [], workDescription = ""): WorkflowState {
   if (!SCOPES.has(scope)) throw new Error(`invalid workflow scope: ${scope}`);
   if (selectedOptionalStages.some((stage) => stage !== "prd-generation") || (selectedOptionalStages.length > 0 && !PRD_SCOPES.has(scope))) {
     throw new Error("invalid selected optional stage for scope");

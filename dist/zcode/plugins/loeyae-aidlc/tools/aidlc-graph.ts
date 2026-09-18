@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { dirname, isAbsolute, join, normalize, resolve } from "path";
 import { fileURLToPath } from "url";
+import { loadAgentCatalog } from "./aidlc-agent-runtime";
 import type { ExecutionAxis } from "./aidlc-execution-context";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -20,6 +21,7 @@ interface StageNode {
   lead_agent: string;
   support_agents: string[];
   mode: string;
+  reviewer_agent?: string;
   scopes: string[];
   requires: string[];
   scope_waived_requires: string[];
@@ -45,6 +47,7 @@ const PHASES = ["ideation", "inception", "construction", "operation"];
 const PHASE_ORDER = new Map(PHASES.map((phase, index) => [phase, index]));
 const VALID_SCOPES = new Set(["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor", "poc"]);
 const ALLOWED_ROOTS = new Set(["workspace-detection", "product-inception"]);
+const VALID_AGENT_MODES = new Set(["inline", "delegate", "pipeline", "mob", "review"]);
 
 function parseFrontmatter(content: string): Record<string, unknown> | null {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
@@ -107,6 +110,7 @@ function scanStages(): StageNode[] {
         lead_agent: (fm.lead_agent as string) || "(orchestrator)",
         support_agents: (fm.support_agents as string[]) || [],
         mode: (fm.mode as string) || "inline",
+        ...(typeof fm.reviewer_agent === "string" && fm.reviewer_agent.trim() ? { reviewer_agent: fm.reviewer_agent.trim() } : {}),
         scopes: (fm.scopes as string[]) || [],
         requires: (fm.requires as string[]) || [],
         scope_waived_requires: (fm.scope_waived_requires as string[]) || [],
@@ -203,6 +207,7 @@ function detectCycles(stages: StageNode[]): string[] {
 
 export function validateGraph(graph: { stages: StageNode[]; stage_count: number; scopes?: string[] }): string[] {
   const errors: string[] = [];
+  const agentCatalog = loadAgentCatalog();
   const bySlug = new Map<string, StageNode>();
   const numbers = new Set<string>();
   const producers = new Map<string, string[]>();
@@ -216,7 +221,12 @@ export function validateGraph(graph: { stages: StageNode[]; stage_count: number;
     if (!stage.number || !stage.name || !stage.file) errors.push(`missing identity metadata: ${stage.slug || "<unknown>"}`);
     if (!PHASE_ORDER.has(stage.phase)) errors.push(`invalid phase on ${stage.slug}: ${stage.phase}`);
     if (!["project", "module", "unit"].includes(stage.axis)) errors.push(`invalid execution axis on ${stage.slug}: ${stage.axis}`);
+    if (!agentCatalog.has(stage.lead_agent)) errors.push(`unknown lead_agent on ${stage.slug}: ${stage.lead_agent}`);
+    for (const support of stage.support_agents) if (!agentCatalog.has(support)) errors.push(`unknown support_agent on ${stage.slug}: ${support}`);
+    if (stage.reviewer_agent && !agentCatalog.has(stage.reviewer_agent)) errors.push(`unknown reviewer_agent on ${stage.slug}: ${stage.reviewer_agent}`);
     if (!VALID_CONDITIONS.has(stage.condition)) errors.push(`unknown condition on ${stage.slug}: ${stage.condition}`);
+    if (!VALID_AGENT_MODES.has(stage.mode)) errors.push(`invalid agent execution mode on ${stage.slug}: ${stage.mode}`);
+    if (stage.reviewer_agent && stage.mode !== "review") errors.push(`reviewer_agent requires review mode on ${stage.slug}`);
     if (!["ALWAYS", "CONDITIONAL"].includes(stage.execution)) errors.push(`invalid execution on ${stage.slug}: ${stage.execution}`);
     if (!["automatic", "user"].includes(stage.selection)) errors.push(`invalid selection on ${stage.slug}: ${stage.selection}`);
     if (stage.selection === "user" && stage.execution === "ALWAYS") errors.push(`user-selected stage cannot declare execution ALWAYS: ${stage.slug}`);
@@ -306,7 +316,7 @@ export function validateGraph(graph: { stages: StageNode[]; stage_count: number;
 function sourceGraph(): StageGraph {
   const stages = scanStages();
   return {
-    version: "3.0.0",
+    version: "4.1.0",
     stages,
     stage_count: stages.length,
     scopes: [...VALID_SCOPES].sort(),

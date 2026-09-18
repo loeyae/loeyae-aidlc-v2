@@ -7,7 +7,8 @@ axis: unit
 execution: ALWAYS
 lead_agent: aidlc-quality-agent
 support_agents: []
-mode: inline
+mode: review
+reviewer_agent: aidlc-quality-agent
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes:
   - src/

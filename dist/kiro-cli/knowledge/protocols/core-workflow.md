@@ -31,6 +31,12 @@ loeyae-aidlc orchestrate report \
 
 module manifest 与 unit manifest 生成后，成员使用 `unit select` 记录开发分工。当前 state 中的阶段 history、module/unit 上下文和 manifests 决定路由。
 
+## Agent 执行
+
+每个 `run-stage` directive 可附带 `agent_execution`，由 conductor 决定 inline、delegate、pipeline、mob 或 review 执行。persona 从 `agents/<id>.md` 加载；delegate/review 使用宿主原生 subagent 能力，缺少能力时必须显式回退 inline。
+
+Agent 只能返回结构化结果。conductor 使用 `agent validate-result` 验证结果后，才可继续质量门禁和 `orchestrate report`。state/audit、审批、merge、push 与嵌套派发均不属于 agent 权限。
+
 ## 阶段完成
 
 普通阶段：

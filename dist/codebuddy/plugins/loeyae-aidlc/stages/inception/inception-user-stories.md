@@ -6,8 +6,8 @@ phase: inception
 axis: module
 execution: CONDITIONAL
 lead_agent: aidlc-product-agent
-support_agents: []
-mode: inline
+support_agents: [aidlc-design-agent, aidlc-quality-agent, aidlc-developer-agent]
+mode: mob
 scopes: [feature, enterprise, mvp, classic]
 consumes: [docs/aidlc/modules/{module-id}/inception/requirements.md]
 produces: [docs/aidlc/modules/{module-id}/inception/user-stories.md]

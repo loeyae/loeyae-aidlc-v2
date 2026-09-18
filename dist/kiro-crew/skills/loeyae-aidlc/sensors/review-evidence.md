@@ -24,7 +24,10 @@ rubber-stamping.
   "status": "passed",
   "spec_axis": "passed",       // Design conformance axis
   "standards_axis": "passed",  // Coding standards axis
-  "reviewer": "aidlc-review-agent",  // Who/what performed the review
+  "reviewer": "aidlc-quality-agent",  // Who/what performed the review
+  "reviewer_agent": "aidlc-quality-agent",
+  "execution_context": "isolated",
+  "review_only": true,
   "files_reviewed": [
     "src/main/java/com/example/UserService.java",
     "src/main/java/com/example/UserController.java"
@@ -43,6 +46,9 @@ rubber-stamping.
 | `spec_axis` | Must be `"passed"` |
 | `standards_axis` | Must be `"passed"` |
 | `reviewer` | Non-empty string identifying the reviewer |
+| `reviewer_agent` | Must match the stage reviewer persona in review mode |
+| `execution_context` | Must be `"isolated"` in review mode |
+| `review_only` | Must be `true` in review mode |
 | `files_reviewed` | Non-empty string array |
 | `issues_found` | Non-negative integer |
 | `issues_resolved` | Non-negative integer, >= `issues_found` |

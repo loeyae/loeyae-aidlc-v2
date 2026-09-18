@@ -1,5 +1,5 @@
 {
-  "version": "3.0.0",
+  "version": "4.1.0",
   "stages": [
     {
       "slug": "workspace-detection",
@@ -267,8 +267,10 @@
       "selection": "automatic",
       "choices": [],
       "lead_agent": "aidlc-developer-agent",
-      "support_agents": [],
-      "mode": "inline",
+      "support_agents": [
+        "aidlc-architect-agent"
+      ],
+      "mode": "pipeline",
       "scopes": [
         "feature",
         "enterprise",
@@ -503,8 +505,12 @@
       "selection": "automatic",
       "choices": [],
       "lead_agent": "aidlc-product-agent",
-      "support_agents": [],
-      "mode": "inline",
+      "support_agents": [
+        "aidlc-design-agent",
+        "aidlc-quality-agent",
+        "aidlc-developer-agent"
+      ],
+      "mode": "mob",
       "scopes": [
         "feature",
         "enterprise",
@@ -1265,7 +1271,7 @@
       "choices": [],
       "lead_agent": "aidlc-developer-agent",
       "support_agents": [],
-      "mode": "inline",
+      "mode": "delegate",
       "scopes": [
         "feature",
         "enterprise",
@@ -1466,7 +1472,8 @@
       "choices": [],
       "lead_agent": "aidlc-quality-agent",
       "support_agents": [],
-      "mode": "inline",
+      "mode": "review",
+      "reviewer_agent": "aidlc-quality-agent",
       "scopes": [
         "feature",
         "enterprise",

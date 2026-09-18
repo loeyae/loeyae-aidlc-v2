@@ -67,6 +67,25 @@ loeyae-aidlc unit select \
 
 选择是协作记录，不是分布式锁。若发生重复选择，团队协商或使用显式 `--replace` 更新记录。
 
+## Agent 执行
+
+每个 directive 可携带 `agent_execution`：它声明 primary persona、support/reviewer、执行模式和结构化结果契约。
+
+- `inline`：conductor 在当前会话加载 persona；
+- `delegate`：宿主支持时派发独立实现 agent，否则明确回退 inline；
+- `pipeline`：按步骤传递结构化结果；
+- `mob`：多个 persona 独立贡献后由 conductor 整合；
+- `review`：独立 reviewer 只读审查，不编辑业务产物。
+
+persona 位于 `agents/`，执行计划可检查：
+
+```bash
+loeyae-aidlc agent plan --stage code-generation
+loeyae-aidlc agent validate-result result.json
+```
+
+无论执行模式如何，只有 conductor 可以更新 Markdown state/audit、报告阶段、接受审批或执行 merge/push。
+
 ## 阶段推进
 
 ```bash

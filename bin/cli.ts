@@ -1303,6 +1303,7 @@ Workflow:
 Quality and utilities:
   evidence run --stage <slug> [flags]       Produce controlled build/test/check evidence
   attest resolve [flags]                     Read-only commit/diff attribution
+  agent describe|plan|validate-result [args]          Inspect agent persona, execution plan or result contract
   extension validate|compose|status [flags] Restricted additive extension metadata
   check --sensor <name>                      Run a deterministic semantic checker
   diagram-provider run [options]            Run diagram validation
@@ -1344,6 +1345,7 @@ function main(): void {
     case "attest":
     case "attestation": run("core/tools/aidlc-attestation-resolver.ts", rest); break;
     case "runtime": run("core/tools/aidlc-runtime-light.ts", rest); break;
+    case "agent": run("core/tools/aidlc-agent-runtime.ts", rest); break;
     case "extension": run("core/tools/aidlc-extension.ts", rest); break;
     case "worktree": run("core/tools/aidlc-worktree-light.ts", rest); break;
     case "check": run("core/tools/aidlc-semantic-checks.ts", rest); break;

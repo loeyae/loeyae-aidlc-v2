@@ -7,7 +7,7 @@ axis: unit
 execution: ALWAYS
 lead_agent: aidlc-developer-agent
 support_agents: []
-mode: inline
+mode: delegate
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
 produces:
