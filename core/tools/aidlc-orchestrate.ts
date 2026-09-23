@@ -20,9 +20,12 @@
  */
 
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "fs";
+import { spawnSync } from "child_process";
+import { createRequire } from "module";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
 import { planAgentExecution, type AgentExecutionPlan } from "./aidlc-agent-runtime";
+import { SEMANTIC_SENSORS } from "./aidlc-evidence";
 import { readSourceRevision } from "./aidlc-revision";
 import {
   evidenceRelativePath,
@@ -54,6 +57,8 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENGINE_ROOT = resolve(__dirname, "..");
 const GRAPH_PATH = join(__dirname, "data", "stage-graph.json");
+const require = createRequire(import.meta.url);
+const TSX_CLI = require.resolve("tsx/cli");
 
 // State lives in the user's project; realpath prevents lexical containment bypasses.
 const PROJECT_ROOT = realpathSync(process.cwd());
@@ -1819,6 +1824,37 @@ function clearActiveContext(state: WorkflowState): void {
   delete state.current_unit;
 }
 
+function missingSemanticEvidence(instance: StageInstance): string[] {
+  return instance.stage.sensors
+    .filter((sensor) => SEMANTIC_SENSORS.has(sensor))
+    .filter((sensor) => !existsSync(join(PROJECT_ROOT, evidenceRelativePath(instance.stage.slug, sensor, instance.axis, instance))));
+}
+
+function produceMissingSemanticEvidence(instance: StageInstance): string | null {
+  const missing = missingSemanticEvidence(instance);
+  if (missing.length === 0) return null;
+  const evidenceTool = join(__dirname, "aidlc-evidence.ts");
+  const result = spawnSync(process.execPath, [TSX_CLI, evidenceTool, "run", "--stage", instance.stage.slug, "--instance", instance.instance_id, "--all-sensors"], {
+    cwd: PROJECT_ROOT,
+    encoding: "utf8",
+    shell: false,
+    timeout: 30 * 60 * 1000,
+    maxBuffer: 8 * 1024 * 1024,
+    env: process.env,
+  });
+  if (result.status !== 0) {
+    const detail = [result.stderr, result.stdout]
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .join("; ")
+      .trim();
+    return `automatic semantic evidence production failed for ${instance.instance_id} (${missing.join(", ")}): ${detail || `exit code ${result.status}`}`;
+  }
+  const stillMissing = missingSemanticEvidence(instance);
+  return stillMissing.length === 0
+    ? null
+    : `automatic semantic evidence production did not write: ${stillMissing.join(", ")}`;
+}
+
 export function artifactRoot(instance: StageInstance): string {
   if (instance.axis === "module" && instance.module_id) return moduleInceptionRoot(instance.module_id);
   if (instance.axis === "unit" && instance.module_id && instance.unit_id) return unitConstructionRoot(instance.module_id, instance.unit_id);
@@ -2138,6 +2174,14 @@ async function handleReport(args: string[]): Promise<Directive> {
           kind: "error",
           message: `🚫 Cannot complete stage instance "${currentInstance.instance_id}" — canonical consumed artifacts are no longer valid:\n` +
             consumeFailures.map((failure) => `  ❌ ${failure}`).join("\n"),
+        };
+      }
+
+      const automaticEvidenceError = produceMissingSemanticEvidence(currentInstance);
+      if (automaticEvidenceError) {
+        return {
+          kind: "error",
+          message: `🚫 Cannot complete stage "${stageSlug}" — ${automaticEvidenceError}`,
         };
       }
 

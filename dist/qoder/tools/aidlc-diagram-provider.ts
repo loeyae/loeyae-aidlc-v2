@@ -46,6 +46,7 @@ interface ProviderRequest {
   provider: "chrome-devtools";
   target_operation: TargetOperation;
   stage: string;
+  browser?: string;
   target_reading_environment?: { viewport?: Viewport; viewports?: ReadingViewports };
   diagrams: DiagramRequest[];
 }
@@ -247,6 +248,7 @@ function parseRequest(path: string): ProviderRequest {
   const targetOperation = nonEmpty(value.target_operation, "request.target_operation") as TargetOperation;
   if (!["preview", "render"].includes(targetOperation)) fail('request.target_operation must be "preview" or "render"; export is not supported by this provider (NEEDS_CAPABILITY)');
   const stage = nonEmpty(value.stage, "request.stage");
+  const requestedBrowser = value.browser === undefined ? undefined : nonEmpty(value.browser, "request.browser");
   if (!/^[a-z0-9][a-z0-9-]*$/.test(stage)) fail("request.stage must contain only lowercase letters, digits, and hyphens");
   if (!Array.isArray(value.diagrams) || value.diagrams.length === 0) fail("request.diagrams must be a non-empty array");
   const environment = value.target_reading_environment === undefined ? undefined : record(value.target_reading_environment, "request.target_reading_environment");
@@ -275,7 +277,7 @@ function parseRequest(path: string): ProviderRequest {
     if (result.expected_contract_path) projectPath(result.expected_contract_path, `diagrams[${index}].expected_contract_path`);
     return result;
   });
-  return { version: "1", provider: "chrome-devtools", target_operation: targetOperation, stage, target_reading_environment: { viewport: defaultViewport, ...(viewports ? { viewports } : {}) }, diagrams };
+  return { version: "1", provider: "chrome-devtools", target_operation: targetOperation, stage, ...(requestedBrowser ? { browser: requestedBrowser } : {}), target_reading_environment: { viewport: defaultViewport, ...(viewports ? { viewports } : {}) }, diagrams };
 }
 
 function parseJsonOutput(stdout: string): unknown {
@@ -299,7 +301,41 @@ function parseJsonOutput(stdout: string): unknown {
   }
 }
 
+const BROWSER_CANDIDATES = process.platform === "darwin"
+  ? [
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ]
+  : process.platform === "win32"
+    ? [
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+      ]
+    : [
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/microsoft-edge",
+      ];
 const BROWSER_PROFILE_CONFLICT = "BROWSER_PROFILE_CONFLICT";
+let configuredBrowser: string | undefined;
+
+function resolveBrowserExecutable(requested?: string): string | undefined {
+  const candidate = requested || process.env.AIDLC_CHROME_BIN || process.env.CHROME_BIN;
+  if (candidate) {
+    const resolved = resolve(candidate);
+    if (!existsSync(resolved) || !statSync(resolved).isFile()) {
+      fail(`NEEDS_CAPABILITY: configured browser executable does not exist: ${candidate}`);
+    }
+    return resolved;
+  }
+  return BROWSER_CANDIDATES.find((candidatePath) => existsSync(candidatePath) && statSync(candidatePath).isFile());
+}
+
 let chromeSessionId: string | undefined;
 let chromeSessionExitHandlerRegistered = false;
 
@@ -308,7 +344,9 @@ function isBrowserProfileConflict(detail: string): boolean {
 }
 
 function runChromeCommand(args: string[], sessionId: string, expectsJson: boolean): CliResult {
-  const result = spawnSync("npx", [
+  const browserArgument = configuredBrowser && args[0] === "start" ? ["--browser", configuredBrowser] : [];
+  const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
+  const result = spawnSync(npxCommand, [
     "-y",
     "--package",
     PROVIDER_PACKAGE,
@@ -316,17 +354,19 @@ function runChromeCommand(args: string[], sessionId: string, expectsJson: boolea
     "--sessionId",
     sessionId,
     ...args,
+    ...browserArgument,
     ...(expectsJson ? ["--output-format=json"] : []),
   ], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
-    shell: false,
+    shell: process.platform === "win32",
     timeout: COMMAND_TIMEOUT_MS,
     env: {
       ...process.env,
       CI: "1",
       CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1",
       CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1",
+      ...(configuredBrowser ? { CHROME_BIN: configuredBrowser, PUPPETEER_EXECUTABLE_PATH: configuredBrowser } : {}),
     },
     maxBuffer: 8 * 1024 * 1024,
   });
@@ -1539,20 +1579,22 @@ function writeJsonAtomic(path: string, value: unknown): void {
   renameSync(temporary, path);
 }
 
-function parseOptions(args: string[]): { request: string; evidence?: string; dryRun: boolean } {
-  if (args[0] !== "run") fail("usage: aidlc-diagram-provider.ts run --request <path> [--evidence <path>] [--dry-run]");
+function parseOptions(args: string[]): { request: string; evidence?: string; dryRun: boolean; browser?: string } {
+  if (args[0] !== "run") fail("usage: aidlc-diagram-provider.ts run --request <path> [--evidence <path>] [--browser <path>] [--dry-run]");
   let request = "";
   let evidence: string | undefined;
   let dryRun = false;
+  let browser: string | undefined;
   for (let index = 1; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--request") request = nonEmpty(args[++index], "--request");
     else if (arg === "--evidence") evidence = nonEmpty(args[++index], "--evidence");
+    else if (arg === "--browser") browser = nonEmpty(args[++index], "--browser");
     else if (arg === "--dry-run") dryRun = true;
     else fail(`unknown argument: ${arg}`);
   }
   if (!request) fail("--request is required");
-  return { request, evidence, dryRun };
+  return { request, evidence, dryRun, browser };
 }
 
 function localPreviewUrl(source: string, temporaryRoot: string, index: number, diagramId: string): string {
@@ -1570,6 +1612,7 @@ async function main(): Promise<void> {
   const options = parseOptions(process.argv.slice(2));
   const request = parseRequest(options.request);
   configureEvidenceDirectory(request.stage);
+  configuredBrowser = resolveBrowserExecutable(options.browser || request.browser);
   const plan = request.diagrams.map((diagram, index) => ({
     id: diagram.id,
     url: sourceUrl(diagram, index),

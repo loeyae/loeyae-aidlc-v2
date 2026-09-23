@@ -2243,6 +2243,21 @@ function uiArtifactConsistency(): Record<string, unknown> {
   fail(`ui-artifact-consistency is not registered for active stage ${stage || "(none)"}`);
 }
 
+function reconcileV3V4Choices(report: string, prdSelected: boolean, uiRoute: UiRoute): void {
+  const expectedPrdRoute = prdSelected ? "selected" : "not-selected";
+  const fields: Array<[string, string]> = [["prd_route", expectedPrdRoute], ["ui_route", uiRoute]];
+  for (const [field, expected] of fields) {
+    const match = report.match(new RegExp(`^\\s*[-*]?\\s*${field}\\s*[:：]\\s*([^\\r\\n|]+)`, "im"));
+    const actual = match?.[1]?.trim();
+    if (!actual) {
+      fail(`v3->v4 choice reconciliation failed: cross-validation-report.md is missing ${field}. Align the report machine summary with the current v4 workflow choices, then rerun the checker; do not edit business content to hide the mismatch`);
+    }
+    if (actual !== expected) {
+      fail(`v3->v4 choice reconciliation failed: cross-validation-report.md declares ${field}: ${actual}, but the current v4 workflow requires ${field}: ${expected} from selected_optional_stages/UI history. Align the v4 selection or regenerate only the machine summary, then rerun inception-consistency; do not silently pass or change business content`);
+    }
+  }
+}
+
 function inceptionConsistency(): Record<string, unknown> {
   if (!workflowState || !ACTIVE_MODULE) fail("inception-consistency requires a Markdown workflow and an active module");
   const requirementsPath = join(ROOT, contextual("docs/aidlc/inception/requirements.md"));
@@ -2266,8 +2281,8 @@ function inceptionConsistency(): Record<string, unknown> {
 
   const prdSelected = selectedPrdRoute();
   const uiRoute = selectedUiRoute();
-  const expectedPrdRoute = prdSelected ? "selected" : "not-selected";
-  for (const [field, expected] of [["status", "passed"], ["unresolved_conflicts", "0"], ["prd_route", expectedPrdRoute], ["ui_route", uiRoute]] as const) {
+  reconcileV3V4Choices(report, prdSelected, uiRoute);
+  for (const [field, expected] of [["status", "passed"], ["unresolved_conflicts", "0"]] as const) {
     const expression = new RegExp(`${field}\\s*[:：]\\s*${expected.replace("-", "[- ]")}`, "i");
     if (!expression.test(report)) fail(`cross-validation machine summary must declare ${field}: ${expected}`);
   }

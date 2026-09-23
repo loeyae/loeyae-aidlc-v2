@@ -25,7 +25,7 @@ type ProducerState = WorkflowState;
 
 type CommandRole = "build" | "test" | "check" | "semantic";
 
-const SEMANTIC_SENSORS = new Set([
+export const SEMANTIC_SENSORS = new Set([
   "review-evidence",
   "test-quality",
   "contract-baseline",
@@ -216,7 +216,9 @@ function parseConfig(path: string, stage: string): EvidenceConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail("command allowlist must be a JSON object");
   const config = value as Record<string, unknown>;
   if (config.version !== "1") fail('command allowlist version must be "1"');
-  if (config.stage !== stage) fail(`command allowlist stage must be "${stage}"`);
+  if (config.stage !== stage) {
+    fail(`command allowlist stage must be "${stage}"; create or update the allowlist for the active stage by setting "stage": "${stage}" in .aidlc/evidence-commands.json and declaring its semantic checker commands`);
+  }
   if (!Array.isArray(config.commands) || config.commands.length === 0) fail("command allowlist commands must be non-empty");
 
   const ids = new Set<string>();
@@ -411,7 +413,7 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
   };
 }
 
-function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig, state: ProducerState): void {
+function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig, state: ProducerState, quiet = false): void {
   const sensor = options.sensor;
   if (!sensor || sensor === "build-test-evidence") fail("semantic producer requires --sensor with a semantic sensor name");
   if (options.commandIds.length > 0) fail("--command-id is only supported for build/test evidence");
@@ -429,7 +431,7 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig, s
     checker: result.execution,
   };
   writeAtomic(output, `${JSON.stringify(producedEvidence(unsigned), null, 2)}\n`);
-  console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}` }, null, 2));
+  if (!quiet) console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}` }, null, 2));
 }
 
 interface ProducerOptions {
@@ -439,16 +441,18 @@ interface ProducerOptions {
   config: string;
   output?: string;
   commandIds: string[];
+  allSensors: boolean;
 }
 
 function parseArgs(args: string[]): ProducerOptions {
-  if (args[0] !== "run") fail("usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance>] [--sensor <sensor>] [--config <path>] [--output <path>] [--command-id <id> ...]");
+  if (args[0] !== "run") fail("usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance>] [--sensor <sensor>] [--all-sensors] [--config <path>] [--output <path>] [--command-id <id> ...]");
   let stage = "";
   let instance: string | undefined;
   let sensor: string | undefined;
   let config = DEFAULT_CONFIG;
   let output: string | undefined;
   const commandIds: string[] = [];
+  let allSensors = false;
   for (let i = 1; i < args.length; i++) {
     const arg = args[i];
     if (["--stage", "--instance", "--sensor", "--config", "--output", "--command-id"].includes(arg)) {
@@ -460,8 +464,10 @@ function parseArgs(args: string[]): ProducerOptions {
       if (arg === "--config") config = value;
       if (arg === "--output") output = value;
       if (arg === "--command-id") commandIds.push(value);
+    } else if (arg === "--all-sensors") {
+      allSensors = true;
     } else if (arg === "--help" || arg === "-h") {
-      console.log("Usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance>] [--sensor <sensor>] [--config <path>] [--output <path>] [--command-id <id> ...]");
+      console.log("Usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance>] [--sensor <sensor>] [--all-sensors] [--config <path>] [--output <path>] [--command-id <id> ...]");
       process.exit(0);
     } else {
       fail(`unknown argument: ${arg}`);
@@ -469,6 +475,9 @@ function parseArgs(args: string[]): ProducerOptions {
   }
   if (!stage) fail("--stage is required");
   if (sensor && sensor !== "build-test-evidence" && !SEMANTIC_SENSORS.has(sensor)) fail(`unsupported semantic sensor: ${sensor}`);
+  if (allSensors && sensor) fail("--all-sensors cannot be combined with --sensor; it uses the sensors declared by the active stage");
+  if (allSensors && output && stage !== "build-and-test") fail("--output cannot be used with --all-sensors because each sensor has its own canonical evidence path");
+  if (allSensors && commandIds.length > 0) fail("--command-id cannot be used with --all-sensors");
   return {
     stage,
     ...(instance ? { instance } : {}),
@@ -476,6 +485,7 @@ function parseArgs(args: string[]): ProducerOptions {
     config: safeProjectPath(config, "config", true),
     output,
     commandIds,
+    allSensors,
   };
 }
 
@@ -503,9 +513,52 @@ function loadProducerState(options: ProducerOptions): ProducerState | null {
   const state = loadWorkflowState(PROJECT_ROOT);
   if (!state) return null;
   if (options.instance && options.instance !== state.current_stage_instance) {
-    fail(`stage instance ${options.instance} is not active`);
+    const claim = state.active_instances?.[options.instance];
+    if (!claim || claim.module_id !== state.current_module && !options.instance.includes(`@module:${claim.module_id}`)) {
+      fail(`stage instance ${options.instance} is not active`);
+    }
+    const moduleMatch = /@module:([a-z0-9][a-z0-9-]*)/.exec(options.instance);
+    const unitMatch = /@unit:([a-z0-9][a-z0-9-]*)$/.exec(options.instance);
+    return {
+      ...state,
+      current_stage_instance: options.instance,
+      current_module: moduleMatch?.[1] || claim.module_id,
+      ...(unitMatch ? { current_unit: unitMatch[1] } : {}),
+    };
   }
   return state;
+}
+
+function declaredSemanticSensors(stage: string): string[] {
+  const graphPath = resolve(TOOL_DIR, "data", "stage-graph.json");
+  if (!existsSync(graphPath)) fail(`stage graph is missing at ${graphPath}; run loeyae-aidlc graph compile first`);
+  let graph: unknown;
+  try {
+    graph = JSON.parse(readFileSync(graphPath, "utf8"));
+  } catch (error) {
+    fail(`cannot read stage graph ${graphPath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const stages = graph && typeof graph === "object" && !Array.isArray(graph) && Array.isArray((graph as Record<string, unknown>).stages)
+    ? (graph as Record<string, unknown>).stages as unknown[]
+    : [];
+  const node = stages.find((item) => item && typeof item === "object" && !Array.isArray(item) && (item as Record<string, unknown>).slug === stage) as Record<string, unknown> | undefined;
+  if (!node) fail(`stage ${stage} is not declared in the compiled stage graph`);
+  const sensors = Array.isArray(node.sensors) ? node.sensors.filter((sensor): sensor is string => typeof sensor === "string") : [];
+  return sensors.filter((sensor) => SEMANTIC_SENSORS.has(sensor));
+}
+
+function produceAllSemantic(options: ProducerOptions, state: ProducerState, config: EvidenceConfig): void {
+  const sensors = declaredSemanticSensors(options.stage);
+  if (sensors.length === 0) fail(`stage ${options.stage} declares no semantic sensors; use the stage's ordinary report gates instead`);
+  const outputs: string[] = [];
+  for (const sensor of sensors) {
+    const output = evidenceOutput(options.stage, sensor, undefined, state);
+    withProducerLock(output, () => {
+      runSemanticProducer({ ...options, sensor, output }, config, state, true);
+    });
+    outputs.push(output);
+  }
+  console.log(JSON.stringify({ status: "passed", stage: options.stage, sensors, outputs }, null, 2));
 }
 
 function runProducer(args: string[]): void {
@@ -515,16 +568,26 @@ function runProducer(args: string[]): void {
   if (state.current_stage !== options.stage) {
     fail(`stage ${options.stage} is not active; current stage is ${state.current_stage || "(none)"}`);
   }
+
+  const config = parseConfig(options.config, options.stage);
+  if (options.stage !== "build-and-test" && !options.sensor) {
+    produceAllSemantic(options, state, config);
+    return;
+  }
+  if (options.allSensors && options.stage !== "build-and-test") {
+    produceAllSemantic(options, state, config);
+    return;
+  }
+
   const outputSensor = options.sensor || "build-test-evidence";
   const output = evidenceOutput(options.stage, outputSensor, options.output, state);
   withProducerLock(output, () => {
     const lockedOptions = { ...options, output };
-    const config = parseConfig(lockedOptions.config, lockedOptions.stage);
     if (lockedOptions.sensor && lockedOptions.sensor !== "build-test-evidence") {
       runSemanticProducer(lockedOptions, config, state);
       return;
     }
-    if (lockedOptions.stage !== "build-and-test") fail('controlled producer currently supports only stage "build-and-test"');
+    if (lockedOptions.stage !== "build-and-test") fail(`stage ${lockedOptions.stage} does not use the build/test producer; pass --sensor <semantic-sensor> or --all-sensors`);
     const selected = lockedOptions.commandIds.length === 0
       ? config.commands.filter((command) => command.role !== "semantic")
       : lockedOptions.commandIds.map((id) => {
@@ -563,9 +626,11 @@ function runProducer(args: string[]): void {
   });
 }
 
-try {
-  runProducer(process.argv.slice(2));
-} catch (error) {
-  console.error(`Evidence producer blocked: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(2);
+if (import.meta.url === `file://${process.argv[1]}`) {
+  try {
+    runProducer(process.argv.slice(2));
+  } catch (error) {
+    console.error(`Evidence producer blocked: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(2);
+  }
 }
