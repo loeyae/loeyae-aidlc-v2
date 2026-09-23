@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readFileSync, readdirSync } from "fs";
 import { isAbsolute, join, relative, resolve, sep } from "path";
-import { expandStageInstances, loadGraph } from "./aidlc-orchestrate";
+import { crossModuleRequires, dependencyInstances, expandStageInstances, loadGraph } from "./aidlc-orchestrate";
 import { lightAuditPath, loadWorkflowState } from "./aidlc-light-state";
 
 function inside(root: string, candidate: string): boolean {
@@ -36,13 +36,35 @@ export function buildTeamLightRuntimeProjection(projectRoot = process.cwd()): Re
   if (!state) throw new Error("no active AWS-style lightweight workflow");
   const completed = new Set(state.completed_stage_instances || []);
   const skipped = new Set(state.skipped_stage_instances || []);
-  const instances = expandStageInstances(loadGraph(), state).map((instance) => ({
-    stage_instance: instance.instance_id,
-    stage: instance.stage.slug,
-    module_id: instance.module_id || null,
-    unit_id: instance.unit_id || null,
-    status: completed.has(instance.instance_id) ? "completed" : skipped.has(instance.instance_id) ? "skipped" : state.current_stage_instance === instance.instance_id ? "in_progress" : "pending",
-  }));
+  const claims = state.active_instances || {};
+  const allInstances = expandStageInstances(loadGraph(), state);
+  const instances = allInstances.map((instance) => {
+    const claim = claims[instance.instance_id];
+    const dependencyWaiting = [
+      ...instance.stage.requires.flatMap((dependency) => dependencyInstances(instance, dependency, allInstances))
+        .filter((candidate) => !completed.has(candidate.instance_id) && !skipped.has(candidate.instance_id))
+        .map((candidate) => candidate.instance_id),
+      ...crossModuleRequires(instance, allInstances, state),
+    ].filter((value, index, values) => values.indexOf(value) === index);
+    const status = completed.has(instance.instance_id)
+      ? "completed"
+      : skipped.has(instance.instance_id)
+        ? "skipped"
+        : claim && Date.parse(claim.expires_at) > Date.now()
+          ? "claimed"
+          : dependencyWaiting.length > 0
+            ? "blocked"
+            : "ready";
+    return {
+      stage_instance: instance.instance_id,
+      stage: instance.stage.slug,
+      module_id: instance.module_id || null,
+      unit_id: instance.unit_id || null,
+      status,
+      dependency_waiting: dependencyWaiting,
+      ...(claim ? { owner: claim.owner, branch: claim.branch || null, worktree: claim.worktree || null, claimed_at: claim.claimed_at, heartbeat_at: claim.heartbeat_at, expires_at: claim.expires_at } : {}),
+    };
+  });
   const evidenceSummary = evidence(root);
   return {
     kind: "aidlc.aws-light.runtime",
@@ -55,6 +77,10 @@ export function buildTeamLightRuntimeProjection(projectRoot = process.cwd()): Re
     audit_path: relative(root, lightAuditPath(root)),
     instances,
     unit_selections: state.unit_selections || {},
+    module_selections: state.module_selections || {},
+    active_instances: claims,
+    ready_instances: instances.filter((instance) => instance.status === "ready").map((instance) => instance.stage_instance),
+    blocked_instances: instances.filter((instance) => instance.status === "blocked").map((instance) => ({ stage_instance: instance.stage_instance, waiting_for: instance.dependency_waiting })),
     evidence: evidenceSummary,
     warnings: evidenceSummary.invalid ? [`${evidenceSummary.invalid} evidence file(s) are invalid JSON`] : [],
   };

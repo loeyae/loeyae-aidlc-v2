@@ -24,6 +24,7 @@ interface StageNode {
   reviewer_agent?: string;
   scopes: string[];
   requires: string[];
+  cross_module_requires: string[];
   scope_waived_requires: string[];
   consumes: string[];
   produces: string[];
@@ -53,7 +54,7 @@ function parseFrontmatter(content: string): Record<string, unknown> | null {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return null;
   const fm: Record<string, unknown> = {};
-  const listKeys = new Set(["support_agents", "scopes", "requires", "scope_waived_requires", "consumes", "produces", "sensors", "choices"]);
+  const listKeys = new Set(["support_agents", "scopes", "requires", "cross_module_requires", "scope_waived_requires", "consumes", "produces", "sensors", "choices"]);
   let currentListKey: string | null = null;
   for (const line of match[1].split("\n")) {
     const trimmed = line.trim();
@@ -113,6 +114,7 @@ function scanStages(): StageNode[] {
         ...(typeof fm.reviewer_agent === "string" && fm.reviewer_agent.trim() ? { reviewer_agent: fm.reviewer_agent.trim() } : {}),
         scopes: (fm.scopes as string[]) || [],
         requires: (fm.requires as string[]) || [],
+        cross_module_requires: (fm.cross_module_requires as string[]) || [],
         scope_waived_requires: (fm.scope_waived_requires as string[]) || [],
         consumes: (fm.consumes as string[]) || [],
         produces,
@@ -248,6 +250,7 @@ export function validateGraph(graph: { stages: StageNode[]; stage_count: number;
     if (stage.produces.length > 0 && !stage.sensors.includes("traceability")) errors.push(`missing automatic traceability sensor on ${stage.slug}`);
     for (const scope of stage.scopes) if (!VALID_SCOPES.has(scope)) errors.push(`invalid scope on ${stage.slug}: ${scope}`);
     for (const dependency of stage.requires) if (!graph.stages.some((candidate) => candidate.slug === dependency)) errors.push(`orphan dependency on ${stage.slug}: ${dependency}`);
+    for (const dependency of stage.cross_module_requires) if (!graph.stages.some((candidate) => candidate.slug === dependency)) errors.push(`orphan cross-module dependency on ${stage.slug}: ${dependency}`);
     for (const waived of stage.scope_waived_requires) if (!stage.requires.includes(waived)) errors.push(`scope_waived_requires on ${stage.slug} is not a requires dependency: ${waived}`);
     for (const sensor of stage.sensors) if (!VALID_SENSORS.has(sensor)) errors.push(`unknown sensor on ${stage.slug}: ${sensor}`);
     for (const path of stage.produces) {

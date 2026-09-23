@@ -1297,6 +1297,7 @@ Workflow:
   orchestrate report --stage <slug> --result completed  Report a completed stage
   orchestrate park                                      Park the active Markdown workflow
   unit list|select [flags]                              List or self-select a development unit
+  module list|select|claim|heartbeat|migrate [flags]    Coordinate parallel module instances
   runtime summary|doctor                                Inspect the active Markdown workflow
   worktree prepare|verify|merge-plan [flags]            Prepare or verify a member worktree
 
@@ -1326,6 +1327,9 @@ Examples:
   loeyae-aidlc unit select --module module-a --unit unit-a --member alice --branch feat/unit-a
   loeyae-aidlc worktree prepare --instance code-generation@module:module-a@unit:unit-a --member alice --path /absolute/path/to/unit-a
   loeyae-aidlc worktree merge-plan --instance code-generation@module:module-a@unit:unit-a --member alice --path /absolute/path/to/unit-a --review-evidence .aidlc/review.json
+  loeyae-aidlc orchestrate next --claim --module module-a --owner alice
+  loeyae-aidlc module heartbeat --stage-instance application-design@module:module-a --owner alice
+  loeyae-aidlc worktree prepare --instance application-design@module:module-a --member alice --path /absolute/path/to/module-a
   loeyae-aidlc orchestrate report --stage application-design --result approved --user-input Approve
 `);
 }
@@ -1342,6 +1346,7 @@ function main(): void {
     case "approve": throw new Error("Use orchestrate report --result approved --user-input Approve for lightweight approval.");
     case "evidence": run("core/tools/aidlc-evidence.ts", rest); break;
     case "unit": run("core/tools/aidlc-team-light.ts", rest); break;
+    case "module": run("core/tools/aidlc-team-light.ts", ["module", ...rest]); break;
     case "attest":
     case "attestation": run("core/tools/aidlc-attestation-resolver.ts", rest); break;
     case "runtime": run("core/tools/aidlc-runtime-light.ts", rest); break;

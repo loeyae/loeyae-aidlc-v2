@@ -25,6 +25,7 @@
         "workshop"
       ],
       "requires": [],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
@@ -56,6 +57,7 @@
       "requires": [
         "workspace-detection"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
@@ -92,6 +94,7 @@
       "requires": [
         "product-inception"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
@@ -129,6 +132,7 @@
       "requires": [
         "module-division"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/ideation/module-division.md"
@@ -167,6 +171,7 @@
       "requires": [
         "product-contracts"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/ideation/module-division.md"
@@ -207,6 +212,7 @@
       "requires": [
         "product-contracts"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/ideation/module-division.md"
@@ -247,6 +253,7 @@
       "requires": [
         "workspace-detection"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
@@ -280,6 +287,7 @@
       "requires": [
         "workspace-detection"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
@@ -316,6 +324,7 @@
       "requires": [
         "workspace-detection"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/ideation/scenario-module-mapping.md"
@@ -354,6 +363,7 @@
       "requires": [
         "requirements-analysis"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
@@ -385,6 +395,7 @@
       "requires": [
         "requirements-analysis"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
@@ -416,6 +427,7 @@
       "requires": [
         "requirements-analysis"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
@@ -454,6 +466,7 @@
       "requires": [
         "requirements-analysis"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
@@ -485,6 +498,7 @@
       "requires": [
         "requirements-analysis"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
@@ -520,6 +534,7 @@
       "requires": [
         "requirements-analysis"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/modules/{module-id}/inception/requirements.md"
@@ -563,6 +578,7 @@
       "requires": [
         "user-stories"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
@@ -594,6 +610,7 @@
       "requires": [
         "ui-mock"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/modules/{module-id}/inception/requirements.md",
@@ -635,6 +652,7 @@
       "requires": [
         "ui-page-planning"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
@@ -666,6 +684,7 @@
       "requires": [
         "ui-figma"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md"
@@ -706,6 +725,7 @@
       "requires": [
         "ui-page-planning"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
@@ -737,6 +757,7 @@
       "requires": [
         "ui-mock-workflow"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
@@ -768,6 +789,7 @@
       "requires": [
         "ui-mock-design-spec"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
@@ -799,6 +821,7 @@
       "requires": [
         "ui-mock-styles"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [],
@@ -830,6 +853,7 @@
       "requires": [
         "ui-mock-reasoning-principles"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md"
@@ -871,6 +895,7 @@
       "requires": [
         "user-stories"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/modules/{module-id}/inception/requirements.md",
@@ -913,6 +938,7 @@
         "user-stories",
         "cross-validation"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
@@ -949,6 +975,7 @@
       "requires": [
         "cross-validation"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/modules/{module-id}/inception/requirements.md",
@@ -994,6 +1021,7 @@
       "requires": [
         "application-design"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/ideation/module-manifest.json",
@@ -1039,6 +1067,7 @@
       "requires": [
         "application-design"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/modules/{module-id}/inception/application-design.md",
@@ -1078,6 +1107,7 @@
       "requires": [
         "units-generation"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work.md"
@@ -1123,6 +1153,7 @@
       "requires": [
         "functional-design"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
@@ -1163,6 +1194,7 @@
       "requires": [
         "nfr-requirements"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
@@ -1204,6 +1236,7 @@
       "requires": [
         "functional-design"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
@@ -1244,6 +1277,7 @@
       "requires": [
         "functional-design"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
@@ -1285,6 +1319,7 @@
       "requires": [
         "functional-design"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [
         "functional-design"
       ],
@@ -1330,6 +1365,7 @@
       "requires": [
         "code-generation"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "src/"
@@ -1370,6 +1406,7 @@
       "requires": [
         "code-generation"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
@@ -1407,6 +1444,7 @@
       "requires": [
         "code-generation"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
@@ -1444,6 +1482,7 @@
       "requires": [
         "code-generation"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
@@ -1488,6 +1527,7 @@
         "code-generation",
         "tdd"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "src/",
@@ -1539,6 +1579,7 @@
         "tdd",
         "code-review"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "src/",
@@ -1582,6 +1623,7 @@
       "requires": [
         "build-and-test"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
@@ -1625,6 +1667,7 @@
       "requires": [
         "build-and-test"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md"
@@ -1666,6 +1709,7 @@
       "requires": [
         "workspace-detection"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [
@@ -1702,6 +1746,7 @@
       "requires": [
         "implementation-report"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "docs/aidlc/construction/build-test-report.md",
@@ -1744,6 +1789,7 @@
       "requires": [
         "operations"
       ],
+      "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [],
       "produces": [

@@ -30,7 +30,7 @@
     "build:zcode": "tsx scripts/build.ts --harness zcode",
     "build:all": "tsx scripts/build.ts --all",
     "install-skill": "tsx bin/cli.ts install",
-    "test": "npx --no-install tsx core/tools/aidlc-graph.ts compile && npx --no-install tsc --noEmit && npx --no-install tsx tests/test_aws_light_workflow.ts && npx --no-install tsx tests/test_aws_light_worktree.ts && npx --no-install tsx tests/test_agent_runtime.ts && npx --no-install tsx tests/test_attestation_resolver.ts && npx --no-install tsx tests/test_restricted_extension.ts && python3 tests/test_platform_hooks.py && python3 tests/test_export_cli.py && python3 tests/test_docx_inspect.py && python3 tests/test_docx_beautify.py && python3 tests/test_installer_lifecycle.py && tsx tests/test_distribution_parity.ts",
+    "test": "npx --no-install tsx core/tools/aidlc-graph.ts compile && npx --no-install tsc --noEmit && npx --no-install tsx tests/test_aws_light_workflow.ts && npx --no-install tsx tests/test_aws_light_worktree.ts && npx --no-install tsx tests/test_v4_phase1_phase2.ts && npx --no-install tsx tests/test_agent_runtime.ts && npx --no-install tsx tests/test_attestation_resolver.ts && npx --no-install tsx tests/test_restricted_extension.ts && python3 tests/test_platform_hooks.py && python3 tests/test_export_cli.py && python3 tests/test_docx_inspect.py && python3 tests/test_docx_beautify.py && python3 tests/test_installer_lifecycle.py && tsx tests/test_distribution_parity.ts",
     "evidence": "tsx core/tools/aidlc-evidence.ts",
     "compile-graph": "tsx core/tools/aidlc-graph.ts compile",
     "scope-table": "tsx core/tools/aidlc-utility.ts scope-table"

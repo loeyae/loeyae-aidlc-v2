@@ -56,11 +56,21 @@ function metadataPath(project: string, instance: string): string {
 function selection(project: string, instance: string, member: string): void {
   const state = loadWorkflowState(project);
   if (!state) throw new Error("no active AWS-style lightweight workflow");
-  const match = /@module:([a-z0-9][a-z0-9-]*)@unit:([a-z0-9][a-z0-9-]*)$/.exec(instance);
-  if (!match) throw new Error("lightweight worktree requires a unit stage instance");
-  const selected = state.unit_selections?.[`${match[1]}:${match[2]}`];
-  if (!selected) throw new Error(`unit ${match[1]}:${match[2]} has not been selected`);
-  if (selected.member !== member) throw new Error(`unit ${match[1]}:${match[2]} is selected by ${selected.member}, not ${member}`);
+  const unitMatch = /@module:([a-z0-9][a-z0-9-]*)@unit:([a-z0-9][a-z0-9-]*)$/.exec(instance);
+  if (unitMatch) {
+    const selected = state.unit_selections?.[`${unitMatch[1]}:${unitMatch[2]}`];
+    if (!selected) throw new Error(`unit ${unitMatch[1]}:${unitMatch[2]} has not been selected`);
+    if (selected.member !== member) throw new Error(`unit ${unitMatch[1]}:${unitMatch[2]} is selected by ${selected.member}, not ${member}`);
+    return;
+  }
+  const moduleMatch = /@module:([a-z0-9][a-z0-9-]*)$/.exec(instance);
+  if (!moduleMatch) throw new Error("lightweight worktree requires a module or unit stage instance");
+  const moduleId = moduleMatch[1];
+  const selected = state.module_selections?.[moduleId];
+  const claim = state.active_instances?.[instance];
+  if (!selected && !claim) throw new Error(`module ${moduleId} has not been selected or claimed`);
+  const owner = claim?.owner || selected?.owner;
+  if (owner !== member) throw new Error(`module ${moduleId} is selected by ${owner}, not ${member}`);
 }
 
 function render(metadata: Metadata): string {

@@ -26,6 +26,7 @@ import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
 import { planAgentExecution, type AgentExecutionPlan } from "./aidlc-agent-runtime";
 import { SEMANTIC_SENSORS } from "./aidlc-evidence";
+import { releaseExpiredModuleClaims } from "./aidlc-team-light";
 import { readSourceRevision } from "./aidlc-revision";
 import {
   evidenceRelativePath,
@@ -82,6 +83,7 @@ export interface StageNode {
   reviewer_agent?: string;
   scopes: string[];
   requires: string[];
+  cross_module_requires?: string[];
   scope_waived_requires: string[];
   consumes: string[];
   produces: string[];
@@ -176,8 +178,8 @@ type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
 type StageResult = (typeof VALID_RESULTS)[number];
-const NEXT_FLAGS = new Set(["scope", "work", "with-prd", "resume", "status", "text"]);
-const REPORT_FLAGS = new Set(["stage", "result", "user-input", "instruction-ack", "module", "unit"]);
+const NEXT_FLAGS = new Set(["scope", "work", "with-prd", "resume", "status", "text", "claim", "module", "owner", "branch", "worktree"]);
+const REPORT_FLAGS = new Set(["stage", "result", "user-input", "instruction-ack", "module", "unit", "instance", "owner"]);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -366,6 +368,94 @@ export function expandStageInstances(graph: StageGraph, state: WorkflowState): S
   return instances;
 }
 
+interface ModuleDependency {
+  provider_module: string;
+  consumer_module: string;
+  provider_stage: string;
+  consumer_stage: string;
+  source: string;
+}
+
+function dependencyDocuments(): string[] {
+  const root = join(PROJECT_ROOT, "docs", "aidlc");
+  if (!existsSync(root)) return [];
+  const result: string[] = [];
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name.startsWith(".")) continue;
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) visit(path);
+      else if (entry.isFile() && (entry.name === "product-contracts.md" || entry.name === "runtime-dependencies.md")) result.push(path);
+    }
+  };
+  visit(root);
+  return result.sort();
+}
+
+export function moduleDependencyGraph(): ModuleDependency[] {
+  const modules = readModuleManifest(PROJECT_ROOT);
+  const moduleForValue = (value: string, excluded?: string): string | undefined => {
+    const normalized = value.trim();
+    return modules.find((module) => module.module_id !== excluded
+      && (normalized === module.module_id || normalized === module.service_id || normalized === module.name || normalized.includes(module.module_id)))?.module_id;
+  };
+  const dependencies: ModuleDependency[] = [];
+  const append = (providerValue: string, consumerValue: string, providerStageValue: string | undefined, consumerStageValue: string | undefined, source: string): void => {
+    const provider = moduleForValue(providerValue);
+    const consumer = moduleForValue(consumerValue, provider);
+    if (!provider || !consumer || provider === consumer) return;
+    const providerStage = providerStageValue?.replace(/^(?:provider[_ -]?stage|提供方阶段)\s*[:：]\s*/i, "").trim() || "application-design";
+    const consumerStage = consumerStageValue?.replace(/^(?:consumer[_ -]?stage|消费方阶段)\s*[:：]\s*/i, "").trim() || "application-design";
+    dependencies.push({
+      provider_module: provider,
+      consumer_module: consumer,
+      provider_stage: providerStage,
+      consumer_stage: consumerStage,
+      source,
+    });
+  };
+  for (const sourcePath of dependencyDocuments()) {
+    const source = relative(PROJECT_ROOT, sourcePath);
+    const lines = readFileSync(sourcePath, "utf8").split(/\r?\n/);
+    let header: string[] | undefined;
+    for (const line of lines) {
+      if (!line.trim().startsWith("|")) {
+        header = undefined;
+        continue;
+      }
+      const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
+      if (cells.length === 0 || cells.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
+      if (!header) {
+        header = cells;
+        continue;
+      }
+      const index = (patterns: RegExp[]): number => header!.findIndex((cell) => patterns.some((pattern) => pattern.test(cell)));
+      const providerIndex = index([/provider|source|提供方|来源/i]);
+      const consumerIndex = index([/consumer|target|消费者|消费方|目标/i]);
+      if (providerIndex >= 0 && consumerIndex >= 0 && cells[providerIndex] && cells[consumerIndex]) {
+        const providerStageIndex = index([/provider[_ -]?stage|提供方阶段/i]);
+        const consumerStageIndex = index([/consumer[_ -]?stage|消费方阶段/i]);
+        append(cells[providerIndex], cells[consumerIndex], providerStageIndex >= 0 ? cells[providerStageIndex] : undefined, consumerStageIndex >= 0 ? cells[consumerStageIndex] : undefined, source);
+        continue;
+      }
+      const ids = modules.map((module) => module.module_id).filter((moduleId) => line.includes(moduleId));
+      const distinct = [...new Set(ids)];
+      if (distinct.length >= 2) {
+        append(
+          distinct[0],
+          distinct[1],
+          line.match(/(?:provider[_ -]?stage|提供方阶段)\s*[:：|]\s*([a-z0-9][a-z0-9-]*)/i)?.[1],
+          line.match(/(?:consumer[_ -]?stage|消费方阶段)\s*[:：|]\s*([a-z0-9][a-z0-9-]*)/i)?.[1],
+          source,
+        );
+      }
+    }
+  }
+  const unique = new Map<string, ModuleDependency>();
+  for (const dependency of dependencies) unique.set(`${dependency.provider_module}->${dependency.consumer_module}:${dependency.provider_stage}:${dependency.consumer_stage}`, dependency);
+  return [...unique.values()];
+}
+
 export function dependencyInstances(instance: StageInstance, dependency: string, instances: StageInstance[]): StageInstance[] {
   const candidates = instances.filter((candidate) => candidate.stage.slug === dependency);
   if (instance.axis === "project") return candidates;
@@ -389,8 +479,30 @@ function checkRequires(instance: StageInstance, instances: StageInstance[], stat
     }
     for (const candidate of required) if (!isInstanceResolved(state, candidate.instance_id)) missing.push(candidate.instance_id);
   }
-  return missing;
+  for (const dependency of instance.stage.cross_module_requires || []) {
+    const required = instances.filter((candidate) => candidate.stage.slug === dependency && candidate.axis === "module" && candidate.module_id !== instance.module_id);
+    if (required.length === 0) missing.push(`cross-module:${dependency}`);
+    else for (const candidate of required) if (!isInstanceResolved(state, candidate.instance_id)) missing.push(candidate.instance_id);
+  }
+  missing.push(...crossModuleRequires(instance, instances, state));
+  return [...new Set(missing)];
 }
+
+export function crossModuleRequires(instance: StageInstance, instances: StageInstance[], state: WorkflowState): string[] {
+  if (instance.axis !== "module" || !instance.module_id) return [];
+  const failures: string[] = [];
+  for (const dependency of moduleDependencyGraph()) {
+    if (dependency.consumer_module !== instance.module_id || dependency.consumer_stage !== instance.stage.slug) continue;
+    const providers = instances.filter((candidate) => candidate.axis === "module" && candidate.module_id === dependency.provider_module && candidate.stage.slug === dependency.provider_stage);
+    if (providers.length === 0) {
+      failures.push(`${dependency.provider_stage}@module:${dependency.provider_module} (from ${dependency.source})`);
+      continue;
+    }
+    for (const provider of providers) if (!isInstanceResolved(state, provider.instance_id)) failures.push(provider.instance_id);
+  }
+  return failures;
+}
+
 
 function reconcileStageSummaries(state: WorkflowState, instances: StageInstance[]): void {
   for (const stage of getExecutableStages(loadGraph(), state.scope, selectedOptionalStages(state))) {
@@ -1732,6 +1844,49 @@ export function evaluateCondition(condition: string, context: ConditionContext):
  * dependencies are all satisfied, condition evaluates to true,
  * and not yet completed or skipped.
  */
+function activeClaimed(state: WorkflowState, instanceId: string): boolean {
+  const claim = state.active_instances?.[instanceId];
+  return Boolean(claim && Date.parse(claim.expires_at) > Date.now());
+}
+
+function findClaimableModuleInstance(
+  instances: StageInstance[],
+  state: WorkflowState,
+  moduleId: string,
+): {
+  instance: StageInstance | null;
+  blocked?: { instance: StageInstance; unsatisfied: string[] };
+  conditionError?: { instance: StageInstance; condition: string };
+  skippedByCondition?: { instance: StageInstance; reason: string }[];
+} {
+  let blocked: { instance: StageInstance; unsatisfied: string[] } | undefined;
+  for (const instance of instances) {
+    if (instance.axis !== "module" || instance.module_id !== moduleId || isInstanceResolved(state, instance.instance_id) || activeClaimed(state, instance.instance_id)) continue;
+    const stage = instance.stage;
+    if (stage.condition && stage.condition.trim() !== "") {
+      const conditionResult = evaluateCondition(stage.condition, buildConditionContext(state, instance));
+      if (conditionResult === undefined) return { instance: null, conditionError: { instance, condition: stage.condition } };
+      if (!conditionResult) {
+        state.skipped_stage_instances.push(instance.instance_id);
+        state.history.push({
+          stage: stage.slug,
+          instance_id: instance.instance_id,
+          module_id: instance.module_id,
+          unit_id: instance.unit_id,
+          result: "condition_skipped",
+          timestamp: new Date().toISOString(),
+          user_input: `Auto-skipped: condition "${stage.condition}" evaluated to false`,
+        });
+        continue;
+      }
+    }
+    const unsatisfied = checkRequires(instance, instances, state);
+    if (unsatisfied.length === 0) return { instance };
+    return { instance: null, blocked: { instance, unsatisfied } };
+  }
+  return { instance: null, blocked };
+}
+
 function findNextInstance(
   instances: StageInstance[],
   state: WorkflowState
@@ -1744,7 +1899,7 @@ function findNextInstance(
   const conditionSkips: { instance: StageInstance; reason: string }[] = [];
 
   for (const instance of instances) {
-    if (isInstanceResolved(state, instance.instance_id)) continue;
+    if (isInstanceResolved(state, instance.instance_id) || activeClaimed(state, instance.instance_id)) continue;
     const stage = instance.stage;
 
     if (stage.condition && stage.condition.trim() !== "") {
@@ -1824,6 +1979,23 @@ function clearActiveContext(state: WorkflowState): void {
   delete state.current_unit;
 }
 
+function selectActiveContext(state: WorkflowState): void {
+  const next = Object.values(state.active_instances || {}).sort((left, right) => left.stage_instance.localeCompare(right.stage_instance))[0];
+  if (!next) {
+    clearActiveContext(state);
+    return;
+  }
+  const stageSlug = next.stage_instance.split("@", 1)[0];
+  const stage = loadGraph().stages.find((candidate) => candidate.slug === stageSlug);
+  state.current_stage = stageSlug;
+  state.current_phase = stage?.phase || state.current_phase;
+  state.current_stage_instance = next.stage_instance;
+  state.current_module = next.module_id;
+  const unitMatch = /@unit:([a-z0-9][a-z0-9-]*)$/.exec(next.stage_instance);
+  if (unitMatch) state.current_unit = unitMatch[1];
+  else delete state.current_unit;
+}
+
 function missingSemanticEvidence(instance: StageInstance): string[] {
   return instance.stage.sensors
     .filter((sensor) => SEMANTIC_SENSORS.has(sensor))
@@ -1879,6 +2051,10 @@ async function handleNext(args: string[]): Promise<Directive> {
   const invalidFlag = unsupportedFlag(flags, NEXT_FLAGS);
   if (invalidFlag) return { kind: "error", message: `Unsupported AWS-style workflow option: --${invalidFlag}` };
 
+  const claimRequested = "claim" in flags;
+  if (claimRequested && flags.claim !== "true") return { kind: "error", message: "--claim is a boolean flag and does not accept a value" };
+  if (claimRequested && !flags.module) return { kind: "error", message: "--claim requires --module <module-id>" };
+
   // PRD is a user-selected workflow option, never a default Inception gate.
   const withPrd = "with-prd" in flags;
   if (withPrd && flags["with-prd"] !== "true") {
@@ -1920,6 +2096,7 @@ async function handleNext(args: string[]): Promise<Directive> {
         `  Scope: ${state.scope} | Phase: ${state.current_phase} | Status: ${state.status}\n` +
         `  PRD option: ${selectedOptionalStages(state).includes("prd-generation") ? "selected" : "not selected"}\n` +
         `  Current stage: ${state.current_stage_instance || state.current_stage || "(none)"}\n` +
+        `  Active claims: ${Object.values(state.active_instances || {}).map((claim) => `${claim.stage_instance}=${claim.owner}`).join(", ") || "(none)"}\n` +
         `  Context: module=${state.current_module || "-"}, unit=${state.current_unit || "-"}\n` +
         `  Completed: ${completedCount}/${instances.length} stage instances\n` +
         `  Skipped: ${skippedCount}\n` +
@@ -1929,6 +2106,11 @@ async function handleNext(args: string[]): Promise<Directive> {
 
   // Load or create state
   let state = loadState();
+
+  if (state) {
+    const released = releaseExpiredModuleClaims(state);
+    if (released.length > 0) saveState(state);
+  }
 
   if (state && withPrd) {
     return { kind: "error", message: "--with-prd can only be selected when initializing a new workflow" };
@@ -1984,7 +2166,10 @@ async function handleNext(args: string[]): Promise<Directive> {
 
   // Expand the static graph into the currently known execution instances.
   const instances = expandStageInstances(graph, state);
-  const { instance: nextInstance, blocked, conditionError, skippedByCondition } = findNextInstance(instances, state);
+  const search = claimRequested
+    ? findClaimableModuleInstance(instances, state, flags.module as string)
+    : findNextInstance(instances, state);
+  const { instance: nextInstance, blocked, conditionError, skippedByCondition } = search;
 
   if (skippedByCondition && skippedByCondition.length > 0) saveState(state);
 
@@ -2008,6 +2193,9 @@ async function handleNext(args: string[]): Promise<Directive> {
   }
 
   if (!nextInstance) {
+    if (claimRequested) {
+      return { kind: "error", message: `Module "${flags.module}" has no unclaimed ready stage instance; inspect dependency waiting and active claims with runtime summary.` };
+    }
     reconcileStageSummaries(state, instances);
     state.status = "done";
     clearActiveContext(state);
@@ -2016,6 +2204,10 @@ async function handleNext(args: string[]): Promise<Directive> {
       kind: "done",
       message: `🎉 All ${instances.length} stage instances resolved. Workflow finished.`,
     };
+  }
+
+  if (claimRequested && nextInstance && nextInstance.axis !== "module") {
+    return { kind: "error", message: `--claim can only claim a module stage instance; ${nextInstance.instance_id} is ${nextInstance.axis}-axis` };
   }
 
   const effectiveNextInstance = runtimeInstance(nextInstance, state);
@@ -2035,8 +2227,29 @@ async function handleNext(args: string[]): Promise<Directive> {
   else delete state.current_module;
   if (nextInstance.unit_id) state.current_unit = nextInstance.unit_id;
   else delete state.current_unit;
+  if (claimRequested) {
+    const now = new Date();
+    const selected = state.module_selections?.[effectiveNextInstance.module_id || ""];
+    const owner = flags.owner || process.env.AIDLC_OWNER || process.env.AIDLC_MEMBER || "unidentified-owner";
+    state.active_instances[effectiveNextInstance.instance_id] = {
+      module_id: effectiveNextInstance.module_id as string,
+      stage_instance: effectiveNextInstance.instance_id,
+      owner,
+      ...(flags.branch || selected?.branch ? { branch: flags.branch || selected?.branch } : {}),
+      ...(flags.worktree || selected?.worktree ? { worktree: flags.worktree || selected?.worktree } : {}),
+      claimed_at: now.toISOString(),
+      heartbeat_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + 30 * 60 * 1000).toISOString(),
+    };
+  }
+
   const gate = nextStage.approval === "block";
-  saveState(state);
+  try {
+    saveState(state);
+  } catch (error) {
+    if (claimRequested && error instanceof Error && error.message.startsWith("workflow state revision conflict")) return handleNext(args);
+    throw error;
+  }
 
   const directiveChoices = runtimeChoices(nextStage, state);
   const agentExecution = planAgentExecution(nextStage);
@@ -2064,6 +2277,7 @@ async function handleNext(args: string[]): Promise<Directive> {
     produces: nextStage.produces.map((pattern) => instanceArtifactPattern(pattern, effectiveNextInstance)),
     sensors: nextStage.sensors,
     handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, agentExecution),
+    ...(claimRequested ? { claimed: true, owner: state.active_instances[effectiveNextInstance.instance_id].owner, claim_expires_at: state.active_instances[effectiveNextInstance.instance_id].expires_at } : {}),
   };
 }
 
@@ -2099,29 +2313,49 @@ async function handleReport(args: string[]): Promise<Directive> {
     return { kind: "error", message: `Workflow is ${state.status}, not running. Cannot report.` };
   }
 
-  // Validate stage matches current
-  if (state.current_stage !== stageSlug) {
-    return {
-      kind: "error",
-      message: `Stage mismatch: current is "${state.current_stage}", but report is for "${stageSlug}". ` +
-        `Cannot report on a stage that is not the active one.`,
-    };
-  }
-
   const graph = loadGraph();
   const stageNode = graph.stages.find((stage) => stage.slug === stageSlug);
   if (!stageNode) {
     return { kind: "error", message: `Unknown stage "${stageSlug}".` };
   }
   const instances = expandStageInstances(graph, state);
-  const declaredCurrentInstance = instances.find((instance) => instance.instance_id === state.current_stage_instance);
+  const activeCandidates = instances.filter((instance) =>
+    instance.stage.slug === stageSlug && state.active_instances?.[instance.instance_id]
+    && (!flags.module || instance.module_id === flags.module)
+    && (!flags.instance || instance.instance_id === flags.instance)
+  );
+  let declaredCurrentInstance: StageInstance | undefined;
+  if (activeCandidates.length > 1 && !flags.module && !flags.instance) {
+    return { kind: "error", message: `Multiple claimed instances are active for stage "${stageSlug}"; report with --module or --instance.` };
+  }
+  if (activeCandidates.length > 0) {
+    declaredCurrentInstance = activeCandidates[0];
+  } else if (flags.instance) {
+    declaredCurrentInstance = instances.find((instance) => instance.instance_id === flags.instance);
+  } else {
+    if (state.current_stage !== stageSlug) {
+      return {
+        kind: "error",
+        message: `Stage mismatch: current is "${state.current_stage}", but report is for "${stageSlug}". Cannot report on a stage that is not the active one.`,
+      };
+    }
+    declaredCurrentInstance = instances.find((instance) => instance.instance_id === state.current_stage_instance);
+  }
   if (!declaredCurrentInstance || declaredCurrentInstance.stage.slug !== stageSlug) {
     return {
       kind: "error",
-      message: `Active stage instance "${state.current_stage_instance || stageSlug}" no longer exists in the declared module/unit manifests. Restore the current Markdown workflow manifests before reporting.`,
+      message: `Active stage instance "${flags.instance || state.current_stage_instance || stageSlug}" no longer exists in the declared module/unit manifests. Restore the current Markdown workflow manifests before reporting.`,
     };
   }
   const currentInstance = runtimeInstance(declaredCurrentInstance, state);
+  const claim = state.active_instances?.[currentInstance.instance_id];
+  if (claim) {
+    const owner = flags.owner || process.env.AIDLC_OWNER || process.env.AIDLC_MEMBER || "unidentified-owner";
+    if (claim.owner !== owner) return { kind: "error", message: `Stage instance ${currentInstance.instance_id} is claimed by ${claim.owner}, not ${owner}.` };
+    if (Date.parse(claim.expires_at) <= Date.now()) return { kind: "error", message: `Stage instance ${currentInstance.instance_id} claim expired at ${claim.expires_at}; claim it again before reporting.` };
+    claim.heartbeat_at = new Date().toISOString();
+    claim.expires_at = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+  }
   if (flags.module && flags.module !== currentInstance.module_id) {
     return { kind: "error", message: `Module mismatch: active module is "${currentInstance.module_id || "(none)"}", but report specified "${flags.module}".` };
   }
@@ -2233,7 +2467,8 @@ async function handleReport(args: string[]): Promise<Directive> {
     case "approved":
       state.completed_stage_instances.push(currentInstance.instance_id);
       reconcileStageSummaries(state, instances);
-      clearActiveContext(state);
+      if (state.active_instances?.[currentInstance.instance_id]) delete state.active_instances[currentInstance.instance_id];
+      if (state.current_stage_instance === currentInstance.instance_id) selectActiveContext(state);
       break;
 
     case "rejected":
@@ -2243,7 +2478,12 @@ async function handleReport(args: string[]): Promise<Directive> {
       break;
   }
 
-  saveState(state);
+  try {
+    saveState(state);
+  } catch (error) {
+    if (claim && error instanceof Error && error.message.startsWith("workflow state revision conflict")) return handleReport(args);
+    throw error;
+  }
 
   // Return confirmation
   switch (result) {

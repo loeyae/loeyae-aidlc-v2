@@ -19,6 +19,25 @@ export interface TeamLightUnitSelection {
   note?: string;
 }
 
+export interface TeamLightModuleSelection {
+  owner: string;
+  selected_at: string;
+  branch?: string;
+  worktree?: string;
+  note?: string;
+}
+
+export interface TeamLightActiveInstance {
+  module_id: string;
+  stage_instance: string;
+  owner: string;
+  branch?: string;
+  worktree?: string;
+  claimed_at: string;
+  heartbeat_at: string;
+  expires_at: string;
+}
+
 export interface WorkflowState {
   format: "markdown-workflow";
   version: string;
@@ -40,6 +59,8 @@ export interface WorkflowState {
   selected_optional_stages: string[];
   history: HistoryEntry[];
   unit_selections: Record<string, TeamLightUnitSelection>;
+  module_selections: Record<string, TeamLightModuleSelection>;
+  active_instances: Record<string, TeamLightActiveInstance>;
   created_at: string;
   updated_at: string;
 }
@@ -133,6 +154,44 @@ function parseSelections(markdown: string): Record<string, TeamLightUnitSelectio
   return result;
 }
 
+function parseModuleSelections(markdown: string): Record<string, TeamLightModuleSelection> {
+  const result: Record<string, TeamLightModuleSelection> = {};
+  for (const [index, cells] of table(markdown, "Module Selections").entries()) {
+    if (cells.length !== 6) throw new Error(`Module Selections row ${index + 1} is malformed`);
+    const key = text(cells[0], "module selection key");
+    if (result[key]) throw new Error(`duplicate module selection: ${key}`);
+    result[key] = {
+      owner: text(cells[1], "module selection owner"),
+      selected_at: iso(cells[2], "module selection timestamp"),
+      ...(cells[3] !== "-" ? { branch: clean(cells[3]) } : {}),
+      ...(cells[4] !== "-" ? { worktree: clean(cells[4]) } : {}),
+      ...(cells[5] !== "-" ? { note: clean(cells[5]) } : {}),
+    };
+  }
+  return result;
+}
+
+function parseActiveInstances(markdown: string): Record<string, TeamLightActiveInstance> {
+  const result: Record<string, TeamLightActiveInstance> = {};
+  for (const [index, cells] of table(markdown, "Active Instances").entries()) {
+    if (cells.length !== 8) throw new Error(`Active Instances row ${index + 1} is malformed`);
+    const key = text(cells[0], "active instance key");
+    if (result[key]) throw new Error(`duplicate active instance: ${key}`);
+    result[key] = {
+      stage_instance: key,
+      module_id: text(cells[1], "active module"),
+      owner: text(cells[2], "active owner"),
+      ...(cells[3] !== "-" ? { branch: clean(cells[3]) } : {}),
+      ...(cells[4] !== "-" ? { worktree: clean(cells[4]) } : {}),
+      claimed_at: iso(cells[5], "active claimed_at"),
+      heartbeat_at: iso(cells[6], "active heartbeat_at"),
+      expires_at: iso(cells[7], "active expires_at"),
+    };
+  }
+  return result;
+}
+
+
 export function lightStatePath(projectRoot: string): string {
   return resolve(projectRoot, "aidlc", "active", "aidlc-state.md");
 }
@@ -165,6 +224,8 @@ export function createInitialState(scope: string, version = "4.1.0", workflowId 
     selected_optional_stages: [...selectedOptionalStages],
     history: [],
     unit_selections: {},
+    module_selections: {},
+    active_instances: {},
     created_at: now,
     updated_at: now,
   };
@@ -205,6 +266,8 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
     selected_optional_stages: optional,
     history: parseHistory(markdown),
     unit_selections: parseSelections(markdown),
+    module_selections: parseModuleSelections(markdown),
+    active_instances: parseActiveInstances(markdown),
     created_at: iso(scalar(markdown, "Created At"), "Created At"),
     updated_at: iso(scalar(markdown, "Updated At"), "Updated At"),
   };
@@ -258,6 +321,16 @@ ${bullet(state.skipped_stage_instances)}
 | --- | --- | --- | --- | --- |
 ${Object.entries(state.unit_selections).sort(([left], [right]) => left.localeCompare(right)).map(([unit, selection]) => `| ${cell(unit)} | ${cell(selection.member)} | ${selection.selected_at} | ${cell(selection.branch)} | ${cell(selection.note)} |`).join("\n") || "| - | - | - | - | - |"}
 
+## Module Selections
+| Module | Owner | Selected At | Branch | Worktree | Note |
+| --- | --- | --- | --- | --- | --- |
+${Object.entries(state.module_selections || {}).sort(([left], [right]) => left.localeCompare(right)).map(([module, selection]) => `| ${cell(module)} | ${cell(selection.owner)} | ${selection.selected_at} | ${cell(selection.branch)} | ${cell(selection.worktree)} | ${cell(selection.note)} |`).join("\n") || "| - | - | - | - | - | - |"}
+
+## Active Instances
+| Stage Instance | Module | Owner | Branch | Worktree | Claimed At | Heartbeat At | Expires At |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+${Object.entries(state.active_instances || {}).sort(([left], [right]) => left.localeCompare(right)).map(([instance, claim]) => `| ${cell(instance)} | ${cell(claim.module_id)} | ${cell(claim.owner)} | ${cell(claim.branch)} | ${cell(claim.worktree)} | ${claim.claimed_at} | ${claim.heartbeat_at} | ${claim.expires_at} |`).join("\n") || "| - | - | - | - | - | - | - | - |"}
+
 ## History
 | Stage | Instance | Module | Unit | Result | Timestamp | Input |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -285,7 +358,7 @@ function acquireLock(path: string): number {
 function appendAudit(projectRoot: string, state: WorkflowState): void {
   const path = lightAuditPath(projectRoot);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  appendFileSync(path, `## ${new Date().toISOString()}\n- Event: STATE_UPDATED\n- Revision: ${state.revision}\n- Work: ${clean(state.work_description)}\n- Current Instance: ${cell(state.current_stage_instance)}\n- Status: ${state.status}\n\n`, "utf8");
+  appendFileSync(path, `## ${new Date().toISOString()}\n- Event: STATE_UPDATED\n- Revision: ${state.revision}\n- Work: ${clean(state.work_description)}\n- Current Instance: ${cell(state.current_stage_instance)}\n- Active Instances: ${Object.keys(state.active_instances || {}).sort().join(", ") || "-"}\n- Instance Owners: ${Object.values(state.active_instances || {}).map((claim) => `${claim.stage_instance}=${claim.owner}`).sort().join(", ") || "-"}\n- Status: ${state.status}\n\n`, "utf8");
 }
 
 export function loadWorkflowState(projectRoot: string): WorkflowState | null {
@@ -315,4 +388,38 @@ export function saveWorkflowState(projectRoot: string, state: WorkflowState): vo
     closeSync(lock);
     if (existsSync(`${path}.lock`)) unlinkSync(`${path}.lock`);
   }
+}
+
+export function updateWorkflowState(projectRoot: string, mutate: (state: WorkflowState) => void, retries = 3): WorkflowState {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const state = loadWorkflowState(projectRoot);
+    if (!state) throw new Error("no active AWS-style lightweight workflow");
+    try {
+      mutate(state);
+      saveWorkflowState(projectRoot, state);
+      return state;
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof Error) || !error.message.startsWith("workflow state revision conflict")) throw error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("workflow state update failed after retries");
+}
+
+export function migrateSingleInstanceState(projectRoot: string, owner = "legacy-single-instance"): WorkflowState {
+  const state = loadWorkflowState(projectRoot);
+  if (!state) throw new Error("no active AWS-style lightweight workflow");
+  if (!state.current_stage_instance || !state.current_module || state.active_instances[state.current_stage_instance]) return state;
+  const now = new Date().toISOString();
+  state.active_instances[state.current_stage_instance] = {
+    module_id: state.current_module,
+    stage_instance: state.current_stage_instance,
+    owner: text(owner, "owner"),
+    claimed_at: state.updated_at || now,
+    heartbeat_at: now,
+    expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+  };
+  saveWorkflowState(projectRoot, state);
+  return state;
 }
