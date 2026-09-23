@@ -626,7 +626,7 @@ function runProducer(args: string[]): void {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     runProducer(process.argv.slice(2));
   } catch (error) {
