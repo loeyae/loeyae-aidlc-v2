@@ -2562,6 +2562,35 @@ function traceabilityMatrix(): Record<string, unknown> {
   const downstreamForCl = storyDoc + "\n" + designDoc + "\n" + fdDoc;
   const uncoveredCl = clIds.filter((cl) => !new RegExp(`\\b${cl}\\b`).test(downstreamForCl));
 
+  // 缺口B:跨 module 契约累积层。本 module 产物引用的 CT-{OTHER}-* 契约,其 Owner module 是否已交付。
+  // 契约 ID 形态 CT-{MODULE}-{NAME};排除本 module 自有(CT-{THIS}-*)。Owner 从 product-contracts.md 查。
+  // Owner 交付判定:Owner module 的 application-design 已完成(state completed 实例)。存在即对账,无则 NA。
+  const thisModuleToken = ACTIVE_MODULE.replace(/-/g, "").toUpperCase();
+  const moduleArtifacts = reqDoc + "\n" + storyDoc + "\n" + designDoc + "\n" + fdDoc;
+  const allCtIds = ids(moduleArtifacts, /\bCT-[A-Z0-9]+-[A-Z0-9-]+\b/g);
+  // 跨 module 消费的契约 = CT-* 且其 module 段 ≠ 本 module。
+  const consumedContracts = allCtIds.filter((ct) => {
+    const seg = ct.match(/^CT-([A-Z0-9]+)-/)?.[1];
+    return seg && seg !== thisModuleToken;
+  });
+  const prodContracts = existing(["docs/aidlc/ideation/product-contracts.md"]).map(text).join("\n");
+  const completedStages: string[] = Array.isArray(workflowState.completed_stage_instances)
+    ? workflowState.completed_stage_instances
+    : (Array.isArray(workflowState.completed_stages) ? workflowState.completed_stages : []);
+  const ownerDelivered = (ownerModule: string): boolean =>
+    completedStages.includes(`application-design@module:${ownerModule}`) || completedStages.includes("application-design");
+  const uncoveredContracts: string[] = [];
+  for (const ct of consumedContracts) {
+    // 从 product-contracts 找该契约行的 Owner module 段(形如 "owner/unit" 或 module 名)。
+    const seg = ct.match(/^CT-([A-Z0-9]+)-/)?.[1] || "";
+    const ownerModule = seg.toLowerCase();
+    if (!prodContracts.includes(ct)) {
+      uncoveredContracts.push(`${ct}: 契约未在 product-contracts.md 登记(消费了未声明的跨 module 契约)`);
+    } else if (ownerModule && !ownerDelivered(ownerModule)) {
+      uncoveredContracts.push(`${ct}: Owner module ${ownerModule} 的 application-design 未完成(消费方引用了尚未交付的契约)`);
+    }
+  }
+
   const rows: Record<string, unknown>[] = [];
   const brokenRows: string[] = [];
   const missingTrack: string[] = [];
@@ -2648,12 +2677,18 @@ function traceabilityMatrix(): Record<string, unknown> {
     ...uncoveredFr.map((fr) => `${fr}: UNCOVERED_FR@requirements(PRD 的 FR 未被任何 REQ 承接)`),
     ...uncoveredCl.map((cl) => `${cl}: UNCOVERED_CL@downstream(澄清结论未被 story/design 遵循)`),
   ];
-  const allBroken = legacy ? [...brokenRows] : [...brokenRows, ...cumulativeBroken];
+  const allBroken = legacy ? [...brokenRows] : [...brokenRows, ...cumulativeBroken, ...uncoveredContracts];
   const cumulativeStatus = frIds.length === 0 && clIds.length === 0
     ? "not_applicable(无 PRD/澄清产物)"
     : legacy
       ? (cumulativeBroken.length === 0 ? "passed" : "MIGRATION_REQUIRED(存量未迁移,累积缺口降级放行)")
       : (cumulativeBroken.length === 0 ? "passed" : "BROKEN");
+  // 缺口B 契约层状态:已迁移 module 的跨 module 契约缺口进 allBroken 硬拦;存量降级。
+  const contractStatus = consumedContracts.length === 0
+    ? "not_applicable(无跨 module 契约消费)"
+    : legacy
+      ? (uncoveredContracts.length === 0 ? "passed" : "MIGRATION_REQUIRED(存量未迁移,契约缺口降级放行)")
+      : (uncoveredContracts.length === 0 ? "passed" : "BROKEN");
   return {
     status: "passed",
     module_id: ACTIVE_MODULE,
@@ -2668,6 +2703,10 @@ function traceabilityMatrix(): Record<string, unknown> {
     clarification_cl_total: clIds.length,
     uncovered_cl: uncoveredCl,
     cumulative_status: cumulativeStatus,
+    // 缺口B 跨 module 契约累积层:本 module 消费的 CT-{OTHER}-* 其 Owner 是否交付。
+    consumed_contracts: consumedContracts,
+    uncovered_contracts: uncoveredContracts,
+    contract_status: contractStatus,
     derived_children: derivedChildren.length,
     derived_gaps: derivedGaps,
     migration_status: legacy ? "MIGRATION_REQUIRED" : "passed",

@@ -456,6 +456,29 @@ export function moduleDependencyGraph(): ModuleDependency[] {
   return [...unique.values()];
 }
 
+// 缺口A:跨 module 契约依赖门禁。消费方阶段推进前,验证其依赖的 provider module 的 provider_stage 已完成。
+// 复用 moduleDependencyGraph()(已从 product-contracts/runtime-dependencies 解析出 provider→consumer 边)
+// 与 completedInstanceIds(阶段实例完成判定)。只判时序(provider 阶段是否完成),不判契约内容(那是 contract-baseline)。
+// 遗留兼容:无跨 module 依赖表 → 空图 → 无 failure,不阻断存量项目。
+export function checkCrossModuleDependencies(instance: StageInstance, state: WorkflowState): string[] {
+  if (instance.axis !== "module" || !instance.module_id) return [];
+  const failures: string[] = [];
+  const completed = new Set(completedInstanceIds(state));
+  const isProviderStageDone = (providerModule: string, providerStage: string): boolean => {
+    // provider module 的 provider_stage 完成 = 存在已完成实例 `<providerStage>@module:<providerModule>`,
+    // 或 project 轴阶段直接以 slug 记完成。
+    const moduleInstanceId = `${providerStage}@module:${providerModule}`;
+    return completed.has(moduleInstanceId) || completed.has(providerStage);
+  };
+  for (const dep of moduleDependencyGraph()) {
+    if (dep.consumer_module !== instance.module_id || dep.consumer_stage !== instance.stage.slug) continue;
+    if (!isProviderStageDone(dep.provider_module, dep.provider_stage)) {
+      failures.push(`跨 module 依赖未就绪: ${dep.provider_module}@${dep.provider_stage} 未完成,但本阶段 ${dep.consumer_module}@${dep.consumer_stage} 消费其契约(来源: ${dep.source})`);
+    }
+  }
+  return failures;
+}
+
 export function dependencyInstances(instance: StageInstance, dependency: string, instances: StageInstance[]): StageInstance[] {
   const candidates = instances.filter((candidate) => candidate.stage.slug === dependency);
   if (instance.axis === "project") return candidates;
@@ -2326,6 +2349,15 @@ async function handleNext(args: string[]): Promise<Directive> {
     return {
       kind: "error",
       message: `🚫 Stage instance "${nextInstance.instance_id}" is missing canonical consumed artifacts:\n${consumeFailures.map((failure) => `  ❌ ${failure}`).join("\n")}`,
+    };
+  }
+
+  // 缺口A:跨 module 契约依赖门禁。消费方阶段推进前,provider module 的 provider_stage 必须已完成。
+  const crossModuleFailures = checkCrossModuleDependencies(effectiveNextInstance, state);
+  if (crossModuleFailures.length > 0) {
+    return {
+      kind: "error",
+      message: `🚫 Stage instance "${nextInstance.instance_id}" 跨 module 依赖未就绪:\n${crossModuleFailures.map((failure) => `  ❌ ${failure}`).join("\n")}`,
     };
   }
 

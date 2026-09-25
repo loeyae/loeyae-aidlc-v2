@@ -6,6 +6,36 @@
 
 ---
 
+## ★ 最终落地状态（2026-09-25 更新，已实现并提交 60dd252 + 2fea092）
+
+原方案的 B1/B2/B3 逐 checker 思路，在实现中**演化为"分类追溯矩阵"治本方案**（见 `aidlc-traceability-matrix-design.md`）——用一条贯穿 ID 链的矩阵替换零散的两两对账。最终落地状态：
+
+| 计划项 | 落地 | 实现要点 |
+|--------|------|---------|
+| **B1** 前端↔设计稿元素级对账 | ✅ | `uiAlignment` 计数级 diff 替换硬编码字面量(Vue3+Element Plus,元素/token/条件级) |
+| **B2** functional-design UC-D 覆盖确定性 | ✅ | `functionalDesign` 引擎算 UC-D 覆盖差集(`covered.length !== sourceCases.length`) |
+| **B3** prd-completeness 结构确定性 | ✅ | 4 字段(acceptance/non_goals/source_index/pending_questions_indexed)从硬编码 true 升为从 PRD 文本算出;required_sections 保证节存在,B3 查节内容充实度;**放弃 legacy 降级**(与 required 重叠成死代码) |
+| **C1** 内容级 ID 双向覆盖 | ✅ | 矩阵 producer 正向(track 条件化)+ 反向 + 悬空 |
+| **C2** 从 PRD 起累积 | ✅ | 矩阵纳入 PRD 的 FR→REQ 承接 + 澄清 CL→下游遵循;已迁移 module 硬拦,存量降级 |
+| **治本机制** 分类追溯矩阵 | ✅ | `track` 标签 + `traceabilityMatrix` producer + `traceability-matrix` 门禁 |
+| **CL 入链** | ✅ | `clarification-traceability` + CL-xxx 规范 |
+| **AC 可见性** | ✅ | 矩阵 derived_gaps advisory(STORY 缺 AC 提示,不阻断) |
+| **门禁前移** | ✅ | 矩阵挂到 8 个产出阶段:requirements/user-stories/application-design/test-case-derivation/functional-design/code-generation/tdd/code-review——每个产出阶段当场累积对账 |
+
+**确定性边界（最终，诚实）：** 矩阵保证**结构覆盖**(ID 双向、无断点、无需求消失),纯确定性、可强制、不误报(靠 track 分类 + 存量降级)。**不**保证内容"忠实"上游意图(代码是否真实现语义)——那仍靠 review/测试。
+
+**遗留兼容（最终）：** 所有新 checker 对旧产物走降级(`MIGRATION_REQUIRED`/`not_applicable` + 缺失清单),不硬阻断存量项目迁移。存量迁移工具见 `legacy-migration-plan.md` + `scripts/legacy-id-migrate.ts`。
+
+**验证：** tsc / graph compile(46 stages) / matrix 单测(`tests/test_traceability_matrix.py` 6 用例) / build 9 harness / distribution parity(1667) / 存量项目 loeyae-boot-workspace 实测降级正确。
+
+---
+
+## 以下为原始评审方案（保留作设计留档，实际落地以上表为准）
+
+
+
+---
+
 ## 0. 现状分级(源码核实)
 
 把所有核心产物 sensor 按"证据如何产生"分三级:
@@ -113,11 +143,18 @@ PRD(FR-xxx) → 需求(REQ-xxx) → 用户故事(STORY-xxx, 验收标准 AC-xxx)
 
 ---
 
-## 评审决策点(请逐条确认)
+## 评审决策点(已决,记录最终结论)
 
-1. **B1 实现侧解析范围**:先只做 Vue 3 + Element Plus(可插拔架构预留),对吗?还是要求首版就语言无关?
-2. **B1 对账深度**:确认只做元素/字段/token/条件级结构对账,像素级留给已有 chrome Provider(且默认不阻断),对吗?
-3. **C "内容级"边界**:确定性部分做 ID 双向覆盖 + 悬空检测;"内容是否忠实意图"标注为非确定性(review/LLM 辅助),不假装 checker。接受吗?
-4. **C 追溯链 ID**:接受为补齐 **AC-xxx(验收标准级 ID)** 而修改故事产物模板 + 生成 skill 吗?(这是 C2 累积对账的前提)
-5. **遗留兼容**:新 checker 对旧产物走降级放行(标记 + 清单)而非硬阻断,对吗?
-6. **交付顺序**:B1 → B2 → C1/C2 → B3,还是你要调整优先级?
+1. **B1 实现侧解析范围** → ✅ 先做 Vue 3 + Element Plus(计数级元素对账),解析器保留可插拔。
+2. **B1 对账深度** → ✅ 元素/字段/token/条件级结构对账;像素级留给 chrome Provider(默认不阻断)。
+3. **C "内容级"边界** → ✅ 确定性做 ID 双向覆盖 + 悬空检测;"内容忠实意图"标为非确定性(review/LLM 辅助),不假装 checker。
+4. **C 追溯链 ID** → ✅ 补齐 CL-xxx(澄清入链)、STORY/AC-xxx(故事模板);REQ 统一 `REQ-` 前缀。AC 作 advisory 可见性,不硬门禁(存量兼容)。
+5. **遗留兼容** → ✅ 全部降级放行(MIGRATION_REQUIRED/not_applicable + 缺失清单),不硬阻断旧项目。
+6. **交付顺序** → 实际:治本方案(分类追溯矩阵)替换零散 B1/B2/B3 → 增量①②③(澄清/故事/前端) → C2 累积 + B3 确定性 + AC → 门禁前移到 8 个产出阶段。
+
+**演化说明(对原方案的偏离,已记录):**
+- 原 B1/B2/B3/④⑤⑥⑦ 零散对账 → 收敛为**单一分类追溯矩阵**(治本,消除"正向覆盖误报"+"断点累积"两个结构漏洞)。
+- B3 原设计含 legacy 降级 → 实现中发现与 required_sections 重叠成死代码,**移除**,改纯确定性。
+- 增量④⑤(存在性对账显式化) → 核实后确认已被 `uiArtifactConsistency`(反向)+ 矩阵(正向 track)覆盖,**关闭不新增**(避免冗余门禁互相矛盾)。
+- 存量项目实测暴露并修复 producer 3 缺陷(B1 路径 {module-id} / B2 ID 格式 / B3 阶段感知)。
+- 实际 checker 落点是 `aidlc-semantic-checks.ts` 的 `traceabilityMatrix`(非原设想的独立 `aidlc-traceability-checks.ts`)。

@@ -186,6 +186,39 @@ def test_b3_empty_sections_prd_blocked() -> None:
     print("PASS test_b3_empty_sections_prd_blocked")
 
 
+# ---- 缺口B: 已迁移 module 消费未交付的跨 module 契约 → broken 硬拦 ----
+def test_gapb_undelivered_cross_module_contract_broken() -> None:
+    project = make_temp("aidlc-gapb-broken-")
+    # sample module(已迁移,track) 消费 CT-OTHER-SVC;product-contracts 登记它;但 OTHER 的 application-design 未完成
+    write(project, "docs/aidlc/modules/sample/inception/requirements.md",
+          "# 需求\n### REQ-SAMPLE-001 登录\n- track: [doc-only]\n- 消费契约: CT-OTHER-SVC\n")
+    write(project, "docs/aidlc/modules/sample/inception/user-stories.md",
+          "### STORY-SAMPLE-001（REQ-SAMPLE-001）\n- 来源: REQ-SAMPLE-001\n")
+    write(project, "docs/aidlc/ideation/product-contracts.md",
+          "| 契约 ID | Owner | 消费方 | 状态 |\n|---|---|---|---|\n| CT-OTHER-SVC | other/unit-contracts | sample | registered |\n")
+    write_state(project, "shared-contract-baseline", "sample")  # completed 为空 → other 未交付
+    out = run_matrix(project, "sample")
+    assert "CT-OTHER-SVC" in out.get("consumed_contracts", []), out
+    assert any("CT-OTHER-SVC" in c for c in out.get("uncovered_contracts", [])), out
+    assert out.get("contract_status") == "BROKEN", out
+    assert any("CT-OTHER-SVC" in b for b in out.get("broken_rows", [])), out
+    print("PASS test_gapb_undelivered_cross_module_contract_broken")
+
+
+# ---- 缺口B: 无跨 module 契约消费 → contract_status not_applicable ----
+def test_gapb_no_cross_module_contract_na() -> None:
+    project = make_temp("aidlc-gapb-na-")
+    write(project, "docs/aidlc/modules/sample/inception/requirements.md",
+          "# 需求\n### REQ-SAMPLE-001 登录\n- track: [doc-only]\n")
+    write(project, "docs/aidlc/modules/sample/inception/user-stories.md",
+          "### STORY-SAMPLE-001（REQ-SAMPLE-001）\n- 来源: REQ-SAMPLE-001\n")
+    write_state(project, "shared-contract-baseline", "sample")
+    out = run_matrix(project, "sample")
+    assert out.get("consumed_contracts") == [], out
+    assert "not_applicable" in out.get("contract_status", ""), out
+    print("PASS test_gapb_no_cross_module_contract_na")
+
+
 def main() -> None:
     test_b1_path_resolved_and_b3_stage_awareness()
     test_c2_uncovered_fr_on_migrated_module_is_broken()
@@ -193,7 +226,9 @@ def main() -> None:
     test_c2_no_prd_is_not_applicable()
     test_b3_compliant_prd_fields_true()
     test_b3_empty_sections_prd_blocked()
-    print("\nAll traceability-matrix + B3 tests passed.")
+    test_gapb_undelivered_cross_module_contract_broken()
+    test_gapb_no_cross_module_contract_na()
+    print("\nAll traceability-matrix + B3 + 缺口B tests passed.")
 
 
 if __name__ == "__main__":
