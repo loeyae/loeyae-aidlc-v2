@@ -1,17 +1,17 @@
-{
+﻿{
   "name": "loeyae-aidlc",
   "owner": {
     "name": "Loeyae Team",
     "url": "https://github.com/loeyae"
   },
   "description": "AWS-style lightweight AI-DLC plugin marketplace for CodeBuddy.",
-  "version": "4.1.0",
+  "version": "4.2.0",
   "plugins": [
     {
       "name": "loeyae-aidlc",
       "source": "./plugins/loeyae-aidlc",
       "description": "AWS-style lightweight AI-DLC workflow with Markdown state/audit, unit selection, review, build and test.",
-      "version": "4.1.0",
+      "version": "4.2.0",
       "skills": ["./plugins/loeyae-aidlc/skills/loeyae-aidlc"]
     }
   ]

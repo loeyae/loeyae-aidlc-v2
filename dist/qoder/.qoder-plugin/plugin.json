@@ -1,6 +1,6 @@
-{
+﻿{
   "name": "loeyae-aidlc",
-  "version": "4.1.0",
+  "version": "4.2.0",
   "displayName": "Loeyae AI-DLC",
   "description": "AWS-style lightweight AI-DLC workflow with Markdown state/audit, unit selection, review, build and test.",
   "author": { "name": "Loeyae Team" },
