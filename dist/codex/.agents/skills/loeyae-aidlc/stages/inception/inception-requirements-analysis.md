@@ -251,6 +251,16 @@ sensors: [traceability]
 - 业务流程图引用：显式引用 `requirements/business-flows.md`，每个 FR 标注所属流程节点
 - 状态流转判定：记录触发及状态图引用，或“不涉及状态流转”及依据
 - 功能需求（按优先级排序，含 GWT 验收标准）
+  - **每个功能需求必须携带稳定 `REQ-xxx` ID 和 `track` 去向标签**（追溯矩阵的根，规范见 `knowledge/common-traceability-id-chain.md`）：
+    ```markdown
+    ### REQ-012 用户可导出订单为 Excel
+    - track: [backend, frontend]   # 去向,决定该需求必须在哪些下游层被覆盖
+    - ui_relevant: true
+    - 优先级: P1
+    - 验收(GWT): ...
+    ```
+  - `track` 枚举：`backend` / `frontend` / `data` / `infra` / `nfr` / `doc-only`，可多选，至少一个。
+  - **这是"全覆盖对账不误报"的前提**：追溯矩阵只要求每个 REQ 到达它自己 track 声明的下游层，UI-only 不查后端代码、backend-only 不查页面。缺 track 标签的需求，`traceability-matrix` 门禁会标记未迁移并降级。
 - 非功能需求（含量化指标）
 - **数据源溯源表**（强制）：每个功能需求对应的数据来源清单
   - 格式：`| 功能 | 读取的数据 | 数据来源类型 | 来源确认状态 | 备注 |`

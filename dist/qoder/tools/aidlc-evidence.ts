@@ -44,6 +44,7 @@ export const SEMANTIC_SENSORS = new Set([
   "ui-design-alignment",
   "ui-artifact-consistency",
   "inception-consistency",
+  "traceability-matrix",
 ]);
 
 interface CommandSpec {
@@ -626,7 +627,7 @@ function runProducer(args: string[]): void {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     runProducer(process.argv.slice(2));
   } catch (error) {

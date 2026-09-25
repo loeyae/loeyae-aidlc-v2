@@ -44,6 +44,7 @@ export const SEMANTIC_SENSORS = new Set([
   "ui-design-alignment",
   "ui-artifact-consistency",
   "inception-consistency",
+  "traceability-matrix",
 ]);
 
 interface CommandSpec {

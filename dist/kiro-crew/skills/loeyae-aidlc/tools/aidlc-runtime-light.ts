@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, readFileSync, readdirSync } from "fs";
 import { isAbsolute, join, relative, resolve, sep } from "path";
+import { fileURLToPath } from "url";
 import { crossModuleRequires, dependencyInstances, expandStageInstances, loadGraph } from "./aidlc-orchestrate";
 import { lightAuditPath, loadWorkflowState } from "./aidlc-light-state";
 
@@ -94,6 +95,6 @@ function main(): void {
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { main(); } catch (error) { console.error(`Lightweight runtime blocked: ${error instanceof Error ? error.message : String(error)}`); process.exitCode = 2; }
 }

@@ -365,11 +365,19 @@
       ],
       "cross_module_requires": [],
       "scope_waived_requires": [],
-      "consumes": [],
-      "produces": [],
-      "sensors": [],
+      "consumes": [
+        "docs/aidlc/modules/{module-id}/inception/requirements.md"
+      ],
+      "produces": [
+        "docs/aidlc/modules/{module-id}/inception/clarifications.md"
+      ],
+      "sensors": [
+        "clarification-traceability",
+        "no-todo",
+        "traceability"
+      ],
       "traceability": "required",
-      "completion_contract": "instruction_only",
+      "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
       "file": "stages/inception/inception-requirement-clarification.md"
@@ -543,6 +551,7 @@
         "docs/aidlc/modules/{module-id}/inception/user-stories.md"
       ],
       "sensors": [
+        "story-traceability",
         "no-todo",
         "traceability"
       ],
@@ -987,10 +996,12 @@
         "docs/aidlc/modules/{module-id}/inception/application-design/component-methods.md",
         "docs/aidlc/modules/{module-id}/inception/application-design/application-services.md",
         "docs/aidlc/modules/{module-id}/inception/application-design/component-dependency.md",
-        ".aidlc/evidence/application-design/{module-id}/diagram-contract.json"
+        ".aidlc/evidence/application-design/{module-id}/diagram-contract.json",
+        ".aidlc/evidence/application-design/{module-id}/traceability-matrix.json"
       ],
       "sensors": [
         "diagram-contract",
+        "traceability-matrix",
         "no-todo",
         "traceability"
       ],
@@ -1118,11 +1129,13 @@
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-rules.md",
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/domain-entities.md",
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/data-source-validation.md",
-        ".aidlc/evidence/functional-design/{module-id}/{unit-id}/functional-design-completeness.json"
+        ".aidlc/evidence/functional-design/{module-id}/{unit-id}/functional-design-completeness.json",
+        ".aidlc/evidence/functional-design/{module-id}/{unit-id}/traceability-matrix.json"
       ],
       "sensors": [
         "doc-cascade",
         "functional-design-completeness",
+        "traceability-matrix",
         "no-todo",
         "traceability"
       ],
@@ -1327,10 +1340,12 @@
       "produces": [
         "src/",
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md",
-        "docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md"
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md",
+        ".aidlc/evidence/code-generation/{module-id}/{unit-id}/traceability-matrix.json"
       ],
       "sensors": [
         "doc-cascade",
+        "traceability-matrix",
         "no-todo",
         "traceability"
       ],
@@ -1372,10 +1387,12 @@
       ],
       "produces": [
         "src/test/",
-        ".aidlc/evidence/tdd/{module-id}/{unit-id}/test-quality.json"
+        ".aidlc/evidence/tdd/{module-id}/{unit-id}/test-quality.json",
+        ".aidlc/evidence/tdd/{module-id}/{unit-id}/traceability-matrix.json"
       ],
       "sensors": [
         "test-quality",
+        "traceability-matrix",
         "no-todo",
         "traceability"
       ],
@@ -1537,12 +1554,14 @@
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md",
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/audit.md",
         ".aidlc/evidence/code-review/{module-id}/{unit-id}/review-evidence.json",
-        ".aidlc/evidence/code-review/{module-id}/{unit-id}/ui-design-alignment.json"
+        ".aidlc/evidence/code-review/{module-id}/{unit-id}/ui-design-alignment.json",
+        ".aidlc/evidence/code-review/{module-id}/{unit-id}/traceability-matrix.json"
       ],
       "sensors": [
         "reviewer-required",
         "review-evidence",
         "ui-design-alignment",
+        "traceability-matrix",
         "no-todo",
         "traceability"
       ],

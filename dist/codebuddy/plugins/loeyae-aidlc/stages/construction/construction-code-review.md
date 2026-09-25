@@ -18,7 +18,8 @@ produces:
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/audit.md
   - .aidlc/evidence/code-review/{module-id}/{unit-id}/review-evidence.json
   - .aidlc/evidence/code-review/{module-id}/{unit-id}/ui-design-alignment.json
-sensors: [reviewer-required, review-evidence, ui-design-alignment]
+  - .aidlc/evidence/code-review/{module-id}/{unit-id}/traceability-matrix.json
+sensors: [reviewer-required, review-evidence, ui-design-alignment, traceability-matrix]
 requires: [code-generation, tdd]
 ---
 # 代码审查

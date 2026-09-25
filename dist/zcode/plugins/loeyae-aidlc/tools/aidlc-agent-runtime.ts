@@ -269,6 +269,6 @@ function main(): void {
   throw new Error("usage: loeyae-aidlc agent <describe|plan|validate-result> [args]");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { main(); } catch (error) { console.error(`Agent runtime blocked: ${error instanceof Error ? error.message : String(error)}`); process.exitCode = 2; }
 }

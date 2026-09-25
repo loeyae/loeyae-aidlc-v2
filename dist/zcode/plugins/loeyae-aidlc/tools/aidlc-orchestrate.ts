@@ -966,6 +966,111 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
         break;
       }
 
+      case "clarification-traceability": {
+        // 澄清入链的确定性门禁:clarifications.md 必须存在、含 CL-xxx ID、且每条 CL 有实质内容。
+        // 这让澄清结论进入追溯链,可被 user-stories / application-design / cross-validation 下游对账;
+        // 修复"澄清文档是孤儿产物"的根源缺口。ID 规范见 knowledge/common-traceability-id-chain.md。
+        const targets = [...new Set((stage.produces || [])
+          .flatMap((pattern) => resolveProducePaths(pattern, instance))
+          .filter((filePath) => !isEvidenceArtifact(filePath)))];
+        const problems: string[] = [];
+        for (const filePath of targets) {
+          const content = producedText(filePath);
+          if (content === null) { problems.push(`unreadable: ${artifactLabel(filePath)}`); continue; }
+          const clIds = [...new Set((content.match(/\bCL-\d{3,}\b/g) || []))];
+          if (clIds.length === 0) {
+            // 无澄清结论是合法的(澄清可能确认"无歧义"):要求显式声明,避免空文件蒙混。
+            if (!/(?:^|\n)\s*(?:无澄清项|无需澄清|no clarifications?)\b/i.test(content)) {
+              problems.push(`${artifactLabel(filePath)} 无 CL-xxx 澄清条目,也未显式声明"无澄清项"`);
+            }
+            continue;
+          }
+          // 每条 CL 后必须有实质内容(结论文本),不能只有裸 ID。
+          for (const cl of clIds) {
+            const section = content.split(new RegExp(`\\b${cl}\\b`))[1]?.split(/\bCL-\d{3,}\b/)[0] || "";
+            if (section.replace(/[#*_`>\-\s]/g, "").length < 10) problems.push(`${cl} 缺少实质澄清结论内容`);
+          }
+        }
+        if (problems.length > 0) {
+          failures.push({ sensor: "clarification-traceability", passed: false, message: problems.join("; ") });
+        }
+        break;
+      }
+
+      case "story-traceability": {
+        // 用户故事对账(确定性):双向覆盖 + 澄清条件遵循。ID 规范见 knowledge/common-traceability-id-chain.md。
+        //  - 正向:requirements.md 每个 REQ-xxx 必须被至少一个 STORY 的来源声明覆盖;
+        //  - 反向:故事引用的每个 REQ/CL 必须真实存在于上游;
+        //  - 澄清:clarifications.md 存在时,每个 CL-xxx 至少被一个 STORY 引用(遵循);不存在则跳过(澄清阶段可条件跳过);
+        //  - 遗留兼容:requirements.md 无任何 REQ-xxx 时记 not_applicable 不阻断(未迁移旧项目)。
+        const problems: string[] = [];
+        const readModuleArtifact = (relPattern: string): string | null => {
+          try {
+            const rel = instanceArtifactPattern(relPattern, instance, true);
+            if (/[{}]/.test(rel)) return null;
+            const abs = join(PROJECT_ROOT, rel);
+            return existsSync(abs) ? readFileSync(abs, "utf8") : null;
+          } catch { return null; }
+        };
+        const storyTargets = [...new Set((stage.produces || [])
+          .flatMap((pattern) => resolveProducePaths(pattern, instance))
+          .filter((filePath) => !isEvidenceArtifact(filePath)))];
+        const storyContent = storyTargets.map((p) => producedText(p) ?? "").join("\n");
+        const reqContent = readModuleArtifact("docs/aidlc/modules/{module-id}/inception/requirements.md");
+        const clarContent = readModuleArtifact("docs/aidlc/modules/{module-id}/inception/clarifications.md");
+
+        const ids = (text: string | null, re: RegExp) => text ? [...new Set(text.match(re) || [])] : [];
+        const reqIds = ids(reqContent, /\b(?:REQ-[A-Z0-9][A-Z0-9_-]*|R-\d+)\b/g);
+        const storyIds = ids(storyContent, /\bSTORY-\d{3,}\b/g);
+        const clIds = ids(clarContent, /\bCL-\d{3,}\b/g);
+        const storyReqRefs = ids(storyContent, /\b(?:REQ-[A-Z0-9][A-Z0-9_-]*|R-\d+)\b/g);
+        const storyClRefs = ids(storyContent, /\bCL-\d{3,}\b/g);
+
+        if (reqContent === null) {
+          problems.push("requirements.md 不可读或缺失,无法对账");
+        } else if (reqIds.length === 0) {
+          // 未迁移旧项目:需求无 REQ-xxx —— not_applicable,不阻断(仍要求故事非空)。
+          if (storyContent.replace(/[#*_`>\-\s]/g, "").length < 20) problems.push("user-stories.md 内容为空");
+        } else {
+          if (storyIds.length === 0) problems.push("user-stories.md 无 STORY-xxx 故事 ID");
+          // 正向:每个 REQ 被覆盖
+          const uncovered = reqIds.filter((req) => !storyReqRefs.includes(req));
+          if (uncovered.length > 0) problems.push(`未被任何故事覆盖的需求: ${uncovered.join(", ")}`);
+          // 反向:故事引用的 REQ 必须存在
+          const danglingReq = storyReqRefs.filter((req) => !reqIds.includes(req));
+          if (danglingReq.length > 0) problems.push(`故事引用了不存在的需求: ${danglingReq.join(", ")}`);
+          // 澄清遵循(条件):clarifications 存在且有 CL 时,每个 CL 至少被引用一次
+          if (clarContent !== null && clIds.length > 0) {
+            const ignoredCl = clIds.filter((cl) => !storyClRefs.includes(cl));
+            if (ignoredCl.length > 0) problems.push(`澄清结论未被任何故事引用/遵循: ${ignoredCl.join(", ")}`);
+            const danglingCl = storyClRefs.filter((cl) => !clIds.includes(cl));
+            if (danglingCl.length > 0) problems.push(`故事引用了不存在的澄清: ${danglingCl.join(", ")}`);
+          }
+        }
+        if (problems.length > 0) {
+          failures.push({ sensor: "story-traceability", passed: false, message: problems.join("; ") });
+        }
+        break;
+      }
+
+      case "traceability-matrix": {
+        // 全覆盖对账门禁:分类追溯矩阵到本阶段应完成的层必须 100% 覆盖,无 BROKEN@<layer>。
+        // 由确定性 producer(traceabilityMatrix)生成 evidence;此处校验其结论。遗留(缺 track)降级放行。
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (!["passed", "not_applicable"].includes(String(evidence.status))) errors.push('status must be "passed" or "not_applicable"');
+          if (evidence.status === "not_applicable") return errors;
+          const broken = Array.isArray(evidence.broken_rows) ? evidence.broken_rows : [];
+          if (broken.length > 0) errors.push(`追溯矩阵存在断点(某需求在中途层丢失,drift): ${broken.slice(0, 20).join("; ")}`);
+          // 遗留兼容:migration_status=MIGRATION_REQUIRED 允许(旧项目缺 track 标签),但仍报缺失清单供补齐。
+          if (!["passed", "MIGRATION_REQUIRED"].includes(String(evidence.migration_status))) errors.push('migration_status must be "passed" or "MIGRATION_REQUIRED"');
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+
       case "build-test-evidence": {
         const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
@@ -1304,7 +1409,10 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           if (typeof evidence.target_operation_required !== "boolean") errors.push("target_operation_required must be boolean");
           if (evidence.fr_mapping_complete !== true) errors.push("fr_mapping_complete must be true");
           if (evidence.design_notes_valid !== true) errors.push("design_notes_valid must be true");
-          if (evidence.migration_status !== "passed") errors.push('migration_status must be "passed"');
+          // 方案1:遗留图降级路径允许 migration_status="MIGRATION_REQUIRED"(仅在 STATIC_PASS 时);
+          // 完整 PASS 仍要求 migration_status="passed"。
+          if (!["passed", "MIGRATION_REQUIRED"].includes(String(evidence.migration_status))) errors.push('migration_status must be "passed" or "MIGRATION_REQUIRED"');
+          if (evidence.migration_status === "MIGRATION_REQUIRED" && final.status === "PASS") errors.push('migration_status=MIGRATION_REQUIRED cannot report full PASS; legacy diagrams stay at STATIC_PASS');
           if (evidence.port_paths_valid !== true) errors.push("port_paths_valid must be true");
 
           const requiredTrueFields = [
@@ -2218,6 +2326,37 @@ async function handleNext(args: string[]): Promise<Directive> {
       kind: "error",
       message: `🚫 Stage instance "${nextInstance.instance_id}" is missing canonical consumed artifacts:\n${consumeFailures.map((failure) => `  ❌ ${failure}`).join("\n")}`,
     };
+  }
+
+  // Harness-independent 准出门禁底座 (Phase A):在发出下一 directive 前,重新校验本阶段所依赖的
+  // 上游 completed 阶段的 sensor(准出门禁)是否仍然满足。这让"想拿下一步指令 → 上游门禁必须现在仍绿"
+  // 成为程序化事实,不依赖 host 是否提供 Stop hook —— kiro-crew 等无自动 hook 的 harness 也据此硬拦。
+  // 只复验已 resolved(completed,非 skipped)的直接 requires 依赖;首个阶段无上游依赖时自然放行。
+  {
+    const upstreamDeps = new Set<StageInstance>();
+    for (const dependency of effectiveNextInstance.stage.requires || []) {
+      for (const dep of dependencyInstances(effectiveNextInstance, dependency, instances)) {
+        if (completedInstanceIds(state).includes(dep.instance_id)) upstreamDeps.add(dep);
+      }
+    }
+    const upstreamGateFailures: { instance: string; message: string }[] = [];
+    for (const dep of upstreamDeps) {
+      const failures = await checkSensors(dep, state);
+      for (const failure of failures) {
+        // 已 completed 的上游阶段在完成时其门禁已为绿;此处复验只为拦截"事后被改坏/覆盖不再满足"的实质失败。
+        // 纯时间性证据过期(>24h resume 间隔)不是回归,不应阻断多日跨度的正常续作 —— 过滤掉纯 staleness 失败。
+        if (/evidence is stale \(\d+h old/i.test(failure.message)) continue;
+        upstreamGateFailures.push({ instance: dep.instance_id, message: `[${failure.sensor}] ${failure.message}` });
+      }
+    }
+    if (upstreamGateFailures.length > 0) {
+      return {
+        kind: "error",
+        message: `🚫 无法推进到 "${nextInstance.instance_id}" — 上游阶段的准出门禁已不满足,必须先修复:\n` +
+          upstreamGateFailures.map((f) => `  ❌ ${f.instance}: ${f.message}`).join("\n") +
+          `\n\n修复上游产物/证据后重新 report 使门禁转绿,再执行 next。`,
+      };
+    }
   }
 
   state.current_stage = nextStage.slug;

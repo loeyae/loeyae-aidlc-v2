@@ -9,9 +9,10 @@ lead_agent: aidlc-product-agent
 support_agents: [aidlc-design-agent, aidlc-quality-agent, aidlc-developer-agent]
 mode: mob
 scopes: [feature, enterprise, mvp, classic]
-consumes: [docs/aidlc/modules/{module-id}/inception/requirements.md]
+consumes:
+  - docs/aidlc/modules/{module-id}/inception/requirements.md
 produces: [docs/aidlc/modules/{module-id}/inception/user-stories.md]
-sensors: []
+sensors: [story-traceability]
 requires: [requirements-analysis]
 ---
 # 用户故事 - 详细步骤
@@ -104,6 +105,31 @@ Scenario: [场景名，描述行为而非实现]
 4. 转化后**必须由产品确认**语义无偏差
 
 转化后的 Gherkin 场景即成为产品基线，后续步骤以此为准。
+
+### 追溯 ID 与覆盖要求（强制，story-traceability 门禁校验）
+
+每个用户故事和验收标准必须携带稳定 ID 并声明来源，使故事进入追溯链（ID 规范见 `knowledge/common-traceability-id-chain.md`）：
+
+- 每个故事标 `STORY-xxx`，并声明其覆盖的需求 `来源: REQ-xxx[, REQ-yyy]`；
+- 每个 Gherkin 验收标准标 `AC-xxx`，隶属某 STORY；
+- **正向覆盖**：`requirements.md` 的每个 `REQ-xxx` 必须被至少一个 STORY 的来源声明覆盖；未覆盖即门禁失败；
+- **澄清遵循**：`clarifications.md` 的每个 `CL-xxx` 若影响故事范围，相关 STORY 必须在来源或备注中引用该 CL；
+- **反向存在**：故事引用的每个 REQ/CL 必须真实存在于上游产物（无悬空引用）。
+
+格式示例：
+
+```markdown
+## STORY-001 作为管理员，我希望创建用户时有表单校验
+来源: REQ-003, REQ-004 · 澄清: CL-002
+
+### AC-001
+​```gherkin
+Scenario: 必填字段为空时提交被拒
+  Given 管理员在用户创建表单
+  When 未填写用户名直接提交
+  Then 表单显示"用户名必填"且不创建用户
+​```
+```
 
 ## 步骤 1：确定用户故事深度（强制）
 

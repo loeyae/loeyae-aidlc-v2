@@ -146,6 +146,7 @@ const VALID_SENSORS = new Set([
   "frontend-platform-spec", "framework-compliance", "subagent-evidence", "template-completeness",
   "recovery-evidence", "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
   "ui-artifact-consistency", "inception-consistency",
+  "clarification-traceability", "story-traceability", "traceability-matrix",
 ]);
 
 function executableForScope(stage: StageNode, scope: string): boolean {

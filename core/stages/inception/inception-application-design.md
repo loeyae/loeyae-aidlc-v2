@@ -19,7 +19,8 @@ produces:
   - docs/aidlc/modules/{module-id}/inception/application-design/application-services.md
   - docs/aidlc/modules/{module-id}/inception/application-design/component-dependency.md
   - .aidlc/evidence/application-design/{module-id}/diagram-contract.json
-sensors: [diagram-contract]
+  - .aidlc/evidence/application-design/{module-id}/traceability-matrix.json
+sensors: [diagram-contract, traceability-matrix]
 requires: [cross-validation]
 condition: has_application_design_needs
 approval: block

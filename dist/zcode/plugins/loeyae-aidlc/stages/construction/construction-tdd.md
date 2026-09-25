@@ -13,7 +13,8 @@ consumes: [src/]
 produces:
   - src/test/
   - .aidlc/evidence/tdd/{module-id}/{unit-id}/test-quality.json
-sensors: [test-quality]
+  - .aidlc/evidence/tdd/{module-id}/{unit-id}/traceability-matrix.json
+sensors: [test-quality, traceability-matrix]
 requires: [code-generation]
 ---
 

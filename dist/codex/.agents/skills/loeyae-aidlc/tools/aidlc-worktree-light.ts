@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
+import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
 import { loadWorkflowState } from "./aidlc-light-state";
 import { readSourceRevision } from "./aidlc-revision";
@@ -160,6 +161,6 @@ function main(): void {
   } else throw new Error("usage: loeyae-aidlc worktree <prepare|verify|merge-plan> [flags]");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { main(); } catch (error) { console.error(`Lightweight worktree blocked: ${error instanceof Error ? error.message : String(error)}`); process.exitCode = 2; }
 }

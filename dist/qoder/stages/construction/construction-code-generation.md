@@ -14,7 +14,8 @@ produces:
   - src/
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md
-sensors: [doc-cascade]
+  - .aidlc/evidence/code-generation/{module-id}/{unit-id}/traceability-matrix.json
+sensors: [doc-cascade, traceability-matrix]
 requires: [functional-design]
 scope_waived_requires: [functional-design]
 ---
@@ -54,6 +55,7 @@ scope_waived_requires: [functional-design]
 
 **在代码生成和审查的所有步骤中，严格遵循**：
 - 每一行代码改动必须能追溯到当前单元的需求
+- **追溯标记(强制,traceability-matrix 门禁校验)**：本单元实现的每个 `REQ-xxx` 必须在对应代码处留下可搜索的 `@ReqId REQ-xxx` 标记(注释即可),使追溯矩阵的 `code_refs` 层能确认该需求真的落到了代码。缺标记 → 矩阵 `BROKEN@code_refs` → 门禁阻断。前端页面同时保留 `PAGE-xxx` 标记(见 ui-design-alignment)。
 - 禁止在实现 A 功能时"顺手"重构 B 模块
 - 不"改进"相邻代码、注释或格式
 - 不重构没坏的东西

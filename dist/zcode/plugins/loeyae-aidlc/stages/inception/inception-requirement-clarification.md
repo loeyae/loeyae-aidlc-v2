@@ -9,10 +9,11 @@ lead_agent: aidlc-product-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic]
-consumes: []
-produces: []
-sensors: []
-completion_contract: instruction_only
+consumes:
+  - docs/aidlc/modules/{module-id}/inception/requirements.md
+produces: [docs/aidlc/modules/{module-id}/inception/clarifications.md]
+sensors: [clarification-traceability]
+completion_contract: gated
 requires: [requirements-analysis]
 ---
 # 需求澄清流程
@@ -117,6 +118,29 @@ Q3: [核心问题3]（依赖 Q2 答案）
 
 ### Q2: [问题]
 ...
+
+---
+
+## 强制产物：clarifications.md（追溯链入口）
+
+澄清完成后**必须**生成 `docs/aidlc/modules/{module-id}/inception/clarifications.md`，把每条已确认的澄清结论登记为稳定 `CL-xxx` ID，供下游 user-stories / application-design / cross-validation 对账遵循。这是澄清进入追溯链的唯一载体（ID 规范见 `knowledge/common-traceability-id-chain.md`）。
+
+模板：
+
+```markdown
+# 需求澄清结论
+
+## CL-001 <一句话澄清主题>
+- 问题：<澄清了什么歧义/缺口>
+- 结论：<用户确认的答案，实质内容，不少于一句>
+- 影响：<影响哪些 REQ/后续设计>（可选）
+
+## CL-002 <...>
+- 问题：...
+- 结论：...
+```
+
+若澄清后确认需求本无歧义、无需任何澄清结论，则文件必须显式写明一行 `无澄清项`（或 `no clarifications`），不得留空文件。`clarification-traceability` 门禁会校验:每个 CL-xxx 有实质结论内容;无 CL 时必须有显式"无澄清项"声明。
 
 ---
 

@@ -17,7 +17,8 @@ produces:
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/domain-entities.md
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/data-source-validation.md
   - .aidlc/evidence/functional-design/{module-id}/{unit-id}/functional-design-completeness.json
-sensors: [doc-cascade, functional-design-completeness]
+  - .aidlc/evidence/functional-design/{module-id}/{unit-id}/traceability-matrix.json
+sensors: [doc-cascade, functional-design-completeness, traceability-matrix]
 requires: [units-generation]
 condition: has_functional_design_needs
 ---

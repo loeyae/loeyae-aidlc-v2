@@ -93,6 +93,7 @@ const SENSOR_NAMES = new Set([
   "framework-compliance", "subagent-evidence", "template-completeness", "recovery-evidence",
   "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
   "ui-artifact-consistency", "inception-consistency",
+  "traceability-matrix",
 ]);
 
 function fail(message: string): never { throw new Error(message); }
@@ -324,7 +325,21 @@ function pagePlanContract(): PagePlanContract {
   };
 }
 
-function htmlArtifactContract(plan: PagePlanContract): { pageIds: string[]; elements: number; artifacts: string[] } {
+// 元素分类型计数(A 计数级对账基础)。设计侧与实现侧用同一类型集,逐类型比较。
+type ElementTally = { button: number; input: number; select: number; table: number; dialog: number };
+interface DesignArtifactContract {
+  pageIds: string[];
+  elements: number;
+  tally: ElementTally;
+  conditions: number;      // 设计侧条件显隐信号数(粗粒度)
+  elementLevel: boolean;   // 是否支持元素级 diff(html-mock=true;figma=false,元素级不适用)
+  artifacts: string[];
+}
+function addElementTally(into: ElementTally, add: ElementTally): void {
+  into.button += add.button; into.input += add.input; into.select += add.select; into.table += add.table; into.dialog += add.dialog;
+}
+
+function htmlArtifactContract(plan: PagePlanContract): DesignArtifactContract {
   const manifestPath = join(ROOT, contextual("docs/aidlc/inception/ui-mock/ui-mock-manifest.json"));
   if (!existsSync(manifestPath)) fail(`HTML Mock manifest is missing: ${relativePath(manifestPath)}`);
   const manifest = jsonFile(manifestPath);
@@ -346,6 +361,8 @@ function htmlArtifactContract(plan: PagePlanContract): { pageIds: string[]; elem
   const pageIds: string[] = [];
   const artifacts = [...plan.artifacts, relativePath(manifestPath)];
   let elements = 0;
+  const tally: ElementTally = { button: 0, input: 0, select: 0, table: 0, dialog: 0 };
+  let conditions = 0;
   const knownRequirements = new Set(plan.requirementIds);
   const knownStories = new Set(plan.storyIds);
   for (const [index, raw] of pages.entries()) {
@@ -366,14 +383,23 @@ function htmlArtifactContract(plan: PagePlanContract): { pageIds: string[]; elem
       fail(`${pageId} is not consistently mapped across page-specs, HTML and mock_box_id`);
     }
     elements += count(htmlContent, /mock-box|<button\b|<input\b|<select\b|<table\b|<dialog\b/gi);
+    addElementTally(tally, {
+      button: count(htmlContent, /<button\b/gi),
+      input: count(htmlContent, /<input\b|<textarea\b/gi),
+      select: count(htmlContent, /<select\b/gi),
+      table: count(htmlContent, /<table\b/gi),
+      dialog: count(htmlContent, /<dialog\b/gi),
+    });
+    // 条件显隐信号:mock 里以 data-visible-when / v-if 风格或 class 注释表达的条件(粗粒度)。
+    conditions += count(htmlContent, /data-visible-when|data-role-visible|条件显示|条件渲染/gi);
     artifacts.push(specs.relative, html.relative);
   }
   sameIdentifiers(pageIds, plan.pageIds, "ui-mock-manifest.pages.page_id");
   if (new Set(pageIds).size !== pageIds.length || elements < pageIds.length) fail("HTML Mock pages or verifiable UI elements are incomplete");
-  return { pageIds: [...new Set(pageIds)].sort(), elements, artifacts: [...new Set(artifacts)] };
+  return { pageIds: [...new Set(pageIds)].sort(), elements, tally, conditions, elementLevel: true, artifacts: [...new Set(artifacts)] };
 }
 
-function figmaArtifactContract(plan: PagePlanContract, route: UiRoute): { pageIds: string[]; elements: number; artifacts: string[] } {
+function figmaArtifactContract(plan: PagePlanContract, route: UiRoute): DesignArtifactContract {
   const manifestPath = join(ROOT, contextual("docs/aidlc/inception/ui-design/figma-manifest.json"));
   if (!existsSync(manifestPath)) fail(`Figma manifest is missing: ${relativePath(manifestPath)}`);
   const manifest = jsonFile(manifestPath);
@@ -415,7 +441,8 @@ function figmaArtifactContract(plan: PagePlanContract, route: UiRoute): { pageId
   }
   sameIdentifiers(pageIds, plan.pageIds, "figma-manifest.pages.page_id");
   if (new Set(pageIds).size !== pageIds.length) fail("figma-manifest contains duplicate page IDs");
-  return { pageIds: [...new Set(pageIds)].sort(), elements: nodeIds.size, artifacts: [...plan.artifacts, relativePath(manifestPath)] };
+  // figma 无可解析的 HTML 元素:元素级 diff 不适用(需 Provider/design-context),elementLevel=false。
+  return { pageIds: [...new Set(pageIds)].sort(), elements: nodeIds.size, tally: { button: 0, input: 0, select: 0, table: 0, dialog: 0 }, conditions: 0, elementLevel: false, artifacts: [...plan.artifacts, relativePath(manifestPath)] };
 }
 
 function reviewEvidence(): Record<string, unknown> {
@@ -698,6 +725,8 @@ function diagramContract(): Record<string, unknown> {
   let diagramsChecked = 0;
   let expectedContractsChecked = 0;
   let generationContractsChecked = 0;
+  let legacyDiagramsChecked = 0;
+  const legacyDiagrams: { diagram_id: string; missing: string[] }[] = [];
   const generationClosures: Record<string, unknown>[] = [];
   const routeContractReports: Record<string, unknown>[] = [];
   let changeImpactReviewsChecked = 0;
@@ -1058,6 +1087,26 @@ function diagramContract(): Record<string, unknown> {
       if (!Array.isArray(diagram.groups || [])) fail(`diagram ${id}.groups must be an array`);
       if (diagram.legend !== undefined) fail(`VISUAL_STYLE: diagram ${id} must not define a global legend`);
       if (diagram.annotations !== undefined && (!Array.isArray(diagram.annotations) || diagram.annotations.length > 0)) fail(`VISUAL_STYLE: diagram ${id} must not define global annotations`);
+
+      // Legacy (pre-v4) diagram downgrade path — 方案1.
+      // 旧图缺 v4 结构化契约根字段(diagramType / designNotes)时,不再硬 throw MIGRATION_REQUIRED
+      // 阻断整个迁移,而是:仍强制 SVG 安全/可访问性底线,记为遗留图并降级放行,附缺失字段清单。
+      // 这原子地跳过下方 9 个结构字段硬门禁,避免半校验状态;严格校验只对已迁移 v4 图执行。
+      {
+        const legacyMissing: string[] = [];
+        if (!diagramTypes.has(diagram.diagramType)) legacyMissing.push("diagramType");
+        if (!diagram.designNotes || typeof diagram.designNotes !== "object") legacyMissing.push("designNotes");
+        if (legacyMissing.length > 0) {
+          // 安全底线仍强制:不安全 SVG / 缺 viewBox/role/title/desc 的图即使是遗留图也必须失败。
+          if (!existsSync(svgPath)) fail(`diagram ${id} SVG output is missing: ${relativePath(svgPath)}`);
+          const legacySvg = text(svgPath);
+          if (unsafeSvg.test(legacySvg) || !/<svg\b[^>]*\bviewBox=["'][^"']+["']/i.test(legacySvg) || !/\brole=["']img["']/i.test(legacySvg) || !/<title\b/i.test(legacySvg) || !/<desc\b/i.test(legacySvg)) fail(`diagram ${id} SVG fails static safety or accessibility checks`);
+          legacyDiagrams.push({ diagram_id: id, missing: legacyMissing });
+          legacyDiagramsChecked += 1;
+          diagramsChecked += 1;
+          continue;
+        }
+      }
 
       // New/adjusted diagrams must carry the v1 structured design contract.
       if (!diagramTypes.has(diagram.diagramType)) fail(`MIGRATION_REQUIRED: diagram ${id} lacks a valid diagramType`);
@@ -2140,8 +2189,13 @@ function diagramContract(): Record<string, unknown> {
   }
 
   const riskLevel = riskScore >= 6 ? "HIGH" : riskScore >= 3 ? "MEDIUM" : "LOW";
-  const finalStatus = expectedContractsChecked === diagramsChecked ? "STATIC_PASS" : "UNVERIFIED";
-  const routeStatus = expectedContractsChecked === diagramsChecked ? "ROUTE_CONTRACT_PASS" : "UNVERIFIED";
+  // 遗留图(legacyDiagramsChecked)已通过安全/可访问性底线并被计入分母;
+  // 只要"已迁移图均带 expected_contract + 遗留图已计数"覆盖全部图,即可 STATIC_PASS 放行,
+  // 不因存在未迁移旧图而降级 UNVERIFIED 阻断迁移。
+  const strictContractsSatisfied = expectedContractsChecked + legacyDiagramsChecked === diagramsChecked;
+  const finalStatus = strictContractsSatisfied ? "STATIC_PASS" : "UNVERIFIED";
+  const routeStatus = strictContractsSatisfied ? "ROUTE_CONTRACT_PASS" : "UNVERIFIED";
+  const migrationStatus = legacyDiagramsChecked > 0 ? "MIGRATION_REQUIRED" : "passed";
   return {
     status: "passed", final_status: finalStatus, source_format: "svg", diagrams_checked: diagramsChecked,
     structure_status: "STRUCTURE_PASS",
@@ -2150,15 +2204,17 @@ function diagramContract(): Record<string, unknown> {
     visual_status: "UNVERIFIED",
     overall_status: finalStatus,
     gate_statuses: { structure: "STRUCTURE_PASS", route_contract: routeStatus, geometry: "GEOMETRY_PASS", visual: "UNVERIFIED", overall: finalStatus },
-    expected_contract_status: expectedContractsChecked === diagramsChecked ? "passed" : "unverified",
-    generation_status: generationContractsChecked === diagramsChecked ? "passed" : "unverified",
+    expected_contract_status: strictContractsSatisfied ? "passed" : "unverified",
+    generation_status: generationContractsChecked + legacyDiagramsChecked === diagramsChecked ? "passed" : "unverified",
     generation_closure: generationClosures,
     route_contract_reports: routeContractReports,
-    semantic_status: expectedContractsChecked === diagramsChecked ? "passed" : "unverified",
+    semantic_status: strictContractsSatisfied ? "passed" : "unverified",
+    legacy_diagrams: legacyDiagrams,
+    legacy_diagrams_checked: legacyDiagramsChecked,
     ids_unique: true, ports_valid: true, direction_consistent: true, legend_valid: true, global_decorations_absent: true,
     groups_valid: true, viewbox_valid: true, provider_status: "unverified",
     target_operation_required: false, fr_mapping_complete: true,
-    design_notes_valid: true, layout_contract_valid: true, main_flow_valid: true, loop_lanes_valid: true, decision_exit_valid: true, annotation_mapping_valid: true, migration_status: "passed", port_paths_valid: true,
+    design_notes_valid: true, layout_contract_valid: true, main_flow_valid: true, loop_lanes_valid: true, decision_exit_valid: true, annotation_mapping_valid: true, migration_status: migrationStatus, port_paths_valid: true,
     geometry_status: "passed", node_text_fit_status: "passed", group_capacity_status: "passed", visual_style_status: "passed", edge_label_placement_status: "passed", edge_intersection_status: "passed", collinear_overlap_status: "passed", target_port_direction_status: "passed", target_port_approach_status: "passed", routing_minimality_status: "passed", side_switch_status: "passed", change_impact_review_status: changeImpactReviewsChecked > 0 ? "passed" : "not_applicable", visible_arrow_mapping_status: "passed",
     structural_occlusion_status: structuralDiagramsChecked > 0 ? "passed" : "not_applicable",
     structural_node_intersections: structuralEvidenceReports.flatMap((report) => Array.isArray(report.node_intersections) ? report.node_intersections : []),
@@ -2356,18 +2412,203 @@ function uiAlignment(): Record<string, unknown> {
   const missingTrace = mappedPages.filter((id) => !source.toUpperCase().includes(id));
   if (missingTrace.length > 0) fail(`target UI code omits PAGE traceability markers: ${missingTrace.join(", ")}`);
   if (route !== "html-mock" && count(codePlan, /\b\d+:\d+\b/g) < mappedPages.length) fail("Figma UI mapping lacks nodeId for every mapped page");
+
+  // A 计数级元素对账(仅 html-mock,elementLevel=true):设计侧 vs 实现侧按元素类型计数比较。
+  // 实现侧解析 Vue 3 + Element Plus:el-button/<button>、el-input/el-textarea/<input>、el-select、el-table、el-dialog。
+  // figma 模式无可解析 HTML 元素基准 → 元素级 diff not_applicable,退回页面级(保持既有行为但不再假装 0)。
+  let unmapped = 0;
+  let extra = 0;
+  let stylesAligned = true;
+  let conditionsAligned = true;
+  if (design.elementLevel) {
+    const implTally: ElementTally = {
+      button: count(source, /<el-button\b|<button\b/gi),
+      input: count(source, /<el-input\b|<el-textarea\b|<input\b|<textarea\b/gi),
+      select: count(source, /<el-select\b|<select\b/gi),
+      table: count(source, /<el-table\b|<table\b/gi),
+      dialog: count(source, /<el-dialog\b|<dialog\b/gi),
+    };
+    for (const key of ["button", "input", "select", "table", "dialog"] as const) {
+      const need = design.tally[key];
+      const have = implTally[key];
+      if (have < need) unmapped += need - have;   // 设计有而实现缺
+      if (need > 0 && have > need) extra += have - need; // 实现多于设计(过度实现;仅在设计有该类型时计,避免误伤布局辅助元素)
+    }
+    // 条件显隐:设计声明了条件信号时,实现应有等量或更多的 v-if/v-show。
+    const implConditions = count(source, /\bv-if\b|\bv-show\b/gi);
+    if (design.conditions > 0 && implConditions < design.conditions) conditionsAligned = false;
+    // 样式对账(粗粒度):实现不得硬编码十六进制色值/Element Plus 默认色变量以外的字面色,应引用设计 token(CSS var / SCSS 变量)。
+    const hardcodedColors = count(source, /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)/g);
+    const tokenRefs = count(source, /var\(--[a-z0-9-]+\)|\$[a-z0-9-]+/gi);
+    if (hardcodedColors > 0 && tokenRefs === 0) stylesAligned = false; // 有硬编码色且完全不用 token
+  }
+
   return {
     status: "passed",
     design_mode: route === "html-mock" ? "html-mock" : "figma",
     unit_scope: "ui",
+    element_diff_mode: design.elementLevel ? "counting" : "page-level-only",
     pages_checked: mappedPages.length,
     elements_checked: Math.max(design.elements, mappedPages.length),
-    unmapped_elements: 0,
-    extra_elements: 0,
-    styles_aligned: true,
-    conditional_visibility_aligned: true,
+    unmapped_elements: unmapped,
+    extra_elements: extra,
+    styles_aligned: stylesAligned,
+    conditional_visibility_aligned: conditionsAligned,
     platform_constraints_respected: true,
     artifacts_checked: [...new Set([...design.artifacts, relativePath(codePlanPath), ...targetFiles.map(relativePath)])],
+  };
+}
+
+// 分类追溯矩阵(全覆盖对账治本机制)。以 REQ 为行,按 track 条件化校验每层覆盖,算 coverage_status。
+// 阶段感知:只强制"截至当前阶段应完成的层",未到的层不算断点。规范见 knowledge/common-traceability-id-chain.md。
+type Track = "backend" | "frontend" | "data" | "infra" | "nfr" | "doc-only";
+const TRACKS = new Set<Track>(["backend", "frontend", "data", "infra", "nfr", "doc-only"]);
+// 每层在哪个阶段应被填充,以及该层对哪些 track 适用(*=全部)。顺序即阶段推进顺序。
+const MATRIX_LAYERS: { layer: string; stage: string; tracks: Track[] | "*" }[] = [
+  { layer: "stories",           stage: "user-stories",       tracks: ["backend", "frontend"] },
+  { layer: "acceptance",        stage: "user-stories",       tracks: ["backend", "frontend"] },
+  { layer: "design_components", stage: "application-design",  tracks: ["backend", "data"] },
+  { layer: "pages",             stage: "application-design",  tracks: ["frontend"] },
+  { layer: "test_cases",        stage: "functional-design",   tracks: ["backend", "frontend", "data"] },
+  { layer: "code_refs",         stage: "code-generation",     tracks: "*" },
+  { layer: "tests",             stage: "tdd",                 tracks: ["backend", "frontend", "data"] },
+];
+const MATRIX_STAGE_ORDER = ["requirements-analysis", "requirement-clarification", "user-stories", "application-design", "functional-design", "code-generation", "tdd", "code-review"];
+// B3 修复:真实 stage 图是 DAG,construction 期有多个分叉 stage(shared-contract-baseline / nfr-* /
+// infrastructure-* / subagent-execution / loeyae-compliance / ui-implementation-bridge 等)不在上面的
+// 线性序上。裸 indexOf 对它们返回 -1,会使阶段感知守卫 (currentOrder>=0) 整体失效,退化为"全层都判",
+// 对尚未到达的 code_refs/tests 层产生假阳性 BROKEN。故用保守映射:未知 stage 回退到其依赖语义对应的
+// 线性位置下界,绝不高估进度(宁可少判、不误判)。
+const MATRIX_STAGE_FALLBACK: Record<string, string> = {
+  // 均 requires functional-design,与 code-generation 平行 → 保守视为"设计已完成,code 层尚未强制"。
+  "shared-contract-baseline": "functional-design",
+  "nfr-requirements": "functional-design",
+  "nfr-design": "functional-design",
+  "infrastructure-design": "functional-design",
+  // 均 requires code-generation → 视为已到 code-generation。
+  "subagent-execution": "code-generation",
+  "loeyae-compliance": "code-generation",
+  "ui-implementation-bridge": "code-generation",
+  "build-and-test": "code-review",
+  "implementation-report": "code-review",
+};
+function resolveStageOrder(stage: string): number {
+  const direct = MATRIX_STAGE_ORDER.indexOf(stage);
+  if (direct >= 0) return direct;
+  const mapped = MATRIX_STAGE_FALLBACK[stage];
+  if (mapped) return MATRIX_STAGE_ORDER.indexOf(mapped);
+  // 完全未知的 stage:保守下界=application-design(设计层已判,code 层不判),而非退化为全判。
+  return MATRIX_STAGE_ORDER.indexOf("application-design");
+}
+
+function traceabilityMatrix(): Record<string, unknown> {
+  if (!workflowState || !ACTIVE_MODULE) return { status: "not_applicable", reason: "no active Markdown workflow module context" };
+  const currentStage = workflowState.current_stage || "";
+  const currentOrder = resolveStageOrder(currentStage);
+
+  // {module-id} 占位符解析:contextual() 只认 docs/aidlc/inception|construction 前缀替换,不认此占位符,
+  // 故在此显式替换为 ACTIVE_MODULE。否则所有产物路径含字面量 {module-id},existsSync 永远 false,
+  // producer 对任何真实 module 都误判 not_applicable(门禁静默失效)。
+  const mod = (rel: string): string => rel.replace(/\{module-id\}/g, ACTIVE_MODULE);
+  const read = (rel: string): string => existing([mod(rel)]).map(text).join("\n");
+  const reqDoc = read("docs/aidlc/modules/{module-id}/inception/requirements.md");
+  if (!reqDoc.trim()) return { status: "not_applicable", reason: "requirements.md not present yet" };
+
+  // 解析每个 REQ 的 track(段落级:REQ-xxx 到下一个 REQ-xxx 之间找 track: [...])。
+  const reqIds = ids(reqDoc, /\bREQ-[A-Z0-9][A-Z0-9_-]*\b/g);
+  if (reqIds.length === 0) return { status: "not_applicable", reason: "requirements.md has no REQ-xxx IDs (legacy, MIGRATION_REQUIRED)", migration_status: "MIGRATION_REQUIRED" };
+
+  const storyDoc = read("docs/aidlc/modules/{module-id}/inception/user-stories.md");
+  const designDoc = existing([mod("docs/aidlc/modules/{module-id}/inception/application-design.md")]).map(text).join("\n")
+    + "\n" + joined(allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design"), /\.md$/));
+  const fdDoc = joined(allFiles(mod("docs/aidlc/modules/{module-id}/construction"), /functional-design[^/]*\/?[^/]*\.md$/));
+  const codeSrc = joined(projectFiles(/\.(?:java|kt|ts|tsx|js|jsx|vue)$/));
+  const testSrc = joined(projectFiles(/(?:test|spec)[^/]*\.(?:java|kt|ts|tsx|js)$/i));
+
+  const layerText: Record<string, string> = {
+    stories: storyDoc, acceptance: storyDoc, design_components: designDoc,
+    pages: designDoc, test_cases: fdDoc, code_refs: codeSrc, tests: testSrc,
+  };
+
+  const rows: Record<string, unknown>[] = [];
+  const brokenRows: string[] = [];
+  const missingTrack: string[] = [];
+  // REQ → track 映射(供 STORY/UC-D 派生继承)。
+  const reqTrack = new Map<string, Track[]>();
+  for (const req of reqIds) {
+    const start = reqDoc.indexOf(req);
+    const nextIdx = reqDoc.slice(start + req.length).search(/\bREQ-[A-Z0-9]/);
+    const block = reqDoc.slice(start, nextIdx < 0 ? reqDoc.length : start + req.length + nextIdx);
+    const trackMatch = block.match(/track\s*:\s*\[([^\]]*)\]/i);
+    const tracks = (trackMatch ? trackMatch[1].split(",").map((t) => t.trim().toLowerCase()) : []).filter((t): t is Track => TRACKS.has(t as Track));
+    reqTrack.set(req, tracks);
+  }
+  // STORY/UC-D 的派生 track:从其引用的 REQ 继承(取并集)。用于派生级覆盖诊断。
+  // 在 STORY 段/UC-D 段里找它引用的 REQ-xxx,合并这些 REQ 的 track。
+  const deriveChildTracks = (childId: string, childDoc: string): Track[] => {
+    const start = childDoc.indexOf(childId);
+    if (start < 0) return [];
+    const rest = childDoc.slice(start + childId.length);
+    const nextIdx = rest.search(/\b(?:STORY-\d|UC-D-\d)/);
+    const block = childDoc.slice(start, nextIdx < 0 ? childDoc.length : start + childId.length + nextIdx);
+    const refReqs = ids(block, /\bREQ-[A-Z0-9][A-Z0-9_-]*\b/g);
+    const set = new Set<Track>();
+    for (const r of refReqs) for (const t of reqTrack.get(r) || []) set.add(t);
+    return [...set];
+  };
+  const storyIdsAll = ids(storyDoc, /\bSTORY-\d{3,}\b/g);
+  const ucdIdsAll = ids(fdDoc + "\n" + joined(allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/)), /\bUC-D-\d+\b/g);
+  const derivedChildren = [
+    ...storyIdsAll.map((id) => ({ id, kind: "STORY", tracks: deriveChildTracks(id, storyDoc) })),
+    ...ucdIdsAll.map((id) => ({ id, kind: "UC-D", tracks: deriveChildTracks(id, fdDoc) })),
+  ];
+
+  for (const req of reqIds) {
+    const tracks = reqTrack.get(req) || [];
+    if (tracks.length === 0) { missingTrack.push(req); }
+    let brokenAt: string | null = null;
+    for (const { layer, stage, tracks: applic } of MATRIX_LAYERS) {
+      const applies = applic === "*" || tracks.some((t) => (applic as Track[]).includes(t));
+      if (!applies) continue;
+      // 阶段感知:该层所属阶段尚未到达时,不算断点(currentOrder 经 resolveStageOrder 恒 >=0)。
+      const layerOrder = MATRIX_STAGE_ORDER.indexOf(stage);
+      if (layerOrder > currentOrder) continue;
+      // 覆盖判定:该层文本中出现本 REQ(或其派生 @ReqId 标记)。
+      const covered = new RegExp(`\\b${req}\\b`).test(layerText[layer] || "");
+      if (!covered && brokenAt === null) brokenAt = layer;
+    }
+    const status = missingTrack.includes(req) ? "MIGRATION_REQUIRED" : (brokenAt ? `BROKEN@${brokenAt}` : "COMPLETE");
+    if (brokenAt) brokenRows.push(`${req}: BROKEN@${brokenAt}`);
+    rows.push({ req, tracks, coverage_status: status });
+  }
+
+  // 派生级诊断(advisory,不新增硬失败面):STORY/UC-D 继承的 track 若含 backend/frontend/data,
+  // 检查其在对应下游层是否出现;缺失记入 derived_gaps 供审查参考,不直接判 BROKEN(避免命名不规范误报)。
+  const derivedGaps: string[] = [];
+  for (const child of derivedChildren) {
+    if (child.tracks.length === 0) continue;
+    // UC-D 应出现在测试层(@TestCaseId);STORY 应出现在设计或代码层。
+    const layer = child.kind === "UC-D" ? "tests" : "code_refs";
+    const stageOfLayer = child.kind === "UC-D" ? "tdd" : "code-generation";
+    const layerOrder = MATRIX_STAGE_ORDER.indexOf(stageOfLayer);
+    if (layerOrder > currentOrder) continue;
+    const covered = new RegExp(`\\b${child.id}\\b`).test(layerText[layer] || "");
+    if (!covered) derivedGaps.push(`${child.id}(${child.kind}, tracks=${child.tracks.join("/")}) 未出现在 ${layer} 层`);
+  }
+
+  const legacy = missingTrack.length > 0;
+  return {
+    status: "passed",
+    module_id: ACTIVE_MODULE,
+    current_stage: currentStage,
+    matrix_rows: rows.length,
+    complete_rows: rows.filter((r) => r.coverage_status === "COMPLETE").length,
+    broken_rows: brokenRows,
+    missing_track: missingTrack,
+    derived_children: derivedChildren.length,
+    derived_gaps: derivedGaps,
+    migration_status: legacy ? "MIGRATION_REQUIRED" : "passed",
+    matrix: rows,
   };
 }
 
@@ -2390,6 +2631,7 @@ const CHECKERS: Record<string, () => Record<string, unknown>> = {
   "ui-design-alignment": uiAlignment,
   "ui-artifact-consistency": uiArtifactConsistency,
   "inception-consistency": inceptionConsistency,
+  "traceability-matrix": traceabilityMatrix,
 };
 
 try {

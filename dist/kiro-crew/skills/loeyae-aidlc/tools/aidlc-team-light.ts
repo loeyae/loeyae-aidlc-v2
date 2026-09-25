@@ -8,6 +8,8 @@ import {
   type TeamLightUnitSelection,
   type WorkflowState,
 } from "./aidlc-light-state";
+import { resolve } from "path";
+import { fileURLToPath } from "url";
 
 const CLAIM_TTL_MS = 30 * 60 * 1000;
 
@@ -240,6 +242,6 @@ function main(): void {
   throw new Error("usage: loeyae-aidlc unit <list|select> [flags] or module <list|select|claim|heartbeat|migrate> [flags]");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { main(); } catch (error) { console.error(`Team-light command blocked: ${error instanceof Error ? error.message : String(error)}`); process.exitCode = 2; }
 }
