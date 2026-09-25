@@ -2266,7 +2266,7 @@ async function handleNext(args: string[]): Promise<Directive> {
       } as unknown as Directive;
     }
     const selectedOptionalStages = withPrd ? ["prd-generation"] : [];
-    state = createInitialState(scopeFlag, "4.2.0", undefined, selectedOptionalStages, workDescription);
+    state = createInitialState(scopeFlag, "4.2.1", undefined, selectedOptionalStages, workDescription);
     saveState(state);
     return {
       kind: "print",

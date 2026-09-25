@@ -238,9 +238,12 @@ function qoderDesktopKnownPaths(): string[] {
     ...programFilesRoots.flatMap((root) =>
       executablePaths.map((relativePath) => resolve(root, relativePath))),
     ...(configuredMcpPath ? [resolve(configuredMcpPath)] : []),
-    ...(userProfile
-      ? [resolve(userProfile, ".qoder-cn/mcp.json"), resolve(userProfile, ".qoder-cn")]
-      : []),
+    // Only ~/.qoder-cn/mcp.json is a genuine Qoder CN signal (written by the host on Windows,
+    // never produced by our installer). The bare ~/.qoder-cn directory is deliberately NOT used
+    // as evidence: it is our OWN Skill install root (QODER_CN_USER_SKILL_ROOT = ~/.qoder-cn/skills/...),
+    // so treating it as "Qoder present" created a self-perpetuating false positive that installed
+    // the qoder harness on machines with no Qoder app or qcode CLI at all.
+    ...(userProfile ? [resolve(userProfile, ".qoder-cn/mcp.json")] : []),
   ];
 }
 

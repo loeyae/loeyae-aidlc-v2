@@ -403,11 +403,11 @@ export function codeBuddyKnownCliPaths(
   const home = env.HOME || env.USERPROFILE || "~";
   const applicationRoots = unique([
     env.AIDLC_APPLICATIONS_ROOT?.trim() || "/Applications",
-    path.resolve(home, "Applications"),
+    path.posix.resolve(home, "Applications"),
   ]);
   return applicationRoots.flatMap((root) => [
-    path.resolve(root, "WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy"),
-    path.resolve(root, "CodeBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy"),
+    path.posix.resolve(root, "WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy"),
+    path.posix.resolve(root, "CodeBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy"),
   ]);
 }
 
