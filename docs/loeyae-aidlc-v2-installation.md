@@ -16,6 +16,28 @@ loeyae-aidlc install --harness claude
 loeyae-aidlc install --all
 ```
 
+## 更新（升级到新版本）
+
+升级到新版本时，按以下四步顺序执行（先清理旧安装，再装新版）：
+
+```bash
+# 1. 卸载已部署到各 harness 的资产
+loeyae-aidlc uninstall --all
+
+# 2. 从 npm 全局卸载旧的 CLI 包
+npm uninstall -g loeyae-aidlc
+
+# 3. 从 npm 全局安装新版本 CLI 包
+npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
+
+# 4. 重新部署到所有检测到的 harness
+loeyae-aidlc install --all
+```
+
+> 说明：`loeyae-aidlc uninstall --all` / `install --all` 的 `--all` 是 CLI 选项（对所有 harness 生效）；`npm uninstall -g` / `npm install -g` 的 `-g` 是 npm 的全局选项。两者不要混用。
+>
+> 完成后需重启受影响的 harness（如 Kiro Crew / Kiro IDE）以加载新版本。
+
 安装后从明确工作描述开始：
 
 ```bash
