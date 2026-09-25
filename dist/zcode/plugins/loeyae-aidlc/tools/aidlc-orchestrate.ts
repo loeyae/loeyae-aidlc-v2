@@ -1377,6 +1377,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           const sections = asStringArray(evidence.required_sections);
           if (!sections || sections.length < 6) errors.push("required_sections must list at least 6 PRD sections");
           if (asPositiveInt(evidence.functional_requirements) === null || (evidence.functional_requirements as number) < 1) errors.push("functional_requirements must be >= 1");
+          // B3:这 4 项从"硬编码 true"升为确定性判定(required_sections 已保证节存在,这里查节内容充实)。
           if (evidence.acceptance_criteria_complete !== true) errors.push("acceptance_criteria_complete must be true");
           if (evidence.non_goals_complete !== true) errors.push("non_goals_complete must be true");
           if (evidence.pending_questions_indexed !== true) errors.push("pending_questions_indexed must be true");

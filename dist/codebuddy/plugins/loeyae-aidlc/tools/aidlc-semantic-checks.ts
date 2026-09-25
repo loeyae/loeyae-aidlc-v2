@@ -702,7 +702,21 @@ function prdCompleteness(): Record<string, unknown> {
   if (requirements.length < 1 || !/验收|acceptance|acceptance criteria/i.test(content)) fail("PRD lacks functional requirements or acceptance criteria");
   if (!/clarification|澄清|一致性|consistency|通过|passed/i.test(content)) fail("PRD clarification consistency evidence is missing");
   const flow = projectFiles(/business-flows?\.md$/i).length > 0 ? "passed" : "not_applicable";
-  return { status: "passed", prd_path: relativePath(path), required_sections: required.map(([name]) => name), functional_requirements: requirements.length, acceptance_criteria_complete: true, non_goals_complete: true, pending_questions: pending.pendingQuestions, pending_questions_indexed: true, source_index_complete: true, clarification_consistency: "passed", business_flow_validation: flow, unresolved_blockers: 0 };
+  // B3:以下 4 项从 S 级(硬编码 true)升为结构确定性(从 PRD 文本算出,Agent 改证据无法伪造通过)。
+  // required_sections 已硬保证这 6 节存在;B3 进一步查"节内是否有实际内容"——结构齐全但内容空即真缺陷,拦。
+  // acceptance_criteria_complete:验收相关条目数应 ≥ FR 数(每个 FR 至少一条验收标准的结构下界)。
+  const acceptanceLines = (content.match(/(?:验收标准|acceptance criteria|验收[:：])/gi) || []).length
+    + (content.match(/^\s*[-*]\s+.*(?:验收|acceptance)/gim) || []).length;
+  const acceptanceCriteriaComplete = requirements.length > 0 && acceptanceLines >= requirements.length;
+  // non_goals_complete:非目标章节存在且有实际条目(标题后至少一个列表项),非仅空标题。
+  const nonGoalsMatch = content.match(/(?:非目标|non[- ]?goals?)[^\n]*\n([\s\S]{0,600}?)(?:\n#{1,3}\s|\n---|\Z)/i);
+  const nonGoalsComplete = Boolean(nonGoalsMatch && /[-*]\s+\S|\d+[.)]\s+\S/.test(nonGoalsMatch[1]));
+  // source_index_complete:来源章节存在且有实际条目。
+  const sourceMatch = content.match(/(?:来源|source index|sources?)[^\n]*\n([\s\S]{0,600}?)(?:\n#{1,3}\s|\n---|\Z)/i);
+  const sourceIndexComplete = Boolean(sourceMatch && /[-*]\s+\S|\d+[.)]\s+\S|\|/.test(sourceMatch[1]));
+  // pending_questions_indexed:待确认项要么为 0,要么全部登记进问题索引。
+  const pendingQuestionsIndexed = pending.pendingQuestions === 0 || /问题索引|questions? index|待确认[^\n]*索引/i.test(content);
+  return { status: "passed", prd_path: relativePath(path), required_sections: required.map(([name]) => name), functional_requirements: requirements.length, acceptance_criteria_complete: acceptanceCriteriaComplete, non_goals_complete: nonGoalsComplete, pending_questions: pending.pendingQuestions, pending_questions_indexed: pendingQuestionsIndexed, source_index_complete: sourceIndexComplete, clarification_consistency: "passed", business_flow_validation: flow, unresolved_blockers: 0 };
 }
 
 function diagramContract(): Record<string, unknown> {
@@ -2491,6 +2505,9 @@ const MATRIX_STAGE_FALLBACK: Record<string, string> = {
   "ui-implementation-bridge": "code-generation",
   "build-and-test": "code-review",
   "implementation-report": "code-review",
+  // test-case-derivation 产出 UC-D(test_cases 层的上游权威)。映射到 functional-design 位置,
+  // 使 test_cases 层在 UC-D 产出当阶段即被判(缺口1修复);layerText.test_cases 在该阶段读 UC-D 目录本身。
+  "test-case-derivation": "functional-design",
 };
 function resolveStageOrder(stage: string): number {
   const direct = MATRIX_STAGE_ORDER.indexOf(stage);
@@ -2522,13 +2539,28 @@ function traceabilityMatrix(): Record<string, unknown> {
   const designDoc = existing([mod("docs/aidlc/modules/{module-id}/inception/application-design.md")]).map(text).join("\n")
     + "\n" + joined(allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design"), /\.md$/));
   const fdDoc = joined(allFiles(mod("docs/aidlc/modules/{module-id}/construction"), /functional-design[^/]*\/?[^/]*\.md$/));
+  // UC-D 目录(test-case-derivation 产物)。test_cases 层来源 = 功能设计 + UC-D 目录,使该层在
+  // UC-D 产出阶段(功能设计尚未产出)也能正确判"REQ 是否被 UC-D 覆盖"(缺口1)。
+  const ucdDoc = joined(allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/));
   const codeSrc = joined(projectFiles(/\.(?:java|kt|ts|tsx|js|jsx|vue)$/));
   const testSrc = joined(projectFiles(/(?:test|spec)[^/]*\.(?:java|kt|ts|tsx|js)$/i));
 
   const layerText: Record<string, string> = {
     stories: storyDoc, acceptance: storyDoc, design_components: designDoc,
-    pages: designDoc, test_cases: fdDoc, code_refs: codeSrc, tests: testSrc,
+    pages: designDoc, test_cases: fdDoc + "\n" + ucdDoc, code_refs: codeSrc, tests: testSrc,
   };
+
+  // C2 累积对账(从 PRD/澄清起,囊括全部前序产物)。PRD 与 clarifications 均为条件产物:
+  // 缺失时该层 not_applicable、不阻断(避免误伤未跑 PRD/无澄清的项目)。存在时做覆盖对账。
+  // PRD(docs/aidlc/ideation/prd.md,产品级非 module 目录)→ REQ:每个 FR-xxx 是否被某 REQ 段承接。
+  const prdDoc = existing(["docs/aidlc/ideation/prd.md"]).map(text).join("\n");
+  const frIds = prdDoc.trim() ? ids(prdDoc, /\bFR-\d{2,}\b/g) : [];
+  const uncoveredFr = frIds.filter((fr) => !new RegExp(`\\b${fr}\\b`).test(reqDoc));
+  // 澄清(clarifications.md,module 级)→ 下游:每个 CL-xxx 是否被 story/design 引用遵循。
+  const clDoc = read("docs/aidlc/modules/{module-id}/inception/clarifications.md");
+  const clIds = clDoc.trim() ? ids(clDoc, /\bCL-\d{2,}\b/g) : [];
+  const downstreamForCl = storyDoc + "\n" + designDoc + "\n" + fdDoc;
+  const uncoveredCl = clIds.filter((cl) => !new RegExp(`\\b${cl}\\b`).test(downstreamForCl));
 
   const rows: Record<string, unknown>[] = [];
   const brokenRows: string[] = [];
@@ -2596,15 +2628,46 @@ function traceabilityMatrix(): Record<string, unknown> {
     if (!covered) derivedGaps.push(`${child.id}(${child.kind}, tracks=${child.tracks.join("/")}) 未出现在 ${layer} 层`);
   }
 
+  // AC advisory(验收标准可见性,不阻断):每个 STORY 段内是否出现隶属它的 AC-xxx。
+  // 缺失记入 derived_gaps 供审查(存量故事常无 AC),不硬拦——AC 硬约束由故事模板要求新故事标注。
+  for (const sid of storyIdsAll) {
+    const start = storyDoc.indexOf(sid);
+    if (start < 0) continue;
+    const rest = storyDoc.slice(start + sid.length);
+    const nextIdx = rest.search(/\bSTORY-\d/);
+    const block = storyDoc.slice(start, nextIdx < 0 ? storyDoc.length : start + sid.length + nextIdx);
+    if (!/\bAC-\d{2,}\b/.test(block)) derivedGaps.push(`${sid}(STORY) 未标注隶属的 AC-xxx 验收标准 ID`);
+  }
+
   const legacy = missingTrack.length > 0;
+  // C2:PRD 的 FR 未被任何 REQ 承接、澄清 CL 未被下游遵循,都是累积覆盖漏洞(真实 drift)。
+  // 仅在对应产物存在时生效(frIds/clIds 为空即该层 not_applicable)。
+  // 存量兼容:module 未迁移(legacy=有 REQ 缺 track)时,FR/CL 缺口降级为 advisory 不进 broken_rows
+  // (旧规范未建 FR→REQ 显式链,不硬拦);仅已迁移 module 的累积缺口才计入硬门禁 broken_rows。
+  const cumulativeBroken = [
+    ...uncoveredFr.map((fr) => `${fr}: UNCOVERED_FR@requirements(PRD 的 FR 未被任何 REQ 承接)`),
+    ...uncoveredCl.map((cl) => `${cl}: UNCOVERED_CL@downstream(澄清结论未被 story/design 遵循)`),
+  ];
+  const allBroken = legacy ? [...brokenRows] : [...brokenRows, ...cumulativeBroken];
+  const cumulativeStatus = frIds.length === 0 && clIds.length === 0
+    ? "not_applicable(无 PRD/澄清产物)"
+    : legacy
+      ? (cumulativeBroken.length === 0 ? "passed" : "MIGRATION_REQUIRED(存量未迁移,累积缺口降级放行)")
+      : (cumulativeBroken.length === 0 ? "passed" : "BROKEN");
   return {
     status: "passed",
     module_id: ACTIVE_MODULE,
     current_stage: currentStage,
     matrix_rows: rows.length,
     complete_rows: rows.filter((r) => r.coverage_status === "COMPLETE").length,
-    broken_rows: brokenRows,
+    broken_rows: allBroken,
     missing_track: missingTrack,
+    // C2 累积对账(从 PRD/澄清起):存在即对账,缺失即 not_applicable,存量未迁移则降级。
+    prd_fr_total: frIds.length,
+    uncovered_fr: uncoveredFr,
+    clarification_cl_total: clIds.length,
+    uncovered_cl: uncoveredCl,
+    cumulative_status: cumulativeStatus,
     derived_children: derivedChildren.length,
     derived_gaps: derivedGaps,
     migration_status: legacy ? "MIGRATION_REQUIRED" : "passed",

@@ -12,8 +12,10 @@ scopes: [feature, enterprise, mvp, classic]
 requires: [workspace-detection]
 consumes:
   - docs/aidlc/ideation/scenario-module-mapping.md
-produces: [docs/aidlc/modules/{module-id}/inception/requirements.md]
-sensors: [traceability]
+produces:
+  - docs/aidlc/modules/{module-id}/inception/requirements.md
+  - .aidlc/evidence/requirements-analysis/{module-id}/traceability-matrix.json
+sensors: [traceability, traceability-matrix]
 ---
 # 需求分析（自适应）
 

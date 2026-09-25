@@ -13,8 +13,10 @@ requires: [application-design]
 consumes:
   - docs/aidlc/modules/{module-id}/inception/application-design.md
   - docs/aidlc/modules/{module-id}/inception/user-stories.md
-produces: [docs/aidlc/modules/{module-id}/inception/application-design/test-cases/]
-sensors: []
+produces:
+  - docs/aidlc/modules/{module-id}/inception/application-design/test-cases/
+  - .aidlc/evidence/test-case-derivation/{module-id}/traceability-matrix.json
+sensors: [traceability-matrix]
 condition: has_test_case_sources
 approval: notify
 ---

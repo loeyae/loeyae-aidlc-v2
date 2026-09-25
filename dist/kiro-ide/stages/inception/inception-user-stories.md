@@ -11,8 +11,10 @@ mode: mob
 scopes: [feature, enterprise, mvp, classic]
 consumes:
   - docs/aidlc/modules/{module-id}/inception/requirements.md
-produces: [docs/aidlc/modules/{module-id}/inception/user-stories.md]
-sensors: [story-traceability]
+produces:
+  - docs/aidlc/modules/{module-id}/inception/user-stories.md
+  - .aidlc/evidence/user-stories/{module-id}/traceability-matrix.json
+sensors: [story-traceability, traceability-matrix]
 requires: [requirements-analysis]
 ---
 # 用户故事 - 详细步骤
