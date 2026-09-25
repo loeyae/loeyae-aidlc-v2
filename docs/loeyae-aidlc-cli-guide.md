@@ -88,9 +88,16 @@ loeyae-aidlc worktree merge-plan \
   --member <name> \
   --path <absolute-worktree-path> \
   --review-evidence <worktree-relative-review-json>
+
+# verify 与 merge-plan 同一实现、同一批 flag：只验证不输出建议 merge 命令之外的额外动作
+loeyae-aidlc worktree verify \
+  --instance <stage-instance> \
+  --member <name> \
+  --path <absolute-worktree-path> \
+  --review-evidence <worktree-relative-review-json>
 ```
 
-`prepare` 创建成员选择 unit 对应的 branch/worktree，并写入 Markdown metadata。`merge-plan` 验证已提交变更、review 的 `files_reviewed` 覆盖、branch/base 一致性，并输出建议 merge 命令。
+`prepare` 创建成员选择 unit 对应的 branch/worktree，并写入 Markdown metadata。`verify` / `merge-plan` 验证已提交变更、review 的 `files_reviewed` 覆盖、branch/base 一致性，并输出建议 merge 命令（`authorized: false`）。
 
 不会自动 merge、push、删除 worktree、修改工作流完成状态或代替仓库权限持有者执行操作。
 
@@ -106,6 +113,27 @@ loeyae-aidlc attest resolve --base origin/main --head HEAD
 ```
 
 `evidence run --stage <stage> --all-sensors` 会读取编译后的 `stage-graph.json`，按阶段声明顺序依次运行 semantic checker；省略 `--sensor` 时，非 `build-and-test` 阶段也采用同一行为。`build-and-test` 仍使用既有 build/test/check allowlist。`orchestrate report` 发现缺失 semantic Evidence 时会自动触发该受控产出器，失败仍由 report 门禁阻断。
+
+### Evidence 是 producer 生成的，Agent 不能手写
+
+每个 semantic sensor 的 Evidence 都由 **确定性 producer** 扫描真实产物机械生成，写到 canonical `evidence_path`（`.aidlc/evidence/<stage>/[<module>/[<unit>/]]<sensor>.json`）。以追溯矩阵为例（sensor `traceability-matrix`）：producer 扫描 `requirements.md` 的 `REQ-xxx` 及其 `track:[backend/frontend/data/infra/nfr/doc-only]` 标签，再按阶段到 `user-stories.md`、`application-design`、功能设计、UC-D、代码源文件、测试里逐层比对该 REQ / `@ReqId` 是否出现，算出 `broken_rows`。给同样的产物永远输出同样的矩阵——这是它能当客观证据的前提。
+
+**Agent 手写证据 = 伪造证据。** 受控证据带防伪印章：`producer.name=loeyae-aidlc-evidence`、`producer.mode=controlled`、`checker.argv_digest`（SHA-256）、`source_revision.worktree_digest`（与当前 git HEAD/worktree 绑定）。手写 JSON 缺印章或印章对不上当前提交，`report` / `next` 会当场拒绝。若看到引擎提示“checkSensors 与 traceability-matrix.json：须由引擎受控 producer 生成，Agent 手写即伪造证据”，那是正常的边界提示，不是需要人工补写矩阵的错误。
+
+### checkSensors 何时触发
+
+`checkSensors`（引擎内的门禁裁判）不需你手动调用，在两个时机自动运行：
+
+1. `orchestrate report --result completed` 时，先自动为缺失的 semantic sensor 跑 producer（等价 `evidence run --all-sensors`），再校验证据；任一 sensor 不绿则拒绝完成。
+2. `orchestrate next` 推进下一步时，复验上游已完成阶段的门禁是否**仍然**满足，防止上游产物事后被改坏。
+
+### 门禁失败处置
+
+- **证据缺失 / provenance 不匹配** → 重新 `orchestrate report`（或显式 `evidence run --stage <stage> --all-sensors`）让 producer 重新生成。**不要手写证据 JSON。**
+- **追溯矩阵断链 `REQ-xxx: BROKEN@<layer>`** → 该需求在某层真的丢了（如活到故事层却在设计层断）。去补那一层产物：让对应文档/代码里出现该 REQ 标记，再 `report`。矩阵只保证结构覆盖（无需求悄悄消失），内容是否忠实仍需 review / 测试。
+- **未迁移旧项目**（`requirements.md` 无 `REQ-xxx` 或缺 `track` 标签）→ 记 `MIGRATION_REQUIRED`，降级放行并输出 `missing_track` 清单，不硬阻断。
+
+证据文件默认 24 小时过期；跨天续作时上游纯过期不算回归，`next` 会放行。
 
 `diagram-contract` 的 source-only 结果在 source checker、独立 expected contract、generator closure 和几何门禁均通过时可以写成 `final_status: "STATIC_PASS"`，并足以通过不要求目标渲染的 report 门禁；只有 stage/Provider Request 将 `target_operation_required` 设为 `true`（`preview` 或 `render`）时，才必须执行 Provider 的 normal/fit/zoom 证据并达到 `PASS`。Provider 不可用只能保持 `UNVERIFIED`/`NEEDS_CAPABILITY`，不能伪造截图或视觉证据。
 
