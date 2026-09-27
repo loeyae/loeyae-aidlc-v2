@@ -38,11 +38,26 @@ export interface TeamLightActiveInstance {
   expires_at: string;
 }
 
+export const ENGINE_VERSION = "4.3.0";
+
+export type WorkflowKind = "global" | "module" | "integration";
+
+export type WorkflowRef = { kind: "global" } | { kind: "module"; module_id: string } | { kind: "integration" };
+
+export const GLOBAL_WORKFLOW: WorkflowRef = { kind: "global" };
+
+export function workflowRefKey(ref: WorkflowRef): string {
+  return ref.kind === "module" ? `module:${ref.module_id}` : ref.kind;
+}
+
 export interface WorkflowState {
   format: "markdown-workflow";
   version: string;
   workflow_id: string;
   work_description: string;
+  workflow_kind?: WorkflowKind;
+  module_id?: string;
+  parent_workflow_id?: string;
   revision: number;
   scope: string;
   depth: string;
@@ -138,6 +153,18 @@ function parseHistory(markdown: string): HistoryEntry[] {
   });
 }
 
+export function markdownScalar(markdown: string, label: string, required = true): string {
+  return scalar(markdown, label, required);
+}
+
+export function markdownTable(markdown: string, title: string): string[][] {
+  return table(markdown, title);
+}
+
+export function markdownCell(value: string | undefined): string {
+  return value ? clean(value) : "-";
+}
+
 function parseSelections(markdown: string): Record<string, TeamLightUnitSelection> {
   const result: Record<string, TeamLightUnitSelection> = {};
   for (const [index, cells] of table(markdown, "Unit Selections").entries()) {
@@ -192,15 +219,24 @@ function parseActiveInstances(markdown: string): Record<string, TeamLightActiveI
 }
 
 
-export function lightStatePath(projectRoot: string): string {
-  return resolve(projectRoot, "aidlc", "active", "aidlc-state.md");
+export function workflowDirectory(projectRoot: string, ref: WorkflowRef = GLOBAL_WORKFLOW): string {
+  const active = resolve(projectRoot, "aidlc", "active");
+  if (ref.kind === "module") {
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,62})$/.test(ref.module_id)) throw new Error(`invalid module workflow id: ${ref.module_id}`);
+    return resolve(active, "modules", ref.module_id);
+  }
+  return ref.kind === "integration" ? resolve(active, "integration") : active;
 }
 
-export function lightAuditPath(projectRoot: string): string {
-  return resolve(projectRoot, "aidlc", "active", "audit.md");
+export function lightStatePath(projectRoot: string, ref: WorkflowRef = GLOBAL_WORKFLOW): string {
+  return resolve(workflowDirectory(projectRoot, ref), "aidlc-state.md");
 }
 
-export function createInitialState(scope: string, version = "4.2.1", workflowId = randomUUID(), selectedOptionalStages: string[] = [], workDescription = ""): WorkflowState {
+export function lightAuditPath(projectRoot: string, ref: WorkflowRef = GLOBAL_WORKFLOW): string {
+  return resolve(workflowDirectory(projectRoot, ref), "audit.md");
+}
+
+export function createInitialState(scope: string, version = ENGINE_VERSION, workflowId = randomUUID(), selectedOptionalStages: string[] = [], workDescription = ""): WorkflowState {
   if (!SCOPES.has(scope)) throw new Error(`invalid workflow scope: ${scope}`);
   if (selectedOptionalStages.some((stage) => stage !== "prd-generation") || (selectedOptionalStages.length > 0 && !PRD_SCOPES.has(scope))) {
     throw new Error("invalid selected optional stage for scope");
@@ -245,11 +281,19 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
   const currentUnit = scalar(markdown, "Current Unit", false);
   const optional = list(markdown, "Selected Optional Stages");
   if (optional.some((stage) => stage !== "prd-generation")) throw new Error("unsupported selected optional stage");
+  const kind = scalar(markdown, "Workflow Kind", false);
+  if (kind && !(["global", "module", "integration"] as string[]).includes(kind)) throw new Error(`invalid workflow kind: ${kind}`);
+  const workflowModule = scalar(markdown, "Module", false);
+  if (kind === "module" && !workflowModule) throw new Error("module workflow state is missing Module");
+  const parentWorkflow = scalar(markdown, "Parent Workflow ID", false);
   return {
     format: "markdown-workflow",
     version: scalar(markdown, "Engine Version"),
     workflow_id: scalar(markdown, "Workflow ID"),
     work_description: scalar(markdown, "Work"),
+    ...(kind ? { workflow_kind: kind as WorkflowKind } : {}),
+    ...(workflowModule ? { module_id: workflowModule } : {}),
+    ...(parentWorkflow ? { parent_workflow_id: parentWorkflow } : {}),
     revision,
     scope,
     depth: scalar(markdown, "Depth"),
@@ -292,7 +336,7 @@ export function renderLightWorkflowState(state: WorkflowState): string {
 - Status: ${state.status}
 - Revision: ${state.revision}
 - Engine Version: ${clean(state.version)}
-- Depth: ${clean(state.depth)}
+${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}- Depth: ${clean(state.depth)}
 - Current Phase: ${clean(state.current_phase)}
 - Current Stage: ${cell(state.current_stage)}
 - Current Instance: ${cell(state.current_stage_instance)}
@@ -355,31 +399,49 @@ function acquireLock(path: string): number {
   }
 }
 
-function appendAudit(projectRoot: string, state: WorkflowState): void {
-  const path = lightAuditPath(projectRoot);
+function appendAudit(projectRoot: string, state: WorkflowState, ref: WorkflowRef): void {
+  const path = lightAuditPath(projectRoot, ref);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  appendFileSync(path, `## ${new Date().toISOString()}\n- Event: STATE_UPDATED\n- Revision: ${state.revision}\n- Work: ${clean(state.work_description)}\n- Current Instance: ${cell(state.current_stage_instance)}\n- Active Instances: ${Object.keys(state.active_instances || {}).sort().join(", ") || "-"}\n- Instance Owners: ${Object.values(state.active_instances || {}).map((claim) => `${claim.stage_instance}=${claim.owner}`).sort().join(", ") || "-"}\n- Status: ${state.status}\n\n`, "utf8");
+  appendFileSync(path, `## ${new Date().toISOString()}\n- Event: STATE_UPDATED\n- Revision: ${state.revision}\n- Work: ${clean(state.work_description)}\n${state.workflow_kind ? `- Workflow: ${workflowRefKey(ref)}\n` : ""}- Current Instance: ${cell(state.current_stage_instance)}\n- Active Instances: ${Object.keys(state.active_instances || {}).sort().join(", ") || "-"}\n- Instance Owners: ${Object.values(state.active_instances || {}).map((claim) => `${claim.stage_instance}=${claim.owner}`).sort().join(", ") || "-"}\n- Status: ${state.status}\n\n`, "utf8");
 }
 
-export function loadWorkflowState(projectRoot: string): WorkflowState | null {
-  const path = lightStatePath(projectRoot);
+export function appendAuditEvent(projectRoot: string, ref: WorkflowRef, event: string, fields: Record<string, string>): void {
+  const path = lightAuditPath(projectRoot, ref);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const lines = Object.entries(fields).map(([key, value]) => `- ${key}: ${clean(value) || "-"}`).join("\n");
+  appendFileSync(path, `## ${new Date().toISOString()}\n- Event: ${clean(event)}\n${lines}${lines ? "\n" : ""}\n`, "utf8");
+}
+
+export function releaseExpiredModuleClaims(state: WorkflowState, now = Date.now()): string[] {
+  const released: string[] = [];
+  for (const [instance, claim] of Object.entries(state.active_instances || {})) {
+    if (Date.parse(claim.expires_at) <= now) {
+      delete state.active_instances[instance];
+      released.push(instance);
+    }
+  }
+  return released.sort();
+}
+
+export function loadWorkflowState(projectRoot: string, ref: WorkflowRef = GLOBAL_WORKFLOW): WorkflowState | null {
+  const path = lightStatePath(projectRoot, ref);
   if (!existsSync(path)) return null;
   const stat = lstatSync(path);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`workflow state must be a regular non-symlink file: ${path}`);
   return parseLightWorkflowState(readFileSync(path, "utf8"));
 }
 
-export function saveWorkflowState(projectRoot: string, state: WorkflowState): void {
-  const path = lightStatePath(projectRoot);
+export function saveWorkflowState(projectRoot: string, state: WorkflowState, ref: WorkflowRef = GLOBAL_WORKFLOW): void {
+  const path = lightStatePath(projectRoot, ref);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const lock = acquireLock(`${path}.lock`);
   const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
   try {
-    const existing = loadWorkflowState(projectRoot);
+    const existing = loadWorkflowState(projectRoot, ref);
     if (existing && existing.revision !== state.revision) throw new Error(`workflow state revision conflict: expected ${state.revision}, found ${existing.revision}`);
     if (!existing && state.revision !== 0) throw new Error(`workflow state is missing at revision ${state.revision}`);
-    const next = { ...state, revision: state.revision + 1, updated_at: new Date().toISOString() };
-    appendAudit(projectRoot, next);
+    const next = { ...state, version: ENGINE_VERSION, revision: state.revision + 1, updated_at: new Date().toISOString() };
+    appendAudit(projectRoot, next, ref);
     writeFileSync(temporary, renderLightWorkflowState(next), { encoding: "utf8", flag: "wx", mode: 0o600 });
     renameSync(temporary, path);
     Object.assign(state, next);
@@ -390,14 +452,14 @@ export function saveWorkflowState(projectRoot: string, state: WorkflowState): vo
   }
 }
 
-export function updateWorkflowState(projectRoot: string, mutate: (state: WorkflowState) => void, retries = 3): WorkflowState {
+export function updateWorkflowState(projectRoot: string, mutate: (state: WorkflowState) => void, retries = 3, ref: WorkflowRef = GLOBAL_WORKFLOW): WorkflowState {
   let lastError: unknown;
   for (let attempt = 0; attempt < retries; attempt++) {
-    const state = loadWorkflowState(projectRoot);
-    if (!state) throw new Error("no active AWS-style lightweight workflow");
+    const state = loadWorkflowState(projectRoot, ref);
+    if (!state) throw new Error(ref.kind === "global" ? "no active AWS-style lightweight workflow" : `no ${workflowRefKey(ref)} workflow`);
     try {
       mutate(state);
-      saveWorkflowState(projectRoot, state);
+      saveWorkflowState(projectRoot, state, ref);
       return state;
     } catch (error) {
       lastError = error;
@@ -407,8 +469,8 @@ export function updateWorkflowState(projectRoot: string, mutate: (state: Workflo
   throw lastError instanceof Error ? lastError : new Error("workflow state update failed after retries");
 }
 
-export function migrateSingleInstanceState(projectRoot: string, owner = "legacy-single-instance"): WorkflowState {
-  const state = loadWorkflowState(projectRoot);
+export function migrateSingleInstanceState(projectRoot: string, owner = "legacy-single-instance", ref: WorkflowRef = GLOBAL_WORKFLOW): WorkflowState {
+  const state = loadWorkflowState(projectRoot, ref);
   if (!state) throw new Error("no active AWS-style lightweight workflow");
   if (!state.current_stage_instance || !state.current_module || state.active_instances[state.current_stage_instance]) return state;
   const now = new Date().toISOString();
@@ -420,6 +482,6 @@ export function migrateSingleInstanceState(projectRoot: string, owner = "legacy-
     heartbeat_at: now,
     expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
   };
-  saveWorkflowState(projectRoot, state);
+  saveWorkflowState(projectRoot, state, ref);
   return state;
 }

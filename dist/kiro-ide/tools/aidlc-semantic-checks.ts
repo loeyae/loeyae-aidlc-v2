@@ -6,7 +6,8 @@ import { join, relative, resolve } from "path";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
 import { portableDirname, readModuleManifest } from "./aidlc-execution-context";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
-import { loadWorkflowState, type WorkflowState } from "./aidlc-light-state";
+import { type WorkflowState } from "./aidlc-light-state";
+import { loadWorkflowView } from "./aidlc-workflow-layout";
 import {
   ExpectedContract,
   expectedContractPath,
@@ -20,17 +21,35 @@ import {
 type SemanticWorkflowState = WorkflowState;
 
 const ROOT = process.cwd();
+
+function argumentValue(name: string): string | undefined {
+  const args = process.argv.slice(2);
+  const index = args.indexOf(`--${name}`);
+  const value = index >= 0 ? args[index + 1] : undefined;
+  return value && !value.startsWith("--") ? value.trim() : undefined;
+}
+
+// `check --sensor <name> --module <id> [--unit <id>]` scopes a checker to one module
+// explicitly; the controlled producer passes the same flags in the split layout.
+const ARGUMENT_MODULE = argumentValue("module");
+const ARGUMENT_UNIT = argumentValue("unit");
+const STRICT_MODULE_SCOPE = Boolean(ARGUMENT_MODULE);
+const REQUESTED_MODULE = ARGUMENT_MODULE || process.env.AIDLC_ACTIVE_MODULE?.trim() || undefined;
+
 let workflowState: SemanticWorkflowState | null = null;
 let workflowStateError: string | null = null;
 try {
-  workflowState = loadWorkflowState(ROOT);
+  workflowState = loadWorkflowView(ROOT, REQUESTED_MODULE);
+  const activeStage = process.env.AIDLC_ACTIVE_STAGE?.trim();
+  if (workflowState && activeStage) workflowState = { ...workflowState, current_stage: activeStage };
 } catch (error) {
   workflowStateError = error instanceof Error ? error.message : String(error);
 }
 
-const ACTIVE_MODULE = process.env.AIDLC_ACTIVE_MODULE?.trim() || workflowState?.current_module;
-const ACTIVE_UNIT = process.env.AIDLC_ACTIVE_UNIT?.trim() || workflowState?.current_unit;
-const CONTROLLED_CONTEXT_REQUESTED = Object.prototype.hasOwnProperty.call(process.env, "AIDLC_ACTIVE_MODULE")
+const ACTIVE_MODULE = ARGUMENT_MODULE || process.env.AIDLC_ACTIVE_MODULE?.trim() || workflowState?.current_module;
+const ACTIVE_UNIT = ARGUMENT_UNIT || process.env.AIDLC_ACTIVE_UNIT?.trim() || workflowState?.current_unit;
+const CONTROLLED_CONTEXT_REQUESTED = STRICT_MODULE_SCOPE
+  || Object.prototype.hasOwnProperty.call(process.env, "AIDLC_ACTIVE_MODULE")
   || Object.prototype.hasOwnProperty.call(process.env, "AIDLC_ACTIVE_UNIT");
 
 const MODULE_CONTEXT_SENSORS = new Set([
@@ -132,6 +151,21 @@ function allFiles(base: string, pattern: RegExp): string[] {
   return result.sort();
 }
 function projectFiles(pattern: RegExp): string[] { return allFiles(".", pattern); }
+/**
+ * Artifacts a module owns: its docs/aidlc/modules/<id>/ tree plus any manifest `paths`.
+ * Used when a checker is scoped with --module, so project-wide files outside the module
+ * (other documentation, other services) can no longer block that module's gate.
+ */
+function moduleArtifactFiles(pattern: RegExp): string[] {
+  if (!ACTIVE_MODULE) return projectFiles(pattern);
+  let extraRoots: string[] = [];
+  try {
+    extraRoots = readModuleManifest(ROOT).find((module) => module.module_id === ACTIVE_MODULE)?.paths || [];
+  } catch {
+    extraRoots = [];
+  }
+  return [...new Set([`docs/aidlc/modules/${ACTIVE_MODULE}`, ...extraRoots].flatMap((base) => allFiles(base, pattern)))].sort();
+}
 function relativePath(path: string): string { return relative(ROOT, path); }
 function joined(paths: string[]): string { return paths.map(text).join("\n"); }
 function ids(value: string, pattern: RegExp): string[] { return [...new Set([...value.matchAll(pattern)].map((match) => match[0]))].sort(); }
@@ -720,8 +754,10 @@ function prdCompleteness(): Record<string, unknown> {
 }
 
 function diagramContract(): Record<string, unknown> {
-  const manifests = projectFiles(/\.diagram\.json$/i);
-  if (manifests.length === 0) fail("diagram structured source is missing; new or adjusted SVG requires a .diagram.json manifest");
+  const manifests = STRICT_MODULE_SCOPE ? moduleArtifactFiles(/\.diagram\.json$/i) : projectFiles(/\.diagram\.json$/i);
+  if (manifests.length === 0) fail(STRICT_MODULE_SCOPE
+    ? `diagram structured source is missing for module ${ACTIVE_MODULE}; new or adjusted SVG requires a .diagram.json manifest under docs/aidlc/modules/${ACTIVE_MODULE}/`
+    : "diagram structured source is missing; new or adjusted SVG requires a .diagram.json manifest");
 
   const ports = new Set(["top", "right", "bottom", "left"]);
   const shapes = new Set(["round", "rect", "diamond", "ellipse", "database", "actor", "note"]);

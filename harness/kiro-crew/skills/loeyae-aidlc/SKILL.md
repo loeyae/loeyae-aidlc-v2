@@ -14,6 +14,8 @@ loeyae-aidlc orchestrate next --scope <scope> --work "<工作描述>"
 
 控制面为 `aidlc/active/aidlc-state.md` 与 `aidlc/active/audit.md`。每次 `orchestrate next` 后原样展示 `handoff_prompt`，按当前阶段完成产物、review、构建、测试和报告。
 
+存在 `aidlc/active/registry.md` 时为按模块拆分的工作流：用 `orchestrate next --module <id>` 推进单个模块，按 `handoff_prompt` 给出的带 `--module` 的 report 命令结算；已完成阶段的证据失配时，先 `evidence run --stage <slug> --module <id> --refresh`，再用同一 `report` 命令复验（re-attest）。
+
 成员使用 `unit list` 与 `unit select` 记录分工。应用设计和部署决策在用户明确批准后通过 `--user-input Approve` 报告。merge plan 只提供人工合并建议。
 
 ## Agent execution

@@ -11,6 +11,7 @@ import {
 } from "./diagram-contract.js";
 import { DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE } from "./diagram-visual-style.js";
 import { loadWorkflowState } from "./aidlc-light-state";
+import { isSplitLayout, loadWorkflowParts } from "./aidlc-workflow-layout";
 import { evidenceRelativePath } from "./aidlc-execution-context";
 
 const PROJECT_ROOT = process.cwd();
@@ -203,8 +204,18 @@ function sourceUrl(item: DiagramRequest, index: number): string {
   return pathToFileURL(source).toString();
 }
 
+function activeStageState(stage: string): ReturnType<typeof loadWorkflowState> {
+  if (!isSplitLayout(PROJECT_ROOT)) return loadWorkflowState(PROJECT_ROOT);
+  const activeModule = process.env.AIDLC_ACTIVE_MODULE?.trim();
+  const candidates = [...loadWorkflowParts(PROJECT_ROOT).parts.values()]
+    .map((part) => part.state)
+    .filter((state) => state.status === "running" && state.current_stage === stage && (!activeModule || state.current_module === activeModule));
+  if (candidates.length > 1) fail(`several workflows are running stage ${stage}; set AIDLC_ACTIVE_MODULE to the module this provider run belongs to`);
+  return candidates[0] || null;
+}
+
 function configureEvidenceDirectory(stage: string): string {
-  const state = loadWorkflowState(PROJECT_ROOT);
+  const state = activeStageState(stage);
   if (!state || state.status !== "running" || state.current_stage !== stage) {
     fail(`diagram provider stage ${stage} is not the active running stage`);
   }

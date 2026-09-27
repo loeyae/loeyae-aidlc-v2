@@ -7,6 +7,18 @@ export interface SourceRevision {
   commit: string;
   dirty: boolean | null;
   worktree_digest: string | null;
+  scope?: string;
+  scope_digest?: string | null;
+}
+
+/**
+ * A digest scope narrows which files bind a piece of evidence. `worktree` keeps
+ * the historical whole-worktree binding; any other label is content-addressed
+ * over the files the exclusion predicate keeps.
+ */
+export interface DigestScope {
+  label: string;
+  exclude: (path: string) => boolean;
 }
 
 function normalized(path: string): string {
@@ -18,11 +30,12 @@ function excluded(path: string): boolean {
   return value === ".aidlc" || value.startsWith(".aidlc/") || value === "aidlc" || value.startsWith("aidlc/");
 }
 
-export function readSourceRevision(projectRoot: string): SourceRevision {
+export function readSourceRevision(projectRoot: string, scope?: DigestScope): SourceRevision {
+  const scoped = scope && scope.label !== "worktree" ? scope : undefined;
   const root = realpathSync(resolve(projectRoot));
   const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", shell: false });
   if (revision.status !== 0 || typeof revision.stdout !== "string") {
-    return { commit: "unavailable", dirty: null, worktree_digest: null };
+    return { commit: "unavailable", dirty: null, worktree_digest: null, ...(scoped ? { scope: scoped.label, scope_digest: null } : {}) };
   }
 
   const status = spawnSync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], {
@@ -44,21 +57,31 @@ export function readSourceRevision(projectRoot: string): SourceRevision {
     maxBuffer: 64 * 1024 * 1024,
   });
   if (files.status !== 0 || typeof files.stdout !== "string") {
-    return { commit: revision.stdout.trim(), dirty, worktree_digest: null };
+    return { commit: revision.stdout.trim(), dirty, worktree_digest: null, ...(scoped ? { scope: scoped.label, scope_digest: null } : {}) };
   }
 
   const digest = createHash("sha256");
+  const scopeDigest = scoped ? createHash("sha256") : undefined;
   for (const path of files.stdout.split("\0").filter(Boolean).map(normalized).filter((path) => !excluded(path)).sort()) {
     const absolute = resolve(root, path);
     const rel = normalized(relative(root, absolute));
     if (rel === ".." || rel.startsWith("../") || !existsSync(absolute)) continue;
     const stat = lstatSync(absolute);
-    digest.update(path).update("\0");
+    const inScope = Boolean(scopeDigest && !scoped!.exclude(path));
+    const targets = inScope ? [digest, scopeDigest!] : [digest];
+    for (const target of targets) target.update(path).update("\0");
     if (stat.isSymbolicLink()) {
-      digest.update("symlink\0").update(readlinkSync(absolute)).update("\0");
+      const link = readlinkSync(absolute);
+      for (const target of targets) target.update("symlink\0").update(link).update("\0");
     } else if (stat.isFile()) {
-      digest.update("file\0").update(createHash("sha256").update(readFileSync(absolute)).digest()).update("\0");
+      const content = createHash("sha256").update(readFileSync(absolute)).digest();
+      for (const target of targets) target.update("file\0").update(content).update("\0");
     }
   }
-  return { commit: revision.stdout.trim(), dirty, worktree_digest: digest.digest("hex") };
+  return {
+    commit: revision.stdout.trim(),
+    dirty,
+    worktree_digest: digest.digest("hex"),
+    ...(scoped ? { scope: scoped.label, scope_digest: scopeDigest!.digest("hex") } : {}),
+  };
 }

@@ -1296,20 +1296,21 @@ Usage:
 
 Workflow:
   orchestrate next --scope <scope> --work <description>  Start a new Markdown workflow
-  orchestrate next                                      Read the next directive
-  orchestrate report --stage <slug> --result completed  Report a completed stage
-  orchestrate park                                      Park the active Markdown workflow
+  orchestrate next [--module <module-id>]               Read the next directive (per-module after split)
+  orchestrate report --stage <slug> --result completed  Report a completed stage (--module in split layout)
+  orchestrate park [--module <module-id>]               Park the active workflow or one module workflow
+  orchestrate split --from <workflow-id> [--dry-run]    Split into per-module workflows (aidlc/active/registry.md)
   unit list|select [flags]                              List or self-select a development unit
   module list|select|claim|heartbeat|migrate [flags]    Coordinate parallel module instances
-  runtime summary|doctor                                Inspect the active Markdown workflow
+  runtime summary|doctor [--module <module-id>]         Inspect the active Markdown workflow(s)
   worktree prepare|verify|merge-plan [flags]            Prepare or verify a member worktree
 
 Quality and utilities:
-  evidence run --stage <slug> [flags]       Produce controlled build/test/check evidence
+  evidence run --stage <slug> [flags]       Produce controlled evidence (--module/--unit, --refresh for completed stages)
   attest resolve [flags]                     Read-only commit/diff attribution
   agent describe|plan|validate-result [args]          Inspect agent persona, execution plan or result contract
   extension validate|compose|status [flags] Restricted additive extension metadata
-  check --sensor <name>                      Run a deterministic semantic checker
+  check --sensor <name> [--module <id>]      Run a deterministic semantic checker (module-scoped with --module)
   diagram-provider run [options]            Run diagram validation
   export <md|svg> <file> --to <format>      Export Markdown or SVG
   docx <inspect|beautify|validate> [args]   Inspect or conservatively restyle DOCX
@@ -1323,6 +1324,8 @@ Platform:
 
 Lightweight workflow:
   Markdown workflow state and audit are stored in aidlc/active/.
+  After orchestrate split, each module has aidlc/active/modules/<id>/, cross-module integration has
+  aidlc/active/integration/, and aidlc/active/registry.md indexes them.
   Team members select units directly; review, build, test and merge-plan provide delivery evidence.
 
 Examples:
@@ -1331,6 +1334,9 @@ Examples:
   loeyae-aidlc worktree prepare --instance code-generation@module:module-a@unit:unit-a --member alice --path /absolute/path/to/unit-a
   loeyae-aidlc worktree merge-plan --instance code-generation@module:module-a@unit:unit-a --member alice --path /absolute/path/to/unit-a --review-evidence .aidlc/review.json
   loeyae-aidlc orchestrate next --claim --module module-a --owner alice
+  loeyae-aidlc orchestrate split --from <workflow-id> --dry-run
+  loeyae-aidlc orchestrate next --module module-b
+  loeyae-aidlc evidence run --stage requirements-analysis --module module-a --refresh
   loeyae-aidlc module heartbeat --stage-instance application-design@module:module-a --owner alice
   loeyae-aidlc worktree prepare --instance application-design@module:module-a --member alice --path /absolute/path/to/module-a
   loeyae-aidlc orchestrate report --stage application-design --result approved --user-input Approve

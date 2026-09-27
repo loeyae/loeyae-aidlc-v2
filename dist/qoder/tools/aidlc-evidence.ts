@@ -17,9 +17,9 @@ import {
 import { spawnSync } from "child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
-import { evidenceRelativePath } from "./aidlc-execution-context";
-import { readSourceRevision } from "./aidlc-revision";
-import { loadWorkflowState, type WorkflowState } from "./aidlc-light-state";
+import { evidenceRelativePath, stageInstanceId } from "./aidlc-execution-context";
+import { GLOBAL_WORKFLOW, loadWorkflowState, type WorkflowRef, type WorkflowState } from "./aidlc-light-state";
+import { evidenceSourceRevision, integrationStageSlugs, isSplitLayout, loadWorkflowParts, ownerOfInstance, stageAxis } from "./aidlc-workflow-layout";
 
 type ProducerState = WorkflowState;
 
@@ -367,7 +367,12 @@ function producedEvidence(unsigned: Record<string, unknown>): Record<string, unk
 function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerState): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
   const tsx = require.resolve("tsx/cli");
   const checker = resolve(TOOL_DIR, "aidlc-semantic-checks.ts");
-  const argv = [process.execPath, tsx, checker, "--sensor", sensor];
+  // Split layout: pass the module scope explicitly so module-owned checkers (diagram-contract)
+  // only inspect the module's own artifacts.
+  const scopeArgs = isSplitLayout(PROJECT_ROOT) && state.current_module
+    ? ["--module", state.current_module, ...(state.current_unit ? ["--unit", state.current_unit] : [])]
+    : [];
+  const argv = [process.execPath, tsx, checker, "--sensor", sensor, ...scopeArgs];
   const started = Date.now();
   const result = spawnSync(argv[0], argv.slice(1), {
     cwd: PROJECT_ROOT,
@@ -375,6 +380,7 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
       ...process.env,
       AIDLC_ACTIVE_MODULE: state.current_module || "",
       AIDLC_ACTIVE_UNIT: state.current_unit || "",
+      AIDLC_ACTIVE_STAGE: state.current_stage || "",
     },
     encoding: "utf8",
     shell: false,
@@ -428,7 +434,7 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig, s
     evidence_version: "1",
     timestamp: new Date().toISOString(),
     producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() },
-    source_revision: readSourceRevision(PROJECT_ROOT),
+    source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance),
     checker: result.execution,
   };
   writeAtomic(output, `${JSON.stringify(producedEvidence(unsigned), null, 2)}\n`);
@@ -438,6 +444,9 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig, s
 interface ProducerOptions {
   stage: string;
   instance?: string;
+  module?: string;
+  unit?: string;
+  refresh: boolean;
   sensor?: string;
   config: string;
   output?: string;
@@ -445,10 +454,15 @@ interface ProducerOptions {
   allSensors: boolean;
 }
 
+const USAGE = "usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance> | --module <module-id> [--unit <unit-id>]] [--refresh] [--sensor <sensor>] [--all-sensors] [--config <path>] [--output <path>] [--command-id <id> ...]";
+
 function parseArgs(args: string[]): ProducerOptions {
-  if (args[0] !== "run") fail("usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance>] [--sensor <sensor>] [--all-sensors] [--config <path>] [--output <path>] [--command-id <id> ...]");
+  if (args[0] !== "run") fail(USAGE);
   let stage = "";
   let instance: string | undefined;
+  let moduleId: string | undefined;
+  let unitId: string | undefined;
+  let refresh = false;
   let sensor: string | undefined;
   let config = DEFAULT_CONFIG;
   let output: string | undefined;
@@ -456,25 +470,31 @@ function parseArgs(args: string[]): ProducerOptions {
   let allSensors = false;
   for (let i = 1; i < args.length; i++) {
     const arg = args[i];
-    if (["--stage", "--instance", "--sensor", "--config", "--output", "--command-id"].includes(arg)) {
+    if (["--stage", "--instance", "--module", "--unit", "--sensor", "--config", "--output", "--command-id"].includes(arg)) {
       const value = args[++i];
       if (!value) fail(`${arg} requires a value`);
       if (arg === "--stage") stage = value;
       if (arg === "--instance") instance = value;
+      if (arg === "--module") moduleId = value;
+      if (arg === "--unit") unitId = value;
       if (arg === "--sensor") sensor = value;
       if (arg === "--config") config = value;
       if (arg === "--output") output = value;
       if (arg === "--command-id") commandIds.push(value);
     } else if (arg === "--all-sensors") {
       allSensors = true;
+    } else if (arg === "--refresh") {
+      refresh = true;
     } else if (arg === "--help" || arg === "-h") {
-      console.log("Usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance>] [--sensor <sensor>] [--all-sensors] [--config <path>] [--output <path>] [--command-id <id> ...]");
+      console.log(USAGE.replace(/^usage: /, "Usage: "));
       process.exit(0);
     } else {
       fail(`unknown argument: ${arg}`);
     }
   }
   if (!stage) fail("--stage is required");
+  if (instance && moduleId) fail("--instance and --module are mutually exclusive");
+  if (unitId && !moduleId) fail("--unit requires --module");
   if (sensor && sensor !== "build-test-evidence" && !SEMANTIC_SENSORS.has(sensor)) fail(`unsupported semantic sensor: ${sensor}`);
   if (allSensors && sensor) fail("--all-sensors cannot be combined with --sensor; it uses the sensors declared by the active stage");
   if (allSensors && output && stage !== "build-and-test") fail("--output cannot be used with --all-sensors because each sensor has its own canonical evidence path");
@@ -482,6 +502,9 @@ function parseArgs(args: string[]): ProducerOptions {
   return {
     stage,
     ...(instance ? { instance } : {}),
+    ...(moduleId ? { module: moduleId } : {}),
+    ...(unitId ? { unit: unitId } : {}),
+    refresh,
     sensor,
     config: safeProjectPath(config, "config", true),
     output,
@@ -510,24 +533,54 @@ function withProducerLock(output: string, action: () => void): void {
   }
 }
 
-function loadProducerState(options: ProducerOptions): ProducerState | null {
-  const state = loadWorkflowState(PROJECT_ROOT);
-  if (!state) return null;
-  if (options.instance && options.instance !== state.current_stage_instance) {
-    const claim = state.active_instances?.[options.instance];
-    if (!claim || claim.module_id !== state.current_module && !options.instance.includes(`@module:${claim.module_id}`)) {
-      fail(`stage instance ${options.instance} is not active`);
-    }
-    const moduleMatch = /@module:([a-z0-9][a-z0-9-]*)/.exec(options.instance);
-    const unitMatch = /@unit:([a-z0-9][a-z0-9-]*)$/.exec(options.instance);
-    return {
-      ...state,
-      current_stage_instance: options.instance,
-      current_module: moduleMatch?.[1] || claim.module_id,
-      ...(unitMatch ? { current_unit: unitMatch[1] } : {}),
-    };
+/** Which workflow owns this evidence run: the single workflow, or the split owner of the instance. */
+function producerOwner(options: ProducerOptions, instance: string | undefined): WorkflowRef {
+  if (!isSplitLayout(PROJECT_ROOT)) return GLOBAL_WORKFLOW;
+  if (instance) return ownerOfInstance(instance);
+  const axis = stageAxis(options.stage);
+  if (axis === "project") return integrationStageSlugs().has(options.stage) ? { kind: "integration" } : GLOBAL_WORKFLOW;
+  const active = [...loadWorkflowParts(PROJECT_ROOT).parts.values()].filter((part) => part.ref.kind === "module" && part.state.current_stage === options.stage);
+  if (active.length === 1) return active[0].ref;
+  fail(`split workflow layout: evidence run --stage ${options.stage} needs --module <module-id>${active.length > 1 ? ` (active in ${active.map((part) => (part.ref as { module_id: string }).module_id).join(", ")})` : ""}`);
+}
+
+function targetInstance(options: ProducerOptions): string | undefined {
+  if (options.instance) return options.instance;
+  if (!options.module) return undefined;
+  const axis = stageAxis(options.stage);
+  if (axis === "module") return stageInstanceId(options.stage, "module", { module_id: options.module });
+  if (axis === "unit") {
+    if (!options.unit) fail(`stage ${options.stage} is unit-axis; pass --unit <unit-id> with --module`);
+    return stageInstanceId(options.stage, "unit", { module_id: options.module, unit_id: options.unit });
   }
-  return state;
+  fail(`stage ${options.stage} is project-axis and does not take --module`);
+}
+
+function loadProducerState(options: ProducerOptions): ProducerState | null {
+  const instance = targetInstance(options);
+  const state = loadWorkflowState(PROJECT_ROOT, producerOwner(options, instance));
+  if (!state) return null;
+  if (!instance || instance === state.current_stage_instance) {
+    if (options.refresh) fail("--refresh regenerates evidence for a completed stage instance; the active instance uses a normal evidence run");
+    return state;
+  }
+  const claim = state.active_instances?.[instance];
+  const completed = state.completed_stage_instances.includes(instance);
+  if (!claim && !(options.refresh && completed)) {
+    fail(`stage instance ${instance} is not active${completed ? "; it is completed, pass --refresh to regenerate its evidence" : ""}`);
+  }
+  const moduleMatch = /@module:([a-z0-9][a-z0-9-]*)/.exec(instance);
+  const unitMatch = /@unit:([a-z0-9][a-z0-9-]*)$/.exec(instance);
+  const context: ProducerState = {
+    ...state,
+    current_stage: instance.split("@", 1)[0],
+    current_stage_instance: instance,
+  };
+  if (moduleMatch || claim) context.current_module = moduleMatch?.[1] || claim!.module_id;
+  else delete context.current_module;
+  if (unitMatch) context.current_unit = unitMatch[1];
+  else delete context.current_unit;
+  return context;
 }
 
 function declaredSemanticSensors(stage: string): string[] {
@@ -565,7 +618,8 @@ function produceAllSemantic(options: ProducerOptions, state: ProducerState, conf
 function runProducer(args: string[]): void {
   const options = parseArgs(args);
   const state = loadProducerState(options);
-  if (!state || state.status !== "running") fail("evidence production requires an active lightweight workflow");
+  const statusAllowed = state && (state.status === "running" || options.refresh);
+  if (!state || !statusAllowed) fail("evidence production requires an active lightweight workflow");
   if (state.current_stage !== options.stage) {
     fail(`stage ${options.stage} is not active; current stage is ${state.current_stage || "(none)"}`);
   }
@@ -616,7 +670,7 @@ function runProducer(args: string[]): void {
       timestamp: new Date().toISOString(),
       status: "passed",
       producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() },
-      source_revision: readSourceRevision(PROJECT_ROOT),
+      source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance),
       commands,
       tests,
       checks: { status: "passed", command_ids: commands.filter((command) => command.role === "check").map((command) => command.id) },

@@ -74,6 +74,51 @@ loeyae-aidlc module migrate [--owner <legacy-owner>]
 
 `product-contracts.md` 与 `runtime-dependencies.md` 中明确的模块关系会作为跨模块准入依赖；消费方会显示等待的提供方阶段。`runtime summary` 同时展示所有活动实例、owner、就绪实例和依赖阻塞。
 
+## 按模块独立工作流（4.3.0）
+
+单工作流里一个模块被门禁卡住会拖住其他模块。`module-division` 完成后可以拆分为独立工作流：
+
+```bash
+# 预览：各工作流归属、状态，以及哪些旧证据已失配（不写入）
+loeyae-aidlc orchestrate split --from <workflow-id 或其前 8 位以上> --dry-run
+loeyae-aidlc orchestrate split --from <workflow-id>
+
+loeyae-aidlc orchestrate next --module <module-id>            # 只推进该模块
+loeyae-aidlc orchestrate report --stage <slug> --module <module-id> [--unit <unit-id>] --result completed
+loeyae-aidlc orchestrate park --module <module-id>            # 只暂停该模块；next --module <id> --resume 恢复
+loeyae-aidlc orchestrate next                                  # 先 global，再第一个可推进的模块，最后 integration
+loeyae-aidlc orchestrate next --status                         # 所有工作流与集成屏障概览
+loeyae-aidlc runtime doctor --module <module-id>
+```
+
+拆分后的布局：
+
+| 文件 | 承载 |
+|------|------|
+| `aidlc/active/aidlc-state.md` | global：workspace-detection 至 state-template 等前置 project 阶段（Workflow ID 不变） |
+| `aidlc/active/modules/<id>/aidlc-state.md` | 该模块全部 module/unit 阶段实例，独立 Workflow ID、revision、status 和 audit |
+| `aidlc/active/integration/aidlc-state.md` | build-and-test 起的尾部 project 阶段（跨模块集成） |
+| `aidlc/active/registry.md` | 模块到工作流的身份映射（权威），以及状态、跨模块依赖、共享契约和集成屏障投影（引擎刷新，勿手改） |
+
+- 未拆分的项目行为与 4.2.x 一致；旧布局下首次执行 `next --module <id>`（不带 `--claim`）会自动拆分。
+- 跨模块依赖仍以 `product-contracts.md` / `runtime-dependencies.md` 为唯一来源，registry 只做投影。共享契约的消费者在“消费者状态”表中标为 `已验证`/`verified` 后，才算 verified。
+- integration 的准入条件：所有模块的 construction 已完成，且所有共享契约都已 verified；缺任何一项都保持屏障。
+
+### 证据作用域与修复
+
+拆分后新产出的证据会记录 `source_revision.scope`（`module:<id>` / `global`）和 `scope_digest`，按作用域内的内容校验，commit 只作溯源。其他模块的 `docs/aidlc/modules/<other>/`、module-manifest 中可选的 `paths`（模块独占代码根），以及 integration 写入的 `docs/aidlc/construction/`、`docs/aidlc/operation/`，都不会使本模块证据失配。本模块自身产物变化仍会使其失配。
+
+`split` 会把当前仍有效的旧证据重锚定到对应作用域；已失配的旧证据列入 stale 清单，修复方式如下：
+
+```bash
+loeyae-aidlc evidence run --stage <slug> --module <module-id> [--unit <unit-id>] --refresh
+loeyae-aidlc orchestrate report --stage <slug> --module <module-id> --result completed   # re-attest，模块 parked 时也可执行
+```
+
+对已完成实例执行 report 属于 re-attest：重新跑 consumes/produces/sensor 并记录 `reattested` 历史，不改变进度。
+
+`check --sensor <name> --module <id>` 在模块上下文中运行 checker；其中 diagram-contract 只扫描该模块自己的 `.diagram.json`。不带 `--module` 时保持全仓扫描。
+
 ## Worktree 与 review
 
 ```bash

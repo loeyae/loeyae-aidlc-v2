@@ -24,6 +24,7 @@ export interface ModuleDescriptor {
   module_id: string;
   name: string;
   service_id: string;
+  paths?: string[];
 }
 
 export const UNIT_CONDITIONAL_STAGES = [
@@ -100,16 +101,35 @@ export function unitManifestPath(projectRoot: string, moduleId: string): string 
   return join(projectRoot, "docs", "aidlc", "modules", contextId(moduleId, "module_id"), "inception", "unit-manifest.json");
 }
 
+function modulePaths(value: unknown, label: string): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array of project-relative directories`);
+  const paths = value.map((item, index) => {
+    const path = nonEmptyString(item, `${label}[${index}]`).replace(/\\/g, "/").replace(/\/+$/, "");
+    if (!path || path.startsWith("/") || /^[A-Za-z]:/.test(path) || path.split("/").some((segment) => segment === ".." || segment === "." || segment === "")) {
+      throw new Error(`${label}[${index}] must be a normalized project-relative directory`);
+    }
+    if (path === "aidlc" || path.startsWith("aidlc/") || path === ".aidlc" || path.startsWith(".aidlc/") || path === "docs/aidlc" || path.startsWith("docs/aidlc/")) {
+      throw new Error(`${label}[${index}] must not point into the AI-DLC control plane or docs/aidlc`);
+    }
+    return path;
+  });
+  uniqueIds(paths, label);
+  return paths;
+}
+
 export function readModuleManifest(projectRoot: string): ModuleDescriptor[] {
   const value = regularJson(moduleManifestPath(projectRoot), "module manifest");
   if (value.schema_version !== 1) throw new Error("module manifest schema_version must be 1");
   if (!Array.isArray(value.modules) || value.modules.length === 0) throw new Error("module manifest modules must be a non-empty array");
   const modules = value.modules.map((item, index) => {
     const module = record(item, `modules[${index}]`);
+    const paths = modulePaths(module.paths, `modules[${index}].paths`);
     return {
       module_id: contextId(module.module_id, `modules[${index}].module_id`),
       name: nonEmptyString(module.name, `modules[${index}].name`),
       service_id: nonEmptyString(module.service_id, `modules[${index}].service_id`),
+      ...(paths ? { paths } : {}),
     };
   });
   uniqueIds(modules.map((module) => module.module_id), "module manifest");
