@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "f
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
-import { loadWorkflowState } from "./aidlc-light-state";
+import { loadWorkflowView } from "./aidlc-workflow-layout";
 import { readSourceRevision } from "./aidlc-revision";
 
 const SAFE_BRANCH = /^aidlc-light\/[a-z0-9][a-z0-9/-]{0,120}$/;
@@ -55,7 +55,7 @@ function metadataPath(project: string, instance: string): string {
 }
 
 function selection(project: string, instance: string, member: string): void {
-  const state = loadWorkflowState(project);
+  const state = loadWorkflowView(project);
   if (!state) throw new Error("no active AWS-style lightweight workflow");
   const unitMatch = /@module:([a-z0-9][a-z0-9-]*)@unit:([a-z0-9][a-z0-9-]*)$/.exec(instance);
   if (unitMatch) {
@@ -103,7 +103,7 @@ export function prepareLightWorktree(projectRoot: string, instance: string, memb
   const target = resolve(path);
   if (inside(project, target) || existsSync(target)) throw new Error("worktree path must be outside project and must not already exist");
   directory(dirname(target), "worktree parent");
-  const state = loadWorkflowState(project)!;
+  const state = loadWorkflowView(project)!;
   const branch = requestedBranch || `aidlc-light/${state.workflow_id.slice(0, 12)}/${createHash("sha256").update(instance).digest("hex").slice(0, 16)}`;
   if (!SAFE_BRANCH.test(branch)) throw new Error("branch must match aidlc-light/<safe-name>");
   git(project, ["worktree", "add", "-b", branch, target, revision.commit]);

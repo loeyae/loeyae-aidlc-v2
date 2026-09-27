@@ -2,7 +2,8 @@ import { existsSync, lstatSync, readFileSync, readdirSync } from "fs";
 import { isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { crossModuleRequires, dependencyInstances, expandStageInstances, loadGraph } from "./aidlc-orchestrate";
-import { lightAuditPath, loadWorkflowState } from "./aidlc-light-state";
+import { GLOBAL_WORKFLOW, lightAuditPath, lightStatePath, type WorkflowRef } from "./aidlc-light-state";
+import { loadWorkflowParts, mergeWorkflowView, ownerOfInstance, registryPath, sameRef } from "./aidlc-workflow-layout";
 
 function inside(root: string, candidate: string): boolean {
   const value = relative(root, candidate);
@@ -31,15 +32,28 @@ function evidence(projectRoot: string): { total: number; invalid: number; paths:
   return { total: paths.length, invalid, paths: paths.sort() };
 }
 
-export function buildTeamLightRuntimeProjection(projectRoot = process.cwd()): Record<string, unknown> {
+function relativePath(root: string, path: string): string {
+  return relative(root, path).replaceAll(sep, "/");
+}
+
+/**
+ * Non-authoritative runtime projection. In the split layout `moduleId` narrows it to one
+ * module workflow; without it the projection covers every workflow plus the registry.
+ */
+export function buildTeamLightRuntimeProjection(projectRoot = process.cwd(), moduleId?: string): Record<string, unknown> {
   const root = resolve(projectRoot);
-  const state = loadWorkflowState(root);
-  if (!state) throw new Error("no active AWS-style lightweight workflow");
+  const loaded = loadWorkflowParts(root);
+  if (!loaded.parts.has("global")) throw new Error("no active AWS-style lightweight workflow");
+  if (moduleId && !loaded.split) throw new Error("runtime --module requires the per-module layout; split first with orchestrate split --from <workflow-id>");
+  const owner: WorkflowRef = moduleId ? { kind: "module", module_id: moduleId } : GLOBAL_WORKFLOW;
+  if (moduleId && !loaded.parts.has(`module:${moduleId}`)) throw new Error(`module ${moduleId} has no workflow yet; start it with orchestrate next --module ${moduleId}`);
+  const state = loaded.split ? mergeWorkflowView(loaded.parts, owner) : loaded.parts.get("global")!.state;
   const completed = new Set(state.completed_stage_instances || []);
   const skipped = new Set(state.skipped_stage_instances || []);
   const claims = state.active_instances || {};
   const allInstances = expandStageInstances(loadGraph(), state);
-  const instances = allInstances.map((instance) => {
+  const scoped = moduleId ? allInstances.filter((instance) => sameRef(ownerOfInstance(instance.instance_id), owner)) : allInstances;
+  const instances = scoped.map((instance) => {
     const claim = claims[instance.instance_id];
     const dependencyWaiting = [
       ...instance.stage.requires.flatMap((dependency) => dependencyInstances(instance, dependency, allInstances))
@@ -61,21 +75,35 @@ export function buildTeamLightRuntimeProjection(projectRoot = process.cwd()): Re
       stage: instance.stage.slug,
       module_id: instance.module_id || null,
       unit_id: instance.unit_id || null,
+      ...(loaded.split ? { workflow: ownerOfInstance(instance.instance_id).kind === "module" ? `module:${instance.module_id}` : ownerOfInstance(instance.instance_id).kind } : {}),
       status,
       dependency_waiting: dependencyWaiting,
       ...(claim ? { owner: claim.owner, branch: claim.branch || null, worktree: claim.worktree || null, claimed_at: claim.claimed_at, heartbeat_at: claim.heartbeat_at, expires_at: claim.expires_at } : {}),
     };
   });
   const evidenceSummary = evidence(root);
+  const workflows = loaded.split
+    ? [...loaded.parts.values()].map((part) => ({
+      workflow: part.ref.kind === "module" ? `module:${part.ref.module_id}` : part.ref.kind,
+      workflow_id: part.state.workflow_id,
+      status: part.state.status,
+      current_stage_instance: part.state.current_stage_instance || null,
+      revision: part.state.revision,
+      state_path: relativePath(root, lightStatePath(root, part.ref)),
+    }))
+    : undefined;
   return {
     kind: "aidlc.aws-light.runtime",
     authoritative: false,
+    layout: loaded.split ? "split" : "single",
     work: state.work_description,
     workflow_id: state.workflow_id,
     scope: state.scope,
     revision: state.revision,
-    state_path: relative(root, resolve(root, "aidlc", "active", "aidlc-state.md")),
-    audit_path: relative(root, lightAuditPath(root)),
+    state_path: relativePath(root, lightStatePath(root, owner)),
+    audit_path: relativePath(root, lightAuditPath(root, owner)),
+    ...(loaded.split ? { registry_path: relativePath(root, registryPath(root)), registry: loaded.registry, workflows } : {}),
+    ...(moduleId ? { module_id: moduleId, status: state.status, current_stage_instance: state.current_stage_instance || null } : {}),
     instances,
     unit_selections: state.unit_selections || {},
     module_selections: state.module_selections || {},
@@ -88,9 +116,12 @@ export function buildTeamLightRuntimeProjection(projectRoot = process.cwd()): Re
 }
 
 function main(): void {
-  const [command] = process.argv.slice(2);
-  if (command !== "summary" && command !== "doctor") throw new Error("usage: loeyae-aidlc runtime <summary|doctor>");
-  const projection = buildTeamLightRuntimeProjection();
+  const [command, ...rest] = process.argv.slice(2);
+  if (command !== "summary" && command !== "doctor") throw new Error("usage: loeyae-aidlc runtime <summary|doctor> [--module <module-id>]");
+  const moduleIndex = rest.indexOf("--module");
+  const moduleId = moduleIndex >= 0 ? rest[moduleIndex + 1] : undefined;
+  if (moduleIndex >= 0 && (!moduleId || moduleId.startsWith("--"))) throw new Error("--module requires a value");
+  const projection = buildTeamLightRuntimeProjection(process.cwd(), moduleId);
   const result = command === "doctor" ? { kind: "aidlc.aws-light.runtime-doctor", healthy: projection.warnings instanceof Array && projection.warnings.length === 0, projection } : projection;
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }

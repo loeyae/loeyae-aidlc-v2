@@ -7,8 +7,11 @@
  *   continue <token>  — Internal steering transport (load-steering chain)
  *   report [flags]    — Record stage outcome, advance state machine
  *   park              — Park workflow at current inter-stage boundary
+ *   split             — Split a single workflow into per-module workflows (4.3.0)
  *
- * State file: <project>/aidlc/active/aidlc-state.md
+ * State file: <project>/aidlc/active/aidlc-state.md (single layout). After `split`, the
+ * global, per-module (aidlc/active/modules/<id>/) and integration workflows are indexed
+ * by aidlc/active/registry.md; see aidlc-workflow-layout.ts.
  * Stage graph: <engine>/core/tools/data/stage-graph.json
  *
  * This tool is DETERMINISTIC: same state → same directive.
@@ -19,14 +22,14 @@
  * with `approval: block`; all other stages auto-advance after gates pass.
  */
 
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { randomUUID } from "crypto";
 import { spawnSync } from "child_process";
 import { createRequire } from "module";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
 import { planAgentExecution, type AgentExecutionPlan } from "./aidlc-agent-runtime";
 import { SEMANTIC_SENSORS } from "./aidlc-evidence";
-import { releaseExpiredModuleClaims } from "./aidlc-team-light";
 import { readSourceRevision } from "./aidlc-revision";
 import {
   evidenceRelativePath,
@@ -44,12 +47,36 @@ import {
   type UnitDescriptor,
 } from "./aidlc-execution-context";
 import {
+  ENGINE_VERSION,
+  GLOBAL_WORKFLOW,
+  appendAuditEvent,
   createInitialState,
+  lightStatePath,
   loadWorkflowState,
+  releaseExpiredModuleClaims,
   saveWorkflowState,
+  workflowRefKey,
   type HistoryEntry,
+  type WorkflowRef,
   type WorkflowState,
 } from "./aidlc-light-state";
+import {
+  evidenceScopeForInstance,
+  extractOwnedState,
+  integrationStageSlugs,
+  isSplitLayout,
+  loadWorkflowParts,
+  mergeWorkflowView,
+  ownerOfInstance,
+  relativeStatePath,
+  sameRef,
+  saveRegistry,
+  updateRegistry,
+  type RegistryCrossRequire,
+  type RegistrySharedContract,
+  type WorkflowParts,
+  type WorkflowRegistry,
+} from "./aidlc-workflow-layout";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -173,13 +200,15 @@ const PRD_ELIGIBLE_SCOPES = new Set(FULL_WORKFLOW_SCOPES);
 // Subcommands
 // ---------------------------------------------------------------------------
 
-const SUBCOMMANDS = ["next", "continue", "report", "park"] as const;
+const SUBCOMMANDS = ["next", "continue", "report", "park", "split"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
 type StageResult = (typeof VALID_RESULTS)[number];
 const NEXT_FLAGS = new Set(["scope", "work", "with-prd", "resume", "status", "text", "claim", "module", "owner", "branch", "worktree"]);
 const REPORT_FLAGS = new Set(["stage", "result", "user-input", "instruction-ack", "module", "unit", "instance", "owner"]);
+const SPLIT_FLAGS = new Set(["from", "dry-run"]);
+const INTEGRATION_WORKFLOW: WorkflowRef = { kind: "integration" };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -392,17 +421,18 @@ function dependencyDocuments(): string[] {
   return result.sort();
 }
 
+function moduleForValue(modules: ModuleDescriptor[], value: string, excluded?: string): string | undefined {
+  const normalized = value.trim();
+  return modules.find((module) => module.module_id !== excluded
+    && (normalized === module.module_id || normalized === module.service_id || normalized === module.name || normalized.includes(module.module_id)))?.module_id;
+}
+
 export function moduleDependencyGraph(): ModuleDependency[] {
   const modules = readModuleManifest(PROJECT_ROOT);
-  const moduleForValue = (value: string, excluded?: string): string | undefined => {
-    const normalized = value.trim();
-    return modules.find((module) => module.module_id !== excluded
-      && (normalized === module.module_id || normalized === module.service_id || normalized === module.name || normalized.includes(module.module_id)))?.module_id;
-  };
   const dependencies: ModuleDependency[] = [];
   const append = (providerValue: string, consumerValue: string, providerStageValue: string | undefined, consumerStageValue: string | undefined, source: string): void => {
-    const provider = moduleForValue(providerValue);
-    const consumer = moduleForValue(consumerValue, provider);
+    const provider = moduleForValue(modules, providerValue);
+    const consumer = moduleForValue(modules, consumerValue, provider);
     if (!provider || !consumer || provider === consumer) return;
     const providerStage = providerStageValue?.replace(/^(?:provider[_ -]?stage|提供方阶段)\s*[:：]\s*/i, "").trim() || "application-design";
     const consumerStage = consumerStageValue?.replace(/^(?:consumer[_ -]?stage|消费方阶段)\s*[:：]\s*/i, "").trim() || "application-design";
@@ -792,14 +822,29 @@ function validateEvidence(
   } else {
     const commit = asNonEmptyString(sourceRevision.commit);
     if (!commit) errors.push("source_revision.commit is required");
-    const activeRevision = readSourceRevision(PROJECT_ROOT);
-    if (commit && commit !== activeRevision.commit) errors.push(`source_revision.commit ${commit} does not match current HEAD ${activeRevision.commit}`);
     if (sourceRevision.dirty !== null && typeof sourceRevision.dirty !== "boolean") errors.push("source_revision.dirty must be boolean or null");
-    if (sourceRevision.dirty !== activeRevision.dirty) errors.push("source_revision.dirty no longer matches the current worktree");
-    if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.worktree_digest || ""))) {
-      errors.push("source_revision.worktree_digest must be a SHA-256 digest");
-    } else if (sourceRevision.worktree_digest !== activeRevision.worktree_digest) {
-      errors.push("source_revision.worktree_digest no longer matches the current worktree");
+    const recordedScope = typeof sourceRevision.scope === "string" ? sourceRevision.scope : undefined;
+    if (recordedScope === undefined || recordedScope === "worktree") {
+      // Historical binding: the exact commit, dirty flag and whole-worktree digest.
+      const activeRevision = readSourceRevision(PROJECT_ROOT);
+      if (commit && commit !== activeRevision.commit) errors.push(`source_revision.commit ${commit} does not match current HEAD ${activeRevision.commit}`);
+      if (sourceRevision.dirty !== activeRevision.dirty) errors.push("source_revision.dirty no longer matches the current worktree");
+      if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.worktree_digest || ""))) {
+        errors.push("source_revision.worktree_digest must be a SHA-256 digest");
+      } else if (sourceRevision.worktree_digest !== activeRevision.worktree_digest) {
+        errors.push("source_revision.worktree_digest no longer matches the current worktree");
+      }
+    } else {
+      // Split layout: content-addressed within the owning workflow's scope. The commit
+      // is provenance only, so another module's commit or write cannot invalidate it.
+      const expectedScope = evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
+      if (recordedScope !== expectedScope.label) {
+        errors.push(`source_revision.scope ${recordedScope} does not match the ${expectedScope.label} scope of ${instance.instance_id}`);
+      } else if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.scope_digest || ""))) {
+        errors.push("source_revision.scope_digest must be a SHA-256 digest");
+      } else if (sourceRevision.scope_digest !== readSourceRevision(PROJECT_ROOT, expectedScope).scope_digest) {
+        errors.push(`source_revision.scope_digest no longer matches the ${recordedScope} scope`);
+      }
     }
   }
 
@@ -1985,6 +2030,7 @@ function findClaimableModuleInstance(
   instances: StageInstance[],
   state: WorkflowState,
   moduleId: string,
+  all: StageInstance[] = instances,
 ): {
   instance: StageInstance | null;
   blocked?: { instance: StageInstance; unsatisfied: string[] };
@@ -2012,7 +2058,7 @@ function findClaimableModuleInstance(
         continue;
       }
     }
-    const unsatisfied = checkRequires(instance, instances, state);
+    const unsatisfied = checkRequires(instance, all, state);
     if (unsatisfied.length === 0) return { instance };
     return { instance: null, blocked: { instance, unsatisfied } };
   }
@@ -2021,7 +2067,8 @@ function findClaimableModuleInstance(
 
 function findNextInstance(
   instances: StageInstance[],
-  state: WorkflowState
+  state: WorkflowState,
+  all: StageInstance[] = instances,
 ): {
   instance: StageInstance | null;
   blocked?: { instance: StageInstance; unsatisfied: string[] };
@@ -2055,12 +2102,12 @@ function findNextInstance(
           timestamp: new Date().toISOString(),
           user_input: `Auto-skipped: condition "${stage.condition}" evaluated to false`,
         });
-        reconcileStageSummaries(state, instances);
+        reconcileStageSummaries(state, all);
         continue;
       }
     }
 
-    const unsatisfied = checkRequires(instance, instances, state);
+    const unsatisfied = checkRequires(instance, all, state);
     if (unsatisfied.length > 0) {
       return {
         instance: null,
@@ -2094,14 +2141,14 @@ function unsupportedFlag(flags: Record<string, string>, allowed: ReadonlySet<str
   return Object.keys(flags).find((flag) => !allowed.has(flag));
 }
 
-function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, agentExecution: AgentExecutionPlan): string {
+function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, agentExecution: AgentExecutionPlan, reportCommand?: string): string {
   const unit = instance.module_id && instance.unit_id
     ? `当前单元：${instance.module_id}/${instance.unit_id}。团队成员可用 unit select 声明负责人与分支。`
     : "当前阶段不要求成员选择单元；按产物、review、构建和测试门禁推进。";
   const artifacts = instance.stage.produces.length
     ? instance.stage.produces.map((pattern) => instanceArtifactPattern(pattern, instance)).join("、")
     : "本阶段没有声明文件产物";
-  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；状态、审批和 merge 权限仅属于 conductor。\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。\n下一步：完成后将结构化结果交回 conductor，再运行 orchestrate report。`;
+  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；状态、审批和 merge 权限仅属于 conductor。\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。\n下一步：完成后将结构化结果交回 conductor，再运行 ${reportCommand || "orchestrate report"}。`;
 }
 
 function clearActiveContext(state: WorkflowState): void {
@@ -2111,8 +2158,8 @@ function clearActiveContext(state: WorkflowState): void {
   delete state.current_unit;
 }
 
-function selectActiveContext(state: WorkflowState): void {
-  const next = Object.values(state.active_instances || {}).sort((left, right) => left.stage_instance.localeCompare(right.stage_instance))[0];
+function selectActiveContext(state: WorkflowState, owns: (instanceId: string) => boolean = () => true): void {
+  const next = Object.values(state.active_instances || {}).filter((claim) => owns(claim.stage_instance)).sort((left, right) => left.stage_instance.localeCompare(right.stage_instance))[0];
   if (!next) {
     clearActiveContext(state);
     return;
@@ -2134,11 +2181,11 @@ function missingSemanticEvidence(instance: StageInstance): string[] {
     .filter((sensor) => !existsSync(join(PROJECT_ROOT, evidenceRelativePath(instance.stage.slug, sensor, instance.axis, instance))));
 }
 
-function produceMissingSemanticEvidence(instance: StageInstance): string | null {
+function produceMissingSemanticEvidence(instance: StageInstance, refresh = false): string | null {
   const missing = missingSemanticEvidence(instance);
   if (missing.length === 0) return null;
   const evidenceTool = join(__dirname, "aidlc-evidence.ts");
-  const result = spawnSync(process.execPath, [TSX_CLI, evidenceTool, "run", "--stage", instance.stage.slug, "--instance", instance.instance_id, "--all-sensors"], {
+  const result = spawnSync(process.execPath, [TSX_CLI, evidenceTool, "run", "--stage", instance.stage.slug, "--instance", instance.instance_id, "--all-sensors", ...(refresh ? ["--refresh"] : [])], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
     shell: false,
@@ -2174,6 +2221,568 @@ export function evidenceRoot(instance: StageInstance): string {
 }
 
 // ---------------------------------------------------------------------------
+// Split per-module layout (4.3.0)
+// ---------------------------------------------------------------------------
+
+interface EngineContext {
+  owner: WorkflowRef;
+  loaded: WorkflowParts;
+  view: WorkflowState;
+}
+
+function workflowLabel(ref: WorkflowRef): string {
+  if (ref.kind === "module") return `Module workflow "${ref.module_id}"`;
+  return ref.kind === "integration" ? "Integration workflow" : "Global workflow";
+}
+
+function moduleRef(moduleId: string): WorkflowRef {
+  return { kind: "module", module_id: moduleId };
+}
+
+function openSplitContext(owner: WorkflowRef): EngineContext {
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  if (!loaded.split) throw new Error("split workflow layout is not initialized");
+  for (const part of loaded.parts.values()) {
+    if (releaseExpiredModuleClaims(part.state).length > 0) saveWorkflowState(PROJECT_ROOT, part.state, part.ref);
+  }
+  if (!loaded.parts.has(workflowRefKey(owner))) throw new Error(`${workflowLabel(owner)} does not exist in the registry`);
+  return { owner, loaded, view: mergeWorkflowView(loaded.parts, owner) };
+}
+
+function ownedInstances(instances: StageInstance[], ref: WorkflowRef): StageInstance[] {
+  return instances.filter((instance) => sameRef(ownerOfInstance(instance.instance_id), ref));
+}
+
+function summarizeOwned(state: WorkflowState, instances: StageInstance[]): void {
+  const completed = new Set(state.completed_stage_instances);
+  const skipped = new Set(state.skipped_stage_instances);
+  state.completed_stages = [];
+  state.skipped_stages = [];
+  for (const slug of [...new Set(instances.map((instance) => instance.stage.slug))]) {
+    const group = instances.filter((instance) => instance.stage.slug === slug);
+    if (!group.every((instance) => completed.has(instance.instance_id) || skipped.has(instance.instance_id))) continue;
+    if (group.every((instance) => skipped.has(instance.instance_id))) state.skipped_stages.push(slug);
+    else state.completed_stages.push(slug);
+  }
+}
+
+/** Persist the owner's portion of a mutated view, then refresh the registry projections. */
+function commitSplitContext(ctx: EngineContext, view: WorkflowState = ctx.view): void {
+  const key = workflowRefKey(ctx.owner);
+  const part = ctx.loaded.parts.get(key);
+  if (!part) throw new Error(`${workflowLabel(ctx.owner)} is not loaded`);
+  const next = extractOwnedState(view, part.state, ctx.owner);
+  summarizeOwned(next, ownedInstances(expandStageInstances(loadGraph(), view), ctx.owner));
+  saveWorkflowState(PROJECT_ROOT, next, ctx.owner);
+  ctx.loaded.parts.set(key, { ref: ctx.owner, state: next });
+  view.revision = next.revision;
+  view.updated_at = next.updated_at;
+  refreshRegistry(ctx.loaded);
+}
+
+function markdownTableCells(line: string): string[] {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
+
+/**
+ * Cross-module shared contracts derived from docs/aidlc/ideation/product-contracts.md:
+ * the contract list gives the provider module, the consumer status table gives each
+ * consumer module and whether it is verified (已验证 / verified).
+ */
+function sharedContractProjection(): RegistrySharedContract[] {
+  const path = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "product-contracts.md");
+  if (!existsSync(path)) return [];
+  let modules: ModuleDescriptor[];
+  try {
+    modules = readModuleManifest(PROJECT_ROOT);
+  } catch {
+    return [];
+  }
+  const providers = new Map<string, string>();
+  const consumers = new Map<string, Map<string, boolean>>();
+  let header: string[] | undefined;
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+    if (!line.trim().startsWith("|")) {
+      header = undefined;
+      continue;
+    }
+    const cells = markdownTableCells(line);
+    if (cells.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
+    if (!header) {
+      header = cells;
+      continue;
+    }
+    const column = (pattern: RegExp): number => header!.findIndex((cell) => pattern.test(cell));
+    const idIndex = column(/契约\s*ID|^contract(?:\s*id)?$/i);
+    const contractId = idIndex >= 0 ? cells[idIndex] : "";
+    if (!contractId || contractId === "-") continue;
+    const providerIndex = column(/^(?:提供方|provider)$/i);
+    const consumerIndex = column(/^(?:消费者|消费方|consumers?)$/i);
+    const statusIndex = column(/^(?:状态|status)$/i);
+    if (providerIndex >= 0 && consumerIndex < 0) {
+      const provider = moduleForValue(modules, cells[providerIndex] || "");
+      if (provider) providers.set(contractId, provider);
+    } else if (consumerIndex >= 0 && statusIndex >= 0) {
+      const consumer = moduleForValue(modules, cells[consumerIndex] || "");
+      if (!consumer) continue;
+      const status = cells[statusIndex] || "";
+      const verified = /已验证|^verified$/i.test(status) && !/未验证|unverified/i.test(status);
+      const entry = consumers.get(contractId) || new Map<string, boolean>();
+      entry.set(consumer, (entry.get(consumer) ?? true) && verified);
+      consumers.set(contractId, entry);
+    }
+  }
+  const source = relative(PROJECT_ROOT, path).replace(/\\/g, "/");
+  return [...providers.entries()].flatMap(([contractId, provider]) => {
+    const moduleConsumers = [...(consumers.get(contractId) || new Map<string, boolean>()).entries()].filter(([consumer]) => consumer !== provider);
+    if (moduleConsumers.length === 0) return [];
+    return [{
+      contract_id: contractId,
+      provider,
+      consumers: moduleConsumers.map(([consumer]) => consumer),
+      verified: moduleConsumers.every(([, verified]) => verified),
+      source,
+    }];
+  });
+}
+
+function crossModuleRequireProjection(view: WorkflowState, instances: StageInstance[]): RegistryCrossRequire[] {
+  let dependencies: ModuleDependency[];
+  try {
+    dependencies = moduleDependencyGraph();
+  } catch {
+    return [];
+  }
+  return dependencies.map((dependency) => {
+    const providers = instances.filter((candidate) => candidate.axis === "module" && candidate.module_id === dependency.provider_module && candidate.stage.slug === dependency.provider_stage);
+    return {
+      consumer: dependency.consumer_module,
+      consumer_stage: dependency.consumer_stage,
+      provider: dependency.provider_module,
+      provider_stage: dependency.provider_stage,
+      satisfied: providers.length > 0 && providers.every((provider) => isInstanceResolved(view, provider.instance_id)),
+      source: dependency.source,
+    };
+  });
+}
+
+/** Recompute every projection column from the loaded workflow parts; identity rows are kept. */
+function registryProjection(registry: WorkflowRegistry, loaded: WorkflowParts): WorkflowRegistry {
+  const view = mergeWorkflowView(loaded.parts, GLOBAL_WORKFLOW);
+  const instances = expandStageInstances(loadGraph(), view);
+  const resolved = (instance: StageInstance): boolean => isInstanceResolved(view, instance.instance_id);
+  const modules = registry.modules.map((row) => {
+    const state = loaded.parts.get(`module:${row.module_id}`)?.state;
+    if (!state) return row;
+    const own = instances.filter((instance) => instance.module_id === row.module_id && instance.axis !== "project");
+    const inceptionDone = own.filter((instance) => instance.axis === "module").every(resolved);
+    return {
+      ...row,
+      status: state.status,
+      current_stage: state.current_stage_instance || state.current_stage || "-",
+      inception_done: inceptionDone,
+      construction_done: inceptionDone && own.filter((instance) => instance.axis === "unit").every(resolved),
+      owner: state.module_selections?.[row.module_id]?.owner || Object.values(state.active_instances || {})[0]?.owner || "-",
+    };
+  });
+  const registered = new Set(modules.map((row) => row.module_id));
+  const unregistered = [...new Set(instances.filter((instance) => instance.axis !== "project" && instance.module_id && !registered.has(instance.module_id)).map((instance) => instance.module_id as string))];
+  const sharedContracts = sharedContractProjection();
+  const blocking = [
+    ...unregistered.map((moduleId) => `workflow:${moduleId}`),
+    ...modules.filter((row) => !row.construction_done).map((row) => `construction:${row.module_id}`),
+    ...sharedContracts.filter((contract) => !contract.verified).map((contract) => `contract:${contract.contract_id}`),
+  ];
+  const integration = loaded.parts.get("integration")?.state;
+  return {
+    ...registry,
+    modules,
+    integration: {
+      ...registry.integration,
+      status: integration?.status || registry.integration.status,
+      current_stage: integration?.current_stage_instance || integration?.current_stage || "-",
+      barrier_ready: blocking.length === 0,
+      blocking,
+    },
+    shared_contracts: sharedContracts,
+    cross_module_requires: crossModuleRequireProjection(view, instances),
+  };
+}
+
+function refreshRegistry(loaded: WorkflowParts): void {
+  const updated = updateRegistry(PROJECT_ROOT, (current) => registryProjection(current as WorkflowRegistry, loaded));
+  loaded.registry = updated;
+}
+
+function reportCommandFor(instance: StageInstance): string {
+  const target = `${instance.module_id ? ` --module ${instance.module_id}` : ""}${instance.unit_id ? ` --unit ${instance.unit_id}` : ""}`;
+  const result = instance.stage.approval === "block" ? "approved --user-input Approve" : "completed";
+  return `orchestrate report --stage ${instance.stage.slug}${target} --result ${result}`;
+}
+
+function advanceSplit(ctx: EngineContext, graph: StageGraph, args: string[], flags: Record<string, string>): Promise<Directive> {
+  const key = workflowRefKey(ctx.owner);
+  const persisted = ctx.loaded.parts.get(key)!.state;
+  return advance(graph, {
+    state: ctx.view,
+    flags,
+    commit: (view) => commitSplitContext(ctx, view),
+    retry: () => handleNext(args),
+    label: workflowLabel(ctx.owner),
+    finishedMessage: (count) => `🎉 ${workflowLabel(ctx.owner)}: all ${count} stage instances resolved.`,
+    candidate: (instance) => sameRef(ownerOfInstance(instance.instance_id), ctx.owner),
+    extras: { workflow: key, workflow_id: persisted.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, ctx.owner) },
+    reportCommand: reportCommandFor,
+  });
+}
+
+function ensureModuleWorkflow(moduleId: string): Directive | null {
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  if (loaded.parts.has(`module:${moduleId}`)) return null;
+  let modules: ModuleDescriptor[];
+  try {
+    modules = readModuleManifest(PROJECT_ROOT);
+  } catch (error) {
+    return { kind: "error", message: `Module manifest is unavailable: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (!modules.some((module) => module.module_id === moduleId)) {
+    return { kind: "error", message: `Unknown module "${moduleId}"; declare it in docs/aidlc/ideation/module-manifest.json first.` };
+  }
+  const global = loaded.parts.get("global")!.state;
+  const ref = moduleRef(moduleId);
+  const state: WorkflowState = {
+    ...createInitialState(global.scope, ENGINE_VERSION, randomUUID(), global.selected_optional_stages, global.work_description),
+    workflow_kind: "module",
+    module_id: moduleId,
+    parent_workflow_id: global.workflow_id,
+    depth: global.depth,
+    current_phase: "inception",
+  };
+  saveWorkflowState(PROJECT_ROOT, state, ref);
+  appendAuditEvent(PROJECT_ROOT, ref, "WORKFLOW_CREATED", { "Parent Workflow ID": global.workflow_id, Trigger: "next --module" });
+  updateRegistry(PROJECT_ROOT, (current) => {
+    const registry = current as WorkflowRegistry;
+    if (registry.modules.some((row) => row.module_id === moduleId)) return registry;
+    return {
+      ...registry,
+      modules: [...registry.modules, { module_id: moduleId, workflow_id: state.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, ref), status: "running", current_stage: "-", inception_done: false, construction_done: false, owner: "-" }],
+    };
+  });
+  return null;
+}
+
+function firstLine(value: unknown): string {
+  return String(value || "").split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 2).join(" ");
+}
+
+/**
+ * `next` in the split layout. `--module <id>` advances only that module. Without it the
+ * global workflow goes first (compatible behavior), then the first module that can advance
+ * (blocked, parked or finished modules are reported, never allowed to hold the others),
+ * and finally the integration workflow once its cross-module barrier is ready.
+ */
+async function splitNext(args: string[], flags: Record<string, string>, graph: StageGraph): Promise<Directive> {
+  if (flags.module) {
+    const failure = ensureModuleWorkflow(flags.module);
+    if (failure) return failure;
+    return advanceSplit(openSplitContext(moduleRef(flags.module)), graph, args, flags);
+  }
+  const globalContext = openSplitContext(GLOBAL_WORKFLOW);
+  if (globalContext.loaded.parts.get("global")!.state.status !== "done") {
+    const directive = await advanceSplit(globalContext, graph, args, flags);
+    if (directive.kind !== "done") return directive;
+  }
+  const moduleFlags = Object.fromEntries(Object.entries(flags).filter(([key]) => key !== "resume"));
+  const notes: string[] = [];
+  let modulesDone = true;
+  for (const row of openSplitContext(GLOBAL_WORKFLOW).loaded.registry!.modules) {
+    const ctx = openSplitContext(moduleRef(row.module_id));
+    const state = ctx.loaded.parts.get(`module:${row.module_id}`)!.state;
+    if (state.status === "done") continue;
+    modulesDone = false;
+    if (state.status === "parked") {
+      notes.push(`module:${row.module_id}: parked at ${state.current_stage_instance || state.current_stage || "-"} (resume with next --module ${row.module_id} --resume)`);
+      continue;
+    }
+    const directive = await advanceSplit(ctx, graph, args, moduleFlags);
+    if (directive.kind === "run-stage") return notes.length ? { ...directive, other_workflows: notes } : directive;
+    if (directive.kind === "done") continue;
+    notes.push(`module:${row.module_id}: ${firstLine(directive.message)}`);
+  }
+  if (!modulesDone) {
+    const pending = openSplitContext(GLOBAL_WORKFLOW).loaded.registry!.modules.filter((row) => {
+      const state = loadWorkflowState(PROJECT_ROOT, moduleRef(row.module_id));
+      return state && state.status !== "done";
+    });
+    if (pending.length > 0) {
+      return { kind: "error", message: `🚫 No module workflow can advance right now:\n${notes.map((note) => `  • ${note}`).join("\n")}\n  Use next --module <module-id> to work on one module.`, other_workflows: notes };
+    }
+  }
+  const integrationContext = openSplitContext(INTEGRATION_WORKFLOW);
+  if (integrationContext.loaded.parts.get("integration")!.state.status === "done") {
+    return { kind: "done", message: "🎉 All split workflows finished (global, modules and integration)." };
+  }
+  const barrier = registryProjection(integrationContext.loaded.registry!, integrationContext.loaded).integration;
+  if (!barrier.barrier_ready) {
+    return {
+      kind: "error",
+      message: `🚫 Cross-module integration barrier is not ready: ${barrier.blocking.join(", ")}. Every module must finish construction and every shared contract consumer must be 已验证/verified in docs/aidlc/ideation/product-contracts.md.`,
+      workflow: "integration",
+      blocking: barrier.blocking,
+    };
+  }
+  const directive = await advanceSplit(integrationContext, graph, args, flags);
+  if (directive.kind === "done") return { ...directive, message: "🎉 All split workflows finished (global, modules and integration)." };
+  return directive;
+}
+
+function splitStatusDirective(graph: StageGraph, moduleId?: string): Directive {
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  const view = mergeWorkflowView(loaded.parts, GLOBAL_WORKFLOW);
+  const instances = expandStageInstances(graph, view);
+  const projection = registryProjection(loaded.registry!, loaded);
+  const refs = moduleId
+    ? [moduleRef(moduleId)]
+    : [GLOBAL_WORKFLOW, ...projection.modules.map((row) => moduleRef(row.module_id)), INTEGRATION_WORKFLOW];
+  const lines = refs.map((ref) => {
+    const state = loaded.parts.get(workflowRefKey(ref))?.state;
+    if (!state) return `  [${workflowRefKey(ref)}] (no workflow yet)`;
+    const own = ownedInstances(instances, ref);
+    const completed = own.filter((instance) => state.completed_stage_instances.includes(instance.instance_id)).length;
+    const skipped = own.filter((instance) => state.skipped_stage_instances.includes(instance.instance_id)).length;
+    const remaining = own.filter((instance) => !isInstanceResolved(view, instance.instance_id)).map((instance) => instance.instance_id);
+    return `  [${workflowRefKey(ref)}] ${state.status} | current: ${state.current_stage_instance || state.current_stage || "(none)"} | completed: ${completed}/${own.length} | skipped: ${skipped} | remaining: ${remaining.length}${remaining.length ? ` (${remaining.slice(0, 6).join(", ")}${remaining.length > 6 ? ", …" : ""})` : ""}`;
+  });
+  const barrier = projection.integration;
+  return {
+    kind: "print",
+    message: `📊 Split Workflow Status (registry: aidlc/active/registry.md)\n` +
+      `  Scope: ${view.scope} | Global workflow: ${projection.global_workflow_id}\n` +
+      `${lines.join("\n")}\n` +
+      `  Integration barrier: ${barrier.barrier_ready ? "ready" : `blocked (${barrier.blocking.join(", ")})`}`,
+  };
+}
+
+interface LegacyEvidence {
+  path: string;
+  instance: string;
+  valid: boolean;
+  record: Record<string, unknown>;
+}
+
+/** Evidence still bound to the whole worktree; `valid` means it would pass the historical check now. */
+function legacyEvidenceInventory(): LegacyEvidence[] {
+  const root = join(PROJECT_ROOT, ".aidlc", "evidence");
+  if (!existsSync(root)) return [];
+  const current = readSourceRevision(PROJECT_ROOT);
+  const inventory: LegacyEvidence[] = [];
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(path);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      let record: Record<string, unknown>;
+      try {
+        record = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const revision = asRecord(record?.source_revision);
+      if (!revision || typeof revision.scope === "string") continue;
+      const segments = relative(root, path).split(sep);
+      const derived = segments.length === 3
+        ? `${segments[0]}@module:${segments[1]}`
+        : segments.length === 4
+          ? `${segments[0]}@module:${segments[1]}@unit:${segments[2]}`
+          : segments[0];
+      const instance = typeof record.stage_instance === "string" && record.stage_instance ? record.stage_instance : derived;
+      if (ownerOfInstance(instance).kind === "integration") continue;
+      inventory.push({
+        path,
+        instance,
+        valid: revision.commit === current.commit && revision.dirty === current.dirty && revision.worktree_digest === current.worktree_digest,
+        record,
+      });
+    }
+  };
+  visit(root);
+  return inventory.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+/** Re-anchor still-valid legacy evidence to its split scope; mismatched evidence needs --refresh. */
+function anchorLegacyEvidence(inventory: LegacyEvidence[]): { anchored: string[]; stale: string[] } {
+  const anchored: string[] = [];
+  const stale: string[] = [];
+  const digests = new Map<string, string | null | undefined>();
+  for (const item of inventory) {
+    const label = relative(PROJECT_ROOT, item.path).replace(/\\/g, "/");
+    if (!item.valid) {
+      stale.push(`${label} (${item.instance})`);
+      continue;
+    }
+    const scope = evidenceScopeForInstance(PROJECT_ROOT, item.instance);
+    if (scope.label === "worktree") continue;
+    if (!digests.has(scope.label)) digests.set(scope.label, readSourceRevision(PROJECT_ROOT, scope).scope_digest);
+    const digest = digests.get(scope.label);
+    if (!digest) {
+      stale.push(`${label} (${item.instance})`);
+      continue;
+    }
+    const record = { ...item.record, source_revision: { ...(item.record.source_revision as Record<string, unknown>), scope: scope.label, scope_digest: digest, anchored_by: "orchestrate split", anchored_at: new Date().toISOString() } };
+    const temporary = `${item.path}.tmp-${process.pid}-${Date.now()}`;
+    writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    renameSync(temporary, item.path);
+    anchored.push(label);
+  }
+  return { anchored, stale };
+}
+
+/**
+ * Split a single-layout workflow into global, per-module and integration workflows without
+ * losing any recorded stage instance, history row, claim or selection.
+ */
+function performSplit(fromId: string, dryRun: boolean, trigger: string): Directive {
+  if (isSplitLayout(PROJECT_ROOT)) return { kind: "error", message: "The workflow layout is already split; use next --module <module-id>." };
+  const legacy = loadState();
+  if (!legacy) return { kind: "error", message: "No active workflow to split." };
+  const requested = fromId.trim();
+  if (!(legacy.workflow_id === requested || (requested.length >= 8 && legacy.workflow_id.startsWith(requested)))) {
+    return { kind: "error", message: `--from ${requested} does not match the active workflow ${legacy.workflow_id}.` };
+  }
+  if (!legacy.completed_stages.includes("module-division")) {
+    return { kind: "error", message: "Per-module workflows require a completed module-division stage and docs/aidlc/ideation/module-manifest.json." };
+  }
+  let modules: ModuleDescriptor[];
+  try {
+    modules = readModuleManifest(PROJECT_ROOT);
+  } catch (error) {
+    return { kind: "error", message: `Module manifest is unavailable: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const instances = expandStageInstances(loadGraph(), legacy);
+  const refs: WorkflowRef[] = [GLOBAL_WORKFLOW, ...modules.map((module) => moduleRef(module.module_id)), INTEGRATION_WORKFLOW];
+  const known = new Set(refs.map(workflowRefKey));
+  const tracked = [
+    ...legacy.completed_stage_instances,
+    ...legacy.skipped_stage_instances,
+    ...Object.keys(legacy.active_instances || {}),
+    ...legacy.history.map((entry) => entry.instance_id).filter((value): value is string => Boolean(value)),
+  ];
+  const orphans = [...new Set(tracked.filter((instance) => !known.has(workflowRefKey(ownerOfInstance(instance)))))];
+  if (orphans.length > 0) {
+    return { kind: "error", message: `Cannot split: ${orphans.join(", ")} belong to modules missing from module-manifest.json. Restore the manifest before splitting.` };
+  }
+  const currentOwner = legacy.current_stage_instance ? ownerOfInstance(legacy.current_stage_instance) : GLOBAL_WORKFLOW;
+  const planned = refs.map((ref) => {
+    const isCurrent = sameRef(ref, currentOwner);
+    const base: WorkflowState = ref.kind === "global"
+      ? { ...legacy, workflow_kind: "global" }
+      : {
+        ...createInitialState(legacy.scope, ENGINE_VERSION, randomUUID(), legacy.selected_optional_stages, legacy.work_description),
+        workflow_kind: ref.kind,
+        ...(ref.kind === "module" ? { module_id: ref.module_id } : {}),
+        parent_workflow_id: legacy.workflow_id,
+        depth: legacy.depth,
+        current_phase: legacy.current_phase,
+      };
+    const source: WorkflowState = isCurrent
+      ? legacy
+      : { ...legacy, current_stage: "", current_stage_instance: undefined, current_module: undefined, current_unit: undefined };
+    const state = extractOwnedState(source, base, ref);
+    const own = ownedInstances(instances, ref);
+    summarizeOwned(state, own);
+    const unresolved = own.filter((instance) => !state.completed_stage_instances.includes(instance.instance_id) && !state.skipped_stage_instances.includes(instance.instance_id));
+    state.status = legacy.status === "done" ? "done" : isCurrent ? legacy.status : own.length > 0 && unresolved.length === 0 ? "done" : "running";
+    return { ref, state, total: own.length, completed: state.completed_stage_instances.length, unresolved: unresolved.length };
+  });
+  const inventory = legacyEvidenceInventory();
+  const describe = planned.map((item) => `  [${workflowRefKey(item.ref)}] ${item.state.status} | current: ${item.state.current_stage_instance || "-"} | completed: ${item.completed}/${item.total} | pending: ${item.unresolved}`);
+  const staleCount = inventory.filter((item) => !item.valid).length;
+  if (dryRun) {
+    return {
+      kind: "print",
+      message: `🔎 Split plan for workflow ${legacy.workflow_id} (dry run, nothing written)\n${describe.join("\n")}\n` +
+        `  Evidence: ${inventory.length - staleCount} still valid (will be re-anchored), ${staleCount} already stale (refresh with evidence run --module <id> --refresh).`,
+      split_plan: planned.map((item) => ({ workflow: workflowRefKey(item.ref), status: item.state.status, current: item.state.current_stage_instance || null, completed: item.completed, total: item.total, pending: item.unresolved })),
+      stale_evidence: inventory.filter((item) => !item.valid).map((item) => relative(PROJECT_ROOT, item.path).replace(/\\/g, "/")),
+    };
+  }
+
+  const now = new Date().toISOString();
+  const created: WorkflowRef[] = [];
+  try {
+    for (const item of planned) {
+      if (item.ref.kind === "global") continue;
+      if (existsSync(lightStatePath(PROJECT_ROOT, item.ref))) throw new Error(`${relativeStatePath(PROJECT_ROOT, item.ref)} already exists`);
+      saveWorkflowState(PROJECT_ROOT, { ...item.state, revision: 0 }, item.ref);
+      created.push(item.ref);
+    }
+    const integration = loadWorkflowState(PROJECT_ROOT, INTEGRATION_WORKFLOW)!;
+    saveRegistry(PROJECT_ROOT, {
+      version: "1",
+      global_workflow_id: legacy.workflow_id,
+      split_from_workflow_id: legacy.workflow_id,
+      split_at: now,
+      updated_at: now,
+      modules: planned.filter((item) => item.ref.kind === "module").map((item) => {
+        const persisted = loadWorkflowState(PROJECT_ROOT, item.ref)!;
+        return { module_id: (item.ref as { module_id: string }).module_id, workflow_id: persisted.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, item.ref), status: persisted.status, current_stage: persisted.current_stage_instance || "-", inception_done: false, construction_done: false, owner: "-" };
+      }),
+      integration: { workflow_id: integration.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, INTEGRATION_WORKFLOW), status: integration.status, current_stage: "-", barrier_ready: false, blocking: [] },
+      shared_contracts: [],
+      cross_module_requires: [],
+    });
+    saveWorkflowState(PROJECT_ROOT, planned.find((item) => item.ref.kind === "global")!.state, GLOBAL_WORKFLOW);
+  } catch (error) {
+    for (const ref of created) {
+      for (const path of [lightStatePath(PROJECT_ROOT, ref), join(dirname(lightStatePath(PROJECT_ROOT, ref)), "audit.md")]) {
+        if (existsSync(path)) rmFile(path);
+      }
+    }
+    const registry = join(PROJECT_ROOT, "aidlc", "active", "registry.md");
+    if (existsSync(registry)) rmFile(registry);
+    return { kind: "error", message: `Split aborted and rolled back: ${error instanceof Error ? error.message : String(error)}` };
+  }
+
+  const evidence = anchorLegacyEvidence(inventory);
+  const moduleIds = modules.map((module) => module.module_id).join(", ");
+  appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "WORKFLOW_SPLIT", {
+    Trigger: trigger,
+    "Split From": legacy.workflow_id,
+    Modules: moduleIds,
+    "Evidence Anchored": String(evidence.anchored.length),
+    "Evidence Stale": String(evidence.stale.length),
+  });
+  for (const item of planned) {
+    if (item.ref.kind === "global") continue;
+    appendAuditEvent(PROJECT_ROOT, item.ref, "WORKFLOW_CREATED", {
+      "Parent Workflow ID": legacy.workflow_id,
+      Trigger: trigger,
+      "Migrated Instances": String(item.state.completed_stage_instances.length + item.state.skipped_stage_instances.length),
+    });
+  }
+  refreshRegistry(loadWorkflowParts(PROJECT_ROOT));
+  return {
+    kind: "print",
+    message: `✅ Workflow ${legacy.workflow_id} split into per-module workflows (registry: aidlc/active/registry.md)\n${describe.join("\n")}\n` +
+      `  Evidence: ${evidence.anchored.length} re-anchored to their scope, ${evidence.stale.length} stale` +
+      (evidence.stale.length ? ` — refresh completed stages with evidence run --stage <slug> --module <id> --refresh, then report --stage <slug> --module <id> --result completed.` : "."),
+    split: {
+      registry: "aidlc/active/registry.md",
+      workflows: planned.map((item) => ({ workflow: workflowRefKey(item.ref), state_path: relativeStatePath(PROJECT_ROOT, item.ref), status: item.state.status })),
+      evidence,
+    },
+  };
+}
+
+function rmFile(path: string): void {
+  const stat = lstatSync(path);
+  if (stat.isFile() || stat.isSymbolicLink()) unlinkSync(path);
+}
+
+// ---------------------------------------------------------------------------
 // next — compute the next directive without mutating state
 // ---------------------------------------------------------------------------
 
@@ -2193,9 +2802,6 @@ async function handleNext(args: string[]): Promise<Directive> {
     return { kind: "error", message: "--with-prd is a boolean flag and does not accept a value" };
   }
 
-  // Check for --resume flag
-  const isResume = "resume" in flags;
-
   // Check for --scope flag (initializes a new workflow)
   const scopeFlag = flags.scope;
   if (scopeFlag && !VALID_SCOPES.has(scopeFlag)) {
@@ -2213,6 +2819,7 @@ async function handleNext(args: string[]): Promise<Directive> {
   }
 
   // Check for --status flag
+  if ("status" in flags && isSplitLayout(PROJECT_ROOT)) return splitStatusDirective(graph, flags.module);
   if ("status" in flags) {
     const state = loadState();
     if (!state) {
@@ -2234,6 +2841,21 @@ async function handleNext(args: string[]): Promise<Directive> {
         `  Skipped: ${skippedCount}\n` +
         `  Remaining: ${remaining.length} (${remaining.map((instance) => instance.instance_id).join(", ")})`,
     };
+  }
+
+  // Split per-module layout (4.3.0): route to the owning workflow. A legacy multi-module
+  // workflow is split automatically the first time `next --module <id>` is used without --claim.
+  if (!isSplitLayout(PROJECT_ROOT) && flags.module && !claimRequested) {
+    const legacy = loadState();
+    if (!legacy) {
+      return { kind: "error", message: "No active workflow. Start with next --scope <scope> --work <description>; per-module workflows start after module-division completes." };
+    }
+    const split = performSplit(legacy.workflow_id, false, "next --module");
+    if (split.kind === "error") return split;
+  }
+  if (isSplitLayout(PROJECT_ROOT)) {
+    if (withPrd) return { kind: "error", message: "--with-prd can only be selected when initializing a new workflow" };
+    return splitNext(args, flags, graph);
   }
 
   // Load or create state
@@ -2266,7 +2888,7 @@ async function handleNext(args: string[]): Promise<Directive> {
       } as unknown as Directive;
     }
     const selectedOptionalStages = withPrd ? ["prd-generation"] : [];
-    state = createInitialState(scopeFlag, "4.2.1", undefined, selectedOptionalStages, workDescription);
+    state = createInitialState(scopeFlag, ENGINE_VERSION, undefined, selectedOptionalStages, workDescription);
     saveState(state);
     return {
       kind: "print",
@@ -2277,38 +2899,77 @@ async function handleNext(args: string[]): Promise<Directive> {
     };
   }
 
+  const legacyState = state;
+  return advance(graph, {
+    state: legacyState,
+    flags,
+    commit: (value) => saveState(value),
+    retry: () => handleNext(args),
+    label: "Workflow",
+    finishedMessage: (count) => `🎉 All ${count} stage instances resolved. Workflow finished.`,
+  });
+}
+
+interface AdvanceOptions {
+  /** Legacy: the workflow state itself. Split: the merged view whose owner is being advanced. */
+  state: WorkflowState;
+  flags: Record<string, string>;
+  commit: (state: WorkflowState) => void;
+  retry: () => Promise<Directive>;
+  label: string;
+  finishedMessage: (count: number) => string;
+  /** Split layout: only the owner's instances are candidates; dependencies still see every instance. */
+  candidate?: (instance: StageInstance) => boolean;
+  extras?: Record<string, unknown>;
+  reportCommand?: (instance: StageInstance) => string;
+}
+
+/**
+ * Advance one workflow: parked/resume handling, instance selection, admission gates
+ * (requires, consumes, cross-module dependencies, upstream sensor re-check), current
+ * context and optional claim. Shared by the single layout and every split workflow.
+ */
+async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directive> {
+  const { state, flags } = opts;
+  const isResume = "resume" in flags;
+  const claimRequested = "claim" in flags;
+  const extras = opts.extras || {};
+
   // Parked workflow — resume or report parked
   if (state.status === "parked") {
     if (!isResume) {
       return {
         kind: "parked",
         stage: state.current_stage,
-        message: `Workflow is parked at stage "${state.current_stage}". Pass --resume to continue.`,
+        message: `${opts.label} is parked at stage "${state.current_stage}". Pass --resume to continue.`,
+        ...extras,
       };
     }
     // Resume: clear parked status
     state.status = "running";
-    saveState(state);
+    opts.commit(state);
   }
 
   // Done workflow
   if (state.status === "done") {
-    return { kind: "done", message: "Workflow is already complete." };
+    return { kind: "done", message: `${opts.label} is already complete.`, ...extras };
   }
 
   // Expand the static graph into the currently known execution instances.
   const instances = expandStageInstances(graph, state);
+  const candidates = opts.candidate ? instances.filter(opts.candidate) : instances;
   const search = claimRequested
-    ? findClaimableModuleInstance(instances, state, flags.module as string)
-    : findNextInstance(instances, state);
+    ? findClaimableModuleInstance(candidates, state, flags.module as string, instances)
+    : findNextInstance(candidates, state, instances);
   const { instance: nextInstance, blocked, conditionError, skippedByCondition } = search;
 
-  if (skippedByCondition && skippedByCondition.length > 0) saveState(state);
+  if (skippedByCondition && skippedByCondition.length > 0) opts.commit(state);
 
   if (conditionError) {
     return {
       kind: "error",
       message: `🚫 Unknown stage condition "${conditionError.condition}" on "${conditionError.instance.instance_id}". Register the condition in the engine before continuing.`,
+      ...extras,
     };
   }
 
@@ -2321,25 +2982,27 @@ async function handleNext(args: string[]): Promise<Directive> {
         (skippedByCondition && skippedByCondition.length > 0
           ? `\n  ⏭️ Auto-skipped by condition: ${skippedByCondition.map((item) => item.instance.instance_id).join(", ")}`
           : ""),
+      ...extras,
     };
   }
 
   if (!nextInstance) {
     if (claimRequested) {
-      return { kind: "error", message: `Module "${flags.module}" has no unclaimed ready stage instance; inspect dependency waiting and active claims with runtime summary.` };
+      return { kind: "error", message: `Module "${flags.module}" has no unclaimed ready stage instance; inspect dependency waiting and active claims with runtime summary.`, ...extras };
     }
     reconcileStageSummaries(state, instances);
     state.status = "done";
     clearActiveContext(state);
-    saveState(state);
+    opts.commit(state);
     return {
       kind: "done",
-      message: `🎉 All ${instances.length} stage instances resolved. Workflow finished.`,
+      message: opts.finishedMessage(candidates.length),
+      ...extras,
     };
   }
 
   if (claimRequested && nextInstance && nextInstance.axis !== "module") {
-    return { kind: "error", message: `--claim can only claim a module stage instance; ${nextInstance.instance_id} is ${nextInstance.axis}-axis` };
+    return { kind: "error", message: `--claim can only claim a module stage instance; ${nextInstance.instance_id} is ${nextInstance.axis}-axis`, ...extras };
   }
 
   const effectiveNextInstance = runtimeInstance(nextInstance, state);
@@ -2349,6 +3012,7 @@ async function handleNext(args: string[]): Promise<Directive> {
     return {
       kind: "error",
       message: `🚫 Stage instance "${nextInstance.instance_id}" is missing canonical consumed artifacts:\n${consumeFailures.map((failure) => `  ❌ ${failure}`).join("\n")}`,
+      ...extras,
     };
   }
 
@@ -2358,6 +3022,7 @@ async function handleNext(args: string[]): Promise<Directive> {
     return {
       kind: "error",
       message: `🚫 Stage instance "${nextInstance.instance_id}" 跨 module 依赖未就绪:\n${crossModuleFailures.map((failure) => `  ❌ ${failure}`).join("\n")}`,
+      ...extras,
     };
   }
 
@@ -2387,7 +3052,11 @@ async function handleNext(args: string[]): Promise<Directive> {
         kind: "error",
         message: `🚫 无法推进到 "${nextInstance.instance_id}" — 上游阶段的准出门禁已不满足,必须先修复:\n` +
           upstreamGateFailures.map((f) => `  ❌ ${f.instance}: ${f.message}`).join("\n") +
-          `\n\n修复上游产物/证据后重新 report 使门禁转绿,再执行 next。`,
+          `\n\n修复上游产物/证据后重新 report 使门禁转绿,再执行 next。` +
+          (opts.reportCommand
+            ? `已完成阶段可先用 evidence run --stage <slug> --module <id> --refresh 重新产证,再以 report --stage <slug> --module <id> --result completed 复验。`
+            : ""),
+        ...extras,
       };
     }
   }
@@ -2417,9 +3086,9 @@ async function handleNext(args: string[]): Promise<Directive> {
 
   const gate = nextStage.approval === "block";
   try {
-    saveState(state);
+    opts.commit(state);
   } catch (error) {
-    if (claimRequested && error instanceof Error && error.message.startsWith("workflow state revision conflict")) return handleNext(args);
+    if (claimRequested && error instanceof Error && error.message.startsWith("workflow state revision conflict")) return opts.retry();
     throw error;
   }
 
@@ -2448,8 +3117,9 @@ async function handleNext(args: string[]): Promise<Directive> {
     consumes: nextStage.consumes.map((pattern) => instanceArtifactPattern(pattern, effectiveNextInstance, true)),
     produces: nextStage.produces.map((pattern) => instanceArtifactPattern(pattern, effectiveNextInstance)),
     sensors: nextStage.sensors,
-    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, agentExecution),
+    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, agentExecution, opts.reportCommand?.(effectiveNextInstance)),
     ...(claimRequested ? { claimed: true, owner: state.active_instances[effectiveNextInstance.instance_id].owner, claim_expires_at: state.active_instances[effectiveNextInstance.instance_id].expires_at } : {}),
+    ...extras,
   };
 }
 
@@ -2477,22 +3147,54 @@ async function handleReport(args: string[]): Promise<Directive> {
   }
 
   // Load state
-  const state = loadState();
+  const graph = loadGraph();
+  const stageNode = graph.stages.find((stage) => stage.slug === stageSlug);
+  let state: WorkflowState | null;
+  let commit: (value: WorkflowState) => void;
+  let label = "Workflow";
+  let extras: Record<string, unknown> = {};
+  let ownsInstance: (instanceId: string) => boolean = () => true;
+  if (isSplitLayout(PROJECT_ROOT)) {
+    if (!stageNode) return { kind: "error", message: `Unknown stage "${stageSlug}".` };
+    const owner = reportOwner(flags, stageNode);
+    if (owner.kind === "error") return owner as Directive;
+    const ownerRef = owner as WorkflowRef;
+    if (!loadWorkflowParts(PROJECT_ROOT).parts.has(workflowRefKey(ownerRef))) {
+      return { kind: "error", message: `${workflowLabel(ownerRef)} does not exist yet; start it with orchestrate next --module ${ownerRef.kind === "module" ? ownerRef.module_id : "<module-id>"}.` };
+    }
+    const context = openSplitContext(ownerRef);
+    state = context.view;
+    commit = (value) => commitSplitContext(context, value);
+    label = workflowLabel(ownerRef);
+    ownsInstance = (instanceId) => sameRef(ownerOfInstance(instanceId), ownerRef);
+    extras = { workflow: workflowRefKey(ownerRef), workflow_id: context.loaded.parts.get(workflowRefKey(ownerRef))!.state.workflow_id };
+  } else {
+    state = loadState();
+    commit = (value) => saveState(value);
+  }
   if (!state) {
     return { kind: "error", message: "No active workflow. Cannot report." };
   }
-  if (state.status !== "running") {
-    return { kind: "error", message: `Workflow is ${state.status}, not running. Cannot report.` };
+
+  // Re-attestation: an explicitly addressed, already completed instance re-runs its exit
+  // gates (typically after evidence run --refresh) without changing workflow progress.
+  const addressed = addressedInstance(flags, stageNode);
+  if (stageNode && addressed && completedInstanceIds(state).includes(addressed)
+    && addressed !== state.current_stage_instance && !state.active_instances?.[addressed]) {
+    return reattestInstance(state, stageNode, addressed, flags, graph, commit, extras);
   }
 
-  const graph = loadGraph();
-  const stageNode = graph.stages.find((stage) => stage.slug === stageSlug);
+  if (state.status !== "running") {
+    return { kind: "error", message: `${label} is ${state.status}, not running. Cannot report.`, ...extras };
+  }
+
   if (!stageNode) {
     return { kind: "error", message: `Unknown stage "${stageSlug}".` };
   }
   const instances = expandStageInstances(graph, state);
   const activeCandidates = instances.filter((instance) =>
     instance.stage.slug === stageSlug && state.active_instances?.[instance.instance_id]
+    && ownsInstance(instance.instance_id)
     && (!flags.module || instance.module_id === flags.module)
     && (!flags.instance || instance.instance_id === flags.instance)
   );
@@ -2640,7 +3342,7 @@ async function handleReport(args: string[]): Promise<Directive> {
       state.completed_stage_instances.push(currentInstance.instance_id);
       reconcileStageSummaries(state, instances);
       if (state.active_instances?.[currentInstance.instance_id]) delete state.active_instances[currentInstance.instance_id];
-      if (state.current_stage_instance === currentInstance.instance_id) selectActiveContext(state);
+      if (state.current_stage_instance === currentInstance.instance_id) selectActiveContext(state, ownsInstance);
       break;
 
     case "rejected":
@@ -2651,39 +3353,156 @@ async function handleReport(args: string[]): Promise<Directive> {
   }
 
   try {
-    saveState(state);
+    commit(state);
   } catch (error) {
     if (claim && error instanceof Error && error.message.startsWith("workflow state revision conflict")) return handleReport(args);
     throw error;
   }
 
+  const nextCommand = isSplitLayout(PROJECT_ROOT) && currentInstance.module_id ? `next --module ${currentInstance.module_id}` : "next";
   // Return confirmation
   switch (result) {
     case "completed":
     case "approved":
       return {
         kind: "print",
-        message: `✅ Stage "${stageSlug}" ${result}. Run 'next' for the next stage.`,
-        handoff_prompt: `工作目标：${state.work_description}\n当前阶段：${stageSlug} 已完成。\n下一步：运行 orchestrate next 获取新的 directive，并按其产物、review、构建、测试和 sensor 要求继续。`,
+        message: `✅ Stage "${stageSlug}" ${result}. Run '${nextCommand}' for the next stage.`,
+        handoff_prompt: `工作目标：${state.work_description}\n当前阶段：${stageSlug} 已完成。\n下一步：运行 orchestrate ${nextCommand} 获取新的 directive，并按其产物、review、构建、测试和 sensor 要求继续。`,
+        ...extras,
       };
     case "rejected":
       return {
         kind: "print",
         message: `🔄 Stage "${stageSlug}" rejected. Revise and report --result revised, then re-report --result completed.`,
+        ...extras,
       };
     case "revised":
       return {
         kind: "print",
         message: `📝 Stage "${stageSlug}" revised. Report --result completed when ready.`,
+        ...extras,
       };
   }
+}
+
+function reportOwner(flags: Record<string, string>, stage: StageNode): WorkflowRef | Directive {
+  if (flags.instance) return ownerOfInstance(flags.instance);
+  if (flags.module) return moduleRef(flags.module);
+  if (stage.axis === "project") return integrationStageSlugs().has(stage.slug) ? INTEGRATION_WORKFLOW : GLOBAL_WORKFLOW;
+  const matches = [...loadWorkflowParts(PROJECT_ROOT).parts.values()].filter((part) => part.ref.kind === "module"
+    && (part.state.current_stage === stage.slug || Object.keys(part.state.active_instances || {}).some((instance) => instance.startsWith(`${stage.slug}@`))));
+  if (matches.length === 1) return matches[0].ref;
+  return {
+    kind: "error",
+    message: `Split workflow layout: report --stage ${stage.slug} needs --module <module-id>${matches.length > 1 ? ` (active in ${matches.map((part) => workflowRefKey(part.ref)).join(", ")})` : ""}.`,
+  };
+}
+
+function addressedInstance(flags: Record<string, string>, stage: StageNode | undefined): string | undefined {
+  if (!stage) return undefined;
+  if (flags.instance) return flags.instance;
+  if (!flags.module) return undefined;
+  if (stage.axis === "module") return stageInstanceId(stage.slug, "module", { module_id: flags.module });
+  if (stage.axis === "unit" && flags.unit) return stageInstanceId(stage.slug, "unit", { module_id: flags.module, unit_id: flags.unit });
+  return undefined;
+}
+
+/**
+ * Re-verify an already completed stage instance: consumes, produces and sensors must be
+ * green again. It records a `reattested` history row and never changes progress, so it is
+ * allowed while the owning workflow is parked (the usual repair path after a refresh).
+ */
+async function reattestInstance(
+  state: WorkflowState,
+  stageNode: StageNode,
+  instanceId: string,
+  flags: Record<string, string>,
+  graph: StageGraph,
+  commit: (value: WorkflowState) => void,
+  extras: Record<string, unknown>,
+): Promise<Directive> {
+  const result = flags.result as StageResult;
+  const userInput = flags["user-input"];
+  if (result !== "completed" && result !== "approved") {
+    return { kind: "error", message: `Stage instance "${instanceId}" is already completed; re-attest it with --result completed (or approved for approval gates).`, ...extras };
+  }
+  if (result === "completed" && stageNode.approval === "block") {
+    return { kind: "error", message: `Stage "${stageNode.slug}" requires explicit approval. Re-attest with --result approved --user-input Approve.`, ...extras };
+  }
+  if (result === "approved" && (stageNode.approval !== "block" || userInput !== "Approve")) {
+    return { kind: "error", message: stageNode.approval !== "block" ? `Stage "${stageNode.slug}" is not an approval gate and cannot use --result approved.` : `Stage "${stageNode.slug}" requires --user-input Approve.`, ...extras };
+  }
+  if (stageNode.completion_contract === "instruction_only" && flags["instruction-ack"] !== stageNode.slug) {
+    return { kind: "error", message: `Stage "${stageNode.slug}" is instruction-only; re-attest with --instruction-ack ${stageNode.slug}.`, ...extras };
+  }
+  const instances = expandStageInstances(graph, state);
+  const declared = instances.find((instance) => instance.instance_id === instanceId);
+  if (!declared) {
+    return { kind: "error", message: `Stage instance "${instanceId}" no longer exists in the declared module/unit manifests.`, ...extras };
+  }
+  const instance = runtimeInstance(declared, state);
+  const consumeFailures = checkConsumes(instance, state, graph, instances);
+  if (consumeFailures.length > 0) {
+    return { kind: "error", message: `🚫 Cannot re-attest "${instanceId}" — canonical consumed artifacts are no longer valid:\n${consumeFailures.map((failure) => `  ❌ ${failure}`).join("\n")}`, ...extras };
+  }
+  const automaticEvidenceError = produceMissingSemanticEvidence(instance, true);
+  if (automaticEvidenceError) return { kind: "error", message: `🚫 Cannot re-attest "${instanceId}" — ${automaticEvidenceError}`, ...extras };
+  const missingProduces = checkProduces(instance);
+  if (missingProduces.length > 0) {
+    return { kind: "error", message: `🚫 Cannot re-attest "${instanceId}" — required produces not found:\n${missingProduces.map((path) => `  ❌ ${path}`).join("\n")}`, ...extras };
+  }
+  const sensorFailures = await checkSensors(instance, state);
+  if (sensorFailures.length > 0) {
+    return {
+      kind: "error",
+      message: `🚫 Cannot re-attest "${instanceId}" — sensor checks failed:\n${sensorFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\n")}\n\nRefresh evidence with evidence run --stage ${stageNode.slug}${instance.module_id ? ` --module ${instance.module_id}` : ""}${instance.unit_id ? ` --unit ${instance.unit_id}` : ""} --refresh, then re-attest.`,
+      ...extras,
+    };
+  }
+  state.history.push({
+    stage: stageNode.slug,
+    instance_id: instanceId,
+    module_id: instance.module_id,
+    unit_id: instance.unit_id,
+    result: "reattested",
+    timestamp: new Date().toISOString(),
+    user_input: userInput || "exit gates re-verified",
+  });
+  commit(state);
+  return {
+    kind: "print",
+    message: `✅ Stage instance "${instanceId}" re-attested: consumes, produces and sensors are green. Workflow progress is unchanged.`,
+    reattested: true,
+    ...extras,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // park — save workflow for later resume
 // ---------------------------------------------------------------------------
 
-async function handlePark(): Promise<Directive> {
+async function handlePark(args: string[] = []): Promise<Directive> {
+  const flags = parseFlags(args);
+  if (isSplitLayout(PROJECT_ROOT)) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    const owner = flags.module
+      ? moduleRef(flags.module)
+      : loaded.parts.get("global")!.state.status !== "done" ? GLOBAL_WORKFLOW : INTEGRATION_WORKFLOW;
+    if (!loaded.parts.has(workflowRefKey(owner))) return { kind: "error", message: `${workflowLabel(owner)} does not exist.` };
+    const context = openSplitContext(owner);
+    const view = context.view;
+    if (view.status !== "running") return { kind: "error", message: `${workflowLabel(owner)} is ${view.status}, not running. Cannot park.`, workflow: workflowRefKey(owner) };
+    view.status = "parked";
+    commitSplitContext(context, view);
+    return {
+      kind: "parked",
+      stage: view.current_stage,
+      workflow: workflowRefKey(owner),
+      message: `${workflowLabel(owner)} parked at stage "${view.current_stage}". Resume with 'next ${owner.kind === "module" ? `--module ${owner.module_id} ` : ""}--resume'. Other workflows are unaffected.`,
+    };
+  }
+  if (flags.module) return { kind: "error", message: "park --module requires the per-module layout; split first with orchestrate split --from <workflow-id>." };
+
   const state = loadState();
   if (!state) {
     return { kind: "error", message: "No active workflow to park." };
@@ -2700,6 +3519,19 @@ async function handlePark(): Promise<Directive> {
     stage: state.current_stage,
     message: `Workflow parked at stage "${state.current_stage}". Resume with 'next --resume'.`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// split — migrate a single-layout workflow into per-module workflows
+// ---------------------------------------------------------------------------
+
+async function handleSplit(args: string[]): Promise<Directive> {
+  const flags = parseFlags(args);
+  const invalidFlag = unsupportedFlag(flags, SPLIT_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported split option: --${invalidFlag}` };
+  if (!flags.from || flags.from === "true") return { kind: "error", message: "split requires --from <workflow-id> (the Workflow ID of aidlc/active/aidlc-state.md, or its first 8+ characters)" };
+  if ("dry-run" in flags && flags["dry-run"] !== "true") return { kind: "error", message: "--dry-run is a boolean flag and does not accept a value" };
+  return performSplit(flags.from, "dry-run" in flags, "orchestrate split");
 }
 
 // ---------------------------------------------------------------------------
@@ -2739,7 +3571,7 @@ async function main() {
     console.error(
       JSON.stringify({
         kind: "error",
-        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park> [args...]",
+        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|split> [args...]",
       })
     );
     process.exit(1);
@@ -2756,7 +3588,10 @@ async function main() {
       directive = await handleReport(rest);
       break;
     case "park":
-      directive = await handlePark();
+      directive = await handlePark(rest);
+      break;
+    case "split":
+      directive = await handleSplit(rest);
       break;
     case "continue":
       directive = await handleContinue(rest[0] || "");

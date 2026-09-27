@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync } from "fs";
 import { resolve } from "path";
 import { loadWorkflowState } from "./aidlc-light-state";
 import { checkSensors, expandStageInstances, loadGraph, type StageInstance } from "./aidlc-orchestrate";
+import { isSplitLayout, loadWorkflowParts, mergeWorkflowView } from "./aidlc-workflow-layout";
 
 interface HookInput {
   cwd?: string;
@@ -49,6 +50,38 @@ async function main(): Promise<never> {
   const requestedRoot = typeof input.cwd === "string" && input.cwd.trim() ? resolve(input.cwd) : projectRoot;
   if (!existsSync(requestedRoot)) block(`AI-DLC project root does not exist: ${requestedRoot}`);
   const root = realpathSync(requestedRoot);
+
+  // Split per-module layout: several workflows run side by side, often in different
+  // sessions. Only a workflow with a stage in progress holds the session, and
+  // AIDLC_ACTIVE_MODULE narrows module workflows to the one this session works on.
+  if (isSplitLayout(root)) {
+    try {
+      const loaded = loadWorkflowParts(root);
+      const activeModule = process.env.AIDLC_ACTIVE_MODULE?.trim();
+      const targets = [...loaded.parts.values()].filter((part) => part.state.status === "running"
+        && part.state.current_stage_instance
+        && (part.ref.kind !== "module" || !activeModule || part.ref.module_id === activeModule));
+      if (targets.length === 0) allow();
+      const graph = loadGraph();
+      for (const part of targets) {
+        const view = mergeWorkflowView(loaded.parts, part.ref);
+        const current = expandStageInstances(graph, view).find((instance) => instance.instance_id === part.state.current_stage_instance);
+        if (!current) continue;
+        const substantive = (await checkSensors(current, view)).filter((failure) => !/evidence is stale \(\d+h old/i.test(failure.message));
+        if (substantive.length > 0) {
+          block(
+            `🚫 当前阶段 "${current.instance_id}" 的准出门禁未通过,必须先修复再结束:\n` +
+            substantive.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\n") +
+            `\n\n修复产物/证据使门禁转绿后再继续;不要跳过门禁直接结束或写下游产物。`,
+          );
+        }
+      }
+      const running = targets.map((part) => `${part.ref.kind === "module" ? `module:${part.ref.module_id}` : part.ref.kind}=${part.state.current_stage_instance}`).join(", ");
+      block(`AWS-style lightweight workflows still have stages in progress: ${running}. Continue them, report them, or park one with 'orchestrate park --module <module-id>'.`);
+    } catch (error) {
+      block(`AI-DLC split workflow state is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   try {
     const state = loadWorkflowState(root);
