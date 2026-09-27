@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   codeBuddyConfigDirForCli,
   codeBuddyKnownCliPaths,
   hostCliInvocation,
+  hostCliSpawnSpec,
   qoderCnMcpConfigPath,
+  resolveWindowsCommand,
   type WindowsDesktopHarness,
   windowsDesktopHostPaths,
 } from "../bin/host-detection";
@@ -27,6 +30,55 @@ try {
   });
 } finally {
   rmSync(launcherRoot, { recursive: true, force: true });
+}
+
+// Windows 批处理包装(npm 全局安装的 claude.cmd 等):裸命令名按 PATHEXT 解析,并经 cmd.exe 严格转义执行。
+const cmdRoot = mkdtempSync(path.join(scratchRoot, "aidlc-host-cmd-"));
+try {
+  const echoScript = path.join(cmdRoot, "echo-args.cjs");
+  writeFileSync(echoScript, "process.stdout.write(JSON.stringify(process.argv.slice(2)));\n");
+  const binDir = path.join(cmdRoot, "bin dir (x86) & co");
+  mkdirSync(binDir);
+  const shim = path.join(binDir, "fakehost.cmd");
+  writeFileSync(shim, `@"${process.execPath}" "${echoScript}" %*\r\n`);
+  const winEnv: NodeJS.ProcessEnv = { PATH: binDir, PATHEXT: ".exe;.cmd", ComSpec: "C:\\Windows\\System32\\cmd.exe" };
+
+  assert.equal(resolveWindowsCommand("fakehost", "win32", winEnv), path.win32.join(binDir, "fakehost.cmd"));
+  assert.equal(resolveWindowsCommand("fakehost", "darwin", winEnv), "fakehost");
+  assert.equal(resolveWindowsCommand("missing-host", "win32", winEnv), "missing-host");
+
+  const spec = hostCliSpawnSpec("fakehost", ["a b"], "win32", "node.exe", winEnv);
+  assert.equal(spec.command, "C:\\Windows\\System32\\cmd.exe");
+  assert.equal(spec.windowsVerbatimArguments, true);
+  assert.deepEqual(spec.args.slice(0, 3), ["/d", "/s", "/c"]);
+  assert.deepEqual(hostCliSpawnSpec("fakehost", ["a b"], "linux", "node", winEnv), { command: "fakehost", args: ["a b"] });
+  assert.throws(() => hostCliSpawnSpec("fakehost", ["line\nbreak"], "win32", "node.exe", winEnv), /line break/);
+
+  if (process.platform === "win32") {
+    const tricky = [
+      "plain",
+      "with space",
+      "C:\\Program Files (x86)\\market & co",
+      "quote\"inside",
+      "trailing\\",
+      "%PATH%",
+      "a|b<c>d^e!f",
+      "x\" & echo INJECTED & \"",
+      "",
+    ];
+    const runEnv = { ...process.env, PATH: `${binDir};${process.env.PATH ?? ""}` };
+    const runSpec = hostCliSpawnSpec("fakehost", tricky, "win32", process.execPath, runEnv);
+    const result = spawnSync(runSpec.command, runSpec.args, {
+      env: runEnv,
+      encoding: "utf8",
+      windowsVerbatimArguments: runSpec.windowsVerbatimArguments,
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), tricky);
+  }
+} finally {
+  rmSync(cmdRoot, { recursive: true, force: true });
 }
 
 const windowsEnvironment: NodeJS.ProcessEnv = {

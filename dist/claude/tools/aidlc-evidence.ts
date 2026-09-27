@@ -45,6 +45,7 @@ export const SEMANTIC_SENSORS = new Set([
   "ui-artifact-consistency",
   "inception-consistency",
   "traceability-matrix",
+  "structural-invariants",
 ]);
 
 interface CommandSpec {
@@ -364,6 +365,38 @@ function producedEvidence(unsigned: Record<string, unknown>): Record<string, unk
   return unsigned;
 }
 
+function blockedReport(stdout: string): Record<string, unknown> | null {
+  if (!stdout) return null;
+  try {
+    const value = JSON.parse(stdout.split(/\r?\n/)[0]) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).status === "blocked"
+      ? value as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Diagnostics for a fail-closed checker: .aidlc/reports/<stage>/[<module>/[<unit>/]]<sensor>.blocked.json. */
+function writeBlockedReport(sensor: string, state: ProducerState, report: Record<string, unknown>): string {
+  const axis = state.current_unit ? "unit" : state.current_module ? "module" : "project";
+  const evidenceRelative = evidenceRelativePath(state.current_stage || "unknown", sensor, axis, { module_id: state.current_module, unit_id: state.current_unit });
+  const reportRelative = evidenceRelative.replace(/\\/g, "/").replace(/^\.aidlc\/evidence\//, ".aidlc/reports/").replace(/\.json$/, ".blocked.json");
+  if (!reportRelative.startsWith(".aidlc/reports/")) fail(`cannot derive blocked report path from ${evidenceRelative}`);
+  const body = {
+    ...report,
+    report_kind: "semantic-checker-blocked",
+    sensor,
+    stage: state.current_stage || null,
+    module_id: state.current_module || null,
+    unit_id: state.current_unit || null,
+    timestamp: new Date().toISOString(),
+    note: "diagnostic only; not gate evidence — fix the violations and rerun the controlled producer",
+  };
+  writeAtomic(resolve(PROJECT_ROOT, reportRelative), `${JSON.stringify(body, null, 2)}\n`);
+  return reportRelative;
+}
+
 function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerState): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
   const tsx = require.resolve("tsx/cli");
   const checker = resolve(TOOL_DIR, "aidlc-semantic-checks.ts");
@@ -393,7 +426,11 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
   const exitCode = typeof result.status === "number" ? result.status : 1;
   if (result.error || exitCode !== 0) {
     const detail = result.error ? result.error.message : `exit code ${exitCode}`;
-    fail(`built-in semantic checker ${sensor} failed: ${detail}; ${tail(stderr) || tail(stdout) || "no output"}`);
+    // A checker that fails closed may print a structured blocked report ({status:"blocked", ...}) on
+    // stdout. Persist it outside .aidlc/evidence (it is diagnostics, never gate-accepted evidence).
+    const report = blockedReport(stdout);
+    const reportNote = report ? `; blocked report: ${writeBlockedReport(sensor, state, report)}` : "";
+    fail(`built-in semantic checker ${sensor} failed: ${detail}; ${tail(stderr) || tail(stdout) || "no output"}${reportNote}`);
   }
   let parsed: unknown;
   try {

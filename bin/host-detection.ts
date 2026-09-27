@@ -44,6 +44,89 @@ export function hostCliInvocation(
     : direct;
 }
 
+export interface HostCliSpawnSpec {
+  command: string;
+  args: string[];
+  /** 仅 Windows 批处理包装时为 true:命令行已按 cmd.exe 规则手工转义,Node 不得再次加引号。 */
+  windowsVerbatimArguments?: boolean;
+}
+
+/**
+ * Windows 上把裸命令名(如 `claude`)按 PATH + PATHEXT 解析成真实文件;
+ * 已是路径/已存在的文件、以及非 win32 平台原样返回(POSIX 的 execvp 自己会查 PATH)。
+ */
+export function resolveWindowsCommand(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (platform !== "win32" || existsSync(command) || /[\\/]/.test(command)) return command;
+  const hasExtension = Boolean(path.win32.extname(command));
+  const extensions = hasExtension
+    ? [""]
+    : (env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+  const pathValue = env.PATH ?? env.Path ?? "";
+  for (const directory of pathValue.split(";").filter(Boolean)) {
+    for (const extension of extensions) {
+      const candidate = path.win32.join(directory, `${command}${extension}`);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return command;
+}
+
+// cmd.exe 元字符;转义方案与 cross-spawn 相同:先按 CommandLineToArgvW 规则加引号,
+// 再给包括引号在内的所有元字符加 ^,使 cmd 解析时永远不进入"引号态",caret 全部被消费。
+const CMD_META_CHARS = /([()\][%!^"`<>&|;, *?])/g;
+
+// 命令路径整体加引号(路径里不可能含 `"`),引号内 & ( ) 空格等均为字面量;
+// 裸 caret 转义对命令 token 中的空格不可靠(实测 "The system cannot find the file specified")。
+function escapeCmdCommand(command: string): string {
+  if (/[%"]/.test(command)) {
+    throw new Error(`command path cannot be run safely through cmd.exe (contains % or "): ${command}`);
+  }
+  return `"${command}"`;
+}
+
+function escapeCmdArgument(argument: string): string {
+  if (/[\r\n\0]/.test(argument)) {
+    throw new Error(`argument cannot be passed through cmd.exe (contains a line break or NUL): ${JSON.stringify(argument)}`);
+  }
+  let quoted = argument.replace(/(\\*)"/g, '$1$1\\"');
+  quoted = quoted.replace(/(\\*)$/, "$1$1");
+  // 双重 caret 转义:第一层被 `cmd /c` 自身消费;批处理再把 %*/%1 展开进自己的命令行时会**二次解析**
+  // (npm cmd-shim 生成的 claude.cmd 等都是 `... %*`),第二层防止 `\"` 引起的引号奇偶错位把 & | < > 暴露成元字符。
+  return `"${quoted}"`.replace(CMD_META_CHARS, "^$1").replace(CMD_META_CHARS, "^$1");
+}
+
+/**
+ * 构造启动宿主 CLI 的 spawnSync 参数。Windows 上:
+ * - 裸命令名先按 PATHEXT 解析(spawnSync 不走 shell 时只会找 .exe/.com);
+ * - node 脚本交给 node 运行;
+ * - `.cmd`/`.bat`(如 npm 全局安装的 `claude.cmd`)经 `cmd.exe /d /s /c` 运行并严格转义——
+ *   Node ≥18.20.2 起不带 shell 直接 spawn 批处理会被拒绝(EINVAL,CVE-2024-27980)。
+ */
+export function hostCliSpawnSpec(
+  cliPath: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+  nodeExecutable: string = process.execPath,
+  env: NodeJS.ProcessEnv = process.env,
+): HostCliSpawnSpec {
+  const resolved = resolveWindowsCommand(cliPath, platform, env);
+  const invocation = hostCliInvocation(resolved, platform, nodeExecutable);
+  if (platform === "win32" && invocation.argsPrefix.length === 0
+    && [".cmd", ".bat"].includes(path.win32.extname(resolved).toLowerCase())) {
+    const commandLine = [escapeCmdCommand(resolved), ...args.map(escapeCmdArgument)].join(" ");
+    return {
+      command: env.ComSpec || env.COMSPEC || "cmd.exe",
+      args: ["/d", "/s", "/c", `"${commandLine}"`],
+      windowsVerbatimArguments: true,
+    };
+  }
+  return { command: invocation.command, args: [...invocation.argsPrefix, ...args] };
+}
+
 export function qoderCnMcpConfigPath(
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,

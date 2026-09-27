@@ -15,7 +15,8 @@ produces:
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md
   - .aidlc/evidence/code-generation/{module-id}/{unit-id}/traceability-matrix.json
-sensors: [doc-cascade, traceability-matrix]
+  - .aidlc/evidence/code-generation/{module-id}/{unit-id}/structural-invariants.json
+sensors: [doc-cascade, traceability-matrix, structural-invariants]
 requires: [functional-design]
 scope_waived_requires: [functional-design]
 ---
@@ -57,6 +58,7 @@ scope_waived_requires: [functional-design]
 - 每一行代码改动必须能追溯到当前单元的需求
 - **追溯标记(强制,traceability-matrix 门禁校验)**：本单元实现的每个 `REQ-xxx` 必须在对应代码处留下可搜索的 `@ReqId REQ-xxx` 标记(注释即可),使追溯矩阵的 `code_refs` 层能确认该需求真的落到了代码。缺标记 → 矩阵 `BROKEN@code_refs` → 门禁阻断。前端页面同时保留 `PAGE-xxx` 标记(见 ui-design-alignment)。
 - 禁止在实现 A 功能时"顺手"重构 B 模块
+- **结构不变式(强制,structural-invariants 门禁校验)**：存在 `structural-invariants.json` 时，生成的迁移 DDL、实体类(`@TableName`/`@Table`/`@Entity`)、Prisma model、Mapper SQL 不得影子化已声明的唯一真源、不得重建或写入已收敛/废弃/迁出的对象；`persistence.mode: strict` 下每个新持久化实体都必须在清单中被授权。命中即阻断，违例清单写入 `.aidlc/reports/code-generation/{module-id}/{unit-id}/structural-invariants.blocked.json`；修正实现而非改清单，确需新实体时回到应用设计补声明并重新审批。
 - 不"改进"相邻代码、注释或格式
 - 不重构没坏的东西
 - 匹配现有代码风格，即使你会做不同选择

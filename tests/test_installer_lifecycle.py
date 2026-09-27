@@ -17,6 +17,9 @@ SCRATCH_ROOT = Path(os.environ.get("KIROCREW_SCRATCH") or os.environ.get("TMPDIR
 def run_cli(home: Path, args: list, extra_env=None) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["HOME"] = str(home)
+    # Windows host CLIs (and os.homedir()) resolve the profile from USERPROFILE, not HOME. Without this a
+    # real host CLI found on PATH would register test fixtures into the developer's own configuration.
+    env["USERPROFILE"] = str(home)
     env["AIDLC_INSTALL_STATE_DIR"] = str(home / ".config" / "loeyae-aidlc" / "installations")
     if extra_env:
         env.update(extra_env)
@@ -29,11 +32,30 @@ def run_cli(home: Path, args: list, extra_env=None) -> subprocess.CompletedProce
     )
 
 
+def write_node_stub(path: Path, body: str) -> Path:
+    """Write a fake host CLI as a Node script that runs on every platform.
+
+    The shebang is the absolute node path, so POSIX execs it directly (PATH may be isolated) and the
+    installer's Windows ``hostCliInvocation`` recognises it as a node script and runs it via node.
+    On Windows a ``<name>.cmd`` shim is added so PATHEXT-based discovery (``commandOnPath``) finds it.
+    """
+    prologue = (
+        "const fs = require('fs');\n"
+        "const args = process.argv.slice(2);\n"
+        "const env = process.env;\n"
+        "const log = (file, line) => fs.appendFileSync(file, line + '\\n');\n"
+        "const read = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null);\n"
+        "const remove = (file) => fs.rmSync(file, { force: true });\n"
+    )
+    path.write_bytes(f"#!{NODE}\n{prologue}{body}".encode("utf-8"))
+    path.chmod(0o755)
+    if os.name == "nt":
+        path.with_name(f"{path.name}.cmd").write_bytes(f'@"{NODE}" "%~dp0{path.name}" %*\r\n'.encode("utf-8"))
+    return path
+
+
 def write_fake_host_command(directory: Path, name: str, exit_code: int = 0) -> Path:
-    command = directory / name
-    command.write_text(f"#!/bin/sh\nexit {exit_code}\n")
-    command.chmod(0o755)
-    return command
+    return write_node_stub(directory / name, f"process.exit({exit_code});\n")
 
 
 def isolated_host_env(root: Path, fake_bin: Path) -> dict:
@@ -79,43 +101,41 @@ def write_fake_plugin_hosts(root: Path) -> dict:
     codebuddy_log = root / "codebuddy-commands.log"
     codebuddy_market_state = root / "codebuddy-market-state"
     codebuddy_plugin_state = root / "codebuddy-plugin-state"
-    codebuddy = fake_bin / "codebuddy"
-    codebuddy.write_text(
-        "#!/bin/sh\n"
-        "printf '%s|%s|%s\\n' \"$PWD\" \"${CODEBUDDY_CONFIG_DIR:-}\" \"$*\" >> \"$CODEBUDDY_LOG\"\n"
-        "if [ \"$1\" = plugin ] && [ \"$2\" = marketplace ] && [ \"$3\" = list ]; then\n"
-        "  if [ -f \"$CODEBUDDY_MARKET_STATE\" ]; then name=$(cat \"$CODEBUDDY_MARKET_STATE\"); printf '[{\"name\":\"%s\"}]\\n' \"$name\"; else printf '[]\\n'; fi\n"
-        "  exit 0\n"
-        "fi\n"
-        "if [ \"$1\" = plugin ] && [ \"$2\" = marketplace ] && [ \"$3\" = add ]; then printf '%s' \"$6\" > \"$CODEBUDDY_MARKET_STATE\"; fi\n"
-        "if [ \"$1\" = plugin ] && [ \"$2\" = marketplace ] && [ \"$3\" = remove ]; then rm -f \"$CODEBUDDY_MARKET_STATE\"; fi\n"
-        "if [ \"$1\" = plugin ] && [ \"$2\" = list ]; then\n"
-        "  if [ -f \"$CODEBUDDY_PLUGIN_STATE\" ]; then ref=$(cat \"$CODEBUDDY_PLUGIN_STATE\"); printf '[\"%s\"]\\n' \"$ref\"; else printf '[]\\n'; fi\n"
-        "  exit 0\n"
-        "fi\n"
-        "if [ \"$1\" = plugin ] && [ \"$2\" = install ]; then printf '%s' \"$3\" > \"$CODEBUDDY_PLUGIN_STATE\"; fi\n"
-        "if [ \"$1\" = plugin ] && [ \"$2\" = update ] && [ \"${CODEBUDDY_UPDATE_FAIL:-}\" = 1 ]; then exit 31; fi\n"
-        "if [ \"$1\" = plugin ] && [ \"$2\" = uninstall ]; then rm -f \"$CODEBUDDY_PLUGIN_STATE\"; fi\n"
-        "exit 0\n"
-    )
-    codebuddy.chmod(0o755)
+    codebuddy = write_node_stub(fake_bin / "codebuddy", (
+        "log(env.CODEBUDDY_LOG, `${process.cwd()}|${env.CODEBUDDY_CONFIG_DIR || ''}|${args.join(' ')}`);\n"
+        "const [a1, a2, a3] = args;\n"
+        "if (a1 === 'plugin' && a2 === 'marketplace' && a3 === 'list') {\n"
+        "  const name = read(env.CODEBUDDY_MARKET_STATE);\n"
+        "  console.log(JSON.stringify(name === null ? [] : [{ name }]));\n"
+        "  process.exit(0);\n"
+        "}\n"
+        "if (a1 === 'plugin' && a2 === 'marketplace' && a3 === 'add') fs.writeFileSync(env.CODEBUDDY_MARKET_STATE, args[5] || '');\n"
+        "if (a1 === 'plugin' && a2 === 'marketplace' && a3 === 'remove') remove(env.CODEBUDDY_MARKET_STATE);\n"
+        "if (a1 === 'plugin' && a2 === 'list') {\n"
+        "  const ref = read(env.CODEBUDDY_PLUGIN_STATE);\n"
+        "  console.log(JSON.stringify(ref === null ? [] : [ref]));\n"
+        "  process.exit(0);\n"
+        "}\n"
+        "if (a1 === 'plugin' && a2 === 'install') fs.writeFileSync(env.CODEBUDDY_PLUGIN_STATE, a3 || '');\n"
+        "if (a1 === 'plugin' && a2 === 'update' && env.CODEBUDDY_UPDATE_FAIL === '1') process.exit(31);\n"
+        "if (a1 === 'plugin' && a2 === 'uninstall') remove(env.CODEBUDDY_PLUGIN_STATE);\n"
+        "process.exit(0);\n"
+    ))
 
     qoder_log = root / "qoder-commands.log"
     qoder_plugin_state = root / "qoder-plugin-state"
-    qoder = fake_bin / "qoder"
-    qoder.write_text(
-        "#!/bin/sh\n"
-        "printf '%s|%s\\n' \"$PWD\" \"$*\" >> \"$QODER_LOG\"\n"
-        "if [ \"$1\" = plugins ] && [ \"$2\" = list ]; then\n"
-        "  if [ -f \"$QODER_PLUGIN_STATE\" ]; then printf '[\"loeyae-aidlc@local\"]\\n'; else printf '[]\\n'; fi\n"
-        "  exit 0\n"
-        "fi\n"
-        "if [ \"$1\" = plugins ] && [ \"$2\" = install ] && [ \"${QODER_INSTALL_FAIL:-}\" = 1 ]; then exit 32; fi\n"
-        "if [ \"$1\" = plugins ] && [ \"$2\" = install ]; then : > \"$QODER_PLUGIN_STATE\"; fi\n"
-        "if [ \"$1\" = plugins ] && [ \"$2\" = uninstall ]; then rm -f \"$QODER_PLUGIN_STATE\"; fi\n"
-        "exit 0\n"
-    )
-    qoder.chmod(0o755)
+    qoder = write_node_stub(fake_bin / "qoder", (
+        "log(env.QODER_LOG, `${process.cwd()}|${args.join(' ')}`);\n"
+        "const [a1, a2] = args;\n"
+        "if (a1 === 'plugins' && a2 === 'list') {\n"
+        "  console.log(JSON.stringify(fs.existsSync(env.QODER_PLUGIN_STATE) ? ['loeyae-aidlc@local'] : []));\n"
+        "  process.exit(0);\n"
+        "}\n"
+        "if (a1 === 'plugins' && a2 === 'install' && env.QODER_INSTALL_FAIL === '1') process.exit(32);\n"
+        "if (a1 === 'plugins' && a2 === 'install') fs.writeFileSync(env.QODER_PLUGIN_STATE, '');\n"
+        "if (a1 === 'plugins' && a2 === 'uninstall') remove(env.QODER_PLUGIN_STATE);\n"
+        "process.exit(0);\n"
+    ))
     return {
         "CODEBUDDY_CLI": str(codebuddy),
         "CODEBUDDY_LOG": str(codebuddy_log),
@@ -163,15 +183,17 @@ def test_managed_upgrade_rollback_and_uninstall() -> None:
         assert tree_digest(target) == before
 
         skill = target / "SKILL.md"
-        original = skill.read_text()
-        skill.write_text(original + "\nuser modification\n")
+        # Byte-exact I/O: text mode rewrites "\n" as "\r\n" on Windows, so a text "restore" would not be
+        # byte-identical and the installer's (correct) digest check would keep reporting a modification.
+        original = skill.read_bytes()
+        skill.write_bytes(original + b"\nuser modification\n")
         refused = run_cli(home, ["install", "--harness", "kiro-ide", "--target", str(target)])
         assert refused.returncode != 0 and "was modified" in refused.stderr
         refused = run_cli(home, ["uninstall", "--harness", "kiro-ide", "--target", str(target)])
         assert refused.returncode != 0 and "was modified" in refused.stderr
-        assert skill.read_text().endswith("user modification\n")
+        assert skill.read_bytes().endswith(b"user modification\n")
 
-        skill.write_text(original)
+        skill.write_bytes(original)
         removed = run_cli(home, ["uninstall", "--harness", "kiro-ide", "--target", str(target)])
         assert removed.returncode == 0, removed.stdout + removed.stderr
         assert not target.exists()
@@ -320,15 +342,14 @@ def test_claude_activation_refreshes_existing_plugin() -> None:
         fake_bin = root / "bin"
         fake_bin.mkdir()
         command_log = root / "claude-commands.log"
-        claude = fake_bin / "claude"
-        claude.write_text(
-            "#!/bin/sh\n"
-            "printf '%s\\n' \"$*\" >> \"$CLAUDE_LOG\"\n"
-            "if [ \"${CLAUDE_UPDATE_FAIL:-}\" = 1 ] && [ \"$2\" = update ]; then exit 29; fi\n"
-            "exit 0\n"
-        )
-        claude.chmod(0o755)
-        path = f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"
+        write_node_stub(fake_bin / "claude", (
+            "log(env.CLAUDE_LOG, args.join(' '));\n"
+            "if (env.CLAUDE_UPDATE_FAIL === '1' && args[1] === 'update') process.exit(29);\n"
+            "process.exit(0);\n"
+        ))
+        # Only the fake bin on PATH: prepending to the real PATH let an installed `claude` win over the stub.
+        system_bin = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32") if os.name == "nt" else "/usr/bin:/bin"
+        path = f"{fake_bin}{os.pathsep}{system_bin}"
 
         home = root / "success-home"
         home.mkdir()

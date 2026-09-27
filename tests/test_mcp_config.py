@@ -2,11 +2,15 @@
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# Run tsx's CLI through node directly: on Windows `npx` is a .cmd shim, and cmd.exe truncates
+# multi-line `--eval` scripts at the first newline, silently skipping the fixture setup.
+TSX = [shutil.which("node") or "node", os.path.join(str(ROOT), "node_modules", "tsx", "dist", "cli.mjs")]
 CONFIG_PATH = ROOT / "harness" / "kiro-crew" / "mcp.json"
 MERGE_TOOL = ROOT / "core" / "tools" / "aidlc-mcp-config.ts"
 
@@ -21,7 +25,7 @@ def test_declares_v1_services() -> None:
 
 def run_eval(script: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["npx", "--no-install", "--prefix", str(ROOT), "tsx", "--eval", script],
+        [*TSX, "--eval", script],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -73,7 +77,7 @@ updateMcpConfig({json.dumps(str(target))}, {{ {name}: {{ type: 'http', url: 'htt
 """)
         processes = [
             subprocess.Popen(
-                ["npx", "--no-install", "--prefix", str(ROOT), "tsx", "--eval", script],
+                [*TSX, "--eval", script],
                 cwd=ROOT,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

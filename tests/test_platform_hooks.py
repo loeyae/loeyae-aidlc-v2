@@ -8,6 +8,9 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# Run tsx's CLI through node directly: on Windows `npx` is a .cmd shim, and cmd.exe truncates
+# multi-line `--eval` scripts at the first newline, silently skipping the fixture setup.
+TSX = [shutil.which("node") or "node", os.path.join(str(ROOT), "node_modules", "tsx", "dist", "cli.mjs")]
 NODE = os.environ.get("NODE", "node")
 
 def environment(home: Path, trust: Path = None) -> dict:
@@ -40,7 +43,7 @@ state.current_phase = 'inception';
 saveWorkflowState(process.cwd(), state);
 """
     result = subprocess.run(
-        ["npx", "--no-install", "--prefix", str(ROOT), "tsx", "--eval", script],
+        [*TSX, "--eval", script],
         cwd=project,
         env=environment(home, home / f"trust-{project.name}"),
         capture_output=True,

@@ -18,7 +18,8 @@ produces:
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/data-source-validation.md
   - .aidlc/evidence/functional-design/{module-id}/{unit-id}/functional-design-completeness.json
   - .aidlc/evidence/functional-design/{module-id}/{unit-id}/traceability-matrix.json
-sensors: [doc-cascade, functional-design-completeness, traceability-matrix]
+  - .aidlc/evidence/functional-design/{module-id}/{unit-id}/structural-invariants.json
+sensors: [doc-cascade, functional-design-completeness, traceability-matrix, structural-invariants]
 requires: [units-generation]
 condition: has_functional_design_needs
 ---
@@ -108,6 +109,8 @@ condition: has_functional_design_needs
 - 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-rules.md`
 - 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/domain-entities.md`
 - 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/data-source-validation.md`（数据源现实性验证）
+
+**结构不变式约束**（存在 `structural-invariants.json` 时强制）：`domain-entities.md` 中每个持久化实体用 `[实体:实体名 table=表名]` 标记（DDL 草案放在 ``sql` 块）。`structural-invariants` sensor 在本阶段当场比对：影子化唯一真源、重建/写入已收敛/废弃/迁出对象、strict 模式下未授权的新实体，均 fail-closed 阻断。需要新实体而清单未授权时，回到应用设计补充声明并重新审批，不得在功能设计中自行放行。
 
 **数据源现实性验证产物格式**（`data-source-validation.md`）：
 

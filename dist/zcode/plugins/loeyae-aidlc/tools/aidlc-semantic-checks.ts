@@ -55,6 +55,7 @@ const CONTROLLED_CONTEXT_REQUESTED = STRICT_MODULE_SCOPE
 const MODULE_CONTEXT_SENSORS = new Set([
   "diagram-contract",
   "design-intent-coverage",
+  "structural-invariants",
   "ui-artifact-consistency",
   "inception-consistency",
   "review-evidence",
@@ -112,7 +113,7 @@ const SENSOR_NAMES = new Set([
   "framework-compliance", "subagent-evidence", "template-completeness", "recovery-evidence",
   "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
   "ui-artifact-consistency", "inception-consistency",
-  "traceability-matrix",
+  "traceability-matrix", "structural-invariants",
 ]);
 
 function fail(message: string): never { throw new Error(message); }
@@ -625,7 +626,7 @@ function implementationReport(): Record<string, unknown> {
             try { return jsonFile(candidate).status === "passed"; } catch { return false; }
           });
         if (alignmentFiles.length === 0) fail(`selected UI route for ${module.module_id} has no passed code-review ui-design-alignment evidence`);
-        requiredEvidence.push(...alignmentFiles.map(relativePath));
+        requiredEvidence.push(...alignmentFiles.map((file) => relativePath(file).replace(/\\/g, "/")));
         uiModulesVerified.push(module.module_id);
       }
     }
@@ -1051,8 +1052,10 @@ function diagramContract(): Record<string, unknown> {
     if (!routeConfig || Object.keys(routeConfig).length === 0) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.route_config must be a non-empty object`);
     const sourceRefs = stringArray(metadata.source_refs, `diagram ${id}.generation.source_refs`);
     for (const sourceRef of sourceRefs) projectReference(sourceRef, `diagram ${id}.generation.source_refs`);
-    const outputs = stringArray(metadata.outputs, `diagram ${id}.generation.outputs`);
-    const requiredOutputs = [relativePath(svgPath), relativePath(expectedPath)];
+    // Compare project-relative paths in portable form: sidecars declare `/`, while relative() yields `\` on Windows.
+    const portable = (value: string): string => value.replace(/\\/g, "/");
+    const outputs = stringArray(metadata.outputs, `diagram ${id}.generation.outputs`).map(portable);
+    const requiredOutputs = [relativePath(svgPath), relativePath(expectedPath)].map(portable);
     for (const output of requiredOutputs) if (!outputs.includes(output)) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.outputs must include ${output}`);
     const command = metadata.command_argv;
     if (!Array.isArray(command) || command.length === 0 || !command.every((value) => typeof value === "string" && value.trim().length > 0)) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.command_argv must be a non-empty argv array`);
@@ -2630,8 +2633,20 @@ function traceabilityMatrix(): Record<string, unknown> {
   const rows: Record<string, unknown>[] = [];
   const brokenRows: string[] = [];
   const missingTrack: string[] = [];
+  let invariantCache: { ids: Set<string>; error?: string } | null = null;
+  const declaredInvariants = (): { ids: Set<string>; error?: string } => {
+    if (invariantCache) return invariantCache;
+    try {
+      const set = loadInvariantSet(ACTIVE_MODULE);
+      invariantCache = set ? { ids: new Set(set.invariants.map((invariant) => invariant.id)) } : { ids: new Set(), error: "no structural-invariants manifest" };
+    } catch (error) {
+      invariantCache = { ids: new Set(), error: error instanceof Error ? error.message : String(error) };
+    }
+    return invariantCache;
+  };
   // REQ → track 映射(供 STORY/UC-D 派生继承)。
   const reqTrack = new Map<string, Track[]>();
+  const reqOwnership = new Map<string, string[]>();
   for (const req of reqIds) {
     const start = reqDoc.indexOf(req);
     const nextIdx = reqDoc.slice(start + req.length).search(/\bREQ-[A-Z0-9]/);
@@ -2639,6 +2654,9 @@ function traceabilityMatrix(): Record<string, unknown> {
     const trackMatch = block.match(/track\s*:\s*\[([^\]]*)\]/i);
     const tracks = (trackMatch ? trackMatch[1].split(",").map((t) => t.trim().toLowerCase()) : []).filter((t): t is Track => TRACKS.has(t as Track));
     reqTrack.set(req, tracks);
+    // D:形态/归属断言(可选)。REQ 段内 `data_ownership: [INV-xxx]` 声明该需求在数据层归属哪条结构不变式。
+    const ownershipMatch = block.match(/data_ownership\s*:\s*\[([^\]]*)\]/i);
+    if (ownershipMatch) reqOwnership.set(req, ownershipMatch[1].split(",").map((value) => value.trim().toUpperCase()).filter(Boolean));
   }
   // STORY/UC-D 的派生 track:从其引用的 REQ 继承(取并集)。用于派生级覆盖诊断。
   // 在 STORY 段/UC-D 段里找它引用的 REQ-xxx,合并这些 REQ 的 track。
@@ -2674,9 +2692,23 @@ function traceabilityMatrix(): Record<string, unknown> {
       const covered = new RegExp(`\\b${req}\\b`).test(layerText[layer] || "");
       if (!covered && brokenAt === null) brokenAt = layer;
     }
+    // D:归属断言校验(仅声明了 data_ownership 的 REQ;设计阶段起生效)。引用的 INV 必须在结构不变式清单中存在,
+    // 使覆盖型门禁同时具备最小形态校验:需求声明"归属某唯一真源",而该真源未被机器声明 → BROKEN@ownership。
+    const ownership = reqOwnership.get(req) || [];
+    let ownershipStatus = ownership.length > 0 ? "declared" : "not_declared";
+    if (ownership.length > 0 && currentOrder >= MATRIX_STAGE_ORDER.indexOf("application-design")) {
+      const known = declaredInvariants();
+      const unknown = ownership.filter((id) => !known.ids.has(id));
+      if (unknown.length > 0) {
+        ownershipStatus = `unresolved(${unknown.join(", ")}${known.error ? `; ${known.error}` : ""})`;
+        if (brokenAt === null) brokenAt = "ownership";
+      } else {
+        ownershipStatus = "resolved";
+      }
+    }
     const status = missingTrack.includes(req) ? "MIGRATION_REQUIRED" : (brokenAt ? `BROKEN@${brokenAt}` : "COMPLETE");
     if (brokenAt) brokenRows.push(`${req}: BROKEN@${brokenAt}`);
-    rows.push({ req, tracks, coverage_status: status });
+    rows.push({ req, tracks, coverage_status: status, ...(ownership.length > 0 ? { data_ownership: ownership, ownership_status: ownershipStatus } : {}) });
   }
 
   // 派生级诊断(advisory,不新增硬失败面):STORY/UC-D 继承的 track 若含 backend/frontend/data,
@@ -2750,6 +2782,469 @@ function traceabilityMatrix(): Record<string, unknown> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// structural-invariants:形态一致性门禁。
+// 覆盖型门禁(traceability-matrix)保证"需求到达下游层",但防不住需求以错误结构形态落地
+// (例如本应并入既有真源的对象被实现成并行/影子实体表)。本 checker 读取设计阶段声明的
+// 机器可读不变式清单(structural-invariants.json),对生成产物(DDL/迁移、实体类、schema、
+// Mapper SQL、设计文档里的 [实体:X] 标记与 ```sql 块)做确定性比对,命中即 fail-closed。
+// 无清单 = not_applicable(向后兼容:未声明不变式的项目不被误伤)。
+// ---------------------------------------------------------------------------
+type InvariantKind = "single-source-of-truth" | "converge" | "deprecated" | "migrate-out";
+const INVARIANT_KINDS = new Set<InvariantKind>(["single-source-of-truth", "converge", "deprecated", "migrate-out"]);
+const INVARIANT_ID = /^INV-[A-Z0-9][A-Z0-9_-]*$/;
+const DEFAULT_STRIP_PREFIXES = ["t_", "tb_", "tbl_"];
+const MODULE_INVARIANTS_PATH = (moduleId: string): string => `docs/aidlc/modules/${moduleId}/inception/application-design/structural-invariants.json`;
+const PRODUCT_INVARIANTS_PATH = "docs/aidlc/ideation/structural-invariants.json";
+
+interface InvariantExemption { path: string; reason: string }
+interface StructuralInvariant {
+  id: string;
+  kind: InvariantKind;
+  source: string;
+  subject: string;
+  ownerModule?: string;
+  canonical: string[];
+  ownerPaths: string[];
+  shadowNames: string[];
+  patterns: RegExp[];
+  writers: string[];
+  targets: string[];
+  toModule?: string;
+  requirements: string[];
+  exemptions: InvariantExemption[];
+}
+interface PersistenceAuthorization { names: string[]; refs: string[] }
+interface InvariantSet {
+  manifests: string[];
+  baselineRef?: string;
+  stripPrefixes: string[];
+  invariants: StructuralInvariant[];
+  persistence?: { authorized: PersistenceAuthorization[]; exemptions: InvariantExemption[] };
+}
+interface PersistOp { op: "create" | "write"; names: string[]; file: string; line: number; via: string }
+interface InvariantViolation {
+  invariant: string;
+  kind: string;
+  rule: string;
+  name: string;
+  file: string;
+  line: number;
+  via: string;
+  requirements: string[];
+  message: string;
+}
+
+function portableLabel(path: string): string { return relative(ROOT, path).replace(/\\/g, "/"); }
+function normalizedPrefix(value: string): string { return value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\*+$/, ""); }
+
+/** 实体/表名蛇形形态:去引号与 schema 前缀、驼峰转蛇形、去表前缀与实体类后缀(保留下划线,供 patterns 匹配)。 */
+function entityForm(name: string, stripPrefixes: string[]): string {
+  let value = name.trim().replace(/[`"'[\]]/g, "");
+  value = value.split(".").pop() || value;
+  value = value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+  for (const prefix of stripPrefixes) {
+    if (value.startsWith(prefix) && value.length > prefix.length) { value = value.slice(prefix.length); break; }
+  }
+  return value.replace(/_(?:entity|do|po|model|table|tbl)$/, "");
+}
+/** 实体/表名归一键:蛇形形态仅保留 [a-z0-9],用于精确比对。 */
+function entityKey(name: string, stripPrefixes: string[]): string {
+  return entityForm(name, stripPrefixes).replace(/[^a-z0-9]/g, "");
+}
+
+function parseInvariantManifest(path: string, requirementIds: Set<string> | null, errors: string[]): Omit<InvariantSet, "manifests"> & { declaredIds: string[] } {
+  const label = portableLabel(path);
+  const raw = jsonFile(path);
+  const err = (message: string): void => { errors.push(`${label}: ${message}`); };
+  if (raw.schema_version !== "1") err('schema_version must be "1"');
+  let baselineRef: string | undefined;
+  if (raw.baseline_ref !== undefined) {
+    if (typeof raw.baseline_ref !== "string" || !/^[A-Za-z0-9._/][A-Za-z0-9._/~^-]*$/.test(raw.baseline_ref)) err("baseline_ref must be a git ref (no leading '-', no whitespace)");
+    else baselineRef = raw.baseline_ref;
+  }
+  let stripPrefixes = DEFAULT_STRIP_PREFIXES;
+  if (raw.strip_prefixes !== undefined) {
+    if (!Array.isArray(raw.strip_prefixes) || !raw.strip_prefixes.every((item) => typeof item === "string" && /^[a-z0-9_]+$/.test(item))) err("strip_prefixes must be an array of lowercase [a-z0-9_] strings");
+    else stripPrefixes = raw.strip_prefixes as string[];
+  }
+  const names = (value: unknown, field: string, required: boolean): string[] => {
+    if (value === undefined && !required) return [];
+    if (!Array.isArray(value) || (required && value.length === 0) || !value.every((item) => typeof item === "string" && item.trim())) {
+      err(`${field} must be a ${required ? "non-empty " : ""}string array`);
+      return [];
+    }
+    return (value as string[]).map((item) => item.trim());
+  };
+  const exemptions = (value: unknown, field: string): InvariantExemption[] => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) { err(`${field} must be an array`); return []; }
+    const result: InvariantExemption[] = [];
+    value.forEach((item, index) => {
+      const record = item && typeof item === "object" && !Array.isArray(item) ? item as Record<string, unknown> : null;
+      const exemptPath = typeof record?.path === "string" ? normalizedPrefix(record.path.trim()) : "";
+      const reason = typeof record?.reason === "string" ? record.reason.trim() : "";
+      if (!exemptPath || exemptPath.startsWith("/") || exemptPath.split("/").includes("..")) err(`${field}[${index}].path must be a project-relative path prefix`);
+      else if (reason.length < 8) err(`${field}[${index}].reason must explain the exemption (>= 8 chars)`);
+      else result.push({ path: exemptPath, reason });
+    });
+    return result;
+  };
+  const invariants: StructuralInvariant[] = [];
+  const declaredIds: string[] = [];
+  if (!Array.isArray(raw.invariants)) err("invariants must be an array");
+  const list = Array.isArray(raw.invariants) ? raw.invariants : [];
+  list.forEach((item, index) => {
+    const field = `invariants[${index}]`;
+    if (!item || typeof item !== "object" || Array.isArray(item)) { err(`${field} must be an object`); return; }
+    const record = item as Record<string, unknown>;
+    const id = typeof record.id === "string" ? record.id.trim() : "";
+    if (!INVARIANT_ID.test(id)) { err(`${field}.id must match INV-XXX`); return; }
+    declaredIds.push(id);
+    const kind = record.kind as InvariantKind;
+    if (!INVARIANT_KINDS.has(kind)) { err(`${id}.kind must be one of ${[...INVARIANT_KINDS].join(", ")}`); return; }
+    const subject = typeof record.subject === "string" ? record.subject.trim() : "";
+    if (!subject) err(`${id}.subject must be a non-empty string`);
+    const patterns: RegExp[] = [];
+    for (const source of names(record.patterns, `${id}.patterns`, false)) {
+      try { patterns.push(new RegExp(source, "i")); } catch { err(`${id}.patterns contains an invalid regex: ${source}`); }
+    }
+    const requirements = names(record.requirements, `${id}.requirements`, false);
+    if (requirementIds) {
+      const dangling = requirements.filter((req) => !requirementIds.has(req.toUpperCase()));
+      if (dangling.length > 0) err(`${id}.requirements reference unknown requirement IDs: ${dangling.join(", ")}`);
+    }
+    const invariant: StructuralInvariant = {
+      id, kind, source: label, subject, canonical: [], ownerPaths: [], shadowNames: [], patterns, writers: [], targets: [],
+      requirements, exemptions: exemptions(record.exemptions, `${id}.exemptions`),
+    };
+    if (kind === "single-source-of-truth") {
+      const owner = record.owner && typeof record.owner === "object" && !Array.isArray(record.owner) ? record.owner as Record<string, unknown> : null;
+      const ownerModule = typeof owner?.module === "string" ? owner.module.trim() : "";
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(ownerModule)) err(`${id}.owner.module must be a module id`);
+      invariant.ownerModule = ownerModule;
+      invariant.canonical = [...names(owner?.tables, `${id}.owner.tables`, false), ...names(owner?.entities, `${id}.owner.entities`, false)];
+      if (invariant.canonical.length === 0) err(`${id}.owner must declare at least one of tables/entities`);
+      invariant.ownerPaths = names(owner?.paths, `${id}.owner.paths`, false).map(normalizedPrefix);
+      invariant.shadowNames = names(record.aliases, `${id}.aliases`, false);
+      invariant.writers = record.writers === undefined ? [ownerModule] : names(record.writers, `${id}.writers`, true);
+      if (invariant.shadowNames.length === 0 && patterns.length === 0) err(`${id} must declare aliases or patterns that identify a shadow/parallel copy`);
+    } else if (kind === "converge") {
+      invariant.targets = names(record.from, `${id}.from`, true);
+      const to = record.to && typeof record.to === "object" && !Array.isArray(record.to) ? record.to as Record<string, unknown> : null;
+      invariant.canonical = [...names(to?.tables, `${id}.to.tables`, false), ...names(to?.entities, `${id}.to.entities`, false)];
+      if (invariant.canonical.length === 0) err(`${id}.to must declare the convergence target tables/entities`);
+      if (typeof to?.module === "string" && to.module.trim()) invariant.ownerModule = to.module.trim();
+    } else if (kind === "deprecated") {
+      invariant.targets = names(record.targets, `${id}.targets`, true);
+    } else {
+      invariant.targets = names(record.targets, `${id}.targets`, true);
+      const toModule = typeof record.to_module === "string" ? record.to_module.trim() : "";
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(toModule)) err(`${id}.to_module must be a module id`);
+      invariant.toModule = toModule;
+    }
+    invariants.push(invariant);
+  });
+  let persistence: InvariantSet["persistence"];
+  if (raw.persistence !== undefined) {
+    const record = raw.persistence && typeof raw.persistence === "object" && !Array.isArray(raw.persistence) ? raw.persistence as Record<string, unknown> : null;
+    if (!record || record.mode !== "strict") err('persistence.mode must be "strict" when persistence is declared');
+    else {
+      const authorized: PersistenceAuthorization[] = [];
+      const entries = Array.isArray(record.authorized) ? record.authorized : null;
+      if (!entries) err("persistence.authorized must be an array");
+      (entries || []).forEach((item, index) => {
+        const entry = item && typeof item === "object" && !Array.isArray(item) ? item as Record<string, unknown> : {};
+        const entryNames = names(entry.names, `persistence.authorized[${index}].names`, true);
+        const refs = names(entry.refs, `persistence.authorized[${index}].refs`, true);
+        for (const ref of refs) {
+          if (/^INV-/.test(ref)) continue; // resolved against declared invariants after merge
+          if (!/^REQ-/i.test(ref)) err(`persistence.authorized[${index}].refs must be REQ-xxx or INV-xxx: ${ref}`);
+          else if (requirementIds && !requirementIds.has(ref.toUpperCase())) err(`persistence.authorized[${index}].refs references unknown requirement ${ref}`);
+        }
+        authorized.push({ names: entryNames, refs });
+      });
+      persistence = { authorized, exemptions: exemptions(record.exemptions, "persistence.exemptions") };
+    }
+  }
+  return { baselineRef, stripPrefixes, invariants, persistence, declaredIds };
+}
+
+function loadInvariantSet(moduleId: string): InvariantSet | null {
+  const modulePath = join(ROOT, MODULE_INVARIANTS_PATH(moduleId));
+  const productPath = join(ROOT, PRODUCT_INVARIANTS_PATH);
+  const hasModule = existsSync(modulePath);
+  const hasProduct = existsSync(productPath);
+  if (!hasModule && !hasProduct) return null;
+  const requirementsPath = join(ROOT, `docs/aidlc/modules/${moduleId}/inception/requirements.md`);
+  const requirementIds = existsSync(requirementsPath) ? new Set(normalizedIds(text(requirementsPath), REQUIREMENT_ID)) : null;
+  const errors: string[] = [];
+  const manifests: string[] = [];
+  const invariants: StructuralInvariant[] = [];
+  const declared: string[] = [];
+  let baselineRef: string | undefined;
+  let stripPrefixes = DEFAULT_STRIP_PREFIXES;
+  let persistence: InvariantSet["persistence"];
+  if (hasProduct) {
+    // 产品级清单承载跨 module 的唯一真源;其 requirements 指向其他 module,不在本 module 校验存在性。
+    const parsed = parseInvariantManifest(productPath, null, errors);
+    if (parsed.persistence) errors.push(`${PRODUCT_INVARIANTS_PATH}: persistence is module-level only`);
+    manifests.push(PRODUCT_INVARIANTS_PATH);
+    invariants.push(...parsed.invariants);
+    declared.push(...parsed.declaredIds);
+    baselineRef = parsed.baselineRef;
+    stripPrefixes = parsed.stripPrefixes;
+  }
+  if (hasModule) {
+    if (!requirementIds) errors.push(`${MODULE_INVARIANTS_PATH(moduleId)}: requirements.md is missing, requirement references cannot be verified`);
+    const parsed = parseInvariantManifest(modulePath, requirementIds || new Set(), errors);
+    manifests.push(MODULE_INVARIANTS_PATH(moduleId));
+    invariants.push(...parsed.invariants);
+    declared.push(...parsed.declaredIds);
+    if (parsed.baselineRef) baselineRef = parsed.baselineRef;
+    if (parsed.stripPrefixes !== DEFAULT_STRIP_PREFIXES) stripPrefixes = parsed.stripPrefixes;
+    persistence = parsed.persistence;
+  }
+  const duplicates = declared.filter((id, index) => declared.indexOf(id) !== index);
+  if (duplicates.length > 0) errors.push(`duplicate invariant ids across manifests: ${[...new Set(duplicates)].join(", ")}`);
+  for (const entry of persistence?.authorized || []) {
+    for (const ref of entry.refs.filter((value) => /^INV-/.test(value))) {
+      if (!declared.includes(ref)) errors.push(`persistence.authorized refs unknown invariant ${ref}`);
+    }
+  }
+  if (errors.length > 0) fail(`structural-invariants manifest is invalid: ${errors.join("; ")}`);
+  return { manifests, baselineRef, stripPrefixes, invariants, persistence };
+}
+
+function lineAt(content: string, index: number): number {
+  let line = 1;
+  for (let i = 0; i < index; i++) if (content.charCodeAt(i) === 10) line++;
+  return line;
+}
+
+const SQL_IDENT = "([`\"\\[]?[A-Za-z_][\\w$]*(?:[`\"\\]]?\\.[`\"\\[]?[A-Za-z_][\\w$]*)?[`\"\\]]?)";
+const SQL_PATTERNS: Array<{ op: PersistOp["op"]; via: string; pattern: RegExp }> = [
+  { op: "create", via: "CREATE TABLE", pattern: new RegExp(`\\bcreate\\s+(?!temporary\\b|temp\\b)(?:or\\s+replace\\s+)?table\\s+(?:if\\s+not\\s+exists\\s+)?${SQL_IDENT}`, "gi") },
+  { op: "create", via: "RENAME TO", pattern: new RegExp(`\\balter\\s+table\\s+[^\\s;]+\\s+rename\\s+to\\s+${SQL_IDENT}`, "gi") },
+  { op: "write", via: "INSERT INTO", pattern: new RegExp(`\\binsert\\s+(?:ignore\\s+)?into\\s+${SQL_IDENT}\\s*(?=\\(|values\\b|select\\b|set\\b)`, "gi") },
+  { op: "write", via: "REPLACE INTO", pattern: new RegExp(`\\breplace\\s+into\\s+${SQL_IDENT}\\s*(?=\\(|values\\b|select\\b|set\\b)`, "gi") },
+  { op: "write", via: "MERGE INTO", pattern: new RegExp(`\\bmerge\\s+into\\s+${SQL_IDENT}\\s+(?=using\\b|\\w+\\s+using\\b)`, "gi") },
+  { op: "write", via: "UPDATE", pattern: new RegExp(`\\bupdate\\s+${SQL_IDENT}\\s+set\\b`, "gi") },
+];
+
+function sqlOperations(content: string, file: string, baseLine: number): PersistOp[] {
+  const ops: PersistOp[] = [];
+  for (const { op, via, pattern } of SQL_PATTERNS) {
+    for (const match of content.matchAll(pattern)) {
+      ops.push({ op, via, names: [match[1].replace(/[`"[\]]/g, "")], file, line: baseLine + lineAt(content, match.index || 0) - 1 });
+    }
+  }
+  return ops;
+}
+
+/** 从单个文件确定性提取持久化操作(新建实体/表、写入表)。 */
+function persistenceOperations(path: string): PersistOp[] {
+  const file = portableLabel(path);
+  const content = text(path);
+  const ops: PersistOp[] = [];
+  if (/\.md$/i.test(path)) {
+    for (const match of content.matchAll(/\[实体\s*[:：]\s*([^\]\s]+)(?:\s+table\s*=\s*([^\]\s]+))?\s*\]/g)) {
+      ops.push({ op: "create", via: "[实体:] marker", names: [match[1], ...(match[2] ? [match[2]] : [])], file, line: lineAt(content, match.index || 0) });
+    }
+    for (const match of content.matchAll(/```sql[^\n]*\n([\s\S]*?)```/gi)) {
+      const bodyStart = (match.index || 0) + match[0].indexOf("\n") + 1;
+      ops.push(...sqlOperations(match[1], file, lineAt(content, bodyStart)));
+    }
+    return ops;
+  }
+  if (/\.(?:sql|xml)$/i.test(path)) return sqlOperations(content, file, 1);
+  if (/\.prisma$/i.test(path)) {
+    for (const match of content.matchAll(/^\s*model\s+(\w+)\s*\{/gm)) ops.push({ op: "create", via: "prisma model", names: [match[1]], file, line: lineAt(content, match.index || 0) });
+    return ops;
+  }
+  // 代码:注解声明的持久化实体 + 字符串内嵌 DML。
+  const classAfter = (index: number): string[] => {
+    const tail = content.slice(index, index + 600).match(/\bclass\s+(\w+)/);
+    return tail ? [tail[1]] : [];
+  };
+  for (const match of content.matchAll(/@TableName\s*\(\s*(?:value\s*=\s*)?"([^"]+)"/g)) {
+    ops.push({ op: "create", via: "@TableName", names: [match[1], ...classAfter(match.index || 0)], file, line: lineAt(content, match.index || 0) });
+  }
+  for (const match of content.matchAll(/@Table\s*\(\s*[^)]*?\bname\s*=\s*"([^"]+)"/g)) {
+    ops.push({ op: "create", via: "@Table", names: [match[1], ...classAfter(match.index || 0)], file, line: lineAt(content, match.index || 0) });
+  }
+  for (const match of content.matchAll(/@Entity\b(?:\s*\(\s*(?:name\s*=\s*)?["']([^"']+)["']\s*\))?/g)) {
+    const names = [...(match[1] ? [match[1]] : []), ...classAfter(match.index || 0)];
+    if (names.length > 0) ops.push({ op: "create", via: "@Entity", names, file, line: lineAt(content, match.index || 0) });
+  }
+  ops.push(...sqlOperations(content, file, 1).filter((op) => op.op === "write"));
+  return ops;
+}
+
+function baselineChangedFiles(ref: string): Set<string> {
+  const git = (args: string[]): string => {
+    const result = spawnSync("git", args, { cwd: ROOT, encoding: "utf8", shell: false });
+    if (result.status !== 0) fail(`structural-invariants baseline_ref ${ref} could not be resolved (git ${args[0]}): ${(result.stderr || "").trim() || `exit ${result.status}`}`);
+    return result.stdout || "";
+  };
+  git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+  const changed = git(["diff", "--name-only", "--relative", "--diff-filter=ACMR", ref, "--"]);
+  const untracked = git(["ls-files", "--others", "--exclude-standard"]);
+  return new Set(`${changed}\n${untracked}`.split(/\r?\n/).map((line) => line.trim().replace(/\\/g, "/")).filter(Boolean));
+}
+
+function structuralInvariants(): Record<string, unknown> {
+  if (!ACTIVE_MODULE) return { status: "not_applicable", invariants_declared: 0, violations: [], skip_reason: "no active module context" };
+  const set = loadInvariantSet(ACTIVE_MODULE);
+  if (!set) {
+    return {
+      status: "not_applicable",
+      module_id: ACTIVE_MODULE,
+      invariants_declared: 0,
+      violations: [],
+      skip_reason: "no structural-invariants manifest declared (module or product level)",
+    };
+  }
+  const keyOf = (name: string): string => entityKey(name, set.stripPrefixes);
+  // 清单是架构决策,随应用设计人工审批。后续阶段必须与应用设计阶段受控证据记录的 manifest_digest 一致,
+  // 防止在生成阶段为"过门禁"而削弱清单(加豁免/删不变式)。改清单 = 回到应用设计重新审批。
+  const manifestDigest = createHash("sha256").update(set.manifests.map((label) => `${label}\n${text(join(ROOT, label))}`).join("\n\0")).digest("hex");
+  const stage = workflowState?.current_stage || "";
+  let manifestBinding = "authoring";
+  if (stage !== "application-design") {
+    const approvedPath = join(ROOT, `.aidlc/evidence/application-design/${ACTIVE_MODULE}/structural-invariants.json`);
+    if (!existsSync(approvedPath)) {
+      fail(`structural-invariants manifest has no application-design evidence (${relativePath(approvedPath)}); declare or change invariants in application-design and pass its approval gate first`);
+    }
+    const approved = jsonFile(approvedPath);
+    const producer = approved.producer as Record<string, unknown> | undefined;
+    const checker = approved.checker as Record<string, unknown> | undefined;
+    if (producer?.name !== "loeyae-aidlc-evidence" || producer?.mode !== "controlled" || checker?.id !== "builtin:structural-invariants") {
+      fail(`${relativePath(approvedPath)} is not controlled structural-invariants evidence`);
+    }
+    if (approved.manifest_digest !== manifestDigest) {
+      fail(`structural-invariants manifest changed after application-design approval (approved ${String(approved.manifest_digest || "none").slice(0, 12)}, current ${manifestDigest.slice(0, 12)}); revert the change or re-run application-design and its approval`);
+    }
+    manifestBinding = "bound";
+  }
+  let manifestModules: Array<{ module_id: string; paths?: string[] }> = [];
+  try { manifestModules = readModuleManifest(ROOT); } catch { manifestModules = []; }
+  const activePaths = (manifestModules.find((module) => module.module_id === ACTIVE_MODULE)?.paths || []).map(normalizedPrefix);
+  const underAny = (label: string, prefixes: string[]): boolean => prefixes.some((prefix) => prefix && (label === prefix || label.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)));
+  /** 文件归属 module:显式 manifest paths > docs/aidlc/modules/<id>/ > 单 module 项目默认归本 module;否则不可归属。 */
+  const attributedModule = (label: string): string | undefined => {
+    for (const module of manifestModules) if (underAny(label, (module.paths || []).map(normalizedPrefix))) return module.module_id;
+    const docMatch = /^docs\/aidlc\/modules\/([a-z0-9][a-z0-9-]*)\//.exec(label);
+    if (docMatch) return docMatch[1];
+    return manifestModules.length <= 1 ? ACTIVE_MODULE : undefined;
+  };
+
+  const scanPattern = /\.(?:sql|xml|java|kt|ts|js|prisma|md)$/i;
+  const candidates = activePaths.length > 0 ? moduleArtifactFiles(scanPattern) : projectFiles(scanPattern);
+  const moduleDocs = `docs/aidlc/modules/${ACTIVE_MODULE}/`;
+  let files = candidates.filter((path) => {
+    const label = portableLabel(path);
+    if (/\.md$/i.test(label)) return label.startsWith(moduleDocs); // 设计文档只看本 module 目录
+    return !label.startsWith("docs/") && !/\.d\.ts$/i.test(label);
+  });
+  const changed = set.baselineRef ? baselineChangedFiles(set.baselineRef) : null;
+  if (changed) files = files.filter((path) => changed.has(portableLabel(path)));
+
+  const ops = files.flatMap(persistenceOperations);
+  const violations: InvariantViolation[] = [];
+  const exemptionsApplied: Array<{ invariant: string; path: string; reason: string; file: string }> = [];
+  const exempted = (invariant: string, list: InvariantExemption[], file: string): boolean => {
+    const hit = list.find((exemption) => file === exemption.path || file.startsWith(exemption.path));
+    if (hit) exemptionsApplied.push({ invariant, path: hit.path, reason: hit.reason, file });
+    return Boolean(hit);
+  };
+  const push = (invariant: StructuralInvariant | null, rule: string, op: PersistOp, name: string, message: string): void => {
+    violations.push({
+      invariant: invariant?.id || "PERSISTENCE",
+      kind: invariant?.kind || "persistence-authorization",
+      rule, name, file: op.file, line: op.line, via: op.via,
+      requirements: invariant?.requirements || [],
+      message,
+    });
+  };
+  const matchedName = (op: PersistOp, keys: Set<string>, patterns: RegExp[] = []): string | undefined =>
+    op.names.find((name) => keys.has(keyOf(name)) || patterns.some((pattern) => pattern.test(name) || pattern.test(entityForm(name, set.stripPrefixes))));
+
+  for (const invariant of set.invariants) {
+    const canonical = new Set(invariant.canonical.map(keyOf));
+    const shadows = new Set([invariant.subject, ...invariant.shadowNames].map(keyOf).filter((key) => key && !canonical.has(key)));
+    const targets = new Set(invariant.targets.map(keyOf));
+    for (const op of ops) {
+      if (exempted(invariant.id, invariant.exemptions, op.file)) continue;
+      const owner = underAny(op.file, invariant.ownerPaths) ? invariant.ownerModule : attributedModule(op.file);
+      if (invariant.kind === "single-source-of-truth") {
+        const canonicalHit = op.names.find((name) => canonical.has(keyOf(name)));
+        if (canonicalHit) {
+          if (op.op === "create" && owner && owner !== invariant.ownerModule) {
+            push(invariant, "duplicate-canonical", op, canonicalHit, `${invariant.subject} 的唯一真源归属 ${invariant.ownerModule},${owner} 不得再建同名实体/表 ${canonicalHit}`);
+          }
+          if (op.op === "write" && owner && !invariant.writers.includes(owner)) {
+            push(invariant, "foreign-write", op, canonicalHit, `${invariant.subject} 只允许 ${invariant.writers.join("/")} 写入,${owner} 写入了 ${canonicalHit}`);
+          }
+          continue;
+        }
+        const shadowHit = op.op === "create" ? matchedName(op, shadows, invariant.patterns) : undefined;
+        if (shadowHit) push(invariant, "shadow-entity", op, shadowHit, `新建实体/表 ${shadowHit} 影子化了唯一真源 ${invariant.subject}(应复用 ${invariant.canonical.join("/")} @${invariant.ownerModule})`);
+      } else if (invariant.kind === "converge" || invariant.kind === "deprecated") {
+        const hit = matchedName(op, targets, invariant.patterns);
+        if (!hit) continue;
+        const label = invariant.kind === "converge" ? `已声明收敛至 ${invariant.canonical.join("/")}` : "已声明废弃";
+        push(invariant, op.op === "create" ? `${invariant.kind}-recreated` : `${invariant.kind}-written`, op, hit, `${hit} ${label},不得再${op.op === "create" ? "新建" : "写入"}`);
+      } else {
+        const hit = matchedName(op, targets, invariant.patterns);
+        if (!hit || !owner || owner === invariant.toModule) continue;
+        push(invariant, op.op === "create" ? "migrate-out-recreated" : "migrate-out-written", op, hit, `${hit} 已声明迁出至 ${invariant.toModule},${owner} 不得再${op.op === "create" ? "新建" : "写入"}`);
+      }
+    }
+  }
+
+  let persistenceChecked = 0;
+  if (set.persistence) {
+    const allowed = new Set<string>([
+      ...set.persistence.authorized.flatMap((entry) => entry.names),
+      ...set.invariants.filter((inv) => inv.kind === "single-source-of-truth" && inv.ownerModule === ACTIVE_MODULE).flatMap((inv) => inv.canonical),
+      ...set.invariants.filter((inv) => inv.kind === "converge").flatMap((inv) => inv.canonical),
+    ].map(keyOf));
+    const alreadyFlagged = new Set(violations.map((violation) => `${violation.file}:${violation.line}`));
+    for (const op of ops.filter((candidate) => candidate.op === "create")) {
+      if (attributedModule(op.file) !== ACTIVE_MODULE) continue;
+      persistenceChecked++;
+      if (op.names.some((name) => allowed.has(keyOf(name)))) continue;
+      if (alreadyFlagged.has(`${op.file}:${op.line}`)) continue;
+      if (exempted("PERSISTENCE", set.persistence.exemptions, op.file)) continue;
+      push(null, "unauthorized-entity", op, op.names[0], `新建持久化实体 ${op.names.join("/")} 未被任何设计声明授权(persistence.authorized 需登记并引用 REQ/INV)`);
+    }
+  }
+
+  if (violations.length > 0) {
+    // 结构化阻断报告写 stdout(JSON),producer 落盘为 .aidlc/reports/.../structural-invariants.blocked.json。
+    output({ status: "blocked", module_id: ACTIVE_MODULE, stage: workflowState?.current_stage || null, violations_count: violations.length, violations: violations.slice(0, 200) });
+    fail(`structural invariant violations (${violations.length}): ${violations.slice(0, 5).map((violation) => `${violation.invariant}/${violation.rule} ${violation.name} @ ${violation.file}:${violation.line}`).join("; ")}`);
+  }
+  return {
+    status: "passed",
+    module_id: ACTIVE_MODULE,
+    stage: workflowState?.current_stage || null,
+    manifests: set.manifests,
+    manifest_digest: manifestDigest,
+    manifest_binding: manifestBinding,
+    invariants_declared: set.invariants.length,
+    invariant_ids: set.invariants.map((invariant) => invariant.id),
+    persistence_mode: set.persistence ? "strict" : "off",
+    persistence_entities_checked: persistenceChecked,
+    baseline_ref: set.baselineRef || null,
+    files_scanned: files.length,
+    operations_detected: ops.length,
+    exemptions_applied: exemptionsApplied,
+    violations: [],
+  };
+}
+
 const CHECKERS: Record<string, () => Record<string, unknown>> = {
   "review-evidence": reviewEvidence,
   "test-quality": testQuality,
@@ -2770,6 +3265,7 @@ const CHECKERS: Record<string, () => Record<string, unknown>> = {
   "ui-artifact-consistency": uiArtifactConsistency,
   "inception-consistency": inceptionConsistency,
   "traceability-matrix": traceabilityMatrix,
+  "structural-invariants": structuralInvariants,
 };
 
 try {

@@ -20,7 +20,8 @@ produces:
   - docs/aidlc/modules/{module-id}/inception/application-design/component-dependency.md
   - .aidlc/evidence/application-design/{module-id}/diagram-contract.json
   - .aidlc/evidence/application-design/{module-id}/traceability-matrix.json
-sensors: [diagram-contract, traceability-matrix]
+  - .aidlc/evidence/application-design/{module-id}/structural-invariants.json
+sensors: [diagram-contract, traceability-matrix, structural-invariants]
 requires: [cross-validation]
 condition: has_application_design_needs
 approval: block
@@ -190,6 +191,16 @@ approval: block
 - 收敛必须注明目标（`→ 目标名称`）；迁出必须注明去向
 - 前端产物（`frontend-components.md`、`frontend-routes.md`）适用同一标记规范
 - 标记用于 I14 设计意图覆盖检查的锚点；未标记的条目不纳入覆盖检查
+
+**结构不变式声明（架构硬约束的机器可读化，按条件执行）**：
+
+触发条件：设计中存在任一架构级硬约束——唯一真源归属、禁止并行/影子实体、收敛至既有实体、废弃、迁出，或需要“新建持久化实体必须有设计授权”。
+
+- 这类约束**不得只以散文写在设计文档里**：散文没有 sensor 消费，只能靠人工评审晚检测。架构师（`aidlc-architect-agent`）必须把它写成 `docs/aidlc/modules/{module-id}/inception/application-design/structural-invariants.json`；跨 module 的唯一真源写到产品级 `docs/aidlc/ideation/structural-invariants.json`。
+- Schema、字段、触发与豁免规则见 `common-structural-invariants.md`；`[意图:收敛]`、`[意图:废弃]`、`[意图:迁出]` 标记的对象若涉及持久化实体/表，同时写成对应 `kind` 的不变式。
+- 相关需求在 `requirements.md` 的 REQ 段内用 `data_ownership: [INV-xxx]` 声明归属，追溯矩阵据此校验归属断言。
+- 清单随本阶段一并提交人工审批；`structural-invariants` sensor 在本阶段校验清单合法性，并在单元生成、功能设计、代码生成阶段对生成产物 fail-closed 比对。
+- 无任何硬约束时不创建清单（sensor 记为 `not_applicable`）。存量项目声明废弃/收敛/迁出既有对象时必须设置 `baseline_ref`，只检查基线之后新增或修改的文件。
 
 **前端设计产物**（如项目包含前端）：
 - 创建 `docs/aidlc/modules/{module-id}/inception/application-design/frontend-components.md`，包含：

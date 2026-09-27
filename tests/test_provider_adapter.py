@@ -11,6 +11,9 @@ from pathlib import Path
 from diagram_fixture_style import canonicalize_svg
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# Run tsx's CLI through node directly: on Windows `npx` is a .cmd shim, and cmd.exe truncates
+# multi-line `--eval` scripts at the first newline, silently skipping the fixture setup.
+TSX = [shutil.which("node") or "node", os.path.join(REPO_ROOT, "node_modules", "tsx", "dist", "cli.mjs")]
 TOOL = os.path.join(REPO_ROOT, "core", "tools", "aidlc-diagram-provider.ts")
 
 
@@ -30,7 +33,7 @@ state.current_module = 'test-module';
 saveWorkflowState(process.cwd(), state);
 """
     result = subprocess.run(
-        ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", "--eval", script],
+        [*TSX, "--eval", script],
         cwd=project,
         env=provider_environment(project),
         capture_output=True,
@@ -41,7 +44,7 @@ saveWorkflowState(process.cwd(), state);
 
 def run_adapter(project: str, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", TOOL, *args],
+        [*TSX, TOOL, *args],
         cwd=project,
         env=provider_environment(project),
         capture_output=True,
@@ -143,17 +146,24 @@ def test_export_is_rejected() -> None:
 
 def test_file_url_cannot_escape_project() -> None:
     project, request_path = fixture()
+    # A real, existing SVG just outside the project root, addressed by a platform-correct absolute
+    # file URL (``file:///etc/passwd`` is not absolute on Windows, so it would be rejected by URL
+    # parsing before the containment guard under test ever ran).
+    outside_dir = tempfile.mkdtemp(prefix="aidlc-provider-outside-", dir=os.path.dirname(project))
     try:
+        outside_svg = Path(outside_dir) / "escape.svg"
+        outside_svg.write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>', encoding="utf-8")
         with open(request_path) as handle:
             request = json.load(handle)
-        request["diagrams"][0] = {"id": "flow", "url": "file:///etc/passwd"}
+        request["diagrams"][0] = {"id": "flow", "url": outside_svg.resolve().as_uri()}
         with open(request_path, "w") as handle:
             json.dump(request, handle)
         result = run_adapter(project, "run", "--request", "request.json", "--dry-run")
         assert result.returncode != 0
-        assert "project root" in result.stderr
+        assert "project root" in result.stderr, result.stderr
     finally:
         shutil.rmtree(project)
+        shutil.rmtree(outside_dir, ignore_errors=True)
 
 
 def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> None:

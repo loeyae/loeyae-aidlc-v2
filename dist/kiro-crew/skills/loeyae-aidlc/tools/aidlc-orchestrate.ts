@@ -1545,6 +1545,34 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
         break;
       }
 
+      case "structural-invariants": {
+        // 形态一致性门禁:生成产物不得违反设计声明的结构不变式(唯一真源/收敛/废弃/迁出/持久化授权)。
+        // 无清单 → not_applicable(向后兼容);有清单 → violations 必须为空。证据只能由受控 producer 生成。
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (!["passed", "not_applicable"].includes(String(evidence.status))) errors.push('status must be "passed" or "not_applicable"');
+          const violations = Array.isArray(evidence.violations) ? evidence.violations : null;
+          if (!violations) errors.push("violations must be an array");
+          else if (violations.length > 0) errors.push(`结构不变式违例(形态 drift): ${violations.length} 项`);
+          if (evidence.status === "not_applicable") {
+            if (!asNonEmptyString(evidence.skip_reason)) errors.push("skip_reason is required when not_applicable");
+            return errors;
+          }
+          if (evidence.module_id !== instance.module_id) errors.push(`module_id must be ${instance.module_id || "(none)"}`);
+          const declared = asPositiveInt(evidence.invariants_declared);
+          const persistenceStrict = evidence.persistence_mode === "strict";
+          if (declared === null || (declared < 1 && !persistenceStrict)) errors.push("invariants_declared must be >= 1 (or persistence_mode strict)");
+          if (asPositiveInt(evidence.files_scanned) === null) errors.push("files_scanned must be a non-negative integer");
+          if (!asStringArray(evidence.manifests)?.length) errors.push("manifests must list the invariant manifests that were applied");
+          if (!/^[a-f0-9]{64}$/.test(String(evidence.manifest_digest || ""))) errors.push("manifest_digest must be a SHA-256 digest");
+          const expectedBinding = stage.slug === "application-design" ? "authoring" : "bound";
+          if (evidence.manifest_binding !== expectedBinding) errors.push(`manifest_binding must be ${expectedBinding}`);
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
       case "design-intent-coverage": {
         const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];

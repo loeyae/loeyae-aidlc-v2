@@ -19,7 +19,8 @@ produces:
   - docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-dependency.md
   - docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-story-map.md
   - .aidlc/evidence/units-generation/{module-id}/design-intent-coverage.json
-sensors: [design-intent-coverage]
+  - .aidlc/evidence/units-generation/{module-id}/structural-invariants.json
+sensors: [design-intent-coverage, structural-invariants]
 requires: [application-design]
 condition: has_unit_generation_needs
 ---
@@ -458,3 +459,7 @@ condition: has_unit_generation_needs
   - I12 产物中所有 `[意图:*]` 标记条目均已被至少一个工作单元覆盖
   - 覆盖检查报告已写入 `docs/aidlc/audit.md`
   - 无 `[意图:*]` 标记时已记录跳过原因
+- **结构不变式一致性（`structural-invariants` sensor，fail-closed）**：
+  - 存在 `structural-invariants.json` 时，单元产物（`unit-of-work*.md` 中的 `[实体:X]` 标记与 ``sql` 块）不得影子化唯一真源、不得新建或写入已声明收敛/废弃/迁出的对象；启用 `persistence.mode: strict` 时每个新实体都必须被授权
+  - 违例清单见 `.aidlc/reports/units-generation/{module-id}/structural-invariants.blocked.json`，修正单元划分或补充设计声明（需重新审批应用设计）后重跑，不得绕过
+  - 无清单时 sensor 记为 `not_applicable`，不阻断

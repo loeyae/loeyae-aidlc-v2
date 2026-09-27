@@ -147,6 +147,7 @@ const VALID_SENSORS = new Set([
   "recovery-evidence", "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
   "ui-artifact-consistency", "inception-consistency",
   "clarification-traceability", "story-traceability", "traceability-matrix",
+  "structural-invariants",
 ]);
 
 function executableForScope(stage: StageNode, scope: string): boolean {
@@ -320,7 +321,7 @@ export function validateGraph(graph: { stages: StageNode[]; stage_count: number;
 function sourceGraph(): StageGraph {
   const stages = scanStages();
   return {
-    version: "4.3.0",
+    version: "4.4.0",
     stages,
     stage_count: stages.length,
     scopes: [...VALID_SCOPES].sort(),

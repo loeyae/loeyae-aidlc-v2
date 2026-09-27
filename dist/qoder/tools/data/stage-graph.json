@@ -1,5 +1,5 @@
 {
-  "version": "4.3.0",
+  "version": "4.4.0",
   "stages": [
     {
       "slug": "workspace-detection",
@@ -1001,11 +1001,13 @@
         "docs/aidlc/modules/{module-id}/inception/application-design/application-services.md",
         "docs/aidlc/modules/{module-id}/inception/application-design/component-dependency.md",
         ".aidlc/evidence/application-design/{module-id}/diagram-contract.json",
-        ".aidlc/evidence/application-design/{module-id}/traceability-matrix.json"
+        ".aidlc/evidence/application-design/{module-id}/traceability-matrix.json",
+        ".aidlc/evidence/application-design/{module-id}/structural-invariants.json"
       ],
       "sensors": [
         "diagram-contract",
         "traceability-matrix",
+        "structural-invariants",
         "no-todo",
         "traceability"
       ],
@@ -1048,10 +1050,12 @@
         "docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work.md",
         "docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-dependency.md",
         "docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-story-map.md",
-        ".aidlc/evidence/units-generation/{module-id}/design-intent-coverage.json"
+        ".aidlc/evidence/units-generation/{module-id}/design-intent-coverage.json",
+        ".aidlc/evidence/units-generation/{module-id}/structural-invariants.json"
       ],
       "sensors": [
         "design-intent-coverage",
+        "structural-invariants",
         "no-todo",
         "traceability"
       ],
@@ -1136,12 +1140,14 @@
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/domain-entities.md",
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/data-source-validation.md",
         ".aidlc/evidence/functional-design/{module-id}/{unit-id}/functional-design-completeness.json",
-        ".aidlc/evidence/functional-design/{module-id}/{unit-id}/traceability-matrix.json"
+        ".aidlc/evidence/functional-design/{module-id}/{unit-id}/traceability-matrix.json",
+        ".aidlc/evidence/functional-design/{module-id}/{unit-id}/structural-invariants.json"
       ],
       "sensors": [
         "doc-cascade",
         "functional-design-completeness",
         "traceability-matrix",
+        "structural-invariants",
         "no-todo",
         "traceability"
       ],
@@ -1347,11 +1353,13 @@
         "src/",
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md",
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md",
-        ".aidlc/evidence/code-generation/{module-id}/{unit-id}/traceability-matrix.json"
+        ".aidlc/evidence/code-generation/{module-id}/{unit-id}/traceability-matrix.json",
+        ".aidlc/evidence/code-generation/{module-id}/{unit-id}/structural-invariants.json"
       ],
       "sensors": [
         "doc-cascade",
         "traceability-matrix",
+        "structural-invariants",
         "no-todo",
         "traceability"
       ],

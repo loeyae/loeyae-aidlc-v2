@@ -3,14 +3,19 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 from diagram_fixture_style import canonicalize_svg
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# Run tsx's CLI through node directly: on Windows `npx` is a .cmd shim, and cmd.exe truncates
+# multi-line `--eval` scripts at the first newline, silently skipping the fixture setup.
+TSX = [shutil.which("node") or "node", os.path.join(REPO_ROOT, "node_modules", "tsx", "dist", "cli.mjs")]
 CHECKER = os.path.join(REPO_ROOT, "core", "tools", "aidlc-semantic-checks.ts")
 SENSORS = [
     "review-evidence", "test-quality", "contract-baseline", "functional-design-completeness",
@@ -40,7 +45,7 @@ state.current_stage = 'compact-recovery';
 saveWorkflowState(process.cwd(), state);
 """
     result = subprocess.run(
-        ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", "--eval", script],
+        [*TSX, "--eval", script],
         cwd=project,
         env=checker_environment(project),
         capture_output=True,
@@ -176,7 +181,7 @@ Clarification consistency: passed
         "route_config": {"diagram_id": "requirements-flow", "edges": {"start-done": {"arrow_target": "done:left", "label_text": "完成", "topology": {"orthogonal": True, "segment_count": 1, "directions": ["right"]}}}},
         "source_refs": ["docs/aidlc/inception/requirements/business-flows.md"],
         "outputs": ["docs/aidlc/inception/requirements/business-flows.svg", "docs/aidlc/inception/requirements/business-flows.expected.json"],
-        "command_argv": ["python3", "generator.py"],
+        "command_argv": [sys.executable, "generator.py"],  # "python3" resolves to the Store stub (exit 9009) on Windows
     }
     with open(manifest_path, "w") as handle:
         json.dump(manifest, handle)
@@ -225,7 +230,7 @@ def run_checker(project: str, sensor: str, module_id: str = "", unit_id: str = "
     if unit_id:
         env["AIDLC_ACTIVE_UNIT"] = unit_id
     return subprocess.run(
-        ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", CHECKER, "--sensor", sensor],
+        [*TSX, CHECKER, "--sensor", sensor],
         cwd=project,
         env=env,
         capture_output=True,
@@ -346,7 +351,9 @@ def test_prd_pending_questions_contract() -> None:
         shutil.rmtree(project)
 
 
-def test_checker_rejects_incomplete_diagram_without_structured_contract() -> None:
+def test_checker_downgrades_legacy_diagram_without_structured_contract() -> None:
+    """旧图缺 v4 结构化契约(designNotes)时降级放行:记为 MIGRATION_REQUIRED,绝不报完整 PASS;
+    SVG 安全/可访问性底线仍 fail-closed。"""
     project = make_temp(prefix="aidlc-semantic-checkers-migration-")
     try:
         fixture(project)
@@ -357,8 +364,22 @@ def test_checker_rejects_incomplete_diagram_without_structured_contract() -> Non
         with open(manifest_path, "w") as handle:
             json.dump(manifest, handle)
         result = run_checker(project, "diagram-contract")
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["migration_status"] == "MIGRATION_REQUIRED", payload
+        assert payload["final_status"] != "PASS", payload
+        assert payload["legacy_diagrams_checked"] == 1, payload
+        assert payload["legacy_diagrams"] == [{"diagram_id": "requirements-flow", "missing": ["designNotes"]}], payload
+
+        # 降级不等于放弃底线:遗留图的 SVG 缺 <desc> 仍必须阻断。
+        svg_path = os.path.join(project, "docs/aidlc/inception/requirements/business-flows.svg")
+        with open(svg_path, encoding="utf-8") as handle:
+            svg = handle.read()
+        with open(svg_path, "w", encoding="utf-8") as handle:
+            handle.write(re.sub(r"<desc>.*?</desc>", "", svg, flags=re.S))
+        result = run_checker(project, "diagram-contract")
         assert result.returncode != 0
-        assert "MIGRATION_REQUIRED" in result.stderr
+        assert "fails static safety or accessibility checks" in result.stderr
     finally:
         shutil.rmtree(project)
 
@@ -861,6 +882,23 @@ def diagram009_expected_path(project: str) -> str:
     return os.path.join(project, "diagram-009.expected.json")
 
 
+def copy_diagram009_fixture(project: str) -> None:
+    """Copy the diagram-009 fixture and run its generator with this interpreter.
+
+    The committed sidecar declares ``python3``, which on Windows resolves to the Store stub (exit 9009).
+    """
+    shutil.copytree(os.path.join(REPO_ROOT, "tests", "fixtures", "diagram-009"), project, dirs_exist_ok=True)
+    sidecar = os.path.join(project, "diagram-009.diagram.json")
+    with open(sidecar, encoding="utf-8") as handle:
+        manifest = json.load(handle)
+    for diagram in manifest["diagrams"]:
+        argv = diagram.get("generation", {}).get("command_argv")
+        if argv and argv[0] == "python3":
+            argv[0] = sys.executable
+    with open(sidecar, "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, ensure_ascii=False, indent=2)
+
+
 def mutate_diagram009_expected(project: str, mutation) -> None:
     path = diagram009_expected_path(project)
     with open(path) as handle:
@@ -881,8 +919,7 @@ def diagram009_edge(expected_diagram: dict, edge_id: str) -> dict:
 def test_diagram_009_route_contract() -> None:
     project = make_temp(prefix="aidlc-diagram-009-route-contract-")
     try:
-        source = os.path.join(REPO_ROOT, "tests", "fixtures", "diagram-009")
-        shutil.copytree(source, project, dirs_exist_ok=True)
+        copy_diagram009_fixture(project)
         result = run_checker(project, "diagram-contract")
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout)
@@ -925,8 +962,7 @@ def test_diagram_009_route_contract() -> None:
     for name, mutation, expected_error in cases:
         project = make_temp(prefix=f"aidlc-diagram-009-{name}-")
         try:
-            source = os.path.join(REPO_ROOT, "tests", "fixtures", "diagram-009")
-            shutil.copytree(source, project, dirs_exist_ok=True)
+            copy_diagram009_fixture(project)
             mutate_diagram009_expected(project, mutation)
             result = run_checker(project, "diagram-contract")
             assert result.returncode != 0, name
@@ -1038,7 +1074,7 @@ state.history = {json.dumps(history)};
 saveWorkflowState(process.cwd(), state);
 """
     result = subprocess.run(
-        ["npx", "--no-install", "--prefix", REPO_ROOT, "tsx", "--eval", script],
+        [*TSX, "--eval", script],
         cwd=project,
         env=checker_environment(project),
         capture_output=True,
@@ -1379,7 +1415,7 @@ if __name__ == "__main__":
     test_checker_fails_closed_when_required_artifact_is_removed()
     test_prd_checker_rejects_noncanonical_artifacts()
     test_prd_pending_questions_contract()
-    test_checker_rejects_incomplete_diagram_without_structured_contract()
+    test_checker_downgrades_legacy_diagram_without_structured_contract()
     test_diagram_003_fixed_regression()
     test_structural_group_capacity_and_style_contract_pass()
     test_diagram_geometry_gates_fail_closed()

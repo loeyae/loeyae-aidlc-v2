@@ -33,7 +33,7 @@ import {
 import {
   codeBuddyConfigDirForCli,
   codeBuddyKnownCliPaths,
-  hostCliInvocation,
+  hostCliSpawnSpec,
   qoderCnMcpConfigPath,
   type WindowsDesktopHarness,
   windowsDesktopHostPaths,
@@ -167,8 +167,19 @@ function runInteractive(script: string, args: string[]): never | void {
 }
 
 function runExternal(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env): number {
-  const invocation = hostCliInvocation(command);
-  const result = spawnSync(invocation.command, [...invocation.argsPrefix, ...args], { stdio: "inherit", cwd, env });
+  let spec;
+  try {
+    spec = hostCliSpawnSpec(command, args, process.platform, process.execPath, env);
+  } catch (error) {
+    console.error(`❌ Failed to run ${command}: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  }
+  const result = spawnSync(spec.command, spec.args, {
+    stdio: "inherit",
+    cwd,
+    env,
+    windowsVerbatimArguments: spec.windowsVerbatimArguments,
+  });
   if (result.error) {
     console.error(`❌ Failed to run ${command}: ${result.error.message}`);
     return 1;
@@ -331,10 +342,11 @@ function runExternalJson(
   description: string,
   env: NodeJS.ProcessEnv = process.env,
 ): unknown {
-  const invocation = hostCliInvocation(command);
-  const result = spawnSync(invocation.command, [...invocation.argsPrefix, ...args], {
+  const spec = hostCliSpawnSpec(command, args, process.platform, process.execPath, env);
+  const result = spawnSync(spec.command, spec.args, {
     cwd,
     env,
+    windowsVerbatimArguments: spec.windowsVerbatimArguments,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
