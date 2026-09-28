@@ -2,8 +2,7 @@
 id: test-quality
 name: Test Quality & UC-D Traceability
 description: >
-  Verifies TDD discipline (red-green-refactor observed) and Use Case to Design
-  traceability — every use case maps to at least one test method.
+  Verifies the RED-before-GREEN gate and Use Case to Design traceability — every applicable UC-D maps to real tests and the target GREEN command passes.
 evidence_path: .aidlc/evidence/<stage-slug>/test-quality.json
 ---
 
@@ -26,28 +25,29 @@ not just exit codes.
   "evidence_version": "1",
   "timestamp": "2026-08-22T12:00:00.000Z",
   "status": "passed",
-  "red_seen": true,          // RED phase observed (test failed first)
-  "green_seen": true,        // GREEN phase observed (tests pass now)
+  "red_seen": true,
+  "green_seen": true,
   "tests_total": 48,
   "tests_failed": 0,
   "traceability_complete": true,
   "uc_mapping": [
     {
-      "use_case": "UC-001: User Registration",
-      "test_methods": [
-        "UserRegistrationTest#testSuccessfulRegistration",
-        "UserRegistrationTest#testDuplicateEmailRejected"
-      ]
-    },
-    {
-      "use_case": "UC-002: User Login",
-      "test_methods": [
-        "AuthenticationTest#testValidLogin",
-        "AuthenticationTest#testInvalidPassword"
-      ]
+      "use_case": "UC-D-001",
+      "test_methods": ["UserRegistrationTest#testSuccessfulRegistration"]
     }
-  ],
-  "red_exemption": null  // or string explaining why RED was not observed
+  ]
+}
+```
+
+For a unit with no executable business behavior, the controlled evidence may instead be:
+
+```json
+{
+  "status": "not_applicable",
+  "not_applicable_reason": "I13 approved pure declaration",
+  "alternative_validation": "compile and schema validation",
+  "traceability_complete": true,
+  "uc_mapping": []
 }
 ```
 
@@ -55,20 +55,20 @@ not just exit codes.
 
 | Field | Rule |
 |-------|------|
-| `status` | Must be `"passed"` |
-| `green_seen` | Must be `true` |
-| `tests_total` | >= 1 |
-| `tests_failed` | Must be 0 |
-| `red_seen` | Must be `true` OR `red_exemption` must be a non-empty string |
+| `status` | `"passed"` for executable behavior, or `"not_applicable"` only with I13-derived reason and alternative validation |
+| `green_seen` | Must be `true` for executable behavior |
+| `tests_total` | >= 1 for executable behavior |
+| `tests_failed` | Must be 0 for executable behavior |
+| `red_seen` | Must be `true` for executable behavior; no free-form exemption replaces I13 |
 | `traceability_complete` | Must be `true` |
-| `uc_mapping` | Non-empty array; each entry needs `use_case` (non-empty) and `test_methods` (non-empty string array) |
+| `uc_mapping` | Non-empty for executable behavior; empty only for `not_applicable` |
 | `timestamp` | Valid ISO, < 24h old |
 
 ## Producer Responsibility
 
 The agent MUST:
-1. Write a failing test first (RED), observe the failure, then implement until GREEN
-2. Record `red_seen: true` only if a test failure was actually observed
-3. Map EVERY use case from `docs/aidlc/inception/user-stories.md` or equivalent to test methods
-4. If RED cannot be demonstrated (e.g., pure refactor), document `red_exemption`
-5. Never fabricate the UC mapping — it must reflect actual test class/method names
+1. Consume the I13 evidence before evaluating tests
+2. For executable behavior, require the controlled RED phase before GREEN
+3. Verify the GREEN evidence and actual test source mapping for every UC-D
+4. For `not_applicable`, verify the I13 reason and deterministic alternative validation
+5. Never fabricate the UC mapping or accept a text-only TDD claim

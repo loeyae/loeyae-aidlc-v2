@@ -1,5 +1,5 @@
 {
-  "version": "4.4.0",
+  "version": "4.5.0",
   "stages": [
     {
       "slug": "workspace-detection",
@@ -1071,7 +1071,7 @@
       "name": "测试用例派生",
       "phase": "inception",
       "axis": "module",
-      "execution": "CONDITIONAL",
+      "execution": "ALWAYS",
       "selection": "automatic",
       "choices": [],
       "lead_agent": "aidlc-product-agent",
@@ -1081,29 +1081,30 @@
         "feature",
         "enterprise",
         "mvp",
-        "classic"
+        "classic",
+        "express",
+        "workshop",
+        "bugfix",
+        "refactor"
       ],
       "requires": [
-        "application-design"
+        "workspace-detection"
       ],
       "cross_module_requires": [],
       "scope_waived_requires": [],
-      "consumes": [
-        "docs/aidlc/modules/{module-id}/inception/application-design.md",
-        "docs/aidlc/modules/{module-id}/inception/user-stories.md"
-      ],
+      "consumes": [],
       "produces": [
         "docs/aidlc/modules/{module-id}/inception/application-design/test-cases/",
-        ".aidlc/evidence/test-case-derivation/{module-id}/traceability-matrix.json"
+        ".aidlc/evidence/test-case-derivation/{module-id}/test-case-derivation.json"
       ],
       "sensors": [
-        "traceability-matrix",
+        "test-case-derivation",
         "no-todo",
         "traceability"
       ],
-      "traceability": "required",
+      "traceability": "not_applicable",
       "completion_contract": "gated",
-      "condition": "has_test_case_sources",
+      "condition": "",
       "approval": "notify",
       "file": "stages/inception/inception-test-case-derivation.md"
     },
@@ -1320,8 +1321,53 @@
       "file": "stages/construction/construction-shared-contract-baseline.md"
     },
     {
-      "slug": "code-generation",
+      "slug": "tdd",
       "number": "3.5",
+      "name": "RED 测试门禁",
+      "phase": "construction",
+      "axis": "unit",
+      "execution": "ALWAYS",
+      "selection": "automatic",
+      "choices": [],
+      "lead_agent": "aidlc-developer-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic",
+        "express",
+        "workshop",
+        "bugfix",
+        "refactor"
+      ],
+      "requires": [
+        "test-case-derivation"
+      ],
+      "cross_module_requires": [],
+      "scope_waived_requires": [],
+      "consumes": [
+        "docs/aidlc/modules/{module-id}/inception/application-design/test-cases/",
+        ".aidlc/evidence/test-case-derivation/{module-id}/test-case-derivation.json"
+      ],
+      "produces": [
+        ".aidlc/evidence/tdd/{module-id}/{unit-id}/red-test-evidence.json"
+      ],
+      "sensors": [
+        "red-test-evidence",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "not_applicable",
+      "completion_contract": "gated",
+      "condition": "",
+      "approval": "notify",
+      "file": "stages/construction/construction-tdd.md"
+    },
+    {
+      "slug": "code-generation",
+      "number": "3.5.1",
       "name": "代码生成",
       "phase": "construction",
       "axis": "unit",
@@ -1342,22 +1388,29 @@
         "refactor"
       ],
       "requires": [
-        "functional-design"
+        "test-case-derivation",
+        "tdd"
       ],
       "cross_module_requires": [],
-      "scope_waived_requires": [
-        "functional-design"
+      "scope_waived_requires": [],
+      "consumes": [
+        "docs/aidlc/modules/{module-id}/inception/application-design/test-cases/",
+        ".aidlc/evidence/test-case-derivation/{module-id}/test-case-derivation.json",
+        ".aidlc/evidence/tdd/{module-id}/{unit-id}/red-test-evidence.json"
       ],
-      "consumes": [],
       "produces": [
         "src/",
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md",
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md",
+        ".aidlc/evidence/code-generation/{module-id}/{unit-id}/green-test-evidence.json",
+        ".aidlc/evidence/code-generation/{module-id}/{unit-id}/test-quality.json",
         ".aidlc/evidence/code-generation/{module-id}/{unit-id}/traceability-matrix.json",
         ".aidlc/evidence/code-generation/{module-id}/{unit-id}/structural-invariants.json"
       ],
       "sensors": [
         "doc-cascade",
+        "green-test-evidence",
+        "test-quality",
         "traceability-matrix",
         "structural-invariants",
         "no-todo",
@@ -1368,53 +1421,6 @@
       "condition": "",
       "approval": "notify",
       "file": "stages/construction/construction-code-generation.md"
-    },
-    {
-      "slug": "tdd",
-      "number": "3.5.1",
-      "name": "TDD 测试驱动开发",
-      "phase": "construction",
-      "axis": "unit",
-      "execution": "ALWAYS",
-      "selection": "automatic",
-      "choices": [],
-      "lead_agent": "aidlc-developer-agent",
-      "support_agents": [],
-      "mode": "inline",
-      "scopes": [
-        "feature",
-        "enterprise",
-        "mvp",
-        "classic",
-        "express",
-        "workshop",
-        "bugfix",
-        "refactor"
-      ],
-      "requires": [
-        "code-generation"
-      ],
-      "cross_module_requires": [],
-      "scope_waived_requires": [],
-      "consumes": [
-        "src/"
-      ],
-      "produces": [
-        "src/test/",
-        ".aidlc/evidence/tdd/{module-id}/{unit-id}/test-quality.json",
-        ".aidlc/evidence/tdd/{module-id}/{unit-id}/traceability-matrix.json"
-      ],
-      "sensors": [
-        "test-quality",
-        "traceability-matrix",
-        "no-todo",
-        "traceability"
-      ],
-      "traceability": "required",
-      "completion_contract": "gated",
-      "condition": "",
-      "approval": "notify",
-      "file": "stages/construction/construction-tdd.md"
     },
     {
       "slug": "subagent-execution",
@@ -1555,25 +1561,27 @@
         "refactor"
       ],
       "requires": [
-        "code-generation",
-        "tdd"
+        "code-generation"
       ],
       "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "src/",
-        "src/test/"
+        ".aidlc/evidence/test-case-derivation/{module-id}/test-case-derivation.json",
+        ".aidlc/evidence/code-generation/{module-id}/{unit-id}/green-test-evidence.json"
       ],
       "produces": [
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md",
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/audit.md",
         ".aidlc/evidence/code-review/{module-id}/{unit-id}/review-evidence.json",
+        ".aidlc/evidence/code-review/{module-id}/{unit-id}/test-quality.json",
         ".aidlc/evidence/code-review/{module-id}/{unit-id}/ui-design-alignment.json",
         ".aidlc/evidence/code-review/{module-id}/{unit-id}/traceability-matrix.json"
       ],
       "sensors": [
         "reviewer-required",
         "review-evidence",
+        "test-quality",
         "ui-design-alignment",
         "traceability-matrix",
         "no-todo",
@@ -1609,14 +1617,14 @@
       ],
       "requires": [
         "code-generation",
-        "tdd",
         "code-review"
       ],
       "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
         "src/",
-        "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md"
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md",
+        ".aidlc/evidence/code-generation/{module-id}/{unit-id}/green-test-evidence.json"
       ],
       "produces": [
         "docs/aidlc/construction/build-test-report.md",
@@ -1626,6 +1634,7 @@
       "sensors": [
         "doc-cascade",
         "build-test-evidence",
+        "test-quality",
         "no-todo",
         "traceability"
       ],
@@ -1864,7 +1873,6 @@
     "has_operations_template_needs",
     "has_product_contract_needs",
     "has_subagent_support",
-    "has_test_case_sources",
     "has_ui_requirements",
     "has_unit_generation_needs",
     "is_loeyae_boot",

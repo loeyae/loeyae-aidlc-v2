@@ -23,7 +23,7 @@ import { evidenceSourceRevision, integrationStageSlugs, isSplitLayout, loadWorkf
 
 type ProducerState = WorkflowState;
 
-type CommandRole = "build" | "test" | "check" | "semantic";
+type CommandRole = "build" | "test" | "check" | "semantic" | "red" | "green";
 
 export const SEMANTIC_SENSORS = new Set([
   "review-evidence",
@@ -46,6 +46,9 @@ export const SEMANTIC_SENSORS = new Set([
   "inception-consistency",
   "traceability-matrix",
   "structural-invariants",
+  "test-case-derivation",
+  "red-test-evidence",
+  "green-test-evidence",
 ]);
 
 interface CommandSpec {
@@ -233,7 +236,7 @@ function parseConfig(path: string, stage: string): EvidenceConfig {
     if (ids.has(id)) fail(`duplicate command id: ${id}`);
     ids.add(id);
     const role = nonEmptyString(record.role, `commands[${i}].role`) as CommandRole;
-    if (!["build", "test", "check", "semantic"].includes(role)) fail(`commands[${i}].role must be build, test, check, or semantic`);
+    if (!["build", "test", "check", "semantic", "red", "green"].includes(role)) fail(`commands[${i}].role must be build, test, check, semantic, red, or green`);
     const sensor = role === "semantic" ? nonEmptyString(record.sensor, `commands[${i}].sensor`) : undefined;
     if (sensor && !SEMANTIC_SENSORS.has(sensor)) fail(`commands[${i}].sensor is not a supported semantic sensor: ${sensor}`);
     const argv = validateArgv(record.argv, `commands[${i}].argv`);
@@ -457,10 +460,105 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
   };
 }
 
+function phaseRecord(state: ProducerState): Record<string, unknown> {
+  if (!state.current_module) fail("RED/GREEN evidence requires an active module");
+  const path = resolve(PROJECT_ROOT, evidenceRelativePath("test-case-derivation", "test-case-derivation", "module", { module_id: state.current_module }));
+  if (!existsSync(path)) fail(`I13 evidence is missing: ${path}`);
+  let value: unknown;
+  try { value = JSON.parse(readFileSync(path, "utf8")); } catch (error) { fail(`I13 evidence is invalid: ${error instanceof Error ? error.message : String(error)}`); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail("I13 evidence must be a JSON object");
+  return value as Record<string, unknown>;
+}
+
+function phaseObservation(stdout: string, phase: "RED" | "GREEN"): Record<string, unknown> {
+  for (const line of stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)) {
+    try {
+      const value = JSON.parse(line) as unknown;
+      if (value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).phase === phase) return value as Record<string, unknown>;
+    } catch { }
+  }
+  fail(`controlled ${phase} command must emit one JSON observation with phase=${phase}`);
+}
+
+function validatePhaseObservation(value: Record<string, unknown>, phase: "RED" | "GREEN"): void {
+  if (value.phase !== phase) fail(`controlled evidence phase must be ${phase}`);
+  if (value.compile_status !== "passed") fail(`${phase} evidence compile_status must be passed`);
+  if (value.environment_status !== "passed") fail(`${phase} evidence environment_status must be passed`);
+  if (typeof value.tests_total !== "number" || !Number.isInteger(value.tests_total) || value.tests_total < 1) fail(`${phase} evidence tests_total must be >= 1`);
+  if (typeof value.tests_failed !== "number" || !Number.isInteger(value.tests_failed) || value.tests_failed < 0) fail(`${phase} evidence tests_failed must be a non-negative integer`);
+  if (value.traceability_complete !== true) fail(`${phase} evidence traceability_complete must be true`);
+  if (!Array.isArray(value.uc_mapping) || value.uc_mapping.length === 0) fail(`${phase} evidence uc_mapping must be non-empty`);
+  if (phase === "RED") {
+    if (value.status !== "failed" || value.failure_class !== "behavior" || typeof value.failure_signature !== "string" || value.failure_signature.trim().length === 0) fail("RED evidence must be a behavior assertion failure with a non-empty failure_signature");
+    if (value.tests_failed < 1) fail("RED evidence tests_failed must be >= 1");
+  } else {
+    if (value.status !== "passed" || value.tests_failed !== 0) fail("GREEN evidence must be passed with tests_failed=0");
+  }
+}
+
+function runPhaseProducer(options: ProducerOptions, config: EvidenceConfig, state: ProducerState, phase: "RED" | "GREEN"): void {
+  const i13 = phaseRecord(state);
+  const output = options.output || evidenceOutput(options.stage, phase === "RED" ? "red-test-evidence" : "green-test-evidence", undefined, state);
+  let payload: Record<string, unknown>;
+  let execution: Record<string, unknown>;
+  if (i13.status === "not_applicable") {
+    const reason = typeof i13.reason === "string" ? i13.reason : typeof i13.not_applicable_reason === "string" ? i13.not_applicable_reason : "I13 declared no executable business behavior";
+    const alternative = typeof i13.alternative_validation === "string" ? i13.alternative_validation : "controlled alternative validation";
+    const checks = config.commands.filter((command) => command.role === "check");
+    if (checks.length !== 1) fail(`I13 not_applicable requires exactly one controlled check command for ${options.stage}`);
+    const check = runCommand(checks[0]);
+    const alternativeValidationExecution = {
+      id: check.id,
+      argv_digest: check.argv_digest,
+      cwd: check.cwd,
+      exit_code: check.exit_code,
+      status: check.status,
+      duration_ms: check.duration_ms,
+    };
+    payload = {
+      status: "not_applicable",
+      phase,
+      not_applicable_reason: reason,
+      alternative_validation: alternative,
+      alternative_validation_execution: alternativeValidationExecution,
+      red_exemption: phase === "RED" ? reason : undefined,
+    };
+    execution = { id: `builtin:${options.sensor}`, sensor: options.sensor, argv_digest: argvDigest(["I13-not-applicable", phase, check.argv_digest]), exit_code: 0, status: "passed" };
+  } else {
+    if (i13.status !== "required") fail(`I13 evidence status must be required or not_applicable, got ${String(i13.status)}`);
+    const role = phase.toLowerCase() as "red" | "green";
+    const declarations = config.commands.filter((command) => command.role === role);
+    if (declarations.length !== 1) fail(`allowlist must declare exactly one ${role} command for ${options.stage}`);
+    const command = declarations[0];
+    const result = spawnSync(command.argv[0], command.argv.slice(1), {
+      cwd: command.cwd || PROJECT_ROOT,
+      env: { ...process.env, AIDLC_PHASE: phase, AIDLC_ACTIVE_MODULE: state.current_module || "", AIDLC_ACTIVE_UNIT: state.current_unit || "" },
+      encoding: "utf8",
+      shell: false,
+      timeout: command.timeout_ms,
+      maxBuffer: MAX_OUTPUT_BYTES,
+    });
+    const exitCode = typeof result.status === "number" ? result.status : 1;
+    const expectedExit = phase === "RED" ? 1 : 0;
+    if (result.error || exitCode !== expectedExit) fail(`controlled ${phase} command ${command.id} must exit ${expectedExit}; got ${exitCode}${result.error ? ` (${result.error.message})` : ""}`);
+    const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout ? String(result.stdout) : "";
+    const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr ? String(result.stderr) : "";
+    payload = phaseObservation(`${stdout}\n${stderr}`, phase);
+    validatePhaseObservation(payload, phase);
+    execution = { id: command.id, phase, argv_digest: argvDigest(command.argv), cwd: safeCwdLabel(command.cwd || PROJECT_ROOT), exit_code: exitCode, status: "passed", duration_ms: 0 };
+  }
+  writeAtomic(output, `${JSON.stringify({ ...payload, ...executionContext(state), evidence_version: "1", timestamp: new Date().toISOString(), producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() }, source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance), checker: execution }, null, 2)}\n`);
+  if (!options.output) console.log(JSON.stringify({ status: "passed", output, sensor: options.sensor, phase }, null, 2));
+}
+
 function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig, state: ProducerState, quiet = false): void {
   const sensor = options.sensor;
   if (!sensor || sensor === "build-test-evidence") fail("semantic producer requires --sensor with a semantic sensor name");
   if (options.commandIds.length > 0) fail("--command-id is only supported for build/test evidence");
+  if (sensor === "red-test-evidence" || sensor === "green-test-evidence") {
+    runPhaseProducer(options, config, state, sensor === "red-test-evidence" ? "RED" : "GREEN");
+    return;
+  }
   const declarations = config.commands.filter((command) => command.role === "semantic" && command.sensor === sensor);
   if (declarations.length !== 1) fail(`allowlist must declare exactly one built-in semantic checker for ${sensor}`);
   const result = runSemanticCommand(sensor, declarations[0].timeout_ms || 10 * 60 * 1000, state);

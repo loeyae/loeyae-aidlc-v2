@@ -1,6 +1,6 @@
 ---
 slug: code-generation
-number: "3.5"
+number: "3.5.1"
 name: 代码生成
 phase: construction
 axis: unit
@@ -9,38 +9,44 @@ lead_agent: aidlc-developer-agent
 support_agents: []
 mode: delegate
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
-consumes: []
+consumes:
+  - docs/aidlc/modules/{module-id}/inception/application-design/test-cases/
+  - .aidlc/evidence/test-case-derivation/{module-id}/test-case-derivation.json
+  - .aidlc/evidence/tdd/{module-id}/{unit-id}/red-test-evidence.json
 produces:
   - src/
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md
+  - .aidlc/evidence/code-generation/{module-id}/{unit-id}/green-test-evidence.json
+  - .aidlc/evidence/code-generation/{module-id}/{unit-id}/test-quality.json
   - .aidlc/evidence/code-generation/{module-id}/{unit-id}/traceability-matrix.json
   - .aidlc/evidence/code-generation/{module-id}/{unit-id}/structural-invariants.json
-sensors: [doc-cascade, traceability-matrix, structural-invariants]
-requires: [functional-design]
-scope_waived_requires: [functional-design]
+sensors: [doc-cascade, green-test-evidence, test-quality, traceability-matrix, structural-invariants]
+requires: [test-case-derivation, tdd]
+scope_waived_requires: []
 ---
 # 代码生成 - 详细步骤
 
 ## 概述
-此阶段通过两个集成部分为每个工作单元生成代码：
-- **第一部分 - 规划**：创建详细的代码生成计划，包含明确步骤
-- **第二部分 - 生成**：执行批准的计划生成代码、测试和产物
+此阶段是 Construction 的 GREEN 阶段。它只在 I13 和 RED 门禁完成后执行批准的计划，生成最少生产代码并使目标测试转绿。
+- **第一部分 - 规划**：创建详细的代码生成计划，消费 I13 的 UC-D 或结构化豁免证据以及 RED 证据
+- **第二部分 - 生成**：实现生产代码，运行受控 GREEN 测试，并生成可机读的 GREEN/UC-D 证据
 
-**注意**：对于存量项目，"生成"意味着在适当时修改现有文件，而非创建副本。
+**完成边界**：仅有 `src/`、计划或文字 TDD 声明不能完成本阶段；必须存在对应 RED 证据、GREEN 测试通过证据和完整追溯。对于存量项目，"生成"意味着在适当时修改现有文件，而非创建副本。
 
 ## 前置条件
 
 **完整流程/精简流程**：
-- 该单元的单元设计生成必须完成
-- NFR 实现（如已执行）必须完成
-- 所有单元设计产物必须可用
-- 单元已准备好进行代码生成
+- 该单元的 I13 测试用例派生必须完成
+- 该单元的 RED 测试门禁必须完成
+- 单元设计和 NFR 产物（如适用）必须可用
+- 单元只能在对应 RED 证据、测试用例和追溯链完整后进入 GREEN
 
 **快速通道**：
 - 工作区检测已完成
-- 用户需求已口头确认（1 句话）
-- 无需设计产物，直接进入代码生成
+- I13 已完成，并已生成 UC-D 或结构化不适用/豁免证据
+- RED 阶段已完成；存在可执行业务行为时必须有真实测试及受控失败证据
+- 只能压缩计划和说明文档，仍必须按 I13 → RED → GREEN 顺序执行
 
 **CR4 L1/L2 变更模式**（从 CR 进入 Construction 时）：
 - 不创建独立代码生成计划文件
@@ -75,7 +81,8 @@ scope_waived_requires: [functional-design]
 - [ ] 读取单元设计生成的设计产物
 - [ ] 读取单元故事映射以理解分配的故事
 - [ ] 识别单元依赖和接口
-- [ ] 验证单元已准备好进行代码生成
+- [ ] 验证 I13 用例或结构化不适用/豁免证据已就绪
+- [ ] 验证 RED 测试及其受控失败证据已就绪
 
 ## 步骤 1.25：共享契约基线门禁（条件）
 
@@ -149,7 +156,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 | 步骤 | 完整模式 | 快速模式 | 简化方式 |
 |------|----------|----------|----------|
 | 代码生成计划 | 写入文档并等待审批 | 口头确认即可 | 向用户展示摘要，用户说"继续"即视为批准 |
-| TDD 严格度 | 严格 RED-GREEN-REFACTOR | 可先代码后测试 | 但测试必须在同一交互中完成，不可拖延 |
+| RED/GREEN 门禁 | I13 → RED → GREEN | 可压缩说明文档 | 不得改变执行顺序或证据要求 |
 | 代码审查 | 两阶段独立审查 | 合并为单份审计记录 | 保留 Spec / Standards 两个独立章节与结论，不减少任一审查轴 |
 | 审计日志 | 详细记录每步 | 简化为关键节点 | 仅记录开始、完成、关键决策 |
 
@@ -172,7 +179,8 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 **快速模式的正确理解**：
 - ✅ 减少文档仪式感（口头确认代替书面审批）
 - ✅ 合并可合并的审查步骤
-- ✅ 调整 TDD 顺序（先代码后测试）
+- ✅ 压缩计划和审计说明，但保留 I13 → RED → GREEN
+- ❌ 以 Code-First 或文字声明替代 RED 证据
 - ❌ 跳过规范加载
 - ❌ 省略测试
 - ❌ 不验证编译
@@ -411,7 +419,7 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 
 ---
 
-- [ ] 生成代码并写入正确位置：
+- [ ] 生成最少生产代码并写入正确位置；不可在 RED 前或没有 RED 证据时先写生产代码
   - **如果文件存在**：就地修改（绝不创建 `ClassName_modified.java`、`ClassName_new.java` 等）
   - **如果文件不存在**：创建新文件
 - [ ] 写入正确位置：
@@ -426,7 +434,8 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 - [ ] 当故事的生成完成时，将关联的单元故事标记为 [x]
 - [ ] 更新 `docs/aidlc/handoff.md` 当前状态
 - [ ] **仅存量项目**：验证未创建重复文件（如 `ClassName_modified.java` 与 `ClassName.java` 并存）
-- [ ] 保存所有生成的产物
+- [ ] 运行受控 GREEN 测试，确认目标测试通过且不是环境/编译假绿
+- [ ] 保存所有生成的产物与 GREEN/UC-D 追溯证据
 
 ## 步骤 14：继续或完成生成
 - [ ] 如果还有步骤，返回步骤 11

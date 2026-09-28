@@ -20,7 +20,7 @@ evidence_path: .aidlc/evidence/<stage-slug>/traceability-matrix.json
 | pages | application-design | frontend |
 | test_cases | functional-design | backend, frontend, data |
 | code_refs (@ReqId) | code-generation | 全部 |
-| tests (@TestCaseId) | tdd | backend, frontend, data |
+| tests (@TestCaseId) | RED/GREEN | backend, frontend, data |
 
 ## 为什么不误报
 覆盖只要求 REQ 到达**它自己 track 声明的层** —— UI-only 不查后端代码,backend-only 不查页面。这消除了"正向全覆盖"在混合前后端场景的误报,同时把覆盖率拉满到 100%。

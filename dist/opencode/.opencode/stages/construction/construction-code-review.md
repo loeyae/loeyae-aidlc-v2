@@ -12,15 +12,17 @@ reviewer_agent: aidlc-quality-agent
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes:
   - src/
-  - src/test/
+  - .aidlc/evidence/test-case-derivation/{module-id}/test-case-derivation.json
+  - .aidlc/evidence/code-generation/{module-id}/{unit-id}/green-test-evidence.json
 produces:
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/audit.md
   - .aidlc/evidence/code-review/{module-id}/{unit-id}/review-evidence.json
+  - .aidlc/evidence/code-review/{module-id}/{unit-id}/test-quality.json
   - .aidlc/evidence/code-review/{module-id}/{unit-id}/ui-design-alignment.json
   - .aidlc/evidence/code-review/{module-id}/{unit-id}/traceability-matrix.json
-sensors: [reviewer-required, review-evidence, ui-design-alignment, traceability-matrix]
-requires: [code-generation, tdd]
+sensors: [reviewer-required, review-evidence, test-quality, ui-design-alignment, traceability-matrix]
+requires: [code-generation]
 ---
 # 代码审查
 
@@ -507,9 +509,7 @@ echo "已覆盖: $HIT / $TOTAL"
 ### 在 Construction 阶段的位置
 
 ```
-代码生成 — TDD 执行阶段
-  ↓ 每个单元完成
-按复杂度执行集成或独立双轴审查（本文件）
+代码生成（GREEN）完成后，按复杂度执行集成或独立双轴审查（本文件）；审查阶段同时重新验证 GREEN 测试和 UC-D 覆盖。
   ↓ 审查通过
 标记单元完成，进入下一个单元
   ↓ 触发 C7？

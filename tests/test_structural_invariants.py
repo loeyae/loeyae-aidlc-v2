@@ -98,6 +98,8 @@ def base_project(prefix: str) -> str:
     write(project, "src/main/resources/mapper/OrderMapper.xml",
           "<mapper><select id=\"c\">select * from t_customer where id = #{id}</select>\n"
           "<insert id=\"i\">insert into t_order (id, customer_id) values (#{id}, #{cid})</insert></mapper>\n")
+    write(project, "src/test/java/demo/order/OrderTest.java",
+          "package demo.order;\n// UC-D-001 REQ-ORDER-003\nclass OrderTest {}\n")
     return project
 
 

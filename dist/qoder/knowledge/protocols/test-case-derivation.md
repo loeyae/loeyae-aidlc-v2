@@ -8,7 +8,26 @@
 
 - 产品行为用例：I7 用户故事已完成，I12 已提供接口、页面或流程锚点。
 - 技术风险用例：已有经批准的 NFR、CR、契约变更、配置变更、迁移设计或一致性场景。
-- 两类来源都不存在时跳过 I13，并在 handoff.md 记录依据。
+- 两类来源都不存在时，也必须执行 I13 并生成结构化 `non-applicable.json`；只有传感器验证该记录包含批准依据、原因代码、替代验证和可执行命令后，才能将状态记为 `not_applicable`。
+
+## 结构化不适用/豁免
+
+无可执行业务行为时，在测试用例目录写入 `non-applicable.json`：
+
+```json
+{
+  "schema_version": "1",
+  "status": "not_applicable",
+  "reason_code": "pure-declaration",
+  "reason": "仅生成声明，不包含可执行业务行为",
+  "approval_ref": "REQ-001 / approved design decision",
+  "alternative_validation": "编译、Schema/序列化或配置加载验证",
+  "validation_command": "<项目已有的确定性验证命令>",
+  "source_refs": ["<稳定来源>"]
+}
+```
+
+`reason_code`、`approval_ref`、`alternative_validation`、`validation_command` 和 `source_refs` 均为必填。该文件只能由 I13 传感器验证后产生 `not_applicable`，不得用 handoff、计划或自然语言代替。
 
 ## 来源基线规则
 
@@ -109,7 +128,7 @@ service_ids: [{受影响服务；非分布式项目写不适用}]
 4. 自检覆盖性、锚点、来源一致性和技术可行性。
 5. 无法执行的用例标记 `blocked`，记录约束、建议和需要的用户决策。
 6. 生成 `_index.md`，列出用例、来源、类型、服务、状态和证据位置。
-7. 将用例 ID 映射到工作单元和 C8 验证矩阵；I14 跳过时映射到 `project/default` 执行范围，并直接记录到 handoff.md 与 C8 矩阵。
+7. 将用例 ID 映射到 RED、GREEN、代码审查和构建测试证据；无可执行业务行为时，将结构化豁免映射到确定性替代验证并直接记录到 handoff.md 与构建测试矩阵。
 
 ## 强制字段
 

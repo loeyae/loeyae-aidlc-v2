@@ -1,7 +1,7 @@
 ---
 slug: tdd
-number: "3.5.1"
-name: TDD 测试驱动开发
+number: "3.5"
+name: RED 测试门禁
 phase: construction
 axis: unit
 execution: ALWAYS
@@ -9,42 +9,37 @@ lead_agent: aidlc-developer-agent
 support_agents: []
 mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
-consumes: [src/]
+consumes:
+  - docs/aidlc/modules/{module-id}/inception/application-design/test-cases/
+  - .aidlc/evidence/test-case-derivation/{module-id}/test-case-derivation.json
 produces:
-  - src/test/
-  - .aidlc/evidence/tdd/{module-id}/{unit-id}/test-quality.json
-  - .aidlc/evidence/tdd/{module-id}/{unit-id}/traceability-matrix.json
-sensors: [test-quality, traceability-matrix]
-requires: [code-generation]
+  - .aidlc/evidence/tdd/{module-id}/{unit-id}/red-test-evidence.json
+sensors: [red-test-evidence]
+traceability: not_applicable
+requires: [test-case-derivation]
 ---
 
-# 测试驱动开发（TDD）
+# RED 测试门禁（原 TDD 阶段）
 
-## 概述
+本阶段位于 GREEN 代码生成之前，负责把 I13 的 UC-D 转换为真实测试，并由受控命令观察测试因目标行为尚未实现而失败。生产代码不得在本阶段前置生成；GREEN 由 `code-generation` 阶段负责。
 
-先写测试。看它失败。写最少的代码让它通过。
+纯声明、纯样式或纯配置等无可执行业务行为的单元，必须消费 I13 的结构化 `not_applicable`/豁免证据，并执行其中声明的确定性替代验证；不得通过省略测试或文字说明静默跳过。
 
-**核心原则**：如果你没有看到测试失败，你就不知道它是否在测试正确的东西。
+## 本阶段完成标准
 
-**违反规则的字面意思就是违反规则的精神。**
-
----
+- I13 的 `test-case-derivation.json` 已通过并明确为 `required` 或结构化 `not_applicable`
+- `required` 时，真实测试已生成，至少关联一个 ready UC-D，且受控 RED 命令以 `failure_class: behavior` 失败
+- RED 失败的 `compile_status` 和 `environment_status` 均为 `passed`，不能由编译、环境或命令错误充当 RED
+- `not_applicable` 时，必须有非适用理由、批准依据和确定性替代验证
+- 只有本阶段证据通过，GREEN 代码生成阶段才可进入
 
 ## 铁律
 
 ```
-没有失败测试，就没有生产代码。
+没有受控 RED 证据，就没有 GREEN 生产代码。
 ```
 
-在测试之前写了代码？删除它。从头开始。
-
-**默认行为：**
-- 不要保留作为"参考"
-- 不要在写测试时"适配"它
-- 不要看它
-- 删除意味着删除
-
-从测试出发重新实现。句号。
+测试失败后不要在本阶段实现生产行为；实现动作统一进入 `code-generation`。
 
 ---
 
@@ -91,7 +86,7 @@ describe('UC-D-003 超出配额拒绝请求', () => {
 
 `construction-shared-contract-baseline.md` 允许的纯声明型物化（接口、抽象成员、DTO、枚举、机器契约生成类型及必要元数据）不单独要求 RED 测试，但必须完成该规则要求的实际编译、结构、序列化、Schema 或兼容性验证及双轴审查。
 
-一旦声明包含默认方法、构造器或静态方法中的业务逻辑，或涉及数据访问、网络调用、状态转换等可执行行为，即不再属于声明型物化，必须按本文件完整执行 RED-GREEN-REFACTOR。该条件不构成对任何业务代码的 TDD 豁免。
+一旦声明包含默认方法、构造器或静态方法中的业务逻辑，或涉及数据访问、网络调用、状态转换等可执行行为，即必须完成本阶段 RED 门禁并移交 `code-generation` 执行 GREEN。该条件不构成对任何业务代码的 TDD 豁免。
 
 **始终适用：**
 - 新功能
@@ -109,7 +104,7 @@ describe('UC-D-003 超出配额拒绝请求', () => {
 
 ---
 
-## RED-GREEN-REFACTOR 循环
+## RED 门禁与 GREEN 阶段移交
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -128,12 +123,7 @@ describe('UC-D-003 超出配额拒绝请求', () => {
 
 ### RED — 写失败测试
 
-写一个最小的测试，展示期望的行为。
-
-**要求：**
-- 一个行为
-- 清晰的名称（描述行为，不是实现）
-- 真实代码（除非不可避免，否则不用 mock）
+写一个最小的真实测试，展示期望的行为，并标注对应 UC-D。测试必须在生产代码实现前编写；随后通过受控 RED 命令运行，并输出机器可读观察对象。
 
 **好的测试：**
 ```java
@@ -159,90 +149,38 @@ void testCreate() {
 ```
 模糊的名称，测试 mock 而非代码。
 
-### 验证 RED — 看它失败
+### 验证 RED — 受控失败
 
 **强制执行。绝不跳过。**
 
-```bash
-# Java/Maven
-mvn test -pl module-name -Dtest=TestClassName#testMethodName
+运行 `evidence run --stage tdd --sensor red-test-evidence`。受控命令必须输出一个 JSON 对象，至少包含：
 
-# Vue/前端
-pnpm test -- --run path/to/test.spec.ts
-```
-
-确认：
-- 测试失败（不是报错）
-- 失败消息符合预期
-- 因为功能缺失而失败（不是拼写错误）
-
-**测试通过了？** 你在测试已有行为。修正测试。
-
-**测试报错了？** 修正错误，重跑直到它正确失败。
-
-### GREEN — 最少代码
-
-写最简单的代码让测试通过。
-
-**要求：**
-- 刚好够通过测试
-- 不添加额外功能
-- 不重构其他代码
-- 不"改进"超出测试范围的东西
-
-**好的实现：**
-```java
-public ValidationResult createUser(CreateUserRequest request) {
-    if (request.getEmail() == null || request.getEmail().isBlank()) {
-        return ValidationResult.error("邮箱不能为空");
-    }
-    // ... 最小实现
+```json
+{
+  "phase": "RED",
+  "status": "failed",
+  "failure_class": "behavior",
+  "failure_signature": "明确的行为断言失败摘要",
+  "compile_status": "passed",
+  "environment_status": "passed",
+  "tests_total": 1,
+  "tests_failed": 1,
+  "traceability_complete": true,
+  "uc_mapping": [{"use_case": "UC-D-001", "test_methods": ["ExampleTest#expectedBehavior"]}]
 }
 ```
-刚好够通过。
 
-**坏的实现：**
-```java
-public ValidationResult createUser(CreateUserRequest request) {
-    // 验证所有字段（YAGNI - 测试只要求验证邮箱）
-    var errors = new ArrayList<String>();
-    if (request.getEmail() == null || request.getEmail().isBlank()) {
-        errors.add("邮箱不能为空");
-    }
-    if (request.getPassword() == null || request.getPassword().length() < 8) {
-        errors.add("密码至少8位");
-    }
-    // ... 过度工程
-}
-```
-超出测试要求。
+退出码、失败分类和测试计数均由 evidence producer 复核；编译失败、环境失败、命令找不到或缺少结构化观察对象均不构成 RED。
 
-### 验证 GREEN — 看它通过
+测试通过了？说明没有观察到目标行为缺失，RED 门禁失败。测试报错了？修正测试或环境后重跑，直到得到明确的行为断言失败。
 
-**强制执行。**
+### GREEN 与 REFACTOR
 
-> **测试范围选择**：参见 `common-test-execution-strategy.md` 的分层模型。
+本阶段不执行 GREEN 或生产代码实现。完成 RED 门禁后，`code-generation` 必须消费本阶段证据，写最少生产代码并运行 GREEN 命令；只有 GREEN 证据通过后才可进入代码审查。重构也只能在 GREEN 之后进行，并由代码生成阶段和后续审查/构建阶段验证。
 
-```bash
-# 步骤 1：运行 L1 焦点测试（当前测试方法/文件）
-mvn test -pl module-name -Dtest=TestClassName#testMethodName        # Maven
-pnpm test -- --run path/to/test.spec.ts                             # 前端
+### 验证 GREEN — code-generation 负责
 
-# 步骤 2：运行 L2 模块测试（当前模块全部测试，确认无回归）
-mvn test -pl module-name                                            # Maven
-pnpm --filter current-package test -- --run                         # 前端
-```
-
-确认：
-- 当前测试通过（L1）
-- 模块内其他测试仍然通过（L2）
-- 输出干净（无错误、无警告）
-
-**注意**：此处无需运行全量测试（L4）。模块级验证（L2）足以保证 TDD 循环的快速反馈。跨模块回归验证在单元完成时通过 L3 执行。
-
-**测试失败？** 修正代码，不是测试。
-
-**其他测试失败？** 立即修复。
+GREEN 命令和测试分层策略由 `construction-code-generation.md` 的 GREEN 阶段与 `common-test-execution-strategy.md` 共同定义；本阶段不再把 GREEN 通过写入 RED 证据。
 
 ### REFACTOR — 清理
 
@@ -261,37 +199,19 @@ pnpm --filter current-package test -- --run                         # 前端
 
 ## 与 AI-DLC Construction 阶段的集成
 
-### 快速模式下的 TDD 调整
+### 快速模式下的 RED 门禁
 
-当用户选择快速推进时，TDD 的**顺序**可以调整，但**铁律**不变。
+快速模式只能压缩计划、审计和说明文档，不能改变阶段顺序或删减证据：
 
-**快速模式允许的调整**：
-- 可以先写代码后写测试（Code-First + Immediate Test）
-- 不需要严格观察 RED 阶段（因为代码已存在）
-- 可以一次性为多个方法写测试（批量验证）
-
-**快速模式不变的铁律**：
-- 每个新增/修改的公共方法**必须有测试** — 无例外
-- 测试**必须在同一交互中完成** — 不可说"测试下次补"
-- 测试**必须使用框架工具** — BaseMockitoUnitTest、RandomUtils、AssertUtils
-- 测试**必须实际运行并通过** — 不可只写不跑
-
-**为什么不能拖延测试**：
-- "下次补"在实践中意味着"永远不补"
-- 没有测试的代码在重构时无法验证正确性
-- 框架升级时，没有测试的模块是最大的风险点
-
-**快速模式的 TDD 流程**：
 ```
-1. 写实现代码（GREEN 优先）
-2. 立即为该代码写测试
-3. 运行 L1 测试确认通过
-4. 运行 L2 模块测试确认无回归
+I13（UC-D 或结构化豁免）
+  → RED（真实测试 + 受控行为失败）
+  → GREEN（代码生成 + 目标测试通过）
+  → 代码审查
+  → 构建与测试
 ```
 
-> **注意**：快速模式下也遵循 `common-test-execution-strategy.md` 的分层策略。无需全量测试，L2 足以保证模块内无回归。跨模块验证在单元完成时统一执行 L3。
-
-与完整 TDD 的区别仅在于：跳过了"先看测试失败"的 RED 阶段。代码质量和测试覆盖率的要求完全不变。
+禁止 Code-First、先写生产代码后补测试、跳过失败观察或以“同一交互内补测试”替代 RED。纯声明/样式/配置例外必须通过 I13 `not_applicable` 记录和确定性替代验证。
 
 ---
 
@@ -315,17 +235,14 @@ pnpm --filter current-package test -- --run                         # 前端
 
 ```
 对每个单元：
-  1. 读取代码生成计划中的 TDD 执行序列
-  2. 对序列中的每一行：
-     a. RED：写测试
-     b. 验证 RED：运行 L1 测试，确认失败
-     c. GREEN：写最少实现代码
-     d. 验证 GREEN：运行 L1 确认通过 + 运行 L2 确认模块内无回归
-     e. REFACTOR：清理（可选）
-     f. 验证 REFACTOR：运行 L2 确认仍然绿色
-  3. 所有 TDD 循环完成后，运行 L3（影响域测试）确认跨模块无回归
-  4. L3 通过后，进入代码审查
+  1. I13 生成或确认 UC-D 以及结构化适用性/豁免状态
+  2. 本阶段 RED：写真实测试，运行受控命令并确认行为断言失败
+  3. code-generation GREEN：消费 RED 证据，写最少生产代码，运行目标测试和模块回归
+  4. GREEN 通过后进入代码审查
+  5. 代码审查通过后进入构建与测试
 ```
+
+GREEN 测试不得回写为 RED 通过；两个阶段必须分别保留可机读证据。
 
 ---
 

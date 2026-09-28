@@ -11,12 +11,13 @@ scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes:
   - src/
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md
+  - .aidlc/evidence/code-generation/{module-id}/{unit-id}/green-test-evidence.json
 produces:
   - docs/aidlc/construction/build-test-report.md
   - docs/aidlc/construction/build-and-test/build-and-test-summary.md
   - .aidlc/evidence/build-and-test/build-test-evidence.json
-sensors: [doc-cascade, build-test-evidence]
-requires: [code-generation, tdd, code-review]
+sensors: [doc-cascade, build-test-evidence, test-quality]
+requires: [code-generation, code-review]
 ---
 
 # 构建和测试
@@ -25,7 +26,7 @@ requires: [code-generation, tdd, code-review]
 
 ## 前置条件
 
-- 所有计划内单元已完成 TDD 和两阶段审查
+- 所有计划内单元已完成 GREEN 代码生成、两阶段审查，并具备可复核的 UC-D 测试质量证据
 - 最终全局审查已通过
 - 已加载 `common-test-execution-strategy.md`
 

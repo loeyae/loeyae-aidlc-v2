@@ -1,6 +1,6 @@
 ---
 name: aidlc-test-case-derivation
-description: "从已批准的产品行为或技术风险来源派生可执行 UC-D 测试用例；不负责 I13 路由、审批和完成判定。"
+description: "从已批准的产品行为或技术风险来源派生可执行 UC-D；所有进入代码生成的 scope 都必须执行 I13，无行为时生成结构化不适用证据。"
 triggers: 测试用例派生, UC-D, 测试场景, 验收测试设计, test case derivation, 测试用例设计
 ---
 
@@ -13,7 +13,7 @@ triggers: 测试用例派生, UC-D, 测试场景, 验收测试设计, test case 
 调用方必须提供：
 
 - 用例类型（产品或技术）；
-- 已批准的需求、故事或技术风险来源及稳定 `source_ref`；
+- 已批准的需求、故事或技术风险来源及稳定 `source_ref`；无来源时必须提供结构化纯声明/样式/配置例外依据；
 - 可执行锚点；
 - 模块或服务范围；
 - 适用的现有测试与覆盖证据。
@@ -26,7 +26,7 @@ triggers: 测试用例派生, UC-D, 测试场景, 验收测试设计, test case 
 
 ## 输出
 
-返回新增或更新的 UC-D 文件路径、`_index.md`、来源与覆盖映射、覆盖缺口、冲突、未决项和结构自检结果。
+返回新增或更新的 UC-D 文件路径、`_index.md`、来源与覆盖映射、覆盖缺口、冲突、未决项和结构自检结果；无可执行业务行为时返回并验证 `non-applicable.json`（含 `reason_code`、`approval_ref`、`alternative_validation`、`validation_command` 和 `source_refs`）。不得因快速模式或 scope 精简跳过 I13。
 
 ## 禁止事项
 

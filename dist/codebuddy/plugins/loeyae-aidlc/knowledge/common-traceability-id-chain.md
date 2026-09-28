@@ -19,7 +19,7 @@ type: knowledge
 | `UC-D-xxx` | 测试用例点 | test-case-derivation | `test-cases/` | `UC-D-\d+` | 设计级用例点 |
 | `PAGE-xxx` | 页面 | ui-page-planning | `page-plan.md` | `PAGE[-_]?[A-Z0-9]+` | 页面标识，贯穿 mock/figma/前端代码 |
 | `@ReqId` | 代码追溯 | code-generation | 源码注释/标记 | `@ReqId\s*[:=]?\s*(REQ-\d+)` | 代码回溯到需求 |
-| `@TestCaseId` | 测试追溯 | tdd | 测试代码 | `@TestCaseId\s*[:=]?\s*(UC-D-\d+)` | 测试回溯到用例点 |
+| `@TestCaseId` | 测试追溯 | RED/GREEN | 测试代码 | `@TestCaseId\s*[:=]?\s*(UC-D-\d+)` | 测试回溯到用例点 |
 
 ## 追溯链（每层携带上游 ID，被下游引用）
 

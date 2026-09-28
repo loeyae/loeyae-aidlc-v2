@@ -428,6 +428,8 @@ function moduleForValue(modules: ModuleDescriptor[], value: string, excluded?: s
 }
 
 export function moduleDependencyGraph(): ModuleDependency[] {
+  const manifestPath = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "module-manifest.json");
+  if (!existsSync(manifestPath)) return [];
   const modules = readModuleManifest(PROJECT_ROOT);
   const dependencies: ModuleDependency[] = [];
   const append = (providerValue: string, consumerValue: string, providerStageValue: string | undefined, consumerStageValue: string | undefined, source: string): void => {
@@ -920,6 +922,65 @@ function isEvidenceArtifact(path: string): boolean {
   return isEvidenceArtifactLabel(artifactLabel(path));
 }
 
+function i13Applicability(instance: StageInstance): { any: boolean; allNotApplicable: boolean } {
+  const root = join(PROJECT_ROOT, ".aidlc", "evidence", "test-case-derivation");
+  if (!existsSync(root)) return { any: false, allNotApplicable: false };
+  const paths = instance.module_id
+    ? [join(root, instance.module_id, "test-case-derivation.json")]
+    : collectFiles(root).filter((path) => path.endsWith("test-case-derivation.json"));
+  const records = paths.flatMap((path) => {
+    try {
+      const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      return value && typeof value === "object" && !Array.isArray(value) ? [value] : [];
+    } catch { return []; }
+  });
+  return { any: records.length > 0, allNotApplicable: records.length > 0 && records.every((record) => record.status === "not_applicable") };
+}
+
+function phaseEvidenceErrors(
+  evidence: Evidence,
+  sensor: string,
+  phase: "RED" | "GREEN",
+  applicability: { any: boolean; allNotApplicable: boolean },
+): string[] {
+  const errors: string[] = [];
+  const allowedStatuses = phase === "RED" ? ["failed", "not_applicable"] : ["passed", "not_applicable"];
+  if (!allowedStatuses.includes(String(evidence.status))) errors.push(`status must be ${allowedStatuses.join(" or ")}`);
+  if (evidence.status === "not_applicable") {
+    if (!applicability.any || !applicability.allNotApplicable) errors.push(`${sensor} may be not_applicable only when I13 evidence is not_applicable`);
+    if (!asNonEmptyString(evidence.not_applicable_reason)) errors.push("not_applicable_reason is required");
+    if (!asNonEmptyString(evidence.alternative_validation)) errors.push("alternative_validation is required");
+    const execution = asRecord(evidence.alternative_validation_execution);
+    if (!execution) {
+      errors.push("alternative_validation_execution is required");
+    } else {
+      if (!asNonEmptyString(execution.id)) errors.push("alternative_validation_execution.id is required");
+      if (!/^[a-f0-9]{64}$/.test(String(execution.argv_digest || ""))) errors.push("alternative_validation_execution.argv_digest must be a SHA-256 digest");
+      if (asNumber(execution.exit_code) !== 0 || execution.status !== "passed") errors.push("alternative_validation_execution must have passed with exit_code 0");
+      if (asNumber(execution.duration_ms) === null) errors.push("alternative_validation_execution.duration_ms must be a number");
+    }
+    return errors;
+  }
+  if (evidence.phase !== phase) errors.push(`phase must be ${phase}`);
+  if (evidence.compile_status !== "passed") errors.push("compile_status must be passed");
+  if (evidence.environment_status !== "passed") errors.push("environment_status must be passed");
+  const total = asPositiveInt(evidence.tests_total);
+  const failed = asPositiveInt(evidence.tests_failed);
+  if (total === null || total < 1) errors.push("tests_total must be >= 1");
+  if (failed === null) errors.push("tests_failed must be a non-negative integer");
+  if (evidence.traceability_complete !== true) errors.push("traceability_complete must be true");
+  if (!Array.isArray(evidence.uc_mapping) || evidence.uc_mapping.length === 0) errors.push("uc_mapping must be non-empty");
+  if (phase === "RED") {
+    if (evidence.status !== "failed") errors.push('RED status must be "failed"');
+    if (evidence.failure_class !== "behavior") errors.push('RED failure_class must be "behavior"');
+    if (!asNonEmptyString(evidence.failure_signature)) errors.push("RED failure_signature is required");
+    if (failed === null || failed < 1) errors.push("RED tests_failed must be >= 1");
+  } else if (evidence.status !== "passed" || failed !== 0) {
+    errors.push("GREEN must be passed with tests_failed=0");
+  }
+  return errors;
+}
+
 /**
  * Run sensors defined on a stage. Each sensor is a named check.
  * Built-in sensors:
@@ -992,6 +1053,10 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
       case "traceability": {
         if (stage.traceability === "not_applicable") break;
+        if (["tdd", "code-generation", "code-review", "build-and-test"].includes(stage.slug)) {
+          const applicability = i13Applicability(instance);
+          if (applicability.allNotApplicable) break;
+        }
 
         const untraced: string[] = [];
         const unreadableFiles: string[] = [];
@@ -1139,6 +1204,44 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
       }
 
 
+      case "test-case-derivation": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (!["required", "not_applicable"].includes(String(evidence.status))) errors.push('status must be "required" or "not_applicable"');
+          if (evidence.status === "not_applicable") {
+            if (!["pure-declaration", "pure-style", "pure-configuration", "approved-exception"].includes(String(evidence.reason_code))) errors.push("reason_code is not an approved non-applicable code");
+            for (const field of ["reason_code", "reason", "approval_ref", "alternative_validation", "validation_command"]) if (!asNonEmptyString(evidence[field])) errors.push(`${field} is required for not_applicable`);
+            const sourceRefs = asStringArray(evidence.source_refs);
+            if (!sourceRefs || sourceRefs.length === 0) errors.push("source_refs must be non-empty");
+          } else {
+            const total = asPositiveInt(evidence.ucd_total);
+            const ready = asPositiveInt(evidence.ready_ucd);
+            if (total === null || total < 1) errors.push("ucd_total must be >= 1");
+            if (ready === null || ready !== total) errors.push("ready_ucd must equal ucd_total");
+            const ucdIds = asStringArray(evidence.ucd_ids);
+            if (!ucdIds || ucdIds.length === 0) errors.push("ucd_ids must be non-empty");
+            if (!asNonEmptyString(evidence.index)) errors.push("index is required");
+          }
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "red-test-evidence": {
+        const applicability = i13Applicability(instance);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "RED", applicability));
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "green-test-evidence": {
+        const applicability = i13Applicability(instance);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "GREEN", applicability));
+        if (failure) failures.push(failure);
+        break;
+      }
+
       case "build-test-evidence": {
         const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
@@ -1221,24 +1324,23 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
       case "test-quality": {
         const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
+          if (evidence.status === "not_applicable") {
+            if (!asNonEmptyString(evidence.not_applicable_reason)) errors.push("not_applicable_reason is required");
+            if (!asNonEmptyString(evidence.alternative_validation)) errors.push("alternative_validation is required");
+            if (evidence.traceability_complete !== true) errors.push("traceability_complete must be true");
+            if (!Array.isArray(evidence.uc_mapping) || evidence.uc_mapping.length !== 0) errors.push("not_applicable uc_mapping must be empty");
+            return errors;
+          }
           if (evidence.status !== "passed") errors.push('status must be "passed"');
-          if (evidence.green_seen !== true) errors.push("green_seen must be true (tests passing observed)");
+          if (evidence.green_seen !== true) errors.push("green_seen must be true (GREEN tests passing observed)");
           if (asNumber(evidence.tests_failed) !== 0) errors.push("tests_failed must be 0");
-
-          // Total tests must be positive
           const testsTotal = asPositiveInt(evidence.tests_total);
           if (testsTotal === null || testsTotal < 1) errors.push("tests_total must be >= 1");
-
-          // TDD red-green cycle evidence
-          if (evidence.red_seen !== true && typeof evidence.red_exemption !== "string") {
-            errors.push("red_seen must be true or red_exemption must explain an approved exemption");
-          }
-
-          // UC-D traceability: mapping from use cases to test methods
+          if (evidence.red_seen !== true) errors.push("red_seen must be true (controlled RED evidence required)");
           if (evidence.traceability_complete !== true) errors.push("traceability_complete must be true");
           const ucMapping = evidence.uc_mapping;
           if (!Array.isArray(ucMapping) || ucMapping.length === 0) {
-            errors.push("uc_mapping must be a non-empty array mapping use cases to test methods");
+            errors.push("uc_mapping must be a non-empty array mapping UC-D to test methods");
           } else {
             for (let i = 0; i < ucMapping.length; i++) {
               const entry = asRecord(ucMapping[i]);
@@ -1251,7 +1353,6 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
               if (!tests || tests.length === 0) errors.push(`uc_mapping[${i}].test_methods must list at least one test`);
             }
           }
-
           return errors;
         });
         if (failure) failures.push(failure);
@@ -3313,6 +3414,19 @@ async function handleReport(args: string[]): Promise<Directive> {
         };
       }
 
+      if (stageSlug === "code-generation") {
+        const redInstance = instances.find((candidate) => candidate.stage.slug === "tdd" && candidate.module_id === currentInstance.module_id && candidate.unit_id === currentInstance.unit_id);
+        if (redInstance) {
+          const redFailures = await checkSensors(redInstance, state);
+          if (redFailures.length > 0) {
+            return {
+              kind: "error",
+              message: `🚫 Cannot complete GREEN stage "${currentInstance.instance_id}" — RED gate evidence is invalid:\n${redFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\\n")}`,
+            };
+          }
+        }
+      }
+
       const automaticEvidenceError = produceMissingSemanticEvidence(currentInstance);
       if (automaticEvidenceError) {
         return {
@@ -3471,7 +3585,14 @@ async function reattestInstance(
   const instance = runtimeInstance(declared, state);
   const consumeFailures = checkConsumes(instance, state, graph, instances);
   if (consumeFailures.length > 0) {
-    return { kind: "error", message: `🚫 Cannot re-attest "${instanceId}" — canonical consumed artifacts are no longer valid:\n${consumeFailures.map((failure) => `  ❌ ${failure}`).join("\n")}`, ...extras };
+    return { kind: "error", message: `🚫 Cannot re-attest "${instanceId}" — canonical consumed artifacts are no longer valid:\n${consumeFailures.map((failure) => `  ❌ ${failure}`).join("\\n")}`, ...extras };
+  }
+  if (stageNode.slug === "code-generation") {
+    const redInstance = instances.find((candidate) => candidate.stage.slug === "tdd" && candidate.module_id === instance.module_id && candidate.unit_id === instance.unit_id);
+    if (redInstance) {
+      const redFailures = await checkSensors(redInstance, state);
+      if (redFailures.length > 0) return { kind: "error", message: `🚫 Cannot re-attest GREEN stage "${instanceId}" — RED gate evidence is invalid:\\n${redFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\\n")}`, ...extras };
+    }
   }
   const automaticEvidenceError = produceMissingSemanticEvidence(instance, true);
   if (automaticEvidenceError) return { kind: "error", message: `🚫 Cannot re-attest "${instanceId}" — ${automaticEvidenceError}`, ...extras };

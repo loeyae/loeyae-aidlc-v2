@@ -4,40 +4,43 @@ number: "2.8.1"
 name: 测试用例派生
 phase: inception
 axis: module
-execution: CONDITIONAL
+execution: ALWAYS
 lead_agent: aidlc-product-agent
 support_agents: []
 mode: inline
-scopes: [feature, enterprise, mvp, classic]
-requires: [application-design]
-consumes:
-  - docs/aidlc/modules/{module-id}/inception/application-design.md
-  - docs/aidlc/modules/{module-id}/inception/user-stories.md
+scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
+requires: [workspace-detection]
+consumes: []
 produces:
   - docs/aidlc/modules/{module-id}/inception/application-design/test-cases/
-  - .aidlc/evidence/test-case-derivation/{module-id}/traceability-matrix.json
-sensors: [traceability-matrix]
-condition: has_test_case_sources
+  - .aidlc/evidence/test-case-derivation/{module-id}/test-case-derivation.json
+sensors: [test-case-derivation]
+traceability: not_applicable
+condition: ""
 approval: notify
 ---
 
 # 测试用例派生（I13）
 
-本阶段加载 `knowledge/protocols/test-case-derivation.md`，将产品行为和已批准的系统级技术风险翻译为可执行测试用例点 UC-D，建立“需求/设计/CR → 执行锚点 → Construction 证据”的追溯链。
+本阶段对所有会进入 `code-generation` 的 scope 执行，不受快速通道绕过。它加载 `knowledge/protocols/test-case-derivation.md`，将产品行为和已批准的系统级技术风险翻译为可执行测试用例点 UC-D，并建立“需求/设计/CR → 执行锚点 → Construction 证据”的追溯链。
+
+当当前单元确实没有可执行业务行为（纯声明、纯样式、纯配置或其他经批准的例外）时，必须基于至少一个需求、故事、应用设计或澄清来源，在测试用例目录中生成结构化 `non-applicable.json`，写明 `reason_code`、批准依据、`alternative_validation` 和验证命令；I13 传感器据此输出 `status: not_applicable`。RED/GREEN 阶段还必须在 `.aidlc/evidence-commands.json` 中各声明且执行唯一一个 `role: "check"` 的受控替代验证命令。缺少来源、文件或成功执行记录均不是跳过，而是阻断。
 
 ## 执行约束
 
-1. 收集 I7 用户故事中的 Gherkin 场景和已批准的 NFR、CR、契约、配置、迁移或一致性风险来源。
-2. 对每个来源派生至少一个可执行 UC-D；每个用例必须包含 `id`、`source_ref`、`scenario_ref`、`type`、`status`、`service_ids` 和覆盖映射。
+1. 收集可用的 I7 用户故事 Gherkin 和已批准的 NFR、CR、契约、配置、迁移或一致性风险来源。
+2. 有可执行业务行为时，对每个来源派生至少一个可执行 UC-D；每个用例必须包含 `id`、`source_ref`、`scenario_ref`、`type`、`status`、`service_ids` 和覆盖映射。
 3. 产品 Gherkin 必须原样保留，不得用技术用例引入未经批准的业务语义。
-4. 无法执行的用例标记 `blocked` 并记录待决策项，不得伪造通过。
+4. 无法执行的用例标记 `blocked` 并记录待决策项；存在 `blocked` 时不得进入 RED/GREEN。
 5. 在 `docs/aidlc/modules/{module-id}/inception/application-design/test-cases/` 生成 `_index.md`，列出用例、来源、类型、服务、状态和证据位置。
-6. 任何来源未覆盖、执行锚点不真实或必填字段缺失时，不得报告完成。
+6. 没有业务行为时只能使用 `non-applicable.json`；不得只在 handoff、计划或聊天文本中声明跳过。
+7. 任何来源未覆盖、执行锚点不真实或必填字段缺失时，不得报告完成。
 
 ## 完成标准
 
-- [ ] 每个产品 Gherkin 场景至少有一个 UC-D，或记录明确不适用依据
-- [ ] 每个已批准高风险技术场景有 UC-D，或记录明确不适用依据
+- [ ] 每个产品 Gherkin 场景至少有一个 UC-D，或有结构化 `non-applicable.json` 及确定性替代验证
+- [ ] 每个已批准高风险技术场景有 UC-D，或有结构化不适用依据
 - [ ] 每个用例有真实执行锚点和可验证断言
-- [ ] `_index.md` 已生成且列出 ready/blocked/deprecated 状态
-- [ ] 用例 ID 可被 TDD、代码审查和构建测试阶段追溯
+- [ ] `_index.md` 已生成且列出 ready/blocked/deprecated 状态；不适用时目录含 `non-applicable.json`
+- [ ] 证据 producer 输出 `test-case-derivation.json`，明确 `required` 或 `not_applicable`
+- [ ] 用例 ID 可被 RED、GREEN、代码审查和构建测试阶段追溯

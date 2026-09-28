@@ -58,6 +58,7 @@ const MODULE_CONTEXT_SENSORS = new Set([
   "structural-invariants",
   "ui-artifact-consistency",
   "inception-consistency",
+  "test-case-derivation",
   "review-evidence",
   "test-quality",
   "contract-baseline",
@@ -72,6 +73,8 @@ const MODULE_CONTEXT_SENSORS = new Set([
 const UNIT_CONTEXT_SENSORS = new Set([
   "review-evidence",
   "test-quality",
+  "red-test-evidence",
+  "green-test-evidence",
   "contract-baseline",
   "functional-design-completeness",
   "nfr-coverage",
@@ -112,7 +115,7 @@ const SENSOR_NAMES = new Set([
   "nfr-coverage", "infrastructure-completeness", "implementation-report", "frontend-platform-spec",
   "framework-compliance", "subagent-evidence", "template-completeness", "recovery-evidence",
   "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
-  "ui-artifact-consistency", "inception-consistency",
+  "ui-artifact-consistency", "inception-consistency", "test-case-derivation", "red-test-evidence", "green-test-evidence",
   "traceability-matrix", "structural-invariants",
 ]);
 
@@ -501,27 +504,107 @@ function reviewEvidence(): Record<string, unknown> {
   return { status: "passed", spec_axis: "passed", standards_axis: "passed", reviewer, files_reviewed: filesReviewed, issues_found: Number(found), issues_resolved: Number(resolved), issues_open: Number(open) };
 }
 
+function evidenceRecords(stage: string, sensor: string): Record<string, unknown>[] {
+  const root = join(ROOT, ".aidlc", "evidence", stage);
+  if (!existsSync(root)) return [];
+  return allFiles(root, new RegExp(`${sensor}\\.json$`)).flatMap((path) => {
+    try { return [jsonFile(path)]; } catch { return []; }
+  });
+}
+
+function i13Evidence(moduleId = ACTIVE_MODULE): Record<string, unknown> | null {
+  if (!moduleId) return null;
+  const path = join(ROOT, ".aidlc", "evidence", "test-case-derivation", moduleId, "test-case-derivation.json");
+  return existsSync(path) ? jsonFile(path) : null;
+}
+
+function testCaseDerivation(): Record<string, unknown> {
+  if (!ACTIVE_MODULE) fail("test-case-derivation requires an active module context");
+  const caseRoot = join(ROOT, contextual("docs/aidlc/inception/application-design/test-cases"));
+  const indexPath = join(caseRoot, "_index.md");
+  const exemptionPath = join(caseRoot, "non-applicable.json");
+  const sourcePaths = [
+    "docs/aidlc/inception/requirements.md",
+    "docs/aidlc/inception/user-stories.md",
+    "docs/aidlc/inception/application-design.md",
+    "docs/aidlc/inception/clarifications.md",
+  ].map((path) => join(ROOT, contextual(path))).filter((path) => existsSync(path));
+  if (sourcePaths.length === 0) {
+    fail("I13 requires at least one requirement, story, application-design, or clarification source artifact before declaring not_applicable");
+  }
+  const sourceContent = sourcePaths.map(text).join("\n");
+  const caseFiles = existsSync(caseRoot) ? allFiles(caseRoot, /\.md$/) : [];
+  const caseContent = caseFiles.map(text).join("\n");
+  const hasExecutableBehavior = sourcePaths.length > 0 && /\b(?:Given|When|Then|Scenario|API|endpoint|接口|业务行为|业务规则|状态转换|验收|service method|可执行)/i.test(sourceContent);
+  if (!hasExecutableBehavior) {
+    if (!existsSync(exemptionPath)) fail(`I13 requires structured non-applicable evidence: ${relativePath(exemptionPath)}`);
+    const exemption = jsonFile(exemptionPath);
+    if (exemption.schema_version !== "1" || exemption.status !== "not_applicable") fail("I13 non-applicable record must use schema_version=1 and status=not_applicable");
+    if (!["pure-declaration", "pure-style", "pure-configuration", "approved-exception"].includes(String(exemption.reason_code))) fail("non-applicable.reason_code must be pure-declaration, pure-style, pure-configuration, or approved-exception");
+    for (const field of ["reason_code", "reason", "approval_ref", "alternative_validation", "validation_command"]) stringValue(exemption[field], `non-applicable.${field}`);
+    const refs = stringArray(exemption.source_refs, "non-applicable.source_refs");
+    return { status: "not_applicable", applicability: "not_applicable", reason_code: exemption.reason_code, reason: exemption.reason, approval_ref: exemption.approval_ref, alternative_validation: exemption.alternative_validation, validation_command: exemption.validation_command, source_refs: refs, source_files: sourcePaths.map(relativePath), test_case_files: [] };
+  }
+  if (!existsSync(indexPath)) fail(`I13 requires test case index: ${relativePath(indexPath)}`);
+  const idsFound = [...new Set((caseContent.match(/\bUC-D-\d+\b/g) || []))];
+  if (idsFound.length === 0) fail("I13 test case directory contains no UC-D identifiers");
+  if (/status\s*:\s*blocked|\bblocked\b/i.test(caseContent)) fail("I13 cannot complete while any UC-D is blocked");
+  const readyCount = (caseContent.match(/status\s*:\s*ready/gi) || []).length;
+  if (readyCount < idsFound.length) fail("every UC-D must declare status: ready before RED");
+  if (!/source_ref\s*:/i.test(caseContent)) fail("every I13 test case must declare source_ref");
+  return { status: "required", applicability: "required", ucd_total: idsFound.length, ready_ucd: readyCount, ucd_ids: idsFound, source_files: sourcePaths.map(relativePath), test_case_files: caseFiles.map(relativePath), index: relativePath(indexPath) };
+}
+
 function testQuality(): Record<string, unknown> {
-  const caseFiles = allFiles("docs/aidlc/inception/application-design/test-cases", /\.md$/);
+  const current = i13Evidence();
+  const allI13 = current ? [current] : evidenceRecords("test-case-derivation", "test-case-derivation");
+  if (allI13.length === 0) fail("I13 evidence is missing for test-quality");
+  if (allI13.every((record) => record.status === "not_applicable")) {
+    const alternative = allI13.find((record) => typeof record.alternative_validation === "string")?.alternative_validation;
+    return { status: "not_applicable", not_applicable_reason: "I13 declared no executable business behavior", alternative_validation: alternative || "controlled alternative validation", red_seen: false, green_seen: false, tests_total: 0, tests_failed: 0, traceability_complete: true, uc_mapping: [] };
+  }
+  const caseFiles = ACTIVE_MODULE
+    ? allFiles("docs/aidlc/inception/application-design/test-cases", /\.md$/)
+    : allFiles("docs/aidlc/modules", /test-cases[\\/].*\.md$/);
   const testFiles = projectFiles(/(?:test|spec)[^/]*\.(?:java|kt|ts|tsx|js|jsx|py|go|rs|cs)$/i);
   if (caseFiles.length === 0) fail("UC-D test case files are missing");
   if (testFiles.length === 0) fail("test source files are missing");
   const cases = ids(joined(caseFiles), /UC-D-\d+(?:-[A-Za-z0-9_-]+)?/g);
   if (cases.length === 0) fail("no UC-D identifiers found in test case files");
+  const greenRecords = evidenceRecords("code-generation", "green-test-evidence").filter((record) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT)));
+  const redRecords = evidenceRecords("tdd", "red-test-evidence").filter((record) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT)));
+  if (greenRecords.length === 0) fail("GREEN evidence is missing for test-quality");
+  if (redRecords.length === 0) fail("RED evidence is missing for test-quality");
+  const greenRequired = greenRecords.filter((record) => record.status === "passed");
+  if (greenRequired.length === 0 || greenRequired.some((record) => record.phase !== "GREEN" || record.tests_failed !== 0)) fail("GREEN evidence is not passing");
+  if (redRecords.some((record) => record.status !== "failed" || record.phase !== "RED" || record.failure_class !== "behavior")) fail("RED evidence is not a controlled behavior failure");
   const mapping = cases.map((useCase) => {
-    const matches = testFiles.filter((path) => new RegExp(`\\b${useCase}\\b`).test(text(path)));
+    const matches = testFiles.filter((path) => new RegExp(`\b${useCase}\b`).test(text(path)));
     if (matches.length === 0) fail(`${useCase} has no test source mapping`);
     return { use_case: useCase, test_methods: matches.map(relativePath) };
   });
-  const redGreenPath = join(ROOT, ".aidlc", "tdd", "red-green.json");
-  if (!existsSync(redGreenPath)) fail(".aidlc/tdd/red-green.json is required for observed RED/GREEN evidence");
-  const redGreen = jsonFile(redGreenPath);
-  if (redGreen.red_seen !== true && typeof redGreen.red_exemption !== "string") fail("TDD RED evidence is missing");
-  if (redGreen.green_seen !== true) fail("TDD GREEN evidence is missing");
-  const total = numberValue(redGreen.tests_total, "red-green.tests_total");
-  const failed = numberValue(redGreen.tests_failed, "red-green.tests_failed");
-  if (total < 1 || failed !== 0) fail("red-green test result is not passing");
-  return { status: "passed", red_seen: redGreen.red_seen === true, green_seen: true, tests_total: total, tests_failed: 0, traceability_complete: true, uc_mapping: mapping, ...(typeof redGreen.red_exemption === "string" ? { red_exemption: redGreen.red_exemption } : {}) };
+  const testsTotal = greenRequired.reduce((total, record) => total + numberValue(record.tests_total, "green-test-evidence.tests_total"), 0);
+  return { status: "passed", red_seen: true, green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping };
+}
+
+function phaseEvidenceCheck(sensor: "red-test-evidence" | "green-test-evidence"): Record<string, unknown> {
+  const phase = sensor === "red-test-evidence" ? "RED" : "GREEN";
+  const stage = phase === "RED" ? "tdd" : "code-generation";
+  const records = evidenceRecords(stage, sensor).filter((record) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT)));
+  if (records.length === 0) fail(`${sensor} evidence is missing`);
+  const record = records[records.length - 1];
+  if (record.status === "not_applicable") {
+    stringValue(record.not_applicable_reason, `${sensor}.not_applicable_reason`);
+    stringValue(record.alternative_validation, `${sensor}.alternative_validation`);
+    return record;
+  }
+  if (record.phase !== phase || record.compile_status !== "passed" || record.environment_status !== "passed" || record.traceability_complete !== true) fail(`${sensor} evidence has invalid phase, compile, environment, or traceability status`);
+  numberValue(record.tests_total, `${sensor}.tests_total`);
+  const failed = numberValue(record.tests_failed, `${sensor}.tests_failed`);
+  if (phase === "RED" && (record.status !== "failed" || record.failure_class !== "behavior" || failed < 1)) fail("RED evidence is not a behavior failure");
+  if (phase === "GREEN" && (record.status !== "passed" || failed !== 0)) fail("GREEN evidence is not passing");
+  if (!Array.isArray(record.uc_mapping) || record.uc_mapping.length === 0) fail(`${sensor}.uc_mapping must be non-empty`);
+  return record;
 }
 
 function contractBaseline(): Record<string, unknown> {
@@ -2526,7 +2609,7 @@ const MATRIX_LAYERS: { layer: string; stage: string; tracks: Track[] | "*" }[] =
   { layer: "code_refs",         stage: "code-generation",     tracks: "*" },
   { layer: "tests",             stage: "tdd",                 tracks: ["backend", "frontend", "data"] },
 ];
-const MATRIX_STAGE_ORDER = ["requirements-analysis", "requirement-clarification", "user-stories", "application-design", "functional-design", "code-generation", "tdd", "code-review"];
+const MATRIX_STAGE_ORDER = ["requirements-analysis", "requirement-clarification", "user-stories", "application-design", "functional-design", "tdd", "code-generation", "code-review"];
 // B3 修复:真实 stage 图是 DAG,construction 期有多个分叉 stage(shared-contract-baseline / nfr-* /
 // infrastructure-* / subagent-execution / loeyae-compliance / ui-implementation-bridge 等)不在上面的
 // 线性序上。裸 indexOf 对它们返回 -1,会使阶段感知守卫 (currentOrder>=0) 整体失效,退化为"全层都判",
@@ -2544,9 +2627,8 @@ const MATRIX_STAGE_FALLBACK: Record<string, string> = {
   "ui-implementation-bridge": "code-generation",
   "build-and-test": "code-review",
   "implementation-report": "code-review",
-  // test-case-derivation 产出 UC-D(test_cases 层的上游权威)。映射到 functional-design 位置,
-  // 使 test_cases 层在 UC-D 产出当阶段即被判(缺口1修复);layerText.test_cases 在该阶段读 UC-D 目录本身。
-  "test-case-derivation": "functional-design",
+  // I13 产出 UC-D；测试层在 RED 阶段校验，映射到 tdd 位置。
+  "test-case-derivation": "tdd",
 };
 function resolveStageOrder(stage: string): number {
   const direct = MATRIX_STAGE_ORDER.indexOf(stage);
@@ -3264,6 +3346,9 @@ const CHECKERS: Record<string, () => Record<string, unknown>> = {
   "ui-design-alignment": uiAlignment,
   "ui-artifact-consistency": uiArtifactConsistency,
   "inception-consistency": inceptionConsistency,
+  "test-case-derivation": testCaseDerivation,
+  "red-test-evidence": () => phaseEvidenceCheck("red-test-evidence"),
+  "green-test-evidence": () => phaseEvidenceCheck("green-test-evidence"),
   "traceability-matrix": traceabilityMatrix,
   "structural-invariants": structuralInvariants,
 };
