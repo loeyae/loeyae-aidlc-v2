@@ -32,15 +32,14 @@ def test_official_plugin_layout() -> None:
     assert diagram_skill.is_file()
     assert approval_skill.is_file()
     assert approval_command.is_file()
-    assert "Slash Command 本身不是批准" in approval_command.read_text()
+    assert "--user-input Approve" in approval_command.read_text()
     assert not (DIST / ".claude").exists()
 
     manifest = json.loads(manifest_path.read_text())
     assert manifest["name"] == "loeyae-aidlc"
     assert "mcpServers" in manifest
-    assert orchestrator_skill.read_text().startswith(
-        "---\nname: loeyae-aidlc\n"
-    )
+    assert manifest["mcpServers"]["ssot"]["headers"]["Authorization"] == "Bearer ${SSOT_API_KEY}"
+    assert orchestrator_skill.read_text().startswith("# Loeyae AI-DLC\n")
 
 
 def main() -> None:
