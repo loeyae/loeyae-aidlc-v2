@@ -93,10 +93,12 @@ def main() -> None:
         assert (codebuddy_plugin / ".mcp.json").is_file()
         codebuddy_marketplace_manifest = json.loads((codebuddy_marketplace / ".codebuddy-plugin" / "marketplace.json").read_text())
         codebuddy_plugin_manifest = json.loads((codebuddy_plugin / ".codebuddy-plugin" / "plugin.json").read_text())
+        codebuddy_mcp_manifest = json.loads((codebuddy_plugin / ".mcp.json").read_text())
         assert codebuddy_marketplace_manifest["version"] == package_version
         assert codebuddy_plugin_manifest["version"] == package_version
         assert codebuddy_marketplace_manifest["plugins"][0]["skills"] == ["./plugins/loeyae-aidlc/skills/loeyae-aidlc"]
         assert codebuddy_plugin_manifest["skills"] == ["./skills/loeyae-aidlc"]
+        assert codebuddy_mcp_manifest["mcpServers"]["ssot"]["headers"]["Authorization"] == "Bearer ${SSOT_API_KEY}"
 
         run_install("qoder", home, host_env)
         qoder_plugin = home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc"
@@ -116,6 +118,8 @@ def main() -> None:
         expected_qoder_mcp = {"loeyae-skills", "awesome-design", "figma", "ssot"}
         assert set(qoder_mcp_manifest["mcpServers"]) == expected_qoder_mcp
         assert set(qoder_settings["mcpServers"]) == expected_qoder_mcp
+        assert qoder_mcp_manifest["mcpServers"]["ssot"]["headers"]["Authorization"] == "Bearer ${SSOT_API_KEY}"
+        assert qoder_settings["mcpServers"]["ssot"]["headers"]["Authorization"] == "Bearer ${SSOT_API_KEY}"
         assert set(qoder_cn_config["mcpServers"]) == expected_qoder_mcp
         for server in qoder_cn_config["mcpServers"].values():
             assert server["command"] == "npx"
@@ -134,6 +138,7 @@ def main() -> None:
         assert zcode_config["hooks"]["enabled"] is True
         assert zcode_config["hooks"]["events"]["Stop"][0]["hooks"][0]["args"] == ["hook", "--format", "zcode"]
         assert set(zcode_config["mcp"]["servers"]) == {"loeyae-skills", "awesome-design", "figma", "ssot"}
+        assert zcode_config["mcp"]["servers"]["ssot"]["headers"]["Authorization"] == "Bearer ${SSOT_API_KEY}"
 
     print("Native platform layout tests passed")
 
