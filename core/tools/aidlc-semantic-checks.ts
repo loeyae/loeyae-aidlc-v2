@@ -2,10 +2,11 @@
 import { createHash } from "crypto";
 import { spawnSync } from "child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
-import { join, relative, resolve } from "path";
+import { dirname, join, relative, resolve } from "path";
+import { fileURLToPath } from "url";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
-import { portableDirname, readModuleManifest } from "./aidlc-execution-context";
-import { scanFiles } from "./aidlc-scan-root";
+import { portableDirname, readModuleManifest, verifiedModuleIds } from "./aidlc-execution-context";
+import { scanFiles, SOURCE_FILE_PATTERN, TEST_FILE_PATTERN } from "./aidlc-scan-root";
 import { hasExecutableBehavior } from "./aidlc-executable-behavior";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
 import { type WorkflowState } from "./aidlc-light-state";
@@ -50,9 +51,11 @@ try {
 
 const ACTIVE_MODULE = ARGUMENT_MODULE || process.env.AIDLC_ACTIVE_MODULE?.trim() || workflowState?.current_module;
 const ACTIVE_UNIT = ARGUMENT_UNIT || process.env.AIDLC_ACTIVE_UNIT?.trim() || workflowState?.current_unit;
+// Only a non-empty value is a context request: an empty AIDLC_ACTIVE_MODULE/UNIT (as
+// exported by 4.5.3 producers for project-axis stages) carries no module or unit.
 const CONTROLLED_CONTEXT_REQUESTED = STRICT_MODULE_SCOPE
-  || Object.prototype.hasOwnProperty.call(process.env, "AIDLC_ACTIVE_MODULE")
-  || Object.prototype.hasOwnProperty.call(process.env, "AIDLC_ACTIVE_UNIT");
+  || Boolean(process.env.AIDLC_ACTIVE_MODULE?.trim())
+  || Boolean(process.env.AIDLC_ACTIVE_UNIT?.trim());
 
 const MODULE_CONTEXT_SENSORS = new Set([
   "diagram-contract",
@@ -491,7 +494,41 @@ function reviewEvidence(): Record<string, unknown> {
   const filesReviewed = [...new Set(content.match(/(?:src|app|lib|test|tests|docs)\/[^\s`),]+/g) || [])];
   if (filesReviewed.length === 0) fail("review record must identify reviewed files");
   if (Number(resolved) < Number(found) || Number(open) !== 0) fail("review issues are not fully resolved");
-  return { status: "passed", spec_axis: "passed", standards_axis: "passed", reviewer, files_reviewed: filesReviewed, issues_found: Number(found), issues_resolved: Number(resolved), issues_open: Number(open) };
+  return { status: "passed", spec_axis: "passed", standards_axis: "passed", reviewer, files_reviewed: filesReviewed, issues_found: Number(found), issues_resolved: Number(resolved), issues_open: Number(open), ...reviewModeFields(content) };
+}
+
+/** `key: value` declared on its own line (optionally as a list item, bold, or code). */
+function declaredValue(content: string, key: string): string | undefined {
+  const expression = new RegExp(`^[\\s>*-]*\\**\`?${key}\`?\\**\\s*[:：]\\s*\`?([^\`\\s|]+)`, "im");
+  return content.match(expression)?.[1]?.trim();
+}
+
+function currentStageNode(): { mode?: string; reviewer_agent?: string } | undefined {
+  const stage = workflowState?.current_stage;
+  const graphPath = join(dirname(fileURLToPath(import.meta.url)), "data", "stage-graph.json");
+  if (!stage || !existsSync(graphPath)) return undefined;
+  const graph = JSON.parse(text(graphPath)) as { stages?: Array<{ slug: string; mode?: string; reviewer_agent?: string }> };
+  return graph.stages?.find((candidate) => candidate.slug === stage);
+}
+
+/**
+ * Review-mode fields. reviewer_agent comes from the stage metadata (an explicit
+ * `reviewer_agent:` in the record overrides it so a mismatch stays visible to the gate);
+ * execution_context and review_only are emitted only when the record declares them,
+ * with the declared value, so a missing or wrong declaration still fails closed.
+ */
+function reviewModeFields(content: string): Record<string, unknown> {
+  const stage = currentStageNode();
+  const fields: Record<string, unknown> = {};
+  const declaredAgent = declaredValue(content, "reviewer_agent");
+  if (declaredAgent) fields.reviewer_agent = declaredAgent;
+  else if (stage?.mode === "review" && stage.reviewer_agent) fields.reviewer_agent = stage.reviewer_agent;
+  const context = declaredValue(content, "execution_context");
+  if (context) fields.execution_context = context.toLowerCase();
+  const reviewOnly = declaredValue(content, "review_only")?.toLowerCase();
+  if (reviewOnly === "true") fields.review_only = true;
+  else if (reviewOnly !== undefined) fields.review_only = reviewOnly === "false" ? false : reviewOnly;
+  return fields;
 }
 
 function evidenceRecords(stage: string, sensor: string): Record<string, unknown>[] {
@@ -556,7 +593,7 @@ function testQuality(): Record<string, unknown> {
   const caseFiles = ACTIVE_MODULE
     ? allFiles("docs/aidlc/inception/application-design/test-cases", /\.md$/)
     : allFiles("docs/aidlc/modules", /test-cases[\\/].*\.md$/);
-  const testFiles = projectFiles(/(?:test|spec)[^/]*\.(?:java|kt|ts|tsx|js|jsx|py|go|rs|cs)$/i);
+  const testFiles = projectFiles(TEST_FILE_PATTERN);
   if (caseFiles.length === 0) fail("UC-D test case files are missing");
   if (testFiles.length === 0) fail("test source files are missing");
   const cases = ids(joined(caseFiles), /UC-D-\d+(?:-[A-Za-z0-9_-]+)?/g);
@@ -681,11 +718,11 @@ function implementationReport(): Record<string, unknown> {
 
   const requiredEvidence: string[] = [];
   const uiModulesVerified: string[] = [];
-  let modulesVerified = 0;
+  // Same participating-module list as the orchestrator gate (D3): never computed twice.
+  const modulesVerified = verifiedModuleIds(ROOT, requiredWorkflowState().scope).length;
   const prdSelected = selectedPrdRoute();
   if (workflowState?.current_module || existsSync(join(ROOT, "docs", "aidlc", "ideation", "module-manifest.json"))) {
     const modules = readModuleManifest(ROOT);
-    modulesVerified = modules.length;
     for (const module of modules) {
       requiredEvidence.push(`.aidlc/evidence/cross-validation/${module.module_id}/inception-consistency.json`);
       const route = selectedUiRoute(module.module_id);
@@ -2780,8 +2817,8 @@ function traceabilityMatrix(): Record<string, unknown> {
   // UC-D 目录(test-case-derivation 产物)。test_cases 层来源 = 功能设计 + UC-D 目录,使该层在
   // UC-D 产出阶段(功能设计尚未产出)也能正确判"REQ 是否被 UC-D 覆盖"(缺口1)。
   const ucdDoc = joined(allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/));
-  const codeSrc = joined(projectFiles(/\.(?:java|kt|ts|tsx|js|jsx|vue)$/));
-  const testSrc = joined(projectFiles(/(?:test|spec)[^/]*\.(?:java|kt|ts|tsx|js)$/i));
+  const codeSrc = joined(projectFiles(SOURCE_FILE_PATTERN));
+  const testSrc = joined(projectFiles(TEST_FILE_PATTERN));
 
   const layerText: Record<string, string> = {
     stories: storyDoc, acceptance: storyDoc, design_components: designDoc,

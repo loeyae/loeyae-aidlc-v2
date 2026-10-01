@@ -96,6 +96,7 @@ interface CommandResult {
 const PROJECT_ROOT = realpathSync(process.cwd());
 const TOOL_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CONFIG = ".aidlc/evidence-commands.json";
+const STAGE_CONFIG_DIR = ".aidlc/commands";
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
@@ -104,6 +105,59 @@ const require = createRequire(import.meta.url);
 
 function fail(message: string): never {
   throw new Error(message);
+}
+
+/**
+ * Environment for a controlled child process (semantic checker or RED/GREEN command).
+ * The active module/unit are exported only when non-empty; inherited values are
+ * dropped so a project-axis stage never looks like an (empty) module request.
+ */
+export function semanticCheckerEnv(
+  state: Pick<ProducerState, "current_stage" | "current_module" | "current_unit">,
+  base: NodeJS.ProcessEnv = process.env,
+  extra: Record<string, string> = {},
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base, ...extra };
+  delete env.AIDLC_ACTIVE_MODULE;
+  delete env.AIDLC_ACTIVE_UNIT;
+  env.AIDLC_ACTIVE_STAGE = state.current_stage || "";
+  if (state.current_module) env.AIDLC_ACTIVE_MODULE = state.current_module;
+  if (state.current_unit) env.AIDLC_ACTIVE_UNIT = state.current_unit;
+  return env;
+}
+
+/**
+ * Command allowlist lookup: an explicit --config wins; otherwise the stage's own
+ * `.aidlc/commands/<stage>.json`; otherwise the shared `.aidlc/evidence-commands.json`.
+ * Whichever file is chosen is still stage-locked and validated by parseConfig.
+ */
+export function resolveCommandConfigPath(projectRoot: string, stage: string, explicit?: string): string {
+  if (explicit) return resolve(projectRoot, explicit);
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(stage)) fail(`stage must contain only lowercase letters, digits, and hyphens: ${stage}`);
+  const perStage = resolve(projectRoot, STAGE_CONFIG_DIR, `${stage}.json`);
+  return existsSync(perStage) ? perStage : resolve(projectRoot, DEFAULT_CONFIG);
+}
+
+/** Comparable form of a config path: resolved, real path when it exists, no trailing separator, case-folded on Windows. */
+function comparableConfigPath(path: string): string {
+  let value = resolve(path);
+  if (existsSync(value)) value = realpathSync.native(value);
+  value = value.replace(/[\\/]+$/, "") || value;
+  return process.platform === "win32" ? value.toLowerCase() : value;
+}
+
+/**
+ * RED/GREEN gates bind observed commands to the default allowlist lookup only
+ * (`.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json`). An explicit
+ * --config naming any other file would yield evidence the gate always rejects, so the
+ * producer refuses it before running a command or writing evidence.
+ */
+function assertPhaseConfigBinding(options: ProducerOptions): void {
+  if (options.explicitConfig === undefined) return;
+  const requested = resolve(PROJECT_ROOT, options.explicitConfig);
+  const lookup = resolveCommandConfigPath(PROJECT_ROOT, options.stage);
+  if (comparableConfigPath(requested) === comparableConfigPath(lookup)) return;
+  fail(`RED/GREEN evidence binds only the default allowlist lookup (.aidlc/commands/${options.stage}.json, then ${DEFAULT_CONFIG}); --config ${options.explicitConfig} names another file. Put the red/green command in .aidlc/commands/${options.stage}.json and omit --config`);
 }
 
 function nonEmptyString(value: unknown, field: string): string {
@@ -187,8 +241,33 @@ function tail(value: string): string | undefined {
   return redact(text.slice(-TAIL_LENGTH));
 }
 
-function argvDigest(argv: string[]): string {
+export function argvDigest(argv: string[]): string {
   return createHash("sha256").update(JSON.stringify(argv)).digest("hex");
+}
+
+/** checker.argv_digest of controlled RED/GREEN evidence: derived from the observed command digest. */
+export function phaseObservationDigest(phase: "RED" | "GREEN", commandDigest: string): string {
+  return argvDigest([`${phase}-observation`, commandDigest]);
+}
+
+/** The single allowlisted red/green command of a stage; fails unless exactly one is declared. */
+function phaseCommand(config: EvidenceConfig, stage: string, phase: "RED" | "GREEN"): CommandSpec {
+  const role = phase.toLowerCase() as "red" | "green";
+  const declarations = config.commands.filter((command) => command.role === role);
+  if (declarations.length !== 1) fail(`allowlist must declare exactly one ${role} command for ${stage}`);
+  return declarations[0];
+}
+
+/**
+ * Gate-side lookup of the command a controlled RED/GREEN observation must have run:
+ * the same allowlist resolution (`resolveCommandConfigPath`, no explicit --config) and
+ * the same stage-locked parser the producer uses. Throws when the allowlist is missing,
+ * unreadable, locked to another stage, or does not declare exactly one command.
+ */
+export function allowlistedPhaseCommand(stage: string, phase: "RED" | "GREEN"): { id: string; argv_digest: string; config: string } {
+  const config = resolveCommandConfigPath(PROJECT_ROOT, stage);
+  const command = phaseCommand(requireCommandConfig(config, stage), stage, phase);
+  return { id: command.id, argv_digest: argvDigest(command.argv), config };
 }
 
 function validateArgv(argv: unknown, field: string): string[] {
@@ -252,7 +331,7 @@ function parseConfig(path: string, stage: string, allowEmptyCommands = false): E
   const config = value as Record<string, unknown>;
   if (config.version !== "1") fail('command allowlist version must be "1"');
   if (config.stage !== stage) {
-    fail(`command allowlist stage must be "${stage}"; update ${DEFAULT_CONFIG} for the active stage, minimal example: ${configExample(stage)}`);
+    fail(`command allowlist stage must be "${stage}"; use ${STAGE_CONFIG_DIR}/${stage}.json (or update ${DEFAULT_CONFIG}) for the active stage, minimal example: ${configExample(stage)}`);
   }
   if (!Array.isArray(config.commands) || (!allowEmptyCommands && config.commands.length === 0)) fail("command allowlist commands must be non-empty");
 
@@ -442,12 +521,7 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
   const started = Date.now();
   const result = spawnSync(argv[0], argv.slice(1), {
     cwd: PROJECT_ROOT,
-    env: {
-      ...process.env,
-      AIDLC_ACTIVE_MODULE: state.current_module || "",
-      AIDLC_ACTIVE_UNIT: state.current_unit || "",
-      AIDLC_ACTIVE_STAGE: state.current_stage || "",
-    },
+    env: semanticCheckerEnv(state),
     encoding: "utf8",
     shell: false,
     timeout: timeoutMs,
@@ -526,7 +600,9 @@ function validatePhaseObservation(value: Record<string, unknown>, phase: "RED" |
   }
 }
 
-function runPhaseProducer(options: ProducerOptions, config: EvidenceConfig, state: ProducerState, phase: "RED" | "GREEN"): void {
+function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase: "RED" | "GREEN"): void {
+  assertPhaseConfigBinding(options);
+  const config = requireCommandConfig(options.config, options.stage);
   const i13 = phaseRecord(state);
   const output = options.output || evidenceOutput(options.stage, phase === "RED" ? "red-test-evidence" : "green-test-evidence", undefined, state);
   let payload: Record<string, unknown>;
@@ -556,18 +632,17 @@ function runPhaseProducer(options: ProducerOptions, config: EvidenceConfig, stat
     execution = { id: `builtin:${options.sensor}`, sensor: options.sensor, argv_digest: argvDigest(["I13-not-applicable", phase, check.argv_digest]), exit_code: 0, status: "passed" };
   } else {
     if (i13.status !== "required") fail(`I13 evidence status must be required or not_applicable, got ${String(i13.status)}`);
-    const role = phase.toLowerCase() as "red" | "green";
-    const declarations = config.commands.filter((command) => command.role === role);
-    if (declarations.length !== 1) fail(`allowlist must declare exactly one ${role} command for ${options.stage}`);
-    const command = declarations[0];
+    const command = phaseCommand(config, options.stage, phase);
+    const started = Date.now();
     const result = spawnSync(command.argv[0], command.argv.slice(1), {
       cwd: command.cwd || PROJECT_ROOT,
-      env: { ...process.env, AIDLC_PHASE: phase, AIDLC_ACTIVE_MODULE: state.current_module || "", AIDLC_ACTIVE_UNIT: state.current_unit || "" },
+      env: semanticCheckerEnv(state, process.env, { AIDLC_PHASE: phase }),
       encoding: "utf8",
       shell: false,
       timeout: command.timeout_ms,
       maxBuffer: MAX_OUTPUT_BYTES,
     });
+    const duration = Date.now() - started;
     const exitCode = typeof result.status === "number" ? result.status : 1;
     const expectedExit = phase === "RED" ? 1 : 0;
     if (result.error || exitCode !== expectedExit) fail(`controlled ${phase} command ${command.id} must exit ${expectedExit}; got ${exitCode}${result.error ? ` (${result.error.message})` : ""}`);
@@ -575,7 +650,15 @@ function runPhaseProducer(options: ProducerOptions, config: EvidenceConfig, stat
     const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr ? String(result.stderr) : "";
     payload = phaseObservation(`${stdout}\n${stderr}`, phase);
     validatePhaseObservation(payload, phase);
-    execution = { id: command.id, phase, argv_digest: argvDigest(command.argv), cwd: safeCwdLabel(command.cwd || PROJECT_ROOT), exit_code: exitCode, status: "passed", duration_ms: 0 };
+    // The observed test command legitimately exits 1 for RED, so it is recorded as
+    // observed_command; `checker` describes the built-in producer check that validated
+    // the observation (same contract as every other semantic sensor).
+    const commandDigest = argvDigest(command.argv);
+    payload = {
+      ...payload,
+      observed_command: { id: command.id, phase, argv_digest: commandDigest, cwd: safeCwdLabel(command.cwd || PROJECT_ROOT), exit_code: exitCode, expected_exit_code: expectedExit, duration_ms: duration },
+    };
+    execution = { id: `builtin:${options.sensor}`, sensor: options.sensor, argv_digest: phaseObservationDigest(phase, commandDigest), exit_code: 0, status: "passed", duration_ms: duration };
   }
   writeAtomic(output, `${JSON.stringify({ ...payload, ...executionContext(state), evidence_version: "1", timestamp: new Date().toISOString(), producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() }, source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance), checker: execution }, null, 2)}\n`);
   if (!options.output) console.log(JSON.stringify({ status: "passed", output, sensor: options.sensor, phase }, null, 2));
@@ -586,7 +669,7 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   if (!sensor || sensor === "build-test-evidence") fail("semantic producer requires --sensor with a semantic sensor name");
   if (options.commandIds.length > 0) fail("--command-id is only supported for build/test evidence");
   if (sensor === "red-test-evidence" || sensor === "green-test-evidence") {
-    runPhaseProducer(options, requireCommandConfig(options.config, options.stage), state, sensor === "red-test-evidence" ? "RED" : "GREEN");
+    runPhaseProducer(options, state, sensor === "red-test-evidence" ? "RED" : "GREEN");
     return;
   }
   const declarations = (config?.commands || []).filter((command) => command.role === "semantic" && command.sensor === sensor);
@@ -614,6 +697,8 @@ interface ProducerOptions {
   refresh: boolean;
   sensor?: string;
   config: string;
+  /** Raw --config value as given by the user; unset when the default lookup is used. */
+  explicitConfig?: string;
   output?: string;
   commandIds: string[];
   allSensors: boolean;
@@ -629,7 +714,7 @@ function parseArgs(args: string[]): ProducerOptions {
   let unitId: string | undefined;
   let refresh = false;
   let sensor: string | undefined;
-  let config = DEFAULT_CONFIG;
+  let config: string | undefined;
   let output: string | undefined;
   const commandIds: string[] = [];
   let allSensors = false;
@@ -671,7 +756,8 @@ function parseArgs(args: string[]): ProducerOptions {
     ...(unitId ? { unit: unitId } : {}),
     refresh,
     sensor,
-    config: safeProjectPath(config, "config"),
+    config: safeProjectPath(resolveCommandConfigPath(PROJECT_ROOT, stage, config), "config"),
+    ...(config !== undefined ? { explicitConfig: config } : {}),
     output,
     commandIds,
     allSensors,
@@ -769,6 +855,8 @@ function declaredSemanticSensors(stage: string): string[] {
 function produceAllSemantic(options: ProducerOptions, state: ProducerState, config: EvidenceConfig | null): void {
   const sensors = declaredSemanticSensors(options.stage);
   if (sensors.length === 0) fail(`stage ${options.stage} declares no semantic sensors; use the stage's ordinary report gates instead`);
+  // Checked up front so no other sensor's evidence is written before a RED/GREEN refusal.
+  if (sensors.includes("red-test-evidence") || sensors.includes("green-test-evidence")) assertPhaseConfigBinding(options);
   const outputs: string[] = [];
   for (const sensor of sensors) {
     const output = evidenceOutput(options.stage, sensor, undefined, state);

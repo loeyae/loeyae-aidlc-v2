@@ -25,7 +25,7 @@ Evidence 路径由当前 directive 的 `evidence_root` 决定：
 - 对应 sensor 的结果字段；
 - 语义检查时的内置 checker 信息，或构建/测试/静态检查的真实命令结果。
 
-使用 `loeyae-aidlc evidence run` 生成 Evidence。Producer 只执行项目 `.aidlc/evidence-commands.json` 中受允许的 build、test、check 命令，采用无 shell 执行、路径边界、原子写入和输出脱敏。
+使用 `loeyae-aidlc evidence run` 生成 Evidence。Producer 只执行项目命令清单中受允许的 build、test、check 命令（清单按 `--config` 显式指定 → `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找；RED/GREEN 只按 `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找，显式 `--config` 仅在指向同一文件时被接受，否则 producer 拒绝），采用无 shell 执行、路径边界、原子写入和输出脱敏。
 
 ## 阶段质量
 

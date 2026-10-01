@@ -284,6 +284,14 @@ def test_all_checkers_pass_on_realistic_fixture() -> None:
         fixture(project, with_expected=True)
         for sensor in SENSORS:
             result = run_checker(project, sensor)
+            if sensor == "implementation-report":
+                # 4.5.4 (D3): the checker shares verifiedModuleIds() with the orchestrator gate.
+                # A feature-scope workflow without module-manifest is rejected by both, so the
+                # checker fails closed here; the manifest-backed path is covered by
+                # test_implementation_report_aggregates_selected_artifacts.
+                assert result.returncode != 0, result.stdout
+                assert "module manifest is missing" in result.stderr, result.stderr
+                continue
             assert result.returncode == 0, f"{sensor}: {result.stderr}"
             payload = json.loads(result.stdout)
             assert payload["status"] in ("passed", "verified", "not_applicable"), sensor

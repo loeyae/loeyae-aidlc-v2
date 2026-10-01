@@ -34,6 +34,21 @@ scope_waived_requires: []
 
 **完成边界**：仅有 `src/`、计划或文字 TDD 声明不能完成本阶段；必须存在对应 RED 证据、GREEN 测试通过证据和完整追溯。对于存量项目，"生成"意味着在适当时修改现有文件，而非创建副本。
 
+### 源码根解析
+
+frontmatter 中的 `src/` 是“项目源码根”的规范占位（code-review、build-and-test 的 `consumes` 同样使用它），引擎按以下优先级解析为真实目录，`checkProduces` / `checkConsumes`、`no-todo`、`traceability` 与 directive 中显示的产物都使用解析结果：
+
+1. `docs/aidlc/ideation/module-manifest.json` 中当前模块的 `paths`（project 轴阶段取所有模块 `paths` 的并集）；
+2. 项目配置 `.aidlc/source-roots.json`：
+
+   ```json
+   { "version": "1", "source_roots": ["app", "web/src"] }
+   ```
+
+3. 默认 `src/`。
+
+每个源码根必须是项目根内的相对目录：接受 `/` 或 `\` 分隔与末尾分隔符，拒绝绝对路径（`/x`、`C:\x`、`C:x`、`\\server\share`）、`.`/`..` 段、AI-DLC 控制面（`aidlc/`、`.aidlc/`、`docs/aidlc/`）以及符号链接/junction。配置非法时直接报错，不回退到低优先级；每个解析出的源码根都必须存在且含有实质文件，否则 produces 校验失败。源码根下的每个文件仍须满足 `traceability`（引用 `REQ-xxx`）与 `no-todo`。
+
 ## 前置条件
 
 **完整流程/精简流程**：

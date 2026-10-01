@@ -35,7 +35,15 @@ Producer 只执行命令清单中的命令，解析真实测试输出，记录�
 
 ## 命令清单 `.aidlc/evidence-commands.json`
 
-默认路径为 `.aidlc/evidence-commands.json`，可用 `evidence run --config <path>` 指定，路径必须位于项目根目录内。
+命令清单按以下顺序查找，路径必须位于项目根目录内：
+
+1. `evidence run --config <path>` 显式指定（仅 build/test/check 与其他 semantic sensor；RED/GREEN 见下文）；
+2. 当前阶段专用的 `.aidlc/commands/<stage>.json`（如 `.aidlc/commands/tdd.json`、`.aidlc/commands/build-and-test.json`），多阶段工作流无需反复覆盖同一文件；
+3. 默认 `.aidlc/evidence-commands.json`。
+
+无论来源如何，文件中的 `stage` 都必须等于当前阶段，否则拒绝（不会跳过而改用下一来源）。`orchestrate report` 自动产证时使用同一查找顺序。
+
+RED/GREEN 证据还会被门禁反向绑定到命令清单：门禁按上面第 2、3 步（不考虑 `--config`）重新解析 `tdd` / `code-generation` 的清单，要求证据里 `observed_command.argv_digest` 与清单中唯一 red/green 命令的 argv digest 一致。因此 TDD 流程请使用 `.aidlc/commands/tdd.json` 与 `.aidlc/commands/code-generation.json`：`code-generation` 完成时还要按 `tdd` 清单复验 RED，共用 `.aidlc/evidence-commands.json` 并改写为 `code-generation` 后，RED 复验会被拒。修改 red/green 命令 argv 后须重新产证。producer 会拒绝 RED/GREEN 的 `--config` 指向其他清单（与默认查找结果不是同一文件时直接报错，不执行命令、不写证据）；指向默认查找到的同一文件则允许。
 
 ### 何时需要
 

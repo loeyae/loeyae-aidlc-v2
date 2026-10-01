@@ -24,7 +24,7 @@ approval: notify
 
 本阶段对所有会进入 `code-generation` 的 scope 执行，不受快速通道绕过。它加载 `knowledge/protocols/test-case-derivation.md`，将产品行为和已批准的系统级技术风险翻译为可执行测试用例点 UC-D，并建立“需求/设计/CR → 执行锚点 → Construction 证据”的追溯链。
 
-当当前单元确实没有可执行业务行为（纯声明、纯样式、纯配置或其他经批准的例外）时，必须基于至少一个需求、故事、应用设计或澄清来源，在测试用例目录中生成结构化 `non-applicable.json`，写明 `reason_code`、批准依据、`alternative_validation` 和验证命令；I13 传感器据此输出 `status: not_applicable`。RED/GREEN 阶段还必须在 `.aidlc/evidence-commands.json` 中各声明且执行唯一一个 `role: "check"` 的受控替代验证命令。缺少来源、文件或成功执行记录均不是跳过，而是阻断。
+当当前单元确实没有可执行业务行为（纯声明、纯样式、纯配置或其他经批准的例外）时，必须基于至少一个需求、故事、应用设计或澄清来源，在测试用例目录中生成结构化 `non-applicable.json`，写明 `reason_code`、批准依据、`alternative_validation` 和验证命令；I13 传感器据此输出 `status: not_applicable`。RED/GREEN 阶段还必须在命令清单（`.aidlc/commands/<stage>.json`，不存在时为 `.aidlc/evidence-commands.json`）中各声明且执行唯一一个 `role: "check"` 的受控替代验证命令。缺少来源、文件或成功执行记录均不是跳过，而是阻断。
 
 ## 执行约束
 

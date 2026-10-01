@@ -57,6 +57,16 @@ rubber-stamping.
 
 ## Producer Responsibility
 
+The built-in checker derives the review-mode fields as follows (fail-closed):
+
+- `reviewer_agent` — from the stage metadata (`reviewer_agent` of the active review-mode
+  stage). An explicit `reviewer_agent:` line in the review record overrides it, so a
+  mismatching declaration is still rejected by the gate.
+- `execution_context` / `review_only` — only from explicit declarations in the review
+  record (`execution_context: isolated`, `review_only: true`, each on its own line).
+  Without a declaration the field is not emitted and the gate rejects the evidence; a
+  wrong value (e.g. `execution_context: inline`) is emitted as declared and rejected.
+
 The review agent MUST:
 1. Evaluate code against the functional design spec (spec_axis)
 2. Evaluate code against project coding standards (standards_axis)

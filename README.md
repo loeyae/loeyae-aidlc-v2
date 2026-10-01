@@ -135,6 +135,12 @@ loeyae-aidlc orchestrate report --stage <slug> --result completed
 
 证据文件默认 24 小时过期；跨天续作时上游纯过期不算回归，引擎会放行。
 
+### 源码根与命令清单
+
+- 阶段图中的 `src/` 是源码根的规范占位，按 module-manifest `paths` → `.aidlc/source-roots.json`（`{ "version": "1", "source_roots": ["app", "web/src"] }`）→ 默认 `src/` 解析，适用于 Python 等不使用 `src/` 的项目。
+- 构建/测试/检查命令清单按 `--config` → `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找；RED/GREEN 命令清单只按 `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找，显式 `--config` 仅在指向同一文件时被接受，否则 producer 直接拒绝。文件中的 `stage` 必须与当前阶段一致。
+- `mode: review` 的代码审查记录须声明 `execution_context: isolated` 与 `review_only: true`。
+
 ## Worktree 与 merge plan
 
 ```bash

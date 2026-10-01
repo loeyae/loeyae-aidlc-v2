@@ -29,8 +29,9 @@ import { createRequire } from "module";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
 import { planAgentExecution, type AgentExecutionPlan } from "./aidlc-agent-runtime";
-import { SEMANTIC_SENSORS } from "./aidlc-evidence";
-import { readSourceRevision } from "./aidlc-revision";
+import { SEMANTIC_SENSORS, allowlistedPhaseCommand, phaseObservationDigest } from "./aidlc-evidence";
+import { CANONICAL_SOURCE_PATTERN, resolveSourceRoots } from "./aidlc-source-roots";
+import { commitAncestryErrors, readSourceRevision } from "./aidlc-revision";
 import {
   evidenceRelativePath,
   isEvidenceArtifactLabel,
@@ -45,6 +46,8 @@ import {
   type ExecutionContext,
   type ModuleDescriptor,
   type UnitDescriptor,
+  FULL_WORKFLOW_SCOPES,
+  verifiedModuleIds,
 } from "./aidlc-execution-context";
 import {
   DIAGRAM_FORMATS,
@@ -196,7 +199,6 @@ const VALID_SCOPES = new Set([
   "poc",
 ]);
 
-const FULL_WORKFLOW_SCOPES = new Set(["feature", "enterprise", "mvp", "classic"]);
 const PRD_ELIGIBLE_SCOPES = new Set(FULL_WORKFLOW_SCOPES);
 
 // ---------------------------------------------------------------------------
@@ -642,6 +644,13 @@ function escapeExpression(value: string): string {
 }
 
 function resolveProducePaths(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string[] {
+  if (pattern === CANONICAL_SOURCE_PATTERN) {
+    return [...new Set(expandSourcePattern(pattern, instance).flatMap((root) => resolveConcretePaths(root, instance, allowProjectAggregate)))];
+  }
+  return resolveConcretePaths(pattern, instance, allowProjectAggregate);
+}
+
+function resolveConcretePaths(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string[] {
   const contextual = instanceArtifactPattern(pattern, instance, allowProjectAggregate).replace(/\\/g, "/");
   const expansionAllowed = allowsProjectAggregate(instance, allowProjectAggregate);
   if (contextual.includes("*") && !expansionAllowed) {
@@ -662,6 +671,22 @@ function resolveProducePaths(pattern: string, instance?: StageInstance, allowPro
 }
 
 /**
+ * The canonical `src/` produce/consume resolves to the project's source roots
+ * (module-manifest paths, then .aidlc/source-roots.json, then src/); every other
+ * pattern is returned unchanged. Each root is checked on its own, so an empty or
+ * missing configured root still fails the gate.
+ */
+function expandSourcePattern(pattern: string, instance?: StageInstance): string[] {
+  if (pattern !== CANONICAL_SOURCE_PATTERN) return [pattern];
+  return resolveSourceRoots(PROJECT_ROOT, instance?.module_id).roots.map((root) => `${root}/`);
+}
+
+/** Display form of a declared artifact for directives and messages. */
+function displayArtifactPatterns(pattern: string, instance: StageInstance, allowProjectAggregate = false): string[] {
+  return expandSourcePattern(pattern, instance).map((expanded) => instanceArtifactPattern(expanded, instance, allowProjectAggregate));
+}
+
+/**
  * Check if produces files exist (including directories and dynamic unit paths).
  */
 const MIN_ARTIFACT_BYTES = 16;
@@ -670,8 +695,8 @@ export function checkProduces(instance: StageInstance): string[] {
   const stage = instance.stage;
   if (!stage.produces || stage.produces.length === 0) return [];
   const missing: string[] = [];
-  for (const pattern of stage.produces) {
-    const paths = resolveProducePaths(pattern, instance);
+  for (const pattern of stage.produces.flatMap((declared) => expandSourcePattern(declared, instance))) {
+    const paths = resolveConcretePaths(pattern, instance);
     if (paths.length === 0) {
       missing.push(instanceArtifactPattern(pattern, instance));
       continue;
@@ -692,16 +717,25 @@ export function checkConsumes(instance: StageInstance, state: WorkflowState, gra
   const stage = instance.stage;
   const failures: string[] = [];
   for (const pattern of stage.consumes || []) {
-    const resolvedPattern = instanceArtifactPattern(pattern, instance, true);
+    let resolvedPattern = pattern;
     let paths: string[] = [];
+    let missingLabel: string | undefined;
     try {
-      paths = resolveProducePaths(pattern, instance, true);
+      resolvedPattern = displayArtifactPatterns(pattern, instance, true).join(", ");
+      for (const expanded of expandSourcePattern(pattern, instance)) {
+        const expandedPaths = resolveConcretePaths(expanded, instance, true);
+        if (expandedPaths.length === 0 || expandedPaths.some((path) => lstatSync(path).isFile() && lstatSync(path).size < MIN_ARTIFACT_BYTES)) {
+          missingLabel = instanceArtifactPattern(expanded, instance, true);
+          break;
+        }
+        paths.push(...expandedPaths);
+      }
     } catch (error) {
       failures.push(`${resolvedPattern}: ${error instanceof Error ? error.message : String(error)}`);
       continue;
     }
-    if (paths.length === 0 || paths.some((path) => lstatSync(path).isFile() && lstatSync(path).size < MIN_ARTIFACT_BYTES)) {
-      failures.push(`${resolvedPattern}: missing or smaller than ${MIN_ARTIFACT_BYTES} bytes`);
+    if (missingLabel !== undefined || paths.length === 0) {
+      failures.push(`${missingLabel ?? resolvedPattern}: missing or smaller than ${MIN_ARTIFACT_BYTES} bytes`);
       continue;
     }
     const producers = graph.stages.filter((candidate) => (candidate.produces || []).includes(pattern));
@@ -804,11 +838,23 @@ function loadEvidence(stage: StageNode, sensor: string, instance?: StageInstance
   }
 }
 
+interface SensorCheckOptions {
+  /**
+   * Accept evidence whose source_revision no longer matches the current tree (the
+   * revision fields must still be well-formed). Only used to re-check RED evidence
+   * while completing GREEN: RED is observed on the pre-implementation tree, and the
+   * GREEN implementation necessarily changes that tree. The recorded commit must still
+   * be the current HEAD or one of its ancestors (non-git projects: exact match).
+   */
+  tolerateRevisionDrift?: boolean;
+}
+
 function validateEvidence(
   stage: StageNode,
   sensor: string,
   instance: StageInstance,
   required: (value: Evidence) => string[],
+  options: SensorCheckOptions = {},
 ): SensorResult | null {
   const loaded = loadEvidence(stage, sensor, instance);
   if (loaded.failure) return loaded.failure;
@@ -835,22 +881,26 @@ function validateEvidence(
     if (recordedScope === undefined || recordedScope === "worktree") {
       // Historical binding: the exact commit, dirty flag and whole-worktree digest.
       const activeRevision = readSourceRevision(PROJECT_ROOT);
-      if (commit && commit !== activeRevision.commit) errors.push(`source_revision.commit ${commit} does not match current HEAD ${activeRevision.commit}`);
-      if (sourceRevision.dirty !== activeRevision.dirty) errors.push("source_revision.dirty no longer matches the current worktree");
+      const drift = !options.tolerateRevisionDrift;
+      if (drift && commit && commit !== activeRevision.commit) errors.push(`source_revision.commit ${commit} does not match current HEAD ${activeRevision.commit}`);
+      // The tolerated drift is the worktree only: the recorded commit must still be in HEAD's history.
+      if (!drift && commit) errors.push(...commitAncestryErrors(PROJECT_ROOT, commit, activeRevision.commit));
+      if (drift && sourceRevision.dirty !== activeRevision.dirty) errors.push("source_revision.dirty no longer matches the current worktree");
       if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.worktree_digest || ""))) {
         errors.push("source_revision.worktree_digest must be a SHA-256 digest");
-      } else if (sourceRevision.worktree_digest !== activeRevision.worktree_digest) {
+      } else if (drift && sourceRevision.worktree_digest !== activeRevision.worktree_digest) {
         errors.push("source_revision.worktree_digest no longer matches the current worktree");
       }
     } else {
       // Split layout: content-addressed within the owning workflow's scope. The commit
       // is provenance only, so another module's commit or write cannot invalidate it.
       const expectedScope = evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
+      if (options.tolerateRevisionDrift && commit) errors.push(...commitAncestryErrors(PROJECT_ROOT, commit, readSourceRevision(PROJECT_ROOT).commit));
       if (recordedScope !== expectedScope.label) {
         errors.push(`source_revision.scope ${recordedScope} does not match the ${expectedScope.label} scope of ${instance.instance_id}`);
       } else if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.scope_digest || ""))) {
         errors.push("source_revision.scope_digest must be a SHA-256 digest");
-      } else if (sourceRevision.scope_digest !== readSourceRevision(PROJECT_ROOT, expectedScope).scope_digest) {
+      } else if (!options.tolerateRevisionDrift && sourceRevision.scope_digest !== readSourceRevision(PROJECT_ROOT, expectedScope).scope_digest) {
         errors.push(`source_revision.scope_digest no longer matches the ${recordedScope} scope`);
       }
     }
@@ -948,6 +998,7 @@ function phaseEvidenceErrors(
   sensor: string,
   phase: "RED" | "GREEN",
   applicability: { any: boolean; allNotApplicable: boolean },
+  stageSlug: string,
 ): string[] {
   const errors: string[] = [];
   const allowedStatuses = phase === "RED" ? ["failed", "not_applicable"] : ["passed", "not_applicable"];
@@ -976,6 +1027,35 @@ function phaseEvidenceErrors(
   if (failed === null) errors.push("tests_failed must be a non-negative integer");
   if (evidence.traceability_complete !== true) errors.push("traceability_complete must be true");
   if (!Array.isArray(evidence.uc_mapping) || evidence.uc_mapping.length === 0) errors.push("uc_mapping must be non-empty");
+  // The controlled producer records the observed test command separately from its
+  // built-in checker; RED must have exited 1 and GREEN 0.
+  const observed = asRecord(evidence.observed_command);
+  const expectedExit = phase === "RED" ? 1 : 0;
+  if (!observed) {
+    errors.push("observed_command is required for controlled RED/GREEN evidence");
+  } else {
+    if (!asNonEmptyString(observed.id)) errors.push("observed_command.id is required");
+    if (observed.phase !== phase) errors.push(`observed_command.phase must be ${phase}`);
+    const observedDigest = String(observed.argv_digest || "");
+    if (!/^[a-f0-9]{64}$/.test(observedDigest)) {
+      errors.push("observed_command.argv_digest must be a SHA-256 digest");
+    } else {
+      // Bind the observation to the stage's allowlisted command (same resolution and
+      // stage-locked parser as the producer) and the checker digest to the observation.
+      // Any allowlist failure rejects: the binding is never skipped.
+      const role = phase.toLowerCase();
+      try {
+        const declared = allowlistedPhaseCommand(stageSlug, phase);
+        if (observedDigest !== declared.argv_digest) errors.push(`observed_command.argv_digest does not match the allowlisted ${role} command ${declared.id} in ${normalizeArtifactLabel(relative(PROJECT_ROOT, declared.config))}`);
+        if (asNonEmptyString(observed.id) && observed.id !== declared.id) errors.push(`observed_command.id must be ${declared.id}`);
+      } catch (error) {
+        errors.push(`cannot bind observed_command to the ${role} command allowlist of stage ${stageSlug}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const checker = asRecord(evidence.checker);
+      if (checker && checker.argv_digest !== phaseObservationDigest(phase, observedDigest)) errors.push(`checker.argv_digest does not match the ${phase} observation of observed_command`);
+    }
+    if (asNumber(observed.exit_code) !== expectedExit) errors.push(`observed_command.exit_code must be ${expectedExit}`);
+  }
   if (phase === "RED") {
     if (evidence.status !== "failed") errors.push('RED status must be "failed"');
     if (evidence.failure_class !== "behavior") errors.push('RED failure_class must be "behavior"');
@@ -997,7 +1077,7 @@ function phaseEvidenceErrors(
  *
  * Returns list of failed sensor results.
  */
-export async function checkSensors(instance: StageInstance, state: WorkflowState): Promise<SensorResult[]> {
+export async function checkSensors(instance: StageInstance, state: WorkflowState, options: SensorCheckOptions = {}): Promise<SensorResult[]> {
   const stage = instance.stage;
   if (!stage.sensors || stage.sensors.length === 0) return [];
 
@@ -1236,14 +1316,14 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
       case "red-test-evidence": {
         const applicability = i13Applicability(instance);
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "RED", applicability));
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "RED", applicability, stage.slug), options);
         if (failure) failures.push(failure);
         break;
       }
 
       case "green-test-evidence": {
         const applicability = i13Applicability(instance);
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "GREEN", applicability));
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "GREEN", applicability, stage.slug));
         if (failure) failures.push(failure);
         break;
       }
@@ -1516,12 +1596,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           }
 
           {
-            const moduleManifestPath = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "module-manifest.json");
-            const modules = existsSync(moduleManifestPath)
-              ? readModuleManifest(PROJECT_ROOT).map((module) => module.module_id).sort()
-              : FULL_WORKFLOW_SCOPES.has(state.scope)
-                ? readModuleManifest(PROJECT_ROOT).map((module) => module.module_id).sort()
-                : ["default"];
+            const modules = verifiedModuleIds(PROJECT_ROOT, state.scope);
             if (evidence.selected_artifacts_verified !== true) errors.push("selected_artifacts_verified must be true");
             if (asNumber(evidence.modules_verified) !== modules.length) errors.push(`modules_verified must be ${modules.length}`);
             const expectedPrd = selectedOptionalStages(state).includes("prd-generation");
@@ -2323,7 +2398,7 @@ function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, ag
     ? `当前单元：${instance.module_id}/${instance.unit_id}。团队成员可用 unit select 声明负责人与分支。`
     : "当前阶段不要求成员选择单元；按产物、review、构建和测试门禁推进。";
   const artifacts = instance.stage.produces.length
-    ? instance.stage.produces.map((pattern) => instanceArtifactPattern(pattern, instance)).join("、")
+    ? instance.stage.produces.flatMap((pattern) => displayArtifactPatterns(pattern, instance)).join("、")
     : "本阶段没有声明文件产物";
   return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；状态、审批和 merge 权限仅属于 conductor。\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。${diagramFormatPrompt(state, instance)}${choicePrompt(instance.stage.slug, choices)}\n下一步：完成后将结构化结果交回 conductor，再运行 ${reportCommand || "orchestrate report"}。`;
 }
@@ -3333,8 +3408,8 @@ async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directi
     gate,
     approval: nextStage.approval,
     completion_contract: nextStage.completion_contract,
-    consumes: nextStage.consumes.map((pattern) => instanceArtifactPattern(pattern, effectiveNextInstance, true)),
-    produces: nextStage.produces.map((pattern) => instanceArtifactPattern(pattern, effectiveNextInstance)),
+    consumes: nextStage.consumes.flatMap((pattern) => displayArtifactPatterns(pattern, effectiveNextInstance, true)),
+    produces: nextStage.produces.flatMap((pattern) => displayArtifactPatterns(pattern, effectiveNextInstance)),
     sensors: nextStage.sensors,
     choices: directiveChoices,
     diagram_format: diagramFormatOf(state),
@@ -3509,7 +3584,7 @@ async function handleReport(args: string[]): Promise<Directive> {
       if (stageSlug === "code-generation") {
         const redInstance = instances.find((candidate) => candidate.stage.slug === "tdd" && candidate.module_id === currentInstance.module_id && candidate.unit_id === currentInstance.unit_id);
         if (redInstance) {
-          const redFailures = await checkSensors(redInstance, state);
+          const redFailures = await checkSensors(redInstance, state, { tolerateRevisionDrift: true });
           if (redFailures.length > 0) {
             return {
               kind: "error",
@@ -3682,7 +3757,7 @@ async function reattestInstance(
   if (stageNode.slug === "code-generation") {
     const redInstance = instances.find((candidate) => candidate.stage.slug === "tdd" && candidate.module_id === instance.module_id && candidate.unit_id === instance.unit_id);
     if (redInstance) {
-      const redFailures = await checkSensors(redInstance, state);
+      const redFailures = await checkSensors(redInstance, state, { tolerateRevisionDrift: true });
       if (redFailures.length > 0) return { kind: "error", message: `🚫 Cannot re-attest GREEN stage "${instanceId}" — RED gate evidence is invalid:\\n${redFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\\n")}`, ...extras };
     }
   }

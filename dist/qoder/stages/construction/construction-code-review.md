@@ -341,6 +341,8 @@ requires: [code-generation]
 ```markdown
 ## 代码审查 — 单元 X
 **审查模式**: 集成双轴审查
+**execution_context**: isolated
+**review_only**: true
 **Spec 结果**: ✅ 合规 | ❌ 不合规
 **Standards 结果**: ✅ 通过 | ⚠️ 需要修复
 **证据**: [各轴的规格引用与代码引用]
@@ -353,6 +355,8 @@ requires: [code-generation]
 ## 代码审查 — 单元 X
 **时间戳**: [ISO 时间戳]
 **审查模式**: 双轴独立审查
+**execution_context**: isolated
+**review_only**: true
 **Standards 结果**: ✅ 通过 | ⚠️ 需要修复
 **Spec 结果**: ✅ 合规 | ❌ 不合规
 **Standards 问题**: 关键 X 个, 重要 Y 个（Smells Z 个）, 建议 W 个
@@ -520,12 +524,18 @@ echo "已覆盖: $HIT / $TOTAL"
 
 ### 审查记录
 
+**必填声明（review 模式）**：本阶段为 `mode: review`，审查记录（`code-review.md` 或 `audit/` 下的审计文件）必须各占一行显式声明 `execution_context: isolated` 与 `review_only: true`。`review-evidence` 内置 checker 只在记录声明时输出这两个字段，`reviewer_agent` 取自阶段元数据（`aidlc-quality-agent`）；缺少声明或声明值不符（如 `execution_context: inline`）时门禁拒绝，不会自动补全。
+
+**源码根**：`consumes` 中的 `src/` 是源码根的规范占位，按 `module-manifest` 的 `paths` → `.aidlc/source-roots.json` → 默认 `src/` 解析（见 `construction-code-generation.md`“源码根解析”）。
+
 审查结果记录到单元审计文件 `docs/aidlc/modules/{module-id}/construction/{unit-id}/audit/{unit-id}.md`（每单元一份，包含 Spec Axis / Standards Axis / 修复与复审 / 验证证据索引四个章节）：
 
 ```markdown
 ## 代码审查 — 单元 X
 **时间戳**: [ISO 时间戳]
 **审查模式**: 双轴独立审查
+**execution_context**: isolated
+**review_only**: true
 **Standards 结果**: ⚠️ 需要修复
 **Spec 结果**: ✅ 合规
 **Standards 问题**: 关键 0 个, 重要 2 个（Smells 1 个）, 建议 1 个

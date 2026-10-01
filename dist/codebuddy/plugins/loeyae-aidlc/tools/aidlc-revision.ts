@@ -85,3 +85,25 @@ export function readSourceRevision(projectRoot: string, scope?: DigestScope): So
     ...(scoped ? { scope: scoped.label, scope_digest: scopeDigest!.digest("hex") } : {}),
   };
 }
+
+
+/** SHA-1 (40) or SHA-256 (64) object id; anything else (refs, options, "unavailable") is not a commit id. */
+export const COMMIT_ID_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
+/**
+ * Errors when `recorded` is not the current HEAD or one of its ancestors. Used where the
+ * worktree is allowed to drift (RED re-check at GREEN completion) but history is not.
+ * Fails closed: a malformed id, an unknown commit, a non-ancestor, or git being
+ * unavailable all produce an error. Non-git projects ("unavailable") need an exact match.
+ */
+export function commitAncestryErrors(projectRoot: string, recorded: string, current: string): string[] {
+  if (recorded === "unavailable" || current === "unavailable") {
+    return recorded === current ? [] : [`source_revision.commit ${recorded} does not match current HEAD ${current}`];
+  }
+  if (!COMMIT_ID_PATTERN.test(recorded)) return ["source_revision.commit must be a 40- or 64-character hex commit id"];
+  const root = realpathSync(resolve(projectRoot));
+  const result = spawnSync("git", ["merge-base", "--is-ancestor", recorded, "HEAD"], { cwd: root, encoding: "utf8", shell: false });
+  if (result.error) return [`source_revision.commit ${recorded} cannot be verified: git is unavailable (${result.error.message})`];
+  if (result.status === 0) return [];
+  return [`source_revision.commit ${recorded} is not the current HEAD or one of its ancestors`];
+}

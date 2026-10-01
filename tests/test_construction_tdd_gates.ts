@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInitialState, loadWorkflowState, saveWorkflowState } from "../core/tools/aidlc-light-state";
 import { readSourceRevision } from "../core/tools/aidlc-revision";
+import { argvDigest, phaseObservationDigest } from "../core/tools/aidlc-evidence";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -65,14 +66,29 @@ function writeI13AndRed(project: string, red: Record<string, unknown>): void {
 }
 
 function envelope(project: string, sensor: string, payload: Record<string, unknown>): Record<string, unknown> {
+  // 4.5.4: controlled RED/GREEN evidence records the observed test command separately
+  // from the built-in checker (RED exits 1, GREEN exits 0). The observed digest is bound
+  // to the stage allowlist (see writePhaseAllowlists) and the checker digest derives from it.
+  const phase = sensor === "red-test-evidence" ? "RED" : sensor === "green-test-evidence" ? "GREEN" : undefined;
+  const observedDigest = phase ? argvDigest(PHASE_ARGV[phase]) : undefined;
   return {
     ...payload,
+    ...(phase ? { observed_command: { id: `${phase.toLowerCase()}-command`, phase, argv_digest: observedDigest, exit_code: phase === "RED" ? 1 : 0, expected_exit_code: phase === "RED" ? 1 : 0, duration_ms: 1 } } : {}),
     evidence_version: "1",
     timestamp: new Date().toISOString(),
     producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: `test-${sensor}` },
     source_revision: readSourceRevision(project),
-    checker: { id: `builtin:${sensor}`, sensor, argv_digest: "a".repeat(64), exit_code: 0, status: "passed" },
+    checker: { id: `builtin:${sensor}`, sensor, argv_digest: phase ? phaseObservationDigest(phase, observedDigest!) : "a".repeat(64), exit_code: 0, status: "passed" },
   };
+}
+
+const PHASE_ARGV: Record<"RED" | "GREEN", string[]> = { RED: ["node", "red-observer.js"], GREEN: ["node", "green-observer.js"] };
+
+/** Per-stage allowlists declaring the RED/GREEN commands the hand-built envelopes claim to have observed. */
+function writePhaseAllowlists(project: string): void {
+  mkdirSync(join(project, ".aidlc", "commands"), { recursive: true });
+  writeFileSync(join(project, ".aidlc", "commands", "tdd.json"), JSON.stringify({ version: "1", stage: "tdd", commands: [{ id: "red-command", role: "red", argv: PHASE_ARGV.RED }] }), "utf8");
+  writeFileSync(join(project, ".aidlc", "commands", "code-generation.json"), JSON.stringify({ version: "1", stage: "code-generation", commands: [{ id: "green-command", role: "green", argv: PHASE_ARGV.GREEN }] }), "utf8");
 }
 
 function prepareCodeGeneration(project: string, greenStatus: "failed" | "passed"): void {
@@ -224,6 +240,7 @@ try {
   const validRed = envelope(greenFailure, "red-test-evidence", { phase: "RED", status: "failed", failure_class: "behavior", failure_signature: "expected behavior is absent", compile_status: "passed", environment_status: "passed", tests_total: 1, tests_failed: 1, traceability_complete: true, uc_mapping: [{ use_case: "UC-D-001", test_methods: ["behaviorTest"] }] });
   writeI13AndRed(greenFailure, validRed);
   prepareCodeGeneration(greenFailure, "failed");
+  writePhaseAllowlists(greenFailure);
   writeFileSync(join(greenFailure, ".aidlc", "evidence", "tdd", "project", "default", "red-test-evidence.json"), JSON.stringify(envelope(greenFailure, "red-test-evidence", { phase: "RED", status: "failed", failure_class: "behavior", failure_signature: "expected behavior is absent", compile_status: "passed", environment_status: "passed", tests_total: 1, tests_failed: 1, traceability_complete: true, uc_mapping: [{ use_case: "UC-D-001", test_methods: ["behaviorTest"] }] })), "utf8");
   const greenState = loadWorkflowState(greenFailure);
   assert.ok(greenState);
@@ -242,6 +259,7 @@ try {
   const greenPass = makeProject("green-pass");
   writeI13AndRed(greenPass, envelope(greenPass, "red-test-evidence", { phase: "RED", status: "failed", failure_class: "behavior", failure_signature: "expected behavior is absent", compile_status: "passed", environment_status: "passed", tests_total: 1, tests_failed: 1, traceability_complete: true, uc_mapping: [{ use_case: "UC-D-001", test_methods: ["behaviorTest"] }] }));
   prepareCodeGeneration(greenPass, "passed");
+  writePhaseAllowlists(greenPass);
   writeFileSync(join(greenPass, ".aidlc", "evidence", "tdd", "project", "default", "red-test-evidence.json"), JSON.stringify(envelope(greenPass, "red-test-evidence", { phase: "RED", status: "failed", failure_class: "behavior", failure_signature: "expected behavior is absent", compile_status: "passed", environment_status: "passed", tests_total: 1, tests_failed: 1, traceability_complete: true, uc_mapping: [{ use_case: "UC-D-001", test_methods: ["behaviorTest"] }] })), "utf8");
   const passState = loadWorkflowState(greenPass);
   assert.ok(passState);

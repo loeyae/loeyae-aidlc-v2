@@ -136,6 +136,24 @@ export function readModuleManifest(projectRoot: string): ModuleDescriptor[] {
   return modules;
 }
 
+/** Module id used by workflows that never ran module-division (no module-manifest). */
+export const DEFAULT_MODULE_ID = "project";
+/** Scopes that run ideation/module-division and therefore always have a module manifest. */
+export const FULL_WORKFLOW_SCOPES: ReadonlySet<string> = new Set(["feature", "enterprise", "mvp", "classic"]);
+
+/**
+ * Modules that participate in final implementation-report verification. Shared by
+ * the implementation-report checker and the orchestrator gate so both always agree:
+ * the manifest modules when a manifest exists (required for full-workflow scopes),
+ * otherwise the single default module of a manifest-less workflow.
+ */
+export function verifiedModuleIds(projectRoot: string, scope: string): string[] {
+  if (existsSync(moduleManifestPath(projectRoot)) || FULL_WORKFLOW_SCOPES.has(scope)) {
+    return readModuleManifest(projectRoot).map((module) => module.module_id).sort();
+  }
+  return [DEFAULT_MODULE_ID];
+}
+
 export function readUnitManifest(projectRoot: string, moduleId: string): UnitDescriptor[] {
   const safeModuleId = contextId(moduleId, "module_id");
   const value = regularJson(unitManifestPath(projectRoot, safeModuleId), `unit manifest for ${safeModuleId}`);

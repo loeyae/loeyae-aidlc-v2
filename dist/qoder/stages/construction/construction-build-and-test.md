@@ -24,6 +24,8 @@ requires: [code-generation, code-review]
 
 **目的**：实际执行构建与测试命令，修复失败并保存可复现证据。生成说明文档不能替代命令执行。
 
+`consumes` 中的 `src/` 是源码根的规范占位，按 `module-manifest` 的 `paths`（本阶段为 project 轴，取所有模块并集）→ `.aidlc/source-roots.json` → 默认 `src/` 解析，规则见 `construction-code-generation.md`“源码根解析”。命令清单优先使用 `.aidlc/commands/build-and-test.json`，不存在时回退 `.aidlc/evidence-commands.json`；`evidence run --config <path>` 显式指定时优先。
+
 ## 前置条件
 
 - 所有计划内单元已完成 GREEN 代码生成、两阶段审查，并具备可复核的 UC-D 测试质量证据
