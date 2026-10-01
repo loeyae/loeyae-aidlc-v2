@@ -104,6 +104,18 @@ def write_fake_plugin_hosts(root: Path) -> dict:
     codebuddy = write_node_stub(fake_bin / "codebuddy", (
         "log(env.CODEBUDDY_LOG, `${process.cwd()}|${env.CODEBUDDY_CONFIG_DIR || ''}|${args.join(' ')}`);\n"
         "const [a1, a2, a3] = args;\n"
+        "if (a1 === 'plugin' && a2 === 'validate') {\n"
+        "  if (env.CODEBUDDY_FORCE_HEADLESS_BUNDLE !== '1' || env.CODEBUDDY_VALIDATE_MODE === 'crash') {\n"
+        "    console.error(\"Error: Cannot find module '../dist/codebuddy'\");\n"
+        "    process.exit(1);\n"
+        "  }\n"
+        "  if (env.CODEBUDDY_VALIDATE_MODE === 'fail') {\n"
+        "    console.log('\\u2718 Validation failed');\n"
+        "    process.exit(0);\n"
+        "  }\n"
+        "  console.log('\\u2714 Validation passed');\n"
+        "  process.exit(0);\n"
+        "}\n"
         "if (a1 === 'plugin' && a2 === 'marketplace' && a3 === 'list') {\n"
         "  const name = read(env.CODEBUDDY_MARKET_STATE);\n"
         "  console.log(JSON.stringify(name === null ? [] : [{ name }]));\n"
@@ -528,6 +540,28 @@ def test_workbuddy_embedded_cli_uses_workbuddy_config_dir() -> None:
         assert config_dirs == {str(home / ".workbuddy")}, lines
 
 
+def test_codebuddy_validation_uses_output_verdict() -> None:
+    for mode, expected in (
+        ("fail", "CodeBuddy plugin validation failed"),
+        ("crash", "CodeBuddy CLI is not executable"),
+    ):
+        with tempfile.TemporaryDirectory(prefix=f"aidlc-installer-codebuddy-{mode}-", dir=str(SCRATCH_ROOT)) as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            host_env = write_fake_plugin_hosts(root)
+            host_env["CODEBUDDY_VALIDATE_MODE"] = mode
+
+            installed = run_cli(home, ["install", "--harness", "codebuddy"], host_env)
+            output = installed.stdout + installed.stderr
+            assert installed.returncode != 0, output
+            assert expected in output, output
+            if mode == "crash":
+                assert "validation failed" not in output, output
+            commands = Path(host_env["CODEBUDDY_LOG"]).read_text().splitlines()
+            assert not any("marketplace add" in line or "plugin install" in line for line in commands), commands
+
+
 def test_install_all_detects_qoder_cn_desktop_without_cli() -> None:
     with tempfile.TemporaryDirectory(prefix="aidlc-installer-qoder-cn-desktop-", dir=str(SCRATCH_ROOT)) as directory:
         root = Path(directory)
@@ -762,6 +796,7 @@ if __name__ == "__main__":
     test_claude_activation_refreshes_existing_plugin()
     test_new_plugin_host_lifecycles()
     test_workbuddy_embedded_cli_uses_workbuddy_config_dir()
+    test_codebuddy_validation_uses_output_verdict()
     test_install_all_detects_qoder_cn_desktop_without_cli()
     test_install_all_detects_qoder_cn_profile_without_cli()
     test_qoder_cn_native_skill_migration()

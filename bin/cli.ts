@@ -706,17 +706,46 @@ function codeBuddyCli(): { command: string; env: NodeJS.ProcessEnv } {
   }
   const configDir = codeBuddyConfigDirForCli(executableIdentity)
     || codeBuddyConfigDirForCli(command);
-  return {
-    command,
-    env: configDir ? { ...process.env, CODEBUDDY_CONFIG_DIR: configDir } : process.env,
+  // WorkBuddy ships its embedded CLI without the full TUI bundle; non-interactive `plugin`
+  // subcommands only start when the entry script is routed to the headless bundle.
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    CODEBUDDY_FORCE_HEADLESS_BUNDLE: process.env.CODEBUDDY_FORCE_HEADLESS_BUNDLE || "1",
   };
+  if (configDir) env.CODEBUDDY_CONFIG_DIR = configDir;
+  return { command, env };
+}
+
+const CODEBUDDY_STARTUP_FAILURE = /Cannot find module|MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND/;
+const CODEBUDDY_VALIDATION_PASSED = /Validation passed|"valid"\s*:\s*true/;
+const CODEBUDDY_VALIDATION_FAILED = /Validation failed|"valid"\s*:\s*false/;
+
+function validateCodeBuddyPlugin(cli: string, deployment: CodeBuddyDeployment, env: NodeJS.ProcessEnv): void {
+  const spec = hostCliSpawnSpec(cli, ["plugin", "validate", deployment.pluginRoot], process.platform, process.execPath, env);
+  const result = spawnSync(spec.command, spec.args, {
+    cwd: deployment.cwd,
+    env,
+    windowsVerbatimArguments: spec.windowsVerbatimArguments,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const output = `${result.stdout || ""}${result.stderr || ""}`;
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.error || CODEBUDDY_STARTUP_FAILURE.test(output)) {
+    const reason = result.error ? result.error.message : "the CLI failed to start";
+    throw new Error(`CodeBuddy CLI is not executable (${reason}): ${cli}. Set CODEBUDDY_CLI to a working CodeBuddy CLI.`);
+  }
+  // The headless bundle exits 0 even when validation fails, so the verdict must come from the output.
+  const status = result.status ?? 1;
+  if (status !== 0 || CODEBUDDY_VALIDATION_FAILED.test(output) || !CODEBUDDY_VALIDATION_PASSED.test(output)) {
+    throw new Error(`CodeBuddy plugin validation failed: ${deployment.pluginRoot}`);
+  }
 }
 
 function registerCodeBuddyPlugin(deployment: CodeBuddyDeployment): void {
   const { command: cli, env } = codeBuddyCli();
-  if (runExternal(cli, ["plugin", "validate", deployment.pluginRoot], deployment.cwd, env) !== 0) {
-    throw new Error(`CodeBuddy plugin validation failed: ${deployment.pluginRoot}`);
-  }
+  validateCodeBuddyPlugin(cli, deployment, env);
   const marketplaces = runExternalJson(cli, ["plugin", "marketplace", "list"], deployment.cwd, "CodeBuddy marketplace list", env);
   const alreadyRegistered = jsonHasNamedEntry(marketplaces, deployment.marketplaceName);
   if (alreadyRegistered) {
