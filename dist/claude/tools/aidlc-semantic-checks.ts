@@ -6,6 +6,7 @@ import { join, relative, resolve } from "path";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
 import { portableDirname, readModuleManifest } from "./aidlc-execution-context";
 import { scanFiles } from "./aidlc-scan-root";
+import { hasExecutableBehavior } from "./aidlc-executable-behavior";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
 import { type WorkflowState } from "./aidlc-light-state";
 import { loadWorkflowView } from "./aidlc-workflow-layout";
@@ -523,8 +524,9 @@ function testCaseDerivation(): Record<string, unknown> {
   const sourceContent = sourcePaths.map(text).join("\n");
   const caseFiles = existsSync(caseRoot) ? allFiles("docs/aidlc/inception/application-design/test-cases", /\.md$/) : [];
   const caseContent = caseFiles.map(text).join("\n");
-  const hasExecutableBehavior = sourcePaths.length > 0 && /\b(?:Given|When|Then|Scenario|API|endpoint|接口|业务行为|业务规则|状态转换|验收|service method|可执行)/i.test(sourceContent);
-  if (!hasExecutableBehavior) {
+  // A present non-applicable.json is validated first and wins over keyword detection;
+  // an invalid one fails loudly instead of silently falling back to the UC-D branch.
+  if (existsSync(exemptionPath) || !hasExecutableBehavior(sourceContent)) {
     if (!existsSync(exemptionPath)) fail(`I13 requires structured non-applicable evidence: ${relativePath(exemptionPath)}`);
     const exemption = jsonFile(exemptionPath);
     if (exemption.schema_version !== "1" || exemption.status !== "not_applicable") fail("I13 non-applicable record must use schema_version=1 and status=not_applicable");

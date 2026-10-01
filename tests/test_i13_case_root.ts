@@ -27,7 +27,7 @@ function makeI13Project(name: string, caseStatus: "ready" | "blocked"): { projec
   const cases = join(inception, "application-design", "test-cases");
   mkdirSync(cases, { recursive: true });
   writeFileSync(join(project, "README.md"), "I13 case root regression project\n", "utf8");
-  writeFileSync(join(inception, "requirements.md"), "# Requirements\nREQ-1 订单导出验收\nScenario: Given 已有订单 When 导出 Then 30 秒内完成\n", "utf8");
+  writeFileSync(join(inception, "requirements.md"), "# Requirements\nREQ-1 订单导出：验收标准为 30 秒内完成\n", "utf8");
   writeFileSync(join(cases, "_index.md"), "# UC-D index\n- UC-D-001 订单导出\n", "utf8");
   const caseFile = join(cases, "UC-D-001-export.md");
   writeFileSync(caseFile, `---\nid: UC-D-001\nstatus: ${caseStatus}\nsource_ref: REQ-1\n---\n# UC-D-001 订单导出\n`, "utf8");
