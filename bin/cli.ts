@@ -1314,6 +1314,7 @@ Workflow:
   orchestrate archive [--reason <text>]                 Archive a parked/done workflow and its evidence to aidlc/archive/
   orchestrate split --from <workflow-id> [--dry-run]    Split into per-module workflows (aidlc/active/registry.md)
   orchestrate upgrade --dry-run [--module <module-id>]  List completed stages missing evidence after an engine upgrade (read-only)
+  orchestrate diagram-format [--set <mermaid|svg> --user-input <text>]  Show or record the user's diagram format (default mermaid)
   unit list|select [flags]                              List or self-select a development unit
   module list|select|claim|heartbeat|migrate [flags]    Coordinate parallel module instances
   runtime summary|doctor [--module <module-id>]         Inspect the active Markdown workflow(s)

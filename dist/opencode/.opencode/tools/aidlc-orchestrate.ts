@@ -47,6 +47,7 @@ import {
   type UnitDescriptor,
 } from "./aidlc-execution-context";
 import {
+  DIAGRAM_FORMATS,
   ENGINE_VERSION,
   GLOBAL_WORKFLOW,
   appendAuditEvent,
@@ -56,6 +57,7 @@ import {
   releaseExpiredModuleClaims,
   saveWorkflowState,
   workflowRefKey,
+  type DiagramFormat,
   type HistoryEntry,
   type WorkflowRef,
   type WorkflowState,
@@ -201,7 +203,7 @@ const PRD_ELIGIBLE_SCOPES = new Set(FULL_WORKFLOW_SCOPES);
 // Subcommands
 // ---------------------------------------------------------------------------
 
-const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade"] as const;
+const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
@@ -211,6 +213,7 @@ const REPORT_FLAGS = new Set(["stage", "result", "user-input", "instruction-ack"
 const SPLIT_FLAGS = new Set(["from", "dry-run"]);
 const ARCHIVE_FLAGS = new Set(["reason"]);
 const UPGRADE_FLAGS = new Set(["dry-run", "module"]);
+const DIAGRAM_FORMAT_FLAGS = new Set(["set", "user-input"]);
 const INTEGRATION_WORKFLOW: WorkflowRef = { kind: "integration" };
 
 // ---------------------------------------------------------------------------
@@ -1566,6 +1569,17 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
       case "diagram-contract": {
         const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
+          // Mermaid (default) mode: static Mermaid checks; the SVG contract applies only after the user selects SVG.
+          if (evidence.source_format === "mermaid") {
+            if (diagramFormatOf(state) === "svg") errors.push("diagram format is svg (explicitly selected by the user); refresh the evidence so the SVG contract is checked");
+            if (evidence.status !== "passed") errors.push(`Mermaid diagram evidence must be passed (got ${String(evidence.status)}); the stage document must contain valid mermaid code blocks`);
+            const checked = asPositiveInt(evidence.diagrams_checked);
+            if (checked === null || checked < 1) errors.push("Mermaid diagram evidence must check at least one mermaid code block");
+            if (!Array.isArray(evidence.diagrams) || evidence.diagrams.length !== checked) errors.push("Mermaid diagram evidence must list every checked diagram");
+            if (evidence.syntax_checks !== "static") errors.push('Mermaid diagram evidence must record syntax_checks "static"');
+            if (!["passed", "not_executed"].includes(String(evidence.syntax_parse))) errors.push('Mermaid diagram evidence syntax_parse must be "passed" or "not_executed"');
+            return errors;
+          }
           if (evidence.status !== "passed") errors.push('status must be "passed" (sensor envelope)');
           const final = diagramFinalStatus(evidence);
           if (!DIAGRAM_FINAL_STATUSES.has(final.status)) errors.push('final_status must be PASS, STATIC_PASS, UNVERIFIED, NEEDS_CAPABILITY or FAIL');
@@ -2293,6 +2307,17 @@ function choicePrompt(stageSlug: string, choices: string[]): string {
   return `\n用户选择：必须向用户提问并等待用户回答后再 report，不得自行选择；将用户回答的选项作为 --user-input 的值。可选项：\n${options}`;
 }
 
+export function diagramFormatOf(state: Pick<WorkflowState, "diagram_format">): DiagramFormat {
+  return state.diagram_format === "svg" ? "svg" : "mermaid";
+}
+
+function diagramFormatPrompt(state: WorkflowState, instance: StageInstance): string {
+  if (!instance.stage.sensors.includes("diagram-contract")) return "";
+  return diagramFormatOf(state) === "svg"
+    ? "\n图表格式：svg（用户已明确选择）。按 aidlc-diagram-design 交付 SVG 源与 .diagram.json，并通过 diagram-contract 的 SVG 契约。"
+    : "\n图表格式：mermaid（默认）。直接写 Mermaid fenced block，不生成 SVG、.diagram.json 或 Provider Request，不做渲染验证。只有用户明确要求 SVG 时，先执行 loeyae-aidlc orchestrate diagram-format --set svg --user-input \"<用户原话>\"。";
+}
+
 function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, agentExecution: AgentExecutionPlan, reportCommand?: string, choices: string[] = []): string {
   const unit = instance.module_id && instance.unit_id
     ? `当前单元：${instance.module_id}/${instance.unit_id}。团队成员可用 unit select 声明负责人与分支。`
@@ -2300,7 +2325,7 @@ function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, ag
   const artifacts = instance.stage.produces.length
     ? instance.stage.produces.map((pattern) => instanceArtifactPattern(pattern, instance)).join("、")
     : "本阶段没有声明文件产物";
-  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；状态、审批和 merge 权限仅属于 conductor。\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。${choicePrompt(instance.stage.slug, choices)}\n下一步：完成后将结构化结果交回 conductor，再运行 ${reportCommand || "orchestrate report"}。`;
+  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；状态、审批和 merge 权限仅属于 conductor。\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。${diagramFormatPrompt(state, instance)}${choicePrompt(instance.stage.slug, choices)}\n下一步：完成后将结构化结果交回 conductor，再运行 ${reportCommand || "orchestrate report"}。`;
 }
 
 function clearActiveContext(state: WorkflowState): void {
@@ -3312,6 +3337,7 @@ async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directi
     produces: nextStage.produces.map((pattern) => instanceArtifactPattern(pattern, effectiveNextInstance)),
     sensors: nextStage.sensors,
     choices: directiveChoices,
+    diagram_format: diagramFormatOf(state),
     handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, agentExecution, opts.reportCommand?.(effectiveNextInstance), directiveChoices),
     ...(claimRequested ? { claimed: true, owner: state.active_instances[effectiveNextInstance.instance_id].owner, claim_expires_at: state.active_instances[effectiveNextInstance.instance_id].expires_at } : {}),
     ...extras,
@@ -3896,6 +3922,52 @@ async function handleUpgrade(args: string[]): Promise<Directive> {
 }
 
 // ---------------------------------------------------------------------------
+// diagram-format — record the user's explicit diagram format choice (default mermaid)
+// ---------------------------------------------------------------------------
+
+async function handleDiagramFormat(args: string[]): Promise<Directive> {
+  const flags = parseFlags(args);
+  const invalidFlag = unsupportedFlag(flags, DIAGRAM_FORMAT_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported diagram-format option: --${invalidFlag}` };
+  if (flags.text) return { kind: "error", message: `Unexpected diagram-format argument: ${flags.text}` };
+  const state = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!state) return { kind: "error", message: "No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\"." };
+  const current = diagramFormatOf(state);
+  if (!("set" in flags)) {
+    return {
+      kind: "print",
+      diagram_format: current,
+      message: `Diagram format: ${current}${state.diagram_format ? "" : " (default)"}. Change it only on the user's explicit request: orchestrate diagram-format --set <mermaid|svg> --user-input "<user's words>".`,
+    };
+  }
+  const requested = flags.set;
+  if (!(DIAGRAM_FORMATS as readonly string[]).includes(requested)) return { kind: "error", message: `--set must be one of: ${DIAGRAM_FORMATS.join(", ")}` };
+  const userInput = flags["user-input"];
+  if (!userInput || userInput === "true" || !userInput.trim()) {
+    return { kind: "error", message: "--user-input is required: quote the user's explicit request for this diagram format; never choose it on the user's behalf." };
+  }
+  if (current === requested && state.diagram_format) {
+    return { kind: "print", diagram_format: current, changed: false, message: `Diagram format is already ${current}.` };
+  }
+  state.diagram_format = requested as DiagramFormat;
+  saveWorkflowState(PROJECT_ROOT, state, GLOBAL_WORKFLOW);
+  appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "DIAGRAM_FORMAT_SET", {
+    "Workflow ID": state.workflow_id,
+    From: current,
+    To: requested,
+    "User Input": userInput,
+  });
+  return {
+    kind: "print",
+    diagram_format: requested,
+    changed: true,
+    message: requested === "svg"
+      ? "✅ Diagram format set to svg. Diagrams are delivered through aidlc-diagram-design (SVG source + .diagram.json) and diagram-contract checks the SVG contract; refresh diagram-contract evidence of completed stages if needed."
+      : "✅ Diagram format set to mermaid. Diagrams are Mermaid fenced blocks; diagram-contract records not_applicable.",
+  };
+}
+
+// ---------------------------------------------------------------------------
 // split — migrate a single-layout workflow into per-module workflows
 // ---------------------------------------------------------------------------
 
@@ -3945,7 +4017,7 @@ async function main() {
     console.error(
       JSON.stringify({
         kind: "error",
-        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|archive|split|upgrade> [args...]",
+        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|archive|split|upgrade|diagram-format> [args...]",
       })
     );
     process.exit(1);
@@ -3972,6 +4044,9 @@ async function main() {
       break;
     case "upgrade":
       directive = await handleUpgrade(rest);
+      break;
+    case "diagram-format":
+      directive = await handleDiagramFormat(rest);
       break;
     case "continue":
       directive = await handleContinue(rest[0] || "");

@@ -35,13 +35,18 @@ def checker_environment(project: str) -> dict:
     return os.environ.copy()
 
 
-def write_checker_state(project: str) -> None:
+def write_checker_state(project: str, diagram_format: str = "svg") -> None:
+    """Fixtures exercise the SVG diagram contract, so they record the explicit svg choice by default."""
+    existing = os.path.join(project, "aidlc", "active", "aidlc-state.md")
+    if os.path.exists(existing):
+        os.remove(existing)
     state_uri = (Path(REPO_ROOT) / "core" / "tools" / "aidlc-light-state.ts").as_uri()
     script = f"""
 import {{ createInitialState, saveWorkflowState }} from {json.dumps(state_uri)};
 const state = createInitialState('feature', '4.0.0', 'semantic-checker-fixture', [], 'semantic checker fixture');
 state.current_phase = 'construction';
 state.current_stage = 'compact-recovery';
+state.diagram_format = {json.dumps(diagram_format)};
 saveWorkflowState(process.cwd(), state);
 """
     result = subprocess.run(
@@ -395,6 +400,30 @@ def test_checker_downgrades_legacy_diagram_without_structured_contract() -> None
         result = run_checker(project, "diagram-contract")
         assert result.returncode != 0
         assert "fails static safety or accessibility checks" in result.stderr
+    finally:
+        shutil.rmtree(project)
+
+
+def test_diagram_contract_follows_recorded_diagram_format() -> None:
+    """SVG 只在用户明确选择(state 记录 svg)时启用;默认 mermaid 下即使存在 .diagram.json 或外部 SVG 也不走 SVG 契约。"""
+    project = make_temp(prefix="aidlc-semantic-checkers-mermaid-")
+    try:
+        fixture(project)
+        write_checker_state(project, "mermaid")
+        write(project, "docs/aidlc/inception/external.md", "# External\n\n![外部架构图](assets/vendor.svg)\n")
+        write(project, "docs/aidlc/inception/assets/vendor.svg", '<svg xmlns="http://www.w3.org/2000/svg"/>\n')
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "not_applicable", payload
+        assert payload["source_format"] == "mermaid", payload
+        assert payload["diagrams_checked"] == 0, payload
+
+        write_checker_state(project, "svg")
+        os.remove(os.path.join(project, "docs/aidlc/inception/requirements/business-flows.diagram.json"))
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode != 0
+        assert "the user selected svg" in result.stderr, result.stderr
     finally:
         shutil.rmtree(project)
 
@@ -1431,6 +1460,7 @@ if __name__ == "__main__":
     test_prd_checker_rejects_noncanonical_artifacts()
     test_prd_pending_questions_contract()
     test_checker_downgrades_legacy_diagram_without_structured_contract()
+    test_diagram_contract_follows_recorded_diagram_format()
     test_diagram_003_fixed_regression()
     test_structural_group_capacity_and_style_contract_pass()
     test_diagram_geometry_gates_fail_closed()

@@ -836,11 +836,138 @@ function prdCompleteness(): Record<string, unknown> {
   return { status: "passed", prd_path: relativePath(path), required_sections: required.map(([name]) => name), functional_requirements: requirements.length, acceptance_criteria_complete: acceptanceCriteriaComplete, non_goals_complete: nonGoalsComplete, pending_questions: pending.pendingQuestions, pending_questions_indexed: pendingQuestionsIndexed, source_index_complete: sourceIndexComplete, clarification_consistency: "passed", business_flow_validation: flow, unresolved_blockers: 0 };
 }
 
-function diagramContract(): Record<string, unknown> {
+/** Stage document that must carry the stage's Mermaid diagrams (paths are contextualised per module). */
+const MERMAID_STAGE_DOCUMENTS: Record<string, string> = {
+  "requirements-methods": "docs/aidlc/inception/requirements/business-flows.md",
+  "application-design": "docs/aidlc/inception/application-design/component-dependency.md",
+};
+
+const MERMAID_DIAGRAM_TYPES = [
+  "flowchart", "graph", "sequenceDiagram", "classDiagram-v2", "classDiagram", "stateDiagram-v2", "stateDiagram",
+  "erDiagram", "journey", "gantt", "pie", "quadrantChart", "requirementDiagram", "gitGraph", "mindmap", "timeline",
+  "sankey-beta", "xychart-beta", "block-beta", "packet-beta", "architecture-beta", "radar-beta", "treemap-beta", "kanban",
+  "C4Context", "C4Container", "C4Component", "C4Dynamic", "C4Deployment", "zenuml",
+];
+
+interface MermaidBlock { file: string; line: number; source: string }
+
+function mermaidBlocks(path: string): MermaidBlock[] {
+  const lines = text(path).split(/\r?\n/);
+  const blocks: MermaidBlock[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    const open = /^(\s*)(`{3,}|~{3,})\s*mermaid\b/i.exec(lines[index]);
+    if (!open) continue;
+    const fence = open[2];
+    const start = index;
+    const body: string[] = [];
+    index++;
+    while (index < lines.length && !new RegExp(`^\\s*${fence[0] === "`" ? "`" : "~"}{${fence.length},}\\s*$`).test(lines[index])) body.push(lines[index++]);
+    if (index >= lines.length) fail(`${relativePath(path)}:${start + 1} mermaid code block is not closed`);
+    blocks.push({ file: relativePath(path), line: start + 1, source: body.join("\n") });
+  }
+  return blocks;
+}
+
+/** Static Mermaid checks: non-empty body, a known diagram type header and a valid flowchart direction. */
+function mermaidDiagramType(block: MermaidBlock): string {
+  const lines = block.source.split("\n");
+  let index = 0;
+  if (lines[index]?.trim() === "---") {
+    index++;
+    while (index < lines.length && lines[index].trim() !== "---") index++;
+    if (index >= lines.length) fail(`${block.file}:${block.line} mermaid front matter is not closed`);
+    index++;
+  }
+  const meaningful = lines.slice(index).map((line) => line.trim()).filter((line) => line.length > 0 && !line.startsWith("%%"));
+  if (meaningful.length === 0) fail(`${block.file}:${block.line} mermaid code block is empty`);
+  const header = meaningful[0];
+  const type = MERMAID_DIAGRAM_TYPES.find((name) => header === name || header.startsWith(`${name} `) || header.startsWith(`${name}:`));
+  if (!type) fail(`${block.file}:${block.line} mermaid code block must start with a diagram type (e.g. flowchart TB, sequenceDiagram, erDiagram, stateDiagram-v2); found: ${header.slice(0, 60)}`);
+  if (type === "flowchart" || type === "graph") {
+    const direction = header.slice(type.length).trim().split(/\s+/)[0].replace(/;$/, "");
+    if (direction && !["TB", "TD", "BT", "RL", "LR"].includes(direction)) fail(`${block.file}:${block.line} ${type} direction must be TB, TD, BT, RL or LR; found: ${direction}`);
+  }
+  if (meaningful.length < 2) fail(`${block.file}:${block.line} mermaid ${type} declares no nodes or relations`);
+  return type;
+}
+
+/**
+ * Real syntax check with the Mermaid package that ships with loeyae-aidlc (`mermaid.parse`,
+ * run in Node — no browser, no rendering, no visual check). Mermaid sanitises labels with
+ * DOMPurify, which has no DOM here; parsing never emits markup, so its hooks are stubbed.
+ */
+async function parseMermaidBlocks(blocks: MermaidBlock[]): Promise<"passed" | "not_executed"> {
+  let mermaid: { parse(source: string): Promise<unknown> };
+  try {
+    const purify = (await import("dompurify")).default as unknown as Record<string, unknown>;
+    for (const method of ["addHook", "removeHook", "removeHooks", "removeAllHooks", "setConfig", "clearConfig"]) {
+      if (typeof purify[method] !== "function") purify[method] = () => undefined;
+    }
+    if (typeof purify.sanitize !== "function") purify.sanitize = (value: unknown) => value;
+    mermaid = (await import("mermaid")).default as unknown as { parse(source: string): Promise<unknown> };
+  } catch {
+    return "not_executed";
+  }
+  for (const block of blocks) {
+    try {
+      await mermaid.parse(block.source.trim());
+    } catch (error) {
+      // Keep it short: the evidence producer only relays the tail of the checker output.
+      const raw = error instanceof Error ? error.message : String(error);
+      const position = raw.split("\n")[0].trim();
+      const got = /got '([^']*)'/.exec(raw)?.[1];
+      fail(`mermaid syntax error (Mermaid parser): ${position}${got ? ` (unexpected ${got})` : ""} in ${block.file}:${block.line}`);
+    }
+  }
+  return "passed";
+}
+
+async function mermaidDiagramContract(): Promise<Record<string, unknown>> {
+  const stage = workflowState?.current_stage || "";
+  const required = MERMAID_STAGE_DOCUMENTS[stage];
+  let files: string[];
+  if (required) {
+    const path = join(ROOT, contextual(required));
+    if (!existsSync(path)) fail(`${relativePath(path)} is missing; ${stage} delivers its diagrams as Mermaid code blocks in this document`);
+    files = [path];
+  } else {
+    files = (STRICT_MODULE_SCOPE ? moduleArtifactFiles(/\.md$/i) : allFiles("docs/aidlc", /\.md$/i));
+  }
+  const blocks = files.flatMap(mermaidBlocks);
+  if (blocks.length === 0) {
+    if (required) fail(`${relativePath(files[0])} contains no mermaid code block; ${stage} requires its diagrams as Mermaid fenced blocks`);
+    return {
+      status: "not_applicable",
+      source_format: "mermaid",
+      diagrams_checked: 0,
+      reason: "no stage-required diagram document and no mermaid code block in scope",
+    };
+  }
+  const diagrams = blocks.map((block) => ({ file: block.file, line: block.line, type: mermaidDiagramType(block) }));
+  const syntaxParse = await parseMermaidBlocks(blocks);
+  return {
+    status: "passed",
+    source_format: "mermaid",
+    diagrams_checked: diagrams.length,
+    diagrams,
+    documents: [...new Set(diagrams.map((diagram) => diagram.file))],
+    syntax_checks: "static",
+    syntax_parse: syntaxParse,
+    reason: syntaxParse === "passed"
+      ? "diagram format is mermaid (default); static checks and the Mermaid parser passed (syntax only, no rendering). The SVG contract runs only after the user explicitly selects svg"
+      : "diagram format is mermaid (default); static checks passed, the Mermaid parser is not available so real parsing was not executed. The SVG contract runs only after the user explicitly selects svg",
+  };
+}
+
+function diagramContract(): Record<string, unknown> | Promise<Record<string, unknown>> {
   const manifests = STRICT_MODULE_SCOPE ? moduleArtifactFiles(/\.diagram\.json$/i) : projectFiles(/\.diagram\.json$/i);
+  // SVG mode is opt-in: it applies only after the user explicitly selected it, which is
+  // recorded in the workflow state (orchestrate diagram-format --set svg). Otherwise
+  // diagrams are Mermaid fenced blocks and referenced SVG files may be external assets.
+  if (workflowState?.diagram_format !== "svg") return mermaidDiagramContract();
   if (manifests.length === 0) fail(STRICT_MODULE_SCOPE
-    ? `diagram structured source is missing for module ${ACTIVE_MODULE}; new or adjusted SVG requires a .diagram.json manifest under docs/aidlc/modules/${ACTIVE_MODULE}/`
-    : "diagram structured source is missing; new or adjusted SVG requires a .diagram.json manifest");
+    ? `diagram structured source is missing for module ${ACTIVE_MODULE}; the user selected svg, so each AI-DLC SVG requires a .diagram.json manifest under docs/aidlc/modules/${ACTIVE_MODULE}/`
+    : "diagram structured source is missing; the user selected svg, so each AI-DLC SVG requires a .diagram.json manifest");
 
   const ports = new Set(["top", "right", "bottom", "left"]);
   const shapes = new Set(["round", "rect", "diamond", "ellipse", "database", "actor", "note"]);
@@ -3326,7 +3453,7 @@ function structuralInvariants(): Record<string, unknown> {
   };
 }
 
-const CHECKERS: Record<string, () => Record<string, unknown>> = {
+const CHECKERS: Record<string, () => Record<string, unknown> | Promise<Record<string, unknown>>> = {
   "review-evidence": reviewEvidence,
   "test-quality": testQuality,
   "contract-baseline": contractBaseline,
@@ -3358,7 +3485,7 @@ try {
   const sensor = sensorIndex >= 0 ? args[sensorIndex + 1] : undefined;
   if (!sensor || !SENSOR_NAMES.has(sensor) || !CHECKERS[sensor]) fail("usage: aidlc-semantic-checks.ts --sensor <semantic-sensor>");
   assertSemanticContext(sensor);
-  output(CHECKERS[sensor]());
+  output(await CHECKERS[sensor]());
 } catch (error) {
   console.error(`Semantic checker blocked: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);

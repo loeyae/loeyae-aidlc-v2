@@ -310,7 +310,7 @@ sensors: [traceability, traceability-matrix]
 
 ## 可视化标准
 
-业务流程、状态和关系图先按 `core-workflow.md` 的“文档图表格式决策”选择格式。普通文档创建或优化默认写入 Mermaid；用户明确指定 SVG、目标文档已有有效 SVG 引用，或后续 `requirements-methods` 的 `diagram-contract` 契约要求 SVG 时，调用 `aidlc-diagram-design` 并加载 SVG 标准。格式选择、图型语义、拆图和验证均由共享规范定义，不得因工具失败静默切换格式。
+业务流程、状态和关系图按 `core-workflow.md` 的“文档图表格式”选择格式：默认写入 Mermaid；仅用户明确指定 SVG 时，调用 `aidlc-diagram-design` 并加载 SVG 标准。目标文档已有 SVG 引用或阶段声明 `diagram-contract` 都不构成 SVG 要求。格式选择、图型语义、拆图和验证均由共享规范定义，不得因工具失败静默切换格式。
 
 图表不能清晰表达或事实不足时，使用文字/表格并记录 `NEEDS_CONTEXT`。Mermaid 模式执行语法与正文一致性检查；SVG 模式在只要求源时交付 SVG 源并将未执行的目标几何/视觉标记为 `UNVERIFIED`，只有明确要求 `preview`、`render` 或 `export` 且没有可验证 Provider 时返回 `NEEDS_CAPABILITY`。不得把源不存在与 Provider 能力缺失混为一谈。
 

@@ -41,7 +41,7 @@ requires: [requirements-analysis]
 
 ![需求 ER 图 SVG 模板](assets/requirements-er-template.svg)
 
-模板的可审阅源位于 `assets/diagram-library.diagram.json`，该文件仅是模板/语义参考，不要求作为每张实际图的本地渲染输入。实际实体、字段、关系和基数必须来自已批准需求；需要交付 ER 图时，在目标文档同级 `assets/` 创建 SVG 源，并按需创建 `.diagram.json` 语义伴随清单和 Provider Request。静态 SVG 只有在外部 Provider 实际生成且通过相应目标验收后才作为目标交付物，不得复制模板中的占位实体作为业务事实。
+模板的可审阅源位于 `assets/diagram-library.diagram.json`，该文件仅是模板/语义参考，不要求作为每张实际图的本地渲染输入。实际实体、字段、关系和基数必须来自已批准需求；需要交付 ER 图时，默认在目标文档中写 Mermaid `erDiagram` fenced block；仅用户明确要求 SVG 时，才在同级 `assets/` 创建 SVG 源与 `.diagram.json`。不得复制模板中的占位实体作为业务事实。
 
 **关系类型**：
 
@@ -71,7 +71,7 @@ requires: [requirements-analysis]
 
 ![需求状态图 SVG 模板](assets/requirements-state-template.svg)
 
-模板的可审阅源位于 `assets/diagram-library.diagram.json`，该文件仅是模板/语义参考，不要求作为每张实际图的本地渲染输入。实际状态、迁移、触发事件和前置条件必须从 FR 与既有状态机提取；需要交付状态图时，在目标文档同级 `assets/` 创建 SVG 源，并按需创建 `.diagram.json` 语义伴随清单和 Provider Request。静态 SVG 只有在外部 Provider 实际生成且通过相应目标验收后才作为目标交付物。
+模板的可审阅源位于 `assets/diagram-library.diagram.json`，该文件仅是模板/语义参考，不要求作为每张实际图的本地渲染输入。实际状态、迁移、触发事件和前置条件必须从 FR 与既有状态机提取；需要交付状态图时，默认在目标文档中写 Mermaid `stateDiagram-v2` fenced block；仅用户明确要求 SVG 时，才在同级 `assets/` 创建 SVG 源与 `.diagram.json`。
 
 **状态图约束**：
 - `[*]` 明确起始和终止节点，所有终态必须可识别；

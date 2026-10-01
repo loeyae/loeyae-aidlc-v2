@@ -2,7 +2,7 @@
 
 ## 定位
 
-Mermaid 是创建或优化 Markdown 及其他文本型文档时的新图表默认格式。仅当用户明确指定 SVG、目标文档已有有效 SVG 引用，或阶段/目标产物契约明确要求 SVG 时，才改走 `aidlc-diagram-design` 的 SVG 流程。
+Mermaid 是创建或优化 Markdown 及其他文本型文档时的新图表默认格式。仅当用户明确指定 SVG 时，才改走 `aidlc-diagram-design` 的 SVG 流程；目标文档已有 SVG 引用或阶段声明 `diagram-contract` 都不构成 SVG 要求。
 
 Mermaid 图表以目标 Markdown 内的 `mermaid` fenced block 作为正式源，不生成 `.svg`、`.diagram.json`、expected contract 或 Provider Request。图表目的、图型、粒度、拆分和事实边界仍遵守 `common-diagram-design-standards.md`；语法遵守 `common-mermaid-syntax-rules.md`。
 

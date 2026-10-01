@@ -166,11 +166,10 @@ approval: block
 - 创建 `docs/aidlc/modules/{module-id}/inception/application-design/component-dependency.md`，包含：
   - 显示关系的依赖矩阵（表格）
   - 组件间通信模式
-  - 组件依赖图和数据流图——调用 `aidlc-diagram-design`：
-    - 依赖图：`intent` = 展示组件依赖方向和职责边界；`diagram_type` = auto
-    - 数据流图：`intent` = 展示数据在组件、服务和存储之间的流转；`diagram_type` = auto
-    - `approved facts` = 步骤 10 已生成的组件、方法和服务定义
-    - Kiro 降级：加载 `common-diagram-design-standards.md` 执行
+  - 组件依赖图和数据流图——按 `core-workflow.md` 的“文档图表格式”默认写 Mermaid fenced block；仅用户明确要求 SVG 时调用 `aidlc-diagram-design`：
+    - 依赖图：展示组件依赖方向和职责边界
+    - 数据流图：展示数据在组件、服务和存储之间的流转
+    - 事实来源：步骤 10 已生成的组件、方法和服务定义
 
 **变更意图标记**（存量项目，按条件执行）：
 
@@ -205,7 +204,7 @@ approval: block
 **前端设计产物**（如项目包含前端）：
 - 创建 `docs/aidlc/modules/{module-id}/inception/application-design/frontend-components.md`，包含：
   - 页面组件拆分方案
-  - 组件层级关系图——调用 `aidlc-diagram-design`：`intent` = 展示前端组件层级和复用关系；`approved facts` = 已确认的页面和组件列表
+  - 组件层级关系图（默认 Mermaid，仅用户明确要求 SVG 时调用 `aidlc-diagram-design`）：展示前端组件层级和复用关系，事实来源为已确认的页面和组件列表
   - 公共组件复用策略
 - 创建 `docs/aidlc/modules/{module-id}/inception/application-design/frontend-routes.md`，包含：
   - 路由结构设计

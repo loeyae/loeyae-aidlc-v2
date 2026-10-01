@@ -42,6 +42,10 @@ export const ENGINE_VERSION = "4.5.1";
 
 export type WorkflowKind = "global" | "module" | "integration";
 
+/** Document diagram format. Mermaid is the default; SVG is recorded only on the user's explicit request. */
+export type DiagramFormat = "mermaid" | "svg";
+export const DIAGRAM_FORMATS: readonly DiagramFormat[] = ["mermaid", "svg"];
+
 export type WorkflowRef = { kind: "global" } | { kind: "module"; module_id: string } | { kind: "integration" };
 
 export const GLOBAL_WORKFLOW: WorkflowRef = { kind: "global" };
@@ -58,6 +62,7 @@ export interface WorkflowState {
   workflow_kind?: WorkflowKind;
   module_id?: string;
   parent_workflow_id?: string;
+  diagram_format?: DiagramFormat;
   revision: number;
   scope: string;
   depth: string;
@@ -286,6 +291,8 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
   const workflowModule = scalar(markdown, "Module", false);
   if (kind === "module" && !workflowModule) throw new Error("module workflow state is missing Module");
   const parentWorkflow = scalar(markdown, "Parent Workflow ID", false);
+  const diagramFormat = scalar(markdown, "Diagram Format", false);
+  if (diagramFormat && !(DIAGRAM_FORMATS as readonly string[]).includes(diagramFormat)) throw new Error(`invalid diagram format: ${diagramFormat}`);
   return {
     format: "markdown-workflow",
     version: scalar(markdown, "Engine Version"),
@@ -294,6 +301,7 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
     ...(kind ? { workflow_kind: kind as WorkflowKind } : {}),
     ...(workflowModule ? { module_id: workflowModule } : {}),
     ...(parentWorkflow ? { parent_workflow_id: parentWorkflow } : {}),
+    ...(diagramFormat ? { diagram_format: diagramFormat as DiagramFormat } : {}),
     revision,
     scope,
     depth: scalar(markdown, "Depth"),
@@ -336,7 +344,7 @@ export function renderLightWorkflowState(state: WorkflowState): string {
 - Status: ${state.status}
 - Revision: ${state.revision}
 - Engine Version: ${clean(state.version)}
-${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}- Depth: ${clean(state.depth)}
+${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}${state.diagram_format ? `- Diagram Format: ${state.diagram_format}\n` : ""}- Depth: ${clean(state.depth)}
 - Current Phase: ${clean(state.current_phase)}
 - Current Stage: ${cell(state.current_stage)}
 - Current Instance: ${cell(state.current_stage_instance)}

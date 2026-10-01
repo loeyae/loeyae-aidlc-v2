@@ -225,7 +225,7 @@ sensors: [prd-completeness]
 ...
 
 ## 5. 业务流程
-<当流程存在分支、异常、跨角色或跨系统交互时，通过 Diagram Invocation Protocol 调用图表能力生成流程图，`constraints` 传入 `delivery-business-flow`。已有 I5 `business-flows.md` 时复用其已批准事实，不重新自由生成。流程简单（线性无分支 ≤5 步）时使用编号步骤即可>
+<当流程存在分支、异常、跨角色或跨系统交互时，按 `core-workflow.md` 的“文档图表格式”生成流程图（默认 Mermaid；仅用户明确要求 SVG 时调用 `aidlc-diagram-design` 并传入 `constraints: delivery-business-flow`）。已有 I5 `business-flows.md` 时复用其已批准事实，不重新自由生成。流程简单（线性无分支 ≤5 步）时使用编号步骤即可>
 
 ## 6. 数据需求
 | 实体 | 核心字段 | 说明 |
@@ -308,7 +308,7 @@ sensors: [prd-completeness]
 | 4 | 待确认问题是否全部汇总 | 所有 `[待确认: PQ-NNN]` 均在 §12 有唯一记录，且阻断项为 0 |
 | 5 | 来源索引是否完整 | 每章有对应来源 |
 | 6 | 是否包含技术实现细节（不应包含） | 无 URL 路径、表结构、API 设计等 |
-| 7 | §5 业务流程图是否满足 `delivery-business-flow` 视觉档案 | 有图时：已通过渲染视觉检查且标注验证记录；无图时：已记录不适用原因 |
+| 7 | §5 业务流程图是否满足 `delivery-business-flow` 视觉档案 | 有图时：Mermaid 已通过语法与正文一致性检查（SVG 模式另需渲染视觉检查记录）；无图时：已记录不适用原因 |
 
 自审全部通过后输出。未通过项修正后重审，不得跳过。
 

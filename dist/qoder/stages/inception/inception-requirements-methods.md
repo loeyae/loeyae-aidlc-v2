@@ -36,15 +36,9 @@ requires: [requirements-analysis]
 | C 端/最终用户流程图 | 存在最终用户交互 | 完整用户路径、反馈和异常 |
 | 跨系统端到端流程图 | 涉及外部系统 | 系统边界、调用方向和数据流向 |
 
-全部流程图通过调用 `aidlc-diagram-design` 生成。每张流程图单独调用，Diagram Request 包含：
-- `source/context`：已确认的业务需求和业务规则；
-- `diagram intent`：明确希望读者理解的业务行为（如"展示运营端从入口到完成的操作流程"）；
-- `approved facts`：已确认的角色、步骤、系统、判定条件和异常路径；
-- `diagram_type`：Flowchart（默认）或 Sequence（跨系统时序场景）；
-- `target artifact`：`<inception-root>/requirements/business-flows.md`；
-- `constraints`：`delivery-business-flow`。
+流程图格式按 `core-workflow.md` 的“文档图表格式”确定：默认直接在 `<inception-root>/requirements/business-flows.md` 中为每张图写一个 Mermaid fenced block（`flowchart`，跨系统时序场景用 `sequenceDiagram`），不生成 SVG、`.diagram.json` 或 Provider Request；`diagram-contract` 检查该文档至少有一个合法的 Mermaid 代码块（闭合、图类型、节点/关系、Mermaid parser 解析通过）。每张图须基于已确认的角色、步骤、系统、判定条件和异常路径，表达明确的业务行为（如“展示运营端从入口到完成的操作流程”）。
 
-若宿主未独立发现 `aidlc-diagram-design` capability，则直接加载随附的 `skills/aidlc-diagram-design/SKILL.md` 执行。Phase 不重复定义图类型选择、SVG 源格式或布局规则；没有已验证 Provider 时返回 `NEEDS_CAPABILITY` 或经用户同意使用文字/表格。
+仅当用户明确要求 SVG 并已用 `orchestrate diagram-format --set svg` 记录后，每张流程图单独调用 `aidlc-diagram-design`（`output_format: svg`，`constraints: delivery-business-flow`），由其交付 SVG 源与 `.diagram.json`，并通过 `diagram-contract` 的 SVG 契约校验；宿主未独立发现该 capability 时直接加载随附的 `skills/aidlc-diagram-design/SKILL.md`。
 
 内容约束：
 

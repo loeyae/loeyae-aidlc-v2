@@ -256,7 +256,7 @@ architecture-beta
 - [ ] 图表语义与相邻正文一致，未引入未批准内容；
 - [ ] C4/architecture-beta 图类型未使用目标 Mermaid 版本不支持的特性。
 
-静态检查不能替代 Mermaid parser。无法执行 Mermaid CLI 验证时，必须明确记录"未执行真实语法解析"。
+静态检查不能替代 Mermaid parser。带 `diagram-contract` 的阶段由门禁用 loeyae-aidlc 自带的 Mermaid parser 校验；其他场景无法执行真实语法解析时，必须明确记录"未执行真实语法解析"。
 
 ## 技术依据
 

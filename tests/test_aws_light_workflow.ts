@@ -50,6 +50,7 @@ try {
   assert.match(handoff, /质量动作：.*review.*构建.*测试/);
   assert.match(handoff, /下一步：/);
   assert.deepEqual(next.choices, []);
+  assert.equal(next.diagram_format, "mermaid");
   assert.doesNotMatch(handoff, /用户选择：/);
   const retiredNext = run(["orchestrate", "next", "--team-enrollment-confirmation-stdin"]);
   assert.notEqual(retiredNext.status, 0);

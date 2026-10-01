@@ -10,6 +10,12 @@ evidence_path: .aidlc/evidence/<stage-slug>/diagram-contract.json
 ## 目的
 验证需求流程图和应用设计图遵循 V1 SVG/Diagram 契约：稳定 ID、主阅读方向、主轴、业务层级、端口、分支、连通性、分组、统一单色视觉、structural / swimlane / phase region 遮挡、无全局图例/备注、viewBox、FR 映射和 Provider 状态均有结构化证据。纵向滚动允许，水平溢出、裁切、对象越界、标签压线、structural 背景穿透和不可读失败。
 
+## 适用范围
+按 workflow state 的 `Diagram Format` 判定（由 `orchestrate diagram-format --set <mermaid|svg>` 记录用户的明确选择，缺省为 mermaid）：
+
+- mermaid：只做 Mermaid 基本检查。requirements-methods 检查 `requirements/business-flows.md`，application-design 检查 `application-design/component-dependency.md`，文档必须至少有一个 `mermaid` 代码块；每个代码块须闭合、首行声明图类型（flowchart/graph 方向为 TB/TD/BT/RL/LR）、包含节点或关系，并通过 loeyae-aidlc 自带 Mermaid 的 `mermaid.parse`（只解析，不渲染、不做视觉验证）。通过时输出 `status: "passed"`、`source_format: "mermaid"`、`diagrams_checked`、`diagrams[]`（file/line/type）、`syntax_checks: "static"` 与 `syntax_parse: "passed"`（parser 不可用时为 `"not_executed"`）。范围内的 `.diagram.json` 或 SVG 文件（可能是外部资产）不触发 SVG 校验。
+- svg：执行下述完整 SVG 契约，缺少 `.diagram.json` 即失败；门禁拒绝 Mermaid 证据。
+
 ## Evidence 路径
 
 ```text

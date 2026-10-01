@@ -8,7 +8,7 @@ triggers: 画图, 图表设计, 业务流程图, 系统架构图, 架构图, 流
 
 Independent Capability — not an AIDLC phase.
 
-本能力只处理已由 `core-workflow.md` 判定为 SVG 的请求。文档创建或优化的默认 Mermaid 输出由调用 Phase 直接按 Mermaid 标准写入，不调用本能力。
+本能力只处理用户明确要求 SVG 的请求：调用前 workflow state 的 `Diagram Format` 必须已由 `loeyae-aidlc orchestrate diagram-format --set svg --user-input "<用户原话>"` 记录为 svg（见 `core-workflow.md` 的“文档图表格式”）。文档创建或优化的默认 Mermaid 输出由调用 Phase 直接按 Mermaid 标准写入，不调用本能力。
 
 ## 输入
 

@@ -128,17 +128,23 @@ def main() -> None:
 
     require(
         workflow,
-        "## 文档图表格式决策（强制）",
-        "其余文档创建或优化场景默认选择 `mermaid`",
-        "同目录存在未引用的 `.svg` 文件不构成依据",
-        "阶段的 `produces`、sensor 或目标产物契约明确要求 SVG",
-        "不调用仅处理 SVG 的 `aidlc-diagram-design` Capability",
+        "## 文档图表格式",
+        "默认 Mermaid",
+        "SVG 仅在用户明确指定时使用",
+        "目标文档已引用 SVG（可能是外部资产）",
+        "阶段声明了 `diagram-contract` 传感器",
+        "也不调用 `aidlc-diagram-design`",
+        "loeyae-aidlc orchestrate diagram-format --set svg --user-input",
+        "`Diagram Format` 字段（缺省为 mermaid）",
+        "mermaid 时只检查 Mermaid（`source_format: mermaid`）",
+        "loeyae-aidlc 自带的 Mermaid parser",
     )
     require(
         design,
         "## 输出格式选择（强制）",
         "文档创建或优化中的图表默认使用 Mermaid",
-        "同目录存在孤立 SVG、其他文档使用 SVG 或 Agent 偏好均不能改变默认选择",
+        "只有用户明确指定 SVG 时，才进入 SVG 模式",
+        "阶段声明 `diagram-contract` 传感器或 Agent 偏好均不能改变默认选择",
         "任一模式失败都应修复当前格式或报告能力/验证缺口",
     )
     require(
@@ -158,22 +164,24 @@ def main() -> None:
     require(
         validation,
         "## Mermaid 图表写入前验证",
-        "其他情况默认 Mermaid",
+        "仅用户明确指定 SVG 时使用 SVG，其他情况默认 Mermaid",
         "两种格式的证据不得互相替代",
     )
     require(
         capability,
-        "本能力只处理已由 `core-workflow.md` 判定为 SVG 的请求",
+        "本能力只处理用户明确要求 SVG",
+        "orchestrate diagram-format --set svg",
         "**output_format**：必须为 `svg`",
     )
     require(
         requirements,
-        "普通文档创建或优化默认写入 Mermaid",
-        "`diagram-contract` 契约要求 SVG",
+        "默认写入 Mermaid；仅用户明确指定 SVG 时",
+        "目标文档已有 SVG 引用或阶段声明 `diagram-contract` 都不构成 SVG 要求",
     )
 
     forbidden = {
         WORKFLOW: "默认且唯一的新图表格式",
+        REQUIREMENTS_STAGE: "`diagram-contract` 契约要求 SVG",
         MERMAID_STANDARD: "Mermaid fenced block 不再是本仓图表设计的输出格式",
         CONTENT_VALIDATION: "不得新建 Mermaid fenced block",
         DESIGN_STANDARD: "Mermaid fenced block 与二维 ASCII/Unicode 图已不再是本仓的新图表输出格式",

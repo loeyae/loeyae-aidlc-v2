@@ -241,12 +241,20 @@ try {
   const moduleManifest = join(project, diagramRoot, "diagram-003.diagram.json");
   writeFileSync(moduleManifest, JSON.stringify({ ...JSON.parse(readFileSync(moduleManifest, "utf8")), document: `${diagramRoot}/diagram-003.md` }, null, 2), "utf8");
   write(project, "docs/正式/broken.diagram.json", JSON.stringify({ version: 1, diagrams: [{ id: "broken" }] }));
+  const defaultMermaid = success(project, ["check", "--sensor", "diagram-contract", "--module", M03]);
+  assert.equal(defaultMermaid.status, "not_applicable", "SVG diagrams are not validated until the user selects svg");
+  assert.equal(defaultMermaid.source_format, "mermaid");
+  failure(project, ["orchestrate", "diagram-format", "--set", "svg"], /--user-input is required/);
+  const selected = success(project, ["orchestrate", "diagram-format", "--set", "svg", "--user-input", "流程图请用 SVG"]);
+  assert.equal(selected.diagram_format, "svg");
+  assert.match(readFileSync(join(project, "aidlc", "active", "aidlc-state.md"), "utf8"), /^- Diagram Format: svg$/m);
   failure(project, ["check", "--sensor", "diagram-contract"], /Semantic checker blocked/);
   const scoped = success(project, ["check", "--sensor", "diagram-contract", "--module", M03]);
   assert.equal(scoped.status, "passed");
   failure(project, ["check", "--sensor", "diagram-contract", "--module", M01], /diagram structured source is missing for module m01-trade/);
   const legacyContext = spawnSync(process.execPath, [tsx, cli, "check", "--sensor", "diagram-contract"], { cwd: project, encoding: "utf8", env: { ...process.env, AIDLC_ACTIVE_MODULE: M03 } });
   assert.notEqual(legacyContext.status, 0, "an env-only module context keeps the historical project-wide discovery");
+  success(project, ["orchestrate", "diagram-format", "--set", "mermaid", "--user-input", "改回 Mermaid"]);
 
   // ---------------------------------------------------------------- park / registry / lazy module
   const parkedM03 = success(project, ["orchestrate", "park", "--module", M03]);

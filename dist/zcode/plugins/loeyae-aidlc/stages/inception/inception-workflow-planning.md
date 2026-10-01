@@ -252,17 +252,11 @@ requires: [user-stories, cross-validation]
 
 ## 步骤 6：生成工作流可视化
 
-当执行计划存在多阶段、并行任务、条件分支、依赖或跨角色执行时，调用 `aidlc-diagram-design` 生成工作流图：
+当执行计划存在多阶段、并行任务、条件分支、依赖或跨角色执行时，生成工作流图。格式按 `core-workflow.md` 的“文档图表格式”确定：默认在执行计划文档中写 Mermaid `flowchart` fenced block；仅用户明确要求 SVG 时调用 `aidlc-diagram-design`（`output_format: svg`）。
 
-- `source/context`：步骤 3-5 确定的阶段列表、条件和依赖关系；
-- `diagram intent`：展示执行计划的阶段顺序、依赖和关键分支；
-- `approved facts`：已确定的待执行阶段、跳过阶段及其原因、依赖关系；
-- `diagram_type`：Flowchart SVG 场景；
-- `target artifact`：`docs/aidlc/modules/{module-id}/inception/plans/execution-plan.md`；需要保存时，SVG 源和可选 `.diagram.json` 语义伴随清单优先写入其同级 `assets/`，静态 SVG 只有在目标产物明确要求且由外部 Provider 实际生成后才记录；
-- `output_format`：`svg`（SVG 源）；
-- `target_operations`：按执行计划实际要求填写 `source-only`、`preview`、`render` 或 `export`。
-
-若宿主未独立发现 `aidlc-diagram-design` capability，则直接加载随附的 `skills/aidlc-diagram-design/SKILL.md` 执行。
+- 事实来源：步骤 3-5 确定的阶段列表、条件和依赖关系，以及跳过阶段及其原因；
+- 表达目标：展示执行计划的阶段顺序、依赖和关键分支；
+- 目标产物：`docs/aidlc/modules/{module-id}/inception/plans/execution-plan.md`。
 
 如果计划仅为简单线性顺序且无条件分支，可使用编号列表代替图表，不强制生成。
 
@@ -307,9 +301,9 @@ requires: [user-stories, cross-validation]
 
 ## 工作流可视化
 
-![执行计划 SVG 模板](assets/workflow-plan-template.svg)
+![执行计划模板](assets/workflow-plan-template.svg)
 
-实际计划图需要保存 SVG 源时，在该执行计划文档同级 `assets/` 创建 SVG 源；`.diagram.json` 仅在需要机器检查语义、连通性、稳定 ID 或 Provider 映射时按需创建，并替换模板中的状态、依赖、条件和跳过理由。静态 SVG、预览或导出只有在目标产物明确要求且由外部 Provider 实际生成后才记录；不得把本模板的节点状态作为真实计划事实，也不得把本地脚本设为 AIDLC 默认渲染路径。
+上图仅为版式参考。实际计划图默认以 Mermaid fenced block 写入执行计划文档，用真实的状态、依赖、条件和跳过理由替换模板内容；用户明确要求 SVG 时才在同级 `assets/` 创建 SVG 源与 `.diagram.json`。不得把本模板的节点状态作为真实计划事实。
 
 **注意**：将“状态待填”替换为实际状态；阶段被跳过时必须在节点文字和正文理由中同时说明。
 

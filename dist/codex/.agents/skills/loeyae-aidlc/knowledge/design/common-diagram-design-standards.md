@@ -2,13 +2,13 @@
 
 ## 目的与边界
 
-本文件定义图表设计的共享决策规则：何时需要图、表达什么语义、选择什么图型、如何控制粒度、布局和可读性。输出格式必须先按 `core-workflow.md` 的“文档图表格式决策”确定；Mermaid 模式由 `common-mermaid-diagram-standards.md` 与 `common-mermaid-syntax-rules.md` 约束，SVG 模式才使用 Blueprinter 设计规则与 `common-svg-diagram-standards.md`。AIDLC 不内置或运行 Blueprinter。
+本文件定义图表设计的共享决策规则：何时需要图、表达什么语义、选择什么图型、如何控制粒度、布局和可读性。输出格式必须先按 `core-workflow.md` 的“文档图表格式”确定（默认 Mermaid，仅用户明确指定时使用 SVG）；Mermaid 模式由 `common-mermaid-diagram-standards.md` 与 `common-mermaid-syntax-rules.md` 约束，SVG 模式才使用 Blueprinter 设计规则与 `common-svg-diagram-standards.md`。AIDLC 不内置或运行 Blueprinter。
 
 本文件可被 AI-DLC 流程按需调用，也可独立使用。独立使用时不要求任何 AIDLC 状态（handoff.md、audit.md、审批流程）。涉及 structural / swimlane / phase region 框体时，必须同时遵守 `common-structural-region-occlusion-contract.md`。
 
 ## 输出格式选择（强制）
 
-文档创建或优化中的图表默认使用 Mermaid。只有用户明确指定 SVG、目标文档已经通过有效引用使用 SVG，或当前阶段/目标产物契约明确要求 SVG 时，才进入 SVG 模式。同目录存在孤立 SVG、其他文档使用 SVG 或 Agent 偏好均不能改变默认选择。
+文档创建或优化中的图表默认使用 Mermaid。只有用户明确指定 SVG 时，才进入 SVG 模式。目标文档已有 SVG 引用（可能是外部资产）、同目录存在孤立 SVG、其他文档使用 SVG、阶段声明 `diagram-contract` 传感器或 Agent 偏好均不能改变默认选择。
 
 - **Mermaid 模式**：在目标 Markdown 内维护 `mermaid` fenced block；不创建 SVG 伴随资产、`.diagram.json`、expected contract 或 Provider Request；执行 Mermaid 语法与业务语义验证。
 - **SVG 模式**：调用 `aidlc-diagram-design`，并应用本文件的 SVG 专项规则、`common-svg-diagram-standards.md`、结构化契约和 Provider 证据边界。
