@@ -5,6 +5,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, resolve } from "path";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
 import { portableDirname, readModuleManifest } from "./aidlc-execution-context";
+import { scanFiles } from "./aidlc-scan-root";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
 import { type WorkflowState } from "./aidlc-light-state";
 import { loadWorkflowView } from "./aidlc-workflow-layout";
@@ -138,21 +139,9 @@ function assertSemanticContext(sensor: string): void {
 function text(path: string): string { return readFileSync(path, "utf8"); }
 function textIfExists(path: string): string { return existsSync(path) ? text(path) : ""; }
 function existing(paths: string[]): string[] { return paths.map((path) => join(ROOT, contextual(path))).filter((path) => existsSync(path) && contextAllows(path)); }
+// base is project-relative (contextualized + joined onto ROOT); an absolute base is used as-is.
 function allFiles(base: string, pattern: RegExp): string[] {
-  const root = join(ROOT, contextual(base));
-  if (!existsSync(root)) return [];
-  const result: string[] = [];
-  const visit = (directory: string): void => {
-    for (const entry of readdirSync(directory)) {
-      if ([".git", "node_modules", "dist", "build", "target", ".aidlc/evidence"].includes(entry)) continue;
-      const path = join(directory, entry);
-      const info = statSync(path);
-      if (info.isDirectory()) visit(path);
-      else if (pattern.test(path) && contextAllows(path)) result.push(path);
-    }
-  };
-  visit(root);
-  return result.sort();
+  return scanFiles(ROOT, base, pattern, { contextualize: contextual, allows: contextAllows });
 }
 function projectFiles(pattern: RegExp): string[] { return allFiles(".", pattern); }
 /**
@@ -532,7 +521,7 @@ function testCaseDerivation(): Record<string, unknown> {
     fail("I13 requires at least one requirement, story, application-design, or clarification source artifact before declaring not_applicable");
   }
   const sourceContent = sourcePaths.map(text).join("\n");
-  const caseFiles = existsSync(caseRoot) ? allFiles(caseRoot, /\.md$/) : [];
+  const caseFiles = existsSync(caseRoot) ? allFiles("docs/aidlc/inception/application-design/test-cases", /\.md$/) : [];
   const caseContent = caseFiles.map(text).join("\n");
   const hasExecutableBehavior = sourcePaths.length > 0 && /\b(?:Given|When|Then|Scenario|API|endpoint|接口|业务行为|业务规则|状态转换|验收|service method|可执行)/i.test(sourceContent);
   if (!hasExecutableBehavior) {
