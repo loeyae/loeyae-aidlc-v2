@@ -21,13 +21,15 @@ def checker_environment(project: str) -> dict[str, str]:
     return env
 
 
-def write_checker_state(project: str) -> None:
+def write_checker_state(project: str, diagram_format: str = "svg") -> None:
+    """Fixtures exercise the SVG diagram contract, so they record the explicit svg choice by default."""
     state_uri = (REPO_ROOT / "core" / "tools" / "aidlc-light-state.ts").as_uri()
     script = f"""
 import {{ createInitialState, saveWorkflowState }} from {json.dumps(state_uri)};
 const state = createInitialState('feature', '4.0.0', 'semantic-checker-fixture', [], 'semantic checker fixture');
 state.current_phase = 'inception';
 state.current_stage = 'requirements-methods';
+state.diagram_format = {json.dumps(diagram_format)};
 saveWorkflowState(process.cwd(), state);
 """
     result = subprocess.run(
