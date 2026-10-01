@@ -505,9 +505,8 @@ function reviewEvidence(): Record<string, unknown> {
 }
 
 function evidenceRecords(stage: string, sensor: string): Record<string, unknown>[] {
-  const root = join(ROOT, ".aidlc", "evidence", stage);
-  if (!existsSync(root)) return [];
-  return allFiles(root, new RegExp(`${sensor}\\.json$`)).flatMap((path) => {
+  // allFiles resolves its base against ROOT, so it must receive the project-relative path.
+  return allFiles(join(".aidlc", "evidence", stage), new RegExp(`${sensor}\\.json$`)).flatMap((path) => {
     try { return [jsonFile(path)]; } catch { return []; }
   });
 }
@@ -579,7 +578,7 @@ function testQuality(): Record<string, unknown> {
   if (greenRequired.length === 0 || greenRequired.some((record) => record.phase !== "GREEN" || record.tests_failed !== 0)) fail("GREEN evidence is not passing");
   if (redRecords.some((record) => record.status !== "failed" || record.phase !== "RED" || record.failure_class !== "behavior")) fail("RED evidence is not a controlled behavior failure");
   const mapping = cases.map((useCase) => {
-    const matches = testFiles.filter((path) => new RegExp(`\b${useCase}\b`).test(text(path)));
+    const matches = testFiles.filter((path) => new RegExp(`\\b${useCase}\\b`).test(text(path)));
     if (matches.length === 0) fail(`${useCase} has no test source mapping`);
     return { use_case: useCase, test_methods: matches.map(relativePath) };
   });

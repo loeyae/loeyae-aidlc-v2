@@ -68,7 +68,7 @@ def main() -> None:
         assert (home / ".kiro" / "settings" / "mcp.json").is_file()
         skill_text = skill_entry.read_text()
         assert skill_text.startswith("---\nname: loeyae-aidlc\n")
-        assert "Kiro IDE or CLI" in skill_text.split("---", 2)[1]
+        assert "Loeyae AI-DLC workflow" in skill_text.split("---", 2)[1]
         assert all(keyword in skill_text.split("---", 2)[1] for keyword in ["AI-DLC", "使用 AI-DLC", "功能设计", "代码审查"])
 
         run_install("kiro-cli", home)

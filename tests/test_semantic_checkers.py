@@ -75,7 +75,22 @@ Conclusion: passed
 """)
     write(project, "docs/aidlc/inception/application-design/test-cases/_index.md", "# UC-D-001 Registration\n")
     write(project, "src/test/main.test.ts", "describe('UC-D-001', () => { it('passes', () => {}) })\n")
-    write(project, ".aidlc/tdd/red-green.json", json.dumps({"red_seen": True, "green_seen": True, "tests_total": 1, "tests_failed": 0}))
+    # 4.5 TDD evidence model: test-quality reads I13, RED and GREEN controlled evidence.
+    write(project, "docs/aidlc/modules/project/inception/application-design/test-cases/_index.md", "# UC-D-001 Registration\n")
+    write(project, ".aidlc/evidence/test-case-derivation/project/test-case-derivation.json", json.dumps({
+        "status": "required", "ucd_total": 1, "ready_ucd": 1, "ucd_ids": ["UC-D-001"],
+        "index": "docs/aidlc/modules/project/inception/application-design/test-cases/_index.md",
+    }))
+    uc_mapping = [{"use_case": "UC-D-001", "test_methods": ["src/test/main.test.ts"]}]
+    write(project, ".aidlc/evidence/tdd/project/default/red-test-evidence.json", json.dumps({
+        "phase": "RED", "status": "failed", "failure_class": "behavior", "failure_signature": "expected behavior is absent",
+        "compile_status": "passed", "environment_status": "passed", "tests_total": 1, "tests_failed": 1,
+        "traceability_complete": True, "uc_mapping": uc_mapping,
+    }))
+    write(project, ".aidlc/evidence/code-generation/project/default/green-test-evidence.json", json.dumps({
+        "phase": "GREEN", "status": "passed", "compile_status": "passed", "environment_status": "passed",
+        "tests_total": 1, "tests_failed": 0, "traceability_complete": True, "uc_mapping": uc_mapping,
+    }))
     write(project, "docs/aidlc/product/contracts.md", """Owner: platform-team
 Consumers: service-a, service-b
 Version: v1
