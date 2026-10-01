@@ -27,7 +27,12 @@ def run_install(harness: str, home: Path, extra_env=None) -> None:
 
 
 def fake_host_cli(path: Path, marketplace_list=False) -> None:
-    body = ["#!/bin/sh"]
+    body = [
+        "#!/bin/sh",
+        "if [ \"$1\" = plugin ] && [ \"$2\" = validate ]; then",
+        "  printf 'Validation passed\\n'",
+        "fi",
+    ]
     if marketplace_list:
         body.extend([
             "if [ \"$1\" = plugin ] && [ \"$2\" = marketplace ] && [ \"$3\" = list ]; then",
