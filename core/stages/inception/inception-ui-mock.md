@@ -50,7 +50,7 @@ condition: has_ui_requirements
 | 使用已有 Figma | `figma-existing` |
 | 跳过 UI 设计 | `skip` |
 
-示例：`orchestrate report --stage ui-mock --result completed --instruction-ack ui-mock --user-input skip`。不得只修改 handoff.md 或用聊天文本改变后续分支。
+示例：`orchestrate report --stage ui-mock --result completed --instruction-ack ui-mock --user-input <html-mock|figma-create|figma-existing|skip>`，取值必须来自用户回答，不得自行选择。不得只修改 handoff.md 或用聊天文本改变后续分支。
 
 路由：
 

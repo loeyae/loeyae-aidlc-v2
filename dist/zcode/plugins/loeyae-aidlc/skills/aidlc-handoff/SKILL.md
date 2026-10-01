@@ -14,7 +14,7 @@ loeyae-aidlc orchestrate next
 
 将返回的 `handoff_prompt` 原样展示为可复制文本。提示词必须包含工作目标、当前阶段/实例、module/unit、产物、review/build/test 与下一步。
 
-用户仅希望换会话或换成员时，不要暂停流程；下一位成员运行 `orchestrate next` 后从 Markdown state 和 prompt 继续。
+用户仅希望换会话或换成员时，不要暂停流程；下一位成员运行 `orchestrate next` 后从 Markdown state 和 prompt 继续。per-module 布局下若 `next` 返回 `ask_type: "module-selection"`，须由用户指定模块后运行 `orchestrate next --module <module-id>`（或设置 `AIDLC_MODULE`），不得自行选择。
 
 用户明确要求暂停时执行：
 

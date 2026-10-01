@@ -32,14 +32,14 @@ aidlc/active/audit.md
 1. 读取当前 directive 的工作目标与 `handoff_prompt`。
 2. 检查项目根目录、版本控制状态、主要语言、构建系统、测试入口和现有模块。
 3. 记录实际发现，不从文件名、聊天记录或未验证的假设推断技术栈。
-4. 对完整 scope，向用户展示 `single-module` 与 `multi-module` 两种架构选择；通过报告保存选择：
+4. 对完整 scope，向用户展示 `single-module` 与 `multi-module` 两种架构选择（directive 的 `choices` 与 `handoff_prompt` 列出全部选项），必须等待用户回答，不得自行选择；把用户回答的选项作为 `--user-input` 的值报告：
 
 ```bash
 loeyae-aidlc orchestrate report \
   --stage workspace-detection \
   --result completed \
   --instruction-ack workspace-detection \
-  --user-input single-module
+  --user-input <single-module|multi-module>
 ```
 
 5. 生成工作区发现产物，并在 `handoff_prompt` 中清楚说明下一个阶段、当前 module/unit 与所需证据。

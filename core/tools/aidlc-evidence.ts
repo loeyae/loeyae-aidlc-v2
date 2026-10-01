@@ -96,6 +96,7 @@ interface CommandResult {
 const PROJECT_ROOT = realpathSync(process.cwd());
 const TOOL_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CONFIG = ".aidlc/evidence-commands.json";
+const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const TAIL_LENGTH = 200;
@@ -210,7 +211,36 @@ function validateSemanticDeclaration(spec: CommandSpec): void {
   }
 }
 
-function parseConfig(path: string, stage: string): EvidenceConfig {
+function configExample(stage: string): string {
+  return JSON.stringify({ version: "1", stage, commands: [{ id: "unit-tests", role: "test", argv: ["npm", "test"] }] });
+}
+
+/** Command allowlist for build/test/check/red/green commands: required, stage-locked, non-empty. */
+function requireCommandConfig(path: string, stage: string): EvidenceConfig {
+  if (!existsSync(path)) {
+    fail(`command allowlist ${path} is required for build/test/check/red/green commands of stage ${stage}; minimal example: ${configExample(stage)}`);
+  }
+  return parseConfig(path, stage);
+}
+
+/**
+ * Built-in semantic checkers need no external command, so the allowlist is optional for them.
+ * A missing allowlist or one written for another stage is ignored; a matching one is still validated.
+ */
+function optionalSemanticConfig(path: string, stage: string): EvidenceConfig | null {
+  if (!existsSync(path)) return null;
+  let declaredStage: unknown;
+  try {
+    const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> | null;
+    declaredStage = value && typeof value === "object" ? value.stage : undefined;
+  } catch {
+    return parseConfig(path, stage, true);
+  }
+  if (declaredStage !== stage) return null;
+  return parseConfig(path, stage, true);
+}
+
+function parseConfig(path: string, stage: string, allowEmptyCommands = false): EvidenceConfig {
   const configPath = requireRegularFile(path, "config");
   let value: unknown;
   try {
@@ -222,9 +252,9 @@ function parseConfig(path: string, stage: string): EvidenceConfig {
   const config = value as Record<string, unknown>;
   if (config.version !== "1") fail('command allowlist version must be "1"');
   if (config.stage !== stage) {
-    fail(`command allowlist stage must be "${stage}"; create or update the allowlist for the active stage by setting "stage": "${stage}" in .aidlc/evidence-commands.json and declaring its semantic checker commands`);
+    fail(`command allowlist stage must be "${stage}"; update ${DEFAULT_CONFIG} for the active stage, minimal example: ${configExample(stage)}`);
   }
-  if (!Array.isArray(config.commands) || config.commands.length === 0) fail("command allowlist commands must be non-empty");
+  if (!Array.isArray(config.commands) || (!allowEmptyCommands && config.commands.length === 0)) fail("command allowlist commands must be non-empty");
 
   const ids = new Set<string>();
   const commands: CommandSpec[] = [];
@@ -551,17 +581,17 @@ function runPhaseProducer(options: ProducerOptions, config: EvidenceConfig, stat
   if (!options.output) console.log(JSON.stringify({ status: "passed", output, sensor: options.sensor, phase }, null, 2));
 }
 
-function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig, state: ProducerState, quiet = false): void {
+function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | null, state: ProducerState, quiet = false): void {
   const sensor = options.sensor;
   if (!sensor || sensor === "build-test-evidence") fail("semantic producer requires --sensor with a semantic sensor name");
   if (options.commandIds.length > 0) fail("--command-id is only supported for build/test evidence");
   if (sensor === "red-test-evidence" || sensor === "green-test-evidence") {
-    runPhaseProducer(options, config, state, sensor === "red-test-evidence" ? "RED" : "GREEN");
+    runPhaseProducer(options, requireCommandConfig(options.config, options.stage), state, sensor === "red-test-evidence" ? "RED" : "GREEN");
     return;
   }
-  const declarations = config.commands.filter((command) => command.role === "semantic" && command.sensor === sensor);
-  if (declarations.length !== 1) fail(`allowlist must declare exactly one built-in semantic checker for ${sensor}`);
-  const result = runSemanticCommand(sensor, declarations[0].timeout_ms || 10 * 60 * 1000, state);
+  const declarations = (config?.commands || []).filter((command) => command.role === "semantic" && command.sensor === sensor);
+  if (declarations.length > 1) fail(`allowlist must declare at most one built-in semantic checker for ${sensor}`);
+  const result = runSemanticCommand(sensor, declarations[0]?.timeout_ms || DEFAULT_TIMEOUT_MS, state);
   const output = options.output || evidenceOutput(options.stage, sensor, undefined, state);
   const unsigned = {
     ...result.payload,
@@ -641,7 +671,7 @@ function parseArgs(args: string[]): ProducerOptions {
     ...(unitId ? { unit: unitId } : {}),
     refresh,
     sensor,
-    config: safeProjectPath(config, "config", true),
+    config: safeProjectPath(config, "config"),
     output,
     commandIds,
     allSensors,
@@ -736,7 +766,7 @@ function declaredSemanticSensors(stage: string): string[] {
   return sensors.filter((sensor) => SEMANTIC_SENSORS.has(sensor));
 }
 
-function produceAllSemantic(options: ProducerOptions, state: ProducerState, config: EvidenceConfig): void {
+function produceAllSemantic(options: ProducerOptions, state: ProducerState, config: EvidenceConfig | null): void {
   const sensors = declaredSemanticSensors(options.stage);
   if (sensors.length === 0) fail(`stage ${options.stage} declares no semantic sensors; use the stage's ordinary report gates instead`);
   const outputs: string[] = [];
@@ -759,13 +789,8 @@ function runProducer(args: string[]): void {
     fail(`stage ${options.stage} is not active; current stage is ${state.current_stage || "(none)"}`);
   }
 
-  const config = parseConfig(options.config, options.stage);
-  if (options.stage !== "build-and-test" && !options.sensor) {
-    produceAllSemantic(options, state, config);
-    return;
-  }
-  if (options.allSensors && options.stage !== "build-and-test") {
-    produceAllSemantic(options, state, config);
+  if ((options.stage !== "build-and-test" && !options.sensor) || (options.allSensors && options.stage !== "build-and-test")) {
+    produceAllSemantic(options, state, optionalSemanticConfig(options.config, options.stage));
     return;
   }
 
@@ -774,10 +799,11 @@ function runProducer(args: string[]): void {
   withProducerLock(output, () => {
     const lockedOptions = { ...options, output };
     if (lockedOptions.sensor && lockedOptions.sensor !== "build-test-evidence") {
-      runSemanticProducer(lockedOptions, config, state);
+      runSemanticProducer(lockedOptions, optionalSemanticConfig(options.config, options.stage), state);
       return;
     }
     if (lockedOptions.stage !== "build-and-test") fail(`stage ${lockedOptions.stage} does not use the build/test producer; pass --sensor <semantic-sensor> or --all-sensors`);
+    const config = requireCommandConfig(options.config, options.stage);
     const selected = lockedOptions.commandIds.length === 0
       ? config.commands.filter((command) => command.role !== "semantic")
       : lockedOptions.commandIds.map((id) => {

@@ -22,7 +22,7 @@
  * with `approval: block`; all other stages auto-advance after gates pass.
  */
 
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { randomUUID } from "crypto";
 import { spawnSync } from "child_process";
 import { createRequire } from "module";
@@ -149,6 +149,7 @@ export interface Directive {
   consumes?: string[];
   produces?: string[];
   sensors?: string[];
+  choices?: string[];
   message?: string;
   handoff_prompt?: string;
   handoff_status?: "updated" | "unverified";
@@ -200,7 +201,7 @@ const PRD_ELIGIBLE_SCOPES = new Set(FULL_WORKFLOW_SCOPES);
 // Subcommands
 // ---------------------------------------------------------------------------
 
-const SUBCOMMANDS = ["next", "continue", "report", "park", "split"] as const;
+const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
@@ -208,6 +209,8 @@ type StageResult = (typeof VALID_RESULTS)[number];
 const NEXT_FLAGS = new Set(["scope", "work", "with-prd", "resume", "status", "text", "claim", "module", "owner", "branch", "worktree"]);
 const REPORT_FLAGS = new Set(["stage", "result", "user-input", "instruction-ack", "module", "unit", "instance", "owner"]);
 const SPLIT_FLAGS = new Set(["from", "dry-run"]);
+const ARCHIVE_FLAGS = new Set(["reason"]);
+const UPGRADE_FLAGS = new Set(["dry-run", "module"]);
 const INTEGRATION_WORKFLOW: WorkflowRef = { kind: "integration" };
 
 // ---------------------------------------------------------------------------
@@ -2270,14 +2273,34 @@ function unsupportedFlag(flags: Record<string, string>, allowed: ReadonlySet<str
   return Object.keys(flags).find((flag) => !allowed.has(flag));
 }
 
-function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, agentExecution: AgentExecutionPlan, reportCommand?: string): string {
+const CHOICE_DESCRIPTIONS: Record<string, Record<string, string>> = {
+  "workspace-detection": {
+    "single-module": "单一业务模块，不需要跨模块协作和产品级 inception",
+    "multi-module": "多业务模块或多服务，启用产品级 inception（module-division、product-contracts 等）",
+  },
+  "ui-mock": {
+    "html-mock": "生成可离线浏览的结构化 HTML 原型",
+    "figma-create": "创建 Figma 设计，适合团队协作、高保真交付和 Dev Mode",
+    "figma-existing": "使用已有 Figma 设计稿，验证后登记为正式设计基准",
+    skip: "跳过 UI 设计，仅适用于无界面需求或用户明确不需要设计基准",
+  },
+};
+
+function choicePrompt(stageSlug: string, choices: string[]): string {
+  if (choices.length === 0) return "";
+  const descriptions = CHOICE_DESCRIPTIONS[stageSlug] || {};
+  const options = choices.map((choice) => `- ${choice}${descriptions[choice] ? `：${descriptions[choice]}` : ""}`).join("\n");
+  return `\n用户选择：必须向用户提问并等待用户回答后再 report，不得自行选择；将用户回答的选项作为 --user-input 的值。可选项：\n${options}`;
+}
+
+function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, agentExecution: AgentExecutionPlan, reportCommand?: string, choices: string[] = []): string {
   const unit = instance.module_id && instance.unit_id
     ? `当前单元：${instance.module_id}/${instance.unit_id}。团队成员可用 unit select 声明负责人与分支。`
     : "当前阶段不要求成员选择单元；按产物、review、构建和测试门禁推进。";
   const artifacts = instance.stage.produces.length
     ? instance.stage.produces.map((pattern) => instanceArtifactPattern(pattern, instance)).join("、")
     : "本阶段没有声明文件产物";
-  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；状态、审批和 merge 权限仅属于 conductor。\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。\n下一步：完成后将结构化结果交回 conductor，再运行 ${reportCommand || "orchestrate report"}。`;
+  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；状态、审批和 merge 权限仅属于 conductor。\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。${choicePrompt(instance.stage.slug, choices)}\n下一步：完成后将结构化结果交回 conductor，再运行 ${reportCommand || "orchestrate report"}。`;
 }
 
 function clearActiveContext(state: WorkflowState): void {
@@ -2549,13 +2572,14 @@ function reportCommandFor(instance: StageInstance): string {
   return `orchestrate report --stage ${instance.stage.slug}${target} --result ${result}`;
 }
 
-function advanceSplit(ctx: EngineContext, graph: StageGraph, args: string[], flags: Record<string, string>): Promise<Directive> {
+/** `probe` evaluates the next directive without persisting anything (used to compare modules). */
+function advanceSplit(ctx: EngineContext, graph: StageGraph, args: string[], flags: Record<string, string>, probe = false): Promise<Directive> {
   const key = workflowRefKey(ctx.owner);
   const persisted = ctx.loaded.parts.get(key)!.state;
   return advance(graph, {
     state: ctx.view,
     flags,
-    commit: (view) => commitSplitContext(ctx, view),
+    commit: probe ? () => undefined : (view) => commitSplitContext(ctx, view),
     retry: () => handleNext(args),
     label: workflowLabel(ctx.owner),
     finishedMessage: (count) => `🎉 ${workflowLabel(ctx.owner)}: all ${count} stage instances resolved.`,
@@ -2611,10 +2635,13 @@ function firstLine(value: unknown): string {
  * and finally the integration workflow once its cross-module barrier is ready.
  */
 async function splitNext(args: string[], flags: Record<string, string>, graph: StageGraph): Promise<Directive> {
-  if (flags.module) {
-    const failure = ensureModuleWorkflow(flags.module);
-    if (failure) return failure;
-    return advanceSplit(openSplitContext(moduleRef(flags.module)), graph, args, flags);
+  // Explicit --module wins; AIDLC_MODULE is an equivalent default and never falls back to another module.
+  const envModule = process.env.AIDLC_MODULE?.trim();
+  const targetModule = flags.module || envModule;
+  if (targetModule) {
+    const failure = ensureModuleWorkflow(targetModule);
+    if (failure) return flags.module ? failure : { ...failure, message: `AIDLC_MODULE: ${failure.message}` };
+    return advanceSplit(openSplitContext(moduleRef(targetModule)), graph, args, { ...flags, module: targetModule });
   }
   const globalContext = openSplitContext(GLOBAL_WORKFLOW);
   if (globalContext.loaded.parts.get("global")!.state.status !== "done") {
@@ -2623,6 +2650,7 @@ async function splitNext(args: string[], flags: Record<string, string>, graph: S
   }
   const moduleFlags = Object.fromEntries(Object.entries(flags).filter(([key]) => key !== "resume"));
   const notes: string[] = [];
+  const ready: { module_id: string; stage: string; stage_instance: string; name: string }[] = [];
   let modulesDone = true;
   for (const row of openSplitContext(GLOBAL_WORKFLOW).loaded.registry!.modules) {
     const ctx = openSplitContext(moduleRef(row.module_id));
@@ -2633,10 +2661,31 @@ async function splitNext(args: string[], flags: Record<string, string>, graph: S
       notes.push(`module:${row.module_id}: parked at ${state.current_stage_instance || state.current_stage || "-"} (resume with next --module ${row.module_id} --resume)`);
       continue;
     }
-    const directive = await advanceSplit(ctx, graph, args, moduleFlags);
-    if (directive.kind === "run-stage") return notes.length ? { ...directive, other_workflows: notes } : directive;
+    const probed = await advanceSplit(ctx, graph, args, moduleFlags, true);
+    if (probed.kind === "run-stage") {
+      ready.push({ module_id: row.module_id, stage: String(probed.stage), stage_instance: String(probed.stage_instance), name: String(probed.name) });
+      continue;
+    }
+    // Not advanceable: run it for real so auto-skips and completion are persisted as before.
+    const directive = await advanceSplit(openSplitContext(moduleRef(row.module_id)), graph, args, moduleFlags);
     if (directive.kind === "done") continue;
     notes.push(`module:${row.module_id}: ${firstLine(directive.message)}`);
+  }
+  if (ready.length === 1) {
+    const directive = await advanceSplit(openSplitContext(moduleRef(ready[0].module_id)), graph, args, moduleFlags);
+    return notes.length ? { ...directive, other_workflows: notes } : directive;
+  }
+  if (ready.length > 1) {
+    return {
+      kind: "ask",
+      ask_type: "module-selection",
+      question: `${ready.length} module workflows can advance. Ask the user which module to work on, then run next --module <module-id> (or set AIDLC_MODULE).`,
+      options: ready.map((item) => item.module_id),
+      modules: ready,
+      command_template: "loeyae-aidlc orchestrate next --module <module-id>",
+      message: `Multiple module workflows can advance; the user must choose one:\n${ready.map((item) => `  • ${item.module_id}: next stage ${item.stage_instance} (${item.name})`).join("\n")}\n  Run: loeyae-aidlc orchestrate next --module <module-id>`,
+      ...(notes.length ? { other_workflows: notes } : {}),
+    };
   }
   if (!modulesDone) {
     const pending = openSplitContext(GLOBAL_WORKFLOW).loaded.registry!.modules.filter((row) => {
@@ -2972,6 +3021,22 @@ async function handleNext(args: string[]): Promise<Directive> {
     };
   }
 
+  // An existing workflow is never replaced implicitly: --scope/--work only initialize.
+  if (scopeFlag || flags.work) {
+    const existing = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+    if (existing) {
+      const steps = existing.status === "running"
+        ? "park it with 'orchestrate park', then archive it with 'orchestrate archive'"
+        : "archive it with 'orchestrate archive'";
+      return {
+        kind: "error",
+        workflow_id: existing.workflow_id,
+        status: existing.status,
+        message: `Workflow ${existing.workflow_id} already exists (status: ${existing.status}); --scope/--work only initialize a new workflow. To start new work, ${steps}; to continue it, run 'orchestrate next' without --scope/--work.`,
+      };
+    }
+  }
+
   // Split per-module layout (4.3.0): route to the owning workflow. A legacy multi-module
   // workflow is split automatically the first time `next --module <id>` is used without --claim.
   if (!isSplitLayout(PROJECT_ROOT) && flags.module && !claimRequested) {
@@ -3246,7 +3311,8 @@ async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directi
     consumes: nextStage.consumes.map((pattern) => instanceArtifactPattern(pattern, effectiveNextInstance, true)),
     produces: nextStage.produces.map((pattern) => instanceArtifactPattern(pattern, effectiveNextInstance)),
     sensors: nextStage.sensors,
-    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, agentExecution, opts.reportCommand?.(effectiveNextInstance)),
+    choices: directiveChoices,
+    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, agentExecution, opts.reportCommand?.(effectiveNextInstance), directiveChoices),
     ...(claimRequested ? { claimed: true, owner: state.active_instances[effectiveNextInstance.instance_id].owner, claim_expires_at: state.active_instances[effectiveNextInstance.instance_id].expires_at } : {}),
     ...extras,
   };
@@ -3671,6 +3737,165 @@ async function handlePark(args: string[] = []): Promise<Directive> {
 }
 
 // ---------------------------------------------------------------------------
+// archive — move a parked/done workflow and its evidence out of the active area
+// ---------------------------------------------------------------------------
+
+function lockFiles(root: string): string[] {
+  if (!existsSync(root)) return [];
+  const found: string[] = [];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) found.push(...lockFiles(path));
+    else if (entry.name.endsWith(".lock")) found.push(relative(PROJECT_ROOT, path));
+  }
+  return found;
+}
+
+async function handleArchive(args: string[]): Promise<Directive> {
+  const flags = parseFlags(args);
+  const invalidFlag = unsupportedFlag(flags, ARCHIVE_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported archive option: --${invalidFlag}` };
+  if (flags.reason === "true") return { kind: "error", message: "--reason requires a value" };
+  if (flags.text) return { kind: "error", message: `Unexpected archive argument: ${flags.text}` };
+
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  const global = loaded.parts.get("global");
+  if (!global) return { kind: "error", message: "No active workflow to archive." };
+  const notArchivable = [...loaded.parts.values()].filter((part) => part.state.status !== "parked" && part.state.status !== "done");
+  if (notArchivable.length > 0) {
+    return {
+      kind: "error",
+      message: `Only parked or done workflows can be archived; ${notArchivable.map((part) => `${workflowLabel(part.ref)} is ${part.state.status}`).join(", ")}. Park it first with 'orchestrate park${notArchivable[0].ref.kind === "module" ? ` --module ${notArchivable[0].ref.module_id}` : ""}'.`,
+    };
+  }
+  const claims = [...loaded.parts.values()].flatMap((part) => Object.values(part.state.active_instances || {}).map((claim) => `${claim.stage_instance}=${claim.owner}`));
+  if (claims.length > 0) return { kind: "error", message: `Workflow has unreleased claims: ${claims.join(", ")}. Release them before archiving.` };
+
+  const activeDir = resolve(PROJECT_ROOT, "aidlc", "active");
+  const evidenceDir = resolve(PROJECT_ROOT, ".aidlc", "evidence");
+  const locks = [...lockFiles(activeDir), ...lockFiles(evidenceDir)];
+  if (locks.length > 0) return { kind: "error", message: `Workflow or evidence locks are held: ${locks.join(", ")}. Wait for the running command to finish before archiving.` };
+
+  const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const target = resolve(PROJECT_ROOT, "aidlc", "archive", `${global.state.workflow_id}-${timestamp}`);
+  const targetLabel = relative(PROJECT_ROOT, target).split(sep).join("/");
+  if (existsSync(target)) return { kind: "error", message: `Archive target already exists: ${targetLabel}` };
+  if (existsSync(join(activeDir, "evidence"))) return { kind: "error", message: "aidlc/active/evidence already exists and would collide with the archived evidence directory." };
+
+  appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "WORKFLOW_ARCHIVED", {
+    "Workflow ID": global.state.workflow_id,
+    Status: global.state.status,
+    Reason: flags.reason || "-",
+    Target: targetLabel,
+  });
+  mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+  renameSync(activeDir, target);
+  const evidenceArchived = existsSync(evidenceDir);
+  if (evidenceArchived) renameSync(evidenceDir, join(target, "evidence"));
+
+  return {
+    kind: "print",
+    workflow_id: global.state.workflow_id,
+    archive_path: targetLabel,
+    evidence_archived: evidenceArchived,
+    message: `📦 Workflow ${global.state.workflow_id} archived to ${targetLabel}${evidenceArchived ? " (evidence included)" : ""}.\n` +
+      `  Start a new workflow with: loeyae-aidlc orchestrate next --scope <scope> --work "<description>"`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// upgrade --dry-run — list completed instances that lack evidence for the current graph
+// ---------------------------------------------------------------------------
+
+/** Sensors whose verdict is read from a controlled evidence file. */
+function evidenceBackedSensor(sensor: string): boolean {
+  return SEMANTIC_SENSORS.has(sensor) || sensor === "build-test-evidence";
+}
+
+function upgradeRecoveryCommands(instance: StageInstance, missing: string[]): string[] {
+  const target = `--stage ${instance.stage.slug} --instance ${instance.instance_id}`;
+  const evidence = instance.stage.slug === "build-and-test"
+    ? missing.map((sensor) => sensor === "build-test-evidence"
+      ? `loeyae-aidlc evidence run ${target} --refresh`
+      : `loeyae-aidlc evidence run ${target} --sensor ${sensor} --refresh`)
+    : [`loeyae-aidlc evidence run ${target} --all-sensors --refresh`];
+  const result = instance.stage.approval === "block" ? "--result approved --user-input Approve" : "--result completed";
+  const ack = instance.stage.completion_contract === "instruction_only" ? ` --instruction-ack ${instance.stage.slug}` : "";
+  return [...evidence, `loeyae-aidlc orchestrate report ${target} ${result}${ack}`];
+}
+
+async function handleUpgrade(args: string[]): Promise<Directive> {
+  const flags = parseFlags(args);
+  const invalidFlag = unsupportedFlag(flags, UPGRADE_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported upgrade option: --${invalidFlag}` };
+  if (flags.text) return { kind: "error", message: `Unexpected upgrade argument: ${flags.text}` };
+  if (!("dry-run" in flags)) {
+    return { kind: "error", message: "orchestrate upgrade only supports --dry-run. Run it with --dry-run, then execute the listed recovery commands one instance at a time." };
+  }
+  if (flags["dry-run"] !== "true") return { kind: "error", message: "--dry-run is a boolean flag and does not accept a value" };
+  if (flags.module === "true") return { kind: "error", message: "--module requires a value" };
+  const moduleFilter = flags.module;
+
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  if (!loaded.parts.has("global")) return { kind: "error", message: "No active workflow to check." };
+  if (moduleFilter && loaded.split && !loaded.parts.has(workflowRefKey(moduleRef(moduleFilter)))) {
+    return { kind: "error", message: `Module workflow "${moduleFilter}" does not exist in the registry.` };
+  }
+  const view = loaded.split ? mergeWorkflowView(loaded.parts) : loaded.parts.get("global")!.state;
+  const instances = expandStageInstances(loadGraph(), view);
+  if (moduleFilter && !loaded.split && !instances.some((instance) => instance.module_id === moduleFilter)) {
+    return { kind: "error", message: `Module "${moduleFilter}" is not declared in the module manifest.` };
+  }
+  const completed = new Set(completedInstanceIds(view));
+  const ownerKey = (instanceId: string): string => loaded.split ? workflowRefKey(ownerOfInstance(instanceId)) : "global";
+
+  const pending = instances
+    .filter((instance) => completed.has(instance.instance_id))
+    .filter((instance) => !moduleFilter || instance.module_id === moduleFilter)
+    .map((declared) => {
+      const instance = runtimeInstance(declared, view);
+      const missing = instance.stage.sensors
+        .filter(evidenceBackedSensor)
+        .filter((sensor) => !existsSync(evidencePath(instance.stage, sensor, instance)));
+      return { instance, missing };
+    })
+    .filter((item) => item.missing.length > 0)
+    .map(({ instance, missing }) => ({
+      instance_id: instance.instance_id,
+      stage: instance.stage.slug,
+      module_id: instance.module_id || null,
+      unit_id: instance.unit_id || null,
+      workflow: ownerKey(instance.instance_id),
+      missing_sensors: missing,
+      requires_user_approval: instance.stage.approval === "block",
+      commands: upgradeRecoveryCommands(instance, missing),
+    }));
+
+  const workflows = [...loaded.parts.values()]
+    .filter((part) => !moduleFilter || (part.ref.kind === "module" ? part.ref.module_id === moduleFilter : !loaded.split))
+    .map((part) => ({
+      workflow: workflowRefKey(part.ref),
+      workflow_id: part.state.workflow_id,
+      status: part.state.status,
+      recorded_engine_version: part.state.version || "unknown",
+    }));
+
+  return {
+    kind: "print",
+    dry_run: true,
+    engine_version: ENGINE_VERSION,
+    layout: loaded.split ? "split" : "single",
+    ...(moduleFilter ? { module_id: moduleFilter } : {}),
+    workflows,
+    pending,
+    message: pending.length === 0
+      ? "✅ Every completed stage instance has evidence for the sensors declared by the current stage graph."
+      : `⚠️ ${pending.length} completed stage instance(s) lack evidence for the current stage graph. Run each instance's commands in order; ` +
+        "approval gates (requires_user_approval) must only be re-attested after the user explicitly approves. Nothing was written.",
+  };
+}
+
+// ---------------------------------------------------------------------------
 // split — migrate a single-layout workflow into per-module workflows
 // ---------------------------------------------------------------------------
 
@@ -3720,7 +3945,7 @@ async function main() {
     console.error(
       JSON.stringify({
         kind: "error",
-        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|split> [args...]",
+        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|archive|split|upgrade> [args...]",
       })
     );
     process.exit(1);
@@ -3739,8 +3964,14 @@ async function main() {
     case "park":
       directive = await handlePark(rest);
       break;
+    case "archive":
+      directive = await handleArchive(rest);
+      break;
     case "split":
       directive = await handleSplit(rest);
+      break;
+    case "upgrade":
+      directive = await handleUpgrade(rest);
       break;
     case "continue":
       directive = await handleContinue(rest[0] || "");

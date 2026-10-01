@@ -18,6 +18,14 @@ aidlc/active/audit.md
 loeyae-aidlc orchestrate next
 ```
 
+per-module 布局（存在 `aidlc/active/registry.md`）下，多个模块 workflow 都可推进时，`next` 返回 `kind: "ask"`（`ask_type: "module-selection"`），`modules` 列出各模块的下一阶段。此时必须向用户提问由用户指定模块，不得自行选择，也不得根据工作描述推断模块；得到回答后运行：
+
+```bash
+loeyae-aidlc orchestrate next --module <module-id>
+```
+
+也可设置环境变量 `AIDLC_MODULE=<module-id>` 作为默认模块，效果等同 `--module`；显式 `--module` 优先，模块不存在时直接报错，不会回退到其他模块。只有一个模块可推进时，`next` 直接返回该模块的 directive。
+
 若没有 active workflow，要求用户明确新的工作描述并启动：
 
 ```bash

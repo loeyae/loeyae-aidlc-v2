@@ -63,7 +63,7 @@ function writeModuleManifest(project: string): void {
 
 let semanticProjectCounter = 0;
 
-function prepareCrossValidationProject(): string {
+function prepareCrossValidationProject(configStage: string | null = "cross-validation"): string {
   const project = makeGitProject(`semantic-${++semanticProjectCounter}`);
   writeModuleManifest(project);
   const moduleRoot = join(project, "docs", "aidlc", "modules", "module-a", "inception");
@@ -72,11 +72,13 @@ function prepareCrossValidationProject(): string {
   writeFileSync(join(moduleRoot, "user-stories.md"), "# Stories\nUS-1 covers FR-1 and provides a complete acceptance behavior for the user.\n", "utf8");
   writeFileSync(join(moduleRoot, "cross-validation-report.md"), "# Cross validation\nREQ-1 FR-1 US-1\n\n## Machine consistency summary\n- status: passed\n- unresolved_conflicts: 0\n- prd_route: not-selected\n- ui_route: not-selected\n", "utf8");
   mkdirSync(join(project, ".aidlc"), { recursive: true });
-  writeFileSync(join(project, ".aidlc", "evidence-commands.json"), JSON.stringify({
-    version: "1",
-    stage: "cross-validation",
-    commands: [{ id: "inception-consistency", role: "semantic", sensor: "inception-consistency", argv: ["loeyae-aidlc", "check", "--sensor", "inception-consistency"] }],
-  }), "utf8");
+  if (configStage) {
+    writeFileSync(join(project, ".aidlc", "evidence-commands.json"), JSON.stringify({
+      version: "1",
+      stage: configStage,
+      commands: [{ id: "inception-consistency", role: "semantic", sensor: "inception-consistency", argv: ["loeyae-aidlc", "check", "--sensor", "inception-consistency"] }],
+    }), "utf8");
+  }
   git(project, ["add", "docs/aidlc/modules/module-a/inception/requirements.md", "docs/aidlc/modules/module-a/inception/user-stories.md", "docs/aidlc/modules/module-a/inception/cross-validation-report.md"]);
   git(project, ["commit", "-qm", "cross validation inputs"]);
 
@@ -113,6 +115,35 @@ try {
   assert.equal(reported.kind, "print");
   assert.ok(existsSync(semanticEvidence), "report must auto-produce missing semantic evidence");
   assert.ok(loadWorkflowState(semanticProject)?.completed_stage_instances.includes("cross-validation@module:module-a"));
+
+  const noConfigProject = prepareCrossValidationProject(null);
+  const noConfigEvidence = join(noConfigProject, ".aidlc", "evidence", "cross-validation", "module-a", "inception-consistency.json");
+  const noConfigRun = success(noConfigProject, ["evidence", "run", "--stage", "cross-validation", "--all-sensors"]);
+  assert.deepEqual(noConfigRun.sensors, ["inception-consistency"]);
+  assert.ok(existsSync(noConfigEvidence), "semantic evidence must not require .aidlc/evidence-commands.json");
+  unlinkSync(noConfigEvidence);
+  success(noConfigProject, ["orchestrate", "report", "--stage", "cross-validation", "--result", "completed"]);
+  assert.ok(existsSync(noConfigEvidence), "report must auto-produce semantic evidence without a command allowlist");
+
+  const otherStageConfigProject = prepareCrossValidationProject("requirements-analysis");
+  success(otherStageConfigProject, ["evidence", "run", "--stage", "cross-validation", "--sensor", "inception-consistency"]);
+  assert.ok(existsSync(join(otherStageConfigProject, ".aidlc", "evidence", "cross-validation", "module-a", "inception-consistency.json")), "an allowlist for another stage must not block semantic evidence");
+
+  const buildProject = prepareCrossValidationProject(null);
+  const buildState = loadWorkflowState(buildProject);
+  assert.ok(buildState);
+  buildState!.current_stage = "build-and-test";
+  buildState!.current_phase = "construction";
+  buildState!.current_stage_instance = "build-and-test";
+  delete buildState!.current_module;
+  saveWorkflowState(buildProject, buildState!);
+  const buildMissing = run(buildProject, ["evidence", "run", "--stage", "build-and-test"]);
+  assert.notEqual(buildMissing.status, 0);
+  assert.match(buildMissing.stderr, /command allowlist .* is required for build\/test\/check\/red\/green commands of stage build-and-test; minimal example: .*"stage":"build-and-test"/);
+  writeFileSync(join(buildProject, ".aidlc", "evidence-commands.json"), JSON.stringify({ version: "1", stage: "cross-validation", commands: [{ id: "unit-tests", role: "test", argv: ["npm", "test"] }] }), "utf8");
+  const buildMismatch = run(buildProject, ["evidence", "run", "--stage", "build-and-test"]);
+  assert.notEqual(buildMismatch.status, 0);
+  assert.match(buildMismatch.stderr, /command allowlist stage must be "build-and-test".*minimal example: .*"role":"test"/);
 
   const mismatchProject = prepareCrossValidationProject();
   const mismatchState = loadWorkflowState(mismatchProject);

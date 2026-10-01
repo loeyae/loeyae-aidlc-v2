@@ -10,13 +10,13 @@ const tsx = join(repository, "node_modules", "tsx", "dist", "cli.mjs");
 const root = join(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir(), `aidlc-aws-light-${process.pid}`);
 const project = join(root, "project");
 
-function run(args: string[]): { status: number; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8" });
+function run(args: string[], cwd = project): { status: number; stdout: string; stderr: string } {
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8" });
   return { status: result.status ?? 1, stdout: result.stdout || "", stderr: result.stderr || "" };
 }
 
-function success(args: string[]): Record<string, unknown> {
-  const result = run(args);
+function success(args: string[], cwd = project): Record<string, unknown> {
+  const result = run(args, cwd);
   assert.equal(result.status, 0, `${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
   return JSON.parse(result.stdout) as Record<string, unknown>;
 }
@@ -49,6 +49,8 @@ try {
   assert.match(handoff, /需要产物：/);
   assert.match(handoff, /质量动作：.*review.*构建.*测试/);
   assert.match(handoff, /下一步：/);
+  assert.deepEqual(next.choices, []);
+  assert.doesNotMatch(handoff, /用户选择：/);
   const retiredNext = run(["orchestrate", "next", "--team-enrollment-confirmation-stdin"]);
   assert.notEqual(retiredNext.status, 0);
   assert.match(`${retiredNext.stdout}\n${retiredNext.stderr}`, /Unsupported AWS-style workflow option/);
@@ -67,6 +69,18 @@ try {
   assert.equal(runtime.kind, "aidlc.aws-light.runtime");
   assert.equal(runtime.authoritative, false);
   assert.equal(((runtime.unit_selections as Record<string, Record<string, unknown>>)["module-a:unit-a"]).member, "alice");
+
+  const fullProject = join(root, "full-scope");
+  mkdirSync(fullProject, { recursive: true });
+  success(["orchestrate", "next", "--scope", "feature", "--work", "Build multi-service ordering"], fullProject);
+  const detection = success(["orchestrate", "next"], fullProject);
+  assert.equal(detection.kind, "run-stage");
+  assert.equal(detection.stage, "workspace-detection");
+  assert.deepEqual(detection.choices, ["single-module", "multi-module"]);
+  const detectionHandoff = String(detection.handoff_prompt || "");
+  assert.match(detectionHandoff, /必须向用户提问并等待用户回答后再 report，不得自行选择/);
+  assert.match(detectionHandoff, /- single-module：单一业务模块/);
+  assert.match(detectionHandoff, /- multi-module：多业务模块或多服务/);
 
   console.log("AWS-style Markdown lightweight workflow tests passed");
 } finally {

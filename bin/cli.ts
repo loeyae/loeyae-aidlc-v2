@@ -1311,7 +1311,9 @@ Workflow:
   orchestrate next [--module <module-id>]               Read the next directive (per-module after split)
   orchestrate report --stage <slug> --result completed  Report a completed stage (--module in split layout)
   orchestrate park [--module <module-id>]               Park the active workflow or one module workflow
+  orchestrate archive [--reason <text>]                 Archive a parked/done workflow and its evidence to aidlc/archive/
   orchestrate split --from <workflow-id> [--dry-run]    Split into per-module workflows (aidlc/active/registry.md)
+  orchestrate upgrade --dry-run [--module <module-id>]  List completed stages missing evidence after an engine upgrade (read-only)
   unit list|select [flags]                              List or self-select a development unit
   module list|select|claim|heartbeat|migrate [flags]    Coordinate parallel module instances
   runtime summary|doctor [--module <module-id>]         Inspect the active Markdown workflow(s)
