@@ -1,5 +1,31 @@
 # Changelog
 
+## 4.6.0（草稿）
+
+> 草稿：由 S1（MARS-47）起逐 issue 追加，P（MARS-46）合并为正式 `## 4.6.0`。版本号仍为 4.5.4。
+
+### Fixed
+
+- **`has_legacy_code` 只看 `src/`（S1.0）**：存量代码判定改为统计全部源码根（module-manifest `paths` → `.aidlc/source-roots.json` → 默认 `src`，与 4.5.4 D6 同一解析）下的文件数之和，阈值仍为"超过 10 个"。遍历跳过 `node_modules`、`.git`、`dist`、`build`、`target` 和隐藏项，嵌套源码根不重复计数；源码根不存在计 0 个文件。源码根配置无效（绝对路径、`..` 越界、符号链接/junction、manifest `paths` 非法）时该条件直接报错，不再静默当作"没有存量代码"。该值只在阶段条件读取 `has_legacy_code` 时才计算。
+- **`diagram-format` 审计写入失败被当作成功（S1.5）**：`DIAGRAM_FORMAT_SET` 审计写入失败时命令返回 error，并提示"状态已写入、审计缺失，请人工补记"。
+
+### Added
+
+- **工作流基线状态字段（S1.1）**：`baseline_commit`（Markdown `- Baseline Commit:`）与 `baseline_source`（`- Baseline Source:`，`created` / `registered` / `replaced`）。两个字段须同时出现或同时缺失，commit 须为 40/64 位小写十六进制或 `unavailable`，否则 `loadWorkflowState` 拒绝；模块与集成子工作流状态里出现这两个字段同样拒绝。
+  - 只有 `orchestrate next --scope` 新建全局/单一工作流时自动记录当前 HEAD（`source=created`，非 git 项目或尚无提交时为 `unavailable`），并写审计 `BASELINE_COMMIT_RECORDED`；`createInitialState()` 不写基线。
+  - 4.6 之前的状态文件经过 `next`、`report`、`upgrade`、`park` 及任何普通保存后仍然没有基线字段；补登只能走 `orchestrate baseline --set`。
+  - `saveWorkflowState` 的普通保存必须原样保留基线（修改、删除或在子工作流上写入都会被拒），只有 `orchestrate baseline` 的写入路径（`{ baselineWrite: true }`）可以登记或替换。
+  - split 时全局工作流原样保留原单一工作流的基线，拆出的模块/集成子工作流不写，也不产生新的 `BASELINE_COMMIT_RECORDED`。子工作流通过共享函数 `workflowBaseline(projectRoot, ref)`（`core/tools/aidlc-baseline.ts`）读取父工作流的基线，父工作流没有时返回"未登记"。
+- **`orchestrate baseline`（S1.2 / S1.3）**：不带参数时查看当前基线及来源；`--set <commit> --user-input Approve --reason "<理由>" [--dry-run]` 登记基线，`--set <new> --replace --expect <current> ...` 更正基线。
+  - 参数：`--set` / `--expect` 必须是完整 40/64 位小写十六进制（缩写、`HEAD~3`、分支名、选项一律拒绝；`--expect` 另接受字面值 `unavailable`，见下），`--user-input` 必须恰好为 `Approve`，`--reason` 必填，`--dry-run` / `--replace` 为布尔开关，未知参数、多余位置参数和 `--module` 报错。
+  - 前置条件：存在 running / parked 的全局或单一工作流；git 仓库且 git 可用。已设为同一值返回 `changed: false`；已设为不同值时 `--set` 拒绝并提示 `--replace`；没有基线时 `--replace` 拒绝并提示改用 `--set`。
+  - 检查（`--set` 与替换的新 commit 相同）：对象存在且为 commit；是 HEAD 或其祖先（浅克隆无法判断时拒绝并提示 `git fetch --unshallow`）；是 `.aidlc/evidence/**` 中所有受控证据 `source_revision.commit` 的祖先或相等（证据无法解析时拒绝，没有证据时审计记 `Anchor Commits: none`）；`aidlc/active/aidlc-state.md` 被 git 跟踪时该 commit 的树里不能已有同一 Workflow ID 的状态文件；committer date 不晚于 `T0 = min(Created At, history[0])`（提交时间由提交者自报，只防误操作）。
+  - 替换额外要求基线未被使用（扫描父工作流和全部子工作流）：U1 任一 `tdd` / `code-generation` / `code-review` / `build-and-test` 实例已完成或处于活动中；U2 已完成的 `test-case-derivation` 实例的 I13 证据含非空 `characterization`；U3 任何证据记录了 `baseline_commit`；U4 任何证据文件无法解析。任一成立即拒绝。
+  - 基线为 `unavailable`（创建工作流时不在 git 仓库或仓库尚无提交）时，用 `--set <commit> --replace --expect unavailable ...` 更正（`--expect` 只接受严格小写的字面值 `unavailable`，`--set` 目标仍须为完整十六进制 commit，且同样须通过上述全部检查和 U1–U4）；F3 的报错直接给出该命令。目标 commit 的 committer date 须不晚于 T0，工作流若创建于仓库第一次提交之前则不存在合法基线，需要重新开始工作流。
+  - 写入：全部检查通过后（`--dry-run` 到此为止）重新读取状态，revision 或 `--expect` 失效时拒绝；`history` 追加 `{ stage: "baseline", result: "registered" | "replaced", user_input: "Approve" }`；审计 `BASELINE_COMMIT_SET` / `BASELINE_COMMIT_REPLACED`（含 HEAD、自报的 committer/author date、Workflow Started At、Anchor Commits、Tracked State At Commit、Reason、User Input；替换另含 From / From Source / Expected / Usage Check / Replacement Count）。审计写入失败时返回 error 并提示"状态已写入、审计缺失，请人工补记"。
+- **共享函数 `baselineCommitErrors(projectRoot, state)`（S1.4，`core/tools/aidlc-baseline.ts`）**：每次调用都重新检查基线已登记、不是 `unavailable`、commit 存在且仍是 HEAD 或其祖先（rebase 使基线成为孤立提交时报错），供后续门禁使用。
+- 新增回归测试 `tests/test_v4_6_0_baseline.ts` 并加入 `npm test`。
+
 ## 4.5.4
 
 本版本修复 Python / 非 `src/` 项目在 `scope=refactor`、无 module-manifest 时无法用受控证据走完流程的引擎缺陷，并归入此前 Unreleased 的 I13 修复。所有修复都保持 fail-closed：只让真实合规的受控证据通过，缺字段或伪造的证据仍被拒绝。

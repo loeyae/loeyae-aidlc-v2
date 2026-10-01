@@ -1,0 +1,313 @@
+/**
+ * aidlc-baseline.ts — workflow baseline commit (4.6.0).
+ *
+ * The global (or single) workflow records the commit that existing behavior is
+ * characterized against: automatically when `next --scope` creates the workflow
+ * (Baseline Source `created`), or explicitly with `orchestrate baseline --set`
+ * (`registered`) / `--set --replace --expect` (`replaced`). Module and integration
+ * sub-workflows never store a baseline; they read the parent's via workflowBaseline().
+ *
+ * Every git call uses argument arrays with `shell: false`. All checks fail closed:
+ * git being unavailable, a shallow history or unreadable evidence reject instead of
+ * skipping the check.
+ */
+
+import { spawnSync, type SpawnSyncReturns } from "child_process";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "fs";
+import { join, relative, resolve } from "path";
+import { COMMIT_ID_PATTERN } from "./aidlc-revision";
+import {
+  BASELINE_UNAVAILABLE,
+  GLOBAL_WORKFLOW,
+  loadWorkflowState,
+  workflowRefKey,
+  type BaselineSource,
+  type WorkflowRef,
+  type WorkflowState,
+} from "./aidlc-light-state";
+import { loadWorkflowParts } from "./aidlc-workflow-layout";
+
+/** Stages whose evidence is produced against the baseline (usage check U1). */
+export const BASELINE_CONSUMING_STAGES: ReadonlySet<string> = new Set(["tdd", "code-generation", "code-review", "build-and-test"]);
+const STATE_PATH_IN_TREE = "aidlc/active/aidlc-state.md";
+const EVIDENCE_ROOT = join(".aidlc", "evidence");
+
+function root(projectRoot: string): string {
+  return realpathSync(resolve(projectRoot));
+}
+
+function git(projectRoot: string, args: string[]): SpawnSyncReturns<string> {
+  return spawnSync("git", args, { cwd: root(projectRoot), encoding: "utf8", shell: false, maxBuffer: 16 * 1024 * 1024 });
+}
+
+/** HEAD of the project repository, or "unavailable" outside git (or before the first commit). */
+export function currentHeadCommit(projectRoot: string): string {
+  const result = git(projectRoot, ["rev-parse", "--verify", "--quiet", "HEAD"]);
+  const head = typeof result.stdout === "string" ? result.stdout.trim() : "";
+  return !result.error && result.status === 0 && COMMIT_ID_PATTERN.test(head) ? head : BASELINE_UNAVAILABLE;
+}
+
+export type WorkflowBaseline =
+  | { registered: true; commit: string; source: BaselineSource; workflow_id: string }
+  | { registered: false; workflow_id: string };
+
+/**
+ * The baseline that applies to a workflow. The global (or single) workflow answers
+ * with its own fields; module and integration sub-workflows answer with the parent
+ * global workflow's value, or "not registered" when the parent has none.
+ */
+export function workflowBaseline(projectRoot: string, ref: WorkflowRef = GLOBAL_WORKFLOW): WorkflowBaseline {
+  const own = loadWorkflowState(projectRoot, ref);
+  if (!own) throw new Error(`no ${workflowRefKey(ref)} workflow`);
+  let owner = own;
+  if (ref.kind !== "global") {
+    const parent = loadWorkflowState(projectRoot, GLOBAL_WORKFLOW);
+    if (!parent) throw new Error(`${workflowRefKey(ref)} workflow has no parent global workflow`);
+    if (own.parent_workflow_id && own.parent_workflow_id !== parent.workflow_id) {
+      throw new Error(`${workflowRefKey(ref)} workflow parent ${own.parent_workflow_id} does not match the global workflow ${parent.workflow_id}`);
+    }
+    owner = parent;
+  }
+  if (owner.baseline_commit === undefined || owner.baseline_source === undefined) return { registered: false, workflow_id: owner.workflow_id };
+  return { registered: true, commit: owner.baseline_commit, source: owner.baseline_source, workflow_id: owner.workflow_id };
+}
+
+type CommitCheck = { ok: true } | { ok: false; error: string };
+
+function isShallow(projectRoot: string): boolean {
+  const result = git(projectRoot, ["rev-parse", "--is-shallow-repository"]);
+  return result.status === 0 && result.stdout.trim() === "true";
+}
+
+const UNSHALLOW_HINT = "the repository is a shallow clone, so its truncated history cannot prove ancestry; run git fetch --unshallow and retry";
+
+/** `commit` names an existing commit object that is HEAD or one of its ancestors. */
+function commitIsAncestorOfHead(projectRoot: string, commit: string, label: string): CommitCheck {
+  const shallow = isShallow(projectRoot);
+  const type = git(projectRoot, ["cat-file", "-t", commit]);
+  if (type.error) return { ok: false, error: `${label} ${commit} cannot be verified: git is unavailable (${type.error.message})` };
+  if (type.status !== 0) {
+    return { ok: false, error: shallow ? `${label} ${commit} is missing: ${UNSHALLOW_HINT}` : `${label} ${commit} does not exist in this repository` };
+  }
+  const objectType = type.stdout.trim();
+  if (objectType !== "commit") return { ok: false, error: `${label} ${commit} is a ${objectType || "unknown"} object, not a commit` };
+  const ancestor = git(projectRoot, ["merge-base", "--is-ancestor", commit, "HEAD"]);
+  if (ancestor.error) return { ok: false, error: `${label} ${commit} cannot be verified: git is unavailable (${ancestor.error.message})` };
+  if (ancestor.status === 0) return { ok: true };
+  if (shallow) return { ok: false, error: `${label} ${commit} could not be confirmed as an ancestor of HEAD: ${UNSHALLOW_HINT}` };
+  if (ancestor.status === 1) return { ok: false, error: `${label} ${commit} is not the current HEAD or one of its ancestors` };
+  return { ok: false, error: `${label} ${commit} ancestry cannot be determined (git merge-base exit ${ancestor.status}): ${ancestor.stderr.trim()}` };
+}
+
+/**
+ * Shared gate check (S2/S3): re-verifies on every call that the workflow baseline is
+ * registered, is not "unavailable", exists, and is still HEAD or one of its ancestors
+ * (a rebase that orphans the baseline is reported). Pass the global state, or the
+ * value returned by workflowBaseline() for a sub-workflow.
+ */
+export function baselineCommitErrors(projectRoot: string, state: Pick<WorkflowState, "baseline_commit" | "baseline_source">): string[] {
+  const commit = state.baseline_commit;
+  if (commit === undefined || state.baseline_source === undefined) {
+    return ["workflow baseline commit is not registered; register it with orchestrate baseline --set <commit> --user-input Approve --reason \"<reason>\""];
+  }
+  if (commit === BASELINE_UNAVAILABLE) return ["workflow baseline commit is unavailable: the workflow was created outside a git repository"];
+  if (!COMMIT_ID_PATTERN.test(commit)) return [`workflow baseline commit ${JSON.stringify(commit)} must be a 40- or 64-character lowercase hex commit id`];
+  const check = commitIsAncestorOfHead(projectRoot, commit, "workflow baseline commit");
+  return check.ok ? [] : [check.error];
+}
+
+// ---------------------------------------------------------------------------
+// Evidence scan (anchors for --set, usage U2-U4 for --replace)
+// ---------------------------------------------------------------------------
+
+export interface EvidenceFile {
+  /** Project-relative POSIX path. */
+  path: string;
+  value?: unknown;
+  error?: string;
+}
+
+/** Every `.json` file under `.aidlc/evidence/`, parsed; unreadable entries carry `error`. */
+export function scanEvidenceFiles(projectRoot: string): EvidenceFile[] {
+  const base = root(projectRoot);
+  const found: EvidenceFile[] = [];
+  const label = (path: string) => relative(base, path).replace(/\\/g, "/");
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      const path = join(dir, entry.name);
+      if (entry.isSymbolicLink()) {
+        found.push({ path: label(path), error: "evidence entry is a symbolic link" });
+      } else if (entry.isDirectory()) {
+        walk(path);
+      } else if (entry.isFile() && entry.name.endsWith(".json")) {
+        try {
+          found.push({ path: label(path), value: JSON.parse(readFileSync(path, "utf8")) });
+        } catch (error) {
+          found.push({ path: label(path), error: `cannot be parsed: ${error instanceof Error ? error.message : String(error)}` });
+        }
+      }
+    }
+  };
+  const evidence = join(base, EVIDENCE_ROOT);
+  if (existsSync(evidence)) {
+    if (lstatSync(evidence).isSymbolicLink()) return [{ path: label(evidence), error: "evidence directory is a symbolic link" }];
+    walk(evidence);
+  }
+  return found;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function hasKey(value: unknown, key: string): boolean {
+  if (Array.isArray(value)) return value.some((item) => hasKey(item, key));
+  const record = asRecord(value);
+  if (!record) return false;
+  return Object.prototype.hasOwnProperty.call(record, key) || Object.values(record).some((item) => hasKey(item, key));
+}
+
+function nonEmpty(value: unknown): boolean {
+  if (value === undefined || value === null || value === false || value === "") return false;
+  if (Array.isArray(value)) return value.length > 0;
+  const record = asRecord(value);
+  return record ? Object.keys(record).length > 0 : true;
+}
+
+// ---------------------------------------------------------------------------
+// Registration checks (orchestrate baseline --set, and --replace for the new commit)
+// ---------------------------------------------------------------------------
+
+export interface BaselineCandidate {
+  commit: string;
+  head: string;
+  committer_date: string;
+  author_date: string;
+  /** T0 = min(state.created_at, history[0].timestamp), as recorded. */
+  workflow_started_at: string;
+  anchors: string[];
+  tracked_state: string;
+}
+
+/** The workflow start T0: the earlier of Created At and the first history entry. */
+export function workflowStartedAt(state: Pick<WorkflowState, "created_at" | "history">): string {
+  const first = state.history[0]?.timestamp;
+  return first && Date.parse(first) < Date.parse(state.created_at) ? first : state.created_at;
+}
+
+/**
+ * Structural and time checks a commit must pass before it becomes the workflow
+ * baseline: git repository, existing commit object, HEAD ancestry (shallow clones
+ * reject with an unshallow hint), ancestor of every controlled evidence anchor, not
+ * already containing this workflow's tracked state file, and a self-reported
+ * committer date no later than the workflow start. The time check only guards
+ * against mistakes; committer dates are chosen by the committer.
+ */
+export function checkBaselineCandidate(projectRoot: string, state: WorkflowState, commit: string): { error: string } | { candidate: BaselineCandidate } {
+  const inside = git(projectRoot, ["rev-parse", "--is-inside-work-tree"]);
+  if (inside.error) return { error: `git is unavailable (${inside.error.message}); orchestrate baseline requires a git repository` };
+  if (inside.status !== 0 || inside.stdout.trim() !== "true") return { error: "the project is not a git repository; orchestrate baseline requires git" };
+  const head = currentHeadCommit(projectRoot);
+  if (head === BASELINE_UNAVAILABLE) return { error: "the git repository has no HEAD commit; commit first, then register the baseline" };
+
+  const ancestry = commitIsAncestorOfHead(projectRoot, commit, "commit");
+  if (!ancestry.ok) return { error: ancestry.error };
+
+  const anchors: string[] = [];
+  for (const file of scanEvidenceFiles(projectRoot)) {
+    if (file.error) return { error: `evidence ${file.path} ${file.error}; evidence anchors cannot be verified` };
+    const evidence = asRecord(file.value);
+    if (asRecord(evidence?.producer)?.mode !== "controlled") continue;
+    const anchor = asRecord(evidence?.source_revision)?.commit;
+    if (typeof anchor !== "string" || !COMMIT_ID_PATTERN.test(anchor)) {
+      return { error: `controlled evidence ${file.path} has source_revision.commit ${JSON.stringify(anchor)}, which cannot serve as an evidence anchor` };
+    }
+    if (anchor === commit || anchors.includes(anchor)) {
+      if (!anchors.includes(anchor)) anchors.push(anchor);
+      continue;
+    }
+    const result = git(projectRoot, ["merge-base", "--is-ancestor", commit, anchor]);
+    if (result.error) return { error: `evidence anchor ${anchor} cannot be verified: git is unavailable (${result.error.message})` };
+    if (result.status !== 0) return { error: `commit ${commit} is not an ancestor of evidence anchor ${anchor} (${file.path}); the baseline must predate all evidence of this workflow` };
+    anchors.push(anchor);
+  }
+
+  let trackedState = "untracked";
+  const tracked = git(projectRoot, ["ls-files", "--error-unmatch", "--", STATE_PATH_IN_TREE]);
+  if (tracked.error) return { error: `git is unavailable (${tracked.error.message})` };
+  if (tracked.status === 0) {
+    const shown = git(projectRoot, ["show", `${commit}:${STATE_PATH_IN_TREE}`]);
+    if (shown.status !== 0) {
+      trackedState = "absent";
+    } else {
+      const workflowId = /^- Workflow ID:\s*(.*)$/m.exec(shown.stdout)?.[1]?.replace(/^`|`$/g, "").trim();
+      if (workflowId === state.workflow_id) {
+        return { error: `commit ${commit} already contains this workflow's state file (${STATE_PATH_IN_TREE}, Workflow ID ${state.workflow_id}); the baseline must predate the workflow` };
+      }
+      trackedState = `other workflow ${workflowId || "(unreadable)"}`;
+    }
+  }
+
+  const dates = git(projectRoot, ["show", "-s", "--format=%cI%n%aI", commit]);
+  if (dates.status !== 0) return { error: `cannot read the dates of commit ${commit}: ${dates.stderr.trim()}` };
+  const [committerDate = "", authorDate = ""] = dates.stdout.trim().split(/\r?\n/);
+  const startedAt = workflowStartedAt(state);
+  const committed = Date.parse(committerDate);
+  if (Number.isNaN(committed)) return { error: `commit ${commit} has an unreadable committer date ${JSON.stringify(committerDate)}` };
+  if (committed > Date.parse(startedAt)) {
+    return { error: `commit ${commit} committer date ${committerDate} (self-reported) is later than the workflow start ${startedAt}; the baseline must predate the workflow` };
+  }
+  return { candidate: { commit, head, committer_date: committerDate, author_date: authorDate, workflow_started_at: startedAt, anchors, tracked_state: trackedState } };
+}
+
+// ---------------------------------------------------------------------------
+// Usage check (orchestrate baseline --replace)
+// ---------------------------------------------------------------------------
+
+export interface BaselineUsage {
+  used: boolean;
+  findings: string[];
+  /** e.g. "U1=clear U2=used U3=clear U4=clear (workflows scanned: 3)" */
+  summary: string;
+  workflows: number;
+}
+
+/**
+ * Whether the current baseline has been used, over the parent and every module /
+ * integration sub-workflow: U1 a tdd / code-generation / code-review / build-and-test
+ * instance is completed or active; U2 a completed test-case-derivation instance has
+ * I13 evidence with a non-empty `characterization`; U3 any evidence records a
+ * `baseline_commit`; U4 any evidence file cannot be parsed (treated as used).
+ */
+export function baselineUsage(projectRoot: string): BaselineUsage {
+  const loaded = loadWorkflowParts(projectRoot);
+  const findings: Record<"U1" | "U2" | "U3" | "U4", string[]> = { U1: [], U2: [], U3: [], U4: [] };
+  const evidence = scanEvidenceFiles(projectRoot);
+  const byPath = new Map(evidence.map((file) => [file.path, file]));
+  for (const part of loaded.parts.values()) {
+    const key = workflowRefKey(part.ref);
+    for (const instance of [...part.state.completed_stage_instances, ...Object.keys(part.state.active_instances || {})]) {
+      if (BASELINE_CONSUMING_STAGES.has(instance.split("@", 1)[0])) findings.U1.push(`${key}: ${instance}`);
+    }
+    for (const instance of part.state.completed_stage_instances.filter((value) => value.split("@", 1)[0] === "test-case-derivation")) {
+      const moduleId = /@module:([a-z0-9][a-z0-9-]*)/.exec(instance)?.[1];
+      const path = moduleId
+        ? `.aidlc/evidence/test-case-derivation/${moduleId}/test-case-derivation.json`
+        : ".aidlc/evidence/test-case-derivation/test-case-derivation.json";
+      const file = byPath.get(path);
+      if (file && !file.error && nonEmpty(asRecord(file.value)?.characterization)) findings.U2.push(`${key}: ${instance} (${path})`);
+    }
+  }
+  for (const file of evidence) {
+    if (file.error) findings.U4.push(`${file.path} ${file.error}`);
+    else if (hasKey(file.value, "baseline_commit")) findings.U3.push(file.path);
+  }
+  const workflows = loaded.parts.size;
+  const ids = ["U1", "U2", "U3", "U4"] as const;
+  return {
+    used: ids.some((id) => findings[id].length > 0),
+    findings: ids.flatMap((id) => findings[id].map((item) => `${id} ${item}`)),
+    summary: `${ids.map((id) => `${id}=${findings[id].length ? "used" : "clear"}`).join(" ")} (workflows scanned: ${workflows})`,
+    workflows,
+  };
+}

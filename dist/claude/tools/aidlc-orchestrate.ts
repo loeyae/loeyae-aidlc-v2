@@ -8,6 +8,7 @@
  *   report [flags]    — Record stage outcome, advance state machine
  *   park              — Park workflow at current inter-stage boundary
  *   split             — Split a single workflow into per-module workflows (4.3.0)
+ *   baseline          — Show / register / replace the workflow baseline commit (4.6.0)
  *
  * State file: <project>/aidlc/active/aidlc-state.md (single layout). After `split`, the
  * global, per-module (aidlc/active/modules/<id>/) and integration workflows are indexed
@@ -31,7 +32,8 @@ import { fileURLToPath } from "url";
 import { planAgentExecution, type AgentExecutionPlan } from "./aidlc-agent-runtime";
 import { SEMANTIC_SENSORS, allowlistedPhaseCommand, phaseObservationDigest } from "./aidlc-evidence";
 import { CANONICAL_SOURCE_PATTERN, resolveSourceRoots } from "./aidlc-source-roots";
-import { commitAncestryErrors, readSourceRevision } from "./aidlc-revision";
+import { COMMIT_ID_PATTERN, commitAncestryErrors, readSourceRevision } from "./aidlc-revision";
+import { baselineUsage, checkBaselineCandidate, currentHeadCommit } from "./aidlc-baseline";
 import {
   evidenceRelativePath,
   isEvidenceArtifactLabel,
@@ -50,6 +52,7 @@ import {
   verifiedModuleIds,
 } from "./aidlc-execution-context";
 import {
+  BASELINE_UNAVAILABLE,
   DIAGRAM_FORMATS,
   ENGINE_VERSION,
   GLOBAL_WORKFLOW,
@@ -205,7 +208,7 @@ const PRD_ELIGIBLE_SCOPES = new Set(FULL_WORKFLOW_SCOPES);
 // Subcommands
 // ---------------------------------------------------------------------------
 
-const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format"] as const;
+const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format", "baseline"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
@@ -216,6 +219,10 @@ const SPLIT_FLAGS = new Set(["from", "dry-run"]);
 const ARCHIVE_FLAGS = new Set(["reason"]);
 const UPGRADE_FLAGS = new Set(["dry-run", "module"]);
 const DIAGRAM_FORMAT_FLAGS = new Set(["set", "user-input"]);
+// `module` is accepted only to reject it with a specific message (baseline is global-only).
+const BASELINE_FLAGS = new Set(["set", "user-input", "reason", "dry-run", "replace", "expect", "module"]);
+/** Appended to every error where the state write succeeded but its audit entry did not. */
+const AUDIT_MISSING = "状态已写入、审计缺失，请人工补记";
 const INTEGRATION_WORKFLOW: WorkflowRef = { kind: "integration" };
 
 // ---------------------------------------------------------------------------
@@ -2049,15 +2056,11 @@ function rootBuildMetadata(): string {
 }
 
 export function buildConditionContext(state: WorkflowState, instance?: StageInstance): ConditionContext {
-  // has_legacy_code: src/ has >10 files pre-existing
-  let has_legacy_code = false;
-  const srcDir = join(PROJECT_ROOT, "src");
-  if (existsSync(srcDir)) {
-    try {
-      const fileCount = countFilesRecursive(srcDir);
-      has_legacy_code = fileCount > 10;
-    } catch { /* inaccessible, treat as no legacy */ }
-  }
+  // has_legacy_code: the resolved source roots hold more than 10 pre-existing files.
+  // Evaluated lazily (only the has_legacy_code condition reads it) so an invalid
+  // source-root configuration fails that condition loudly instead of reading as false.
+  let legacyCode: boolean | undefined;
+  const legacyCodeValue = (): boolean => (legacyCode ??= legacySourceFileCount() > LEGACY_CODE_FILE_THRESHOLD);
 
   // has_ui_requirements: user-stories.md contains 'UI' or '界面'
   const userStoriesPath = contextualConditionPath("docs/aidlc/inception/user-stories.md", instance);
@@ -2174,7 +2177,9 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
   const context_compacted = existsSync(join(PROJECT_ROOT, ".aidlc", "context-compacted"));
 
   return {
-    has_legacy_code,
+    get has_legacy_code() {
+      return legacyCodeValue();
+    },
     has_ui_requirements,
     has_reverse_output,
     multi_module,
@@ -2198,22 +2203,33 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
   };
 }
 
+const LEGACY_CODE_FILE_THRESHOLD = 10;
+/** Build output and dependency directories never count as legacy source. */
+const LEGACY_SCAN_SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build", "target"]);
+
 /**
- * Count files recursively in a directory (non-hidden files only).
+ * Number of distinct files under the project's source roots (module-manifest `paths`
+ * → `.aidlc/source-roots.json` → default `src`). A missing root counts as 0 files; an
+ * invalid configuration (absolute, escaping or symbolic-link root) throws. Nested
+ * roots are counted once, and hidden entries keep being ignored as before.
  */
-function countFilesRecursive(dir: string): number {
-  let count = 0;
-  const entries = readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.name.startsWith(".")) continue;
-    const fullPath = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      count += countFilesRecursive(fullPath);
-    } else if (entry.isFile()) {
-      count++;
+function legacySourceFileCount(): number {
+  const files = new Set<string>();
+  const visit = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith(".") || LEGACY_SCAN_SKIPPED_DIRECTORIES.has(entry.name)) continue;
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) visit(fullPath);
+      else if (entry.isFile()) files.add(fullPath);
     }
+  };
+  for (const sourceRoot of resolveSourceRoots(PROJECT_ROOT).roots) {
+    const path = assertProjectPath(join(PROJECT_ROOT, ...sourceRoot.split("/")));
+    if (!existsSync(path)) continue;
+    if (!lstatSync(path).isDirectory()) throw new Error(`source root is not a directory: ${sourceRoot}`);
+    visit(path);
   }
-  return count;
+  return files.size;
 }
 
 /**
@@ -3183,11 +3199,25 @@ async function handleNext(args: string[]): Promise<Directive> {
     }
     const selectedOptionalStages = withPrd ? ["prd-generation"] : [];
     state = createInitialState(scopeFlag, ENGINE_VERSION, undefined, selectedOptionalStages, workDescription);
+    // Only a new global/single workflow records its baseline; createInitialState stays
+    // baseline-free so module/integration workflows and pre-4.6 states never get one.
+    state.baseline_commit = currentHeadCommit(PROJECT_ROOT);
+    state.baseline_source = "created";
     saveState(state);
+    try {
+      appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "BASELINE_COMMIT_RECORDED", {
+        "Workflow ID": state.workflow_id,
+        Commit: state.baseline_commit,
+        Source: "created",
+      });
+    } catch (error) {
+      return { kind: "error", message: `Workflow ${state.workflow_id} was created with baseline ${state.baseline_commit}, but the BASELINE_COMMIT_RECORDED audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。` };
+    }
     return {
       kind: "print",
       message: `✅ AWS-style lightweight workflow initialized for: ${workDescription}\n` +
         `  PRD option: ${withPrd ? "selected" : "not selected"}\n` +
+        `  Baseline commit: ${state.baseline_commit} (created)\n` +
         `  Executable stages: ${getExecutableStages(graph, scopeFlag, selectedOptionalStages).length}/${graph.stage_count}\n` +
         `  Run 'next' again to get the first stage directive.`,
     };
@@ -4000,7 +4030,15 @@ async function handleUpgrade(args: string[]): Promise<Directive> {
 // diagram-format — record the user's explicit diagram format choice (default mermaid)
 // ---------------------------------------------------------------------------
 
-async function handleDiagramFormat(args: string[]): Promise<Directive> {
+/** Injection points for handlers that write state then audit (tests simulate failures and races). */
+export interface StateWriteHooks {
+  /** Audit writer; defaults to appendAuditEvent. */
+  appendAudit?: typeof appendAuditEvent;
+  /** Runs after every check passed and before the state is re-read for the write. */
+  beforeWrite?: () => void;
+}
+
+export async function handleDiagramFormat(args: string[], hooks: StateWriteHooks = {}): Promise<Directive> {
   const flags = parseFlags(args);
   const invalidFlag = unsupportedFlag(flags, DIAGRAM_FORMAT_FLAGS);
   if (invalidFlag) return { kind: "error", message: `Unsupported diagram-format option: --${invalidFlag}` };
@@ -4026,12 +4064,20 @@ async function handleDiagramFormat(args: string[]): Promise<Directive> {
   }
   state.diagram_format = requested as DiagramFormat;
   saveWorkflowState(PROJECT_ROOT, state, GLOBAL_WORKFLOW);
-  appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "DIAGRAM_FORMAT_SET", {
-    "Workflow ID": state.workflow_id,
-    From: current,
-    To: requested,
-    "User Input": userInput,
-  });
+  try {
+    (hooks.appendAudit || appendAuditEvent)(PROJECT_ROOT, GLOBAL_WORKFLOW, "DIAGRAM_FORMAT_SET", {
+      "Workflow ID": state.workflow_id,
+      From: current,
+      To: requested,
+      "User Input": userInput,
+    });
+  } catch (error) {
+    return {
+      kind: "error",
+      diagram_format: requested,
+      message: `Diagram format ${requested} was saved to the workflow state, but the DIAGRAM_FORMAT_SET audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。`,
+    };
+  }
   return {
     kind: "print",
     diagram_format: requested,
@@ -4039,6 +4085,196 @@ async function handleDiagramFormat(args: string[]): Promise<Directive> {
     message: requested === "svg"
       ? "✅ Diagram format set to svg. Diagrams are delivered through aidlc-diagram-design (SVG source + .diagram.json) and diagram-contract checks the SVG contract; refresh diagram-contract evidence of completed stages if needed."
       : "✅ Diagram format set to mermaid. Diagrams are Mermaid fenced blocks; diagram-contract records not_applicable.",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// baseline — show, register (--set) or correct (--set --replace --expect) the workflow baseline
+// ---------------------------------------------------------------------------
+
+function baselineError(message: string, extra: Record<string, unknown> = {}): Directive {
+  return { kind: "error", message, ...extra };
+}
+
+const UNAVAILABLE_T0_NOTE = "The replacement commit's committer date must be no later than the workflow start (T0); if the workflow was created before the repository's first commit, no valid baseline exists and 需要重新开始工作流 (start a new workflow).";
+
+export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}): Promise<Directive> {
+  const flags = parseFlags(args);
+  if (flags.text) return baselineError(`Unexpected baseline argument: ${flags.text}`);
+  const invalidFlag = unsupportedFlag(flags, BASELINE_FLAGS);
+  if (invalidFlag) return baselineError(`Unsupported baseline option: --${invalidFlag}`);
+  if ("module" in flags) {
+    return baselineError("orchestrate baseline only runs on the global (or single) workflow; module sub-workflows read the parent workflow's baseline and cannot register their own. Drop --module.");
+  }
+  for (const flag of ["dry-run", "replace"]) {
+    if (flag in flags && flags[flag] !== "true") return baselineError(`--${flag} is a boolean flag and does not accept a value`);
+  }
+  const setting = "set" in flags;
+  if (!setting) {
+    const stray = ["replace", "expect", "dry-run", "user-input", "reason"].find((flag) => flag in flags);
+    if (stray) return baselineError(`--${stray} is only valid with --set <commit>`);
+  }
+
+  const state = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!setting) {
+    if (!state) return baselineError("No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\".");
+    const registered = state.baseline_commit !== undefined;
+    return {
+      kind: "print",
+      workflow_id: state.workflow_id,
+      registered,
+      baseline_commit: state.baseline_commit ?? null,
+      baseline_source: state.baseline_source ?? null,
+      message: registered
+        ? `Workflow baseline: ${state.baseline_commit} (source: ${state.baseline_source}).`
+        : "No workflow baseline is registered. Register the commit existing behavior is characterized against with: orchestrate baseline --set <commit> --user-input Approve --reason \"<reason>\" [--dry-run].",
+    };
+  }
+
+  const target = flags.set;
+  if (!COMMIT_ID_PATTERN.test(target)) {
+    return baselineError(`--set must be a full 40- or 64-character lowercase hex commit id; abbreviations, revision expressions (HEAD~3), branch names and options are rejected (got ${JSON.stringify(target)})`);
+  }
+  if (flags["user-input"] !== "Approve") return baselineError("--user-input must be exactly Approve: registering a baseline requires the user's explicit approval.");
+  if (!flags.reason || flags.reason === "true" || !flags.reason.trim()) return baselineError("--reason is required: state why this commit is the baseline.");
+  const replace = "replace" in flags;
+  if (!replace && "expect" in flags) return baselineError("--expect is only valid with --replace");
+  if (replace && (!flags.expect || flags.expect === "true")) return baselineError("--replace requires --expect <current baseline commit>");
+  if (replace && !COMMIT_ID_PATTERN.test(flags.expect) && flags.expect !== BASELINE_UNAVAILABLE) {
+    return baselineError(`--expect must be a full 40- or 64-character lowercase hex commit id, or exactly ${BASELINE_UNAVAILABLE} when correcting an unavailable baseline (got ${JSON.stringify(flags.expect)})`);
+  }
+
+  if (!state) return baselineError("No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\".");
+  if (state.status === "done") return baselineError(`Workflow ${state.workflow_id} is done; its baseline can no longer be registered or replaced.`);
+  if (state.status !== "running" && state.status !== "parked") return baselineError(`Workflow ${state.workflow_id} is ${state.status}; baseline requires a running or parked workflow.`);
+  if (state.workflow_kind && state.workflow_kind !== "global") return baselineError(`aidlc/active/aidlc-state.md is a ${state.workflow_kind} workflow; baseline only runs on the global workflow.`);
+
+  const current = state.baseline_commit;
+  const unchanged = (): Directive => ({
+    kind: "print",
+    workflow_id: state.workflow_id,
+    baseline_commit: current,
+    baseline_source: state.baseline_source,
+    changed: false,
+    message: `Workflow baseline is already ${current}; nothing was written.`,
+  });
+  if (!replace) {
+    if (current === target) return unchanged();
+    if (current !== undefined) {
+      const correction = `orchestrate baseline --set ${target} --replace --expect ${current} --user-input Approve --reason "<why>"`;
+      return baselineError(current === BASELINE_UNAVAILABLE
+        ? `Workflow baseline is ${BASELINE_UNAVAILABLE} (source: ${state.baseline_source}): no commit was available when the workflow started. To correct it, run: ${correction}. ${UNAVAILABLE_T0_NOTE}`
+        : `Workflow baseline is already ${current} (source: ${state.baseline_source}). To correct it, run: ${correction}`);
+    }
+  } else {
+    if (current === undefined) return baselineError("No workflow baseline is registered yet, so there is nothing to replace; use --set <commit> without --replace.");
+    if (flags.expect !== current) return baselineError(`--expect ${flags.expect} does not match the current workflow baseline ${current}`);
+    if (target === current) return unchanged();
+  }
+
+  let usage: ReturnType<typeof baselineUsage> | undefined;
+  if (replace) {
+    usage = baselineUsage(PROJECT_ROOT);
+    if (usage.used) {
+      return baselineError(`Workflow baseline ${current} is already in use and cannot be replaced (${usage.summary}): ${usage.findings.join("; ")}`, { usage_check: usage.summary });
+    }
+  }
+  const checked = checkBaselineCandidate(PROJECT_ROOT, state, target);
+  if ("error" in checked) {
+    const restart = current === BASELINE_UNAVAILABLE && /is later than the workflow start/.test(checked.error) ? `. ${UNAVAILABLE_T0_NOTE}` : "";
+    return baselineError(`Cannot use ${target} as the workflow baseline: ${checked.error}${restart}`);
+  }
+  const candidate = checked.candidate;
+  const anchors = candidate.anchors.length ? candidate.anchors.join(", ") : "none";
+  const checks = {
+    head: candidate.head,
+    committer_date: candidate.committer_date,
+    author_date: candidate.author_date,
+    workflow_started_at: candidate.workflow_started_at,
+    anchor_commits: candidate.anchors,
+    tracked_state_at_commit: candidate.tracked_state,
+    ...(usage ? { usage_check: usage.summary } : {}),
+  };
+  if ("dry-run" in flags) {
+    return {
+      kind: "print",
+      dry_run: true,
+      changed: true,
+      workflow_id: state.workflow_id,
+      baseline_commit: target,
+      ...(replace ? { replaces: current } : {}),
+      checks,
+      message: `🔎 ${target} passes every baseline check (dry run, nothing written). Run the same command without --dry-run to ${replace ? "replace" : "register"} it.`,
+    };
+  }
+
+  hooks.beforeWrite?.();
+  const fresh = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!fresh || fresh.revision !== state.revision) {
+    return baselineError(`workflow state revision conflict: expected ${state.revision}, found ${fresh ? fresh.revision : "no workflow"}; nothing was written, re-run the command.`);
+  }
+  if (fresh.baseline_commit !== current) {
+    return baselineError(`--expect ${current ?? "(none)"} is no longer the workflow baseline (now ${fresh.baseline_commit ?? "none"}); nothing was written.`);
+  }
+  const source = replace ? "replaced" : "registered";
+  const replacementCount = fresh.history.filter((entry) => entry.stage === "baseline" && entry.result === "replaced").length + 1;
+  const previousSource = fresh.baseline_source;
+  fresh.baseline_commit = target;
+  fresh.baseline_source = source;
+  fresh.history.push({ stage: "baseline", result: source, timestamp: new Date().toISOString(), user_input: "Approve" });
+  try {
+    saveWorkflowState(PROJECT_ROOT, fresh, GLOBAL_WORKFLOW, { baselineWrite: true });
+  } catch (error) {
+    return baselineError(`${error instanceof Error ? error.message : String(error)}; nothing was written, re-run the command.`);
+  }
+
+  const dates = {
+    "Committer Date (self-reported)": candidate.committer_date,
+    "Author Date (self-reported)": candidate.author_date,
+    "Workflow Started At": candidate.workflow_started_at,
+    "Anchor Commits": anchors,
+    "Tracked State At Commit": candidate.tracked_state,
+  };
+  const event = replace ? "BASELINE_COMMIT_REPLACED" : "BASELINE_COMMIT_SET";
+  const fields: Record<string, string> = replace
+    ? {
+      "Workflow ID": fresh.workflow_id,
+      From: current as string,
+      "From Source": previousSource || "-",
+      To: target,
+      Expected: flags.expect,
+      "HEAD At Replacement": candidate.head,
+      ...dates,
+      "Usage Check": usage!.summary,
+      "Replacement Count": String(replacementCount),
+      Reason: flags.reason.trim(),
+      "User Input": "Approve",
+    }
+    : {
+      "Workflow ID": fresh.workflow_id,
+      Commit: target,
+      Source: source,
+      "HEAD At Registration": candidate.head,
+      ...dates,
+      Reason: flags.reason.trim(),
+      "User Input": "Approve",
+    };
+  try {
+    (hooks.appendAudit || appendAuditEvent)(PROJECT_ROOT, GLOBAL_WORKFLOW, event, fields);
+  } catch (error) {
+    return baselineError(`Workflow baseline ${target} was saved to the workflow state, but the ${event} audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。`, { baseline_commit: target, baseline_source: source });
+  }
+  return {
+    kind: "print",
+    changed: true,
+    workflow_id: fresh.workflow_id,
+    baseline_commit: target,
+    baseline_source: source,
+    ...(replace ? { replaced: current, replacement_count: replacementCount } : {}),
+    checks,
+    message: replace
+      ? `✅ Workflow baseline replaced: ${current} → ${target} (replacement #${replacementCount}).`
+      : `✅ Workflow baseline registered: ${target}.`,
   };
 }
 
@@ -4092,7 +4328,7 @@ async function main() {
     console.error(
       JSON.stringify({
         kind: "error",
-        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|archive|split|upgrade|diagram-format> [args...]",
+        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|archive|split|upgrade|diagram-format|baseline> [args...]",
       })
     );
     process.exit(1);
@@ -4122,6 +4358,9 @@ async function main() {
       break;
     case "diagram-format":
       directive = await handleDiagramFormat(rest);
+      break;
+    case "baseline":
+      directive = await handleBaseline(rest);
       break;
     case "continue":
       directive = await handleContinue(rest[0] || "");

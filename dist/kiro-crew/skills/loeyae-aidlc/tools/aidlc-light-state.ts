@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
+import { COMMIT_ID_PATTERN } from "./aidlc-revision";
 
 export interface HistoryEntry {
   stage: string;
@@ -46,6 +47,16 @@ export type WorkflowKind = "global" | "module" | "integration";
 export type DiagramFormat = "mermaid" | "svg";
 export const DIAGRAM_FORMATS: readonly DiagramFormat[] = ["mermaid", "svg"];
 
+/**
+ * How the workflow baseline commit was recorded: automatically when `next --scope`
+ * created the workflow, registered later with `orchestrate baseline --set`, or
+ * corrected with `orchestrate baseline --set --replace --expect`.
+ */
+export type BaselineSource = "created" | "registered" | "replaced";
+export const BASELINE_SOURCES: readonly BaselineSource[] = ["created", "registered", "replaced"];
+/** Baseline commit value of a workflow created outside a git repository. */
+export const BASELINE_UNAVAILABLE = "unavailable";
+
 export type WorkflowRef = { kind: "global" } | { kind: "module"; module_id: string } | { kind: "integration" };
 
 export const GLOBAL_WORKFLOW: WorkflowRef = { kind: "global" };
@@ -63,6 +74,9 @@ export interface WorkflowState {
   module_id?: string;
   parent_workflow_id?: string;
   diagram_format?: DiagramFormat;
+  /** Global/single workflows only; both baseline fields are present or both absent. */
+  baseline_commit?: string;
+  baseline_source?: BaselineSource;
   revision: number;
   scope: string;
   depth: string;
@@ -160,6 +174,36 @@ function parseHistory(markdown: string): HistoryEntry[] {
 
 export function markdownScalar(markdown: string, label: string, required = true): string {
   return scalar(markdown, label, required);
+}
+
+/** A scalar line that may be absent (undefined) or present with any value, including empty. */
+function presentScalar(markdown: string, label: string): string | undefined {
+  const match = new RegExp(`^- ${label}:[ \\t]*(.*)$`, "m").exec(markdown);
+  return match ? match[1].replace(/^`|`$/g, "").trim() : undefined;
+}
+
+function subWorkflowBaselineError(kind: string): Error {
+  return new Error(`${kind} sub-workflow state must not carry Baseline Commit / Baseline Source; the workflow baseline belongs to the global workflow`);
+}
+
+/**
+ * Structural rules of the workflow baseline, shared by parsing and saving: both fields
+ * or neither; the commit is a full lowercase hex id or "unavailable"; the source is
+ * created / registered / replaced; module and integration sub-workflows carry none.
+ */
+export function assertBaselineFields(state: Pick<WorkflowState, "baseline_commit" | "baseline_source" | "workflow_kind">): void {
+  const hasCommit = state.baseline_commit !== undefined;
+  const hasSource = state.baseline_source !== undefined;
+  if (!hasCommit && !hasSource) return;
+  if (state.workflow_kind === "module" || state.workflow_kind === "integration") throw subWorkflowBaselineError(state.workflow_kind);
+  if (hasCommit !== hasSource) throw new Error("Baseline Commit and Baseline Source must both be present or both be absent");
+  const commit = state.baseline_commit as string;
+  if (commit !== BASELINE_UNAVAILABLE && !COMMIT_ID_PATTERN.test(commit)) {
+    throw new Error(`Baseline Commit must be a 40- or 64-character lowercase hex commit id or "${BASELINE_UNAVAILABLE}", got ${JSON.stringify(commit)}`);
+  }
+  if (!(BASELINE_SOURCES as readonly string[]).includes(state.baseline_source as string)) {
+    throw new Error(`Baseline Source must be one of ${BASELINE_SOURCES.join(", ")}, got ${JSON.stringify(state.baseline_source)}`);
+  }
 }
 
 export function markdownTable(markdown: string, title: string): string[][] {
@@ -293,6 +337,13 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
   const parentWorkflow = scalar(markdown, "Parent Workflow ID", false);
   const diagramFormat = scalar(markdown, "Diagram Format", false);
   if (diagramFormat && !(DIAGRAM_FORMATS as readonly string[]).includes(diagramFormat)) throw new Error(`invalid diagram format: ${diagramFormat}`);
+  const baselineCommit = presentScalar(markdown, "Baseline Commit");
+  const baselineSource = presentScalar(markdown, "Baseline Source");
+  assertBaselineFields({
+    baseline_commit: baselineCommit,
+    baseline_source: baselineSource as BaselineSource | undefined,
+    workflow_kind: (kind || undefined) as WorkflowKind | undefined,
+  });
   return {
     format: "markdown-workflow",
     version: scalar(markdown, "Engine Version"),
@@ -302,6 +353,7 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
     ...(workflowModule ? { module_id: workflowModule } : {}),
     ...(parentWorkflow ? { parent_workflow_id: parentWorkflow } : {}),
     ...(diagramFormat ? { diagram_format: diagramFormat as DiagramFormat } : {}),
+    ...(baselineCommit !== undefined ? { baseline_commit: baselineCommit, baseline_source: baselineSource as BaselineSource } : {}),
     revision,
     scope,
     depth: scalar(markdown, "Depth"),
@@ -344,7 +396,7 @@ export function renderLightWorkflowState(state: WorkflowState): string {
 - Status: ${state.status}
 - Revision: ${state.revision}
 - Engine Version: ${clean(state.version)}
-${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}${state.diagram_format ? `- Diagram Format: ${state.diagram_format}\n` : ""}- Depth: ${clean(state.depth)}
+${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}${state.diagram_format ? `- Diagram Format: ${state.diagram_format}\n` : ""}${state.baseline_commit !== undefined ? `- Baseline Commit: ${clean(state.baseline_commit)}\n- Baseline Source: ${clean(state.baseline_source || "")}\n` : ""}- Depth: ${clean(state.depth)}
 - Current Phase: ${clean(state.current_phase)}
 - Current Stage: ${cell(state.current_stage)}
 - Current Instance: ${cell(state.current_stage_instance)}
@@ -439,7 +491,28 @@ export function loadWorkflowState(projectRoot: string, ref: WorkflowRef = GLOBAL
   return parseLightWorkflowState(readFileSync(path, "utf8"));
 }
 
-export function saveWorkflowState(projectRoot: string, state: WorkflowState, ref: WorkflowRef = GLOBAL_WORKFLOW): void {
+export interface SaveWorkflowOptions {
+  /**
+   * Only `orchestrate baseline` sets this: it may register or replace the baseline.
+   * Every other save must keep Baseline Commit / Baseline Source exactly as persisted.
+   */
+  baselineWrite?: boolean;
+}
+
+function assertBaselinePreserved(existing: WorkflowState | null, state: WorkflowState, ref: WorkflowRef, options: SaveWorkflowOptions): void {
+  assertBaselineFields(state);
+  if (ref.kind !== "global" && (state.baseline_commit !== undefined || state.baseline_source !== undefined)) throw subWorkflowBaselineError(ref.kind);
+  if (options.baselineWrite) return;
+  if (existing) {
+    if (existing.baseline_commit !== state.baseline_commit || existing.baseline_source !== state.baseline_source) {
+      throw new Error("the workflow baseline can only be changed by orchestrate baseline; an ordinary save must keep Baseline Commit / Baseline Source unchanged");
+    }
+  } else if (state.baseline_source !== undefined && state.baseline_source !== "created") {
+    throw new Error(`a new workflow can only record a created baseline, got Baseline Source ${state.baseline_source}`);
+  }
+}
+
+export function saveWorkflowState(projectRoot: string, state: WorkflowState, ref: WorkflowRef = GLOBAL_WORKFLOW, options: SaveWorkflowOptions = {}): void {
   const path = lightStatePath(projectRoot, ref);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const lock = acquireLock(`${path}.lock`);
@@ -448,6 +521,7 @@ export function saveWorkflowState(projectRoot: string, state: WorkflowState, ref
     const existing = loadWorkflowState(projectRoot, ref);
     if (existing && existing.revision !== state.revision) throw new Error(`workflow state revision conflict: expected ${state.revision}, found ${existing.revision}`);
     if (!existing && state.revision !== 0) throw new Error(`workflow state is missing at revision ${state.revision}`);
+    assertBaselinePreserved(existing, state, ref, options);
     const next = { ...state, version: ENGINE_VERSION, revision: state.revision + 1, updated_at: new Date().toISOString() };
     appendAudit(projectRoot, next, ref);
     writeFileSync(temporary, renderLightWorkflowState(next), { encoding: "utf8", flag: "wx", mode: 0o600 });
