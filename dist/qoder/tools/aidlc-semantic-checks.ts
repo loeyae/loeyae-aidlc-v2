@@ -815,18 +815,56 @@ function testQuality(): Record<string, unknown> {
   if (cases.length === 0) fail("no UC-D identifiers found in test case files");
   const greenRecords = evidenceRecords("code-generation", "green-test-evidence").filter((record) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT)));
   const redRecords = evidenceRecords("tdd", "red-test-evidence").filter((record) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT)));
+  const baselineRecords = evidenceRecords("tdd", "baseline-test-evidence").filter((record) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT)));
   if (greenRecords.length === 0) fail("GREEN evidence is missing for test-quality");
   if (redRecords.length === 0) fail("RED evidence is missing for test-quality");
   const greenRequired = greenRecords.filter((record) => record.status === "passed");
   if (greenRequired.length === 0 || greenRequired.some((record) => record.phase !== "GREEN" || record.tests_failed !== 0)) fail("GREEN evidence is not passing");
-  if (redRecords.some((record) => record.status !== "failed" || record.phase !== "RED" || record.failure_class !== "behavior")) fail("RED evidence is not a controlled behavior failure");
+  // 4.6.0 S3b: RED is demanded by the tdd_mode new UC-Ds and BASELINE by the
+  // characterization UC-Ds of each module's required I13 (without ucd_modes every UC-D is new).
+  const modesByModule = new Map<string, { new: string[]; characterization: string[] }>();
+  for (const record of allI13.filter((value) => value.status === "required")) {
+    modesByModule.set(String(record.module_id ?? ACTIVE_MODULE ?? ""), i13ModeIds(record));
+  }
+  const modesOf = (record: Record<string, unknown>) => modesByModule.get(String(record.module_id ?? ACTIVE_MODULE ?? ""));
+  for (const record of redRecords) {
+    const modes = modesOf(record);
+    if (modes && modes.new.length === 0) {
+      if (record.status !== "not_required" || record.phase !== "RED") fail(`RED evidence of module ${String(record.module_id)} must be not_required: its I13 declares no tdd_mode new UC-D`);
+    } else if (record.status !== "failed" || record.phase !== "RED" || record.failure_class !== "behavior") {
+      fail("RED evidence is not a controlled behavior failure");
+    }
+  }
+  for (const [moduleId, modes] of modesByModule) {
+    if (modes.characterization.length === 0) continue;
+    if (!baselineRecords.some((record) => String(record.module_id ?? ACTIVE_MODULE ?? "") === moduleId)) fail(`BASELINE evidence is missing for test-quality: module ${moduleId} declares tdd_mode characterization UC-Ds (${modes.characterization.join(", ")})`);
+  }
+  for (const record of baselineRecords) {
+    const modes = modesOf(record);
+    if (modes && modes.characterization.length > 0) {
+      if (record.status !== "passed" || record.phase !== "BASELINE" || record.tests_failed !== 0) fail(`BASELINE evidence of module ${String(record.module_id)} is not passing for the tdd_mode characterization UC-Ds (${modes.characterization.join(", ")})`);
+    } else if (record.status !== "not_required") {
+      fail(`BASELINE evidence of module ${String(record.module_id)} must be not_required: its I13 declares no tdd_mode characterization UC-D`);
+    }
+  }
+  const modes = [...modesByModule.values()];
+  const redSeen = modes.length === 0 || modes.some((mode) => mode.new.length > 0);
+  const baselineSeen = modes.some((mode) => mode.characterization.length > 0);
   const mapping = cases.map((useCase) => {
     const matches = testFiles.filter((path) => new RegExp(`\\b${useCase}\\b`).test(text(path)));
     if (matches.length === 0) fail(`${useCase} has no test source mapping`);
     return { use_case: useCase, test_methods: matches.map(relativePath) };
   });
   const testsTotal = greenRequired.reduce((total, record) => total + numberValue(record.tests_total, "green-test-evidence.tests_total"), 0);
-  return { status: "passed", red_seen: true, green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping };
+  return { status: "passed", red_seen: redSeen, baseline_seen: baselineSeen, green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping };
+}
+
+/** UC-D ids of a required I13 record by tdd_mode; I13 without ucd_modes predates 4.6 and is all new. */
+function i13ModeIds(record: Record<string, unknown>): { new: string[]; characterization: string[] } {
+  const ids = Array.isArray(record.ucd_ids) ? record.ucd_ids.filter((id): id is string => typeof id === "string") : [];
+  const modes = record.ucd_modes && typeof record.ucd_modes === "object" && !Array.isArray(record.ucd_modes) ? record.ucd_modes as Record<string, unknown> : undefined;
+  if (!modes) return { new: ids, characterization: [] };
+  return { new: ids.filter((id) => modes[id] === "new"), characterization: ids.filter((id) => modes[id] === "characterization") };
 }
 
 function phaseEvidenceCheck(sensor: "red-test-evidence" | "green-test-evidence" | "baseline-test-evidence"): Record<string, unknown> {

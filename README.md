@@ -141,6 +141,14 @@ loeyae-aidlc orchestrate report --stage <slug> --result completed
 - 构建/测试/检查命令清单按 `--config` → `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找；RED/GREEN 命令清单只按 `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找，显式 `--config` 仅在指向同一文件时被接受，否则 producer 直接拒绝。文件中的 `stage` 必须与当前阶段一致。
 - `mode: review` 的代码审查记录须声明 `execution_context: isolated` 与 `review_only: true`。
 
+### 新行为与存量行为（RED / BASELINE / GREEN）
+
+I13 的每个 UC-D 带 `tdd_mode`：新行为（`new`，默认）走 RED→GREEN，存量行为（`characterization`，须声明 `code_refs`、`reason`、`approval_ref`，并绑定到工作流基线）走 BASELINE→GREEN，不再提供"重构可豁免 TDD"的豁免。
+
+- `tdd` 阶段的 `.aidlc/commands/tdd.json`：有 `new` UC-D 时声明恰好一条 `role: red`，有 characterization UC-D 时声明恰好一条 `role: baseline`。BASELINE 在修改任何 code ref 之前运行：producer 先用 `git hash-object` 比对 code ref 与基线 blob，不一致直接拒绝；命令须退出 0。某一模式没有 UC-D 时对应证据自动为 `not_required`。
+- `code-generation` 的唯一 `role: green` 命令须覆盖全部 UC-D；完成时连同 RED 复验 BASELINE。`test-quality` 按 `ucd_modes` 要求 RED failed / BASELINE passed。
+- 存量工作流（4.6 之前创建、没有基线）先执行 `loeyae-aidlc orchestrate baseline --set <sha> --user-input Approve --reason "<原因>"` 登记基线，再派生 characterization UC-D。split 布局的模块子工作流继承父工作流基线。
+
 ## Worktree 与 merge plan
 
 ```bash

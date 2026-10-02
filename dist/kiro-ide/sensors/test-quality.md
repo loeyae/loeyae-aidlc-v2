@@ -26,6 +26,7 @@ not just exit codes.
   "timestamp": "2026-08-22T12:00:00.000Z",
   "status": "passed",
   "red_seen": true,
+  "baseline_seen": false,
   "green_seen": true,
   "tests_total": 48,
   "tests_failed": 0,
@@ -59,7 +60,8 @@ For a unit with no executable business behavior, the controlled evidence may ins
 | `green_seen` | Must be `true` for executable behavior |
 | `tests_total` | >= 1 for executable behavior |
 | `tests_failed` | Must be 0 for executable behavior |
-| `red_seen` | Must be `true` for executable behavior; no free-form exemption replaces I13 |
+| `red_seen` | Must be `true` when I13 declares a `tdd_mode: new` UC-D (pre-4.6 I13 without `ucd_modes`: every UC-D is new; no readable required I13: always); no free-form exemption replaces I13 |
+| `baseline_seen` | Must be `true` when I13 declares a `tdd_mode: characterization` UC-D |
 | `traceability_complete` | Must be `true` |
 | `uc_mapping` | Non-empty for executable behavior; empty only for `not_applicable` |
 | `timestamp` | Valid ISO, < 24h old |
@@ -68,7 +70,7 @@ For a unit with no executable business behavior, the controlled evidence may ins
 
 The agent MUST:
 1. Consume the I13 evidence before evaluating tests
-2. For executable behavior, require the controlled RED phase before GREEN
+2. For executable behavior, judge each module by its I13 `ucd_modes`: `new` UC-Ds require the controlled RED evidence (`status: failed`, behavior failure) before GREEN; `characterization` UC-Ds require the controlled BASELINE evidence (`status: passed`, `tests_failed: 0`); a phase whose mode has no UC-D must be `not_required`
 3. Verify the GREEN evidence and actual test source mapping for every UC-D
 4. For `not_applicable`, verify the I13 reason and deterministic alternative validation
 5. Never fabricate the UC mapping or accept a text-only TDD claim

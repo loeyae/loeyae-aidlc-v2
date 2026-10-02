@@ -22,17 +22,23 @@ requires: [test-case-derivation]
 
 # RED 测试门禁（原 TDD 阶段）
 
-本阶段位于 GREEN 代码生成之前，负责把 I13 的 UC-D 转换为真实测试，并由受控命令观察测试因目标行为尚未实现而失败。生产代码不得在本阶段前置生成；GREEN 由 `code-generation` 阶段负责。
+本阶段位于 GREEN 代码生成之前，负责把 I13 的 UC-D 转换为真实测试，并按 UC-D 的 `tdd_mode` 由受控命令观察：
+
+- **新行为**（`tdd_mode: new`，默认）：RED→GREEN。测试因目标行为尚未实现而失败（RED），`code-generation` 实现后通过（GREEN）。
+- **存量行为**（`tdd_mode: characterization`）：BASELINE→GREEN。改动前在未修改的基线代码上运行刻画测试并全部通过（BASELINE），`code-generation` 改动后仍须通过（GREEN）。
+
+不再提供"重构/存量代码可豁免 TDD"的豁免：重构、bug 修复中保留的存量行为都必须以 characterization UC-D 走 BASELINE。生产代码不得在本阶段前置生成；GREEN 由 `code-generation` 阶段负责。
 
 纯声明、纯样式或纯配置等无可执行业务行为的单元，必须消费 I13 的结构化 `not_applicable`/豁免证据，并执行其中声明的确定性替代验证；不得通过省略测试或文字说明静默跳过。
 
 ## 本阶段完成标准
 
 - I13 的 `test-case-derivation.json` 已通过并明确为 `required` 或结构化 `not_applicable`
-- `required` 时，真实测试已生成，至少关联一个 ready UC-D，且受控 RED 命令以 `failure_class: behavior` 失败
+- `required` 且有 `new` UC-D 时，真实测试已生成，受控 RED 命令以 `failure_class: behavior` 失败，`uc_mapping` 恰好覆盖全部 `new` UC-D；没有 `new` UC-D 时 RED 证据为 `not_required`
+- `required` 且有 `characterization` UC-D 时，受控 BASELINE 命令在 I13 记录的基线 blob 未改动的代码上退出 0、`tests_failed=0`，`uc_mapping` 恰好覆盖全部 characterization UC-D；没有 characterization UC-D 时 BASELINE 证据为 `not_required`
 - RED 失败的 `compile_status` 和 `environment_status` 均为 `passed`，不能由编译、环境或命令错误充当 RED
 - `not_applicable` 时，必须有非适用理由、批准依据和确定性替代验证
-- 只有本阶段证据通过，GREEN 代码生成阶段才可进入
+- 只有本阶段证据（`red-test-evidence`、`baseline-test-evidence`）都通过，GREEN 代码生成阶段才可进入
 
 ## 铁律
 
@@ -75,7 +81,7 @@ describe('UC-D-003 超出配额拒绝请求', () => {
 - Construction 末尾对账（见 `construction-code-review.md` 全局审查）要校验"每个 UC-D 都有对应测试且通过"，没有标记就无法校验
 - 没有溯源的测试回答"代码做了什么"，有溯源的测试回答"产品要的有没有被验证"——这是本质区别
 
-**豁免**（需用户明确许可）：纯重构不新增行为、纯配置文件。豁免时必须在审计文件记录"本测试无 UC-D 关联，理由：XXX"。
+**不提供豁免**：新行为 RED→GREEN，存量行为 BASELINE→GREEN。纯重构不新增行为时，被改动的存量行为同样必须由 characterization UC-D 关联测试，不能以"本测试无 UC-D 关联"跳过；无可执行业务行为的单元只能走 I13 结构化 `not_applicable`。
 
 **违反处理**：测试没有用例点标记 = 红旗信号，按"跳过 TDD"同等处理——补标记或删除测试重写。
 
@@ -90,10 +96,10 @@ describe('UC-D-003 超出配额拒绝请求', () => {
 一旦声明包含默认方法、构造器或静态方法中的业务逻辑，或涉及数据访问、网络调用、状态转换等可执行行为，即必须完成本阶段 RED 门禁并移交 `code-generation` 执行 GREEN。该条件不构成对任何业务代码的 TDD 豁免。
 
 **始终适用：**
-- 新功能
-- Bug 修复
-- 重构
-- 行为变更
+- 新功能（`new`：RED→GREEN）
+- Bug 修复（复现 bug 的 `new` UC-D 走 RED→GREEN，被保留的存量行为走 BASELINE→GREEN）
+- 重构（存量行为以 `characterization` UC-D 走 BASELINE→GREEN）
+- 行为变更（`new`：RED→GREEN）
 
 **豁免场景（需用户明确许可）：**
 - 一次性原型
@@ -174,6 +180,27 @@ void testCreate() {
 退出码、失败分类和测试计数均由 evidence producer 复核；编译失败、环境失败、命令找不到或缺少结构化观察对象均不构成 RED。
 
 测试通过了？说明没有观察到目标行为缺失，RED 门禁失败。测试报错了？修正测试或环境后重跑，直到得到明确的行为断言失败。
+
+`uc_mapping` 必须恰好覆盖 I13 中全部 `new` UC-D（缺 `ucd_modes` 的旧 I13 视为全部 `new`），不得包含 characterization UC-D。I13 没有 `new` UC-D 时，RED 由 producer 写为 `status: "not_required"`、`ucd_ids: []`，不执行命令。
+
+### 验证 BASELINE — 存量行为刻画
+
+I13 中有 `tdd_mode: characterization` 的 UC-D 时，在修改任何 code ref 之前运行 `evidence run --stage tdd --sensor baseline-test-evidence`（`report` 也会自动产出）。命令清单 `.aidlc/commands/tdd.json` 须声明恰好一条 `role: baseline` 命令，命令输出：
+
+```json
+{
+  "phase": "BASELINE",
+  "status": "passed",
+  "compile_status": "passed",
+  "environment_status": "passed",
+  "tests_total": 3,
+  "tests_failed": 0,
+  "traceability_complete": true,
+  "uc_mapping": [{"use_case": "UC-D-003", "test_methods": ["tests/test_exporter.py::test_pagination"]}]
+}
+```
+
+执行命令之前，producer 用 `git hash-object` 计算 I13 `characterization[]` 中每个 code ref 的当前工作区 blob，任一与 `baseline_blob` 不同就直接失败、不出证据——BASELINE 只能观察未改动的基线代码。命令须退出 0，`uc_mapping` 恰好覆盖全部 characterization UC-D。没有 characterization UC-D 时 BASELINE 为 `not_required`，清单也不必声明 `role: baseline`。契约详见 `sensors/baseline-test-evidence.md`。
 
 ### GREEN 与 REFACTOR
 
@@ -341,11 +368,12 @@ pnpm test -- --run --coverage
 ## Bug 修复的 TDD 流程
 
 ```
-1. 写一个重现 bug 的失败测试
-2. 验证 RED：确认测试因为 bug 而失败
-3. 修复 bug（最小改动）
-4. 验证 GREEN：测试通过
-5. 验证无回归：所有其他测试通过
+1. 为要保留的存量行为写 characterization 测试，验证 BASELINE：在未修改的代码上通过
+2. 写一个重现 bug 的失败测试（new UC-D）
+3. 验证 RED：确认测试因为 bug 而失败
+4. 修复 bug（最小改动）
+5. 验证 GREEN：新测试与 characterization 测试全部通过
+6. 验证无回归：所有其他测试通过
 ```
 
 **绝不在没有测试的情况下修复 bug。** 测试证明修复有效，并防止回归。

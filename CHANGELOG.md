@@ -39,6 +39,12 @@
   - tdd 门禁：RED 的 `uc_mapping` 须恰好覆盖全部 `new` UC-D、不得包含 characterization，RED `not_required` 仅在无 `new` 时接受。BASELINE 的 producer / checker / provenance 契约同 RED；`observed_command` 绑定 `role: baseline` 且 `exit_code=0`；`uc_mapping` 恰好覆盖全部 characterization UC-D、不得包含 `new`；`baseline_commit` 在状态（`workflowBaselineForModule`）、I13、证据三处一致并通过 `baselineCommitErrors`；`code_ref_digests` 与 I13 code ref 一一对应、`worktree_blob == baseline_blob`，且门禁现场重新解析基线 blob 比对；BASELINE `not_required` 仅在 I13 无 characterization 时接受。缺 `ucd_modes` 的旧 I13 视为全部 `new`。
   - `checkSensors` 按阶段声明的全部 sensor 复验 tdd 实例，因此 code-generation 完成时对 RED 的漂移容忍复验（现有 2 个调用点）同时覆盖 BASELINE。
 - 新增回归测试 `tests/test_v4_6_0_baseline_evidence.ts` 并加入 `npm test`。
+- **下游门禁按 `tdd_mode` 判定（S3b）**：
+  - code-generation GREEN：I13 为 `required` 时，`uc_mapping` 须恰好覆盖 I13 全部 UC-D（`new` 与 characterization），漏写、多写或重复都会被拒。
+  - code-generation 完成与 re-attest 时连同 RED 复验 BASELINE（仍只有原有 2 个 `tolerateRevisionDrift` 调用点）：只容忍工作区漂移，`source_revision.commit` 须为 HEAD 或其祖先，`producer.mode` 等 provenance 与基线绑定照常校验；基线被替换后，旧基线下产出的 BASELINE 证据被拒。`next` 复验上游维持严格模式，不容忍漂移。
+  - test-quality：checker 按各模块 I13 `ucd_modes` 判定——有 `new` UC-D 时要求 RED `failed`（behavior），没有时 RED 须为 `not_required`；有 characterization UC-D 时要求 BASELINE `passed`、`tests_failed=0`，没有时须为 `not_required`；证据新增 `baseline_seen`，`red_seen` 只在有 `new` UC-D 时为 true。门禁按同一规则要求 `red_seen` / `baseline_seen`（读不到 required I13 时仍要求 `red_seen`）。每个 UC-D 都须有测试映射的规则不变。
+- **文档（S3b）**：`construction-tdd.md` 统一为"新行为 RED→GREEN，存量行为 BASELINE→GREEN，不再提供豁免"，删去"纯重构不新增行为可豁免"，并补充 BASELINE 步骤与 bug 修复流程；新增 `sensors/baseline-test-evidence.md`；`red-test-evidence.md`、`green-test-evidence.md`、`test-quality.md`、`skills/aidlc-build-test-evidence/SKILL.md`（`role: baseline`、characterization 流程）与 README 同步更新。
+- 新增端到端回归测试 `tests/test_v4_6_0_downstream.ts` 并加入 `npm test`：(a) refactor（Python `app/`、无 `src/`、全部 characterization），(b) bugfix（`new` 与 characterization 混合，含 S3b 负向用例及以真实 BASELINE 证据触发的 U3 `--replace` 拒绝），(c) 存量工作流先 `orchestrate baseline --set` 再走完全程，(d) split 布局模块子工作流继承父工作流基线；均只用受控 producer 产证，跑到 implementation-report 完成。
 
 ### Upgrade notes
 
@@ -50,6 +56,8 @@
 - **RED 新增 `uc_mapping` 覆盖检查（S3a）**：tdd 门禁要求 RED 的 `uc_mapping` 恰好覆盖 I13 中全部 `new` UC-D（缺 `ucd_modes` 的旧 I13 即全部 UC-D），多写或漏写都会被拒；请让 red 命令输出的映射与 I13 一致后重新产证。
 - **tdd 阶段新增 `baseline-test-evidence.json` 产物（S3a）**：没有 characterization UC-D 时为 `not_required`，由 `report` 自动产出，无需新增命令清单条目；有 characterization UC-D 时须在 `.aidlc/commands/tdd.json` 声明恰好一条 `role: baseline` 命令。
 - **已完成的 tdd 实例需补齐 BASELINE 证据（S3a）**：升级前完成的 tdd 实例没有该产物，`next` 复验上游时会阻断（不提供按证据版本的兼容豁免）。对每个已完成的 tdd 实例执行 `loeyae-aidlc evidence run --stage tdd --module <id> --unit <id> --sensor baseline-test-evidence --refresh` 补齐后再继续。
+- **GREEN 新增全部 UC-D 覆盖检查（S3b）**：green 命令输出的 `uc_mapping` 须与 I13 的 `ucd_ids` 完全一致；只映射部分 UC-D 的 GREEN 证据会被拒，请修正命令输出后重新产证。
+- **test-quality 证据新增 `baseline_seen`（S3b）**：升级前产出的 test-quality 证据没有该字段，若模块有 characterization UC-D，门禁会要求重新产证（`evidence run --stage <code-generation|code-review|build-and-test> ... --sensor test-quality --refresh`）。未声明 `tdd_mode` 的项目行为不变。
 
 ## 4.5.4
 

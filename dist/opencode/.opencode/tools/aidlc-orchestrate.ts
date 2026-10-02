@@ -994,19 +994,38 @@ function isEvidenceArtifact(path: string): boolean {
   return isEvidenceArtifactLabel(artifactLabel(path));
 }
 
-function i13Applicability(instance: StageInstance): { any: boolean; allNotApplicable: boolean } {
+/** I13 evidence records relevant to an instance: its module's, or every module's on the project axis. */
+function i13Records(instance: StageInstance): Record<string, unknown>[] {
   const root = join(PROJECT_ROOT, ".aidlc", "evidence", "test-case-derivation");
-  if (!existsSync(root)) return { any: false, allNotApplicable: false };
+  if (!existsSync(root)) return [];
   const paths = instance.module_id
     ? [join(root, instance.module_id, "test-case-derivation.json")]
     : collectFiles(root).filter((path) => path.endsWith("test-case-derivation.json"));
-  const records = paths.flatMap((path) => {
+  return paths.flatMap((path) => {
     try {
       const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
       return value && typeof value === "object" && !Array.isArray(value) ? [value] : [];
     } catch { return []; }
   });
+}
+
+function i13Applicability(instance: StageInstance): { any: boolean; allNotApplicable: boolean } {
+  const records = i13Records(instance);
   return { any: records.length > 0, allNotApplicable: records.length > 0 && records.every((record) => record.status === "not_applicable") };
+}
+
+/**
+ * Which phase evidence the required I13 records demand: RED for tdd_mode new UC-Ds,
+ * BASELINE for characterization UC-Ds. `known` is false when no required I13 record
+ * is readable (callers then keep requiring RED).
+ */
+function i13PhaseNeeds(instance: StageInstance): { known: boolean; red: boolean; baseline: boolean } {
+  const modes = i13Records(instance).filter((record) => record.status === "required").map((record) => i13UcdIdsByMode(record));
+  return {
+    known: modes.length > 0,
+    red: modes.some((mode) => mode.new.length > 0),
+    baseline: modes.some((mode) => mode.characterization.length > 0),
+  };
 }
 
 const UCD_MODES = new Set(["new", "characterization"]);
@@ -1119,7 +1138,7 @@ function moduleI13Evidence(instance: StageInstance): I13Context {
 }
 
 /** `uc_mapping` must name exactly `expected` (by use_case), no more and no less. */
-function ucMappingCoverageErrors(evidence: Evidence, phase: Phase, mode: "new" | "characterization", expected: string[]): string[] {
+function ucMappingCoverageErrors(evidence: Evidence, requirement: string, expected: string[]): string[] {
   const named = (Array.isArray(evidence.uc_mapping) ? evidence.uc_mapping : []).map((entry) => asNonEmptyString(asRecord(entry)?.use_case) || "");
   const missing = expected.filter((id) => !named.includes(id));
   const unexpected = [...new Set(named.filter((id) => !expected.includes(id)))].map((id) => id || "(entry without use_case)");
@@ -1130,7 +1149,7 @@ function ucMappingCoverageErrors(evidence: Evidence, phase: Phase, mode: "new" |
     unexpected.length ? `unexpected ${unexpected.join(", ")}` : "",
     duplicated.length ? `duplicated ${duplicated.join(", ")}` : "",
   ].filter(Boolean).join("; ");
-  return [`${phase} uc_mapping must cover exactly the tdd_mode ${mode} UC-Ds (${expected.join(", ") || "none"}): ${detail}`];
+  return [`${requirement} (${expected.join(", ") || "none"}): ${detail}`];
 }
 
 /**
@@ -1192,8 +1211,9 @@ function phaseEvidenceErrors(
 ): string[] {
   const errors: string[] = [];
   // RED covers the tdd_mode new UC-Ds and BASELINE the characterization UC-Ds of I13
-  // (4.6.0 S3a); I13 without ucd_modes predates 4.6 and means every UC-D is new.
-  const i13 = phase === "GREEN" ? null : moduleI13Evidence(instance);
+  // (4.6.0 S3a), GREEN every UC-D (S3b); I13 without ucd_modes predates 4.6 and means
+  // every UC-D is new.
+  const i13 = moduleI13Evidence(instance);
   const i13Value = i13 && "value" in i13 ? i13.value : null;
   const modes = i13Value?.status === "required" ? i13UcdIdsByMode(i13Value) : null;
   const allowedStatuses = phase === "RED" ? ["failed", "not_applicable", "not_required"] : phase === "GREEN" ? ["passed", "not_applicable"] : ["passed", "not_required"];
@@ -1270,15 +1290,18 @@ function phaseEvidenceErrors(
     if (evidence.failure_class !== "behavior") errors.push('RED failure_class must be "behavior"');
     if (!asNonEmptyString(evidence.failure_signature)) errors.push("RED failure_signature is required");
     if (failed === null || failed < 1) errors.push("RED tests_failed must be >= 1");
-    if (modes) errors.push(...ucMappingCoverageErrors(evidence, "RED", "new", modes.new));
+    if (modes) errors.push(...ucMappingCoverageErrors(evidence, "RED uc_mapping must cover exactly the tdd_mode new UC-Ds", modes.new));
   } else if (evidence.status !== "passed" || failed !== 0) {
     errors.push(`${phase} must be passed with tests_failed=0`);
   }
+  // GREEN observes every UC-D of I13 after the change: new ones turned green and
+  // characterization ones still green (4.6.0 S3b).
+  if (phase === "GREEN" && modes) errors.push(...ucMappingCoverageErrors(evidence, "GREEN uc_mapping must cover every I13 UC-D", asStringArray(i13Value!.ucd_ids) || []));
   if (phase === "BASELINE") {
     if (!modes) {
       if (i13Value) errors.push(`BASELINE may be passed only when I13 is required and declares tdd_mode characterization UC-Ds (I13 status ${String(i13Value.status)})`);
     } else {
-      errors.push(...ucMappingCoverageErrors(evidence, "BASELINE", "characterization", modes.characterization));
+      errors.push(...ucMappingCoverageErrors(evidence, "BASELINE uc_mapping must cover exactly the tdd_mode characterization UC-Ds", modes.characterization));
       if (modes.characterization.length > 0) errors.push(...baselineEvidenceErrors(evidence, i13Value!, instance));
     }
   }
@@ -1634,6 +1657,9 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
       }
 
       case "test-quality": {
+        // RED is required for tdd_mode new UC-Ds and BASELINE for characterization
+        // UC-Ds (4.6.0 S3b); without a readable required I13 RED stays mandatory.
+        const needs = i13PhaseNeeds(instance);
         const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status === "not_applicable") {
@@ -1648,7 +1674,8 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           if (asNumber(evidence.tests_failed) !== 0) errors.push("tests_failed must be 0");
           const testsTotal = asPositiveInt(evidence.tests_total);
           if (testsTotal === null || testsTotal < 1) errors.push("tests_total must be >= 1");
-          if (evidence.red_seen !== true) errors.push("red_seen must be true (controlled RED evidence required)");
+          if (evidence.red_seen !== true && (needs.red || !needs.known)) errors.push("red_seen must be true (controlled RED evidence required)");
+          if (evidence.baseline_seen !== true && needs.baseline) errors.push("baseline_seen must be true (controlled BASELINE evidence required for the tdd_mode characterization UC-Ds)");
           if (evidence.traceability_complete !== true) errors.push("traceability_complete must be true");
           const ucMapping = evidence.uc_mapping;
           if (!Array.isArray(ucMapping) || ucMapping.length === 0) {
