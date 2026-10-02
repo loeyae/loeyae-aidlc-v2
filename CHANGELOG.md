@@ -1,8 +1,8 @@
 # Changelog
 
-## 4.6.0（草稿）
+## 4.6.0
 
-> 草稿：由 S1（MARS-47）起逐 issue 追加，P（MARS-46）合并为正式 `## 4.6.0`。版本号仍为 4.5.4。
+TDD characterization 模式与工作流基线登记：UC-D 按 `tdd_mode` 区分，新行为走 RED→GREEN，存量行为走 BASELINE→GREEN，存量工作流通过 `orchestrate baseline` 显式登记基线。
 
 ### Fixed
 
@@ -48,6 +48,9 @@
 
 ### Upgrade notes
 
+- **reverse-engineering 可能被重新触发（S1.0）**：`has_legacy_code` 改为统计全部源码根，源码不在 `src/` 的项目升级后可能首次被判为存量代码，从而在新工作流中选中 reverse-engineering。
+- **降级兼容（S1.1）**：4.5.4 及更早引擎读取 4.6 状态文件不会报错，但第一次写状态时会静默丢掉 `Baseline Commit` / `Baseline Source`；之后回到 4.6 时基线显示为未登记，可用 `orchestrate baseline --set <原 commit> --user-input Approve --reason "<理由>"` 补登。建议团队成员统一升级后再继续同一工作流。
+- **存量工作流使用 characterization 前需先登记基线（S1.2 / S2.2）**：4.6 之前创建的工作流没有基线，I13 会拒绝 characterization UC-D；先执行 `loeyae-aidlc orchestrate baseline --set <commit> --user-input Approve --reason "<理由>"` 登记。基线为 `unavailable` 时改用 `--set <commit> --replace --expect unavailable`。split 布局的模块子工作流继承父工作流基线，无需单独登记。
 - **I13 用例文件写法收紧（S2.0）**：`ready_ucd` 改为按 UC-D 去重、以每个 UC-D 自己的用例文件为准后，以下三种以前可能被放行的写法现在会被 I13 拒绝，升级后请按需调整并重新产证：
   - **同一 UC-D 不得在多个用例文件中声明**：每个 UC-D 只能有一个用例文件（或一个带 `id: UC-D-xxx` 的 frontmatter 块）声明它；重复声明时报错并列出涉及的文件。
   - **仅出现在 `_index.md`（或其他文件正文引用）中的 UC-D 不算 ready**：`_index.md` 不再参与计数，没有自己用例文件的 UC-D 报 `no case file declares it`；请为其补充单独的用例文件并写 `status: ready`。
