@@ -30,7 +30,7 @@ import { createRequire } from "module";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
 import { planAgentExecution, type AgentExecutionPlan } from "./aidlc-agent-runtime";
-import { SEMANTIC_SENSORS, allowlistedPhaseCommand, phaseObservationDigest } from "./aidlc-evidence";
+import { SEMANTIC_SENSORS, allowlistedPhaseCommand, i13CodeRefBlobs, i13UcdIdsByMode, phaseNotRequiredDigest, phaseObservationDigest, type Phase } from "./aidlc-evidence";
 import { CANONICAL_SOURCE_PATTERN, resolveSourceRoots } from "./aidlc-source-roots";
 import { COMMIT_ID_PATTERN, commitAncestryErrors, readSourceRevision } from "./aidlc-revision";
 import {
@@ -1103,16 +1103,115 @@ function i13ModeErrors(evidence: Evidence, ucdIds: string[], state: WorkflowStat
   return errors;
 }
 
+type I13Context = { value: Evidence } | { error: string };
+
+/** The module's I13 evidence, read by the tdd gate to derive the RED / BASELINE UC-D sets. */
+function moduleI13Evidence(instance: StageInstance): I13Context {
+  if (!instance.module_id) return { error: "the tdd gate needs a module context to read the I13 evidence" };
+  const path = join(PROJECT_ROOT, evidenceRelativePath("test-case-derivation", "test-case-derivation", "module", { module_id: instance.module_id }));
+  if (!existsSync(path)) return { error: `I13 evidence is missing: ${normalizeArtifactLabel(relative(PROJECT_ROOT, path))}` };
+  try {
+    const value = asRecord(JSON.parse(readFileSync(path, "utf8")));
+    return value ? { value } : { error: "I13 evidence must be a JSON object" };
+  } catch (error) {
+    return { error: `I13 evidence cannot be parsed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+/** `uc_mapping` must name exactly `expected` (by use_case), no more and no less. */
+function ucMappingCoverageErrors(evidence: Evidence, phase: Phase, mode: "new" | "characterization", expected: string[]): string[] {
+  const named = (Array.isArray(evidence.uc_mapping) ? evidence.uc_mapping : []).map((entry) => asNonEmptyString(asRecord(entry)?.use_case) || "");
+  const missing = expected.filter((id) => !named.includes(id));
+  const unexpected = [...new Set(named.filter((id) => !expected.includes(id)))].map((id) => id || "(entry without use_case)");
+  const duplicated = [...new Set(named.filter((id, index) => id && named.indexOf(id) !== index))];
+  if (missing.length === 0 && unexpected.length === 0 && duplicated.length === 0) return [];
+  const detail = [
+    missing.length ? `missing ${missing.join(", ")}` : "",
+    unexpected.length ? `unexpected ${unexpected.join(", ")}` : "",
+    duplicated.length ? `duplicated ${duplicated.join(", ")}` : "",
+  ].filter(Boolean).join("; ");
+  return [`${phase} uc_mapping must cover exactly the tdd_mode ${mode} UC-Ds (${expected.join(", ") || "none"}): ${detail}`];
+}
+
+/**
+ * BASELINE binding to the workflow baseline: the commit agrees in the state (through
+ * workflowBaselineForModule), I13 and the evidence and is still reachable from HEAD;
+ * code_ref_digests name exactly the I13 code refs, each observed unchanged
+ * (worktree_blob == baseline_blob), with the baseline blob re-resolved here.
+ */
+function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: StageInstance): string[] {
+  const errors: string[] = [];
+  let baseline: ReturnType<typeof workflowBaselineForModule>;
+  try {
+    baseline = workflowBaselineForModule(PROJECT_ROOT, instance.module_id);
+  } catch (error) {
+    return [`workflow baseline cannot be resolved: ${error instanceof Error ? error.message : String(error)}`];
+  }
+  const commitErrors = baselineCommitErrors(PROJECT_ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
+  if (commitErrors.length > 0 || !baseline.registered) return commitErrors;
+  if (evidence.baseline_commit !== baseline.commit) errors.push(`BASELINE baseline_commit ${JSON.stringify(evidence.baseline_commit)} does not match the workflow baseline ${baseline.commit}`);
+  if (i13.baseline_commit !== baseline.commit) errors.push(`I13 baseline_commit ${JSON.stringify(i13.baseline_commit)} does not match the workflow baseline ${baseline.commit}`);
+
+  let expected: Array<{ path: string; baseline_blob: string }>;
+  try {
+    expected = i13CodeRefBlobs(i13);
+  } catch (error) {
+    return [...errors, error instanceof Error ? error.message : String(error)];
+  }
+  const digests = Array.isArray(evidence.code_ref_digests) ? evidence.code_ref_digests.map((entry) => asRecord(entry)) : [];
+  const paths = digests.map((entry) => asNonEmptyString(entry?.path) || "");
+  const expectedPaths = expected.map((entry) => entry.path);
+  if (!Array.isArray(evidence.code_ref_digests) || paths.length !== new Set(paths).size || paths.length !== expectedPaths.length || !expectedPaths.every((path) => paths.includes(path))) {
+    errors.push(`code_ref_digests must cover exactly the I13 characterization code refs (${expectedPaths.join(", ")}), got ${JSON.stringify(paths)}`);
+  }
+  for (const entry of digests) {
+    const path = asNonEmptyString(entry?.path);
+    const recorded = String(entry?.baseline_blob || "");
+    const worktree = String(entry?.worktree_blob || "");
+    if (!entry || !path || !BLOB_ID_PATTERN.test(recorded) || !BLOB_ID_PATTERN.test(worktree)) {
+      errors.push("code_ref_digests entries need path, baseline_blob and worktree_blob git blob ids");
+      continue;
+    }
+    if (worktree !== recorded) errors.push(`code_ref_digests ${path} worktree_blob ${worktree} must equal baseline_blob ${recorded}: BASELINE must observe the unmodified baseline code`);
+    const declared = expected.find((item) => item.path === path);
+    if (declared && declared.baseline_blob !== recorded) errors.push(`code_ref_digests ${path} baseline_blob ${recorded} does not match the I13 baseline_blob ${declared.baseline_blob}`);
+    const resolved = baselineCodeRef(PROJECT_ROOT, baseline.commit, { path }, `code_ref_digests ${path}`);
+    if ("error" in resolved) errors.push(resolved.error);
+    else if (resolved.blob !== recorded) errors.push(`code_ref_digests ${path} baseline_blob ${recorded} does not match ${resolved.blob} at the workflow baseline ${baseline.commit}`);
+  }
+  return errors;
+}
+
 function phaseEvidenceErrors(
   evidence: Evidence,
   sensor: string,
-  phase: "RED" | "GREEN",
+  phase: Phase,
   applicability: { any: boolean; allNotApplicable: boolean },
   stageSlug: string,
+  instance: StageInstance,
 ): string[] {
   const errors: string[] = [];
-  const allowedStatuses = phase === "RED" ? ["failed", "not_applicable"] : ["passed", "not_applicable"];
+  // RED covers the tdd_mode new UC-Ds and BASELINE the characterization UC-Ds of I13
+  // (4.6.0 S3a); I13 without ucd_modes predates 4.6 and means every UC-D is new.
+  const i13 = phase === "GREEN" ? null : moduleI13Evidence(instance);
+  const i13Value = i13 && "value" in i13 ? i13.value : null;
+  const modes = i13Value?.status === "required" ? i13UcdIdsByMode(i13Value) : null;
+  const allowedStatuses = phase === "RED" ? ["failed", "not_applicable", "not_required"] : phase === "GREEN" ? ["passed", "not_applicable"] : ["passed", "not_required"];
   if (!allowedStatuses.includes(String(evidence.status))) errors.push(`status must be ${allowedStatuses.join(" or ")}`);
+  if (i13 && "error" in i13) errors.push(`cannot derive the ${phase} UC-D set: ${i13.error}`);
+  if (evidence.status === "not_required" && phase !== "GREEN") {
+    if (evidence.phase !== phase) errors.push(`phase must be ${phase}`);
+    if (!Array.isArray(evidence.ucd_ids) || evidence.ucd_ids.length !== 0) errors.push("not_required evidence must declare ucd_ids: []");
+    const checker = asRecord(evidence.checker);
+    if (checker && checker.argv_digest !== phaseNotRequiredDigest(phase)) errors.push(`checker.argv_digest does not match the ${phase} not_required check`);
+    if (phase === "RED") {
+      if (i13Value && !modes) errors.push(`RED may be not_required only when I13 is required and declares no tdd_mode new UC-D (I13 status ${String(i13Value.status)})`);
+      if (modes && modes.new.length > 0) errors.push(`RED may be not_required only when I13 declares no tdd_mode new UC-D; new: ${modes.new.join(", ")}`);
+    } else if (modes && modes.characterization.length > 0) {
+      errors.push(`BASELINE may be not_required only when I13 declares no tdd_mode characterization UC-D; characterization: ${modes.characterization.join(", ")}`);
+    }
+    return errors;
+  }
   if (evidence.status === "not_applicable") {
     if (!applicability.any || !applicability.allNotApplicable) errors.push(`${sensor} may be not_applicable only when I13 evidence is not_applicable`);
     if (!asNonEmptyString(evidence.not_applicable_reason)) errors.push("not_applicable_reason is required");
@@ -1138,11 +1237,11 @@ function phaseEvidenceErrors(
   if (evidence.traceability_complete !== true) errors.push("traceability_complete must be true");
   if (!Array.isArray(evidence.uc_mapping) || evidence.uc_mapping.length === 0) errors.push("uc_mapping must be non-empty");
   // The controlled producer records the observed test command separately from its
-  // built-in checker; RED must have exited 1 and GREEN 0.
+  // built-in checker; RED must have exited 1, GREEN and BASELINE 0.
   const observed = asRecord(evidence.observed_command);
   const expectedExit = phase === "RED" ? 1 : 0;
   if (!observed) {
-    errors.push("observed_command is required for controlled RED/GREEN evidence");
+    errors.push(`observed_command is required for controlled ${phase} evidence`);
   } else {
     if (!asNonEmptyString(observed.id)) errors.push("observed_command.id is required");
     if (observed.phase !== phase) errors.push(`observed_command.phase must be ${phase}`);
@@ -1171,8 +1270,17 @@ function phaseEvidenceErrors(
     if (evidence.failure_class !== "behavior") errors.push('RED failure_class must be "behavior"');
     if (!asNonEmptyString(evidence.failure_signature)) errors.push("RED failure_signature is required");
     if (failed === null || failed < 1) errors.push("RED tests_failed must be >= 1");
+    if (modes) errors.push(...ucMappingCoverageErrors(evidence, "RED", "new", modes.new));
   } else if (evidence.status !== "passed" || failed !== 0) {
-    errors.push("GREEN must be passed with tests_failed=0");
+    errors.push(`${phase} must be passed with tests_failed=0`);
+  }
+  if (phase === "BASELINE") {
+    if (!modes) {
+      if (i13Value) errors.push(`BASELINE may be passed only when I13 is required and declares tdd_mode characterization UC-Ds (I13 status ${String(i13Value.status)})`);
+    } else {
+      errors.push(...ucMappingCoverageErrors(evidence, "BASELINE", "characterization", modes.characterization));
+      if (modes.characterization.length > 0) errors.push(...baselineEvidenceErrors(evidence, i13Value!, instance));
+    }
   }
   return errors;
 }
@@ -1427,14 +1535,21 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
       case "red-test-evidence": {
         const applicability = i13Applicability(instance);
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "RED", applicability, stage.slug), options);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "RED", applicability, stage.slug, instance), options);
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "baseline-test-evidence": {
+        const applicability = i13Applicability(instance);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "BASELINE", applicability, stage.slug, instance), options);
         if (failure) failures.push(failure);
         break;
       }
 
       case "green-test-evidence": {
         const applicability = i13Applicability(instance);
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "GREEN", applicability, stage.slug));
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "GREEN", applicability, stage.slug, instance));
         if (failure) failures.push(failure);
         break;
       }

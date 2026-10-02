@@ -82,6 +82,7 @@ const UNIT_CONTEXT_SENSORS = new Set([
   "test-quality",
   "red-test-evidence",
   "green-test-evidence",
+  "baseline-test-evidence",
   "contract-baseline",
   "functional-design-completeness",
   "nfr-coverage",
@@ -122,7 +123,7 @@ const SENSOR_NAMES = new Set([
   "nfr-coverage", "infrastructure-completeness", "implementation-report", "frontend-platform-spec",
   "framework-compliance", "subagent-evidence", "template-completeness", "recovery-evidence",
   "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
-  "ui-artifact-consistency", "inception-consistency", "test-case-derivation", "red-test-evidence", "green-test-evidence",
+  "ui-artifact-consistency", "inception-consistency", "test-case-derivation", "red-test-evidence", "green-test-evidence", "baseline-test-evidence",
   "traceability-matrix", "structural-invariants",
 ]);
 
@@ -828,9 +829,9 @@ function testQuality(): Record<string, unknown> {
   return { status: "passed", red_seen: true, green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping };
 }
 
-function phaseEvidenceCheck(sensor: "red-test-evidence" | "green-test-evidence"): Record<string, unknown> {
-  const phase = sensor === "red-test-evidence" ? "RED" : "GREEN";
-  const stage = phase === "RED" ? "tdd" : "code-generation";
+function phaseEvidenceCheck(sensor: "red-test-evidence" | "green-test-evidence" | "baseline-test-evidence"): Record<string, unknown> {
+  const phase = sensor === "red-test-evidence" ? "RED" : sensor === "green-test-evidence" ? "GREEN" : "BASELINE";
+  const stage = phase === "GREEN" ? "code-generation" : "tdd";
   const records = evidenceRecords(stage, sensor).filter((record) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT)));
   if (records.length === 0) fail(`${sensor} evidence is missing`);
   const record = records[records.length - 1];
@@ -839,11 +840,16 @@ function phaseEvidenceCheck(sensor: "red-test-evidence" | "green-test-evidence")
     stringValue(record.alternative_validation, `${sensor}.alternative_validation`);
     return record;
   }
+  // RED / BASELINE without a UC-D of their tdd_mode; the orchestrator gate re-derives this from I13.
+  if (record.status === "not_required" && phase !== "GREEN") {
+    if (record.phase !== phase || !Array.isArray(record.ucd_ids) || record.ucd_ids.length !== 0) fail(`${sensor} not_required evidence must have phase ${phase} and empty ucd_ids`);
+    return record;
+  }
   if (record.phase !== phase || record.compile_status !== "passed" || record.environment_status !== "passed" || record.traceability_complete !== true) fail(`${sensor} evidence has invalid phase, compile, environment, or traceability status`);
   numberValue(record.tests_total, `${sensor}.tests_total`);
   const failed = numberValue(record.tests_failed, `${sensor}.tests_failed`);
   if (phase === "RED" && (record.status !== "failed" || record.failure_class !== "behavior" || failed < 1)) fail("RED evidence is not a behavior failure");
-  if (phase === "GREEN" && (record.status !== "passed" || failed !== 0)) fail("GREEN evidence is not passing");
+  if (phase !== "RED" && (record.status !== "passed" || failed !== 0)) fail(`${phase} evidence is not passing`);
   if (!Array.isArray(record.uc_mapping) || record.uc_mapping.length === 0) fail(`${sensor}.uc_mapping must be non-empty`);
   return record;
 }
@@ -3717,6 +3723,7 @@ const CHECKERS: Record<string, () => Record<string, unknown> | Promise<Record<st
   "test-case-derivation": testCaseDerivation,
   "red-test-evidence": () => phaseEvidenceCheck("red-test-evidence"),
   "green-test-evidence": () => phaseEvidenceCheck("green-test-evidence"),
+  "baseline-test-evidence": () => phaseEvidenceCheck("baseline-test-evidence"),
   "traceability-matrix": traceabilityMatrix,
   "structural-invariants": structuralInvariants,
 };

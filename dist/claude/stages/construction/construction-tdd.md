@@ -14,7 +14,8 @@ consumes:
   - .aidlc/evidence/test-case-derivation/{module-id}/test-case-derivation.json
 produces:
   - .aidlc/evidence/tdd/{module-id}/{unit-id}/red-test-evidence.json
-sensors: [red-test-evidence]
+  - .aidlc/evidence/tdd/{module-id}/{unit-id}/baseline-test-evidence.json
+sensors: [red-test-evidence, baseline-test-evidence]
 traceability: not_applicable
 requires: [test-case-derivation]
 ---

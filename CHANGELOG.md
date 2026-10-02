@@ -32,6 +32,13 @@
   - 门禁复核：`ucd_modes` 与 `ucd_ids` 一一对应；characterization 条目与 characterization UC-D 一一对应且字段齐全；`baseline_commit` 须等于当前工作流基线并仍可从 HEAD 到达；每个 `code_refs` 重新解析到基线中的同一 blob；没有 characterization 时不得出现 `characterization` / `baseline_commit`。缺 `ucd_modes` 的旧证据视为全部 `new`（不得同时带 `characterization` / `baseline_commit`）。
   - 兼容性：未声明 `tdd_mode` 的项目 I13 结论不变，`ucd_modes` 全部为 `new`，证据不含 `baseline_commit`（S1.3 U3 依赖这一点）。
 - 新增回归测试 `tests/test_v4_6_0_tdd_mode.ts` 并加入 `npm test`；`tests/test_python_refactor_e2e.ts` 的 `_index.md` 改回普通列表写法（同时写 `status: ready`）。
+- **BASELINE 证据与命令角色 `role: baseline`（S3a）**：tdd 阶段新增 sensor `baseline-test-evidence`，产物 `.aidlc/evidence/tdd/{module-id}/{unit-id}/baseline-test-evidence.json`（graph `produces` 静态声明）。RED 覆盖 I13 `ucd_modes` 中的 `new` UC-D，BASELINE 覆盖 `characterization` UC-D。
+  - 命令清单新增 `role: baseline`，沿用 G1：只认默认查找（`.aidlc/commands/tdd.json` → `.aidlc/evidence-commands.json`）、恰好一条；`observed_command.argv_digest` 绑定清单命令，`checker.argv_digest` 由其派生（`BASELINE-observation`）。沿用 M1：`--sensor baseline-test-evidence` 与 `--all-sensors` 带指向其他文件的 `--config` 时，在执行任何命令、写任何证据之前拒绝。
+  - producer：执行命令之前用 `git hash-object`（数组参数、`shell: false`）计算 I13 `characterization[]` 中每个 code ref 当前工作区文件的 blob，与 `baseline_blob` 不同（或文件缺失）直接失败、不出证据；命令须退出 0，观察结果须 `status=passed`、`tests_failed=0`、`tests_total≥1`。证据记录 `baseline_commit`、`code_ref_digests[{ path, baseline_blob, worktree_blob }]` 与 `observed_command`。
+  - `not_required`：I13 没有 characterization UC-D（含 I13 为 `not_applicable`）时 BASELINE 写 `status: "not_required"`、`ucd_ids: []`，不执行命令，清单也不必声明 `role: baseline`；I13 没有 `new` UC-D 时 RED 同样写 `not_required`。I13 为 `not_applicable` 时 RED/GREEN 原有分支不变。
+  - tdd 门禁：RED 的 `uc_mapping` 须恰好覆盖全部 `new` UC-D、不得包含 characterization，RED `not_required` 仅在无 `new` 时接受。BASELINE 的 producer / checker / provenance 契约同 RED；`observed_command` 绑定 `role: baseline` 且 `exit_code=0`；`uc_mapping` 恰好覆盖全部 characterization UC-D、不得包含 `new`；`baseline_commit` 在状态（`workflowBaselineForModule`）、I13、证据三处一致并通过 `baselineCommitErrors`；`code_ref_digests` 与 I13 code ref 一一对应、`worktree_blob == baseline_blob`，且门禁现场重新解析基线 blob 比对；BASELINE `not_required` 仅在 I13 无 characterization 时接受。缺 `ucd_modes` 的旧 I13 视为全部 `new`。
+  - `checkSensors` 按阶段声明的全部 sensor 复验 tdd 实例，因此 code-generation 完成时对 RED 的漂移容忍复验（现有 2 个调用点）同时覆盖 BASELINE。
+- 新增回归测试 `tests/test_v4_6_0_baseline_evidence.ts` 并加入 `npm test`。
 
 ### Upgrade notes
 
@@ -40,6 +47,9 @@
   - **仅出现在 `_index.md`（或其他文件正文引用）中的 UC-D 不算 ready**：`_index.md` 不再参与计数，没有自己用例文件的 UC-D 报 `no case file declares it`；请为其补充单独的用例文件并写 `status: ready`。
   - **无 frontmatter 的聚合文件不再支持**：一个文件里写多个 UC-D、每个只靠正文中的 `status:` 行的写法不再被识别。支持的写法只有两种：每个 UC-D 一个带 `id: UC-D-xxx` 的 frontmatter 块（一个文件可以包含多个块），或者文件名含 UC-D 编号、正文写 `status:`。
   - 已生成的 I13 证据不会自动重算（见 4.5.4 Upgrade notes）；调整用例文件后，已完成的 I13 实例用 `loeyae-aidlc evidence run --stage test-case-derivation --module <id> --refresh` 重新产证。
+- **RED 新增 `uc_mapping` 覆盖检查（S3a）**：tdd 门禁要求 RED 的 `uc_mapping` 恰好覆盖 I13 中全部 `new` UC-D（缺 `ucd_modes` 的旧 I13 即全部 UC-D），多写或漏写都会被拒；请让 red 命令输出的映射与 I13 一致后重新产证。
+- **tdd 阶段新增 `baseline-test-evidence.json` 产物（S3a）**：没有 characterization UC-D 时为 `not_required`，由 `report` 自动产出，无需新增命令清单条目；有 characterization UC-D 时须在 `.aidlc/commands/tdd.json` 声明恰好一条 `role: baseline` 命令。
+- **已完成的 tdd 实例需补齐 BASELINE 证据（S3a）**：升级前完成的 tdd 实例没有该产物，`next` 复验上游时会阻断（不提供按证据版本的兼容豁免）。对每个已完成的 tdd 实例执行 `loeyae-aidlc evidence run --stage tdd --module <id> --unit <id> --sensor baseline-test-evidence --refresh` 补齐后再继续。
 
 ## 4.5.4
 

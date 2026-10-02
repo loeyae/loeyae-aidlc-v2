@@ -109,6 +109,17 @@ function prepareCodeGeneration(project: string, greenStatus: "failed" | "passed"
   writeFileSync(join(evidenceRoot, "structural-invariants.json"), JSON.stringify(envelope(project, "structural-invariants", { status: "not_applicable", skip_reason: "test fixture has no persistence manifest", violations: [] })), "utf8");
 }
 
+/**
+ * 4.6.0 S3a: the tdd stage also produces baseline-test-evidence. These fixtures declare
+ * no tdd_mode characterization UC-D, so the controlled producer writes `not_required`
+ * (no command, no allowlist entry needed). Completed tdd instances need --refresh.
+ */
+function produceNotRequiredBaseline(project: string, extra: string[]): void {
+  const produced = run(project, ["evidence", "run", "--stage", "tdd", "--module", "project", "--unit", "default", "--sensor", "baseline-test-evidence", ...extra]);
+  assert.equal(produced.status, 0, `${produced.stdout}\n${produced.stderr}`);
+  assert.equal(JSON.parse(readFileSync(join(project, ".aidlc", "evidence", "tdd", "project", "default", "baseline-test-evidence.json"), "utf8")).status, "not_required");
+}
+
 try {
   const i13 = stage("test-case-derivation");
   const red = stage("tdd");
@@ -232,6 +243,8 @@ try {
   mismatchedState!.current_module = "project";
   mismatchedState!.current_unit = "default";
   saveWorkflowState(mismatchedExemption, mismatchedState!);
+  // 4.6.0 S3a: tdd also produces BASELINE; I13 declares no characterization UC-D, so the controlled producer writes not_required.
+  produceNotRequiredBaseline(mismatchedExemption, []);
   const mismatchedResult = run(mismatchedExemption, ["orchestrate", "report", "--stage", "tdd", "--result", "completed"]);
   assert.notEqual(mismatchedResult.status, 0);
   assert.match(`${mismatchedResult.stdout}\n${mismatchedResult.stderr}`, /only when I13 evidence is not_applicable/);
@@ -252,6 +265,7 @@ try {
   greenState!.current_module = "project";
   greenState!.current_unit = "default";
   saveWorkflowState(greenFailure, greenState!);
+  produceNotRequiredBaseline(greenFailure, ["--refresh"]);
   const blockedGreen = run(greenFailure, ["orchestrate", "report", "--stage", "code-generation", "--result", "completed"]);
   assert.notEqual(blockedGreen.status, 0);
   assert.match(`${blockedGreen.stdout}\n${blockedGreen.stderr}`, /GREEN|tests_failed|phase/);
@@ -271,6 +285,7 @@ try {
   passState!.current_module = "project";
   passState!.current_unit = "default";
   saveWorkflowState(greenPass, passState!);
+  produceNotRequiredBaseline(greenPass, ["--refresh"]);
   const completedGreen = run(greenPass, ["orchestrate", "report", "--stage", "code-generation", "--result", "completed"]);
   assert.equal(completedGreen.status, 0, `${completedGreen.stdout}\n${completedGreen.stderr}`);
   assert.ok(loadWorkflowState(greenPass)?.completed_stage_instances.includes("code-generation@module:project@unit:default"));

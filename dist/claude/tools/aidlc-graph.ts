@@ -147,7 +147,7 @@ const VALID_SENSORS = new Set([
   "recovery-evidence", "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
   "ui-artifact-consistency", "inception-consistency",
   "clarification-traceability", "story-traceability", "traceability-matrix",
-  "structural-invariants", "test-case-derivation", "red-test-evidence", "green-test-evidence",
+  "structural-invariants", "test-case-derivation", "red-test-evidence", "green-test-evidence", "baseline-test-evidence",
 ]);
 
 function executableForScope(stage: StageNode, scope: string): boolean {

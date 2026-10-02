@@ -23,7 +23,12 @@ import { evidenceSourceRevision, integrationStageSlugs, isSplitLayout, loadWorkf
 
 type ProducerState = WorkflowState;
 
-type CommandRole = "build" | "test" | "check" | "semantic" | "red" | "green";
+type CommandRole = "build" | "test" | "check" | "semantic" | "red" | "green" | "baseline";
+
+/** Phases observed by the controlled tdd / code-generation producers. */
+export type Phase = "RED" | "GREEN" | "BASELINE";
+
+const PHASE_SENSORS: Record<Phase, string> = { RED: "red-test-evidence", GREEN: "green-test-evidence", BASELINE: "baseline-test-evidence" };
 
 export const SEMANTIC_SENSORS = new Set([
   "review-evidence",
@@ -49,6 +54,7 @@ export const SEMANTIC_SENSORS = new Set([
   "test-case-derivation",
   "red-test-evidence",
   "green-test-evidence",
+  "baseline-test-evidence",
 ]);
 
 interface CommandSpec {
@@ -147,17 +153,17 @@ function comparableConfigPath(path: string): string {
 }
 
 /**
- * RED/GREEN gates bind observed commands to the default allowlist lookup only
+ * RED/GREEN/BASELINE gates bind observed commands to the default allowlist lookup only
  * (`.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json`). An explicit
  * --config naming any other file would yield evidence the gate always rejects, so the
  * producer refuses it before running a command or writing evidence.
  */
-function assertPhaseConfigBinding(options: ProducerOptions): void {
+function assertPhaseConfigBinding(options: ProducerOptions, label = "RED/GREEN"): void {
   if (options.explicitConfig === undefined) return;
   const requested = resolve(PROJECT_ROOT, options.explicitConfig);
   const lookup = resolveCommandConfigPath(PROJECT_ROOT, options.stage);
   if (comparableConfigPath(requested) === comparableConfigPath(lookup)) return;
-  fail(`RED/GREEN evidence binds only the default allowlist lookup (.aidlc/commands/${options.stage}.json, then ${DEFAULT_CONFIG}); --config ${options.explicitConfig} names another file. Put the red/green command in .aidlc/commands/${options.stage}.json and omit --config`);
+  fail(`${label} evidence binds only the default allowlist lookup (.aidlc/commands/${options.stage}.json, then ${DEFAULT_CONFIG}); --config ${options.explicitConfig} names another file. Put the ${label.toLowerCase()} command in .aidlc/commands/${options.stage}.json and omit --config`);
 }
 
 function nonEmptyString(value: unknown, field: string): string {
@@ -245,26 +251,31 @@ export function argvDigest(argv: string[]): string {
   return createHash("sha256").update(JSON.stringify(argv)).digest("hex");
 }
 
-/** checker.argv_digest of controlled RED/GREEN evidence: derived from the observed command digest. */
-export function phaseObservationDigest(phase: "RED" | "GREEN", commandDigest: string): string {
+/** checker.argv_digest of controlled RED/GREEN/BASELINE evidence: derived from the observed command digest. */
+export function phaseObservationDigest(phase: Phase, commandDigest: string): string {
   return argvDigest([`${phase}-observation`, commandDigest]);
 }
 
-/** The single allowlisted red/green command of a stage; fails unless exactly one is declared. */
-function phaseCommand(config: EvidenceConfig, stage: string, phase: "RED" | "GREEN"): CommandSpec {
-  const role = phase.toLowerCase() as "red" | "green";
+/** checker.argv_digest of a `not_required` RED/BASELINE record (no command was observed). */
+export function phaseNotRequiredDigest(phase: Phase): string {
+  return argvDigest([`${phase}-not-required`]);
+}
+
+/** The single allowlisted red/green/baseline command of a stage; fails unless exactly one is declared. */
+function phaseCommand(config: EvidenceConfig, stage: string, phase: Phase): CommandSpec {
+  const role = phase.toLowerCase() as "red" | "green" | "baseline";
   const declarations = config.commands.filter((command) => command.role === role);
   if (declarations.length !== 1) fail(`allowlist must declare exactly one ${role} command for ${stage}`);
   return declarations[0];
 }
 
 /**
- * Gate-side lookup of the command a controlled RED/GREEN observation must have run:
+ * Gate-side lookup of the command a controlled RED/GREEN/BASELINE observation must have run:
  * the same allowlist resolution (`resolveCommandConfigPath`, no explicit --config) and
  * the same stage-locked parser the producer uses. Throws when the allowlist is missing,
  * unreadable, locked to another stage, or does not declare exactly one command.
  */
-export function allowlistedPhaseCommand(stage: string, phase: "RED" | "GREEN"): { id: string; argv_digest: string; config: string } {
+export function allowlistedPhaseCommand(stage: string, phase: Phase): { id: string; argv_digest: string; config: string } {
   const config = resolveCommandConfigPath(PROJECT_ROOT, stage);
   const command = phaseCommand(requireCommandConfig(config, stage), stage, phase);
   return { id: command.id, argv_digest: argvDigest(command.argv), config };
@@ -294,7 +305,7 @@ function configExample(stage: string): string {
   return JSON.stringify({ version: "1", stage, commands: [{ id: "unit-tests", role: "test", argv: ["npm", "test"] }] });
 }
 
-/** Command allowlist for build/test/check/red/green commands: required, stage-locked, non-empty. */
+/** Command allowlist for build/test/check/red/green commands (and the tdd baseline command): required, stage-locked, non-empty. */
 function requireCommandConfig(path: string, stage: string): EvidenceConfig {
   if (!existsSync(path)) {
     fail(`command allowlist ${path} is required for build/test/check/red/green commands of stage ${stage}; minimal example: ${configExample(stage)}`);
@@ -345,7 +356,7 @@ function parseConfig(path: string, stage: string, allowEmptyCommands = false): E
     if (ids.has(id)) fail(`duplicate command id: ${id}`);
     ids.add(id);
     const role = nonEmptyString(record.role, `commands[${i}].role`) as CommandRole;
-    if (!["build", "test", "check", "semantic", "red", "green"].includes(role)) fail(`commands[${i}].role must be build, test, check, semantic, red, or green`);
+    if (!["build", "test", "check", "semantic", "red", "green", "baseline"].includes(role)) fail(`commands[${i}].role must be build, test, check, semantic, red, green, or baseline`);
     const sensor = role === "semantic" ? nonEmptyString(record.sensor, `commands[${i}].sensor`) : undefined;
     if (sensor && !SEMANTIC_SENSORS.has(sensor)) fail(`commands[${i}].sensor is not a supported semantic sensor: ${sensor}`);
     const argv = validateArgv(record.argv, `commands[${i}].argv`);
@@ -565,7 +576,7 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
 }
 
 function phaseRecord(state: ProducerState): Record<string, unknown> {
-  if (!state.current_module) fail("RED/GREEN evidence requires an active module");
+  if (!state.current_module) fail("RED/GREEN/BASELINE evidence requires an active module");
   const path = resolve(PROJECT_ROOT, evidenceRelativePath("test-case-derivation", "test-case-derivation", "module", { module_id: state.current_module }));
   if (!existsSync(path)) fail(`I13 evidence is missing: ${path}`);
   let value: unknown;
@@ -574,7 +585,64 @@ function phaseRecord(state: ProducerState): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function phaseObservation(stdout: string, phase: "RED" | "GREEN"): Record<string, unknown> {
+/**
+ * UC-D ids of a `required` I13 record grouped by tdd_mode (4.6.0 S2 `ucd_modes`).
+ * I13 evidence without `ucd_modes` predates 4.6 and means every UC-D is new.
+ */
+export function i13UcdIdsByMode(i13: Record<string, unknown>): { new: string[]; characterization: string[] } {
+  const ids = Array.isArray(i13.ucd_ids) ? i13.ucd_ids.filter((id): id is string => typeof id === "string") : [];
+  const modes = i13.ucd_modes && typeof i13.ucd_modes === "object" && !Array.isArray(i13.ucd_modes) ? i13.ucd_modes as Record<string, unknown> : undefined;
+  if (!modes) return { new: ids, characterization: [] };
+  return {
+    new: ids.filter((id) => modes[id] === "new"),
+    characterization: ids.filter((id) => modes[id] === "characterization"),
+  };
+}
+
+/** Distinct code ref paths of the I13 `characterization[]` with the blob each had at the workflow baseline. */
+export function i13CodeRefBlobs(i13: Record<string, unknown>): Array<{ path: string; baseline_blob: string }> {
+  const entries = Array.isArray(i13.characterization) ? i13.characterization : fail("I13 characterization must list the code_refs of every characterization UC-D");
+  const blobs = new Map<string, string>();
+  for (const entry of entries) {
+    const refs = entry && typeof entry === "object" && Array.isArray((entry as Record<string, unknown>).code_refs) ? (entry as Record<string, unknown>).code_refs as unknown[] : [];
+    for (const ref of refs) {
+      const record = ref && typeof ref === "object" ? ref as Record<string, unknown> : {};
+      const path = typeof record.path === "string" ? record.path : "";
+      const blob = typeof record.baseline_blob === "string" ? record.baseline_blob : "";
+      if (!path || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(blob)) fail("I13 characterization code_refs entries need path and baseline_blob");
+      const known = blobs.get(path);
+      if (known !== undefined && known !== blob) fail(`I13 characterization records two baseline blobs for ${path}`);
+      blobs.set(path, blob);
+    }
+  }
+  if (blobs.size === 0) fail("I13 characterization declares no code_refs");
+  return [...blobs].map(([path, baseline_blob]) => ({ path, baseline_blob }));
+}
+
+/**
+ * BASELINE precondition, checked before the baseline command runs: every code ref of
+ * the I13 characterization is still byte-identical (as a git blob) to the workflow
+ * baseline. A changed, missing or unhashable file fails without writing evidence.
+ */
+function baselineCodeRefDigests(i13: Record<string, unknown>): Record<string, unknown> {
+  const commit = typeof i13.baseline_commit === "string" ? i13.baseline_commit : "";
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)) fail("I13 evidence must record the workflow baseline_commit of its characterization UC-Ds");
+  const digests = i13CodeRefBlobs(i13).map(({ path, baseline_blob }) => {
+    requireRegularFile(path, `code ref ${path}`);
+    const result = spawnSync("git", ["hash-object", "--", path], { cwd: PROJECT_ROOT, encoding: "utf8", shell: false });
+    const worktree = typeof result.stdout === "string" ? result.stdout.trim() : "";
+    if (result.error || result.status !== 0 || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(worktree)) {
+      fail(`cannot hash code ref ${path} with git hash-object: ${result.error ? result.error.message : (result.stderr || "").trim() || `exit ${result.status}`}`);
+    }
+    if (worktree !== baseline_blob) {
+      fail(`BASELINE refuses to run: code ref ${path} changed since the workflow baseline ${commit} (worktree blob ${worktree}, baseline blob ${baseline_blob}); characterization tests must observe the unmodified baseline code`);
+    }
+    return { path, baseline_blob, worktree_blob: worktree };
+  });
+  return { baseline_commit: commit, code_ref_digests: digests };
+}
+
+function phaseObservation(stdout: string, phase: Phase): Record<string, unknown> {
   for (const line of stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)) {
     try {
       const value = JSON.parse(line) as unknown;
@@ -584,7 +652,7 @@ function phaseObservation(stdout: string, phase: "RED" | "GREEN"): Record<string
   fail(`controlled ${phase} command must emit one JSON observation with phase=${phase}`);
 }
 
-function validatePhaseObservation(value: Record<string, unknown>, phase: "RED" | "GREEN"): void {
+function validatePhaseObservation(value: Record<string, unknown>, phase: Phase): void {
   if (value.phase !== phase) fail(`controlled evidence phase must be ${phase}`);
   if (value.compile_status !== "passed") fail(`${phase} evidence compile_status must be passed`);
   if (value.environment_status !== "passed") fail(`${phase} evidence environment_status must be passed`);
@@ -596,18 +664,28 @@ function validatePhaseObservation(value: Record<string, unknown>, phase: "RED" |
     if (value.status !== "failed" || value.failure_class !== "behavior" || typeof value.failure_signature !== "string" || value.failure_signature.trim().length === 0) fail("RED evidence must be a behavior assertion failure with a non-empty failure_signature");
     if (value.tests_failed < 1) fail("RED evidence tests_failed must be >= 1");
   } else {
-    if (value.status !== "passed" || value.tests_failed !== 0) fail("GREEN evidence must be passed with tests_failed=0");
+    if (value.status !== "passed" || value.tests_failed !== 0) fail(`${phase} evidence must be passed with tests_failed=0`);
   }
 }
 
-function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase: "RED" | "GREEN"): void {
-  assertPhaseConfigBinding(options);
-  const config = requireCommandConfig(options.config, options.stage);
+function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase: Phase): void {
+  assertPhaseConfigBinding(options, phase === "BASELINE" ? "BASELINE" : "RED/GREEN");
+  const sensor = PHASE_SENSORS[phase];
   const i13 = phaseRecord(state);
-  const output = options.output || evidenceOutput(options.stage, phase === "RED" ? "red-test-evidence" : "green-test-evidence", undefined, state);
+  const output = options.output || evidenceOutput(options.stage, sensor, undefined, state);
   let payload: Record<string, unknown>;
   let execution: Record<string, unknown>;
-  if (i13.status === "not_applicable") {
+  const notRequired = (reason: string): void => {
+    // No UC-D of this phase's tdd_mode: nothing to observe, so no command runs and the
+    // allowlist need not declare one. The gate re-derives the verdict from I13.
+    payload = { status: "not_required", phase, ucd_ids: [], not_required_reason: reason };
+    execution = { id: `builtin:${sensor}`, sensor, argv_digest: phaseNotRequiredDigest(phase), exit_code: 0, status: "passed" };
+  };
+  const modes = i13.status === "required" ? i13UcdIdsByMode(i13) : { new: [], characterization: [] };
+  if (i13.status === "not_applicable" && phase === "BASELINE") {
+    notRequired("I13 declared no executable business behavior, so no UC-D uses tdd_mode characterization");
+  } else if (i13.status === "not_applicable") {
+    const config = requireCommandConfig(options.config, options.stage);
     const reason = typeof i13.reason === "string" ? i13.reason : typeof i13.not_applicable_reason === "string" ? i13.not_applicable_reason : "I13 declared no executable business behavior";
     const alternative = typeof i13.alternative_validation === "string" ? i13.alternative_validation : "controlled alternative validation";
     const checks = config.commands.filter((command) => command.role === "check");
@@ -630,9 +708,17 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
       red_exemption: phase === "RED" ? reason : undefined,
     };
     execution = { id: `builtin:${options.sensor}`, sensor: options.sensor, argv_digest: argvDigest(["I13-not-applicable", phase, check.argv_digest]), exit_code: 0, status: "passed" };
+  } else if (i13.status !== "required") {
+    fail(`I13 evidence status must be required or not_applicable, got ${String(i13.status)}`);
+  } else if (phase === "RED" && modes.new.length === 0) {
+    notRequired("I13 declares no tdd_mode new UC-D");
+  } else if (phase === "BASELINE" && modes.characterization.length === 0) {
+    notRequired("I13 declares no tdd_mode characterization UC-D");
   } else {
-    if (i13.status !== "required") fail(`I13 evidence status must be required or not_applicable, got ${String(i13.status)}`);
+    const config = requireCommandConfig(options.config, options.stage);
     const command = phaseCommand(config, options.stage, phase);
+    // BASELINE observes the unmodified baseline code: verified before the command runs.
+    const baselineFields = phase === "BASELINE" ? baselineCodeRefDigests(i13) : {};
     const started = Date.now();
     const result = spawnSync(command.argv[0], command.argv.slice(1), {
       cwd: command.cwd || PROJECT_ROOT,
@@ -656,20 +742,21 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     const commandDigest = argvDigest(command.argv);
     payload = {
       ...payload,
+      ...baselineFields,
       observed_command: { id: command.id, phase, argv_digest: commandDigest, cwd: safeCwdLabel(command.cwd || PROJECT_ROOT), exit_code: exitCode, expected_exit_code: expectedExit, duration_ms: duration },
     };
-    execution = { id: `builtin:${options.sensor}`, sensor: options.sensor, argv_digest: phaseObservationDigest(phase, commandDigest), exit_code: 0, status: "passed", duration_ms: duration };
+    execution = { id: `builtin:${sensor}`, sensor, argv_digest: phaseObservationDigest(phase, commandDigest), exit_code: 0, status: "passed", duration_ms: duration };
   }
-  writeAtomic(output, `${JSON.stringify({ ...payload, ...executionContext(state), evidence_version: "1", timestamp: new Date().toISOString(), producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() }, source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance), checker: execution }, null, 2)}\n`);
-  if (!options.output) console.log(JSON.stringify({ status: "passed", output, sensor: options.sensor, phase }, null, 2));
+  writeAtomic(output, `${JSON.stringify({ ...payload!, ...executionContext(state), evidence_version: "1", timestamp: new Date().toISOString(), producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() }, source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance), checker: execution! }, null, 2)}\n`);
+  if (!options.output) console.log(JSON.stringify({ status: "passed", output, sensor, phase }, null, 2));
 }
 
 function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | null, state: ProducerState, quiet = false): void {
   const sensor = options.sensor;
   if (!sensor || sensor === "build-test-evidence") fail("semantic producer requires --sensor with a semantic sensor name");
   if (options.commandIds.length > 0) fail("--command-id is only supported for build/test evidence");
-  if (sensor === "red-test-evidence" || sensor === "green-test-evidence") {
-    runPhaseProducer(options, state, sensor === "red-test-evidence" ? "RED" : "GREEN");
+  if (sensor === "red-test-evidence" || sensor === "green-test-evidence" || sensor === "baseline-test-evidence") {
+    runPhaseProducer(options, state, sensor === "red-test-evidence" ? "RED" : sensor === "green-test-evidence" ? "GREEN" : "BASELINE");
     return;
   }
   const declarations = (config?.commands || []).filter((command) => command.role === "semantic" && command.sensor === sensor);
@@ -855,8 +942,9 @@ function declaredSemanticSensors(stage: string): string[] {
 function produceAllSemantic(options: ProducerOptions, state: ProducerState, config: EvidenceConfig | null): void {
   const sensors = declaredSemanticSensors(options.stage);
   if (sensors.length === 0) fail(`stage ${options.stage} declares no semantic sensors; use the stage's ordinary report gates instead`);
-  // Checked up front so no other sensor's evidence is written before a RED/GREEN refusal.
+  // Checked up front so no other sensor's evidence is written before a RED/GREEN/BASELINE refusal.
   if (sensors.includes("red-test-evidence") || sensors.includes("green-test-evidence")) assertPhaseConfigBinding(options);
+  else if (sensors.includes("baseline-test-evidence")) assertPhaseConfigBinding(options, "BASELINE");
   const outputs: string[] = [];
   for (const sensor of sensors) {
     const output = evidenceOutput(options.stage, sensor, undefined, state);

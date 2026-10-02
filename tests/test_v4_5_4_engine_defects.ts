@@ -503,6 +503,9 @@ try {
     const redInstance = "tdd@module:project@unit:default";
     seed(project, redInstance, ["test-case-derivation@module:project"]);
     ok(project, ["evidence", "run", "--stage", "tdd", "--sensor", "red-test-evidence"]);
+    // 4.6.0 S3a: the GREEN-completion re-check covers every tdd sensor; no UC-D is
+    // characterization, so the controlled producer writes a not_required BASELINE.
+    ok(project, ["evidence", "run", "--stage", "tdd", "--sensor", "baseline-test-evidence"]);
     const redPath = join(project, ".aidlc/evidence/tdd/project/default/red-test-evidence.json");
     const red = JSON.parse(readFileSync(redPath, "utf8"));
 
