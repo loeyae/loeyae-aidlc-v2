@@ -22,7 +22,10 @@ An absent source document is not a silent skip. It is either an explicitly valid
 | Field | Required rule |
 |------|---------------|
 | `status` | `required` or `not_applicable` |
-| `required` | `ucd_total >= 1`, every UC-D is `ready`, `_index.md` and source references exist |
+| `required` | `ucd_total >= 1`, every UC-D is `ready` in its own case file (`_index.md` is not counted), `_index.md` and source references exist |
+| `ucd_modes` | `required` only: one entry per UC-D, `new` (default) or `characterization`; evidence without it predates 4.6 and means all `new` |
+| `characterization` | only when a UC-D uses characterization: `{ ucd, code_refs: [{ path, symbol?, baseline_blob }], reason, approval_ref }` per characterization UC-D; every path inside the source roots and a regular file of the baseline |
+| `baseline_commit` | only together with `characterization`: must equal the current workflow baseline (the parent's for a module sub-workflow), which must still be HEAD or an ancestor |
 | `not_applicable` | reason code, reason, approval reference, alternative validation, validation command, and non-empty source references |
 | `producer` | controlled evidence producer only |
 | `checker` | `builtin:test-case-derivation` with exit code 0 |

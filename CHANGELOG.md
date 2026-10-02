@@ -8,6 +8,7 @@
 
 - **`has_legacy_code` 只看 `src/`（S1.0）**：存量代码判定改为统计全部源码根（module-manifest `paths` → `.aidlc/source-roots.json` → 默认 `src`，与 4.5.4 D6 同一解析）下的文件数之和，阈值仍为"超过 10 个"。遍历跳过 `node_modules`、`.git`、`dist`、`build`、`target` 和隐藏项，嵌套源码根不重复计数；源码根不存在计 0 个文件。源码根配置无效（绝对路径、`..` 越界、符号链接/junction、manifest `paths` 非法）时该条件直接报错，不再静默当作"没有存量代码"。该值只在阶段条件读取 `has_legacy_code` 时才计算。
 - **`diagram-format` 审计写入失败被当作成功（S1.5）**：`DIAGRAM_FORMAT_SET` 审计写入失败时命令返回 error，并提示"状态已写入、审计缺失，请人工补记"。
+- **I13 `ready_ucd` 按出现次数计数（S2.0）**：`testCaseDerivation()` 原先统计 `status: ready` 在 `_index.md` 与用例文件中出现的次数，同一 UC-D 两处都写时 `ready_ucd` 大于 `ucd_total`，门禁报 `ready_ucd must equal ucd_total`。现在按 UC-D 去重，每个 UC-D 以自己的用例文件（含 `id: UC-D-xxx` 的 frontmatter 块；没有 frontmatter 块时按文件名认定）为准，`_index.md` 不参与计数。用例文件不是 ready、只在 `_index.md` 中出现、或同一 UC-D 在多个用例文件中声明时拒绝，报错列出具体 UC-D。
 
 ### Added
 
@@ -25,6 +26,20 @@
   - 写入：全部检查通过后（`--dry-run` 到此为止）重新读取状态，revision 或 `--expect` 失效时拒绝；`history` 追加 `{ stage: "baseline", result: "registered" | "replaced", user_input: "Approve" }`；审计 `BASELINE_COMMIT_SET` / `BASELINE_COMMIT_REPLACED`（含 HEAD、自报的 committer/author date、Workflow Started At、Anchor Commits、Tracked State At Commit、Reason、User Input；替换另含 From / From Source / Expected / Usage Check / Replacement Count）。审计写入失败时返回 error 并提示"状态已写入、审计缺失，请人工补记"。
 - **共享函数 `baselineCommitErrors(projectRoot, state)`（S1.4，`core/tools/aidlc-baseline.ts`）**：每次调用都重新检查基线已登记、不是 `unavailable`、commit 存在且仍是 HEAD 或其祖先（rebase 使基线成为孤立提交时报错），供后续门禁使用。
 - 新增回归测试 `tests/test_v4_6_0_baseline.ts` 并加入 `npm test`。
+- **UC-D `tdd_mode` 契约（S2.1）**：UC-D frontmatter 可声明 `tdd_mode: new | characterization`（默认 `new`）。`characterization` 必须写非空 `code_refs`、`reason`、`approval_ref`，`new` 不能写这三项；这四个字段只能出现在 frontmatter。`code_refs` 每项为 `<项目相对路径>[::<符号>]`，路径按 `normalizeSourceRoot` 规则处理（`\` / `/` 均可，拒绝绝对路径、盘符、UNC、`.`/`..`、控制面目录），且须落在源码根之内；工作区与基线中的符号链接均拒绝。UC-D 模板（`knowledge/protocols/test-case-derivation.md`）、`inception-test-case-derivation.md` 与 sensor 文档同步更新。
+- **I13 扩展（S2.2）**：required 分支输出 `ucd_modes`（每个 UC-D 一项）；只有存在 characterization 时才输出 `characterization[]`（`ucd`、`code_refs[{ path, symbol?, baseline_blob }]`、`reason`、`approval_ref`）和 `baseline_commit`。
+  - producer 校验（git 调用均为数组参数、`shell: false`）：git 仓库；基线取自 `workflowBaselineForModule()`（split 布局下模块子工作流读父工作流的基线）并通过 `baselineCommitErrors`；`git cat-file -e <base>:<path>` 成功且树条目是普通文件（非目录、非符号链接）；写了符号的，符号须作为完整标识符出现在 `git show <base>:<path>` 中；`bugfix` 至少 1 条 `new`。非 git 项目、基线为 `unavailable`、存量工作流未登记基线、基线因 rebase 成为孤立提交时拒绝 characterization。任一项失败 I13 整体失败。
+  - 门禁复核：`ucd_modes` 与 `ucd_ids` 一一对应；characterization 条目与 characterization UC-D 一一对应且字段齐全；`baseline_commit` 须等于当前工作流基线并仍可从 HEAD 到达；每个 `code_refs` 重新解析到基线中的同一 blob；没有 characterization 时不得出现 `characterization` / `baseline_commit`。缺 `ucd_modes` 的旧证据视为全部 `new`（不得同时带 `characterization` / `baseline_commit`）。
+  - 兼容性：未声明 `tdd_mode` 的项目 I13 结论不变，`ucd_modes` 全部为 `new`，证据不含 `baseline_commit`（S1.3 U3 依赖这一点）。
+- 新增回归测试 `tests/test_v4_6_0_tdd_mode.ts` 并加入 `npm test`；`tests/test_python_refactor_e2e.ts` 的 `_index.md` 改回普通列表写法（同时写 `status: ready`）。
+
+### Upgrade notes
+
+- **I13 用例文件写法收紧（S2.0）**：`ready_ucd` 改为按 UC-D 去重、以每个 UC-D 自己的用例文件为准后，以下三种以前可能被放行的写法现在会被 I13 拒绝，升级后请按需调整并重新产证：
+  - **同一 UC-D 不得在多个用例文件中声明**：每个 UC-D 只能有一个用例文件（或一个带 `id: UC-D-xxx` 的 frontmatter 块）声明它；重复声明时报错并列出涉及的文件。
+  - **仅出现在 `_index.md`（或其他文件正文引用）中的 UC-D 不算 ready**：`_index.md` 不再参与计数，没有自己用例文件的 UC-D 报 `no case file declares it`；请为其补充单独的用例文件并写 `status: ready`。
+  - **无 frontmatter 的聚合文件不再支持**：一个文件里写多个 UC-D、每个只靠正文中的 `status:` 行的写法不再被识别。支持的写法只有两种：每个 UC-D 一个带 `id: UC-D-xxx` 的 frontmatter 块（一个文件可以包含多个块），或者文件名含 UC-D 编号、正文写 `status:`。
+  - 已生成的 I13 证据不会自动重算（见 4.5.4 Upgrade notes）；调整用例文件后，已完成的 I13 实例用 `loeyae-aidlc evidence run --stage test-case-derivation --module <id> --refresh` 重新产证。
 
 ## 4.5.4
 

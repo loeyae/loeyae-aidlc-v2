@@ -64,6 +64,11 @@ type: {unit/api/e2e/contract/integration/resilience/configuration/migration}
 priority: {P0/P1/P2}
 status: {ready/blocked/deprecated}
 service_ids: [{受影响服务；非分布式项目写不适用}]
+tdd_mode: {new/characterization}        # 可选，默认 new
+code_refs:                              # 仅 characterization 必填，new 不得填写
+  - {项目相对路径}[::{符号}]
+reason: {仅 characterization 必填：为什么给存量行为补回归保护}
+approval_ref: {仅 characterization 必填：批准依据}
 ---
 
 # UC-D-{编号} {标题}
@@ -90,6 +95,38 @@ service_ids: [{受影响服务；非分布式项目写不适用}]
 ## 派生日志
 - 来源、时间、派生者和 CR 变更记录
 ```
+
+## 用例声明与计数
+
+- 每个 UC-D 以**自己的用例文件**为准：用例文件 frontmatter（`---` 包围、含 `id: UC-D-xxx` 的块）中的 `status` 决定是否 ready；聚合文件可包含多个这样的块。没有 frontmatter 块的用例文件，按文件名中的 UC-D 编号认定，并读取正文中的 `status:` 行。
+- `_index.md` 只是索引，其中的 `status: ready` 不参与计数；只在 `_index.md` 中出现、没有自己用例文件的 UC-D 视为未 ready。
+- 同一 UC-D 在多个用例文件（或块）中声明会被拒绝。
+
+## TDD 模式（`tdd_mode`）
+
+| 取值 | 含义 | 字段要求 |
+|------|------|----------|
+| `new`（默认） | 新行为，严格 RED→GREEN | 不得写 `code_refs`、`reason`、`approval_ref` |
+| `characterization` | 为基线中已存在的行为补回归保护（BASELINE→GREEN） | 必须写非空 `code_refs`、`reason`、`approval_ref` |
+
+```yaml
+---
+id: UC-D-003
+status: ready
+source_ref: REQ-002
+tdd_mode: characterization
+code_refs:
+  - app/exporter.py::export_orders
+reason: 补齐导出现有分页行为的回归保护，重构前锁定
+approval_ref: REVIEW-2026-10-01-01
+---
+```
+
+- `tdd_mode`、`code_refs`、`reason`、`approval_ref` 只能写在 frontmatter 中。
+- `code_refs` 每项格式 `<项目相对路径>[::<符号>]`：`\` 与 `/` 均可；拒绝绝对路径、盘符、UNC、`.`/`..` 段、控制面目录与符号链接；路径必须落在源码根之内（module-manifest `paths` → `.aidlc/source-roots.json` → 默认 `src`）。
+- I13 用工作流基线（`orchestrate baseline`；模块子工作流使用父工作流的基线）校验：文件在基线中存在且是普通文件；写了符号的，符号须作为完整标识符出现在基线版本的文件文本中（文本匹配，不做 AST 解析）。
+- 使用 characterization 需要 git 仓库与已登记、仍可从 HEAD 到达的基线；存量工作流先执行 `orchestrate baseline --set`。
+- `bugfix` 至少要有 1 条 `new`（复现 bug）；`refactor` 可全部为 characterization。
 
 ## 用例类型
 

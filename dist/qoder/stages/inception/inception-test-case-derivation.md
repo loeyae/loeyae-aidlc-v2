@@ -35,6 +35,8 @@ approval: notify
 5. 在 `docs/aidlc/modules/{module-id}/inception/application-design/test-cases/` 生成 `_index.md`，列出用例、来源、类型、服务、状态和证据位置。
 6. 没有业务行为时只能使用 `non-applicable.json`；不得只在 handoff、计划或聊天文本中声明跳过。
 7. 任何来源未覆盖、执行锚点不真实或必填字段缺失时，不得报告完成。
+8. 每个 UC-D 可在 frontmatter 声明 `tdd_mode`（`new` 默认 / `characterization`）。`characterization` 只用于基线中已存在的行为，必须写非空 `code_refs`（`<项目相对路径>[::<符号>]`，落在源码根内）、`reason` 和 `approval_ref`；`new` 不得写这三项。`bugfix` 至少保留 1 条 `new` 复现 bug。使用 characterization 前工作流须已登记基线（存量工作流执行 `orchestrate baseline --set`）。
+9. ready 状态以每个 UC-D 自己的用例文件为准，`_index.md` 中的状态不参与计数。
 
 ## 完成标准
 

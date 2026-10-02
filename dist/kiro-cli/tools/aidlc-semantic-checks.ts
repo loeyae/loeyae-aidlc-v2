@@ -2,12 +2,14 @@
 import { createHash } from "crypto";
 import { spawnSync } from "child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
-import { dirname, join, relative, resolve } from "path";
+import { basename, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
 import { portableDirname, readModuleManifest, verifiedModuleIds } from "./aidlc-execution-context";
 import { scanFiles, SOURCE_FILE_PATTERN, TEST_FILE_PATTERN } from "./aidlc-scan-root";
 import { hasExecutableBehavior } from "./aidlc-executable-behavior";
+import { baselineCodeRef, baselineCommitErrors, gitWorkTreeError, parseCodeRef, workflowBaselineForModule, type CodeRef } from "./aidlc-baseline";
+import { resolveSourceRoots } from "./aidlc-source-roots";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
 import { type WorkflowState } from "./aidlc-light-state";
 import { loadWorkflowView } from "./aidlc-workflow-layout";
@@ -576,10 +578,222 @@ function testCaseDerivation(): Record<string, unknown> {
   const idsFound = [...new Set((caseContent.match(/\bUC-D-\d+\b/g) || []))];
   if (idsFound.length === 0) fail("I13 test case directory contains no UC-D identifiers");
   if (/status\s*:\s*blocked|\bblocked\b/i.test(caseContent)) fail("I13 cannot complete while any UC-D is blocked");
-  const readyCount = (caseContent.match(/status\s*:\s*ready/gi) || []).length;
-  if (readyCount < idsFound.length) fail("every UC-D must declare status: ready before RED");
+  // Each UC-D is counted once, from its own case file; `_index.md` lists cases but never declares them.
+  const declarations = ucdDeclarations(caseFiles.filter((path) => basename(path) !== "_index.md"));
+  const notReady = idsFound.filter((id) => declarations.get(id)?.status !== "ready");
+  if (notReady.length > 0) {
+    const detail = notReady.map((id) => {
+      const declaration = declarations.get(id);
+      return declaration ? `${id} (${relativePath(declaration.file)}: status ${declaration.status ?? "missing"})` : `${id} (no case file declares it)`;
+    });
+    fail(`every UC-D must declare status: ready in its own case file before RED: ${detail.join("; ")}`);
+  }
+  const readyCount = idsFound.length;
   if (!/source_ref\s*:/i.test(caseContent)) fail("every I13 test case must declare source_ref");
-  return { status: "required", applicability: "required", ucd_total: idsFound.length, ready_ucd: readyCount, ucd_ids: idsFound, source_files: sourcePaths.map(relativePath), test_case_files: caseFiles.map(relativePath), index: relativePath(indexPath) };
+  const modes = ucdModes(idsFound, declarations);
+  return {
+    status: "required",
+    applicability: "required",
+    ucd_total: idsFound.length,
+    ready_ucd: readyCount,
+    ucd_ids: idsFound,
+    ucd_modes: Object.fromEntries(idsFound.map((id) => [id, modes.get(id)!.mode])),
+    ...characterizationEvidence(idsFound, modes),
+    source_files: sourcePaths.map(relativePath),
+    test_case_files: caseFiles.map(relativePath),
+    index: relativePath(indexPath),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// UC-D declarations and tdd_mode (4.6.0 S2)
+// ---------------------------------------------------------------------------
+
+type FrontmatterValue = string | string[];
+
+interface UcdDeclaration {
+  id: string;
+  file: string;
+  status?: string;
+  /** Frontmatter fields; absent for a body-only case file (identified by its file name). */
+  fields?: Map<string, FrontmatterValue>;
+  /** A body-only case file that declares `tdd_mode:` (only frontmatter may declare it). */
+  bodyTddMode?: boolean;
+}
+
+function unquote(value: string): string {
+  const trimmed = value.trim();
+  const quoted = /^"(.*)"$|^'(.*)'$/.exec(trimmed);
+  if (quoted) return quoted[1] ?? quoted[2] ?? "";
+  return trimmed.replace(/\s+#.*$/, "").trim();
+}
+
+const FRONTMATTER_LINE = /^\s*$|^\s*#|^[A-Za-z_][\w-]*\s*:|^\s*-\s/;
+
+/** Parse a YAML frontmatter subset: `key: value`, `key: [a, b]`, and `key:` followed by `- item` lines. */
+function parseFrontmatter(lines: string[], label: string): Map<string, FrontmatterValue> {
+  const fields = new Map<string, FrontmatterValue>();
+  let listKey: string | undefined;
+  for (const line of lines) {
+    if (/^\s*$|^\s*#/.test(line)) continue;
+    const item = /^\s*-\s+(.*)$/.exec(line);
+    if (item) {
+      const list = listKey === undefined ? undefined : fields.get(listKey);
+      if (!Array.isArray(list)) fail(`${label}: list item ${JSON.stringify(line.trim())} does not belong to a key`);
+      list.push(unquote(item[1]));
+      continue;
+    }
+    const pair = /^([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(line);
+    if (!pair) fail(`${label}: unsupported frontmatter line ${JSON.stringify(line)}`);
+    const [, key, rawValue] = pair;
+    if (fields.has(key)) fail(`${label}: frontmatter key ${key} is declared twice`);
+    const value = unquote(rawValue);
+    const inline = /^\[(.*)\]$/.exec(value);
+    if (value === "") {
+      fields.set(key, []);
+      listKey = key;
+    } else {
+      fields.set(key, inline ? inline[1].split(",").map(unquote).filter(Boolean) : value);
+      listKey = undefined;
+    }
+  }
+  return fields;
+}
+
+/** Frontmatter-style blocks (`---` … `---`) of a case file that declare an `id`. */
+function frontmatterBlocks(content: string, label: string): Array<Map<string, FrontmatterValue>> {
+  const lines = content.split(/\r?\n/);
+  const blocks: Array<Map<string, FrontmatterValue>> = [];
+  for (let index = 0; index < lines.length; index++) {
+    if (lines[index].trimEnd() !== "---") continue;
+    let close = index + 1;
+    while (close < lines.length && lines[close].trimEnd() !== "---") close++;
+    if (close >= lines.length) break;
+    const body = lines.slice(index + 1, close);
+    if (body.every((line) => FRONTMATTER_LINE.test(line)) && body.some((line) => /^id\s*:/.test(line))) {
+      blocks.push(parseFrontmatter(body, label));
+      index = close;
+    }
+  }
+  return blocks;
+}
+
+/**
+ * The declaration of every UC-D, from its own case file: each frontmatter block whose
+ * `id` is a UC-D, or, for a case file without such a block, the UC-D named by the file
+ * name with its `status:` line. A UC-D declared twice is ambiguous and rejected.
+ */
+function ucdDeclarations(files: string[]): Map<string, UcdDeclaration> {
+  const declarations = new Map<string, UcdDeclaration>();
+  const add = (declaration: UcdDeclaration) => {
+    const existing = declarations.get(declaration.id);
+    if (existing) fail(`${declaration.id} is declared in more than one case file: ${relativePath(existing.file)}, ${relativePath(declaration.file)}`);
+    declarations.set(declaration.id, declaration);
+  };
+  for (const file of files) {
+    const content = text(file);
+    const label = relativePath(file);
+    const blocks = frontmatterBlocks(content, label).filter((block) => /^UC-D-\d+$/.test(String(block.get("id"))));
+    if (blocks.length > 0) {
+      for (const fields of blocks) {
+        const status = fields.get("status");
+        add({ id: String(fields.get("id")), file, status: typeof status === "string" ? status.toLowerCase() : undefined, fields });
+      }
+      continue;
+    }
+    const named = /^(UC-D-\d+)(?!\d)/.exec(basename(file))?.[1];
+    if (named) add({ id: named, file, status: declaredValue(content, "status")?.toLowerCase(), bodyTddMode: declaredValue(content, "tdd_mode") !== undefined });
+  }
+  return declarations;
+}
+
+type UcdMode = { mode: "new" } | { mode: "characterization"; codeRefs: string[]; reason: string; approvalRef: string };
+
+const CHARACTERIZATION_FIELDS = ["code_refs", "reason", "approval_ref"] as const;
+
+/** Validate the `tdd_mode` contract (S2.1) of every UC-D and return its mode. */
+function ucdModes(ids: string[], declarations: Map<string, UcdDeclaration>): Map<string, UcdMode> {
+  const errors: string[] = [];
+  const modes = new Map<string, UcdMode>();
+  for (const id of ids) {
+    const declaration = declarations.get(id)!;
+    if (declaration.bodyTddMode) {
+      errors.push(`${id} declares tdd_mode outside a frontmatter block (${relativePath(declaration.file)}); tdd_mode, code_refs, reason and approval_ref belong in the UC-D frontmatter`);
+      continue;
+    }
+    const fields = declaration.fields || new Map<string, FrontmatterValue>();
+    const declared = fields.get("tdd_mode");
+    const mode = declared === undefined ? "new" : declared;
+    if (mode !== "new" && mode !== "characterization") {
+      errors.push(`${id} tdd_mode must be new or characterization, got ${JSON.stringify(declared)}`);
+      continue;
+    }
+    if (mode === "new") {
+      const extra = CHARACTERIZATION_FIELDS.filter((field) => fields.has(field));
+      if (extra.length > 0) errors.push(`${id} uses tdd_mode new and must not declare ${extra.join(", ")} (only characterization UC-Ds carry code_refs, reason and approval_ref)`);
+      else modes.set(id, { mode: "new" });
+      continue;
+    }
+    const codeRefs = fields.get("code_refs");
+    const reason = fields.get("reason");
+    const approvalRef = fields.get("approval_ref");
+    const missing: string[] = [];
+    if (!Array.isArray(codeRefs) || codeRefs.length === 0) missing.push("a non-empty code_refs list");
+    if (typeof reason !== "string" || reason.length === 0) missing.push("a non-empty reason");
+    if (typeof approvalRef !== "string" || approvalRef.length === 0) missing.push("a non-empty approval_ref");
+    if (missing.length > 0) errors.push(`${id} uses tdd_mode characterization and must declare ${missing.join(", ")}`);
+    else modes.set(id, { mode: "characterization", codeRefs: codeRefs as string[], reason: reason as string, approvalRef: approvalRef as string });
+  }
+  if (errors.length > 0) fail(`I13 UC-D tdd_mode contract violated: ${errors.join("; ")}`);
+  return modes;
+}
+
+/**
+ * `characterization[]` and `baseline_commit` (S2.2), only when a UC-D uses
+ * characterization. Requires a git repository and a registered, reachable workflow
+ * baseline (the parent's for a module sub-workflow); every code ref must be a regular
+ * file of the baseline inside the source roots, and every symbol must occur in it.
+ * A bugfix needs at least one new UC-D reproducing the bug.
+ */
+function characterizationEvidence(ids: string[], modes: Map<string, UcdMode>): Record<string, unknown> {
+  const characterized = ids.filter((id) => modes.get(id)!.mode === "characterization");
+  if (workflowState?.scope === "bugfix" && characterized.length === ids.length) {
+    fail("a bugfix workflow needs at least one tdd_mode new UC-D that reproduces the bug; only characterization UC-Ds were declared");
+  }
+  if (characterized.length === 0) return {};
+  const repository = gitWorkTreeError(ROOT);
+  if (repository) fail(`tdd_mode characterization requires a git repository with a workflow baseline: ${repository}`);
+  let baseline: ReturnType<typeof workflowBaselineForModule>;
+  try {
+    baseline = workflowBaselineForModule(ROOT, ACTIVE_MODULE);
+  } catch (error) {
+    fail(`tdd_mode characterization cannot resolve the workflow baseline: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const baselineErrors = baselineCommitErrors(ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
+  if (baselineErrors.length > 0 || !baseline.registered) fail(`tdd_mode characterization requires a usable workflow baseline: ${baselineErrors.join("; ")}`);
+  const roots = resolveSourceRoots(ROOT, ACTIVE_MODULE).roots;
+  const errors: string[] = [];
+  const entries = characterized.map((id) => {
+    const mode = modes.get(id) as Extract<UcdMode, { mode: "characterization" }>;
+    const codeRefs = mode.codeRefs.flatMap((value) => {
+      let ref: CodeRef;
+      try {
+        ref = parseCodeRef(value, roots, `${id} code_refs`);
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+        return [];
+      }
+      const resolved = baselineCodeRef(ROOT, baseline.commit, ref, `${id} code_refs ${JSON.stringify(value)}`);
+      if ("error" in resolved) {
+        errors.push(resolved.error);
+        return [];
+      }
+      return [{ path: ref.path, ...(ref.symbol === undefined ? {} : { symbol: ref.symbol }), baseline_blob: resolved.blob }];
+    });
+    return { ucd: id, code_refs: codeRefs, reason: mode.reason, approval_ref: mode.approvalRef };
+  });
+  if (errors.length > 0) fail(`I13 characterization code_refs rejected: ${errors.join("; ")}`);
+  return { characterization: entries, baseline_commit: baseline.commit };
 }
 
 function testQuality(): Record<string, unknown> {

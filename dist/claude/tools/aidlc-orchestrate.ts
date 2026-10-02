@@ -33,7 +33,16 @@ import { planAgentExecution, type AgentExecutionPlan } from "./aidlc-agent-runti
 import { SEMANTIC_SENSORS, allowlistedPhaseCommand, phaseObservationDigest } from "./aidlc-evidence";
 import { CANONICAL_SOURCE_PATTERN, resolveSourceRoots } from "./aidlc-source-roots";
 import { COMMIT_ID_PATTERN, commitAncestryErrors, readSourceRevision } from "./aidlc-revision";
-import { baselineUsage, checkBaselineCandidate, currentHeadCommit } from "./aidlc-baseline";
+import {
+  baselineCodeRef,
+  baselineCommitErrors,
+  baselineUsage,
+  checkBaselineCandidate,
+  currentHeadCommit,
+  parseCodeRef,
+  workflowBaselineForModule,
+  type CodeRef,
+} from "./aidlc-baseline";
 import {
   evidenceRelativePath,
   isEvidenceArtifactLabel,
@@ -1000,6 +1009,100 @@ function i13Applicability(instance: StageInstance): { any: boolean; allNotApplic
   return { any: records.length > 0, allNotApplicable: records.length > 0 && records.every((record) => record.status === "not_applicable") };
 }
 
+const UCD_MODES = new Set(["new", "characterization"]);
+const BLOB_ID_PATTERN = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+
+/**
+ * I13 `ucd_modes` / `characterization[]` / `baseline_commit` (4.6.0 S2.2). Evidence
+ * without `ucd_modes` predates 4.6 and means every UC-D is new. When a UC-D uses
+ * characterization, the recorded baseline must be the current workflow baseline (the
+ * parent's for a module sub-workflow), still reachable from HEAD, and every code ref
+ * must resolve to the recorded blob inside the source roots.
+ */
+function i13ModeErrors(evidence: Evidence, ucdIds: string[], state: WorkflowState, instance: StageInstance): string[] {
+  const errors: string[] = [];
+  let modes: Record<string, unknown>;
+  if (evidence.ucd_modes === undefined) {
+    if (evidence.characterization !== undefined || evidence.baseline_commit !== undefined) errors.push("characterization and baseline_commit require ucd_modes");
+    modes = Object.fromEntries(ucdIds.map((id) => [id, "new"]));
+  } else {
+    const record = asRecord(evidence.ucd_modes);
+    if (!record) return ["ucd_modes must be an object keyed by UC-D"];
+    modes = record;
+    const keys = Object.keys(record);
+    if (keys.length !== ucdIds.length || !ucdIds.every((id) => keys.includes(id))) errors.push("ucd_modes must have exactly one entry per ucd_ids entry");
+    for (const [id, mode] of Object.entries(record)) if (!UCD_MODES.has(String(mode))) errors.push(`ucd_modes.${id} must be new or characterization`);
+  }
+  const characterized = ucdIds.filter((id) => modes[id] === "characterization");
+  if (state.scope === "bugfix" && ucdIds.length > 0 && characterized.length === ucdIds.length) errors.push("a bugfix workflow needs at least one tdd_mode new UC-D that reproduces the bug");
+  if (characterized.length === 0) {
+    if (evidence.characterization !== undefined) errors.push("characterization must be absent when no UC-D uses tdd_mode characterization");
+    if (evidence.baseline_commit !== undefined) errors.push("baseline_commit must be absent when no UC-D uses tdd_mode characterization");
+    return errors;
+  }
+
+  const entries = Array.isArray(evidence.characterization) ? evidence.characterization : null;
+  if (!entries) return [...errors, "characterization must list every tdd_mode characterization UC-D"];
+  let roots: string[] = [];
+  try {
+    roots = resolveSourceRoots(PROJECT_ROOT, instance.module_id).roots;
+  } catch (error) {
+    errors.push(`source roots cannot be resolved: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const refs: Array<{ ucd: string; ref: CodeRef; blob: string }> = [];
+  const seen = new Set<string>();
+  for (const [index, value] of entries.entries()) {
+    const entry = asRecord(value);
+    const ucd = asNonEmptyString(entry?.ucd);
+    if (!entry || !ucd || !characterized.includes(ucd) || seen.has(ucd)) {
+      errors.push(`characterization[${index}].ucd must name a distinct tdd_mode characterization UC-D`);
+      continue;
+    }
+    seen.add(ucd);
+    if (!asNonEmptyString(entry.reason)) errors.push(`characterization ${ucd} reason is required`);
+    if (!asNonEmptyString(entry.approval_ref)) errors.push(`characterization ${ucd} approval_ref is required`);
+    const codeRefs = Array.isArray(entry.code_refs) ? entry.code_refs : [];
+    if (codeRefs.length === 0) errors.push(`characterization ${ucd} code_refs must be non-empty`);
+    for (const item of codeRefs) {
+      const codeRef = asRecord(item);
+      const path = asNonEmptyString(codeRef?.path);
+      const blob = String(codeRef?.baseline_blob || "");
+      const symbol = codeRef?.symbol;
+      if (!codeRef || !path || !BLOB_ID_PATTERN.test(blob) || (symbol !== undefined && !asNonEmptyString(symbol))) {
+        errors.push(`characterization ${ucd} code_refs entries need path, baseline_blob and an optional non-empty symbol`);
+        continue;
+      }
+      try {
+        const ref = parseCodeRef(symbol === undefined ? path : `${path}::${String(symbol)}`, roots, `characterization ${ucd} code_refs`);
+        if (ref.path !== path) errors.push(`characterization ${ucd} code_refs path ${path} is not normalized`);
+        refs.push({ ucd, ref, blob });
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+  }
+  const missing = characterized.filter((id) => !seen.has(id));
+  if (missing.length > 0) errors.push(`characterization is missing ${missing.join(", ")}`);
+
+  let baseline: ReturnType<typeof workflowBaselineForModule>;
+  try {
+    baseline = workflowBaselineForModule(PROJECT_ROOT, instance.module_id);
+  } catch (error) {
+    return [...errors, `workflow baseline cannot be resolved: ${error instanceof Error ? error.message : String(error)}`];
+  }
+  const baselineErrors = baselineCommitErrors(PROJECT_ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
+  if (baselineErrors.length > 0 || !baseline.registered) return [...errors, ...baselineErrors];
+  if (evidence.baseline_commit !== baseline.commit) {
+    return [...errors, `baseline_commit ${JSON.stringify(evidence.baseline_commit)} does not match the workflow baseline ${baseline.commit}`];
+  }
+  for (const { ucd, ref, blob } of refs) {
+    const resolved = baselineCodeRef(PROJECT_ROOT, baseline.commit, ref, `characterization ${ucd} code_refs ${ref.path}`);
+    if ("error" in resolved) errors.push(resolved.error);
+    else if (resolved.blob !== blob) errors.push(`characterization ${ucd} code_refs ${ref.path} baseline_blob ${blob} does not match ${resolved.blob} at the workflow baseline`);
+  }
+  return errors;
+}
+
 function phaseEvidenceErrors(
   evidence: Evidence,
   sensor: string,
@@ -1314,6 +1417,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
             const ucdIds = asStringArray(evidence.ucd_ids);
             if (!ucdIds || ucdIds.length === 0) errors.push("ucd_ids must be non-empty");
             if (!asNonEmptyString(evidence.index)) errors.push("index is required");
+            errors.push(...i13ModeErrors(evidence, ucdIds || [], state, instance));
           }
           return errors;
         });

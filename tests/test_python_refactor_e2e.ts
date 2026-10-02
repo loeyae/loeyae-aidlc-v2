@@ -112,13 +112,16 @@ try {
   next("test-case-derivation@module:project");
   const inception = "docs/aidlc/modules/project/inception";
   write(`${inception}/requirements.md`, "# 需求\n\n## REQ-001 导出超时重试\n\ntrack: [nfr]\n\n业务规则：订单导出接口在下游超时时最多重试 3 次，3 次内成功则返回订单列表。\n");
-  write(`${inception}/application-design/test-cases/_index.md`, "# UC-D 索引\n\n| UC-D | 来源 |\n| --- | --- |\n| UC-D-001 | REQ-001 |\n");
+  write(`${inception}/application-design/test-cases/_index.md`, "# UC-D 索引\n\n- UC-D-001 导出超时后重试（status: ready，source_ref: REQ-001）\n");
   write(`${inception}/application-design/test-cases/UC-D-001.md`, "---\nid: UC-D-001\nstatus: ready\nsource_ref: REQ-001\n---\n# UC-D-001 导出超时后重试\n\nGiven 下游首次调用超时，When 调用 export_orders，Then 重试后返回订单列表。\n");
   ok(["orchestrate", "report", "--stage", "test-case-derivation", "--result", "completed"]);
   // D4: the module-layout I13 required branch (UC-D cases read from the module test-case root).
   const i13 = JSON.parse(readFileSync(join(project, ".aidlc/evidence/test-case-derivation/project/test-case-derivation.json"), "utf8"));
   assert.equal(i13.status, "required");
   assert.deepEqual(i13.ucd_ids, ["UC-D-001"]);
+  // S2.0: `status: ready` in both _index.md and the case file counts once.
+  assert.equal(i13.ready_ucd, 1);
+  assert.deepEqual(i13.ucd_modes, { "UC-D-001": "new" });
 
   // RED.
   next("tdd@module:project@unit:default");

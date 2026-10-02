@@ -25,7 +25,8 @@ import {
   type WorkflowRef,
   type WorkflowState,
 } from "./aidlc-light-state";
-import { loadWorkflowParts } from "./aidlc-workflow-layout";
+import { normalizeSourceRoot } from "./aidlc-source-roots";
+import { isSplitLayout, loadWorkflowParts } from "./aidlc-workflow-layout";
 
 /** Stages whose evidence is produced against the baseline (usage check U1). */
 export const BASELINE_CONSUMING_STAGES: ReadonlySet<string> = new Set(["tdd", "code-generation", "code-review", "build-and-test"]);
@@ -114,6 +115,99 @@ export function baselineCommitErrors(projectRoot: string, state: Pick<WorkflowSt
   if (!COMMIT_ID_PATTERN.test(commit)) return [`workflow baseline commit ${JSON.stringify(commit)} must be a 40- or 64-character lowercase hex commit id`];
   const check = commitIsAncestorOfHead(projectRoot, commit, "workflow baseline commit");
   return check.ok ? [] : [check.error];
+}
+
+/**
+ * The baseline that applies to a module's stages: in the split layout the module
+ * sub-workflow (which reads its parent global workflow); otherwise the global/single
+ * workflow, which also owns every module of the single layout.
+ */
+export function workflowBaselineForModule(projectRoot: string, moduleId?: string): WorkflowBaseline {
+  const ref: WorkflowRef = moduleId && isSplitLayout(projectRoot) ? { kind: "module", module_id: moduleId } : GLOBAL_WORKFLOW;
+  return workflowBaseline(projectRoot, ref);
+}
+
+/** Null when the project is a git work tree, otherwise why it is not (git missing included). */
+export function gitWorkTreeError(projectRoot: string): string | null {
+  const inside = git(projectRoot, ["rev-parse", "--is-inside-work-tree"]);
+  if (inside.error) return `git is unavailable (${inside.error.message})`;
+  if (inside.status !== 0 || inside.stdout.trim() !== "true") return "the project is not a git repository";
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// UC-D code_refs (tdd_mode characterization, 4.6.0 S2)
+// ---------------------------------------------------------------------------
+
+export interface CodeRef {
+  /** Project-relative POSIX path inside one of the source roots. */
+  path: string;
+  symbol?: string;
+}
+
+/**
+ * Parse one UC-D `code_refs` entry `<project-relative path>[::<symbol>]`. The path
+ * follows the source-root rules (normalizeSourceRoot: `\` or `/` separators; absolute,
+ * drive, UNC, `.`/`..` and control-plane paths rejected) and must lie inside one of
+ * `roots`. The symbol, when given, is a single token without whitespace or `:`.
+ */
+export function parseCodeRef(value: unknown, roots: readonly string[], label: string): CodeRef {
+  if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${label} must be a non-empty "<path>[::<symbol>]" string`);
+  const raw = value.trim();
+  const separator = raw.indexOf("::");
+  const pathPart = separator >= 0 ? raw.slice(0, separator) : raw;
+  const symbol = separator >= 0 ? raw.slice(separator + 2).trim() : undefined;
+  const where = `${label} ${JSON.stringify(value)}`;
+  if (symbol !== undefined && symbol.length === 0) throw new Error(`${where}: the symbol after "::" must not be empty`);
+  if (symbol !== undefined && !/^[^\s:]+$/.test(symbol)) throw new Error(`${where}: the symbol must be a single token without whitespace or ":"`);
+  const path = normalizeSourceRoot(pathPart, where);
+  if (!roots.some((sourceRoot) => path.startsWith(`${sourceRoot}/`))) {
+    throw new Error(`${where}: ${path} is outside the source roots (${roots.join(", ")})`);
+  }
+  return symbol === undefined ? { path } : { path, symbol };
+}
+
+function escapeExpression(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Resolve a code ref against the workflow baseline commit: no symbolic link on the
+ * path in the worktree, `git cat-file -e <base>:<path>` succeeds, the tree entry is a
+ * regular file (not a symlink or a directory), and a declared symbol occurs as a whole
+ * token in `git show <base>:<path>`. Returns the git blob id of the file at the base.
+ */
+export function baselineCodeRef(projectRoot: string, commit: string, ref: CodeRef, label: string): { blob: string } | { error: string } {
+  const base = root(projectRoot);
+  const segments = ref.path.split("/");
+  for (let index = 1; index <= segments.length; index++) {
+    const partial = segments.slice(0, index).join("/");
+    let isLink = false;
+    try {
+      isLink = lstatSync(join(base, ...segments.slice(0, index))).isSymbolicLink();
+    } catch {
+      break;
+    }
+    if (isLink) return { error: `${label}: ${partial} is a symbolic link in the worktree` };
+  }
+  const spec = `${commit}:${ref.path}`;
+  const exists = git(projectRoot, ["cat-file", "-e", spec]);
+  if (exists.error) return { error: `${label}: git is unavailable (${exists.error.message})` };
+  if (exists.status !== 0) return { error: `${label}: ${ref.path} does not exist in the workflow baseline ${commit}; characterization covers code that already existed at the baseline` };
+  const listed = git(projectRoot, ["ls-tree", "-z", commit, "--", ref.path]);
+  const entry = listed.status === 0 ? listed.stdout.split("\0").find((line) => line.endsWith(`\t${ref.path}`)) : undefined;
+  const match = entry ? /^(\d{6}) (\w+) ([a-f0-9]{40}|[a-f0-9]{64})\t/.exec(entry) : null;
+  if (!match) return { error: `${label}: cannot read the tree entry of ${ref.path} at the workflow baseline ${commit}` };
+  const [, mode, type, blob] = match;
+  if (mode === "120000") return { error: `${label}: ${ref.path} is a symbolic link in the workflow baseline ${commit}` };
+  if (type !== "blob") return { error: `${label}: ${ref.path} is not a file in the workflow baseline ${commit} (git ${type})` };
+  if (ref.symbol !== undefined) {
+    const shown = git(projectRoot, ["show", spec]);
+    if (shown.status !== 0) return { error: `${label}: cannot read ${ref.path} at the workflow baseline ${commit}: ${shown.stderr.trim()}` };
+    const token = new RegExp(`(?<![A-Za-z0-9_$])${escapeExpression(ref.symbol)}(?![A-Za-z0-9_$])`);
+    if (!token.test(shown.stdout)) return { error: `${label}: symbol ${ref.symbol} not found in ${ref.path} at the workflow baseline ${commit}` };
+  }
+  return { blob };
 }
 
 // ---------------------------------------------------------------------------
