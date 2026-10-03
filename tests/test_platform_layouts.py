@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -9,11 +10,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 NODE = os.environ.get("NODE", "node")
+NODE_PATH = shutil.which(NODE) or NODE
 
 
 def run_install(harness: str, home: Path, extra_env=None) -> None:
     env = os.environ.copy()
     env["HOME"] = str(home)
+    # Windows os.homedir() (install state dir) and the Qoder CN path resolve the profile from USERPROFILE,
+    # not HOME. Without these the installer writes manifests into the developer's real ~/.config.
+    env["USERPROFILE"] = str(home)
+    env["AIDLC_INSTALL_STATE_DIR"] = str(home / ".config" / "loeyae-aidlc" / "installations")
     if extra_env:
         env.update(extra_env)
     result = subprocess.run(
@@ -27,20 +33,20 @@ def run_install(harness: str, home: Path, extra_env=None) -> None:
 
 
 def fake_host_cli(path: Path, marketplace_list=False) -> None:
+    # A node-shebang script runs on every platform: POSIX execs it directly, and on Windows the
+    # installer's hostCliInvocation detects the node shebang and runs it via node (a /bin/sh stub
+    # cannot be spawned on Windows).
     body = [
-        "#!/bin/sh",
-        "if [ \"$1\" = plugin ] && [ \"$2\" = validate ]; then",
-        "  printf 'Validation passed\\n'",
-        "fi",
+        f"#!{NODE_PATH}",
+        "const args = process.argv.slice(2);",
+        "if (args[0] === 'plugin' && args[1] === 'validate') process.stdout.write('Validation passed\\n');",
     ]
     if marketplace_list:
-        body.extend([
-            "if [ \"$1\" = plugin ] && [ \"$2\" = marketplace ] && [ \"$3\" = list ]; then",
-            "  printf '[]\\n'",
-            "fi",
-        ])
-    body.append("exit 0")
-    path.write_text("\n".join(body) + "\n")
+        body.append(
+            "if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'list') process.stdout.write('[]\\n');"
+        )
+    body.append("process.exit(0);")
+    path.write_bytes(("\n".join(body) + "\n").encode("utf-8"))
     path.chmod(0o755)
 
 
