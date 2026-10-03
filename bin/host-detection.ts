@@ -54,13 +54,15 @@ export interface HostCliSpawnSpec {
 /**
  * Windows 上把裸命令名(如 `claude`)按 PATH + PATHEXT 解析成真实文件;
  * 已是路径/已存在的文件、以及非 win32 平台原样返回(POSIX 的 execvp 自己会查 PATH)。
+ * `exists` 默认为 `fs.existsSync`,可注入以模拟 Windows 文件系统(让 POSIX 主机也能测试 win32 解析)。
  */
 export function resolveWindowsCommand(
   command: string,
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
+  exists: (filePath: string) => boolean = existsSync,
 ): string {
-  if (platform !== "win32" || existsSync(command) || /[\\/]/.test(command)) return command;
+  if (platform !== "win32" || exists(command) || /[\\/]/.test(command)) return command;
   const hasExtension = Boolean(path.win32.extname(command));
   const extensions = hasExtension
     ? [""]
@@ -69,7 +71,7 @@ export function resolveWindowsCommand(
   for (const directory of pathValue.split(";").filter(Boolean)) {
     for (const extension of extensions) {
       const candidate = path.win32.join(directory, `${command}${extension}`);
-      if (existsSync(candidate)) return candidate;
+      if (exists(candidate)) return candidate;
     }
   }
   return command;
@@ -112,8 +114,9 @@ export function hostCliSpawnSpec(
   platform: NodeJS.Platform = process.platform,
   nodeExecutable: string = process.execPath,
   env: NodeJS.ProcessEnv = process.env,
+  exists: (filePath: string) => boolean = existsSync,
 ): HostCliSpawnSpec {
-  const resolved = resolveWindowsCommand(cliPath, platform, env);
+  const resolved = resolveWindowsCommand(cliPath, platform, env, exists);
   const invocation = hostCliInvocation(resolved, platform, nodeExecutable);
   if (platform === "win32" && invocation.argsPrefix.length === 0
     && [".cmd", ".bat"].includes(path.win32.extname(resolved).toLowerCase())) {

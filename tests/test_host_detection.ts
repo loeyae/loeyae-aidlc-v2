@@ -42,17 +42,21 @@ try {
   const shim = path.join(binDir, "fakehost.cmd");
   writeFileSync(shim, `@"${process.execPath}" "${echoScript}" %*\r\n`);
   const winEnv: NodeJS.ProcessEnv = { PATH: binDir, PATHEXT: ".exe;.cmd", ComSpec: "C:\\Windows\\System32\\cmd.exe" };
+  // 注入 exists,模拟 Windows 文件系统:只承认 fakehost.cmd 候选存在。
+  // 这样 POSIX 主机也能测 win32 命令解析,无需真实文件系统(该文件用 win32 路径分隔符,POSIX 上不存在)。
+  const fakeHostCmd = path.win32.join(binDir, "fakehost.cmd");
+  const mockExists = (filePath: string): boolean => filePath === fakeHostCmd;
 
-  assert.equal(resolveWindowsCommand("fakehost", "win32", winEnv), path.win32.join(binDir, "fakehost.cmd"));
+  assert.equal(resolveWindowsCommand("fakehost", "win32", winEnv, mockExists), fakeHostCmd);
   assert.equal(resolveWindowsCommand("fakehost", "darwin", winEnv), "fakehost");
-  assert.equal(resolveWindowsCommand("missing-host", "win32", winEnv), "missing-host");
+  assert.equal(resolveWindowsCommand("missing-host", "win32", winEnv, mockExists), "missing-host");
 
-  const spec = hostCliSpawnSpec("fakehost", ["a b"], "win32", "node.exe", winEnv);
+  const spec = hostCliSpawnSpec("fakehost", ["a b"], "win32", "node.exe", winEnv, mockExists);
   assert.equal(spec.command, "C:\\Windows\\System32\\cmd.exe");
   assert.equal(spec.windowsVerbatimArguments, true);
   assert.deepEqual(spec.args.slice(0, 3), ["/d", "/s", "/c"]);
   assert.deepEqual(hostCliSpawnSpec("fakehost", ["a b"], "linux", "node", winEnv), { command: "fakehost", args: ["a b"] });
-  assert.throws(() => hostCliSpawnSpec("fakehost", ["line\nbreak"], "win32", "node.exe", winEnv), /line break/);
+  assert.throws(() => hostCliSpawnSpec("fakehost", ["line\nbreak"], "win32", "node.exe", winEnv, mockExists), /line break/);
 
   if (process.platform === "win32") {
     const tricky = [
