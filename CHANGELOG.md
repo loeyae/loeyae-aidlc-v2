@@ -1,5 +1,23 @@
 # Changelog
 
+## 4.6.1
+
+修复目录型产物在 produces 与 consumes 两侧判定标准不一致（D8）：源码根中只要有一个 0 字节的 `__init__.py`，消费源码根的阶段就固定失败。
+
+### Fixed
+
+- **D8 `checkConsumes` 对目录型源码根逐文件要求 ≥16 字节**：同一个目录型产物，`checkProduces` 只要求目录中至少有一个 ≥16 字节的文件，`checkConsumes` 却要求目录中每个文件都 ≥16 字节。因此 Python 项目源码根里合法的 0 字节包标记 `__init__.py` 会让 `code-review`、`build-and-test` 固定报 `app/: missing or smaller than 16 bytes`，对已完成的 `code-review` 做 re-attest 也失败。
+  - 新规则：两侧统一调用共享函数 `artifactPresenceFailure`（`core/tools/aidlc-orchestrate.ts`）。**目录型**（pattern 以 `/` 结尾，或目标本身是目录；源码根展开为 `<root>/`）要求目录存在且至少有一个 ≥16 字节的文件，目录中的空文件、小文件不算失败。**单文件型**规则不变：文件存在且 ≥16 字节，project 级 aggregate 展开成多个文件时每个都须 ≥16 字节。报错文案与 label 不变。
+  - 保持 fail-closed：源码根不存在、为空目录、其中文件全部小于 16 字节、是符号链接或 junction（含解析到项目外）时仍然失败；多个源码根逐个判定，任一不满足即失败；单文件 <16 字节仍然失败。目录型 pattern 经 aggregate 展开到多个 module/unit 时直接拒绝，避免一个模块的文件替另一个模块凑数（当前阶段图中没有这种组合）。
+  - 受影响的 consumes：`src/`（`code-review`，unit 级；`build-and-test`，project 级）与 `docs/aidlc/modules/{module-id}/inception/application-design/test-cases/`（`tdd`、`code-generation`，unit 级），现在与 produces 侧采用同一目录型规则。`checkProduces` 的判定结果不变。
+  - 内建 `traceability` sensor 不再把目录型 produce（如源码根）中小于 16 字节（`MIN_ARTIFACT_BYTES`）的文件当作缺少需求 ID 的产物；≥16 字节且没有 REQ 标记的源码文件仍然失败，单文件 produce 的检查不变。
+
+### Upgrade notes
+
+- 已完成的 `code-review`、`build-and-test` 实例不需要任何额外操作。
+- 源码根里有空文件或很小文件（如 0 字节 `__init__.py`）的项目，升级后可以直接继续 `next` / `report` / re-attest。
+- 源码根中小于 16 字节的源码文件不再参与 traceability 追溯。
+
 ## 4.6.0
 
 TDD characterization 模式与工作流基线登记：UC-D 按 `tdd_mode` 区分，新行为走 RED→GREEN，存量行为走 BASELINE→GREEN，存量工作流通过 `orchestrate baseline` 显式登记基线。

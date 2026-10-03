@@ -707,24 +707,51 @@ function displayArtifactPatterns(pattern: string, instance: StageInstance, allow
  */
 const MIN_ARTIFACT_BYTES = 16;
 
+/**
+ * Shared presence rule of checkProduces and checkConsumes for one declared artifact
+ * pattern (a canonical `src/` is expanded per source root by the callers first, so
+ * every root is judged on its own). Returns the failure label, or undefined when the
+ * artifact is present.
+ *
+ * - Directory artifact (pattern ends with `/`, or the resolved target is a directory):
+ *   the directory exists and holds at least one file of >= MIN_ARTIFACT_BYTES. Empty
+ *   or small files next to it (e.g. 0-byte Python `__init__.py`) do not fail it.
+ * - Single-file artifact: the file exists and is >= MIN_ARTIFACT_BYTES; when a project
+ *   aggregate expands it to several files, every one of them must be.
+ *
+ * Symbolic links / junctions and paths escaping the project root keep throwing (from
+ * assertProjectPath / collectFiles); each caller keeps its own fail-closed handling.
+ */
+function artifactPresenceFailure(pattern: string, instance: StageInstance, allowProjectAggregate = false): string | undefined {
+  const label = instanceArtifactPattern(pattern, instance, allowProjectAggregate);
+  const contextual = label.replace(/\\/g, "/");
+  const aggregated = contextual.includes("*") || /\{[^}]+\}/.test(contextual);
+  let directory = contextual.endsWith("/");
+  if (!directory && !aggregated) {
+    const target = assertProjectPath(join(PROJECT_ROOT, contextual));
+    directory = existsSync(target) && lstatSync(target).isDirectory();
+  }
+  if (directory && aggregated) {
+    // A directory artifact expanded across modules/units would let a substantive file of
+    // one module satisfy an empty directory of another; resolveConcretePaths returns only
+    // files, so the concrete directories cannot be judged one by one here. No graph
+    // consume reaches this combination today, so it is rejected instead (fail-closed).
+    throw new Error(`directory artifact cannot be aggregated across modules/units: ${label}`);
+  }
+  const paths = resolveConcretePaths(pattern, instance, allowProjectAggregate);
+  const present = directory
+    ? paths.some((path) => lstatSync(path).size >= MIN_ARTIFACT_BYTES)
+    : paths.length > 0 && paths.every((path) => lstatSync(path).size >= MIN_ARTIFACT_BYTES);
+  return present ? undefined : label;
+}
+
 export function checkProduces(instance: StageInstance): string[] {
   const stage = instance.stage;
   if (!stage.produces || stage.produces.length === 0) return [];
   const missing: string[] = [];
   for (const pattern of stage.produces.flatMap((declared) => expandSourcePattern(declared, instance))) {
-    const paths = resolveConcretePaths(pattern, instance);
-    if (paths.length === 0) {
-      missing.push(instanceArtifactPattern(pattern, instance));
-      continue;
-    }
-
-    if (pattern.endsWith("/") || paths.some((path) => statSync(path).isDirectory())) {
-      const hasSubstantiveFile = paths.some((path) => statSync(path).size >= MIN_ARTIFACT_BYTES);
-      if (!hasSubstantiveFile) missing.push(instanceArtifactPattern(pattern, instance));
-      continue;
-    }
-
-    if (paths.some((path) => statSync(path).size < MIN_ARTIFACT_BYTES)) missing.push(instanceArtifactPattern(pattern, instance));
+    const failure = artifactPresenceFailure(pattern, instance);
+    if (failure !== undefined) missing.push(failure);
   }
   return missing;
 }
@@ -734,24 +761,21 @@ export function checkConsumes(instance: StageInstance, state: WorkflowState, gra
   const failures: string[] = [];
   for (const pattern of stage.consumes || []) {
     let resolvedPattern = pattern;
-    let paths: string[] = [];
     let missingLabel: string | undefined;
     try {
       resolvedPattern = displayArtifactPatterns(pattern, instance, true).join(", ");
-      for (const expanded of expandSourcePattern(pattern, instance)) {
-        const expandedPaths = resolveConcretePaths(expanded, instance, true);
-        if (expandedPaths.length === 0 || expandedPaths.some((path) => lstatSync(path).isFile() && lstatSync(path).size < MIN_ARTIFACT_BYTES)) {
-          missingLabel = instanceArtifactPattern(expanded, instance, true);
-          break;
-        }
-        paths.push(...expandedPaths);
+      const expandedPatterns = expandSourcePattern(pattern, instance);
+      if (expandedPatterns.length === 0) missingLabel = resolvedPattern;
+      for (const expanded of expandedPatterns) {
+        missingLabel = artifactPresenceFailure(expanded, instance, true);
+        if (missingLabel !== undefined) break;
       }
     } catch (error) {
       failures.push(`${resolvedPattern}: ${error instanceof Error ? error.message : String(error)}`);
       continue;
     }
-    if (missingLabel !== undefined || paths.length === 0) {
-      failures.push(`${missingLabel ?? resolvedPattern}: missing or smaller than ${MIN_ARTIFACT_BYTES} bytes`);
+    if (missingLabel !== undefined) {
+      failures.push(`${missingLabel}: missing or smaller than ${MIN_ARTIFACT_BYTES} bytes`);
       continue;
     }
     const producers = graph.stages.filter((candidate) => (candidate.produces || []).includes(pattern));
@@ -1387,8 +1411,13 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
         const untraced: string[] = [];
         const unreadableFiles: string[] = [];
+        // Files below MIN_ARTIFACT_BYTES inside a directory produce (e.g. empty or
+        // one-line-comment Python `__init__.py` package markers under a source root) are
+        // not artifacts on their own and are not traced, matching the artifact presence
+        // rule (4.6.1 D8); a single-file produce is still traced whatever its size.
         const targets = [...new Set((stage.produces || [])
-          .flatMap((pattern) => resolveProducePaths(pattern, instance))
+          .flatMap((pattern) => resolveProducePaths(pattern, instance)
+            .filter((filePath) => !pattern.endsWith("/") || lstatSync(filePath).size >= MIN_ARTIFACT_BYTES))
           .filter((filePath) => !isEvidenceArtifact(filePath)))];
 
         if (targets.length === 0) {

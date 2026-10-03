@@ -2,7 +2,8 @@
  * 4.5.4 regression suite: one section per engine defect (D1-D3, D5-D8), each with
  * the positive case and at least one fail-closed negative case. D4 (I13 path
  * duplication) is covered by tests/test_i13_case_root.ts and the I13 required
- * branch of tests/test_python_refactor_e2e.ts.
+ * branch of tests/test_python_refactor_e2e.ts. The "4.6.1 D8" section covers the
+ * shared directory/single-file artifact presence rule of checkProduces/checkConsumes.
  */
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -657,6 +658,154 @@ try {
     assert.equal(naAllowed.status, 0, naAllowed.out);
     m1.assertAll();
     // build-and-test --config precedence is covered unchanged by the D7 section.
+  });
+
+  // ---------------------------------------------------------------- 4.6.1 D8
+  await section("4.6.1 D8 directory artifacts: produces and consumes share one presence rule (0-byte __init__.py)", () => {
+    const project = makeProject("d8-dir-presence");
+    const produceAt = "code-generation@module:project@unit:default";
+    const consumeAt = "code-review@module:project@unit:default";
+    seed(project, consumeAt, ["test-case-derivation@module:project", "tdd@module:project@unit:default", produceAt]);
+    write(project, ".aidlc/source-roots.json", JSON.stringify({ version: "1", source_roots: ["app", "web/src"] }));
+    const ROOT_LABEL = /^(?:app|web\/src)\//;
+    const reset = (dir: string) => rmSync(join(project, dir), { recursive: true, force: true });
+    const empty = (path: string) => write(project, path, "");
+    const healthyApp = () => {
+      reset("app");
+      write(project, "app/exporter.py", "def export_orders(client):\n    return client.fetch_orders()\n");
+      for (const init of ["app/__init__.py", "app/orders/__init__.py", "app/orders/export/__init__.py", "app/utils/__init__.py"]) empty(init);
+    };
+    const healthyWeb = () => {
+      reset("web");
+      write(project, "web/src/export-button.js", "export function exportLabel() {\n  return 'Export orders';\n}\n");
+      empty("web/src/placeholder.js");
+    };
+    /** Verdict of both gates for the source roots: "" = pass, otherwise the failing root labels / error. */
+    const verdict = (): { produces: string; consumes: string } => {
+      const produced = gate(project, produceAt, "produces");
+      const consumed = gate(project, consumeAt, "consumes");
+      const produces = produced.error !== undefined
+        ? `error: ${String(produced.error)}`
+        : (produced.missing as string[]).filter((item) => ROOT_LABEL.test(item)).join(" | ");
+      const failures = consumed.error !== undefined ? [`error: ${String(consumed.error)}`] : consumed.failures as string[];
+      const consumes = failures.filter((item) => ROOT_LABEL.test(item) || /symbolic link|outside project root/.test(item)).join(" | ");
+      return { produces, consumes };
+    };
+    const gaps: string[] = [];
+    const expectBoth = (label: string, produces: RegExp, consumes: RegExp) => {
+      const actual = verdict();
+      console.log(`    [${label}] produces=${JSON.stringify(actual.produces)} consumes=${JSON.stringify(actual.consumes)}`);
+      if (!produces.test(actual.produces)) gaps.push(`${label} produces: expected ${produces}, got ${JSON.stringify(actual.produces)}`);
+      if (!consumes.test(actual.consumes)) gaps.push(`${label} consumes: expected ${consumes}, got ${JSON.stringify(actual.consumes)}`);
+    };
+    const PASS = /^$/;
+    const appFails = /^app\/(?:: missing or smaller than 16 bytes)?$/;
+    const webFails = /^web\/src\/(?:: missing or smaller than 16 bytes)?$/;
+
+    // Positive: substantive files next to 0-byte nested package markers satisfy both gates.
+    healthyApp();
+    healthyWeb();
+    expectBoth("large + 0-byte __init__.py files", PASS, PASS);
+
+    // Fail-closed: only files below 16 bytes in a root.
+    reset("app");
+    for (const init of ["app/__init__.py", "app/orders/__init__.py"]) empty(init);
+    write(project, "app/tiny.py", "x = 1\n");
+    expectBoth("root with only small files", appFails, appFails);
+    // Fail-closed: empty root directory.
+    reset("app");
+    mkdirSync(join(project, "app"), { recursive: true });
+    expectBoth("empty root directory", appFails, appFails);
+    // Fail-closed: missing root.
+    reset("app");
+    expectBoth("missing root", appFails, appFails);
+    // Fail-closed: one configured root satisfied, the other empty or missing.
+    healthyApp();
+    reset("web");
+    mkdirSync(join(project, "web", "src"), { recursive: true });
+    expectBoth("second root empty", webFails, webFails);
+    reset("web");
+    expectBoth("second root missing", webFails, webFails);
+    // Fail-closed: a root that is a symbolic link (POSIX) / junction (Windows).
+    healthyWeb();
+    reset("app");
+    const outside = join(scratch, "d8-dir-outside");
+    write(outside, "leak.py", "LEAK = True  # a substantive file outside the project\n");
+    symlinkSync(outside, join(project, "app"), process.platform === "win32" ? "junction" : "dir");
+    expectBoth(`root is a ${process.platform === "win32" ? "junction" : "symlink"}`, /symbolic link|outside project root/, /symbolic link|outside project root/);
+    rmSync(join(project, "app"), { recursive: true, force: true });
+    healthyApp();
+
+    // Single-file artifacts keep the per-file rule: a file below 16 bytes fails both gates.
+    const reviewRecord = `${CONSTRUCTION}/code-review.md`;
+    write(project, reviewRecord, "# short\n");
+    const singleProduced = gate(project, consumeAt, "produces").missing as string[];
+    if (!singleProduced.includes(reviewRecord)) gaps.push(`single file produces: expected ${reviewRecord} missing, got ${JSON.stringify(singleProduced)}`);
+    seed(project, "build-and-test", [consumeAt]);
+    const singleConsumed = (gate(project, "build-and-test", "consumes").failures as string[]);
+    if (!singleConsumed.some((item) => item === "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md: missing or smaller than 16 bytes")) {
+      gaps.push(`single file consumes: expected the aggregated code-review.md to fail, got ${JSON.stringify(singleConsumed)}`);
+    }
+    console.log(`    [single file < 16 bytes] produces=${JSON.stringify(singleProduced.filter((item) => item === reviewRecord))} consumes=${JSON.stringify(singleConsumed.filter((item) => item.includes("code-review.md")))}`);
+
+    // The I13 test-case directory (produced by test-case-derivation, consumed by tdd) follows the same rule.
+    const caseDir = `${INCEPTION}/application-design/test-cases/`;
+    const caseVerdict = (label: string, expected: RegExp) => {
+      seed(project, "tdd@module:project@unit:default", ["test-case-derivation@module:project"]);
+      const produced = (gate(project, "test-case-derivation@module:project", "produces").missing as string[]).filter((item) => item === caseDir).join(" | ");
+      const consumed = (gate(project, "tdd@module:project@unit:default", "consumes").failures as string[]).filter((item) => item.startsWith(caseDir)).join(" | ");
+      console.log(`    [test-cases ${label}] produces=${JSON.stringify(produced)} consumes=${JSON.stringify(consumed)}`);
+      const consumeExpected = expected === PASS ? PASS : new RegExp(`^${caseDir.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}: missing or smaller than 16 bytes$`);
+      if (!expected.test(produced)) gaps.push(`test-cases ${label} produces: expected ${expected}, got ${JSON.stringify(produced)}`);
+      if (!consumeExpected.test(consumed)) gaps.push(`test-cases ${label} consumes: expected ${consumeExpected}, got ${JSON.stringify(consumed)}`);
+    };
+    write(project, `${caseDir}_index.md`, "# UC-D\n\n| UC-D | 来源 |\n| --- | --- |\n| UC-D-001 | REQ-001 |\n");
+    write(project, `${caseDir}notes.md`, "");
+    caseVerdict("large + 0-byte file", PASS);
+    write(project, `${caseDir}_index.md`, "# UC-D\n");
+    caseVerdict("only small files", new RegExp(`^${caseDir.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}$`));
+
+    // The built-in traceability sensor skips 0-byte files of a directory produce, but a
+    // non-empty source file without a requirement ID still fails it.
+    produceRequiredI13(project);
+    seed(project, produceAt, ["test-case-derivation@module:project", "tdd@module:project@unit:default"]);
+    healthyApp();
+    healthyWeb();
+    write(project, "app/exporter.py", "# REQ-001 export retry\ndef export_orders(client):\n    return client.fetch_orders()\n");
+    write(project, "web/src/export-button.js", "// REQ-001 export button label\nexport function exportLabel() {\n  return 'Export orders';\n}\n");
+    write(project, `${CONSTRUCTION}/plans/code-generation-plan.md`, "# 代码生成计划\n\nREQ-001：在 app/exporter.py 中实现超时重试逻辑。\n");
+    write(project, `${CONSTRUCTION}/implementation-summary.md`, "# 实现摘要\n\nREQ-001：app/exporter.py 已实现超时重试逻辑。\n");
+    const traced = (gate(project, produceAt, "sensors", "traceability").failures as string[]).join("\n");
+    console.log(`    [traceability, 0-byte markers only] ${JSON.stringify(traced)}`);
+    if (traced !== "") gaps.push(`traceability with 0-byte markers: expected pass, got ${JSON.stringify(traced)}`);
+    // Boundary: 1-byte and 15-byte (< MIN_ARTIFACT_BYTES) untraced files are not trace targets.
+    const oneByte = "\n";
+    const fifteenBytes = "# package mark\n";
+    assert.equal(Buffer.byteLength(oneByte), 1);
+    assert.equal(Buffer.byteLength(fifteenBytes), 15);
+    write(project, "app/orders/export/__init__.py", oneByte);
+    write(project, "app/utils/__init__.py", fifteenBytes);
+    const tracedSmall = (gate(project, produceAt, "sensors", "traceability").failures as string[]).join("\n");
+    console.log(`    [traceability, 1-byte + 15-byte untraced files] ${JSON.stringify(tracedSmall)}`);
+    if (tracedSmall !== "") gaps.push(`traceability with 1/15-byte files: expected pass, got ${JSON.stringify(tracedSmall)}`);
+    // Boundary: a 16-byte (== MIN_ARTIFACT_BYTES) source file without a requirement ID is still traced and fails.
+    const sixteenBytes = "# sixteen bytes\n";
+    assert.equal(Buffer.byteLength(sixteenBytes), 16);
+    write(project, "app/orders/sixteen.py", sixteenBytes);
+    const tracedSixteen = (gate(project, produceAt, "sensors", "traceability").failures as string[]).join("\n");
+    console.log(`    [traceability, 16-byte untraced file] ${JSON.stringify(tracedSixteen)}`);
+    if (!/No requirement ID .*app[\\/]orders[\\/]sixteen\.py/.test(tracedSixteen) || /__init__\.py/.test(tracedSixteen)) {
+      gaps.push(`traceability with a 16-byte untraced file: expected only sixteen.py, got ${JSON.stringify(tracedSixteen)}`);
+    }
+    rmSync(join(project, "app/orders/sixteen.py"), { force: true });
+    write(project, "app/orders/untraced.py", "def untraced():\n    return None\n");
+    const untraced = (gate(project, produceAt, "sensors", "traceability").failures as string[]).join("\n");
+    console.log(`    [traceability, untraced source file] ${JSON.stringify(untraced)}`);
+    if (!/No requirement ID .*app[\\/]orders[\\/]untraced\.py/.test(untraced) || /__init__\.py/.test(untraced)) {
+      gaps.push(`traceability with an untraced source file: expected only untraced.py, got ${JSON.stringify(untraced)}`);
+    }
+
+    assert.equal(gaps.length, 0, `directory/single-file presence verdicts differ from the expected rule:\n- ${gaps.join("\n- ")}`);
   });
 
   assert.equal(existsSync(scratch), true);

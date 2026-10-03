@@ -8,7 +8,7 @@
  * No placeholder files are added; every artifact carries real fixture content.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -18,6 +18,19 @@ const cli = join(repository, "bin", "cli.ts");
 const tsx = join(repository, "node_modules", "tsx", "dist", "cli.mjs");
 const scratch = mkdtempSync(join(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir(), "aidlc-py-refactor-"));
 const project = join(scratch, "orders");
+/** Nested 0-byte package markers (plus the 0-byte app/__init__.py) that must not trip any gate. */
+const ZERO_BYTE_PACKAGES = ["app/orders/__init__.py", "app/orders/export/__init__.py", "app/orders/export/formats/__init__.py", "app/utils/__init__.py", "app/utils/retry/__init__.py"];
+/** A small (1-15 byte, < MIN_ARTIFACT_BYTES) package marker with a one-line comment and no requirement ID. */
+const SMALL_PACKAGE = "app/orders/audit/__init__.py";
+const SMALL_PACKAGE_CONTENT = "# pkg\n";
+
+function assertZeroBytePackages(): void {
+  for (const marker of ["app/__init__.py", ...ZERO_BYTE_PACKAGES]) {
+    assert.equal(statSync(join(project, marker)).size, 0, `${marker} must stay a 0-byte package marker`);
+  }
+  const smallSize = statSync(join(project, SMALL_PACKAGE)).size;
+  assert.ok(smallSize >= 1 && smallSize <= 15, `${SMALL_PACKAGE} must stay a 1-15 byte package marker, got ${smallSize}`);
+}
 
 function run(args: string[]): { status: number; out: string; json: Record<string, unknown> | null } {
   const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8" });
@@ -91,8 +104,11 @@ process.exit(passed ? 0 : 1);
 try {
   mkdirSync(project, { recursive: true });
   write("README.md", "# Orders service\n\nPython order export service.\n");
-  write("app/__init__.py", "\"\"\"Order export application package.\"\"\"\n");
+  write("app/__init__.py", "");
   write("app/exporter.py", "def export_orders(client):\n    return client.fetch_orders()\n");
+  // 4.6.1 D8: 0-byte Python package markers, nested, are legal source-root content.
+  for (const marker of ZERO_BYTE_PACKAGES) write(marker, "");
+  write(SMALL_PACKAGE, SMALL_PACKAGE_CONTENT);
   write("web/src/export-button.js", "export function exportLabel() {\n  return 'Export orders';\n}\n");
   git(["init", "-q"]);
   git(["add", "-A"]);
@@ -138,8 +154,8 @@ try {
   refresh("test-case-derivation@module:project");
   next("code-generation@module:project@unit:default");
   write("app/exporter.py", "\"\"\"Order export with timeout retry (REQ-001, UC-D-001).\"\"\"\n\nMAX_RETRIES = 3\n\n\ndef export_orders(client):\n    last_error = None\n    for _ in range(MAX_RETRIES):\n        try:\n            return client.fetch_orders()\n        except TimeoutError as error:\n            last_error = error\n    raise last_error\n");
-  // Every file under the configured source roots must trace a requirement (traceability sensor).
-  write("app/__init__.py", "\"\"\"Order export application package; export retry behaviour is REQ-001.\"\"\"\n");
+  // Every non-empty file under the configured source roots must trace a requirement
+  // (traceability sensor); the 0-byte package markers stay empty (4.6.1 D8).
   write("web/src/export-button.js", "// REQ-001: the export button relies on the backend timeout retry.\nexport function exportLabel() {\n  return 'Export orders';\n}\n");
   const construction = "docs/aidlc/modules/project/construction/default";
   write(`${construction}/plans/code-generation-plan.md`, "# 代码生成计划\n\n- REQ-001 / UC-D-001：在 app/exporter.py 中为 export_orders 增加最多 3 次的超时重试。\n");
@@ -178,6 +194,12 @@ try {
   // Project-axis build-and-test: test-quality must not demand a module (D2).
   refresh("code-generation@module:project@unit:default");
   next("build-and-test");
+  // 4.6.1 D8: `next` above re-verified the completed code-review upstream gate; an explicit
+  // re-attestation of the completed code-review instance (consumes src/ = app/, web/src/,
+  // produces, sensors) must also pass with the 0-byte package markers in app/.
+  assertZeroBytePackages();
+  const reattest = ok(["orchestrate", "report", "--stage", "code-review", "--module", "project", "--unit", "default", "--result", "completed"]);
+  assert.match(JSON.stringify(reattest), /reattest/i, JSON.stringify(reattest, null, 2));
   write("tests/build_check.cjs", "const { readFileSync } = require('node:fs');\nfor (const file of ['app/__init__.py', 'app/exporter.py']) readFileSync(file, 'utf8');\nconsole.log('build ok');\n");
   write("tests/run_tests.cjs", "const { spawnSync } = require('node:child_process');\nconst result = spawnSync(process.execPath, ['tests/observe_uc.cjs'], { encoding: 'utf8', env: { ...process.env, AIDLC_PHASE: 'GREEN' } });\nprocess.stdout.write(result.stdout.split(/\\r?\\n/).filter((line) => !line.startsWith('{')).join('\\n'));\nprocess.exit(result.status ?? 1);\n");
   write("tests/lint_check.cjs", "const { readFileSync } = require('node:fs');\nif (/\\t/.test(readFileSync('app/exporter.py', 'utf8'))) process.exit(1);\nconsole.log('lint ok');\n");
@@ -221,6 +243,7 @@ try {
   assert.notEqual(done.json?.kind, "run-stage", done.out);
   assert.notEqual(done.json?.kind, "error", done.out);
   assert.equal(existsSync(join(project, "src")), false, "the workflow must not require creating src/");
+  assertZeroBytePackages();
 
   // Every evidence file came from the controlled producer.
   for (const path of listEvidence(join(project, ".aidlc", "evidence"))) {
