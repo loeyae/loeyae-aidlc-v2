@@ -11,6 +11,9 @@ SKILL_PATHS = [
     ROOT / "harness" / "kiro-ide" / "SKILL.md",
     ROOT / "harness" / "kiro-cli" / "SKILL.md",
 ]
+# Since 4.0.0 the Kiro SKILL.md is only an entry point; the Chrome DevTools provider rules live in
+# diagram-contract.md ("Chrome DevTools Provider 运行时适配"), which ships unchanged into kiro-ide/kiro-cli.
+DIAGRAM_CONTRACT_PATH = ROOT / "core" / "sensors" / "diagram-contract.md"
 
 
 def main() -> None:
@@ -30,11 +33,13 @@ def main() -> None:
         frontmatter = skill.split("---", 2)[1]
         assert "description:" in frontmatter
         assert all(keyword in frontmatter for keyword in [
-            "AI-DLC", "aidlc", "使用 AI-DLC", "继续上次的工作", "功能设计", "用户故事", "代码审查", "部署准备",
+            "AI-DLC", "aidlc", "使用 AI-DLC", "继续当前工作", "功能设计", "用户故事", "代码审查", "部署准备",
         ])
-        assert "chrome-devtools" in skill
-        assert "NEEDS_CAPABILITY" in skill
-        assert "不生成 SVG" in skill
+
+    provider_doc = DIAGRAM_CONTRACT_PATH.read_text(encoding="utf-8")
+    assert "未固定版本的 `chrome-devtools-mcp`" in provider_doc
+    assert "Provider 能力不可用时写入 `final_status: \"NEEDS_CAPABILITY\"`，不得伪造通过" in provider_doc
+    assert "不修改 SVG 源" in provider_doc
 
     assert not (ROOT / "harness" / "kiro-ide" / "POWER.md").exists()
     assert not (ROOT / "harness" / "kiro-ide" / "mcp.json").exists()
