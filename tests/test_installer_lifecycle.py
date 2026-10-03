@@ -235,7 +235,7 @@ def test_shared_kiro_global_skill_lifecycle() -> None:
         assert len(manifests) == 1
         manifest = json.loads(manifests[0].read_text())
         assert manifest["owner"] == "loeyae-aidlc:kiro-global-skill"
-        assert manifest["assets"][0]["target"] == str(shared_skill.resolve())
+        assert manifest["assets"][0]["target"] == os.path.abspath(shared_skill)
 
         before = tree_digest(shared_skill)
         repeated = run_cli(home, ["install", "--harness", "kiro-cli"])

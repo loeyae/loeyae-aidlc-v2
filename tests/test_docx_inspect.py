@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import tempfile
 import zipfile
@@ -121,7 +122,7 @@ def test_inspect(directory: Path) -> None:
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
     assert report["schema_version"] == "1"
-    assert report["input"]["path"] == str(source.resolve())
+    assert report["input"]["path"] == os.path.abspath(source)
     assert report["input"]["sha256"] == before_digest
     assert report["package"]["has_macros"] is False
     assert report["package"]["has_digital_signatures"] is False

@@ -172,7 +172,7 @@ def test_beautify_and_validate(directory: Path) -> None:
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
     assert report["status"] == "STATIC_PASS"
-    assert report["output"]["path"] == str(output.resolve())
+    assert report["output"]["path"] == os.path.abspath(output)
     assert report["output"]["sha256"] == digest(output)
     assert report["planned_changed_parts"] == ["word/styles.xml"]
     assert report["changed_parts"] == ["word/styles.xml"]
