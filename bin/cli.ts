@@ -1345,6 +1345,7 @@ Workflow:
   orchestrate upgrade --dry-run [--module <module-id>]  List completed stages missing evidence after an engine upgrade (read-only)
   orchestrate diagram-format [--set <mermaid|svg> --user-input <text>]  Show or record the user's diagram format (default mermaid)
   orchestrate baseline [--set <commit> --user-input Approve --reason <text> [--replace --expect <commit|unavailable>] [--dry-run]]  Show, register or replace the workflow baseline commit (--expect unavailable corrects a baseline recorded outside git; the new commit must still predate the workflow start)
+  orchestrate baseline --advance <commit> --expect <current baseline> --user-input Approve --reason <text> [--dry-run]  Advance the baseline to a completed unit's code-generation GREEN commit (multi-unit characterization; completed units keep their BASELINE evidence)
   unit list|select [flags]                              List or self-select a development unit
   module list|select|claim|heartbeat|migrate [flags]    Coordinate parallel module instances
   runtime summary|doctor [--module <module-id>]         Inspect the active Markdown workflow(s)
