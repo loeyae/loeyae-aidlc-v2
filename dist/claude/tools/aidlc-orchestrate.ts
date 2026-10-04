@@ -4462,8 +4462,11 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
   }
 
   if (!state) return baselineError("No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\".");
-  if (state.status === "done") return baselineError(`Workflow ${state.workflow_id} is done; its baseline can no longer be registered or replaced.`);
-  if (state.status !== "running" && state.status !== "parked") return baselineError(`Workflow ${state.workflow_id} is ${state.status}; baseline requires a running or parked workflow.`);
+  if (state.status === "done") {
+    // 4.7.1: the done global workflow of a split layout still owns the baseline its live sub-workflows inherit.
+    const blocked = doneGlobalBaselineBlocker(state, "its baseline can no longer be registered or replaced");
+    if (blocked) return baselineError(blocked);
+  } else if (state.status !== "running" && state.status !== "parked") return baselineError(`Workflow ${state.workflow_id} is ${state.status}; baseline requires a running or parked workflow.`);
   if (state.workflow_kind && state.workflow_kind !== "global") return baselineError(`aidlc/active/aidlc-state.md is a ${state.workflow_kind} workflow; baseline only runs on the global workflow.`);
 
   const current = state.baseline_commit;
@@ -4603,6 +4606,33 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
 // baseline --advance — append an epoch to the workflow baseline chain (4.7.0)
 // ---------------------------------------------------------------------------
 
+/**
+ * Why a done workflow cannot take a baseline write, or undefined when it can (4.7.1).
+ * Only the global workflow of a split layout (registry present, same Global Workflow ID)
+ * qualifies, and only while at least one module or integration sub-workflow is running
+ * or parked: those sub-workflows inherit the global baseline chain via workflowBaseline().
+ * A done single (non-split) workflow is always refused with the pre-4.7.1 text.
+ */
+function doneGlobalBaselineBlocker(state: WorkflowState, refusal: string): string | undefined {
+  const refused = `Workflow ${state.workflow_id} is done; ${refusal}`;
+  let loaded: WorkflowParts;
+  try {
+    loaded = loadWorkflowParts(PROJECT_ROOT);
+  } catch (error) {
+    return `${refused} (the split workflow layout cannot be loaded: ${error instanceof Error ? error.message : String(error)}).`;
+  }
+  if (!loaded.split || !loaded.registry) return `${refused}.`;
+  if (state.workflow_kind && state.workflow_kind !== "global") return `${refused}.`;
+  if (loaded.registry.global_workflow_id !== state.workflow_id) {
+    return `${refused} (registry Global Workflow ID ${loaded.registry.global_workflow_id} does not match it).`;
+  }
+  const live = [...loaded.parts.values()].filter((part) => part.ref.kind !== "global" && (part.state.status === "running" || part.state.status === "parked"));
+  if (live.length === 0) {
+    return `${refused}: it is the global workflow of a split layout, but no module or integration sub-workflow is running or parked.`;
+  }
+  return undefined;
+}
+
 const ADVANCE_USAGE = "orchestrate baseline --advance <commit> --expect <current baseline> --user-input Approve --reason \"<reason>\" [--dry-run]";
 
 /** Every workflow part as one merged read view (the global/single state outside the split layout). */
@@ -4643,7 +4673,12 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
 
   // 1. Workflow, git repository and a usable current epoch.
   if (!state) return baselineError("No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\".");
-  if (state.status !== "running" && state.status !== "parked") return baselineError(`Workflow ${state.workflow_id} is ${state.status}; baseline --advance requires a running or parked workflow.`);
+  if (state.status === "done") {
+    // 4.7.1: in the split layout the global workflow is legitimately done once the product-level
+    // stages resolve; the module / integration sub-workflows that inherit its chain keep running.
+    const blocked = doneGlobalBaselineBlocker(state, "baseline --advance requires a running or parked workflow");
+    if (blocked) return baselineError(blocked);
+  } else if (state.status !== "running" && state.status !== "parked") return baselineError(`Workflow ${state.workflow_id} is ${state.status}; baseline --advance requires a running or parked workflow.`);
   if (state.workflow_kind && state.workflow_kind !== "global") return baselineError(`aidlc/active/aidlc-state.md is a ${state.workflow_kind} workflow; baseline only runs on the global workflow.`);
   const current = state.baseline_commit;
   if (current === undefined || state.baseline_source === undefined) {

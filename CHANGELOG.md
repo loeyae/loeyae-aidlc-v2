@@ -1,5 +1,22 @@
 # Changelog
 
+## 4.7.1
+
+split 布局下 `orchestrate baseline --advance` 可用了：产品级阶段全部完成后全局工作流会被置为 `done`，4.7.0 在这种情况下拒绝推进，而这正是 `--advance` 要解决的场景（split 布局 + 多单元 characterization）。
+
+### Fixed
+
+- **split 布局下全局工作流为 `done` 时 `--advance` 被拒绝**：4.7.0 的第 1 条前置检查要求 `aidlc/active/aidlc-state.md` 的全局工作流处于 `running` / `parked`，`--advance` 又只能在全局工作流上执行。split 时，如果当前阶段已经属于某个模块，全局工作流自有的实例全部 resolved，会被合法地置为 `done`（`summarizeOwned`），实际在跑的是模块子工作流。消费方因此报 `Workflow … is done; baseline --advance requires a running or parked workflow.`，无法推进。现在全局工作流为 `done` 时，同时满足以下两条就允许推进：它是 split 布局的全局工作流（`registry.md` 存在，Global Workflow ID 与之一致）；至少有一个模块或集成子工作流处于 `running` / `parked`。
+  - 推进写入的仍然是全局工作流（`Baseline History`、`Baseline Source: advanced`、`history` 的 baseline/advanced 记录、`BASELINE_COMMIT_ADVANCED` 审计），全局工作流的 `Status` 保持 `done`；子工作流仍通过 `workflowBaseline()` 继承这条链。`saveWorkflowState` 的 `{ baselineWrite: true }` 写路径本来就不检查 `Status`，`done` 的全局工作流可以正常写入。
+  - 第 2–5 条检查语义不变：目标的祖先关系、GREEN 锚点、BASELINE 与 GREEN 之间没有停着的单元、code ref 可解析。
+  - 以下情况仍然拒绝：非 split 的单一工作流为 `done`（错误文本与 4.7.0 相同）；split 布局下所有模块和集成子工作流都为 `done`（报 `no module or integration sub-workflow is running or parked`）；registry 无法加载或 Global Workflow ID 不一致。
+- **`--set` / `--replace` 同样修复**：它们对 `done` 工作流的拒绝属于同一缺陷，并非有意设计。split 布局下的 characterization UC-D 继承全局工作流的基线，全局工作流一旦 `done`，存量 split 工作流就无法登记基线（README 要求先 `--set` 再派生 characterization UC-D），也无法更正尚未使用的基线。现在采用与 `--advance` 相同的判定条件。非 split 的单一工作流为 `done` 时仍然拒绝，错误文本不变（`its baseline can no longer be registered or replaced.`）；U1–U4 使用检查和"推进过的链不能替换"的规则也不变。
+
+### Tests
+
+- `tests/test_v4_7_0_baseline_advance.ts` 新增一个 e2e 变体：split 时当前阶段已属于模块，断言 split 后全局工作流为 `done`、模块为 `running`。在这个前提下，`--set --replace --dry-run` 可以更正尚未使用的基线；u1 改动共享 code ref、提交并 GREEN 之后 `--advance` 成功，全局工作流仍为 `done`；u2 tdd 的 BASELINE 产出受控证据（绑定第 1 代）；u1 原有 BASELINE 证据逐字节不变，并继续通过门禁。全部子工作流 `done` 后，`--advance` 被拒绝。4.7.0 原有 e2e 中，全局工作流在 split 后仍是 `running`，因此没有覆盖到这个问题。去掉修复后，新变体会失败。
+- 新增负向用例：非 split 的单一工作流为 `done` 时，`--advance` 和 `--set --replace` 仍然被拒绝，且不写入状态。
+
 ## 4.7.0
 
 多单元 characterization 基线分代：工作流基线从单个值变为只能追加的 commit 链，`orchestrate baseline --advance` 把上一个单元的完成点追加为新一代，每份 BASELINE 证据按它产出时的那一代校验。

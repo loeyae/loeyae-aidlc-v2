@@ -297,11 +297,14 @@ function writeImplementationReport(project: string, stages: number, ids: string)
 const ADVANCE = (target: string, expect: string, extra: string[] = []) => ["orchestrate", "baseline", "--advance", target, "--expect", expect, "--user-input", "Approve", "--reason", "u1 已完成并提交，基线推进到 u1 的完成点", ...extra];
 const auditText = (project: string): string => readFileSync(join(project, "aidlc", "active", "audit.md"), "utf8");
 
-try {
-  // ---------------------------------------------------------------- (A) end to end
-  await section("e2e: split layout, one module with u1/u2, shared characterization code ref — u2 BASELINE RED, --advance, u2 GREEN, u1 evidence unchanged", async () => {
+/**
+ * (A) end to end. `globalDone` (4.7.1, MARS-72) splits while the current stage already
+ * belongs to the module, so the split leaves the global workflow legitimately `done`
+ * (as in a real consumer repository) and every baseline write must still succeed.
+ */
+async function endToEnd(globalDone: boolean): Promise<void> {
     const checks = rejections();
-    const { project, commits } = legacyRepository("advance");
+    const { project, commits } = legacyRepository(globalDone ? "advance-global-done" : "advance");
     write(project, "docs/aidlc/ideation/module-manifest.json", `${JSON.stringify({ schema_version: 1, modules: [{ module_id: M01, name: "Trade", service_id: "trade-service" }] })}\n`);
     git(project, ["add", "docs/aidlc/ideation/module-manifest.json"]);
     git(project, ["commit", "-qm", "c3 module manifest"], "2024-01-03T00:00:00Z");
@@ -315,10 +318,24 @@ try {
     global.completed_stages = [...globalStages];
     global.completed_stage_instances = [...globalStages];
     global.skipped_stage_instances = [`reverse-engineering@module:${M01}`];
+    if (globalDone) {
+      // The current stage already belongs to the module: split resolves every global-owned
+      // instance and leaves the global workflow done (summarizeOwned).
+      global.current_stage = "requirements-analysis";
+      global.current_stage_instance = `requirements-analysis@module:${M01}`;
+      global.current_module = M01;
+    }
     saveWorkflowState(project, global);
     write(project, "docs/aidlc/ideation/scenario-module-mapping.md", `# 场景模块映射\n\nREQ-001 订单导出分页属于 ${M01}。\n`);
     ok(project, ["orchestrate", "split", "--from", global.workflow_id]);
     const moduleRef = { kind: "module" as const, module_id: M01 };
+    if (globalDone) {
+      assert.equal(loadWorkflowState(project)!.status, "done", "split leaves the global workflow done");
+      assert.equal(loadWorkflowState(project, moduleRef)!.status, "running", "the module workflow runs");
+      // --set / --replace on the done global workflow of a split layout: an unused baseline can still be corrected.
+      const corrected = ok(project, ["orchestrate", "baseline", "--set", commits[1], "--replace", "--expect", epoch0, "--user-input", "Approve", "--reason", "更正基线（dry run）", "--dry-run"]).json;
+      assert.equal(corrected.dry_run, true, JSON.stringify(corrected));
+    }
 
     const moduleArgs = ["--module", M01];
     const unitArgs = (unit: string) => ["--module", M01, "--unit", unit];
@@ -459,6 +476,7 @@ try {
     const advanced = ok(project, ADVANCE(u1Commit, epoch0)).json;
     console.log(`    --advance: ${String(advanced.message)}`);
     const advancedState = loadWorkflowState(project)!;
+    if (globalDone) assert.equal(advancedState.status, "done", "--advance keeps the global workflow done");
     assert.equal(advancedState.baseline_source, "advanced");
     assert.equal(advancedState.baseline_commit, u1Commit);
     assert.deepEqual(advancedState.baseline_history, [epoch0, u1Commit], "baseline chain has two epochs");
@@ -554,6 +572,31 @@ try {
     assert.equal(sha256(project, BASE("u1")), u1BaselineSha, "u1 BASELINE evidence is byte-identical at the end of the workflow");
     assert.deepEqual(loadWorkflowState(project)!.baseline_history, [epoch0, u1Commit], "the chain is unchanged by ordinary saves");
     console.log(`    u1 BASELINE sha256 before/after --advance: ${u1BaselineSha}`);
+    if (globalDone) {
+      // Every sub-workflow resolved: the done global workflow no longer takes baseline writes.
+      for (const ref of [undefined, moduleRef, { kind: "integration" as const }]) assert.equal(loadWorkflowState(project, ref)!.status, "done");
+      const u2Green = readJson(project, GREEN("u2")).source_revision.commit as string;
+      checks.expect("--advance once every sub-workflow is done", rejected(run(project, ADVANCE(u2Green, u1Commit, ["--dry-run"]))), /is done; baseline --advance requires a running or parked workflow: it is the global workflow of a split layout, but no module or integration sub-workflow is running or parked/);
+    }
+    checks.assertAll();
+}
+
+try {
+  await section("e2e: split layout, one module with u1/u2, shared characterization code ref — u2 BASELINE RED, --advance, u2 GREEN, u1 evidence unchanged", () => endToEnd(false));
+  await section("e2e (4.7.1): split leaves the global workflow done — --advance still succeeds, u2 BASELINE controlled, u1 evidence unchanged; refused once every sub-workflow is done", () => endToEnd(true));
+
+  // ---------------------------------------------------------------- (A2) done single workflow
+  await section("4.7.1: a done non-split workflow still refuses --advance and --set", () => {
+    const checks = rejections();
+    const { project, commits } = legacyRepository("single-done");
+    ok(project, ["orchestrate", "next", "--scope", "feature", "--work", "4.7.1 single done"]);
+    const state = loadWorkflowState(project)!;
+    const current = state.baseline_commit!;
+    state.status = "done";
+    saveWorkflowState(project, state);
+    checks.expect("--advance on a done single workflow", rejected(run(project, ADVANCE(commits[1], current, ["--dry-run"]))), /^[\s\S]*is done; baseline --advance requires a running or parked workflow\./);
+    checks.expect("--set --replace on a done single workflow", rejected(run(project, ["orchestrate", "baseline", "--set", commits[0], "--replace", "--expect", current, "--user-input", "Approve", "--reason", "x", "--dry-run"])), /is done; its baseline can no longer be registered or replaced\./);
+    assert.equal(loadWorkflowState(project)!.revision, state.revision, "nothing was written");
     checks.assertAll();
   });
 
