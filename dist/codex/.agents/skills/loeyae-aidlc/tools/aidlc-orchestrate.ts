@@ -8,7 +8,7 @@
  *   report [flags]    — Record stage outcome, advance state machine
  *   park              — Park workflow at current inter-stage boundary
  *   split             — Split a single workflow into per-module workflows (4.3.0)
- *   baseline          — Show / register / replace the workflow baseline commit (4.6.0)
+ *   baseline          — Show / register / replace (4.6.0) / advance (4.7.0) the workflow baseline commit
  *
  * State file: <project>/aidlc/active/aidlc-state.md (single layout). After `split`, the
  * global, per-module (aidlc/active/modules/<id>/) and integration workflows are indexed
@@ -36,7 +36,9 @@ import { COMMIT_ID_PATTERN, commitAncestryErrors, readSourceRevision } from "./a
 import {
   baselineCodeRef,
   baselineCommitErrors,
+  baselineEpochErrors,
   baselineUsage,
+  checkAdvanceTarget,
   checkBaselineCandidate,
   currentHeadCommit,
   parseCodeRef,
@@ -66,6 +68,7 @@ import {
   ENGINE_VERSION,
   GLOBAL_WORKFLOW,
   appendAuditEvent,
+  baselineChain,
   createInitialState,
   lightStatePath,
   loadWorkflowState,
@@ -229,7 +232,7 @@ const ARCHIVE_FLAGS = new Set(["reason"]);
 const UPGRADE_FLAGS = new Set(["dry-run", "module"]);
 const DIAGRAM_FORMAT_FLAGS = new Set(["set", "user-input"]);
 // `module` is accepted only to reject it with a specific message (baseline is global-only).
-const BASELINE_FLAGS = new Set(["set", "user-input", "reason", "dry-run", "replace", "expect", "module"]);
+const BASELINE_FLAGS = new Set(["set", "advance", "user-input", "reason", "dry-run", "replace", "expect", "module"]);
 /** Appended to every error where the state write succeeded but its audit entry did not. */
 const AUDIT_MISSING = "状态已写入、审计缺失，请人工补记";
 const INTEGRATION_WORKFLOW: WorkflowRef = { kind: "integration" };
@@ -887,6 +890,13 @@ interface SensorCheckOptions {
    * be the current HEAD or one of its ancestors (non-git projects: exact match).
    */
   tolerateRevisionDrift?: boolean;
+  /**
+   * BASELINE evidence must have been produced in the current epoch of the baseline
+   * chain (4.7.0). Set only when completing code-generation of the same unit.
+   */
+  requireCurrentBaselineEpoch?: boolean;
+  /** Evaluate only these sensors of the stage (orchestrate baseline --advance anchor check). */
+  onlySensors?: readonly string[];
 }
 
 function validateEvidence(
@@ -1135,11 +1145,13 @@ function i13ModeErrors(evidence: Evidence, ucdIds: string[], state: WorkflowStat
   }
   const baselineErrors = baselineCommitErrors(PROJECT_ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
   if (baselineErrors.length > 0 || !baseline.registered) return [...errors, ...baselineErrors];
-  if (evidence.baseline_commit !== baseline.commit) {
-    return [...errors, `baseline_commit ${JSON.stringify(evidence.baseline_commit)} does not match the workflow baseline ${baseline.commit}`];
+  // 4.7.0: I13 stays bound to epoch 0 of the baseline chain; --advance never refreshes it.
+  const epoch0 = baseline.epochs[0];
+  if (evidence.baseline_commit !== epoch0) {
+    return [...errors, `baseline_commit ${JSON.stringify(evidence.baseline_commit)} does not match the workflow baseline ${epoch0}${baseline.epochs.length > 1 ? " (epoch 0 of the baseline chain)" : ""}`];
   }
   for (const { ucd, ref, blob } of refs) {
-    const resolved = baselineCodeRef(PROJECT_ROOT, baseline.commit, ref, `characterization ${ucd} code_refs ${ref.path}`);
+    const resolved = baselineCodeRef(PROJECT_ROOT, epoch0, ref, `characterization ${ucd} code_refs ${ref.path}`);
     if ("error" in resolved) errors.push(resolved.error);
     else if (resolved.blob !== blob) errors.push(`characterization ${ucd} code_refs ${ref.path} baseline_blob ${blob} does not match ${resolved.blob} at the workflow baseline`);
   }
@@ -1177,12 +1189,17 @@ function ucMappingCoverageErrors(evidence: Evidence, requirement: string, expect
 }
 
 /**
- * BASELINE binding to the workflow baseline: the commit agrees in the state (through
- * workflowBaselineForModule), I13 and the evidence and is still reachable from HEAD;
- * code_ref_digests name exactly the I13 code refs, each observed unchanged
- * (worktree_blob == baseline_blob), with the baseline blob re-resolved here.
+ * BASELINE binding to the workflow baseline chain (4.7.0 epochs): the evidence's
+ * baseline_commit is one epoch of the chain (the current baseline when it was never
+ * advanced), still reachable from HEAD; I13 is bound to epoch 0; code_ref_digests
+ * name exactly the I13 code refs, each observed unchanged (worktree_blob ==
+ * baseline_blob) at the evidence's own epoch, with that blob re-resolved here. The
+ * worktree is not read: the digests are the record of what BASELINE observed.
+ * `requireCurrentEpoch` (code-generation completion of the same unit) additionally
+ * demands that BASELINE was produced in the current epoch, so a unit's BASELINE and
+ * GREEN never straddle an --advance.
  */
-function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: StageInstance): string[] {
+function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: StageInstance, requireCurrentEpoch = false): string[] {
   const errors: string[] = [];
   let baseline: ReturnType<typeof workflowBaselineForModule>;
   try {
@@ -1192,8 +1209,18 @@ function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: Sta
   }
   const commitErrors = baselineCommitErrors(PROJECT_ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
   if (commitErrors.length > 0 || !baseline.registered) return commitErrors;
-  if (evidence.baseline_commit !== baseline.commit) errors.push(`BASELINE baseline_commit ${JSON.stringify(evidence.baseline_commit)} does not match the workflow baseline ${baseline.commit}`);
-  if (i13.baseline_commit !== baseline.commit) errors.push(`I13 baseline_commit ${JSON.stringify(i13.baseline_commit)} does not match the workflow baseline ${baseline.commit}`);
+  const chain = baseline.epochs;
+  const epochIndex = typeof evidence.baseline_commit === "string" ? chain.indexOf(evidence.baseline_commit) : -1;
+  const epoch = epochIndex >= 0 ? chain[epochIndex] : undefined;
+  if (epoch === undefined) {
+    errors.push(`BASELINE baseline_commit ${JSON.stringify(evidence.baseline_commit)} does not match the workflow baseline ${baseline.commit}${chain.length > 1 ? ` or any earlier epoch of the baseline chain (${chain.join(", ")})` : ""}`);
+  } else {
+    if (epoch !== baseline.commit) errors.push(...baselineEpochErrors(PROJECT_ROOT, epoch));
+    if (requireCurrentEpoch && epoch !== baseline.commit) {
+      errors.push(`BASELINE baseline_commit ${epoch} is epoch ${epochIndex} of the baseline chain, but the current epoch is ${baseline.commit} (epoch ${chain.length - 1}): a unit's BASELINE and GREEN must complete within one epoch`);
+    }
+  }
+  if (i13.baseline_commit !== chain[0]) errors.push(`I13 baseline_commit ${JSON.stringify(i13.baseline_commit)} does not match the workflow baseline ${chain[0]}${chain.length > 1 ? " (epoch 0 of the baseline chain)" : ""}`);
 
   let expected: Array<{ path: string; baseline_blob: string }>;
   try {
@@ -1216,11 +1243,13 @@ function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: Sta
       continue;
     }
     if (worktree !== recorded) errors.push(`code_ref_digests ${path} worktree_blob ${worktree} must equal baseline_blob ${recorded}: BASELINE must observe the unmodified baseline code`);
+    if (epoch === undefined) continue;
+    // I13 records the epoch-0 blobs; an evidence of a later epoch is checked against its own epoch only.
     const declared = expected.find((item) => item.path === path);
-    if (declared && declared.baseline_blob !== recorded) errors.push(`code_ref_digests ${path} baseline_blob ${recorded} does not match the I13 baseline_blob ${declared.baseline_blob}`);
-    const resolved = baselineCodeRef(PROJECT_ROOT, baseline.commit, { path }, `code_ref_digests ${path}`);
+    if (epochIndex === 0 && declared && declared.baseline_blob !== recorded) errors.push(`code_ref_digests ${path} baseline_blob ${recorded} does not match the I13 baseline_blob ${declared.baseline_blob}`);
+    const resolved = baselineCodeRef(PROJECT_ROOT, epoch, { path }, `code_ref_digests ${path}`);
     if ("error" in resolved) errors.push(resolved.error);
-    else if (resolved.blob !== recorded) errors.push(`code_ref_digests ${path} baseline_blob ${recorded} does not match ${resolved.blob} at the workflow baseline ${baseline.commit}`);
+    else if (resolved.blob !== recorded) errors.push(`code_ref_digests ${path} baseline_blob ${recorded} does not match ${resolved.blob} at the workflow baseline ${epoch}${chain.length > 1 ? ` (epoch ${epochIndex})` : ""}`);
   }
   return errors;
 }
@@ -1232,6 +1261,7 @@ function phaseEvidenceErrors(
   applicability: { any: boolean; allNotApplicable: boolean },
   stageSlug: string,
   instance: StageInstance,
+  requireCurrentBaselineEpoch = false,
 ): string[] {
   const errors: string[] = [];
   // RED covers the tdd_mode new UC-Ds and BASELINE the characterization UC-Ds of I13
@@ -1326,7 +1356,7 @@ function phaseEvidenceErrors(
       if (i13Value) errors.push(`BASELINE may be passed only when I13 is required and declares tdd_mode characterization UC-Ds (I13 status ${String(i13Value.status)})`);
     } else {
       errors.push(...ucMappingCoverageErrors(evidence, "BASELINE uc_mapping must cover exactly the tdd_mode characterization UC-Ds", modes.characterization));
-      if (modes.characterization.length > 0) errors.push(...baselineEvidenceErrors(evidence, i13Value!, instance));
+      if (modes.characterization.length > 0) errors.push(...baselineEvidenceErrors(evidence, i13Value!, instance, requireCurrentBaselineEpoch));
     }
   }
   return errors;
@@ -1349,6 +1379,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
   const failures: SensorResult[] = [];
 
   for (const sensor of stage.sensors) {
+    if (options.onlySensors && !options.onlySensors.includes(sensor)) continue;
     switch (sensor) {
       case "no-todo": {
         const todoFiles: string[] = [];
@@ -1594,14 +1625,14 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
       case "baseline-test-evidence": {
         const applicability = i13Applicability(instance);
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "BASELINE", applicability, stage.slug, instance), options);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "BASELINE", applicability, stage.slug, instance, options.requireCurrentBaselineEpoch === true), options);
         if (failure) failures.push(failure);
         break;
       }
 
       case "green-test-evidence": {
         const applicability = i13Applicability(instance);
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "GREEN", applicability, stage.slug, instance));
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "GREEN", applicability, stage.slug, instance), options);
         if (failure) failures.push(failure);
         break;
       }
@@ -3889,7 +3920,8 @@ async function handleReport(args: string[]): Promise<Directive> {
       if (stageSlug === "code-generation") {
         const redInstance = instances.find((candidate) => candidate.stage.slug === "tdd" && candidate.module_id === currentInstance.module_id && candidate.unit_id === currentInstance.unit_id);
         if (redInstance) {
-          const redFailures = await checkSensors(redInstance, state, { tolerateRevisionDrift: true });
+          // 4.7.0: completing GREEN also demands that the unit's BASELINE belongs to the current epoch.
+          const redFailures = await checkSensors(redInstance, state, { tolerateRevisionDrift: true, requireCurrentBaselineEpoch: true });
           if (redFailures.length > 0) {
             return {
               kind: "error",
@@ -4364,7 +4396,7 @@ export async function handleDiagramFormat(args: string[], hooks: StateWriteHooks
 }
 
 // ---------------------------------------------------------------------------
-// baseline — show, register (--set) or correct (--set --replace --expect) the workflow baseline
+// baseline — show, register (--set), correct (--set --replace --expect) or advance (--advance, 4.7.0) the workflow baseline
 // ---------------------------------------------------------------------------
 
 function baselineError(message: string, extra: Record<string, unknown> = {}): Directive {
@@ -4385,26 +4417,36 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
     if (flag in flags && flags[flag] !== "true") return baselineError(`--${flag} is a boolean flag and does not accept a value`);
   }
   const setting = "set" in flags;
-  if (!setting) {
+  const advancing = "advance" in flags;
+  if (advancing && (setting || "replace" in flags)) {
+    return baselineError("--advance cannot be combined with --set or --replace: --advance appends a new epoch to the baseline chain, --set/--replace register or correct the baseline itself.");
+  }
+  if (!setting && !advancing) {
     const stray = ["replace", "expect", "dry-run", "user-input", "reason"].find((flag) => flag in flags);
-    if (stray) return baselineError(`--${stray} is only valid with --set <commit>`);
+    if (stray) return baselineError(`--${stray} is only valid with --set <commit> (or --advance <commit>)`);
   }
 
   const state = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
-  if (!setting) {
+  if (!setting && !advancing) {
     if (!state) return baselineError("No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\".");
     const registered = state.baseline_commit !== undefined;
+    const chain = baselineChain(state);
     return {
       kind: "print",
       workflow_id: state.workflow_id,
       registered,
       baseline_commit: state.baseline_commit ?? null,
       baseline_source: state.baseline_source ?? null,
+      baseline_epoch: registered ? chain.length - 1 : null,
+      baseline_history: chain,
       message: registered
-        ? `Workflow baseline: ${state.baseline_commit} (source: ${state.baseline_source}).`
+        ? chain.length > 1
+          ? `Workflow baseline: ${state.baseline_commit} (source: ${state.baseline_source}, epoch ${chain.length - 1}). Baseline chain: ${chain.map((commit, index) => `#${index} ${commit}`).join(" → ")}.`
+          : `Workflow baseline: ${state.baseline_commit} (source: ${state.baseline_source}).`
         : "No workflow baseline is registered. Register the commit existing behavior is characterized against with: orchestrate baseline --set <commit> --user-input Approve --reason \"<reason>\" [--dry-run].",
     };
   }
+  if (advancing) return advanceBaseline(flags, state, hooks);
 
   const target = flags.set;
   if (!COMMIT_ID_PATTERN.test(target)) {
@@ -4443,6 +4485,10 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
     }
   } else {
     if (current === undefined) return baselineError("No workflow baseline is registered yet, so there is nothing to replace; use --set <commit> without --replace.");
+    // 4.7.0 fail-closed: an advanced baseline chain is append-only and never replaced.
+    if (state.baseline_source === "advanced" || state.baseline_history !== undefined) {
+      return baselineError(`Workflow baseline ${current} was advanced (baseline chain: ${baselineChain(state).join(" → ")}); an advanced baseline chain is append-only and cannot be replaced. Use orchestrate baseline --advance to append an epoch, or start a new workflow.`);
+    }
     if (flags.expect !== current) return baselineError(`--expect ${flags.expect} does not match the current workflow baseline ${current}`);
     if (target === current) return unchanged();
   }
@@ -4550,6 +4596,208 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
     message: replace
       ? `✅ Workflow baseline replaced: ${current} → ${target} (replacement #${replacementCount}).`
       : `✅ Workflow baseline registered: ${target}.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// baseline --advance — append an epoch to the workflow baseline chain (4.7.0)
+// ---------------------------------------------------------------------------
+
+const ADVANCE_USAGE = "orchestrate baseline --advance <commit> --expect <current baseline> --user-input Approve --reason \"<reason>\" [--dry-run]";
+
+/** Every workflow part as one merged read view (the global/single state outside the split layout). */
+function baselineScanView(): { view: WorkflowState; parts: WorkflowParts } {
+  const parts = loadWorkflowParts(PROJECT_ROOT);
+  const global = parts.parts.get("global")?.state;
+  if (!global) throw new Error("no active workflow");
+  return { view: parts.split ? mergeWorkflowView(parts.parts, GLOBAL_WORKFLOW) : global, parts };
+}
+
+/** I13 evidence files that declare characterization code refs, project-relative. */
+function characterizationI13Files(): Array<{ path: string; value: Record<string, unknown> }> {
+  const root = join(PROJECT_ROOT, ".aidlc", "evidence", "test-case-derivation");
+  if (!existsSync(root)) return [];
+  return collectFiles(root).filter((path) => path.endsWith("test-case-derivation.json")).sort().map((path) => {
+    const label = normalizeArtifactLabel(relative(PROJECT_ROOT, path));
+    let value: unknown;
+    try {
+      value = JSON.parse(readFileSync(path, "utf8"));
+    } catch (error) {
+      throw new Error(`I13 evidence ${label} cannot be parsed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const record = asRecord(value);
+    if (!record) throw new Error(`I13 evidence ${label} must be a JSON object`);
+    return { path: label, value: record };
+  }).filter((file) => file.value.status === "required" && i13UcdIdsByMode(file.value).characterization.length > 0);
+}
+
+async function advanceBaseline(flags: Record<string, string>, state: WorkflowState | null, hooks: StateWriteHooks): Promise<Directive> {
+  const target = flags.advance;
+  if (!COMMIT_ID_PATTERN.test(target)) {
+    return baselineError(`--advance must be a full 40- or 64-character lowercase hex commit id; abbreviations, revision expressions (HEAD~3), branch names and options are rejected (got ${JSON.stringify(target)})`);
+  }
+  if (flags["user-input"] !== "Approve") return baselineError("--user-input must be exactly Approve: advancing the baseline requires the user's explicit approval.");
+  if (!flags.reason || flags.reason === "true" || !flags.reason.trim()) return baselineError("--reason is required: state why the baseline advances to this commit.");
+  if (!flags.expect || flags.expect === "true") return baselineError(`--advance requires --expect <current baseline commit> (same optimistic check as --replace). Usage: ${ADVANCE_USAGE}`);
+  if (!COMMIT_ID_PATTERN.test(flags.expect)) return baselineError(`--expect must be a full 40- or 64-character lowercase hex commit id (got ${JSON.stringify(flags.expect)})`);
+
+  // 1. Workflow, git repository and a usable current epoch.
+  if (!state) return baselineError("No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\".");
+  if (state.status !== "running" && state.status !== "parked") return baselineError(`Workflow ${state.workflow_id} is ${state.status}; baseline --advance requires a running or parked workflow.`);
+  if (state.workflow_kind && state.workflow_kind !== "global") return baselineError(`aidlc/active/aidlc-state.md is a ${state.workflow_kind} workflow; baseline only runs on the global workflow.`);
+  const current = state.baseline_commit;
+  if (current === undefined || state.baseline_source === undefined) {
+    return baselineError("No workflow baseline is registered, so there is no epoch to advance from; register one with orchestrate baseline --set <commit> --user-input Approve --reason \"<reason>\".");
+  }
+  if (current === BASELINE_UNAVAILABLE) {
+    return baselineError(`Workflow baseline is ${BASELINE_UNAVAILABLE}; it cannot be advanced. Correct it first with orchestrate baseline --set <commit> --replace --expect ${BASELINE_UNAVAILABLE} --user-input Approve --reason "<why>".`);
+  }
+  if (flags.expect !== current) return baselineError(`--expect ${flags.expect} does not match the current workflow baseline ${current}`);
+  const currentErrors = baselineCommitErrors(PROJECT_ROOT, state);
+  if (currentErrors.length > 0) return baselineError(`Cannot advance the workflow baseline: ${currentErrors.join("; ")}`);
+
+  // 2. Target: existing commit, HEAD or an ancestor of HEAD, strict descendant of the current epoch.
+  const gitCheck = checkAdvanceTarget(PROJECT_ROOT, current, target);
+  if ("error" in gitCheck) return baselineError(`Cannot advance the workflow baseline to ${target}: ${gitCheck.error}`);
+
+  let scan: ReturnType<typeof baselineScanView>;
+  try {
+    scan = baselineScanView();
+  } catch (error) {
+    return baselineError(`Cannot advance the workflow baseline: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const { view, parts } = scan;
+  const graph = loadGraph();
+  const instances = expandStageInstances(graph, view);
+  const completed = new Set(completedInstanceIds(view));
+
+  // 4. Never between a unit's BASELINE and GREEN: no active code-generation, and no unit
+  //    whose controlled BASELINE observation exists while its code-generation is open.
+  const blockers: string[] = [];
+  const unitKey = (instance: StageInstance) => `${instance.module_id}/${instance.unit_id}`;
+  const codeGenerationDone = new Set(instances.filter((instance) => instance.stage.slug === "code-generation" && completed.has(instance.instance_id)).map(unitKey));
+  for (const part of parts.parts.values()) {
+    const open = [...Object.keys(part.state.active_instances || {}), ...(part.state.status !== "done" && part.state.current_stage_instance ? [part.state.current_stage_instance] : [])];
+    for (const id of new Set(open)) {
+      if (id.split("@", 1)[0] === "code-generation" && !completed.has(id)) blockers.push(`${id} is active in the ${workflowRefKey(part.ref)} workflow`);
+    }
+  }
+  for (const instance of instances.filter((candidate) => candidate.stage.slug === "tdd")) {
+    if (codeGenerationDone.has(unitKey(instance))) continue;
+    const path = evidencePath(instance.stage, "baseline-test-evidence", instance);
+    if (!existsSync(path)) continue;
+    let observed = true;
+    try {
+      observed = asRecord(JSON.parse(readFileSync(path, "utf8")))?.status !== "not_required";
+    } catch { /* unreadable BASELINE evidence counts as observed: fail closed */ }
+    if (observed) blockers.push(`${instance.instance_id} already holds BASELINE evidence (${normalizeArtifactLabel(relative(PROJECT_ROOT, path))}) while code-generation of unit ${unitKey(instance)} is not completed`);
+  }
+  if (blockers.length > 0) {
+    return baselineError(`Cannot advance the workflow baseline while a unit sits between its BASELINE and GREEN: ${blockers.join("; ")}. Complete that unit's code-generation first.`);
+  }
+
+  // 3. Anchor: the target is the source_revision.commit of the controlled GREEN evidence
+  //    of a completed code-generation instance that still passes its gate.
+  const anchorErrors: string[] = [];
+  let anchor: { instance: string; path: string; commit: string } | undefined;
+  for (const declared of instances.filter((candidate) => candidate.stage.slug === "code-generation" && completed.has(candidate.instance_id))) {
+    const instance = runtimeInstance(declared, view);
+    const path = evidencePath(instance.stage, "green-test-evidence", instance);
+    const label = normalizeArtifactLabel(relative(PROJECT_ROOT, path));
+    const loaded = loadEvidence(instance.stage, "green-test-evidence", instance);
+    if (!loaded.value) continue;
+    if (asRecord(loaded.value.source_revision)?.commit !== target) continue;
+    const failures = await checkSensors(instance, view, { tolerateRevisionDrift: true, onlySensors: ["green-test-evidence"] });
+    if (failures.length > 0) {
+      anchorErrors.push(`${label}: ${failures.map((failure) => failure.message).join("; ")}`);
+      continue;
+    }
+    anchor = { instance: instance.instance_id, path: label, commit: target };
+    break;
+  }
+  if (!anchor) {
+    return baselineError(anchorErrors.length > 0
+      ? `Cannot advance the workflow baseline to ${target}: the GREEN evidence anchored at it no longer passes its gate: ${anchorErrors.join("; ")}`
+      : `Cannot advance the workflow baseline to ${target}: it is not the source_revision.commit of the controlled GREEN evidence of any completed code-generation instance. --advance only moves to the completion point of a finished unit; commit that unit's changes before its GREEN evidence is produced (or refresh it after the commit).`);
+  }
+
+  // 5. Every I13 characterization code ref resolves at the target commit.
+  const refErrors: string[] = [];
+  try {
+    for (const file of characterizationI13Files()) {
+      for (const { path } of i13CodeRefBlobs(file.value)) {
+        const resolved = baselineCodeRef(PROJECT_ROOT, target, { path }, `${file.path} code ref ${path}`);
+        if ("error" in resolved) refErrors.push(resolved.error);
+      }
+    }
+  } catch (error) {
+    refErrors.push(error instanceof Error ? error.message : String(error));
+  }
+  if (refErrors.length > 0) return baselineError(`Cannot advance the workflow baseline to ${target}: the I13 characterization code refs do not resolve there: ${refErrors.join("; ")}`);
+
+  const chain = [...baselineChain(state), target];
+  const epoch = chain.length - 1;
+  const checks = { head: gitCheck.head, anchor, epoch, baseline_history: chain };
+  if ("dry-run" in flags) {
+    return {
+      kind: "print",
+      dry_run: true,
+      changed: true,
+      workflow_id: state.workflow_id,
+      baseline_commit: target,
+      advances: current,
+      checks,
+      message: `🔎 ${target} passes every baseline --advance check (dry run, nothing written). Run the same command without --dry-run to advance to epoch ${epoch}.`,
+    };
+  }
+
+  hooks.beforeWrite?.();
+  const fresh = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!fresh || fresh.revision !== state.revision) {
+    return baselineError(`workflow state revision conflict: expected ${state.revision}, found ${fresh ? fresh.revision : "no workflow"}; nothing was written, re-run the command.`);
+  }
+  if (fresh.baseline_commit !== current || JSON.stringify(baselineChain(fresh)) !== JSON.stringify(baselineChain(state))) {
+    return baselineError(`--expect ${current} is no longer the workflow baseline (now ${fresh.baseline_commit ?? "none"}); nothing was written.`);
+  }
+  const previousSource = fresh.baseline_source;
+  fresh.baseline_history = chain;
+  fresh.baseline_commit = target;
+  fresh.baseline_source = "advanced";
+  fresh.history.push({ stage: "baseline", result: "advanced", timestamp: new Date().toISOString(), user_input: "Approve" });
+  try {
+    saveWorkflowState(PROJECT_ROOT, fresh, GLOBAL_WORKFLOW, { baselineWrite: true });
+  } catch (error) {
+    return baselineError(`${error instanceof Error ? error.message : String(error)}; nothing was written, re-run the command.`);
+  }
+  const event = "BASELINE_COMMIT_ADVANCED";
+  try {
+    (hooks.appendAudit || appendAuditEvent)(PROJECT_ROOT, GLOBAL_WORKFLOW, event, {
+      "Workflow ID": fresh.workflow_id,
+      From: current,
+      "From Source": previousSource || "-",
+      To: target,
+      Epoch: String(epoch),
+      Chain: chain.join(", "),
+      Anchor: `${anchor.path} @ ${anchor.commit} (${anchor.instance})`,
+      Expected: flags.expect,
+      HEAD: gitCheck.head,
+      Reason: flags.reason.trim(),
+      "User Input": "Approve",
+    });
+  } catch (error) {
+    return baselineError(`Workflow baseline ${target} was saved to the workflow state, but the ${event} audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。`, { baseline_commit: target, baseline_source: "advanced" });
+  }
+  return {
+    kind: "print",
+    changed: true,
+    workflow_id: fresh.workflow_id,
+    baseline_commit: target,
+    baseline_source: "advanced",
+    advanced: current,
+    baseline_epoch: epoch,
+    baseline_history: chain,
+    checks,
+    message: `✅ Workflow baseline advanced: ${current} → ${target} (epoch ${epoch}). Completed units keep their original BASELINE evidence; run evidence run for the active unit's tdd to observe BASELINE at the new epoch.`,
   };
 }
 

@@ -148,6 +148,7 @@ I13 的每个 UC-D 带 `tdd_mode`：新行为（`new`，默认）走 RED→GREEN
 - `tdd` 阶段的 `.aidlc/commands/tdd.json`：有 `new` UC-D 时声明恰好一条 `role: red`，有 characterization UC-D 时声明恰好一条 `role: baseline`。BASELINE 在修改任何 code ref 之前运行：producer 先用 `git hash-object` 比对 code ref 与基线 blob，不一致直接拒绝；命令须退出 0。某一模式没有 UC-D 时对应证据自动为 `not_required`。
 - `code-generation` 的唯一 `role: green` 命令须覆盖全部 UC-D；完成时连同 RED 复验 BASELINE。`test-quality` 按 `ucd_modes` 要求 RED failed / BASELINE passed。
 - 存量工作流（4.6 之前创建、没有基线）先执行 `loeyae-aidlc orchestrate baseline --set <sha> --user-input Approve --reason "<原因>"` 登记基线，再派生 characterization UC-D。split 布局的模块子工作流继承父工作流基线。
+- 多单元基线分代（4.7.0）：基线是一条只能追加的 commit 链（`Baseline History`），每份 BASELINE 证据绑定它产出时的那一代。多个单元依次改动同一批 code ref 时，上一个单元的 `code-generation` 完成并提交后，执行 `loeyae-aidlc orchestrate baseline --advance <该单元 GREEN 证据的 source_revision.commit> --expect <当前基线> --user-input Approve --reason "<原因>"`，再对活动中单元的 tdd 执行普通 `evidence run`。已完成单元的 BASELINE 证据保持有效，不需要 `--refresh`。`--advance` 只能推进到已完成单元的完成点，且不能在某个单元的 BASELINE 与 GREEN 之间执行；`--replace` 用于更正一个尚未使用的基线，推进过的工作流一律拒绝 `--replace`。不带参数的 `orchestrate baseline` 显示当前代与完整链。
 
 ## Worktree 与 merge plan
 

@@ -17,6 +17,7 @@ import {
 import { spawnSync } from "child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
+import { baselineCodeRef, baselineCommitErrors, workflowBaselineForModule } from "./aidlc-baseline";
 import { evidenceRelativePath, stageInstanceId } from "./aidlc-execution-context";
 import { GLOBAL_WORKFLOW, loadWorkflowState, type WorkflowRef, type WorkflowState } from "./aidlc-light-state";
 import { evidenceSourceRevision, integrationStageSlugs, isSplitLayout, loadWorkflowParts, ownerOfInstance, stageAxis } from "./aidlc-workflow-layout";
@@ -621,13 +622,28 @@ export function i13CodeRefBlobs(i13: Record<string, unknown>): Array<{ path: str
 
 /**
  * BASELINE precondition, checked before the baseline command runs: every code ref of
- * the I13 characterization is still byte-identical (as a git blob) to the workflow
- * baseline. A changed, missing or unhashable file fails without writing evidence.
+ * the I13 characterization is still byte-identical (as a git blob) to the current
+ * epoch of the workflow baseline chain (4.7.0; the single baseline when it was never
+ * advanced). I13 stays bound to epoch 0, so its own baseline_commit must be the first
+ * epoch. A changed, missing or unhashable file fails without writing evidence.
  */
-function baselineCodeRefDigests(i13: Record<string, unknown>): Record<string, unknown> {
-  const commit = typeof i13.baseline_commit === "string" ? i13.baseline_commit : "";
-  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)) fail("I13 evidence must record the workflow baseline_commit of its characterization UC-Ds");
-  const digests = i13CodeRefBlobs(i13).map(({ path, baseline_blob }) => {
+function baselineCodeRefDigests(i13: Record<string, unknown>, state: ProducerState): Record<string, unknown> {
+  const recorded = typeof i13.baseline_commit === "string" ? i13.baseline_commit : "";
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(recorded)) fail("I13 evidence must record the workflow baseline_commit of its characterization UC-Ds");
+  let baseline: ReturnType<typeof workflowBaselineForModule>;
+  try {
+    baseline = workflowBaselineForModule(PROJECT_ROOT, state.current_module);
+  } catch (error) {
+    fail(`BASELINE cannot resolve the workflow baseline: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const commitErrors = baselineCommitErrors(PROJECT_ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
+  if (commitErrors.length > 0 || !baseline.registered) fail(`BASELINE requires a usable workflow baseline: ${commitErrors.join("; ")}`);
+  if (recorded !== baseline.epochs[0]) fail(`I13 baseline_commit ${recorded} does not match epoch 0 of the workflow baseline (${baseline.epochs[0]})`);
+  const commit = baseline.commit;
+  const digests = i13CodeRefBlobs(i13).map(({ path }) => {
+    const resolved = baselineCodeRef(PROJECT_ROOT, commit, { path }, `code ref ${path}`);
+    if ("error" in resolved) fail(`BASELINE refuses to run: ${resolved.error}`);
+    const baseline_blob = resolved.blob;
     requireRegularFile(path, `code ref ${path}`);
     const result = spawnSync("git", ["hash-object", "--", path], { cwd: PROJECT_ROOT, encoding: "utf8", shell: false });
     const worktree = typeof result.stdout === "string" ? result.stdout.trim() : "";
@@ -718,7 +734,7 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     const config = requireCommandConfig(options.config, options.stage);
     const command = phaseCommand(config, options.stage, phase);
     // BASELINE observes the unmodified baseline code: verified before the command runs.
-    const baselineFields = phase === "BASELINE" ? baselineCodeRefDigests(i13) : {};
+    const baselineFields = phase === "BASELINE" ? baselineCodeRefDigests(i13, state) : {};
     const started = Date.now();
     const result = spawnSync(command.argv[0], command.argv.slice(1), {
       cwd: command.cwd || PROJECT_ROOT,

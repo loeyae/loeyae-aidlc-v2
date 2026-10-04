@@ -39,7 +39,7 @@ export interface TeamLightActiveInstance {
   expires_at: string;
 }
 
-export const ENGINE_VERSION = "4.6.1";
+export const ENGINE_VERSION = "4.7.0";
 
 export type WorkflowKind = "global" | "module" | "integration";
 
@@ -49,11 +49,12 @@ export const DIAGRAM_FORMATS: readonly DiagramFormat[] = ["mermaid", "svg"];
 
 /**
  * How the workflow baseline commit was recorded: automatically when `next --scope`
- * created the workflow, registered later with `orchestrate baseline --set`, or
- * corrected with `orchestrate baseline --set --replace --expect`.
+ * created the workflow, registered later with `orchestrate baseline --set`,
+ * corrected with `orchestrate baseline --set --replace --expect`, or moved to a new
+ * epoch of the baseline chain with `orchestrate baseline --advance` (4.7.0).
  */
-export type BaselineSource = "created" | "registered" | "replaced";
-export const BASELINE_SOURCES: readonly BaselineSource[] = ["created", "registered", "replaced"];
+export type BaselineSource = "created" | "registered" | "replaced" | "advanced";
+export const BASELINE_SOURCES: readonly BaselineSource[] = ["created", "registered", "replaced", "advanced"];
 /** Baseline commit value of a workflow created outside a git repository. */
 export const BASELINE_UNAVAILABLE = "unavailable";
 
@@ -77,6 +78,12 @@ export interface WorkflowState {
   /** Global/single workflows only; both baseline fields are present or both absent. */
   baseline_commit?: string;
   baseline_source?: BaselineSource;
+  /**
+   * Append-only baseline chain (4.7.0): epoch 0 first, the current baseline last.
+   * Present only once the baseline was advanced (Baseline Source `advanced`); absent
+   * means the chain is the single epoch `[baseline_commit]`.
+   */
+  baseline_history?: string[];
   revision: number;
   scope: string;
   depth: string;
@@ -183,20 +190,25 @@ function presentScalar(markdown: string, label: string): string | undefined {
 }
 
 function subWorkflowBaselineError(kind: string): Error {
-  return new Error(`${kind} sub-workflow state must not carry Baseline Commit / Baseline Source; the workflow baseline belongs to the global workflow`);
+  return new Error(`${kind} sub-workflow state must not carry Baseline Commit / Baseline Source / Baseline History; the workflow baseline belongs to the global workflow`);
 }
 
 /**
  * Structural rules of the workflow baseline, shared by parsing and saving: both fields
  * or neither; the commit is a full lowercase hex id or "unavailable"; the source is
- * created / registered / replaced; module and integration sub-workflows carry none.
+ * created / registered / replaced / advanced; module and integration sub-workflows
+ * carry none. The baseline chain (4.7.0) exists exactly when the source is advanced:
+ * at least two distinct full commit ids, the last one equal to Baseline Commit. Git
+ * ancestry between epochs is checked when the chain is used, not here.
  */
-export function assertBaselineFields(state: Pick<WorkflowState, "baseline_commit" | "baseline_source" | "workflow_kind">): void {
+export function assertBaselineFields(state: Pick<WorkflowState, "baseline_commit" | "baseline_source" | "workflow_kind" | "baseline_history">): void {
   const hasCommit = state.baseline_commit !== undefined;
   const hasSource = state.baseline_source !== undefined;
-  if (!hasCommit && !hasSource) return;
+  const hasHistory = state.baseline_history !== undefined;
+  if (!hasCommit && !hasSource && !hasHistory) return;
   if (state.workflow_kind === "module" || state.workflow_kind === "integration") throw subWorkflowBaselineError(state.workflow_kind);
   if (hasCommit !== hasSource) throw new Error("Baseline Commit and Baseline Source must both be present or both be absent");
+  if (hasHistory && !hasCommit) throw new Error("Baseline History requires Baseline Commit and Baseline Source");
   const commit = state.baseline_commit as string;
   if (commit !== BASELINE_UNAVAILABLE && !COMMIT_ID_PATTERN.test(commit)) {
     throw new Error(`Baseline Commit must be a 40- or 64-character lowercase hex commit id or "${BASELINE_UNAVAILABLE}", got ${JSON.stringify(commit)}`);
@@ -204,6 +216,27 @@ export function assertBaselineFields(state: Pick<WorkflowState, "baseline_commit
   if (!(BASELINE_SOURCES as readonly string[]).includes(state.baseline_source as string)) {
     throw new Error(`Baseline Source must be one of ${BASELINE_SOURCES.join(", ")}, got ${JSON.stringify(state.baseline_source)}`);
   }
+  const advanced = state.baseline_source === "advanced";
+  if (advanced && !hasHistory) throw new Error("Baseline Source advanced requires a Baseline History chain");
+  if (!hasHistory) return;
+  if (!advanced) throw new Error(`Baseline History is only valid with Baseline Source advanced, got ${JSON.stringify(state.baseline_source)}`);
+  const chain = state.baseline_history as string[];
+  if (!Array.isArray(chain) || chain.length < 2) throw new Error("Baseline History must list at least two epochs (epoch 0 and the advanced baseline)");
+  for (const entry of chain) {
+    if (typeof entry !== "string" || !COMMIT_ID_PATTERN.test(entry)) {
+      throw new Error(`Baseline History entries must be 40- or 64-character lowercase hex commit ids, got ${JSON.stringify(entry)}`);
+    }
+  }
+  if (new Set(chain).size !== chain.length) throw new Error("Baseline History contains duplicate commits");
+  if (chain[chain.length - 1] !== commit) {
+    throw new Error(`the last Baseline History entry ${chain[chain.length - 1]} must equal Baseline Commit ${commit}`);
+  }
+}
+
+/** Baseline chain of a state that has a commit baseline: the recorded history, or the single epoch. */
+export function baselineChain(state: Pick<WorkflowState, "baseline_commit" | "baseline_history">): string[] {
+  if (state.baseline_history !== undefined) return [...state.baseline_history];
+  return state.baseline_commit !== undefined ? [state.baseline_commit] : [];
 }
 
 export function markdownTable(markdown: string, title: string): string[][] {
@@ -339,9 +372,12 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
   if (diagramFormat && !(DIAGRAM_FORMATS as readonly string[]).includes(diagramFormat)) throw new Error(`invalid diagram format: ${diagramFormat}`);
   const baselineCommit = presentScalar(markdown, "Baseline Commit");
   const baselineSource = presentScalar(markdown, "Baseline Source");
+  const baselineHistoryText = presentScalar(markdown, "Baseline History");
+  const baselineHistory = baselineHistoryText === undefined ? undefined : baselineHistoryText.split(",").map((entry) => entry.trim());
   assertBaselineFields({
     baseline_commit: baselineCommit,
     baseline_source: baselineSource as BaselineSource | undefined,
+    baseline_history: baselineHistory,
     workflow_kind: (kind || undefined) as WorkflowKind | undefined,
   });
   return {
@@ -354,6 +390,7 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
     ...(parentWorkflow ? { parent_workflow_id: parentWorkflow } : {}),
     ...(diagramFormat ? { diagram_format: diagramFormat as DiagramFormat } : {}),
     ...(baselineCommit !== undefined ? { baseline_commit: baselineCommit, baseline_source: baselineSource as BaselineSource } : {}),
+    ...(baselineHistory !== undefined ? { baseline_history: baselineHistory } : {}),
     revision,
     scope,
     depth: scalar(markdown, "Depth"),
@@ -396,7 +433,7 @@ export function renderLightWorkflowState(state: WorkflowState): string {
 - Status: ${state.status}
 - Revision: ${state.revision}
 - Engine Version: ${clean(state.version)}
-${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}${state.diagram_format ? `- Diagram Format: ${state.diagram_format}\n` : ""}${state.baseline_commit !== undefined ? `- Baseline Commit: ${clean(state.baseline_commit)}\n- Baseline Source: ${clean(state.baseline_source || "")}\n` : ""}- Depth: ${clean(state.depth)}
+${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}${state.diagram_format ? `- Diagram Format: ${state.diagram_format}\n` : ""}${state.baseline_commit !== undefined ? `- Baseline Commit: ${clean(state.baseline_commit)}\n- Baseline Source: ${clean(state.baseline_source || "")}\n` : ""}${state.baseline_history !== undefined ? `- Baseline History: ${state.baseline_history.map(clean).join(", ")}\n` : ""}- Depth: ${clean(state.depth)}
 - Current Phase: ${clean(state.current_phase)}
 - Current Stage: ${cell(state.current_stage)}
 - Current Instance: ${cell(state.current_stage_instance)}
@@ -493,20 +530,24 @@ export function loadWorkflowState(projectRoot: string, ref: WorkflowRef = GLOBAL
 
 export interface SaveWorkflowOptions {
   /**
-   * Only `orchestrate baseline` sets this: it may register or replace the baseline.
-   * Every other save must keep Baseline Commit / Baseline Source exactly as persisted.
+   * Only `orchestrate baseline` sets this: it may register, replace or advance the
+   * baseline. Every other save must keep Baseline Commit / Baseline Source / Baseline
+   * History exactly as persisted.
    */
   baselineWrite?: boolean;
 }
 
 function assertBaselinePreserved(existing: WorkflowState | null, state: WorkflowState, ref: WorkflowRef, options: SaveWorkflowOptions): void {
   assertBaselineFields(state);
-  if (ref.kind !== "global" && (state.baseline_commit !== undefined || state.baseline_source !== undefined)) throw subWorkflowBaselineError(ref.kind);
+  if (ref.kind !== "global" && (state.baseline_commit !== undefined || state.baseline_source !== undefined || state.baseline_history !== undefined)) throw subWorkflowBaselineError(ref.kind);
   if (options.baselineWrite) return;
   if (existing) {
-    if (existing.baseline_commit !== state.baseline_commit || existing.baseline_source !== state.baseline_source) {
-      throw new Error("the workflow baseline can only be changed by orchestrate baseline; an ordinary save must keep Baseline Commit / Baseline Source unchanged");
+    if (existing.baseline_commit !== state.baseline_commit || existing.baseline_source !== state.baseline_source
+      || JSON.stringify(existing.baseline_history) !== JSON.stringify(state.baseline_history)) {
+      throw new Error("the workflow baseline can only be changed by orchestrate baseline; an ordinary save must keep Baseline Commit / Baseline Source / Baseline History unchanged");
     }
+  } else if (state.baseline_history !== undefined) {
+    throw new Error("a new workflow cannot start with a Baseline History chain");
   } else if (state.baseline_source !== undefined && state.baseline_source !== "created") {
     throw new Error(`a new workflow can only record a created baseline, got Baseline Source ${state.baseline_source}`);
   }

@@ -7,6 +7,10 @@
  * (`registered`) / `--set --replace --expect` (`replaced`). Module and integration
  * sub-workflows never store a baseline; they read the parent's via workflowBaseline().
  *
+ * 4.7.0: the baseline is an append-only chain of epochs. `orchestrate baseline
+ * --advance` (`advanced`) appends the completion commit of a finished unit; every
+ * BASELINE evidence stays bound to the epoch it was produced in (`Baseline History`).
+ *
  * Every git call uses argument arrays with `shell: false`. All checks fail closed:
  * git being unavailable, a shallow history or unreadable evidence reject instead of
  * skipping the check.
@@ -19,6 +23,7 @@ import { COMMIT_ID_PATTERN } from "./aidlc-revision";
 import {
   BASELINE_UNAVAILABLE,
   GLOBAL_WORKFLOW,
+  baselineChain,
   loadWorkflowState,
   workflowRefKey,
   type BaselineSource,
@@ -49,13 +54,22 @@ export function currentHeadCommit(projectRoot: string): string {
 }
 
 export type WorkflowBaseline =
-  | { registered: true; commit: string; source: BaselineSource; workflow_id: string }
+  | {
+    registered: true;
+    /** The current epoch (the last entry of `epochs`). */
+    commit: string;
+    source: BaselineSource;
+    workflow_id: string;
+    /** The baseline chain (4.7.0), epoch 0 first; `[commit]` when never advanced. */
+    epochs: string[];
+  }
   | { registered: false; workflow_id: string };
 
 /**
  * The baseline that applies to a workflow. The global (or single) workflow answers
  * with its own fields; module and integration sub-workflows answer with the parent
- * global workflow's value, or "not registered" when the parent has none.
+ * global workflow's value (its whole baseline chain included), or "not registered"
+ * when the parent has none.
  */
 export function workflowBaseline(projectRoot: string, ref: WorkflowRef = GLOBAL_WORKFLOW): WorkflowBaseline {
   const own = loadWorkflowState(projectRoot, ref);
@@ -70,7 +84,7 @@ export function workflowBaseline(projectRoot: string, ref: WorkflowRef = GLOBAL_
     owner = parent;
   }
   if (owner.baseline_commit === undefined || owner.baseline_source === undefined) return { registered: false, workflow_id: owner.workflow_id };
-  return { registered: true, commit: owner.baseline_commit, source: owner.baseline_source, workflow_id: owner.workflow_id };
+  return { registered: true, commit: owner.baseline_commit, source: owner.baseline_source, workflow_id: owner.workflow_id, epochs: baselineChain(owner) };
 }
 
 type CommitCheck = { ok: true } | { ok: false; error: string };
@@ -115,6 +129,39 @@ export function baselineCommitErrors(projectRoot: string, state: Pick<WorkflowSt
   if (!COMMIT_ID_PATTERN.test(commit)) return [`workflow baseline commit ${JSON.stringify(commit)} must be a 40- or 64-character lowercase hex commit id`];
   const check = commitIsAncestorOfHead(projectRoot, commit, "workflow baseline commit");
   return check.ok ? [] : [check.error];
+}
+
+/**
+ * Errors when an earlier epoch of the baseline chain is no longer usable: it must be
+ * a full commit id that is still HEAD or one of its ancestors. The current epoch is
+ * covered by baselineCommitErrors().
+ */
+export function baselineEpochErrors(projectRoot: string, epoch: string): string[] {
+  if (!COMMIT_ID_PATTERN.test(epoch)) return [`baseline epoch ${JSON.stringify(epoch)} must be a 40- or 64-character lowercase hex commit id`];
+  const check = commitIsAncestorOfHead(projectRoot, epoch, "baseline epoch");
+  return check.ok ? [] : [check.error];
+}
+
+/**
+ * Git checks of `orchestrate baseline --advance` (4.7.0) on the target commit: a git
+ * work tree with a HEAD; the target is an existing commit object that is HEAD or one
+ * of its ancestors; it is a strict descendant of the current epoch. Shallow clones
+ * that cannot prove ancestry reject.
+ */
+export function checkAdvanceTarget(projectRoot: string, current: string, target: string): { error: string } | { head: string } {
+  const repository = gitWorkTreeError(projectRoot);
+  if (repository) return { error: `${repository}; orchestrate baseline --advance requires a git repository` };
+  const head = currentHeadCommit(projectRoot);
+  if (head === BASELINE_UNAVAILABLE) return { error: "the git repository has no HEAD commit" };
+  const ancestry = commitIsAncestorOfHead(projectRoot, target, "commit");
+  if (!ancestry.ok) return { error: ancestry.error };
+  if (target === current) return { error: `commit ${target} is the current baseline epoch; --advance needs a strict descendant of it` };
+  const descendant = git(projectRoot, ["merge-base", "--is-ancestor", current, target]);
+  if (descendant.error) return { error: `commit ${target} cannot be verified: git is unavailable (${descendant.error.message})` };
+  if (descendant.status === 0) return { head };
+  if (isShallow(projectRoot)) return { error: `commit ${target} could not be confirmed as a descendant of the current baseline ${current}: ${UNSHALLOW_HINT}` };
+  if (descendant.status === 1) return { error: `commit ${target} is not a descendant of the current baseline epoch ${current}` };
+  return { error: `commit ${target} ancestry cannot be determined (git merge-base exit ${descendant.status}): ${descendant.stderr.trim()}` };
 }
 
 /**

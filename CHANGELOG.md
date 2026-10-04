@@ -1,5 +1,41 @@
 # Changelog
 
+## 4.7.0
+
+多单元 characterization 基线分代：工作流基线从单个值变为只能追加的 commit 链，`orchestrate baseline --advance` 把上一个单元的完成点追加为新一代，每份 BASELINE 证据按它产出时的那一代校验。
+
+### Added
+
+- **`orchestrate baseline --advance <commit> --expect <当前基线> --user-input Approve --reason "<理由>" [--dry-run]`**：把基线推进到一个已完成单元的完成点。参数规则沿用 `--set` / `--replace`：`<commit>` 与 `--expect` 必须是完整的 40/64 位小写十六进制，`--user-input` 只能是 `Approve`，`--reason` 必填；`--expect` 必填（与 `--replace` 相同的乐观校验，写入前重新读取状态并比较 revision 与当前基线）。`--advance` 与 `--set`、`--replace` 互斥，未知参数、多余位置参数和 `--module` 报错。推进前检查（任一不满足即拒绝，并给出具体原因）：
+  1. 存在 running / parked 的全局或单一工作流；是 git 仓库；基线已登记且不是 `unavailable`（`unavailable` 仍走 `--replace --expect unavailable`），当前基线仍可从 HEAD 到达。
+  2. 目标是存在的 commit 对象，是 HEAD 或 HEAD 的祖先，并且是当前代的严格后代（不能等于当前代）；浅克隆无法判断时拒绝。
+  3. 锚点：目标等于父工作流或任一子工作流中某个已完成 `code-generation` 实例的受控 GREEN 证据的 `source_revision.commit`，且该证据仍通过 GREEN 门禁（只容忍工作区漂移）。
+  4. 没有单元停在 BASELINE 与 GREEN 之间：扫描父工作流和全部子工作流，不能有活动中（Active Instances 或 Current Instance）的 `code-generation`，也不能有已产出 BASELINE 证据（非 `not_required`）而同一单元 `code-generation` 尚未完成的 `tdd`。
+  5. 目标 commit 中所有 I13 characterization code ref 都能解析为普通文件（不是符号链接）。
+- **基线链字段**：全局/单一工作流状态新增可选的 `- Baseline History: <c0>, <c1>, …`（`baseline_history?: string[]`）。加载与保存时 fail-closed 校验：链存在时至少 2 项、每项为 40/64 位小写十六进制且不重复、最后一项等于 `Baseline Commit`，并且 `Baseline Source` 必须是 `advanced`；`Baseline Source` 为 `advanced` 时链必须存在；模块与集成子工作流不得携带该字段，通过 `workflowBaseline()` 继承父工作流的整条链（新增 `epochs` 字段）。普通保存必须原样保留链，只有 `{ baselineWrite: true }` 的 baseline 写路径可以追加。各代之间的 git 祖先关系在使用时校验。
+- **`baseline_source=advanced`**：`BaselineSource` 增加取值 `advanced`。
+- **审计 `BASELINE_COMMIT_ADVANCED`**：记录 Workflow ID、From、From Source、To、Epoch、Chain、Anchor（GREEN 证据路径、commit 与实例）、Expected、HEAD、Reason、User Input；审计写入失败时返回 error 并提示"状态已写入、审计缺失，请人工补记"。`history` 追加 `{ stage: "baseline", result: "advanced", user_input: "Approve" }`。
+- 不带参数的 `orchestrate baseline` 增加 `baseline_epoch` 与 `baseline_history` 字段；推进过的工作流在 message 中显示当前代与完整链，未推进的工作流 message 与 4.6.1 相同。
+
+### Changed
+
+- **BASELINE 前置校验按当前代**：producer 比对的期望 blob 改为从**当前代** commit 中解析（`baselineCodeRef(projectRoot, 当前代, ref)`），不再使用 I13 存的 `baseline_blob`；证据记录 `baseline_commit = 当前代`、`code_ref_digests[].baseline_blob = 当前代 blob`，`worktree_blob` 必须与之相等。producer 同时要求 I13 的 `baseline_commit` 等于链的第 0 代。从未推进时当前代即第 0 代，行为不变。
+- **BASELINE 复验按证据所在的代**（tdd 门禁、`code-generation` 完成与 re-attest、`next` 对上游的复验）：`evidence.baseline_commit` 必须是本工作流基线链中的一项，且仍可从 HEAD 到达；`code_ref_digests` 的路径集合仍须等于 I13 的 code ref 集合；`baseline_blob` 必须等于证据所在那一代 commit 中解析出的 blob，`worktree_blob === baseline_blob`（产出时的记录，复验不读当前工作区）；第 0 代的证据还须与 I13 的 `baseline_blob` 一致。`i13.baseline_commit` 必须是链的第一项。
+- **`code-generation` 完成时的 BASELINE 复验要求当前代**：同一单元的 tdd BASELINE 证据必须属于当前代，即一个单元的 BASELINE 与 GREEN 必须在同一代内完成。re-attest 已完成的 `code-generation` 不要求当前代。
+- I13（`characterizationEvidence`）与 I13 门禁按第 0 代解析 code ref；推进后不需要也不会因推进而 refresh I13。
+- GREEN 门禁接受调用方的漂移容忍选项（仅供 `--advance` 的锚点检查使用；`code-generation` 完成与 `next` 复验的调用方式不变）。
+- `orchestrate baseline --set --replace` 对推进过的工作流（`Baseline Source: advanced` 或存在链）一律拒绝：推进过的基线链只能追加，不能替换。
+
+### Fixed
+
+- **多单元 characterization 场景中后续单元的 tdd BASELINE 永远无法满足**：split 布局下一个模块的多个单元共享 characterization code ref 时，先完成的单元在 `code-generation` 中合法修改这些文件（例如为 traceability 添加 `@ReqId` 注释）后，后续单元的 BASELINE 前置校验固定报 `BASELINE refuses to run: code ref … changed since the workflow baseline`；基线又因已在使用中（U1–U4）无法 `--replace`，回滚改动会让上一个单元的 traceability 失败。现在用 `--advance` 推进到上一个单元的完成点即可继续。
+
+### Upgrade notes
+
+- 存量工作流不需要迁移：没有 `Baseline History` 字段的状态等价于只有一代，读取和保存后仍然没有该字段；单单元工作流与从不推进的工作流行为不变。
+- 被这个问题卡住的多单元工作流：在上一个单元的 `code-generation` 完成并提交之后（GREEN 证据的 `source_revision.commit` 必须是该提交；GREEN 若在提交前产出，提交后对该实例执行 `evidence run --refresh` 并 re-attest），执行 `orchestrate baseline --advance <该单元 GREEN 的 commit> --expect <当前基线> --user-input Approve --reason "…"`，然后对**活动中的**实例执行普通 `evidence run`，继续当前单元的 tdd。**已完成实例不需要 `--refresh`**，它们的原始 BASELINE 证据保持有效。
+- `--advance` 与 `--replace` 的区别：`--replace` 更正一个**尚未使用**的基线（U1–U4 任一命中即拒绝），旧值被覆盖；`--advance` 在基线**已在使用中**时追加新的一代，旧的代保留在链中，按旧代产出的证据继续有效。推进过的工作流不能再 `--replace`。
+
 ## 4.6.1
 
 修复目录型产物在 produces 与 consumes 两侧判定标准不一致（D8）：源码根中只要有一个 0 字节的 `__init__.py`，消费源码根的阶段就固定失败。

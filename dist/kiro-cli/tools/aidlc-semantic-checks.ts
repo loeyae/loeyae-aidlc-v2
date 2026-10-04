@@ -772,6 +772,9 @@ function characterizationEvidence(ids: string[], modes: Map<string, UcdMode>): R
   }
   const baselineErrors = baselineCommitErrors(ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
   if (baselineErrors.length > 0 || !baseline.registered) fail(`tdd_mode characterization requires a usable workflow baseline: ${baselineErrors.join("; ")}`);
+  // 4.7.0: I13 binds epoch 0 of the baseline chain (the baseline itself when it was
+  // never advanced), so a refresh after orchestrate baseline --advance reproduces it.
+  const epoch0 = baseline.epochs[0];
   const roots = resolveSourceRoots(ROOT, ACTIVE_MODULE).roots;
   const errors: string[] = [];
   const entries = characterized.map((id) => {
@@ -784,7 +787,7 @@ function characterizationEvidence(ids: string[], modes: Map<string, UcdMode>): R
         errors.push(error instanceof Error ? error.message : String(error));
         return [];
       }
-      const resolved = baselineCodeRef(ROOT, baseline.commit, ref, `${id} code_refs ${JSON.stringify(value)}`);
+      const resolved = baselineCodeRef(ROOT, epoch0, ref, `${id} code_refs ${JSON.stringify(value)}`);
       if ("error" in resolved) {
         errors.push(resolved.error);
         return [];
@@ -794,7 +797,7 @@ function characterizationEvidence(ids: string[], modes: Map<string, UcdMode>): R
     return { ucd: id, code_refs: codeRefs, reason: mode.reason, approval_ref: mode.approvalRef };
   });
   if (errors.length > 0) fail(`I13 characterization code_refs rejected: ${errors.join("; ")}`);
-  return { characterization: entries, baseline_commit: baseline.commit };
+  return { characterization: entries, baseline_commit: epoch0 };
 }
 
 function testQuality(): Record<string, unknown> {
