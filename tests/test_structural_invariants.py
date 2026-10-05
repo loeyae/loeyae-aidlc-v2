@@ -11,7 +11,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -22,10 +24,50 @@ NPX = shutil.which("npx") or shutil.which("npx.cmd") or "npx"
 SCRATCH_ROOT = os.environ.get("KIROCREW_SCRATCH") or os.environ.get("TMPDIR") or tempfile.gettempdir()
 MODULE = "order"
 MANIFEST = f"docs/aidlc/modules/{MODULE}/inception/application-design/structural-invariants.json"
+# 本次运行 mkdtemp 返回的目录;main() 结束时只删除这里登记的路径。
+CREATED_TEMPS: list[str] = []
 
 
 def make_temp(prefix: str) -> str:
-    return tempfile.mkdtemp(prefix=prefix, dir=SCRATCH_ROOT)
+    path = tempfile.mkdtemp(prefix=prefix, dir=SCRATCH_ROOT)
+    CREATED_TEMPS.append(path)
+    return path
+
+
+def _force_remove(func, path, _exc_info) -> None:
+    # Windows 下 git 对象文件为只读,先去掉只读位再重试。
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def cleanup_temps() -> None:
+    """删除本次创建的临时目录;AIDLC_KEEP_TEST_SCRATCH=1 时保留并打印路径。"""
+    if os.environ.get("AIDLC_KEEP_TEST_SCRATCH") == "1":
+        for path in CREATED_TEMPS:
+            print(f"KEEP {path}", file=sys.stderr)
+        CREATED_TEMPS.clear()
+        return
+    root = os.path.realpath(SCRATCH_ROOT)
+    errors: list[str] = []
+    while CREATED_TEMPS:
+        path = CREATED_TEMPS.pop()
+        real = os.path.realpath(path)
+        # fail-closed:只删 SCRATCH_ROOT 之下、且不是 SCRATCH_ROOT 本身的 mkdtemp 路径。
+        try:
+            inside = real != root and os.path.commonpath([root, real]) == root
+        except ValueError:  # Windows 跨盘符
+            inside = False
+        if not inside:
+            errors.append(f"refuse to remove {path}: not under {SCRATCH_ROOT}")
+            continue
+        if not os.path.isdir(real):
+            continue
+        try:
+            shutil.rmtree(real, onerror=_force_remove)
+        except OSError as error:
+            errors.append(f"failed to remove {path}: {error}")
+    if errors:
+        raise RuntimeError("temp cleanup failed:\n" + "\n".join(errors))
 
 
 def write(project: str, path: str, content: str) -> None:
@@ -312,17 +354,20 @@ def test_producer_writes_blocked_report_and_no_evidence() -> None:
 
 
 def main() -> None:
-    test_no_manifest_is_not_applicable()
-    test_self_check_shadow_entity_blocked_while_traceability_complete()
-    test_positive_reuse_of_source_of_truth_passes()
-    test_duplicate_canonical_and_foreign_write_blocked()
-    test_deprecated_written_in_mapper_blocked_and_exemption_applies()
-    test_strict_persistence_requires_authorization()
-    test_manifest_changed_after_approval_blocked()
-    test_invalid_manifest_fails_closed()
-    test_traceability_ownership_dangling_is_broken()
-    test_baseline_ref_scans_only_changed_files()
-    test_producer_writes_blocked_report_and_no_evidence()
+    try:
+        test_no_manifest_is_not_applicable()
+        test_self_check_shadow_entity_blocked_while_traceability_complete()
+        test_positive_reuse_of_source_of_truth_passes()
+        test_duplicate_canonical_and_foreign_write_blocked()
+        test_deprecated_written_in_mapper_blocked_and_exemption_applies()
+        test_strict_persistence_requires_authorization()
+        test_manifest_changed_after_approval_blocked()
+        test_invalid_manifest_fails_closed()
+        test_traceability_ownership_dangling_is_broken()
+        test_baseline_ref_scans_only_changed_files()
+        test_producer_writes_blocked_report_and_no_evidence()
+    finally:
+        cleanup_temps()
     print("\nAll structural-invariants tests passed.")
 
 
