@@ -28,6 +28,9 @@ evidence_path: .aidlc/evidence/<stage-slug>/traceability-matrix.json
 ## 门禁语义
 由确定性 producer `traceabilityMatrix()` 生成 evidence(provenance 受控,Agent 不可伪造);sensor 校验 `broken_rows` 为空。经 Phase A 的 `next` 前置门禁 + Stop hook 强制。
 
+## 按单元收敛(4.8.0)
+module 的 I13 有 `ucd_units`(UC-D 声明了 `unit_refs`)且处于 unit 上下文时,tests 层只检查本单元的 UC-D 用例文件引用的 REQ,UC-D 派生诊断也只看本单元子集;证据额外输出 `unit_scope: { unit_id, ucd_ids, tests_layer_reqs }`。模块全集由 build-and-test 的 `test-quality` 对账保证。没有 `ucd_units` 时行为不变;code_refs 层与"标注全部源码文件"规则不受影响。
+
 ## 遗留兼容
 requirements.md 无 REQ-xxx 或需求缺 `track` 标签(未迁移旧项目)→ `migration_status: MIGRATION_REQUIRED`,降级放行 + 输出 `missing_track` 缺失清单,不硬阻断。
 

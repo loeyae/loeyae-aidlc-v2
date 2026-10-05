@@ -65,6 +65,14 @@ For a unit with no executable business behavior, the controlled evidence may ins
 | `traceability_complete` | Must be `true` |
 | `uc_mapping` | Non-empty for executable behavior; empty only for `not_applicable` |
 | `timestamp` | Valid ISO, < 24h old |
+| `ucd_coverage` | 4.8.0, project axis (build-and-test) only, present when an I13 declares `ucd_units`: `[{ module_id, ucd_units, status: "passed" }]` |
+
+### Unit scope and module reconciliation (4.8.0)
+
+- In a unit context whose module I13 declares `ucd_units`, RED / BASELINE requirements, the case list and the UC-D mapping use only the UC-Ds whose `unit_refs` name the unit.
+- A unit whose subset is empty returns `not_applicable` (reason and alternative validation from its `ucd_exemption`) only after its RED / BASELINE / GREEN are the controlled `ucd_exemption` `not_required` records; the gate accepts `not_applicable` only for such a unit or when I13 is `not_applicable`.
+- Without a unit context (build-and-test) the checker reconciles every module with `ucd_units`: each UC-D must be in the passed GREEN `uc_mapping` of every unit its `unit_refs` name; a gap fails with `module <id> UC-D coverage is incomplete: <UC-D> is not covered by the GREEN uc_mapping of unit <unit>`. The split integration barrier blocks with `ucd-coverage:<module>` on the same rule.
+- Without `ucd_units` the behaviour is that of 4.7.1.
 
 ## Producer Responsibility
 

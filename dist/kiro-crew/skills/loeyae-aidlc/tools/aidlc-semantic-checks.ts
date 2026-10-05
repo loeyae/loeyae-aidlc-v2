@@ -5,7 +5,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { basename, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
-import { portableDirname, readModuleManifest, verifiedModuleIds } from "./aidlc-execution-context";
+import { greenCoveredUcds, i13UcdIdsByMode, i13UcdUnits, portableDirname, readModuleManifest, readUnitManifest, ucdCoverageGaps, unitUcdIds, verifiedModuleIds } from "./aidlc-execution-context";
 import { scanFiles, SOURCE_FILE_PATTERN, TEST_FILE_PATTERN } from "./aidlc-scan-root";
 import { hasExecutableBehavior } from "./aidlc-executable-behavior";
 import { baselineCodeRef, baselineCommitErrors, gitWorkTreeError, parseCodeRef, workflowBaselineForModule, type CodeRef } from "./aidlc-baseline";
@@ -592,6 +592,7 @@ function testCaseDerivation(): Record<string, unknown> {
   const readyCount = idsFound.length;
   if (!/source_ref\s*:/i.test(caseContent)) fail("every I13 test case must declare source_ref");
   const modes = ucdModes(idsFound, declarations);
+  const units = ucdUnitRefs(idsFound, declarations);
   return {
     status: "required",
     applicability: "required",
@@ -599,6 +600,7 @@ function testCaseDerivation(): Record<string, unknown> {
     ready_ucd: readyCount,
     ucd_ids: idsFound,
     ucd_modes: Object.fromEntries(idsFound.map((id) => [id, modes.get(id)!.mode])),
+    ...(units ? { ucd_units: units } : {}),
     ...characterizationEvidence(idsFound, modes),
     source_files: sourcePaths.map(relativePath),
     test_case_files: caseFiles.map(relativePath),
@@ -620,6 +622,8 @@ interface UcdDeclaration {
   fields?: Map<string, FrontmatterValue>;
   /** A body-only case file that declares `tdd_mode:` (only frontmatter may declare it). */
   bodyTddMode?: boolean;
+  /** A body-only case file that declares `unit_refs:` (4.8.0; only frontmatter may declare it). */
+  bodyUnitRefs?: boolean;
 }
 
 function unquote(value: string): string {
@@ -703,7 +707,7 @@ function ucdDeclarations(files: string[]): Map<string, UcdDeclaration> {
       continue;
     }
     const named = /^(UC-D-\d+)(?!\d)/.exec(basename(file))?.[1];
-    if (named) add({ id: named, file, status: declaredValue(content, "status")?.toLowerCase(), bodyTddMode: declaredValue(content, "tdd_mode") !== undefined });
+    if (named) add({ id: named, file, status: declaredValue(content, "status")?.toLowerCase(), bodyTddMode: declaredValue(content, "tdd_mode") !== undefined, bodyUnitRefs: declaredValue(content, "unit_refs") !== undefined });
   }
   return declarations;
 }
@@ -747,6 +751,55 @@ function ucdModes(ids: string[], declarations: Map<string, UcdDeclaration>): Map
   }
   if (errors.length > 0) fail(`I13 UC-D tdd_mode contract violated: ${errors.join("; ")}`);
   return modes;
+}
+
+/**
+ * The `unit_refs` contract (4.8.0): optional and frontmatter-only, like tdd_mode. Each
+ * declaration is a non-empty list of distinct unit ids of the module's unit manifest;
+ * once one UC-D of the module declares it, every UC-D must (no "which unit owns an
+ * undeclared UC-D" ambiguity). Returns the I13 `ucd_units`, or undefined when no UC-D
+ * declares unit_refs (every UC-D then belongs to every unit, the 4.7.1 behaviour).
+ */
+function ucdUnitRefs(ids: string[], declarations: Map<string, UcdDeclaration>): Record<string, string[]> | undefined {
+  const errors: string[] = [];
+  const declared = new Map<string, FrontmatterValue>();
+  for (const id of ids) {
+    const declaration = declarations.get(id)!;
+    if (declaration.bodyUnitRefs) {
+      errors.push(`${id} declares unit_refs outside a frontmatter block (${relativePath(declaration.file)}); unit_refs belongs in the UC-D frontmatter`);
+      continue;
+    }
+    const value = declaration.fields?.get("unit_refs");
+    if (value !== undefined) declared.set(id, value);
+  }
+  if (errors.length === 0 && declared.size === 0) return undefined;
+  let known: string[] = [];
+  if (declared.size > 0) {
+    try {
+      known = readUnitManifest(ROOT, ACTIVE_MODULE!).map((unit) => unit.unit_id);
+    } catch (error) {
+      errors.push(`unit_refs requires a readable unit manifest for module ${ACTIVE_MODULE}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const units: Record<string, string[]> = {};
+  for (const id of ids) {
+    if (!declared.has(id)) continue;
+    const value = declared.get(id)!;
+    if (!Array.isArray(value) || value.length === 0) {
+      errors.push(`${id} unit_refs must be a non-empty list of unit ids, e.g. unit_refs: [u1]`);
+      continue;
+    }
+    const repeated = [...new Set(value.filter((unit, index) => value.indexOf(unit) !== index))];
+    for (const unit of repeated) errors.push(`${id} unit_refs lists ${unit} more than once`);
+    if (known.length > 0) {
+      for (const unit of value.filter((candidate) => !known.includes(candidate))) errors.push(`${id} unit_refs names unknown unit ${unit} (units of ${ACTIVE_MODULE}: ${known.join(", ")})`);
+    }
+    units[id] = [...new Set(value)];
+  }
+  const missing = ids.filter((id) => !declared.has(id) && !declarations.get(id)!.bodyUnitRefs);
+  if (declared.size > 0 && missing.length > 0) errors.push(`unit_refs must be declared by every UC-D of the module once one declares it; missing: ${missing.join(", ")}`);
+  if (errors.length > 0) fail(`I13 UC-D unit_refs contract violated: ${errors.join("; ")}`);
+  return units;
 }
 
 /**
@@ -813,27 +866,37 @@ function testQuality(): Record<string, unknown> {
     : allFiles("docs/aidlc/modules", /test-cases[\\/].*\.md$/);
   const testFiles = projectFiles(TEST_FILE_PATTERN);
   if (caseFiles.length === 0) fail("UC-D test case files are missing");
+  const inUnit = (record: Record<string, unknown>) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT));
+  const greenRecords = evidenceRecords("code-generation", "green-test-evidence").filter(inUnit);
+  const redRecords = evidenceRecords("tdd", "red-test-evidence").filter(inUnit);
+  const baselineRecords = evidenceRecords("tdd", "baseline-test-evidence").filter(inUnit);
+  // 4.8.0: in a unit context with I13 ucd_units only the unit's own UC-Ds count.
+  const unitScope = ACTIVE_UNIT && current?.status === "required" ? unitUcdIds(current, ACTIVE_UNIT) : null;
+  if (unitScope?.scoped && unitScope.all.length === 0) return emptyUnitTestQuality(redRecords, baselineRecords, greenRecords);
   if (testFiles.length === 0) fail("test source files are missing");
-  const cases = ids(joined(caseFiles), /UC-D-\d+(?:-[A-Za-z0-9_-]+)?/g);
+  const inScope = (useCase: string) => !unitScope?.scoped || unitScope.all.includes(/^UC-D-\d+/.exec(useCase)?.[0] || useCase);
+  const cases = ids(joined(caseFiles), /UC-D-\d+(?:-[A-Za-z0-9_-]+)?/g).filter(inScope);
   if (cases.length === 0) fail("no UC-D identifiers found in test case files");
-  const greenRecords = evidenceRecords("code-generation", "green-test-evidence").filter((record) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT)));
-  const redRecords = evidenceRecords("tdd", "red-test-evidence").filter((record) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT)));
-  const baselineRecords = evidenceRecords("tdd", "baseline-test-evidence").filter((record) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT)));
   if (greenRecords.length === 0) fail("GREEN evidence is missing for test-quality");
   if (redRecords.length === 0) fail("RED evidence is missing for test-quality");
   const greenRequired = greenRecords.filter((record) => record.status === "passed");
   if (greenRequired.length === 0 || greenRequired.some((record) => record.phase !== "GREEN" || record.tests_failed !== 0)) fail("GREEN evidence is not passing");
   // 4.6.0 S3b: RED is demanded by the tdd_mode new UC-Ds and BASELINE by the
-  // characterization UC-Ds of each module's required I13 (without ucd_modes every UC-D is new).
+  // characterization UC-Ds of each module's required I13 (without ucd_modes every UC-D
+  // is new); 4.8.0: of the unit's own subset when I13 declares ucd_units.
+  const requiredI13 = new Map<string, Record<string, unknown>>();
+  for (const record of allI13.filter((value) => value.status === "required")) requiredI13.set(String(record.module_id ?? ACTIVE_MODULE ?? ""), record);
   const modesByModule = new Map<string, { new: string[]; characterization: string[] }>();
-  for (const record of allI13.filter((value) => value.status === "required")) {
-    modesByModule.set(String(record.module_id ?? ACTIVE_MODULE ?? ""), i13ModeIds(record));
-  }
-  const modesOf = (record: Record<string, unknown>) => modesByModule.get(String(record.module_id ?? ACTIVE_MODULE ?? ""));
+  for (const [moduleId, record] of requiredI13) modesByModule.set(moduleId, unitScope && moduleId === String(current?.module_id ?? ACTIVE_MODULE ?? "") ? unitScope : i13UcdIdsByMode(record));
+  const modesOf = (record: Record<string, unknown>) => {
+    const i13 = requiredI13.get(String(record.module_id ?? ACTIVE_MODULE ?? ""));
+    return i13 ? unitUcdIds(i13, typeof record.unit_id === "string" ? record.unit_id : undefined) : undefined;
+  };
+  const ownerLabel = (record: Record<string, unknown>, modes: { scoped?: boolean } | undefined) => `module ${String(record.module_id)}${modes?.scoped ? ` unit ${String(record.unit_id)}` : ""}`;
   for (const record of redRecords) {
     const modes = modesOf(record);
     if (modes && modes.new.length === 0) {
-      if (record.status !== "not_required" || record.phase !== "RED") fail(`RED evidence of module ${String(record.module_id)} must be not_required: its I13 declares no tdd_mode new UC-D`);
+      if (record.status !== "not_required" || record.phase !== "RED") fail(`RED evidence of ${ownerLabel(record, modes)} must be not_required: ${modes.scoped ? "the unit owns" : "its I13 declares"} no tdd_mode new UC-D`);
     } else if (record.status !== "failed" || record.phase !== "RED" || record.failure_class !== "behavior") {
       fail("RED evidence is not a controlled behavior failure");
     }
@@ -845,9 +908,23 @@ function testQuality(): Record<string, unknown> {
   for (const record of baselineRecords) {
     const modes = modesOf(record);
     if (modes && modes.characterization.length > 0) {
-      if (record.status !== "passed" || record.phase !== "BASELINE" || record.tests_failed !== 0) fail(`BASELINE evidence of module ${String(record.module_id)} is not passing for the tdd_mode characterization UC-Ds (${modes.characterization.join(", ")})`);
+      if (record.status !== "passed" || record.phase !== "BASELINE" || record.tests_failed !== 0) fail(`BASELINE evidence of ${ownerLabel(record, modes)} is not passing for the tdd_mode characterization UC-Ds (${modes.characterization.join(", ")})`);
     } else if (record.status !== "not_required") {
-      fail(`BASELINE evidence of module ${String(record.module_id)} must be not_required: its I13 declares no tdd_mode characterization UC-D`);
+      fail(`BASELINE evidence of ${ownerLabel(record, modes)} must be not_required: ${modes?.scoped ? "the unit owns" : "its I13 declares"} no tdd_mode characterization UC-D`);
+    }
+  }
+  // 4.8.0 module close-out (no unit context): every UC-D of an I13 with ucd_units is in
+  // the GREEN of every unit its unit_refs name.
+  const coverage: Record<string, unknown>[] = [];
+  if (!ACTIVE_UNIT) {
+    for (const [moduleId, record] of requiredI13) {
+      const ucdUnits = i13UcdUnits(record);
+      if (!ucdUnits) continue;
+      const green = new Map<string, string[]>();
+      for (const value of greenRecords.filter((candidate) => String(candidate.module_id ?? ACTIVE_MODULE ?? "") === moduleId && candidate.status === "passed")) green.set(String(value.unit_id), greenCoveredUcds(value));
+      const gaps = ucdCoverageGaps(record, green);
+      if (gaps.length > 0) fail(`module ${moduleId} UC-D coverage is incomplete: ${gaps.join("; ")}`);
+      coverage.push({ module_id: moduleId, ucd_units: ucdUnits, status: "passed" });
     }
   }
   const modes = [...modesByModule.values()];
@@ -859,15 +936,35 @@ function testQuality(): Record<string, unknown> {
     return { use_case: useCase, test_methods: matches.map(relativePath) };
   });
   const testsTotal = greenRequired.reduce((total, record) => total + numberValue(record.tests_total, "green-test-evidence.tests_total"), 0);
-  return { status: "passed", red_seen: redSeen, baseline_seen: baselineSeen, green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping };
+  return { status: "passed", red_seen: redSeen, baseline_seen: baselineSeen, green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping, ...(coverage.length > 0 ? { ucd_coverage: coverage } : {}) };
 }
 
-/** UC-D ids of a required I13 record by tdd_mode; I13 without ucd_modes predates 4.6 and is all new. */
-function i13ModeIds(record: Record<string, unknown>): { new: string[]; characterization: string[] } {
-  const ids = Array.isArray(record.ucd_ids) ? record.ucd_ids.filter((id): id is string => typeof id === "string") : [];
-  const modes = record.ucd_modes && typeof record.ucd_modes === "object" && !Array.isArray(record.ucd_modes) ? record.ucd_modes as Record<string, unknown> : undefined;
-  if (!modes) return { new: ids, characterization: [] };
-  return { new: ids.filter((id) => modes[id] === "new"), characterization: ids.filter((id) => modes[id] === "characterization") };
+/**
+ * test-quality of a unit whose UC-D subset is empty (4.8.0): nothing maps to tests, so
+ * the result is not_applicable, but only after its RED / BASELINE / GREEN are the
+ * controlled ucd_exemption not_required records (the gate re-checks them).
+ */
+function emptyUnitTestQuality(red: Record<string, unknown>[], baseline: Record<string, unknown>[], green: Record<string, unknown>[]): Record<string, unknown> {
+  const label = `unit ${ACTIVE_UNIT} of module ${ACTIVE_MODULE}`;
+  let exemption: Record<string, unknown> | undefined;
+  for (const [phase, records] of [["RED", red], ["BASELINE", baseline], ["GREEN", green]] as const) {
+    if (records.length === 0) fail(`${phase} evidence is missing for test-quality of ${label}`);
+    const record = records[records.length - 1];
+    const declared = record.ucd_exemption && typeof record.ucd_exemption === "object" ? record.ucd_exemption as Record<string, unknown> : undefined;
+    if (record.status !== "not_required" || record.phase !== phase || !declared) fail(`${phase} evidence of ${label} must be the ucd_exemption not_required record: the unit owns no UC-D`);
+    exemption = declared;
+  }
+  return {
+    status: "not_applicable",
+    not_applicable_reason: `${label} owns no UC-D (ucd_exemption ${String(exemption!.reason_code)}: ${String(exemption!.reason)})`,
+    alternative_validation: String(exemption!.alternative_validation),
+    red_seen: false,
+    green_seen: false,
+    tests_total: 0,
+    tests_failed: 0,
+    traceability_complete: true,
+    uc_mapping: [],
+  };
 }
 
 function phaseEvidenceCheck(sensor: "red-test-evidence" | "green-test-evidence" | "baseline-test-evidence"): Record<string, unknown> {
@@ -881,8 +978,9 @@ function phaseEvidenceCheck(sensor: "red-test-evidence" | "green-test-evidence" 
     stringValue(record.alternative_validation, `${sensor}.alternative_validation`);
     return record;
   }
-  // RED / BASELINE without a UC-D of their tdd_mode; the orchestrator gate re-derives this from I13.
-  if (record.status === "not_required" && phase !== "GREEN") {
+  // RED / BASELINE without a UC-D of their tdd_mode, or (4.8.0) any phase of a unit whose
+  // UC-D subset is empty (ucd_exemption); the orchestrator gate re-derives this from I13.
+  if (record.status === "not_required" && (phase !== "GREEN" || record.ucd_exemption !== undefined)) {
     if (record.phase !== phase || !Array.isArray(record.ucd_ids) || record.ucd_ids.length !== 0) fail(`${sensor} not_required evidence must have phase ${phase} and empty ucd_ids`);
     return record;
   }
@@ -918,7 +1016,12 @@ function functionalDesign(): Record<string, unknown> {
   if (files.length === 0) fail("functional design artifacts are missing");
   const content = joined(files);
   noUnresolved(content);
-  const sourceCases = ids(joined(allFiles("docs/aidlc/inception/application-design/test-cases", /\.md$/)), /UC-D-\d+(?:-[A-Za-z0-9_-]+)?/g);
+  // 4.8.0: with I13 ucd_units a unit's functional design covers only the unit's own UC-Ds;
+  // the module's completeness is reconciled at build-and-test.
+  const i13 = ACTIVE_UNIT ? i13Evidence() : null;
+  const unitScope = i13?.status === "required" ? unitUcdIds(i13, ACTIVE_UNIT) : null;
+  const sourceCases = ids(joined(allFiles("docs/aidlc/inception/application-design/test-cases", /\.md$/)), /UC-D-\d+(?:-[A-Za-z0-9_-]+)?/g)
+    .filter((id) => !unitScope?.scoped || unitScope.all.includes(/^UC-D-\d+/.exec(id)?.[0] || id));
   const covered = sourceCases.filter((id) => new RegExp(`\\b${id}\\b`).test(content));
   if (sourceCases.length > 0 && covered.length !== sourceCases.length) fail("functional design does not cover every UC-D case");
   const interfaces = count(content, /(?:API|接口|endpoint|event handler|事件处理|public method|公共方法)/gi);
@@ -3168,8 +3271,23 @@ function traceabilityMatrix(): Record<string, unknown> {
     for (const r of refReqs) for (const t of reqTrack.get(r) || []) set.add(t);
     return [...set];
   };
+  // 4.8.0 unit scope: with I13 ucd_units a unit's tests layer covers only its own UC-Ds and
+  // the REQs those UC-D case files reference; the module set is reconciled at build-and-test.
+  const matrixI13 = ACTIVE_UNIT ? i13Evidence() : null;
+  const matrixScope = matrixI13?.status === "required" ? unitUcdIds(matrixI13, ACTIVE_UNIT) : null;
+  const unitScope = matrixScope?.scoped ? matrixScope : null;
+  let unitTestReqs: Set<string> | null = null;
+  if (unitScope) {
+    const caseFilesForScope = allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/).filter((path) => basename(path) !== "_index.md");
+    const declarations = ucdDeclarations(caseFilesForScope);
+    unitTestReqs = new Set(unitScope.all.flatMap((id) => {
+      const declaration = declarations.get(id);
+      return declaration ? ids(text(declaration.file), /\bREQ-[A-Z0-9][A-Z0-9_-]*\b/g) : [];
+    }));
+  }
   const storyIdsAll = ids(storyDoc, /\bSTORY-\d{3,}\b/g);
-  const ucdIdsAll = ids(fdDoc + "\n" + joined(allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/)), /\bUC-D-\d+\b/g);
+  const ucdIdsAll = ids(fdDoc + "\n" + joined(allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/)), /\bUC-D-\d+\b/g)
+    .filter((id) => !unitScope || unitScope.all.includes(id));
   const derivedChildren = [
     ...storyIdsAll.map((id) => ({ id, kind: "STORY", tracks: deriveChildTracks(id, storyDoc) })),
     ...ucdIdsAll.map((id) => ({ id, kind: "UC-D", tracks: deriveChildTracks(id, fdDoc) })),
@@ -3185,6 +3303,7 @@ function traceabilityMatrix(): Record<string, unknown> {
       // 阶段感知:该层所属阶段尚未到达时,不算断点(currentOrder 经 resolveStageOrder 恒 >=0)。
       const layerOrder = MATRIX_STAGE_ORDER.indexOf(stage);
       if (layerOrder > currentOrder) continue;
+      if (layer === "tests" && unitTestReqs && !unitTestReqs.has(req)) continue;
       // 覆盖判定:该层文本中出现本 REQ(或其派生 @ReqId 标记)。
       const covered = new RegExp(`\\b${req}\\b`).test(layerText[layer] || "");
       if (!covered && brokenAt === null) brokenAt = layer;
@@ -3258,6 +3377,7 @@ function traceabilityMatrix(): Record<string, unknown> {
     status: "passed",
     module_id: ACTIVE_MODULE,
     current_stage: currentStage,
+    ...(unitScope ? { unit_scope: { unit_id: ACTIVE_UNIT, ucd_ids: unitScope.all, tests_layer_reqs: [...unitTestReqs!].sort() } } : {}),
     matrix_rows: rows.length,
     complete_rows: rows.filter((r) => r.coverage_status === "COMPLETE").length,
     broken_rows: allBroken,

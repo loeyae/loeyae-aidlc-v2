@@ -1,5 +1,32 @@
 # Changelog
 
+## 4.8.0
+
+unit 轴的 tdd / code-generation 按单元收敛 UC-D 覆盖：split 布局下一个模块拆成多个 unit 时，UC-D 用 frontmatter `unit_refs` 声明所属单元，各单元的 RED / BASELINE / GREEN 只覆盖自己的 UC-D，模块完整性在 build-and-test 和集成屏障对账。此前第一个 unit 的 GREEN 必须让整个模块的 UC-D 全部通过，后续 unit 的 tdd 失去意义，不含业务代码的契约类 unit 无法完成。
+
+### Added
+
+- **UC-D frontmatter `unit_refs: [<unit-id>, ...]`**（可选）：与 `tdd_mode` 相同，只能写在 frontmatter，写在正文里拒绝。一个 UC-D 可以属于多个 unit，列出的每个 unit 的 GREEN 都必须覆盖它。I13 fail-closed 校验：列表非空、元素不重复；每个 unit-id 必须是该模块 `unit-manifest.json` 中已有的 unit；同一模块内只要有一个 UC-D 声明，就要求全部 UC-D 都声明，否则拒绝并列出缺失的 UC-D。
+- **I13 证据字段 `ucd_units: { "<UC-D>": ["<unit-id>", ...] }`**：只在有声明时输出。I13 门禁校验每个 UC-D 恰好一项、非空、不重复、unit 在清单中。
+- **共享函数 `unitUcdIds(i13, unitId) → { new, characterization, all, scoped }`**（`aidlc-execution-context.ts`）：有 `ucd_units` 且有 unit 上下文时返回 `unit_refs` 包含该 unit 的子集，否则返回模块全集。evidence producer、orchestrate 门禁和 semantic checker 都调用它；`i13UcdIdsByMode` 一并移入该文件（`aidlc-evidence.ts` 仍按原名导出）。
+- **空子集豁免 `ucd_exemption`**：不被任何 `unit_refs` 指向的 unit（如契约类 unit）在 `unit-manifest.json` 对应 unit 下声明 `{ reason_code, reason, approval_ref, alternative_validation, validation_command }`（`reason_code` 取值同 I13 `non-applicable.json`，`validation_command` 为 argv 数组，不经 shell）。受控 producer 先执行该命令，退出 0 才把 RED、BASELINE、GREEN 写为 `not_required`（`ucd_ids: []`，并记录 `ucd_exemption` 与 `exemption_validation_execution`）；没有豁免或命令非零退出时拒绝、不写证据。门禁复核豁免字段与清单一致、执行摘要等于 `validation_command` 的 argv 摘要、退出码为 0。GREEN 的 `allowedStatuses` 在有 `ucd_units` 时增加 `not_required`，且只允许出现在子集为空的情况。
+- **模块收口对账**：project 轴 build-and-test 的 `test-quality`（无 unit 上下文）对每个有 `ucd_units` 的模块检查：每个 UC-D 都出现在其 `unit_refs` 中每个 unit 的 passed GREEN `uc_mapping` 里（从而所有 unit 的 GREEN 并集覆盖模块全部 UC-D）；缺一项即失败，报错点名 UC-D 与 unit，通过时证据输出 `ucd_coverage`。split 布局的集成屏障（`registryProjection` 的 `blocking`）对已完成 construction 的模块做同样的检查，失败时阻断原因为 `ucd-coverage:<module>`，提示中列出缺口。
+
+### Changed
+
+- 以下位置在 unit 上下文中改用本单元子集（I13 没有 `ucd_units` 时全部保持 4.7.1 行为）：
+  - RED / BASELINE / GREEN 门禁的 `uc_mapping` 覆盖检查（报错文本带 `of unit <id>`），以及 RED / BASELINE `not_required` 的判定；
+  - producer：RED / BASELINE 是否 `not_required`，观察型证据额外写入本单元子集 `ucd_ids`；
+  - BASELINE `code_ref_digests`：producer 只比对、只记录子集中 characterization UC-D 的 code ref，门禁复验的“`code_ref_digests` 必须等于 code ref 集合”同样换成子集；4.7.0 的按代校验规则不变；
+  - `test-quality` 门禁与 checker（RED / BASELINE 要求、用例清单、UC-D 映射）；子集为空的 unit 返回 `not_applicable`，门禁只对这种 unit 或 I13 `not_applicable` 接受 `not_applicable`；
+  - `traceability-matrix` 的 tests 层：只检查本单元 UC-D 用例文件引用的 REQ，UC-D 派生诊断只看子集，证据输出 `unit_scope`；code_refs 层不变；
+  - `functional-design-completeness`：有 unit 上下文且 I13 有 `ucd_units` 时，只要求单元 FD 出现子集中的 UC-D 编号。
+
+### Upgrade notes
+
+- 不声明 `unit_refs` 的工作流行为与 4.7.1 完全相同：每个 unit 仍覆盖模块全集，单单元和非 split 工作流不受影响，`--advance` / `--replace` 不变。
+- 已有工作流要启用：给模块内**全部** UC-D 补上 `unit_refs`，给不拥有 UC-D 的 unit 补 `ucd_exemption`，然后 `evidence run --stage test-case-derivation --module <id> --refresh` 刷新 I13 并 re-attest。影响：已完成的 tdd / code-generation 实例是按模块全集产出的证据，刷新 I13 后在 `next` 复验或 re-attest 时会按子集判定——RED / BASELINE / GREEN 的 `uc_mapping` 多出其他单元的 UC-D 会报 `unexpected`，BASELINE 的 `code_ref_digests` 多出其他单元的 code ref 也会被拒；对这些已完成实例执行 `evidence run --stage <tdd|code-generation> --module <id> --unit <id> --refresh`（命令按子集输出观察）后 re-attest。RED 无法在已实现的代码上重新观察失败，因此建议在第一个 unit 进入 tdd 之前启用；中途启用时，已完成单元的 RED 需按团队流程处理（例如在该单元实现之前的提交上重新产出）。
+
 ## 4.7.1
 
 split 布局下 `orchestrate baseline --advance` 可用了：产品级阶段全部完成后全局工作流会被置为 `done`，4.7.0 在这种情况下拒绝推进，而这正是 `--advance` 要解决的场景（split 布局 + 多单元 characterization）。

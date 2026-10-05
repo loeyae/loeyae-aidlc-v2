@@ -47,6 +47,44 @@ export interface UnitDescriptor {
   name: string;
   service_id: string;
   conditional_stages?: UnitConditionalStage[];
+  ucd_exemption?: UcdExemption;
+}
+
+/** Reason codes accepted for a structured exemption (shared with the I13 non-applicable record). */
+export const UCD_EXEMPTION_REASON_CODES: ReadonlySet<string> = new Set(["pure-declaration", "pure-style", "pure-configuration", "approved-exception"]);
+
+/**
+ * 4.8.0: a unit whose UC-D subset (by `unit_refs`) is empty declares this in the unit
+ * manifest; the controlled producer runs `validation_command` (argv, no shell) before
+ * it writes RED / BASELINE / GREEN `not_required`.
+ */
+export interface UcdExemption {
+  reason_code: string;
+  reason: string;
+  approval_ref: string;
+  alternative_validation: string;
+  validation_command: string[];
+}
+
+const UCD_EXEMPTION_FIELDS = ["reason_code", "reason", "approval_ref", "alternative_validation", "validation_command"];
+
+function ucdExemption(value: unknown, label: string): UcdExemption {
+  const exemption = record(value, label);
+  const unknown = Object.keys(exemption).filter((key) => !UCD_EXEMPTION_FIELDS.includes(key));
+  if (unknown.length > 0) throw new Error(`${label} has unsupported fields: ${unknown.join(", ")}`);
+  const reasonCode = nonEmptyString(exemption.reason_code, `${label}.reason_code`);
+  if (!UCD_EXEMPTION_REASON_CODES.has(reasonCode)) throw new Error(`${label}.reason_code must be one of ${[...UCD_EXEMPTION_REASON_CODES].join(", ")}`);
+  const command = exemption.validation_command;
+  if (!Array.isArray(command) || command.length === 0 || !command.every((item) => typeof item === "string" && item.length > 0)) {
+    throw new Error(`${label}.validation_command must be a non-empty argv array of non-empty strings`);
+  }
+  return {
+    reason_code: reasonCode,
+    reason: nonEmptyString(exemption.reason, `${label}.reason`),
+    approval_ref: nonEmptyString(exemption.approval_ref, `${label}.approval_ref`),
+    alternative_validation: nonEmptyString(exemption.alternative_validation, `${label}.alternative_validation`),
+    validation_command: [...command] as string[],
+  };
 }
 
 interface ModuleManifest {
@@ -190,6 +228,7 @@ export function readUnitManifest(projectRoot: string, moduleId: string): UnitDes
       name: nonEmptyString(unit.name, `units[${index}].name`),
       service_id: nonEmptyString(unit.service_id, `units[${index}].service_id`),
       ...(conditionalStages !== undefined ? { conditional_stages: conditionalStages } : {}),
+      ...(unit.ucd_exemption !== undefined ? { ucd_exemption: ucdExemption(unit.ucd_exemption, `units[${index}].ucd_exemption`) } : {}),
     };
   });
   uniqueIds(units.map((unit) => unit.unit_id), `unit manifest for ${safeModuleId}`);
@@ -233,4 +272,92 @@ export function moduleInceptionRoot(moduleId: string): string {
 
 export function unitConstructionRoot(moduleId: string, unitId: string): string {
   return join("docs", "aidlc", "modules", contextId(moduleId, "module_id"), "construction", contextId(unitId, "unit_id"));
+}
+
+
+// ---------------------------------------------------------------------------
+// UC-D unit scope (4.8.0): I13 `ucd_units` and the per-unit UC-D subset
+// ---------------------------------------------------------------------------
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+/** UC-D ids of a `required` I13 record. */
+export function i13UcdIds(i13: Record<string, unknown>): string[] {
+  return stringList(i13.ucd_ids);
+}
+
+/**
+ * UC-D ids of a `required` I13 record grouped by tdd_mode (4.6.0 S2 `ucd_modes`).
+ * I13 evidence without `ucd_modes` predates 4.6 and means every UC-D is new.
+ */
+export function i13UcdIdsByMode(i13: Record<string, unknown>): { new: string[]; characterization: string[] } {
+  const ids = i13UcdIds(i13);
+  const modes = i13.ucd_modes && typeof i13.ucd_modes === "object" && !Array.isArray(i13.ucd_modes) ? i13.ucd_modes as Record<string, unknown> : undefined;
+  if (!modes) return { new: ids, characterization: [] };
+  return {
+    new: ids.filter((id) => modes[id] === "new"),
+    characterization: ids.filter((id) => modes[id] === "characterization"),
+  };
+}
+
+/** I13 `ucd_units` (UC-D → unit ids); undefined when no UC-D declared `unit_refs`. */
+export function i13UcdUnits(i13: Record<string, unknown>): Record<string, string[]> | undefined {
+  const value = i13.ucd_units;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([id, units]) => [id, stringList(units)]));
+}
+
+export interface UnitUcdScope {
+  new: string[];
+  characterization: string[];
+  all: string[];
+  /** True when the subset was taken by `ucd_units` for a unit (false = the module set). */
+  scoped: boolean;
+}
+
+/**
+ * The UC-Ds a unit's tdd / code-generation must cover. With I13 `ucd_units` and a unit
+ * id: the UC-Ds whose `unit_refs` name the unit. Otherwise (no `unit_refs` anywhere in
+ * the module, or no unit context) the whole module set, i.e. the 4.7.1 behaviour.
+ */
+export function unitUcdIds(i13: Record<string, unknown>, unitId?: string): UnitUcdScope {
+  const ids = i13UcdIds(i13);
+  const modes = i13UcdIdsByMode(i13);
+  const units = i13UcdUnits(i13);
+  if (!units || !unitId) return { new: modes.new, characterization: modes.characterization, all: ids, scoped: false };
+  const owned = (id: string) => (units[id] || []).includes(unitId);
+  return { new: modes.new.filter(owned), characterization: modes.characterization.filter(owned), all: ids.filter(owned), scoped: true };
+}
+
+/**
+ * Module close-out reconciliation (4.8.0): every UC-D of an I13 with `ucd_units` must be
+ * in the GREEN `uc_mapping` of every unit its `unit_refs` name (so the union of the
+ * units' GREEN covers the module). `green` maps unit id → the UC-Ds its passed GREEN
+ * covers; a unit without a GREEN record is absent. Returns one message per gap.
+ */
+export function ucdCoverageGaps(i13: Record<string, unknown>, green: Map<string, string[]>): string[] {
+  const units = i13UcdUnits(i13);
+  if (!units) return [];
+  const gaps: string[] = [];
+  for (const id of i13UcdIds(i13)) {
+    const owners = units[id] || [];
+    if (owners.length === 0) gaps.push(`${id} names no unit in ucd_units`);
+    for (const unit of owners) {
+      const covered = green.get(unit);
+      if (covered === undefined) gaps.push(`${id} has no passed GREEN evidence of unit ${unit}`);
+      else if (!covered.includes(id)) gaps.push(`${id} is not covered by the GREEN uc_mapping of unit ${unit}`);
+    }
+  }
+  return gaps;
+}
+
+/** UC-Ds a GREEN evidence record covers: its `uc_mapping` use cases when it passed, otherwise none. */
+export function greenCoveredUcds(record: Record<string, unknown>): string[] {
+  if (record.status !== "passed" || !Array.isArray(record.uc_mapping)) return [];
+  return record.uc_mapping.flatMap((entry) => {
+    const useCase = entry && typeof entry === "object" ? (entry as Record<string, unknown>).use_case : undefined;
+    return typeof useCase === "string" && useCase ? [useCase] : [];
+  });
 }

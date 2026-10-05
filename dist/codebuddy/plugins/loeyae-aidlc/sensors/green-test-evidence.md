@@ -26,6 +26,8 @@ GREEN 命令必须退出码为 0，且测试计数为非零/零失败。代码�
 
 GREEN 观察改动后的全部行为：I13 为 `required` 时，`uc_mapping` 必须恰好覆盖 I13 的全部 UC-D——`tdd_mode: new`（RED→GREEN）与 `characterization`（BASELINE→GREEN）都要包含，漏写、多写或重复都会被拒。
 
+按单元收敛（4.8.0）：I13 有 `ucd_units` 时，`uc_mapping` 必须恰好覆盖 `unit_refs` 指向本单元的全部 UC-D（报错 `GREEN uc_mapping must cover every UC-D of unit <id>`）。GREEN 的 `not_required` 只允许出现在本单元子集为空且 `ucd_exemption` 的 `validation_command` 已执行通过的情况（见 `red-test-evidence.md`）；子集非空时一律拒绝。模块完整性由 build-and-test 的 `test-quality` 对账和集成屏障 `ucd-coverage:<module>` 保证：每个 UC-D 都必须出现在其 `unit_refs` 中每个 unit 的 GREEN 里。
+
 受控证据中 `checker` 为内置检查（`id: builtin:green-test-evidence`，`exit_code: 0`），被观察的测试命令记录在 `observed_command`（`exit_code: 0`）；缺少 `observed_command` 或其退出码不为 0 时门禁拒绝。
 
 与 RED 相同，门禁把 `observed_command.argv_digest` / `id` 绑定到 `code-generation` 命令清单（`.aidlc/commands/code-generation.json` → `.aidlc/evidence-commands.json`，stage 锁定）中唯一一条 `role: green` 命令，并要求 `checker.argv_digest` 等于 `SHA-256(JSON.stringify(["GREEN-observation", observed_command.argv_digest]))`；命令清单缺失、无法解析、stage 不匹配或不是恰好一条 green 命令时拒绝。producer 会拒绝指向其他清单的 `--config`（与默认查找结果不是同一文件时直接报错，不执行命令、不写证据）。

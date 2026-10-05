@@ -30,7 +30,7 @@ import { createRequire } from "module";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
 import { planAgentExecution, type AgentExecutionPlan } from "./aidlc-agent-runtime";
-import { SEMANTIC_SENSORS, allowlistedPhaseCommand, i13CodeRefBlobs, i13UcdIdsByMode, phaseNotRequiredDigest, phaseObservationDigest, type Phase } from "./aidlc-evidence";
+import { SEMANTIC_SENSORS, allowlistedPhaseCommand, argvDigest, i13CodeRefBlobs, i13UcdIdsByMode, phaseNotRequiredDigest, phaseObservationDigest, ucdExemptionDigest, unitUcdExemption, type Phase } from "./aidlc-evidence";
 import { CANONICAL_SOURCE_PATTERN, resolveSourceRoots } from "./aidlc-source-roots";
 import { COMMIT_ID_PATTERN, commitAncestryErrors, readSourceRevision } from "./aidlc-revision";
 import {
@@ -47,7 +47,12 @@ import {
 } from "./aidlc-baseline";
 import {
   evidenceRelativePath,
+  greenCoveredUcds,
+  i13UcdUnits,
   isEvidenceArtifactLabel,
+  ucdCoverageGaps,
+  unitUcdIds,
+  type UnitUcdScope,
   moduleInceptionRoot,
   normalizeArtifactLabel,
   readModuleManifest,
@@ -1054,12 +1059,87 @@ function i13Applicability(instance: StageInstance): { any: boolean; allNotApplic
  * is readable (callers then keep requiring RED).
  */
 function i13PhaseNeeds(instance: StageInstance): { known: boolean; red: boolean; baseline: boolean } {
-  const modes = i13Records(instance).filter((record) => record.status === "required").map((record) => i13UcdIdsByMode(record));
+  // 4.8.0: a unit instance needs the phases of its own UC-D subset (the module set without ucd_units).
+  const modes = i13Records(instance).filter((record) => record.status === "required").map((record) => unitUcdIds(record, instance.unit_id));
   return {
     known: modes.length > 0,
     red: modes.some((mode) => mode.new.length > 0),
     baseline: modes.some((mode) => mode.characterization.length > 0),
   };
+}
+
+/**
+ * The unit's UC-D subset (4.8.0): set only for a unit instance whose module I13 is
+ * required and declares `ucd_units`; null otherwise (module set, 4.7.1 behaviour).
+ */
+function unitScopeOf(instance: StageInstance): UnitUcdScope | null {
+  if (!instance.unit_id) return null;
+  const record = i13Records(instance).find((value) => value.status === "required");
+  if (!record) return null;
+  const scope = unitUcdIds(record, instance.unit_id);
+  return scope.scoped ? scope : null;
+}
+
+/**
+ * I13 `ucd_units` (4.8.0): absent, or exactly one non-empty list of distinct unit ids
+ * of the module's unit manifest per UC-D.
+ */
+function i13UnitErrors(evidence: Evidence, ucdIds: string[], instance: StageInstance): string[] {
+  if (evidence.ucd_units === undefined) return [];
+  const record = asRecord(evidence.ucd_units);
+  if (!record) return ["ucd_units must be an object keyed by UC-D"];
+  const errors: string[] = [];
+  const keys = Object.keys(record);
+  if (keys.length !== ucdIds.length || !ucdIds.every((id) => keys.includes(id))) errors.push("ucd_units must have exactly one entry per ucd_ids entry");
+  let known: string[] = [];
+  try {
+    known = instance.module_id ? readUnitManifest(PROJECT_ROOT, instance.module_id).map((unit) => unit.unit_id) : [];
+  } catch (error) {
+    errors.push(`ucd_units cannot be checked against the unit manifest: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  for (const [id, value] of Object.entries(record)) {
+    const units = Array.isArray(value) && value.every((unit) => typeof unit === "string") ? value as string[] : null;
+    if (!units || units.length === 0) {
+      errors.push(`ucd_units.${id} must be a non-empty list of unit ids`);
+      continue;
+    }
+    if (new Set(units).size !== units.length) errors.push(`ucd_units.${id} lists a unit more than once`);
+    const unknown = known.length > 0 ? units.filter((unit) => !known.includes(unit)) : [];
+    if (unknown.length > 0) errors.push(`ucd_units.${id} names unknown units ${unknown.join(", ")}`);
+  }
+  return errors;
+}
+
+/**
+ * Module close-out reconciliation (4.8.0) from the files on disk: the I13 `ucd_units`
+ * of the module against the passed GREEN evidence of each of its units. Returns [] when
+ * the module's I13 has no `ucd_units` (nothing to reconcile).
+ */
+function moduleUcdCoverageGaps(moduleId: string): string[] {
+  const i13Path = join(PROJECT_ROOT, evidenceRelativePath("test-case-derivation", "test-case-derivation", "module", { module_id: moduleId }));
+  if (!existsSync(i13Path)) return [];
+  let i13: Evidence | null = null;
+  try {
+    i13 = asRecord(JSON.parse(readFileSync(i13Path, "utf8")));
+  } catch (error) {
+    return [`I13 evidence cannot be parsed: ${error instanceof Error ? error.message : String(error)}`];
+  }
+  if (!i13 || i13.status !== "required" || !i13UcdUnits(i13)) return [];
+  const green = new Map<string, string[]>();
+  const root = join(PROJECT_ROOT, ".aidlc", "evidence", "code-generation", moduleId);
+  if (existsSync(root)) {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      const path = join(root, entry.name, "green-test-evidence.json");
+      if (!entry.isDirectory() || !existsSync(path)) continue;
+      try {
+        const record = asRecord(JSON.parse(readFileSync(path, "utf8")));
+        if (record && record.status === "passed") green.set(entry.name, greenCoveredUcds(record));
+      } catch {
+        continue;
+      }
+    }
+  }
+  return ucdCoverageGaps(i13, green);
 }
 
 const UCD_MODES = new Set(["new", "characterization"]);
@@ -1199,7 +1279,7 @@ function ucMappingCoverageErrors(evidence: Evidence, requirement: string, expect
  * demands that BASELINE was produced in the current epoch, so a unit's BASELINE and
  * GREEN never straddle an --advance.
  */
-function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: StageInstance, requireCurrentEpoch = false): string[] {
+function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: StageInstance, requireCurrentEpoch = false, scope: UnitUcdScope | null = null): string[] {
   const errors: string[] = [];
   let baseline: ReturnType<typeof workflowBaselineForModule>;
   try {
@@ -1224,7 +1304,8 @@ function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: Sta
 
   let expected: Array<{ path: string; baseline_blob: string }>;
   try {
-    expected = i13CodeRefBlobs(i13);
+    // 4.8.0: a unit-scoped BASELINE covers only the code refs of its own characterization UC-Ds.
+    expected = i13CodeRefBlobs(i13, scope ? scope.characterization : undefined);
   } catch (error) {
     return [...errors, error instanceof Error ? error.message : String(error)];
   }
@@ -1232,7 +1313,7 @@ function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: Sta
   const paths = digests.map((entry) => asNonEmptyString(entry?.path) || "");
   const expectedPaths = expected.map((entry) => entry.path);
   if (!Array.isArray(evidence.code_ref_digests) || paths.length !== new Set(paths).size || paths.length !== expectedPaths.length || !expectedPaths.every((path) => paths.includes(path))) {
-    errors.push(`code_ref_digests must cover exactly the I13 characterization code refs (${expectedPaths.join(", ")}), got ${JSON.stringify(paths)}`);
+    errors.push(`code_ref_digests must cover exactly the ${scope ? `characterization code refs of unit ${instance.unit_id}` : "I13 characterization code refs"} (${expectedPaths.join(", ")}), got ${JSON.stringify(paths)}`);
   }
   for (const entry of digests) {
     const path = asNonEmptyString(entry?.path);
@@ -1254,6 +1335,46 @@ function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: Sta
   return errors;
 }
 
+/**
+ * RED / BASELINE / GREEN `not_required` of a unit with an empty UC-D subset (4.8.0):
+ * only valid when the subset really is empty, and bound to the unit's `ucd_exemption`
+ * in the unit manifest (fields equal, the executed command is its validation_command,
+ * which exited 0, and the checker digest derives from that execution).
+ */
+function ucdExemptionEvidenceErrors(evidence: Evidence, phase: Phase, instance: StageInstance, scope: UnitUcdScope | null): string[] {
+  const errors: string[] = [];
+  const unitLabel = `unit ${instance.unit_id}`;
+  if (!scope || !scope.scoped || scope.all.length > 0) {
+    errors.push(`${phase} may be not_required by ucd_exemption only when the UC-D subset of ${unitLabel} is empty${scope?.scoped ? `; ${unitLabel}: ${scope.all.join(", ")}` : " (I13 declares no ucd_units)"}`);
+    return errors;
+  }
+  if (evidence.phase !== phase) errors.push(`phase must be ${phase}`);
+  if (!Array.isArray(evidence.ucd_ids) || evidence.ucd_ids.length !== 0) errors.push("not_required evidence must declare ucd_ids: []");
+  let exemption: ReturnType<typeof unitUcdExemption>;
+  try {
+    exemption = unitUcdExemption(PROJECT_ROOT, instance.module_id!, instance.unit_id!);
+  } catch (error) {
+    return [...errors, `${unitLabel} owns no UC-D and its ucd_exemption cannot be read: ${error instanceof Error ? error.message : String(error)}`];
+  }
+  if (!exemption) return [...errors, `${unitLabel} owns no UC-D of module ${instance.module_id} (unit_refs) and declares no ucd_exemption in its unit manifest`];
+  const declared = asRecord(evidence.ucd_exemption);
+  for (const field of ["reason_code", "reason", "approval_ref", "alternative_validation"] as const) {
+    if (declared?.[field] !== exemption[field]) errors.push(`ucd_exemption.${field} does not match the unit manifest ucd_exemption of ${unitLabel}`);
+  }
+  const execution = asRecord(evidence.exemption_validation_execution);
+  const commandDigest = argvDigest(exemption.validation_command);
+  if (!execution) {
+    errors.push("exemption_validation_execution is required");
+  } else {
+    if (execution.argv_digest !== commandDigest) errors.push(`exemption_validation_execution.argv_digest does not match the ucd_exemption validation_command of ${unitLabel}`);
+    if (asNumber(execution.exit_code) !== 0 || execution.status !== "passed") errors.push("exemption_validation_execution must have passed with exit_code 0");
+    if (asNumber(execution.duration_ms) === null) errors.push("exemption_validation_execution.duration_ms must be a number");
+  }
+  const checker = asRecord(evidence.checker);
+  if (checker && checker.argv_digest !== ucdExemptionDigest(phase, commandDigest)) errors.push(`checker.argv_digest does not match the ${phase} ucd_exemption check`);
+  return errors;
+}
+
 function phaseEvidenceErrors(
   evidence: Evidence,
   sensor: string,
@@ -1269,10 +1390,24 @@ function phaseEvidenceErrors(
   // every UC-D is new.
   const i13 = moduleI13Evidence(instance);
   const i13Value = i13 && "value" in i13 ? i13.value : null;
-  const modes = i13Value?.status === "required" ? i13UcdIdsByMode(i13Value) : null;
-  const allowedStatuses = phase === "RED" ? ["failed", "not_applicable", "not_required"] : phase === "GREEN" ? ["passed", "not_applicable"] : ["passed", "not_required"];
+  // 4.8.0: with I13 ucd_units a unit instance is checked against its own UC-D subset;
+  // without them (or without a unit) `scope` is the module set and unscoped.
+  const scope = i13Value?.status === "required" ? unitUcdIds(i13Value, instance.unit_id) : null;
+  const modes = scope ? { new: scope.new, characterization: scope.characterization } : null;
+  const scoped = scope?.scoped === true;
+  const unitLabel = `unit ${instance.unit_id}`;
+  const emptySubset = scoped && scope!.all.length === 0;
+  const allowedStatuses = phase === "RED" ? ["failed", "not_applicable", "not_required"] : phase === "GREEN" ? (scoped ? ["passed", "not_applicable", "not_required"] : ["passed", "not_applicable"]) : ["passed", "not_required"];
   if (!allowedStatuses.includes(String(evidence.status))) errors.push(`status must be ${allowedStatuses.join(" or ")}`);
   if (i13 && "error" in i13) errors.push(`cannot derive the ${phase} UC-D set: ${i13.error}`);
+  if (evidence.status === "not_required" && (emptySubset || evidence.ucd_exemption !== undefined || evidence.exemption_validation_execution !== undefined)) {
+    errors.push(...ucdExemptionEvidenceErrors(evidence, phase, instance, scope));
+    return errors;
+  }
+  if (evidence.status === "not_required" && phase === "GREEN" && scoped) {
+    errors.push(`GREEN may be not_required only when the UC-D subset of ${unitLabel} is empty; ${unitLabel}: ${scope!.all.join(", ")}`);
+    return errors;
+  }
   if (evidence.status === "not_required" && phase !== "GREEN") {
     if (evidence.phase !== phase) errors.push(`phase must be ${phase}`);
     if (!Array.isArray(evidence.ucd_ids) || evidence.ucd_ids.length !== 0) errors.push("not_required evidence must declare ucd_ids: []");
@@ -1280,9 +1415,9 @@ function phaseEvidenceErrors(
     if (checker && checker.argv_digest !== phaseNotRequiredDigest(phase)) errors.push(`checker.argv_digest does not match the ${phase} not_required check`);
     if (phase === "RED") {
       if (i13Value && !modes) errors.push(`RED may be not_required only when I13 is required and declares no tdd_mode new UC-D (I13 status ${String(i13Value.status)})`);
-      if (modes && modes.new.length > 0) errors.push(`RED may be not_required only when I13 declares no tdd_mode new UC-D; new: ${modes.new.join(", ")}`);
+      if (modes && modes.new.length > 0) errors.push(scoped ? `RED may be not_required only when ${unitLabel} owns no tdd_mode new UC-D; new: ${modes.new.join(", ")}` : `RED may be not_required only when I13 declares no tdd_mode new UC-D; new: ${modes.new.join(", ")}`);
     } else if (modes && modes.characterization.length > 0) {
-      errors.push(`BASELINE may be not_required only when I13 declares no tdd_mode characterization UC-D; characterization: ${modes.characterization.join(", ")}`);
+      errors.push(scoped ? `BASELINE may be not_required only when ${unitLabel} owns no tdd_mode characterization UC-D; characterization: ${modes.characterization.join(", ")}` : `BASELINE may be not_required only when I13 declares no tdd_mode characterization UC-D; characterization: ${modes.characterization.join(", ")}`);
     }
     return errors;
   }
@@ -1344,19 +1479,23 @@ function phaseEvidenceErrors(
     if (evidence.failure_class !== "behavior") errors.push('RED failure_class must be "behavior"');
     if (!asNonEmptyString(evidence.failure_signature)) errors.push("RED failure_signature is required");
     if (failed === null || failed < 1) errors.push("RED tests_failed must be >= 1");
-    if (modes) errors.push(...ucMappingCoverageErrors(evidence, "RED uc_mapping must cover exactly the tdd_mode new UC-Ds", modes.new));
+    if (modes) errors.push(...ucMappingCoverageErrors(evidence, scoped ? `RED uc_mapping must cover exactly the tdd_mode new UC-Ds of ${unitLabel}` : "RED uc_mapping must cover exactly the tdd_mode new UC-Ds", modes.new));
   } else if (evidence.status !== "passed" || failed !== 0) {
     errors.push(`${phase} must be passed with tests_failed=0`);
   }
   // GREEN observes every UC-D of I13 after the change: new ones turned green and
-  // characterization ones still green (4.6.0 S3b).
-  if (phase === "GREEN" && modes) errors.push(...ucMappingCoverageErrors(evidence, "GREEN uc_mapping must cover every I13 UC-D", asStringArray(i13Value!.ucd_ids) || []));
+  // characterization ones still green (4.6.0 S3b); with ucd_units, every UC-D of the unit (4.8.0).
+  if (phase === "GREEN" && modes) {
+    errors.push(...(scoped
+      ? ucMappingCoverageErrors(evidence, `GREEN uc_mapping must cover every UC-D of ${unitLabel}`, scope!.all)
+      : ucMappingCoverageErrors(evidence, "GREEN uc_mapping must cover every I13 UC-D", asStringArray(i13Value!.ucd_ids) || [])));
+  }
   if (phase === "BASELINE") {
     if (!modes) {
       if (i13Value) errors.push(`BASELINE may be passed only when I13 is required and declares tdd_mode characterization UC-Ds (I13 status ${String(i13Value.status)})`);
     } else {
-      errors.push(...ucMappingCoverageErrors(evidence, "BASELINE uc_mapping must cover exactly the tdd_mode characterization UC-Ds", modes.characterization));
-      if (modes.characterization.length > 0) errors.push(...baselineEvidenceErrors(evidence, i13Value!, instance, requireCurrentBaselineEpoch));
+      errors.push(...ucMappingCoverageErrors(evidence, scoped ? `BASELINE uc_mapping must cover exactly the tdd_mode characterization UC-Ds of ${unitLabel}` : "BASELINE uc_mapping must cover exactly the tdd_mode characterization UC-Ds", modes.characterization));
+      if (modes.characterization.length > 0) errors.push(...baselineEvidenceErrors(evidence, i13Value!, instance, requireCurrentBaselineEpoch, scoped ? scope : null));
     }
   }
   return errors;
@@ -1609,6 +1748,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
             if (!ucdIds || ucdIds.length === 0) errors.push("ucd_ids must be non-empty");
             if (!asNonEmptyString(evidence.index)) errors.push("index is required");
             errors.push(...i13ModeErrors(evidence, ucdIds || [], state, instance));
+            errors.push(...i13UnitErrors(evidence, ucdIds || [], instance));
           }
           return errors;
         });
@@ -1720,9 +1860,14 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
         // RED is required for tdd_mode new UC-Ds and BASELINE for characterization
         // UC-Ds (4.6.0 S3b); without a readable required I13 RED stays mandatory.
         const needs = i13PhaseNeeds(instance);
+        const unitScope = unitScopeOf(instance);
         const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status === "not_applicable") {
+            // Only I13 not_applicable, or (4.8.0) a unit whose UC-D subset is empty, has nothing to map.
+            if (unitScope ? unitScope.all.length > 0 : !i13Applicability(instance).allNotApplicable) {
+              errors.push(unitScope ? `test-quality may be not_applicable only when the UC-D subset of unit ${instance.unit_id} is empty; unit ${instance.unit_id}: ${unitScope.all.join(", ")}` : "test-quality may be not_applicable only when I13 evidence is not_applicable");
+            }
             if (!asNonEmptyString(evidence.not_applicable_reason)) errors.push("not_applicable_reason is required");
             if (!asNonEmptyString(evidence.alternative_validation)) errors.push("alternative_validation is required");
             if (evidence.traceability_complete !== true) errors.push("traceability_complete must be true");
@@ -2966,6 +3111,9 @@ function registryProjection(registry: WorkflowRegistry, loaded: WorkflowParts): 
     ...unregistered.map((moduleId) => `workflow:${moduleId}`),
     ...modules.filter((row) => !row.construction_done).map((row) => `construction:${row.module_id}`),
     ...sharedContracts.filter((contract) => !contract.verified).map((contract) => `contract:${contract.contract_id}`),
+    // 4.8.0: a module with I13 ucd_units enters integration only when every UC-D is in
+    // the GREEN of every unit its unit_refs name.
+    ...modules.filter((row) => row.construction_done && moduleUcdCoverageGaps(row.module_id).length > 0).map((row) => `ucd-coverage:${row.module_id}`),
   ];
   const integration = loaded.parts.get("integration")?.state;
   return {
@@ -3126,7 +3274,7 @@ async function splitNext(args: string[], flags: Record<string, string>, graph: S
   if (!barrier.barrier_ready) {
     return {
       kind: "error",
-      message: `🚫 Cross-module integration barrier is not ready: ${barrier.blocking.join(", ")}. Every module must finish construction and every shared contract consumer must be 已验证/verified in docs/aidlc/ideation/product-contracts.md.`,
+      message: `🚫 Cross-module integration barrier is not ready: ${barrier.blocking.join(", ")}. Every module must finish construction and every shared contract consumer must be 已验证/verified in docs/aidlc/ideation/product-contracts.md.${barrier.blocking.filter((item) => item.startsWith("ucd-coverage:")).map((item) => ` Module ${item.slice("ucd-coverage:".length)} UC-D coverage is incomplete: ${moduleUcdCoverageGaps(item.slice("ucd-coverage:".length)).join("; ")}.`).join("")}`,
       workflow: "integration",
       blocking: barrier.blocking,
     };

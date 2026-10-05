@@ -53,6 +53,8 @@ evidence_path: .aidlc/evidence/tdd/<module-id>/<unit-id>/baseline-test-evidence.
 
 I13 没有 characterization UC-D（含 I13 为 `not_applicable`）时写 `status: "not_required"`、`ucd_ids: []`，不执行命令，清单也不必声明 `role: baseline`。
 
+按单元收敛（4.8.0）：I13 有 `ucd_units` 时，BASELINE 只覆盖本单元的 characterization UC-D，producer 的前置比对与 `code_ref_digests` 只包含这些 UC-D 的 code ref，门禁复验时“`code_ref_digests` 必须等于 code ref 集合”同样换成本单元子集。按代校验规则不变：其他单元改动了本单元的 code ref 时，本单元的 BASELINE 仍会被拒，需要 `--advance`。本单元没有 characterization UC-D 时写 `not_required`；子集为空时走 `ucd_exemption`（见 `red-test-evidence.md`）。
+
 ## tdd 门禁
 
 - producer / checker / provenance 契约与 RED 相同；`observed_command.argv_digest` 等于清单中唯一 baseline 命令 argv 的 SHA-256，`checker.argv_digest` 等于 `SHA-256(JSON.stringify(["BASELINE-observation", observed_command.argv_digest]))`，`observed_command.exit_code` 为 0。

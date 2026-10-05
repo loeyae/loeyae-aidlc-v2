@@ -58,3 +58,7 @@ The design agent MUST:
 3. Count and list all public interfaces (API endpoints, event handlers, etc.)
 4. Confirm error/exception handling is specified for each interface
 5. Validate data sources are identified and accessible
+
+## Unit scope (4.8.0)
+
+When the module's I13 evidence declares `ucd_units` (UC-Ds with frontmatter `unit_refs`), a unit's functional design only has to name the UC-Ds whose `unit_refs` include that unit; the module's completeness is reconciled at build-and-test (`test-quality`). Without `ucd_units` every UC-D of the module's `test-cases` must appear, as before.

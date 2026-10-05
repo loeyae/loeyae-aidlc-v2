@@ -69,6 +69,7 @@ code_refs:                              # 仅 characterization 必填，new 不�
   - {项目相对路径}[::{符号}]
 reason: {仅 characterization 必填：为什么给存量行为补回归保护}
 approval_ref: {仅 characterization 必填：批准依据}
+unit_refs: [{unit-id}, ...]              # 可选（4.8.0）：所属单元；同一模块要么全部声明，要么全部不声明
 ---
 
 # UC-D-{编号} {标题}
@@ -128,6 +129,47 @@ approval_ref: REVIEW-2026-10-01-01
 - 使用 characterization 需要 git 仓库与已登记、仍可从 HEAD 到达的基线；存量工作流先执行 `orchestrate baseline --set`。
 - I13 始终绑定基线链的第 0 代（4.7.0）：多单元依次改动共享 code ref 时，用 `orchestrate baseline --advance <上一单元 GREEN 的 commit>` 追加一代，后续单元的 BASELINE 在新一代上观察；I13 不需要因推进而刷新。
 - `bugfix` 至少要有 1 条 `new`（复现 bug）；`refactor` 可全部为 characterization。
+
+## 所属单元（`unit_refs`，4.8.0）
+
+一个模块拆成多个 unit 时，用 `unit_refs` 声明每个 UC-D 属于哪些 unit。声明后，各 unit 的 tdd / code-generation 只覆盖本单元的 UC-D：RED、BASELINE、GREEN 的 `uc_mapping`、BASELINE 的 `code_ref_digests`、test-quality、追溯矩阵 tests 层和功能设计都只看本单元子集。
+
+```yaml
+---
+id: UC-D-003
+status: ready
+source_ref: REQ-002
+tdd_mode: new
+unit_refs: [u1, u2]          # 跨单元：u1 和 u2 的 GREEN 都必须覆盖它
+---
+```
+
+- 可选字段，和 `tdd_mode` 一样只能写在 frontmatter；写在正文会被拒绝。
+- 取值必须是非空列表，不得重复，每个 unit-id 都必须是本模块 `unit-manifest.json` 中已有的 unit。
+- 同一模块内只要有一个 UC-D 写了 `unit_refs`，**全部** UC-D 都必须写，否则拒绝并列出缺失的 UC-D。
+- I13 证据在有声明时输出 `ucd_units: { "<UC-D>": ["<unit-id>", ...] }`；全部不写时不输出该字段，行为与 4.7.1 相同（每个 unit 都覆盖模块全集）。
+- 模块收口时对账：build-and-test 的 test-quality 和 split 布局的集成屏障（`ucd-coverage:<module>`）要求每个 UC-D 都出现在其 `unit_refs` 中**每个** unit 的 GREEN `uc_mapping` 里，缺一项即失败。
+
+### 不含 UC-D 的单元（`ucd_exemption`）
+
+契约类等不含业务行为的 unit 不被任何 `unit_refs` 指向时，必须在 `unit-manifest.json` 的该 unit 下声明结构化豁免：
+
+```json
+{
+  "unit_id": "u3",
+  "name": "订单契约",
+  "service_id": "trade-service",
+  "ucd_exemption": {
+    "reason_code": "pure-declaration",
+    "reason": "只声明跨单元契约，不含业务行为",
+    "approval_ref": "REVIEW-2026-10-05-02",
+    "alternative_validation": "契约结构校验",
+    "validation_command": ["node", "tests/validate_contract.cjs"]
+  }
+}
+```
+
+`reason_code` 取值同 `non-applicable.json`；`validation_command` 是 argv 数组（不经 shell）。受控 producer 先执行该命令，退出码为 0 才写 RED / BASELINE / GREEN 的 `not_required`（`ucd_ids: []`），门禁复核豁免字段与命令摘要。子集为空却没有豁免时拒绝；子集非空时 GREEN 不得为 `not_required`。
 
 ## 用例类型
 

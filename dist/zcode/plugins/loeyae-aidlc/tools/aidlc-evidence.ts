@@ -18,7 +18,7 @@ import { spawnSync } from "child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { baselineCodeRef, baselineCommitErrors, workflowBaselineForModule } from "./aidlc-baseline";
-import { evidenceRelativePath, stageInstanceId } from "./aidlc-execution-context";
+import { evidenceRelativePath, i13UcdIdsByMode as sharedI13UcdIdsByMode, readUnitManifest, stageInstanceId, unitManifestPath, unitUcdIds, type UcdExemption } from "./aidlc-execution-context";
 import { GLOBAL_WORKFLOW, loadWorkflowState, type WorkflowRef, type WorkflowState } from "./aidlc-light-state";
 import { evidenceSourceRevision, integrationStageSlugs, isSplitLayout, loadWorkflowParts, ownerOfInstance, stageAxis } from "./aidlc-workflow-layout";
 
@@ -260,6 +260,21 @@ export function phaseObservationDigest(phase: Phase, commandDigest: string): str
 /** checker.argv_digest of a `not_required` RED/BASELINE record (no command was observed). */
 export function phaseNotRequiredDigest(phase: Phase): string {
   return argvDigest([`${phase}-not-required`]);
+}
+
+/** checker.argv_digest of a `not_required` record of a unit with an empty UC-D subset (4.8.0): bound to the executed validation_command. */
+export function ucdExemptionDigest(phase: Phase, commandDigest: string): string {
+  return argvDigest([`${phase}-ucd-exemption`, commandDigest]);
+}
+
+/**
+ * The `ucd_exemption` of a unit in its module's unit manifest (4.8.0), shared by the
+ * producer and the gate. Throws when the manifest cannot be read or is malformed.
+ */
+export function unitUcdExemption(projectRoot: string, moduleId: string, unitId: string): UcdExemption | undefined {
+  const unit = readUnitManifest(projectRoot, moduleId).find((candidate) => candidate.unit_id === unitId);
+  if (!unit) throw new Error(`unit ${unitId} is not declared in the unit manifest of module ${moduleId}`);
+  return unit.ucd_exemption;
 }
 
 /** The single allowlisted red/green/baseline command of a stage; fails unless exactly one is declared. */
@@ -589,20 +604,17 @@ function phaseRecord(state: ProducerState): Record<string, unknown> {
 /**
  * UC-D ids of a `required` I13 record grouped by tdd_mode (4.6.0 S2 `ucd_modes`).
  * I13 evidence without `ucd_modes` predates 4.6 and means every UC-D is new.
+ * (Defined with the 4.8.0 unit scope in aidlc-execution-context; re-exported here.)
  */
-export function i13UcdIdsByMode(i13: Record<string, unknown>): { new: string[]; characterization: string[] } {
-  const ids = Array.isArray(i13.ucd_ids) ? i13.ucd_ids.filter((id): id is string => typeof id === "string") : [];
-  const modes = i13.ucd_modes && typeof i13.ucd_modes === "object" && !Array.isArray(i13.ucd_modes) ? i13.ucd_modes as Record<string, unknown> : undefined;
-  if (!modes) return { new: ids, characterization: [] };
-  return {
-    new: ids.filter((id) => modes[id] === "new"),
-    characterization: ids.filter((id) => modes[id] === "characterization"),
-  };
-}
+export const i13UcdIdsByMode = sharedI13UcdIdsByMode;
 
-/** Distinct code ref paths of the I13 `characterization[]` with the blob each had at the workflow baseline. */
-export function i13CodeRefBlobs(i13: Record<string, unknown>): Array<{ path: string; baseline_blob: string }> {
-  const entries = Array.isArray(i13.characterization) ? i13.characterization : fail("I13 characterization must list the code_refs of every characterization UC-D");
+/**
+ * Distinct code ref paths of the I13 `characterization[]` with the blob each had at the
+ * workflow baseline. `ucdIds` (4.8.0 unit scope) keeps only the entries of those UC-Ds.
+ */
+export function i13CodeRefBlobs(i13: Record<string, unknown>, ucdIds?: string[]): Array<{ path: string; baseline_blob: string }> {
+  const all = Array.isArray(i13.characterization) ? i13.characterization : fail("I13 characterization must list the code_refs of every characterization UC-D");
+  const entries = ucdIds === undefined ? all : all.filter((entry) => entry && typeof entry === "object" && ucdIds.includes(String((entry as Record<string, unknown>).ucd)));
   const blobs = new Map<string, string>();
   for (const entry of entries) {
     const refs = entry && typeof entry === "object" && Array.isArray((entry as Record<string, unknown>).code_refs) ? (entry as Record<string, unknown>).code_refs as unknown[] : [];
@@ -626,8 +638,9 @@ export function i13CodeRefBlobs(i13: Record<string, unknown>): Array<{ path: str
  * epoch of the workflow baseline chain (4.7.0; the single baseline when it was never
  * advanced). I13 stays bound to epoch 0, so its own baseline_commit must be the first
  * epoch. A changed, missing or unhashable file fails without writing evidence.
+ * `ucdIds` (4.8.0) limits the code refs to the characterization UC-Ds of the unit.
  */
-function baselineCodeRefDigests(i13: Record<string, unknown>, state: ProducerState): Record<string, unknown> {
+function baselineCodeRefDigests(i13: Record<string, unknown>, state: ProducerState, ucdIds?: string[]): Record<string, unknown> {
   const recorded = typeof i13.baseline_commit === "string" ? i13.baseline_commit : "";
   if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(recorded)) fail("I13 evidence must record the workflow baseline_commit of its characterization UC-Ds");
   let baseline: ReturnType<typeof workflowBaselineForModule>;
@@ -640,7 +653,7 @@ function baselineCodeRefDigests(i13: Record<string, unknown>, state: ProducerSta
   if (commitErrors.length > 0 || !baseline.registered) fail(`BASELINE requires a usable workflow baseline: ${commitErrors.join("; ")}`);
   if (recorded !== baseline.epochs[0]) fail(`I13 baseline_commit ${recorded} does not match epoch 0 of the workflow baseline (${baseline.epochs[0]})`);
   const commit = baseline.commit;
-  const digests = i13CodeRefBlobs(i13).map(({ path }) => {
+  const digests = i13CodeRefBlobs(i13, ucdIds).map(({ path }) => {
     const resolved = baselineCodeRef(PROJECT_ROOT, commit, { path }, `code ref ${path}`);
     if ("error" in resolved) fail(`BASELINE refuses to run: ${resolved.error}`);
     const baseline_blob = resolved.blob;
@@ -698,6 +711,9 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     execution = { id: `builtin:${sensor}`, sensor, argv_digest: phaseNotRequiredDigest(phase), exit_code: 0, status: "passed" };
   };
   const modes = i13.status === "required" ? i13UcdIdsByMode(i13) : { new: [], characterization: [] };
+  // 4.8.0: with I13 ucd_units a unit observes only the UC-Ds its unit_refs name.
+  const scope = i13.status === "required" ? unitUcdIds(i13, state.current_unit) : null;
+  const unitLabel = `unit ${state.current_unit}`;
   if (i13.status === "not_applicable" && phase === "BASELINE") {
     notRequired("I13 declared no executable business behavior, so no UC-D uses tdd_mode characterization");
   } else if (i13.status === "not_applicable") {
@@ -726,15 +742,39 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     execution = { id: `builtin:${options.sensor}`, sensor: options.sensor, argv_digest: argvDigest(["I13-not-applicable", phase, check.argv_digest]), exit_code: 0, status: "passed" };
   } else if (i13.status !== "required") {
     fail(`I13 evidence status must be required or not_applicable, got ${String(i13.status)}`);
-  } else if (phase === "RED" && modes.new.length === 0) {
-    notRequired("I13 declares no tdd_mode new UC-D");
-  } else if (phase === "BASELINE" && modes.characterization.length === 0) {
-    notRequired("I13 declares no tdd_mode characterization UC-D");
+  } else if (scope!.scoped && scope!.all.length === 0) {
+    // A unit that owns no UC-D (e.g. a contract unit): its structured exemption is
+    // validated by really running validation_command before anything is written.
+    const moduleId = state.current_module!;
+    const unitId = state.current_unit!;
+    let exemption: UcdExemption | undefined;
+    try {
+      exemption = unitUcdExemption(PROJECT_ROOT, moduleId, unitId);
+    } catch (error) {
+      fail(`${unitLabel} owns no UC-D of module ${moduleId} (unit_refs) and its ucd_exemption cannot be read: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!exemption) {
+      fail(`${unitLabel} owns no UC-D of module ${moduleId} (unit_refs); declare ucd_exemption for it in ${relative(PROJECT_ROOT, unitManifestPath(PROJECT_ROOT, moduleId)).replace(/\\/g, "/")} (reason_code, reason, approval_ref, alternative_validation, validation_command) before ${phase} can be not_required`);
+    }
+    const check = runCommand({ id: `ucd-exemption:${unitId}`, role: "check", argv: validateArgv(exemption.validation_command, `${unitLabel} ucd_exemption.validation_command`) });
+    payload = {
+      status: "not_required",
+      phase,
+      ucd_ids: [],
+      not_required_reason: `${unitLabel} owns no UC-D of module ${moduleId}; ucd_exemption ${exemption.reason_code}: ${exemption.reason}`,
+      ucd_exemption: { reason_code: exemption.reason_code, reason: exemption.reason, approval_ref: exemption.approval_ref, alternative_validation: exemption.alternative_validation },
+      exemption_validation_execution: { id: check.id, argv_digest: check.argv_digest, cwd: check.cwd, exit_code: check.exit_code, status: check.status, duration_ms: check.duration_ms },
+    };
+    execution = { id: `builtin:${sensor}`, sensor, argv_digest: ucdExemptionDigest(phase, check.argv_digest), exit_code: 0, status: "passed" };
+  } else if (phase === "RED" && scope!.new.length === 0) {
+    notRequired(scope!.scoped ? `${unitLabel} owns no tdd_mode new UC-D` : "I13 declares no tdd_mode new UC-D");
+  } else if (phase === "BASELINE" && scope!.characterization.length === 0) {
+    notRequired(scope!.scoped ? `${unitLabel} owns no tdd_mode characterization UC-D` : "I13 declares no tdd_mode characterization UC-D");
   } else {
     const config = requireCommandConfig(options.config, options.stage);
     const command = phaseCommand(config, options.stage, phase);
     // BASELINE observes the unmodified baseline code: verified before the command runs.
-    const baselineFields = phase === "BASELINE" ? baselineCodeRefDigests(i13, state) : {};
+    const baselineFields = phase === "BASELINE" ? baselineCodeRefDigests(i13, state, scope!.scoped ? scope!.characterization : undefined) : {};
     const started = Date.now();
     const result = spawnSync(command.argv[0], command.argv.slice(1), {
       cwd: command.cwd || PROJECT_ROOT,
@@ -756,8 +796,11 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     // observed_command; `checker` describes the built-in producer check that validated
     // the observation (same contract as every other semantic sensor).
     const commandDigest = argvDigest(command.argv);
+    // A unit-scoped observation (4.8.0) records the UC-D subset it had to cover.
+    const scopedIds = scope!.scoped ? { ucd_ids: phase === "RED" ? scope!.new : phase === "BASELINE" ? scope!.characterization : scope!.all } : {};
     payload = {
       ...payload,
+      ...scopedIds,
       ...baselineFields,
       observed_command: { id: command.id, phase, argv_digest: commandDigest, cwd: safeCwdLabel(command.cwd || PROJECT_ROOT), exit_code: exitCode, expected_exit_code: expectedExit, duration_ms: duration },
     };
