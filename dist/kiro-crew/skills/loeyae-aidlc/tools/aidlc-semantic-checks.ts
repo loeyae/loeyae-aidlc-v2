@@ -3331,17 +3331,36 @@ function traceabilityMatrix(): Record<string, unknown> {
   const completedStages: string[] = Array.isArray(workflowState.completed_stage_instances)
     ? workflowState.completed_stage_instances
     : (Array.isArray(workflowState.completed_stages) ? workflowState.completed_stages : []);
-  const ownerDelivered = (ownerModule: string): boolean =>
-    completedStages.includes(`application-design@module:${ownerModule}`) || completedStages.includes("application-design");
+  // MARS-91:Owner 交付只认 `application-design@module:<owner>`。裸 `application-design` 仅在
+  // 单 module 场景(无 module-manifest,或 manifest 只有一个 module 且就是 Owner)兼容回退;
+  // 多 module 下任一 module 完成裸实例都不能让其他 Owner 的契约视为已交付。
+  let manifestModules: ModuleDescriptor[] | null = null;
+  const contractModules = (): ModuleDescriptor[] => (manifestModules ??= activeModuleManifest().modules);
+  // 契约 ID 的 module 段去掉了连字符(CT-{MODULEID}-*),按 manifest 还原真实 module_id。
+  const resolveOwnerModule = (seg: string): string =>
+    contractModules().find((module) => module.module_id.replace(/-/g, "").toUpperCase() === seg)?.module_id || seg.toLowerCase();
+  const ownerDelivered = (ownerModule: string): boolean => {
+    if (completedStages.includes(`application-design@module:${ownerModule}`)) return true;
+    if (!completedStages.includes("application-design")) return false;
+    const modules = contractModules();
+    return modules.length === 0 || (modules.length === 1 && modules[0].module_id === ownerModule);
+  };
+  // MARS-90 阶段感知:消费方真正"使用"契约的是其 application-design(设计层消费 CT);
+  // 在此之前(需求/故事阶段 REQ 文本早期引用 CT)Owner 尚未交付不算断点,只记 advisory。
+  // 契约未在 product-contracts.md(ideation 产物,早于需求)登记属本阶段即可判定的缺口,不受此守卫影响。
+  const contractDeliveryGateActive = currentOrder >= MATRIX_STAGE_ORDER.indexOf("application-design");
   const uncoveredContracts: string[] = [];
+  const advisoryContractsPending: string[] = [];
   for (const ct of consumedContracts) {
     // 从 product-contracts 找该契约行的 Owner module 段(形如 "owner/unit" 或 module 名)。
     const seg = ct.match(/^CT-([A-Z0-9]+)-/)?.[1] || "";
-    const ownerModule = seg.toLowerCase();
+    const ownerModule = seg ? resolveOwnerModule(seg) : "";
     if (!prodContracts.includes(ct)) {
       uncoveredContracts.push(`${ct}: 契约未在 product-contracts.md 登记(消费了未声明的跨 module 契约)`);
     } else if (ownerModule && !ownerDelivered(ownerModule)) {
-      uncoveredContracts.push(`${ct}: Owner module ${ownerModule} 的 application-design 未完成(消费方引用了尚未交付的契约)`);
+      const message = `${ct}: Owner module ${ownerModule} 的 application-design 未完成(消费方引用了尚未交付的契约)`;
+      if (contractDeliveryGateActive) uncoveredContracts.push(message);
+      else advisoryContractsPending.push(message);
     }
   }
 
@@ -3472,9 +3491,15 @@ function traceabilityMatrix(): Record<string, unknown> {
   // 仅在对应产物存在时生效(frIds/clIds 为空即该层 not_applicable)。
   // 存量兼容:module 未迁移(legacy=有 REQ 缺 track)时,FR/CL 缺口降级为 advisory 不进 broken_rows
   // (旧规范未建 FR→REQ 显式链,不硬拦);仅已迁移 module 的累积缺口才计入硬门禁 broken_rows。
+  // 阶段感知(MARS-90):FR→REQ 归属 requirements-analysis(本 producer 最早运行阶段),恒生效;
+  // CL→story/design 的下游层最早是 user-stories,此前(澄清刚完成)story/design 必然不存在,
+  // 不得提前硬拦,降级为 advisory_cl_pending,clarification_cl_total 仍可见。
+  const clGateActive = currentOrder >= MATRIX_STAGE_ORDER.indexOf("user-stories");
+  const enforcedCl = clGateActive ? uncoveredCl : [];
+  const advisoryClPending = clGateActive ? [] : uncoveredCl;
   const cumulativeBroken = [
     ...uncoveredFr.map((fr) => `${fr}: UNCOVERED_FR@requirements(PRD 的 FR 未被任何 REQ 承接)`),
-    ...uncoveredCl.map((cl) => `${cl}: UNCOVERED_CL@downstream(澄清结论未被 story/design 遵循)`),
+    ...enforcedCl.map((cl) => `${cl}: UNCOVERED_CL@downstream(澄清结论未被 story/design 遵循)`),
   ];
   const allBroken = legacy ? [...brokenRows] : [...brokenRows, ...cumulativeBroken, ...uncoveredContracts];
   const cumulativeStatus = frIds.length === 0 && clIds.length === 0
@@ -3502,10 +3527,13 @@ function traceabilityMatrix(): Record<string, unknown> {
     uncovered_fr: uncoveredFr,
     clarification_cl_total: clIds.length,
     uncovered_cl: uncoveredCl,
+    // 仅存在澄清产物时输出,无 CL 的项目证据结构与 4.9.0 一致。
+    ...(clIds.length > 0 ? { cl_gate: clGateActive ? "enforced" : "not_applicable(用户故事阶段未到达)", advisory_cl_pending: advisoryClPending } : {}),
     cumulative_status: cumulativeStatus,
     // 缺口B 跨 module 契约累积层:本 module 消费的 CT-{OTHER}-* 其 Owner 是否交付。
     consumed_contracts: consumedContracts,
     uncovered_contracts: uncoveredContracts,
+    ...(consumedContracts.length > 0 ? { advisory_contracts_pending: advisoryContractsPending } : {}),
     contract_status: contractStatus,
     derived_children: derivedChildren.length,
     derived_gaps: derivedGaps,

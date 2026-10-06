@@ -163,7 +163,7 @@ try {
   const integrationState = loadWorkflowState(project, { kind: "integration" })!;
   assert.equal(globalState.workflow_id, LEGACY_ID);
   assert.equal(globalState.workflow_kind, "global");
-  assert.equal(globalState.version, "4.9.0", "Engine Version is written back on save");
+  assert.equal(globalState.version, "4.9.1", "Engine Version is written back on save");
   assert.equal(globalState.status, "done");
   assert.deepEqual(globalState.completed_stage_instances, GLOBAL_STAGES);
   assert.ok(globalState.history.every((entry) => !entry.instance_id?.includes("@module:")));
@@ -302,7 +302,7 @@ try {
   assert.equal(existsSync(join(legacy, "aidlc", "active", "registry.md")), false);
   const legacyText = readFileSync(join(legacy, "aidlc", "active", "aidlc-state.md"), "utf8");
   assert.doesNotMatch(legacyText, /Workflow Kind/);
-  assert.match(legacyText, /- Engine Version: 4\.9\.0/);
+  assert.match(legacyText, /- Engine Version: 4\.9\.1/);
   failure(legacy, ["orchestrate", "park", "--module", M01], /requires the per-module layout/);
   const legacyPark = success(legacy, ["orchestrate", "park"]);
   assert.match(String(legacyPark.message), /^Workflow parked at stage/);

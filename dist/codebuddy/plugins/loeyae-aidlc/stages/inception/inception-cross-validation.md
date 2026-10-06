@@ -16,7 +16,7 @@ produces:
   - docs/aidlc/modules/{module-id}/inception/cross-validation-report.md
   - .aidlc/evidence/cross-validation/{module-id}/inception-consistency.json
 sensors: [inception-consistency]
-requires: [user-stories]
+requires: [user-stories, ui-mock-generation, ui-figma-generation]
 ---
 # Inception 产物交叉验证（强制审查）
 

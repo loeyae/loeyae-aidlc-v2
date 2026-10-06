@@ -1,5 +1,25 @@
 # Changelog
 
+## 4.9.1
+
+修复类版本：门禁按阶段生效，不再在下游产物所属阶段到达前提前硬拦（MARS-90）；收紧跨 module 契约 Owner 交付判定（MARS-91）。
+
+### Fixed
+
+- **traceability-matrix 澄清层阶段错位**（MARS-90）：`UNCOVERED_CL@downstream` 原先无阶段守卫，需求分析内完成澄清后即因 `user-stories.md` 尚不存在而阻断 `requirements-analysis`。现在从 `user-stories` 起才计入 `broken_rows`；此前缺口记入 `advisory_cl_pending`，`cl_gate` 为 `not_applicable(用户故事阶段未到达)`，`clarification_cl_total` / `uncovered_cl` 照常输出。`cl_gate` / `advisory_cl_pending` 只在存在 CL 时输出，`advisory_contracts_pending` 只在存在跨 module 契约消费时输出，其余项目的证据结构与 4.9.0 一致。
+- **traceability-matrix 契约 Owner 未交付的阶段错位**（MARS-90）：消费方从自身 `application-design` 起才硬拦"Owner 的 application-design 未完成"，此前记入 `advisory_contracts_pending`。"契约未在 product-contracts.md 登记"仍从一开始硬拦。
+- **cross-validation 依赖 UI 生成阶段**（MARS-90）：`requires` 增加 `ui-mock-generation`、`ui-figma-generation`，避免按 DAG 先跑交叉验证时因 UI 页面产物缺失被提前阻断；UI 阶段跳过时视为已满足，无 UI 流程不受影响。
+- **契约 Owner 交付判定偏宽**（MARS-91）：多 module 下只认 `application-design@module:<owner>`；裸 `application-design` 仅在单 module（无 manifest，或 manifest 仅含 Owner）时兼容回退。契约 ID 中去掉连字符的 module 段按 manifest 还原为真实 `module_id`。
+
+### Unchanged
+
+- `story-traceability` 的澄清遵循语义保持"每个 CL 至少被一个故事引用"，不要求每个故事关联澄清；无 `clarifications.md` 或声明"无澄清项"时不校验。
+- `UNCOVERED_FR@requirements` 仍从 `requirements-analysis` 起硬拦。
+
+### Upgrade notes
+
+- 无需迁移。已完成阶段的证据保持有效；之前被 `UNCOVERED_CL@downstream` 阻断的 `requirements-analysis` 重新 `report` 即可。
+
 ## 4.9.0
 
 新增嵌套独立 git 仓库作为源码根：characterization、BASELINE、`source_revision` 与代码追溯按仓库解析；已有工作流声明嵌套仓库后，用一条受限迁移命令即可继续推进，不需要重新开始工作流，已完成实例不需要 `--refresh`。
