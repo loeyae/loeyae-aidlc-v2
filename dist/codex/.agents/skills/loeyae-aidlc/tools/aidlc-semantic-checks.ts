@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { createHash } from "crypto";
 import { spawnSync } from "child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "fs";
-import { basename, dirname, join, relative, resolve } from "path";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "fs";
+import { basename, dirname, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
-import { greenCoveredUcds, i13UcdIdsByMode, i13UcdUnits, portableDirname, readModuleManifest, readUnitManifest, ucdCoverageGaps, unitUcdIds, verifiedModuleIds } from "./aidlc-execution-context";
+import { greenCoveredUcds, i13UcdIdsByMode, i13UcdUnits, moduleManifestPath, portableDirname, readModuleManifest, readUnitManifest, ucdCoverageGaps, unitUcdIds, verifiedModuleIds, type ModuleDescriptor } from "./aidlc-execution-context";
+import { contractTableRowsForModule, type ModuleContractRows } from "./aidlc-contract-table";
 import { scanFiles, SOURCE_FILE_PATTERN, TEST_FILE_PATTERN } from "./aidlc-scan-root";
 import { hasExecutableBehavior } from "./aidlc-executable-behavior";
 import { baselineCodeRef, baselineCommitErrors, gitWorkTreeError, parseCodeRef, workflowBaselineForModule, type CodeRef } from "./aidlc-baseline";
@@ -166,13 +167,83 @@ function moduleArtifactFiles(pattern: RegExp): string[] {
   }
   return [...new Set([`docs/aidlc/modules/${ACTIVE_MODULE}`, ...extraRoots].flatMap((base) => allFiles(base, pattern)))].sort();
 }
+/**
+ * The module manifest as seen by a module-scoped checker (4.8.1): absent manifest (a
+ * manifest-less single-module workflow) yields no modules; an invalid one fails closed.
+ */
+function activeModuleManifest(): { modules: ModuleDescriptor[]; module?: ModuleDescriptor } {
+  if (!existsSync(moduleManifestPath(ROOT))) return { modules: [] };
+  let modules: ModuleDescriptor[];
+  try {
+    modules = readModuleManifest(ROOT);
+  } catch (error) {
+    fail(`module manifest is invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return { modules, module: modules.find((module) => module.module_id === ACTIVE_MODULE) };
+}
+/**
+ * Files of the active module's `contract_paths` (4.8.1), fail-closed: every entry must
+ * exist, must not be (or contain) a symbolic link and must resolve inside the project.
+ */
+function declaredContractFiles(module: ModuleDescriptor | undefined): string[] {
+  const projectRoot = realpathSync(ROOT);
+  const inside = (path: string): boolean => {
+    const real = realpathSync(path);
+    return real === projectRoot || real.startsWith(projectRoot.endsWith(sep) ? projectRoot : `${projectRoot}${sep}`);
+  };
+  const result: string[] = [];
+  for (const [index, declared] of (module?.contract_paths || []).entries()) {
+    const label = `module-manifest ${ACTIVE_MODULE}.contract_paths[${index}] (${declared})`;
+    const target = join(ROOT, ...declared.split("/"));
+    let info;
+    try {
+      info = lstatSync(target);
+    } catch {
+      fail(`${label} does not exist`);
+    }
+    if (info.isSymbolicLink()) fail(`${label} is a symbolic link`);
+    if (!inside(target)) fail(`${label} resolves outside the project`);
+    const visit = (path: string): void => {
+      const entry = lstatSync(path);
+      if (entry.isSymbolicLink()) fail(`${label} contains a symbolic link: ${relativePath(path)}`);
+      if (entry.isDirectory()) {
+        for (const name of readdirSync(path).sort()) visit(join(path, name));
+      } else if (entry.isFile()) {
+        result.push(path);
+      }
+    };
+    visit(target);
+  }
+  return result;
+}
+/**
+ * Files a module-scoped checker collects (contract-baseline, nfr-coverage,
+ * infrastructure-completeness; 4.8.1). Without an active module: every project file
+ * (projectFiles, unchanged). With one: the module's inception, the active unit's
+ * construction (the module's whole construction without a unit), the module-manifest
+ * `paths`, and the declared `contract_paths` — matched by `pattern`, or all of them
+ * with `declaredContracts: "all"`. Other project files are never collected implicitly.
+ */
+function moduleScopedFiles(pattern: RegExp, options: { declaredContracts?: "match" | "all" } = {}): string[] {
+  if (!ACTIVE_MODULE) return projectFiles(pattern);
+  const { module } = activeModuleManifest();
+  const moduleRoot = `docs/aidlc/modules/${ACTIVE_MODULE}`;
+  const roots = [`${moduleRoot}/inception`, ACTIVE_UNIT ? `${moduleRoot}/construction/${ACTIVE_UNIT}` : `${moduleRoot}/construction`, ...(module?.paths || [])];
+  const declared = declaredContractFiles(module).filter((path) => options.declaredContracts === "all" || pattern.test(path));
+  return [...new Set([...roots.flatMap((base) => allFiles(base, pattern)), ...declared])].sort();
+}
+/** A project-level contract table (docs/aidlc/ideation/product-contracts.md or a declared copy). */
+function isContractTable(path: string): boolean {
+  return basename(path) === "product-contracts.md";
+}
 function relativePath(path: string): string { return relative(ROOT, path); }
 function joined(paths: string[]): string { return paths.map(text).join("\n"); }
 function ids(value: string, pattern: RegExp): string[] { return [...new Set([...value.matchAll(pattern)].map((match) => match[0]))].sort(); }
 function count(value: string, pattern: RegExp): number { return [...value.matchAll(pattern)].length; }
 function section(value: string, patterns: RegExp[]): boolean { return patterns.some((pattern) => pattern.test(value)); }
 function noUnresolved(value: string): void {
-  if (/\b(TODO|FIXME|TBD|HACK|NotImplemented)\b|待确认|待定|未解决|未定义|阻断/i.test(value)) fail("unresolved marker found in project artifact");
+  // 4.8.1: a negated 阻断 (不阻断 / 非阻断 / 无阻断) describes the absence of a blocker.
+  if (/\b(TODO|FIXME|TBD|HACK|NotImplemented)\b|待确认|待定|未解决|未定义|(?<![不非无])阻断/i.test(value)) fail("unresolved marker found in project artifact");
 }
 
 function markdownTableCells(line: string): string[] | null {
@@ -994,19 +1065,39 @@ function phaseEvidenceCheck(sensor: "red-test-evidence" | "green-test-evidence" 
 }
 
 function contractBaseline(): Record<string, unknown> {
-  const files = projectFiles(/(?:contracts?|openapi|swagger|schema|\.proto$|\.avsc$)/i).filter((path) => !path.includes("core/"));
-  if (files.length === 0) fail("no contract schema file found");
-  const content = joined(files);
-  noUnresolved(content);
-  const owner = content.match(/(?:owner|负责人|所有者)\s*[:：|]\s*([^\n|]+)/i)?.[1]?.trim();
-  const consumers = content.match(/(?:consumers?|消费者|下游)\s*[:：|]\s*([^\n]+)/i)?.[1]?.split(/[,，、|]/).map((item) => item.trim()).filter(Boolean) || [];
+  const pattern = /(?:contracts?|openapi|swagger|schema|\.proto$|\.avsc$)/i;
+  // 4.8.1: in a module context only the module scope (and its declared contract_paths,
+  // matched or not) is collected; a project-level contract table contributes only the
+  // rows of the module's contracts and is not a source when it has none.
+  const files = (ACTIVE_MODULE ? moduleScopedFiles(pattern, { declaredContracts: "all" }) : projectFiles(pattern)).filter((path) => !path.includes("core/"));
+  const tableModules = ACTIVE_MODULE && files.some(isContractTable) ? activeModuleManifest().modules : [];
+  const sources: Array<{ path: string; content: string; table?: ModuleContractRows }> = [];
+  for (const path of files) {
+    if (!ACTIVE_MODULE || !isContractTable(path)) {
+      sources.push({ path, content: text(path) });
+      continue;
+    }
+    const table = contractTableRowsForModule(text(path), tableModules, ACTIVE_MODULE);
+    if (table.rows.length > 0) sources.push({ path, content: table.lines.join("\n"), table });
+  }
+  if (sources.length === 0) fail("no contract schema file found");
+  const documents = sources.filter((source) => !source.table).map((source) => source.content).join("\n");
+  const tables = sources.flatMap((source) => (source.table ? [source.table] : []));
+  noUnresolved(documents);
+  for (const table of tables) noUnresolved(table.rows.join("\n"));
+  const content = sources.map((source) => source.content).join("\n");
+  const owner = documents.match(/(?:owner|负责人|所有者)\s*[:：|]\s*([^\n|]+)/i)?.[1]?.trim()
+    || tables.flatMap((table) => table.providers)[0];
+  const documentConsumers = documents.match(/(?:consumers?|消费者|下游)\s*[:：|]\s*([^\n]+)/i)?.[1]?.split(/[,，、|]/).map((item) => item.trim()).filter(Boolean) || [];
+  const consumers = documentConsumers.length > 0 ? documentConsumers : [...new Set(tables.flatMap((table) => table.consumers))];
   if (!owner) fail("contract owner is missing");
   if (consumers.length === 0) fail("contract consumers are missing");
   if (!/version|版本|compat|兼容|schema/i.test(content)) fail("contract compatibility/version information is missing");
-  const schema = files.map((path) => `${relativePath(path)}\n${text(path)}`).join("\n");
+  const schema = sources.map((source) => `${relativePath(source.path)}\n${source.content}`).join("\n");
   const schemaHash = `sha256:${createHash("sha256").update(schema).digest("hex")}`;
-  const extension = files[0].split(".").pop()?.toLowerCase();
-  const contractType = extension === "proto" ? "proto" : /openapi|swagger/i.test(relativePath(files[0])) ? "api" : "schema";
+  const first = sources[0].path;
+  const extension = first.split(".").pop()?.toLowerCase();
+  const contractType = extension === "proto" ? "proto" : /openapi|swagger/i.test(relativePath(first)) ? "api" : "schema";
   return { status: "verified", contract_id: `contract-${schemaHash.slice(-12)}`, contract_type: contractType, owner, consumers, schema_hash: schemaHash, validation_status: "passed" };
 }
 
@@ -1032,24 +1123,27 @@ function functionalDesign(): Record<string, unknown> {
 }
 
 function nfrCoverage(): Record<string, unknown> {
-  const files = projectFiles(/(?:nfr|non-functional|非功能)/i).filter((path) => path.endsWith(".md"));
+  const files = moduleScopedFiles(/(?:nfr|non-functional|非功能)/i).filter((path) => path.endsWith(".md"));
   if (files.length === 0) fail("NFR artifacts are missing");
   const content = joined(files);
   noUnresolved(content);
   const nfrIds = ids(content, /NFR-\d+(?:-[A-Za-z0-9_-]+)?/g);
   if (nfrIds.length === 0) fail("no NFR identifiers found");
   const items = nfrIds.map((id) => {
-    const start = content.indexOf(id);
+    // 4.8.1: the occurrence of the whole id (NFR-1 is not the prefix of NFR-10 or NFR-1-x),
+    // and the block ends at the next NFR id counted from the end of this id.
+    const whole = content.search(new RegExp(`${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d|-[A-Za-z0-9_-])`));
+    const start = whole >= 0 ? whole : content.indexOf(id);
     const next = content.slice(start + id.length).search(/NFR-\d+/);
-    const block = content.slice(start, next < 0 ? start + 1600 : start + next);
-    if (!/验收|acceptance|阈值|threshold|p95|measurement|度量|指标/i.test(block)) fail(`${id} has no acceptance or measurement rule`);
-    return { id, category: block.match(/performance|security|reliability|scalability|性能|安全|可靠性|扩展性/i)?.[0] || "quality", acceptance_criterion: block.split(/\n/).find((line) => /验收|acceptance|阈值|threshold|p95|指标/i.test(line))?.trim() || id, verified: true };
+    const block = content.slice(start, next < 0 ? start + 1600 : start + id.length + next);
+    if (!/验收|acceptance|阈值|threshold|p95|p99|measurement|度量|指标/i.test(block)) fail(`${id} has no acceptance or measurement rule`);
+    return { id, category: block.match(/performance|security|reliability|scalability|性能|安全|可靠性|扩展性/i)?.[0] || "quality", acceptance_criterion: block.split(/\n/).find((line) => /验收|acceptance|阈值|threshold|p95|p99|指标/i.test(line))?.trim() || id, verified: true };
   });
   return { status: "passed", requirements_covered: items.length, unresolved: 0, nfr_items: items };
 }
 
 function infrastructure(): Record<string, unknown> {
-  const files = projectFiles(/(?:infrastructure|deployment|deploy|基础设施|部署)/i).filter((path) => path.endsWith(".md"));
+  const files = moduleScopedFiles(/(?:infrastructure|deployment|deploy|基础设施|部署)/i).filter((path) => path.endsWith(".md"));
   if (files.length === 0) fail("infrastructure design artifacts are missing");
   const content = joined(files);
   noUnresolved(content);

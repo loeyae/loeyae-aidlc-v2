@@ -99,6 +99,29 @@ produces:
 
 已完成代码是否重构由 CR 风险与批准计划决定，不默认推迟，也不顺手扩大范围。
 
+## `module-manifest.json` 字段
+
+```json
+{
+  "schema_version": 1,
+  "modules": [
+    {
+      "module_id": "m01",
+      "name": "Orders",
+      "service_id": "order-service",
+      "paths": ["services/orders"],
+      "contract_paths": ["docs/aidlc/ideation/product-contracts.md", "contracts/orders"]
+    }
+  ]
+}
+```
+
+- `module_id` / `name` / `service_id`：必填；`module_id` 匹配 `^[a-z0-9][a-z0-9-]{0,62}$`，清单内不重复。
+- `paths`（可选）：模块独占的源码目录，规范化的项目相对目录，不得指向 `aidlc/`、`.aidlc/`、`docs/aidlc/`。用作源码根，也属于模块上下文中 semantic checker 的收集范围。
+- `contract_paths`（可选，4.8.1）：模块作为提供方或消费方需要在 `contract-baseline` 中校验的共享契约文件或目录。规范化的项目相对路径（拒绝绝对路径、盘符、`.`/`..`/空段，清单内不重复），不得指向 `aidlc/`、`.aidlc/`、`docs/aidlc` 本身或 `docs/aidlc/modules/` 下的模块目录；可以指向 `docs/aidlc/ideation/product-contracts.md`。checker 读取时 fail-closed：路径不存在、本身或目录内含符号链接/junction、解析后越出项目根都直接报错，不静默跳过。`contract-baseline` 把声明的文件（含目录下全部文件）都视为契约，不按文件名过滤；`nfr-coverage` / `infrastructure-completeness` 对这些文件仍按各自的文件名规则过滤。
+
+模块上下文（`--module`/`AIDLC_ACTIVE_MODULE`）中，`contract-baseline`、`nfr-coverage`、`infrastructure-completeness` 只收集本模块 inception、本单元（无单元时本模块全部）construction、`paths` 与 `contract_paths`，不再扫描项目根下的其他文件。需要校验项目级共享契约时必须声明 `contract_paths`。
+
 ## 完成标准
 
 - [ ] 模块按业务边界划分且职责单一

@@ -39,7 +39,7 @@ export interface TeamLightActiveInstance {
   expires_at: string;
 }
 
-export const ENGINE_VERSION = "4.8.0";
+export const ENGINE_VERSION = "4.8.1";
 
 export type WorkflowKind = "global" | "module" | "integration";
 

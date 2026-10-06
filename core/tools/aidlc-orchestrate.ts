@@ -32,6 +32,7 @@ import { fileURLToPath } from "url";
 import { planAgentExecution, type AgentExecutionPlan } from "./aidlc-agent-runtime";
 import { SEMANTIC_SENSORS, allowlistedPhaseCommand, argvDigest, i13CodeRefBlobs, i13UcdIdsByMode, phaseNotRequiredDigest, phaseObservationDigest, ucdExemptionDigest, unitUcdExemption, type Phase } from "./aidlc-evidence";
 import { CANONICAL_SOURCE_PATTERN, resolveSourceRoots } from "./aidlc-source-roots";
+import { CONTRACT_CONSUMER_COLUMN, CONTRACT_ID_COLUMN, CONTRACT_PROVIDER_COLUMN, moduleForValue } from "./aidlc-contract-table";
 import { COMMIT_ID_PATTERN, commitAncestryErrors, readSourceRevision } from "./aidlc-revision";
 import {
   baselineCodeRef,
@@ -453,11 +454,6 @@ function dependencyDocuments(): string[] {
   return result.sort();
 }
 
-function moduleForValue(modules: ModuleDescriptor[], value: string, excluded?: string): string | undefined {
-  const normalized = value.trim();
-  return modules.find((module) => module.module_id !== excluded
-    && (normalized === module.module_id || normalized === module.service_id || normalized === module.name || normalized.includes(module.module_id)))?.module_id;
-}
 
 export function moduleDependencyGraph(): ModuleDependency[] {
   const manifestPath = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "module-manifest.json");
@@ -3032,11 +3028,11 @@ function sharedContractProjection(): RegistrySharedContract[] {
       continue;
     }
     const column = (pattern: RegExp): number => header!.findIndex((cell) => pattern.test(cell));
-    const idIndex = column(/契约\s*ID|^contract(?:\s*id)?$/i);
+    const idIndex = column(CONTRACT_ID_COLUMN);
     const contractId = idIndex >= 0 ? cells[idIndex] : "";
     if (!contractId || contractId === "-") continue;
-    const providerIndex = column(/^(?:提供方|provider)$/i);
-    const consumerIndex = column(/^(?:消费者|消费方|consumers?)$/i);
+    const providerIndex = column(CONTRACT_PROVIDER_COLUMN);
+    const consumerIndex = column(CONTRACT_CONSUMER_COLUMN);
     const statusIndex = column(/^(?:状态|status)$/i);
     if (providerIndex >= 0 && consumerIndex < 0) {
       const provider = moduleForValue(modules, cells[providerIndex] || "");

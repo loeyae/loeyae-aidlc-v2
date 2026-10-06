@@ -25,6 +25,12 @@ export interface ModuleDescriptor {
   name: string;
   service_id: string;
   paths?: string[];
+  /**
+   * 4.8.1: shared contract files or directories the module validates as provider or
+   * consumer (contract-baseline in a module / unit context). Project-relative; existence
+   * and symlinks are checked fail-closed by the checker that reads them.
+   */
+  contract_paths?: string[];
 }
 
 export const UNIT_CONDITIONAL_STAGES = [
@@ -156,6 +162,32 @@ function modulePaths(value: unknown, label: string): string[] | undefined {
   return paths;
 }
 
+/**
+ * `contract_paths` (4.8.1): normalized project-relative files or directories. Unlike
+ * `paths` they may point into docs/aidlc (e.g. docs/aidlc/ideation/product-contracts.md),
+ * but never into the control plane (aidlc/, .aidlc/) or another module tree
+ * (docs/aidlc/modules/), whose files are scoped by the module context itself.
+ */
+function moduleContractPaths(value: unknown, label: string): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array of project-relative paths`);
+  const paths = value.map((item, index) => {
+    const path = nonEmptyString(item, `${label}[${index}]`).replace(/\\/g, "/").replace(/\/+$/, "");
+    if (!path || path.startsWith("/") || /^[A-Za-z]:/.test(path) || path.split("/").some((segment) => segment === ".." || segment === "." || segment === "")) {
+      throw new Error(`${label}[${index}] must be a normalized project-relative path`);
+    }
+    if (path === "aidlc" || path.startsWith("aidlc/") || path === ".aidlc" || path.startsWith(".aidlc/")) {
+      throw new Error(`${label}[${index}] must not point into the AI-DLC control plane`);
+    }
+    if (path === "docs/aidlc" || path === "docs/aidlc/modules" || path.startsWith("docs/aidlc/modules/")) {
+      throw new Error(`${label}[${index}] must not point at docs/aidlc or a module tree under docs/aidlc/modules`);
+    }
+    return path;
+  });
+  uniqueIds(paths, label);
+  return paths;
+}
+
 export function readModuleManifest(projectRoot: string): ModuleDescriptor[] {
   const value = regularJson(moduleManifestPath(projectRoot), "module manifest");
   if (value.schema_version !== 1) throw new Error("module manifest schema_version must be 1");
@@ -163,11 +195,13 @@ export function readModuleManifest(projectRoot: string): ModuleDescriptor[] {
   const modules = value.modules.map((item, index) => {
     const module = record(item, `modules[${index}]`);
     const paths = modulePaths(module.paths, `modules[${index}].paths`);
+    const contractPaths = moduleContractPaths(module.contract_paths, `modules[${index}].contract_paths`);
     return {
       module_id: contextId(module.module_id, `modules[${index}].module_id`),
       name: nonEmptyString(module.name, `modules[${index}].name`),
       service_id: nonEmptyString(module.service_id, `modules[${index}].service_id`),
       ...(paths ? { paths } : {}),
+      ...(contractPaths ? { contract_paths: contractPaths } : {}),
     };
   });
   uniqueIds(modules.map((module) => module.module_id), "module manifest");

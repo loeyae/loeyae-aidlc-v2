@@ -1,5 +1,28 @@
 # Changelog
 
+## 4.8.1
+
+修复类版本：模块 / 单元上下文中，`contract-baseline`、`nfr-coverage`、`infrastructure-completeness` 不再扫描全项目；同时修正 `noUnresolved()` 对否定描述的误判和 `nfrCoverage()` 的块截断。
+
+### Fixed
+
+- **模块 / 单元上下文中三个检查器扫描全项目**：`contextAllows()` 对 `docs/aidlc/modules/` 之外的路径一律放行，`contractBaseline()`、`nfrCoverage()`、`infrastructure()` 又直接用 `projectFiles()` 收集文件，项目根文档、ideation、逆向工程产物和其他工作线文档里真实存在的未决标记会让当前单元永远无法通过，`contract-baseline` 的 owner / consumers 也可能取到别的模块的契约。三者改为调用共享函数 `moduleScopedFiles(pattern)`：有 `ACTIVE_MODULE` 时只收集本模块 `inception/`、本单元 `construction/<unit>/`（无单元时本模块整个 `construction/`）、module-manifest 中本模块的 `paths`，以及新增的 `contract_paths`；没有 `ACTIVE_MODULE` 时仍是 `projectFiles()`，行为与 4.8.0 一致。范围内没有文件时照旧报 `no contract schema file found` / `NFR artifacts are missing` / `infrastructure design artifacts are missing`。`contract-baseline` 的 owner、consumers、版本信息和 `schema_hash` 只来自范围内的来源。`contextAllows()` 本身和其他检查器不变。
+- **项目级共享契约表**：`product-contracts.md` 通过 `contract_paths` 纳入时，模块上下文中按本模块的角色取行（列识别与 `moduleForValue` 匹配规则从 `aidlc-orchestrate.ts` 抽到 `core/tools/aidlc-contract-table.ts`，orchestrate 的 shared contract projection 与依赖图改为复用）：本模块是**提供方**的契约，校验该契约在各表中的全部行（提供方要对所有消费方负责）；本模块**只是消费方**的契约，只校验消费者单元格包含本模块的行，提供方行仅作为引用行用于确定 owner 和计入 `schema_hash`，不检查未决标记，其他消费方的行不纳入。owner / consumers 从这些行提取（消费的契约只报告本模块自身为 consumer）；其他模块行中的未决标记不再使当前模块失败。表中没有本模块的行时不作为本模块的契约来源，也不报错。
+- **`noUnresolved()` 误伤否定描述**：`阻断` 前为 `不`、`非`、`无` 时（“不阻断”“非阻断”“无阻断”）不再判定为未决；单独的 `阻断`、`存在阻断`、`阻断项`，以及 `TODO`、`FIXME`、`TBD`、`HACK`、`NotImplemented`、`待确认`、`待定`、`未解决`、`未定义` 的规则不变。对该函数的全部调用点生效；`validatePrdPendingQuestions` 的规则不变。
+- **`nfrCoverage()` 切块**：块结束位置少加了编号长度（`start + next` → `start + id.length + next`），两个 NFR 相邻时第一个块会丢掉末尾的验收信息；编号起点改为完整编号的出现处，`NFR-1` 不再取到 `NFR-10` 的块（此前 `NFR-1` 没有验收规则时也会借用 `NFR-10` 的规则而通过）。验收关键词和 `acceptance_criterion` 的行查找都增加 `p99`（不区分大小写）。
+- **契约表单元格的模块匹配（`moduleForValue`）**：原实现在精确匹配失败后用 `value.includes(module_id)` 做子串匹配，并取 manifest 中第一个命中的模块。模块 id 之间有前缀关系时（如 `m1` / `m10`、`order` / `order-ext`），`m10` 的单元格会被解析为 `m1`：在 4.8.1 的行过滤中，`m1` 会把 `m10` 的行当作自己的而误报失败，`m10` 则找不到自己的行，契约表被忽略、未决标记无人检查。现在先按 `module_id` / `service_id` / `name` 精确匹配；否则只接受以整词出现的 `module_id`（两侧是单元格边界或非 ASCII 字母数字的字符，如 `m10/unit`、`order-api`、`订单服务 m10`），多个命中时取最长的 `module_id`，再按 manifest 顺序。`m100`、`xm10y`、`orders` 不再匹配任何模块。`excluded`（依赖图中解析消费方时排除提供方）语义不变。这一规则同时用于 contract-baseline 的行过滤、集成屏障的 shared contract projection 和模块依赖图。
+
+### Added
+
+- module-manifest 模块描述新增可选字段 `contract_paths: string[]`：本模块作为提供方或消费方需要在 `contract-baseline` 中校验的契约文件或目录。规范化的项目相对路径，不得指向 `aidlc/`、`.aidlc/`、`docs/aidlc` 本身或 `docs/aidlc/modules/`；checker 读取时路径不存在、为符号链接 / junction（含目录内）或解析后越出项目根都直接报错，不静默跳过。`contract-baseline` 把声明的文件全部视为契约；`nfr-coverage` / `infrastructure-completeness` 对其仍按文件名规则过滤。
+
+### Upgrade notes
+
+- 模块上下文中不再扫描项目根。原先靠项目根文件（如 `docs/` 下的 `*-contract*.md`、`nfr-*.md`、`deployment-*.md`）通过的模块，需要把这些产物放进本模块 / 本单元目录或模块 `paths`；否则会报 `no contract schema file found` 等缺失错误。
+- 需要校验项目级共享契约（如 `docs/aidlc/ideation/product-contracts.md`）时，在 module-manifest 中为模块声明 `contract_paths`；未声明时项目级契约文件不再参与本模块的 `contract-baseline`。
+- 模块上下文中按新范围重新计算的 `contract-baseline` `schema_hash` 可能与已有证据不同；需要让已有证据与新范围一致时，对相应实例执行 `evidence run --refresh` 后 re-attest。
+- 没有模块上下文的单一工作流不受范围收敛影响；`noUnresolved()` 和 `nfrCoverage()` 的修正对所有工作流生效。
+
 ## 4.8.0
 
 unit 轴的 tdd / code-generation 按单元收敛 UC-D 覆盖：split 布局下一个模块拆成多个 unit 时，UC-D 用 frontmatter `unit_refs` 声明所属单元，各单元的 RED / BASELINE / GREEN 只覆盖自己的 UC-D，模块完整性在 build-and-test 和集成屏障对账。此前第一个 unit 的 GREEN 必须让整个模块的 UC-D 全部通过，后续 unit 的 tdd 失去意义，不含业务代码的契约类 unit 无法完成。

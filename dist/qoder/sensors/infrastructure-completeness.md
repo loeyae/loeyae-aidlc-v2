@@ -66,3 +66,7 @@ The agent MUST:
 4. Define migration steps (database schema, data, config)
 5. Define a rollback strategy (how to revert if the deploy fails)
 6. List all runtime dependencies (external services, SDKs, certificates)
+
+## Collection scope (4.8.1)
+
+收集范围与 `contract-baseline` 的模块规则相同（见 `contract-baseline.md` 的 Collection scope），文件名规则为 `infrastructure|deployment|deploy|基础设施|部署` 且扩展名 `.md`；`contract_paths` 中的文件同样按该规则过滤。没有模块上下文时与 4.8.0 相同，扫描全项目。未决标记检查不把 `不阻断`、`非阻断`、`无阻断` 视为命中。

@@ -65,3 +65,10 @@ The agent MUST:
 3. Verify or design-validate each criterion is achievable
 4. Mark `verified: true` only when the criterion can be met by the design
 5. Never mark unresolved NFRs as verified
+
+## Collection scope and block rules (4.8.1)
+
+- 收集范围与 `contract-baseline` 的模块规则相同（见 `contract-baseline.md` 的 Collection scope），文件名规则为 `nfr|non-functional|非功能` 且扩展名 `.md`；`contract_paths` 中的文件同样按该规则过滤。没有模块上下文时与 4.8.0 相同，扫描全项目。注意 `infrastructure` 一词也匹配 `nfr`。
+- 每个 NFR 编号的块从该编号的完整出现处开始（`NFR-1` 不会命中 `NFR-10` 或 `NFR-1-x`），到其后的下一个 `NFR-\d+` 为止（偏移从编号末尾起算，4.8.0 少算了编号长度）。
+- 验收关键词：`验收|acceptance|阈值|threshold|p95|p99|measurement|度量|指标`（不区分大小写）；`acceptance_criterion` 取块内第一行匹配 `验收|acceptance|阈值|threshold|p95|p99|指标` 的行。
+- 未决标记检查不把 `不阻断`、`非阻断`、`无阻断` 视为命中；`阻断`、`存在阻断`、`阻断项` 及 `TODO`、`待确认` 等仍然命中。
