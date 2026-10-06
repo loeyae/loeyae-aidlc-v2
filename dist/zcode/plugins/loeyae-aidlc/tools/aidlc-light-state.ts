@@ -39,7 +39,7 @@ export interface TeamLightActiveInstance {
   expires_at: string;
 }
 
-export const ENGINE_VERSION = "4.8.1";
+export const ENGINE_VERSION = "4.9.0";
 
 export type WorkflowKind = "global" | "module" | "integration";
 
@@ -84,6 +84,19 @@ export interface WorkflowState {
    * means the chain is the single epoch `[baseline_commit]`.
    */
   baseline_history?: string[];
+  /**
+   * 4.9.0: the current commit of every registered nested source repository, keyed by
+   * its project-relative path (`- Baseline Repos: app=<sha>, web=<sha>`). Global/single
+   * workflows only; absent for projects without registered nested repositories.
+   */
+  baseline_repos?: Record<string, string>;
+  /**
+   * 4.9.0: per nested repository, the epoch it was registered in (`start`) and its
+   * commit in every epoch from `start` to the current one
+   * (`- Baseline Repos History: app=@0:<sha>+<sha>`). Present exactly when both
+   * Baseline History and Baseline Repos are.
+   */
+  baseline_repos_history?: Record<string, { start: number; commits: string[] }>;
   revision: number;
   scope: string;
   depth: string;
@@ -201,14 +214,20 @@ function subWorkflowBaselineError(kind: string): Error {
  * at least two distinct full commit ids, the last one equal to Baseline Commit. Git
  * ancestry between epochs is checked when the chain is used, not here.
  */
-export function assertBaselineFields(state: Pick<WorkflowState, "baseline_commit" | "baseline_source" | "workflow_kind" | "baseline_history">): void {
+export function assertBaselineFields(state: Pick<WorkflowState, "baseline_commit" | "baseline_source" | "workflow_kind" | "baseline_history"> & Partial<Pick<WorkflowState, "baseline_repos" | "baseline_repos_history">>): void {
   const hasCommit = state.baseline_commit !== undefined;
   const hasSource = state.baseline_source !== undefined;
   const hasHistory = state.baseline_history !== undefined;
-  if (!hasCommit && !hasSource && !hasHistory) return;
+  const hasRepos = state.baseline_repos !== undefined;
+  const hasReposHistory = state.baseline_repos_history !== undefined;
+  if (!hasCommit && !hasSource && !hasHistory && !hasRepos && !hasReposHistory) return;
+  if ((state.workflow_kind === "module" || state.workflow_kind === "integration") && (hasRepos || hasReposHistory) && !hasCommit && !hasSource && !hasHistory) {
+    throw subWorkflowReposError(state.workflow_kind);
+  }
   if (state.workflow_kind === "module" || state.workflow_kind === "integration") throw subWorkflowBaselineError(state.workflow_kind);
   if (hasCommit !== hasSource) throw new Error("Baseline Commit and Baseline Source must both be present or both be absent");
   if (hasHistory && !hasCommit) throw new Error("Baseline History requires Baseline Commit and Baseline Source");
+  if ((hasRepos || hasReposHistory) && !hasCommit) throw new Error("Baseline Repos / Baseline Repos History require Baseline Commit and Baseline Source");
   const commit = state.baseline_commit as string;
   if (commit !== BASELINE_UNAVAILABLE && !COMMIT_ID_PATTERN.test(commit)) {
     throw new Error(`Baseline Commit must be a 40- or 64-character lowercase hex commit id or "${BASELINE_UNAVAILABLE}", got ${JSON.stringify(commit)}`);
@@ -216,6 +235,7 @@ export function assertBaselineFields(state: Pick<WorkflowState, "baseline_commit
   if (!(BASELINE_SOURCES as readonly string[]).includes(state.baseline_source as string)) {
     throw new Error(`Baseline Source must be one of ${BASELINE_SOURCES.join(", ")}, got ${JSON.stringify(state.baseline_source)}`);
   }
+  if (hasRepos || hasReposHistory) assertBaselineRepoFields(state as BaselineRepoState);
   const advanced = state.baseline_source === "advanced";
   if (advanced && !hasHistory) throw new Error("Baseline Source advanced requires a Baseline History chain");
   if (!hasHistory) return;
@@ -227,10 +247,116 @@ export function assertBaselineFields(state: Pick<WorkflowState, "baseline_commit
       throw new Error(`Baseline History entries must be 40- or 64-character lowercase hex commit ids, got ${JSON.stringify(entry)}`);
     }
   }
-  if (new Set(chain).size !== chain.length) throw new Error("Baseline History contains duplicate commits");
+  if (!hasRepos) {
+    if (new Set(chain).size !== chain.length) throw new Error("Baseline History contains duplicate commits");
+  } else {
+    // 4.9.0: an epoch may keep the workflow commit while a nested repository advances,
+    // so an epoch is identified by the workflow commit together with its repo commits.
+    const tuples = chain.map((entry, epoch) => [entry, ...Object.entries(baselineReposAtEpoch(state as BaselineRepoState, epoch)).map(([key, sha]) => `${key}=${sha}`)].join(";"));
+    if (new Set(tuples).size !== tuples.length) throw new Error("Baseline History contains duplicate epochs (the same workflow commit with the same nested repository commits)");
+  }
   if (chain[chain.length - 1] !== commit) {
     throw new Error(`the last Baseline History entry ${chain[chain.length - 1]} must equal Baseline Commit ${commit}`);
   }
+}
+
+type BaselineRepoState = Pick<WorkflowState, "baseline_commit" | "baseline_history" | "baseline_repos" | "baseline_repos_history">;
+
+const REPO_KEY_PATTERN = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
+
+function subWorkflowReposError(kind: string): Error {
+  return new Error(`${kind} sub-workflow state must not carry Baseline Repos / Baseline Repos History; the workflow baseline (nested repositories included) belongs to the global workflow`);
+}
+
+/**
+ * 4.9.0 structural rules of the nested repository baseline: keys are nested repository
+ * paths, values full lowercase hex commit ids; never with an unavailable workflow
+ * commit. Baseline Repos History exists exactly when Baseline History and Baseline
+ * Repos do; it has the same keys, each with a start epoch in [0, current] and one
+ * commit per epoch from the start to the current epoch (no gaps), the last one equal to
+ * Baseline Repos. Without Baseline History every repository starts at epoch 0.
+ */
+function assertBaselineRepoFields(state: BaselineRepoState): void {
+  const repos = state.baseline_repos;
+  const history = state.baseline_repos_history;
+  if (state.baseline_commit === BASELINE_UNAVAILABLE) throw new Error(`Baseline Repos cannot be recorded with Baseline Commit ${BASELINE_UNAVAILABLE}`);
+  if (history !== undefined && repos === undefined) throw new Error("Baseline Repos History requires Baseline Repos");
+  if (!repos || typeof repos !== "object" || Object.keys(repos).length === 0) throw new Error("Baseline Repos must name at least one nested repository");
+  for (const [key, sha] of Object.entries(repos)) {
+    if (!REPO_KEY_PATTERN.test(key) || key === "." || key.split("/").some((segment) => segment === "." || segment === "..")) throw new Error(`Baseline Repos key ${JSON.stringify(key)} must be a nested repository path`);
+    if (typeof sha !== "string" || !COMMIT_ID_PATTERN.test(sha)) throw new Error(`Baseline Repos ${key} must be a 40- or 64-character lowercase hex commit id, got ${JSON.stringify(sha)}`);
+  }
+  const hasHistory = state.baseline_history !== undefined;
+  if (hasHistory !== (history !== undefined)) {
+    throw new Error(hasHistory ? "Baseline History with Baseline Repos requires Baseline Repos History" : "Baseline Repos History is only valid together with Baseline History");
+  }
+  if (!history) return;
+  const current = (state.baseline_history as string[]).length - 1;
+  const keys = Object.keys(repos).sort();
+  const historyKeys = Object.keys(history).sort();
+  if (JSON.stringify(keys) !== JSON.stringify(historyKeys)) throw new Error(`Baseline Repos History keys (${historyKeys.join(", ")}) must equal the Baseline Repos keys (${keys.join(", ")})`);
+  for (const key of keys) {
+    const { start, commits } = history[key];
+    if (!Number.isInteger(start) || start < 0 || start > current) throw new Error(`Baseline Repos History ${key} start epoch ${start} must be between 0 and the current epoch ${current}`);
+    if (!Array.isArray(commits) || commits.length !== current - start + 1) {
+      throw new Error(`Baseline Repos History ${key} must record one commit for every epoch from ${start} to ${current} (no gaps), got ${Array.isArray(commits) ? commits.length : 0}`);
+    }
+    for (const sha of commits) if (!COMMIT_ID_PATTERN.test(sha)) throw new Error(`Baseline Repos History ${key} entries must be 40- or 64-character lowercase hex commit ids, got ${JSON.stringify(sha)}`);
+    if (commits[commits.length - 1] !== repos[key]) throw new Error(`the last Baseline Repos History entry of ${key} (${commits[commits.length - 1]}) must equal Baseline Repos ${key}=${repos[key]}`);
+  }
+}
+
+/**
+ * Per nested repository, its start epoch and commits (epoch `start` first). Without
+ * Baseline Repos History every registered repository starts at epoch 0 with its
+ * Baseline Repos commit (a never-advanced chain has the single epoch 0).
+ */
+export function baselineRepoChains(state: Partial<BaselineRepoState>): Record<string, { start: number; commits: string[] }> {
+  if (state.baseline_repos_history) {
+    return Object.fromEntries(Object.entries(state.baseline_repos_history).sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) => [key, { start: value.start, commits: [...value.commits] }]));
+  }
+  return Object.fromEntries(Object.entries(state.baseline_repos || {}).sort(([left], [right]) => left.localeCompare(right)).map(([key, sha]) => [key, { start: 0, commits: [sha] }]));
+}
+
+/** Commits of the nested repositories registered at `epoch` (start epoch ≤ epoch), keyed and sorted. */
+export function baselineReposAtEpoch(state: Partial<BaselineRepoState>, epoch: number): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, chain] of Object.entries(baselineRepoChains(state))) {
+    if (epoch >= chain.start && epoch - chain.start < chain.commits.length) result[key] = chain.commits[epoch - chain.start];
+  }
+  return result;
+}
+
+/** `app=<sha>, web=<sha>` (keys sorted). */
+export function renderBaselineRepos(repos: Record<string, string>): string {
+  return Object.keys(repos).sort().map((key) => `${key}=${repos[key]}`).join(", ");
+}
+
+function parseBaselineRepos(text: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const entry of text.split(",").map((value) => value.trim()).filter(Boolean)) {
+    const separator = entry.indexOf("=");
+    if (separator <= 0) throw new Error(`Baseline Repos entries must be <path>=<commit>, got ${JSON.stringify(entry)}`);
+    const key = entry.slice(0, separator).trim();
+    if (key in result) throw new Error(`Baseline Repos lists ${key} more than once`);
+    result[key] = entry.slice(separator + 1).trim();
+  }
+  return result;
+}
+
+function renderBaselineReposHistory(history: Record<string, { start: number; commits: string[] }>): string {
+  return Object.keys(history).sort().map((key) => `${key}=@${history[key].start}:${history[key].commits.join("+")}`).join(", ");
+}
+
+function parseBaselineReposHistory(text: string): Record<string, { start: number; commits: string[] }> {
+  const result: Record<string, { start: number; commits: string[] }> = {};
+  for (const entry of text.split(",").map((value) => value.trim()).filter(Boolean)) {
+    const match = /^([^=\s]+)=@(\d+):(.+)$/.exec(entry);
+    if (!match) throw new Error(`Baseline Repos History entries must be <path>=@<start epoch>:<commit>+<commit>…, got ${JSON.stringify(entry)}`);
+    if (match[1] in result) throw new Error(`Baseline Repos History lists ${match[1]} more than once`);
+    result[match[1]] = { start: Number(match[2]), commits: match[3].split("+").map((value) => value.trim()) };
+  }
+  return result;
 }
 
 /** Baseline chain of a state that has a commit baseline: the recorded history, or the single epoch. */
@@ -374,10 +500,16 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
   const baselineSource = presentScalar(markdown, "Baseline Source");
   const baselineHistoryText = presentScalar(markdown, "Baseline History");
   const baselineHistory = baselineHistoryText === undefined ? undefined : baselineHistoryText.split(",").map((entry) => entry.trim());
+  const baselineReposText = presentScalar(markdown, "Baseline Repos");
+  const baselineRepos = baselineReposText === undefined ? undefined : parseBaselineRepos(baselineReposText);
+  const baselineReposHistoryText = presentScalar(markdown, "Baseline Repos History");
+  const baselineReposHistory = baselineReposHistoryText === undefined ? undefined : parseBaselineReposHistory(baselineReposHistoryText);
   assertBaselineFields({
     baseline_commit: baselineCommit,
     baseline_source: baselineSource as BaselineSource | undefined,
     baseline_history: baselineHistory,
+    baseline_repos: baselineRepos,
+    baseline_repos_history: baselineReposHistory,
     workflow_kind: (kind || undefined) as WorkflowKind | undefined,
   });
   return {
@@ -391,6 +523,8 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
     ...(diagramFormat ? { diagram_format: diagramFormat as DiagramFormat } : {}),
     ...(baselineCommit !== undefined ? { baseline_commit: baselineCommit, baseline_source: baselineSource as BaselineSource } : {}),
     ...(baselineHistory !== undefined ? { baseline_history: baselineHistory } : {}),
+    ...(baselineRepos !== undefined ? { baseline_repos: baselineRepos } : {}),
+    ...(baselineReposHistory !== undefined ? { baseline_repos_history: baselineReposHistory } : {}),
     revision,
     scope,
     depth: scalar(markdown, "Depth"),
@@ -433,7 +567,7 @@ export function renderLightWorkflowState(state: WorkflowState): string {
 - Status: ${state.status}
 - Revision: ${state.revision}
 - Engine Version: ${clean(state.version)}
-${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}${state.diagram_format ? `- Diagram Format: ${state.diagram_format}\n` : ""}${state.baseline_commit !== undefined ? `- Baseline Commit: ${clean(state.baseline_commit)}\n- Baseline Source: ${clean(state.baseline_source || "")}\n` : ""}${state.baseline_history !== undefined ? `- Baseline History: ${state.baseline_history.map(clean).join(", ")}\n` : ""}- Depth: ${clean(state.depth)}
+${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}${state.diagram_format ? `- Diagram Format: ${state.diagram_format}\n` : ""}${state.baseline_commit !== undefined ? `- Baseline Commit: ${clean(state.baseline_commit)}\n- Baseline Source: ${clean(state.baseline_source || "")}\n` : ""}${state.baseline_history !== undefined ? `- Baseline History: ${state.baseline_history.map(clean).join(", ")}\n` : ""}${state.baseline_repos !== undefined ? `- Baseline Repos: ${clean(renderBaselineRepos(state.baseline_repos))}\n` : ""}${state.baseline_repos_history !== undefined ? `- Baseline Repos History: ${clean(renderBaselineReposHistory(state.baseline_repos_history))}\n` : ""}- Depth: ${clean(state.depth)}
 - Current Phase: ${clean(state.current_phase)}
 - Current Stage: ${cell(state.current_stage)}
 - Current Instance: ${cell(state.current_stage_instance)}
@@ -540,14 +674,21 @@ export interface SaveWorkflowOptions {
 function assertBaselinePreserved(existing: WorkflowState | null, state: WorkflowState, ref: WorkflowRef, options: SaveWorkflowOptions): void {
   assertBaselineFields(state);
   if (ref.kind !== "global" && (state.baseline_commit !== undefined || state.baseline_source !== undefined || state.baseline_history !== undefined)) throw subWorkflowBaselineError(ref.kind);
+  if (ref.kind !== "global" && (state.baseline_repos !== undefined || state.baseline_repos_history !== undefined)) throw subWorkflowReposError(ref.kind);
   if (options.baselineWrite) return;
   if (existing) {
     if (existing.baseline_commit !== state.baseline_commit || existing.baseline_source !== state.baseline_source
       || JSON.stringify(existing.baseline_history) !== JSON.stringify(state.baseline_history)) {
       throw new Error("the workflow baseline can only be changed by orchestrate baseline; an ordinary save must keep Baseline Commit / Baseline Source / Baseline History unchanged");
     }
+    if (JSON.stringify(baselineRepoChains(existing)) !== JSON.stringify(baselineRepoChains(state))
+      || (existing.baseline_repos_history === undefined) !== (state.baseline_repos_history === undefined)) {
+      throw new Error("the workflow baseline can only be changed by orchestrate baseline; an ordinary save must keep Baseline Repos / Baseline Repos History unchanged");
+    }
   } else if (state.baseline_history !== undefined) {
     throw new Error("a new workflow cannot start with a Baseline History chain");
+  } else if (state.baseline_repos_history !== undefined) {
+    throw new Error("a new workflow cannot start with a Baseline Repos History chain");
   } else if (state.baseline_source !== undefined && state.baseline_source !== "created") {
     throw new Error(`a new workflow can only record a created baseline, got Baseline Source ${state.baseline_source}`);
   }

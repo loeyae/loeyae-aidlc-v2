@@ -31,9 +31,10 @@ import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
 import { planAgentExecution, type AgentExecutionPlan } from "./aidlc-agent-runtime";
 import { SEMANTIC_SENSORS, allowlistedPhaseCommand, argvDigest, i13CodeRefBlobs, i13UcdIdsByMode, phaseNotRequiredDigest, phaseObservationDigest, ucdExemptionDigest, unitUcdExemption, type Phase } from "./aidlc-evidence";
-import { CANONICAL_SOURCE_PATTERN, resolveSourceRoots } from "./aidlc-source-roots";
+import { CANONICAL_SOURCE_PATTERN, SOURCE_ROOTS_CONFIG, declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
+import { codeRefRepo, nestedHead, nestedMigrationCommand, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
 import { CONTRACT_CONSUMER_COLUMN, CONTRACT_ID_COLUMN, CONTRACT_PROVIDER_COLUMN, moduleForValue } from "./aidlc-contract-table";
-import { COMMIT_ID_PATTERN, commitAncestryErrors, readSourceRevision } from "./aidlc-revision";
+import { COMMIT_ID_PATTERN, commitAncestryErrors, readSourceRevision, type RepoRevision } from "./aidlc-revision";
 import {
   baselineCodeRef,
   baselineCommitErrors,
@@ -41,8 +42,16 @@ import {
   baselineUsage,
   checkAdvanceTarget,
   checkBaselineCandidate,
+  checkRepoAdvanceTarget,
+  checkRepoCandidate,
   currentHeadCommit,
+  epochRepos,
+  extraRepoKeyErrors,
+  nestedCommitErrors,
+  nestedDirty,
   parseCodeRef,
+  pendingRepos,
+  workflowStartedAt,
   workflowBaselineForModule,
   type CodeRef,
 } from "./aidlc-baseline";
@@ -75,7 +84,9 @@ import {
   GLOBAL_WORKFLOW,
   appendAuditEvent,
   baselineChain,
+  baselineRepoChains,
   createInitialState,
+  renderBaselineRepos,
   lightStatePath,
   loadWorkflowState,
   releaseExpiredModuleClaims,
@@ -730,6 +741,10 @@ function artifactPresenceFailure(pattern: string, instance: StageInstance, allow
   const label = instanceArtifactPattern(pattern, instance, allowProjectAggregate);
   const contextual = label.replace(/\\/g, "/");
   const aggregated = contextual.includes("*") || /\{[^}]+\}/.test(contextual);
+  // 4.9.0: a lightweight worktree does not check out nested repositories; a produce or
+  // consume inside a skipped one is judged in the main checkout that holds it.
+  const delegated = aggregated ? undefined : skippedNestedMainCheckout(contextual);
+  if (delegated) return mainCheckoutPresence(delegated, contextual) ? undefined : label;
   let directory = contextual.endsWith("/");
   if (!directory && !aggregated) {
     const target = assertProjectPath(join(PROJECT_ROOT, contextual));
@@ -747,6 +762,46 @@ function artifactPresenceFailure(pattern: string, instance: StageInstance, allow
     ? paths.some((path) => lstatSync(path).size >= MIN_ARTIFACT_BYTES)
     : paths.length > 0 && paths.every((path) => lstatSync(path).size >= MIN_ARTIFACT_BYTES);
   return present ? undefined : label;
+}
+
+/**
+ * 4.9.0: when PROJECT_ROOT is a lightweight worktree (`.aidlc/worktrees/<id>.md` with
+ * `Nested Repos Skipped`) and `path` lies in a skipped nested repository that the
+ * worktree does not contain, the main checkout (parent of the shared git directory)
+ * holding that nested repository; undefined otherwise (always outside a worktree).
+ */
+function skippedNestedMainCheckout(path: string): string | undefined {
+  const metadataDir = join(PROJECT_ROOT, ".aidlc", "worktrees");
+  if (!existsSync(metadataDir)) return undefined;
+  const skipped = new Set<string>();
+  for (const name of readdirSync(metadataDir).filter((entry) => entry.endsWith(".md"))) {
+    const text = readFileSync(join(metadataDir, name), "utf8");
+    const line = /^- Nested Repos Skipped:\s*(.*)$/m.exec(text)?.[1];
+    if (line) for (const key of line.split(",").map((value) => value.trim()).filter(Boolean)) skipped.add(key);
+  }
+  const key = [...skipped].find((candidate) => path === candidate || path === `${candidate}/` || path.startsWith(`${candidate}/`));
+  if (!key || existsSync(join(PROJECT_ROOT, ...key.split("/")))) return undefined;
+  const common = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: PROJECT_ROOT, encoding: "utf8", shell: false });
+  if (common.error || common.status !== 0) return undefined;
+  const main = dirname(resolve(PROJECT_ROOT, common.stdout.trim()));
+  if (main === resolve(PROJECT_ROOT) || !existsSync(join(main, ...key.split("/"), ".git"))) return undefined;
+  return main;
+}
+
+/** Presence of `path` in the main checkout `root` with the rules of artifactPresenceFailure (no symbolic links). */
+function mainCheckoutPresence(root: string, path: string): boolean {
+  const target = join(root, ...path.replace(/\/+$/, "").split("/"));
+  if (!existsSync(target)) return false;
+  const walk = (current: string): string[] => {
+    const stat = lstatSync(current);
+    if (stat.isSymbolicLink()) throw new Error(`artifact path is a symbolic link: ${current}`);
+    if (stat.isFile()) return [current];
+    if (!stat.isDirectory()) return [];
+    return readdirSync(current).filter((entry) => !entry.startsWith(".")).flatMap((entry) => walk(join(current, entry)));
+  };
+  const files = walk(target);
+  const directory = path.endsWith("/") || lstatSync(target).isDirectory();
+  return directory ? files.some((file) => lstatSync(file).size >= MIN_ARTIFACT_BYTES) : files.length > 0 && files.every((file) => lstatSync(file).size >= MIN_ARTIFACT_BYTES);
 }
 
 export function checkProduces(instance: StageInstance): string[] {
@@ -900,6 +955,63 @@ interface SensorCheckOptions {
   onlySensors?: readonly string[];
 }
 
+/**
+ * `source_revision.repos` of an evidence (4.9.0): undefined for evidence without it
+ * (re-checked with the 4.8.1 algorithm). Each recorded repository must still be a
+ * declared nested repository; malformed entries are reported into `errors`.
+ */
+function nestedRevisionContext(sourceRevision: Evidence, errors: string[]): { keys: string[]; recorded: Record<string, Evidence> } | undefined {
+  if (sourceRevision.repos === undefined) return undefined;
+  const repos = asRecord(sourceRevision.repos);
+  if (!repos || Object.keys(repos).length === 0) {
+    errors.push("source_revision.repos must be a non-empty object keyed by nested repository path");
+    return undefined;
+  }
+  let declared: string[] = [];
+  try {
+    declared = nestedSourceRepos(PROJECT_ROOT);
+  } catch (error) {
+    errors.push(`source_revision.repos cannot be re-checked: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
+  const keys = Object.keys(repos).sort();
+  const undeclared = keys.filter((key) => !declared.includes(key));
+  if (undeclared.length > 0) {
+    errors.push(`source_revision.repos records ${undeclared.map((key) => `${key}/`).join(", ")}, which ${SOURCE_ROOTS_CONFIG} no longer declares as a nested repository`);
+    return undefined;
+  }
+  const recorded: Record<string, Evidence> = {};
+  for (const key of keys) {
+    const entry = asRecord(repos[key]);
+    if (!entry || !asNonEmptyString(entry.commit) || (entry.dirty !== null && typeof entry.dirty !== "boolean") || !/^[a-f0-9]{64}$/.test(String(entry.worktree_digest || ""))) {
+      errors.push(`source_revision.repos.${key} needs commit, dirty (boolean or null) and a SHA-256 worktree_digest`);
+      return undefined;
+    }
+    recorded[key] = entry;
+  }
+  return { keys, recorded };
+}
+
+/** Per nested repository comparison: exact (commit, dirty, worktree_digest) or HEAD ancestry of the recorded commit. */
+function nestedRevisionErrors(recorded: Record<string, Evidence>, current: Record<string, RepoRevision>, mode: { exact: boolean; ancestry: boolean }): string[] {
+  const errors: string[] = [];
+  for (const [key, entry] of Object.entries(recorded)) {
+    const active = current[key];
+    const field = `source_revision.repos.${key}`;
+    if (!active) {
+      errors.push(`${field}: the nested repository ${key}/ cannot be read`);
+      continue;
+    }
+    if (mode.exact) {
+      if (entry.commit !== active.commit) errors.push(`${field}.commit ${String(entry.commit)} does not match the current HEAD ${active.commit} of the nested repository ${key}/`);
+      if (entry.dirty !== active.dirty) errors.push(`${field}.dirty no longer matches the nested repository ${key}/`);
+      if (entry.worktree_digest !== active.worktree_digest) errors.push(`${field}.worktree_digest no longer matches the nested repository ${key}/ (its files changed after this evidence was produced)`);
+    }
+    if (mode.ancestry) errors.push(...commitAncestryErrors(join(PROJECT_ROOT, ...key.split("/")), String(entry.commit), active.commit, `${field}.commit`));
+  }
+  return errors;
+}
+
 function validateEvidence(
   stage: StageNode,
   sensor: string,
@@ -929,9 +1041,14 @@ function validateEvidence(
     if (!commit) errors.push("source_revision.commit is required");
     if (sourceRevision.dirty !== null && typeof sourceRevision.dirty !== "boolean") errors.push("source_revision.dirty must be boolean or null");
     const recordedScope = typeof sourceRevision.scope === "string" ? sourceRevision.scope : undefined;
+    // 4.9.0: the algorithm follows the evidence's own structure. Evidence without
+    // source_revision.repos is re-checked exactly as in 4.8.1 (nested repositories left
+    // out); evidence with it is re-checked per repository.
+    const nestedCheck = nestedRevisionContext(sourceRevision, errors);
+    const nestedKeys = nestedCheck?.keys;
     if (recordedScope === undefined || recordedScope === "worktree") {
       // Historical binding: the exact commit, dirty flag and whole-worktree digest.
-      const activeRevision = readSourceRevision(PROJECT_ROOT);
+      const activeRevision = readSourceRevision(PROJECT_ROOT, undefined, nestedKeys);
       const drift = !options.tolerateRevisionDrift;
       if (drift && commit && commit !== activeRevision.commit) errors.push(`source_revision.commit ${commit} does not match current HEAD ${activeRevision.commit}`);
       // The tolerated drift is the worktree only: the recorded commit must still be in HEAD's history.
@@ -942,6 +1059,7 @@ function validateEvidence(
       } else if (drift && sourceRevision.worktree_digest !== activeRevision.worktree_digest) {
         errors.push("source_revision.worktree_digest no longer matches the current worktree");
       }
+      if (nestedCheck) errors.push(...nestedRevisionErrors(nestedCheck.recorded, activeRevision.repos || {}, { exact: drift, ancestry: !drift }));
     } else {
       // Split layout: content-addressed within the owning workflow's scope. The commit
       // is provenance only, so another module's commit or write cannot invalidate it.
@@ -951,9 +1069,11 @@ function validateEvidence(
         errors.push(`source_revision.scope ${recordedScope} does not match the ${expectedScope.label} scope of ${instance.instance_id}`);
       } else if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.scope_digest || ""))) {
         errors.push("source_revision.scope_digest must be a SHA-256 digest");
-      } else if (!options.tolerateRevisionDrift && sourceRevision.scope_digest !== readSourceRevision(PROJECT_ROOT, expectedScope).scope_digest) {
+      } else if (!options.tolerateRevisionDrift && sourceRevision.scope_digest !== readSourceRevision(PROJECT_ROOT, expectedScope, nestedKeys).scope_digest) {
         errors.push(`source_revision.scope_digest no longer matches the ${recordedScope} scope`);
       }
+      // Nested files inside the scope are covered by scope_digest; the repository commits stay in history.
+      if (nestedCheck) errors.push(...nestedRevisionErrors(nestedCheck.recorded, readSourceRevision(PROJECT_ROOT, undefined, nestedKeys).repos || {}, { exact: false, ancestry: options.tolerateRevisionDrift === true }));
     }
   }
 
@@ -1178,7 +1298,7 @@ function i13ModeErrors(evidence: Evidence, ucdIds: string[], state: WorkflowStat
   } catch (error) {
     errors.push(`source roots cannot be resolved: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const refs: Array<{ ucd: string; ref: CodeRef; blob: string }> = [];
+  const refs: Array<{ ucd: string; ref: CodeRef; blob: string; repo?: string }> = [];
   const seen = new Set<string>();
   for (const [index, value] of entries.entries()) {
     const entry = asRecord(value);
@@ -1204,7 +1324,8 @@ function i13ModeErrors(evidence: Evidence, ucdIds: string[], state: WorkflowStat
       try {
         const ref = parseCodeRef(symbol === undefined ? path : `${path}::${String(symbol)}`, roots, `characterization ${ucd} code_refs`);
         if (ref.path !== path) errors.push(`characterization ${ucd} code_refs path ${path} is not normalized`);
-        refs.push({ ucd, ref, blob });
+        if (codeRef.repo !== undefined && !asNonEmptyString(codeRef.repo)) errors.push(`characterization ${ucd} code_refs ${path} repo must be "." or a nested repository path`);
+        refs.push({ ucd, ref, blob, ...(codeRef.repo !== undefined ? { repo: String(codeRef.repo) } : {}) });
       } catch (error) {
         errors.push(error instanceof Error ? error.message : String(error));
       }
@@ -1226,8 +1347,44 @@ function i13ModeErrors(evidence: Evidence, ucdIds: string[], state: WorkflowStat
   if (evidence.baseline_commit !== epoch0) {
     return [...errors, `baseline_commit ${JSON.stringify(evidence.baseline_commit)} does not match the workflow baseline ${epoch0}${baseline.epochs.length > 1 ? " (epoch 0 of the baseline chain)" : ""}`];
   }
-  for (const { ucd, ref, blob } of refs) {
-    const resolved = baselineCodeRef(PROJECT_ROOT, epoch0, ref, `characterization ${ucd} code_refs ${ref.path}`);
+  // 4.9.0: I13 with baseline_repos binds each nested repository at its start epoch; I13
+  // without it (and without code_refs[].repo) keeps the 4.8.1 rules.
+  const nestedI13 = evidence.baseline_repos !== undefined;
+  let nested: string[] = [];
+  const registered = Object.keys(baseline.repos).length > 0;
+  if (nestedI13 || registered) {
+    try {
+      nested = nestedSourceRepos(PROJECT_ROOT);
+    } catch (error) {
+      return [...errors, error instanceof Error ? error.message : String(error)];
+    }
+    const extra = extraRepoKeyErrors(baseline, nested);
+    if (extra.length > 0) return [...errors, ...extra];
+  }
+  const startRepos = Object.fromEntries(Object.entries(baseline.repos).map(([key, chain]) => [key, chain.commits[0]]));
+  if (nestedI13) {
+    const recorded = asRecord(evidence.baseline_repos);
+    if (!recorded || JSON.stringify(Object.keys(recorded).sort()) !== JSON.stringify(Object.keys(startRepos).sort())
+      || Object.keys(startRepos).some((key) => recorded[key] !== startRepos[key])) {
+      return [...errors, `baseline_repos ${JSON.stringify(evidence.baseline_repos)} does not match the start-epoch commits of the registered nested repositories ${JSON.stringify(startRepos)}`];
+    }
+  }
+  for (const { ucd, ref, blob, repo } of refs) {
+    if (!nestedI13 && repo !== undefined) {
+      errors.push(`characterization ${ucd} code_refs ${ref.path} records repo ${JSON.stringify(repo)} but the I13 evidence has no baseline_repos`);
+      continue;
+    }
+    const owner = nestedI13 ? codeRefRepo(PROJECT_ROOT, ref.path, nested) : undefined;
+    if (owner && repo !== owner.repoKey) {
+      errors.push(`characterization ${ucd} code_refs ${ref.path} repo ${JSON.stringify(repo)} must be ${JSON.stringify(owner.repoKey)}`);
+      continue;
+    }
+    if (owner && owner.repoKey !== WORKFLOW_REPO_KEY && !(owner.repoKey in startRepos)) {
+      errors.push(pendingNestedError(PROJECT_ROOT, baseline.commit, [owner.repoKey]));
+      continue;
+    }
+    const commit = owner && owner.repoKey !== WORKFLOW_REPO_KEY ? startRepos[owner.repoKey] : epoch0;
+    const resolved = baselineCodeRef(PROJECT_ROOT, commit, ref, `characterization ${ucd} code_refs ${ref.path}`, owner);
     if ("error" in resolved) errors.push(resolved.error);
     else if (resolved.blob !== blob) errors.push(`characterization ${ucd} code_refs ${ref.path} baseline_blob ${blob} does not match ${resolved.blob} at the workflow baseline`);
   }
@@ -1286,13 +1443,42 @@ function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: Sta
   const commitErrors = baselineCommitErrors(PROJECT_ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
   if (commitErrors.length > 0 || !baseline.registered) return commitErrors;
   const chain = baseline.epochs;
-  const epochIndex = typeof evidence.baseline_commit === "string" ? chain.indexOf(evidence.baseline_commit) : -1;
+  // 4.9.0: BASELINE evidence with baseline_repos is identified by the workflow commit
+  // together with the nested repository commits of its epoch; evidence without it (and
+  // without code_ref_digests[].repo) is re-checked with the 4.8.1 rules.
+  const nestedEvidence = evidence.baseline_repos !== undefined;
+  let nested: string[] = [];
+  if (nestedEvidence || Object.keys(baseline.repos).length > 0) {
+    try {
+      nested = nestedSourceRepos(PROJECT_ROOT);
+    } catch (error) {
+      return [error instanceof Error ? error.message : String(error)];
+    }
+    const extra = extraRepoKeyErrors(baseline, nested);
+    if (extra.length > 0) return extra;
+  }
+  const recordedRepos = nestedEvidence ? asRecord(evidence.baseline_repos) : null;
+  if (nestedEvidence && !recordedRepos) errors.push("BASELINE baseline_repos must be an object keyed by nested repository path");
+  const sameRepos = (left: Record<string, unknown>, right: Record<string, string>) => JSON.stringify(Object.keys(left).sort()) === JSON.stringify(Object.keys(right).sort()) && Object.keys(right).every((key) => left[key] === right[key]);
+  const epochIndex = typeof evidence.baseline_commit !== "string"
+    ? -1
+    : nestedEvidence
+      ? chain.findIndex((entry, index) => entry === evidence.baseline_commit && recordedRepos !== null && sameRepos(recordedRepos, epochRepos(baseline, index)))
+      : chain.indexOf(evidence.baseline_commit);
   const epoch = epochIndex >= 0 ? chain[epochIndex] : undefined;
+  const repos = epochIndex >= 0 ? epochRepos(baseline, epochIndex) : {};
   if (epoch === undefined) {
-    errors.push(`BASELINE baseline_commit ${JSON.stringify(evidence.baseline_commit)} does not match the workflow baseline ${baseline.commit}${chain.length > 1 ? ` or any earlier epoch of the baseline chain (${chain.join(", ")})` : ""}`);
+    errors.push(nestedEvidence
+      ? `BASELINE baseline_commit ${JSON.stringify(evidence.baseline_commit)} with baseline_repos ${JSON.stringify(evidence.baseline_repos)} does not match any epoch of the workflow baseline chain (${chain.map((entry, index) => [entry, ...Object.entries(epochRepos(baseline, index)).map(([key, sha]) => `${key}=${sha}`)].join(";")).join(", ")})`
+      : `BASELINE baseline_commit ${JSON.stringify(evidence.baseline_commit)} does not match the workflow baseline ${baseline.commit}${chain.length > 1 ? ` or any earlier epoch of the baseline chain (${chain.join(", ")})` : ""}`);
   } else {
-    if (epoch !== baseline.commit) errors.push(...baselineEpochErrors(PROJECT_ROOT, epoch));
-    if (requireCurrentEpoch && epoch !== baseline.commit) {
+    if (epochIndex !== chain.length - 1) {
+      if (epoch !== baseline.commit) errors.push(...baselineEpochErrors(PROJECT_ROOT, epoch));
+      for (const [key, sha] of Object.entries(repos)) errors.push(...nestedCommitErrors(PROJECT_ROOT, key, sha, "baseline epoch"));
+    } else {
+      for (const [key, sha] of Object.entries(repos)) errors.push(...nestedCommitErrors(PROJECT_ROOT, key, sha, "workflow baseline commit"));
+    }
+    if (requireCurrentEpoch && epochIndex !== chain.length - 1) {
       errors.push(`BASELINE baseline_commit ${epoch} is epoch ${epochIndex} of the baseline chain, but the current epoch is ${baseline.commit} (epoch ${chain.length - 1}): a unit's BASELINE and GREEN must complete within one epoch`);
     }
   }
@@ -1320,13 +1506,29 @@ function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: Sta
       continue;
     }
     if (worktree !== recorded) errors.push(`code_ref_digests ${path} worktree_blob ${worktree} must equal baseline_blob ${recorded}: BASELINE must observe the unmodified baseline code`);
+    if (!nestedEvidence && entry.repo !== undefined) {
+      errors.push(`code_ref_digests ${path} records repo ${JSON.stringify(entry.repo)} but the BASELINE evidence has no baseline_repos`);
+      continue;
+    }
     if (epoch === undefined) continue;
-    // I13 records the epoch-0 blobs; an evidence of a later epoch is checked against its own epoch only.
+    const owner = nestedEvidence ? codeRefRepo(PROJECT_ROOT, path, nested) : undefined;
+    if (owner && entry.repo !== owner.repoKey) {
+      errors.push(`code_ref_digests ${path} repo ${JSON.stringify(entry.repo)} must be ${JSON.stringify(owner.repoKey)}`);
+      continue;
+    }
+    const nestedKey = owner && owner.repoKey !== WORKFLOW_REPO_KEY ? owner.repoKey : undefined;
+    if (nestedKey && !(nestedKey in repos)) {
+      errors.push(`code_ref_digests ${path} lies in the nested repository ${nestedKey}/, which the workflow baseline did not register at epoch ${epochIndex}${nestedKey in baseline.repos ? ` (registered from epoch ${baseline.repos[nestedKey].start})` : ""}`);
+      continue;
+    }
+    // I13 records the blobs of each repository's start epoch (epoch 0 for the workflow
+    // repository); an evidence of a later epoch is checked against its own epoch only.
     const declared = expected.find((item) => item.path === path);
-    if (epochIndex === 0 && declared && declared.baseline_blob !== recorded) errors.push(`code_ref_digests ${path} baseline_blob ${recorded} does not match the I13 baseline_blob ${declared.baseline_blob}`);
-    const resolved = baselineCodeRef(PROJECT_ROOT, epoch, { path }, `code_ref_digests ${path}`);
+    const startEpoch = nestedKey ? baseline.repos[nestedKey].start : 0;
+    if (epochIndex === startEpoch && declared && declared.baseline_blob !== recorded) errors.push(`code_ref_digests ${path} baseline_blob ${recorded} does not match the I13 baseline_blob ${declared.baseline_blob}`);
+    const resolved = baselineCodeRef(PROJECT_ROOT, nestedKey ? repos[nestedKey] : epoch, { path }, `code_ref_digests ${path}`, owner);
     if ("error" in resolved) errors.push(resolved.error);
-    else if (resolved.blob !== recorded) errors.push(`code_ref_digests ${path} baseline_blob ${recorded} does not match ${resolved.blob} at the workflow baseline ${epoch}${chain.length > 1 ? ` (epoch ${epochIndex})` : ""}`);
+    else if (resolved.blob !== recorded) errors.push(`code_ref_digests ${path} baseline_blob ${recorded} does not match ${resolved.blob} at the workflow baseline ${nestedKey ? `${repos[nestedKey]} (nested repository ${nestedKey}/)` : epoch}${chain.length > 1 ? ` (epoch ${epochIndex})` : ""}`);
   }
   return errors;
 }
@@ -3653,12 +3855,42 @@ async function handleNext(args: string[]): Promise<Directive> {
     // baseline-free so module/integration workflows and pre-4.6 states never get one.
     state.baseline_commit = currentHeadCommit(PROJECT_ROOT);
     state.baseline_source = "created";
+    // 4.9.0: declared nested repositories record their HEAD too; a dirty or commit-less
+    // nested repository refuses the whole creation before anything is written.
+    let nestedRepos: string[] = [];
+    try {
+      nestedRepos = nestedSourceRepos(PROJECT_ROOT);
+    } catch (error) {
+      return { kind: "error", message: `🚫 Cannot start the workflow: ${error instanceof Error ? error.message : String(error)}. Nothing was written.` };
+    }
+    if (nestedRepos.length > 0) {
+      if (state.baseline_commit === BASELINE_UNAVAILABLE) {
+        return { kind: "error", message: `🚫 Cannot start the workflow: nested source repositories (${nestedRepos.map((key) => `${key}/`).join(", ")}) need the workflow repository to have a HEAD commit. Nothing was written.` };
+      }
+      const problems: string[] = [];
+      const repos: Record<string, string> = {};
+      for (const key of nestedRepos) {
+        const head = nestedHead(PROJECT_ROOT, key);
+        if (!head) {
+          problems.push(`${key}/ has no commit yet`);
+          continue;
+        }
+        const dirty = nestedDirty(PROJECT_ROOT, key);
+        if (dirty !== false) problems.push(`${key}/ ${dirty === null ? "status cannot be read" : "has uncommitted or untracked changes"}`);
+        repos[key] = head;
+      }
+      if (problems.length > 0) {
+        return { kind: "error", message: `🚫 Cannot start the workflow: the baseline records the HEAD of every nested source repository, but ${problems.join("; ")}. Commit or stash the changes in the nested repositories first, then run next --scope again. Nothing was written.` };
+      }
+      state.baseline_repos = repos;
+    }
     saveState(state);
     try {
       appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "BASELINE_COMMIT_RECORDED", {
         "Workflow ID": state.workflow_id,
         Commit: state.baseline_commit,
         Source: "created",
+        ...(state.baseline_repos ? { Repos: renderBaselineRepos(state.baseline_repos) } : {}),
       });
     } catch (error) {
       return { kind: "error", message: `Workflow ${state.workflow_id} was created with baseline ${state.baseline_commit}, but the BASELINE_COMMIT_RECORDED audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。` };
@@ -3668,6 +3900,7 @@ async function handleNext(args: string[]): Promise<Directive> {
       message: `✅ AWS-style lightweight workflow initialized for: ${workDescription}\n` +
         `  PRD option: ${withPrd ? "selected" : "not selected"}\n` +
         `  Baseline commit: ${state.baseline_commit} (created)\n` +
+        (state.baseline_repos ? `  Baseline repos: ${renderBaselineRepos(state.baseline_repos)}\n` : "") +
         `  Executable stages: ${getExecutableStages(graph, scopeFlag, selectedOptionalStages).length}/${graph.stage_count}\n` +
         `  Run 'next' again to get the first stage directive.`,
     };
@@ -4549,8 +4782,173 @@ function baselineError(message: string, extra: Record<string, unknown> = {}): Di
 
 const UNAVAILABLE_T0_NOTE = "The replacement commit's committer date must be no later than the workflow start (T0); if the workflow was created before the repository's first commit, no valid baseline exists and 需要重新开始工作流 (start a new workflow).";
 
+/**
+ * Take every `--<name> <path>=<commit>` pair out of `args` (4.9.0 `--repo` /
+ * `--expect-repo`). The commit must be a full lowercase hex id; a path may appear once.
+ */
+function takeRepoFlags(args: string[], name: string): { rest: string[]; values: Map<string, string> } | { error: string } {
+  const rest: string[] = [];
+  const values = new Map<string, string>();
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] !== `--${name}`) {
+      rest.push(args[index]);
+      continue;
+    }
+    const value = args[index + 1];
+    if (value === undefined || value.startsWith("--")) return { error: `--${name} requires <path>=<commit>` };
+    index++;
+    const match = /^([^=\s]+)=(.*)$/.exec(value);
+    if (!match) return { error: `--${name} must be <path>=<commit>, got ${JSON.stringify(value)}` };
+    const key = match[1].replace(/\\/g, "/").replace(/\/+$/, "");
+    if (!COMMIT_ID_PATTERN.test(match[2])) return { error: `--${name} ${key}=… must name a full 40- or 64-character lowercase hex commit id; abbreviations, revision expressions and branch names are rejected (got ${JSON.stringify(match[2])})` };
+    if (values.has(key)) return { error: `--${name} ${key} is given more than once` };
+    values.set(key, match[2]);
+  }
+  return { rest, values };
+}
+
+/**
+ * References into `paths` (nested repositories about to be registered) made by any
+ * evidence of the workflow: I13 characterization code refs, BASELINE code_ref_digests
+ * and any other `code_refs` / `code_ref_digests` entry. An unreadable evidence counts
+ * as referencing (fail closed). `source_revision.repos` is a revision record, not a reference.
+ */
+function nestedEvidenceReferences(paths: readonly string[]): string[] {
+  const findings: string[] = [];
+  const evidenceRoot = join(PROJECT_ROOT, ".aidlc", "evidence");
+  if (!existsSync(evidenceRoot)) return findings;
+  const inside = (value: unknown) => typeof value === "string" && paths.some((key) => value === key || value.startsWith(`${key}/`));
+  const walk = (value: unknown, label: string, refList: boolean): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, label, refList);
+      return;
+    }
+    const record = asRecord(value);
+    if (!record) return;
+    if (refList && inside(record.path)) findings.push(`${label}: ${String(record.path)}`);
+    for (const [key, item] of Object.entries(record)) {
+      if (key === "source_revision") continue;
+      walk(item, label, key === "code_refs" || key === "code_ref_digests");
+    }
+  };
+  for (const path of collectFiles(evidenceRoot).filter((file) => file.endsWith(".json")).sort()) {
+    const label = normalizeArtifactLabel(relative(PROJECT_ROOT, path));
+    try {
+      walk(JSON.parse(readFileSync(path, "utf8")), label, false);
+    } catch (error) {
+      findings.push(`${label}: cannot be parsed (${error instanceof Error ? error.message : String(error)}); treated as referencing`);
+    }
+  }
+  return findings;
+}
+
+/**
+ * Restricted migration (4.9.0): register nested repositories for a workflow whose
+ * baseline may already be in use or advanced. The workflow commit, Baseline Source and
+ * Baseline History never change; only missing keys are added, from the current epoch.
+ */
+async function registerNestedRepos(flags: Record<string, string>, state: WorkflowState, nested: readonly string[], repoFlags: Map<string, string>, hooks: StateWriteHooks): Promise<Directive> {
+  const current = state.baseline_commit as string;
+  const refuse = (reason: string) => baselineError(`Cannot register the nested repositories for workflow baseline ${current}: ${reason}. Nothing was written.`);
+  if (current === BASELINE_UNAVAILABLE) return refuse(`the workflow commit is ${BASELINE_UNAVAILABLE}; correct it first with --set <commit> --replace --expect ${BASELINE_UNAVAILABLE}`);
+  const registered = state.baseline_repos || {};
+  const adding = [...repoFlags.keys()].sort();
+  const changed = adding.filter((key) => key in registered);
+  if (changed.length > 0) return refuse(`${changed.map((key) => `${key}/`).join(", ")} ${changed.length === 1 ? "is" : "are"} already registered; a registered nested repository cannot be modified or removed here`);
+  const resulting = [...new Set([...Object.keys(registered), ...adding])].sort();
+  if (JSON.stringify(resulting) !== JSON.stringify([...nested].sort())) {
+    const missing = nested.filter((key) => !resulting.includes(key));
+    const extra = resulting.filter((key) => !nested.includes(key));
+    return refuse(`after this registration the nested repositories would be ${resulting.join(", ") || "none"}, but ${SOURCE_ROOTS_CONFIG} declares ${nested.join(", ") || "none"}${missing.length ? `; also pass --repo for ${missing.join(", ")}` : ""}${extra.length ? `; not declared: ${extra.join(", ")}` : ""}`);
+  }
+  const chain = baselineChain(state);
+  const startEpoch = chain.length - 1;
+  const references = nestedEvidenceReferences(adding);
+  if (references.length > 0) return refuse(`evidence of this workflow already refers to ${adding.map((key) => `${key}/`).join(", ")}: ${references.join("; ")}`);
+  const startedAt = workflowStartedAt(state);
+  const repoDirty: Record<string, string> = {};
+  const heads: Record<string, string> = {};
+  for (const key of adding) {
+    const check = checkRepoCandidate(PROJECT_ROOT, key, repoFlags.get(key)!, startedAt);
+    if ("error" in check) return refuse(`${key}=${repoFlags.get(key)}: ${check.error}`);
+    heads[key] = check.head;
+    const dirty = nestedDirty(PROJECT_ROOT, key);
+    repoDirty[key] = dirty === null ? "unknown" : dirty ? "yes" : "no";
+  }
+  const added = Object.fromEntries(adding.map((key) => [key, repoFlags.get(key)!]));
+  const repos = { ...registered, ...added };
+  const scan = `no evidence refers to ${adding.map((key) => `${key}/`).join(", ")}`;
+  const checks = { start_epoch: startEpoch, added_repos: added, heads, repo_dirty: repoDirty, evidence_scan: scan };
+  if ("dry-run" in flags) {
+    return {
+      kind: "print",
+      dry_run: true,
+      changed: true,
+      workflow_id: state.workflow_id,
+      baseline_commit: current,
+      baseline_repos: repos,
+      checks,
+      message: `🔎 ${renderBaselineRepos(added)} pass every nested repository check (dry run, nothing written). Run the same command without --dry-run to register ${adding.length === 1 ? "it" : "them"} from epoch ${startEpoch}.`,
+    };
+  }
+  hooks.beforeWrite?.();
+  const fresh = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!fresh || fresh.revision !== state.revision) {
+    return baselineError(`workflow state revision conflict: expected ${state.revision}, found ${fresh ? fresh.revision : "no workflow"}; nothing was written, re-run the command.`);
+  }
+  if (fresh.baseline_commit !== current || JSON.stringify(baselineChain(fresh)) !== JSON.stringify(chain) || JSON.stringify(baselineRepoChains(fresh)) !== JSON.stringify(baselineRepoChains(state))) {
+    return baselineError(`--expect ${current} is no longer the workflow baseline; nothing was written.`);
+  }
+  const chains = baselineRepoChains(fresh);
+  fresh.baseline_repos = repos;
+  if (fresh.baseline_history !== undefined) {
+    fresh.baseline_repos_history = { ...chains, ...Object.fromEntries(adding.map((key) => [key, { start: startEpoch, commits: [added[key]] }])) };
+  }
+  fresh.history.push({ stage: "baseline", result: "repos-registered", timestamp: new Date().toISOString(), user_input: "Approve" });
+  try {
+    saveWorkflowState(PROJECT_ROOT, fresh, GLOBAL_WORKFLOW, { baselineWrite: true });
+  } catch (error) {
+    return baselineError(`${error instanceof Error ? error.message : String(error)}; nothing was written, re-run the command.`);
+  }
+  const event = "BASELINE_REPOS_REGISTERED";
+  try {
+    (hooks.appendAudit || appendAuditEvent)(PROJECT_ROOT, GLOBAL_WORKFLOW, event, {
+      "Workflow ID": fresh.workflow_id,
+      "Baseline Commit": current,
+      Repos: renderBaselineRepos(added),
+      "Start Epoch": String(startEpoch),
+      "Registered Repos": renderBaselineRepos(repos),
+      "Repo Dirty": adding.map((key) => `${key}=${repoDirty[key]}`).join(", "),
+      "Evidence Scan": scan,
+      Expected: flags.expect,
+      Reason: flags.reason.trim(),
+      "User Input": "Approve",
+    });
+  } catch (error) {
+    return baselineError(`Nested repositories ${renderBaselineRepos(added)} were saved to the workflow state, but the ${event} audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。`, { baseline_commit: current, baseline_repos: repos });
+  }
+  return {
+    kind: "print",
+    changed: true,
+    workflow_id: fresh.workflow_id,
+    baseline_commit: current,
+    baseline_source: fresh.baseline_source,
+    baseline_repos: repos,
+    baseline_epoch: startEpoch,
+    checks,
+    message: `✅ Nested repositories registered for workflow baseline ${current}: ${renderBaselineRepos(added)} (from epoch ${startEpoch}). Baseline Commit, Baseline Source and Baseline History are unchanged.`,
+  };
+}
+
 export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}): Promise<Directive> {
-  const flags = parseFlags(args);
+  // 4.9.0: --repo / --expect-repo <path>=<commit> may repeat; they are taken out before parseFlags.
+  const repoArgs = takeRepoFlags(args, "repo");
+  if ("error" in repoArgs) return baselineError(repoArgs.error);
+  const expectRepoArgs = takeRepoFlags(repoArgs.rest, "expect-repo");
+  if ("error" in expectRepoArgs) return baselineError(expectRepoArgs.error);
+  const repoFlags = repoArgs.values;
+  const expectRepoFlags = expectRepoArgs.values;
+  const flags = parseFlags(expectRepoArgs.rest);
   if (flags.text) return baselineError(`Unexpected baseline argument: ${flags.text}`);
   const invalidFlag = unsupportedFlag(flags, BASELINE_FLAGS);
   if (invalidFlag) return baselineError(`Unsupported baseline option: --${invalidFlag}`);
@@ -4568,13 +4966,36 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
   if (!setting && !advancing) {
     const stray = ["replace", "expect", "dry-run", "user-input", "reason"].find((flag) => flag in flags);
     if (stray) return baselineError(`--${stray} is only valid with --set <commit> (or --advance <commit>)`);
+    if (repoFlags.size > 0 || expectRepoFlags.size > 0) return baselineError(`--${repoFlags.size > 0 ? "repo" : "expect-repo"} is only valid with --set <commit> (or --advance <commit>)`);
   }
+  if (setting && !("replace" in flags) && expectRepoFlags.size > 0) return baselineError("--expect-repo is only valid with --replace (or --advance)");
 
   const state = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
   if (!setting && !advancing) {
     if (!state) return baselineError("No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\".");
     const registered = state.baseline_commit !== undefined;
     const chain = baselineChain(state);
+    // 4.9.0: nested repositories are shown only when registered or declared, so projects without them keep the 4.8.1 output.
+    let declared: string[] = [];
+    let declaredError: string | undefined;
+    try {
+      declared = declaredNestedRoots(PROJECT_ROOT);
+    } catch (error) {
+      declaredError = error instanceof Error ? error.message : String(error);
+    }
+    const repoChains = baselineRepoChains(state);
+    const pending = registered ? declared.filter((key) => !(key in repoChains)) : [];
+    const extra = Object.keys(repoChains).filter((key) => !declared.includes(key));
+    const nestedShown = Object.keys(repoChains).length > 0 || declared.length > 0 || declaredError !== undefined;
+    const migration = pending.length > 0 && state.baseline_commit && state.baseline_commit !== BASELINE_UNAVAILABLE
+      ? nestedMigrationCommand(state.baseline_commit, pending, Object.fromEntries(pending.map((key) => [key, nestedHead(PROJECT_ROOT, key) || "<sha>"])))
+      : undefined;
+    const nestedLines = !nestedShown ? "" : [
+      Object.keys(repoChains).length > 0 ? ` Nested repositories: ${Object.entries(repoChains).map(([key, value]) => `${key}=${value.commits[value.commits.length - 1]} (from epoch ${value.start})`).join(", ")}.` : "",
+      pending.length > 0 ? ` Pending migration (declared nested but not registered): ${pending.map((key) => `${key}/`).join(", ")}; register with: ${migration}` : "",
+      extra.length > 0 ? ` Registered but no longer declared in ${SOURCE_ROOTS_CONFIG}: ${extra.map((key) => `${key}/`).join(", ")} (gates reject this).` : "",
+      declaredError ? ` ${SOURCE_ROOTS_CONFIG} cannot be read: ${declaredError}` : "",
+    ].join("");
     return {
       kind: "print",
       workflow_id: state.workflow_id,
@@ -4583,14 +5004,21 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
       baseline_source: state.baseline_source ?? null,
       baseline_epoch: registered ? chain.length - 1 : null,
       baseline_history: chain,
-      message: registered
+      ...(nestedShown ? {
+        baseline_repos: state.baseline_repos ?? {},
+        baseline_repos_history: repoChains,
+        nested_source_roots: declared,
+        pending_nested_repos: pending,
+        ...(migration ? { migration_command: migration } : {}),
+      } : {}),
+      message: (registered
         ? chain.length > 1
           ? `Workflow baseline: ${state.baseline_commit} (source: ${state.baseline_source}, epoch ${chain.length - 1}). Baseline chain: ${chain.map((commit, index) => `#${index} ${commit}`).join(" → ")}.`
           : `Workflow baseline: ${state.baseline_commit} (source: ${state.baseline_source}).`
-        : "No workflow baseline is registered. Register the commit existing behavior is characterized against with: orchestrate baseline --set <commit> --user-input Approve --reason \"<reason>\" [--dry-run].",
+        : "No workflow baseline is registered. Register the commit existing behavior is characterized against with: orchestrate baseline --set <commit> --user-input Approve --reason \"<reason>\" [--dry-run].") + nestedLines,
     };
   }
-  if (advancing) return advanceBaseline(flags, state, hooks);
+  if (advancing) return advanceBaseline(flags, state, hooks, repoFlags, expectRepoFlags);
 
   const target = flags.set;
   if (!COMMIT_ID_PATTERN.test(target)) {
@@ -4614,6 +5042,29 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
   if (state.workflow_kind && state.workflow_kind !== "global") return baselineError(`aidlc/active/aidlc-state.md is a ${state.workflow_kind} workflow; baseline only runs on the global workflow.`);
 
   const current = state.baseline_commit;
+  // 4.9.0: nested source repositories (checked on disk, fail closed).
+  let nested: string[] = [];
+  try {
+    nested = nestedSourceRepos(PROJECT_ROOT);
+  } catch (error) {
+    return baselineError(`Cannot ${replace ? "replace" : "register"} the workflow baseline: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const undeclaredRepo = [...repoFlags.keys()].find((key) => !nested.includes(key));
+  if (undeclaredRepo) return baselineError(`--repo ${undeclaredRepo}=… names no nested repository declared in ${SOURCE_ROOTS_CONFIG} (declared: ${nested.join(", ") || "none"})`);
+  const registeredRepos = state.baseline_repos || {};
+  const extraKeys = Object.keys(registeredRepos).filter((key) => !nested.includes(key)).sort();
+  if (extraKeys.length > 0) {
+    return baselineError(`The workflow baseline registers nested repositories that ${SOURCE_ROOTS_CONFIG} no longer declares: ${extraKeys.map((key) => `${key}/`).join(", ")} (registered: ${Object.keys(registeredRepos).sort().join(", ")}; declared: ${nested.join(", ") || "none"}). Removing a registered nested repository is not supported; restore the declaration or start a new workflow.`);
+  }
+  for (const [key, sha] of expectRepoFlags) {
+    if (!(key in registeredRepos)) return baselineError(`--expect-repo ${key}=${sha}: ${key}/ is not registered in the workflow baseline (registered: ${Object.keys(registeredRepos).sort().join(", ") || "none"})`);
+    if (registeredRepos[key] !== sha) return baselineError(`--expect-repo ${key}=${sha} does not match the current workflow baseline ${key}=${registeredRepos[key]}`);
+  }
+  // Restricted migration: same workflow commit, only adding nested repositories the baseline does not register yet.
+  if (replace && current !== undefined && target === current && repoFlags.size > 0 && [...repoFlags.keys()].every((key) => !(key in registeredRepos))) {
+    if (flags.expect !== current) return baselineError(`--expect ${flags.expect} does not match the current workflow baseline ${current}`);
+    return registerNestedRepos(flags, state, nested, repoFlags, hooks);
+  }
   const unchanged = (): Directive => ({
     kind: "print",
     workflow_id: state.workflow_id,
@@ -4623,6 +5074,9 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
     message: `Workflow baseline is already ${current}; nothing was written.`,
   });
   if (!replace) {
+    if (current === target && repoFlags.size > 0) {
+      return baselineError(`Workflow baseline is already ${current}; to register nested repositories for it run: ${nestedMigrationCommand(current, [...repoFlags.keys()], Object.fromEntries(repoFlags))}`);
+    }
     if (current === target) return unchanged();
     if (current !== undefined) {
       const correction = `orchestrate baseline --set ${target} --replace --expect ${current} --user-input Approve --reason "<why>"`;
@@ -4637,7 +5091,7 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
       return baselineError(`Workflow baseline ${current} was advanced (baseline chain: ${baselineChain(state).join(" → ")}); an advanced baseline chain is append-only and cannot be replaced. Use orchestrate baseline --advance to append an epoch, or start a new workflow.`);
     }
     if (flags.expect !== current) return baselineError(`--expect ${flags.expect} does not match the current workflow baseline ${current}`);
-    if (target === current) return unchanged();
+    if (target === current && repoFlags.size === 0) return unchanged();
   }
 
   let usage: ReturnType<typeof baselineUsage> | undefined;
@@ -4653,6 +5107,41 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
     return baselineError(`Cannot use ${target} as the workflow baseline: ${checked.error}${restart}`);
   }
   const candidate = checked.candidate;
+  // 4.9.0: every declared nested repository gets a commit: --repo, or its clean HEAD.
+  const newRepos: Record<string, string> = {};
+  const repoDirty: Record<string, string> = {};
+  if (nested.length > 0) {
+    if (replace) {
+      const missingExpect = Object.keys(registeredRepos).filter((key) => !expectRepoFlags.has(key));
+      if (missingExpect.length > 0) return baselineError(`--replace of a baseline with registered nested repositories requires --expect-repo <path>=<current commit> for each of them; missing: ${missingExpect.map((key) => `--expect-repo ${key}=${registeredRepos[key]}`).join(" ")}`);
+    }
+    const problems: string[] = [];
+    for (const key of nested) {
+      const explicit = repoFlags.get(key);
+      const dirty = nestedDirty(PROJECT_ROOT, key);
+      if (explicit) {
+        newRepos[key] = explicit;
+        repoDirty[key] = dirty === null ? "unknown" : dirty ? "yes" : "no";
+        continue;
+      }
+      const head = nestedHead(PROJECT_ROOT, key);
+      if (!head) {
+        problems.push(`${key}/ has no commit yet`);
+        continue;
+      }
+      if (dirty !== false) problems.push(`${key}/ ${dirty === null ? "status cannot be read" : "has uncommitted or untracked changes"}`);
+      newRepos[key] = head;
+      repoDirty[key] = "no (HEAD taken)";
+    }
+    if (problems.length > 0) {
+      return baselineError(`Cannot take the HEAD of the nested repositories as their baseline: ${problems.join("; ")}. Commit or stash the changes first, or name the commit explicitly with --repo <path>=<commit>.`);
+    }
+    for (const key of nested) {
+      const repoCheck = checkRepoCandidate(PROJECT_ROOT, key, newRepos[key], candidate.workflow_started_at);
+      if ("error" in repoCheck) return baselineError(`Cannot use ${key}=${newRepos[key]} as the nested repository baseline: ${repoCheck.error}`);
+    }
+  }
+  const nestedChecks = nested.length > 0 ? { baseline_repos: newRepos, repo_dirty: repoDirty } : {};
   const anchors = candidate.anchors.length ? candidate.anchors.join(", ") : "none";
   const checks = {
     head: candidate.head,
@@ -4662,6 +5151,7 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
     anchor_commits: candidate.anchors,
     tracked_state_at_commit: candidate.tracked_state,
     ...(usage ? { usage_check: usage.summary } : {}),
+    ...nestedChecks,
   };
   if ("dry-run" in flags) {
     return {
@@ -4670,6 +5160,7 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
       changed: true,
       workflow_id: state.workflow_id,
       baseline_commit: target,
+      ...(nested.length > 0 ? { baseline_repos: newRepos } : {}),
       ...(replace ? { replaces: current } : {}),
       checks,
       message: `🔎 ${target} passes every baseline check (dry run, nothing written). Run the same command without --dry-run to ${replace ? "replace" : "register"} it.`,
@@ -4684,11 +5175,17 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
   if (fresh.baseline_commit !== current) {
     return baselineError(`--expect ${current ?? "(none)"} is no longer the workflow baseline (now ${fresh.baseline_commit ?? "none"}); nothing was written.`);
   }
+  if (JSON.stringify(baselineRepoChains(fresh)) !== JSON.stringify(baselineRepoChains(state))) {
+    return baselineError("the nested repository baseline changed while the command ran; nothing was written, re-run the command.");
+  }
   const source = replace ? "replaced" : "registered";
   const replacementCount = fresh.history.filter((entry) => entry.stage === "baseline" && entry.result === "replaced").length + 1;
   const previousSource = fresh.baseline_source;
+  const previousRepos = fresh.baseline_repos;
   fresh.baseline_commit = target;
   fresh.baseline_source = source;
+  if (nested.length > 0) fresh.baseline_repos = newRepos;
+  else delete fresh.baseline_repos;
   fresh.history.push({ stage: "baseline", result: source, timestamp: new Date().toISOString(), user_input: "Approve" });
   try {
     saveWorkflowState(PROJECT_ROOT, fresh, GLOBAL_WORKFLOW, { baselineWrite: true });
@@ -4704,6 +5201,13 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
     "Tracked State At Commit": candidate.tracked_state,
   };
   const event = replace ? "BASELINE_COMMIT_REPLACED" : "BASELINE_COMMIT_SET";
+  const repoFields: Record<string, string> = nested.length > 0
+    ? {
+      ...(replace ? { "From Repos": previousRepos ? renderBaselineRepos(previousRepos) : "-" } : {}),
+      Repos: renderBaselineRepos(newRepos),
+      "Repo Dirty": Object.keys(repoDirty).sort().map((key) => `${key}=${repoDirty[key]}`).join(", "),
+    }
+    : {};
   const fields: Record<string, string> = replace
     ? {
       "Workflow ID": fresh.workflow_id,
@@ -4711,6 +5215,7 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
       "From Source": previousSource || "-",
       To: target,
       Expected: flags.expect,
+      ...repoFields,
       "HEAD At Replacement": candidate.head,
       ...dates,
       "Usage Check": usage!.summary,
@@ -4722,6 +5227,7 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
       "Workflow ID": fresh.workflow_id,
       Commit: target,
       Source: source,
+      ...repoFields,
       "HEAD At Registration": candidate.head,
       ...dates,
       Reason: flags.reason.trim(),
@@ -4738,11 +5244,12 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
     workflow_id: fresh.workflow_id,
     baseline_commit: target,
     baseline_source: source,
+    ...(nested.length > 0 ? { baseline_repos: newRepos } : {}),
     ...(replace ? { replaced: current, replacement_count: replacementCount } : {}),
     checks,
     message: replace
-      ? `✅ Workflow baseline replaced: ${current} → ${target} (replacement #${replacementCount}).`
-      : `✅ Workflow baseline registered: ${target}.`,
+      ? `✅ Workflow baseline replaced: ${current} → ${target} (replacement #${replacementCount}).${nested.length > 0 ? ` Nested repositories: ${renderBaselineRepos(newRepos)}.` : ""}`
+      : `✅ Workflow baseline registered: ${target}.${nested.length > 0 ? ` Nested repositories: ${renderBaselineRepos(newRepos)}.` : ""}`,
   };
 }
 
@@ -4778,6 +5285,7 @@ function doneGlobalBaselineBlocker(state: WorkflowState, refusal: string): strin
 }
 
 const ADVANCE_USAGE = "orchestrate baseline --advance <commit> --expect <current baseline> --user-input Approve --reason \"<reason>\" [--dry-run]";
+const ADVANCE_USAGE_NESTED = "orchestrate baseline --advance <workflow commit> --repo <path>=<commit>… --expect <current workflow commit> --expect-repo <path>=<current commit>… --user-input Approve --reason \"<reason>\" [--dry-run]";
 
 /** Every workflow part as one merged read view (the global/single state outside the split layout). */
 function baselineScanView(): { view: WorkflowState; parts: WorkflowParts } {
@@ -4805,7 +5313,7 @@ function characterizationI13Files(): Array<{ path: string; value: Record<string,
   }).filter((file) => file.value.status === "required" && i13UcdIdsByMode(file.value).characterization.length > 0);
 }
 
-async function advanceBaseline(flags: Record<string, string>, state: WorkflowState | null, hooks: StateWriteHooks): Promise<Directive> {
+async function advanceBaseline(flags: Record<string, string>, state: WorkflowState | null, hooks: StateWriteHooks, repoFlags: Map<string, string> = new Map(), expectRepoFlags: Map<string, string> = new Map()): Promise<Directive> {
   const target = flags.advance;
   if (!COMMIT_ID_PATTERN.test(target)) {
     return baselineError(`--advance must be a full 40- or 64-character lowercase hex commit id; abbreviations, revision expressions (HEAD~3), branch names and options are rejected (got ${JSON.stringify(target)})`);
@@ -4835,8 +5343,48 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
   const currentErrors = baselineCommitErrors(PROJECT_ROOT, state);
   if (currentErrors.length > 0) return baselineError(`Cannot advance the workflow baseline: ${currentErrors.join("; ")}`);
 
+  // 4.9.0: every registered nested repository needs an explicit --repo target (and
+  // --expect-repo); a declared but unregistered one must be migrated first.
+  let nested: string[] = [];
+  try {
+    nested = nestedSourceRepos(PROJECT_ROOT);
+  } catch (error) {
+    return baselineError(`Cannot advance the workflow baseline: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const registeredRepos = state.baseline_repos || {};
+  const registeredKeys = Object.keys(registeredRepos).sort();
+  const extraKeys = registeredKeys.filter((key) => !nested.includes(key));
+  if (extraKeys.length > 0) {
+    return baselineError(`Cannot advance the workflow baseline: it registers nested repositories that ${SOURCE_ROOTS_CONFIG} no longer declares: ${extraKeys.map((key) => `${key}/`).join(", ")} (registered: ${registeredKeys.join(", ")}; declared: ${nested.join(", ") || "none"}). Restore the declaration or start a new workflow.`);
+  }
+  const pendingKeys = nested.filter((key) => !(key in registeredRepos));
+  if (pendingKeys.length > 0) return baselineError(`Cannot advance the workflow baseline: ${pendingNestedError(PROJECT_ROOT, current, pendingKeys)}`);
+  const strayRepo = [...repoFlags.keys(), ...expectRepoFlags.keys()].find((key) => !(key in registeredRepos));
+  if (strayRepo) return baselineError(`--repo / --expect-repo ${strayRepo}: ${strayRepo}/ is not a registered nested repository of the workflow baseline (registered: ${registeredKeys.join(", ") || "none"})`);
+  const missingRepo = registeredKeys.filter((key) => !repoFlags.has(key));
+  if (missingRepo.length > 0) {
+    return baselineError(`--advance must name the target of every registered nested repository explicitly (there is no default); missing: ${missingRepo.map((key) => `--repo ${key}=<commit>`).join(" ")}. Usage: ${ADVANCE_USAGE_NESTED}`);
+  }
+  const missingExpect = registeredKeys.filter((key) => !expectRepoFlags.has(key));
+  if (missingExpect.length > 0) return baselineError(`--advance requires --expect-repo <path>=<current commit> for every registered nested repository; missing: ${missingExpect.map((key) => `--expect-repo ${key}=${registeredRepos[key]}`).join(" ")}`);
+  for (const [key, sha] of expectRepoFlags) {
+    if (registeredRepos[key] !== sha) return baselineError(`--expect-repo ${key}=${sha} does not match the current workflow baseline ${key}=${registeredRepos[key]}`);
+  }
+  const repoTargets = Object.fromEntries(registeredKeys.map((key) => [key, repoFlags.get(key)!]));
+  const repoMoves: Record<string, boolean> = {};
+  for (const key of registeredKeys) {
+    const checked = checkRepoAdvanceTarget(PROJECT_ROOT, key, registeredRepos[key], repoTargets[key]);
+    if ("error" in checked) return baselineError(`Cannot advance the workflow baseline: ${checked.error}`);
+    repoMoves[key] = checked.moved;
+  }
+
   // 2. Target: existing commit, HEAD or an ancestor of HEAD, strict descendant of the current epoch.
-  const gitCheck = checkAdvanceTarget(PROJECT_ROOT, current, target);
+  // 4.9.0: with registered nested repositories the workflow commit may stay (at least one repository must advance).
+  const mainStays = registeredKeys.length > 0 && target === current;
+  if (mainStays && !Object.values(repoMoves).some(Boolean)) {
+    return baselineError(`Cannot advance the workflow baseline: neither the workflow repository (${target} is the current epoch) nor any nested repository (${registeredKeys.map((key) => `${key}=${repoTargets[key]}`).join(", ")}) moves; --advance needs at least one strict descendant`);
+  }
+  const gitCheck: { error: string } | { head: string } = mainStays ? { head: currentHeadCommit(PROJECT_ROOT) } : checkAdvanceTarget(PROJECT_ROOT, current, target);
   if ("error" in gitCheck) return baselineError(`Cannot advance the workflow baseline to ${target}: ${gitCheck.error}`);
 
   let scan: ReturnType<typeof baselineScanView>;
@@ -4885,7 +5433,11 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
     const label = normalizeArtifactLabel(relative(PROJECT_ROOT, path));
     const loaded = loadEvidence(instance.stage, "green-test-evidence", instance);
     if (!loaded.value) continue;
-    if (asRecord(loaded.value.source_revision)?.commit !== target) continue;
+    const anchoredRevision = asRecord(loaded.value.source_revision);
+    if (anchoredRevision?.commit !== target) continue;
+    // 4.9.0: the same GREEN evidence must also record every nested repository target.
+    const anchoredRepos = asRecord(anchoredRevision?.repos);
+    if (registeredKeys.some((key) => asRecord(anchoredRepos?.[key])?.commit !== repoTargets[key])) continue;
     const failures = await checkSensors(instance, view, { tolerateRevisionDrift: true, onlySensors: ["green-test-evidence"] });
     if (failures.length > 0) {
       anchorErrors.push(`${label}: ${failures.map((failure) => failure.message).join("; ")}`);
@@ -4895,17 +5447,20 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
     break;
   }
   if (!anchor) {
+    const nestedTargets = registeredKeys.length > 0 ? ` (with ${registeredKeys.map((key) => `source_revision.repos.${key}.commit ${repoTargets[key]}`).join(", ")})` : "";
     return baselineError(anchorErrors.length > 0
       ? `Cannot advance the workflow baseline to ${target}: the GREEN evidence anchored at it no longer passes its gate: ${anchorErrors.join("; ")}`
-      : `Cannot advance the workflow baseline to ${target}: it is not the source_revision.commit of the controlled GREEN evidence of any completed code-generation instance. --advance only moves to the completion point of a finished unit; commit that unit's changes before its GREEN evidence is produced (or refresh it after the commit).`);
+      : `Cannot advance the workflow baseline to ${target}: it is not the source_revision.commit${nestedTargets} of the controlled GREEN evidence of any completed code-generation instance. --advance only moves to the completion point of a finished unit; commit that unit's changes${registeredKeys.length > 0 ? " in the workflow repository and every nested repository" : ""} before its GREEN evidence is produced (or refresh it after the commit).`);
   }
 
-  // 5. Every I13 characterization code ref resolves at the target commit.
+  // 5. Every I13 characterization code ref resolves at the target commit (of its own repository, 4.9.0).
   const refErrors: string[] = [];
   try {
     for (const file of characterizationI13Files()) {
       for (const { path } of i13CodeRefBlobs(file.value)) {
-        const resolved = baselineCodeRef(PROJECT_ROOT, target, { path }, `${file.path} code ref ${path}`);
+        const repo = codeRefRepo(PROJECT_ROOT, path, registeredKeys);
+        const repoTarget = repo.repoKey === WORKFLOW_REPO_KEY ? target : repoTargets[repo.repoKey];
+        const resolved = baselineCodeRef(PROJECT_ROOT, repoTarget, { path }, `${file.path} code ref ${path}`, repo);
         if ("error" in resolved) refErrors.push(resolved.error);
       }
     }
@@ -4916,7 +5471,9 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
 
   const chain = [...baselineChain(state), target];
   const epoch = chain.length - 1;
-  const checks = { head: gitCheck.head, anchor, epoch, baseline_history: chain };
+  const repoChains = baselineRepoChains(state);
+  const nextRepoChains = Object.fromEntries(registeredKeys.map((key) => [key, { start: repoChains[key].start, commits: [...repoChains[key].commits, repoTargets[key]] }]));
+  const checks = { head: gitCheck.head, anchor, epoch, baseline_history: chain, ...(registeredKeys.length > 0 ? { baseline_repos: repoTargets, repo_moves: repoMoves } : {}) };
   if ("dry-run" in flags) {
     return {
       kind: "print",
@@ -4935,13 +5492,17 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
   if (!fresh || fresh.revision !== state.revision) {
     return baselineError(`workflow state revision conflict: expected ${state.revision}, found ${fresh ? fresh.revision : "no workflow"}; nothing was written, re-run the command.`);
   }
-  if (fresh.baseline_commit !== current || JSON.stringify(baselineChain(fresh)) !== JSON.stringify(baselineChain(state))) {
+  if (fresh.baseline_commit !== current || JSON.stringify(baselineChain(fresh)) !== JSON.stringify(baselineChain(state)) || JSON.stringify(baselineRepoChains(fresh)) !== JSON.stringify(repoChains)) {
     return baselineError(`--expect ${current} is no longer the workflow baseline (now ${fresh.baseline_commit ?? "none"}); nothing was written.`);
   }
   const previousSource = fresh.baseline_source;
   fresh.baseline_history = chain;
   fresh.baseline_commit = target;
   fresh.baseline_source = "advanced";
+  if (registeredKeys.length > 0) {
+    fresh.baseline_repos = { ...repoTargets };
+    fresh.baseline_repos_history = nextRepoChains;
+  }
   fresh.history.push({ stage: "baseline", result: "advanced", timestamp: new Date().toISOString(), user_input: "Approve" });
   try {
     saveWorkflowState(PROJECT_ROOT, fresh, GLOBAL_WORKFLOW, { baselineWrite: true });
@@ -4957,6 +5518,12 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
       To: target,
       Epoch: String(epoch),
       Chain: chain.join(", "),
+      ...(registeredKeys.length > 0 ? {
+        "From Repos": renderBaselineRepos(registeredRepos),
+        "To Repos": renderBaselineRepos(repoTargets),
+        "Repos Moved": registeredKeys.map((key) => `${key}=${repoMoves[key] ? "yes" : "no"}`).join(", "),
+        "Expected Repos": renderBaselineRepos(Object.fromEntries(expectRepoFlags)),
+      } : {}),
       Anchor: `${anchor.path} @ ${anchor.commit} (${anchor.instance})`,
       Expected: flags.expect,
       HEAD: gitCheck.head,
@@ -4975,8 +5542,9 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
     advanced: current,
     baseline_epoch: epoch,
     baseline_history: chain,
+    ...(registeredKeys.length > 0 ? { baseline_repos: repoTargets } : {}),
     checks,
-    message: `✅ Workflow baseline advanced: ${current} → ${target} (epoch ${epoch}). Completed units keep their original BASELINE evidence; run evidence run for the active unit's tdd to observe BASELINE at the new epoch.`,
+    message: `✅ Workflow baseline advanced: ${current} → ${target} (epoch ${epoch}).${registeredKeys.length > 0 ? ` Nested repositories: ${renderBaselineRepos(repoTargets)}.` : ""} Completed units keep their original BASELINE evidence; run evidence run for the active unit's tdd to observe BASELINE at the new epoch.`,
   };
 }
 

@@ -138,6 +138,7 @@ loeyae-aidlc orchestrate report --stage <slug> --result completed
 ### 源码根与命令清单
 
 - 阶段图中的 `src/` 是源码根的规范占位，按 module-manifest `paths` → `.aidlc/source-roots.json`（`{ "version": "1", "source_roots": ["app", "web/src"] }`）→ 默认 `src/` 解析，适用于 Python 等不使用 `src/` 的项目。
+- 嵌套独立 git 仓库（4.9.0）：业务代码放在被工作流仓库忽略的子仓库（如 `app/` 自带 `.git`）时，在 `source-roots.json` 中写 `{ "path": "app", "repo": "nested" }`（只在这里声明；module-manifest `paths` 不接受对象条目，manifest 管模块归属，source-roots 管仓库拓扑）。声明会被 fail-closed 校验（是仓库根、无符号链接/junction、不互相包含、工作流仓库不跟踪其中文件）。characterization code ref、BASELINE 的 `git hash-object` 与 blob 解析都在子仓库内执行；基线在 `- Baseline Repos: app=<sha>` 里为每个嵌套仓库记录 commit，`baseline_commit` 始终是工作流仓库的 commit；证据的 `source_revision.repos` 记录各子仓库的 commit / dirty / digest，子仓库代码漂移会被发现。`--set` 默认取各子仓库干净的 HEAD（或 `--repo app=<sha>`），`--advance` 必须为每个嵌套仓库显式写 `--repo app=<sha>` 与 `--expect-repo app=<当前 sha>`。已有工作流声明后执行一次受限迁移：`loeyae-aidlc orchestrate baseline --set <当前 commit> --replace --expect <当前 commit> --repo app=<sha> --user-input Approve --reason "<原因>"`（基线已使用或已推进也可以，只补登尚未登记的仓库；`orchestrate baseline` 会打印这条命令）。涉及嵌套仓库的 `attest resolve`、`worktree prepare/merge-plan` 明确拒绝，不涉及的照旧。
 - 构建/测试/检查命令清单按 `--config` → `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找；RED/GREEN 命令清单只按 `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找，显式 `--config` 仅在指向同一文件时被接受，否则 producer 直接拒绝。文件中的 `stage` 必须与当前阶段一致。
 - `mode: review` 的代码审查记录须声明 `execution_context: isolated` 与 `review_only: true`。
 

@@ -32,6 +32,7 @@ import {
   type WorkflowState,
 } from "./aidlc-light-state";
 import { readSourceRevision, type DigestScope, type SourceRevision } from "./aidlc-revision";
+import { nestedSourceRepos } from "./aidlc-nested-repos";
 
 const TOOL_DIR = dirname(fileURLToPath(import.meta.url));
 const GRAPH_PATH = join(TOOL_DIR, "data", "stage-graph.json");
@@ -472,6 +473,10 @@ export function evidenceScopeForInstance(projectRoot: string, instanceId: string
   return { label: "worktree", exclude: () => false };
 }
 
+/**
+ * Source revision recorded by a new piece of evidence. 4.9.0: every declared nested
+ * repository (checked fail closed by nestedSourceRepos) gets its own `repos` entry.
+ */
 export function evidenceSourceRevision(projectRoot: string, instanceId: string | undefined): SourceRevision {
-  return readSourceRevision(projectRoot, instanceId ? evidenceScopeForInstance(projectRoot, instanceId) : undefined);
+  return readSourceRevision(projectRoot, instanceId ? evidenceScopeForInstance(projectRoot, instanceId) : undefined, nestedSourceRepos(projectRoot));
 }

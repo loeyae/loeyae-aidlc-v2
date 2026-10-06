@@ -38,6 +38,7 @@ approval: notify
 8. 每个 UC-D 可在 frontmatter 声明 `tdd_mode`（`new` 默认 / `characterization`）。`characterization` 只用于基线中已存在的行为，必须写非空 `code_refs`（`<项目相对路径>[::<符号>]`，落在源码根内）、`reason` 和 `approval_ref`；`new` 不得写这三项。`bugfix` 至少保留 1 条 `new` 复现 bug。使用 characterization 前工作流须已登记基线（存量工作流执行 `orchestrate baseline --set`）。
 9. ready 状态以每个 UC-D 自己的用例文件为准，`_index.md` 中的状态不参与计数。
 10. 模块拆成多个 unit 时，可在 frontmatter 声明 `unit_refs: [<unit-id>, ...]`（4.8.0）：只能写在 frontmatter，非空、不重复、必须是本模块 `unit-manifest.json` 中的 unit；模块内一旦有 UC-D 声明，全部 UC-D 都必须声明。声明后各 unit 的 tdd / code-generation 只覆盖本单元的 UC-D，build-and-test 对账模块全集；不被任何 `unit_refs` 指向的 unit 须在 `unit-manifest.json` 中声明 `ucd_exemption`（字段见 `knowledge/protocols/test-case-derivation.md`）。全部不声明时保持模块全集覆盖。
+11. `code_refs` 指向嵌套独立 git 仓库（4.9.0，`.aidlc/source-roots.json` 中的 `{ "path": "<dir>", "repo": "nested" }`）时，先确认基线已登记该仓库（`orchestrate baseline` 显示待迁移仓库与迁移命令）。已有工作流新增这类 characterization UC-D：用 `unit_refs` 只分配给还没开始 tdd 的单元；模块原来没用 `unit_refs` 时一次给全部 UC-D 补上，已完成单元的 UC-D 指向它们原来的单元。I13 原本产出失败时，迁移后对活动中的 test-case-derivation 执行普通 `evidence run`；I13 已完成时执行 `evidence run --refresh`。已完成单元的 RED / BASELINE / GREEN 不需要任何操作（按单元子集复验，工作流仓库部分仍绑定第 0 代）。
 
 ## 完成标准
 

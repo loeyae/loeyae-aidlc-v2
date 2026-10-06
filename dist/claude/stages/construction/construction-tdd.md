@@ -202,6 +202,8 @@ I13 中有 `tdd_mode: characterization` 的 UC-D 时，在修改任何 code ref 
 
 执行命令之前，producer 用 `git hash-object` 计算 I13 `characterization[]` 中每个 code ref 的当前工作区 blob，任一与 `baseline_blob` 不同就直接失败、不出证据——BASELINE 只能观察未改动的基线代码。命令须退出 0，`uc_mapping` 恰好覆盖全部 characterization UC-D。没有 characterization UC-D 时 BASELINE 为 `not_required`，清单也不必声明 `role: baseline`。契约详见 `sensors/baseline-test-evidence.md`。
 
+code ref 位于嵌套独立 git 仓库（4.9.0，source-roots 中 `repo: "nested"`）时，比对在该仓库内进行，取该仓库当前代的 commit；嵌套仓库中未提交的改动同样会被拒。多单元依次改动嵌套仓库的 code ref 时，上一单元在嵌套仓库中提交、产出 GREEN 后执行 `orchestrate baseline --advance <工作流 commit> --repo <dir>=<GREEN 的 repos.<dir>.commit> --expect … --expect-repo <dir>=<当前>`。
+
 ### GREEN 与 REFACTOR
 
 本阶段不执行 GREEN 或生产代码实现。完成 RED 门禁后，`code-generation` 必须消费本阶段证据，写最少生产代码并运行 GREEN 命令；只有 GREEN 证据通过后才可进入代码审查。重构也只能在 GREEN 之后进行，并由代码生成阶段和后续审查/构建阶段验证。

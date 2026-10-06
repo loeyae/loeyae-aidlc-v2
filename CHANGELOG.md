@@ -1,5 +1,37 @@
 # Changelog
 
+## 4.9.0
+
+新增嵌套独立 git 仓库作为源码根：characterization、BASELINE、`source_revision` 与代码追溯按仓库解析；已有工作流声明嵌套仓库后，用一条受限迁移命令即可继续推进，不需要重新开始工作流，已完成实例不需要 `--refresh`。
+
+### Added
+
+- **声明方式**：`.aidlc/source-roots.json` 的 `source_roots` 条目除字符串外，还接受 `{ "path": "<dir>", "repo": "nested" }`（只允许这两个键，`repo` 只能是 `"nested"`）。嵌套仓库是项目级拓扑：split 布局里 module-manifest `paths` 优先决定源码根时，落在 `<dir>/` 下的路径仍按 source-roots 的声明归属该仓库（manifest 管模块归属，source-roots 管仓库拓扑）。module-manifest `paths` 出现对象条目时明确报错。不做自动识别。
+- **fail-closed 校验**（`core/tools/aidlc-nested-repos.ts` `nestedSourceRepos`）：路径每一段都不能是符号链接 / junction，realpath 在项目根内；`<dir>/.git` 存在；`git -C <dir> rev-parse --show-toplevel` 的 realpath 等于 `<dir>`；嵌套仓库不能互相包含；工作流仓库 `git ls-files -- <dir>` 为空。
+- **状态字段**：`baseline_commit` 处处仍是工作流仓库的 40/64 位 commit 或 `unavailable`。嵌套仓库放在独立字段：`- Baseline Repos: app=<sha>, web=<sha>`（`baseline_repos`，键按字典序；子工作流禁止携带；工作流 commit 为 `unavailable` 时禁止）；推进过的工作流另有 `- Baseline Repos History: app=@<起始代>:<sha>+<sha>…`（每个仓库从起始代到当前代每代一个 commit，无空洞，最后一代等于 `Baseline Repos`，只与 `Baseline History` 一起出现）。`Baseline History` 每项仍只是工作流 commit；嵌套仓库前进而工作流 commit 不变时，同一 commit 可在相邻两代出现，代以“工作流 commit + 各仓库 commit”区分。
+- **证据字段**（只在声明了嵌套仓库且已登记时出现）：I13 增加 `baseline_repos`（各仓库起始代的 commit），`characterization[].code_refs[]` 增加 `repo`（`"."` 或嵌套路径）；BASELINE 增加 `baseline_repos`（证据所在代），`code_ref_digests[]` 增加 `repo`；`source_revision` 增加 `repos: { "<dir>": { commit, dirty, worktree_digest } }`（嵌套仓库自己的 `ls-files -co --exclude-standard`），split 布局的 `scope_digest` 覆盖 scope 内的嵌套仓库文件。
+- **CLI**：`orchestrate baseline --set <commit> [--repo <dir>=<sha>]…`：未写 `--repo` 的嵌套仓库取它当前的 HEAD，此时任一嵌套仓库 dirty（含未跟踪文件）或没有提交即拒绝；显式 `--repo` 不查 dirty，但审计 `Repo Dirty` 记录。`--advance <commit> --repo <dir>=<sha>… --expect <commit> --expect-repo <dir>=<sha>…`：每个已登记仓库都必须显式写出（无默认值），目标是严格后代或等于当前代，至少一个仓库前进；GREEN 锚点要求同一份已完成 code-generation 的 GREEN 证据同时记录工作流 commit 和每个 `repos.<dir>.commit`。`next --scope` 创建工作流时自动记录各嵌套仓库 HEAD，dirty 或无提交时整个创建被拒绝，不写状态与审计。
+- **受限迁移**：`orchestrate baseline --set <当前 commit> --replace --expect <当前 commit> [--expect-repo …] --repo <dir>=<sha>… --user-input Approve --reason "…"`。只补登尚未登记的嵌套仓库：工作流 commit 必须等于当前值；登记后的键集合必须等于声明集合（已有键不能修改或删除）；已推进的工作流也可以，新仓库从当前代开始记录；父工作流和全部子工作流的证据中不得已有引用落在新仓库路径下（无法解析的证据视为已引用）；各仓库 commit 通过逐仓检查（存在、是 commit、是该仓库 HEAD 的祖先、非浅克隆、committer date 不晚于 T0、证据锚点）。只写入 `Baseline Repos` / `Baseline Repos History`，`Baseline Commit`、`Baseline Source`、`Baseline History` 不变，审计 `BASELINE_REPOS_REGISTERED`。
+- **待迁移状态**：声明了嵌套仓库、但基线没有登记它时，只拒绝产出 / 复验指向该仓库的 I13 characterization 或 BASELINE，以及 `--advance`，报错直接给出迁移命令；新的 GREEN / RED 照常产出并记录 `source_revision.repos`。不带参数的 `orchestrate baseline` 与 `runtime doctor` 显示待迁移仓库和命令。已登记但 source-roots 不再声明的键在门禁、`--set`、`--advance` 与迁移中报错；加载状态只校验格式。
+
+### Changed
+
+- **旧证据按自身结构复验**：证据没有 `source_revision.repos` 时按 4.8.1 算法复验（不含嵌套仓库文件）；BASELINE / I13 没有 `baseline_repos` / `repo` 时按 4.8.1 规则复验。适用于门禁、code-generation 完成时对 RED/BASELINE 的复验、`next` 上游复验、re-attest、`--advance` 锚点复验和 test-quality。声明嵌套仓库后已完成实例的证据字节不变。
+- **按仓库解析**：嵌套仓库下的 code ref 以子仓库为 cwd、用子仓库内相对路径执行 `cat-file` / `ls-tree` / `show` / `hash-object`。I13 中工作流仓库的 code ref 取第 0 代，嵌套仓库的取该仓库的起始代；BASELINE 复验按“证据所在代 × 所在仓库”重新解析 blob，证据所在代早于仓库起始代却引用该仓库时拒绝。
+- 字符串源码根照旧：`baselineCodeRef` 报 `does not exist in the workflow baseline` 时，若路径上某一级目录带 `.git`，报错末尾追加提示 `<dir>/ is an independent git repository; declare it in .aidlc/source-roots.json as { "path": "<dir>", "repo": "nested" }`，行为不变。
+- **attest / worktree / structural-invariants**（共享判定 `nestedInvolvement`，`core/tools/aidlc-nested-repos.ts`；命中 `code_ref` / `changed_path` / `evidence_repos` 之一即为“涉及”，只声明了嵌套源码根只给 `nested_source_roots` 提示）：
+  - `worktree prepare`：不涉及时照常创建工作流仓库的 worktree，元数据记录 `Nested Repos Skipped`；涉及时拒绝，不创建 worktree 与分支。在这种 worktree 中，code-generation 的 produces / consumes 对被跳过的嵌套源码根到主 checkout 中判定。
+  - `worktree merge-plan`：按最新 I13 的 code ref 与 diff 路径判定，涉及时拒绝（含 prepare 后 I13 refresh 才变成涉及的情况）；不涉及时结构与 4.8.1 一致，另有 `nested_repos_skipped`。
+  - `attest resolve`：显式路径、审查覆盖路径在嵌套仓库下，或证据带 `source_revision.repos` 时返回 `unverifiable` 并给出 `nested_repos_involved`，不会把看不到的仓库当作“已覆盖”或“未变更”；其他情况与 4.8.1 一致。
+  - structural-invariants 的 `baseline_ref`：候选文件位于嵌套仓库下时明确报错。
+
+### Upgrade notes
+
+- 没有嵌套仓库声明的项目无需任何操作，状态、证据和 CLI 输出与 4.8.1 一致。
+- 已有工作流切换到嵌套源码根：把 source-roots 条目改为 `{ "path": "app", "repo": "nested" }`，再执行一次受限迁移命令（`orchestrate baseline` 会打印）。基线已被使用或已推进也可以；需要更正已被使用的工作流 commit、或删除已登记的嵌套仓库时只能重新开始工作流。
+- I13 补充指向嵌套仓库的 characterization：新 UC-D 用 `unit_refs` 只分配给还没开始 tdd 的单元（模块原来没用 `unit_refs` 时需一次给全部 UC-D 补上，已完成单元的 UC-D 指向原单元）。I13 原本产出失败时迁移后对活动中的 `test-case-derivation` 执行普通 `evidence run`；I13 已完成时执行 `evidence run --refresh`。已完成单元的 RED / BASELINE / GREEN 不需要任何操作。
+- 推进顺序：先把工作流仓库和所有嵌套仓库的改动都提交，再产出 GREEN，然后 `--advance … --repo <dir>=<该 GREEN 记录的 commit>`。
+- 跨仓库的完整 attest / worktree 支持不在 4.9.0 范围内，另行跟进。
 ## 4.8.1
 
 修复类版本：模块 / 单元上下文中，`contract-baseline`、`nfr-coverage`、`infrastructure-completeness` 不再扫描全项目；同时修正 `noUnresolved()` 对否定描述的误判和 `nfrCoverage()` 的块截断。

@@ -84,3 +84,14 @@ I13 没有 characterization UC-D（含 I13 为 `not_applicable`）时写 `status
 3. 对**活动中的**单元执行普通 `evidence run --stage tdd --module <id> --unit <id> --sensor baseline-test-evidence`，BASELINE 在新一代上观察未修改的代码。
 
 `--advance` 的前置条件：工作流 running/parked、基线已登记且不是 `unavailable`；目标是当前代的严格后代、是 HEAD 或其祖先（浅克隆拒绝）；目标等于某个已完成 `code-generation` 实例受控 GREEN 证据的 `source_revision.commit`，且该证据仍通过 GREEN 门禁；没有单元停在 BASELINE 与 GREEN 之间（活动中的 `code-generation`，或已有 BASELINE 证据而 `code-generation` 未完成的 `tdd`）；所有 I13 code ref 在目标提交中可解析为普通文件。已完成单元不需要 `--refresh`。
+
+## 嵌套仓库（4.9.0）
+
+源码根声明为 `{ "path": "app", "repo": "nested" }` 的独立 git 仓库按仓库解析：
+
+- producer 的前置比对对 `app/` 下的 code ref 在 `app/` 内执行 `git hash-object`，与 `app` 在**当前代**的 commit（`Baseline Repos` / `Baseline Repos History`）中解析出的 blob 比较；不一致或未提交的改动直接拒绝（`changed since the baseline <sha> of the nested repository app/`）。
+- 已登记嵌套仓库时，证据增加 `baseline_repos`（证据所在代各仓库的 commit），`code_ref_digests[]` 增加 `repo`（`"."` 或 `"app"`）；`baseline_commit` 仍是工作流仓库的 commit。
+- 门禁按“证据所在代 × 所在仓库”重新解析 blob：代由工作流 commit 与 `baseline_repos` 一起确定；嵌套仓库的 code ref 与 I13 记录的 `baseline_blob` 在该仓库的**起始代**比对；证据所在代早于仓库起始代却引用该仓库时拒绝。
+- 没有 `baseline_repos` / `repo` 的旧证据按 4.8.1 规则复验，声明嵌套仓库后不需要 `--refresh`。
+- 嵌套仓库声明了但基线未登记（待迁移）时，涉及该仓库的 BASELINE 被拒，报错给出 `orchestrate baseline --set <当前> --replace --expect <当前> --repo app=<sha> …` 迁移命令。
+- 多单元改动同一嵌套仓库的 code ref 时，`--advance <工作流 commit> --repo app=<上一单元 GREEN 的 repos.app.commit> --expect <当前> --expect-repo app=<当前>`；每个已登记仓库都必须显式写出，至少一个前进。

@@ -17,7 +17,8 @@ import {
 import { spawnSync } from "child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
-import { baselineCodeRef, baselineCommitErrors, workflowBaselineForModule } from "./aidlc-baseline";
+import { baselineCodeRef, baselineCommitErrors, epochRepos, extraRepoKeyErrors, workflowBaselineForModule } from "./aidlc-baseline";
+import { codeRefRepo, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
 import { evidenceRelativePath, i13UcdIdsByMode as sharedI13UcdIdsByMode, readUnitManifest, stageInstanceId, unitManifestPath, unitUcdIds, type UcdExemption } from "./aidlc-execution-context";
 import { GLOBAL_WORKFLOW, loadWorkflowState, type WorkflowRef, type WorkflowState } from "./aidlc-light-state";
 import { evidenceSourceRevision, integrationStageSlugs, isSplitLayout, loadWorkflowParts, ownerOfInstance, stageAxis } from "./aidlc-workflow-layout";
@@ -653,22 +654,40 @@ function baselineCodeRefDigests(i13: Record<string, unknown>, state: ProducerSta
   if (commitErrors.length > 0 || !baseline.registered) fail(`BASELINE requires a usable workflow baseline: ${commitErrors.join("; ")}`);
   if (recorded !== baseline.epochs[0]) fail(`I13 baseline_commit ${recorded} does not match epoch 0 of the workflow baseline (${baseline.epochs[0]})`);
   const commit = baseline.commit;
-  const digests = i13CodeRefBlobs(i13, ucdIds).map(({ path }) => {
-    const resolved = baselineCodeRef(PROJECT_ROOT, commit, { path }, `code ref ${path}`);
+  // 4.9.0: code refs of a nested repository resolve in that repository at its commit of the current epoch.
+  let nested: string[] = [];
+  try {
+    nested = nestedSourceRepos(PROJECT_ROOT);
+  } catch (error) {
+    fail(`BASELINE refuses to run: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const extra = extraRepoKeyErrors(baseline, nested);
+  if (extra.length > 0) fail(`BASELINE refuses to run: ${extra.join("; ")}`);
+  const currentEpoch = baseline.epochs.length - 1;
+  const repos = epochRepos(baseline, currentEpoch);
+  const registered = Object.keys(baseline.repos).length > 0;
+  const entries = i13CodeRefBlobs(i13, ucdIds);
+  const pending = [...new Set(entries.map(({ path }) => codeRefRepo(PROJECT_ROOT, path, nested).repoKey).filter((key) => key !== WORKFLOW_REPO_KEY && !(key in repos)))].sort();
+  if (pending.length > 0) fail(`BASELINE refuses to run: ${pendingNestedError(PROJECT_ROOT, commit, pending)}`);
+  const digests = entries.map(({ path }) => {
+    const repo = codeRefRepo(PROJECT_ROOT, path, nested);
+    const repoCommit = repo.repoKey === WORKFLOW_REPO_KEY ? commit : repos[repo.repoKey];
+    const resolved = baselineCodeRef(PROJECT_ROOT, repoCommit, { path }, `code ref ${path}`, repo);
     if ("error" in resolved) fail(`BASELINE refuses to run: ${resolved.error}`);
     const baseline_blob = resolved.blob;
     requireRegularFile(path, `code ref ${path}`);
-    const result = spawnSync("git", ["hash-object", "--", path], { cwd: PROJECT_ROOT, encoding: "utf8", shell: false });
+    const result = spawnSync("git", ["hash-object", "--", repo.relativePath], { cwd: repo.repoKey === WORKFLOW_REPO_KEY ? PROJECT_ROOT : repo.repoRoot, encoding: "utf8", shell: false });
     const worktree = typeof result.stdout === "string" ? result.stdout.trim() : "";
     if (result.error || result.status !== 0 || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(worktree)) {
       fail(`cannot hash code ref ${path} with git hash-object: ${result.error ? result.error.message : (result.stderr || "").trim() || `exit ${result.status}`}`);
     }
     if (worktree !== baseline_blob) {
-      fail(`BASELINE refuses to run: code ref ${path} changed since the workflow baseline ${commit} (worktree blob ${worktree}, baseline blob ${baseline_blob}); characterization tests must observe the unmodified baseline code`);
+      const where = repo.repoKey === WORKFLOW_REPO_KEY ? `the workflow baseline ${commit}` : `the baseline ${repoCommit} of the nested repository ${repo.repoKey}/`;
+      fail(`BASELINE refuses to run: code ref ${path} changed since ${where} (worktree blob ${worktree}, baseline blob ${baseline_blob}); characterization tests must observe the unmodified baseline code`);
     }
-    return { path, baseline_blob, worktree_blob: worktree };
+    return registered ? { path, repo: repo.repoKey, baseline_blob, worktree_blob: worktree } : { path, baseline_blob, worktree_blob: worktree };
   });
-  return { baseline_commit: commit, code_ref_digests: digests };
+  return registered ? { baseline_commit: commit, baseline_repos: repos, code_ref_digests: digests } : { baseline_commit: commit, code_ref_digests: digests };
 }
 
 function phaseObservation(stdout: string, phase: Phase): Record<string, unknown> {

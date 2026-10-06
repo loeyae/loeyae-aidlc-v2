@@ -46,7 +46,46 @@ function unique(values: string[]): string[] {
   return [...new Set(values)];
 }
 
+/** Characters a nested repository path may use: it is also a key of `Baseline Repos`. */
+const NESTED_PATH_PATTERN = /^[A-Za-z0-9._/-]+$/;
+
+/**
+ * One `source_roots` entry (4.9.0): a string root, or `{ "path": "<dir>", "repo": "nested" }`
+ * declaring an independent nested git repository. Objects allow exactly these two keys.
+ */
+function sourceRootEntry(item: unknown, label: string): { path: string; nested: boolean } {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return { path: normalizeSourceRoot(item, label), nested: false };
+  const record = item as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  if (keys.length !== 2 || keys[0] !== "path" || keys[1] !== "repo") {
+    throw new Error(`${label}: an object source root must have exactly the keys "path" and "repo" ({ "path": "<dir>", "repo": "nested" }), got ${JSON.stringify(Object.keys(record))}`);
+  }
+  if (record.repo !== "nested") throw new Error(`${label}: repo must be "nested", got ${JSON.stringify(record.repo)}`);
+  const path = normalizeSourceRoot(record.path, label);
+  if (!NESTED_PATH_PATTERN.test(path)) throw new Error(`${label}: a nested repository path may only use letters, digits, ".", "_", "-" and "/", got ${JSON.stringify(record.path)}`);
+  return { path, nested: true };
+}
+
+interface ConfiguredRoots {
+  roots: string[];
+  nested: string[];
+}
+
 function configuredRoots(projectRoot: string): string[] | null {
+  return readConfiguredRoots(projectRoot)?.roots ?? null;
+}
+
+/**
+ * Nested repository paths declared in `.aidlc/source-roots.json` (4.9.0), sorted. Only
+ * the declaration is parsed here; nestedSourceRepos() (aidlc-nested-repos) checks the
+ * repositories on disk. Nested repositories are project-level topology: they apply even
+ * when module-manifest `paths` take priority for the source roots.
+ */
+export function declaredNestedRoots(projectRoot: string): string[] {
+  return [...(readConfiguredRoots(projectRoot)?.nested ?? [])].sort();
+}
+
+function readConfiguredRoots(projectRoot: string): ConfiguredRoots | null {
   const path = join(projectRoot, SOURCE_ROOTS_CONFIG);
   if (!existsSync(path)) return null;
   const info = lstatSync(path);
@@ -63,7 +102,12 @@ function configuredRoots(projectRoot: string): string[] | null {
   if (!Array.isArray(record.source_roots) || record.source_roots.length === 0) {
     throw new Error(`${SOURCE_ROOTS_CONFIG} source_roots must be a non-empty array of project-relative directories`);
   }
-  return unique(record.source_roots.map((item, index) => normalizeSourceRoot(item, `${SOURCE_ROOTS_CONFIG} source_roots[${index}]`)));
+  const entries = record.source_roots.map((item, index) => sourceRootEntry(item, `${SOURCE_ROOTS_CONFIG} source_roots[${index}]`));
+  const nested = unique(entries.filter((entry) => entry.nested).map((entry) => entry.path));
+  const plain = entries.filter((entry) => !entry.nested).map((entry) => entry.path);
+  const both = nested.filter((path) => plain.includes(path));
+  if (both.length > 0) throw new Error(`${SOURCE_ROOTS_CONFIG} declares ${both.join(", ")} both as a string root and as a nested repository`);
+  return { roots: unique(entries.map((entry) => entry.path)), nested };
 }
 
 /**

@@ -149,6 +149,9 @@ function modulePaths(value: unknown, label: string): string[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) throw new Error(`${label} must be an array of project-relative directories`);
   const paths = value.map((item, index) => {
+    if (item && typeof item === "object") {
+      throw new Error(`${label}[${index}] must be a string: nested git repositories are declared only in .aidlc/source-roots.json as { "path": "<dir>", "repo": "nested" } (module-manifest paths assign source to modules; source-roots.json declares the repository topology)`);
+    }
     const path = nonEmptyString(item, `${label}[${index}]`).replace(/\\/g, "/").replace(/\/+$/, "");
     if (!path || path.startsWith("/") || /^[A-Za-z]:/.test(path) || path.split("/").some((segment) => segment === ".." || segment === "." || segment === "")) {
       throw new Error(`${label}[${index}] must be a normalized project-relative directory`);

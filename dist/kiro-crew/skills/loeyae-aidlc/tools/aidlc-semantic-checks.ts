@@ -9,8 +9,9 @@ import { greenCoveredUcds, i13UcdIdsByMode, i13UcdUnits, moduleManifestPath, por
 import { contractTableRowsForModule, type ModuleContractRows } from "./aidlc-contract-table";
 import { scanFiles, SOURCE_FILE_PATTERN, TEST_FILE_PATTERN } from "./aidlc-scan-root";
 import { hasExecutableBehavior } from "./aidlc-executable-behavior";
-import { baselineCodeRef, baselineCommitErrors, gitWorkTreeError, parseCodeRef, workflowBaselineForModule, type CodeRef } from "./aidlc-baseline";
-import { resolveSourceRoots } from "./aidlc-source-roots";
+import { baselineCodeRef, baselineCommitErrors, extraRepoKeyErrors, gitWorkTreeError, parseCodeRef, workflowBaselineForModule, type CodeRef } from "./aidlc-baseline";
+import { codeRefRepo, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
+import { declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
 import { type WorkflowState } from "./aidlc-light-state";
 import { loadWorkflowView } from "./aidlc-workflow-layout";
@@ -900,7 +901,20 @@ function characterizationEvidence(ids: string[], modes: Map<string, UcdMode>): R
   // never advanced), so a refresh after orchestrate baseline --advance reproduces it.
   const epoch0 = baseline.epochs[0];
   const roots = resolveSourceRoots(ROOT, ACTIVE_MODULE).roots;
+  // 4.9.0: a code ref of a nested repository binds that repository's start epoch (the
+  // epoch it was registered in); workflow-repository refs keep binding epoch 0.
+  let nested: string[] = [];
+  try {
+    nested = nestedSourceRepos(ROOT);
+  } catch (error) {
+    fail(`tdd_mode characterization cannot use the nested source repositories: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const extra = extraRepoKeyErrors(baseline, nested);
+  if (extra.length > 0) fail(`tdd_mode characterization requires a usable workflow baseline: ${extra.join("; ")}`);
+  const registered = Object.keys(baseline.repos).length > 0;
+  const startRepos = Object.fromEntries(Object.entries(baseline.repos).map(([key, chain]) => [key, chain.commits[0]]));
   const errors: string[] = [];
+  const pending = new Set<string>();
   const entries = characterized.map((id) => {
     const mode = modes.get(id) as Extract<UcdMode, { mode: "characterization" }>;
     const codeRefs = mode.codeRefs.flatMap((value) => {
@@ -911,17 +925,24 @@ function characterizationEvidence(ids: string[], modes: Map<string, UcdMode>): R
         errors.push(error instanceof Error ? error.message : String(error));
         return [];
       }
-      const resolved = baselineCodeRef(ROOT, epoch0, ref, `${id} code_refs ${JSON.stringify(value)}`);
+      const repo = codeRefRepo(ROOT, ref.path, nested);
+      if (repo.repoKey !== WORKFLOW_REPO_KEY && !(repo.repoKey in startRepos)) {
+        pending.add(repo.repoKey);
+        return [];
+      }
+      const commit = repo.repoKey === WORKFLOW_REPO_KEY ? epoch0 : startRepos[repo.repoKey];
+      const resolved = baselineCodeRef(ROOT, commit, ref, `${id} code_refs ${JSON.stringify(value)}`, repo);
       if ("error" in resolved) {
         errors.push(resolved.error);
         return [];
       }
-      return [{ path: ref.path, ...(ref.symbol === undefined ? {} : { symbol: ref.symbol }), baseline_blob: resolved.blob }];
+      return [{ path: ref.path, ...(ref.symbol === undefined ? {} : { symbol: ref.symbol }), ...(registered ? { repo: repo.repoKey } : {}), baseline_blob: resolved.blob }];
     });
     return { ucd: id, code_refs: codeRefs, reason: mode.reason, approval_ref: mode.approvalRef };
   });
+  if (pending.size > 0) errors.push(pendingNestedError(ROOT, baseline.commit, [...pending].sort()));
   if (errors.length > 0) fail(`I13 characterization code_refs rejected: ${errors.join("; ")}`);
-  return { characterization: entries, baseline_commit: epoch0 };
+  return registered ? { characterization: entries, baseline_commit: epoch0, baseline_repos: startRepos } : { characterization: entries, baseline_commit: epoch0 };
 }
 
 function testQuality(): Record<string, unknown> {
@@ -3858,6 +3879,16 @@ function structuralInvariants(): Record<string, unknown> {
     if (/\.md$/i.test(label)) return label.startsWith(moduleDocs); // 设计文档只看本 module 目录
     return !label.startsWith("docs/") && !/\.d\.ts$/i.test(label);
   });
+  if (set.baselineRef) {
+    // 4.9.0: git diff of the workflow repository cannot see a nested repository, so a
+    // baseline_ref over files of one would silently drop them.
+    const nestedRoots = declaredNestedRoots(ROOT);
+    const inNested = files.map((path) => portableLabel(path)).filter((label) => nestedRoots.some((key) => label.startsWith(`${key}/`)));
+    if (inNested.length > 0) {
+      const repos = [...new Set(inNested.map((label) => nestedRoots.find((key) => label.startsWith(`${key}/`))))].map((key) => `${key}/`).join(", ");
+      fail(`structural-invariants baseline_ref ${set.baselineRef} does not support nested source repositories yet: ${repos} (${inNested.slice(0, 3).join(", ")}${inNested.length > 3 ? ", …" : ""}); git diff of the workflow repository cannot see their changes. Remove baseline_ref to scan every file, or keep the invariant scope outside the nested repository.`);
+    }
+  }
   const changed = set.baselineRef ? baselineChangedFiles(set.baselineRef) : null;
   if (changed) files = files.filter((path) => changed.has(portableLabel(path)));
 

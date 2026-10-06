@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
 import { loadWorkflowView } from "./aidlc-workflow-layout";
 import { readSourceRevision } from "./aidlc-revision";
+import { describeInvolvement, nestedInvolvement } from "./aidlc-nested-repos";
 
 const SAFE_BRANCH = /^aidlc-light\/[a-z0-9][a-z0-9/-]{0,120}$/;
 
@@ -16,6 +17,8 @@ interface Metadata {
   branch: string;
   worktree_path: string;
   created_at: string;
+  /** 4.9.0: declared nested repositories that `git worktree add` does not check out (absent when none). */
+  nested_repos_skipped?: string[];
 }
 
 function text(value: unknown, field: string): string {
@@ -75,7 +78,7 @@ function selection(project: string, instance: string, member: string): void {
 }
 
 function render(metadata: Metadata): string {
-  return `# AI-DLC Lightweight Worktree\n\n- Workflow ID: ${metadata.workflow_id}\n- Stage Instance: ${metadata.stage_instance}\n- Member: ${metadata.member}\n- Base Commit: ${metadata.base_commit}\n- Branch: ${metadata.branch}\n- Worktree Path: ${metadata.worktree_path}\n- Created At: ${metadata.created_at}\n\n> This metadata is coordination context only. Git review, build and merge policy remain authoritative.\n`;
+  return `# AI-DLC Lightweight Worktree\n\n- Workflow ID: ${metadata.workflow_id}\n- Stage Instance: ${metadata.stage_instance}\n- Member: ${metadata.member}\n- Base Commit: ${metadata.base_commit}\n- Branch: ${metadata.branch}\n- Worktree Path: ${metadata.worktree_path}\n- Created At: ${metadata.created_at}\n${metadata.nested_repos_skipped ? `- Nested Repos Skipped: ${metadata.nested_repos_skipped.join(", ")}\n` : ""}\n> This metadata is coordination context only. Git review, build and merge policy remain authoritative.\n`;
 }
 
 function readMetadata(project: string, instance: string): Metadata {
@@ -91,13 +94,35 @@ function readMetadata(project: string, instance: string): Metadata {
     branch: scalar(markdown, "Branch"),
     worktree_path: directory(scalar(markdown, "Worktree Path"), "worktree path"),
     created_at: scalar(markdown, "Created At"),
+    ...(/^- Nested Repos Skipped:/m.test(markdown) ? { nested_repos_skipped: scalar(markdown, "Nested Repos Skipped").split(",").map((value) => value.trim()).filter(Boolean) } : {}),
   };
+}
+
+function instanceContext(instance: string): { module_id?: string; unit_id?: string } {
+  const unit = /@module:([a-z0-9][a-z0-9-]*)@unit:([a-z0-9][a-z0-9-]*)$/.exec(instance);
+  if (unit) return { module_id: unit[1], unit_id: unit[2] };
+  const module = /@module:([a-z0-9][a-z0-9-]*)$/.exec(instance);
+  return module ? { module_id: module[1] } : {};
+}
+
+/**
+ * 4.9.0: `git worktree add` only checks out the workflow repository. An instance whose
+ * characterization code refs (or compared changed paths) lie in a nested repository
+ * cannot be isolated; any other instance proceeds and records the skipped repositories.
+ */
+function nestedWorktreeCheck(project: string, instance: string, action: string, paths: readonly string[] = []): string[] {
+  const result = nestedInvolvement(project, { ...instanceContext(instance), paths });
+  if (result.nested_repos_involved.length > 0) {
+    throw new Error(`${action} cannot isolate ${instance}: it involves the nested source repository ${describeInvolvement(result.nested_repos_involved)}; git worktree add only checks out the workflow repository. Work on this unit in the main checkout, or create a worktree of ${[...new Set(result.nested_repos_involved.map((item) => `${item.repo}/`))].join(", ")} yourself and record it outside AI-DLC.`);
+  }
+  return result.nested_source_roots;
 }
 
 export function prepareLightWorktree(projectRoot: string, instance: string, member: string, path: string, requestedBranch?: string): Metadata {
   const project = directory(projectRoot, "project root");
   if (resolve(git(project, ["rev-parse", "--show-toplevel"])) !== project) throw new Error("worktree must be created from the main project root");
   selection(project, instance, member);
+  const skipped = nestedWorktreeCheck(project, instance, "worktree prepare");
   const revision = readSourceRevision(project);
   if (!/^[a-f0-9]{40,64}$/i.test(revision.commit) || revision.dirty !== false) throw new Error("lightweight worktree requires a clean committed project");
   const target = resolve(path);
@@ -107,13 +132,13 @@ export function prepareLightWorktree(projectRoot: string, instance: string, memb
   const branch = requestedBranch || `aidlc-light/${state.workflow_id.slice(0, 12)}/${createHash("sha256").update(instance).digest("hex").slice(0, 16)}`;
   if (!SAFE_BRANCH.test(branch)) throw new Error("branch must match aidlc-light/<safe-name>");
   git(project, ["worktree", "add", "-b", branch, target, revision.commit]);
-  const metadata: Metadata = { workflow_id: state.workflow_id, stage_instance: instance, member, base_commit: revision.commit, branch, worktree_path: target, created_at: new Date().toISOString() };
+  const metadata: Metadata = { workflow_id: state.workflow_id, stage_instance: instance, member, base_commit: revision.commit, branch, worktree_path: target, created_at: new Date().toISOString(), ...(skipped.length > 0 ? { nested_repos_skipped: skipped } : {}) };
   try {
     writeFileSync(metadataPath(project, instance), render(metadata), { encoding: "utf8", flag: "wx", mode: 0o600 });
     const local = join(target, ".aidlc", "worktrees");
     mkdirSync(local, { recursive: true, mode: 0o700 });
     writeFileSync(join(local, `${createHash("sha256").update(instance).digest("hex").slice(0, 24)}.md`), render(metadata), { encoding: "utf8", flag: "wx", mode: 0o600 });
-    return metadata;
+    return skipped.length > 0 ? { ...metadata, nested_source_roots: skipped } as Metadata : metadata;
   } catch (error) {
     try { git(project, ["worktree", "remove", "--force", target]); } catch {}
     try { git(project, ["branch", "-D", branch]); } catch {}
@@ -133,6 +158,7 @@ export function lightMergePlan(projectRoot: string, instance: string, member: st
   git(worktree, ["merge-base", "--is-ancestor", metadata.base_commit, revision.commit]);
   const changed = git(worktree, ["diff", "--name-only", "-z", metadata.base_commit, revision.commit, "--"]).split("\0").filter(Boolean).sort();
   if (!changed.length) throw new Error("worktree has no committed changes");
+  const skipped = nestedWorktreeCheck(project, instance, "worktree merge-plan", changed);
   const review = resolve(worktree, reviewPath);
   if (!inside(worktree, review) || !existsSync(review)) throw new Error("review evidence must be inside worktree");
   const value = JSON.parse(readFileSync(review, "utf8")) as Record<string, unknown>;
@@ -140,7 +166,7 @@ export function lightMergePlan(projectRoot: string, instance: string, member: st
   const reviewed = new Set(value.files_reviewed.filter((item): item is string => typeof item === "string"));
   const missing = changed.filter((path) => !reviewed.has(path));
   if (missing.length) throw new Error(`review evidence does not cover changed paths: ${missing.join(", ")}`);
-  return { kind: "aidlc.aws-light.merge-plan", authorized: false, workflow_id: metadata.workflow_id, stage_instance: instance, member, branch: metadata.branch, base_commit: metadata.base_commit, head_commit: revision.commit, changed_paths: changed, merge_command: `git -C ${JSON.stringify(project)} merge --no-ff ${JSON.stringify(metadata.branch)}` };
+  return { kind: "aidlc.aws-light.merge-plan", authorized: false, workflow_id: metadata.workflow_id, stage_instance: instance, member, branch: metadata.branch, base_commit: metadata.base_commit, head_commit: revision.commit, changed_paths: changed, merge_command: `git -C ${JSON.stringify(project)} merge --no-ff ${JSON.stringify(metadata.branch)}`, ...(skipped.length > 0 ? { nested_repos_skipped: skipped, nested_source_roots: skipped } : {}) };
 }
 
 function main(): void {

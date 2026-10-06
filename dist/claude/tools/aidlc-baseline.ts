@@ -24,13 +24,15 @@ import {
   BASELINE_UNAVAILABLE,
   GLOBAL_WORKFLOW,
   baselineChain,
+  baselineRepoChains,
   loadWorkflowState,
   workflowRefKey,
   type BaselineSource,
   type WorkflowRef,
   type WorkflowState,
 } from "./aidlc-light-state";
-import { normalizeSourceRoot } from "./aidlc-source-roots";
+import { normalizeSourceRoot, SOURCE_ROOTS_CONFIG } from "./aidlc-source-roots";
+import { nestedRepositoryHint, WORKFLOW_REPO_KEY, type CodeRefRepo } from "./aidlc-nested-repos";
 import { isSplitLayout, loadWorkflowParts } from "./aidlc-workflow-layout";
 
 /** Stages whose evidence is produced against the baseline (usage check U1). */
@@ -62,6 +64,8 @@ export type WorkflowBaseline =
     workflow_id: string;
     /** The baseline chain (4.7.0), epoch 0 first; `[commit]` when never advanced. */
     epochs: string[];
+    /** 4.9.0: registered nested repositories, each with its start epoch and per-epoch commits ({} when none). */
+    repos: Record<string, { start: number; commits: string[] }>;
   }
   | { registered: false; workflow_id: string };
 
@@ -84,7 +88,7 @@ export function workflowBaseline(projectRoot: string, ref: WorkflowRef = GLOBAL_
     owner = parent;
   }
   if (owner.baseline_commit === undefined || owner.baseline_source === undefined) return { registered: false, workflow_id: owner.workflow_id };
-  return { registered: true, commit: owner.baseline_commit, source: owner.baseline_source, workflow_id: owner.workflow_id, epochs: baselineChain(owner) };
+  return { registered: true, commit: owner.baseline_commit, source: owner.baseline_source, workflow_id: owner.workflow_id, epochs: baselineChain(owner), repos: baselineRepoChains(owner) };
 }
 
 type CommitCheck = { ok: true } | { ok: false; error: string };
@@ -224,7 +228,7 @@ function escapeExpression(value: string): string {
  * regular file (not a symlink or a directory), and a declared symbol occurs as a whole
  * token in `git show <base>:<path>`. Returns the git blob id of the file at the base.
  */
-export function baselineCodeRef(projectRoot: string, commit: string, ref: CodeRef, label: string): { blob: string } | { error: string } {
+export function baselineCodeRef(projectRoot: string, commit: string, ref: CodeRef, label: string, repo?: CodeRefRepo): { blob: string } | { error: string } {
   const base = root(projectRoot);
   const segments = ref.path.split("/");
   for (let index = 1; index <= segments.length; index++) {
@@ -237,24 +241,142 @@ export function baselineCodeRef(projectRoot: string, commit: string, ref: CodeRe
     }
     if (isLink) return { error: `${label}: ${partial} is a symbolic link in the worktree` };
   }
-  const spec = `${commit}:${ref.path}`;
-  const exists = git(projectRoot, ["cat-file", "-e", spec]);
+  // 4.9.0: a code ref of a nested repository resolves inside that repository, at its own commit.
+  const nested = repo && repo.repoKey !== WORKFLOW_REPO_KEY ? repo : undefined;
+  const cwd = nested ? nested.repoRoot : projectRoot;
+  const path = nested ? nested.relativePath : ref.path;
+  const where = nested ? `the baseline ${commit} of the nested repository ${nested.repoKey}/` : `the workflow baseline ${commit}`;
+  const spec = `${commit}:${path}`;
+  const exists = git(cwd, ["cat-file", "-e", spec]);
   if (exists.error) return { error: `${label}: git is unavailable (${exists.error.message})` };
-  if (exists.status !== 0) return { error: `${label}: ${ref.path} does not exist in the workflow baseline ${commit}; characterization covers code that already existed at the baseline` };
-  const listed = git(projectRoot, ["ls-tree", "-z", commit, "--", ref.path]);
-  const entry = listed.status === 0 ? listed.stdout.split("\0").find((line) => line.endsWith(`\t${ref.path}`)) : undefined;
+  if (exists.status !== 0) {
+    const hint = nested ? undefined : nestedRepositoryHint(projectRoot, ref.path);
+    return { error: `${label}: ${ref.path} does not exist in ${where}; characterization covers code that already existed at the baseline${hint ? `. ${hint}` : ""}` };
+  }
+  const listed = git(cwd, ["ls-tree", "-z", commit, "--", path]);
+  const entry = listed.status === 0 ? listed.stdout.split("\0").find((line) => line.endsWith(`\t${path}`)) : undefined;
   const match = entry ? /^(\d{6}) (\w+) ([a-f0-9]{40}|[a-f0-9]{64})\t/.exec(entry) : null;
-  if (!match) return { error: `${label}: cannot read the tree entry of ${ref.path} at the workflow baseline ${commit}` };
+  if (!match) return { error: `${label}: cannot read the tree entry of ${ref.path} at ${where}` };
   const [, mode, type, blob] = match;
-  if (mode === "120000") return { error: `${label}: ${ref.path} is a symbolic link in the workflow baseline ${commit}` };
-  if (type !== "blob") return { error: `${label}: ${ref.path} is not a file in the workflow baseline ${commit} (git ${type})` };
+  if (mode === "120000") return { error: `${label}: ${ref.path} is a symbolic link in ${where}` };
+  if (type !== "blob") return { error: `${label}: ${ref.path} is not a file in ${where} (git ${type})` };
   if (ref.symbol !== undefined) {
-    const shown = git(projectRoot, ["show", spec]);
-    if (shown.status !== 0) return { error: `${label}: cannot read ${ref.path} at the workflow baseline ${commit}: ${shown.stderr.trim()}` };
+    const shown = git(cwd, ["show", spec]);
+    if (shown.status !== 0) return { error: `${label}: cannot read ${ref.path} at ${where}: ${shown.stderr.trim()}` };
     const token = new RegExp(`(?<![A-Za-z0-9_$])${escapeExpression(ref.symbol)}(?![A-Za-z0-9_$])`);
-    if (!token.test(shown.stdout)) return { error: `${label}: symbol ${ref.symbol} not found in ${ref.path} at the workflow baseline ${commit}` };
+    if (!token.test(shown.stdout)) return { error: `${label}: symbol ${ref.symbol} not found in ${ref.path} at ${where}` };
   }
   return { blob };
+}
+
+// ---------------------------------------------------------------------------
+// Nested source repositories (4.9.0)
+// ---------------------------------------------------------------------------
+
+/** Commits of the nested repositories registered at `epoch` of a registered baseline (start ≤ epoch). */
+export function epochRepos(baseline: Extract<WorkflowBaseline, { registered: true }>, epoch: number): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, chain] of Object.entries(baseline.repos)) {
+    if (epoch >= chain.start && epoch - chain.start < chain.commits.length) result[key] = chain.commits[epoch - chain.start];
+  }
+  return result;
+}
+
+/**
+ * Errors when the registered nested repositories and the declared ones disagree by an
+ * extra key (registered but no longer declared). A declared but unregistered repository
+ * is a pending migration, reported only by the operations that need it.
+ */
+export function extraRepoKeyErrors(baseline: Extract<WorkflowBaseline, { registered: true }>, declared: readonly string[]): string[] {
+  const extra = Object.keys(baseline.repos).filter((key) => !declared.includes(key)).sort();
+  if (extra.length === 0) return [];
+  return [`the workflow baseline registers nested repositories that ${SOURCE_ROOTS_CONFIG} no longer declares: ${extra.map((key) => `${key}/`).join(", ")} (registered: ${Object.keys(baseline.repos).sort().join(", ") || "none"}; declared: ${declared.join(", ") || "none"}); a registered nested repository cannot be removed from a workflow — restore the declaration or start a new workflow`];
+}
+
+/** Declared nested repositories that the workflow baseline has not registered (pending migration). */
+export function pendingRepos(baseline: Extract<WorkflowBaseline, { registered: true }>, declared: readonly string[]): string[] {
+  return declared.filter((key) => !(key in baseline.repos));
+}
+
+/**
+ * Git checks of one nested repository commit: the repository has a HEAD, the commit is
+ * an existing commit object that is HEAD or one of its ancestors (shallow clones that
+ * cannot prove ancestry reject). The repository's own errors are prefixed with its key.
+ */
+export function nestedCommitErrors(projectRoot: string, key: string, commit: string, label = "commit"): string[] {
+  const repoRoot = join(root(projectRoot), ...key.split("/"));
+  if (!COMMIT_ID_PATTERN.test(commit)) return [`${key}/: ${label} ${JSON.stringify(commit)} must be a 40- or 64-character lowercase hex commit id`];
+  if (currentHeadCommit(repoRoot) === BASELINE_UNAVAILABLE) return [`${key}/: the nested repository has no HEAD commit`];
+  const check = commitIsAncestorOfHead(repoRoot, commit, `${key}/ ${label}`);
+  return check.ok ? [] : [check.error];
+}
+
+/**
+ * Per-repository variant of checkAdvanceTarget: the target equals the current commit
+ * (this repository does not advance in this epoch) or is a strict descendant of it,
+ * and is HEAD of the nested repository or one of its ancestors.
+ */
+export function checkRepoAdvanceTarget(projectRoot: string, key: string, current: string, target: string): { error: string } | { moved: boolean } {
+  const repoRoot = join(root(projectRoot), ...key.split("/"));
+  const errors = nestedCommitErrors(projectRoot, key, target, "--repo target");
+  if (errors.length > 0) return { error: errors.join("; ") };
+  if (target === current) return { moved: false };
+  const descendant = git(repoRoot, ["merge-base", "--is-ancestor", current, target]);
+  if (descendant.error) return { error: `${key}/: commit ${target} cannot be verified: git is unavailable (${descendant.error.message})` };
+  if (descendant.status === 0) return { moved: true };
+  if (isShallow(repoRoot)) return { error: `${key}/: commit ${target} could not be confirmed as a descendant of the current baseline ${current}: ${UNSHALLOW_HINT}` };
+  if (descendant.status === 1) return { error: `${key}/: commit ${target} is not a descendant of the current baseline epoch ${current} of the nested repository (nor equal to it)` };
+  return { error: `${key}/: commit ${target} ancestry cannot be determined (git merge-base exit ${descendant.status}): ${descendant.stderr.trim()}` };
+}
+
+/**
+ * Registration checks of one nested repository commit (`--set`, `next --scope`,
+ * migration): repository HEAD, commit object, HEAD ancestry, not shallow, a committer
+ * date no later than the workflow start (when given), and ancestor of every controlled
+ * evidence anchor `source_revision.repos.<key>.commit`.
+ */
+export function checkRepoCandidate(projectRoot: string, key: string, commit: string, startedAt?: string): { error: string } | { head: string; committer_date: string; anchors: string[] } {
+  const repoRoot = join(root(projectRoot), ...key.split("/"));
+  const head = currentHeadCommit(repoRoot);
+  if (head === BASELINE_UNAVAILABLE) return { error: `${key}/: the nested repository has no commit yet; commit first` };
+  const errors = nestedCommitErrors(projectRoot, key, commit);
+  if (errors.length > 0) return { error: errors.join("; ") };
+  const anchors: string[] = [];
+  for (const file of scanEvidenceFiles(projectRoot)) {
+    if (file.error) return { error: `evidence ${file.path} ${file.error}; evidence anchors cannot be verified` };
+    const evidence = asRecord(file.value);
+    if (asRecord(evidence?.producer)?.mode !== "controlled") continue;
+    const repos = asRecord(asRecord(evidence?.source_revision)?.repos);
+    if (!repos || !(key in repos)) continue;
+    const anchor = asRecord(repos[key])?.commit;
+    if (typeof anchor !== "string" || !COMMIT_ID_PATTERN.test(anchor)) {
+      return { error: `controlled evidence ${file.path} has source_revision.repos.${key}.commit ${JSON.stringify(anchor)}, which cannot serve as an evidence anchor` };
+    }
+    if (anchor === commit || anchors.includes(anchor)) {
+      if (!anchors.includes(anchor)) anchors.push(anchor);
+      continue;
+    }
+    const result = git(repoRoot, ["merge-base", "--is-ancestor", commit, anchor]);
+    if (result.error) return { error: `${key}/: evidence anchor ${anchor} cannot be verified: git is unavailable (${result.error.message})` };
+    if (result.status !== 0) return { error: `${key}/: commit ${commit} is not an ancestor of evidence anchor ${anchor} (${file.path}); the baseline must predate all evidence of this workflow` };
+    anchors.push(anchor);
+  }
+  const dates = git(repoRoot, ["show", "-s", "--format=%cI", commit]);
+  if (dates.status !== 0) return { error: `${key}/: cannot read the dates of commit ${commit}: ${dates.stderr.trim()}` };
+  const committerDate = dates.stdout.trim();
+  if (startedAt !== undefined) {
+    const committed = Date.parse(committerDate);
+    if (Number.isNaN(committed)) return { error: `${key}/: commit ${commit} has an unreadable committer date ${JSON.stringify(committerDate)}` };
+    if (committed > Date.parse(startedAt)) return { error: `${key}/: commit ${commit} committer date ${committerDate} (self-reported) is later than the workflow start ${startedAt}; the baseline must predate the workflow` };
+  }
+  return { head, committer_date: committerDate, anchors };
+}
+
+/** Whether `git status --porcelain` of the nested repository reports anything (untracked files included); null when unreadable. */
+export function nestedDirty(projectRoot: string, key: string): boolean | null {
+  const result = git(join(root(projectRoot), ...key.split("/")), ["status", "--porcelain=v1", "--untracked-files=all"]);
+  if (result.error || result.status !== 0) return null;
+  return result.stdout.trim().length > 0;
 }
 
 // ---------------------------------------------------------------------------

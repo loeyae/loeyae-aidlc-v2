@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { describeInvolvement, nestedInvolvement, type NestedInvolvement } from "./aidlc-nested-repos";
 
 export const ATTESTATION_STATUSES = [
   "verified",
@@ -97,6 +98,10 @@ export interface AttestationResolution {
   summary: AttestationSummary;
   trust_basis: string[];
   errors: string[];
+  /** 4.9.0: declared nested source repositories (a hint; present only when declared). */
+  nested_source_roots?: string[];
+  /** 4.9.0: why the resolution was refused because it involves a nested repository. */
+  nested_repos_involved?: NestedInvolvement[];
 }
 
 interface GitEntry {
@@ -129,6 +134,8 @@ interface CoveragePath {
 }
 
 interface EvidenceCandidate {
+  /** 4.9.0: keys of source_revision.repos when the evidence records nested repositories. */
+  nested_repos?: string[];
   context: UnitContext;
   status: AttestationStatus;
   coverage: CoveragePath[];
@@ -508,6 +515,7 @@ function inspectCandidate(
     }
   }
 
+  const recordedRepos = record && isRecord(record.source_revision) && isRecord(record.source_revision.repos) ? Object.keys(record.source_revision.repos).sort() : undefined;
   let status: AttestationStatus;
   if (errors.length > 0) status = "unverifiable";
   else status = worstStatus([source?.status || "unverifiable", content?.status || "verified"], "verified");
@@ -518,6 +526,7 @@ function inspectCandidate(
   }
   if (errors.length > 0) basis.push(`trust is withheld because ${errors.join("; ")}`);
   return {
+    ...(recordedRepos ? { nested_repos: recordedRepos } : {}),
     context,
     status,
     coverage,
@@ -923,6 +932,33 @@ export function resolveCommitDiffAttestations(options: AttestationResolverOption
       ));
     }
 
+    // 4.9.0: the resolver only reads the workflow repository; a nested repository is
+    // neither covered nor unchanged from its point of view, so an attestation that
+    // involves one (explicit or reviewed path inside it, or evidence recording
+    // source_revision.repos) is refused instead of being resolved silently.
+    let nested: ReturnType<typeof nestedInvolvement>;
+    try {
+      const pathSet = new Set(requestedPaths);
+      const attested = candidates.filter((candidate) => candidate.coverage.some((item) => pathSet.has(item.path)));
+      nested = nestedInvolvement(repositoryRoot, {
+        paths: [
+          ...(options.changed_paths || []).filter((path): path is string => typeof path === "string"),
+          ...attested.flatMap((candidate) => candidate.coverage.map((item) => item.path)),
+        ],
+        evidence: candidates.filter((candidate) => candidate.nested_repos).map((candidate) => ({ path: candidate.context.evidence_path, value: { source_revision: { repos: Object.fromEntries(candidate.nested_repos!.map((key) => [key, {}])) } } })),
+      });
+    } catch (error) {
+      return failureResolution("unverifiable", { ...history, complete: false }, `nested source repositories cannot be determined: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (nested.nested_repos_involved.length > 0) {
+      const involved = [...new Map(nested.nested_repos_involved.map((item) => [`${item.repo}|${item.reason}|${item.detail}`, item])).values()];
+      return {
+        ...failureResolution("unverifiable", { ...history, complete: false, trust_basis: [...history.trust_basis, "the resolver reads only the workflow repository; nested source repositories cannot be attested"] }, `attest resolve does not support nested source repositories yet: ${describeInvolvement(involved)}`),
+        nested_source_roots: nested.nested_source_roots,
+        nested_repos_involved: involved,
+      };
+    }
+    const nestedHint = nested.nested_source_roots.length > 0 ? { nested_source_roots: nested.nested_source_roots } : {};
     const treeDigestResult = treeDigest();
     const historyStatus: AttestationStatus | null = shallow
       ? "indeterminate"
@@ -982,6 +1018,7 @@ export function resolveCommitDiffAttestations(options: AttestationResolverOption
       errors: candidates.flatMap((candidate) => candidate.status === "unverifiable"
         ? candidate.trust_basis.filter((basis) => basis.startsWith("trust is withheld"))
         : []),
+      ...nestedHint,
     };
   } catch (error) {
     return failureResolution("unverifiable", history, error instanceof Error ? error.message : String(error));

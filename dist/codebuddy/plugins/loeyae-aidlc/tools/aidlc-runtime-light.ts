@@ -2,7 +2,9 @@ import { existsSync, lstatSync, readFileSync, readdirSync } from "fs";
 import { isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { crossModuleRequires, dependencyInstances, expandStageInstances, loadGraph } from "./aidlc-orchestrate";
-import { GLOBAL_WORKFLOW, lightAuditPath, lightStatePath, type WorkflowRef } from "./aidlc-light-state";
+import { GLOBAL_WORKFLOW, lightAuditPath, lightStatePath, type WorkflowRef, type WorkflowState } from "./aidlc-light-state";
+import { pendingNestedError } from "./aidlc-nested-repos";
+import { declaredNestedRoots } from "./aidlc-source-roots";
 import { loadWorkflowParts, mergeWorkflowView, ownerOfInstance, registryPath, sameRef } from "./aidlc-workflow-layout";
 
 function inside(root: string, candidate: string): boolean {
@@ -111,8 +113,23 @@ export function buildTeamLightRuntimeProjection(projectRoot = process.cwd(), mod
     ready_instances: instances.filter((instance) => instance.status === "ready").map((instance) => instance.stage_instance),
     blocked_instances: instances.filter((instance) => instance.status === "blocked").map((instance) => ({ stage_instance: instance.stage_instance, waiting_for: instance.dependency_waiting })),
     evidence: evidenceSummary,
-    warnings: evidenceSummary.invalid ? [`${evidenceSummary.invalid} evidence file(s) are invalid JSON`] : [],
+    warnings: [...(evidenceSummary.invalid ? [`${evidenceSummary.invalid} evidence file(s) are invalid JSON`] : []), ...nestedWarnings(root, loaded.parts.get("global")!.state)],
   };
+}
+
+/** 4.9.0: declared nested repositories the workflow baseline has not registered yet (pending migration). */
+function nestedWarnings(root: string, global: WorkflowState): string[] {
+  let declared: string[];
+  try {
+    declared = declaredNestedRoots(root);
+  } catch (error) {
+    return [`.aidlc/source-roots.json cannot be read: ${error instanceof Error ? error.message : String(error)}`];
+  }
+  const commit = global.baseline_commit;
+  if (declared.length === 0 || commit === undefined || commit === "unavailable") return [];
+  const pending = declared.filter((key) => !(key in (global.baseline_repos || {})));
+  if (pending.length === 0) return [];
+  return [pendingNestedError(root, commit, pending)];
 }
 
 function main(): void {
