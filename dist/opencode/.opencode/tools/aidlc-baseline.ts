@@ -611,11 +611,30 @@ export function checkAdoptionCandidate(projectRoot: string, commit: string, notA
 
 /**
  * RED / BASELINE / GREEN evidence of a module (any stage, any unit), project-relative.
- * An unreadable or symlinked evidence entry under the module counts as present (fail closed).
+ * An unreadable or symlinked evidence entry under the module counts as held (fail closed).
+ *
+ * 4.10.1: a `not_required` record carrying `ucd_exemption`, directly under a unit named
+ * in `exemptUnits` (units with an empty UC-D subset and a `ucd_exemption`), observed no
+ * code and is reported in `exempt` instead of `held`. Every other record stays held.
  */
-export function modulePhaseEvidence(projectRoot: string, moduleId: string): string[] {
+export function modulePhaseEvidence(projectRoot: string, moduleId: string, exemptUnits: ReadonlySet<string> = new Set()): { held: string[]; exempt: string[] } {
   const pattern = new RegExp("^\\.aidlc/evidence/[^/]+/" + escapeExpression(moduleId) + "/(?:.+/)?(?:red|baseline|green)-test-evidence\\.json" + "$");
-  return scanEvidenceFiles(projectRoot).filter((file) => pattern.test(file.path) || (file.error !== undefined && file.path.includes("/" + moduleId + "/"))).map((file) => file.path);
+  const unitPattern = new RegExp("^\\.aidlc/evidence/[^/]+/" + escapeExpression(moduleId) + "/([^/]+)/(?:red|baseline|green)-test-evidence\\.json" + "$");
+  const held: string[] = [];
+  const exempt: string[] = [];
+  for (const file of scanEvidenceFiles(projectRoot)) {
+    if (file.error !== undefined) {
+      if (pattern.test(file.path) || file.path.includes("/" + moduleId + "/")) held.push(file.path);
+      continue;
+    }
+    if (!pattern.test(file.path)) continue;
+    const unitId = unitPattern.exec(file.path)?.[1];
+    const record = asRecord(file.value);
+    const exemption = record?.ucd_exemption;
+    const exempted = unitId !== undefined && exemptUnits.has(unitId) && record?.status === "not_required" && !!exemption && typeof exemption === "object" && !Array.isArray(exemption);
+    (exempted ? exempt : held).push(file.path);
+  }
+  return { held, exempt };
 }
 
 // ---------------------------------------------------------------------------

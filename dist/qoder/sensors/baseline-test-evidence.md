@@ -108,6 +108,7 @@ loeyae-aidlc orchestrate baseline --adopt <工作流仓库 commit> [--repo app=<
 
 - 只在 split 布局可用，写入模块子工作流状态：`Adoption Baseline` / `Adoption Baseline Repos` / `Adoption Approval Ref` / `Adopted At`；全局 Baseline 链不变。
 - 豁免「committer date 不晚于 T0」与「不包含工作流状态文件」；「是所有证据锚点的祖先」改为「该模块没有任何 RED / BASELINE / GREEN 证据」。仍要求 commit 存在、是 HEAD 或其祖先、不是浅克隆，且 committer date 不晚于该模块第一个 tdd 实例的开始时间（history 中的 tdd 记录或 tdd 认领的 `claimed_at`）。嵌套仓库逐仓做同样校验，未写 `--repo` 时取干净的 HEAD。
+- 豁免单元不计入（4.10.1）：I13 有 `ucd_units`、unit 不拥有其中任何 UC-D 且 unit-manifest 声明了 `ucd_exemption` 的 unit，其 tdd 没有观察代码——它的 tdd history / 认领不计入「第一个 tdd 开始时间」，它目录下带 `ucd_exemption` 的 `not_required` RED / BASELINE / GREEN 记录不计入「已有证据」，也无需删除；这些记录不绑定基线，接管后照常通过复验。被忽略的实例与证据记入 `BASELINE_ADOPTED` 的 `Ignored Exemption Instances`。没有豁免单元的模块行为与 4.10.0 一致。
 - 审计事件 `BASELINE_ADOPTED`（模块审计），记录 `Approval Ref`、`Reason`、`Exempted Rules`、`Replaced Rules`。
 - 登记后该模块的 I13 characterization code ref 与 BASELINE blob 比对都按接管基线解析（工作流仓库与各嵌套仓库分别取对应的值），证据记录 `baseline_kind: "adoption"`；没有该字段的证据视为 `"workflow"`。门禁复验时证据的 `baseline_kind` 必须与模块当前适用的基线一致，否则拒绝并提示 `--refresh`。接管后先 `evidence run --stage test-case-derivation --module <id> --refresh`。
 - 推进：`orchestrate baseline --advance <commit> --module <id> --expect <当前接管基线> [--repo …] [--expect-repo …]` 在模块的接管链上推进（`Adoption Baseline History` / `Adoption Baseline Repos History`），规则与 4.7.0 一致，只考察该模块的单元与 I13；不带 `--module` 的全局推进跳过已接管模块。

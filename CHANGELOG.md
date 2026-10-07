@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.10.1
+
+修复类版本：`orchestrate baseline --adopt` 的两条守卫不再把 `ucd_exemption`（空 UC-D 子集）单元算作模块已进入 tdd（MARS-93）。
+
+### Fixed
+
+- **「接管 commit 不晚于模块第一个 tdd 开始时间」**：只统计拥有 UC-D 子集的 unit 的 tdd 实例。I13 有 `ucd_units`、unit 不拥有其中任何 UC-D 且 unit-manifest 声明了 `ucd_exemption` 的 unit，其 tdd history 与认领不计入。
+- **「模块已有 RED / BASELINE / GREEN 证据」**：上述豁免单元目录下 `status: not_required` 且带 `ucd_exemption` 的记录不计入，`--adopt` 不要求删除它们；其余记录（含无法解析的条目）照旧计入。这些记录不绑定基线，接管后门禁复验照常通过。
+- `BASELINE_ADOPTED` 审计新增 `Ignored Exemption Instances`（`--dry-run` 的 `checks.ignored_exemption_instances`），列出被忽略的豁免 tdd 实例与证据。
+
+### Unchanged
+
+- 没有豁免单元的模块行为、审计字段与 4.10.0 一致；I13 没有 `ucd_units` 或 I13 / unit-manifest 读不出时不做任何豁免（fail closed）。
+
 ## 4.10.0
 
 新增模块级接管基线（MARS-92）：接管前已存在的实现可以登记为 characterization 存量行为，不再需要人为造空壳补 RED。

@@ -1405,7 +1405,7 @@ function i13ModeErrors(evidence: Evidence, ucdIds: string[], state: WorkflowStat
 type I13Context = { value: Evidence } | { error: string };
 
 /** The module's I13 evidence, read by the tdd gate to derive the RED / BASELINE UC-D sets. */
-function moduleI13Evidence(instance: StageInstance): I13Context {
+function moduleI13Evidence(instance: Pick<StageInstance, "module_id">): I13Context {
   if (!instance.module_id) return { error: "the tdd gate needs a module context to read the I13 evidence" };
   const path = join(PROJECT_ROOT, evidenceRelativePath("test-case-derivation", "test-case-derivation", "module", { module_id: instance.module_id }));
   if (!existsSync(path)) return { error: `I13 evidence is missing: ${normalizeArtifactLabel(relative(PROJECT_ROOT, path))}` };
@@ -5317,18 +5317,55 @@ function moduleOfInstanceId(instanceId: string): string | undefined {
 }
 
 /**
- * Earliest recorded start of a tdd instance of the module: the timestamps of its tdd
- * history entries and the claimed_at of its active tdd claims. Undefined when no tdd
- * instance of the module has a recorded start (the module has not entered tdd).
+ * Units of a module whose tdd observes no code (4.10.1): the I13 declares `ucd_units`,
+ * the unit owns none of them and the unit manifest declares its `ucd_exemption`. Empty
+ * when the I13 has no `ucd_units` or the I13 / unit manifest cannot be read, so every
+ * unit counts (fail closed).
  */
-function firstTddStart(state: WorkflowState, moduleId: string): string | undefined {
+function adoptionExemptUnits(moduleId: string): Set<string> {
+  const exempt = new Set<string>();
+  const i13 = moduleI13Evidence({ module_id: moduleId });
+  if (!("value" in i13)) return exempt;
+  const ucdUnits = i13UcdUnits(i13.value);
+  if (!ucdUnits) return exempt;
+  const owners = new Set(Object.values(ucdUnits).flat());
+  let units: ReturnType<typeof readUnitManifest>;
+  try {
+    units = readUnitManifest(PROJECT_ROOT, moduleId);
+  } catch {
+    return exempt;
+  }
+  for (const unit of units) if (unit.ucd_exemption && !owners.has(unit.unit_id)) exempt.add(unit.unit_id);
+  return exempt;
+}
+
+/**
+ * Earliest recorded start of a tdd instance of the module: the timestamps of its tdd
+ * history entries and the claimed_at of its active tdd claims. `started_at` is undefined
+ * when no tdd instance of the module has a recorded start (the module has not entered
+ * tdd). Instances of `exemptUnits` (4.10.1) observe no code and are listed in `ignored`
+ * instead of being counted.
+ */
+function firstTddStart(state: WorkflowState, moduleId: string, exemptUnits: ReadonlySet<string> = new Set()): { started_at: string | undefined; ignored: string[] } {
   const isModuleTdd = (instanceId?: string) => !!instanceId && instanceId.split("@", 1)[0] === "tdd" && moduleOfInstanceId(instanceId) === moduleId;
-  const times = [
-    ...state.history.filter((entry) => entry.stage === "tdd" && (isModuleTdd(entry.instance_id) || (!entry.instance_id && entry.module_id === moduleId))).map((entry) => entry.timestamp),
-    ...Object.values(state.active_instances || {}).filter((claim) => isModuleTdd(claim.stage_instance)).map((claim) => claim.claimed_at),
-  ].filter((value) => !Number.isNaN(Date.parse(value)));
-  if (times.length === 0) return undefined;
-  return times.reduce((earliest, value) => (Date.parse(value) < Date.parse(earliest) ? value : earliest));
+  const exemptUnit = (unitId?: string) => unitId !== undefined && exemptUnits.has(unitId);
+  const unitOf = (instanceId: string) => /@unit:([a-z0-9][a-z0-9-]*)/.exec(instanceId)?.[1];
+  const ignored = new Set<string>();
+  const times: string[] = [];
+  for (const entry of state.history) {
+    if (entry.stage !== "tdd" || !(isModuleTdd(entry.instance_id) || (!entry.instance_id && entry.module_id === moduleId))) continue;
+    const unitId = entry.instance_id ? unitOf(entry.instance_id) : entry.unit_id;
+    if (exemptUnit(unitId)) ignored.add(entry.instance_id || `tdd@module:${moduleId}@unit:${unitId}`);
+    else times.push(entry.timestamp);
+  }
+  for (const claim of Object.values(state.active_instances || {})) {
+    if (!isModuleTdd(claim.stage_instance)) continue;
+    if (exemptUnit(unitOf(claim.stage_instance))) ignored.add(claim.stage_instance);
+    else times.push(claim.claimed_at);
+  }
+  const valid = times.filter((value) => !Number.isNaN(Date.parse(value)));
+  const startedAt = valid.length === 0 ? undefined : valid.reduce((earliest, value) => (Date.parse(value) < Date.parse(earliest) ? value : earliest));
+  return { started_at: startedAt, ignored: [...ignored].sort() };
 }
 
 /** Read-only view of the baseline that applies to one module (`orchestrate baseline --module <id>`). */
@@ -5439,15 +5476,19 @@ async function adoptBaseline(flags: Record<string, string>, repoFlags: Map<strin
   }
 
   let phaseEvidence: string[];
+  let exemptEvidence: string[];
+  const exemptUnits = adoptionExemptUnits(moduleId);
   try {
-    phaseEvidence = modulePhaseEvidence(PROJECT_ROOT, moduleId);
+    ({ held: phaseEvidence, exempt: exemptEvidence } = modulePhaseEvidence(PROJECT_ROOT, moduleId, exemptUnits));
   } catch (error) {
     return refuse(`the module evidence cannot be scanned: ${error instanceof Error ? error.message : String(error)}`);
   }
   if (phaseEvidence.length > 0) {
     return refuse(`module ${moduleId} already holds RED / BASELINE / GREEN evidence (${phaseEvidence.join(", ")}); adoption must happen before the module's tdd produces evidence — invalidate (remove) that evidence first, then adopt`);
   }
-  const tddStartedAt = firstTddStart(moduleState, moduleId);
+  const { started_at: tddStartedAt, ignored: ignoredTdd } = firstTddStart(moduleState, moduleId, exemptUnits);
+  // 4.10.1: tdd instances and not_required evidence of ucd_exemption units observed no code.
+  const ignoredExemption = [...ignoredTdd, ...exemptEvidence];
   const main = checkAdoptionCandidate(PROJECT_ROOT, target, tddStartedAt);
   if ("error" in main) return refuse(main.error);
   const repoDates: Record<string, string> = {};
@@ -5463,6 +5504,7 @@ async function adoptBaseline(flags: Record<string, string>, repoFlags: Map<strin
     workflow_started_at: workflowStartedAt(global),
     tdd_started_at: tddStartedAt ?? null,
     evidence_scan: scan,
+    ...(ignoredExemption.length > 0 ? { ignored_exemption_instances: ignoredExemption } : {}),
     exempted_rules: [...ADOPTION_EXEMPTED_RULES],
     replaced_rules: [...ADOPTION_REPLACED_RULES],
     ...(nested.length > 0 ? { adoption_baseline_repos: repos, repo_committer_dates: repoDates, repo_dirty: repoDirty } : {}),
@@ -5511,6 +5553,7 @@ async function adoptBaseline(flags: Record<string, string>, repoFlags: Map<strin
       "Workflow Started At": checks.workflow_started_at,
       "TDD Started At": tddStartedAt || "not started",
       "Evidence Scan": scan,
+      ...(ignoredExemption.length > 0 ? { "Ignored Exemption Instances": ignoredExemption.join(", ") } : {}),
       "Exempted Rules": ADOPTION_EXEMPTED_RULES.join("; "),
       "Replaced Rules": ADOPTION_REPLACED_RULES.join("; "),
       "Approval Ref": approvalRef.trim(),
