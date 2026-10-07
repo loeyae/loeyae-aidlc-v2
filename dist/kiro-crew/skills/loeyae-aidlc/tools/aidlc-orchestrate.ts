@@ -25,7 +25,7 @@
 
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { randomUUID } from "crypto";
-import { spawnSync } from "child_process";
+import { overflowDirective, recordedSubprocessOverflow, runSync, SubprocessOverflowError } from "./aidlc-spawn";
 import { createRequire } from "module";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
@@ -789,7 +789,7 @@ function skippedNestedMainCheckout(path: string): string | undefined {
   }
   const key = [...skipped].find((candidate) => path === candidate || path === `${candidate}/` || path.startsWith(`${candidate}/`));
   if (!key || existsSync(join(PROJECT_ROOT, ...key.split("/")))) return undefined;
-  const common = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: PROJECT_ROOT, encoding: "utf8", shell: false });
+  const common = runSync("git", ["rev-parse", "--git-common-dir"], { cwd: PROJECT_ROOT, encoding: "utf8", shell: false });
   if (common.error || common.status !== 0) return undefined;
   const main = dirname(resolve(PROJECT_ROOT, common.stdout.trim()));
   if (main === resolve(PROJECT_ROOT) || !existsSync(join(main, ...key.split("/"), ".git"))) return undefined;
@@ -3116,12 +3116,11 @@ function produceMissingSemanticEvidence(instance: StageInstance, refresh = false
   const missing = missingSemanticEvidence(instance);
   if (missing.length === 0) return null;
   const evidenceTool = join(__dirname, "aidlc-evidence.ts");
-  const result = spawnSync(process.execPath, [TSX_CLI, evidenceTool, "run", "--stage", instance.stage.slug, "--instance", instance.instance_id, "--all-sensors", ...(refresh ? ["--refresh"] : [])], {
+  const result = runSync(process.execPath, [TSX_CLI, evidenceTool, "run", "--stage", instance.stage.slug, "--instance", instance.instance_id, "--all-sensors", ...(refresh ? ["--refresh"] : [])], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
     shell: false,
     timeout: 30 * 60 * 1000,
-    maxBuffer: 8 * 1024 * 1024,
     env: process.env,
   });
   if (result.status !== 0) {
@@ -6075,12 +6074,21 @@ async function main() {
       break;
   }
 
+  // 4.11.0: a subprocess overflow is an engine failure of its own, never part of a gate
+  // result, even when a caller swallowed the error on the way up.
+  const overflow = recordedSubprocessOverflow();
+  if (overflow) directive = overflowDirective(overflow) as unknown as Directive;
   console.log(JSON.stringify(directive, null, 2));
   if (directive.kind === "error") process.exitCode = 2;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((error) => {
+    const overflow = error instanceof SubprocessOverflowError ? error : recordedSubprocessOverflow();
+    if (overflow) {
+      console.log(JSON.stringify(overflowDirective(overflow), null, 2));
+      process.exit(2);
+    }
     console.error(JSON.stringify({
       kind: "error",
       message: error instanceof Error ? error.message : String(error),

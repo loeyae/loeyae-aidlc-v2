@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
-import { spawnSync } from "child_process";
+import { runSync } from "./aidlc-spawn";
 import { loadWorkflowView } from "./aidlc-workflow-layout";
 import { readSourceRevision } from "./aidlc-revision";
 import { describeInvolvement, nestedInvolvement } from "./aidlc-nested-repos";
@@ -46,7 +46,7 @@ function directory(path: string, field: string): string {
 }
 
 function git(cwd: string, args: string[]): string {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8", shell: false, maxBuffer: 16 * 1024 * 1024 });
+  const result = runSync("git", args, { cwd, encoding: "utf8", shell: false});
   if (result.status !== 0) throw new Error(result.stderr || result.stdout || `git ${args.join(" ")} failed`);
   return (result.stdout || "").trim();
 }

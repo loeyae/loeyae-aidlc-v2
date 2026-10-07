@@ -16,7 +16,8 @@
  * skipping the check.
  */
 
-import { spawnSync, type SpawnSyncReturns } from "child_process";
+import { type SpawnSyncReturns } from "child_process";
+import { runSync } from "./aidlc-spawn";
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "fs";
 import { join, relative, resolve } from "path";
 import { COMMIT_ID_PATTERN } from "./aidlc-revision";
@@ -46,7 +47,7 @@ function root(projectRoot: string): string {
 }
 
 function git(projectRoot: string, args: string[]): SpawnSyncReturns<string> {
-  return spawnSync("git", args, { cwd: root(projectRoot), encoding: "utf8", shell: false, maxBuffer: 16 * 1024 * 1024 });
+  return runSync("git", args, { cwd: root(projectRoot), encoding: "utf8", shell: false});
 }
 
 /** HEAD of the project repository, or "unavailable" outside git (or before the first commit). */

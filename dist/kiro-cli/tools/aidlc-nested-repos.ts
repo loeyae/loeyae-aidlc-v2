@@ -10,7 +10,7 @@
  * Every git call uses argument arrays with `shell: false` and fails closed.
  */
 
-import { spawnSync } from "child_process";
+import { runSync } from "./aidlc-spawn";
 import { existsSync, lstatSync, readFileSync, realpathSync } from "fs";
 import { join, relative, resolve } from "path";
 import { declaredNestedRoots, SOURCE_ROOTS_CONFIG } from "./aidlc-source-roots";
@@ -31,7 +31,7 @@ function projectRootOf(projectRoot: string): string {
 }
 
 function gitIn(cwd: string, args: string[]) {
-  return spawnSync("git", args, { cwd, encoding: "utf8", shell: false, maxBuffer: 16 * 1024 * 1024 });
+  return runSync("git", args, { cwd, encoding: "utf8", shell: false});
 }
 
 function under(path: string, key: string): boolean {

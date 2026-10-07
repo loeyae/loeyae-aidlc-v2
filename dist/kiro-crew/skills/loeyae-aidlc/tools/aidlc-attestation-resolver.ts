@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { runSync } from "./aidlc-spawn";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -555,11 +555,10 @@ class GitObjectReader {
   }
 
   private execute(args: string[], input?: string): GitResult {
-    const result = spawnSync("git", ["--no-optional-locks", ...args], {
+    const result = runSync("git", ["--no-optional-locks", ...args], {
       cwd: this.repositoryRoot,
       input,
       shell: false,
-      maxBuffer: MAX_GIT_OUTPUT_BYTES,
     });
     return {
       status: result.status ?? 1,

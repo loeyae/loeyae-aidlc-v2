@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { createHash } from "crypto";
-import { spawnSync } from "child_process";
+import { runSync } from "./aidlc-spawn";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "fs";
 import { basename, dirname, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
-import { greenCoveredUcds, i13UcdIdsByMode, i13UcdUnits, moduleManifestPath, portableDirname, readModuleManifest, readUnitManifest, ucdCoverageGaps, unitUcdIds, verifiedModuleIds, type ModuleDescriptor } from "./aidlc-execution-context";
+import { greenCoveredUcds, i13UcdIdsByMode, i13UcdUnits, moduleManifestPath, portableDirname, readModuleManifest, readUnitManifest, ucdCoverageGaps, unitManifestPath, unitUcdIds, verifiedModuleIds, type ModuleDescriptor, type UnitDescriptor } from "./aidlc-execution-context";
 import { contractTableRowsForModule, type ModuleContractRows } from "./aidlc-contract-table";
 import { scanFiles, SOURCE_FILE_PATTERN, TEST_FILE_PATTERN } from "./aidlc-scan-root";
 import { hasExecutableBehavior } from "./aidlc-executable-behavior";
@@ -1781,12 +1781,11 @@ function diagramContract(): Record<string, unknown> | Promise<Record<string, unk
     const configuredCwd = metadata.cwd === undefined ? ROOT : resolve(ROOT, requireString(metadata.cwd, `diagram ${id}.generation.cwd`));
     if (!existsSync(configuredCwd) || !statSync(configuredCwd).isDirectory()) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.cwd does not exist: ${configuredCwd}`);
     const before = snapshotProjectFiles();
-    const result = spawnSync(commandArgv[0], commandArgv.slice(1), {
+    const result = runSync(commandArgv[0], commandArgv.slice(1), {
       cwd: configuredCwd,
       shell: false,
       encoding: "utf8",
       timeout: 120_000,
-      maxBuffer: 4 * 1024 * 1024,
       env: { ...process.env, AIDLC_DIAGRAM_ID: id, AIDLC_ROUTE_CONFIG_JSON: JSON.stringify(routeConfig), AIDLC_EXPECTED_CONTRACT_PATH: expectedPath },
     });
     if (result.error || result.status !== 0) {
@@ -3298,7 +3297,21 @@ function traceabilityMatrix(): Record<string, unknown> {
   // UC-D 目录(test-case-derivation 产物)。test_cases 层来源 = 功能设计 + UC-D 目录,使该层在
   // UC-D 产出阶段(功能设计尚未产出)也能正确判"REQ 是否被 UC-D 覆盖"(缺口1)。
   const ucdDoc = joined(allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/));
-  const codeSrc = joined(projectFiles(SOURCE_FILE_PATTERN));
+  // 4.11.0: the code_refs layer only reads the module's own source roots (module-manifest
+  // paths → .aidlc/source-roots.json, nested repositories included), so another module's
+  // code can never cover this module's REQs and large unrelated trees are skipped. A
+  // project that declares no source roots at all (default origin) carries no ownership
+  // information: it keeps the whole-project scan of 4.10.1.
+  let codeRoots: { roots: string[]; origin: string };
+  try {
+    codeRoots = resolveSourceRoots(ROOT, ACTIVE_MODULE);
+  } catch (error) {
+    fail(`traceability-matrix cannot resolve the source roots of module ${ACTIVE_MODULE}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const codeFiles = codeRoots.origin === "default"
+    ? projectFiles(SOURCE_FILE_PATTERN)
+    : [...new Set(codeRoots.roots.flatMap((root) => allFiles(root, SOURCE_FILE_PATTERN)))].sort();
+  const codeSrc = joined(codeFiles);
   const testSrc = joined(projectFiles(TEST_FILE_PATTERN));
 
   const layerText: Record<string, string> = {
@@ -3421,6 +3434,30 @@ function traceabilityMatrix(): Record<string, unknown> {
       return declaration ? ids(text(declaration.file), /\bREQ-[A-Z0-9][A-Z0-9_-]*\b/g) : [];
     }));
   }
+  // 4.11.0 unit scope of the code_refs layer: the unit-manifest `req_refs` of the active
+  // unit, else the REQs of its UC-D subset (as the tests layer), else the module set. A
+  // ucd_exemption unit (empty UC-D subset by I13 ucd_units) has no code_refs/tests layer.
+  // Without a unit context (build-and-test) the module set is reconciled as before.
+  let unitDescriptor: UnitDescriptor | undefined;
+  if (ACTIVE_UNIT && existsSync(unitManifestPath(ROOT, ACTIVE_MODULE))) {
+    try {
+      unitDescriptor = readUnitManifest(ROOT, ACTIVE_MODULE).find((unit) => unit.unit_id === ACTIVE_UNIT);
+    } catch (error) {
+      fail(`traceability-matrix cannot read the unit manifest of module ${ACTIVE_MODULE}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const unitExemption = unitScope && unitScope.all.length === 0 ? unitDescriptor?.ucd_exemption : undefined;
+  let unitCodeReqs: Set<string> | null = null;
+  let codeRefsSource: "req_refs" | "ucd_subset" | "module" = "module";
+  const unknownReqRefs: string[] = [];
+  if (!unitExemption && unitDescriptor?.req_refs) {
+    unitCodeReqs = new Set(unitDescriptor.req_refs);
+    codeRefsSource = "req_refs";
+    unknownReqRefs.push(...unitDescriptor.req_refs.filter((ref) => !reqIds.includes(ref)).sort());
+  } else if (!unitExemption && unitTestReqs && unitTestReqs.size > 0) {
+    unitCodeReqs = new Set(unitTestReqs);
+    codeRefsSource = "ucd_subset";
+  }
   const storyIdsAll = ids(storyDoc, /\bSTORY-\d{3,}\b/g);
   const ucdIdsAll = ids(fdDoc + "\n" + joined(allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/)), /\bUC-D-\d+\b/g)
     .filter((id) => !unitScope || unitScope.all.includes(id));
@@ -3439,7 +3476,9 @@ function traceabilityMatrix(): Record<string, unknown> {
       // 阶段感知:该层所属阶段尚未到达时,不算断点(currentOrder 经 resolveStageOrder 恒 >=0)。
       const layerOrder = MATRIX_STAGE_ORDER.indexOf(stage);
       if (layerOrder > currentOrder) continue;
+      if (unitExemption && (layer === "code_refs" || layer === "tests")) continue;
       if (layer === "tests" && unitTestReqs && !unitTestReqs.has(req)) continue;
+      if (layer === "code_refs" && unitCodeReqs && !unitCodeReqs.has(req)) continue;
       // 覆盖判定:该层文本中出现本 REQ(或其派生 @ReqId 标记)。
       const covered = new RegExp(`\\b${req}\\b`).test(layerText[layer] || "");
       if (!covered && brokenAt === null) brokenAt = layer;
@@ -3462,6 +3501,7 @@ function traceabilityMatrix(): Record<string, unknown> {
     if (brokenAt) brokenRows.push(`${req}: BROKEN@${brokenAt}`);
     rows.push({ req, tracks, coverage_status: status, ...(ownership.length > 0 ? { data_ownership: ownership, ownership_status: ownershipStatus } : {}) });
   }
+  for (const ref of unknownReqRefs) brokenRows.push(`${ref}: UNKNOWN_REQ_REF@unit-manifest(${ACTIVE_UNIT}.req_refs 引用了 requirements.md 中不存在的 REQ)`);
 
   // 派生级诊断(advisory,不新增硬失败面):STORY/UC-D 继承的 track 若含 backend/frontend/data,
   // 检查其在对应下游层是否出现;缺失记入 derived_gaps 供审查参考,不直接判 BROKEN(避免命名不规范误报)。
@@ -3519,7 +3559,19 @@ function traceabilityMatrix(): Record<string, unknown> {
     status: "passed",
     module_id: ACTIVE_MODULE,
     current_stage: currentStage,
-    ...(unitScope ? { unit_scope: { unit_id: ACTIVE_UNIT, ucd_ids: unitScope.all, tests_layer_reqs: [...unitTestReqs!].sort() } } : {}),
+    ...(ACTIVE_UNIT && (unitScope || codeRefsSource !== "module" || unitExemption) ? {
+      unit_scope: {
+        unit_id: ACTIVE_UNIT,
+        ...(unitScope ? { ucd_ids: unitScope.all, tests_layer_reqs: [...unitTestReqs!].sort() } : {}),
+        code_refs_layer_reqs: unitExemption ? [] : [...(unitCodeReqs || reqIds)].sort(),
+        code_refs_source: unitExemption ? "ucd_exemption" : codeRefsSource,
+        ...(unitExemption ? {
+          code_refs_layer: "not_applicable(ucd_exemption)",
+          tests_layer: "not_applicable(ucd_exemption)",
+          exemption: { reason_code: unitExemption.reason_code },
+        } : {}),
+      },
+    } : {}),
     matrix_rows: rows.length,
     complete_rows: rows.filter((r) => r.coverage_status === "COMPLETE").length,
     broken_rows: allBroken,
@@ -3845,7 +3897,7 @@ function persistenceOperations(path: string): PersistOp[] {
 
 function baselineChangedFiles(ref: string): Set<string> {
   const git = (args: string[]): string => {
-    const result = spawnSync("git", args, { cwd: ROOT, encoding: "utf8", shell: false });
+    const result = runSync("git", args, { cwd: ROOT, encoding: "utf8", shell: false });
     if (result.status !== 0) fail(`structural-invariants baseline_ref ${ref} could not be resolved (git ${args[0]}): ${(result.stderr || "").trim() || `exit ${result.status}`}`);
     return result.stdout || "";
   };

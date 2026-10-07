@@ -1,7 +1,7 @@
 import { createHash, type Hash } from "crypto";
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync } from "fs";
 import { join, relative, resolve } from "path";
-import { spawnSync } from "child_process";
+import { runSync } from "./aidlc-spawn";
 
 /** Revision of one nested source repository (4.9.0), computed in that repository. */
 export interface RepoRevision {
@@ -55,22 +55,20 @@ function digestFile(root: string, path: string, label: string, targets: Hash[]):
 }
 
 function listedFiles(root: string): string[] | null {
-  const files = spawnSync("git", ["ls-files", "-co", "--exclude-standard", "-z"], {
+  const files = runSync("git", ["ls-files", "-co", "--exclude-standard", "-z"], {
     cwd: root,
     encoding: "utf8",
     shell: false,
-    maxBuffer: 64 * 1024 * 1024,
   });
   if (files.status !== 0 || typeof files.stdout !== "string") return null;
   return files.stdout.split("\0").filter(Boolean).map(normalized);
 }
 
 function dirtyOf(root: string, ignore: (path: string) => boolean): boolean | null {
-  const status = spawnSync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], {
+  const status = runSync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], {
     cwd: root,
     encoding: "utf8",
     shell: false,
-    maxBuffer: 16 * 1024 * 1024,
   });
   const statusEntries = typeof status.stdout === "string" ? status.stdout.split("\0").filter(Boolean) : [];
   return status.status === 0 ? statusEntries.some((entry) => {
@@ -87,7 +85,7 @@ function dirtyOf(root: string, ignore: (path: string) => boolean): boolean | nul
  */
 function nestedRevision(projectRoot: string, key: string, scope?: { exclude: (path: string) => boolean; digest: Hash }): RepoRevision {
   const repoRoot = join(projectRoot, key);
-  const revision = spawnSync("git", ["rev-parse", "--verify", "--quiet", "HEAD"], { cwd: repoRoot, encoding: "utf8", shell: false });
+  const revision = runSync("git", ["rev-parse", "--verify", "--quiet", "HEAD"], { cwd: repoRoot, encoding: "utf8", shell: false });
   const head = typeof revision.stdout === "string" ? revision.stdout.trim() : "";
   if (revision.error || revision.status !== 0 || !COMMIT_ID_PATTERN.test(head)) return { commit: "unavailable", dirty: null, worktree_digest: null };
   const dirty = dirtyOf(repoRoot, () => false);
@@ -118,7 +116,7 @@ function nestedRevision(projectRoot: string, key: string, scope?: { exclude: (pa
 export function readSourceRevision(projectRoot: string, scope?: DigestScope, nested?: readonly string[]): SourceRevision {
   const scoped = scope && scope.label !== "worktree" ? scope : undefined;
   const root = realpathSync(resolve(projectRoot));
-  const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", shell: false });
+  const revision = runSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", shell: false });
   if (revision.status !== 0 || typeof revision.stdout !== "string") {
     return { commit: "unavailable", dirty: null, worktree_digest: null, ...(scoped ? { scope: scoped.label, scope_digest: null } : {}) };
   }
@@ -169,7 +167,7 @@ export function commitAncestryErrors(projectRoot: string, recorded: string, curr
   }
   if (!COMMIT_ID_PATTERN.test(recorded)) return [`${field} must be a 40- or 64-character hex commit id`];
   const root = realpathSync(resolve(projectRoot));
-  const result = spawnSync("git", ["merge-base", "--is-ancestor", recorded, "HEAD"], { cwd: root, encoding: "utf8", shell: false });
+  const result = runSync("git", ["merge-base", "--is-ancestor", recorded, "HEAD"], { cwd: root, encoding: "utf8", shell: false });
   if (result.error) return [`${field} ${recorded} cannot be verified: git is unavailable (${result.error.message})`];
   if (result.status === 0) return [];
   return [`${field} ${recorded} is not the current HEAD or one of its ancestors`];

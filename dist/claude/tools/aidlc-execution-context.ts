@@ -54,6 +54,22 @@ export interface UnitDescriptor {
   service_id: string;
   conditional_stages?: UnitConditionalStage[];
   ucd_exemption?: UcdExemption;
+  /** 4.11.0: REQs the unit's code delivers (traceability-matrix code_refs layer scope). */
+  req_refs?: string[];
+}
+
+const REQ_REF = /^REQ-[A-Z0-9][A-Z0-9_-]*$/;
+
+/** `units[].req_refs` (4.11.0): a non-empty list of unique REQ ids. */
+function unitReqRefs(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${label} must be a non-empty array of REQ ids, e.g. ["REQ-001"]`);
+  const refs = value.map((item, index) => {
+    const ref = nonEmptyString(item, `${label}[${index}]`);
+    if (!REQ_REF.test(ref)) throw new Error(`${label}[${index}] must be a REQ id matching ${REQ_REF.source}, got ${JSON.stringify(item)}`);
+    return ref;
+  });
+  uniqueIds(refs, label);
+  return refs;
 }
 
 /** Reason codes accepted for a structured exemption (shared with the I13 non-applicable record). */
@@ -266,6 +282,7 @@ export function readUnitManifest(projectRoot: string, moduleId: string): UnitDes
       service_id: nonEmptyString(unit.service_id, `units[${index}].service_id`),
       ...(conditionalStages !== undefined ? { conditional_stages: conditionalStages } : {}),
       ...(unit.ucd_exemption !== undefined ? { ucd_exemption: ucdExemption(unit.ucd_exemption, `units[${index}].ucd_exemption`) } : {}),
+      ...(unit.req_refs !== undefined ? { req_refs: unitReqRefs(unit.req_refs, `units[${index}].req_refs`) } : {}),
     };
   });
   uniqueIds(units.map((unit) => unit.unit_id), `unit manifest for ${safeModuleId}`);

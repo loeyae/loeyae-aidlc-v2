@@ -14,7 +14,7 @@ import {
   unlinkSync,
   writeSync,
 } from "fs";
-import { spawnSync } from "child_process";
+import { runSync } from "./aidlc-spawn";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { baselineCodeRef, baselineCommitErrors, baselineKindErrors, epochRepos, extraRepoKeyErrors, workflowBaselineForModule } from "./aidlc-baseline";
@@ -107,7 +107,6 @@ const DEFAULT_CONFIG = ".aidlc/evidence-commands.json";
 const STAGE_CONFIG_DIR = ".aidlc/commands";
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_TIMEOUT_MS = 30 * 60 * 1000;
-const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const TAIL_LENGTH = 200;
 const require = createRequire(import.meta.url);
 
@@ -423,13 +422,12 @@ function safeCwdLabel(cwd: string): string {
 function runCommand(spec: CommandSpec): CommandResult {
   const cwd = requireDirectory(spec.cwd || PROJECT_ROOT, `command ${spec.id} cwd`);
   const started = Date.now();
-  const result = spawnSync(spec.argv[0], spec.argv.slice(1), {
+  const result = runSync(spec.argv[0], spec.argv.slice(1), {
     cwd,
     env: process.env,
     encoding: "utf8",
     shell: false,
     timeout: spec.timeout_ms,
-    maxBuffer: MAX_OUTPUT_BYTES,
   });
   const duration = Date.now() - started;
   const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout ? String(result.stdout) : "";
@@ -547,13 +545,12 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
     : [];
   const argv = [process.execPath, tsx, checker, "--sensor", sensor, ...scopeArgs];
   const started = Date.now();
-  const result = spawnSync(argv[0], argv.slice(1), {
+  const result = runSync(argv[0], argv.slice(1), {
     cwd: PROJECT_ROOT,
     env: semanticCheckerEnv(state),
     encoding: "utf8",
     shell: false,
     timeout: timeoutMs,
-    maxBuffer: MAX_OUTPUT_BYTES,
   });
   const duration = Date.now() - started;
   const stdout = typeof result.stdout === "string" ? result.stdout.trim() : result.stdout ? String(result.stdout).trim() : "";
@@ -679,7 +676,7 @@ function baselineCodeRefDigests(i13: Record<string, unknown>, state: ProducerSta
     if ("error" in resolved) fail(`BASELINE refuses to run: ${resolved.error}`);
     const baseline_blob = resolved.blob;
     requireRegularFile(path, `code ref ${path}`);
-    const result = spawnSync("git", ["hash-object", "--", repo.relativePath], { cwd: repo.repoKey === WORKFLOW_REPO_KEY ? PROJECT_ROOT : repo.repoRoot, encoding: "utf8", shell: false });
+    const result = runSync("git", ["hash-object", "--", repo.relativePath], { cwd: repo.repoKey === WORKFLOW_REPO_KEY ? PROJECT_ROOT : repo.repoRoot, encoding: "utf8", shell: false });
     const worktree = typeof result.stdout === "string" ? result.stdout.trim() : "";
     if (result.error || result.status !== 0 || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(worktree)) {
       fail(`cannot hash code ref ${path} with git hash-object: ${result.error ? result.error.message : (result.stderr || "").trim() || `exit ${result.status}`}`);
@@ -799,13 +796,12 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     // BASELINE observes the unmodified baseline code: verified before the command runs.
     const baselineFields = phase === "BASELINE" ? baselineCodeRefDigests(i13, state, scope!.scoped ? scope!.characterization : undefined) : {};
     const started = Date.now();
-    const result = spawnSync(command.argv[0], command.argv.slice(1), {
+    const result = runSync(command.argv[0], command.argv.slice(1), {
       cwd: command.cwd || PROJECT_ROOT,
       env: semanticCheckerEnv(state, process.env, { AIDLC_PHASE: phase }),
       encoding: "utf8",
       shell: false,
       timeout: command.timeout_ms,
-      maxBuffer: MAX_OUTPUT_BYTES,
     });
     const duration = Date.now() - started;
     const exitCode = typeof result.status === "number" ? result.status : 1;

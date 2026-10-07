@@ -21,6 +21,7 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 import { updateMcpConfig } from "../core/tools/aidlc-mcp-config";
+import { runSync } from "../core/tools/aidlc-spawn";
 import {
   hasManagedInstallation,
   installManagedAssets,
@@ -144,12 +145,15 @@ function orchestrationScript(): string {
 
 function run(script: string, args: string[], input?: string): never | void {
   const tsx = require.resolve("tsx/cli");
-  const result = spawnSync(process.execPath, [tsx, resolve(ROOT, script), ...args], {
+  // 4.11.0: the shared 64 MB limit (Node's default 1 MB overflowed on large reports);
+  // an overflow throws a SubprocessOverflowError naming the child. The child's own
+  // output, including an overflow it reported, is passed through unchanged.
+  const result = runSync(process.execPath, [tsx, resolve(ROOT, script), ...args], {
     stdio: "pipe",
     cwd: process.cwd(),
     encoding: "utf8",
     input,
-  });
+  }, { propagate: false });
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) throw result.error;

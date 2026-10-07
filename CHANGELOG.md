@@ -1,5 +1,26 @@
 # Changelog
 
+## 4.11.0
+
+traceability-matrix 的 code_refs 层按单元收敛并豁免 `ucd_exemption` 单元；子进程输出溢出（ENOBUFS）成为独立错误（MARS-94）。
+
+### Added
+
+- unit-manifest `units[].req_refs: string[]`：该 unit 代码交付的 REQ（非空、不重复、形如 `REQ-xxx`）；引用 requirements.md 中不存在的 REQ 时矩阵输出 `REQ-xxx: UNKNOWN_REQ_REF@unit-manifest(...)`。
+- `unit_scope.code_refs_layer_reqs`（排序）与 `code_refs_source`（`req_refs` / `ucd_subset` / `module` / `ucd_exemption`）。
+
+### Fixed
+
+- **code_refs 层按单元收敛**：unit 上下文按 `req_refs` → 本单元 UC-D 子集用例文件引用的 REQ → 模块全集确定检查范围，不再要求每个 unit 的代码覆盖模块全部 REQ。
+- **豁免单元**：声明了 `ucd_exemption` 且 I13 `ucd_units` 中没有该 unit 时，code_refs 层与 tests 层为 `not_applicable`（`unit_scope.code_refs_layer = "not_applicable(ucd_exemption)"`，带 `exemption.reason_code`），其他层不变。
+- **源码扫描范围**：code_refs 层只扫本模块源码根（module-manifest `paths` → `.aidlc/source-roots.json`，含嵌套仓库），不再扫整个项目；其他模块代码里的 REQ 标记不再算作本模块已覆盖。两者都没有声明的项目没有源码归属信息，保持 4.10.1 的全项目扫描。
+- **ENOBUFS**：引擎所有缓冲子进程（git、受控命令、语义检查器、`evidence run`、CLI 转发）经 `core/tools/aidlc-spawn.ts` 统一使用 64 MB 上限（原先部分调用为 Node 默认 1 MB，CLI 转发 orchestrate 输出即是其一）。溢出时 `orchestrate` 输出独立的 `kind: "error"`，`subprocess: { argv, max_buffer }` 指出溢出的子进程（argv[0..1]，`node tsx <script>` 带脚本），不再与 sensor 门禁失败拼成一条；子进程内的溢出逐层上抛。`AIDLC_SUBPROCESS_MAX_BUFFER`（字节）可覆盖上限，用于诊断。
+
+### Unchanged
+
+- 没有 unit 上下文（build-and-test）时证据结构与 4.10.1 一致，按模块全集对账：每条 REQ 至少被本模块某处代码引用，否则 `BROKEN@code_refs`。
+- 不声明 `req_refs`、I13 没有 `ucd_units` 时 unit 上下文的证据结构与 4.10.1 一致（无 `unit_scope`）。
+
 ## 4.10.1
 
 修复类版本：`orchestrate baseline --adopt` 的两条守卫不再把 `ucd_exemption`（空 UC-D 子集）单元算作模块已进入 tdd（MARS-93）。
