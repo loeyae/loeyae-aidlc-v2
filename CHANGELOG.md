@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 4.12.0
 
 文件级 sensor（no-todo / traceability）与源码 produce 存在性判定只看本单元交付的变更文件，不再检查源码根全集（MARS-95）。
 
