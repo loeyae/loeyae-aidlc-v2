@@ -656,6 +656,234 @@ function collectFiles(path: string): string[] {
   return files;
 }
 
+// ---------------------------------------------------------------------------
+// MARS-95: source produce = tracked text files / the unit's delivery set
+// ---------------------------------------------------------------------------
+
+/** A file without NUL bytes (git's own binary heuristic). Unreadable files count as binary. */
+function isTextFile(path: string): boolean {
+  try {
+    return !readFileSync(path).includes(0);
+  } catch {
+    return false;
+  }
+}
+
+/** NUL-separated output of a git command in `cwd`, or null when git fails (not a repository, unknown commit). */
+function gitPaths(cwd: string, args: string[]): string[] | null {
+  const result = runSync("git", args, { cwd, encoding: "utf8", shell: false });
+  if (result.error || result.status !== 0) return null;
+  return result.stdout.split("\0").filter(Boolean);
+}
+
+/**
+ * Repository of a project-relative source root directory: the declared repository it
+ * belongs to (workflow or nested, by `.aidlc/source-roots.json`), the pathspec inside
+ * it, and whether git really resolves the directory to that repository (false for an
+ * undeclared independent repository, or no git at all) — only then can it be diffed
+ * against that repository's baseline.
+ */
+function sourceRootRepo(rel: string, directory: string): { repoRoot: string; repoKey: string; pathspec: string; resolved: boolean } {
+  const repo = codeRefRepo(PROJECT_ROOT, rel, declaredNestedRoots(PROJECT_ROOT));
+  const top = runSync("git", ["rev-parse", "--show-toplevel"], { cwd: directory, encoding: "utf8", shell: false });
+  let resolved = false;
+  if (!top.error && top.status === 0 && top.stdout.trim()) {
+    try {
+      resolved = realpathSync(top.stdout.trim()) === realpathSync(repo.repoRoot);
+    } catch {
+      resolved = false;
+    }
+  }
+  return { repoRoot: repo.repoRoot, repoKey: repo.repoKey, pathspec: repo.relativePath || ".", resolved };
+}
+
+/**
+ * Tracked plus untracked-but-not-ignored files below `directory` (`git ls-files` run in
+ * the directory itself, so git answers for the repository that really holds it), as
+ * absolute paths: existing regular text files only; files matching `.gitignore` (even
+ * when tracked), deleted files, gitlinks and dot-prefixed path segments (as
+ * collectFiles) are dropped; a symbolic link keeps failing closed. Null when the
+ * directory is not inside a git work tree.
+ */
+function trackedTextFiles(directory: string): string[] | null {
+  const listed = gitPaths(directory, ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."]);
+  if (listed === null) return null;
+  const ignored = new Set(gitPaths(directory, ["ls-files", "-z", "--cached", "--ignored", "--exclude-standard", "--", "."]) || []);
+  const files: string[] = [];
+  for (const path of new Set(listed)) {
+    if (ignored.has(path) || path.split("/").some((segment) => segment.startsWith("."))) continue;
+    const absolute = join(directory, ...path.split("/"));
+    if (!existsSync(absolute)) continue;
+    const stat = lstatSync(absolute);
+    if (stat.isSymbolicLink()) throw new Error(`artifact path is a symbolic link: ${absolute}`);
+    if (stat.isFile() && isTextFile(absolute)) files.push(absolute);
+  }
+  return files.sort();
+}
+
+/** Text files of one source root: tracked ones in a git work tree, else (no git) every non-dot text file. */
+function sourceRootFiles(root: string): string[] {
+  const rel = root.replace(/\\/g, "/").replace(/\/+$/, "");
+  const target = assertProjectPath(join(PROJECT_ROOT, ...rel.split("/")));
+  if (!existsSync(target)) return [];
+  if (!lstatSync(target).isDirectory()) return collectFiles(target).filter(isTextFile);
+  return trackedTextFiles(target) ?? collectFiles(target).filter(isTextFile);
+}
+
+interface SourceDelivery {
+  /** `delta`: at least one source root was diffed against a registered baseline; `tracked`: no baseline, the tracked text files. */
+  mode: "delta" | "tracked";
+  /** Expanded source roots (`<root>/`). */
+  roots: string[];
+  /** Delivered (delta) or tracked (fallback) text files, absolute. */
+  files: string[];
+  /** Range each diffed repository was compared with ("." = workflow repository): `<baseline>` or `<baseline>..<completion>`. */
+  baselines: Record<string, string>;
+  /** Roots inside a nested repository a lightweight worktree skipped; judged in the main checkout as before. */
+  delegated: string[];
+  /** Why the delivery set cannot be judged (git diff failed, or an empty delta of a unit without ucd_exemption). */
+  error?: string;
+  /** The delta is empty and the unit declares no ucd_exemption (`error` names it). */
+  emptyDelta?: boolean;
+  /** Empty delta of a unit that declares ucd_exemption: the source produce is not_applicable. */
+  exemption?: { reason_code: string; approval_ref: string; reason: string };
+}
+
+type DeliveryRange = { base: string; head?: string };
+
+/** source_revision of the unit's code-generation GREEN evidence: workflow commit and nested repository commits. */
+function unitGreenRevision(instance: StageInstance): { commit: string; repos: Record<string, string> } | undefined {
+  if (!instance.module_id || !instance.unit_id) return undefined;
+  const path = join(PROJECT_ROOT, ".aidlc", "evidence", "code-generation", instance.module_id, instance.unit_id, "green-test-evidence.json");
+  if (!existsSync(path)) return undefined;
+  try {
+    const revision = asRecord(asRecord(JSON.parse(readFileSync(path, "utf8")))?.source_revision);
+    const commit = asNonEmptyString(revision?.commit);
+    if (!commit) return undefined;
+    const repos = Object.fromEntries(Object.entries(asRecord(revision?.repos) || {}).flatMap(([key, value]) => {
+      const repoCommit = asNonEmptyString(asRecord(value)?.commit);
+      return repoCommit ? [[key, repoCommit]] : [];
+    }));
+    return { commit, repos };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Diff range per repository ("." and nested keys) of the instance's module baseline
+ * (module adoption chain, else the global chain), {} when none is registered:
+ * - the current epoch against the work tree; or
+ * - when the baseline was advanced to this unit's own completion point (its GREEN
+ *   evidence commit is epoch k > 0, `orchestrate baseline --advance`), the unit's
+ *   delivery is the committed range epoch k-1 .. epoch k, so a re-check of a completed
+ *   unit judges what it delivered rather than an empty delta or later units' work.
+ */
+function deliveryRanges(instance: StageInstance): Record<string, DeliveryRange> {
+  if (!instance.module_id) return {};
+  let baseline: ReturnType<typeof workflowBaselineForModule>;
+  try {
+    baseline = workflowBaselineForModule(PROJECT_ROOT, instance.module_id);
+  } catch {
+    return {};
+  }
+  if (!baseline.registered || !COMMIT_ID_PATTERN.test(baseline.commit)) return {};
+  const green = unitGreenRevision(instance);
+  const anchor = green ? baseline.epochs.lastIndexOf(green.commit) : -1;
+  if (anchor > 0) {
+    const before = epochRepos(baseline, anchor - 1);
+    const at = epochRepos(baseline, anchor);
+    const ranges: Record<string, DeliveryRange> = { [WORKFLOW_REPO_KEY]: { base: baseline.epochs[anchor - 1], head: baseline.epochs[anchor] } };
+    for (const [key, commit] of Object.entries(at)) ranges[key] = before[key] ? { base: before[key], head: commit } : { base: commit };
+    return ranges;
+  }
+  const current = epochRepos(baseline, baseline.epochs.length - 1);
+  return Object.fromEntries([[WORKFLOW_REPO_KEY, { base: baseline.commit }], ...Object.entries(current).map(([key, commit]) => [key, { base: commit }])]);
+}
+
+/**
+ * The source files a module/unit stage instance delivers (MARS-95). With a registered
+ * baseline each source root is diffed in its own repository (nested repositories in
+ * their own cwd): `git diff --name-only <baseline>` (commits since the baseline plus
+ * staged and unstaged changes) plus untracked files — or the committed range of a
+ * completed unit (deliveryRanges) — limited to tracked/untracked-not-ignored text
+ * files. Without a baseline (or for a root git does not resolve to its declared
+ * repository) every tracked text file of the root is returned (mode `tracked`, the
+ * 4.11.0 scope minus ignored and binary files). Project-axis instances always use
+ * `tracked`.
+ */
+function sourceDelivery(instance?: StageInstance): SourceDelivery {
+  const roots = expandSourcePattern(CANONICAL_SOURCE_PATTERN, instance);
+  const ranges = instance ? deliveryRanges(instance) : {};
+  const delivery: SourceDelivery = { mode: "tracked", roots, files: [], baselines: {}, delegated: [] };
+  const files = new Set<string>();
+  for (const root of roots) {
+    const rel = root.replace(/\/+$/, "");
+    if (skippedNestedMainCheckout(root)) {
+      // A skipped nested repository is one the unit does not involve: it holds none of
+      // its delivery; its baseline is still named so the worktree and the main checkout
+      // report the same result.
+      delivery.delegated.push(root);
+      const key = codeRefRepo(PROJECT_ROOT, rel, declaredNestedRoots(PROJECT_ROOT)).repoKey;
+      const range = ranges[key];
+      if (range) {
+        delivery.mode = "delta";
+        delivery.baselines[key] = range.head ? `${range.base}..${range.head}` : range.base;
+      }
+      continue;
+    }
+    const target = assertProjectPath(join(PROJECT_ROOT, ...rel.split("/")));
+    if (!existsSync(target)) continue;
+    const repo = lstatSync(target).isDirectory() ? sourceRootRepo(rel, target) : undefined;
+    const range = repo?.resolved ? ranges[repo.repoKey] : undefined;
+    const tracked = repo && range ? trackedTextFiles(target) : null;
+    if (!repo || !range || tracked === null) {
+      for (const file of sourceRootFiles(root)) files.add(file);
+      continue;
+    }
+    delivery.mode = "delta";
+    delivery.baselines[repo.repoKey] = range.head ? `${range.base}..${range.head}` : range.base;
+    const changed = gitPaths(repo.repoRoot, ["diff", "--name-only", "-z", range.base, ...(range.head ? [range.head] : []), "--", repo.pathspec]);
+    if (changed === null) {
+      delivery.error = `git diff against the baseline ${delivery.baselines[repo.repoKey]} failed in ${repo.repoKey === WORKFLOW_REPO_KEY ? "the workflow repository" : `the nested repository ${repo.repoKey}/`}`;
+      continue;
+    }
+    const untracked = range.head ? [] : gitPaths(repo.repoRoot, ["ls-files", "-z", "--others", "--exclude-standard", "--", repo.pathspec]) || [];
+    const delta = new Set([...changed, ...untracked].map((path) => resolve(repo.repoRoot, ...path.split("/"))));
+    for (const file of tracked) if (delta.has(resolve(file))) files.add(file);
+  }
+  delivery.files = [...files].sort();
+  if (delivery.mode === "delta" && !delivery.error && delivery.files.length === 0) {
+    let exemption: ReturnType<typeof unitUcdExemption>;
+    try {
+      exemption = instance?.module_id && instance.unit_id ? unitUcdExemption(PROJECT_ROOT, instance.module_id, instance.unit_id) : undefined;
+    } catch {
+      exemption = undefined;
+    }
+    const against = Object.entries(delivery.baselines).map(([key, commit]) => `${key}=${commit}`).join(", ");
+    if (exemption) delivery.exemption = { reason_code: exemption.reason_code, approval_ref: exemption.approval_ref, reason: exemption.reason };
+    else {
+      delivery.emptyDelta = true;
+      delivery.error = `本单元未交付任何源码变更 (no source change in ${roots.join(", ")} since the baseline ${against})`;
+    }
+  }
+  return delivery;
+}
+
+/** REQ ids a delivered source file must reference: the unit-manifest req_refs, else any REQ / R id. */
+function deliveryRequirementPattern(instance: StageInstance): { pattern: RegExp; label: string } {
+  let refs: string[] | undefined;
+  if (instance.module_id && instance.unit_id) {
+    try {
+      refs = readUnitManifest(PROJECT_ROOT, instance.module_id).find((unit) => unit.unit_id === instance.unit_id)?.req_refs;
+    } catch {
+      refs = undefined;
+    }
+  }
+  if (refs && refs.length > 0) return { pattern: new RegExp(`\\b(?:${refs.map(escapeExpression).join("|")})\\b`), label: `a REQ of ${instance.unit_id}.req_refs (${refs.join(", ")})` };
+  return { pattern: /\b(?:REQ-[A-Z0-9][A-Z0-9_-]*|R-[0-9]+)\b/i, label: "a requirement ID (REQ-xxx or R-xxx)" };
+}
+
 function artifactPlaceholderNames(pattern: string): string[] {
   return [...pattern.matchAll(/\{([^{}]+)\}/g)].map((match) => match[1]);
 }
@@ -683,9 +911,9 @@ function escapeExpression(value: string): string {
 }
 
 function resolveProducePaths(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string[] {
-  if (pattern === CANONICAL_SOURCE_PATTERN) {
-    return [...new Set(expandSourcePattern(pattern, instance).flatMap((root) => resolveConcretePaths(root, instance, allowProjectAggregate)))];
-  }
+  // MARS-95: the canonical source produce is the instance's delivery set (changed files
+  // since the baseline), or the tracked text files of the source roots without one.
+  if (pattern === CANONICAL_SOURCE_PATTERN) return sourceDelivery(instance).files;
   return resolveConcretePaths(pattern, instance, allowProjectAggregate);
 }
 
@@ -744,8 +972,11 @@ const MIN_ARTIFACT_BYTES = 16;
  *
  * Symbolic links / junctions and paths escaping the project root keep throwing (from
  * assertProjectPath / collectFiles); each caller keeps its own fail-closed handling.
+ *
+ * MARS-95: `sourceRoot` (an expanded canonical `src/` root) judges only the tracked text
+ * files of the root (`git ls-files`, .gitignore respected, binary files dropped).
  */
-function artifactPresenceFailure(pattern: string, instance: StageInstance, allowProjectAggregate = false): string | undefined {
+function artifactPresenceFailure(pattern: string, instance: StageInstance, allowProjectAggregate = false, sourceRoot = false): string | undefined {
   const label = instanceArtifactPattern(pattern, instance, allowProjectAggregate);
   const contextual = label.replace(/\\/g, "/");
   const aggregated = contextual.includes("*") || /\{[^}]+\}/.test(contextual);
@@ -765,7 +996,7 @@ function artifactPresenceFailure(pattern: string, instance: StageInstance, allow
     // consume reaches this combination today, so it is rejected instead (fail-closed).
     throw new Error(`directory artifact cannot be aggregated across modules/units: ${label}`);
   }
-  const paths = resolveConcretePaths(pattern, instance, allowProjectAggregate);
+  const paths = sourceRoot ? sourceRootFiles(contextual) : resolveConcretePaths(pattern, instance, allowProjectAggregate);
   const present = directory
     ? paths.some((path) => lstatSync(path).size >= MIN_ARTIFACT_BYTES)
     : paths.length > 0 && paths.every((path) => lstatSync(path).size >= MIN_ARTIFACT_BYTES);
@@ -812,15 +1043,44 @@ function mainCheckoutPresence(root: string, path: string): boolean {
   return directory ? files.some((file) => lstatSync(file).size >= MIN_ARTIFACT_BYTES) : files.length > 0 && files.every((file) => lstatSync(file).size >= MIN_ARTIFACT_BYTES);
 }
 
-export function checkProduces(instance: StageInstance): string[] {
+export function checkProduces(instance: StageInstance, options: { completed?: boolean } = {}): string[] {
   const stage = instance.stage;
   if (!stage.produces || stage.produces.length === 0) return [];
   const missing: string[] = [];
-  for (const pattern of stage.produces.flatMap((declared) => expandSourcePattern(declared, instance))) {
-    const failure = artifactPresenceFailure(pattern, instance);
+  for (const declared of stage.produces) {
+    if (declared === CANONICAL_SOURCE_PATTERN) {
+      missing.push(...sourcePresenceFailures(instance, options.completed === true));
+      continue;
+    }
+    const failure = artifactPresenceFailure(declared, instance);
     if (failure !== undefined) missing.push(failure);
   }
   return missing;
+}
+
+/**
+ * Presence of the canonical source produce (MARS-95). With a baseline (mode `delta`) the
+ * unit must deliver at least one changed source file across its roots; an empty delta
+ * is not_applicable for a ucd_exemption unit and an explicit failure otherwise (never
+ * the full source set). Without a baseline every root is judged on its own tracked
+ * text files. Roots of a skipped nested repository keep the main-checkout rule.
+ */
+function sourcePresenceFailures(instance: StageInstance, completed: boolean): string[] {
+  const delivery = sourceDelivery(instance);
+  const failures: string[] = [];
+  for (const root of delivery.delegated) {
+    const failure = artifactPresenceFailure(root, instance);
+    if (failure !== undefined) failures.push(failure);
+  }
+  if (delivery.mode === "delta") {
+    if (delivery.error && !(completed && delivery.emptyDelta)) failures.push(`${delivery.roots.join(", ")}: ${delivery.error}`);
+    return failures;
+  }
+  for (const root of delivery.roots.filter((candidate) => !delivery.delegated.includes(candidate))) {
+    const failure = artifactPresenceFailure(root, instance, false, true);
+    if (failure !== undefined) failures.push(failure);
+  }
+  return failures;
 }
 
 export function checkConsumes(instance: StageInstance, state: WorkflowState, graph: StageGraph, instances: StageInstance[]): string[] {
@@ -834,7 +1094,7 @@ export function checkConsumes(instance: StageInstance, state: WorkflowState, gra
       const expandedPatterns = expandSourcePattern(pattern, instance);
       if (expandedPatterns.length === 0) missingLabel = resolvedPattern;
       for (const expanded of expandedPatterns) {
-        missingLabel = artifactPresenceFailure(expanded, instance, true);
+        missingLabel = artifactPresenceFailure(expanded, instance, true, pattern === CANONICAL_SOURCE_PATTERN);
         if (missingLabel !== undefined) break;
       }
     } catch (error) {
@@ -1793,11 +2053,26 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
         const untraced: string[] = [];
         const unreadableFiles: string[] = [];
+        // MARS-95: with a baseline the source produce is the unit's delivery set, which as a
+        // whole must reference a REQ of the unit (req_refs) — per-file REQ markers in code
+        // are the traceability-matrix code_refs layer's business. An empty delta is judged
+        // by the produce presence gate. Without a baseline the 4.11.0 per-file rule applies.
+        const delivery = (stage.produces || []).includes(CANONICAL_SOURCE_PATTERN) ? sourceDelivery(instance) : undefined;
+        const deltaSource = delivery?.mode === "delta";
+        let sourceUntraced: string | undefined;
+        if (delivery && deltaSource && delivery.files.length > 0) {
+          const required = deliveryRequirementPattern(instance);
+          const texts = delivery.files.map((filePath) => producedText(filePath));
+          if (!texts.some((content) => content !== null && required.pattern.test(content))) {
+            sourceUntraced = `No delivered source file (${delivery.files.map(artifactLabel).join(", ")}) references ${required.label}`;
+          }
+        }
         // Files below MIN_ARTIFACT_BYTES inside a directory produce (e.g. empty or
         // one-line-comment Python `__init__.py` package markers under a source root) are
         // not artifacts on their own and are not traced, matching the artifact presence
         // rule (4.6.1 D8); a single-file produce is still traced whatever its size.
         const targets = [...new Set((stage.produces || [])
+          .filter((pattern) => !(deltaSource && pattern === CANONICAL_SOURCE_PATTERN))
           .flatMap((pattern) => resolveProducePaths(pattern, instance)
             .filter((filePath) => !pattern.endsWith("/") || lstatSync(filePath).size >= MIN_ARTIFACT_BYTES))
           .filter((filePath) => !isEvidenceArtifact(filePath)))];
@@ -1824,9 +2099,10 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
             untraced.push(artifactLabel(filePath));
           }
         }
-        if (untraced.length > 0 || unreadableFiles.length > 0) {
+        if (untraced.length > 0 || unreadableFiles.length > 0 || sourceUntraced) {
           const details = [];
           if (untraced.length > 0) details.push(`No requirement ID (REQ-xxx or R-xxx) found in: ${untraced.join(", ")}`);
+          if (sourceUntraced) details.push(sourceUntraced);
           if (unreadableFiles.length > 0) details.push(`unreadable produced files: ${unreadableFiles.join(", ")}`);
           failures.push({
             sensor: "traceability",
@@ -4176,11 +4452,13 @@ async function handleReport(args: string[]): Promise<Directive> {
   let label = "Workflow";
   let extras: Record<string, unknown> = {};
   let ownsInstance: (instanceId: string) => boolean = () => true;
+  let auditRef: WorkflowRef = GLOBAL_WORKFLOW;
   if (isSplitLayout(PROJECT_ROOT)) {
     if (!stageNode) return { kind: "error", message: `Unknown stage "${stageSlug}".` };
     const owner = reportOwner(flags, stageNode);
     if (owner.kind === "error") return owner as Directive;
     const ownerRef = owner as WorkflowRef;
+    auditRef = ownerRef;
     if (!loadWorkflowParts(PROJECT_ROOT).parts.has(workflowRefKey(ownerRef))) {
       return { kind: "error", message: `${workflowLabel(ownerRef)} does not exist yet; start it with orchestrate next --module ${ownerRef.kind === "module" ? ownerRef.module_id : "<module-id>"}.` };
     }
@@ -4295,6 +4573,7 @@ async function handleReport(args: string[]): Promise<Directive> {
     timestamp: new Date().toISOString(),
   };
   if (userInput) entry.user_input = userInput;
+  let sourceDeliveryRecord: Record<string, unknown> | undefined;
 
   // --- P0 Gate: Validate consumes and produces before allowing completion ---
   if (result === "completed" || result === "approved") {
@@ -4367,6 +4646,19 @@ async function handleReport(args: string[]): Promise<Directive> {
             `\n\nFix sensor failures, then report again.`,
         };
       }
+      // MARS-95: an empty source delivery of a ucd_exemption unit is recorded with its basis.
+      if ((stageNode.produces || []).includes(CANONICAL_SOURCE_PATTERN)) {
+        const delivery = sourceDelivery(currentInstance);
+        if (delivery.exemption) {
+          sourceDeliveryRecord = {
+            status: "not_applicable",
+            reason: "ucd_exemption",
+            roots: delivery.roots,
+            baselines: delivery.baselines,
+            ucd_exemption: delivery.exemption,
+          };
+        }
+      }
   }
 
   state.history.push(entry);
@@ -4393,6 +4685,18 @@ async function handleReport(args: string[]): Promise<Directive> {
   } catch (error) {
     if (claim && error instanceof Error && error.message.startsWith("workflow state revision conflict")) return handleReport(args);
     throw error;
+  }
+  if (sourceDeliveryRecord) {
+    const exemption = sourceDeliveryRecord.ucd_exemption as { reason_code: string; approval_ref: string; reason: string };
+    appendAuditEvent(PROJECT_ROOT, auditRef, "SOURCE_DELIVERY_NOT_APPLICABLE", {
+      "Stage Instance": currentInstance.instance_id,
+      "Source Roots": (sourceDeliveryRecord.roots as string[]).join(", "),
+      Baselines: Object.entries(sourceDeliveryRecord.baselines as Record<string, string>).map(([key, value]) => `${key}=${value}`).join(", "),
+      "Exemption Reason Code": exemption.reason_code,
+      "Exemption Approval Ref": exemption.approval_ref,
+      "Exemption Reason": exemption.reason,
+    });
+    extras = { ...extras, source_delivery: sourceDeliveryRecord };
   }
 
   const nextCommand = isSplitLayout(PROJECT_ROOT) && currentInstance.module_id ? `next --module ${currentInstance.module_id}` : "next";
@@ -4490,7 +4794,9 @@ async function reattestInstance(
   }
   const automaticEvidenceError = produceMissingSemanticEvidence(instance, true);
   if (automaticEvidenceError) return { kind: "error", message: `🚫 Cannot re-attest "${instanceId}" — ${automaticEvidenceError}`, ...extras };
-  const missingProduces = checkProduces(instance);
+  // MARS-95: a completed unit proved its source delivery when it completed; after
+  // --advance its changes are part of the baseline, so an empty delta is not a failure.
+  const missingProduces = checkProduces(instance, { completed: true });
   if (missingProduces.length > 0) {
     return { kind: "error", message: `🚫 Cannot re-attest "${instanceId}" — required produces not found:\n${missingProduces.map((path) => `  ❌ ${path}`).join("\n")}`, ...extras };
   }

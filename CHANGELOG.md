@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+文件级 sensor（no-todo / traceability）与源码 produce 存在性判定只看本单元交付的变更文件，不再检查源码根全集（MARS-95）。
+
+### Fixed
+
+- **交付文件集**：module/unit 上下文且已登记基线（模块接管基线 → 全局基线链，当前代即 `--advance` 后的 GREEN 锚点）时，canonical `src/` 解析为各源码根在各自仓库内（嵌套仓库在子仓库 cwd）`git diff --name-only <baseline>`（基线后的提交 + 暂存/未暂存改动）加未跟踪文件，只取已跟踪/未忽略的文本文件；`.gitignore` 命中的文件（即使已跟踪）和含 NUL 字节的二进制文件一律排除。
+- **no-todo** 只检查交付文件集；**traceability** 对源码改为「交付文件集中至少一个文件引用本单元 `req_refs` 中的 REQ」（未声明 `req_refs` 时为任一 REQ/R 编号），逐文件 REQ 标记交给 traceability-matrix 的 code_refs 层；文档类 produce 仍要求每个文件含 REQ。
+- **交付文件集为空**：声明 `ucd_exemption` 的 unit 源码 produce 为 `not_applicable`，`report` 写审计事件 `SOURCE_DELIVERY_NOT_APPLICABLE`（含基线与豁免 reason_code / approval_ref / reason）并在返回中带 `source_delivery`；其他 unit 报 `本单元未交付任何源码变更`，不静默通过、不退回全集。
+- **已完成单元**：基线已 `--advance` 到本单元 GREEN 证据的提交（第 k 代）时，本单元的交付文件集为第 k-1 代到第 k 代的已提交范围，不混入后续单元的改动；re-attest 已完成单元时空交付不报错（其交付在完成时已校验）。lightweight worktree 跳过的嵌套仓库不计入交付，worktree 与主检出给出相同结论。
+- **collectFiles → git ls-files**：源码根的存在性判定（produces / consumes）与文件枚举改用 `git ls-files --cached --others --exclude-standard`，尊重 `.gitignore`，排除二进制。
+
+### Unchanged
+
+- 没有基线（全新项目、未登记基线）时，范围为源码根下已跟踪/未忽略的文本文件，逐文件规则与 4.11.0 一致；不在 git 仓库中时按文件系统枚举（排除二进制）。
+- lightweight worktree 跳过的嵌套仓库源码根仍按主检出判定存在性。
 ## 4.11.0
 
 traceability-matrix 的 code_refs 层按单元收敛并豁免 `ucd_exemption` 单元；子进程输出溢出（ENOBUFS）成为独立错误（MARS-94）。
