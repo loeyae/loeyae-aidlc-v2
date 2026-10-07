@@ -17,7 +17,7 @@ import {
 import { spawnSync } from "child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
-import { baselineCodeRef, baselineCommitErrors, epochRepos, extraRepoKeyErrors, workflowBaselineForModule } from "./aidlc-baseline";
+import { baselineCodeRef, baselineCommitErrors, baselineKindErrors, epochRepos, extraRepoKeyErrors, workflowBaselineForModule } from "./aidlc-baseline";
 import { codeRefRepo, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
 import { evidenceRelativePath, i13UcdIdsByMode as sharedI13UcdIdsByMode, readUnitManifest, stageInstanceId, unitManifestPath, unitUcdIds, type UcdExemption } from "./aidlc-execution-context";
 import { GLOBAL_WORKFLOW, loadWorkflowState, type WorkflowRef, type WorkflowState } from "./aidlc-light-state";
@@ -653,6 +653,9 @@ function baselineCodeRefDigests(i13: Record<string, unknown>, state: ProducerSta
   const commitErrors = baselineCommitErrors(PROJECT_ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
   if (commitErrors.length > 0 || !baseline.registered) fail(`BASELINE requires a usable workflow baseline: ${commitErrors.join("; ")}`);
   if (recorded !== baseline.epochs[0]) fail(`I13 baseline_commit ${recorded} does not match epoch 0 of the workflow baseline (${baseline.epochs[0]})`);
+  // 4.10.0: I13 and BASELINE must be produced against the same kind of baseline (adoption or workflow).
+  const kindErrors = baselineKindErrors(i13.baseline_kind, baseline, "I13");
+  if (kindErrors.length > 0) fail(`BASELINE refuses to run: ${kindErrors.join("; ")}`);
   const commit = baseline.commit;
   // 4.9.0: code refs of a nested repository resolve in that repository at its commit of the current epoch.
   let nested: string[] = [];
@@ -687,7 +690,8 @@ function baselineCodeRefDigests(i13: Record<string, unknown>, state: ProducerSta
     }
     return registered ? { path, repo: repo.repoKey, baseline_blob, worktree_blob: worktree } : { path, baseline_blob, worktree_blob: worktree };
   });
-  return registered ? { baseline_commit: commit, baseline_repos: repos, code_ref_digests: digests } : { baseline_commit: commit, code_ref_digests: digests };
+  const kind = baseline.kind === "adoption" ? { baseline_kind: "adoption" } : {};
+  return registered ? { baseline_commit: commit, baseline_repos: repos, code_ref_digests: digests, ...kind } : { baseline_commit: commit, code_ref_digests: digests, ...kind };
 }
 
 function phaseObservation(stdout: string, phase: Phase): Record<string, unknown> {

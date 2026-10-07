@@ -36,10 +36,14 @@ import { codeRefRepo, nestedHead, nestedMigrationCommand, nestedSourceRepos, pen
 import { CONTRACT_CONSUMER_COLUMN, CONTRACT_ID_COLUMN, CONTRACT_PROVIDER_COLUMN, moduleForValue } from "./aidlc-contract-table";
 import { COMMIT_ID_PATTERN, commitAncestryErrors, readSourceRevision, type RepoRevision } from "./aidlc-revision";
 import {
+  ADOPTION_EXEMPTED_RULES,
+  ADOPTION_REPLACED_RULES,
   baselineCodeRef,
   baselineCommitErrors,
   baselineEpochErrors,
+  baselineKindErrors,
   baselineUsage,
+  checkAdoptionCandidate,
   checkAdvanceTarget,
   checkBaselineCandidate,
   checkRepoAdvanceTarget,
@@ -47,11 +51,13 @@ import {
   currentHeadCommit,
   epochRepos,
   extraRepoKeyErrors,
+  modulePhaseEvidence,
   nestedCommitErrors,
   nestedDirty,
   parseCodeRef,
   pendingRepos,
   workflowStartedAt,
+  workflowBaseline,
   workflowBaselineForModule,
   type CodeRef,
 } from "./aidlc-baseline";
@@ -82,6 +88,7 @@ import {
   DIAGRAM_FORMATS,
   ENGINE_VERSION,
   GLOBAL_WORKFLOW,
+  adoptionAsBaseline,
   appendAuditEvent,
   baselineChain,
   baselineRepoChains,
@@ -248,8 +255,9 @@ const SPLIT_FLAGS = new Set(["from", "dry-run"]);
 const ARCHIVE_FLAGS = new Set(["reason"]);
 const UPGRADE_FLAGS = new Set(["dry-run", "module"]);
 const DIAGRAM_FORMAT_FLAGS = new Set(["set", "user-input"]);
-// `module` is accepted only to reject it with a specific message (baseline is global-only).
-const BASELINE_FLAGS = new Set(["set", "advance", "user-input", "reason", "dry-run", "replace", "expect", "module"]);
+// `module` scopes --adopt / --advance / the read-only view to a module sub-workflow (4.10.0); --set / --replace reject it.
+const BASELINE_FLAGS = new Set(["set", "advance", "adopt", "user-input", "reason", "dry-run", "replace", "expect", "module", "approval-ref"]);
+const MODULE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62})$/;
 /** Appended to every error where the state write succeeded but its audit entry did not. */
 const AUDIT_MISSING = "状态已写入、审计缺失，请人工补记";
 const INTEGRATION_WORKFLOW: WorkflowRef = { kind: "integration" };
@@ -1342,6 +1350,9 @@ function i13ModeErrors(evidence: Evidence, ucdIds: string[], state: WorkflowStat
   }
   const baselineErrors = baselineCommitErrors(PROJECT_ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
   if (baselineErrors.length > 0 || !baseline.registered) return [...errors, ...baselineErrors];
+  // 4.10.0: the evidence must have been produced against the kind of baseline that applies now.
+  const kindErrors = baselineKindErrors(evidence.baseline_kind, baseline, "I13");
+  if (kindErrors.length > 0) return [...errors, ...kindErrors];
   // 4.7.0: I13 stays bound to epoch 0 of the baseline chain; --advance never refreshes it.
   const epoch0 = baseline.epochs[0];
   if (evidence.baseline_commit !== epoch0) {
@@ -1442,6 +1453,9 @@ function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: Sta
   }
   const commitErrors = baselineCommitErrors(PROJECT_ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
   if (commitErrors.length > 0 || !baseline.registered) return commitErrors;
+  // 4.10.0: BASELINE and its I13 must both be bound to the kind of baseline that applies now.
+  const kindErrors = [...baselineKindErrors(evidence.baseline_kind, baseline, "BASELINE"), ...baselineKindErrors(i13.baseline_kind, baseline, "I13")];
+  if (kindErrors.length > 0) return kindErrors;
   const chain = baseline.epochs;
   // 4.9.0: BASELINE evidence with baseline_repos is identified by the workflow commit
   // together with the nested repository commits of its epoch; evidence without it (and
@@ -4948,15 +4962,37 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
   if ("error" in expectRepoArgs) return baselineError(expectRepoArgs.error);
   const repoFlags = repoArgs.values;
   const expectRepoFlags = expectRepoArgs.values;
+  // 4.10.0: an empty --approval-ref value would otherwise be parsed as a stray positional argument.
+  const approvalIndex = expectRepoArgs.rest.indexOf("--approval-ref");
+  if (approvalIndex >= 0 && (expectRepoArgs.rest[approvalIndex + 1] ?? "").trim() === "") {
+    return baselineError(`--approval-ref is required: name the real approval record of this adoption (review id, ticket, meeting minutes). Usage: ${ADOPT_USAGE}`);
+  }
   const flags = parseFlags(expectRepoArgs.rest);
   if (flags.text) return baselineError(`Unexpected baseline argument: ${flags.text}`);
   const invalidFlag = unsupportedFlag(flags, BASELINE_FLAGS);
   if (invalidFlag) return baselineError(`Unsupported baseline option: --${invalidFlag}`);
-  if ("module" in flags) {
-    return baselineError("orchestrate baseline only runs on the global (or single) workflow; module sub-workflows read the parent workflow's baseline and cannot register their own. Drop --module.");
-  }
   for (const flag of ["dry-run", "replace"]) {
     if (flag in flags && flags[flag] !== "true") return baselineError(`--${flag} is a boolean flag and does not accept a value`);
+  }
+  // 4.10.0: --adopt registers a module's adoption baseline; --module also scopes --advance and the read-only view.
+  if ("approval-ref" in flags && !("adopt" in flags)) return baselineError("--approval-ref is only valid with --adopt <commit> --module <id>");
+  if ("adopt" in flags) {
+    const conflict = ["set", "advance", "replace", "expect"].find((flag) => flag in flags);
+    if (conflict) return baselineError(`--adopt cannot be combined with --${conflict}: --adopt registers the adoption baseline of one module and leaves the global baseline chain unchanged.`);
+    if (expectRepoFlags.size > 0) return baselineError("--expect-repo is not valid with --adopt (there is no current adoption baseline to compare with)");
+    return adoptBaseline(flags, repoFlags, hooks);
+  }
+  if ("module" in flags) {
+    if ("set" in flags || "replace" in flags) {
+      return baselineError("orchestrate baseline --set / --replace only run on the global (or single) workflow; module sub-workflows read the parent workflow's baseline and cannot register their own (use --adopt <commit> --module <id> for an adoption baseline). Drop --module.");
+    }
+    if (!MODULE_ID_PATTERN.test(flags.module || "")) return baselineError(`--module must name a module id, got ${JSON.stringify(flags.module)}`);
+    if (!("advance" in flags)) {
+      const stray = ["expect", "dry-run", "user-input", "reason"].find((flag) => flag in flags);
+      if (stray) return baselineError(`--${stray} is only valid with --adopt <commit> or --advance <commit>`);
+      if (repoFlags.size > 0 || expectRepoFlags.size > 0) return baselineError(`--${repoFlags.size > 0 ? "repo" : "expect-repo"} is only valid with --adopt <commit> or --advance <commit>`);
+      return showModuleBaseline(flags.module);
+    }
   }
   const setting = "set" in flags;
   const advancing = "advance" in flags;
@@ -4996,6 +5032,12 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
       extra.length > 0 ? ` Registered but no longer declared in ${SOURCE_ROOTS_CONFIG}: ${extra.map((key) => `${key}/`).join(", ")} (gates reject this).` : "",
       declaredError ? ` ${SOURCE_ROOTS_CONFIG} cannot be read: ${declaredError}` : "",
     ].join("");
+    // 4.10.0: modules with an adoption baseline are listed only when there are any.
+    let adoptions: Record<string, string> = {};
+    try {
+      adoptions = Object.fromEntries([...adoptedModuleStates()].map(([id, moduleState]) => [id, moduleState.adoption_baseline as string]));
+    } catch { /* the read-only view never fails on an unreadable layout */ }
+    const adoptionLine = Object.keys(adoptions).length > 0 ? ` Modules with an adoption baseline (orchestrate baseline --module <id>): ${Object.entries(adoptions).map(([id, sha]) => `${id}=${sha}`).join(", ")}.` : "";
     return {
       kind: "print",
       workflow_id: state.workflow_id,
@@ -5011,14 +5053,15 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
         pending_nested_repos: pending,
         ...(migration ? { migration_command: migration } : {}),
       } : {}),
+      ...(Object.keys(adoptions).length > 0 ? { adoption_baselines: adoptions } : {}),
       message: (registered
         ? chain.length > 1
           ? `Workflow baseline: ${state.baseline_commit} (source: ${state.baseline_source}, epoch ${chain.length - 1}). Baseline chain: ${chain.map((commit, index) => `#${index} ${commit}`).join(" → ")}.`
           : `Workflow baseline: ${state.baseline_commit} (source: ${state.baseline_source}).`
-        : "No workflow baseline is registered. Register the commit existing behavior is characterized against with: orchestrate baseline --set <commit> --user-input Approve --reason \"<reason>\" [--dry-run].") + nestedLines,
+        : "No workflow baseline is registered. Register the commit existing behavior is characterized against with: orchestrate baseline --set <commit> --user-input Approve --reason \"<reason>\" [--dry-run].") + nestedLines + adoptionLine,
     };
   }
-  if (advancing) return advanceBaseline(flags, state, hooks, repoFlags, expectRepoFlags);
+  if (advancing) return advanceBaseline(flags, state, hooks, repoFlags, expectRepoFlags, "module" in flags ? flags.module : undefined);
 
   const target = flags.set;
   if (!COMMIT_ID_PATTERN.test(target)) {
@@ -5254,6 +5297,245 @@ export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}
 }
 
 // ---------------------------------------------------------------------------
+// baseline --adopt — register a module's adoption baseline (4.10.0)
+// ---------------------------------------------------------------------------
+
+const ADOPT_USAGE = "orchestrate baseline --adopt <workflow commit> [--repo <path>=<commit>]… --module <id> --user-input Approve --approval-ref \"<approval record>\" --reason \"<reason>\" [--dry-run]";
+
+/** Module sub-workflows (split layout) that registered an adoption baseline, keyed by module id. */
+function adoptedModuleStates(): Map<string, WorkflowState> {
+  const adopted = new Map<string, WorkflowState>();
+  if (!isSplitLayout(PROJECT_ROOT)) return adopted;
+  for (const part of loadWorkflowParts(PROJECT_ROOT).parts.values()) {
+    if (part.ref.kind === "module" && part.state.adoption_baseline !== undefined) adopted.set(part.ref.module_id, part.state);
+  }
+  return adopted;
+}
+
+function moduleOfInstanceId(instanceId: string): string | undefined {
+  return /@module:([a-z0-9][a-z0-9-]*)/.exec(instanceId)?.[1];
+}
+
+/**
+ * Earliest recorded start of a tdd instance of the module: the timestamps of its tdd
+ * history entries and the claimed_at of its active tdd claims. Undefined when no tdd
+ * instance of the module has a recorded start (the module has not entered tdd).
+ */
+function firstTddStart(state: WorkflowState, moduleId: string): string | undefined {
+  const isModuleTdd = (instanceId?: string) => !!instanceId && instanceId.split("@", 1)[0] === "tdd" && moduleOfInstanceId(instanceId) === moduleId;
+  const times = [
+    ...state.history.filter((entry) => entry.stage === "tdd" && (isModuleTdd(entry.instance_id) || (!entry.instance_id && entry.module_id === moduleId))).map((entry) => entry.timestamp),
+    ...Object.values(state.active_instances || {}).filter((claim) => isModuleTdd(claim.stage_instance)).map((claim) => claim.claimed_at),
+  ].filter((value) => !Number.isNaN(Date.parse(value)));
+  if (times.length === 0) return undefined;
+  return times.reduce((earliest, value) => (Date.parse(value) < Date.parse(earliest) ? value : earliest));
+}
+
+/** Read-only view of the baseline that applies to one module (`orchestrate baseline --module <id>`). */
+function showModuleBaseline(moduleId: string): Directive {
+  let baseline: ReturnType<typeof workflowBaselineForModule>;
+  let own: WorkflowState | null = null;
+  try {
+    baseline = workflowBaselineForModule(PROJECT_ROOT, moduleId);
+    if (isSplitLayout(PROJECT_ROOT)) own = loadWorkflowState(PROJECT_ROOT, { kind: "module", module_id: moduleId });
+  } catch (error) {
+    return baselineError(`Cannot resolve the baseline of module ${moduleId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!baseline.registered) {
+    return { kind: "print", module_id: moduleId, baseline_kind: baseline.kind, registered: false, message: `Module ${moduleId} uses the workflow baseline, which is not registered.` };
+  }
+  const adopted = baseline.kind === "adoption" && own;
+  return {
+    kind: "print",
+    module_id: moduleId,
+    baseline_kind: baseline.kind,
+    registered: true,
+    baseline_commit: baseline.commit,
+    baseline_epoch: baseline.epochs.length - 1,
+    baseline_history: baseline.epochs,
+    ...(Object.keys(baseline.repos).length > 0 ? { baseline_repos_history: baseline.repos } : {}),
+    ...(adopted ? { adoption_approval_ref: own!.adoption_approval_ref, adopted_at: own!.adopted_at } : {}),
+    message: adopted
+      ? `Module ${moduleId} uses its adoption baseline ${baseline.commit} (adopted at ${own!.adopted_at}, approval ${own!.adoption_approval_ref}${baseline.epochs.length > 1 ? `, epoch ${baseline.epochs.length - 1}` : ""}).`
+      : `Module ${moduleId} uses the workflow baseline ${baseline.commit}${baseline.epochs.length > 1 ? ` (epoch ${baseline.epochs.length - 1})` : ""}.`,
+  };
+}
+
+/**
+ * `orchestrate baseline --adopt <commit> --module <id>` (4.10.0): register the commit a
+ * module's already existing implementation is characterized against, in the module
+ * sub-workflow. Exempt from the workflow-start (T0) and state-file rules of --set; the
+ * commit must still exist, be HEAD or an ancestor (no shallow clone) and predate the
+ * module's first tdd start, and the module must hold no RED / BASELINE / GREEN
+ * evidence. Nested repositories get a commit each (--repo or their clean HEAD), checked
+ * the same way. The global baseline chain is not touched.
+ */
+async function adoptBaseline(flags: Record<string, string>, repoFlags: Map<string, string>, hooks: StateWriteHooks): Promise<Directive> {
+  const target = flags.adopt;
+  if (!COMMIT_ID_PATTERN.test(target)) {
+    return baselineError(`--adopt must be a full 40- or 64-character lowercase hex commit id; abbreviations, revision expressions (HEAD~3), branch names and options are rejected (got ${JSON.stringify(target)})`);
+  }
+  const moduleId = flags.module;
+  if (moduleId === undefined || moduleId === "true") return baselineError(`--adopt requires --module <id>: an adoption baseline belongs to one module. Usage: ${ADOPT_USAGE}`);
+  if (!MODULE_ID_PATTERN.test(moduleId)) return baselineError(`--module must name a module id, got ${JSON.stringify(moduleId)}`);
+  if (flags["user-input"] !== "Approve") return baselineError("--user-input must be exactly Approve: adopting a baseline requires the user's explicit approval.");
+  const approvalRef = flags["approval-ref"];
+  if (approvalRef === undefined || approvalRef === "true" || !approvalRef.trim()) {
+    return baselineError(`--approval-ref is required: name the real approval record of this adoption (review id, ticket, meeting minutes). Usage: ${ADOPT_USAGE}`);
+  }
+  if (!flags.reason || flags.reason === "true" || !flags.reason.trim()) return baselineError("--reason is required: state why the module's existing implementation is adopted at this commit.");
+  const refuse = (reason: string) => baselineError(`Cannot adopt ${target} as the adoption baseline of module ${moduleId}: ${reason}. Nothing was written.`);
+
+  const global = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!global) return baselineError("No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\".");
+  if (!isSplitLayout(PROJECT_ROOT)) return refuse("the adoption baseline is recorded in the module sub-workflow, which only exists in the split layout; migrate with orchestrate split --from <workflow-id> first");
+  const ref: WorkflowRef = { kind: "module", module_id: moduleId };
+  let moduleState: WorkflowState | null;
+  try {
+    moduleState = loadWorkflowState(PROJECT_ROOT, ref);
+    if (moduleState) workflowBaseline(PROJECT_ROOT, ref);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+  if (!moduleState) return refuse(`there is no module sub-workflow ${moduleId}`);
+  if (moduleState.status !== "running" && moduleState.status !== "parked") return refuse(`the module sub-workflow is ${moduleState.status}; adoption requires a running or parked module`);
+
+  let nested: string[] = [];
+  try {
+    nested = nestedSourceRepos(PROJECT_ROOT);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+  const undeclaredRepo = [...repoFlags.keys()].find((key) => !nested.includes(key));
+  if (undeclaredRepo) return refuse(`--repo ${undeclaredRepo}=… names no nested repository declared in ${SOURCE_ROOTS_CONFIG} (declared: ${nested.join(", ") || "none"})`);
+  const repos: Record<string, string> = {};
+  const repoDirty: Record<string, string> = {};
+  const problems: string[] = [];
+  for (const key of nested) {
+    const explicit = repoFlags.get(key);
+    const dirty = nestedDirty(PROJECT_ROOT, key);
+    if (explicit) {
+      repos[key] = explicit;
+      repoDirty[key] = dirty === null ? "unknown" : dirty ? "yes" : "no";
+      continue;
+    }
+    const head = nestedHead(PROJECT_ROOT, key);
+    if (!head) {
+      problems.push(`${key}/ has no commit yet`);
+      continue;
+    }
+    if (dirty !== false) problems.push(`${key}/ ${dirty === null ? "status cannot be read" : "has uncommitted or untracked changes"}`);
+    repos[key] = head;
+    repoDirty[key] = "no (HEAD taken)";
+  }
+  if (problems.length > 0) return refuse(`cannot take the HEAD of the nested repositories as their adoption commit: ${problems.join("; ")}; commit or stash the changes first, or name the commit explicitly with --repo <path>=<commit>`);
+
+  if (moduleState.adoption_baseline !== undefined) {
+    const same = moduleState.adoption_baseline === target && JSON.stringify(moduleState.adoption_baseline_repos || {}) === JSON.stringify(repos) && moduleState.adoption_baseline_history === undefined;
+    if (same) {
+      return { kind: "print", changed: false, module_id: moduleId, baseline_kind: "adoption", baseline_commit: target, message: `Module ${moduleId} already adopted ${target}; nothing was written.` };
+    }
+    return refuse(`module ${moduleId} already has the adoption baseline ${moduleState.adoption_baseline} (adopted at ${moduleState.adopted_at}); an adoption baseline is registered once and then only advanced with orchestrate baseline --advance <commit> --module ${moduleId} --expect ${moduleState.adoption_baseline} --user-input Approve --reason "<reason>"`);
+  }
+
+  let phaseEvidence: string[];
+  try {
+    phaseEvidence = modulePhaseEvidence(PROJECT_ROOT, moduleId);
+  } catch (error) {
+    return refuse(`the module evidence cannot be scanned: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (phaseEvidence.length > 0) {
+    return refuse(`module ${moduleId} already holds RED / BASELINE / GREEN evidence (${phaseEvidence.join(", ")}); adoption must happen before the module's tdd produces evidence — invalidate (remove) that evidence first, then adopt`);
+  }
+  const tddStartedAt = firstTddStart(moduleState, moduleId);
+  const main = checkAdoptionCandidate(PROJECT_ROOT, target, tddStartedAt);
+  if ("error" in main) return refuse(main.error);
+  const repoDates: Record<string, string> = {};
+  for (const key of nested) {
+    const checked = checkAdoptionCandidate(PROJECT_ROOT, repos[key], tddStartedAt, key);
+    if ("error" in checked) return refuse(`${key}=${repos[key]}: ${checked.error}`);
+    repoDates[key] = checked.committer_date;
+  }
+  const scan = `no RED / BASELINE / GREEN evidence of module ${moduleId}`;
+  const checks = {
+    head: main.head,
+    committer_date: main.committer_date,
+    workflow_started_at: workflowStartedAt(global),
+    tdd_started_at: tddStartedAt ?? null,
+    evidence_scan: scan,
+    exempted_rules: [...ADOPTION_EXEMPTED_RULES],
+    replaced_rules: [...ADOPTION_REPLACED_RULES],
+    ...(nested.length > 0 ? { adoption_baseline_repos: repos, repo_committer_dates: repoDates, repo_dirty: repoDirty } : {}),
+  };
+  if ("dry-run" in flags) {
+    return {
+      kind: "print",
+      dry_run: true,
+      changed: true,
+      module_id: moduleId,
+      baseline_kind: "adoption",
+      baseline_commit: target,
+      ...(nested.length > 0 ? { baseline_repos: repos } : {}),
+      checks,
+      message: `🔎 ${target} passes every adoption check for module ${moduleId} (dry run, nothing written). Run the same command without --dry-run to adopt it.`,
+    };
+  }
+
+  hooks.beforeWrite?.();
+  const fresh = loadWorkflowState(PROJECT_ROOT, ref);
+  if (!fresh || fresh.revision !== moduleState.revision) {
+    return baselineError(`module workflow state revision conflict: expected ${moduleState.revision}, found ${fresh ? fresh.revision : "no workflow"}; nothing was written, re-run the command.`);
+  }
+  if (fresh.adoption_baseline !== undefined) return refuse(`module ${moduleId} adopted ${fresh.adoption_baseline} while the command ran`);
+  const adoptedAt = new Date().toISOString();
+  fresh.adoption_baseline = target;
+  if (nested.length > 0) fresh.adoption_baseline_repos = { ...repos };
+  fresh.adoption_approval_ref = approvalRef.trim();
+  fresh.adopted_at = adoptedAt;
+  fresh.history.push({ stage: "baseline", module_id: moduleId, result: "adopted", timestamp: adoptedAt, user_input: "Approve" });
+  try {
+    saveWorkflowState(PROJECT_ROOT, fresh, ref, { baselineWrite: true });
+  } catch (error) {
+    return baselineError(`${error instanceof Error ? error.message : String(error)}; nothing was written, re-run the command.`);
+  }
+  const event = "BASELINE_ADOPTED";
+  try {
+    (hooks.appendAudit || appendAuditEvent)(PROJECT_ROOT, ref, event, {
+      "Workflow ID": fresh.workflow_id,
+      "Parent Workflow ID": global.workflow_id,
+      Module: moduleId,
+      Commit: target,
+      ...(nested.length > 0 ? { Repos: renderBaselineRepos(repos), "Repo Dirty": nested.map((key) => `${key}=${repoDirty[key]}`).join(", "), "Repo Committer Dates (self-reported)": nested.map((key) => `${key}=${repoDates[key]}`).join(", ") } : {}),
+      "HEAD At Adoption": main.head,
+      "Committer Date (self-reported)": main.committer_date,
+      "Workflow Started At": checks.workflow_started_at,
+      "TDD Started At": tddStartedAt || "not started",
+      "Evidence Scan": scan,
+      "Exempted Rules": ADOPTION_EXEMPTED_RULES.join("; "),
+      "Replaced Rules": ADOPTION_REPLACED_RULES.join("; "),
+      "Approval Ref": approvalRef.trim(),
+      Reason: flags.reason.trim(),
+      "User Input": "Approve",
+    });
+  } catch (error) {
+    return baselineError(`The adoption baseline ${target} of module ${moduleId} was saved to the module workflow state, but the ${event} audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。`, { module_id: moduleId, baseline_commit: target });
+  }
+  return {
+    kind: "print",
+    changed: true,
+    module_id: moduleId,
+    workflow_id: fresh.workflow_id,
+    baseline_kind: "adoption",
+    baseline_commit: target,
+    ...(nested.length > 0 ? { baseline_repos: repos } : {}),
+    adoption_approval_ref: approvalRef.trim(),
+    adopted_at: adoptedAt,
+    checks,
+    message: `✅ Module ${moduleId} adopted ${target} as its adoption baseline${nested.length > 0 ? ` (nested repositories: ${renderBaselineRepos(repos)})` : ""}. Its characterization UC-Ds and BASELINE now resolve against it; the global baseline chain is unchanged. Refresh the module's I13 evidence (evidence run --stage test-case-derivation --module ${moduleId} --refresh) before its tdd.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // baseline --advance — append an epoch to the workflow baseline chain (4.7.0)
 // ---------------------------------------------------------------------------
 
@@ -5313,7 +5595,7 @@ function characterizationI13Files(): Array<{ path: string; value: Record<string,
   }).filter((file) => file.value.status === "required" && i13UcdIdsByMode(file.value).characterization.length > 0);
 }
 
-async function advanceBaseline(flags: Record<string, string>, state: WorkflowState | null, hooks: StateWriteHooks, repoFlags: Map<string, string> = new Map(), expectRepoFlags: Map<string, string> = new Map()): Promise<Directive> {
+async function advanceBaseline(flags: Record<string, string>, state: WorkflowState | null, hooks: StateWriteHooks, repoFlags: Map<string, string> = new Map(), expectRepoFlags: Map<string, string> = new Map(), moduleId?: string): Promise<Directive> {
   const target = flags.advance;
   if (!COMMIT_ID_PATTERN.test(target)) {
     return baselineError(`--advance must be a full 40- or 64-character lowercase hex commit id; abbreviations, revision expressions (HEAD~3), branch names and options are rejected (got ${JSON.stringify(target)})`);
@@ -5325,23 +5607,41 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
 
   // 1. Workflow, git repository and a usable current epoch.
   if (!state) return baselineError("No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\".");
-  if (state.status === "done") {
+  // 4.10.0: --module advances that module's adoption baseline chain; the global chain is untouched.
+  let adoption: { ref: WorkflowRef; state: WorkflowState } | undefined;
+  if (moduleId !== undefined) {
+    const ref: WorkflowRef = { kind: "module", module_id: moduleId };
+    let moduleState: WorkflowState | null = null;
+    try {
+      moduleState = isSplitLayout(PROJECT_ROOT) ? loadWorkflowState(PROJECT_ROOT, ref) : null;
+    } catch (error) {
+      return baselineError(`Cannot advance the adoption baseline of module ${moduleId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!moduleState || moduleState.adoption_baseline === undefined) {
+      return baselineError(`Module ${moduleId} has no adoption baseline, so there is no module chain to advance: --advance --module only advances an adoption baseline registered with orchestrate baseline --adopt <commit> --module ${moduleId}. To advance the workflow baseline, Drop --module.`);
+    }
+    if (moduleState.status !== "running" && moduleState.status !== "parked") return baselineError(`Module workflow ${moduleId} is ${moduleState.status}; baseline --advance --module requires a running or parked module.`);
+    adoption = { ref, state: moduleState };
+  } else if (state.status === "done") {
     // 4.7.1: in the split layout the global workflow is legitimately done once the product-level
     // stages resolve; the module / integration sub-workflows that inherit its chain keep running.
     const blocked = doneGlobalBaselineBlocker(state, "baseline --advance requires a running or parked workflow");
     if (blocked) return baselineError(blocked);
   } else if (state.status !== "running" && state.status !== "parked") return baselineError(`Workflow ${state.workflow_id} is ${state.status}; baseline --advance requires a running or parked workflow.`);
   if (state.workflow_kind && state.workflow_kind !== "global") return baselineError(`aidlc/active/aidlc-state.md is a ${state.workflow_kind} workflow; baseline only runs on the global workflow.`);
-  const current = state.baseline_commit;
-  if (current === undefined || state.baseline_source === undefined) {
+  const owner = adoption ? adoptionAsBaseline(adoption.state) : state;
+  const ownerSource = adoption ? (adoption.state.adoption_baseline_history !== undefined ? "advanced" : "registered") : state.baseline_source;
+  const chainLabel = adoption ? `adoption baseline of module ${moduleId}` : "workflow baseline";
+  const current = owner.baseline_commit;
+  if (current === undefined || ownerSource === undefined) {
     return baselineError("No workflow baseline is registered, so there is no epoch to advance from; register one with orchestrate baseline --set <commit> --user-input Approve --reason \"<reason>\".");
   }
   if (current === BASELINE_UNAVAILABLE) {
     return baselineError(`Workflow baseline is ${BASELINE_UNAVAILABLE}; it cannot be advanced. Correct it first with orchestrate baseline --set <commit> --replace --expect ${BASELINE_UNAVAILABLE} --user-input Approve --reason "<why>".`);
   }
-  if (flags.expect !== current) return baselineError(`--expect ${flags.expect} does not match the current workflow baseline ${current}`);
-  const currentErrors = baselineCommitErrors(PROJECT_ROOT, state);
-  if (currentErrors.length > 0) return baselineError(`Cannot advance the workflow baseline: ${currentErrors.join("; ")}`);
+  if (flags.expect !== current) return baselineError(`--expect ${flags.expect} does not match the current ${chainLabel} ${current}`);
+  const currentErrors = baselineCommitErrors(PROJECT_ROOT, { baseline_commit: current, baseline_source: ownerSource });
+  if (currentErrors.length > 0) return baselineError(`Cannot advance the ${chainLabel}: ${currentErrors.join("; ")}`);
 
   // 4.9.0: every registered nested repository needs an explicit --repo target (and
   // --expect-repo); a declared but unregistered one must be migrated first.
@@ -5351,7 +5651,7 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
   } catch (error) {
     return baselineError(`Cannot advance the workflow baseline: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const registeredRepos = state.baseline_repos || {};
+  const registeredRepos = owner.baseline_repos || {};
   const registeredKeys = Object.keys(registeredRepos).sort();
   const extraKeys = registeredKeys.filter((key) => !nested.includes(key));
   if (extraKeys.length > 0) {
@@ -5397,6 +5697,15 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
   const graph = loadGraph();
   const instances = expandStageInstances(graph, view);
   const completed = new Set(completedInstanceIds(view));
+  // 4.10.0: a module adoption chain only looks at that module; the global chain skips
+  // adopted modules, whose BASELINE / GREEN / I13 are bound to their own chain.
+  let adoptedIds: Set<string>;
+  try {
+    adoptedIds = adoption ? new Set<string>() : new Set(adoptedModuleStates().keys());
+  } catch (error) {
+    return baselineError(`Cannot advance the workflow baseline: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const inScope = (owningModule: string | undefined): boolean => (adoption ? owningModule === moduleId : !(owningModule && adoptedIds.has(owningModule)));
 
   // 4. Never between a unit's BASELINE and GREEN: no active code-generation, and no unit
   //    whose controlled BASELINE observation exists while its code-generation is open.
@@ -5406,10 +5715,10 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
   for (const part of parts.parts.values()) {
     const open = [...Object.keys(part.state.active_instances || {}), ...(part.state.status !== "done" && part.state.current_stage_instance ? [part.state.current_stage_instance] : [])];
     for (const id of new Set(open)) {
-      if (id.split("@", 1)[0] === "code-generation" && !completed.has(id)) blockers.push(`${id} is active in the ${workflowRefKey(part.ref)} workflow`);
+      if (id.split("@", 1)[0] === "code-generation" && !completed.has(id) && inScope(moduleOfInstanceId(id))) blockers.push(`${id} is active in the ${workflowRefKey(part.ref)} workflow`);
     }
   }
-  for (const instance of instances.filter((candidate) => candidate.stage.slug === "tdd")) {
+  for (const instance of instances.filter((candidate) => candidate.stage.slug === "tdd" && inScope(candidate.module_id))) {
     if (codeGenerationDone.has(unitKey(instance))) continue;
     const path = evidencePath(instance.stage, "baseline-test-evidence", instance);
     if (!existsSync(path)) continue;
@@ -5420,14 +5729,14 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
     if (observed) blockers.push(`${instance.instance_id} already holds BASELINE evidence (${normalizeArtifactLabel(relative(PROJECT_ROOT, path))}) while code-generation of unit ${unitKey(instance)} is not completed`);
   }
   if (blockers.length > 0) {
-    return baselineError(`Cannot advance the workflow baseline while a unit sits between its BASELINE and GREEN: ${blockers.join("; ")}. Complete that unit's code-generation first.`);
+    return baselineError(`Cannot advance the ${chainLabel} while a unit sits between its BASELINE and GREEN: ${blockers.join("; ")}. Complete that unit's code-generation first.`);
   }
 
   // 3. Anchor: the target is the source_revision.commit of the controlled GREEN evidence
   //    of a completed code-generation instance that still passes its gate.
   const anchorErrors: string[] = [];
   let anchor: { instance: string; path: string; commit: string } | undefined;
-  for (const declared of instances.filter((candidate) => candidate.stage.slug === "code-generation" && completed.has(candidate.instance_id))) {
+  for (const declared of instances.filter((candidate) => candidate.stage.slug === "code-generation" && completed.has(candidate.instance_id) && inScope(candidate.module_id))) {
     const instance = runtimeInstance(declared, view);
     const path = evidencePath(instance.stage, "green-test-evidence", instance);
     const label = normalizeArtifactLabel(relative(PROJECT_ROOT, path));
@@ -5456,7 +5765,7 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
   // 5. Every I13 characterization code ref resolves at the target commit (of its own repository, 4.9.0).
   const refErrors: string[] = [];
   try {
-    for (const file of characterizationI13Files()) {
+    for (const file of characterizationI13Files().filter((candidate) => inScope(/^\.aidlc\/evidence\/test-case-derivation\/([^/]+)\/test-case-derivation\.json/.exec(candidate.path)?.[1]))) {
       for (const { path } of i13CodeRefBlobs(file.value)) {
         const repo = codeRefRepo(PROJECT_ROOT, path, registeredKeys);
         const repoTarget = repo.repoKey === WORKFLOW_REPO_KEY ? target : repoTargets[repo.repoKey];
@@ -5469,9 +5778,9 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
   }
   if (refErrors.length > 0) return baselineError(`Cannot advance the workflow baseline to ${target}: the I13 characterization code refs do not resolve there: ${refErrors.join("; ")}`);
 
-  const chain = [...baselineChain(state), target];
+  const chain = [...baselineChain(owner), target];
   const epoch = chain.length - 1;
-  const repoChains = baselineRepoChains(state);
+  const repoChains = baselineRepoChains(owner);
   const nextRepoChains = Object.fromEntries(registeredKeys.map((key) => [key, { start: repoChains[key].start, commits: [...repoChains[key].commits, repoTargets[key]] }]));
   const checks = { head: gitCheck.head, anchor, epoch, baseline_history: chain, ...(registeredKeys.length > 0 ? { baseline_repos: repoTargets, repo_moves: repoMoves } : {}) };
   if ("dry-run" in flags) {
@@ -5479,13 +5788,15 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
       kind: "print",
       dry_run: true,
       changed: true,
-      workflow_id: state.workflow_id,
+      ...(adoption ? { module_id: moduleId, baseline_kind: "adoption" } : {}),
+      workflow_id: adoption ? adoption.state.workflow_id : state.workflow_id,
       baseline_commit: target,
       advances: current,
       checks,
-      message: `🔎 ${target} passes every baseline --advance check (dry run, nothing written). Run the same command without --dry-run to advance to epoch ${epoch}.`,
+      message: `🔎 ${target} passes every baseline --advance check${adoption ? ` for the adoption baseline of module ${moduleId}` : ""} (dry run, nothing written). Run the same command without --dry-run to advance to epoch ${epoch}.`,
     };
   }
+  if (adoption) return writeAdoptionAdvance(adoption, { flags, hooks, current, target, chain, epoch, repoChains, nextRepoChains, registeredKeys, registeredRepos, repoTargets, repoMoves, expectRepoFlags, anchor, head: gitCheck.head, checks });
 
   hooks.beforeWrite?.();
   const fresh = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
@@ -5545,6 +5856,90 @@ async function advanceBaseline(flags: Record<string, string>, state: WorkflowSta
     ...(registeredKeys.length > 0 ? { baseline_repos: repoTargets } : {}),
     checks,
     message: `✅ Workflow baseline advanced: ${current} → ${target} (epoch ${epoch}).${registeredKeys.length > 0 ? ` Nested repositories: ${renderBaselineRepos(repoTargets)}.` : ""} Completed units keep their original BASELINE evidence; run evidence run for the active unit's tdd to observe BASELINE at the new epoch.`,
+  };
+}
+
+interface AdoptionAdvance {
+  flags: Record<string, string>;
+  hooks: StateWriteHooks;
+  current: string;
+  target: string;
+  chain: string[];
+  epoch: number;
+  repoChains: Record<string, { start: number; commits: string[] }>;
+  nextRepoChains: Record<string, { start: number; commits: string[] }>;
+  registeredKeys: string[];
+  registeredRepos: Record<string, string>;
+  repoTargets: Record<string, string>;
+  repoMoves: Record<string, boolean>;
+  expectRepoFlags: Map<string, string>;
+  anchor: { instance: string; path: string; commit: string };
+  head: string;
+  checks: Record<string, unknown>;
+}
+
+/** Write step of `--advance --module` (4.10.0): append the epoch to the module's adoption chain. */
+function writeAdoptionAdvance(adoption: { ref: WorkflowRef; state: WorkflowState }, input: AdoptionAdvance): Directive {
+  const { flags, hooks, current, target, chain, epoch, repoChains, nextRepoChains, registeredKeys, registeredRepos, repoTargets, repoMoves, expectRepoFlags, anchor } = input;
+  const moduleId = adoption.ref.kind === "module" ? adoption.ref.module_id : "";
+  hooks.beforeWrite?.();
+  const fresh = loadWorkflowState(PROJECT_ROOT, adoption.ref);
+  if (!fresh || fresh.revision !== adoption.state.revision) {
+    return baselineError(`module workflow state revision conflict: expected ${adoption.state.revision}, found ${fresh ? fresh.revision : "no workflow"}; nothing was written, re-run the command.`);
+  }
+  const freshOwner = adoptionAsBaseline(fresh);
+  if (freshOwner.baseline_commit !== current || JSON.stringify(baselineChain(freshOwner)) !== JSON.stringify(chain.slice(0, -1)) || JSON.stringify(baselineRepoChains(freshOwner)) !== JSON.stringify(repoChains)) {
+    return baselineError(`--expect ${current} is no longer the adoption baseline of module ${moduleId} (now ${fresh.adoption_baseline ?? "none"}); nothing was written.`);
+  }
+  fresh.adoption_baseline_history = chain;
+  fresh.adoption_baseline = target;
+  if (registeredKeys.length > 0) {
+    fresh.adoption_baseline_repos = { ...repoTargets };
+    fresh.adoption_baseline_repos_history = nextRepoChains;
+  }
+  fresh.history.push({ stage: "baseline", module_id: moduleId, result: "adoption-advanced", timestamp: new Date().toISOString(), user_input: "Approve" });
+  try {
+    saveWorkflowState(PROJECT_ROOT, fresh, adoption.ref, { baselineWrite: true });
+  } catch (error) {
+    return baselineError(`${error instanceof Error ? error.message : String(error)}; nothing was written, re-run the command.`);
+  }
+  const event = "BASELINE_ADOPTION_ADVANCED";
+  try {
+    (hooks.appendAudit || appendAuditEvent)(PROJECT_ROOT, adoption.ref, event, {
+      "Workflow ID": fresh.workflow_id,
+      Module: moduleId,
+      From: current,
+      To: target,
+      Epoch: String(epoch),
+      Chain: chain.join(", "),
+      ...(registeredKeys.length > 0 ? {
+        "From Repos": renderBaselineRepos(registeredRepos),
+        "To Repos": renderBaselineRepos(repoTargets),
+        "Repos Moved": registeredKeys.map((key) => `${key}=${repoMoves[key] ? "yes" : "no"}`).join(", "),
+        "Expected Repos": renderBaselineRepos(Object.fromEntries(expectRepoFlags)),
+      } : {}),
+      Anchor: `${anchor.path} @ ${anchor.commit} (${anchor.instance})`,
+      Expected: flags.expect,
+      HEAD: input.head,
+      Reason: flags.reason.trim(),
+      "User Input": "Approve",
+    });
+  } catch (error) {
+    return baselineError(`The adoption baseline ${target} of module ${moduleId} was saved to the module workflow state, but the ${event} audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。`, { module_id: moduleId, baseline_commit: target });
+  }
+  return {
+    kind: "print",
+    changed: true,
+    module_id: moduleId,
+    workflow_id: fresh.workflow_id,
+    baseline_kind: "adoption",
+    baseline_commit: target,
+    advanced: current,
+    baseline_epoch: epoch,
+    baseline_history: chain,
+    ...(registeredKeys.length > 0 ? { baseline_repos: repoTargets } : {}),
+    checks: input.checks,
+    message: `✅ Adoption baseline of module ${moduleId} advanced: ${current} → ${target} (epoch ${epoch}).${registeredKeys.length > 0 ? ` Nested repositories: ${renderBaselineRepos(repoTargets)}.` : ""} The global baseline chain is unchanged.`,
   };
 }
 

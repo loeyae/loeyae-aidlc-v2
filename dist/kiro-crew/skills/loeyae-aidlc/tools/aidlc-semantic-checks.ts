@@ -942,7 +942,9 @@ function characterizationEvidence(ids: string[], modes: Map<string, UcdMode>): R
   });
   if (pending.size > 0) errors.push(pendingNestedError(ROOT, baseline.commit, [...pending].sort()));
   if (errors.length > 0) fail(`I13 characterization code_refs rejected: ${errors.join("; ")}`);
-  return registered ? { characterization: entries, baseline_commit: epoch0, baseline_repos: startRepos } : { characterization: entries, baseline_commit: epoch0 };
+  // 4.10.0: a module with an adoption baseline records it; evidence without baseline_kind is "workflow".
+  const kind = baseline.kind === "adoption" ? { baseline_kind: "adoption" } : {};
+  return registered ? { characterization: entries, baseline_commit: epoch0, baseline_repos: startRepos, ...kind } : { characterization: entries, baseline_commit: epoch0, ...kind };
 }
 
 function testQuality(): Record<string, unknown> {

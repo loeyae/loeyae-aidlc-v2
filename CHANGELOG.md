@@ -1,5 +1,25 @@
 # Changelog
 
+## 4.10.0
+
+新增模块级接管基线（MARS-92）：接管前已存在的实现可以登记为 characterization 存量行为，不再需要人为造空壳补 RED。
+
+### Added
+
+- **`orchestrate baseline --adopt <commit> [--repo <dir>=<sha>]… --module <id> --user-input Approve --approval-ref "<批准记录>" --reason "<原因>" [--dry-run]`**：写入模块子工作流的 `Adoption Baseline` / `Adoption Baseline Repos` / `Adoption Approval Ref` / `Adopted At`，全局 Baseline 链不变。豁免「committer date 不晚于 T0」与「不包含工作流状态文件」；保留 commit 存在、是 HEAD 祖先、非浅克隆、不晚于该模块第一个 tdd 开始时间；模块已有 RED / BASELINE / GREEN 证据时拒绝；嵌套仓库逐仓校验。审计事件 `BASELINE_ADOPTED`。
+- **I13 / BASELINE 按模块解析基线**：登记了接管基线的模块用接管基线解析 characterization code ref 与 BASELINE blob，证据记录 `baseline_kind: "adoption"`（缺省即 `"workflow"`），门禁复验时要求与模块当前适用的基线一致。
+- **`--advance --module <id>`**：在模块的接管基线链上推进（`Adoption Baseline History` / `Adoption Baseline Repos History`），规则与 4.7.0 一致；审计事件 `BASELINE_ADOPTION_ADVANCED`。
+- **`orchestrate baseline --module <id>`** 显示模块适用的基线；`orchestrate baseline` 在存在接管模块时列出 `adoption_baselines`。
+
+### Unchanged
+
+- 没有登记接管基线的模块行为与 4.9.x 一致，证据结构不变（不写 `baseline_kind`）。不带 `--module` 的全局 `--advance` 跳过已接管模块。
+- `--set` / `--replace` 仍拒绝 `--module`。
+
+### Upgrade notes
+
+- 无需迁移。接管基线仅支持 split 布局；接管后先对该模块的 `test-case-derivation` 执行 `evidence run --refresh`。
+
 ## 4.9.1
 
 修复类版本：门禁按阶段生效，不再在下游产物所属阶段到达前提前硬拦（MARS-90）；收紧跨 module 契约 Owner 交付判定（MARS-91）。

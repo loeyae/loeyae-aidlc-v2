@@ -518,7 +518,7 @@ function normalizeText(value: string, project: string): string {
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<uuid>")
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/g, "<ts>")
     .replace(/"duration_ms": \d+/g, "\"duration_ms\": <n>")
-    .replace(/\b4\.8\.1\b|\b4\.9\.\d+\b/g, "<version>")
+    .replace(/\b4\.8\.1\b|\b4\.(?:9|10)\.\d+\b/g, "<version>")
     .replace(/\(\d+h old/g, "(<n>h old");
 }
 

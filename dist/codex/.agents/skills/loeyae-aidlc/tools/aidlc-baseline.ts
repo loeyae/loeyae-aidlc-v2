@@ -23,6 +23,7 @@ import { COMMIT_ID_PATTERN } from "./aidlc-revision";
 import {
   BASELINE_UNAVAILABLE,
   GLOBAL_WORKFLOW,
+  adoptionAsBaseline,
   baselineChain,
   baselineRepoChains,
   loadWorkflowState,
@@ -55,9 +56,13 @@ export function currentHeadCommit(projectRoot: string): string {
   return !result.error && result.status === 0 && COMMIT_ID_PATTERN.test(head) ? head : BASELINE_UNAVAILABLE;
 }
 
+export type BaselineKind = "workflow" | "adoption";
+
 export type WorkflowBaseline =
   | {
     registered: true;
+    /** 4.10.0: `adoption` when the module registered an adoption baseline, otherwise `workflow`. */
+    kind: BaselineKind;
     /** The current epoch (the last entry of `epochs`). */
     commit: string;
     source: BaselineSource;
@@ -67,7 +72,7 @@ export type WorkflowBaseline =
     /** 4.9.0: registered nested repositories, each with its start epoch and per-epoch commits ({} when none). */
     repos: Record<string, { start: number; commits: string[] }>;
   }
-  | { registered: false; workflow_id: string };
+  | { registered: false; kind: "workflow"; workflow_id: string };
 
 /**
  * The baseline that applies to a workflow. The global (or single) workflow answers
@@ -87,8 +92,8 @@ export function workflowBaseline(projectRoot: string, ref: WorkflowRef = GLOBAL_
     }
     owner = parent;
   }
-  if (owner.baseline_commit === undefined || owner.baseline_source === undefined) return { registered: false, workflow_id: owner.workflow_id };
-  return { registered: true, commit: owner.baseline_commit, source: owner.baseline_source, workflow_id: owner.workflow_id, epochs: baselineChain(owner), repos: baselineRepoChains(owner) };
+  if (owner.baseline_commit === undefined || owner.baseline_source === undefined) return { registered: false, kind: "workflow", workflow_id: owner.workflow_id };
+  return { registered: true, kind: "workflow", commit: owner.baseline_commit, source: owner.baseline_source, workflow_id: owner.workflow_id, epochs: baselineChain(owner), repos: baselineRepoChains(owner) };
 }
 
 type CommitCheck = { ok: true } | { ok: false; error: string };
@@ -172,10 +177,46 @@ export function checkAdvanceTarget(projectRoot: string, current: string, target:
  * The baseline that applies to a module's stages: in the split layout the module
  * sub-workflow (which reads its parent global workflow); otherwise the global/single
  * workflow, which also owns every module of the single layout.
+ *
+ * 4.10.0: a module sub-workflow that registered an adoption baseline (`orchestrate
+ * baseline --adopt --module`) answers with its own adoption chain (`kind: adoption`)
+ * instead of the parent's chain. Modules without one keep the 4.9.x resolution.
  */
 export function workflowBaselineForModule(projectRoot: string, moduleId?: string): WorkflowBaseline {
   const ref: WorkflowRef = moduleId && isSplitLayout(projectRoot) ? { kind: "module", module_id: moduleId } : GLOBAL_WORKFLOW;
-  return workflowBaseline(projectRoot, ref);
+  const resolved = workflowBaseline(projectRoot, ref);
+  if (ref.kind !== "module") return resolved;
+  const own = loadWorkflowState(projectRoot, ref);
+  return own && own.adoption_baseline !== undefined ? adoptionBaseline(own) : resolved;
+}
+
+/** The adoption chain of a module sub-workflow state that registered one (4.10.0). */
+export function adoptionBaseline(state: WorkflowState): Extract<WorkflowBaseline, { registered: true }> {
+  if (state.adoption_baseline === undefined) throw new Error(`module ${state.module_id} has no adoption baseline`);
+  const mapped = adoptionAsBaseline(state);
+  return {
+    registered: true,
+    kind: "adoption",
+    commit: state.adoption_baseline,
+    source: state.adoption_baseline_history !== undefined ? "advanced" : "registered",
+    workflow_id: state.workflow_id,
+    epochs: baselineChain(mapped),
+    repos: baselineRepoChains(mapped),
+  };
+}
+
+/**
+ * Gate check of an evidence's `baseline_kind` (4.10.0): absent means `workflow` (every
+ * evidence produced before 4.10.0, and every evidence of a module without adoption);
+ * it must equal the kind of the baseline that applies to the module now, so evidence
+ * produced against the global chain is never accepted against an adoption baseline
+ * (or the other way round).
+ */
+export function baselineKindErrors(recorded: unknown, baseline: WorkflowBaseline, label: string): string[] {
+  const kind = recorded === undefined ? "workflow" : recorded;
+  if (kind !== "workflow" && kind !== "adoption") return [`${label} baseline_kind must be "adoption" or "workflow", got ${JSON.stringify(recorded)}`];
+  if (kind === baseline.kind) return [];
+  return [`${label} baseline_kind ${kind} does not match the ${baseline.kind} baseline that now applies to this module${baseline.kind === "adoption" ? " (orchestrate baseline --adopt)" : ""}; refresh the evidence with evidence run --refresh`];
 }
 
 /** Null when the project is a git work tree, otherwise why it is not (git missing included). */
@@ -521,6 +562,60 @@ export function checkBaselineCandidate(projectRoot: string, state: WorkflowState
     return { error: `commit ${commit} committer date ${committerDate} (self-reported) is later than the workflow start ${startedAt}; the baseline must predate the workflow` };
   }
   return { candidate: { commit, head, committer_date: committerDate, author_date: authorDate, workflow_started_at: startedAt, anchors, tracked_state: trackedState } };
+}
+
+// ---------------------------------------------------------------------------
+// Adoption checks (orchestrate baseline --adopt --module, 4.10.0)
+// ---------------------------------------------------------------------------
+
+/** Rules an adoption commit is exempted from, as recorded in the BASELINE_ADOPTED audit entry. */
+export const ADOPTION_EXEMPTED_RULES: readonly string[] = [
+  "committer date no later than the workflow start (T0)",
+  "commit must not contain this workflow's state file",
+];
+/** Rules of --set an adoption commit satisfies in a different form. */
+export const ADOPTION_REPLACED_RULES: readonly string[] = [
+  "ancestor of every evidence anchor -> the module holds no RED / BASELINE / GREEN evidence",
+];
+
+/**
+ * Git checks of one adoption commit, in the workflow repository (`key` undefined) or a
+ * nested repository: a git work tree with a HEAD, not a shallow clone, an existing
+ * commit object that is HEAD or one of its ancestors, and (when `notAfter` is given) a
+ * self-reported committer date no later than it (the first tdd start of the module).
+ * The workflow-start (T0) and state-file rules of --set do not apply.
+ */
+export function checkAdoptionCandidate(projectRoot: string, commit: string, notAfter?: string, key?: string): { error: string } | { head: string; committer_date: string } {
+  const cwd = key ? join(root(projectRoot), ...key.split("/")) : projectRoot;
+  const prefix = key ? `${key}/: ` : "";
+  if (!key) {
+    const repository = gitWorkTreeError(projectRoot);
+    if (repository) return { error: `${repository}; orchestrate baseline --adopt requires a git repository` };
+  }
+  const head = currentHeadCommit(cwd);
+  if (head === BASELINE_UNAVAILABLE) return { error: `${prefix}the repository has no HEAD commit; commit first` };
+  if (isShallow(cwd)) return { error: `${prefix}${UNSHALLOW_HINT}` };
+  if (!COMMIT_ID_PATTERN.test(commit)) return { error: `${prefix}commit ${JSON.stringify(commit)} must be a 40- or 64-character lowercase hex commit id` };
+  const ancestry = commitIsAncestorOfHead(cwd, commit, `${prefix}commit`);
+  if (!ancestry.ok) return { error: ancestry.error };
+  const dates = git(cwd, ["show", "-s", "--format=%cI", commit]);
+  if (dates.status !== 0) return { error: `${prefix}cannot read the dates of commit ${commit}: ${dates.stderr.trim()}` };
+  const committerDate = dates.stdout.trim();
+  const committed = Date.parse(committerDate);
+  if (Number.isNaN(committed)) return { error: `${prefix}commit ${commit} has an unreadable committer date ${JSON.stringify(committerDate)}` };
+  if (notAfter !== undefined && committed > Date.parse(notAfter)) {
+    return { error: `${prefix}commit ${commit} committer date ${committerDate} (self-reported) is later than the first tdd start of the module ${notAfter}; adoption must predate the module's tdd` };
+  }
+  return { head, committer_date: committerDate };
+}
+
+/**
+ * RED / BASELINE / GREEN evidence of a module (any stage, any unit), project-relative.
+ * An unreadable or symlinked evidence entry under the module counts as present (fail closed).
+ */
+export function modulePhaseEvidence(projectRoot: string, moduleId: string): string[] {
+  const pattern = new RegExp("^\\.aidlc/evidence/[^/]+/" + escapeExpression(moduleId) + "/(?:.+/)?(?:red|baseline|green)-test-evidence\\.json" + "$");
+  return scanEvidenceFiles(projectRoot).filter((file) => pattern.test(file.path) || (file.error !== undefined && file.path.includes("/" + moduleId + "/"))).map((file) => file.path);
 }
 
 // ---------------------------------------------------------------------------

@@ -120,7 +120,9 @@ try {
   assert.equal(evidence.status, "passed");
   assert.equal(evidence.source_format, "mermaid");
   assert.equal(evidence.diagrams_checked, 1);
-  assert.deepEqual(evidence.diagrams, [{ file: flows, line: 9, type: "flowchart" }]);
+  // Evidence records the path with the platform separator (\ on Windows); compare it as POSIX.
+  const diagrams = (evidence.diagrams as Array<{ file: string }>).map((entry) => ({ ...entry, file: entry.file.replace(/\\/g, "/") }));
+  assert.deepEqual(diagrams, [{ file: flows, line: 9, type: "flowchart" }]);
   assert.equal(evidence.syntax_parse, "passed");
 
   const report = success(project, ["orchestrate", "report", "--stage", "requirements-methods", "--module", M01, "--result", "completed"]);

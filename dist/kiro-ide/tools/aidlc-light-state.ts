@@ -39,7 +39,7 @@ export interface TeamLightActiveInstance {
   expires_at: string;
 }
 
-export const ENGINE_VERSION = "4.9.1";
+export const ENGINE_VERSION = "4.10.0";
 
 export type WorkflowKind = "global" | "module" | "integration";
 
@@ -97,6 +97,22 @@ export interface WorkflowState {
    * Baseline History and Baseline Repos are.
    */
   baseline_repos_history?: Record<string, { start: number; commits: string[] }>;
+  /**
+   * 4.10.0 adoption baseline (`orchestrate baseline --adopt --module`): module
+   * sub-workflows only. The commit the module's characterization UC-Ds and BASELINE
+   * resolve against instead of the global baseline chain, for implementations that
+   * already existed when the module was taken over by the workflow. Adoption Baseline,
+   * Adoption Approval Ref and Adopted At are present together or absent together.
+   */
+  adoption_baseline?: string;
+  /** 4.10.0: nested repository commits of the adoption baseline (`- Adoption Baseline Repos: app=<sha>`). */
+  adoption_baseline_repos?: Record<string, string>;
+  /** 4.10.0: the adoption chain once advanced with `--advance --module` (epoch 0 first, current last). */
+  adoption_baseline_history?: string[];
+  /** 4.10.0: per nested repository chain of an advanced adoption baseline (same format as Baseline Repos History). */
+  adoption_baseline_repos_history?: Record<string, { start: number; commits: string[] }>;
+  adoption_approval_ref?: string;
+  adopted_at?: string;
   revision: number;
   scope: string;
   depth: string;
@@ -359,6 +375,58 @@ function parseBaselineReposHistory(text: string): Record<string, { start: number
   return result;
 }
 
+type AdoptionState = Pick<WorkflowState, "workflow_kind" | "adoption_baseline" | "adoption_baseline_repos" | "adoption_baseline_history" | "adoption_baseline_repos_history" | "adoption_approval_ref" | "adopted_at">;
+
+/** The adoption fields in the shape of the workflow baseline fields (chain helpers accept both). */
+export function adoptionAsBaseline(state: Partial<AdoptionState>): Pick<WorkflowState, "baseline_commit" | "baseline_history" | "baseline_repos" | "baseline_repos_history"> {
+  return {
+    ...(state.adoption_baseline !== undefined ? { baseline_commit: state.adoption_baseline } : {}),
+    ...(state.adoption_baseline_history !== undefined ? { baseline_history: [...state.adoption_baseline_history] } : {}),
+    ...(state.adoption_baseline_repos !== undefined ? { baseline_repos: { ...state.adoption_baseline_repos } } : {}),
+    ...(state.adoption_baseline_repos_history !== undefined ? { baseline_repos_history: state.adoption_baseline_repos_history } : {}),
+  };
+}
+
+function adoptionFieldsPresent(state: Partial<AdoptionState>): boolean {
+  return state.adoption_baseline !== undefined || state.adoption_baseline_repos !== undefined || state.adoption_baseline_history !== undefined
+    || state.adoption_baseline_repos_history !== undefined || state.adoption_approval_ref !== undefined || state.adopted_at !== undefined;
+}
+
+/**
+ * 4.10.0 structural rules of the adoption baseline: module sub-workflows only; Adoption
+ * Baseline, Adoption Approval Ref and Adopted At together; a full lowercase hex commit
+ * id; a non-empty approval reference; an ISO Adopted At. Nested repositories and the
+ * advanced chain follow the same rules as Baseline Repos / Baseline History (at least
+ * two distinct epochs, the last one equal to Adoption Baseline).
+ */
+export function assertAdoptionFields(state: Partial<AdoptionState>): void {
+  if (!adoptionFieldsPresent(state)) return;
+  if (state.workflow_kind !== "module") throw new Error("Adoption Baseline fields are only valid in a module sub-workflow state");
+  if (state.adoption_baseline === undefined || state.adoption_approval_ref === undefined || state.adopted_at === undefined) {
+    throw new Error("Adoption Baseline, Adoption Approval Ref and Adopted At must all be present or all be absent");
+  }
+  if (!COMMIT_ID_PATTERN.test(state.adoption_baseline)) throw new Error(`Adoption Baseline must be a 40- or 64-character lowercase hex commit id, got ${JSON.stringify(state.adoption_baseline)}`);
+  if (!state.adoption_approval_ref.trim()) throw new Error("Adoption Approval Ref must be a non-empty approval record reference");
+  if (Number.isNaN(Date.parse(state.adopted_at))) throw new Error("Adopted At must be an ISO timestamp");
+  const mapped = adoptionAsBaseline(state);
+  if (mapped.baseline_repos !== undefined || mapped.baseline_repos_history !== undefined) {
+    try {
+      assertBaselineRepoFields(mapped);
+    } catch (error) {
+      throw new Error(`Adoption ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const chain = mapped.baseline_history;
+  if (chain === undefined) return;
+  if (!Array.isArray(chain) || chain.length < 2) throw new Error("Adoption Baseline History must list at least two epochs (epoch 0 and the advanced adoption baseline)");
+  for (const entry of chain) {
+    if (typeof entry !== "string" || !COMMIT_ID_PATTERN.test(entry)) throw new Error(`Adoption Baseline History entries must be 40- or 64-character lowercase hex commit ids, got ${JSON.stringify(entry)}`);
+  }
+  const tuples = chain.map((entry, epoch) => [entry, ...Object.entries(baselineReposAtEpoch(mapped, epoch)).map(([key, sha]) => `${key}=${sha}`)].join(";"));
+  if (new Set(tuples).size !== tuples.length) throw new Error("Adoption Baseline History contains duplicate epochs");
+  if (chain[chain.length - 1] !== state.adoption_baseline) throw new Error(`the last Adoption Baseline History entry ${chain[chain.length - 1]} must equal Adoption Baseline ${state.adoption_baseline}`);
+}
+
 /** Baseline chain of a state that has a commit baseline: the recorded history, or the single epoch. */
 export function baselineChain(state: Pick<WorkflowState, "baseline_commit" | "baseline_history">): string[] {
   if (state.baseline_history !== undefined) return [...state.baseline_history];
@@ -512,6 +580,19 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
     baseline_repos_history: baselineReposHistory,
     workflow_kind: (kind || undefined) as WorkflowKind | undefined,
   });
+  const adoptionBaseline = presentScalar(markdown, "Adoption Baseline");
+  const adoptionReposText = presentScalar(markdown, "Adoption Baseline Repos");
+  const adoptionHistoryText = presentScalar(markdown, "Adoption Baseline History");
+  const adoptionReposHistoryText = presentScalar(markdown, "Adoption Baseline Repos History");
+  const adoption: Partial<AdoptionState> = {
+    ...(adoptionBaseline !== undefined ? { adoption_baseline: adoptionBaseline } : {}),
+    ...(adoptionReposText !== undefined ? { adoption_baseline_repos: parseBaselineRepos(adoptionReposText) } : {}),
+    ...(adoptionHistoryText !== undefined ? { adoption_baseline_history: adoptionHistoryText.split(",").map((entry) => entry.trim()) } : {}),
+    ...(adoptionReposHistoryText !== undefined ? { adoption_baseline_repos_history: parseBaselineReposHistory(adoptionReposHistoryText) } : {}),
+    ...(presentScalar(markdown, "Adoption Approval Ref") !== undefined ? { adoption_approval_ref: presentScalar(markdown, "Adoption Approval Ref") } : {}),
+    ...(presentScalar(markdown, "Adopted At") !== undefined ? { adopted_at: presentScalar(markdown, "Adopted At") } : {}),
+  };
+  assertAdoptionFields({ ...adoption, workflow_kind: (kind || undefined) as WorkflowKind | undefined });
   return {
     format: "markdown-workflow",
     version: scalar(markdown, "Engine Version"),
@@ -525,6 +606,7 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
     ...(baselineHistory !== undefined ? { baseline_history: baselineHistory } : {}),
     ...(baselineRepos !== undefined ? { baseline_repos: baselineRepos } : {}),
     ...(baselineReposHistory !== undefined ? { baseline_repos_history: baselineReposHistory } : {}),
+    ...adoption,
     revision,
     scope,
     depth: scalar(markdown, "Depth"),
@@ -567,7 +649,7 @@ export function renderLightWorkflowState(state: WorkflowState): string {
 - Status: ${state.status}
 - Revision: ${state.revision}
 - Engine Version: ${clean(state.version)}
-${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}${state.diagram_format ? `- Diagram Format: ${state.diagram_format}\n` : ""}${state.baseline_commit !== undefined ? `- Baseline Commit: ${clean(state.baseline_commit)}\n- Baseline Source: ${clean(state.baseline_source || "")}\n` : ""}${state.baseline_history !== undefined ? `- Baseline History: ${state.baseline_history.map(clean).join(", ")}\n` : ""}${state.baseline_repos !== undefined ? `- Baseline Repos: ${clean(renderBaselineRepos(state.baseline_repos))}\n` : ""}${state.baseline_repos_history !== undefined ? `- Baseline Repos History: ${clean(renderBaselineReposHistory(state.baseline_repos_history))}\n` : ""}- Depth: ${clean(state.depth)}
+${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}${state.diagram_format ? `- Diagram Format: ${state.diagram_format}\n` : ""}${state.baseline_commit !== undefined ? `- Baseline Commit: ${clean(state.baseline_commit)}\n- Baseline Source: ${clean(state.baseline_source || "")}\n` : ""}${state.baseline_history !== undefined ? `- Baseline History: ${state.baseline_history.map(clean).join(", ")}\n` : ""}${state.baseline_repos !== undefined ? `- Baseline Repos: ${clean(renderBaselineRepos(state.baseline_repos))}\n` : ""}${state.baseline_repos_history !== undefined ? `- Baseline Repos History: ${clean(renderBaselineReposHistory(state.baseline_repos_history))}\n` : ""}${renderAdoption(state)}- Depth: ${clean(state.depth)}
 - Current Phase: ${clean(state.current_phase)}
 - Current Stage: ${cell(state.current_stage)}
 - Current Instance: ${cell(state.current_stage_instance)}
@@ -611,6 +693,19 @@ ${Object.entries(state.active_instances || {}).sort(([left], [right]) => left.lo
 | --- | --- | --- | --- | --- | --- | --- |
 ${state.history.map((entry) => `| ${cell(entry.stage)} | ${cell(entry.instance_id)} | ${cell(entry.module_id)} | ${cell(entry.unit_id)} | ${cell(entry.result)} | ${entry.timestamp} | ${cell(entry.user_input)} |`).join("\n") || "| - | - | - | - | - | - | - |"}
 `;
+}
+
+/** 4.10.0 adoption baseline lines of a module sub-workflow (empty when not adopted). */
+function renderAdoption(state: WorkflowState): string {
+  if (state.adoption_baseline === undefined) return "";
+  return [
+    `- Adoption Baseline: ${clean(state.adoption_baseline)}`,
+    ...(state.adoption_baseline_repos !== undefined ? [`- Adoption Baseline Repos: ${clean(renderBaselineRepos(state.adoption_baseline_repos))}`] : []),
+    ...(state.adoption_baseline_history !== undefined ? [`- Adoption Baseline History: ${state.adoption_baseline_history.map(clean).join(", ")}`] : []),
+    ...(state.adoption_baseline_repos_history !== undefined ? [`- Adoption Baseline Repos History: ${clean(renderBaselineReposHistory(state.adoption_baseline_repos_history))}`] : []),
+    `- Adoption Approval Ref: ${clean(state.adoption_approval_ref || "")}`,
+    `- Adopted At: ${clean(state.adopted_at || "")}`,
+  ].map((line) => `${line}\n`).join("");
 }
 
 function acquireLock(path: string): number {
@@ -673,6 +768,16 @@ export interface SaveWorkflowOptions {
 
 function assertBaselinePreserved(existing: WorkflowState | null, state: WorkflowState, ref: WorkflowRef, options: SaveWorkflowOptions): void {
   assertBaselineFields(state);
+  assertAdoptionFields(state);
+  if (adoptionFieldsPresent(state) && ref.kind !== "module") throw new Error("Adoption Baseline fields are only valid in a module sub-workflow state");
+  if (!options.baselineWrite && existing) {
+    const keys = ["adoption_baseline", "adoption_baseline_repos", "adoption_baseline_history", "adoption_baseline_repos_history", "adoption_approval_ref", "adopted_at"] as const;
+    if (keys.some((key) => JSON.stringify(existing[key]) !== JSON.stringify(state[key]))) {
+      throw new Error("the adoption baseline can only be changed by orchestrate baseline --adopt / --advance --module; an ordinary save must keep the Adoption Baseline fields unchanged");
+    }
+  } else if (!options.baselineWrite && adoptionFieldsPresent(state)) {
+    throw new Error("a new workflow cannot start with an adoption baseline");
+  }
   if (ref.kind !== "global" && (state.baseline_commit !== undefined || state.baseline_source !== undefined || state.baseline_history !== undefined)) throw subWorkflowBaselineError(ref.kind);
   if (ref.kind !== "global" && (state.baseline_repos !== undefined || state.baseline_repos_history !== undefined)) throw subWorkflowReposError(ref.kind);
   if (options.baselineWrite) return;

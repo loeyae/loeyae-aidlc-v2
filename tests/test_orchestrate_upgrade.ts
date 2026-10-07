@@ -113,7 +113,7 @@ try {
   assert.deepEqual(snapshot(project), before, "dry-run must not write any file");
   assert.equal(report.dry_run, true);
   assert.equal(report.layout, "split");
-  assert.equal(report.engine_version, "4.9.1");
+  assert.equal(report.engine_version, "4.10.0");
   const workflows = report.workflows as { workflow: string; recorded_engine_version: string }[];
   assert.deepEqual(workflows.map((item) => item.workflow).sort(), ["global", "integration", `module:${M01}`, `module:${M02}`].sort());
   assert.ok(workflows.every((item) => item.recorded_engine_version.length > 0));
