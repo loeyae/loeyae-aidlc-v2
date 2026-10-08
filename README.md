@@ -67,6 +67,10 @@ loeyae-aidlc unit select \
 
 选择是协作记录，不是分布式锁。若发生重复选择，团队协商或使用显式 `--replace` 更新记录。
 
+### 工作流 lineage 保护（4.13.0）
+
+`aidlc/active/` 是团队共享状态，一个项目只有一条工作流 lineage。`next --scope` / `split` 发现 git 中已有另一条未归档 lineage 时拒绝创建（确需作废时加 `--replace-lineage <id>`）；合并后 HEAD 历史出现另一条未退役 lineage 时 `next` / `report` 拒绝继续，由负责人用 `orchestrate state retire --lineage <id> --user-input Approve --reason "<原因>"` 裁决；`orchestrate state verify` 只读检查 lineage 与状态 `Revision` 回退；另一条 lineage 上的模块用 `orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason "<原因>"` 迁入当前 lineage（同一模块只能保留一份）。`registry.md` 只存身份行，只在创建工作流时改变，推进模块不会改写它。合并冲突时禁止对 `aidlc/active/` 整目录「保留本地」，registry 冲突保留双方的模块行。
+
 ## Agent 执行
 
 每个 directive 可携带 `agent_execution`：它声明 primary persona、support/reviewer、执行模式和结构化结果契约。

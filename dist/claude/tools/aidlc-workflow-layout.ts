@@ -150,21 +150,15 @@ function flag(value: string): boolean {
   return value === "yes";
 }
 
-function yesNo(value: boolean): string {
-  return value ? "yes" : "no";
-}
-
-function listCell(values: string[]): string {
-  return values.length ? values.map((value) => markdownCell(value)).join(", ") : "-";
-}
-
 function parseList(value: string): string[] {
   return value === "-" ? [] : value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 export function parseRegistry(markdown: string): WorkflowRegistry {
   if (!markdown.startsWith("# AI-DLC Workflow Registry\n")) throw new Error("registry is not an AI-DLC workflow registry Markdown document");
-  if (markdownScalar(markdown, "Registry Version") !== "1") throw new Error("registry version must be 1");
+  const version = markdownScalar(markdown, "Registry Version");
+  if (version === "2") return parseIdentityRegistry(markdown);
+  if (version !== "1") throw new Error("registry version must be 1 or 2");
   const modules = markdownTable(markdown, "Modules").map((cells, index) => {
     if (cells.length !== 8) throw new Error(`registry Modules row ${index + 1} is malformed`);
     return {
@@ -208,40 +202,58 @@ export function parseRegistry(markdown: string): WorkflowRegistry {
   };
 }
 
+/**
+ * Registry version 2 (4.13.0, MARS-98): identity only. The file changes only when a
+ * workflow is created, so members advancing different modules never touch it; module
+ * rows are sorted by module ID so two members creating different modules add lines
+ * at different places (keep both rows when git still reports a conflict). Status,
+ * dependency, contract and barrier projections are computed from the workflow states
+ * on every read and are not persisted.
+ */
+function parseIdentityRegistry(markdown: string): WorkflowRegistry {
+  const modules = markdownTable(markdown, "Modules").map((cells, index) => {
+    if (cells.length !== 3) throw new Error(`registry Modules row ${index + 1} is malformed`);
+    return { module_id: cells[0], workflow_id: cells[1], state_path: cells[2], status: "-", current_stage: "-", inception_done: false, construction_done: false, owner: "-" };
+  });
+  if (new Set(modules.map((row) => row.module_id)).size !== modules.length) throw new Error("registry contains duplicate module rows");
+  const integrationRows = markdownTable(markdown, "Integration");
+  if (integrationRows.length !== 1 || integrationRows[0].length !== 2) throw new Error("registry must contain exactly one Integration row");
+  const splitAt = markdownScalar(markdown, "Split At");
+  return {
+    version: "1",
+    global_workflow_id: markdownScalar(markdown, "Global Workflow ID"),
+    split_from_workflow_id: markdownScalar(markdown, "Split From Workflow ID"),
+    split_at: splitAt,
+    updated_at: splitAt,
+    modules,
+    integration: { workflow_id: integrationRows[0][0], state_path: integrationRows[0][1], status: "-", current_stage: "-", barrier_ready: false, blocking: [] },
+    shared_contracts: [],
+    cross_module_requires: [],
+  };
+}
+
 export function renderRegistry(registry: WorkflowRegistry): string {
-  const modules = registry.modules.map((row) => `| ${markdownCell(row.module_id)} | ${markdownCell(row.workflow_id)} | ${markdownCell(row.state_path)} | ${markdownCell(row.status)} | ${markdownCell(row.current_stage)} | ${yesNo(row.inception_done)} | ${yesNo(row.construction_done)} | ${markdownCell(row.owner)} |`);
-  const contracts = registry.shared_contracts.map((row) => `| ${markdownCell(row.contract_id)} | ${markdownCell(row.provider)} | ${listCell(row.consumers)} | ${yesNo(row.verified)} | ${markdownCell(row.source)} |`);
-  const requires = registry.cross_module_requires.map((row) => `| ${markdownCell(row.consumer)} | ${markdownCell(row.consumer_stage)} | ${markdownCell(row.provider)} | ${markdownCell(row.provider_stage)} | ${yesNo(row.satisfied)} | ${markdownCell(row.source)} |`);
+  const modules = [...registry.modules].sort((left, right) => left.module_id.localeCompare(right.module_id))
+    .map((row) => `| ${markdownCell(row.module_id)} | ${markdownCell(row.workflow_id)} | ${markdownCell(row.state_path)} |`);
   const integration = registry.integration;
   return `# AI-DLC Workflow Registry
 
-> Per-module workflow index. Identity rows (module -> workflow ID and state path) are authoritative; status, dependency, contract and barrier columns are engine projections refreshed after every workflow write. Do not edit projections by hand.
+> Per-module workflow identity index (module -> workflow ID and state path). It changes only when a workflow is created; status, contracts and the integration barrier are computed from the workflow states (orchestrate next --status). On a git conflict keep the module rows of both sides; never keep one side of aidlc/active as a whole.
 
-- Registry Version: 1
+- Registry Version: 2
 - Global Workflow ID: ${markdownCell(registry.global_workflow_id)}
 - Split From Workflow ID: ${markdownCell(registry.split_from_workflow_id)}
 - Split At: ${registry.split_at}
-- Updated At: ${registry.updated_at}
 
 ## Modules
-| Module | Workflow ID | State Path | Status | Current Stage | Inception Done | Construction Done | Owner |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-${modules.join("\n") || "| - | - | - | - | - | - | - | - |"}
+| Module | Workflow ID | State Path |
+| --- | --- | --- |
+${modules.join("\n") || "| - | - | - |"}
 
 ## Integration
-| Workflow ID | State Path | Status | Current Stage | Barrier Ready | Blocking |
-| --- | --- | --- | --- | --- | --- |
-| ${markdownCell(integration.workflow_id)} | ${markdownCell(integration.state_path)} | ${markdownCell(integration.status)} | ${markdownCell(integration.current_stage)} | ${yesNo(integration.barrier_ready)} | ${listCell(integration.blocking)} |
-
-## Shared Contracts
-| Contract | Provider | Consumers | Verified | Source |
-| --- | --- | --- | --- | --- |
-${contracts.join("\n") || "| - | - | - | - | - |"}
-
-## Cross Module Requires
-| Consumer | Consumer Stage | Provider | Provider Stage | Satisfied | Source |
-| --- | --- | --- | --- | --- | --- |
-${requires.join("\n") || "| - | - | - | - | - | - |"}
+| Workflow ID | State Path |
+| --- | --- |
+| ${markdownCell(integration.workflow_id)} | ${markdownCell(integration.state_path)} |
 `;
 }
 
@@ -287,7 +299,10 @@ export function updateRegistry(projectRoot: string, mutate: (current: WorkflowRe
     const current = loadRegistry(projectRoot);
     if (!current && !allowCreate) throw new Error("workflow registry is missing; run orchestrate split first");
     const next = { ...mutate(current), updated_at: new Date().toISOString() };
-    writeFileSync(temporary, renderRegistry(next), { encoding: "utf8", flag: "wx", mode: 0o600 });
+    // 4.13.0: identity-only file; an unchanged identity leaves it byte-for-byte untouched.
+    const rendered = renderRegistry(next);
+    if (current && readFileSync(path, "utf8").replace(/\r\n/g, "\n") === rendered) return next;
+    writeFileSync(temporary, rendered, { encoding: "utf8", flag: "wx", mode: 0o600 });
     renameSync(temporary, path);
     return next;
   } finally {
@@ -316,6 +331,17 @@ export interface WorkflowParts {
   parts: Map<string, WorkflowPart>;
 }
 
+/**
+ * 4.13.0 (MARS-98): every sub-workflow of a split layout belongs to the registry's
+ * lineage. A module or integration state carried over from another split (a merge that
+ * mixed two lineages file by file) is rejected on every command instead of only by the
+ * baseline resolution. States written before 4.3 parentage are accepted.
+ */
+function assertSameLineage(registry: WorkflowRegistry, label: string, state: WorkflowState): void {
+  if (!state.parent_workflow_id || state.parent_workflow_id === registry.global_workflow_id) return;
+  throw new Error(`workflow lineage conflict: ${label} ${state.workflow_id} belongs to lineage ${state.parent_workflow_id}, but the registry and the global workflow are lineage ${registry.global_workflow_id}. Two lineages are mixed in aidlc/active; restore the files of one lineage from git (orchestrate state verify lists both) instead of merging them.`);
+}
+
 export function loadWorkflowParts(projectRoot: string): WorkflowParts {
   const registry = loadRegistry(projectRoot);
   const parts = new Map<string, WorkflowPart>();
@@ -329,12 +355,14 @@ export function loadWorkflowParts(projectRoot: string): WorkflowParts {
     const state = loadWorkflowState(projectRoot, ref);
     if (!state) throw new Error(`registry module ${row.module_id} has no workflow state at ${relativeStatePath(projectRoot, ref)}`);
     if (state.workflow_id !== row.workflow_id) throw new Error(`module workflow ${row.module_id} ID ${state.workflow_id} does not match registry ${row.workflow_id}`);
+    assertSameLineage(registry, `module workflow ${row.module_id}`, state);
     parts.set(workflowRefKey(ref), { ref, state });
   }
   const integrationRef: WorkflowRef = { kind: "integration" };
   const integration = loadWorkflowState(projectRoot, integrationRef);
   if (!integration) throw new Error("split workflow layout is missing the integration workflow state");
   if (integration.workflow_id !== registry.integration.workflow_id) throw new Error(`integration workflow ID ${integration.workflow_id} does not match registry ${registry.integration.workflow_id}`);
+  assertSameLineage(registry, "integration workflow", integration);
   parts.set("integration", { ref: integrationRef, state: integration });
   return { split: true, registry, parts };
 }

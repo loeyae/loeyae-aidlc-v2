@@ -94,7 +94,9 @@ import {
   baselineRepoChains,
   createInitialState,
   renderBaselineRepos,
+  lightAuditPath,
   lightStatePath,
+  parseLightWorkflowState,
   loadWorkflowState,
   releaseExpiredModuleClaims,
   saveWorkflowState,
@@ -121,6 +123,7 @@ import {
   type WorkflowParts,
   type WorkflowRegistry,
 } from "./aidlc-workflow-layout";
+import { committedFile, describeConflict, gitHistoryAvailable, lineageConflicts, lineageRemedy, resolveCommit, revisionRegressions, type LineageConflict } from "./aidlc-lineage";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -244,14 +247,15 @@ const PRD_ELIGIBLE_SCOPES = new Set(FULL_WORKFLOW_SCOPES);
 // Subcommands
 // ---------------------------------------------------------------------------
 
-const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format", "baseline"] as const;
+const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format", "baseline", "state"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
 type StageResult = (typeof VALID_RESULTS)[number];
-const NEXT_FLAGS = new Set(["scope", "work", "with-prd", "resume", "status", "text", "claim", "module", "owner", "branch", "worktree"]);
+const NEXT_FLAGS = new Set(["scope", "work", "with-prd", "resume", "status", "text", "claim", "module", "owner", "branch", "worktree", "replace-lineage"]);
 const REPORT_FLAGS = new Set(["stage", "result", "user-input", "instruction-ack", "module", "unit", "instance", "owner"]);
-const SPLIT_FLAGS = new Set(["from", "dry-run"]);
+const SPLIT_FLAGS = new Set(["from", "dry-run", "replace-lineage"]);
+const STATE_FLAGS = new Set(["lineage", "user-input", "reason", "text", "module", "from"]);
 const ARCHIVE_FLAGS = new Set(["reason"]);
 const UPGRADE_FLAGS = new Set(["dry-run", "module"]);
 const DIAGRAM_FORMAT_FLAGS = new Set(["set", "user-input"]);
@@ -3619,8 +3623,10 @@ function registryProjection(registry: WorkflowRegistry, loaded: WorkflowParts): 
 }
 
 function refreshRegistry(loaded: WorkflowParts): void {
-  const updated = updateRegistry(PROJECT_ROOT, (current) => registryProjection(current as WorkflowRegistry, loaded));
-  loaded.registry = updated;
+  // 4.13.0: the file keeps identity rows only (a version-1 registry is rewritten once);
+  // projections live in memory for the rest of this command.
+  const updated = updateRegistry(PROJECT_ROOT, (current) => current as WorkflowRegistry);
+  loaded.registry = registryProjection(updated, loaded);
 }
 
 function reportCommandFor(instance: StageInstance): string {
@@ -3646,9 +3652,11 @@ function advanceSplit(ctx: EngineContext, graph: StageGraph, args: string[], fla
   });
 }
 
-function ensureModuleWorkflow(moduleId: string): Directive | null {
+function ensureModuleWorkflow(moduleId: string, work?: string): Directive | null {
   const loaded = loadWorkflowParts(PROJECT_ROOT);
-  if (loaded.parts.has(`module:${moduleId}`)) return null;
+  if (loaded.parts.has(`module:${moduleId}`)) {
+    return work === undefined ? null : { kind: "error", message: `Module workflow ${moduleId} already exists; --work only describes a module workflow when next --module creates it.` };
+  }
   let modules: ModuleDescriptor[];
   try {
     modules = readModuleManifest(PROJECT_ROOT);
@@ -3661,7 +3669,7 @@ function ensureModuleWorkflow(moduleId: string): Directive | null {
   const global = loaded.parts.get("global")!.state;
   const ref = moduleRef(moduleId);
   const state: WorkflowState = {
-    ...createInitialState(global.scope, ENGINE_VERSION, randomUUID(), global.selected_optional_stages, global.work_description),
+    ...createInitialState(global.scope, ENGINE_VERSION, randomUUID(), global.selected_optional_stages, work?.trim() || global.work_description),
     workflow_kind: "module",
     module_id: moduleId,
     parent_workflow_id: global.workflow_id,
@@ -3696,7 +3704,7 @@ async function splitNext(args: string[], flags: Record<string, string>, graph: S
   const envModule = process.env.AIDLC_MODULE?.trim();
   const targetModule = flags.module || envModule;
   if (targetModule) {
-    const failure = ensureModuleWorkflow(targetModule);
+    const failure = ensureModuleWorkflow(targetModule, flags.module ? flags.work : undefined);
     if (failure) return flags.module ? failure : { ...failure, message: `AIDLC_MODULE: ${failure.message}` };
     return advanceSplit(openSplitContext(moduleRef(targetModule)), graph, args, { ...flags, module: targetModule });
   }
@@ -3791,6 +3799,7 @@ function splitStatusDirective(graph: StageGraph, moduleId?: string): Directive {
   const barrier = projection.integration;
   return {
     kind: "print",
+    registry: projection,
     message: `📊 Split Workflow Status (registry: aidlc/active/registry.md)\n` +
       `  Scope: ${view.scope} | Global workflow: ${projection.global_workflow_id}\n` +
       `${lines.join("\n")}\n` +
@@ -3875,11 +3884,94 @@ function anchorLegacyEvidence(inventory: LegacyEvidence[]): { anchored: string[]
   return { anchored, stale };
 }
 
+// ---------------------------------------------------------------------------
+// Workflow lineage protection (4.13.0, MARS-98)
+// ---------------------------------------------------------------------------
+
+/** `--replace-lineage a,b` → ["a", "b"]; a bare flag is an error. */
+function lineageList(value: string | undefined, flag: string): string[] | { error: string } {
+  if (value === undefined) return [];
+  if (value === "true" || value.trim() === "") return { error: `--${flag} requires one or more comma-separated workflow IDs` };
+  return [...new Set(value.split(",").map((item) => item.trim()).filter(Boolean))];
+}
+
+function lineageError(lead: string, current: string | undefined, conflicts: LineageConflict[], extra: Record<string, unknown> = {}): Directive {
+  return {
+    kind: "error",
+    ...(current ? { workflow_id: current } : {}),
+    lineage_conflicts: conflicts,
+    ...extra,
+    message: `${lead}: ${conflicts.map(describeConflict).join("; ")}. ${lineageRemedy(current, conflicts)}`,
+  };
+}
+
+function auditLineageRetired(conflict: LineageConflict, trigger: string, reason?: string): void {
+  appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "LINEAGE_RETIRED", {
+    Lineage: conflict.workflow_id,
+    Trigger: trigger,
+    "Last Present Commit": conflict.last_present_commit || "-",
+    "Seen In": conflict.sightings.map((item) => item.source === "ref" ? `${item.ref}@${item.commit}` : `history@${item.commit}`).join(", "),
+    ...(reason ? { Reason: reason } : {}),
+  });
+}
+
+/**
+ * next / report on an existing workflow: another lineage committed in the history of
+ * HEAD (and neither archived nor retired) means a merge replaced or mixed workflows.
+ */
+function activeLineageError(): Directive | null {
+  const global = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!global) return null;
+  const conflicts = lineageConflicts(PROJECT_ROOT, { current: global.workflow_id, retired: global.retired_lineages });
+  if (conflicts.length === 0) return null;
+  return lineageError(`Workflow lineage conflict: the active workflow is ${global.workflow_id}, but git history also carries another workflow lineage that was neither archived nor retired`, global.workflow_id, conflicts);
+}
+
+/**
+ * Creating a lineage (next --scope on an empty aidlc/active, or split): any other
+ * active lineage in the history of HEAD or at a branch tip must be named in
+ * --replace-lineage. Returns the lineages to retire, or the refusal.
+ */
+function newLineageCheck(retired: readonly string[], replace: string[], exclude: string | undefined, action: string, retryCommand: string): { retire: string[]; conflicts: LineageConflict[] } | Directive {
+  if (replace.length > 0 && !gitHistoryAvailable(PROJECT_ROOT)) return { kind: "error", message: "--replace-lineage needs git history: no other workflow lineage can be found outside a git repository with commits." };
+  const conflicts = lineageConflicts(PROJECT_ROOT, { current: exclude, retired, refs: true });
+  const unknown = replace.filter((id) => !conflicts.some((item) => item.workflow_id === id));
+  if (unknown.length > 0) {
+    return { kind: "error", message: `--replace-lineage ${unknown.join(",")}: no such active workflow lineage in git (history of HEAD or branch tips)${conflicts.length ? `; found: ${conflicts.map((item) => item.workflow_id).join(", ")}` : ""}.` };
+  }
+  const open = conflicts.filter((item) => !replace.includes(item.workflow_id));
+  if (open.length > 0) {
+    return lineageError(
+      `${action} would create a second workflow lineage. git already tracks another active lineage (run git fetch first so remote branches are seen)`,
+      exclude,
+      open,
+      { retry_command: `${retryCommand} --replace-lineage ${open.map((item) => item.workflow_id).join(",")}` },
+    );
+  }
+  return { retire: conflicts.map((item) => item.workflow_id), conflicts };
+}
+
+function splitLineageCheck(legacy: WorkflowState, replace: string[]): { retire: string[]; conflicts: LineageConflict[] } | Directive {
+  if (!gitHistoryAvailable(PROJECT_ROOT)) return replace.length > 0 ? { kind: "error", message: "--replace-lineage needs git history: no other workflow lineage can be found outside a git repository with commits." } : { retire: [], conflicts: [] };
+  // The same workflow already split on another branch: a second split would create a second set of module workflows.
+  const own = lineageConflicts(PROJECT_ROOT, { retired: legacy.retired_lineages, refs: true }).find((item) => item.workflow_id === legacy.workflow_id);
+  const splitRefs = (own?.sightings || []).filter((item) => item.source === "ref" && item.split);
+  if (splitRefs.length > 0) {
+    return {
+      kind: "error",
+      workflow_id: legacy.workflow_id,
+      split_refs: splitRefs.map((item) => ({ ref: item.ref, commit: item.commit })),
+      message: `Workflow ${legacy.workflow_id} is already split on ${splitRefs.map((item) => `${item.ref} (${item.commit.slice(0, 12)})`).join(", ")}. Merge that branch (git merge <ref>) instead of splitting again: a second split creates a second, incompatible set of module workflows.`,
+    };
+  }
+  return newLineageCheck(legacy.retired_lineages || [], replace, legacy.workflow_id, `Splitting workflow ${legacy.workflow_id}`, `orchestrate split --from ${legacy.workflow_id}`);
+}
+
 /**
  * Split a single-layout workflow into global, per-module and integration workflows without
  * losing any recorded stage instance, history row, claim or selection.
  */
-function performSplit(fromId: string, dryRun: boolean, trigger: string): Directive {
+function performSplit(fromId: string, dryRun: boolean, trigger: string, replaceLineage: string[] = []): Directive {
   if (isSplitLayout(PROJECT_ROOT)) return { kind: "error", message: "The workflow layout is already split; use next --module <module-id>." };
   const legacy = loadState();
   if (!legacy) return { kind: "error", message: "No active workflow to split." };
@@ -3887,6 +3979,8 @@ function performSplit(fromId: string, dryRun: boolean, trigger: string): Directi
   if (!(legacy.workflow_id === requested || (requested.length >= 8 && legacy.workflow_id.startsWith(requested)))) {
     return { kind: "error", message: `--from ${requested} does not match the active workflow ${legacy.workflow_id}.` };
   }
+  const lineage = splitLineageCheck(legacy, replaceLineage);
+  if ("kind" in lineage) return lineage;
   if (!legacy.completed_stages.includes("module-division")) {
     return { kind: "error", message: "Per-module workflows require a completed module-division stage and docs/aidlc/ideation/module-manifest.json." };
   }
@@ -3913,7 +4007,7 @@ function performSplit(fromId: string, dryRun: boolean, trigger: string): Directi
   const planned = refs.map((ref) => {
     const isCurrent = sameRef(ref, currentOwner);
     const base: WorkflowState = ref.kind === "global"
-      ? { ...legacy, workflow_kind: "global" }
+      ? { ...legacy, workflow_kind: "global", ...(lineage.retire.length > 0 ? { retired_lineages: [...new Set([...(legacy.retired_lineages || []), ...lineage.retire])] } : {}) }
       : {
         ...createInitialState(legacy.scope, ENGINE_VERSION, randomUUID(), legacy.selected_optional_stages, legacy.work_description),
         workflow_kind: ref.kind,
@@ -3989,7 +4083,9 @@ function performSplit(fromId: string, dryRun: boolean, trigger: string): Directi
     Modules: moduleIds,
     "Evidence Anchored": String(evidence.anchored.length),
     "Evidence Stale": String(evidence.stale.length),
+    ...(lineage.retire.length > 0 ? { "Replaced Lineages": lineage.retire.join(", ") } : {}),
   });
+  for (const conflict of lineage.conflicts) auditLineageRetired(conflict, `orchestrate split --replace-lineage`);
   for (const item of planned) {
     if (item.ref.kind === "global") continue;
     appendAuditEvent(PROJECT_ROOT, item.ref, "WORKFLOW_CREATED", {
@@ -4079,7 +4175,10 @@ async function handleNext(args: string[]): Promise<Directive> {
   }
 
   // An existing workflow is never replaced implicitly: --scope/--work only initialize.
-  if (scopeFlag || flags.work) {
+  // 4.13.0: --module <id> --work <text> describes a module workflow when it is first created.
+  const initializing = Boolean(scopeFlag || (flags.work && !flags.module));
+  if (flags.work === "true") return { kind: "error", message: "--work requires a description" };
+  if (initializing) {
     const existing = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
     if (existing) {
       const steps = existing.status === "running"
@@ -4096,6 +4195,16 @@ async function handleNext(args: string[]): Promise<Directive> {
 
   // Split per-module layout (4.3.0): route to the owning workflow. A legacy multi-module
   // workflow is split automatically the first time `next --module <id>` is used without --claim.
+  if ("replace-lineage" in flags && !initializing) {
+    return { kind: "error", message: "--replace-lineage is only valid when initializing a new workflow with next --scope/--work, or on orchestrate split." };
+  }
+  if (!initializing) {
+    const conflict = activeLineageError();
+    if (conflict) return conflict;
+  }
+  if (!isSplitLayout(PROJECT_ROOT) && flags.module && flags.work && !scopeFlag) {
+    return { kind: "error", message: "--module <id> --work <text> only describes a module workflow created after the split (a module added to module-manifest.json later); split creates the workflows of the manifest modules with the global work description." };
+  }
   if (!isSplitLayout(PROJECT_ROOT) && flags.module && !claimRequested) {
     const legacy = loadState();
     if (!legacy) {
@@ -4139,7 +4248,13 @@ async function handleNext(args: string[]): Promise<Directive> {
       } as unknown as Directive;
     }
     const selectedOptionalStages = withPrd ? ["prd-generation"] : [];
+    // 4.13.0 (MARS-98): never start a second workflow lineage next to one git already tracks.
+    const replace = lineageList(flags["replace-lineage"], "replace-lineage");
+    if ("error" in replace) return { kind: "error", message: replace.error };
+    const lineage = newLineageCheck([], replace, undefined, "Starting a new workflow", `orchestrate next --scope ${scopeFlag} --work "<work>"`);
+    if ("kind" in lineage) return lineage;
     state = createInitialState(scopeFlag, ENGINE_VERSION, undefined, selectedOptionalStages, workDescription);
+    if (lineage.retire.length > 0) state.retired_lineages = lineage.retire;
     // Only a new global/single workflow records its baseline; createInitialState stays
     // baseline-free so module/integration workflows and pre-4.6 states never get one.
     state.baseline_commit = currentHeadCommit(PROJECT_ROOT);
@@ -4181,6 +4296,7 @@ async function handleNext(args: string[]): Promise<Directive> {
         Source: "created",
         ...(state.baseline_repos ? { Repos: renderBaselineRepos(state.baseline_repos) } : {}),
       });
+      for (const conflict of lineage.conflicts) auditLineageRetired(conflict, "orchestrate next --scope --replace-lineage");
     } catch (error) {
       return { kind: "error", message: `Workflow ${state.workflow_id} was created with baseline ${state.baseline_commit}, but the BASELINE_COMMIT_RECORDED audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。` };
     }
@@ -4447,6 +4563,9 @@ async function handleReport(args: string[]): Promise<Directive> {
   // Load state
   const graph = loadGraph();
   const stageNode = graph.stages.find((stage) => stage.slug === stageSlug);
+  // 4.13.0 (MARS-98): no stage is reported into a workflow whose lineage git contradicts.
+  const lineageConflict = activeLineageError();
+  if (lineageConflict) return lineageConflict;
   let state: WorkflowState | null;
   let commit: (value: WorkflowState) => void;
   let label = "Workflow";
@@ -6292,6 +6411,196 @@ function writeAdoptionAdvance(adoption: { ref: WorkflowRef; state: WorkflowState
 }
 
 // ---------------------------------------------------------------------------
+// state — lineage / revision verification and lineage retirement (4.13.0, MARS-98)
+// ---------------------------------------------------------------------------
+
+const STATE_USAGE = "Usage: orchestrate state verify | orchestrate state retire --lineage <workflow-id>[,<workflow-id>] --user-input Approve --reason \"<why>\" | orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason \"<why>\"";
+
+async function handleState(args: string[]): Promise<Directive> {
+  const [action, ...rest] = args;
+  const flags = parseFlags(rest);
+  const invalidFlag = unsupportedFlag(flags, STATE_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported state option: --${invalidFlag}. ${STATE_USAGE}` };
+  if (flags.text) return { kind: "error", message: `Unexpected state argument: ${flags.text}. ${STATE_USAGE}` };
+  if (action === "verify") {
+    if (Object.keys(flags).length > 0) return { kind: "error", message: `state verify takes no options. ${STATE_USAGE}` };
+    return verifyState();
+  }
+  if (action === "retire") return retireLineages(flags);
+  if (action === "adopt") return adoptModuleState(flags);
+  return { kind: "error", message: STATE_USAGE };
+}
+
+/**
+ * 4.13.0: carry one module workflow of another lineage (a commit of the git history)
+ * over into the active split layout. The module keeps its workflow ID, history and
+ * Revision (continued), and is re-parented to the active lineage; evidence is not
+ * trusted blindly — next/report re-verify upstream gates, and missing evidence is listed.
+ */
+async function adoptModuleState(flags: Record<string, string>): Promise<Directive> {
+  const moduleId = flags.module;
+  if (!moduleId || moduleId === "true" || !MODULE_ID_PATTERN.test(moduleId)) return { kind: "error", message: `state adopt requires --module <module-id>. ${STATE_USAGE}` };
+  if (!flags.from || flags.from === "true") return { kind: "error", message: `state adopt requires --from <commit> (a commit of the other lineage that carries the module state). ${STATE_USAGE}` };
+  if (flags["user-input"] !== "Approve") return { kind: "error", message: "--user-input must be exactly Approve: adopting a module from another workflow lineage requires the user's explicit approval." };
+  if (!flags.reason || flags.reason === "true" || !flags.reason.trim()) return { kind: "error", message: "--reason is required: record why this module is adopted." };
+  if (!isSplitLayout(PROJECT_ROOT)) return { kind: "error", message: "state adopt needs the split layout (aidlc/active/registry.md); modules belong to per-module workflows." };
+  if (!gitHistoryAvailable(PROJECT_ROOT)) return { kind: "error", message: "state adopt needs git history: the module state is read from a commit." };
+  const commit = resolveCommit(PROJECT_ROOT, flags.from);
+  if (!commit) return { kind: "error", message: `--from ${flags.from} is not a commit of this repository.` };
+  const ref = moduleRef(moduleId);
+  const statePath = relativeStatePath(PROJECT_ROOT, ref);
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  const global = loaded.parts.get("global")!.state;
+  if (loaded.parts.has(workflowRefKey(ref)) || existsSync(lightStatePath(PROJECT_ROOT, ref))) {
+    return { kind: "error", message: `Module ${moduleId} already has a workflow in the active lineage ${global.workflow_id}; one module has exactly one workflow, so keep that one or the one of ${commit.slice(0, 12)} — state adopt never merges two module workflows.` };
+  }
+  try {
+    if (!readModuleManifest(PROJECT_ROOT).some((module) => module.module_id === moduleId)) {
+      return { kind: "error", message: `Module ${moduleId} is not declared in docs/aidlc/ideation/module-manifest.json of the active checkout; declare it first.` };
+    }
+  } catch (error) {
+    return { kind: "error", message: `Module manifest is unavailable: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const text = committedFile(PROJECT_ROOT, commit, statePath);
+  if (!text) return { kind: "error", message: `${commit} has no ${statePath}.` };
+  let source: WorkflowState;
+  try {
+    source = parseLightWorkflowState(text.replace(/\r\n/g, "\n"));
+  } catch (error) {
+    return { kind: "error", message: `${statePath} at ${commit} is not a readable workflow state: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (source.workflow_kind !== "module" || source.module_id !== moduleId) return { kind: "error", message: `${statePath} at ${commit} is not the module workflow of ${moduleId}.` };
+  const fromLineage = source.parent_workflow_id || "-";
+  if (fromLineage === global.workflow_id) {
+    return { kind: "error", message: `${statePath} at ${commit} already belongs to the active lineage ${global.workflow_id}; restore it with git (git checkout ${commit} -- aidlc/active/modules/${moduleId}) instead of adopting it.` };
+  }
+  if ([...loaded.parts.values()].some((part) => part.state.workflow_id === source.workflow_id)) {
+    return { kind: "error", message: `Workflow ID ${source.workflow_id} of ${moduleId} at ${commit} is already used in the active layout.` };
+  }
+  const audit = committedFile(PROJECT_ROOT, commit, `aidlc/active/modules/${moduleId}/audit.md`);
+  const adopted: WorkflowState = { ...source, parent_workflow_id: global.workflow_id };
+  const auditPath = lightAuditPath(PROJECT_ROOT, ref);
+  mkdirSync(dirname(auditPath), { recursive: true, mode: 0o700 });
+  if (audit) writeFileSync(auditPath, audit.replace(/\r\n/g, "\n"), { encoding: "utf8", flag: "wx", mode: 0o600 });
+  try {
+    saveWorkflowState(PROJECT_ROOT, adopted, ref, { adoptRevision: true, baselineWrite: true });
+    updateRegistry(PROJECT_ROOT, (current) => {
+      const registry = current as WorkflowRegistry;
+      if (registry.modules.some((row) => row.module_id === moduleId)) throw new Error(`registry already lists module ${moduleId}`);
+      return { ...registry, modules: [...registry.modules, { module_id: moduleId, workflow_id: adopted.workflow_id, state_path: statePath, status: adopted.status, current_stage: "-", inception_done: false, construction_done: false, owner: "-" }] };
+    });
+  } catch (error) {
+    for (const path of [lightStatePath(PROJECT_ROOT, ref), auditPath]) if (existsSync(path)) rmFile(path);
+    return { kind: "error", message: `state adopt aborted and rolled back: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const fields = {
+    Module: moduleId,
+    "Module Workflow ID": adopted.workflow_id,
+    "From Lineage": fromLineage,
+    "From Commit": commit,
+    "Revision": String(adopted.revision),
+    "Completed Instances": String(adopted.completed_stage_instances.length),
+    Reason: flags.reason.trim(),
+  };
+  try {
+    appendAuditEvent(PROJECT_ROOT, ref, "STATE_ADOPTED", fields);
+    appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "STATE_ADOPTED", fields);
+  } catch (error) {
+    return { kind: "error", message: `Module ${moduleId} was adopted, but the STATE_ADOPTED audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。` };
+  }
+  const check = await handleUpgrade(["--dry-run", "--module", moduleId]);
+  const missing = Array.isArray(check.pending) ? check.pending as { instance_id: string; missing_sensors: string[] }[] : [];
+  return {
+    kind: "print",
+    workflow_id: global.workflow_id,
+    module_id: moduleId,
+    module_workflow_id: adopted.workflow_id,
+    from_lineage: fromLineage,
+    from_commit: commit,
+    revision: adopted.revision,
+    completed_instances: adopted.completed_stage_instances.length,
+    evidence_missing: missing,
+    message: `✅ Module ${moduleId} adopted from lineage ${fromLineage} (${commit.slice(0, 12)}) into ${global.workflow_id}: revision ${adopted.revision}, ${adopted.completed_stage_instances.length} completed instance(s).` +
+      (missing.length
+        ? ` ⚠️ ${missing.length} completed instance(s) lack evidence in this checkout: ${missing.map((item) => `${item.instance_id} (${item.missing_sensors.join(", ")})`).join("; ")}. Recover them with orchestrate upgrade --dry-run --module ${moduleId}.`
+        : " Every completed instance still has its evidence; next/report re-verify the gates.") +
+      ` Commit aidlc/active so the team shares it${fromLineage !== "-" ? `, and retire the source lineage once nothing else is needed from it (orchestrate state retire --lineage ${fromLineage} ...)` : ""}.`,
+  };
+}
+
+function verifyState(): Directive {
+  const global = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!global) return { kind: "error", message: "No active workflow to verify." };
+  if (!gitHistoryAvailable(PROJECT_ROOT)) {
+    return { kind: "print", workflow_id: global.workflow_id, git_available: false, message: `Workflow ${global.workflow_id}: no git history (not a git work tree, or no commit yet); lineage and revision checks need git and were skipped.` };
+  }
+  let layoutError: string | undefined;
+  try {
+    loadWorkflowParts(PROJECT_ROOT);
+  } catch (error) {
+    layoutError = error instanceof Error ? error.message : String(error);
+  }
+  const conflicts = lineageConflicts(PROJECT_ROOT, { current: global.workflow_id, retired: global.retired_lineages, refs: true });
+  const regressions = revisionRegressions(PROJECT_ROOT);
+  const ok = !layoutError && conflicts.length === 0 && regressions.length === 0;
+  const lines = [
+    ok ? `✅ Workflow ${global.workflow_id}: one lineage, no revision regressions.` : `🚫 Workflow ${global.workflow_id}: state verification failed.`,
+    ...(layoutError ? [`  Layout: ${layoutError}`] : []),
+    ...conflicts.map((item) => `  Other lineage: ${describeConflict(item)}`),
+    ...(conflicts.length > 0 ? [`  ${lineageRemedy(global.workflow_id, conflicts)}`] : []),
+    ...regressions.map((item) => `  Revision regression: ${item.path} is at revision ${item.current_revision}, but ${item.commit} committed revision ${item.committed_revision} of the same workflow ${item.workflow_id}; the newer state is recoverable with: ${item.restore_command}`),
+    ...(global.retired_lineages?.length ? [`  Retired lineages: ${global.retired_lineages.join(", ")}`] : []),
+  ];
+  return {
+    kind: ok ? "print" : "error",
+    workflow_id: global.workflow_id,
+    git_available: true,
+    lineage_conflicts: conflicts,
+    revision_regressions: regressions,
+    retired_lineages: global.retired_lineages || [],
+    ...(layoutError ? { layout_error: layoutError } : {}),
+    message: lines.join("\n"),
+  };
+}
+
+function retireLineages(flags: Record<string, string>): Directive {
+  const ids = lineageList(flags.lineage, "lineage");
+  if ("error" in ids) return { kind: "error", message: `${ids.error}. ${STATE_USAGE}` };
+  if (ids.length === 0) return { kind: "error", message: `state retire requires --lineage <workflow-id>. ${STATE_USAGE}` };
+  if (flags["user-input"] !== "Approve") return { kind: "error", message: "--user-input must be exactly Approve: retiring a workflow lineage discards it from the team's workflow and requires the user's explicit approval." };
+  if (!flags.reason || flags.reason === "true" || !flags.reason.trim()) return { kind: "error", message: "--reason is required: record why this lineage is retired." };
+  const global = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!global) return { kind: "error", message: "No active workflow." };
+  if (ids.includes(global.workflow_id)) {
+    return { kind: "error", message: `${global.workflow_id} is the active lineage and cannot be retired. To keep another lineage instead, restore its files first (git checkout <commit> -- aidlc/active; orchestrate state verify shows the commit), then retire ${global.workflow_id} from there.` };
+  }
+  if (!gitHistoryAvailable(PROJECT_ROOT)) return { kind: "error", message: "state retire needs git history: no other workflow lineage can be found outside a git repository with commits." };
+  const conflicts = lineageConflicts(PROJECT_ROOT, { current: global.workflow_id, retired: global.retired_lineages, refs: true });
+  const unknown = ids.filter((id) => !conflicts.some((item) => item.workflow_id === id));
+  if (unknown.length > 0) {
+    return { kind: "error", message: `--lineage ${unknown.join(",")}: no such open workflow lineage in git (already retired, archived, or never committed)${conflicts.length ? `; open lineages: ${conflicts.map((item) => item.workflow_id).join(", ")}` : ""}.` };
+  }
+  global.retired_lineages = [...(global.retired_lineages || []), ...ids];
+  saveWorkflowState(PROJECT_ROOT, global, GLOBAL_WORKFLOW);
+  const retired = conflicts.filter((item) => ids.includes(item.workflow_id));
+  try {
+    for (const conflict of retired) auditLineageRetired(conflict, "orchestrate state retire", flags.reason.trim());
+  } catch (error) {
+    return { kind: "error", message: `Lineages ${ids.join(", ")} were retired, but the LINEAGE_RETIRED audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。` };
+  }
+  const remaining = conflicts.filter((item) => !ids.includes(item.workflow_id));
+  return {
+    kind: "print",
+    workflow_id: global.workflow_id,
+    retired_lineages: global.retired_lineages,
+    remaining_conflicts: remaining,
+    message: `✅ Retired workflow lineage ${ids.join(", ")}; ${global.workflow_id} stays the active lineage.` +
+      (remaining.length ? ` Still open: ${remaining.map((item) => item.workflow_id).join(", ")}.` : "") +
+      ` Commit aidlc/active so the team shares the decision. Progress of a retired lineage stays readable in git: ${retired.map((item) => item.last_present_commit ? `git show ${item.last_present_commit}:./aidlc/active/aidlc-state.md` : item.workflow_id).join("; ")}.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // split — migrate a single-layout workflow into per-module workflows
 // ---------------------------------------------------------------------------
 
@@ -6301,7 +6610,9 @@ async function handleSplit(args: string[]): Promise<Directive> {
   if (invalidFlag) return { kind: "error", message: `Unsupported split option: --${invalidFlag}` };
   if (!flags.from || flags.from === "true") return { kind: "error", message: "split requires --from <workflow-id> (the Workflow ID of aidlc/active/aidlc-state.md, or its first 8+ characters)" };
   if ("dry-run" in flags && flags["dry-run"] !== "true") return { kind: "error", message: "--dry-run is a boolean flag and does not accept a value" };
-  return performSplit(flags.from, "dry-run" in flags, "orchestrate split");
+  const replace = lineageList(flags["replace-lineage"], "replace-lineage");
+  if ("error" in replace) return { kind: "error", message: replace.error };
+  return performSplit(flags.from, "dry-run" in flags, "orchestrate split", replace);
 }
 
 // ---------------------------------------------------------------------------
@@ -6341,7 +6652,7 @@ async function main() {
     console.error(
       JSON.stringify({
         kind: "error",
-        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|archive|split|upgrade|diagram-format|baseline> [args...]",
+        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|archive|split|upgrade|diagram-format|baseline|state> [args...]",
       })
     );
     process.exit(1);
@@ -6374,6 +6685,9 @@ async function main() {
       break;
     case "baseline":
       directive = await handleBaseline(rest);
+      break;
+    case "state":
+      directive = await handleState(rest);
       break;
     case "continue":
       directive = await handleContinue(rest[0] || "");

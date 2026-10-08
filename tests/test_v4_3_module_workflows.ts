@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInitialState, loadWorkflowState, saveWorkflowState, type WorkflowState } from "../core/tools/aidlc-light-state";
-import { loadRegistry } from "../core/tools/aidlc-workflow-layout";
+import { loadRegistry, type WorkflowRegistry } from "../core/tools/aidlc-workflow-layout";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -31,6 +31,11 @@ function failure(cwd: string, args: string[], pattern: RegExp): void {
   const result = run(cwd, args);
   assert.notEqual(result.status, 0, `${args.join(" ")} should fail\n${result.stdout}`);
   assert.match(`${result.stdout}\n${result.stderr}`, pattern, args.join(" "));
+}
+
+/** The registry with its engine projections (status, contracts, barrier) as next --status computes them. */
+function projected(cwd: string): WorkflowRegistry {
+  return success(cwd, ["orchestrate", "next", "--status"]).registry as WorkflowRegistry;
 }
 
 function git(cwd: string, args: string[]): void {
@@ -184,7 +189,11 @@ try {
   assert.match(m03Text, /- Workflow Kind: module\n- Module: m03-merchant\n- Parent Workflow ID: ad8e646d/);
   assert.match(readFileSync(join(project, "aidlc", "active", "audit.md"), "utf8"), /Event: WORKFLOW_SPLIT/);
   assert.match(readFileSync(join(project, "aidlc", "active", "modules", M01, "audit.md"), "utf8"), /Event: WORKFLOW_CREATED/);
-  const registry = loadRegistry(project)!;
+  // 4.13.0: the registry file keeps identity rows only; projections come from next --status.
+  const identity = loadRegistry(project)!;
+  assert.deepEqual(identity.modules.map((row) => [row.module_id, row.status]), [[M01, "-"], [M03, "-"]]);
+  assert.doesNotMatch(readFileSync(join(project, "aidlc", "active", "registry.md"), "utf8"), /Updated At|Barrier Ready|Shared Contracts/);
+  const registry = projected(project);
   assert.equal(registry.global_workflow_id, LEGACY_ID);
   assert.deepEqual(registry.modules.map((row) => [row.module_id, row.status, row.current_stage]), [[M01, "parked", `requirements-data-model@module:${M01}`], [M03, "running", "-"]]);
   assert.deepEqual(registry.shared_contracts.map((row) => [row.contract_id, row.provider, row.consumers.join(","), row.verified]), [["SB01-store-instance", M03, M01, false]]);
@@ -202,7 +211,7 @@ try {
   assert.equal(routed.stage_instance, `requirement-clarification@module:${M03}`, "plain next skips the parked module");
   assert.ok((routed.other_workflows as string[]).some((note) => /m01-trade: parked/.test(note)));
   assert.equal(loadWorkflowState(project, { kind: "module", module_id: M01 })!.status, "parked");
-  assert.equal(loadRegistry(project)!.modules.find((row) => row.module_id === M03)!.current_stage, `requirement-clarification@module:${M03}`);
+  assert.equal(projected(project).modules.find((row) => row.module_id === M03)!.current_stage, `requirement-clarification@module:${M03}`);
   const status = success(project, ["orchestrate", "next", "--status"]);
   assert.match(String(status.message), /\[module:m01-trade\] parked[\s\S]*\[module:m03-merchant\] running/);
 
@@ -269,11 +278,11 @@ try {
   success(project, ["orchestrate", "report", "--stage", "requirements-analysis", "--module", M03, "--result", "completed"]);
   const m03Resumed = success(project, ["orchestrate", "next", "--module", M03]);
   assert.equal(m03Resumed.stage_instance, `requirement-clarification@module:${M03}`);
-  const verified = loadRegistry(project)!;
+  const verified = projected(project);
   assert.equal(verified.shared_contracts[0].verified, true);
   assert.deepEqual(verified.integration.blocking, [`construction:${M01}`, `construction:${M03}`]);
   success(project, ["module", "select", "--module", M03, "--owner", "carol"]);
-  assert.equal(loadRegistry(project)!.modules.find((row) => row.module_id === M03)!.owner, "carol");
+  assert.equal(projected(project).modules.find((row) => row.module_id === M03)!.owner, "carol");
   assert.equal(loadWorkflowState(project, { kind: "module", module_id: M03 })!.module_selections[M03].owner, "carol");
   const runtime = success(project, ["runtime", "doctor", "--module", M03]);
   const projection = runtime.projection as Record<string, unknown>;

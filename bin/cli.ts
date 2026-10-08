@@ -1346,6 +1346,11 @@ Workflow:
   orchestrate park [--module <module-id>]               Park the active workflow or one module workflow
   orchestrate archive [--reason <text>]                 Archive a parked/done workflow and its evidence to aidlc/archive/
   orchestrate split --from <workflow-id> [--dry-run]    Split into per-module workflows (aidlc/active/registry.md)
+  orchestrate split --from <workflow-id> --replace-lineage <id>[,<id>]  Split although git tracks another active workflow lineage (retires it)
+  orchestrate state verify                              Check git for other workflow lineages and state revision regressions (read-only)
+  orchestrate state retire --lineage <id> --user-input Approve --reason <text>  Retire another workflow lineage found in git; the active one stays
+  orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason <text>  Carry a module workflow of another lineage over into the active split layout
+  orchestrate next --module <id> --work <description>   Create a module workflow added after the split with its own work description
   orchestrate upgrade --dry-run [--module <module-id>]  List completed stages missing evidence after an engine upgrade (read-only)
   orchestrate diagram-format [--set <mermaid|svg> --user-input <text>]  Show or record the user's diagram format (default mermaid)
   orchestrate baseline [--set <commit> --user-input Approve --reason <text> [--replace --expect <commit|unavailable>] [--dry-run]]  Show, register or replace the workflow baseline commit (--expect unavailable corrects a baseline recorded outside git; the new commit must still predate the workflow start)

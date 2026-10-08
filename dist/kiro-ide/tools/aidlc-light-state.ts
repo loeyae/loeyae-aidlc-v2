@@ -113,6 +113,12 @@ export interface WorkflowState {
   adoption_baseline_repos_history?: Record<string, { start: number; commits: string[] }>;
   adoption_approval_ref?: string;
   adopted_at?: string;
+  /**
+   * 4.13.0 (MARS-98): global/single workflows only. Other workflow lineages (Workflow IDs)
+   * found in git that the user explicitly retired (`orchestrate state retire`, or
+   * `--replace-lineage` on split / next --scope); lineage checks ignore them.
+   */
+  retired_lineages?: string[];
   revision: number;
   scope: string;
   depth: string;
@@ -593,6 +599,9 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
     ...(presentScalar(markdown, "Adopted At") !== undefined ? { adopted_at: presentScalar(markdown, "Adopted At") } : {}),
   };
   assertAdoptionFields({ ...adoption, workflow_kind: (kind || undefined) as WorkflowKind | undefined });
+  const retiredText = presentScalar(markdown, "Retired Lineages");
+  const retired = retiredText === undefined ? undefined : retiredText.split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (retired !== undefined && (kind === "module" || kind === "integration")) throw new Error(`${kind} sub-workflow state must not carry Retired Lineages; lineages belong to the global workflow`);
   return {
     format: "markdown-workflow",
     version: scalar(markdown, "Engine Version"),
@@ -607,6 +616,7 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
     ...(baselineRepos !== undefined ? { baseline_repos: baselineRepos } : {}),
     ...(baselineReposHistory !== undefined ? { baseline_repos_history: baselineReposHistory } : {}),
     ...adoption,
+    ...(retired !== undefined && retired.length > 0 ? { retired_lineages: retired } : {}),
     revision,
     scope,
     depth: scalar(markdown, "Depth"),
@@ -649,7 +659,7 @@ export function renderLightWorkflowState(state: WorkflowState): string {
 - Status: ${state.status}
 - Revision: ${state.revision}
 - Engine Version: ${clean(state.version)}
-${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}${state.diagram_format ? `- Diagram Format: ${state.diagram_format}\n` : ""}${state.baseline_commit !== undefined ? `- Baseline Commit: ${clean(state.baseline_commit)}\n- Baseline Source: ${clean(state.baseline_source || "")}\n` : ""}${state.baseline_history !== undefined ? `- Baseline History: ${state.baseline_history.map(clean).join(", ")}\n` : ""}${state.baseline_repos !== undefined ? `- Baseline Repos: ${clean(renderBaselineRepos(state.baseline_repos))}\n` : ""}${state.baseline_repos_history !== undefined ? `- Baseline Repos History: ${clean(renderBaselineReposHistory(state.baseline_repos_history))}\n` : ""}${renderAdoption(state)}- Depth: ${clean(state.depth)}
+${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}${state.diagram_format ? `- Diagram Format: ${state.diagram_format}\n` : ""}${state.baseline_commit !== undefined ? `- Baseline Commit: ${clean(state.baseline_commit)}\n- Baseline Source: ${clean(state.baseline_source || "")}\n` : ""}${state.baseline_history !== undefined ? `- Baseline History: ${state.baseline_history.map(clean).join(", ")}\n` : ""}${state.baseline_repos !== undefined ? `- Baseline Repos: ${clean(renderBaselineRepos(state.baseline_repos))}\n` : ""}${state.baseline_repos_history !== undefined ? `- Baseline Repos History: ${clean(renderBaselineReposHistory(state.baseline_repos_history))}\n` : ""}${renderAdoption(state)}${state.retired_lineages?.length ? `- Retired Lineages: ${state.retired_lineages.map(clean).join(", ")}\n` : ""}- Depth: ${clean(state.depth)}
 - Current Phase: ${clean(state.current_phase)}
 - Current Stage: ${cell(state.current_stage)}
 - Current Instance: ${cell(state.current_stage_instance)}
@@ -764,6 +774,11 @@ export interface SaveWorkflowOptions {
    * History exactly as persisted.
    */
   baselineWrite?: boolean;
+  /**
+   * 4.13.0: `orchestrate state adopt` creates a module state carried over from another
+   * lineage; it continues that state's Revision instead of starting at 0.
+   */
+  adoptRevision?: boolean;
 }
 
 function assertBaselinePreserved(existing: WorkflowState | null, state: WorkflowState, ref: WorkflowRef, options: SaveWorkflowOptions): void {
@@ -807,7 +822,8 @@ export function saveWorkflowState(projectRoot: string, state: WorkflowState, ref
   try {
     const existing = loadWorkflowState(projectRoot, ref);
     if (existing && existing.revision !== state.revision) throw new Error(`workflow state revision conflict: expected ${state.revision}, found ${existing.revision}`);
-    if (!existing && state.revision !== 0) throw new Error(`workflow state is missing at revision ${state.revision}`);
+    if (!existing && state.revision !== 0 && !options.adoptRevision) throw new Error(`workflow state is missing at revision ${state.revision}`);
+    if (existing && options.adoptRevision) throw new Error("an adopted workflow state cannot overwrite an existing state");
     assertBaselinePreserved(existing, state, ref, options);
     const next = { ...state, version: ENGINE_VERSION, revision: state.revision + 1, updated_at: new Date().toISOString() };
     appendAudit(projectRoot, next, ref);

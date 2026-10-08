@@ -1,6 +1,7 @@
 import { readModuleManifest, readUnitManifest } from "./aidlc-execution-context";
 import {
   GLOBAL_WORKFLOW,
+  loadWorkflowState,
   migrateSingleInstanceState,
   releaseExpiredModuleClaims,
   updateWorkflowState,
@@ -10,7 +11,7 @@ import {
   type WorkflowRef,
   type WorkflowState,
 } from "./aidlc-light-state";
-import { isSplitLayout, loadRegistry, loadWorkflowView, ownerOfInstance, updateRegistry } from "./aidlc-workflow-layout";
+import { isSplitLayout, loadRegistry, loadWorkflowView, ownerOfInstance } from "./aidlc-workflow-layout";
 import { resolve } from "path";
 import { fileURLToPath } from "url";
 
@@ -34,13 +35,6 @@ function updateModuleWorkflow(projectRoot: string, moduleId: string, mutate: (st
   return updateWorkflowState(projectRoot, mutate, 3, moduleWorkflowRef(projectRoot, moduleId));
 }
 
-function projectRegistryOwner(projectRoot: string, moduleId: string, owner: string): void {
-  if (!isSplitLayout(projectRoot)) return;
-  updateRegistry(projectRoot, (current) => ({
-    ...current!,
-    modules: current!.modules.map((row) => row.module_id === moduleId ? { ...row, owner } : row),
-  }));
-}
 
 function text(value: unknown, field: string): string {
   if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${field} must be a non-empty string`);
@@ -69,6 +63,12 @@ export function listUnits(projectRoot = process.cwd()): Array<Record<string, unk
   );
 }
 
+/** 4.13.0: status and stage come from the module state; the registry only keeps identity rows. */
+function moduleWorkflowSummary(projectRoot: string, moduleId: string, workflowId: string, statePath: string): Record<string, unknown> {
+  const state = loadWorkflowState(projectRoot, { kind: "module", module_id: moduleId });
+  return { workflow_id: workflowId, state_path: statePath, status: state?.status || "-", current_stage: state?.current_stage_instance || state?.current_stage || "-" };
+}
+
 export function listModules(projectRoot = process.cwd()): Array<Record<string, unknown>> {
   const state = loadWorkflowView(projectRoot);
   if (!state) throw new Error("no active AWS-style lightweight workflow");
@@ -82,7 +82,7 @@ export function listModules(projectRoot = process.cwd()): Array<Record<string, u
       service_id: module.service_id,
       selection: (state.module_selections || {})[module.module_id] || null,
       active_instances: active.filter((claim) => claim.module_id === module.module_id),
-      ...(registry ? { workflow: row ? { workflow_id: row.workflow_id, state_path: row.state_path, status: row.status, current_stage: row.current_stage } : null } : {}),
+      ...(registry ? { workflow: row ? moduleWorkflowSummary(projectRoot, row.module_id, row.workflow_id, row.state_path) : null } : {}),
     };
   });
 }
@@ -123,7 +123,6 @@ export function selectModule(projectRoot: string, moduleId: string, owner: strin
     state.module_selections = { ...(state.module_selections || {}), [moduleId]: selection };
     result = selection;
   });
-  projectRegistryOwner(projectRoot, moduleId, selection.owner);
   return result as TeamLightModuleSelection;
 }
 
@@ -169,7 +168,6 @@ export function claimModule(projectRoot: string, moduleId: string, owner: string
     }
     result = claim;
   });
-  projectRegistryOwner(projectRoot, moduleId, selectedOwner);
   return result as TeamLightActiveInstance;
 }
 
@@ -205,7 +203,6 @@ export function migrateModuleOwnership(projectRoot: string, owner: string, modul
     if (existing?.owner === owner) return;
     current.module_selections = { ...(current.module_selections || {}), [moduleId]: { ...(existing || {}), owner, selected_at: new Date().toISOString() } };
   }, 3, ref);
-  projectRegistryOwner(projectRoot, moduleId, owner);
   return migrated || state;
 }
 

@@ -1,5 +1,30 @@
 # Changelog
 
+## 4.13.0
+
+split 布局的跨 lineage 保护与跨 lineage 模块迁移；registry 只存身份行，推进模块不再改写它（MARS-98）。
+
+### Added
+
+- **创建时防第二套 lineage**：`next --scope`（`aidlc/active` 为空时）与 `split`（含 `next --module` 自动拆分）读取 git——HEAD 历史（`git log --full-history`）与本地/远程跟踪分支末端——发现另一条既未 `archive`（`aidlc/archive/<id>-<时间戳>`）也未退役的工作流 lineage 时拒绝，并给出 `retry_command`；显式 `--replace-lineage <id>[,<id>]` 才放行，被替换的 lineage 写入全局状态 `- Retired Lineages:` 与审计 `LINEAGE_RETIRED`（split 的 `WORKFLOW_SPLIT` 记 `Replaced Lineages`）。同一 workflow 已在其他分支拆分时 `split` 拒绝并提示 merge 该分支。
+- **`orchestrate state verify`**（只读）：列出 git 中的其他 lineage（出现位置、最后存在的 commit、该 commit 的模块进度）、混入的其他 lineage 模块状态，以及 `Revision` 低于 HEAD 历史中同一 Workflow ID 已提交版本的状态文件（附 `git show <commit>:./<path>` 恢复命令）；有问题时 `kind: "error"`。
+- **`orchestrate state retire --lineage <id> --user-input Approve --reason "<原因>"`**：负责人裁决保留当前 lineage 时退役另一条，写 `LINEAGE_RETIRED`（含最后存在的 commit）；不能退役当前 lineage。
+- **`orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason "<原因>"`**：把另一条 lineage 在 `<commit>` 中的模块工作流迁入当前 split 布局——保留模块 Workflow ID、history 与审计，`Revision` 接续，`Parent Workflow ID` 改为当前 lineage，registry 追加身份行，模块与全局审计写 `STATE_ADOPTED`（来源 lineage / commit）。当前 lineage 已有该模块、模块未在 module-manifest 声明、来源已属当前 lineage 时拒绝；迁入后列出缺失 evidence 的已完成实例（同 `upgrade --dry-run --module`）。
+- **`next --module <id> --work "<描述>"`**：split 后新增的模块在首次创建时记录自己的工作描述（默认仍继承全局描述）；模块已存在时拒绝。
+
+### Fixed
+
+- **主路径 lineage 校验**：`next` / `report` 在 HEAD 历史出现未归档、未退役的另一条 lineage 时 `kind: "error"`，列出两条 lineage 与进度摘要和两种裁决命令，不再按被合并进来的一套静默继续。
+- **混合 lineage**：`loadWorkflowParts` 校验每个模块/集成状态的 `Parent Workflow ID` 与 registry `Global Workflow ID` 一致（原先只在 baseline 解析中校验），所有命令统一拒绝。
+- 团队协作协议补充 `aidlc/active/` 合并规范：禁止整目录「保留本地」，同 lineage 逐文件按 Revision 裁决。
+- **registry 版本 2：只存身份行**。`aidlc/active/registry.md` 只记录模块 → Workflow ID / State Path（按模块 ID 排序）与集成工作流身份，去掉 `Updated At` 与 Status / Current Stage / Owner / 屏障 / 契约 / 跨模块依赖等派生列；这些投影在每次读取时由各工作流状态计算（`next --status` 返回 `registry` 投影，`module list` 从模块状态读取状态）。文件只在创建工作流时改变，多人推进不同模块不再在 registry 上冲突；版本 1 registry 照常读取，下次写入时一次性改写为版本 2。
+
+### Unchanged
+
+- 非 git 项目、无提交的仓库、只有一条 lineage 的项目行为与 4.12.0 一致；`--status`、`park`、`archive`、`baseline` 不做历史 lineage 检查（`archive` 仍可用来收尾旧 lineage）。
+- Stop hook 不做 lineage 检查。状态模型重构（本机游标 + 共享追加式事件）留作后续方案，不在本版本。
+- 门禁与集成屏障判定本来就使用实时计算的投影，不受 registry 改为身份行影响；`runtime summary` 中 `registry` 字段的派生列现为默认值，状态以 `workflows` 为准。
+
 ## 4.12.0
 
 文件级 sensor（no-todo / traceability）与源码 produce 存在性判定只看本单元交付的变更文件，不再检查源码根全集（MARS-95）。
