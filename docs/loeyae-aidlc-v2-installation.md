@@ -7,7 +7,7 @@ npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main
 loeyae-aidlc install
 ```
 
-可指定 harness：
+可指定 harness（`loeyae-aidlc install --list` 列出全部可用 harness 及安装位置）：
 
 ```bash
 loeyae-aidlc install --harness kiro-crew
@@ -15,6 +15,31 @@ loeyae-aidlc install --harness kiro-ide
 loeyae-aidlc install --harness claude
 loeyae-aidlc install --all
 ```
+
+| harness | 目标工具 |
+| --- | --- |
+| `kiro-crew` | Kiro Crew Dashboard（全局 skill） |
+| `kiro-ide` / `kiro-cli` | Kiro IDE / Kiro CLI（共享同一个全局 Agent Skill） |
+| `claude` | Claude Code（官方 user/project plugin） |
+| `opencode` | OpenCode（全局 plugin） |
+| `codex` | Codex（全局 skill） |
+| `codebuddy` | WorkBuddy Enterprise / CodeBuddy（官方 plugin） |
+| `qoder` | Qoder CN IDE / Desktop / CLI |
+| `zcode` | ZCode |
+
+### Kiro 项目级 Stop Hook
+
+全局安装 `kiro-ide` / `kiro-cli` 只部署共享 Skill 并注册 MCP，不会安装 Stop Hook。需要 Hook 时对每个业务项目执行：
+
+```bash
+loeyae-aidlc install --harness kiro-ide --project /absolute/path/to/project
+```
+
+Hook 写入 `<项目>/.kiro/hooks/loeyae-aidlc.json`。`--project` 只支持 `kiro-ide`、`kiro-cli`、`codebuddy`、`qoder`，不能与 `--all` 同时使用。
+
+> 注意：`--project` 路径不存在（或是符号链接、不是目录）时，CLI 会**先完成全局 Skill 安装和 MCP 注册**，随后才报错 `--project must be an existing, non-symlink directory` 并以非 0 退出。此时全局 Skill 已安装，只有项目 Hook 未写入；修正路径后重新执行同一条命令即可，无需先卸载。
+
+安装自检使用 `loeyae-aidlc install --list` 与 `loeyae-aidlc version`；`loeyae-aidlc runtime doctor` 需要项目中已有活动 workflow。
 
 ## 更新（升级到新版本）
 

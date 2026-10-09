@@ -19,6 +19,20 @@ aidlc/active/audit.md
 
 当前 workflow 只使用 `aidlc/active/aidlc-state.md` 与 `aidlc/active/audit.md` 管理路由、报告和成员分工。
 
+### scope 与阶段集合
+
+`execution: ALWAYS` 的阶段对所有 scope 生效，其余阶段按其 `scopes` 声明生效（4.13.0 实测，单模块默认路由）。单模块下阶段数等于实例数；multi-module 下 module/unit 轴阶段按模块数和单元数展开为多个实例：
+
+| scope | 阶段数（单模块下等于实例数） | 说明 |
+|------|------|------|
+| `feature` / `enterprise` / `mvp` | 45 | 完整 Inception → Construction → 条件 Operations |
+| `classic` | 43 | 同上，不含 `operations`、`operations-templates` |
+| `express` / `workshop` / `bugfix` / `refactor` / `poc` | 8 | `workspace-detection` → `state-template` → `test-case-derivation` → `tdd` → `code-generation` → `code-review` → `build-and-test` → `implementation-report` |
+
+- `prd-generation` 只在完整 scope 初始化时加 `--with-prd` 才进入。
+- `workspace-detection` 的 `single-module` / `multi-module` 选择只出现在 feature、enterprise、mvp、classic。
+- `bugfix` 额外要求至少一个 `tdd_mode: new` 的 UC-D 复现缺陷；`poc` 没有额外规则。
+
 ## 继续与报告
 
 ```bash
@@ -39,9 +53,54 @@ loeyae-aidlc orchestrate report \
 # 暂停或恢复当前 Markdown workflow
 loeyae-aidlc orchestrate park
 loeyae-aidlc orchestrate next --resume
+
+# 查看进度（只读）
+loeyae-aidlc orchestrate next --status
+
+# 归档已 parked/done 的 workflow 及其证据到 aidlc/archive/，为新工作腾出控制面
+loeyae-aidlc orchestrate archive [--reason <text>]
+
+# 引擎升级后列出缺失证据的已完成阶段（只读）
+loeyae-aidlc orchestrate upgrade --dry-run [--module <module-id>]
+
+# 查看或记录图表格式（默认 mermaid；切换为 svg 须带用户原话）
+loeyae-aidlc orchestrate diagram-format [--set <mermaid|svg> --user-input "<用户原话>"]
 ```
 
+已有 workflow 时 `--scope/--work` 不会覆盖它：运行中的先 `park` 再 `archive`，已完成的直接 `archive`。
+
 每个 `run-stage` directive 和成功 report 都有 `handoff_prompt`。Agent 必须原样展示该提示词，提示中包含工作目标、当前阶段、当前单元、产物、review/build/test 和下一步动作。
+
+## 基线与 lineage
+
+```bash
+# 查看工作流基线（新 workflow 初始化时自动记录当前 HEAD，characterization UC-D 的 BASELINE 依赖它）
+loeyae-aidlc orchestrate baseline
+# 仅 4.6 之前创建、没有基线的 workflow 需要登记；--replace 更正尚未使用的基线
+loeyae-aidlc orchestrate baseline --set <commit> --user-input Approve --reason <text> [--replace --expect <commit>] [--dry-run]
+
+# 多单元依次修改同一批 code ref：推进到已完成单元的 GREEN commit
+loeyae-aidlc orchestrate baseline --advance <commit> --expect <当前基线> --user-input Approve --reason <text>
+
+# split 布局下接管已按旧流程提交的模块实现
+loeyae-aidlc orchestrate baseline --adopt <commit> --module <id> --user-input Approve --approval-ref "<批准记录>" --reason <text>
+
+# lineage 检查与裁决
+loeyae-aidlc orchestrate state verify
+loeyae-aidlc orchestrate state retire --lineage <id> --user-input Approve --reason <text>
+loeyae-aidlc orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason <text>
+```
+
+`--set` / `--replace` 的提交限制：
+
+- 目标 commit 必须存在且是 HEAD 或其祖先，否则报 `is not the current HEAD or one of its ancestors` / `does not exist in this repository`。
+- 浅克隆本身可以使用（可正常初始化 workflow、`--set` 当前 HEAD）；只有目标 commit 落在被截断的历史中、无法证明祖先关系时才拒绝，报 `the repository is a shallow clone, so its truncated history cannot prove ancestry`，执行 `git fetch --unshallow` 后重试即可。
+- 目标 commit 已包含本 workflow 的状态文件（`aidlc/active/aidlc-state.md` 且 Workflow ID 相同）时拒绝，报 `already contains this workflow's state file`；该检查与 committer date 无关，回填提交日期也无法绕过。
+- 目标 commit 必须早于 workflow 启动时间（按 commit 自报的 committer date 判断）。
+
+因此 `--replace` 只能把基线更正为启动前的 commit，不能改到启动后的提交，否则报 `the baseline must predate the workflow`；启动后产生的提交只能通过 `--advance` 推进到已完成单元的 GREEN commit。已推进过的基线一律拒绝 `--replace`。
+
+嵌套仓库的 `--repo <path>=<commit>` / `--expect-repo` 用法见 `loeyae-aidlc help` 与 README。
 
 ## 团队 unit 协作
 

@@ -148,7 +148,7 @@ function main(): void {
   } else {
     console.log(`\n✅ 已写盘。请用 git diff 复核，并跑矩阵 producer 确认收敛。`);
   }
-  console.log(`\n【脚本不做】track 填充、AC 新建、正文语义修改 —— 这三项需人工/审阅完成（见 legacy-migration-plan.md）。`);
+  console.log(`\n【脚本不做】track 填充、AC 新建、正文语义修改 —— 这三项需人工/审阅完成（见 docs/optimization-notes/legacy-migration-plan.md）。`);
   console.log(`${"=".repeat(70)}\n`);
 }
 
