@@ -26,6 +26,41 @@ approval: notify
 
 当当前单元确实没有可执行业务行为（纯声明、纯样式、纯配置或其他经批准的例外）时，必须基于至少一个需求、故事、应用设计或澄清来源，在测试用例目录中生成结构化 `non-applicable.json`，写明 `reason_code`、批准依据、`alternative_validation` 和验证命令；I13 传感器据此输出 `status: not_applicable`。RED/GREEN 阶段还必须在命令清单（`.aidlc/commands/<stage>.json`，不存在时为 `.aidlc/evidence-commands.json`）中各声明且执行唯一一个 `role: "check"` 的受控替代验证命令。缺少来源、文件或成功执行记录均不是跳过，而是阻断。
 
+## 轻量 scope 的 UC-D 来源（bugfix / refactor / express / workshop）
+
+本阶段 `execution: ALWAYS`，对所有会进入 `code-generation` 的 scope 执行。I13 producer 要求至少存在一个 UC-D 来源锚点文件（四选一），用于把派生出的 UC-D 追溯回一个受控来源：
+
+```text
+docs/aidlc/modules/{module-id}/inception/requirements.md
+docs/aidlc/modules/{module-id}/inception/user-stories.md
+docs/aidlc/modules/{module-id}/inception/application-design.md
+docs/aidlc/modules/{module-id}/inception/clarifications.md
+```
+
+`feature` / `enterprise` / `mvp` / `classic` 走完整 Inception 路径，上述文件由 `requirements-analysis` / `user-stories` / `application-design` / `requirement-clarification` 等上游阶段产出，本阶段直接消费即可。
+
+**轻量 scope（`bugfix` / `refactor` / `express` / `workshop`）不运行这些上游阶段，不会自动产出任何来源文件。** 这是有意的轻量取舍——执行者针对具体 bug / 重构点 / 微需求直接手写 UC-D，而不是先铺一遍需求/故事/设计。因此在这些 scope 下，**执行者必须在派生 UC-D 之前，手工在上面任一规范路径放置至少一个来源锚点文件**，否则 I13 producer 会以“至少需要一个需求/故事/应用设计/澄清来源文件”硬失败。缺来源不是跳过，而是阻断。
+
+来源锚点文件没有强制 schema，只要求是该路径下的真实 Markdown 文本，并承载 UC-D 的 `source_ref` 可以指向的内容。最小样例（`bugfix`，把 UC-D 锚定到缺陷身份）：
+
+```markdown
+<!-- docs/aidlc/modules/{module-id}/inception/clarifications.md -->
+# 缺陷澄清：订单导出超时（BUG-123）
+
+## 背景
+导出大于 N 条的订单时请求在 30s 处超时，无重试。
+
+## 期望行为
+- 导出失败时按指数退避重试，最多 3 次。
+- 单次导出超时上限提升到可配置值。
+
+## UC-D 来源锚点
+- source_ref: clarifications.md#订单导出超时
+- defect_ref: BUG-123
+```
+
+随后在 `docs/aidlc/modules/{module-id}/inception/application-design/test-cases/` 下派生 UC-D，令其 frontmatter 的 `source_ref` 指向该锚点（`bugfix` 的 `new` UC-D 还须声明 `defect_ref`，见追溯矩阵的轻量来源锚点规则）。`refactor` 同理：放置一个描述被重构行为基线的来源文件，并为 `characterization` UC-D 声明 `code_refs`。
+
 ## 执行约束
 
 1. 收集可用的 I7 用户故事 Gherkin 和已批准的 NFR、CR、契约、配置、迁移或一致性风险来源。

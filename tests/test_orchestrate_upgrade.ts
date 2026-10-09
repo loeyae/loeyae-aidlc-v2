@@ -86,7 +86,7 @@ function prepareProject(): string {
   const ref = { kind: "module" as const, module_id: M01 };
   const m01 = loadWorkflowState(project, ref)!;
   m01.completed_stage_instances.push(REQUIREMENTS, DESIGN);
-  m01.skipped_stage_instances.push(`requirement-clarification@module:${M01}`, `requirements-data-model@module:${M01}`);
+  m01.skipped_stage_instances.push(`requirement-clarification@module:${M01}`);
   m01.status = "parked";
   saveWorkflowState(project, m01, ref);
   // application-design kept its v4.3 evidence; only the sensor added in v4.5 has none.

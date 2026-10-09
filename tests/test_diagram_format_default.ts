@@ -86,7 +86,7 @@ try {
   const ref = { kind: "module" as const, module_id: M01 };
   const state = loadWorkflowState(project, ref)!;
   state.completed_stage_instances.push(`requirements-analysis@module:${M01}`);
-  state.skipped_stage_instances.push(`requirement-clarification@module:${M01}`, `requirements-data-model@module:${M01}`);
+  state.skipped_stage_instances.push(`requirement-clarification@module:${M01}`);
   state.current_stage = "requirements-methods";
   state.current_phase = "inception";
   state.current_stage_instance = INSTANCE;

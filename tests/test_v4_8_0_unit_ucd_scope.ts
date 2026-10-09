@@ -340,15 +340,9 @@ function scenario(name: string, units: UnitSpec[], ucds: Ucd[]): Scenario {
   nextModule(`requirement-clarification@module:${M01}`);
   write(project, `${IN}/clarifications.md`, "# 需求澄清\n\nNo clarifications needed.\n\nREQ-001 的单元划分已在需求中明确，本次改动沿用现有行为。\n");
   report("requirement-clarification");
-  nextModule(`requirements-data-model@module:${M01}`, [RA]);
-  ack("requirements-data-model");
   nextModule(`requirements-methods@module:${M01}`, [RA]);
   write(project, `${IN}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单处理流程\n\n```mermaid\nflowchart LR\n  A[接收订单] --> B[按单元处理]\n  B --> C[返回结果]\n```\n");
   report("requirements-methods");
-  nextModule(`requirements-prioritization@module:${M01}`, [RA]);
-  ack("requirements-prioritization");
-  nextModule(`requirements-validation@module:${M01}`, [RA]);
-  ack("requirements-validation");
   nextModule(`user-stories@module:${M01}`, [RA]);
   write(project, `${IN}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营处理订单\n\n- 关联需求：REQ-001\n- 作为运营人员，我希望订单按单元交付的能力被正确处理，以便逐项核对。\n- 验收标准：每个单元的用例在该单元完成时通过，模块完成时全部通过。\n");
   report("user-stories");

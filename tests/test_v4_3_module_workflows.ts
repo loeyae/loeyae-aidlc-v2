@@ -72,7 +72,7 @@ function setCurrent(project: string, instance: string, moduleId: string, stage: 
 
 /**
  * A legacy single workflow that mirrors the reported incident: m01-trade is parked at
- * requirements-data-model and its requirements-analysis evidence went stale because
+ * requirements-methods and its requirements-analysis evidence went stale because
  * m03-merchant wrote artifacts afterwards; m03's own evidence is still valid.
  */
 function prepareLegacyProject(name: string): string {
@@ -129,7 +129,7 @@ function prepareLegacyProject(name: string): string {
   success(project, ["orchestrate", "report", "--stage", "requirements-analysis", "--result", "completed"]);
 
   // The single workflow parks on m01 exactly like the reported incident (clarification was not needed).
-  setCurrent(project, `requirements-data-model@module:${M01}`, M01, "requirements-data-model");
+  setCurrent(project, `requirements-methods@module:${M01}`, M01, "requirements-methods");
   const parked = loadWorkflowState(project)!;
   parked.skipped_stage_instances.push(`requirement-clarification@module:${M01}`);
   parked.status = "parked";
@@ -181,7 +181,7 @@ try {
   assert.deepEqual(m03State.skipped_stage_instances, [`reverse-engineering@module:${M03}`]);
   assert.ok(m03State.history.some((entry) => entry.instance_id === `requirements-analysis@module:${M03}` && entry.result === "completed"));
   assert.equal(m01State.status, "parked");
-  assert.equal(m01State.current_stage_instance, `requirements-data-model@module:${M01}`);
+  assert.equal(m01State.current_stage_instance, `requirements-methods@module:${M01}`);
   assert.deepEqual(m01State.completed_stage_instances, [`requirements-analysis@module:${M01}`]);
   assert.equal(integrationState.workflow_kind, "integration");
   assert.equal(integrationState.status, "running");
@@ -195,7 +195,7 @@ try {
   assert.doesNotMatch(readFileSync(join(project, "aidlc", "active", "registry.md"), "utf8"), /Updated At|Barrier Ready|Shared Contracts/);
   const registry = projected(project);
   assert.equal(registry.global_workflow_id, LEGACY_ID);
-  assert.deepEqual(registry.modules.map((row) => [row.module_id, row.status, row.current_stage]), [[M01, "parked", `requirements-data-model@module:${M01}`], [M03, "running", "-"]]);
+  assert.deepEqual(registry.modules.map((row) => [row.module_id, row.status, row.current_stage]), [[M01, "parked", `requirements-methods@module:${M01}`], [M03, "running", "-"]]);
   assert.deepEqual(registry.shared_contracts.map((row) => [row.contract_id, row.provider, row.consumers.join(","), row.verified]), [["SB01-store-instance", M03, M01, false]]);
   assert.equal(registry.integration.barrier_ready, false);
   assert.deepEqual(registry.integration.blocking, [`construction:${M01}`, `construction:${M03}`, "contract:SB01-store-instance"]);
@@ -230,7 +230,7 @@ try {
   assert.equal(m01AfterReattest.status, "parked", "re-attestation never changes progress");
   assert.ok(m01AfterReattest.history.some((entry) => entry.result === "reattested"));
   const m01Next = success(project, ["orchestrate", "next", "--module", M01, "--resume"]);
-  assert.equal(m01Next.stage_instance, `requirements-data-model@module:${M01}`);
+  assert.equal(m01Next.stage_instance, `requirements-methods@module:${M01}`);
 
   // ---------------------------------------------------------------- acceptance 4: digest isolation
   write(project, `docs/aidlc/modules/${M03}/inception/clarifications.md`, "# Clarifications\nREQ-101 store onboarding hours are confirmed with the merchant team.\n");

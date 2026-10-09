@@ -1,5 +1,33 @@
 # Changelog
 
+## 4.13.1
+
+两轮流程评估的收口：门禁错位 / 门禁不足 / 过度设计的集中修复（MARS-104/106/107/108/109/110/111/112 + 四项评估 issue），阶段数 46 → 43 → 40。
+
+### Added
+
+- **refactor scope 强制 characterization（MARS-104）**：refactor 工作流至少声明一个 `tdd_mode: characterization` UC-D（绑定工作流基线的存量行为锚点），producer 与 gate 双侧对称拦截全 `new` 的 refactor。
+- **多模块默认开启共享契约基线（MARS-107）**：`has_contract_dependencies` 的推断 fallback 改为 `multi_module || moduleHasContractDependencies`，多模块工作流默认进入 `shared-contract-baseline` 阶段。
+- **operations 拆分为规划 + 授权（MARS-109）**：原 `operations` 阶段拆为 `operations-planning`（approval: notify，可逆规划，产出 operations-plan.md）与 `operations-authorization`（approval: block，不可逆授权，产出 deployment-config/guide/summary），二者同受 `has_deployment_needs` 门控；`operations` 作为向后兼容别名保留在 `has_deployment_needs` 的 workflow-plan 决策求值中。`operations-templates` 顺延为 4.3。
+- **bugfix / refactor 轻量追溯锚点（MARS-112）**：轻量 scope 不经 `requirements-analysis`、无 requirements.md 时，追溯矩阵不再对其盲判 `not_applicable`，改验各自的轻量来源锚点——`bugfix` 要求至少一个 `tdd_mode: new` UC-D 的 frontmatter 声明 `defect_ref`（bug ticket / 缺陷 REQ 标识），且交付源码必须引用该锚点（否则记 `ANCHOR_UNREFERENCED@code_refs`）；`refactor` 要求至少一个 characterization UC-D 的非空 `code_refs`。其他 scope 在无 requirements.md 时仍为 `not_applicable`，行为不变。
+- **AIDLC_PROGRAM_FILES_ROOTS 环境种子（MARS-111）**：`bin/cli.ts` 新增非受保护的机器级 Program Files 根覆盖，使 installer host-detection 测试与真实机器的 `C:\Program Files`（及宿主机 KiroCrew 安装）隔离。
+
+### Fixed
+
+- **not_applicable 阶段去除 traceability 噪音（MARS-108）**：`not_applicable` 阶段不再自动挂载被门禁短路的 traceability sensor（`no-todo` 保持无条件挂载），清理 tdd / shared-contract-baseline / subagent-execution / loeyae-compliance / compact-recovery 等阶段的 clean-list 噪音。
+- **ALWAYS 阶段 scopes 死配置（评估 eval-04）**：`workspace-detection` / `state-template` 的 frontmatter `scopes` 补全为全部 8 个 scope，并加注释说明 `execution: ALWAYS` 阶段的 scopes 仅作文档参考、不参与阶段过滤（过滤规则 `execution==="ALWAYS" || scopes.includes(scope)` 短路了 scopes），消除原先漏列 bugfix/refactor 的误导。
+
+### Removed
+
+- **删除死 scope `poc`（MARS-106）**：从 orchestrate / graph / light-state / extension / utility 五处移除未被任何阶段使用的 `poc` scope。
+- **合并 html-mock 四个 instruction_only 子阶段（MARS-110）**：`ui-mock-workflow` / `ui-mock-design-spec` / `ui-mock-styles` / `ui-mock-reasoning-principles` 合并为 `ui-mock-generation` 的附录 A/B/C/D，`requires` 改指向 `ui-page-planning`。阶段数 46 → 43。
+- **合并 requirements 三个 instruction_only 子阶段（评估 eval-03）**：`requirements-data-model`（2.2.2）/ `requirements-prioritization`（2.2.4）/ `requirements-validation`（2.2.5）这三个无产出、无 sensor、condition 恒空的纯指令阶段合并进 requirements-analysis，不损失门禁能力。阶段数 43 → 40。
+
+### Unchanged
+
+- **I13 来源在轻量 scope 下的取舍（评估 eval-02）**：`bugfix` / `refactor` 路径不产出 requirements / user-stories / application-design，UC-D 来源由执行者针对具体缺陷 / 重构点手工提供（最小一个来源文件）；在 test-case-derivation 文档中明确该约定，保持轻量化取舍，不新增强制阶段。
+- approval=block 仍仅 `application-design` 与 `operations-authorization` 两处；轻量 scope 的构建门禁（tdd / code-generation / code-review / build-and-test）行为不变。
+
 ## 4.13.0
 
 split 布局的跨 lineage 保护与跨 lineage 模块迁移；registry 只存身份行，推进模块不再改写它（MARS-98）。

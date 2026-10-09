@@ -192,15 +192,9 @@ function fixture(name: string): Fixture {
   nextModule(`requirement-clarification@module:${M01}`);
   write(project, `${IN}/clarifications.md`, "# 需求澄清\n\nNo clarifications needed.\n\nREQ-001 的重试行为由接管前的实现定义，本次改动沿用。\n");
   report("requirement-clarification");
-  nextModule(`requirements-data-model@module:${M01}`, [RA]);
-  ack("requirements-data-model");
   nextModule(`requirements-methods@module:${M01}`, [RA]);
   write(project, `${IN}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单导出流程\n\n```mermaid\nflowchart LR\n  A[调用导出] --> B{超时?}\n  B -- 是 --> A\n  B -- 否 --> C[返回订单]\n```\n");
   report("requirements-methods");
-  nextModule(`requirements-prioritization@module:${M01}`, [RA]);
-  ack("requirements-prioritization");
-  nextModule(`requirements-validation@module:${M01}`, [RA]);
-  ack("requirements-validation");
   nextModule(`user-stories@module:${M01}`, [RA]);
   write(project, `${IN}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营导出订单\n\n- 关联需求：REQ-001\n- 作为运营人员，我希望订单导出在下游超时时自动重试。\n- 验收标准：接管前实现的重试行为在改动后保持不变。\n");
   report("user-stories");

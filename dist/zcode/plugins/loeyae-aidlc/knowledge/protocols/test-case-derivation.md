@@ -70,6 +70,7 @@ code_refs:                              # 仅 characterization 必填，new 不�
 reason: {仅 characterization 必填：为什么给存量行为补回归保护}
 approval_ref: {仅 characterization 必填：批准依据}
 unit_refs: [{unit-id}, ...]              # 可选（4.8.0）：所属单元；同一模块要么全部声明，要么全部不声明
+defect_ref: {bug ticket 或缺陷 REQ 标识}  # 可选（4.13.2/MARS-112）：仅 bugfix scope 的 new UC-D 需要，锚定复现缺陷的追溯身份
 ---
 
 # UC-D-{编号} {标题}
@@ -129,6 +130,24 @@ approval_ref: REVIEW-2026-10-01-01
 - 使用 characterization 需要 git 仓库与已登记、仍可从 HEAD 到达的基线；存量工作流先执行 `orchestrate baseline --set`。
 - I13 始终绑定基线链的第 0 代（4.7.0）：多单元依次改动共享 code ref 时，用 `orchestrate baseline --advance <上一单元 GREEN 的 commit>` 追加一代，后续单元的 BASELINE 在新一代上观察；I13 不需要因推进而刷新。
 - `bugfix` 至少要有 1 条 `new`（复现 bug）；`refactor` 至少要有 1 条 `characterization`（锚定存量行为的基线），可以全部为 characterization。
+
+## 轻量 scope 的追溯锚点（`defect_ref`，4.13.2 / MARS-112）
+
+`bugfix` / `refactor` 走 8 阶段路径、不经 `requirements-analysis`，没有 `requirements.md` 作 REQ 追溯根。`traceability-matrix` 门禁不再对它们盲判 `not_applicable`，而是改验各自的轻量来源锚点：
+
+- `bugfix`：至少一个 `tdd_mode: new` 的 UC-D 要在 frontmatter 声明 `defect_ref`（bug ticket 或缺陷 REQ 标识，如 `BUG-123`、`REQ-DEFECT-7`，单个清洁 token：字母数字与 `. _ - /`），把复现缺陷的 UC-D 锚定到可追溯的缺陷身份。到 `code-generation` 阶段起，交付源码必须至少引用一个该锚点（否则记 `ANCHOR_UNREFERENCED@code_refs`）；缺锚点记 `ANCHOR_MISSING@defect_ref`。`defect_ref` 只能写在 frontmatter，I13 证据以 `defect_refs` 记录。
+- `refactor`：至少一个 `tdd_mode: characterization` 的 UC-D 要声明非空 `code_refs`（上面已要求的 baseline 锚点），追溯锚定到存量代码基线；缺则记 `ANCHOR_MISSING@code_refs`。
+- 其他 scope 在没有 `requirements.md` 时仍为 `not_applicable`，行为不变。
+
+```yaml
+---
+id: UC-D-001
+status: ready
+source_ref: BUG-123
+tdd_mode: new
+defect_ref: BUG-123          # bugfix：锚定复现缺陷的追溯身份，交付源码须引用它
+---
+```
 
 ## 所属单元（`unit_refs`，4.8.0）
 

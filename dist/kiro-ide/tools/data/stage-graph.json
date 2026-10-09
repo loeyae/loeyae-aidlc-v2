@@ -22,7 +22,9 @@
         "mvp",
         "classic",
         "express",
-        "workshop"
+        "workshop",
+        "bugfix",
+        "refactor"
       ],
       "requires": [],
       "cross_module_requires": [],
@@ -248,7 +250,9 @@
         "mvp",
         "classic",
         "express",
-        "workshop"
+        "workshop",
+        "bugfix",
+        "refactor"
       ],
       "requires": [
         "workspace-detection"
@@ -385,38 +389,6 @@
       "file": "stages/inception/inception-requirement-clarification.md"
     },
     {
-      "slug": "requirements-data-model",
-      "number": "2.2.2",
-      "name": "需求数据模型",
-      "phase": "inception",
-      "axis": "module",
-      "execution": "CONDITIONAL",
-      "selection": "automatic",
-      "choices": [],
-      "lead_agent": "aidlc-product-agent",
-      "support_agents": [],
-      "mode": "inline",
-      "scopes": [
-        "feature",
-        "enterprise",
-        "mvp",
-        "classic"
-      ],
-      "requires": [
-        "requirements-analysis"
-      ],
-      "cross_module_requires": [],
-      "scope_waived_requires": [],
-      "consumes": [],
-      "produces": [],
-      "sensors": [],
-      "traceability": "required",
-      "completion_contract": "instruction_only",
-      "condition": "",
-      "approval": "notify",
-      "file": "stages/inception/inception-requirements-data-model.md"
-    },
-    {
       "slug": "requirements-methods",
       "number": "2.2.3",
       "name": "需求方法",
@@ -454,70 +426,6 @@
       "condition": "",
       "approval": "notify",
       "file": "stages/inception/inception-requirements-methods.md"
-    },
-    {
-      "slug": "requirements-prioritization",
-      "number": "2.2.4",
-      "name": "需求优先级",
-      "phase": "inception",
-      "axis": "module",
-      "execution": "CONDITIONAL",
-      "selection": "automatic",
-      "choices": [],
-      "lead_agent": "aidlc-product-agent",
-      "support_agents": [],
-      "mode": "inline",
-      "scopes": [
-        "feature",
-        "enterprise",
-        "mvp",
-        "classic"
-      ],
-      "requires": [
-        "requirements-analysis"
-      ],
-      "cross_module_requires": [],
-      "scope_waived_requires": [],
-      "consumes": [],
-      "produces": [],
-      "sensors": [],
-      "traceability": "required",
-      "completion_contract": "instruction_only",
-      "condition": "",
-      "approval": "notify",
-      "file": "stages/inception/inception-requirements-prioritization.md"
-    },
-    {
-      "slug": "requirements-validation",
-      "number": "2.2.5",
-      "name": "需求验证",
-      "phase": "inception",
-      "axis": "module",
-      "execution": "CONDITIONAL",
-      "selection": "automatic",
-      "choices": [],
-      "lead_agent": "aidlc-product-agent",
-      "support_agents": [],
-      "mode": "inline",
-      "scopes": [
-        "feature",
-        "enterprise",
-        "mvp",
-        "classic"
-      ],
-      "requires": [
-        "requirements-analysis"
-      ],
-      "cross_module_requires": [],
-      "scope_waived_requires": [],
-      "consumes": [],
-      "produces": [],
-      "sensors": [],
-      "traceability": "required",
-      "completion_contract": "instruction_only",
-      "condition": "",
-      "approval": "notify",
-      "file": "stages/inception/inception-requirements-validation.md"
     },
     {
       "slug": "user-stories",
@@ -1756,7 +1664,7 @@
       "file": "stages/operation/operations-templates.md"
     }
   ],
-  "stage_count": 43,
+  "stage_count": 40,
   "scopes": [
     "bugfix",
     "classic",

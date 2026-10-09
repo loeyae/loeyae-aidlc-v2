@@ -357,15 +357,9 @@ async function endToEnd(globalDone: boolean): Promise<void> {
     nextModule(`requirement-clarification@module:${M01}`);
     write(project, `${inception}/clarifications.md`, "# 需求澄清\n\nNo clarifications needed.\n\nREQ-001 的分页规则（50 条一页）已在需求中明确，本次改动沿用现有行为。\n");
     report("requirement-clarification");
-    nextModule(`requirements-data-model@module:${M01}`, [RA]);
-    ack("requirements-data-model");
     nextModule(`requirements-methods@module:${M01}`, [RA]);
     write(project, `${inception}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单导出分页流程\n\n```mermaid\nflowchart LR\n  A[调用 export_orders] --> B[读取下游订单]\n  B --> C[按 50 条分页返回]\n```\n");
     report("requirements-methods");
-    nextModule(`requirements-prioritization@module:${M01}`, [RA]);
-    ack("requirements-prioritization");
-    nextModule(`requirements-validation@module:${M01}`, [RA]);
-    ack("requirements-validation");
     nextModule(`user-stories@module:${M01}`, [RA]);
     write(project, `${inception}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营导出分页订单\n\n- 关联需求：REQ-001\n- 作为运营人员，我希望导出订单时按 50 条分页返回，以便逐页核对。\n- 验收标准：下游返回 120 条订单时，导出结果为 50、50、20 三页。\n");
     report("user-stories");

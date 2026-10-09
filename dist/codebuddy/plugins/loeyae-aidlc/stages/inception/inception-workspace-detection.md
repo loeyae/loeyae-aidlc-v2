@@ -7,7 +7,8 @@ execution: ALWAYS
 lead_agent: aidlc-architect-agent
 support_agents: []
 mode: inline
-scopes: [feature, enterprise, mvp, classic, express, workshop]
+# execution: ALWAYS 阶段对所有 scope 无条件执行；下面的 scopes 仅作文档参考，不参与阶段过滤（过滤规则 execution==="ALWAYS" || scopes.includes(scope)，ALWAYS 短路了 scopes）。
+scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes: []
 produces: []
 sensors: []

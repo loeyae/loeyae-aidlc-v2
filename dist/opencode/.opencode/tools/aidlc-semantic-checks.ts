@@ -665,6 +665,7 @@ function testCaseDerivation(): Record<string, unknown> {
   if (!/source_ref\s*:/i.test(caseContent)) fail("every I13 test case must declare source_ref");
   const modes = ucdModes(idsFound, declarations);
   const units = ucdUnitRefs(idsFound, declarations);
+  const defectRefs = ucdDefectRefs(idsFound, declarations);
   return {
     status: "required",
     applicability: "required",
@@ -673,6 +674,7 @@ function testCaseDerivation(): Record<string, unknown> {
     ucd_ids: idsFound,
     ucd_modes: Object.fromEntries(idsFound.map((id) => [id, modes.get(id)!.mode])),
     ...(units ? { ucd_units: units } : {}),
+    ...(defectRefs.size > 0 ? { defect_refs: Object.fromEntries([...defectRefs].sort(([left], [right]) => left.localeCompare(right))) } : {}),
     ...characterizationEvidence(idsFound, modes),
     source_files: sourcePaths.map(relativePath),
     test_case_files: caseFiles.map(relativePath),
@@ -823,6 +825,149 @@ function ucdModes(ids: string[], declarations: Map<string, UcdDeclaration>): Map
   }
   if (errors.length > 0) fail(`I13 UC-D tdd_mode contract violated: ${errors.join("; ")}`);
   return modes;
+}
+
+const DEFECT_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+
+/**
+ * MARS-112: the optional `defect_ref` anchor of a UC-D (bugfix lightweight traceability).
+ * Frontmatter-only, like tdd_mode: a non-empty single token (bug ticket / defect REQ id,
+ * e.g. `BUG-123`, `MARS-112`, `REQ-DEFECT-7`) that anchors the reproduction UC-D to a
+ * traceable defect identity. Returns the ref of every UC-D that declares one (keyed by
+ * UC-D id); UC-Ds without the field are absent from the map. Rejects a `defect_ref` that
+ * sits in a body-only case file (frontmatter is the only place it may be declared) or is
+ * not a single clean token, mirroring the tdd_mode/unit_refs contract.
+ */
+function ucdDefectRefs(ids: string[], declarations: Map<string, UcdDeclaration>): Map<string, string> {
+  const errors: string[] = [];
+  const refs = new Map<string, string>();
+  for (const id of ids) {
+    const declaration = declarations.get(id)!;
+    const fields = declaration.fields;
+    if (!fields) {
+      // body-only case file: a stray `defect_ref:` line in the body must not pass silently.
+      if (declaredValue(text(declaration.file), "defect_ref") !== undefined) {
+        errors.push(`${id} declares defect_ref outside a frontmatter block (${relativePath(declaration.file)}); defect_ref belongs in the UC-D frontmatter`);
+      }
+      continue;
+    }
+    const value = fields.get("defect_ref");
+    if (value === undefined) continue;
+    if (Array.isArray(value) || typeof value !== "string" || value.length === 0) {
+      errors.push(`${id} defect_ref must be a single non-empty token (bug ticket or defect id), got ${JSON.stringify(value)}`);
+      continue;
+    }
+    if (!DEFECT_REF_PATTERN.test(value)) {
+      errors.push(`${id} defect_ref ${JSON.stringify(value)} is not a valid anchor token (letters, digits, . _ - / only)`);
+      continue;
+    }
+    refs.set(id, value);
+  }
+  if (errors.length > 0) fail(`I13 UC-D defect_ref contract violated: ${errors.join("; ")}`);
+  return refs;
+}
+
+/**
+ * MARS-112: traceability-matrix for lightweight scopes (bugfix/refactor) that skip
+ * requirements-analysis and so have no requirements.md root. Returns null for any other
+ * scope (the caller then keeps the historical not_applicable). The anchor is the scope's
+ * own source of truth, so the gate is no longer a determinate no-op:
+ *
+ *   - bugfix:   at least one tdd_mode new UC-D must declare a `defect_ref`; once the
+ *               code_refs layer (code-generation) is reached, the delivered source must
+ *               reference that defect anchor. A missing anchor or an unreferenced anchor
+ *               is a broken_row the gate rejects.
+ *   - refactor: at least one tdd_mode characterization UC-D must declare a non-empty
+ *               `code_refs` list (the baseline anchor MARS-104 already requires). A
+ *               refactor with no characterization code_refs anchor is a broken_row.
+ */
+function lightweightScopeMatrix(
+  currentStage: string,
+  currentOrder: number,
+  mod: (rel: string) => string,
+  read: (rel: string) => string,
+): Record<string, unknown> | null {
+  const scope = (workflowState?.scope || "").toLowerCase();
+  if (scope !== "bugfix" && scope !== "refactor") return null;
+
+  const caseFiles = allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/)
+    .filter((path) => basename(path) !== "_index.md");
+  const declarations = ucdDeclarations(caseFiles);
+  const ucdIds = [...declarations.keys()].sort();
+  const brokenRows: string[] = [];
+  const base: Record<string, unknown> = {
+    status: "passed",
+    module_id: ACTIVE_MODULE,
+    current_stage: currentStage,
+    scope,
+    lightweight_anchor: scope === "bugfix" ? "defect_ref" : "code_refs",
+    ucd_total: ucdIds.length,
+    migration_status: "passed",
+  };
+
+  if (ucdIds.length === 0) {
+    // No UC-D at all: the I13/i13 contract (a bugfix needs a new UC-D, a refactor a
+    // characterization one) rejects this upstream, but the matrix must not pass blindly.
+    brokenRows.push(`${scope}: ANCHOR_MISSING@ucd(no UC-D declared; cannot anchor lightweight traceability)`);
+    return { ...base, broken_rows: brokenRows, anchored_ucds: [] };
+  }
+
+  const modes = ucdModes(ucdIds, declarations);
+
+  if (scope === "bugfix") {
+    const defectRefs = ucdDefectRefs(ucdIds, declarations);
+    const newUcds = ucdIds.filter((id) => modes.get(id)!.mode === "new");
+    const anchoredNew = newUcds.filter((id) => defectRefs.has(id));
+    if (anchoredNew.length === 0) {
+      brokenRows.push("bugfix: ANCHOR_MISSING@defect_ref(no tdd_mode new UC-D declares a defect_ref anchoring the reproduced bug to a traceable defect id)");
+    } else if (currentOrder >= MATRIX_STAGE_ORDER.indexOf("code-generation")) {
+      // Reconcile the anchor against the delivered source once code-generation is reached:
+      // at least one anchor token must appear in the module's own source roots.
+      let codeRoots: { roots: string[]; origin: string };
+      try {
+        codeRoots = resolveSourceRoots(ROOT, ACTIVE_MODULE);
+      } catch (error) {
+        fail(`traceability-matrix cannot resolve the source roots of module ${ACTIVE_MODULE}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const codeFiles = codeRoots!.origin === "default"
+        ? projectFiles(SOURCE_FILE_PATTERN)
+        : [...new Set(codeRoots!.roots.flatMap((root) => allFiles(root, SOURCE_FILE_PATTERN)))].sort();
+      const codeSrc = joined(codeFiles);
+      const anchors = [...new Set(anchoredNew.map((id) => defectRefs.get(id)!))];
+      const referenced = anchors.filter((anchor) => new RegExp(`\\b${anchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(codeSrc));
+      if (referenced.length === 0) {
+        brokenRows.push(`bugfix: ANCHOR_UNREFERENCED@code_refs(delivered source does not reference any defect anchor ${anchors.join(", ")})`);
+      }
+    }
+    return {
+      ...base,
+      broken_rows: brokenRows,
+      new_ucds: newUcds,
+      anchored_ucds: anchoredNew,
+      defect_refs: Object.fromEntries([...defectRefs].sort(([left], [right]) => left.localeCompare(right))),
+    };
+  }
+
+  // refactor: the characterization code_refs are the baseline anchor.
+  const characterizationUcds = ucdIds.filter((id) => modes.get(id)!.mode === "characterization");
+  const anchored = characterizationUcds.filter((id) => {
+    const mode = modes.get(id)!;
+    return mode.mode === "characterization" && mode.codeRefs.length > 0;
+  });
+  if (anchored.length === 0) {
+    brokenRows.push("refactor: ANCHOR_MISSING@code_refs(no tdd_mode characterization UC-D declares a code_refs baseline anchor)");
+  }
+  const codeRefs = [...new Set(characterizationUcds.flatMap((id) => {
+    const mode = modes.get(id)!;
+    return mode.mode === "characterization" ? mode.codeRefs : [];
+  }))].sort();
+  return {
+    ...base,
+    broken_rows: brokenRows,
+    characterization_ucds: characterizationUcds,
+    anchored_ucds: anchored,
+    code_refs: codeRefs,
+  };
 }
 
 /**
@@ -3287,7 +3432,17 @@ function traceabilityMatrix(): Record<string, unknown> {
   const mod = (rel: string): string => rel.replace(/\{module-id\}/g, ACTIVE_MODULE);
   const read = (rel: string): string => existing([mod(rel)]).map(text).join("\n");
   const reqDoc = read("docs/aidlc/modules/{module-id}/inception/requirements.md");
-  if (!reqDoc.trim()) return { status: "not_applicable", reason: "requirements.md not present yet" };
+  if (!reqDoc.trim()) {
+    // MARS-112: lightweight scopes (bugfix/refactor) skip requirements-analysis, so
+    // requirements.md is never produced and the REQ→code matrix has no root. Instead of
+    // passing blindly (not_applicable), the gate anchors to the scope's own source of
+    // truth: bugfix to a UC-D `defect_ref` reconciled against the delivered source,
+    // refactor to a characterization UC-D `code_refs` baseline anchor. Any other scope
+    // without requirements.md stays not_applicable (unchanged).
+    const lightweight = lightweightScopeMatrix(currentStage, currentOrder, mod, read);
+    if (lightweight) return lightweight;
+    return { status: "not_applicable", reason: "requirements.md not present yet" };
+  }
 
   // 解析每个 REQ 的 track(段落级:REQ-xxx 到下一个 REQ-xxx 之间找 track: [...])。
   const reqIds = ids(reqDoc, /\bREQ-[A-Z0-9][A-Z0-9_-]*\b/g);
