@@ -303,7 +303,7 @@ try {
   });
 
   await section("positive: no tdd_mode — RED unchanged, BASELINE not_required without a baseline command; legacy I13 without ucd_modes", () => {
-    const { project } = tddProject("refactor", ["UC-D-001"], [], ["red"]);
+    const { project } = tddProject("bugfix", ["UC-D-001"], [], ["red"]);
     const completed = reportTdd(project);
     assert.equal(completed.status, 0, completed.out);
     assert.notEqual(completed.json.kind, "error", completed.out);

@@ -886,6 +886,9 @@ function characterizationEvidence(ids: string[], modes: Map<string, UcdMode>): R
   if (workflowState?.scope === "bugfix" && characterized.length === ids.length) {
     fail("a bugfix workflow needs at least one tdd_mode new UC-D that reproduces the bug; only characterization UC-Ds were declared");
   }
+  if (workflowState?.scope === "refactor" && characterized.length === 0) {
+    fail("a refactor workflow needs at least one tdd_mode characterization UC-D bound to the workflow baseline; declare tdd_mode: characterization with code_refs/reason/approval_ref on the UC-Ds that change existing behavior");
+  }
   if (characterized.length === 0) return {};
   const repository = gitWorkTreeError(ROOT);
   if (repository) fail(`tdd_mode characterization requires a git repository with a workflow baseline: ${repository}`);

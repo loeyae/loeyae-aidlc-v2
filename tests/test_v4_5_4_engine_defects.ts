@@ -103,7 +103,7 @@ function write(project: string, path: string, content: string): void {
   writeFileSync(target, content, "utf8");
 }
 
-function makeProject(name: string, scope = "refactor"): string {
+function makeProject(name: string, scope = "bugfix"): string {
   const project = join(scratch, name);
   mkdirSync(project, { recursive: true });
   write(project, "README.md", `# ${name}\n`);

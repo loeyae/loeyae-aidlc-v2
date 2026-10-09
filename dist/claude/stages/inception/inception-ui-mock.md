@@ -90,7 +90,7 @@ condition: has_ui_requirements
 
 调用 `aidlc-ui-mock-design`，传入已批准页面计划和 `stage=skeleton`。具体生成规则由 `inception-ui-mock-generation.md` 及其引用文件定义。
 
-生成后按 `inception-ui-mock-workflow.md` 提交用户审核页面数量、改造基础和操作闭环。发现页面语义错误时回到页面计划就地修正并重新确认。
+生成后按 `inception-ui-mock-generation.md` 附录 A（UI Mock 工作流·两阶段编排）提交用户审核页面数量、改造基础和操作闭环。发现页面语义错误时回到页面计划就地修正并重新确认。
 
 ### 4. 填充并审核内容
 

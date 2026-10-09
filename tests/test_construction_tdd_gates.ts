@@ -11,7 +11,7 @@ const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
 const tsx = join(repository, "node_modules", "tsx", "dist", "cli.mjs");
 const graph = JSON.parse(readFileSync(join(repository, "core", "tools", "data", "stage-graph.json"), "utf8")) as {
-  stages: Array<{ slug: string; number: string; execution: string; scopes: string[]; requires: string[]; consumes: string[]; sensors: string[] }>;
+  stages: Array<{ slug: string; number: string; execution: string; scopes: string[]; requires: string[]; consumes: string[]; sensors: string[]; produces: string[]; traceability: string }>;
 };
 const scratch = mkdtempSync(join(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir(), "aidlc-tdd-gates-"));
 
@@ -135,6 +135,25 @@ try {
   assert.deepEqual(review.requires, ["code-generation"]);
   assert.ok(build.requires.includes("code-generation") && build.requires.includes("code-review"));
   assert.ok(review.sensors.includes("test-quality") && build.sensors.includes("test-quality"));
+
+  // P3 (MARS-108): a producing stage auto-mounts no-todo unconditionally, but traceability
+  // only when traceability: required. A not_applicable stage must not carry the (space-filling,
+  // gate-short-circuited) traceability sensor; it must still carry no-todo.
+  for (const node of graph.stages) {
+    if (node.produces.length === 0) continue;
+    assert.ok(node.sensors.includes("no-todo"), `producing stage ${node.slug} must auto-mount no-todo`);
+    if (node.traceability === "not_applicable") {
+      assert.ok(!node.sensors.includes("traceability"), `not_applicable stage ${node.slug} must not carry a traceability sensor`);
+    } else {
+      assert.ok(node.sensors.includes("traceability"), `required stage ${node.slug} must auto-mount traceability`);
+    }
+  }
+  for (const slug of ["tdd", "shared-contract-baseline", "subagent-execution", "loeyae-compliance", "compact-recovery"]) {
+    const node = stage(slug);
+    assert.equal(node.traceability, "not_applicable", `${slug} is expected to be traceability: not_applicable`);
+    assert.ok(!node.sensors.includes("traceability"), `${slug} must not carry traceability after P3`);
+    assert.ok(node.sensors.includes("no-todo"), `${slug} must still carry no-todo`);
+  }
 
   const quick = makeProject("quick");
   const first = run(quick, ["orchestrate", "next"]);

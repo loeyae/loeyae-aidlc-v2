@@ -141,7 +141,7 @@ export interface WorkflowState {
   updated_at: string;
 }
 
-const SCOPES = new Set(["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor", "poc"]);
+const SCOPES = new Set(["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor"]);
 const PRD_SCOPES = new Set(["feature", "enterprise", "mvp", "classic"]);
 const LOCK_WAIT_MS = 3_000;
 const LOCK_STALE_MS = 30_000;

@@ -17,7 +17,7 @@ interface StageGraph {
 function scopeTable(): void {
   const graph = JSON.parse(readFileSync(GRAPH_PATH, "utf-8")) as StageGraph;
   const declared = graph.stages.flatMap((stage) => stage.scopes);
-  const scopes = [...new Set([...declared, "poc"])].sort();
+  const scopes = [...new Set(declared)].sort();
   for (const scope of scopes) {
     const count = graph.stages.filter(
       (stage) => (stage.execution === "ALWAYS" || stage.scopes.includes(scope)) && stage.selection !== "user"

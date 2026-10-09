@@ -88,12 +88,15 @@ function listEvidence(root: string): string[] {
   });
 }
 
-// Deterministic test observer: evaluates UC-D-001 against the Python source and
-// reports the controlled RED/GREEN observation the evidence producer expects.
+// Deterministic test observer: a characterization UC-D. At BASELINE it observes the
+// unmodified baseline behavior of export_orders (the function exists and returns the
+// client's orders) and passes; at GREEN it asserts the retry behavior was added.
 const OBSERVER = `const { readFileSync } = require("node:fs");
 const source = readFileSync("app/exporter.py", "utf8");
-const passed = /MAX_RETRIES\\s*=\\s*3/.test(source) && /except\\s+TimeoutError/.test(source);
 const phase = process.env.AIDLC_PHASE || "GREEN";
+const hasExport = /def\\s+export_orders/.test(source);
+const hasRetry = /MAX_RETRIES\\s*=\\s*3/.test(source) && /except\\s+TimeoutError/.test(source);
+const passed = phase === "BASELINE" ? hasExport : hasRetry;
 const observation = { phase, status: passed ? "passed" : "failed", compile_status: "passed", environment_status: "passed", tests_total: 1, tests_failed: passed ? 0 : 1, traceability_complete: true, uc_mapping: [{ use_case: "UC-D-001", test_methods: ["tests/test_exporter.py::test_export_retries_on_timeout"] }] };
 if (!passed) Object.assign(observation, { failure_class: "behavior", failure_signature: "UC-D-001 export_orders raised TimeoutError without retrying" });
 console.log(JSON.stringify(observation));
@@ -129,7 +132,7 @@ try {
   const inception = "docs/aidlc/modules/project/inception";
   write(`${inception}/requirements.md`, "# 需求\n\n## REQ-001 导出超时重试\n\ntrack: [nfr]\n\n业务规则：订单导出接口在下游超时时最多重试 3 次，3 次内成功则返回订单列表。\n");
   write(`${inception}/application-design/test-cases/_index.md`, "# UC-D 索引\n\n- UC-D-001 导出超时后重试（status: ready，source_ref: REQ-001）\n");
-  write(`${inception}/application-design/test-cases/UC-D-001.md`, "---\nid: UC-D-001\nstatus: ready\nsource_ref: REQ-001\n---\n# UC-D-001 导出超时后重试\n\nGiven 下游首次调用超时，When 调用 export_orders，Then 重试后返回订单列表。\n");
+  write(`${inception}/application-design/test-cases/UC-D-001.md`, "---\nid: UC-D-001\nstatus: ready\nsource_ref: REQ-001\ntdd_mode: characterization\ncode_refs: [app/exporter.py::export_orders]\nreason: 为存量 export_orders 增加超时重试，必须以基线行为为锚\napproval_ref: approved refactor decision\n---\n# UC-D-001 导出超时后重试\n\nGiven 下游首次调用超时，When 调用 export_orders，Then 重试后返回订单列表。\n");
   ok(["orchestrate", "report", "--stage", "test-case-derivation", "--result", "completed"]);
   // D4: the module-layout I13 required branch (UC-D cases read from the module test-case root).
   const i13 = JSON.parse(readFileSync(join(project, ".aidlc/evidence/test-case-derivation/project/test-case-derivation.json"), "utf8"));
@@ -137,18 +140,18 @@ try {
   assert.deepEqual(i13.ucd_ids, ["UC-D-001"]);
   // S2.0: `status: ready` in both _index.md and the case file counts once.
   assert.equal(i13.ready_ucd, 1);
-  assert.deepEqual(i13.ucd_modes, { "UC-D-001": "new" });
+  assert.deepEqual(i13.ucd_modes, { "UC-D-001": "characterization" });
 
-  // RED.
+  // BASELINE (characterization): observe the unmodified baseline behavior before any edit.
   next("tdd@module:project@unit:default");
   write("tests/__init__.py", "\"\"\"Tests for the order export service.\"\"\"\n");
   write("tests/test_exporter.py", "# REQ-001 UC-D-001\nfrom app.exporter import export_orders\n\n\nclass FlakyClient:\n    def __init__(self):\n        self.calls = 0\n\n    def fetch_orders(self):\n        self.calls += 1\n        if self.calls == 1:\n            raise TimeoutError(\"upstream timeout\")\n        return [\"order-1\"]\n\n\ndef test_export_retries_on_timeout():\n    assert export_orders(FlakyClient()) == [\"order-1\"]\n");
   write("tests/observe_uc.cjs", OBSERVER);
-  write(".aidlc/commands/tdd.json", `${JSON.stringify({ version: "1", stage: "tdd", commands: [{ id: "uc-red", role: "red", argv: ["node", "tests/observe_uc.cjs"] }] }, null, 2)}\n`);
+  write(".aidlc/commands/tdd.json", `${JSON.stringify({ version: "1", stage: "tdd", commands: [{ id: "uc-baseline", role: "baseline", argv: ["node", "tests/observe_uc.cjs"] }] }, null, 2)}\n`);
   ok(["orchestrate", "report", "--stage", "tdd", "--result", "completed"]);
-  const red = JSON.parse(readFileSync(join(project, ".aidlc/evidence/tdd/project/default/red-test-evidence.json"), "utf8"));
-  assert.equal(red.status, "failed");
-  assert.equal(red.producer.mode, "controlled");
+  const baselineEvidence = JSON.parse(readFileSync(join(project, ".aidlc/evidence/tdd/project/default/baseline-test-evidence.json"), "utf8"));
+  assert.equal(baselineEvidence.status, "passed");
+  assert.equal(baselineEvidence.producer.mode, "controlled");
 
   // GREEN: implementation lives in app/, never in src/.
   refresh("test-case-derivation@module:project");

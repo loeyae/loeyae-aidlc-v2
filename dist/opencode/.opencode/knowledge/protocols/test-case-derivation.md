@@ -128,7 +128,7 @@ approval_ref: REVIEW-2026-10-01-01
 - I13 用工作流基线（`orchestrate baseline`；模块子工作流使用父工作流的基线）校验：文件在基线中存在且是普通文件；写了符号的，符号须作为完整标识符出现在基线版本的文件文本中（文本匹配，不做 AST 解析）。
 - 使用 characterization 需要 git 仓库与已登记、仍可从 HEAD 到达的基线；存量工作流先执行 `orchestrate baseline --set`。
 - I13 始终绑定基线链的第 0 代（4.7.0）：多单元依次改动共享 code ref 时，用 `orchestrate baseline --advance <上一单元 GREEN 的 commit>` 追加一代，后续单元的 BASELINE 在新一代上观察；I13 不需要因推进而刷新。
-- `bugfix` 至少要有 1 条 `new`（复现 bug）；`refactor` 可全部为 characterization。
+- `bugfix` 至少要有 1 条 `new`（复现 bug）；`refactor` 至少要有 1 条 `characterization`（锚定存量行为的基线），可以全部为 characterization。
 
 ## 所属单元（`unit_refs`，4.8.0）
 

@@ -210,7 +210,7 @@ function report(project: string): Run {
 try {
   // ---------------------------------------------------------------- S2.0
   await section("S2.0 ready_ucd counts each UC-D once, from its own case file", () => {
-    const { project } = legacyProject();
+    const { project } = legacyProject("bugfix");
     const index = "# UC-D 索引\n\n- UC-D-001 导出分页（status: ready，source_ref: REQ-001）\n- UC-D-002 超时重试（status: ready，source_ref: REQ-001）\n";
     writeCases(project, { "UC-D-001-pages.md": ucd("UC-D-001"), "UC-D-002-retry.md": ucd("UC-D-002") }, index);
     const result = checked(project);
@@ -245,13 +245,13 @@ try {
 
   // ---------------------------------------------------------------- S2.1 / S2.2 compatibility
   await section("S2.1 compatibility: no tdd_mode keeps the I13 verdict, every ucd_modes entry is new", () => {
-    const { project } = legacyProject();
+    const { project } = legacyProject("feature");
     writeCases(project, { "UC-D-001-pages.md": ucd("UC-D-001"), "UC-D-002-retry.md": ucd("UC-D-002") });
     const result = checked(project);
     assert.deepEqual(result.ucd_modes, { "UC-D-001": "new", "UC-D-002": "new" });
     assert.equal("characterization" in result, false, "no characterization key without characterization UC-Ds");
     assert.equal("baseline_commit" in result, false, "no baseline_commit without characterization (S1.3 U3)");
-    const explicit = legacyProject().project;
+    const explicit = legacyProject("feature").project;
     writeCases(explicit, { "UC-D-001-pages.md": ucd("UC-D-001", { tdd_mode: "new" }) });
     assert.deepEqual(checked(explicit).ucd_modes, { "UC-D-001": "new" });
   });
@@ -278,7 +278,7 @@ try {
       reason: CHARACTERIZATION.reason,
       approval_ref: CHARACTERIZATION.approval_ref,
     }]);
-    // refactor may consist of characterization UC-Ds only; bugfix with one new is accepted.
+    // refactor must declare at least one characterization UC-D; all-characterization is accepted.
     const allCharacterization = legacyProject().project;
     writeCases(allCharacterization, { "UC-D-003-pages.md": ucd("UC-D-003", CHARACTERIZATION) });
     assert.deepEqual(checked(allCharacterization).ucd_modes, { "UC-D-003": "characterization" });
@@ -327,6 +327,31 @@ try {
     checks.assertAll();
   });
 
+  await section("S2.3 refactor requires at least one characterization UC-D (producer + gate)", () => {
+    // Producer: a refactor workflow whose UC-Ds are all new is rejected by the I13 checker.
+    const allNew = legacyProject("refactor").project;
+    writeCases(allNew, { "UC-D-001-pages.md": ucd("UC-D-001"), "UC-D-002-retry.md": ucd("UC-D-002") });
+    const checks = rejections();
+    checks.expect("refactor with only new UC-Ds (producer)", check(allNew), /refactor workflow needs at least one tdd_mode characterization UC-D/);
+    checks.assertAll();
+
+    // Gate: the same all-new refactor cannot complete the test-case-derivation stage.
+    const gated = legacyProject("refactor").project;
+    writeCases(gated, { "UC-D-001-pages.md": ucd("UC-D-001"), "UC-D-002-retry.md": ucd("UC-D-002") });
+    toI13(gated);
+    const blocked = report(gated);
+    assert.notEqual(blocked.status, 0, blocked.out);
+    assert.match(blocked.out, /at least one tdd_mode characterization UC-D/, blocked.out);
+
+    // A refactor that declares at least one characterization UC-D passes the producer.
+    const withCharacterization = legacyProject("refactor").project;
+    writeCases(withCharacterization, {
+      "UC-D-001-pages.md": ucd("UC-D-001"),
+      "UC-D-003-pages.md": ucd("UC-D-003", CHARACTERIZATION),
+    });
+    assert.deepEqual(checked(withCharacterization).ucd_modes, { "UC-D-001": "new", "UC-D-003": "characterization" });
+  });
+
   await section("S2.2 characterization requires a registered, reachable git baseline", () => {
     const checks = rejections();
     // Non-git project: the workflow records `unavailable` and there is no repository.
@@ -359,9 +384,15 @@ try {
     preBaseline(legacy, "workflow-legacy");
     writeCases(legacy, { "UC-D-003-pages.md": ucd("UC-D-003", CHARACTERIZATION) });
     checks.expect("existing workflow without a registered baseline", check(legacy), /not registered/);
-    // The same pre-4.6 workflow without characterization keeps its verdict.
-    const legacyNew = legacyProject("refactor", { createWorkflow: false }).project;
-    preBaseline(legacyNew, "workflow-legacy-new");
+    // A non-refactor workflow without characterization keeps its verdict (every UC-D new).
+    const preBaselineFeature = (project: string, id: string) => {
+      const state = createInitialState("feature", "4.5.4", id, [], "pre-4.6 workflow");
+      state.completed_stages = ["workspace-detection"];
+      state.completed_stage_instances = ["workspace-detection"];
+      saveWorkflowState(project, state);
+    };
+    const legacyNew = legacyProject("feature", { createWorkflow: false }).project;
+    preBaselineFeature(legacyNew, "workflow-legacy-new");
     writeCases(legacyNew, { "UC-D-001-pages.md": ucd("UC-D-001") });
     assert.deepEqual(checked(legacyNew).ucd_modes, { "UC-D-001": "new" });
     // Registered, then a rebase rewrites history and orphans the baseline commit.

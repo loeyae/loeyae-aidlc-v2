@@ -216,15 +216,34 @@ function windowsDesktopEvidence(harness: WindowsDesktopHarness): string | undefi
   return firstExistingPath(windowsDesktopHostPaths(harness));
 }
 
+// Windows synthesizes ProgramFiles, ProgramW6432 and ProgramFiles(x86) in every child process from
+// the live system values and silently discards any override a parent passes in the child's environment
+// block, so tests cannot redirect machine-wide program-files detection by setting those variables.
+// AIDLC_PROGRAM_FILES_ROOTS is a non-protected, delimiter-separated override of the machine roots: when
+// set it fully REPLACES the live roots (isolating detection from the real C:\Program Files and any host
+// KiroCrew/Qoder install there), and when unset production behaviour is unchanged. Mirrors the
+// AIDLC_APPLICATIONS_ROOT seam used to redirect macOS /Applications in isolated tests.
+function machineProgramFilesRoots(): string[] {
+  const override = process.env.AIDLC_PROGRAM_FILES_ROOTS;
+  if (override !== undefined) {
+    return [...new Set(
+      override.split(path.delimiter).map((root) => root.trim()).filter(Boolean),
+    )];
+  }
+  return [...new Set(
+    [
+      process.env.ProgramW6432?.trim(),
+      process.env.ProgramFiles?.trim(),
+      process.env["ProgramFiles(x86)"]?.trim(),
+    ].filter((root): root is string => Boolean(root)),
+  )];
+}
+
 function kiroCrewKnownPaths(): string[] {
   const dataHome = process.env.KIROCREW_HOME?.trim() || resolve(HOME, ".kiro/crew");
   const venvRoot = process.env.KIROCREW_VENV?.trim() || resolve(HOME, ".kiro/crew-venv");
   const localAppData = process.env.LOCALAPPDATA?.trim();
-  const programFilesRoots = [
-    process.env.ProgramW6432?.trim(),
-    process.env.ProgramFiles?.trim(),
-    process.env["ProgramFiles(x86)"]?.trim(),
-  ].filter((root): root is string => Boolean(root));
+  const programFilesRoots = machineProgramFilesRoots();
   return [
     ...programFilesRoots.map((root) => resolve(root, "KiroCrew/KiroCrew.exe")),
     ...(localAppData ? [resolve(localAppData, "Programs/KiroCrew/KiroCrew.exe")] : []),
@@ -239,11 +258,7 @@ function qoderDesktopKnownPaths(): string[] {
   const localAppData = process.env.LOCALAPPDATA?.trim();
   const userProfile = process.env.USERPROFILE?.trim() || process.env.HOME?.trim();
   const configuredMcpPath = process.env.QODER_CN_MCP_CONFIG?.trim();
-  const programFilesRoots = [
-    process.env.ProgramW6432?.trim(),
-    process.env.ProgramFiles?.trim(),
-    process.env["ProgramFiles(x86)"]?.trim(),
-  ].filter((root): root is string => Boolean(root));
+  const programFilesRoots = machineProgramFilesRoots();
   const executablePaths = ["Qoder/Qoder.exe", "Qoder CN/Qoder.exe", "Lingma/Lingma.exe"];
   return [
     ...(localAppData

@@ -46,7 +46,7 @@ interface StageGraph {
 
 const PHASES = ["ideation", "inception", "construction", "operation"];
 const PHASE_ORDER = new Map(PHASES.map((phase, index) => [phase, index]));
-const VALID_SCOPES = new Set(["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor", "poc"]);
+const VALID_SCOPES = new Set(["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor"]);
 const ALLOWED_ROOTS = new Set(["workspace-detection", "product-inception"]);
 const VALID_AGENT_MODES = new Set(["inline", "delegate", "pipeline", "mob", "review"]);
 
@@ -98,7 +98,15 @@ function scanStages(): StageNode[] {
       if (fm.phase !== undefined && fm.phase !== phase) throw new Error(`frontmatter phase mismatch in ${phase}/${file}: ${fm.phase}`);
       const produces = (fm.produces as string[]) || [];
       const declaredSensors = (fm.sensors as string[]) || [];
-      const sensors = produces.length > 0 ? [...new Set([...declaredSensors, "no-todo", "traceability"])] : declaredSensors;
+      const traceabilityMode = fm.traceability === "not_applicable" ? "not_applicable" : "required";
+      // no-todo is auto-mounted on every producing stage; traceability only when the
+      // stage actually tracks requirements (traceability: required). A not_applicable
+      // stage carrying a traceability sensor was clean-list noise: the gate short-circuits
+      // it anyway (orchestrate case "traceability" breaks on not_applicable).
+      const autoSensors = produces.length > 0
+        ? ["no-todo", ...(traceabilityMode === "not_applicable" ? [] : ["traceability"])]
+        : [];
+      const sensors = produces.length > 0 ? [...new Set([...declaredSensors, ...autoSensors])] : declaredSensors;
       nodes.push({
         slug: fm.slug as string,
         number: (fm.number as string) || "",
@@ -119,7 +127,7 @@ function scanStages(): StageNode[] {
         consumes: (fm.consumes as string[]) || [],
         produces,
         sensors,
-        traceability: fm.traceability === "not_applicable" ? "not_applicable" : "required",
+        traceability: traceabilityMode,
         completion_contract: fm.completion_contract === "instruction_only" ? "instruction_only" : "gated",
         condition: (fm.condition as string) || "",
         approval: ((fm.approval as string) || "notify") as StageNode["approval"],
@@ -249,7 +257,7 @@ export function validateGraph(graph: { stages: StageNode[]; stage_count: number;
       errors.push(`instruction_only stage cannot declare produces/sensors: ${stage.slug}`);
     }
     if (stage.produces.length > 0 && !stage.sensors.includes("no-todo")) errors.push(`missing automatic no-todo sensor on ${stage.slug}`);
-    if (stage.produces.length > 0 && !stage.sensors.includes("traceability")) errors.push(`missing automatic traceability sensor on ${stage.slug}`);
+    if (stage.produces.length > 0 && stage.traceability !== "not_applicable" && !stage.sensors.includes("traceability")) errors.push(`missing automatic traceability sensor on ${stage.slug}`);
     for (const scope of stage.scopes) if (!VALID_SCOPES.has(scope)) errors.push(`invalid scope on ${stage.slug}: ${scope}`);
     for (const dependency of stage.requires) if (!graph.stages.some((candidate) => candidate.slug === dependency)) errors.push(`orphan dependency on ${stage.slug}: ${dependency}`);
     for (const dependency of stage.cross_module_requires) if (!graph.stages.some((candidate) => candidate.slug === dependency)) errors.push(`orphan cross-module dependency on ${stage.slug}: ${dependency}`);
@@ -321,7 +329,7 @@ export function validateGraph(graph: { stages: StageNode[]; stage_count: number;
 function sourceGraph(): StageGraph {
   const stages = scanStages();
   return {
-    version: "4.13.0",
+    version: "4.13.1",
     stages,
     stage_count: stages.length,
     scopes: [...VALID_SCOPES].sort(),

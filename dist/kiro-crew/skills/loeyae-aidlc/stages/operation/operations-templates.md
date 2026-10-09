@@ -1,18 +1,18 @@
 ---
 slug: operations-templates
-number: "4.2"
+number: "4.3"
 name: 运维模板
 execution: CONDITIONAL
 lead_agent: aidlc-operations-agent
 scopes: [feature, enterprise, mvp]
-requires: [operations]
+requires: [operations-authorization]
 condition: has_operations_template_needs
 produces: [docs/aidlc/operation/templates/]
 ---
 
 # Operations 配置模板
 
-> **加载时机**：仅在 `operations-operations.md` O2 交付配置生成时加载。
+> **加载时机**：仅在 `operations-authorization.md` 步骤 1 生成目标配置时加载。
 > **Stage 触发条件**：只有已确认交付决策明确要求保留可复用 Docker/Jenkins/Kubernetes/Nginx 模板时，才将选中的无占位模板归档到 `docs/aidlc/operation/templates/`；普通目标配置生成只在 O1 内按需加载本文件，不单独进入本 Stage。
 > **不要在其他阶段预加载此文件。**
 

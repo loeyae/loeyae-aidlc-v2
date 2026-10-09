@@ -70,6 +70,13 @@ def isolated_host_env(root: Path, fake_bin: Path) -> dict:
         "ProgramW6432": "",
         "ProgramFiles": "",
         "ProgramFiles(x86)": "",
+        # Windows restores ProgramFiles/ProgramW6432/ProgramFiles(x86) to the live system values in every
+        # child process regardless of what the parent sets, so clearing them above cannot stop the CLI
+        # from seeing the real C:\Program Files (and any machine-level host installed there). This
+        # non-protected override reaches the child and, when empty, suppresses machine-wide roots so
+        # detection stays isolated from host state; tests that exercise machine detection set it to a
+        # fake Program Files tree.
+        "AIDLC_PROGRAM_FILES_ROOTS": "",
     }
 
 
@@ -691,7 +698,12 @@ def test_install_all_detects_machine_wide_windows_kiro_crew() -> None:
         kiro_crew_executable.parent.mkdir(parents=True)
         kiro_crew_executable.write_text("fake machine-wide Windows KiroCrew executable")
         env = isolated_host_env(root, fake_bin)
-        env["ProgramFiles"] = str(program_files)
+        # Windows synthesizes ProgramFiles/ProgramW6432/ProgramFiles(x86) in every child process from the
+        # live system values and discards any override passed in the child env block, so setting
+        # env["ProgramFiles"] here cannot redirect detection (the CLI would still see the real
+        # C:\\Program Files and, on a host with a machine-level KiroCrew install, detect the real
+        # executable). AIDLC_PROGRAM_FILES_ROOTS is the non-protected seam that reaches the child.
+        env["AIDLC_PROGRAM_FILES_ROOTS"] = str(program_files)
 
         installed = run_cli(home, ["install", "--all"], env)
         assert installed.returncode == 0, installed.stdout + installed.stderr

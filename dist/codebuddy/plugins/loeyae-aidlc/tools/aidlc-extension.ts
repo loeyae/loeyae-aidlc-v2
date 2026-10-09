@@ -28,7 +28,7 @@ const SAFE_ID = /^[a-z][a-z0-9-]{0,62}$/;
 const SEMVER = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const PHASES = new Set(["ideation", "inception", "construction", "operation"]);
 const AXES = new Set(["project", "module", "unit"]);
-const SCOPES = new Set(["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor", "poc"]);
+const SCOPES = new Set(["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor"]);
 const BLOCKED_FIELDS = new Set([
   "approval",
   "completion_contract",

@@ -1,5 +1,5 @@
 {
-  "version": "4.13.0",
+  "version": "4.13.1",
   "stages": [
     {
       "slug": "workspace-detection",
@@ -718,134 +718,6 @@
       "file": "stages/inception/inception-ui-figma-generation.md"
     },
     {
-      "slug": "ui-mock-workflow",
-      "number": "2.5.4",
-      "name": "Mock 工作流",
-      "phase": "inception",
-      "axis": "module",
-      "execution": "CONDITIONAL",
-      "selection": "automatic",
-      "choices": [],
-      "lead_agent": "aidlc-design-agent",
-      "support_agents": [],
-      "mode": "inline",
-      "scopes": [
-        "feature",
-        "enterprise",
-        "mvp",
-        "classic"
-      ],
-      "requires": [
-        "ui-page-planning"
-      ],
-      "cross_module_requires": [],
-      "scope_waived_requires": [],
-      "consumes": [],
-      "produces": [],
-      "sensors": [],
-      "traceability": "required",
-      "completion_contract": "instruction_only",
-      "condition": "ui_mode_html_mock",
-      "approval": "notify",
-      "file": "stages/inception/inception-ui-mock-workflow.md"
-    },
-    {
-      "slug": "ui-mock-design-spec",
-      "number": "2.5.5",
-      "name": "Mock 设计规格",
-      "phase": "inception",
-      "axis": "module",
-      "execution": "CONDITIONAL",
-      "selection": "automatic",
-      "choices": [],
-      "lead_agent": "aidlc-design-agent",
-      "support_agents": [],
-      "mode": "inline",
-      "scopes": [
-        "feature",
-        "enterprise",
-        "mvp",
-        "classic"
-      ],
-      "requires": [
-        "ui-mock-workflow"
-      ],
-      "cross_module_requires": [],
-      "scope_waived_requires": [],
-      "consumes": [],
-      "produces": [],
-      "sensors": [],
-      "traceability": "required",
-      "completion_contract": "instruction_only",
-      "condition": "ui_mode_html_mock",
-      "approval": "notify",
-      "file": "stages/inception/inception-ui-mock-design-spec.md"
-    },
-    {
-      "slug": "ui-mock-styles",
-      "number": "2.5.6",
-      "name": "Mock 样式",
-      "phase": "inception",
-      "axis": "module",
-      "execution": "CONDITIONAL",
-      "selection": "automatic",
-      "choices": [],
-      "lead_agent": "aidlc-design-agent",
-      "support_agents": [],
-      "mode": "inline",
-      "scopes": [
-        "feature",
-        "enterprise",
-        "mvp",
-        "classic"
-      ],
-      "requires": [
-        "ui-mock-design-spec"
-      ],
-      "cross_module_requires": [],
-      "scope_waived_requires": [],
-      "consumes": [],
-      "produces": [],
-      "sensors": [],
-      "traceability": "required",
-      "completion_contract": "instruction_only",
-      "condition": "ui_mode_html_mock",
-      "approval": "notify",
-      "file": "stages/inception/inception-ui-mock-styles.md"
-    },
-    {
-      "slug": "ui-mock-reasoning-principles",
-      "number": "2.5.7",
-      "name": "Mock 推理原则",
-      "phase": "inception",
-      "axis": "module",
-      "execution": "CONDITIONAL",
-      "selection": "automatic",
-      "choices": [],
-      "lead_agent": "aidlc-design-agent",
-      "support_agents": [],
-      "mode": "inline",
-      "scopes": [
-        "feature",
-        "enterprise",
-        "mvp",
-        "classic"
-      ],
-      "requires": [
-        "ui-mock-styles"
-      ],
-      "cross_module_requires": [],
-      "scope_waived_requires": [],
-      "consumes": [],
-      "produces": [],
-      "sensors": [],
-      "traceability": "required",
-      "completion_contract": "instruction_only",
-      "condition": "ui_mode_html_mock",
-      "approval": "notify",
-      "file": "stages/inception/inception-ui-mock-reasoning-principles.md"
-    },
-    {
       "slug": "ui-mock-generation",
       "number": "2.5.8",
       "name": "Mock 生成",
@@ -864,7 +736,7 @@
         "classic"
       ],
       "requires": [
-        "ui-mock-reasoning-principles"
+        "ui-page-planning"
       ],
       "cross_module_requires": [],
       "scope_waived_requires": [],
@@ -1101,8 +973,7 @@
       ],
       "sensors": [
         "test-case-derivation",
-        "no-todo",
-        "traceability"
+        "no-todo"
       ],
       "traceability": "not_applicable",
       "completion_contract": "gated",
@@ -1313,8 +1184,7 @@
       ],
       "sensors": [
         "contract-baseline",
-        "no-todo",
-        "traceability"
+        "no-todo"
       ],
       "traceability": "not_applicable",
       "completion_contract": "gated",
@@ -1360,8 +1230,7 @@
       "sensors": [
         "red-test-evidence",
         "baseline-test-evidence",
-        "no-todo",
-        "traceability"
+        "no-todo"
       ],
       "traceability": "not_applicable",
       "completion_contract": "gated",
@@ -1455,8 +1324,7 @@
       ],
       "sensors": [
         "subagent-evidence",
-        "no-todo",
-        "traceability"
+        "no-todo"
       ],
       "traceability": "not_applicable",
       "completion_contract": "gated",
@@ -1493,8 +1361,7 @@
       ],
       "sensors": [
         "framework-compliance",
-        "no-todo",
-        "traceability"
+        "no-todo"
       ],
       "traceability": "not_applicable",
       "completion_contract": "gated",
@@ -1763,8 +1630,7 @@
       ],
       "sensors": [
         "recovery-evidence",
-        "no-todo",
-        "traceability"
+        "no-todo"
       ],
       "traceability": "not_applicable",
       "completion_contract": "gated",
@@ -1773,9 +1639,9 @@
       "file": "stages/construction/construction-compact-recovery.md"
     },
     {
-      "slug": "operations",
+      "slug": "operations-planning",
       "number": "4.1",
-      "name": "部署运维",
+      "name": "部署规划",
       "phase": "operation",
       "axis": "project",
       "execution": "CONDITIONAL",
@@ -1799,7 +1665,45 @@
         "docs/aidlc/construction/implementation-report.md"
       ],
       "produces": [
-        "docs/aidlc/operation/operations-plan.md",
+        "docs/aidlc/operation/operations-plan.md"
+      ],
+      "sensors": [
+        "doc-cascade",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "completion_contract": "gated",
+      "condition": "has_deployment_needs",
+      "approval": "notify",
+      "file": "stages/operation/operations-planning.md"
+    },
+    {
+      "slug": "operations-authorization",
+      "number": "4.2",
+      "name": "部署授权",
+      "phase": "operation",
+      "axis": "project",
+      "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
+      "lead_agent": "aidlc-operations-agent",
+      "support_agents": [],
+      "mode": "inline",
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp"
+      ],
+      "requires": [
+        "operations-planning"
+      ],
+      "cross_module_requires": [],
+      "scope_waived_requires": [],
+      "consumes": [
+        "docs/aidlc/operation/operations-plan.md"
+      ],
+      "produces": [
         "docs/aidlc/operation/deployment-config.md",
         "docs/aidlc/operation/deployment-guide.md",
         "docs/aidlc/operation/operations-summary.md"
@@ -1813,11 +1717,11 @@
       "completion_contract": "gated",
       "condition": "has_deployment_needs",
       "approval": "block",
-      "file": "stages/operation/operations.md"
+      "file": "stages/operation/operations-authorization.md"
     },
     {
       "slug": "operations-templates",
-      "number": "4.2",
+      "number": "4.3",
       "name": "运维模板",
       "phase": "operation",
       "axis": "project",
@@ -1833,7 +1737,7 @@
         "mvp"
       ],
       "requires": [
-        "operations"
+        "operations-authorization"
       ],
       "cross_module_requires": [],
       "scope_waived_requires": [],
@@ -1852,7 +1756,7 @@
       "file": "stages/operation/operations-templates.md"
     }
   ],
-  "stage_count": 46,
+  "stage_count": 43,
   "scopes": [
     "bugfix",
     "classic",
@@ -1860,7 +1764,6 @@
     "express",
     "feature",
     "mvp",
-    "poc",
     "refactor",
     "workshop"
   ],

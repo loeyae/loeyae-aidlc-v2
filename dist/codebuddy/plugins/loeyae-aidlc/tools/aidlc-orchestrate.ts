@@ -238,7 +238,6 @@ const VALID_SCOPES = new Set([
   "workshop",
   "bugfix",
   "refactor",
-  "poc",
 ]);
 
 const PRD_ELIGIBLE_SCOPES = new Set(FULL_WORKFLOW_SCOPES);
@@ -1556,6 +1555,7 @@ function i13ModeErrors(evidence: Evidence, ucdIds: string[], state: WorkflowStat
   }
   const characterized = ucdIds.filter((id) => modes[id] === "characterization");
   if (state.scope === "bugfix" && ucdIds.length > 0 && characterized.length === ucdIds.length) errors.push("a bugfix workflow needs at least one tdd_mode new UC-D that reproduces the bug");
+  if (state.scope === "refactor" && ucdIds.length > 0 && characterized.length === 0) errors.push("a refactor workflow needs at least one tdd_mode characterization UC-D bound to the workflow baseline");
   if (characterized.length === 0) {
     if (evidence.characterization !== undefined) errors.push("characterization must be absent when no UC-D uses tdd_mode characterization");
     if (evidence.baseline_commit !== undefined) errors.push("baseline_commit must be absent when no UC-D uses tdd_mode characterization");
@@ -2890,7 +2890,8 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           "code-generation": [["functional-design", "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design.md"]],
           "build-and-test": [["code-review", "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md"]],
           "implementation-report": [["build-and-test", "docs/aidlc/construction/build-test-report.md"]],
-          "operations": [["implementation-report", "docs/aidlc/construction/implementation-report.md"]],
+          "operations-planning": [["implementation-report", "docs/aidlc/construction/implementation-report.md"]],
+          "operations-authorization": [["operations-planning", "docs/aidlc/operation/operations-plan.md"]],
         };
         const requiredDocs = (cascadeDependencies[stage.slug] || [])
           .filter(([dependency]) => executable.has(dependency) && !skipped.has(dependency))
@@ -3054,7 +3055,7 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
   const applicationDesignCompleted = completedInstanceIds(state).includes(applicationInstance);
   const has_test_case_sources = applicationDesignCompleted && (existsSync(userStoriesPath) || has_nfr_needs || has_infra_needs);
   const moduleHasContractDependencies = /共享契约|shared.?contract|API.?contract|接口契约|proto|protobuf|OpenAPI|swagger/i.test(contextText);
-  const has_contract_dependencies = selectedForUnit("shared-contract-baseline", moduleHasContractDependencies);
+  const has_contract_dependencies = selectedForUnit("shared-contract-baseline", multi_module || moduleHasContractDependencies);
 
   const applicationDecision = plannedStageDecision(workflowPlanText, "application-design");
   const applicationEvidence = /新接口|新组件|应用服务|编排器|跨模块|跨服务|多端|复杂业务规则|共享配置|数据迁移|一致性|外部故障|数据 Owner|runtime consumer/i.test(contextText);
@@ -3098,7 +3099,16 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
 
   const implementationText = readConditionText(join(PROJECT_ROOT, "docs", "aidlc", "construction", "implementation-report.md"));
   const deploymentText = `${contextText}\n${implementationText}\n${buildMetadata}`;
-  const operationsDecision = plannedStageDecision(workflowPlanText, "operations");
+  // operations was split into operations-planning + operations-authorization (both
+  // gated by has_deployment_needs). Honor an explicit workflow-plan decision for
+  // either new slug; keep "operations" as a backward-compatible alias for plans
+  // authored before the split. An explicit execute on any of them means deploy.
+  const operationsStageDecisions = ["operations-planning", "operations-authorization", "operations"]
+    .map((slug) => plannedStageDecision(workflowPlanText, slug))
+    .filter((decision): decision is boolean => decision !== undefined);
+  const operationsDecision = operationsStageDecisions.length === 0
+    ? undefined
+    : operationsStageDecisions.some((decision) => decision);
   const explicitlyNoDeployment = /无需部署|不需要部署|纯库|library only|纯本地工具|local-only/i.test(deploymentText);
   const deploymentFilesExist = ["Dockerfile", "compose.yml", "docker-compose.yml", "Procfile", "Jenkinsfile"]
     .some((file) => existsSync(join(PROJECT_ROOT, file)))
@@ -4235,7 +4245,7 @@ async function handleNext(args: string[]): Promise<Directive> {
       return {
         kind: "ask",
         question: "No active AWS-style lightweight workflow found. Which scope should this work use?",
-        options: ["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor", "poc"],
+        options: ["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor"],
         ask_type: "scope-selection",
       } as unknown as Directive;
     }
