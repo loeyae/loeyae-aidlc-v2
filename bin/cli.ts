@@ -22,6 +22,7 @@ import {
 import { tmpdir } from "os";
 import { updateMcpConfig } from "../core/tools/aidlc-mcp-config";
 import { runSync } from "../core/tools/aidlc-spawn";
+import { provisionControlPlaneGitStrategy } from "../core/tools/aidlc-git-merge";
 import {
   hasManagedInstallation,
   installManagedAssets,
@@ -1340,11 +1341,40 @@ function deploy(args: string[], operation: "install" | "uninstall"): void {
     console.log(operation === "install"
       ? "⚠️  Restart affected platforms to activate."
       : `✅ Uninstalled ${harnesses.length} installer-owned global platform installation${harnesses.length === 1 ? "" : "s"}.`);
+    if (operation === "install") provisionProjectGitStrategyOnInstall();
     return;
   }
   const harness = options.harness || "kiro-crew";
   if (operation === "install") installOne(harness, options.target, options.project, options.migrateLegacy);
   else uninstallOne(harness, options.target, options.project);
+  if (operation === "install") provisionProjectGitStrategyOnInstall();
+}
+
+/**
+ * MARS-117: on install, idempotently provision the control-plane git merge strategy in
+ * the project where install was run (process.cwd()): the `.gitattributes` union rule for
+ * audit, the registry merge driver attribute, the `.gitignore` of engine backups, and
+ * the local `.git/config` registration of the registry merge driver. Best-effort and
+ * non-fatal — a project that is not a git work tree, or that already has everything, is a
+ * silent no-op; a user-set clashing merge strategy is reported, never overwritten.
+ */
+function provisionProjectGitStrategyOnInstall(): void {
+  const projectRoot = process.cwd();
+  try {
+    const result = provisionControlPlaneGitStrategy(projectRoot);
+    const added = [...result.gitattributes.added, ...result.gitignore.added];
+    if (added.length > 0) {
+      console.log(`🔧 Provisioned control-plane git merge strategy in ${projectRoot}: ${added.join(", ")}.`);
+    }
+    if (result.driver.registered) {
+      console.log("🔧 Registered the aidlc-registry merge driver in this repository's .git/config.");
+    }
+    for (const conflict of result.gitattributes.conflicts) {
+      console.warn(`⚠️  .gitattributes already sets a different merge strategy for ${conflict.pattern} ("${conflict.existing}"); left unchanged. For conflict-free control-plane merges use: ${conflict.managed}`);
+    }
+  } catch (error) {
+    console.warn(`⚠️  Could not provision the control-plane git merge strategy in ${projectRoot}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 function help(): void {

@@ -36,7 +36,11 @@ function normalized(path: string): string {
 
 function excluded(path: string): boolean {
   const value = normalized(path);
-  return value === ".aidlc" || value.startsWith(".aidlc/") || value === "aidlc" || value.startsWith("aidlc/");
+  // The engine's own control plane (aidlc / .aidlc) and the git merge-strategy files it
+  // provisions (.gitattributes / .gitignore, MARS-117) are infrastructure, not source;
+  // they never bind evidence provenance, so writing them never invalidates a digest.
+  return value === ".aidlc" || value.startsWith(".aidlc/") || value === "aidlc" || value.startsWith("aidlc/")
+    || value === ".gitattributes" || value === ".gitignore";
 }
 
 function digestFile(root: string, path: string, label: string, targets: Hash[]): void {

@@ -124,6 +124,7 @@ import {
   type WorkflowRegistry,
 } from "./aidlc-workflow-layout";
 import { committedFile, describeConflict, gitHistoryAvailable, lineageConflicts, lineageRemedy, resolveCommit, revisionRegressions, type LineageConflict } from "./aidlc-lineage";
+import { provisionControlPlaneGitStrategy, runRegistryMergeDriver, type ControlPlaneProvisionResult } from "./aidlc-git-merge";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -246,7 +247,7 @@ const PRD_ELIGIBLE_SCOPES = new Set(FULL_WORKFLOW_SCOPES);
 // Subcommands
 // ---------------------------------------------------------------------------
 
-const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format", "baseline", "state"] as const;
+const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format", "baseline", "state", "registry"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
@@ -282,6 +283,34 @@ function loadState(): WorkflowState | null {
 
 function saveState(state: WorkflowState): void {
   saveWorkflowState(PROJECT_ROOT, state);
+}
+
+/**
+ * MARS-117: provision the control-plane git merge strategy (A: audit merge=union; B:
+ * registry merge driver + local .git/config registration; C: .gitignore of engine
+ * backups) idempotently at the project root. Called from every control-plane creation
+ * path (next --scope, split, a module workflow created after the split) and never
+ * blocks the workflow. Returns human-readable warning lines (a .gitattributes/.gitignore
+ * strategy clash the user set) for the caller to surface in its own message; it never
+ * writes to the workflow audit (provisioning is repository infrastructure, not a
+ * workflow event, and must not break cross-version audit parity).
+ */
+function provisionGitStrategy(): string[] {
+  let result: ControlPlaneProvisionResult;
+  try {
+    result = provisionControlPlaneGitStrategy(PROJECT_ROOT);
+  } catch (error) {
+    return [`⚠️ Could not provision the control-plane git merge strategy (${error instanceof Error ? error.message : String(error)}); audit/registry merges may conflict until it is set up.`];
+  }
+  const warnings: string[] = [];
+  for (const conflict of [...result.gitattributes.conflicts]) {
+    warnings.push(`⚠️ .gitattributes already sets a different merge strategy for ${conflict.pattern} ("${conflict.existing}"); the engine did not overwrite it. For conflict-free control-plane merges use: ${conflict.managed}`);
+  }
+  // Provisioning the git merge strategy is repository infrastructure, not a workflow
+  // event: it is intentionally NOT written to the workflow audit (keeps aidlc/active
+  // audit.md a pure workflow log and preserves cross-version audit parity). The result
+  // is surfaced to the user through the command's own message instead.
+  return warnings;
 }
 
 export function runtimeChoices(stage: StageNode, state: WorkflowState): string[] {
@@ -3696,6 +3725,9 @@ function ensureModuleWorkflow(moduleId: string, work?: string): Directive | null
       modules: [...registry.modules, { module_id: moduleId, workflow_id: state.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, ref), status: "running", current_stage: "-", inception_done: false, construction_done: false, owner: "-" }],
     };
   });
+  // Idempotent: a module created after the split keeps the control-plane merge strategy
+  // provisioned (and registers the driver on a clone that first runs next here).
+  provisionGitStrategy();
   return null;
 }
 
@@ -4105,11 +4137,13 @@ function performSplit(fromId: string, dryRun: boolean, trigger: string, replaceL
     });
   }
   refreshRegistry(loadWorkflowParts(PROJECT_ROOT));
+  const gitWarnings = provisionGitStrategy();
   return {
     kind: "print",
     message: `✅ Workflow ${legacy.workflow_id} split into per-module workflows (registry: aidlc/active/registry.md)\n${describe.join("\n")}\n` +
       `  Evidence: ${evidence.anchored.length} re-anchored to their scope, ${evidence.stale.length} stale` +
-      (evidence.stale.length ? ` — refresh completed stages with evidence run --stage <slug> --module <id> --refresh, then report --stage <slug> --module <id> --result completed.` : "."),
+      (evidence.stale.length ? ` — refresh completed stages with evidence run --stage <slug> --module <id> --refresh, then report --stage <slug> --module <id> --result completed.` : ".") +
+      (gitWarnings.length ? `\n${gitWarnings.map((line) => `  ${line}`).join("\n")}` : ""),
     split: {
       registry: "aidlc/active/registry.md",
       workflows: planned.map((item) => ({ workflow: workflowRefKey(item.ref), state_path: relativeStatePath(PROJECT_ROOT, item.ref), status: item.state.status })),
@@ -4225,6 +4259,9 @@ async function handleNext(args: string[]): Promise<Directive> {
   }
   if (isSplitLayout(PROJECT_ROOT)) {
     if (withPrd) return { kind: "error", message: "--with-prd can only be selected when initializing a new workflow" };
+    // MARS-117: a clone that first runs next in an existing split layout registers the
+    // registry merge driver in its own .git/config (idempotent, best-effort).
+    provisionGitStrategy();
     return splitNext(args, flags, graph);
   }
 
@@ -4310,6 +4347,7 @@ async function handleNext(args: string[]): Promise<Directive> {
     } catch (error) {
       return { kind: "error", message: `Workflow ${state.workflow_id} was created with baseline ${state.baseline_commit}, but the BASELINE_COMMIT_RECORDED audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。` };
     }
+    const gitWarnings = provisionGitStrategy();
     return {
       kind: "print",
       message: `✅ AWS-style lightweight workflow initialized for: ${workDescription}\n` +
@@ -4317,7 +4355,8 @@ async function handleNext(args: string[]): Promise<Directive> {
         `  Baseline commit: ${state.baseline_commit} (created)\n` +
         (state.baseline_repos ? `  Baseline repos: ${renderBaselineRepos(state.baseline_repos)}\n` : "") +
         `  Executable stages: ${getExecutableStages(graph, scopeFlag, selectedOptionalStages).length}/${graph.stage_count}\n` +
-        `  Run 'next' again to get the first stage directive.`,
+        `  Run 'next' again to get the first stage directive.` +
+        (gitWarnings.length ? `\n${gitWarnings.map((line) => `  ${line}`).join("\n")}` : ""),
     };
   }
 
@@ -6424,7 +6463,7 @@ function writeAdoptionAdvance(adoption: { ref: WorkflowRef; state: WorkflowState
 // state — lineage / revision verification and lineage retirement (4.13.0, MARS-98)
 // ---------------------------------------------------------------------------
 
-const STATE_USAGE = "Usage: orchestrate state verify | orchestrate state retire --lineage <workflow-id>[,<workflow-id>] --user-input Approve --reason \"<why>\" | orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason \"<why>\"";
+const STATE_USAGE = "Usage: orchestrate state verify | orchestrate state rebuild | orchestrate state retire --lineage <workflow-id>[,<workflow-id>] --user-input Approve --reason \"<why>\" | orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason \"<why>\"";
 
 async function handleState(args: string[]): Promise<Directive> {
   const [action, ...rest] = args;
@@ -6438,7 +6477,67 @@ async function handleState(args: string[]): Promise<Directive> {
   }
   if (action === "retire") return retireLineages(flags);
   if (action === "adopt") return adoptModuleState(flags);
+  if (action === "rebuild") return rebuildControlPlane(flags);
   return { kind: "error", message: STATE_USAGE };
+}
+
+/**
+ * MARS-117 (change C): rebuild the registry identity file and recompute the derived
+ * projection / global summary from the per-module workflow states after a merge. The
+ * registry file is identity-only (module -> Workflow ID / State Path); a merge that went
+ * through the aidlc-registry driver already unioned the identity rows, and this command
+ * rewrites them to the canonical, sorted, deduplicated, conflict-note-free form and then
+ * recomputes the status / barrier / contract projections (which the engine never
+ * persists) so the team can one-click rebuild instead of hand-editing. Read-only against
+ * the workflow states; it only ever rewrites registry.md to its canonical identity form.
+ */
+async function rebuildControlPlane(flags: Record<string, string>): Promise<Directive> {
+  if (Object.keys(flags).length > 0) return { kind: "error", message: `state rebuild takes no options. ${STATE_USAGE}` };
+  if (!isSplitLayout(PROJECT_ROOT)) {
+    return { kind: "error", message: "state rebuild needs the split layout (aidlc/active/registry.md); a single-layout workflow has no registry projection to rebuild." };
+  }
+  let loaded: WorkflowParts;
+  try {
+    loaded = loadWorkflowParts(PROJECT_ROOT);
+  } catch (error) {
+    return { kind: "error", message: `Cannot rebuild: the control plane is inconsistent — ${error instanceof Error ? error.message : String(error)}. Resolve the registry/state conflict (orchestrate state verify) first.` };
+  }
+  // refreshRegistry rewrites registry.md to the canonical identity form (sorted, deduped,
+  // any leftover conflict note dropped) and recomputes the in-memory projection.
+  refreshRegistry(loaded);
+  const projection = loaded.registry!;
+  const modules = projection.modules.map((row) => ({
+    module_id: row.module_id,
+    workflow_id: row.workflow_id,
+    state_path: row.state_path,
+    status: row.status,
+    current_stage: row.current_stage,
+  }));
+  try {
+    appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "CONTROL_PLANE_REBUILT", {
+      Trigger: "state rebuild",
+      Modules: String(modules.length),
+      "Barrier Ready": projection.integration.barrier_ready ? "yes" : "no",
+    });
+  } catch {
+    // Audit is best-effort; the registry rewrite is the contract.
+  }
+  return {
+    kind: "print",
+    workflow_id: projection.global_workflow_id,
+    modules,
+    integration: {
+      workflow_id: projection.integration.workflow_id,
+      status: projection.integration.status,
+      barrier_ready: projection.integration.barrier_ready,
+      blocking: projection.integration.blocking,
+    },
+    message: `✅ Control plane rebuilt from the per-module workflow states (registry.md canonicalized).\n` +
+      `  Global workflow: ${projection.global_workflow_id}\n` +
+      `  Modules (${modules.length}): ${modules.map((row) => `${row.module_id} [${row.status}] @ ${row.current_stage}`).join("; ") || "(none)"}\n` +
+      `  Integration: ${projection.integration.status}, barrier ${projection.integration.barrier_ready ? "ready" : "not ready"}${projection.integration.blocking.length ? ` (blocking: ${projection.integration.blocking.join(", ")})` : ""}\n` +
+      `  Commit aidlc/active/registry.md so the team shares the rebuilt identity index.`,
+  };
 }
 
 /**
@@ -6669,6 +6768,18 @@ async function main() {
   }
 
   const { cmd, rest } = parseSubcommand(args);
+
+  // The registry merge driver (change B) is invoked by git with `%O %A %B`; it must
+  // write the merged result back to the ours file and signal clean (0) / conflict (1)
+  // through its exit status, not a JSON directive. Handle it before the directive flow.
+  if (cmd === "registry") {
+    if (rest[0] !== "merge-driver" || rest.length !== 4) {
+      console.error(JSON.stringify({ kind: "error", message: "Usage: orchestrate registry merge-driver <base> <ours> <theirs> (invoked by git via merge=aidlc-registry)" }));
+      process.exit(2);
+    }
+    const [, baseFile, oursFile, theirsFile] = rest;
+    process.exit(runRegistryMergeDriver(baseFile, oursFile, theirsFile));
+  }
 
   let directive: Directive;
   switch (cmd) {
