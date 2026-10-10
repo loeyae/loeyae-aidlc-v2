@@ -665,7 +665,8 @@ function testCaseDerivation(): Record<string, unknown> {
   if (!/source_ref\s*:/i.test(caseContent)) fail("every I13 test case must declare source_ref");
   const modes = ucdModes(idsFound, declarations);
   const units = ucdUnitRefs(idsFound, declarations);
-  const defectRefs = ucdDefectRefs(idsFound, declarations);
+  const defectRefs = ucdAnchorRefs(idsFound, declarations, "defect_ref");
+  const changeRefs = ucdAnchorRefs(idsFound, declarations, "change_ref");
   return {
     status: "required",
     applicability: "required",
@@ -675,6 +676,7 @@ function testCaseDerivation(): Record<string, unknown> {
     ucd_modes: Object.fromEntries(idsFound.map((id) => [id, modes.get(id)!.mode])),
     ...(units ? { ucd_units: units } : {}),
     ...(defectRefs.size > 0 ? { defect_refs: Object.fromEntries([...defectRefs].sort(([left], [right]) => left.localeCompare(right))) } : {}),
+    ...(changeRefs.size > 0 ? { change_refs: Object.fromEntries([...changeRefs].sort(([left], [right]) => left.localeCompare(right))) } : {}),
     ...characterizationEvidence(idsFound, modes),
     source_files: sourcePaths.map(relativePath),
     test_case_files: caseFiles.map(relativePath),
@@ -838,49 +840,65 @@ const DEFECT_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
  * sits in a body-only case file (frontmatter is the only place it may be declared) or is
  * not a single clean token, mirroring the tdd_mode/unit_refs contract.
  */
-function ucdDefectRefs(ids: string[], declarations: Map<string, UcdDeclaration>): Map<string, string> {
+// MARS-112 / MARS-116: read a single-token lightweight anchor from UC-D frontmatter.
+// `defect_ref` anchors a bugfix UC-D to a traceable defect id; `change_ref` anchors an
+// express/workshop UC-D to a traceable change identity (ticket / requirement item /
+// experiment goal id). Both share the same ASCII-token contract (DEFECT_REF_PATTERN) so
+// the token can be grep-reconciled against the delivered source at code-generation.
+function ucdAnchorRefs(ids: string[], declarations: Map<string, UcdDeclaration>, anchorField: "defect_ref" | "change_ref"): Map<string, string> {
   const errors: string[] = [];
   const refs = new Map<string, string>();
   for (const id of ids) {
     const declaration = declarations.get(id)!;
     const fields = declaration.fields;
     if (!fields) {
-      // body-only case file: a stray `defect_ref:` line in the body must not pass silently.
-      if (declaredValue(text(declaration.file), "defect_ref") !== undefined) {
-        errors.push(`${id} declares defect_ref outside a frontmatter block (${relativePath(declaration.file)}); defect_ref belongs in the UC-D frontmatter`);
+      // body-only case file: a stray `<anchorField>:` line in the body must not pass silently.
+      if (declaredValue(text(declaration.file), anchorField) !== undefined) {
+        errors.push(`${id} declares ${anchorField} outside a frontmatter block (${relativePath(declaration.file)}); ${anchorField} belongs in the UC-D frontmatter`);
       }
       continue;
     }
-    const value = fields.get("defect_ref");
+    const value = fields.get(anchorField);
     if (value === undefined) continue;
     if (Array.isArray(value) || typeof value !== "string" || value.length === 0) {
-      errors.push(`${id} defect_ref must be a single non-empty token (bug ticket or defect id), got ${JSON.stringify(value)}`);
+      errors.push(`${id} ${anchorField} must be a single non-empty token, got ${JSON.stringify(value)}`);
       continue;
     }
     if (!DEFECT_REF_PATTERN.test(value)) {
-      errors.push(`${id} defect_ref ${JSON.stringify(value)} is not a valid anchor token (letters, digits, . _ - / only)`);
+      errors.push(`${id} ${anchorField} ${JSON.stringify(value)} is not a valid anchor token (letters, digits, . _ - / only)`);
       continue;
     }
     refs.set(id, value);
   }
-  if (errors.length > 0) fail(`I13 UC-D defect_ref contract violated: ${errors.join("; ")}`);
+  if (errors.length > 0) fail(`I13 UC-D ${anchorField} contract violated: ${errors.join("; ")}`);
   return refs;
 }
 
 /**
- * MARS-112: traceability-matrix for lightweight scopes (bugfix/refactor) that skip
+ * MARS-112 / MARS-116: traceability-matrix for lightweight scopes that skip
  * requirements-analysis and so have no requirements.md root. Returns null for any other
  * scope (the caller then keeps the historical not_applicable). The anchor is the scope's
  * own source of truth, so the gate is no longer a determinate no-op:
  *
- *   - bugfix:   at least one tdd_mode new UC-D must declare a `defect_ref`; once the
- *               code_refs layer (code-generation) is reached, the delivered source must
- *               reference that defect anchor. A missing anchor or an unreferenced anchor
- *               is a broken_row the gate rejects.
- *   - refactor: at least one tdd_mode characterization UC-D must declare a non-empty
- *               `code_refs` list (the baseline anchor MARS-104 already requires). A
- *               refactor with no characterization code_refs anchor is a broken_row.
+ *   - bugfix:            at least one tdd_mode new UC-D must declare a `defect_ref`; once
+ *                        the code_refs layer (code-generation) is reached, the delivered
+ *                        source must reference that defect anchor.
+ *   - express/workshop:  at least one tdd_mode new UC-D must declare a `change_ref`
+ *                        (same new-UC-D anchor mechanism as bugfix, semantically neutral:
+ *                        a ticket / requirement item / experiment goal id); reconciled
+ *                        against the delivered source at code-generation, same as bugfix.
+ *   - refactor:          at least one tdd_mode characterization UC-D must declare a
+ *                        non-empty `code_refs` list (the baseline anchor MARS-104 already
+ *                        requires).
+ *
+ * A missing anchor or an unreferenced anchor is a broken_row the gate rejects.
  */
+const NEW_UCD_ANCHOR_FIELD: Record<string, "defect_ref" | "change_ref"> = {
+  bugfix: "defect_ref",
+  express: "change_ref",
+  workshop: "change_ref",
+};
+
 function lightweightScopeMatrix(
   currentStage: string,
   currentOrder: number,
@@ -888,7 +906,8 @@ function lightweightScopeMatrix(
   read: (rel: string) => string,
 ): Record<string, unknown> | null {
   const scope = (workflowState?.scope || "").toLowerCase();
-  if (scope !== "bugfix" && scope !== "refactor") return null;
+  const anchorField = NEW_UCD_ANCHOR_FIELD[scope];
+  if (!anchorField && scope !== "refactor") return null;
 
   const caseFiles = allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/)
     .filter((path) => basename(path) !== "_index.md");
@@ -900,26 +919,28 @@ function lightweightScopeMatrix(
     module_id: ACTIVE_MODULE,
     current_stage: currentStage,
     scope,
-    lightweight_anchor: scope === "bugfix" ? "defect_ref" : "code_refs",
+    lightweight_anchor: anchorField ?? "code_refs",
     ucd_total: ucdIds.length,
     migration_status: "passed",
   };
 
   if (ucdIds.length === 0) {
-    // No UC-D at all: the I13/i13 contract (a bugfix needs a new UC-D, a refactor a
-    // characterization one) rejects this upstream, but the matrix must not pass blindly.
+    // No UC-D at all: the I13/i13 contract (a new-behaviour lightweight scope needs a new
+    // UC-D, a refactor a characterization one) rejects this upstream, but the matrix must
+    // not pass blindly.
     brokenRows.push(`${scope}: ANCHOR_MISSING@ucd(no UC-D declared; cannot anchor lightweight traceability)`);
     return { ...base, broken_rows: brokenRows, anchored_ucds: [] };
   }
 
   const modes = ucdModes(ucdIds, declarations);
 
-  if (scope === "bugfix") {
-    const defectRefs = ucdDefectRefs(ucdIds, declarations);
+  if (anchorField) {
+    // bugfix / express / workshop: a new-behaviour UC-D carries the source anchor token.
+    const anchorRefs = ucdAnchorRefs(ucdIds, declarations, anchorField);
     const newUcds = ucdIds.filter((id) => modes.get(id)!.mode === "new");
-    const anchoredNew = newUcds.filter((id) => defectRefs.has(id));
+    const anchoredNew = newUcds.filter((id) => anchorRefs.has(id));
     if (anchoredNew.length === 0) {
-      brokenRows.push("bugfix: ANCHOR_MISSING@defect_ref(no tdd_mode new UC-D declares a defect_ref anchoring the reproduced bug to a traceable defect id)");
+      brokenRows.push(`${scope}: ANCHOR_MISSING@${anchorField}(no tdd_mode new UC-D declares a ${anchorField} anchoring the change to a traceable identity)`);
     } else if (currentOrder >= MATRIX_STAGE_ORDER.indexOf("code-generation")) {
       // Reconcile the anchor against the delivered source once code-generation is reached:
       // at least one anchor token must appear in the module's own source roots.
@@ -933,10 +954,10 @@ function lightweightScopeMatrix(
         ? projectFiles(SOURCE_FILE_PATTERN)
         : [...new Set(codeRoots!.roots.flatMap((root) => allFiles(root, SOURCE_FILE_PATTERN)))].sort();
       const codeSrc = joined(codeFiles);
-      const anchors = [...new Set(anchoredNew.map((id) => defectRefs.get(id)!))];
+      const anchors = [...new Set(anchoredNew.map((id) => anchorRefs.get(id)!))];
       const referenced = anchors.filter((anchor) => new RegExp(`\\b${anchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(codeSrc));
       if (referenced.length === 0) {
-        brokenRows.push(`bugfix: ANCHOR_UNREFERENCED@code_refs(delivered source does not reference any defect anchor ${anchors.join(", ")})`);
+        brokenRows.push(`${scope}: ANCHOR_UNREFERENCED@code_refs(delivered source does not reference any ${anchorField} anchor ${anchors.join(", ")})`);
       }
     }
     return {
@@ -944,7 +965,7 @@ function lightweightScopeMatrix(
       broken_rows: brokenRows,
       new_ucds: newUcds,
       anchored_ucds: anchoredNew,
-      defect_refs: Object.fromEntries([...defectRefs].sort(([left], [right]) => left.localeCompare(right))),
+      [`${anchorField}s`]: Object.fromEntries([...anchorRefs].sort(([left], [right]) => left.localeCompare(right))),
     };
   }
 
@@ -3433,12 +3454,13 @@ function traceabilityMatrix(): Record<string, unknown> {
   const read = (rel: string): string => existing([mod(rel)]).map(text).join("\n");
   const reqDoc = read("docs/aidlc/modules/{module-id}/inception/requirements.md");
   if (!reqDoc.trim()) {
-    // MARS-112: lightweight scopes (bugfix/refactor) skip requirements-analysis, so
+    // MARS-112 / MARS-116: lightweight scopes skip requirements-analysis, so
     // requirements.md is never produced and the REQ→code matrix has no root. Instead of
     // passing blindly (not_applicable), the gate anchors to the scope's own source of
     // truth: bugfix to a UC-D `defect_ref` reconciled against the delivered source,
-    // refactor to a characterization UC-D `code_refs` baseline anchor. Any other scope
-    // without requirements.md stays not_applicable (unchanged).
+    // express/workshop to a UC-D `change_ref` (same mechanism), refactor to a
+    // characterization UC-D `code_refs` baseline anchor. Any other scope without
+    // requirements.md stays not_applicable (unchanged).
     const lightweight = lightweightScopeMatrix(currentStage, currentOrder, mod, read);
     if (lightweight) return lightweight;
     return { status: "not_applicable", reason: "requirements.md not present yet" };

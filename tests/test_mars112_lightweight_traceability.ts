@@ -8,12 +8,14 @@
  * unconditionally — so bugfix/refactor code-generation had no real REQ→code tracing.
  *
  * The producer now anchors each lightweight scope to its own source of truth:
- *   - bugfix:   at least one tdd_mode new UC-D must declare a `defect_ref`; once the
- *               code_refs layer (code-generation) is reached the delivered source must
- *               reference that defect anchor. A missing/unreferenced anchor is a
- *               broken_row the gate rejects.
- *   - refactor: at least one tdd_mode characterization UC-D must declare a non-empty
- *               `code_refs` baseline anchor.
+ *   - bugfix:            at least one tdd_mode new UC-D must declare a `defect_ref`; once
+ *                        the code_refs layer (code-generation) is reached the delivered
+ *                        source must reference that defect anchor.
+ *   - express/workshop:  at least one tdd_mode new UC-D must declare a `change_ref`
+ *                        (MARS-116, same new-UC-D mechanism as bugfix, semantically
+ *                        neutral); reconciled against the delivered source the same way.
+ *   - refactor:          at least one tdd_mode characterization UC-D must declare a
+ *                        non-empty `code_refs` baseline anchor.
  * Any other scope without requirements.md stays not_applicable (unchanged).
  *
  * Producer side runs through the public `check` CLI; the gate side generates real
@@ -190,6 +192,74 @@ try {
     assert.deepEqual(result.broken_rows, [], JSON.stringify(result.broken_rows));
     assert.deepEqual(result.anchored_ucds, ["UC-D-001"]);
     assert.deepEqual(result.code_refs, ["src/placeholder.py"]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Producer side — express / workshop (MARS-116: same new-UC-D anchor as bugfix,
+  // using the semantically neutral `change_ref` field)
+  // -------------------------------------------------------------------------
+  for (const scope of ["express", "workshop"]) {
+    await section(`${scope}: a new UC-D with no change_ref anchor is a broken_row`, () => {
+      const project = lightProject(`${scope}-missing`, scope, "# code\ndef feature():\n    return 1\n");
+      write(project, `${CASES}/_index.md`, "# UC-D index\n- UC-D-001 micro change\n");
+      write(project, `${CASES}/UC-D-001.md`, "---\nid: UC-D-001\nstatus: ready\nsource_ref: notes\ntdd_mode: new\n---\n# UC-D-001\nMicro change.\n");
+      commit(project, "fixture");
+      // before code-generation: anchor presence is already demanded
+      const planning = matrix(project, "tdd");
+      assert.equal(planning.status, "passed");
+      assert.equal(planning.scope, scope);
+      assert.equal(planning.lightweight_anchor, "change_ref");
+      assert.ok(planning.broken_rows.some((row: string) => row.includes("ANCHOR_MISSING@change_ref")), JSON.stringify(planning.broken_rows));
+    });
+
+    await section(`${scope}: a new UC-D with a change_ref referenced in source passes`, () => {
+      const project = lightProject(`${scope}-anchored`, scope, "# TASK-42 add the micro feature\ndef feature():\n    return 1\n");
+      write(project, `${CASES}/_index.md`, "# UC-D index\n- UC-D-001 TASK-42\n");
+      write(project, `${CASES}/UC-D-001.md`, "---\nid: UC-D-001\nstatus: ready\nsource_ref: TASK-42\ntdd_mode: new\nchange_ref: TASK-42\n---\n# UC-D-001\nImplement TASK-42.\n");
+      commit(project, "fixture");
+      const result = matrix(project, "code-generation");
+      assert.equal(result.status, "passed");
+      assert.deepEqual(result.broken_rows, [], JSON.stringify(result.broken_rows));
+      assert.deepEqual(result.anchored_ucds, ["UC-D-001"]);
+      assert.deepEqual(result.change_refs, { "UC-D-001": "TASK-42" });
+      assert.equal(result.migration_status, "passed");
+    });
+
+    await section(`${scope}: a change_ref the delivered source never references is a broken_row`, () => {
+      const project = lightProject(`${scope}-unref`, scope, "# unrelated code\ndef feature():\n    return 1\n");
+      write(project, `${CASES}/_index.md`, "# UC-D index\n- UC-D-001 TASK-42\n");
+      write(project, `${CASES}/UC-D-001.md`, "---\nid: UC-D-001\nstatus: ready\nsource_ref: TASK-42\ntdd_mode: new\nchange_ref: TASK-42\n---\n# UC-D-001\nImplement TASK-42.\n");
+      commit(project, "fixture");
+      // at code-generation the anchor must be reconciled against the source
+      const atGreen = matrix(project, "code-generation");
+      assert.ok(atGreen.broken_rows.some((row: string) => row.includes("ANCHOR_UNREFERENCED@code_refs")), JSON.stringify(atGreen.broken_rows));
+      // before code-generation the reconciliation does not yet apply (anchor present is enough)
+      const atTdd = matrix(project, "tdd");
+      assert.deepEqual(atTdd.broken_rows, [], JSON.stringify(atTdd.broken_rows));
+    });
+  }
+
+  await section("change_ref must be a single clean token in frontmatter (regex escape of . - /)", () => {
+    const project = lightProject("express-badref", "express", "# code\ndef feature():\n    return 1\n");
+    write(project, `${CASES}/_index.md`, "# UC-D index\n- UC-D-001 micro\n");
+    write(project, `${CASES}/UC-D-001.md`, "---\nid: UC-D-001\nstatus: ready\nsource_ref: x\ntdd_mode: new\nchange_ref: 'bad token'\n---\n# UC-D-001\nMicro.\n");
+    commit(project, "fixture");
+    const result = run(project, [cli, "check", "--sensor", "traceability-matrix", "--module", M01], { AIDLC_ACTIVE_STAGE: "code-generation" });
+    assert.notEqual(result.status, 0, result.out);
+    assert.match(result.out, /change_ref .* is not a valid anchor token/);
+  });
+
+  await section("change_ref with regex metacharacters is escaped and matched literally", () => {
+    // a valid token containing `.` `-` `/` (DEFECT_REF_PATTERN allows these); the source
+    // reconciliation must match it literally, not as a regex.
+    const project = lightProject("express-escape", "express", "# implements EXP-1.2/a now\ndef feature():\n    return 1\n");
+    write(project, `${CASES}/_index.md`, "# UC-D index\n- UC-D-001 EXP\n");
+    write(project, `${CASES}/UC-D-001.md`, "---\nid: UC-D-001\nstatus: ready\nsource_ref: x\ntdd_mode: new\nchange_ref: EXP-1.2/a\n---\n# UC-D-001\nExperiment.\n");
+    commit(project, "fixture");
+    const result = matrix(project, "code-generation");
+    assert.equal(result.status, "passed");
+    assert.deepEqual(result.broken_rows, [], JSON.stringify(result.broken_rows));
+    assert.deepEqual(result.change_refs, { "UC-D-001": "EXP-1.2/a" });
   });
 
   // -------------------------------------------------------------------------

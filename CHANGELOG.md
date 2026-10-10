@@ -2,7 +2,7 @@
 
 ## 4.13.1
 
-两轮流程评估的收口：门禁错位 / 门禁不足 / 过度设计的集中修复（MARS-104/106/107/108/109/110/111/112 + 四项评估 issue），阶段数 46 → 43 → 40。
+两轮流程评估的收口：门禁错位 / 门禁不足 / 过度设计的集中修复（MARS-104/106/107/108/109/110/111/112/116 + 四项评估 issue），阶段数 46 → 43 → 40。
 
 ### Added
 
@@ -10,6 +10,7 @@
 - **多模块默认开启共享契约基线（MARS-107）**：`has_contract_dependencies` 的推断 fallback 改为 `multi_module || moduleHasContractDependencies`，多模块工作流默认进入 `shared-contract-baseline` 阶段。
 - **operations 拆分为规划 + 授权（MARS-109）**：原 `operations` 阶段拆为 `operations-planning`（approval: notify，可逆规划，产出 operations-plan.md）与 `operations-authorization`（approval: block，不可逆授权，产出 deployment-config/guide/summary），二者同受 `has_deployment_needs` 门控；`operations` 作为向后兼容别名保留在 `has_deployment_needs` 的 workflow-plan 决策求值中。`operations-templates` 顺延为 4.3。
 - **bugfix / refactor 轻量追溯锚点（MARS-112）**：轻量 scope 不经 `requirements-analysis`、无 requirements.md 时，追溯矩阵不再对其盲判 `not_applicable`，改验各自的轻量来源锚点——`bugfix` 要求至少一个 `tdd_mode: new` UC-D 的 frontmatter 声明 `defect_ref`（bug ticket / 缺陷 REQ 标识），且交付源码必须引用该锚点（否则记 `ANCHOR_UNREFERENCED@code_refs`）；`refactor` 要求至少一个 characterization UC-D 的非空 `code_refs`。其他 scope 在无 requirements.md 时仍为 `not_applicable`，行为不变。
+- **express / workshop 轻量追溯锚点（MARS-116）**：补齐 MARS-112 的范围遗漏——`express`（快速微需求）/ `workshop`（实验）同样走 8 阶段轻量路径、同样经过带 `traceability-matrix` sensor 的 `code-generation`，此前被 `lightweightScopeMatrix` 排除而静默回落 `not_applicable`。现要求至少一个 `tdd_mode: new` UC-D 的 frontmatter 声明语义中性的 ASCII 锚点 `change_ref`（变更身份：ticket / 需求条目 / 实验目标 id，复用 `defect_ref` 同一校验正则），且到 `code-generation` 起交付源码必须引用该锚点，否则记 `ANCHOR_MISSING@change_ref` / `ANCHOR_UNREFERENCED@code_refs`。机制与 bugfix 完全对称（`lightweightScopeMatrix` 的 new-UC-D 锚点分支参数化为 `defect_ref` / `change_ref`），bugfix 的 `defect_ref` 与 refactor 的 `code_refs` 契约不变。I13 producer 同时校验并输出 `change_ref`。test_mars112 扩展至 17 section，覆盖 express/workshop 的缺锚点 / 锚点被引用 / 锚点未引用三条路径，并补齐正则转义（`change_ref` 含 `. - /`）边界。
 - **AIDLC_PROGRAM_FILES_ROOTS 环境种子（MARS-111）**：`bin/cli.ts` 新增非受保护的机器级 Program Files 根覆盖，使 installer host-detection 测试与真实机器的 `C:\Program Files`（及宿主机 KiroCrew 安装）隔离。
 
 ### Fixed

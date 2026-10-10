@@ -136,8 +136,9 @@ loeyae-aidlc orchestrate report --stage <slug> --result completed
 - **证据缺失 / provenance 不匹配** → 重新 `report`，让 producer 重新生成。**不要手写证据 JSON。**
 - **追溯矩阵断链 `REQ-xxx: BROKEN@<layer>`** → 该需求在某一层真的丢了（如活到故事层却在设计层断）。去补那一层的产物：让对应文档/代码里出现该 `REQ` 标记，再 `report`。
 - **未迁移旧项目**（`requirements.md` 无 `REQ-xxx` 或缺 `track` 标签）→ 记 `MIGRATION_REQUIRED`，降级放行并输出缺失清单，不硬阻断。
-- **轻量 scope 缺锚点 `<scope>: ANCHOR_MISSING@<anchor>` / `ANCHOR_UNREFERENCED@code_refs`**（4.13.2，MARS-112）→ `bugfix` / `refactor` 走 8 阶段路径、不经 `requirements-analysis`，没有 `requirements.md` 作 REQ 追溯根。追溯矩阵不再对它们盲判 `not_applicable`，而是改验各自的轻量来源锚点：
+- **轻量 scope 缺锚点 `<scope>: ANCHOR_MISSING@<anchor>` / `ANCHOR_UNREFERENCED@code_refs`**（4.13.1，MARS-112/116）→ `bugfix` / `refactor` / `express` / `workshop` 走 8 阶段路径、不经 `requirements-analysis`，没有 `requirements.md` 作 REQ 追溯根。追溯矩阵不再对它们盲判 `not_applicable`，而是改验各自的轻量来源锚点：
   - `bugfix`：至少一个 `tdd_mode: new` UC-D 的 frontmatter 要声明 `defect_ref`（bug ticket 或缺陷 REQ 标识，如 `BUG-123`），把复现缺陷的 UC-D 锚定到可追溯的缺陷身份；到 `code-generation` 阶段起，交付源码必须引用该锚点，否则记 `ANCHOR_UNREFERENCED@code_refs`。
+  - `express` / `workshop`：至少一个 `tdd_mode: new` UC-D 的 frontmatter 要声明 `change_ref`（变更身份：需求 ticket / 需求条目 / 实验目标 id，如 `TASK-42`、`EXP-7`），机制与 `bugfix` 的 `defect_ref` 完全一致、语义中性；到 `code-generation` 阶段起，交付源码必须引用该锚点，否则记 `ANCHOR_UNREFERENCED@code_refs`。
   - `refactor`：至少一个 `tdd_mode: characterization` UC-D 要声明非空 `code_refs`（MARS-104 已要求的 baseline 锚点），追溯锚定到存量代码基线。
   - 其他 scope 在没有 `requirements.md` 时仍为 `not_applicable`，行为不变。
 

@@ -59,7 +59,13 @@ docs/aidlc/modules/{module-id}/inception/clarifications.md
 - defect_ref: BUG-123
 ```
 
-随后在 `docs/aidlc/modules/{module-id}/inception/application-design/test-cases/` 下派生 UC-D，令其 frontmatter 的 `source_ref` 指向该锚点（`bugfix` 的 `new` UC-D 还须声明 `defect_ref`，见追溯矩阵的轻量来源锚点规则）。`refactor` 同理：放置一个描述被重构行为基线的来源文件，并为 `characterization` UC-D 声明 `code_refs`。
+随后在 `docs/aidlc/modules/{module-id}/inception/application-design/test-cases/` 下派生 UC-D，令其 frontmatter 的 `source_ref` 指向该锚点。各轻量 scope 在追溯矩阵层还要声明一个可追溯身份锚点（见追溯矩阵的轻量来源锚点规则）：
+
+- `bugfix`：至少一个 `new` UC-D 的 frontmatter 声明 `defect_ref`（缺陷 ticket 或缺陷 id，如 `BUG-123`），把复现缺陷的 UC-D 锚定到可追溯的缺陷身份。
+- `express` / `workshop`：至少一个 `new` UC-D 的 frontmatter 声明 `change_ref`（变更身份：需求 ticket、需求条目或实验目标 id，如 `TASK-42`、`EXP-7`），把该微需求/实验锚定到可追溯的变更身份。机制与 `bugfix` 的 `defect_ref` 完全一致，只是语义中性。
+- `refactor`：为 `characterization` UC-D 声明非空 `code_refs`，追溯锚定到存量代码基线。
+
+`defect_ref` / `change_ref` 都是单个 ASCII token（字母、数字、`.` `_` `-` `/`），到 `code-generation` 阶段起，交付源码必须引用该锚点 token（例如在修复/实现处留一行 `// TASK-42` 注释），否则追溯矩阵记 `ANCHOR_UNREFERENCED@code_refs`；完全缺锚点则记 `ANCHOR_MISSING@<字段>`。
 
 ## 执行约束
 
