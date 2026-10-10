@@ -388,6 +388,7 @@ function safeReferencedFile(value: unknown, field: string): { path: string; rela
 interface PagePlanContract {
   path: string;
   content: string;
+  storiesContent: string;  // user-stories.md 原文(正向全覆盖解析 US 全集与显式豁免用)
   pageIds: string[];
   requirementIds: string[];
   storyIds: string[];
@@ -421,14 +422,15 @@ function pagePlanContract(): PagePlanContract {
   const known = new Set([...requirementIds, ...storyIds]);
   const unknown = sourceIds.filter((id) => !known.has(id));
   if (unknown.length > 0) fail(`page plan references unknown source IDs: ${[...new Set(unknown)].join(", ")}`);
-  return {
-    path: planPath,
-    content,
-    pageIds,
-    requirementIds,
-    storyIds,
-    artifacts: [relativePath(requirementsPath), relativePath(storiesPath), relativePath(planPath)],
-  };
+    return {
+      path: planPath,
+      content,
+      storiesContent: stories,
+      pageIds,
+      requirementIds,
+      storyIds,
+      artifacts: [relativePath(requirementsPath), relativePath(storiesPath), relativePath(planPath)],
+    };
 }
 
 // 元素分类型计数(A 计数级对账基础)。设计侧与实现侧用同一类型集,逐类型比较。
@@ -440,6 +442,7 @@ interface DesignArtifactContract {
   conditions: number;      // 设计侧条件显隐信号数(粗粒度)
   elementLevel: boolean;   // 是否支持元素级 diff(html-mock=true;figma=false,元素级不适用)
   artifacts: string[];
+  coveredStories: string[]; // manifest 全部 page 的 stories[] 并集(正向全覆盖对账用,已 normalize)
 }
 function addElementTally(into: ElementTally, add: ElementTally): void {
   into.button += add.button; into.input += add.input; into.select += add.select; into.table += add.table; into.dialog += add.dialog;
@@ -469,6 +472,7 @@ function htmlArtifactContract(plan: PagePlanContract): DesignArtifactContract {
   let elements = 0;
   const tally: ElementTally = { button: 0, input: 0, select: 0, table: 0, dialog: 0 };
   let conditions = 0;
+  const coveredStories = new Set<string>();
   const knownRequirements = new Set(plan.requirementIds);
   const knownStories = new Set(plan.storyIds);
   for (const [index, raw] of pages.entries()) {
@@ -483,6 +487,7 @@ function htmlArtifactContract(plan: PagePlanContract): DesignArtifactContract {
     const unknownRequirements = requirements.filter((id) => !knownRequirements.has(id));
     const unknownStories = stories.filter((id) => !knownStories.has(id));
     if (unknownRequirements.length > 0 || unknownStories.length > 0) fail(`${pageId} references unknown requirements/stories`);
+    for (const story of stories) coveredStories.add(story);
     const specsContent = text(specs.path);
     const htmlContent = text(html.path);
     if (!specsContent.toUpperCase().includes(pageId) || !htmlContent.toUpperCase().includes(pageId) || !htmlContent.includes(mockBox)) {
@@ -502,7 +507,7 @@ function htmlArtifactContract(plan: PagePlanContract): DesignArtifactContract {
   }
   sameIdentifiers(pageIds, plan.pageIds, "ui-mock-manifest.pages.page_id");
   if (new Set(pageIds).size !== pageIds.length || elements < pageIds.length) fail("HTML Mock pages or verifiable UI elements are incomplete");
-  return { pageIds: [...new Set(pageIds)].sort(), elements, tally, conditions, elementLevel: true, artifacts: [...new Set(artifacts)] };
+  return { pageIds: [...new Set(pageIds)].sort(), elements, tally, conditions, elementLevel: true, artifacts: [...new Set(artifacts)], coveredStories: [...coveredStories].sort() };
 }
 
 function figmaArtifactContract(plan: PagePlanContract, route: UiRoute): DesignArtifactContract {
@@ -527,6 +532,7 @@ function figmaArtifactContract(plan: PagePlanContract, route: UiRoute): DesignAr
   if (pages.length === 0) fail("figma-manifest.pages must not be empty");
   const pageIds: string[] = [];
   const nodeIds = new Set<string>();
+  const coveredStories = new Set<string>();
   const knownRequirements = new Set(plan.requirementIds);
   const knownStories = new Set(plan.storyIds);
   for (const [index, raw] of pages.entries()) {
@@ -543,12 +549,13 @@ function figmaArtifactContract(plan: PagePlanContract, route: UiRoute): DesignAr
     if (requirements.some((id) => !knownRequirements.has(id)) || stories.some((id) => !knownStories.has(id))) {
       fail(`${pageId} references unknown requirements/stories`);
     }
+    for (const story of stories) coveredStories.add(story);
     pageIds.push(pageId);
   }
   sameIdentifiers(pageIds, plan.pageIds, "figma-manifest.pages.page_id");
   if (new Set(pageIds).size !== pageIds.length) fail("figma-manifest contains duplicate page IDs");
   // figma 无可解析的 HTML 元素:元素级 diff 不适用(需 Provider/design-context),elementLevel=false。
-  return { pageIds: [...new Set(pageIds)].sort(), elements: nodeIds.size, tally: { button: 0, input: 0, select: 0, table: 0, dialog: 0 }, conditions: 0, elementLevel: false, artifacts: [...plan.artifacts, relativePath(manifestPath)] };
+  return { pageIds: [...new Set(pageIds)].sort(), elements: nodeIds.size, tally: { button: 0, input: 0, select: 0, table: 0, dialog: 0 }, conditions: 0, elementLevel: false, artifacts: [...plan.artifacts, relativePath(manifestPath)], coveredStories: [...coveredStories].sort() };
 }
 
 function reviewEvidence(): Record<string, unknown> {
@@ -3187,6 +3194,37 @@ function designIntentCoverage(): Record<string, unknown> {
   return { status: "passed", intent_markers_found: markers.length, coverage_complete: true, uncovered: 0, covered_intents: markers };
 }
 
+// US→UI 正向全覆盖(MARS-118):有界面表现的 US 必须至少被一个 ui-mock/figma page 的 stories[] 覆盖。
+// 口径:默认不豁免——user-stories.md 中每个 US 一律要求被 UI 覆盖;只有在声明该 US 的那一行用显式标记
+// (行内 `[ui: n/a]` / `[ui: 无界面]` / `[无界面]`,大小写与全半角冒号不敏感)声明无界面表现时才豁免。
+// US id 复用 ui-artifact-consistency 自身的 STORY_ID 口径(与本 sensor 的反向 mock→US 校验、pagePlanContract 一致)。
+const UI_EXEMPTION_MARKER = /\[\s*(?:ui\s*[:：]\s*(?:n\/?a|无界面|无\s*界面)|无\s*界面)\s*\]/i;
+function forwardStoryCoverage(storiesContent: string, coveredStories: string[]): {
+  required_stories: string[];
+  exempt_stories: string[];
+  covered_stories: string[];
+  uncovered_stories: string[];
+} {
+  const covered = new Set(coveredStories);
+  const exempt = new Set<string>();
+  for (const line of storiesContent.split(/\r?\n/)) {
+    if (!UI_EXEMPTION_MARKER.test(line)) continue;
+    for (const id of normalizedIds(line, STORY_ID)) exempt.add(id);
+  }
+  const allStories = normalizedIds(storiesContent, STORY_ID);
+  const required = allStories.filter((id) => !exempt.has(id));
+  const uncovered = required.filter((id) => !covered.has(id));
+  if (uncovered.length > 0) {
+    fail(`user stories lack any UI mock coverage: ${uncovered.map((id) => `${id}: UNCOVERED@ui-mock`).join(", ")}. Add a mock page whose stories[] covers each one, or declare an explicit no-UI exemption ([ui: n/a]) on its line in user-stories.md`);
+  }
+  return {
+    required_stories: required,
+    exempt_stories: [...exempt].sort(),
+    covered_stories: [...covered].sort(),
+    uncovered_stories: [],
+  };
+}
+
 function uiArtifactConsistency(): Record<string, unknown> {
   if (!workflowState || !ACTIVE_MODULE) fail("ui-artifact-consistency requires a Markdown workflow and an active module");
   const route = selectedUiRoute();
@@ -3208,6 +3246,7 @@ function uiArtifactConsistency(): Record<string, unknown> {
   if (stage === "ui-mock-generation") {
     if (route !== "html-mock") fail(`ui-mock-generation cannot validate signed UI route ${route}`);
     const html = htmlArtifactContract(plan);
+    const coverage = forwardStoryCoverage(plan.storiesContent, html.coveredStories);
     return {
       status: "passed",
       stage,
@@ -3217,12 +3256,17 @@ function uiArtifactConsistency(): Record<string, unknown> {
       elements_checked: html.elements,
       phases_verified: ["page-plan", "skeleton", "content"],
       artifacts_checked: html.artifacts,
+      stories_required: coverage.required_stories.length,
+      stories_covered: coverage.covered_stories.length,
+      stories_exempt: coverage.exempt_stories,
+      uncovered_stories: coverage.uncovered_stories,
       unresolved: 0,
     };
   }
   if (stage === "ui-figma-generation") {
     if (route !== "figma-create" && route !== "figma-existing") fail(`ui-figma-generation cannot validate signed UI route ${route}`);
     const figma = figmaArtifactContract(plan, route);
+    const coverage = forwardStoryCoverage(plan.storiesContent, figma.coveredStories);
     return {
       status: "passed",
       stage,
@@ -3232,6 +3276,10 @@ function uiArtifactConsistency(): Record<string, unknown> {
       elements_checked: figma.elements,
       phases_verified: ["page-plan", route === "figma-create" ? "figma-created" : "figma-external-read-only"],
       artifacts_checked: figma.artifacts,
+      stories_required: coverage.required_stories.length,
+      stories_covered: coverage.covered_stories.length,
+      stories_exempt: coverage.exempt_stories,
+      uncovered_stories: coverage.uncovered_stories,
       unresolved: 0,
     };
   }

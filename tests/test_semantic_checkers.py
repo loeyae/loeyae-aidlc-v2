@@ -1261,7 +1261,31 @@ def test_ui_artifact_consistency_contracts() -> None:
         write_module_state(project, "ui-mock-generation", {"module-a": "html-mock"})
         html_ok = run_checker(project, "ui-artifact-consistency", "module-a")
         assert html_ok.returncode == 0, html_ok.stderr
-        assert json.loads(html_ok.stdout)["phases_verified"] == ["page-plan", "skeleton", "content"]
+        html_ok_payload = json.loads(html_ok.stdout)
+        assert html_ok_payload["phases_verified"] == ["page-plan", "skeleton", "content"]
+        # 正向全覆盖:单个有界面 US 被 mock page 的 stories[] 覆盖,无悬空。
+        assert html_ok_payload["stories_required"] == 1
+        assert html_ok_payload["stories_covered"] == 1
+        assert html_ok_payload["uncovered_stories"] == []
+        assert html_ok_payload["stories_exempt"] == []
+
+        # MARS-118 正向全覆盖:有界面 US 零 mock 覆盖必须 fail,并列出悬空 US id。
+        stories_path = Path(project) / "docs/aidlc/modules/module-a/inception/user-stories.md"
+        base_stories = stories_path.read_text(encoding="utf-8")
+        stories_path.write_text(base_stories + "US-002 覆盖 FR-001：用户查看注册结果。\n", encoding="utf-8")
+        uncovered = run_checker(project, "ui-artifact-consistency", "module-a")
+        assert uncovered.returncode != 0
+        assert "US-002: UNCOVERED@ui-mock" in uncovered.stderr
+
+        # 显式豁免:无界面 US 用行内 [ui: n/a] 声明后不再被误判为未覆盖。
+        stories_path.write_text(base_stories + "US-002 纯后端对账任务，无界面表现。[ui: n/a]\n", encoding="utf-8")
+        exempt = run_checker(project, "ui-artifact-consistency", "module-a")
+        assert exempt.returncode == 0, exempt.stderr
+        exempt_payload = json.loads(exempt.stdout)
+        assert exempt_payload["stories_exempt"] == ["US-002"]
+        assert exempt_payload["stories_required"] == 1
+        assert exempt_payload["uncovered_stories"] == []
+        stories_path.write_text(base_stories, encoding="utf-8")
 
         manifest_path = Path(project) / "docs/aidlc/modules/module-a/inception/ui-mock/ui-mock-manifest.json"
         phase_mismatch = json.loads(json.dumps(manifest))
@@ -1284,7 +1308,20 @@ def test_ui_artifact_consistency_contracts() -> None:
         write_module_state(project, "ui-figma-generation", {"module-a": "figma-existing"})
         figma_ok = run_checker(project, "ui-artifact-consistency", "module-a")
         assert figma_ok.returncode == 0, figma_ok.stderr
-        assert json.loads(figma_ok.stdout)["design_mode"] == "figma-existing"
+        figma_ok_payload = json.loads(figma_ok.stdout)
+        assert figma_ok_payload["design_mode"] == "figma-existing"
+        # 正向全覆盖同样守 figma route:每个有界面 US 必须被某 figma page 的 stories[] 覆盖。
+        assert figma_ok_payload["stories_required"] == 1
+        assert figma_ok_payload["stories_covered"] == 1
+        assert figma_ok_payload["uncovered_stories"] == []
+
+        figma_stories_path = Path(project) / "docs/aidlc/modules/module-a/inception/user-stories.md"
+        figma_base_stories = figma_stories_path.read_text(encoding="utf-8")
+        figma_stories_path.write_text(figma_base_stories + "US-002 覆盖 FR-001：用户查看注册结果。\n", encoding="utf-8")
+        figma_uncovered = run_checker(project, "ui-artifact-consistency", "module-a")
+        assert figma_uncovered.returncode != 0
+        assert "US-002: UNCOVERED@ui-mock" in figma_uncovered.stderr
+        figma_stories_path.write_text(figma_base_stories, encoding="utf-8")
 
         figma_path = Path(project) / "docs/aidlc/modules/module-a/inception/ui-design/figma-manifest.json"
         writable_external = json.loads(json.dumps(figma))
@@ -1299,6 +1336,12 @@ def test_ui_artifact_consistency_contracts() -> None:
         wrong_source = run_checker(project, "ui-artifact-consistency", "module-a")
         assert wrong_source.returncode != 0
         assert "source must be created" in wrong_source.stderr
+
+        # 未选 UI route 的模块:sensor 不适用(行为不变,不新增负担),正向全覆盖也不触发。
+        write_module_state(project, "ui-mock-generation", {"module-a": None})
+        not_applicable = run_checker(project, "ui-artifact-consistency", "module-a")
+        assert not_applicable.returncode != 0
+        assert "not applicable to selected UI route not-selected" in not_applicable.stderr
     finally:
         shutil.rmtree(project)
 

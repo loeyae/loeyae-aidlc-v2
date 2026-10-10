@@ -152,6 +152,7 @@ loeyae-aidlc orchestrate report --stage <slug> --result completed
   - `express` / `workshop`：至少一个 `tdd_mode: new` UC-D 的 frontmatter 要声明 `change_ref`（变更身份：需求 ticket / 需求条目 / 实验目标 id，如 `TASK-42`、`EXP-7`），机制与 `bugfix` 的 `defect_ref` 完全一致、语义中性；到 `code-generation` 阶段起，交付源码必须引用该锚点，否则记 `ANCHOR_UNREFERENCED@code_refs`。
   - `refactor`：至少一个 `tdd_mode: characterization` UC-D 要声明非空 `code_refs`（MARS-104 已要求的 baseline 锚点），追溯锚定到存量代码基线。
   - 其他 scope 在没有 `requirements.md` 时仍为 `not_applicable`，行为不变。
+- **用户故事缺 UI 覆盖 `US-xxx: UNCOVERED@ui-mock`**（4.13.2，MARS-118）→ 模块选了 UI route（`html-mock` / `figma-create` / `figma-existing`）时，`ui-artifact-consistency` 除了校验反向（每个 ui-mock page 的 `stories[]` 引用的 US 真实存在）外，还校验**正向全覆盖**：`user-stories.md` 里每个有界面表现的 US 必须至少被一个 ui-mock page 的 `stories[]` 覆盖。某条有界面 US 零 mock 关联即记 `US-xxx: UNCOVERED@ui-mock`。修复方式二选一：给某个 mock page 的 `stories[]` 加上该 US，或在 `user-stories.md` 该 US 所在行用显式豁免标记 `[ui: n/a]`（也支持 `[无界面]`）声明它无界面表现。**默认不豁免**——无标记的 US 一律要求被 UI 覆盖。未选 UI route 的模块（纯后端等）该检查不适用，不受影响。
 
 证据文件默认 24 小时过期；跨天续作时上游纯过期不算回归，引擎会放行。
 

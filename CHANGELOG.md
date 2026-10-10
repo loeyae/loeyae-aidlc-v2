@@ -1,5 +1,20 @@
 # Changelog
 
+## 4.13.2
+
+UI 追溯链补强：用户故事 → ui-mock 的正向全覆盖门禁（MARS-118）。此前 `ui-artifact-consistency` 只校验反向（ui-mock 引用的 US 真实存在），有界面表现的 US 若零 mock 关联无人拦截；现增量补上正向全覆盖，使 UI route 模块的 `US ↔ ui-mock` 双向绑定都受门禁保护，有利于后续设计、代码生成与 code review 的精准界定。
+
+### Added
+
+- **用户故事 UI 覆盖门禁（MARS-118）**：`ui-artifact-consistency` sensor 在既有反向校验（每个 ui-mock page 的 `stories[]` / `requirements[]` 引用必须真实存在、page-specs/HTML/`mock_box_id` 三者一致）之外，新增**正向全覆盖**校验——`user-stories.md` 里每个有界面表现的 US 必须至少被一个 ui-mock page 的 `stories[]` 覆盖，否则记 `US-xxx: UNCOVERED@ui-mock` 并阻断承载 ui-mock 阶段（`ui-mock-generation` / `ui-figma-generation`）的准出。实现为新增 `forwardStoryCoverage()`，`htmlArtifactContract` / `figmaArtifactContract` 收集并返回各 page `stories[]` 的并集 `coveredStories`，入口两条 UI route 均对账。
+- **显式豁免标记 `[ui: n/a]`**：纯后端 / 无界面表现的 US 在 `user-stories.md` 该行用显式标记（`[ui: n/a]` / `[ui：n/a]` / `[无界面]`，大小写不敏感，正则 `UI_EXEMPTION_MARKER`）声明无界面表现，sensor 认豁免、不误判。**默认不豁免**——无标记的 US 一律要求被 UI 覆盖。
+
+### Unchanged
+
+- **仅 UI route 模块强制**：正向全覆盖只在模块实际选了 UI route（`html-mock` / `figma-create` / `figma-existing`）时生效；未选 UI route 的模块（纯后端等）`ui-artifact-consistency` 不适用，不新增负担。
+- 未新增 / 删除 core stage，未改阶段拓扑，未新增独立 sensor（增量加到既有 `ui-artifact-consistency`）；code-review 的 `ui-design-alignment` 行为不变。阶段数仍为 40。
+- 元素级 `data-us` / `data-ac` 强制标记、ui-mock 进 `code-generation` 的 `consumes` 两项不在本版本范围（另行评估）。随本版本修正了优化笔记 `docs/optimization-notes/aidlc-ui-mock-us-binding-prompt.md` 对引擎现状的事实偏差。
+
 ## 4.13.1
 
 两轮流程评估的收口：门禁错位 / 门禁不足 / 过度设计的集中修复（MARS-104/106/107/108/109/110/111/112/116 + 四项评估 issue），阶段数 46 → 43 → 40。
