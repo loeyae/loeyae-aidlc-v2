@@ -1594,6 +1594,69 @@ PAGE-001 与 PAGE-002 契约。
         shutil.rmtree(project)
 
 
+def test_design_intent_coverage_brownfield_requires_declaration() -> None:
+    # MARS-126 (L1): no [意图:*] marker is no longer a silent pass. greenfield stays passed;
+    # brownfield (reverse-engineering present) must declare intents or explicitly declare
+    # no structural change, else fail.
+    design_path = "docs/aidlc/modules/module-a/inception/application-design/components.md"
+    reverse_path = "docs/aidlc/modules/module-a/inception/reverse-engineering.md"
+
+    # greenfield: no reverse-engineering artifact, no markers -> passed, mode greenfield.
+    project = make_temp(prefix="aidlc-design-intent-greenfield-")
+    try:
+        write_module_manifest(project, ("module-a",))
+        write_module_state(project, "units-generation", {"module-a": None})
+        write(project, design_path, "# Components\n\nOrderService 负责下单。\n")
+        green = run_checker(project, "design-intent-coverage", "module-a")
+        assert green.returncode == 0, green.stderr
+        payload = json.loads(green.stdout)
+        assert payload["project_mode"] == "greenfield", payload
+        assert payload["intent_markers_found"] == 0
+    finally:
+        shutil.rmtree(project)
+
+    # brownfield, no markers, no declaration -> fail.
+    project = make_temp(prefix="aidlc-design-intent-brownfield-fail-")
+    try:
+        write_module_manifest(project, ("module-a",))
+        write_module_state(project, "units-generation", {"module-a": None})
+        write(project, reverse_path, "# Reverse engineering\n\n现有 OrderController。\n")
+        write(project, design_path, "# Components\n\nOrderService 负责下单。\n")
+        fail_run = run_checker(project, "design-intent-coverage", "module-a")
+        assert fail_run.returncode != 0, fail_run.stdout
+        assert "no explicit no-change declaration" in fail_run.stderr, fail_run.stderr
+    finally:
+        shutil.rmtree(project)
+
+    # brownfield, explicit no-change declaration -> passed.
+    project = make_temp(prefix="aidlc-design-intent-brownfield-nochange-")
+    try:
+        write_module_manifest(project, ("module-a",))
+        write_module_state(project, "units-generation", {"module-a": None})
+        write(project, reverse_path, "# Reverse engineering\n\n现有 OrderController。\n")
+        write(project, design_path, "# Components\n\n本次仅新增组件。[意图:无结构变更]\n")
+        ok = run_checker(project, "design-intent-coverage", "module-a")
+        assert ok.returncode == 0, ok.stderr
+        payload = json.loads(ok.stdout)
+        assert payload["project_mode"] == "brownfield", payload
+        assert payload["no_change_declared"] is True, payload
+    finally:
+        shutil.rmtree(project)
+
+    # brownfield, a [意图:*] marker not carried by any unit -> fail (existing coverage not regressed).
+    project = make_temp(prefix="aidlc-design-intent-uncovered-")
+    try:
+        write_module_manifest(project, ("module-a",))
+        write_module_state(project, "units-generation", {"module-a": None})
+        write(project, reverse_path, "# Reverse engineering\n\n现有 OrderController。\n")
+        write(project, design_path, "# Components\n\nOrderController [意图:删除]\n")
+        uncovered = run_checker(project, "design-intent-coverage", "module-a")
+        assert uncovered.returncode != 0, uncovered.stdout
+        assert "design intents are not covered" in uncovered.stderr, uncovered.stderr
+    finally:
+        shutil.rmtree(project)
+
+
 if __name__ == "__main__":
     test_all_checkers_pass_on_realistic_fixture()
     test_checker_fails_closed_when_required_artifact_is_removed()
@@ -1615,4 +1678,5 @@ if __name__ == "__main__":
     test_ui_alignment_uses_selected_route_and_code_traceability()
     test_implementation_report_aggregates_selected_artifacts()
     test_implementation_report_ui_page_forward_coverage()
+    test_design_intent_coverage_brownfield_requires_declaration()
     print("semantic checker regression tests passed")

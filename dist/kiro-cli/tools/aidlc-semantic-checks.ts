@@ -3201,16 +3201,41 @@ function diagramContract(): Record<string, unknown> | Promise<Record<string, unk
   };
 }
 
+// MARS-126 (L1): 存量改造项目在 application-design 显式声明「本次无结构变更意图」的标记。
+// 与 [意图:删除|局部重构|收敛|迁出|废弃] 并列,语义为「本迭代不改任何现有结构」;大小写与全半角冒号不敏感。
+// 支持中文 [意图:无结构变更] 与英文 [design-intent: none] 两种写法。
+const DESIGN_INTENT_NONE_MARKER = /\[\s*(?:意图\s*[:：]\s*无\s*结构\s*变更|design-intent\s*[:：]\s*none)\s*\]/i;
+
 function designIntentCoverage(): Record<string, unknown> {
   const designFiles = allFiles("docs/aidlc/inception/application-design", /\.md$/);
   const unitFiles = [...designFiles, ...allFiles("docs/aidlc/construction", /(?:unit|implementation|summary).*\.md$/i)];
   const content = joined(designFiles);
-  const markers = [...new Set([...content.matchAll(/\[意图:([^\]]+)\]/g)].map((match) => match[1].trim()))];
-  if (markers.length === 0) return { status: "passed", intent_markers_found: 0, coverage_complete: true, uncovered: 0, skip_reason: "no structural change intent markers" };
+  // 收集真·结构变更意图标记;排除 [意图:无结构变更] sentinel(它由 DESIGN_INTENT_NONE_MARKER 单独识别,
+  // 不是一个需要被下游单元承接的变更条目,否则会被误当作未覆盖的意图)。
+  const markers = [...new Set([...content.matchAll(/\[意图:([^\]]+)\]/g)].map((match) => match[1].trim()))]
+    .filter((marker) => marker.replace(/\s+/g, "") !== "无结构变更");
+  if (markers.length === 0) {
+    // MARS-126 (L1, 与 MARS-118/125 同族): 「无 [意图:*] 标记」此前一律静默 passed,使存量改造项目
+    // 改了现有组件却不打标记即可规避覆盖检查。精确化口径——意图标记的触发条件(见
+    // inception-application-design.md) 是「存量改造(逆向工程产物存在)且设计中有结构性变更意图」:
+    //   - greenfield(本模块无 reverse-engineering.md): 无存量结构可变更,无标记 passed 是正确的,维持不变。
+    //   - brownfield(逆向产物存在): 无标记不再静默放行,要求 application-design 产物里显式声明本次
+    //     无结构变更([意图:无结构变更] / [design-intent: none],大小写与全半角冒号不敏感);无标记又
+    //     无显式声明 → fail(缺节不等于不适用,必须显式声明)。
+    const brownfield = existsSync(join(ROOT, contextual("docs/aidlc/inception/reverse-engineering.md")));
+    if (!brownfield) {
+      return { status: "passed", project_mode: "greenfield", intent_markers_found: 0, no_change_declared: false, coverage_complete: true, uncovered: 0, skip_reason: "greenfield: no legacy structure to change, intent markers not required" };
+    }
+    const noChangeDeclared = DESIGN_INTENT_NONE_MARKER.test(content);
+    if (!noChangeDeclared) {
+      fail("brownfield (reverse-engineering present) application-design declares no [意图:*] change-intent marker and no explicit no-change declaration; mark each structural change with [意图:删除|局部重构|收敛|迁出|废弃], or if this iteration changes no existing structure declare it explicitly with [意图:无结构变更]");
+    }
+    return { status: "passed", project_mode: "brownfield", intent_markers_found: 0, no_change_declared: true, coverage_complete: true, uncovered: 0, skip_reason: "brownfield: explicitly declared no structural change intent ([意图:无结构变更])" };
+  }
   const unitContent = joined(unitFiles);
   const uncovered = markers.filter((marker) => !unitContent.includes(marker) || !/允许修改范围|完成证据|implementation summary|unit/i.test(unitContent));
   if (uncovered.length > 0) fail(`design intents are not covered: ${uncovered.join(", ")}`);
-  return { status: "passed", intent_markers_found: markers.length, coverage_complete: true, uncovered: 0, covered_intents: markers };
+  return { status: "passed", project_mode: "brownfield", intent_markers_found: markers.length, no_change_declared: false, coverage_complete: true, uncovered: 0, covered_intents: markers };
 }
 
 // US→UI 正向全覆盖(MARS-118):有界面表现的 US 必须至少被一个 ui-mock/figma page 的 stories[] 覆盖。
