@@ -2040,6 +2040,31 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
             }
           }
         }
+        // L2 (MARS-125/127): empty-set guard, symmetric to the traceability sensor
+        // (~L2117). no-todo is mounted unconditionally (even on not_applicable stages),
+        // so a stage that declares a NON-evidence produce (every traceability=required
+        // stage) but resolves to zero real files has nothing scanned and would pass
+        // silently — the gate空转. Fail closed in that case. A pure-evidence stage
+        // (shared-contract-baseline / tdd / subagent-execution / loeyae-compliance /
+        // compact-recovery; all traceability=not_applicable) declares no non-evidence
+        // produce, so the guard does not fire — no false positive. Directory produces
+        // whose only entries are sub-MIN_ARTIFACT_BYTES markers are not artifacts (same
+        // rule as traceability / produce-presence) and do not satisfy the guard.
+        const nonEvidenceProduces = (stage.produces || []).filter((pattern) => !pattern.startsWith(".aidlc/evidence"));
+        if (todoFiles.length === 0 && unreadableFiles.length === 0 && nonEvidenceProduces.length > 0) {
+          const noTodoTargets = [...new Set(nonEvidenceProduces
+            .flatMap((pattern) => resolveProducePaths(pattern, instance)
+              .filter((filePath) => !pattern.endsWith("/") || lstatSync(filePath).size >= MIN_ARTIFACT_BYTES))
+            .filter((filePath) => !isEvidenceArtifact(filePath)))];
+          if (noTodoTargets.length === 0) {
+            failures.push({
+              sensor: "no-todo",
+              passed: false,
+              message: `No produced artifact found to scan for TODO/FIXME/HACK (stage declares non-evidence produces ${nonEvidenceProduces.join(", ")} but none resolved to a real file); produce the stage's artifacts before reporting.`,
+            });
+            break;
+          }
+        }
         if (todoFiles.length > 0 || unreadableFiles.length > 0) {
           const details = [];
           if (todoFiles.length > 0) details.push(`TODO/FIXME/HACK in: ${todoFiles.join(", ")}`);
