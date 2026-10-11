@@ -1394,6 +1394,25 @@ function implementationReport(): Record<string, unknown> {
           });
         if (alignmentFiles.length === 0) fail(`selected UI route for ${module.module_id} has no passed code-review ui-design-alignment evidence`);
         requiredEvidence.push(...alignmentFiles.map((file) => relativePath(file).replace(/\\/g, "/")));
+        // MARS-125 正向全覆盖(与 MARS-118 的 US→UI mock 层对称):模块 page-plan 中声明的每个 UI 页面
+        // 必须至少被一份 passed 对齐证据的 pages_covered 覆盖。多单元分页时承担部分页面的单元若规避对齐
+        // (缺页面映射 → 现在 fail,见 uiAlignment),或某页根本无任何单元做对齐,此处正向对账会判 fail,
+        // 不再只要求 "模块至少一个单元有 1 份 passed 证据"。
+        const planPagePath = join(ROOT, `docs/aidlc/modules/${module.module_id}/inception/ui-design/page-plan.md`);
+        if (existsSync(planPagePath)) {
+          const planPages = normalizedIds(text(planPagePath), PAGE_ID);
+          const covered = new Set<string>();
+          for (const file of alignmentFiles) {
+            let evidence: Record<string, unknown>;
+            try { evidence = jsonFile(file); } catch { continue; }
+            const pages = Array.isArray(evidence.pages_covered) ? evidence.pages_covered : [];
+            for (const page of pages) if (typeof page === "string") covered.add(page.toUpperCase());
+          }
+          const uncoveredPages = planPages.filter((id) => !covered.has(id.toUpperCase()));
+          if (uncoveredPages.length > 0) {
+            fail(`UI pages of ${module.module_id} lack any passed ui-design-alignment coverage: ${uncoveredPages.map((id) => `${id}: UNCOVERED@ui-design-alignment`).join(", ")}. Every page in page-plan must be covered by at least one unit's passed alignment evidence (pages_covered)`);
+          }
+        }
         uiModulesVerified.push(module.module_id);
       }
     }
@@ -3379,8 +3398,16 @@ function uiAlignment(): Record<string, unknown> {
   if (!existsSync(codePlanPath)) fail("code-generation plan is missing for UI alignment review");
   const codePlan = text(codePlanPath);
   noUnresolved(codePlan);
+  // MARS-125 (与 MARS-118 对称):选了 UI route 的单元,"code-generation-plan 缺页面对照表章节" 不再等于
+  // "本单元无 UI" 而静默 not_applicable——那会让整个 UI 对齐门禁被 "它自己要求的那一节的缺席" 击穿。
+  // 口径改为:默认要求页面映射;只有在 code-generation-plan 里用显式豁免标记(复用 MARS-118 的
+  // `[ui: n/a]` / `[ui: 无界面]` / `[无界面]`,大小写与全半角冒号不敏感)声明本单元无界面承载时,才 not_applicable。
+  // 无标记且缺页面映射 → fail(页面映射应有而缺失),而非放行。
   if (!/页面对照表|page mapping/i.test(codePlan)) {
-    return { status: "not_applicable", reason: "current unit has no UI page mapping" };
+    if (UI_EXEMPTION_MARKER.test(codePlan)) {
+      return { status: "not_applicable", reason: "current unit explicitly declares no UI pages ([ui: n/a])" };
+    }
+    fail("UI route is selected but code-generation plan has no page mapping (页面对照表 / page mapping) section; declare an explicit no-UI exemption ([ui: n/a]) in the plan when this unit carries no UI page, otherwise add the page mapping");
   }
   const mappedPages = normalizedIds(codePlan, PAGE_ID);
   if (mappedPages.length === 0) fail("UI page mapping must include canonical PAGE identifiers");
@@ -3436,6 +3463,7 @@ function uiAlignment(): Record<string, unknown> {
     unit_scope: "ui",
     element_diff_mode: design.elementLevel ? "counting" : "page-level-only",
     pages_checked: mappedPages.length,
+    pages_covered: [...new Set(mappedPages)].sort(),
     elements_checked: Math.max(design.elements, mappedPages.length),
     unmapped_elements: unmapped,
     extra_elements: extra,

@@ -1447,6 +1447,36 @@ def test_ui_alignment_uses_selected_route_and_code_traceability() -> None:
         figma_aligned = run_checker(project, "ui-design-alignment", "module-a", "unit-a")
         assert figma_aligned.returncode == 0, figma_aligned.stderr
         assert json.loads(figma_aligned.stdout)["design_mode"] == "figma"
+
+        # MARS-125:选了 UI route 但 code-generation-plan 缺页面对照表章节 → 不再静默 not_applicable,判 fail。
+        html_manifest(project)
+        write_module_state(project, "code-review", {"module-a": "html-mock"}, current_unit="unit-a")
+        write(project, "src/pages/registration.tsx", "// PAGE-001\nexport const Registration = () => 'registration';\n")
+        write(project, plan_path, "# Code generation plan\n本单元实现注册逻辑。\n")
+        missing_mapping = run_checker(project, "ui-design-alignment", "module-a", "unit-a")
+        assert missing_mapping.returncode != 0, missing_mapping.stdout
+        assert "has no page mapping" in missing_mapping.stderr
+
+        # MARS-125:显式声明本单元无 UI([ui: n/a])→ 正确豁免为 not_applicable,不误判。
+        write(project, plan_path, "# Code generation plan\n本单元为纯后端对账,无界面承载。[ui: n/a]\n")
+        exempt_plan = run_checker(project, "ui-design-alignment", "module-a", "unit-a")
+        assert exempt_plan.returncode == 0, exempt_plan.stderr
+        exempt_plan_payload = json.loads(exempt_plan.stdout)
+        assert exempt_plan_payload["status"] == "not_applicable"
+        assert "explicitly declares no UI" in exempt_plan_payload["reason"]
+
+        # MARS-125:正常对齐单元在 passed 证据中列出 pages_covered,供 implementation-report 做正向对账。
+        write(project, plan_path, """# Code generation plan
+## 页面对照表
+| PAGE ID | Target |
+|---|---|
+| PAGE-001 | src/pages/registration.tsx |
+""")
+        covered = run_checker(project, "ui-design-alignment", "module-a", "unit-a")
+        assert covered.returncode == 0, covered.stderr
+        covered_payload = json.loads(covered.stdout)
+        assert covered_payload["status"] == "passed"
+        assert covered_payload["pages_covered"] == ["PAGE-001"]
     finally:
         shutil.rmtree(project)
 
@@ -1505,6 +1535,65 @@ def test_implementation_report_aggregates_selected_artifacts() -> None:
         shutil.rmtree(project)
 
 
+def test_implementation_report_ui_page_forward_coverage() -> None:
+    # MARS-125:每个 UI 页面必须至少被一份 passed 对齐证据的 pages_covered 覆盖(多单元分页正向全覆盖)。
+    project = make_temp(prefix="aidlc-impl-ui-forward-")
+    try:
+        write_module_manifest(project, ("module-a",))
+        write_module_state(
+            project,
+            "implementation-report",
+            {"module-a": "html-mock"},
+            with_prd=False,
+            current_module=None,
+        )
+        write_cross_validation_inputs(project, "module-a", prd_selected=False, ui_route="html-mock")
+        # page-plan 声明两个页面;两个单元各对齐一个 → 正向全覆盖。
+        write(project, "docs/aidlc/modules/module-a/inception/ui-design/page-plan.md", """# 页面计划
+## 页面清单
+| PAGE ID | 来源 |
+|---|---|
+| PAGE-001 | FR-001, US-001 |
+| PAGE-002 | FR-001, US-001 |
+## 页面内容契约
+PAGE-001 与 PAGE-002 契约。
+## 操作闭环
+闭环。
+## 未决项
+无
+""")
+
+        references = [
+            ".aidlc/evidence/cross-validation/module-a/inception-consistency.json",
+            ".aidlc/evidence/ui-page-planning/module-a/ui-artifact-consistency.json",
+            ".aidlc/evidence/ui-mock-generation/module-a/ui-artifact-consistency.json",
+            ".aidlc/evidence/code-review/module-a/unit-a/ui-design-alignment.json",
+            ".aidlc/evidence/code-review/module-a/unit-b/ui-design-alignment.json",
+        ]
+        for reference in references:
+            if "inception-consistency" in reference or "ui-artifact-consistency" in reference:
+                write(project, reference, json.dumps({"status": "passed", "evidence_version": "1"}))
+        write(project, references[3], json.dumps({"status": "passed", "evidence_version": "1", "pages_checked": 1, "pages_covered": ["PAGE-001"]}))
+        write(project, references[4], json.dumps({"status": "passed", "evidence_version": "1", "pages_checked": 1, "pages_covered": ["PAGE-002"]}))
+        report_path = "docs/aidlc/construction/implementation-report.md"
+
+        def report_content(items: list[str]) -> str:
+            return "# Implementation report\nall_gates_passed: true\nscope: feature\nstages_completed: 46\n" + "\n".join(items) + "\n"
+
+        write(project, report_path, report_content(references))
+        full = run_checker(project, "implementation-report")
+        assert full.returncode == 0, full.stderr
+        assert json.loads(full.stdout)["ui_modules_verified"] == ["module-a"]
+
+        # 某页零覆盖(unit-b 只覆盖 PAGE-002 改为 PAGE-001,PAGE-002 悬空)→ fail。
+        write(project, references[4], json.dumps({"status": "passed", "evidence_version": "1", "pages_checked": 1, "pages_covered": ["PAGE-001"]}))
+        uncovered = run_checker(project, "implementation-report")
+        assert uncovered.returncode != 0, uncovered.stdout
+        assert "PAGE-002: UNCOVERED@ui-design-alignment" in uncovered.stderr
+    finally:
+        shutil.rmtree(project)
+
+
 if __name__ == "__main__":
     test_all_checkers_pass_on_realistic_fixture()
     test_checker_fails_closed_when_required_artifact_is_removed()
@@ -1525,4 +1614,5 @@ if __name__ == "__main__":
     test_inception_consistency_optional_routes()
     test_ui_alignment_uses_selected_route_and_code_traceability()
     test_implementation_report_aggregates_selected_artifacts()
+    test_implementation_report_ui_page_forward_coverage()
     print("semantic checker regression tests passed")

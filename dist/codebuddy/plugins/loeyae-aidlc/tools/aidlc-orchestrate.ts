@@ -2829,6 +2829,11 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           if (asNumber(evidence.extra_elements) !== 0) errors.push("extra_elements must be 0");
           if (asPositiveInt(evidence.pages_checked) === null || (evidence.pages_checked as number) < 1) errors.push("pages_checked must be >= 1");
           if (asPositiveInt(evidence.elements_checked) === null || (evidence.elements_checked as number) < 1) errors.push("elements_checked must be >= 1");
+          // MARS-125: a passed alignment must enumerate the pages it covered so implementation-report can
+          // reconcile per-page forward coverage across units; the id list must match pages_checked.
+          const pagesCovered = asStringArray(evidence.pages_covered);
+          if (!pagesCovered || pagesCovered.length < 1) errors.push("pages_covered must list the covered PAGE identifiers");
+          else if (pagesCovered.length !== (evidence.pages_checked as number)) errors.push("pages_covered length must equal pages_checked");
           return errors;
         });
         if (failure) failures.push(failure);

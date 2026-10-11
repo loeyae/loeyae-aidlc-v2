@@ -8,6 +8,7 @@ UI 追溯链补强：用户故事 → ui-mock 的正向全覆盖门禁（MARS-11
 
 - **用户故事 UI 覆盖门禁（MARS-118）**：`ui-artifact-consistency` sensor 在既有反向校验（每个 ui-mock page 的 `stories[]` / `requirements[]` 引用必须真实存在、page-specs/HTML/`mock_box_id` 三者一致）之外，新增**正向全覆盖**校验——`user-stories.md` 里每个有界面表现的 US 必须至少被一个 ui-mock page 的 `stories[]` 覆盖，否则记 `US-xxx: UNCOVERED@ui-mock` 并阻断承载 ui-mock 阶段（`ui-mock-generation` / `ui-figma-generation`）的准出。实现为新增 `forwardStoryCoverage()`，`htmlArtifactContract` / `figmaArtifactContract` 收集并返回各 page `stories[]` 的并集 `coveredStories`，入口两条 UI route 均对账。
 - **显式豁免标记 `[ui: n/a]`**：纯后端 / 无界面表现的 US 在 `user-stories.md` 该行用显式标记（`[ui: n/a]` / `[ui：n/a]` / `[无界面]`，大小写不敏感，正则 `UI_EXEMPTION_MARKER`）声明无界面表现，sensor 认豁免、不误判。**默认不豁免**——无标记的 US 一律要求被 UI 覆盖。
+- **ui-design-alignment 门禁击穿修复（MARS-125，与 MARS-118 同族）**：code-review 的 `ui-design-alignment` producer 此前对「已选 UI route 但 `code-generation-plan` 正文不含字面量『页面对照表』/『page mapping』」的单元静默返回 `not_applicable`，跳过未知页检测、目标代码存在性、元素级 diff / 样式 / 条件显隐 / 平台约束全部实质校验——门禁被「它自己要求的那一节的缺席」击穿。现改为：缺页面映射且未显式豁免 → **fail**（复用 MARS-118 的 `UI_EXEMPTION_MARKER`，仅当 plan 内写 `[ui: n/a]` / `[无界面]` 显式声明本单元无界面承载时才 `not_applicable`）。`ui-design-alignment` passed 证据新增 `pages_covered`（本单元覆盖的 PAGE id 列表）。`implementation-report` 新增**每页正向全覆盖对账**（与 MARS-118 mock 层对称）：模块 `page-plan` 中每个页面必须至少被一份 passed 对齐证据的 `pages_covered` 覆盖，某页零覆盖记 `PAGE-xxx: UNCOVERED@ui-design-alignment` 并阻断——堵住多单元分页时承担部分页面的单元借「别的单元有 1 份 passed 证据」规避对齐的缺口。orchestrate 侧 `ui-design-alignment` gate 校验 passed 证据的 `pages_covered` 非空且长度等于 `pages_checked`。无 `page-plan` 的存量模块跳过正向对账，行为不回归。
 
 ### Unchanged
 
