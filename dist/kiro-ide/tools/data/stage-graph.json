@@ -1259,7 +1259,11 @@
         "feature",
         "enterprise",
         "mvp",
-        "classic"
+        "classic",
+        "express",
+        "workshop",
+        "bugfix",
+        "refactor"
       ],
       "requires": [
         "code-generation"
@@ -1273,6 +1277,9 @@
       "sensors": [
         "framework-compliance",
         "no-todo"
+      ],
+      "provider_capabilities": [
+        "implementation-validation"
       ],
       "traceability": "not_applicable",
       "completion_contract": "gated",

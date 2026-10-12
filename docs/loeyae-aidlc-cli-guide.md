@@ -6,7 +6,7 @@
 
 ```bash
 loeyae-aidlc orchestrate next \
-  --scope <feature|enterprise|mvp|classic|express|workshop|bugfix|refactor|poc> \
+  --scope <feature|enterprise|mvp|classic|express|workshop|bugfix|refactor> \
   --work "<明确的工作描述>"
 ```
 
@@ -25,13 +25,15 @@ aidlc/active/audit.md
 
 | scope | 阶段数（单模块下等于实例数） | 说明 |
 |------|------|------|
-| `feature` / `enterprise` / `mvp` | 45 | 完整 Inception → Construction → 条件 Operations |
-| `classic` | 43 | 同上，不含 `operations`、`operations-templates` |
-| `express` / `workshop` / `bugfix` / `refactor` / `poc` | 8 | `workspace-detection` → `state-template` → `test-case-derivation` → `tdd` → `code-generation` → `code-review` → `build-and-test` → `implementation-report` |
+| `feature` / `enterprise` / `mvp` | 39 | 完整 Inception → Construction → 条件 Operations |
+| `classic` | 36 | 同上，不含 Operations 尾段 |
+| `express` / `workshop` / `bugfix` / `refactor` | 9 个候选、非 Loeyae 实际 8 | 轻量链路 + 条件 `loeyae-compliance` |
+
+Loeyae Boot 项目会在 `code-generation` 后额外进入条件阶段 `loeyae-compliance`（通用 `implementation-validation` 挂载点），因此轻量 scope 的实际实例数为 9；非 Loeyae 项目仍为 8。该条件阶段覆盖 `bugfix/refactor/express/workshop`，不再因轻量 scope 整体跳过。
 
 - `prd-generation` 只在完整 scope 初始化时加 `--with-prd` 才进入。
 - `workspace-detection` 的 `single-module` / `multi-module` 选择只出现在 feature、enterprise、mvp、classic。
-- `bugfix` 额外要求至少一个 `tdd_mode: new` 的 UC-D 复现缺陷；`poc` 没有额外规则。
+- `bugfix` 额外要求至少一个 `tdd_mode: new` 的 UC-D 复现缺陷；`refactor` 使用 characterization 基线；`express/workshop` 使用 `change_ref` 锚点。
 
 ## 继续与报告
 
@@ -70,6 +72,30 @@ loeyae-aidlc orchestrate diagram-format [--set <mermaid|svg> --user-input "<用�
 已有 workflow 时 `--scope/--work` 不会覆盖它：运行中的先 `park` 再 `archive`，已完成的直接 `archive`。
 
 每个 `run-stage` directive 和成功 report 都有 `handoff_prompt`。Agent 必须原样展示该提示词，提示中包含工作目标、当前阶段、当前单元、产物、review/build/test 和下一步动作。
+
+## 项目级 Provider 与 Loeyae 迁移
+
+安装时可显式限制 module/unit/stage/capability binding。Loeyae Boot 首个 Provider 应只挂到迁移阶段：
+
+```bash
+loeyae-aidlc provider add <git-url> --ref <tag-or-commit> \
+  --subdir providers/loeyae-boot \
+  --id framework.java-loeyae-boot --instance loeyae-boot \
+  --stage loeyae-compliance --capability implementation-validation
+loeyae-aidlc provider compatibility --mode shadow --instance loeyae-boot
+```
+
+当前 directive 给出 `provider_context.plan.path` 与 `provider_actions[].plan_node_id` 后：
+
+```bash
+loeyae-aidlc provider run --plan <plan-id-or-path> --node <node-id> \
+  --input source=<project-relative-source-path>
+loeyae-aidlc provider gate --plan <plan-id-or-path> --evidence <evidence-id>
+loeyae-aidlc orchestrate report --stage loeyae-compliance --result completed \
+  --gate-decision <gate-id>
+```
+
+`provider compatibility` 默认显示状态：`legacy` 只走旧 sensor，`shadow` 双写且旧 sensor 权威，`enforce` 由 Provider Gate 权威；切回 `legacy` 不删除旧 Evidence、Gate 或 Rule/路径对账报告。完整 Profile、scope、升级、回滚和发布清单见 `docs/loeyae-boot-provider-migration.md`。
 
 ## 基线与 lineage
 

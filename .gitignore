@@ -1,7 +1,12 @@
 node_modules/
-core/tools/data/
+core/tools/data/*
+!core/tools/data/stage-graph.json
+!core/tools/data/provider-schema-ownership.json
+!core/tools/data/provider-schemas/
+!core/tools/data/provider-schemas/*.json
 *.tsbuildinfo
 .DS_Store
 
 __pycache__/
 *.pyc
+aidlc/active/**/*.bak-*

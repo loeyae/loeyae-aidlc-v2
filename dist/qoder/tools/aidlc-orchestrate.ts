@@ -125,6 +125,27 @@ import {
 } from "./aidlc-workflow-layout";
 import { committedFile, describeConflict, gitHistoryAvailable, lineageConflicts, lineageRemedy, resolveCommit, revisionRegressions, type LineageConflict } from "./aidlc-lineage";
 import { provisionControlPlaneGitStrategy, runRegistryMergeDriver, type ControlPlaneProvisionResult } from "./aidlc-git-merge";
+import { PROJECT_PROVIDERS_LOCK_PATH, PROJECT_PROVIDERS_PATH } from "./aidlc-project-provider";
+import {
+  ProviderResolutionError,
+  assertPlanResolvable,
+  defaultResolutionPolicy,
+  freezeProviderPlan,
+  resolveProjectProviderPlan,
+  type ProviderDirectiveAction,
+  type ProviderDirectiveContext,
+} from "./aidlc-provider-resolver";
+import type { CapabilityExpression, GateDecisionV1_1, ProviderScope, ProviderSourceRevision, Sha256Digest } from "./aidlc-provider-types";
+import { verifyGateDecisionForReport } from "./aidlc-provider-gate";
+import {
+  IMPLEMENTATION_VALIDATION_CAPABILITY,
+  LOEYAE_COMPATIBILITY_STAGE,
+  loeyaeCompatibilityPolicyId,
+  projectProviderEvidenceToLegacy,
+  readLoeyaeCompatibilitySettings,
+  reconcileLoeyaeCompliance,
+  type WrittenLoeyaeReconciliation,
+} from "./aidlc-provider-compatibility";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -163,6 +184,8 @@ export interface StageNode {
   consumes: string[];
   produces: string[];
   sensors: string[];
+  /** Optional Core-owned Provider capabilities required by this canonical stage. */
+  provider_capabilities?: string[];
   traceability: "required" | "not_applicable";
   completion_contract: "gated" | "instruction_only";
   condition: string;
@@ -203,6 +226,8 @@ export interface Directive {
   handoff_status?: "updated" | "unverified";
   handoff_error?: string;
   rules_content?: string[];
+  provider_context?: ProviderDirectiveContext;
+  provider_actions?: readonly ProviderDirectiveAction[];
   [key: string]: unknown;
 }
 
@@ -252,8 +277,8 @@ type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
 type StageResult = (typeof VALID_RESULTS)[number];
-const NEXT_FLAGS = new Set(["scope", "work", "with-prd", "resume", "status", "text", "claim", "module", "owner", "branch", "worktree", "replace-lineage"]);
-const REPORT_FLAGS = new Set(["stage", "result", "user-input", "instruction-ack", "module", "unit", "instance", "owner"]);
+const NEXT_FLAGS = new Set(["scope", "work", "with-prd", "resume", "status", "text", "claim", "module", "owner", "branch", "worktree", "replace-lineage", "provider-approval"]);
+const REPORT_FLAGS = new Set(["stage", "result", "user-input", "instruction-ack", "module", "unit", "instance", "owner", "gate-decision"]);
 const SPLIT_FLAGS = new Set(["from", "dry-run", "replace-lineage"]);
 const STATE_FLAGS = new Set(["lineage", "user-input", "reason", "text", "module", "from"]);
 const ARCHIVE_FLAGS = new Set(["reason"]);
@@ -3077,8 +3102,14 @@ function projectModuleConditionText(relativePaths: string[]): string {
 }
 
 function rootBuildMetadata(): string {
-  return ["package.json", "pom.xml", "build.gradle", "build.gradle.kts", "pubspec.yaml"]
-    .map((file) => readConditionText(join(PROJECT_ROOT, file)))
+  const buildNames = new Set(["package.json", "pom.xml", "build.gradle", "build.gradle.kts", "pubspec.yaml"]);
+  const excluded = new Set(["node_modules", "vendor", ".venv", "venv", "__pycache__", ".m2", ".gradle", "Pods", ".dart_tool", ".pub-cache", "dist", "build", "out", "target", ".next", ".nuxt", ".turbo", ".cache", "coverage", ".output", ".git", ".idea", ".codegraph"]);
+  const tracked = gitPaths(PROJECT_ROOT, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+  const candidates = tracked === null
+    ? [...buildNames]
+    : tracked.filter((path) => buildNames.has(path.replace(/\\/g, "/").split("/").at(-1) || "") && !path.replace(/\\/g, "/").split("/").some((segment) => excluded.has(segment)));
+  return [...new Set(candidates)]
+    .map((file) => readConditionText(join(PROJECT_ROOT, ...file.replace(/\\/g, "/").split("/"))))
     .join("\n");
 }
 
@@ -3445,14 +3476,170 @@ function diagramFormatPrompt(state: WorkflowState, instance: StageInstance): str
     : "\n图表格式：mermaid（默认）。直接写 Mermaid fenced block，不生成 SVG、.diagram.json 或 Provider Request，不做渲染验证。只有用户明确要求 SVG 时，先执行 loeyae-aidlc orchestrate diagram-format --set svg --user-input \"<用户原话>\"。";
 }
 
-function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, agentExecution: AgentExecutionPlan, reportCommand?: string, choices: string[] = []): string {
+function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, agentExecution: AgentExecutionPlan, reportCommand?: string, choices: string[] = [], providerPrompt = ""): string {
   const unit = instance.module_id && instance.unit_id
     ? `当前单元：${instance.module_id}/${instance.unit_id}。团队成员可用 unit select 声明负责人与分支。`
     : "当前阶段不要求成员选择单元；按产物、review、构建和测试门禁推进。";
   const artifacts = instance.stage.produces.length
     ? instance.stage.produces.flatMap((pattern) => displayArtifactPatterns(pattern, instance)).join("、")
     : "本阶段没有声明文件产物";
-  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；conductor-only 按当前 WorkflowRef 生效。split 后模块负责人可作为本模块 workflow conductor 推进，无需回到 global/父议题协调者；用户审批和 merge 门禁不变。\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。${diagramFormatPrompt(state, instance)}${choicePrompt(instance.stage.slug, choices)}\n下一步：execution agent 完成后将结构化结果交回当前 workflow conductor；后者运行 ${reportCommand || "orchestrate report"}。`;
+  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；conductor-only 按当前 WorkflowRef 生效。split 后模块负责人可作为本模块 workflow conductor 推进，无需回到 global/父议题协调者；用户审批和 merge 门禁不变。\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。${diagramFormatPrompt(state, instance)}${choicePrompt(instance.stage.slug, choices)}${providerPrompt}\n下一步：execution agent 完成后将结构化结果交回当前 workflow conductor；后者运行 ${reportCommand || "orchestrate report"}。`;
+}
+
+interface PreparedProviderDirective {
+  readonly context: ProviderDirectiveContext;
+  readonly actions: readonly ProviderDirectiveAction[];
+}
+
+function stageCapabilityExpression(capabilities: readonly string[]): CapabilityExpression | undefined {
+  if (capabilities.length === 0) return undefined;
+  if (capabilities.length === 1) return { capability: capabilities[0] };
+  return { all_of: [...capabilities].sort().map((capability) => ({ capability })) };
+}
+
+/** Convert the existing provenance reader into the Provider protocol's digest-prefixed shape. */
+function currentProviderSourceRevision(): ProviderSourceRevision {
+  const nested = nestedSourceRepos(PROJECT_ROOT);
+  const revision = readSourceRevision(PROJECT_ROOT, undefined, nested);
+  const checkedDigest = (value: string | null, field: string): Sha256Digest => {
+    if (!value || !/^[0-9a-f]{64}$/.test(value)) throw new ProviderResolutionError("PROVIDER_PLAN_STALE", `${field} is unavailable; ProviderPlan cannot bind the current source revision`);
+    return `sha256:${value}` as Sha256Digest;
+  };
+  if (!COMMIT_ID_PATTERN.test(revision.commit)) {
+    throw new ProviderResolutionError("PROVIDER_PLAN_STALE", "current Git commit is unavailable; ProviderPlan requires an immutable source revision");
+  }
+  const repos: Record<string, { commit: string; worktree_digest: Sha256Digest }> = {};
+  for (const [key, value] of Object.entries(revision.repos || {})) {
+    if (!COMMIT_ID_PATTERN.test(value.commit)) throw new ProviderResolutionError("PROVIDER_PLAN_STALE", `nested repository ${key} commit is unavailable`);
+    repos[key] = { commit: value.commit, worktree_digest: checkedDigest(value.worktree_digest, `source_revision.repos.${key}.worktree_digest`) };
+  }
+  return {
+    commit: revision.commit,
+    worktree_digest: checkedDigest(revision.worktree_digest, "source_revision.worktree_digest"),
+    ...(Object.keys(repos).length > 0 ? { repos } : {}),
+  };
+}
+
+/** Resolve only from project intent + immutable lock/cache; never discovers or refreshes a Provider. */
+function prepareProviderDirective(instance: StageInstance, approvalRef: string | undefined, persist: boolean): PreparedProviderDirective | null {
+  const compatibility = instance.stage.slug === LOEYAE_COMPATIBILITY_STAGE
+    ? readLoeyaeCompatibilitySettings(PROJECT_ROOT)
+    : undefined;
+  if (compatibility?.mode === "legacy") return null;
+  const configuredCapabilities = compatibility
+    ? [IMPLEMENTATION_VALIDATION_CAPABILITY]
+    : instance.stage.provider_capabilities || [];
+  const hasConfig = existsSync(join(PROJECT_ROOT, PROJECT_PROVIDERS_PATH));
+  const hasLock = existsSync(join(PROJECT_ROOT, PROJECT_PROVIDERS_LOCK_PATH));
+  if (!hasConfig && !hasLock) {
+    if (configuredCapabilities.length > 0) {
+      throw new ProviderResolutionError("PROVIDER_CAPABILITY_MISSING", `stage ${instance.stage.slug} requires Provider capabilities but ${PROJECT_PROVIDERS_PATH} is absent`);
+    }
+    return null;
+  }
+  const result = resolveProjectProviderPlan(PROJECT_ROOT, {
+    scope: {
+      stage: instance.stage.slug,
+      ...(instance.module_id ? { module_id: instance.module_id } : {}),
+      ...(instance.unit_id ? { unit_id: instance.unit_id } : {}),
+    },
+    source_revision: currentProviderSourceRevision(),
+    policy: defaultResolutionPolicy({
+      policy_id: loeyaeCompatibilityPolicyId(PROJECT_ROOT, instance.stage.slug),
+      protected_gate: instance.stage.approval === "block",
+    }),
+    capability_expression: stageCapabilityExpression(configuredCapabilities),
+    ...(approvalRef ? { approval_ref: approvalRef } : {}),
+  });
+  // An installed project Provider with no binding for this stage does not add empty
+  // control-plane noise to the directive. Explicit stage capabilities always create nodes.
+  if (result.plan.nodes.length === 0 && configuredCapabilities.length === 0) return null;
+  assertPlanResolvable(result.resolution);
+  const planPath = persist ? freezeProviderPlan(PROJECT_ROOT, result.plan) : undefined;
+  return {
+    context: {
+      ...result.provider_context,
+      plan: { ...result.provider_context.plan, ...(planPath ? { path: planPath } : {}) },
+    },
+    actions: result.provider_actions,
+  };
+}
+
+function providerHandoffPrompt(provider: PreparedProviderDirective | null, instance?: StageInstance): string {
+  if (!provider) return "";
+  const actions = provider.actions.map((action) => `${action.provider_instance_id}/${action.capability_id}@${action.plan_node_id}`).join("、");
+  const shadow = instance?.stage.slug === LOEYAE_COMPATIBILITY_STAGE && readLoeyaeCompatibilitySettings(PROJECT_ROOT).mode === "shadow";
+  const gateRule = shadow
+    ? "shadow 模式允许当前签名的 blocked Gate 进入只读双写对账，但阶段仍只由旧 framework-compliance sensor 放行；blocked Gate 绝不代表 Provider 验收通过。"
+    : "缺失或 blocked Gate 不会推进。";
+  return `\nProvider 计划：${provider.context.plan.id}（${provider.context.plan.digest}），lock=${provider.context.lock_digest}。只能执行 directive.provider_actions 中绑定的项目实例与 Plan node，不得从全局缓存、远端 branch 或同名仓库替换。${actions ? `动作：${actions}。` : ""} 对 validation/command/composite 动作运行 provider run，随后以 provider gate 聚合当前 Evidence；report 必须携带 --gate-decision <gate-id>。${gateRule}`;
+}
+
+function providerScopeForInstance(instance: StageInstance): ProviderScope {
+  return {
+    stage: instance.stage.slug,
+    ...(instance.module_id ? { module_id: instance.module_id } : {}),
+    ...(instance.unit_id ? { unit_id: instance.unit_id } : {}),
+  };
+}
+
+interface ProviderGateCheck {
+  readonly failure: string | null;
+  readonly decision?: GateDecisionV1_1;
+}
+
+/** Provider-backed quality actions require a current signed Gate before any workflow mutation. */
+function providerGateCheck(instance: StageInstance, gateReference: string | undefined): ProviderGateCheck {
+  let directive: PreparedProviderDirective | null;
+  try {
+    directive = prepareProviderDirective(instance, undefined, false);
+  } catch (error) {
+    return { failure: `Provider Gate prerequisite cannot be resolved: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const requiresGate = directive?.actions.some((action) => action.required && action.type !== "knowledge") === true;
+  if (!requiresGate) {
+    return { failure: gateReference ? `Stage ${instance.instance_id} has no Provider quality action requiring a GateDecision; remove --gate-decision.` : null };
+  }
+  if (!gateReference) {
+    return { failure: `Stage ${instance.instance_id} has required Provider quality actions. Run the bound provider actions and provider gate, then report with --gate-decision <gate-id>.` };
+  }
+  try {
+    const mode = instance.stage.slug === LOEYAE_COMPATIBILITY_STAGE
+      ? readLoeyaeCompatibilitySettings(PROJECT_ROOT).mode
+      : undefined;
+    const decision = verifyGateDecisionForReport(PROJECT_ROOT, gateReference, {
+      scope: providerScopeForInstance(instance),
+      sourceRevision: currentProviderSourceRevision(),
+      resolutionPolicy: defaultResolutionPolicy({
+        policy_id: loeyaeCompatibilityPolicyId(PROJECT_ROOT, instance.stage.slug),
+        protected_gate: instance.stage.approval === "block",
+      }),
+      ...(mode === "shadow" ? { allowBlockedForShadow: true } : {}),
+    });
+    return { failure: null, decision };
+  } catch (error) {
+    return { failure: `GateDecision ${gateReference} cannot authorize report: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+function prepareLoeyaeCompatibilityProjection(instance: StageInstance, decision: GateDecisionV1_1 | undefined): string | null {
+  if (instance.stage.slug !== LOEYAE_COMPATIBILITY_STAGE || !decision) return null;
+  const projected = projectProviderEvidenceToLegacy(PROJECT_ROOT, decision);
+  return projected.error ? `Loeyae compatibility projection failed: ${projected.error}` : null;
+}
+
+function reconcileLoeyaeCompatibility(instance: StageInstance, decision: GateDecisionV1_1 | undefined): { report?: WrittenLoeyaeReconciliation; failure?: string } {
+  if (instance.stage.slug !== LOEYAE_COMPATIBILITY_STAGE || !decision) return {};
+  try {
+    const report = reconcileLoeyaeCompliance(PROJECT_ROOT, decision);
+    const mode = readLoeyaeCompatibilitySettings(PROJECT_ROOT).mode;
+    if (mode === "enforce" && report.result.status !== "matched") {
+      return { report, failure: `Loeyae Provider 双写对账不一致；Rule/路径诊断：${report.path}。切回 legacy 或修复后用新 invocation 重跑。` };
+    }
+    return { report };
+  } catch (error) {
+    return { failure: `Loeyae Provider 双写对账失败: ${error instanceof Error ? error.message : String(error)}` };
+  }
 }
 
 function clearActiveContext(state: WorkflowState): void {
@@ -3741,6 +3928,7 @@ function advanceSplit(ctx: EngineContext, graph: StageGraph, args: string[], fla
     finishedMessage: (count) => `🎉 ${workflowLabel(ctx.owner)}: all ${count} stage instances resolved.`,
     candidate: (instance) => sameRef(ownerOfInstance(instance.instance_id), ctx.owner),
     extras: { workflow: key, workflow_id: persisted.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, ctx.owner) },
+    persistProviderPlans: !probe,
     reportCommand: reportCommandFor,
   });
 }
@@ -4222,6 +4410,7 @@ async function handleNext(args: string[]): Promise<Directive> {
   if (invalidFlag) return { kind: "error", message: `Unsupported AWS-style workflow option: --${invalidFlag}` };
 
   const claimRequested = "claim" in flags;
+  if (flags["provider-approval"] === "true") return { kind: "error", message: "--provider-approval requires a non-empty approval reference" };
   if (claimRequested && flags.claim !== "true") return { kind: "error", message: "--claim is a boolean flag and does not accept a value" };
   if (claimRequested && !flags.module) return { kind: "error", message: "--claim requires --module <module-id>" };
 
@@ -4436,6 +4625,8 @@ interface AdvanceOptions {
   /** Split layout: only the owner's instances are candidates; dependencies still see every instance. */
   candidate?: (instance: StageInstance) => boolean;
   extras?: Record<string, unknown>;
+  /** False for split-layout readiness probes: compute the same plan without writing it. */
+  persistProviderPlans?: boolean;
   reportCommand?: (instance: StageInstance) => string;
 }
 
@@ -4576,6 +4767,36 @@ async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directi
     }
   }
 
+  let providerDirective: PreparedProviderDirective | null = null;
+  try {
+    providerDirective = prepareProviderDirective(effectiveNextInstance, flags["provider-approval"], opts.persistProviderPlans !== false);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      kind: "error",
+      stage: nextStage.slug,
+      stage_instance: effectiveNextInstance.instance_id,
+      message: `🚫 Provider resolution blocked for "${effectiveNextInstance.instance_id}": ${message}`,
+      ...(error instanceof ProviderResolutionError ? { provider_diagnostics: error.diagnostics } : {}),
+      ...extras,
+    };
+  }
+  if (providerDirective?.context.plan.status === "pending") {
+    const moduleOption = effectiveNextInstance.module_id ? ` --module ${effectiveNextInstance.module_id}` : "";
+    return {
+      kind: "ask",
+      ask_type: "provider-plan-approval",
+      stage: nextStage.slug,
+      stage_instance: effectiveNextInstance.instance_id,
+      question: `ProviderPlan ${providerDirective.context.plan.id} requires human approval before this stage can start.`,
+      command_template: `loeyae-aidlc orchestrate next${moduleOption} --provider-approval "<approval-ref>"`,
+      message: `ProviderPlan ${providerDirective.context.plan.id} is pending approval. Review its locked instances/actions, then rerun next with --provider-approval <approval-ref>.`,
+      provider_context: providerDirective.context,
+      provider_actions: providerDirective.actions,
+      ...extras,
+    };
+  }
+
   state.current_stage = nextStage.slug;
   state.current_phase = nextStage.phase;
   state.current_stage_instance = nextInstance.instance_id;
@@ -4634,7 +4855,8 @@ async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directi
     sensors: nextStage.sensors,
     choices: directiveChoices,
     diagram_format: diagramFormatOf(state),
-    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, agentExecution, opts.reportCommand?.(effectiveNextInstance), directiveChoices),
+    ...(providerDirective ? { provider_context: providerDirective.context, provider_actions: providerDirective.actions } : {}),
+    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, agentExecution, opts.reportCommand?.(effectiveNextInstance), directiveChoices, providerHandoffPrompt(providerDirective, effectiveNextInstance)),
     ...(claimRequested ? { claimed: true, owner: state.active_instances[effectiveNextInstance.instance_id].owner, claim_expires_at: state.active_instances[effectiveNextInstance.instance_id].expires_at } : {}),
     ...extras,
   };
@@ -4785,6 +5007,14 @@ async function handleReport(args: string[]): Promise<Directive> {
     }
   }
 
+  // --- Provider Gate: fail before artifact producers, history or state/audit writes. ---
+  let providerDecision: GateDecisionV1_1 | undefined;
+  if (result === "completed" || result === "approved") {
+    const gate = providerGateCheck(currentInstance, flags["gate-decision"]);
+    if (gate.failure) return { kind: "error", message: `🚫 ${gate.failure}` };
+    providerDecision = gate.decision;
+  }
+
   // Record history entry
   const entry: HistoryEntry = {
     stage: stageSlug,
@@ -4822,6 +5052,9 @@ async function handleReport(args: string[]): Promise<Directive> {
         }
       }
 
+      const compatibilityProjectionFailure = prepareLoeyaeCompatibilityProjection(currentInstance, providerDecision);
+      if (compatibilityProjectionFailure) return { kind: "error", message: `🚫 ${compatibilityProjectionFailure}` };
+
       const automaticEvidenceError = produceMissingSemanticEvidence(currentInstance);
       if (automaticEvidenceError) {
         return {
@@ -4829,6 +5062,12 @@ async function handleReport(args: string[]): Promise<Directive> {
           message: `🚫 Cannot complete stage "${stageSlug}" — ${automaticEvidenceError}`,
         };
       }
+
+      const compatibility = reconcileLoeyaeCompatibility(currentInstance, providerDecision);
+      if (compatibility.failure) {
+        return { kind: "error", message: `🚫 ${compatibility.failure}`, ...(compatibility.report ? { provider_reconciliation: compatibility.report } : {}) };
+      }
+      if (compatibility.report) extras = { ...extras, provider_reconciliation: compatibility.report };
 
       const missingProduces = checkProduces(currentInstance);
       if (missingProduces.length > 0) {
@@ -4997,6 +5236,10 @@ async function reattestInstance(
   if (stageNode.completion_contract === "instruction_only" && flags["instruction-ack"] !== stageNode.slug) {
     return { kind: "error", message: `Stage "${stageNode.slug}" is instruction-only; re-attest with --instruction-ack ${stageNode.slug}.`, ...extras };
   }
+  const declaredForProviderGate = expandStageInstances(graph, state).find((instance) => instance.instance_id === instanceId);
+  if (!declaredForProviderGate) return { kind: "error", message: `Stage instance "${instanceId}" no longer exists.`, ...extras };
+  const providerGate = providerGateCheck(runtimeInstance(declaredForProviderGate, state), flags["gate-decision"]);
+  if (providerGate.failure) return { kind: "error", message: `🚫 ${providerGate.failure}`, ...extras };
   const instances = expandStageInstances(graph, state);
   const declared = instances.find((instance) => instance.instance_id === instanceId);
   if (!declared) {
@@ -5014,8 +5257,13 @@ async function reattestInstance(
       if (redFailures.length > 0) return { kind: "error", message: `🚫 Cannot re-attest GREEN stage "${instanceId}" — RED gate evidence is invalid:\\n${redFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\\n")}`, ...extras };
     }
   }
+  const compatibilityProjectionFailure = prepareLoeyaeCompatibilityProjection(instance, providerGate.decision);
+  if (compatibilityProjectionFailure) return { kind: "error", message: `🚫 ${compatibilityProjectionFailure}`, ...extras };
   const automaticEvidenceError = produceMissingSemanticEvidence(instance, true);
   if (automaticEvidenceError) return { kind: "error", message: `🚫 Cannot re-attest "${instanceId}" — ${automaticEvidenceError}`, ...extras };
+  const compatibility = reconcileLoeyaeCompatibility(instance, providerGate.decision);
+  if (compatibility.failure) return { kind: "error", message: `🚫 ${compatibility.failure}`, ...(compatibility.report ? { provider_reconciliation: compatibility.report } : {}), ...extras };
+  if (compatibility.report) extras = { ...extras, provider_reconciliation: compatibility.report };
   // MARS-95: a completed unit proved its source delivery when it completed; after
   // --advance its changes are part of the baseline, so an empty delta is not a failure.
   const missingProduces = checkProduces(instance, { completed: true });

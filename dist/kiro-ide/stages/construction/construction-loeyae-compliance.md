@@ -8,7 +8,8 @@ execution: CONDITIONAL
 lead_agent: aidlc-developer-agent
 support_agents: []
 mode: inline
-scopes: [feature, enterprise, mvp, classic]
+scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
+provider_capabilities: [implementation-validation]
 consumes: []
 produces: [.aidlc/evidence/loeyae-compliance/{module-id}/{unit-id}/framework-compliance.json]
 sensors: [framework-compliance]
@@ -17,15 +18,53 @@ requires: [code-generation]
 condition: is_loeyae_boot
 ---
 
-# Loeyae Boot 编码规范加载与合规验证
+# Implementation validation（Loeyae compatibility adapter）
 
 > **加载条件**：仅当当前 unit Stage directive 由机器条件 `is_loeyae_boot` 路由为适用时加载；新签名工作流还要求当前单元的 `conditional_stages` 包含 `loeyae-compliance`。`handoff.md` 只展示派生结果，不是路由来源。
-> **加载时机**：Construction 代码生成步骤 2（MCP Skill 加载）时。
-> **非 Loeyae Boot 项目完全不需要本文件。**
+> **适用 scope**：`feature`、`enterprise`、`mvp`、`classic`、`bugfix`、`refactor`、`express`、`workshop`。scope 只决定 Provider 的规则/输入深度，不能整体跳过已识别的 Loeyae Boot 代码变更。
+> **非 Loeyae Boot 项目**：本阶段由 `is_loeyae_boot` 排除，不解析或运行 Loeyae Provider。
+
+## 迁移模式
+
+项目级开关位于 `.aidlc/provider-compatibility.json`，通过 CLI 管理，默认安全回退为 `legacy`：
+
+```bash
+loeyae-aidlc provider compatibility
+loeyae-aidlc provider compatibility --mode shadow --instance loeyae-boot
+loeyae-aidlc provider compatibility --mode enforce --instance loeyae-boot
+loeyae-aidlc provider compatibility --mode legacy
+```
+
+| 模式 | 权威门禁 | 行为 |
+|---|---|---|
+| `legacy` | 原 `framework-compliance` | 不创建 implementation-validation ProviderPlan；完全兼容旧 workflow。 |
+| `shadow` | 原 `framework-compliance` | 必须运行锁定 Provider 并提供当前 GateDecision；允许 blocked Gate 进入只读对账，差异按 Rule/路径记录但不代替旧门禁。 |
+| `enforce` | Provider Gate | Gate 必须通过；缺旧 Evidence 时由 Core 从 accepted Provider Evidence 生成兼容投影，双写结果与历史均保留。 |
+
+安装时必须把首个 Provider 显式绑定到本挂载点，避免在无关阶段加载：
+
+```bash
+loeyae-aidlc provider add <git-url> --ref <tag-or-commit> \
+  --subdir providers/loeyae-boot \
+  --id framework.java-loeyae-boot --instance loeyae-boot \
+  --stage loeyae-compliance --capability implementation-validation
+```
+
+执行 directive 中的 validation action 时，将本单元实际变更的 Java/Kotlin 文件或源码目录作为只读输入：
+
+```bash
+loeyae-aidlc provider run --plan <plan-id-or-path> --node <node-id> \
+  --input source=<project-relative-source-path>
+loeyae-aidlc provider gate --plan <plan-id-or-path> --evidence <evidence-id>
+loeyae-aidlc orchestrate report --stage loeyae-compliance --result completed \
+  --gate-decision <gate-id>
+```
+
+旧 Evidence、Provider Evidence/Result、GateDecision 和 `.aidlc/provider-reconciliation/loeyae-compliance/**` 对账报告均只读保留；切回 `legacy` 不删除历史，修复后必须以新 invocation 重跑。
 
 ---
 
-## 第一部分：MCP Skill 加载策略
+## 第一部分：迁移期 MCP Skill 加载策略
 
 ### 强制要求（不可跳过）
 

@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — MARS-154
+
+Loeyae 合规迁移为通用 `implementation-validation` 项目级 Provider 挂载，并完成兼容双写与端到端回归；尚未创建版本 tag。
+
+### Added
+
+- 新增 `.aidlc/provider-compatibility.json` 与 `provider compatibility --mode legacy|shadow|enforce`。默认 `legacy`；模式进入 Plan policy digest，跨模式旧 Gate 失效。
+- 新增 `aidlc-provider-compatibility.ts`：enforce 缺旧 Evidence 时生成 controlled 兼容投影；每个 Gate 生成不可变 JSON/Markdown 对账，保留 Rule ID、文件/行位置、Provider commit/invocation/source revision 与回滚动作。
+- `provider add` 支持重复 `--module/--unit/--stage/--capability`，Loeyae Provider 可只绑定到 `loeyae-compliance/implementation-validation`。
+- 新增本地 bare Git 联合回归 `test_loeyae_provider_migration.ts`，实际执行 fixture entrypoint，覆盖嵌套多模块、非 Loeyae、轻量 scope、blocked shadow Gate、enforce 投影、CR stale 与历史保留。
+
+### Changed
+
+- `loeyae-compliance` 覆盖全部 8 个 scope，并声明通用 `implementation-validation` capability；Profile 决定适用性，scope 只决定 full/targeted 规则深度。
+- ProviderRequest 以 `extensions.io.loeyae.aidlc.workflow_scope` 传递 workflow scope；多模块 Loeyae 检测读取受 gitignore 约束的全部构建元数据，而非只看根文件。
+- `shadow` 可验证并消费当前签名的 blocked Gate 作为只读对账输入，但仍由旧 sensor 决定阶段准出；`enforce` 仍要求 passing Gate。
+
+### Security / compatibility
+
+- 旧 workflow 未配置 feature flag 时维持 `legacy`；非 Loeyae 项目在 Provider resolution 前跳过本阶段。
+- rollback/update/disable/remove 不删除旧 Evidence、GateDecision、lock history、audit 或对账报告。
+- 生产 `restricted-v1` 仍 fail-closed；Windows/macOS 不具备完整 OS isolation 时不会降级执行。
+
 ## 4.13.3
 
 UI 生成治理与多人模块协作收口（MARS-132 / MARS-133）：UI 设计改为代表页定标、全量连续生成、每批自动技术读回、最终需求新鲜度门禁、一次集中验收与定向复验；团队协作把 `conductor-only` 明确为 per-WorkflowRef 单写者，模块负责人可自主推进，整体进度由 registry 动态聚合。

@@ -13,3 +13,5 @@
 | `aidlc-structural-invariants-design.md` | 方案 | 形态一致性门禁（structural-invariants） |
 | `legacy-migration-plan.md` | 计划 | 存量项目追溯 ID 迁移计划（配套 `scripts/legacy-id-migrate.ts`） |
 | `loeyae-aidlc-dart-issue.md` | 问题报告 | 源码扫描缺少 `.dart` 扩展名 |
+| `aidlc-project-git-provider-optimization-design.md` | 方案 | 项目级 Git Provider、Core 集成、首个 Loeyae Boot Provider 迁移与实施计划 |
+| `aidlc-project-git-provider-execution-backlog.md` | 任务清单 | 按阶段、依赖关系和交付物划分的 Provider 实施 backlog |

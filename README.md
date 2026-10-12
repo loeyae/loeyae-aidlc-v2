@@ -38,6 +38,75 @@ loeyae-aidlc install --harness claude
 loeyae-aidlc install --all
 ```
 
+## 项目级 Git Provider
+
+Provider 以项目意图和不可变 lock 管理：`.aidlc/providers.yaml` 保存来源、配置与 binding，`.aidlc/providers.lock.yaml` 保存 commit/tree/Manifest/ruleset/config 摘要。生产 `https`/`ssh` 来源须先在 `.aidlc/provider-git-policy.json` 配置 `allowed_hosts`（可选 `allowed_organizations`）；运行时只使用 lock 中的 commit，不会自动跟随 branch/tag。
+
+```bash
+loeyae-aidlc provider add <git-url> --ref <tag|branch|commit> [--subdir <path>] [--id <provider-id>] [--instance <id>] \
+  [--module <id|*>]... [--unit <id|*>]... [--stage <slug|*>]... [--capability <id>]...
+loeyae-aidlc provider list --project
+loeyae-aidlc provider status <instance-id>
+loeyae-aidlc provider update <instance-id> --ref <tag|branch|commit>
+loeyae-aidlc provider disable <instance-id>
+loeyae-aidlc provider enable <instance-id>
+loeyae-aidlc provider remove <instance-id>
+loeyae-aidlc provider probe
+loeyae-aidlc provider run --plan <plan-id|path> --node <node-id> \
+  [--input <id>=<project-relative-path>]...
+loeyae-aidlc provider gate --plan <plan-id|path> \
+  [--evidence <evidence-id|path>]...
+loeyae-aidlc provider compatibility [--mode <legacy|shadow|enforce>] [--instance <id>]
+```
+
+### Loeyae Boot implementation-validation 迁移
+
+`loeyae-compliance` 现为通用 `implementation-validation` 的迁移期挂载点。默认 `legacy` 不要求 Provider；`shadow` 双写并保留 Rule/路径级差异但仍以旧 sensor 为权威；`enforce` 以当前签名 GateDecision 为权威，并在缺少旧 Evidence 时生成兼容投影。Loeyae Boot Provider 必须显式绑定到该阶段，四个轻量 scope 不再整体跳过：
+
+```bash
+loeyae-aidlc provider add <git-url> --ref <tag-or-commit> \
+  --subdir providers/loeyae-boot \
+  --id framework.java-loeyae-boot --instance loeyae-boot \
+  --stage loeyae-compliance --capability implementation-validation
+loeyae-aidlc provider compatibility --mode shadow --instance loeyae-boot
+# 对账稳定后
+loeyae-aidlc provider compatibility --mode enforce
+# 一键回到旧门禁，历史 Evidence/Gate/报告不删除
+loeyae-aidlc provider compatibility --mode legacy
+```
+
+完整安装、Profile、运行、迁移、回滚、兼容矩阵与发布清单见 `docs/loeyae-boot-provider-migration.md`。
+
+`provider run` 只执行 frozen Plan 中选中的 node：Runner 从锁定 commit 物化只读 bundle，为显式 `--input` 创建只读快照，使用结构化 argv、最小环境和默认无网络的 `restricted-v1` sandbox。当前 OS 若无法完整落实文件系统、网络、进程与资源隔离，`provider probe` 返回不支持且 `run` fail-closed，不会 best-effort 降级。Provider 只能写 invocation 的 `output/result.json` 与已声明报告；Runner 严格校验后重算 summary、绑定 Plan/lock/revision，并以 Core 本机密钥签发 accepted Evidence。
+
+`provider gate` 只消费签名有效且当前状态为 accepted 的 Evidence；stale、expired、revoked、deferred、缺失或伪造 Evidence 均阻断。waiver/fallback 默认拒绝，必须同时由锁定 Plan、Core policy 和阶段 policy 放行。Provider-backed 阶段报告时必须携带当前 passing GateDecision：
+
+```bash
+loeyae-aidlc orchestrate report --stage <slug> --result completed \
+  --gate-decision <gate-id>
+```
+
+安装/更新只执行隔离的 Git fetch 与对象读取，不 checkout 或执行 Provider entrypoint、hook、submodule、LFS/filter、package manager 和构建脚本。`file://` 与本地绝对路径仅供隔离测试 fixture，需显式 `--allow-file` 或 `AIDLC_PROVIDER_ALLOW_FILE=1`。生命周期变更保留 lock history 和历史 Evidence，并写入失效记录与审计；配置/lock 不一致、cache 缺失、来源或必需 capability 不可用时默认阻断。
+
+Provider selector 使用项目级 `.aidlc/provider-profile.json`。Profile 支持 `extends` 继承，facts 深合并，risk 只升不降；缺失 selector fact 为 `unknown`，必需 capability 会 fail-closed。示例：
+
+```json
+{
+  "version": 1,
+  "active": "typescript-web",
+  "profiles": {
+    "base": { "facts": { "languages": ["typescript"] } },
+    "typescript-web": {
+      "extends": ["base"],
+      "facts": { "frameworks": ["react"], "profiles": ["strict"] },
+      "risk": { "level": "standard", "protected_gate": false }
+    }
+  }
+}
+```
+
+`orchestrate next` 仅从项目 `providers.yaml`、不可变 lock 和本地受验 cache 解析当前 module/unit/stage binding，生成确定性的 `.aidlc/provider-plans/<plan-id>.json`，并在 directive 中返回 `provider_context` / `provider_actions`。每个 action 都绑定 `provider_instance_id + project lock digest + plan node`；不得以全局安装、移动 branch 或同名仓库替代。受保护 Profile/gate 或显式 fallback Plan 会先返回审批提示，审核锁定动作后用 `orchestrate next --provider-approval "<approval-ref>"` 继续。
+
 ## 开始新工作
 
 用户先明确要做的事：

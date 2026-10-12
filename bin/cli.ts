@@ -1387,7 +1387,8 @@ Usage:
 Workflow:
   orchestrate next --scope <scope> --work <description>  Start a new Markdown workflow
   orchestrate next [--module <module-id>]               Read the next directive (per-module after split)
-  orchestrate report --stage <slug> --result completed  Report a completed stage (--module in split layout)
+  orchestrate next [--module <id>] --provider-approval <ref>  Continue an approved protected/fallback ProviderPlan
+  orchestrate report --stage <slug> --result completed [--gate-decision <id>]  Report a completed stage (--module in split layout)
   orchestrate park [--module <module-id>]               Park the active workflow or one module workflow
   orchestrate archive [--reason <text>]                 Archive a parked/done workflow and its evidence to aidlc/archive/
   orchestrate split --from <workflow-id> [--dry-run]    Split into per-module workflows (aidlc/active/registry.md)
@@ -1413,6 +1414,10 @@ Quality and utilities:
   evidence run --stage <slug> [flags]       Produce controlled evidence (--module/--unit, --refresh for completed stages)
   attest resolve [flags]                     Read-only commit/diff attribution
   agent describe|plan|validate-result [args]          Inspect agent persona, execution plan or result contract
+  provider add|list|status|update|enable|disable|remove [args]  Manage project-level locked Git Providers
+  provider add <git-url> --stage <slug> --capability <id> [...]  Install with an explicit project binding
+  provider compatibility [--mode legacy|shadow|enforce] [--instance <id>]  Migrate/rollback loeyae-compliance
+  provider probe|run|gate [args]                       Probe restricted-v1, execute a Plan node, and issue GateDecision
   extension validate|compose|status [flags] Restricted additive extension metadata
   check --sensor <name> [--module <id>]      Run a deterministic semantic checker (module-scoped with --module)
   ui lock|accept|check|impact-matrix|dry-run  Lock UI inputs, verify freshness, and enforce one full acceptance
@@ -1465,6 +1470,7 @@ function main(): void {
     case "attestation": run("core/tools/aidlc-attestation-resolver.ts", rest); break;
     case "runtime": run("core/tools/aidlc-runtime-light.ts", rest); break;
     case "agent": run("core/tools/aidlc-agent-runtime.ts", rest); break;
+    case "provider": run("core/tools/aidlc-provider-cli.ts", rest); break;
     case "extension": run("core/tools/aidlc-extension.ts", rest); break;
     case "worktree": run("core/tools/aidlc-worktree-light.ts", rest); break;
     case "check": run("core/tools/aidlc-semantic-checks.ts", rest); break;

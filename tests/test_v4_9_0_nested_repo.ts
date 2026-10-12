@@ -514,10 +514,15 @@ function normalizeText(value: string, project: string): string {
     .replace(/"duration_ms": \d+/g, "\"duration_ms\": <n>")
     .replace(/\b4\.8\.1\b|\b4\.(?:9|10|11|12|13)\.\d+\b/g, "<version>")
     .replace(/\(\d+h old/g, "(<n>h old")
-    // E-fixture only ignores two intentional engine evolutions so the "≡ 4.8.1" lock still
+    // E-fixture only ignores three intentional engine evolutions so the "≡ 4.8.1" lock still
     // guards every other behaviour (symmetric on both engines):
     //   P4 (MARS-109): operations split into planning+authorization raised the stage total.
-    .replace(/Executable stages: (\d+)\/\d+/g, "Executable stages: $1/<total>")
+    //   MARS-154: refactor gained the conditional loeyae-compliance candidate. Its actual
+    //   non-Loeyae condition skip and Provider non-loading have a dedicated E2E; this
+    //   historical lock continues comparing every unrelated nested-repository behavior.
+    .replace(/Executable stages: \d+\/\d+/g, "Executable stages: <n>/<total>")
+    .replace(/\n\s*\{\n\s*"stage_instance": "loeyae-compliance@module:project@unit:default",\n\s*"stage": "loeyae-compliance",\n\s*"module_id": "project",\n\s*"unit_id": "default",\n\s*"status": "ready",\n\s*"dependency_waiting": \[\]\n\s*\},/g, "")
+    .replace(/\n\s*"loeyae-compliance@module:project@unit:default",/g, "")
     //   P3 (MARS-108): not_applicable stages no longer carry the (gate-short-circuited)
     //   traceability sensor. Dropping the traceability sensor line on BOTH engines keeps the
     //   comparison symmetric; sensor-mount correctness itself is covered by test_construction_tdd_gates.

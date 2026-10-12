@@ -29,6 +29,7 @@ interface StageNode {
   consumes: string[];
   produces: string[];
   sensors: string[];
+  provider_capabilities?: string[];
   traceability: "required" | "not_applicable";
   completion_contract: "gated" | "instruction_only";
   condition: string;
@@ -54,7 +55,7 @@ function parseFrontmatter(content: string): Record<string, unknown> | null {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return null;
   const fm: Record<string, unknown> = {};
-  const listKeys = new Set(["support_agents", "scopes", "requires", "cross_module_requires", "scope_waived_requires", "consumes", "produces", "sensors", "choices"]);
+  const listKeys = new Set(["support_agents", "scopes", "requires", "cross_module_requires", "scope_waived_requires", "consumes", "produces", "sensors", "choices", "provider_capabilities"]);
   let currentListKey: string | null = null;
   for (const line of match[1].split("\n")) {
     const trimmed = line.trim();
@@ -107,6 +108,7 @@ function scanStages(): StageNode[] {
         ? ["no-todo", ...(traceabilityMode === "not_applicable" ? [] : ["traceability"])]
         : [];
       const sensors = produces.length > 0 ? [...new Set([...declaredSensors, ...autoSensors])] : declaredSensors;
+      const providerCapabilities = (fm.provider_capabilities as string[]) || [];
       nodes.push({
         slug: fm.slug as string,
         number: (fm.number as string) || "",
@@ -127,6 +129,7 @@ function scanStages(): StageNode[] {
         consumes: (fm.consumes as string[]) || [],
         produces,
         sensors,
+        ...(providerCapabilities.length > 0 ? { provider_capabilities: providerCapabilities } : {}),
         traceability: traceabilityMode,
         completion_contract: fm.completion_contract === "instruction_only" ? "instruction_only" : "gated",
         condition: (fm.condition as string) || "",
@@ -248,6 +251,10 @@ export function validateGraph(graph: { stages: StageNode[]; stage_count: number;
     if (stage.choices.length > 0 && stage.completion_contract !== "instruction_only") errors.push(`choice stage must be instruction_only: ${stage.slug}`);
     if (stage.choices.length > 0 && stage.selection === "user") errors.push(`runtime choice stage cannot also use initialization selection: ${stage.slug}`);
     if (!["block", "confirm", "notify"].includes(stage.approval)) errors.push(`invalid approval on ${stage.slug}: ${stage.approval}`);
+    if (new Set(stage.provider_capabilities || []).size !== (stage.provider_capabilities || []).length) errors.push(`duplicate provider_capabilities on ${stage.slug}`);
+    for (const capability of stage.provider_capabilities || []) {
+      if (!/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(capability)) errors.push(`invalid provider capability on ${stage.slug}: ${capability}`);
+    }
     if (!["required", "not_applicable"].includes(stage.traceability)) errors.push(`invalid traceability mode on ${stage.slug}: ${stage.traceability}`);
     if (!["gated", "instruction_only"].includes(stage.completion_contract)) errors.push(`invalid completion_contract on ${stage.slug}`);
     if (stage.produces.length === 0 && stage.sensors.length === 0 && stage.completion_contract !== "instruction_only") {
