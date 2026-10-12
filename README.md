@@ -38,7 +38,7 @@ loeyae-aidlc install --harness claude
 loeyae-aidlc install --all
 ```
 
-## 项目级 Git Provider
+## 项目级 Git Provider（4.14.0，MARS-148）
 
 Provider 以项目意图和不可变 lock 管理：`.aidlc/providers.yaml` 保存来源、配置与 binding，`.aidlc/providers.lock.yaml` 保存 commit/tree/Manifest/ruleset/config 摘要。生产 `https`/`ssh` 来源须先在 `.aidlc/provider-git-policy.json` 配置 `allowed_hosts`（可选 `allowed_organizations`）；运行时只使用 lock 中的 commit，不会自动跟随 branch/tag。
 
