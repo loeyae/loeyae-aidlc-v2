@@ -32,4 +32,4 @@ loeyae-aidlc unit select --module <id> --unit <id> --member <name> --branch <bra
 
 ## Agent execution
 
-当 directive 包含 `agent_execution` 时，加载 `agents/<primary.id>.md` 与 `skills/aidlc-agent-execution/SKILL.md`。对 `delegate`、`pipeline`、`mob` 和 `review` 使用宿主原生 subagent 能力；若不可用，明确回退 inline。只有 conductor 可以 `orchestrate report`、更新 state/audit、批准或 merge。
+当 directive 包含 `agent_execution` 时，加载 `agents/<primary.id>.md` 与 `skills/aidlc-agent-execution/SKILL.md`。对 `delegate`、`pipeline`、`mob` 和 `review` 使用宿主原生 subagent 能力；若不可用，明确回退 inline。只有当前 WorkflowRef 的 conductor 可以 `orchestrate report`、更新其 state/audit；split 后模块负责人可作为本模块 conductor 使用带 `--module` 的 `next` / `report` / `park`，无需回到 global/父议题协调者。用户审批、跨模块 barrier、integration 与人工 merge 门禁保持不变。

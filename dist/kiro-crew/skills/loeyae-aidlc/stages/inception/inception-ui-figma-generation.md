@@ -11,6 +11,7 @@ mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes:
   - docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md
+  - docs/aidlc/modules/{module-id}/inception/ui-design/ui-generation-lock.json
 produces:
   - docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json
   - .aidlc/evidence/ui-figma-generation/{module-id}/ui-artifact-consistency.json
@@ -26,6 +27,7 @@ condition: ui_mode_figma
 ## 输入
 
 - 页面计划路径；
+- `ui-generation-lock.json`（由 `ui-page-planning` 受控校验，禁止生成后覆盖）；
 - `source=created` 或 `source=external`；
 - 编排层已验证的读写能力结果；
 - 目标文件或创建目标；
@@ -111,3 +113,5 @@ condition: ui_mode_figma
 - 流程创建模式使用 Variables、Auto Layout 和适用 Components；
 - 外部提供模式零写入；
 - 截图证据可复现，不使用“看起来一致”或百分比估算代替。
+
+**每批轻量技术读回**（`knowledge/design/common-ui-generation-flow.md` 阶段 4，全量连续生成中每批自动执行，不启动独立 reviewer、不等待用户）：节点真实生成、顶层 Frame 唯一、`nodeId` 稳定、未误改只读来源或旧版本、无 API 回滚残留、无碰撞/越界/缺字/截断、Variables/Components/Auto Layout 真实引用、截图与登记生成。写入失败按阶段 4 恢复顺序，连续两次失败切换实现，不无限重试。

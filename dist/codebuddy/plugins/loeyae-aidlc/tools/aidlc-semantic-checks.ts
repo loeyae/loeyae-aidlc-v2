@@ -13,6 +13,7 @@ import { baselineCodeRef, baselineCommitErrors, extraRepoKeyErrors, gitWorkTreeE
 import { codeRefRepo, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
 import { declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
+import { readUiGenerationLock, verifyUiGenerationAcceptance, verifyUiGenerationLockAtBaseline, type UiDesignRoute } from "./aidlc-ui-governance";
 import { type WorkflowState } from "./aidlc-light-state";
 import { loadWorkflowView } from "./aidlc-workflow-layout";
 import {
@@ -3275,6 +3276,25 @@ function uiArtifactConsistency(): Record<string, unknown> {
   if (route === "skip" || route === "not-selected") fail(`ui-artifact-consistency is not applicable to selected UI route ${route}`);
   const plan = pagePlanContract();
   const stage = workflowState.current_stage;
+  const selectedRoute = route as UiDesignRoute;
+  const loadedLock = readUiGenerationLock(ROOT, ACTIVE_MODULE);
+  if (loadedLock.lock.route !== selectedRoute) fail(`UI generation lock.route must match selected UI route ${route}`);
+  const lock = stage === "ui-page-planning"
+    ? verifyUiGenerationLockAtBaseline(ROOT, ACTIVE_MODULE, selectedRoute, plan.pageIds)
+    : {
+      path: loadedLock.path,
+      digest: loadedLock.digest,
+      upstream_ref: loadedLock.lock.upstream.ref,
+      upstream_commit: loadedLock.lock.upstream.commit,
+      baseline_mode: loadedLock.lock.baseline_mode,
+    };
+  const lockEvidence = {
+    ui_generation_lock_verified: true,
+    ui_generation_lock_digest: lock.digest,
+    ui_generation_upstream_ref: lock.upstream_ref,
+    ui_generation_upstream_commit: lock.upstream_commit,
+    ui_generation_baseline_mode: lock.baseline_mode,
+  };
   if (stage === "ui-page-planning") {
     return {
       status: "passed",
@@ -3282,8 +3302,9 @@ function uiArtifactConsistency(): Record<string, unknown> {
       module_id: ACTIVE_MODULE,
       design_mode: route,
       pages_checked: plan.pageIds.length,
-      phases_verified: ["page-plan"],
-      artifacts_checked: plan.artifacts,
+      phases_verified: ["page-plan", "ui-generation-lock"],
+      artifacts_checked: [...plan.artifacts, lock.path],
+      ...lockEvidence,
       unresolved: 0,
     };
   }
@@ -3298,8 +3319,9 @@ function uiArtifactConsistency(): Record<string, unknown> {
       design_mode: route,
       pages_checked: html.pageIds.length,
       elements_checked: html.elements,
-      phases_verified: ["page-plan", "skeleton", "content"],
-      artifacts_checked: html.artifacts,
+      phases_verified: ["page-plan", "ui-generation-lock", "skeleton", "content"],
+      artifacts_checked: [...html.artifacts, lock.path],
+      ...lockEvidence,
       stories_required: coverage.required_stories.length,
       stories_covered: coverage.covered_stories.length,
       stories_exempt: coverage.exempt_stories,
@@ -3318,8 +3340,9 @@ function uiArtifactConsistency(): Record<string, unknown> {
       design_mode: route,
       pages_checked: figma.pageIds.length,
       elements_checked: figma.elements,
-      phases_verified: ["page-plan", route === "figma-create" ? "figma-created" : "figma-external-read-only"],
-      artifacts_checked: figma.artifacts,
+      phases_verified: ["page-plan", "ui-generation-lock", route === "figma-create" ? "figma-created" : "figma-external-read-only"],
+      artifacts_checked: [...figma.artifacts, lock.path],
+      ...lockEvidence,
       stories_required: coverage.required_stories.length,
       stories_covered: coverage.covered_stories.length,
       stories_exempt: coverage.exempt_stories,
@@ -3388,13 +3411,15 @@ function inceptionConsistency(): Record<string, unknown> {
   }
 
   let uiPagesChecked = 0;
+  let uiGovernance: ReturnType<typeof verifyUiGenerationAcceptance> | null = null;
   if (uiRoute === "html-mock" || uiRoute === "figma-create" || uiRoute === "figma-existing") {
     const plan = pagePlanContract();
     const design = uiRoute === "html-mock" ? htmlArtifactContract(plan) : figmaArtifactContract(plan, uiRoute);
     const missingPages = design.pageIds.filter((id) => !report.toUpperCase().includes(id));
     if (missingPages.length > 0) fail(`cross-validation report omits selected UI pages: ${missingPages.join(", ")}`);
+    uiGovernance = verifyUiGenerationAcceptance(ROOT, ACTIVE_MODULE, uiRoute, design.pageIds);
     uiPagesChecked = design.pageIds.length;
-    artifacts.push(...design.artifacts);
+    artifacts.push(...design.artifacts, uiGovernance.lock_path, uiGovernance.acceptance_path);
   }
 
   return {
@@ -3406,6 +3431,17 @@ function inceptionConsistency(): Record<string, unknown> {
     prd_items_checked: prdItemsChecked,
     ui_route: uiRoute,
     ui_pages_checked: uiPagesChecked,
+    ui_freshness_verified: Boolean(uiGovernance),
+    ui_generation_lock_digest: uiGovernance?.lock_digest || null,
+    ui_generation_acceptance_digest: uiGovernance?.acceptance_digest || null,
+    ui_upstream_ref: uiGovernance?.upstream_ref || null,
+    ui_baseline_upstream_commit: uiGovernance?.baseline_upstream_commit || null,
+    ui_current_upstream_commit: uiGovernance?.current_upstream_commit || null,
+    ui_changed_paths: uiGovernance?.changed_paths || [],
+    ui_affected_pages: uiGovernance?.affected_pages || [],
+    ui_impact_unmapped: 0,
+    ui_full_acceptance_runs: uiGovernance?.full_acceptance_runs || 0,
+    ui_targeted_reverification_runs: uiGovernance?.targeted_reverification_runs || 0,
     unresolved_conflicts: 0,
     artifacts_checked: [...new Set(artifacts)],
   };

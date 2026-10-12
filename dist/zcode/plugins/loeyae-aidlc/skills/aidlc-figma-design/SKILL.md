@@ -24,6 +24,8 @@ triggers: Figma, Figma 设计, UI 设计稿, 外部设计稿, Figma 页面
 
 加载发布包中的 `stages/inception/inception-ui-figma-generation.md`。Construction 的 `knowledge/design/common-figma-design-standards.md` 不属于本能力。
 
+UI 生成流程（代表页定标·全量连续生成·每批轻量技术读回）见 `knowledge/design/common-ui-generation-flow.md`：调用方按该流程以**连续模式**传入全部页面，批次仅用于控制写入规模和错误恢复，本能力不逐页等待用户审批，每批完成后自动技术读回。
+
 ## 输出
 
 返回当前模块 canonical `docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json` 的路径和完整内容：主文件 URL、每个 PAGE 对应的 Page/Frame/nodeId、设计资源验证、截图引用和未解决问题。`source=created` 必须记录 `external_read_only=false`；`source=external` 必须只读并记录 `external_read_only=true`。

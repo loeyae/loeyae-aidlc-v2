@@ -62,10 +62,10 @@ AI：展示“下一步提示”（handoff_prompt），需要你决定时停下�
 | --- | --- | --- |
 | Kiro IDE | Chat 面板 | 一个 Chat 会话当“协调者”，从头到尾在同一个会话推进最省事 |
 | Kiro CLI | `kiro-cli chat` | 与 Kiro IDE 共用同一个 Skill，提示词完全相同 |
-| Kiro Crew | 主会话 | 遇到可并行或需独立审查的阶段，主会话会派发子 agent；只有主会话能上报阶段和接受批准 |
+| Kiro Crew | 主会话 | 遇到可并行或需独立审查的阶段，当前 WorkflowRef 的主会话会派发子 agent；split 后可由各模块主会话分别上报 |
 | Claude Code | 对话 | 审批阶段可直接输入 `/aidlc-approve` |
 | Codex / OpenCode / CodeBuddy / Qoder / ZCode | 对话 | 提示词与上面相同 |
-| Multica | 父议题评论 / 对话 | 由父议题的协调者推进，子议题只交付产物（见 §8.3） |
+| Multica | global/integration 父议题或模块议题 | 父议题聚合 global/integration；各模块议题负责人作为模块 workflow conductor 自主推进（见 §8.3） |
 
 ### 3.1 开工提示词怎么写
 
@@ -329,7 +329,7 @@ AI 会先判断这是不是 CR：
 
 不同成员可以用不同工具（A 用 Kiro IDE、B 用 Claude Code），注意：
 
-- 每个流程（或拆分后的每个模块流程）同一时刻只有一个会话负责上报阶段，其他人只交付产物；
+- 同一个 WorkflowRef 同一时刻只有一个 conductor 会话负责上报；split 后不同模块各有自己的 WorkflowRef 和模块 conductor，可以并行 `next` / `report`，不需要回到 global 会话代报；同一模块内被派发的 execution agent 仍只交付产物；
 - 流程状态和证据随 Git 同步，先拉取再说“继续”；
 - 接手别人的工作时说 `使用 AI-DLC，继续上次的工作`，以 AI 展示的下一步提示为准，不依赖上一位的聊天记录。
 
@@ -341,9 +341,10 @@ AI 会先判断这是不是 CR：
 按 AI-DLC 当前阶段拆解任务，先给我看任务矩阵，确认后再建子议题
 ```
 
-- 只有父议题的协调者推进 AI-DLC 状态；子议题只交付文档、代码、测试或审查结论。
-- 协调者按阶段的执行方式决定落地形态：可并行的按单元建子议题；需要多角色同场的建一个协作议题；审查类建审查子议题（审查者不能是作者）；顺序类建串行议题链；需要你回答或审批的阶段由协调者在对话里直接问你，不外派。
-- 跨模块集成排在所有模块完成之后的独立批次。
+- 父议题协调者负责 global/integration workflow、lineage、跨模块 barrier 和任务视图聚合；**不得**在模块子议题中写入“禁止 `next/report/park`、只能回父议题代报”的约束。
+- 每个模块子议题的负责人是该模块 workflow conductor，可使用带 `--module <id>` 的 `next` / `report` / `park` 自主推进。只有该模块内部派发出的 execution/review 子议题只交付结构化结果，不直接写模块 state。
+- 协调者按阶段的执行方式决定落地形态：module/unit 轴的 inline 阶段留在对应模块议题执行；可并行的按单元建子议题；需要多角色同场的建一个协作议题；审查类建审查子议题（审查者不能是作者）；顺序类建串行议题链。需要用户回答或审批时，由当前 workflow conductor 在所在模块议题中询问并记录真实输入，不强制回父议题。
+- 下游模块只因引擎声明的真实依赖、证据/sensor、用户审批或跨模块 barrier 阻塞，不因“等待父议题协调者裁决/代报”阻塞。整体进度由各 workflow state 自动聚合；跨模块集成排在 barrier 就绪后的独立批次。
 
 ## 9. 中断与恢复
 
@@ -377,7 +378,7 @@ AI 会先判断这是不是 CR：
 - **替 AI 说“我同意你自己选”**：单/多模块、优先级、批准这类决策，要给出明确答案；AI 不应接受“你看着办”。
 - **为通过检查删测试、关检查、把未验证标成不适用**：协议禁止，也会让后续 CR 无法评估影响。
 - **CR 只写一份变更说明**：必须就地更新正式文档，CR 文件只是临时摘要。
-- **多个会话同时推进同一个流程**：会造成状态冲突，一个流程只能有一个协调会话。
+- **多个会话同时推进同一个 WorkflowRef**：会造成状态冲突；同一 global/module/integration workflow 只能有一个 conductor 会话。split 后不同模块是不同 WorkflowRef，允许各自并行推进。
 - **以为 merge plan 会自动合并**：它只给建议，merge 和 push 由人执行。
 
 ## 附录 A：提示词速查

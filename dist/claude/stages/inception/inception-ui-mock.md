@@ -76,29 +76,35 @@ condition: has_ui_requirements
 
 ## HTML Mock 编排
 
-### 1. 建立页面计划
+本编排遵循 `knowledge/design/common-ui-generation-flow.md`（流程单一真相源）的七阶段：版本锁定 → 代表页定标 → 全量连续生成 → 每批轻量技术读回 → 需求新鲜度检查 → 一次集中验收 → 定向修正。不设逐页人工确认门禁，不设每批独立审查循环；代表页定标是唯一页面级人工确认点（满足自动化条件时可自动定标）。
 
-加载 `inception-ui-page-planning.md`，生成跨模式唯一页面计划。将路径和 `draft` 状态写入 handoff.md，提交用户确认；确认后把 `页面计划状态` 更新为 `approved`。未确认前不得调用生成 Skill。
+### 1. 建立页面计划与版本锁定
 
-### 2. 确定视觉来源
+加载 `inception-ui-page-planning.md`，生成跨模式唯一页面计划。将路径和 `draft` 状态写入 handoff.md，提交用户确认页面计划（这是对**页面范围**的一次确认，不是对每张 Mock 的确认）；确认后把 `页面计划状态` 更新为 `approved`。未确认前不得调用生成 Skill。
+
+按 `common-ui-generation-flow.md` 阶段 1，执行 `loeyae-aidlc ui lock --module {module-id} --route html-mock`，由工具记录 PRD/故事/page-plan 的真实 SHA-256、Git blob、ID digest、HEAD 与 upstream commit。`ui-page-planning` 未通过该锁的受控校验前不得生成。
+
+### 2. 确定视觉来源与代表页定标
 
 - 存量项目读取实际 UI 框架和现有页面风格，不另选品牌风格；
 - 新项目由用户选择默认样式或可选设计风格；
 - 选择设计风格时可通过 `awesome-design` 获取 tokens；不可用时使用默认样式，不改变页面语义。
 
-### 3. 生成并审核骨架
+按 `common-ui-generation-flow.md` 阶段 2 选择信息量最丰富的代表页，调用 `aidlc-ui-mock-design`（`stage=skeleton`+`stage=content` 仅针对代表页）完成其视觉、密度、状态条件表和交互清单，执行**一次定标确认**。已批准参考设计或已有稳定样式来源时自动定标，并在 canonical manifest 或交叉验证报告记录所用来源。定标后后续页面不得逐页暂停确认。
 
-调用 `aidlc-ui-mock-design`，传入已批准页面计划和 `stage=skeleton`。具体生成规则由 `inception-ui-mock-generation.md` 及其引用文件定义。
+### 3. 全量连续生成
 
-生成后按 `inception-ui-mock-generation.md` 附录 A（UI Mock 工作流·两阶段编排）提交用户审核页面数量、改造基础和操作闭环。发现页面语义错误时回到页面计划就地修正并重新确认。
+调用 `aidlc-ui-mock-design`，传入已批准页面计划，按页面依赖顺序**连续生成全部页面**（`stage=skeleton` 后 `stage=content`）。具体生成规则由 `inception-ui-mock-generation.md` 及其附录定义。
 
-### 4. 填充并审核内容
+不设逐页人工确认门禁，不设每批“独立审查→修正→复验”repeat loop；批次只用于控制写入规模和错误恢复。不影响其他页面的需求缺口在“开发说明·不渲染”标记后继续生成其余页面，禁止臆造。仅 `common-ui-generation-flow.md` 阶段 3 列出的高风险情形允许暂停。
 
-骨架确认后再次调用 `aidlc-ui-mock-design`，传入 `stage=content`。提交用户审核字段、状态、权限和交互；反馈只修改受影响页面，涉及产品语义时按 `common-workflow-changes.md` 协调。
+### 4. 每批轻量技术读回
+
+按 `common-ui-generation-flow.md` 阶段 4，每批写入后由当前写者自动执行技术读回（节点真实生成、编号/mock-box 唯一、未误改只读来源、无碰撞/截断、Variables/Components 真实引用、临时产物生成），不启动独立 reviewer，不等待用户确认。发现页面语义错误时回到页面计划就地修正并同步 canonical manifest。
 
 ### 5. I9 状态交接
 
-HTML Mock 用户审核完成后，在 handoff.md 中记录：
+全量连续生成与每批技术读回完成后，在 handoff.md 中记录：
 
 - `UI 设计方式：html-mock`；
 - `Figma 来源：不适用`；

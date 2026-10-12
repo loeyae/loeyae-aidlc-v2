@@ -19,7 +19,7 @@ condition: ui_mode_figma
 
 ## 目的
 
-在 I9 已选择 Figma 后，确认来源和运行时能力，协调页面计划、设计资源、能力调用、分批用户审核和状态恢复。Figma 画布生成与外部文件登记由 `aidlc-figma-design` 加载 `inception-ui-figma-generation.md` 执行。
+在 I9 已选择 Figma 后，确认来源和运行时能力，协调页面计划、设计资源、代表页定标、全量连续生成、自动技术读回和最终集中验收。Figma 画布生成与外部文件登记由 `aidlc-figma-design` 加载 `inception-ui-figma-generation.md` 执行。
 
 ## 前置条件
 
@@ -53,7 +53,7 @@ condition: ui_mode_figma
 
 外部提供模式还必须将计划项与现有 Page/Frame 对照。缺失页面、无法定位或语义冲突时阻断并请用户或设计方修正，不得静默写入外部文件。
 
-## 4. 确定设计资源
+## 4. 确定设计资源与代表页定标
 
 `流程创建`由用户选择：
 
@@ -62,6 +62,8 @@ condition: ui_mode_figma
 - 提供参考 Figma 文件。
 
 `外部提供`以目标文件为正式设计基准，不重新选择视觉来源或写入设计资源。
+
+按 `knowledge/design/common-ui-generation-flow.md` 阶段 1、2：先执行 `loeyae-aidlc ui lock --module {module-id} --route <figma-create|figma-existing>`，受控记录 PRD/故事/page-plan 的真实 SHA-256、Git blob、ID digest、HEAD 与 upstream commit；再选代表页完成一次定标（已批准参考或稳定设计系统时自动定标，并在 canonical manifest/报告记录参考节点）。定标后后续页面不得逐页暂停确认。
 
 ## 5. 调用 Figma 设计能力
 
@@ -75,17 +77,23 @@ condition: ui_mode_figma
 
 具体 Page/Frame 组织、Variables/Components、画布写入、截图验证和只读登记规则由 `inception-ui-figma-generation.md` 定义。
 
-## 6. 分批用户审核
+## 6. 全量连续生成与每批轻量技术读回
 
-`流程创建`每完成 3–5 个核心页面提交一批审核；提交前把 `设计状态` 更新为 `review_pending`。用户选择继续时恢复 `designing` 并处理下一批；要求调整时只修改受影响页面。
+按 `knowledge/design/common-ui-generation-flow.md` 阶段 3、4执行。
 
-`外部提供`提交已登记页面和截图证据。用户要求调整时由用户或设计方更新源文件，随后重新读取验证；流程不得写入。
+`流程创建`按页面依赖顺序**连续生成全部页面**：
 
-涉及页面语义变化时回到页面计划并按 `common-workflow-changes.md` 处理，旧设计证据失效。
+- 不设逐页人工确认门禁，不设每批“独立审查→修正→复验”repeat loop；
+- 可按批次写入，但批次**只用于控制写入规模和错误恢复**，一个 Figma 文件同时只有一个写者；
+- 每批写入后由当前写者**自动执行技术读回**（节点真实生成、顶层 Frame 唯一、`nodeId` 稳定、未误改只读来源或旧版本、无 API 回滚残留、无碰撞/越界/缺字/截断、Variables/Components/Auto Layout 真实引用、截图与登记生成），**不启动独立 reviewer，不等待用户确认**；
+- Figma 写入失败时按阶段 4 的恢复顺序（改参数→拆更小批次→先 Auto Layout 父级再 FILL→自动重试→连续两次失败切换实现），不无限重试；
+- 每次汇报或状态更新后生成继续运行，不因进度回复停顿。每批进度和读回结果写入 canonical manifest 或报告。
+
+`外部提供`连续读取并登记已有 Page/Frame，生成截图证据，不写入源文件。涉及页面语义变化时回到页面计划并按 `common-workflow-changes.md` 处理，旧设计证据失效。
 
 ## 7. I9 状态交接
 
-全部计划页面完成并经用户审核后，先核对当前模块 canonical `figma-manifest.json`：
+全部计划页面完成全量连续生成与每批技术读回后，先核对当前模块 canonical `figma-manifest.json`：
 
 - `file_url` 与签名 source 一致；
 - manifest 的 `page_plan` 指向已验证页面计划；

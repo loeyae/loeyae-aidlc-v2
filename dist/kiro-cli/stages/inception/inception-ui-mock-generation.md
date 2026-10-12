@@ -11,6 +11,7 @@ mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes:
   - docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md
+  - docs/aidlc/modules/{module-id}/inception/ui-design/ui-generation-lock.json
 produces:
   - docs/aidlc/modules/{module-id}/inception/ui-mock/
   - docs/aidlc/modules/{module-id}/inception/ui-mock/ui-mock-manifest.json
@@ -27,6 +28,7 @@ condition: ui_mode_html_mock
 ## 输入
 
 - 页面计划路径；
+- `ui-generation-lock.json`（由 `ui-page-planning` 受控校验，禁止生成后覆盖）；
 - `stage=skeleton` 或 `stage=content`；
 - 存量页面代码和组件证据；
 - 默认样式、现有项目样式或已选择的 design tokens。
@@ -102,6 +104,8 @@ condition: ui_mode_html_mock
 - 局部改动未删减或重新设计未批准内容；
 - 无需求外功能、TODO、FIXME 或空实现。
 
+**每批轻量技术读回**（`knowledge/design/common-ui-generation-flow.md` 阶段 4，全量连续生成中每批自动执行，不启动独立 reviewer、不等待用户）：HTML/mock-box 真实生成、mock-box 编号唯一、未误改已还原的现有结构、无明显截断/越界、page-specs 与 mock-box 数量一致、临时产物生成。
+
 
 ---
 
@@ -109,7 +113,9 @@ condition: ui_mode_html_mock
 
 > 原 instruction_only 子阶段 `ui-mock-workflow`，P5（MARS-110）合并至此。
 
-核心思想：**先以已批准 `page-plan.md` 生成可视化骨架，再往同一骨架填充内容**。用户审两次：一次审模式产物是否忠实表达页面计划，一次审最终效果。
+> **流程升级说明**：本附录的“骨架/内容”两段文件组织和内容规则仍有效，但**不再对每张页面做两次用户审核**。按 `knowledge/design/common-ui-generation-flow.md`：页面级人工确认收敛为**代表页一次定标**（对代表页应用骨架+内容规则并确认视觉/密度/状态条件表/交互）；其余页面**全量连续生成**，仅做**每批轻量技术读回**（不启动独立 reviewer、不等待用户），语义一致性由 I10 一次集中验收。下文“用户审核”表述统一重解为代表页定标时的自检点与技术读回检查项，非逐页暂停。
+
+核心思想：**先以已批准 `page-plan.md` 生成可视化骨架，再往同一骨架填充内容**。在代表页上做一次定标确认，其余页面按同模式连续生成。
 
 ---
 

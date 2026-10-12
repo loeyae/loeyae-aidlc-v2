@@ -522,7 +522,10 @@ function normalizeText(value: string, project: string): string {
     //   traceability sensor. Dropping the traceability sensor line on BOTH engines keeps the
     //   comparison symmetric; sensor-mount correctness itself is covered by test_construction_tdd_gates.
     .replace(/,\n(\s*)"traceability"(?=\n\s*\])/g, "")
-    .replace(/\n\s*"traceability",/g, "");
+    .replace(/\n\s*"traceability",/g, "")
+    // MARS-133 intentionally changed only the human handoff wording. This 4.9.0 test compares
+    // nested-repository state/evidence semantics; the prompt contract has dedicated tests.
+    .replace(/"handoff_prompt": ".*"/g, '"handoff_prompt": "<handoff>"');
 }
 
 /**

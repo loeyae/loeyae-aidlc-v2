@@ -35,7 +35,7 @@ module manifest 与 unit manifest 生成后，成员使用 `unit select` 记录�
 
 每个 `run-stage` directive 可附带 `agent_execution`，由 conductor 决定 inline、delegate、pipeline、mob 或 review 执行。persona 从 `agents/<id>.md` 加载；delegate/review 使用宿主原生 subagent 能力，缺少能力时必须显式回退 inline。
 
-Agent 只能返回结构化结果。conductor 使用 `agent validate-result` 验证结果后，才可继续质量门禁和 `orchestrate report`。state/audit、审批、merge、push 与嵌套派发均不属于 agent 权限。
+被派发的 execution agent 只能返回结构化结果；拥有当前 WorkflowRef 的 conductor 使用 `agent validate-result` 验证后，才可继续质量门禁和 `orchestrate report`。`conductor-only` 按 workflow state 生效：split 后模块负责人可作为本模块 conductor 使用带 `--module` 的 `next` / `report` / `park`，不需要回到 global/父议题协调者；execution agent 仍不得更新 state/audit、代用户审批、merge/push 或嵌套派发。global/integration 与跨模块 barrier 由对应 workflow conductor 负责。
 
 ## 阶段完成
 

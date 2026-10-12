@@ -176,6 +176,56 @@ requires: [user-stories, ui-mock-generation, ui-figma-generation]
 
 **执行条件**：执行了 UI 设计步骤后（HTML Mock 模式或 Figma 模式均适用）
 
+> **最终验收定位**：审查项 e 是 UI 设计全量连续生成完成后的**一次全量集中验收**（`knowledge/design/common-ui-generation-flow.md` 阶段 6），非每页/每批重复执行。同一任务只能登记一个 `UI full acceptance` 段；`ui-generation-acceptance.json` 的 schema 也只允许一个 `full_acceptance` 对象，不接受数组或第二次创建。本审查不得递归触发另一轮同级全量审查。
+
+交叉验证报告必须使用以下机器段；`reviewed_pages` 必须恰好等于当前 page-plan/manifest 页面集合：
+
+```markdown
+## UI full acceptance
+- run_id: UIA-<唯一 ID>
+- completed_at: <ISO-8601>
+- result: passed | issues-found
+- reviewed_pages: PAGE-001, PAGE-002
+- issue_pages: none | PAGE-002
+```
+
+`result: issues-found` 时不得再做全量验收，只能修正 `issue_pages` 并追加一个或多个定向段；所有问题页必须且只能被定向段覆盖：
+
+```markdown
+## UI targeted reverification UIT-<唯一 ID>
+- run_id: UIT-<唯一 ID>
+- completed_at: <ISO-8601>
+- result: passed
+- pages: PAGE-002
+```
+
+### e0. 最终需求新鲜度检查（审查项 e 前置，强制受控门禁）
+
+`ui-page-planning` 已生成不可覆盖的 `ui-generation-lock.json`，其中封存生成开始时 PRD、requirements、user stories、page-plan、设计决定（如存在）的文件 SHA-256、Git blob、机器 ID 分段摘要与 upstream commit。最终验收前先更新本地 remote-tracking ref（通常执行 `git fetch origin main`；checker 本身不发起网络请求），再读取**实际正文**完成差异分类。
+
+- 对比对象：正式 PRD、requirements、user stories、STORY/AC 正文、页面清单、已确认设计决定；
+- `loeyae-aidlc ui accept` 同时比较锁定内容与当前 worktree，并比较锁定 upstream commit 与当前 `origin/main`；禁止只比较文件时间或数量；
+- 任何发生变化却无法归入 REQ/FR、US/STORY、AC 或 PAGE ID 的正文路径一律阻断；
+- 变化 ID 必须全部映射到锁定/当前 page-plan 的页面。任一新增或删除 ID 未映射即 fail-closed，不得当作“无需同步”；
+- 影响矩阵只允许同步 `affected_pages`，未受影响页面不得重生；报告中的 `synchronized_pages` 必须与机械重算结果完全一致。
+
+完成正文同步后，在 `cross-validation-report.md` 写入恰好一个新鲜度段：
+
+```markdown
+## UI requirement freshness
+- checked_at: <ISO-8601>
+- synchronized_pages: PAGE-001, PAGE-002 | none
+```
+
+然后执行一次审查项 e。审查及定向复验完成后运行：
+
+```bash
+loeyae-aidlc ui accept --module {module-id} --route <html-mock|figma-create|figma-existing> \
+  --review-report docs/aidlc/modules/{module-id}/inception/cross-validation-report.md
+```
+
+该命令确定性生成 `ui-generation-acceptance.json`；文件已存在时拒绝再次创建，从命令层阻止第二次全量验收登记。`orchestrate report --stage cross-validation` 触发的受控 `inception-consistency` 会重新计算 upstream commit、所有文件/ID digest、影响矩阵和报告段；任一漂移、漏报或伪造都会阻断。
+
 **输入文件**：
 - 页面计划：当前模块 `docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md`
 - HTML Mock 模式：`docs/aidlc/modules/{module-id}/inception/ui-mock/*-page-specs.md` + 对应 HTML 文件（标准或大型模式）
@@ -220,7 +270,8 @@ requires: [user-stories, ui-mock-generation, ui-figma-generation]
 1. 为每个不一致项分配冲突 ID，在交叉验证报告中记录需求、用户故事、UI 三方描述、影响范围和建议；不得把语义差异直接归因于任一方错误。
 2. 仅缺少证据、命名映射或 page-specs 对应关系的机械性问题可直接修正。涉及产品语义时，将 handoff.md `设计状态` 标记为 `blocked`、记录失败门禁，并按 `common-question-format-guide.md` 创建或更新 `docs/aidlc/modules/{module-id}/inception/ui-mock/ui-conflict-questions.md`。
 3. 加载并执行 `common-workflow-changes.md` 的“产品产物一致性协调”；该规则统一定义用户裁决选项、禁止提前修改、代码基线分流、就地更新、下游失效和重审恢复。
-4. 未决冲突为零且适用审查全部通过后，才能将 handoff.md `设计状态` 更新为 `approved`，`下一操作` 更新为“进入 I11 工作流规划”。
+4. **定向修正与定向复验**（`common-ui-generation-flow.md` 阶段 7）：按问题清单**只修受影响页面**，保留原 `nodeId`、禁止删除重建已登记 Frame；修复后**只做定向复验**（仅复查受影响页面及其直接依赖）；除非发现共享组件、公共契约或全局设计系统问题，否则**不得再次执行全量验收 e**。
+5. 未决冲突为零且适用审查全部通过后，才能将 handoff.md `设计状态` 更新为 `approved`，`下一操作` 更新为“进入 I11 工作流规划”。
 
 ---
 

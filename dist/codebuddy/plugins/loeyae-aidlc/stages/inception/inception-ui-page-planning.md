@@ -14,6 +14,7 @@ consumes:
   - docs/aidlc/modules/{module-id}/inception/user-stories.md
 produces:
   - docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md
+  - docs/aidlc/modules/{module-id}/inception/ui-design/ui-generation-lock.json
   - .aidlc/evidence/ui-page-planning/{module-id}/ui-artifact-consistency.json
 sensors: [ui-artifact-consistency]
 requires: [ui-mock]
@@ -28,6 +29,14 @@ condition: ui_design_selected
 
 本文件只定义页面计划的输入、推导、产物格式和内容自检，不定义设计模式、工具、视觉样式、用户审批、state 状态或 I10 放行。
 
+UI 设计生成的整体流程（版本锁定→代表页定标→全量连续生成→每批轻量技术读回→需求新鲜度检查→一次集中验收→定向修正）见 `knowledge/design/common-ui-generation-flow.md`。本阶段产出的页面清单是阶段 1 版本锁定和阶段 5 需求新鲜度检查的页面基准。页面计划完成后、任何 UI 生成前，运行：
+
+```bash
+loeyae-aidlc ui lock --module {module-id} --route <html-mock|figma-create|figma-existing> [--upstream-ref origin/main]
+```
+
+命令确定性采集 PRD（如存在）、requirements、user stories、page-plan 和设计决定（如存在）的 SHA-256、Git blob、机器 ID 分段摘要以及本地 `origin/main` commit，生成不可覆盖的 `ui-generation-lock.json`。`ui-artifact-consistency` 会在本阶段校验锁与当前真实文件、HEAD 和 upstream ref 完全一致；缺锁、伪造 hash 或 upstream 已推进均 fail-closed。
+
 ## 输入
 
 - 已批准需求；
@@ -38,13 +47,14 @@ condition: ui_design_selected
 
 缺少会改变页面数量、类型、字段、权限或操作路径的信息时，按 `common-question-format-guide.md` 提问，不得用假设补齐。
 
-## 唯一产物
+## Canonical 产物
 
 多模块与单模块均使用同一模块隔离路径：
 
-`docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md`
+- 页面语义基线：`docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md`
+- 生成输入锁：`docs/aidlc/modules/{module-id}/inception/ui-design/ui-generation-lock.json`
 
-报告阶段完成前必须运行 `ui-artifact-consistency`。该 sensor 只在签名 I9 choice 选择 HTML Mock 或 Figma 时出现，并验证当前模块的需求、用户故事与页面计划来源引用；未选择 UI 或选择 `skip` 时本 Stage 不实例化，也不要求页面计划或 Evidence。
+报告阶段完成前必须运行 `ui-artifact-consistency`。该 sensor 只在签名 I9 choice 选择 HTML Mock 或 Figma 时出现，并验证当前模块的需求、用户故事、页面计划来源引用以及输入锁的真实文件/hash/upstream 绑定；未选择 UI 或选择 `skip` 时本 Stage 不实例化，也不要求页面计划、锁或 Evidence。
 
 页面计划至少包含：
 

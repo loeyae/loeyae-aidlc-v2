@@ -2797,7 +2797,12 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           const phases = asStringArray(evidence.phases_verified);
           if (!phases || phases.length === 0) errors.push("phases_verified must list validated phases");
           const artifacts = asStringArray(evidence.artifacts_checked);
-          if (!artifacts || artifacts.length < 3) errors.push("artifacts_checked must include canonical upstream and current artifacts");
+          if (!artifacts || artifacts.length < 4) errors.push("artifacts_checked must include canonical upstream, current artifacts, and ui-generation-lock.json");
+          if (evidence.ui_generation_lock_verified !== true) errors.push("ui_generation_lock_verified must be true");
+          if (!/^[a-f0-9]{64}$/.test(String(evidence.ui_generation_lock_digest || ""))) errors.push("ui_generation_lock_digest must be SHA-256");
+          if (!asNonEmptyString(evidence.ui_generation_upstream_ref)) errors.push("ui_generation_upstream_ref is required");
+          if (!COMMIT_ID_PATTERN.test(String(evidence.ui_generation_upstream_commit || ""))) errors.push("ui_generation_upstream_commit must be a git commit id");
+          if (!["generation-start", "adoption"].includes(String(evidence.ui_generation_baseline_mode))) errors.push("ui_generation_baseline_mode must be generation-start or adoption");
           if (asNumber(evidence.unresolved) !== 0) errors.push("unresolved must be 0");
           if (stage.slug === "ui-mock-generation" && (!phases?.includes("skeleton") || !phases?.includes("content"))) {
             errors.push("HTML Mock consistency must verify skeleton and content phases");
@@ -2828,8 +2833,27 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           const uiSelected = expectedUiRoute === "html-mock" || expectedUiRoute === "figma-create" || expectedUiRoute === "figma-existing";
           if (uiPages === null || (uiSelected ? uiPages < 1 : uiPages !== 0)) errors.push("ui_pages_checked is inconsistent with selected UI route");
           if (asNumber(evidence.unresolved_conflicts) !== 0) errors.push("unresolved_conflicts must be 0");
+          const freshnessVerified = evidence.ui_freshness_verified === true;
+          const fullAcceptanceRuns = asNumber(evidence.ui_full_acceptance_runs);
+          if (uiSelected) {
+            if (!freshnessVerified) errors.push("ui_freshness_verified must be true for selected UI routes");
+            if (!/^[a-f0-9]{64}$/.test(String(evidence.ui_generation_lock_digest || ""))) errors.push("ui_generation_lock_digest must be SHA-256");
+            if (!/^[a-f0-9]{64}$/.test(String(evidence.ui_generation_acceptance_digest || ""))) errors.push("ui_generation_acceptance_digest must be SHA-256");
+            if (!asNonEmptyString(evidence.ui_upstream_ref)) errors.push("ui_upstream_ref is required");
+            if (!COMMIT_ID_PATTERN.test(String(evidence.ui_baseline_upstream_commit || ""))) errors.push("ui_baseline_upstream_commit must be a git commit id");
+            if (!COMMIT_ID_PATTERN.test(String(evidence.ui_current_upstream_commit || ""))) errors.push("ui_current_upstream_commit must be a git commit id");
+            if (!Array.isArray(evidence.ui_changed_paths)) errors.push("ui_changed_paths must be an array");
+            if (!Array.isArray(evidence.ui_affected_pages)) errors.push("ui_affected_pages must be an array");
+            if (asNumber(evidence.ui_impact_unmapped) !== 0) errors.push("ui_impact_unmapped must be 0");
+            if (fullAcceptanceRuns !== 1) errors.push("ui_full_acceptance_runs must be exactly 1");
+            const targetedRuns = asPositiveInt(evidence.ui_targeted_reverification_runs);
+            if (targetedRuns === null) errors.push("ui_targeted_reverification_runs must be a non-negative integer");
+          } else {
+            if (freshnessVerified) errors.push("ui_freshness_verified must be false when no UI route is selected");
+            if (fullAcceptanceRuns !== 0) errors.push("ui_full_acceptance_runs must be 0 when no UI route is selected");
+          }
           const artifacts = asStringArray(evidence.artifacts_checked);
-          if (!artifacts || artifacts.length < 3) errors.push("artifacts_checked must list canonical consistency inputs");
+          if (!artifacts || artifacts.length < (uiSelected ? 5 : 3)) errors.push("artifacts_checked must list canonical consistency inputs and UI governance artifacts when selected");
           return errors;
         });
         if (failure) failures.push(failure);
@@ -3428,7 +3452,7 @@ function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, ag
   const artifacts = instance.stage.produces.length
     ? instance.stage.produces.flatMap((pattern) => displayArtifactPatterns(pattern, instance)).join("、")
     : "本阶段没有声明文件产物";
-  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；状态、审批和 merge 权限仅属于 conductor。\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。${diagramFormatPrompt(state, instance)}${choicePrompt(instance.stage.slug, choices)}\n下一步：完成后将结构化结果交回 conductor，再运行 ${reportCommand || "orchestrate report"}。`;
+  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；conductor-only 按当前 WorkflowRef 生效。split 后模块负责人可作为本模块 workflow conductor 推进，无需回到 global/父议题协调者；用户审批和 merge 门禁不变。\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。${diagramFormatPrompt(state, instance)}${choicePrompt(instance.stage.slug, choices)}\n下一步：execution agent 完成后将结构化结果交回当前 workflow conductor；后者运行 ${reportCommand || "orchestrate report"}。`;
 }
 
 function clearActiveContext(state: WorkflowState): void {

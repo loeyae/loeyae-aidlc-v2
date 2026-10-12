@@ -1,6 +1,6 @@
 ---
 name: aidlc-agent-execution
-description: Execute an AI-DLC agent_execution plan with portable persona, isolated review, structured return, and conductor-only state authority.
+description: Execute an AI-DLC agent_execution plan with portable persona, isolated review, structured return, and per-WorkflowRef conductor-only state authority.
 ---
 
 # Agent Execution
@@ -33,10 +33,10 @@ Agent 返回 JSON 结果：
 }
 ```
 
-conductor 运行：
+拥有当前 WorkflowRef 的 conductor 运行：
 
 ```bash
 loeyae-aidlc agent validate-result result.json
 ```
 
-验证后才可继续质量门禁和 `orchestrate report`。Agent 永远不得更新 state、audit、approval、merge、push 或派发嵌套 agent。
+验证后才可继续质量门禁和 `orchestrate report`。split 后，模块负责人可作为本模块 workflow conductor 使用带 `--module` 的 `next` / `report` / `park`，不需要回到 global/父议题协调者；被派发的 execution agent 仍不得更新 state、audit、代用户 approval、merge、push 或派发嵌套 agent。

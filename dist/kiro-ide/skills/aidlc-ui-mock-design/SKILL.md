@@ -22,7 +22,8 @@ triggers: UI 原型, HTML Mock, 页面原型, 交互原型, UI mock, 页面 Mock
 ## 加载
 
 1. 发布包中的 `stages/inception/inception-ui-mock-generation.md`；
-2. 按该文件要求加载 HTML 设计、推导和样式细则（同目录的 `inception-ui-mock-*.md` 文件）。
+2. 按该文件要求加载 HTML 设计、推导和样式细则（同目录的 `inception-ui-mock-*.md` 文件）；
+3. UI 生成流程（代表页定标·全量连续生成·每批轻量技术读回）见 `knowledge/design/common-ui-generation-flow.md`：调用方按该流程以**连续模式**传入全部页面，本能力不逐页等待用户审批，每批完成后自动技术读回。
 
 ## 输出
 

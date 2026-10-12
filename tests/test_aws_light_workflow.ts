@@ -47,7 +47,9 @@ try {
   assert.match(handoff, /工作目标：Fix checkout validation failure/);
   assert.match(handoff, /当前阶段：/);
   assert.match(handoff, /需要产物：/);
+  assert.match(handoff, /conductor-only 按当前 WorkflowRef 生效/);
   assert.match(handoff, /质量动作：.*review.*构建.*测试/);
+  assert.match(handoff, /结构化结果交回当前 workflow conductor/);
   assert.match(handoff, /下一步：/);
   assert.deepEqual(next.choices, []);
   assert.equal(next.diagram_format, "mermaid");

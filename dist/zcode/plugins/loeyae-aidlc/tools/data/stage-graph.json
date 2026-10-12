@@ -1,5 +1,5 @@
 {
-  "version": "4.13.2",
+  "version": "4.13.3",
   "stages": [
     {
       "slug": "workspace-detection",
@@ -539,6 +539,7 @@
       ],
       "produces": [
         "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md",
+        "docs/aidlc/modules/{module-id}/inception/ui-design/ui-generation-lock.json",
         ".aidlc/evidence/ui-page-planning/{module-id}/ui-artifact-consistency.json"
       ],
       "sensors": [
@@ -608,7 +609,8 @@
       "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
-        "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md"
+        "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md",
+        "docs/aidlc/modules/{module-id}/inception/ui-design/ui-generation-lock.json"
       ],
       "produces": [
         "docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json",
@@ -649,7 +651,8 @@
       "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
-        "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md"
+        "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md",
+        "docs/aidlc/modules/{module-id}/inception/ui-design/ui-generation-lock.json"
       ],
       "produces": [
         "docs/aidlc/modules/{module-id}/inception/ui-mock/",

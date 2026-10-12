@@ -206,6 +206,7 @@ try {
   assert.equal(m03Next.kind, "run-stage");
   assert.equal(m03Next.stage_instance, `requirement-clarification@module:${M03}`);
   assert.equal(m03Next.workflow, `module:${M03}`);
+  assert.match(String(m03Next.handoff_prompt), /模块负责人可作为本模块 workflow conductor 推进，无需回到 global\/父议题协调者/);
   assert.match(String(m03Next.handoff_prompt), /orchestrate report --stage requirement-clarification --module m03-merchant --result completed/);
   const routed = success(project, ["orchestrate", "next"]);
   assert.equal(routed.stage_instance, `requirement-clarification@module:${M03}`, "plain next skips the parked module");

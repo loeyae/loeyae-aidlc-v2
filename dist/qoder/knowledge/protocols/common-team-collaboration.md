@@ -32,6 +32,20 @@ loeyae-aidlc unit select \
 
 选择是公开协作记录，不是锁。重复选择由成员沟通；达成一致后可使用 `--replace` 更新记录。
 
+### 模块自主推进
+
+`conductor` 的权限范围是一个 WorkflowRef，而不是整个项目的顶层 issue。`module-division` 完成并产生 module manifest 后，成员可直接进入自己负责的模块：
+
+```bash
+loeyae-aidlc orchestrate next --module module-a
+loeyae-aidlc orchestrate report --stage <slug> --module module-a --result completed
+loeyae-aidlc orchestrate park --module module-a
+```
+
+首次 `next --module` 会把旧单布局透明迁移为 per-module 布局；成员无需先回到顶层 issue 请求人工执行 `split`。split 后，每个模块 state 由该模块自己的 conductor 串行写入，不同模块可并行推进。global/integration conductor 只负责 project 轴阶段、跨模块 barrier、lineage 处置和 integration，不代替模块反复 `next` / `report`。
+
+整体进度不是由顶层 issue 手工推动：引擎在读取时聚合 global、各 module 与 integration state，并据此计算模块完成度和 integration barrier。模块内的真实依赖、consumes/produces、sensor、证据以及用户审批仍然照常阻塞；“等待顶层协调者代报或裁决”本身不得作为模块阻塞理由。
+
 ## 交付标准
 
 1. 读取当前 directive 的 `handoff_prompt`、依赖和产物要求。

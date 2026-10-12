@@ -1,5 +1,32 @@
 # Changelog
 
+## 4.13.3
+
+UI 生成治理与多人模块协作收口（MARS-132 / MARS-133）：UI 设计改为代表页定标、全量连续生成、每批自动技术读回、最终需求新鲜度门禁、一次集中验收与定向复验；团队协作把 `conductor-only` 明确为 per-WorkflowRef 单写者，模块负责人可自主推进，整体进度由 registry 动态聚合。
+
+### Added
+
+- **UI 生成输入锁与验收登记（MARS-132）**：新增 `loeyae-aidlc ui lock|accept|check|impact-matrix|dry-run` 和 `core/tools/aidlc-ui-governance.ts`。`ui-generation-lock.json` 在生成前封存 PRD/requirements/user stories/page-plan/设计决定的 SHA-256、Git blob、机器 ID 分段摘要、页面映射及 upstream commit；`ui-generation-acceptance.json` 记录最终新鲜度、影响矩阵、同步页面、唯一 full acceptance 与定向复验。
+- **真实需求新鲜度门禁（MARS-132）**：`ui-artifact-consistency` 强制校验输入锁；`inception-consistency` 在 cross-validation 准出时重新计算当前 worktree、锁定/current upstream、REQ/FR/US/STORY/AC/PAGE 正文差异与影响页面。验收登记后 upstream 或输入漂移会阻断，不再依赖时间戳或数量比较。
+- **一次全量验收门禁（MARS-132）**：同一任务只允许一个 `UI full acceptance`；第二次 `ui accept` 拒绝覆盖。full acceptance 发现问题后只能以 `UI targeted reverification` 覆盖全部且仅有问题页。
+- **影响矩阵 fail-closed（MARS-132）**：任一变化 REQ/FR、US/STORY、AC、PAGE 未映射时非零退出；无法归入机器 ID 的正文变化同样阻断，禁止把新增需求误判为“无需同步”。新增端到端回归 `test_ui_generation_governance.ts`。
+
+### Changed
+
+- **UI 设计生成流程（MARS-132）**：HTML Mock、Figma 创建与既有 Figma 增量更新统一为“版本锁定 → 代表页一次定标 → 全量连续生成 → 每批轻量技术读回 → 最终需求新鲜度检查 → 一次集中验收 → 定向修正/复验”。取消逐页人工确认和逐批独立 reviewer repeat loop；高风险覆盖/删除、需求冲突、生产写入和不可逆 Git 操作仍需确认。
+- **per-WorkflowRef conductor（MARS-133）**：single layout 由 global conductor 推进；split layout 的 global、各 module、integration 各有 owning conductor。模块负责人可直接使用带 `--module` 的 `next/report/park` 并在模块议题执行 inline；只有被派发的 execution/review/pipeline/mob contribution 不得写 state/audit、代审批或直接 report。
+- **整体进度动态聚合（MARS-133）**：`next --status` 从各模块 state 实时投影 `inception_done`、`construction_done`、共享契约和 integration barrier；模块推进不要求父议题代报或手工 rebuild identity-only `registry.md`。Multica 指南与全部 harness 入口同步采用该模型。
+
+### Fixed
+
+- 修复 MARS-132 初次实现中 9 个 harness 未同步、dry-run 自证式放行、未映射 STORY/AC 返回成功，以及版本锁定/验收次数只有 prose 无受控门禁的问题。
+- 修复 MARS-133 中“父议题协调者独占整个项目状态”的错误解释；保留 lineage、requires、consumes/produces、sensor/evidence、approval、人工 merge 与跨模块集成门禁。
+
+### Unchanged
+
+- 正式 PRD 与已确认用户故事的权威优先级不变；无 UI/skip 路由不要求 UI 治理文件。
+- 阶段数仍为 40；既有 single-layout 工作流保持兼容。
+
 ## 4.13.2
 
 UI 追溯链补强：用户故事 → ui-mock 的正向全覆盖门禁（MARS-118）。此前 `ui-artifact-consistency` 只校验反向（ui-mock 引用的 US 真实存在），有界面表现的 US 若零 mock 关联无人拦截；现增量补上正向全覆盖，使 UI route 模块的 `US ↔ ui-mock` 双向绑定都受门禁保护，有利于后续设计、代码生成与 code review 的精准界定。

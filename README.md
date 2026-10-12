@@ -67,6 +67,18 @@ loeyae-aidlc unit select \
 
 选择是协作记录，不是分布式锁。若发生重复选择，团队协商或使用显式 `--replace` 更新记录。
 
+### 模块自主推进与整体进度聚合（4.13.3，MARS-133）
+
+`conductor-only` 按 **WorkflowRef** 生效，不是顶层父议题独占整个项目：single layout 只有 global workflow；split layout 的 global、每个 module、integration 各有一个 owning conductor。`module-division` 完成后，模块负责人可直接推进自己的模块，首次 `next --module` 会透明建立 per-module 布局：
+
+```bash
+loeyae-aidlc orchestrate next --module module-a
+loeyae-aidlc orchestrate report --stage <slug> --module module-a --result completed
+loeyae-aidlc orchestrate park --module module-a
+```
+
+模块只因真实 `requires`、consumes/produces、sensor/evidence、用户审批或 integration barrier 阻塞，不因等待父议题代报而阻塞。`next --status` 每次从所有 module state 动态计算完成度、共享契约与 integration barrier；推进模块无需改写 identity-only `registry.md` 或让父议题手工放行。被 owning conductor 派发的 execution/review agent 仍只返回结构化结果，不得写 state/audit、代审批或直接 report。
+
 ### 工作流 lineage 保护（4.13.0）
 
 `aidlc/active/` 是团队共享状态，一个项目只有一条工作流 lineage。`next --scope` / `split` 发现 git 中已有另一条未归档 lineage 时拒绝创建（确需作废时加 `--replace-lineage <id>`）；合并后 HEAD 历史出现另一条未退役 lineage 时 `next` / `report` 拒绝继续，由负责人用 `orchestrate state retire --lineage <id> --user-input Approve --reason "<原因>"` 裁决；`orchestrate state verify` 只读检查 lineage 与状态 `Revision` 回退；另一条 lineage 上的模块用 `orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason "<原因>"` 迁入当前 lineage（同一模块只能保留一份）。`registry.md` 只存身份行，只在创建工作流时改变，推进模块不会改写它。合并冲突时禁止对 `aidlc/active/` 整目录「保留本地」，registry 冲突保留双方的模块行。
@@ -99,7 +111,7 @@ loeyae-aidlc agent plan --stage code-generation
 loeyae-aidlc agent validate-result result.json
 ```
 
-无论执行模式如何，只有 conductor 可以更新 Markdown state/audit、报告阶段、接受审批或执行 merge/push。
+无论执行模式如何，只有**当前 WorkflowRef 的 owning conductor**可以更新其 Markdown state/audit、报告阶段和接受审批；split 后模块负责人可作为本模块 conductor。被派发的 execution/review agent 不得直接 report、代用户审批或执行 merge/push。
 
 ## 阶段推进
 
@@ -153,6 +165,25 @@ loeyae-aidlc orchestrate report --stage <slug> --result completed
   - `refactor`：至少一个 `tdd_mode: characterization` UC-D 要声明非空 `code_refs`（MARS-104 已要求的 baseline 锚点），追溯锚定到存量代码基线。
   - 其他 scope 在没有 `requirements.md` 时仍为 `not_applicable`，行为不变。
 - **用户故事缺 UI 覆盖 `US-xxx: UNCOVERED@ui-mock`**（4.13.2，MARS-118）→ 模块选了 UI route（`html-mock` / `figma-create` / `figma-existing`）时，`ui-artifact-consistency` 除了校验反向（每个 ui-mock page 的 `stories[]` 引用的 US 真实存在）外，还校验**正向全覆盖**：`user-stories.md` 里每个有界面表现的 US 必须至少被一个 ui-mock page 的 `stories[]` 覆盖。某条有界面 US 零 mock 关联即记 `US-xxx: UNCOVERED@ui-mock`。修复方式二选一：给某个 mock page 的 `stories[]` 加上该 US，或在 `user-stories.md` 该 US 所在行用显式豁免标记 `[ui: n/a]`（也支持 `[无界面]`）声明它无界面表现。**默认不豁免**——无标记的 US 一律要求被 UI 覆盖。未选 UI route 的模块（纯后端等）该检查不适用，不受影响。
+
+### UI 连续生成与受控验收（4.13.3，MARS-132）
+
+UI route 统一采用“版本锁定 → 代表页定标 → 全量连续生成 → 每批自动技术读回 → 最终需求新鲜度检查 → 一次集中验收 → 定向复验”。不再逐页暂停确认，也不再为每批启动独立 reviewer 循环。
+
+```bash
+# page-plan 完成后、生成前锁定真实输入与 upstream
+loeyae-aidlc ui lock --module <module-id> --route <html-mock|figma-create|figma-existing>
+
+# 最终验收与定向复验记录完成后生成唯一验收登记
+loeyae-aidlc ui accept --module <module-id> --route <route> \
+  --review-report docs/aidlc/modules/<module-id>/inception/cross-validation-report.md
+
+# 独立检查 / 影响矩阵
+loeyae-aidlc ui check --module <module-id>
+loeyae-aidlc ui impact-matrix --page-plan <path> --changed-stories US-001
+```
+
+`ui-generation-lock.json` 封存文件 SHA-256、Git blob、机器 ID 分段摘要、页面映射和 upstream commit；cross-validation 的受控 `inception-consistency` 会重新计算实际正文差异。未映射的 REQ/FR、US/STORY、AC、PAGE 与无法归类的正文变化一律 fail-closed；一个任务只能登记一次 full acceptance，问题修复后只能定向复验。checker 不主动联网，执行 lock/accept 前应先更新本地 remote-tracking ref（默认 `origin/main`）。
 
 证据文件默认 24 小时过期；跨天续作时上游纯过期不算回归，引擎会放行。
 

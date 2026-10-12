@@ -1415,6 +1415,7 @@ Quality and utilities:
   agent describe|plan|validate-result [args]          Inspect agent persona, execution plan or result contract
   extension validate|compose|status [flags] Restricted additive extension metadata
   check --sensor <name> [--module <id>]      Run a deterministic semantic checker (module-scoped with --module)
+  ui lock|accept|check|impact-matrix|dry-run  Lock UI inputs, verify freshness, and enforce one full acceptance
   diagram-provider run [options]            Run diagram validation
   export <md|svg> <file> --to <format>      Export Markdown or SVG
   docx <inspect|beautify|validate> [args]   Inspect or conservatively restyle DOCX
@@ -1467,6 +1468,7 @@ function main(): void {
     case "extension": run("core/tools/aidlc-extension.ts", rest); break;
     case "worktree": run("core/tools/aidlc-worktree-light.ts", rest); break;
     case "check": run("core/tools/aidlc-semantic-checks.ts", rest); break;
+    case "ui": run("core/tools/aidlc-ui-governance.ts", rest); break;
     case "diagram-provider": run("core/tools/aidlc-diagram-provider.ts", rest); break;
     case "export": run("core/tools/aidlc-export.ts", rest); break;
     case "docx": run("core/tools/aidlc-docx.ts", rest); break;

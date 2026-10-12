@@ -8,9 +8,9 @@ evidence_path: .aidlc/evidence/<stage>/{module-id}/ui-artifact-consistency.json
 
 仅当签名 I9 choice 选择 `html-mock`、`figma-create` 或 `figma-existing` 时适用。按当前模块隔离验证：
 
-- `ui-page-planning`：需求、用户故事与 `page-plan.md` 的页面和来源引用一致；
-- `ui-mock-generation`：page-plan、page-specs、HTML/mock-box 及 `ui-mock-manifest.json` 页面集合一致，skeleton/content 两段均为 `validated`；并校验 **US→UI 正向全覆盖**（见下）；
-- `ui-figma-generation`：page-plan 与 `figma-manifest.json` 的 Page/Frame/nodeId/截图和来源模式一致；外部稿必须只读；并校验 **US→UI 正向全覆盖**（见下）。
+- `ui-page-planning`：需求、用户故事与 `page-plan.md` 的页面和来源引用一致；同时要求 `ui-generation-lock.json`，并机械校验锁中的 HEAD、upstream ref/commit、文件 SHA-256、Git blob、机器 ID 分段摘要和页面映射与当前真实输入完全一致；
+- `ui-mock-generation`：page-plan、不可变输入锁、page-specs、HTML/mock-box 及 `ui-mock-manifest.json` 页面集合一致，skeleton/content 两段均为 `validated`；并校验 **US→UI 正向全覆盖**（见下）；
+- `ui-figma-generation`：page-plan、不可变输入锁与 `figma-manifest.json` 的 Page/Frame/nodeId/截图和来源模式一致；外部稿必须只读；并校验 **US→UI 正向全覆盖**（见下）。
 
 ## US→UI 正向全覆盖（MARS-118）
 
@@ -24,4 +24,4 @@ evidence_path: .aidlc/evidence/<stage>/{module-id}/ui-artifact-consistency.json
 
 该正向校验**仅在模块实际选了 UI route（html-mock / figma）时触发**：未选择 UI 或选择 `skip` 的模块本 sensor 不实例化，不新增负担。
 
-未选择 UI 或选择 `skip` 时相关 Stage 不实例化，不生成或要求本 Evidence。checker 必须由受控 Producer 运行，不接受 handoff.md 作为机器选择或 canonical 设计清单。
+未选择 UI 或选择 `skip` 时相关 Stage 不实例化，不生成或要求本 Evidence。checker 必须由受控 Producer 运行，不接受 handoff.md 作为机器选择或 canonical 设计清单。受控 Evidence 必须包含 `ui_generation_lock_verified=true`、锁 SHA-256、upstream ref/commit 与 baseline mode；缺锁或手写 hash 不能通过。
