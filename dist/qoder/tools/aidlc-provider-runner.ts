@@ -323,7 +323,10 @@ function copySnapshotNode(source: string, destination: string, logical: string, 
     return;
   }
   if (!before.isDirectory()) fail("PROVIDER_PATH_ESCAPE", `authorized input is not a regular file or directory: ${logical}`);
-  mkdirSync(destination, { mode: 0o500 });
+  // Snapshot directories must stay owner-writable while children are copied and while the invocation
+  // directory is removed afterwards; POSIX mkdir/unlink need the write bit on the parent directory.
+  // Windows ignores these bits, and the restricted-v1 sandbox enforces inputs read-only via --ro-bind.
+  mkdirSync(destination, { mode: 0o700 });
   for (const entry of readdirSync(source).sort()) {
     if (entry === "." || entry === "..") fail("PROVIDER_PATH_ESCAPE", `authorized input has an invalid entry: ${logical}`);
     copySnapshotNode(join(source, entry), join(destination, entry), `${logical}/${entry}`.replace(/^\//, ""), files, limit);
