@@ -517,9 +517,9 @@ function normalizeText(value: string, project: string): string {
     // E-fixture only ignores three intentional engine evolutions so the "≡ 4.8.1" lock still
     // guards every other behaviour (symmetric on both engines):
     //   P4 (MARS-109): operations split into planning+authorization raised the stage total.
-    //   MARS-154: refactor gained the conditional loeyae-compliance candidate. Its actual
-    //   non-Loeyae condition skip and Provider non-loading have a dedicated E2E; this
-    //   historical lock continues comparing every unrelated nested-repository behavior.
+    //   Provider domain extraction removed the Loeyae-specific loeyae-compliance stage; the
+    //   normalizer below still strips any legacy loeyae-compliance lines so this historical
+    //   lock keeps comparing every unrelated nested-repository behavior (symmetric no-op now).
     .replace(/Executable stages: \d+\/\d+/g, "Executable stages: <n>/<total>")
     .replace(/\n\s*\{\n\s*"stage_instance": "loeyae-compliance@module:project@unit:default",\n\s*"stage": "loeyae-compliance",\n\s*"module_id": "project",\n\s*"unit_id": "default",\n\s*"status": "ready",\n\s*"dependency_waiting": \[\]\n\s*\},/g, "")
     .replace(/\n\s*"loeyae-compliance@module:project@unit:default",/g, "")

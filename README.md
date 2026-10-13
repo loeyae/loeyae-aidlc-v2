@@ -56,26 +56,20 @@ loeyae-aidlc provider run --plan <plan-id|path> --node <node-id> \
   [--input <id>=<project-relative-path>]...
 loeyae-aidlc provider gate --plan <plan-id|path> \
   [--evidence <evidence-id|path>]...
-loeyae-aidlc provider compatibility [--mode <legacy|shadow|enforce>] [--instance <id>]
 ```
 
-### Loeyae Boot implementation-validation 迁移
+### Loeyae Boot implementation-validation 注入
 
-`loeyae-compliance` 现为通用 `implementation-validation` 的迁移期挂载点。默认 `legacy` 不要求 Provider；`shadow` 双写并保留 Rule/路径级差异但仍以旧 sensor 为权威；`enforce` 以当前签名 GateDecision 为权威，并在缺少旧 Evidence 时生成兼容投影。Loeyae Boot Provider 必须显式绑定到该阶段，四个轻量 scope 不再整体跳过：
+Core 不再内置任何 Loeyae 专属 stage、sensor 或 compatibility 层。外部 Loeyae Boot Provider 通过通用 `code-generation` 生命周期 Hook 注入（`implementation-validation` capability）：未安装 Provider 时 `code-generation` 行为不变；安装并被 Profile selector 选中时，该动作为 required 并强制通用 GateDecision。不存在 compatibility/legacy/shadow/enforce 模式：
 
 ```bash
 loeyae-aidlc provider add <git-url> --ref <tag-or-commit> \
   --subdir providers/loeyae-boot \
   --id framework.java-loeyae-boot --instance loeyae-boot \
-  --stage loeyae-compliance --capability implementation-validation
-loeyae-aidlc provider compatibility --mode shadow --instance loeyae-boot
-# 对账稳定后
-loeyae-aidlc provider compatibility --mode enforce
-# 一键回到旧门禁，历史 Evidence/Gate/报告不删除
-loeyae-aidlc provider compatibility --mode legacy
+  --stage code-generation --capability implementation-validation
 ```
 
-完整安装、Profile、运行、迁移、回滚、兼容矩阵与发布清单见 `docs/loeyae-boot-provider-migration.md`。
+完整安装、Profile、运行、Scope 深度、更新/卸载、兼容矩阵与发布清单见 `docs/loeyae-boot-provider-migration.md`。
 
 `provider run` 只执行 frozen Plan 中选中的 node：Runner 从锁定 commit 物化只读 bundle，为显式 `--input` 创建只读快照，使用结构化 argv、最小环境和默认无网络的 `restricted-v1` sandbox。当前 OS 若无法完整落实文件系统、网络、进程与资源隔离，`provider probe` 返回不支持且 `run` fail-closed，不会 best-effort 降级。Provider 只能写 invocation 的 `output/result.json` 与已声明报告；Runner 严格校验后重算 summary、绑定 Plan/lock/revision，并以 Core 本机密钥签发 accepted Evidence。
 

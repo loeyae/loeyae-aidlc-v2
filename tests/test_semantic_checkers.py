@@ -20,7 +20,7 @@ CHECKER = os.path.join(REPO_ROOT, "core", "tools", "aidlc-semantic-checks.ts")
 SENSORS = [
     "review-evidence", "test-quality", "contract-baseline", "functional-design-completeness",
     "nfr-coverage", "infrastructure-completeness", "implementation-report", "frontend-platform-spec",
-    "framework-compliance", "subagent-evidence", "template-completeness", "recovery-evidence",
+    "subagent-evidence", "template-completeness", "recovery-evidence",
     "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
 ]
 

@@ -148,7 +148,7 @@ try {
       assert.ok(node.sensors.includes("traceability"), `required stage ${node.slug} must auto-mount traceability`);
     }
   }
-  for (const slug of ["tdd", "shared-contract-baseline", "subagent-execution", "loeyae-compliance", "compact-recovery"]) {
+  for (const slug of ["tdd", "shared-contract-baseline", "subagent-execution", "compact-recovery"]) {
     const node = stage(slug);
     assert.equal(node.traceability, "not_applicable", `${slug} is expected to be traceability: not_applicable`);
     assert.ok(!node.sensors.includes("traceability"), `${slug} must not carry traceability after P3`);

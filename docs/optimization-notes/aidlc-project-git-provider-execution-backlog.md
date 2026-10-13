@@ -3,6 +3,7 @@
 - **依据**：`aidlc-project-git-provider-optimization-design.md`、`loeyae-aidlc-provider/docs/implementation-plan.md`
 - **目标**：在不削弱 AI-DLC 控制面、受控 Evidence、用户审批与人工 merge 边界的前提下，实现项目级 Git Provider 的安装、锁定、解析、执行、门禁和首个 Loeyae Boot Provider 迁移。
 - **执行原则**：Provider 项目化安装、commit 锁定、安装不执行、Provider 只写 Result、Core/Runner 唯一签发 Evidence/Gate、默认 fail-closed。
+- **完成状态（4.14.0）**：P0–P5 已以真实领域抽离交付；Loeyae Boot 通过独立 Provider 的 `code-generation` Hook 注入，Core 中不保留 `loeyae-compliance`、`framework-compliance`、`is_loeyae_boot` 或 compatibility 层。文中双写迁移步骤仅保留为历史任务记录。
 
 ## 1. 阶段总览与关键路径
 

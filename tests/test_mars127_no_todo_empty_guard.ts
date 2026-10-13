@@ -7,7 +7,7 @@
  * The guard is symmetric to the traceability sensor's empty-set guard: a stage with a
  * non-evidence produce (every traceability=required stage) but no resolved real file
  * fails; a pure-evidence stage (traceability=not_applicable: tdd / shared-contract-baseline
- * / subagent-execution / loeyae-compliance / compact-recovery) declares no non-evidence
+ * / subagent-execution / compact-recovery) declares no non-evidence
  * produce, so the guard never fires (no false positive).
  *
  * The gate side is exercised through gate_probe.ts (real checkSensors), proving the empty

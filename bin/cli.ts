@@ -1416,7 +1416,6 @@ Quality and utilities:
   agent describe|plan|validate-result [args]          Inspect agent persona, execution plan or result contract
   provider add|list|status|update|enable|disable|remove [args]  Manage project-level locked Git Providers
   provider add <git-url> --stage <slug> --capability <id> [...]  Install with an explicit project binding
-  provider compatibility [--mode legacy|shadow|enforce] [--instance <id>]  Migrate/rollback loeyae-compliance
   provider probe|run|gate [args]                       Probe restricted-v1, execute a Plan node, and issue GateDecision
   extension validate|compose|status [flags] Restricted additive extension metadata
   check --sensor <name> [--module <id>]      Run a deterministic semantic checker (module-scoped with --module)

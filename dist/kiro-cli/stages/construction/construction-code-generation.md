@@ -129,11 +129,11 @@ frontmatter 中的 `src/` 是“项目源码根”的规范占位（code-review�
 
 先读取 handoff.md 的技术适配标志。仅在工作区检测已有可靠证据时加载对应 `common-tech-*` 规则；检测到 Spring Cloud/Nacos 时加载 `common-tech-spring-cloud-nacos.md`，用于事实映射与真实命令发现，不替代项目规范。未检测到时不得套用。
 
-> ⚠️ **Loeyae Boot 项目强制**：加载 `construction-loeyae-compliance.md` 并按其规则调用 MCP Skill。非 Loeyae Boot 项目不得调用 `loeyae-*` MCP Skill。
+> ℹ️ **外部 Provider**：Core 不内置任何框架专属 MCP Skill 或合规规则。若项目通过 `provider add ... --stage code-generation --capability implementation-validation` 安装了 Provider，orchestrate 会在 code-generation Hook 通过通用 Resolver/Runner/Gate 注入 `directive.provider_actions`；按 handoff 中的 Provider 指令执行并要求通用 GateDecision。未安装 Provider 时行为不变。
 
-### 渐进式披露原则
+### 渐进式披露原则（Provider Skill）
 
-MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section`（章节加载）→ `content`（全文兜底）。
+MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section`（章节加载）→ `content`（全文兜底）。当外部 Provider 在 code-generation Hook 提供 Skill 时适用；未安装 Provider 时本节不适用。
 
 - **优先 `get_skill_section`**：只加载当前单元需要的章节，避免 token 浪费
 - **`get_skill_outline` 导航**：先查大纲，再选择需要的章节
@@ -142,10 +142,10 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 
 ### 加载执行
 
-**Loeyae Boot 项目**：加载 `construction-loeyae-compliance.md`，按其中的 MCP Skill 加载表执行。
+**已安装外部 Provider（code-generation 绑定 implementation-validation）**：按 `directive.provider_actions` 与 Provider 自带的 Skill 加载表执行，并在 report 时携带通用 `--gate-decision`。
 
-**非 Loeyae Boot 项目**：
-1. 不调用任何 `loeyae-*` MCP Skill
+**未安装 Provider 的普通项目**：
+1. 不调用任何外部 Provider MCP Skill
 2. 加载 `common-tech-security.md`（安全编码规范）
 3. 加载 `common-database-design.md`（数据库设计规范）
 4. 读取项目 `.kiro/steering/structure.md`（如存在）
@@ -160,7 +160,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 
 **测试代码**：
 1. 加载 `common-tech-testing.md`
-2. Loeyae Boot 测试 → 参见 `construction-loeyae-compliance.md` 的测试强制规则
+2. 已安装 Provider 时 → 按 Provider 在 code-generation Hook 提供的测试规则执行
 
 ## 步骤 2.5：快速模式 vs 完整模式边界定义
 
@@ -221,7 +221,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 - [ ] 编译通过（exit 0）
 - [ ] 单元测试全部通过（0 失败）
 - [ ] 规格合规审查通过
-- [ ] 框架规范对照通过（仅 Loeyae Boot）
+- [ ] 外部 Provider 实现验证通过（仅已安装 Provider）
 ```
 
 **规则**：
@@ -553,10 +553,10 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 2. 回退补充时需验证该字段在数据源中的实际存在性，并标注验证状态
 3. 不得以"先用着后面再确认"跳过验证
 
-## 框架规范逐项对照（Loeyae Boot 项目强制）
+## 外部 Provider 实现验证（仅已安装 Provider）
 
-> 代码审查阶段 2 时，加载 `construction-loeyae-compliance.md` 的第二部分执行逐项对照。
-> 非 Loeyae Boot 项目跳过。
+> 若项目在 code-generation 绑定了 `implementation-validation` Provider，代码审查阶段 2 时按 Provider 自带的规则执行逐项对照，并以通用 GateDecision 聚合 Evidence。
+> 未安装 Provider 的项目跳过本节。
 
 ## 关键规则
 
@@ -595,7 +595,7 @@ d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 tok
 - 单元代码生成计划中所有步骤已标记 [x]
 - 所有单元故事已按计划实现
 - 所有代码和测试已生成（测试将在构建和测试阶段执行）
-- 框架规范逐项对照已通过（仅 Loeyae Boot 项目）
+- 外部 Provider 实现验证已通过（仅已安装 Provider 的项目）
 - 单元级微型摘要已生成（参见 `construction-implementation-report.md`）
 - 部署产物已生成
 - handoff.md 已更新（步骤完成强制协议）

@@ -2,29 +2,29 @@
 
 ## 4.14.0
 
-项目级 Git Provider Core（MARS-148 / MARS-150–154）：Provider 契约冻结为 protocol `1.1`；业务项目以 `.aidlc/providers.yaml` 声明意图、以 `providers.lock.yaml` 锁定不可变 commit 安装；`orchestrate next` 输出绑定 instance/lock/plan node 的 `provider_context`/`provider_actions`；`restricted-v1` Runner 只读物化 bundle 并签发 accepted Evidence，GateDecision 成为 Provider-backed 阶段报告的强制门禁；`loeyae-compliance` 迁移为通用 `implementation-validation` capability 的 legacy/shadow/enforce 兼容挂载。Windows/macOS/POSIX 均已回归（macOS 补充了 POSIX 安装与目录型 input 快照修复）。
+项目级 Git Provider Core（MARS-148 / MARS-150–154）：Provider 契约冻结为 protocol `1.1`；业务项目以 `.aidlc/providers.yaml` 声明意图、以 `providers.lock.yaml` 锁定不可变 commit 安装；`orchestrate next` 输出绑定 instance/lock/plan node 的 `provider_context`/`provider_actions`；`restricted-v1` Runner 只读物化 bundle 并签发 accepted Evidence，GateDecision 成为 Provider-backed 阶段报告的强制门禁。Loeyae Boot 规则、知识、检测、运行时和报告已真实抽离到独立 `loeyae-aidlc-provider` Git Provider，并通过通用 `code-generation` Hook 的 `implementation-validation` capability 注入；Core 不再含 Loeyae 专属 stage、sensor、检测或 compatibility 层。
 
 ### Added
 
 - **Provider Core 契约冻结（MARS-150）**：Provider/Profile/Plan/Request/Result/Evidence/Gate 的 protocol `1.1` Schema 与 ownership 表、五层状态机、P0 诊断码、fallback/waiver 策略与 `restricted-v1` 安全基线（`core/knowledge/protocols/project-git-provider-core-contract.md`）。
-- **项目 Provider 生命周期（MARS-151）**：`.aidlc/providers.yaml`/`providers.lock.yaml` 读写/校验/原子更新与 `provider add/list/status/update/enable/disable/remove`。安装期只做隔离 Git fetch 与对象读取（ref→commit/tree/Manifest/ruleset/config digest 锁定），不 checkout、不执行 hook/submodule/LFS/filter/entrypoint/package 脚本；Windows SSH 来源在保留严格主机指纹校验的前提下使用真实 `~/.ssh/known_hosts` 与默认私钥。
-- **Resolver、ProviderPlan 与 directive 集成（MARS-152）**：Effective Profile 合并（`extends` 继承、facts 深合并、risk 只升不降）、三值 selector、模块/单元 binding 匹配、capability 表达式与依赖 DAG、确定性 Plan digest 与审批；`orchestrate next` 输出绑定 `provider_instance_id + lock digest + plan node` 的 `provider_context`/`provider_actions`。
-- **受控 Runner、Evidence 与 GateDecision（MARS-153）**：`restricted-v1` 本地 Runner（结构化 argv、只读 input 快照、最小环境、timeout/cancel）、Result 严格校验与 Core 签名 accepted Evidence、`provider run/gate/probe` 与 `orchestrate report --gate-decision`。Linux 使用 bubblewrap + prlimit，其余 OS fail-closed 不降级；input 快照目录在 POSIX 上保持 owner-writable（0o700），修复目录型 input 必然 `EACCES` 的跨平台缺陷。
-- 新增 `.aidlc/provider-compatibility.json` 与 `provider compatibility --mode legacy|shadow|enforce`。默认 `legacy`；模式进入 Plan policy digest，跨模式旧 Gate 失效。
-- 新增 `aidlc-provider-compatibility.ts`：enforce 缺旧 Evidence 时生成 controlled 兼容投影；每个 Gate 生成不可变 JSON/Markdown 对账，保留 Rule ID、文件/行位置、Provider commit/invocation/source revision 与回滚动作。
-- `provider add` 支持重复 `--module/--unit/--stage/--capability`，Loeyae Provider 可只绑定到 `loeyae-compliance/implementation-validation`。
-- 新增本地 bare Git 联合回归 `test_loeyae_provider_migration.ts`，实际执行 fixture entrypoint，覆盖嵌套多模块、非 Loeyae、轻量 scope、blocked shadow Gate、enforce 投影、CR stale 与历史保留。
+- **项目 Provider 生命周期（MARS-151）**：`.aidlc/providers.yaml`/`providers.lock.yaml` 读写/校验/原子更新与 `provider add/list/status/update/enable/disable/remove`。安装期只做隔离 Git fetch 与对象读取（ref→commit/tree/Manifest/ruleset/config digest 锁定），不 checkout、不执行 hook/submodule/LFS/filter/entrypoint/package 脚本。
+- **Resolver、ProviderPlan 与 directive 集成（MARS-152）**：Effective Profile 合并、三值 selector、模块/单元/stage binding 匹配、能力表达式与依赖 DAG、确定性 Plan digest 与审批；`orchestrate next` 输出绑定 `provider_instance_id + lock digest + plan node` 的 `provider_context`/`provider_actions`。
+- **受控 Runner、Evidence 与 GateDecision（MARS-153）**：`restricted-v1` Runner、Result 严格校验与 Core 签名 accepted Evidence、`provider run/gate/probe` 与 `orchestrate report --gate-decision`。无法完整落实隔离时 fail-closed，不做 best-effort 降级。
+- 新增 `tests/test_provider_domain_extraction.ts`：验证 Core 不保留领域专属文件/标识；没有项目 Provider 时 `code-generation` 不生成 action，锁定并绑定的 Provider 则产生 action 且 GateDecision 是报告前置条件。
 
 ### Changed
 
-- `loeyae-compliance` 覆盖全部 8 个 scope，并声明通用 `implementation-validation` capability；Profile 决定适用性，scope 只决定 full/targeted 规则深度。
-- ProviderRequest 以 `extensions.io.loeyae.aidlc.workflow_scope` 传递 workflow scope；多模块 Loeyae 检测读取受 gitignore 约束的全部构建元数据，而非只看根文件。
-- `shadow` 可验证并消费当前签名的 blocked Gate 作为只读对账输入，但仍由旧 sensor 决定阶段准出；`enforce` 仍要求 passing Gate。
+- Loeyae Boot Provider 使用 `provider add ... --stage code-generation --capability implementation-validation` 注入。Profile selector 与锁定 manifest 决定适用性；Core 不读取或推断 Loeyae Boot 构建元数据。
+- 全部 9 套 harness 从 40-stage 图重建为不含领域专属阶段的 39-stage 图；`code-generation` 是保持工作流控制权的通用质量 Hook。
 
-### Security / compatibility
+### Removed
 
-- 旧 workflow 未配置 feature flag 时维持 `legacy`；非 Loeyae 项目在 Provider resolution 前跳过本阶段。
-- rollback/update/disable/remove 不删除旧 Evidence、GateDecision、lock history、audit 或对账报告。
+- 删除 `loeyae-compliance` stage、`framework-compliance` sensor、`is_loeyae_boot` Core 检测、`aidlc-provider-compatibility.ts`、`provider compatibility` CLI 和旧 Evidence 投影/双写对账机制。
+- 删除 Core 内 Loeyae MCP/Skill 加载规则；它们仅随外部 Provider 的锁定 Git commit 提供。
+
+### Security
+
+- Provider 安装、更新、禁用和删除保留 lock history、Evidence、GateDecision 与 audit；Provider 始终不能写 workflow state/audit/最终 Evidence/Gate。
 - 生产 `restricted-v1` 仍 fail-closed；Windows/macOS 不具备完整 OS isolation 时不会降级执行。
 
 ## 4.13.3

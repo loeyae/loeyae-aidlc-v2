@@ -35,11 +35,6 @@ import {
   type ProviderRunInput,
 } from "./aidlc-provider-runner";
 import { evaluateProviderGate } from "./aidlc-provider-gate";
-import {
-  getLoeyaeCompatibilityStatus,
-  setLoeyaeCompatibilityMode,
-  type LoeyaeCompatibilityMode,
-} from "./aidlc-provider-compatibility";
 
 export interface ProviderLifecycleResult {
   readonly status: "added" | "updated" | "enabled" | "disabled" | "removed" | "unchanged";
@@ -520,8 +515,6 @@ export function providerCliUsage(): string {
     "  probe [--project <path>]",
     "  run --plan <plan-id|path> --node <node-id> [--input <id>=<project-relative-path>]... [--timeout <ms>] [--project <path>]",
     "  gate --plan <plan-id|path> [--evidence <evidence-id|path>]... [--waiver <json-file>]... [--fallback <json-file>]... [--project <path>]",
-    "  compatibility [--mode <legacy|shadow|enforce>] [--instance <id>] [--project <path>]",
-    "      Show or change the loeyae-compliance migration feature flag; legacy is the safe default.",
     "",
     "file:// and absolute-path sources are test-fixture-only and require --allow-file or AIDLC_PROVIDER_ALLOW_FILE=1.",
     `Production https/ssh sources require host allowlisting in .aidlc/provider-git-policy.json.`,
@@ -578,17 +571,6 @@ export function runProviderCli(args = process.argv.slice(2)): unknown {
     assertOptions(parsed, ["project", "output"]);
     if (parsed.positionals.length !== 1) throw new Error("provider remove requires exactly one <instance-id>");
     return removeProjectProvider(root, parsed.positionals[0]);
-  }
-  if (command === "compatibility") {
-    assertOptions(parsed, ["mode", "instance", "project", "output"]);
-    if (parsed.positionals.length !== 0) throw new Error("provider compatibility does not accept positional arguments");
-    const mode = option(parsed, "mode");
-    if (!mode) {
-      if (option(parsed, "instance")) throw new Error("provider compatibility --instance requires --mode");
-      return getLoeyaeCompatibilityStatus(root);
-    }
-    if (mode !== "legacy" && mode !== "shadow" && mode !== "enforce") throw new Error("provider compatibility --mode must be legacy, shadow, or enforce");
-    return setLoeyaeCompatibilityMode(root, mode as LoeyaeCompatibilityMode, option(parsed, "instance"));
   }
   throw new Error(`unknown provider command: ${command}`);
 }

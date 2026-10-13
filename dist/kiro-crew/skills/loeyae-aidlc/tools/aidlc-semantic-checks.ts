@@ -76,7 +76,6 @@ const MODULE_CONTEXT_SENSORS = new Set([
   "nfr-coverage",
   "infrastructure-completeness",
   "frontend-platform-spec",
-  "framework-compliance",
   "subagent-evidence",
   "ui-design-alignment",
 ]);
@@ -91,7 +90,6 @@ const UNIT_CONTEXT_SENSORS = new Set([
   "nfr-coverage",
   "infrastructure-completeness",
   "frontend-platform-spec",
-  "framework-compliance",
   "subagent-evidence",
   "ui-design-alignment",
 ]);
@@ -124,7 +122,7 @@ function contextAllows(path: string): boolean {
 const SENSOR_NAMES = new Set([
   "review-evidence", "test-quality", "contract-baseline", "functional-design-completeness",
   "nfr-coverage", "infrastructure-completeness", "implementation-report", "frontend-platform-spec",
-  "framework-compliance", "subagent-evidence", "template-completeness", "recovery-evidence",
+  "subagent-evidence", "template-completeness", "recovery-evidence",
   "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
   "ui-artifact-consistency", "inception-consistency", "test-case-derivation", "red-test-evidence", "green-test-evidence", "baseline-test-evidence",
   "traceability-matrix", "structural-invariants",
@@ -1458,19 +1456,6 @@ function frontendPlatform(): Record<string, unknown> {
   const css = count(content, /CSS|样式|spacing|responsive|tokens|间距|响应式|设计令牌/gi);
   if (layout < 3 || components < 5 || css < 3) fail(`frontend platform spec is incomplete: layout=${layout}, components=${components}, css=${css}`);
   return { status: "passed", layout_primitives: ["documented-layout-1", "documented-layout-2", "documented-layout-3"], component_mapping: Array.from({ length: 5 }, (_, index) => `documented-component-${index + 1}`), css_constraints: ["documented-css-1", "documented-css-2", "documented-css-3"] };
-}
-
-function frameworkCompliance(): Record<string, unknown> {
-  const buildFiles = projectFiles(/(?:pom\.xml|build\.gradle|settings\.gradle|package\.json)$/i);
-  const buildContent = joined(buildFiles);
-  if (!/loeyae-boot|loeyae\.boot/i.test(buildContent)) fail("Loeyae Boot project was not detected");
-  const files = projectFiles(/\.(?:java|kt|ts|tsx|js|md)$/i);
-  const content = joined(files);
-  if (!/loeyae|framework|技能|skill/i.test(content)) fail("framework skill loading evidence is missing");
-  const checksTotal = count(content, /\[[ xX]\]|通过|passed|check|检查/gi);
-  const checksFailed = count(content, /\[\s*[xX]\s*\].*(?:失败|failed)|未通过|blocked/gi);
-  if (checksTotal < 1 || checksFailed > 0) fail("framework compliance checks did not pass");
-  return { status: "passed", skills_loaded: true, checks_total: checksTotal, checks_failed: 0 };
 }
 
 function subagentEvidence(): Record<string, unknown> {
@@ -3551,7 +3536,7 @@ const MATRIX_LAYERS: { layer: string; stage: string; tracks: Track[] | "*" }[] =
 ];
 const MATRIX_STAGE_ORDER = ["requirements-analysis", "requirement-clarification", "user-stories", "application-design", "functional-design", "tdd", "code-generation", "code-review"];
 // B3 修复:真实 stage 图是 DAG,construction 期有多个分叉 stage(shared-contract-baseline / nfr-* /
-// infrastructure-* / subagent-execution / loeyae-compliance / ui-implementation-bridge 等)不在上面的
+// infrastructure-* / subagent-execution / ui-implementation-bridge 等)不在上面的
 // 线性序上。裸 indexOf 对它们返回 -1,会使阶段感知守卫 (currentOrder>=0) 整体失效,退化为"全层都判",
 // 对尚未到达的 code_refs/tests 层产生假阳性 BROKEN。故用保守映射:未知 stage 回退到其依赖语义对应的
 // 线性位置下界,绝不高估进度(宁可少判、不误判)。
@@ -3563,7 +3548,6 @@ const MATRIX_STAGE_FALLBACK: Record<string, string> = {
   "infrastructure-design": "functional-design",
   // 均 requires code-generation → 视为已到 code-generation。
   "subagent-execution": "code-generation",
-  "loeyae-compliance": "code-generation",
   "ui-implementation-bridge": "code-generation",
   "build-and-test": "code-review",
   "implementation-report": "code-review",
@@ -4395,7 +4379,6 @@ const CHECKERS: Record<string, () => Record<string, unknown> | Promise<Record<st
   "infrastructure-completeness": infrastructure,
   "implementation-report": implementationReport,
   "frontend-platform-spec": frontendPlatform,
-  "framework-compliance": frameworkCompliance,
   "subagent-evidence": subagentEvidence,
   "template-completeness": templateCompleteness,
   "recovery-evidence": recoveryEvidence,

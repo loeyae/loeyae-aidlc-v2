@@ -40,7 +40,6 @@ export const UNIT_CONDITIONAL_STAGES = [
   "infrastructure-design",
   "shared-contract-baseline",
   "subagent-execution",
-  "loeyae-compliance",
   "ui-implementation-bridge",
 ] as const;
 

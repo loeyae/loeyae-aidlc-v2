@@ -144,7 +144,7 @@ function scanStages(): StageNode[] {
 const POSITIVE_CONDITIONS = [
   "has_legacy_code", "has_ui_requirements", "has_reverse_output", "multi_module", "has_product_contract_needs", "has_nfr_needs",
   "has_infra_needs", "has_test_case_sources", "has_contract_dependencies", "has_subagent_support",
-  "is_loeyae_boot", "context_compacted", "ui_design_selected", "ui_mode_html_mock", "ui_mode_figma",
+  "context_compacted", "ui_design_selected", "ui_mode_html_mock", "ui_mode_figma",
   "has_application_design_needs", "has_unit_generation_needs", "has_functional_design_needs",
   "needs_ui_implementation_bridge", "has_deployment_needs", "has_operations_template_needs",
 ];
@@ -154,7 +154,7 @@ const VALID_SENSORS = new Set([
   "no-todo", "build-success", "test-pass", "traceability", "doc-cascade", "reviewer-required",
   "build-test-evidence", "review-evidence", "test-quality", "contract-baseline",
   "functional-design-completeness", "nfr-coverage", "infrastructure-completeness", "implementation-report",
-  "frontend-platform-spec", "framework-compliance", "subagent-evidence", "template-completeness",
+  "frontend-platform-spec", "subagent-evidence", "template-completeness",
   "recovery-evidence", "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
   "ui-artifact-consistency", "inception-consistency",
   "clarification-traceability", "story-traceability", "traceability-matrix",

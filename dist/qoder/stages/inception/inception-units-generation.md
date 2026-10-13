@@ -67,7 +67,7 @@ condition: has_unit_generation_needs
 - [ ] 生成 `docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work.md`，包含单元定义、职责、`service_id`、允许修改范围和验证检查点
 - [ ] 生成 `docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-dependency.md`，包含带类型的依赖矩阵
 - [ ] 生成 `docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-story-map.md`，映射故事到单元
-- [ ] 在 `unit-manifest.json` 的每个单元写入 `conditional_stages`，只允许：`functional-design`、`nfr-requirements`、`nfr-design`、`infrastructure-design`、`shared-contract-baseline`、`subagent-execution`、`loeyae-compliance`、`ui-implementation-bridge`
+- [ ] 在 `unit-manifest.json` 的每个单元写入 `conditional_stages`，只允许：`functional-design`、`nfr-requirements`、`nfr-design`、`infrastructure-design`、`shared-contract-baseline`、`subagent-execution`、`ui-implementation-bridge`
 - [ ] 每个 `conditional_stages` 选择必须能追溯到当前单元的需求、故事、技术用例、允许修改范围、依赖矩阵或已批准执行计划；不得把另一个单元的事实复制为本单元选择
 - [ ] `nfr-requirements` 与 `nfr-design` 必须同时选择，且 NFR 或基础设施设计适用时必须同时选择 `functional-design`
 - [ ] **多单元且存在共享契约时**：在 `unit-of-work.md` 生成跨单元共享契约索引，并在 `shared-interfaces.md` 记录其完整设计；不适用时不得创建空表或空文件

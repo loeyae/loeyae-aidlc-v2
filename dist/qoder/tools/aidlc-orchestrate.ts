@@ -137,15 +137,6 @@ import {
 } from "./aidlc-provider-resolver";
 import type { CapabilityExpression, GateDecisionV1_1, ProviderScope, ProviderSourceRevision, Sha256Digest } from "./aidlc-provider-types";
 import { verifyGateDecisionForReport } from "./aidlc-provider-gate";
-import {
-  IMPLEMENTATION_VALIDATION_CAPABILITY,
-  LOEYAE_COMPATIBILITY_STAGE,
-  loeyaeCompatibilityPolicyId,
-  projectProviderEvidenceToLegacy,
-  readLoeyaeCompatibilitySettings,
-  reconcileLoeyaeCompliance,
-  type WrittenLoeyaeReconciliation,
-} from "./aidlc-provider-compatibility";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -242,7 +233,6 @@ export interface ConditionContext {
   has_test_case_sources: boolean;
   has_contract_dependencies: boolean;
   has_subagent_support: boolean;
-  is_loeyae_boot: boolean;
   context_compacted: boolean;
   ui_design_selected: boolean;
   ui_mode_html_mock: boolean;
@@ -2070,7 +2060,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
         // so a stage that declares a NON-evidence produce (every traceability=required
         // stage) but resolves to zero real files has nothing scanned and would pass
         // silently — the gate空转. Fail closed in that case. A pure-evidence stage
-        // (shared-contract-baseline / tdd / subagent-execution / loeyae-compliance /
+        // (shared-contract-baseline / tdd / subagent-execution /
         // compact-recovery; all traceability=not_applicable) declares no non-evidence
         // produce, so the guard does not fire — no false positive. Directory produces
         // whose only entries are sub-MIN_ARTIFACT_BYTES markers are not artifacts (same
@@ -2930,19 +2920,6 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
         break;
       }
 
-      case "framework-compliance": {
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
-          const errors: string[] = [];
-          if (evidence.status !== "passed") errors.push('status must be "passed"');
-          if (evidence.skills_loaded !== true) errors.push("skills_loaded must be true");
-          if (asPositiveInt(evidence.checks_total) === null || (evidence.checks_total as number) < 1) errors.push("checks_total must be >= 1");
-          if (asNumber(evidence.checks_failed) !== 0) errors.push("checks_failed must be 0");
-          return errors;
-        });
-        if (failure) failures.push(failure);
-        break;
-      }
-
       case "subagent-evidence": {
         const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
@@ -3196,11 +3173,6 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
   const has_product_contract_needs = multi_module
     || /跨模块|跨服务|跨进程|异步事件|事件\s*(?:schema|契约)|前后端接口|API\s*契约|接口契约|OpenAPI|swagger|webhook|消息队列|外部系统交换/i.test(productContractText);
 
-  // is_loeyae_boot: build metadata references loeyae-boot framework.
-  const projectUsesLoeyaeBoot = /loeyae-boot|loeyae\.boot/i.test(buildMetadata);
-  const is_loeyae_boot = projectUsesLoeyaeBoot
-    && selectedForUnit("loeyae-compliance", true);
-
   // Runtime UI mode is taken from Markdown workflow history, never from handoff text.
   const uiChoice = uiDesignChoice(state, instance?.module_id);
   const ui_mode_html_mock = uiChoice === "html-mock";
@@ -3256,7 +3228,6 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
     has_test_case_sources,
     has_contract_dependencies,
     has_subagent_support,
-    is_loeyae_boot,
     context_compacted,
     ui_design_selected,
     ui_mode_html_mock,
@@ -3520,15 +3491,14 @@ function currentProviderSourceRevision(): ProviderSourceRevision {
   };
 }
 
+/** Generic Core-owned Provider lifecycle policy id for a stage; no domain stage is special-cased. */
+function stageResolutionPolicyId(stage: string): string {
+  return `aidlc.orchestrate-stage/${stage}`;
+}
+
 /** Resolve only from project intent + immutable lock/cache; never discovers or refreshes a Provider. */
 function prepareProviderDirective(instance: StageInstance, approvalRef: string | undefined, persist: boolean): PreparedProviderDirective | null {
-  const compatibility = instance.stage.slug === LOEYAE_COMPATIBILITY_STAGE
-    ? readLoeyaeCompatibilitySettings(PROJECT_ROOT)
-    : undefined;
-  if (compatibility?.mode === "legacy") return null;
-  const configuredCapabilities = compatibility
-    ? [IMPLEMENTATION_VALIDATION_CAPABILITY]
-    : instance.stage.provider_capabilities || [];
+  const configuredCapabilities = instance.stage.provider_capabilities || [];
   const hasConfig = existsSync(join(PROJECT_ROOT, PROJECT_PROVIDERS_PATH));
   const hasLock = existsSync(join(PROJECT_ROOT, PROJECT_PROVIDERS_LOCK_PATH));
   if (!hasConfig && !hasLock) {
@@ -3545,7 +3515,7 @@ function prepareProviderDirective(instance: StageInstance, approvalRef: string |
     },
     source_revision: currentProviderSourceRevision(),
     policy: defaultResolutionPolicy({
-      policy_id: loeyaeCompatibilityPolicyId(PROJECT_ROOT, instance.stage.slug),
+      policy_id: stageResolutionPolicyId(instance.stage.slug),
       protected_gate: instance.stage.approval === "block",
     }),
     capability_expression: stageCapabilityExpression(configuredCapabilities),
@@ -3568,11 +3538,7 @@ function prepareProviderDirective(instance: StageInstance, approvalRef: string |
 function providerHandoffPrompt(provider: PreparedProviderDirective | null, instance?: StageInstance): string {
   if (!provider) return "";
   const actions = provider.actions.map((action) => `${action.provider_instance_id}/${action.capability_id}@${action.plan_node_id}`).join("、");
-  const shadow = instance?.stage.slug === LOEYAE_COMPATIBILITY_STAGE && readLoeyaeCompatibilitySettings(PROJECT_ROOT).mode === "shadow";
-  const gateRule = shadow
-    ? "shadow 模式允许当前签名的 blocked Gate 进入只读双写对账，但阶段仍只由旧 framework-compliance sensor 放行；blocked Gate 绝不代表 Provider 验收通过。"
-    : "缺失或 blocked Gate 不会推进。";
-  return `\nProvider 计划：${provider.context.plan.id}（${provider.context.plan.digest}），lock=${provider.context.lock_digest}。只能执行 directive.provider_actions 中绑定的项目实例与 Plan node，不得从全局缓存、远端 branch 或同名仓库替换。${actions ? `动作：${actions}。` : ""} 对 validation/command/composite 动作运行 provider run，随后以 provider gate 聚合当前 Evidence；report 必须携带 --gate-decision <gate-id>。${gateRule}`;
+  return `\nProvider 计划：${provider.context.plan.id}（${provider.context.plan.digest}），lock=${provider.context.lock_digest}。只能执行 directive.provider_actions 中绑定的项目实例与 Plan node，不得从全局缓存、远端 branch 或同名仓库替换。${actions ? `动作：${actions}。` : ""} 对 validation/command/composite 动作运行 provider run，随后以 provider gate 聚合当前 Evidence；report 必须携带 --gate-decision <gate-id>。缺失或 blocked Gate 不会推进。`;
 }
 
 function providerScopeForInstance(instance: StageInstance): ProviderScope {
@@ -3604,41 +3570,17 @@ function providerGateCheck(instance: StageInstance, gateReference: string | unde
     return { failure: `Stage ${instance.instance_id} has required Provider quality actions. Run the bound provider actions and provider gate, then report with --gate-decision <gate-id>.` };
   }
   try {
-    const mode = instance.stage.slug === LOEYAE_COMPATIBILITY_STAGE
-      ? readLoeyaeCompatibilitySettings(PROJECT_ROOT).mode
-      : undefined;
     const decision = verifyGateDecisionForReport(PROJECT_ROOT, gateReference, {
       scope: providerScopeForInstance(instance),
       sourceRevision: currentProviderSourceRevision(),
       resolutionPolicy: defaultResolutionPolicy({
-        policy_id: loeyaeCompatibilityPolicyId(PROJECT_ROOT, instance.stage.slug),
+        policy_id: stageResolutionPolicyId(instance.stage.slug),
         protected_gate: instance.stage.approval === "block",
       }),
-      ...(mode === "shadow" ? { allowBlockedForShadow: true } : {}),
     });
     return { failure: null, decision };
   } catch (error) {
     return { failure: `GateDecision ${gateReference} cannot authorize report: ${error instanceof Error ? error.message : String(error)}` };
-  }
-}
-
-function prepareLoeyaeCompatibilityProjection(instance: StageInstance, decision: GateDecisionV1_1 | undefined): string | null {
-  if (instance.stage.slug !== LOEYAE_COMPATIBILITY_STAGE || !decision) return null;
-  const projected = projectProviderEvidenceToLegacy(PROJECT_ROOT, decision);
-  return projected.error ? `Loeyae compatibility projection failed: ${projected.error}` : null;
-}
-
-function reconcileLoeyaeCompatibility(instance: StageInstance, decision: GateDecisionV1_1 | undefined): { report?: WrittenLoeyaeReconciliation; failure?: string } {
-  if (instance.stage.slug !== LOEYAE_COMPATIBILITY_STAGE || !decision) return {};
-  try {
-    const report = reconcileLoeyaeCompliance(PROJECT_ROOT, decision);
-    const mode = readLoeyaeCompatibilitySettings(PROJECT_ROOT).mode;
-    if (mode === "enforce" && report.result.status !== "matched") {
-      return { report, failure: `Loeyae Provider 双写对账不一致；Rule/路径诊断：${report.path}。切回 legacy 或修复后用新 invocation 重跑。` };
-    }
-    return { report };
-  } catch (error) {
-    return { failure: `Loeyae Provider 双写对账失败: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 
@@ -5052,9 +4994,6 @@ async function handleReport(args: string[]): Promise<Directive> {
         }
       }
 
-      const compatibilityProjectionFailure = prepareLoeyaeCompatibilityProjection(currentInstance, providerDecision);
-      if (compatibilityProjectionFailure) return { kind: "error", message: `🚫 ${compatibilityProjectionFailure}` };
-
       const automaticEvidenceError = produceMissingSemanticEvidence(currentInstance);
       if (automaticEvidenceError) {
         return {
@@ -5062,12 +5001,6 @@ async function handleReport(args: string[]): Promise<Directive> {
           message: `🚫 Cannot complete stage "${stageSlug}" — ${automaticEvidenceError}`,
         };
       }
-
-      const compatibility = reconcileLoeyaeCompatibility(currentInstance, providerDecision);
-      if (compatibility.failure) {
-        return { kind: "error", message: `🚫 ${compatibility.failure}`, ...(compatibility.report ? { provider_reconciliation: compatibility.report } : {}) };
-      }
-      if (compatibility.report) extras = { ...extras, provider_reconciliation: compatibility.report };
 
       const missingProduces = checkProduces(currentInstance);
       if (missingProduces.length > 0) {
@@ -5257,13 +5190,8 @@ async function reattestInstance(
       if (redFailures.length > 0) return { kind: "error", message: `🚫 Cannot re-attest GREEN stage "${instanceId}" — RED gate evidence is invalid:\\n${redFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\\n")}`, ...extras };
     }
   }
-  const compatibilityProjectionFailure = prepareLoeyaeCompatibilityProjection(instance, providerGate.decision);
-  if (compatibilityProjectionFailure) return { kind: "error", message: `🚫 ${compatibilityProjectionFailure}`, ...extras };
   const automaticEvidenceError = produceMissingSemanticEvidence(instance, true);
   if (automaticEvidenceError) return { kind: "error", message: `🚫 Cannot re-attest "${instanceId}" — ${automaticEvidenceError}`, ...extras };
-  const compatibility = reconcileLoeyaeCompatibility(instance, providerGate.decision);
-  if (compatibility.failure) return { kind: "error", message: `🚫 ${compatibility.failure}`, ...(compatibility.report ? { provider_reconciliation: compatibility.report } : {}), ...extras };
-  if (compatibility.report) extras = { ...extras, provider_reconciliation: compatibility.report };
   // MARS-95: a completed unit proved its source delivery when it completed; after
   // --advance its changes are part of the baseline, so an empty delta is not a failure.
   const missingProduces = checkProduces(instance, { completed: true });

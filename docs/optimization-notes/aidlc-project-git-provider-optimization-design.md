@@ -1,6 +1,6 @@
 # AI-DLC 项目级 Git Provider 优化调整设计
 
-- **状态**：拟实施设计
+- **状态**：已实施；迁移期 compatibility 章节为历史设计记录。当前 Loeyae Boot 已从 Core 真实抽离，通过独立 Git Provider 的通用 `code-generation` Hook 注入。
 - **适用版本**：`loeyae-aidlc-v2` 4.13.3 之后的下一主线版本
 - **关联项目**：`E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2`、`E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-provider`
 - **目标**：将框架/技术栈/工具链专属规则从 AI-DLC Core 拆分为可由 Git 地址安装的**项目级 Provider**，同时保留 Core 对工作流、审批、Evidence 和门禁的唯一控制权。

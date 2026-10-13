@@ -1244,50 +1244,6 @@
       "file": "stages/construction/construction-subagent-execution.md"
     },
     {
-      "slug": "loeyae-compliance",
-      "number": "3.5.3",
-      "name": "Loeyae 框架合规",
-      "phase": "construction",
-      "axis": "unit",
-      "execution": "CONDITIONAL",
-      "selection": "automatic",
-      "choices": [],
-      "lead_agent": "aidlc-developer-agent",
-      "support_agents": [],
-      "mode": "inline",
-      "scopes": [
-        "feature",
-        "enterprise",
-        "mvp",
-        "classic",
-        "express",
-        "workshop",
-        "bugfix",
-        "refactor"
-      ],
-      "requires": [
-        "code-generation"
-      ],
-      "cross_module_requires": [],
-      "scope_waived_requires": [],
-      "consumes": [],
-      "produces": [
-        ".aidlc/evidence/loeyae-compliance/{module-id}/{unit-id}/framework-compliance.json"
-      ],
-      "sensors": [
-        "framework-compliance",
-        "no-todo"
-      ],
-      "provider_capabilities": [
-        "implementation-validation"
-      ],
-      "traceability": "not_applicable",
-      "completion_contract": "gated",
-      "condition": "is_loeyae_boot",
-      "approval": "notify",
-      "file": "stages/construction/construction-loeyae-compliance.md"
-    },
-    {
       "slug": "ui-implementation-bridge",
       "number": "3.5.4",
       "name": "UI 实现桥接",
@@ -1674,7 +1630,7 @@
       "file": "stages/operation/operations-templates.md"
     }
   ],
-  "stage_count": 40,
+  "stage_count": 39,
   "scopes": [
     "bugfix",
     "classic",
@@ -1700,7 +1656,6 @@
     "has_subagent_support",
     "has_ui_requirements",
     "has_unit_generation_needs",
-    "is_loeyae_boot",
     "multi_module",
     "needs_ui_implementation_bridge",
     "ui_design_selected",

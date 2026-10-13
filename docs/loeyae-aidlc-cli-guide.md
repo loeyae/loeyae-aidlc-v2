@@ -27,9 +27,9 @@ aidlc/active/audit.md
 |------|------|------|
 | `feature` / `enterprise` / `mvp` | 39 | 完整 Inception → Construction → 条件 Operations |
 | `classic` | 36 | 同上，不含 Operations 尾段 |
-| `express` / `workshop` / `bugfix` / `refactor` | 9 个候选、非 Loeyae 实际 8 | 轻量链路 + 条件 `loeyae-compliance` |
+| `express` / `workshop` / `bugfix` / `refactor` | 8 | 轻量链路 |
 
-Loeyae Boot 项目会在 `code-generation` 后额外进入条件阶段 `loeyae-compliance`（通用 `implementation-validation` 挂载点），因此轻量 scope 的实际实例数为 9；非 Loeyae 项目仍为 8。该条件阶段覆盖 `bugfix/refactor/express/workshop`，不再因轻量 scope 整体跳过。
+Core 不再内置任何 Loeyae 专属 stage。外部 Loeyae Provider 通过通用 `code-generation` Hook 注入（`implementation-validation` capability）：未安装 Provider 时行为不变，轻量 scope 实例数为 8。
 
 - `prd-generation` 只在完整 scope 初始化时加 `--with-prd` 才进入。
 - `workspace-detection` 的 `single-module` / `multi-module` 选择只出现在 feature、enterprise、mvp、classic。
@@ -75,14 +75,13 @@ loeyae-aidlc orchestrate diagram-format [--set <mermaid|svg> --user-input "<用�
 
 ## 项目级 Provider 与 Loeyae 迁移
 
-安装时可显式限制 module/unit/stage/capability binding。Loeyae Boot 首个 Provider 应只挂到迁移阶段：
+安装时可显式限制 module/unit/stage/capability binding。外部 Loeyae Provider 挂到通用 `code-generation` Hook：
 
 ```bash
 loeyae-aidlc provider add <git-url> --ref <tag-or-commit> \
   --subdir providers/loeyae-boot \
   --id framework.java-loeyae-boot --instance loeyae-boot \
-  --stage loeyae-compliance --capability implementation-validation
-loeyae-aidlc provider compatibility --mode shadow --instance loeyae-boot
+  --stage code-generation --capability implementation-validation
 ```
 
 当前 directive 给出 `provider_context.plan.path` 与 `provider_actions[].plan_node_id` 后：
@@ -91,11 +90,11 @@ loeyae-aidlc provider compatibility --mode shadow --instance loeyae-boot
 loeyae-aidlc provider run --plan <plan-id-or-path> --node <node-id> \
   --input source=<project-relative-source-path>
 loeyae-aidlc provider gate --plan <plan-id-or-path> --evidence <evidence-id>
-loeyae-aidlc orchestrate report --stage loeyae-compliance --result completed \
+loeyae-aidlc orchestrate report --stage code-generation --result completed \
   --gate-decision <gate-id>
 ```
 
-`provider compatibility` 默认显示状态：`legacy` 只走旧 sensor，`shadow` 双写且旧 sensor 权威，`enforce` 由 Provider Gate 权威；切回 `legacy` 不删除旧 Evidence、Gate 或 Rule/路径对账报告。完整 Profile、scope、升级、回滚和发布清单见 `docs/loeyae-boot-provider-migration.md`。
+Profile selector 决定是否选中该 Provider；选中时该 `implementation-validation` 动作为 required，orchestrate 在未携带通用 GateDecision 时拒绝推进。Core 不存在 compatibility/legacy/shadow/enforce 模式，也没有 Loeyae 专属 stage。完整 Profile、scope、升级和发布清单见 `docs/loeyae-boot-provider-migration.md`。
 
 ## 基线与 lineage
 
