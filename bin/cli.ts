@@ -1419,7 +1419,7 @@ Quality and utilities:
   provider probe|run|gate [args]                       Probe restricted-v1, execute a Plan node, and issue GateDecision
   extension validate|compose|status [flags] Restricted additive extension metadata
   check --sensor <name> [--module <id>]      Run a deterministic semantic checker (module-scoped with --module)
-  ui lock|accept|check|impact-matrix|dry-run  Lock UI inputs, verify freshness, and enforce one full acceptance
+  ui lock|accept|refresh|reverify|check|impact-matrix|dry-run  Lock UI inputs, verify freshness, one full acceptance + controlled freshness checkpoints
   diagram-provider run [options]            Run diagram validation
   export <md|svg> <file> --to <format>      Export Markdown or SVG
   docx <inspect|beautify|validate> [args]   Inspect or conservatively restyle DOCX
