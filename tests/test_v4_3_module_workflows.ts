@@ -238,6 +238,12 @@ try {
   commit(project, "merchant clarifications");
   const isolated = success(project, ["orchestrate", "report", "--stage", "requirements-analysis", "--module", M01, "--result", "completed"]);
   assert.equal(isolated.reattested, true, "an m03 write and commit must not invalidate m01 evidence");
+  // MARS-159 B: a successful module report checkpoints the module into its ledger ref.
+  const reportCheckpoint = isolated.module_checkpoint as { status: string; module_id: string; published: boolean } | undefined;
+  assert.ok(reportCheckpoint && ["created", "unchanged"].includes(reportCheckpoint.status), `module report must checkpoint the module: ${JSON.stringify(isolated.module_checkpoint)}`);
+  assert.equal(reportCheckpoint!.module_id, M01);
+  assert.equal(reportCheckpoint!.published, false);
+  assert.match(spawnSync("git", ["rev-parse", "--verify", `refs/heads/aidlc/modules/${M01}`], { cwd: project, encoding: "utf8" }).stdout, /^[a-f0-9]{40}/);
   const m01Requirements = join(project, "docs", "aidlc", "modules", M01, "inception", "requirements.md");
   writeFileSync(m01Requirements, `${readFileSync(m01Requirements, "utf8")}Additional REQ-001 detail.\n`, "utf8");
   failure(project, ["orchestrate", "report", "--stage", "requirements-analysis", "--module", M01, "--result", "completed"], /scope_digest no longer matches the module:m01-trade scope/);

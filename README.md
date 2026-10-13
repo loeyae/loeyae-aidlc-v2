@@ -146,6 +146,17 @@ loeyae-aidlc orchestrate park --module module-a
 
 `aidlc/active/` 是团队共享状态，一个项目只有一条工作流 lineage。`next --scope` / `split` 发现 git 中已有另一条未归档 lineage 时拒绝创建（确需作废时加 `--replace-lineage <id>`）；合并后 HEAD 历史出现另一条未退役 lineage 时 `next` / `report` 拒绝继续，由负责人用 `orchestrate state retire --lineage <id> --user-input Approve --reason "<原因>"` 裁决；`orchestrate state verify` 只读检查 lineage 与状态 `Revision` 回退；另一条 lineage 上的模块用 `orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason "<原因>"` 迁入当前 lineage（同一模块只能保留一份）。`registry.md` 只存身份行，只在创建工作流时改变，推进模块不会改写它。合并冲突时禁止对 `aidlc/active/` 整目录「保留本地」，registry 冲突保留双方的模块行。
 
+### 模块 checkpoint ledger（MARS-159）
+
+普通 feature branch 被 merge/squash 后删除时，模块 state 与契约视图可能不可达。每个模块有一条 append-only ledger ref `refs/heads/aidlc/modules/<module-id>`：模块 `report` 成功后 Core 用 git plumbing（不动 worktree/index/HEAD）追加 checkpoint，内容为该模块 `aidlc-state.md`、模块 audit、workflow/lineage/revision、前一 checkpoint digest、规范化契约视图（本模块提供/消费行、来源路径与 blob）以及自身 digest。也可手动执行：
+
+```bash
+loeyae-aidlc orchestrate state checkpoint --module <id>
+loeyae-aidlc orchestrate state recover --module <id> [--user-input Approve --reason "<原因>"]
+```
+
+`state recover` 从本地与 remote-tracking ledger 中选最高有效 revision，校验 checkpoint 链、lineage、state/契约 digest 与 module manifest；本地 state 更旧、更新或冲突时必须 `--user-input Approve`（先备份为 `*.bak-*`）；恢复后用 `orchestrate upgrade --dry-run --module <id>` 列出缺失证据，只重验它们。ledger **不会自动 push**：CLI 会输出 `git push origin refs/heads/aidlc/modules/<id>:refs/heads/aidlc/modules/<id>` 并在未发布时警告；全新 clone 默认 fetch 即可拿到 `refs/remotes/origin/aidlc/modules/*`。远端必须保护 `aidlc/modules/*`（禁止删除与 force-push），否则“任何人可恢复”不成立；从未合并、未打 tag、未 checkpoint 也无其他远端引用的已删除分支，git 无法恢复。
+
 ### 控制面 git 合并策略（4.13.1，MARS-117）
 
 引擎在 `install`、`next --scope`、`split` 时**幂等下发**控制面 git 合并策略到项目根，使多人协作的常规合并不再产生伪冲突（已有用户内容逐字节保留，只追加缺失行；用户为同一 pattern 设过不同策略时只报告、不覆盖）：
@@ -247,6 +258,17 @@ loeyae-aidlc ui impact-matrix --page-plan <path> --changed-stories US-001
 ```
 
 `ui-generation-lock.json` 封存文件 SHA-256、Git blob、机器 ID 分段摘要、页面映射和 upstream commit；cross-validation 的受控 `inception-consistency` 会重新计算实际正文差异。未映射的 REQ/FR、US/STORY、AC、PAGE 与无法归类的正文变化一律 fail-closed；一个任务只能登记一次 full acceptance，问题修复后只能定向复验。checker 不主动联网，执行 lock/accept 前应先更新本地 remote-tracking ref（默认 `origin/main`）。
+
+验收后的新鲜度（MARS-159）：仓库级 upstream 指针只作审计观察——其他模块推进 `origin/main`、本模块锁定源与页面映射未变时，`ui-page-planning` / `inception-consistency` 直接通过，无需也不允许第二次 `ui accept`。验收后的变化通过 Core 受控、append-only 的 checkpoint 链（`ui-generation-checkpoints.json`）记录：
+
+```bash
+# 锁定源未变、只有指针前进：追加 freshness checkpoint
+loeyae-aidlc ui refresh --module <module-id> --route <route>
+# 锁定源有可映射变化：报告追加 `## UI freshness reverification <run_id>`（pages 必须等于受影响页面）后
+loeyae-aidlc ui reverify --module <module-id> --route <route> --review-report <path>
+```
+
+未映射变化、复验页不匹配、手改 lock/acceptance/checkpoint 或复验段被改写时 fail-closed。
 
 证据文件默认 24 小时过期；跨天续作时上游纯过期不算回归，引擎会放行。
 

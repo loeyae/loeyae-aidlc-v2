@@ -34,6 +34,7 @@ import { SEMANTIC_SENSORS, allowlistedPhaseCommand, argvDigest, i13CodeRefBlobs,
 import { CANONICAL_SOURCE_PATTERN, SOURCE_ROOTS_CONFIG, declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
 import { codeRefRepo, nestedHead, nestedMigrationCommand, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
 import { CONTRACT_CONSUMER_COLUMN, CONTRACT_ID_COLUMN, CONTRACT_PROVIDER_COLUMN, moduleForValue } from "./aidlc-contract-table";
+import { bestLedgerCheckpoint, checkpointModule, gitRepositoryAvailable, ledgerFetchCommand, ledgerPublishCommand, ledgerRef, moduleContractSnapshot, remoteLedgerRef } from "./aidlc-module-ledger";
 import { COMMIT_ID_PATTERN, commitAncestryErrors, readSourceRevision, type RepoRevision } from "./aidlc-revision";
 import {
   ADOPTION_EXEMPTED_RULES,
@@ -1476,14 +1477,24 @@ function diagramFinalStatus(evidence: Evidence): { status: string; legacy: boole
   return { status: "UNVERIFIED", legacy: true };
 }
 
-function producedText(path: string): string | null {
+export type ProducedArtifact = { kind: "text"; content: string } | { kind: "binary" } | { kind: "unreadable" };
+
+/** MARS-159 C: distinguishes binary produce (NUL bytes, e.g. .xlsx) from a real read failure. */
+export function readProducedArtifact(path: string): ProducedArtifact {
+  let content: Buffer;
   try {
-    const content = readFileSync(path);
-    if (content.includes(0)) return null;
-    return content.toString("utf-8");
+    content = readFileSync(path);
   } catch {
-    return null;
+    return { kind: "unreadable" };
   }
+  if (content.includes(0)) return { kind: "binary" };
+  return { kind: "text", content: content.toString("utf-8") };
+}
+
+/** Text content for checks that require text; binary and unreadable both fail closed (null). */
+function producedText(path: string): string | null {
+  const artifact = readProducedArtifact(path);
+  return artifact.kind === "text" ? artifact.content : null;
 }
 
 function artifactLabel(path: string): string {
@@ -2075,11 +2086,14 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
         const unreadableFiles: string[] = [];
         for (const pattern of stage.produces || []) {
           for (const filePath of resolveProducePaths(pattern, instance)) {
-            const content = producedText(filePath);
-            if (content === null) {
+            const artifact = readProducedArtifact(filePath);
+            // Binary produce cannot carry a TODO marker; only a real read failure fails closed.
+            if (artifact.kind === "binary") continue;
+            if (artifact.kind === "unreadable") {
               unreadableFiles.push(artifactLabel(filePath));
               continue;
             }
+            const content = artifact.content;
             if (/(?:^|\n)\s*(?:(?:\/\/|#|<!--|\*|-)\s*)?\b(?:TODO|FIXME|HACK)\b\s*(?::|\(|\[|$)/im.test(content)) {
               todoFiles.push(artifactLabel(filePath));
             }
@@ -6806,7 +6820,7 @@ function writeAdoptionAdvance(adoption: { ref: WorkflowRef; state: WorkflowState
 // state — lineage / revision verification and lineage retirement (4.13.0, MARS-98)
 // ---------------------------------------------------------------------------
 
-const STATE_USAGE = "Usage: orchestrate state verify | orchestrate state rebuild | orchestrate state retire --lineage <workflow-id>[,<workflow-id>] --user-input Approve --reason \"<why>\" | orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason \"<why>\"";
+const STATE_USAGE = "Usage: orchestrate state verify | orchestrate state rebuild | orchestrate state retire --lineage <workflow-id>[,<workflow-id>] --user-input Approve --reason \"<why>\" | orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason \"<why>\" | orchestrate state checkpoint --module <id> | orchestrate state recover --module <id> [--user-input Approve --reason \"<why>\"]";
 
 async function handleState(args: string[]): Promise<Directive> {
   const [action, ...rest] = args;
@@ -6821,7 +6835,186 @@ async function handleState(args: string[]): Promise<Directive> {
   if (action === "retire") return retireLineages(flags);
   if (action === "adopt") return adoptModuleState(flags);
   if (action === "rebuild") return rebuildControlPlane(flags);
+  if (action === "checkpoint") return checkpointModuleState(flags);
+  if (action === "recover") return recoverModuleState(flags);
   return { kind: "error", message: STATE_USAGE };
+}
+
+/**
+ * MARS-159 B: after a successful module report, append a checkpoint of the module state and
+ * its contract view to the module ledger (refs/heads/aidlc/modules/<id>). Never pushes and
+ * never fails the report: a skipped checkpoint is surfaced as a warning.
+ */
+function withModuleCheckpoint(directive: Directive, args: string[]): Directive {
+  if (directive.kind === "error" || !isSplitLayout(PROJECT_ROOT)) return directive;
+  const workflow = typeof (directive as Record<string, unknown>).workflow === "string" ? String((directive as Record<string, unknown>).workflow) : "";
+  const moduleId = workflow.startsWith("module:") ? workflow.slice("module:".length) : "";
+  if (!moduleId || !MODULE_ID_PATTERN.test(moduleId)) return directive;
+  const flags = parseFlags(args);
+  const result = checkpointModule(PROJECT_ROOT, moduleId, `report ${flags.stage || "-"}`);
+  const note = result.status === "skipped"
+    ? `⚠️ Module checkpoint of ${moduleId} skipped: ${result.reason}.`
+    : result.published ? "" : `⚠️ ${result.warning || `Publish the module checkpoint: ${result.publish_command}`}`;
+  const message = typeof directive.message === "string" && note ? `${directive.message}\n${note}` : directive.message;
+  return { ...directive, ...(message !== undefined ? { message } : {}), module_checkpoint: result } as Directive;
+}
+
+function checkpointModuleState(flags: Record<string, string>): Directive {
+  const moduleId = flags.module;
+  if (!moduleId || moduleId === "true" || !MODULE_ID_PATTERN.test(moduleId)) return { kind: "error", message: `state checkpoint requires --module <module-id>. ${STATE_USAGE}` };
+  if (Object.keys(flags).some((key) => key !== "module")) return { kind: "error", message: `state checkpoint takes only --module. ${STATE_USAGE}` };
+  if (!isSplitLayout(PROJECT_ROOT)) return { kind: "error", message: "state checkpoint needs the split layout (aidlc/active/registry.md); modules belong to per-module workflows." };
+  const result = checkpointModule(PROJECT_ROOT, moduleId, "state checkpoint");
+  if (result.status === "skipped") return { kind: "error", module_checkpoint: result, message: `🚫 Module checkpoint of ${moduleId} not written: ${result.reason}` };
+  return {
+    kind: "print",
+    module_checkpoint: result,
+    message: `${result.status === "created" ? "✅ Module checkpoint appended" : "✅ Module ledger already holds this state"}: ${ledgerRef(moduleId)} @ ${result.commit?.slice(0, 12)} (revision ${result.revision}).` +
+      (result.published ? " Published." : `\n⚠️ ${result.warning}`),
+  };
+}
+
+/**
+ * MARS-159 B: restore a module workflow state from the highest valid checkpoint of its
+ * ledger (local or remote-tracking). The chain, lineage, state/contract digests and the
+ * module manifest are verified first; any overwrite of an existing local state needs the
+ * user's explicit approval and keeps a backup. Missing/stale evidence is listed, not
+ * trusted: recovery reuses orchestrate upgrade --dry-run and the regular next/report gates.
+ */
+async function recoverModuleState(flags: Record<string, string>): Promise<Directive> {
+  const moduleId = flags.module;
+  if (!moduleId || moduleId === "true" || !MODULE_ID_PATTERN.test(moduleId)) return { kind: "error", message: `state recover requires --module <module-id>. ${STATE_USAGE}` };
+  if ("from" in flags || "lineage" in flags) return { kind: "error", message: `state recover reads the module ledger only; use state adopt --from <commit> for another lineage. ${STATE_USAGE}` };
+  if (!isSplitLayout(PROJECT_ROOT)) return { kind: "error", message: "state recover needs the split layout (aidlc/active/registry.md); modules belong to per-module workflows." };
+  if (!gitRepositoryAvailable(PROJECT_ROOT)) return { kind: "error", message: "state recover needs a git repository: module checkpoints live in refs/heads/aidlc/modules/<id>." };
+  const ledger = bestLedgerCheckpoint(PROJECT_ROOT, moduleId);
+  if (ledger.errors.length > 0) {
+    return { kind: "error", ledger_errors: ledger.errors, message: `🚫 Module ledger of ${moduleId} failed verification; nothing was recovered:\n  ${ledger.errors.join("\n  ")}` };
+  }
+  if (!ledger.best) {
+    return {
+      kind: "error",
+      message: `🚫 No checkpoint of module ${moduleId} in ${ledgerRef(moduleId)} or ${remoteLedgerRef(moduleId)}. Fetch the ledger first: ${ledgerFetchCommand()}. ` +
+        "A deleted branch whose commits were never merged, tagged, checkpointed or otherwise reachable from a remote ref cannot be recovered by git.",
+    };
+  }
+  const best = ledger.best;
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  const global = loaded.parts.get("global")!.state;
+  if (best.checkpoint.lineage !== global.workflow_id) {
+    return { kind: "error", message: `🚫 Ledger checkpoint ${best.commit.slice(0, 12)} of ${moduleId} belongs to lineage ${best.checkpoint.lineage}, not the active ${global.workflow_id}; carry it over with orchestrate state adopt --module ${moduleId} --from ${best.commit} --user-input Approve --reason "<why>" if it is still wanted.` };
+  }
+  let contracts: ReturnType<typeof moduleContractSnapshot>;
+  try {
+    contracts = moduleContractSnapshot(PROJECT_ROOT, moduleId);
+  } catch (error) {
+    return { kind: "error", message: `🚫 Cannot verify module ${moduleId} against the current checkout: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (contracts.manifest_entry_sha256 !== best.checkpoint.contracts.manifest_entry_sha256) {
+    return { kind: "error", message: `🚫 Module ${moduleId} in docs/aidlc/ideation/module-manifest.json differs from the checkpoint ${best.commit.slice(0, 12)}; reconcile the manifest before recovering.` };
+  }
+  if (contracts.digest !== best.checkpoint.contracts.digest) {
+    const recorded = new Map(best.checkpoint.contracts.documents.map((document) => [document.path, document]));
+    const current = new Map(contracts.documents.map((document) => [document.path, document]));
+    const changed = [...new Set([...recorded.keys(), ...current.keys()])].filter((path) => JSON.stringify([recorded.get(path)?.rows, recorded.get(path)?.references]) !== JSON.stringify([current.get(path)?.rows, current.get(path)?.references]));
+    return { kind: "error", message: `🚫 The contract view of ${moduleId} in the current checkout differs from checkpoint ${best.commit.slice(0, 12)} (${changed.join(", ") || "contract documents"}); restore or reconcile the shared contracts before recovering.` };
+  }
+  const ref = moduleRef(moduleId);
+  const statePath = lightStatePath(PROJECT_ROOT, ref);
+  const auditPath = lightAuditPath(PROJECT_ROOT, ref);
+  const localText = existsSync(statePath) ? readFileSync(statePath) : null;
+  let local: WorkflowState | null = null;
+  if (localText) {
+    try {
+      local = parseLightWorkflowState(localText.toString("utf8").replace(/\r\n/g, "\n"));
+    } catch {
+      local = null;
+    }
+  }
+  const recovered = best.state;
+  if (local && localText && localText.equals(best.state_text)) {
+    return { kind: "print", module_id: moduleId, recovered: false, checkpoint: best.commit, message: `✅ Module ${moduleId} is already at the ledger head ${best.commit.slice(0, 12)} (revision ${recovered.revision}); nothing to recover.` };
+  }
+  const conflict = localText
+    ? (!local ? "the local state is unreadable"
+      : local.workflow_id !== recovered.workflow_id ? `the local state is workflow ${local.workflow_id}, the checkpoint ${recovered.workflow_id}`
+        : local.revision > recovered.revision ? `the local state revision ${local.revision} is newer than the checkpoint revision ${recovered.revision}`
+          : local.revision === recovered.revision ? `the local state differs from the checkpoint at the same revision ${local.revision}`
+            : `the local state revision ${local.revision} is older than the checkpoint revision ${recovered.revision}`)
+    : "";
+  if (conflict) {
+    if (flags["user-input"] !== "Approve") return { kind: "error", message: `🚫 ${conflict}. Overwriting a local module state needs the user's explicit approval: orchestrate state recover --module ${moduleId} --user-input Approve --reason "<why>" (the local files are backed up first).` };
+    if (!flags.reason || flags.reason === "true" || !flags.reason.trim()) return { kind: "error", message: "--reason is required when an approved recovery overwrites a local module state." };
+  }
+  const otherWorkflow = [...loaded.parts.entries()].find(([key, part]) => key !== workflowRefKey(ref) && part.state.workflow_id === recovered.workflow_id);
+  if (otherWorkflow) return { kind: "error", message: `🚫 Workflow ID ${recovered.workflow_id} of the checkpoint is already used by ${otherWorkflow[0]} in the active layout.` };
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backups: string[] = [];
+  const writeAtomic = (path: string, content: Buffer): void => {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
+    writeFileSync(temporary, content, { flag: "wx", mode: 0o600 });
+    renameSync(temporary, path);
+  };
+  try {
+    for (const path of [statePath, auditPath]) {
+      if (conflict && existsSync(path)) {
+        const backup = `${path}.bak-${stamp}`;
+        writeFileSync(backup, readFileSync(path), { flag: "wx", mode: 0o600 });
+        backups.push(relative(PROJECT_ROOT, backup).replace(/\\/g, "/"));
+      }
+    }
+    writeAtomic(statePath, best.state_text);
+    if (best.audit_text) writeAtomic(auditPath, best.audit_text);
+    updateRegistry(PROJECT_ROOT, (current) => {
+      const registry = current as WorkflowRegistry;
+      const row = { module_id: moduleId, workflow_id: recovered.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, ref), status: recovered.status, current_stage: "-", inception_done: false, construction_done: false, owner: "-" };
+      const existing = registry.modules.find((item) => item.module_id === moduleId);
+      if (existing && existing.workflow_id === recovered.workflow_id) return registry;
+      return { ...registry, modules: [...registry.modules.filter((item) => item.module_id !== moduleId), row] };
+    });
+    // The ledger head is now the local state; keep the local ledger ref on it.
+    if (ledger.heads.local !== best.commit) checkpointModule(PROJECT_ROOT, moduleId, "state recover");
+  } catch (error) {
+    return { kind: "error", message: `state recover failed while writing ${moduleId}: ${error instanceof Error ? error.message : String(error)}${backups.length ? `; backups: ${backups.join(", ")}` : ""}` };
+  }
+  const fields = {
+    Module: moduleId,
+    "Module Workflow ID": recovered.workflow_id,
+    "Checkpoint Commit": best.commit,
+    "Checkpoint Digest": best.checkpoint.digest,
+    Revision: String(recovered.revision),
+    "Previous Local Revision": local ? String(local.revision) : "-",
+    Approval: conflict ? "Approve" : "-",
+    Reason: flags.reason && flags.reason !== "true" ? flags.reason.trim() : "-",
+  };
+  try {
+    appendAuditEvent(PROJECT_ROOT, ref, "STATE_RECOVERED", fields);
+    appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "STATE_RECOVERED", fields);
+  } catch (error) {
+    return { kind: "error", message: `Module ${moduleId} was recovered, but the STATE_RECOVERED audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。` };
+  }
+  const check = await handleUpgrade(["--dry-run", "--module", moduleId]);
+  const missing = Array.isArray(check.pending) ? check.pending as { instance_id: string; missing_sensors: string[] }[] : [];
+  const unpublished = ledger.heads.remote !== best.commit;
+  return {
+    kind: "print",
+    workflow_id: global.workflow_id,
+    module_id: moduleId,
+    recovered: true,
+    checkpoint: best.commit,
+    revision: recovered.revision,
+    previous_local_revision: local ? local.revision : null,
+    backups,
+    evidence_missing: missing,
+    message: `✅ Module ${moduleId} recovered from ledger checkpoint ${best.commit.slice(0, 12)} (revision ${recovered.revision}, chain of ${best.chain_length}).` +
+      (backups.length ? ` Local files backed up: ${backups.join(", ")}.` : "") +
+      (missing.length
+        ? ` ⚠️ ${missing.length} completed instance(s) lack evidence in this checkout: ${missing.map((item) => `${item.instance_id} (${item.missing_sensors.join(", ")})`).join("; ")}. Re-verify only those with orchestrate upgrade --dry-run --module ${moduleId} and the regular report gates.`
+        : " Every completed instance still has its evidence; next/report re-verify the gates.") +
+      (unpublished ? ` ⚠️ The checkpoint is not on the remote; publish it: ${ledgerPublishCommand(moduleId)}.` : "") +
+      " Commit aidlc/active so the team shares the recovered state.",
+  };
 }
 
 /**
@@ -7131,6 +7324,7 @@ async function main() {
       break;
     case "report":
       directive = await handleReport(rest);
+      directive = withModuleCheckpoint(directive, rest);
       break;
     case "park":
       directive = await handlePark(rest);

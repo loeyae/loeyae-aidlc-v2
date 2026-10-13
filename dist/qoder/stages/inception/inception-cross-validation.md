@@ -204,7 +204,7 @@ requires: [user-stories, ui-mock-generation, ui-figma-generation]
 `ui-page-planning` 已生成不可覆盖的 `ui-generation-lock.json`，其中封存生成开始时 PRD、requirements、user stories、page-plan、设计决定（如存在）的文件 SHA-256、Git blob、机器 ID 分段摘要与 upstream commit。最终验收前先更新本地 remote-tracking ref（通常执行 `git fetch origin main`；checker 本身不发起网络请求），再读取**实际正文**完成差异分类。
 
 - 对比对象：正式 PRD、requirements、user stories、STORY/AC 正文、页面清单、已确认设计决定；
-- `loeyae-aidlc ui accept` 同时比较锁定内容与当前 worktree，并比较锁定 upstream commit 与当前 `origin/main`；禁止只比较文件时间或数量；
+- `loeyae-aidlc ui accept` 同时比较锁定内容与当前 worktree，并比较锁定源在锁定 upstream commit 与当前 `origin/main` 上的实际正文；禁止只比较文件时间或数量。仓库级指针本身前进（其他模块合入）不算变化（MARS-159）；
 - 任何发生变化却无法归入 REQ/FR、US/STORY、AC 或 PAGE ID 的正文路径一律阻断；
 - 变化 ID 必须全部映射到锁定/当前 page-plan 的页面。任一新增或删除 ID 未映射即 fail-closed，不得当作“无需同步”；
 - 影响矩阵只允许同步 `affected_pages`，未受影响页面不得重生；报告中的 `synchronized_pages` 必须与机械重算结果完全一致。
@@ -224,7 +224,7 @@ loeyae-aidlc ui accept --module {module-id} --route <html-mock|figma-create|figm
   --review-report docs/aidlc/modules/{module-id}/inception/cross-validation-report.md
 ```
 
-该命令确定性生成 `ui-generation-acceptance.json`；文件已存在时拒绝再次创建，从命令层阻止第二次全量验收登记。`orchestrate report --stage cross-validation` 触发的受控 `inception-consistency` 会重新计算 upstream commit、所有文件/ID digest、影响矩阵和报告段；任一漂移、漏报或伪造都会阻断。
+该命令确定性生成 `ui-generation-acceptance.json`；文件已存在时拒绝再次创建，从命令层阻止第二次全量验收登记。`orchestrate report --stage cross-validation` 触发的受控 `inception-consistency` 会按登记的 upstream commit 重新计算所有文件/ID digest、影响矩阵和报告段，并只把锁定源在 upstream 上的真实正文漂移判为失败；任一漂移、漏报或伪造都会阻断。验收后锁定源发生可映射变化时，用 `loeyae-aidlc ui reverify` 追加定向复验 checkpoint；仅指针前进可用 `ui refresh` 记录（见 `common-ui-generation-flow.md`「验收后的新鲜度」）。
 
 **输入文件**：
 - 页面计划：当前模块 `docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md`

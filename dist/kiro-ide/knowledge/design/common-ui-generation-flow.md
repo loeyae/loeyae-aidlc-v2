@@ -138,7 +138,34 @@ loeyae-aidlc ui accept --module {module-id} --route <route> \
   --review-report docs/aidlc/modules/{module-id}/inception/cross-validation-report.md
 ```
 
-命令生成 `ui-generation-acceptance.json`。随后 `orchestrate report --stage cross-validation` 会由受控 producer 重新计算全部内容；upstream 在登记后再次推进、worktree 文件变化、影响矩阵漏报或报告被改写都会使门禁失败。
+命令生成 `ui-generation-acceptance.json`。随后 `orchestrate report --stage cross-validation` 会由受控 producer 重新计算全部内容；worktree 文件变化、锁定源在 upstream 上被他人改动、影响矩阵漏报或报告被改写都会使门禁失败。
+
+### 验收后的新鲜度（MARS-159）
+
+仓库级 upstream 指针（如 `origin/main`）只作审计观察，不再参与全等比较：其他模块合入 main、但本模块锁定源与页面映射未变时，`ui-page-planning` 与 `inception-consistency` 照常通过，**不需要也不允许**第二次 `ui accept`。本模块分支合入 main（upstream blob 收敛到已验收内容）同样不算漂移。
+
+验收后的变化只能通过 Core 受控命令追加到 `ui-generation-checkpoints.json`（append-only，按 digest 链接，禁止手改）：
+
+```bash
+# 锁定源未变、只有 upstream 指针前进：追加 freshness checkpoint（可选，审计用）
+loeyae-aidlc ui refresh --module {module-id} --route <route>
+
+# 锁定源有可映射变化：先在报告追加一个复验段，再追加 targeted reverification checkpoint
+loeyae-aidlc ui reverify --module {module-id} --route <route> \
+  --review-report docs/aidlc/modules/{module-id}/inception/cross-validation-report.md
+```
+
+`ui reverify` 要求报告中恰好有一个新的复验段，且 `pages` 与影响矩阵的 `affected_pages` **完全相等**（未受影响页面不重生、不重审）：
+
+```markdown
+## UI freshness reverification UIF-001
+- run_id: UIF-001
+- completed_at: <ISO-8601>
+- result: passed
+- pages: PAGE-002
+```
+
+变化无 ID 分类、ID 未映射、复验页不匹配、源不可读、checkpoint/acceptance 被手改（digest 不符）或复验段事后被改写时一律 fail-closed；当前源已变而没有匹配 checkpoint 时门禁失败。
 
 ---
 
@@ -214,10 +241,11 @@ UI 设计阶段**默认自动执行**（对应 stage-graph `approval: notify`，
 
 ## 受控登记文件
 
-机器闭环由两份按模块隔离的 canonical JSON 承担，不再依赖人工填写 Markdown hash：
+机器闭环由按模块隔离的 canonical JSON 承担，不再依赖人工填写 Markdown hash：
 
 1. `ui-generation-lock.json`：阶段 1 由 `loeyae-aidlc ui lock` 生成，锁定 upstream、文件/ID digest 和页面映射；文件不可覆盖。
 2. `ui-generation-acceptance.json`：阶段 5–7 完成后由 `loeyae-aidlc ui accept` 生成，记录当前 upstream、实际变化、影响矩阵、同步页面、唯一 full acceptance 和定向复验；文件存在时拒绝第二次生成。
+3. `ui-generation-checkpoints.json`：验收后由 `ui refresh` / `ui reverify` 追加的 freshness / targeted reverification checkpoint 链（每条记录前一 digest、baseline/current 源快照、影响矩阵、复验段摘要）；只允许 Core 原子写入。
 
 `cross-validation-report.md` 是人工可读审查记录，同时必须包含以下机器段：
 

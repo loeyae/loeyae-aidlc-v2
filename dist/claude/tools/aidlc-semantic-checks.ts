@@ -3422,6 +3422,8 @@ function inceptionConsistency(): Record<string, unknown> {
     ui_upstream_ref: uiGovernance?.upstream_ref || null,
     ui_baseline_upstream_commit: uiGovernance?.baseline_upstream_commit || null,
     ui_current_upstream_commit: uiGovernance?.current_upstream_commit || null,
+    ui_freshness_checkpoints: uiGovernance?.freshness_checkpoints || 0,
+    ui_freshness_checkpoint_digest: uiGovernance?.checkpoint_head_digest || null,
     ui_changed_paths: uiGovernance?.changed_paths || [],
     ui_affected_pages: uiGovernance?.affected_pages || [],
     ui_impact_unmapped: 0,

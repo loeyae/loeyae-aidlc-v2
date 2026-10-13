@@ -111,6 +111,50 @@ export interface UiGenerationAcceptance {
   final_status: "passed";
 }
 
+/**
+ * Effective UI source state after the single full acceptance (MARS-159). The original
+ * acceptance stays immutable; later freshness evidence is appended as controlled checkpoints.
+ */
+export interface UiFreshnessState {
+  upstream_commit: string;
+  sources: UiSourceSnapshot[];
+  pages: UiPageRef[];
+}
+
+export interface UiCheckpointReview {
+  report_path: string;
+  run_id: string;
+  completed_at: string;
+  pages: string[];
+  section_sha256: string;
+}
+
+export interface UiFreshnessCheckpoint {
+  sequence: number;
+  type: "freshness-refresh" | "targeted-reverification";
+  created_at: string;
+  previous_digest: string;
+  upstream_ref: string;
+  worktree_commit: string;
+  baseline: UiFreshnessState;
+  current: UiFreshnessState;
+  changed_paths: string[];
+  unclassified_changed_paths: string[];
+  changes: UiChangeSet;
+  impact_matrix: UiImpactMatrix;
+  review: UiCheckpointReview | null;
+  digest: string;
+}
+
+export interface UiGenerationCheckpoints {
+  version: "1";
+  kind: "aidlc.ui-generation-checkpoints";
+  module_id: string;
+  route: UiDesignRoute;
+  acceptance_digest: string;
+  checkpoints: UiFreshnessCheckpoint[];
+}
+
 const ID_PATTERN = /\b(?:REQ|FR|US|STORY|AC|PAGE)-[A-Z0-9][A-Z0-9_-]*\b/gi;
 const REQUIREMENT_PATTERN = /\b(?:REQ|FR)-[A-Z0-9][A-Z0-9_-]*\b/gi;
 const STORY_PATTERN = /\b(?:US|STORY)-[A-Z0-9][A-Z0-9_-]*\b/gi;
@@ -237,6 +281,21 @@ function isGitAncestor(projectRoot: string, ancestor: string, descendant: string
   const result = runSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], { cwd: projectRoot, encoding: "utf8", shell: false });
   if (result.error) fail(`verify UI lock ancestry: git is unavailable (${result.error.message})`);
   return result.status === 0;
+}
+
+function gitBlobAt(projectRoot: string, commit: string, path: string): string | null {
+  if (!GIT_OBJECT_PATTERN.test(commit)) fail(`invalid git commit: ${commit}`);
+  const label = normalizedPath(path);
+  if (label.includes(":")) fail(`source path cannot contain a colon: ${label}`);
+  const blob = gitOutput(projectRoot, ["rev-parse", "--verify", "--quiet", `${commit}:${label}`], `resolve ${label} at ${commit}`, true);
+  return blob && GIT_OBJECT_PATTERN.test(blob.trim()) ? blob.trim() : null;
+}
+
+function requireCommitObject(projectRoot: string, commit: string, field: string): string {
+  if (!GIT_OBJECT_PATTERN.test(commit)) fail(`${field} must be a git commit id`);
+  const resolved = gitOutput(projectRoot, ["rev-parse", "--verify", "--quiet", `${commit}^{commit}`], field, true);
+  if (!resolved || resolved.trim() !== commit) fail(`${field} ${commit} is not available locally; fetch the upstream history before verifying UI freshness`);
+  return commit;
 }
 
 function gitContentAt(projectRoot: string, commit: string, path: string): string | null {
@@ -592,21 +651,37 @@ export function createUiGenerationLock(projectRoot: string, options: CreateUiLoc
   return lock;
 }
 
-export function verifyUiGenerationLockAtBaseline(projectRoot: string, moduleId: string, route: UiDesignRoute, expectedPageIds: string[]): { path: string; digest: string; upstream_ref: string; upstream_commit: string; baseline_mode: string } {
+export function verifyUiGenerationLockAtBaseline(projectRoot: string, moduleId: string, route: UiDesignRoute, expectedPageIds: string[]): { path: string; digest: string; upstream_ref: string; upstream_commit: string; baseline_mode: string; observed_upstream_commit: string; superseded_by_acceptance: boolean } {
   const root = realpathSync(resolve(projectRoot));
   const loaded = readUiGenerationLock(root, moduleId);
   if (loaded.lock.route !== route) fail(`UI generation lock.route must match selected route ${route}`);
-  const currentUpstream = resolveGitCommit(root, loaded.lock.upstream.ref);
-  if (currentUpstream !== loaded.lock.upstream.commit) fail(`UI generation lock is stale before generation: ${loaded.lock.upstream.ref} advanced from ${loaded.lock.upstream.commit} to ${currentUpstream}; recreate the lock before generating UI`);
   const currentCommit = resolveGitCommit(root, "HEAD");
   if (!isGitAncestor(root, loaded.lock.worktree_commit, currentCommit)) fail(`UI generation lock.worktree_commit ${loaded.lock.worktree_commit} is not an ancestor of current HEAD ${currentCommit}`);
+  const base = { path: loaded.path, digest: loaded.digest, upstream_ref: loaded.lock.upstream.ref, upstream_commit: loaded.lock.upstream.commit, baseline_mode: loaded.lock.baseline_mode };
   const currentSources = loaded.lock.sources.map((source) => snapshotUiSource(root, source.kind, source.path));
-  if (!sameValue(currentSources, loaded.lock.sources)) fail("UI generation lock source hashes do not match the current PRD/requirements/stories/page-plan/design decisions");
   const plan = loaded.lock.sources.find((source) => source.kind === "page-plan")!;
   const currentPages = readUiPagePlan(root, plan.path);
-  if (!sameValue(currentPages, loaded.lock.pages)) fail("UI generation lock page mapping does not match the current page-plan");
+  if (!sameValue(currentSources, loaded.lock.sources) || !sameValue(currentPages, loaded.lock.pages)) {
+    // After the single full acceptance, legitimate source changes are carried by the controlled
+    // freshness/reverification chain. Without an acceptance record the lock baseline is authoritative.
+    if (!existsSync(resolve(root, uiGenerationAcceptancePath(moduleId)))) {
+      if (!sameValue(currentSources, loaded.lock.sources)) fail("UI generation lock source hashes do not match the current PRD/requirements/stories/page-plan/design decisions");
+      fail("UI generation lock page mapping does not match the current page-plan");
+    }
+    const accepted = verifyUiGenerationAcceptance(root, moduleId, route, expectedPageIds);
+    return { ...base, observed_upstream_commit: accepted.observed_upstream_commit, superseded_by_acceptance: true };
+  }
   if (!sameStrings(expectedPageIds, currentPages.map((page) => page.page_id))) fail("UI generation lock pages do not match the page-plan sensor result");
-  return { path: loaded.path, digest: loaded.digest, upstream_ref: loaded.lock.upstream.ref, upstream_commit: loaded.lock.upstream.commit, baseline_mode: loaded.lock.baseline_mode };
+  // The repository-level upstream pointer is an audit observation only: unrelated modules
+  // advancing origin/main must not invalidate the lock. Only real upstream content drift of
+  // the locked sources (that differs from the locked local content) is stale.
+  const observedUpstream = resolveGitCommit(root, loaded.lock.upstream.ref);
+  requireCommitObject(root, loaded.lock.upstream.commit, "UI generation lock.upstream.commit");
+  const drift = upstreamDrift(root, loaded.lock.sources, loaded.lock.upstream.commit, observedUpstream, currentSources);
+  if (drift.paths.length > 0) {
+    fail(`UI generation lock is stale before generation: ${loaded.lock.upstream.ref} changed locked UI sources (${drift.paths.join(", ")}) between ${loaded.lock.upstream.commit} and ${observedUpstream}; resolve the upstream change before generating UI`);
+  }
+  return { ...base, observed_upstream_commit: observedUpstream, superseded_by_acceptance: false };
 }
 
 function aggregateIdentifierDigests(sources: UiSourceSnapshot[]): Record<string, string> {
@@ -671,6 +746,26 @@ function upstreamSnapshots(projectRoot: string, sources: UiSourceSnapshot[], com
     if (content !== null) snapshots.push(snapshotFromContent(source.kind, source.path, content, sha256(content)));
   }
   return snapshots;
+}
+
+/**
+ * Upstream content drift of locked UI sources between two upstream commits. Paths whose
+ * upstream blob converged onto the current local content (e.g. this module's own branch was
+ * merged) are not drift: they carry nothing the local snapshot does not already contain.
+ */
+function upstreamDrift(projectRoot: string, reference: UiSourceSnapshot[], fromCommit: string, toCommit: string, local: UiSourceSnapshot[]): { paths: string[]; ids: string[]; unclassified: string[] } {
+  if (fromCommit === toCommit) return { paths: [], ids: [], unclassified: [] };
+  const before = upstreamSnapshots(projectRoot, reference, fromCommit);
+  const after = upstreamSnapshots(projectRoot, reference, toCommit);
+  const raw = sourceChanges(before, after);
+  const localByPath = new Map(local.map((source) => [source.path, source]));
+  const drifted = new Set(raw.paths.filter((path) => {
+    const upstreamBlob = gitBlobAt(projectRoot, toCommit, path);
+    const localSource = localByPath.get(path);
+    return !(upstreamBlob && localSource && upstreamBlob === localSource.git_blob);
+  }));
+  if (drifted.size === 0) return { paths: [], ids: [], unclassified: [] };
+  return sourceChanges(before.filter((source) => drifted.has(source.path)), after.filter((source) => drifted.has(source.path)));
 }
 
 function freshnessDiff(projectRoot: string, lock: UiGenerationLock, currentSources: UiSourceSnapshot[], currentUpstreamCommit: string): { changedPaths: string[]; unclassifiedPaths: string[]; changes: UiChangeSet } {
@@ -777,11 +872,15 @@ function parseReviewReport(projectRoot: string, reportPath: string, expectedPage
   };
 }
 
-function buildExpectedAcceptance(projectRoot: string, moduleId: string, route: UiDesignRoute, reportPath: string): UiGenerationAcceptance {
+function buildExpectedAcceptance(projectRoot: string, moduleId: string, route: UiDesignRoute, reportPath: string, recordedUpstreamCommit?: string): UiGenerationAcceptance {
   const root = realpathSync(resolve(projectRoot));
   const loaded = readUiGenerationLock(root, moduleId);
   if (loaded.lock.route !== route) fail(`UI generation lock.route must match selected route ${route}`);
-  const currentUpstream = resolveGitCommit(root, loaded.lock.upstream.ref);
+  // At `ui accept` the live upstream is recorded. Verification recomputes against the recorded
+  // commit so a repository-level pointer advance alone never invalidates the acceptance.
+  const currentUpstream = recordedUpstreamCommit
+    ? requireCommitObject(root, recordedUpstreamCommit, "UI generation acceptance.freshness.current_upstream_commit")
+    : resolveGitCommit(root, loaded.lock.upstream.ref);
   const currentSources = loaded.lock.sources.map((source) => snapshotUiSource(root, source.kind, source.path));
   const diff = freshnessDiff(root, loaded.lock, currentSources, currentUpstream);
   if (diff.unclassifiedPaths.length > 0) {
@@ -858,24 +957,12 @@ function parseAcceptance(raw: unknown): UiGenerationAcceptance {
   return value as unknown as UiGenerationAcceptance;
 }
 
-export function verifyUiGenerationAcceptance(projectRoot: string, moduleId: string, route: UiDesignRoute, expectedPageIds: string[]): {
-  lock_path: string;
-  lock_digest: string;
-  acceptance_path: string;
-  acceptance_digest: string;
-  upstream_ref: string;
-  baseline_upstream_commit: string;
-  current_upstream_commit: string;
-  changed_paths: string[];
-  affected_pages: string[];
-  full_acceptance_runs: 1;
-  targeted_reverification_runs: number;
-} {
-  const root = realpathSync(resolve(projectRoot));
-  const loadedLock = readUiGenerationLock(root, moduleId);
-  if (loadedLock.lock.route !== route) fail(`UI generation lock.route must match selected route ${route}`);
-  const acceptanceLabel = uiGenerationAcceptancePath(moduleId);
-  const file = safeProjectFile(root, acceptanceLabel, "UI generation acceptance");
+export function uiGenerationCheckpointsPath(moduleId: string): string {
+  return uiGenerationAcceptancePath(moduleId).replace(/ui-generation-acceptance\.json$/, "ui-generation-checkpoints.json");
+}
+
+function readAcceptanceFile(root: string, moduleId: string, route: UiDesignRoute): { acceptance: UiGenerationAcceptance; path: string; digest: string } {
+  const file = safeProjectFile(root, uiGenerationAcceptancePath(moduleId), "UI generation acceptance");
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(file.absolute, "utf8").replace(/^\uFEFF/, ""));
@@ -885,24 +972,331 @@ export function verifyUiGenerationAcceptance(projectRoot: string, moduleId: stri
   const acceptance = parseAcceptance(raw);
   if (acceptance.module_id !== moduleId) fail(`UI generation acceptance.module_id must be ${moduleId}`);
   if (acceptance.route !== route) fail(`UI generation acceptance.route must match selected route ${route}`);
-  const expected = buildExpectedAcceptance(root, moduleId, route, acceptance.full_acceptance.report_path);
-  if (!sameValue(acceptance, expected)) fail("UI generation acceptance does not match current source revisions, impact matrix, or review report; rerun the controlled 'ui accept' command after resolving drift");
-  const currentPageSource = expected.freshness.current_sources.find((source) => source.kind === "page-plan")!;
-  const currentPages = readUiPagePlan(root, currentPageSource.path).map((page) => page.page_id);
-  if (!sameStrings(currentPages, expectedPageIds)) fail("UI acceptance pages do not match the selected design manifest/page plan");
+  const freshness = acceptance.freshness as unknown as Record<string, unknown>;
+  requireString(freshness.current_upstream_commit, "UI generation acceptance.freshness.current_upstream_commit");
+  requireArray(freshness.current_sources, "UI generation acceptance.freshness.current_sources");
+  return { acceptance, path: file.relative, digest: sha256(canonicalJson(acceptance)) };
+}
+
+function checkpointDigest(checkpoint: Omit<UiFreshnessCheckpoint, "digest"> | UiFreshnessCheckpoint): string {
+  const { digest: _digest, ...body } = checkpoint as UiFreshnessCheckpoint;
+  return sha256(canonicalJson(body));
+}
+
+function parseFreshnessState(raw: unknown, field: string): UiFreshnessState {
+  const value = requireObject(raw, field);
+  const upstream = requireString(value.upstream_commit, `${field}.upstream_commit`);
+  if (!GIT_OBJECT_PATTERN.test(upstream)) fail(`${field}.upstream_commit must be a git commit id`);
+  const sources = requireArray(value.sources, `${field}.sources`).map((source, index) => validateSourceSnapshot(source, `${field}.sources[${index}]`));
+  const pages = pageRefsFromUnknown(value.pages, `${field}.pages`);
+  return { upstream_commit: upstream, sources, pages };
+}
+
+function parseCheckpoints(raw: unknown, moduleId: string, route: UiDesignRoute): UiGenerationCheckpoints {
+  const value = requireObject(raw, "UI generation checkpoints");
+  if (value.version !== "1" || value.kind !== "aidlc.ui-generation-checkpoints") fail("UI generation checkpoints has an unsupported version or kind");
+  if (value.module_id !== moduleId) fail(`UI generation checkpoints.module_id must be ${moduleId}`);
+  if (validateRoute(value.route, "UI generation checkpoints.route") !== route) fail(`UI generation checkpoints.route must match selected route ${route}`);
+  const acceptanceDigest = requireString(value.acceptance_digest, "UI generation checkpoints.acceptance_digest");
+  if (!SHA256_PATTERN.test(acceptanceDigest)) fail("UI generation checkpoints.acceptance_digest must be SHA-256");
+  const checkpoints = requireArray(value.checkpoints, "UI generation checkpoints.checkpoints").map((entry, index) => {
+    const field = `UI generation checkpoints.checkpoints[${index}]`;
+    const cp = requireObject(entry, field);
+    const type = requireString(cp.type, `${field}.type`);
+    if (type !== "freshness-refresh" && type !== "targeted-reverification") fail(`${field}.type is unsupported: ${type}`);
+    for (const name of ["previous_digest", "digest"]) {
+      if (!SHA256_PATTERN.test(requireString(cp[name], `${field}.${name}`))) fail(`${field}.${name} must be SHA-256`);
+    }
+    if (cp.sequence !== index + 1) fail(`${field}.sequence must be ${index + 1}`);
+    requireIso(cp.created_at, `${field}.created_at`);
+    requireString(cp.upstream_ref, `${field}.upstream_ref`);
+    if (!GIT_OBJECT_PATTERN.test(requireString(cp.worktree_commit, `${field}.worktree_commit`))) fail(`${field}.worktree_commit must be a git commit id`);
+    parseFreshnessState(cp.baseline, `${field}.baseline`);
+    parseFreshnessState(cp.current, `${field}.current`);
+    requireArray(cp.changed_paths, `${field}.changed_paths`);
+    requireArray(cp.unclassified_changed_paths, `${field}.unclassified_changed_paths`);
+    requireObject(cp.changes, `${field}.changes`);
+    requireObject(cp.impact_matrix, `${field}.impact_matrix`);
+    if (type === "targeted-reverification") {
+      const review = requireObject(cp.review, `${field}.review`);
+      requireString(review.report_path, `${field}.review.report_path`);
+      requireString(review.run_id, `${field}.review.run_id`);
+      requireIso(review.completed_at, `${field}.review.completed_at`);
+      requireArray(review.pages, `${field}.review.pages`);
+      if (!SHA256_PATTERN.test(requireString(review.section_sha256, `${field}.review.section_sha256`))) fail(`${field}.review.section_sha256 must be SHA-256`);
+    } else if (cp.review !== null) {
+      fail(`${field}.review must be null for a freshness-refresh checkpoint`);
+    }
+    return cp as unknown as UiFreshnessCheckpoint;
+  });
+  return { version: "1", kind: "aidlc.ui-generation-checkpoints", module_id: moduleId, route, acceptance_digest: acceptanceDigest, checkpoints };
+}
+
+function readCheckpointsFile(root: string, moduleId: string, route: UiDesignRoute): UiGenerationCheckpoints | null {
+  const label = uiGenerationCheckpointsPath(moduleId);
+  if (!existsSync(resolve(root, label))) return null;
+  const file = safeProjectFile(root, label, "UI generation checkpoints");
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(file.absolute, "utf8").replace(/^\uFEFF/, ""));
+  } catch (error) {
+    fail(`UI generation checkpoints is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return parseCheckpoints(raw, moduleId, route);
+}
+
+/** Section `## UI freshness reverification <run_id>` of a review report; distinct from the full-acceptance targeted runs. */
+function freshnessReverificationSections(root: string, reportPath: string): Array<{ report_path: string; run_id: string; completed_at: string; result: string; pages: string[]; section_sha256: string }> {
+  const reportFile = safeProjectFile(root, reportPath, "UI freshness reverification report");
+  const content = readFileSync(reportFile.absolute, "utf8");
+  return markdownSections(content, /^UI freshness reverification(?:\s+.+)?$/i).map((section, index) => ({
+    report_path: reportFile.relative,
+    run_id: requireString(sectionField(section, "run_id"), `UI freshness reverification[${index}].run_id`),
+    completed_at: requireIso(sectionField(section, "completed_at"), `UI freshness reverification[${index}].completed_at`),
+    result: requireString(sectionField(section, "result"), `UI freshness reverification[${index}].result`),
+    pages: listField(section, "pages"),
+    section_sha256: sha256(section),
+  }));
+}
+
+function acceptanceState(acceptance: UiGenerationAcceptance, pages: UiPageRef[]): UiFreshnessState {
+  return { upstream_commit: acceptance.freshness.current_upstream_commit, sources: acceptance.freshness.current_sources, pages };
+}
+
+/** Deterministic freshness delta between a recorded state and a newer state. */
+function computeFreshnessDelta(root: string, lock: UiGenerationLock, baseline: UiFreshnessState, current: UiFreshnessState): {
+  changed_paths: string[];
+  unclassified_changed_paths: string[];
+  changes: UiChangeSet;
+  impact_matrix: UiImpactMatrix;
+} {
+  requireCommitObject(root, baseline.upstream_commit, "UI freshness baseline upstream commit");
+  requireCommitObject(root, current.upstream_commit, "UI freshness current upstream commit");
+  const local = sourceChanges(baseline.sources, current.sources);
+  const upstream = upstreamDrift(root, lock.sources, baseline.upstream_commit, current.upstream_commit, current.sources);
+  const changes = mergeChanges(classifyIds(local.ids), classifyIds(upstream.ids));
+  return {
+    changed_paths: [...new Set([...local.paths, ...upstream.paths])].sort(),
+    unclassified_changed_paths: [...new Set([...local.unclassified, ...upstream.unclassified])].sort(),
+    changes,
+    impact_matrix: buildUiImpactMatrix(mergePageRefs(baseline.pages, current.pages), changes),
+  };
+}
+
+function liveFreshnessState(root: string, lock: UiGenerationLock): { state: UiFreshnessState; observed: string } {
+  const observed = resolveGitCommit(root, lock.upstream.ref);
+  const sources = lock.sources.map((source) => snapshotUiSource(root, source.kind, source.path));
+  const plan = sources.find((source) => source.kind === "page-plan")!;
+  return { state: { upstream_commit: observed, sources, pages: readUiPagePlan(root, plan.path) }, observed };
+}
+
+interface VerifiedChain {
+  lock: UiGenerationLock;
+  acceptance: UiGenerationAcceptance;
+  acceptancePath: string;
+  acceptanceDigest: string;
+  checkpoints: UiGenerationCheckpoints | null;
+  effective: UiFreshnessState;
+  headDigest: string;
+  runIds: Set<string>;
+}
+
+/**
+ * Verifies the immutable full acceptance plus the append-only checkpoint chain. Every recorded
+ * delta is recomputed from recorded snapshots and git objects; review sections are re-hashed.
+ */
+function verifyAcceptanceChain(root: string, moduleId: string, route: UiDesignRoute): VerifiedChain {
+  const loadedLock = readUiGenerationLock(root, moduleId);
+  if (loadedLock.lock.route !== route) fail(`UI generation lock.route must match selected route ${route}`);
+  const lock = loadedLock.lock;
+  const { acceptance, path, digest } = readAcceptanceFile(root, moduleId, route);
+  const checkpoints = readCheckpointsFile(root, moduleId, route);
+  const runIds = new Set<string>([acceptance.full_acceptance.run_id, ...(acceptance.targeted_reverifications || []).map((entry) => entry.run_id)]);
+  if (!checkpoints || checkpoints.checkpoints.length === 0) {
+    if (checkpoints && checkpoints.acceptance_digest !== digest) fail("UI generation checkpoints do not belong to the recorded full acceptance");
+    const expected = buildExpectedAcceptance(root, moduleId, route, acceptance.full_acceptance.report_path, acceptance.freshness.current_upstream_commit);
+    if (!sameValue(acceptance, expected)) {
+      fail("UI generation acceptance does not match current source revisions, impact matrix, or review report; a second full acceptance is forbidden — record the change with the controlled 'ui reverify' (sources changed) or 'ui refresh' (pointer only) command");
+    }
+    return { lock, acceptance, acceptancePath: path, acceptanceDigest: digest, checkpoints, effective: acceptanceState(acceptance, readUiPagePlan(root, acceptance.freshness.current_sources.find((source) => source.kind === "page-plan")!.path)), headDigest: digest, runIds };
+  }
+  if (checkpoints.acceptance_digest !== digest) fail("UI generation checkpoints do not belong to the recorded full acceptance (acceptance digest mismatch)");
+  // The original acceptance cannot be recomputed against live inputs once sources legitimately
+  // moved on; verify its recorded deltas and its still-present full acceptance review section.
+  const original = freshnessDiff(root, lock, acceptance.freshness.current_sources, requireCommitObject(root, acceptance.freshness.current_upstream_commit, "UI generation acceptance.freshness.current_upstream_commit"));
+  if (!sameValue(original.changedPaths, [...acceptance.freshness.changed_paths].sort()) || !sameValue(original.changes, acceptance.freshness.changes)) {
+    fail("UI generation acceptance freshness record does not match its recorded source snapshots");
+  }
+  const reportFile = safeProjectFile(root, acceptance.full_acceptance.report_path, "UI acceptance report");
+  const fullSections = markdownSections(readFileSync(reportFile.absolute, "utf8"), /^UI full acceptance$/i);
+  if (fullSections.length !== 1 || sha256(fullSections[0]) !== acceptance.full_acceptance.section_sha256) fail("UI full acceptance review section changed after acceptance");
+  // The acceptance-time page mapping is bound by the page-plan snapshot (verified live when the
+  // chain was first extended) and by the checkpoint digest chain.
+  let previous = acceptanceState(acceptance, parseFreshnessState(checkpoints.checkpoints[0].baseline, "UI generation checkpoint #1.baseline").pages);
+  let previousDigest = digest;
+  for (const [index, checkpoint] of checkpoints.checkpoints.entries()) {
+    const label = `UI generation checkpoint #${index + 1}`;
+    if (checkpoint.previous_digest !== previousDigest) fail(`${label} does not chain to the previous record`);
+    if (checkpointDigest(checkpoint) !== checkpoint.digest) fail(`${label} digest does not match its content (controlled record was modified)`);
+    if (checkpoint.upstream_ref !== lock.upstream.ref) fail(`${label}.upstream_ref must be ${lock.upstream.ref}`);
+    const baseline = parseFreshnessState(checkpoint.baseline, `${label}.baseline`);
+    const current = parseFreshnessState(checkpoint.current, `${label}.current`);
+    if (!sameValue(baseline, previous)) fail(`${label}.baseline does not equal the previous effective state`);
+    const delta = computeFreshnessDelta(root, lock, baseline, current);
+    if (!sameValue(delta.changed_paths, checkpoint.changed_paths) || !sameValue(delta.unclassified_changed_paths, checkpoint.unclassified_changed_paths) || !sameValue(delta.changes, checkpoint.changes) || !sameValue(delta.impact_matrix, checkpoint.impact_matrix)) {
+      fail(`${label} freshness delta does not match its recorded snapshots`);
+    }
+    if (checkpoint.type === "freshness-refresh") {
+      if (delta.changed_paths.length > 0) fail(`${label} is a freshness-refresh but locked UI sources changed`);
+    } else {
+      if (delta.changed_paths.length === 0) fail(`${label} is a targeted-reverification without source changes`);
+      if (delta.unclassified_changed_paths.length > 0 || !delta.impact_matrix.all_changes_mapped) fail(`${label} contains unclassified or unmapped changes`);
+      const review = checkpoint.review!;
+      if (!sameStrings(review.pages, delta.impact_matrix.affected_pages)) fail(`${label}.review.pages must exactly match affected pages`);
+      if (runIds.has(review.run_id)) fail(`${label}.review.run_id ${review.run_id} is reused`);
+      runIds.add(review.run_id);
+      const section = freshnessReverificationSections(root, review.report_path).filter((entry) => entry.run_id === review.run_id);
+      if (section.length !== 1) fail(`${label} review section ${review.run_id} is missing or duplicated in ${review.report_path}`);
+      if (section[0].section_sha256 !== review.section_sha256 || section[0].result !== "passed" || !sameStrings(section[0].pages, review.pages)) {
+        fail(`${label} review section ${review.run_id} changed after the checkpoint was recorded`);
+      }
+    }
+    previous = current;
+    previousDigest = checkpoint.digest;
+  }
+  return { lock, acceptance, acceptancePath: path, acceptanceDigest: digest, checkpoints, effective: previous, headDigest: previousDigest, runIds };
+}
+
+export function verifyUiGenerationAcceptance(projectRoot: string, moduleId: string, route: UiDesignRoute, expectedPageIds: string[]): {
+  lock_path: string;
+  lock_digest: string;
+  acceptance_path: string;
+  acceptance_digest: string;
+  upstream_ref: string;
+  baseline_upstream_commit: string;
+  current_upstream_commit: string;
+  observed_upstream_commit: string;
+  changed_paths: string[];
+  affected_pages: string[];
+  full_acceptance_runs: 1;
+  targeted_reverification_runs: number;
+  freshness_checkpoints: number;
+  checkpoint_head_digest: string;
+} {
+  const root = realpathSync(resolve(projectRoot));
+  const loadedLock = readUiGenerationLock(root, moduleId);
+  const chain = verifyAcceptanceChain(root, moduleId, route);
+  const live = liveFreshnessState(root, chain.lock);
+  if (!sameValue(live.state.sources, chain.effective.sources) || !sameValue(live.state.pages, chain.effective.pages)) {
+    fail("UI generation acceptance does not match current source revisions; record mapped changes with the controlled 'ui reverify' command (a second full acceptance is forbidden)");
+  }
+  // Repository-level pointer advance is audit-only; only content drift of locked sources counts.
+  const drift = upstreamDrift(root, chain.lock.sources, chain.effective.upstream_commit, live.observed, live.state.sources);
+  if (drift.paths.length > 0) {
+    fail(`UI generation acceptance does not match current source revisions: ${chain.lock.upstream.ref} changed locked UI sources (${drift.paths.join(", ")}); run the controlled 'ui reverify' command`);
+  }
+  if (!sameStrings(live.state.pages.map((page) => page.page_id), expectedPageIds)) fail("UI acceptance pages do not match the selected design manifest/page plan");
+  const checkpoints = chain.checkpoints?.checkpoints || [];
   return {
     lock_path: loadedLock.path,
     lock_digest: loadedLock.digest,
-    acceptance_path: file.relative,
-    acceptance_digest: sha256(canonicalJson(acceptance)),
-    upstream_ref: expected.freshness.upstream_ref,
-    baseline_upstream_commit: expected.freshness.baseline_upstream_commit,
-    current_upstream_commit: expected.freshness.current_upstream_commit,
-    changed_paths: expected.freshness.changed_paths,
-    affected_pages: expected.freshness.impact_matrix.affected_pages,
+    acceptance_path: chain.acceptancePath,
+    acceptance_digest: chain.acceptanceDigest,
+    upstream_ref: chain.acceptance.freshness.upstream_ref,
+    baseline_upstream_commit: chain.acceptance.freshness.baseline_upstream_commit,
+    current_upstream_commit: chain.effective.upstream_commit,
+    observed_upstream_commit: live.observed,
+    changed_paths: [...new Set([...chain.acceptance.freshness.changed_paths, ...checkpoints.flatMap((entry) => entry.changed_paths)])].sort(),
+    affected_pages: normalizedIds([...chain.acceptance.freshness.impact_matrix.affected_pages, ...checkpoints.flatMap((entry) => entry.impact_matrix.affected_pages)]),
     full_acceptance_runs: 1,
-    targeted_reverification_runs: expected.targeted_reverifications.length,
+    targeted_reverification_runs: chain.acceptance.targeted_reverifications.length + checkpoints.filter((entry) => entry.type === "targeted-reverification").length,
+    freshness_checkpoints: checkpoints.length,
+    checkpoint_head_digest: chain.headDigest,
   };
+}
+
+export interface UiCheckpointOptions {
+  moduleId: string;
+  route: UiDesignRoute;
+  reportPath?: string;
+  now?: string;
+}
+
+function appendCheckpoint(root: string, chain: VerifiedChain, moduleId: string, route: UiDesignRoute, body: Omit<UiFreshnessCheckpoint, "digest" | "sequence" | "previous_digest">): UiFreshnessCheckpoint {
+  const existing = chain.checkpoints?.checkpoints || [];
+  const withLinks = { ...body, sequence: existing.length + 1, previous_digest: chain.headDigest };
+  const checkpoint: UiFreshnessCheckpoint = { ...withLinks, digest: checkpointDigest(withLinks as UiFreshnessCheckpoint) } as UiFreshnessCheckpoint;
+  const file: UiGenerationCheckpoints = {
+    version: "1",
+    kind: "aidlc.ui-generation-checkpoints",
+    module_id: moduleId,
+    route,
+    acceptance_digest: chain.acceptanceDigest,
+    checkpoints: [...existing, checkpoint],
+  };
+  const label = uiGenerationCheckpointsPath(moduleId);
+  atomicJson(safeOutputFile(root, label, label), file);
+  return checkpoint;
+}
+
+/** `ui refresh`: records an upstream pointer advance when the locked UI sources did not change. */
+export function refreshUiGenerationFreshness(projectRoot: string, options: UiCheckpointOptions): { status: "refreshed" | "unchanged"; checkpoint: UiFreshnessCheckpoint | null } {
+  const root = realpathSync(resolve(projectRoot));
+  const route = validateRoute(options.route);
+  const chain = verifyAcceptanceChain(root, options.moduleId, route);
+  const live = liveFreshnessState(root, chain.lock);
+  const current: UiFreshnessState = { ...live.state };
+  const delta = computeFreshnessDelta(root, chain.lock, chain.effective, current);
+  if (delta.changed_paths.length > 0 || !sameValue(chain.effective.pages, current.pages)) {
+    fail(`locked UI sources changed (${delta.changed_paths.join(", ") || "page mapping"}); 'ui refresh' only records pointer-only drift — use 'ui reverify' with a targeted review of the affected pages`);
+  }
+  if (current.upstream_commit === chain.effective.upstream_commit) return { status: "unchanged", checkpoint: null };
+  const checkpoint = appendCheckpoint(root, chain, options.moduleId, route, {
+    type: "freshness-refresh",
+    created_at: requireIso(options.now || new Date().toISOString(), "created_at"),
+    upstream_ref: chain.lock.upstream.ref,
+    worktree_commit: resolveGitCommit(root, "HEAD"),
+    baseline: chain.effective,
+    current,
+    ...delta,
+    review: null,
+  });
+  return { status: "refreshed", checkpoint };
+}
+
+/** `ui reverify`: records a targeted reverification that covers exactly the impact-matrix affected pages. */
+export function reverifyUiGenerationFreshness(projectRoot: string, options: UiCheckpointOptions): UiFreshnessCheckpoint {
+  const root = realpathSync(resolve(projectRoot));
+  const route = validateRoute(options.route);
+  const chain = verifyAcceptanceChain(root, options.moduleId, route);
+  const live = liveFreshnessState(root, chain.lock);
+  const delta = computeFreshnessDelta(root, chain.lock, chain.effective, live.state);
+  if (delta.changed_paths.length === 0) fail("locked UI sources did not change; use 'ui refresh' for pointer-only drift");
+  if (delta.unclassified_changed_paths.length > 0) {
+    fail(`UI freshness found changed source text with no machine ID classification: ${delta.unclassified_changed_paths.join(", ")}; add REQ/FR, US/STORY, AC, or PAGE identifiers before reverification`);
+  }
+  if (!delta.impact_matrix.all_changes_mapped) {
+    const labels = Object.entries(delta.impact_matrix.unmapped_changes).filter(([, values]) => values.length > 0).map(([kind, values]) => `${kind}: ${(values as string[]).join(", ")}`);
+    fail(`UI impact matrix has unmapped requirement changes (${labels.join("; ")}); update page-plan before reverification`);
+  }
+  const reportPath = options.reportPath || chain.acceptance.full_acceptance.report_path;
+  const candidates = freshnessReverificationSections(root, reportPath).filter((entry) => !chain.runIds.has(entry.run_id));
+  if (candidates.length !== 1) fail(`review report must contain exactly one new '## UI freshness reverification <run_id>' section (found ${candidates.length})`);
+  const review = candidates[0];
+  if (review.result !== "passed") fail("UI freshness reverification.result must be passed");
+  if (!sameStrings(review.pages, delta.impact_matrix.affected_pages)) {
+    fail(`UI freshness reverification.pages must exactly match affected pages: ${delta.impact_matrix.affected_pages.join(", ")}`);
+  }
+  return appendCheckpoint(root, chain, options.moduleId, route, {
+    type: "targeted-reverification",
+    created_at: requireIso(options.now || new Date().toISOString(), "created_at"),
+    upstream_ref: chain.lock.upstream.ref,
+    worktree_commit: resolveGitCommit(root, "HEAD"),
+    baseline: chain.effective,
+    current: live.state,
+    ...delta,
+    review: { report_path: review.report_path, run_id: review.run_id, completed_at: review.completed_at, pages: normalizedIds(review.pages), section_sha256: review.section_sha256 },
+  });
 }
 
 function argValue(args: string[], flag: string): string | undefined {
@@ -1002,6 +1396,40 @@ export async function runUiGovernanceCli(args: string[], projectRoot = process.c
     process.stdout.write(`${JSON.stringify({ status: "passed", path: uiGenerationAcceptancePath(moduleId), upstream: acceptance.freshness.current_upstream_commit, changed_paths: acceptance.freshness.changed_paths, affected_pages: acceptance.freshness.impact_matrix.affected_pages, full_acceptance_runs: 1, targeted_reverification_runs: acceptance.targeted_reverifications.length }, null, 2)}\n`);
     return;
   }
+  if (command === "refresh") {
+    const moduleId = requiredArg(args, "--module");
+    const result = refreshUiGenerationFreshness(projectRoot, { moduleId, route: validateRoute(requiredArg(args, "--route")) });
+    process.stdout.write(`${JSON.stringify({
+      status: result.status,
+      path: uiGenerationCheckpointsPath(moduleId),
+      sequence: result.checkpoint?.sequence ?? null,
+      baseline_upstream_commit: result.checkpoint?.baseline.upstream_commit ?? null,
+      current_upstream_commit: result.checkpoint?.current.upstream_commit ?? null,
+      digest: result.checkpoint?.digest ?? null,
+      full_acceptance_runs: 1,
+    }, null, 2)}\n`);
+    return;
+  }
+  if (command === "reverify") {
+    const moduleId = requiredArg(args, "--module");
+    const checkpoint = reverifyUiGenerationFreshness(projectRoot, {
+      moduleId,
+      route: validateRoute(requiredArg(args, "--route")),
+      reportPath: requiredArg(args, "--review-report"),
+    });
+    process.stdout.write(`${JSON.stringify({
+      status: "reverified",
+      path: uiGenerationCheckpointsPath(moduleId),
+      sequence: checkpoint.sequence,
+      changed_paths: checkpoint.changed_paths,
+      affected_pages: checkpoint.impact_matrix.affected_pages,
+      unaffected_pages: checkpoint.impact_matrix.unaffected_pages,
+      review_run_id: checkpoint.review?.run_id,
+      digest: checkpoint.digest,
+      full_acceptance_runs: 1,
+    }, null, 2)}\n`);
+    return;
+  }
   if (command === "check") {
     const moduleId = requiredArg(args, "--module");
     const loaded = readUiGenerationLock(projectRoot, moduleId);
@@ -1051,7 +1479,7 @@ export async function runUiGovernanceCli(args: string[], projectRoot = process.c
     process.stdout.write("UI governance dry-run passed; all changes are mapped and no production data was written.\n");
     return;
   }
-  fail("usage: loeyae-aidlc ui <lock|accept|check|impact-matrix|dry-run> [options]");
+  fail("usage: loeyae-aidlc ui <lock|accept|refresh|reverify|check|impact-matrix|dry-run> [options]");
 }
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
