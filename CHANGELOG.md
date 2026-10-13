@@ -1,5 +1,27 @@
 # Changelog
 
+## 4.14.1
+
+UI 验收新鲜度不再被无关模块推进 `origin/main` 永久拦截；模块 state/契约获得可从受保护 ledger 恢复的 checkpoint；Agent directive 携带确定性执行策略（MARS-159 / MARS-160）。
+
+### Added
+
+- **UI 验收后的受控新鲜度（MARS-159 A）**：`ui refresh`（锁定源未变、仅 upstream 指针前进）与 `ui reverify --review-report`（可映射源变化，复验段 `pages` 必须等于影响矩阵受影响页面）向 `ui-generation-checkpoints.json` 追加 digest 链接的 checkpoint；full acceptance 仍只有一次。
+- **模块 checkpoint ledger（MARS-159 B）**：每模块 append-only ref `refs/heads/aidlc/modules/<id>`，模块 `report` 成功后用 git plumbing 自动追加（含 state、audit、lineage/revision、规范化契约视图与自身 digest）；新增 `orchestrate state checkpoint --module <id>` 与 `orchestrate state recover --module <id>`（校验链、lineage、state/契约 digest 与 manifest，覆盖本地 state 需 `--user-input Approve` 并先备份）。不自动 push，未发布时输出 publish 命令并告警。
+- **Agent 执行策略（MARS-160）**：`run-stage` directive 与 `agent_execution` 同时携带确定性 `execution_policy`（范围、产物、门禁、Evidence 复用、停止与扩大范围条件），并写入 `handoff_prompt`；共享 Agent 协议、agent-execution Skill 与步骤完成协议同步收敛 review/build/test 的适用范围。
+
+### Changed
+
+- `ui-page-planning` / `inception-consistency` 以锁定 source snapshot 与页面映射为准；仓库级 upstream 指针只作审计观察（`observed_upstream_commit`），只有锁定源在 upstream 上的真实正文漂移才阻断，本模块分支合入后的内容收敛不算漂移。
+
+### Fixed
+
+- `no-todo` 不再把 `.xlsx` 等二进制 produce 报为 unreadable；真实读取失败仍 fail-closed，traceability 等文本检查不放宽（MARS-159 C）。
+
+### Security
+
+- 手改 lock/acceptance/checkpoint、复验段事后改写、未映射变化、ledger 链损坏/不连续、契约或 manifest 与 checkpoint 不符时一律 fail-closed。远端须保护 `aidlc/modules/*`（禁止删除与 force-push），"任何人可恢复"才成立。
+
 ## 4.14.0
 
 项目级 Git Provider Core（MARS-148 / MARS-150–154）：Provider 契约冻结为 protocol `1.1`；业务项目以 `.aidlc/providers.yaml` 声明意图、以 `providers.lock.yaml` 锁定不可变 commit 安装；`orchestrate next` 输出绑定 instance/lock/plan node 的 `provider_context`/`provider_actions`；`restricted-v1` Runner 只读物化 bundle 并签发 accepted Evidence，GateDecision 成为 Provider-backed 阶段报告的强制门禁。Loeyae Boot 规则、知识、检测、运行时和报告已真实抽离到独立 `loeyae-aidlc-provider` Git Provider，并通过通用 `code-generation` Hook 的 `implementation-validation` capability 注入；Core 不再含 Loeyae 专属 stage、sensor、检测或 compatibility 层。

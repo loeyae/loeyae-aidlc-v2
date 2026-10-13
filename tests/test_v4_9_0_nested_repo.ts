@@ -530,7 +530,13 @@ function normalizeText(value: string, project: string): string {
     .replace(/\n\s*"traceability",/g, "")
     // MARS-133 intentionally changed only the human handoff wording. This 4.9.0 test compares
     // nested-repository state/evidence semantics; the prompt contract has dedicated tests.
-    .replace(/"handoff_prompt": ".*"/g, '"handoff_prompt": "<handoff>"');
+    .replace(/"handoff_prompt": ".*"/g, '"handoff_prompt": "<handoff>"')
+    // MARS-160 intentionally added a deterministic execution_policy block (top level and inside
+    // agent_execution) and a top-level requires list to run-stage directives; their contract has
+    // dedicated tests (test_mars160_execution_policy). Stripping them on both engines keeps the
+    // comparison symmetric.
+    .replace(/,\n(\s*)"execution_policy": \{[\s\S]*?\n\1\}(?=,?\n)/g, "")
+    .replace(/\n {2}"requires": \[[^\]]*\],/g, "");
 }
 
 /**
