@@ -12,6 +12,8 @@ agents/<primary.id>.md
 knowledge/protocols/common-agent-execution.md
 ```
 
+同时消费 `agent_execution.execution_policy`（与 directive 顶层 `execution_policy` 为同一对象）：以其中的 `goal`、`success_condition`、`task_level`、`required`、`allowed_exploration`、有效 Evidence 复用规则、禁止动作、停止条件和扩大范围触发条件约束本次执行。派发 `delegate`、`pipeline`、`mob` 或 `review` 时原样转交该对象，不创建宿主私有的平行策略。它由当前 directive 确定性生成，不允许跳过 Engine / producer 负责的门禁。完成策略定义的最小闭环后立即返回结构化结果；修复后只重跑受影响、失效或尚未满足的声明检查；非阻断未验证项在 `risks` 说明原因；同一检查连续失败两次后改用不同诊断路径或返回 `NEEDS_CONTEXT` / `BLOCKED`，不得仅因多个文件、工具或角色变化而扩大为全仓探索、全量验证或重复委托。
+
 按 `agent_execution.mode` 执行：
 
 - `inline`：当前 conductor 加载 persona 后执行。

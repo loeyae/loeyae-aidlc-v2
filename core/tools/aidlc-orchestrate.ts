@@ -196,6 +196,34 @@ export interface StageInstance extends ExecutionContext {
   instance_id: string;
 }
 
+export type ExecutionTaskLevel = "question" | "local-change" | "multi-file-feature" | "cross-module-infrastructure";
+
+/**
+ * Deterministic, directive-scoped execution guidance. It is derived from the
+ * current workflow state and stage graph; it does not create a second policy
+ * store or weaken the engine-owned gates.
+ */
+export interface ExecutionPolicy {
+  version: "1";
+  task_level: ExecutionTaskLevel;
+  goal: string;
+  success_condition: string;
+  required: {
+    requires: string[];
+    consumes: string[];
+    produces: string[];
+    sensors: string[];
+    approval: StageNode["approval"];
+    completion_contract: StageNode["completion_contract"];
+  };
+  allowed_exploration: string;
+  reusable_evidence: string;
+  prohibited_actions: string[];
+  stop_conditions: string[];
+  expansion_triggers: string[];
+  priority: string[];
+}
+
 export interface Directive {
   kind: "load-steering" | "run-stage" | "ask" | "print" | "error" | "done" | "parked";
   stage?: string;
@@ -206,8 +234,10 @@ export interface Directive {
   lead_agent?: string;
   support_agents?: string[];
   mode?: string;
-  agent_execution?: AgentExecutionPlan;
+  agent_execution?: AgentExecutionPlan & { execution_policy?: ExecutionPolicy };
+  execution_policy?: ExecutionPolicy;
   gate?: boolean;
+  requires?: string[];
   consumes?: string[];
   produces?: string[];
   sensors?: string[];
@@ -3447,14 +3477,87 @@ function diagramFormatPrompt(state: WorkflowState, instance: StageInstance): str
     : "\n图表格式：mermaid（默认）。直接写 Mermaid fenced block，不生成 SVG、.diagram.json 或 Provider Request，不做渲染验证。只有用户明确要求 SVG 时，先执行 loeyae-aidlc orchestrate diagram-format --set svg --user-input \"<用户原话>\"。";
 }
 
-function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, agentExecution: AgentExecutionPlan, reportCommand?: string, choices: string[] = [], providerPrompt = ""): string {
+function executionTaskLevelFor(instance: StageInstance): ExecutionTaskLevel {
+  if (instance.stage.completion_contract === "instruction_only") return "question";
+  if (instance.axis === "unit") return "local-change";
+  if (instance.axis === "module") return "multi-file-feature";
+  return "cross-module-infrastructure";
+}
+
+function allowedExplorationFor(taskLevel: ExecutionTaskLevel): string {
+  switch (taskLevel) {
+    case "question":
+      return "只回答或收集当前 directive 所需的用户输入；除非 directive 明确要求，否则不修改或探索代码。";
+    case "local-change":
+      return "只检查当前 unit、声明的产物/consumes，以及直接的调用方、被调用方、测试和配置依赖；不得扫描全仓。";
+    case "multi-file-feature":
+      return "只检查当前 module、声明的产物/consumes 和直接 module 依赖；多个文件本身不能升级为全仓审查。";
+    case "cross-module-infrastructure":
+      return "只检查当前 directive 命名的模块、共享契约或基础设施及其直接依赖；不得默认进行全仓审计。";
+  }
+}
+
+export function executionPolicyFor(
+  state: Pick<WorkflowState, "work_description">,
+  instance: StageInstance,
+): ExecutionPolicy {
+  const taskLevel = executionTaskLevelFor(instance);
+  const consumes = instance.stage.consumes.flatMap((pattern) => displayArtifactPatterns(pattern, instance, true));
+  const produces = instance.stage.produces.flatMap((pattern) => displayArtifactPatterns(pattern, instance));
+  return {
+    version: "1",
+    task_level: taskLevel,
+    goal: state.work_description,
+    success_condition: "完成 directive 声明的产物与任务特定工作；所有声明门禁由其所属引擎或角色取得结果，且不存在阻断问题。",
+    required: {
+      requires: [...(instance.stage.requires || [])],
+      consumes,
+      produces,
+      sensors: [...instance.stage.sensors],
+      approval: instance.stage.approval,
+      completion_contract: instance.stage.completion_contract,
+    },
+    allowed_exploration: allowedExplorationFor(taskLevel),
+    reusable_evidence: "仅复用与当前 source revision、provenance、digest 和新鲜度校验匹配的有效受控 Evidence；修复后仅重新执行受影响、已失效或尚未满足的声明检查；不得因更换工具、Agent 或阶段描述重跑等价检查。",
+    prohibited_actions: [
+      "不得因多个文件、角色或工具不同而默认升级为全仓探索、全量测试或重复审查。",
+      "不得跳过、伪造、手写或以 Agent 叙述替代受控 Evidence、sensor、review、build、test 或审批门禁。",
+      "不得追加无关重构、优化、测试或对相同范围的二次委托。",
+    ],
+    stop_conditions: [
+      "声明的产物和当前任务所需的实现或分析已完成，声明的检查已有结果或已由指定机制安排，且无阻断问题时，立即交回 conductor。",
+      "非阻断且当前无法执行的检查，须在结构化结果 risks 中记录为未验证及原因；不得为消除未知项扩大范围。",
+      "同一检查连续失败两次后，停止等价重试；改用不同诊断路径或返回 NEEDS_CONTEXT/BLOCKED。",
+      "完成后不得仅为提高信心继续探索无关目录、重复读取未变化内容或重复已通过的检查。",
+    ],
+    expansion_triggers: [
+      "当前 requires、consumes、produces、sensor 或 Provider gate 失败。",
+      "直接调用关系、配置或共享契约证据表明影响超出当前边界，或影响范围无法界定。",
+      "存在安全或数据完整性风险，或用户明确要求 exhaustive 调查。",
+    ],
+    priority: [
+      "用户明确要求及安全约束",
+      "当前 AIDLC directive 与强制门禁",
+      "当前任务的执行范围、必需检查和停止条件",
+      "Agent 一般行为准则",
+    ],
+  };
+}
+
+function executionPolicyPrompt(policy: ExecutionPolicy): string {
+  const required = policy.required;
+  const list = (values: readonly string[], empty: string) => values.length > 0 ? values.join("、") : empty;
+  return `\n执行策略（directive 优先）：任务级别=${policy.task_level}。成功条件：${policy.success_condition}\n允许探索：${policy.allowed_exploration}\n阶段依赖：${list(required.requires, "无")}；consumes：${list(required.consumes, "无")}；produces：${list(required.produces, "无")}；sensors：${list(required.sensors, "无")}。\n证据复用：${policy.reusable_evidence}\n禁止：${policy.prohibited_actions.join("；")}\n停止：${policy.stop_conditions.join("；")}\n扩大范围仅当：${policy.expansion_triggers.join("；")}\n规则优先级：${policy.priority.join(" > ")}。`;
+}
+
+function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, agentExecution: AgentExecutionPlan, executionPolicy: ExecutionPolicy, reportCommand?: string, choices: string[] = [], providerPrompt = ""): string {
   const unit = instance.module_id && instance.unit_id
     ? `当前单元：${instance.module_id}/${instance.unit_id}。团队成员可用 unit select 声明负责人与分支。`
     : "当前阶段不要求成员选择单元；按产物、review、构建和测试门禁推进。";
   const artifacts = instance.stage.produces.length
     ? instance.stage.produces.flatMap((pattern) => displayArtifactPatterns(pattern, instance)).join("、")
     : "本阶段没有声明文件产物";
-  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；conductor-only 按当前 WorkflowRef 生效。split 后模块负责人可作为本模块 workflow conductor 推进，无需回到 global/父议题协调者；用户审批和 merge 门禁不变。\n需要产物：${artifacts}\n质量动作：完成适用 review、构建、测试和 sensor 检查。${diagramFormatPrompt(state, instance)}${choicePrompt(instance.stage.slug, choices)}${providerPrompt}\n下一步：execution agent 完成后将结构化结果交回当前 workflow conductor；后者运行 ${reportCommand || "orchestrate report"}。`;
+  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；conductor-only 按当前 WorkflowRef 生效。split 后模块负责人可作为本模块 workflow conductor 推进，无需回到 global/父议题协调者；用户审批和 merge 门禁不变。\n需要产物：${artifacts}\n质量动作：只执行本 directive 声明或绑定的 review、构建、测试、sensor、Provider 与审批动作；report/next 会复验 requires、consumes、produces 和受控 Evidence。不得跳过，也不得因更换工具或 Agent 重复。${executionPolicyPrompt(executionPolicy)}${diagramFormatPrompt(state, instance)}${choicePrompt(instance.stage.slug, choices)}${providerPrompt}\n下一步：execution agent 完成后将结构化结果交回当前 workflow conductor；后者运行 ${reportCommand || "orchestrate report"}。`;
 }
 
 interface PreparedProviderDirective {
@@ -4771,7 +4874,15 @@ async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directi
   }
 
   const directiveChoices = runtimeChoices(nextStage, state);
-  const agentExecution = planAgentExecution(nextStage);
+  const plannedAgentExecution = planAgentExecution(nextStage);
+  const executionPolicy = executionPolicyFor(state, effectiveNextInstance);
+  // Dispatching hosts commonly forward only agent_execution. Carry the same
+  // directive-derived object there so delegate/pipeline/mob/review agents cannot
+  // receive a weaker, host-authored execution boundary.
+  const agentExecution: AgentExecutionPlan & { execution_policy: ExecutionPolicy } = {
+    ...plannedAgentExecution,
+    execution_policy: executionPolicy,
+  };
   return {
     kind: "run-stage",
     stage: nextStage.slug,
@@ -4789,16 +4900,18 @@ async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directi
     support_agents: nextStage.support_agents,
     mode: nextStage.mode,
     agent_execution: agentExecution,
+    execution_policy: executionPolicy,
     gate,
     approval: nextStage.approval,
     completion_contract: nextStage.completion_contract,
+    requires: [...(nextStage.requires || [])],
     consumes: nextStage.consumes.flatMap((pattern) => displayArtifactPatterns(pattern, effectiveNextInstance, true)),
     produces: nextStage.produces.flatMap((pattern) => displayArtifactPatterns(pattern, effectiveNextInstance)),
     sensors: nextStage.sensors,
     choices: directiveChoices,
     diagram_format: diagramFormatOf(state),
     ...(providerDirective ? { provider_context: providerDirective.context, provider_actions: providerDirective.actions } : {}),
-    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, agentExecution, opts.reportCommand?.(effectiveNextInstance), directiveChoices, providerHandoffPrompt(providerDirective, effectiveNextInstance)),
+    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, agentExecution, executionPolicy, opts.reportCommand?.(effectiveNextInstance), directiveChoices, providerHandoffPrompt(providerDirective, effectiveNextInstance)),
     ...(claimRequested ? { claimed: true, owner: state.active_instances[effectiveNextInstance.instance_id].owner, claim_expires_at: state.active_instances[effectiveNextInstance.instance_id].expires_at } : {}),
     ...extras,
   };
