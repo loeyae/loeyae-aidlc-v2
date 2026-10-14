@@ -15,7 +15,8 @@ consumes:
 produces:
   - docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json
   - .aidlc/evidence/ui-figma-generation/{module-id}/ui-artifact-consistency.json
-sensors: [ui-artifact-consistency]
+  - .aidlc/evidence/ui-figma-generation/{module-id}/ui-behavior-consistency.json
+sensors: [ui-artifact-consistency, ui-behavior-consistency]
 requires: [ui-figma]
 condition: ui_mode_figma
 ---

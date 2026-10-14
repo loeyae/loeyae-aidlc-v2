@@ -15,9 +15,18 @@ consumes:
 produces:
   - docs/aidlc/modules/{module-id}/inception/requirements.md
   - .aidlc/evidence/requirements-analysis/{module-id}/traceability-matrix.json
-sensors: [traceability, traceability-matrix]
+  - .aidlc/evidence/requirements-analysis/{module-id}/quality-change-impact.json
+  - .aidlc/evidence/requirements-analysis/{module-id}/dependency-readiness.json
+  - .aidlc/evidence/requirements-analysis/{module-id}/field-capability.json
+sensors: [traceability, traceability-matrix, quality-change-impact, dependency-readiness, field-capability]
 ---
 # 需求分析（自适应）
+
+质量门禁 v1 采用范围：在本文件唯一的 `aidlc-quality` JSON 章节维护
+dependency/field/rule inventory、dependencies、fields、artifacts、changes，以及
+dependency_review / field_review 的输入绑定审查定位。新增工作流直接启用；旧工作流
+先提交 quality-adoption.json 的迁移差异、补证据计划与采用依据。先验证来源和字段
+方案，再进入故事。详见 knowledge/protocols/quality-gates-v1.md。
 
 **角色**：产品负责人
 

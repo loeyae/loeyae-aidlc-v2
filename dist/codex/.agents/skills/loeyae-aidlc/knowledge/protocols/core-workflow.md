@@ -15,7 +15,9 @@ aidlc/active/aidlc-state.md
 aidlc/active/audit.md
 ```
 
-`next` 返回一个当前 directive；Agent 读取其阶段文件、产物要求与 `handoff_prompt` 后执行当前工作。
+`next` 返回一个当前 directive；Agent 读取其阶段文件、产物要求与 `handoff_prompt` 后执行当前工作。directive 的 `rule_load_plan.load_now` 指明当前应加载的阶段规则（当前阶段及已选依赖），`deferred` 列出已选但留待后续交接的规则；`orchestrate state rules [--module <id>]` 可只读查看完整计划。它不是执行豁免：阶段图、审批、`requires`、产物、sensor、evidence 和 Provider gate 仍由 engine 强制执行。
+
+directive 的 `evidence_reuse_plan` 是同样只读的 evidence 调度建议；`orchestrate state evidence [--module <id>]` 可查看。`reuse` 仅表示可读取既有 evidence，`verify` 表示 mandatory gate 仍须由正常 sensor/gate 明确复验，`revalidate` 表示必须重新产证。计划只查看当前 stage instance 的规范 evidence 路径，并要求受控 producer、严格时间、instance/module/unit、source revision 和 checker provenance 全部匹配；它绝不写 evidence、绝不通过 report，也绝不绕过 gate。
 
 ## 路由与实例
 

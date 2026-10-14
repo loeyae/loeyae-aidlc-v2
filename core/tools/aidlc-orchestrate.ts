@@ -31,6 +31,8 @@ import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
 import { planAgentExecution, type AgentExecutionPlan } from "./aidlc-agent-runtime";
 import { SEMANTIC_SENSORS, allowlistedPhaseCommand, argvDigest, i13CodeRefBlobs, i13UcdIdsByMode, phaseNotRequiredDigest, phaseObservationDigest, ucdExemptionDigest, unitUcdExemption, type Phase } from "./aidlc-evidence";
+import { QUALITY_SENSORS, qualityAdoption, qualityEvidenceErrors, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
+import { controlledQualityErrors, developmentAcceptanceErrors } from "./aidlc-quality-delivery";
 import { CANONICAL_SOURCE_PATTERN, SOURCE_ROOTS_CONFIG, declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
 import { codeRefRepo, nestedHead, nestedMigrationCommand, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
 import { CONTRACT_CONSUMER_COLUMN, CONTRACT_ID_COLUMN, CONTRACT_PROVIDER_COLUMN, moduleForValue } from "./aidlc-contract-table";
@@ -1096,6 +1098,11 @@ const MIN_ARTIFACT_BYTES = 16;
  * files of the root (`git ls-files`, .gitignore respected, binary files dropped).
  */
 function artifactPresenceFailure(pattern: string, instance: StageInstance, allowProjectAggregate = false, sourceRoot = false): string | undefined {
+  const qualitySensor = pattern.replace(/\\/g, "/").match(/\/([^/]+)\.json$/)?.[1];
+  if (qualitySensor && QUALITY_SENSORS.has(qualitySensor)) {
+    const view = loadWorkflowView(PROJECT_ROOT, instance.module_id);
+    if (view && !qualityAdoption(qualityGateContext(view, instance)).enabled) return undefined;
+  }
   const label = instanceArtifactPattern(pattern, instance, allowProjectAggregate);
   const contextual = label.replace(/\\/g, "/");
   const aggregated = contextual.includes("*") || /\{[^}]+\}/.test(contextual);
@@ -2121,6 +2128,18 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
   for (const sensor of stage.sensors) {
     if (options.onlySensors && !options.onlySensors.includes(sensor)) continue;
+    if (QUALITY_SENSORS.has(sensor)) {
+      try {
+        const context = qualityGateContext(state, instance);
+        if (!qualityAdoption(context).enabled) continue;
+        const failure = validateEvidence(stage, sensor, instance, evidence => {
+          const errors = controlledQualityErrors(context, sensor, evidence);
+          return errors;
+        }, { ...options, tolerateRevisionDrift: true });
+        if (failure) failures.push({ ...failure, message: `GATE_EVIDENCE_MISSING_OR_INVALID: ${failure.message}` });
+      } catch (error) { failures.push({ sensor, passed: false, message: String(error) }); }
+      continue;
+    }
     switch (sensor) {
       case "no-todo": {
         const todoFiles: string[] = [];
@@ -3110,6 +3129,43 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
   return failures;
 }
 
+function qualityGateContext(state: WorkflowState, instance: StageInstance): QualityContext {
+  const adoptionPath = instance.module_id ? `docs/aidlc/modules/${instance.module_id}/inception/quality-adoption.json` : "docs/aidlc/inception/quality-adoption.json";
+  const adopted = Boolean(state.quality_gates_version || existsSync(join(PROJECT_ROOT, adoptionPath)));
+  return { root: PROJECT_ROOT, workflow_id: state.workflow_id, module_id: instance.module_id, scope: state.scope, prd_selected: selectedOptionalStages(state).includes("prd-generation"), project_workflow_id: state.parent_workflow_id || state.workflow_id,
+    stage: instance.stage.slug, ui_route: uiDesignChoice(state, instance.module_id) || "not-selected",
+    quality_version: state.quality_gates_version, code_baseline: adopted && qualityCodeBaseline(PROJECT_ROOT, instance.module_id, state.adoption_baseline || state.baseline_commit, state.completed_stages.includes("build-and-test")) };
+}
+
+export function qualityDevelopmentFailures(instance: StageInstance, state: WorkflowState, instances: StageInstance[]): SensorResult[] {
+  if (!["functional-design", "tdd", "code-generation"].includes(instance.stage.slug)) return [];
+  try {
+    const ctx = qualityGateContext(state, instance);
+    if (!qualityAdoption(ctx).enabled) return [];
+    const source = instances.find(i => i.stage.slug === "cross-validation" && i.module_id === instance.module_id);
+    if (!source || !completedInstanceIds(state).includes(source.instance_id)) return [{ sensor: "delivery-readiness", passed: false, message: "DEVELOPMENT_ENTRY_NOT_READY: applicable I10 not completed" }];
+    const executable = new Set(getExecutableStages(loadGraph(), state.scope, selectedOptionalStages(state), state.execution_profile).map(s => s.slug));
+    const required = ["workflow-planning", "application-design", "units-generation", "test-case-derivation", ...(selectedOptionalStages(state).includes("prd-generation") ? ["prd-generation"] : [])];
+    const incomplete = instances.filter(i => required.includes(i.stage.slug) && executable.has(i.stage.slug) && (!i.module_id || i.module_id === instance.module_id) && !completedInstanceIds(state).includes(i.instance_id) && !skippedInstanceIds(state).includes(i.instance_id));
+    if (incomplete.length) return [{ sensor: "delivery-readiness", passed: false, message: `DEVELOPMENT_ENTRY_NOT_READY: applicable downstream/PRD gates incomplete: ${incomplete.map(i => i.instance_id).join(", ")}` }];
+    const context = { ...ctx, stage: "cross-validation" };
+    const failure = validateEvidence(source.stage, "delivery-readiness", source, evidence => {
+      const errors = controlledQualityErrors(context, "delivery-readiness", evidence);
+      return errors;
+    }, { tolerateRevisionDrift: true });
+    const errors = developmentAcceptanceErrors(context);
+    const inceptionFailure = validateEvidence(source.stage, "inception-consistency", source, evidence => {
+      const findings: string[] = [];
+      if (evidence.status !== "passed" || evidence.module_id !== instance.module_id || !asNumber(evidence.requirements_checked) || !asNumber(evidence.stories_checked) || evidence.unresolved_conflicts !== 0) findings.push("DEVELOPMENT_ENTRY_NOT_READY: original I10 consistency conclusion invalid");
+      const quality = asRecord(evidence.quality);
+      if (!quality) findings.push("DEVELOPMENT_ENTRY_NOT_READY: adopted I10 quality aggregation missing");
+      else findings.push(...qualityEvidenceErrors(context, "delivery-readiness", quality));
+      return findings;
+    }, { tolerateRevisionDrift: true });
+    return [...(failure ? [{ ...failure, message: `DEVELOPMENT_ENTRY_NOT_READY: ${failure.message}` }] : []), ...(inceptionFailure ? [{ ...inceptionFailure, message: `DEVELOPMENT_ENTRY_NOT_READY: ${inceptionFailure.message}` }] : []), ...errors.map(message => ({ sensor: "delivery-readiness", passed: false, message }))];
+  } catch (error) { return [{ sensor: "delivery-readiness", passed: false, message: `DEVELOPMENT_ENTRY_NOT_READY: ${String(error)}` }]; }
+}
+
 // ---------------------------------------------------------------------------
 // Condition evaluation — conditional stage execution
 // ---------------------------------------------------------------------------
@@ -3767,8 +3823,11 @@ function selectActiveContext(state: WorkflowState, owns: (instanceId: string) =>
 }
 
 function missingSemanticEvidence(instance: StageInstance): string[] {
+  const view = loadWorkflowView(PROJECT_ROOT, instance.module_id);
+  const adopted = view ? qualityAdoption(qualityGateContext(view, instance)).enabled : false;
   return instance.stage.sensors
     .filter((sensor) => SEMANTIC_SENSORS.has(sensor))
+    .filter((sensor) => !QUALITY_SENSORS.has(sensor) || adopted)
     .filter((sensor) => !existsSync(join(PROJECT_ROOT, evidenceRelativePath(instance.stage.slug, sensor, instance.axis, instance))));
 }
 
@@ -4054,6 +4113,7 @@ function ensureModuleWorkflow(moduleId: string, work?: string): Directive | null
     workflow_kind: "module",
     module_id: moduleId,
     parent_workflow_id: global.workflow_id,
+    ...(global.quality_gates_version ? { quality_gates_version: global.quality_gates_version } : {}),
     depth: global.depth,
     current_phase: "inception",
   };
@@ -4247,7 +4307,7 @@ function anchorLegacyEvidence(inventory: LegacyEvidence[]): { anchored: string[]
   const digests = new Map<string, string | null | undefined>();
   for (const item of inventory) {
     const label = relative(PROJECT_ROOT, item.path).replace(/\\/g, "/");
-    if (!item.valid) {
+    if (!item.valid || item.record.quality_version) {
       stale.push(`${label} (${item.instance})`);
       continue;
     }
@@ -4397,6 +4457,7 @@ function performSplit(fromId: string, dryRun: boolean, trigger: string, replaceL
         workflow_kind: ref.kind,
         ...(ref.kind === "module" ? { module_id: ref.module_id } : {}),
         parent_workflow_id: legacy.workflow_id,
+        ...(legacy.quality_gates_version ? { quality_gates_version: legacy.quality_gates_version } : {}),
         depth: legacy.depth,
         current_phase: legacy.current_phase,
       };
@@ -4644,6 +4705,7 @@ async function handleNext(args: string[]): Promise<Directive> {
     const lineage = newLineageCheck([], replace, undefined, "Starting a new workflow", `orchestrate next --scope ${scopeFlag} --work "<work>"`);
     if ("kind" in lineage) return lineage;
     state = createInitialState(scopeFlag, ENGINE_VERSION, undefined, selectedOptionalStages, workDescription);
+    if (["feature", "enterprise", "mvp", "classic"].includes(scopeFlag)) state.quality_gates_version = "1";
     initializeGlobalExecutionProfile(state);
     if (lineage.retire.length > 0) state.retired_lineages = lineage.retire;
     // Only a new global/single workflow records its baseline; createInitialState stays
@@ -4916,7 +4978,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
       for (const failure of failures) {
         // 已 completed 的上游阶段在完成时其门禁已为绿;此处复验只为拦截"事后被改坏/覆盖不再满足"的实质失败。
         // 纯时间性证据过期(>24h resume 间隔)不是回归,不应阻断多日跨度的正常续作 —— 过滤掉纯 staleness 失败。
-        if (/evidence is stale \(\d+h old/i.test(failure.message)) continue;
+        if (/evidence is stale \(\d+h old/i.test(failure.message) && !QUALITY_SENSORS.has(failure.sensor)) continue;
         upstreamGateFailures.push({ instance: dep.instance_id, message: `[${failure.sensor}] ${failure.message}` });
       }
     }
@@ -4935,6 +4997,8 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   }
 
   let providerDirective: PreparedProviderDirective | null = null;
+  const qualityAdmission = qualityDevelopmentFailures(effectiveNextInstance, state, instances);
+  if (qualityAdmission.length) return { kind: "error", message: qualityAdmission.map(f => f.message).join("\n"), ...extras };
   try {
     providerDirective = prepareProviderDirective(effectiveNextInstance, flags["provider-approval"], opts.persistProviderPlans !== false);
   } catch (error) {
@@ -5190,6 +5254,8 @@ async function handleReport(args: string[]): Promise<Directive> {
   // --- Provider Gate: fail before artifact producers, history or state/audit writes. ---
   let providerDecision: GateDecisionV1_1 | undefined;
   if (result === "completed" || result === "approved") {
+      const qualityAdmission = qualityDevelopmentFailures(currentInstance, state, instances);
+      if (qualityAdmission.length) return { kind: "error", message: qualityAdmission.map(f => f.message).join("\n") };
     const gate = providerGateCheck(currentInstance, flags["gate-decision"]);
     if (gate.failure) return { kind: "error", message: `🚫 ${gate.failure}` };
     providerDecision = gate.decision;

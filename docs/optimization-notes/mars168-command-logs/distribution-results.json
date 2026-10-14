@@ -1,0 +1,13 @@
+{
+  "group": "distribution",
+  "baseline": false,
+  "timestamp": "2026-10-14T17:01:21.364Z",
+  "results": [
+    {
+      "command": "npx --no-install tsx tests/test_distribution_parity.ts",
+      "exit_code": 0,
+      "duration_ms": 9658,
+      "log": "mars168-command-logs/test_distribution_parity.log"
+    }
+  ]
+}

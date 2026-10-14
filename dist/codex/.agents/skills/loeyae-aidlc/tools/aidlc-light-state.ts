@@ -2,6 +2,11 @@ import { randomUUID } from "crypto";
 import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { COMMIT_ID_PATTERN } from "./aidlc-revision";
+import {
+  assertExecutionProfile,
+  type ExecutionProfile,
+  type ExecutionProfileEvent,
+} from "./aidlc-execution-profile";
 
 export interface HistoryEntry {
   stage: string;
@@ -119,6 +124,12 @@ export interface WorkflowState {
    * `--replace-lineage` on split / next --scope); lineage checks ignore them.
    */
   retired_lineages?: string[];
+  /**
+   * MARS-161: execution classification for the global workflow lineage only.
+   * It deliberately remains absent on legacy files until explicitly initialized.
+   */
+  execution_profile?: ExecutionProfile;
+  quality_gates_version?: string;
   revision: number;
   scope: string;
   depth: string;
@@ -602,9 +613,14 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
   const retiredText = presentScalar(markdown, "Retired Lineages");
   const retired = retiredText === undefined ? undefined : retiredText.split(",").map((entry) => entry.trim()).filter(Boolean);
   if (retired !== undefined && (kind === "module" || kind === "integration")) throw new Error(`${kind} sub-workflow state must not carry Retired Lineages; lineages belong to the global workflow`);
+  const executionProfile = parseExecutionProfile(markdown);
+  if (executionProfile !== undefined && (kind === "module" || kind === "integration")) {
+    throw new Error(`${kind} sub-workflow state must not carry Execution Profile; it belongs to the global workflow`);
+  }
   return {
     format: "markdown-workflow",
     version: scalar(markdown, "Engine Version"),
+    ...(scalar(markdown, "Quality Gates Version", false) ? { quality_gates_version: scalar(markdown, "Quality Gates Version", false) } : {}),
     workflow_id: scalar(markdown, "Workflow ID"),
     work_description: scalar(markdown, "Work"),
     ...(kind ? { workflow_kind: kind as WorkflowKind } : {}),
@@ -617,6 +633,7 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
     ...(baselineReposHistory !== undefined ? { baseline_repos_history: baselineReposHistory } : {}),
     ...adoption,
     ...(retired !== undefined && retired.length > 0 ? { retired_lineages: retired } : {}),
+    ...(executionProfile !== undefined ? { execution_profile: executionProfile } : {}),
     revision,
     scope,
     depth: scalar(markdown, "Depth"),
@@ -649,6 +666,7 @@ function cell(value: string | undefined): string {
 }
 
 export function renderLightWorkflowState(state: WorkflowState): string {
+  assertExecutionProfileOwnership(state);
   return `# AI-DLC Lightweight Workflow
 
 > AWS-style lightweight collaboration controlled by this Markdown state and its audit log.
@@ -659,6 +677,7 @@ export function renderLightWorkflowState(state: WorkflowState): string {
 - Status: ${state.status}
 - Revision: ${state.revision}
 - Engine Version: ${clean(state.version)}
+${state.quality_gates_version ? `- Quality Gates Version: ${clean(state.quality_gates_version)}\n` : ""}
 ${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}${state.diagram_format ? `- Diagram Format: ${state.diagram_format}\n` : ""}${state.baseline_commit !== undefined ? `- Baseline Commit: ${clean(state.baseline_commit)}\n- Baseline Source: ${clean(state.baseline_source || "")}\n` : ""}${state.baseline_history !== undefined ? `- Baseline History: ${state.baseline_history.map(clean).join(", ")}\n` : ""}${state.baseline_repos !== undefined ? `- Baseline Repos: ${clean(renderBaselineRepos(state.baseline_repos))}\n` : ""}${state.baseline_repos_history !== undefined ? `- Baseline Repos History: ${clean(renderBaselineReposHistory(state.baseline_repos_history))}\n` : ""}${renderAdoption(state)}${state.retired_lineages?.length ? `- Retired Lineages: ${state.retired_lineages.map(clean).join(", ")}\n` : ""}- Depth: ${clean(state.depth)}
 - Current Phase: ${clean(state.current_phase)}
 - Current Stage: ${cell(state.current_stage)}
@@ -702,7 +721,74 @@ ${Object.entries(state.active_instances || {}).sort(([left], [right]) => left.lo
 | Stage | Instance | Module | Unit | Result | Timestamp | Input |
 | --- | --- | --- | --- | --- | --- | --- |
 ${state.history.map((entry) => `| ${cell(entry.stage)} | ${cell(entry.instance_id)} | ${cell(entry.module_id)} | ${cell(entry.unit_id)} | ${cell(entry.result)} | ${entry.timestamp} | ${cell(entry.user_input)} |`).join("\n") || "| - | - | - | - | - | - | - |"}
+${renderExecutionProfile(state.execution_profile)}
 `;
+}
+
+function parseExecutionProfile(markdown: string): ExecutionProfile | undefined {
+  const content = section(markdown, "Execution Profile");
+  if (!content) return undefined;
+  const risksContent = section(markdown, "Execution Profile Active Risks");
+  const eventsContent = section(markdown, "Execution Profile Events");
+  if (!risksContent || !eventsContent) {
+    throw new Error("Execution Profile requires Active Risks and Events sections");
+  }
+  const risks = list(markdown, "Execution Profile Active Risks");
+  const events = table(markdown, "Execution Profile Events").map((cells, index): ExecutionProfileEvent => {
+    if (cells.length !== 7) throw new Error(`Execution Profile Events row ${index + 1} is malformed`);
+    return {
+      kind: cells[0] as ExecutionProfileEvent["kind"],
+      at: cells[1],
+      actor: cells[2] as ExecutionProfileEvent["actor"],
+      reason_code: cells[3] as ExecutionProfileEvent["reason_code"],
+      ...(cells[4] !== "-" ? { from: cells[4] as ExecutionProfileEvent["from"] } : {}),
+      ...(cells[5] !== "-" ? { to: cells[5] as ExecutionProfileEvent["to"] } : {}),
+      ...(cells[6] !== "-" ? { detail: cells[6] } : {}),
+    };
+  });
+  const profile: ExecutionProfile = {
+    level: scalar(content, "Level") as ExecutionProfile["level"],
+    source: scalar(content, "Source") as ExecutionProfile["source"],
+    primary_reason: scalar(content, "Primary Reason") as ExecutionProfile["primary_reason"],
+    active_risks: risks as ExecutionProfile["active_risks"],
+    events,
+  };
+  assertExecutionProfile(profile);
+  return profile;
+}
+
+function renderExecutionProfile(profile: ExecutionProfile | undefined): string {
+  if (profile === undefined) return "";
+  assertExecutionProfile(profile);
+  const risks = profile.active_risks.length
+    ? profile.active_risks.map((risk) => `- ${risk}`).join("\n")
+    : "- (none)";
+  const events = profile.events.map((event) =>
+    `| ${event.kind} | ${event.at} | ${event.actor} | ${event.reason_code} | ${cell(event.from)} | ${cell(event.to)} | ${cell(event.detail)} |`,
+  ).join("\n") || "| - | - | - | - | - | - | - |";
+  return `
+
+## Execution Profile
+- Level: ${profile.level}
+- Source: ${profile.source}
+- Primary Reason: ${profile.primary_reason}
+
+## Execution Profile Active Risks
+${risks}
+
+## Execution Profile Events
+| Kind | At | Actor | Reason Code | From | To | Detail |
+| --- | --- | --- | --- | --- | --- | --- |
+${events}
+`;
+}
+
+function assertExecutionProfileOwnership(state: WorkflowState): void {
+  if (state.execution_profile === undefined) return;
+  assertExecutionProfile(state.execution_profile);
+  if (state.workflow_kind === "module" || state.workflow_kind === "integration") {
+    throw new Error("Execution Profile is only valid in the global workflow state");
+  }
 }
 
 /** 4.10.0 adoption baseline lines of a module sub-workflow (empty when not adopted). */
@@ -795,6 +881,10 @@ function assertBaselinePreserved(existing: WorkflowState | null, state: Workflow
   }
   if (ref.kind !== "global" && (state.baseline_commit !== undefined || state.baseline_source !== undefined || state.baseline_history !== undefined)) throw subWorkflowBaselineError(ref.kind);
   if (ref.kind !== "global" && (state.baseline_repos !== undefined || state.baseline_repos_history !== undefined)) throw subWorkflowReposError(ref.kind);
+  assertExecutionProfileOwnership(state);
+  if (state.execution_profile !== undefined && ref.kind !== "global") {
+    throw new Error("Execution Profile is only valid in the global workflow state");
+  }
   if (options.baselineWrite) return;
   if (existing) {
     if (existing.baseline_commit !== state.baseline_commit || existing.baseline_source !== state.baseline_source

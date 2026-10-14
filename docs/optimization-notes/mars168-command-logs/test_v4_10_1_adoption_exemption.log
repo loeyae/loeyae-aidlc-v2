@@ -1,0 +1,6 @@
+4.10.1 adoption ignores ucd_exemption units
+    --adopt: ✅ Module m01-trade adopted c1ec2507658fd5ea924c29ca070e3043d3794493 as its adoption baseline (nested repositories: app=b12432a8af24d203f00f32c0a6dfbfdadf3300e4)
+    rejected --adopt after u1 BASELINE passed: already holds RED / BASELINE / GREEN evidence (.aidlc/evidence/tdd/m01-trade/u1/baseline-test-evidence.json
+  ok adoption ignores ucd_exemption units: adopt after u0 tdd, u0 evidence re-check, u1 BASELINE on the adoption baseline, refused after u1 BASELINE
+PASS
+

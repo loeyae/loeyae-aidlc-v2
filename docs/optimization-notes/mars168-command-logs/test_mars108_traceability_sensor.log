@@ -1,0 +1,7 @@
+PASS every producing not_applicable stage drops traceability but keeps no-todo
+PASS the known 4 not_applicable stages are present and cleaned
+PASS every producing required stage keeps the traceability sensor
+PASS no producing stage ever loses no-todo
+
+All 4 MARS-108 sections passed.
+

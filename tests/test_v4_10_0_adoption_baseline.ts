@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { loadWorkflowState, saveWorkflowState } from "../core/tools/aidlc-light-state";
+import { createInitialState, loadWorkflowState, saveWorkflowState } from "../core/tools/aidlc-light-state";
 import { workflowBaselineForModule } from "../core/tools/aidlc-baseline";
 
 const repository = resolve(import.meta.dirname, "..");
@@ -163,7 +163,11 @@ function fixture(name: string): Fixture {
   write(project, ".aidlc/source-roots.json", `${JSON.stringify({ version: "1", source_roots: [{ path: "app", repo: "nested" }] })}\n`);
 
   const step = (args: string[]) => ok(project, args);
-  step(["orchestrate", "next", "--scope", "feature", "--work", `4.10.0 adoption ${name}`]);
+  // This test characterizes the 4.10 legacy baseline adoption protocol. New
+  // quality-v1 creation/adoption is covered by test_mars168_admission/lifecycle.
+  const legacy = createInitialState("feature", "4.10.0", undefined, [], `4.10.0 adoption ${name}`);
+  legacy.baseline_commit = workflowCommit; legacy.baseline_source = "created";
+  legacy.baseline_repos = { app: appLegacy }; saveWorkflowState(project, legacy);
   // T0 is now; the old process keeps committing the implementation into app/ afterwards.
   write(app, "order_export.py", ORDER_EXPORT);
   git(app, ["add", "-A"]);
@@ -249,7 +253,10 @@ async function main(): Promise<void> {
     // ---- Negative: the adopted commit is later than the first tdd start of the module.
     const moduleRef = { kind: "module" as const, module_id: M01 };
     const withTddStart = loadWorkflowState(f.project, moduleRef)!;
-    const tddStartedAt = new Date(Date.now() + 1_000).toISOString();
+    // Bind the negative to the actual candidate timestamp, rather than a 60s
+    // wall-clock setup budget (slow Windows/parallel runs may exceed it).
+    const candidateDate = git(f.app, ["show", "-s", "--format=%cI", f.appAdopted]);
+    const tddStartedAt = new Date(Date.parse(candidateDate) - 1_000).toISOString();
     withTddStart.history.push({ stage: "tdd", instance_id: TDD, module_id: M01, unit_id: "u1", result: "rejected", timestamp: tddStartedAt, user_input: "fixture: tdd entered" });
     saveWorkflowState(f.project, withTddStart, moduleRef);
     expectRejected("--adopt later than the first tdd start", rejected(run(f.project, ADOPT(f, APPROVAL))), /app\/: commit [0-9a-f]{40} committer date \S+ \(self-reported\) is later than the first tdd start of the module/);

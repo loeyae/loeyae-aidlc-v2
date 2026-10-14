@@ -1,0 +1,18 @@
+4.10.0 adoption baseline
+    rejected --set of the post-T0 app/ commit: app/: commit 7a7a93dbae3aaf75817ef8e55821140792672a29 committer date 2026-10-14T15:59:39+00:00 (self-reported) is later than the workflow start
+    rejected I13 before adoption: app/order_export.py does not exist in the baseline bef6c8df4ae908520447c6ca8d9e9e8f7afb64fa of the nested repository app/
+    rejected --adopt without --approval-ref: --approval-ref is required
+    rejected --adopt with an empty --approval-ref: --approval-ref is required
+    rejected --adopt without --module: --adopt requires --module <id>
+    rejected --adopt with --set: --adopt cannot be combined with --set
+    rejected --adopt later than the first tdd start: app/: commit 7a7a93dbae3aaf75817ef8e55821140792672a29 committer date 2026-10-14T15:59:39+00:00 (self-reported) is later than the first tdd start of the module
+    rejected --adopt with GREEN evidence of the module: already holds RED / BASELINE / GREEN evidence (.aidlc/evidence/code-generation/m01-trade/u1/green-test-evidence.json)
+    --adopt: ✅ Module m01-trade adopted f85e48954a79fbe934c5a018f6656441ab176206 as its adoption baseline (nested repositories: app=7a7a93dbae3aaf75817ef8e55821140792672a29)
+    rejected --adopt a second time with another commit: already has the adoption baseline
+    rejected BASELINE after changing the code ref: BASELINE refuses to run: code ref app/order_export.py changed since the baseline 7a7a93dbae3aaf75817ef8e55821140792672a29 of the nested repository app/
+    rejected BASELINE without baseline_kind against the adoption baseline: BASELINE baseline_kind workflow does not match the adoption baseline
+    --advance --module: ✅ Adoption baseline of module m01-trade advanced: f85e48954a79fbe934c5a018f6656441ab176206 → f85e48954a79fbe934c5a018f6656441ab176206 (epoch 1). Nested reposito
+    rejected --advance --module of a module without adoption: Module m02-billing has no adoption baseline, so there is no module chain to advance: --advance --module only advances an adoption baseline registered with orche
+  ok adoption baseline: --set refused, --adopt negatives, adopt, I13/BASELINE resolve per module, baseline_kind re-check, --advance --module
+PASS
+
