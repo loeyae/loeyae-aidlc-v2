@@ -1,0 +1,10 @@
+{
+  "baseline": null,
+  "results": [
+    {
+      "command": "npm test",
+      "exit_code": 1,
+      "duration_ms": 1024309
+    }
+  ]
+}

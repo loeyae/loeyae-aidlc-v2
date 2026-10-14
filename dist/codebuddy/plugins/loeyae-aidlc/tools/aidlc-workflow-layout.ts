@@ -393,6 +393,7 @@ export function mergeWorkflowView(parts: Map<string, WorkflowPart>, owner: Workf
     workflow_id: ownerState.workflow_id,
     workflow_kind: ownerState.workflow_kind,
     quality_gates_version: ownerState.quality_gates_version,
+    document_slices_version: ownerState.document_slices_version,
     ...(ownerState.module_id ? { module_id: ownerState.module_id } : { module_id: undefined }),
     parent_workflow_id: ownerState.parent_workflow_id,
     revision: ownerState.revision,

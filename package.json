@@ -1,6 +1,6 @@
 {
   "name": "loeyae-aidlc",
-  "version": "4.16.0",
+  "version": "4.17.0",
   "description": "Loeyae AI-DLC — AWS-style lightweight workflow with multi-harness distribution",
   "author": "Loeyae Team",
   "license": "MIT",
@@ -19,6 +19,7 @@
   "scripts": {
     "build": "tsx scripts/build.ts",
     "typecheck": "tsc --noEmit",
+    "pretest": "npm run test:mars169",
     "test:mars161-phase2": "npx --no-install tsx tests/test_mars161_execution_profile_phase2.ts",
     "test:mars161-phase3": "npx --no-install tsx tests/test_mars161_execution_profile_phase3.ts",
     "test:mars161-phase4": "npx --no-install tsx tests/test_mars161_execution_profile_phase4.ts",
@@ -40,7 +41,8 @@
     "compile-graph": "tsx core/tools/aidlc-graph.ts compile",
     "scope-table": "tsx core/tools/aidlc-utility.ts scope-table",
     "test:mars168": "tsx tests/run_mars168.ts quality",
-    "test:mars168-regression": "tsx tests/run_mars168.ts regression"
+    "test:mars168-regression": "tsx tests/run_mars168.ts regression",
+    "test:mars169": "tsx tests/test_mars169_document_slices.ts"
   },
   "dependencies": {
     "@resvg/resvg-js": "2.6.2",

@@ -185,7 +185,11 @@ AI 在以下情况下主动读取延迟加载的文件：
 
 ### 切片操作
 
-在单元生成步骤完成后，自动将以下 Inception 产出物按单元拆分：
+在单元生成步骤完成后，依照 `common-document-slices.md` 用确定性工具生成派生视图。
+以下目录清单是内容职责示意；实际单元/共享 requirements、stories、index 的路径由
+`document-slices/manifest.json` 指向 `document-slices/objects/{sha256}.md`，不得另维护手写切片。
+全文、映射或单元变化先失效旧证据，再定向重生成受影响消费者。未采用旧项目可明确采用；
+单单元、轻量 scope 或未执行单元生成保持 canonical 读取路径。
 
 **需求文档切片**：
 ```
@@ -242,17 +246,19 @@ docs/aidlc/modules/{module-id}/inception/application-design/
 - **用户故事**：直接使用 `unit-of-work-story-map.md` 的映射关系
 - **应用设计**：根据 `unit-of-work.md` 中单元包含的组件/服务进行切片
 
-### 原始文件处理
+### 权威全文与派生视图
 
-切片后，原始完整文件**重命名为归档**：
-- `requirements.md` → `requirements.full.md`
-- `stories.md` → `stories.full.md`
-
-归档文件不删除，但不再默认加载。仅在需要全局视图时按需读取。
+`requirements.md` 和 `user-stories.md` 始终保留完整权威内容与稳定路径。
+禁止改名、删除或以导航索引替换正文。业务修改先回写权威全文，再运行切片生成。
+覆盖分母取自全文和批准映射，manifest/index 只记录投影，不维护第二套业务事实。
+模块校验、UI 来源锁、交付/开发准入继续读取全文；开发按 directive 的独立
+`business_document_load_plan` 加载当前单元和适用共享内容。已采用但缺失/过期时阻断。
+旧改名项目只允许显式 recover；双文件冲突须裁决，不自动覆盖，不静默回退。
 
 ### 单单元项目
 
-如果项目只有 1 个单元，**不执行切片**（没有意义，反而增加文件数量）。
+如果项目只有 1 个单元且没有采用记录，**不要求切片**。已有采用/manifest 则仍需验证，
+不能通过删除单元或损坏记录伪装成不适用。
 
 ---
 

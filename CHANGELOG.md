@@ -1,5 +1,24 @@
 # Changelog
 
+## 4.17.0 — 2026-10-15
+
+MARS-169：保留完整权威需求与用户故事，按批准映射生成并验证派生单元视图。
+
+### Added
+
+- **确定性文档切片**：新增 `document-slices generate|check|plan|recover`，保留原始正文区间、Gherkin、代码块、表格和中文；支持 STORY/US、REQ/AC 定义与显式来源，拒绝重复定义、孤立 AC、悬空或歧义映射。内容寻址对象及最后原子发布的 manifest 绑定 workflow/module、权威来源、批准映射、单元、独立覆盖分母和实际正文摘要。
+- **受控门禁与加载计划**：注册 `document-slice-consistency`，接入单元生成准出、真实 report/next 和下游单元准入；独立业务文档加载计划携带当前单元、适用共享正文及契约，不混入 stage-rule 加载计划。支持新完整流程的多单元采用、旧流程显式采用及单单元/轻量兼容。
+- **失效、恢复和度量**：比较旧/新消费者，保留未变化对象，报告受影响单元与失效来源；提供旧改名文档的 dry-run、冲突检测和禁止覆盖的完整恢复。进程中断后保守处理锁归属；报告实际加载字节及明确标注的 token 估算，不宣称实测节省。
+
+### Fixed
+
+- 删除把权威全文改名为归档的活跃指令，统一 `requirements.md` 与 `user-stories.md` 稳定路径；完整流程缺失需求根时明确失败，不静默回退 `.full.md` 或以不适用掩盖缺失。保留既有 UI 来源锁、新鲜度、追溯、模块隔离和质量准入行为。
+
+### Changed
+
+- 同步 package/lock、插件、marketplace 与 stage graph 发布版本；九套 harness 全部通过既有构建生成。
+- 验证结果、独立审查和已复现基线失败见 `docs/optimization-notes/mars169-validation.md`；完整 `npm test` 的历史 tdd_mode 路由断言失败已在 `fee14ad` 复现，不宣称全量测试通过。
+
 ## 4.16.0 — 2026-10-15
 
 MARS-168：新增明确采用范围内的产品与 UI 质量门禁及只读质量度量。

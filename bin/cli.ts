@@ -1413,6 +1413,7 @@ Workflow:
   worktree prepare|verify|merge-plan [flags]            Prepare or verify a member worktree
 
 Quality and utilities:
+  document-slices generate|check|plan|recover --module <id> [--unit <id>] [--apply]  Canonical-preserving derived views
   quality metrics [--module <module-id>]     Read-only quality coverage and return-defect metrics
   evidence run --stage <slug> [flags]       Produce controlled evidence (--module/--unit, --refresh for completed stages)
   attest resolve [flags]                     Read-only commit/diff attribution
@@ -1466,6 +1467,7 @@ function main(): void {
     case "recover": throw new Error("Use orchestrate next to continue the active Markdown workflow, or start a new workflow with an explicit work description.");
     case "approve": throw new Error("Use orchestrate report --result approved --user-input Approve for lightweight approval.");
     case "evidence": run("core/tools/aidlc-evidence.ts", rest); break;
+    case "document-slices": run("core/tools/aidlc-document-slices.ts", rest); break;
     case "unit": run("core/tools/aidlc-team-light.ts", rest); break;
     case "module": run("core/tools/aidlc-team-light.ts", ["module", ...rest]); break;
     case "attest":

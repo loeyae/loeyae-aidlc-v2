@@ -1,0 +1,61 @@
+{
+    "group":  "quality",
+    "baseline":  false,
+    "timestamp":  "2026-10-14T18:54:41.756Z",
+    "results":  [
+                    {
+                        "command":  "npx --no-install tsx tests/test_mars168_phase1.ts",
+                        "exit_code":  0,
+                        "duration_ms":  8571,
+                        "log":  "mars169-command-logs/test_mars168_phase1.log"
+                    },
+                    {
+                        "command":  "npx --no-install tsx tests/test_mars168_phase2.ts",
+                        "exit_code":  0,
+                        "duration_ms":  53017,
+                        "log":  "mars169-command-logs/test_mars168_phase2.log"
+                    },
+                    {
+                        "command":  "npx --no-install tsx tests/test_mars168_phase3_ui.ts",
+                        "exit_code":  0,
+                        "duration_ms":  70436,
+                        "log":  "mars169-command-logs/test_mars168_phase3_ui.log"
+                    },
+                    {
+                        "command":  "npx --no-install tsx tests/test_mars168_phase3_delivery.ts",
+                        "exit_code":  0,
+                        "duration_ms":  79244,
+                        "log":  "mars169-command-logs/test_mars168_phase3_delivery.log"
+                    },
+                    {
+                        "command":  "npx --no-install tsx tests/test_mars168_phase4.ts",
+                        "exit_code":  0,
+                        "duration_ms":  55452,
+                        "log":  "mars169-command-logs/test_mars168_phase4.log"
+                    },
+                    {
+                        "command":  "npx --no-install tsx tests/test_mars168_phase5.ts",
+                        "exit_code":  0,
+                        "duration_ms":  11381,
+                        "log":  "mars169-command-logs/test_mars168_phase5.log"
+                    },
+                    {
+                        "command":  "npx --no-install tsx tests/test_mars168_admission.ts",
+                        "exit_code":  0,
+                        "duration_ms":  43840,
+                        "log":  "mars169-command-logs/test_mars168_admission.log"
+                    },
+                    {
+                        "command":  "npx --no-install tsx tests/test_mars168_lifecycle.ts",
+                        "exit_code":  0,
+                        "duration_ms":  21184,
+                        "log":  "mars169-command-logs/test_mars168_lifecycle.log"
+                    },
+                    {
+                        "command":  "npx --no-install tsx tests/test_mars168_report.ts",
+                        "exit_code":  0,
+                        "duration_ms":  28833,
+                        "log":  "mars169-command-logs/test_mars168_report.log"
+                    }
+                ]
+}

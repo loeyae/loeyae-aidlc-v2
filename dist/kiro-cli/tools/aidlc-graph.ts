@@ -152,6 +152,7 @@ const POSITIVE_CONDITIONS = [
 const VALID_CONDITIONS = new Set(["", ...POSITIVE_CONDITIONS, ...POSITIVE_CONDITIONS.map((condition) => `!${condition}`)]);
 
 const VALID_SENSORS = new Set([
+  "document-slice-consistency",
   ...QUALITY_SENSORS,
   "no-todo", "build-success", "test-pass", "traceability", "doc-cascade", "reviewer-required",
   "build-test-evidence", "review-evidence", "test-quality", "contract-baseline",
@@ -338,7 +339,7 @@ export function validateGraph(graph: { stages: StageNode[]; stage_count: number;
 function sourceGraph(): StageGraph {
   const stages = scanStages();
   return {
-    version: "4.16.0",
+    version: "4.17.0",
     stages,
     stage_count: stages.length,
     scopes: [...VALID_SCOPES].sort(),
