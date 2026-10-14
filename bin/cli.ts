@@ -1389,10 +1389,12 @@ Workflow:
   orchestrate next [--module <module-id>]               Read the next directive (per-module after split)
   orchestrate next [--module <id>] --provider-approval <ref>  Continue an approved protected/fallback ProviderPlan
   orchestrate report --stage <slug> --result completed [--gate-decision <id>]  Report a completed stage (--module in split layout)
+  orchestrate profile escalate --signal <ProfileSignal> [--detail <text>]  Escalate the global execution profile from a recorded risk
   orchestrate park [--module <module-id>]               Park the active workflow or one module workflow
   orchestrate archive [--reason <text>]                 Archive a parked/done workflow and its evidence to aidlc/archive/
   orchestrate split --from <workflow-id> [--dry-run]    Split into per-module workflows (aidlc/active/registry.md)
   orchestrate split --from <workflow-id> --replace-lineage <id>[,<id>]  Split although git tracks another active workflow lineage (retires it)
+  orchestrate state measurements [--module <module-id>] Read-only execution-profile release measurements
   orchestrate state verify                              Check git for other workflow lineages and state revision regressions (read-only)
   orchestrate state retire --lineage <id> --user-input Approve --reason <text>  Retire another workflow lineage found in git; the active one stays
   orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason <text>  Carry a module workflow of another lineage over into the active split layout

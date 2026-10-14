@@ -73,6 +73,10 @@ loeyae-aidlc orchestrate diagram-format [--set <mermaid|svg> --user-input "<用�
 
 每个 `run-stage` directive 和成功 report 都有 `handoff_prompt`。Agent 必须原样展示该提示词，提示中包含工作目标、当前阶段、当前单元、产物、review/build/test 和下一步动作。
 
+`run-stage` 还会返回只读的 `rule_load_plan`：`load_now` 是当前阶段及其已选依赖应加载的阶段规则，`deferred` 是已选但应在后续阶段交接时再加载的规则，`selected` 是完整的执行器选中集合。可用 `loeyae-aidlc orchestrate state rules [--module <id>]` 查看不带当前目标的计划。该计划只减少交接上下文，不会跳过阶段、审批、`requires`、产物、sensor、evidence 或 Provider gate；这些 engine gate 始终具有最终约束力。
+
+`loeyae-aidlc orchestrate state measurements [--module <id>]` 输出只读的 `execution_profile_measurements`：它对照历史 standard 选择结果，展示当前 profile 的选中/省略阶段、mandatory 规则保留情况和 legacy 迁移边界。该命令不写入 global 或 module WorkflowState，不能授予任何 report、sensor、evidence、approval 或 release gate pass；在 split 布局指定 `--module` 时，module 视图继承 global `execution_profile`。
+
 ## 项目级 Provider 与 Loeyae 迁移
 
 安装时可显式限制 module/unit/stage/capability binding。外部 Loeyae Provider 挂到通用 `code-generation` Hook：
@@ -263,6 +267,10 @@ loeyae-aidlc attest resolve --base origin/main --head HEAD
 - **未迁移旧项目**（`requirements.md` 无 `REQ-xxx` 或缺 `track` 标签）→ 记 `MIGRATION_REQUIRED`，降级放行并输出 `missing_track` 清单，不硬阻断。
 
 证据文件默认 24 小时过期；跨天续作时上游纯过期不算回归，`next` 会放行。
+
+### Evidence reuse plan
+
+`loeyae-aidlc orchestrate state evidence [--module <id>]` 输出只读 `evidence_reuse_plan`；当前 stage 的 `next` directive 也会附带同一类计划。`reuse` 是可读取的既有证据，`verify` 仍必须正常复验 mandatory gate，`revalidate` 必须重新产证。该计划不授予 gate pass、不会写入状态或 evidence。对 handoff，它只接受当前 stage instance 的规范路径，并校验受控 producer、严格 ISO 时间、module/unit/instance、source revision 与 checker；任何不匹配都转为 `revalidate`。
 
 `diagram-contract` 的 source-only 结果在 source checker、独立 expected contract、generator closure 和几何门禁均通过时可以写成 `final_status: "STATIC_PASS"`，并足以通过不要求目标渲染的 report 门禁；只有 stage/Provider Request 将 `target_operation_required` 设为 `true`（`preview` 或 `render`）时，才必须执行 Provider 的 normal/fit/zoom 证据并达到 `PASS`。Provider 不可用只能保持 `UNVERIFIED`/`NEEDS_CAPABILITY`，不能伪造截图或视觉证据。
 

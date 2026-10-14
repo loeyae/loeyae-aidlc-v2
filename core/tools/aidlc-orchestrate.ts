@@ -108,11 +108,25 @@ import {
   type WorkflowState,
 } from "./aidlc-light-state";
 import {
+  applyExecutionProfile,
+  classifyExecutionProfile,
+  isProfileSignal,
+  type ExecutionProfile,
+  type ProfileScope,
+} from "./aidlc-execution-profile";
+import { buildStagePlan } from "./aidlc-stage-plan";
+import { selectExecutableStages } from "./aidlc-stage-selection";
+import { buildRuleLoadPlan, type RuleLoadPlan } from "./aidlc-rule-load-plan";
+import { buildEvidenceReusePlan, type EvidenceReusePlan } from "./aidlc-evidence-reuse-plan";
+import { buildExecutionProfileReleaseMeasurements, type ExecutionProfileReleaseMeasurements } from "./aidlc-execution-profile-measurements";
+import {
+  evidenceSourceRevision,
   evidenceScopeForInstance,
   extractOwnedState,
   integrationStageSlugs,
   isSplitLayout,
   loadWorkflowParts,
+  loadWorkflowView,
   mergeWorkflowView,
   ownerOfInstance,
   relativeStatePath,
@@ -248,6 +262,10 @@ export interface Directive {
   handoff_status?: "updated" | "unverified";
   handoff_error?: string;
   rules_content?: string[];
+  /** Phase 4: deterministic instruction loading for the current hand-off. */
+  rule_load_plan?: RuleLoadPlan;
+  /** Phase 5: advisory reuse/verification schedule; normal gates remain authoritative. */
+  evidence_reuse_plan?: EvidenceReusePlan;
   provider_context?: ProviderDirectiveContext;
   provider_actions?: readonly ProviderDirectiveAction[];
   [key: string]: unknown;
@@ -293,7 +311,7 @@ const PRD_ELIGIBLE_SCOPES = new Set(FULL_WORKFLOW_SCOPES);
 // Subcommands
 // ---------------------------------------------------------------------------
 
-const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format", "baseline", "state", "registry"] as const;
+const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format", "baseline", "state", "profile", "registry"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
@@ -302,6 +320,7 @@ const NEXT_FLAGS = new Set(["scope", "work", "with-prd", "resume", "status", "te
 const REPORT_FLAGS = new Set(["stage", "result", "user-input", "instruction-ack", "module", "unit", "instance", "owner", "gate-decision"]);
 const SPLIT_FLAGS = new Set(["from", "dry-run", "replace-lineage"]);
 const STATE_FLAGS = new Set(["lineage", "user-input", "reason", "text", "module", "from"]);
+const PROFILE_FLAGS = new Set(["signal", "detail", "module"]);
 const ARCHIVE_FLAGS = new Set(["reason"]);
 const UPGRADE_FLAGS = new Set(["dry-run", "module"]);
 const DIAGRAM_FORMAT_FLAGS = new Set(["set", "user-input"]);
@@ -329,6 +348,23 @@ function loadState(): WorkflowState | null {
 
 function saveState(state: WorkflowState): void {
   saveWorkflowState(PROJECT_ROOT, state);
+}
+
+/**
+ * Phase 1 has one intentional profile entry point: creation of a new global
+ * workflow. It records the scope default as advisory state only; it does not
+ * alter stage selection, and module/integration workflows never call it.
+ */
+function initializeGlobalExecutionProfile(state: WorkflowState): void {
+  if (state.execution_profile !== undefined) return;
+  const classified = classifyExecutionProfile({
+    scope: state.scope as ProfileScope,
+  });
+  state.execution_profile = applyExecutionProfile({
+    classified,
+    at: state.created_at,
+    actor: "engine",
+  });
 }
 
 /**
@@ -366,18 +402,23 @@ export function runtimeChoices(stage: StageNode, state: WorkflowState): string[]
 
 /**
  * Filter stages by scope and the immutable user selections captured in Markdown workflow history.
- * workflow state. User-selected stages never enter the default path.
+ * User-selected stages never enter the default path.
+ *
+ * A persisted lightweight profile is the sole opt-in for the Phase 3 slice.
+ * It may remove only an `ALWAYS` stage which the graph declares as an
+ * instruction-only no-op: it has no sensors or produced artifacts, no
+ * blocking approval, and no selected stage requires it.  In particular, gated stages and every stage
+ * with evidence are retained even when their scope is lightweight.  Missing
+ * (legacy), standard, and complex profiles use the original graph selector
+ * without any change.
  */
 export function getExecutableStages(
   graph: StageGraph,
   scope: string,
   selectedOptionalStages: string[] = [],
+  executionProfile?: ExecutionProfile,
 ): StageNode[] {
-  const selected = new Set(selectedOptionalStages);
-  return graph.stages.filter((stage) =>
-    (stage.execution === "ALWAYS" || stage.scopes.includes(scope))
-    && (stage.selection !== "user" || selected.has(stage.slug))
-  );
+  return selectExecutableStages<StageNode>(graph.stages, scope, selectedOptionalStages, executionProfile);
 }
 
 const DEFAULT_MODULE: ModuleDescriptor = { module_id: "project", name: "Project", service_id: "not-applicable" };
@@ -501,7 +542,7 @@ function routingUnits(state: WorkflowState, modules: ModuleDescriptor[]): Array<
  * Consecutive module stages run module-major; consecutive unit stages run unit-major.
  */
 export function expandStageInstances(graph: StageGraph, state: WorkflowState): StageInstance[] {
-  const stages = getExecutableStages(graph, state.scope, selectedOptionalStages(state));
+  const stages = getExecutableStages(graph, state.scope, selectedOptionalStages(state), state.execution_profile);
 
   const modules = routingModules(state);
   const units = routingUnits(state, modules);
@@ -685,7 +726,7 @@ export function crossModuleRequires(instance: StageInstance, instances: StageIns
 
 
 function reconcileStageSummaries(state: WorkflowState, instances: StageInstance[]): void {
-  for (const stage of getExecutableStages(loadGraph(), state.scope, selectedOptionalStages(state))) {
+  for (const stage of getExecutableStages(loadGraph(), state.scope, selectedOptionalStages(state), state.execution_profile)) {
     const stageInstances = instances.filter((instance) => instance.stage.slug === stage.slug);
     if (stageInstances.length === 0) continue;
     const completed = new Set(completedInstanceIds(state));
@@ -3008,7 +3049,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
         // prior chain documents existing
         const skipped = new Set(state.skipped_stages);
         const executable = new Set(
-          getExecutableStages(loadGraph(), state.scope, selectedOptionalStages(state)).map((candidate) => candidate.slug)
+          getExecutableStages(loadGraph(), state.scope, selectedOptionalStages(state), state.execution_profile).map((candidate) => candidate.slug)
         );
         const cascadeDependencies: Record<string, Array<[string, string]>> = {
           "functional-design": [
@@ -4603,6 +4644,7 @@ async function handleNext(args: string[]): Promise<Directive> {
     const lineage = newLineageCheck([], replace, undefined, "Starting a new workflow", `orchestrate next --scope ${scopeFlag} --work "<work>"`);
     if ("kind" in lineage) return lineage;
     state = createInitialState(scopeFlag, ENGINE_VERSION, undefined, selectedOptionalStages, workDescription);
+    initializeGlobalExecutionProfile(state);
     if (lineage.retire.length > 0) state.retired_lineages = lineage.retire;
     // Only a new global/single workflow records its baseline; createInitialState stays
     // baseline-free so module/integration workflows and pre-4.6 states never get one.
@@ -4656,7 +4698,7 @@ async function handleNext(args: string[]): Promise<Directive> {
         `  PRD option: ${withPrd ? "selected" : "not selected"}\n` +
         `  Baseline commit: ${state.baseline_commit} (created)\n` +
         (state.baseline_repos ? `  Baseline repos: ${renderBaselineRepos(state.baseline_repos)}\n` : "") +
-        `  Executable stages: ${getExecutableStages(graph, scopeFlag, selectedOptionalStages).length}/${graph.stage_count}\n` +
+        `  Executable stages: ${getExecutableStages(graph, scopeFlag, selectedOptionalStages, state.execution_profile).length}/${graph.stage_count}\n` +
         `  Run 'next' again to get the first stage directive.` +
         (gitWarnings.length ? `\n${gitWarnings.map((line) => `  ${line}`).join("\n")}` : ""),
     };
@@ -4673,7 +4715,7 @@ async function handleNext(args: string[]): Promise<Directive> {
   });
 }
 
-interface AdvanceOptions {
+export interface AdvanceOptions {
   /** Legacy: the workflow state itself. Split: the merged view whose owner is being advanced. */
   state: WorkflowState;
   flags: Record<string, string>;
@@ -4694,8 +4736,14 @@ interface AdvanceOptions {
  * (requires, consumes, cross-module dependencies, upstream sensor re-check), current
  * context and optional claim. Shared by the single layout and every split workflow.
  */
-async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directive> {
-  const { state, flags } = opts;
+export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directive> {
+  const { flags } = opts;
+  const originalState = opts.state;
+  // Advance is transactional: all fallible planning/admission work operates on
+  // this clone. The caller-visible state changes only after every gate passes.
+  const state = structuredClone(originalState);
+  const planningState = state;
+  const wasParked = originalState.status === "parked";
   const isResume = "resume" in flags;
   const claimRequested = "claim" in flags;
   const extras = opts.extras || {};
@@ -4710,9 +4758,8 @@ async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directi
         ...extras,
       };
     }
-    // Resume: clear parked status
+    // Resume is provisional until planning and every admission gate succeeds.
     state.status = "running";
-    opts.commit(state);
   }
 
   // Done workflow
@@ -4723,14 +4770,26 @@ async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directi
   // Expand the static graph into the currently known execution instances.
   const instances = expandStageInstances(graph, state);
   const candidates = opts.candidate ? instances.filter(opts.candidate) : instances;
+  // Instance search may record condition skips on the transactional clone.
   const search = claimRequested
-    ? findClaimableModuleInstance(candidates, state, flags.module as string, instances)
-    : findNextInstance(candidates, state, instances);
+    ? findClaimableModuleInstance(candidates, planningState, flags.module as string, instances)
+    : findNextInstance(candidates, planningState, instances);
   const { instance: nextInstance, blocked, conditionError, skippedByCondition } = search;
 
-  if (skippedByCondition && skippedByCondition.length > 0) opts.commit(state);
+  const applyPlanningState = (): void => {
+    const target = originalState as unknown as Record<string, unknown>;
+    const source = planningState as unknown as Record<string, unknown>;
+    for (const key of Object.keys(target)) if (!(key in source)) delete target[key];
+    Object.assign(target, source);
+  };
 
   if (conditionError) {
+    // Preserve the legacy auto-skip persistence for a running workflow, but
+    // never turn a failed parked resume into a visible state transition.
+    if (!wasParked && skippedByCondition && skippedByCondition.length > 0) {
+      applyPlanningState();
+      opts.commit(originalState);
+    }
     return {
       kind: "error",
       message: `🚫 Unknown stage condition "${conditionError.condition}" on "${conditionError.instance.instance_id}". Register the condition in the engine before continuing.`,
@@ -4739,6 +4798,10 @@ async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directi
   }
 
   if (blocked) {
+    if (!wasParked && skippedByCondition && skippedByCondition.length > 0) {
+      applyPlanningState();
+      opts.commit(originalState);
+    }
     return {
       kind: "error",
       message: `🚫 Stage instance "${blocked.instance.instance_id}" (${blocked.instance.stage.name}) is blocked.\n` +
@@ -4753,12 +4816,17 @@ async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directi
 
   if (!nextInstance) {
     if (claimRequested) {
+      if (!wasParked && skippedByCondition && skippedByCondition.length > 0) {
+        applyPlanningState();
+        opts.commit(originalState);
+      }
       return { kind: "error", message: `Module "${flags.module}" has no unclaimed ready stage instance; inspect dependency waiting and active claims with runtime summary.`, ...extras };
     }
     reconcileStageSummaries(state, instances);
     state.status = "done";
     clearActiveContext(state);
-    opts.commit(state);
+    applyPlanningState();
+    opts.commit(originalState);
     return {
       kind: "done",
       message: opts.finishedMessage(candidates.length),
@@ -4770,8 +4838,48 @@ async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directi
     return { kind: "error", message: `--claim can only claim a module stage instance; ${nextInstance.instance_id} is ${nextInstance.axis}-axis`, ...extras };
   }
 
-  const effectiveNextInstance = runtimeInstance(nextInstance, state);
+  const effectiveNextInstance = runtimeInstance(nextInstance, planningState);
   const nextStage = effectiveNextInstance.stage;
+  // Construct this fallible hand-off plan before changing current context,
+  // claims, or committing state. A malformed graph can therefore never
+  // advance a workflow while omitting a selected dependency rule.
+  let ruleLoadPlan: RuleLoadPlan;
+  let evidenceReusePlan: EvidenceReusePlan;
+  try {
+    ruleLoadPlan = buildRuleLoadPlan(graph, {
+      scope: planningState.scope,
+      selectedOptionalStages: selectedOptionalStages(planningState),
+      executionProfile: planningState.execution_profile,
+      targetStageSlug: nextStage.slug,
+    });
+    evidenceReusePlan = buildEvidenceReusePlan(graph, {
+      projectRoot: PROJECT_ROOT,
+      scope: planningState.scope,
+      selectedOptionalStages: selectedOptionalStages(planningState),
+      executionProfile: planningState.execution_profile,
+      evidenceScope: evidenceScopeForInstance(PROJECT_ROOT, effectiveNextInstance.instance_id).label,
+      target: {
+        stage_slug: nextStage.slug,
+        instance_id: effectiveNextInstance.instance_id,
+        axis: effectiveNextInstance.axis,
+        ...(effectiveNextInstance.module_id ? { module_id: effectiveNextInstance.module_id } : {}),
+        ...(effectiveNextInstance.unit_id ? { unit_id: effectiveNextInstance.unit_id } : {}),
+      },
+      expectedSourceRevision: evidenceSourceRevision(PROJECT_ROOT, effectiveNextInstance.instance_id),
+      now: new Date().toISOString(),
+      ruleLoadPlan,
+    });
+  } catch (error) {
+    return {
+      kind: "error",
+      stage: nextStage.slug,
+      stage_instance: effectiveNextInstance.instance_id,
+      message: `🚫 Rule-load plan blocked for "${effectiveNextInstance.instance_id}": ${error instanceof Error ? error.message : String(error)}`,
+      ...extras,
+    };
+  }
+  // Keep all later admission work on the clone too. No speculative condition
+  // skip, resume, claim, or current-context write reaches originalState yet.
   const consumeFailures = checkConsumes(effectiveNextInstance, state, graph, instances);
   if (consumeFailures.length > 0) {
     return {
@@ -4880,8 +4988,9 @@ async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directi
   }
 
   const gate = nextStage.approval === "block";
+  applyPlanningState();
   try {
-    opts.commit(state);
+    opts.commit(originalState);
   } catch (error) {
     if (claimRequested && error instanceof Error && error.message.startsWith("workflow state revision conflict")) return opts.retry();
     throw error;
@@ -4907,6 +5016,8 @@ async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directi
     artifact_root: artifactRoot(effectiveNextInstance),
     evidence_root: evidenceRoot(effectiveNextInstance),
     stage_file: join("core", nextStage.file),
+    rule_load_plan: ruleLoadPlan,
+    evidence_reuse_plan: evidenceReusePlan,
     name: nextStage.name,
     number: nextStage.number,
     phase: nextStage.phase,
@@ -6820,7 +6931,57 @@ function writeAdoptionAdvance(adoption: { ref: WorkflowRef; state: WorkflowState
 // state — lineage / revision verification and lineage retirement (4.13.0, MARS-98)
 // ---------------------------------------------------------------------------
 
-const STATE_USAGE = "Usage: orchestrate state verify | orchestrate state rebuild | orchestrate state retire --lineage <workflow-id>[,<workflow-id>] --user-input Approve --reason \"<why>\" | orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason \"<why>\" | orchestrate state checkpoint --module <id> | orchestrate state recover --module <id> [--user-input Approve --reason \"<why>\"]";
+const PROFILE_USAGE = "Usage: orchestrate profile escalate --signal <ProfileSignal> [--detail <text>]";
+
+/**
+ * Record a risk-driven monotonic escalation in the global lineage profile.
+ * Module/integration state inherits this field and legacy state is never
+ * silently migrated by an administrative command.
+ */
+function handleProfile(args: string[]): Directive {
+  const [action, ...rest] = args;
+  const flags = parseFlags(rest);
+  const invalidFlag = unsupportedFlag(flags, PROFILE_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported profile option: --${invalidFlag}. ${PROFILE_USAGE}` };
+  if (action !== "escalate") return { kind: "error", message: PROFILE_USAGE };
+  if (flags.module !== undefined) {
+    return { kind: "error", message: "profile escalation is global-only; module and integration workflows inherit the global execution_profile. Drop --module." };
+  }
+  const signal = flags.signal;
+  if (signal === undefined || signal === "true" || !isProfileSignal(signal)) {
+    return { kind: "error", message: `profile escalate requires a valid --signal. ${PROFILE_USAGE}` };
+  }
+  if (flags.detail === "true") return { kind: "error", message: `--detail requires text. ${PROFILE_USAGE}` };
+
+  const state = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!state) return { kind: "error", message: "No active global workflow. Start one with orchestrate next --scope <scope> --work <description>." };
+  if (state.execution_profile === undefined) {
+    return { kind: "error", message: "This legacy workflow has no execution_profile. Profile escalation does not implicitly migrate legacy state; continue with its conservative standard selection or start a new workflow." };
+  }
+
+  const previous = state.execution_profile;
+  const classified = classifyExecutionProfile({
+    scope: state.scope as ProfileScope,
+    current: previous,
+    signals: new Set([signal]),
+  });
+  const next = applyExecutionProfile({
+    current: previous,
+    classified,
+    at: new Date().toISOString(),
+    actor: "user",
+    ...(flags.detail !== undefined ? { detail: flags.detail } : {}),
+  });
+  state.execution_profile = next;
+  saveWorkflowState(PROJECT_ROOT, state, GLOBAL_WORKFLOW);
+  return {
+    kind: "print",
+    execution_profile: next,
+    message: `Execution profile ${previous.level} → ${next.level} via ${signal}. Global profile persisted; subsequent stage selection now uses ${next.level} graph semantics.`,
+  };
+}
+
+const STATE_USAGE = "Usage: orchestrate state plan [--module <id>] | orchestrate state rules [--module <id>] | orchestrate state evidence [--module <id>] | orchestrate state measurements [--module <id>] | orchestrate state verify | orchestrate state rebuild | orchestrate state retire --lineage <workflow-id>[,<workflow-id>] --user-input Approve --reason \"<why>\" | orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason \"<why>\" | orchestrate state checkpoint --module <id> | orchestrate state recover --module <id> [--user-input Approve --reason \"<why>\"]";
 
 async function handleState(args: string[]): Promise<Directive> {
   const [action, ...rest] = args;
@@ -6828,6 +6989,10 @@ async function handleState(args: string[]): Promise<Directive> {
   const invalidFlag = unsupportedFlag(flags, STATE_FLAGS);
   if (invalidFlag) return { kind: "error", message: `Unsupported state option: --${invalidFlag}. ${STATE_USAGE}` };
   if (flags.text) return { kind: "error", message: `Unexpected state argument: ${flags.text}. ${STATE_USAGE}` };
+  if (action === "plan") return stagePlanDirective(flags);
+  if (action === "rules") return ruleLoadPlanDirective(flags);
+  if (action === "evidence") return evidenceReusePlanDirective(flags);
+  if (action === "measurements") return executionProfileMeasurementsDirective(flags);
   if (action === "verify") {
     if (Object.keys(flags).length > 0) return { kind: "error", message: `state verify takes no options. ${STATE_USAGE}` };
     return verifyState();
@@ -6838,6 +7003,155 @@ async function handleState(args: string[]): Promise<Directive> {
   if (action === "checkpoint") return checkpointModuleState(flags);
   if (action === "recover") return recoverModuleState(flags);
   return { kind: "error", message: STATE_USAGE };
+}
+
+/**
+ * MARS-161: an observable graph/profile projection. This command is read-only
+ * and shares the executor's graph/profile selector.
+ */
+function stagePlanDirective(flags: Record<string, string>): Directive {
+  if (Object.keys(flags).some((key) => key !== "module")) {
+    return { kind: "error", message: `state plan takes only --module. ${STATE_USAGE}` };
+  }
+  const moduleId = flags.module;
+  if (moduleId === "true" || (moduleId !== undefined && !MODULE_ID_PATTERN.test(moduleId))) {
+    return { kind: "error", message: `state plan --module requires a valid module id. ${STATE_USAGE}` };
+  }
+  if (moduleId !== undefined) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    if (!loaded.split) {
+      return { kind: "error", message: "state plan --module requires the split workflow layout; start module workflows after orchestrate split." };
+    }
+    if (!loaded.parts.has(workflowRefKey(moduleRef(moduleId)))) {
+      return { kind: "error", message: `state plan: module ${moduleId} has no workflow state in the active split layout.` };
+    }
+  }
+  const state = loadWorkflowView(PROJECT_ROOT, moduleId);
+  if (!state) return { kind: "error", message: "No active workflow." };
+  const plan = buildStagePlan(loadGraph(), {
+    scope: state.scope,
+    selectedOptionalStages: selectedOptionalStages(state),
+    executionProfile: state.execution_profile,
+  });
+  return {
+    kind: "print",
+    stage_plan: plan,
+    message: `StagePlan: ${plan.selected.length} selected (${plan.required.length} graph-required), ${plan.skipped.length} skipped; profile ${plan.profile.level} from ${plan.profile.provenance}. This read-only view matches execution selection; gates and evidence requirements remain unchanged.`,
+  };
+}
+
+/**
+ * MARS-161 Phase 4 read path. This exposes the same selected rule files that
+ * are carried in a run-stage hand-off, without loading files or mutating state.
+ */
+function ruleLoadPlanDirective(flags: Record<string, string>): Directive {
+  if (Object.keys(flags).some((key) => key !== "module")) {
+    return { kind: "error", message: `state rules takes only --module. ${STATE_USAGE}` };
+  }
+  const moduleId = flags.module;
+  if (moduleId === "true" || (moduleId !== undefined && !MODULE_ID_PATTERN.test(moduleId))) {
+    return { kind: "error", message: `state rules --module requires a valid module id. ${STATE_USAGE}` };
+  }
+  if (moduleId !== undefined) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    if (!loaded.split) {
+      return { kind: "error", message: "state rules --module requires the split workflow layout; start module workflows after orchestrate split." };
+    }
+    if (!loaded.parts.has(workflowRefKey(moduleRef(moduleId)))) {
+      return { kind: "error", message: `state rules: module ${moduleId} has no workflow state in the active split layout.` };
+    }
+  }
+  const state = loadWorkflowView(PROJECT_ROOT, moduleId);
+  if (!state) return { kind: "error", message: "No active workflow." };
+  const plan = buildRuleLoadPlan(loadGraph(), {
+    scope: state.scope,
+    selectedOptionalStages: selectedOptionalStages(state),
+    executionProfile: state.execution_profile,
+  });
+  return {
+    kind: "print",
+    rule_load_plan: plan,
+    message: `RuleLoadPlan: ${plan.selected.length} selected stage rules; no target is loaded by this read-only view. Profile ${plan.profile.level} from ${plan.profile.provenance}; mandatory rules and declared dependencies remain selected.`,
+  };
+}
+
+/**
+ * MARS-161 Phase 5 read path. This shares Phase 4's selected-rule plan and
+ * only describes reuse or validation work; it cannot grant a gate pass.
+ */
+function evidenceReusePlanDirective(flags: Record<string, string>): Directive {
+  if (Object.keys(flags).some((key) => key !== "module")) {
+    return { kind: "error", message: `state evidence takes only --module. ${STATE_USAGE}` };
+  }
+  const moduleId = flags.module;
+  if (moduleId === "true" || (moduleId !== undefined && !MODULE_ID_PATTERN.test(moduleId))) {
+    return { kind: "error", message: `state evidence --module requires a valid module id. ${STATE_USAGE}` };
+  }
+  if (moduleId !== undefined) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    if (!loaded.split) return { kind: "error", message: "state evidence --module requires the split workflow layout; start module workflows after orchestrate split." };
+    if (!loaded.parts.has(workflowRefKey(moduleRef(moduleId)))) return { kind: "error", message: `state evidence: module ${moduleId} has no workflow state in the active split layout.` };
+  }
+  const state = loadWorkflowView(PROJECT_ROOT, moduleId);
+  if (!state) return { kind: "error", message: "No active workflow." };
+  const graph = loadGraph();
+  const ruleLoadPlan = buildRuleLoadPlan(graph, {
+    scope: state.scope,
+    selectedOptionalStages: selectedOptionalStages(state),
+    executionProfile: state.execution_profile,
+  });
+  const evidenceScope = state.current_stage_instance
+    ? evidenceScopeForInstance(PROJECT_ROOT, state.current_stage_instance).label
+    : moduleId === undefined ? "worktree" : `module:${moduleId}`;
+  const plan = buildEvidenceReusePlan(graph, {
+    projectRoot: PROJECT_ROOT,
+    scope: state.scope,
+    selectedOptionalStages: selectedOptionalStages(state),
+    executionProfile: state.execution_profile,
+    evidenceScope,
+    now: new Date().toISOString(),
+    ruleLoadPlan,
+  });
+  return {
+    kind: "print",
+    evidence_reuse_plan: plan,
+    message: `EvidenceReusePlan: ${plan.reuse.length} reusable, ${plan.verify.length} mandatory verification, ${plan.revalidate.length} revalidation. Read-only: report and sensor gates remain authoritative.`,
+  };
+}
+
+/**
+ * MARS-161 Phase 6 release-observation path. It shares the profile-aware
+ * selector but is strictly read-only and cannot make a release or gate pass.
+ */
+function executionProfileMeasurementsDirective(flags: Record<string, string>): Directive {
+  if (Object.keys(flags).some((key) => key !== "module")) {
+    return { kind: "error", message: `state measurements takes only --module. ${STATE_USAGE}` };
+  }
+  const moduleId = flags.module;
+  if (moduleId === "true" || (moduleId !== undefined && !MODULE_ID_PATTERN.test(moduleId))) {
+    return { kind: "error", message: `state measurements --module requires a valid module id. ${STATE_USAGE}` };
+  }
+  if (moduleId !== undefined) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    if (!loaded.split) return { kind: "error", message: "state measurements --module requires the split workflow layout; start module workflows after orchestrate split." };
+    if (!loaded.parts.has(workflowRefKey(moduleRef(moduleId)))) return { kind: "error", message: `state measurements: module ${moduleId} has no workflow state in the active split layout.` };
+  }
+  const state = loadWorkflowView(PROJECT_ROOT, moduleId);
+  if (!state) return { kind: "error", message: "No active workflow." };
+  const measurements: ExecutionProfileReleaseMeasurements = buildExecutionProfileReleaseMeasurements(loadGraph(), {
+    scope: state.scope,
+    ...(selectedOptionalStages(state).length > 0
+      ? { selectedOptionalStages: selectedOptionalStages(state) }
+      : {}),
+    ...(state.execution_profile !== undefined
+      ? { executionProfile: state.execution_profile }
+      : {}),
+  });
+  return {
+    kind: "print",
+    execution_profile_measurements: measurements,
+    message: `Execution-profile measurements: ${measurements.regression.measured_selected_stage_count}/${measurements.regression.historical_selected_stage_count} stages selected; ${measurements.regression.omitted_stage_slugs.length} safely omitted; legacy profile migration remains read-only. Advisory only: report, sensor, evidence, approval, and release gates remain authoritative.`,
+  };
 }
 
 /**
@@ -7297,7 +7611,7 @@ async function main() {
     console.error(
       JSON.stringify({
         kind: "error",
-        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|archive|split|upgrade|diagram-format|baseline|state> [args...]",
+        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|archive|split|upgrade|diagram-format|baseline|state|profile> [args...]",
       })
     );
     process.exit(1);
@@ -7346,6 +7660,9 @@ async function main() {
       break;
     case "state":
       directive = await handleState(rest);
+      break;
+    case "profile":
+      directive = handleProfile(rest);
       break;
     case "continue":
       directive = await handleContinue(rest[0] || "");
