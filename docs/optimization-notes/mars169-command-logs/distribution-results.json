@@ -4,12 +4,12 @@
     {
       "command": "npx --no-install tsx tests/test_distribution_parity.ts",
       "exit_code": 0,
-      "duration_ms": 938
+      "duration_ms": 1004
     },
     {
       "command": "npx --no-install tsx tests/test_mars169_document_slices.ts --distribution",
       "exit_code": 0,
-      "duration_ms": 41454
+      "duration_ms": 37713
     }
   ]
 }
