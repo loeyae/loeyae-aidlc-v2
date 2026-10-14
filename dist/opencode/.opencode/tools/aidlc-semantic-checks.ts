@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "crypto";
+import { checkSlices } from "./aidlc-document-slices";
 import { QUALITY_SENSORS, QualityBlocked, qualityChangeCheck, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
 import { artifactConsistency, dependencyReadiness, fieldCapability, storyRuleConsistency } from "./aidlc-quality-checks";
 import { qualityUiCheck } from "./aidlc-quality-ui";
@@ -67,6 +68,7 @@ const CONTROLLED_CONTEXT_REQUESTED = STRICT_MODULE_SCOPE
   || Boolean(process.env.AIDLC_ACTIVE_UNIT?.trim());
 
 const MODULE_CONTEXT_SENSORS = new Set([
+  "document-slice-consistency",
   ...QUALITY_SENSORS,
   "diagram-contract",
   "design-intent-coverage",
@@ -125,6 +127,7 @@ function contextAllows(path: string): boolean {
 }
 
 const SENSOR_NAMES = new Set([
+  "document-slice-consistency",
   ...QUALITY_SENSORS,
   "review-evidence", "test-quality", "contract-baseline", "functional-design-completeness",
   "nfr-coverage", "infrastructure-completeness", "implementation-report", "frontend-platform-spec",
@@ -3599,6 +3602,7 @@ function traceabilityMatrix(): Record<string, unknown> {
     // requirements.md stays not_applicable (unchanged).
     const lightweight = lightweightScopeMatrix(currentStage, currentOrder, mod, read);
     if (lightweight) return lightweight;
+    if (["feature", "enterprise", "mvp", "classic"].includes(workflowState.scope)) fail("CANONICAL_INPUT_MISSING: requirements.md is required; restore any legacy .full.md explicitly");
     return { status: "not_applicable", reason: "requirements.md not present yet" };
   }
 
@@ -4386,6 +4390,11 @@ function structuralInvariants(): Record<string, unknown> {
 }
 
 const CHECKERS: Record<string, () => Record<string, unknown> | Promise<Record<string, unknown>>> = {
+  "document-slice-consistency": () => {
+    const state = requiredWorkflowState();
+    return checkSlices({ ...qualityContext(), slices_version: state.document_slices_version,
+      units_executed: state.current_stage === "units-generation" || state.completed_stage_instances.includes(`units-generation@module:${ACTIVE_MODULE}`) });
+  },
   "quality-change-impact": () => qualityChangeCheck(qualityContext()),
   "dependency-readiness": () => dependencyReadiness(qualityContext()),
   "field-capability": () => fieldCapability(qualityContext()),

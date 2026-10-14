@@ -34,6 +34,7 @@ export type Phase = "RED" | "GREEN" | "BASELINE";
 const PHASE_SENSORS: Record<Phase, string> = { RED: "red-test-evidence", GREEN: "green-test-evidence", BASELINE: "baseline-test-evidence" };
 
 export const SEMANTIC_SENSORS = new Set([
+  "document-slice-consistency",
   ...QUALITY_SENSORS,
   "review-evidence",
   "test-quality",

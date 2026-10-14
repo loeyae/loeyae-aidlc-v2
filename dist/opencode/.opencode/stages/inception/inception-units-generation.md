@@ -20,7 +20,8 @@ produces:
   - docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-story-map.md
   - .aidlc/evidence/units-generation/{module-id}/design-intent-coverage.json
   - .aidlc/evidence/units-generation/{module-id}/structural-invariants.json
-sensors: [design-intent-coverage, structural-invariants]
+  - .aidlc/evidence/units-generation/{module-id}/document-slice-consistency.json
+sensors: [design-intent-coverage, structural-invariants, document-slice-consistency]
 requires: [application-design]
 condition: has_unit_generation_needs
 ---
@@ -275,6 +276,10 @@ condition: has_unit_generation_needs
 
 **执行**（参见 `common-token-management.md` 策略 E）：
 
+以下按单元文件名为内容职责示意；受控工具实际将所有单元/共享需求、故事和 index
+存为内容寻址对象，由 `document-slices/manifest.json` 登记实际路径与摘要，不另手写副本。
+应用设计契约继续按原流程维护，不属于需求/故事切片工具的业务解析范围。
+
 - [ ] 读取 `unit-of-work-story-map.md` 确定故事到单元的映射
 - [ ] 读取 `unit-of-work.md` 确定单元包含的组件/服务
 
@@ -283,14 +288,14 @@ condition: has_unit_generation_needs
 - [ ] 为每个单元生成 `unit-{name}-requirements.md`（仅包含该单元相关需求）
 - [ ] 生成 `shared-requirements.md`（跨单元共享的 NFR、全局约束）
 - [ ] 生成 `index.md`（需求索引，极简）
-- [ ] 将原始 `requirements.md` 重命名为 `requirements.full.md`
+- [ ] 保留完整权威 `requirements.md`，原路径和正文不得改名、删除或替换成索引
 
 **用户故事切片**：
 - [ ] 根据 `unit-of-work-story-map.md` 直接按单元拆分故事
 - [ ] 为每个单元生成 `unit-{name}-stories.md`
 - [ ] 生成 `shared-stories.md`（跨单元共享故事，如有）
 - [ ] 生成 `index.md`（故事索引，极简）
-- [ ] 将原始 `stories.md` 重命名为 `stories.full.md`
+- [ ] 保留完整权威 `user-stories.md`，原路径和正文不得改名、删除或替换成索引
 
 **应用设计切片**：
 - [ ] 根据 `unit-of-work.md` 中单元包含的组件/服务进行切片
@@ -300,6 +305,9 @@ condition: has_unit_generation_needs
 - [ ] 保留 `unit-of-work.md`、`unit-of-work-dependency.md`、`unit-of-work-story-map.md` 不变
 
 **切片质量验证**：
+- [ ] 依照 `common-document-slices.md` 在批准映射中登记机器投影，执行 `npx tsx core/tools/aidlc-document-slices.ts generate --module {module-id}`
+- [ ] 执行受控 `evidence run --stage units-generation --module {module-id} --sensor document-slice-consistency`；不得手写通过证据
+- [ ] 新完整流程 ≥2 单元强制生成；单单元/轻量/未执行单元生成/未采用旧项目按明确适用性处理；已有采用记录或 manifest 损坏一律阻断
 - [ ] 验证每个需求至少出现在一个单元切片或 shared 文件中（无遗漏）
 - [ ] 验证每个用户故事至少出现在一个单元切片中
 - [ ] 当共享契约索引非空时，验证 `shared-interfaces.md` 覆盖全部进程内共享声明，并仅索引跨进程机器契约

@@ -119,6 +119,7 @@ import {
 import { buildStagePlan } from "./aidlc-stage-plan";
 import { selectExecutableStages } from "./aidlc-stage-selection";
 import { buildRuleLoadPlan, type RuleLoadPlan } from "./aidlc-rule-load-plan";
+import { buildBusinessDocumentLoadPlan, checkSlices, sliceAdoption, sliceEvidenceErrors, SLICE_SENSOR, type SliceContext, type BusinessDocumentLoadPlan } from "./aidlc-document-slices";
 import { buildEvidenceReusePlan, type EvidenceReusePlan } from "./aidlc-evidence-reuse-plan";
 import { buildExecutionProfileReleaseMeasurements, type ExecutionProfileReleaseMeasurements } from "./aidlc-execution-profile-measurements";
 import {
@@ -266,6 +267,7 @@ export interface Directive {
   rules_content?: string[];
   /** Phase 4: deterministic instruction loading for the current hand-off. */
   rule_load_plan?: RuleLoadPlan;
+  business_document_load_plan?: BusinessDocumentLoadPlan;
   /** Phase 5: advisory reuse/verification schedule; normal gates remain authoritative. */
   evidence_reuse_plan?: EvidenceReusePlan;
   provider_context?: ProviderDirectiveContext;
@@ -1099,6 +1101,10 @@ const MIN_ARTIFACT_BYTES = 16;
  */
 function artifactPresenceFailure(pattern: string, instance: StageInstance, allowProjectAggregate = false, sourceRoot = false): string | undefined {
   const qualitySensor = pattern.replace(/\\/g, "/").match(/\/([^/]+)\.json$/)?.[1];
+  if (qualitySensor === SLICE_SENSOR) {
+    const view = loadWorkflowView(PROJECT_ROOT, instance.module_id);
+    if (view && !sliceAdoption(documentSliceContext(view, instance)).enabled) return undefined;
+  }
   if (qualitySensor && QUALITY_SENSORS.has(qualitySensor)) {
     const view = loadWorkflowView(PROJECT_ROOT, instance.module_id);
     if (view && !qualityAdoption(qualityGateContext(view, instance)).enabled) return undefined;
@@ -2122,12 +2128,36 @@ function phaseEvidenceErrors(
  */
 export async function checkSensors(instance: StageInstance, state: WorkflowState, options: SensorCheckOptions = {}): Promise<SensorResult[]> {
   const stage = instance.stage;
-  if (!stage.sensors || stage.sensors.length === 0) return [];
 
   const failures: SensorResult[] = [];
 
-  for (const sensor of stage.sensors) {
+  // Report is another admission boundary: do not trust a previously issued plan.
+  if (instance.unit_id) {
+    try {
+      const context = documentSliceContext(state, instance);
+      const current = checkSlices(context);
+      if (current.applicable === true) {
+        const source = expandStageInstances(loadGraph(), state).find(i => i.stage.slug === "units-generation" && i.module_id === instance.module_id);
+        if (!source) throw new Error("SLICE_EVIDENCE_MISSING: units-generation source");
+        const failure = validateEvidence(source.stage, SLICE_SENSOR, source, evidence => sliceEvidenceErrors(context, evidence), { ...options, tolerateRevisionDrift: true });
+        if (failure) failures.push(failure);
+      }
+    }
+    catch (error) { failures.push({ sensor: SLICE_SENSOR, passed: false, message: String(error) }); }
+  }
+
+  for (const sensor of stage.sensors || []) {
     if (options.onlySensors && !options.onlySensors.includes(sensor)) continue;
+    if (sensor === SLICE_SENSOR) {
+      try {
+        const ctx = documentSliceContext(state, instance);
+        const current = checkSlices(ctx);
+        if (current.applicable === false) continue;
+        const failure = validateEvidence(stage, sensor, instance, evidence => sliceEvidenceErrors(ctx, evidence), { ...options, tolerateRevisionDrift: true });
+        if (failure) failures.push(failure);
+      } catch (error) { failures.push({ sensor, passed: false, message: String(error) }); }
+      continue;
+    }
     if (QUALITY_SENSORS.has(sensor)) {
       try {
         const context = qualityGateContext(state, instance);
@@ -2382,6 +2412,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
         // 由确定性 producer(traceabilityMatrix)生成 evidence;此处校验其结论。遗留(缺 track)降级放行。
         const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
+          if (["feature", "enterprise", "mvp", "classic"].includes(state.scope) && instance.module_id && !existsSync(join(PROJECT_ROOT, moduleInceptionRoot(instance.module_id), "requirements.md"))) errors.push("CANONICAL_INPUT_MISSING: requirements.md is required; no .full.md fallback");
           if (!["passed", "not_applicable"].includes(String(evidence.status))) errors.push('status must be "passed" or "not_applicable"');
           if (evidence.status === "not_applicable") return errors;
           const broken = Array.isArray(evidence.broken_rows) ? evidence.broken_rows : [];
@@ -3135,6 +3166,11 @@ function qualityGateContext(state: WorkflowState, instance: StageInstance): Qual
   return { root: PROJECT_ROOT, workflow_id: state.workflow_id, module_id: instance.module_id, scope: state.scope, prd_selected: selectedOptionalStages(state).includes("prd-generation"), project_workflow_id: state.parent_workflow_id || state.workflow_id,
     stage: instance.stage.slug, ui_route: uiDesignChoice(state, instance.module_id) || "not-selected",
     quality_version: state.quality_gates_version, code_baseline: adopted && qualityCodeBaseline(PROJECT_ROOT, instance.module_id, state.adoption_baseline || state.baseline_commit, state.completed_stages.includes("build-and-test")) };
+}
+
+function documentSliceContext(state: WorkflowState, instance: StageInstance): SliceContext {
+  return { ...qualityGateContext(state, instance), slices_version: state.document_slices_version,
+    units_executed: instance.stage.slug === "units-generation" || completedInstanceIds(state).includes(`units-generation@module:${instance.module_id}`) };
 }
 
 export function qualityDevelopmentFailures(instance: StageInstance, state: WorkflowState, instances: StageInstance[]): SensorResult[] {
@@ -4114,6 +4150,7 @@ function ensureModuleWorkflow(moduleId: string, work?: string): Directive | null
     module_id: moduleId,
     parent_workflow_id: global.workflow_id,
     ...(global.quality_gates_version ? { quality_gates_version: global.quality_gates_version } : {}),
+    ...(global.document_slices_version ? { document_slices_version: global.document_slices_version } : {}),
     depth: global.depth,
     current_phase: "inception",
   };
@@ -4458,6 +4495,7 @@ function performSplit(fromId: string, dryRun: boolean, trigger: string, replaceL
         ...(ref.kind === "module" ? { module_id: ref.module_id } : {}),
         parent_workflow_id: legacy.workflow_id,
         ...(legacy.quality_gates_version ? { quality_gates_version: legacy.quality_gates_version } : {}),
+        ...(legacy.document_slices_version ? { document_slices_version: legacy.document_slices_version } : {}),
         depth: legacy.depth,
         current_phase: legacy.current_phase,
       };
@@ -4706,6 +4744,7 @@ async function handleNext(args: string[]): Promise<Directive> {
     if ("kind" in lineage) return lineage;
     state = createInitialState(scopeFlag, ENGINE_VERSION, undefined, selectedOptionalStages, workDescription);
     if (["feature", "enterprise", "mvp", "classic"].includes(scopeFlag)) state.quality_gates_version = "1";
+    if (["feature", "enterprise", "mvp", "classic"].includes(scopeFlag)) state.document_slices_version = "1";
     initializeGlobalExecutionProfile(state);
     if (lineage.retire.length > 0) state.retired_lineages = lineage.retire;
     // Only a new global/single workflow records its baseline; createInitialState stays
@@ -4907,7 +4946,15 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   // advance a workflow while omitting a selected dependency rule.
   let ruleLoadPlan: RuleLoadPlan;
   let evidenceReusePlan: EvidenceReusePlan;
+  let businessDocumentLoadPlan: BusinessDocumentLoadPlan | undefined;
   try {
+    if (effectiveNextInstance.unit_id && (["feature", "enterprise", "mvp", "classic"].includes(planningState.scope) || sliceAdoption(documentSliceContext(planningState, effectiveNextInstance)).enabled)) businessDocumentLoadPlan = buildBusinessDocumentLoadPlan(documentSliceContext(planningState, effectiveNextInstance), effectiveNextInstance.unit_id);
+    if (businessDocumentLoadPlan?.mode === "derived") {
+      const source = instances.find(i => i.stage.slug === "units-generation" && i.module_id === effectiveNextInstance.module_id);
+      if (!source) throw new Error("SLICE_EVIDENCE_MISSING: units-generation source");
+      const failure = validateEvidence(source.stage, SLICE_SENSOR, source, evidence => sliceEvidenceErrors(documentSliceContext(planningState, effectiveNextInstance), evidence), { tolerateRevisionDrift: true });
+      if (failure) throw new Error(failure.message);
+    }
     ruleLoadPlan = buildRuleLoadPlan(graph, {
       scope: planningState.scope,
       selectedOptionalStages: selectedOptionalStages(planningState),
@@ -5066,9 +5113,10 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   // Dispatching hosts commonly forward only agent_execution. Carry the same
   // directive-derived object there so delegate/pipeline/mob/review agents cannot
   // receive a weaker, host-authored execution boundary.
-  const agentExecution: AgentExecutionPlan & { execution_policy: ExecutionPolicy } = {
+  const agentExecution: AgentExecutionPlan & { execution_policy: ExecutionPolicy; business_document_load_plan?: BusinessDocumentLoadPlan } = {
     ...plannedAgentExecution,
     execution_policy: executionPolicy,
+    ...(businessDocumentLoadPlan ? { business_document_load_plan: businessDocumentLoadPlan } : {}),
   };
   return {
     kind: "run-stage",
@@ -5081,6 +5129,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
     evidence_root: evidenceRoot(effectiveNextInstance),
     stage_file: join("core", nextStage.file),
     rule_load_plan: ruleLoadPlan,
+    ...(businessDocumentLoadPlan ? { business_document_load_plan: businessDocumentLoadPlan } : {}),
     evidence_reuse_plan: evidenceReusePlan,
     name: nextStage.name,
     number: nextStage.number,
@@ -5100,7 +5149,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
     choices: directiveChoices,
     diagram_format: diagramFormatOf(state),
     ...(providerDirective ? { provider_context: providerDirective.context, provider_actions: providerDirective.actions } : {}),
-    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, agentExecution, executionPolicy, opts.reportCommand?.(effectiveNextInstance), directiveChoices, providerHandoffPrompt(providerDirective, effectiveNextInstance)),
+    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, agentExecution, executionPolicy, opts.reportCommand?.(effectiveNextInstance), directiveChoices, providerHandoffPrompt(providerDirective, effectiveNextInstance)) + (businessDocumentLoadPlan ? `\nBusiness document load plan (${businessDocumentLoadPlan.mode}):\n${businessDocumentLoadPlan.files.map(f => `- ${f.path} (sha256 ${f.sha256})`).join("\n")}\nGates and business edits continue to use canonical requirements.md and user-stories.md.` : ""),
     ...(claimRequested ? { claimed: true, owner: state.active_instances[effectiveNextInstance.instance_id].owner, claim_expires_at: state.active_instances[effectiveNextInstance.instance_id].expires_at } : {}),
     ...extras,
   };

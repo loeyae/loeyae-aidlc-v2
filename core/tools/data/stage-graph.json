@@ -860,11 +860,13 @@
         "docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-dependency.md",
         "docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-story-map.md",
         ".aidlc/evidence/units-generation/{module-id}/design-intent-coverage.json",
-        ".aidlc/evidence/units-generation/{module-id}/structural-invariants.json"
+        ".aidlc/evidence/units-generation/{module-id}/structural-invariants.json",
+        ".aidlc/evidence/units-generation/{module-id}/document-slice-consistency.json"
       ],
       "sensors": [
         "design-intent-coverage",
         "structural-invariants",
+        "document-slice-consistency",
         "no-todo",
         "traceability"
       ],

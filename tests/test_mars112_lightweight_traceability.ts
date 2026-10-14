@@ -263,16 +263,16 @@ try {
   });
 
   // -------------------------------------------------------------------------
-  // Producer side — other scopes stay not_applicable
+  // Full scopes require their canonical root; lightweight anchors remain above.
   // -------------------------------------------------------------------------
-  await section("non-lightweight scope without requirements.md stays not_applicable", () => {
+  await section("non-lightweight scope without requirements.md fails closed", () => {
     const project = lightProject("feature-na", "feature", "# code\ndef f():\n    return 1\n");
     write(project, `${CASES}/_index.md`, "# UC-D index\n- UC-D-001 something\n");
     write(project, `${CASES}/UC-D-001.md`, "---\nid: UC-D-001\nstatus: ready\nsource_ref: x\ntdd_mode: new\n---\n# UC-D-001\nSomething.\n");
     commit(project, "fixture");
-    const result = matrix(project, "code-generation");
-    assert.equal(result.status, "not_applicable");
-    assert.match(String(result.reason), /requirements\.md not present yet/);
+    const result = run(project, [cli, "check", "--sensor", "traceability-matrix", "--module", M01], { AIDLC_ACTIVE_STAGE: "code-generation" });
+    assert.notEqual(result.status, 0, result.out);
+    assert.match(result.out, /CANONICAL_INPUT_MISSING/);
   });
 
   // -------------------------------------------------------------------------

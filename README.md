@@ -336,6 +336,22 @@ npm run test:mars168
 采用、证据和交接格式见 [quality-gates-v1](core/knowledge/protocols/quality-gates-v1.md)；
 13 项实现状态、实际测试结果和试点限制见 [验收报告](docs/optimization-notes/mars168-validation.md)。
 
+## 权威文档与派生切片（MARS-169）
+
+完整 `requirements.md` / `user-stories.md` 保持原路径。新完整流程执行单元生成且 ≥2 单元时，
+按批准故事映射生成确定性派生视图；门禁继续读取全文，开发交接加载当前单元与适用共享正文。
+旧流程未采用时保持 canonical 加载，已有采用记录但缺失/过期的切片会阻断。
+
+```bash
+loeyae-aidlc document-slices generate --module <id>
+loeyae-aidlc document-slices check --module <id>
+loeyae-aidlc document-slices plan --module <id> --unit <unit-id>
+loeyae-aidlc document-slices recover --module <id> # dry-run；无冲突时可显式 --apply
+npm run test:mars169
+```
+
+映射、manifest、采用与恢复契约见 [文档切片协议](core/knowledge/protocols/common-document-slices.md)。
+
 ## 开发
 
 ```bash

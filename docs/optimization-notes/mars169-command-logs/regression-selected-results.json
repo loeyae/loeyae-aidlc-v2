@@ -1,0 +1,10 @@
+{
+  "baseline": null,
+  "results": [
+    {
+      "command": "npx --no-install tsx tests/test_mars112_lightweight_traceability.ts",
+      "exit_code": 0,
+      "duration_ms": 53696
+    }
+  ]
+}
