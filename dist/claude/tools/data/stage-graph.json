@@ -1,5 +1,5 @@
 {
-  "version": "4.14.1",
+  "version": "4.16.0",
   "stages": [
     {
       "slug": "workspace-detection",
@@ -335,11 +335,17 @@
       ],
       "produces": [
         "docs/aidlc/modules/{module-id}/inception/requirements.md",
-        ".aidlc/evidence/requirements-analysis/{module-id}/traceability-matrix.json"
+        ".aidlc/evidence/requirements-analysis/{module-id}/traceability-matrix.json",
+        ".aidlc/evidence/requirements-analysis/{module-id}/quality-change-impact.json",
+        ".aidlc/evidence/requirements-analysis/{module-id}/dependency-readiness.json",
+        ".aidlc/evidence/requirements-analysis/{module-id}/field-capability.json"
       ],
       "sensors": [
         "traceability",
         "traceability-matrix",
+        "quality-change-impact",
+        "dependency-readiness",
+        "field-capability",
         "no-todo"
       ],
       "traceability": "required",
@@ -459,11 +465,17 @@
       ],
       "produces": [
         "docs/aidlc/modules/{module-id}/inception/user-stories.md",
-        ".aidlc/evidence/user-stories/{module-id}/traceability-matrix.json"
+        ".aidlc/evidence/user-stories/{module-id}/traceability-matrix.json",
+        ".aidlc/evidence/user-stories/{module-id}/story-rule-consistency.json",
+        ".aidlc/evidence/user-stories/{module-id}/quality-change-impact.json",
+        ".aidlc/evidence/user-stories/{module-id}/artifact-consistency.json"
       ],
       "sensors": [
         "story-traceability",
         "traceability-matrix",
+        "story-rule-consistency",
+        "quality-change-impact",
+        "artifact-consistency",
         "no-todo",
         "traceability"
       ],
@@ -540,10 +552,12 @@
       "produces": [
         "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md",
         "docs/aidlc/modules/{module-id}/inception/ui-design/ui-generation-lock.json",
-        ".aidlc/evidence/ui-page-planning/{module-id}/ui-artifact-consistency.json"
+        ".aidlc/evidence/ui-page-planning/{module-id}/ui-artifact-consistency.json",
+        ".aidlc/evidence/ui-page-planning/{module-id}/ui-behavior-consistency.json"
       ],
       "sensors": [
         "ui-artifact-consistency",
+        "ui-behavior-consistency",
         "no-todo",
         "traceability"
       ],
@@ -614,10 +628,12 @@
       ],
       "produces": [
         "docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json",
-        ".aidlc/evidence/ui-figma-generation/{module-id}/ui-artifact-consistency.json"
+        ".aidlc/evidence/ui-figma-generation/{module-id}/ui-artifact-consistency.json",
+        ".aidlc/evidence/ui-figma-generation/{module-id}/ui-behavior-consistency.json"
       ],
       "sensors": [
         "ui-artifact-consistency",
+        "ui-behavior-consistency",
         "no-todo",
         "traceability"
       ],
@@ -657,10 +673,12 @@
       "produces": [
         "docs/aidlc/modules/{module-id}/inception/ui-mock/",
         "docs/aidlc/modules/{module-id}/inception/ui-mock/ui-mock-manifest.json",
-        ".aidlc/evidence/ui-mock-generation/{module-id}/ui-artifact-consistency.json"
+        ".aidlc/evidence/ui-mock-generation/{module-id}/ui-artifact-consistency.json",
+        ".aidlc/evidence/ui-mock-generation/{module-id}/ui-behavior-consistency.json"
       ],
       "sensors": [
         "ui-artifact-consistency",
+        "ui-behavior-consistency",
         "no-todo",
         "traceability"
       ],
@@ -701,9 +719,15 @@
       ],
       "produces": [
         "docs/aidlc/modules/{module-id}/inception/cross-validation-report.md",
-        ".aidlc/evidence/cross-validation/{module-id}/inception-consistency.json"
+        ".aidlc/evidence/cross-validation/{module-id}/inception-consistency.json",
+        ".aidlc/evidence/cross-validation/{module-id}/quality-change-impact.json",
+        ".aidlc/evidence/cross-validation/{module-id}/delivery-readiness.json",
+        ".aidlc/evidence/cross-validation/{module-id}/artifact-consistency.json"
       ],
       "sensors": [
+        "quality-change-impact",
+        "artifact-consistency",
+        "delivery-readiness",
         "inception-consistency",
         "no-todo",
         "traceability"

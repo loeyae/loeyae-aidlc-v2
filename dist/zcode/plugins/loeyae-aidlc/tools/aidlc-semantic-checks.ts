@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from "crypto";
+import { QUALITY_SENSORS, QualityBlocked, qualityChangeCheck, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
+import { artifactConsistency, dependencyReadiness, fieldCapability, storyRuleConsistency } from "./aidlc-quality-checks";
+import { qualityUiCheck } from "./aidlc-quality-ui";
+import { deliveryReadiness } from "./aidlc-quality-delivery";
 import { runSync } from "./aidlc-spawn";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "fs";
 import { basename, dirname, join, relative, resolve, sep } from "path";
@@ -63,6 +67,7 @@ const CONTROLLED_CONTEXT_REQUESTED = STRICT_MODULE_SCOPE
   || Boolean(process.env.AIDLC_ACTIVE_UNIT?.trim());
 
 const MODULE_CONTEXT_SENSORS = new Set([
+  ...QUALITY_SENSORS,
   "diagram-contract",
   "design-intent-coverage",
   "structural-invariants",
@@ -120,6 +125,7 @@ function contextAllows(path: string): boolean {
 }
 
 const SENSOR_NAMES = new Set([
+  ...QUALITY_SENSORS,
   "review-evidence", "test-quality", "contract-baseline", "functional-design-completeness",
   "nfr-coverage", "infrastructure-completeness", "implementation-report", "frontend-platform-spec",
   "subagent-evidence", "template-completeness", "recovery-evidence",
@@ -326,6 +332,12 @@ function stringArray(value: unknown, field: string): string[] {
 function output(value: Record<string, unknown>): void { process.stdout.write(`${JSON.stringify(value)}\n`); }
 
 type UiRoute = "html-mock" | "figma-create" | "figma-existing" | "skip" | "not-selected";
+function qualityContext(): QualityContext {
+  const state = requiredWorkflowState();
+  const adopted = Boolean(state.quality_gates_version || existsSync(join(ROOT, contextual("docs/aidlc/inception/quality-adoption.json"))));
+  return { root: ROOT, workflow_id: state.workflow_id, module_id: ACTIVE_MODULE, scope: state.scope, stage: state.current_stage, prd_selected: selectedPrdRoute(), project_workflow_id: state.parent_workflow_id || state.workflow_id,
+    ui_route: selectedUiRoute(), quality_version: state.quality_gates_version, code_baseline: adopted && qualityCodeBaseline(ROOT, ACTIVE_MODULE, state.adoption_baseline || state.baseline_commit, state.completed_stages.includes("build-and-test")) };
+}
 const UI_ROUTES = new Set<UiRoute>(["html-mock", "figma-create", "figma-existing", "skip", "not-selected"]);
 const REQUIREMENT_ID = /\b(?:REQ|FR)-[A-Z0-9][A-Z0-9_-]*\b/gi;
 const STORY_ID = /\bUS-[A-Z0-9][A-Z0-9_-]*\b/gi;
@@ -448,6 +460,7 @@ function addElementTally(into: ElementTally, add: ElementTally): void {
 }
 
 function htmlArtifactContract(plan: PagePlanContract): DesignArtifactContract {
+  if (qualityContext().quality_version || existsSync(join(ROOT, contextual("docs/aidlc/inception/quality-adoption.json")))) qualityUiCheck(qualityContext());
   const manifestPath = join(ROOT, contextual("docs/aidlc/inception/ui-mock/ui-mock-manifest.json"));
   if (!existsSync(manifestPath)) fail(`HTML Mock manifest is missing: ${relativePath(manifestPath)}`);
   const manifest = jsonFile(manifestPath);
@@ -4373,6 +4386,13 @@ function structuralInvariants(): Record<string, unknown> {
 }
 
 const CHECKERS: Record<string, () => Record<string, unknown> | Promise<Record<string, unknown>>> = {
+  "quality-change-impact": () => qualityChangeCheck(qualityContext()),
+  "dependency-readiness": () => dependencyReadiness(qualityContext()),
+  "field-capability": () => fieldCapability(qualityContext()),
+  "story-rule-consistency": () => storyRuleConsistency(qualityContext()),
+  "ui-behavior-consistency": () => qualityUiCheck(qualityContext()),
+  "delivery-readiness": () => deliveryReadiness(qualityContext(), true),
+  "artifact-consistency": () => artifactConsistency(qualityContext()),
   "review-evidence": reviewEvidence,
   "test-quality": testQuality,
   "contract-baseline": contractBaseline,
@@ -4389,7 +4409,7 @@ const CHECKERS: Record<string, () => Record<string, unknown> | Promise<Record<st
   "design-intent-coverage": designIntentCoverage,
   "ui-design-alignment": uiAlignment,
   "ui-artifact-consistency": uiArtifactConsistency,
-  "inception-consistency": inceptionConsistency,
+  "inception-consistency": () => ({ ...inceptionConsistency(), quality: deliveryReadiness(qualityContext(), true) }),
   "test-case-derivation": testCaseDerivation,
   "red-test-evidence": () => phaseEvidenceCheck("red-test-evidence"),
   "green-test-evidence": () => phaseEvidenceCheck("green-test-evidence"),
@@ -4406,6 +4426,7 @@ try {
   assertSemanticContext(sensor);
   output(await CHECKERS[sensor]());
 } catch (error) {
+  if (error instanceof QualityBlocked) output({ status: "blocked", issues: error.issues });
   console.error(`Semantic checker blocked: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 }

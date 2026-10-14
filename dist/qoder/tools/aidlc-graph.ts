@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
+import { QUALITY_SENSORS } from "./aidlc-quality-gates";
 import { dirname, isAbsolute, join, normalize, resolve } from "path";
 import { fileURLToPath } from "url";
 import { loadAgentCatalog } from "./aidlc-agent-runtime";
@@ -151,6 +152,7 @@ const POSITIVE_CONDITIONS = [
 const VALID_CONDITIONS = new Set(["", ...POSITIVE_CONDITIONS, ...POSITIVE_CONDITIONS.map((condition) => `!${condition}`)]);
 
 const VALID_SENSORS = new Set([
+  ...QUALITY_SENSORS,
   "no-todo", "build-success", "test-pass", "traceability", "doc-cascade", "reviewer-required",
   "build-test-evidence", "review-evidence", "test-quality", "contract-baseline",
   "functional-design-completeness", "nfr-coverage", "infrastructure-completeness", "implementation-report",
@@ -336,7 +338,7 @@ export function validateGraph(graph: { stages: StageNode[]; stage_count: number;
 function sourceGraph(): StageGraph {
   const stages = scanStages();
   return {
-    version: "4.14.1",
+    version: "4.16.0",
     stages,
     stage_count: stages.length,
     scopes: [...VALID_SCOPES].sort(),

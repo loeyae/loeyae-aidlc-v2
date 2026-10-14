@@ -1,0 +1,45 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { QualityFixture } from "./mars168_fixture";
+import { qualitySnapshots, type QualityDocument, type QualityChange } from "../core/tools/aidlc-quality-gates";
+
+const story = new QualityFixture(); story.stage("user-stories"); story.pass("story-rule-consistency");
+const original = readFileSync(join(story.root, `${story.base}/user-stories.md`), "utf8");
+story.write(`${story.base}/user-stories.md`, original + "\n## US-001 Duplicate definition\nConflicting story.\n");
+story.blocked("story-rule-consistency", "STORY_DEFINITION_DUPLICATE");
+story.write(`${story.base}/user-stories.md`, original);
+story.write(`${story.base}/epics/copy.md`, original); story.sync(); story.pass("story-rule-consistency");
+story.write(`${story.base}/epics/copy.md`, original.replace("Ready products become published", "Draft products become published")); story.sync(); story.blocked("story-rule-consistency", "STORY_COPY_DIVERGED");
+story.write(`${story.base}/epics/copy.md`, "Reference US-001, US-001 and AC-001, AC-001\n"); story.sync(); story.pass("story-rule-consistency");
+story.write(`${story.base}/user-stories.md`, "### AC-999 Orphan\nNo owning story.\n" + original); story.blocked("story-rule-consistency", "AC_OWNER_MISSING");
+
+const fields = new QualityFixture(); fields.stage("user-stories"); fields.pass("artifact-consistency");
+const mappings = fields.req.artifact_mappings as Array<{ path: string; field_uses: Array<{ id: string; granularity: string; definition: string }>; decision_uses: unknown[]; depends_on: string[] }>;
+mappings[0].field_uses[0].granularity = "SPU"; fields.sync(); fields.blocked("artifact-consistency", "ARTIFACT_FIELD_CONFLICT");
+mappings[0].field_uses[0].granularity = "SKU";
+(fields.req.field_contracts as Array<{ aliases: string[] }>)[0].aliases.push("FIELD-NAME"); mappings[0].field_uses.push({ id: "FIELD-NAME", granularity: "SKU", definition: "localized product label" }); fields.sync(); fields.pass("artifact-consistency");
+fields.req.decision_contracts = [{ id: "DEC-OLD", status: "superseded", source: `${fields.base}/source.md`, replaced_by: "DEC-NEW" }, { id: "DEC-NEW", status: "effective", source: `${fields.base}/source.md` }];
+mappings[0].decision_uses = [{ id: "DEC-OLD", usage: "active" }, { id: "DEC-NEW", usage: "active" }]; fields.sync(); fields.blocked("artifact-consistency", "ARTIFACT_SUPERSEDED_RULE_USED");
+mappings[0].decision_uses = [{ id: "DEC-OLD", usage: "history", rationale: "historical adoption decision" }, { id: "DEC-NEW", usage: "active" }]; fields.sync(); fields.pass("artifact-consistency");
+mappings[0].depends_on = ["NEW-DEPENDENCY"]; fields.sync(); fields.blocked("artifact-consistency", "CHANGE_DEPENDENCY_MISSING");
+
+const change = new QualityFixture();
+const spec = `${change.base}/spec.md`, consumer = `${change.base}/consumer.md`;
+change.write(spec, "REQ-001 approved FIELD-LABEL localized product label\n"); change.write(consumer, "REQ-001 consumer uses FIELD-LABEL localized product label\n");
+change.req.artifacts = [{ id: "spec", path: spec, sha256: change.hash(spec), ids: ["FIELD-LABEL"], depends_on: [] }, { id: "consumer", path: consumer, sha256: change.hash(consumer), ids: ["FIELD-LABEL"], depends_on: ["spec"] }];
+(change.req.artifact_mappings as unknown[]).push(...[spec, consumer].map(path => ({ path, field_uses: [{ id: "FIELD-LABEL", granularity: "SKU", definition: "localized product label" }], decision_uses: [], depends_on: path === consumer ? ["spec"] : [] })));
+change.sync(); change.pass("quality-change-impact");
+const old = qualitySnapshots(change.ctx, change.req as unknown as QualityDocument);
+change.write(spec, "REQ-001 deleted label contract\n");
+(change.req.artifacts as Array<{ sha256: string }>)[0].sha256 = change.hash(spec); change.sync(); change.blocked("quality-change-impact", "CHANGE_IMPACT_UNMAPPED");
+const now = qualitySnapshots(change.ctx, change.req as unknown as QualityDocument);
+const changed: QualityChange = { id: "CHANGE-1", kind: "semantic", before: [old.find(s => s.path === spec)!], after: [now.find(s => s.path === spec)!], affected: ["spec"], synchronized: ["spec"], reverified: ["spec"], route: "in-flight", reverification_review: `${change.base}/change-review.json` };
+change.req.changes = [changed]; change.sync(); change.review("change", ["spec"], [...qualitySnapshots(change.ctx, change.req as unknown as QualityDocument).map(s => s.path), changed.before[0].content_path!]); change.blocked("quality-change-impact", "CHANGE_ARTIFACT_OMITTED");
+changed.affected = [...new Set([...old, ...now].map(s => s.id))]; changed.synchronized = [...changed.affected]; changed.reverified = [...changed.affected];
+change.sync(); change.review("change", changed.affected, [...qualitySnapshots(change.ctx, change.req as unknown as QualityDocument).map(s => s.path), changed.before[0].content_path!]); change.pass("quality-change-impact");
+assert.ok(changed.affected.includes("consumer"));
+change.write(changed.before[0].content_path!, "tampered historical source\n");
+const staleHistory = change.run("tests/gate_probe.ts", ["requirements-analysis@module:shop", "sensors", "quality-change-impact", "--module", "shop"]);
+assert.ok(JSON.parse(staleHistory.stdout).failures.length > 0, "gate must invalidate evidence when actual before text changes");
+console.log("PASS MARS-168 phase 4: definitions/copies, aliases/history, grain/decision mismatch, new dependencies, omitted changes and deleted-ID old consumers");

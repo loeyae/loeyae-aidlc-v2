@@ -16,7 +16,8 @@ produces:
   - docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md
   - docs/aidlc/modules/{module-id}/inception/ui-design/ui-generation-lock.json
   - .aidlc/evidence/ui-page-planning/{module-id}/ui-artifact-consistency.json
-sensors: [ui-artifact-consistency]
+  - .aidlc/evidence/ui-page-planning/{module-id}/ui-behavior-consistency.json
+sensors: [ui-artifact-consistency, ui-behavior-consistency]
 requires: [ui-mock]
 condition: ui_design_selected
 ---

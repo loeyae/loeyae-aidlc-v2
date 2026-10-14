@@ -14,10 +14,17 @@ consumes:
 produces:
   - docs/aidlc/modules/{module-id}/inception/user-stories.md
   - .aidlc/evidence/user-stories/{module-id}/traceability-matrix.json
-sensors: [story-traceability, traceability-matrix]
+  - .aidlc/evidence/user-stories/{module-id}/story-rule-consistency.json
+  - .aidlc/evidence/user-stories/{module-id}/quality-change-impact.json
+  - .aidlc/evidence/user-stories/{module-id}/artifact-consistency.json
+sensors: [story-traceability, traceability-matrix, story-rule-consistency, quality-change-impact, artifact-consistency]
 requires: [requirements-analysis]
 ---
 # 用户故事 - 详细步骤
+
+质量门禁 v1：在当前故事的唯一 `aidlc-quality` 章节维护 rules、rule_review。
+高风险规则全集来自需求 inventory；UI 正常路径与 API 防御路径分别登记。
+公式等价性由绑定本次输入与边界实例的审查提供，结构检查不替代语义审查。
 
 ## 目的
 **将需求转化为以用户为中心的故事，并附带验收标准**

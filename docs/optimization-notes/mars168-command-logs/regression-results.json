@@ -1,0 +1,121 @@
+{
+  "group": "regression",
+  "baseline": false,
+  "timestamp": "2026-10-14T16:33:04.178Z",
+  "results": [
+    {
+      "command": "npx --no-install tsx tests/test_mars108_traceability_sensor.ts",
+      "exit_code": 0,
+      "duration_ms": 516,
+      "log": "mars168-command-logs/test_mars108_traceability_sensor.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_v4_9_0_nested_repo.ts",
+      "exit_code": 1,
+      "duration_ms": 775857,
+      "log": "mars168-command-logs/test_v4_9_0_nested_repo.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_v4_10_1_adoption_exemption.ts",
+      "exit_code": 0,
+      "duration_ms": 148354,
+      "log": "mars168-command-logs/test_v4_10_1_adoption_exemption.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_orchestrate_archive.ts",
+      "exit_code": 0,
+      "duration_ms": 16320,
+      "log": "mars168-command-logs/test_orchestrate_archive.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_mars161_execution_profile_phase2.ts",
+      "exit_code": 0,
+      "duration_ms": 8503,
+      "log": "mars168-command-logs/test_mars161_execution_profile_phase2.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_mars161_execution_profile_phase3.ts",
+      "exit_code": 0,
+      "duration_ms": 11568,
+      "log": "mars168-command-logs/test_mars161_execution_profile_phase3.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_mars161_execution_profile_phase4.ts",
+      "exit_code": 0,
+      "duration_ms": 13465,
+      "log": "mars168-command-logs/test_mars161_execution_profile_phase4.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_mars161_execution_profile_phase5.ts",
+      "exit_code": 0,
+      "duration_ms": 4993,
+      "log": "mars168-command-logs/test_mars161_execution_profile_phase5.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_mars161_execution_profile_phase6.ts",
+      "exit_code": 0,
+      "duration_ms": 6259,
+      "log": "mars168-command-logs/test_mars161_execution_profile_phase6.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_aws_light_workflow.ts",
+      "exit_code": 0,
+      "duration_ms": 12256,
+      "log": "mars168-command-logs/test_aws_light_workflow.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_v4_phase1_phase2.ts",
+      "exit_code": 0,
+      "duration_ms": 36809,
+      "log": "mars168-command-logs/test_v4_phase1_phase2.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_mars90_stage_aligned_gates.ts",
+      "exit_code": 0,
+      "duration_ms": 39443,
+      "log": "mars168-command-logs/test_mars90_stage_aligned_gates.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_mars112_lightweight_traceability.ts",
+      "exit_code": 0,
+      "duration_ms": 45522,
+      "log": "mars168-command-logs/test_mars112_lightweight_traceability.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_ui_generation_governance.ts",
+      "exit_code": 0,
+      "duration_ms": 18943,
+      "log": "mars168-command-logs/test_ui_generation_governance.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_mars159_ui_freshness.ts",
+      "exit_code": 0,
+      "duration_ms": 36342,
+      "log": "mars168-command-logs/test_mars159_ui_freshness.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_mars159_module_ledger.ts",
+      "exit_code": 0,
+      "duration_ms": 41828,
+      "log": "mars168-command-logs/test_mars159_module_ledger.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_v4_3_module_workflows.ts",
+      "exit_code": 1,
+      "duration_ms": 59781,
+      "log": "mars168-command-logs/test_v4_3_module_workflows.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_v4_8_1_checker_scope.ts",
+      "exit_code": 0,
+      "duration_ms": 81320,
+      "log": "mars168-command-logs/test_v4_8_1_checker_scope.log"
+    },
+    {
+      "command": "npx --no-install tsx tests/test_v4_10_0_adoption_baseline.ts",
+      "exit_code": 0,
+      "duration_ms": 122264,
+      "log": "mars168-command-logs/test_v4_10_0_adoption_baseline.log"
+    }
+  ]
+}

@@ -1,5 +1,33 @@
 # Changelog
 
+## 4.16.0 — 2026-10-15
+
+MARS-168：新增明确采用范围内的产品与 UI 质量门禁及只读质量度量。
+
+### Added
+
+- **采用策略与受控证据**：新建 full workflow 启用质量门禁 v1；旧流程需显式采用。证据绑定 workflow/module/交付范围、UI route、检查器版本及当前输入 SHA-256，并通过真实 producer、report 和下游准入校验。
+- **依赖、字段与故事检查**：核对关键外部依赖确认、字段能力与必要性能验证、故事规则及边界示例；区分正常 UI 路径、禁用/隐藏约束与 API 防御。自然语言结论依赖绑定实际输入的语义审查，不宣称自动证明等价性。
+- **HTML、区域及操作闭环**：HTML Mock 接入本地静态校验和 DOM 检查，按批准页面契约核对区域、Story/AC 归属、状态、操作目标及成功/失败/异步反馈；Figma、skip 和无 UI 按各自路线验证。
+- **变更失效与复验**：保存变化前正文及链接 checkpoint，使用旧/新影响图发现遗漏消费者；受影响证据失效后需同步和复验，存在代码基线的产品语义变更遵循既有 CR 路由。
+- **交开发与真实准入**：聚合当前专项证据、交接包及阻断项，实际开发准入还需当前开发接收和技术复核。I10 产品/UI 就绪不替代适用的 I11/I12/I13、所选 PRD 及 TDD 门禁。
+- **跨产物对账与度量**：核对 Story/AC 定义和已有副本、字段粒度/别名及有效/废止决定，按实际生成产物检查同步遗漏；新增只读 `quality metrics --module <id>`，缺失数据标为未知，不增加业务阻断 sensor。
+
+### Changed
+
+- 同步安装插件、marketplace 和 stage graph 的发布版本；全部九套 harness 由既有构建流程生成。保留模块隔离、单次全量 UI 验收、定向复验、旧流程及 execution profile 行为。
+- 框架 fixture 验证与真实业务试点分开报告；M02 原始业务材料缺失，尚未验证真实业务闭环、生产性能或缺陷回流改善。
+
+## 4.15.0
+
+补记代码基线 `39a0399` 中已实现的 execution profile 能力（MARS-161）；未记录独立发布日期。
+
+### Added
+
+- 持久化 `lightweight` / `standard` / `complex` execution profile、风险信号及受控升级；旧状态按 conservative standard 解释，读取时不自动迁移或回写。
+- Profile-aware 阶段选择、实例绑定的执行计划和规则加载计划，以及 evidence reuse/verify/revalidate 建议；不绕过原有 sensor、approval 或 report 门禁。
+- 只读 `orchestrate state measurements [--module <id>]`，观察选择器一致性、必须规则保留及迁移情况；度量仅作建议，不作为发布或门禁授权。
+
 ## 4.14.1
 
 UI 验收新鲜度不再被无关模块推进 `origin/main` 永久拦截；模块 state/契约获得可从受保护 ledger 恢复的 checkpoint；Agent directive 携带确定性执行策略（MARS-159 / MARS-160）。

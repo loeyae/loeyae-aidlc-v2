@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "crypto";
+import { QUALITY_SENSORS, qualityAdoption, recordQualityCheckpoint, type QualitySnapshot } from "./aidlc-quality-gates";
 import { createRequire } from "module";
 import {
   closeSync,
@@ -33,6 +34,7 @@ export type Phase = "RED" | "GREEN" | "BASELINE";
 const PHASE_SENSORS: Record<Phase, string> = { RED: "red-test-evidence", GREEN: "green-test-evidence", BASELINE: "baseline-test-evidence" };
 
 export const SEMANTIC_SENSORS = new Set([
+  ...QUALITY_SENSORS,
   "review-evidence",
   "test-quality",
   "contract-baseline",
@@ -584,6 +586,7 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
       exit_code: exitCode,
       status: "passed",
       duration_ms: duration,
+      ...(QUALITY_SENSORS.has(sensor) ? { argv, stdout_digest: createHash("sha256").update(stdout).digest("hex"), stderr_digest: createHash("sha256").update(stderr).digest("hex") } : {}),
     },
   };
 }
@@ -839,13 +842,17 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   const declarations = (config?.commands || []).filter((command) => command.role === "semantic" && command.sensor === sensor);
   if (declarations.length > 1) fail(`allowlist must declare at most one built-in semantic checker for ${sensor}`);
   const result = runSemanticCommand(sensor, declarations[0]?.timeout_ms || DEFAULT_TIMEOUT_MS, state);
+  const executionId = randomUUID();
+  if (sensor === "quality-change-impact" && result.payload.applicable === true) {
+    result.payload.quality_checkpoint_digest = recordQualityCheckpoint({ root: PROJECT_ROOT, workflow_id: state.workflow_id, project_workflow_id: state.parent_workflow_id || state.workflow_id, module_id: state.current_module, scope: state.scope, stage: options.stage, ui_route: String(result.payload.ui_route), quality_version: state.quality_gates_version }, result.payload.quality_snapshots as QualitySnapshot[], executionId);
+  }
   const output = options.output || evidenceOutput(options.stage, sensor, undefined, state);
   const unsigned = {
     ...result.payload,
     ...executionContext(state),
     evidence_version: "1",
     timestamp: new Date().toISOString(),
-    producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() },
+    producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: executionId },
     source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance),
     checker: result.execution,
   };
@@ -1017,7 +1024,8 @@ function declaredSemanticSensors(stage: string): string[] {
 }
 
 function produceAllSemantic(options: ProducerOptions, state: ProducerState, config: EvidenceConfig | null): void {
-  const sensors = declaredSemanticSensors(options.stage);
+  const adopted = qualityAdoption({ root: PROJECT_ROOT, workflow_id: state.workflow_id, project_workflow_id: state.parent_workflow_id || state.workflow_id, module_id: state.current_module, scope: state.scope, stage: options.stage, ui_route: "not-selected", quality_version: state.quality_gates_version }).enabled;
+  const sensors = declaredSemanticSensors(options.stage).filter(sensor => !QUALITY_SENSORS.has(sensor) || adopted);
   if (sensors.length === 0) fail(`stage ${options.stage} declares no semantic sensors; use the stage's ordinary report gates instead`);
   // Checked up front so no other sensor's evidence is written before a RED/GREEN/BASELINE refusal.
   if (sensors.includes("red-test-evidence") || sensors.includes("green-test-evidence")) assertPhaseConfigBinding(options);

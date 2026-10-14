@@ -129,6 +129,7 @@ export interface WorkflowState {
    * It deliberately remains absent on legacy files until explicitly initialized.
    */
   execution_profile?: ExecutionProfile;
+  quality_gates_version?: string;
   revision: number;
   scope: string;
   depth: string;
@@ -619,6 +620,7 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
   return {
     format: "markdown-workflow",
     version: scalar(markdown, "Engine Version"),
+    ...(scalar(markdown, "Quality Gates Version", false) ? { quality_gates_version: scalar(markdown, "Quality Gates Version", false) } : {}),
     workflow_id: scalar(markdown, "Workflow ID"),
     work_description: scalar(markdown, "Work"),
     ...(kind ? { workflow_kind: kind as WorkflowKind } : {}),
@@ -675,6 +677,7 @@ export function renderLightWorkflowState(state: WorkflowState): string {
 - Status: ${state.status}
 - Revision: ${state.revision}
 - Engine Version: ${clean(state.version)}
+${state.quality_gates_version ? `- Quality Gates Version: ${clean(state.quality_gates_version)}\n` : ""}
 ${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}${state.diagram_format ? `- Diagram Format: ${state.diagram_format}\n` : ""}${state.baseline_commit !== undefined ? `- Baseline Commit: ${clean(state.baseline_commit)}\n- Baseline Source: ${clean(state.baseline_source || "")}\n` : ""}${state.baseline_history !== undefined ? `- Baseline History: ${state.baseline_history.map(clean).join(", ")}\n` : ""}${state.baseline_repos !== undefined ? `- Baseline Repos: ${clean(renderBaselineRepos(state.baseline_repos))}\n` : ""}${state.baseline_repos_history !== undefined ? `- Baseline Repos History: ${clean(renderBaselineReposHistory(state.baseline_repos_history))}\n` : ""}${renderAdoption(state)}${state.retired_lineages?.length ? `- Retired Lineages: ${state.retired_lineages.map(clean).join(", ")}\n` : ""}- Depth: ${clean(state.depth)}
 - Current Phase: ${clean(state.current_phase)}
 - Current Stage: ${cell(state.current_stage)}

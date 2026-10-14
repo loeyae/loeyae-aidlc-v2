@@ -320,6 +320,22 @@ loeyae-aidlc export --help
 loeyae-aidlc docx --help
 ```
 
+## 产品与 UI 质量门禁（MARS-168）
+
+新建 full workflow 启用质量门禁 v1；旧 workflow 保持原门禁，明确采用后再补齐证据。
+需求、故事、UI 和交开发前检查当前输入摘要、依赖确认、字段能力、规则、区域追溯、
+状态反馈及变更复验。HTML Mock 使用本地校验器；Figma、skip 和无 UI 按各自路线检查。
+自然语言结论需要绑定输入的审查记录。字段矩阵与决定仍以既有业务文档为事实来源。
+
+```bash
+loeyae-aidlc evidence run --stage requirements-analysis --module <id>
+loeyae-aidlc quality metrics --module <id>
+npm run test:mars168
+```
+
+采用、证据和交接格式见 [quality-gates-v1](core/knowledge/protocols/quality-gates-v1.md)；
+13 项实现状态、实际测试结果和试点限制见 [验收报告](docs/optimization-notes/mars168-validation.md)。
+
 ## 开发
 
 ```bash

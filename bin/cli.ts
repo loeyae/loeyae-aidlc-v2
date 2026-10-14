@@ -1413,6 +1413,7 @@ Workflow:
   worktree prepare|verify|merge-plan [flags]            Prepare or verify a member worktree
 
 Quality and utilities:
+  quality metrics [--module <module-id>]     Read-only quality coverage and return-defect metrics
   evidence run --stage <slug> [flags]       Produce controlled evidence (--module/--unit, --refresh for completed stages)
   attest resolve [flags]                     Read-only commit/diff attribution
   agent describe|plan|validate-result [args]          Inspect agent persona, execution plan or result contract
@@ -1476,6 +1477,7 @@ function main(): void {
     case "worktree": run("core/tools/aidlc-worktree-light.ts", rest); break;
     case "check": run("core/tools/aidlc-semantic-checks.ts", rest); break;
     case "ui": run("core/tools/aidlc-ui-governance.ts", rest); break;
+    case "quality": run("core/tools/aidlc-quality-metrics.ts", rest); break;
     case "diagram-provider": run("core/tools/aidlc-diagram-provider.ts", rest); break;
     case "export": run("core/tools/aidlc-export.ts", rest); break;
     case "docx": run("core/tools/aidlc-docx.ts", rest); break;

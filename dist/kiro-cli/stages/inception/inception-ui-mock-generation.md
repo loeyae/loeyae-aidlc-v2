@@ -16,7 +16,8 @@ produces:
   - docs/aidlc/modules/{module-id}/inception/ui-mock/
   - docs/aidlc/modules/{module-id}/inception/ui-mock/ui-mock-manifest.json
   - .aidlc/evidence/ui-mock-generation/{module-id}/ui-artifact-consistency.json
-sensors: [ui-artifact-consistency]
+  - .aidlc/evidence/ui-mock-generation/{module-id}/ui-behavior-consistency.json
+sensors: [ui-artifact-consistency, ui-behavior-consistency]
 requires: [ui-page-planning]
 condition: ui_mode_html_mock
 ---

@@ -116,3 +116,11 @@ PRD 已发出且业务方提出内容变更时，若全部受影响范围尚无�
 4. **handoff.md 同步**：每次调整后立即更新 handoff.md。
 5. **边界清晰**：尚无代码基线的产品产物差异在本文件内协调；已有代码基线的产品语义变化走 CR。
 6. **失效传播**：上游语义变化后，不得继续沿用依赖旧语义的完成标记、审查结论或验证证据。
+## Quality v1 affected evidence
+
+For adopted scopes, maintain the requirements quality section's before/after
+artifact graph and change records. Changed input bytes immediately invalidate
+dependent quality evidence. Synchronize, review and re-produce only affected
+checks; preserve the existing single UI acceptance and checkpoint chain. Product
+semantic changes after a code baseline use the existing CR process. See
+quality-gates-v1.md. Legacy and lightweight execution profiles retain their gates.
