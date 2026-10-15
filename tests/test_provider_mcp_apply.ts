@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { addProjectProvider, runProviderCli, setProjectProviderEnabled } from "../core/tools/aidlc-provider-cli.js";
-import { applyProviderMcp, planProviderMcp } from "../core/tools/aidlc-provider-mcp-apply.js";
+import { applyProviderMcp, planProviderMcp, cleanupProviderMcp, planProviderMcpCleanup } from "../core/tools/aidlc-provider-mcp-apply.js";
 import { MCP_REQUIREMENTS_SCHEMA } from "../core/tools/aidlc-provider-mcp.js";
 import { sha256ProviderDigest } from "../core/tools/aidlc-project-provider.js";
 
@@ -116,12 +116,18 @@ try {
     assert.throws(() => apply(crash, value, stop(point)), /injected/);
     assert.equal(existsSync(journal(crash.host)), true);
     if (point === "after-config") {
-      assert.equal(existsSync(ledger(crash.host)), false);
+      assert.ok(json(ledger(crash.host)).pending, "prepared authorization remains until recovery completes");
+  assert.deepEqual(json(ledger(crash.host)).entries, {});
       assert.throws(() => apply(crash, value, stop("recovery-before-ledger")), /injected/);
       assert.equal(existsSync(journal(crash.host)), true, "interrupted recovery remains recoverable");
     }
-    assert.ok(["applied", "recovered"].includes(apply(crash, value).status));
-    assert.equal(apply(crash, value).status, "unchanged");
+    if (point === "before-config") {
+      assert.throws(() => apply(crash, value), /aborted before config/);
+      assert.equal(apply(crash).status, "applied");
+    } else {
+      assert.equal(apply(crash, value).status, "recovered");
+      assert.equal(apply(crash, value).status, "unchanged");
+    }
     assert.equal(existsSync(journal(crash.host)), false);
   }
   const manual = fixture();
@@ -129,19 +135,21 @@ try {
   assert.throws(() => apply(manual, pending, stop("after-config")), /injected/);
   write(manual.host, { ...json(manual.host), userLater: "preserve" });
   unchanged(manual, () => assert.throws(() => apply(manual, pending), /recovery conflict/));
-  assert.equal(existsSync(ledger(manual.host)), false);
+  assert.ok(json(ledger(manual.host)).pending, "prepared authorization remains until recovery completes");
+  assert.deepEqual(json(ledger(manual.host)).entries, {});
 
   const ledgerEdit = fixture(); const ledgerEditPlan = plan(ledgerEdit);
   assert.throws(() => apply(ledgerEdit, ledgerEditPlan, stop("after-config")), /injected/);
-  write(ledger(ledgerEdit.host), { schema: "aidlc.mcp-ownership/v2", target: ledgerEdit.host, entries: {}, transactions: {} });
-  unchanged(ledgerEdit, () => assert.throws(() => apply(ledgerEdit, ledgerEditPlan), /ledger version/));
+  write(ledger(ledgerEdit.host), { schema: "aidlc.mcp-ownership/v999", target: ledgerEdit.host, entries: {}, transactions: {} });
+  unchanged(ledgerEdit, () => assert.throws(() => apply(ledgerEdit, ledgerEditPlan), /unknown or missing fields|ledger version/));
 
   const publicationEdit = fixture(); const publicationPlan = plan(publicationEdit);
   assert.throws(() => apply(publicationEdit, publicationPlan, (point) => {
     if (point === "after-config") write(publicationEdit.host, { ...json(publicationEdit.host), userEdit: true });
   }), /changed after publication/);
   assert.equal(json(publicationEdit.host).userEdit, true);
-  assert.equal(existsSync(ledger(publicationEdit.host)), false);
+  assert.ok(json(ledger(publicationEdit.host)).pending, "prepared authorization remains until recovery completes");
+  assert.deepEqual(json(ledger(publicationEdit.host)).entries, {});
   unchanged(publicationEdit, () => assert.throws(() => apply(publicationEdit, publicationPlan), /recovery conflict/));
 
   const recoveryEdit = fixture(); const recoveryEditPlan = plan(recoveryEdit);
@@ -150,7 +158,8 @@ try {
     if (point === "recovery-before-ledger") write(recoveryEdit.host, { ...json(recoveryEdit.host), recoveryEdit: true });
   }), /recovery conflict/);
   assert.equal(json(recoveryEdit.host).recoveryEdit, true);
-  assert.equal(existsSync(ledger(recoveryEdit.host)), false);
+  assert.ok(json(ledger(recoveryEdit.host)).pending, "prepared authorization remains until recovery completes");
+  assert.deepEqual(json(ledger(recoveryEdit.host)).entries, {});
 
   const stale = fixture();
   const stalePlan = plan(stale);
@@ -165,7 +174,7 @@ try {
   const empty = { project: emptyProject, host: join(root, "absent.json") };
   assert.equal(apply(empty).status, "unchanged");
   assert.equal(existsSync(empty.host), false); assert.equal(existsSync(join(emptyProject, ".aidlc")), false);
-  for (const patch of [{ schema: "aidlc.mcp-plan/v2" }, { extra: true }, { target: join(root, "tampered.json") }, { changes: [] }]) {
+  for (const patch of [{ schema: "aidlc.mcp-plan/v999" }, { extra: true }, { target: join(root, "tampered.json") }, { changes: [] }]) {
     unchanged(f, () => assert.throws(() => apply(f, { ...original, ...patch }), /REJECTED/));
   }
   assert.throws(() => applyProviderMcp(f.project, { hostConfig: join(root, "other.json"), plan: original, approvedConfigs: [digest] }), /target mismatch/);
@@ -231,5 +240,133 @@ try {
   assert.equal(Object.keys(json(ledger(a.host)).entries).length, 2);
   assert.deepEqual(runProviderCli(["mcp-plan", "--project", a.project, "--host-config", a.host]), plan(a));
   assert.throws(() => runProviderCli(["mcp-apply", "--project", a.project, "--host-config", a.host]), /requires --plan/);
+  function cleanupPlan(f: typeof a, releaseAll = false, hostDomains?: string) {
+    return planProviderMcpCleanup(f.project, { hostConfig: f.host, releaseAll, hostDomains });
+  }
+  function cleanup(f: typeof a, value = cleanupPlan(f), releaseAll = false, fault?: Parameters<typeof cleanupProviderMcp>[2], hostDomains?: string) {
+    return cleanupProviderMcp(f.project, { hostConfig: f.host, releaseAll, plan: value, hostDomains }, fault);
+  }
+  const sharedA = fixture(); const sharedB = fixture(); sharedB.host = sharedA.host;
+  const oldAdd = plan(sharedA); apply(sharedA, oldAdd); apply(sharedB);
+  const beforeRelease = readFileSync(sharedA.host);
+  const releaseA = cleanupPlan(sharedA, true);
+  unchanged(sharedA, () => assert.equal(cleanupPlan(sharedA, true).changes[0].action, "release"));
+  assert.equal(cleanup(sharedA, releaseA, true).status, "cleaned");
+  assert.deepEqual(readFileSync(sharedA.host), beforeRelease);
+  assert.equal(Object.keys(json(ledger(sharedA.host)).entries["fixture-service"].consumers).length, 1);
+  assert.equal(cleanup(sharedA, releaseA, true).status, "unchanged");
+  unchanged(sharedA, () => assert.throws(() => apply(sharedA, oldAdd), /stale/));
+  const releaseB = cleanupPlan(sharedB, true);
+  assert.equal(releaseB.changes[0].action, "delete");
+  assert.equal(cleanup(sharedB, releaseB, true).status, "cleaned");
+  assert.deepEqual(json(sharedA.host), { mcpServers: {}, setting: "keep" });
+  assert.deepEqual(json(ledger(sharedA.host)).entries, {});
+  unchanged(sharedA, () => assert.throws(() => apply(sharedA, oldAdd), /stale/));
+  apply(sharedA);
+  unchanged(sharedA, () => assert.throws(() => cleanup(sharedA, releaseA, true), /stale/));
+
+  const two = fixture(); apply(two);
+  addProjectProvider(two.project, { source: pathToFileURL(source).href, ref: "main", subdir: "primary", instance: "alias", allowFile: true });
+  apply(two);
+  setProjectProviderEnabled(two.project, "primary", false);
+  const keep = cleanupPlan(two);
+  assert.equal(keep.changes[0].action, "refresh");
+  assert.equal(cleanup(two, keep).status, "cleaned");
+  assert.equal(json(two.host).mcpServers["fixture-service"].command, config.command);
+  assert.deepEqual(json(ledger(two.host)).entries["fixture-service"].consumers[keep.consumer].sources.map((item: { instance_id: string }) => item.instance_id), ["alias"]);
+  runProviderCli(["remove", "alias", "--project", two.project]);
+  assert.equal(cleanupPlan(two).changes[0].action, "delete"); cleanup(two);
+  for (const extra of [{ userPin: true }, { disabled: true }, { autoApprove: ["*"] }, { env: { TOKEN: "user-secret" } }, { args: ["pin@1"] }]) {
+    const edited = fixture(); apply(edited);
+    write(edited.host, { ...json(edited.host), mcpServers: { "fixture-service": { ...config, ...extra }, unrelated: { user: true } } });
+    const preserve = readFileSync(edited.host); const value = cleanupPlan(edited, true);
+    assert.equal(value.changes[0].reason, "user_modified");
+    assert.equal(JSON.stringify(value).includes("user-secret"), false);
+    cleanup(edited, value, true); assert.deepEqual(readFileSync(edited.host), preserve);
+    assert.equal(json(ledger(edited.host)).entries["fixture-service"].state, "retained");
+    write(edited.host, { mcpServers: { "fixture-service": config } });
+    assert.equal(cleanupPlan(edited, true).changes.length, 0);
+    unchanged(edited, () => assert.throws(() => apply(edited), /retained/));
+  }
+  const absentEntry = fixture(); apply(absentEntry); write(absentEntry.host, { mcpServers: {}, keep: true });
+  assert.equal(cleanupPlan(absentEntry, true).changes[0].reason, "entry_missing");
+  cleanup(absentEntry, cleanupPlan(absentEntry, true), true);
+  assert.equal(json(ledger(absentEntry.host)).entries["fixture-service"].state, "retained");
+  const unknownDomain = fixture("realm"); apply(unknownDomain);
+  const unknownMap = join(root, "unknown-map.json"); write(unknownMap, {});
+  const unknownPlan = cleanupPlan(unknownDomain, true, unknownMap);
+  assert.equal(unknownPlan.changes[0].reason, "credential_domain_unknown_or_changed");
+  cleanup(unknownDomain, unknownPlan, true, undefined, unknownMap);
+  assert.ok(json(unknownDomain.host).mcpServers["fixture-service"]);
+  unchanged(externalRealm, () => assert.equal(cleanup(externalRealm, cleanupPlan(externalRealm, true), true).status, "unchanged"));
+  unchanged(empty, () => assert.equal(cleanup(empty, cleanupPlan(empty, true), true).status, "unchanged"));
+  for (const metadataOnly of [false, true]) for (const point of ["before-config", "after-config", "after-ledger"]) {
+    const crash = fixture(); apply(crash);
+    if (metadataOnly) { const other = fixture(); other.host = crash.host; apply(other); }
+    const value = cleanupPlan(crash, true);
+    assert.throws(() => cleanup(crash, value, true, stop(point)), /injected/);
+    if (point === "before-config" && !metadataOnly) {
+      assert.throws(() => cleanup(crash, value, true), /aborted before config/);
+      cleanup(crash, cleanupPlan(crash, true), true);
+    } else {
+      if (point !== "after-ledger") assert.throws(() => cleanup(crash, value, true, stop("recovery-before-ledger")), /injected/);
+      assert.equal(cleanup(crash, value, true).status, "recovered");
+      assert.equal(cleanup(crash, value, true).status, "unchanged");
+    }
+    assert.equal(existsSync(journal(crash.host)), false);
+    assert.equal(!!json(crash.host).mcpServers["fixture-service"], metadataOnly);
+  }
+  for (const metadataOnly of [false, true]) {
+    const edited = fixture(); apply(edited);
+    if (metadataOnly) { const other = fixture(); other.host = edited.host; apply(other); }
+    const value = cleanupPlan(edited, true);
+    assert.throws(() => cleanup(edited, value, true, stop("after-config")), /injected/);
+    write(edited.host, { ...json(edited.host), userAfterCrash: true });
+    unchanged(edited, () => assert.throws(() => cleanup(edited, value, true), /recovery conflict/));
+  }
+  const forged = fixture(); apply(forged); const forgedPlan = cleanupPlan(forged, true);
+  assert.throws(() => cleanup(forged, forgedPlan, true, stop("after-config")), /injected/);
+  const forgedJournal = json(journal(forged.host)); forgedJournal.ledger_after.entries.evil = { fabricated: true };
+  write(journal(forged.host), forgedJournal);
+  unchanged(forged, () => assert.throws(() => cleanup(forged, forgedPlan, true), /invalid transaction ledger/));
+  const forgedApply = fixture(); const forgedApplyPlan = plan(forgedApply);
+  assert.throws(() => apply(forgedApply, forgedApplyPlan, stop("after-config")), /injected/);
+  const forgedAddJournal = json(journal(forgedApply.host)); forgedAddJournal.ledger_before.entries.evil = { fabricated: true };
+  write(journal(forgedApply.host), forgedAddJournal);
+  unchanged(forgedApply, () => assert.throws(() => apply(forgedApply, forgedApplyPlan), /invalid transaction baseline/));
+  const drift = fixture(); apply(drift); const driftPlan = cleanupPlan(drift, true); const otherProject = fixture();
+  assert.throws(() => cleanupProviderMcp(otherProject.project, { hostConfig: drift.host, releaseAll: true, plan: driftPlan }), /project/);
+  write(drift.host, { ...json(drift.host), later: true });
+  unchanged(drift, () => assert.throws(() => cleanup(drift, driftPlan, true), /stale/));
+  const currentDriftPlan = cleanupPlan(drift, true); const ownEdit = json(ledger(drift.host)); ownEdit.entries["fixture-service"].consumers = {};
+  write(ledger(drift.host), ownEdit);
+  unchanged(drift, () => assert.throws(() => cleanup(drift, currentDriftPlan, true), /stale/));
+  assert.deepEqual(runProviderCli(["mcp-cleanup-plan", "--project", drift.project, "--host-config", drift.host, "--release-all"]), cleanupPlan(drift, true));
+  assert.throws(() => runProviderCli(["mcp-cleanup", "--project", drift.project, "--host-config", drift.host]), /requires --plan/);
+  const legacy = fixture(); apply(legacy);
+  const legacyLedger = json(ledger(legacy.host)); delete legacyLedger.pending; legacyLedger.schema = "aidlc.mcp-ownership/v1";
+  write(ledger(legacy.host), legacyLedger);
+  cleanup(legacy, cleanupPlan(legacy, true), true);
+  assert.equal(json(ledger(legacy.host)).schema, "aidlc.mcp-ownership/v2");
+  const resurrect = fixture(); const resurrectPlan = plan(resurrect);
+  assert.throws(() => apply(resurrect, resurrectPlan, stop("after-ledger")), /injected/);
+  const obsoleteJournal = readFileSync(journal(resurrect.host));
+  apply(resurrect, resurrectPlan);
+  cleanup(resurrect, cleanupPlan(resurrect, true), true);
+  writeFileSync(journal(resurrect.host), obsoleteJournal);
+  unchanged(resurrect, () => assert.throws(() => apply(resurrect, resurrectPlan), /recovery conflict/));
+  const raceA = fixture(); const raceB = fixture(); raceB.host = raceA.host; apply(raceA);
+  const cleanupFile = join(root, "race-cleanup.json"); const applyFile = join(root, "race-apply.json");
+  write(cleanupFile, cleanupPlan(raceA, true)); write(applyFile, plan(raceB));
+  const cleanupChild = new Promise<number | null>((done, reject) => {
+    const child = spawn(process.execPath, ["--import", "tsx", join(repo, "bin/cli.ts"), "provider", "mcp-cleanup", "--project", raceA.project, "--host-config", raceA.host, "--plan", cleanupFile, "--release-all"], { cwd: repo, stdio: "pipe" });
+    child.stdout.resume(); child.stderr.resume(); child.on("error", reject); child.on("close", done);
+  });
+  const raceStatuses = await Promise.all([cleanupChild, child(raceB, applyFile)]);
+  assert.ok(raceStatuses.includes(0), JSON.stringify(raceStatuses));
+  apply(raceB); cleanup(raceA, cleanupPlan(raceA, true), true);
+  assert.deepEqual(json(raceA.host).mcpServers["fixture-service"], config);
+  assert.deepEqual(Object.keys(json(ledger(raceA.host)).entries["fixture-service"].consumers), [plan(raceB).consumer]);
+  console.log("Managed MCP cleanup: shared consumers/provider references/retention/stale replay/authority/fault recovery passed");
   console.log("Managed MCP apply: add/idempotence/external reuse/pins/drift/domains/safe references/path guards/concurrent processes/transaction fault recovery passed");
 } finally { rmSync(root, { recursive: true, force: true }); }

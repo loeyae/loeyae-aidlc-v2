@@ -6,9 +6,9 @@ import { resolveProviderMcpRequirements } from "./aidlc-provider-mcp.js";
 
 type ObjectValue = Record<string, unknown>;
 type Input = { hostConfig: string; hostDomains?: string };
-const PLAN = "aidlc.mcp-plan/v1";
-const LEDGER = "aidlc.mcp-ownership/v1";
-const JOURNAL = "aidlc.mcp-transaction/v1";
+const PLAN = "aidlc.mcp-plan/v2";
+const LEDGER = "aidlc.mcp-ownership/v2";
+const JOURNAL = "aidlc.mcp-transaction/v2";
 function fail(reason: string): never { throw new Error(`MCP_APPLY_REJECTED: ${reason}`); }
 function object(value: unknown): ObjectValue {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail("expected object");
@@ -66,21 +66,22 @@ function paths(projectRoot: string, input: Input) {
   return { project, target, domains, ledger: `${target}.aidlc-mcp-ledger.json`, journal: `${target}.aidlc-mcp-journal.json`, lock: `${target}.aidlc-mcp-lock` };
 }
 type Paths = ReturnType<typeof paths>;
-function emptyLedger(p: Paths) { return { schema: LEDGER, target: p.target, entries: {} as ObjectValue, transactions: {} as ObjectValue }; }
+function emptyLedger(p: Paths) { return { schema: LEDGER, target: p.target, entries: {} as ObjectValue, transactions: {} as ObjectValue, pending: null as ObjectValue | null }; }
 function ledger(p: Paths) {
   const current = read(p.ledger);
   if (current.digest === null) return { value: emptyLedger(p), digest: null };
-  const value = exact(current.value, ["schema", "target", "entries", "transactions"]);
-  if (value.schema !== LEDGER || value.target !== p.target) fail("ledger version or target mismatch");
+  const legacy = current.value.schema === "aidlc.mcp-ownership/v1";
+  const value = exact(current.value, ["schema", "target", "entries", "transactions", ...(legacy ? [] : ["pending"])]);
+  if ((!legacy && value.schema !== LEDGER) || value.target !== p.target) fail("ledger version or target mismatch");
   const entries = object(value.entries);
   for (const entry of Object.values(entries)) {
     const item = exact(entry, ["consumer", "sources", "consumers", "before", "after", "credential_domain", "transaction", "state"]);
-    if (item.state !== "committed" || item.before !== null || !Array.isArray(item.sources)) fail("invalid ownership record");
+    if (!["committed", "retained"].includes(String(item.state)) || item.before !== null || !Array.isArray(item.sources) || typeof item.after !== "string" || typeof item.credential_domain !== "string" || !item.credential_domain) fail("invalid ownership record");
     for (const consumer of Object.values(object(item.consumers))) exact(consumer, ["sources", "source_digest"]);
   }
   const transactions = object(value.transactions);
   for (const receipt of Object.values(transactions)) exact(receipt, ["consumer", "source_digest", "after"]);
-  return { value: { schema: LEDGER, target: p.target, entries, transactions }, digest: current.digest };
+  return { value: { schema: LEDGER, target: p.target, entries, transactions, pending: legacy ? null : value.pending === null ? null : exact(value.pending, ["plan_digest", "journal_digest"]) }, digest: current.digest };
 }
 /** A restrictive initial transport policy. Values stay in memory; only digests enter artifacts.
  * Exact digest approval at apply is additional to this policy, never inherited from the plan. */
@@ -116,6 +117,7 @@ function compute(p: Paths) {
     const configDigest = sha256ProviderDigest(connection.config);
     const present = Object.hasOwn(servers, name);
     const owned = Object.hasOwn(ownership.value.entries, name) ? object(ownership.value.entries[name]) : null;
+    if (owned && owned.state !== "committed") fail("entry retained after conflict; manual reconciliation required");
     if (owned && (owned.after !== configDigest || owned.credential_domain !== connection.credential_domain)) fail("owned entry or credential domain conflict");
     if (present) {
       const current = object(servers[name]);
@@ -130,13 +132,13 @@ function compute(p: Paths) {
   });
   const payload = { schema: PLAN, consumer: sha256ProviderDigest({ project: p.project }), target: p.target, structure: "mcpServers",
     domains_path: p.domains, domains_digest: domainSnapshot?.digest ?? null,
-    source_digest: sha256ProviderDigest({ config: state.config, lock: state.lock }), target_digest: host.digest, ledger_digest: ownership.digest, changes };
+    source_digest: sha256ProviderDigest({ config: state.config, lock: state.lock }), target_digest: host.digest, ledger_digest: ownership.digest, ledger_state_digest: sha256ProviderDigest(ownership.value), changes };
   return { plan: { ...payload, plan_digest: sha256ProviderDigest(payload) }, host, ownership, configs };
 }
 export function planProviderMcp(projectRoot: string, input: Input) { return compute(paths(projectRoot, input)).plan; }
 
 function validatePlan(value: unknown) {
-  const plan = exact(value, ["schema", "consumer", "target", "structure", "domains_path", "domains_digest", "source_digest", "target_digest", "ledger_digest", "changes", "plan_digest"]);
+  const plan = exact(value, ["schema", "consumer", "target", "structure", "domains_path", "domains_digest", "source_digest", "target_digest", "ledger_digest", "ledger_state_digest", "changes", "plan_digest"]);
   const { plan_digest, ...payload } = plan;
   if (plan.schema !== PLAN || plan.structure !== "mcpServers" || sha256ProviderDigest(payload) !== plan_digest || !Array.isArray(plan.changes)) fail("plan version or digest mismatch");
   // Full nested shape and values are compared against freshly computed requirements before writing.
@@ -155,44 +157,10 @@ function locked<T>(p: Paths, run: () => T): T {
   finally { closeSync(fd); unlinkSync(p.lock); }
 }
 type Fault = (point: "before-config" | "after-config" | "recovery-before-ledger" | "after-ledger") => void;
-/** Recovery never replays config bytes: before => retry fresh; after => finish metadata; other => preserve and conflict. */
-function recover(p: Paths, plan: ObjectValue, approvals: readonly string[], fault?: Fault): boolean {
-  const pending = read(p.journal);
-  if (pending.digest === null) return false;
-  const journal = exact(pending.value, ["schema", "plan", "after", "ledger_before", "ledger_after"]);
-  if (journal.schema !== JOURNAL || canonicalProviderJson(journal.plan) !== canonicalProviderJson(plan)) fail("pending transaction requires its original plan");
-  if (journal.ledger_before !== plan.ledger_digest) fail("transaction ledger baseline mismatch");
-  approved(plan, approvals);
-  const { state, requirements, diagnostics } = resolveProviderMcpRequirements(p.project);
-  if (diagnostics.length || sha256ProviderDigest({ config: state.config, lock: state.lock }) !== plan.source_digest) fail("source changed during pending transaction");
-  for (const change of plan.changes as ObjectValue[]) {
-    const items = requirements.filter((item) => item.connection.name === change.name);
-    if (!items.length || items.some((item) => sha256ProviderDigest(item.connection.config) !== change.config_digest || item.connection.credential_domain !== change.credential_domain)
-      || canonicalProviderJson(items.map((item) => item.source)) !== canonicalProviderJson(change.sources)) fail("pending requirements changed");
-    items.forEach((item) => safeConfig(item.connection.config));
-  }
-  const domainDigest = p.domains === null ? null : read(p.domains).digest;
-  if (domainDigest !== plan.domains_digest) fail("domains changed during pending transaction");
-  const host = read(p.target).digest;
-  if (host !== plan.target_digest && host !== journal.after) fail("recovery conflict: host changed; preserve user edits");
-  const own = ledger(p);
-  const afterDigest = sha256FileDigest(bytes(journal.ledger_after));
-  if (own.digest !== journal.ledger_before && own.digest !== afterDigest) fail("recovery conflict: ledger changed");
-  if (host === plan.target_digest && own.digest === journal.ledger_before) { unlinkSync(p.journal); return false; }
-  if (host !== journal.after) fail("recovery conflict: inconsistent transaction");
-  // Reconstruct intended metadata from the approved plan; do not trust journal ownership claims.
-  const expected = nextLedger(p, plan, own.digest === afterDigest ? null : own.value, String(journal.after));
-  if (expected && canonicalProviderJson(expected) !== canonicalProviderJson(journal.ledger_after)) fail("invalid transaction ledger");
-  fault?.("recovery-before-ledger");
-  if (read(p.target).digest !== host || ledger(p).digest !== own.digest) fail("recovery conflict: host or ledger changed before metadata publication");
-  if (own.digest !== afterDigest) atomic(p.ledger, journal.ledger_after);
-  fault?.("after-ledger");
-  unlinkSync(p.journal);
-  return true;
-}
 function nextLedger(p: Paths, plan: ObjectValue, previous: ReturnType<typeof emptyLedger> | null, after: string) {
   if (!previous) return null;
   const next = structuredClone(previous);
+  for (const [id, receipt] of Object.entries(next.transactions)) if (object(receipt).consumer === plan.consumer) delete next.transactions[id];
   for (const change of plan.changes as ObjectValue[]) {
     if (change.action === "reuse" && change.ownership === "managed") {
       const entry = object(next.entries[String(change.name)]);
@@ -212,18 +180,91 @@ function nextLedger(p: Paths, plan: ObjectValue, previous: ReturnType<typeof emp
     value: { consumer: plan.consumer, source_digest: plan.source_digest, after } });
   return next;
 }
+/** The journal is intent, never authority: recovery consumes a current ledger prepare anchor. */
+function transaction(p: Paths, plan: ObjectValue, own: ReturnType<typeof ledger>, next: ReturnType<typeof emptyLedger>, hostAfter: string | null, config: ObjectValue | null, fault?: Fault) {
+  const journal = { schema: JOURNAL, plan, after: hostAfter, ledger_before: own.value, ledger_after: next };
+  verifyInputs(p, plan);
+  if (ledger(p).digest !== plan.ledger_digest || read(p.target).digest !== plan.target_digest) fail("host or ledger changed before preparation");
+  atomic(p.journal, journal);
+  const preparation = { ...own.value, pending: { plan_digest: plan.plan_digest, journal_digest: sha256ProviderDigest(journal) } };
+  atomic(p.ledger, preparation);
+  const prepared = sha256FileDigest(bytes(preparation));
+  fault?.("before-config");
+  verifyInputs(p, plan);
+  if (read(p.target).digest !== plan.target_digest || ledger(p).digest !== prepared) fail("host or ledger changed before publication");
+  if (config) atomic(p.target, config);
+  fault?.("after-config");
+  if (read(p.target).digest !== hostAfter || ledger(p).digest !== prepared) fail("host or ledger changed after publication; recovery required");
+  verifyInputs(p, plan);
+  atomic(p.ledger, next);
+  fault?.("after-ledger");
+  unlinkSync(p.journal);
+}
+function verifyInputs(p: Paths, plan: ObjectValue) {
+  const { state } = resolveProviderMcpRequirements(p.project);
+  if (sha256ProviderDigest({ config: state.config, lock: state.lock }) !== plan.source_digest) fail("source changed during pending transaction");
+  if ((p.domains === null ? null : read(p.domains).digest) !== plan.domains_digest) fail("domains changed during pending transaction");
+}
+function recover(p: Paths, plan: ObjectValue, fault?: Fault): boolean {
+  const pending = read(p.journal);
+  if (pending.digest === null) return false;
+  const journal = exact(pending.value, ["schema", "plan", "after", "ledger_before", "ledger_after"]);
+  if (journal.schema !== JOURNAL || canonicalProviderJson(journal.plan) !== canonicalProviderJson(plan)) fail("pending transaction requires its original v2 transaction plan");
+  verifyInputs(p, plan);
+  const own = ledger(p);
+  const baseline = object(journal.ledger_before) as ReturnType<typeof emptyLedger>;
+  if (sha256ProviderDigest(baseline) !== plan.ledger_state_digest || baseline.pending !== null) fail("invalid transaction baseline");
+  const next = plan.schema === PLAN ? nextLedger(p, plan, baseline, String(journal.after))! : cleanupLedger(plan, baseline, journal.after as string | null);
+  if (canonicalProviderJson(next) !== canonicalProviderJson(journal.ledger_after)) fail("invalid transaction ledger");
+  const afterDigest = sha256FileDigest(bytes(next));
+  const anchor = own.value.pending;
+  const authorized = anchor?.plan_digest === plan.plan_digest && anchor?.journal_digest === sha256ProviderDigest(journal)
+    && canonicalProviderJson({ ...own.value, pending: null }) === canonicalProviderJson(baseline);
+  const completed = own.digest === afterDigest && Object.hasOwn(own.value.transactions, String(plan.plan_digest));
+  if (!authorized && !completed) {
+    if (own.digest === plan.ledger_digest && read(p.target).digest === plan.target_digest) { unlinkSync(p.journal); return false; }
+    fail("recovery conflict: no current ledger authorization");
+  }
+  const host = read(p.target).digest;
+  if (host !== plan.target_digest && host !== journal.after) fail("recovery conflict: host changed; preserve user edits");
+  if (host === plan.target_digest && host !== journal.after && authorized) {
+    atomic(p.ledger, baseline);
+    unlinkSync(p.journal);
+    fail("transaction aborted before config; re-plan against current ledger");
+  }
+  if (host !== journal.after) fail("recovery conflict: inconsistent transaction");
+  fault?.("recovery-before-ledger");
+  if (read(p.target).digest !== host || ledger(p).digest !== own.digest) fail("recovery conflict: host or ledger changed before metadata publication");
+  verifyInputs(p, plan);
+  if (!completed) atomic(p.ledger, next);
+  fault?.("after-ledger");
+  unlinkSync(p.journal);
+  return true;
+}
+function assertIdentity(p: Paths, plan: ObjectValue) {
+  if (plan.target !== p.target || plan.domains_path !== p.domains || plan.consumer !== sha256ProviderDigest({ project: p.project })) fail("plan project or explicit target mismatch");
+}
 export function applyProviderMcp(projectRoot: string, input: Input & { plan: unknown; approvedConfigs: readonly string[] }, fault?: Fault) {
   const p = paths(projectRoot, input);
   const plan = validatePlan(input.plan);
-  if (plan.target !== p.target || plan.domains_path !== p.domains || plan.consumer !== sha256ProviderDigest({ project: p.project })) fail("plan project or explicit target mismatch");
+  assertIdentity(p, plan);
   approved(plan, input.approvedConfigs);
   return locked(p, () => {
-    if (recover(p, plan, input.approvedConfigs, fault)) return { status: "recovered", target: p.target };
+    if (recover(p, plan, fault)) return { status: "recovered", target: p.target };
     const current = compute(p);
+    if (current.ownership.value.pending) fail("pending transaction requires recovery");
     const receipt = current.ownership.value.transactions[String(plan.plan_digest)];
     if (receipt) {
       const value = object(receipt);
-      if (value.consumer === plan.consumer && value.source_digest === current.plan.source_digest && value.after === current.host.digest && current.plan.domains_digest === plan.domains_digest) return { status: "unchanged", target: p.target };
+      const referencesValid = (plan.changes as ObjectValue[]).every((change) => {
+        if (change.ownership === "external") return true;
+        const entry = current.ownership.value.entries[String(change.name)];
+        if (!entry) return false;
+        const item = object(entry);
+        return item.state === "committed" && item.after === change.config_digest && item.credential_domain === change.credential_domain
+          && canonicalProviderJson(object(item.consumers)[String(plan.consumer)] ?? null) === canonicalProviderJson({ sources: change.sources, source_digest: plan.source_digest });
+      });
+      if (referencesValid && value.consumer === plan.consumer && value.source_digest === current.plan.source_digest && value.after === current.host.digest && current.plan.domains_digest === plan.domains_digest) return { status: "unchanged", target: p.target };
       fail("completed plan is stale");
     }
     if (canonicalProviderJson(current.plan) !== canonicalProviderJson(plan)) fail("plan stale: source, target, domains or ledger changed");
@@ -237,19 +278,80 @@ export function applyProviderMcp(projectRoot: string, input: Input & { plan: unk
     const additions = Object.fromEntries(current.plan.changes.filter((change) => change.action === "add").map((change) => [change.name, current.configs[change.name]]));
     const next = { ...current.host.value, mcpServers: { ...object(current.host.value.mcpServers ?? {}), ...additions } };
     const after = adding ? sha256FileDigest(bytes(next)) : current.host.digest!;
-    const nextOwnership = nextLedger(p, plan, current.ownership.value, after)!;
-    atomic(p.journal, { schema: JOURNAL, plan, after, ledger_before: current.ownership.digest, ledger_after: nextOwnership });
-    fault?.("before-config");
-    // Check once more immediately before replacement for non-cooperating host edits.
-    if (read(p.target).digest !== plan.target_digest) fail("host changed before publication");
-    const source = resolveProviderMcpRequirements(p.project).state;
-    if (sha256ProviderDigest({ config: source.config, lock: source.lock }) !== plan.source_digest) fail("source changed before publication");
-    if (adding) atomic(p.target, next);
-    fault?.("after-config");
-    if (read(p.target).digest !== after || ledger(p).digest !== current.ownership.digest) fail("host or ledger changed after publication; recovery required");
-    atomic(p.ledger, nextOwnership);
-    fault?.("after-ledger");
-    unlinkSync(p.journal);
+    transaction(p, plan, current.ownership, nextLedger(p, plan, current.ownership.value, after)!, after, adding ? next : null, fault);
     return { status: "applied", target: p.target };
+  });
+}
+
+const CLEANUP = "aidlc.mcp-cleanup-plan/v1";
+type CleanupInput = Input & { releaseAll?: boolean };
+function computeCleanup(p: Paths, releaseAll: boolean) {
+  const { state, requirements, diagnostics } = resolveProviderMcpRequirements(p.project);
+  if (diagnostics.length && !releaseAll) fail("enabled Provider has unknown MCP requirements");
+  const host = read(p.target);
+  const own = ledger(p);
+  const domainSnapshot = p.domains === null ? null : read(p.domains);
+  if (domainSnapshot?.digest === null) fail("domain file is missing");
+  const domains = domainSnapshot?.value ?? {};
+  if (Object.values(domains).some((value) => typeof value !== "string")) fail("invalid credential domains");
+  const consumer = sha256ProviderDigest({ project: p.project });
+  const sourceDigest = sha256ProviderDigest({ config: state.config, lock: state.lock });
+  const servers = object(host.value.mcpServers ?? {});
+  const changes = Object.keys(own.value.entries).sort().flatMap((name) => {
+    const entry = object(own.value.entries[name]);
+    const consumers = object(entry.consumers);
+    if (!Object.hasOwn(consumers, consumer)) return [];
+    const needed = requirements.filter((item) => item.connection.name === name);
+    const sources = needed.map((item) => item.source);
+    const present = Object.hasOwn(servers, name);
+    const reason = entry.state === "retained" ? "previous_conflict_retained" : !present ? "entry_missing"
+      : sha256ProviderDigest(servers[name]) !== entry.after ? "user_modified"
+      : p.domains !== null && (!Object.hasOwn(domains, name) || domains[name] !== entry.credential_domain) ? "credential_domain_unknown_or_changed" : null;
+    const release = releaseAll || needed.length === 0;
+    const remaining = Object.keys(consumers).filter((id) => id !== consumer);
+    const refresh = canonicalProviderJson(consumers[consumer]) !== canonicalProviderJson({ sources, source_digest: sourceDigest });
+    const action = !release ? refresh ? "refresh" : "keep" : reason ? "retain" : remaining.length ? "release" : "delete";
+    return [{ name, action, reason, release, sources, remaining_consumers: remaining.sort(), entry_digest: sha256ProviderDigest(entry) }];
+  });
+  const nextServers = { ...servers };
+  for (const change of changes) if (change.action === "delete") delete nextServers[change.name];
+  const nextHost = changes.some((change) => change.action === "delete") ? { ...host.value, mcpServers: nextServers } : null;
+  const payload = { schema: CLEANUP, consumer, target: p.target, domains_path: p.domains, domains_digest: domainSnapshot?.digest ?? null,
+    release_all: releaseAll, source_digest: sourceDigest, target_digest: host.digest, target_after: nextHost ? sha256FileDigest(bytes(nextHost)) : host.digest,
+    ledger_digest: own.digest, ledger_state_digest: sha256ProviderDigest(own.value), changes };
+  return { plan: { ...payload, plan_digest: sha256ProviderDigest(payload) }, host, own, nextHost };
+}
+function cleanupLedger(plan: ObjectValue, previous: ReturnType<typeof emptyLedger>, after: string | null) {
+  const next = structuredClone(previous);
+  for (const change of plan.changes as ObjectValue[]) {
+    const entry = object(next.entries[String(change.name)]);
+    if (sha256ProviderDigest(entry) !== change.entry_digest || !Object.hasOwn(object(entry.consumers), String(plan.consumer))) fail("cleanup ownership conflict");
+    if (change.action === "keep") continue;
+    if (change.action === "refresh") { object(entry.consumers)[String(plan.consumer)] = { sources: change.sources, source_digest: plan.source_digest }; continue; }
+    delete object(entry.consumers)[String(plan.consumer)];
+    if (change.action === "delete") delete next.entries[String(change.name)];
+    if (change.action === "retain") entry.state = "retained";
+  }
+  for (const [id, receipt] of Object.entries(next.transactions)) if (object(receipt).consumer === plan.consumer) delete next.transactions[id];
+  next.transactions[String(plan.plan_digest)] = { consumer: plan.consumer, source_digest: plan.source_digest, after };
+  return next;
+}
+export function planProviderMcpCleanup(projectRoot: string, input: CleanupInput) { return computeCleanup(paths(projectRoot, input), input.releaseAll === true).plan; }
+export function cleanupProviderMcp(projectRoot: string, input: CleanupInput & { plan: unknown }, fault?: Fault) {
+  const p = paths(projectRoot, input);
+  const plan = exact(input.plan, ["schema", "consumer", "target", "domains_path", "domains_digest", "release_all", "source_digest", "target_digest", "target_after", "ledger_digest", "ledger_state_digest", "changes", "plan_digest"]);
+  const { plan_digest, ...payload } = plan;
+  if (plan.schema !== CLEANUP || sha256ProviderDigest(payload) !== plan_digest || !Array.isArray(plan.changes) || plan.release_all !== (input.releaseAll === true)) fail("cleanup plan version, digest or release mode mismatch");
+  assertIdentity(p, plan);
+  return locked(p, () => {
+    if (recover(p, plan, fault)) return { status: "recovered", target: p.target, changes: plan.changes };
+    const current = computeCleanup(p, input.releaseAll === true);
+    if (current.own.value.pending) fail("pending transaction requires recovery");
+    const receipt = current.own.value.transactions[String(plan.plan_digest)];
+    if (receipt && object(receipt).after === current.host.digest && plan.source_digest === current.plan.source_digest && plan.domains_digest === current.plan.domains_digest) return { status: "unchanged", target: p.target, changes: plan.changes };
+    if (canonicalProviderJson(plan) !== canonicalProviderJson(current.plan)) fail("cleanup plan stale: source, target, domains or ledger changed");
+    if (!current.plan.changes.some((change) => change.action !== "keep")) return { status: "unchanged", target: p.target, changes: plan.changes };
+    transaction(p, plan, current.own, cleanupLedger(plan, current.own.value, current.plan.target_after), current.plan.target_after, current.nextHost, fault);
+    return { status: "cleaned", target: p.target, changes: plan.changes };
   });
 }
