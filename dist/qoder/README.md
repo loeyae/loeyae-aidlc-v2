@@ -1,22 +1,14 @@
-# Loeyae AI-DLC for Qoder CN IDE / Desktop / CLI
+# Loeyae AI-DLC for Qoder
 
-本目录是 Qoder 本地插件与 CN Desktop 直接集成的共享发行资产，包含全部 Skills、Stop Hook 和两套 MCP 声明。user scope 始终把原生 Skill 受管安装到 `~/.qoder-cn/skills/loeyae-aidlc/`。检测到 `qoder` CLI 时，`loeyae-aidlc install --harness qoder` 还会调用官方 `qoder plugins` 注册并启用 `loeyae-aidlc@local`；仅检测到 Qoder CN Desktop 时，则跳过插件/Stop Hook 注册，只安装原生 Skill 并直接更新 MCP。两种模式都以“只补缺失、保留同名用户配置”的方式更新：
+Core 安装提供原生 Skill、官方插件注册及 Stop Hook，不默认部署领域 MCP 或 CN bridge。user scope 把 Skill 受管安装到 ~/.qoder-cn/skills/loeyae-aidlc/；检测到 qoder CLI 时继续通过官方 qoder plugins 验证、注册并启用插件。desktop-only 模式仅安装原生 Skill。
 
-- Qoder Desktop/CLI：`~/.qoder/settings.json`，直接使用 Streamable HTTP；
-- Qoder CN IDE：Windows `%USERPROFILE%\.qoder-cn\mcp.json`（真实宿主实测）、macOS `~/Library/Application Support/Qoder/SharedClientCache/mcp.json`、Linux `~/.config/Qoder/SharedClientCache/mcp.json`。
-
-Qoder CN IDE 官方仅声明支持 STDIO/SSE，因此 CN 配置使用固定版本 `mcp-remote@0.8.3`，把共享知识、设计、Figma 和 SSOT 的 Streamable HTTP 服务转换为本地 STDIO。共享知识服务还提供独立的 AI 上下文文件指南；领域知识包尚未替代该用途，因此保留现有注册。项目框架规则由已启用 Provider 的锁定知识和 validation 结果承接。可用 `QODER_CN_MCP_CONFIG` 指定非标准 CN 配置文件；`QODER_CONFIG_DIR` 继续覆盖 Desktop/CLI 配置目录。卸载时受管原生 Skill 与 staging 会删除，共享 MCP 条目保留，避免删除用户或其他安装仍在使用的服务。
-
-`install --all` 会独立探测 Qoder CN Desktop：Windows 优先使用 App Paths 与卸载注册表，并保留默认安装目录以及已存在 `.qoder-cn` 配置目录的兼容回退；macOS 检查 App bundle。无 CLI 的 desktop-only 模式保证原生 Skill + MCP 直接集成，但不宣称插件或 Stop Hook 已注册；项目级安装仍要求 PATH 中存在 `qoder`，也可通过 `QODER_CLI` 指定：
-
-```bash
+loeyae-aidlc install --harness qoder
 loeyae-aidlc install --harness qoder --project /absolute/path/to/project
-```
 
-Windows 真实宿主已验证 `%USERPROFILE%\.qoder-cn\skills\loeyae-aidlc\SKILL.md` 会被 Qoder CN Desktop 加载，该路径由 user-scope 安装器独立管理。手工复制或旧版本留下的同名目录默认不覆盖；首次接管需使用 `--migrate-legacy`，安装器会保留 `*.pre-managed-backup-*`。Qoder CN Desktop 也可能读取 `%USERPROFILE%\.agents\skills\loeyae-aidlc\SKILL.md`，但该共享 Skill 可能由 Codex 或其他安装创建；共享 Skill 可见仍不能作为 Qoder harness 已选中、MCP 已写入或 Stop Hook 已注册的证据。
+项目级安装要求 qoder CLI，可用 QODER_CLI 指定。--project 只选择部署范围，不代表 MCP 授权。Core 不携带 .mcp.json 或 mcp-cn.json，不创建/改写 Desktop/CLI settings.json 或 CN mcp.json。QODER_CN_MCP_CONFIG 仍可用于宿主探测，不授权连接写入。
 
-安装或升级后必须完全退出并重启 Qoder CN IDE。CN IDE 2.5.0 或更高版本中，进入头像菜单 **Your Settings → MCP tools**，确认 4 个服务可见并逐项展开工具。CN IDE 仅在 Agent 模式配合 Qwen3 使用 MCP，且最多同时连接 10 个服务。
+项目需要 MCP 时，由启用 Provider 的锁定 aidlc.mcp 元数据提供需求，再显式执行 provider mcp-preview、mcp-plan、逐配置批准的 mcp-apply。没有 Provider、禁用实例或缺元数据时安装不补服务。现有受管适配器仅支持 JSON mcpServers；CN bridge 配方需由 Provider 提供并显式批准，安装器不自动生成或运行 bridge。完整命令与格式限制见 core/knowledge/protocols/provider-mcp-apply.md。
 
-Qoder Desktop 应在 **Settings → Plugins → User → Custom** 核对插件，并在 **Settings → MCP**（新版为 **Extensions → Connectors**）核对服务。Qoder CLI 可依次执行 `/plugins reload`、`/mcp reload`，再用 `/plugins`、`/hooks`、`/mcp` 检查。
+历史宿主连接（包括旧 CN bridge）保持原样，不按名称认领或删除。卸载仅删除受管 Skill/staging 并按原路径注销插件，不释放 MCP 引用；清理需显式审阅 provider mcp-cleanup-plan，再执行 provider mcp-cleanup。共享 Skill 可见不能作为 Qoder harness、Hook 或认证成功的证据。
 
-MCP 可见不等于认证成功：Figma 首次连接需要 OAuth；SSOT 要求在启动 Qoder CN IDE 前向宿主进程提供 `SSOT_API_KEY`；所有服务还需分别验证网络连通性。
+手工复制或旧版同名 Skill 默认不覆盖；首次接管使用 --migrate-legacy，安装器保留 *.pre-managed-backup-*。安装后新开宿主会话；CLI 可使用 /plugins reload，并检查 /plugins、/hooks。本变更不代表任何 MCP 服务已完成真实认证。

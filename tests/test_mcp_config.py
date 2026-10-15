@@ -15,12 +15,13 @@ CONFIG_PATH = ROOT / "harness" / "kiro-crew" / "mcp.json"
 MERGE_TOOL = ROOT / "core" / "tools" / "aidlc-mcp-config.ts"
 
 
-def test_declares_v1_services() -> None:
-    config = json.loads(CONFIG_PATH.read_text())
-    servers = config["mcpServers"]
-    assert set(servers) == {"loeyae-skills", "awesome-design", "figma", "ssot", "chrome-devtools"}
-    assert servers["ssot"]["headers"]["Authorization"] == "Bearer ${SSOT_API_KEY}"
-    assert servers["chrome-devtools"]["args"] == ["-y", "chrome-devtools-mcp"]
+def test_core_has_no_mcp_declarations() -> None:
+    assert not CONFIG_PATH.exists()
+    for host in ("claude", "qoder", "codebuddy", "zcode"):
+        plugin = json.loads((ROOT / "harness" / host / "plugin.json").read_text())
+        assert "mcpServers" not in plugin
+        assert not (ROOT / "harness" / host / ".mcp.json").exists()
+    assert not (ROOT / "harness" / "qoder" / "mcp-cn.json").exists()
 
 
 def run_eval(script: str) -> subprocess.CompletedProcess:
@@ -47,8 +48,8 @@ const knownLegacy = mergeMcpServers(
   {{ mcpServers: {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp@1.6.0'], disabled: false, autoApprove: [] }} }} }},
   {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp'] }} }}
 );
-if (knownLegacy.upgraded.join(',') !== 'chrome-devtools') throw new Error('known legacy default was not migrated');
-for (const packageSpec of ['chrome-devtools-mcp@latest', 'chrome-devtools-mcp@legacy-tag', 'chrome-devtools-mcp@1.7.0']) {{
+if (knownLegacy.upgraded.length || knownLegacy.config.mcpServers['chrome-devtools'].args[1] !== 'chrome-devtools-mcp@1.6.0') throw new Error('historical pin was changed');
+for (const packageSpec of ['chrome-devtools-mcp@1.6.0', 'chrome-devtools-mcp@latest', 'chrome-devtools-mcp@legacy-tag', 'chrome-devtools-mcp@1.7.0']) {{
   const pinned = mergeMcpServers(
     {{ mcpServers: {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', packageSpec], disabled: false, autoApprove: [] }} }} }},
     {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp'] }} }}
@@ -60,9 +61,29 @@ const custom = mergeMcpServers(
   {{ 'chrome-devtools': {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp'] }} }}
 );
 if (custom.upgraded.length !== 0 || custom.preserved.join(',') !== 'chrome-devtools') throw new Error('custom service was overwritten');
+const user = {{ command: 'npx', args: ['-y', 'chrome-devtools-mcp@1.6.0'], env: {{ PROFILE: 'user' }}, autoApprove: ['tool'], disabled: true, unknown: {{ keep: 1 }} }};
+if (JSON.stringify(mergeMcpServers({{mcpServers: {{ service: user }}}}, {{service: {{command: 'other'}}}}).config.mcpServers.service) !== JSON.stringify(user)) throw new Error('user fields changed');
+if (JSON.stringify(mergeMcpServers({{ setting: true }}, {{}}).config) !== '{{"setting":true}}') throw new Error('empty merge manufactured mcpServers');
 """
     result = run_eval(script)
     assert result.returncode == 0, result.stderr
+
+
+def test_empty_requirements_do_no_io() -> None:
+    with tempfile.TemporaryDirectory(prefix="aidlc-mcp-empty-") as directory:
+        target = Path(directory) / "absent" / "mcp.json"
+        invalid = Path(directory) / "invalid.json"
+        invalid.write_bytes(b"invalid user data\r\n")
+        script = f"""
+import {{ updateMcpConfig }} from {json.dumps(MERGE_TOOL.as_uri())};
+updateMcpConfig({json.dumps(str(target))}, {{}});
+updateMcpConfig({json.dumps(str(invalid))}, {{}});
+"""
+        result = run_eval(script)
+        assert result.returncode == 0, result.stderr
+        assert not target.parent.exists()
+        assert invalid.read_bytes() == b"invalid user data\r\n"
+        assert sorted(p.name for p in Path(directory).iterdir()) == ["invalid.json"]
 
 
 def test_concurrent_updates_do_not_lose_servers() -> None:
@@ -101,8 +122,9 @@ def test_node_launcher() -> None:
 
 
 def main() -> None:
-    test_declares_v1_services()
+    test_core_has_no_mcp_declarations()
     test_merge_preserves_pins_and_adds_missing()
+    test_empty_requirements_do_no_io()
     test_concurrent_updates_do_not_lose_servers()
     test_node_launcher()
     print("MCP migration tests passed")

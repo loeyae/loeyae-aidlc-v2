@@ -399,6 +399,68 @@ def test_claude_activation_refreshes_existing_plugin() -> None:
         assert not list(state.glob("*.json"))
 
 
+def test_core_mcp_lifecycle() -> None:
+    """Every host keeps fresh installs empty and historical/shared connections external."""
+    with tempfile.TemporaryDirectory(prefix="aidlc-core-mcp-", dir=str(SCRATCH_ROOT)) as directory:
+        root = Path(directory)
+        home = root / "home"
+        project = root / "project"
+        home.mkdir()
+        project.mkdir()
+        host_env = write_fake_plugin_hosts(root)
+        fake_bin = root / "plugin-host-bin"
+        write_fake_host_command(fake_bin, "claude")
+        env = {**isolated_host_env(root, fake_bin), **host_env}
+        hosts = ["kiro-crew", "kiro-ide", "kiro-cli", "claude", "codebuddy", "qoder", "zcode", "codex", "opencode"]
+        paths = [home / ".kiro/settings/mcp.json", home / ".claude/.mcp.json",
+                 home / ".codebuddy/.mcp.json", Path(env["QODER_CONFIG_DIR"]) / "settings.json",
+                 Path(env["QODER_CN_MCP_CONFIG"])]
+        zcode_path = home / ".zcode/cli/config.json"
+        for host in hosts:
+            args = ["--harness", host]
+            if host in ("kiro-ide", "kiro-cli", "qoder", "codebuddy"):
+                args += ["--project", str(project)]
+            result = run_cli(home, ["install", *args], env)
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "Core installation adds none" in result.stdout
+            assert "provider mcp-apply" in result.stdout and "--approve-config" in result.stdout
+            assert all(not path.exists() for path in paths)
+        assert "mcp" not in json.loads(zcode_path.read_text())
+        assert not list(home.rglob("*.aidlc-mcp-*"))
+
+        historical = {
+            "loeyae-skills": {"type": "http", "url": "https://example.test/skills", "unknown": [1]},
+            "awesome-design": {"command": "never-execute", "args": ["bridge@0.8.3"]},
+            "figma": {"type": "http", "url": "https://example.test/figma", "disabled": True},
+            "ssot": {"type": "http", "url": "https://example.test/ssot", "env": {"CUSTOM": "user"}},
+            "chrome-devtools": {"command": "npx", "args": ["-y", "chrome-devtools-mcp@1.6.0"], "autoApprove": []},
+            "custom": {"anything": True},
+        }
+        before = {}
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes((json.dumps({"user": True, "mcpServers": historical}, indent=4) + "\r\n").encode())
+            # Even sidecars belonging to another project are outside installer ownership.
+            sidecar = Path(str(path) + ".aidlc-mcp-ledger.json")
+            sidecar.write_bytes(b'{"other-project":"preserve verbatim"}\r\n')
+            before[path] = path.read_bytes()
+            before[sidecar] = sidecar.read_bytes()
+        zcode = json.loads(zcode_path.read_text())
+        zcode["mcp"] = {"servers": historical, "unknown": "keep"}
+        zcode_path.write_text(json.dumps(zcode))
+        for operation in ("install", "uninstall", "install", "uninstall"):
+            for host in hosts:
+                args = ["--harness", host]
+                if host in ("kiro-ide", "kiro-cli", "qoder", "codebuddy"):
+                    args += ["--project", str(project)]
+                result = run_cli(home, [operation, *args], env)
+                assert result.returncode == 0, result.stdout + result.stderr
+                assert all(path.read_bytes() == content for path, content in before.items())
+                assert json.loads(zcode_path.read_text())["mcp"] == zcode["mcp"]
+        assert not list(home.rglob("*.aidlc-mcp-lock"))
+        assert not list(home.rglob("*.aidlc-mcp-journal.json"))
+
+
 def test_new_plugin_host_lifecycles() -> None:
     with tempfile.TemporaryDirectory(prefix="aidlc-installer-new-hosts-", dir=str(SCRATCH_ROOT)) as directory:
         root = Path(directory)
@@ -448,7 +510,7 @@ def test_new_plugin_host_lifecycles() -> None:
         qoder_cn_skill = home / ".qoder-cn" / "skills" / "loeyae-aidlc" / "SKILL.md"
         assert qoder_cn_skill.is_file()
         assert "Markdown state/audit" in qoder_cn_skill.read_text()
-        expected_qoder_mcp = {"loeyae-skills", "awesome-design", "figma", "ssot"}
+        expected_qoder_mcp = {"figma"}
         for config_path in qoder_mcp_config_paths:
             config = json.loads(config_path.read_text())
             assert config["userSetting"] == "preserve"
@@ -464,7 +526,7 @@ def test_new_plugin_host_lifecycles() -> None:
         ) == 1
         assert zcode_config["hooks"]["enabled"] is True
         assert zcode_config["mcp"]["servers"]["figma"] == custom_figma
-        assert set(zcode_config["mcp"]["servers"]) == {"loeyae-skills", "awesome-design", "figma", "ssot"}
+        assert set(zcode_config["mcp"]["servers"]) == {"figma"}
         assert zcode_config["userSetting"] == "preserve"
 
         for harness in ["codebuddy", "qoder", "zcode"]:
@@ -477,7 +539,7 @@ def test_new_plugin_host_lifecycles() -> None:
         assert not (home / ".zcode" / "skills" / "loeyae-aidlc").exists()
         zcode_after = json.loads(zcode_config_path.read_text())
         assert zcode_after["hooks"]["events"]["Stop"] == [custom_hook]
-        assert set(zcode_after["mcp"]["servers"]) == {"loeyae-skills", "awesome-design", "figma", "ssot"}
+        assert set(zcode_after["mcp"]["servers"]) == {"figma"}
         for config_path in qoder_mcp_config_paths:
             config = json.loads(config_path.read_text())
             assert config["mcpServers"]["figma"] == custom_figma
@@ -594,18 +656,17 @@ def test_install_all_detects_qoder_cn_desktop_without_cli() -> None:
         detected_line = next(line for line in output.splitlines() if "Detected supported hosts:" in line)
         assert f"qoder ({qoder_executable})" in detected_line
         assert "Qoder CN Desktop detected without qoder CLI" in output
-        expected_mcp = {"loeyae-skills", "awesome-design", "figma", "ssot"}
-        assert set(json.loads(qoder_cn_config.read_text())["mcpServers"]) == expected_mcp
-        assert set(json.loads((home / ".qoder" / "settings.json").read_text())["mcpServers"]) == expected_mcp
+        assert not qoder_cn_config.exists()
+        assert not (home / ".qoder" / "settings.json").exists()
         qoder_assets = home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc"
         qoder_cn_skill = home / ".qoder-cn" / "skills" / "loeyae-aidlc" / "SKILL.md"
-        assert (qoder_assets / "mcp-cn.json").is_file()
+        assert not (qoder_assets / "mcp-cn.json").exists()
         assert qoder_cn_skill.is_file()
         assert "Markdown state/audit" in qoder_cn_skill.read_text()
 
         repeated = run_cli(home, ["install", "--all"], env)
         assert repeated.returncode == 0, repeated.stdout + repeated.stderr
-        assert "MCP services already present" in repeated.stdout
+        assert "Core installation adds none" in repeated.stdout
 
         project = root / "project"
         project.mkdir()
@@ -617,7 +678,7 @@ def test_install_all_detects_qoder_cn_desktop_without_cli() -> None:
         assert removed.returncode == 0, removed.stdout + removed.stderr
         assert not qoder_assets.exists()
         assert not qoder_cn_skill.exists()
-        assert set(json.loads(qoder_cn_config.read_text())["mcpServers"]) == expected_mcp
+        assert not qoder_cn_config.exists()
 
 
 def test_install_all_detects_qoder_cn_profile_without_cli() -> None:
@@ -645,7 +706,7 @@ def test_install_all_detects_qoder_cn_profile_without_cli() -> None:
         assert "Qoder CN Desktop detected without qoder CLI" in output
         config = json.loads(qoder_cn_config.read_text())
         assert config["preserved"] is True
-        assert set(config["mcpServers"]) == {"loeyae-skills", "awesome-design", "figma", "ssot"}
+        assert config["mcpServers"] == {}
         assert (home / ".qoder-cn" / "skills" / "loeyae-aidlc" / "SKILL.md").is_file()
 
 
@@ -806,6 +867,7 @@ if __name__ == "__main__":
     test_unowned_targets_and_argument_contracts()
     test_opencode_multi_asset_transaction_and_uninstall()
     test_claude_activation_refreshes_existing_plugin()
+    test_core_mcp_lifecycle()
     test_new_plugin_host_lifecycles()
     test_workbuddy_embedded_cli_uses_workbuddy_config_dir()
     test_codebuddy_validation_uses_output_verdict()

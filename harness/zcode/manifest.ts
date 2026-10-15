@@ -22,7 +22,6 @@ const manifest: HarnessManifest = {
     { src: "SKILL.md", dst: "skills/loeyae-aidlc/SKILL.md" },
     { src: "plugin.json", dst: ".zcode-plugin/plugin.json" },
     { src: "hooks/hooks.json", dst: "hooks/hooks.json" },
-    { src: ".mcp.json", dst: ".mcp.json" },
     { src: "README.md", dst: "README.md" },
     { src: "marketplace.json", dst: "marketplace.json", projectRoot: true },
   ],

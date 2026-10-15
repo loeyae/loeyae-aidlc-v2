@@ -17,14 +17,8 @@ DIAGRAM_CONTRACT_PATH = ROOT / "core" / "sensors" / "diagram-contract.md"
 
 
 def main() -> None:
-    config = json.loads(CONFIG_PATH.read_text())
-    provider = config["mcpServers"]["chrome-devtools"]
-    assert provider == {
-        "command": "npx",
-        "args": ["-y", "chrome-devtools-mcp"],
-        "disabled": False,
-        "autoApprove": [],
-    }
+    # Runtime rendering guidance remains available without activating a default server.
+    assert not CONFIG_PATH.exists()
 
     skills = [path.read_text() for path in SKILL_PATHS]
     assert skills[0] == skills[1]

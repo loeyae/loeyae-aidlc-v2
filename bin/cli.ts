@@ -20,7 +20,6 @@ import {
   writeFileSync,
 } from "fs";
 import { tmpdir } from "os";
-import { updateMcpConfig } from "../core/tools/aidlc-mcp-config";
 import { runSync } from "../core/tools/aidlc-spawn";
 import { provisionControlPlaneGitStrategy } from "../core/tools/aidlc-git-merge";
 import {
@@ -36,7 +35,6 @@ import {
   codeBuddyConfigDirForCli,
   codeBuddyKnownCliPaths,
   hostCliSpawnSpec,
-  qoderCnMcpConfigPath,
   type WindowsDesktopHarness,
   windowsDesktopHostPaths,
 } from "./host-detection";
@@ -67,11 +65,6 @@ const CODEBUDDY_USER_MARKETPLACE_ROOT = resolve(HOST_ASSET_ROOT, "codebuddy/user
 const QODER_USER_PLUGIN_ROOT = resolve(HOST_ASSET_ROOT, "qoder/user/loeyae-aidlc");
 const QODER_CN_USER_SKILL_ROOT = resolve(HOME, ".qoder-cn/skills/loeyae-aidlc");
 const QODER_CN_SKILL_OWNER = "loeyae-aidlc:qoder-cn-skill";
-const QODER_CONFIG_ROOT = process.env.QODER_CONFIG_DIR?.trim()
-  ? resolve(process.env.QODER_CONFIG_DIR.trim())
-  : resolve(HOME, ".qoder");
-const QODER_SETTINGS_PATH = resolve(QODER_CONFIG_ROOT, "settings.json");
-const QODER_CN_MCP_CONFIG_PATH = qoderCnMcpConfigPath();
 const ZCODE_GLOBAL_SKILL_ROOT = resolve(HOME, ".zcode/skills/loeyae-aidlc");
 const ZCODE_GLOBAL_CONFIG_PATH = resolve(HOME, ".zcode/cli/config.json");
 const KIRO_GLOBAL_SKILL_ROOT = resolve(HOME, ".kiro/skills/loeyae-aidlc");
@@ -847,36 +840,6 @@ function unregisterQoderPlugin(deployment: QoderDeployment, cli: string): void {
   if (status !== 0) throw new Error(`Qoder CLI plugin unregister failed: ${PLUGIN_NAME}`);
 }
 
-function updateQoderMcpConfig(sourcePath: string, targetPath: string, hostLabel: string): void {
-  const defaults = JSON.parse(readFileSync(sourcePath, "utf8"));
-  if (!isRecord(defaults.mcpServers)) {
-    throw new Error(`Qoder MCP defaults must contain mcpServers: ${sourcePath}`);
-  }
-  const merged = updateMcpConfig(targetPath, defaults.mcpServers);
-  if (merged.added.length === 0 && merged.upgraded.length === 0) {
-    console.log(`🔌 ${hostLabel} MCP services already present; preserved: ${merged.preserved.join(", ") || "none"}`);
-    return;
-  }
-  const changes = [
-    ...(merged.added.length ? [`added: ${merged.added.join(", ")}`] : []),
-    ...(merged.upgraded.length ? [`upgraded: ${merged.upgraded.join(", ")}`] : []),
-  ];
-  console.log(`🔌 Updated ${hostLabel} MCP services (${changes.join("; ")}) → ${targetPath}`);
-}
-
-function registerQoderMcpConfigs(pluginRoot: string): void {
-  updateQoderMcpConfig(
-    resolve(pluginRoot, ".mcp.json"),
-    QODER_SETTINGS_PATH,
-    "Qoder Desktop / CLI",
-  );
-  updateQoderMcpConfig(
-    resolve(pluginRoot, "mcp-cn.json"),
-    QODER_CN_MCP_CONFIG_PATH,
-    "Qoder CN IDE",
-  );
-}
-
 function isZcodeHookGroup(group: unknown): boolean {
   if (!isRecord(group) || !Array.isArray(group.hooks)) return false;
   return group.hooks.some((hook) => isRecord(hook)
@@ -887,9 +850,7 @@ function isZcodeHookGroup(group: unknown): boolean {
 
 function registerZcodeConfig(pluginRoot: string): void {
   const hookDefaults = JSON.parse(readFileSync(resolve(pluginRoot, "hooks/hooks.json"), "utf8"));
-  const mcpDefaults = JSON.parse(readFileSync(resolve(pluginRoot, ".mcp.json"), "utf8"));
   const desiredGroups = Array.isArray(hookDefaults?.hooks?.Stop) ? hookDefaults.hooks.Stop : [];
-  const desiredServers = isRecord(mcpDefaults.mcpServers) ? mcpDefaults.mcpServers : {};
   const result = updateSharedJson(ZCODE_GLOBAL_CONFIG_PATH, (current) => {
     if (current.hooks !== undefined && !isRecord(current.hooks)) throw new Error(`ZCode hooks config must be an object: ${ZCODE_GLOBAL_CONFIG_PATH}`);
     const hooks = isRecord(current.hooks) ? { ...current.hooks } : {};
@@ -900,29 +861,12 @@ function registerZcodeConfig(pluginRoot: string): void {
     const nextStop = [...retainedStop, ...desiredGroups];
     events.Stop = nextStop;
 
-    if (current.mcp !== undefined && !isRecord(current.mcp)) throw new Error(`ZCode MCP config must be an object: ${ZCODE_GLOBAL_CONFIG_PATH}`);
-    const mcp = isRecord(current.mcp) ? { ...current.mcp } : {};
-    if (mcp.servers !== undefined && !isRecord(mcp.servers)) throw new Error(`ZCode MCP servers must be an object: ${ZCODE_GLOBAL_CONFIG_PATH}`);
-    const servers = isRecord(mcp.servers) ? { ...mcp.servers } : {};
-    const added: string[] = [];
-    const preserved: string[] = [];
-    for (const [name, server] of Object.entries(desiredServers)) {
-      if (servers[name] === undefined) {
-        servers[name] = server;
-        added.push(name);
-      } else {
-        preserved.push(name);
-      }
-    }
     return {
-      value: { ...current, hooks: { ...hooks, enabled: true, events }, mcp: { ...mcp, servers } },
-      result: { hookChanged: JSON.stringify(existingStop) !== JSON.stringify(nextStop) || hooks.enabled !== true, added, preserved },
+      value: { ...current, hooks: { ...hooks, enabled: true, events } },
+      result: { hookChanged: JSON.stringify(existingStop) !== JSON.stringify(nextStop) || hooks.enabled !== true },
     };
   });
   console.log(result.hookChanged ? "🔒 Registered ZCode user Stop Hook." : "🔒 ZCode user Stop Hook already current.");
-  console.log(result.added.length
-    ? `🔌 Added ZCode MCP services: ${result.added.join(", ")}`
-    : `🔌 ZCode MCP services already present; preserved: ${result.preserved.join(", ") || "none"}`);
 }
 
 function unregisterZcodeConfig(): void {
@@ -942,22 +886,6 @@ function unregisterZcodeConfig(): void {
     return { value: { ...current, hooks }, result: count };
   });
   if (removed) console.log("🔓 Removed ZCode user Stop Hook; shared MCP services were preserved.");
-}
-
-function registerKiroMcp(): void {
-  const sourcePath = resolve(ROOT, "harness/kiro-crew/mcp.json");
-  const targetPath = resolve(HOME, ".kiro/settings/mcp.json");
-  const defaults = JSON.parse(readFileSync(sourcePath, "utf8"));
-  const merged = updateMcpConfig(targetPath, defaults.mcpServers);
-  if (merged.added.length === 0 && merged.upgraded.length === 0) {
-    console.log(`🔌 Kiro MCP services already present; preserved: ${merged.preserved.join(", ") || "none"}`);
-    return;
-  }
-  const changes = [
-    ...(merged.added.length ? [`added: ${merged.added.join(", ")}`] : []),
-    ...(merged.upgraded.length ? [`upgraded: ${merged.upgraded.join(", ")}`] : []),
-  ];
-  console.log(`🔌 Updated Kiro MCP services (${changes.join("; ")})`);
 }
 
 function hookCommand(group: unknown): string {
@@ -1099,9 +1027,8 @@ function installOne(harness: string, customTarget: string, projectTarget: string
       if (cli) {
         registerQoderPlugin(deployment, cli);
       } else {
-        console.log("ℹ️  Qoder CN Desktop detected without qoder CLI; skipped plugin/Stop Hook registration and continued with native Skill + host MCP configuration.");
+        console.log("ℹ️  Qoder CN Desktop detected without qoder CLI; skipped plugin/Stop Hook registration and continued with native Skill.");
       }
-      registerQoderMcpConfigs(deployment.pluginRoot);
     }, migrationOptions);
     if (deployment.scope === "user") {
       installManagedAssets(
@@ -1160,7 +1087,6 @@ function installOne(harness: string, customTarget: string, projectTarget: string
     console.log(`♻️  Adopted legacy Kiro CLI ownership for the shared global Agent Skill → ${target}`);
   }
   const activate = (): void => {
-    if ((harness === "kiro-crew" || harness === "kiro-ide" || harness === "kiro-cli") && !customTarget) registerKiroMcp();
     if (harness === "codex" && !customTarget) registerCodexHooks(resolve(source, "hooks/hooks.json"));
   };
   installManagedAssets(owner, [{ source, target, kind: "directory" }], activate, migrationOptions);
@@ -1341,13 +1267,35 @@ function deploy(args: string[], operation: "install" | "uninstall"): void {
     console.log(operation === "install"
       ? "⚠️  Restart affected platforms to activate."
       : `✅ Uninstalled ${harnesses.length} installer-owned global platform installation${harnesses.length === 1 ? "" : "s"}.`);
-    if (operation === "install") provisionProjectGitStrategyOnInstall();
+    if (operation === "install") {
+      provisionProjectGitStrategyOnInstall();
+      printMcpNextSteps();
+    }
     return;
   }
   const harness = options.harness || "kiro-crew";
   if (operation === "install") installOne(harness, options.target, options.project, options.migrateLegacy);
   else uninstallOne(harness, options.target, options.project);
-  if (operation === "install") provisionProjectGitStrategyOnInstall();
+  if (operation === "install") {
+    provisionProjectGitStrategyOnInstall();
+    printMcpNextSteps();
+  }
+}
+
+/** Installation scope never authorizes project Provider connections. */
+function printMcpNextSteps(): void {
+  console.log(`
+MCP connections require a separate, explicit project approval; Core installation adds none.
+--project selects deployment/Hook scope only. Existing host connections and ownership are preserved.
+For enabled Providers with locked aidlc.mcp metadata, select an explicit host JSON file:
+  loeyae-aidlc provider mcp-preview --project <project> --host-config <host.json>
+  loeyae-aidlc provider mcp-plan --project <project> --host-config <host.json>
+Save the plan as UTF-8 JSON, review changes[].config_digest, then approve each configuration:
+  loeyae-aidlc provider mcp-apply --project <project> --host-config <host.json> --plan <plan.json> --approve-config <digest>
+No Provider/disabled instance: no connections. Missing metadata: resolve the Provider capability gap first.
+The managed adapter supports JSON mcpServers only; ZCode mcp.servers, Codex/OpenCode and plugin-managed formats need a supported adapter; do not apply directly to them.
+Cleanup is separate from uninstall: review provider mcp-cleanup-plan, then provider mcp-cleanup with the same explicit target and saved plan.
+`);
 }
 
 /**
