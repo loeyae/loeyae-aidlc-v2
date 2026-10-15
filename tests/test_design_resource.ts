@@ -61,6 +61,9 @@ const http = createServer(async (req, res) => {
   } catch { if (!res.headersSent) res.writeHead(500); res.end(); }
 });
 let approved: any;
+// Synchronous Git verification can exceed Node's default 5s idle socket timeout.
+http.keepAliveTimeout = 120_000;
+http.headersTimeout = 130_000;
 function approve(instance: string, required = false, ref = "approval-1") {
   const c = readDesignResourceContract(project, instance)!; assert(c);
   approved = { required, style: c.style, platform: c.platform, team: c.team, approval_ref: ref, instance_id: instance,

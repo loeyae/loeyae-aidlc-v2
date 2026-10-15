@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { verifyDesignResourceConsumption } from "./aidlc-design-resource.js";
+import { verifyExternalUiManifest } from "./aidlc-ui-readonly.js";
 import { createHash } from "crypto";
 import { checkSlices } from "./aidlc-document-slices";
 import { QUALITY_SENSORS, QualityBlocked, qualityChangeCheck, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
@@ -531,6 +532,7 @@ function figmaArtifactContract(plan: PagePlanContract, route: UiRoute): DesignAr
   const manifestPath = join(ROOT, contextual("docs/aidlc/inception/ui-design/figma-manifest.json"));
   if (!existsSync(manifestPath)) fail(`Figma manifest is missing: ${relativePath(manifestPath)}`);
   const manifest = jsonFile(manifestPath);
+  const readArtifacts = route === "figma-existing" ? verifyExternalUiManifest(ROOT, ACTIVE_MODULE!, manifest) : [];
   if (manifest.schema_version !== "1" || manifest.design_mode !== "figma") fail("figma-manifest.json has an unsupported schema or design_mode");
   const expectedSource = route === "figma-existing" ? "external" : "created";
   if (manifest.source !== expectedSource) fail(`figma-manifest.source must be ${expectedSource} for signed route ${route}`);
@@ -540,7 +542,7 @@ function figmaArtifactContract(plan: PagePlanContract, route: UiRoute): DesignAr
   if (manifest.page_plan !== expectedPlan) fail(`figma-manifest.page_plan must be ${expectedPlan}`);
   emptyArray(manifest.unresolved, "figma-manifest.unresolved");
   const validation = objectValue(manifest.validation, "figma-manifest.validation");
-  for (const field of ["variables", "components", "auto_layout", "screenshots"]) {
+  for (const field of route === "figma-existing" ? [] : ["variables", "components", "auto_layout", "screenshots"]) {
     if (validation[field] !== "passed") fail(`figma-manifest.validation.${field} must be passed`);
   }
   if (expectedSource === "external" && validation.external_read_only !== true) fail("external Figma designs must declare external_read_only=true");
@@ -572,7 +574,7 @@ function figmaArtifactContract(plan: PagePlanContract, route: UiRoute): DesignAr
   sameIdentifiers(pageIds, plan.pageIds, "figma-manifest.pages.page_id");
   if (new Set(pageIds).size !== pageIds.length) fail("figma-manifest contains duplicate page IDs");
   // figma 无可解析的 HTML 元素:元素级 diff 不适用(需 Provider/design-context),elementLevel=false。
-  return { pageIds: [...new Set(pageIds)].sort(), elements: nodeIds.size, tally: { button: 0, input: 0, select: 0, table: 0, dialog: 0 }, conditions: 0, elementLevel: false, artifacts: [...plan.artifacts, relativePath(manifestPath)], coveredStories: [...coveredStories].sort() };
+  return { pageIds: [...new Set(pageIds)].sort(), elements: nodeIds.size, tally: { button: 0, input: 0, select: 0, table: 0, dialog: 0 }, conditions: 0, elementLevel: false, artifacts: [...plan.artifacts, relativePath(manifestPath), ...readArtifacts], coveredStories: [...coveredStories].sort() };
 }
 
 function reviewEvidence(): Record<string, unknown> {

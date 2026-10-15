@@ -40,10 +40,10 @@ condition: ui_mode_figma
 
 ## 2. 身份与能力门禁
 
-调用 `whoami` 确认认证和 seat。配置存在或认证成功均不能替代运行时能力验证：
+创建分支调用 `whoami` 确认认证和 seat，再核对写入能力；配置存在或认证成功均不能替代运行时能力验证：
 
 - `流程创建`：`create_new_file` 创建的验证目标必须直接作为唯一主文件；在该文件内用 `use_figma` 完成最小写入验证，后续设计必须复用同一文件，不得另建正式文件。工具返回的 URL 必须进入本次 `figma-manifest.json`，handoff.md 只能镜像展示；
-- `外部提供`：必须用 `get_metadata` 验证目标文件可读取，且后续不得调用写入工具；URL 必须以 `source=external`、`external_read_only=true` 写入 manifest。
+- `外部提供`：通过 Git 锁定的外部只读适配契约与 Core 通用消费入口验证目标文件和授权节点，按 `knowledge/protocols/ui-readonly-adapter.md` 执行。服务认证尚不支持时准确返回能力诊断，不继承宿主会话；本分支不直接调用身份、读取或写入工具。
 
 客户端、seat、权限或工具不满足时标记 blocked，向用户提供“修复 Figma 能力后重试”与“切换 HTML Mock”选项。未经用户选择不得自动切换模式。
 
@@ -98,7 +98,7 @@ condition: ui_mode_figma
 - `file_url` 与签名 source 一致；
 - manifest 的 `page_plan` 指向已验证页面计划；
 - 每个 PAGE 都有唯一 Page/Frame/nodeId 和截图引用；
-- Variables、Components、Auto Layout、screenshots 以及外部只读状态均通过；
+- 创建模式核对 Variables、Components、Auto Layout 和截图；已有稿分别核对读取来源/资产、只读状态和未验证的行为项，不能将存在截图视为全部通过；
 - `unresolved` 为空。
 
 随后运行受控 `ui-artifact-consistency` Producer。只有 manifest 与 Evidence 均通过后，才能把上述状态派生展示到 handoff.md，并将下一操作写为“执行 I10 UI 设计交叉验证”。

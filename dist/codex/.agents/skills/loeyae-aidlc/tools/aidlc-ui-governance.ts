@@ -13,6 +13,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runSync } from "./aidlc-spawn";
 import { resolveDesignResource, verifyDesignResource, verifyDesignResourceConsumption, applyDesignResourceStyle, type DesignResourceLock } from "./aidlc-design-resource.js";
+import { verifyExternalUiManifest } from "./aidlc-ui-readonly.js";
 
 export type UiDesignRoute = "html-mock" | "figma-create" | "figma-existing";
 export type UiSourceKind = "prd" | "requirements" | "user-stories" | "page-plan" | "design-decisions";
@@ -951,6 +952,7 @@ function verifyLockedHtmlResources(projectRoot: string, moduleId: string, lock: 
 
 function buildExpectedAcceptance(projectRoot: string, moduleId: string, route: UiDesignRoute, reportPath: string, recordedUpstreamCommit?: string): UiGenerationAcceptance {
   const root = realpathSync(resolve(projectRoot));
+  if (route === "figma-existing") verifyExternalUiReview(root, moduleId, reportPath);
   const loaded = readUiGenerationLock(root, moduleId);
   verifyLockedHtmlResources(root, moduleId, loaded.lock);
   if (loaded.lock.route !== route) fail(`UI generation lock.route must match selected route ${route}`);
@@ -1001,6 +1003,15 @@ function buildExpectedAcceptance(projectRoot: string, moduleId: string, route: U
   };
 }
 
+/** A changed remote read generation needs a review of those exact registered bytes. */
+function verifyExternalUiReview(root: string, moduleId: string, reportPath: string): void {
+  verifyExternalUiManifest(root, moduleId);
+  const manifest = safeProjectFile(root, `docs/aidlc/modules/${moduleId}/inception/ui-design/figma-manifest.json`, "Figma manifest");
+  const report = safeProjectFile(root, reportPath, "UI review report");
+  const sections = markdownSections(readFileSync(report.absolute, "utf8"), /^UI full acceptance$/i);
+  if (sections.length !== 1 || sectionField(sections[0], "figma_manifest_sha256") !== sha256(readFileSync(manifest.absolute))) fail("UI_READ_NEW_VISUAL_REVIEW_REQUIRED");
+}
+
 export interface CreateUiAcceptanceOptions {
   moduleId: string;
   route: UiDesignRoute;
@@ -1009,6 +1020,7 @@ export interface CreateUiAcceptanceOptions {
 
 export function createUiGenerationAcceptance(projectRoot: string, options: CreateUiAcceptanceOptions): UiGenerationAcceptance {
   const root = realpathSync(resolve(projectRoot));
+  if (options.route === "figma-existing") verifyExternalUiManifest(root, options.moduleId);
   const outputLabel = uiGenerationAcceptancePath(options.moduleId);
   const output = safeOutputFile(root, outputLabel, outputLabel);
   if (existsSync(output)) fail(`UI full acceptance is already recorded; a second full acceptance is forbidden: ${outputLabel}`);
@@ -1264,8 +1276,10 @@ export function verifyUiGenerationAcceptance(projectRoot: string, moduleId: stri
 } {
   const root = realpathSync(resolve(projectRoot));
   const loadedLock = readUiGenerationLock(root, moduleId);
+  if (route === "figma-existing") verifyExternalUiManifest(root, moduleId);
   verifyLockedHtmlResources(root, moduleId, loadedLock.lock);
   const chain = verifyAcceptanceChain(root, moduleId, route);
+  if (route === "figma-existing") verifyExternalUiReview(root, moduleId, chain.acceptance.full_acceptance.report_path);
   const live = liveFreshnessState(root, chain.lock);
   if (!sameValue(live.state.sources, chain.effective.sources) || !sameValue(live.state.pages, chain.effective.pages)) {
     fail("UI generation acceptance does not match current source revisions; record mapped changes with the controlled 'ui reverify' command (a second full acceptance is forbidden)");

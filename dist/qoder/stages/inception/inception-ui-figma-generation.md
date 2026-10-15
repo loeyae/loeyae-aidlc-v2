@@ -50,20 +50,22 @@ condition: ui_mode_figma
 
 ## 外部提供模式
 
-1. 只使用调用方提供且已验证可读的目标文件。
-2. 读取 Page/Frame，并将每个页面计划项映射到唯一 nodeId。
-3. 使用 metadata、variables 和 screenshot 证据验证页面可定位、视觉可读和设计资源可追溯。
-4. 缺少计划页面、存在多重映射或产品语义不一致时返回问题，不调用任何写入工具。
-5. 资产导出仅在调用方明确要求且不修改源文件时执行。
+由已 Git 锁定的外部只读适配包提供读取声明与未受信任 manifest 候选，调用 Core 通用 `consumeExternalUiDesign` 入口；契约与调用说明见 `knowledge/protocols/ui-readonly-adapter.md`。本分支不直接调用服务工具。
 
-## 工具边界
+输入必须绑定签名选择、已批准 page-plan、当前 generation/resource/provider lock、显式目标文件和 PAGE→Page/Frame 节点，以及可信 currentContext 和精确操作策略。映射来源只能是用户提供的目标或锁定声明，不猜页面名称。Provider 声明和服务读取提示均不授予权限。
+
+Core 验证读取快照、唯一映射、来源、新鲜度与真实资产后受控发布 canonical manifest。缺页、冲突、越界、资源不明或未决项返回 `UNVERIFIED`；不支持的认证/截图形式返回 `NEEDS_CAPABILITY`。失败不发布占位 manifest。未选择本分支、无 UI、skip 或 HTML 时零调用、无占位 Evidence。
+
+metadata/variables 读取与截图资产核验不等于 Components、Auto Layout、产品行为或视觉验收通过。适配器不签发质量 Evidence，不修改 state/approval；继续由既有 artifact、behavior、freshness sensors 和集中视觉审核分别验证。
+
+## 创建分支工具边界（本轮保留，尚未迁移）
 
 - 文件与画布：`create_new_file`、`use_figma`；
 - 设计系统：`get_libraries`、`search_design_system`；
 - 读取验证：`get_metadata`、`get_variable_defs`、`get_screenshot`；
 - 资产：`upload_assets`、`download_assets`。
 
-工具是否可调用由编排层提供的能力结果决定，本文件不把配置存在视为可用。
+上述创建分支名称保留原流程语义，不能作为实际服务工具存在或可调用的证明。必须按运行时服务契约与显式授权核对；本轮只承接已有稿只读分支，不开放这些远程写工具。
 
 除能力返回值外，编排层必须把结果写入当前模块的 canonical `docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json`：
 
@@ -94,7 +96,7 @@ condition: ui_mode_figma
 }
 ```
 
-`figma-create` 必须写 `source=created`；`figma-existing` 必须写 `source=external` 且 `external_read_only=true`。每个页面计划项必须恰有一个 Page/Frame/nodeId 和截图引用，页面集合及来源 ID 与 `page-plan.md` 完全一致。report 前运行 `ui-artifact-consistency`；handoff.md 仅展示派生进度，不能替代此 manifest。
+上例只展示创建分支的输出形状，不作为已有稿的验证值模板。`figma-existing` 的 canonical 内容必须由通用 Core 入口发布，含 `read_registration` 与受控 PNG 路径/摘要，标记 `source=external`、`external_read_only=true`。Variables 是 `observed`，截图是 `verified-assets`，行为/Components/Auto Layout/视觉审核保持 `unverified`，不能抄上例的 passed。每个页面计划项恰有一个 Page/Frame/nodeId 和截图资产；页面集合及来源 ID 与计划完全一致。report 前分别运行现有 artifact 与 behavior 校验；handoff.md 不能替代 manifest 或 Evidence。
 
 ## 输出
 

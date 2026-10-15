@@ -6,6 +6,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFile
 import { dirname, join, resolve } from "node:path";
 import { resolveProviderMcpRequirements } from "./aidlc-provider-mcp.js";
 import { canonicalProviderJson, readProjectProviders, sha256FileDigest, sha256ProviderDigest } from "./aidlc-project-provider.js";
+import { decodeMcpPng } from "./aidlc-mcp-image.js";
 
 export interface McpReadContext {
   project_id: string;
@@ -28,7 +29,11 @@ export interface McpReadRequest extends McpReadContext {
   arguments: Record<string, unknown>;
 }
 export interface McpReadPolicy extends McpReadContext {
-  schema: "aidlc.mcp-read-policy/v1";
+  schema: "aidlc.mcp-read-policy/v1" | "aidlc.mcp-read-policy/v2";
+  /** v2 only. Inline PNG data; never resource reads, downloads, or URL fetching. */
+  result_content?: "text-or-png";
+  /** Trusted v2 acquisition group; never a remote tool argument. */
+  read_generation?: string;
   operator: string;
   instance_id: string;
   project_lock_digest: string;
@@ -96,9 +101,10 @@ function context(value: McpReadContext): void {
 export function createCoreMcpReadOnly(options: McpReadOptions) {
   // Freeze by value so caller mutation during async credential/transport work cannot widen grants.
   const policy: McpReadPolicy = JSON.parse(JSON.stringify(options.policy));
-  exact(policy, ["schema", ...bindingKeys, "operator", "endpoint", "credential_domain", "credential_ref", "grants", "timeout_ms", "max_request_bytes", "max_response_bytes", "ttl_ms", "fixture"]);
-  if (policy.schema !== "aidlc.mcp-read-policy/v1" || !policy.operator || typeof policy.fixture !== "boolean") fail("MCP_INVALID_POLICY");
+  exact(policy, ["schema", ...bindingKeys, "operator", "endpoint", "credential_domain", "credential_ref", "grants", "timeout_ms", "max_request_bytes", "max_response_bytes", "ttl_ms", "fixture", ...(policy.schema === "aidlc.mcp-read-policy/v2" ? ["result_content", ...(Object.hasOwn(policy, "read_generation") ? ["read_generation"] : [])] : [])]);
+  if (!["aidlc.mcp-read-policy/v1", "aidlc.mcp-read-policy/v2"].includes(policy.schema) || (policy.schema === "aidlc.mcp-read-policy/v2" && policy.result_content !== "text-or-png") || !policy.operator || typeof policy.fixture !== "boolean") fail("MCP_INVALID_POLICY");
   context(policy);
+  if (policy.read_generation !== undefined && !/^[A-Za-z0-9_-]{1,80}$/.test(policy.read_generation)) fail("MCP_INVALID_POLICY");
   for (const item of [policy.operator, policy.instance_id, policy.connection, policy.credential_domain]) text(item, 256);
   for (const item of [policy.project_lock_digest, policy.connection_digest]) if (!/^sha256:[a-f0-9]{64}$/.test(item)) fail("MCP_INVALID_DIGEST");
   bounded(policy.timeout_ms, 50, 60_000); bounded(policy.max_request_bytes, 1, 1024 * 1024);
@@ -225,7 +231,13 @@ export function createCoreMcpReadOnly(options: McpReadOptions) {
         failure = "MCP_TOOL_ERROR";
         const result = await client.callTool({ name: request.tool, arguments: request.arguments }, undefined, { timeout: policy.timeout_ms, signal: controller.signal });
         if (result.isError) fail(failure);
-        if (!Array.isArray(result.content) || result.content.some(c => !object(c) || c.type !== "text" || typeof c.text !== "string")) { failure = "MCP_RESULT_UNSUPPORTED"; fail(failure); }
+        failure = "MCP_RESULT_UNSUPPORTED";
+        if (!Array.isArray(result.content)) fail(failure);
+        for (const c of result.content) {
+          if (object(c) && c.type === "text" && typeof c.text === "string") continue;
+          if (policy.schema === "aidlc.mcp-read-policy/v2" && object(c) && c.type === "image") { decodeMcpPng(c); continue; }
+          fail(failure);
+        }
         const content = JSON.stringify(result);
         if (Buffer.byteLength(content) > policy.max_response_bytes) { failure = "MCP_RESPONSE_TOO_LARGE"; fail(failure); }
         if (secret && (content.includes(secret) || (remoteEtag ?? "").includes(secret))) { failure = "MCP_SECRET_IN_RESULT"; fail(failure); }
@@ -242,6 +254,7 @@ export function createCoreMcpReadOnly(options: McpReadOptions) {
           expires_at: new Date(now + policy.ttl_ms).toISOString(), ttl_ms: policy.ttl_ms,
           remote_version: remoteEtag === null ? { status: "unknown" } : { status: "provided", etag: remoteEtag },
           fixture: policy.fixture, trust: "external-data", result,
+          ...(policy.schema === "aidlc.mcp-read-policy/v2" ? { read_generation: policy.read_generation ?? null } : {}),
         };
         const digest = sha256ProviderDigest(snapshot);
         failure = "MCP_STORAGE_ERROR";
