@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { designResourceStyle, resolveDesignResource } from "../core/tools/aidlc-design-resource";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,7 +24,7 @@ const moduleRoot = `docs/aidlc/modules/${moduleId}/inception`;
 function write(project: string, path: string, content: string): void {
   const target = join(project, path);
   mkdirSync(resolve(target, ".."), { recursive: true });
-  writeFileSync(target, content, "utf8");
+  writeFileSync(target, path.endsWith(".html") ? `<head>${designResourceStyle(resolveDesignResource(project, moduleId))}</head>${content}` : content, "utf8");
 }
 
 function git(project: string, args: string[]): string {

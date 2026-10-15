@@ -21,6 +21,7 @@
     "typecheck": "tsc --noEmit",
     "pretest": "npm run test:mars169 && npm run test:mcp-readonly && npm run test:context-source-boundary",
     "test:context-source": "tsx tests/test_context_source.ts",
+    "test:design-resource": "tsx tests/test_design_resource.ts",
     "test:context-source-boundary": "tsx tests/test_context_source_boundary.ts",
     "test:mcp-readonly": "tsx tests/test_mcp_readonly.ts",
     "test:mars161-phase2": "npx --no-install tsx tests/test_mars161_execution_profile_phase2.ts",

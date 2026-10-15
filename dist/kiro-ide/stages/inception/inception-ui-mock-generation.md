@@ -66,7 +66,8 @@ condition: ui_mode_html_mock
 
 - 存量项目使用现有 UI 框架和实际页面风格；
 - 新项目可使用默认样式或调用方提供的 design tokens；
-- `awesome-design` 仅提供 tokens，字段缺失时使用默认值，不得影响页面语义。
+- 通用设计资源只提供经过校验的 tokens；可选字段默认值记录来源，强制品牌缺必需字段时阻断。不得改变页面集合、字段、权限或操作，不接管 state/audit/approval。
+- `ui lock` 固定资源选择、Provider commit、来源快照和 tokens 摘要。HTML 骨架和内容均通过 `loeyae-aidlc ui resource-css --module {module-id} --html docs/aidlc/modules/{module-id}/inception/ui-mock/{端}.html` 消费锁定样式；检查器验证实际样式内容。资源变化必须显式重新基线并重新验收视觉产物，禁止静默读取 latest 或覆盖原锁。
 
 ## 输出
 

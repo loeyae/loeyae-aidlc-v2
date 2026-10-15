@@ -12,6 +12,7 @@ import {
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runSync } from "./aidlc-spawn";
+import { resolveDesignResource, verifyDesignResource, verifyDesignResourceConsumption, applyDesignResourceStyle, type DesignResourceLock } from "./aidlc-design-resource.js";
 
 export type UiDesignRoute = "html-mock" | "figma-create" | "figma-existing";
 export type UiSourceKind = "prd" | "requirements" | "user-stories" | "page-plan" | "design-decisions";
@@ -70,6 +71,7 @@ export interface UiGenerationLock {
   upstream: { ref: string; commit: string };
   sources: UiSourceSnapshot[];
   pages: UiPageRef[];
+  design_resource?: DesignResourceLock;
   adoption?: { approval_ref: string; reason: string };
 }
 
@@ -567,6 +569,7 @@ function parseLock(raw: unknown): UiGenerationLock {
     upstream: { ref: upstreamRef, commit: upstreamCommit },
     sources,
     pages,
+    ...(value.design_resource !== undefined ? { design_resource: value.design_resource as DesignResourceLock } : {}),
     ...(adoption ? { adoption } : {}),
   };
 }
@@ -581,6 +584,7 @@ export function readUiGenerationLock(projectRoot: string, moduleId: string): { l
     fail(`UI generation lock is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
   }
   const lock = parseLock(raw);
+  verifyDesignResource(projectRoot, moduleId, lock.design_resource);
   if (lock.module_id !== moduleId) fail(`UI generation lock.module_id must be ${moduleId}`);
   return { lock, path: file.relative, digest: sha256(canonicalJson(lock)) };
 }
@@ -645,10 +649,49 @@ export function createUiGenerationLock(projectRoot: string, options: CreateUiLoc
     upstream: { ref: upstreamRef, commit: upstreamCommit },
     sources,
     pages,
+    design_resource: resolveDesignResource(root, moduleId),
     ...(adoption ? { adoption } : {}),
   };
   atomicJson(output, lock);
   return lock;
+}
+
+/** Explicit style adoption starts a new visual review, retaining the exact old baseline
+ * and acceptance bytes. Ordinary refresh/reverify never replaces resource selections. */
+export function rebaselineUiDesignResource(projectRoot: string, moduleId: string): UiGenerationLock {
+  const label = uiGenerationLockPath(moduleId);
+  const previous = safeProjectFile(projectRoot, label, label);
+  const oldBytes = readFileSync(previous.absolute, "utf8");
+  const old = parseLock(JSON.parse(oldBytes));
+  if (old.module_id !== moduleId || old.route !== "html-mock") fail("DESIGN_HTML_ROUTE_REQUIRED");
+  const next = resolveDesignResource(projectRoot, moduleId);
+  if (!next.approval_ref || next.approval_ref === old.design_resource?.approval_ref || next.selection_digest === old.design_resource?.selection_digest) fail("DESIGN_NEW_APPROVAL_REQUIRED");
+  // Validate all inputs before moving anything. Keep original source selection semantics.
+  const sources = old.sources.map(source => snapshotUiSource(projectRoot, source.kind, source.path));
+  if (!sameValue(sources, old.sources)) fail("DESIGN_REBASELINE_REQUIRES_UNCHANGED_BUSINESS_INPUTS");
+  readUiPagePlan(projectRoot, canonicalModulePath(moduleId, "page-plan"));
+  const observed = resolveGitCommit(projectRoot, old.upstream.ref);
+  if (upstreamDrift(projectRoot, old.sources, old.upstream.commit, observed, sources).paths.length > 0) fail("DESIGN_REBASELINE_REQUIRES_UNCHANGED_BUSINESS_INPUTS");
+  resolveGitCommit(projectRoot, "HEAD");
+  const suffix = `.archived-${sha256(oldBytes)}`;
+  const labels = [label, uiGenerationAcceptancePath(moduleId), uiGenerationCheckpointsPath(moduleId)];
+  const moves = labels.filter(p => existsSync(resolve(projectRoot, p))).map(p => ({
+    from: safeProjectFile(projectRoot, p, p).absolute,
+    to: safeOutputFile(projectRoot, p + suffix, p + suffix),
+  }));
+  if (moves.some(m => existsSync(m.to))) fail("DESIGN_BASELINE_ARCHIVE_EXISTS");
+  const moved: typeof moves = [];
+  try {
+    for (const move of moves) { renameSync(move.from, move.to); moved.push(move); }
+    return createUiGenerationLock(projectRoot, {
+      moduleId, route: old.route, upstreamRef: old.upstream.ref,
+      prdPath: old.sources.find(s => s.kind === "prd")?.path,
+      designDecisionsPath: old.sources.find(s => s.kind === "design-decisions")?.path,
+    });
+  } catch (e) {
+    for (const move of moved.reverse()) renameSync(move.to, move.from);
+    throw e;
+  }
 }
 
 export function verifyUiGenerationLockAtBaseline(projectRoot: string, moduleId: string, route: UiDesignRoute, expectedPageIds: string[]): { path: string; digest: string; upstream_ref: string; upstream_commit: string; baseline_mode: string; observed_upstream_commit: string; superseded_by_acceptance: boolean } {
@@ -872,9 +915,24 @@ function parseReviewReport(projectRoot: string, reportPath: string, expectedPage
   };
 }
 
+function verifyLockedHtmlResources(projectRoot: string, moduleId: string, lock: UiGenerationLock): void {
+  if (!lock.design_resource || lock.route !== "html-mock") return;
+  const prefix = `docs/aidlc/modules/${moduleId}/inception/ui-mock/`;
+  const manifest = safeProjectFile(projectRoot, prefix + "ui-mock-manifest.json", "UI mock manifest");
+  const pages = requireArray(requireObject(JSON.parse(readFileSync(manifest.absolute, "utf8")), "UI manifest").pages, "UI manifest.pages");
+  if (pages.length === 0) fail("DESIGN_TOKENS_NOT_CONSUMED");
+  for (const raw of pages) {
+    const page = requireObject(raw, "UI page"), path = requireString(page.html, "UI page.html");
+    if (!path.startsWith(prefix) || !path.endsWith(".html")) fail("DESIGN_INVALID_HTML_TARGET");
+    const html = safeProjectFile(projectRoot, path, "UI HTML");
+    verifyDesignResourceConsumption(projectRoot, moduleId, lock.design_resource, readFileSync(html.absolute, "utf8"));
+  }
+}
+
 function buildExpectedAcceptance(projectRoot: string, moduleId: string, route: UiDesignRoute, reportPath: string, recordedUpstreamCommit?: string): UiGenerationAcceptance {
   const root = realpathSync(resolve(projectRoot));
   const loaded = readUiGenerationLock(root, moduleId);
+  verifyLockedHtmlResources(root, moduleId, loaded.lock);
   if (loaded.lock.route !== route) fail(`UI generation lock.route must match selected route ${route}`);
   // At `ui accept` the live upstream is recorded. Verification recomputes against the recorded
   // commit so a repository-level pointer advance alone never invalidates the acceptance.
@@ -1185,6 +1243,7 @@ export function verifyUiGenerationAcceptance(projectRoot: string, moduleId: stri
 } {
   const root = realpathSync(resolve(projectRoot));
   const loadedLock = readUiGenerationLock(root, moduleId);
+  verifyLockedHtmlResources(root, moduleId, loadedLock.lock);
   const chain = verifyAcceptanceChain(root, moduleId, route);
   const live = liveFreshnessState(root, chain.lock);
   if (!sameValue(live.state.sources, chain.effective.sources) || !sameValue(live.state.pages, chain.effective.pages)) {
@@ -1372,6 +1431,20 @@ function writeOptionalOutput(projectRoot: string, path: string | undefined, cont
 
 export async function runUiGovernanceCli(args: string[], projectRoot = process.cwd()): Promise<void> {
   const command = args[0];
+  if (command === "resource-rebaseline") {
+    const lock = rebaselineUiDesignResource(projectRoot, requiredArg(args, "--module"));
+    process.stdout.write(`${JSON.stringify({ status: "visual-review-required", token_digest: lock.design_resource!.token_digest })}\n`);
+    return;
+  }
+  if (command === "resource-css") {
+    const moduleId = requiredArg(args, "--module");
+    const loaded = readUiGenerationLock(projectRoot, moduleId);
+    if (!loaded.lock.design_resource) fail("DESIGN_LEGACY_ADOPTION_REQUIRED");
+    if (loaded.lock.route !== "html-mock") fail("DESIGN_HTML_ROUTE_REQUIRED");
+    applyDesignResourceStyle(projectRoot, moduleId, loaded.lock.design_resource, requiredArg(args, "--html"));
+    process.stdout.write("Locked design tokens applied.\n");
+    return;
+  }
   if (command === "lock") {
     const moduleId = requiredArg(args, "--module");
     const adoption = args.includes("--adopt") ? { approvalRef: requiredArg(args, "--approval-ref"), reason: requiredArg(args, "--reason") } : undefined;

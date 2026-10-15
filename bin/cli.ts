@@ -1376,7 +1376,7 @@ Quality and utilities:
   provider mcp-apply --host-config <json-path> --plan <json-file> --approve-config <digest> [...]  Apply approved additions
   extension validate|compose|status [flags] Restricted additive extension metadata
   check --sensor <name> [--module <id>]      Run a deterministic semantic checker (module-scoped with --module)
-  ui lock|accept|refresh|reverify|check|impact-matrix|dry-run  Lock UI inputs, verify freshness, one full acceptance + controlled freshness checkpoints
+  ui lock|accept|refresh|reverify|check|resource-css|resource-rebaseline|impact-matrix|dry-run  Lock UI inputs/resources, consume styles, verify freshness and visual acceptance
   diagram-provider run [options]            Run diagram validation
   export <md|svg> <file> --to <format>      Export Markdown or SVG
   docx <inspect|beautify|validate> [args]   Inspect or conservatively restyle DOCX

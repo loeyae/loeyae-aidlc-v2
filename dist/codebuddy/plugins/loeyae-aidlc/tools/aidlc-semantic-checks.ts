@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { verifyDesignResourceConsumption } from "./aidlc-design-resource.js";
 import { createHash } from "crypto";
 import { checkSlices } from "./aidlc-document-slices";
 import { QUALITY_SENSORS, QualityBlocked, qualityChangeCheck, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
@@ -505,6 +506,7 @@ function htmlArtifactContract(plan: PagePlanContract): DesignArtifactContract {
     for (const story of stories) coveredStories.add(story);
     const specsContent = text(specs.path);
     const htmlContent = text(html.path);
+    verifyDesignResourceConsumption(ROOT, ACTIVE_MODULE!, readUiGenerationLock(ROOT, ACTIVE_MODULE!).lock.design_resource, htmlContent);
     if (!specsContent.toUpperCase().includes(pageId) || !htmlContent.toUpperCase().includes(pageId) || !htmlContent.includes(mockBox)) {
       fail(`${pageId} is not consistently mapped across page-specs, HTML and mock_box_id`);
     }

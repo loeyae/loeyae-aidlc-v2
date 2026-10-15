@@ -4,7 +4,7 @@ import { join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 // Limited to production roots, not migration history, generic SSOT invariant ids or tests.
-const forbidden = /ssot\.dev\.loeyae\.com|SSOT_API_KEY|common-ssot-integration|\b(?:search_documents|retrieve_context|list_projects|write_formal_document|archive_document)\b/;
+const forbidden = /ssot\.dev\.loeyae\.com|SSOT_API_KEY|common-ssot-integration|awesome-design|\b(?:search_documents|retrieve_context|list_projects|write_formal_document|archive_document|list_design_styles|get_design_style|get_design_tokens)\b/;
 function scan(root: string): string[] {
   const found: string[] = [];
   function walk(dir: string) {
@@ -22,7 +22,7 @@ assert.deepEqual(scan(root), [], "production must not contain service endpoints,
 const fixture = mkdtempSync(join(tmpdir(), "aidlc-context-scan-"));
 try {
   for (const dir of ["core", "harness", "bin", "scripts"]) mkdirSync(join(fixture, dir));
-  for (const value of ["https://ssot.dev.loeyae.com/mcp/", "SSOT_API_KEY", "search_documents", "list_projects", "common-ssot-integration.md"]) {
+  for (const value of ["https://ssot.dev.loeyae.com/mcp/", "SSOT_API_KEY", "search_documents", "list_projects", "common-ssot-integration.md", "awesome-design", "list_design_styles", "get_design_style", "get_design_tokens"]) {
     writeFileSync(join(fixture, "core", "regression.md"), value);
     assert.deepEqual(scan(fixture), ["core/regression.md"]);
   }

@@ -88,7 +88,7 @@ condition: has_ui_requirements
 
 - 存量项目读取实际 UI 框架和现有页面风格，不另选品牌风格；
 - 新项目由用户选择默认样式或可选设计风格；
-- 选择设计风格时可通过 `awesome-design` 获取 tokens；不可用时使用默认样式，不改变页面语义。
+- 设计资源由锁定的通用 Provider 或最小离线默认样式提供；按可信项目政策核对已批准风格、平台与团队。可选资源不可用时记录 fallback，强制品牌缺必需项时阻断，不改变页面语义。
 
 按 `common-ui-generation-flow.md` 阶段 2 选择信息量最丰富的代表页，调用 `aidlc-ui-mock-design`（`stage=skeleton`+`stage=content` 仅针对代表页）完成其视觉、密度、状态条件表和交互清单，执行**一次定标确认**。已批准参考设计或已有稳定样式来源时自动定标，并在 canonical manifest 或交叉验证报告记录所用来源。定标后后续页面不得逐页暂停确认。
 
