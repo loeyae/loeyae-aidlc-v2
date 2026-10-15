@@ -442,11 +442,12 @@ export function providerSshCommand(
   return args.join(" ");
 }
 
-function isolatedGitEnvironment(home: string): NodeJS.ProcessEnv {
-  const inherited = ["PATH", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC", "TEMP", "TMP", "SSH_AUTH_SOCK", "GIT_SSH_COMMAND", "GIT_ASKPASS", "SSH_ASKPASS"];
+function isolatedGitEnvironment(home: string, offline = false): NodeJS.ProcessEnv {
+  const inherited = ["PATH", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC", "TEMP", "TMP",
+    ...(offline ? [] : ["SSH_AUTH_SOCK", "GIT_SSH_COMMAND", "GIT_ASKPASS", "SSH_ASKPASS"])];
   const env: NodeJS.ProcessEnv = {};
   for (const key of inherited) if (process.env[key] !== undefined) env[key] = process.env[key];
-  if (env.GIT_SSH_COMMAND === undefined) {
+  if (!offline && env.GIT_SSH_COMMAND === undefined) {
     const sshCommand = providerSshCommand();
     if (sshCommand) env.GIT_SSH_COMMAND = sshCommand;
   }
@@ -469,6 +470,7 @@ interface GitContext {
   readonly home: string;
   readonly hooks: string;
   readonly allowFile: boolean;
+  readonly offline?: boolean;
 }
 
 function gitArgs(context: GitContext, args: readonly string[]): string[] {
@@ -480,9 +482,9 @@ function gitArgs(context: GitContext, args: readonly string[]): string[] {
     "-c", "filter.lfs.required=false",
     "-c", "credential.helper=",
     "-c", "protocol.allow=never",
-    "-c", "protocol.https.allow=always",
-    "-c", "protocol.ssh.allow=always",
-    "-c", `protocol.file.allow=${context.allowFile ? "always" : "never"}`,
+    "-c", `protocol.https.allow=${context.offline ? "never" : "always"}`,
+    "-c", `protocol.ssh.allow=${context.offline ? "never" : "always"}`,
+    "-c", `protocol.file.allow=${context.allowFile && !context.offline ? "always" : "never"}`,
     "-c", "protocol.ext.allow=never",
     ...args,
   ];
@@ -521,8 +523,8 @@ function git(context: GitContext, args: readonly string[], encoding?: undefined)
 function git(context: GitContext, args: readonly string[], encoding?: "utf8"): SpawnSyncReturns<string> | SpawnSyncReturns<Buffer> {
   if (args[0] !== "init") assertSafeCacheConfiguration(context);
   return encoding === "utf8"
-    ? runSync("git", gitArgs(context, args), { cwd: context.cache, env: isolatedGitEnvironment(context.home), encoding: "utf8", shell: false })
-    : runSync("git", gitArgs(context, args), { cwd: context.cache, env: isolatedGitEnvironment(context.home), shell: false });
+    ? runSync("git", gitArgs(context, args), { cwd: context.cache, env: isolatedGitEnvironment(context.home, context.offline), encoding: "utf8", shell: false })
+    : runSync("git", gitArgs(context, args), { cwd: context.cache, env: isolatedGitEnvironment(context.home, context.offline), shell: false });
 }
 
 function gitText(context: GitContext, args: readonly string[], label: string): string {
@@ -785,6 +787,20 @@ export interface LockedProviderRulePolicy {
   readonly waivable: boolean;
 }
 
+/** Read a regular blob from an already locked package. No checkout, fetch or scripts. */
+export function readLockedProviderFile(projectRoot: string, entry: ProjectProviderLockEntry, path: string): Buffer {
+  const verified = verifyLockedProviderCache(projectRoot, entry);
+  const session = mkdtempSync(join(tmpdir(), "aidlc-provider-knowledge-"));
+  const context: GitContext = { cache: verified.cache_path, home: join(session, "home"), hooks: join(session, "hooks"), allowFile: false, offline: true };
+  mkdirSync(context.home);
+  mkdirSync(context.hooks);
+  try {
+    return readLockedBlob(context, entry.source.commit_oid, repoPath(entry.source.subdir, path)).bytes;
+  } finally {
+    rmSync(session, { recursive: true, force: true });
+  }
+}
+
 /** Read only rule waiver policy from the already verified locked commit; never refresh or execute Provider code. */
 export function readLockedProviderRulePolicies(projectRoot: string, entry: ProjectProviderLockEntry): readonly LockedProviderRulePolicy[] {
   const verified = verifyLockedProviderCache(projectRoot, entry);
@@ -799,6 +815,7 @@ export function readLockedProviderRulePolicies(projectRoot: string, entry: Proje
     home: join(sessionRoot, "home"),
     hooks: join(sessionRoot, "hooks-disabled"),
     allowFile: source.fixture,
+    offline: true,
   };
   mkdirSync(context.home, { mode: 0o700 });
   mkdirSync(context.hooks, { mode: 0o700 });
@@ -835,6 +852,7 @@ export function verifyLockedProviderCache(projectRoot: string, entry: ProjectPro
     home: join(sessionRoot, "home"),
     hooks: join(sessionRoot, "hooks-disabled"),
     allowFile: source.fixture,
+    offline: true,
   };
   mkdirSync(context.home, { mode: 0o700 });
   mkdirSync(context.hooks, { mode: 0o700 });

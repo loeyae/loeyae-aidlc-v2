@@ -39,6 +39,7 @@ import {
 import {
   canonicalProviderJson,
   readProjectProviders,
+  requireEnabledProviderCapability,
   sha256FileDigest,
   sha256ProviderDigest,
 } from "./aidlc-project-provider.js";
@@ -185,7 +186,7 @@ function exactSourceRevision(left: ProviderSourceRevision, right: ProviderSource
   return canonicalProviderJson(left) === canonicalProviderJson(right);
 }
 
-function assertPlanAndNodeCurrent(projectRoot: string, plan: ProviderPlanV1_1, nodeId: string): {
+export function assertPlanAndNodeCurrent(projectRoot: string, plan: ProviderPlanV1_1, nodeId: string): {
   readonly node: ProviderPlanNode;
   readonly lock: ProjectProviderLockEntry;
   readonly manifest: ProviderRepositoryManifestV1_1;
@@ -203,6 +204,10 @@ function assertPlanAndNodeCurrent(projectRoot: string, plan: ProviderPlanV1_1, n
   if (!lock) fail("PROVIDER_LOCK_MISSING", `Provider lock has no instance ${node.provider_instance_id}`);
   if (lock.trust.status === "revoked") fail("PROVIDER_COMMIT_REVOKED", `Provider instance ${lock.instance_id} is revoked`);
   const verified = verifyLockedProviderCache(projectRoot, lock);
+  if (!verified.manifest.capabilities.includes(node.capability_id)
+    || !requireEnabledProviderCapability(projectRoot, node.capability_id, plan.scope, { verifySource: false }).some((candidate) => candidate.intent.instance_id === lock.instance_id)) {
+    fail("PROVIDER_RESULT_BINDING_MISMATCH", `Provider node ${nodeId} is not bound to this scope/capability`);
+  }
   if (verified.manifest.provider_id !== lock.id || verified.manifest.entrypoint.path !== node.entrypoint_id) {
     fail("PROVIDER_RESULT_BINDING_MISMATCH", `Provider Plan node ${nodeId} no longer matches its locked Manifest`);
   }
@@ -439,6 +444,7 @@ function prepareInvocation(
   limitOverrides: Partial<ProviderRunLimits>,
 ): PreparedProviderInvocation {
   const binding = assertPlanAndNodeCurrent(projectRoot, plan, nodeId);
+  if (binding.manifest.kind === "knowledge") fail("PROVIDER_PERMISSION_DENIED", "Knowledge Providers use knowledge-load/knowledge-confirm and cannot issue accepted Evidence");
   const invocationId = `inv-${randomBytes(16).toString("hex")}`;
   const sandboxRoot = mkdtempSync(join(tmpdir(), PROVIDER_INVOCATION_TEMP_PREFIX));
   const providerRoot = resolve(sandboxRoot, "provider");

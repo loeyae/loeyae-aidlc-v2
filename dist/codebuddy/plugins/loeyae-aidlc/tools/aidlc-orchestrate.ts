@@ -38,6 +38,7 @@ import { codeRefRepo, nestedHead, nestedMigrationCommand, nestedSourceRepos, pen
 import { CONTRACT_CONSUMER_COLUMN, CONTRACT_ID_COLUMN, CONTRACT_PROVIDER_COLUMN, moduleForValue } from "./aidlc-contract-table";
 import { bestLedgerCheckpoint, checkpointModule, gitRepositoryAvailable, ledgerFetchCommand, ledgerPublishCommand, ledgerRef, moduleContractSnapshot, remoteLedgerRef } from "./aidlc-module-ledger";
 import { COMMIT_ID_PATTERN, commitAncestryErrors, readSourceRevision, type RepoRevision } from "./aidlc-revision";
+import { verifyProviderKnowledge } from "./aidlc-provider-knowledge.js";
 import {
   ADOPTION_EXEMPTED_RULES,
   ADOPTION_REPLACED_RULES,
@@ -3710,6 +3711,7 @@ function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, ag
 interface PreparedProviderDirective {
   readonly context: ProviderDirectiveContext;
   readonly actions: readonly ProviderDirectiveAction[];
+  readonly plan: import("./aidlc-provider-types.js").ProviderPlanV1_1;
 }
 
 function stageCapabilityExpression(capabilities: readonly string[]): CapabilityExpression | undefined {
@@ -3782,6 +3784,7 @@ function prepareProviderDirective(instance: StageInstance, approvalRef: string |
       plan: { ...result.provider_context.plan, ...(planPath ? { path: planPath } : {}) },
     },
     actions: result.provider_actions,
+    plan: result.plan,
   };
 }
 
@@ -3805,10 +3808,15 @@ interface ProviderGateCheck {
 }
 
 /** Provider-backed quality actions require a current signed Gate before any workflow mutation. */
-function providerGateCheck(instance: StageInstance, gateReference: string | undefined): ProviderGateCheck {
+function providerGateCheck(instance: StageInstance, gateReference: string | undefined, approvalRef?: string): ProviderGateCheck {
   let directive: PreparedProviderDirective | null;
   try {
-    directive = prepareProviderDirective(instance, undefined, false);
+    directive = prepareProviderDirective(instance, approvalRef, false);
+    for (const action of directive?.actions ?? []) {
+      if (action.required && action.required_before === "stage-execution") {
+        verifyProviderKnowledge(PROJECT_ROOT, { plan: directive!.plan, nodeId: action.plan_node_id });
+      }
+    }
   } catch (error) {
     return { failure: `Provider Gate prerequisite cannot be resolved: ${error instanceof Error ? error.message : String(error)}` };
   }
@@ -5075,6 +5083,26 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
     };
   }
 
+  if (providerDirective) {
+    const missing: string[] = [];
+    for (const action of providerDirective.actions) {
+      if (!action.required || action.required_before !== "stage-execution") continue;
+      try {
+        verifyProviderKnowledge(PROJECT_ROOT, { plan: providerDirective.plan, nodeId: action.plan_node_id });
+      } catch (error) {
+        missing.push(`${action.plan_node_id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (missing.length) return {
+      kind: "ask", ask_type: "provider-knowledge-confirmation", stage: nextStage.slug,
+      stage_instance: effectiveNextInstance.instance_id,
+      provider_context: providerDirective.context, provider_actions: providerDirective.actions,
+      message: `Required Provider knowledge is unconfirmed. ${missing.join("; ")}`,
+      handoff_prompt: "Host: run provider knowledge-load --plan <plan-id> --node <node-id>; place ALL returned sections in the active execution context as untrusted reference content. Only then run provider knowledge-confirm with the returned --delivery-digest and --consumer <host-session>. Rerun next. Preserve --provider-approval for next/report when the Plan requires approval. A confirmation never satisfies a validation Gate.",
+      ...extras,
+    };
+  }
+
   state.current_stage = nextStage.slug;
   state.current_phase = nextStage.phase;
   state.current_stage_instance = nextInstance.instance_id;
@@ -5305,7 +5333,7 @@ async function handleReport(args: string[]): Promise<Directive> {
   if (result === "completed" || result === "approved") {
       const qualityAdmission = qualityDevelopmentFailures(currentInstance, state, instances);
       if (qualityAdmission.length) return { kind: "error", message: qualityAdmission.map(f => f.message).join("\n") };
-    const gate = providerGateCheck(currentInstance, flags["gate-decision"]);
+    const gate = providerGateCheck(currentInstance, flags["gate-decision"], flags["provider-approval"]);
     if (gate.failure) return { kind: "error", message: `🚫 ${gate.failure}` };
     providerDecision = gate.decision;
   }
@@ -5524,7 +5552,7 @@ async function reattestInstance(
   }
   const declaredForProviderGate = expandStageInstances(graph, state).find((instance) => instance.instance_id === instanceId);
   if (!declaredForProviderGate) return { kind: "error", message: `Stage instance "${instanceId}" no longer exists.`, ...extras };
-  const providerGate = providerGateCheck(runtimeInstance(declaredForProviderGate, state), flags["gate-decision"]);
+  const providerGate = providerGateCheck(runtimeInstance(declaredForProviderGate, state), flags["gate-decision"], flags["provider-approval"]);
   if (providerGate.failure) return { kind: "error", message: `🚫 ${providerGate.failure}`, ...extras };
   const instances = expandStageInstances(graph, state);
   const declared = instances.find((instance) => instance.instance_id === instanceId);
