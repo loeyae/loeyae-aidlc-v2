@@ -35,6 +35,7 @@ import {
   type ProviderRunInput,
 } from "./aidlc-provider-runner";
 import { evaluateProviderGate } from "./aidlc-provider-gate";
+import { loadProviderKnowledge, confirmProviderKnowledge, verifyProviderKnowledge } from "./aidlc-provider-knowledge.js";
 
 export interface ProviderLifecycleResult {
   readonly status: "added" | "updated" | "enabled" | "disabled" | "removed" | "unchanged";
@@ -433,7 +434,7 @@ interface ParsedCli {
 
 const BOOLEAN_OPTIONS = new Set(["allow-file", "required-for-protected-gates"]);
 const REPEATABLE_OPTIONS = new Set(["input", "evidence", "waiver", "fallback", "module", "unit", "stage", "capability"]);
-const VALUE_OPTIONS = new Set(["ref", "subdir", "id", "instance", "project", "config", "trust", "output", "plan", "node", "timeout", "mode", ...REPEATABLE_OPTIONS]);
+const VALUE_OPTIONS = new Set(["ref", "subdir", "id", "instance", "project", "config", "trust", "output", "plan", "node", "timeout", "mode", "delivery-digest", "consumer", ...REPEATABLE_OPTIONS]);
 
 function parseCli(args: readonly string[]): ParsedCli {
   const positionals: string[] = [];
@@ -513,6 +514,9 @@ export function providerCliUsage(): string {
     "  disable <instance-id> [--project <path>]",
     "  remove <instance-id> [--project <path>]",
     "  probe [--project <path>]",
+    "  knowledge-load --plan <plan-id|path> --node <node-id> [--project <path>]",
+    "  knowledge-confirm --plan <plan-id|path> --node <node-id> --delivery-digest <digest> --consumer <host-session> [--project <path>]",
+    "  knowledge-verify --plan <plan-id|path> --node <node-id> [--project <path>]",
     "  run --plan <plan-id|path> --node <node-id> [--input <id>=<project-relative-path>]... [--timeout <ms>] [--project <path>]",
     "  gate --plan <plan-id|path> [--evidence <evidence-id|path>]... [--waiver <json-file>]... [--fallback <json-file>]... [--project <path>]",
     "",
@@ -526,6 +530,18 @@ export function runProviderCli(args = process.argv.slice(2)): unknown {
   if (!command || command === "help" || command === "--help" || command === "-h") return { usage: providerCliUsage() };
   const parsed = parseCli(rest);
   const root = project(parsed);
+  if (["knowledge-load", "knowledge-confirm", "knowledge-verify"].includes(command)) {
+    assertOptions(parsed, ["plan", "node", "project", "output", ...(command === "knowledge-confirm" ? ["delivery-digest", "consumer"] : [])]);
+    const plan = option(parsed, "plan");
+    const nodeId = option(parsed, "node");
+    if (!plan || !nodeId || parsed.positionals.length) throw new Error(`${command} requires --plan and --node, without positional arguments`);
+    if (command === "knowledge-load") return loadProviderKnowledge(root, { plan, nodeId });
+    if (command === "knowledge-verify") return verifyProviderKnowledge(root, { plan, nodeId });
+    const deliveryDigest = option(parsed, "delivery-digest");
+    const consumer = option(parsed, "consumer");
+    if (!deliveryDigest || !consumer) throw new Error("knowledge-confirm requires --delivery-digest and --consumer after host context loading");
+    return confirmProviderKnowledge(root, { plan, nodeId, deliveryDigest, consumer });
+  }
   if (command === "add") {
     assertOptions(parsed, ["ref", "subdir", "id", "instance", "project", "config", "trust", "required-for-protected-gates", "allow-file", "module", "unit", "stage", "capability", "output"]);
     if (parsed.positionals.length !== 1) throw new Error("provider add requires exactly one <git-url>");
