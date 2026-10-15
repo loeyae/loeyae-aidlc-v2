@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { addProjectProvider } from "../core/tools/aidlc-provider-cli.js";
+import { readProjectProviders, PROJECT_PROVIDERS_LOCK_PATH } from "../core/tools/aidlc-project-provider.js";
+import { verifyVisualEvidence } from "../core/tools/aidlc-visual-provider.js";
 
 const [sourceArg,commit,python]=process.argv.slice(2); assert(sourceArg&&commit&&python);
 const repo=process.cwd(), project=mkdtempSync(join(tmpdir(),"vc-")), tsx=join(repo,"node_modules/tsx/dist/cli.mjs");
@@ -28,6 +30,9 @@ assert.equal(JSON.parse(readFileSync(evidence,"utf8")).final_status,"PASS");
 const orchestrator=pathToFileURL(join(repo,"core/tools/aidlc-orchestrate.ts")).href;
 const check=`import {checkSensors} from ${JSON.stringify(orchestrator)};import {loadWorkflowState} from ${JSON.stringify(stateTool)};(async()=>{const state=loadWorkflowState(process.cwd()); const result=await checkSensors({stage:{slug:'requirements-methods',axis:'project',sensors:['diagram-contract']},axis:'project',instance_id:'requirements-methods@project'},state);if(result.length)throw new Error(JSON.stringify(result));console.log('existing diagram-contract sensor: PASS');})()`;
 console.log(run(process.execPath,[tsx,"--eval",check]));
+const lockPath=join(project,PROJECT_PROVIDERS_LOCK_PATH), lockBytes=readFileSync(lockPath), driftedLock:any=structuredClone(readProjectProviders(project).lock);
+driftedLock.providers[0].source.commit_oid="0".repeat(40);writeFileSync(lockPath,JSON.stringify(driftedLock));
+assert.throws(()=>verifyVisualEvidence(project,JSON.parse(readFileSync(evidence,"utf8"))),/LOCK|STALE/);writeFileSync(lockPath,lockBytes);
 const published=readFileSync(evidence);writeFileSync(evidence,JSON.stringify({status:"passed"}));
 const incomplete=spawnSync(process.execPath,[tsx,adapter,"run","--request","request.json","--host-provider","visual"],{cwd:project,encoding:"utf8"});assert.notEqual(incomplete.status,0);assert.match(incomplete.stderr,/UNVERIFIED.*source diagram-contract/);writeFileSync(evidence,published);
 const generator=join(project,"generator.py"), originalGenerator=readFileSync(generator);writeFileSync(generator,Buffer.concat([originalGenerator,Buffer.from("\n# changed generator\n")]));
