@@ -36,6 +36,7 @@ import {
 } from "./aidlc-provider-runner";
 import { evaluateProviderGate } from "./aidlc-provider-gate";
 import { loadProviderKnowledge, confirmProviderKnowledge, verifyProviderKnowledge } from "./aidlc-provider-knowledge.js";
+import { previewProviderMcp } from "./aidlc-provider-mcp.js";
 
 export interface ProviderLifecycleResult {
   readonly status: "added" | "updated" | "enabled" | "disabled" | "removed" | "unchanged";
@@ -434,7 +435,7 @@ interface ParsedCli {
 
 const BOOLEAN_OPTIONS = new Set(["allow-file", "required-for-protected-gates"]);
 const REPEATABLE_OPTIONS = new Set(["input", "evidence", "waiver", "fallback", "module", "unit", "stage", "capability"]);
-const VALUE_OPTIONS = new Set(["ref", "subdir", "id", "instance", "project", "config", "trust", "output", "plan", "node", "timeout", "mode", "delivery-digest", "consumer", ...REPEATABLE_OPTIONS]);
+const VALUE_OPTIONS = new Set(["ref", "subdir", "id", "instance", "project", "config", "trust", "output", "plan", "node", "timeout", "mode", "delivery-digest", "consumer", "host-config", "host-domains", ...REPEATABLE_OPTIONS]);
 
 function parseCli(args: readonly string[]): ParsedCli {
   const positionals: string[] = [];
@@ -514,6 +515,7 @@ export function providerCliUsage(): string {
     "  disable <instance-id> [--project <path>]",
     "  remove <instance-id> [--project <path>]",
     "  probe [--project <path>]",
+    "  mcp-preview --host-config <json-path> [--host-domains <json-path>] [--project <path>]",
     "  knowledge-load --plan <plan-id|path> --node <node-id> [--project <path>]",
     "  knowledge-confirm --plan <plan-id|path> --node <node-id> --delivery-digest <digest> --consumer <host-session> [--project <path>]",
     "  knowledge-verify --plan <plan-id|path> --node <node-id> [--project <path>]",
@@ -530,6 +532,12 @@ export function runProviderCli(args = process.argv.slice(2)): unknown {
   if (!command || command === "help" || command === "--help" || command === "-h") return { usage: providerCliUsage() };
   const parsed = parseCli(rest);
   const root = project(parsed);
+  if (command === "mcp-preview") {
+    assertOptions(parsed, ["host-config", "host-domains", "project", "output"]);
+    const hostConfig = option(parsed, "host-config");
+    if (!hostConfig || parsed.positionals.length) throw new Error("mcp-preview requires --host-config and no positional arguments");
+    return previewProviderMcp(root, { hostConfig, hostDomains: option(parsed, "host-domains") });
+  }
   if (["knowledge-load", "knowledge-confirm", "knowledge-verify"].includes(command)) {
     assertOptions(parsed, ["plan", "node", "project", "output", ...(command === "knowledge-confirm" ? ["delivery-digest", "consumer"] : [])]);
     const plan = option(parsed, "plan");

@@ -1421,6 +1421,7 @@ Quality and utilities:
   provider add|list|status|update|enable|disable|remove [args]  Manage project-level locked Git Providers
   provider add <git-url> --stage <slug> --capability <id> [...]  Install with an explicit project binding
   provider probe|run|gate [args]                       Probe restricted-v1, execute a Plan node, and issue GateDecision
+  provider mcp-preview --host-config <json-path> [--host-domains <json-path>]  Preview required MCP connections offline
   extension validate|compose|status [flags] Restricted additive extension metadata
   check --sensor <name> [--module <id>]      Run a deterministic semantic checker (module-scoped with --module)
   ui lock|accept|refresh|reverify|check|impact-matrix|dry-run  Lock UI inputs, verify freshness, one full acceptance + controlled freshness checkpoints
