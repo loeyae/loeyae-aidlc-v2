@@ -1,6 +1,6 @@
 # 测试规范
 
-**适用范围**：通用测试规范，适用于所有技术栈。框架专有测试工具（如 Loeyae Boot 的测试基类）通过 MCP Skill 按需获取。
+**适用范围**：通用测试规范，适用于所有技术栈。框架专有测试工具依据项目技术事实与已启用 Provider 的锁定知识选用。
 
 ---
 
@@ -257,12 +257,8 @@ describe('useCounter', () => {
 
 ---
 
-## 框架专有测试工具
+## 项目测试工具
 
-> **注意**：以下内容仅在 `handoff.md` 中 `后端框架 = Loeyae Boot` 时适用。
-> 详细 API 通过 MCP Skill `loeyae-test` 获取。
+依据项目依赖、版本、已有测试和技术上下文选择测试基类、Mock 与断言工具。已启用的知识 Provider 必须按当前 Plan/node 加载锁定章节并完成宿主确认，参见 `provider-offline-knowledge.md`。未启用 Provider 时使用项目已有工具，不添加框架专属依赖或占位内容。
 
-如果项目使用 Loeyae Boot Framework，在代码生成阶段通过 MCP 加载以下 skill：
-- `loeyae-test` — 测试基类（BaseMockitoUnitTest、BaseDbUnitTest）、RandomUtils、AssertUtils
-- `loeyae-test-base` — 测试基础设施配置
-- `loeyae-test-utils` — 测试工具类
+知识回执仅证明知识交付，不能替代真实测试、受控 Evidence 或 validation Gate；测试充分性、边界和安全要求仍适用。

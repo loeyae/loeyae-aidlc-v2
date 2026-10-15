@@ -5,7 +5,7 @@
 - Qoder Desktop/CLI：`~/.qoder/settings.json`，直接使用 Streamable HTTP；
 - Qoder CN IDE：Windows `%USERPROFILE%\.qoder-cn\mcp.json`（真实宿主实测）、macOS `~/Library/Application Support/Qoder/SharedClientCache/mcp.json`、Linux `~/.config/Qoder/SharedClientCache/mcp.json`。
 
-Qoder CN IDE 官方仅声明支持 STDIO/SSE，因此 CN 配置使用固定版本 `mcp-remote@0.8.3`，把 `loeyae-skills`、`awesome-design`、`figma`、`ssot` 的 Streamable HTTP 服务转换为本地 STDIO。可用 `QODER_CN_MCP_CONFIG` 指定非标准 CN 配置文件；`QODER_CONFIG_DIR` 继续覆盖 Desktop/CLI 配置目录。卸载时受管原生 Skill 与 staging 会删除，共享 MCP 条目保留，避免删除用户或其他安装仍在使用的服务。
+Qoder CN IDE 官方仅声明支持 STDIO/SSE，因此 CN 配置使用固定版本 `mcp-remote@0.8.3`，把共享知识、设计、Figma 和 SSOT 的 Streamable HTTP 服务转换为本地 STDIO。共享知识服务还提供独立的 AI 上下文文件指南；领域知识包尚未替代该用途，因此保留现有注册。项目框架规则由已启用 Provider 的锁定知识和 validation 结果承接。可用 `QODER_CN_MCP_CONFIG` 指定非标准 CN 配置文件；`QODER_CONFIG_DIR` 继续覆盖 Desktop/CLI 配置目录。卸载时受管原生 Skill 与 staging 会删除，共享 MCP 条目保留，避免删除用户或其他安装仍在使用的服务。
 
 `install --all` 会独立探测 Qoder CN Desktop：Windows 优先使用 App Paths 与卸载注册表，并保留默认安装目录以及已存在 `.qoder-cn` 配置目录的兼容回退；macOS 检查 App bundle。无 CLI 的 desktop-only 模式保证原生 Skill + MCP 直接集成，但不宣称插件或 Stop Hook 已注册；项目级安装仍要求 PATH 中存在 `qoder`，也可通过 `QODER_CLI` 指定：
 

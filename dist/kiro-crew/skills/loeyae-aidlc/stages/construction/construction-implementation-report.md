@@ -193,17 +193,15 @@ pnpm lint:all
 
 ## 5. 规范合规汇总
 
-### 框架规范对照（仅 Loeyae Boot）
+### 项目规范与 Provider 验证
 
-| 规则类别 | 检查项数 | 首次合规 | 修复后合规 |
-|---------|---------|---------|-----------|
-| Entity 实体类 | {X} | {Y} | {Z} |
-| Service/Repository | {X} | {Y} | {Z} |
-| Controller | {X} | {Y} | {Z} |
-| DTO/VO | {X} | {Y} | {Z} |
-| Convert | {X} | {Y} | {Z} |
-| 异常处理 | {X} | {Y} | {Z} |
-| 测试 | {X} | {Y} | {Z} |
+依据项目已确认的技术事实报告适用规范。启用 validation Provider 时逐项引用当前 scope/source revision 的 Core-signed Evidence 和 GateDecision；不得把知识回执当作规则通过证明。仅加载知识时报告知识来源与宿主确认，不填写 validation 通过。
+
+| 适用规范/能力 | 规则集与锁定版本 | 实际结果 | 受控 Evidence / GateDecision 引用 |
+|---------------|----------------|----------|---------------------------------|
+| {项目实际启用的规范或 validation 能力} | {实际版本与 lock} | {实际结果} | {当前有效引用} |
+
+未启用 Provider 时省略 Provider 行，仅汇总项目实际执行的通用审查、测试和安全检查，不生成专属占位内容。
 
 ### 质量门禁结果
 

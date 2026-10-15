@@ -39,4 +39,4 @@ Core 签发既有 `aidlc.knowledge-receipt/v1.1`（`issuer: aidlc-core`、`gate_
 
 知识 Provider 的 `provider run` 被拒绝，不能通过知识 entrypoint 签发 accepted Evidence。知识确认不能作为 `provider gate --evidence` 输入，不能满足 validation Gate。本轮不变更混合知识/验证 Plan 的 Gate 聚合协议，也不新增 MCP 默认注册或修改共享宿主配置。
 
-下一小步：将 Loeyae 专属章节与模板迁入实际外部 Provider 包，验证接收后清理 Core；随后处理 MCP 按需注册。
+项目专属章节与模板由外部知识包维护，Core 仅引用实际技术事实、锁定知识与受控验证结果。共享 MCP 服务的用途应单独核实，知识迁移不授权删除宿主已有配置。

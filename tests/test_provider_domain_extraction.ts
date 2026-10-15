@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { addProjectProvider } from "../core/tools/aidlc-provider-cli.js";
 import {
@@ -31,6 +31,67 @@ import type { ProviderScope } from "../core/tools/aidlc-provider-types.js";
 const repository = resolve(import.meta.dirname, "..");
 const CODE_GENERATION = "code-generation";
 const CAPABILITY = "implementation-validation";
+
+// Product names / protocol owner repositories use loeyae-aidlc and are intentionally
+// outside this domain pattern. Migration notes and negative fixtures are not production roots.
+const domainPattern = /is_loeyae_boot|loeyae-compliance|framework-compliance|aidlc-provider-compatibility|LoeyaeCompatibility|reconcileLoeyae|projectProviderEvidenceToLegacy|Loeyae\s+Boot|loeyae[-_.]?(?:boot|starter)|loeyae-(?:test|database|crud|error-handling|validation|data-access|framework-modules)\b|@InsertFill(?:Time|Data)|BaseMockitoUnitTest|BaseDbUnitTest|\bloeyae-skills\b|mcp-skills\.allbelieves\.com/i;
+
+// These shared registrations also serve ai-context-file-guide, which has no replacement
+// in the migrated domain package. Permit only their exact existing server payloads.
+const sharedKnowledgeServers: Record<string, object> = {
+  "harness/claude/plugin.json": { type: "http", url: "https://mcp-skills.allbelieves.com/mcp" },
+  "harness/codebuddy/.mcp.json": { type: "http", url: "https://mcp-skills.allbelieves.com/mcp" },
+  "harness/qoder/.mcp.json": { type: "http", url: "https://mcp-skills.allbelieves.com/mcp" },
+  "harness/zcode/.mcp.json": { type: "http", url: "https://mcp-skills.allbelieves.com/mcp" },
+  "harness/kiro-crew/mcp.json": { type: "http", url: "https://mcp-skills.allbelieves.com/mcp", disabled: false, autoApprove: ["get_skill_outline", "get_skill_section", "get_skill_summary", "get_skill_content", "search_skill"] },
+  "harness/qoder/mcp-cn.json": { command: "npx", args: ["-y", "mcp-remote@0.8.3", "https://mcp-skills.allbelieves.com/mcp", "--transport", "http-only"] },
+};
+
+function domainOffenders(root: string): string[] {
+  const offenders: string[] = [];
+  for (const dir of ["core", "bin", "scripts", "harness"]) {
+    for (const file of listFilesRecursive(join(root, dir))) {
+      const path = relative(root, file).replace(/\\/g, "/");
+      let content = readFileSync(file, "utf8");
+      if (Object.hasOwn(sharedKnowledgeServers, path)) {
+        const config = JSON.parse(content);
+        assert.deepEqual(config.mcpServers["loeyae-skills"], sharedKnowledgeServers[path], `shared service exception changed: ${path}`);
+        delete config.mcpServers["loeyae-skills"];
+        content = JSON.stringify(config);
+      }
+      if (domainPattern.test(path) || domainPattern.test(content)) offenders.push(path);
+    }
+  }
+  return offenders;
+}
+
+function assertDomainScannerRejectsProductionRegressions(): void {
+  const root = mkdtempSync(join(tmpdir(), "aidlc-domain-scan-"));
+  try {
+    for (const [path, token] of [
+      ["core/knowledge/testing.md", "loeyae-test-utils"],
+      ["core/knowledge/database.md", "@InsertFillData"],
+      ["core/stages/state.md", "Loeyae Boot 版本与 Starter"],
+      ["core/tools/data/profile.json", '{"framework":"loeyae-boot"}'],
+      ["core/tools/data/fields.json", '{"loeyaeBootVersion":"1.0","loeyaeStarter":"web"}'],
+      ["harness/new/mcp.json", '{"mcpServers":{"loeyae-skills":{}}}'],
+      ["harness/new/prompt.md", "loeyae-database-design"],
+      ["scripts/check.ts", "is_loeyae_boot"],
+    ]) {
+      write(join(root, path), token);
+      assert.deepEqual(domainOffenders(root), [path], `scanner must reject production ${path}`);
+      rmSync(join(root, path));
+    }
+    write(join(root, "core/tools/data/owner.json"), '{"owner":"loeyae-aidlc-provider","schema":"urn:loeyae:aidlc:schema:provider:1.1"}');
+    write(join(root, "harness/new/product.md"), "Loeyae AI-DLC / loeyae-aidlc");
+    assert.deepEqual(domainOffenders(root), [], "product and protocol names remain valid");
+    const path = "harness/claude/plugin.json";
+    write(join(root, path), JSON.stringify({ mcpServers: { "loeyae-skills": sharedKnowledgeServers[path] }, extra: "loeyae-test" }));
+    assert.deepEqual(domainOffenders(root), [path], "an allowed service must not hide other production domain content");
+    write(join(root, path), JSON.stringify({ mcpServers: { "loeyae-skills": { ...sharedKnowledgeServers[path], domain: "loeyae-boot" } } }));
+    assert.throws(() => domainOffenders(root), /shared service exception changed/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+}
 
 const graph = JSON.parse(readFileSync(join(repository, "core", "tools", "data", "stage-graph.json"), "utf8")) as {
   stage_count: number;
@@ -77,14 +138,7 @@ function assertDomainExtractedFromCore(): void {
 
   // No Core source file carries the extracted domain identifiers. dist/ is build output
   // rebuilt from these sources and is covered by build:all / distribution-parity.
-  const domainPattern = /is_loeyae_boot|loeyae-compliance|framework-compliance|aidlc-provider-compatibility|LoeyaeCompatibility|reconcileLoeyae|projectProviderEvidenceToLegacy/;
-  const offenders: string[] = [];
-  for (const dir of ["core", "bin", "scripts"]) {
-    for (const file of listFilesRecursive(join(repository, dir))) {
-      if (file.endsWith(".json")) continue; // compiled stage-graph.json checked above
-      if (domainPattern.test(readFileSync(file, "utf8"))) offenders.push(file);
-    }
-  }
+  const offenders = domainOffenders(repository);
   assert.deepEqual(offenders, [], `Core source must not reference the extracted Loeyae domain:\n${offenders.join("\n")}`);
 
   // The generic Provider lifecycle Hook survives: a generic resolution policy and the
@@ -178,6 +232,7 @@ function sandbox(): RestrictedSandboxAdapter {
 }
 
 async function main(): Promise<void> {
+  assertDomainScannerRejectsProductionRegressions();
   assertDomainExtractedFromCore();
 
   const root = mkdtempSync(join(tmpdir(), "aidlc-provider-extraction-"));
@@ -254,8 +309,14 @@ async function main(): Promise<void> {
     const lockPath = join(withoutProvider, PROJECT_PROVIDERS_LOCK_PATH);
     assert.equal(existsSync(configPath), false, "a project with no Provider must have no provider config");
     assert.equal(existsSync(lockPath), false, "a project with no Provider must have no provider lock");
-    // With neither file present the generic resolver is never consulted (orchestrate guard),
-    // so the code-generation Hook produces no provider actions.
+    const next = spawnSync(process.execPath, [
+      join(repository, "node_modules/tsx/dist/cli.mjs"), join(repository, "bin/cli.ts"),
+      "orchestrate", "next", "--scope", "feature", "--work", "Implement order export",
+    ], { cwd: withoutProvider, encoding: "utf8", shell: false });
+    assert.equal(next.status, 0, `${next.stdout}\n${next.stderr}`);
+    const directive = JSON.parse(next.stdout);
+    assert.equal((directive.provider_actions ?? []).length, 0, "no Provider project emits no Provider actions");
+    assert.equal(domainPattern.test(next.stdout), false, "no Provider directive must not contain domain placeholders");
 
     console.log("Provider domain extraction + generic hook regression passed");
   } finally {

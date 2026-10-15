@@ -140,9 +140,8 @@ CREATE TABLE IF NOT EXISTS `module_table_name` (
 
 ---
 
-## 框架专有 Entity 模板
+## 项目实体映射
 
-> **注意**：以下内容仅在 `handoff.md` 中 `后端框架 = Loeyae Boot` 时适用。
-> 详细 Entity 注解和模板通过 MCP Skill `loeyae-database-design` 获取。
+依据项目实际 ORM、依赖版本与审计字段约定选择实体映射、自动填充和删除策略。框架注解与模板由已启用 Provider 的锁定知识承接，并按 `provider-offline-knowledge.md` 完成加载和宿主确认；无 Provider 时沿用项目已确认的技术事实。
 
-如果项目使用 Loeyae Boot Framework，Entity 类需要使用框架提供的自动填充注解（`@InsertFillTime`、`@InsertFillData` 等）。具体用法在代码生成阶段通过 MCP 加载。
+知识不能替代 validation Provider 的受控检查。数据库设计审查仍须覆盖约束、索引、数据一致性、安全与迁移风险，并引用实际 Evidence。

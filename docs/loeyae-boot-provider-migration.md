@@ -9,7 +9,7 @@
 生产 `https`/`ssh` 来源先在 `.aidlc/provider-git-policy.json` 配置 `allowed_hosts`（可选 `allowed_organizations`），再安装固定 tag 或 commit，并显式绑定到通用 `code-generation` Hook：
 
 ```bash
-loeyae-aidlc provider add https://github.com/loeyae/loeyae-aidlc-provider.git \
+loeyae-aidlc provider add ssh://git@git.dev.loeyae.com:31022/libraries/loeyae-aidlc-provider.git \
   --ref v0.1.0 \
   --subdir providers/loeyae-boot \
   --id framework.java-loeyae-boot \
@@ -39,6 +39,29 @@ loeyae-aidlc provider add https://github.com/loeyae/loeyae-aidlc-provider.git \
 ```
 
 Profile selector 决定该 Provider 是否被选中：事实不匹配（selector false/unknown）时不创建可执行 Plan，`code-generation` 退回普通项目行为。领域事实（Loeyae Boot 识别、规则、知识、runtime、检测）全部由 Provider 自身拥有，Core 不感知。
+
+### 离线知识包（独立安装）
+
+实际接收包是同仓的 `providers/loeyae-boot-knowledge`，包含测试基类/工具、Entity 注解、术语、框架版本/Starter 上下文和合规表的实际内容。知识包 commit 为 `2978f09cc86d2643b050e4f79c44115e4f83aea0`；先允许 `git.dev.loeyae.com` 来源并把该 commit 加入项目 `allowed_commits`，再安装：
+
+```bash
+loeyae-aidlc provider add ssh://git@git.dev.loeyae.com:31022/libraries/loeyae-aidlc-provider.git \
+  --ref 2978f09cc86d2643b050e4f79c44115e4f83aea0 \
+  --subdir providers/loeyae-boot-knowledge --instance loeyae-knowledge \
+  --trust allowlisted-commit --stage code-generation --capability framework.conventions
+```
+
+包为 `kind: knowledge`，通过 `aidlc.knowledge-package/v1` 声明 15 个章节与原始字节摘要。沿用上述 Java / `loeyae-boot` Profile；宿主按 `provider-offline-knowledge.md` 加载当前 Plan/node 的全部章节后显式确认，Core 签发并校验回执。现有 validation 包独立绑定 `implementation-validation`，不能用知识回执代替验证 Evidence 或 GateDecision。
+
+Core 和模板不再强制加载领域 MCP Skill。保留的共享知识服务注册精确位于 `harness/claude/plugin.json`、`harness/kiro-crew/mcp.json`、`harness/qoder/mcp-cn.json` 与 CodeBuddy/Qoder/ZCode 的 `.mcp.json`；该服务还提供 `ai-context-file-guide` 等独立内容，当前离线领域包未替代这些用途，因此本轮不移除共享注册或用户配置。
+
+实际外部包集成验证（会访问该远程固定 commit，不创建合成知识 fixture）：
+
+```bash
+npx --no-install tsx tests/test_external_provider_knowledge.ts \
+  ssh://git@git.dev.loeyae.com:31022/libraries/loeyae-aidlc-provider.git \
+  2978f09cc86d2643b050e4f79c44115e4f83aea0
+```
 
 ## 2. 运行完整链路
 

@@ -141,17 +141,19 @@ requires: [code-generation]
 
 **项目规范覆盖规则**：
 - 以上 Smells 为基线判断
-- 项目编码规范（MCP Skills + CLAUDE.md）优先
+- 项目编码规范（已确认的项目技术事实、项目上下文文件与已启用 Provider 的锁定知识）优先；不能削弱通用测试、安全和质量门禁
 - 项目规范明确允许的情况，不标记为 Smell
 
 **其他重要问题**：
 
 | 类别 | 检查项 |
 |------|--------|
-| 命名 | 违反团队命名规范（Loeyae Boot / Vue 3） |
+| 命名 | 违反项目已确认的命名规范与技术栈约定 |
 | 结构 | 方法过长（> 50行）、类职责不单一、层次混乱 |
 | 测试 | 测试覆盖不足、测试质量差、缺少边界测试 |
 | 规范 | 违反团队编码规范 |
+
+已启用 Provider 时，审查对应规则和当前 scope/source revision 的 validation 结果，引用 Core-signed Evidence 与 GateDecision。知识章节须先加载并完成宿主确认；知识回执不能替代 validation Gate。未启用 Provider 时按项目规范执行通用审查，不生成框架专属检查项。
 
 #### 共享契约基线检查（条件）
 
