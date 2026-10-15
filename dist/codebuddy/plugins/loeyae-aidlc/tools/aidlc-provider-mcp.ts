@@ -90,15 +90,7 @@ function readSnapshot(path: string, allowMissing = false) {
  * This is a review artifact, never proof of authentication, authorization, ownership or permission to apply.
  * Config values are omitted from output so host secrets do not enter reports.
  */
-export function previewProviderMcp(projectRoot: string, input: { hostConfig: string; hostDomains?: string }) {
-  const project = resolve(projectRoot);
-  const hostPath = resolve(project, input.hostConfig);
-  const host = readSnapshot(hostPath, true);
-  const hostValue = record(host.value);
-  const servers = hostValue.mcpServers === undefined ? {} : record(hostValue.mcpServers);
-  const domainsPath = input.hostDomains === undefined ? null : resolve(project, input.hostDomains);
-  const domains = domainsPath === null ? null : readSnapshot(domainsPath);
-  const domainMap = domains === null ? {} : stringMap(domains.value);
+export function resolveProviderMcpRequirements(project: string) {
   const state = readProjectProviders(project);
   const requirements: { connection: ConnectionRequirement; source: {
     instance_id: string; provider_id: string; version: string; commit_oid: string;
@@ -123,6 +115,19 @@ export function previewProviderMcp(projectRoot: string, input: { hostConfig: str
       } });
     }
   }
+  return { state, requirements, diagnostics };
+}
+
+export function previewProviderMcp(projectRoot: string, input: { hostConfig: string; hostDomains?: string }) {
+  const project = resolve(projectRoot);
+  const hostPath = resolve(project, input.hostConfig);
+  const host = readSnapshot(hostPath, true);
+  const hostValue = record(host.value);
+  const servers = hostValue.mcpServers === undefined ? {} : record(hostValue.mcpServers);
+  const domainsPath = input.hostDomains === undefined ? null : resolve(project, input.hostDomains);
+  const domains = domainsPath === null ? null : readSnapshot(domainsPath);
+  const domainMap = domains === null ? {} : stringMap(domains.value);
+  const { state, requirements, diagnostics } = resolveProviderMcpRequirements(project);
   const names = [...new Set(requirements.map((item) => item.connection.name))].sort();
   const changes = names.map((name) => {
     const required = requirements.filter((item) => item.connection.name === name);

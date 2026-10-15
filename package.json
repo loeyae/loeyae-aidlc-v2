@@ -42,7 +42,7 @@
     "scope-table": "tsx core/tools/aidlc-utility.ts scope-table",
     "test:mars168": "tsx tests/run_mars168.ts quality",
     "test:mars168-regression": "tsx tests/run_mars168.ts regression",
-    "test:provider-mcp": "tsx tests/test_provider_mcp.ts",
+    "test:provider-mcp": "tsx tests/test_provider_mcp.ts && tsx tests/test_provider_mcp_apply.ts",
     "test:mars169": "tsx tests/test_mars169_document_slices.ts"
   },
   "dependencies": {
