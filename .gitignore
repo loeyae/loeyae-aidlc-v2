@@ -1,4 +1,5 @@
 node_modules/
+.aidlc/mcp-readonly/
 core/tools/data/*
 !core/tools/data/stage-graph.json
 !core/tools/data/provider-schema-ownership.json
