@@ -72,6 +72,7 @@ export interface UiGenerationLock {
   sources: UiSourceSnapshot[];
   pages: UiPageRef[];
   design_resource?: DesignResourceLock;
+  superseded_visual_reviews?: Array<{ run_id: string; section_sha256: string }>;
   adoption?: { approval_ref: string; reason: string };
 }
 
@@ -558,6 +559,13 @@ function parseLock(raw: unknown): UiGenerationLock {
   } else if (value.adoption !== undefined) {
     fail("generation-start locks must not contain adoption metadata");
   }
+  const superseded = value.superseded_visual_reviews === undefined ? [] : requireArray(value.superseded_visual_reviews, "superseded_visual_reviews").map(raw => {
+    const item = requireObject(raw, "superseded visual review");
+    const run_id = requireString(item.run_id, "superseded review.run_id");
+    const section_sha256 = requireString(item.section_sha256, "superseded review.section_sha256");
+    if (!/^[a-f0-9]{64}$/.test(section_sha256)) fail("DESIGN_INVALID_REVIEW_HISTORY");
+    return { run_id, section_sha256 };
+  });
   return {
     version: "1",
     kind: "aidlc.ui-generation-lock",
@@ -570,6 +578,7 @@ function parseLock(raw: unknown): UiGenerationLock {
     sources,
     pages,
     ...(value.design_resource !== undefined ? { design_resource: value.design_resource as DesignResourceLock } : {}),
+    ...(superseded.length ? { superseded_visual_reviews: superseded } : {}),
     ...(adoption ? { adoption } : {}),
   };
 }
@@ -603,6 +612,7 @@ export interface CreateUiLockOptions {
   designDecisionsPath?: string;
   adoption?: { approvalRef: string; reason: string };
   now?: string;
+  supersededVisualReviews?: UiGenerationLock["superseded_visual_reviews"];
 }
 
 export function createUiGenerationLock(projectRoot: string, options: CreateUiLockOptions): UiGenerationLock {
@@ -650,6 +660,7 @@ export function createUiGenerationLock(projectRoot: string, options: CreateUiLoc
     sources,
     pages,
     design_resource: resolveDesignResource(root, moduleId),
+    ...(options.supersededVisualReviews?.length ? { superseded_visual_reviews: options.supersededVisualReviews } : {}),
     ...(adoption ? { adoption } : {}),
   };
   atomicJson(output, lock);
@@ -674,6 +685,14 @@ export function rebaselineUiDesignResource(projectRoot: string, moduleId: string
   if (upstreamDrift(projectRoot, old.sources, old.upstream.commit, observed, sources).paths.length > 0) fail("DESIGN_REBASELINE_REQUIRES_UNCHANGED_BUSINESS_INPUTS");
   resolveGitCommit(projectRoot, "HEAD");
   const suffix = `.archived-${sha256(oldBytes)}`;
+  const superseded = [...(old.superseded_visual_reviews || [])];
+  const acceptanceLabel = uiGenerationAcceptancePath(moduleId);
+  if (existsSync(resolve(projectRoot, acceptanceLabel))) {
+    const acceptanceFile = safeProjectFile(projectRoot, acceptanceLabel, acceptanceLabel);
+    const prior = requireObject(JSON.parse(readFileSync(acceptanceFile.absolute, "utf8")), "prior acceptance");
+    const full = requireObject(prior.full_acceptance, "prior full acceptance");
+    superseded.push({ run_id: requireString(full.run_id, "prior review run_id"), section_sha256: requireString(full.section_sha256, "prior review digest") });
+  }
   const labels = [label, uiGenerationAcceptancePath(moduleId), uiGenerationCheckpointsPath(moduleId)];
   const moves = labels.filter(p => existsSync(resolve(projectRoot, p))).map(p => ({
     from: safeProjectFile(projectRoot, p, p).absolute,
@@ -687,6 +706,7 @@ export function rebaselineUiDesignResource(projectRoot: string, moduleId: string
       moduleId, route: old.route, upstreamRef: old.upstream.ref,
       prdPath: old.sources.find(s => s.kind === "prd")?.path,
       designDecisionsPath: old.sources.find(s => s.kind === "design-decisions")?.path,
+      supersededVisualReviews: superseded,
     });
   } catch (e) {
     for (const move of moved.reverse()) renameSync(move.to, move.from);
@@ -954,6 +974,7 @@ function buildExpectedAcceptance(projectRoot: string, moduleId: string, route: U
     fail(`UI impact matrix has unmapped requirement changes (${labels.join("; ")}); update page-plan or explicitly mark non-UI stories before acceptance`);
   }
   const review = parseReviewReport(root, reportPath, currentPages.map((page) => page.page_id));
+  if (loaded.lock.superseded_visual_reviews?.some(prior => prior.run_id === review.full.run_id || prior.section_sha256 === review.full.section_sha256)) fail("DESIGN_NEW_VISUAL_REVIEW_REQUIRED");
   if (!sameStrings(review.synchronizedPages, impact.affected_pages)) {
     fail(`UI requirement freshness.synchronized_pages must exactly match affected pages: ${impact.affected_pages.join(", ") || "none"}`);
   }

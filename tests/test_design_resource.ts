@@ -122,6 +122,10 @@ try {
   assert.equal(read(`${base}/ui-design/${archive}`), original);
   assert.deepEqual(rebased.pages, lock.pages);
   assert(!existsSync(join(project, base, "ui-design/ui-generation-acceptance.json")), "new baseline has no passed acceptance");
+  assert.throws(() => createUiGenerationAcceptance(project, { moduleId: mod, route: "html-mock" }), /DESIGN_NEW_VISUAL_REVIEW_REQUIRED/, "a previous passed report cannot certify a new style baseline");
+  write(`${base}/cross-validation-report.md`, read(`${base}/cross-validation-report.md`).replace("visual-1", "visual-2"));
+  createUiGenerationAcceptance(project, { moduleId: mod, route: "html-mock" });
+  verifyUiGenerationAcceptance(project, mod, "html-mock", ["PAGE-001"]);
   assert.throws(() => rebaselineUiDesignResource(project, mod), /DESIGN_NEW_APPROVAL_REQUIRED/);
   console.log("Offline Git resource and existing UI generation/acceptance path passed");
   // Optional HTTP mapping uses existing exact authorization, source snapshot and freshness.
