@@ -92,9 +92,9 @@ local directory replacement races by hostile users are outside this local-user t
 The store belongs in project ignore rules when consuming this feature; it may contain sensitive
 source content. No secret values, credentials, or generated local snapshots belong in commits.
 
-This increment does not feed the snapshot into the existing knowledge Receipt protocol, claim
-model understanding, create `passed` Gates, or modify workflow state. Future context-source and
-SSOT adapters can consume the versioned snapshot explicitly without reinterpreting v1.1 Receipts.
+This reader does not feed snapshots into the knowledge Receipt protocol, claim model understanding,
+create `passed` Gates, or modify workflow state. The generic `consumeContextSource` entry point
+uses these snapshots under a separate trusted binding and contract policy; see `context-source.md`.
 
 ## Executable local fixture
 

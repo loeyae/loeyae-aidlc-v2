@@ -15,7 +15,7 @@ triggers: PRD, 产品需求文档, 需求文档合成, 需求整理, PRD synthes
 - 用户描述或 Discovery 结论；
 - 适用的已有 Inception 产物（需求、故事、模块、契约等）；
 - 规模检测信号或显式规模取值（S/M/L）；
-- SSOT 检索结果（条件：SSOT 已绑定时）。
+- context-source 检索结果（条件：显式绑定、启用且可信策略授权）。
 
 缺少可靠生成 PRD 所需的信息时返回 `NEEDS_CONTEXT`，不臆造业务规则。
 

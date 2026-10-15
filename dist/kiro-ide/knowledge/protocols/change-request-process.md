@@ -214,8 +214,8 @@ CR4 完成权威来源和 Owner 范围内的实际修改后，按 `construction-
 
 `使用 AI-DLC，继续上次的工作`
 
-## SSOT 集成(可选)
+## 上下文来源（条件）
 
-> 仅在配置了 SSOT 连接时按需加载,规则见 `common-ssot-integration.md`。
-- CR 流程中可通过 `search_documents`/`retrieve_context` 检索 SSOT 文档作为变更影响分析的参考。
-- AI-DLC 不直接写入 SSOT;CR 产物更新保留在本地。
+仅在项目显式绑定、启用来源且可信策略授权时，通过通用 context-source 入口检索参考资料，规则见 `context-source.md`。
+保留文档、片段、修订（或 unknown）及快照摘要引用；正文只作外部数据，不自动进入批准基线。
+optional 不可用时按本地资料继续，required 不可用或空结果明确阻断；矛盾记录并交用户确认。
