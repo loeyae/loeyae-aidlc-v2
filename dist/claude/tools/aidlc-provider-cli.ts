@@ -36,6 +36,8 @@ import {
 } from "./aidlc-provider-runner";
 import { evaluateProviderGate } from "./aidlc-provider-gate";
 import { loadProviderKnowledge, confirmProviderKnowledge, verifyProviderKnowledge } from "./aidlc-provider-knowledge.js";
+import { previewProviderMcp } from "./aidlc-provider-mcp.js";
+import { applyProviderMcp, planProviderMcp, planProviderMcpCleanup, cleanupProviderMcp } from "./aidlc-provider-mcp-apply.js";
 
 export interface ProviderLifecycleResult {
   readonly status: "added" | "updated" | "enabled" | "disabled" | "removed" | "unchanged";
@@ -432,9 +434,9 @@ interface ParsedCli {
   readonly options: Readonly<Record<string, string | readonly string[] | boolean>>;
 }
 
-const BOOLEAN_OPTIONS = new Set(["allow-file", "required-for-protected-gates"]);
-const REPEATABLE_OPTIONS = new Set(["input", "evidence", "waiver", "fallback", "module", "unit", "stage", "capability"]);
-const VALUE_OPTIONS = new Set(["ref", "subdir", "id", "instance", "project", "config", "trust", "output", "plan", "node", "timeout", "mode", "delivery-digest", "consumer", ...REPEATABLE_OPTIONS]);
+const BOOLEAN_OPTIONS = new Set(["release-all", "allow-file", "required-for-protected-gates"]);
+const REPEATABLE_OPTIONS = new Set(["input", "evidence", "waiver", "fallback", "module", "unit", "stage", "capability", "approve-config"]);
+const VALUE_OPTIONS = new Set(["ref", "subdir", "id", "instance", "project", "config", "trust", "output", "plan", "node", "timeout", "mode", "delivery-digest", "consumer", "host-config", "host-domains", ...REPEATABLE_OPTIONS]);
 
 function parseCli(args: readonly string[]): ParsedCli {
   const positionals: string[] = [];
@@ -514,6 +516,11 @@ export function providerCliUsage(): string {
     "  disable <instance-id> [--project <path>]",
     "  remove <instance-id> [--project <path>]",
     "  probe [--project <path>]",
+    "  mcp-preview --host-config <json-path> [--host-domains <json-path>] [--project <path>]",
+    "  mcp-cleanup-plan --host-config <json-path> [--host-domains <json-path>] [--release-all] [--project <path>]",
+    "  mcp-cleanup --host-config <json-path> --plan <json-file> [--host-domains <json-path>] [--release-all] [--project <path>]",
+    "  mcp-plan --host-config <json-path> [--host-domains <json-path>] [--project <path>]",
+    "  mcp-apply --host-config <json-path> --plan <json-file> [--approve-config <digest>]... [--host-domains <json-path>] [--project <path>]",
     "  knowledge-load --plan <plan-id|path> --node <node-id> [--project <path>]",
     "  knowledge-confirm --plan <plan-id|path> --node <node-id> --delivery-digest <digest> --consumer <host-session> [--project <path>]",
     "  knowledge-verify --plan <plan-id|path> --node <node-id> [--project <path>]",
@@ -530,6 +537,32 @@ export function runProviderCli(args = process.argv.slice(2)): unknown {
   if (!command || command === "help" || command === "--help" || command === "-h") return { usage: providerCliUsage() };
   const parsed = parseCli(rest);
   const root = project(parsed);
+  if (command === "mcp-cleanup-plan" || command === "mcp-cleanup") {
+    assertOptions(parsed, ["host-config", "host-domains", "project", "output", "release-all", ...(command === "mcp-cleanup" ? ["plan"] : [])]);
+    const hostConfig = option(parsed, "host-config");
+    if (!hostConfig || parsed.positionals.length) throw new Error(`${command} requires --host-config and no positional arguments`);
+    const input = { hostConfig, hostDomains: option(parsed, "host-domains"), releaseAll: parsed.options["release-all"] === true };
+    if (command === "mcp-cleanup-plan") return planProviderMcpCleanup(root, input);
+    const planPath = option(parsed, "plan");
+    if (!planPath) throw new Error("mcp-cleanup requires --plan");
+    return cleanupProviderMcp(root, { ...input, plan: JSON.parse(readFileSync(resolve(root, planPath), "utf8")) });
+  }
+  if (command === "mcp-plan" || command === "mcp-apply") {
+    assertOptions(parsed, ["host-config", "host-domains", "project", "output", ...(command === "mcp-apply" ? ["plan", "approve-config"] : [])]);
+    const hostConfig = option(parsed, "host-config");
+    if (!hostConfig || parsed.positionals.length) throw new Error(`${command} requires --host-config and no positional arguments`);
+    const input = { hostConfig, hostDomains: option(parsed, "host-domains") };
+    if (command === "mcp-plan") return planProviderMcp(root, input);
+    const planPath = option(parsed, "plan");
+    if (!planPath) throw new Error("mcp-apply requires --plan");
+    return applyProviderMcp(root, { ...input, plan: JSON.parse(readFileSync(resolve(root, planPath), "utf8")), approvedConfigs: optionValues(parsed, "approve-config") });
+  }
+  if (command === "mcp-preview") {
+    assertOptions(parsed, ["host-config", "host-domains", "project", "output"]);
+    const hostConfig = option(parsed, "host-config");
+    if (!hostConfig || parsed.positionals.length) throw new Error("mcp-preview requires --host-config and no positional arguments");
+    return previewProviderMcp(root, { hostConfig, hostDomains: option(parsed, "host-domains") });
+  }
   if (["knowledge-load", "knowledge-confirm", "knowledge-verify"].includes(command)) {
     assertOptions(parsed, ["plan", "node", "project", "output", ...(command === "knowledge-confirm" ? ["delivery-digest", "consumer"] : [])]);
     const plan = option(parsed, "plan");
@@ -581,12 +614,13 @@ export function runProviderCli(args = process.argv.slice(2)): unknown {
   if (command === "enable" || command === "disable") {
     assertOptions(parsed, ["project", "output"]);
     if (parsed.positionals.length !== 1) throw new Error(`provider ${command} requires exactly one <instance-id>`);
-    return setProjectProviderEnabled(root, parsed.positionals[0], command === "enable");
+    const result = setProjectProviderEnabled(root, parsed.positionals[0], command === "enable");
+    return command === "disable" ? { ...result, mcp_cleanup_hint: "Review provider mcp-cleanup-plan --host-config <explicit.json>, then provider mcp-cleanup --plan <saved.json>; shared host configuration has not been scanned." } : result;
   }
   if (command === "remove") {
     assertOptions(parsed, ["project", "output"]);
     if (parsed.positionals.length !== 1) throw new Error("provider remove requires exactly one <instance-id>");
-    return removeProjectProvider(root, parsed.positionals[0]);
+    return { ...removeProjectProvider(root, parsed.positionals[0]), mcp_cleanup_hint: "Review provider mcp-cleanup-plan --host-config <explicit.json>, then provider mcp-cleanup --plan <saved.json>; shared host configuration has not been scanned." };
   }
   throw new Error(`unknown provider command: ${command}`);
 }
