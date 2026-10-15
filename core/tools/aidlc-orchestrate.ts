@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { verifyVisualEvidence } from "./aidlc-visual-provider.js";
 /**
  * aidlc-orchestrate.ts — The deterministic workflow engine.
  *
@@ -2866,6 +2867,8 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
             if (!["passed", "unverified"].includes(String(evidence.generation_status))) errors.push('generation_status must be "passed" or "unverified"');
           }
           if (final.status === "PASS") {
+            try { verifyVisualEvidence(PROJECT_ROOT, evidence, { project_id: state.workflow_id, stage: stage.slug, scope: instance.instance_id }); }
+            catch (error) { errors.push(error instanceof Error ? error.message : "VISUAL_EVIDENCE_INVALID"); }
             if (evidence.target_operation_required !== true) errors.push("PASS requires target_operation_required=true");
             if (evidence.provider_status !== "passed") errors.push("PASS requires provider_status=passed");
             if (evidence.render_status !== "passed" || evidence.browser_visual_status !== "passed") errors.push("PASS requires latest browser visual evidence");

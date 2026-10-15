@@ -86,7 +86,7 @@
 
 ## Provider 门禁
 
-Chrome Provider 必须在 `normal`、`fit`、`zoom` 三个最新视图中检查：
+视觉 Provider 必须在 `normal`、`fit`、`zoom` 三个最新视图中检查：
 
 - 相交节点的 computed `fill` 为 `rgb(255,255,255)`；
 - structural 框体的 computed `stroke` 为 `rgb(102,102,102)`，且框体不透明填充仍为 `none`；

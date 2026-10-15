@@ -1,0 +1,37 @@
+/** Actual source checker -> locked production browser adapter -> existing sensor. */
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { addProjectProvider } from "../core/tools/aidlc-provider-cli.js";
+
+const [sourceArg,commit,python]=process.argv.slice(2); assert(sourceArg&&commit&&python);
+const repo=process.cwd(), project=mkdtempSync(join(tmpdir(),"vc-")), tsx=join(repo,"node_modules/tsx/dist/cli.mjs");
+function run(command:string,args:string[]){const r=spawnSync(command,args,{cwd:project,encoding:"utf8",timeout:120000,maxBuffer:8*1024*1024}); assert.equal(r.status,0,`${r.stdout}\n${r.stderr}`);return r.stdout;}
+run(python,["-c",`import sys; sys.path.insert(0,${JSON.stringify(join(repo,"tests"))}); from test_semantic_checkers import fixture; fixture(sys.argv[1],True)`,project]);
+const stateTool=pathToFileURL(join(repo,"core/tools/aidlc-light-state.ts")).href;
+run(process.execPath,[tsx,"--eval",`import {loadWorkflowState,saveWorkflowState} from ${JSON.stringify(stateTool)};const s=loadWorkflowState(process.cwd());s.current_stage='requirements-methods';s.current_phase='inception';s.current_stage_instance='requirements-methods@project';saveWorkflowState(process.cwd(),s);`]);
+run("git",["init"]); run("git",["add","."]); run("git",["-c","user.name=Visual Test","-c","user.email=visual@example.invalid","commit","-m","test sources"]);
+const source=sourceArg.includes("://")?sourceArg:pathToFileURL(resolve(repo,sourceArg)).href, fixture=source.startsWith("file:");
+writeFileSync(join(project,".aidlc/provider-git-policy.json"),JSON.stringify({version:1,allowed_hosts:fixture?[]:[new URL(source).hostname],allowed_commits:[commit],allow_file_fixtures:fixture}));
+addProjectProvider(project,{source,ref:commit,subdir:"providers/diagram-visual",instance:"visual",allowFile:fixture,trust:"allowlisted-commit"});
+const viewport={width:800,height:600}, base="docs/aidlc/inception/requirements/business-flows";
+writeFileSync(join(project,"request.json"),JSON.stringify({version:"1",provider:"diagram.visual",stage:"requirements-methods",target_operation:"preview",target_reading_environment:{viewports:{normal:viewport,fit:viewport,zoom:viewport}},diagrams:[{id:"requirements-flow",source_path:`${base}.svg`,manifest_path:`${base}.diagram.json`,expected_contract_path:`${base}.expected.json`}]}));
+const producer=join(repo,"core/tools/aidlc-evidence.ts"), adapter=join(repo,"core/tools/aidlc-diagram-provider.ts");
+run(process.execPath,[tsx,producer,"run","--stage","requirements-methods","--sensor","diagram-contract"]);
+const evidence=join(project,".aidlc/evidence/requirements-methods/diagram-contract.json");
+assert.equal(JSON.parse(readFileSync(evidence,"utf8")).final_status,"STATIC_PASS");
+run(process.execPath,[tsx,adapter,"run","--request","request.json","--host-provider","visual"]);
+assert.equal(JSON.parse(readFileSync(evidence,"utf8")).final_status,"PASS");
+const orchestrator=pathToFileURL(join(repo,"core/tools/aidlc-orchestrate.ts")).href;
+const check=`import {checkSensors} from ${JSON.stringify(orchestrator)};import {loadWorkflowState} from ${JSON.stringify(stateTool)};(async()=>{const state=loadWorkflowState(process.cwd()); const result=await checkSensors({stage:{slug:'requirements-methods',axis:'project',sensors:['diagram-contract']},axis:'project',instance_id:'requirements-methods@project'},state);if(result.length)throw new Error(JSON.stringify(result));console.log('existing diagram-contract sensor: PASS');})()`;
+console.log(run(process.execPath,[tsx,"--eval",check]));
+const published=readFileSync(evidence);writeFileSync(evidence,JSON.stringify({status:"passed"}));
+const incomplete=spawnSync(process.execPath,[tsx,adapter,"run","--request","request.json","--host-provider","visual"],{cwd:project,encoding:"utf8"});assert.notEqual(incomplete.status,0);assert.match(incomplete.stderr,/UNVERIFIED.*source diagram-contract/);writeFileSync(evidence,published);
+const generator=join(project,"generator.py"), originalGenerator=readFileSync(generator);writeFileSync(generator,Buffer.concat([originalGenerator,Buffer.from("\n# changed generator\n")]));
+const generatorDrift=spawnSync(process.execPath,[tsx,"--eval",check],{cwd:project,encoding:"utf8"});assert.notEqual(generatorDrift.status,0);writeFileSync(generator,originalGenerator);
+const request=JSON.parse(readFileSync(join(project,"request.json"),"utf8"));request.target_reading_environment.viewports.zoom=undefined;writeFileSync(join(project,"request.json"),JSON.stringify(request));
+const rejected=spawnSync(process.execPath,[tsx,"--eval",check],{cwd:project,encoding:"utf8"}); assert.notEqual(rejected.status,0);assert.match(rejected.stderr,/STALE|source_revision/);
+console.log(JSON.stringify({source_checker:"STATIC_PASS",production_browser:"PASS",existing_sensor:"PASS",input_drift:"rejected",artifacts:project}));

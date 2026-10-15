@@ -31,7 +31,7 @@ def main() -> None:
         ])
 
     provider_doc = DIAGRAM_CONTRACT_PATH.read_text(encoding="utf-8")
-    assert "未固定版本的 `chrome-devtools-mcp`" in provider_doc
+    assert "不自动下载、安装或注册 MCP" in provider_doc
     assert "Provider 能力不可用时写入 `final_status: \"NEEDS_CAPABILITY\"`，不得伪造通过" in provider_doc
     assert "不修改 SVG 源" in provider_doc
 

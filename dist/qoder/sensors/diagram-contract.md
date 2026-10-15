@@ -116,13 +116,14 @@ evidence_path: .aidlc/evidence/<stage-slug>/diagram-contract.json
 Checker 必须实际以 `shell: false` 执行 `command_argv`，通过 `AIDLC_DIAGRAM_ID`、`AIDLC_ROUTE_CONFIG_JSON`、`AIDLC_EXPECTED_CONTRACT_PATH` 传入当前上下文，重读 SVG/sidecar，并拒绝任何未列入允许 outputs 的项目文件变更。`route_config`、实际命令、cwd、changed files 和 `reloaded` 结果必须进入 `generation_closure`；命令或配置位于 `/tmp` 时也必须在验证输出中保留路径证据。生成器闭环失败时不得沿用旧 evidence 的 PASS。
 
 
-## Chrome DevTools Provider 运行时适配
+## 已锁定的视觉 Provider 运行时适配
 
 当 `target_operations` 包含 `preview` 或浏览器侧 `render` 时，先完成源级 `diagram-contract` evidence，再执行：
 
 ```bash
 loeyae-aidlc diagram-provider run \
   --request <provider-request.json> \
+  --host-provider <explicitly-authorized-instance> \
   --evidence .aidlc/evidence/<stage-slug>/diagram-contract.json
 ```
 
@@ -131,7 +132,7 @@ Provider Request 使用 version `1`，最小结构如下：
 ```json
 {
   "version": "1",
-  "provider": "chrome-devtools",
+  "provider": "diagram.visual",
   "target_operation": "preview",
   "stage": "<stage-slug>",
   "target_reading_environment": {
@@ -151,11 +152,11 @@ Provider Request 使用 version `1`，最小结构如下：
 ```
 
 
-运行器调用未固定版本的 `chrome-devtools-mcp` CLI，执行页面导航、viewport 调整、DOM/computed style/实际 bbox 检查、可访问性快照、viewport 截图和控制台采集。每次真实运行都会以唯一 `sessionId` 启动 `chrome-devtools start --isolated`，后续所有 CLI 调用复用该 daemon，并在运行器进程退出时只停止自身会话；它不依赖或停止 Kiro Crew Dashboard Browser 面板的默认会话。源级 evidence 或 independent expected 不存在、未通过或不可解析时拒绝执行并保持 `UNVERIFIED`；浏览器检查失败时记录当前 `FAIL` evidence 且不把旧 evidence 升级；normal 必须从 `(0,0)` 开始，fit 必须完整显示 content bbox，zoom 必须覆盖 expected `affected_edge_ids`。全部适用检查通过后，且 `normal`、`fit`、`zoom` 三视图各自生成截图和快照，才原子更新 `provider_status: "passed"`、`browser_visual_status: "passed"`、`gate_statuses.visual: "VISUAL_PASS"`、`gate_statuses.overall: "OVERALL_PASS"`、`final_status: "PASS"`，并写入 `diagram-contract-provider.json#views.<view>`。Provider 能力不可用时写入 `final_status: "NEEDS_CAPABILITY"`，不得伪造通过；`export` 不属于该 Provider 能力。
+运行器仅调用已通过项目 Provider add/lock 安装并启用的 `diagram.visual` 包；`--host-provider` 显式授权可信宿主执行该实例的锁定入口。这不是 `restricted-v1` 执行，不改变其无网络、无秘密规则。外部包实现浏览器启动、独立会话、固定 DOM 配方和截图采集；Core 保留业务/布局判定、输入和锁漂移校验、PNG 完整性验证、证据签名及受管发布。包声明不构成宿主授权。没有包、实例禁用、缺浏览器或缺授权时返回 `NEEDS_CAPABILITY`，不自动下载、安装或注册 MCP。
 
+只接受项目范围内的本地 SVG，不修改 SVG 源；远程 URL 不在本次授权范围。外部引用、脚本、事件、主动嵌入和越界输出被拒绝；浏览器只接收惰性 SVG 数据，不接收任意代码或文件路径。normal 从 `(0,0)` 开始，fit 必须包含完整内容，zoom 覆盖 expected affected edges。三视图都必须有本次 invocation 的真实 DOM 测量、PNG 截图和可访问性快照；候选不能自行签发 Evidence/Gate。Core 将完整结果签名，并在 sensor 消费时再次检查输入摘要、锁、截图、快照和签名。Provider 能力不可用时写入 `final_status: "NEEDS_CAPABILITY"`，不得伪造通过；视觉失败为 `FAIL`，静态通过只为 `STATIC_PASS`。`preview` 表示浏览器预览验证，`render` 表示浏览器渲染验证并采集产物，操作值绑定在请求中；两者都受三视图门禁约束，`export` 明确不支持。仅关闭本次独立浏览器并删除本次独立临时 profile，不连接或终止共享浏览器。
 
-对本地 SVG，运行器会先验证源文件的静态安全约束；若 Chrome 将直接 `file://` SVG 呈现为 XML 查看器，则使用只包含当前 SVG 的临时本地 HTML wrapper 进行浏览器检查，wrapper 在运行结束后删除，不修改 SVG 源。无法启动或调用 Chrome DevTools 时保持原有 `UNVERIFIED` evidence，不得伪造通过；若运行时明确报告 Chrome profile 被占用，返回稳定错误码 `BROWSER_PROFILE_CONFLICT`，不得误报为“Browser 面板未配置”。
-
+历史请求 `provider: "chrome-devtools"` 仍可解析，实际执行统一由锁定 Provider 调度。完整安装、锁定和运行示例见 `docs/diagram-visual-provider.md`。
 
 ## 过程图严格契约与证据门禁
 
@@ -202,6 +203,6 @@ Producer 还必须记录 `expected_contract_status`、`semantic_status`、`gener
 
 `EDGE_CROSSING` 默认阻断，但 `designNotes.layout.crossingExceptions` 可为保持主轴、同层业务顺序或避免更差折返而声明一对必要交叉边；Producer 必须验证声明边对存在、互异且恰好对应实际交叉，并确认交叉不触及节点、文字、标签、箭头或关键端点，且方向与语义可辨。`sideSwitchExceptions` 只允许记录真实避障或业务端口语义导致的跨轴例外，必须命中实际同侧折返或多次换边，不能用于掩盖左右折返。`PORT_APPROACH` 阻断从目标形状内部回折到端口，`ROUTING_MINIMALITY` 阻断存在更短无障碍直达、一折或在已声明 `loopLanes` 的侧别和最小偏移内更少折点候选的流程路径；回路声明不是最少路径豁免。`changeImpactReview` 存在时必须覆盖移动节点的 incident edges。`COLLINEAR_OVERLAP`、节点/文字/标签穿越和未声明或不可读的 `EDGE_CROSSING` 始终阻断；`PORT_DIRECTION`、`DECISION_SHAPE`、`DECISION_EXIT`、`MAIN_FLOW_TRACE` 和 `LOOP_LANE` 继续是可定位的阻断错误码。
 
-### Chrome Provider 证据
+### 视觉 Provider 证据
 
-当 `target_operation_required` 为 `true` 时，受控 Provider 必须实际检查 DOM/SVG 的节点/边集合、sidecar 主流程/回路/必要交叉覆盖、判定 diamond/出口、edge-node/edge-edge 几何、共线重叠、端口方向与目标外侧接近、同侧通道、边 bbox、标签与无关边 bbox、标签中点法向净空、`10 × 10` 箭头 overlay 可见性及其被节点、后绘制标签或分组边界遮挡、structural 框体与节点/连线/标签/箭头实际交点、相交节点 computed `fill`、structural 框体 computed `stroke`/`fill`/`strokeWidth`、绘制层级、alpha mask 类型与两个 `userSpaceOnUse` 单位、透明 cutout 对实际交点的覆盖、文字/tspan bbox 越界与重叠、白色不透明画布、框体/连线/文字 computed style、marker 尺寸、全局图例/备注缺失、`contentBBox` 及水平溢出。structural 检查不得只依赖 DOM 顺序或 `elementFromPoint`，必须保存最新截图并以实际像素证据复核框体未透过业务前景；截图/快照或像素证据缺失时保持 structural 结果 `UNVERIFIED`。Provider Request 必须提供 `target_reading_environment.viewports.normal`、`.fit`、`.zoom`；缺少任一视图、Chrome 不可用或任一实际检查失败时，不得把 evidence 更新为 `provider_status: "passed"`，应保持 `UNVERIFIED` 或返回 `NEEDS_CAPABILITY`。`--dry-run` 仅验证请求格式和计划，不产生浏览器通过证据。
+当 `target_operation_required` 为 `true` 时，受控 Provider 必须实际检查 DOM/SVG 的节点/边集合、sidecar 主流程/回路/必要交叉覆盖、判定 diamond/出口、edge-node/edge-edge 几何、共线重叠、端口方向与目标外侧接近、同侧通道、边 bbox、标签与无关边 bbox、标签中点法向净空、`10 × 10` 箭头 overlay 可见性及其被节点、后绘制标签或分组边界遮挡、structural 框体与节点/连线/标签/箭头实际交点、相交节点 computed `fill`、structural 框体 computed `stroke`/`fill`/`strokeWidth`、绘制层级、alpha mask 类型与两个 `userSpaceOnUse` 单位、透明 cutout 对实际交点的覆盖、文字/tspan bbox 越界与重叠、白色不透明画布、框体/连线/文字 computed style、marker 尺寸、全局图例/备注缺失、`contentBBox` 及水平溢出。structural 检查不得只依赖 DOM 顺序或 `elementFromPoint`，必须保存最新截图并以实际像素证据复核框体未透过业务前景；截图/快照或像素证据缺失时保持 structural 结果 `UNVERIFIED`。Provider Request 必须提供 `target_reading_environment.viewports.normal`、`.fit`、`.zoom`；缺少任一视图、浏览器不可用或任一实际检查失败时，不得把 evidence 更新为 `provider_status: "passed"`，应保持 `UNVERIFIED` 或返回 `NEEDS_CAPABILITY`。`--dry-run` 仅验证请求格式和计划，不产生浏览器通过证据。
