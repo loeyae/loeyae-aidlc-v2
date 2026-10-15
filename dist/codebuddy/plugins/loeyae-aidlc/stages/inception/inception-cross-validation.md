@@ -319,7 +319,7 @@ loeyae-aidlc ui accept --module {module-id} --route <html-mock|figma-create|figm
 **输入文件**：
 - PRD 文件（`docs/aidlc/ideation/prd.md`）
 - 已有 Inception 产物（如存在）
-- SSOT 检索记录（如使用）
+- context-source 检索记录（如使用）
 
 ### 审查清单
 

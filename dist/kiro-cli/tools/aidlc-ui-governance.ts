@@ -12,6 +12,8 @@ import {
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runSync } from "./aidlc-spawn";
+import { resolveDesignResource, verifyDesignResource, verifyDesignResourceConsumption, applyDesignResourceStyle, type DesignResourceLock } from "./aidlc-design-resource.js";
+import { verifyExternalUiManifest } from "./aidlc-ui-readonly.js";
 
 export type UiDesignRoute = "html-mock" | "figma-create" | "figma-existing";
 export type UiSourceKind = "prd" | "requirements" | "user-stories" | "page-plan" | "design-decisions";
@@ -70,6 +72,8 @@ export interface UiGenerationLock {
   upstream: { ref: string; commit: string };
   sources: UiSourceSnapshot[];
   pages: UiPageRef[];
+  design_resource?: DesignResourceLock;
+  superseded_visual_reviews?: Array<{ run_id: string; section_sha256: string }>;
   adoption?: { approval_ref: string; reason: string };
 }
 
@@ -556,6 +560,13 @@ function parseLock(raw: unknown): UiGenerationLock {
   } else if (value.adoption !== undefined) {
     fail("generation-start locks must not contain adoption metadata");
   }
+  const superseded = value.superseded_visual_reviews === undefined ? [] : requireArray(value.superseded_visual_reviews, "superseded_visual_reviews").map(raw => {
+    const item = requireObject(raw, "superseded visual review");
+    const run_id = requireString(item.run_id, "superseded review.run_id");
+    const section_sha256 = requireString(item.section_sha256, "superseded review.section_sha256");
+    if (!/^[a-f0-9]{64}$/.test(section_sha256)) fail("DESIGN_INVALID_REVIEW_HISTORY");
+    return { run_id, section_sha256 };
+  });
   return {
     version: "1",
     kind: "aidlc.ui-generation-lock",
@@ -567,6 +578,8 @@ function parseLock(raw: unknown): UiGenerationLock {
     upstream: { ref: upstreamRef, commit: upstreamCommit },
     sources,
     pages,
+    ...(value.design_resource !== undefined ? { design_resource: value.design_resource as DesignResourceLock } : {}),
+    ...(superseded.length ? { superseded_visual_reviews: superseded } : {}),
     ...(adoption ? { adoption } : {}),
   };
 }
@@ -581,6 +594,7 @@ export function readUiGenerationLock(projectRoot: string, moduleId: string): { l
     fail(`UI generation lock is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
   }
   const lock = parseLock(raw);
+  verifyDesignResource(projectRoot, moduleId, lock.design_resource);
   if (lock.module_id !== moduleId) fail(`UI generation lock.module_id must be ${moduleId}`);
   return { lock, path: file.relative, digest: sha256(canonicalJson(lock)) };
 }
@@ -599,6 +613,7 @@ export interface CreateUiLockOptions {
   designDecisionsPath?: string;
   adoption?: { approvalRef: string; reason: string };
   now?: string;
+  supersededVisualReviews?: UiGenerationLock["superseded_visual_reviews"];
 }
 
 export function createUiGenerationLock(projectRoot: string, options: CreateUiLockOptions): UiGenerationLock {
@@ -645,10 +660,59 @@ export function createUiGenerationLock(projectRoot: string, options: CreateUiLoc
     upstream: { ref: upstreamRef, commit: upstreamCommit },
     sources,
     pages,
+    design_resource: resolveDesignResource(root, moduleId),
+    ...(options.supersededVisualReviews?.length ? { superseded_visual_reviews: options.supersededVisualReviews } : {}),
     ...(adoption ? { adoption } : {}),
   };
   atomicJson(output, lock);
   return lock;
+}
+
+/** Explicit style adoption starts a new visual review, retaining the exact old baseline
+ * and acceptance bytes. Ordinary refresh/reverify never replaces resource selections. */
+export function rebaselineUiDesignResource(projectRoot: string, moduleId: string): UiGenerationLock {
+  const label = uiGenerationLockPath(moduleId);
+  const previous = safeProjectFile(projectRoot, label, label);
+  const oldBytes = readFileSync(previous.absolute, "utf8");
+  const old = parseLock(JSON.parse(oldBytes));
+  if (old.module_id !== moduleId || old.route !== "html-mock") fail("DESIGN_HTML_ROUTE_REQUIRED");
+  const next = resolveDesignResource(projectRoot, moduleId);
+  if (!next.approval_ref || next.approval_ref === old.design_resource?.approval_ref || next.selection_digest === old.design_resource?.selection_digest) fail("DESIGN_NEW_APPROVAL_REQUIRED");
+  // Validate all inputs before moving anything. Keep original source selection semantics.
+  const sources = old.sources.map(source => snapshotUiSource(projectRoot, source.kind, source.path));
+  if (!sameValue(sources, old.sources)) fail("DESIGN_REBASELINE_REQUIRES_UNCHANGED_BUSINESS_INPUTS");
+  readUiPagePlan(projectRoot, canonicalModulePath(moduleId, "page-plan"));
+  const observed = resolveGitCommit(projectRoot, old.upstream.ref);
+  if (upstreamDrift(projectRoot, old.sources, old.upstream.commit, observed, sources).paths.length > 0) fail("DESIGN_REBASELINE_REQUIRES_UNCHANGED_BUSINESS_INPUTS");
+  resolveGitCommit(projectRoot, "HEAD");
+  const suffix = `.archived-${sha256(oldBytes)}`;
+  const superseded = [...(old.superseded_visual_reviews || [])];
+  const acceptanceLabel = uiGenerationAcceptancePath(moduleId);
+  if (existsSync(resolve(projectRoot, acceptanceLabel))) {
+    const acceptanceFile = safeProjectFile(projectRoot, acceptanceLabel, acceptanceLabel);
+    const prior = requireObject(JSON.parse(readFileSync(acceptanceFile.absolute, "utf8")), "prior acceptance");
+    const full = requireObject(prior.full_acceptance, "prior full acceptance");
+    superseded.push({ run_id: requireString(full.run_id, "prior review run_id"), section_sha256: requireString(full.section_sha256, "prior review digest") });
+  }
+  const labels = [label, uiGenerationAcceptancePath(moduleId), uiGenerationCheckpointsPath(moduleId)];
+  const moves = labels.filter(p => existsSync(resolve(projectRoot, p))).map(p => ({
+    from: safeProjectFile(projectRoot, p, p).absolute,
+    to: safeOutputFile(projectRoot, p + suffix, p + suffix),
+  }));
+  if (moves.some(m => existsSync(m.to))) fail("DESIGN_BASELINE_ARCHIVE_EXISTS");
+  const moved: typeof moves = [];
+  try {
+    for (const move of moves) { renameSync(move.from, move.to); moved.push(move); }
+    return createUiGenerationLock(projectRoot, {
+      moduleId, route: old.route, upstreamRef: old.upstream.ref,
+      prdPath: old.sources.find(s => s.kind === "prd")?.path,
+      designDecisionsPath: old.sources.find(s => s.kind === "design-decisions")?.path,
+      supersededVisualReviews: superseded,
+    });
+  } catch (e) {
+    for (const move of moved.reverse()) renameSync(move.to, move.from);
+    throw e;
+  }
 }
 
 export function verifyUiGenerationLockAtBaseline(projectRoot: string, moduleId: string, route: UiDesignRoute, expectedPageIds: string[]): { path: string; digest: string; upstream_ref: string; upstream_commit: string; baseline_mode: string; observed_upstream_commit: string; superseded_by_acceptance: boolean } {
@@ -872,9 +936,25 @@ function parseReviewReport(projectRoot: string, reportPath: string, expectedPage
   };
 }
 
+function verifyLockedHtmlResources(projectRoot: string, moduleId: string, lock: UiGenerationLock): void {
+  if (!lock.design_resource || lock.route !== "html-mock") return;
+  const prefix = `docs/aidlc/modules/${moduleId}/inception/ui-mock/`;
+  const manifest = safeProjectFile(projectRoot, prefix + "ui-mock-manifest.json", "UI mock manifest");
+  const pages = requireArray(requireObject(JSON.parse(readFileSync(manifest.absolute, "utf8")), "UI manifest").pages, "UI manifest.pages");
+  if (pages.length === 0) fail("DESIGN_TOKENS_NOT_CONSUMED");
+  for (const raw of pages) {
+    const page = requireObject(raw, "UI page"), path = requireString(page.html, "UI page.html");
+    if (!path.startsWith(prefix) || !path.endsWith(".html")) fail("DESIGN_INVALID_HTML_TARGET");
+    const html = safeProjectFile(projectRoot, path, "UI HTML");
+    verifyDesignResourceConsumption(projectRoot, moduleId, lock.design_resource, readFileSync(html.absolute, "utf8"));
+  }
+}
+
 function buildExpectedAcceptance(projectRoot: string, moduleId: string, route: UiDesignRoute, reportPath: string, recordedUpstreamCommit?: string): UiGenerationAcceptance {
   const root = realpathSync(resolve(projectRoot));
+  if (route === "figma-existing") verifyExternalUiReview(root, moduleId, reportPath);
   const loaded = readUiGenerationLock(root, moduleId);
+  verifyLockedHtmlResources(root, moduleId, loaded.lock);
   if (loaded.lock.route !== route) fail(`UI generation lock.route must match selected route ${route}`);
   // At `ui accept` the live upstream is recorded. Verification recomputes against the recorded
   // commit so a repository-level pointer advance alone never invalidates the acceptance.
@@ -896,6 +976,7 @@ function buildExpectedAcceptance(projectRoot: string, moduleId: string, route: U
     fail(`UI impact matrix has unmapped requirement changes (${labels.join("; ")}); update page-plan or explicitly mark non-UI stories before acceptance`);
   }
   const review = parseReviewReport(root, reportPath, currentPages.map((page) => page.page_id));
+  if (loaded.lock.superseded_visual_reviews?.some(prior => prior.run_id === review.full.run_id || prior.section_sha256 === review.full.section_sha256)) fail("DESIGN_NEW_VISUAL_REVIEW_REQUIRED");
   if (!sameStrings(review.synchronizedPages, impact.affected_pages)) {
     fail(`UI requirement freshness.synchronized_pages must exactly match affected pages: ${impact.affected_pages.join(", ") || "none"}`);
   }
@@ -922,6 +1003,15 @@ function buildExpectedAcceptance(projectRoot: string, moduleId: string, route: U
   };
 }
 
+/** A changed remote read generation needs a review of those exact registered bytes. */
+function verifyExternalUiReview(root: string, moduleId: string, reportPath: string): void {
+  verifyExternalUiManifest(root, moduleId);
+  const manifest = safeProjectFile(root, `docs/aidlc/modules/${moduleId}/inception/ui-design/figma-manifest.json`, "Figma manifest");
+  const report = safeProjectFile(root, reportPath, "UI review report");
+  const sections = markdownSections(readFileSync(report.absolute, "utf8"), /^UI full acceptance$/i);
+  if (sections.length !== 1 || sectionField(sections[0], "figma_manifest_sha256") !== sha256(readFileSync(manifest.absolute))) fail("UI_READ_NEW_VISUAL_REVIEW_REQUIRED");
+}
+
 export interface CreateUiAcceptanceOptions {
   moduleId: string;
   route: UiDesignRoute;
@@ -930,6 +1020,7 @@ export interface CreateUiAcceptanceOptions {
 
 export function createUiGenerationAcceptance(projectRoot: string, options: CreateUiAcceptanceOptions): UiGenerationAcceptance {
   const root = realpathSync(resolve(projectRoot));
+  if (options.route === "figma-existing") verifyExternalUiManifest(root, options.moduleId);
   const outputLabel = uiGenerationAcceptancePath(options.moduleId);
   const output = safeOutputFile(root, outputLabel, outputLabel);
   if (existsSync(output)) fail(`UI full acceptance is already recorded; a second full acceptance is forbidden: ${outputLabel}`);
@@ -1185,7 +1276,10 @@ export function verifyUiGenerationAcceptance(projectRoot: string, moduleId: stri
 } {
   const root = realpathSync(resolve(projectRoot));
   const loadedLock = readUiGenerationLock(root, moduleId);
+  if (route === "figma-existing") verifyExternalUiManifest(root, moduleId);
+  verifyLockedHtmlResources(root, moduleId, loadedLock.lock);
   const chain = verifyAcceptanceChain(root, moduleId, route);
+  if (route === "figma-existing") verifyExternalUiReview(root, moduleId, chain.acceptance.full_acceptance.report_path);
   const live = liveFreshnessState(root, chain.lock);
   if (!sameValue(live.state.sources, chain.effective.sources) || !sameValue(live.state.pages, chain.effective.pages)) {
     fail("UI generation acceptance does not match current source revisions; record mapped changes with the controlled 'ui reverify' command (a second full acceptance is forbidden)");
@@ -1372,6 +1466,20 @@ function writeOptionalOutput(projectRoot: string, path: string | undefined, cont
 
 export async function runUiGovernanceCli(args: string[], projectRoot = process.cwd()): Promise<void> {
   const command = args[0];
+  if (command === "resource-rebaseline") {
+    const lock = rebaselineUiDesignResource(projectRoot, requiredArg(args, "--module"));
+    process.stdout.write(`${JSON.stringify({ status: "visual-review-required", token_digest: lock.design_resource!.token_digest })}\n`);
+    return;
+  }
+  if (command === "resource-css") {
+    const moduleId = requiredArg(args, "--module");
+    const loaded = readUiGenerationLock(projectRoot, moduleId);
+    if (!loaded.lock.design_resource) fail("DESIGN_LEGACY_ADOPTION_REQUIRED");
+    if (loaded.lock.route !== "html-mock") fail("DESIGN_HTML_ROUTE_REQUIRED");
+    applyDesignResourceStyle(projectRoot, moduleId, loaded.lock.design_resource, requiredArg(args, "--html"));
+    process.stdout.write("Locked design tokens applied.\n");
+    return;
+  }
   if (command === "lock") {
     const moduleId = requiredArg(args, "--module");
     const adoption = args.includes("--adopt") ? { approvalRef: requiredArg(args, "--approval-ref"), reason: requiredArg(args, "--reason") } : undefined;

@@ -19,7 +19,11 @@
   "scripts": {
     "build": "tsx scripts/build.ts",
     "typecheck": "tsc --noEmit",
-    "pretest": "npm run test:mars169",
+    "pretest": "npm run test:mars169 && npm run test:mcp-readonly && npm run test:context-source-boundary",
+    "test:context-source": "tsx tests/test_context_source.ts",
+    "test:design-resource": "tsx tests/test_design_resource.ts",
+    "test:context-source-boundary": "tsx tests/test_context_source_boundary.ts",
+    "test:mcp-readonly": "tsx tests/test_mcp_readonly.ts",
     "test:mars161-phase2": "npx --no-install tsx tests/test_mars161_execution_profile_phase2.ts",
     "test:mars161-phase3": "npx --no-install tsx tests/test_mars161_execution_profile_phase3.ts",
     "test:mars161-phase4": "npx --no-install tsx tests/test_mars161_execution_profile_phase4.ts",
@@ -46,6 +50,7 @@
     "test:mars169": "tsx tests/test_mars169_document_slices.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@resvg/resvg-js": "2.6.2",
     "@xmldom/xmldom": "0.9.12",
     "docx": "9.7.1",

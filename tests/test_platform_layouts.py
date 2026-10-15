@@ -76,7 +76,7 @@ def main() -> None:
         assert not (kiro_skill / "POWER.md").exists()
         assert (kiro_skill / "stages").is_dir()
         assert not (home / ".kiro" / "powers" / "loeyae-aidlc").exists()
-        assert (home / ".kiro" / "settings" / "mcp.json").is_file()
+        assert not (home / ".kiro" / "settings" / "mcp.json").exists()
         skill_text = skill_entry.read_text()
         assert skill_text.startswith("---\nname: loeyae-aidlc\n")
         assert "Loeyae AI-DLC workflow" in skill_text.split("---", 2)[1]
@@ -101,43 +101,29 @@ def main() -> None:
         assert (codebuddy_plugin / ".codebuddy-plugin" / "plugin.json").is_file()
         assert (codebuddy_plugin / "skills" / "loeyae-aidlc" / "SKILL.md").is_file()
         assert (codebuddy_plugin / "hooks" / "hooks.json").is_file()
-        assert (codebuddy_plugin / ".mcp.json").is_file()
+        assert not (codebuddy_plugin / ".mcp.json").exists()
         codebuddy_marketplace_manifest = json.loads((codebuddy_marketplace / ".codebuddy-plugin" / "marketplace.json").read_text())
         codebuddy_plugin_manifest = json.loads((codebuddy_plugin / ".codebuddy-plugin" / "plugin.json").read_text())
-        codebuddy_mcp_manifest = json.loads((codebuddy_plugin / ".mcp.json").read_text())
         assert codebuddy_marketplace_manifest["version"] == package_version
         assert codebuddy_plugin_manifest["version"] == package_version
         assert codebuddy_marketplace_manifest["plugins"][0]["skills"] == ["./plugins/loeyae-aidlc/skills/loeyae-aidlc"]
         assert codebuddy_plugin_manifest["skills"] == ["./skills/loeyae-aidlc"]
-        assert codebuddy_mcp_manifest["mcpServers"]["ssot"]["headers"]["Authorization"] == "Bearer ${SSOT_API_KEY}"
+        assert "mcpServers" not in codebuddy_plugin_manifest
 
         run_install("qoder", home, host_env)
         qoder_plugin = home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc"
         assert (qoder_plugin / ".qoder-plugin" / "plugin.json").is_file()
         assert (qoder_plugin / "skills" / "loeyae-aidlc" / "SKILL.md").is_file()
         assert (qoder_plugin / "hooks" / "hooks.json").is_file()
-        assert (qoder_plugin / ".mcp.json").is_file()
-        assert (qoder_plugin / "mcp-cn.json").is_file()
+        assert not (qoder_plugin / ".mcp.json").exists()
+        assert not (qoder_plugin / "mcp-cn.json").exists()
         qoder_plugin_manifest = json.loads((qoder_plugin / ".qoder-plugin" / "plugin.json").read_text())
-        qoder_mcp_manifest = json.loads((qoder_plugin / ".mcp.json").read_text())
-        qoder_settings = json.loads((root / "qoder-config" / "settings.json").read_text())
-        qoder_cn_config = json.loads((root / "qoder-cn" / "mcp.json").read_text())
         assert qoder_plugin_manifest["version"] == package_version
         assert qoder_plugin_manifest["skills"] == "./skills"
         assert qoder_plugin_manifest["hooks"] == "./hooks/hooks.json"
-        assert qoder_plugin_manifest["mcpServers"] == "./.mcp.json"
-        expected_qoder_mcp = {"loeyae-skills", "awesome-design", "figma", "ssot"}
-        assert set(qoder_mcp_manifest["mcpServers"]) == expected_qoder_mcp
-        assert set(qoder_settings["mcpServers"]) == expected_qoder_mcp
-        assert qoder_mcp_manifest["mcpServers"]["ssot"]["headers"]["Authorization"] == "Bearer ${SSOT_API_KEY}"
-        assert qoder_settings["mcpServers"]["ssot"]["headers"]["Authorization"] == "Bearer ${SSOT_API_KEY}"
-        assert set(qoder_cn_config["mcpServers"]) == expected_qoder_mcp
-        for server in qoder_cn_config["mcpServers"].values():
-            assert server["command"] == "npx"
-            assert server["args"][:2] == ["-y", "mcp-remote@0.8.3"]
-            assert server["args"][-2:] == ["--transport", "http-only"] or server["args"][-4:-2] == ["--transport", "http-only"]
-        ssot_args = qoder_cn_config["mcpServers"]["ssot"]["args"]
-        assert ssot_args[-2:] == ["--header", "Authorization: Bearer ${SSOT_API_KEY}"]
+        assert "mcpServers" not in qoder_plugin_manifest
+        assert not (root / "qoder-config" / "settings.json").exists()
+        assert not (root / "qoder-cn" / "mcp.json").exists()
 
         run_install("zcode", home)
         zcode_skill = home / ".zcode" / "skills" / "loeyae-aidlc"
@@ -148,8 +134,7 @@ def main() -> None:
         zcode_config = json.loads((home / ".zcode" / "cli" / "config.json").read_text())
         assert zcode_config["hooks"]["enabled"] is True
         assert zcode_config["hooks"]["events"]["Stop"][0]["hooks"][0]["args"] == ["hook", "--format", "zcode"]
-        assert set(zcode_config["mcp"]["servers"]) == {"loeyae-skills", "awesome-design", "figma", "ssot"}
-        assert zcode_config["mcp"]["servers"]["ssot"]["headers"]["Authorization"] == "Bearer ${SSOT_API_KEY}"
+        assert "mcp" not in zcode_config
 
     print("Native platform layout tests passed")
 

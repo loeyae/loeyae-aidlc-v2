@@ -1,6 +1,7 @@
 """Regression tests for the Claude Code official plugin layout."""
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -11,7 +12,7 @@ DIST = ROOT / "dist" / "claude"
 
 def build_claude() -> None:
     result = subprocess.run(
-        ["npm", "run", "build:claude"],
+        [shutil.which("node") or "node", str(ROOT / "node_modules/tsx/dist/cli.mjs"), str(ROOT / "scripts/build.ts"), "--harness", "claude"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -37,8 +38,7 @@ def test_official_plugin_layout() -> None:
 
     manifest = json.loads(manifest_path.read_text())
     assert manifest["name"] == "loeyae-aidlc"
-    assert "mcpServers" in manifest
-    assert manifest["mcpServers"]["ssot"]["headers"]["Authorization"] == "Bearer ${SSOT_API_KEY}"
+    assert "mcpServers" not in manifest
     assert orchestrator_skill.read_text().startswith("# Loeyae AI-DLC\n")
 
 

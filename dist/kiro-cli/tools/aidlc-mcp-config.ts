@@ -29,24 +29,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const CHROME_DEVTOOLS_PACKAGE = "chrome-devtools-mcp";
-const MIGRATABLE_LEGACY_SPECS = new Set(["chrome-devtools-mcp@1.6.0"]);
-
-function isChromeDevtoolsPackage(value: unknown, packageName = CHROME_DEVTOOLS_PACKAGE): boolean {
-  if (!isRecord(value) || value.command !== "npx" || !Array.isArray(value.args)) return false;
-  return value.args.length === 2 && value.args[0] === "-y" && value.args[1] === packageName;
-}
-
-function isMigratableLegacyChromeDevtools(value: unknown): boolean {
-  if (!isRecord(value) || value.command !== "npx" || !Array.isArray(value.args) || value.args.length !== 2 || value.args[0] !== "-y") return false;
-  if (!MIGRATABLE_LEGACY_SPECS.has(String(value.args[1]))) return false;
-  if (value.disabled !== undefined && value.disabled !== false) return false;
-  if (value.autoApprove !== undefined && (!Array.isArray(value.autoApprove) || value.autoApprove.length !== 0)) return false;
-  return Object.keys(value).every((key) => ["command", "args", "disabled", "autoApprove"].includes(key));
-}
-
 export function mergeMcpServers(current: unknown, defaults: Record<string, McpServerConfig>): McpMergeResult {
   if (!isRecord(current)) throw new Error("MCP config must be a JSON object");
+  if (Object.keys(defaults).length === 0) return { config: current, added: [], upgraded: [], preserved: [] };
   const currentServers = current.mcpServers;
   if (currentServers !== undefined && !isRecord(currentServers)) throw new Error("MCP config mcpServers must be a JSON object");
   const servers: Record<string, unknown> = isRecord(currentServers) ? { ...currentServers } : {};
@@ -57,9 +42,6 @@ export function mergeMcpServers(current: unknown, defaults: Record<string, McpSe
     if (!Object.prototype.hasOwnProperty.call(servers, name)) {
       servers[name] = config;
       added.push(name);
-    } else if (name === "chrome-devtools" && isChromeDevtoolsPackage(config) && isMigratableLegacyChromeDevtools(servers[name])) {
-      servers[name] = config;
-      upgraded.push(name);
     } else {
       preserved.push(name);
     }
@@ -93,6 +75,8 @@ function acquireLock(path: string): number {
 }
 
 export function updateMcpConfig(path: string, defaults: Record<string, McpServerConfig>): McpMergeResult {
+  // No requirements means no host IO, including directory, lock or empty config creation.
+  if (Object.keys(defaults).length === 0) return { config: {}, added: [], upgraded: [], preserved: [] };
   mkdirSync(dirname(path), { recursive: true });
   const lockPath = `${path}.lock`;
   const lockFd = acquireLock(lockPath);

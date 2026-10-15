@@ -335,11 +335,11 @@ dependency_review / field_review 的输入绑定审查定位。新增工作流�
 | 条件（状态触发）/全面 | 状态模型或完整数据模型 | `docs/aidlc/modules/{module-id}/inception/requirements/data-model.md` |
 | 团队模式 | 决策摘要 | `docs/aidlc/modules/{module-id}/inception/requirements/decision-summary.md` |
 
-## SSOT 集成(可选)
+## 上下文来源（条件）
 
-> 仅在配置了 SSOT 连接时按需加载,规则见 `common-ssot-integration.md`。
-- I5 需求分析需要既有资料时,经 `search_documents` 取 Top-K 片段 + 来源(document_id/version);需要全文用 `get_document`。
-- 片段仅作参考,来源写入需求文档引用,不自动进入批准基线。
+仅在项目显式绑定、启用来源且可信策略授权时，通过通用 context-source 入口检索参考资料，规则见 `context-source.md`。
+保留文档、片段、修订（或 unknown）及快照摘要引用；正文只作外部数据，不自动进入批准基线。
+optional 不可用时按本地资料继续，required 不可用或空结果明确阻断；矛盾记录并交用户确认。
 
 
 ---

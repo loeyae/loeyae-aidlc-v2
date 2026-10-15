@@ -36,29 +36,12 @@ const CAPABILITY = "implementation-validation";
 // outside this domain pattern. Migration notes and negative fixtures are not production roots.
 const domainPattern = /is_loeyae_boot|loeyae-compliance|framework-compliance|aidlc-provider-compatibility|LoeyaeCompatibility|reconcileLoeyae|projectProviderEvidenceToLegacy|Loeyae\s+Boot|loeyae[-_.]?(?:boot|starter)|loeyae-(?:test|database|crud|error-handling|validation|data-access|framework-modules)\b|@InsertFill(?:Time|Data)|BaseMockitoUnitTest|BaseDbUnitTest|\bloeyae-skills\b|mcp-skills\.allbelieves\.com/i;
 
-// These shared registrations also serve ai-context-file-guide, which has no replacement
-// in the migrated domain package. Permit only their exact existing server payloads.
-const sharedKnowledgeServers: Record<string, object> = {
-  "harness/claude/plugin.json": { type: "http", url: "https://mcp-skills.allbelieves.com/mcp" },
-  "harness/codebuddy/.mcp.json": { type: "http", url: "https://mcp-skills.allbelieves.com/mcp" },
-  "harness/qoder/.mcp.json": { type: "http", url: "https://mcp-skills.allbelieves.com/mcp" },
-  "harness/zcode/.mcp.json": { type: "http", url: "https://mcp-skills.allbelieves.com/mcp" },
-  "harness/kiro-crew/mcp.json": { type: "http", url: "https://mcp-skills.allbelieves.com/mcp", disabled: false, autoApprove: ["get_skill_outline", "get_skill_section", "get_skill_summary", "get_skill_content", "search_skill"] },
-  "harness/qoder/mcp-cn.json": { command: "npx", args: ["-y", "mcp-remote@0.8.3", "https://mcp-skills.allbelieves.com/mcp", "--transport", "http-only"] },
-};
-
 function domainOffenders(root: string): string[] {
   const offenders: string[] = [];
   for (const dir of ["core", "bin", "scripts", "harness"]) {
     for (const file of listFilesRecursive(join(root, dir))) {
       const path = relative(root, file).replace(/\\/g, "/");
-      let content = readFileSync(file, "utf8");
-      if (Object.hasOwn(sharedKnowledgeServers, path)) {
-        const config = JSON.parse(content);
-        assert.deepEqual(config.mcpServers["loeyae-skills"], sharedKnowledgeServers[path], `shared service exception changed: ${path}`);
-        delete config.mcpServers["loeyae-skills"];
-        content = JSON.stringify(config);
-      }
+      const content = readFileSync(file, "utf8");
       if (domainPattern.test(path) || domainPattern.test(content)) offenders.push(path);
     }
   }
@@ -85,11 +68,11 @@ function assertDomainScannerRejectsProductionRegressions(): void {
     write(join(root, "core/tools/data/owner.json"), '{"owner":"loeyae-aidlc-provider","schema":"urn:loeyae:aidlc:schema:provider:1.1"}');
     write(join(root, "harness/new/product.md"), "Loeyae AI-DLC / loeyae-aidlc");
     assert.deepEqual(domainOffenders(root), [], "product and protocol names remain valid");
-    const path = "harness/claude/plugin.json";
-    write(join(root, path), JSON.stringify({ mcpServers: { "loeyae-skills": sharedKnowledgeServers[path] }, extra: "loeyae-test" }));
-    assert.deepEqual(domainOffenders(root), [path], "an allowed service must not hide other production domain content");
-    write(join(root, path), JSON.stringify({ mcpServers: { "loeyae-skills": { ...sharedKnowledgeServers[path], domain: "loeyae-boot" } } }));
-    assert.throws(() => domainOffenders(root), /shared service exception changed/);
+    for (const path of ["harness/claude/plugin.json", "harness/kiro-crew/mcp.json", "harness/qoder/mcp-cn.json"]) {
+      write(join(root, path), JSON.stringify({ mcpServers: { "loeyae-skills": { type: "http", url: "https://mcp-skills.allbelieves.com/mcp" } } }));
+      assert.deepEqual(domainOffenders(root), [path], "former default registrations have no exception");
+      rmSync(join(root, path));
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
