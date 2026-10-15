@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.18.0 — 2026-10-15
+
+- Deliver offline Provider knowledge with explicit host confirmation and immutable content checks (MARS-189).
+- Move framework knowledge out of Core and guard production extraction (MARS-190).
+- Rebuild all nine harness distributions with consistent release versions.
+
 ## 4.17.0 — 2026-10-15
 
 MARS-169：保留完整权威需求与用户故事，按批准映射生成并验证派生单元视图。
