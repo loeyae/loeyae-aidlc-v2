@@ -39,6 +39,10 @@ condition: ui_mode_figma
 
 ## 流程创建模式
 
+具体连接与工具由外部创建 Provider 声明，Core 通过 `createUiDesign` 验证签名授权并先持久化认领操作 ID；外部包不接收凭据、不执行远端脚本。当前生产包明确缺少 OAuth 与已核实的有限写入/归属读回协议，联网前返回能力诊断。仅本地 fixture 支持结构化 Frame 和文本创建，不能宣称支持完整设计系统生成或真实账户写入。
+
+操作日志区分 prepared/dispatched/unknown/failed/succeeded。超时、响应丢失或进程中断后只允许 `recoverUiDesign` 只读对账；无法唯一证明本操作归属就要求人工处理，不重试创建，不宣称 exactly-once。只有读回内容、节点归属、截图和当前锁全部核验后，由 Core 原子发布 canonical manifest；视觉与行为仍须独立验收。
+
 1. 创建或复用调用方指定的唯一主 Figma 文件，一个 AI-DLC 项目不得按模块创建多个主文件。
 2. 单模块按端创建 Page；多模块按 `{module}-{endpoint}` 创建 Page。
 3. 每个页面计划项创建一个可唯一定位的顶层 Frame；PC、平板和移动端使用适合其端的标准宽度。
@@ -58,16 +62,11 @@ Core 验证读取快照、唯一映射、来源、新鲜度与真实资产后受
 
 metadata/variables 读取与截图资产核验不等于 Components、Auto Layout、产品行为或视觉验收通过。适配器不签发质量 Evidence，不修改 state/approval；继续由既有 artifact、behavior、freshness sensors 和集中视觉审核分别验证。
 
-## 创建分支工具边界（本轮保留，尚未迁移）
+## 创建分支工具边界
 
-- 文件与画布：`create_new_file`、`use_figma`；
-- 设计系统：`get_libraries`、`search_design_system`；
-- 读取验证：`get_metadata`、`get_variable_defs`、`get_screenshot`；
-- 资产：`upload_assets`、`download_assets`。
+外部包的 `aidlc.ui-create-source/v1` 声明协议和连接；operator 独立核对该契约，不依据服务提示或包声明授予写权限。Core 保留通用授权、签名操作日志、精确单次发送、读回恢复与受管发布；不开放任意代码执行。已有稿、HTML、skip 和未选择创建模式时零写入。
 
-上述创建分支名称保留原流程语义，不能作为实际服务工具存在或可调用的证明。必须按运行时服务契约与显式授权核对；本轮只承接已有稿只读分支，不开放这些远程写工具。
-
-除能力返回值外，编排层必须把结果写入当前模块的 canonical `docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json`：
+以下仅展示 manifest 字段，不能手工生成通过状态；实际 canonical `docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json` 必须由 Core 带受管 create_registration 发布，技术读回不签发视觉或行为通过：
 
 ```json
 {
@@ -86,10 +85,10 @@ metadata/variables 读取与截图资产核验不等于 Components、Auto Layout
     "stories": ["US-001"]
   }],
   "validation": {
-    "variables": "passed",
-    "components": "passed",
-    "auto_layout": "passed",
-    "screenshots": "passed",
+    "creation": "reconciled",
+    "components": "unverified",
+    "auto_layout": "unverified",
+    "screenshots": "verified-assets",
     "external_read_only": false
   },
   "unresolved": []

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { verifyDesignResourceConsumption } from "./aidlc-design-resource.js";
 import { verifyExternalUiManifest } from "./aidlc-ui-readonly.js";
+import { verifyCreatedUiManifest } from "./aidlc-ui-create.js";
 import { createHash } from "crypto";
 import { checkSlices } from "./aidlc-document-slices";
 import { QUALITY_SENSORS, QualityBlocked, qualityChangeCheck, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
@@ -532,7 +533,7 @@ function figmaArtifactContract(plan: PagePlanContract, route: UiRoute): DesignAr
   const manifestPath = join(ROOT, contextual("docs/aidlc/inception/ui-design/figma-manifest.json"));
   if (!existsSync(manifestPath)) fail(`Figma manifest is missing: ${relativePath(manifestPath)}`);
   const manifest = jsonFile(manifestPath);
-  const readArtifacts = route === "figma-existing" ? verifyExternalUiManifest(ROOT, ACTIVE_MODULE!, manifest) : [];
+  const readArtifacts = route === "figma-existing" ? verifyExternalUiManifest(ROOT, ACTIVE_MODULE!, manifest) : verifyCreatedUiManifest(ROOT, ACTIVE_MODULE!, manifest);
   if (manifest.schema_version !== "1" || manifest.design_mode !== "figma") fail("figma-manifest.json has an unsupported schema or design_mode");
   const expectedSource = route === "figma-existing" ? "external" : "created";
   if (manifest.source !== expectedSource) fail(`figma-manifest.source must be ${expectedSource} for signed route ${route}`);
@@ -542,9 +543,8 @@ function figmaArtifactContract(plan: PagePlanContract, route: UiRoute): DesignAr
   if (manifest.page_plan !== expectedPlan) fail(`figma-manifest.page_plan must be ${expectedPlan}`);
   emptyArray(manifest.unresolved, "figma-manifest.unresolved");
   const validation = objectValue(manifest.validation, "figma-manifest.validation");
-  for (const field of route === "figma-existing" ? [] : ["variables", "components", "auto_layout", "screenshots"]) {
-    if (validation[field] !== "passed") fail(`figma-manifest.validation.${field} must be passed`);
-  }
+  // Artifact acquisition proves bytes and ownership only. Visual, token, component and
+  // behavior acceptance remain independent checks; a created receipt cannot issue them.
   if (expectedSource === "external" && validation.external_read_only !== true) fail("external Figma designs must declare external_read_only=true");
   if (expectedSource === "created" && validation.external_read_only !== false) fail("created Figma designs must declare external_read_only=false");
   const pages = arrayValue(manifest.pages, "figma-manifest.pages");
