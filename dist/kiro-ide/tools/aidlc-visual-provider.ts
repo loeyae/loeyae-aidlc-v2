@@ -1,3 +1,4 @@
+import { trustedHostEnvironment } from "./aidlc-trusted-host.js";
 /** Core-only dispatch for explicitly authorized, reviewed host adapters.
  * This is not the restricted-v1 runner and grants it no new permissions.
  * A host adapter executes code with the operator's privileges. Locking is integrity,
@@ -153,12 +154,7 @@ export function dispatchVisual(options: VisualDispatchOptions) {
     const entrypoint = join(root, "host.mjs"); writeFileSync(entrypoint, code, { flag: "wx", mode: 0o600 });
     // No inherited tokens, NODE_OPTIONS or browser endpoint. The selected
     // executable is reviewed host code; never label it a restricted-v1 execution.
-    const env: NodeJS.ProcessEnv = { TEMP: root, TMP: root };
-    // Windows Chrome needs OS known-folder identity to distinguish its default
-    // profile from --user-data-dir. These are path variables, never credentials.
-    for (const key of ["SystemRoot", "WINDIR", "SystemDrive", "ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA", "APPDATA", "USERPROFILE"]) {
-      if (process.env[key]) env[key] = process.env[key];
-    }
+    const env = trustedHostEnvironment(root);
     const p = spawnSync(process.execPath, [entrypoint], { cwd: root, env, input: JSON.stringify(request), encoding: "utf8", shell: false, windowsHide: true, timeout: 90_000, maxBuffer: 24*1024*1024 });
     if (p.error || p.status !== 0) {
       const diagnostic = p.stderr?.trim();

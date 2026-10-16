@@ -200,3 +200,6 @@ expected contract 使用 `primary_flow`、结构化 `branch_groups`，actual `.d
 过程图先冻结来源确认的 `primaryFlow`。没有确认主干时返回 `NEEDS_CONTEXT`；允许使用最长分支作为布局候选，但不得把它当作业务事实。随后生成确定性的 `branchLayoutPlan`，按主流程优先、路径长度、稳定 edge ID 排序；分支组必须整组外移或进入局部 lane，节点移动后重算全部 incident edges、端口、标签和障碍净空。真实反馈/重试关系才可进入 `loopLanes`，同侧 lane 按实际中心偏移满足共享 `laneGap`。
 
 验证闭环必须覆盖 expected、sidecar、SVG、静态 checker 和 Provider：静态层检查形状尺寸、实体/端口/障碍/lane gap、branch plan 和 structural 节点白底/框体 mask 对照；Provider 的 `normal`、`fit`、`zoom` 分别检查真实 DOM 边界、文本 bbox、structural 交点、computed fill/stroke、mask cutout 和截图像素证据。未执行 视觉 Provider 的三视图时，最终状态不得写为完整 `PASS`。
+## 文档导出边界
+
+`loeyae-aidlc export` 由已锁定的 `document.render` Provider 执行；需要显式 `--host-provider <instance>` 和项目 Provider 配置。仅支持 Markdown→DOCX/PDF、SVG→PNG，未启用时不下载安装。Core 锁定输入及本地依赖快照、验证候选后受管发布。DOCX 生成与 `docx inspect/beautify/validate` 是独立操作，导出成功不代表页面版式已审阅。图表视觉 Provider 的 preview/render 不能充当文档 export。

@@ -171,6 +171,12 @@ def test_exported_docx(directory: Path) -> None:
     markdown.write_text("# 自动生成文档\n\n## 概览\n\n这是导出器生成的 DOCX。\n", encoding="utf-8")
     exported = directory / "generated.docx"
     result = run_cli("export", "md", str(markdown), "--to", "docx", "--output", str(exported))
+    if not os.environ.get("AIDLC_EXPORT_HOST_PROVIDER"):
+        assert result.returncode != 0
+        assert "explicitly authorize --host-provider" in result.stderr
+        assert not exported.exists()
+        print("Exported DOCX integration requires explicit locked Provider; migration diagnostic passed")
+        return
     assert result.returncode == 0, result.stderr
 
     inspected = run_cli("docx", "inspect", str(exported), "--json")

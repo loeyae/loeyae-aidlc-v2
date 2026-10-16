@@ -234,6 +234,15 @@ flowchart TD
 
 def main() -> None:
     test_help()
+    if not os.environ.get("AIDLC_EXPORT_HOST_PROVIDER"):
+        with tempfile.TemporaryDirectory(prefix="aidlc-export-missing-") as temp:
+            svg, _ = write_fixtures(Path(temp))
+            result = run_cli("export", "svg", str(svg), "--to", "png")
+            assert result.returncode != 0
+            assert "explicitly authorize --host-provider" in result.stderr
+            assert not svg.with_suffix(".png").exists()
+        print("Export migration diagnostic passed; set AIDLC_EXPORT_PROJECT and AIDLC_EXPORT_HOST_PROVIDER for locked production-package regressions")
+        return
     with tempfile.TemporaryDirectory(prefix="aidlc-export-test-") as temp:
         directory = Path(temp)
         svg, markdown = write_fixtures(directory)

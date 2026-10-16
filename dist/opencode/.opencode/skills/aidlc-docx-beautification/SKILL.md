@@ -94,3 +94,7 @@ loeyae-aidlc docx beautify "/absolute/path/input.docx" \
 ## 输出
 
 最终报告至少包含：输入与输出绝对路径、输入/输出 SHA-256、preset 或 Style Spec 摘要、样式角色映射、coverage、changed parts、不变量结果、`visual_validation`、warnings，以及是否创建 Git commit。
+
+## 文档导出边界
+
+`loeyae-aidlc export` 由已锁定的 `document.render` Provider 执行；需要显式 `--host-provider <instance>` 和项目 Provider 配置。仅支持 Markdown→DOCX/PDF、SVG→PNG，未启用时不下载安装。Core 锁定输入及本地依赖快照、验证候选后受管发布。DOCX 生成与 `docx inspect/beautify/validate` 是独立操作，导出成功不代表页面版式已审阅。图表视觉 Provider 的 preview/render 不能充当文档 export。

@@ -2,12 +2,17 @@ import { inflateSync } from "node:zlib";
 
 /** Bounded, inert PNG subset. No URL, resource URI, SVG, scripts or remote decoding. */
 export function decodeMcpPng(value: unknown): Buffer {
+  return decodeBoundedPng(value, 1024 * 1024, 4_000_000);
+}
+
+/** Shared passive decoder; callers choose fixed bounds, never Provider-supplied limits. */
+export function decodeBoundedPng(value: unknown, maxBytes: number, maxPixels: number): Buffer {
   const fail = (): never => { throw new Error("MCP_PNG_UNSUPPORTED_OR_INVALID"); };
   const c = value as Record<string, unknown>;
   if (!c || c.type !== "image" || c.mimeType !== "image/png" || typeof c.data !== "string"
-    || c.data.length > 1_398_104 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(c.data)) fail();
+    || c.data.length > 4 * Math.ceil(maxBytes / 3) || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(c.data)) fail();
   const b = Buffer.from(c.data as string, "base64");
-  if (b.toString("base64") !== c.data || b.length < 57 || b.length > 1024 * 1024 || b.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") fail();
+  if (b.toString("base64") !== c.data || b.length < 57 || b.length > maxBytes || b.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") fail();
   let offset = 8, width = 0, height = 0, channels = 0, ended = false, dataEnded = false;
   const compressed: Buffer[] = [];
   while (offset < b.length) {
@@ -25,7 +30,7 @@ export function decodeMcpPng(value: unknown): Buffer {
       if (type !== "IHDR" || size !== 13) fail();
       width = body.readUInt32BE(0); height = body.readUInt32BE(4);
       channels = ({ 0: 1, 2: 3, 4: 2, 6: 4 } as Record<number, number>)[body[9]];
-      if (!width || !height || width * height > 4_000_000 || !channels || body[8] !== 8 || body[10] || body[11] || body[12]) fail();
+      if (!width || !height || width * height > maxPixels || !channels || body[8] !== 8 || body[10] || body[11] || body[12]) fail();
     } else if (type === "IDAT") {
       if (dataEnded) fail();
       compressed.push(body);
