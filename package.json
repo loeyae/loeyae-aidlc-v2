@@ -17,6 +17,8 @@
     "README.md"
   ],
   "scripts": {
+    "test:docx-provider": "tsx tests/test_docx_provider.ts",
+    "test:docx-provider-fixture": "tsx tests/test_docx_provider_fixture.ts",
     "build": "tsx scripts/build.ts",
     "typecheck": "tsc --noEmit",
     "pretest": "npm run test:mars169 && npm run test:mcp-readonly && npm run test:context-source-boundary",

@@ -1,20 +1,19 @@
-import type { InspectionReport } from "../aidlc-docx";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import type { InspectionReport, CoverageReport, StyleMapping } from "./types";
 import {
-	type CoverageReport,
-	type StyleMapping,
-	transformStyles,
-} from "./beautify-styles";
-import {
-	type InvariantSummary,
-	type OutputArtifact,
-	generateStyledPackage,
 	loadEditableDocx,
+	assertRegularDocxInput,
 	snapshotPackage,
 	validateStyleOnlyBuffer,
-	writeAtomicOutput,
+	type InvariantSummary,
+	type OutputArtifact,
 } from "./package";
-import { loadStyleSpec, styleSpecDigest } from "./style-spec";
-
+import { dispatchDocx } from "../aidlc-docx-provider";
+const hash = (p: string) => {
+	assertRegularDocxInput(p);
+	return createHash("sha256").update(readFileSync(p)).digest("hex");
+};
 export interface BeautifyOptions {
 	input: string;
 	output?: string;
@@ -69,121 +68,29 @@ export interface ValidateReport {
 	visual_validation: "not_run";
 }
 
-type InspectFunction = (path: string) => Promise<InspectionReport>;
-
-function assertTextUnchanged(
-	input: InspectionReport,
-	output: InspectionReport,
-): void {
-	if (input.document.text_sha256 !== output.document.text_sha256) {
-		throw new Error("DOCX invariant failed: visible text changed");
-	}
-}
-
+/** Compatibility library entry: explicit authorization also applies to library callers. */
 export async function beautifyDocx(
 	options: BeautifyOptions,
-	inputInspection: InspectionReport,
-	inspect: InspectFunction,
+	_inspection?: InspectionReport,
+	_inspect?: (path: string) => Promise<InspectionReport>,
 ): Promise<BeautifyReport> {
-	if (!options.dryRun && !options.output) {
-		throw new Error("docx beautify requires --output unless --dry-run is used");
-	}
-	if (options.dryRun && options.force) {
-		throw new Error("--force cannot be combined with --dry-run");
-	}
-	const spec = loadStyleSpec(options.preset, options.styleSpecPath);
-	const loaded = await loadEditableDocx(
-		options.input,
-		inputInspection.input.sha256,
-	);
-	const transformation = transformStyles(
-		loaded.documentXml,
-		loaded.stylesXml,
-		loaded.stylesPart,
-		spec,
-	);
-	const base: Omit<
-		BeautifyReport,
-		"status" | "output" | "changed_parts" | "invariants"
-	> = {
-		schema_version: "1",
-		operation: "beautify",
-		input: {
-			path: inputInspection.input.path,
-			size_bytes: inputInspection.input.size_bytes,
-			sha256: inputInspection.input.sha256,
-		},
-		policy: {
-			preset: spec.id,
-			mode: "conservative",
-			spec_sha256: styleSpecDigest(spec),
-		},
-		planned_changed_parts: [loaded.stylesPart],
-		styles: {
-			mappings: transformation.mappings,
-			updated_roles: transformation.updatedRoles,
-			skipped_roles: transformation.skippedRoles,
-		},
-		coverage: transformation.coverage,
-		visual_validation: "not_run",
-		warnings: transformation.warnings,
-	};
-	if (options.dryRun) {
-		return {
-			...base,
-			status: "DRY_RUN",
-			output: null,
-			changed_parts: [],
-			invariants: null,
-		};
-	}
-	const inputSnapshot = await snapshotPackage(loaded.zip);
-	const outputData = await generateStyledPackage(
-		loaded,
-		transformation.stylesXml,
-	);
-	const validation = await validateStyleOnlyBuffer(
-		inputSnapshot,
-		outputData,
-		loaded.stylesPart,
-		true,
-	);
-	let temporaryInspection: InspectionReport | undefined;
-	const output = await writeAtomicOutput(
-		loaded.input,
-		options.output as string,
-		outputData,
-		options.force,
-		async (temporaryPath) => {
-			temporaryInspection = await inspect(temporaryPath);
-			assertTextUnchanged(inputInspection, temporaryInspection);
-		},
-	);
-	if (!temporaryInspection) {
-		throw new Error("DOCX output validation did not run");
-	}
-	return {
-		...base,
-		status: "STATIC_PASS",
-		output,
-		changed_parts: validation.changedParts,
-		invariants: validation.invariants,
-	};
+	if (_inspection)
+		await loadEditableDocx(options.input, _inspection.input.sha256);
+	return dispatchDocx({ ...options, command: "beautify" });
 }
-
 export async function validateDocxAgainst(
 	output: string,
 	against: string,
-	outputInspection: InspectionReport,
-	againstInspection: InspectionReport,
+	outputInspection?: InspectionReport,
+	againstInspection?: InspectionReport,
 ): Promise<ValidateReport> {
 	const baseline = await loadEditableDocx(
 		against,
-		againstInspection.input.sha256,
+		againstInspection?.input.sha256 ?? hash(against),
 	);
 	const candidate = await loadEditableDocx(
 		output,
-		outputInspection.input.sha256,
+		outputInspection?.input.sha256 ?? hash(output),
 	);
 	if (baseline.stylesPart !== candidate.stylesPart) {
 		throw new Error(
@@ -197,18 +104,23 @@ export async function validateDocxAgainst(
 		baseline.stylesPart,
 		false,
 	);
-	assertTextUnchanged(againstInspection, outputInspection);
+	if (
+		hash(against) !== baseline.inputSha256 ||
+		hash(output) !== candidate.inputSha256
+	)
+		throw new Error("DOCX input changed during validation; retry the command");
+
 	return {
 		schema_version: "1",
 		operation: "validate",
 		status: "STATIC_PASS",
 		against: {
-			path: againstInspection.input.path,
-			sha256: againstInspection.input.sha256,
+			path: against,
+			sha256: baseline.inputSha256,
 		},
 		output: {
-			path: outputInspection.input.path,
-			sha256: outputInspection.input.sha256,
+			path: output,
+			sha256: candidate.inputSha256,
 		},
 		changed_parts: validation.changedParts,
 		invariants: validation.invariants,

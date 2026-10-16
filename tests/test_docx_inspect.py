@@ -216,6 +216,14 @@ def test_fail_closed(directory: Path) -> None:
 
 def main() -> None:
     test_help()
+    if not os.environ.get("AIDLC_DOCX_HOST_PROVIDER"):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "source.docx"
+            write_docx(source)
+            result = run_cli("docx", "inspect", str(source))
+            assert result.returncode != 0 and "explicitly authorize --host-provider" in result.stderr
+        print("DOCX missing-package diagnostic passed; SKIP production inspect (set AIDLC_DOCX_PROJECT/HOST_PROVIDER)")
+        return
     with tempfile.TemporaryDirectory(prefix="aidlc-docx-inspect-") as temp:
         directory = Path(temp)
         test_inspect(directory)
