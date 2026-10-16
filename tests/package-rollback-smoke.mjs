@@ -1,6 +1,7 @@
 /** A real old CLI must not be treated as a reader of a new pending journal. */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -14,7 +15,8 @@ const run = (root, args, expected = 0) => {
 };
 for (const instance of ["documents", "styles"]) run(candidate, ["provider", "disable", instance, "--project", project]);
 run(candidate, ["provider", "enable", "context", "--project", project]);
-const host = join(project, "rollback-host.json"), planFile = join(project, "rollback-plan.json");
+const fixtureId = randomUUID().slice(0, 8);
+const host = join(project, `rollback-host-${fixtureId}.json`), planFile = join(project, `rollback-plan-${fixtureId}.json`);
 writeFileSync(host, JSON.stringify({ mcpServers: {}, userSetting: "preserve" }));
 const args = ["--project", project, "--host-config", host];
 const plan = JSON.parse(run(candidate, ["provider", "mcp-plan", ...args]));
@@ -27,7 +29,7 @@ const paths = [host, `${host}.aidlc-mcp-ledger.json`, `${host}.aidlc-mcp-journal
 const snapshot = () => paths.map(p => readFileSync(p).toString("base64"));
 const before = snapshot();
 assert.equal(JSON.parse(run(candidate, ["provider", "mcp-status", ...args])).status, "recoverable");
-assert(!JSON.parse(run(previous, ["provider", "help"])).usage.includes("mcp-recover"));
+assert(!run(previous, ["provider", "help"]).includes("mcp-recover"));
 assert.match(run(previous, ["provider", "mcp-recover", ...args, "--plan", planFile], 2), /unknown provider (command|option)/);
 assert.deepEqual(snapshot(), before, "old CLI changed unsupported pending state");
 assert.equal(JSON.parse(run(candidate, ["provider", "mcp-recover", ...args, "--plan", planFile])).status, "recovered");
