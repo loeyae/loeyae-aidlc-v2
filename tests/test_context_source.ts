@@ -72,6 +72,9 @@ async function zero(action: () => Promise<any>, status: string, reason?: string)
   return result;
 }
 try {
+  // Git checks run synchronously in this local fixture's event loop; close its
+  // sockets explicitly in finally instead of racing the client's pooled reuse.
+  http.keepAliveTimeout = 0;
   http.listen(18766, "127.0.0.1"); await once(http, "listening");
   mkdirSync(project); mkdirSync(join(project, ".aidlc"));
   write(join(project, ".aidlc/provider-git-policy.json"), { version: 1, allowed_hosts: fixture ? [] : [new URL(source).hostname], allowed_commits: [commit], allow_file_fixtures: fixture });

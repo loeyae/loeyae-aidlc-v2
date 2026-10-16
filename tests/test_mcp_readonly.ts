@@ -22,6 +22,14 @@ let mode = "ok", remote = "external content", jsonResponse = true, needAuth = fa
 let business = 0, network = 0, initialized = 0, sessionsSeen = 0, leakedRedirects = 0;
 const transports = new Map<string, StreamableHTTPServerTransport>();
 const servers: Server[] = [];
+const nativeFetch = globalThis.fetch;
+const fetchFailures: unknown[] = [];
+globalThis.fetch = (...args) => nativeFetch(...args).catch(error => {
+  const causes = [];
+  for (let cause = error; cause; cause = cause.cause) causes.push({ name: cause.name, code: cause.code, message: String(cause.message).replaceAll(secret, "<fixture-secret>") });
+  fetchFailures.push(causes);
+  throw error;
+});
 const exchanges: Array<{ method?: string; status: number; phase: string; authenticated: boolean }> = [];
 const http = createServer(async (req, res) => {
   const phase = mode;
@@ -90,6 +98,10 @@ function verify(snapshot: { snapshot_path: string; snapshot_digest: string }) {
   return readMcpSnapshot(snapshot.snapshot_path, { project, project_id: current.project_id, project_lock_digest: policy.project_lock_digest, snapshot_digest: snapshot.snapshot_digest });
 }
 try {
+  // Synchronous Git provenance checks share this event loop. An idle server
+  // timeout can reset a pooled socket between SDK exchanges on Windows.
+  // Keep fixture sockets until the explicit closeAllConnections() in finally.
+  http.keepAliveTimeout = 0;
   http.listen(0, "127.0.0.1"); await once(http, "listening");
   const address = http.address(); assert(address && typeof address !== "string");
   const endpoint = `http://127.0.0.1:${address.port}/mcp`;
@@ -219,8 +231,7 @@ try {
   assert.equal(network, beforeCredentials, "context drift during credential resolution is rejected before networking");
   current = previousContext;
   const authenticatedRequest = request();
-  try { verify(await broker({}, resolveSecret).call(authenticatedRequest)); }
-  catch (error) { console.error("Authenticated fixture exchanges (no credential values):", exchanges.slice(-12)); throw error; }
+  verify(await broker({}, resolveSecret).call(authenticatedRequest));
   assert.equal(callRecord(authenticatedRequest.request_id).authentication, "accepted");
   mode = "redirect";
   await assert.rejects(() => broker({}, resolveSecret).call(request()), /MCP_REDIRECT_DENIED/);
@@ -236,7 +247,11 @@ try {
   }
   assert.equal(existsSync(join(project, "aidlc/state.md")), false);
   console.log("PASS controlled MCP: official JSON/SSE/session transport, authorization zero-call rejections, TTL/integrity/provenance, bounded failures and credential isolation (local fixture only)");
+} catch (error) {
+  console.error("Local fixture failure diagnostics:", JSON.stringify({ fetchFailures, exchanges: exchanges.slice(-16) }));
+  throw error;
 } finally {
+  globalThis.fetch = nativeFetch;
   await Promise.all(servers.map(s => s.close()));
   http.closeAllConnections(); await new Promise<void>(r => http.close(() => r()));
   rmSync(root, { recursive: true, force: true });
