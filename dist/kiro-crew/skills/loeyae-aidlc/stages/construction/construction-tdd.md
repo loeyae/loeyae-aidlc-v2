@@ -276,49 +276,9 @@ GREEN 测试不得回写为 RED 通过；两个阶段必须分别保留可机读
 
 ---
 
-## 前后端 TDD 差异
+## 技术栈适配与例外
 
-### 后端（Java / Spring Boot）
-
-**测试框架**：JUnit 5 + Mockito + AssertJ
-
-**测试层次**：
-- 单元测试：Service 层业务逻辑
-- 集成测试：Controller 层 + Repository 层
-- 契约测试：API 接口契约
-
-**运行命令**：
-```bash
-# 单个测试
-mvn test -pl module-name -Dtest=ClassName#methodName
-
-# 模块所有测试
-mvn test -pl module-name
-
-# 全量测试
-mvn test
-```
-
-### 前端（Vue 3 / TypeScript）
-
-**测试框架**：Vitest + Vue Test Utils + Testing Library
-
-**测试层次**：
-- 单元测试：Composables、Utils、Store
-- 组件测试：Vue 组件渲染和交互
-- E2E 测试：关键用户流程（Playwright）
-
-**运行命令**：
-```bash
-# 单个测试
-pnpm test -- --run path/to/test.spec.ts
-
-# 所有测试
-pnpm test -- --run
-
-# 带覆盖率
-pnpm test -- --run --coverage
-```
+按当前模块的真实依赖、锁定版本和批准决策选择测试层次及命令。框架专属 TDD 建议由显式绑定的兼容外部知识提供，见 `provider-offline-knowledge.md`；普通项目沿用自身测试工具。知识 Receipt 不能替代 RED/GREEN 测试 Evidence。
 
 ### 不适用 TDD 的场景（需用户许可）
 

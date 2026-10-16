@@ -264,7 +264,7 @@ Construction 代码审查的**规格合规阶段**，对前端跨端项目增加
 |---------|------------|
 | `inception-ui-mock.md` | 产出 HTML Mock → 本流程消费 mock-box 做映射 |
 | `inception-ui-figma.md` | 产出 Figma 设计稿 → 本流程消费 Frame 做映射 |
-| `common-figma-design-standards.md` | 提供 Figma MCP 读取契约和 Tailwind→CSS 映射 → figma 模式下本流程依赖它获取设计表现，两者串联而非互斥；该文件的 Element Plus 章节仅纯 Web 项目适用 |
-| `common-tech-frontend-uniapp.md` | UniApp 编码规范 → 可与本流程并行使用 |
+| `common-figma-design-standards.md` | 提供通用 Figma 读取契约与布局语义映射；组件库映射由真实模块事实匹配的外部知识提供 |
+| `provider-offline-knowledge.md` | 按已批准模块身份、依赖版本和显式绑定加载兼容章节；不得从跨端类型或旧 handoff 标记推断框架 |
 | `construction-code-generation.md` | 本流程嵌入其前端步骤模板第一步 |
 | `construction-code-review.md` | 本流程扩展其规格合规检查清单 |

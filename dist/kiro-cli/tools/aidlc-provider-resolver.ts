@@ -82,6 +82,7 @@ import {
   type ProjectProviderState,
 } from "./aidlc-project-provider.js";
 import { verifyLockedProviderCache, type ProviderRepositoryManifestV1_1 } from "./aidlc-provider-git.js";
+import { readModuleFacts, matchKnowledgeRequirements } from "./aidlc-module-facts.js";
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const PROFILE_ID = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
@@ -1522,6 +1523,24 @@ export function readProjectProviderCandidates(projectRoot: string, scope: Provid
       continue;
     }
     const capabilities = deriveCapabilityDeclarations(intent, manifest, scope);
+    // v2 knowledge is optional by installed module facts, never by a platform/name.
+    // An explicit requested capability still fails as missing if no chapter applies.
+    const knowledge = manifest.extensions?.["aidlc.knowledge"] as any;
+    if (manifest.kind === "knowledge" && knowledge?.schema === "aidlc.knowledge-package/v2") {
+      const facts = readModuleFacts(root, scope.module_id);
+      if (!Array.isArray(knowledge.topics)) fail("PROVIDER_MANIFEST_INVALID", "missing knowledge topics");
+      const relevant = knowledge.topics.filter((topic: any) => capabilities.some(cap => cap.id === topic.capability_id));
+      const results = relevant.flatMap((topic: any) => {
+        if (!Array.isArray(topic.sections) || !topic.sections.length) fail("PROVIDER_MANIFEST_INVALID", "missing knowledge sections");
+        return topic.sections.map((section: any) => matchKnowledgeRequirements(facts, section.requires));
+      });
+      if (!results.includes("match")) {
+        if (results.includes("unknown") || results.includes("conflict")) {
+          candidates.push({ intent, lock, capabilities: [], incompatibility: { code: "PROVIDER_MANIFEST_INVALID", message: `module ${scope.module_id ?? "(unbound)"}: knowledge dependency versions ${results.includes("conflict") ? "conflict" : "unknown"}; supply verified module facts` } });
+        }
+        continue;
+      }
+    }
     // A validated v1.1 Manifest is compatible by construction (no protocol range needed).
     candidates.push({ intent, lock, capabilities });
   }

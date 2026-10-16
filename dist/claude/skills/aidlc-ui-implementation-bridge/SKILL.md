@@ -13,7 +13,7 @@ triggers: Figma 转代码, Mock 转代码, 前端平台规范, 组件映射, 设
 调用方必须提供：
 
 - UI 设计产物路径（HTML Mock 或 Figma 设计稿）；
-- 目标平台及框架（Taro/RN/Flutter/UniApp 等）；
+- 已批准目标平台、模块身份、实际框架与版本来源；知识引用按 `provider-offline-knowledge.md` 的显式绑定和兼容章节核验，不由跨端类型推断框架；
 - 当前 directive 的 `module_id`、`unit_id` 和 `artifact_root`；
 - 当前单元的 `frontend-platform-spec.md` 路径（存在时）；
 - 当前工作单元范围。

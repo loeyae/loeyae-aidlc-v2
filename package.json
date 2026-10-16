@@ -17,11 +17,14 @@
     "README.md"
   ],
   "scripts": {
+    "test:module-facts": "tsx tests/test_module_facts.ts",
+    "test:module-knowledge": "tsx tests/test_module_knowledge.ts",
+    "test:tech-extraction": "tsx tests/test_tech_extraction.ts",
     "test:docx-provider": "tsx tests/test_docx_provider.ts",
     "test:docx-provider-fixture": "tsx tests/test_docx_provider_fixture.ts",
     "build": "tsx scripts/build.ts",
     "typecheck": "tsc --noEmit",
-    "pretest": "npm run test:mars169 && npm run test:mcp-readonly && npm run test:context-source-boundary",
+    "pretest": "npm run test:module-facts && npm run test:mars169 && npm run test:mcp-readonly && npm run test:context-source-boundary",
     "test:context-source": "tsx tests/test_context_source.ts",
     "test:design-resource": "tsx tests/test_design_resource.ts",
     "test:context-source-boundary": "tsx tests/test_context_source_boundary.ts",

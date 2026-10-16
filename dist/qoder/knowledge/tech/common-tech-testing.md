@@ -6,19 +6,7 @@
 
 ## 测试框架（按技术栈选择）
 
-### Java / Spring Boot
-- **JUnit 5**: 测试框架
-- **Mockito**: Mock 框架
-- **Spring Boot Test**: 集成测试支持
-- **AssertJ**: 流式断言
-
-### Vue 3 / TypeScript
-- **Vitest**: 测试框架
-- **Vue Test Utils**: 组件测试
-- **Testing Library**: DOM 测试
-- **Playwright**: E2E 测试
-
----
+沿用项目已确认的测试工具及真实命令；框架专属测试建议和样例按模块依赖/版本从显式绑定的外部知识加载，见 `provider-offline-knowledge.md`。未启用包时不引入框架依赖，不回退到固定工具组合。
 
 ## 测试类命名规范
 
@@ -61,57 +49,6 @@ void testMethod() {
 
 ---
 
-## 单元测试规范
-
-### Service 层测试
-
-```java
-@ExtendWith(MockitoExtension.class)
-class UserServiceTest {
-
-    @Mock
-    private UserRepository userRepository;
-
-    @InjectMocks
-    private UserServiceImpl userService;
-
-    @Test
-    @DisplayName("创建用户 - 成功")
-    void create_success() {
-        // Given
-        UserCreate create = new UserCreate();
-        create.setName("张三");
-
-        User entity = new User();
-        entity.setId(1L);
-
-        when(userRepository.save(any())).thenReturn(true);
-
-        // When
-        UserView result = userService.create(create);
-
-        // Then
-        assertNotNull(result);
-        verify(userRepository).save(any());
-    }
-
-    @Test
-    @DisplayName("创建用户 - 手机号已存在")
-    void create_mobileExists() {
-        // Given
-        UserCreate create = new UserCreate();
-        create.setMobile("13812345678");
-
-        when(userRepository.existsByMobile("13812345678")).thenReturn(true);
-
-        // When & Then
-        assertThrows(RuntimeException.class, () -> userService.create(create));
-    }
-}
-```
-
----
-
 ## Mock 规范
 
 ### 何时使用 Mock
@@ -124,90 +61,6 @@ class UserServiceTest {
 | 文件系统 | 是 |
 | 内部业务逻辑 | 否 |
 
-### Mock 示例
-
-```java
-// Mock 返回值
-when(repository.findById(1L)).thenReturn(Optional.of(user));
-
-// Mock 抛异常
-when(repository.save(any())).thenThrow(new RuntimeException("DB Error"));
-
-// Mock 无返回值方法
-doNothing().when(service).sendEmail(any());
-
-// 验证调用
-verify(repository, times(1)).save(any());
-verify(repository, never()).delete(any());
-```
-
----
-
-## 集成测试规范
-
-### Controller 集成测试
-
-```java
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@AutoConfigureMockMvc
-class UserControllerIntegrationTest {
-
-    @Autowired
-    private MockMvc mockMvc;
-
-    @Autowired
-    private ObjectMapper objectMapper;
-
-    @Test
-    @DisplayName("GET /api/user/{id} - 成功")
-    void getById_success() throws Exception {
-        mockMvc.perform(get("/api/user/1"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.id").value(1));
-    }
-
-    @Test
-    @DisplayName("POST /api/user - 创建成功")
-    void create_success() throws Exception {
-        UserCreate create = new UserCreate();
-        create.setName("张三");
-
-        mockMvc.perform(post("/api/user")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(create)))
-            .andExpect(status().isOk());
-    }
-}
-```
-
----
-
-## 参数化测试
-
-```java
-@ParameterizedTest
-@ValueSource(strings = {"13812345678", "15912345678", "18612345678"})
-@DisplayName("手机号格式验证 - 有效")
-void mobileValid(String mobile) {
-    assertTrue(MobileValidator.isValid(mobile));
-}
-
-@ParameterizedTest
-@CsvSource({
-    "张三, 13812345678",
-    "李四, 15912345678"
-})
-@DisplayName("创建用户 - 参数化")
-void create_multipleUsers(String name, String mobile) {
-    UserCreate create = new UserCreate();
-    create.setName(name);
-    create.setMobile(mobile);
-    // ...
-}
-```
-
----
-
 ## 测试覆盖要求
 
 | 层级 | 最低覆盖率 | 说明 |
@@ -216,44 +69,6 @@ void create_multipleUsers(String name, String mobile) {
 | Controller | 70% | 接口层 |
 | Repository | 60% | 数据访问层 |
 | Util | 90% | 工具类 |
-
----
-
-## 前端测试规范
-
-### 组件测试
-
-```typescript
-import { mount } from '@vue/test-utils'
-import UserForm from './UserForm.vue'
-
-describe('UserForm', () => {
-  it('should render form fields', () => {
-    const wrapper = mount(UserForm)
-    expect(wrapper.find('input[name="username"]').exists()).toBe(true)
-  })
-
-  it('should validate required fields', async () => {
-    const wrapper = mount(UserForm)
-    await wrapper.find('form').trigger('submit')
-    expect(wrapper.find('.error-message').exists()).toBe(true)
-  })
-})
-```
-
-### Composable 测试
-
-```typescript
-import { useCounter } from './useCounter'
-
-describe('useCounter', () => {
-  it('should increment', () => {
-    const { count, increment } = useCounter()
-    increment()
-    expect(count.value).toBe(1)
-  })
-})
-```
 
 ---
 

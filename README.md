@@ -4,6 +4,13 @@
 
 ## 核心模型
 
+技术栈知识按已批准模块事实和版本从可选 Git Provider 包加载。模块根目录登记在
+`.aidlc/module-facts.json`，来源摘要与版本状态进入知识交付和签名确认；不按 PC/移动端、
+目录名或旧 handoff 标记选择框架。Vue/Element Plus、UniApp、Spring Cloud/Nacos、
+测试工具和运行时模板均可独立安装并绑定模块/阶段。未安装时沿用项目规范，未知或冲突
+版本不套用默认值。配置格式、受限事实来源及知识权限边界见
+`core/knowledge/protocols/provider-offline-knowledge.md`。
+
 新流程以明确工作描述、Markdown 状态与审计、成员自主选择 unit、Git 分支、review、构建和测试为基础。
 
 ```text

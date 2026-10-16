@@ -127,7 +127,7 @@ frontmatter 中的 `src/` 是“项目源码根”的规范占位（code-review�
 
 ## 步骤 2：技术规范与 MCP Skill 加载策略
 
-先读取 handoff.md 的技术适配标志。仅在工作区检测已有可靠证据时加载对应 `common-tech-*` 规则；检测到 Spring Cloud/Nacos 时加载 `common-tech-spring-cloud-nacos.md`，用于事实映射与真实命令发现，不替代项目规范。未检测到时不得套用。
+先核对已批准模块事实和显式 Provider 绑定，按 `provider-offline-knowledge.md` 读取当前模块的真实依赖、lockfile 与版本来源。旧 handoff 技术适配标志仅作迁移线索，不能无条件加载。只消费当前 Plan/node 的兼容知识章节并完成宿主确认；unknown/conflict 保留准确诊断，缺少必需知识不得回退到旧固定规则。项目自身规范和批准技术决策优先。
 
 > ℹ️ **外部 Provider**：Core 不内置任何框架专属 MCP Skill 或合规规则。若项目通过 `provider add ... --stage code-generation --capability implementation-validation` 安装了 Provider，orchestrate 会在 code-generation Hook 通过通用 Resolver/Runner/Gate 注入 `directive.provider_actions`；按 handoff 中的 Provider 指令执行并要求通用 GateDecision。未安装 Provider 时行为不变。
 
@@ -153,7 +153,7 @@ MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section
 6. 按项目自身代码风格生成代码
 
 **前端代码**：
-1. PC端 → `common-tech-frontend-pc.md`；小程序/APP → `common-tech-frontend-uniapp.md`
+1. 按当前模块事实/版本和显式绑定加载兼容外部知识；PC、移动端、小程序或目录名均不代表特定框架。未启用包时沿用项目自身规范，不添加领域占位。
 2. 当前模块 Markdown history 中 I9 choice 为 `figma-create` 或 `figma-existing` → `common-figma-design-standards.md`
 3. 读取项目 `.kiro/steering/structure.md`（如存在）
 4. 跨端项目 → 加载 `construction-ui-implementation-bridge.md` + 读取 `docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md`

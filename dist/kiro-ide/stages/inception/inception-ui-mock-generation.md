@@ -513,10 +513,7 @@ condition: ui_mode_html_mock
 
 ## 8. 图标规范
 
-**图标来源**：使用统一图标集
-- Web端：Element Plus Icons / Lucide Icons
-- 移动端：UniApp uni-icons
-- 小程序：微信原生图标
+**图标来源**：使用项目已批准且目标平台支持的统一图标集。先核对模块依赖和版本，外部知识仅通过显式绑定加载兼容章节（见 `provider-offline-knowledge.md`）；不得根据 Web/移动端/小程序类型推断组件库。项目未选择时在设计决定中记录待确认，不默认引入技术包。
 
 **图标尺寸**：
 - 导航图标：20px

@@ -75,7 +75,7 @@ condition: has_legacy_code
 - `src/locales/` — 国际化文件
 
 **识别前端架构：**
-- Vue 组件结构（页面组件、业务组件、公共组件层级）
+- 项目实际框架的组件结构（页面组件、业务组件、公共组件层级），附模块依赖与版本来源
 - 路由配置（路由表、路由守卫、动态路由）
 - Store 定义（Pinia Store 划分、状态管理模式）
 - API 调用关系（接口定义、请求拦截器、响应处理）
@@ -208,8 +208,8 @@ condition: has_legacy_code
 - **框架**：[Vue 3/React/其他]
 - **UI 框架**：[Element Plus/Ant Design Vue/其他]
 - **构建工具**：[Vite/Webpack]
-- **状态管理**：[Pinia/Vuex]
-- **路由**：[Vue Router]
+- **状态管理**：[项目实际方案/无，附来源]
+- **路由**：[项目实际方案/无，附来源]
 
 ## 组件树
 [Mermaid 图展示组件层级关系]

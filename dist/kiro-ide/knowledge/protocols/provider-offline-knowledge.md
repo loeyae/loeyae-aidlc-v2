@@ -20,9 +20,72 @@ extensions:
             digest: sha256:<章节原始 UTF-8 字节的 64 位小写十六进制摘要>
 ```
 
-每个选中 capability 必须唯一映射到一个 topic；topic 的全部章节都是本次交付内容。章节路径相对于锁定包 subdir，必须是 portable relative POSIX path，拒绝路径逃逸、符号链接、submodule、缺章、摘要不匹配和无效 UTF-8。每个 topic 最多 128 章，总内容最多 4 MiB。
+每个选中 capability 必须唯一映射到一个 topic；v1 交付 topic 的全部章节，v2 仅交付符合当前模块事实和版本条件的章节。章节路径相对于锁定包 subdir，必须是 portable relative POSIX path，拒绝路径逃逸、符号链接、submodule、缺章、摘要不匹配和无效 UTF-8。每个 topic 最多 128 章，总内容最多 4 MiB。
 
-## 最小宿主接口
+## 按模块事实匹配的可选技术包
+
+技术专属章节使用 `aidlc.knowledge-package/v2`；每章必须声明 `requires`。
+AND 数组中每项为 `dependency` 与 `exact`，或数值三段版本的 `minimum`（含）和
+`maximum_exclusive`（不含）；`{ "any_of": [AND数组, AND数组] }` 支持最多 16 个替代条件。
+内容仍是不可信参考资料，项目规范和批准技术决策优先，章节不能自行改变技术选择。
+
+项目显式登记批准的模块身份和根目录，不根据目录名、PC/移动端或旧 handoff 标记猜测框架：
+
+```json
+{
+  "schema": "aidlc.module-facts/v1",
+  "modules": [
+    { "id": "web", "root": "apps/web" },
+    { "id": "service", "root": "services/api" }
+  ]
+}
+```
+
+保存到 `.aidlc/module-facts.json`。每模块仅读取本根目录下 `package.json`、
+`package-lock.json`（npm v2/v3）、`pom.xml` 的直接依赖。坐标为 `npm:vue` 或
+`maven:org.springframework.cloud:spring-cloud-starter-gateway` 等真实包身份。
+`package.json` 的精确 `packageManager`（如 `pnpm@9.15.0`）提供对应 `runtime:pnpm` 工具事实。
+精确依赖版本直接采用；简单 npm `^`/`~` 范围仅在模块内 lock 的根依赖声明一致且解析版本
+满足范围时采用。没有经核验的显式有效版本声明时，缺版本、继承/BOM、属性变量、其他包管理器、tag、workspace/git
+依赖及未支持的 prerelease 范围保持 unknown；清单/lock 或明确声明版本不一致为 conflict。
+不会运行安装脚本、构建文件、Provider 代码、远程查询或自动解析父目录。
+
+其他可信事实通过模块的 `declarations` 数据列表显式补充，例如：
+
+```json
+{
+  "id": "web", "root": "apps/web",
+  "declarations": [
+    { "dependency": "runtime:node", "version": "18.20.8", "decision": ".aidlc/decisions/web-runtime.json" }
+  ]
+}
+```
+
+引用文件限 `.aidlc/decisions/<name>.json`，内容为
+`{ "schema": "aidlc.module-decision/v1", "module_id": "web", "approved": true,
+"dependencies": [{ "dependency": "runtime:node", "version": "18.20.8" }] }`。
+这代表项目已确认的事实，不能由包生成批准；不得用来掩盖与真实清单的冲突。
+不允许任意字段、路径逃逸、符号链接或超过 2 MiB 的来源文件。
+
+可选外部包位于 Provider 仓的 `providers/vue-element-knowledge`、`uniapp-knowledge`、
+`spring-cloud-knowledge`、`spring-testing-knowledge`、`runtime-knowledge`，另有仅供旧项目迁移参考的
+`legacy-security-reference`（必须显式批准 `convention:legacy-security-reference` 版本 `1.0.0`；不从库名猜测，旧密码样例不作为新实现建议）。capability 为
+`tech.<目录名>`。按实际需求安装并显式绑定模块及阶段，例如
+`provider add <Git-URL> --ref <immutable-commit> --subdir providers/vue-element-knowledge
+--instance web-knowledge --module web --stage code-generation --capability tech.vue-element-knowledge`。
+安装、信任和锁定沿用既有 Git Provider 策略；知识加载不增加网络或凭据。
+
+Resolver 只给兼容模块派发知识动作；完全不匹配或未启用包零加载，无领域占位。
+显式要求但缺少必需知识时给出缺失/unknown/conflict 诊断，不回退旧固定规则。
+同项目多个模块各自读取版本，只有兼容章节进入上下文；Spring Cloud 不代表所有组件启用。
+原版本表、旧运行时镜像和代码例保存在包中，仅兼容事实才允许加载，不作为默认或升级建议。
+
+delivery 包含 `module_facts`：相对来源路径、原始字节摘要、依赖坐标、版本来源、状态及
+`facts_digest`。每次 load/confirm/verify 都重读，事实、兼容章节或锁变化会改变 delivery
+摘要，旧签名确认不再适用。缺省 registry 不触发递归探测；普通无包项目沿用自身规范。
+旧 handoff 技术标记仅作迁移线索，须核验真实模块事实后才建立显式绑定。
+
+## 最小宿主接口（执行）
 
 1. 从 `orchestrate next` 的 `provider_context.plan.id` 和 `provider_actions[].plan_node_id` 获取固定上下文。
 2. 执行 `provider knowledge-load --plan <plan-id> --node <node-id>`。返回 `aidlc.knowledge-delivery/v1`，包括实际章节内容、章节摘要、scope、lock、Plan/node 和确定性的 `delivery_digest`。
