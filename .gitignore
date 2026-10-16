@@ -1,4 +1,5 @@
 node_modules/
+.artifacts/
 .aidlc/mcp-readonly/
 core/tools/data/*
 !core/tools/data/stage-graph.json

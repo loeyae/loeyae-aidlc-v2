@@ -237,6 +237,7 @@ function gitObject(
   encoding?: "utf8",
 ): SpawnSyncReturns<string> | SpawnSyncReturns<Buffer> {
   const command = [
+    ...(process.platform === "win32" ? ["-c", "core.longpaths=true"] : []),
     "-c", "core.hooksPath=",
     "-c", "core.fsmonitor=false",
     "-c", "submodule.recurse=false",

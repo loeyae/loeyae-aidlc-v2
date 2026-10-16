@@ -475,6 +475,9 @@ interface GitContext {
 
 function gitArgs(context: GitContext, args: readonly string[]): string[] {
   return [
+    // Detached caches can exceed MAX_PATH under a normal Windows user profile.
+    // Scope this to the child invocation; never change the user's Git config.
+    ...(process.platform === "win32" ? ["-c", "core.longpaths=true"] : []),
     "-c", `core.hooksPath=${context.hooks}`,
     "-c", "core.fsmonitor=false",
     "-c", "submodule.recurse=false",

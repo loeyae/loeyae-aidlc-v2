@@ -343,6 +343,16 @@ try {
     assert.equal(existsSync(join(markers, marker)), false, `${marker} must never be created by lifecycle operations`);
   }
 
+  // Real Git fetch/index-pack must work past MAX_PATH without user Git settings.
+  // This fails on Windows at the pack-*.keep file when core.longpaths is absent.
+  const longBase = join(root, "project 中文 with spaces");
+  const longProject = join(longBase, "p".repeat(Math.max(1, 220 - providerGitCachePath(longBase, fixture.sourceUrl).length - 1)));
+  mkdirSync(longProject, { recursive: true });
+  write(join(longProject, ".aidlc/provider-git-policy.json"), JSON.stringify({ version: 1, allow_file_fixtures: true }));
+  assert(providerGitCachePath(longProject, fixture.sourceUrl).length + "/objects/pack/pack-".length + 40 + ".keep".length > 260);
+  addProjectProvider(longProject, { source: fixture.sourceUrl, ref: "main", subdir: "providers/fixture", instance: "long-path-provider", allowFile: true });
+  assert.equal(getProjectProviderStatus(longProject, "long-path-provider").status, "current");
+
   // Windows ssh sources must see the real user's known_hosts/keys despite the isolated HOME.
   assert.equal(providerSshCommand("linux", "/home/u", () => true), undefined, "POSIX ssh needs no override");
   const winSsh = providerSshCommand("win32", "C:\\Users\\o'neil", (path) => path.endsWith("/id_ed25519"));
