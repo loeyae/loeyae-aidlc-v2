@@ -102,7 +102,7 @@ try {
   env.PATH = `${fakebin}${process.platform === "win32" ? ";" : ":"}${process.env.PATH}`;
   check("installed CLI help/version and graph data", () => {
     assert.match(cli(candidate, "help", ["--help"]), /Usage:/);
-    assert.match(cli(candidate, "version", ["--version"]), /4\.18\.0/);
+    assert.match(cli(candidate, "version", ["--version"]), new RegExp(report.candidate.version.replaceAll(".", "\\.")));
     cli(candidate, "graph-compile", ["graph", "compile"]);
     cli(candidate, "graph-validate", ["graph", "validate"]);
     cli(candidate, "provider-help", ["provider", "help"]);
@@ -170,7 +170,7 @@ try {
     const { unlinkSync } = await import("node:fs");
     assert.equal(readFileSync(join(target, "user-note.txt"), "utf8"), "preserve my edit"); unlinkSync(join(target, "user-note.txt"));
     npmRun("npm-upgrade", ["install", "--omit=dev", "--no-audit", "--no-fund", candidateTarball], previousPrefix);
-    assert.match(cli(previous, "upgraded-version", ["--version"]), /4\.18\.0/);
+    assert.match(cli(previous, "upgraded-version", ["--version"]), new RegExp(report.candidate.version.replaceAll(".", "\\.")));
     cli(previous, "upgrade", ["install", ...args]);
     npmRun("npm-rollback", ["install", "--omit=dev", "--no-audit", "--no-fund", ...(options["--previous-legacy-peer-deps"] ? ["--legacy-peer-deps"] : []), previousTarball], previousPrefix);
     cli(previous, "rollback", ["install", ...args]);

@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.19.0 — 2026-10-17
+
+- Add offline MCP planning, managed connection ownership, transaction diagnostics and explicit recovery; remove domain MCP defaults from Core installation (MARS-191-195, MARS-236).
+- Consume locked context sources and design resources through controlled read-only MCP adapters; support external Figma registration and trusted UI writes with signed journals and readback recovery (MARS-196-199).
+- Dispatch diagrams, document exports and DOCX styling through locked Providers; load technology knowledge from module facts and compatible locked chapters (MARS-200-203).
+- Repair integration regressions, register repeatable Core/Provider suites, and validate real tarball installation with isolated upgrade/recovery fixtures (MARS-205, MARS-240).
+- Synchronize package, plugin, marketplace and stage-graph versions; regenerate all nine harness distributions. Package smoke version checks follow the candidate package version.
+
 ## 4.18.0 — 2026-10-15
 
 - Deliver offline Provider knowledge with explicit host confirmation and immutable content checks (MARS-189).
