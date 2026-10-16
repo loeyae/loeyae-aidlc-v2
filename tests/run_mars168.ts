@@ -12,7 +12,10 @@ const group = process.argv[2] || "quality"; if (!groups[group]) throw new Error(
 const requested = process.argv.slice(3); const suites = requested.length ? groups[group].filter(name => requested.includes(name)) : groups[group];
 if (requested.length !== 0 && suites.length !== new Set(requested).size) throw new Error("requested suite must belong to its registered group");
 const baseline = root !== repo;
-const output = join(repo, "docs/optimization-notes/mars168-command-logs", ...(baseline ? ["baseline-39a0399"] : [])); mkdirSync(output, { recursive: true });
+const output = process.env.AIDLC_TEST_OUTPUT
+  ? join(resolve(process.env.AIDLC_TEST_OUTPUT), "mars168", ...(baseline ? ["baseline-39a0399"] : []))
+  : join(repo, "docs/optimization-notes/mars168-command-logs", ...(baseline ? ["baseline-39a0399"] : []));
+mkdirSync(output, { recursive: true });
 const results = [];
 for (const name of suites) {
   const args = [join(root, "node_modules/tsx/dist/cli.mjs"), join(root, `tests/${name}.ts`)];

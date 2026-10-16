@@ -194,8 +194,7 @@ function toI13(project: string): void {
   };
   expect("workspace-detection");
   ok(project, ["orchestrate", "report", "--stage", "workspace-detection", "--result", "completed", "--instruction-ack", "workspace-detection"]);
-  expect("state-template");
-  ok(project, ["orchestrate", "report", "--stage", "state-template", "--result", "completed", "--instruction-ack", "state-template"]);
+  // The lightweight profile omits instruction-only state-template, but keeps I13.
   expect("test-case-derivation@module:project");
 }
 

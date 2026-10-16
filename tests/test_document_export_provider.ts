@@ -448,3 +448,8 @@ assert.throws(
 	() => snapshotExportInputs({ ...svg, fontDirs: [emptyFonts] }),
 	/NEEDS_CAPABILITY: local font/,
 );
+// Feed an actual exported document into the independently locked DOCX style host.
+if (process.env.AIDLC_TEST_ARTIFACT_DIR) {
+	mkdirSync(process.env.AIDLC_TEST_ARTIFACT_DIR, { recursive: true });
+	writeFileSync(join(process.env.AIDLC_TEST_ARTIFACT_DIR, "document-export.docx"), readFileSync(md.output));
+}
