@@ -54,7 +54,8 @@
     "test:provider-mcp": "tsx tests/test_provider_mcp.ts && tsx tests/test_provider_mcp_apply.ts && tsx tests/test_provider_mcp_recovery_cli.ts",
     "test:mars169": "tsx tests/test_mars169_document_slices.ts",
     "test:provider-local": "node scripts/test-providers.mjs local",
-    "test:provider-integration": "node scripts/test-providers.mjs integration"
+    "test:provider-integration": "node scripts/test-providers.mjs integration",
+    "test:package": "node scripts/test-package.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
@@ -77,5 +78,8 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/loeyae/loeyae-aidlc-v2.git"
-  }
+  },
+  "bundleDependencies": [
+    "html-validate"
+  ]
 }

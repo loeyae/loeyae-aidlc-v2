@@ -255,5 +255,9 @@
   [
     "tsx",
     "tests/test_distribution_parity.ts"
+  ],
+  [
+    "node",
+    "scripts/test-package.mjs"
   ]
 ]
