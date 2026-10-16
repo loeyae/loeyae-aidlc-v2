@@ -30,7 +30,7 @@ if (mode === "integration") {
   assert.equal(git("status", "--porcelain", "--untracked-files=no"), "", "Provider tracked sources must be clean");
 }
 const local = [
-  "test_provider_mcp_apply", "test_mcp_readonly", "test_context_source_boundary", "test_module_facts",
+  "test_provider_mcp_apply", "test_provider_mcp_recovery_cli", "test_mcp_readonly", "test_context_source_boundary", "test_module_facts",
   "test_docx_provider_fixture", "test_diagram_layout_contract", "test_diagram_layout_analysis",
   "test_quality_document_slices",
   "test_provider_config.py", "test_mcp_config.py", "test_platform_layouts.py",

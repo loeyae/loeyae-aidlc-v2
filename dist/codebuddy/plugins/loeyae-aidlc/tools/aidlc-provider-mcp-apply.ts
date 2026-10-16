@@ -148,13 +148,21 @@ function approved(plan: ObjectValue, approvals: readonly string[]): void {
   for (const change of plan.changes as ObjectValue[]) if (!approvals.includes(String(change.config_digest))) fail("explicit --approve-config digest required for every connection");
 }
 /** Same target lock across projects; never steal a live or old lock on a timer. */
-function locked<T>(p: Paths, run: () => T): T {
+function locked<T>(p: Paths, run: (guard: () => void) => T): T {
   safePath(p.lock);
   let fd: number;
   try { fd = openSync(p.lock, "wx", 0o600); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") fail("target busy; an orphan lock requires operator PID verification before removal"); throw error; }
-  try { writeFileSync(fd, JSON.stringify({ pid: process.pid })); return run(); }
-  finally { closeSync(fd); unlinkSync(p.lock); }
+  const token = JSON.stringify({ pid: process.pid, token: randomUUID() });
+  const guard = () => {
+    safePath(p.lock);
+    if (!existsSync(p.lock) || readFileSync(p.lock, "utf8") !== token) fail("target lock changed; preserve operator state");
+  };
+  try { writeFileSync(fd, token); return run(guard); }
+  finally {
+    closeSync(fd);
+    try { guard(); unlinkSync(p.lock); } catch { /* Never remove a replacement lock. */ }
+  }
 }
 type Fault = (point: "before-config" | "after-config" | "recovery-before-ledger" | "after-ledger") => void;
 function nextLedger(p: Paths, plan: ObjectValue, previous: ReturnType<typeof emptyLedger> | null, after: string) {
@@ -181,33 +189,35 @@ function nextLedger(p: Paths, plan: ObjectValue, previous: ReturnType<typeof emp
   return next;
 }
 /** The journal is intent, never authority: recovery consumes a current ledger prepare anchor. */
-function transaction(p: Paths, plan: ObjectValue, own: ReturnType<typeof ledger>, next: ReturnType<typeof emptyLedger>, hostAfter: string | null, config: ObjectValue | null, fault?: Fault) {
+function transaction(p: Paths, plan: ObjectValue, own: ReturnType<typeof ledger>, next: ReturnType<typeof emptyLedger>, hostAfter: string | null, config: ObjectValue | null, fault?: Fault, guard?: () => void) {
   const journal = { schema: JOURNAL, plan, after: hostAfter, ledger_before: own.value, ledger_after: next };
-  verifyInputs(p, plan);
+  verifyInputs(p, plan, guard);
   if (ledger(p).digest !== plan.ledger_digest || read(p.target).digest !== plan.target_digest) fail("host or ledger changed before preparation");
   atomic(p.journal, journal);
   const preparation = { ...own.value, pending: { plan_digest: plan.plan_digest, journal_digest: sha256ProviderDigest(journal) } };
   atomic(p.ledger, preparation);
   const prepared = sha256FileDigest(bytes(preparation));
   fault?.("before-config");
-  verifyInputs(p, plan);
+  verifyInputs(p, plan, guard);
   if (read(p.target).digest !== plan.target_digest || ledger(p).digest !== prepared) fail("host or ledger changed before publication");
   if (config) atomic(p.target, config);
   fault?.("after-config");
   if (read(p.target).digest !== hostAfter || ledger(p).digest !== prepared) fail("host or ledger changed after publication; recovery required");
-  verifyInputs(p, plan);
+  verifyInputs(p, plan, guard);
   atomic(p.ledger, next);
   fault?.("after-ledger");
   unlinkSync(p.journal);
 }
-function verifyInputs(p: Paths, plan: ObjectValue) {
+function verifyInputs(p: Paths, plan: ObjectValue, guard?: () => void) {
+  guard?.();
   const { state } = resolveProviderMcpRequirements(p.project);
   if (sha256ProviderDigest({ config: state.config, lock: state.lock }) !== plan.source_digest) fail("source changed during pending transaction");
   if ((p.domains === null ? null : read(p.domains).digest) !== plan.domains_digest) fail("domains changed during pending transaction");
 }
-function recover(p: Paths, plan: ObjectValue, fault?: Fault): boolean {
+/** Read-only decision shared by diagnostics, explicit recovery and apply/cleanup retry. */
+function recoveryState(p: Paths, plan: ObjectValue) {
   const pending = read(p.journal);
-  if (pending.digest === null) return false;
+  if (pending.digest === null) return null;
   const journal = exact(pending.value, ["schema", "plan", "after", "ledger_before", "ledger_after"]);
   if (journal.schema !== JOURNAL || canonicalProviderJson(journal.plan) !== canonicalProviderJson(plan)) fail("pending transaction requires its original v2 transaction plan");
   verifyInputs(p, plan);
@@ -217,27 +227,53 @@ function recover(p: Paths, plan: ObjectValue, fault?: Fault): boolean {
   const next = plan.schema === PLAN ? nextLedger(p, plan, baseline, String(journal.after))! : cleanupLedger(plan, baseline, journal.after as string | null);
   if (canonicalProviderJson(next) !== canonicalProviderJson(journal.ledger_after)) fail("invalid transaction ledger");
   const afterDigest = sha256FileDigest(bytes(next));
+  // A durable abort receipt makes rollback itself restartable between ledger publication
+  // and journal removal. It is separate from the successful transaction receipt.
+  const aborted = structuredClone(baseline);
+  aborted.transactions[`abort:${sha256ProviderDigest(journal)}`] = { consumer: plan.consumer, source_digest: plan.source_digest, after: plan.target_digest };
+  const abortCompleted = own.digest === sha256FileDigest(bytes(aborted));
   const anchor = own.value.pending;
   const authorized = anchor?.plan_digest === plan.plan_digest && anchor?.journal_digest === sha256ProviderDigest(journal)
     && canonicalProviderJson({ ...own.value, pending: null }) === canonicalProviderJson(baseline);
   const completed = own.digest === afterDigest && Object.hasOwn(own.value.transactions, String(plan.plan_digest));
-  if (!authorized && !completed) {
-    if (own.digest === plan.ledger_digest && read(p.target).digest === plan.target_digest) { unlinkSync(p.journal); return false; }
+  if (!authorized && !completed && !abortCompleted) {
+    if (own.digest === plan.ledger_digest && read(p.target).digest === plan.target_digest) return { phase: "unprepared" as const, pending, own, baseline, next, host: plan.target_digest };
     fail("recovery conflict: no current ledger authorization");
   }
   const host = read(p.target).digest;
+  if (abortCompleted) {
+    if (host !== plan.target_digest) fail("recovery conflict: host changed after abort");
+    return { phase: "after-abort" as const, pending, own, baseline, next: aborted, host };
+  }
   if (host !== plan.target_digest && host !== journal.after) fail("recovery conflict: host changed; preserve user edits");
   if (host === plan.target_digest && host !== journal.after && authorized) {
-    atomic(p.ledger, baseline);
-    unlinkSync(p.journal);
-    fail("transaction aborted before config; re-plan against current ledger");
+    return { phase: "before-config" as const, pending, own, baseline, next: aborted, host };
   }
   if (host !== journal.after) fail("recovery conflict: inconsistent transaction");
-  fault?.("recovery-before-ledger");
-  if (read(p.target).digest !== host || ledger(p).digest !== own.digest) fail("recovery conflict: host or ledger changed before metadata publication");
-  verifyInputs(p, plan);
-  if (!completed) atomic(p.ledger, next);
+  return { phase: completed ? "after-ledger" as const : "after-config" as const, pending, own, baseline, next, host };
+}
+function recover(p: Paths, plan: ObjectValue, fault?: Fault, guard?: () => void, explicit = false): boolean {
+  const state = recoveryState(p, plan);
+  if (!state) return false;
+  const { phase, pending, own, next, host } = state;
+  if (explicit && phase === "unprepared") fail("recovery conflict: no current ledger authorization; preserve unprepared journal");
+  if (phase === "after-config" || phase === "after-ledger") fault?.("recovery-before-ledger");
+  verifyInputs(p, plan, guard);
+  if (read(p.target).digest !== host || ledger(p).digest !== own.digest || read(p.journal).digest !== pending.digest) fail("recovery conflict: host, ledger or journal changed before metadata publication");
+  if (phase === "unprepared") { unlinkSync(p.journal); return false; }
+  if (phase === "before-config" || phase === "after-abort") {
+    if (phase === "before-config") atomic(p.ledger, next);
+    fault?.("after-ledger");
+    guard?.();
+    if (read(p.journal).digest !== pending.digest) fail("recovery conflict: journal changed before abort finalization");
+    unlinkSync(p.journal);
+    if (explicit) return true;
+    fail("transaction aborted before config; re-plan against current ledger");
+  }
+  if (phase !== "after-ledger") atomic(p.ledger, next);
   fault?.("after-ledger");
+  guard?.();
+  if (read(p.journal).digest !== pending.digest) fail("recovery conflict: journal changed before removal");
   unlinkSync(p.journal);
   return true;
 }
@@ -249,8 +285,8 @@ export function applyProviderMcp(projectRoot: string, input: Input & { plan: unk
   const plan = validatePlan(input.plan);
   assertIdentity(p, plan);
   approved(plan, input.approvedConfigs);
-  return locked(p, () => {
-    if (recover(p, plan, fault)) return { status: "recovered", target: p.target };
+  return locked(p, (guard) => {
+    if (recover(p, plan, fault, guard)) return { status: "recovered", target: p.target };
     const current = compute(p);
     if (current.ownership.value.pending) fail("pending transaction requires recovery");
     const receipt = current.ownership.value.transactions[String(plan.plan_digest)];
@@ -278,7 +314,7 @@ export function applyProviderMcp(projectRoot: string, input: Input & { plan: unk
     const additions = Object.fromEntries(current.plan.changes.filter((change) => change.action === "add").map((change) => [change.name, current.configs[change.name]]));
     const next = { ...current.host.value, mcpServers: { ...object(current.host.value.mcpServers ?? {}), ...additions } };
     const after = adding ? sha256FileDigest(bytes(next)) : current.host.digest!;
-    transaction(p, plan, current.ownership, nextLedger(p, plan, current.ownership.value, after)!, after, adding ? next : null, fault);
+    transaction(p, plan, current.ownership, nextLedger(p, plan, current.ownership.value, after)!, after, adding ? next : null, fault, guard);
     return { status: "applied", target: p.target };
   });
 }
@@ -337,21 +373,114 @@ function cleanupLedger(plan: ObjectValue, previous: ReturnType<typeof emptyLedge
   return next;
 }
 export function planProviderMcpCleanup(projectRoot: string, input: CleanupInput) { return computeCleanup(paths(projectRoot, input), input.releaseAll === true).plan; }
+function validateCleanupPlan(value: unknown) {
+  const plan = exact(value, ["schema", "consumer", "target", "domains_path", "domains_digest", "release_all", "source_digest", "target_digest", "target_after", "ledger_digest", "ledger_state_digest", "changes", "plan_digest"]);
+  const { plan_digest, ...payload } = plan;
+  if (plan.schema !== CLEANUP || sha256ProviderDigest(payload) !== plan_digest || !Array.isArray(plan.changes) || typeof plan.release_all !== "boolean") fail("cleanup plan version, digest or release mode mismatch");
+  return plan;
+}
 export function cleanupProviderMcp(projectRoot: string, input: CleanupInput & { plan: unknown }, fault?: Fault) {
   const p = paths(projectRoot, input);
-  const plan = exact(input.plan, ["schema", "consumer", "target", "domains_path", "domains_digest", "release_all", "source_digest", "target_digest", "target_after", "ledger_digest", "ledger_state_digest", "changes", "plan_digest"]);
-  const { plan_digest, ...payload } = plan;
-  if (plan.schema !== CLEANUP || sha256ProviderDigest(payload) !== plan_digest || !Array.isArray(plan.changes) || plan.release_all !== (input.releaseAll === true)) fail("cleanup plan version, digest or release mode mismatch");
+  const plan = validateCleanupPlan(input.plan);
+  if (plan.release_all !== (input.releaseAll === true)) fail("cleanup plan release mode mismatch");
   assertIdentity(p, plan);
-  return locked(p, () => {
-    if (recover(p, plan, fault)) return { status: "recovered", target: p.target, changes: plan.changes };
+  return locked(p, (guard) => {
+    if (recover(p, plan, fault, guard)) return { status: "recovered", target: p.target, changes: plan.changes };
     const current = computeCleanup(p, input.releaseAll === true);
     if (current.own.value.pending) fail("pending transaction requires recovery");
     const receipt = current.own.value.transactions[String(plan.plan_digest)];
     if (receipt && object(receipt).after === current.host.digest && plan.source_digest === current.plan.source_digest && plan.domains_digest === current.plan.domains_digest) return { status: "unchanged", target: p.target, changes: plan.changes };
     if (canonicalProviderJson(plan) !== canonicalProviderJson(current.plan)) fail("cleanup plan stale: source, target, domains or ledger changed");
     if (!current.plan.changes.some((change) => change.action !== "keep")) return { status: "unchanged", target: p.target, changes: plan.changes };
-    transaction(p, plan, current.own, cleanupLedger(plan, current.own.value, current.plan.target_after), current.plan.target_after, current.nextHost, fault);
+    transaction(p, plan, current.own, cleanupLedger(plan, current.own.value, current.plan.target_after), current.plan.target_after, current.nextHost, fault, guard);
     return { status: "cleaned", target: p.target, changes: plan.changes };
   });
+}
+
+function transactionPlan(value: unknown) {
+  return object(value).schema === CLEANUP ? validateCleanupPlan(value) : validatePlan(value);
+}
+
+/** An explicit original plan is required; the journal is never used to recreate approval. */
+export function recoverProviderMcp(projectRoot: string, input: Input & { plan: unknown }) {
+  const p = paths(projectRoot, input);
+  const plan = transactionPlan(input.plan);
+  assertIdentity(p, plan);
+  if (read(p.journal).digest === null) {
+    if (ledger(p).value.pending) fail("recovery conflict: prepared ledger is missing its journal; restore original artifacts, do not re-plan");
+    return { status: "unchanged", target: p.target };
+  }
+  return locked(p, (guard) => {
+    const state = recoveryState(p, plan);
+    if (!state) return { status: "unchanged", target: p.target };
+    recover(p, plan, undefined, guard, true);
+    return { status: state.phase === "before-config" || state.phase === "after-abort" ? "aborted" : "recovered", target: p.target };
+  });
+}
+
+/** Advisory snapshot only. Never serialize raw JSON, server names, config values or errors. */
+export function statusProviderMcp(projectRoot: string, input: Input) {
+  const p = paths(projectRoot, input);
+  const summary = {
+    target: { path: p.target, exists: false, digest: null as string | null },
+    ledger: { exists: false, schema: "absent", entries: 0, transactions: 0, pending: false },
+    journal: { exists: false, schema: "absent" },
+    lock: { exists: false },
+  };
+  const result = (status: string, phase: string, diagnostic: string, recoverable = false) => ({
+    status, phase, diagnostic, recoverable, can_recover: recoverable && !summary.lock.exists, ...summary,
+  });
+  let stage = "target";
+  try {
+    safePath(p.lock);
+    summary.lock.exists = existsSync(p.lock);
+    summary.target.exists = existsSync(p.target);
+    const host = read(p.target);
+    summary.target.exists = host.digest !== null; summary.target.digest = host.digest;
+    const servers = object(host.value.mcpServers ?? {});
+    stage = "ledger";
+    safePath(p.ledger);
+    summary.ledger.exists = existsSync(p.ledger);
+    const rawLedger = read(p.ledger);
+    summary.ledger.exists = rawLedger.digest !== null;
+    if (rawLedger.digest !== null) {
+      if (typeof rawLedger.value.schema !== "string") return result("corrupt", "unknown", "ledger-validation-failed");
+      if (![LEDGER, "aidlc.mcp-ownership/v1"].includes(String(rawLedger.value.schema))) return result("incompatible", "unknown", "unsupported-ledger-version");
+      summary.ledger.schema = String(rawLedger.value.schema);
+    }
+    const own = ledger(p);
+    summary.ledger.entries = Object.keys(own.value.entries).length;
+    summary.ledger.transactions = Object.keys(own.value.transactions).length;
+    summary.ledger.pending = own.value.pending !== null;
+    stage = "journal";
+    safePath(p.journal);
+    summary.journal.exists = existsSync(p.journal);
+    const pending = read(p.journal);
+    summary.journal.exists = pending.digest !== null;
+    if (pending.digest === null) {
+      if (own.value.pending) return result("conflict", "unknown", "missing-authorized-journal");
+      if (Object.entries(own.value.entries).some(([name, entry]) => {
+        const item = object(entry);
+        return item.state !== "committed" || !Object.hasOwn(servers, name) || sha256ProviderDigest(servers[name]) !== item.after;
+      })) return result("conflict", "completed", "managed-config-changed-or-retained");
+      return summary.ledger.transactions ? result("completed", "completed", "no-pending-transaction") : result("no-transaction", "none", "no-pending-transaction");
+    }
+    if (pending.value.schema !== JOURNAL) {
+      if (typeof pending.value.schema !== "string") return result("corrupt", "unknown", "journal-validation-failed");
+      summary.journal.schema = "unsupported";
+      return result("incompatible", "unknown", "original-v2-journal-required-no-auto-upgrade");
+    }
+    summary.journal.schema = JOURNAL;
+    exact(pending.value, ["schema", "plan", "after", "ledger_before", "ledger_after"]);
+    const plan = transactionPlan(pending.value.plan);
+    stage = "recovery";
+    assertIdentity(p, plan);
+    const state = recoveryState(p, plan);
+    if (!state) return result("conflict", "unknown", "snapshot-changed-retry-status");
+    if (state.phase === "unprepared") return result("conflict", state.phase, "no-current-ledger-authorization");
+    return result(state.phase === "after-ledger" || state.phase === "after-abort" ? "completed" : "recoverable", state.phase,
+      summary.lock.exists ? "verify-owner-process-before-removing-orphan-lock" : state.phase === "before-config" ? "recovery-will-abort-before-config" : "original-plan-required", true);
+  } catch {
+    return result(stage === "recovery" ? "conflict" : "corrupt", "unknown", `${stage}-validation-failed`);
+  }
 }
