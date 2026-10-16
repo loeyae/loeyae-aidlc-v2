@@ -23,6 +23,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { loadWorkflowState, saveWorkflowState } from "../core/tools/aidlc-light-state";
+import { orderQualityFixture } from "./order_quality_fixture";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -313,14 +314,33 @@ function scenario(name: string, units: UnitSpec[], ucds: Ucd[]): Scenario {
     return result;
   };
   const moduleArgs = ["--module", M01];
+  let syncQuality = () => {};
+  const refreshQuality = () => {
+    if (!loadWorkflowState(project, { kind: "module", module_id: M01 })!.completed_stages.includes("cross-validation")) return;
+    for (const stage of ["requirements-analysis", "user-stories", "cross-validation"]) step(["evidence", "run", "--stage", stage, ...moduleArgs, "--all-sensors", "--refresh"]);
+  };
   const nextModule = (expected: string, refreshes: string[][] = []): Run => {
-    for (const args of refreshes) step(["evidence", "run", ...args, "--refresh"]);
+    if (existsSync(join(project, `${IN}/requirements.md`))) syncQuality();
+    const completed = loadWorkflowState(project, { kind: "module", module_id: M01 })!.completed_stages;
+    if (completed.includes("units-generation")) {
+      step(["document-slices", "generate", ...moduleArgs]);
+      step(["evidence", "run", "--stage", "units-generation", ...moduleArgs, "--sensor", "document-slice-consistency", "--refresh"]);
+      syncQuality();
+    }
+    if (completed.includes("cross-validation")) refreshQuality();
+    for (const args of refreshes) if (!completed.includes("cross-validation") || !["requirements-analysis", "user-stories"].includes(args[1])) step(["evidence", "run", ...args, "--refresh"]);
     const result = step(["orchestrate", "next", ...moduleArgs]);
     assert.equal(result.json.stage_instance, expected, JSON.stringify(result.json, null, 2));
     return result;
   };
-  const report = (stage: string, extra: string[] = []) => step(["orchestrate", "report", "--stage", stage, ...moduleArgs, "--result", "completed", ...extra]);
-  const reportUnit = (stage: string, unit: string) => step(["orchestrate", "report", "--stage", stage, ...unitArgs(unit), "--result", "completed"], false);
+  const report = (stage: string, extra: string[] = []) => {
+    syncQuality(); refreshQuality();
+    return step(["orchestrate", "report", "--stage", stage, ...moduleArgs, "--result", "completed", ...extra]);
+  };
+  const reportUnit = (stage: string, unit: string) => {
+    if (stage !== "tdd") { syncQuality(); refreshQuality(); }
+    return step(["orchestrate", "report", "--stage", stage, ...unitArgs(unit), "--result", "completed"], false);
+  };
   const ack = (stage: string) => report(stage, ["--instruction-ack", stage]);
 
   step(["orchestrate", "next", "--scope", "feature", "--work", `4.8.0 unit scope ${name}`]);
@@ -333,6 +353,12 @@ function scenario(name: string, units: UnitSpec[], ucds: Ucd[]): Scenario {
   write(project, "docs/aidlc/ideation/scenario-module-mapping.md", `# 场景模块映射\n\nREQ-001 订单处理属于 ${M01}。\n`);
   step(["orchestrate", "split", "--from", global.workflow_id]);
   const moduleRef = { kind: "module" as const, module_id: M01 };
+  syncQuality = orderQualityFixture(project, M01, loadWorkflowState(project, moduleRef)!.workflow_id, {
+    source: "REQ-001 approved unit delivery fixture: legacy alpha paginates 120 rows as 50/50/20; beta reads the upstream order list. New UC-Ds are delivered by their declared units; integration covers every owning unit. An empty contract subset needs approved controlled validation. No UI or persisted field changes. Fixture owner confirmed version 1.",
+    rationale: "Fixture review compares the legacy order source, per-unit UC-D ownership and module reconciliation, including an empty contract subset",
+    example: "u1 covers UC-D-001; u2 covers UC-D-002; integration requires both; a contract-only unit must run its approved validator",
+    rule: { condition: "unit scope selected", action: "deliver owned UC-Ds", effect: "every owning unit has GREEN coverage at module completion", failure: "reject missing ownership coverage or a failing exemption validator", input: "UC-D-001 owned by u1 and UC-D-002 owned by u2", expected: "per-unit coverage then complete module reconciliation", boundary: "empty subset requires approved validation" },
+  });
 
   nextModule(`requirements-analysis@module:${M01}`);
   write(project, `${IN}/requirements.md`, "# 需求\n\n## REQ-001 订单处理\n\ntrack: [backend]\n\n业务规则：订单处理由多个单元分别实现，每个单元只交付自己负责的用例，模块收口时全部用例都必须通过。\n");
@@ -344,7 +370,7 @@ function scenario(name: string, units: UnitSpec[], ucds: Ucd[]): Scenario {
   write(project, `${IN}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单处理流程\n\n```mermaid\nflowchart LR\n  A[接收订单] --> B[按单元处理]\n  B --> C[返回结果]\n```\n");
   report("requirements-methods");
   nextModule(`user-stories@module:${M01}`, [RA]);
-  write(project, `${IN}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营处理订单\n\n- 关联需求：REQ-001\n- 作为运营人员，我希望订单按单元交付的能力被正确处理，以便逐项核对。\n- 验收标准：每个单元的用例在该单元完成时通过，模块完成时全部通过。\n");
+  write(project, `${IN}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营处理订单\n\n来源：REQ-001\n- 作为运营人员，我希望订单按单元交付的能力被正确处理，以便逐项核对。\n\n### AC-001 单元覆盖与模块收口\n每个单元的用例在该单元完成时通过，模块完成时全部通过；无用例的契约单元必须执行批准的替代验证。\n");
   report("user-stories");
   nextModule(`cross-validation@module:${M01}`, [RA]);
   write(project, `${IN}/cross-validation-report.md`, "# 交叉验证报告\n\n- status: passed\n- unresolved_conflicts: 0\n- prd_route: not-selected\n- ui_route: not-selected\n\n| 需求 | 故事 | 结论 |\n| --- | --- | --- |\n| REQ-001 | STORY-001 / US-001 | 一致：单元划分由故事验收标准覆盖 |\n");
@@ -354,13 +380,17 @@ function scenario(name: string, units: UnitSpec[], ucds: Ucd[]): Scenario {
   report("workflow-planning");
 
   const writeUnitManifest = (specs: UnitSpec[]) => {
-    write(project, `${IN}/unit-manifest.json`, `${JSON.stringify({ schema_version: 1, module_id: M01, units: specs.map((unit) => ({ unit_id: unit.id, name: `Unit ${unit.id}`, service_id: "trade-service", conditional_stages: [], ...(unit.exemption ? { ucd_exemption: unit.exemption } : {}) })) }, null, 2)}\n`);
+    write(project, `${IN}/unit-manifest.json`, `${JSON.stringify({ schema_version: 1, module_id: M01, units: specs.map((unit) => ({ unit_id: unit.id, name: `Unit ${unit.id}`, service_id: "trade-service", conditional_stages: [], req_refs: ["REQ-001"], ...(unit.exemption ? { ucd_exemption: unit.exemption } : {}) })) }, null, 2)}\n`);
   };
   writeUnitManifest(units);
+  const storyOwners = [...new Set(ucds.flatMap(ucd => ucd.unitRefs ?? units.map(unit => unit.id)))];
+  write(project, `${IN}/application-design/unit-of-work-story-map.md`, '# Approved unit ownership\n```aidlc-story-map\n' + JSON.stringify({ schema_version: 1, status: "approved", approved_by: "fixture-owner", mappings: [{ story_id: "STORY-001", unit_ids: storyOwners }], shared_req_refs: ["REQ-001"] }) + '\n```\n');
   const moduleState = loadWorkflowState(project, moduleRef)!;
   moduleState.completed_stages.push("units-generation");
   moduleState.completed_stage_instances.push(`units-generation@module:${M01}`);
   saveWorkflowState(project, moduleState, moduleRef);
+  step(["document-slices", "generate", ...moduleArgs]);
+  step(["evidence", "run", "--stage", "units-generation", ...moduleArgs, "--sensor", "document-slice-consistency", "--refresh"]);
   for (const unit of units) {
     write(project, `${construction(unit.id)}/functional-design.md`, `# 功能设计 — ${unit.id}\n\nREQ-001：${unit.id} 交付自己负责的用例；无新增接口与数据结构。\n`);
   }
@@ -369,6 +399,7 @@ function scenario(name: string, units: UnitSpec[], ucds: Ucd[]): Scenario {
     rmSync(join(project, CASES), { recursive: true, force: true });
     write(project, `${CASES}/_index.md`, `# UC-D 索引\n\n${list.map((ucd) => `- ${ucd.id} ${ucd.title}（source_ref: REQ-001）`).join("\n")}\n`);
     for (const ucd of list) write(project, `${CASES}/${ucd.id}.md`, caseFile(ucd));
+    syncQuality();
   };
 
   write(project, "tests/__init__.py", "\"\"\"Tests for the order service (REQ-001).\"\"\"\n");
@@ -687,6 +718,7 @@ try {
     checks.expect("empty subset without ucd_exemption", rejected(s.reportUnit("tdd", "u3")), /unit u3 owns no UC-D of module m01-trade \(unit_refs\); declare ucd_exemption for it in .*unit-manifest\.json/);
     assert.equal(existsSync(join(s.project, RED("u3"))), false, "the refused RED writes no evidence");
     s.writeUnitManifest([{ id: "u1" }, { id: "u3", exemption: EXEMPTION }]);
+    s.nextModule(`tdd@module:${M01}@unit:u3`, [TCD]);
     write(s.project, ".aidlc/contract-broken", "1\n");
     checks.expect("validation_command exits non-zero", rejected(s.reportUnit("tdd", "u3")), /command ucd-exemption:u3 failed: exit code 3/);
     assert.equal(existsSync(join(s.project, RED("u3"))), false, "a failing validation writes no evidence");
@@ -694,6 +726,9 @@ try {
     s.writeUnitManifest([{ id: "u1" }, { id: "u3", exemption: { ...EXEMPTION, approval_ref: "" } }]);
     checks.expect("ucd_exemption without approval_ref", rejected(s.reportUnit("tdd", "u3")), /units\[1\]\.ucd_exemption\.approval_ref must be a non-empty string/);
     s.writeUnitManifest([{ id: "u1" }, { id: "u3", exemption: EXEMPTION }]);
+    // The approved exemption changes canonical unit input; regenerate projections
+    // and re-attest admission before accepting the successful controlled report.
+    s.nextModule(`tdd@module:${M01}@unit:u3`, [TCD]);
     const before = log();
     const u3Tdd = s.reportUnit("tdd", "u3");
     assert.equal(rejected(u3Tdd), "", u3Tdd.out);

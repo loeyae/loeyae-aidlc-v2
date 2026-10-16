@@ -22,7 +22,10 @@ let mode = "ok", remote = "external content", jsonResponse = true, needAuth = fa
 let business = 0, network = 0, initialized = 0, sessionsSeen = 0, leakedRedirects = 0;
 const transports = new Map<string, StreamableHTTPServerTransport>();
 const servers: Server[] = [];
+const exchanges: Array<{ method?: string; status: number; phase: string; authenticated: boolean }> = [];
 const http = createServer(async (req, res) => {
+  const phase = mode;
+  res.once("finish", () => exchanges.push({ method: req.method, status: res.statusCode, phase, authenticated: req.headers.authorization === `Bearer ${secret}` }));
   try {
     network++;
     if (req.url === "/redirect-target") { leakedRedirects++; res.writeHead(200).end(); return; }
@@ -36,7 +39,13 @@ const http = createServer(async (req, res) => {
     if (req.headers["mcp-session-id"]) sessionsSeen++;
     if (!transport && isInitializeRequest(body)) {
       initialized++;
-      transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID(), enableJsonResponse: jsonResponse });
+      const initializedTransport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(), enableJsonResponse: jsonResponse,
+        // Publish the session before the initialize response can reach the client.
+        // A fast follow-up request can arrive before handleRequest resolves.
+        onsessioninitialized: id => { transports.set(id, initializedTransport); },
+      });
+      transport = initializedTransport;
       const server = new Server({ name: "local-test-fixture", version: "1.0.0" }, { capabilities: { tools: {} } });
       servers.push(server);
       server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{ name: "write", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } }] }));
@@ -55,7 +64,6 @@ const http = createServer(async (req, res) => {
     if (!transport) { res.writeHead(400).end(); return; }
     if (body?.method === "tools/call" && mode !== "no-etag") res.setHeader("ETag", `"${remote.length}"`);
     await transport.handleRequest(req, res, body);
-    if (transport.sessionId) transports.set(transport.sessionId, transport);
   } catch { if (!res.headersSent) res.writeHead(500); res.end(); }
 });
 function write(path: string, value: unknown) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, JSON.stringify(value)); }
@@ -211,7 +219,8 @@ try {
   assert.equal(network, beforeCredentials, "context drift during credential resolution is rejected before networking");
   current = previousContext;
   const authenticatedRequest = request();
-  verify(await broker({}, resolveSecret).call(authenticatedRequest));
+  try { verify(await broker({}, resolveSecret).call(authenticatedRequest)); }
+  catch (error) { console.error("Authenticated fixture exchanges (no credential values):", exchanges.slice(-12)); throw error; }
   assert.equal(callRecord(authenticatedRequest.request_id).authentication, "accepted");
   mode = "redirect";
   await assert.rejects(() => broker({}, resolveSecret).call(request()), /MCP_REDIRECT_DENIED/);

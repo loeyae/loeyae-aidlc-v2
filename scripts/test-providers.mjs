@@ -32,6 +32,7 @@ if (mode === "integration") {
 const local = [
   "test_provider_mcp_apply", "test_mcp_readonly", "test_context_source_boundary", "test_module_facts",
   "test_docx_provider_fixture", "test_diagram_layout_contract", "test_diagram_layout_analysis",
+  "test_quality_document_slices",
   "test_provider_config.py", "test_mcp_config.py", "test_platform_layouts.py",
 ];
 const integration = [
@@ -51,7 +52,8 @@ for (const [name, ...parameters] of suites) {
   console.log(`RUN ${name}`);
   const started = Date.now();
   const result = spawnSync(executable, argv, { cwd: root, encoding: "utf8", timeout: 20 * 60 * 1000, maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, AIDLC_TEST_PYTHON: python, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8", AIDLC_TEST_ARTIFACT_DIR: output, VISUAL_SCENARIOS: "" } });
+    env: { ...process.env, AIDLC_TEST_PYTHON: python, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8", AIDLC_TEST_ARTIFACT_DIR: output, VISUAL_SCENARIOS: "",
+      AIDLC_EXPORT_PROJECT: "", AIDLC_EXPORT_HOST_PROVIDER: "", AIDLC_DOCX_PROJECT: "", AIDLC_DOCX_HOST_PROVIDER: "" } });
   const log = `${result.stdout || ""}\n${result.stderr || ""}\n${result.error?.message || ""}`;
   writeFileSync(join(output, `${name}.log`), log);
   results.push({ name, command: [executable, ...argv], exit_code: result.status, signal: result.signal, duration_ms: Date.now() - started,

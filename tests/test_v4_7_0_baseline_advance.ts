@@ -22,6 +22,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInitialState, loadWorkflowState, parseLightWorkflowState, renderLightWorkflowState, saveWorkflowState, type WorkflowState } from "../core/tools/aidlc-light-state";
+import { orderQualityFixture } from "./order_quality_fixture";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -125,6 +126,7 @@ function rejections(): { expect: (label: string, output: string, pattern: RegExp
 }
 
 async function section(name: string, body: () => void | Promise<void>): Promise<void> {
+  if (process.env.AIDLC_ONLY && !name.includes(process.env.AIDLC_ONLY)) return;
   try {
     await body();
     sections.push(name);
@@ -339,13 +341,27 @@ async function endToEnd(globalDone: boolean): Promise<void> {
 
     const moduleArgs = ["--module", M01];
     const unitArgs = (unit: string) => ["--module", M01, "--unit", unit];
+    const syncQuality = orderQualityFixture(project, M01, loadWorkflowState(project, moduleRef)!.workflow_id);
+    const refreshQuality = () => {
+      if (!loadWorkflowState(project, moduleRef)!.completed_stages.includes("cross-validation")) return;
+      for (const stage of ["requirements-analysis", "user-stories", "cross-validation"]) ok(project, ["evidence", "run", "--stage", stage, ...moduleArgs, "--all-sensors", "--refresh"]);
+    };
     const nextModule = (expected: string, refreshes: string[][] = []) => {
-      for (const args of refreshes) ok(project, ["evidence", "run", ...args, "--refresh"]);
+      if (existsSync(join(project, `docs/aidlc/modules/${M01}/inception/requirements.md`))) syncQuality();
+      const crossCompleted = loadWorkflowState(project, moduleRef)!.completed_stages.includes("cross-validation");
+      if (crossCompleted) refreshQuality();
+      for (const args of refreshes) if (!crossCompleted || !["requirements-analysis", "user-stories"].includes(args[1])) ok(project, ["evidence", "run", ...args, "--refresh"]);
       const directive = ok(project, ["orchestrate", "next", ...moduleArgs]).json;
       assert.equal(directive.stage_instance, expected, JSON.stringify(directive, null, 2));
     };
-    const report = (stage: string, extra: string[] = []) => ok(project, ["orchestrate", "report", "--stage", stage, ...moduleArgs, "--result", "completed", ...extra]);
-    const reportUnit = (stage: string, unit: string) => run(project, ["orchestrate", "report", "--stage", stage, ...unitArgs(unit), "--result", "completed"]);
+    const report = (stage: string, extra: string[] = []) => {
+      syncQuality(); refreshQuality();
+      return ok(project, ["orchestrate", "report", "--stage", stage, ...moduleArgs, "--result", "completed", ...extra]);
+    };
+    const reportUnit = (stage: string, unit: string) => {
+      syncQuality(); refreshQuality();
+      return run(project, ["orchestrate", "report", "--stage", stage, ...unitArgs(unit), "--result", "completed"]);
+    };
     const ack = (stage: string) => report(stage, ["--instruction-ack", stage]);
     const RA = ["--stage", "requirements-analysis", ...moduleArgs];
     const TCD = ["--stage", "test-case-derivation", ...moduleArgs];
@@ -361,7 +377,7 @@ async function endToEnd(globalDone: boolean): Promise<void> {
     write(project, `${inception}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单导出分页流程\n\n```mermaid\nflowchart LR\n  A[调用 export_orders] --> B[读取下游订单]\n  B --> C[按 50 条分页返回]\n```\n");
     report("requirements-methods");
     nextModule(`user-stories@module:${M01}`, [RA]);
-    write(project, `${inception}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营导出分页订单\n\n- 关联需求：REQ-001\n- 作为运营人员，我希望导出订单时按 50 条分页返回，以便逐页核对。\n- 验收标准：下游返回 120 条订单时，导出结果为 50、50、20 三页。\n");
+    write(project, `${inception}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营导出分页订单\n\n来源：REQ-001\n- 作为运营人员，我希望导出订单时按 50 条分页返回，以便逐页核对。\n\n### AC-001 分页与空列表\n下游返回 120 条订单时，导出结果为 50、50、20 三页；空列表返回空页列表。\n");
     report("user-stories");
     nextModule(`cross-validation@module:${M01}`, [RA]);
     write(project, `${inception}/cross-validation-report.md`, "# 交叉验证报告\n\n- status: passed\n- unresolved_conflicts: 0\n- prd_route: not-selected\n- ui_route: not-selected\n\n| 需求 | 故事 | 结论 |\n| --- | --- | --- |\n| REQ-001 | STORY-001 / US-001 | 一致：分页 50 条的需求由故事验收标准覆盖 |\n");
@@ -373,13 +389,16 @@ async function endToEnd(globalDone: boolean): Promise<void> {
     // Two units u1 / u2. units-generation is recorded as completed in the module
     // workflow (as the product-level stages above); the unit manifest is real content.
     write(project, `${inception}/unit-manifest.json`, `${JSON.stringify({ schema_version: 1, module_id: M01, units: [
-      { unit_id: "u1", name: "Pagination annotations", service_id: "trade-service", conditional_stages: [] },
-      { unit_id: "u2", name: "Export annotations", service_id: "trade-service", conditional_stages: [] },
+      { unit_id: "u1", name: "Pagination annotations", service_id: "trade-service", conditional_stages: [], req_refs: ["REQ-001"] },
+      { unit_id: "u2", name: "Export annotations", service_id: "trade-service", conditional_stages: [], req_refs: ["REQ-001"] },
     ] }, null, 2)}\n`);
+    write(project, `${inception}/application-design/unit-of-work-story-map.md`, '# Approved shared pagination story\n```aidlc-story-map\n' + JSON.stringify({ schema_version: 1, status: "approved", approved_by: "fixture-owner", mappings: [{ story_id: "STORY-001", unit_ids: ["u1", "u2"] }], shared_req_refs: ["REQ-001"] }) + '\n```\n');
     const moduleState = loadWorkflowState(project, moduleRef)!;
     moduleState.completed_stages.push("units-generation");
     moduleState.completed_stage_instances.push(`units-generation@module:${M01}`);
     saveWorkflowState(project, moduleState, moduleRef);
+    ok(project, ["document-slices", "generate", ...moduleArgs]);
+    ok(project, ["evidence", "run", "--stage", "units-generation", ...moduleArgs, "--sensor", "document-slice-consistency", "--refresh"]);
     // doc-cascade of code-generation reads stage-level skips: functional-design only counts
     // as skipped once every unit skipped it, so each unit carries a real design note.
     for (const unit of ["u1", "u2"]) {
@@ -666,7 +685,7 @@ try {
     };
     step(["orchestrate", "next", "--scope", "refactor", "--work", "4.7.0 single unit"]);
     const baseline = commits[1];
-    for (const stage of ["workspace-detection", "state-template"]) {
+    for (const stage of ["workspace-detection"]) {
       step(["orchestrate", "next"]);
       step(["orchestrate", "report", "--stage", stage, "--result", "completed", "--instruction-ack", stage]);
     }
@@ -712,6 +731,7 @@ try {
     if (process.env.AIDLC_TRANSCRIPT) writeFileSync(process.env.AIDLC_TRANSCRIPT, `${transcript.join("\n")}\n`, "utf8");
   });
 
+  if (process.env.AIDLC_ONLY && sections.length === 0 && failed.length === 0) throw new Error("AIDLC_ONLY matched no baseline advance section");
   if (failed.length > 0) {
     console.log(`4.7.0 baseline advance regression tests FAILED: ${failed.join("; ")}`);
     process.exitCode = 1;

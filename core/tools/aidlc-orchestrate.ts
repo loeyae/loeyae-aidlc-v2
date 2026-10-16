@@ -3173,7 +3173,12 @@ function qualityGateContext(state: WorkflowState, instance: StageInstance): Qual
 }
 
 function documentSliceContext(state: WorkflowState, instance: StageInstance): SliceContext {
-  return { ...qualityGateContext(state, instance), slices_version: state.document_slices_version,
+  // Global/integration operations re-check module GREEN using their own views.
+  // Slice identity belongs to that module's workflow, never to its parent.
+  const owner = instance.module_id ? loadWorkflowView(PROJECT_ROOT, instance.module_id) : null;
+  const scoped = owner && (owner.parent_workflow_id === state.workflow_id
+    || state.workflow_kind === "integration" && !!owner.parent_workflow_id && owner.parent_workflow_id === state.parent_workflow_id) ? owner : state;
+  return { ...qualityGateContext(scoped, instance), slices_version: scoped.document_slices_version,
     units_executed: instance.stage.slug === "units-generation" || completedInstanceIds(state).includes(`units-generation@module:${instance.module_id}`) };
 }
 
@@ -5770,9 +5775,14 @@ async function handleUpgrade(args: string[]): Promise<Directive> {
     .filter((instance) => !moduleFilter || instance.module_id === moduleFilter)
     .map((declared) => {
       const instance = runtimeInstance(declared, view);
+      // Match producer/admission adoption rules: legacy workflows do not create
+      // quality Evidence until explicitly adopted. Never offer an endless repair.
+      const missingSemantic = new Set(missingSemanticEvidence(instance));
       const missing = instance.stage.sensors
         .filter(evidenceBackedSensor)
-        .filter((sensor) => !existsSync(evidencePath(instance.stage, sensor, instance)));
+        .filter((sensor) => SEMANTIC_SENSORS.has(sensor)
+          ? missingSemantic.has(sensor)
+          : !existsSync(evidencePath(instance.stage, sensor, instance)));
       return { instance, missing };
     })
     .filter((item) => item.missing.length > 0)

@@ -368,7 +368,7 @@ npm test
 
 `npm test` 包含 pretest、Core 回归和 `test:provider-local`。后者覆盖受管 MCP apply/cleanup、只读 transport、context 边界、模块事实、DOCX 对抗 fixture 和图表布局；只使用本地数据与本机协议服务，不下载 Provider 或要求真实账户。Python 检查会验证解释器；Windows Store 占位命令不可用时，可在当前进程设置 `AIDLC_TEST_PYTHON` 为已安装 Python 3 的完整路径，不修改系统配置。导出/DOCX 的无包诊断不代表生产渲染或版式验证通过。
 
-Core 聚合入口按 `scripts/core-test-suites.json` 保留原有命令顺序，失败后继续收集后续结果，最后统一返回非零。可用 `AIDLC_TEST_OUTPUT` 指定日志目录；pretest 的原始输出由 npm 正常报告，聚合阶段另存每项命令、退出码和日志。
+Core 聚合入口按 `scripts/core-test-suites.json` 保留原有命令顺序，失败后继续收集后续结果，最后统一返回非零。可用 `AIDLC_TEST_OUTPUT` 指定日志目录；pretest 的原始输出由 npm 正常报告，聚合阶段另存每项命令、退出码和日志。完整聚合清除定向章节过滤、旧基线运行器及用户文档 host 环境变量；定向诊断请直接运行单个测试脚本。质量与文档切片组合也包含在本地回归中。
 
 跨仓测试必须显式运行，并提前准备匹配 revision 的实际 Provider checkout 及依赖：
 

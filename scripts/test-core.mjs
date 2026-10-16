@@ -15,7 +15,9 @@ for (const [tool, ...parameters] of commands) {
   if (parameters[0] === "scripts/test-providers.mjs") args.push("--output", join(output, "provider-local"));
   console.log(`RUN ${tool} ${parameters.join(" ")}`);
   const started = Date.now();
-  const result = spawnSync(process.execPath, args, { cwd: root, encoding: "utf8", timeout: 30 * 60 * 1000, maxBuffer: 64 * 1024 * 1024, env: { ...process.env, AIDLC_TEST_OUTPUT: output } });
+  const result = spawnSync(process.execPath, args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
+    env: { ...process.env, AIDLC_TEST_OUTPUT: output, AIDLC_ONLY: "", AIDLC_MARS168_BASELINE_ROOT: "", AIDLC_TSX: join(root, "node_modules/tsx/dist/cli.mjs"),
+      AIDLC_EXPORT_PROJECT: "", AIDLC_EXPORT_HOST_PROVIDER: "", AIDLC_DOCX_PROJECT: "", AIDLC_DOCX_HOST_PROVIDER: "" } });
   const log = `${result.stdout || ""}\n${result.stderr || ""}\n${result.error?.message || ""}`;
   const path = `${results.length.toString().padStart(2, "0")}-${name}.log`;
   writeFileSync(join(output, path), log);

@@ -35,7 +35,11 @@ const http = createServer(async (req, res) => {
     if (req.method === "POST") { const bytes = []; for await (const c of req) bytes.push(c); body = JSON.parse(Buffer.concat(bytes).toString()); }
     let transport = sessions.get(String(req.headers["mcp-session-id"]));
     if (!transport && isInitializeRequest(body)) {
-      transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID(), enableJsonResponse: true });
+      const initializedTransport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(), enableJsonResponse: true,
+        onsessioninitialized: id => { sessions.set(id, initializedTransport); },
+      });
+      transport = initializedTransport;
       const server = new Server({ name: "isolated-ssot-contract-fixture", version: "1.0.0" }, { capabilities: { tools: {} } }); servers.push(server);
       server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{ name: "archive_document", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } }] }));
       server.setRequestHandler(CallToolRequestSchema, async request => {
@@ -52,7 +56,6 @@ const http = createServer(async (req, res) => {
     }
     if (!transport) { res.writeHead(400).end(); return; }
     await transport.handleRequest(req, res, body);
-    if (transport.sessionId) sessions.set(transport.sessionId, transport);
   } catch { if (!res.headersSent) res.writeHead(500); res.end(); }
 });
 const write = (p: string, v: unknown) => writeFileSync(p, JSON.stringify(v));
@@ -130,7 +133,8 @@ try {
   verify(first); assert.throws(() => verify(first, "local-B"), /MCP_SNAPSHOT_STALE_OR_INVALID/);
   revision = 9; const changed = await consume(); assert.equal(changed.items![0].revision, "9"); assert.notEqual(changed.snapshot!.snapshot_digest, first.snapshot!.snapshot_digest);
   mode = "unknown"; const unknown = await consume(); assert.equal(unknown.items![0].revision, "unknown"); assert.equal(unknown.items![0].version, "unknown");
-  mode = "degraded"; assert.equal((await consume()).degraded, true);
+  mode = "degraded"; const degraded = await consume();
+  assert.equal(degraded.status, "available", JSON.stringify(degraded)); assert.equal(degraded.degraded, true);
   mode = "mixed"; assert.equal((await consume()).reason, "CONTEXT_MIXED_REVISIONS");
   mode = "empty"; assert.equal((await consume()).status, "unavailable"); assert.equal((await consume(required())).status, "blocked");
   mode = "blank"; assert.equal((await consume()).reason, "CONTEXT_EMPTY"); assert.equal((await consume(required())).status, "blocked");
