@@ -96,7 +96,9 @@ try {
       project_lock_digest: state.lock.lock_digest, connection: binding.connection, connection_digest: sha256ProviderDigest(requirement.connection),
       endpoint: String(requirement.connection.config.url), credential_domain: "ssot-readonly", credential_ref: "secret:fixture/key",
       grants: [{ tool: "search_documents", resource: binding.resource, arguments: { project_id: 101, query: "requirements", top_k: 2, max_total_chars: 40 } }],
-      timeout_ms: 5000, max_request_bytes: 4096, max_response_bytes: 8192, ttl_ms: 60000, fixture: true } };
+      // Positive requests include synchronous Git provenance work on Windows.
+      // The slow negative below still uses its explicit 80 ms deadline.
+      timeout_ms: 30_000, max_request_bytes: 4096, max_response_bytes: 8192, ttl_ms: 60000, fixture: true } };
   await zero(() => consume(options, null), "local");
   assert.equal(existsSync(join(project, ".aidlc/mcp-readonly")), false, "unbound creates no placeholder");
   const required = () => ({ ...options, sourcePolicy: { ...options.sourcePolicy, required: true } });
@@ -134,8 +136,8 @@ try {
   assert.equal(existsSync(join(project, ".aidlc/evidence")), false);
   const verify = (v: any, projectId = current.project_id) => readMcpSnapshot(v.snapshot.snapshot_path, { project, project_id: projectId, project_lock_digest: options.policy.project_lock_digest, snapshot_digest: v.snapshot.snapshot_digest });
   verify(first); assert.throws(() => verify(first, "local-B"), /MCP_SNAPSHOT_STALE_OR_INVALID/);
-  revision = 9; const changed = await consume(); assert.equal(changed.items![0].revision, "9"); assert.notEqual(changed.snapshot!.snapshot_digest, first.snapshot!.snapshot_digest);
-  mode = "unknown"; const unknown = await consume(); assert.equal(unknown.items![0].revision, "unknown"); assert.equal(unknown.items![0].version, "unknown");
+  revision = 9; const changed = await consume(); assert.equal(changed.status, "available", JSON.stringify(changed)); assert.equal(changed.items![0].revision, "9"); assert.notEqual(changed.snapshot!.snapshot_digest, first.snapshot!.snapshot_digest);
+  mode = "unknown"; const unknown = await consume(); assert.equal(unknown.status, "available", JSON.stringify(unknown)); assert.equal(unknown.items![0].revision, "unknown"); assert.equal(unknown.items![0].version, "unknown");
   mode = "degraded"; const degraded = await consume();
   assert.equal(degraded.status, "available", JSON.stringify(degraded)); assert.equal(degraded.degraded, true);
   mode = "mixed"; assert.equal((await consume()).reason, "CONTEXT_MIXED_REVISIONS");
