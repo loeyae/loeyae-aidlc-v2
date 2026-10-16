@@ -14,6 +14,10 @@ Independent Capability — not an AIDLC phase.
 
 本能力按需检查或美化现有 `.docx`。它不调用 46-stage 主状态机，不更新 `docs/aidlc/aidlc-state.json`、handoff、audit 或 Evidence，也不宣布任何 AI-DLC Stage 完成。
 
+`inspect` 和 `beautify` 由独立、按需 Git 安装并锁定的 `document.docx-style` Provider 承接（Provider 仓库 `providers/docx-style`）。先显式 add/lock/enable 包，再传 `--project <root> --host-provider <instance>`，或显式设置 `AIDLC_DOCX_PROJECT`、`AIDLC_DOCX_HOST_PROVIDER`。缺包时报告 NEEDS_CAPABILITY；不得隐式安装、联网、注册 MCP 或安装字体。该包仅声明 Windows x64。`validate` 是 Core 独立 OPC verifier，无需 Provider。inspect 保持只读；其普通检查和显式自定义样式不要求绑定品牌。
+
+Core 锁定输入 DOCX、自定义 style-spec 的原始字节、调用参数和 Provider revision；Provider 仅输出 invocation 绑定的候选。Core 重新解析原始和候选的关系与 Content Types，检查唯一 styles Part、完整 ZIP 条目集合和全部非样式字节，并复核输入与锁的新鲜度后才发布。不采信 Provider 自报 unchanged。
+
 ## 输入与写入边界
 
 调用方提供：
@@ -21,7 +25,7 @@ Independent Capability — not an AIDLC phase.
 - 输入 DOCX 的绝对路径；
 - 只读检查、dry-run 或写入目标；
 - 写入时必须提供与输入不同的显式绝对输出路径；
-- 可选内置 preset，当前仅支持 `professional-zh`；或严格 allowlist 的自定义 JSON Style Spec；
+- 可选 Provider preset，当前仅支持 `professional-zh`；或严格 allowlist 的自定义 JSON Style Spec；
 - 目标已存在时，只有用户明确授权替换才使用 `--force`。
 
 永不原地覆盖或修改源 DOCX。临时验收产物写入会话 scratch 或用户明确指定的安全位置，不写回源目录。不得把真实业务文档复制进源码仓库。
@@ -36,6 +40,10 @@ Independent Capability — not an AIDLC phase.
 4. `docx validate --against`：验证 Part 集合不变、所有非 styles Part 字节完全相同、正文文本不变。
 
 ```bash
+# 以下 inspect/beautify 命令需要预先显式设置这两个值，validate 不需要：
+export AIDLC_DOCX_PROJECT="/absolute/path/project"
+export AIDLC_DOCX_HOST_PROVIDER="docx-styles"
+
 loeyae-aidlc docx inspect "/absolute/path/input.docx" --json
 
 loeyae-aidlc docx beautify "/absolute/path/input.docx" \
@@ -78,6 +86,7 @@ loeyae-aidlc docx beautify "/absolute/path/input.docx" \
 - `visual_validation` 未经 Microsoft Word 或 LibreOffice 真实打开/渲染时必须为 `not_run`；
 - 没有真实渲染证据时不得声明视觉 `PASS`；
 - 直接格式会覆盖样式时，必须原样报告 coverage 和 warning，不得按“已映射段落数”虚报实际美化效果。
+- preset 不证明品牌合规或字体可用；缺品牌规范/包或未满足要求时不得声明品牌合规。普通 inspect 和授权自定义样式不受品牌绑定阻断。
 
 ## 禁止事项
 
@@ -94,3 +103,7 @@ loeyae-aidlc docx beautify "/absolute/path/input.docx" \
 ## 输出
 
 最终报告至少包含：输入与输出绝对路径、输入/输出 SHA-256、preset 或 Style Spec 摘要、样式角色映射、coverage、changed parts、不变量结果、`visual_validation`、warnings，以及是否创建 Git commit。
+
+## 文档导出边界
+
+`loeyae-aidlc export` 由已锁定的 `document.render` Provider 执行；需要显式 `--host-provider <instance>` 和项目 Provider 配置。仅支持 Markdown→DOCX/PDF、SVG→PNG，未启用时不下载安装。Core 锁定输入及本地依赖快照、验证候选后受管发布。DOCX 生成与 `docx inspect/beautify/validate` 是独立操作，导出成功不代表页面版式已审阅。图表视觉 Provider 的 preview/render 不能充当文档 export。

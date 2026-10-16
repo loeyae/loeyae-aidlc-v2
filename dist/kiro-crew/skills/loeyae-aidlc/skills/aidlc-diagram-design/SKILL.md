@@ -38,7 +38,7 @@ Mermaid 可作为文档默认输出，但不由本 SVG Capability 生成；已�
 
 ## 执行
 
-按加载的设计标准执行完整的图表设计流程：先从可追溯业务来源生成独立 expected contract，再确定 `TB`/`LR` 主阅读方向、主轴、业务层级、首层对称组和判断分支端口；随后提取 actual 节点/边、计算实际内容边界、生成 SVG 源、`.diagram.json` 语义伴随清单、Provider Request 和 generation provenance，并执行 expected-vs-actual 源级验证。`legend` 必须省略、`annotations[]` 必须省略或为空，SVG 不得生成 `data-legend-item` 或 `data-note`；较长说明写入相邻 Markdown、Design Notes 或 evidence。route contract 的折点按方向变化次数记录，不能使用 `points.length`。生成器或配置变更后必须重新生成 expected、sidecar、SVG、Provider Request 和其他声明的派生产物，记录 generator/version、config summary/digest、source refs/outputs，再重跑受影响验收。生成器不得以固定窗口高度、整体缩放、缩小字号或压缩层级换取“一屏显示”，纵向图可以扩展画布并允许页面纵向滚动。具体步骤和验收矩阵以加载的三份规则文件为准，本文件不复制。当 structural / swimlane / phase region 存在时，必须先枚举其与节点、连线、标签和箭头的实际交点，再生成节点白底与框体 alpha 断口；目标操作包含 `preview` 或浏览器侧 `render` 时，Provider 必须保存三视图截图和 snapshot 作为可复核证据。当 `target_operations` 包含 `preview` 或浏览器侧 `render` 时，源级 `diagram-contract` evidence 的业务、结构和几何层通过且 expected 存在后调用 `loeyae-aidlc diagram-provider run --request <provider-request.json> --evidence <diagram-contract.json>`；该运行器负责常规/适合窗口/放大视图的浏览器证据采集和 evidence 状态更新，`export` 不由 Chrome DevTools Provider 承担。
+按加载的设计标准执行完整的图表设计流程：先从可追溯业务来源生成独立 expected contract，再确定 `TB`/`LR` 主阅读方向、主轴、业务层级、首层对称组和判断分支端口；随后提取 actual 节点/边、计算实际内容边界、生成 SVG 源、`.diagram.json` 语义伴随清单、Provider Request 和 generation provenance，并执行 expected-vs-actual 源级验证。`legend` 必须省略、`annotations[]` 必须省略或为空，SVG 不得生成 `data-legend-item` 或 `data-note`；较长说明写入相邻 Markdown、Design Notes 或 evidence。route contract 的折点按方向变化次数记录，不能使用 `points.length`。生成器或配置变更后必须重新生成 expected、sidecar、SVG、Provider Request 和其他声明的派生产物，记录 generator/version、config summary/digest、source refs/outputs，再重跑受影响验收。生成器不得以固定窗口高度、整体缩放、缩小字号或压缩层级换取“一屏显示”，纵向图可以扩展画布并允许页面纵向滚动。具体步骤和验收矩阵以加载的三份规则文件为准，本文件不复制。当 structural / swimlane / phase region 存在时，必须先枚举其与节点、连线、标签和箭头的实际交点，再生成节点白底与框体 alpha 断口；目标操作包含 `preview` 或浏览器侧 `render` 时，Provider 必须保存三视图截图和 snapshot 作为可复核证据。当 `target_operations` 包含 `preview` 或浏览器侧 `render` 时，源级 `diagram-contract` evidence 的业务、结构和几何层通过且 expected 存在后调用 `loeyae-aidlc diagram-provider run --request <provider-request.json> --evidence <diagram-contract.json> --host-provider <instance>`；该运行器负责常规/适合窗口/放大视图的浏览器证据采集和 evidence 状态更新，`export` 不由 已锁定的视觉 Provider 承担。
 
 
 ## 连接线驱动布局执行流程
@@ -97,7 +97,7 @@ Mermaid 可作为文档默认输出，但不由本 SVG Capability 生成；已�
 
 先执行 JSON/SVG 结构、expected-vs-actual、source checker 和几何检查；目标操作包含 `preview` 或浏览器 `render` 时，再执行 Provider 的 `normal`、`fit`、`zoom` 三视图。`source-only` 只有在 expected、业务、结构和几何通过时才能以 `STATIC_PASS` 交付；只有用户要求的目标操作全部有最新真实 Provider 证据时才可声明 `PASS`。Provider 不可用时标记 `NEEDS_CAPABILITY`，来源/解析/证据缺失时标记 `UNVERIFIED`，发现问题标记 `FAIL`，不得伪造截图、快照或 evidence。
 
-最终报告至少列出图表 ID、来源文档上下文、修改 edge ID、最终端口和路径、保留外道理由、静态结果、Chrome 结果、未验证项、修改文件、证据路径和“未创建 Git commit”。
+最终报告至少列出图表 ID、来源文档上下文、修改 edge ID、最终端口和路径、保留外道理由、静态结果、浏览器结果、未验证项、修改文件、证据路径和“未创建 Git commit”。
 
 ## 上下文预算与分段执行
 
@@ -199,4 +199,7 @@ expected contract 使用 `primary_flow`、结构化 `branch_groups`，actual `.d
 
 过程图先冻结来源确认的 `primaryFlow`。没有确认主干时返回 `NEEDS_CONTEXT`；允许使用最长分支作为布局候选，但不得把它当作业务事实。随后生成确定性的 `branchLayoutPlan`，按主流程优先、路径长度、稳定 edge ID 排序；分支组必须整组外移或进入局部 lane，节点移动后重算全部 incident edges、端口、标签和障碍净空。真实反馈/重试关系才可进入 `loopLanes`，同侧 lane 按实际中心偏移满足共享 `laneGap`。
 
-验证闭环必须覆盖 expected、sidecar、SVG、静态 checker 和 Provider：静态层检查形状尺寸、实体/端口/障碍/lane gap、branch plan 和 structural 节点白底/框体 mask 对照；Provider 的 `normal`、`fit`、`zoom` 分别检查真实 DOM 边界、文本 bbox、structural 交点、computed fill/stroke、mask cutout 和截图像素证据。未执行 Chrome Provider 的三视图时，最终状态不得写为完整 `PASS`。
+验证闭环必须覆盖 expected、sidecar、SVG、静态 checker 和 Provider：静态层检查形状尺寸、实体/端口/障碍/lane gap、branch plan 和 structural 节点白底/框体 mask 对照；Provider 的 `normal`、`fit`、`zoom` 分别检查真实 DOM 边界、文本 bbox、structural 交点、computed fill/stroke、mask cutout 和截图像素证据。未执行 视觉 Provider 的三视图时，最终状态不得写为完整 `PASS`。
+## 文档导出边界
+
+`loeyae-aidlc export` 由已锁定的 `document.render` Provider 执行；需要显式 `--host-provider <instance>` 和项目 Provider 配置。仅支持 Markdown→DOCX/PDF、SVG→PNG，未启用时不下载安装。Core 锁定输入及本地依赖快照、验证候选后受管发布。DOCX 生成与 `docx inspect/beautify/validate` 是独立操作，导出成功不代表页面版式已审阅。图表视觉 Provider 的 preview/render 不能充当文档 export。

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { parseStoryDefinitions } from "./aidlc-story-index";
+import { checkSlices } from "./aidlc-document-slices";
 import { qualityBase, qualityChangeIssues, qualityInput, qualityLegacyResult, qualityPath, qualityResult, qualitySection, type QualityContext, type QualityDocument, type QualityInput, type QualityIssue } from "./aidlc-quality-gates";
 
 export interface Inventory { dependencies: string[]; fields: string[]; rules: string[] }
@@ -216,8 +217,23 @@ export function artifactConsistency(ctx: QualityContext): Record<string, unknown
     }
   };
   walk(ctx.module_id ? `docs/aidlc/modules/${ctx.module_id}` : "docs/aidlc/inception");
+  // Verified slice objects are byte-exact projections of canonical documents,
+  // whose authority mappings are checked below. They are not new authorities.
+  // Bind the complete verification inputs; unknown objects still take the normal
+  // mapping path and stale/tampered projections fail before any exemption.
+  const derived = new Set<string>();
+  const objectPrefix = `${qualityBase(ctx)}/document-slices/objects/`;
+  if (paths.some(path => path.startsWith(objectPrefix))) {
+    const slices = checkSlices(ctx);
+    if (slices.status === "passed") {
+      const inputs = slices.inputs as QualityInput[];
+      req.inputs.push(...inputs);
+      for (const input of inputs) if (input.path.startsWith(objectPrefix)) derived.add(input.path);
+    }
+  }
   for (const path of paths) {
     req.inputs.push(qualityInput(ctx, path));
+    if (derived.has(path)) continue;
     const body = readFileSync(qualityPath(ctx, path), "utf8");
     const referenced = [...new Set(body.match(/\b(?:FIELD|DEC|VC|CL)-[A-Z0-9_-]+\b/g) || [])];
     const mapping = mappings.find(m => m.path === path);

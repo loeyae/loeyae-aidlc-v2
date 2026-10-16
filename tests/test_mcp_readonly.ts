@@ -22,7 +22,18 @@ let mode = "ok", remote = "external content", jsonResponse = true, needAuth = fa
 let business = 0, network = 0, initialized = 0, sessionsSeen = 0, leakedRedirects = 0;
 const transports = new Map<string, StreamableHTTPServerTransport>();
 const servers: Server[] = [];
+const nativeFetch = globalThis.fetch;
+const fetchFailures: unknown[] = [];
+globalThis.fetch = (...args) => nativeFetch(...args).catch(error => {
+  const causes = [];
+  for (let cause = error; cause; cause = cause.cause) causes.push({ name: cause.name, code: cause.code, message: String(cause.message).replaceAll(secret, "<fixture-secret>") });
+  fetchFailures.push(causes);
+  throw error;
+});
+const exchanges: Array<{ method?: string; status: number; phase: string; authenticated: boolean }> = [];
 const http = createServer(async (req, res) => {
+  const phase = mode;
+  res.once("finish", () => exchanges.push({ method: req.method, status: res.statusCode, phase, authenticated: req.headers.authorization === `Bearer ${secret}` }));
   try {
     network++;
     if (req.url === "/redirect-target") { leakedRedirects++; res.writeHead(200).end(); return; }
@@ -36,7 +47,13 @@ const http = createServer(async (req, res) => {
     if (req.headers["mcp-session-id"]) sessionsSeen++;
     if (!transport && isInitializeRequest(body)) {
       initialized++;
-      transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID(), enableJsonResponse: jsonResponse });
+      const initializedTransport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(), enableJsonResponse: jsonResponse,
+        // Publish the session before the initialize response can reach the client.
+        // A fast follow-up request can arrive before handleRequest resolves.
+        onsessioninitialized: id => { transports.set(id, initializedTransport); },
+      });
+      transport = initializedTransport;
       const server = new Server({ name: "local-test-fixture", version: "1.0.0" }, { capabilities: { tools: {} } });
       servers.push(server);
       server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{ name: "write", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } }] }));
@@ -55,7 +72,6 @@ const http = createServer(async (req, res) => {
     if (!transport) { res.writeHead(400).end(); return; }
     if (body?.method === "tools/call" && mode !== "no-etag") res.setHeader("ETag", `"${remote.length}"`);
     await transport.handleRequest(req, res, body);
-    if (transport.sessionId) transports.set(transport.sessionId, transport);
   } catch { if (!res.headersSent) res.writeHead(500); res.end(); }
 });
 function write(path: string, value: unknown) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, JSON.stringify(value)); }
@@ -82,6 +98,10 @@ function verify(snapshot: { snapshot_path: string; snapshot_digest: string }) {
   return readMcpSnapshot(snapshot.snapshot_path, { project, project_id: current.project_id, project_lock_digest: policy.project_lock_digest, snapshot_digest: snapshot.snapshot_digest });
 }
 try {
+  // Synchronous Git provenance checks share this event loop. An idle server
+  // timeout can reset a pooled socket between SDK exchanges on Windows.
+  // Keep fixture sockets until the explicit closeAllConnections() in finally.
+  http.keepAliveTimeout = 0;
   http.listen(0, "127.0.0.1"); await once(http, "listening");
   const address = http.address(); assert(address && typeof address !== "string");
   const endpoint = `http://127.0.0.1:${address.port}/mcp`;
@@ -227,7 +247,11 @@ try {
   }
   assert.equal(existsSync(join(project, "aidlc/state.md")), false);
   console.log("PASS controlled MCP: official JSON/SSE/session transport, authorization zero-call rejections, TTL/integrity/provenance, bounded failures and credential isolation (local fixture only)");
+} catch (error) {
+  console.error("Local fixture failure diagnostics:", JSON.stringify({ fetchFailures, exchanges: exchanges.slice(-16) }));
+  throw error;
 } finally {
+  globalThis.fetch = nativeFetch;
   await Promise.all(servers.map(s => s.close()));
   http.closeAllConnections(); await new Promise<void>(r => http.close(() => r()));
   rmSync(root, { recursive: true, force: true });

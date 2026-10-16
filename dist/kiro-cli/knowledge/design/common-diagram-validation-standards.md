@@ -15,13 +15,13 @@
 
 每个新建、调整和迁移图表必须同时通过以下固定基线：画布 `#ffffff` 且完全不透明；structural 框体及标题 `fill="none" stroke="#666666"`，业务节点默认 `fill="none"`，但 structural 交点节点必须使用不透明 `fill="#ffffff"`；业务节点边框、业务边界、连线、箭头、边标签和业务文字 `#000000`；微软雅黑为首选字体；框体文字 `16`、边标签 `14`；框体与连线线宽 `2`；marker/overlay `10 × 10`；边标签无框、位于所属线段中点法向且实际 bbox 净空至少 `6`；不存在全局图例或全局备注层。structural 框体与连线、标签或箭头相交时必须按 [Structural Region Occlusion Contract](common-structural-region-occlusion-contract.md) 验证实际断口和绘制层级。
 
-source checker 必须检查显式 SVG 属性、sidecar 禁用字段、标签源坐标与路径中点关系，并输出 `global_decorations_absent: true`、`visual_style_status: "passed"`、`edge_label_placement_status: "passed"` 后才可进入 `STATIC_PASS`。Chrome Provider 必须从真实 DOM 读取 computed style、`getBBox()` 与 `getScreenCTM()`，在三视图逐一复核相同约束；`visualStyleErrors` 或 `labelPlacementErrors` 非空必须阻断 `VISUAL_PASS`。source 与 Provider 任一层缺失均不得由另一层代替。
+source checker 必须检查显式 SVG 属性、sidecar 禁用字段、标签源坐标与路径中点关系，并输出 `global_decorations_absent: true`、`visual_style_status: "passed"`、`edge_label_placement_status: "passed"` 后才可进入 `STATIC_PASS`。视觉 Provider 必须从真实 DOM 读取 computed style、`getBBox()` 与 `getScreenCTM()`，在三视图逐一复核相同约束；`visualStyleErrors` 或 `labelPlacementErrors` 非空必须阻断 `VISUAL_PASS`。source 与 Provider 任一层缺失均不得由另一层代替。
 
 ## Structural Region Occlusion 验收
 
 存在 `data-group-style-role="structural"` 时，source checker 必须单独记录 structural 遮挡结果：枚举框体与节点、连线、标签、箭头的实际交点；允许相交节点使用 `#ffffff`，禁止白色扩散到其他对象；检查 structural 框体/标题的 `#666666`、业务前景层级、alpha mask 单位和透明 cutout。mask 只能附着 structural 框体，不能附着业务连线或标签。源级通过不代表真实像素遮挡通过。
 
-Chrome Provider 在 `normal`、`fit`、`zoom` 中必须读取 computed style、实际 DOM bbox 和绘制顺序，验证相交节点白底、框体在业务对象下方不可见、标签法向净空至少 `6`、箭头不被框体遮挡，并保存包含实际交点的截图和 snapshot。不得只使用 `elementFromPoint` 判断 SVG mask；截图或实际像素证据缺失时保持 `UNVERIFIED`。任一视图的 structural 遮挡错误都必须阻断该视图和最终 `PASS`。
+视觉 Provider 在 `normal`、`fit`、`zoom` 中必须读取 computed style、实际 DOM bbox 和绘制顺序，验证相交节点白底、框体在业务对象下方不可见、标签法向净空至少 `6`、箭头不被框体遮挡，并保存包含实际交点的截图和 snapshot。不得只使用 `elementFromPoint` 判断 SVG mask；截图或实际像素证据缺失时保持 `UNVERIFIED`。任一视图的 structural 遮挡错误都必须阻断该视图和最终 `PASS`。
 
 ## 验证顺序
 
@@ -237,7 +237,7 @@ Geometry QA 使用源坐标、路径点和结构化文本估算，不声称完�
 2. `source-only` 默认不启动浏览器；
 3. HIGH 风险且非 source-only，或 MEDIUM 风险且目标操作为 `preview`/`render`，进入 Browser；
 4. Semantic 或 Geometry 未通过时先修复源，不执行浏览器掩盖问题；
-5. Chrome 未实际执行时保持 `executed=false` 和 `status=UNVERIFIED`；要求能力但不可用时为 `NEEDS_CAPABILITY`。
+5. 浏览器未实际执行时保持 `executed=false` 和 `status=UNVERIFIED`；要求能力但不可用时为 `NEEDS_CAPABILITY`。
 
 适用时 Provider 必须分别保留 `normal`、`fit`、`zoom` 三种阅读视图，每个视图记录 viewport、状态、几何观察、computed style 和截图/快照路径。normal 必须从 `(0,0)` 开始，fit 必须完整显示 content bbox，zoom 必须覆盖 `affected_edge_ids`；每个视图的 `visualStyleErrors` 与 `labelPlacementErrors` 均须为空。三视图任一缺失、失败或未实际执行，都不能输出 `VISUAL_PASS`/`OVERALL_PASS`。纵向滚动允许，水平溢出、裁切和不可读失败。
 
@@ -287,7 +287,7 @@ Geometry QA 使用源坐标、路径点和结构化文本估算，不声称完�
 
 确定性 checker 使用稳定错误码区分失败原因：`MAIN_FLOW_TRACE`、`LOOP_LANE`、`DECISION_SHAPE`、`DECISION_EXIT`、`PORT_DIRECTION`、`PORT_APPROACH`、`ROUTING_MINIMALITY`、`SIDE_SWITCH`、`SIDE_SWITCH_EXCEPTION`、`CHANGE_IMPACT_REVIEW`、`EDGE_CROSSING`、`CROSSING_EXCEPTION`、`COLLINEAR_OVERLAP`、`REDUNDANT_PATH_POINT`、`EDGE_NODE_COLLISION`、`STRUCTURAL_FRAME_STYLE`、`STRUCTURAL_NODE_FILL`、`STRUCTURAL_LAYER_ORDER`、`STRUCTURAL_MASK` 和 `STRUCTURAL_MASK_COVERAGE`。`EDGE_CROSSING` 仅针对未声明或未满足必要交叉可读性条件的交叉；`CROSSING_EXCEPTION` 处理缺失、重复、非法或未实际发生的例外；`COLLINEAR_OVERLAP` 始终不得降级为普通交叉，端点接触也不能掩盖同一边对之间的非零共线重叠。
 
-当目标操作为 `preview` 或浏览器 `render` 时，Chrome DevTools Provider 必须对实际 DOM/SVG 执行：节点和边集合的精确映射、edge-node crossing、edge-edge intersection（仅接受 sidecar 已声明且实际命中的必要交叉）、共线重叠、端口首末方向和目标外侧接近、边 bbox、同侧通道/跨轴折返、标签与无关边 bbox、边标签中点法向净空、箭头 overlay `10 × 10` bbox 及其被无关节点、后绘制标签或分组边界遮挡、structural 框体与节点/连线/标签/箭头交点、相交节点 computed `fill`、structural 框体 computed `stroke`、mask 单位和 cutout 覆盖、`text`/`tspan` bbox 越界与重叠、分组标题映射/标题区净空/成员与内部路径标签容量、白色不透明画布、框体/连线 computed fill/stroke/strokeWidth、文字 computed font/fill/size、marker 尺寸、全局图例/备注缺失、`contentBBox`、水平溢出、判定 diamond 和出口数量，以及 sidecar 声明的主流程和回路边覆盖。structural 遮挡必须结合最新截图或实际像素证据，不能只依赖 `elementFromPoint`；业务对象必须实际为黑色，只有相交节点允许不透明白底，只有匹配的结构性分组框体及标题允许实际为 `#666666`。不能用源坐标结果代替这些浏览器检查。
+当目标操作为 `preview` 或浏览器 `render` 时，已锁定的视觉 Provider 必须对实际 DOM/SVG 执行：节点和边集合的精确映射、edge-node crossing、edge-edge intersection（仅接受 sidecar 已声明且实际命中的必要交叉）、共线重叠、端口首末方向和目标外侧接近、边 bbox、同侧通道/跨轴折返、标签与无关边 bbox、边标签中点法向净空、箭头 overlay `10 × 10` bbox 及其被无关节点、后绘制标签或分组边界遮挡、structural 框体与节点/连线/标签/箭头交点、相交节点 computed `fill`、structural 框体 computed `stroke`、mask 单位和 cutout 覆盖、`text`/`tspan` bbox 越界与重叠、分组标题映射/标题区净空/成员与内部路径标签容量、白色不透明画布、框体/连线 computed fill/stroke/strokeWidth、文字 computed font/fill/size、marker 尺寸、全局图例/备注缺失、`contentBBox`、水平溢出、判定 diamond 和出口数量，以及 sidecar 声明的主流程和回路边覆盖。structural 遮挡必须结合最新截图或实际像素证据，不能只依赖 `elementFromPoint`；业务对象必须实际为黑色，只有相交节点允许不透明白底，只有匹配的结构性分组框体及标题允许实际为 `#666666`。不能用源坐标结果代替这些浏览器检查。
 
 Provider Request 的 `target_reading_environment.viewports` 必须同时声明 `normal`、`fit`、`zoom` 三个对象。实际运行缺少任何一个视图时必须阻断；只有三个视图全部检查成功，且截图/快照均已生成，才可以原子更新 `provider_status: "passed"`。页面纵向滚动允许，但水平溢出、对象越界、文字/箭头不可见或被遮挡都失败。dry-run 只验证请求和执行计划，不产生浏览器通过证据。
 
@@ -333,6 +333,6 @@ Provider Request 的 `target_reading_environment.viewports` 必须同时声明 `
 
 `route_contract.geometry_profile` 是独立 expected 意图，不能从 actual 坐标、sidecar 或 SVG 反向生成；`designNotes.layout.geometryProfile` 是 actual 声明，必须与 expected 逐字段匹配。`route_contract.branch_layout_plan` 与 actual `designNotes.layout.branchLayoutPlan` 同样必须比较策略、冻结顺序、基准间距、分支组、排序、布局候选边、已确认主流程边、局部 lane 模式和分支间距。Provider 不得只检查字段存在。
 
-Chrome DevTools Provider 在 `normal`、`fit`、`zoom` 每个实际视图中使用 `getBoundingClientRect()`、`getScreenCTM()`、路径采样和真实文本 bbox 重复上述门禁；阈值按当前 SVG 屏幕缩放换算。Provider 的 `entityGapErrors`、`portGapErrors`、`obstacleGapErrors`、`labelObstacleGapErrors` 或 `laneGapErrors` 非空时，当前视图失败且不得写入视觉通过证据。只有三视图全部通过，才能升级 `VISUAL_PASS`/`PASS`；未执行 Provider 仍只能是 `STATIC_PASS` 或 `UNVERIFIED`。
+已锁定的视觉 Provider 在 `normal`、`fit`、`zoom` 每个实际视图中使用 `getBoundingClientRect()`、`getScreenCTM()`、路径采样和真实文本 bbox 重复上述门禁；阈值按当前 SVG 屏幕缩放换算。Provider 的 `entityGapErrors`、`portGapErrors`、`obstacleGapErrors`、`labelObstacleGapErrors` 或 `laneGapErrors` 非空时，当前视图失败且不得写入视觉通过证据。只有三视图全部通过，才能升级 `VISUAL_PASS`/`PASS`；未执行 Provider 仍只能是 `STATIC_PASS` 或 `UNVERIFIED`。
 
 分支布局计划的自动排序不构成业务确认，验证报告必须分别记录 `primaryFlow` 的来源确认状态与 branch layout candidate。分支组外移、节点尺寸变化或 lane 变化后，必须复核所有 incident edges、端口、标签、障碍净空和画布边界；不能只修复触发错误的单条边。

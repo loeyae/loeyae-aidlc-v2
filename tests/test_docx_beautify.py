@@ -323,8 +323,84 @@ def test_custom_spec_and_validation_failure(directory: Path) -> None:
     assert "DOCX invariant failed" in failed.stderr
 
 
+def test_hostile_packages_and_high_direct_coverage(directory: Path) -> None:
+    base = directory / "security-base.docx"
+    write_docx(base)
+    parts = zip_parts(base)
+    output = directory / "preserved.docx"
+    rels = parts["word/_rels/document.xml.rels"]
+    style_rel = b'<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+    # Select the real styles relationship independent of its Id spelling.
+    import re
+    style_rel = re.search(rb'<Relationship\b[^>]*Type="[^"]*/styles"[^>]*/>', rels).group(0)
+    cases = {
+        "ambiguous-styles": ("word/_rels/document.xml.rels", rels.replace(b"</Relationships>", style_rel.replace(b'Id="', b'Id="second-') + b"</Relationships>")),
+        "external-styles": ("word/_rels/document.xml.rels", rels.replace(style_rel, style_rel.replace(b"/>", b' TargetMode="External"/>'))),
+        "malformed": ("word/styles.xml", b"<broken>"),
+        "wrong-content-type": ("[Content_Types].xml", parts["[Content_Types].xml"].replace(b"wordprocessingml.styles+xml", b"wrong-styles+xml")),
+        "ambiguous-content-type": ("[Content_Types].xml", parts["[Content_Types].xml"].replace(b"</Types>", b'<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>')),
+        "wrong-styles-root": ("word/styles.xml", b"<not-styles/>"),
+        "escaping-styles": ("word/_rels/document.xml.rels", rels.replace(b'Target="styles.xml"', b'Target="../../escape.xml"')),
+    }
+    for name, (part, replacement) in cases.items():
+        source = directory / (name + ".docx")
+        rewrite_part(base, source, part, replacement)
+        output.write_bytes(b"old output")
+        result = run_cli("docx", "beautify", str(source), "--output", str(output), "--force", "--json")
+        assert result.returncode != 0, name
+        assert output.read_bytes() == b"old output", name
+    duplicate = directory / "duplicate.docx"
+    with zipfile.ZipFile(duplicate, "w") as archive:
+        for name, content in parts.items():
+            archive.writestr(name, content)
+        archive.writestr("word/styles.xml", parts["word/styles.xml"])
+    failed = run_cli("docx", "beautify", str(duplicate), "--output", str(output), "--force")
+    assert failed.returncode != 0 and "duplicate DOCX ZIP entry" in failed.stderr
+    assert output.read_bytes() == b"old output"
+    bomb = directory / "bomb.docx"
+    data = bytearray(base.read_bytes())
+    central = data.index(b"PK\x01\x02")
+    data[central + 24:central + 28] = (0xFFFFFFFF).to_bytes(4, "little")
+    bomb.write_bytes(data)
+    failed = run_cli("docx", "beautify", str(bomb), "--output", str(output), "--force")
+    assert failed.returncode != 0 and "size limit" in failed.stderr
+    assert output.read_bytes() == b"old output"
+    # Original inspect permits a package without a styles relationship, without binding a brand.
+    no_styles = directory / "no-styles.docx"
+    rewrite_part(base, no_styles, "word/_rels/document.xml.rels", rels.replace(style_rel, b""))
+    checked = run_cli("docx", "inspect", str(no_styles), "--json")
+    assert checked.returncode == 0, checked.stderr
+    assert json.loads(checked.stdout)["styles"]["defined"] == 0
+    # Actual high direct-format coverage must lower the conservative effectiveness estimate.
+    document = ET.fromstring(parts["word/document.xml"])
+    for paragraph in document.iter(W + "p"):
+        properties = paragraph.find(W + "pPr")
+        if properties is None:
+            properties = ET.Element(W + "pPr")
+            paragraph.insert(0, properties)
+        ET.SubElement(properties, W + "spacing", {W + "after": "123"})
+    high = directory / "high-direct.docx"
+    rewrite_part(base, high, "word/document.xml", ET.tostring(document, encoding="utf-8"))
+    result = run_cli("docx", "beautify", str(high), "--dry-run", "--json")
+    assert result.returncode == 0, result.stderr
+    coverage = json.loads(result.stdout)["coverage"]
+    assert coverage["paragraphs_with_direct_visual_overrides"] == coverage["paragraphs_total"]
+    assert coverage["estimated_effective_paragraphs"] == 0
+    checked = run_cli("docx", "inspect", str(high), "--json")
+    assert checked.returncode == 0, checked.stderr
+    assert json.loads(checked.stdout)["direct_formatting"]["paragraphs_with_direct_visual_overrides"] == coverage["paragraphs_total"]
+
+
 def main() -> None:
     test_help()
+    if not os.environ.get("AIDLC_DOCX_HOST_PROVIDER"):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "source.docx"
+            write_docx(source)
+            result = run_cli("docx", "beautify", str(source), "--dry-run")
+            assert result.returncode != 0 and "explicitly authorize --host-provider" in result.stderr
+        print("DOCX missing-package diagnostic passed; SKIP production beautify (set AIDLC_DOCX_PROJECT/HOST_PROVIDER)")
+        return
     with tempfile.TemporaryDirectory(prefix="aidlc-docx-beautify-") as temp:
         directory = Path(temp)
         test_dry_run(directory)
@@ -332,6 +408,7 @@ def main() -> None:
         test_relationship_resolved_styles_part(directory)
         test_beautify_and_validate(directory)
         test_custom_spec_and_validation_failure(directory)
+        test_hostile_packages_and_high_direct_coverage(directory)
     print("DOCX beautify CLI tests passed")
 
 

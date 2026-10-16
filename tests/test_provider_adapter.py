@@ -114,17 +114,14 @@ def test_dry_run_validates_request() -> None:
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout)
         assert payload["status"] == "ready"
-        assert payload["provider"] == "chrome-devtools-mcp"
+        assert payload["provider"] == "diagram.visual"
         assert payload["plan"][0]["local_preview_fallback"] is True
         with open(TOOL) as handle:
             provider_source = handle.read()
-        assert '["start", "--isolated"]' in provider_source
-        assert '"--sessionId",\n    sessionId,' in provider_source
-        assert "BROWSER_PROFILE_CONFLICT" in provider_source
-        assert 'process.once("exit"' in provider_source
+        assert "dispatchVisual" in provider_source
+        assert "chrome-devtools-mcp" not in provider_source
         assert "visualStyleErrors" in provider_source
         assert "labelPlacementErrors" in provider_source
-        assert "getComputedStyle" in provider_source
     finally:
         shutil.rmtree(project)
 
@@ -283,7 +280,10 @@ def geometry_fixture(project: str, variant: str, viewport: tuple[int, int]) -> N
     evidence_dir = os.path.join(project, ".aidlc", "evidence", "requirements-methods", "test-module")
     os.makedirs(evidence_dir, exist_ok=True)
     with open(os.path.join(evidence_dir, "diagram-contract.json"), "w") as handle:
-        json.dump({"status": "passed"}, handle)
+        # Browser-only fixture precondition. The production source-producer/sensor
+        # chain is exercised separately by test_diagram_visual_chain.ts.
+        json.dump({"status": "passed", "source_format": "svg", "final_status": "STATIC_PASS",
+                   "expected_contract_status": "passed", "generation_status": "passed"}, handle)
     with open(os.path.join(project, "request.json"), "w") as handle:
         json.dump({
             "version": "1",

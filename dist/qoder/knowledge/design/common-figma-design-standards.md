@@ -50,7 +50,7 @@ Step 4: get_screenshot → 视觉参考，确认解析结果与实际外观一�
 - [ ] `borderRadius` 设置在正确的层级（不依赖父容器 overflow 裁剪）
 - [ ] 文字样式（fontFamily、fontWeight、fontSize、lineHeight、color）全部来自 Figma，无凭空取值
 - [ ] 颜色和间距优先使用 `get_variable_defs` 返回的变量对应的项目 token，而非硬编码值
-- [ ] Element Plus 组件样式覆盖使用 `:deep()` 选择器
+
 - [ ] 组件在主页面中的 flex 属性正确（父级为 fill 的节点需要 `flex: 1`）
 
 ## 2. Figma MCP 使用规范
@@ -105,76 +105,9 @@ Step 4: get_screenshot → 视觉参考，确认解析结果与实际外观一�
 
 **`min-width: 0` 必须显式补充**：Tailwind 的 `flex-1` 不包含 `min-width: 0`，在 flex 容器中会导致内容溢出不收缩。翻译时必须补上。
 
-## 3. Element Plus 组件还原规范
+## 3. 组件库映射
 
-### 3.1 Figma Component 到 Element Plus 的映射
-
-`get_design_context` 返回的 JSX 中，Figma 组件实例表现为具名 JSX 组件及其 props。当组件名可识别为 Element Plus 组件时，映射为对应的 `<el-xxx>`，props 按下表转换：
-
-```
-Figma 组件属性 → Element Plus props:
-- Button: 文本→slot内容, type→type, style=text→link, size→size, plain→plain, round→round
-- Tag: type→type, effect→effect, round→round, size→size, closable→closable
-- Badge: type→type, dot=on→is-dot, value→value
-- Progress: type→type, format=true→show-text, %=30→:percentage="30"
-```
-
-**已建立 Code Connect 时优先使用映射**：调用 `get_code_connect_map` 获取节点到项目实际组件的映射，直接使用返回的 `componentName` 和 `source`，不再依据组件名推测。
-
-### 3.2 Figma 组件与前端组件的结构差异
-
-Figma 中的组件是纯视觉的，不包含交互行为。以下场景会导致前端组件结构与 Figma 不一致，需要特别注意布局处理：
-
-| Figma 表现 | 前端实际结构 | 布局影响 |
-|-----------|-------------|---------|
-| Button（带下拉菜单语义） | `el-dropdown > el-button` | dropdown 包裹层不继承 flex:1，需对 `.el-dropdown` 也设置 flex:1 |
-| Button（带弹出确认框） | `el-popconfirm > el-button` | 同上，popconfirm 包裹层需处理 |
-| Input（带搜索建议） | `el-autocomplete`（非 el-input） | 组件根元素不同，宽度行为不同 |
-| Select（带远程搜索） | `el-select-v2` | 组件 class 不同 |
-
-**规则**：当 Figma 中多个 Button 实例并排且尺寸行为为 fill（Tailwind `flex-1`）时，检查前端是否有按钮需要被 dropdown/popconfirm/tooltip 等包裹。如果有，必须对包裹容器也设置 `flex: 1; min-width: 0`，确保与设计稿等宽。
-
-### 3.3 Element Plus 样式覆盖规则
-
-- 对 Element Plus 组件的样式覆盖**必须**使用 `:deep()` 选择器（Vue scoped 样式不穿透子组件）
-- 优先使用 Element Plus 的 props 控制样式（type、size、effect），避免直接覆盖 CSS
-- 设计稿中的自定义颜色（如 #6E6CF5 不在 Element Plus 预设中）使用 `color` prop 或 `style` 绑定
-
-```vue
-<!-- ✅ 正确：使用 props -->
-<el-tag type="warning" effect="plain" round>股权基金</el-tag>
-
-<!-- ✅ 正确：自定义颜色用 color prop 或 style -->
-<el-tag :color="'#6E6CF5'" style="border-color: #6E6CF5; color: #fff;" round>项目储备</el-tag>
-
-<!-- ✅ 正确：样式覆盖用 :deep() -->
-<style scoped>
-:deep(.el-avatar) { border-radius: 100px; }
-</style>
-
-<!-- ❌ 错误：scoped 中直接写子组件类名 -->
-<style scoped>
-.el-avatar { border-radius: 100px; }  /* 不生效 */
-</style>
-```
-
-### 3.4 Element Plus 颜色体系
-
-设计稿中的颜色值与 Element Plus CSS 变量的对应关系：
-
-| 色值 | Element Plus 变量 | 语义 |
-|------|------------------|------|
-| #409EFF | --el-color-primary | 主色 |
-| #67C23A | --el-color-success | 成功 |
-| #E6A23C | --el-color-warning | 警告 |
-| #F56C6C | --el-color-danger | 危险 |
-| #909399 | --el-color-info | 信息 |
-| #303133 | --el-text-color-primary | 主要文字 |
-| #606266 | --el-text-color-regular | 常规文字 |
-| #909399 | --el-text-color-secondary | 次要文字 |
-| #DCDFE6 | --el-border-color | 边框 |
-| #EBEEF5 | --el-border-color-lighter | 浅边框/分隔线 |
-| #F5F7FA | --el-fill-color-light | 悬停背景 |
+先使用项目已确认的组件映射和 Code Connect。框架/组件库专属映射、props 与样式覆盖规则按真实模块依赖/版本及显式绑定加载外部兼容章节，见 `provider-offline-knowledge.md`；不能由纯 Web、PC 或组件名称推断某组件库。未安装包时使用项目自身规范。
 
 ## 4. design.md 中前端部分的定位
 

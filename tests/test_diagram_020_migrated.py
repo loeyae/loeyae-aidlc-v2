@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from semantic_checker_fixture import TSX, checker_environment, write_checker_state
@@ -84,6 +85,13 @@ def test_migrated_fixture_reaches_static_pass_without_browser_evidence() -> None
     project = tempfile.mkdtemp(prefix="aidlc-diagram-020-migrated-")
     try:
         shutil.copytree(FIXTURE_ROOT, project, dirs_exist_ok=True)
+        # The checked-in recipe uses python3; Windows can resolve that name to
+        # the Store stub. Use the interpreter actually running this fixture.
+        manifest_path = os.path.join(project, MANIFEST_RELATIVE_PATH)
+        manifest = load_json(project, MANIFEST_RELATIVE_PATH)
+        manifest["diagrams"][0]["generation"]["command_argv"][0] = sys.executable
+        with open(manifest_path, "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle, ensure_ascii=False)
         write_checker_state(project)
         result = run_checker(project)
         assert result.returncode == 0, result.stderr

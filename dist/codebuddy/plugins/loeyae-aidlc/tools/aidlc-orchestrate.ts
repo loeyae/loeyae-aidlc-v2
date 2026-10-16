@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { verifyVisualEvidence } from "./aidlc-visual-provider.js";
 /**
  * aidlc-orchestrate.ts — The deterministic workflow engine.
  *
@@ -2866,6 +2867,8 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
             if (!["passed", "unverified"].includes(String(evidence.generation_status))) errors.push('generation_status must be "passed" or "unverified"');
           }
           if (final.status === "PASS") {
+            try { verifyVisualEvidence(PROJECT_ROOT, evidence, { project_id: state.workflow_id, stage: stage.slug, scope: instance.instance_id }); }
+            catch (error) { errors.push(error instanceof Error ? error.message : "VISUAL_EVIDENCE_INVALID"); }
             if (evidence.target_operation_required !== true) errors.push("PASS requires target_operation_required=true");
             if (evidence.provider_status !== "passed") errors.push("PASS requires provider_status=passed");
             if (evidence.render_status !== "passed" || evidence.browser_visual_status !== "passed") errors.push("PASS requires latest browser visual evidence");
@@ -3170,7 +3173,12 @@ function qualityGateContext(state: WorkflowState, instance: StageInstance): Qual
 }
 
 function documentSliceContext(state: WorkflowState, instance: StageInstance): SliceContext {
-  return { ...qualityGateContext(state, instance), slices_version: state.document_slices_version,
+  // Global/integration operations re-check module GREEN using their own views.
+  // Slice identity belongs to that module's workflow, never to its parent.
+  const owner = instance.module_id ? loadWorkflowView(PROJECT_ROOT, instance.module_id) : null;
+  const scoped = owner && (owner.parent_workflow_id === state.workflow_id
+    || state.workflow_kind === "integration" && !!owner.parent_workflow_id && owner.parent_workflow_id === state.parent_workflow_id) ? owner : state;
+  return { ...qualityGateContext(scoped, instance), slices_version: scoped.document_slices_version,
     units_executed: instance.stage.slug === "units-generation" || completedInstanceIds(state).includes(`units-generation@module:${instance.module_id}`) };
 }
 
@@ -5767,9 +5775,14 @@ async function handleUpgrade(args: string[]): Promise<Directive> {
     .filter((instance) => !moduleFilter || instance.module_id === moduleFilter)
     .map((declared) => {
       const instance = runtimeInstance(declared, view);
+      // Match producer/admission adoption rules: legacy workflows do not create
+      // quality Evidence until explicitly adopted. Never offer an endless repair.
+      const missingSemantic = new Set(missingSemanticEvidence(instance));
       const missing = instance.stage.sensors
         .filter(evidenceBackedSensor)
-        .filter((sensor) => !existsSync(evidencePath(instance.stage, sensor, instance)));
+        .filter((sensor) => SEMANTIC_SENSORS.has(sensor)
+          ? missingSemantic.has(sensor)
+          : !existsSync(evidencePath(instance.stage, sensor, instance)));
       return { instance, missing };
     })
     .filter((item) => item.missing.length > 0)

@@ -217,8 +217,8 @@ function tddProject(scope: string, newIds: string[], characterizationIds: string
   };
   expect("workspace-detection");
   ok(project, ["orchestrate", "report", "--stage", "workspace-detection", "--result", "completed", "--instruction-ack", "workspace-detection"]);
-  expect("state-template");
-  ok(project, ["orchestrate", "report", "--stage", "state-template", "--result", "completed", "--instruction-ack", "state-template"]);
+  // New lightweight workflows omit the ungated instruction stage, not I13.
+  assert.equal(loadWorkflowState(project)!.execution_profile?.level, "lightweight");
   expect("test-case-derivation@module:project");
   write(project, "docs/aidlc/modules/project/inception/requirements.md", REQUIREMENTS);
   const ids = [...newIds, ...characterizationIds].sort();

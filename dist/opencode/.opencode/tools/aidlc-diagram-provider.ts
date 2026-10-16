@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, writeFileSync, readFileSync } from "fs";
-import { spawnSync } from "child_process";
+import { existsSync, mkdirSync, renameSync, statSync, writeFileSync, readFileSync } from "fs";
+import { dispatchVisual, safeVisualPath, bindVisualInputs, sealVisualEvidence } from "./aidlc-visual-provider.js";
+import { sha256FileDigest } from "./aidlc-project-provider.js";
 import { dirname, extname, join, relative, resolve } from "path";
-import { tmpdir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
 import {
   ExpectedContract,
@@ -15,8 +15,7 @@ import { isSplitLayout, loadWorkflowParts } from "./aidlc-workflow-layout";
 import { evidenceRelativePath } from "./aidlc-execution-context";
 
 const PROJECT_ROOT = process.cwd();
-const PROVIDER_PACKAGE = "chrome-devtools-mcp";
-const COMMAND_TIMEOUT_MS = 120_000;
+const PROVIDER_PACKAGE = "diagram.visual";
 const MAX_VIEWPORT = { width: 3840, height: 2160 };
 const MIN_VIEWPORT = { width: 320, height: 240 };
 let activeEvidenceDirectory: string | undefined;
@@ -44,7 +43,7 @@ interface DiagramRequest {
 
 interface ProviderRequest {
   version: "1";
-  provider: "chrome-devtools";
+  provider: "diagram.visual";
   target_operation: TargetOperation;
   stage: string;
   browser?: string;
@@ -164,7 +163,7 @@ function nonEmpty(value: unknown, field: string): string {
 }
 
 function projectPath(value: string, field: string): string {
-  const resolved = resolve(PROJECT_ROOT, value);
+  const resolved = safeVisualPath(PROJECT_ROOT, value);
   const rel = relative(PROJECT_ROOT, resolved);
   if (rel === ".." || rel.startsWith(`..${requirePathSeparator()}`) || rel.startsWith("/")) {
     fail(`${field} must stay inside the project root`);
@@ -255,7 +254,7 @@ function parseRequest(path: string): ProviderRequest {
   }
   const value = record(raw, "request");
   if (value.version !== "1") fail('request.version must be "1"');
-  if (value.provider !== "chrome-devtools") fail('request.provider must be "chrome-devtools"');
+  if (!["chrome-devtools", "diagram.visual"].includes(String(value.provider))) fail('request.provider must be "diagram.visual" (legacy chrome-devtools accepted)');
   const targetOperation = nonEmpty(value.target_operation, "request.target_operation") as TargetOperation;
   if (!["preview", "render"].includes(targetOperation)) fail('request.target_operation must be "preview" or "render"; export is not supported by this provider (NEEDS_CAPABILITY)');
   const stage = nonEmpty(value.stage, "request.stage");
@@ -274,158 +273,23 @@ function parseRequest(path: string): ProviderRequest {
   const diagrams: DiagramRequest[] = value.diagrams.map((rawItem, index) => {
     const item = record(rawItem, `diagrams[${index}]`);
     const result: DiagramRequest = { id: nonEmpty(item.id, `diagrams[${index}].id`) };
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(result.id)) fail("diagram id must be a portable identifier");
     if (item.source_path !== undefined && item.url !== undefined) fail(`diagrams[${index}] must provide only one of source_path or url`);
     if (item.source_path === undefined && item.url === undefined) fail(`diagrams[${index}] must provide source_path or url`);
     if (item.source_path !== undefined) result.source_path = nonEmpty(item.source_path, `diagrams[${index}].source_path`);
     if (item.url !== undefined) result.url = nonEmpty(item.url, `diagrams[${index}].url`);
     if (item.manifest_path !== undefined) result.manifest_path = nonEmpty(item.manifest_path, `diagrams[${index}].manifest_path`);
     if (item.expected_contract_path !== undefined) result.expected_contract_path = nonEmpty(item.expected_contract_path, `diagrams[${index}].expected_contract_path`);
-    if (item.screenshot_path !== undefined) result.screenshot_path = nonEmpty(item.screenshot_path, `diagrams[${index}].screenshot_path`);
-    if (item.snapshot_path !== undefined) result.snapshot_path = nonEmpty(item.snapshot_path, `diagrams[${index}].snapshot_path`);
+    if (item.screenshot_path !== undefined) { result.screenshot_path = nonEmpty(item.screenshot_path, `diagrams[${index}].screenshot_path`); if (!result.screenshot_path.endsWith(".png")) fail("screenshot_path must end in .png"); }
+    if (item.snapshot_path !== undefined) { result.snapshot_path = nonEmpty(item.snapshot_path, `diagrams[${index}].snapshot_path`); if (!result.snapshot_path.endsWith(".snapshot.txt")) fail("snapshot_path must end in .snapshot.txt"); }
     result.viewport = item.viewport === undefined ? defaultViewport : validateViewport(item.viewport, `diagrams[${index}].viewport`);
     sourceUrl(result, index);
     if (result.manifest_path) projectPath(result.manifest_path, `diagrams[${index}].manifest_path`);
     if (result.expected_contract_path) projectPath(result.expected_contract_path, `diagrams[${index}].expected_contract_path`);
     return result;
   });
-  return { version: "1", provider: "chrome-devtools", target_operation: targetOperation, stage, ...(requestedBrowser ? { browser: requestedBrowser } : {}), target_reading_environment: { viewport: defaultViewport, ...(viewports ? { viewports } : {}) }, diagrams };
-}
-
-function parseJsonOutput(stdout: string): unknown {
-  const text = stdout.trim();
-  if (!text) fail("Chrome DevTools CLI returned no JSON output");
-  try {
-    const direct = JSON.parse(text);
-    if (direct && typeof direct === "object" && typeof direct.message === "string") {
-      const match = direct.message.match(/```json\s*([\s\S]*?)\s*```/i);
-      if (match) {
-        try { return JSON.parse(match[1]); } catch { return direct; }
-      }
-    }
-    return direct;
-  } catch {
-    const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    for (let index = lines.length - 1; index >= 0; index--) {
-      try { return JSON.parse(lines[index]); } catch { /* continue to the last JSON line */ }
-    }
-    fail(`Chrome DevTools CLI returned invalid JSON: ${text.slice(-500)}`);
-  }
-}
-
-const BROWSER_CANDIDATES = process.platform === "darwin"
-  ? [
-      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-      "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    ]
-  : process.platform === "win32"
-    ? [
-        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-      ]
-    : [
-        "/usr/bin/google-chrome",
-        "/usr/bin/google-chrome-stable",
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-        "/usr/bin/microsoft-edge",
-      ];
-const BROWSER_PROFILE_CONFLICT = "BROWSER_PROFILE_CONFLICT";
-let configuredBrowser: string | undefined;
-
-function resolveBrowserExecutable(requested?: string): string | undefined {
-  const candidate = requested || process.env.AIDLC_CHROME_BIN || process.env.CHROME_BIN;
-  if (candidate) {
-    const resolved = resolve(candidate);
-    if (!existsSync(resolved) || !statSync(resolved).isFile()) {
-      fail(`NEEDS_CAPABILITY: configured browser executable does not exist: ${candidate}`);
-    }
-    return resolved;
-  }
-  return BROWSER_CANDIDATES.find((candidatePath) => existsSync(candidatePath) && statSync(candidatePath).isFile());
-}
-
-let chromeSessionId: string | undefined;
-let chromeSessionExitHandlerRegistered = false;
-
-function isBrowserProfileConflict(detail: string): boolean {
-  return /browser is already running|user[ -]data[ -]dir(?:ectory)?.*(?:in use|already)|profile.*(?:in use|already running)/i.test(detail);
-}
-
-function runChromeCommand(args: string[], sessionId: string, expectsJson: boolean): CliResult {
-  const browserArgument = configuredBrowser && args[0] === "start" ? ["--browser", configuredBrowser] : [];
-  const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
-  const result = spawnSync(npxCommand, [
-    "-y",
-    "--package",
-    PROVIDER_PACKAGE,
-    "chrome-devtools",
-    "--sessionId",
-    sessionId,
-    ...args,
-    ...browserArgument,
-    ...(expectsJson ? ["--output-format=json"] : []),
-  ], {
-    cwd: PROJECT_ROOT,
-    encoding: "utf8",
-    shell: process.platform === "win32",
-    timeout: COMMAND_TIMEOUT_MS,
-    env: {
-      ...process.env,
-      CI: "1",
-      CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1",
-      CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1",
-      ...(configuredBrowser ? { CHROME_BIN: configuredBrowser, PUPPETEER_EXECUTABLE_PATH: configuredBrowser } : {}),
-    },
-    maxBuffer: 8 * 1024 * 1024,
-  });
-  const stdout = typeof result.stdout === "string" ? result.stdout : String(result.stdout || "");
-  const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
-  if (result.error || result.status !== 0) {
-    const detail = result.error ? result.error.message : `exit code ${result.status}`;
-    const output = [stderr, stdout.trim()].filter(Boolean).join("; ").slice(-1000);
-    const code = isBrowserProfileConflict(output) ? BROWSER_PROFILE_CONFLICT : "NEEDS_CAPABILITY";
-    const reason = code === BROWSER_PROFILE_CONFLICT
-      ? "Chrome DevTools browser profile conflict"
-      : "Chrome DevTools Provider unavailable";
-    fail(`${code}: ${reason} while running ${args.join(" ")}: ${detail}${output ? `; ${output}` : ""}`);
-  }
-  return { payload: expectsJson ? parseJsonOutput(stdout) : undefined, stdout };
-}
-
-function stopChromeSession(sessionId: string): void {
-  try {
-    runChromeCommand(["stop"], sessionId, false);
-  } catch (error) {
-    console.error(`Chrome DevTools cleanup warning for isolated session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-function ensureChromeSession(): string {
-  if (chromeSessionId) return chromeSessionId;
-  const sessionId = `loeyae-diagram-${process.pid}-${Date.now()}`;
-  chromeSessionId = sessionId;
-  if (!chromeSessionExitHandlerRegistered) {
-    chromeSessionExitHandlerRegistered = true;
-    process.once("exit", () => stopChromeSession(sessionId));
-  }
-  runChromeCommand(["start", "--isolated"], sessionId, false);
-  return sessionId;
-}
-
-function runChrome(args: string[]): CliResult {
-  return runChromeCommand(args, ensureChromeSession(), true);
-}
-
-function selectPage(payload: unknown): number {
-  const pages = record(payload, "list_pages response").pages;
-  if (!Array.isArray(pages) || pages.length === 0) fail("Chrome DevTools Provider returned no browser page");
-  const selected = pages.find((page) => record(page, "page").selected === true) || pages[pages.length - 1];
-  const id = Number(record(selected, "selected page").id);
-  if (!Number.isInteger(id)) fail("Chrome DevTools Provider returned an invalid page id");
-  return id;
+  if (new Set(diagrams.map(d => d.id)).size !== diagrams.length) fail("duplicate diagram ids");
+  return { version: "1", provider: "diagram.visual", target_operation: targetOperation, stage, ...(requestedBrowser ? { browser: requestedBrowser } : {}), target_reading_environment: { viewport: defaultViewport, ...(viewports ? { viewports } : {}) }, diagrams };
 }
 
 function declaredExpectedPath(item: DiagramRequest): string | undefined {
@@ -484,810 +348,6 @@ function loadActualLayout(item: DiagramRequest): ActualLayout {
   };
 }
 
-const INSPECTION_SCRIPT = `(contract = {}) => {
-  try {
-  const svg = document.querySelector('svg');
-  const visualStyle = ${JSON.stringify(DIAGRAM_VISUAL_STYLE)};
-  const layoutMetrics = ${JSON.stringify(DIAGRAM_LAYOUT_METRICS)};
-  const geometryProfile = contract.geometryProfile && typeof contract.geometryProfile === 'object' ? contract.geometryProfile : null;
-  if (contract.resetScroll === true) window.scrollTo(0, 0);
-  const ids = (selector, attribute) => [...document.querySelectorAll(selector)].map((element) => element.getAttribute(attribute)).filter(Boolean);
-  const bounds = (element) => {
-    try {
-      const box = element.getBoundingClientRect();
-      return { left: box.left, top: box.top, right: box.right, bottom: box.bottom, width: box.width, height: box.height };
-    } catch (_) { return null; }
-  };
-  const overlaps = (first, second) => first && second && first.left < second.right && first.right > second.left && first.top < second.bottom && first.bottom > second.top;
-  const pointInside = (point, box) => Boolean(box && point[0] > box.left + 1 && point[0] < box.right - 1 && point[1] > box.top + 1 && point[1] < box.bottom - 1);
-  const segmentIntersectsBox = (first, second, box) => {
-    if (!box) return false;
-    const dx = second[0] - first[0];
-    const dy = second[1] - first[1];
-    let entering = 0;
-    let leaving = 1;
-    for (const [origin, delta, minimum, maximum] of [[first[0], dx, box.left, box.right], [first[1], dy, box.top, box.bottom]]) {
-      if (delta === 0) {
-        if (origin <= minimum || origin >= maximum) return false;
-        continue;
-      }
-      const near = (minimum - origin) / delta;
-      const far = (maximum - origin) / delta;
-      entering = Math.max(entering, Math.min(near, far));
-      leaving = Math.min(leaving, Math.max(near, far));
-      if (entering > leaving) return false;
-    }
-    return entering < leaving && leaving > 0 && entering < 1;
-  };
-  const paintedAfter = (cover, target) => Boolean(cover && target && (target.compareDocumentPosition(cover) & Node.DOCUMENT_POSITION_FOLLOWING));
-  const pointEqual = (first, second, tolerance = 1) => Math.abs(first[0] - second[0]) <= tolerance && Math.abs(first[1] - second[1]) <= tolerance;
-  const orientation = (first, second, third) => (second[0] - first[0]) * (third[1] - first[1]) - (second[1] - first[1]) * (third[0] - first[0]);
-  const onSegment = (first, second, point) => Math.abs(orientation(first, second, point)) <= 1e-9 && point[0] >= Math.min(first[0], second[0]) - 1e-9 && point[0] <= Math.max(first[0], second[0]) + 1e-9 && point[1] >= Math.min(first[1], second[1]) - 1e-9 && point[1] <= Math.max(first[1], second[1]) + 1e-9;
-  const segmentRelation = (first, second, third, fourth) => {
-    const a = orientation(first, second, third);
-    const b = orientation(first, second, fourth);
-    const c = orientation(third, fourth, first);
-    const d = orientation(third, fourth, second);
-    const collinear = Math.abs(a) <= 1e-9 && Math.abs(b) <= 1e-9 && Math.abs(c) <= 1e-9 && Math.abs(d) <= 1e-9;
-    if (collinear) {
-      const useX = Math.abs(first[0] - second[0]) >= Math.abs(first[1] - second[1]);
-      const firstLow = useX ? Math.min(first[0], second[0]) : Math.min(first[1], second[1]);
-      const firstHigh = useX ? Math.max(first[0], second[0]) : Math.max(first[1], second[1]);
-      const secondLow = useX ? Math.min(third[0], fourth[0]) : Math.min(third[1], fourth[1]);
-      const secondHigh = useX ? Math.max(third[0], fourth[0]) : Math.max(third[1], fourth[1]);
-      const overlap = Math.min(firstHigh, secondHigh) - Math.max(firstLow, secondLow);
-      if (overlap > 1e-9) return 'overlap';
-      if (overlap >= -1e-9 && (onSegment(first, second, third) || onSegment(first, second, fourth) || onSegment(third, fourth, first) || onSegment(third, fourth, second))) return 'touch';
-      return 'none';
-    }
-    const proper = ((a > 1e-9 && b < -1e-9) || (a < -1e-9 && b > 1e-9)) && ((c > 1e-9 && d < -1e-9) || (c < -1e-9 && d > 1e-9));
-    if (proper) return 'cross';
-    if (onSegment(first, second, third) || onSegment(first, second, fourth) || onSegment(third, fourth, first) || onSegment(third, fourth, second)) return 'touch';
-    return 'none';
-  };
-  const nodeElements = [...document.querySelectorAll('[data-node]')];
-  const edgeElements = [...document.querySelectorAll('path[data-edge]')].filter((element) => !element.hasAttribute('data-edge-arrow'));
-  const nodeOutline = (element) => {
-    if (element.matches('rect, ellipse, circle, polygon, path')) return element;
-    return element.querySelector(':scope > rect, :scope > ellipse, :scope > circle, :scope > polygon, :scope > path') || element;
-  };
-  const edgeGeometry = (element) => {
-    if (typeof element.getTotalLength !== 'function' || typeof element.getPointAtLength !== 'function') return null;
-    const length = element.getTotalLength();
-    const matrix = element.getScreenCTM();
-    if (!matrix || length <= 0) return null;
-    const points = [];
-    const count = Math.max(2, Math.ceil(length / 4));
-    for (let index = 0; index <= count; index++) {
-      const point = element.getPointAtLength(length * index / count);
-      const screen = new DOMPoint(point.x, point.y).matrixTransform(matrix);
-      points.push([screen.x, screen.y]);
-    }
-    return { points, box: bounds(element) };
-  };
-  const nodeBoxes = new Map(nodeElements.map((element) => [element.getAttribute('data-node'), bounds(element)]));
-  const nodeOutlineBoxes = new Map(nodeElements.map((element) => [element.getAttribute('data-node'), bounds(nodeOutline(element))]));
-  const nodeCollisionPairs = [];
-  const entityGapErrors = [];
-  const axisGapErrors = [];
-  const axisAlignmentErrors = [];
-  const portGapErrors = [];
-  const obstacleGapErrors = [];
-  const labelObstacleGapErrors = [];
-  const laneGapErrors = [];
-  const nodeEntries = [...nodeBoxes.entries()].filter((entry) => entry[0] && entry[1]);
-  const nodeOutlineEntries = [...nodeOutlineBoxes.entries()].filter((entry) => entry[0] && entry[1]);
-  const geometryScaleMatrix = svg?.getScreenCTM();
-  const geometryScale = geometryScaleMatrix ? Math.max(0.01, Math.min(Math.hypot(geometryScaleMatrix.a, geometryScaleMatrix.b), Math.hypot(geometryScaleMatrix.c, geometryScaleMatrix.d))) : 1;
-  const geometryThreshold = (field) => geometryProfile ? Number(geometryProfile[field] || 0) * geometryScale : 0;
-  const axisGeometryThreshold = (field) => geometryProfile?.axisSpacing ? Number(geometryProfile.axisSpacing[field] || 0) * geometryScale : 0;
-  const boxGap = (first, second) => {
-    const horizontal = Math.max(0, first.left - second.right, second.left - first.right);
-    const vertical = Math.max(0, first.top - second.bottom, second.top - first.bottom);
-    return Math.hypot(horizontal, vertical);
-  };
-  const pointBoxDistance = (point, box) => {
-    const horizontal = point[0] < box.left ? box.left - point[0] : point[0] > box.right ? point[0] - box.right : 0;
-    const vertical = point[1] < box.top ? box.top - point[1] : point[1] > box.bottom ? point[1] - box.bottom : 0;
-    return Math.hypot(horizontal, vertical);
-  };
-  const segmentBoxDistance = (first, second, box) => {
-    if (segmentIntersectsBox(first, second, box)) return 0;
-    const dx = second[0] - first[0];
-    const dy = second[1] - first[1];
-    if (Math.abs(dx) <= 1e-6) {
-      const vertical = Math.max(box.top - Math.max(first[1], second[1]), Math.min(first[1], second[1]) - box.bottom, 0);
-      const horizontal = first[0] < box.left ? box.left - first[0] : first[0] > box.right ? first[0] - box.right : 0;
-      return Math.hypot(horizontal, vertical);
-    }
-    if (Math.abs(dy) <= 1e-6) {
-      const horizontal = Math.max(box.left - Math.max(first[0], second[0]), Math.min(first[0], second[0]) - box.right, 0);
-      const vertical = first[1] < box.top ? box.top - first[1] : first[1] > box.bottom ? first[1] - box.bottom : 0;
-      return Math.hypot(horizontal, vertical);
-    }
-    const count = Math.max(2, Math.ceil(Math.hypot(dx, dy) / 4));
-    let minimum = Infinity;
-    for (let index = 0; index <= count; index++) minimum = Math.min(minimum, pointBoxDistance([first[0] + dx * index / count, first[1] + dy * index / count], box));
-    return minimum;
-  };
-  if (geometryProfile) {
-    for (let first = 0; first < nodeOutlineEntries.length; first++) for (let second = first + 1; second < nodeOutlineEntries.length; second++) {
-      const gap = boxGap(nodeOutlineEntries[first][1], nodeOutlineEntries[second][1]);
-      if (gap < geometryThreshold('entityGap') - 0.5) entityGapErrors.push(nodeOutlineEntries[first][0] + ':' + nodeOutlineEntries[second][0]);
-    }
-  }
-  if (geometryProfile?.axisSpacing && (contract.readingDirection === 'TB' || contract.readingDirection === 'LR') && contract.primaryFlow && Array.isArray(contract.primaryFlow.nodeIds)) {
-    const minimumGap = contract.readingDirection === 'TB' ? axisGeometryThreshold('tbMinimumGap') : axisGeometryThreshold('lrMinimumGap');
-    const primaryNodes = contract.primaryFlow.nodeIds.map((nodeId) => [String(nodeId), nodeOutlineBoxes.get(String(nodeId))]).filter((entry) => entry[1]);
-    for (let index = 1; index < primaryNodes.length; index++) {
-      const previous = primaryNodes[index - 1][1];
-      const current = primaryNodes[index][1];
-      const gap = contract.readingDirection === 'TB' ? current.top - previous.bottom : current.left - previous.right;
-      if (gap < minimumGap - 0.5) axisGapErrors.push(primaryNodes[index - 1][0] + ':' + primaryNodes[index][0]);
-    }
-  }
-  for (let first = 0; first < nodeEntries.length; first++) for (let second = first + 1; second < nodeEntries.length; second++) {
-    if (overlaps(nodeEntries[first][1], nodeEntries[second][1])) nodeCollisionPairs.push(nodeEntries[first][0] + ':' + nodeEntries[second][0]);
-  }
-  const edgeNodeCollisionPairs = [];
-  const edgeIntersectionPairs = [];
-  const collinearOverlapPairs = [];
-  const portDirectionErrors = [];
-  const portApproachErrors = [];
-  const edgeRecords = {};
-  const edgeBBoxes = {};
-  const arrowTargetByEdge = new Map([...document.querySelectorAll('[data-edge-arrow]')].map((element) => [element.getAttribute('data-edge-arrow') || '', element.getAttribute('data-arrow-target') || '']));
-  const edgeBendCounts = {};
-  const edgeGeometryKinds = {};
-  const edgeSamples = [];
-  const directionToken = (first, second) => {
-    const dx = second[0] - first[0];
-    const dy = second[1] - first[1];
-    const tolerance = 1e-3;
-    const normalizedX = Math.abs(dx) <= tolerance ? 0 : Math.sign(dx);
-    const normalizedY = Math.abs(dy) <= tolerance ? 0 : Math.sign(dy);
-    if (normalizedX === 0 && normalizedY === 0) return null;
-    // getPointAtLength may straddle a sharp Manhattan corner by one sample.
-    // Use the dominant component for bend counting; isOrthogonal still checks
-    // the original coordinates and rejects genuine diagonal geometry.
-    if (normalizedX !== 0 && normalizedY !== 0) {
-      return Math.abs(dx) >= Math.abs(dy) ? normalizedX + ',0' : '0,' + normalizedY;
-    }
-    return normalizedX + ',' + normalizedY;
-  };
-  const bendCount = (points) => {
-    const directions = [];
-    for (let index = 1; index < points.length; index++) {
-      const direction = directionToken(points[index - 1], points[index]);
-      if (direction && directions[directions.length - 1] !== direction) directions.push(direction);
-    }
-    return directions.length === 0 ? 0 : directions.length - 1;
-  };
-  const parseLineSegments = (element) => {
-    const raw = element.getAttribute('d');
-    if (!raw) return null;
-    const tokens = raw.match(/[a-zA-Z]|[-+]?(?:\\d*\\.?\\d+)(?:[eE][-+]?\\d+)?/g) || [];
-    const segments = [];
-    let index = 0;
-    let command = '';
-    let current = [0, 0];
-    let subpathStart = [0, 0];
-    const isCommand = (token) => /^[a-zA-Z]$/.test(token);
-    const number = (token) => Number(token);
-    while (index < tokens.length) {
-      if (isCommand(tokens[index])) command = tokens[index++];
-      if (!command) return null;
-      const upper = command.toUpperCase();
-      const relative = command === command.toLowerCase();
-      if (upper === 'Z') {
-        segments.push([current, subpathStart]);
-        current = subpathStart;
-        command = '';
-        continue;
-      }
-      if (!['M', 'L', 'H', 'V'].includes(upper)) return null;
-      const required = upper === 'H' || upper === 'V' ? 1 : 2;
-      if (index + required > tokens.length || tokens.slice(index, index + required).some(isCommand)) return null;
-      const values = tokens.slice(index, index + required).map(number);
-      index += required;
-      let next = current;
-      if (upper === 'H') next = [relative ? current[0] + values[0] : values[0], current[1]];
-      else if (upper === 'V') next = [current[0], relative ? current[1] + values[0] : values[0]];
-      else next = [relative ? current[0] + values[0] : values[0], relative ? current[1] + values[1] : values[1]];
-      if (upper === 'M') {
-        current = next;
-        subpathStart = next;
-        command = relative ? 'l' : 'L';
-      } else {
-        segments.push([current, next]);
-        current = next;
-      }
-    }
-    return segments;
-  };
-  const isOrthogonal = (element, points) => {
-    const pathSegments = parseLineSegments(element);
-    if (pathSegments) {
-      const matrix = element.getScreenCTM();
-      return pathSegments.length > 0 && Boolean(matrix) && pathSegments.every(([first, second]) => {
-        const firstScreen = new DOMPoint(first[0], first[1]).matrixTransform(matrix);
-        const secondScreen = new DOMPoint(second[0], second[1]).matrixTransform(matrix);
-        return Math.abs(firstScreen.x - secondScreen.x) <= 1 || Math.abs(firstScreen.y - secondScreen.y) <= 1;
-      });
-    }
-    return points.length >= 2 && points.every((point, index) => index === 0 || Math.abs(point[0] - points[index - 1][0]) <= 1 || Math.abs(point[1] - points[index - 1][1]) <= 1);
-  };
-  const leavesPort = (points, port) => {
-    if (points.length < 2) return false;
-    const first = points[0];
-    const second = points.find((point) => !pointEqual(first, point));
-    if (!second) return false;
-    if (port === 'top') return second[1] < first[1] - 1;
-    if (port === 'right') return second[0] > first[0] + 1;
-    if (port === 'bottom') return second[1] > first[1] + 1;
-    return second[0] < first[0] - 1;
-  };
-  const entersPort = (points, port) => {
-    if (points.length < 2) return false;
-    const last = points[points.length - 1];
-    let previous = null;
-    for (let index = points.length - 2; index >= 0; index--) if (!pointEqual(points[index], last)) { previous = points[index]; break; }
-    if (!previous) return false;
-    if (port === 'top') return previous[1] < last[1] - 1;
-    if (port === 'right') return previous[0] > last[0] + 1;
-    if (port === 'bottom') return previous[1] > last[1] + 1;
-    return previous[0] < last[0] - 1;
-  };
-  const portEntries = [];
-  for (const edge of edgeElements) {
-    const edgeId = edge.getAttribute('data-edge');
-    if (!edgeId) continue;
-    const geometry = edgeGeometry(edge);
-    if (!geometry) continue;
-    const rawSegments = parseLineSegments(edge);
-    const matrix = edge.getScreenCTM();
-    const screenSegments = rawSegments && matrix
-      ? rawSegments.map(([first, second]) => {
-        const firstScreen = new DOMPoint(first[0], first[1]).matrixTransform(matrix);
-        const secondScreen = new DOMPoint(second[0], second[1]).matrixTransform(matrix);
-        return [[firstScreen.x, firstScreen.y], [secondScreen.x, secondScreen.y]];
-      })
-      : geometry.points.slice(1).map((point, index) => [geometry.points[index], point]);
-    edgeSamples.push({ id: edgeId, element: edge, points: geometry.points, segments: screenSegments });
-    edgeBendCounts[edgeId] = bendCount(geometry.points);
-    edgeGeometryKinds[edgeId] = edgeBendCounts[edgeId] === 0 ? 'direct' : (isOrthogonal(edge, geometry.points) ? 'manhattan' : 'custom');
-    if (geometry.box) edgeBBoxes[edgeId] = geometry.box;
-    edgeRecords[edgeId] = { from: edge.getAttribute('data-from') || '', to: edge.getAttribute('data-to') || '', fromPort: edge.getAttribute('data-from-port') || '', toPort: edge.getAttribute('data-to-port') || '', arrowTarget: arrowTargetByEdge.get(edgeId) || '' };
-    if (edgeRecords[edgeId].from && edgeRecords[edgeId].fromPort) portEntries.push({ role: 'from', nodeId: edgeRecords[edgeId].from, port: edgeRecords[edgeId].fromPort, edgeId, point: geometry.points[0] });
-    if (edgeRecords[edgeId].to && edgeRecords[edgeId].toPort) portEntries.push({ role: 'to', nodeId: edgeRecords[edgeId].to, port: edgeRecords[edgeId].toPort, edgeId, point: geometry.points[geometry.points.length - 1] });
-    if (!leavesPort(geometry.points, edgeRecords[edgeId].fromPort) || !entersPort(geometry.points, edgeRecords[edgeId].toPort)) portDirectionErrors.push(edgeId);
-    const targetBox = nodeOutlineBoxes.get(edgeRecords[edgeId].to);
-    const lastPoint = geometry.points[geometry.points.length - 1];
-    let previousPoint = null;
-    for (let pointIndex = geometry.points.length - 2; pointIndex >= 0; pointIndex--) if (!pointEqual(geometry.points[pointIndex], lastPoint)) { previousPoint = geometry.points[pointIndex]; break; }
-    if (previousPoint && pointInside(previousPoint, targetBox)) portApproachErrors.push(edgeId);
-    const hitNodes = new Set();
-    for (const screen of geometry.points) for (const [nodeId, box] of nodeBoxes) if (box && pointInside(screen, box)) hitNodes.add(nodeId);
-    for (const nodeId of hitNodes) edgeNodeCollisionPairs.push(edgeId + ':' + nodeId);
-  }
-  if (geometryProfile?.axisSpacing && (contract.readingDirection === 'TB' || contract.readingDirection === 'LR') && contract.branchLayoutPlan && Array.isArray(contract.branchLayoutPlan.groups)) {
-    const loopEdges = new Set(Array.isArray(contract.loopEdges) ? contract.loopEdges.map(String) : []);
-    for (const group of contract.branchLayoutPlan.groups) {
-      const primaryEdgeId = group && group.primaryEdgeId ? String(group.primaryEdgeId) : '';
-      if (!primaryEdgeId || loopEdges.has(primaryEdgeId)) continue;
-      const edge = edgeRecords[primaryEdgeId];
-      const source = edge ? nodeOutlineBoxes.get(edge.from) : null;
-      const target = edge ? nodeOutlineBoxes.get(edge.to) : null;
-      if (!source || !target) continue;
-      const sourceCross = contract.readingDirection === 'TB' ? (source.left + source.right) / 2 : (source.top + source.bottom) / 2;
-      const targetCross = contract.readingDirection === 'TB' ? (target.left + target.right) / 2 : (target.top + target.bottom) / 2;
-      if (Math.abs(sourceCross - targetCross) > geometryScale + 0.5) axisAlignmentErrors.push(primaryEdgeId);
-    }
-  }
-  if (geometryProfile) {
-    for (let first = 0; first < portEntries.length; first++) for (let second = first + 1; second < portEntries.length; second++) {
-      const left = portEntries[first];
-      const right = portEntries[second];
-      if (left.role !== right.role || left.nodeId !== right.nodeId || left.port !== right.port) continue;
-      const distance = ['top', 'bottom'].includes(left.port) ? Math.abs(left.point[0] - right.point[0]) : Math.abs(left.point[1] - right.point[1]);
-      if (distance < geometryThreshold('portGap') - 0.5) portGapErrors.push(left.edgeId + ':' + right.edgeId);
-    }
-    for (const edgeSample of edgeSamples) {
-      const edge = edgeRecords[edgeSample.id];
-      for (const [nodeId, box] of nodeOutlineEntries) {
-        if (nodeId === edge?.from || nodeId === edge?.to) continue;
-        if (edgeSample.segments.some((segment) => segmentBoxDistance(segment[0], segment[1], box) < geometryThreshold('obstacleGap') - 0.5)) obstacleGapErrors.push(edgeSample.id + ':' + nodeId);
-      }
-    }
-  }
-  for (let first = 0; first < edgeSamples.length; first++) for (let second = first + 1; second < edgeSamples.length; second++) {
-    const firstEdge = edgeSamples[first];
-    const secondEdge = edgeSamples[second];
-    let hasIntersection = false;
-    let hasOverlap = false;
-    for (const firstSegment of firstEdge.segments) for (const secondSegment of secondEdge.segments) {
-      const relation = segmentRelation(firstSegment[0], firstSegment[1], secondSegment[0], secondSegment[1]);
-      if (relation === 'overlap') hasOverlap = true;
-      else if (relation === 'cross') hasIntersection = true;
-      else if (relation === 'touch') {
-        const sharedEndpoint = [firstSegment[0], firstSegment[1]].some((point) => [secondSegment[0], secondSegment[1]].some((candidate) => pointEqual(point, candidate)));
-        if (!sharedEndpoint) hasIntersection = true;
-      }
-    }
-    if (hasOverlap) collinearOverlapPairs.push(firstEdge.id + ':' + secondEdge.id);
-    if (hasIntersection) edgeIntersectionPairs.push(firstEdge.id + ':' + secondEdge.id);
-  }
-  if (geometryProfile && Array.isArray(contract.loopLanes) && (contract.readingDirection === 'TB' || contract.readingDirection === 'LR')) {
-    const laneGeometry = contract.loopLanes.map((lane) => {
-      const coordinates = lane.edgeIds.flatMap((edgeId) => {
-        const sample = edgeSamples.find((candidate) => candidate.id === String(edgeId));
-        if (!sample) return [];
-        const points = sample.points.length > 2 ? sample.points.slice(1, -1) : sample.points;
-        return points.map((point) => contract.readingDirection === 'TB' ? point[0] : point[1]);
-      }).filter((value) => Number.isFinite(value));
-      if (coordinates.length === 0) return null;
-      return { id: String(lane.id), side: String(lane.side), coordinate: lane.side === 'left' ? Math.min(...coordinates) : Math.max(...coordinates) };
-    }).filter(Boolean);
-    for (let first = 0; first < laneGeometry.length; first++) for (let second = first + 1; second < laneGeometry.length; second++) {
-      if (laneGeometry[first].side === laneGeometry[second].side && Math.abs(laneGeometry[first].coordinate - laneGeometry[second].coordinate) < geometryThreshold('laneGap') - 0.5) laneGapErrors.push(laneGeometry[first].id + ':' + laneGeometry[second].id);
-    }
-  }
-  const labelElements = [...document.querySelectorAll('[data-edge-label]')].filter((element) => !element.matches('path[data-edge]'));
-  const labelBoxes = new Map(labelElements.map((element) => [element.getAttribute('data-edge-label') || '', { element, box: bounds(element) }]));
-  const edgeLabels = Object.fromEntries(labelElements.map((element) => [element.getAttribute('data-edge-label') || '', element.textContent?.trim() || '']).filter(([id]) => Boolean(id)));
-  if (geometryProfile) for (const [labelId, label] of labelBoxes) {
-    const edge = edgeRecords[labelId];
-    if (!label.box || !edge) continue;
-    for (const [nodeId, nodeBox] of nodeOutlineEntries) {
-      if (nodeId === edge.from || nodeId === edge.to) continue;
-      if (boxGap(label.box, nodeBox) < geometryThreshold('obstacleGap') - 0.5) labelObstacleGapErrors.push(labelId + ':' + nodeId);
-    }
-  }
-  const labelEdgeCollisionPairs = [];
-  const labelNodeCollisionPairs = [];
-  const labelLabelCollisionPairs = [];
-  const labelArrowCollisionPairs = [];
-  for (const [labelId, label] of labelBoxes) {
-    if (!labelId || !label.box) continue;
-    for (const edgeSample of edgeSamples) {
-      for (let pointIndex = 1; pointIndex < edgeSample.points.length; pointIndex++) {
-        if (segmentIntersectsBox(edgeSample.points[pointIndex - 1], edgeSample.points[pointIndex], label.box)) {
-          labelEdgeCollisionPairs.push(labelId + ':' + edgeSample.id);
-          break;
-        }
-      }
-    }
-    for (const [nodeId, nodeBox] of nodeBoxes) if (nodeId && nodeBox && overlaps(label.box, nodeBox)) labelNodeCollisionPairs.push(labelId + ':' + nodeId);
-    for (const [otherId, other] of labelBoxes) if (otherId && otherId !== labelId && other.box && overlaps(label.box, other.box)) labelLabelCollisionPairs.push(labelId + ':' + otherId);
-    for (const arrow of document.querySelectorAll('[data-edge-arrow]')) {
-      const arrowId = arrow.getAttribute('data-edge-arrow') || '';
-      if (arrowId && overlaps(label.box, bounds(arrow))) labelArrowCollisionPairs.push(labelId + ':' + arrowId);
-    }
-  }
-  const labelPlacementErrors = [];
-  for (const [labelId, label] of labelBoxes) {
-    const edgeSample = edgeSamples.find((candidate) => candidate.id === labelId);
-    const localSegments = edgeSample ? parseLineSegments(edgeSample.element) : null;
-    const matrix = edgeSample?.element.getScreenCTM();
-    if (!label.box || !localSegments || !matrix) {
-      labelPlacementErrors.push(labelId || 'unknown');
-      continue;
-    }
-    const labelCenter = [(label.box.left + label.box.right) / 2, (label.box.top + label.box.bottom) / 2];
-    const scale = Math.max(0.01, Math.min(Math.hypot(matrix.a, matrix.b), Math.hypot(matrix.c, matrix.d)));
-    const valid = localSegments.some(([first, second]) => {
-      const firstScreen = new DOMPoint(first[0], first[1]).matrixTransform(matrix);
-      const secondScreen = new DOMPoint(second[0], second[1]).matrixTransform(matrix);
-      const dx = secondScreen.x - firstScreen.x;
-      const dy = secondScreen.y - firstScreen.y;
-      const length = Math.hypot(dx, dy);
-      if (length <= 0) return false;
-      const tangent = [dx / length, dy / length];
-      const normal = [-tangent[1], tangent[0]];
-      const midpoint = [(firstScreen.x + secondScreen.x) / 2, (firstScreen.y + secondScreen.y) / 2];
-      const offset = [labelCenter[0] - midpoint[0], labelCenter[1] - midpoint[1]];
-      const parallelDistance = Math.abs(offset[0] * tangent[0] + offset[1] * tangent[1]);
-      const perpendicularDistance = Math.abs(offset[0] * normal[0] + offset[1] * normal[1]);
-      const perpendicularRadius = Math.abs(normal[0]) * label.box.width / 2 + Math.abs(normal[1]) * label.box.height / 2;
-      return parallelDistance <= Math.max(2, scale * 2) && perpendicularDistance >= perpendicularRadius + visualStyle.labelClearance * scale;
-    });
-    if (!valid) labelPlacementErrors.push(labelId || 'unknown');
-  }
-  const groupId = (element) => element.getAttribute('data-group') || (element.id && element.id.startsWith('group-') ? element.id.slice('group-'.length) : '');
-  const groupElements = [...new Set([...document.querySelectorAll('[data-group], [id^="group-"]')])];
-  const groupBoxes = new Map(groupElements.map((element) => [groupId(element), bounds(element)]));
-  const groupOverlapPairs = [];
-  const groupEntries = [...groupBoxes.entries()].filter((entry) => entry[0] && entry[1]);
-  for (let first = 0; first < groupEntries.length; first++) for (let second = first + 1; second < groupEntries.length; second++) {
-    if (overlaps(groupEntries[first][1], groupEntries[second][1])) groupOverlapPairs.push(groupEntries[first][0] + ':' + groupEntries[second][0]);
-  }
-  const groupCapacityErrors = [];
-  const groupTitleErrors = [];
-  const groupTitleElements = [...document.querySelectorAll('text[data-group-title]')];
-  const groupScaleMatrix = svg?.getScreenCTM();
-  const groupScale = groupScaleMatrix ? Math.max(0.01, Math.min(Math.hypot(groupScaleMatrix.a, groupScaleMatrix.b), Math.hypot(groupScaleMatrix.c, groupScaleMatrix.d))) : 1;
-  const groupDefinitions = contract.groups && typeof contract.groups === 'object' ? contract.groups : {};
-  const contains = (outer, inner) => Boolean(outer && inner && inner.left >= outer.left - 1 && inner.top >= outer.top - 1 && inner.right <= outer.right + 1 && inner.bottom <= outer.bottom + 1);
-  for (const [id, definition] of Object.entries(groupDefinitions)) {
-    const groupBox = groupBoxes.get(id);
-    if (!groupBox) continue;
-    const group = definition && typeof definition === 'object' ? definition : {};
-    const titles = groupTitleElements.filter((element) => element.getAttribute('data-group-title') === id);
-    if (titles.length !== 1 || titles[0].getAttribute('data-group-style-role') !== String(group.styleRole || '')) groupTitleErrors.push(id + ':mapping');
-    const memberIds = Array.isArray(group.members) ? group.members.map(String) : [];
-    const memberBoxes = memberIds.map((nodeId) => nodeBoxes.get(nodeId)).filter(Boolean);
-    if (memberBoxes.length === 0) continue;
-    const internalEdges = edgeSamples.filter((sample) => {
-      const edge = edgeRecords[sample.id];
-      return edge && memberIds.includes(edge.from) && memberIds.includes(edge.to);
-    });
-    const internalEdgeIds = new Set(internalEdges.map((sample) => sample.id));
-    const contentBoxes = [
-      ...memberBoxes,
-      ...internalEdges.map((sample) => bounds(sample.element)).filter(Boolean),
-      ...[...labelBoxes.entries()].filter(([edgeId]) => internalEdgeIds.has(edgeId)).map(([, label]) => label.box).filter(Boolean),
-    ];
-    const content = {
-      left: Math.min(...contentBoxes.map((box) => box.left)),
-      top: Math.min(...contentBoxes.map((box) => box.top)),
-      right: Math.max(...contentBoxes.map((box) => box.right)),
-      bottom: Math.max(...contentBoxes.map((box) => box.bottom)),
-    };
-    const titleBox = titles.length === 1 ? bounds(titles[0]) : null;
-    if (!titleBox || !contains(groupBox, titleBox) || overlaps(titleBox, content)) groupTitleErrors.push(id + ':placement');
-    if (!contains(groupBox, content)) groupCapacityErrors.push(id + ':containment');
-    if (content.top - groupBox.top < layoutMetrics.groupHeaderHeight * groupScale) groupCapacityErrors.push(id + ':header');
-    if (content.left - groupBox.left < layoutMetrics.groupHorizontalPadding * groupScale || groupBox.right - content.right < layoutMetrics.groupHorizontalPadding * groupScale || groupBox.bottom - content.bottom < layoutMetrics.groupBottomPadding * groupScale) groupCapacityErrors.push(id + ':padding');
-  }
-  const lifelineCoordinates = {};
-  for (const element of [...document.querySelectorAll('[data-lifeline-for]')]) {
-    const id = element.getAttribute('data-lifeline-for');
-    const x1 = Number(element.getAttribute('x1'));
-    const x2 = Number(element.getAttribute('x2'));
-    const box = bounds(element);
-    if (id) lifelineCoordinates[id] = Number.isFinite(x1) ? (Number.isFinite(x2) ? (x1 + x2) / 2 : x1) : (box ? (box.left + box.right) / 2 : NaN);
-  }
-  const nodeCenterPoints = Object.fromEntries([...nodeBoxes.entries()].filter((entry) => entry[0] && entry[1]).map(([id, box]) => [id, { x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 }]));
-  const sideSwitchDetectedEdgeIds = [];
-  const sideSwitchErrors = [];
-  const viewBoxValues = svg?.viewBox?.baseVal;
-  const svgMatrixForAxis = svg?.getScreenCTM();
-  if ((contract.readingDirection === 'TB' || contract.readingDirection === 'LR') && Number.isFinite(Number(contract.mainAxis)) && viewBoxValues && svgMatrixForAxis && viewBoxValues.width > 0 && viewBoxValues.height > 0) {
-    const axisPoint = contract.readingDirection === 'TB'
-      ? new DOMPoint(Number(contract.mainAxis), viewBoxValues.y).matrixTransform(svgMatrixForAxis)
-      : new DOMPoint(viewBoxValues.x, Number(contract.mainAxis)).matrixTransform(svgMatrixForAxis);
-    const screenAxis = contract.readingDirection === 'TB' ? axisPoint.x : axisPoint.y;
-    const sideOf = (point) => {
-      const delta = (contract.readingDirection === 'TB' ? point[0] : point[1]) - screenAxis;
-      return delta > 1 ? 1 : delta < -1 ? -1 : 0;
-    };
-    const loopEdges = new Set(Array.isArray(contract.loopEdges) ? contract.loopEdges.map(String) : []);
-    const allowed = new Set(Array.isArray(contract.sideSwitchExceptionEdgeIds) ? contract.sideSwitchExceptionEdgeIds.map(String) : []);
-    for (const edgeSample of edgeSamples) {
-      if (loopEdges.has(edgeSample.id)) continue;
-      const edge = edgeRecords[edgeSample.id];
-      const source = edge && nodeCenterPoints[edge.from];
-      const target = edge && nodeCenterPoints[edge.to];
-      if (!source || !target) continue;
-      const sourceSide = sideOf([source.x, source.y]);
-      const targetSide = sideOf([target.x, target.y]);
-      if (sourceSide === 0 || targetSide === 0) continue;
-      const sides = edgeSample.points.map(sideOf).filter((side) => side !== 0);
-      let invalid = sourceSide === targetSide ? sides.some((side) => side !== sourceSide) : false;
-      if (sourceSide !== targetSide) {
-        let switches = 0;
-        for (let pointIndex = 1; pointIndex < sides.length; pointIndex++) if (sides[pointIndex] !== sides[pointIndex - 1]) switches++;
-        invalid = switches > 1;
-      }
-      if (invalid) {
-        sideSwitchDetectedEdgeIds.push(edgeSample.id);
-        if (!allowed.has(edgeSample.id)) sideSwitchErrors.push(edgeSample.id);
-      }
-    }
-  }
-  const noteElements = [...document.querySelectorAll('[data-note]')];
-  const legendElements = [...document.querySelectorAll('[data-legend-item]')];
-  const orderedDecorations = [...document.querySelectorAll('[data-legend-item], [data-note]')];
-  const lastLegendIndex = Math.max(-1, ...legendElements.map((element) => orderedDecorations.indexOf(element)));
-  const firstNoteIndex = Math.min(orderedDecorations.length, ...noteElements.map((element) => orderedDecorations.indexOf(element)));
-  const legendBeforeNotes = lastLegendIndex < 0 || firstNoteIndex >= orderedDecorations.length || lastLegendIndex < firstNoteIndex;
-  const svgBounds = svg ? bounds(svg) : null;
-  const arrowVisibilityErrors = [];
-  const arrowOcclusionPairs = [];
-  const arrowDecorationOcclusionPairs = [];
-  const arrowElements = [...document.querySelectorAll('[data-edge-arrow]')];
-  const decorativeBlockers = [
-    ...labelElements.map((element) => ['label:' + (element.getAttribute('data-edge-label') || 'unknown'), element]),
-    ...legendElements.map((element) => ['legend:' + (element.getAttribute('data-legend-item') || 'unknown'), element]),
-    ...groupElements.map((element) => ['group:' + groupId(element), element]),
-  ];
-  for (const arrow of arrowElements) {
-    const arrowId = arrow.getAttribute('data-edge-arrow') || '';
-    const arrowBox = bounds(arrow);
-    if (!arrowBox || arrowBox.width <= 0 || arrowBox.height <= 0) arrowVisibilityErrors.push(arrowId || 'unknown');
-    const target = (arrow.getAttribute('data-arrow-target') || '').split(':')[0];
-    for (const [nodeId, nodeBox] of nodeBoxes) if (nodeBox && nodeId && nodeId !== target && arrowBox && overlaps(arrowBox, nodeBox)) arrowOcclusionPairs.push(arrowId + ':' + nodeId);
-    for (const [blockerId, blocker] of decorativeBlockers) if (arrowBox && overlaps(arrowBox, bounds(blocker)) && paintedAfter(blocker, arrow)) arrowDecorationOcclusionPairs.push(arrowId + ':' + blockerId);
-  }
-  const structuralNodeIntersections = [];
-  const structuralEdgeIntersections = [];
-  const structuralLabelIntersections = [];
-  const structuralArrowIntersections = [];
-  const structuralFrameStyleErrors = [];
-  const structuralNodeFillErrors = [];
-  const structuralLayerOrderErrors = [];
-  const structuralMaskErrors = [];
-  const structuralMaskCoverageErrors = [];
-  const structuralFrames = [...document.querySelectorAll('[data-group][data-group-style-role="structural"]')];
-  const structuralWhite = (value) => value === 'rgb(255, 255, 255)' || value === '#ffffff' || value === '#fff';
-  const structuralFrameGray = (value) => value === 'rgb(102, 102, 102)' || value === 'rgb(102,102,102)' || value === '#666666' || value === '#666';
-  const transformPoint = (element, x, y) => {
-    const matrix = element.getScreenCTM();
-    if (!matrix) return null;
-    const point = new DOMPoint(x, y).matrixTransform(matrix);
-    return [point.x, point.y];
-  };
-  const structuralFrameSegments = (element) => {
-    const name = element.tagName.toLowerCase();
-    if (name === 'rect') {
-      const x = Number(element.getAttribute('x') || 0);
-      const y = Number(element.getAttribute('y') || 0);
-      const width = Number(element.getAttribute('width'));
-      const height = Number(element.getAttribute('height'));
-      if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return [];
-      const corners = [[x, y], [x + width, y], [x + width, y + height], [x, y + height]].map(([pointX, pointY]) => transformPoint(element, pointX, pointY));
-      if (corners.some((point) => !point)) return [];
-      return corners.map((point, index) => [point, corners[(index + 1) % corners.length]]);
-    }
-    if (name === 'line') {
-      const first = transformPoint(element, Number(element.getAttribute('x1')), Number(element.getAttribute('y1')));
-      const second = transformPoint(element, Number(element.getAttribute('x2')), Number(element.getAttribute('y2')));
-      return first && second ? [[first, second]] : [];
-    }
-    if (name === 'polygon' || name === 'polyline') {
-      const values = (element.getAttribute('points') || '').match(/[-+]?(?:\\d*\\.?\\d+)(?:[eE][-+]?\\d+)?/g) || [];
-      const points = [];
-      for (let index = 0; index + 1 < values.length; index += 2) points.push(transformPoint(element, Number(values[index]), Number(values[index + 1])));
-      if (points.some((point) => !point) || points.length < 2) return [];
-      const segments = points.slice(1).map((point, index) => [points[index], point]);
-      if (name === 'polygon') segments.push([points[points.length - 1], points[0]]);
-      return segments;
-    }
-    if (typeof element.getTotalLength === 'function' && typeof element.getPointAtLength === 'function') {
-      const length = element.getTotalLength();
-      const count = Math.max(4, Math.ceil(length / 4));
-      const points = [];
-      for (let index = 0; index <= count; index++) {
-        const point = element.getPointAtLength(length * index / count);
-        points.push(transformPoint(element, point.x, point.y));
-      }
-      if (points.some((point) => !point)) return [];
-      return points.slice(1).map((point, index) => [points[index], point]);
-    }
-    return [];
-  };
-  const boxBoundarySegments = (box) => [
-    [[box.left, box.top], [box.right, box.top]],
-    [[box.right, box.top], [box.right, box.bottom]],
-    [[box.right, box.bottom], [box.left, box.bottom]],
-    [[box.left, box.bottom], [box.left, box.top]],
-  ];
-  const segmentTouchesBox = (first, second, box) => Boolean(box && (segmentIntersectsBox(first, second, box) || boxBoundarySegments(box).some(([third, fourth]) => segmentRelation(first, second, third, fourth) !== 'none')));
-  const frameTouchesBox = (segments, box) => segments.some(([first, second]) => segmentTouchesBox(first, second, box));
-  const frameTouchesEdge = (segments, edgeSample) => segments.some(([first, second]) => edgeSample.segments.some(([third, fourth]) => segmentRelation(first, second, third, fourth) !== 'none'));
-  const elementBox = (element) => {
-    const box = bounds(element);
-    if (box && box.width > 0 && box.height > 0) return box;
-    if (typeof element.getBBox !== 'function' || !element.getScreenCTM()) return box;
-    const local = element.getBBox();
-    const matrix = element.getScreenCTM();
-    const points = [[local.x, local.y], [local.x + local.width, local.y], [local.x + local.width, local.y + local.height], [local.x, local.y + local.height]].map(([x, y]) => new DOMPoint(x, y).matrixTransform(matrix));
-    return { left: Math.min(...points.map((point) => point.x)), top: Math.min(...points.map((point) => point.y)), right: Math.max(...points.map((point) => point.x)), bottom: Math.max(...points.map((point) => point.y)), width: local.width, height: local.height };
-  };
-  const maskInfo = (frame, shape = frame) => {
-    const reference = frame?.getAttribute('mask') || shape?.getAttribute('mask') || '';
-    const maskId = reference.match(/url\\(#([^)]*)\\)/i)?.[1];
-    const mask = maskId ? document.getElementById(maskId) : null;
-    if (!mask) return { mask: null, cutouts: [] };
-    const style = getComputedStyle(mask);
-    const cutouts = [...mask.querySelectorAll('[fill-opacity="0"], [opacity="0"]')].filter((element) => {
-      const computed = getComputedStyle(element);
-      return Number(element.getAttribute('fill-opacity')) === 0 || Number(element.getAttribute('opacity')) === 0 || Number(computed.fillOpacity) === 0 || Number(computed.opacity) === 0;
-    });
-    if (mask.getAttribute('mask-type') !== 'alpha' || mask.getAttribute('maskUnits') !== 'userSpaceOnUse' || mask.getAttribute('maskContentUnits') !== 'userSpaceOnUse' || style.maskType !== 'alpha') structuralMaskErrors.push((frame.getAttribute('data-group') || 'unknown') + ':' + (maskId || 'missing-units'));
-    if (cutouts.length === 0) structuralMaskErrors.push((frame.getAttribute('data-group') || 'unknown') + ':' + (maskId || 'missing-cutout'));
-    return { mask, cutouts };
-  };
-  const maskCovers = (info, targetBox) => info.cutouts.some((cutout) => {
-    const cutoutBox = elementBox(cutout);
-    return overlaps(cutoutBox, targetBox);
-  });
-  for (const frame of structuralFrames) {
-    const groupId = frame.getAttribute('data-group') || 'unknown';
-    const frameShape = nodeOutline(frame);
-    const frameStyle = getComputedStyle(frameShape);
-    if (frameStyle.fill !== 'none' || !structuralFrameGray(frameStyle.stroke) || Math.abs(parseFloat(frameStyle.strokeWidth) - visualStyle.strokeWidth) > 0.01) structuralFrameStyleErrors.push(groupId);
-    const frameSegments = structuralFrameSegments(frameShape);
-    if (frameSegments.length === 0) {
-      structuralMaskErrors.push(groupId + ':unsupported-frame-geometry');
-      continue;
-    }
-    const info = maskInfo(frame, frameShape);
-    for (const [nodeId, nodeBox] of nodeBoxes) {
-      if (!nodeBox || !frameTouchesBox(frameSegments, nodeBox)) continue;
-      structuralNodeIntersections.push(groupId + ':' + nodeId);
-      const outline = nodeOutline(nodeElements.find((element) => element.getAttribute('data-node') === nodeId));
-      if (!outline || !structuralWhite(getComputedStyle(outline).fill)) structuralNodeFillErrors.push(groupId + ':' + nodeId);
-      if (!paintedAfter(nodeElements.find((element) => element.getAttribute('data-node') === nodeId), frameShape)) structuralLayerOrderErrors.push(groupId + ':node:' + nodeId);
-    }
-    for (const edgeSample of edgeSamples) {
-      if (!frameTouchesEdge(frameSegments, edgeSample)) continue;
-      const edgeId = edgeSample.id;
-      structuralEdgeIntersections.push(groupId + ':' + edgeId);
-      if (!paintedAfter(edgeSample.element, frameShape)) structuralLayerOrderErrors.push(groupId + ':edge:' + edgeId);
-      if (!info.mask || !maskCovers(info, elementBox(edgeSample.element))) structuralMaskCoverageErrors.push(groupId + ':edge:' + edgeId);
-    }
-    for (const [labelId, label] of labelBoxes) {
-      if (!label.box || !frameTouchesBox(frameSegments, label.box)) continue;
-      structuralLabelIntersections.push(groupId + ':' + labelId);
-      if (!paintedAfter(label.element, frameShape)) structuralLayerOrderErrors.push(groupId + ':label:' + labelId);
-      if (!info.mask || !maskCovers(info, label.box)) structuralMaskCoverageErrors.push(groupId + ':label:' + labelId);
-    }
-    for (const arrow of arrowElements) {
-      const arrowId = arrow.getAttribute('data-edge-arrow') || 'unknown';
-      const arrowBox = elementBox(arrow);
-      if (!arrowBox || !frameTouchesBox(frameSegments, arrowBox)) continue;
-      structuralArrowIntersections.push(groupId + ':' + arrowId);
-      if (!paintedAfter(arrow, frameShape)) structuralLayerOrderErrors.push(groupId + ':arrow:' + arrowId);
-      if (!info.mask || !maskCovers(info, arrowBox)) structuralMaskCoverageErrors.push(groupId + ':arrow:' + arrowId);
-    }
-  }
-  const textOverflowIds = [];
-  const textOverlapPairs = [];
-  const textElements = [...document.querySelectorAll('svg text')].flatMap((element) => {
-    const tspans = [...element.querySelectorAll(':scope > tspan')];
-    return tspans.length > 0 ? tspans : [element];
-  });
-  const textEntries = textElements.map((element, index) => ({ id: element.getAttribute('data-text-id') || String(index), element, box: bounds(element), owner: element.closest('[data-node], [data-edge], [data-edge-arrow], [data-edge-label], [data-note], [data-legend-item]') }));
-  const visualStyleErrors = [];
-  const black = (value) => value === 'rgb(0, 0, 0)' || value === '#000000' || value === '#000';
-  const structuralGray = (value) => value === 'rgb(102, 102, 102)' || value === 'rgb(102,102,102)' || value === '#666666' || value === '#666';
-  const white = (value) => value === 'rgb(255, 255, 255)' || value === '#ffffff' || value === '#fff';
-  const structuralGroupFrame = (element) => element?.hasAttribute('data-group') && element.getAttribute('data-group-style-role') === 'structural';
-  const structuralGroupTitle = (element) => element?.hasAttribute('data-group-title') && element.getAttribute('data-group-style-role') === 'structural';
-  const frameStyle = (element, id, allowWhite = false) => {
-    const style = getComputedStyle(element);
-    const expectedInk = structuralGroupFrame(element) ? structuralGray : black;
-    const validFill = style.fill === 'none' || (allowWhite && white(style.fill));
-    if (!validFill || !expectedInk(style.stroke) || Math.abs(parseFloat(style.strokeWidth) - visualStyle.strokeWidth) > 0.01) visualStyleErrors.push(id);
-  };
-  const backgrounds = [...document.querySelectorAll('[data-canvas-background]')];
-  if (backgrounds.length !== 1) visualStyleErrors.push('canvas-background-count');
-  else {
-    const style = getComputedStyle(backgrounds[0]);
-    if (!white(style.fill) || style.stroke !== 'none' || Number(style.opacity) !== 1) visualStyleErrors.push('canvas-background-style');
-  }
-  if (legendElements.length > 0 || noteElements.length > 0) visualStyleErrors.push('global-legend-or-note');
-  for (const node of nodeElements) frameStyle(nodeOutline(node), 'node:' + (node.getAttribute('data-node') || 'unknown'), true);
-  for (const group of groupElements) frameStyle(nodeOutline(group), 'group:' + groupId(group));
-  for (const edge of edgeElements) frameStyle(edge, 'edge:' + (edge.getAttribute('data-edge') || 'unknown'));
-  for (const lifeline of document.querySelectorAll('[data-lifeline-for]')) frameStyle(lifeline, 'lifeline:' + (lifeline.getAttribute('data-lifeline-for') || 'unknown'));
-  for (const label of labelElements) if (label.tagName.toLowerCase() !== 'text' || label.querySelector('rect, polygon, ellipse, circle, path')) visualStyleErrors.push('label-frame:' + (label.getAttribute('data-edge-label') || 'unknown'));
-  for (const entry of textEntries) {
-    const style = getComputedStyle(entry.element);
-    const edgeLabel = entry.element.hasAttribute('data-edge-label');
-    const firstFont = style.fontFamily.split(',')[0].replace(/["']/g, '').trim().toLowerCase();
-    const expectedSize = edgeLabel ? visualStyle.edgeLabelFontSize : visualStyle.frameFontSize;
-    const expectedTextInk = structuralGroupTitle(entry.element) ? structuralGray : black;
-    if ((firstFont !== 'microsoft yahei' && firstFont !== '微软雅黑') || Math.abs(parseFloat(style.fontSize) - expectedSize) > 0.01 || !expectedTextInk(style.fill)) visualStyleErrors.push('text:' + entry.id);
-    if (edgeLabel && (style.textAnchor !== 'middle' || !['middle', 'central'].includes(style.dominantBaseline))) visualStyleErrors.push('label-anchor:' + entry.id);
-  }
-  for (const marker of document.querySelectorAll('marker')) {
-    if (Number(marker.getAttribute('markerWidth')) !== visualStyle.arrowWidth || Number(marker.getAttribute('markerHeight')) !== visualStyle.arrowHeight || marker.getAttribute('markerUnits') !== 'userSpaceOnUse') visualStyleErrors.push('marker:' + (marker.id || 'unknown'));
-    const shape = marker.querySelector('path, polygon');
-    if (!shape || !black(getComputedStyle(shape).fill)) visualStyleErrors.push('marker-fill:' + (marker.id || 'unknown'));
-  }
-  for (const arrow of arrowElements) {
-    const box = typeof arrow.getBBox === 'function' ? arrow.getBBox() : null;
-    if (!box || Math.abs(box.width - visualStyle.arrowWidth) > 0.01 || Math.abs(box.height - visualStyle.arrowHeight) > 0.01 || !black(getComputedStyle(arrow).fill)) visualStyleErrors.push('arrow:' + (arrow.getAttribute('data-edge-arrow') || 'unknown'));
-  }
-  for (const entry of textEntries) if (entry.box && svgBounds && (entry.box.left < svgBounds.left - 1 || entry.box.right > svgBounds.right + 1 || entry.box.top < svgBounds.top - 1 || entry.box.bottom > svgBounds.bottom + 1)) textOverflowIds.push(entry.id);
-  for (let first = 0; first < textEntries.length; first++) for (let second = first + 1; second < textEntries.length; second++) {
-    const firstOwner = textEntries[first].owner;
-    const secondOwner = textEntries[second].owner;
-    if (firstOwner && secondOwner && firstOwner === secondOwner) continue;
-    if (overlaps(textEntries[first].box, textEntries[second].box)) textOverlapPairs.push(textEntries[first].id + ':' + textEntries[second].id);
-  }
-  const tracked = [...new Set([...document.querySelectorAll('[data-node], path[data-edge], [data-edge-arrow], [data-legend-item], [data-note], [data-lifeline-for], [data-group], [data-group-title], [id^="group-"]')])];
-  const visibleBoxes = tracked.map(bounds).filter(Boolean);
-  const contentBBox = visibleBoxes.length > 0 ? {
-    left: Math.min(...visibleBoxes.map((box) => box.left)),
-    top: Math.min(...visibleBoxes.map((box) => box.top)),
-    right: Math.max(...visibleBoxes.map((box) => box.right)),
-    bottom: Math.max(...visibleBoxes.map((box) => box.bottom)),
-  } : null;
-  const horizontalOverflow = Boolean(svgBounds && (svgBounds.left < -1 || svgBounds.right > window.innerWidth + 1 || document.documentElement.scrollWidth > window.innerWidth + 1 || document.body.scrollWidth > window.innerWidth + 1));
-  const outsideViewportCount = tracked.filter((element) => {
-    const box = bounds(element);
-    return box && (box.left < -1 || box.right > window.innerWidth + 1);
-  }).length;
-  const contentFullyVisible = Boolean(contentBBox && contentBBox.left >= -1 && contentBBox.top >= -1 && contentBBox.right <= window.innerWidth + 1 && contentBBox.bottom <= window.innerHeight + 1);
-  const nodeShapes = Object.fromEntries(nodeElements.map((element) => [element.getAttribute('data-node'), element.getAttribute('data-node-shape') || '']));
-  return {
-    role: svg?.getAttribute('role') ?? null,
-    title: svg?.querySelector(':scope > title')?.textContent?.trim() ?? '',
-    description: svg?.querySelector(':scope > desc')?.textContent?.trim() ?? '',
-    viewBox: svg?.getAttribute('viewBox') ?? null,
-    svgWidth: svgBounds?.width ?? 0,
-    svgHeight: svgBounds?.height ?? 0,
-    nodeIds: ids('[data-node]', 'data-node'),
-    edgeIds: ids('path[data-edge]:not([data-edge-arrow])', 'data-edge'),
-    arrowTargets: ids('[data-arrow-target]', 'data-arrow-target'),
-    groupIds: [...groupBoxes.keys()],
-    legendIds: ids('[data-legend-item]', 'data-legend-item'),
-    noteIds: ids('[data-note]', 'data-note'),
-    legendBeforeNotes,
-    nodeCenters: nodeCenterPoints,
-    nodeShapes,
-    edgeRecords,
-    edgeBBoxes,
-    edgeBendCounts,
-    edgeGeometryKinds,
-    edgeLabelIds: [...labelBoxes.keys()].filter(Boolean),
-    edgeLabels,
-    labelNodeCollisionPairs,
-    labelLabelCollisionPairs,
-    labelArrowCollisionPairs,
-    edgeIntersectionPairs,
-    collinearOverlapPairs,
-    portDirectionErrors,
-    portApproachErrors,
-    sideSwitchDetectedEdgeIds,
-    sideSwitchErrors,
-    arrowVisibilityErrors,
-    arrowOcclusionPairs,
-    arrowDecorationOcclusionPairs,
-    structuralNodeIntersections,
-    structuralEdgeIntersections,
-    structuralLabelIntersections,
-    structuralArrowIntersections,
-    structuralFrameStyleErrors,
-    structuralNodeFillErrors,
-    structuralLayerOrderErrors,
-    structuralMaskErrors,
-    structuralMaskCoverageErrors,
-    labelEdgeCollisionPairs,
-    labelPlacementErrors,
-    visualStyleErrors,
-    textOverflowIds,
-    textOverlapPairs,
-    contentBBox,
-    horizontalOverflow,
-    lifelineIds: ids('[data-lifeline-for]', 'data-lifeline-for'),
-    lifelineCoordinates,
-    nodeCollisionPairs,
-    edgeNodeCollisionPairs,
-    entityGapErrors,
-    axisGapErrors,
-    axisAlignmentErrors,
-    portGapErrors,
-    obstacleGapErrors,
-    labelObstacleGapErrors,
-    laneGapErrors,
-    scroll: { x: window.scrollX, y: window.scrollY },
-    viewport: { width: window.innerWidth, height: window.innerHeight },
-    contentFullyVisible,
-    groupOverlapPairs,
-    groupCapacityErrors,
-    groupTitleErrors,
-    unsafeCount: document.querySelectorAll('script, foreignObject, iframe, object, embed').length,
-    outsideViewportCount,
-    };
-  } catch (error) {
-    return { scriptError: String(error && error.stack || error) };
-  }
-}`;
-
 function inspection(payload: unknown): InspectionResult {
   let candidate: unknown = payload;
   for (let depth = 0; depth < 5; depth++) {
@@ -1306,6 +366,20 @@ function inspection(payload: unknown): InspectionResult {
     else break;
   }
   const data = record(candidate, "inspection result");
+
+  const measurementFields: Record<string, string> = {"role": "nullableString", "title": "string", "description": "string", "viewBox": "nullableString", "svgWidth": "number", "svgHeight": "number", "nodeIds": "array", "edgeIds": "array", "arrowTargets": "array", "groupIds": "array", "legendIds": "array", "noteIds": "array", "legendBeforeNotes": "boolean", "nodeCenters": "object", "nodeShapes": "object", "edgeRecords": "object", "edgeBBoxes": "object", "edgeBendCounts": "object", "edgeGeometryKinds": "object", "edgeLabelIds": "array", "edgeLabels": "object", "labelNodeCollisionPairs": "array", "labelLabelCollisionPairs": "array", "labelArrowCollisionPairs": "array", "edgeIntersectionPairs": "array", "collinearOverlapPairs": "array", "portDirectionErrors": "array", "portApproachErrors": "array", "sideSwitchDetectedEdgeIds": "array", "sideSwitchErrors": "array", "arrowVisibilityErrors": "array", "arrowOcclusionPairs": "array", "arrowDecorationOcclusionPairs": "array", "structuralNodeIntersections": "array", "structuralEdgeIntersections": "array", "structuralLabelIntersections": "array", "structuralArrowIntersections": "array", "structuralFrameStyleErrors": "array", "structuralNodeFillErrors": "array", "structuralLayerOrderErrors": "array", "structuralMaskErrors": "array", "structuralMaskCoverageErrors": "array", "labelEdgeCollisionPairs": "array", "labelPlacementErrors": "array", "visualStyleErrors": "array", "textOverflowIds": "array", "textOverlapPairs": "array", "contentBBox": "nullableObject", "horizontalOverflow": "boolean", "lifelineIds": "array", "lifelineCoordinates": "object", "nodeCollisionPairs": "array", "edgeNodeCollisionPairs": "array", "entityGapErrors": "array", "axisGapErrors": "array", "axisAlignmentErrors": "array", "portGapErrors": "array", "obstacleGapErrors": "array", "labelObstacleGapErrors": "array", "laneGapErrors": "array", "scroll": "object", "viewport": "object", "contentFullyVisible": "boolean", "groupOverlapPairs": "array", "groupCapacityErrors": "array", "groupTitleErrors": "array", "unsafeCount": "number", "outsideViewportCount": "number"};
+  for (const [field, type] of Object.entries(measurementFields)) {
+    const v = data[field];
+    const valid = type === "array" ? Array.isArray(v) && v.every(x => typeof x === "string")
+      : type === "nullableString" ? v === null || typeof v === "string"
+      : type === "nullableObject" ? v === null || !!v && typeof v === "object" && !Array.isArray(v)
+      : type === "object" ? !!v && typeof v === "object" && !Array.isArray(v)
+      : typeof v === type && (type !== "number" || Number.isFinite(v));
+    if (!valid) fail(`VISUAL_MEASUREMENT_INCOMPLETE: ${field}`);
+  }
+  const finite = (v: unknown): boolean => typeof v === "number" ? Number.isFinite(v)
+    : !v || typeof v !== "object" || Object.values(v).every(finite);
+  if (!finite(data)) fail("VISUAL_MEASUREMENT_NONFINITE");
   if (typeof data.scriptError === "string") fail(`browser inspection script failed: ${data.scriptError}`);
   return {
     role: data.role === null ? null : String(data.role),
@@ -1580,7 +654,7 @@ function validateInspection(result: InspectionResult, expected?: ExpectedContrac
 }
 
 function relativeArtifact(path: string): string {
-  return relative(PROJECT_ROOT, path) || ".";
+  return relative(PROJECT_ROOT, path).replace(/\\/g, "/") || ".";
 }
 
 function writeJsonAtomic(path: string, value: unknown): void {
@@ -1590,40 +664,31 @@ function writeJsonAtomic(path: string, value: unknown): void {
   renameSync(temporary, path);
 }
 
-function parseOptions(args: string[]): { request: string; evidence?: string; dryRun: boolean; browser?: string } {
-  if (args[0] !== "run") fail("usage: aidlc-diagram-provider.ts run --request <path> [--evidence <path>] [--browser <path>] [--dry-run]");
+function parseOptions(args: string[]): { request: string; evidence?: string; dryRun: boolean; browser?: string; hostProvider?: string } {
+  if (args[0] !== "run") fail("usage: aidlc-diagram-provider.ts run --request <path> [--evidence <path>] [--host-provider <authorized-instance>] [--browser <installed-executable>] [--dry-run]");
   let request = "";
   let evidence: string | undefined;
   let dryRun = false;
+  let hostProvider: string | undefined;
   let browser: string | undefined;
   for (let index = 1; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--request") request = nonEmpty(args[++index], "--request");
     else if (arg === "--evidence") evidence = nonEmpty(args[++index], "--evidence");
+    else if (arg === "--host-provider") hostProvider = nonEmpty(args[++index], "--host-provider");
     else if (arg === "--browser") browser = nonEmpty(args[++index], "--browser");
     else if (arg === "--dry-run") dryRun = true;
     else fail(`unknown argument: ${arg}`);
   }
   if (!request) fail("--request is required");
-  return { request, evidence, dryRun, browser };
-}
-
-function localPreviewUrl(source: string, temporaryRoot: string, index: number, diagramId: string): string {
-  const content = readFileSync(source, "utf8");
-  if (/<script\b|<foreignObject\b|\son[a-z]+\s*=|(?:href|xlink:href)\s*=\s*["'](?:https?:|data:|\/\/)/i.test(content)) {
-    fail(`local SVG contains unsafe content and cannot be embedded for browser validation: ${relativeArtifact(source)}`);
-  }
-  const svg = content.replace(/<\?xml[\s\S]*?\?>/gi, "").replace(/<!DOCTYPE[\s\S]*?>/gi, "").trim();
-  const wrapper = join(temporaryRoot, `${index}-${diagramId}.html`);
-  writeFileSync(wrapper, `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:#fff}svg{display:block}</style></head><body>${svg}</body></html>`, { mode: 0o600 });
-  return pathToFileURL(wrapper).toString();
+  return { request, evidence, dryRun, browser, hostProvider };
 }
 
 async function main(): Promise<void> {
   const options = parseOptions(process.argv.slice(2));
   const request = parseRequest(options.request);
   configureEvidenceDirectory(request.stage);
-  configuredBrowser = resolveBrowserExecutable(options.browser || request.browser);
+
   const plan = request.diagrams.map((diagram, index) => ({
     id: diagram.id,
     url: sourceUrl(diagram, index),
@@ -1634,52 +699,35 @@ async function main(): Promise<void> {
     screenshot_path: relativeArtifact(artifactPath(diagram.screenshot_path, defaultDiagramArtifact(diagram.id, ".png"), "screenshot_path")),
     snapshot_path: relativeArtifact(artifactPath(diagram.snapshot_path, defaultDiagramArtifact(diagram.id, ".snapshot.txt"), "snapshot_path")),
   }));
+  const outputs = plan.flatMap(p => [p.screenshot_path, p.snapshot_path]);
+  if (new Set(outputs).size !== outputs.length) fail("duplicate diagram output paths");
   if (options.dryRun) {
     console.log(JSON.stringify({ status: "ready", provider: PROVIDER_PACKAGE, target_operation: request.target_operation, plan }, null, 2));
     return;
   }
-  if (!request.target_reading_environment?.viewports) fail("browser validation requires normal, fit, and zoom reading viewports");
+
 
   const evidence = evidencePath(request.stage, options.evidence);
   if (!existsSync(evidence)) fail(`source diagram-contract evidence is missing: ${relativeArtifact(evidence)}`);
   const sourceEvidence = record(JSON.parse(readFileSync(evidence, "utf8")), "diagram-contract evidence");
-  if (sourceEvidence.status !== "passed") fail("source diagram-contract evidence must already be passed before browser validation");
+  if (sourceEvidence.status !== "passed" || sourceEvidence.source_format !== "svg"
+    || !["STATIC_PASS", "PASS"].includes(String(sourceEvidence.final_status))
+    || sourceEvidence.expected_contract_status !== "passed" || sourceEvidence.generation_status !== "passed") {
+    fail("UNVERIFIED: source diagram-contract requires current SVG structure, expected contract and generator closure before browser validation");
+  }
 
-  const temporaryRoot = mkdtempSync(join(tmpdir(), "loeyae-diagram-provider-"));
   const results: Record<string, unknown>[] = [];
   try {
+    if (request.browser) fail("VISUAL_BROWSER_SELECTION_DENIED: select an installed browser with the trusted --browser option");
+    if (!request.target_reading_environment?.viewports) fail("browser validation requires normal, fit, and zoom reading viewports");
     for (const [index, diagram] of request.diagrams.entries()) {
+      if (!diagram.manifest_path) fail(`UNVERIFIED: semantic sidecar is required for ${diagram.id}`);
       const expected = loadExpected(diagram);
       if (!expected) fail(`UNVERIFIED: browser validation requires an independent expected contract for ${diagram.id}`);
       const actualLayout = loadActualLayout(diagram);
-      const url = diagram.source_path
-        ? localPreviewUrl(projectPath(diagram.source_path, `diagrams[${index}].source_path`), temporaryRoot, index, diagram.id)
-        : sourceUrl(diagram, index);
-      const defaultViewport = diagram.viewport || request.target_reading_environment?.viewport || { width: 1280, height: 720 };
-      const viewEntries: Array<[ReadingView, Viewport]> = request.target_reading_environment?.viewports
-        ? (Object.entries(request.target_reading_environment.viewports) as Array<[ReadingView, Viewport]>)
-        : [["normal", defaultViewport]];
-      for (const [readingView, viewport] of viewEntries) {
-      const pages = runChrome(["new_page", url, "--timeout", String(COMMAND_TIMEOUT_MS)]).payload;
-      const pageId = selectPage(pages);
-      runChrome(["select_page", String(pageId), "--bringToFront"]);
-      runChrome(["resize_page", String(viewport.width), String(viewport.height)]);
-      if (readingView !== "normal") {
-        runChrome(["evaluate_script", `() => {
-          const svg = document.querySelector('svg');
-          if (!svg) return false;
-          document.documentElement.style.width = '100vw';
-          document.documentElement.style.height = '100vh';
-          document.body.style.width = '100vw';
-          document.body.style.height = '100vh';
-          svg.style.width = '100vw';
-          svg.style.height = '100vh';
-          svg.style.maxWidth = 'none';
-          svg.style.maxHeight = 'none';
-          svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-          return true;
-        }`]);
-      }
+      if (!diagram.source_path || diagram.url) fail("NEEDS_CAPABILITY: visual host requires a local SVG source; remote URLs are not authorized");
+      const url = sourceUrl(diagram, index);
+      const viewEntries = Object.entries(request.target_reading_environment!.viewports!) as Array<[ReadingView, Viewport]>;
       const browserContract = {
         readingDirection: actualLayout.readingDirection || expected.routeContract.direction,
         mainAxis: actualLayout.mainAxis,
@@ -1692,27 +740,32 @@ async function main(): Promise<void> {
         sideSwitchExceptionEdgeIds: expected.routeContract.exceptions.filter((exception) => exception.type === "side-switch").flatMap((exception) => exception.edgeIds),
         resetScroll: true,
       };
-      const inspectionScript = `() => ((${INSPECTION_SCRIPT})(${JSON.stringify(browserContract)}))`;
-      const inspected = inspection(runChrome(["evaluate_script", inspectionScript]).payload);
+      const inputs = bindVisualInputs(PROJECT_ROOT, [options.request, diagram.source_path, declaredExpectedPath(diagram)!, ...(diagram.manifest_path ? [diagram.manifest_path] : [])]);
+      const state = activeStageState(request.stage)!;
+      const currentContext = () => {
+        const active = activeStageState(request.stage);
+        if (!active || active.status !== "running" || active.current_stage !== request.stage) fail("VISUAL_CONTEXT_STALE");
+        return { project_id: active.workflow_id, stage: request.stage, scope: active.current_stage_instance || request.stage, module_id: active.current_module, unit_id: active.current_unit };
+      };
+      const candidate = dispatchVisual({ project: PROJECT_ROOT, instance: options.hostProvider, browser: options.browser,
+        currentContext,
+        context: { project_id: state.workflow_id, stage: request.stage, scope: state.current_stage_instance || request.stage, module_id: state.current_module, unit_id: state.current_unit },
+        operation: request.target_operation, svg: readFileSync(projectPath(diagram.source_path, "source"), "utf8"),
+        contract: browserContract, viewports: request.target_reading_environment!.viewports!, inputs });
+      for (const [readingView, viewport] of viewEntries) {
+      const view = candidate.views[readingView];
+      const inspected = inspection(view.measurement);
       const errors = validateInspection(inspected, expected, actualLayout, readingView);
       if (actualLayout.readabilityEvidence && actualLayout.readabilityEvidence[readingView] !== `${relativeArtifact(resolve(dirname(evidence), "diagram-contract-provider.json"))}#views.${readingView}`) errors.push(`READABILITY_EVIDENCE: ${readingView} metadata does not point to this run's provider evidence view`);
-      const viewSuffix = request.target_reading_environment?.viewports ? `-${readingView}` : "";
-      const tempScreenshot = join(temporaryRoot, `${index}-${diagram.id}${viewSuffix}.png`);
-      const tempSnapshot = join(temporaryRoot, `${index}-${diagram.id}${viewSuffix}.snapshot.txt`);
-      runChrome(["take_snapshot", "--filePath", tempSnapshot]);
-      runChrome(["take_screenshot", "--fullPage", "--filePath", tempScreenshot]);
-      const consolePayload = runChrome(["list_console_messages", "--pageSize", "200"]).payload;
       const baseScreenshot = artifactPath(diagram.screenshot_path, defaultDiagramArtifact(diagram.id, ".png"), "screenshot_path");
       const baseSnapshot = artifactPath(diagram.snapshot_path, defaultDiagramArtifact(diagram.id, ".snapshot.txt"), "snapshot_path");
-      const screenshot = request.target_reading_environment?.viewports ? baseScreenshot.replace(/\.png$/i, `-${readingView}.png`) : baseScreenshot;
-      const snapshot = request.target_reading_environment?.viewports ? baseSnapshot.replace(/\.snapshot\.txt$/i, `-${readingView}.snapshot.txt`) : baseSnapshot;
-      if (!existsSync(tempScreenshot) || !existsSync(tempSnapshot)) errors.push("Chrome DevTools did not produce the requested screenshot or snapshot");
-      else {
-        mkdirSync(dirname(screenshot), { recursive: true });
-        mkdirSync(dirname(snapshot), { recursive: true });
-        copyFileSync(tempScreenshot, screenshot);
-        copyFileSync(tempSnapshot, snapshot);
-      }
+      const screenshot = baseScreenshot.replace(/\.png$/i, `-${readingView}.png`);
+      const snapshot = baseSnapshot.replace(/\.snapshot\.txt$/i, `-${readingView}.snapshot.txt`);
+      mkdirSync(dirname(screenshot), { recursive: true });
+      mkdirSync(dirname(snapshot), { recursive: true });
+      writeFileSync(screenshot, view.png);
+      writeFileSync(snapshot, view.snapshot);
+      const consolePayload = view.console;
       const exceptionEvidence = expected.routeContract.exceptions.map((exception) => ({
         type: exception.type,
         object: exception.object,
@@ -1734,6 +787,10 @@ async function main(): Promise<void> {
         expected_contract: relativeArtifact(projectPath(declaredExpectedPath(diagram)!, "expected_contract_path")),
         url,
         local_preview_fallback: diagram.source_path !== undefined,
+        acquisition: candidate.receipt,
+        snapshot_digest: view.snapshot_digest,
+        screenshot_digest: view.screenshot_digest,
+        measurement_digest: sha256FileDigest(JSON.stringify(inspected)),
         viewport,
         reading_view: readingView,
         status: errors.length === 0 ? "passed" : "failed",
@@ -1786,7 +843,7 @@ async function main(): Promise<void> {
         pixel_verified: false,
       },
     };
-    const updatedEvidence = {
+    const updatedEvidence = sealVisualEvidence(PROJECT_ROOT, {
       ...sourceEvidence,
       ...structuralEvidence,
       status: "passed",
@@ -1794,13 +851,15 @@ async function main(): Promise<void> {
       provider_status: "passed",
       target_operation_required: true,
       browser_visual_status: "passed",
+      visual_status: "VISUAL_PASS",
+      overall_status: "OVERALL_PASS",
       gate_statuses: { structure: "STRUCTURE_PASS", route_contract: "ROUTE_CONTRACT_PASS", geometry: "GEOMETRY_PASS", visual: "VISUAL_PASS", overall: "OVERALL_PASS" },
       render_status: "passed",
       expected_contract_status: "passed",
-      provider: { name: "chrome-devtools-mcp", package: PROVIDER_PACKAGE, operation: request.target_operation },
+      provider: { name: "diagram.visual", package: PROVIDER_PACKAGE, operation: request.target_operation },
       provider_validation: { status: "passed", request: relativeArtifact(projectPath(options.request, "request")), views: readingEvidence, structural: structuralEvidence, results },
       timestamp: new Date().toISOString(),
-    };
+    });
     writeJsonAtomic(evidence, updatedEvidence);
     writeJsonAtomic(resolve(dirname(evidence), "diagram-contract-provider.json"), {
       evidence_version: "1",
@@ -1812,6 +871,7 @@ async function main(): Promise<void> {
       views: readingEvidence,
       structural: structuralEvidence,
       results,
+      decision_digest: updatedEvidence.visual_seal.digest,
     });
     console.log(JSON.stringify({ status: "passed", final_status: "PASS", evidence: relativeArtifact(evidence), diagrams_checked: request.diagrams.length }, null, 2));
   } catch (error) {
@@ -1825,6 +885,8 @@ async function main(): Promise<void> {
         provider_status: "unavailable",
         target_operation_required: true,
         browser_visual_status: "unverified",
+        visual_status: "UNVERIFIED",
+        overall_status: "NEEDS_CAPABILITY",
         gate_statuses: { structure: "STRUCTURE_PASS", route_contract: "ROUTE_CONTRACT_PASS", geometry: "GEOMETRY_PASS", visual: "UNVERIFIED", overall: "NEEDS_CAPABILITY" },
         provider_validation: { status: "unavailable", request: relativeArtifact(projectPath(options.request, "request")), reason: message, results },
         timestamp,
@@ -1847,6 +909,8 @@ async function main(): Promise<void> {
         provider_status: "failed",
         target_operation_required: true,
         browser_visual_status: "failed",
+        visual_status: "FAIL",
+        overall_status: "FAIL",
         gate_statuses: { structure: "STRUCTURE_PASS", route_contract: "ROUTE_CONTRACT_PASS", geometry: "GEOMETRY_PASS", visual: "FAIL", overall: "FAIL" },
         provider_validation: { status: "failed", request: relativeArtifact(projectPath(options.request, "request")), reason: message, results },
         timestamp,
@@ -1862,8 +926,6 @@ async function main(): Promise<void> {
       });
     }
     throw error;
-  } finally {
-    rmSync(temporaryRoot, { recursive: true, force: true });
   }
 }
 

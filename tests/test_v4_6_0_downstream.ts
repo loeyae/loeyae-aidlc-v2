@@ -16,6 +16,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInitialState, loadWorkflowState, saveWorkflowState, type WorkflowState } from "../core/tools/aidlc-light-state";
+import { orderQualityFixture } from "./order_quality_fixture";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -307,8 +308,12 @@ function driveSingle(fixture: Fixture, scope: string, implementation: string, ho
   const { project, ucds } = fixture;
   next(project, "workspace-detection");
   ok(project, ["orchestrate", "report", "--stage", "workspace-detection", "--result", "completed", "--instruction-ack", "workspace-detection"]);
-  next(project, "state-template");
-  ok(project, ["orchestrate", "report", "--stage", "state-template", "--result", "completed", "--instruction-ack", "state-template"]);
+  // The lightweight profile omits instruction-only state-template, but keeps I13.
+  // Pre-profile workflows retain their original instruction acknowledgement.
+  if (loadWorkflowState(project)!.execution_profile?.level !== "lightweight") {
+    next(project, "state-template");
+    ok(project, ["orchestrate", "report", "--stage", "state-template", "--result", "completed", "--instruction-ack", "state-template"]);
+  }
 
   // I13: characterization UC-Ds bind their code refs to the workflow baseline.
   next(project, "test-case-derivation@module:project");
@@ -403,7 +408,7 @@ function driveSingle(fixture: Fixture, scope: string, implementation: string, ho
   ok(project, ["orchestrate", "report", "--stage", "build-and-test", "--result", "completed"]);
 
   next(project, "implementation-report");
-  writeImplementationReport(project, "docs/aidlc/construction/implementation-report.md", scope, 8, ids);
+  writeImplementationReport(project, "docs/aidlc/construction/implementation-report.md", scope, loadWorkflowState(project)!.completed_stage_instances.length + 1, ids);
   ok(project, ["orchestrate", "report", "--stage", "implementation-report", "--result", "completed"]);
   assertDone(project);
 }
@@ -575,18 +580,48 @@ try {
 
     const moduleArgs = ["--module", M01];
     const unitArgs = ["--module", M01, "--unit", "default"];
+    const syncQuality = orderQualityFixture(project, M01, loadWorkflowState(project, moduleRef)!.workflow_id);
+    const refreshQuality = () => {
+      const completed = loadWorkflowState(project, moduleRef)!.completed_stages;
+      if (!completed.includes("cross-validation")) return;
+      // delivery-readiness binds upstream Evidence bytes. Refresh in dependency
+      // order after scoped artifacts change, never reuse stale receipts.
+      for (const stage of ["requirements-analysis", "user-stories", "cross-validation"]) {
+        ok(project, ["evidence", "run", "--stage", stage, ...moduleArgs, "--all-sensors", "--refresh"]);
+      }
+    };
     const nextModule = (expected: string, refreshes: string[][] = []) => {
-      for (const args of refreshes) ok(project, ["evidence", "run", ...args, "--refresh"]);
+      if (existsSync(join(project, `docs/aidlc/modules/${M01}/inception/requirements.md`))) syncQuality();
+      const crossCompleted = loadWorkflowState(project, moduleRef)!.completed_stages.includes("cross-validation");
+      if (crossCompleted) refreshQuality();
+      for (const args of refreshes) {
+        if (!crossCompleted || !["requirements-analysis", "user-stories"].includes(args[1])) ok(project, ["evidence", "run", ...args, "--refresh"]);
+      }
       const directive = ok(project, ["orchestrate", "next", ...moduleArgs]).json;
       assert.equal(directive.stage_instance, expected, JSON.stringify(directive, null, 2));
     };
-    const report = (stage: string, extra: string[] = []) => ok(project, ["orchestrate", "report", "--stage", stage, ...(stage === "tdd" || stage === "code-generation" || stage === "code-review" ? unitArgs : moduleArgs), "--result", "completed", ...extra]);
+    const report = (stage: string, extra: string[] = []) => {
+      syncQuality();
+      refreshQuality();
+      return ok(project, ["orchestrate", "report", "--stage", stage, ...(stage === "tdd" || stage === "code-generation" || stage === "code-review" ? unitArgs : moduleArgs), "--result", "completed", ...extra]);
+    };
     const ack = (stage: string) => report(stage, ["--instruction-ack", stage]);
     const RA = ["--stage", "requirements-analysis", ...moduleArgs];
     const inception = `docs/aidlc/modules/${M01}/inception`;
 
     nextModule(`requirements-analysis@module:${M01}`);
     write(project, `${inception}/requirements.md`, "# 需求\n\n## REQ-001 订单导出分页\n\ntrack: [backend]\n\n业务规则：订单导出接口按 50 条分页返回，现有分页行为在本次重构中保持不变。\n");
+    const missingQuality = run(project, ["orchestrate", "report", "--stage", "requirements-analysis", ...moduleArgs, "--result", "completed"]);
+    assert.notEqual(missingQuality.status, 0);
+    assert.match(missingQuality.out, /exactly one authoritative aidlc-quality section/);
+    syncQuality();
+    const dependencyReview = `${inception}/dependency-review.json`;
+    const staleReview = readJson(project, dependencyReview);
+    staleReview.inputs[0].sha256 = "0".repeat(64);
+    write(project, dependencyReview, JSON.stringify(staleReview));
+    const staleQuality = run(project, ["orchestrate", "report", "--stage", "requirements-analysis", ...moduleArgs, "--result", "completed"]);
+    assert.notEqual(staleQuality.status, 0);
+    assert.match(staleQuality.out, /GATE_EVIDENCE_STALE/);
     report("requirements-analysis");
     nextModule(`requirement-clarification@module:${M01}`);
     write(project, `${inception}/clarifications.md`, "# 需求澄清\n\nNo clarifications needed.\n\nREQ-001 的分页规则（50 条一页）已在需求中明确，本次重构沿用现有行为。\n");
@@ -595,7 +630,7 @@ try {
     write(project, `${inception}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单导出分页流程\n\n```mermaid\nflowchart LR\n  A[调用 export_orders] --> B[读取下游订单]\n  B --> C[按 50 条分页返回]\n```\n");
     report("requirements-methods");
     nextModule(`user-stories@module:${M01}`, [RA]);
-    write(project, `${inception}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营导出分页订单\n\n- 关联需求：REQ-001\n- 作为运营人员，我希望导出订单时按 50 条分页返回，以便逐页核对。\n- 验收标准：下游返回 120 条订单时，导出结果为 50、50、20 三页。\n");
+    write(project, `${inception}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营导出分页订单\n\n- 关联需求：REQ-001\n- 作为运营人员，我希望导出订单时按 50 条分页返回，以便逐页核对。\n\n### AC-001 分页顺序与边界\n\n下游返回 120 条订单时，导出结果为 50、50、20 三页；空列表返回空页列表，上游超时向调用者传播。\n");
     report("user-stories");
     nextModule(`cross-validation@module:${M01}`, [RA]);
     write(project, `${inception}/cross-validation-report.md`, "# 交叉验证报告\n\n- status: passed\n- unresolved_conflicts: 0\n- prd_route: not-selected\n- ui_route: not-selected\n\n| 需求 | 故事 | 结论 |\n| --- | --- | --- |\n| REQ-001 | STORY-001 / US-001 | 一致：分页 50 条的需求由故事验收标准覆盖 |\n");

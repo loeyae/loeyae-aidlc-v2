@@ -40,9 +40,9 @@ condition: ui_mode_figma
 
 ## 2. 身份与能力门禁
 
-创建分支调用 `whoami` 确认认证和 seat，再核对写入能力；配置存在或认证成功均不能替代运行时能力验证：
+创建与读取能力均通过 Git 锁定的外部 Provider 声明和可信 Core 入口核对；配置存在或认证成功均不能替代运行时能力验证：
 
-- `流程创建`：`create_new_file` 创建的验证目标必须直接作为唯一主文件；在该文件内用 `use_figma` 完成最小写入验证，后续设计必须复用同一文件，不得另建正式文件。工具返回的 URL 必须进入本次 `figma-manifest.json`，handoff.md 只能镜像展示；
+- `流程创建`：由外部创建包声明有限结构化写入与可靠读回协议，调用 `createUiDesign`；签名创建选择和完整输入授权必须绑定已批准页面计划、当前资源/生成/Provider 锁、操作 ID、唯一主文件/目标 Page、project/stage/scope 和有效期。发送后必须调用只读 `recoverUiDesign` 对账与获取截图，再由 Core 发布 `source=created` manifest。生产 OAuth 或结构化写入能力缺失时在联网前阻断；本地 fixture 不能作为真实账户验证；
 - `外部提供`：通过 Git 锁定的外部只读适配契约与 Core 通用消费入口验证目标文件和授权节点，按 `knowledge/protocols/ui-readonly-adapter.md` 执行。服务认证尚不支持时准确返回能力诊断，不继承宿主会话；本分支不直接调用身份、读取或写入工具。
 
 客户端、seat、权限或工具不满足时标记 blocked，向用户提供“修复 Figma 能力后重试”与“切换 HTML Mock”选项。未经用户选择不得自动切换模式。
@@ -86,7 +86,7 @@ condition: ui_mode_figma
 - 不设逐页人工确认门禁，不设每批“独立审查→修正→复验”repeat loop；
 - 可按批次写入，但批次**只用于控制写入规模和错误恢复**，一个 Figma 文件同时只有一个写者；
 - 每批写入后由当前写者**自动执行技术读回**（节点真实生成、顶层 Frame 唯一、`nodeId` 稳定、未误改只读来源或旧版本、无 API 回滚残留、无碰撞/越界/缺字/截断、Variables/Components/Auto Layout 真实引用、截图与登记生成），**不启动独立 reviewer，不等待用户确认**；
-- Figma 写入失败时按阶段 4 的恢复顺序（改参数→拆更小批次→先 Auto Layout 父级再 FILL→自动重试→连续两次失败切换实现），不无限重试；
+- 写入结果不确定时禁止直接重试创建；按操作 ID 与输入摘要在可信目标读回，唯一证明归属后恢复，无法定位或存在歧义时阻断并要求人工对账。不得按名称认领节点，不删除或改写其他操作的节点；
 - 每次汇报或状态更新后生成继续运行，不因进度回复停顿。每批进度和读回结果写入 canonical manifest 或报告。
 
 `外部提供`连续读取并登记已有 Page/Frame，生成截图证据，不写入源文件。涉及页面语义变化时回到页面计划并按 `common-workflow-changes.md` 处理，旧设计证据失效。

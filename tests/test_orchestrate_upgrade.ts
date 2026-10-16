@@ -59,8 +59,8 @@ function snapshot(project: string): Map<string, string> {
 }
 
 /** A split project whose m01 completed requirements-analysis and application-design before the new sensors existed. */
-function prepareProject(): string {
-  const project = join(root, "upgrade");
+function prepareProject(name = "upgrade"): string {
+  const project = join(root, name);
   mkdirSync(project, { recursive: true });
   git(project, ["init", "-q"]);
   write(project, "README.md", "REQ-BASE upgrade dry-run fixture\n");
@@ -147,6 +147,20 @@ try {
   assert.equal(m01State.status, "parked", "recovery never changes workflow progress");
   const after = success(project, ["orchestrate", "upgrade", "--dry-run", "--module", M01]);
   assert.deepEqual((after.pending as Pending[]).map((item) => item.instance_id), [DESIGN]);
+
+  // Explicit quality adoption makes every declared quality sensor mandatory.
+  const adopted = prepareProject("adopted");
+  const adoptedState = loadWorkflowState(adopted, { kind: "module", module_id: M01 })!;
+  write(adopted, `docs/aidlc/modules/${M01}/inception/quality-adoption.json`, JSON.stringify({
+    version: "1", workflow_id: adoptedState.workflow_id, module_id: M01, scope: "feature", status: "adopted",
+    rationale: "Fixture owner explicitly migrates the legacy product quality contract", migration_differences: [],
+    evidence_plan: ["review dependency and field inventory against source contracts"], adopted_by: "fixture-owner",
+  }));
+  const adoptedBefore = snapshot(adopted);
+  const adoptedReport = success(adopted, ["orchestrate", "upgrade", "--dry-run", "--module", M01]);
+  assert.deepEqual(snapshot(adopted), adoptedBefore, "adopted dry-run also preserves all files");
+  const adoptedRequirements = (adoptedReport.pending as Pending[]).find(item => item.instance_id === REQUIREMENTS)!;
+  assert.deepEqual(adoptedRequirements.missing_sensors, ["traceability-matrix", "quality-change-impact", "dependency-readiness", "field-capability"]);
 
   console.log("test_orchestrate_upgrade: ok");
 } finally {

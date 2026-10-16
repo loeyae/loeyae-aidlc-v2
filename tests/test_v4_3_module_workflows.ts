@@ -281,9 +281,11 @@ try {
   // Module scope still binds a module's evidence to that module's own later writes
   // (clarifications, diagrams); the documented repair is refresh + re-attest.
   failure(project, ["orchestrate", "next", "--module", M03, "--resume"], /scope_digest no longer matches the module:m03-merchant scope/);
+  assert.equal(loadWorkflowState(project, { kind: "module", module_id: M03 })!.status, "parked", "failed admission must not commit the resume");
   success(project, ["evidence", "run", "--stage", "requirements-analysis", "--module", M03, "--refresh"]);
   success(project, ["orchestrate", "report", "--stage", "requirements-analysis", "--module", M03, "--result", "completed"]);
-  const m03Resumed = success(project, ["orchestrate", "next", "--module", M03]);
+  assert.equal(success(project, ["orchestrate", "next", "--module", M03]).kind, "parked", "re-attestation preserves the parked workflow");
+  const m03Resumed = success(project, ["orchestrate", "next", "--module", M03, "--resume"]);
   assert.equal(m03Resumed.stage_instance, `requirement-clarification@module:${M03}`);
   const verified = projected(project);
   assert.equal(verified.shared_contracts[0].verified, true);

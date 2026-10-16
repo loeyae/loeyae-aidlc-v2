@@ -20,6 +20,10 @@ action.target = "result"; action.result_entry = "absent"; f.syncUi(); f.blocked(
 action.result_entry = "result"; f.syncUi(); f.pass(sensor);
 (f.plan.regions as Region[]).push({ id: "old-button", page_id: "PAGE-001", change: "removed", stories: ["US-002"], acs: ["AC-002"], required_states: [], states: [] });
 f.syncUi(); f.review("ui", ["publish", "old-button"], [`${f.base}/ui-design/page-plan.md`, `${f.base}/user-stories.md`, `${f.base}/requirements.md`, ...(f.req.inputs as string[]), `${f.base}/ui-mock/ui-mock-manifest.json`, htmlPath]); f.pass(sensor);
-for (const route of ["figma-create", "figma-existing"]) { const figma = new QualityFixture(); figma.prepareUi(route); figma.pass(sensor); }
+for (const route of ["figma-create", "figma-existing"]) {
+  const figma = new QualityFixture(); figma.prepareUi(route);
+  // Hand-authored snapshots cannot stand in for a managed remote acquisition.
+  figma.blocked(sensor, route === "figma-create" ? "UI_WRITE_REGISTRATION_REQUIRED" : "UI_READ_REGISTRATION_REQUIRED");
+}
 const planning = new QualityFixture(); planning.prepareUi(); planning.stage("ui-page-planning", "html-mock"); planning.syncUi(); planning.pass(sensor);
 console.log("PASS MARS-168 phase 3 UI: local validator, DOM regions/AC ownership, states, actions, removals, Figma and planning real gates");

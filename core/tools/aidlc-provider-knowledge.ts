@@ -7,6 +7,7 @@ import { localProviderArtifactSigner } from "./aidlc-provider-evidence.js";
 import { assertPlanAndNodeCurrent, loadFrozenProviderPlan } from "./aidlc-provider-runner.js";
 import { recomputePlanDigest, recomputePlanId } from "./aidlc-provider-resolver.js";
 import { isPortableProviderPath, PROVIDER_SCHEMA, type KnowledgeReceiptV1_1, type ProviderPlanV1_1, type Sha256Digest } from "./aidlc-provider-types.js";
+import { readModuleFacts, matchKnowledgeRequirements, type ModuleFacts } from "./aidlc-module-facts.js";
 
 /** Explicit extension protocol; the existing v1.1 Manifest/Receipt shapes are unchanged. */
 export const KNOWLEDGE_PACKAGE_SCHEMA = "aidlc.knowledge-package/v1";
@@ -40,6 +41,7 @@ export interface KnowledgeDelivery {
   readonly sections: readonly { readonly id: string; readonly path: string; readonly digest: Sha256Digest; readonly content: string }[];
   readonly delivery_digest: Sha256Digest;
   readonly gate_eligible: false;
+  readonly module_facts?: ModuleFacts;
 }
 
 export interface KnowledgeConfirmation {
@@ -64,7 +66,9 @@ export function loadProviderKnowledge(project: string, input: { plan: string | P
   if (manifest.kind !== "knowledge") fail("node is not a knowledge capability");
   const declaration = record(manifest.extensions?.["aidlc.knowledge"]);
   exact(declaration, ["schema", "version", "topics"]);
-  if (declaration.schema !== KNOWLEDGE_PACKAGE_SCHEMA || declaration.version !== manifest.version) fail("knowledge package schema/version mismatch");
+  const scoped = declaration.schema === "aidlc.knowledge-package/v2";
+  if ((!scoped && declaration.schema !== KNOWLEDGE_PACKAGE_SCHEMA) || declaration.version !== manifest.version) fail("knowledge package schema/version mismatch");
+  const facts = scoped ? readModuleFacts(project, plan.scope.module_id) : undefined;
   if (!Array.isArray(declaration.topics) || !declaration.topics.length) fail("missing topics");
   const topics = declaration.topics.map((value) => {
     const topic = record(value);
@@ -78,21 +82,22 @@ export function loadProviderKnowledge(project: string, input: { plan: string | P
   if (!Array.isArray(topic.sections) || !topic.sections.length || topic.sections.length > 128) fail("expected 1..128 declared sections");
   const ids = new Set<string>();
   let totalBytes = 0;
-  const sections = topic.sections.map((value) => {
+  const sections = topic.sections.flatMap((value) => {
     const section = record(value);
-    exact(section, ["id", "path", "digest"]);
+    exact(section, scoped ? ["id", "path", "digest", "requires"] : ["id", "path", "digest"]);
     const id = text(section.id);
     if (ids.has(id)) fail("duplicate section id");
     ids.add(id);
     const path = text(section.path);
     if (!isPortableProviderPath(path) || path.includes(":")) fail("section path escapes package");
+    if (facts && matchKnowledgeRequirements(facts, section.requires) !== "match") return [];
     const bytes = readLockedProviderFile(project, lock, path);
     totalBytes += bytes.length;
     if (totalBytes > MAX_CONTENT_BYTES) fail("knowledge content exceeds 4 MiB");
     const digest: Sha256Digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
     if (section.digest !== digest) fail(`section ${id} digest mismatch`);
     const content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    return { id, path, digest, content };
+    return [{ id, path, digest, content }];
   });
   const payload = {
     schema: "aidlc.knowledge-delivery/v1" as const,
@@ -104,6 +109,7 @@ export function loadProviderKnowledge(project: string, input: { plan: string | P
       ruleset_digests: lock.manifest.rulesets.map((ruleset) => ruleset.digest),
     },
     topic: text(topic.topic), sections, gate_eligible: false as const,
+    ...(facts ? { module_facts: facts } : {}),
   };
   return { ...payload, delivery_digest: sha256ProviderDigest(payload) };
 }
@@ -132,6 +138,7 @@ export function confirmProviderKnowledge(project: string, input: {
   plan: string | ProviderPlanV1_1; nodeId: string; deliveryDigest: string; consumer: string;
 }): KnowledgeConfirmation {
   const delivery = loadProviderKnowledge(project, input);
+  if (!delivery.sections.length) fail("no compatible knowledge sections for current module facts; nothing to confirm");
   if (input.deliveryDigest !== delivery.delivery_digest) fail("host confirmation does not match delivered content/context");
   const consumer = text(input.consumer);
   const now = new Date();

@@ -37,7 +37,7 @@ import {
 import { evaluateProviderGate } from "./aidlc-provider-gate";
 import { loadProviderKnowledge, confirmProviderKnowledge, verifyProviderKnowledge } from "./aidlc-provider-knowledge.js";
 import { previewProviderMcp } from "./aidlc-provider-mcp.js";
-import { applyProviderMcp, planProviderMcp, planProviderMcpCleanup, cleanupProviderMcp } from "./aidlc-provider-mcp-apply.js";
+import { applyProviderMcp, planProviderMcp, planProviderMcpCleanup, cleanupProviderMcp, statusProviderMcp, recoverProviderMcp } from "./aidlc-provider-mcp-apply.js";
 
 export interface ProviderLifecycleResult {
   readonly status: "added" | "updated" | "enabled" | "disabled" | "removed" | "unchanged";
@@ -517,6 +517,8 @@ export function providerCliUsage(): string {
     "  remove <instance-id> [--project <path>]",
     "  probe [--project <path>]",
     "  mcp-preview --host-config <json-path> [--host-domains <json-path>] [--project <path>]",
+    "  mcp-status --host-config <json-path> [--host-domains <json-path>] [--project <path>]",
+    "  mcp-recover --host-config <json-path> --plan <original-json-file> [--host-domains <json-path>] [--project <path>]",
     "  mcp-cleanup-plan --host-config <json-path> [--host-domains <json-path>] [--release-all] [--project <path>]",
     "  mcp-cleanup --host-config <json-path> --plan <json-file> [--host-domains <json-path>] [--release-all] [--project <path>]",
     "  mcp-plan --host-config <json-path> [--host-domains <json-path>] [--project <path>]",
@@ -537,6 +539,19 @@ export function runProviderCli(args = process.argv.slice(2)): unknown {
   if (!command || command === "help" || command === "--help" || command === "-h") return { usage: providerCliUsage() };
   const parsed = parseCli(rest);
   const root = project(parsed);
+  if (command === "mcp-status" || command === "mcp-recover") {
+    assertOptions(parsed, ["host-config", "host-domains", "project", "output", ...(command === "mcp-recover" ? ["plan"] : [])]);
+    const hostConfig = option(parsed, "host-config");
+    if (!hostConfig || parsed.positionals.length) throw new Error(`${command} requires --host-config and no positional arguments`);
+    const input = { hostConfig, hostDomains: option(parsed, "host-domains") };
+    if (command === "mcp-status") return statusProviderMcp(root, input);
+    const planPath = option(parsed, "plan");
+    if (!planPath) throw new Error("mcp-recover requires --plan with the original saved transaction plan; do not recreate authorization");
+    let originalPlan: unknown;
+    try { originalPlan = JSON.parse(readFileSync(resolve(root, planPath), "utf8")); }
+    catch { throw new Error("mcp-recover requires a readable original JSON plan; preserve transaction artifacts"); }
+    return recoverProviderMcp(root, { ...input, plan: originalPlan });
+  }
   if (command === "mcp-cleanup-plan" || command === "mcp-cleanup") {
     assertOptions(parsed, ["host-config", "host-domains", "project", "output", "release-all", ...(command === "mcp-cleanup" ? ["plan"] : [])]);
     const hostConfig = option(parsed, "host-config");

@@ -6,6 +6,7 @@ import { parseStoryDefinitions } from "./aidlc-story-index";
 import { qualityBase, qualityHash, qualityInput, qualityLegacyResult, qualityPath, qualityResult, qualitySection, type QualityContext, type QualityIssue } from "./aidlc-quality-gates";
 import { reviewIssues } from "./aidlc-quality-checks";
 import { verifyExternalUiManifest } from "./aidlc-ui-readonly.js";
+import { verifyCreatedUiManifest } from "./aidlc-ui-create.js";
 
 export const HTML_QUALITY_CONFIG: ConfigData = { root: true, extends: ["html-validate:recommended"] };
 const qualityRequire = createRequire(import.meta.url);
@@ -140,6 +141,7 @@ export function qualityUiCheck(ctx: QualityContext): Record<string, unknown> {
     plan.inputs.push(qualityInput(ctx, manifestPath));
     const manifest = JSON.parse(readFileSync(qualityPath(ctx, manifestPath), "utf8"));
     if (ctx.ui_route === "figma-existing") for (const path of verifyExternalUiManifest(ctx.root, ctx.module_id!, manifest)) plan.inputs.push(qualityInput(ctx, path));
+    if (ctx.ui_route === "figma-create") for (const path of verifyCreatedUiManifest(ctx.root, ctx.module_id!, manifest)) plan.inputs.push(qualityInput(ctx, path));
     const nodes = arr<FigmaNode>(manifest.region_nodes, "Figma real region nodes and component mappings");
     const snapshotPath = manifest.node_snapshot as string;
     plan.inputs.push(qualityInput(ctx, snapshotPath));

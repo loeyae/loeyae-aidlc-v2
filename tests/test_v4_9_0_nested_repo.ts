@@ -17,6 +17,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { loadWorkflowState, saveWorkflowState } from "../core/tools/aidlc-light-state";
+import { orderQualityFixture } from "./order_quality_fixture";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -218,8 +219,7 @@ function toI13(f: NestedFixture, ucds: Array<{ id: string; codeRef: string }>): 
   };
   expect("workspace-detection");
   ok(f.project, ["orchestrate", "report", "--stage", "workspace-detection", "--result", "completed", "--instruction-ack", "workspace-detection"]);
-  expect("state-template");
-  ok(f.project, ["orchestrate", "report", "--stage", "state-template", "--result", "completed", "--instruction-ack", "state-template"]);
+  assert.equal(loadWorkflowState(f.project)!.execution_profile?.level, "lightweight");
   expect("test-case-derivation@module:project");
   write(f.project, "docs/aidlc/modules/project/inception/requirements.md", REQUIREMENTS);
   write(f.project, `${CASES}/_index.md`, `# UC-D 索引\n\n${ucds.map((ucd) => `- ${ucd.id} 订单导出（source_ref: REQ-001）`).join("\n")}\n`);
@@ -354,14 +354,33 @@ function splitFixture(name: string, sourceRoots: unknown[] = ["lib", "app"]): Sp
 
   const step = (args: string[], expectOk = true): Run => (expectOk ? ok(project, args) : run(project, args));
   const moduleArgs = ["--module", M01];
+  let syncQuality = () => {};
+  const refreshQuality = () => {
+    if (!loadWorkflowState(project, { kind: "module", module_id: M01 })!.completed_stages.includes("cross-validation")) return;
+    for (const stage of ["requirements-analysis", "user-stories", "cross-validation"]) step(["evidence", "run", "--stage", stage, ...moduleArgs, "--all-sensors", "--refresh"]);
+  };
   const nextModule = (expected: string, refreshes: string[][] = []): Run => {
-    for (const args of refreshes) step(["evidence", "run", ...args, "--refresh"]);
+    if (existsSync(join(project, `${IN}/requirements.md`))) syncQuality();
+    const completed = loadWorkflowState(project, { kind: "module", module_id: M01 })!.completed_stages;
+    if (completed.includes("units-generation")) {
+      step(["document-slices", "generate", ...moduleArgs]);
+      step(["evidence", "run", "--stage", "units-generation", ...moduleArgs, "--sensor", "document-slice-consistency", "--refresh"]);
+      syncQuality();
+    }
+    if (completed.includes("cross-validation")) refreshQuality();
+    for (const args of refreshes) if (!completed.includes("cross-validation") || !["requirements-analysis", "user-stories"].includes(args[1])) step(["evidence", "run", ...args, "--refresh"]);
     const result = step(["orchestrate", "next", ...moduleArgs]);
     assert.equal(result.json.stage_instance, expected, JSON.stringify(result.json, null, 2));
     return result;
   };
-  const report = (stage: string, extra: string[] = []) => step(["orchestrate", "report", "--stage", stage, ...moduleArgs, "--result", "completed", ...extra]);
-  const reportUnit = (stage: string, unit: string) => step(["orchestrate", "report", "--stage", stage, ...unitArgs(unit), "--result", "completed"], false);
+  const report = (stage: string, extra: string[] = []) => {
+    syncQuality(); refreshQuality();
+    return step(["orchestrate", "report", "--stage", stage, ...moduleArgs, "--result", "completed", ...extra]);
+  };
+  const reportUnit = (stage: string, unit: string) => {
+    if (stage !== "tdd") { syncQuality(); refreshQuality(); }
+    return step(["orchestrate", "report", "--stage", stage, ...unitArgs(unit), "--result", "completed"], false);
+  };
   const ack = (stage: string) => report(stage, ["--instruction-ack", stage]);
 
   step(["orchestrate", "next", "--scope", "feature", "--work", `4.9.0 nested ${name}`]);
@@ -374,6 +393,7 @@ function splitFixture(name: string, sourceRoots: unknown[] = ["lib", "app"]): Sp
   write(project, "docs/aidlc/ideation/scenario-module-mapping.md", `# 场景模块映射\n\nREQ-001 订单处理属于 ${M01}。\n`);
   step(["orchestrate", "split", "--from", global.workflow_id]);
   const moduleRef = { kind: "module" as const, module_id: M01 };
+  syncQuality = orderQualityFixture(project, M01, loadWorkflowState(project, moduleRef)!.workflow_id);
   nextModule(`requirements-analysis@module:${M01}`);
   write(project, `${IN}/requirements.md`, "# 需求\n\n## REQ-001 订单处理\n\ntrack: [backend]\n\n业务规则：订单处理由多个单元分别改动，每个单元的存量行为由 characterization UC-D 锁定。\n");
   report("requirements-analysis");
@@ -384,7 +404,7 @@ function splitFixture(name: string, sourceRoots: unknown[] = ["lib", "app"]): Sp
   write(project, `${IN}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单处理流程\n\n```mermaid\nflowchart LR\n  A[接收订单] --> B[按单元处理]\n  B --> C[返回结果]\n```\n");
   report("requirements-methods");
   nextModule(`user-stories@module:${M01}`, [RA]);
-  write(project, `${IN}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营处理订单\n\n- 关联需求：REQ-001\n- 作为运营人员，我希望订单处理的存量行为在各单元改动后保持不变。\n- 验收标准：每个单元的 characterization 用例在该单元完成时通过。\n");
+  write(project, `${IN}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营处理订单\n\n来源：REQ-001\n- 作为运营人员，我希望订单处理的存量行为在各单元改动后保持不变。\n\n### AC-001 存量导出与分页\n每个单元的 characterization 用例在该单元完成时通过；120 条订单分页为 50/50/20，空列表保持为空。\n");
   report("user-stories");
   nextModule(`cross-validation@module:${M01}`, [RA]);
   write(project, `${IN}/cross-validation-report.md`, "# 交叉验证报告\n\n- status: passed\n- unresolved_conflicts: 0\n- prd_route: not-selected\n- ui_route: not-selected\n\n| 需求 | 故事 | 结论 |\n| --- | --- | --- |\n| REQ-001 | STORY-001 / US-001 | 一致 |\n");
@@ -392,7 +412,8 @@ function splitFixture(name: string, sourceRoots: unknown[] = ["lib", "app"]): Sp
   nextModule(`workflow-planning@module:${M01}`, [RA, ["--stage", "user-stories", ...moduleArgs]]);
   write(project, `${IN}/workflow-plan.md`, "# 工作流规划\n\nREQ-001：u1、u2 改动 lib/，u3 改动嵌套仓库 app/；各单元 BASELINE→GREEN；不需要应用设计。\n");
   report("workflow-planning");
-  write(project, `${IN}/unit-manifest.json`, `${JSON.stringify({ schema_version: 1, module_id: M01, units: UNITS.map((unit) => ({ unit_id: unit, name: `Unit ${unit}`, service_id: "trade-service", conditional_stages: [] })) }, null, 2)}\n`);
+  write(project, `${IN}/unit-manifest.json`, `${JSON.stringify({ schema_version: 1, module_id: M01, units: UNITS.map((unit) => ({ unit_id: unit, name: `Unit ${unit}`, service_id: "trade-service", conditional_stages: [], req_refs: ["REQ-001"] })) }, null, 2)}\n`);
+  write(project, `${IN}/application-design/unit-of-work-story-map.md`, '# Approved shared order story\n```aidlc-story-map\n' + JSON.stringify({ schema_version: 1, status: "approved", approved_by: "fixture-owner", mappings: [{ story_id: "STORY-001", unit_ids: UNITS }], shared_req_refs: ["REQ-001"] }) + '\n```\n');
   const moduleState = loadWorkflowState(project, moduleRef)!;
   moduleState.completed_stages.push("units-generation");
   moduleState.completed_stage_instances.push(`units-generation@module:${M01}`);
@@ -409,6 +430,7 @@ function splitFixture(name: string, sourceRoots: unknown[] = ["lib", "app"]): Sp
       phases: { ...Object.fromEntries(UNITS.map((unit) => [unit, { BASELINE: ucds.filter((ucd) => ucd.unit === unit).map((ucd) => ucd.id), GREEN: ucds.filter((ucd) => ucd.unit === unit).map((ucd) => ucd.id) }])), "*": { GREEN: ucds.map((ucd) => ucd.id) } },
     }, null, 2)}\n`);
     write(project, "tests/test_features.py", `# REQ-001 ${ucds.map((ucd) => ucd.id).join(" ")}\n\n\n${ucds.map((ucd) => `def test_${ucd.id.toLowerCase().replace(/-/g, "_")}():\n    # ${ucd.id}\n    assert True\n`).join("\n\n")}`);
+    syncQuality();
   };
   write(project, "tests/__init__.py", "\"\"\"Tests for the order service (REQ-001).\"\"\"\n");
   write(project, "tests/observe_uc.cjs", PLAN_OBSERVER);
@@ -505,6 +527,14 @@ function engine481(): string | undefined {
 }
 
 function normalizeText(value: string, project: string): string {
+  try {
+    const directive = JSON.parse(value);
+    // MARS-161 adds read-only loading/reuse plans, covered by its dedicated suites.
+    // Keep comparing the legacy CLI behavior and every state/evidence verdict.
+    delete directive.rule_load_plan;
+    delete directive.evidence_reuse_plan;
+    value = JSON.stringify(directive, null, 2) + "\n";
+  } catch { /* Markdown state/audit and other non-JSON output keep their original form. */ }
   return value
     .split(project).join("<project>").split(project.replace(/\\/g, "/")).join("<project>").split(project.replace(/\\/g, "\\\\")).join("<project>")
     .replace(/\\\\/g, "/").replace(/\\/g, "/")
@@ -536,15 +566,17 @@ function normalizeText(value: string, project: string): string {
     // dedicated tests (test_mars160_execution_policy). Stripping them on both engines keeps the
     // comparison symmetric.
     .replace(/,\n(\s*)"execution_policy": \{[\s\S]*?\n\1\}(?=,?\n)/g, "")
-    .replace(/\n {2}"requires": \[[^\]]*\],/g, "");
+    .replace(/\n {2}"requires": \[[^\]]*\],/g, "")
+    // Markdown renderers may preserve extra empty lines; all state/audit rows remain compared.
+    .split(/\r?\n/).filter(line => line.trim() !== "").join("\n") + "\n";
 }
 
 /**
  * The same no-nested project driven by one engine: refactor workflow, characterization
  * I13 on lib/a.py, BASELINE, GREEN at a new commit, --advance, baseline show, attest.
  */
-function eFixture(name: string, engineRoot: string): { transcript: string[]; state: string; audit: string; evidence: Record<string, string> } {
-  const engineCli = join(engineRoot, "bin", "cli.ts");
+function eFixture(name: string, engineRoot: string, bootstrapRoot = engineRoot): { transcript: string[]; state: string; audit: string; evidence: Record<string, string> } {
+  let engineCli = join(bootstrapRoot, "bin", "cli.ts");
   const project = join(scratch, `p${++counter}-${name}`);
   const transcript: string[] = [];
   const step = (args: string[]): Run => {
@@ -565,6 +597,9 @@ function eFixture(name: string, engineRoot: string): { transcript: string[]; sta
   git(project, ["add", "-A"]);
   git(project, ["commit", "-qm", "e1 legacy"], "2024-01-01T00:00:00Z");
   step(["orchestrate", "next", "--scope", "refactor", "--work", "E no nested"]);
+  // Compare continuation of an actual 4.8.1 workflow. New workflows intentionally
+  // have a persisted lightweight profile and a different instruction-stage route.
+  engineCli = join(engineRoot, "bin", "cli.ts");
   step(["orchestrate", "next"]);
   step(["orchestrate", "report", "--stage", "workspace-detection", "--result", "completed", "--instruction-ack", "workspace-detection"]);
   step(["orchestrate", "next"]);
@@ -1118,7 +1153,7 @@ try {
       return;
     }
     assert.match(readFileSync(join(engine, "package.json"), "utf8"), /"version": "4\.8\.1"/, "the comparison engine is 4.8.1");
-    const current = eFixture("e-current", repository);
+    const current = eFixture("e-current", repository, engine);
     const previous = eFixture("e-481", engine);
     console.log(`    E: ${current.transcript.length} CLI steps, ${Object.keys(current.evidence).length} evidence files compared`);
     assert.deepEqual(current.transcript, previous.transcript, "normalized CLI transcript");

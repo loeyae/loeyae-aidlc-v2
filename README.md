@@ -4,6 +4,13 @@
 
 ## 核心模型
 
+技术栈知识按已批准模块事实和版本从可选 Git Provider 包加载。模块根目录登记在
+`.aidlc/module-facts.json`，来源摘要与版本状态进入知识交付和签名确认；不按 PC/移动端、
+目录名或旧 handoff 标记选择框架。Vue/Element Plus、UniApp、Spring Cloud/Nacos、
+测试工具和运行时模板均可独立安装并绑定模块/阶段。未安装时沿用项目规范，未知或冲突
+版本不套用默认值。配置格式、受限事实来源及知识权限边界见
+`core/knowledge/protocols/provider-offline-knowledge.md`。
+
 新流程以明确工作描述、Markdown 状态与审计、成员自主选择 unit、Git 分支、review、构建和测试为基础。
 
 ```text
@@ -358,6 +365,21 @@ npm run test:mars169
 npm run build:all
 npm test
 ```
+
+`npm test` 包含 pretest、Core 回归和 `test:provider-local`。后者覆盖受管 MCP apply/cleanup、只读 transport、context 边界、模块事实、DOCX 对抗 fixture 和图表布局；只使用本地数据与本机协议服务，不下载 Provider 或要求真实账户。Python 检查会验证解释器；Windows Store 占位命令不可用时，可在当前进程设置 `AIDLC_TEST_PYTHON` 为已安装 Python 3 的完整路径，不修改系统配置。导出/DOCX 的无包诊断不代表生产渲染或版式验证通过。
+
+Core 聚合入口按 `scripts/core-test-suites.json` 保留原有命令顺序，失败后继续收集后续结果，最后统一返回非零。可用 `AIDLC_TEST_OUTPUT` 指定日志目录；pretest 的原始输出由 npm 正常报告，聚合阶段另存每项命令、退出码和日志。完整聚合清除定向章节过滤、旧基线运行器及用户文档 host 环境变量；定向诊断请直接运行单个测试脚本。质量与文档切片组合也包含在本地回归中。
+
+跨仓测试必须显式运行，并提前准备匹配 revision 的实际 Provider checkout 及依赖：
+
+```bash
+npm run test:provider-local
+npm run test:provider-integration -- --source <Provider-Git-URL> --revision <40-character-SHA> --checkout <matching-clean-checkout> --output <log-directory>
+```
+
+集成入口验证 checkout 的 HEAD 和已跟踪文件，逐项执行实际 Git add/lock、离线及模块知识、context/design 只读协议、Figma 既有稿/创建授权恢复 fixture、真实浏览器三视图、SVG/Markdown 导出、导出 DOCX 的样式修改与非样式保护、63 段抽离审计。Figma/SSOT/design 使用本地真实 MCP 协议服务样本，不证明生产账户或 OAuth 可用。需要本机浏览器、字体、Python；document-render/docx-style 原生执行当前仅声明 Windows x64，DOCX 最终页面版式仍未验证。抽离审计要求 Core Git 历史包含原始章节 revision。
+
+两仓分别执行 `npm test`、`npm run typecheck`；Core 另执行 `npm run build:all` 和 `npx --no-install tsx tests/test_distribution_parity.ts`。集成入口不安装依赖，也不等待 CI；各套件即使失败仍继续收集日志，任一失败返回非零，全部通过返回 0。日志目录包含逐项命令、退出码和范围的 `results.json`、原始日志及供 DOCX 样式测试使用的真实导出文档；未指定 `--output` 时使用独立临时目录并打印位置。
 
 ## License
 

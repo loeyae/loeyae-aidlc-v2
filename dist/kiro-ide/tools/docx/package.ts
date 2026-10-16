@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, posix, resolve } from "node:path";
 import JSZip from "jszip";
+import { readSafeZip } from "./safety";
 import {
 	RELATIONSHIPS_NS,
 	WORDPROCESSINGML_NS,
@@ -94,7 +95,7 @@ async function xmlPart(
 	name: string,
 	required = true,
 ): Promise<string | undefined> {
-	const entry = zip.file(name);
+	const entry = zip.files[name];
 	if (!entry) {
 		if (required)
 			throw new Error(`DOCX package is missing required part: ${name}`);
@@ -136,9 +137,16 @@ function relationshipByType(
 	typeSuffix: string,
 ): Element | undefined {
 	const document = parseXmlStrict(xml, label);
-	return elements(document, RELATIONSHIPS_NS, "Relationship").find((entry) =>
-		(entry.getAttribute("Type") || "").endsWith(typeSuffix),
+	const entries = elements(document, RELATIONSHIPS_NS, "Relationship");
+	const ids = entries.map((e) => e.getAttribute("Id"));
+	if (ids.some((x) => !x) || new Set(ids).size !== ids.length)
+		throw new Error("DOCX duplicate or missing relationship Id");
+	const matches = entries.filter((e) =>
+		(e.getAttribute("Type") || "").endsWith(typeSuffix),
 	);
+	if (matches.length > 1)
+		throw new Error("DOCX ambiguous " + typeSuffix + " relationship");
+	return matches[0];
 }
 
 function relationshipPart(documentPart: string): string {
@@ -168,11 +176,31 @@ function assertNoEnforcedProtection(
 	}
 }
 
+export function assertRegularDocxInput(input: string): void {
+	const resolvedInput = resolve(input);
+	for (let ancestor = resolvedInput; ; ancestor = dirname(ancestor)) {
+		try {
+			if (lstatSync(ancestor).isSymbolicLink())
+				throw new Error("DOCX path contains a symbolic link");
+		} catch (error: any) {
+			if (error.code !== "ENOENT") throw error;
+		}
+		if (dirname(ancestor) === ancestor) break;
+	}
+	const stat = lstatSync(resolvedInput);
+	if (!stat.isFile() || stat.size === 0 || stat.size > 50 * 1024 * 1024)
+		throw new Error(
+			"DOCX input must be a nonempty regular file of at most 50 MB",
+		);
+}
+
 export async function loadEditableDocx(
 	input: string,
 	expectedSha256: string,
+	inspectionOnly = false,
 ): Promise<LoadedEditableDocx> {
 	const resolvedInput = resolve(input);
+	assertRegularDocxInput(resolvedInput);
 	const inputData = readFileSync(resolvedInput);
 	const inputSha256 = sha256(inputData);
 	if (inputSha256 !== expectedSha256) {
@@ -180,7 +208,7 @@ export async function loadEditableDocx(
 	}
 	let zip: JSZip;
 	try {
-		zip = await JSZip.loadAsync(inputData);
+		zip = await readSafeZip(inputData);
 	} catch (error) {
 		throw new Error(
 			`invalid DOCX ZIP package: ${error instanceof Error ? error.message : String(error)}`,
@@ -203,27 +231,67 @@ export async function loadEditableDocx(
 	const documentPart = relationshipTarget("", officeTarget);
 	const documentXml = (await xmlPart(zip, documentPart)) as string;
 	const documentRelsPart = relationshipPart(documentPart);
-	const documentRelsXml = (await xmlPart(zip, documentRelsPart)) as string;
+	const documentRelsXml =
+		(await xmlPart(zip, documentRelsPart, !inspectionOnly)) ||
+		`<Relationships xmlns="${RELATIONSHIPS_NS}"/>`;
 	const stylesRelationship = relationshipByType(
 		documentRelsXml,
 		documentRelsPart,
 		"/styles",
 	);
-	if (!stylesRelationship) {
+	if (!stylesRelationship && !inspectionOnly) {
 		throw new Error(
 			"DOCX document has no styles relationship; conservative beautify cannot continue",
 		);
 	}
 	if (
-		stylesRelationship.getAttribute("TargetMode")?.toLowerCase() === "external"
+		stylesRelationship?.getAttribute("TargetMode")?.toLowerCase() === "external"
 	) {
 		throw new Error("DOCX styles relationship cannot be external");
 	}
-	const stylesTarget = stylesRelationship.getAttribute("Target");
-	if (!stylesTarget) throw new Error("DOCX styles relationship has no target");
+	const stylesTarget = stylesRelationship?.getAttribute("Target");
+	if (stylesRelationship && !stylesTarget)
+		throw new Error("DOCX styles relationship has no target");
 	const documentRoot = posix.dirname(documentPart);
-	const stylesPart = relationshipTarget(documentRoot, stylesTarget);
-	const stylesXml = (await xmlPart(zip, stylesPart)) as string;
+	const stylesPart = stylesTarget
+		? relationshipTarget(documentRoot, stylesTarget)
+		: "";
+	const stylesXml = stylesPart
+		? ((await xmlPart(zip, stylesPart)) as string)
+		: "";
+	const contentTypes = parseXmlStrict(
+		(await xmlPart(zip, "[Content_Types].xml"))!,
+		"Content Types",
+	);
+	const ns = "http://schemas.openxmlformats.org/package/2006/content-types";
+	for (const [part, expected] of [
+		[
+			documentPart,
+			"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+		],
+		[
+			stylesPart,
+			"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml",
+		],
+	]) {
+		if (!part) continue;
+		const matches = elements(contentTypes, ns, "Override").filter(
+			(e) => e.getAttribute("PartName") === "/" + part,
+		);
+		if (
+			matches.length !== 1 ||
+			matches[0].getAttribute("ContentType") !== expected
+		)
+			throw new Error("DOCX unexpected or ambiguous Content Type: " + part);
+	}
+	if (stylesPart) {
+		const stylesRoot = parseXmlStrict(stylesXml, stylesPart).documentElement;
+		if (
+			stylesRoot.namespaceURI !== WORDPROCESSINGML_NS ||
+			stylesRoot.localName !== "styles"
+		)
+			throw new Error("DOCX styles part has an unexpected root element");
+	}
 	const settingsRelationship = relationshipByType(
 		documentRelsXml,
 		documentRelsPart,
@@ -242,7 +310,7 @@ export async function loadEditableDocx(
 		if (!target) throw new Error("DOCX settings relationship has no target");
 		settingsPart = relationshipTarget(documentRoot, target);
 		settingsXml = await xmlPart(zip, settingsPart);
-		assertNoEnforcedProtection(settingsXml, settingsPart);
+		if (!inspectionOnly) assertNoEnforcedProtection(settingsXml, settingsPart);
 	}
 	return {
 		input: resolvedInput,
@@ -261,35 +329,15 @@ export async function loadEditableDocx(
 
 export async function snapshotPackage(zip: JSZip): Promise<PackageSnapshot> {
 	const partNames = Object.values(zip.files)
-		.filter((entry) => !entry.dir)
 		.map((entry) => entry.name)
 		.sort((left, right) => left.localeCompare(right, "en"));
 	const partHashes: Record<string, string> = {};
 	for (const name of partNames) {
-		const entry = zip.file(name);
+		const entry = zip.files[name];
 		if (!entry) throw new Error(`DOCX package part disappeared: ${name}`);
 		partHashes[name] = sha256(await entry.async("nodebuffer"));
 	}
 	return { partNames, partHashes };
-}
-
-export async function generateStyledPackage(
-	loaded: LoadedEditableDocx,
-	stylesXml: string,
-): Promise<Buffer> {
-	const stylesEntry = loaded.zip.file(loaded.stylesPart);
-	if (!stylesEntry)
-		throw new Error(`DOCX styles part disappeared: ${loaded.stylesPart}`);
-	loaded.zip.file(loaded.stylesPart, stylesXml, {
-		date: stylesEntry.date,
-		createFolders: false,
-	});
-	return loaded.zip.generateAsync({
-		type: "nodebuffer",
-		compression: "DEFLATE",
-		compressionOptions: { level: 6 },
-		platform: "UNIX",
-	});
 }
 
 export async function validateStyleOnlyBuffer(
@@ -300,7 +348,7 @@ export async function validateStyleOnlyBuffer(
 ): Promise<{ changedParts: string[]; invariants: InvariantSummary }> {
 	let outputZip: JSZip;
 	try {
-		outputZip = await JSZip.loadAsync(outputData);
+		outputZip = await readSafeZip(outputData);
 	} catch (error) {
 		throw new Error(
 			`DOCX invariant failed: output is not a valid ZIP package: ${error instanceof Error ? error.message : String(error)}`,

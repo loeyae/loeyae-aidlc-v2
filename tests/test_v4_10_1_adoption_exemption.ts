@@ -14,11 +14,12 @@
  * Everything is driven through the public CLI and the gate probe.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { loadWorkflowState, saveWorkflowState } from "../core/tools/aidlc-light-state";
+import { orderQualityFixture } from "./order_quality_fixture";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -128,6 +129,7 @@ interface Fixture {
   app: string;
   workflowCommit: string;
   nextModule: (expected: string, refreshes?: string[][]) => void;
+  syncQuality: () => void;
 }
 
 /** Split layout, module m01-trade with units u0 (ucd_exemption) and u1, driven to the I13 stage. */
@@ -162,12 +164,35 @@ function fixture(name: string): Fixture {
   saveWorkflowState(project, global);
   write(project, "docs/aidlc/ideation/scenario-module-mapping.md", `# 场景模块映射\n\nREQ-001 订单导出属于 ${M01}。\n`);
   step(["orchestrate", "split", "--from", global.workflow_id]);
+  const quality = orderQualityFixture(project, M01, loadWorkflowState(project, { kind: "module", module_id: M01 })!.workflow_id, {
+    field: false,
+    source: "REQ-001 approved takeover fixture: export reads the upstream order list; the accepted takeover implementation retries timeout at most three times and propagates the final failure. u0 only declares the existing payload contract and must run its approved validator; u1 adopts the implementation committed before its business TDD starts. Payload shape and persisted fields do not change. Fixture owner confirmed version 1.",
+    rationale: "Fixture review checks the takeover boundary, bounded retry rule and contract-only validation against the order source",
+    example: "first timeout then success returns orders; three timeouts propagate failure; a declaration-only unit executes the approved validator",
+    rule: { condition: "upstream times out", action: "retry export", effect: "return the unchanged order list within at most three attempts", failure: "propagate the final timeout after three attempts", input: "timeout then success", expected: "return order list on the second attempt", boundary: "three timeouts propagate failure" },
+  });
+  const refreshQuality = () => {
+    if (!loadWorkflowState(project, { kind: "module", module_id: M01 })!.completed_stages.includes("cross-validation")) return;
+    for (const stage of ["requirements-analysis", "user-stories", "cross-validation"]) step(["evidence", "run", "--stage", stage, ...MOD, "--all-sensors", "--refresh"]);
+  };
+  const syncQuality = () => { quality(); refreshQuality(); };
   const nextModule = (expected: string, refreshes: string[][] = []): void => {
-    for (const args of refreshes) step(["evidence", "run", ...args, "--refresh"]);
+    if (existsSync(join(project, `${IN}/requirements.md`))) quality();
+    const completed = loadWorkflowState(project, { kind: "module", module_id: M01 })!.completed_stages;
+    if (completed.includes("units-generation")) {
+      step(["document-slices", "generate", ...MOD]);
+      step(["evidence", "run", "--stage", "units-generation", ...MOD, "--sensor", "document-slice-consistency", "--refresh"]);
+      quality();
+    }
+    if (completed.includes("cross-validation")) refreshQuality();
+    for (const args of refreshes) if (!completed.includes("cross-validation") || !["requirements-analysis", "user-stories"].includes(args[1])) step(["evidence", "run", ...args, "--refresh"]);
     const result = step(["orchestrate", "next", ...MOD]);
     assert.equal(result.json.stage_instance, expected, JSON.stringify(result.json, null, 2));
   };
-  const report = (stage: string, extra: string[] = []) => step(["orchestrate", "report", "--stage", stage, ...MOD, "--result", "completed", ...extra]);
+  const report = (stage: string, extra: string[] = []) => {
+    syncQuality();
+    return step(["orchestrate", "report", "--stage", stage, ...MOD, "--result", "completed", ...extra]);
+  };
   const ack = (stage: string) => report(stage, ["--instruction-ack", stage]);
   const RA = ["--stage", "requirements-analysis", ...MOD];
   nextModule(`requirements-analysis@module:${M01}`);
@@ -180,7 +205,7 @@ function fixture(name: string): Fixture {
   write(project, `${IN}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单导出流程\n\n```mermaid\nflowchart LR\n  A[调用导出] --> B{超时?}\n  B -- 是 --> A\n  B -- 否 --> C[返回订单]\n```\n");
   report("requirements-methods");
   nextModule(`user-stories@module:${M01}`, [RA]);
-  write(project, `${IN}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营导出订单\n\n- 关联需求：REQ-001\n- 作为运营人员，我希望订单导出在下游超时时自动重试。\n- 验收标准：接管前实现的重试行为在改动后保持不变。\n");
+  write(project, `${IN}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营导出订单\n\n来源：REQ-001\n- 作为运营人员，我希望订单导出在下游超时时自动重试。\n\n### AC-001 接管后保持重试契约\n接管前实现的重试行为在改动后保持不变；首次超时随后成功返回订单，连续三次超时向调用者传播；声明单元执行批准的替代验证。\n");
   report("user-stories");
   nextModule(`cross-validation@module:${M01}`, [RA]);
   write(project, `${IN}/cross-validation-report.md`, "# 交叉验证报告\n\n- status: passed\n- unresolved_conflicts: 0\n- prd_route: not-selected\n- ui_route: not-selected\n\n| 需求 | 故事 | 结论 |\n| --- | --- | --- |\n| REQ-001 | STORY-001 / US-001 | 一致 |\n");
@@ -189,9 +214,10 @@ function fixture(name: string): Fixture {
   write(project, `${IN}/workflow-plan.md`, "# 工作流规划\n\nREQ-001：单元 u0 只声明契约（ucd_exemption），单元 u1 改动嵌套仓库 app/；接管前的实现走 BASELINE→GREEN；不需要应用设计。\n\n| 阶段 | 决定 |\n| --- | --- |\n| application-design | skip |\n");
   report("workflow-planning");
   write(project, `${IN}/unit-manifest.json`, `${JSON.stringify({ schema_version: 1, module_id: M01, units: [
-    { unit_id: "u0", name: "Unit u0", service_id: "trade-service", conditional_stages: [], ucd_exemption: EXEMPTION },
-    { unit_id: "u1", name: "Unit u1", service_id: "trade-service", conditional_stages: [] },
+    { unit_id: "u0", name: "Unit u0", service_id: "trade-service", conditional_stages: [], req_refs: ["REQ-001"], ucd_exemption: EXEMPTION },
+    { unit_id: "u1", name: "Unit u1", service_id: "trade-service", conditional_stages: [], req_refs: ["REQ-001"] },
   ] }, null, 2)}\n`);
+  write(project, `${IN}/application-design/unit-of-work-story-map.md`, '# Approved takeover story\n```aidlc-story-map\n' + JSON.stringify({ schema_version: 1, status: "approved", approved_by: "fixture-owner", mappings: [{ story_id: "STORY-001", unit_ids: ["u1"] }], shared_req_refs: ["REQ-001"] }) + '\n```\n');
   const moduleRef = { kind: "module" as const, module_id: M01 };
   const moduleState = loadWorkflowState(project, moduleRef)!;
   moduleState.completed_stages.push("units-generation");
@@ -208,7 +234,8 @@ function fixture(name: string): Fixture {
   write(project, "tests/validate_contract.cjs", VALIDATOR);
   write(project, ".aidlc/commands/tdd.json", `${JSON.stringify({ version: "1", stage: "tdd", commands: [{ id: "uc-baseline", role: "baseline", argv: ["node", "tests/observe_uc.cjs"] }] }, null, 2)}\n`);
   write(project, ".aidlc/commands/code-generation.json", `${JSON.stringify({ version: "1", stage: "code-generation", commands: [{ id: "uc-green", role: "green", argv: ["node", "tests/observe_uc.cjs"] }] }, null, 2)}\n`);
-  return { project, app, workflowCommit, nextModule };
+  syncQuality();
+  return { project, app, workflowCommit, nextModule, syncQuality };
 }
 
 const APPROVAL = ["--approval-ref", "REVIEW-2026-10-07-93 架构评审纪要"];
@@ -238,11 +265,13 @@ async function main(): Promise<void> {
     write(f.app, "contract.py", CONTRACT);
     write(f.project, `${CONSTRUCTION("u0")}/plans/code-generation-plan.md`, "# 代码生成计划 — u0\n\n- REQ-001：u0 只声明订单导出契约 app/contract.py，无 UC-D（ucd_exemption）。\n");
     write(f.project, `${CONSTRUCTION("u0")}/implementation-summary.md`, "# 实现摘要 — u0\n\nREQ-001：app/contract.py 声明订单导出字段，契约结构由 tests/validate_contract.cjs 校验。\n");
+    f.syncQuality();
     ok(f.project, ["orchestrate", "report", "--stage", "code-generation", ...UNIT("u0"), "--result", "completed"]);
     assert.equal(readJson(f.project, GREEN("u0")).status, "not_required");
     f.nextModule(`code-review@module:${M01}@unit:u0`);
     write(f.project, `${CONSTRUCTION("u0")}/code-review.md`, ["# 代码审查 — 单元 u0", "", "- 审查模式: 集成双轴审查", "- reviewer: aidlc-quality-agent", "- execution_context: isolated", "- review_only: true", "- Spec 结果: passed（REQ-001 契约声明）", "- Standards 结果: passed", "- issues_found: 0", "- issues_resolved: 0", "- issues_open: 0", "- 审查文件: app/contract.py", "- 修复状态: 无需修复", ""].join("\n"));
     write(f.project, `${CONSTRUCTION("u0")}/audit.md`, "# 审计 — 单元 u0\n\n代码审查（REQ-001 契约声明）结论：passed。\n");
+    f.syncQuality();
     ok(f.project, ["orchestrate", "report", "--stage", "code-review", ...UNIT("u0"), "--result", "completed"]);
 
     // ---- The old process commits u1's implementation after u0's tdd.

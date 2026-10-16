@@ -124,8 +124,7 @@ try {
   ok(["orchestrate", "next", "--scope", "refactor", "--work", "重构订单导出：超时后重试"]);
   next("workspace-detection");
   ok(["orchestrate", "report", "--stage", "workspace-detection", "--result", "completed", "--instruction-ack", "workspace-detection"]);
-  next("state-template");
-  ok(["orchestrate", "report", "--stage", "state-template", "--result", "completed", "--instruction-ack", "state-template"]);
+  // The new lightweight profile goes directly to mandatory I13.
 
   // I13 test-case derivation.
   next("test-case-derivation@module:project");
