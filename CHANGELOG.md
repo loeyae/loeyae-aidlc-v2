@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.20.0 — 2026-10-17
+
+- Default to focused tests and affected consumer coverage; remove automatic full-suite runs for single-module projects and per-edit GREEN/refactor cycles.
+
+- Require impact analysis for broader regression scope, retest failures before expanding, and reuse valid evidence only when current producer, revision and freshness gates accept it.
+
+- Align TDD, code generation, build/test instructions, templates and evidence skills; preserve required UC-D coverage and explicit full-regression delivery gates.
+
+- Synchronize package, plugin, marketplace and stage-graph versions across all nine distributions.
+
 ## 4.19.0 — 2026-10-17
 
 - Add offline MCP planning, managed connection ownership, transaction diagnostics and explicit recovery; remove domain MCP defaults from Core installation (MARS-191-195, MARS-236).
