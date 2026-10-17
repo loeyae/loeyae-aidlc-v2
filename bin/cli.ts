@@ -719,12 +719,16 @@ function codeBuddyCli(): { command: string; env: NodeJS.ProcessEnv } {
   }
   const configDir = codeBuddyConfigDirForCli(executableIdentity)
     || codeBuddyConfigDirForCli(command);
-  // WorkBuddy ships its embedded CLI without the full TUI bundle; non-interactive `plugin`
-  // subcommands only start when the entry script is routed to the headless bundle.
+  // WorkBuddy embeds either the legacy headless bundle or the newer lite-wb bundle.
+  // Route plugin commands to the bundle actually shipped alongside the resolved CLI.
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     CODEBUDDY_FORCE_HEADLESS_BUNDLE: process.env.CODEBUDDY_FORCE_HEADLESS_BUNDLE || "1",
   };
+  if (!env.CODEBUDDY_FORCE_LITE_WB_BUNDLE && candidate
+    && existsSync(resolve(dirname(executableIdentity), "../dist/codebuddy-lite-wb.mjs"))) {
+    env.CODEBUDDY_FORCE_LITE_WB_BUNDLE = "1";
+  }
   if (configDir) env.CODEBUDDY_CONFIG_DIR = configDir;
   return { command, env };
 }

@@ -609,6 +609,41 @@ def test_workbuddy_embedded_cli_uses_workbuddy_config_dir() -> None:
         assert config_dirs == {str(home / ".workbuddy")}, lines
 
 
+def test_workbuddy_bundle_selection() -> None:
+    # Regression: select the shipped bundle and preserve explicit overrides.
+    for lite, override, expected in [(True, "", 0), (True, "0", 1), (False, "", 0)]:
+        with tempfile.TemporaryDirectory(prefix="aidlc-workbuddy-bundle-", dir=str(SCRATCH_ROOT)) as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            host_env = write_fake_plugin_hosts(root)
+            embedded_cli = root / "WorkBuddy" / "resources" / "app.asar.unpacked" / "cli" / "bin" / "codebuddy"
+            embedded_cli.parent.mkdir(parents=True)
+            original = Path(host_env["CODEBUDDY_CLI"]).read_text(encoding="utf-8")
+            shebang, body = original.split("\n", 1)
+            guard = (
+                "const lite = require('fs').existsSync(require('path').resolve(__dirname, '../dist/codebuddy-lite-wb.mjs'));\n"
+                "const selected = ['1', 'true'].includes((process.env.CODEBUDDY_FORCE_LITE_WB_BUNDLE || '').toLowerCase());\n"
+                "if (lite !== selected) { console.error(\"Error: Cannot find module '../dist/codebuddy'\"); process.exit(1); }\n"
+            )
+            embedded_cli.write_bytes((shebang + "\n" + guard + body).encode("utf-8"))
+            embedded_cli.chmod(0o755)
+            if lite:
+                bundle = embedded_cli.parent.parent / "dist" / "codebuddy-lite-wb.mjs"
+                bundle.parent.mkdir()
+                bundle.write_text("// WorkBuddy lite bundle fixture")
+            host_env.update({"CODEBUDDY_CLI": str(embedded_cli), "CODEBUDDY_FORCE_LITE_WB_BUNDLE": override})
+            installed = run_cli(home, ["install", "--harness", "codebuddy"], host_env)
+            output = installed.stdout + installed.stderr
+            assert installed.returncode == expected, output
+            if expected:
+                assert "CodeBuddy CLI is not executable" in output, output
+            else:
+                assert "Validation passed" in output, output
+                removed = run_cli(home, ["uninstall", "--harness", "codebuddy"], host_env)
+                assert removed.returncode == 0, removed.stdout + removed.stderr
+
+
 def test_codebuddy_validation_uses_output_verdict() -> None:
     for mode, expected in (
         ("fail", "CodeBuddy plugin validation failed"),
@@ -870,6 +905,7 @@ if __name__ == "__main__":
     test_core_mcp_lifecycle()
     test_new_plugin_host_lifecycles()
     test_workbuddy_embedded_cli_uses_workbuddy_config_dir()
+    test_workbuddy_bundle_selection()
     test_codebuddy_validation_uses_output_verdict()
     test_install_all_detects_qoder_cn_desktop_without_cli()
     test_install_all_detects_qoder_cn_profile_without_cli()
