@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.22.0 — 2026-10-17
+
+- Retire workflow-level subagent orchestration, fixed personas and subagent-result gates; leave execution strategy to the host while preserving review, TDD and approval requirements (MARS-244).
+- Add audited migration for retired execution checkpoints without bypassing implementation, review or approval evidence.
+- Fence managed UI and document-slice publications with current session claims and workflow locks; scope evidence freshness to declared module, unit and shared inputs.
+- Synchronize package, plugin, marketplace and stage-graph versions; regenerate all nine harness distributions.
+
 ## 4.21.0 — 2026-10-17
 
 - Keep Stop read-only and scoped to the current session; unfinished stages may remain running without parking unrelated workflows (MARS-243).
