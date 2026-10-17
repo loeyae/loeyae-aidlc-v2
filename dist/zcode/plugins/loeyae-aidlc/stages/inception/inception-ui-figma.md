@@ -5,9 +5,6 @@ name: Figma UI 设计
 phase: inception
 axis: module
 execution: CONDITIONAL
-lead_agent: aidlc-design-agent
-support_agents: []
-mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: []

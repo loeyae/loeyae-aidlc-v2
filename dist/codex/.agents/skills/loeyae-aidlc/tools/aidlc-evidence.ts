@@ -45,7 +45,6 @@ export const SEMANTIC_SENSORS = new Set([
   "infrastructure-completeness",
   "implementation-report",
   "frontend-platform-spec",
-  "subagent-evidence",
   "template-completeness",
   "recovery-evidence",
   "prd-completeness",

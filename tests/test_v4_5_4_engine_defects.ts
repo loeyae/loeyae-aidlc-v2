@@ -11,7 +11,8 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { createInitialState, loadWorkflowState, saveWorkflowState, type WorkflowState } from "../core/tools/aidlc-light-state";
+import { createInitialState, loadWorkflowState, type WorkflowState } from "../core/tools/aidlc-light-state";
+import { fixtureEnvironment, saveFixtureState as saveWorkflowState } from "./mars243_fixture_session";
 
 // New 4.5.4 APIs are imported per section so that, on an unfixed engine, each defect
 // reports its own failure instead of the whole suite failing at module link time.
@@ -45,7 +46,7 @@ function cleanEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
 }
 
 function run(project: string, args: string[], env: Record<string, string> = {}): Run {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: cleanEnv(env) });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: { ...cleanEnv(env), AIDLC_SESSION_BINDING: fixtureEnvironment(project, args).AIDLC_SESSION_BINDING } });
   return { status: result.status ?? 1, stdout: result.stdout || "", out: `${result.stdout || ""}\n${result.stderr || ""}` };
 }
 
@@ -185,7 +186,7 @@ async function section(name: string, body: () => void | Promise<void>): Promise<
 
 try {
   // ---------------------------------------------------------------- D1
-  await section("D1 review-evidence emits review-mode fields from stage metadata and record declarations", () => {
+  await section("D1 review-evidence retains real dual-axis review without executor declarations", () => {
     const project = makeProject("d1-review");
     const instance = "code-review@module:project@unit:default";
     seed(project, instance, ["test-case-derivation@module:project", "tdd@module:project@unit:default", "code-generation@module:project@unit:default"]);
@@ -207,20 +208,8 @@ try {
       return gate(project, instance, "sensors", "review-evidence").failures as string[];
     };
 
-    const declared = ["- execution_context: isolated", "- review_only: true"];
-    write(project, `${CONSTRUCTION}/code-review.md`, record(declared));
-    const declaredPayload = checker(project, ["--sensor", "review-evidence", "--module", "project", "--unit", "default"], { AIDLC_ACTIVE_STAGE: "code-review" });
-    assert.equal(declaredPayload.reviewer_agent, "aidlc-quality-agent");
-    assert.equal(declaredPayload.execution_context, "isolated");
-    assert.equal(declaredPayload.review_only, true);
-    assert.deepEqual(produceAndGate(declared), [], "controlled review evidence with both declarations passes the review-mode gate");
-
-    // Fail-closed: a missing or wrong declaration is never filled in by the checker.
-    assert.match(produceAndGate(["- review_only: true"]).join("\n"), /execution_context must be "isolated"/);
-    assert.match(produceAndGate(["- execution_context: isolated"]).join("\n"), /review_only must be true/);
-    assert.match(produceAndGate(["- execution_context: inline", "- review_only: true"]).join("\n"), /execution_context must be "isolated"/);
-    assert.match(produceAndGate(["- execution_context: isolated", "- review_only: false"]).join("\n"), /review_only must be true/);
-    assert.match(produceAndGate(["- reviewer_agent: aidlc-developer-agent", ...declared]).join("\n"), /reviewer_agent must be aidlc-quality-agent/);
+    assert.deepEqual(produceAndGate([]), [], "single-session dual-axis review passes without executor declarations");
+    assert.deepEqual(produceAndGate(["- execution_context: inline"]), [], "historical diagnostic metadata does not control the review gate");
     write(project, `${CONSTRUCTION}/code-review.md`, record([]));
     const undeclared = checker(project, ["--sensor", "review-evidence", "--module", "project", "--unit", "default"], { AIDLC_ACTIVE_STAGE: "code-review" });
     assert.equal("execution_context" in undeclared, false);
@@ -523,7 +512,7 @@ try {
     assert.equal(completed.status, 0, completed.out);
     // The drift tolerance is scoped to the GREEN-completion re-check: the ordinary RED
     // gate (as used by next/upstream re-validation) still binds RED to the current tree.
-    assert.match((gate(project, redInstance, "sensors", "red-test-evidence").failures as string[]).join("\n"), /worktree_digest no longer matches the current worktree/);
+    assert.match((gate(project, redInstance, "sensors", "red-test-evidence").failures as string[]).join("\n"), /scope_digest no longer matches the inputs-v2:module:project:unit:default scope/);
 
     // Fail-closed: provenance drift is the only tolerance; forged or malformed RED is still rejected.
     const state = loadWorkflowState(project) as WorkflowState;

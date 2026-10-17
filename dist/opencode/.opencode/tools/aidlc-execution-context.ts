@@ -39,7 +39,6 @@ export const UNIT_CONDITIONAL_STAGES = [
   "nfr-design",
   "infrastructure-design",
   "shared-contract-baseline",
-  "subagent-execution",
   "ui-implementation-bridge",
 ] as const;
 
@@ -55,9 +54,23 @@ export interface UnitDescriptor {
   ucd_exemption?: UcdExemption;
   /** 4.11.0: REQs the unit's code delivers (traceability-matrix code_refs layer scope). */
   req_refs?: string[];
+  /** Optional versioned source ownership for narrow evidence freshness. Missing
+   * declarations keep all module source/tests in scope (conservative fallback). */
+  evidence_inputs?: { version: 1; paths: string[]; depends_on_units: string[]; shared_paths: string[] };
 }
 
 const REQ_REF = /^REQ-[A-Z0-9][A-Z0-9_-]*$/;
+
+function unitEvidenceInputs(value: unknown, label: string): NonNullable<UnitDescriptor["evidence_inputs"]> {
+  const input = record(value, label);
+  if (input.version !== 1 || Object.keys(input).some(key => !["version", "paths", "depends_on_units", "shared_paths"].includes(key))) throw new Error(`${label}: unsupported evidence input contract`);
+  const paths = modulePaths(input.paths, `${label}.paths`);
+  const shared = moduleContractPaths(input.shared_paths, `${label}.shared_paths`);
+  if (!paths?.length || !shared || !Array.isArray(input.depends_on_units)) throw new Error(`${label}: paths, shared_paths and depends_on_units required`);
+  const dependencies = input.depends_on_units.map((id, i) => contextId(id, `${label}.depends_on_units[${i}]`));
+  uniqueIds(dependencies, `${label}.depends_on_units`);
+  return { version: 1, paths, shared_paths: shared, depends_on_units: dependencies };
+}
 
 /** `units[].req_refs` (4.11.0): a non-empty list of unique REQ ids. */
 function unitReqRefs(value: unknown, label: string): string[] {
@@ -257,7 +270,7 @@ export function readUnitManifest(projectRoot: string, moduleId: string): UnitDes
     let conditionalStages: UnitConditionalStage[] | undefined;
     if (unit.conditional_stages !== undefined) {
       if (!Array.isArray(unit.conditional_stages)) throw new Error(`units[${index}].conditional_stages must be an array`);
-      conditionalStages = unit.conditional_stages.map((item, stageIndex) => {
+      conditionalStages = unit.conditional_stages.filter(item => item !== "subagent-execution").map((item, stageIndex) => {
         const stage = nonEmptyString(item, `units[${index}].conditional_stages[${stageIndex}]`);
         if (!UNIT_CONDITIONAL_STAGE_SET.has(stage)) {
           throw new Error(`units[${index}].conditional_stages contains unsupported stage "${stage}"`);
@@ -282,9 +295,13 @@ export function readUnitManifest(projectRoot: string, moduleId: string): UnitDes
       ...(conditionalStages !== undefined ? { conditional_stages: conditionalStages } : {}),
       ...(unit.ucd_exemption !== undefined ? { ucd_exemption: ucdExemption(unit.ucd_exemption, `units[${index}].ucd_exemption`) } : {}),
       ...(unit.req_refs !== undefined ? { req_refs: unitReqRefs(unit.req_refs, `units[${index}].req_refs`) } : {}),
+      ...(unit.evidence_inputs !== undefined ? { evidence_inputs: unitEvidenceInputs(unit.evidence_inputs, `units[${index}].evidence_inputs`) } : {}),
     };
   });
   uniqueIds(units.map((unit) => unit.unit_id), `unit manifest for ${safeModuleId}`);
+  for (const unit of units) for (const dependency of unit.evidence_inputs?.depends_on_units || []) {
+    if (dependency === unit.unit_id || !units.some(row => row.unit_id === dependency)) throw new Error(`invalid evidence input unit dependency ${unit.unit_id} -> ${dependency}`);
+  }
   if (units.length < 2 && units.some((unit) => unit.conditional_stages?.includes("shared-contract-baseline"))) {
     throw new Error(`unit manifest for ${safeModuleId} cannot select shared-contract-baseline with fewer than two units`);
   }

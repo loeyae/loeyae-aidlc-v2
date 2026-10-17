@@ -3,7 +3,6 @@ slug: product-inception
 number: "1.1"
 name: 产品 Inception
 execution: CONDITIONAL
-lead_agent: aidlc-product-agent
 scopes: [feature, enterprise, mvp, classic]
 produces: [docs/aidlc/ideation/product-inception.md]
 requires: [workspace-detection]

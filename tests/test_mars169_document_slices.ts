@@ -1,3 +1,5 @@
+import { generateSlices, recoverCanonical, createUiGenerationLock } from "./mars244_fixture_writers";
+import { fixtureEnvironment, saveFixtureState as saveWorkflowState } from "./mars243_fixture_session";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
@@ -10,9 +12,9 @@ import type { HarnessManifest } from "../scripts/manifest-types";
 import { spawnSync } from "node:child_process";
 import { parseDocument } from "../core/tools/aidlc-document-parser";
 import { parseStoryDefinitions } from "../core/tools/aidlc-story-index";
-import { buildBusinessDocumentLoadPlan, checkSlices, generateSlices, recoverCanonical, sliceAdoption, sliceEvidenceErrors, type SliceContext } from "../core/tools/aidlc-document-slices";
-import { createInitialState, loadWorkflowState, saveWorkflowState } from "../core/tools/aidlc-light-state";
-import { createUiGenerationLock, verifyUiGenerationLockAtBaseline } from "../core/tools/aidlc-ui-governance";
+import { buildBusinessDocumentLoadPlan, checkSlices, sliceAdoption, sliceEvidenceErrors, type SliceContext } from "../core/tools/aidlc-document-slices";
+import { createInitialState, loadWorkflowState } from "../core/tools/aidlc-light-state";
+import { verifyUiGenerationLockAtBaseline } from "../core/tools/aidlc-ui-governance";
 
 const repository = resolve(import.meta.dirname, "..");
 class Fixture {
@@ -49,7 +51,7 @@ class Fixture {
     this.write(`${this.base}/application-design/unit-of-work-story-map.md`, '# Approved map\n```aidlc-story-map\n' + JSON.stringify(this.mapping) + '\n```\n');
   }
   runGit(args: string[]) { const r = spawnSync("git", args, { cwd: this.root, encoding: "utf8" }); assert.equal(r.status, 0, r.stderr); }
-  run(script: string, args: string[]) { return spawnSync(process.execPath, [join(repository, "node_modules/tsx/dist/cli.mjs"), join(repository, script), ...args], { cwd: this.root, encoding: "utf8" }); }
+  run(script: string, args: string[]) { return spawnSync(process.execPath, [join(repository, "node_modules/tsx/dist/cli.mjs"), join(repository, script), ...args], { cwd: this.root, encoding: "utf8", env: fixtureEnvironment(this.root, script === "bin/cli.ts" ? args : ["evidence", ...args]) }); }
   manifest() { return this.read(`${this.base}/document-slices/manifest.json`); }
   produce() { return this.run("core/tools/aidlc-evidence.ts", ["run", "--stage", "units-generation", "--module", "shop", "--sensor", "document-slice-consistency"]); }
   gate() { const r = this.run("tests/gate_probe.ts", ["units-generation@module:shop", "sensors", "document-slice-consistency"]); assert.equal(r.status, 0, r.stderr); return JSON.parse(r.stdout).failures as string[]; }
@@ -131,7 +133,7 @@ assert.equal(next.status, 0, next.stdout + next.stderr);
 const directive = JSON.parse(next.stdout);
 assert.equal(directive.kind, "run-stage");
 assert.equal(directive.business_document_load_plan.mode, "derived");
-assert.deepEqual(directive.agent_execution.business_document_load_plan, directive.business_document_load_plan);
+assert.equal("agent_execution" in directive, false);
 assert.match(directive.handoff_prompt, /Business document load plan/);
 f.write(`${f.base}/user-stories.md`, source + "\n");
 const stateBeforeBlockedNext = f.read("aidlc/active/aidlc-state.md");
@@ -221,6 +223,10 @@ assert.notEqual(interrupted.status, 0, "recovery child must terminate at the pub
 assert.ok(!existsSync(join(legacy.root, `${legacy.base}/requirements.md`)));
 const recoveryDiagnostic = recoverCanonical(legacyCtx).recovery_lock as { status: string; path: string; remediation: string };
 assert.equal(recoveryDiagnostic.status, "dead"); assert.match(recoveryDiagnostic.remediation, /Stop all/);
+// SIGKILL also leaves the shared workflow publication lock. The foreground
+// child is confirmed dead; remove exactly its fixture lock before testing the
+// separate fail-closed recovery-lock remediation path.
+unlinkSync(join(legacy.root, "aidlc/active/aidlc-state.md.lock"));
 assert.throws(() => recoverCanonical(legacyCtx, true), /SLICE_RECOVERY_LOCK_HELD/);
 // Explicit remediation, after the foreground child is confirmed terminated.
 unlinkSync(join(legacy.root, recoveryDiagnostic.path));

@@ -1,3 +1,5 @@
+import { createUiGenerationAcceptance, createUiGenerationLock, refreshUiGenerationFreshness, reverifyUiGenerationFreshness } from "./mars244_fixture_writers";
+import { fixtureEnvironment, saveFixtureState as saveWorkflowState } from "./mars243_fixture_session";
 /**
  * MARS-159 A: UI lock / acceptance freshness no longer compares the repository-level
  * upstream pointer. Unrelated commits advancing origin/main keep an accepted module valid;
@@ -10,16 +12,8 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createInitialState, loadWorkflowState, saveWorkflowState } from "../core/tools/aidlc-light-state";
-import {
-  createUiGenerationAcceptance,
-  createUiGenerationLock,
-  refreshUiGenerationFreshness,
-  reverifyUiGenerationFreshness,
-  uiGenerationCheckpointsPath,
-  verifyUiGenerationAcceptance,
-  verifyUiGenerationLockAtBaseline,
-} from "../core/tools/aidlc-ui-governance";
+import { createInitialState, loadWorkflowState } from "../core/tools/aidlc-light-state";
+import { uiGenerationCheckpointsPath, verifyUiGenerationAcceptance, verifyUiGenerationLockAtBaseline } from "../core/tools/aidlc-ui-governance";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -53,7 +47,7 @@ function commitAll(project: string, message: string): string {
 }
 
 function run(project: string, args: string[]): { status: number; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8" });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: fixtureEnvironment(project, args) });
   return { status: result.status ?? 1, stdout: result.stdout || "", stderr: result.stderr || "" };
 }
 

@@ -1,5 +1,5 @@
-#!/usr/bin/env node
-import { createHash } from "node:crypto";
+import { captureModulePublication, publishScope } from "./aidlc-session";
+import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
   lstatSync,
@@ -8,6 +8,7 @@ import {
   renameSync,
   statSync,
   writeFileSync,
+  unlinkSync,
 } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -601,9 +602,11 @@ export function readUiGenerationLock(projectRoot: string, moduleId: string): { l
 }
 
 function atomicJson(path: string, value: unknown): void {
-  const temporary = `${path}.tmp-${process.pid}`;
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  renameSync(temporary, path);
+  const temporary = `${path}.tmp-${randomUUID()}`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    renameSync(temporary, path);
+  } finally { if (existsSync(temporary)) unlinkSync(temporary); }
 }
 
 export interface CreateUiLockOptions {
@@ -618,6 +621,7 @@ export interface CreateUiLockOptions {
 }
 
 export function createUiGenerationLock(projectRoot: string, options: CreateUiLockOptions): UiGenerationLock {
+  const publication = captureModulePublication(projectRoot, options.moduleId);
   const root = realpathSync(resolve(projectRoot));
   const moduleId = options.moduleId;
   if (!MODULE_PATTERN.test(moduleId)) fail(`invalid module id: ${moduleId}`);
@@ -665,13 +669,14 @@ export function createUiGenerationLock(projectRoot: string, options: CreateUiLoc
     ...(options.supersededVisualReviews?.length ? { superseded_visual_reviews: options.supersededVisualReviews } : {}),
     ...(adoption ? { adoption } : {}),
   };
-  atomicJson(output, lock);
+  publishScope(projectRoot, publication, () => atomicJson(output, lock));
   return lock;
 }
 
 /** Explicit style adoption starts a new visual review, retaining the exact old baseline
  * and acceptance bytes. Ordinary refresh/reverify never replaces resource selections. */
 export function rebaselineUiDesignResource(projectRoot: string, moduleId: string): UiGenerationLock {
+  const publication = captureModulePublication(projectRoot, moduleId);
   const label = uiGenerationLockPath(moduleId);
   const previous = safeProjectFile(projectRoot, label, label);
   const oldBytes = readFileSync(previous.absolute, "utf8");
@@ -701,19 +706,21 @@ export function rebaselineUiDesignResource(projectRoot: string, moduleId: string
     to: safeOutputFile(projectRoot, p + suffix, p + suffix),
   }));
   if (moves.some(m => existsSync(m.to))) fail("DESIGN_BASELINE_ARCHIVE_EXISTS");
-  const moved: typeof moves = [];
-  try {
-    for (const move of moves) { renameSync(move.from, move.to); moved.push(move); }
-    return createUiGenerationLock(projectRoot, {
-      moduleId, route: old.route, upstreamRef: old.upstream.ref,
-      prdPath: old.sources.find(s => s.kind === "prd")?.path,
-      designDecisionsPath: old.sources.find(s => s.kind === "design-decisions")?.path,
-      supersededVisualReviews: superseded,
-    });
-  } catch (e) {
-    for (const move of moved.reverse()) renameSync(move.to, move.from);
-    throw e;
-  }
+  return publishScope(projectRoot, publication, () => {
+    const moved: typeof moves = [];
+    try {
+      for (const move of moves) { renameSync(move.from, move.to); moved.push(move); }
+      return createUiGenerationLock(projectRoot, {
+        moduleId, route: old.route, upstreamRef: old.upstream.ref,
+        prdPath: old.sources.find(s => s.kind === "prd")?.path,
+        designDecisionsPath: old.sources.find(s => s.kind === "design-decisions")?.path,
+        supersededVisualReviews: superseded,
+      });
+    } catch (e) {
+      for (const move of moved.reverse()) renameSync(move.to, move.from);
+      throw e;
+    }
+  });
 }
 
 export function verifyUiGenerationLockAtBaseline(projectRoot: string, moduleId: string, route: UiDesignRoute, expectedPageIds: string[]): { path: string; digest: string; upstream_ref: string; upstream_commit: string; baseline_mode: string; observed_upstream_commit: string; superseded_by_acceptance: boolean } {
@@ -1029,6 +1036,7 @@ export interface CreateUiAcceptanceOptions {
 }
 
 export function createUiGenerationAcceptance(projectRoot: string, options: CreateUiAcceptanceOptions): UiGenerationAcceptance {
+  const publication = captureModulePublication(projectRoot, options.moduleId);
   const root = realpathSync(resolve(projectRoot));
   if (options.route === "figma-existing") verifyExternalUiManifest(root, options.moduleId);
   if (options.route === "figma-create") verifyCreatedUiManifest(root, options.moduleId);
@@ -1037,7 +1045,7 @@ export function createUiGenerationAcceptance(projectRoot: string, options: Creat
   if (existsSync(output)) fail(`UI full acceptance is already recorded; a second full acceptance is forbidden: ${outputLabel}`);
   const reportPath = options.reportPath || `docs/aidlc/modules/${options.moduleId}/inception/cross-validation-report.md`;
   const acceptance = buildExpectedAcceptance(root, options.moduleId, validateRoute(options.route), reportPath);
-  atomicJson(output, acceptance);
+  publishScope(projectRoot, publication, () => atomicJson(output, acceptance));
   return acceptance;
 }
 
@@ -1348,6 +1356,7 @@ function appendCheckpoint(root: string, chain: VerifiedChain, moduleId: string, 
 
 /** `ui refresh`: records an upstream pointer advance when the locked UI sources did not change. */
 export function refreshUiGenerationFreshness(projectRoot: string, options: UiCheckpointOptions): { status: "refreshed" | "unchanged"; checkpoint: UiFreshnessCheckpoint | null } {
+  const publication = captureModulePublication(projectRoot, options.moduleId);
   const root = realpathSync(resolve(projectRoot));
   const route = validateRoute(options.route);
   const chain = verifyAcceptanceChain(root, options.moduleId, route);
@@ -1358,7 +1367,7 @@ export function refreshUiGenerationFreshness(projectRoot: string, options: UiChe
     fail(`locked UI sources changed (${delta.changed_paths.join(", ") || "page mapping"}); 'ui refresh' only records pointer-only drift — use 'ui reverify' with a targeted review of the affected pages`);
   }
   if (current.upstream_commit === chain.effective.upstream_commit) return { status: "unchanged", checkpoint: null };
-  const checkpoint = appendCheckpoint(root, chain, options.moduleId, route, {
+  const checkpoint = publishScope(root, publication, () => appendCheckpoint(root, chain, options.moduleId, route, {
     type: "freshness-refresh",
     created_at: requireIso(options.now || new Date().toISOString(), "created_at"),
     upstream_ref: chain.lock.upstream.ref,
@@ -1367,12 +1376,13 @@ export function refreshUiGenerationFreshness(projectRoot: string, options: UiChe
     current,
     ...delta,
     review: null,
-  });
+  }));
   return { status: "refreshed", checkpoint };
 }
 
 /** `ui reverify`: records a targeted reverification that covers exactly the impact-matrix affected pages. */
 export function reverifyUiGenerationFreshness(projectRoot: string, options: UiCheckpointOptions): UiFreshnessCheckpoint {
+  const publication = captureModulePublication(projectRoot, options.moduleId);
   const root = realpathSync(resolve(projectRoot));
   const route = validateRoute(options.route);
   const chain = verifyAcceptanceChain(root, options.moduleId, route);
@@ -1394,7 +1404,7 @@ export function reverifyUiGenerationFreshness(projectRoot: string, options: UiCh
   if (!sameStrings(review.pages, delta.impact_matrix.affected_pages)) {
     fail(`UI freshness reverification.pages must exactly match affected pages: ${delta.impact_matrix.affected_pages.join(", ")}`);
   }
-  return appendCheckpoint(root, chain, options.moduleId, route, {
+  return publishScope(root, publication, () => appendCheckpoint(root, chain, options.moduleId, route, {
     type: "targeted-reverification",
     created_at: requireIso(options.now || new Date().toISOString(), "created_at"),
     upstream_ref: chain.lock.upstream.ref,
@@ -1403,7 +1413,7 @@ export function reverifyUiGenerationFreshness(projectRoot: string, options: UiCh
     current: live.state,
     ...delta,
     review: { report_path: review.report_path, run_id: review.run_id, completed_at: review.completed_at, pages: normalizedIds(review.pages), section_sha256: review.section_sha256 },
-  });
+  }));
 }
 
 function argValue(args: string[], flag: string): string | undefined {
@@ -1486,10 +1496,11 @@ export async function runUiGovernanceCli(args: string[], projectRoot = process.c
   }
   if (command === "resource-css") {
     const moduleId = requiredArg(args, "--module");
+    const publication = captureModulePublication(projectRoot, moduleId);
     const loaded = readUiGenerationLock(projectRoot, moduleId);
     if (!loaded.lock.design_resource) fail("DESIGN_LEGACY_ADOPTION_REQUIRED");
     if (loaded.lock.route !== "html-mock") fail("DESIGN_HTML_ROUTE_REQUIRED");
-    applyDesignResourceStyle(projectRoot, moduleId, loaded.lock.design_resource, requiredArg(args, "--html"));
+    publishScope(projectRoot, publication, () => applyDesignResourceStyle(projectRoot, moduleId, loaded.lock.design_resource!, requiredArg(args, "--html")));
     process.stdout.write("Locked design tokens applied.\n");
     return;
   }

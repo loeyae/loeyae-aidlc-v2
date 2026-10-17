@@ -5,9 +5,6 @@ name: 应用设计
 phase: inception
 axis: module
 execution: CONDITIONAL
-lead_agent: aidlc-architect-agent
-support_agents: []
-mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes:
   - docs/aidlc/modules/{module-id}/inception/requirements.md

@@ -24,10 +24,7 @@ rubber-stamping.
   "status": "passed",
   "spec_axis": "passed",       // Design conformance axis
   "standards_axis": "passed",  // Coding standards axis
-  "reviewer": "aidlc-quality-agent",  // Who/what performed the review
-  "reviewer_agent": "aidlc-quality-agent",
-  "execution_context": "isolated",
-  "review_only": true,
+  "reviewer": "current-session",  // Who/what performed the review
   "files_reviewed": [
     "src/main/java/com/example/UserService.java",
     "src/main/java/com/example/UserController.java"
@@ -46,9 +43,6 @@ rubber-stamping.
 | `spec_axis` | Must be `"passed"` |
 | `standards_axis` | Must be `"passed"` |
 | `reviewer` | Non-empty string identifying the reviewer |
-| `reviewer_agent` | Must match the stage reviewer persona in review mode |
-| `execution_context` | Must be `"isolated"` in review mode |
-| `review_only` | Must be `true` in review mode |
 | `files_reviewed` | Non-empty string array |
 | `issues_found` | Non-negative integer |
 | `issues_resolved` | Non-negative integer, >= `issues_found` |
@@ -57,17 +51,12 @@ rubber-stamping.
 
 ## Producer Responsibility
 
-The built-in checker derives the review-mode fields as follows (fail-closed):
+The built-in checker derives the real review result from the record. Historical
+executor metadata is diagnostic only; it does not select a persona, require an
+additional reviewer, or prove completion. The host owns execution and context.
+Explicit user requirements for independent review remain applicable.
 
-- `reviewer_agent` — from the stage metadata (`reviewer_agent` of the active review-mode
-  stage). An explicit `reviewer_agent:` line in the review record overrides it, so a
-  mismatching declaration is still rejected by the gate.
-- `execution_context` / `review_only` — only from explicit declarations in the review
-  record (`execution_context: isolated`, `review_only: true`, each on its own line).
-  Without a declaration the field is not emitted and the gate rejects the evidence; a
-  wrong value (e.g. `execution_context: inline`) is emitted as declared and rejected.
-
-The review agent MUST:
+The reviewer MUST:
 1. Evaluate code against the functional design spec (spec_axis)
 2. Evaluate code against project coding standards (standards_axis)
 3. Record every finding and its resolution

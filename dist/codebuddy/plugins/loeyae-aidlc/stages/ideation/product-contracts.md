@@ -3,7 +3,6 @@ slug: product-contracts
 number: "1.3"
 name: 产品契约
 execution: CONDITIONAL
-lead_agent: aidlc-architect-agent
 scopes: [feature, enterprise, mvp, classic]
 requires: [module-division]
 consumes: [docs/aidlc/ideation/module-division.md]

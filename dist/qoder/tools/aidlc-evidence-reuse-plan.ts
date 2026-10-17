@@ -10,7 +10,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import type { ExecutionProfile } from "./aidlc-execution-profile";
 import { evidenceRelativePath, type ExecutionAxis } from "./aidlc-execution-context";
-import type { SourceRevision } from "./aidlc-revision";
+import { commitAncestryErrors, type SourceRevision } from "./aidlc-revision";
 import type { RuleLoadPlan } from "./aidlc-rule-load-plan";
 import { buildRuleLoadPlan } from "./aidlc-rule-load-plan";
 import type { StageGraph, StageNode } from "./aidlc-orchestrate";
@@ -157,8 +157,20 @@ function candidateForSensor(
       if (value.stage_instance !== target.instance_id || value.module_id !== (target.module_id ?? null) || value.unit_id !== (target.unit_id ?? null)) return { failure: "invalid_evidence" };
       const sourceScope = typeof sourceRevision.scope === "string" ? sourceRevision.scope : "worktree";
       if (sourceScope !== evidenceScope) return { failure: "incompatible_scope" };
-      for (const key of ["commit", "dirty", "worktree_digest", "scope", "scope_digest"] as const) if (sourceRevision[key] !== expected[key]) return { failure: "invalid_evidence" };
-      if (JSON.stringify(sourceRevision.repos ?? {}) !== JSON.stringify(expected.repos ?? {})) return { failure: "invalid_evidence" };
+      if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.worktree_digest))) return { failure: "invalid_evidence" };
+      if (sourceScope === "worktree") {
+        for (const key of ["commit", "dirty", "worktree_digest", "scope", "scope_digest"] as const) if (sourceRevision[key] !== expected[key]) return { failure: "invalid_evidence" };
+        if (JSON.stringify(sourceRevision.repos ?? {}) !== JSON.stringify(expected.repos ?? {})) return { failure: "invalid_evidence" };
+      } else {
+        if (typeof sourceRevision.commit !== "string" || commitAncestryErrors(root, sourceRevision.commit, expected.commit).length
+          || !/^[a-f0-9]{64}$/.test(String(sourceRevision.scope_digest)) || sourceRevision.scope_digest !== expected.scope_digest) return { failure: "invalid_evidence" };
+        const repos = isRecord(sourceRevision.repos) ? sourceRevision.repos : {};
+        if (JSON.stringify(Object.keys(repos).sort()) !== JSON.stringify(Object.keys(expected.repos || {}).sort())) return { failure: "invalid_evidence" };
+        for (const [key, current] of Object.entries(expected.repos || {})) {
+          const recorded = isRecord(repos[key]) ? repos[key] : {};
+          if (typeof recorded.commit !== "string" || commitAncestryErrors(join(root, key), recorded.commit, current.commit).length) return { failure: "invalid_evidence" };
+        }
+      }
       const checker = isRecord(value.checker) ? value.checker : undefined;
       if (checker?.id !== `builtin:${sensor}` || checker.sensor !== sensor || checker.status !== "passed" || checker.exit_code !== 0 || typeof checker.argv_digest !== "string" || !/^[a-f0-9]{64}$/.test(checker.argv_digest)) return { failure: "invalid_evidence" };
       const timestamp = value.timestamp;

@@ -5,9 +5,6 @@ name: 测试用例派生
 phase: inception
 axis: module
 execution: ALWAYS
-lead_agent: aidlc-product-agent
-support_agents: []
-mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 requires: [workspace-detection]
 consumes: []

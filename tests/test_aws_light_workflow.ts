@@ -39,12 +39,8 @@ try {
   const next = success(["orchestrate", "next"]);
   assert.equal(next.kind, "run-stage");
   assert.equal("claim_receipt" in next, false);
-  const agentExecution = next.agent_execution as Record<string, unknown>;
-  assert.equal(agentExecution.mode, "inline");
-  assert.equal(agentExecution.state_authority, "conductor-only");
-  assert.equal((agentExecution.primary as Record<string, unknown>).id, "aidlc-architect-agent");
+  assert.equal("agent_execution" in next, false);
   const executionPolicy = next.execution_policy as Record<string, unknown>;
-  assert.deepEqual(agentExecution.execution_policy, executionPolicy);
   assert.equal(executionPolicy.version, "1");
   assert.equal(executionPolicy.task_level, "question");
   assert.equal(executionPolicy.goal, "Fix checkout validation failure");
@@ -60,12 +56,12 @@ try {
   assert.match(handoff, /工作目标：Fix checkout validation failure/);
   assert.match(handoff, /当前阶段：/);
   assert.match(handoff, /需要产物：/);
-  assert.match(handoff, /conductor-only 按当前 WorkflowRef 生效/);
+  assert.doesNotMatch(handoff, /conductor-only/);
   assert.match(handoff, /质量动作：.*review.*构建.*测试/);
   assert.match(handoff, /执行策略（directive 优先）：任务级别=question/);
   assert.match(handoff, /扩大范围仅当：/);
   assert.match(handoff, /不得因更换工具或 Agent 重复/);
-  assert.match(handoff, /结构化结果交回当前 workflow conductor/);
+  assert.match(handoff, /当前精确 session binding/);
   assert.match(handoff, /下一步：/);
   assert.deepEqual(next.choices, []);
   assert.equal(next.diagram_format, "mermaid");

@@ -4,7 +4,6 @@ number: "1.4"
 name: PRD 生成
 execution: CONDITIONAL
 selection: user
-lead_agent: aidlc-product-agent
 scopes: [feature, enterprise, mvp, classic]
 requires: [product-contracts]
 consumes:

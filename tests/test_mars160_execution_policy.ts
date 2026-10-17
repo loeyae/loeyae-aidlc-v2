@@ -46,7 +46,7 @@ assert.deepEqual(localChange.required.sensors, ["traceability-matrix"]);
 assert.match(localChange.reusable_evidence, /source revision.*provenance.*digest.*新鲜度/);
 assert.match(localChange.reusable_evidence, /修复后仅重新执行受影响、已失效或尚未满足的声明检查/);
 assert.match(localChange.prohibited_actions.join("\n"), /重复审查/);
-assert.match(localChange.stop_conditions.join("\n"), /立即交回 conductor/);
+assert.match(localChange.stop_conditions.join("\n"), /结束当前阶段工作/);
 assert.match(localChange.stop_conditions.join("\n"), /未验证及原因/);
 assert.match(localChange.stop_conditions.join("\n"), /连续失败两次后/);
 assert.match(localChange.expansion_triggers.join("\n"), /Provider gate 失败/);

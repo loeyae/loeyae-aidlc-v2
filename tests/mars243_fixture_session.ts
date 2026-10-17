@@ -29,7 +29,7 @@ export function fixtureEnvironment(
 			arg.startsWith("--") ? [[arg.slice(2), args[index + 1]]] : [],
 		),
 	);
-	if (!["orchestrate", "evidence", "module"].includes(args[0]) || flags.status)
+	if (!["orchestrate", "evidence", "module", "ui", "document-slices"].includes(args[0]) || flags.status)
 		return { ...process.env, AIDLC_SESSION_BINDING: "" };
 	let instance: string | undefined;
 	if (args[0] === "orchestrate" && args[1] === "next") {
@@ -52,14 +52,15 @@ export function fixtureEnvironment(
 		if (preview.status === 0)
 			instance = JSON.parse(preview.stdout).stage_instance;
 	} else {
+		const targetModule = flags.module || /@module:([a-z0-9][a-z0-9-]*)/.exec(flags.instance || "")?.[1];
 		const state = loadWorkflowState(
 			project,
-			flags.module
-				? sessionRef(project, `placeholder@module:${flags.module}`)
+			targetModule
+				? sessionRef(project, `placeholder@module:${targetModule}`)
 				: undefined,
 		);
 		instance = flags.instance || state?.current_stage_instance;
-		if (flags.stage && state && flags.stage !== state.current_stage) {
+		if (flags.stage && !flags.instance && state && flags.stage !== state.current_stage) {
 			const axis = JSON.parse(requireGraph()).stages.find(
 				(s: { slug: string }) => s.slug === flags.stage,
 			)?.axis;

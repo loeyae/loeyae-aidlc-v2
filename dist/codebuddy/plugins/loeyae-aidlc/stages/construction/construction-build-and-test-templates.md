@@ -4,9 +4,6 @@ number: "3.7.1"
 name: 构建测试模板
 phase: construction
 execution: CONDITIONAL
-lead_agent: aidlc-quality-agent
-support_agents: []
-mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces:
@@ -213,6 +210,6 @@ pnpm build:prod  # 生产环境
 
 ## 整体状态
 - **构建**：[成功/失败]
-- **所有测试**：[通过/失败]
+- **选定影响范围的必需测试**：[通过/失败；可复用仍有效的受控证据]
 - **准备就绪**：[是/否]
 ```

@@ -1,3 +1,4 @@
+import { captureModulePublication, publishScope } from "./aidlc-session";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, openSync, closeSync, unlinkSync, fsyncSync, linkSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -118,6 +119,8 @@ function atomic(ctx: SliceContext, path: string, body: string | Buffer, exclusiv
   finally { if (fd !== undefined) closeSync(fd); if (created && existsSync(temp)) unlinkSync(temp); }
 }
 export function generateSlices(ctx: SliceContext): Record<string, unknown> {
+  const publication = captureModulePublication(ctx.root, ctx.module_id!);
+  if (publication && publication.binding.workflow_id !== ctx.workflow_id) throw new Error("slice workflow identity conflicts with session binding");
   const base = sliceBase(ctx), lock = qualityPath(ctx, `${base}/writer.lock`);
   mkdirSync(dirname(lock), { recursive: true });
   const fd = openSync(lock, "wx");
@@ -132,15 +135,17 @@ export function generateSlices(ctx: SliceContext): Record<string, unknown> {
       old = decode(ctx, manifestPath) as unknown as SliceManifest;
       if (Object.entries(identity(ctx)).some(([k, v]) => (old as unknown as Record<string, unknown>)[k] !== v) || !Array.isArray(old.views)) throw new Error("SLICE_MANIFEST_INVALID: recover explicitly");
     }
-    atomic(ctx, adoption, json({ ...identity(ctx), status: "adopted" }));
-    for (const [path, body] of objects) {
-      if (present(ctx, path)) { if (read(ctx, path) !== body) throw new Error(`SLICE_OBJECT_TAMPERED: ${path}`); }
-      else atomic(ctx, path, body);
-    }
-    const affected = sorted([...(old?.views || []).map(v => v.unit_id), ...manifest.views.map(v => v.unit_id)].filter((id): id is string => id !== null).filter(id => JSON.stringify(old?.views.find(v => v.unit_id === id)) !== JSON.stringify(manifest.views.find(v => v.unit_id === id))));
-    for (const input of manifest.inputs) if (qualityInput(ctx, input.path).sha256 !== input.sha256) throw new Error(`SLICE_SOURCE_CHANGED_DURING_GENERATION: ${input.path}`);
-    atomic(ctx, manifestPath, json(manifest));
-    return { status: "generated", affected_units: affected, invalidation_reasons: !old ? ["initial-generation"] : manifest.inputs.filter(i => !old!.inputs.some(o => o.path === i.path && o.sha256 === i.sha256)).map(i => i.path), manifest: manifestPath };
+    return publishScope(ctx.root, publication, () => {
+      atomic(ctx, adoption, json({ ...identity(ctx), status: "adopted" }));
+      for (const [path, body] of objects) {
+        if (present(ctx, path)) { if (read(ctx, path) !== body) throw new Error(`SLICE_OBJECT_TAMPERED: ${path}`); }
+        else atomic(ctx, path, body);
+      }
+      const affected = sorted([...(old?.views || []).map(v => v.unit_id), ...manifest.views.map(v => v.unit_id)].filter((id): id is string => id !== null).filter(id => JSON.stringify(old?.views.find(v => v.unit_id === id)) !== JSON.stringify(manifest.views.find(v => v.unit_id === id))));
+      for (const input of manifest.inputs) if (qualityInput(ctx, input.path).sha256 !== input.sha256) throw new Error(`SLICE_SOURCE_CHANGED_DURING_GENERATION: ${input.path}`);
+      atomic(ctx, manifestPath, json(manifest));
+      return { status: "generated", affected_units: affected, invalidation_reasons: !old ? ["initial-generation"] : manifest.inputs.filter(i => !old!.inputs.some(o => o.path === i.path && o.sha256 === i.sha256)).map(i => i.path), manifest: manifestPath };
+    });
   } finally { closeSync(fd); unlinkSync(lock); }
 }
 export function checkSlices(ctx: SliceContext): Record<string, unknown> {
@@ -225,22 +230,26 @@ export function recoverCanonical(ctx: SliceContext, apply = false): Record<strin
     return { path: recoveryPath, status, owner: record, remediation: "Stop all document-slices generate/recover processes on this host; verify the recorded owner is no longer running; then remove exactly this recovery.lock and retry. Never remove a live or unknown owner's lock without resolving ownership." };
   };
   if (!apply) return { ...recoverCanonicalUnlocked(ctx, false), recovery_lock: recoveryOwner() };
-  // Serialize the entire stale-owner observation and removal across recoverers.
-  // A generator may acquire writer.lock after removal; the next recovery then
-  // observes that live owner and can never unlink its replacement lock.
-  const lock = qualityPath(ctx, recoveryPath);
-  mkdirSync(dirname(lock), { recursive: true });
-  let fd: number;
-  try { fd = openSync(lock, "wx"); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`SLICE_RECOVERY_LOCK_HELD: ${JSON.stringify(recoveryOwner())}`);
-    throw error;
-  }
-  try {
-    writeFileSync(fd, json({ schema_version: 1, pid: process.pid, hostname: hostname(), lock_id: randomUUID() })); fsyncSync(fd);
-    return recoverCanonicalUnlocked(ctx, true);
-  }
-  finally { closeSync(fd); unlinkSync(lock); }
+  const publication = captureModulePublication(ctx.root, ctx.module_id!);
+  if (publication && publication.binding.workflow_id !== ctx.workflow_id) throw new Error("slice workflow identity conflicts with session binding");
+  return publishScope(ctx.root, publication, () => {
+    // Serialize the entire stale-owner observation and removal across recoverers.
+    // A generator may acquire writer.lock after removal; the next recovery then
+    // observes that live owner and can never unlink its replacement lock.
+    const lock = qualityPath(ctx, recoveryPath);
+    mkdirSync(dirname(lock), { recursive: true });
+    let fd: number;
+    try { fd = openSync(lock, "wx"); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`SLICE_RECOVERY_LOCK_HELD: ${JSON.stringify(recoveryOwner())}`);
+      throw error;
+    }
+    try {
+      writeFileSync(fd, json({ schema_version: 1, pid: process.pid, hostname: hostname(), lock_id: randomUUID() })); fsyncSync(fd);
+      return recoverCanonicalUnlocked(ctx, true);
+    }
+    finally { closeSync(fd); unlinkSync(lock); }
+  });
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {

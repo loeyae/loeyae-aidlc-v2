@@ -4,9 +4,6 @@ number: "3.9"
 name: 压缩恢复
 phase: construction
 execution: CONDITIONAL
-lead_agent: aidlc-developer-agent
-support_agents: []
-mode: inline
 scopes: [feature, enterprise, mvp, classic]
 requires: [workspace-detection]
 consumes: []

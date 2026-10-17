@@ -5,9 +5,6 @@ name: 工作流规划
 phase: inception
 axis: module
 execution: CONDITIONAL
-lead_agent: aidlc-architect-agent
-support_agents: []
-mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces: [docs/aidlc/modules/{module-id}/inception/workflow-plan.md]

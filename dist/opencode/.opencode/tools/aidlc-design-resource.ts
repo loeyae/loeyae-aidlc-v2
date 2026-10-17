@@ -5,6 +5,7 @@ import { dirname, relative, resolve } from "node:path";
 import { createCoreMcpReadOnly, readMcpSnapshot, type McpReadOptions } from "./aidlc-mcp-readonly.js";
 import { readProjectProviders, sha256ProviderDigest as digest } from "./aidlc-project-provider.js";
 import { verifyLockedProviderCache } from "./aidlc-provider-git.js";
+import { captureModulePublication, publishScope } from "./aidlc-session";
 
 export const DESIGN_POLICY = ".aidlc/ui-design-policy.json";
 export const DEFAULT_TOKENS = Object.freeze({ background: "#ffffff", foreground: "#202124", primary: "#2457d6", on_primary: "#ffffff", font_family: "system-ui", font_size: "16px", spacing: "16px", radius: "4px" });
@@ -191,8 +192,9 @@ export async function acquireDesignResource(project: string, moduleId: string, o
 }
 /** Explicit staging is immutable. A new selection needs a new reviewed generation baseline. */
 export function stageDesignResource(project: string, moduleId: string, value: DesignResourceLock): void {
+  const publication = captureModulePublication(project, moduleId);
   verifyDesignResource(project, moduleId, value);
-  writeFileSync(safe(project, designResourcePath(moduleId)), JSON.stringify(value, null, 2) + "\n", { flag: "wx", encoding: "utf8" });
+  publishScope(project, publication, () => writeFileSync(safe(project, designResourcePath(moduleId)), JSON.stringify(value, null, 2) + "\n", { flag: "wx", encoding: "utf8" }));
 }
 export function resolveDesignResource(project: string, moduleId: string): DesignResourceLock {
   if (existsSync(safe(project, designResourcePath(moduleId)))) {
@@ -238,10 +240,11 @@ export function verifyDesignResourceConsumption(project: string, moduleId: strin
   if (lock && (!html.includes(designResourceStyle(lock)) || (html.match(/data-aidlc-resource=/g) || []).length !== 1)) fail("DESIGN_TOKENS_NOT_CONSUMED");
 }
 export function applyDesignResourceStyle(project: string, moduleId: string, lock: DesignResourceLock, htmlPath: string): void {
+  const publication = captureModulePublication(project, moduleId);
   verifyDesignResource(project, moduleId, lock);
   const file = safe(project, htmlPath), html = readFileSync(file, "utf8");
   if (!htmlPath.startsWith(`docs/aidlc/modules/${moduleId}/inception/ui-mock/`) || !htmlPath.endsWith(".html") || !html.includes("</head>")) fail("DESIGN_INVALID_HTML_TARGET");
   if (html.includes(designResourceStyle(lock))) { verifyDesignResourceConsumption(project, moduleId, lock, html); return; }
   if (html.includes("data-aidlc-resource=")) fail("DESIGN_EXISTING_STYLE_REVIEW_REQUIRED");
-  writeFileSync(file, html.replace("</head>", designResourceStyle(lock) + "\n</head>"), "utf8");
+  publishScope(project, publication, () => writeFileSync(file, html.replace("</head>", designResourceStyle(lock) + "\n</head>"), "utf8"));
 }

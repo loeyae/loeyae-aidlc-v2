@@ -92,7 +92,27 @@
   ],
   [
     "tsx",
-    "tests/test_agent_runtime.ts"
+    "tests/test_mars244_boundary.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_mars244_migration.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_mars244_writes.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_mars244_publication.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_mars244_scope.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_mars244_review.ts"
   ],
   [
     "tsx",

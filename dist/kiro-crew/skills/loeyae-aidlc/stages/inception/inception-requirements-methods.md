@@ -5,9 +5,6 @@ name: 需求方法
 phase: inception
 axis: module
 execution: CONDITIONAL
-lead_agent: aidlc-product-agent
-support_agents: []
-mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces:

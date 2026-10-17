@@ -5,9 +5,6 @@ name: NFR 需求
 phase: construction
 axis: unit
 execution: CONDITIONAL
-lead_agent: aidlc-architect-agent
-support_agents: []
-mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces:

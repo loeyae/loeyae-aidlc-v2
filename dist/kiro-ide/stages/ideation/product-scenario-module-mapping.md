@@ -3,7 +3,6 @@ slug: scenario-module-mapping
 number: "1.5"
 name: 场景模块映射
 execution: CONDITIONAL
-lead_agent: aidlc-product-agent
 scopes: [feature, enterprise, mvp, classic]
 requires: [product-contracts]
 consumes:

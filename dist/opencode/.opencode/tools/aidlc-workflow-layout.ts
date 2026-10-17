@@ -18,7 +18,7 @@
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
-import { readModuleManifest, type ModuleDescriptor } from "./aidlc-execution-context";
+import { readModuleManifest, readUnitManifest, type ModuleDescriptor } from "./aidlc-execution-context";
 import {
   GLOBAL_WORKFLOW,
   lightStatePath,
@@ -466,34 +466,65 @@ function underAny(path: string, roots: string[]): boolean {
 }
 
 function manifestModules(projectRoot: string): ModuleDescriptor[] {
-  try {
-    return readModuleManifest(projectRoot);
-  } catch {
-    return [];
-  }
+  return existsSync(join(projectRoot, "docs/aidlc/ideation/module-manifest.json")) ? readModuleManifest(projectRoot) : [];
 }
 
 /**
- * Digest scope for evidence of one stage instance. The single layout keeps the
- * historical whole-worktree binding; the split layout binds module evidence to
- * everything except other modules' private roots, and global evidence to
- * everything except module and integration roots.
+ * Versioned input scope, independent of storage layout. Unclassified inputs are
+ * conservative; only declared private ownership permits source exclusion. Real
+ * shared contracts and transitive unit dependencies override private exclusions.
  */
 export function evidenceScopeForInstance(projectRoot: string, instanceId: string): DigestScope {
-  if (!isSplitLayout(projectRoot)) return { label: "worktree", exclude: () => false };
   const owner = ownerOfInstance(instanceId);
   const modules = manifestModules(projectRoot);
   if (owner.kind === "module") {
+    const own = modules.find(module => module.module_id === owner.module_id);
     const otherPaths = modules.filter((module) => module.module_id !== owner.module_id).flatMap((module) => module.paths || []);
+    const unitId = /@unit:([a-z0-9][a-z0-9-]*)$/.exec(instanceId)?.[1];
+    const unitManifest = join(projectRoot, "docs/aidlc/modules", owner.module_id, "inception/unit-manifest.json");
+    const units = unitId && existsSync(unitManifest) ? readUnitManifest(projectRoot, owner.module_id) : [];
+    if (units.length && !units.some(unit => unit.unit_id === unitId)) throw new Error(`unknown evidence input unit ${unitId}`);
+    const relevant = new Set<string>(unitId ? [unitId] : []);
+    const visit = (id: string): void => {
+      for (const dep of units.find(unit => unit.unit_id === id)?.evidence_inputs?.depends_on_units || []) {
+        if (!relevant.has(dep)) { relevant.add(dep); visit(dep); }
+      }
+    };
+    if (unitId) visit(unitId);
+    // Only explicit, disjoint unit ownership can narrow source/tests. Unknown
+    // files, root lockfiles and shared inputs remain bound by default.
+    for (const unit of units) for (const p of unit.evidence_inputs?.paths || []) {
+      if (!underAny(p, own?.paths || [])) throw new Error(`unit evidence path ${p} is outside its module roots`);
+      for (const sibling of units.filter(row => row.unit_id !== unit.unit_id)) for (const q of sibling.evidence_inputs?.paths || []) {
+        if (underAny(p, [q]) || underAny(q, [p])) throw new Error(`overlapping unit evidence paths: ${p}, ${q}`);
+      }
+    }
+    const privateUnits = units.filter(unit => !relevant.has(unit.unit_id));
+    const narrowSources = Boolean(unitId && units.length && units.every(unit => unit.evidence_inputs));
+    const privateSource = narrowSources ? privateUnits.flatMap(unit => unit.evidence_inputs!.paths) : [];
+    const sharedPaths = [...(own?.contract_paths || []), ...units.filter(unit => relevant.has(unit.unit_id)).flatMap(unit => unit.evidence_inputs?.shared_paths || [])];
     return {
-      label: `module:${owner.module_id}`,
+      label: `inputs-v2:module:${owner.module_id}${unitId ? `:unit:${unitId}` : ""}`,
+      projectedInputs: {
+        ...(modules.length ? { "docs/aidlc/ideation/module-manifest.json": JSON.stringify({ version: 1, module: own,
+          ownership: modules.map(module => ({ module_id: module.module_id, paths: module.paths || [], contract_paths: module.contract_paths || [] })),
+        }) } : {}),
+        ...(units.length ? { [`docs/aidlc/modules/${owner.module_id}/inception/unit-manifest.json`]: JSON.stringify({
+        version: 1,
+        units: narrowSources ? units.filter(unit => relevant.has(unit.unit_id)) : units,
+        // Ownership controls exclusions even when sibling business metadata is irrelevant.
+        ownership: units.map(unit => ({ unit_id: unit.unit_id, paths: unit.evidence_inputs?.paths || [] })),
+        }) } : {}),
+      },
       exclude: (path) => {
+        if (underAny(path, sharedPaths)) return false;
+        if (narrowSources && privateUnits.some(unit => path.startsWith(`docs/aidlc/modules/${owner.module_id}/construction/${unit.unit_id}/`))) return true;
         if (path.startsWith("docs/aidlc/modules/")) return path.split("/")[3] !== owner.module_id;
-        return underAny(path, INTEGRATION_ROOTS) || underAny(path, otherPaths);
+        return underAny(path, INTEGRATION_ROOTS) || (underAny(path, otherPaths) && !underAny(path, own?.paths || [])) || underAny(path, privateSource);
       },
     };
   }
-  if (owner.kind === "global") {
+  if (owner.kind === "global" && isSplitLayout(projectRoot)) {
     const modulePaths = modules.flatMap((module) => module.paths || []);
     return {
       label: "global",
