@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.21.0 — 2026-10-17
+
+- Keep Stop read-only and scoped to the current session; unfinished stages may remain running without parking unrelated workflows (MARS-243).
+- Add explicit session binding and human-directed claim transfer, with owner/session/generation checks, expected-claim CAS and stale-writer protection for evidence, receipts, audit and module checkpoints.
+- Require explicit binding before legacy workflow writes; preserve stage evidence, dependency and approval gates. Document session-local setup and handoff for supported hosts.
+- Synchronize package, plugin, marketplace and stage-graph versions; regenerate all nine harness distributions.
+
 ## 4.20.0 — 2026-10-17
 
 - Default to focused tests and affected consumer coverage; remove automatic full-suite runs for single-module projects and per-edit GREEN/refactor cycles.
