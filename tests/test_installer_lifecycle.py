@@ -416,14 +416,18 @@ def test_core_mcp_lifecycle() -> None:
                  home / ".codebuddy/.mcp.json", Path(env["QODER_CONFIG_DIR"]) / "settings.json",
                  Path(env["QODER_CN_MCP_CONFIG"])]
         zcode_path = home / ".zcode/cli/config.json"
+        guidance = run_cli(home, ["provider", "help"], env)
+        assert guidance.returncode == 0, guidance.stdout + guidance.stderr
+        assert "Core installation adds none" in guidance.stdout
+        assert "provider mcp-apply" in guidance.stdout and "--approve-config" in guidance.stdout
         for host in hosts:
             args = ["--harness", host]
             if host in ("kiro-ide", "kiro-cli", "qoder", "codebuddy"):
                 args += ["--project", str(project)]
             result = run_cli(home, ["install", *args], env)
             assert result.returncode == 0, result.stdout + result.stderr
-            assert "Core installation adds none" in result.stdout
-            assert "provider mcp-apply" in result.stdout and "--approve-config" in result.stdout
+            assert "MCP connections require" not in result.stdout
+            assert "provider mcp-apply" not in result.stdout
             assert all(not path.exists() for path in paths)
         assert "mcp" not in json.loads(zcode_path.read_text())
         assert not list(home.rglob("*.aidlc-mcp-*"))
@@ -701,7 +705,8 @@ def test_install_all_detects_qoder_cn_desktop_without_cli() -> None:
 
         repeated = run_cli(home, ["install", "--all"], env)
         assert repeated.returncode == 0, repeated.stdout + repeated.stderr
-        assert "Core installation adds none" in repeated.stdout
+        assert "MCP connections require" not in repeated.stdout
+        assert "provider mcp-apply" not in repeated.stdout
 
         project = root / "project"
         project.mkdir()

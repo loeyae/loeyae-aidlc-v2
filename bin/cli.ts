@@ -1273,7 +1273,6 @@ function deploy(args: string[], operation: "install" | "uninstall"): void {
       : `✅ Uninstalled ${harnesses.length} installer-owned global platform installation${harnesses.length === 1 ? "" : "s"}.`);
     if (operation === "install") {
       provisionProjectGitStrategyOnInstall();
-      printMcpNextSteps();
     }
     return;
   }
@@ -1282,24 +1281,7 @@ function deploy(args: string[], operation: "install" | "uninstall"): void {
   else uninstallOne(harness, options.target, options.project);
   if (operation === "install") {
     provisionProjectGitStrategyOnInstall();
-    printMcpNextSteps();
   }
-}
-
-/** Installation scope never authorizes project Provider connections. */
-function printMcpNextSteps(): void {
-  console.log(`
-MCP connections require a separate, explicit project approval; Core installation adds none.
---project selects deployment/Hook scope only. Existing host connections and ownership are preserved.
-For enabled Providers with locked aidlc.mcp metadata, select an explicit host JSON file:
-  loeyae-aidlc provider mcp-preview --project <project> --host-config <host.json>
-  loeyae-aidlc provider mcp-plan --project <project> --host-config <host.json>
-Save the plan as UTF-8 JSON, review changes[].config_digest, then approve each configuration:
-  loeyae-aidlc provider mcp-apply --project <project> --host-config <host.json> --plan <plan.json> --approve-config <digest>
-No Provider/disabled instance: no connections. Missing metadata: resolve the Provider capability gap first.
-The managed adapter supports JSON mcpServers only; ZCode mcp.servers, Codex/OpenCode and plugin-managed formats need a supported adapter; do not apply directly to them.
-Cleanup is separate from uninstall: review provider mcp-cleanup-plan, then provider mcp-cleanup with the same explicit target and saved plan.
-`);
 }
 
 /**
