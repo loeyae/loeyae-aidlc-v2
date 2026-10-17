@@ -1,3 +1,4 @@
+import { assertSessionClaim, withSessionPublication, sessionBinding, type SessionBinding } from "./aidlc-light-state";
 import { createHash, randomUUID } from "crypto";
 import { QUALITY_SENSORS, qualityAdoption, recordQualityCheckpoint, type QualitySnapshot } from "./aidlc-quality-gates";
 import { createRequire } from "module";
@@ -471,7 +472,15 @@ function hashArtifact(spec: ArtifactSpec): Record<string, unknown> {
   };
 }
 
+let publicationContext: {ref: WorkflowRef; instance: string; binding: SessionBinding} | undefined;
+function publishAuthorized<T>(publish: () => T): T {
+  if (!publicationContext) fail("evidence publication requires session context");
+  return withSessionPublication(PROJECT_ROOT, publicationContext.ref, publicationContext.instance, publish, publicationContext.binding);
+}
 function writeAtomic(path: string, value: string): void {
+  publishAuthorized(() => writeAtomicLocked(path, value));
+}
+function writeAtomicLocked(path: string, value: string): void {
   const safePath = safeProjectPath(path, "output");
   mkdirSync(dirname(safePath), { recursive: true, mode: 0o700 });
   safeProjectPath(dirname(safePath), "output directory", true);
@@ -845,7 +854,7 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   const result = runSemanticCommand(sensor, declarations[0]?.timeout_ms || DEFAULT_TIMEOUT_MS, state);
   const executionId = randomUUID();
   if (sensor === "quality-change-impact" && result.payload.applicable === true) {
-    result.payload.quality_checkpoint_digest = recordQualityCheckpoint({ root: PROJECT_ROOT, workflow_id: state.workflow_id, project_workflow_id: state.parent_workflow_id || state.workflow_id, module_id: state.current_module, scope: state.scope, stage: options.stage, ui_route: String(result.payload.ui_route), quality_version: state.quality_gates_version }, result.payload.quality_snapshots as QualitySnapshot[], executionId);
+    result.payload.quality_checkpoint_digest = publishAuthorized(() => recordQualityCheckpoint({ root: PROJECT_ROOT, workflow_id: state.workflow_id, project_workflow_id: state.parent_workflow_id || state.workflow_id, module_id: state.current_module, scope: state.scope, stage: options.stage, ui_route: String(result.payload.ui_route), quality_version: state.quality_gates_version }, result.payload.quality_snapshots as QualitySnapshot[], executionId));
   }
   const output = options.output || evidenceOutput(options.stage, sensor, undefined, state);
   const unsigned = {
@@ -1047,6 +1056,9 @@ function runProducer(args: string[]): void {
   const state = loadProducerState(options);
   const statusAllowed = state && (state.status === "running" || options.refresh);
   if (!state || !statusAllowed) fail("evidence production requires an active lightweight workflow");
+  if (!state.current_stage_instance) fail("evidence requires an exact stage instance");
+  assertSessionClaim(PROJECT_ROOT, state, state.current_stage_instance);
+  publicationContext = { ref: producerOwner(options, state.current_stage_instance), instance: state.current_stage_instance, binding: sessionBinding()! };
   if (state.current_stage !== options.stage) {
     fail(`stage ${options.stage} is not active; current stage is ${state.current_stage || "(none)"}`);
   }

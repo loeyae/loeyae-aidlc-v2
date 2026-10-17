@@ -24,6 +24,7 @@
     "test:docx-provider-fixture": "tsx tests/test_docx_provider_fixture.ts",
     "build": "tsx scripts/build.ts",
     "typecheck": "tsc --noEmit",
+    "test:mars243": "tsx tests/test_mars243_stop.ts && tsx tests/test_mars243_sessions.ts && tsx tests/test_mars243_layout.ts && tsx tests/test_mars243_report.ts",
     "pretest": "npm run test:module-facts && npm run test:mars169 && npm run test:mcp-readonly && npm run test:context-source-boundary",
     "test:context-source": "tsx tests/test_context_source.ts",
     "test:design-resource": "tsx tests/test_design_resource.ts",
