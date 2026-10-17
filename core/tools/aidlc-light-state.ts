@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
+import { realpathSync } from "fs";
 import { COMMIT_ID_PATTERN } from "./aidlc-revision";
 import {
   assertExecutionProfile,
@@ -39,6 +40,9 @@ export interface TeamLightActiveInstance {
   owner: string;
   branch?: string;
   worktree?: string;
+  session_id?: string;
+  generation?: string;
+  handoff?: string;
   claimed_at: string;
   heartbeat_at: string;
   expires_at: string;
@@ -495,7 +499,8 @@ function parseModuleSelections(markdown: string): Record<string, TeamLightModule
 function parseActiveInstances(markdown: string): Record<string, TeamLightActiveInstance> {
   const result: Record<string, TeamLightActiveInstance> = {};
   for (const [index, cells] of table(markdown, "Active Instances").entries()) {
-    if (cells.length !== 8) throw new Error(`Active Instances row ${index + 1} is malformed`);
+    if (cells.length !== 8 && cells.length !== 11) throw new Error(`Active Instances row ${index + 1} is malformed`);
+    if (cells.length === 11 && ((cells[8] !== "-") !== (cells[9] !== "-"))) throw new Error("active session and generation must be recorded together");
     const key = text(cells[0], "active instance key");
     if (result[key]) throw new Error(`duplicate active instance: ${key}`);
     result[key] = {
@@ -507,6 +512,8 @@ function parseActiveInstances(markdown: string): Record<string, TeamLightActiveI
       claimed_at: iso(cells[5], "active claimed_at"),
       heartbeat_at: iso(cells[6], "active heartbeat_at"),
       expires_at: iso(cells[7], "active expires_at"),
+      ...(cells[8] && cells[8] !== "-" ? { session_id: text(cells[8], "active session"), generation: text(cells[9], "active generation") } : {}),
+      ...(cells[10] && cells[10] !== "-" ? { handoff: clean(cells[10]) } : {}),
     };
   }
   return result;
@@ -716,9 +723,9 @@ ${Object.entries(state.unit_selections).sort(([left], [right]) => left.localeCom
 ${Object.entries(state.module_selections || {}).sort(([left], [right]) => left.localeCompare(right)).map(([module, selection]) => `| ${cell(module)} | ${cell(selection.owner)} | ${selection.selected_at} | ${cell(selection.branch)} | ${cell(selection.worktree)} | ${cell(selection.note)} |`).join("\n") || "| - | - | - | - | - | - |"}
 
 ## Active Instances
-| Stage Instance | Module | Owner | Branch | Worktree | Claimed At | Heartbeat At | Expires At |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-${Object.entries(state.active_instances || {}).sort(([left], [right]) => left.localeCompare(right)).map(([instance, claim]) => `| ${cell(instance)} | ${cell(claim.module_id)} | ${cell(claim.owner)} | ${cell(claim.branch)} | ${cell(claim.worktree)} | ${claim.claimed_at} | ${claim.heartbeat_at} | ${claim.expires_at} |`).join("\n") || "| - | - | - | - | - | - | - | - |"}
+| Stage Instance | Module | Owner | Branch | Worktree | Claimed At | Heartbeat At | Expires At | Session | Generation | Handoff |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+${Object.entries(state.active_instances || {}).sort(([left], [right]) => left.localeCompare(right)).map(([instance, claim]) => `| ${cell(instance)} | ${cell(claim.module_id)} | ${cell(claim.owner)} | ${cell(claim.branch)} | ${cell(claim.worktree)} | ${claim.claimed_at} | ${claim.heartbeat_at} | ${claim.expires_at} | ${cell(claim.session_id)} | ${cell(claim.generation)} | ${cell(claim.handoff)} |`).join("\n") || "| - | - | - | - | - | - | - | - | - | - | - |"}
 
 ## History
 | Stage | Instance | Module | Unit | Result | Timestamp | Input |
@@ -827,20 +834,31 @@ function acquireLock(path: string): number {
 function appendAudit(projectRoot: string, state: WorkflowState, ref: WorkflowRef): void {
   const path = lightAuditPath(projectRoot, ref);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  appendFileSync(path, `## ${new Date().toISOString()}\n- Event: STATE_UPDATED\n- Revision: ${state.revision}\n- Work: ${clean(state.work_description)}\n${state.workflow_kind ? `- Workflow: ${workflowRefKey(ref)}\n` : ""}- Current Instance: ${cell(state.current_stage_instance)}\n- Active Instances: ${Object.keys(state.active_instances || {}).sort().join(", ") || "-"}\n- Instance Owners: ${Object.values(state.active_instances || {}).map((claim) => `${claim.stage_instance}=${claim.owner}`).sort().join(", ") || "-"}\n- Status: ${state.status}\n\n`, "utf8");
+  appendFileSync(path, `## ${new Date().toISOString()}\n- Event: STATE_UPDATED\n- Revision: ${state.revision}\n- Work: ${clean(state.work_description)}\n${state.workflow_kind ? `- Workflow: ${workflowRefKey(ref)}\n` : ""}- Current Instance: ${cell(state.current_stage_instance)}\n- Active Instances: ${Object.keys(state.active_instances || {}).sort().join(", ") || "-"}\n- Instance Owners: ${Object.values(state.active_instances || {}).map((claim) => `${claim.stage_instance}=${claim.owner}`).sort().join(", ") || "-"}\n- Session Claims: ${Object.values(state.active_instances || {}).map(claim => `${claim.stage_instance}=${claim.session_id || "legacy"}/${claim.generation || "legacy"};${claim.handoff || ""}`).join("; ")}\n- Status: ${state.status}\n\n`, "utf8");
 }
 
 export function appendAuditEvent(projectRoot: string, ref: WorkflowRef, event: string, fields: Record<string, string>): void {
+  const append = (): void => {
   const path = lightAuditPath(projectRoot, ref);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const lines = Object.entries(fields).map(([key, value]) => `- ${key}: ${clean(value) || "-"}`).join("\n");
   appendFileSync(path, `## ${new Date().toISOString()}\n- Event: ${clean(event)}\n${lines}${lines ? "\n" : ""}\n`, "utf8");
+
+  };
+  const state = loadWorkflowState(projectRoot, ref);
+  const binding = sessionBinding();
+  if (state && (binding || state.current_stage_instance || Object.keys(state.active_instances || {}).length)) {
+    if (!binding) throw new Error("audit append requires explicit session binding");
+    withSessionPublication(projectRoot, ref, binding.stage_instance, append, binding);
+    return;
+  }
+  append();
 }
 
 export function releaseExpiredModuleClaims(state: WorkflowState, now = Date.now()): string[] {
   const released: string[] = [];
   for (const [instance, claim] of Object.entries(state.active_instances || {})) {
-    if (Date.parse(claim.expires_at) <= now) {
+    if (!claim.session_id && Date.parse(claim.expires_at) <= now) {
       delete state.active_instances[instance];
       released.push(instance);
     }
@@ -856,7 +874,13 @@ export function loadWorkflowState(projectRoot: string, ref: WorkflowRef = GLOBAL
   return parseLightWorkflowState(readFileSync(path, "utf8"));
 }
 
+const CLAIM_TRANSACTION = Symbol("claim transaction");
+
 export interface SaveWorkflowOptions {
+  /** Private transaction token; callers cannot grant claim-write authority with a boolean. */
+  claimWrite?: symbol;
+  /** Synchronous audit/receipt finalization under the same committed-state lock. */
+  afterCommit?: () => void;
   /**
    * Only `orchestrate baseline` sets this: it may register, replace or advance the
    * baseline. Every other save must keep Baseline Commit / Baseline Source / Baseline
@@ -914,15 +938,22 @@ export function saveWorkflowState(projectRoot: string, state: WorkflowState, ref
   const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
   try {
     const existing = loadWorkflowState(projectRoot, ref);
+    if (!existing && sessionBinding()) throw new Error("clear an unrelated session binding before initializing a workflow");
     if (existing && existing.revision !== state.revision) throw new Error(`workflow state revision conflict: expected ${state.revision}, found ${existing.revision}`);
     if (!existing && state.revision !== 0 && !options.adoptRevision) throw new Error(`workflow state is missing at revision ${state.revision}`);
     if (existing && options.adoptRevision) throw new Error("an adopted workflow state cannot overwrite an existing state");
+    if (existing && options.claimWrite !== CLAIM_TRANSACTION) assertSessionMutation(projectRoot, existing, state);
     assertBaselinePreserved(existing, state, ref, options);
     const next = { ...state, version: ENGINE_VERSION, revision: state.revision + 1, updated_at: new Date().toISOString() };
     appendAudit(projectRoot, next, ref);
     writeFileSync(temporary, renderLightWorkflowState(next), { encoding: "utf8", flag: "wx", mode: 0o600 });
     renameSync(temporary, path);
     Object.assign(state, next);
+    if (options.afterCommit) {
+      const binding = sessionBinding();
+      if (binding) publicationLocks.set(path, binding);
+      try { options.afterCommit(); } finally { if (binding) publicationLocks.delete(path); }
+    }
   } finally {
     if (existsSync(temporary)) unlinkSync(temporary);
     closeSync(lock);
@@ -962,4 +993,142 @@ export function migrateSingleInstanceState(projectRoot: string, owner = "legacy-
   };
   saveWorkflowState(projectRoot, state, ref);
   return state;
+}
+
+
+/** A session-local capability. Branch/worktree and ACTIVE_MODULE are never credentials. */
+export interface SessionBinding {
+  project_root: string;
+  workflow_id: string;
+  stage_instance: string;
+  owner: string;
+  session_id: string;
+  generation: string;
+}
+
+export function sessionBinding(raw = process.env.AIDLC_SESSION_BINDING): SessionBinding | undefined {
+  if (!raw?.trim()) return undefined;
+  const value = JSON.parse(raw) as SessionBinding;
+  for (const key of ["project_root", "workflow_id", "stage_instance", "owner", "session_id", "generation"] as const) {
+    if (typeof value[key] !== "string" || !value[key].trim()) throw new Error(`invalid session binding: ${key}`);
+  }
+  return value;
+}
+
+export function bindingFor(projectRoot: string, state: WorkflowState, claim: TeamLightActiveInstance): SessionBinding {
+  if (!claim.session_id || !claim.generation) throw new Error("legacy claim requires explicit session binding");
+  return { project_root: realpathSync(projectRoot), workflow_id: state.workflow_id, stage_instance: claim.stage_instance, owner: claim.owner, session_id: claim.session_id, generation: claim.generation };
+}
+
+export function assertSessionClaim(projectRoot: string, state: WorkflowState, instance: string, binding = sessionBinding()): TeamLightActiveInstance {
+  const claim = state.active_instances?.[instance];
+  if (!binding || !claim?.session_id || !claim.generation) throw new Error(`explicit session binding required for ${instance}; use module bind`);
+  const root = realpathSync(projectRoot);
+  if (binding.project_root !== root || binding.workflow_id !== state.workflow_id || binding.stage_instance !== instance
+    || claim.owner !== binding.owner || claim.session_id !== binding.session_id || claim.generation !== binding.generation) {
+    throw new Error(`claim transferred or session binding conflicts for ${instance}; reread the handoff and bind the current claim`);
+  }
+  if (Date.parse(claim.expires_at) <= Date.now()) throw new Error(`claim expired for ${instance}; explicitly bind/renew before writing`);
+  return claim;
+}
+
+/** Called inside the existing state CAS lock, covering every engine save path. */
+function assertSessionMutation(projectRoot: string, existing: WorkflowState, next: WorkflowState): void {
+  const binding = sessionBinding();
+  const managed = Object.values(existing.active_instances || {}).some(claim => claim.session_id);
+  if (!managed && !binding && !existing.current_stage_instance && Object.keys(existing.active_instances || {}).length === 0) return; // Initialization only. Legacy reads never write.
+  if (!binding) throw new Error("explicit session binding required before workflow mutation");
+  assertSessionClaim(projectRoot, existing, binding.stage_instance, binding);
+  if (next.workflow_id !== existing.workflow_id) throw new Error("session cannot replace workflow identity");
+  for (const instance of Object.keys(next.active_instances)) {
+    if (!existing.active_instances[instance] && instance !== binding.stage_instance) throw new Error("new stage claims require an explicit bind transaction");
+  }
+  for (const [instance, claim] of Object.entries(existing.active_instances)) {
+    if (instance !== binding.stage_instance && JSON.stringify(claim) !== JSON.stringify(next.active_instances[instance])) {
+      throw new Error(`session cannot modify another claim: ${instance}`);
+    }
+  }
+  const scope = (instance: string) => instance.includes("@module:") ? instance.slice(instance.indexOf("@module:")) : "project";
+  if (next.current_stage_instance && next.current_stage_instance !== existing.current_stage_instance && scope(next.current_stage_instance) !== scope(binding.stage_instance)) {
+    throw new Error("session cannot expand its module/unit responsibility; explicitly bind the target");
+  }
+  for (const key of ["completed_stage_instances", "skipped_stage_instances"] as const) {
+    for (const instance of new Set([...existing[key], ...next[key]])) {
+      if (existing[key].includes(instance) !== next[key].includes(instance) && scope(instance) !== scope(binding.stage_instance)) throw new Error(`session cannot resolve sibling instance ${instance}`);
+    }
+  }
+  const module = /@module:([a-z0-9][a-z0-9-]*)/.exec(binding.stage_instance)?.[1];
+  for (const key of new Set([...Object.keys(existing.module_selections || {}), ...Object.keys(next.module_selections || {})])) {
+    if (JSON.stringify(existing.module_selections?.[key]) !== JSON.stringify(next.module_selections?.[key]) && key !== module) throw new Error(`session cannot select sibling module ${key}`);
+    if (JSON.stringify(existing.module_selections?.[key]) !== JSON.stringify(next.module_selections?.[key]) && next.module_selections?.[key]?.owner !== binding.owner) throw new Error("selection owner changes require explicit transfer");
+  }
+  for (const key of new Set([...Object.keys(existing.unit_selections), ...Object.keys(next.unit_selections)])) {
+    if (JSON.stringify(existing.unit_selections[key]) !== JSON.stringify(next.unit_selections[key]) && (!module || !key.startsWith(`${module}:`) || (binding.stage_instance.includes("@unit:") && key !== `${module}:${binding.stage_instance.split("@unit:")[1]}`))) throw new Error(`session cannot select sibling unit ${key}`);
+    if (JSON.stringify(existing.unit_selections[key]) !== JSON.stringify(next.unit_selections[key]) && next.unit_selections[key]?.member !== binding.owner) throw new Error("unit selection owner changes require explicit transfer");
+  }
+  for (const entry of next.history.slice(existing.history.length)) {
+    if (entry.instance_id && entry.instance_id !== binding.stage_instance && !(entry.result === "condition_skipped" && scope(entry.instance_id) === scope(binding.stage_instance))) throw new Error("session cannot report another stage instance");
+  }
+}
+
+const publicationLocks = new Map<string, SessionBinding>();
+
+/** Evidence publication and transfer use the SAME workflow lock: no check/rename gap. */
+export function withSessionPublication<T>(projectRoot: string, ref: WorkflowRef, instance: string, publish: () => T, binding = sessionBinding()): T {
+  const path = lightStatePath(projectRoot, ref);
+  const nested = publicationLocks.get(path);
+  if (nested) {
+    if (!binding || Object.entries(nested).some(([key, value]) => binding[key as keyof SessionBinding] !== value)) throw new Error("nested publication has a conflicting session binding");
+    return publish();
+  }
+  const lock = acquireLock(`${path}.lock`);
+  try {
+    const state = loadWorkflowState(projectRoot, ref);
+    if (!state) throw new Error("workflow disappeared before evidence publication");
+    assertSessionClaim(projectRoot, state, instance, binding);
+    publicationLocks.set(path, binding!);
+    return publish();
+  } finally {
+    publicationLocks.delete(path);
+    closeSync(lock);
+    unlinkSync(`${path}.lock`);
+  }
+}
+
+
+/** Narrow ownership CAS: accepts only claim/selection handoff fields, never arbitrary workflow mutations. */
+export function saveClaimTransaction(projectRoot: string, next: WorkflowState, ref: WorkflowRef, target: string, expectedClaim: TeamLightActiveInstance | undefined): void {
+  const existing = loadWorkflowState(projectRoot, ref);
+  if (!existing || existing.workflow_id !== next.workflow_id || existing.revision !== next.revision) throw new Error("claim changed; reread before retrying transfer");
+  const canonical = (value: unknown): string => JSON.stringify(value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : null);
+  const previous = existing.active_instances[target];
+  if (canonical(previous) !== canonical(expectedClaim)) throw new Error("claim changed; expected original ownership no longer matches");
+  const claim = next.active_instances[target];
+  if (!claim?.owner || !claim.session_id || !claim.generation || claim.stage_instance !== target) throw new Error("incomplete claim transaction");
+  const record = JSON.parse(claim.handoff || "{}") as Record<string, unknown>;
+  if (record.previous_owner !== (previous?.owner || null) || record.previous_session !== (previous?.session_id || null) || record.previous_generation !== (previous?.generation || null) || record.target !== target || record.owner !== claim.owner || record.session !== claim.session_id) throw new Error("handoff must record expected original claim");
+  const transfer = previous && (previous.owner !== claim.owner || (previous.session_id && previous.session_id !== claim.session_id));
+  if (transfer && (typeof record.human_instruction_ref !== "string" || !record.human_instruction_ref.trim())) throw new Error("ownership transfer requires an explicit human instruction reference");
+  if (previous?.session_id && !transfer) {
+    const binding = sessionBinding();
+    const expected = bindingFor(projectRoot, existing, previous);
+    if (!binding || Object.entries(expected).some(([key, value]) => binding[key as keyof SessionBinding] !== value)) throw new Error("renewal requires current session binding");
+  }
+  const module = /@module:([a-z0-9][a-z0-9-]*)/.exec(target)?.[1];
+  const unit = /@unit:([a-z0-9][a-z0-9-]*)$/.exec(target)?.[1];
+  for (const key of new Set([...Object.keys(existing), ...Object.keys(next)])) {
+    if (["active_instances", "module_selections", "unit_selections", "status"].includes(key)) continue;
+    if (JSON.stringify(existing[key as keyof WorkflowState]) !== JSON.stringify(next[key as keyof WorkflowState])) throw new Error(`claim transaction cannot change workflow field ${key}`);
+  }
+  for (const key of new Set([...Object.keys(existing.active_instances), ...Object.keys(next.active_instances)])) {
+    if (key !== target && canonical(existing.active_instances[key]) !== canonical(next.active_instances[key])) throw new Error("claim transaction cannot change sibling ownership");
+  }
+  for (const key of new Set([...Object.keys(existing.module_selections || {}), ...Object.keys(next.module_selections || {})])) {
+    if (canonical(existing.module_selections?.[key]) !== canonical(next.module_selections?.[key]) && (key !== module || next.module_selections?.[key]?.owner !== claim.owner)) throw new Error("claim transaction cannot select another module");
+  }
+  for (const key of new Set([...Object.keys(existing.unit_selections), ...Object.keys(next.unit_selections)])) {
+    if (canonical(existing.unit_selections[key]) !== canonical(next.unit_selections[key]) && (key !== `${module}:${unit}` || next.unit_selections[key]?.member !== claim.owner)) throw new Error("claim transaction cannot select another unit");
+  }
+  if (next.status !== existing.status && !(existing.status === "parked" && next.status === "running" && existing.current_stage_instance === target)) throw new Error("handoff can only resume the exact parked current instance");
+  saveWorkflowState(projectRoot, next, ref, { claimWrite: CLAIM_TRANSACTION });
 }

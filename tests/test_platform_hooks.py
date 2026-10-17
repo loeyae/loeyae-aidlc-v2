@@ -159,26 +159,16 @@ def main() -> None:
         result = run_cli(["hook", "--format", "claude"], done_project, home, home / "trust-done")
         assert result.returncode == 0 and result.stdout == "", result.stdout + result.stderr
 
-        # Running lightweight state blocks with an explicit continuation prompt.
+        # Ending an unbound turn never claims responsibility for any running workflow.
         blocked_project = home / "blocked"
         blocked_project.mkdir()
         save_state(blocked_project, home, current_stage="missing-stage")
-        result = run_cli(["hook", "--format", "claude"], blocked_project, home, home / "trust-blocked")
-        assert result.returncode == 0
-        decision = json.loads(result.stdout)
-        assert decision["decision"] == "block"
-        assert "still running" in decision["reason"]
-
-        for hook_format in ["codebuddy", "zcode"]:
-            platform_result = run_cli(["hook", "--format", hook_format], blocked_project, home, home / "trust-blocked")
-            assert platform_result.returncode == 0
-            platform_decision = json.loads(platform_result.stdout)
-            assert platform_decision["decision"] == "block"
-            assert "still running" in platform_decision["reason"]
-
-        qoder_result = run_cli(["hook", "--format", "qoder-cli"], blocked_project, home, home / "trust-blocked")
-        assert qoder_result.returncode == 2
-        assert qoder_result.stdout == "" and "still running" in qoder_result.stderr
+        state_path = blocked_project / "aidlc" / "active" / "aidlc-state.md"
+        before = state_path.read_bytes()
+        for hook_format in ["claude", "codex", "codebuddy", "zcode", "qoder-cli", "opencode", "kiro"]:
+            result = run_cli(["hook", "--format", hook_format], blocked_project, home)
+            assert result.returncode == 0 and result.stdout == "" and result.stderr == "", result.stdout + result.stderr
+            assert state_path.read_bytes() == before
 
         qoder_retry = run_cli(
             ["hook", "--format", "qoder-cli"],
@@ -189,23 +179,17 @@ def main() -> None:
         )
         assert qoder_retry.returncode == 0 and qoder_retry.stdout == "" and qoder_retry.stderr == ""
 
-        # Invalid Markdown state fails closed.
-        state_path = blocked_project / "aidlc" / "active" / "aidlc-state.md"
+        # No explicit binding: even unrelated malformed state is outside this session.
         state_path.write_text("not a workflow\n")
-        result = run_cli(["hook", "--format", "claude"], blocked_project, home, home / "trust-blocked")
-        assert json.loads(result.stdout)["decision"] == "block"
-        assert "invalid" in json.loads(result.stdout)["reason"]
+        result = run_cli(["hook", "--format", "claude"], blocked_project, home)
+        assert result.returncode == 0 and result.stdout == ""
 
-        # Stop Hook observes but never auto-completes instruction-only stages.
+        # Stop does not report or produce evidence for instruction-only stages either.
         instruction_project = home / "instruction"
         instruction_project.mkdir()
-        init = run_cli(["orchestrate", "next", "--scope", "feature", "--work", "hook instruction test"], instruction_project, home, home / "trust-instruction")
-        assert init.returncode == 0
-        directive = run_cli(["orchestrate", "next"], instruction_project, home, home / "trust-instruction")
-        assert json.loads(directive.stdout)["completion_contract"] == "instruction_only"
-        result = run_cli(["hook", "--format", "claude"], instruction_project, home, home / "trust-instruction")
-        decision = json.loads(result.stdout)
-        assert decision["decision"] == "block" and "still running" in decision["reason"]
+        save_state(instruction_project, home, current_stage="workspace-detection")
+        result = run_cli(["hook", "--format", "claude"], instruction_project, home)
+        assert result.returncode == 0 and result.stdout == ""
 
         shutil.rmtree(home / "trust", ignore_errors=True)
 

@@ -32,6 +32,7 @@ async function enforceIdleGate(client, sessionId) {
     try {
       result = Bun.spawnSync(["loeyae-aidlc", "hook", "--format", "opencode"], {
         cwd: process.cwd(),
+        stdin: new TextEncoder().encode(JSON.stringify({ cwd: process.cwd(), session_id: sessionId })),
         stdout: "pipe",
         stderr: "pipe",
       });
@@ -51,7 +52,7 @@ async function enforceIdleGate(client, sessionId) {
     if (!sessionId) throw new Error(`${message}\nOpenCode did not provide a session ID, so the AI-DLC gate cannot safely continue the session.`);
     await client.session.prompt({
       path: { id: sessionId },
-      body: { parts: [{ type: "text", text: `${message}\nContinue the active stage and report it through the AI-DLC engine before stopping.` }] },
+      body: { parts: [{ type: "text", text: `${message}\nReview the local session binding; ending a turn does not complete a stage.` }] },
     });
   })();
 

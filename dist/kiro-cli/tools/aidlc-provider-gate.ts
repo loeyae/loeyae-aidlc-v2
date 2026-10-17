@@ -1,3 +1,4 @@
+import { captureScopeSession, publishScope } from "./aidlc-session";
 import { randomBytes } from "node:crypto";
 import {
   existsSync,
@@ -336,6 +337,13 @@ export function gateDecisionDigest(decision: GateDecisionV1_1): Sha256Digest {
 
 /** Aggregate current accepted Evidence and sign an immutable Core GateDecision. */
 export function evaluateProviderGate(project: string, options: EvaluateProviderGateOptions): EvaluateProviderGateResult {
+  const root = realpathSync(resolve(project));
+  const plan = typeof options.plan === "string" ? loadFrozenProviderPlan(root, options.plan) : options.plan;
+  const session = captureScopeSession(root, plan.scope);
+  return publishScope(root, session, () => evaluateProviderGateAuthorized(root, { ...options, plan }));
+}
+
+function evaluateProviderGateAuthorized(project: string, options: EvaluateProviderGateOptions): EvaluateProviderGateResult {
   const projectRoot = realpathSync(resolve(project));
   const plan = typeof options.plan === "string" ? loadFrozenProviderPlan(projectRoot, options.plan) : options.plan;
   if (recomputePlanId(plan) !== plan.plan_id || recomputePlanDigest(plan) !== plan.plan_digest) fail("PROVIDER_PLAN_STALE", "Gate Plan identity or digest is invalid");
@@ -444,7 +452,8 @@ export function evaluateProviderGate(project: string, options: EvaluateProviderG
     signature: { algorithm: signer.algorithm, key_id: signer.keyId, value: signer.sign(gateSigningPayload(unsigned)) },
   };
   const gateStore = options.gateStore ?? new LocalProviderGateStore(projectRoot);
-  return { decision, path: gateStore.put(decision), diagnostics };
+  const session = captureScopeSession(projectRoot, decision.scope);
+  return publishScope(projectRoot, session, () => ({ decision, path: gateStore.put(decision), diagnostics }));
 }
 
 export function verifyGateDecisionSignature(decision: GateDecisionV1_1, signer: ProviderArtifactSigner): void {
@@ -542,6 +551,10 @@ export class LocalProviderGateStore implements ProviderGateStore {
   }
 
   put(decision: GateDecisionV1_1): string {
+    const session = captureScopeSession(this.root, decision.scope);
+    return publishScope(this.root, session, () => this.putAuthorized(decision));
+  }
+  private putAuthorized(decision: GateDecisionV1_1): string {
     const parsed = parseGateDecision(decision);
     const path = resolve(this.root, `${parsed.decision_id}.json`);
     const content = `${canonicalProviderJson(parsed as unknown as JsonValue)}\n`;

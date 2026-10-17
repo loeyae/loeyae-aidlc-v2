@@ -1,3 +1,5 @@
+import { bindSession, claimToken, sessionRef } from "./aidlc-session";
+import { assertSessionClaim, sessionBinding } from "./aidlc-light-state";
 import { readModuleManifest, readUnitManifest } from "./aidlc-execution-context";
 import {
   GLOBAL_WORKFLOW,
@@ -133,7 +135,9 @@ export function claimModule(projectRoot: string, moduleId: string, owner: string
   const selectedOwner = text(owner, "--owner");
   let result: TeamLightActiveInstance | undefined;
   updateModuleWorkflow(projectRoot, moduleId, (state) => {
-    releaseExpiredModuleClaims(state);
+    const binding = sessionBinding();
+    if (!binding) throw new Error("module claim requires an explicit session; use module inspect/bind");
+    assertSessionClaim(projectRoot, state, instance, binding);
     const existing = state.active_instances[instance];
     if (existing) {
       if (existing.owner === selectedOwner) {
@@ -180,6 +184,7 @@ export function heartbeatModule(projectRoot: string, stageInstance: string, owne
     releaseExpiredModuleClaims(state);
     const claim = state.active_instances[stageInstance];
     if (!claim) throw new Error(`stage instance ${stageInstance} is not actively claimed`);
+    assertSessionClaim(projectRoot, state, stageInstance);
     if (claim.owner !== expectedOwner) throw new Error(`stage instance ${stageInstance} is claimed by ${claim.owner}, not ${expectedOwner}`);
     const now = new Date();
     claim.heartbeat_at = now.toISOString();
@@ -208,6 +213,10 @@ export function migrateModuleOwnership(projectRoot: string, owner: string, modul
 
 function main(): void {
   const raw = process.argv.slice(2);
+  if (raw.includes("--help")) {
+    console.log("module inspect --stage-instance <exact-instance>: read expected claim token. module bind|transfer --stage-instance <exact-instance> --owner <stable-owner> --session-id <host-session> --expect <token> [--human-instruction-ref <human-prompt-reference>] [--resume] [--preview]. Set AIDLC_SESSION_BINDING to returned binding JSON only in this session. transfer requires the explicit human source reference; the CLI records provenance and cannot authenticate a human prompt. Same-owner renewal requires the current binding. No machine-global environment binding.");
+    return;
+  }
   const command = raw[0];
   const moduleCommand = command === "module" ? raw[1] : undefined;
   const args = command === "module" ? raw.slice(2) : raw.slice(1);
@@ -215,7 +224,7 @@ function main(): void {
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (!arg.startsWith("--")) throw new Error(`unexpected team argument: ${arg}`);
-    if (arg === "--replace") { flags.replace = "true"; continue; }
+    if (["--replace", "--resume", "--preview"].includes(arg)) { flags[arg.slice(2)] = "true"; continue; }
     const value = args[++index];
     if (!value) throw new Error(`${arg} requires a value`);
     flags[arg.slice(2)] = value;
@@ -231,6 +240,19 @@ function main(): void {
     return;
   }
   if (command === "module") {
+    if (["inspect", "bind", "transfer"].includes(moduleCommand || "")) {
+      const instance = text(flags["stage-instance"], "--stage-instance");
+      const state = loadWorkflowState(project, sessionRef(project, instance));
+      if (!state) throw new Error("target workflow does not exist");
+      if (moduleCommand === "inspect") {
+        process.stdout.write(`${JSON.stringify({ workflow_id: state.workflow_id, claim: state.active_instances[instance] || null, expected: claimToken(state.active_instances[instance]) }, null, 2)}\n`);
+        return;
+      }
+      if (moduleCommand === "transfer" && !flags["human-instruction-ref"]) throw new Error("transfer requires --human-instruction-ref");
+      const result = bindSession(project, { instance, owner: text(flags.owner, "--owner"), session: text(flags["session-id"], "--session-id"), expected: text(flags.expect, "--expect"), humanInstructionRef: flags["human-instruction-ref"], resume: flags.resume === "true", preview: flags.preview === "true" });
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      return;
+    }
     if (moduleCommand === "list") {
       process.stdout.write(`${JSON.stringify({ modules: listModules(project) }, null, 2)}\n`);
       return;

@@ -1,9 +1,10 @@
+import { fixtureEnvironment, saveFixtureState } from "./mars243_fixture_session";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createInitialState, loadWorkflowState, saveWorkflowState } from "../core/tools/aidlc-light-state";
+import { createInitialState, loadWorkflowState } from "../core/tools/aidlc-light-state";
 import { readSourceRevision } from "../core/tools/aidlc-revision";
 import { argvDigest, phaseObservationDigest } from "../core/tools/aidlc-evidence";
 
@@ -16,7 +17,7 @@ const graph = JSON.parse(readFileSync(join(repository, "core", "tools", "data", 
 const scratch = mkdtempSync(join(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir(), "aidlc-tdd-gates-"));
 
 function run(project: string, args: string[]): { status: number; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8" });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: fixtureEnvironment(project, args) });
   return { status: result.status ?? 1, stdout: result.stdout || "", stderr: result.stderr || "" };
 }
 
@@ -41,7 +42,7 @@ function makeProject(name: string): string {
   const state = createInitialState("express", "4.5.0", `workflow-${name}`, [], "TDD gate regression");
   state.completed_stages = ["workspace-detection", "state-template"];
   state.completed_stage_instances = ["workspace-detection", "state-template"];
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
   return project;
 }
 
@@ -163,7 +164,7 @@ try {
   assert.ok(quickState);
   quickState!.completed_stage_instances.push("test-case-derivation@module:project");
   quickState!.completed_stages.push("test-case-derivation");
-  saveWorkflowState(quick, quickState!);
+  saveFixtureState(quick, quickState!);
   const noRed = run(quick, ["orchestrate", "next"]);
   assert.notEqual(noRed.status, 0);
   assert.match(`${noRed.stdout}\n${noRed.stderr}`, /canonical consumed artifacts|test-case-derivation/);
@@ -178,7 +179,7 @@ try {
   missingSourceState!.current_phase = "inception";
   missingSourceState!.current_stage_instance = "test-case-derivation@module:project";
   missingSourceState!.current_module = "project";
-  saveWorkflowState(missingSource, missingSourceState!);
+  saveFixtureState(missingSource, missingSourceState!);
   const missingSourceResult = run(missingSource, ["check", "--sensor", "test-case-derivation", "--module", "project"]);
   assert.notEqual(missingSourceResult.status, 0);
   assert.match(`${missingSourceResult.stdout}\n${missingSourceResult.stderr}`, /at least one requirement, story, application-design, or clarification source artifact/);
@@ -194,7 +195,7 @@ try {
   nonApplicableState!.current_phase = "inception";
   nonApplicableState!.current_stage_instance = "test-case-derivation@module:project";
   nonApplicableState!.current_module = "project";
-  saveWorkflowState(nonApplicable, nonApplicableState!);
+  saveFixtureState(nonApplicable, nonApplicableState!);
   const nonApplicableResult = run(nonApplicable, ["check", "--sensor", "test-case-derivation", "--module", "project"]);
   assert.equal(nonApplicableResult.status, 0, `${nonApplicableResult.stdout}\\n${nonApplicableResult.stderr}`);
   assert.equal(JSON.parse(nonApplicableResult.stdout).status, "not_applicable");
@@ -211,7 +212,7 @@ try {
   nonApplicableState!.current_stage_instance = "tdd@module:project@unit:default";
   nonApplicableState!.current_module = "project";
   nonApplicableState!.current_unit = "default";
-  saveWorkflowState(nonApplicable, nonApplicableState!);
+  saveFixtureState(nonApplicable, nonApplicableState!);
   const nonApplicableRed = run(nonApplicable, ["evidence", "run", "--stage", "tdd", "--module", "project", "--unit", "default", "--sensor", "red-test-evidence"]);
   assert.equal(nonApplicableRed.status, 0, `${nonApplicableRed.stdout}\n${nonApplicableRed.stderr}`);
   assert.equal(readFileSync(join(nonApplicable, "alternative-validation-ran.txt"), "utf8"), "validated");
@@ -232,7 +233,7 @@ try {
   producerState!.current_stage_instance = "tdd@module:project@unit:default";
   producerState!.current_module = "project";
   producerState!.current_unit = "default";
-  saveWorkflowState(producer, producerState!);
+  saveFixtureState(producer, producerState!);
   const producedRed = run(producer, ["evidence", "run", "--stage", "tdd", "--module", "project", "--unit", "default", "--sensor", "red-test-evidence"]);
   assert.equal(producedRed.status, 0, `${producedRed.stdout}\\n${producedRed.stderr}`);
   const producedRedPath = join(producer, ".aidlc", "evidence", "tdd", "project", "default", "red-test-evidence.json");
@@ -244,7 +245,7 @@ try {
   assert.ok(invalidState);
   invalidState!.completed_stage_instances.push("test-case-derivation@module:project", "tdd@module:project@unit:default");
   invalidState!.completed_stages.push("test-case-derivation", "tdd");
-  saveWorkflowState(invalid, invalidState!);
+  saveFixtureState(invalid, invalidState!);
   const invalidRed = run(invalid, ["orchestrate", "next"]);
   assert.notEqual(invalidRed.status, 0);
   assert.match(`${invalidRed.stdout}\n${invalidRed.stderr}`, /RED|Evidence rejected|evidence_version/);
@@ -261,7 +262,7 @@ try {
   mismatchedState!.current_stage_instance = "tdd@module:project@unit:default";
   mismatchedState!.current_module = "project";
   mismatchedState!.current_unit = "default";
-  saveWorkflowState(mismatchedExemption, mismatchedState!);
+  saveFixtureState(mismatchedExemption, mismatchedState!);
   // 4.6.0 S3a: tdd also produces BASELINE; I13 declares no characterization UC-D, so the controlled producer writes not_required.
   produceNotRequiredBaseline(mismatchedExemption, []);
   const mismatchedResult = run(mismatchedExemption, ["orchestrate", "report", "--stage", "tdd", "--result", "completed"]);
@@ -283,7 +284,7 @@ try {
   greenState!.current_stage_instance = "code-generation@module:project@unit:default";
   greenState!.current_module = "project";
   greenState!.current_unit = "default";
-  saveWorkflowState(greenFailure, greenState!);
+  saveFixtureState(greenFailure, greenState!);
   produceNotRequiredBaseline(greenFailure, ["--refresh"]);
   const blockedGreen = run(greenFailure, ["orchestrate", "report", "--stage", "code-generation", "--result", "completed"]);
   assert.notEqual(blockedGreen.status, 0);
@@ -303,7 +304,7 @@ try {
   passState!.current_stage_instance = "code-generation@module:project@unit:default";
   passState!.current_module = "project";
   passState!.current_unit = "default";
-  saveWorkflowState(greenPass, passState!);
+  saveFixtureState(greenPass, passState!);
   produceNotRequiredBaseline(greenPass, ["--refresh"]);
   const completedGreen = run(greenPass, ["orchestrate", "report", "--stage", "code-generation", "--result", "completed"]);
   assert.equal(completedGreen.status, 0, `${completedGreen.stdout}\n${completedGreen.stderr}`);

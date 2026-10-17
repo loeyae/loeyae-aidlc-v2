@@ -1,3 +1,4 @@
+import { captureScopeSession, publishScope } from "./aidlc-session";
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcessByStdio, type SpawnSyncReturns } from "node:child_process";
 import type { Readable } from "node:stream";
@@ -800,6 +801,7 @@ export interface ControlledProviderRunResult {
 export async function runControlledProvider(project: string, options: ControlledProviderRunOptions): Promise<ControlledProviderRunResult> {
   const projectRoot = realpathSync(resolve(project));
   const plan = typeof options.plan === "string" ? loadFrozenProviderPlan(projectRoot, options.plan) : options.plan;
+  const session = captureScopeSession(projectRoot, plan.scope);
   if (recomputePlanId(plan) !== plan.plan_id || recomputePlanDigest(plan) !== plan.plan_digest) fail("PROVIDER_PLAN_STALE", "Provider Plan identity or digest is invalid");
   if (options.signal?.aborted) fail("PROVIDER_CANCELLED", "Provider invocation was cancelled before start");
   const adapter = options.sandbox ?? new BubblewrapRestrictedSandbox();
@@ -818,14 +820,14 @@ export async function runControlledProvider(project: string, options: Controlled
     if (execution.timedOut) fail("PROVIDER_TIMEOUT", `Provider invocation exceeded ${invocation.request.limits.wall_time_ms} ms`);
     if (execution.exitCode !== 0 || execution.signal) fail("PROVIDER_PROCESS_ERROR", `Provider process exited with code ${execution.exitCode ?? "null"}${execution.signal ? ` signal ${execution.signal}` : ""}`);
     const result = validateProviderResult(invocation);
-    const signer = options.signer ?? localProviderArtifactSigner(projectRoot, true);
-    const evidence = createAcceptedProviderEvidence(invocation.request, result, {
-      signer,
-      now: options.now,
-      validitySeconds: options.validitySeconds,
+    const { evidence, evidencePath } = publishScope(projectRoot, session, () => {
+      const signer = options.signer ?? localProviderArtifactSigner(projectRoot, true);
+      const evidence = createAcceptedProviderEvidence(invocation.request, result, {
+        signer, now: options.now, validitySeconds: options.validitySeconds,
+      });
+      const store = options.evidenceStore ?? new LocalProviderEvidenceStore(projectRoot);
+      return { evidence, evidencePath: store.put(evidence) };
     });
-    const store = options.evidenceStore ?? new LocalProviderEvidenceStore(projectRoot);
-    const evidencePath = store.put(evidence);
     return {
       invocation_id: invocation.invocationId,
       request_digest: sha256ProviderDigest(invocation.request),

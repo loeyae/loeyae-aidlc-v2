@@ -1342,7 +1342,7 @@ Workflow:
       --set <current> --replace --expect <current> --repo <path>=<commit>...  register missing nested repositories only (restricted migration; works on used/advanced baselines)
       --advance <commit> --repo <path>=<commit>... --expect <current> --expect-repo <path>=<current commit>...  every registered repository explicit; at least one advances
   unit list|select [flags]                              List or self-select a development unit
-  module list|select|claim|heartbeat|migrate [flags]    Coordinate parallel module instances
+  module list|select|claim|heartbeat|migrate|inspect|bind|transfer [flags]    Coordinate parallel module instances
   runtime summary|doctor [--module <module-id>]         Inspect the active Markdown workflow(s)
   worktree prepare|verify|merge-plan [flags]            Prepare or verify a member worktree
 
@@ -1389,6 +1389,10 @@ Examples:
   loeyae-aidlc orchestrate split --from <workflow-id> --dry-run
   loeyae-aidlc orchestrate next --module module-b
   loeyae-aidlc evidence run --stage requirements-analysis --module module-a --refresh
+  loeyae-aidlc module inspect --stage-instance application-design@module:module-a
+  loeyae-aidlc module bind --stage-instance <instance> --owner alice --session-id <host-session> --expect <inspect.expected>
+  loeyae-aidlc module transfer --stage-instance <instance> --owner bob --session-id <host-session> --expect <inspect.expected> --human-instruction-ref <prompt-reference> [--resume] [--preview]
+  Set AIDLC_SESSION_BINDING to the returned binding JSON in this session's child-command environment only.
   loeyae-aidlc module heartbeat --stage-instance application-design@module:module-a --owner alice
   loeyae-aidlc worktree prepare --instance application-design@module:module-a --member alice --path /absolute/path/to/module-a
   loeyae-aidlc orchestrate report --stage application-design --result approved --user-input Approve

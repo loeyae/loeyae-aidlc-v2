@@ -1,3 +1,4 @@
+import { captureScopeSession, publishScope } from "./aidlc-session";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   existsSync,
@@ -520,6 +521,10 @@ export class LocalProviderEvidenceStore implements ProviderEvidenceStore {
   }
 
   put(evidence: ProviderEvidenceV1_1): string {
+    const session = captureScopeSession(this.root, evidence.scope);
+    return publishScope(this.root, session, () => this.putAuthorized(evidence));
+  }
+  private putAuthorized(evidence: ProviderEvidenceV1_1): string {
     const parsed = parseProviderEvidence(evidence);
     if (parsed.state !== "accepted") fail("PROVIDER_PERMISSION_DENIED", "Only an accepted Runner-issued Evidence can be published");
     const path = resolve(this.directory, `${parsed.evidence_id}.json`);

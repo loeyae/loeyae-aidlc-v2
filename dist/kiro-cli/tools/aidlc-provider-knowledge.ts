@@ -1,3 +1,4 @@
+import { captureScopeSession, publishScope } from "./aidlc-session";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -138,6 +139,8 @@ export function confirmProviderKnowledge(project: string, input: {
   plan: string | ProviderPlanV1_1; nodeId: string; deliveryDigest: string; consumer: string;
 }): KnowledgeConfirmation {
   const delivery = loadProviderKnowledge(project, input);
+  const session = captureScopeSession(project, delivery.scope);
+  return publishScope(project, session, () => {
   if (!delivery.sections.length) fail("no compatible knowledge sections for current module facts; nothing to confirm");
   if (input.deliveryDigest !== delivery.delivery_digest) fail("host confirmation does not match delivered content/context");
   const consumer = text(input.consumer);
@@ -167,6 +170,7 @@ export function confirmProviderKnowledge(project: string, input: {
     renameSync(temporary, path);
   } finally { if (existsSync(temporary)) rmSync(temporary); }
   return confirmation;
+  });
 }
 
 /** Re-read locked bytes and validate signed confirmation against the CURRENT Plan/node. */

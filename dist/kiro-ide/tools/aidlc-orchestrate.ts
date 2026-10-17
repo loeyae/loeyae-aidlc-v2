@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import { claimToken } from "./aidlc-session";
+import { assertSessionClaim, sessionBinding, withSessionPublication } from "./aidlc-light-state";
 import { verifyVisualEvidence } from "./aidlc-visual-provider.js";
 /**
  * aidlc-orchestrate.ts — The deterministic workflow engine.
@@ -322,7 +324,7 @@ type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
 type StageResult = (typeof VALID_RESULTS)[number];
-const NEXT_FLAGS = new Set(["scope", "work", "with-prd", "resume", "status", "text", "claim", "module", "owner", "branch", "worktree", "replace-lineage", "provider-approval"]);
+const NEXT_FLAGS = new Set(["preview", "scope", "work", "with-prd", "resume", "status", "text", "claim", "module", "owner", "branch", "worktree", "replace-lineage", "provider-approval"]);
 const REPORT_FLAGS = new Set(["stage", "result", "user-input", "instruction-ack", "module", "unit", "instance", "owner", "gate-decision"]);
 const SPLIT_FLAGS = new Set(["from", "dry-run", "replace-lineage"]);
 const STATE_FLAGS = new Set(["lineage", "user-input", "reason", "text", "module", "from"]);
@@ -352,8 +354,8 @@ function loadState(): WorkflowState | null {
   return loadWorkflowState(PROJECT_ROOT);
 }
 
-function saveState(state: WorkflowState): void {
-  saveWorkflowState(PROJECT_ROOT, state);
+function saveState(state: WorkflowState, afterCommit?: () => void): void {
+  saveWorkflowState(PROJECT_ROOT, state, GLOBAL_WORKFLOW, { afterCommit });
 }
 
 /**
@@ -3484,6 +3486,8 @@ export function evaluateCondition(condition: string, context: ConditionContext):
  */
 function activeClaimed(state: WorkflowState, instanceId: string): boolean {
   const claim = state.active_instances?.[instanceId];
+  const binding = sessionBinding();
+  if (binding && claim?.session_id === binding.session_id && claim.generation === binding.generation && claim.owner === binding.owner && instanceId === binding.stage_instance && state.workflow_id === binding.workflow_id) return false;
   return Boolean(claim && Date.parse(claim.expires_at) > Date.now());
 }
 
@@ -3943,9 +3947,7 @@ function moduleRef(moduleId: string): WorkflowRef {
 function openSplitContext(owner: WorkflowRef): EngineContext {
   const loaded = loadWorkflowParts(PROJECT_ROOT);
   if (!loaded.split) throw new Error("split workflow layout is not initialized");
-  for (const part of loaded.parts.values()) {
-    if (releaseExpiredModuleClaims(part.state).length > 0) saveWorkflowState(PROJECT_ROOT, part.state, part.ref);
-  }
+  // Expiry is checked at the addressed write, never swept across sibling workflows.
   if (!loaded.parts.has(workflowRefKey(owner))) throw new Error(`${workflowLabel(owner)} does not exist in the registry`);
   return { owner, loaded, view: mergeWorkflowView(loaded.parts, owner) };
 }
@@ -3968,13 +3970,13 @@ function summarizeOwned(state: WorkflowState, instances: StageInstance[]): void 
 }
 
 /** Persist the owner's portion of a mutated view, then refresh the registry projections. */
-function commitSplitContext(ctx: EngineContext, view: WorkflowState = ctx.view): void {
+function commitSplitContext(ctx: EngineContext, view: WorkflowState = ctx.view, afterCommit?: () => void): void {
   const key = workflowRefKey(ctx.owner);
   const part = ctx.loaded.parts.get(key);
   if (!part) throw new Error(`${workflowLabel(ctx.owner)} is not loaded`);
   const next = extractOwnedState(view, part.state, ctx.owner);
   summarizeOwned(next, ownedInstances(expandStageInstances(loadGraph(), view), ctx.owner));
-  saveWorkflowState(PROJECT_ROOT, next, ctx.owner);
+  saveWorkflowState(PROJECT_ROOT, next, ctx.owner, { afterCommit });
   ctx.loaded.parts.set(key, { ref: ctx.owner, state: next });
   view.revision = next.revision;
   view.updated_at = next.updated_at;
@@ -4197,6 +4199,13 @@ function firstLine(value: unknown): string {
  * and finally the integration workflow once its cross-module barrier is ready.
  */
 async function splitNext(args: string[], flags: Record<string, string>, graph: StageGraph): Promise<Directive> {
+  const binding = sessionBinding();
+  if (binding) {
+    const bound = [...loadWorkflowParts(PROJECT_ROOT).parts.values()].find(part => part.state.workflow_id === binding.workflow_id);
+    if (!bound) throw new Error("bound workflow no longer exists");
+    if (flags.module && (bound.ref.kind !== "module" || bound.ref.module_id !== flags.module)) throw new Error("requested module conflicts with session binding");
+    return advanceSplit(openSplitContext(bound.ref), graph, args, flags);
+  }
   // Explicit --module wins; AIDLC_MODULE is an equivalent default and never falls back to another module.
   const envModule = process.env.AIDLC_MODULE?.trim();
   const targetModule = flags.module || envModule;
@@ -4624,6 +4633,20 @@ async function handleNext(args: string[]): Promise<Directive> {
   const invalidFlag = unsupportedFlag(flags, NEXT_FLAGS);
   if (invalidFlag) return { kind: "error", message: `Unsupported AWS-style workflow option: --${invalidFlag}` };
 
+  if ("preview" in flags) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    const ref: WorkflowRef = loaded.split && flags.module ? {kind: "module", module_id: flags.module} : GLOBAL_WORKFLOW;
+    const part = loaded.parts.get(workflowRefKey(ref));
+    if (!part) return {kind: "error", message: "workflow does not exist; initialize it first"};
+    const view = structuredClone(loaded.split ? mergeWorkflowView(loaded.parts, ref) : part.state);
+    const all = expandStageInstances(graph, view);
+    const candidates = all.filter(instance => (!loaded.split || sameRef(ownerOfInstance(instance.instance_id), ref)) && (!flags.module || instance.module_id === flags.module));
+    const current = candidates.find(instance => instance.instance_id === part.state.current_stage_instance && !isInstanceResolved(view, instance.instance_id));
+    view.active_instances = {};
+    const search = current ? {instance: current} : findNextInstance(candidates, view, all);
+    const target = search.instance || ("blocked" in search ? search.blocked?.instance : undefined);
+    return {kind: "print", preview: true, workflow_id: part.state.workflow_id, workflow: workflowRefKey(ref), stage_instance: target?.instance_id || null, expected: claimToken(target ? part.state.active_instances[target.instance_id] : undefined), message: "Read-only routing preview; bind the returned exact instance before next. Dependencies and report gates still apply."};
+  }
   const claimRequested = "claim" in flags;
   if (flags["provider-approval"] === "true") return { kind: "error", message: "--provider-approval requires a non-empty approval reference" };
   if (claimRequested && flags.claim !== "true") return { kind: "error", message: "--claim is a boolean flag and does not accept a value" };
@@ -4707,7 +4730,7 @@ async function handleNext(args: string[]): Promise<Directive> {
   if (!isSplitLayout(PROJECT_ROOT) && flags.module && flags.work && !scopeFlag) {
     return { kind: "error", message: "--module <id> --work <text> only describes a module workflow created after the split (a module added to module-manifest.json later); split creates the workflows of the manifest modules with the global work description." };
   }
-  if (!isSplitLayout(PROJECT_ROOT) && flags.module && !claimRequested) {
+  if (!isSplitLayout(PROJECT_ROOT) && flags.module && !claimRequested && !sessionBinding()) {
     const legacy = loadState();
     if (!legacy) {
       return { kind: "error", message: "No active workflow. Start with next --scope <scope> --work <description>; per-module workflows start after module-division completes." };
@@ -4727,8 +4750,7 @@ async function handleNext(args: string[]): Promise<Directive> {
   let state = loadState();
 
   if (state) {
-    const released = releaseExpiredModuleClaims(state);
-    if (released.length > 0) saveState(state);
+    // Do not mutate sibling claims during routing.
   }
 
   if (state && withPrd) {
@@ -4824,6 +4846,8 @@ async function handleNext(args: string[]): Promise<Directive> {
   const legacyState = state;
   return advance(graph, {
     state: legacyState,
+    candidate: (instance) => sameRef(ownerOfInstance(instance.instance_id), ownerOfInstance(sessionBinding()!.stage_instance))
+      && (!sessionBinding()!.stage_instance.includes("@unit:") || instance.unit_id === sessionBinding()!.stage_instance.split("@unit:")[1]),
     flags,
     commit: (value) => saveState(value),
     retry: () => handleNext(args),
@@ -4864,6 +4888,9 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   const isResume = "resume" in flags;
   const claimRequested = "claim" in flags;
   const extras = opts.extras || {};
+  const binding = sessionBinding();
+  if (!binding) return { kind: "error", message: "Explicit session binding required before next writes; inspect/bind the exact stage instance.", ...extras };
+  assertSessionClaim(PROJECT_ROOT, state, binding.stage_instance, binding);
 
   // Parked workflow — resume or report parked
   if (state.status === "parked") {
@@ -4886,7 +4913,10 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
 
   // Expand the static graph into the currently known execution instances.
   const instances = expandStageInstances(graph, state);
-  const candidates = opts.candidate ? instances.filter(opts.candidate) : instances;
+  const candidates = (opts.candidate ? instances.filter(opts.candidate) : instances).filter(instance => {
+    const unit = binding.stage_instance.split("@unit:")[1];
+    return !unit || (instance.unit_id === unit && sameRef(ownerOfInstance(instance.instance_id), ownerOfInstance(binding.stage_instance)));
+  });
   // Instance search may record condition skips on the transactional clone.
   const search = claimRequested
     ? findClaimableModuleInstance(candidates, planningState, flags.module as string, instances)
@@ -4956,6 +4986,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   }
 
   const effectiveNextInstance = runtimeInstance(nextInstance, planningState);
+  if (effectiveNextInstance.instance_id !== binding.stage_instance) return { kind: "error", message: `Bind the exact next instance ${effectiveNextInstance.instance_id} before proceeding.`, ...extras };
   const nextStage = effectiveNextInstance.stage;
   // Construct this fallible hand-off plan before changing current context,
   // claims, or committing state. A malformed graph can therefore never
@@ -5118,21 +5149,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   else delete state.current_module;
   if (nextInstance.unit_id) state.current_unit = nextInstance.unit_id;
   else delete state.current_unit;
-  if (claimRequested) {
-    const now = new Date();
-    const selected = state.module_selections?.[effectiveNextInstance.module_id || ""];
-    const owner = flags.owner || process.env.AIDLC_OWNER || process.env.AIDLC_MEMBER || "unidentified-owner";
-    state.active_instances[effectiveNextInstance.instance_id] = {
-      module_id: effectiveNextInstance.module_id as string,
-      stage_instance: effectiveNextInstance.instance_id,
-      owner,
-      ...(flags.branch || selected?.branch ? { branch: flags.branch || selected?.branch } : {}),
-      ...(flags.worktree || selected?.worktree ? { worktree: flags.worktree || selected?.worktree } : {}),
-      claimed_at: now.toISOString(),
-      heartbeat_at: now.toISOString(),
-      expires_at: new Date(now.getTime() + 30 * 60 * 1000).toISOString(),
-    };
-  }
+  if (claimRequested) assertSessionClaim(PROJECT_ROOT, state, effectiveNextInstance.instance_id);
 
   const gate = nextStage.approval === "block";
   applyPlanningState();
@@ -5156,6 +5173,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   };
   return {
     kind: "run-stage",
+    session_binding: binding,
     stage: nextStage.slug,
     stage_instance: effectiveNextInstance.instance_id,
     axis: effectiveNextInstance.axis,
@@ -5224,6 +5242,14 @@ async function handleReport(args: string[]): Promise<Directive> {
   let commit: (value: WorkflowState) => void;
   let label = "Workflow";
   let extras: Record<string, unknown> = {};
+  let finalizeReportAudit = (): void => {};
+  const afterReportCommit = (): void => {
+    try {
+      finalizeReportAudit();
+      const checkpointed = withModuleCheckpoint({ kind: "print", ...extras } as Directive, args);
+      if (checkpointed.module_checkpoint) Object.assign(extras, { module_checkpoint: checkpointed.module_checkpoint, ...(checkpointed.message ? { checkpoint_warning: checkpointed.message } : {}) });
+    } catch (error) { Object.assign(extras, { checkpoint_warning: error instanceof Error ? error.message : String(error) }); }
+  };
   let ownsInstance: (instanceId: string) => boolean = () => true;
   let auditRef: WorkflowRef = GLOBAL_WORKFLOW;
   if (isSplitLayout(PROJECT_ROOT)) {
@@ -5237,13 +5263,13 @@ async function handleReport(args: string[]): Promise<Directive> {
     }
     const context = openSplitContext(ownerRef);
     state = context.view;
-    commit = (value) => commitSplitContext(context, value);
+    commit = (value) => commitSplitContext(context, value, afterReportCommit);
     label = workflowLabel(ownerRef);
     ownsInstance = (instanceId) => sameRef(ownerOfInstance(instanceId), ownerRef);
     extras = { workflow: workflowRefKey(ownerRef), workflow_id: context.loaded.parts.get(workflowRefKey(ownerRef))!.state.workflow_id };
   } else {
     state = loadState();
-    commit = (value) => saveState(value);
+    commit = (value) => saveState(value, afterReportCommit);
   }
   if (!state) {
     return { kind: "error", message: "No active workflow. Cannot report." };
@@ -5295,9 +5321,9 @@ async function handleReport(args: string[]): Promise<Directive> {
     };
   }
   const currentInstance = runtimeInstance(declaredCurrentInstance, state);
-  const claim = state.active_instances?.[currentInstance.instance_id];
+  const claim = assertSessionClaim(PROJECT_ROOT, state, currentInstance.instance_id);
   if (claim) {
-    const owner = flags.owner || process.env.AIDLC_OWNER || process.env.AIDLC_MEMBER || "unidentified-owner";
+    const owner = flags.owner || sessionBinding()?.owner || process.env.AIDLC_OWNER || process.env.AIDLC_MEMBER || "unidentified-owner";
     if (claim.owner !== owner) return { kind: "error", message: `Stage instance ${currentInstance.instance_id} is claimed by ${claim.owner}, not ${owner}.` };
     if (Date.parse(claim.expires_at) <= Date.now()) return { kind: "error", message: `Stage instance ${currentInstance.instance_id} claim expired at ${claim.expires_at}; claim it again before reporting.` };
     claim.heartbeat_at = new Date().toISOString();
@@ -5453,7 +5479,7 @@ async function handleReport(args: string[]): Promise<Directive> {
       state.completed_stage_instances.push(currentInstance.instance_id);
       reconcileStageSummaries(state, instances);
       if (state.active_instances?.[currentInstance.instance_id]) delete state.active_instances[currentInstance.instance_id];
-      if (state.current_stage_instance === currentInstance.instance_id) selectActiveContext(state, ownsInstance);
+      if (state.current_stage_instance === currentInstance.instance_id) clearActiveContext(state);
       break;
 
     case "rejected":
@@ -5463,34 +5489,38 @@ async function handleReport(args: string[]): Promise<Directive> {
       break;
   }
 
+  if (sourceDeliveryRecord) {
+    const record = sourceDeliveryRecord;
+    extras = { ...extras, source_delivery: record };
+    finalizeReportAudit = () => {
+    const exemption = record.ucd_exemption as { reason_code: string; approval_ref: string; reason: string };
+    appendAuditEvent(PROJECT_ROOT, auditRef, "SOURCE_DELIVERY_NOT_APPLICABLE", {
+      "Stage Instance": currentInstance.instance_id,
+      "Source Roots": (record.roots as string[]).join(", "),
+      Baselines: Object.entries(record.baselines as Record<string, string>).map(([key, value]) => `${key}=${value}`).join(", "),
+      "Exemption Reason Code": exemption.reason_code,
+      "Exemption Approval Ref": exemption.approval_ref,
+      "Exemption Reason": exemption.reason,
+    });
+    };
+  }
   try {
     commit(state);
   } catch (error) {
     if (claim && error instanceof Error && error.message.startsWith("workflow state revision conflict")) return handleReport(args);
     throw error;
   }
-  if (sourceDeliveryRecord) {
-    const exemption = sourceDeliveryRecord.ucd_exemption as { reason_code: string; approval_ref: string; reason: string };
-    appendAuditEvent(PROJECT_ROOT, auditRef, "SOURCE_DELIVERY_NOT_APPLICABLE", {
-      "Stage Instance": currentInstance.instance_id,
-      "Source Roots": (sourceDeliveryRecord.roots as string[]).join(", "),
-      Baselines: Object.entries(sourceDeliveryRecord.baselines as Record<string, string>).map(([key, value]) => `${key}=${value}`).join(", "),
-      "Exemption Reason Code": exemption.reason_code,
-      "Exemption Approval Ref": exemption.approval_ref,
-      "Exemption Reason": exemption.reason,
-    });
-    extras = { ...extras, source_delivery: sourceDeliveryRecord };
-  }
 
-  const nextCommand = isSplitLayout(PROJECT_ROOT) && currentInstance.module_id ? `next --module ${currentInstance.module_id}` : "next";
+
+  const nextCommand = currentInstance.module_id ? `next --module ${currentInstance.module_id}` : "next";
   // Return confirmation
   switch (result) {
     case "completed":
     case "approved":
       return {
         kind: "print",
-        message: `✅ Stage "${stageSlug}" ${result}. Run '${nextCommand}' for the next stage.`,
-        handoff_prompt: `工作目标：${state.work_description}\n当前阶段：${stageSlug} 已完成。\n下一步：运行 orchestrate ${nextCommand} 获取新的 directive，并按其产物、review、构建、测试和 sensor 要求继续。`,
+        message: `✅ Stage "${stageSlug}" ${result}. Run '${nextCommand} --preview', bind the returned exact instance, then next for the next stage.`,
+        handoff_prompt: `工作目标：${state.work_description}\n当前阶段：${stageSlug} 已完成。\n下一步：运行 orchestrate ${nextCommand} --preview，inspect/bind 精确新 instance 后再 next 获取 directive，并按其产物、review、构建、测试和 sensor 要求继续。`,
         ...extras,
       };
     case "rejected":
@@ -5621,13 +5651,14 @@ async function handlePark(args: string[] = []): Promise<Directive> {
   const flags = parseFlags(args);
   if (isSplitLayout(PROJECT_ROOT)) {
     const loaded = loadWorkflowParts(PROJECT_ROOT);
-    const owner = flags.module
-      ? moduleRef(flags.module)
-      : loaded.parts.get("global")!.state.status !== "done" ? GLOBAL_WORKFLOW : INTEGRATION_WORKFLOW;
+    const bound = [...loaded.parts.values()].find(part => part.state.workflow_id === sessionBinding()?.workflow_id);
+    const owner = flags.module ? moduleRef(flags.module) : bound?.ref || GLOBAL_WORKFLOW;
     if (!loaded.parts.has(workflowRefKey(owner))) return { kind: "error", message: `${workflowLabel(owner)} does not exist.` };
     const context = openSplitContext(owner);
     const view = context.view;
     if (view.status !== "running") return { kind: "error", message: `${workflowLabel(owner)} is ${view.status}, not running. Cannot park.`, workflow: workflowRefKey(owner) };
+    if (!view.current_stage_instance) throw new Error("park requires an exact bound stage instance");
+    assertSessionClaim(PROJECT_ROOT, view, view.current_stage_instance);
     view.status = "parked";
     commitSplitContext(context, view);
     return {
@@ -5647,6 +5678,9 @@ async function handlePark(args: string[] = []): Promise<Directive> {
     return { kind: "error", message: `Workflow is ${state.status}, not running. Cannot park.` };
   }
 
+  if (!state.current_stage_instance) throw new Error("park requires an exact bound stage instance");
+  assertSessionClaim(PROJECT_ROOT, state, state.current_stage_instance);
+  if (Object.keys(state.active_instances).some(instance => instance !== state.current_stage_instance && !isInstanceResolved(state, instance))) throw new Error("cannot park another session's active stage; split workflows or transfer the exact target");
   state.status = "parked";
   saveState(state);
 
@@ -7156,7 +7190,11 @@ async function handleState(args: string[]): Promise<Directive> {
   if (action === "retire") return retireLineages(flags);
   if (action === "adopt") return adoptModuleState(flags);
   if (action === "rebuild") return rebuildControlPlane(flags);
-  if (action === "checkpoint") return checkpointModuleState(flags);
+  if (action === "checkpoint") {
+    const binding = sessionBinding();
+    if (!binding) throw new Error("checkpoint requires explicit session binding");
+    return withSessionPublication(PROJECT_ROOT, ownerOfInstance(binding.stage_instance), binding.stage_instance, () => checkpointModuleState(flags), binding);
+  }
   if (action === "recover") return recoverModuleState(flags);
   return { kind: "error", message: STATE_USAGE };
 }
@@ -7787,6 +7825,23 @@ async function main() {
     process.exit(runRegistryMergeDriver(baseFile, oursFile, theirsFile));
   }
 
+  const readOnly = (cmd === "next" && (rest.includes("--status") || rest.includes("--preview")))
+    || (cmd === "state" && (!rest.length || ["plan", "rules", "evidence", "measurements", "verify"].includes(rest[0])))
+    || (["baseline", "diagram-format", "profile"].includes(cmd) && !rest.some(arg => arg.startsWith("--") && !["--module", "--status"].includes(arg)));
+  if (!readOnly) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    if (loaded.parts.size > 0 && !(cmd === "next" && rest.includes("--scope") && ![...loaded.parts.values()].some(part => part.state.current_stage_instance))) {
+      const binding = sessionBinding();
+      if (!binding) throw new Error("explicit session binding required before workflow writes; use module inspect/bind");
+      const target = [...loaded.parts.values()].find(part => part.state.workflow_id === binding.workflow_id);
+      if (!target) throw new Error("bound workflow is not active in this project");
+      assertSessionClaim(PROJECT_ROOT, target.state, binding.stage_instance, binding);
+      const requested = parseFlags(rest);
+      if (requested.module && (target.ref.kind !== "module" || target.ref.module_id !== requested.module) && loaded.split) throw new Error("requested module conflicts with exact session binding");
+      if (cmd === "state" && ["recover", "adopt", "rebuild"].includes(rest[0])) throw new Error("recovery/adoption requires a separate quiescent maintenance handoff; active session ownership cannot be overwritten");
+      if (["archive", "split", "upgrade"].includes(cmd) && loaded.parts.size > 1) throw new Error("whole-project maintenance requires a separate quiescent workflow handoff; a session binding cannot grant sibling ownership");
+    }
+  }
   let directive: Directive;
   switch (cmd) {
     case "next":
@@ -7794,7 +7849,7 @@ async function main() {
       break;
     case "report":
       directive = await handleReport(rest);
-      directive = withModuleCheckpoint(directive, rest);
+      // The report checkpoint was finalized under its state commit lock.
       break;
     case "park":
       directive = await handlePark(rest);
