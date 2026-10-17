@@ -1,18 +1,13 @@
+import { createUiGenerationAcceptance, createUiGenerationLock } from "./mars244_fixture_writers";
+import { fixtureEnvironment, saveFixtureState as saveWorkflowState } from "./mars243_fixture_session";
 import assert from "node:assert/strict";
 import { designResourceStyle, resolveDesignResource } from "../core/tools/aidlc-design-resource";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createInitialState, loadWorkflowState, saveWorkflowState } from "../core/tools/aidlc-light-state";
-import {
-  buildUiImpactMatrix,
-  createUiGenerationAcceptance,
-  createUiGenerationLock,
-  parseUiPagePlanContent,
-  verifyUiGenerationAcceptance,
-  verifyUiGenerationLockAtBaseline,
-} from "../core/tools/aidlc-ui-governance";
+import { createInitialState, loadWorkflowState } from "../core/tools/aidlc-light-state";
+import { buildUiImpactMatrix, parseUiPagePlanContent, verifyUiGenerationAcceptance, verifyUiGenerationLockAtBaseline } from "../core/tools/aidlc-ui-governance";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -50,7 +45,7 @@ function commitAll(project: string, message: string): string {
 }
 
 function run(project: string, args: string[]): { status: number; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8" });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: fixtureEnvironment(project, args) });
   return { status: result.status ?? 1, stdout: result.stdout || "", stderr: result.stderr || "" };
 }
 

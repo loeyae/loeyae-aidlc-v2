@@ -3,7 +3,7 @@
  *
  * Projects core/ into ~/.kiro/crew/skills/loeyae-aidlc/ (the skill install path).
  * Kiro Crew specifics:
- *   - Orchestration via spawn_run MCP tool (not kiro-cli subagent)
+ *   - Execution and delegation are owned by the host
  *   - No .kiro/hooks/ auto-trigger (hooks are advisory, executed by agent)
  *   - SKILL.md is the entry point (not AGENTS.md)
  *   - steering/ files are loaded by agent on-demand via file reads
@@ -18,7 +18,6 @@ const manifest: HarnessManifest = {
 
   coreDirs: [
     { src: "tools", dst: "tools" },
-    { src: "agents", dst: "agents" },
     { src: "stages/ideation", dst: "stages/ideation" },
     { src: "stages/inception", dst: "stages/inception" },
     { src: "stages/construction", dst: "stages/construction" },

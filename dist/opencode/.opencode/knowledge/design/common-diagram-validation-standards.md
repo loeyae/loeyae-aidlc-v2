@@ -98,7 +98,7 @@ FAIL > NEEDS_CAPABILITY > UNVERIFIED > STATIC_PASS > PASS
 
 图表验证的模型上下文不是证据存储。原始 SVG、`.diagram.json`、截图、快照和 Provider stdout 必须保存在文件中，对话只读取当前验证层所需的紧凑摘要。
 
-- 默认一轮只处理一张图和一个目标操作；多图批量必须拆成独立会话或独立子任务；
+- 默认一轮只处理一张图和一个目标操作；多图批量须为各目标保留可追溯的验证结果，执行会话和任务组织由宿主决定；
 - 不读取截图 base64、完整浏览器 snapshot 或多张 SVG 的全文；使用 checker/Provider 输出的状态、错误码、bbox、证据路径和下一步摘要；
 - 按 `common-token-management.md` 的 60KB 预警执行，接近阈值即保存当前图、验证层、输入路径和证据路径并 compact；
 - `The context window overflowed` 后必须从新会话读取摘要恢复，不得重复注入完整历史；

@@ -5,9 +5,6 @@ name: UI 实现桥接
 phase: construction
 axis: unit
 execution: CONDITIONAL
-lead_agent: aidlc-developer-agent
-support_agents: []
-mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: []
 produces:

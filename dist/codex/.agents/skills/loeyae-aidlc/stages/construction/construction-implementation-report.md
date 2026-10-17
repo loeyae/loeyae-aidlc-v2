@@ -4,9 +4,6 @@ number: "3.8"
 name: 实现报告
 phase: construction
 execution: ALWAYS
-lead_agent: aidlc-developer-agent
-support_agents: []
-mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes:
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md

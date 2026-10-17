@@ -4,7 +4,9 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
-import { createInitialState, loadWorkflowState, saveWorkflowState } from "../core/tools/aidlc-light-state";
+import { createInitialState, loadWorkflowState, saveWorkflowState, renderLightWorkflowState } from "../core/tools/aidlc-light-state";
+import { renderRegistry } from "../core/tools/aidlc-workflow-layout";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -18,7 +20,8 @@ const REQUIREMENTS = `requirements-analysis@module:${M01}`;
 const DESIGN = `application-design@module:${M01}`;
 
 function cliRun(cwd: string, args: string[]): { status: number; directive: Record<string, unknown>; output: string } {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8" });
+  const readOnly = args[1] === "upgrade";
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8", env: readOnly ? { ...process.env, AIDLC_SESSION_BINDING: "" } : fixtureEnvironment(cwd, args) });
   const output = `${result.stdout || ""}\n${result.stderr || ""}`;
   const text = (result.stdout || "").trim() || (result.stderr || "").trim();
   return { status: result.status ?? 1, directive: JSON.parse(text) as Record<string, unknown>, output };
@@ -81,14 +84,29 @@ function prepareProject(name = "upgrade"): string {
   state.completed_stage_instances = [...GLOBAL_STAGES];
   state.skipped_stage_instances = [`reverse-engineering@module:${M01}`, `reverse-engineering@module:${M02}`];
   saveWorkflowState(project, state);
-  success(project, ["orchestrate", "split", "--from", WORKFLOW_ID]);
+  // Arrange the historical split directly. A current session cannot run a
+  // whole-project maintenance split or borrow sibling ownership (MARS-243).
+  const modules = [M01, M02].map(module => {
+    const part = createInitialState("feature", "4.3.0", undefined, [], state.work_description);
+    part.workflow_kind = "module"; part.module_id = module; part.parent_workflow_id = state.workflow_id;
+    part.skipped_stage_instances = [`reverse-engineering@module:${module}`];
+    write(project, `aidlc/active/modules/${module}/aidlc-state.md`, renderLightWorkflowState(part));
+    return { module_id: module, workflow_id: part.workflow_id, state_path: `aidlc/active/modules/${module}/aidlc-state.md`, status: "running", current_stage: "-", inception_done: false, construction_done: false, owner: "-" };
+  });
+  const integration = createInitialState("feature", "4.3.0", undefined, [], state.work_description);
+  integration.workflow_kind = "integration"; integration.parent_workflow_id = state.workflow_id;
+  write(project, "aidlc/active/integration/aidlc-state.md", renderLightWorkflowState(integration));
+  write(project, "aidlc/active/registry.md", renderRegistry({ version: "1", global_workflow_id: state.workflow_id,
+    split_from_workflow_id: state.workflow_id, split_at: new Date().toISOString(), updated_at: new Date().toISOString(), modules,
+    integration: { workflow_id: integration.workflow_id, state_path: "aidlc/active/integration/aidlc-state.md", status: "running", current_stage: "-", barrier_ready: false, blocking: [] }, shared_contracts: [], cross_module_requires: [],
+  }));
 
   const ref = { kind: "module" as const, module_id: M01 };
   const m01 = loadWorkflowState(project, ref)!;
   m01.completed_stage_instances.push(REQUIREMENTS, DESIGN);
   m01.skipped_stage_instances.push(`requirement-clarification@module:${M01}`);
   m01.status = "parked";
-  saveWorkflowState(project, m01, ref);
+  write(project, `aidlc/active/modules/${M01}/aidlc-state.md`, renderLightWorkflowState(m01));
   // application-design kept its v4.3 evidence; only the sensor added in v4.5 has none.
   for (const sensor of ["diagram-contract", "traceability-matrix"]) {
     write(project, `.aidlc/evidence/application-design/${M01}/${sensor}.json`, "{}\n");
@@ -144,7 +162,7 @@ try {
     if (argv[0] === "orchestrate") assert.equal(result.reattested, true, command);
   }
   const m01State = loadWorkflowState(project, { kind: "module", module_id: M01 })!;
-  assert.equal(m01State.status, "parked", "recovery never changes workflow progress");
+  assert.equal(m01State.status, "parked", "re-attestation preserves progress and the parked status");
   const after = success(project, ["orchestrate", "upgrade", "--dry-run", "--module", M01]);
   assert.deepEqual((after.pending as Pending[]).map((item) => item.instance_id), [DESIGN]);
 

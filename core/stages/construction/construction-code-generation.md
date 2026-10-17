@@ -5,9 +5,6 @@ name: 代码生成
 phase: construction
 axis: unit
 execution: ALWAYS
-lead_agent: aidlc-developer-agent
-support_agents: []
-mode: delegate
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes:
   - docs/aidlc/modules/{module-id}/inception/application-design/test-cases/

@@ -5,9 +5,6 @@ name: 功能设计
 phase: construction
 axis: unit
 execution: CONDITIONAL
-lead_agent: aidlc-architect-agent
-support_agents: []
-mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes: [docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work.md]
 produces:

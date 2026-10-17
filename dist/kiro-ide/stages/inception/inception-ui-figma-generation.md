@@ -5,9 +5,6 @@ name: Figma 生成
 phase: inception
 axis: module
 execution: CONDITIONAL
-lead_agent: aidlc-design-agent
-support_agents: []
-mode: inline
 scopes: [feature, enterprise, mvp, classic]
 consumes:
   - docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md

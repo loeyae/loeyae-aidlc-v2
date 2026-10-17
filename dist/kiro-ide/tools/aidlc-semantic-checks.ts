@@ -86,7 +86,6 @@ const MODULE_CONTEXT_SENSORS = new Set([
   "nfr-coverage",
   "infrastructure-completeness",
   "frontend-platform-spec",
-  "subagent-evidence",
   "ui-design-alignment",
 ]);
 const UNIT_CONTEXT_SENSORS = new Set([
@@ -100,7 +99,6 @@ const UNIT_CONTEXT_SENSORS = new Set([
   "nfr-coverage",
   "infrastructure-completeness",
   "frontend-platform-spec",
-  "subagent-evidence",
   "ui-design-alignment",
 ]);
 
@@ -134,7 +132,7 @@ const SENSOR_NAMES = new Set([
   ...QUALITY_SENSORS,
   "review-evidence", "test-quality", "contract-baseline", "functional-design-completeness",
   "nfr-coverage", "infrastructure-completeness", "implementation-report", "frontend-platform-spec",
-  "subagent-evidence", "template-completeness", "recovery-evidence",
+  "template-completeness", "recovery-evidence",
   "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
   "ui-artifact-consistency", "inception-consistency", "test-case-derivation", "red-test-evidence", "green-test-evidence", "baseline-test-evidence",
   "traceability-matrix", "structural-invariants",
@@ -595,41 +593,13 @@ function reviewEvidence(): Record<string, unknown> {
   const filesReviewed = [...new Set(content.match(/(?:src|app|lib|test|tests|docs)\/[^\s`),]+/g) || [])];
   if (filesReviewed.length === 0) fail("review record must identify reviewed files");
   if (Number(resolved) < Number(found) || Number(open) !== 0) fail("review issues are not fully resolved");
-  return { status: "passed", spec_axis: "passed", standards_axis: "passed", reviewer, files_reviewed: filesReviewed, issues_found: Number(found), issues_resolved: Number(resolved), issues_open: Number(open), ...reviewModeFields(content) };
+  return { status: "passed", spec_axis: "passed", standards_axis: "passed", reviewer, files_reviewed: filesReviewed, issues_found: Number(found), issues_resolved: Number(resolved), issues_open: Number(open) };
 }
 
 /** `key: value` declared on its own line (optionally as a list item, bold, or code). */
 function declaredValue(content: string, key: string): string | undefined {
   const expression = new RegExp(`^[\\s>*-]*\\**\`?${key}\`?\\**\\s*[:：]\\s*\`?([^\`\\s|]+)`, "im");
   return content.match(expression)?.[1]?.trim();
-}
-
-function currentStageNode(): { mode?: string; reviewer_agent?: string } | undefined {
-  const stage = workflowState?.current_stage;
-  const graphPath = join(dirname(fileURLToPath(import.meta.url)), "data", "stage-graph.json");
-  if (!stage || !existsSync(graphPath)) return undefined;
-  const graph = JSON.parse(text(graphPath)) as { stages?: Array<{ slug: string; mode?: string; reviewer_agent?: string }> };
-  return graph.stages?.find((candidate) => candidate.slug === stage);
-}
-
-/**
- * Review-mode fields. reviewer_agent comes from the stage metadata (an explicit
- * `reviewer_agent:` in the record overrides it so a mismatch stays visible to the gate);
- * execution_context and review_only are emitted only when the record declares them,
- * with the declared value, so a missing or wrong declaration still fails closed.
- */
-function reviewModeFields(content: string): Record<string, unknown> {
-  const stage = currentStageNode();
-  const fields: Record<string, unknown> = {};
-  const declaredAgent = declaredValue(content, "reviewer_agent");
-  if (declaredAgent) fields.reviewer_agent = declaredAgent;
-  else if (stage?.mode === "review" && stage.reviewer_agent) fields.reviewer_agent = stage.reviewer_agent;
-  const context = declaredValue(content, "execution_context");
-  if (context) fields.execution_context = context.toLowerCase();
-  const reviewOnly = declaredValue(content, "review_only")?.toLowerCase();
-  if (reviewOnly === "true") fields.review_only = true;
-  else if (reviewOnly !== undefined) fields.review_only = reviewOnly === "false" ? false : reviewOnly;
-  return fields;
 }
 
 function evidenceRecords(stage: string, sensor: string): Record<string, unknown>[] {
@@ -1478,17 +1448,6 @@ function frontendPlatform(): Record<string, unknown> {
   return { status: "passed", layout_primitives: ["documented-layout-1", "documented-layout-2", "documented-layout-3"], component_mapping: Array.from({ length: 5 }, (_, index) => `documented-component-${index + 1}`), css_constraints: ["documented-css-1", "documented-css-2", "documented-css-3"] };
 }
 
-function subagentEvidence(): Record<string, unknown> {
-  const planFiles = projectFiles(/workflow-plan\.md|subagent-execution\.md/i);
-  const resultFiles = [...allFiles(".aidlc/subagents", /\.json$/), ...allFiles("docs/aidlc/construction/subagent-results", /\.json$/)];
-  if (resultFiles.length === 0) fail("structured subagent result files are missing");
-  const records = resultFiles.map(jsonFile);
-  const failures = records.filter((record) => record.status === "failed" || record.success === false).length;
-  const agents = [...new Set(records.map((record) => typeof record.agent === "string" ? record.agent : typeof record.agent_id === "string" ? record.agent_id : "").filter(Boolean))];
-  const completed = records.filter((record) => record.status === "completed" || record.success === true).length;
-  if (agents.length === 0 || completed < 1 || failures > 0) fail("subagent results are incomplete or failed");
-  return { status: "passed", agents, tasks_completed: completed, failures, plan_files: planFiles.map(relativePath) };
-}
 
 function templateCompleteness(): Record<string, unknown> {
   const directory = join(ROOT, contextual("docs/aidlc/construction/build-and-test"));
@@ -3558,7 +3517,7 @@ const MATRIX_LAYERS: { layer: string; stage: string; tracks: Track[] | "*" }[] =
 ];
 const MATRIX_STAGE_ORDER = ["requirements-analysis", "requirement-clarification", "user-stories", "application-design", "functional-design", "tdd", "code-generation", "code-review"];
 // B3 修复:真实 stage 图是 DAG,construction 期有多个分叉 stage(shared-contract-baseline / nfr-* /
-// infrastructure-* / subagent-execution / ui-implementation-bridge 等)不在上面的
+// infrastructure-* / ui-implementation-bridge 等)不在上面的
 // 线性序上。裸 indexOf 对它们返回 -1,会使阶段感知守卫 (currentOrder>=0) 整体失效,退化为"全层都判",
 // 对尚未到达的 code_refs/tests 层产生假阳性 BROKEN。故用保守映射:未知 stage 回退到其依赖语义对应的
 // 线性位置下界,绝不高估进度(宁可少判、不误判)。
@@ -3569,7 +3528,6 @@ const MATRIX_STAGE_FALLBACK: Record<string, string> = {
   "nfr-design": "functional-design",
   "infrastructure-design": "functional-design",
   // 均 requires code-generation → 视为已到 code-generation。
-  "subagent-execution": "code-generation",
   "ui-implementation-bridge": "code-generation",
   "build-and-test": "code-review",
   "implementation-report": "code-review",
@@ -4414,7 +4372,6 @@ const CHECKERS: Record<string, () => Record<string, unknown> | Promise<Record<st
   "infrastructure-completeness": infrastructure,
   "implementation-report": implementationReport,
   "frontend-platform-spec": frontendPlatform,
-  "subagent-evidence": subagentEvidence,
   "template-completeness": templateCompleteness,
   "recovery-evidence": recoveryEvidence,
   "prd-completeness": prdCompleteness,

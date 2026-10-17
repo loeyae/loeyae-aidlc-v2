@@ -3,7 +3,6 @@ slug: operations-planning
 number: "4.1"
 name: 部署规划
 execution: CONDITIONAL
-lead_agent: aidlc-operations-agent
 scopes: [feature, enterprise, mvp]
 requires: [implementation-report]
 consumes:

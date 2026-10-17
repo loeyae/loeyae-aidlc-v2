@@ -28,6 +28,9 @@ export interface SourceRevision {
 export interface DigestScope {
   label: string;
   exclude: (path: string) => boolean;
+  /** Validated versioned projections of shared manifests for a unit's inputs.
+   * The full bytes still feed worktree_digest; only scope_digest is projected. */
+  projectedInputs?: Readonly<Record<string, string>>;
 }
 
 function normalized(path: string): string {
@@ -133,10 +136,22 @@ export function readSourceRevision(projectRoot: string, scope?: DigestScope, nes
 
   const digest = createHash("sha256");
   const scopeDigest = scoped ? createHash("sha256") : undefined;
+  // Policy projections bind even when a project ignores its AI-DLC documents
+  // in Git. Git tracking is not authority to omit validated input declarations.
+  const projections = Object.entries(scoped?.projectedInputs || {}).sort(([a], [b]) => a.localeCompare(b));
+  if (projections.length) scopeDigest!.update("aidlc-projected-inputs/v1\0");
+  for (const [path, body] of projections) {
+    scopeDigest!.update(path).update("\0file\0").update(createHash("sha256").update(body).digest()).update("\0");
+  }
   const nestedKeys = [...(nested || [])].sort();
   const inNested = (path: string) => nestedKeys.some((key) => path === key || path === `${key}/` || path.startsWith(`${key}/`));
   for (const path of files.filter((path) => !excluded(path)).sort()) {
     const inScope = Boolean(scopeDigest && !scoped!.exclude(path));
+    const projection = scoped?.projectedInputs?.[path];
+    if (inScope && projection !== undefined) {
+      digestFile(root, path, path, [digest]);
+      continue;
+    }
     // An untracked nested repository is listed as one `<key>/` entry; its files feed the
     // scope digest below, so the directory entry itself stays out of it (4.9.0 only).
     const targets = inScope && !(nestedKeys.length > 0 && inNested(path)) ? [digest, scopeDigest!] : [digest];

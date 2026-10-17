@@ -20,7 +20,7 @@ loeyae-aidlc orchestrate next --scope <scope> --work "<工作描述>"
 
 ## Agent execution
 
-当 directive 包含 `agent_execution` 时，加载 `agents/<primary.id>.md` 与 `skills/aidlc-agent-execution/SKILL.md`。对 `delegate`、`pipeline`、`mob` 和 `review` 使用宿主原生 subagent 能力；若不可用，明确回退 inline。只有当前 WorkflowRef 的 conductor 可以 `orchestrate report`、更新其 state/audit；split 后模块负责人可作为本模块 conductor 使用带 `--module` 的 `next` / `report` / `park`，无需回到 global/父议题协调者。用户审批、跨模块 barrier、integration 与人工 merge 门禁保持不变。
+AI-DLC 只定义阶段依赖、产物、追溯、真实证据、质量与审批门禁，以及精确 workflow/session/generation 的写入权限。宿主自行选择执行者、模型、上下文、并行和委派方式；AI-DLC 不要求额外执行结果格式或子代理日志。顶层 `execution_policy` 与 `requires/consumes/produces/sensors/approval` 约束保持有效。只有持有当前 WorkflowRef 精确领取的会话可以发布受管产物和推进 state/audit；人类显式交接后旧会话失去写入权限。
 
 ## 门禁强制契约（kiro-crew 无 host 自动 hook，必须靠本契约兜底）
 

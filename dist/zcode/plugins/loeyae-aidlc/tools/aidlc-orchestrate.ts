@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { claimToken } from "./aidlc-session";
+import { retireExecutionCheckpoint } from "./aidlc-retire-execution";
 import { assertSessionClaim, sessionBinding, withSessionPublication } from "./aidlc-light-state";
 import { verifyVisualEvidence } from "./aidlc-visual-provider.js";
 /**
@@ -32,7 +33,6 @@ import { overflowDirective, recordedSubprocessOverflow, runSync, SubprocessOverf
 import { createRequire } from "module";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
-import { planAgentExecution, type AgentExecutionPlan } from "./aidlc-agent-runtime";
 import { SEMANTIC_SENSORS, allowlistedPhaseCommand, argvDigest, i13CodeRefBlobs, i13UcdIdsByMode, phaseNotRequiredDigest, phaseObservationDigest, ucdExemptionDigest, unitUcdExemption, type Phase } from "./aidlc-evidence";
 import { QUALITY_SENSORS, qualityAdoption, qualityEvidenceErrors, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
 import { controlledQualityErrors, developmentAcceptanceErrors } from "./aidlc-quality-delivery";
@@ -186,10 +186,6 @@ export interface StageNode {
   execution: "ALWAYS" | "CONDITIONAL";
   selection: "automatic" | "user";
   choices: string[];
-  lead_agent: string;
-  support_agents: string[];
-  mode: string;
-  reviewer_agent?: string;
   scopes: string[];
   requires: string[];
   cross_module_requires?: string[];
@@ -253,10 +249,6 @@ export interface Directive {
   name?: string;
   number?: string;
   phase?: string;
-  lead_agent?: string;
-  support_agents?: string[];
-  mode?: string;
-  agent_execution?: AgentExecutionPlan & { execution_policy?: ExecutionPolicy };
   execution_policy?: ExecutionPolicy;
   gate?: boolean;
   requires?: string[];
@@ -289,7 +281,6 @@ export interface ConditionContext {
   has_infra_needs: boolean;
   has_test_case_sources: boolean;
   has_contract_dependencies: boolean;
-  has_subagent_support: boolean;
   context_compacted: boolean;
   ui_design_selected: boolean;
   ui_mode_html_mock: boolean;
@@ -330,7 +321,7 @@ const SPLIT_FLAGS = new Set(["from", "dry-run", "replace-lineage"]);
 const STATE_FLAGS = new Set(["lineage", "user-input", "reason", "text", "module", "from"]);
 const PROFILE_FLAGS = new Set(["signal", "detail", "module"]);
 const ARCHIVE_FLAGS = new Set(["reason"]);
-const UPGRADE_FLAGS = new Set(["dry-run", "module"]);
+const UPGRADE_FLAGS = new Set(["dry-run", "module", "retire-execution", "instance", "human-instruction-ref"]);
 const DIAGRAM_FORMAT_FLAGS = new Set(["set", "user-input"]);
 // `module` scopes --adopt / --advance / the read-only view to a module sub-workflow (4.10.0); --set / --replace reject it.
 const BASELINE_FLAGS = new Set(["set", "advance", "adopt", "user-input", "reason", "dry-run", "replace", "expect", "module", "approval-ref"]);
@@ -347,7 +338,25 @@ export function loadGraph(): StageGraph {
   if (!existsSync(GRAPH_PATH)) {
     throw new Error(`Stage graph not found at ${GRAPH_PATH}. Run 'aidlc-graph.ts compile' first.`);
   }
-  return JSON.parse(readFileSync(GRAPH_PATH, "utf-8"));
+  return normalizeExecutionGraph(JSON.parse(readFileSync(GRAPH_PATH, "utf-8")));
+}
+
+/** Older cached graphs are diagnostic inputs, never a way to restore execution
+ * topology or subagent gates. Real upstream implementation dependencies remain. */
+export function normalizeExecutionGraph(graph: StageGraph): StageGraph {
+  const retiredArtifact = (path: string) => /^(?:\.aidlc\/(?:subagents|evidence\/subagent-execution)|docs\/aidlc\/construction\/subagent-results)(?:\/|$)/.test(path.replace(/\\/g, "/"));
+  const stages = graph.stages.filter(stage => stage.slug !== "subagent-execution").map(source => {
+    const { lead_agent, support_agents, mode, reviewer_agent, ...stage } = source as StageNode & {
+      lead_agent?: unknown; support_agents?: unknown; mode?: unknown; reviewer_agent?: unknown;
+    };
+    return { ...stage,
+      requires: [...new Set(stage.requires.map(dep => dep === "subagent-execution" ? "code-generation" : dep))],
+      consumes: stage.consumes.filter(path => !retiredArtifact(path)),
+      produces: stage.produces.filter(path => !retiredArtifact(path)),
+      sensors: stage.sensors.filter(sensor => sensor !== "subagent-evidence"),
+    };
+  });
+  return { ...graph, stages, stage_count: stages.length };
 }
 
 function loadState(): WorkflowState | null {
@@ -1445,6 +1454,7 @@ function validateEvidence(
     if (!commit) errors.push("source_revision.commit is required");
     if (sourceRevision.dirty !== null && typeof sourceRevision.dirty !== "boolean") errors.push("source_revision.dirty must be boolean or null");
     const recordedScope = typeof sourceRevision.scope === "string" ? sourceRevision.scope : undefined;
+    if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.worktree_digest || ""))) errors.push("source_revision.worktree_digest must be a SHA-256 digest");
     // 4.9.0: the algorithm follows the evidence's own structure. Evidence without
     // source_revision.repos is re-checked exactly as in 4.8.1 (nested repositories left
     // out); evidence with it is re-checked per repository.
@@ -1458,9 +1468,7 @@ function validateEvidence(
       // The tolerated drift is the worktree only: the recorded commit must still be in HEAD's history.
       if (!drift && commit) errors.push(...commitAncestryErrors(PROJECT_ROOT, commit, activeRevision.commit));
       if (drift && sourceRevision.dirty !== activeRevision.dirty) errors.push("source_revision.dirty no longer matches the current worktree");
-      if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.worktree_digest || ""))) {
-        errors.push("source_revision.worktree_digest must be a SHA-256 digest");
-      } else if (drift && sourceRevision.worktree_digest !== activeRevision.worktree_digest) {
+      if (drift && /^[a-f0-9]{64}$/.test(String(sourceRevision.worktree_digest || "")) && sourceRevision.worktree_digest !== activeRevision.worktree_digest) {
         errors.push("source_revision.worktree_digest no longer matches the current worktree");
       }
       if (nestedCheck) errors.push(...nestedRevisionErrors(nestedCheck.recorded, activeRevision.repos || {}, { exact: drift, ancestry: !drift }));
@@ -1468,7 +1476,7 @@ function validateEvidence(
       // Split layout: content-addressed within the owning workflow's scope. The commit
       // is provenance only, so another module's commit or write cannot invalidate it.
       const expectedScope = evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
-      if (options.tolerateRevisionDrift && commit) errors.push(...commitAncestryErrors(PROJECT_ROOT, commit, readSourceRevision(PROJECT_ROOT).commit));
+      if (commit) errors.push(...commitAncestryErrors(PROJECT_ROOT, commit, readSourceRevision(PROJECT_ROOT).commit));
       if (recordedScope !== expectedScope.label) {
         errors.push(`source_revision.scope ${recordedScope} does not match the ${expectedScope.label} scope of ${instance.instance_id}`);
       } else if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.scope_digest || ""))) {
@@ -2198,7 +2206,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
         // so a stage that declares a NON-evidence produce (every traceability=required
         // stage) but resolves to zero real files has nothing scanned and would pass
         // silently — the gate空转. Fail closed in that case. A pure-evidence stage
-        // (shared-contract-baseline / tdd / subagent-execution /
+        // (shared-contract-baseline / tdd /
         // compact-recovery; all traceability=not_applicable) declares no non-evidence
         // produce, so the guard does not fire — no false positive. Directory produces
         // whose only entries are sub-MIN_ARTIFACT_BYTES markers are not artifacts (same
@@ -2531,11 +2539,6 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
           // Reviewer identity required
           if (!asNonEmptyString(evidence.reviewer)) errors.push("reviewer must identify who/what performed the review");
-          if (stage.mode === "review") {
-            if (evidence.reviewer_agent !== stage.reviewer_agent) errors.push(`reviewer_agent must be ${stage.reviewer_agent}`);
-            if (evidence.execution_context !== "isolated") errors.push('execution_context must be "isolated" for review mode');
-            if (evidence.review_only !== true) errors.push("review_only must be true for review mode");
-          }
 
           // Files reviewed must be non-empty
           const filesReviewed = asStringArray(evidence.files_reviewed);
@@ -3061,20 +3064,6 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
         break;
       }
 
-      case "subagent-evidence": {
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
-          const errors: string[] = [];
-          if (evidence.status !== "passed") errors.push('status must be "passed"');
-          const agents = asStringArray(evidence.agents);
-          if (!agents || agents.length === 0) errors.push("agents must list at least one executed agent");
-          if (asPositiveInt(evidence.tasks_completed) === null || (evidence.tasks_completed as number) < 1) errors.push("tasks_completed must be >= 1");
-          if (asNumber(evidence.failures) !== 0) errors.push("failures must be 0");
-          return errors;
-        });
-        if (failure) failures.push(failure);
-        break;
-      }
-
       case "template-completeness": {
         const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
@@ -3348,11 +3337,6 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
   const unitEvidence = /多个工作单元|多单元|跨服务协调|多个包|多个模块|并行开发|工作量超出单次执行/i.test(contextText);
   const has_unit_generation_needs = unitDecision ?? (multi_module || has_functional_design_needs || unitEvidence);
 
-  // has_subagent_support means the approved workflow plan selected delegated/parallel execution.
-  const moduleHasSubagentSupport = /subagent|sub-agent|parallel|并行|mob/i.test(workflowPlanText);
-  const has_subagent_support = moduleHasSubagentSupport
-    && selectedForUnit("subagent-execution", true);
-
   const buildMetadata = rootBuildMetadata();
   const productContractText = [
     readConditionText(join(PROJECT_ROOT, "docs", "aidlc", "ideation", "product-inception.md")),
@@ -3415,7 +3399,6 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
     has_infra_needs,
     has_test_case_sources,
     has_contract_dependencies,
-    has_subagent_support,
     context_compacted,
     ui_design_selected,
     ui_mode_html_mock,
@@ -3682,11 +3665,11 @@ export function executionPolicyFor(
     prohibited_actions: [
       "不得因多个文件、角色或工具不同而默认升级为全仓探索、全量测试或重复审查。",
       "不得跳过、伪造、手写或以 Agent 叙述替代受控 Evidence、sensor、review、build、test 或审批门禁。",
-      "不得追加无关重构、优化、测试或对相同范围的二次委托。",
+      "不得追加无关重构、优化、测试。",
     ],
     stop_conditions: [
-      "声明的产物和当前任务所需的实现或分析已完成，声明的检查已有结果或已由指定机制安排，且无阻断问题时，立即交回 conductor。",
-      "非阻断且当前无法执行的检查，须在结构化结果 risks 中记录为未验证及原因；不得为消除未知项扩大范围。",
+      "声明的产物和当前任务所需的实现或分析已完成，声明的检查已有结果或已由指定机制安排，且无阻断问题时，结束当前阶段工作并交付结果。",
+      "非阻断且当前无法执行的检查，须记录为未验证及原因；不得为消除未知项扩大范围。",
       "同一检查连续失败两次后，停止等价重试；改用不同诊断路径或返回 NEEDS_CONTEXT/BLOCKED。",
       "完成后不得仅为提高信心继续探索无关目录、重复读取未变化内容或重复已通过的检查。",
     ],
@@ -3710,14 +3693,14 @@ function executionPolicyPrompt(policy: ExecutionPolicy): string {
   return `\n执行策略（directive 优先）：任务级别=${policy.task_level}。成功条件：${policy.success_condition}\n允许探索：${policy.allowed_exploration}\n阶段依赖：${list(required.requires, "无")}；consumes：${list(required.consumes, "无")}；produces：${list(required.produces, "无")}；sensors：${list(required.sensors, "无")}。\n证据复用：${policy.reusable_evidence}\n禁止：${policy.prohibited_actions.join("；")}\n停止：${policy.stop_conditions.join("；")}\n扩大范围仅当：${policy.expansion_triggers.join("；")}\n规则优先级：${policy.priority.join(" > ")}。`;
 }
 
-function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, agentExecution: AgentExecutionPlan, executionPolicy: ExecutionPolicy, reportCommand?: string, choices: string[] = [], providerPrompt = ""): string {
+function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, executionPolicy: ExecutionPolicy, reportCommand?: string, choices: string[] = [], providerPrompt = ""): string {
   const unit = instance.module_id && instance.unit_id
     ? `当前单元：${instance.module_id}/${instance.unit_id}。团队成员可用 unit select 声明负责人与分支。`
     : "当前阶段不要求成员选择单元；按产物、review、构建和测试门禁推进。";
   const artifacts = instance.stage.produces.length
     ? instance.stage.produces.flatMap((pattern) => displayArtifactPatterns(pattern, instance)).join("、")
     : "本阶段没有声明文件产物";
-  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n执行角色：${agentExecution.primary.title}（${agentExecution.primary.id}）\n执行方式：${agentExecution.mode}；conductor-only 按当前 WorkflowRef 生效。split 后模块负责人可作为本模块 workflow conductor 推进，无需回到 global/父议题协调者；用户审批和 merge 门禁不变。\n需要产物：${artifacts}\n质量动作：只执行本 directive 声明或绑定的 review、构建、测试、sensor、Provider 与审批动作；report/next 会复验 requires、consumes、produces 和受控 Evidence。不得跳过，也不得因更换工具或 Agent 重复。${executionPolicyPrompt(executionPolicy)}${diagramFormatPrompt(state, instance)}${choicePrompt(instance.stage.slug, choices)}${providerPrompt}\n下一步：execution agent 完成后将结构化结果交回当前 workflow conductor；后者运行 ${reportCommand || "orchestrate report"}。`;
+  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n需要产物：${artifacts}\n质量动作：只执行本 directive 声明或绑定的 review、构建、测试、sensor、Provider 与审批动作；report/next 会复验 requires、consumes、produces 和受控 Evidence。不得跳过，也不得因更换工具或 Agent 重复。${executionPolicyPrompt(executionPolicy)}${diagramFormatPrompt(state, instance)}${choicePrompt(instance.stage.slug, choices)}${providerPrompt}\n下一步：持有当前精确 session binding 的会话运行 ${reportCommand || "orchestrate report"}。`;
 }
 
 interface PreparedProviderDirective {
@@ -4878,6 +4861,7 @@ export interface AdvanceOptions {
  * context and optional claim. Shared by the single layout and every split workflow.
  */
 export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directive> {
+  graph = normalizeExecutionGraph(graph);
   const { flags } = opts;
   const originalState = opts.state;
   // Advance is transactional: all fallible planning/admission work operates on
@@ -5161,16 +5145,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   }
 
   const directiveChoices = runtimeChoices(nextStage, state);
-  const plannedAgentExecution = planAgentExecution(nextStage);
   const executionPolicy = executionPolicyFor(state, effectiveNextInstance);
-  // Dispatching hosts commonly forward only agent_execution. Carry the same
-  // directive-derived object there so delegate/pipeline/mob/review agents cannot
-  // receive a weaker, host-authored execution boundary.
-  const agentExecution: AgentExecutionPlan & { execution_policy: ExecutionPolicy; business_document_load_plan?: BusinessDocumentLoadPlan } = {
-    ...plannedAgentExecution,
-    execution_policy: executionPolicy,
-    ...(businessDocumentLoadPlan ? { business_document_load_plan: businessDocumentLoadPlan } : {}),
-  };
   return {
     kind: "run-stage",
     session_binding: binding,
@@ -5188,10 +5163,6 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
     name: nextStage.name,
     number: nextStage.number,
     phase: nextStage.phase,
-    lead_agent: nextStage.lead_agent,
-    support_agents: nextStage.support_agents,
-    mode: nextStage.mode,
-    agent_execution: agentExecution,
     execution_policy: executionPolicy,
     gate,
     approval: nextStage.approval,
@@ -5203,7 +5174,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
     choices: directiveChoices,
     diagram_format: diagramFormatOf(state),
     ...(providerDirective ? { provider_context: providerDirective.context, provider_actions: providerDirective.actions } : {}),
-    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, agentExecution, executionPolicy, opts.reportCommand?.(effectiveNextInstance), directiveChoices, providerHandoffPrompt(providerDirective, effectiveNextInstance)) + (businessDocumentLoadPlan ? `\nBusiness document load plan (${businessDocumentLoadPlan.mode}):\n${businessDocumentLoadPlan.files.map(f => `- ${f.path} (sha256 ${f.sha256})`).join("\n")}\nGates and business edits continue to use canonical requirements.md and user-stories.md.` : ""),
+    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, executionPolicy, opts.reportCommand?.(effectiveNextInstance), directiveChoices, providerHandoffPrompt(providerDirective, effectiveNextInstance)) + (businessDocumentLoadPlan ? `\nBusiness document load plan (${businessDocumentLoadPlan.mode}):\n${businessDocumentLoadPlan.files.map(f => `- ${f.path} (sha256 ${f.sha256})`).join("\n")}\nGates and business edits continue to use canonical requirements.md and user-stories.md.` : ""),
     ...(claimRequested ? { claimed: true, owner: state.active_instances[effectiveNextInstance.instance_id].owner, claim_expires_at: state.active_instances[effectiveNextInstance.instance_id].expires_at } : {}),
     ...extras,
   };
@@ -5279,7 +5250,7 @@ async function handleReport(args: string[]): Promise<Directive> {
   // gates (typically after evidence run --refresh) without changing workflow progress.
   const addressed = addressedInstance(flags, stageNode);
   if (stageNode && addressed && completedInstanceIds(state).includes(addressed)
-    && addressed !== state.current_stage_instance && !state.active_instances?.[addressed]) {
+    && addressed !== state.current_stage_instance) {
     return reattestInstance(state, stageNode, addressed, flags, graph, commit, extras);
   }
 
@@ -5574,6 +5545,7 @@ async function reattestInstance(
   commit: (value: WorkflowState) => void,
   extras: Record<string, unknown>,
 ): Promise<Directive> {
+  assertSessionClaim(PROJECT_ROOT, state, instanceId);
   const result = flags.result as StageResult;
   const userInput = flags["user-input"];
   if (result !== "completed" && result !== "approved") {
@@ -5784,6 +5756,10 @@ async function handleUpgrade(args: string[]): Promise<Directive> {
   const invalidFlag = unsupportedFlag(flags, UPGRADE_FLAGS);
   if (invalidFlag) return { kind: "error", message: `Unsupported upgrade option: --${invalidFlag}` };
   if (flags.text) return { kind: "error", message: `Unexpected upgrade argument: ${flags.text}` };
+  if ("retire-execution" in flags) {
+    if (flags["retire-execution"] !== "true" || (flags["dry-run"] && flags["dry-run"] !== "true")) throw new Error("retirement/dry-run flags must be boolean");
+    return retireExecutionCheckpoint(PROJECT_ROOT, flags.instance || "", flags["human-instruction-ref"] || "", "dry-run" in flags);
+  }
   if (!("dry-run" in flags)) {
     return { kind: "error", message: "orchestrate upgrade only supports --dry-run. Run it with --dry-run, then execute the listed recovery commands one instance at a time." };
   }
@@ -7826,6 +7802,7 @@ async function main() {
   }
 
   const readOnly = (cmd === "next" && (rest.includes("--status") || rest.includes("--preview")))
+    || (cmd === "upgrade" && (!rest.includes("--retire-execution") || rest.includes("--dry-run")))
     || (cmd === "state" && (!rest.length || ["plan", "rules", "evidence", "measurements", "verify"].includes(rest[0])))
     || (["baseline", "diagram-format", "profile"].includes(cmd) && !rest.some(arg => arg.startsWith("--") && !["--module", "--status"].includes(arg)));
   if (!readOnly) {
@@ -7839,7 +7816,7 @@ async function main() {
       const requested = parseFlags(rest);
       if (requested.module && (target.ref.kind !== "module" || target.ref.module_id !== requested.module) && loaded.split) throw new Error("requested module conflicts with exact session binding");
       if (cmd === "state" && ["recover", "adopt", "rebuild"].includes(rest[0])) throw new Error("recovery/adoption requires a separate quiescent maintenance handoff; active session ownership cannot be overwritten");
-      if (["archive", "split", "upgrade"].includes(cmd) && loaded.parts.size > 1) throw new Error("whole-project maintenance requires a separate quiescent workflow handoff; a session binding cannot grant sibling ownership");
+      if (["archive", "split", "upgrade"].includes(cmd) && loaded.parts.size > 1 && !(cmd === "upgrade" && rest.includes("--retire-execution"))) throw new Error("whole-project maintenance requires a separate quiescent workflow handoff; a session binding cannot grant sibling ownership");
     }
   }
   let directive: Directive;

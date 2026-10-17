@@ -13,9 +13,6 @@
         "single-module",
         "multi-module"
       ],
-      "lead_agent": "aidlc-architect-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -47,9 +44,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-product-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -84,9 +78,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-architect-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -122,9 +113,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-architect-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -161,9 +149,6 @@
       "execution": "CONDITIONAL",
       "selection": "user",
       "choices": [],
-      "lead_agent": "aidlc-product-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -202,9 +187,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-product-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -241,9 +223,6 @@
       "execution": "ALWAYS",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-architect-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -277,11 +256,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-developer-agent",
-      "support_agents": [
-        "aidlc-architect-agent"
-      ],
-      "mode": "pipeline",
       "scopes": [
         "feature",
         "enterprise",
@@ -316,9 +290,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-product-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -363,9 +334,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-product-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -403,9 +371,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-product-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -442,13 +407,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-product-agent",
-      "support_agents": [
-        "aidlc-design-agent",
-        "aidlc-quality-agent",
-        "aidlc-developer-agent"
-      ],
-      "mode": "mob",
       "scopes": [
         "feature",
         "enterprise",
@@ -499,9 +457,6 @@
         "figma-existing",
         "skip"
       ],
-      "lead_agent": "aidlc-design-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -531,9 +486,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-design-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -576,9 +528,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-design-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -608,9 +557,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-design-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -652,9 +598,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-design-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -697,9 +640,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-product-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -747,9 +687,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-architect-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -785,9 +722,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-architect-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -835,9 +769,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-architect-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -885,9 +816,6 @@
       "execution": "ALWAYS",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-product-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -927,9 +855,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-architect-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -977,9 +902,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-architect-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -1018,9 +940,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-architect-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -1060,9 +979,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-architect-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -1101,9 +1017,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-architect-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -1138,9 +1051,6 @@
       "execution": "ALWAYS",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-developer-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -1184,9 +1094,6 @@
       "execution": "ALWAYS",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-developer-agent",
-      "support_agents": [],
-      "mode": "delegate",
       "scopes": [
         "feature",
         "enterprise",
@@ -1233,43 +1140,6 @@
       "file": "stages/construction/construction-code-generation.md"
     },
     {
-      "slug": "subagent-execution",
-      "number": "3.5.2",
-      "name": "子代理执行",
-      "phase": "construction",
-      "axis": "unit",
-      "execution": "CONDITIONAL",
-      "selection": "automatic",
-      "choices": [],
-      "lead_agent": "aidlc-developer-agent",
-      "support_agents": [],
-      "mode": "inline",
-      "scopes": [
-        "feature",
-        "enterprise",
-        "mvp",
-        "classic"
-      ],
-      "requires": [
-        "code-generation"
-      ],
-      "cross_module_requires": [],
-      "scope_waived_requires": [],
-      "consumes": [],
-      "produces": [
-        ".aidlc/evidence/subagent-execution/{module-id}/{unit-id}/subagent-evidence.json"
-      ],
-      "sensors": [
-        "subagent-evidence",
-        "no-todo"
-      ],
-      "traceability": "not_applicable",
-      "completion_contract": "gated",
-      "condition": "has_subagent_support",
-      "approval": "notify",
-      "file": "stages/construction/construction-subagent-execution.md"
-    },
-    {
       "slug": "ui-implementation-bridge",
       "number": "3.5.4",
       "name": "UI 实现桥接",
@@ -1278,9 +1148,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-developer-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -1317,10 +1184,6 @@
       "execution": "ALWAYS",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-quality-agent",
-      "support_agents": [],
-      "mode": "review",
-      "reviewer_agent": "aidlc-quality-agent",
       "scopes": [
         "feature",
         "enterprise",
@@ -1373,9 +1236,6 @@
       "execution": "ALWAYS",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-quality-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -1424,9 +1284,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-quality-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -1464,9 +1321,6 @@
       "execution": "ALWAYS",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-developer-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -1510,9 +1364,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-developer-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -1547,9 +1398,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-operations-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -1587,9 +1435,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-operations-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -1628,9 +1473,6 @@
       "execution": "CONDITIONAL",
       "selection": "automatic",
       "choices": [],
-      "lead_agent": "aidlc-operations-agent",
-      "support_agents": [],
-      "mode": "inline",
       "scopes": [
         "feature",
         "enterprise",
@@ -1656,7 +1498,7 @@
       "file": "stages/operation/operations-templates.md"
     }
   ],
-  "stage_count": 39,
+  "stage_count": 38,
   "scopes": [
     "bugfix",
     "classic",
@@ -1679,7 +1521,6 @@
     "has_nfr_needs",
     "has_operations_template_needs",
     "has_product_contract_needs",
-    "has_subagent_support",
     "has_ui_requirements",
     "has_unit_generation_needs",
     "multi_module",

@@ -46,7 +46,7 @@ section("every producing not_applicable stage drops traceability but keeps no-to
 });
 
 section("the known 4 not_applicable stages are present and cleaned", () => {
-  const expected = ["tdd", "shared-contract-baseline", "subagent-execution", "compact-recovery"];
+  const expected = ["tdd", "shared-contract-baseline", "compact-recovery"];
   for (const slug of expected) {
     const stage = graph.stages.find((candidate) => candidate.slug === slug);
     assert.ok(stage, `stage ${slug} missing from compiled graph`);

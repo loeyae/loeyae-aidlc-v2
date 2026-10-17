@@ -6,7 +6,15 @@ import { join, resolve } from "node:path";
 import { applyExecutionProfile, classifyExecutionProfile } from "../core/tools/aidlc-execution-profile";
 import { advance, loadGraph, type StageGraph, type StageNode } from "../core/tools/aidlc-orchestrate";
 import { buildRuleLoadPlan } from "../core/tools/aidlc-rule-load-plan";
-import { createInitialState, saveWorkflowState } from "../core/tools/aidlc-light-state";
+import { createInitialState, saveWorkflowState, bindingFor, type WorkflowState } from "../core/tools/aidlc-light-state";
+import { fixtureEnvironment } from "./mars243_fixture_session";
+
+function authorizeFixture(state: WorkflowState, instance: string): void {
+  const now = new Date().toISOString();
+  const claim = { module_id: "global", stage_instance: instance, owner: "fixture", session_id: "fixture", generation: "fixture", claimed_at: now, heartbeat_at: now, expires_at: new Date(Date.now() + 600000).toISOString() };
+  state.active_instances[instance] = claim;
+  process.env.AIDLC_SESSION_BINDING = JSON.stringify(bindingFor(process.cwd(), state, claim));
+}
 
 const REPOSITORY = resolve(import.meta.dirname, "..");
 const CLI = join(REPOSITORY, "bin", "cli.ts");
@@ -97,9 +105,6 @@ function syntheticStage(overrides: Partial<StageNode> & Pick<StageNode, "slug">)
     execution: overrides.execution ?? "ALWAYS",
     selection: overrides.selection ?? "automatic",
     choices: overrides.choices ?? [],
-    lead_agent: overrides.lead_agent ?? "fixture-agent",
-    support_agents: overrides.support_agents ?? [],
-    mode: overrides.mode ?? "inline",
     scopes: overrides.scopes ?? ["bugfix"],
     requires: overrides.requires ?? [],
     cross_module_requires: overrides.cross_module_requires ?? [],
@@ -152,6 +157,7 @@ const malformedGraph: StageGraph = {
   ],
 };
 const malformedState = createInitialState("bugfix", "fixture", "malformed-plan", [], "Rule plan failure");
+authorizeFixture(malformedState, "unsafe-stage");
 let malformedCommitCount = 0;
 const malformedDirective = await advance(malformedGraph, {
   state: malformedState,
@@ -168,6 +174,7 @@ assert.equal(malformedCommitCount, 0, "failed rule-load planning must not commit
 assert.equal(malformedState.current_stage, "", "failed rule-load planning must not set current stage");
 
 const parkedMalformedState = createInitialState("bugfix", "fixture", "parked-malformed-plan", [], "Parked rule plan failure");
+authorizeFixture(parkedMalformedState, "unsafe-stage");
 parkedMalformedState.status = "parked";
 parkedMalformedState.current_stage = "previous-stage";
 parkedMalformedState.current_phase = "previous-phase";
@@ -195,6 +202,7 @@ const skippedThenConsumeGraph: StageGraph = {
   ],
 };
 const skippedThenConsumeState = createInitialState("bugfix", "fixture", "skip-then-consume", [], "Later gate failure");
+authorizeFixture(skippedThenConsumeState, "consume-fails");
 skippedThenConsumeState.execution_profile = lightweight;
 const skippedThenConsumeBefore = JSON.stringify(skippedThenConsumeState);
 let skippedThenConsumeCommitCount = 0;
@@ -216,6 +224,7 @@ const conditionSkip = syntheticStage({ slug: "condition-false", condition: "ui_d
 const invalidCondition = syntheticStage({ slug: "invalid-condition", condition: "not-a-registered-condition" });
 const conditionErrorGraph: StageGraph = { version: "fixture", stage_count: 2, stages: [conditionSkip, invalidCondition] };
 const conditionErrorState = createInitialState("bugfix", "fixture", "legacy-condition-error", [], "Legacy condition persistence");
+authorizeFixture(conditionErrorState, "invalid-condition");
 let conditionErrorCommits = 0;
 const conditionErrorDirective = await advance(conditionErrorGraph, {
   state: conditionErrorState,
@@ -236,6 +245,7 @@ const blockedGraph: StageGraph = {
   stages: [conditionSkip, syntheticStage({ slug: "blocked-after-skip", requires: ["missing-dependency"] })],
 };
 const blockedState = createInitialState("bugfix", "fixture", "legacy-blocked", [], "Legacy blocked persistence");
+authorizeFixture(blockedState, "blocked-after-skip");
 let blockedCommits = 0;
 const blockedDirective = await advance(blockedGraph, {
   state: blockedState,
@@ -249,6 +259,7 @@ const blockedDirective = await advance(blockedGraph, {
 assert.equal(blockedDirective.kind, "error");
 assert.equal(blockedCommits, 1, "legacy blocked path persists preceding condition skips");
 assert.ok(blockedState.skipped_stage_instances.includes("condition-false"));
+delete process.env.AIDLC_SESSION_BINDING;
 
 function git(project: string, args: string[]): void {
   const result = spawnSync("git", args, {
@@ -267,7 +278,7 @@ function git(project: string, args: string[]): void {
 }
 
 function run(project: string, args: string[]): Record<string, unknown> {
-  const result = spawnSync(process.execPath, [TSX, CLI, "orchestrate", ...args], { cwd: project, encoding: "utf8" });
+  const result = spawnSync(process.execPath, [TSX, CLI, "orchestrate", ...args], { cwd: project, encoding: "utf8", env: fixtureEnvironment(project, ["orchestrate", ...args]) });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   return JSON.parse(result.stdout) as Record<string, unknown>;
 }

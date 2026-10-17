@@ -3,7 +3,6 @@ slug: operations-authorization
 number: "4.2"
 name: 部署授权
 execution: CONDITIONAL
-lead_agent: aidlc-operations-agent
 scopes: [feature, enterprise, mvp]
 requires: [operations-planning]
 consumes:

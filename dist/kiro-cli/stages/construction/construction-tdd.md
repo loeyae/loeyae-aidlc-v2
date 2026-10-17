@@ -5,9 +5,6 @@ name: RED 测试门禁
 phase: construction
 axis: unit
 execution: ALWAYS
-lead_agent: aidlc-developer-agent
-support_agents: []
-mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes:
   - docs/aidlc/modules/{module-id}/inception/application-design/test-cases/
@@ -350,7 +347,7 @@ GREEN 测试不得回写为 RED 通过；两个阶段必须分别保留可机读
 - [ ] 看到每个测试在实现前失败
 - [ ] 每个测试因预期原因失败（功能缺失，不是拼写错误）
 - [ ] 写了最少代码让每个测试通过
-- [ ] 所有测试通过
+- [ ] 选定影响范围的必需测试全部通过（仍有效的受控证据可复用）
 - [ ] 输出干净（无错误、无警告）
 - [ ] 测试使用真实代码（mock 仅在不可避免时使用）
 - [ ] 边界情况和错误场景已覆盖

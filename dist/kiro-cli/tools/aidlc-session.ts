@@ -44,7 +44,7 @@ function validateInstance(root: string, instance: string): void {
 	);
 	const node = graph.stages.find(
 		(stage: { slug: string }) => stage.slug === instance.split("@", 1)[0],
-	);
+	) || (instance.startsWith("subagent-execution@") ? { slug: "subagent-execution", axis: "unit" } : undefined);
 	if (!node) throw new Error(`unknown stage instance: ${instance}`);
 	const module = /@module:([a-z0-9][a-z0-9-]*)/.exec(instance)?.[1];
 	const unit = /@unit:([a-z0-9][a-z0-9-]*)$/.exec(instance)?.[1];
@@ -58,6 +58,11 @@ function validateInstance(root: string, instance: string): void {
 		);
 	const state = loadWorkflowState(root, sessionRef(root, instance));
 	if (!state) throw new Error("target workflow does not exist");
+	const legacyRetiredCurrent = !state.current_stage_instance && state.current_stage === "subagent-execution"
+		&& state.current_module === module && (state.current_unit || "default") === unit;
+	if (node.slug === "subagent-execution" && !legacyRetiredCurrent && state.current_stage_instance !== instance && !state.active_instances[instance]
+		&& !state.completed_stage_instances.includes(instance) && !state.skipped_stage_instances.includes(instance)
+		&& !state.history.some(row => row.instance_id === instance)) throw new Error("retired stage can only bind an existing historical checkpoint for migration");
 	if (module && !verifiedModuleIds(root, state.scope).includes(module))
 		throw new Error(`unknown module: ${module}`);
 	if (unit) {
@@ -206,6 +211,24 @@ export interface WorkflowPublication {
 	ref: WorkflowRef;
 	instance: string;
 	binding: SessionBinding;
+}
+/** Independent module writers use the exact bound instance, never a merged view's
+ * current stage or another module's claim. Capture before computation and publish
+ * under the claim/transfer lock with publishScope. */
+export function captureModulePublication(root: string, moduleId: string): WorkflowPublication | undefined {
+	const ref = isSplitLayout(root) ? { kind: "module" as const, module_id: moduleId } : GLOBAL_WORKFLOW;
+	const state = loadWorkflowState(root, ref);
+	if (!state) {
+		if (loadWorkflowState(root) || sessionBinding()) throw new Error("target module has no active workflow; bind its exact scope before writing");
+		return undefined;
+	}
+	const binding = sessionBinding();
+	if (!binding || /@module:([a-z0-9][a-z0-9-]*)(?:@|$)/.exec(binding.stage_instance)?.[1] !== moduleId)
+		throw new Error("explicit session binding for the exact target module required");
+	if (binding.stage_instance.includes("@unit:")) throw new Error("module-wide publication requires a module-axis claim; a unit claim cannot expand its responsibility");
+	assertSessionClaim(root, state, binding.stage_instance, binding);
+	if (binding.stage_instance.startsWith("subagent-execution")) throw new Error("retired stage requires migration before managed publication");
+	return { ref, instance: binding.stage_instance, binding: structuredClone(binding) };
 }
 /** Independent Provider setup remains usable without a workflow; active workflow writes require its exact claim. */
 export function captureScopeSession(

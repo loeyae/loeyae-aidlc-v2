@@ -4,9 +4,6 @@ number: "3.7"
 name: 构建与测试
 phase: construction
 execution: ALWAYS
-lead_agent: aidlc-quality-agent
-support_agents: []
-mode: inline
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes:
   - src/
@@ -29,7 +26,7 @@ requires: [code-generation, code-review]
 ## 前置条件
 
 - 所有计划内单元已完成 GREEN 代码生成、两阶段审查，并具备可复核的 UC-D 测试质量证据
-- 最终全局审查已通过
+- C7 触发时，最终全局审查已通过
 - 已加载 `common-test-execution-strategy.md`
 
 ### 审查证据阻断（硬性，不可跳过）

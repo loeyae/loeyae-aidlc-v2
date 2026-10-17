@@ -5,10 +5,6 @@ name: 代码审查
 phase: construction
 axis: unit
 execution: ALWAYS
-lead_agent: aidlc-quality-agent
-support_agents: []
-mode: review
-reviewer_agent: aidlc-quality-agent
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes:
   - src/
@@ -28,7 +24,7 @@ requires: [code-generation]
 
 ## 概述
 
-派发独立审查者检查代码，在问题级联之前捕获它们。审查者获得精心构造的上下文进行评估——永远不是你的会话历史。
+检查代码并记录可追溯的审查结论，在问题级联之前捕获它们。宿主决定执行者和上下文；用户明确要求的独立审查按用户要求验收。
 
 **核心原则**：所有任务都检查 Spec 与 Standards；只让审查调用数量随风险增长。
 
@@ -71,7 +67,7 @@ requires: [code-generation]
 | 模式 | 调用标识 | 适用条件 | 执行方式 |
 |------|----------|----------|----------|
 | 集成双轴审查 | `INTEGRATED_DUAL_AXIS` | `common-complexity-assessment.md` 判定为简单快速通道，且为单单元、无快速通道排除项 | 同一审查上下文依次完成 Spec 与 Standards 检查，分别记录结论 |
-| 独立双轴审查 | `INDEPENDENT_DUAL_AXIS` | 中等/复杂流程，或多单元、跨组件/服务、契约/共享配置/数据所有权/安全边界风险 | Spec 与 Standards 使用独立视角或独立子 Agent，分别报告 |
+| 独立双轴审查 | `INDEPENDENT_DUAL_AXIS` | 中等/复杂流程，或多单元、跨组件/服务、契约/共享配置/数据所有权/安全边界风险 | Spec 与 Standards 分别形成结论；执行者与上下文由宿主决定 |
 | 最终全局审查 | `FINAL_GLOBAL` | 满足本文件“最终全局审查”触发条件 | 按最终全局审查清单执行一次跨单元审查 |
 
 调用标识是编排方向 `aidlc-code-review` 传入审查模式的唯一取值来源。
@@ -104,7 +100,7 @@ requires: [code-generation]
 
 ## 独立双轴审查流程
 
-> 本节适用于独立双轴审查。集成模式使用相同检查维度和结果格式，但在一次审查上下文中依次完成两轴，不再派发第二个审查者。
+> 本节适用于独立双轴审查。集成模式使用相同检查维度和结果格式，两轴均须分别形成可追溯结论；宿主自行组织执行者与上下文。
 
 ### Standards Axis：代码质量审查
 
@@ -343,8 +339,6 @@ requires: [code-generation]
 ```markdown
 ## 代码审查 — 单元 X
 **审查模式**: 集成双轴审查
-**execution_context**: isolated
-**review_only**: true
 **Spec 结果**: ✅ 合规 | ❌ 不合规
 **Standards 结果**: ✅ 通过 | ⚠️ 需要修复
 **证据**: [各轴的规格引用与代码引用]
@@ -357,8 +351,6 @@ requires: [code-generation]
 ## 代码审查 — 单元 X
 **时间戳**: [ISO 时间戳]
 **审查模式**: 双轴独立审查
-**execution_context**: isolated
-**review_only**: true
 **Standards 结果**: ✅ 通过 | ⚠️ 需要修复
 **Spec 结果**: ✅ 合规 | ❌ 不合规
 **Standards 问题**: 关键 X 个, 重要 Y 个（Smells Z 个）, 建议 W 个
@@ -526,7 +518,7 @@ echo "已覆盖: $HIT / $TOTAL"
 
 ### 审查记录
 
-**必填声明（review 模式）**：本阶段为 `mode: review`，审查记录（`code-review.md` 或 `audit/` 下的审计文件）必须各占一行显式声明 `execution_context: isolated` 与 `review_only: true`。`review-evidence` 内置 checker 只在记录声明时输出这两个字段，`reviewer_agent` 取自阶段元数据（`aidlc-quality-agent`）；缺少声明或声明值不符（如 `execution_context: inline`）时门禁拒绝，不会自动补全。
+审查必须保留真实记录及 Spec/Standards 两轴结论。默认不要求执行方式、固定 reviewer persona 或隔离上下文声明；用户明确提出的独立审查约束仍适用。
 
 **源码根**：`consumes` 中的 `src/` 是源码根的规范占位，按 `module-manifest` 的 `paths` → `.aidlc/source-roots.json` → 默认 `src/` 解析（见 `construction-code-generation.md`“源码根解析”）。
 
@@ -536,8 +528,6 @@ echo "已覆盖: $HIT / $TOTAL"
 ## 代码审查 — 单元 X
 **时间戳**: [ISO 时间戳]
 **审查模式**: 双轴独立审查
-**execution_context**: isolated
-**review_only**: true
 **Standards 结果**: ⚠️ 需要修复
 **Spec 结果**: ✅ 合规
 **Standards 问题**: 关键 0 个, 重要 2 个（Smells 1 个）, 建议 1 个

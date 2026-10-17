@@ -189,9 +189,9 @@ try {
   write(`${construction}/audit.md`, "# 审计 — 单元 default\n\n代码审查（REQ-001 / UC-D-001）结论：passed，Spec 与 Standards 均通过，无需修复。\n");
   ok(["orchestrate", "report", "--stage", "code-review", "--result", "completed"]);
   const reviewEvidence = JSON.parse(readFileSync(join(project, ".aidlc/evidence/code-review/project/default/review-evidence.json"), "utf8"));
-  assert.equal(reviewEvidence.reviewer_agent, "aidlc-quality-agent");
-  assert.equal(reviewEvidence.execution_context, "isolated");
-  assert.equal(reviewEvidence.review_only, true);
+  assert.equal("reviewer_agent" in reviewEvidence, false);
+  assert.equal("execution_context" in reviewEvidence, false);
+  assert.equal("review_only" in reviewEvidence, false);
 
   // Project-axis build-and-test: test-quality must not demand a module (D2).
   refresh("code-generation@module:project@unit:default");

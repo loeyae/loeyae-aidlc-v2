@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { realpathSync } from "fs";
+import { hostname } from "os";
 import { COMMIT_ID_PATTERN } from "./aidlc-revision";
 import {
   assertExecutionProfile,
@@ -818,14 +819,38 @@ function acquireLock(path: string): number {
   const started = Date.now();
   while (true) {
     try {
-      return openSync(path, "wx", 0o600);
+      const fd = openSync(path, "wx", 0o600);
+      try { writeFileSync(fd, JSON.stringify({ version: 1, pid: process.pid, hostname: hostname(), lock_id: randomUUID() })); }
+      catch (error) { closeSync(fd); unlinkSync(path); throw error; }
+      return fd;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (Date.now() - statSync(path).mtimeMs > LOCK_STALE_MS) {
-        unlinkSync(path);
-        continue;
+      // Age alone is never proof that a publication lock is abandoned. Serialize
+      // dead-owner recovery so two recoverers cannot unlink a replacement lock.
+      const recoveryPath = `${path}.recovery`;
+      let recovery: number | undefined;
+      try {
+        if (Date.now() - statSync(path).mtimeMs > LOCK_STALE_MS) {
+          try { recovery = openSync(recoveryPath, "wx", 0o600); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+          if (recovery !== undefined && existsSync(path)) {
+            let dead = false;
+            try {
+              const owner = JSON.parse(readFileSync(path, "utf8"));
+              if (owner.version === 1 && owner.hostname === hostname() && Number.isSafeInteger(owner.pid) && owner.pid > 0 && typeof owner.lock_id === "string") {
+                try { process.kill(owner.pid, 0); }
+                catch (error) { dead = (error as NodeJS.ErrnoException).code === "ESRCH"; }
+              }
+            } catch { /* Legacy, remote or incomplete ownership is unknown: fail closed. */ }
+            if (dead) unlinkSync(path);
+          }
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      } finally {
+        if (recovery !== undefined) { closeSync(recovery); unlinkSync(recoveryPath); }
       }
-      if (Date.now() - started > LOCK_WAIT_MS) throw new Error(`timed out waiting for workflow lock: ${path}`);
+      if (Date.now() - started > LOCK_WAIT_MS) throw new Error(`timed out waiting for workflow lock: ${path}; live/unknown ownership is never stolen by age; legacy or interrupted recovery locks require a quiescent ownership check`);
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
     }
   }

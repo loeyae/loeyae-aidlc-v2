@@ -1351,7 +1351,7 @@ Quality and utilities:
   quality metrics [--module <module-id>]     Read-only quality coverage and return-defect metrics
   evidence run --stage <slug> [flags]       Produce controlled evidence (--module/--unit, --refresh for completed stages)
   attest resolve [flags]                     Read-only commit/diff attribution
-  agent describe|plan|validate-result [args]          Inspect agent persona, execution plan or result contract
+  agent [args]                                      Retired compatibility entry (host owns execution)
   provider add|list|status|update|enable|disable|remove [args]  Manage project-level locked Git Providers
   provider add <git-url> --stage <slug> --capability <id> [...]  Install with an explicit project binding
   provider probe|run|gate [args]                       Probe restricted-v1, execute a Plan node, and issue GateDecision

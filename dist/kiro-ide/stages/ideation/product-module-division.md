@@ -3,7 +3,6 @@ slug: module-division
 number: "1.2"
 name: 模块划分
 execution: CONDITIONAL
-lead_agent: aidlc-architect-agent
 scopes: [feature, enterprise, mvp, classic]
 requires: [product-inception]
 produces:

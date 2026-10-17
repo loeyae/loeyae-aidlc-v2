@@ -139,7 +139,7 @@ loeyae-aidlc unit select \
 
 ### 模块自主推进与整体进度聚合（4.13.3，MARS-133）
 
-`conductor-only` 按 **WorkflowRef** 生效，不是顶层父议题独占整个项目：single layout 只有 global workflow；split layout 的 global、每个 module、integration 各有一个 owning conductor。`module-division` 完成后，模块负责人可直接推进自己的模块，首次 `next --module` 会透明建立 per-module 布局：
+受管写入资格按 **WorkflowRef** 的精确 session 领取生效：single layout 只有 global workflow；split layout 的 global、每个 module、integration 分别维护领取资格。`module-division` 完成后，模块负责人可直接推进自己的模块，首次 `next --module` 会透明建立 per-module 布局：
 
 ```bash
 loeyae-aidlc orchestrate next --module module-a
@@ -147,7 +147,7 @@ loeyae-aidlc orchestrate report --stage <slug> --module module-a --result comple
 loeyae-aidlc orchestrate park --module module-a
 ```
 
-模块只因真实 `requires`、consumes/produces、sensor/evidence、用户审批或 integration barrier 阻塞，不因等待父议题代报而阻塞。`next --status` 每次从所有 module state 动态计算完成度、共享契约与 integration barrier；推进模块无需改写 identity-only `registry.md` 或让父议题手工放行。被 owning conductor 派发的 execution/review agent 仍只返回结构化结果，不得写 state/audit、代审批或直接 report。
+模块只因真实 `requires`、consumes/produces、sensor/evidence、用户审批或 integration barrier 阻塞，不因等待父议题代报而阻塞。`next --status` 每次从所有 module state 动态计算完成度、共享契约与 integration barrier；推进模块无需改写 identity-only `registry.md` 或让父议题手工放行。所有受管发布与 state/audit 写入均要求当前精确 workflow/session/generation 领取；人类显式交接后旧会话不能再写。执行者和委派方式由宿主决定。
 
 ### 工作流 lineage 保护（4.13.0）
 
@@ -175,24 +175,13 @@ loeyae-aidlc orchestrate state recover --module <id> [--user-input Approve --rea
 - split 布局每模块独立 state 文件，天然去争用：两人推进不同模块不会触碰同一文件（无共享时间戳 / Revision 行可撞）。
 - `.gitattributes` / `.gitignore` 属引擎基础设施，不参与证据 provenance digest，下发它们不会使任何证据失效。
 
-## Agent 执行
+## 宿主执行边界
 
-每个 directive 可携带 `agent_execution`：它声明 primary persona、support/reviewer、执行模式和结构化结果契约。
+AI-DLC 负责阶段依赖、适用范围、产物与追溯、真实证据、质量验收、用户审批和精确会话领取。宿主自行决定执行者、模型、会话、上下文、并行及委派。单会话可完成同一流程，宿主自行委派时不增加子代理结果格式、结果目录或补走阶段。
 
-- `inline`：conductor 在当前会话加载 persona；
-- `delegate`：宿主支持时派发独立实现 agent，否则明确回退 inline；
-- `pipeline`：按步骤传递结构化结果；
-- `mob`：多个 persona 独立贡献后由 conductor 整合；
-- `review`：独立 reviewer 只读审查，不编辑业务产物。
+正式 directive 顶层保留 `execution_policy` 与 `requires/consumes/produces/sensors/approval`，不再输出 `agent_execution`、lead/support/reviewer persona 或执行模式。审查保留 Spec/Standards 两轴及条件触发的全局审查；默认不要求额外 reviewer 或隔离上下文。用户明确要求的独立审查仍按用户要求验收。
 
-persona 位于 `agents/`，执行计划可检查：
-
-```bash
-loeyae-aidlc agent plan --stage code-generation
-loeyae-aidlc agent validate-result result.json
-```
-
-无论执行模式如何，只有**当前 WorkflowRef 的 owning conductor**可以更新其 Markdown state/audit、报告阶段和接受审批；split 后模块负责人可作为本模块 conductor。被派发的 execution/review agent 不得直接 report、代用户审批或执行 merge/push。
+`subagent-execution`、`subagent-evidence` 和 `agent plan/validate-result` 已退休；历史日志不参与门禁。迁移不会补记真实阶段完成或批准决策。详见 [MARS-244 迁移与宿主适配](docs/optimization-notes/mars244-process-boundary-migration.md)。
 
 ## 阶段推进
 
@@ -284,7 +273,7 @@ loeyae-aidlc ui reverify --module <module-id> --route <route> --review-report <p
 - 阶段图中的 `src/` 是源码根的规范占位，按 module-manifest `paths` → `.aidlc/source-roots.json`（`{ "version": "1", "source_roots": ["app", "web/src"] }`）→ 默认 `src/` 解析，适用于 Python 等不使用 `src/` 的项目。
 - 嵌套独立 git 仓库（4.9.0）：业务代码放在被工作流仓库忽略的子仓库（如 `app/` 自带 `.git`）时，在 `source-roots.json` 中写 `{ "path": "app", "repo": "nested" }`（只在这里声明；module-manifest `paths` 不接受对象条目，manifest 管模块归属，source-roots 管仓库拓扑）。声明会被 fail-closed 校验（是仓库根、无符号链接/junction、不互相包含、工作流仓库不跟踪其中文件）。characterization code ref、BASELINE 的 `git hash-object` 与 blob 解析都在子仓库内执行；基线在 `- Baseline Repos: app=<sha>` 里为每个嵌套仓库记录 commit，`baseline_commit` 始终是工作流仓库的 commit；证据的 `source_revision.repos` 记录各子仓库的 commit / dirty / digest，子仓库代码漂移会被发现。`--set` 默认取各子仓库干净的 HEAD（或 `--repo app=<sha>`），`--advance` 必须为每个嵌套仓库显式写 `--repo app=<sha>` 与 `--expect-repo app=<当前 sha>`。已有工作流声明后执行一次受限迁移：`loeyae-aidlc orchestrate baseline --set <当前 commit> --replace --expect <当前 commit> --repo app=<sha> --user-input Approve --reason "<原因>"`（基线已使用或已推进也可以，只补登尚未登记的仓库；`orchestrate baseline` 会打印这条命令）。涉及嵌套仓库的 `attest resolve`、`worktree prepare/merge-plan` 明确拒绝，不涉及的照旧。
 - 构建/测试/检查命令清单按 `--config` → `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找；RED/GREEN 命令清单只按 `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找，显式 `--config` 仅在指向同一文件时被接受，否则 producer 直接拒绝。文件中的 `stage` 必须与当前阶段一致。
-- `mode: review` 的代码审查记录须声明 `execution_context: isolated` 与 `review_only: true`。
+- 代码审查记录须包含真实 reviewer、Spec/Standards 两轴、审查文件和问题关闭结果；执行者数量和上下文由宿主决定。
 
 ### 新行为与存量行为（RED / BASELINE / GREEN）
 

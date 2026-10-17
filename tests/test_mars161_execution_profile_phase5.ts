@@ -7,6 +7,7 @@ import { applyExecutionProfile, classifyExecutionProfile } from "../core/tools/a
 import { buildEvidenceReusePlan } from "../core/tools/aidlc-evidence-reuse-plan";
 import { loadGraph, type StageGraph, type StageNode } from "../core/tools/aidlc-orchestrate";
 import { buildRuleLoadPlan } from "../core/tools/aidlc-rule-load-plan";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 
 const NOW = "2026-10-14T12:00:00.000Z";
 const root = mkdtempSync(join(tmpdir(), "aidlc-mars161-phase5-"));
@@ -18,8 +19,7 @@ function stage(overrides: Partial<StageNode> & Pick<StageNode, "slug">): StageNo
   return {
     slug: overrides.slug, number: overrides.number ?? "1", name: overrides.name ?? overrides.slug,
     phase: overrides.phase ?? "fixture", axis: overrides.axis ?? "project", execution: overrides.execution ?? "ALWAYS",
-    selection: overrides.selection ?? "automatic", choices: overrides.choices ?? [], lead_agent: overrides.lead_agent ?? "fixture",
-    support_agents: overrides.support_agents ?? [], mode: overrides.mode ?? "inline", scopes: overrides.scopes ?? ["bugfix"],
+    selection: overrides.selection ?? "automatic", choices: overrides.choices ?? [], scopes: overrides.scopes ?? ["bugfix"],
     requires: overrides.requires ?? [], cross_module_requires: overrides.cross_module_requires ?? [], scope_waived_requires: overrides.scope_waived_requires ?? [],
     consumes: overrides.consumes ?? [], produces: overrides.produces ?? [], sensors: overrides.sensors ?? [], traceability: overrides.traceability ?? "not_applicable",
     completion_contract: overrides.completion_contract ?? "gated", condition: overrides.condition ?? "", approval: overrides.approval ?? "notify",
@@ -138,7 +138,7 @@ try {
     assert.equal(result.status, 0, result.stderr);
   }
   const run = (args: string[]): Record<string, unknown> => {
-    const result = spawnSync(process.execPath, [tsx, cli, "orchestrate", ...args], { cwd: project, encoding: "utf8" });
+    const result = spawnSync(process.execPath, [tsx, cli, "orchestrate", ...args], { cwd: project, encoding: "utf8", env: fixtureEnvironment(project, ["orchestrate", ...args]) });
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
     return JSON.parse(result.stdout) as Record<string, unknown>;
   };
