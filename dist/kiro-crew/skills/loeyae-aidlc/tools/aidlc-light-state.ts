@@ -862,6 +862,8 @@ function appendAudit(projectRoot: string, state: WorkflowState, ref: WorkflowRef
   appendFileSync(path, `## ${new Date().toISOString()}\n- Event: STATE_UPDATED\n- Revision: ${state.revision}\n- Work: ${clean(state.work_description)}\n${state.workflow_kind ? `- Workflow: ${workflowRefKey(ref)}\n` : ""}- Current Instance: ${cell(state.current_stage_instance)}\n- Active Instances: ${Object.keys(state.active_instances || {}).sort().join(", ") || "-"}\n- Instance Owners: ${Object.values(state.active_instances || {}).map((claim) => `${claim.stage_instance}=${claim.owner}`).sort().join(", ") || "-"}\n- Session Claims: ${Object.values(state.active_instances || {}).map(claim => `${claim.stage_instance}=${claim.session_id || "legacy"}/${claim.generation || "legacy"};${claim.handoff || ""}`).join("; ")}\n- Status: ${state.status}\n\n`, "utf8");
 }
 
+const initializationAudits = new Set<string>();
+
 export function appendAuditEvent(projectRoot: string, ref: WorkflowRef, event: string, fields: Record<string, string>): void {
   const append = (): void => {
   const path = lightAuditPath(projectRoot, ref);
@@ -870,6 +872,7 @@ export function appendAuditEvent(projectRoot: string, ref: WorkflowRef, event: s
   appendFileSync(path, `## ${new Date().toISOString()}\n- Event: ${clean(event)}\n${lines}${lines ? "\n" : ""}\n`, "utf8");
 
   };
+  if (initializationAudits.has(lightStatePath(projectRoot, ref))) { append(); return; }
   const state = loadWorkflowState(projectRoot, ref);
   const binding = sessionBinding();
   if (state && (binding || state.current_stage_instance || Object.keys(state.active_instances || {}).length)) {
@@ -960,14 +963,25 @@ export function saveWorkflowState(projectRoot: string, state: WorkflowState, ref
   const path = lightStatePath(projectRoot, ref);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const lock = acquireLock(`${path}.lock`);
+  try {
+    persistWorkflowState(projectRoot, state, ref, options);
+  } finally {
+    closeSync(lock);
+    if (existsSync(`${path}.lock`)) unlinkSync(`${path}.lock`);
+  }
+}
+
+/** Private writer: its caller owns the exact state lock. */
+function persistWorkflowState(projectRoot: string, state: WorkflowState, ref: WorkflowRef, options: SaveWorkflowOptions, initialization = false): void {
+  const path = lightStatePath(projectRoot, ref);
   const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
   try {
     const existing = loadWorkflowState(projectRoot, ref);
-    if (!existing && sessionBinding()) throw new Error("clear an unrelated session binding before initializing a workflow");
+    if (!existing && sessionBinding() && !initialization) throw new Error("clear an unrelated session binding before initializing a workflow");
     if (existing && existing.revision !== state.revision) throw new Error(`workflow state revision conflict: expected ${state.revision}, found ${existing.revision}`);
     if (!existing && state.revision !== 0 && !options.adoptRevision) throw new Error(`workflow state is missing at revision ${state.revision}`);
     if (existing && options.adoptRevision) throw new Error("an adopted workflow state cannot overwrite an existing state");
-    if (existing && options.claimWrite !== CLAIM_TRANSACTION) assertSessionMutation(projectRoot, existing, state);
+    if (existing && options.claimWrite !== CLAIM_TRANSACTION && !initialization) assertSessionMutation(projectRoot, existing, state);
     assertBaselinePreserved(existing, state, ref, options);
     const next = { ...state, version: ENGINE_VERSION, revision: state.revision + 1, updated_at: new Date().toISOString() };
     appendAudit(projectRoot, next, ref);
@@ -981,9 +995,108 @@ export function saveWorkflowState(projectRoot: string, state: WorkflowState, ref
     }
   } finally {
     if (existsSync(temporary)) unlinkSync(temporary);
-    closeSync(lock);
-    if (existsSync(`${path}.lock`)) unlinkSync(`${path}.lock`);
   }
+}
+
+/**
+ * A single-layout split (or new child of an existing global workflow) is an
+ * initialization transaction, not a session claiming every child. The caller
+ * supplies the complete, precomputed family; no public save option bypasses the
+ * normal guard. Source CAS and ownership are checked again AFTER taking its lock.
+ * Every destination remains locked through publication, source commit and rollback.
+ */
+export function withWorkflowInitialization<T>(
+  projectRoot: string,
+  expected: WorkflowState,
+  plans: { ref: WorkflowRef; state: WorkflowState }[],
+  publish: (commitSource: () => void) => T,
+): T {
+  projectRoot = realpathSync(projectRoot);
+  plans = structuredClone(plans);
+  const binding = sessionBinding();
+  const sourcePath = lightStatePath(projectRoot);
+  if (!binding) throw new Error("explicit session binding required for workflow initialization");
+  const sourcePlan = plans.find(item => item.ref.kind === "global");
+  if (!sourcePlan || sourcePlan.state.workflow_id !== expected.workflow_id) throw new Error("initialization requires the exact global source");
+  const children = plans.filter(item => item.ref.kind !== "global");
+  if (!children.length || new Set(plans.map(item => item.state.workflow_id)).size !== plans.length) throw new Error("initialization requires distinct child workflows");
+  const paths = [sourcePath, ...children.map(item => lightStatePath(projectRoot, item.ref)).sort()];
+  if (new Set(paths).size !== plans.length) throw new Error("duplicate workflow initialization target");
+  const locks: { path: string; fd: number }[] = [];
+  const before = new Map<string, Buffer | undefined>();
+  try {
+    for (const path of paths) {
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+      if (realpathSync(dirname(path)) !== dirname(path)) throw new Error(`workflow initialization cannot follow a symlinked target directory: ${path}`);
+      locks.push({ path, fd: acquireLock(`${path}.lock`) });
+    }
+    const source = loadWorkflowState(projectRoot);
+    if (!source || source.workflow_id !== expected.workflow_id || source.revision !== expected.revision) throw new Error("workflow initialization revision conflict; reread before retrying");
+    assertSessionClaim(projectRoot, source, binding!.stage_instance, binding);
+    const redistributed = new Set(["workflow_kind", "current_phase", "current_stage", "current_stage_instance", "current_module", "current_unit", "completed_stages", "skipped_stages", "completed_stage_instances", "skipped_stage_instances", "history", "active_instances", "module_selections", "unit_selections", "status", "retired_lineages"]);
+    for (const key of new Set([...Object.keys(source), ...Object.keys(sourcePlan.state)])) {
+      if (!redistributed.has(key) && JSON.stringify(source[key as keyof WorkflowState]) !== JSON.stringify(sourcePlan.state[key as keyof WorkflowState])) throw new Error(`initialization cannot change source field ${key}`);
+    }
+    // Redistribution can move records, never invent/drop approvals, stage results,
+    // claims or selections. The ordinary session guard remains in force elsewhere.
+    for (const key of ["completed_stage_instances", "skipped_stage_instances", "history"] as const) {
+      const entries = (values: unknown[]) => values.map(value => JSON.stringify(value)).sort();
+      if (JSON.stringify(entries(source[key])) !== JSON.stringify(entries(plans.flatMap(item => item.state[key] as unknown[])))) throw new Error(`initialization must preserve ${key}`);
+    }
+    for (const key of ["active_instances", "module_selections", "unit_selections"] as const) {
+      const entries = (records: Record<string, unknown>[]) => records.flatMap(record => Object.entries(record || {}).map(([name, value]) => JSON.stringify([name, value]))).sort();
+      if (JSON.stringify(entries([source[key] || {}])) !== JSON.stringify(entries(plans.map(item => item.state[key] || {})))) throw new Error(`initialization must preserve ${key}`);
+    }
+    if ((source.retired_lineages || []).some(id => !sourcePlan.state.retired_lineages?.includes(id))) throw new Error("initialization cannot unretire a lineage");
+    if (Object.values(source.active_instances).some(claim => claim.stage_instance !== binding!.stage_instance && claim.session_id && Date.parse(claim.expires_at) > Date.now())) {
+      throw new Error("workflow initialization requires a quiescent source; another session still owns a claim");
+    }
+    for (const item of children) {
+      if (item.state.revision !== 0 || item.state.parent_workflow_id !== source.workflow_id || item.state.workflow_id === source.workflow_id || item.state.workflow_kind !== item.ref.kind) throw new Error("invalid child workflow initialization plan");
+      if (item.ref.kind === "module" && item.state.module_id !== item.ref.module_id) throw new Error("child workflow module identity conflicts with its target");
+      const path = lightStatePath(projectRoot, item.ref);
+      if (existsSync(path)) throw new Error(`workflow initialization target already exists: ${path}`);
+    }
+    // Snapshot only while holding all corresponding locks. Existing audit bytes
+    // belong to their owner and must survive both initialization and failures.
+    for (const item of plans) for (const path of [lightStatePath(projectRoot, item.ref), lightAuditPath(projectRoot, item.ref)]) {
+      if (existsSync(path) && (!lstatSync(path).isFile() || lstatSync(path).isSymbolicLink())) throw new Error(`initialization target must be a regular file: ${path}`);
+      before.set(path, existsSync(path) ? readFileSync(path) : undefined);
+    }
+    let committed = false;
+    publicationLocks.set(sourcePath, binding!);
+    for (const path of paths) initializationAudits.add(path);
+    try {
+      for (const item of children) persistWorkflowState(projectRoot, item.state, item.ref, {}, true);
+      const result = publish(() => {
+        if (committed) throw new Error("source initialization already committed");
+        // Expiry is still checked immediately before the final source write.
+        assertSessionClaim(projectRoot, loadWorkflowState(projectRoot)!, binding!.stage_instance, binding);
+        persistWorkflowState(projectRoot, sourcePlan.state, GLOBAL_WORKFLOW, {}, true);
+        committed = true;
+      });
+      if (!committed) throw new Error("workflow initialization did not commit its source");
+      return result;
+    } finally {
+      publicationLocks.delete(sourcePath);
+      for (const path of paths) initializationAudits.delete(path);
+    }
+  } catch (error) {
+    for (const [path, bytes] of before) {
+      if (bytes === undefined) { if (existsSync(path)) unlinkSync(path); }
+      else writeFileSync(path, bytes);
+    }
+    throw error;
+  } finally {
+    for (const { path, fd } of locks.reverse()) { closeSync(fd); unlinkSync(`${path}.lock`); }
+  }
+}
+
+/** Registry publication uses the same dead-owner-safe lock implementation. */
+export function withWorkflowFileLock<T>(path: string, publish: () => T): T {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const fd = acquireLock(`${path}.lock`);
+  try { return publish(); } finally { closeSync(fd); unlinkSync(`${path}.lock`); }
 }
 
 export function updateWorkflowState(projectRoot: string, mutate: (state: WorkflowState) => void, retries = 3, ref: WorkflowRef = GLOBAL_WORKFLOW): WorkflowState {

@@ -15,7 +15,7 @@
  * and contract columns are projections the engine refreshes after every write.
  */
 
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, lstatSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { readModuleManifest, readUnitManifest, type ModuleDescriptor } from "./aidlc-execution-context";
@@ -27,6 +27,7 @@ import {
   markdownScalar,
   markdownTable,
   workflowRefKey,
+  withWorkflowFileLock,
   type HistoryEntry,
   type WorkflowRef,
   type WorkflowState,
@@ -36,8 +37,6 @@ import { nestedSourceRepos } from "./aidlc-nested-repos";
 
 const TOOL_DIR = dirname(fileURLToPath(import.meta.url));
 const GRAPH_PATH = join(TOOL_DIR, "data", "stage-graph.json");
-const LOCK_WAIT_MS = 3_000;
-const LOCK_STALE_MS = 30_000;
 
 /** Project-level roots written only by integration-owned stages. */
 const INTEGRATION_ROOTS = ["docs/aidlc/construction/", "docs/aidlc/operation/"];
@@ -265,25 +264,27 @@ export function loadRegistry(projectRoot: string): WorkflowRegistry | null {
   return parseRegistry(readFileSync(path, "utf8"));
 }
 
-function acquireLock(path: string): number {
-  const started = Date.now();
-  while (true) {
-    try {
-      return openSync(path, "wx", 0o600);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (Date.now() - statSync(path).mtimeMs > LOCK_STALE_MS) {
-        unlinkSync(path);
-        continue;
-      }
-      if (Date.now() - started > LOCK_WAIT_MS) throw new Error(`timed out waiting for registry lock: ${path}`);
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-    }
-  }
-}
-
 export function saveRegistry(projectRoot: string, registry: WorkflowRegistry): void {
   updateRegistry(projectRoot, () => registry, true);
+}
+
+const registryPublications = new Set<string>();
+
+/** Retain the registry lock through a family initialization and its rollback. */
+export function withRegistryPublication<T>(projectRoot: string, publish: () => T): T {
+  const path = registryPath(projectRoot);
+  if (registryPublications.has(path)) return publish();
+  return withWorkflowFileLock(path, () => {
+    if (existsSync(path) && (!lstatSync(path).isFile() || lstatSync(path).isSymbolicLink())) throw new Error("workflow registry must be a regular non-symlink file");
+    const before = existsSync(path) ? readFileSync(path) : undefined;
+    registryPublications.add(path);
+    try { return publish(); }
+    catch (error) {
+      if (before === undefined) { if (existsSync(path)) unlinkSync(path); }
+      else writeFileSync(path, before);
+      throw error;
+    } finally { registryPublications.delete(path); }
+  });
 }
 
 /**
@@ -292,24 +293,22 @@ export function saveRegistry(projectRoot: string, registry: WorkflowRegistry): v
  */
 export function updateRegistry(projectRoot: string, mutate: (current: WorkflowRegistry | null) => WorkflowRegistry, allowCreate = false): WorkflowRegistry {
   const path = registryPath(projectRoot);
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const lock = acquireLock(`${path}.lock`);
-  const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    const current = loadRegistry(projectRoot);
-    if (!current && !allowCreate) throw new Error("workflow registry is missing; run orchestrate split first");
-    const next = { ...mutate(current), updated_at: new Date().toISOString() };
-    // 4.13.0: identity-only file; an unchanged identity leaves it byte-for-byte untouched.
-    const rendered = renderRegistry(next);
-    if (current && readFileSync(path, "utf8").replace(/\r\n/g, "\n") === rendered) return next;
-    writeFileSync(temporary, rendered, { encoding: "utf8", flag: "wx", mode: 0o600 });
-    renameSync(temporary, path);
-    return next;
-  } finally {
-    if (existsSync(temporary)) unlinkSync(temporary);
-    closeSync(lock);
-    if (existsSync(`${path}.lock`)) unlinkSync(`${path}.lock`);
-  }
+  return withRegistryPublication(projectRoot, () => {
+    const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
+    try {
+      const current = loadRegistry(projectRoot);
+      if (!current && !allowCreate) throw new Error("workflow registry is missing; run orchestrate split first");
+      const next = { ...mutate(current), updated_at: new Date().toISOString() };
+      // 4.13.0: identity-only file; an unchanged identity leaves it byte-for-byte untouched.
+      const rendered = renderRegistry(next);
+      if (current && readFileSync(path, "utf8").replace(/\r\n/g, "\n") === rendered) return next;
+      writeFileSync(temporary, rendered, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      renameSync(temporary, path);
+      return next;
+    } finally {
+      if (existsSync(temporary)) unlinkSync(temporary);
+    }
+  });
 }
 
 export function relativeStatePath(projectRoot: string, ref: WorkflowRef): string {
