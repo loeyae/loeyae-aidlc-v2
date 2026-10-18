@@ -1,9 +1,14 @@
-import { readFileSync, statSync } from "fs";
+import { readFileSync } from "fs";
 import { extname } from "path";
 
 /** Presence is not compilation/semantic validation; those remain stage sensors. */
 export function substantiveArtifact(path: string, source = false): boolean {
   const text = readFileSync(path, "utf8");
+  return substantiveText(path, text, source);
+}
+
+/** The same content rule for a verified baseline blob, without a temporary file. */
+export function substantiveText(path: string, text: string, source = false): boolean {
   if (text.includes("\0")) return false;
   const extension = extname(path).toLowerCase();
   const config = [".json", ".yaml", ".yml", ".toml", ".ini", ".env"].includes(extension);
@@ -21,6 +26,6 @@ export function substantiveArtifact(path: string, source = false): boolean {
   if (!body || /^(?:TODO|FIXME|TBD|placeholder|待补充|待实现|\.\.\.|…)[\s.!。]*$/i.test(body)) return false;
   if (source || config) return true;
   // Documents retain a substantive size floor and cannot consist only of headings.
-  return statSync(path).size >= 16 && !!text.split(/\r?\n/)
+  return Buffer.byteLength(text) >= 16 && !!text.split(/\r?\n/)
     .filter(line => !/^\s*(?:#{1,6}\s|<!--|$)/.test(line)).join("\n").trim();
 }

@@ -188,7 +188,7 @@ unit_refs: [u1, u2]          # 跨单元：u1 和 u2 的 GREEN 都必须覆盖�
 }
 ```
 
-`reason_code` 取值同 `non-applicable.json`；`validation_command` 是 argv 数组（不经 shell）。受控 producer 先执行该命令，退出码为 0 才写 RED / BASELINE / GREEN 的 `not_required`（`ucd_ids: []`），门禁复核豁免字段与命令摘要。子集为空却没有豁免时拒绝；子集非空时 GREEN 不得为 `not_required`。
+`reason_code` 取值同 `non-applicable.json`；`validation_command` 是 argv 数组（不经 shell）。受控 producer 先执行该命令，或验证既有成功观察的有效绑定，退出码为 0 才写 RED / BASELINE / GREEN 的 `not_required`（`ucd_ids: []`），门禁复核豁免字段、命令摘要和观察来源；详见下方无行为观察复用规则。子集为空却没有豁免时拒绝；子集非空时 GREEN 不得为 `not_required`。
 
 ## 用例类型
 
@@ -249,3 +249,7 @@ unit_refs: [u1, u2]          # 跨单元：u1 和 u2 的 GREEN 都必须覆盖�
 - 不把文档审阅写成实际执行通过；
 - 不隐藏 blocked、未验证或外部环境依赖；
 - 不因工具缺失删除高风险用例。
+
+## 无行为观察复用
+
+无行为替代验证的每个阶段必须有真实成功执行记录，或带有效 `reused_from` / `observation_id` 的可复核受绑定观察；无需重复启动同一检查进程。命令、输入、scope、环境、I13/单元声明或基线世代漂移时必须重跑。业务 RED/GREEN 仍独立执行，禁止复用替代检查观察来代替业务断言。

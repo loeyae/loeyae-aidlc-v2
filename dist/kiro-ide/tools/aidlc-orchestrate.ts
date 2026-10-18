@@ -41,6 +41,7 @@ import { buildTestEvidenceErrors, SEMANTIC_SENSORS, allowlistedAlternativeComman
 import { QUALITY_SENSORS, qualityAdoption, qualityEvidenceErrors, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
 import { controlledQualityErrors, developmentAcceptanceErrors } from "./aidlc-quality-delivery";
 import { CANONICAL_SOURCE_PATTERN, SOURCE_ROOTS_CONFIG, declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
+import { sourceDeletions, type VerifiedDeletion } from "./aidlc-source-deletions";
 import { codeRefRepo, nestedHead, nestedMigrationCommand, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
 import { CONTRACT_CONSUMER_COLUMN, CONTRACT_ID_COLUMN, CONTRACT_PROVIDER_COLUMN, moduleForValue } from "./aidlc-contract-table";
 import { bestLedgerCheckpoint, checkpointModule, gitRepositoryAvailable, ledgerFetchCommand, ledgerPublishCommand, ledgerRef, moduleContractSnapshot, remoteLedgerRef } from "./aidlc-module-ledger";
@@ -880,6 +881,7 @@ function sourceRootFiles(root: string): string[] {
 }
 
 interface SourceDelivery {
+  deletions: VerifiedDeletion[];
   /** `delta`: at least one source root was diffed against a registered baseline; `tracked`: no baseline, the tracked text files. */
   mode: "delta" | "tracked";
   /** Expanded source roots (`<root>/`). */
@@ -964,7 +966,11 @@ function deliveryRanges(instance: StageInstance): Record<string, DeliveryRange> 
 function sourceDelivery(instance?: StageInstance): SourceDelivery {
   const roots = expandSourcePattern(CANONICAL_SOURCE_PATTERN, instance);
   const ranges = instance ? deliveryRanges(instance) : {};
-  const delivery: SourceDelivery = { mode: "tracked", roots, files: [], baselines: {}, delegated: [] };
+  const delivery: SourceDelivery = { mode: "tracked", roots, files: [], baselines: {}, delegated: [], deletions: [] };
+  try {
+    delivery.deletions = sourceDeletions(PROJECT_ROOT, instance?.module_id, instance?.unit_id);
+    if (delivery.deletions.length) delivery.mode = "delta";
+  } catch (error) { delivery.error = String(error); }
   const files = new Set<string>();
   for (const root of roots) {
     const rel = root.replace(/\/+$/, "");
@@ -1002,7 +1008,7 @@ function sourceDelivery(instance?: StageInstance): SourceDelivery {
     for (const file of tracked) if (delta.has(resolve(file))) files.add(file);
   }
   delivery.files = [...files].sort();
-  if (delivery.mode === "delta" && !delivery.error && delivery.files.length === 0) {
+  if (delivery.mode === "delta" && !delivery.error && delivery.files.length === 0 && delivery.deletions.length === 0) {
     let exemption: ReturnType<typeof unitUcdExemption>;
     try {
       exemption = instance?.module_id && instance.unit_id ? unitUcdExemption(PROJECT_ROOT, instance.module_id, instance.unit_id) : undefined;
@@ -1222,6 +1228,7 @@ export function checkProduces(instance: StageInstance, options: { completed?: bo
 function sourcePresenceFailures(instance: StageInstance, completed: boolean): string[] {
   const delivery = sourceDelivery(instance);
   const failures: string[] = [];
+  if (delivery.error && delivery.mode !== "delta") return [delivery.error];
   for (const root of delivery.delegated) {
     const failure = artifactPresenceFailure(root, instance, false, true);
     if (failure !== undefined) failures.push(failure);
@@ -1250,7 +1257,12 @@ export function checkConsumes(instance: StageInstance, state: WorkflowState, gra
       resolvedPattern = displayArtifactPatterns(pattern, instance, true).join(", ");
       const expandedPatterns = expandSourcePattern(pattern, instance);
       if (expandedPatterns.length === 0) missingLabel = resolvedPattern;
+      // A source consumer accepts a verified removal even when its last file/root is gone.
+      // The producer completion check below still applies.
+      const removal = pattern === CANONICAL_SOURCE_PATTERN ? sourceDelivery(instance) : undefined;
+      if (removal?.error && !removal.emptyDelta) throw new Error(removal.error);
       for (const expanded of expandedPatterns) {
+        if (removal?.deletions.some(entry => entry.path.startsWith(expanded))) continue;
         missingLabel = artifactPresenceFailure(expanded, instance, true, pattern === CANONICAL_SOURCE_PATTERN);
         if (missingLabel !== undefined) break;
       }
@@ -2206,6 +2218,10 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
       case "no-todo": {
         const todoFiles: string[] = [];
         const unreadableFiles: string[] = [];
+        // Deleted implementation is no longer executable. Verify its explicit removal
+        // trace; old TODOs are not live code. sourceDelivery checks blob and ownership.
+        const removal = (stage.produces || []).includes(CANONICAL_SOURCE_PATTERN) ? sourceDelivery(instance) : undefined;
+        if (removal?.error && !removal.emptyDelta) unreadableFiles.push(removal.error);
         for (const pattern of stage.produces || []) {
           for (const filePath of resolveProducePaths(pattern, instance)) {
             const artifact = readProducedArtifact(filePath);
@@ -2237,7 +2253,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
             .flatMap((pattern) => resolveProducePaths(pattern, instance)
               .filter((filePath) => !pattern.endsWith("/") || substantiveArtifact(filePath, pattern === CANONICAL_SOURCE_PATTERN)))
             .filter((filePath) => !isEvidenceArtifact(filePath)))];
-          if (noTodoTargets.length === 0) {
+          if (noTodoTargets.length === 0 && !removal?.deletions.length) {
             failures.push({
               sensor: "no-todo",
               passed: false,
@@ -2301,7 +2317,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
         let sourceUntraced: string | undefined;
         if (delivery && deltaSource && delivery.files.length > 0) {
           const required = deliveryRequirementPattern(instance);
-          const texts = delivery.files.map((filePath) => producedText(filePath));
+          const texts = [...delivery.files.map((filePath) => producedText(filePath)), ...delivery.deletions.map(entry => entry.req_refs.join(" "))];
           if (!texts.some((content) => content !== null && required.pattern.test(content))) {
             sourceUntraced = `No delivered source file (${delivery.files.map(artifactLabel).join(", ")}) references ${required.label}`;
           }
@@ -2314,7 +2330,8 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
             .filter((filePath) => !pattern.endsWith("/") || substantiveArtifact(filePath, pattern === CANONICAL_SOURCE_PATTERN)))
           .filter((filePath) => !isEvidenceArtifact(filePath)))];
 
-        if (targets.length === 0) {
+        if (delivery?.error && !delivery.emptyDelta) sourceUntraced = delivery.error;
+        if (targets.length === 0 && !delivery?.deletions.length) {
           failures.push({
             sensor: "traceability",
             passed: false,
@@ -5437,6 +5454,11 @@ async function handleReport(args: string[]): Promise<Directive> {
             baselines: delivery.baselines,
             ucd_exemption: delivery.exemption,
           };
+        } else if (delivery.deletions.length) {
+          sourceDeliveryRecord = {
+            status: "delivered", roots: delivery.roots, baselines: delivery.baselines,
+            deletions: delivery.deletions.map(({ content, ...entry }) => entry),
+          };
         }
       }
   }
@@ -5464,6 +5486,13 @@ async function handleReport(args: string[]): Promise<Directive> {
     const record = sourceDeliveryRecord;
     extras = { ...extras, source_delivery: record };
     finalizeReportAudit = () => {
+    if (record.status === "delivered") {
+      appendAuditEvent(PROJECT_ROOT, auditRef, "SOURCE_DELETIONS_DELIVERED", {
+        "Stage Instance": currentInstance.instance_id,
+        Deletions: JSON.stringify(record.deletions),
+      });
+      return;
+    }
     const exemption = record.ucd_exemption as { reason_code: string; approval_ref: string; reason: string };
     appendAuditEvent(PROJECT_ROOT, auditRef, "SOURCE_DELIVERY_NOT_APPLICABLE", {
       "Stage Instance": currentInstance.instance_id,

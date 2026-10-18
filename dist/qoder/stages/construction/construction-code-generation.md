@@ -44,7 +44,29 @@ frontmatter 中的 `src/` 是“项目源码根”的规范占位（code-review�
 
 3. 默认 `src/`。
 
-每个源码根必须是项目根内的相对目录：接受 `/` 或 `\` 分隔与末尾分隔符，拒绝绝对路径（`/x`、`C:\x`、`C:x`、`\\server\share`）、`.`/`..` 段、AI-DLC 控制面（`aidlc/`、`.aidlc/`、`docs/aidlc/`）以及符号链接/junction。配置非法时直接报错，不回退到低优先级；每个解析出的源码根都必须存在且含有实质文件，否则 produces 校验失败。源码根下的每个文件仍须满足 `traceability`（引用 `REQ-xxx`）与 `no-todo`。
+每个源码根必须是项目根内的相对目录：接受 `/` 或 `\` 分隔与末尾分隔符，拒绝绝对路径（`/x`、`C:\x`、`C:x`、`\\server\share`）、`.`/`..` 段、AI-DLC 控制面（`aidlc/`、`.aidlc/`、`docs/aidlc/`）以及符号链接/junction。配置非法时直接报错，不回退到低优先级。无基线时检查各根的实质文件；有基线时检查本单元的实质源码 delta（含下述可核验删除）。交付仍须满足 `traceability` 与 `no-todo`，不能以未修改的存续文件代替实施。
+
+### 仅删除源码的交付
+
+移除已批准的可执行业务行为仍须 I13 和真实业务 RED/GREEN，不得声明无行为豁免。删除最后一个文件或整个源码根可以是有效实施；在 `.aidlc/evidence/code-generation/{module-id}/{unit-id}/source-deletions.json` 记录：
+
+```json
+{
+  "schema_version": "1",
+  "module_id": "project",
+  "unit_id": "default",
+  "deletions": [{
+    "path": "src/legacy.route.cjs",
+    "baseline_blob": "<git rev-parse BASE:src/legacy.route.cjs>",
+    "req_refs": ["REQ-1"],
+    "ucd_id": "UC-D-001"
+  }]
+}
+```
+
+删除必须存在于该单元基线范围的真实 Git diff 中，基线对象须为非忽略、非二进制、非占位的普通源码文件。`req_refs` 必须属于该单元 manifest，存在于模块的已授权 requirements.md 和对应 `test-cases/UC-D-001.md`；I13 必须是 `required`，且通过 `unit_refs` 明确将该 UC-D 归给本单元。删除清单承接“旧源码 → 新移除需求 → 受影响行为”的追溯；不要求被删除的旧代码提前包含新需求 ID。消费者、追溯矩阵和完成报告重新核验该绑定；报告输出删除路径、blob、需求、UC-D 和基线，并写入审计。不存在删除、无归属、伪造证据或仅有无关占位修改均不能满足源码 produce。
+
+被删除的旧实现不再接受当前文件读取或旧 TODO 扫描；必要的需求、UC-D、基线对象和业务执行证据仍须真实可读、可复核，缺失时阻断。当前实现要求每个受影响 UC-D 使用其 ID 命名的模块内 Markdown 文件；其他命名先规范为该路径。
 
 ## 前置条件
 
