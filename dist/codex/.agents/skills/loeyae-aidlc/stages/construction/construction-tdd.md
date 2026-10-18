@@ -24,7 +24,7 @@ requires: [test-case-derivation]
 - **新行为**（`tdd_mode: new`，默认）：RED→GREEN。测试因目标行为尚未实现而失败（RED），`code-generation` 实现后通过（GREEN）。
 - **存量行为**（`tdd_mode: characterization`）：BASELINE→GREEN。改动前在未修改的基线代码上运行刻画测试并全部通过（BASELINE），`code-generation` 改动后仍须通过（GREEN）。
 
-不再提供"重构/存量代码可豁免 TDD"的豁免：重构、bug 修复中保留的存量行为都必须以 characterization UC-D 走 BASELINE。生产代码不得在本阶段前置生成；GREEN 由 `code-generation` 阶段负责。
+不再提供"重构/存量代码可豁免 TDD"的豁免：本次选择范围及实际影响范围内，重构、bug 修复中保留的可观察存量行为必须以 characterization UC-D 走 BASELINE，可复用已有测试映射；不扩展到未受影响的全部存量行为或工具测试。生产代码不得在本阶段前置生成；GREEN 由 `code-generation` 阶段负责。
 
 纯声明、纯样式或纯配置等无可执行业务行为的单元，必须消费 I13 的结构化 `not_applicable`/豁免证据，并执行其中声明的确定性替代验证；不得通过省略测试或文字说明静默跳过。
 
@@ -50,13 +50,13 @@ requires: [test-case-derivation]
 ## 用例点溯源铁律
 
 ```
-每个测试必须标注它对应哪个测试用例点。
-没有 @TestCaseId 的测试 = 不知所云的测试。
+本次选择的需求与受影响可观察行为必须有 UC-D 到真实测试/替代验证的可复核映射。
+可复用已有 suite/测试方法映射；未受影响测试无需补注解。
 ```
 
 **规则**：
-- 每个新增/修改的公共方法，其测试**必须**关联到 `docs/aidlc/modules/{module-id}/inception/application-design/test-cases/` 中的某个 UC-D-xxx
-- 关联方式：测试方法名或注解/标签携带用例点编号
+- 按本次选择的需求、可观察行为及实际影响范围选择 UC-D；不按公共方法或函数数量逐一新增测试。所选 UC-D 必须关联到 `docs/aidlc/modules/{module-id}/inception/application-design/test-cases/` 中的某个 UC-D-xxx
+- 关联方式：测试方法名或注解/标签携带编号，或复用可信的 UC-D → suite/测试方法清单并由受控命令输出 `uc_mapping`。映射必须指向本轮实际执行的测试并反映通过状态，不得用清单替代执行
 
 **后端示例**（Java/Kotlin）：
 ```java
@@ -75,12 +75,12 @@ describe('UC-D-003 超出配额拒绝请求', () => {
 ```
 
 **为什么强制**：
-- Construction 末尾对账（见 `construction-code-review.md` 全局审查）要校验"每个 UC-D 都有对应测试且通过"，没有标记就无法校验
+- Construction 末尾对账（见 `construction-code-review.md` 全局审查）要校验本次所选 UC-D 的覆盖与通过状态；方法标记和受控 `uc_mapping` 均可作为可信映射
 - 没有溯源的测试回答"代码做了什么"，有溯源的测试回答"产品要的有没有被验证"——这是本质区别
 
 **不提供豁免**：新行为 RED→GREEN，存量行为 BASELINE→GREEN。纯重构不新增行为时，被改动的存量行为同样必须由 characterization UC-D 关联测试，不能以"本测试无 UC-D 关联"跳过；无可执行业务行为的单元只能走 I13 结构化 `not_applicable`。
 
-**违反处理**：测试没有用例点标记 = 红旗信号，按"跳过 TDD"同等处理——补充用例点标记并复核断言与追溯。
+**违反处理**：所选 UC-D 缺少实际测试/批准替代验证、映射不可验证或测试失败时阻断；复用已有测试映射无需修改未受影响的测试。
 
 ---
 
@@ -127,7 +127,7 @@ describe('UC-D-003 超出配额拒绝请求', () => {
 
 ### RED — 写失败测试
 
-写一个最小的真实测试，展示期望的行为，并标注对应 UC-D。测试必须在生产代码实现前编写；随后通过受控 RED 命令运行，并输出机器可读观察对象。
+写一个最小的真实测试，展示期望的行为，并用标记或可信 `uc_mapping` 关联对应 UC-D。测试必须在生产代码实现前编写；随后通过受控 RED 命令运行，并输出机器可读观察对象。
 
 **好的测试：**
 ```java

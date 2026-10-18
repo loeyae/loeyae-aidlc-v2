@@ -45,7 +45,7 @@ green, and the summary is complete.
 | `scope` | Non-empty string (the workflow scope) |
 | `stages_completed` | >= 1 |
 | `evidence_references` | Non-empty string array; each path must exist on disk |
-| `timestamp` | Valid ISO, < 24h old |
+| `timestamp` | Valid ISO; content/command/provenance bound, no time-only expiry |
 
 ## Producer Responsibility
 

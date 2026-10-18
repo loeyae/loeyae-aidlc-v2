@@ -61,7 +61,7 @@ condition: needs_ui_implementation_bridge
 
 ### 必填章节
 
-frontend-platform-spec.md **必须**包含以下四个章节，缺少任何一个视为不完整：
+frontend-platform-spec.md 使用以下四个章节；表格只列当前单元实际需要的项，不要求填满示例行或满足固定数量。布局、组件和样式约束须是真实映射；空表、重复或占位内容不能通过。
 
 ```markdown
 # 前端平台实现规范
@@ -103,6 +103,17 @@ frontend-platform-spec.md **必须**包含以下四个章节，缺少任何一�
 | ... | ... | ... |
 ```
 
+### 实际覆盖与旧格式兼容
+
+producer 和门禁读取上述既有表格的真实行，按已批准的 `inception/application-design.md`、`application-design/frontend-components.md` 中适用表格验证。单元只覆盖部分页面/组件时，在当前 spec 中引用已有文档章节，不新建审批文档：
+
+```markdown
+- design_source: docs/aidlc/modules/{module-id}/inception/application-design/frontend-components.md#当前页面
+- platform_source: docs/aidlc/modules/{module-id}/inception/application-design.md#平台约束
+```
+
+被引用章节使用“布局原语 / 组件映射参考 / CSS/样式约束”或现有“组件名称 / 目标组件”等表头；名称与目标逐项映射，平台禁止写法须保留原因和替代方案。无法从来源推导时，指向已有文档中适用的表格章节，不以重复关键词代替覆盖。旧四章节表格无需迁移；旧占位数组证据重新运行 producer。无来源的历史项目使用真实 spec 表格兼容路径并显式标记，不强迫其补其他页面的映射；已有来源的实际缺项仍阻断。纯 Web 的跳过条件保持不变。
+
 ### 创建引导流程
 
 当需要创建 frontend-platform-spec.md 时，按以下步骤引导用户：
@@ -127,9 +138,9 @@ frontend-platform-spec.md **必须**包含以下四个章节，缺少任何一�
 
 基于用户提供的信息 + 组件库文档（通过 web_fetch 获取），生成 frontend-platform-spec.md 初稿。
 
-**步骤 C：用户确认**
+**步骤 C：复核来源并保存**
 
-展示初稿，用户确认或修改后保存。
+复用已有设计与平台决策的批准，不新增独立审批；仅尚未决定的实际语义冲突或用户显式要求审阅时请求确认。
 
 ---
 

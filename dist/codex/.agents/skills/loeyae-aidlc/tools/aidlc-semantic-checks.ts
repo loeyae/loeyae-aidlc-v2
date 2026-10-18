@@ -10,6 +10,7 @@ import { qualityUiCheck } from "./aidlc-quality-ui";
 import { deliveryReadiness } from "./aidlc-quality-delivery";
 import { runSync } from "./aidlc-spawn";
 import { reviewIssueErrors } from "./aidlc-evidence-policy";
+import { frontendPlatformPayload } from "./aidlc-frontend-platform";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "fs";
 import { basename, dirname, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
@@ -1447,13 +1448,7 @@ function implementationReport(): Record<string, unknown> {
 function frontendPlatform(): Record<string, unknown> {
   const path = join(ROOT, frontendPlatformSpecRelativePath());
   if (!existsSync(path)) fail("frontend platform specification is missing");
-  const content = text(path);
-  noUnresolved(content);
-  const layout = count(content, /布局原语|layout primitive|stack|grid|container|flex|row|column/gi);
-  const components = count(content, /组件|component|button|form|table|dialog|navigation|列表|表单|按钮/gi);
-  const css = count(content, /CSS|样式|spacing|responsive|tokens|间距|响应式|设计令牌/gi);
-  if (layout < 3 || components < 5 || css < 3) fail(`frontend platform spec is incomplete: layout=${layout}, components=${components}, css=${css}`);
-  return { status: "passed", layout_primitives: ["documented-layout-1", "documented-layout-2", "documented-layout-3"], component_mapping: Array.from({ length: 5 }, (_, index) => `documented-component-${index + 1}`), css_constraints: ["documented-css-1", "documented-css-2", "documented-css-3"] };
+  return frontendPlatformPayload(ROOT, frontendPlatformSpecRelativePath(), ACTIVE_MODULE);
 }
 
 
@@ -1569,19 +1564,22 @@ function mermaidDiagramType(block: MermaidBlock): string {
 }
 
 /**
- * Real syntax check with the Mermaid package that ships with loeyae-aidlc (`mermaid.parse`,
+ * Real syntax check with the optional installed Mermaid package (`mermaid.parse`,
  * run in Node — no browser, no rendering, no visual check). Mermaid sanitises labels with
  * DOMPurify, which has no DOM here; parsing never emits markup, so its hooks are stubbed.
  */
 async function parseMermaidBlocks(blocks: MermaidBlock[]): Promise<"passed" | "not_executed"> {
   let mermaid: { parse(source: string): Promise<unknown> };
+  // Optional runtime capabilities are intentionally absent from some lockfile installs.
+  // Resolve by name at runtime so typecheck does not turn them into required dependencies.
+  const optionalPackages = { purifier: "dompurify", diagram: "mermaid" };
   try {
-    const purify = (await import("dompurify")).default as unknown as Record<string, unknown>;
+    const purify = (await import(optionalPackages.purifier)).default as unknown as Record<string, unknown>;
     for (const method of ["addHook", "removeHook", "removeHooks", "removeAllHooks", "setConfig", "clearConfig"]) {
       if (typeof purify[method] !== "function") purify[method] = () => undefined;
     }
     if (typeof purify.sanitize !== "function") purify.sanitize = (value: unknown) => value;
-    mermaid = (await import("mermaid")).default as unknown as { parse(source: string): Promise<unknown> };
+    mermaid = (await import(optionalPackages.diagram)).default as unknown as { parse(source: string): Promise<unknown> };
   } catch {
     return "not_executed";
   }

@@ -31,7 +31,7 @@ Evidence 路径由当前 directive 的 `evidence_root` 决定：
 
 - `requires`、`condition`、`consumes`、`produces` 和 sensor 必须全部满足。
 - instruction-only 阶段完成时传入 `--instruction-ack <stage>`。
-- `application-design` 与 `operations` 需要用户在审阅影响、产物、review、构建和测试状态后显式提交 `--user-input Approve`。
+- `application-design` 与 `operations-authorization` 等阶段图 `approval: block` 节点需要用户在审阅影响、产物、review、构建和测试状态后显式提交 `--user-input Approve`；`code-generation` 的 `notify` 复用既有授权，用户显式要求审阅时等待。
 - Code review 必须覆盖实际改动路径，且 spec/standards 两轴通过、无未解决关键/重要问题；有明确严重度统计的开放建议不阻断。
 - Build/test evidence 按适用性记录真实构建、检查和测试；业务行为需要非零成功测试且无失败，可信无行为范围允许成功确定性检查及零测试数。
 - Worktree merge plan 必须覆盖分支、base/head、review 及改动路径，且永远只提供建议，人工执行 merge。
@@ -54,8 +54,12 @@ C8 普通行为变更仍需受控 build、test、check 和真实非零通过测�
 此时只要求实际成功的确定性 check；不存在的 build/test 不必新增，测试统计如实为零。空声明、全 skipped、来源不匹配不能放行。
 
 RED、GREEN、BASELINE、build/test、test-quality、I13 和代码审查属于绑定来源的历史观察，纯时间经过不要求重做；未来/畸形时间仍拒绝，来源、命令、scope、实例和基线世代仍须通过门禁。
-其他外部/时效性证据保留 24h 默认窗口；可在阶段命令配置中声明 freshness: { kind: external, max_age_ms: N, reason: 原因 } 收紧窗口，producer 将其写入证据，门禁核对配置绑定。Attestation 的显式 max_evidence_age_ms 继续作为收紧限制。
+确定性文档/源码 sensor 同样以内容绑定为准：frontend-platform-spec、template-completeness、document-slice-consistency、contract-baseline、functional-design-completeness、nfr-coverage、infrastructure-completeness、implementation-report、prd-completeness、diagram-contract、design-intent-coverage、ui-design-alignment、ui-artifact-consistency、inception-consistency、traceability-matrix、structural-invariants，以及七个 quality sensor 都读取本地受控输入/观察，不因纯时间失效。图表/外部 UI 的本地契约复核不授予远端 Provider 或凭据新的有效期。
+recovery-evidence 涉及当前会话恢复状态，保留 24h；未知 sensor、外部/环境/凭据观察继续保守保留 24h。Provider、宿主知识确认的独立时效契约不变。外部依赖可在阶段命令配置中声明 freshness: { kind: external, max_age_ms: N, reason: 原因 } 收紧窗口，producer 将其写入证据，门禁核对配置绑定。Attestation 的显式 max_evidence_age_ms 继续作为收紧限制；producer、reuse planner、主门禁和 attestation 共用语义时间策略。
 调度的 verify 表示重新核对门禁，不表示免检通过；新实例、输入/命令漂移、缺失或无效证据需要 revalidate。
+新 producer 的语义 checker 记录 `command_version: 2` 并核对完整执行命令摘要；旧记录保留既有身份、摘要格式及来源门禁，迁移到新安装路径或新映射语义时重新生成。未来/畸形时间、身份/provenance、输入来源、命令和世代失配不能因取消纯时间失效而放行。
 
-无行为替代检查可复用先前成功观察，绑定工作流、模块/单元、源码摘要、I13/单元声明、命令摘要/cwd、环境和基线世代；后续证据用 reused_from 指向原 observation_id。
+无行为替代检查可复用先前成功观察，绑定工作流、模块/单元、输入摘要、I13/单元声明、命令摘要/cwd、环境和基线世代；后续证据用 reused_from 指向原 observation_id。
+存在模块所有权清单时复用现有 `evidenceScopeForInstance`：模块 paths、contract_paths、单元 `evidence_inputs.paths/shared_paths/depends_on_units` 及传递依赖定义范围；未分类文件、根 lockfile 和共享输入仍绑定。只排除明确属于无关模块/单元的私有文件。无清单时显式记录 `conservative-worktree` 全范围回退，不根据命令文字猜测依赖。范围声明本身参与摘要，基线世代仍单独绑定；不使用全仓 dirty 标志或全仓摘要覆盖已验证范围。
+命令清单每条 check 可声明 `evidence_inputs: { environment: ["CONFIG_MODE", "API_ENDPOINT"] }`，表示完整的相关环境契约；执行器始终额外绑定 PATH/PATHEXT、SystemRoot/ComSpec、NODE_OPTIONS/NODE_PATH 和 Node 可执行文件/版本。未声明时保守绑定全部环境（仅显式会话发布令牌不参与计算）。声明为空数组表示命令无其他环境依赖，不能作为省略已知相关变量的捷径。值只保存摘要；新增/删除/变更声明和相关变量会重跑。输入共享依赖未知时应保留全范围，不得静默缩窄。
 仅相同命令文字不足以复用。输入变化或检查修改输入均重新执行；业务 RED 与 GREEN 仍独立执行。

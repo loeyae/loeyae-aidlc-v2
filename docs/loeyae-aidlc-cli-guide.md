@@ -266,7 +266,7 @@ loeyae-aidlc attest resolve --base origin/main --head HEAD
 - **追溯矩阵断链 `REQ-xxx: BROKEN@<layer>`** → 该需求在某层真的丢了（如活到故事层却在设计层断）。去补那一层产物：让对应文档/代码里出现该 REQ 标记，再 `report`。矩阵只保证结构覆盖（无需求悄悄消失），内容是否忠实仍需 review / 测试。
 - **未迁移旧项目**（`requirements.md` 无 `REQ-xxx` 或缺 `track` 标签）→ 记 `MIGRATION_REQUIRED`，降级放行并输出 `missing_track` 清单，不硬阻断。
 
-证据文件默认 24 小时过期；跨天续作时上游纯过期不算回归，`next` 会放行。
+确定性文档/源码检查及历史测试/审查观察在来源、命令、范围和基线世代仍匹配时，不因纯时间失效；`next` 的 verify 仍需门禁复验，并非免检放行。恢复状态与未知 sensor 默认 24h，外部依赖可用显式 freshness 窗口收紧；未来或畸形时间始终拒绝。完整分类及替代检查的模块/单元输入、环境声明见 `common-quality-gates.md`。
 
 ### Evidence reuse plan
 

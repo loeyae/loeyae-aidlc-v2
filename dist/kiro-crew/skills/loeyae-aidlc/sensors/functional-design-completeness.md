@@ -48,7 +48,7 @@ handling before code is written.
 | `use_cases_covered` | Non-empty string array |
 | `interfaces_specified` | >= 1 |
 | `error_handling_defined` | Must be `true` |
-| `timestamp` | Valid ISO, < 24h old |
+| `timestamp` | Valid ISO; content/command/provenance bound, no time-only expiry |
 
 ## Producer Responsibility
 

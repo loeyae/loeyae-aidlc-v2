@@ -25,7 +25,7 @@ import { evidenceRelativePath, i13UcdIdsByMode as sharedI13UcdIdsByMode, readUni
 import { evidenceTimeError } from "./aidlc-evidence-policy";
 import { readSourceRevision, commitAncestryErrors } from "./aidlc-revision";
 import { GLOBAL_WORKFLOW, loadWorkflowState, type WorkflowRef, type WorkflowState } from "./aidlc-light-state";
-import { evidenceSourceRevision, integrationStageSlugs, isSplitLayout, loadWorkflowParts, ownerOfInstance, stageAxis } from "./aidlc-workflow-layout";
+import { evidenceScopeForInstance, evidenceSourceRevision, integrationStageSlugs, isSplitLayout, loadWorkflowParts, ownerOfInstance, stageAxis } from "./aidlc-workflow-layout";
 
 type ProducerState = WorkflowState;
 
@@ -70,6 +70,7 @@ interface CommandSpec {
   argv: string[];
   cwd?: string;
   timeout_ms?: number;
+  evidence_inputs?: { environment: string[] };
 }
 
 interface ArtifactSpec {
@@ -104,6 +105,7 @@ interface CommandResult {
   stdout_tail?: string;
   stderr_tail?: string;
   test_stats?: TestStats;
+  input_binding?: string;
 }
 
 const PROJECT_ROOT = realpathSync(process.cwd());
@@ -403,7 +405,16 @@ function parseConfig(path: string, stage: string, allowEmptyCommands = false): E
     if (!Number.isInteger(timeout) || timeout < 1 || timeout > MAX_TIMEOUT_MS) {
       fail(`commands[${i}].timeout_ms must be an integer between 1 and ${MAX_TIMEOUT_MS}`);
     }
-    const spec = { id, role, sensor, argv, cwd, timeout_ms: timeout };
+    let evidenceInputs: CommandSpec["evidence_inputs"];
+    if (record.evidence_inputs !== undefined) {
+      const inputs = record.evidence_inputs as Record<string, unknown> | null;
+      if (!inputs || Array.isArray(inputs) || Object.keys(inputs).some(key => key !== "environment")
+        || !Array.isArray(inputs.environment) || !inputs.environment.every(key => typeof key === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(key))) {
+        fail(`commands[${i}].evidence_inputs must declare environment variable names; source ownership belongs in module/unit manifests`);
+      }
+      evidenceInputs = { environment: [...new Set(inputs.environment as string[])].sort() };
+    }
+    const spec = { id, role, sensor, argv, cwd, timeout_ms: timeout, ...(evidenceInputs ? { evidence_inputs: evidenceInputs } : {}) };
     if (role === "semantic") validateSemanticDeclaration(spec);
     commands.push(spec);
   }
@@ -569,7 +580,7 @@ function writeBlockedReport(sensor: string, state: ProducerState, report: Record
   return reportRelative;
 }
 
-function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerState): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
+export function semanticCommandArgv(sensor: string, state: { current_module?: string; current_unit?: string }): string[] {
   const tsx = require.resolve("tsx/cli");
   const checker = resolve(TOOL_DIR, "aidlc-semantic-checks.ts");
   // Split layout: pass the module scope explicitly so module-owned checkers (diagram-contract)
@@ -577,7 +588,11 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
   const scopeArgs = isSplitLayout(PROJECT_ROOT) && state.current_module
     ? ["--module", state.current_module, ...(state.current_unit ? ["--unit", state.current_unit] : [])]
     : [];
-  const argv = [process.execPath, tsx, checker, "--sensor", sensor, ...scopeArgs];
+  return [process.execPath, tsx, checker, "--sensor", sensor, ...scopeArgs];
+}
+
+function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerState): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
+  const argv = semanticCommandArgv(sensor, state);
   const started = Date.now();
   const result = runSync(argv[0], argv.slice(1), {
     cwd: PROJECT_ROOT,
@@ -616,6 +631,7 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
       id: `builtin:${sensor}`,
       sensor,
       argv_digest: argvDigest(argv),
+      command_version: 2,
       exit_code: exitCode,
       status: "passed",
       duration_ms: duration,
@@ -689,6 +705,7 @@ export function buildTestEvidenceErrors(evidence: Record<string, unknown>, state
       const spec = config.commands.find(spec => spec.id === command.id && spec.role === command.role);
       if (!spec || command.argv_digest !== argvDigest(spec.argv) || command.cwd !== safeCwdLabel(spec.cwd || PROJECT_ROOT)) errors.push(`command ${command.id} no longer matches its allowlist`);
       if (command.status !== "passed" || command.exit_code !== 0 || typeof command.duration_ms !== "number" || command.duration_ms < 0) errors.push(`command ${command.id} must have a successful execution`);
+      if (basis && command.role === "check") errors.push(...alternativeCheckBindingErrors(command, "build-and-test", state));
     }
     if (!tests || !Object.values(tests).every(value => Number.isSafeInteger(value) && value >= 0) || tests.total !== tests.passed + tests.failed + tests.skipped
       || tests.failed !== 0 || ((!basis || roles.has("test")) && (tests.total < 1 || tests.passed < 1)) || (!roles.has("test") && !zeroTests)) errors.push("test summary must count real successful tests, or exactly zero for approved no-behavior validation");
@@ -700,18 +717,50 @@ export function buildTestEvidenceErrors(evidence: Record<string, unknown>, state
   return errors;
 }
 
-/** Cache only successful alternative checks. Whole-source and declaration binding is intentional. */
+function alternativeBinding(spec: CommandSpec, state: ProducerState, basis: Record<string, unknown>, freshness?: Record<string, unknown>) {
+  const instance = stageInstanceId("code-generation", state.current_unit ? "unit" : state.current_module ? "module" : "project", { module_id: state.current_module, unit_id: state.current_unit });
+  const declaredScope = state.current_module && existsSync(join(PROJECT_ROOT, "docs/aidlc/ideation/module-manifest.json"))
+    ? evidenceScopeForInstance(PROJECT_ROOT, instance) : undefined;
+  const revision = readSourceRevision(PROJECT_ROOT, declaredScope, nestedSourceRepos(PROJECT_ROOT));
+  const inputs = declaredScope
+    ? { mode: "declared-ownership", scope: revision.scope, digest: revision.scope_digest }
+    : { mode: "conservative-worktree", revision };
+  // PATH and platform/runtime discovery always affect execution. An absent declaration
+  // binds the complete environment; an explicit list is the command owner's dependency contract.
+  const environmentKeys = spec.evidence_inputs
+    ? [...new Set([...spec.evidence_inputs.environment, "PATH", "Path", "PATHEXT", "SystemRoot", "ComSpec", "NODE_OPTIONS", "NODE_PATH"])]
+    : Object.keys(process.env).filter(key => key !== "AIDLC_SESSION_BINDING");
+  const environment = { mode: spec.evidence_inputs ? "declared" : "conservative-all", keys: environmentKeys.sort().map(key => [key, process.env[key] ?? null]) };
+  const baseline = workflowBaselineForModule(PROJECT_ROOT, state.current_module);
+  const binding = { workflow_id: state.workflow_id, module_id: state.current_module, unit_id: state.current_unit, basis, inputs, baseline, freshness,
+    argv_digest: argvDigest(spec.argv), cwd: safeCwdLabel(spec.cwd || PROJECT_ROOT), runtime: { executable: process.execPath, version: process.version },
+    environment: { mode: environment.mode, keys: environmentKeys, digest: argvDigest([JSON.stringify(environment)]) } };
+  return { binding, revision, declaredScope };
+}
+
+/** Current-input verification used by phase/C8 gates, including declared environment/config. */
+export function alternativeCheckBindingErrors(execution: Record<string, unknown>, stage: string, state: ProducerState): string[] {
+  try {
+    const config = requireCommandConfig(resolveCommandConfigPath(PROJECT_ROOT, stage), stage);
+    const spec = config.commands.find(command => command.id === execution.id && command.role === "check");
+    if (!spec) return ["alternative check command is no longer declared"];
+    // Legacy observations retain their existing conservative provenance gate.
+    if (execution.input_binding === undefined && !spec.evidence_inputs) return [];
+    const basis = noBehaviorBasis(state);
+    if (!basis) return ["alternative observation no longer has a trusted applicability basis"];
+    const { binding } = alternativeBinding(spec, state, basis, config.freshness);
+    return execution.input_binding === argvDigest([JSON.stringify(binding)]) ? [] : ["alternative observation inputs/environment/declaration changed; rerun check"];
+  } catch (error) { return [String(error)]; }
+}
+
+/** Cache successful alternative checks using validated ownership; unknown inputs stay bound. */
 function alternativeCheck(spec: CommandSpec, state: ProducerState, freshness?: Record<string, unknown>): CommandResult & { observation_id?: string; reused_from?: string } {
   let basis: Record<string, unknown> | null;
   try { basis = noBehaviorBasis(state); } catch { basis = null; }
   // Legacy declarations still run; they do not acquire reuse authority.
   if (!basis) return runCommand(spec);
-  const revision = readSourceRevision(PROJECT_ROOT, undefined, nestedSourceRepos(PROJECT_ROOT));
-  const baseline = workflowBaselineForModule(PROJECT_ROOT, state.current_module);
-  const binding = { workflow_id: state.workflow_id, module_id: state.current_module, unit_id: state.current_unit, basis, revision, baseline, freshness,
-    argv_digest: argvDigest(spec.argv), cwd: safeCwdLabel(spec.cwd || PROJECT_ROOT), runtime: { executable: process.execPath, version: process.version },
-    environment: argvDigest([JSON.stringify(Object.entries(process.env).filter(([key]) => key !== "AIDLC_SESSION_BINDING").sort())]) };
-  if (!revision.worktree_digest) return runCommand(spec);
+  const { binding, revision, declaredScope } = alternativeBinding(spec, state, basis, freshness);
+  if (!revision.worktree_digest || declaredScope && !revision.scope_digest) return runCommand(spec);
   const key = argvDigest([JSON.stringify(binding)]);
   const path = safeProjectPath(resolve(PROJECT_ROOT, ".aidlc", "alternative-observations", `${key}.json`), "alternative observation");
   if (existsSync(path)) {
@@ -719,15 +768,15 @@ function alternativeCheck(spec: CommandSpec, state: ProducerState, freshness?: R
       const saved = JSON.parse(readFileSync(requireRegularFile(path, "alternative observation"), "utf8"));
       if (JSON.stringify(saved.binding) === JSON.stringify(binding) && saved.producer === "loeyae-aidlc-evidence" && !evidenceTimeError({ ...saved, ...(freshness ? { freshness } : {}) }, "build-test-evidence")
         && typeof saved.observation_id === "string" && saved.result.status === "passed" && saved.result.exit_code === 0 && saved.result.argv_digest === binding.argv_digest
-        && typeof saved.result.duration_ms === "number") return { ...saved.result, id: spec.id, reused_from: saved.observation_id };
+        && typeof saved.result.duration_ms === "number") return { ...saved.result, id: spec.id, input_binding: key, reused_from: saved.observation_id };
     } catch { /* Invalid cache is re-executed, never accepted. */ }
   }
   const result = runCommand(spec);
   // Commands that mutate their inputs cannot seed a reusable observation.
-  const after = readSourceRevision(PROJECT_ROOT, undefined, nestedSourceRepos(PROJECT_ROOT));
+  const after = readSourceRevision(PROJECT_ROOT, declaredScope, nestedSourceRepos(PROJECT_ROOT));
   const observation_id = randomUUID();
   if (JSON.stringify(after) === JSON.stringify(revision)) writeAtomic(path, JSON.stringify({ binding, result, observation_id, producer: "loeyae-aidlc-evidence", timestamp: new Date().toISOString() }));
-  return { ...result, observation_id };
+  return { ...result, input_binding: key, observation_id };
 }
 
 /**
@@ -884,6 +933,7 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
       duration_ms: check.duration_ms,
       ...(check.reused_from ? { reused_from: check.reused_from } : {}),
       ...(check.observation_id ? { observation_id: check.observation_id } : {}),
+      ...(check.input_binding ? { input_binding: check.input_binding } : {}),
     };
     payload = {
       status: "not_applicable",
@@ -1213,7 +1263,7 @@ function runProducer(args: string[]): void {
     const applicability = noBehaviorBasis(state);
     if (applicability ? !roles.has("check") : !roles.has("build") || !roles.has("test") || !roles.has("check")) fail(applicability ? "no-behavior validation requires a controlled check" : "selected allowlist commands must include build, test, and check roles");
 
-    const commands = selected.map(runCommand);
+    const commands = selected.map(spec => applicability && spec.role === "check" ? alternativeCheck(spec, state, config.freshness) : runCommand(spec));
     const testResults = commands.filter((command) => command.role === "test").map((command) => command.test_stats as TestStats);
     const tests = testResults.reduce((sum, current) => ({
       total: sum.total + current.total,
