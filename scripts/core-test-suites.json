@@ -231,6 +231,10 @@
     "tests/test_mars161_execution_profile_phase6.ts"
   ],
   [
+    "tsx",
+    "tests/test_mars245_split.ts"
+  ],
+  [
     "node",
     "scripts/run-python.mjs",
     "tests/test_platform_hooks.py"

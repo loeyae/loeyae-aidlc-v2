@@ -7,6 +7,7 @@ import { applyExecutionProfile, classifyExecutionProfile } from "../core/tools/a
 import { buildExecutionProfileReleaseMeasurements } from "../core/tools/aidlc-execution-profile-measurements";
 import { createInitialState, lightStatePath, saveWorkflowState } from "../core/tools/aidlc-light-state";
 import { loadGraph } from "../core/tools/aidlc-orchestrate";
+import { bindSession, claimToken } from "../core/tools/aidlc-session";
 
 const REPOSITORY = resolve(import.meta.dirname, "..");
 const CLI = join(REPOSITORY, "bin", "cli.ts");
@@ -51,8 +52,11 @@ assert.deepEqual(lightMeasurement.regression.omitted_stage_slugs, ["state-templa
 assert.equal(lightMeasurement.regression.mandatory_rules_retained, true, "measurements prove mandatory rule retention without granting a pass");
 assert.equal(lightMeasurement.regression.measured_selected_stage_count + 1, lightMeasurement.regression.historical_selected_stage_count);
 
-function run(project: string, args: string[]): Record<string, unknown> {
-  const result = spawnSync(process.execPath, [TSX, CLI, "orchestrate", ...args], { cwd: project, encoding: "utf8" });
+function run(project: string, args: string[], binding?: unknown): Record<string, unknown> {
+  const env = { ...process.env };
+  delete env.AIDLC_SESSION_BINDING;
+  if (binding) env.AIDLC_SESSION_BINDING = JSON.stringify(binding);
+  const result = spawnSync(process.execPath, [TSX, CLI, "orchestrate", ...args], { cwd: project, encoding: "utf8", env });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   return JSON.parse(result.stdout) as Record<string, unknown>;
 }
@@ -141,7 +145,8 @@ try {
   splitState.completed_stage_instances = [...splitState.completed_stages];
   splitState.skipped_stage_instances = ["reverse-engineering@module:m01-measurements"];
   saveWorkflowState(splitProject, splitState);
-  run(splitProject, ["split", "--from", "phase6-split"]);
+  const session = bindSession(splitProject, { instance: "state-template", owner: "phase6", session: "phase6-split", expected: claimToken(undefined) });
+  run(splitProject, ["split", "--from", "phase6-split"], session.binding);
   const modulePath = lightStatePath(splitProject, { kind: "module", module_id: "m01-measurements" });
   const moduleBefore = readFileSync(modulePath, "utf8");
   const splitCli = run(splitProject, ["state", "measurements", "--module", "m01-measurements"]);

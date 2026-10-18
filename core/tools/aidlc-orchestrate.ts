@@ -107,6 +107,7 @@ import {
   loadWorkflowState,
   releaseExpiredModuleClaims,
   saveWorkflowState,
+  withWorkflowInitialization,
   workflowRefKey,
   type DiagramFormat,
   type HistoryEntry,
@@ -140,6 +141,7 @@ import {
   sameRef,
   saveRegistry,
   updateRegistry,
+  withRegistryPublication,
   type RegistryCrossRequire,
   type RegistrySharedContract,
   type WorkflowParts,
@@ -4155,16 +4157,18 @@ function ensureModuleWorkflow(moduleId: string, work?: string): Directive | null
     depth: global.depth,
     current_phase: "inception",
   };
-  saveWorkflowState(PROJECT_ROOT, state, ref);
-  appendAuditEvent(PROJECT_ROOT, ref, "WORKFLOW_CREATED", { "Parent Workflow ID": global.workflow_id, Trigger: "next --module" });
-  updateRegistry(PROJECT_ROOT, (current) => {
-    const registry = current as WorkflowRegistry;
-    if (registry.modules.some((row) => row.module_id === moduleId)) return registry;
-    return {
-      ...registry,
-      modules: [...registry.modules, { module_id: moduleId, workflow_id: state.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, ref), status: "running", current_stage: "-", inception_done: false, construction_done: false, owner: "-" }],
-    };
-  });
+  withWorkflowInitialization(PROJECT_ROOT, global, [{ ref: GLOBAL_WORKFLOW, state: global }, { ref, state }], commitSource => withRegistryPublication(PROJECT_ROOT, () => {
+    appendAuditEvent(PROJECT_ROOT, ref, "WORKFLOW_CREATED", { "Parent Workflow ID": global.workflow_id, Trigger: "next --module" });
+    updateRegistry(PROJECT_ROOT, (current) => {
+      const registry = current as WorkflowRegistry;
+      if (registry.global_workflow_id !== global.workflow_id || registry.modules.some((row) => row.module_id === moduleId)) throw new Error("module initialization registry changed; reread before retrying");
+      return {
+        ...registry,
+        modules: [...registry.modules, { module_id: moduleId, workflow_id: state.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, ref), status: "running", current_stage: "-", inception_done: false, construction_done: false, owner: "-" }],
+      };
+    });
+    commitSource();
+  }));
   // Idempotent: a module created after the split keeps the control-plane merge strategy
   // provisioned (and registers the driver on a clone that first runs next here).
   provisionGitStrategy();
@@ -4184,8 +4188,14 @@ function firstLine(value: unknown): string {
 async function splitNext(args: string[], flags: Record<string, string>, graph: StageGraph): Promise<Directive> {
   const binding = sessionBinding();
   if (binding) {
-    const bound = [...loadWorkflowParts(PROJECT_ROOT).parts.values()].find(part => part.state.workflow_id === binding.workflow_id);
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    const bound = [...loaded.parts.values()].find(part => part.state.workflow_id === binding.workflow_id);
     if (!bound) throw new Error("bound workflow no longer exists");
+    if (flags.module && !loaded.parts.has(`module:${flags.module}`) && bound.ref.kind === "global") {
+      const failure = ensureModuleWorkflow(flags.module, flags.work);
+      if (failure) return failure;
+      return moduleBindingRequired(flags.module, "Module workflow initialized.");
+    }
     if (flags.module && (bound.ref.kind !== "module" || bound.ref.module_id !== flags.module)) throw new Error("requested module conflicts with session binding");
     return advanceSplit(openSplitContext(bound.ref), graph, args, flags);
   }
@@ -4266,6 +4276,14 @@ async function splitNext(args: string[], flags: Record<string, string>, graph: S
   const directive = await advanceSplit(integrationContext, graph, args, flags);
   if (directive.kind === "done") return { ...directive, message: "🎉 All split workflows finished (global, modules and integration)." };
   return directive;
+}
+
+function moduleBindingRequired(moduleId: string, lead: string): Directive {
+  return {
+    kind: "print", binding_required: true, workflow: `module:${moduleId}`,
+    command_template: `loeyae-aidlc orchestrate next --module ${moduleId} --preview`,
+    message: `${lead} Run orchestrate next --module ${moduleId} --preview, then module inspect/bind for the exact returned stage instance. Pass the new binding only to that session before next. Initialization does not grant ownership of the new workflow.`,
+  };
 }
 
 function splitStatusDirective(graph: StageGraph, moduleId?: string): Directive {
@@ -4366,8 +4384,10 @@ function anchorLegacyEvidence(inventory: LegacyEvidence[]): { anchored: string[]
     }
     const record = { ...item.record, source_revision: { ...(item.record.source_revision as Record<string, unknown>), scope: scope.label, scope_digest: digest, anchored_by: "orchestrate split", anchored_at: new Date().toISOString() } };
     const temporary = `${item.path}.tmp-${process.pid}-${Date.now()}`;
-    writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
-    renameSync(temporary, item.path);
+    try {
+      writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      renameSync(temporary, item.path);
+    } finally { if (existsSync(temporary)) unlinkSync(temporary); }
     anchored.push(label);
   }
   return { anchored, stale };
@@ -4531,67 +4551,64 @@ function performSplit(fromId: string, dryRun: boolean, trigger: string, replaceL
   }
 
   const now = new Date().toISOString();
-  const created: WorkflowRef[] = [];
+  let evidence: ReturnType<typeof anchorLegacyEvidence>;
+  const moduleIds = modules.map((module) => module.module_id).join(", ");
   try {
-    for (const item of planned) {
-      if (item.ref.kind === "global") continue;
-      if (existsSync(lightStatePath(PROJECT_ROOT, item.ref))) throw new Error(`${relativeStatePath(PROJECT_ROOT, item.ref)} already exists`);
-      saveWorkflowState(PROJECT_ROOT, { ...item.state, revision: 0 }, item.ref);
-      created.push(item.ref);
-    }
-    const integration = loadWorkflowState(PROJECT_ROOT, INTEGRATION_WORKFLOW)!;
-    saveRegistry(PROJECT_ROOT, {
-      version: "1",
-      global_workflow_id: legacy.workflow_id,
-      split_from_workflow_id: legacy.workflow_id,
-      split_at: now,
-      updated_at: now,
-      modules: planned.filter((item) => item.ref.kind === "module").map((item) => {
-        const persisted = loadWorkflowState(PROJECT_ROOT, item.ref)!;
-        return { module_id: (item.ref as { module_id: string }).module_id, workflow_id: persisted.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, item.ref), status: persisted.status, current_stage: persisted.current_stage_instance || "-", inception_done: false, construction_done: false, owner: "-" };
-      }),
-      integration: { workflow_id: integration.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, INTEGRATION_WORKFLOW), status: integration.status, current_stage: "-", barrier_ready: false, blocking: [] },
-      shared_contracts: [],
-      cross_module_requires: [],
-    });
-    saveWorkflowState(PROJECT_ROOT, planned.find((item) => item.ref.kind === "global")!.state, GLOBAL_WORKFLOW);
-  } catch (error) {
-    for (const ref of created) {
-      for (const path of [lightStatePath(PROJECT_ROOT, ref), join(dirname(lightStatePath(PROJECT_ROOT, ref)), "audit.md")]) {
-        if (existsSync(path)) rmFile(path);
+    evidence = withWorkflowInitialization(PROJECT_ROOT, legacy, planned, commitSource => withRegistryPublication(PROJECT_ROOT, () => {
+      if (isSplitLayout(PROJECT_ROOT)) throw new Error("workflow was already split by another maintainer; reread the registry");
+      const currentInventory = legacyEvidenceInventory();
+      const evidenceBefore = new Map(currentInventory.map(item => [item.path, readFileSync(item.path)]));
+      try {
+        const integration = loadWorkflowState(PROJECT_ROOT, INTEGRATION_WORKFLOW)!;
+        saveRegistry(PROJECT_ROOT, {
+          version: "1",
+          global_workflow_id: legacy.workflow_id,
+          split_from_workflow_id: legacy.workflow_id,
+          split_at: now,
+          updated_at: now,
+          modules: planned.filter((item) => item.ref.kind === "module").map((item) => {
+            const persisted = loadWorkflowState(PROJECT_ROOT, item.ref)!;
+            return { module_id: (item.ref as { module_id: string }).module_id, workflow_id: persisted.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, item.ref), status: persisted.status, current_stage: persisted.current_stage_instance || "-", inception_done: false, construction_done: false, owner: "-" };
+          }),
+          integration: { workflow_id: integration.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, INTEGRATION_WORKFLOW), status: integration.status, current_stage: "-", barrier_ready: false, blocking: [] },
+          shared_contracts: [],
+          cross_module_requires: [],
+        });
+        const evidence = anchorLegacyEvidence(currentInventory);
+        appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "WORKFLOW_SPLIT", {
+          Trigger: trigger,
+          "Split From": legacy.workflow_id,
+          Modules: moduleIds,
+          "Evidence Anchored": String(evidence.anchored.length),
+          "Evidence Stale": String(evidence.stale.length),
+          ...(lineage.retire.length > 0 ? { "Replaced Lineages": lineage.retire.join(", ") } : {}),
+        });
+        for (const conflict of lineage.conflicts) auditLineageRetired(conflict, `orchestrate split --replace-lineage`);
+        for (const item of planned) {
+          if (item.ref.kind === "global") continue;
+          appendAuditEvent(PROJECT_ROOT, item.ref, "WORKFLOW_CREATED", {
+            "Parent Workflow ID": legacy.workflow_id,
+            Trigger: trigger,
+            "Migrated Instances": String(item.state.completed_stage_instances.length + item.state.skipped_stage_instances.length),
+          });
+        }
+        commitSource();
+        return evidence;
+      } catch (error) {
+        for (const [path, bytes] of evidenceBefore) writeFileSync(path, bytes);
+        throw error;
       }
-    }
-    const registry = join(PROJECT_ROOT, "aidlc", "active", "registry.md");
-    if (existsSync(registry)) rmFile(registry);
+    }));
+  } catch (error) {
     return { kind: "error", message: `Split aborted and rolled back: ${error instanceof Error ? error.message : String(error)}` };
   }
-
-  const evidence = anchorLegacyEvidence(inventory);
-  const moduleIds = modules.map((module) => module.module_id).join(", ");
-  appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "WORKFLOW_SPLIT", {
-    Trigger: trigger,
-    "Split From": legacy.workflow_id,
-    Modules: moduleIds,
-    "Evidence Anchored": String(evidence.anchored.length),
-    "Evidence Stale": String(evidence.stale.length),
-    ...(lineage.retire.length > 0 ? { "Replaced Lineages": lineage.retire.join(", ") } : {}),
-  });
-  for (const conflict of lineage.conflicts) auditLineageRetired(conflict, `orchestrate split --replace-lineage`);
-  for (const item of planned) {
-    if (item.ref.kind === "global") continue;
-    appendAuditEvent(PROJECT_ROOT, item.ref, "WORKFLOW_CREATED", {
-      "Parent Workflow ID": legacy.workflow_id,
-      Trigger: trigger,
-      "Migrated Instances": String(item.state.completed_stage_instances.length + item.state.skipped_stage_instances.length),
-    });
-  }
-  refreshRegistry(loadWorkflowParts(PROJECT_ROOT));
   const gitWarnings = provisionGitStrategy();
   return {
     kind: "print",
     message: `✅ Workflow ${legacy.workflow_id} split into per-module workflows (registry: aidlc/active/registry.md)\n${describe.join("\n")}\n` +
       `  Evidence: ${evidence.anchored.length} re-anchored to their scope, ${evidence.stale.length} stale` +
       (evidence.stale.length ? ` — refresh completed stages with evidence run --stage <slug> --module <id> --refresh, then report --stage <slug> --module <id> --result completed.` : ".") +
+      "\n  Preview, inspect and explicitly bind each target module/integration workflow before writing; the source binding does not grant child ownership." +
       (gitWarnings.length ? `\n${gitWarnings.map((line) => `  ${line}`).join("\n")}` : ""),
     split: {
       registry: "aidlc/active/registry.md",
@@ -4713,13 +4730,14 @@ async function handleNext(args: string[]): Promise<Directive> {
   if (!isSplitLayout(PROJECT_ROOT) && flags.module && flags.work && !scopeFlag) {
     return { kind: "error", message: "--module <id> --work <text> only describes a module workflow created after the split (a module added to module-manifest.json later); split creates the workflows of the manifest modules with the global work description." };
   }
-  if (!isSplitLayout(PROJECT_ROOT) && flags.module && !claimRequested && !sessionBinding()) {
+  if (!isSplitLayout(PROJECT_ROOT) && flags.module && !claimRequested) {
     const legacy = loadState();
     if (!legacy) {
       return { kind: "error", message: "No active workflow. Start with next --scope <scope> --work <description>; per-module workflows start after module-division completes." };
     }
     const split = performSplit(legacy.workflow_id, false, "next --module");
     if (split.kind === "error") return split;
+    return { ...split, ...moduleBindingRequired(flags.module, String(split.message)) };
   }
   if (isSplitLayout(PROJECT_ROOT)) {
     if (withPrd) return { kind: "error", message: "--with-prd can only be selected when initializing a new workflow" };
@@ -7814,7 +7832,8 @@ async function main() {
       if (!target) throw new Error("bound workflow is not active in this project");
       assertSessionClaim(PROJECT_ROOT, target.state, binding.stage_instance, binding);
       const requested = parseFlags(rest);
-      if (requested.module && (target.ref.kind !== "module" || target.ref.module_id !== requested.module) && loaded.split) throw new Error("requested module conflicts with exact session binding");
+      const initializingModule = cmd === "next" && target.ref.kind === "global" && requested.module && !loaded.parts.has(`module:${requested.module}`);
+      if (requested.module && (target.ref.kind !== "module" || target.ref.module_id !== requested.module) && loaded.split && !initializingModule) throw new Error("requested module conflicts with exact session binding");
       if (cmd === "state" && ["recover", "adopt", "rebuild"].includes(rest[0])) throw new Error("recovery/adoption requires a separate quiescent maintenance handoff; active session ownership cannot be overwritten");
       if (["archive", "split", "upgrade"].includes(cmd) && loaded.parts.size > 1 && !(cmd === "upgrade" && rest.includes("--retire-execution"))) throw new Error("whole-project maintenance requires a separate quiescent workflow handoff; a session binding cannot grant sibling ownership");
     }
