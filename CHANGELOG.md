@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.22.3 — 2026-10-19
+
+- Keep deterministic local evidence valid while its content, command, scope and provenance remain valid; retain explicit external freshness windows (MARS-250).
+- Validate cross-platform UI bridges against real design/component/style mappings instead of fixed counts or keyword frequency.
+- Scope alternative-check reuse to declared module/unit inputs, shared dependencies and relevant environment, with conservative fallback and auditable observations.
+- Align Construction approval, deployment/observability scope and selected-behavior test traceability with runtime policy.
+- Preserve optional Mermaid parsing without making absent runtime packages block typecheck; synchronize versions and regenerate all nine harness distributions.
+
 ## 4.22.2 — 2026-10-18
 
 - Apply validation according to trusted I13/unit applicability; allow real deterministic checks with zero tests for approved no-behavior work while retaining business-test gates (MARS-249).
