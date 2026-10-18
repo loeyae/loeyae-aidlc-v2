@@ -392,9 +392,9 @@ loeyae-aidlc ui accept --module {module-id} --route <html-mock|figma-create|figm
 
 > **📋 审查结果**：所有检查点均通过，产物一致性验证完成。
 
-> **🚀 Boss，下一步？**
+> **下一步：依据 graph/directive 与有效既有授权继续；用户已要求审阅或真实未决语义时等待**
 >
-> ✅ **确认并继续** - 进入 {下一步骤名}
+> ✅ **继续** - 进入 {下一步骤名}，真实 `block` 审批仍由引擎控制
 > 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时读取 `aidlc/active/aidlc-state.md` 和 `aidlc/active/audit.md`。
 
 ---

@@ -22,6 +22,7 @@ import { hasExecutableBehavior } from "./aidlc-executable-behavior";
 import { baselineCodeRef, baselineCommitErrors, extraRepoKeyErrors, gitWorkTreeError, parseCodeRef, workflowBaselineForModule, type CodeRef } from "./aidlc-baseline";
 import { codeRefRepo, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
 import { declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
+import { deletionTraceText } from "./aidlc-source-deletions";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
 import { readUiGenerationLock, verifyUiGenerationAcceptance, verifyUiGenerationLockAtBaseline, type UiDesignRoute } from "./aidlc-ui-governance";
 import { type WorkflowState } from "./aidlc-light-state";
@@ -958,7 +959,7 @@ function lightweightScopeMatrix(
       const codeFiles = codeRoots!.origin === "default"
         ? projectFiles(SOURCE_FILE_PATTERN)
         : [...new Set(codeRoots!.roots.flatMap((root) => allFiles(root, SOURCE_FILE_PATTERN)))].sort();
-      const codeSrc = joined(codeFiles);
+      const codeSrc = joined(codeFiles) + "\n" + deletionTraceText(ROOT, ACTIVE_MODULE, ACTIVE_UNIT);
       const anchors = [...new Set(anchoredNew.map((id) => anchorRefs.get(id)!))];
       const referenced = anchors.filter((anchor) => new RegExp(`\\b${anchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(codeSrc));
       if (referenced.length === 0) {
@@ -3599,7 +3600,7 @@ function traceabilityMatrix(): Record<string, unknown> {
   const codeFiles = codeRoots.origin === "default"
     ? projectFiles(SOURCE_FILE_PATTERN)
     : [...new Set(codeRoots.roots.flatMap((root) => allFiles(root, SOURCE_FILE_PATTERN)))].sort();
-  const codeSrc = joined(codeFiles);
+  const codeSrc = joined(codeFiles) + "\n" + deletionTraceText(ROOT, ACTIVE_MODULE, ACTIVE_UNIT);
   const testSrc = joined(projectFiles(TEST_FILE_PATTERN));
 
   const layerText: Record<string, string> = {

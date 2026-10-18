@@ -70,7 +70,7 @@ try {
  const delta=project("delta");put(delta,"src/old.js","console.log(0)\n");put(delta,"src/keep.js","console.log(1)\n");git(delta,"add","src");git(delta,"-c","user.name=Test","-c","user.email=test@example.invalid","commit","-qm","sources");
  const ds=loadWorkflowState(delta)!;ds.baseline_commit=git(delta,"rev-parse","HEAD");ds.baseline_source="created";saveFixtureState(delta,ds);
  assert.ok(probe(delta,"src/",true).produces.length,"unchanged existing source cannot satisfy unit delta");
- rmSync(join(delta,"src/old.js"));assert.ok(probe(delta,"src/",true).produces.length,"deleting a file cannot make unchanged surviving source count as a delivered delta");
+ rmSync(join(delta,"src/old.js"));assert.ok(probe(delta,"src/",true).produces.length,"deletion without baseline/requirement/behavior ownership evidence cannot claim a delivery; verified removals are covered in MARS-252");
  put(delta,"src/keep.js","console.log(2)\n");assert.equal(probe(delta,"src/",true).produces.length,0,"deletion plus real small source delta stays valid");
  put(delta,"src/keep.js","// padded placeholder only, no actual implementation\n");assert.ok(probe(delta,"src/",true).produces.length,"comment-only changed source is not a delivery");
  console.log("PASS source/config/document positive and negative produces/consumes and no-todo");

@@ -125,3 +125,7 @@ I13 中 `tdd_mode: characterization` 的 UC-D 描述要保留的存量行为（I
 - 放行质量门禁；
 - 宣布 C8 或 Construction 完成；
 - 手动写入 evidence 文件绕过实际执行。
+
+## 无行为观察复用
+
+无行为替代验证的每个阶段必须有真实成功执行记录，或带有效 `reused_from` / `observation_id` 的可复核受绑定观察；无需重复启动同一检查进程。命令、输入、scope、环境、I13/单元声明或基线世代漂移时必须重跑。业务 RED/GREEN 仍独立执行，禁止复用替代检查观察来代替业务断言。
