@@ -132,6 +132,19 @@ function cliResolve(fixture: Fixture, head: string, path: string): Record<string
 }
 
 try {
+  for (const [name, severity, expected] of [
+    ["suggestion-open", { critical_open: 0, important_open: 0, suggestion_open: 1 }, "verified"],
+    ["critical-open", { critical_open: 1, important_open: 0, suggestion_open: 0 }, "unverifiable"],
+    ["important-open", { critical_open: 0, important_open: 1, suggestion_open: 0 }, "unverifiable"],
+  ] as const) {
+    const fixture = changedRepository(name);
+    writeEvidence(fixture, "review-evidence", { ...reviewRecord(["src/unit.ts"]), timestamp: new Date(now - 25 * 3600_000).toISOString(), issues_found: 1, issues_open: 1, issues_by_severity: severity });
+    const head = commit(fixture.repo, "severity review evidence");
+    assert.equal(resolveFixture(fixture, head).status, expected);
+    if (expected === "verified") {
+      assert.notEqual(resolveCommitDiffAttestations({ repository_root: fixture.repo, base: fixture.base, head, now, max_evidence_age_ms: 24 * 3600_000 }).status, "verified", "explicit external freshness window remains effective");
+    }
+  }
   {
     const fixture = changedRepository("verified");
     writeEvidence(fixture, "review-evidence", reviewRecord(["src/unit.ts"]));

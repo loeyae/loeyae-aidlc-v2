@@ -1,3 +1,4 @@
+import { evidenceTimeError, isEvidenceTimestamp as isIsoDate } from "./aidlc-evidence-policy";
 /**
  * Read-only evidence reuse and validation scheduling for MARS-161 Phase 5.
  *
@@ -49,6 +50,7 @@ export interface EvidenceValidationPlanEntry {
   readonly disposition: EvidenceReuseDisposition;
   readonly reason: EvidenceReuseReason;
   readonly evidence?: EvidenceMetadata;
+  readonly validation_errors?: readonly string[];
 }
 
 export interface EvidenceReusePlan {
@@ -79,22 +81,13 @@ export interface BuildEvidenceReusePlanInput {
   readonly target?: { readonly stage_slug: string; readonly instance_id: string; readonly axis: ExecutionAxis; readonly module_id?: string; readonly unit_id?: string };
   /** Current provenance of target, calculated by the engine at dispatch time. */
   readonly expectedSourceRevision?: SourceRevision;
+  /** Engine semantic gate results for this exact target, checked before issuing the plan. */
+  readonly sensorFailures?: readonly { sensor: string; message: string }[];
   /** Injected for deterministic tests and reproducible plan rendering. */
   readonly now: string;
   /** Reuse the already-computed Phase-4 plan when one exists. */
   readonly ruleLoadPlan?: RuleLoadPlan;
 }
-
-const MAX_EVIDENCE_AGE_MS = 24 * 60 * 60 * 1000;
-
-// These evidence types encode a transition observation.  Reusing them for a
-// later transition is unsafe even when the file itself is fresh.
-const MANDATORY_REFRESH_SENSORS = new Set<string>([
-  "red-test-evidence",
-  "green-test-evidence",
-  "baseline-test-evidence",
-  "build-test-evidence",
-]);
 
 type JsonRecord = Record<string, unknown>;
 
@@ -110,16 +103,6 @@ function profileForPlan(profile: ExecutionProfile | undefined): EvidenceReusePla
   return profile === undefined
     ? { level: "standard", provenance: "legacy_standard_default" }
     : { level: profile.level, provenance: "persisted_execution_profile" };
-}
-
-function isIsoDate(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.exec(value);
-  if (!match) return false;
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match;
-  const [year, month, day, hour, minute, second] = [yearText, monthText, dayText, hourText, minuteText, secondText].map(Number);
-  const calendar = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
-  return calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month - 1 && calendar.getUTCDate() === day && hour < 24 && minute < 60 && second < 60 && Number.isFinite(Date.parse(value));
 }
 
 interface CandidateResult {
@@ -172,11 +155,10 @@ function candidateForSensor(
         }
       }
       const checker = isRecord(value.checker) ? value.checker : undefined;
-      if (checker?.id !== `builtin:${sensor}` || checker.sensor !== sensor || checker.status !== "passed" || checker.exit_code !== 0 || typeof checker.argv_digest !== "string" || !/^[a-f0-9]{64}$/.test(checker.argv_digest)) return { failure: "invalid_evidence" };
+      if (sensor !== "build-test-evidence" && (checker?.id !== `builtin:${sensor}` || checker.sensor !== sensor || checker.status !== "passed" || checker.exit_code !== 0 || typeof checker.argv_digest !== "string" || !/^[a-f0-9]{64}$/.test(checker.argv_digest))) return { failure: "invalid_evidence" };
       const timestamp = value.timestamp;
-      const age = nowMs - Date.parse(timestamp);
-      if (age > MAX_EVIDENCE_AGE_MS) return { failure: "stale_evidence" };
-      if (age < -60_000) return { failure: "future_evidence" };
+      const timeError = evidenceTimeError(value, sensor, nowMs);
+      if (timeError) return { failure: timeError.includes("stale") ? "stale_evidence" : timeError.includes("future") ? "future_evidence" : "invalid_evidence" };
       return {
         metadata: {
           path: relativePortable(projectRoot, path),
@@ -231,11 +213,13 @@ export function buildEvidenceReusePlan(graph: StageGraph, input: BuildEvidenceRe
   for (const stage of stages) {
     for (const sensor of [...stage.sensors].sort()) {
       const mandatory = isMandatory(stage, rulePlan);
-      const mandatoryRefresh = MANDATORY_REFRESH_SENSORS.has(sensor);
       const candidate = candidateForSensor(root, stage, sensor, evidenceScope, nowMs, input.target, input.expectedSourceRevision);
-      if (mandatoryRefresh) {
-        entries.push({ stage_slug: stage.slug, sensor, mandatory, mandatory_refresh: true, disposition: "revalidate", reason: "mandatory_refresh", ...(candidate.metadata ? { evidence: candidate.metadata } : {}) });
-      } else if (candidate.metadata !== undefined) {
+      const gateErrors = input.target?.stage_slug === stage.slug ? input.sensorFailures?.filter(failure => failure.sensor === sensor).map(failure => failure.message) : undefined;
+      if (gateErrors?.length) {
+        entries.push({ stage_slug: stage.slug, sensor, mandatory, mandatory_refresh: false, disposition: "revalidate", reason: candidate.failure ?? "invalid_evidence", validation_errors: gateErrors });
+        continue;
+      }
+      if (candidate.metadata !== undefined) {
         entries.push({
           stage_slug: stage.slug,
           sensor,

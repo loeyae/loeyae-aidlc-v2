@@ -1,3 +1,4 @@
+import { evidenceTimeError, reviewIssueErrors } from "./aidlc-evidence-policy";
 import { createHash } from "node:crypto";
 import { runSync } from "./aidlc-spawn";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
@@ -28,8 +29,6 @@ const DIGEST_PATTERN = /^[a-f0-9]{64}$/i;
 const CONTEXT_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62})$/;
 const MAX_EVIDENCE_BYTES = 512 * 1024;
 const MAX_GIT_OUTPUT_BYTES = 64 * 1024 * 1024;
-const DEFAULT_MAX_EVIDENCE_AGE_MS = 24 * 60 * 60 * 1000;
-const FUTURE_CLOCK_SKEW_MS = 60 * 1000;
 
 export interface AttestationResolverOptions {
   repository_root?: string;
@@ -316,11 +315,8 @@ function validateReview(record: Record<string, unknown>): CoveragePath[] {
   nonEmpty(record.reviewer, "reviewer");
   const coverage = parseCoverage(record, true);
   if (coverage.length === 0) throw new Error("review files_reviewed must be non-empty");
-  const found = integer(record.issues_found, "issues_found");
-  const resolved = integer(record.issues_resolved, "issues_resolved");
-  const open = integer(record.issues_open, "issues_open");
-  if (resolved < found) throw new Error("review issues_resolved must be >= issues_found");
-  if (open !== 0) throw new Error("review issues_open must be 0");
+  const issueErrors = reviewIssueErrors(record);
+  if (issueErrors.length) throw new Error(issueErrors.join("; "));
   return coverage;
 }
 
@@ -369,7 +365,7 @@ function sourceRevisionCheck(
   reader: GitObjectReader,
   headCommit: string,
   now: number,
-  maxAgeMs: number,
+  maxAgeMs: number | undefined,
   treeDigest: () => { value?: string; error?: string },
 ): SourceCheck {
   const basis: string[] = [];
@@ -412,12 +408,11 @@ function sourceRevisionCheck(
   basis.push("source_revision.dirty is false");
   basis.push("source_revision.worktree_digest matches the inspected commit tree");
 
-  const timestamp = nonEmpty(record.timestamp, "timestamp");
-  const time = Date.parse(timestamp);
-  if (Number.isNaN(time)) return { status: "unverifiable", trust_basis: ["attestation timestamp is not a valid ISO date"] };
-  if (time - now > FUTURE_CLOCK_SKEW_MS) return { status: "unverifiable", trust_basis: ["attestation timestamp is in the future"] };
-  if (now - time > maxAgeMs) return { status: "drifted", trust_basis: [`attestation is older than the configured freshness window of ${maxAgeMs}ms`] };
-  basis.push("attestation timestamp is valid and within the freshness window");
+  const checker = record.checker as Record<string, unknown> | undefined;
+  const sensor = typeof checker?.sensor === "string" ? checker.sensor : record.spec_axis !== undefined ? "review-evidence" : Array.isArray(record.commands) ? "build-test-evidence" : "unknown";
+  const timeError = evidenceTimeError(record, sensor, now, maxAgeMs);
+  if (timeError) return { status: timeError.includes("stale") ? "drifted" : "unverifiable", trust_basis: [timeError] };
+  basis.push("attestation timestamp satisfies the semantic freshness policy");
   return { status: "verified", trust_basis: basis };
 }
 
@@ -452,7 +447,7 @@ function inspectCandidate(
   context: UnitContext,
   headCommit: string,
   now: number,
-  maxAgeMs: number,
+  maxAgeMs: number | undefined,
   treeDigest: () => { value?: string; error?: string },
 ): EvidenceCandidate {
   const basis: string[] = [`evidence was read from head commit tree at ${context.evidence_path}`];
@@ -903,8 +898,8 @@ export function resolveCommitDiffAttestations(options: AttestationResolverOption
           ? Date.parse(options.now)
           : Date.now();
     if (!Number.isFinite(now)) throw new Error("resolver evaluation time is invalid");
-    const maxAgeMs = options.max_evidence_age_ms ?? DEFAULT_MAX_EVIDENCE_AGE_MS;
-    if (!Number.isInteger(maxAgeMs) || maxAgeMs < 0) throw new Error("max_evidence_age_ms must be a non-negative integer");
+    const maxAgeMs = options.max_evidence_age_ms;
+    if (maxAgeMs !== undefined && (!Number.isInteger(maxAgeMs) || maxAgeMs < 0)) throw new Error("max_evidence_age_ms must be a non-negative integer");
     const candidates: EvidenceCandidate[] = [];
     for (const entry of headTree) {
       if (!entry.path.startsWith(".aidlc/evidence/") || !entry.path.endsWith(".json")) continue;

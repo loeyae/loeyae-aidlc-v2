@@ -9,6 +9,7 @@ import { artifactConsistency, dependencyReadiness, fieldCapability, storyRuleCon
 import { qualityUiCheck } from "./aidlc-quality-ui";
 import { deliveryReadiness } from "./aidlc-quality-delivery";
 import { runSync } from "./aidlc-spawn";
+import { reviewIssueErrors } from "./aidlc-evidence-policy";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "fs";
 import { basename, dirname, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
@@ -580,10 +581,10 @@ function reviewEvidence(): Record<string, unknown> {
   files.push(...allFiles("docs/aidlc/construction/audit", /\.md$/));
   if (files.length === 0) fail("no code review record found");
   const content = joined(files);
-  noUnresolved(content);
   if (!section(content, [/spec/i, /规格/]) || !section(content, [/standards/i, /规范/])) fail("review record must contain Spec and Standards axes");
   if (!section(content, [/passed/i, /通过/, /无需修复/, /已修复并复审通过/])) fail("review record has no passed conclusion");
-  if (/未通过|blocked|阻断/i.test(content)) fail("review record contains a blocking conclusion");
+  const conclusions = content.replace(/(?:不|非)阻断|non[- ]blocking/gi, "");
+  if (/未通过|\bblocked\b|阻断/i.test(conclusions)) fail("review record contains a blocking conclusion");
   const reviewer = content.match(/(?:reviewer|审查者|审查人|reviewed\s+by)\s*[:：]\s*([^\n]+)/i)?.[1]?.trim();
   if (!reviewer) fail("reviewer identity is missing");
   const found = content.match(/(?:issues?_found|发现问题|问题数)\s*[:：]?\s*(\d+)/i)?.[1];
@@ -592,8 +593,14 @@ function reviewEvidence(): Record<string, unknown> {
   if (found === undefined || resolved === undefined) fail("review record must contain issue counts");
   const filesReviewed = [...new Set(content.match(/(?:src|app|lib|test|tests|docs)\/[^\s`),]+/g) || [])];
   if (filesReviewed.length === 0) fail("review record must identify reviewed files");
-  if (Number(resolved) < Number(found) || Number(open) !== 0) fail("review issues are not fully resolved");
-  return { status: "passed", spec_axis: "passed", standards_axis: "passed", reviewer, files_reviewed: filesReviewed, issues_found: Number(found), issues_resolved: Number(resolved), issues_open: Number(open) };
+  const severityKeys = ["critical_open", "important_open", "suggestion_open"];
+  const values = severityKeys.map(key => declaredValue(content, key));
+  const severity = values.some(value => value !== undefined)
+    ? { issues_by_severity: Object.fromEntries(severityKeys.map((key, index) => [key, values[index] === undefined ? NaN : Number(values[index])])) } : {};
+  const result = { status: "passed", spec_axis: "passed", standards_axis: "passed", reviewer, files_reviewed: filesReviewed, issues_found: Number(found), issues_resolved: Number(resolved), issues_open: Number(open), ...severity };
+  const errors = reviewIssueErrors(result);
+  if (errors.length) fail(errors.join("; "));
+  return result;
 }
 
 /** `key: value` declared on its own line (optionally as a list item, bold, or code). */
@@ -641,7 +648,8 @@ function testCaseDerivation(): Record<string, unknown> {
     if (!["pure-declaration", "pure-style", "pure-configuration", "approved-exception"].includes(String(exemption.reason_code))) fail("non-applicable.reason_code must be pure-declaration, pure-style, pure-configuration, or approved-exception");
     for (const field of ["reason_code", "reason", "approval_ref", "alternative_validation", "validation_command"]) stringValue(exemption[field], `non-applicable.${field}`);
     const refs = stringArray(exemption.source_refs, "non-applicable.source_refs");
-    return { status: "not_applicable", applicability: "not_applicable", reason_code: exemption.reason_code, reason: exemption.reason, approval_ref: exemption.approval_ref, alternative_validation: exemption.alternative_validation, validation_command: exemption.validation_command, source_refs: refs, source_files: sourcePaths.map(relativePath), test_case_files: [] };
+    const applicabilityInputsDigest = createHash("sha256").update(JSON.stringify([...sourcePaths, exemptionPath].sort().map(path => [relativePath(path), text(path)]))).digest("hex");
+    return { status: "not_applicable", applicability: "not_applicable", applicability_inputs_digest: applicabilityInputsDigest, reason_code: exemption.reason_code, reason: exemption.reason, approval_ref: exemption.approval_ref, alternative_validation: exemption.alternative_validation, validation_command: exemption.validation_command, source_refs: refs, source_files: sourcePaths.map(relativePath), test_case_files: [] };
   }
   if (!existsSync(indexPath)) fail(`I13 requires test case index: ${relativePath(indexPath)}`);
   const idsFound = [...new Set((caseContent.match(/\bUC-D-\d+\b/g) || []))];
