@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.22.1 — 2026-10-18
+
+- Initialize split and module workflows through a controlled capability under the source session lock, resolving valid session binding conflicts during initialization (MARS-245).
+- Preserve stale-binding write rejection, source and destination race protection, and failure rollback across workflow, registry and evidence publication.
+- Synchronize package, plugin, marketplace and stage-graph versions; regenerate all nine harness distributions.
+
 ## 4.22.0 — 2026-10-17
 
 - Retire workflow-level subagent orchestration, fixed personas and subagent-result gates; leave execution strategy to the host while preserving review, TDD and approval requirements (MARS-244).
