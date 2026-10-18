@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.22.2 — 2026-10-18
+
+- Apply validation according to trusted I13/unit applicability; allow real deterministic checks with zero tests for approved no-behavior work while retaining business-test gates (MARS-249).
+- Reverify source-bound historical evidence without unconditional time expiry; reuse alternative validation only while its source, command, environment and context remain valid.
+- Allow open suggestions in passing dual-axis reviews while unresolved critical/important or unknown-severity legacy findings remain blocking.
+- Align TDD guidance with observable behavior, characterization and project warning policy; keep read-only requirements within their approved data-source and write scope.
+- Synchronize package, plugin, marketplace and stage-graph versions; regenerate all nine harness distributions.
+
 ## 4.22.1 — 2026-10-18
 
 - Initialize split and module workflows through a controlled capability under the source session lock, resolving valid session binding conflicts during initialization (MARS-245).
