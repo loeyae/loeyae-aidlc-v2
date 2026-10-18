@@ -4,6 +4,20 @@ export const HISTORICAL_EVIDENCE = new Set([
   "build-test-evidence", "review-evidence", "test-case-derivation", "test-quality",
 ]);
 
+/** Local deterministic checks: content, command and provenance gates, not age, govern reuse.
+ * Recovery/provider/external observations and unknown sensors retain the 24h default.
+ */
+export const CONTENT_BOUND_EVIDENCE = new Set([
+  ...HISTORICAL_EVIDENCE,
+  "document-slice-consistency", "contract-baseline", "functional-design-completeness",
+  "nfr-coverage", "infrastructure-completeness", "implementation-report",
+  "frontend-platform-spec", "template-completeness", "prd-completeness",
+  "diagram-contract", "design-intent-coverage", "ui-design-alignment",
+  "ui-artifact-consistency", "inception-consistency", "traceability-matrix", "structural-invariants",
+  "quality-change-impact", "dependency-readiness", "field-capability",
+  "story-rule-consistency", "ui-behavior-consistency", "artifact-consistency", "delivery-readiness",
+]);
+
 export function isEvidenceTimestamp(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.exec(value);
@@ -14,12 +28,12 @@ export function isEvidenceTimestamp(value: unknown): value is string {
     && hour < 24 && minute < 60 && second < 60 && Number.isFinite(Date.parse(value));
 }
 
-/** Explicit environment windows may tighten historical evidence; other sensors keep 24h. */
+/** Explicit external/environment windows may tighten any content-bound observation. */
 export function evidenceTimeError(record: Record<string, unknown>, sensor: string, now = Date.now(), maxAgeMs?: number): string | null {
   if (!isEvidenceTimestamp(record.timestamp)) return "evidence timestamp is not a valid ISO date";
   const age = now - Date.parse(record.timestamp);
   if (age < -60_000) return "evidence timestamp is in the future";
-  let limit = maxAgeMs ?? (HISTORICAL_EVIDENCE.has(sensor) ? Infinity : 24 * 3600_000);
+  let limit = maxAgeMs ?? (CONTENT_BOUND_EVIDENCE.has(sensor) ? Infinity : 24 * 3600_000);
   if (record.freshness !== undefined) {
     const policy = record.freshness as Record<string, unknown> | null;
     if (!policy || policy.kind !== "external" || typeof policy.reason !== "string" || !policy.reason.trim()

@@ -55,7 +55,7 @@ and no unresolved infrastructure gaps remain.
 | `unresolved` | Must be 0 |
 | `resources_enumerated` | Non-empty array; each entry needs `name`, `type` (non-empty), `provisioned` = `true` |
 | `rollback_strategy` | Non-empty string |
-| `timestamp` | Valid ISO, < 24h old |
+| `timestamp` | Valid ISO; content/command/provenance bound, no time-only expiry |
 
 ## Producer Responsibility
 

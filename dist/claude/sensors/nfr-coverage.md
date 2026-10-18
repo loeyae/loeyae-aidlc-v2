@@ -55,7 +55,7 @@ acceptance criterion and verified as achievable.
 | `nfr_items[].category` | Non-empty string (performance/security/reliability/...) |
 | `nfr_items[].acceptance_criterion` | Non-empty string |
 | `nfr_items[].verified` | Must be `true` |
-| `timestamp` | Valid ISO, < 24h old |
+| `timestamp` | Valid ISO; content/command/provenance bound, no time-only expiry |
 
 ## Producer Responsibility
 

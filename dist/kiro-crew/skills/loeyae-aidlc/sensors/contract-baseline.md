@@ -43,7 +43,7 @@ compatibility, and a hash allows detecting unauthorized changes.
 | `consumers` | Non-empty string array (at least one consumer) |
 | `schema_hash` | Non-empty string (integrity fingerprint) |
 | `validation_status` | Must be `"passed"` |
-| `timestamp` | Valid ISO, < 24h old |
+| `timestamp` | Valid ISO; content/command/provenance bound, no time-only expiry |
 
 ## Producer Responsibility
 

@@ -64,7 +64,7 @@ For a unit with no executable business behavior, the controlled evidence may ins
 | `baseline_seen` | Must be `true` when I13 declares a `tdd_mode: characterization` UC-D |
 | `traceability_complete` | Must be `true` |
 | `uc_mapping` | Non-empty for executable behavior; empty only for `not_applicable` |
-| `timestamp` | Valid ISO, < 24h old |
+| `timestamp` | Valid ISO; content/command/provenance bound, no time-only expiry |
 | `ucd_coverage` | 4.8.0, project axis (build-and-test) only, present when an I13 declares `ucd_units`: `[{ module_id, ucd_units, status: "passed" }]` |
 
 ### Unit scope and module reconciliation (4.8.0)

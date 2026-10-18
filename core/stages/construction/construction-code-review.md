@@ -215,7 +215,7 @@ requires: [code-generation]
 - [ ] 用户故事中的每个验收标准都已满足
 - [ ] 接口契约中定义的每个端点/方法都已实现
 - [ ] 错误处理覆盖了规格中定义的所有异常场景
-- [ ] **测试用例点覆盖**：本单元涉及的每个 UC-D-xxx（来自 `inception/application-design/test-cases/`）都有对应的 @TestCaseId 测试
+- [ ] **测试用例点覆盖**：本单元涉及的每个 UC-D-xxx（来自 `inception/application-design/test-cases/`）都有对应的真实测试（标记或可信 suite/方法 `uc_mapping`）
 - [ ] **用例点状态**：所有涉及的 UC-D 的 `status` 非 `blocked`（blocked 的须已在 I13 列入待产品决策清单）
 
 ### 准确性（偏差检查）
@@ -403,7 +403,7 @@ requires: [code-generation]
 ### 非功能需求
 - [ ] 性能要求满足（如有）
 - [ ] 安全要求满足
-- [ ] 日志和监控就位
+- [ ] 仅按需求、已批准部署决策和项目现有交付范围检查所需日志、可观测性制品与策略；纯库、本地工具或无此需求时记为不适用，不要求额外监控设施。不执行生产部署，不接管部署后的监控、告警或事故响应
 
 ### 测试完整性
 - [ ] 单元测试覆盖率达标
@@ -412,17 +412,19 @@ requires: [code-generation]
 
 ### 用例点对账（强制门禁，未通过 = Construction 未完成）
 
+统计范围为本次选择的需求/可观察行为验收与实际影响范围：单元审查使用当前单元所选 UC-D，全局审查汇总本次选定单元。未受影响的历史测试不因全局审查而新增标签或逐函数测试义务；选定 UC-D 的实际缺覆盖、失败或未裁决 blocked 仍阻断。
+
 #### 对账① 设计覆盖（每个单元功能设计阶段执行，此处全局复核）
 - [ ] I13 产出的每个 UC-D-xxx，都能在功能设计文档中找到对应的实现设计
 - [ ] 无 UC-D 处于 `blocked` 状态未裁决（blocked 须有产品决策记录）
 
 #### 对账② 测试映射（末尾强制）
-- [ ] 每个 UC-D-xxx 都有至少一个带用例点标记的测试
-- [ ] 所有标记测试全部通过（0 失败）
+- [ ] 本次选择的需求/可观察行为及实际影响范围内，每个 UC-D-xxx 都有至少一个真实测试；可复用已有 suite/测试方法的可信 `uc_mapping`，不要求未受影响测试补注解或逐函数新增测试
+- [ ] 所选 UC-D 的真实测试全部通过（0 失败），覆盖和执行状态可由受控证据机器复核；结构化不适用范围按 I13 替代验证检查
 - [ ] 用例点覆盖统计：`已覆盖 UC-D 数 / 总 UC-D 数 = X/Y`，X=Y 才通过
 
 **对账未通过处理**：
-- 缺测试：回 TDD 补 RED 测试（带 @TestCaseId）
+- 缺覆盖：回 TDD 补真实 RED/BASELINE 测试或核验已有测试映射；不得用措辞放行
 - 测试失败：修复实现，不是改测试期望
 - 用例点 blocked：回 I13 待产品决策清单，不得绕过
 
@@ -430,37 +432,7 @@ requires: [code-generation]
 
 **机器校验辅助**（推荐实施，降低纯纪律门禁风险）：
 
-项目中可添加如下最小校验脚本，在对账②时执行：
-
-```bash
-#!/bin/bash
-# test-case-reconciliation-check.sh
-# 用途：对比 _index.md 中的 UC-D 清单与测试文件中的标记，输出差集
-
-# 1. 从 _index.md 提取所有 UC-D 编号
-INDEX_FILE="docs/aidlc/modules/{module-id}/inception/application-design/test-cases/_index.md"
-EXPECTED=$(grep -oP 'UC-D-\d+' "$INDEX_FILE" | sort -u)
-
-# 2. 从测试文件中提取所有已标记的 UC-D 编号
-# 后端（Java/Kotlin）
-BACKEND=$(grep -rhoP 'UC-D-\d+' src/test/ | sort -u)
-# 前端（TypeScript/JavaScript）
-FRONTEND=$(grep -rhoP 'UC-D-\d+' tests/ src/**/*.spec.* | sort -u)
-
-COVERED=$(echo -e "${BACKEND}\n${FRONTEND}" | sort -u)
-
-# 3. 输出差集
-echo "=== 未覆盖的 UC-D ==="
-comm -23 <(echo "$EXPECTED") <(echo "$COVERED")
-
-echo "=== 覆盖统计 ==="
-TOTAL=$(echo "$EXPECTED" | wc -l)
-HIT=$(comm -12 <(echo "$EXPECTED") <(echo "$COVERED") | wc -l)
-echo "已覆盖: $HIT / $TOTAL"
-[ "$HIT" -eq "$TOTAL" ] && echo "✅ 对账通过" || echo "🔴 对账未通过"
-```
-
-> 此脚本为参考实现，项目可根据技术栈调整路径和正则。后续可升级为 MCP skill 提供更精确的 AST 级校验。
+对账以当前单元 I13 的所选 UC-D 与受控 GREEN/BASELINE `uc_mapping`、真实执行状态为准；全局审查汇总选定单元的结果。可复用已存在的 suite/测试方法映射。仅扫描全仓测试标签的脚本不能证明测试被执行或通过，也不能作为缺覆盖时的放行依据。未受影响的存量测试和工具测试无需补标签。
 
 **对账纪律**：
 - ❌ 不得为通过对账而删除/跳过 UC-D

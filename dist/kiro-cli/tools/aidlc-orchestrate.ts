@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { evidenceTimeError, reviewIssueErrors } from "./aidlc-evidence-policy";
-import { evidenceFreshnessBindingErrors } from "./aidlc-evidence";
+import { frontendPlatformPayload } from "./aidlc-frontend-platform";
+import { alternativeCheckBindingErrors, evidenceFreshnessBindingErrors, semanticCommandArgv } from "./aidlc-evidence";
 import { claimToken } from "./aidlc-session";
 import { retireExecutionCheckpoint } from "./aidlc-retire-execution";
 import { assertSessionClaim, sessionBinding, withSessionPublication } from "./aidlc-light-state";
@@ -1488,6 +1489,7 @@ function validateEvidence(
       if (checker.id !== `builtin:${sensor}`) errors.push(`checker.id must be builtin:${sensor}`);
       if (checker.sensor !== sensor) errors.push(`checker.sensor must be ${sensor}`);
       if (!/^[a-f0-9]{64}$/.test(String(checker.argv_digest || ""))) errors.push("checker.argv_digest must be a SHA-256 digest");
+      if (checker.command_version !== undefined && (checker.command_version !== 2 || checker.argv_digest !== argvDigest(semanticCommandArgv(sensor, { current_module: instance?.module_id, current_unit: instance?.unit_id })))) errors.push("semantic checker command no longer matches the controlled producer");
       if (asNumber(checker.exit_code) !== 0 || checker.status !== "passed") errors.push("checker execution must have passed with exit_code 0");
     }
   }
@@ -2000,6 +2002,7 @@ function phaseEvidenceErrors(
   applicability: { any: boolean; allNotApplicable: boolean },
   stageSlug: string,
   instance: StageInstance,
+  state: WorkflowState,
   requireCurrentBaselineEpoch = false,
 ): string[] {
   const errors: string[] = [];
@@ -2054,6 +2057,7 @@ function phaseEvidenceErrors(
       try {
         const current = allowlistedAlternativeCommand(stageSlug);
         if (execution.argv_digest !== current.argv_digest || execution.id !== current.id || execution.cwd !== current.cwd) errors.push("alternative validation no longer matches its allowlisted command");
+        errors.push(...alternativeCheckBindingErrors(execution, stageSlug, state));
         if (asRecord(evidence.checker)?.argv_digest !== argvDigest(["I13-not-applicable", phase, current.argv_digest])) errors.push("alternative checker digest does not match its command binding");
       } catch (error) { errors.push(String(error)); }
     }
@@ -2462,21 +2466,21 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
       case "red-test-evidence": {
         const applicability = i13Applicability(instance);
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "RED", applicability, stage.slug, instance), options);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "RED", applicability, stage.slug, instance, state), options);
         if (failure) failures.push(failure);
         break;
       }
 
       case "baseline-test-evidence": {
         const applicability = i13Applicability(instance);
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "BASELINE", applicability, stage.slug, instance, options.requireCurrentBaselineEpoch === true), options);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "BASELINE", applicability, stage.slug, instance, state, options.requireCurrentBaselineEpoch === true), options);
         if (failure) failures.push(failure);
         break;
       }
 
       case "green-test-evidence": {
         const applicability = i13Applicability(instance);
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "GREEN", applicability, stage.slug, instance), options);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "GREEN", applicability, stage.slug, instance, state), options);
         if (failure) failures.push(failure);
         break;
       }
@@ -3002,12 +3006,15 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
         const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
           if (evidence.status !== "passed") errors.push('status must be "passed"');
-          const layout = asStringArray(evidence.layout_primitives);
-          const components = asStringArray(evidence.component_mapping);
-          const css = asStringArray(evidence.css_constraints);
-          if (!layout || layout.length < 3) errors.push("layout_primitives must contain at least 3 entries");
-          if (!components || components.length < 5) errors.push("component_mapping must contain at least 5 entries");
-          if (!css || css.length < 3) errors.push("css_constraints must contain at least 3 entries");
+          try {
+            const path = instance.module_id && instance.unit_id
+              ? `docs/aidlc/modules/${instance.module_id}/construction/${instance.unit_id}/frontend-platform-spec.md`
+              : "docs/aidlc/frontend-platform-spec.md";
+            const current = frontendPlatformPayload(PROJECT_ROOT, path, instance.module_id);
+            for (const key of Object.keys(current)) if (JSON.stringify(evidence[key]) !== JSON.stringify(current[key])) {
+              errors.push(`frontend platform ${key} differs from actual approved mappings; regenerate evidence (legacy Markdown tables remain supported)`);
+            }
+          } catch (error) { errors.push(String(error)); }
           return errors;
         });
         if (failure) failures.push(failure);

@@ -47,7 +47,7 @@ rubber-stamping.
 | `issues_found` | Non-negative integer |
 | `issues_resolved` | Non-negative integer, >= `issues_found` |
 | `issues_open` | Must be 0 |
-| `timestamp` | Valid ISO, < 24h old |
+| `timestamp` | Valid ISO; content/command/provenance bound, no time-only expiry |
 
 ## Producer Responsibility
 
