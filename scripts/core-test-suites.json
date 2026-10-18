@@ -40,6 +40,10 @@
   ],
   [
     "tsx",
+    "tests/test_mars249_validation_policy.ts"
+  ],
+  [
+    "tsx",
     "tests/test_i13_case_root.ts"
   ],
   [

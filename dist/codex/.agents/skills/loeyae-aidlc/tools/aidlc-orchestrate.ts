@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import { evidenceTimeError, reviewIssueErrors } from "./aidlc-evidence-policy";
+import { evidenceFreshnessBindingErrors } from "./aidlc-evidence";
 import { claimToken } from "./aidlc-session";
 import { retireExecutionCheckpoint } from "./aidlc-retire-execution";
 import { assertSessionClaim, sessionBinding, withSessionPublication } from "./aidlc-light-state";
@@ -33,7 +35,7 @@ import { overflowDirective, recordedSubprocessOverflow, runSync, SubprocessOverf
 import { createRequire } from "module";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
-import { SEMANTIC_SENSORS, allowlistedPhaseCommand, argvDigest, i13CodeRefBlobs, i13UcdIdsByMode, phaseNotRequiredDigest, phaseObservationDigest, ucdExemptionDigest, unitUcdExemption, type Phase } from "./aidlc-evidence";
+import { buildTestEvidenceErrors, SEMANTIC_SENSORS, allowlistedAlternativeCommand, allowlistedPhaseCommand, argvDigest, i13CodeRefBlobs, i13UcdIdsByMode, phaseNotRequiredDigest, phaseObservationDigest, ucdExemptionDigest, unitUcdExemption, type Phase } from "./aidlc-evidence";
 import { QUALITY_SENSORS, qualityAdoption, qualityEvidenceErrors, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
 import { controlledQualityErrors, developmentAcceptanceErrors } from "./aidlc-quality-delivery";
 import { CANONICAL_SOURCE_PATTERN, SOURCE_ROOTS_CONFIG, declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
@@ -1284,8 +1286,7 @@ type Evidence = Record<string, unknown>;
 /** Maximum evidence file size: 512 KB. Prevents unbounded JSON injection. */
 const MAX_EVIDENCE_BYTES = 512 * 1024;
 
-/** Maximum evidence staleness: 24 hours. Older evidence is rejected. */
-const MAX_EVIDENCE_AGE_MS = 24 * 60 * 60 * 1000;
+
 
 function evidencePath(stage: StageNode, sensor: string, instance?: StageInstance): string {
   if (!instance || (instance.axis === "project" && stage.axis !== "project")) {
@@ -1324,21 +1325,8 @@ function loadEvidence(stage: StageNode, sensor: string, instance?: StageInstance
       throw new Error('evidence_version must be "1"');
     }
 
-    // Timestamp freshness check
-    if (typeof value.timestamp !== "string" || value.timestamp.length === 0) {
-      throw new Error("evidence must include a non-empty ISO timestamp field");
-    }
-    const evidenceTime = new Date(value.timestamp as string).getTime();
-    if (Number.isNaN(evidenceTime)) {
-      throw new Error("evidence timestamp is not a valid ISO date");
-    }
-    const age = Date.now() - evidenceTime;
-    if (age > MAX_EVIDENCE_AGE_MS) {
-      throw new Error(`evidence is stale (${Math.round(age / 3600000)}h old, max 24h). Re-run the producer.`);
-    }
-    if (age < -60000) {
-      throw new Error("evidence timestamp is in the future — clock skew or tampered");
-    }
+    const timeError = evidenceTimeError(value, sensor);
+    if (timeError) throw new Error(timeError);
 
     return { value };
   } catch (error) {
@@ -1438,6 +1426,7 @@ function validateEvidence(
   if (loaded.failure) return loaded.failure;
   const evidence = loaded.value as Evidence;
   const errors = required(evidence);
+  errors.push(...evidenceFreshnessBindingErrors(stage.slug, evidence));
 
   const producer = asRecord(evidence.producer);
   if (!producer) {
@@ -2062,6 +2051,11 @@ function phaseEvidenceErrors(
       if (!/^[a-f0-9]{64}$/.test(String(execution.argv_digest || ""))) errors.push("alternative_validation_execution.argv_digest must be a SHA-256 digest");
       if (asNumber(execution.exit_code) !== 0 || execution.status !== "passed") errors.push("alternative_validation_execution must have passed with exit_code 0");
       if (asNumber(execution.duration_ms) === null) errors.push("alternative_validation_execution.duration_ms must be a number");
+      try {
+        const current = allowlistedAlternativeCommand(stageSlug);
+        if (execution.argv_digest !== current.argv_digest || execution.id !== current.id || execution.cwd !== current.cwd) errors.push("alternative validation no longer matches its allowlisted command");
+        if (asRecord(evidence.checker)?.argv_digest !== argvDigest(["I13-not-applicable", phase, current.argv_digest])) errors.push("alternative checker digest does not match its command binding");
+      } catch (error) { errors.push(String(error)); }
     }
     return errors;
   }
@@ -2488,45 +2482,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
       }
 
       case "build-test-evidence": {
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
-          const errors: string[] = [];
-          if (evidence.status !== "passed") errors.push('status must be "passed"');
-
-          // Commands validation — each command is provenance-bound without persisting secret-bearing argv.
-          const commands = Array.isArray(evidence.commands) ? evidence.commands : [];
-          if (commands.length === 0) errors.push("commands must contain at least one executed command");
-          for (let i = 0; i < commands.length; i++) {
-            const record = asRecord(commands[i]);
-            if (!record) {
-              errors.push(`commands[${i}] must be an object`);
-              continue;
-            }
-            if (!/^[a-f0-9]{64}$/.test(String(record.argv_digest || ""))) errors.push(`commands[${i}].argv_digest must be a SHA-256 digest`);
-            if (asNumber(record.exit_code) !== 0) errors.push(`commands[${i}].exit_code must be 0 (got ${record.exit_code})`);
-            if (record.status !== "passed") errors.push(`commands[${i}].status must be "passed"`);
-            if (typeof record.duration_ms !== "number") errors.push(`commands[${i}].duration_ms must be a number`);
-          }
-
-          // Tests summary — must have total > 0, failed = 0, passed > 0
-          const tests = asRecord(evidence.tests);
-          if (!tests) {
-            errors.push("tests object is required");
-          } else {
-            if (asPositiveInt(tests.total) === null || (tests.total as number) < 1) errors.push("tests.total must be >= 1");
-            if (asPositiveInt(tests.passed) === null || (tests.passed as number) < 1) errors.push("tests.passed must be >= 1");
-            if (asNumber(tests.failed) !== 0) errors.push("tests.failed must be 0");
-          }
-
-          // Static/security checks
-          const checks = asRecord(evidence.checks);
-          if (!checks) {
-            errors.push("checks object is required (lint, type-check, security scan results)");
-          } else {
-            if (checks.status !== "passed") errors.push('checks.status must be "passed"');
-          }
-
-          return errors;
-        });
+        const failure = validateEvidence(stage, sensor, instance, evidence => buildTestEvidenceErrors(evidence, { ...state, current_stage: stage.slug, current_stage_instance: instance.instance_id, current_module: instance.module_id, current_unit: instance.unit_id }));
         if (failure) failures.push(failure);
         break;
       }
@@ -2537,7 +2493,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           if (evidence.status !== "passed") errors.push('status must be "passed"');
           if (evidence.spec_axis !== "passed") errors.push('spec_axis must be "passed" (design conformance)');
           if (evidence.standards_axis !== "passed") errors.push('standards_axis must be "passed" (coding standards)');
-          if (asNumber(evidence.issues_open) !== 0) errors.push("issues_open must be 0 (all findings resolved)");
+          errors.push(...reviewIssueErrors(evidence));
 
           // Reviewer identity required
           if (!asNonEmptyString(evidence.reviewer)) errors.push("reviewer must identify who/what performed the review");
@@ -2546,14 +2502,6 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           const filesReviewed = asStringArray(evidence.files_reviewed);
           if (!filesReviewed || filesReviewed.length === 0) errors.push("files_reviewed must list at least one file");
 
-          // Issues found + resolved counts must be consistent
-          const issuesFound = asPositiveInt(evidence.issues_found);
-          const issuesResolved = asPositiveInt(evidence.issues_resolved);
-          if (issuesFound === null) errors.push("issues_found must be a non-negative integer");
-          if (issuesResolved === null) errors.push("issues_resolved must be a non-negative integer");
-          if (issuesFound !== null && issuesResolved !== null && issuesResolved < issuesFound) {
-            errors.push("issues_resolved must be >= issues_found (all issues must be addressed)");
-          }
 
           return errors;
         });
@@ -3876,19 +3824,24 @@ function produceMissingSemanticEvidence(instance: StageInstance, refresh = false
   const missing = missingSemanticEvidence(instance);
   if (missing.length === 0) return null;
   const evidenceTool = join(__dirname, "aidlc-evidence.ts");
-  const result = runSync(process.execPath, [TSX_CLI, evidenceTool, "run", "--stage", instance.stage.slug, "--instance", instance.instance_id, "--all-sensors", ...(refresh ? ["--refresh"] : [])], {
-    cwd: PROJECT_ROOT,
-    encoding: "utf8",
-    shell: false,
-    timeout: 30 * 60 * 1000,
-    env: process.env,
-  });
-  if (result.status !== 0) {
-    const detail = [result.stderr, result.stdout]
-      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-      .join("; ")
-      .trim();
-    return `automatic semantic evidence production failed for ${instance.instance_id} (${missing.join(", ")}): ${detail || `exit code ${result.status}`}`;
+  // C8's build evidence is separate from its semantic sensors. Repairing a missing
+  // test-quality record must not rerun already completed build/test/check commands.
+  const invocations = instance.stage.slug === "build-and-test" ? missing.map(sensor => ["--sensor", sensor]) : [["--all-sensors"]];
+  for (const invocation of invocations) {
+    const result = runSync(process.execPath, [TSX_CLI, evidenceTool, "run", "--stage", instance.stage.slug, "--instance", instance.instance_id, ...invocation, ...(refresh ? ["--refresh"] : [])], {
+      cwd: PROJECT_ROOT,
+      encoding: "utf8",
+      shell: false,
+      timeout: 30 * 60 * 1000,
+      env: process.env,
+    });
+    if (result.status !== 0) {
+      const detail = [result.stderr, result.stdout]
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .join("; ")
+        .trim();
+      return `automatic semantic evidence production failed for ${instance.instance_id} (${missing.join(", ")}): ${detail || `exit code ${result.status}`}`;
+    }
   }
   const stillMissing = missingSemanticEvidence(instance);
   return stillMissing.length === 0
@@ -5024,6 +4977,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
         ...(effectiveNextInstance.unit_id ? { unit_id: effectiveNextInstance.unit_id } : {}),
       },
       expectedSourceRevision: evidenceSourceRevision(PROJECT_ROOT, effectiveNextInstance.instance_id),
+      sensorFailures: await checkSensors(effectiveNextInstance, planningState, { onlySensors: ["red-test-evidence", "green-test-evidence", "baseline-test-evidence", "build-test-evidence", "review-evidence"] }),
       now: new Date().toISOString(),
       ruleLoadPlan,
     });

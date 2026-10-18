@@ -21,7 +21,9 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { baselineCodeRef, baselineCommitErrors, baselineKindErrors, epochRepos, extraRepoKeyErrors, workflowBaselineForModule } from "./aidlc-baseline";
 import { codeRefRepo, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
-import { evidenceRelativePath, i13UcdIdsByMode as sharedI13UcdIdsByMode, readUnitManifest, stageInstanceId, unitManifestPath, unitUcdIds, type UcdExemption } from "./aidlc-execution-context";
+import { evidenceRelativePath, i13UcdIdsByMode as sharedI13UcdIdsByMode, readUnitManifest, stageInstanceId, unitManifestPath, unitUcdIds, verifiedModuleIds, type UcdExemption } from "./aidlc-execution-context";
+import { evidenceTimeError } from "./aidlc-evidence-policy";
+import { readSourceRevision, commitAncestryErrors } from "./aidlc-revision";
 import { GLOBAL_WORKFLOW, loadWorkflowState, type WorkflowRef, type WorkflowState } from "./aidlc-light-state";
 import { evidenceSourceRevision, integrationStageSlugs, isSplitLayout, loadWorkflowParts, ownerOfInstance, stageAxis } from "./aidlc-workflow-layout";
 
@@ -80,6 +82,7 @@ interface EvidenceConfig {
   stage: string;
   commands: CommandSpec[];
   artifacts?: ArtifactSpec[];
+  freshness?: Record<string, unknown>;
 }
 
 interface TestStats {
@@ -279,6 +282,14 @@ export function unitUcdExemption(projectRoot: string, moduleId: string, unitId: 
   return unit.ucd_exemption;
 }
 
+/** Current alternative allowlist binding, shared with the no-behavior phase gate. */
+export function allowlistedAlternativeCommand(stage: string): { id: string; argv_digest: string; cwd: string } {
+  const config = requireCommandConfig(resolveCommandConfigPath(PROJECT_ROOT, stage), stage);
+  const checks = config.commands.filter(command => command.role === "check");
+  if (checks.length !== 1) fail(`I13 not_applicable requires exactly one controlled check command for ${stage}`);
+  return { id: checks[0].id, argv_digest: argvDigest(checks[0].argv), cwd: safeCwdLabel(checks[0].cwd || PROJECT_ROOT) };
+}
+
 /** The single allowlisted red/green/baseline command of a stage; fails unless exactly one is declared. */
 function phaseCommand(config: EvidenceConfig, stage: string, phase: Phase): CommandSpec {
   const role = phase.toLowerCase() as "red" | "green" | "baseline";
@@ -348,6 +359,15 @@ function optionalSemanticConfig(path: string, stage: string): EvidenceConfig | n
   return parseConfig(path, stage, true);
 }
 
+/** A configured external window cannot be omitted or weakened in an envelope. */
+export function evidenceFreshnessBindingErrors(stage: string, evidence: Record<string, unknown>): string[] {
+  try {
+    const config = optionalSemanticConfig(resolveCommandConfigPath(PROJECT_ROOT, stage), stage);
+    return config?.freshness && JSON.stringify(config.freshness) !== JSON.stringify(evidence.freshness)
+      ? ["evidence freshness no longer matches the stage command configuration"] : [];
+  } catch (error) { return [String(error)]; }
+}
+
 function parseConfig(path: string, stage: string, allowEmptyCommands = false): EvidenceConfig {
   const configPath = requireRegularFile(path, "config");
   let value: unknown;
@@ -403,7 +423,11 @@ function parseConfig(path: string, stage: string, allowEmptyCommands = false): E
     }
   }
 
-  return { version: "1", stage, commands, artifacts };
+  if (config.freshness !== undefined) {
+    const error = evidenceTimeError({ timestamp: "1970-01-01T00:00:00Z", freshness: config.freshness }, "build-test-evidence", 0);
+    if (error) fail(error);
+  }
+  return { version: "1", stage, commands, artifacts, ...(config.freshness !== undefined ? { freshness: config.freshness as Record<string, unknown> } : {}) };
 }
 
 function parseTestStats(output: string): TestStats | null {
@@ -610,6 +634,102 @@ function phaseRecord(state: ProducerState): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+/** Re-derive a no-behavior claim from the real I13 sources, never from a C8 flag. */
+export function noBehaviorBasis(state: ProducerState): Record<string, unknown> | null {
+  if (!state.current_module) {
+    const modules = verifiedModuleIds(PROJECT_ROOT, state.scope);
+    const bases = modules.map(moduleId => noBehaviorBasis({ ...state, current_module: moduleId, current_unit: undefined }));
+    return bases.length && bases.every(Boolean) ? { kind: "project_no_behavior", modules: bases } : null;
+  }
+  if (!existsSync(resolve(PROJECT_ROOT, evidenceRelativePath("test-case-derivation", "test-case-derivation", "module", { module_id: state.current_module })))) return null;
+  const i13 = phaseRecord(state);
+  const scope = i13.status === "required" ? unitUcdIds(i13, state.current_unit) : null;
+  if (i13.status !== "not_applicable" && !(scope?.scoped && scope.all.length === 0)) return null;
+  const producer = i13.producer as Record<string, unknown> | undefined;
+  const checker = i13.checker as Record<string, unknown> | undefined;
+  const revision = i13.source_revision as Record<string, unknown> | undefined;
+  if (i13.evidence_version !== "1" || producer?.name !== "loeyae-aidlc-evidence" || producer.mode !== "controlled" || !producer.execution_id
+    || i13.stage_instance !== `test-case-derivation@module:${state.current_module}` || i13.module_id !== state.current_module || i13.unit_id !== null
+    || !revision || !/^[a-f0-9]{64}$/.test(String(revision.worktree_digest)) || !/^[a-f0-9]{40,64}$/.test(String(revision.commit))
+    || commitAncestryErrors(PROJECT_ROOT, String(revision.commit), readSourceRevision(PROJECT_ROOT).commit).length
+    || checker?.id !== "builtin:test-case-derivation" || checker.sensor !== "test-case-derivation" || !/^[a-f0-9]{64}$/.test(String(checker.argv_digest))
+    || checker.status !== "passed" || checker.exit_code !== 0 || evidenceTimeError(i13, "test-case-derivation")) fail("no-behavior applicability requires controlled valid I13 evidence");
+  const current = runSemanticCommand("test-case-derivation", DEFAULT_TIMEOUT_MS, { ...state, current_stage: "test-case-derivation", current_unit: undefined }).payload;
+  const keys = i13.status === "not_applicable"
+    ? ["status", "applicability_inputs_digest", "reason_code", "reason", "approval_ref", "alternative_validation", "validation_command", "source_refs", "source_files"]
+    : ["status", "ucd_ids", "ucd_units"];
+  for (const key of keys) if (JSON.stringify(i13[key]) !== JSON.stringify(current[key])) fail(`I13 applicability no longer matches its sources: ${key}`);
+  const exemption = scope?.scoped ? unitUcdExemption(PROJECT_ROOT, state.current_module, state.current_unit!) : undefined;
+  if (scope?.scoped && !exemption) fail("empty UC-D subset requires an approved unit ucd_exemption");
+  return { kind: exemption ? "unit_exemption" : "i13_not_applicable", module_id: state.current_module, unit_id: state.current_unit ?? null,
+    i13_digest: argvDigest([JSON.stringify(i13)]), declaration: exemption ?? Object.fromEntries(keys.map(key => [key, current[key]])) };
+}
+
+/** Build/test verification shared by producer, scheduler and completion gate. */
+export function buildTestEvidenceErrors(evidence: Record<string, unknown>, state: ProducerState): string[] {
+  const errors: string[] = [];
+  if (evidence.status !== "passed") errors.push("build/test status must be passed");
+  const commands = Array.isArray(evidence.commands) ? evidence.commands as Record<string, unknown>[] : [];
+  const tests = evidence.tests as TestStats | undefined;
+  const zeroTests = tests?.total === 0 && tests.passed === 0 && tests.failed === 0 && tests.skipped === 0;
+  try {
+    const config = requireCommandConfig(resolveCommandConfigPath(PROJECT_ROOT, "build-and-test"), "build-and-test");
+    const roles = new Set(commands.map(command => command.role));
+    let basis: Record<string, unknown> | null = null;
+    if (evidence.applicability !== undefined || zeroTests || !roles.has("test") || !roles.has("build")) basis = noBehaviorBasis(state);
+    if (basis) {
+      if (JSON.stringify(evidence.applicability) !== JSON.stringify(basis)) errors.push("build/test applicability no longer matches trusted I13/unit sources");
+      if (!roles.has("check")) errors.push("no-behavior validation needs a successful check");
+    } else {
+      if (evidence.applicability !== undefined) errors.push("applicability claim has no trusted no-behavior basis");
+      if (!roles.has("build") || !roles.has("test") || !roles.has("check")) errors.push("build/test commands must include build, test, and check roles");
+    }
+    if (!commands.length || new Set(commands.map(command => command.id)).size !== commands.length) errors.push("commands must be non-empty and unique");
+    for (const command of commands) {
+      const spec = config.commands.find(spec => spec.id === command.id && spec.role === command.role);
+      if (!spec || command.argv_digest !== argvDigest(spec.argv) || command.cwd !== safeCwdLabel(spec.cwd || PROJECT_ROOT)) errors.push(`command ${command.id} no longer matches its allowlist`);
+      if (command.status !== "passed" || command.exit_code !== 0 || typeof command.duration_ms !== "number" || command.duration_ms < 0) errors.push(`command ${command.id} must have a successful execution`);
+    }
+    if (!tests || !Object.values(tests).every(value => Number.isSafeInteger(value) && value >= 0) || tests.total !== tests.passed + tests.failed + tests.skipped
+      || tests.failed !== 0 || ((!basis || roles.has("test")) && (tests.total < 1 || tests.passed < 1)) || (!roles.has("test") && !zeroTests)) errors.push("test summary must count real successful tests, or exactly zero for approved no-behavior validation");
+    const observed = commands.filter(command => command.role === "test").map(command => command.test_stats as TestStats | undefined);
+    if (observed.some(stats => !stats) || tests && (["total", "passed", "failed", "skipped"] as const).some(key => observed.reduce((sum, stats) => sum + (stats?.[key] ?? NaN), 0) !== tests[key])) errors.push("tests summary must equal executed test command counts");
+    const checks = evidence.checks as Record<string, unknown> | undefined;
+    if (checks?.status !== "passed" || JSON.stringify(checks.command_ids) !== JSON.stringify(commands.filter(command => command.role === "check").map(command => command.id))) errors.push("checks must identify successful check commands");
+  } catch (error) { errors.push(String(error)); }
+  return errors;
+}
+
+/** Cache only successful alternative checks. Whole-source and declaration binding is intentional. */
+function alternativeCheck(spec: CommandSpec, state: ProducerState, freshness?: Record<string, unknown>): CommandResult & { observation_id?: string; reused_from?: string } {
+  let basis: Record<string, unknown> | null;
+  try { basis = noBehaviorBasis(state); } catch { basis = null; }
+  // Legacy declarations still run; they do not acquire reuse authority.
+  if (!basis) return runCommand(spec);
+  const revision = readSourceRevision(PROJECT_ROOT, undefined, nestedSourceRepos(PROJECT_ROOT));
+  const baseline = workflowBaselineForModule(PROJECT_ROOT, state.current_module);
+  const binding = { workflow_id: state.workflow_id, module_id: state.current_module, unit_id: state.current_unit, basis, revision, baseline, freshness,
+    argv_digest: argvDigest(spec.argv), cwd: safeCwdLabel(spec.cwd || PROJECT_ROOT), runtime: { executable: process.execPath, version: process.version },
+    environment: argvDigest([JSON.stringify(Object.entries(process.env).filter(([key]) => key !== "AIDLC_SESSION_BINDING").sort())]) };
+  if (!revision.worktree_digest) return runCommand(spec);
+  const key = argvDigest([JSON.stringify(binding)]);
+  const path = safeProjectPath(resolve(PROJECT_ROOT, ".aidlc", "alternative-observations", `${key}.json`), "alternative observation");
+  if (existsSync(path)) {
+    try {
+      const saved = JSON.parse(readFileSync(requireRegularFile(path, "alternative observation"), "utf8"));
+      if (JSON.stringify(saved.binding) === JSON.stringify(binding) && saved.producer === "loeyae-aidlc-evidence" && !evidenceTimeError({ ...saved, ...(freshness ? { freshness } : {}) }, "build-test-evidence")
+        && typeof saved.observation_id === "string" && saved.result.status === "passed" && saved.result.exit_code === 0 && saved.result.argv_digest === binding.argv_digest
+        && typeof saved.result.duration_ms === "number") return { ...saved.result, id: spec.id, reused_from: saved.observation_id };
+    } catch { /* Invalid cache is re-executed, never accepted. */ }
+  }
+  const result = runCommand(spec);
+  // Commands that mutate their inputs cannot seed a reusable observation.
+  const after = readSourceRevision(PROJECT_ROOT, undefined, nestedSourceRepos(PROJECT_ROOT));
+  const observation_id = randomUUID();
+  if (JSON.stringify(after) === JSON.stringify(revision)) writeAtomic(path, JSON.stringify({ binding, result, observation_id, producer: "loeyae-aidlc-evidence", timestamp: new Date().toISOString() }));
+  return { ...result, observation_id };
+}
+
 /**
  * UC-D ids of a `required` I13 record grouped by tdd_mode (4.6.0 S2 `ucd_modes`).
  * I13 evidence without `ucd_modes` predates 4.6 and means every UC-D is new.
@@ -733,6 +853,7 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
   const sensor = PHASE_SENSORS[phase];
   const i13 = phaseRecord(state);
   const output = options.output || evidenceOutput(options.stage, sensor, undefined, state);
+  const freshness = optionalSemanticConfig(options.config, options.stage)?.freshness;
   let payload: Record<string, unknown>;
   let execution: Record<string, unknown>;
   const notRequired = (reason: string): void => {
@@ -753,7 +874,7 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     const alternative = typeof i13.alternative_validation === "string" ? i13.alternative_validation : "controlled alternative validation";
     const checks = config.commands.filter((command) => command.role === "check");
     if (checks.length !== 1) fail(`I13 not_applicable requires exactly one controlled check command for ${options.stage}`);
-    const check = runCommand(checks[0]);
+    const check = alternativeCheck(checks[0], state, freshness);
     const alternativeValidationExecution = {
       id: check.id,
       argv_digest: check.argv_digest,
@@ -761,6 +882,8 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
       exit_code: check.exit_code,
       status: check.status,
       duration_ms: check.duration_ms,
+      ...(check.reused_from ? { reused_from: check.reused_from } : {}),
+      ...(check.observation_id ? { observation_id: check.observation_id } : {}),
     };
     payload = {
       status: "not_applicable",
@@ -787,14 +910,14 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     if (!exemption) {
       fail(`${unitLabel} owns no UC-D of module ${moduleId} (unit_refs); declare ucd_exemption for it in ${relative(PROJECT_ROOT, unitManifestPath(PROJECT_ROOT, moduleId)).replace(/\\/g, "/")} (reason_code, reason, approval_ref, alternative_validation, validation_command) before ${phase} can be not_required`);
     }
-    const check = runCommand({ id: `ucd-exemption:${unitId}`, role: "check", argv: validateArgv(exemption.validation_command, `${unitLabel} ucd_exemption.validation_command`) });
+    const check = alternativeCheck({ id: `ucd-exemption:${unitId}`, role: "check", argv: validateArgv(exemption.validation_command, `${unitLabel} ucd_exemption.validation_command`) }, state, freshness);
     payload = {
       status: "not_required",
       phase,
       ucd_ids: [],
       not_required_reason: `${unitLabel} owns no UC-D of module ${moduleId}; ucd_exemption ${exemption.reason_code}: ${exemption.reason}`,
       ucd_exemption: { reason_code: exemption.reason_code, reason: exemption.reason, approval_ref: exemption.approval_ref, alternative_validation: exemption.alternative_validation },
-      exemption_validation_execution: { id: check.id, argv_digest: check.argv_digest, cwd: check.cwd, exit_code: check.exit_code, status: check.status, duration_ms: check.duration_ms },
+      exemption_validation_execution: { id: check.id, argv_digest: check.argv_digest, cwd: check.cwd, exit_code: check.exit_code, status: check.status, duration_ms: check.duration_ms, ...(check.reused_from ? { reused_from: check.reused_from } : {}), ...(check.observation_id ? { observation_id: check.observation_id } : {}) },
     };
     execution = { id: `builtin:${sensor}`, sensor, argv_digest: ucdExemptionDigest(phase, check.argv_digest), exit_code: 0, status: "passed" };
   } else if (phase === "RED" && scope!.new.length === 0) {
@@ -836,7 +959,7 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     };
     execution = { id: `builtin:${sensor}`, sensor, argv_digest: phaseObservationDigest(phase, commandDigest), exit_code: 0, status: "passed", duration_ms: duration };
   }
-  writeAtomic(output, `${JSON.stringify({ ...payload!, ...executionContext(state), evidence_version: "1", timestamp: new Date().toISOString(), producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() }, source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance), checker: execution! }, null, 2)}\n`);
+  writeAtomic(output, `${JSON.stringify({ ...payload!, ...(freshness ? { freshness } : {}), ...executionContext(state), evidence_version: "1", timestamp: new Date().toISOString(), producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() }, source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance), checker: execution! }, null, 2)}\n`);
   if (!options.output) console.log(JSON.stringify({ status: "passed", output, sensor, phase }, null, 2));
 }
 
@@ -858,6 +981,7 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   const output = options.output || evidenceOutput(options.stage, sensor, undefined, state);
   const unsigned = {
     ...result.payload,
+    ...(config?.freshness ? { freshness: config.freshness } : {}),
     ...executionContext(state),
     evidence_version: "1",
     timestamp: new Date().toISOString(),
@@ -1076,6 +1200,7 @@ function runProducer(args: string[]): void {
       return;
     }
     if (lockedOptions.stage !== "build-and-test") fail(`stage ${lockedOptions.stage} does not use the build/test producer; pass --sensor <semantic-sensor> or --all-sensors`);
+    assertPhaseConfigBinding(options, "build/test");
     const config = requireCommandConfig(options.config, options.stage);
     const selected = lockedOptions.commandIds.length === 0
       ? config.commands.filter((command) => command.role !== "semantic")
@@ -1085,7 +1210,8 @@ function runProducer(args: string[]): void {
         return command;
       });
     const roles = new Set(selected.map((command) => command.role));
-    if (!roles.has("build") || !roles.has("test") || !roles.has("check")) fail("selected allowlist commands must include build, test, and check roles");
+    const applicability = noBehaviorBasis(state);
+    if (applicability ? !roles.has("check") : !roles.has("build") || !roles.has("test") || !roles.has("check")) fail(applicability ? "no-behavior validation requires a controlled check" : "selected allowlist commands must include build, test, and check roles");
 
     const commands = selected.map(runCommand);
     const testResults = commands.filter((command) => command.role === "test").map((command) => command.test_stats as TestStats);
@@ -1095,7 +1221,7 @@ function runProducer(args: string[]): void {
       failed: sum.failed + current.failed,
       skipped: sum.skipped + current.skipped,
     }), { total: 0, passed: 0, failed: 0, skipped: 0 });
-    if (tests.total < 1 || tests.passed < 1 || tests.failed !== 0) fail(`test summary is not eligible for evidence: ${JSON.stringify(tests)}`);
+    if (tests.failed !== 0 || (roles.has("test") || !applicability) && (tests.total < 1 || tests.passed < 1)) fail(`test summary is not eligible for evidence: ${JSON.stringify(tests)}`);
 
     const artifacts = (config.artifacts || []).map(hashArtifact);
     const unsigned = {
@@ -1106,13 +1232,20 @@ function runProducer(args: string[]): void {
       producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() },
       source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance),
       commands,
+      ...(applicability ? { applicability } : {}),
+      ...(config.freshness ? { freshness: config.freshness } : {}),
       tests,
       checks: { status: "passed", command_ids: commands.filter((command) => command.role === "check").map((command) => command.id) },
       artifacts,
     };
+    const errors = buildTestEvidenceErrors(unsigned, state);
+    if (errors.length) fail(errors.join("; "));
     writeAtomic(output, `${JSON.stringify(producedEvidence(unsigned), null, 2)}\n`);
-    console.log(JSON.stringify({ status: "passed", output, tests, commands: commands.length, artifacts: artifacts.length }, null, 2));
+    if (!options.allSensors) console.log(JSON.stringify({ status: "passed", output, tests, commands: commands.length, artifacts: artifacts.length }, null, 2));
   });
+  if (options.allSensors && options.stage === "build-and-test") {
+    produceAllSemantic(options, state, optionalSemanticConfig(options.config, options.stage));
+  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

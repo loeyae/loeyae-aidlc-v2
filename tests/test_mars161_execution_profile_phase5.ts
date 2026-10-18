@@ -112,8 +112,8 @@ try {
   const refreshGraph: StageGraph = { version: "fixture", stage_count: 1, stages: [stage({ slug: "tdd", sensors: ["green-test-evidence"] })] };
   evidence("tdd", "green-test-evidence");
   const refresh = buildEvidenceReusePlan(refreshGraph, { projectRoot: root, scope: "bugfix", now: NOW, target: targetFor("tdd"), expectedSourceRevision: expectedRevision });
-  assert.equal(refresh.revalidate[0]?.reason, "mandatory_refresh");
-  assert.equal(refresh.revalidate[0]?.mandatory_refresh, true);
+  assert.equal(refresh.verify[0]?.reason, "mandatory_gate_verification");
+  assert.equal(refresh.verify[0]?.mandatory_refresh, false);
 
   const actualGraph = loadGraph();
   const light = applyExecutionProfile({ classified: classifyExecutionProfile({ scope: "bugfix" }), at: NOW });

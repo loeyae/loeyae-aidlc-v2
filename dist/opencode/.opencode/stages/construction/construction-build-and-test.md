@@ -21,7 +21,9 @@ requires: [code-generation, code-review]
 
 **目的**：实际执行构建与测试命令，修复失败并保存可复现证据。生成说明文档不能替代命令执行。
 
-`consumes` 中的 `src/` 是源码根的规范占位，按 `module-manifest` 的 `paths`（本阶段为 project 轴，取所有模块并集）→ `.aidlc/source-roots.json` → 默认 `src/` 解析，规则见 `construction-code-generation.md`“源码根解析”。命令清单优先使用 `.aidlc/commands/build-and-test.json`，不存在时回退 `.aidlc/evidence-commands.json`；`evidence run --config <path>` 显式指定时优先。
+**适用性**：普通行为变更执行所需 build/test/check，并记录真实非零通过测试。可信 I13 已声明无可执行业务行为，或单元的空 UC-D 子集有已批准 ucd_exemption 时，producer 与完成门禁复核来源和声明后允许用真实成功的确定性 check 完成该范围；不存在的构建/测试记录为不适用，测试数如实为零。C8 项目轴必须覆盖所有模块，任一模块存在业务行为时仍需适用测试。空声明、全 skipped 或来源失效不能豁免。
+
+`consumes` 中的 `src/` 是源码根的规范占位，按 `module-manifest` 的 `paths`（本阶段为 project 轴，取所有模块并集）→ `.aidlc/source-roots.json` → 默认 `src/` 解析，规则见 `construction-code-generation.md`“源码根解析”。命令清单优先使用 `.aidlc/commands/build-and-test.json`，不存在时回退 `.aidlc/evidence-commands.json`；显式 `--config` 仅在指向同一默认查找文件时接受，以便门禁重新绑定命令。
 
 ## 前置条件
 
@@ -33,7 +35,7 @@ requires: [code-generation, code-review]
 
 进入本步骤前，编排方必须验证以下证据存在且结论为通过：
 
-1. **每单元双轴审查记录**：`docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md` 中包含 Spec 结果 + Standards 结果，且修复状态为"已修复并复审通过"或"无需修复"。
+1. **每单元双轴审查记录**：`docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md` 中包含通过的 Spec + Standards 结果，且无未解决的关键/重要问题；仅建议开放时按严重度计数契约记录，不阻断。
 2. **最终全局审查记录**（C7 触发时）：审计文件中包含 `FINAL_GLOBAL` 模式审查结论且状态为通过。
 3. **缺失任一记录或结论非通过时，C8 不得开始**——返回缺失步骤并告知用户原因。
 
