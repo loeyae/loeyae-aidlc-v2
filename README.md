@@ -33,9 +33,11 @@ aidlc/active/audit.md
 ## 安装
 
 ```bash
-npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
+npm install -g --ignore-scripts https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
 loeyae-aidlc install
 ```
+
+`--ignore-scripts` 是本次安装的必要参数：本包依赖树（`tsx` 的可选依赖 `fsevents@2.3.3`）在 macOS 上会因上游 npm 元数据错误声明 `gypfile`/`install: node-gyp rebuild` 而触发注定失败的本地编译（tarball 内是预编译二进制、无 `binding.gyp`）。跳过生命周期脚本不影响功能——CLI 与各平台二进制（esbuild、fsevents）安装后即已可用。详见 `docs/loeyae-aidlc-v2-installation.md`。
 
 支持 Kiro Crew、Kiro IDE、Kiro CLI、Claude Code、OpenCode、Codex、CodeBuddy、Qoder 和 ZCode：
 
