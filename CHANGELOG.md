@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.22.5 — 2026-10-19
+
+- Accept deletion-only source deliveries with verified baseline blobs, unit requirement ownership and affected I13 behavior, including last-file removals, nested repositories, consumers and completion audits (MARS-252).
+- Align notify-stage bodies, completion templates and referenced instructions with effective authorization while preserving explicit review requests, unresolved decisions and block gates.
+- Clarify bound successful observation reuse for no-behavior I13 checks without weakening independent business RED/GREEN execution.
+- Drive requirement clarification by actual unknowns and approved project policies instead of fixed rounds or unapproved scoring thresholds; regenerate all nine harness distributions.
+
 ## 4.22.4 — 2026-10-19
 
 - Accept substantive small source files and valid small configuration without document byte quotas; retain placeholder, ignored/binary, path and unit-delivery protections (MARS-251).
