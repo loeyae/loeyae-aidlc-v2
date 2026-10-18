@@ -79,7 +79,7 @@ function mandatory(stage: StageNode, required: ReadonlySet<string>): boolean {
     || required.has(stage.slug);
 }
 
-function dependencyClosure(target: StageNode, selectedBySlug: ReadonlyMap<string, StageNode>): ReadonlySet<string> {
+function dependencyClosure(target: StageNode, selectedBySlug: ReadonlyMap<string, StageNode>, declaredSlugs: ReadonlySet<string>): ReadonlySet<string> {
   const closure = new Set<string>();
   const visit = (stage: StageNode): void => {
     if (closure.has(stage.slug)) return;
@@ -89,6 +89,10 @@ function dependencyClosure(target: StageNode, selectedBySlug: ReadonlyMap<string
       // A selected stage whose declared dependency is absent is not safe to
       // hand off.  Fail closed rather than quietly weakening its instructions.
       if (dependencyStage === undefined) {
+        // Match execution's explicit scope waiver: excluded optional stages do
+        // not need rule files in express/bugfix/refactor. Selected dependencies
+        // still load normally, and an undeclared omission still fails closed.
+        if (declaredSlugs.has(dependency) && stage.scope_waived_requires?.includes(dependency)) continue;
         throw new Error(
           `Selected stage "${stage.slug}" requires rule file for unselected stage "${dependency}"`,
         );
@@ -134,7 +138,7 @@ export function buildRuleLoadPlan(graph: StageGraph, input: BuildRuleLoadPlanInp
   }
 
   const required = requiredBySelectedStages(selected);
-  const immediateSlugs = target === undefined ? new Set<string>() : dependencyClosure(target, selectedBySlug);
+  const immediateSlugs = target === undefined ? new Set<string>() : dependencyClosure(target, selectedBySlug, new Set(graph.stages.map(stage => stage.slug)));
   const selectedEntries = selected.map((stage): RuleLoadPlanEntry => ({
     slug: stage.slug,
     stage_file: stageFile(stage),

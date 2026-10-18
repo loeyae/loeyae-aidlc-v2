@@ -19,8 +19,8 @@ produces:
   - .aidlc/evidence/code-generation/{module-id}/{unit-id}/traceability-matrix.json
   - .aidlc/evidence/code-generation/{module-id}/{unit-id}/structural-invariants.json
 sensors: [doc-cascade, green-test-evidence, test-quality, traceability-matrix, structural-invariants]
-requires: [test-case-derivation, tdd]
-scope_waived_requires: []
+requires: [test-case-derivation, tdd, ui-implementation-bridge]
+scope_waived_requires: [ui-implementation-bridge]
 ---
 # 代码生成 - 详细步骤
 
@@ -109,17 +109,17 @@ frontmatter 中的 `src/` 是“项目源码根”的规范占位（code-review�
 
 ## 步骤 1.5：前端平台规范门禁（跨端项目）
 
-> **触发条件**：handoff.md 中 `前端类型` ∈ {跨端, 小程序, APP, 混合}（即非纯 Web）
+> **触发条件**：引擎按 canonical 项目目标事实和模块 I9 choice 实例化本单元 `ui-implementation-bridge`；handoff 仅展示结果
 > **跳过条件**：纯 Web 项目或无前端的纯后端单元
 
 - [ ] 检查 `docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md` 是否存在
 - [ ] 验证文件包含四个必填章节（平台声明 / 布局原语 / 组件映射参考 / CSS 约束）
-- [ ] 验证各章节非空（布局原语 ≥3 行、组件映射 ≥5 行、CSS 约束 ≥3 条）
+- [ ] 复验桥接阶段已完成，按真实设计/平台事实验证所需映射和来源覆盖，不设固定行数配额
 
 **通过** → 继续步骤 2
 
 **不通过** → ❌ 阻断，按以下处理：
-- 文件不存在：提示用户创建（按 `construction-ui-implementation-bridge.md` 第一部分引导）
+- 文件不存在或来源变化：返回 `ui-implementation-bridge` 创建/更新本单元 spec 并重新生成受控证据；不提前写未来阶段产物
 - 文件存在但章节不完整：列出缺失项，要求补充
 - 补充完成后重新验证，通过后继续
 

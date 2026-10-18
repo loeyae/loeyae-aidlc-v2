@@ -1086,6 +1086,42 @@
       "file": "stages/construction/construction-tdd.md"
     },
     {
+      "slug": "ui-implementation-bridge",
+      "number": "3.5.0",
+      "name": "UI 实现桥接",
+      "phase": "construction",
+      "axis": "unit",
+      "execution": "CONDITIONAL",
+      "selection": "automatic",
+      "choices": [],
+      "scopes": [
+        "feature",
+        "enterprise",
+        "mvp",
+        "classic"
+      ],
+      "requires": [
+        "tdd"
+      ],
+      "cross_module_requires": [],
+      "scope_waived_requires": [],
+      "consumes": [],
+      "produces": [
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md",
+        ".aidlc/evidence/ui-implementation-bridge/{module-id}/{unit-id}/frontend-platform-spec.json"
+      ],
+      "sensors": [
+        "frontend-platform-spec",
+        "no-todo",
+        "traceability"
+      ],
+      "traceability": "required",
+      "completion_contract": "gated",
+      "condition": "needs_ui_implementation_bridge",
+      "approval": "notify",
+      "file": "stages/construction/construction-ui-implementation-bridge.md"
+    },
+    {
       "slug": "code-generation",
       "number": "3.5.1",
       "name": "代码生成",
@@ -1106,10 +1142,13 @@
       ],
       "requires": [
         "test-case-derivation",
-        "tdd"
+        "tdd",
+        "ui-implementation-bridge"
       ],
       "cross_module_requires": [],
-      "scope_waived_requires": [],
+      "scope_waived_requires": [
+        "ui-implementation-bridge"
+      ],
       "consumes": [
         "docs/aidlc/modules/{module-id}/inception/application-design/test-cases/",
         ".aidlc/evidence/test-case-derivation/{module-id}/test-case-derivation.json",
@@ -1138,42 +1177,6 @@
       "condition": "",
       "approval": "notify",
       "file": "stages/construction/construction-code-generation.md"
-    },
-    {
-      "slug": "ui-implementation-bridge",
-      "number": "3.5.4",
-      "name": "UI 实现桥接",
-      "phase": "construction",
-      "axis": "unit",
-      "execution": "CONDITIONAL",
-      "selection": "automatic",
-      "choices": [],
-      "scopes": [
-        "feature",
-        "enterprise",
-        "mvp",
-        "classic"
-      ],
-      "requires": [
-        "code-generation"
-      ],
-      "cross_module_requires": [],
-      "scope_waived_requires": [],
-      "consumes": [],
-      "produces": [
-        "docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md",
-        ".aidlc/evidence/ui-implementation-bridge/{module-id}/{unit-id}/frontend-platform-spec.json"
-      ],
-      "sensors": [
-        "frontend-platform-spec",
-        "no-todo",
-        "traceability"
-      ],
-      "traceability": "required",
-      "completion_contract": "gated",
-      "condition": "needs_ui_implementation_bridge",
-      "approval": "notify",
-      "file": "stages/construction/construction-ui-implementation-bridge.md"
     },
     {
       "slug": "code-review",
