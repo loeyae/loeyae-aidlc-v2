@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.22.4 — 2026-10-19
+
+- Accept substantive small source files and valid small configuration without document byte quotas; retain placeholder, ignored/binary, path and unit-delivery protections (MARS-251).
+- Support content-bound explicit projections of approved prose UI designs while preserving real mapping, platform-constraint and source-drift validation.
+- Route conditional UI bridging between RED and GREEN, with explicit spec ownership, conditional consumption, scope waivers and stage-aware traceability; remove fixed mapping quotas.
+- Align notify-stage instructions, project-based testing policy and branch-delivery ownership with authoritative workflow and user authorization; regenerate all nine harness distributions.
+
 ## 4.22.3 — 2026-10-19
 
 - Keep deterministic local evidence valid while its content, command, scope and provenance remain valid; retain explicit external freshness windows (MARS-250).
