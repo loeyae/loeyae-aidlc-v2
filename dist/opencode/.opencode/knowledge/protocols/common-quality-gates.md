@@ -31,10 +31,10 @@ Evidence 路径由当前 directive 的 `evidence_root` 决定：
 
 - `requires`、`condition`、`consumes`、`produces` 和 sensor 必须全部满足。
 - instruction-only 阶段完成时传入 `--instruction-ack <stage>`。
-- `application-design` 与 `operations-authorization` 等阶段图 `approval: block` 节点需要用户在审阅影响、产物、review、构建和测试状态后显式提交 `--user-input Approve`；`code-generation` 的 `notify` 复用既有授权，用户显式要求审阅时等待。
+- `application-design` 与 `operations-authorization` 等阶段图 `approval: block` 节点需要用户在审阅影响、产物、review、构建和测试状态后显式提交 `--user-input Approve`；`user-stories`、`units-generation`、`infrastructure-design` 和 `code-generation` 的 `notify` 覆盖规划、生成模板及完成标准，展示摘要后复用既有授权；用户显式要求审阅时等待。普通文档不得将 notify 升级为 block。
 - Code review 必须覆盖实际改动路径，且 spec/standards 两轴通过、无未解决关键/重要问题；有明确严重度统计的开放建议不阻断。
 - Build/test evidence 按适用性记录真实构建、检查和测试；业务行为需要非零成功测试且无失败，可信无行为范围允许成功确定性检查及零测试数。
-- Worktree merge plan 必须覆盖分支、base/head、review 及改动路径，且永远只提供建议，人工执行 merge。
+- Worktree merge plan 必须覆盖分支、base/head、review 及改动路径，且永远只提供建议；宿主按项目分支策略、受保护分支流程及用户明确授权决定执行者与整合。设计审批不构成 main 写入、push 或合并授权。
 
 ## 结果格式
 

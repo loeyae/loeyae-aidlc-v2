@@ -130,7 +130,8 @@ try {
   assert.equal(i13.execution, "ALWAYS");
   assert.ok(i13.scopes.includes("express") && i13.scopes.includes("bugfix") && i13.scopes.includes("refactor"));
   assert.deepEqual(red.requires, ["test-case-derivation"]);
-  assert.deepEqual(green.requires, ["test-case-derivation", "tdd"]);
+  assert.deepEqual(green.requires, ["test-case-derivation", "tdd", "ui-implementation-bridge"]);
+  assert.ok(green.scope_waived_requires.includes("ui-implementation-bridge"));
   assert.equal(red.number.localeCompare(green.number, undefined, { numeric: true }) < 0, true);
   assert.ok(green.consumes.some((path) => path.includes("red-test-evidence")));
   assert.deepEqual(review.requires, ["code-generation"]);

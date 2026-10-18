@@ -24,6 +24,8 @@ triggers: Figma 转代码, Mock 转代码, 前端平台规范, 组件映射, 设
 
 加载发布包中的 `stages/construction/construction-ui-implementation-bridge.md`。
 
+本能力由桥接 directive 在 RED 完成后、代码生成前调用，是本单元 spec 的创建/更新入口。Inception 提供批准事实，代码生成消费并复验；不要求前一阶段提前创建本阶段产物。
+
 ## 输出
 
 返回生成或更新的 `docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md` 路径、布局原语映射表、组件映射表、CSS 约束禁止列表和未解决问题。

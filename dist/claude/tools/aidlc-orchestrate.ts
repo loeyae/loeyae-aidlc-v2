@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { evidenceTimeError, reviewIssueErrors } from "./aidlc-evidence-policy";
 import { frontendPlatformPayload } from "./aidlc-frontend-platform";
+import { substantiveArtifact } from "./aidlc-artifact-presence";
 import { alternativeCheckBindingErrors, evidenceFreshnessBindingErrors, semanticCommandArgv } from "./aidlc-evidence";
 import { claimToken } from "./aidlc-session";
 import { retireExecutionCheckpoint } from "./aidlc-retire-execution";
@@ -476,6 +477,13 @@ function runtimeStage(instance: StageInstance, state: WorkflowState): StageNode 
   let consumes = [...stage.consumes];
   let produces = [...stage.produces];
   let sensors = [...stage.sensors];
+
+  if (stage.slug === "code-generation" && buildConditionContext(state, instance).needs_ui_implementation_bridge) {
+    consumes.push(
+      "docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md",
+      ".aidlc/evidence/ui-implementation-bridge/{module-id}/{unit-id}/frontend-platform-spec.json",
+    );
+  }
 
   if (stage.slug === "cross-validation" && instance.module_id) {
     if (selectedOptionalStages(state).includes("prd-generation")) {
@@ -1097,19 +1105,15 @@ function displayArtifactPatterns(pattern: string, instance: StageInstance, allow
 /**
  * Check if produces files exist (including directories and dynamic unit paths).
  */
-const MIN_ARTIFACT_BYTES = 16;
-
 /**
  * Shared presence rule of checkProduces and checkConsumes for one declared artifact
  * pattern (a canonical `src/` is expanded per source root by the callers first, so
  * every root is judged on its own). Returns the failure label, or undefined when the
  * artifact is present.
  *
- * - Directory artifact (pattern ends with `/`, or the resolved target is a directory):
- *   the directory exists and holds at least one file of >= MIN_ARTIFACT_BYTES. Empty
- *   or small files next to it (e.g. 0-byte Python `__init__.py`) do not fail it.
- * - Single-file artifact: the file exists and is >= MIN_ARTIFACT_BYTES; when a project
- *   aggregate expands it to several files, every one of them must be.
+ * - A source root needs real tracked text content, with no minimum byte quota.
+ * - Legal small configuration is accepted; documents retain a substantive size floor.
+ * - Directories need at least one substantive file; aggregates check each file.
  *
  * Symbolic links / junctions and paths escaping the project root keep throwing (from
  * assertProjectPath / collectFiles); each caller keeps its own fail-closed handling.
@@ -1133,7 +1137,7 @@ function artifactPresenceFailure(pattern: string, instance: StageInstance, allow
   // 4.9.0: a lightweight worktree does not check out nested repositories; a produce or
   // consume inside a skipped one is judged in the main checkout that holds it.
   const delegated = aggregated ? undefined : skippedNestedMainCheckout(contextual);
-  if (delegated) return mainCheckoutPresence(delegated, contextual) ? undefined : label;
+  if (delegated) return mainCheckoutPresence(delegated, contextual, sourceRoot) ? undefined : label;
   let directory = contextual.endsWith("/");
   if (!directory && !aggregated) {
     const target = assertProjectPath(join(PROJECT_ROOT, contextual));
@@ -1148,8 +1152,8 @@ function artifactPresenceFailure(pattern: string, instance: StageInstance, allow
   }
   const paths = sourceRoot ? sourceRootFiles(contextual) : resolveConcretePaths(pattern, instance, allowProjectAggregate);
   const present = directory
-    ? paths.some((path) => lstatSync(path).size >= MIN_ARTIFACT_BYTES)
-    : paths.length > 0 && paths.every((path) => lstatSync(path).size >= MIN_ARTIFACT_BYTES);
+    ? paths.some((path) => substantiveArtifact(path, sourceRoot))
+    : paths.length > 0 && paths.every((path) => substantiveArtifact(path, sourceRoot));
   return present ? undefined : label;
 }
 
@@ -1178,7 +1182,7 @@ function skippedNestedMainCheckout(path: string): string | undefined {
 }
 
 /** Presence of `path` in the main checkout `root` with the rules of artifactPresenceFailure (no symbolic links). */
-function mainCheckoutPresence(root: string, path: string): boolean {
+function mainCheckoutPresence(root: string, path: string, source = false): boolean {
   const target = join(root, ...path.replace(/\/+$/, "").split("/"));
   if (!existsSync(target)) return false;
   const walk = (current: string): string[] => {
@@ -1188,9 +1192,9 @@ function mainCheckoutPresence(root: string, path: string): boolean {
     if (!stat.isDirectory()) return [];
     return readdirSync(current).filter((entry) => !entry.startsWith(".")).flatMap((entry) => walk(join(current, entry)));
   };
-  const files = walk(target);
+  const files = source && lstatSync(target).isDirectory() ? trackedTextFiles(target) ?? walk(target).filter(isTextFile) : walk(target);
   const directory = path.endsWith("/") || lstatSync(target).isDirectory();
-  return directory ? files.some((file) => lstatSync(file).size >= MIN_ARTIFACT_BYTES) : files.length > 0 && files.every((file) => lstatSync(file).size >= MIN_ARTIFACT_BYTES);
+  return directory ? files.some((file) => substantiveArtifact(file, source)) : files.length > 0 && files.every((file) => substantiveArtifact(file, source));
 }
 
 export function checkProduces(instance: StageInstance, options: { completed?: boolean } = {}): string[] {
@@ -1219,11 +1223,14 @@ function sourcePresenceFailures(instance: StageInstance, completed: boolean): st
   const delivery = sourceDelivery(instance);
   const failures: string[] = [];
   for (const root of delivery.delegated) {
-    const failure = artifactPresenceFailure(root, instance);
+    const failure = artifactPresenceFailure(root, instance, false, true);
     if (failure !== undefined) failures.push(failure);
   }
   if (delivery.mode === "delta") {
     if (delivery.error && !(completed && delivery.emptyDelta)) failures.push(`${delivery.roots.join(", ")}: ${delivery.error}`);
+    if (delivery.files.length > 0 && !delivery.files.some(path => substantiveArtifact(path, true))) {
+      failures.push(`${delivery.roots.join(", ")}: source delta contains only empty or placeholder content`);
+    }
     return failures;
   }
   for (const root of delivery.roots.filter((candidate) => !delivery.delegated.includes(candidate))) {
@@ -1252,7 +1259,7 @@ export function checkConsumes(instance: StageInstance, state: WorkflowState, gra
       continue;
     }
     if (missingLabel !== undefined) {
-      failures.push(`${missingLabel}: missing or smaller than ${MIN_ARTIFACT_BYTES} bytes`);
+      failures.push(`${missingLabel}: missing or non-substantive artifact`);
       continue;
     }
     const producers = graph.stages.filter((candidate) => (candidate.produces || []).includes(pattern));
@@ -2057,7 +2064,12 @@ function phaseEvidenceErrors(
       try {
         const current = allowlistedAlternativeCommand(stageSlug);
         if (execution.argv_digest !== current.argv_digest || execution.id !== current.id || execution.cwd !== current.cwd) errors.push("alternative validation no longer matches its allowlisted command");
-        errors.push(...alternativeCheckBindingErrors(execution, stageSlug, state));
+        // next rechecks upstream instances after report cleared active context. Bind
+        // applicability/input ownership to the instance being checked, not that cursor.
+        errors.push(...alternativeCheckBindingErrors(execution, stageSlug, {
+          ...state, current_stage: stageSlug, current_stage_instance: instance.instance_id,
+          current_module: instance.module_id, current_unit: instance.unit_id,
+        }));
         if (asRecord(evidence.checker)?.argv_digest !== argvDigest(["I13-not-applicable", phase, current.argv_digest])) errors.push("alternative checker digest does not match its command binding");
       } catch (error) { errors.push(String(error)); }
     }
@@ -2143,6 +2155,14 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
   const failures: SensorResult[] = [];
 
+  // GREEN consumes the bridge's real output and rechecks its current semantics.
+  // Production edits may change the source revision, but never the approved mappings.
+  if (stage.slug === "code-generation" && buildConditionContext(state, instance).needs_ui_implementation_bridge) {
+    const bridge = loadGraph().stages.find(node => node.slug === "ui-implementation-bridge")!;
+    const bridgeInstance = { ...instance, stage: bridge, instance_id: `ui-implementation-bridge@module:${instance.module_id}@unit:${instance.unit_id}` };
+    failures.push(...await checkSensors(bridgeInstance, state, { ...options, tolerateRevisionDrift: true, onlySensors: ["frontend-platform-spec"] }));
+  }
+
   // Report is another admission boundary: do not trust a previously issued plan.
   if (instance.unit_id) {
     try {
@@ -2209,13 +2229,13 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
         // (shared-contract-baseline / tdd /
         // compact-recovery; all traceability=not_applicable) declares no non-evidence
         // produce, so the guard does not fire — no false positive. Directory produces
-        // whose only entries are sub-MIN_ARTIFACT_BYTES markers are not artifacts (same
+        // whose only entries are empty/comment-only markers are not artifacts (same
         // rule as traceability / produce-presence) and do not satisfy the guard.
         const nonEvidenceProduces = (stage.produces || []).filter((pattern) => !pattern.startsWith(".aidlc/evidence"));
         if (todoFiles.length === 0 && unreadableFiles.length === 0 && nonEvidenceProduces.length > 0) {
           const noTodoTargets = [...new Set(nonEvidenceProduces
             .flatMap((pattern) => resolveProducePaths(pattern, instance)
-              .filter((filePath) => !pattern.endsWith("/") || lstatSync(filePath).size >= MIN_ARTIFACT_BYTES))
+              .filter((filePath) => !pattern.endsWith("/") || substantiveArtifact(filePath, pattern === CANONICAL_SOURCE_PATTERN)))
             .filter((filePath) => !isEvidenceArtifact(filePath)))];
           if (noTodoTargets.length === 0) {
             failures.push({
@@ -2286,14 +2306,12 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
             sourceUntraced = `No delivered source file (${delivery.files.map(artifactLabel).join(", ")}) references ${required.label}`;
           }
         }
-        // Files below MIN_ARTIFACT_BYTES inside a directory produce (e.g. empty or
-        // one-line-comment Python `__init__.py` package markers under a source root) are
-        // not artifacts on their own and are not traced, matching the artifact presence
-        // rule (4.6.1 D8); a single-file produce is still traced whatever its size.
+        // Empty/comment-only markers are not artifacts on their own. Real small source
+        // and configuration remain traceable, matching the shared presence rule.
         const targets = [...new Set((stage.produces || [])
           .filter((pattern) => !(deltaSource && pattern === CANONICAL_SOURCE_PATTERN))
           .flatMap((pattern) => resolveProducePaths(pattern, instance)
-            .filter((filePath) => !pattern.endsWith("/") || lstatSync(filePath).size >= MIN_ARTIFACT_BYTES))
+            .filter((filePath) => !pattern.endsWith("/") || substantiveArtifact(filePath, pattern === CANONICAL_SOURCE_PATTERN)))
           .filter((filePath) => !isEvidenceArtifact(filePath)))];
 
         if (targets.length === 0) {
@@ -3651,9 +3669,12 @@ function executionPolicyPrompt(policy: ExecutionPolicy): string {
 }
 
 function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, executionPolicy: ExecutionPolicy, reportCommand?: string, choices: string[] = [], providerPrompt = ""): string {
-  const unit = instance.module_id && instance.unit_id
+  const approval = instance.stage.approval === "block"
+    ? "审批策略 block：展示决策摘要后等待用户明确批准；不得代替用户审批。"
+    : `审批策略 ${instance.stage.approval}：展示摘要后复用既有授权继续；用户显式要求审阅时等待回复，普通文档和模板不得升级为阻断。`;
+  const unit = approval + "\n" + (instance.module_id && instance.unit_id
     ? `当前单元：${instance.module_id}/${instance.unit_id}。团队成员可用 unit select 声明负责人与分支。`
-    : "当前阶段不要求成员选择单元；按产物、review、构建和测试门禁推进。";
+    : "当前阶段不要求成员选择单元；按产物、review、构建和测试门禁推进。");
   const artifacts = instance.stage.produces.length
     ? instance.stage.produces.flatMap((pattern) => displayArtifactPatterns(pattern, instance)).join("、")
     : "本阶段没有声明文件产物";

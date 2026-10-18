@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, realpathSync } from "fs";
 import { isAbsolute, relative, resolve, sep } from "path";
+import { createHash } from "crypto";
 
 type Kind = "layout_primitives" | "component_mapping" | "css_constraints";
 type Row = { kind: Kind; name: string; cells: string[]; targetDeclared: boolean };
@@ -46,6 +47,28 @@ function section(content: string, anchor: string): string {
   return lines.slice(start, end).join("\n");
 }
 
+/** Explicit, content-bound projection of prose in the existing unit spec. No NLP guesses. */
+function projections(content: string): Map<string, { source_sha256: string; complete: boolean; rows: (Row & { quote: string })[] }> {
+  const result = new Map<string, { source_sha256: string; complete: boolean; rows: (Row & { quote: string })[] }>();
+  for (const match of content.matchAll(/```frontend-source-projection\s*\n([\s\S]*?)\n```/g)) {
+    const value = JSON.parse(match[1]);
+    if (!value || typeof value.source !== "string" || result.has(value.source) || value.complete !== true
+      || !/^[a-f0-9]{64}$/.test(value.source_sha256) || !Array.isArray(value.rows) || !value.rows.length || value.rows.length > 500) {
+      throw new Error("invalid or duplicate frontend source projection");
+    }
+    for (const row of value.rows) {
+      if (!["layout_primitives", "component_mapping", "css_constraints"].includes(row.kind)
+        || !Array.isArray(row.cells) || row.cells.some((cell: unknown) => typeof cell !== "string" || !cell.trim())
+        || row.cells.length < (row.kind === "css_constraints" ? 3 : 2) || typeof row.quote !== "string" || !row.quote.trim()) {
+        throw new Error("invalid frontend projection row/quote");
+      }
+      row.name = row.cells[0]; row.targetDeclared = true;
+    }
+    result.set(value.source, value);
+  }
+  return result;
+}
+
 export function frontendPlatformPayload(root: string, specPath: string, moduleId?: string): Record<string, unknown> {
   const content = readFileSync(resolve(root, specPath), "utf8");
   if (/TODO|FIXME|待补充|待确认|\bTBD\b/i.test(content)) throw new Error("frontend platform spec has unresolved content");
@@ -54,6 +77,7 @@ export function frontendPlatformPayload(root: string, specPath: string, moduleId
     if (!value || /^(?:\.{2,}|…|[-—]|\[.*\])$/.test(value)) throw new Error(`frontend platform declaration is missing: ${field}`);
   }
   const actual = rows(content);
+  const projected = projections(content);
   for (const kind of ["layout_primitives", "component_mapping", "css_constraints"] as Kind[]) {
     const entries = actual.filter(row => row.kind === kind);
     if (!entries.length) throw new Error(`frontend platform spec needs real ${kind} table rows`);
@@ -71,7 +95,6 @@ export function frontendPlatformPayload(root: string, specPath: string, moduleId
   // Optional references narrow to the unit's already approved page/section, without
   // creating another approval or requiring unrelated module component mappings.
   const references = [...content.matchAll(/^\s*-\s*(design_source|platform_source):\s*`?([^`\s]+)`?\s*$/gm)];
-  const explicit = references.map(match => match[2]);
   const scopedSources = (kind: string, fallback: string) => {
     const refs = references.filter(match => match[1] === kind).map(match => match[2]);
     return refs.length ? refs : existsSync(resolve(root, fallback)) ? [fallback] : [];
@@ -85,8 +108,23 @@ export function frontendPlatformPayload(root: string, specPath: string, moduleId
     const absolute = resolve(root, path), rel = relative(realpathSync(root), absolute);
     if (isAbsolute(path) || rel.startsWith(`..${sep}`) || rel === ".." || !path.startsWith(`${base}/`)
       || !existsSync(absolute) || !realpathSync(absolute).startsWith(realpathSync(root) + sep)) throw new Error(`invalid frontend design source: ${source}`);
-    const required = rows(section(readFileSync(absolute, "utf8"), anchor));
-    if (explicit.includes(source) && !required.length) throw new Error(`frontend design source contains no verifiable constraints/mappings: ${source}`);
+    const sourceText = section(readFileSync(absolute, "utf8"), anchor);
+    const required = rows(sourceText);
+    const projection = projected.get(source);
+    if (projection) {
+      if (createHash("sha256").update(sourceText).digest("hex") !== projection.source_sha256) throw new Error(`frontend projection source drift: ${source}`);
+      for (const row of projection.rows) {
+        if (!sourceText.includes(row.quote)) throw new Error(`frontend projection quote missing: ${source}`);
+      }
+      required.push(...projection.rows);
+    }
+    // Every discovered authoritative source must be accounted for, even when another
+    // source already supplies parseable rows. A projection must explicitly cover its scope.
+    if (!required.length) throw new Error(`frontend design coverage cannot be derived: ${source}; add a complete content-bound frontend-source-projection in the existing spec`);
+    for (const field of ["运行时|runtime", "样式方案|style(?: system| approach)?"]) {
+      const declaration = (text: string) => text.match(new RegExp(`(?:${field})\\s*[:：]\\s*([^\\n]+)`, "i"))?.[1]?.trim();
+      if (declaration(sourceText) && declaration(sourceText) !== declaration(content)) throw new Error(`frontend platform declaration conflicts with approved source: ${source}`);
+    }
     requiredCount += required.length;
     for (const row of required) {
       const found = actual.find(candidate => candidate.kind === row.kind && key(candidate.name) === key(row.name));
@@ -98,10 +136,11 @@ export function frontendPlatformPayload(root: string, specPath: string, moduleId
       }
     }
   }
+  if ([...projected.keys()].some(source => !sources.includes(source))) throw new Error("frontend projection must reference an applicable design_source/platform_source");
   if (sources.length && !requiredCount) throw new Error("frontend design coverage cannot be derived; reference the applicable tables/sections with design_source/platform_source in the existing spec");
   return {
     status: "passed", mapping_version: 2,
     ...Object.fromEntries((["layout_primitives", "component_mapping", "css_constraints"] as Kind[]).map(kind => [kind, actual.filter(row => row.kind === kind).map(row => row.cells.join(" | "))])),
-    source_refs: sources, coverage_basis: requiredCount ? "approved-source-tables" : "legacy-spec-tables",
+    source_refs: sources, coverage_basis: projected.size ? "approved-source-projection" : requiredCount ? "approved-source-tables" : "legacy-spec-tables",
   };
 }

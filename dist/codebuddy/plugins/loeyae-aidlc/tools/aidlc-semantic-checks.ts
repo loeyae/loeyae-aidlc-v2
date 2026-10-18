@@ -3533,8 +3533,8 @@ const MATRIX_STAGE_FALLBACK: Record<string, string> = {
   "nfr-requirements": "functional-design",
   "nfr-design": "functional-design",
   "infrastructure-design": "functional-design",
-  // 均 requires code-generation → 视为已到 code-generation。
-  "ui-implementation-bridge": "code-generation",
+  // 桥接在 RED 后、GREEN 前创建平台规范，尚不应要求生产代码引用。
+  "ui-implementation-bridge": "tdd",
   "build-and-test": "code-review",
   "implementation-report": "code-review",
   // I13 产出 UC-D；测试层在 RED 阶段校验，映射到 tdd 位置。

@@ -1,6 +1,6 @@
 ---
 slug: ui-implementation-bridge
-number: "3.5.4"
+number: "3.5.0"
 name: UI 实现桥接
 phase: construction
 axis: unit
@@ -11,7 +11,7 @@ produces:
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md
   - .aidlc/evidence/ui-implementation-bridge/{module-id}/{unit-id}/frontend-platform-spec.json
 sensors: [frontend-platform-spec]
-requires: [code-generation]
+requires: [tdd]
 condition: needs_ui_implementation_bridge
 ---
 # UI 实现桥接 — UI 设计到平台代码的翻译流程
@@ -56,8 +56,10 @@ condition: needs_ui_implementation_bridge
 
 | 项目状态 | 触发点 | 方式 |
 |----------|--------|------|
-| 存量项目 | workspace detection 检测到前端技术栈 | 检查是否存在 → 不存在则引导创建 |
-| 全新项目 | application design 确定技术选型后 | 作为应用设计产物之一产出 |
+| 存量项目 | ui-implementation-bridge directive | 复用已有批准的平台事实，在本阶段创建或更新单元 spec |
+| 全新项目 | I13 / RED 完成后的 ui-implementation-bridge directive | 消费已批准应用设计，在本阶段创建单元 spec |
+
+本阶段是单元 spec 及其受控证据的唯一 producer，位于 `tdd → ui-implementation-bridge → code-generation`。Inception 只产出已批准设计与平台事实，不提前写未来阶段的单元受管产物。代码生成消费并复验已有 spec；来源变化时回到本阶段更新证据。
 
 ### 必填章节
 
@@ -112,7 +114,7 @@ producer 和门禁读取上述既有表格的真实行，按已批准的 `incept
 - platform_source: docs/aidlc/modules/{module-id}/inception/application-design.md#平台约束
 ```
 
-被引用章节使用“布局原语 / 组件映射参考 / CSS/样式约束”或现有“组件名称 / 目标组件”等表头；名称与目标逐项映射，平台禁止写法须保留原因和替代方案。无法从来源推导时，指向已有文档中适用的表格章节，不以重复关键词代替覆盖。旧四章节表格无需迁移；旧占位数组证据重新运行 producer。无来源的历史项目使用真实 spec 表格兼容路径并显式标记，不强迫其补其他页面的映射；已有来源的实际缺项仍阻断。纯 Web 的跳过条件保持不变。
+被引用章节使用“布局原语 / 组件映射参考 / CSS/样式约束”或现有“组件名称 / 目标组件”等表头；名称与目标逐项映射，平台禁止写法须保留原因和替代方案。自然语言来源可在当前 spec 内附 `frontend-source-projection` fenced JSON：`source` 为上述适用引用，`source_sha256` 为引用章节原文的 SHA-256，`complete: true` 明确声明完整覆盖该范围，`rows` 每项含 `kind`（layout_primitives/component_mapping/css_constraints）、`cells`（与表格相同列顺序）及原文连续 `quote`。由已有批准事实投影，不新增批准或改写无关上游文档；逐项复核投影是否遗漏/误译。source、摘要、原文引用、实际映射及平台声明都由 producer/gate 共同复验。无法确认完整范围或含真实语义冲突时先澄清，不将解析失败视为无约束。旧四章节表格无需迁移；旧占位数组证据重新运行 producer。无来源的历史项目使用真实 spec 表格兼容路径并显式标记，不强迫其补其他页面的映射；已有来源的实际缺项仍阻断。纯 Web 的跳过条件保持不变。
 
 ### 创建引导流程
 
@@ -120,7 +122,7 @@ producer 和门禁读取上述既有表格的真实行，按已批准的 `incept
 
 **步骤 A：收集信息**
 
-向用户提问（一次性）：
+优先读取现有已批准设计与平台事实；仅缺少必要信息时一次性向用户提问。已明确的信息不重复确认：
 
 ```markdown
 检测到前端项目需要建立平台实现规范。请提供以下信息：
@@ -204,11 +206,11 @@ figma 模式下"设计表现"列填写从 `get_design_context` 返回的 Tailwin
 
 ---
 
-## 第三部分：前置门禁（Construction 硬检查）
+## 第三部分：创建、消费与复验门禁
 
 ### 检查时机
 
-前端代码生成的**步骤 2（MCP Skill 加载）之前**。
+桥接 directive 内创建并验证 spec，通过受控 producer 后 report；引擎 `next` 仅在桥接完成后路由到代码生成。代码生成步骤 1.5 消费并复验，代码审查检查实现与映射一致性。
 
 ### 检查逻辑
 
@@ -225,7 +227,7 @@ THEN:
     提示: "前端平台实现规范缺失。跨端项目必须在代码生成前建立平台规范。
            请执行以下操作之一：
            A) 现在创建（我引导你完成）
-           B) 回退到 Inception 补充"
+           B) 真实设计决策缺失时澄清上游事实后，在桥接阶段创建"
     
   IF 存在但章节不完整（缺少必填章节）:
     ⚠️ 阻断代码生成
@@ -239,11 +241,11 @@ THEN:
 
 ### 完整性校验标准
 
-以下四个一级标题必须存在且非空：
-- `## 1. 平台声明`（至少包含运行时和组件库两项）
-- `## 2. 布局原语`（至少 3 行映射）
-- `## 3. 组件映射参考`（至少 5 行映射）
-- `## 4. CSS/样式约束`（至少 3 条约束）
+以下四类内容使用既有兼容章节/表格表达，覆盖真实适用项（不要求精确标题文本或固定行数）：
+- 平台声明包含实际运行时、组件库和样式方案
+- 布局原语覆盖当前单元实际需要的映射
+- 组件映射覆盖适用设计中的组件
+- CSS/样式约束覆盖已批准平台限制；不得为凑数量添加无关项
 
 ---
 
@@ -274,5 +276,5 @@ Construction 代码审查的**规格合规阶段**，对前端跨端项目增加
 | `inception-ui-figma.md` | 产出 Figma 设计稿 → 本流程消费 Frame 做映射 |
 | `common-figma-design-standards.md` | 提供通用 Figma 读取契约与布局语义映射；组件库映射由真实模块事实匹配的外部知识提供 |
 | `provider-offline-knowledge.md` | 按已批准模块身份、依赖版本和显式绑定加载兼容章节；不得从跨端类型或旧 handoff 标记推断框架 |
-| `construction-code-generation.md` | 本流程嵌入其前端步骤模板第一步 |
+| `construction-code-generation.md` | 本阶段先产出 spec，代码生成第一步消费并复验 |
 | `construction-code-review.md` | 本流程扩展其规格合规检查清单 |
