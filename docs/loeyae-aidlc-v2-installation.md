@@ -3,9 +3,22 @@
 安装包分发 AWS-style 轻量 AI-DLC workflow 到支持的 harness。
 
 ```bash
-npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
+npm install -g --ignore-scripts https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
 loeyae-aidlc install
 ```
+
+### 为什么必须加 `--ignore-scripts`
+
+本包的依赖树不需要任何安装期生命周期脚本即可运行，但在 macOS 上不带该参数安装会失败：
+
+- `tsx` 的可选依赖 `fsevents@2.3.3` 官方元数据错误声明了 `gypfile: true` 和 `install: node-gyp rebuild`，而其 tarball 实际自带预编译的 `fsevents.node`、不含 `binding.gyp`。npm 据错误元数据启动本地编译后报 `gyp: binding.gyp not found`，安装失败（Windows/Linux 平台不匹配、不安装 `fsevents`，因此不受影响）。
+- 本包自身没有必需的 install/postinstall 钩子；`tsx` 的 TS 转换由 `esbuild` 完成，`esbuild` 的平台二进制由 `@esbuild/<platform>` optionalDependencies 直接提供。禁用生命周期脚本后，全部平台可选依赖（包括 darwin 上的 `fsevents` 预编译二进制）仍会正常安装且真实可用。
+
+因此 `--ignore-scripts` 是受支持安装命令的固定组成部分，不是可选的故障规避：
+
+- 它是传给 `npm install` 的命令行参数，只作用于这一次安装，不修改（也不建议修改）全局 npm 的 `ignore-scripts` 配置，不需要在项目或用户目录放置 `.npmrc`。
+- 它只影响 npm 安装阶段。`loeyae-aidlc install` / `uninstall` 等 CLI 命令与 npm 生命周期脚本无关，不接收该参数。
+- 与 `--omit=optional` 不同：`--ignore-scripts` 保留全部平台 optionalDependencies，不能用删除可选依赖的方式绕过（那会破坏 esbuild 平台二进制的分发）。
 
 可指定 harness（`loeyae-aidlc install --list` 列出全部可用 harness 及安装位置）：
 
@@ -52,8 +65,8 @@ loeyae-aidlc uninstall --all
 # 2. 从 npm 全局卸载旧的 CLI 包
 npm uninstall -g loeyae-aidlc
 
-# 3. 从 npm 全局安装新版本 CLI 包
-npm install -g https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
+# 3. 从 npm 全局安装新版本 CLI 包（--ignore-scripts 是固定参数，原因见上文）
+npm install -g --ignore-scripts https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
 
 # 4. 重新部署到所有检测到的 harness
 loeyae-aidlc install --all

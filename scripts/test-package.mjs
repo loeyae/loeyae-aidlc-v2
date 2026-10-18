@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
@@ -39,7 +39,7 @@ const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: join(home,
   AIDLC_PROVIDER_ALLOW_FILE: "", AIDLC_PACKAGE_SSH_HOME: homedir(), GIT_CONFIG_GLOBAL: join(home, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" };
 const npm = process.env.npm_execpath;
 assert(npm && existsSync(npm), "run through npm run test:package so npm_execpath identifies the actual npm CLI");
-const report = { node: process.version, platform: `${process.platform}-${process.arch}`, sandbox, dependency_mode: "npm install --omit=dev; normal configured cache/registry; install scripts enabled; no source node_modules copied", commands: [], checks: [], skipped: [], options };
+const report = { node: process.version, platform: `${process.platform}-${process.arch}`, sandbox, dependency_mode: "npm install --omit=dev --ignore-scripts (local pack tarball and global remote tarball URL); normal configured cache/registry; lifecycle scripts disabled via explicit flag at every invocation, platform optionalDependencies preserved; no source node_modules copied", commands: [], checks: [], skipped: [], options };
 function save() { writeFileSync(join(output, "results.json"), JSON.stringify(report, null, 2)); }
 function run(name, command, args, settings = {}) {
   console.log(`RUN ${name}`);
@@ -75,7 +75,7 @@ function install(tarball, label) {
   const prefix = join(sandbox, label);
   mkdirSync(prefix);
   writeFileSync(join(prefix, "package.json"), JSON.stringify({ private: true, name: `package-smoke-${label}`, version: "1.0.0" }));
-  npmRun(`npm-install-${label}`, ["install", "--omit=dev", "--no-audit", "--no-fund", ...(label === "previous" && options["--previous-legacy-peer-deps"] ? ["--legacy-peer-deps"] : []), tarball], prefix);
+  npmRun(`npm-install-${label}`, ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", ...(label === "previous" && options["--previous-legacy-peer-deps"] ? ["--legacy-peer-deps"] : []), tarball], prefix);
   const root = join(prefix, "node_modules/loeyae-aidlc");
   assert(!existsSync(join(root, "tests")));
   assert(!existsSync(join(prefix, "node_modules/typescript")), "production install unexpectedly needs dev dependencies");
@@ -85,6 +85,32 @@ function install(tarball, label) {
 const cli = (root, name, args, extra = {}) => run(name, process.execPath, [join(root, "bin/cli.js"), ...args], extra);
 const json = p => JSON.parse(readFileSync(p, "utf8"));
 function check(name, fn) { fn(); report.checks.push(name); save(); console.log(`PASS ${name}`); }
+// Real remote-tarball acceptance: the supported global install fetches a real archive over HTTP
+// (served locally for repeatability) instead of copying anything from the source checkout.
+async function startArchiveServer(dir) {
+  const script = join(sandbox, "serve-archive.mjs");
+  writeFileSync(script, `import { createServer } from "node:http";
+import { createReadStream, existsSync, statSync } from "node:fs";
+import { basename, extname, join, resolve } from "node:path";
+const root = resolve(process.argv[2]);
+const server = createServer((request, response) => {
+  const file = join(root, basename(decodeURIComponent(new URL(request.url, "http://localhost").pathname)));
+  if (!existsSync(file) || !statSync(file).isFile()) { response.writeHead(404); response.end("not found"); return; }
+  response.writeHead(200, { "content-type": extname(file) === ".tgz" ? "application/gzip" : "application/octet-stream", "content-length": statSync(file).size });
+  createReadStream(file).pipe(response);
+});
+server.listen(0, "127.0.0.1", () => console.log(\`listening \${server.address().port}\`));
+`);
+  const { spawn } = await import("node:child_process");
+  const child = spawn(process.execPath, [script, dir], { stdio: ["ignore", "pipe", "pipe"] });
+  return await new Promise((startOk, startFail) => {
+    let announced = "";
+    child.stdout.on("data", chunk => { announced += chunk; const found = announced.match(/listening (\d+)/); if (found) startOk({ child, url: `http://127.0.0.1:${found[1]}` }); });
+    child.stderr.on("data", chunk => process.stderr.write(chunk));
+    child.on("error", startFail);
+    setTimeout(() => startFail(new Error("local archive HTTP server did not announce readiness")), 60000);
+  });
+}
 try {
   report.core_revision = run("core-revision", "git", ["rev-parse", "HEAD"], { cwd: repo }).trim();
   report.npm_version = npmRun("npm-version", ["--version"]).trim();
@@ -108,6 +134,53 @@ try {
     cli(candidate, "provider-help", ["provider", "help"]);
     assert.match(cli(candidate, "runtime-summary", ["runtime", "summary"], { expected: 2 }), /no active AWS-style lightweight workflow/);
   });
+  // Behavioral regression for the macOS tarball install fix: the supported install command must
+  // disable lifecycle scripts (fsevents@2.3.3 metadata declares a node-gyp build the tarball
+  // cannot satisfy) while platform optionalDependencies stay installable. A script canary proves
+  // both halves: with the flag the script must not run, without it the same environment does run it.
+  check("supported install disables lifecycle scripts and keeps installing (script canary)", () => {
+    const canaryDir = join(sandbox, "lifecycle-canary"); mkdirSync(canaryDir);
+    writeFileSync(join(canaryDir, "package.json"), JSON.stringify({ name: "aidlc-lifecycle-canary", version: "1.0.0", scripts: { install: "node -e \"require('fs').writeFileSync('lifecycle-ran.flag','ran')\"" } }));
+    const canaryTarball = join(output, JSON.parse(npmRun("pack-canary", ["pack", "--json", "--pack-destination", output], canaryDir))[0].filename);
+    const canaryInstall = (label, extraArgs, expectRan) => {
+      const prefix = join(sandbox, `canary-${label}`); mkdirSync(prefix);
+      writeFileSync(join(prefix, "package.json"), JSON.stringify({ private: true, name: `canary-${label}`, version: "1.0.0" }));
+      npmRun(`npm-install-canary-${label}`, ["install", "--no-audit", "--no-fund", ...extraArgs, canaryTarball], prefix);
+      const ran = existsSync(join(prefix, "node_modules", "aidlc-lifecycle-canary", "lifecycle-ran.flag"));
+      assert.equal(ran, expectRan, `lifecycle script ${expectRan ? "did not run" : "ran"} under ${label}`);
+      assert(existsSync(join(prefix, "node_modules", "aidlc-lifecycle-canary")), `canary package missing under ${label}`);
+    };
+    canaryInstall("ignore-scripts", ["--ignore-scripts"], false);
+    canaryInstall("control", [], true);
+  });
+  const archiveServer = await startArchiveServer(output);
+  try {
+    const globalPrefix = join(sandbox, "global-prefix");
+    npmRun("npm-install-global-remote", ["install", "-g", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", globalPrefix, `${archiveServer.url}/${encodeURIComponent(basename(candidateTarball))}`]);
+    const globalRoot = join(globalPrefix, "node_modules", "loeyae-aidlc");
+    const globalRequire = createRequire(join(globalRoot, "package.json"));
+    check("global remote tarball: real version, bin shim and CLI startup (TS executed via installed tsx)", () => {
+      assert.equal(json(join(globalRoot, "package.json")).version, report.candidate.version);
+      const globalShim = process.platform === "win32" ? join(globalPrefix, "loeyae-aidlc.cmd") : join(globalPrefix, "bin", "loeyae-aidlc");
+      assert(existsSync(globalShim), `missing global bin shim ${globalShim}`);
+      assert.match(cli(globalRoot, "global-help", ["--help"]), /Usage:/);
+      assert.match(cli(globalRoot, "global-version", ["--version"]), new RegExp(report.candidate.version.replaceAll(".", "\\.")));
+    });
+    // The platform package ships its executable at the package root (esbuild.exe on Windows,
+    // bin/esbuild elsewhere); resolving the package keeps this independent of hoisting.
+    const esbuildPlatform = dirname(globalRequire.resolve(`@esbuild/${process.platform}-${process.arch}/package.json`));
+    const esbuildBinary = join(esbuildPlatform, ...process.platform === "win32" ? ["esbuild.exe"] : ["bin", "esbuild"]);
+    check("global remote tarball: platform esbuild binary present and performing a real TS transform", () => {
+      assert(existsSync(esbuildBinary), `missing platform esbuild binary ${esbuildBinary}`);
+      const transformed = run("esbuild-transform", esbuildBinary, ["--loader=ts", "--format=cjs"], { input: "const answer: number = 42;\nconsole.log(answer);\n" });
+      assert.match(transformed, /console\.log\(answer\)/, "platform esbuild binary did not transform TypeScript");
+    });
+    if (process.platform === "darwin") check("darwin fsevents prebuilt loads without lifecycle scripts", () => {
+      const fsevents = globalRequire("fsevents");
+      assert(["object", "function"].includes(typeof fsevents), `unexpected fsevents export ${typeof fsevents}`);
+    });
+    else report.skipped.push("darwin fsevents prebuilt load: platform-specific; re-run this acceptance on a real macOS host to cover it");
+  } finally { archiveServer.child.kill(); }
   const host = join(workspace, "host.json");
   const original = { userSetting: "keep-user-field", mcpServers: { unknownLegacy: { command: "user-pinned", disabled: true } } };
   writeFileSync(host, JSON.stringify(original));
@@ -169,10 +242,10 @@ try {
     // Continue after restoring only this test's own deliberately added file.
     const { unlinkSync } = await import("node:fs");
     assert.equal(readFileSync(join(target, "user-note.txt"), "utf8"), "preserve my edit"); unlinkSync(join(target, "user-note.txt"));
-    npmRun("npm-upgrade", ["install", "--omit=dev", "--no-audit", "--no-fund", candidateTarball], previousPrefix);
+    npmRun("npm-upgrade", ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", candidateTarball], previousPrefix);
     assert.match(cli(previous, "upgraded-version", ["--version"]), new RegExp(report.candidate.version.replaceAll(".", "\\.")));
     cli(previous, "upgrade", ["install", ...args]);
-    npmRun("npm-rollback", ["install", "--omit=dev", "--no-audit", "--no-fund", ...(options["--previous-legacy-peer-deps"] ? ["--legacy-peer-deps"] : []), previousTarball], previousPrefix);
+    npmRun("npm-rollback", ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", ...(options["--previous-legacy-peer-deps"] ? ["--legacy-peer-deps"] : []), previousTarball], previousPrefix);
     cli(previous, "rollback", ["install", ...args]);
     assert.match(cli(previous, "rollback-version", ["--version"]), new RegExp(report.previous.version.replaceAll(".", "\\.")));
     cli(previous, "rollback-graph", ["graph", "validate"]);

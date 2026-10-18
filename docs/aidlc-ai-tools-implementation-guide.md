@@ -37,12 +37,15 @@ AI：展示“下一步提示”（handoff_prompt），需要你决定时停下�
 **让 AI 代劳的提示词：**
 
 ```text
-帮我安装 loeyae-aidlc：从 https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz 全局安装，
+帮我安装 loeyae-aidlc：执行
+npm install -g --ignore-scripts https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
+（--ignore-scripts 是固定参数：依赖树无需安装期脚本，且 macOS 上跳过 fsevents 的错误元数据编译），
 然后部署到 Kiro IDE，并给当前项目安装 Stop Hook。装完用 install --list 和 version 自检。
 ```
 
 **要点：**
 
+- 安装命令必须带 `--ignore-scripts`，升级同理（见 `docs/loeyae-aidlc-v2-installation.md`）。这不是可选参数：macOS 上省略它会导致 `fsevents` 触发注定失败的 `node-gyp rebuild`，且该依赖树本就不依赖安装期脚本运行。
 - 全局安装后需重启工具，Skill 才会生效。
 - Kiro IDE / Kiro CLI 的 Stop Hook 是项目级的，每个业务项目单独安装一次（`--project`）；没有 Hook 时流程照样能走，只是会话结束时不会提醒你“流程仍在进行”。
 - `--project` 指向的路径不存在时，CLI 会先装好全局 Skill 再报错，只缺 Hook，修正路径后重来即可。
