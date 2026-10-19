@@ -80,6 +80,8 @@ docs/aidlc/modules/{module-id}/inception/clarifications.md
 
 ## 完成标准
 
+删除交付直接使用本阶段的真实用例来源和范围：描述性文件名与聚合文件无需改名或复制，按唯一声明 ID 和 `source_ref` 追溯；新证据记录 `ucd_sources` 文件及摘要以复核漂移。无 `unit_refs` 时保留模块全集兼容范围，删除归属另由单单元或唯一需求归属证明；多单元歧义要求明确归属。可信无行为删除使用 `applicability: "not_applicable"`、省略 `ucd_id`，沿用受控 I13 或空子集的已批准豁免及成功替代检查，不虚构业务用例。
+
 - [ ] 每个产品 Gherkin 场景至少有一个 UC-D，或有结构化 `non-applicable.json` 及确定性替代验证
 - [ ] 每个已批准高风险技术场景有 UC-D，或有结构化不适用依据
 - [ ] 每个用例有真实执行锚点和可验证断言

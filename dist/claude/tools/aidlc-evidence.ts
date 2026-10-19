@@ -22,6 +22,7 @@ import { fileURLToPath } from "url";
 import { baselineCodeRef, baselineCommitErrors, baselineKindErrors, epochRepos, extraRepoKeyErrors, workflowBaselineForModule } from "./aidlc-baseline";
 import { codeRefRepo, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
 import { evidenceRelativePath, i13UcdIdsByMode as sharedI13UcdIdsByMode, readUnitManifest, stageInstanceId, unitManifestPath, unitUcdIds, verifiedModuleIds, type UcdExemption } from "./aidlc-execution-context";
+import { assertControlledI13 } from "./aidlc-i13-applicability";
 import { evidenceTimeError } from "./aidlc-evidence-policy";
 import { readSourceRevision, commitAncestryErrors } from "./aidlc-revision";
 import { GLOBAL_WORKFLOW, loadWorkflowState, type WorkflowRef, type WorkflowState } from "./aidlc-light-state";
@@ -661,19 +662,11 @@ export function noBehaviorBasis(state: ProducerState): Record<string, unknown> |
   const i13 = phaseRecord(state);
   const scope = i13.status === "required" ? unitUcdIds(i13, state.current_unit) : null;
   if (i13.status !== "not_applicable" && !(scope?.scoped && scope.all.length === 0)) return null;
-  const producer = i13.producer as Record<string, unknown> | undefined;
-  const checker = i13.checker as Record<string, unknown> | undefined;
-  const revision = i13.source_revision as Record<string, unknown> | undefined;
-  if (i13.evidence_version !== "1" || producer?.name !== "loeyae-aidlc-evidence" || producer.mode !== "controlled" || !producer.execution_id
-    || i13.stage_instance !== `test-case-derivation@module:${state.current_module}` || i13.module_id !== state.current_module || i13.unit_id !== null
-    || !revision || !/^[a-f0-9]{64}$/.test(String(revision.worktree_digest)) || !/^[a-f0-9]{40,64}$/.test(String(revision.commit))
-    || commitAncestryErrors(PROJECT_ROOT, String(revision.commit), readSourceRevision(PROJECT_ROOT).commit).length
-    || checker?.id !== "builtin:test-case-derivation" || checker.sensor !== "test-case-derivation" || !/^[a-f0-9]{64}$/.test(String(checker.argv_digest))
-    || checker.status !== "passed" || checker.exit_code !== 0 || evidenceTimeError(i13, "test-case-derivation")) fail("no-behavior applicability requires controlled valid I13 evidence");
+  assertControlledI13(PROJECT_ROOT, i13, state.current_module);
   const current = runSemanticCommand("test-case-derivation", DEFAULT_TIMEOUT_MS, { ...state, current_stage: "test-case-derivation", current_unit: undefined }).payload;
   const keys = i13.status === "not_applicable"
     ? ["status", "applicability_inputs_digest", "reason_code", "reason", "approval_ref", "alternative_validation", "validation_command", "source_refs", "source_files"]
-    : ["status", "ucd_ids", "ucd_units"];
+    : ["status", "ucd_ids", "ucd_units", ...(i13.ucd_sources !== undefined ? ["ucd_sources"] : [])];
   for (const key of keys) if (JSON.stringify(i13[key]) !== JSON.stringify(current[key])) fail(`I13 applicability no longer matches its sources: ${key}`);
   const exemption = scope?.scoped ? unitUcdExemption(PROJECT_ROOT, state.current_module, state.current_unit!) : undefined;
   if (scope?.scoped && !exemption) fail("empty UC-D subset requires an approved unit ucd_exemption");
@@ -738,6 +731,22 @@ function alternativeBinding(spec: CommandSpec, state: ProducerState, basis: Reco
   return { binding, revision, declaredScope };
 }
 
+/** Resolve successful observation provenance; a matching input hash alone is insufficient. */
+function alternativeObservationErrors(execution: Record<string, unknown>, binding: Record<string, unknown>, freshness?: Record<string, unknown>): string[] {
+  const key = argvDigest([JSON.stringify(binding)]);
+  if (execution.input_binding !== key) return ["alternative observation inputs/environment/declaration changed; rerun check"];
+  try {
+    const path = requireRegularFile(join(PROJECT_ROOT, ".aidlc", "alternative-observations", `${key}.json`), "alternative observation");
+    const saved = JSON.parse(readFileSync(path, "utf8"));
+    const observation = execution.reused_from ?? execution.observation_id;
+    if (typeof observation !== "string" || saved.observation_id !== observation || saved.producer !== "loeyae-aidlc-evidence"
+      || JSON.stringify(saved.binding) !== JSON.stringify(binding) || evidenceTimeError({ ...saved, ...(freshness ? { freshness } : {}) }, "build-test-evidence")
+      || saved.result?.status !== "passed" || saved.result?.exit_code !== 0
+      || ["argv_digest", "cwd", "exit_code", "status", "duration_ms"].some(field => execution[field] !== saved.result[field])) return ["alternative observation has no matching successful provenance"];
+    return [];
+  } catch (error) { return [`alternative observation provenance cannot be verified: ${String(error)}`]; }
+}
+
 /** Current-input verification used by phase/C8 gates, including declared environment/config. */
 export function alternativeCheckBindingErrors(execution: Record<string, unknown>, stage: string, state: ProducerState): string[] {
   try {
@@ -745,11 +754,24 @@ export function alternativeCheckBindingErrors(execution: Record<string, unknown>
     const spec = config.commands.find(command => command.id === execution.id && command.role === "check");
     if (!spec) return ["alternative check command is no longer declared"];
     // Legacy observations retain their existing conservative provenance gate.
-    if (execution.input_binding === undefined && !spec.evidence_inputs) return [];
+    if (execution.input_binding === undefined && !spec.evidence_inputs && !execution.reused_from) return [];
     const basis = noBehaviorBasis(state);
     if (!basis) return ["alternative observation no longer has a trusted applicability basis"];
     const { binding } = alternativeBinding(spec, state, basis, config.freshness);
-    return execution.input_binding === argvDigest([JSON.stringify(binding)]) ? [] : ["alternative observation inputs/environment/declaration changed; rerun check"];
+    return alternativeObservationErrors(execution.input_binding === undefined ? { ...execution, input_binding: argvDigest([JSON.stringify(binding)]) } : execution, binding, config.freshness);
+  } catch (error) { return [String(error)]; }
+}
+
+/** Empty-subset observations are owned by the unit manifest, rather than a stage allowlist. */
+export function exemptionCheckBindingErrors(execution: Record<string, unknown>, state: ProducerState): string[] {
+  try {
+    if (execution.input_binding === undefined && !execution.reused_from) return [];
+    const exemption = unitUcdExemption(PROJECT_ROOT, state.current_module!, state.current_unit!);
+    const basis = noBehaviorBasis(state);
+    if (!exemption || !basis) return ["exemption observation no longer has a trusted applicability basis"];
+    const config = optionalSemanticConfig(resolveCommandConfigPath(PROJECT_ROOT, state.current_stage!), state.current_stage!);
+    const { binding } = alternativeBinding({ id: `ucd-exemption:${state.current_unit}`, role: "check", argv: exemption.validation_command }, state, basis, config?.freshness);
+    return alternativeObservationErrors(execution.input_binding === undefined ? { ...execution, input_binding: argvDigest([JSON.stringify(binding)]) } : execution, binding, config?.freshness);
   } catch (error) { return [String(error)]; }
 }
 
@@ -967,7 +989,7 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
       ucd_ids: [],
       not_required_reason: `${unitLabel} owns no UC-D of module ${moduleId}; ucd_exemption ${exemption.reason_code}: ${exemption.reason}`,
       ucd_exemption: { reason_code: exemption.reason_code, reason: exemption.reason, approval_ref: exemption.approval_ref, alternative_validation: exemption.alternative_validation },
-      exemption_validation_execution: { id: check.id, argv_digest: check.argv_digest, cwd: check.cwd, exit_code: check.exit_code, status: check.status, duration_ms: check.duration_ms, ...(check.reused_from ? { reused_from: check.reused_from } : {}), ...(check.observation_id ? { observation_id: check.observation_id } : {}) },
+      exemption_validation_execution: { id: check.id, argv_digest: check.argv_digest, cwd: check.cwd, exit_code: check.exit_code, status: check.status, duration_ms: check.duration_ms, ...(check.reused_from ? { reused_from: check.reused_from } : {}), ...(check.observation_id ? { observation_id: check.observation_id } : {}), ...(check.input_binding ? { input_binding: check.input_binding } : {}) },
     };
     execution = { id: `builtin:${sensor}`, sensor, argv_digest: ucdExemptionDigest(phase, check.argv_digest), exit_code: 0, status: "passed" };
   } else if (phase === "RED" && scope!.new.length === 0) {

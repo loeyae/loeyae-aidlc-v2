@@ -252,4 +252,8 @@ unit_refs: [u1, u2]          # 跨单元：u1 和 u2 的 GREEN 都必须覆盖�
 
 ## 无行为观察复用
 
+删除交付沿用本协议的适用性、声明来源和单元范围：业务删除按声明 ID 解析真实 `test_case_files`（支持描述性文件名和聚合文件），新 I13 的 `ucd_sources` 记录每个 ID 的文件和 SHA-256，来源移动或修改须刷新 I13 并重新验证。缺文件、重复 ID、跨模块来源和归属漂移均拒绝。未声明 `unit_refs` 时保留模块全集；删除归属可由单单元或唯一匹配的 manifest 需求证明，真实多单元歧义须明确归属。
+
+纯配置等可信无行为删除在 `source-deletions.json` 条目声明 `applicability: "not_applicable"` 并省略 `ucd_id`；只接受受控 I13 `not_applicable` 或空单元 UC-D 子集及已批准 `ucd_exemption`。仍需真实删除、基线 blob、授权 `req_refs` 和成功/有效复用的替代检查。业务删除省略该字段保持兼容；实际移除可执行业务行为仍走真实业务 RED/GREEN。
+
 无行为替代验证的每个阶段必须有真实成功执行记录，或带有效 `reused_from` / `observation_id` 的可复核受绑定观察；无需重复启动同一检查进程。命令、输入、scope、环境、I13/单元声明或基线世代漂移时必须重跑。业务 RED/GREEN 仍独立执行，禁止复用替代检查观察来代替业务断言。
