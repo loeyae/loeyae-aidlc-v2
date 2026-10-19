@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.22.9 — 2026-10-19
+
+- Evaluate native Node TypeScript checks using the selected compiler's effective options after local configuration inheritance and CLI overrides; accept valid noEmit checks with suppressed output paths, declarations and maps (MARS-257).
+- Exclude unconsumed tsconfig files from build applicability while preserving real emit, incremental build-info, build-mode, failed-check and mixed-module safeguards; bind consumed configuration, compiler CLI/parser bytes, runtime and environment for producer, gate and report revalidation.
+- Synchronize package, plugin, marketplace and stage-graph versions and regenerate all nine harness distributions.
+
 ## 4.22.8 — 2026-10-19
 
 - Accept approved native Node build exemptions when TypeScript is verified to run only noEmit static checks; bind commands, package policy, tsconfig inheritance, dependency locks and compiler implementation while preserving real-build and mixed-module constraints (MARS-256).
