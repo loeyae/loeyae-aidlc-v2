@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.22.8 — 2026-10-19
+
+- Accept approved native Node build exemptions when TypeScript is verified to run only noEmit static checks; bind commands, package policy, tsconfig inheritance, dependency locks and compiler implementation while preserving real-build and mixed-module constraints (MARS-256).
+- Accept bounded, complete native Node coverage tables following TAP summaries; retain reconciled counts and reject duplicate, truncated, contradictory or unknown output, failures, cancellations and zero successful tests.
+- Align C8 protocols, sensors, stages, templates and evidence skills; synchronize package, plugin, marketplace and stage-graph versions and regenerate all nine harness distributions.
+
 ## 4.22.7 — 2026-10-19
 
 - Verify C8 build/check applicability from approved native Node project policies per module; retain required business tests, mixed-module coverage, command binding and source/configuration drift protection (MARS-255).
