@@ -121,6 +121,14 @@ try {
   run(business, ["evidence", "run", "--stage", "build-and-test"]);
   assert.equal(get(business, buildPath).tests.passed, 1);
   assert.equal(gate(business, "build-test-evidence").failures.length, 0);
+  // Missing declarations still require all default roles; an approved native
+  // project policy exempts only its independent build, never business tests.
+  const businessConfig = get(business, ".aidlc/commands/build-and-test.json");
+  put(business, "package.json", { scripts: { check: "node check.cjs", test: "node test.cjs" }, aidlc_validation: { module_id: "project", runtime: "native-node", approval_ref: "approved:native-runtime", build: { status: "not_applicable", reason: "CommonJS executes directly without compilation or generated artifacts" } } });
+  put(business, ".aidlc/commands/build-and-test.json", { ...businessConfig, role_applicability: [{ module_id: "project", package_json: "package.json", roles: ["build"] }], commands: businessConfig.commands.filter((command: { role: string }) => command.role !== "build") });
+  run(business, ["evidence", "run", "--stage", "build-and-test"]);
+  assert.equal(get(business, buildPath).tests.passed, 1);
+  assert.equal(gate(business, "build-test-evidence").failures.length, 0, "approved no-build business still executes real tests/checks");
 
   const behavior = project("historical-red");
   put(behavior, "docs/aidlc/modules/project/inception/requirements.md", "REQ-1: Given a user, When submitting an order, Then the order is saved.\n");

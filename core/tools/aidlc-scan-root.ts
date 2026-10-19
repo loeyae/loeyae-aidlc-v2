@@ -10,7 +10,7 @@ const SKIPPED_ENTRIES = [".git", "node_modules", "dist", "build", "target", ".ai
  * traceability-matrix code/test layers and the test-quality test-file scan so the
  * two gates never disagree about which languages count.
  */
-export const SOURCE_EXTENSIONS: readonly string[] = ["java", "kt", "ts", "tsx", "js", "jsx", "vue", "py", "go", "rs", "cs"];
+export const SOURCE_EXTENSIONS: readonly string[] = ["java", "kt", "ts", "tsx", "js", "jsx", "cjs", "mjs", "vue", "py", "go", "rs", "cs"];
 const EXTENSION_GROUP = "(?:" + SOURCE_EXTENSIONS.join("|") + ")";
 /** Any source file in a supported language. */
 export const SOURCE_FILE_PATTERN = new RegExp("\\." + EXTENSION_GROUP + "$", "i");

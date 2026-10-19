@@ -21,7 +21,7 @@ requires: [code-generation, code-review]
 
 **目的**：实际执行构建与测试命令，修复失败并保存可复现证据。生成说明文档不能替代命令执行。
 
-**适用性**：普通行为变更执行所需 build/test/check，并记录真实非零通过测试。可信 I13 已声明无可执行业务行为，或单元的空 UC-D 子集有已批准 ucd_exemption 时，producer 与完成门禁复核来源和声明后允许用真实成功的确定性 check 完成该范围；不存在的构建/测试记录为不适用，测试数如实为零。C8 项目轴必须覆盖所有模块，任一模块存在业务行为时仍需适用测试。空声明、全 skipped 或来源失效不能豁免。
+**适用性**：普通行为变更执行实际所需 build/check 与真实非零通过测试。加载 `common-c8-role-applicability.md`：按模块复核已批准项目政策及来源，无声明默认必需；无独立构建/检查时可按契约记录角色不适用，不制造空 build 或重复执行同一检查。可信 I13 已声明无可执行业务行为，或单元的空 UC-D 子集有已批准 ucd_exemption 时，producer 与完成门禁复核来源和声明后允许用真实成功的确定性 check 完成该范围；不存在的构建/测试记录为不适用，测试数如实为零。C8 项目轴必须覆盖所有模块，任一模块需要构建时不能被其他模块豁免。业务范围仍需真实测试；空声明、全 skipped/todo 或来源失效不能豁免。
 
 `consumes` 中的 `src/` 是源码根的规范占位，按 `module-manifest` 的 `paths`（本阶段为 project 轴，取所有模块并集）→ `.aidlc/source-roots.json` → 默认 `src/` 解析，规则见 `construction-code-generation.md`“源码根解析”。命令清单优先使用 `.aidlc/commands/build-and-test.json`，不存在时回退 `.aidlc/evidence-commands.json`；显式 `--config` 仅在指向同一默认查找文件时接受，以便门禁重新绑定命令。
 

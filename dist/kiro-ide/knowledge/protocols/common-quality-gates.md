@@ -49,7 +49,7 @@ Evidence 路径由当前 directive 的 `evidence_root` 决定：
 
 ## 验证适用性与历史观察复验
 
-C8 普通行为变更仍需受控 build、test、check 和真实非零通过测试。
+C8 普通行为变更要求实际适用的受控 build/check，以及真实非零通过且零失败的 test。按 `common-c8-role-applicability.md` 复核模块级来源和已批准项目政策；无声明默认要求 build/check，不用三角色配额制造重复检查。业务测试不能被角色不适用声明豁免。
 无可执行业务行为的单元可由可信 I13 not_applicable 或空 UC-D 子集的已批准 ucd_exemption 证明适用性；producer 和门禁重新检查 I13 来源/单元声明。
 此时只要求实际成功的确定性 check；不存在的 build/test 不必新增，测试统计如实为零。空声明、全 skipped、来源不匹配不能放行。
 
