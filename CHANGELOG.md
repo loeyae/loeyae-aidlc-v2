@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.22.6 — 2026-10-19
+
+- Accept trusted no-behavior deletion deliveries using controlled I13 applicability or approved empty-unit exemptions, with successful deterministic checks and verified observation reuse (MARS-253).
+- Share I13 declaration parsing and source mappings with deletion delivery; support descriptive filenames and aggregate case files while rejecting missing, duplicate, out-of-scope or drifted sources.
+- Preserve module-wide UC-D compatibility without mandatory unit_refs when ownership is provable; reject ambiguous unit claims and retain independent business RED/GREEN validation.
+- Synchronize package, plugin, marketplace and stage-graph versions; regenerate all nine harness distributions.
+
 ## 4.22.5 — 2026-10-19
 
 - Accept deletion-only source deliveries with verified baseline blobs, unit requirement ownership and affected I13 behavior, including last-file removals, nested repositories, consumers and completion audits (MARS-252).
