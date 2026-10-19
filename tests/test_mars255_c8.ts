@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -15,6 +15,8 @@ const configPath = ".aidlc/commands/build-and-test.json", evidencePath = ".aidlc
 const check = { id: "check", role: "check", argv: ["node", "--check", "router.cjs"] };
 const test = { id: "test", role: "test", argv: ["node", "--test", "--test-reporter=tap", "tests/native.test.cjs"] };
 const build = { id: "build", role: "build", argv: ["node", "build.cjs"] };
+const compiler = join(repo, "node_modules/typescript/bin/tsc");
+const noEmitCheck = { ...check, argv: ["node", compiler, "--allowJs", "--checkJs", "--noEmit", "router.cjs"] };
 const policy = { module_id: "project", runtime: "native-node", approval_ref: "approved:REQ-1", build: { status: "not_applicable", reason: "CommonJS executed directly by Node; no generated artifacts or transpiler" }, check: { status: "not_applicable", reason: "No independent static check policy; assertions exercise the CommonJS source" } };
 const declaration = { module_id: "project", package_json: "package.json", roles: ["build"] };
 function config(root: string, commands: unknown[] = [check, test], declarations: unknown = [declaration]) { put(root, configPath, { version: "1", stage: "build-and-test", commands, ...(declarations === null ? {} : { role_applicability: declarations }) }); }
@@ -87,6 +89,54 @@ try {
   produce(root, false); config(root);
   console.log("PASS source/config/commands drift, empty/unapproved/contradictory exemption, and summary tampering block");
 
+  // The compiler really runs, with real CommonJS inputs and no fabricated build.
+  const typedPkg = { ...pkg, devDependencies: { typescript: "5.9.3" }, scripts: { ...pkg.scripts, check: "tsc --allowJs --checkJs --noEmit router.cjs" } };
+  if (process.argv.includes("--baseline-256")) {
+    const main = resolve(repo, "../loeyae-aidlc-v2");
+    put(root, "package.json", typedPkg); config(root, [noEmitCheck, test]);
+    assert.match(produce(root, false, [], main).stderr, /build exemption contradicts configured tooling/);
+    put(root, "package.json", pkg); config(root, [check, { ...test, argv: ["node", "--test", "--test-reporter=tap", "--experimental-test-coverage", "tests/native.test.cjs"] }]);
+    assert.match(produce(root, false, [], main).stderr, /no test counts were parsed/);
+    console.log("PASS MARS-256 baseline: main 4.22.7 real producer rejects both noEmit and native coverage (exit 2)");
+  }
+  put(root, "package.json", typedPkg); config(root, [noEmitCheck, test]); produce(root); gate(root);
+  put(root, "package-lock.json", { lockfileVersion: 3, packages: {} }); gate(root, false); produce(root); gate(root);
+  put(root, "package-lock.json", { lockfileVersion: 3, packages: {}, changed: true }); gate(root, false); produce(root); gate(root);
+  rmSync(join(root, "package-lock.json")); gate(root, false); produce(root); gate(root);
+  assert.deepEqual(read(root, evidencePath).tests, { total: 1, passed: 1, failed: 0, skipped: 0 });
+  assert.equal(read(root, evidencePath).commands.some((c: {role: string}) => c.role === "build"), false);
+  assert.equal(existsSync(join(root, "router.js")), false);
+  put(root, "router.cjs", "module.exports=()=>['health'];\n/** @type {number} */ const invalid='type error';\n"); produce(root, false);
+  put(root, "router.cjs", "module.exports = () => ['health'];\n"); produce(root); gate(root);
+  put(root, "package.json", { ...typedPkg, aidlc_validation: { ...policy, approval_ref: "approved:changed" } }); gate(root, false);
+  put(root, "package.json", typedPkg); gate(root);
+  const projectCheck = { ...check, argv: ["node", compiler, "--project", "tsconfig.json"] };
+  const checkConfig = { compilerOptions: { allowJs: true, checkJs: true, noEmit: true }, files: ["router.cjs"] };
+  put(root, "tsconfig.base.json", "{ // shared static-check options\n\"compilerOptions\": {\"noEmit\": true,},\n}\n");
+  put(root, "tsconfig.json", { ...checkConfig, extends: "./tsconfig.base.json" });
+  put(root, "package.json", { ...typedPkg, scripts: { ...pkg.scripts, check: `node "${compiler}" --project tsconfig.json` } });
+  config(root, [projectCheck, test]); produce(root); gate(root);
+  // Every consumed config byte participates in revalidation, even semantically neutral edits.
+  put(root, "tsconfig.base.json", { compilerOptions: { noEmit: true }, note: "drift" }); gate(root, false); produce(root); gate(root);
+  for (const options of [{ noEmit: false }, { noEmit: true, outDir: "out" }, { noEmit: true, declaration: true }, { noEmit: true, incremental: true }]) {
+    put(root, "tsconfig.json", { ...checkConfig, compilerOptions: { ...checkConfig.compilerOptions, ...options } }); gate(root, false); produce(root, false);
+  }
+  put(root, "tsconfig.json", checkConfig);
+  for (const extra of [["--noEmit", "false"], ["--outDir", "out"], ["--build"], ["--unknown-flag"]]) {
+    config(root, [{ ...projectCheck, argv: [...projectCheck.argv, ...extra] }, test]); produce(root, false);
+  }
+  put(root, "tsconfig.json", { ...checkConfig, extends: "unverified-package/config" }); produce(root, false);
+  put(root, "tsconfig.json", { ...checkConfig, references: [{ path: "compiled" }] }); produce(root, false);
+  put(root, "tsconfig.json", checkConfig);
+  for (const scripts of [{ ...typedPkg.scripts, prepare: "node build.cjs" }, { ...typedPkg.scripts, check: "tsc --noEmit && node other.cjs" }, { ...typedPkg.scripts, check: "custom-typecheck-wrapper" }]) {
+    put(root, "package.json", { ...typedPkg, scripts }); config(root, [{ ...check, argv: ["npm", "run", "check"] }, test]); produce(root, false);
+  }
+  put(root, "package.json", { ...typedPkg, scripts: { ...typedPkg.scripts, check: "tsc router.cjs --allowJs --outDir out" } });
+  config(root, [noEmitCheck, test]); produce(root, false);
+  rmSync(join(root, "tsconfig.json")); rmSync(join(root, "tsconfig.base.json"));
+  put(root, "package.json", pkg); config(root); produce(root); gate(root);
+  console.log("PASS real TypeScript direct/noEmit and npm script/JSONC/local inheritance; config/argv drift, actual emit/output, prepare, wrappers and ambiguous configs block");
+
   // Existing projects with real builds retain the default, and failed/omitted builds block.
   put(root, "package.json", { scripts: { build: "node build.cjs", test: "node --test" } });
   put(root, "build.cjs", "require('node:fs').mkdirSync('out',{recursive:true});require('node:fs').copyFileSync('router.cjs','out/router.cjs');\n");
@@ -95,12 +145,19 @@ try {
   put(root, "build.cjs", "process.exit(1);\n"); produce(root, false);
   console.log("PASS real build required, success accepted, missing/failed build blocked");
 
+  const compiledBuild = { ...build, argv: ["node", compiler, "--allowJs", "--outDir", "compiled-out", "router.cjs"] };
+  put(root, "package.json", { devDependencies: { typescript: "5.9.3" }, scripts: { build: "tsc --allowJs --outDir compiled-out router.cjs" } });
+  config(root, [compiledBuild, noEmitCheck, test], null); produce(root); gate(root);
+  assert.match(readFileSync(join(root, "compiled-out/router.cjs"), "utf8"), /health/);
+  config(root, [{ ...compiledBuild, argv: [...compiledBuild.argv, "--invalid-build-option"] }, noEmitCheck, test], null); produce(root, false);
+  console.log("PASS actual TypeScript artifact compilation required and accepted; real compiler build failure blocks");
+
   // Project aggregation cannot apply one native module's exemption to a build module.
-  put(root, "package.json", pkg);
+  put(root, "package.json", typedPkg);
   put(root, "docs/aidlc/ideation/module-manifest.json", { schema_version: 1, modules: [{ module_id: "project", name: "Native", service_id: "native", paths: ["router.cjs"] }, { module_id: "compiled", name: "Compiled", service_id: "compiled", paths: ["compiled"] }] });
-  mkdirSync(join(root, "compiled")); config(root); produce(root, false);
+  mkdirSync(join(root, "compiled")); config(root, [noEmitCheck, test]); produce(root, false);
   put(root, "build.cjs", "require('node:fs').mkdirSync('out',{recursive:true});require('node:fs').copyFileSync('router.cjs','out/router.cjs');\n");
-  config(root, [build, check, test]); produce(root); gate(root);
+  config(root, [build, noEmitCheck, test]); produce(root); gate(root);
   produce(root, false, ["--command-id", "test", "--command-id", "check"]);
   rmSync(join(root, "docs/aidlc/ideation/module-manifest.json"));
   console.log("PASS mixed modules preserve required build and prevent command subset bypass");
@@ -121,8 +178,25 @@ try {
   assert.deepEqual(parseTestStats("1 passed"), { total: 1, passed: 1, failed: 0, skipped: 0 });
   console.log("PASS Node TAP nested suites + multiple files count leaves once; failures/cancelled/zero-pass block; todo+skip excluded from passed; duplicates/truncation/inconsistency rejected");
 
+  const coverageTest = { ...test, argv: ["node", "--test", "--test-reporter=tap", "--experimental-test-coverage", "tests/native.test.cjs", "tests/second.test.cjs"] };
+  config(root, [coverageTest], [{ ...declaration, roles: ["build", "check"] }]);
+  const coverageRun = spawnSync(process.execPath, coverageTest.argv.slice(1), { cwd: root, encoding: "utf8" });
+  assert.equal(coverageRun.status, 0); const coverage = coverageRun.stdout;
+  assert.deepEqual(parseTestStats(coverage), stats, coverage); produce(root); gate(root);
+  for (const invalid of [coverage + tap, coverage + coverage, coverage + "# unknown trailer\n", coverage.replace("# end of coverage report", ""), coverage.replace("# start of coverage report", "# unknown report"), coverage.replace(/# all files[^\n]*/, "# all files | 101.00 | 100.00 | 100.00 |"), coverage.replace("# pass 3", "# pass 99"), coverage.replace("# end of coverage report", "# pass 0\n# end of coverage report")]) assert.equal(parseTestStats(invalid), null, invalid);
+  for (const source of ["test.skip('skip',()=>{});test.todo('todo');", "test('fail',()=>{throw Error('failure')});", "test('cancel',{timeout:10},()=>new Promise(()=>{}));"]) {
+    put(root, "tests/native.test.cjs", `const {test}=require('node:test');${source}\n`);
+    config(root, [{ ...test, argv: ["node", "--test", "--test-reporter=tap", "--experimental-test-coverage", "tests/native.test.cjs"] }], [{ ...declaration, roles: ["build", "check"] }]); produce(root, false);
+  }
+  console.log("PASS actual Node coverage + nested/multifile/skip/todo counts; truncated/unknown/duplicate/contradictory tables and failed/cancelled/zero-pass coverage block");
+
   // Exercise the public completion boundary with real I13, RED and GREEN evidence.
-  const completed = fixture("completion");
+  for (const mode of ["default", "noEmit", "coverage", "combined"]) {
+  const completed = fixture(`completion-${mode}`);
+  if (mode === "noEmit" || mode === "combined") {
+    put(completed, "package.json", { ...typedPkg }); config(completed, [noEmitCheck, test]);
+  }
+  if (mode === "coverage" || mode === "combined") config(completed, [mode === "combined" ? noEmitCheck : check, { ...test, argv: ["node", "--test", "--test-reporter=tap", "--experimental-test-coverage", "tests/native.test.cjs"] }]);
   put(completed, "router.cjs", "module.exports=require('./src/router.cjs');\n");
   put(completed, "src/router.cjs", "module.exports=()=>[];\n");
   put(completed, "tests/observe.cjs", "const assert=require('node:assert/strict');let failed=0;try{assert.deepEqual(require('../router.cjs')(),['health']);}catch{failed=1;}console.log(JSON.stringify({phase:process.env.AIDLC_PHASE,status:failed?'failed':'passed',compile_status:'passed',environment_status:'passed',tests_total:1,tests_failed:failed,traceability_complete:true,...failed?{failure_class:'behavior',failure_signature:'health route missing'}:{},uc_mapping:[{use_case:'UC-D-001',test_methods:['tests/native.test.cjs']}]}));process.exit(failed);\n");
@@ -147,8 +221,18 @@ try {
   ready.completed_stage_instances = ["workspace-detection", "test-case-derivation@module:project", "tdd@module:project@unit:default", "code-generation@module:project@unit:default", "code-review@module:project@unit:default"]; saveFixtureState(completed, ready);
   produce(completed); gate(completed);
   const execution = read(completed, evidencePath).producer.execution_id;
+  if (mode === "noEmit" || mode === "combined") {
+    put(completed, "tsconfig.build.json", { compilerOptions: { outDir: "dist" } }); gate(completed, false);
+    run(completed, ["orchestrate", "report", "--stage", "build-and-test", "--result", "completed"], false);
+    assert.ok(!loadWorkflowState(completed)!.completed_stage_instances.includes("build-and-test"));
+    rmSync(join(completed, "tsconfig.build.json")); gate(completed);
+    // The rejected report observed the temporary source configuration. Refresh
+    // that semantic observation after restoring sources, never rewrite evidence.
+    run(completed, ["evidence", "run", "--stage", "build-and-test", "--sensor", "test-quality"]);
+  }
   run(completed, ["orchestrate", "report", "--stage", "build-and-test", "--result", "completed"]);
   assert.ok(loadWorkflowState(completed)!.completed_stage_instances.includes("build-and-test"));
   assert.equal(read(completed, evidencePath).producer.execution_id, execution, "report reuses valid C8 commands without manufacturing a build");
-  console.log("PASS public C8 report completed with real business RED/GREEN + native TAP and approved build N/A; existing command evidence reused");
+  console.log(`PASS public C8 report (${mode}) completed with real I13/RED/GREEN, gate and valid command reuse${mode === "noEmit" || mode === "combined" ? "; conflicting build config blocks report" : ""}`);
+  }
 } finally { rmSync(scratch, { recursive: true, force: true }); }

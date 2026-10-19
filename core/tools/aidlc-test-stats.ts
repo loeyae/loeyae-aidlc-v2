@@ -8,12 +8,41 @@ export function validTestStats(value: unknown): value is TestStats {
     && stats.total === stats.passed + stats.failed + stats.skipped;
 }
 
+/** Only the bounded table emitted by Node's native TAP coverage reporter may
+ * follow the final duration. Do not discard arbitrary TAP comments/log output. */
+function nativeCoverage(lines: string[]): boolean {
+  if (!lines.length) return true;
+  if (lines.length > 10000 || lines.join("\n").length > 1024 * 1024) return false;
+  const separator = /^# -+$/;
+  const header = /^# file\s+\| line % \| branch % \| funcs % \| uncovered lines$/;
+  if (lines.length < 9 || lines[0] !== "# start of coverage report" || lines.at(-1) !== "# end of coverage report"
+    || !separator.test(lines[1]) || !header.test(lines[2]) || lines[3] !== lines[1]
+    || lines.at(-4) !== lines[1] || lines.at(-2) !== lines[1]) return false;
+  const row = (line: string, total = false): boolean => {
+    const cells = line.replace(/^# /, "").split("|").map(cell => cell.trim());
+    if (!line.startsWith("# ") || cells.length !== 5 || !cells[0] || (total ? cells[0] !== "all files" : cells[0] === "all files")) return false;
+    if (!total && cells.slice(1).every(cell => cell === "")) return true; // directory
+    return cells.slice(1, 4).every(cell => /^\d{1,3}\.\d{2}$/.test(cell) && Number(cell) <= 100)
+      && /^(?:\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*(?:,?\s*\.\.\.)?)?$/.test(cells[4]);
+  };
+  // separator / totals / separator / end occupy the last four lines.
+  const rows = lines.slice(4, -4);
+  return rows.length > 0 && rows.every(line => row(line)) && row(lines.at(-3)!, true);
+}
+
 /** Node's TAP reporter has one unindented final summary. Nested plans/results
  * belong to suites and must not be added to these leaf counts a second time.
  * Unknown/truncated TAP fails closed, without falling back to prose counters.
  */
 export function parseTestStats(output: string): TestStats | null {
-  const lines = output.replace(/\r\n/g, "\n").trim().split("\n");
+  let lines = output.replace(/\r\n/g, "\n").trim().split("\n");
+  const coverageStart = lines.indexOf("# start of coverage report");
+  if (coverageStart !== -1) {
+    if (!nativeCoverage(lines.slice(coverageStart))) return null;
+    lines = lines.slice(0, coverageStart);
+    // Coverage cannot turn a non-TAP prose report into test evidence.
+    if (!lines.includes("TAP version 13")) return null;
+  }
   if (lines.some(line => /^(?:TAP version|# (?:tests|pass|fail)\b|1\.\.)/.test(line))) {
     if (lines.some(line => /^\s*Bail out!/i.test(line))) return null;
     if (lines.filter(line => line === "TAP version 13").length !== 1) return null;
@@ -60,7 +89,7 @@ export function parseTestStats(output: string): TestStats | null {
     }
     const start = lines.indexOf(`# tests ${counts.tests}`);
     if (lines.indexOf(plans[0]) >= start || keys.some((key, i) => lines[start + i] !== `# ${key} ${counts[key]}`)
-      || !/^# duration_ms \d+(?:\.\d+)?$/.test(lines[start + keys.length] ?? "") || start + keys.length + 1 !== lines.length) return null;
+      || !/^# duration_ms \d+(?:\.\d+)?$/.test(lines[start + keys.length] ?? "") || !nativeCoverage(lines.slice(start + keys.length + 1))) return null;
     // A failed suite/root cannot be hidden by a contradictory successful summary.
     if (!counts.fail && !counts.cancelled && points.some(line => /^not ok /.test(line) && !/# TODO\b/.test(line))) return null;
     const stats = { total: counts.tests, passed: counts.pass, failed: counts.fail + counts.cancelled, skipped: counts.skipped + counts.todo };

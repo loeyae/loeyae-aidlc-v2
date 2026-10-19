@@ -25,6 +25,7 @@ import { evidenceRelativePath, i13UcdIdsByMode as sharedI13UcdIdsByMode, readUni
 import { assertControlledI13 } from "./aidlc-i13-applicability";
 import { evidenceTimeError } from "./aidlc-evidence-policy";
 import { parseTestStats, validTestStats, type TestStats } from "./aidlc-test-stats";
+import { nativeNodeCheckTooling } from "./aidlc-node-check-tooling";
 import { readSourceRevision, commitAncestryErrors } from "./aidlc-revision";
 import { GLOBAL_WORKFLOW, loadWorkflowState, type WorkflowRef, type WorkflowState } from "./aidlc-light-state";
 import { evidenceScopeForInstance, evidenceSourceRevision, integrationStageSlugs, isSplitLayout, loadWorkflowParts, ownerOfInstance, stageAxis } from "./aidlc-workflow-layout";
@@ -691,17 +692,18 @@ function c8RoleBasis(config: EvidenceConfig, state: ProducerState): Record<strin
     const pkg = JSON.parse(bytes);
     const policy = pkg.aidlc_validation;
     if (!policy || policy.module_id !== moduleId || policy.runtime !== "native-node" || typeof policy.approval_ref !== "string" || !policy.approval_ref.trim()) fail(`module ${moduleId} needs an explicit approved native-node aidlc_validation policy`);
+    const checkTooling = entry.roles.includes("build") ? nativeNodeCheckTooling(path, pkg, config.commands, PROJECT_ROOT, requireRegularFile) : undefined;
     for (const role of entry.roles) {
       const claim = policy[role];
       if (!claim || claim.status !== "not_applicable" || typeof claim.reason !== "string" || !claim.reason.trim()) fail(`module ${moduleId} needs a sourced ${role} not_applicable reason`);
       const scripts = pkg.scripts ?? {};
       const dependencies = { ...pkg.dependencies, ...pkg.devDependencies, ...pkg.optionalDependencies };
       // The explicit approval supplies intent; contradictory tools/scripts block it.
-      const tool = role === "build" ? /(?:^|[/@-])(?:typescript|ts-node|tsx|esbuild|webpack|rollup|vite|parcel|babel|swc|gulp|grunt|node-gyp)(?:$|[/@-])/i : /(?:eslint|biome|standard|jshint|typescript)/i;
+      const tool = role === "build" ? new RegExp(`(?:^|[/@-])(?:${checkTooling === undefined ? "typescript|" : ""}ts-node|tsx|esbuild|webpack|rollup|vite|parcel|babel|swc|gulp|grunt|node-gyp)(?:$|[/@-])`, "i") : /(?:eslint|biome|standard|jshint|typescript)/i;
       const script = role === "build" ? /build|compile|bundle|transpile|prepare|prepublish|generate/i : /check|lint|typecheck/i;
       if (Object.keys(scripts).some(key => script.test(key)) || Object.values(scripts).some(value => tool.test(String(value))) || Object.keys(dependencies).some(key => tool.test(key))) fail(`module ${moduleId} ${role} exemption contradicts configured tooling; use its real commands`);
     }
-    return { module_id: moduleId, required: ["build", "check"].filter(role => !entry.roles.includes(role as "build" | "check")), package_json: relative(PROJECT_ROOT, path), sha256: createHash("sha256").update(bytes).digest("hex"), policy };
+    return { module_id: moduleId, required: ["build", "check"].filter(role => !entry.roles.includes(role as "build" | "check")), package_json: relative(PROJECT_ROOT, path), sha256: createHash("sha256").update(bytes).digest("hex"), policy, ...(checkTooling === undefined ? {} : { check_tooling: checkTooling }) };
   });
   return { kind: "native-node-role-policy-v1", config_digest: argvDigest([JSON.stringify(config)]), modules };
 }

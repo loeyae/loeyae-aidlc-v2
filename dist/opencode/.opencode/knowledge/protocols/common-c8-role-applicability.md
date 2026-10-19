@@ -23,6 +23,10 @@
 
 `approval_ref` 是可追溯的项目政策来源引用，采用已有审批语义，不增加工作流审批阶段，也不是人类身份认证。Agent 不能为绕过失败凭空声称批准。包声明、原因与引用非空，并且模块 ID、运行方式与配置相符才是有效依据。配置中的 build/compile/bundle/transpile/prepare/prepublish/generate 脚本或已识别构建工具与该声明冲突时拒绝例外。
 
+工具依赖存在不等于生产构建。TypeScript **仅作为 devDependency**，且本包有受控 `check` 明确执行 `tsc --allowJs --checkJs --noEmit router.cjs`（或 `node <typescript/bin/tsc> ...`）时，可保留已批准的 build 不适用政策。也支持 `--project/-p`、本地 `tsconfig.json` 的 `compilerOptions.noEmit: true`、JSONC 注释/尾逗号及本地相对 `extends`；输入文件与 project 不能混用。包脚本中的简单 tsc 调用及 `npm run <script> -- ...` 会递归解析，不仅按脚本名称判断。实际命令仍须在宿主可执行，适配器不提供 shell 包装或改变退出码。
+
+适配范围是有界的：常见静态检查选项可解析；未知选项、shell 表达式/自定义 TypeScript 包装器、无法定位的本地编译器、包式/数组继承、references、循环继承均明确诊断。真实 emit、outDir/outFile/declarationDir、声明输出、增量/composite/tsBuildInfoFile 以及 prepare/generate 等构建脚本与例外冲突，须执行真实构建或澄清配置。不能用另一个模块的 noEmit 命令为本包免责，不能把类型检查复制为 build。其他构建工具及其他语言沿用原边界。
+
 在 `.aidlc/commands/build-and-test.json`（或默认 allowlist）加入：
 
 ```json
@@ -45,11 +49,15 @@
 
 producer 保存 `role_applicability`：`kind: native-node-role-policy-v1`、规范化配置摘要、所有模块的 required 角色、包路径/字节 SHA-256/政策。producer、实际 sensor gate、report 和证据重验使用同一个复核函数，重新读取来源、聚合范围和命令。配置、命令或包来源漂移拒绝旧证据，必须重新受控执行；正常 source revision/freshness/session 校验仍适用。未使用新声明的旧证据保持原语义。
 
+使用 TypeScript 检查适配时，模块额外保存 `check_tooling` 输入摘要：读取的 tsconfig（含本地继承及包目录内 tsconfig*.json）、依赖锁文件及编译器包/实现。上述来源、依赖声明或审批引用变化使旧适用性证据失效；新增适配字段不改变无 TypeScript 的旧角色声明。
+
 I13 无行为或批准空 UC-D 子集的既有替代验证单独保留：检查必须真实成功，测试数如实为零；本角色契约不授予零测试豁免。
 
 ## Node TAP 与旧格式
 
 Node 的非 TTY 输出可直接使用 TAP；为明确输出格式建议显式 `--test-reporter=tap`，无需另包摘要脚本。解析器要求单个 TAP 13 头、连续根测试编号、完整根 plan、唯一且连续的最终 tests/suites/pass/fail/cancelled/skipped/todo/duration_ms 汇总。嵌套 suite 只采用最终叶测试数，不累计父子结果；多个测试文件由一次 Node runner 的唯一汇总计数。重复/拼接、截断、计数不一致或未知格式阻断，不降级为日志中偶然出现的 passed。
+
+duration_ms 后可紧跟 Node 原生 `# start of coverage report` 至 `# end of coverage report` 表格（如 `--experimental-test-coverage`）：校验固定列头、分隔线、文件/目录行、0–100 的百分比和唯一 all files 行，最多 10000 行/1 MiB。截断、未知尾部、第二份 TAP/摘要或覆盖率表均拒绝；不能任意丢弃尾部。测试计数仍来自同一次真实运行的唯一 TAP 汇总，不重跑测试或要求关闭覆盖率，不新增覆盖率阈值。
 
 `passed = pass`，`failed = fail + cancelled`，`skipped = skipped + todo`，`total = tests`，要求总数一致。退出非零、失败、取消、零通过（包括全 skipped/todo）均阻断。含真实通过的部分 skipped/todo 按项目政策记录，不计为通过。旧数字摘要（例如 `1 passed`）仍受支持，也校验总数；退出 0 从不推导测试数。每条 test 命令必须自身至少一次通过、零失败，C8 汇总须与全部执行记录逐项对账。
 
