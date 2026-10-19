@@ -24,6 +24,7 @@ import { codeRefRepo, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY }
 import { evidenceRelativePath, i13UcdIdsByMode as sharedI13UcdIdsByMode, readUnitManifest, stageInstanceId, unitManifestPath, unitUcdIds, verifiedModuleIds, type UcdExemption } from "./aidlc-execution-context";
 import { assertControlledI13 } from "./aidlc-i13-applicability";
 import { evidenceTimeError } from "./aidlc-evidence-policy";
+import { parseTestStats, validTestStats, type TestStats } from "./aidlc-test-stats";
 import { readSourceRevision, commitAncestryErrors } from "./aidlc-revision";
 import { GLOBAL_WORKFLOW, loadWorkflowState, type WorkflowRef, type WorkflowState } from "./aidlc-light-state";
 import { evidenceScopeForInstance, evidenceSourceRevision, integrationStageSlugs, isSplitLayout, loadWorkflowParts, ownerOfInstance, stageAxis } from "./aidlc-workflow-layout";
@@ -85,13 +86,7 @@ interface EvidenceConfig {
   commands: CommandSpec[];
   artifacts?: ArtifactSpec[];
   freshness?: Record<string, unknown>;
-}
-
-interface TestStats {
-  total: number;
-  passed: number;
-  failed: number;
-  skipped: number;
+  role_applicability?: { module_id: string; package_json: string; roles: ("build" | "check")[] }[];
 }
 
 interface CommandResult {
@@ -439,18 +434,21 @@ function parseConfig(path: string, stage: string, allowEmptyCommands = false): E
     const error = evidenceTimeError({ timestamp: "1970-01-01T00:00:00Z", freshness: config.freshness }, "build-test-evidence", 0);
     if (error) fail(error);
   }
-  return { version: "1", stage, commands, artifacts, ...(config.freshness !== undefined ? { freshness: config.freshness as Record<string, unknown> } : {}) };
-}
-
-function parseTestStats(output: string): TestStats | null {
-  const passed = [...output.matchAll(/(?:^|[^\d])(\d+)\s+(?:tests?\s+)?passed\b/gi)].reduce((sum, match) => sum + Number(match[1]), 0);
-  const failed = [...output.matchAll(/(?:^|[^\d])(\d+)\s+(?:tests?\s+)?failed\b/gi)].reduce((sum, match) => sum + Number(match[1]), 0);
-  const skipped = [...output.matchAll(/(?:^|[^\d])(\d+)\s+(?:tests?\s+)?skipped\b/gi)].reduce((sum, match) => sum + Number(match[1]), 0);
-  if (passed === 0 && failed === 0 && skipped === 0) return null;
-  const explicitTotal = output.match(/(?:tests?\s*[:=]|total\s*[:=])\s*(\d+)/i);
-  const total = explicitTotal ? Number(explicitTotal[1]) : passed + failed + skipped;
-  if (!Number.isInteger(total) || total < 1) return null;
-  return { total, passed, failed, skipped };
+  let roleApplicability: EvidenceConfig["role_applicability"];
+  if (config.role_applicability !== undefined) {
+    if (stage !== "build-and-test" || !Array.isArray(config.role_applicability) || !config.role_applicability.length) fail("role_applicability requires a non-empty C8 module declaration array");
+    const modules = new Set<string>();
+    roleApplicability = config.role_applicability.map((entry: unknown) => {
+      const item = entry as Record<string, unknown> | null;
+      if (!item || typeof item !== "object" || Array.isArray(item) || Object.keys(item).some(key => !["module_id", "package_json", "roles"].includes(key))) fail("invalid role_applicability declaration");
+      const moduleId = nonEmptyString(item.module_id, "role_applicability.module_id");
+      if (modules.has(moduleId)) fail(`duplicate role applicability module: ${moduleId}`);
+      modules.add(moduleId);
+      if (!Array.isArray(item.roles) || !item.roles.length || new Set(item.roles).size !== item.roles.length || item.roles.some(role => role !== "build" && role !== "check")) fail("only build/check roles can be explicitly not applicable");
+      return { module_id: moduleId, package_json: nonEmptyString(item.package_json, "role_applicability.package_json"), roles: item.roles as ("build" | "check")[] };
+    });
+  }
+  return { version: "1", stage, commands, artifacts, ...(roleApplicability ? { role_applicability: roleApplicability } : {}), ...(config.freshness !== undefined ? { freshness: config.freshness as Record<string, unknown> } : {}) };
 }
 
 function safeCwdLabel(cwd: string): string {
@@ -489,7 +487,8 @@ function runCommand(spec: CommandSpec): CommandResult {
   if (stdoutTail) command.stdout_tail = stdoutTail;
   if (stderrTail) command.stderr_tail = stderrTail;
   if (spec.role === "test") {
-    const stats = parseTestStats(`${stdout}\n${stderr}`);
+    // TAP is a stdout report; separate stderr warnings are not part of its footer.
+    const stats = parseTestStats(/^TAP version /m.test(stdout) ? stdout : `${stdout}\n${stderr}`);
     if (!stats) fail(`test command ${spec.id} completed but no test counts were parsed from its output`);
     command.test_stats = stats;
   }
@@ -674,6 +673,53 @@ export function noBehaviorBasis(state: ProducerState): Record<string, unknown> |
     i13_digest: argvDigest([JSON.stringify(i13)]), declaration: exemption ?? Object.fromEntries(keys.map(key => [key, current[key]])) };
 }
 
+/** Opt-in, source-backed role policy. Absence retains the legacy requirements.
+ * A package declaration is an approved project policy, not inferred from I13 or
+ * from missing commands. Each module must independently qualify for an exemption.
+ */
+function c8RoleBasis(config: EvidenceConfig, state: ProducerState): Record<string, unknown> | undefined {
+  if (!config.role_applicability) return undefined;
+  const moduleIds = state.current_module ? [state.current_module] : verifiedModuleIds(PROJECT_ROOT, state.scope);
+  const known = verifiedModuleIds(PROJECT_ROOT, state.scope);
+  for (const entry of config.role_applicability) if (!known.includes(entry.module_id)) fail(`unknown role applicability module: ${entry.module_id}`);
+  const modules = moduleIds.map(moduleId => {
+    const entry = config.role_applicability!.find(item => item.module_id === moduleId);
+    if (!entry) return { module_id: moduleId, required: ["build", "check"] };
+    const path = requireRegularFile(entry.package_json, "role applicability package_json");
+    if (!path.endsWith(`${sep}package.json`)) fail("native-node role applicability requires package.json");
+    const bytes = readFileSync(path, "utf8");
+    const pkg = JSON.parse(bytes);
+    const policy = pkg.aidlc_validation;
+    if (!policy || policy.module_id !== moduleId || policy.runtime !== "native-node" || typeof policy.approval_ref !== "string" || !policy.approval_ref.trim()) fail(`module ${moduleId} needs an explicit approved native-node aidlc_validation policy`);
+    for (const role of entry.roles) {
+      const claim = policy[role];
+      if (!claim || claim.status !== "not_applicable" || typeof claim.reason !== "string" || !claim.reason.trim()) fail(`module ${moduleId} needs a sourced ${role} not_applicable reason`);
+      const scripts = pkg.scripts ?? {};
+      const dependencies = { ...pkg.dependencies, ...pkg.devDependencies, ...pkg.optionalDependencies };
+      // The explicit approval supplies intent; contradictory tools/scripts block it.
+      const tool = role === "build" ? /(?:^|[/@-])(?:typescript|ts-node|tsx|esbuild|webpack|rollup|vite|parcel|babel|swc|gulp|grunt|node-gyp)(?:$|[/@-])/i : /(?:eslint|biome|standard|jshint|typescript)/i;
+      const script = role === "build" ? /build|compile|bundle|transpile|prepare|prepublish|generate/i : /check|lint|typecheck/i;
+      if (Object.keys(scripts).some(key => script.test(key)) || Object.values(scripts).some(value => tool.test(String(value))) || Object.keys(dependencies).some(key => tool.test(key))) fail(`module ${moduleId} ${role} exemption contradicts configured tooling; use its real commands`);
+    }
+    return { module_id: moduleId, required: ["build", "check"].filter(role => !entry.roles.includes(role as "build" | "check")), package_json: relative(PROJECT_ROOT, path), sha256: createHash("sha256").update(bytes).digest("hex"), policy };
+  });
+  return { kind: "native-node-role-policy-v1", config_digest: argvDigest([JSON.stringify(config)]), modules };
+}
+
+function c8RoleErrors(commands: { id: unknown; role: unknown }[], config: EvidenceConfig, roleBasis: Record<string, unknown> | undefined, noBehavior: boolean): string[] {
+  const roles = new Set(commands.map(command => command.role));
+  if (noBehavior) return roles.has("check") ? [] : ["no-behavior validation requires a controlled check"];
+  const modules = roleBasis?.modules as { required: string[] }[] | undefined;
+  const required = ["test", ...(modules ? ["build", "check"].filter(role => modules.some(module => module.required.includes(role))) : ["build", "check"])];
+  const errors = required.filter(role => !roles.has(role)).map(role => `selected allowlist commands must include required ${role} role`);
+  // With a role policy, this config is the minimum matrix for all participating
+  // modules. A selected subset cannot hide a required build, check or test.
+  if (roleBasis) for (const spec of config.commands.filter(spec => ["build", "test", "check"].includes(spec.role))) {
+    if (!commands.some(command => command.id === spec.id && command.role === spec.role)) errors.push(`required configured command ${spec.id} was not executed`);
+  }
+  return errors;
+}
+
 /** Build/test verification shared by producer, scheduler and completion gate. */
 export function buildTestEvidenceErrors(evidence: Record<string, unknown>, state: ProducerState): string[] {
   const errors: string[] = [];
@@ -683,16 +729,17 @@ export function buildTestEvidenceErrors(evidence: Record<string, unknown>, state
   const zeroTests = tests?.total === 0 && tests.passed === 0 && tests.failed === 0 && tests.skipped === 0;
   try {
     const config = requireCommandConfig(resolveCommandConfigPath(PROJECT_ROOT, "build-and-test"), "build-and-test");
+    const roleBasis = c8RoleBasis(config, state);
+    if (JSON.stringify(evidence.role_applicability) !== JSON.stringify(roleBasis)) errors.push("C8 role applicability no longer matches project policy/configuration sources");
     const roles = new Set(commands.map(command => command.role));
     let basis: Record<string, unknown> | null = null;
     if (evidence.applicability !== undefined || zeroTests || !roles.has("test") || !roles.has("build")) basis = noBehaviorBasis(state);
     if (basis) {
       if (JSON.stringify(evidence.applicability) !== JSON.stringify(basis)) errors.push("build/test applicability no longer matches trusted I13/unit sources");
-      if (!roles.has("check")) errors.push("no-behavior validation needs a successful check");
     } else {
       if (evidence.applicability !== undefined) errors.push("applicability claim has no trusted no-behavior basis");
-      if (!roles.has("build") || !roles.has("test") || !roles.has("check")) errors.push("build/test commands must include build, test, and check roles");
     }
+    errors.push(...c8RoleErrors(commands.map(command => ({ id: command.id, role: command.role })), config, roleBasis, !!basis));
     if (!commands.length || new Set(commands.map(command => command.id)).size !== commands.length) errors.push("commands must be non-empty and unique");
     for (const command of commands) {
       const spec = config.commands.find(spec => spec.id === command.id && spec.role === command.role);
@@ -703,7 +750,7 @@ export function buildTestEvidenceErrors(evidence: Record<string, unknown>, state
     if (!tests || !Object.values(tests).every(value => Number.isSafeInteger(value) && value >= 0) || tests.total !== tests.passed + tests.failed + tests.skipped
       || tests.failed !== 0 || ((!basis || roles.has("test")) && (tests.total < 1 || tests.passed < 1)) || (!roles.has("test") && !zeroTests)) errors.push("test summary must count real successful tests, or exactly zero for approved no-behavior validation");
     const observed = commands.filter(command => command.role === "test").map(command => command.test_stats as TestStats | undefined);
-    if (observed.some(stats => !stats) || tests && (["total", "passed", "failed", "skipped"] as const).some(key => observed.reduce((sum, stats) => sum + (stats?.[key] ?? NaN), 0) !== tests[key])) errors.push("tests summary must equal executed test command counts");
+    if (observed.some(stats => !validTestStats(stats) || stats.failed !== 0 || stats.passed < 1) || tests && (["total", "passed", "failed", "skipped"] as const).some(key => observed.reduce((sum, stats) => sum + (stats?.[key] ?? NaN), 0) !== tests[key])) errors.push("tests summary must equal executed successful test command counts");
     const checks = evidence.checks as Record<string, unknown> | undefined;
     if (checks?.status !== "passed" || JSON.stringify(checks.command_ids) !== JSON.stringify(commands.filter(command => command.role === "check").map(command => command.id))) errors.push("checks must identify successful check commands");
   } catch (error) { errors.push(String(error)); }
@@ -1283,7 +1330,9 @@ function runProducer(args: string[]): void {
       });
     const roles = new Set(selected.map((command) => command.role));
     const applicability = noBehaviorBasis(state);
-    if (applicability ? !roles.has("check") : !roles.has("build") || !roles.has("test") || !roles.has("check")) fail(applicability ? "no-behavior validation requires a controlled check" : "selected allowlist commands must include build, test, and check roles");
+    const roleBasis = c8RoleBasis(config, state);
+    const roleErrors = c8RoleErrors(selected, config, roleBasis, !!applicability);
+    if (roleErrors.length) fail(roleErrors.join("; "));
 
     const commands = selected.map(spec => applicability && spec.role === "check" ? alternativeCheck(spec, state, config.freshness) : runCommand(spec));
     const testResults = commands.filter((command) => command.role === "test").map((command) => command.test_stats as TestStats);
@@ -1305,6 +1354,7 @@ function runProducer(args: string[]): void {
       source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance),
       commands,
       ...(applicability ? { applicability } : {}),
+      ...(roleBasis ? { role_applicability: roleBasis } : {}),
       ...(config.freshness ? { freshness: config.freshness } : {}),
       tests,
       checks: { status: "passed", command_ids: commands.filter((command) => command.role === "check").map((command) => command.id) },

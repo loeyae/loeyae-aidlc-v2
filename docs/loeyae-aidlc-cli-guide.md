@@ -245,7 +245,7 @@ loeyae-aidlc runtime doctor
 loeyae-aidlc attest resolve --base origin/main --head HEAD
 ```
 
-`evidence run --stage <stage> --all-sensors` 会读取编译后的 `stage-graph.json`，按阶段声明顺序依次运行 semantic checker；省略 `--sensor` 时，非 `build-and-test` 阶段也采用同一行为。`build-and-test` 仍使用既有 build/test/check allowlist。`orchestrate report` 发现缺失 semantic Evidence 时会自动触发该受控产出器，失败仍由 report 门禁阻断。
+`evidence run --stage <stage> --all-sensors` 会读取编译后的 `stage-graph.json`，按阶段声明顺序依次运行 semantic checker；省略 `--sensor` 时，非 `build-and-test` 阶段也采用同一行为。`build-and-test` 使用真实命令 allowlist；build/check 默认必需，原生 Node 的来源可核验角色例外见 `core/knowledge/protocols/common-c8-role-applicability.md`（`role_applicability` + 包内批准政策，按全部模块聚合）。Node `--test --test-reporter=tap` 完整汇总可直接产证，业务测试仍须非零通过且零失败。`orchestrate report` 发现缺失 semantic Evidence 时会自动触发该受控产出器，失败仍由 report 门禁阻断。
 
 ### Evidence 是 producer 生成的，Agent 不能手写
 

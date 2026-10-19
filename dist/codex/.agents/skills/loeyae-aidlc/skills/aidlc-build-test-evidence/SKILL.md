@@ -57,7 +57,7 @@ I13 中 `tdd_mode: characterization` 的 UC-D 描述要保留的存量行为（I
 
 ### 何时需要
 
-- 需要非语义命令的阶段必须提供：`build-and-test`（build/test/check），`tdd`（red；有 characterization UC-D 时另需 baseline），`code-generation`（green）。
+- 需要非语义命令的阶段必须提供：`build-and-test`（实际适用的 build/check 和业务 test），`tdd`（red；有 characterization UC-D 时另需 baseline），`code-generation`（green）。
 - 只需语义证据的阶段（内置语义检查器，如 `traceability-matrix`、`structural-invariants`、`diagram-contract`）不需要该文件；文件不存在或 `stage` 写的是其他阶段时直接忽略。
 
 ### 顶层字段
@@ -94,7 +94,9 @@ I13 中 `tdd_mode: characterization` 的 UC-D 描述要保留的存量行为（I
 | `green` | `code-generation` | 恰好一条；必须以退出码 0 结束，失败数为 0，`uc_mapping` 覆盖全部 UC-D |
 | `semantic` | 任意阶段 | 可选，仅用于为内置检查器指定 `timeout_ms`；如声明，`argv` 必须是 `["loeyae-aidlc", "check", "--sensor", "<sensor-name>"]`，不要追加 `--module` 等参数；同一 `sensor` 最多声明一次 |
 
-`build-and-test` 执行的命令（全部非 semantic 命令，或 `--command-id` 选中的命令）必须同时包含 `build`、`test`、`check` 三种 role。
+`build-and-test` 按 `knowledge/protocols/common-c8-role-applicability.md` 复核实际角色适用性。业务 test 始终需要真实非零通过且零失败；build/check 默认必需，原生 Node 可使用来源可核验的模块级 `role_applicability` 与包内已批准政策记录不适用，不得复制检查充当构建。聚合范围任一模块需要某角色时仍须覆盖，已配置 build/test/check 不能通过命令选择省略。配置、来源和命令漂移须重新产证；producer/report/gate/重验共用规则。I13 无行为范围的既有成功替代检查/零测试契约保留。
+
+Node 原生 TAP 输出直接受支持，建议 `node --test --test-reporter=tap ...`，不需附加自造 `1 passed`。完整唯一最终汇总与根 plan/编号必须一致，嵌套 suite 不重复累计，todo/skip 不计通过，取消/失败/全跳过/截断阻断。旧数字摘要仍兼容。详细配置示例、来源、证据字段与解析边界见上述协议。
 
 ### 最小示例
 

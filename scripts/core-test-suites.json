@@ -44,6 +44,10 @@
   ],
   [
     "tsx",
+    "tests/test_mars255_c8.ts"
+  ],
+  [
+    "tsx",
     "tests/test_i13_case_root.ts"
   ],
   [

@@ -362,7 +362,7 @@ try {
   });
 
   // ---------------------------------------------------------------- D7
-  await section("D7 command allowlist resolves --config, then .aidlc/commands/<stage>.json, then the default", async () => {
+  await section("D7 C8 command binding uses per-stage/default lookup and rejects a different explicit config", async () => {
     const project = makeProject("d7-config");
     seed(project, "build-and-test");
     write(project, "mark.cjs", "require('node:fs').writeFileSync('marker.txt', process.argv[2]); console.log('1 passed');\n");
@@ -379,8 +379,12 @@ try {
     ok(project, ["evidence", "run", "--stage", "build-and-test"]);
     assert.equal(marker(), "per-stage");
     write(project, "explicit.json", config("explicit"));
-    ok(project, ["evidence", "run", "--stage", "build-and-test", "--config", "explicit.json"]);
-    assert.equal(marker(), "explicit");
+    const explicit = run(project, ["evidence", "run", "--stage", "build-and-test", "--config", "explicit.json"]);
+    assert.equal(explicit.status, 2);
+    assert.match(explicit.out, /build\/test evidence binds only the default allowlist lookup/);
+    assert.equal(marker(), "per-stage", "a config the completion gate cannot bind must not execute");
+    ok(project, ["evidence", "run", "--stage", "build-and-test", "--config", ".aidlc/commands/build-and-test.json"]);
+    assert.equal(marker(), "per-stage", "an explicit path naming the actual lookup is accepted");
 
     // Fail-closed: a per-stage file locked to another stage is rejected, not skipped.
     write(project, ".aidlc/commands/build-and-test.json", config("wrong", "tdd"));
