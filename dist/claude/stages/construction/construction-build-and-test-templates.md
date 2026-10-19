@@ -27,7 +27,7 @@ requires: [build-and-test]
 
 ## 前置条件
 - **角色适用性**：[逐模块记录 build/check 必需或不适用、项目政策/批准来源、package.json 摘要和实际命令；按 common-c8-role-applicability.md，不填空构建或重复检查]
-- **检查工具与统计适配**：[TypeScript 仅检查时记录 noEmit argv/脚本、tsconfig/继承/依赖与摘要；真实输出配置仍需构建。原生 TAP 可附完整有界覆盖率表，测试计数取唯一汇总，保留命令退出码]
+- **检查工具与统计适配**：[TypeScript 仅检查时记录 argv/脚本、所选 tsconfig/继承、CLI 覆盖后的最终 noEmit 语义、依赖与摘要；被抑制的输出设置和闲置配置不要求构建，真实 emit/build-info/构建流程仍阻断例外。原生 TAP 可附完整有界覆盖率表，测试计数取唯一汇总，保留命令退出码]
 - **构建工具**：[工具名称和版本]
 - **依赖**：[列出所有必需依赖]
 - **环境变量**：[列出必需环境变量]

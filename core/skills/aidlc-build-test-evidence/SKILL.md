@@ -98,7 +98,7 @@ I13 中 `tdd_mode: characterization` 的 UC-D 描述要保留的存量行为（I
 
 Node 原生 TAP 输出直接受支持，建议 `node --test --test-reporter=tap ...`，不需附加自造 `1 passed`。完整唯一最终汇总与根 plan/编号必须一致，嵌套 suite 不重复累计，todo/skip 不计通过，取消/失败/全跳过/截断阻断。旧数字摘要仍兼容。详细配置示例、来源、证据字段与解析边界见上述协议。
 
-TypeScript 开发依赖仅用于真实 noEmit 静态检查时，可依据可核实的命令、简单包脚本和 tsconfig 保留已批准 build 不适用；真实输出配置、prepare/generate 或语义歧义仍阻断例外。读取的配置/继承、依赖锁、编译器实现、包政策和 argv 共同绑定，漂移须重验。TAP duration 后允许完整有界的 Node 原生覆盖率表，未知、截断、重复/矛盾尾部拒绝；不要求关闭覆盖率或再跑相同测试，不新增覆盖率阈值。
+TypeScript 开发依赖仅用于真实 noEmit 静态检查时，可依据可核实的命令、简单包脚本和所选 tsconfig 保留已批准 build 不适用；用选定编译器解析本地继承和 CLI 覆盖后的最终语义，被 noEmit 抑制的输出设置及闲置配置不要求构建。真实 emit、增量 build-info、prepare/generate、未知包装器或语义歧义仍阻断例外。实际读取的配置/继承、依赖锁、编译器 CLI/解析 API 实现、包政策和 argv 共同绑定，漂移须重验，正常 source revision 校验保留。TAP duration 后允许完整有界的 Node 原生覆盖率表，未知、截断、重复/矛盾尾部拒绝；不要求关闭覆盖率或再跑相同测试，不新增覆盖率阈值。
 
 ### 最小示例
 

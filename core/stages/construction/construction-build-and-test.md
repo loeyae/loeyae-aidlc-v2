@@ -68,7 +68,7 @@ requires: [code-generation, code-review]
 
 ## 步骤 3：实际执行构建
 
-TypeScript 开发依赖若仅用于可核实的 noEmit 静态检查，可按 `common-c8-role-applicability.md` 保留批准的 build 不适用政策；核对实际 argv、脚本、tsconfig 及来源绑定。真实编译/打包/生成产物仍须构建，未知包装器或配置冲突须明确诊断。原生 TAP 可附完整 Node 覆盖率表，不关闭现有覆盖率、不重复运行测试来换摘要。
+TypeScript 开发依赖若仅用于可核实的 noEmit 静态检查，可按 `common-c8-role-applicability.md` 保留批准的 build 不适用政策；核对实际 argv、脚本、所选 tsconfig、本地继承与 CLI 覆盖后的最终语义及来源绑定。被最终 noEmit 抑制的输出设置或闲置 tsconfig 不要求增加构建；真实 emit、增量 build-info、构建流程或未知包装器仍须准确诊断。原生 TAP 可附完整 Node 覆盖率表，不关闭现有覆盖率、不重复运行测试来换摘要。
 
 按执行矩阵逐项运行构建命令：
 

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { createInitialState, loadWorkflowState } from "../core/tools/aidlc-light-state";
 import { fixtureEnvironment, saveFixtureState } from "./mars243_fixture_session";
 import { parseTestStats } from "../core/tools/aidlc-test-stats";
+import { nativeNodeCheckTooling } from "../core/tools/aidlc-node-check-tooling";
 
 const repo = resolve(import.meta.dirname, ".."), tsx = join(repo, "node_modules/tsx/dist/cli.mjs");
 const scratch = mkdtempSync(join(tmpdir(), "aidlc-mars255-"));
@@ -90,7 +91,7 @@ try {
   console.log("PASS source/config/commands drift, empty/unapproved/contradictory exemption, and summary tampering block");
 
   // The compiler really runs, with real CommonJS inputs and no fabricated build.
-  const typedPkg = { ...pkg, devDependencies: { typescript: "5.9.3" }, scripts: { ...pkg.scripts, check: "tsc --allowJs --checkJs --noEmit router.cjs" } };
+  const typedPkg = { ...pkg, devDependencies: { typescript: "5.9.3" }, scripts: { ...pkg.scripts, check: `node "${compiler}" --allowJs --checkJs --noEmit router.cjs` } };
   if (process.argv.includes("--baseline-256")) {
     const main = resolve(repo, "../loeyae-aidlc-v2");
     put(root, "package.json", typedPkg); config(root, [noEmitCheck, test]);
@@ -100,6 +101,12 @@ try {
     console.log("PASS MARS-256 baseline: main 4.22.7 real producer rejects both noEmit and native coverage (exit 2)");
   }
   put(root, "package.json", typedPkg); config(root, [noEmitCheck, test]); produce(root); gate(root);
+  const originalEnvironment = process.env.MARS257_COMPILER_CONTEXT;
+  process.env.MARS257_COMPILER_CONTEXT = "changed execution environment";
+  gate(root, false);
+  if (originalEnvironment === undefined) delete process.env.MARS257_COMPILER_CONTEXT;
+  else process.env.MARS257_COMPILER_CONTEXT = originalEnvironment;
+  gate(root);
   put(root, "package-lock.json", { lockfileVersion: 3, packages: {} }); gate(root, false); produce(root); gate(root);
   put(root, "package-lock.json", { lockfileVersion: 3, packages: {}, changed: true }); gate(root, false); produce(root); gate(root);
   rmSync(join(root, "package-lock.json")); gate(root, false); produce(root); gate(root);
@@ -118,11 +125,75 @@ try {
   config(root, [projectCheck, test]); produce(root); gate(root);
   // Every consumed config byte participates in revalidation, even semantically neutral edits.
   put(root, "tsconfig.base.json", { compilerOptions: { noEmit: true }, note: "drift" }); gate(root, false); produce(root); gate(root);
-  for (const options of [{ noEmit: false }, { noEmit: true, outDir: "out" }, { noEmit: true, declaration: true }, { noEmit: true, incremental: true }]) {
+  // Real compiler success + producer/gate, with filesystem checks. These output
+  // settings are dormant under final noEmit, including after CLI/inheritance.
+  const outputOptions = { outDir: "unused-dist", declaration: true };
+  const cases = [
+    { options: outputOptions, extra: [] },
+    { options: { declaration: true, declarationDir: "unused-types", sourceMap: true, declarationMap: true }, extra: [] },
+    { options: { outFile: "unused-bundle.js", module: "system", declaration: true }, extra: [] },
+    { options: { declaration: true, emitDeclarationOnly: true }, extra: [] },
+    { options: { ...outputOptions, noEmit: false }, extra: ["--noEmit"] },
+    { options: {}, extra: ["--outDir", "unused-cli", "--declaration", "--noEmit"] },
+    { options: {}, extra: [] },
+  ];
+  put(root, "tsconfig.base.json", { compilerOptions: { ...outputOptions, noEmit: false } });
+  for (const [index, scenario] of cases.entries()) {
+    put(root, "tsconfig.json", { ...checkConfig, ...(index ? { extends: "./tsconfig.base.json" } : {}), compilerOptions: { ...checkConfig.compilerOptions, ...scenario.options } });
+    const command = { ...projectCheck, argv: [...projectCheck.argv, ...scenario.extra] };
+    put(root, "package.json", { ...typedPkg, scripts: { ...pkg.scripts, check: command.argv.map(arg => `"${arg}"`).join(" ") } });
+    config(root, [command, test]);
+    const actual = spawnSync(process.execPath, command.argv.slice(1), { cwd: root, encoding: "utf8" });
+    assert.equal(actual.status, 0, actual.stdout + actual.stderr);
+    produce(root); gate(root);
+    assert.deepEqual(read(root, evidencePath).tests, { total: 1, passed: 1, failed: 0, skipped: 0 });
+    for (const path of ["unused-dist", "unused-types", "unused-bundle.js", "unused-cli", "tsconfig.tsbuildinfo"]) assert.equal(existsSync(join(root, path)), false, path);
+    assert.equal(readdirSync(root, { recursive: true }).some(path => /\.(?:tsbuildinfo|d\.cts|map)$/.test(String(path))), false);
+  }
+  console.log("PASS MARS-257 real noEmit shared output/declaration/maps/outFile configs, CLI override and local inheritance: zero artifacts, producer and gate");
+  // Forwarded npm overrides use the same options as the real compiler checked
+  // above. This assertion covers adapter expansion, not Windows npm spawning.
+  put(root, "tsconfig.json", { ...checkConfig, compilerOptions: { ...checkConfig.compilerOptions, ...outputOptions, noEmit: false } });
+  const forwardedPackage = { ...typedPkg, scripts: { check: `node "${compiler}" -p tsconfig.json` } };
+  const forwarded = [{ role: "check", argv: ["npm", "run", "check", "--", "--noEmit"] }];
+  assert.ok(nativeNodeCheckTooling(join(root, "package.json"), forwardedPackage, forwarded, root, path => path)?.["tsconfig.json"]);
+  assert.throws(() => nativeNodeCheckTooling(join(root, "package.json"), forwardedPackage, [{ role: "check", argv: ["npm", "run", "check"] }], root, path => path), /may emit/);
+  // An unconsumed config has no tooling ownership; a real package build flow
+  // still contradicts the exemption even when its config was initially dormant.
+  put(root, "tsconfig.unused.json", { compilerOptions: { outDir: "dormant-output", noEmit: false } });
+  put(root, "tsconfig.json", checkConfig);
+  put(root, "package.json", { ...typedPkg, scripts: { ...pkg.scripts, check: `node "${compiler}" --project tsconfig.json` } });
+  config(root, [projectCheck, test]); produce(root); gate(root);
+  put(root, "tsconfig.unused.json", "not even JSON: unused by the command"); gate(root, false); produce(root); gate(root);
+  put(root, "package.json", { ...typedPkg, scripts: { check: `node "${compiler}" --project tsconfig.json`, build: `node "${compiler}" -p tsconfig.unused.json` } }); produce(root, false);
+  rmSync(join(root, "tsconfig.unused.json"));
+  put(root, "package.json", { ...typedPkg, scripts: { ...pkg.scripts, check: `node "${compiler}" --project tsconfig.json` } });
+  // noEmit does not suppress build-info. Observe the real side effect before
+  // proving the exemption rejects it; clean only this fixture's known output.
+  for (const extra of [[], ["--build"]]) {
+    put(root, "tsconfig.json", { ...checkConfig, compilerOptions: { ...checkConfig.compilerOptions, incremental: true, tsBuildInfoFile: "actual.tsbuildinfo" } });
+    const argv = extra.length ? [compiler, "--build", "tsconfig.json"] : projectCheck.argv.slice(1);
+    const actual = spawnSync(process.execPath, argv, { cwd: root, encoding: "utf8" });
+    assert.equal(actual.status, 0, actual.stdout + actual.stderr);
+    assert.ok(existsSync(join(root, "actual.tsbuildinfo")));
+    config(root, [{ ...projectCheck, argv: ["node", ...argv] }, test]); produce(root, false);
+    rmSync(join(root, "actual.tsbuildinfo"));
+  }
+  config(root, [projectCheck, test]);
+  put(root, "tsconfig.base.json", { compilerOptions: { ...outputOptions, incremental: true, noEmit: false } });
+  put(root, "tsconfig.json", { ...checkConfig, extends: "./tsconfig.base.json", compilerOptions: { ...checkConfig.compilerOptions, incremental: false } });
+  produce(root); gate(root); assert.equal(existsSync(join(root, "tsconfig.tsbuildinfo")), false);
+  // A path alone does not enable incremental. TypeScript 5.9 accepts this
+  // noEmit combination without writing build-info; the field is not a build.
+  put(root, "tsconfig.json", { ...checkConfig, compilerOptions: { ...checkConfig.compilerOptions, tsBuildInfoFile: "actual.tsbuildinfo" } });
+  assert.equal(spawnSync(process.execPath, projectCheck.argv.slice(1), { cwd: root }).status, 0);
+  produce(root); gate(root); assert.equal(existsSync(join(root, "actual.tsbuildinfo")), false);
+  console.log("PASS real noEmit incremental/build mode writes build-info and blocks exemption; inherited incremental false and dormant build-info path accepted");
+  for (const options of [{ noEmit: false }, { noEmit: true, incremental: true }, { noEmit: true, composite: true }, { noEmit: true, generateTrace: "trace" }, { noEmit: true, noCheck: true }]) {
     put(root, "tsconfig.json", { ...checkConfig, compilerOptions: { ...checkConfig.compilerOptions, ...options } }); gate(root, false); produce(root, false);
   }
   put(root, "tsconfig.json", checkConfig);
-  for (const extra of [["--noEmit", "false"], ["--outDir", "out"], ["--build"], ["--unknown-flag"]]) {
+  for (const extra of [["--noEmit", "false"], ["--build"], ["--unknown-flag"], ["--generateCpuProfile", "cpu.json"], ["--showConfig"], ["--listFilesOnly"], ["--noCheck"], ["@unverified.args"]]) {
     config(root, [{ ...projectCheck, argv: [...projectCheck.argv, ...extra] }, test]); produce(root, false);
   }
   put(root, "tsconfig.json", { ...checkConfig, extends: "unverified-package/config" }); produce(root, false);
@@ -131,7 +202,7 @@ try {
   for (const scripts of [{ ...typedPkg.scripts, prepare: "node build.cjs" }, { ...typedPkg.scripts, check: "tsc --noEmit && node other.cjs" }, { ...typedPkg.scripts, check: "custom-typecheck-wrapper" }]) {
     put(root, "package.json", { ...typedPkg, scripts }); config(root, [{ ...check, argv: ["npm", "run", "check"] }, test]); produce(root, false);
   }
-  put(root, "package.json", { ...typedPkg, scripts: { ...typedPkg.scripts, check: "tsc router.cjs --allowJs --outDir out" } });
+  put(root, "package.json", { ...typedPkg, scripts: { ...typedPkg.scripts, check: `node "${compiler}" router.cjs --allowJs --outDir out` } });
   config(root, [noEmitCheck, test]); produce(root, false);
   rmSync(join(root, "tsconfig.json")); rmSync(join(root, "tsconfig.base.json"));
   put(root, "package.json", pkg); config(root); produce(root); gate(root);
@@ -191,12 +262,16 @@ try {
   console.log("PASS actual Node coverage + nested/multifile/skip/todo counts; truncated/unknown/duplicate/contradictory tables and failed/cancelled/zero-pass coverage block");
 
   // Exercise the public completion boundary with real I13, RED and GREEN evidence.
-  for (const mode of ["default", "noEmit", "coverage", "combined"]) {
+  for (const mode of ["default", "noEmit", "coverage", "combined", "cli-override", "inherited"]) {
   const completed = fixture(`completion-${mode}`);
-  if (mode === "noEmit" || mode === "combined") {
-    put(completed, "package.json", { ...typedPkg }); config(completed, [noEmitCheck, test]);
+  const usesCompiler = ["noEmit", "combined", "cli-override", "inherited"].includes(mode);
+  const completionCheck = { ...projectCheck, argv: [...projectCheck.argv, ...(mode === "cli-override" ? ["--noEmit"] : [])] };
+  if (usesCompiler) {
+    put(completed, "tsconfig.json", { ...checkConfig, ...(mode === "inherited" ? { extends: "./tsconfig.shared.json" } : {}), compilerOptions: { ...checkConfig.compilerOptions, ...(mode === "inherited" ? {} : outputOptions), noEmit: mode !== "cli-override" } });
+    if (mode === "inherited") put(completed, "tsconfig.shared.json", { compilerOptions: { outDir: "unused-inherited", declaration: true, noEmit: false } });
+    put(completed, "package.json", { ...typedPkg, scripts: { ...pkg.scripts, check: completionCheck.argv.map(arg => `"${arg}"`).join(" ") } }); config(completed, [completionCheck, test]);
   }
-  if (mode === "coverage" || mode === "combined") config(completed, [mode === "combined" ? noEmitCheck : check, { ...test, argv: ["node", "--test", "--test-reporter=tap", "--experimental-test-coverage", "tests/native.test.cjs"] }]);
+  if (mode === "coverage" || mode === "combined") config(completed, [mode === "combined" ? completionCheck : check, { ...test, argv: ["node", "--test", "--test-reporter=tap", "--experimental-test-coverage", "tests/native.test.cjs"] }]);
   put(completed, "router.cjs", "module.exports=require('./src/router.cjs');\n");
   put(completed, "src/router.cjs", "module.exports=()=>[];\n");
   put(completed, "tests/observe.cjs", "const assert=require('node:assert/strict');let failed=0;try{assert.deepEqual(require('../router.cjs')(),['health']);}catch{failed=1;}console.log(JSON.stringify({phase:process.env.AIDLC_PHASE,status:failed?'failed':'passed',compile_status:'passed',environment_status:'passed',tests_total:1,tests_failed:failed,traceability_complete:true,...failed?{failure_class:'behavior',failure_signature:'health route missing'}:{},uc_mapping:[{use_case:'UC-D-001',test_methods:['tests/native.test.cjs']}]}));process.exit(failed);\n");
@@ -221,11 +296,16 @@ try {
   ready.completed_stage_instances = ["workspace-detection", "test-case-derivation@module:project", "tdd@module:project@unit:default", "code-generation@module:project@unit:default", "code-review@module:project@unit:default"]; saveFixtureState(completed, ready);
   produce(completed); gate(completed);
   const execution = read(completed, evidencePath).producer.execution_id;
-  if (mode === "noEmit" || mode === "combined") {
-    put(completed, "tsconfig.build.json", { compilerOptions: { outDir: "dist" } }); gate(completed, false);
+  if (usesCompiler) {
+    assert.equal(existsSync(join(completed, "unused-dist")), false);
+    assert.equal(existsSync(join(completed, "unused-inherited")), false);
+    // Drift in a consumed configuration blocks completion, even if it would
+    // retain noEmit. Unconsumed configs are covered separately above.
+    const original = readFileSync(join(completed, "tsconfig.json"), "utf8");
+    put(completed, "tsconfig.json", original + "\n"); gate(completed, false);
     run(completed, ["orchestrate", "report", "--stage", "build-and-test", "--result", "completed"], false);
     assert.ok(!loadWorkflowState(completed)!.completed_stage_instances.includes("build-and-test"));
-    rmSync(join(completed, "tsconfig.build.json")); gate(completed);
+    put(completed, "tsconfig.json", original); gate(completed);
     // The rejected report observed the temporary source configuration. Refresh
     // that semantic observation after restoring sources, never rewrite evidence.
     run(completed, ["evidence", "run", "--stage", "build-and-test", "--sensor", "test-quality"]);
@@ -233,6 +313,6 @@ try {
   run(completed, ["orchestrate", "report", "--stage", "build-and-test", "--result", "completed"]);
   assert.ok(loadWorkflowState(completed)!.completed_stage_instances.includes("build-and-test"));
   assert.equal(read(completed, evidencePath).producer.execution_id, execution, "report reuses valid C8 commands without manufacturing a build");
-  console.log(`PASS public C8 report (${mode}) completed with real I13/RED/GREEN, gate and valid command reuse${mode === "noEmit" || mode === "combined" ? "; conflicting build config blocks report" : ""}`);
+  console.log(`PASS public C8 report (${mode}) completed with real I13/RED/GREEN, gate and valid command reuse${usesCompiler ? "; consumed config drift blocks report; no output files" : ""}`);
   }
 } finally { rmSync(scratch, { recursive: true, force: true }); }
