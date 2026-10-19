@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.22.7 — 2026-10-19
+
+- Verify C8 build/check applicability from approved native Node project policies per module; retain required business tests, mixed-module coverage, command binding and source/configuration drift protection (MARS-255).
+- Accept complete native Node TAP summaries with reconciled test counts, nested suites and multiple files; reject failures, cancellations, zero successful tests, incomplete and contradictory reports while preserving existing numeric summaries.
+- Include CommonJS and ES module source/test files in shared traceability and test-quality scans; align C8 stages, templates, skills and evidence contracts.
+- Synchronize package, plugin, marketplace and stage-graph versions; regenerate all nine harness distributions.
+
 ## 4.22.6 — 2026-10-19
 
 - Accept trusted no-behavior deletion deliveries using controlled I13 applicability or approved empty-unit exemptions, with successful deterministic checks and verified observation reuse (MARS-253).
