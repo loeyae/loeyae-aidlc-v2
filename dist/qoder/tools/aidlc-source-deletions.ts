@@ -1,4 +1,5 @@
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { baselineCodeRef, epochRepos, parseCodeRef, workflowBaselineForModule } from "./aidlc-baseline";
@@ -6,13 +7,17 @@ import { moduleManifestPath, readModuleManifest, readUnitManifest, unitManifestP
 import { codeRefRepo } from "./aidlc-nested-repos";
 import { declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
 import { substantiveText } from "./aidlc-artifact-presence";
+import { ucdDeclarations } from "./aidlc-ucd-declarations";
+import { assertControlledI13, i13NonApplicable } from "./aidlc-i13-applicability";
 
 export interface SourceDeletion {
   path: string;
   baseline_blob: string;
   req_refs: string[];
   /** A module-local UC-D covering the removed behavior. */
-  ucd_id: string;
+  ucd_id?: string;
+  /** Omitted means business behavior (the version 1 declaration contract). */
+  applicability?: "required" | "not_applicable";
 }
 export interface VerifiedDeletion extends SourceDeletion { baseline: string; repo: string; content: string }
 
@@ -54,19 +59,89 @@ export function sourceDeletions(root: string, moduleId?: string, unitId?: string
   const nested = declaredNestedRoots(root);
   const i13 = JSON.parse(readLocal(root, `.aidlc/evidence/test-case-derivation/${moduleId}/test-case-derivation.json`));
   const scope = unitUcdIds(i13, unitId);
-  if (i13.status !== "required" || !scope.scoped) fail("deletion requires required I13 with explicit UC-D unit ownership");
+  const units = readUnitManifest(root, moduleId);
+  const caseRoot = `docs/aidlc/modules/${moduleId}/inception/application-design/test-cases`;
+  const requirements = readLocal(root, `docs/aidlc/modules/${moduleId}/inception/requirements.md`);
+  const mentions = (text: string, token: string) => new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text);
+  // Read the real inventory, including aggregate declarations, through the same parser as I13.
+  // A recorded inventory must still match: missing, extra and moved declarations are drift.
+  const scan = (dir: string): string[] => {
+    readLocalDirectory(dir);
+    return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(entry => {
+      const path = `${dir}/${entry.name}`;
+      if (entry.isSymbolicLink()) return fail(`symbolic link in UC-D sources: ${path}`);
+      return entry.isDirectory() ? scan(path) : entry.name.endsWith(".md") ? [path] : [];
+    });
+  };
+  const readLocalDirectory = (dir: string) => {
+    // readLocal's parent walk also checks the directory itself, without reading its bytes.
+    const absolute = resolve(root, dir);
+    const rel = relative(root, absolute).replace(/\\/g, "/");
+    if (rel === ".." || rel.startsWith("../")) fail(`UC-D sources escape project: ${dir}`);
+    let cursor = absolute;
+    while (cursor !== resolve(root)) {
+      if (lstatSync(cursor).isSymbolicLink()) fail(`symbolic link in UC-D sources: ${dir}`);
+      cursor = dirname(cursor);
+    }
+  };
+  const caseFiles = existsSync(join(root, caseRoot)) ? scan(caseRoot).sort() : [];
+  const portable = (path: string) => path.replace(/\\/g, "/");
+  if (i13.status === "required" && i13.test_case_files !== undefined && (!Array.isArray(i13.test_case_files)
+    || i13.test_case_files.some((path: unknown) => typeof path !== "string")
+    || JSON.stringify(i13.test_case_files.map(portable).sort()) !== JSON.stringify(caseFiles))) fail("I13 test_case_files no longer matches module sources");
+  const declarations = ucdDeclarations(caseFiles.filter(path => !path.endsWith("/_index.md")), path => readLocal(root, path));
+  const noBehavior = i13.status === "not_applicable" || i13.status === "required" && scope.scoped && scope.all.length === 0;
+  const checkNoBehavior = () => {
+    assertControlledI13(root, i13, moduleId);
+    if (i13.status === "not_applicable") {
+      const current = i13NonApplicable(root, moduleId, path => readLocal(root, path));
+      for (const key of ["status", "applicability_inputs_digest", "reason_code", "reason", "approval_ref", "alternative_validation", "validation_command", "source_refs", "source_files"]) {
+        if (JSON.stringify(i13[key]) !== JSON.stringify(current[key])) fail(`I13 applicability sources changed: ${key}`);
+      }
+    } else {
+      if (!unit?.ucd_exemption) fail("empty UC-D subset requires an approved unit ucd_exemption");
+      if (JSON.stringify([...declarations.keys()].sort()) !== JSON.stringify([...i13.ucd_ids].sort())) fail("I13 UC-D declarations changed");
+      for (const [id, useCase] of declarations) {
+        const owners = useCase.fields?.get("unit_refs");
+        if (useCase.status !== "ready" || !Array.isArray(owners) || !Array.isArray(i13.ucd_units?.[id])
+          || JSON.stringify([...owners].sort()) !== JSON.stringify([...i13.ucd_units[id]].sort())) fail("I13 unit ownership sources changed");
+        const recorded = i13.ucd_sources?.[id];
+        if (i13.ucd_sources !== undefined && (!recorded || typeof recorded.file !== "string" || portable(recorded.file) !== useCase.file
+          || recorded.sha256 !== createHash("sha256").update(readLocal(root, useCase.file)).digest("hex"))) fail("I13 affected UC-D source changed");
+      }
+    }
+  };
   const seen = new Set<string>();
   return declaration.deletions.map((entry: SourceDeletion) => {
     const ref = parseCodeRef(entry.path, roots, file);
     if (ref.path !== entry.path || ref.symbol || ref.path.split("/").some(segment => segment.startsWith(".")) || seen.has(ref.path)) fail("invalid or duplicate deletion path");
     seen.add(ref.path);
     if (!Array.isArray(entry.req_refs) || !entry.req_refs.length || entry.req_refs.some(req => typeof req !== "string" || !unit?.req_refs?.includes(req))) fail(`${ref.path}: req_refs must belong to this unit`);
-    if (!/^UC-D-\d+$/.test(entry.ucd_id) || !scope.all.includes(entry.ucd_id)) fail(`${ref.path}: affected UC-D does not belong to this unit`);
-    const casePath = `docs/aidlc/modules/${moduleId}/inception/application-design/test-cases/${entry.ucd_id}.md`;
-    const behavior = readLocal(root, casePath);
-    const requirements = readLocal(root, `docs/aidlc/modules/${moduleId}/inception/requirements.md`);
-    const mentions = (text: string, token: string) => new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text);
-    if (entry.req_refs.some(req => !mentions(behavior, req) || !mentions(requirements, req))) fail(`${ref.path}: requirement/affected behavior source missing`);
+    if (entry.req_refs.some(req => !mentions(requirements, req))) fail(`${ref.path}: authorized requirement source missing`);
+    if (entry.applicability === "not_applicable") {
+      if (!noBehavior || entry.ucd_id !== undefined) fail(`${ref.path}: no-behavior deletion conflicts with I13 UC-D scope`);
+      checkNoBehavior();
+      if (i13.status === "not_applicable" && entry.req_refs.some(req => !i13.source_refs.includes(req))) fail(`${ref.path}: no-behavior approval does not cover requirement`);
+    } else {
+      if (entry.applicability !== undefined && entry.applicability !== "required") fail(`${ref.path}: invalid applicability`);
+      if (i13.status !== "required" || !entry.ucd_id || !/^UC-D-\d+$/.test(entry.ucd_id) || !scope.all.includes(entry.ucd_id)) fail(`${ref.path}: affected UC-D does not belong to this unit`);
+      const useCase = declarations.get(entry.ucd_id!) ?? fail(`${ref.path}: affected UC-D source missing`);
+      if (useCase.status !== "ready") fail(`${ref.path}: affected UC-D source not ready`);
+      const recorded = i13.ucd_sources?.[entry.ucd_id!];
+      if (i13.ucd_sources !== undefined && (!recorded || typeof recorded.file !== "string" || portable(recorded.file) !== useCase.file
+        || recorded.sha256 !== createHash("sha256").update(readLocal(root, useCase.file)).digest("hex"))) fail(`${ref.path}: I13 affected UC-D source changed`);
+      const source = useCase.fields?.get("source_ref");
+      if (useCase.fields && !(Array.isArray(source) ? source.length : source?.trim())) fail(`${ref.path}: affected UC-D source_ref missing`);
+      const behavior = useCase.content;
+      if (entry.req_refs.some(req => !mentions(behavior, req))) fail(`${ref.path}: requirement/affected behavior source missing`);
+      const owners = useCase.fields?.get("unit_refs");
+      if (scope.scoped && (!Array.isArray(owners) || !owners.includes(unitId!) || JSON.stringify([...owners].sort()) !== JSON.stringify([...i13.ucd_units[entry.ucd_id!]].sort()))) fail(`${ref.path}: I13 unit ownership source changed`);
+      if (!scope.scoped) {
+        if (owners !== undefined) fail(`${ref.path}: I13 unit ownership source changed`);
+        const candidates = units.filter(unit => entry.req_refs.every(req => unit.req_refs?.includes(req)));
+        if (candidates.length !== 1 || candidates[0].unit_id !== unitId) fail(`${ref.path}: ambiguous deletion unit ownership; declare unit_refs`);
+      }
+    }
     const owner = codeRefRepo(root, ref.path, nested);
     const base = bases[owner.repoKey];
     if (!base) fail(`${ref.path}: repository baseline missing`);
@@ -86,5 +161,5 @@ export function sourceDeletions(root: string, moduleId?: string, unitId?: string
 
 /** Explicit removal trace, rather than old implementation text, covers the new removal requirement. */
 export function deletionTraceText(root: string, moduleId?: string, unitId?: string): string {
-  return sourceDeletions(root, moduleId, unitId).map(entry => `${entry.path}: ${entry.req_refs.join(" ")} ${entry.ucd_id}`).join("\n");
+  return sourceDeletions(root, moduleId, unitId).map(entry => `${entry.path}: ${entry.req_refs.join(" ")} ${entry.ucd_id ?? "not_applicable"}`).join("\n");
 }

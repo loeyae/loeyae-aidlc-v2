@@ -2,7 +2,7 @@
 import { evidenceTimeError, reviewIssueErrors } from "./aidlc-evidence-policy";
 import { frontendPlatformPayload } from "./aidlc-frontend-platform";
 import { substantiveArtifact } from "./aidlc-artifact-presence";
-import { alternativeCheckBindingErrors, evidenceFreshnessBindingErrors, semanticCommandArgv } from "./aidlc-evidence";
+import { alternativeCheckBindingErrors, exemptionCheckBindingErrors, evidenceFreshnessBindingErrors, semanticCommandArgv } from "./aidlc-evidence";
 import { claimToken } from "./aidlc-session";
 import { retireExecutionCheckpoint } from "./aidlc-retire-execution";
 import { assertSessionClaim, sessionBinding, withSessionPublication } from "./aidlc-light-state";
@@ -2042,6 +2042,9 @@ function phaseEvidenceErrors(
   if (i13 && "error" in i13) errors.push(`cannot derive the ${phase} UC-D set: ${i13.error}`);
   if (evidence.status === "not_required" && (emptySubset || evidence.ucd_exemption !== undefined || evidence.exemption_validation_execution !== undefined)) {
     errors.push(...ucdExemptionEvidenceErrors(evidence, phase, instance, scope));
+    if (asRecord(evidence.exemption_validation_execution)) errors.push(...exemptionCheckBindingErrors(asRecord(evidence.exemption_validation_execution)!, {
+      ...state, current_stage: stageSlug, current_stage_instance: instance.instance_id, current_module: instance.module_id, current_unit: instance.unit_id,
+    }));
     return errors;
   }
   if (evidence.status === "not_required" && phase === "GREEN" && scoped) {

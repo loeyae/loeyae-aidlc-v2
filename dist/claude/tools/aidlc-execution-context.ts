@@ -102,7 +102,7 @@ export interface UcdExemption {
 
 const UCD_EXEMPTION_FIELDS = ["reason_code", "reason", "approval_ref", "alternative_validation", "validation_command"];
 
-function ucdExemption(value: unknown, label: string): UcdExemption {
+export function ucdExemption(value: unknown, label: string): UcdExemption {
   const exemption = record(value, label);
   const unknown = Object.keys(exemption).filter((key) => !UCD_EXEMPTION_FIELDS.includes(key));
   if (unknown.length > 0) throw new Error(`${label} has unsupported fields: ${unknown.join(", ")}`);

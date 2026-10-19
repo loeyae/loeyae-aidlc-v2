@@ -22,6 +22,8 @@ import { hasExecutableBehavior } from "./aidlc-executable-behavior";
 import { baselineCodeRef, baselineCommitErrors, extraRepoKeyErrors, gitWorkTreeError, parseCodeRef, workflowBaselineForModule, type CodeRef } from "./aidlc-baseline";
 import { codeRefRepo, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
 import { declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
+import { i13NonApplicable } from "./aidlc-i13-applicability";
+import { ucdDeclarations, type UcdDeclaration, type FrontmatterValue } from "./aidlc-ucd-declarations";
 import { deletionTraceText } from "./aidlc-source-deletions";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
 import { readUiGenerationLock, verifyUiGenerationAcceptance, verifyUiGenerationLockAtBaseline, type UiDesignRoute } from "./aidlc-ui-governance";
@@ -645,13 +647,7 @@ function testCaseDerivation(): Record<string, unknown> {
   // an invalid one fails loudly instead of silently falling back to the UC-D branch.
   if (existsSync(exemptionPath) || !hasExecutableBehavior(sourceContent)) {
     if (!existsSync(exemptionPath)) fail(`I13 requires structured non-applicable evidence: ${relativePath(exemptionPath)}`);
-    const exemption = jsonFile(exemptionPath);
-    if (exemption.schema_version !== "1" || exemption.status !== "not_applicable") fail("I13 non-applicable record must use schema_version=1 and status=not_applicable");
-    if (!["pure-declaration", "pure-style", "pure-configuration", "approved-exception"].includes(String(exemption.reason_code))) fail("non-applicable.reason_code must be pure-declaration, pure-style, pure-configuration, or approved-exception");
-    for (const field of ["reason_code", "reason", "approval_ref", "alternative_validation", "validation_command"]) stringValue(exemption[field], `non-applicable.${field}`);
-    const refs = stringArray(exemption.source_refs, "non-applicable.source_refs");
-    const applicabilityInputsDigest = createHash("sha256").update(JSON.stringify([...sourcePaths, exemptionPath].sort().map(path => [relativePath(path), text(path)]))).digest("hex");
-    return { status: "not_applicable", applicability: "not_applicable", applicability_inputs_digest: applicabilityInputsDigest, reason_code: exemption.reason_code, reason: exemption.reason, approval_ref: exemption.approval_ref, alternative_validation: exemption.alternative_validation, validation_command: exemption.validation_command, source_refs: refs, source_files: sourcePaths.map(relativePath), test_case_files: [] };
+    return i13NonApplicable(ROOT, ACTIVE_MODULE);
   }
   if (!existsSync(indexPath)) fail(`I13 requires test case index: ${relativePath(indexPath)}`);
   const idsFound = [...new Set((caseContent.match(/\bUC-D-\d+\b/g) || []))];
@@ -686,6 +682,7 @@ function testCaseDerivation(): Record<string, unknown> {
     ...characterizationEvidence(idsFound, modes),
     source_files: sourcePaths.map(relativePath),
     test_case_files: caseFiles.map(relativePath),
+    ucd_sources: Object.fromEntries([...declarations].map(([id, declaration]) => [id, { file: relativePath(declaration.file), sha256: createHash("sha256").update(text(declaration.file)).digest("hex") }])),
     index: relativePath(indexPath),
   };
 }
@@ -693,106 +690,6 @@ function testCaseDerivation(): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 // UC-D declarations and tdd_mode (4.6.0 S2)
 // ---------------------------------------------------------------------------
-
-type FrontmatterValue = string | string[];
-
-interface UcdDeclaration {
-  id: string;
-  file: string;
-  status?: string;
-  /** Frontmatter fields; absent for a body-only case file (identified by its file name). */
-  fields?: Map<string, FrontmatterValue>;
-  /** A body-only case file that declares `tdd_mode:` (only frontmatter may declare it). */
-  bodyTddMode?: boolean;
-  /** A body-only case file that declares `unit_refs:` (4.8.0; only frontmatter may declare it). */
-  bodyUnitRefs?: boolean;
-}
-
-function unquote(value: string): string {
-  const trimmed = value.trim();
-  const quoted = /^"(.*)"$|^'(.*)'$/.exec(trimmed);
-  if (quoted) return quoted[1] ?? quoted[2] ?? "";
-  return trimmed.replace(/\s+#.*$/, "").trim();
-}
-
-const FRONTMATTER_LINE = /^\s*$|^\s*#|^[A-Za-z_][\w-]*\s*:|^\s*-\s/;
-
-/** Parse a YAML frontmatter subset: `key: value`, `key: [a, b]`, and `key:` followed by `- item` lines. */
-function parseFrontmatter(lines: string[], label: string): Map<string, FrontmatterValue> {
-  const fields = new Map<string, FrontmatterValue>();
-  let listKey: string | undefined;
-  for (const line of lines) {
-    if (/^\s*$|^\s*#/.test(line)) continue;
-    const item = /^\s*-\s+(.*)$/.exec(line);
-    if (item) {
-      const list = listKey === undefined ? undefined : fields.get(listKey);
-      if (!Array.isArray(list)) fail(`${label}: list item ${JSON.stringify(line.trim())} does not belong to a key`);
-      list.push(unquote(item[1]));
-      continue;
-    }
-    const pair = /^([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(line);
-    if (!pair) fail(`${label}: unsupported frontmatter line ${JSON.stringify(line)}`);
-    const [, key, rawValue] = pair;
-    if (fields.has(key)) fail(`${label}: frontmatter key ${key} is declared twice`);
-    const value = unquote(rawValue);
-    const inline = /^\[(.*)\]$/.exec(value);
-    if (value === "") {
-      fields.set(key, []);
-      listKey = key;
-    } else {
-      fields.set(key, inline ? inline[1].split(",").map(unquote).filter(Boolean) : value);
-      listKey = undefined;
-    }
-  }
-  return fields;
-}
-
-/** Frontmatter-style blocks (`---` … `---`) of a case file that declare an `id`. */
-function frontmatterBlocks(content: string, label: string): Array<Map<string, FrontmatterValue>> {
-  const lines = content.split(/\r?\n/);
-  const blocks: Array<Map<string, FrontmatterValue>> = [];
-  for (let index = 0; index < lines.length; index++) {
-    if (lines[index].trimEnd() !== "---") continue;
-    let close = index + 1;
-    while (close < lines.length && lines[close].trimEnd() !== "---") close++;
-    if (close >= lines.length) break;
-    const body = lines.slice(index + 1, close);
-    if (body.every((line) => FRONTMATTER_LINE.test(line)) && body.some((line) => /^id\s*:/.test(line))) {
-      blocks.push(parseFrontmatter(body, label));
-      index = close;
-    }
-  }
-  return blocks;
-}
-
-/**
- * The declaration of every UC-D, from its own case file: each frontmatter block whose
- * `id` is a UC-D, or, for a case file without such a block, the UC-D named by the file
- * name with its `status:` line. A UC-D declared twice is ambiguous and rejected.
- */
-function ucdDeclarations(files: string[]): Map<string, UcdDeclaration> {
-  const declarations = new Map<string, UcdDeclaration>();
-  const add = (declaration: UcdDeclaration) => {
-    const existing = declarations.get(declaration.id);
-    if (existing) fail(`${declaration.id} is declared in more than one case file: ${relativePath(existing.file)}, ${relativePath(declaration.file)}`);
-    declarations.set(declaration.id, declaration);
-  };
-  for (const file of files) {
-    const content = text(file);
-    const label = relativePath(file);
-    const blocks = frontmatterBlocks(content, label).filter((block) => /^UC-D-\d+$/.test(String(block.get("id"))));
-    if (blocks.length > 0) {
-      for (const fields of blocks) {
-        const status = fields.get("status");
-        add({ id: String(fields.get("id")), file, status: typeof status === "string" ? status.toLowerCase() : undefined, fields });
-      }
-      continue;
-    }
-    const named = /^(UC-D-\d+)(?!\d)/.exec(basename(file))?.[1];
-    if (named) add({ id: named, file, status: declaredValue(content, "status")?.toLowerCase(), bodyTddMode: declaredValue(content, "tdd_mode") !== undefined, bodyUnitRefs: declaredValue(content, "unit_refs") !== undefined });
-  }
-  return declarations;
-}
 
 type UcdMode = { mode: "new" } | { mode: "characterization"; codeRefs: string[]; reason: string; approvalRef: string };
 
