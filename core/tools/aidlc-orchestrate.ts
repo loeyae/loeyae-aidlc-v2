@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { evidenceTimeError, reviewIssueErrors } from "./aidlc-evidence-policy";
+import { infrastructureResourceErrors } from "./aidlc-infrastructure.js";
 import { frontendPlatformPayload } from "./aidlc-frontend-platform";
 import { substantiveArtifact } from "./aidlc-artifact-presence";
 import { alternativeCheckBindingErrors, exemptionCheckBindingErrors, evidenceFreshnessBindingErrors, semanticCommandArgv } from "./aidlc-evidence";
@@ -2694,22 +2695,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           }
           if (asNumber(evidence.unresolved) !== 0) errors.push("unresolved must be 0");
 
-          // Each resource must be named and provisioned
-          const resources = evidence.resources_enumerated;
-          if (!Array.isArray(resources) || resources.length === 0) {
-            errors.push("resources_enumerated must list at least one infrastructure resource");
-          } else {
-            for (let i = 0; i < resources.length; i++) {
-              const res = asRecord(resources[i]);
-              if (!res) {
-                errors.push(`resources_enumerated[${i}] must be an object`);
-                continue;
-              }
-              if (!asNonEmptyString(res.name)) errors.push(`resources_enumerated[${i}].name is required`);
-              if (!asNonEmptyString(res.type)) errors.push(`resources_enumerated[${i}].type is required`);
-              if (res.provisioned !== true) errors.push(`resources_enumerated[${i}].provisioned must be true`);
-            }
-          }
+          errors.push(...infrastructureResourceErrors(evidence, stage.slug, PROJECT_ROOT));
 
           // Rollback strategy must be defined
           if (!asNonEmptyString(evidence.rollback_strategy)) errors.push("rollback_strategy is required");

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { verifyDesignResourceConsumption } from "./aidlc-design-resource.js";
+import { infrastructureResources } from "./aidlc-infrastructure.js";
 import { verifyExternalUiManifest } from "./aidlc-ui-readonly.js";
 import { verifyCreatedUiManifest } from "./aidlc-ui-create.js";
 import { createHash } from "crypto";
@@ -1248,11 +1249,8 @@ function infrastructure(): Record<string, unknown> {
     return aliases[item].test(content);
   });
   if (matched.length !== required.length) fail(`infrastructure sections missing: ${required.filter((item) => !matched.includes(item)).join(", ")}`);
-  const resourceLines = content.split("\n").filter((line) => /资源|resource|数据库|缓存|queue|消息|service|服务/i.test(line) && line.trim().length > 3);
-  if (resourceLines.length === 0) fail("infrastructure resources are not enumerated");
-  const unprovisioned = resourceLines.filter((line) => !/provisioned|已创建|已配置|existing|现有|true|就绪/i.test(line));
-  if (unprovisioned.length > 0) fail("infrastructure resources lack provisioning confirmation");
-  return { status: "passed", sections: required, unresolved: 0, resources_enumerated: resourceLines.slice(0, 50).map((line, index) => ({ name: line.trim().replace(/^[-*|\s]+/, "").slice(0, 120), type: "declared", provisioned: true, index })), rollback_strategy: "documented in infrastructure artifacts" };
+  const resources = infrastructureResources(ROOT, files.map(path => ({ path: relativePath(path), content: text(path) })), requiredWorkflowState().current_stage);
+  return { status: "passed", sections: required, unresolved: 0, ...resources, rollback_strategy: "documented in infrastructure artifacts" };
 }
 
 function implementationReport(): Record<string, unknown> {

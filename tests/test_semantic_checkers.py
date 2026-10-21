@@ -115,6 +115,9 @@ resources: database provisioned true
 migration: database migration provisioned true
 rollback: previous version provisioned true
 runtime dependencies: service provisioned true
+```infrastructure-resources
+{"schema_version":1,"resources":[{"name":"fixture-db","type":"database","provisioning_status":"provisioned","source_refs":["docs/aidlc/construction/infrastructure-design.md"],"target_environment":"fixture","provisioning_evidence":["docs/aidlc/construction/infrastructure-design.md"]}]}
+```
 """)
     write(project, ".aidlc/evidence/build-and-test/build-test-evidence.json", "{}")
     write(project, ".aidlc/evidence/code-review/review-evidence.json", "{}")
