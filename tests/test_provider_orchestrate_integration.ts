@@ -9,6 +9,7 @@ import { runControlledProvider, type PreparedProviderInvocation, type Restricted
 import { evaluateProviderGate } from "../core/tools/aidlc-provider-gate.js";
 import { PROVIDER_PROFILE_REGISTRY_PATH } from "../core/tools/aidlc-provider-resolver.js";
 import { PROJECT_PROVIDERS_LOCK_PATH } from "../core/tools/aidlc-project-provider.js";
+import { fixtureEnvironment } from "./mars243_fixture_session.js";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -26,7 +27,7 @@ function write(path: string, content: string): void {
 }
 
 function run(cwd: string, args: string[]): { status: number; stdout: string; stderr: string; json?: Record<string, unknown> } {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8", shell: false });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8", shell: false, env: fixtureEnvironment(cwd, args) });
   let json: Record<string, unknown> | undefined;
   try { json = JSON.parse(result.stdout || "") as Record<string, unknown>; } catch { /* error output may not be JSON */ }
   return { status: result.status ?? 1, stdout: result.stdout || "", stderr: result.stderr || "", json };
@@ -67,6 +68,7 @@ const root = mkdtempSync(join(tmpdir(), "aidlc-provider-directive-"));
 const source = join(root, "provider-source");
 const remote = join(root, "provider-remote.git");
 const project = join(root, "project");
+const previousBinding = process.env.AIDLC_SESSION_BINDING;
 
 try {
   const providerRoot = join(source, "providers", "fixture");
@@ -199,6 +201,7 @@ try {
       return { exitCode: 0, signal: null, timedOut: false, cancelled: false, stdout: "", stderr: "" };
     },
   };
+  process.env.AIDLC_SESSION_BINDING = fixtureEnvironment(project, reportArgs).AIDLC_SESSION_BINDING;
   const evidence = await runControlledProvider(project, {
     plan: String(approvedPlan.path),
     nodeId: String(approvedAction.plan_node_id),
@@ -218,5 +221,7 @@ try {
 
   console.log("Provider orchestrate directive integration tests passed");
 } finally {
+  if (previousBinding === undefined) delete process.env.AIDLC_SESSION_BINDING;
+  else process.env.AIDLC_SESSION_BINDING = previousBinding;
   rmSync(root, { recursive: true, force: true });
 }
