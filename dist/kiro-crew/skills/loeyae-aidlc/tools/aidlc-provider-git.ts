@@ -15,6 +15,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { SpawnSyncReturns } from "node:child_process";
 import { runSync } from "./aidlc-spawn";
+import { validateKnowledgePackage } from "./aidlc-provider-knowledge-contract.js";
 import {
   parseProviderYaml,
   sha256FileDigest,
@@ -191,7 +192,7 @@ function jsonObject(value: unknown, field: string): JsonObject {
   return visit(value, field) as JsonObject;
 }
 
-export function validateProviderRepositoryManifest(value: unknown): ProviderRepositoryManifestV1_1 {
+export function validateProviderRepositoryManifest(value: unknown, options: { locked?: boolean } = {}): ProviderRepositoryManifestV1_1 {
   if (!isRecord(value)) fail("PROVIDER_MANIFEST_INVALID", "provider.yaml must contain an object");
   exact(value, ["schema", "provider_id", "name", "version", "kind", "capabilities", "selectors", "entrypoint", "ruleset", "artifacts", "policies", "extensions"], "provider.yaml");
   if (value.schema !== PROVIDER_SCHEMA.provider) fail("PROVIDER_SCHEMA_INCOMPATIBLE", `provider.yaml schema must be ${PROVIDER_SCHEMA.provider}`);
@@ -225,6 +226,15 @@ export function validateProviderRepositoryManifest(value: unknown): ProviderRepo
   if (network !== "none" && network !== "allowlisted") fail("PROVIDER_MANIFEST_INVALID", "provider.yaml.policies.network must be none or allowlisted");
   const writes = strings(value.policies.writes, "provider.yaml.policies.writes").map((candidate, index) => safePath(candidate, `provider.yaml.policies.writes[${index}]`));
   const extensions = value.extensions === undefined ? undefined : jsonObject(value.extensions, "provider.yaml.extensions");
+  // Old locks may contain knowledge-kind external sources with no knowledge package.
+  // Keep those readable offline; new installs and updates must satisfy the contract.
+  if (kind === "knowledge" && !(options.locked && extensions?.["aidlc.knowledge"] === undefined)) {
+    try {
+      validateKnowledgePackage(extensions?.["aidlc.knowledge"], version);
+    } catch (error) {
+      fail("PROVIDER_MANIFEST_INVALID", error instanceof Error ? error.message : String(error));
+    }
+  }
   return {
     schema: PROVIDER_SCHEMA.provider,
     provider_id: id(value.provider_id, "provider.yaml.provider_id"),
@@ -651,7 +661,7 @@ function validateRuleCatalog(value: Record<string, unknown>): void {
   });
 }
 
-function inspectBundle(context: GitContext, commit: string, subdir: string | null): {
+function inspectBundle(context: GitContext, commit: string, subdir: string | null, locked = false): {
   manifest: ProviderRepositoryManifestV1_1;
   manifestDigest: Sha256Digest;
   rulesetDigest: Sha256Digest;
@@ -667,7 +677,7 @@ function inspectBundle(context: GitContext, commit: string, subdir: string | nul
     if (error instanceof ProviderGitError) throw error;
     fail("PROVIDER_MANIFEST_INVALID", error instanceof Error ? error.message : String(error));
   }
-  const manifest = validateProviderRepositoryManifest(manifestValue);
+  const manifest = validateProviderRepositoryManifest(manifestValue, { locked });
   const ruleset = readLockedBlob(context, commit, repoPath(subdir, manifest.ruleset.catalog));
   validateRuleCatalog(parseJsonObject(ruleset, "ruleset catalog"));
   const providerLock = readLockedBlob(context, commit, repoPath(subdir, manifest.artifacts.lock));
@@ -864,7 +874,7 @@ export function verifyLockedProviderCache(projectRoot: string, entry: ProjectPro
     if (object.error || object.status !== 0) fail("PROVIDER_SOURCE_UNAVAILABLE", `locked commit ${entry.source.commit_oid} is missing from cache`);
     const tree = gitText(context, ["rev-parse", "--verify", `${entry.source.commit_oid}^{tree}`], "verify locked Provider tree");
     if (tree !== entry.source.tree_oid) fail("PROVIDER_LOCK_MISMATCH", `locked tree for ${entry.instance_id} is ${entry.source.tree_oid}, cache has ${tree}`);
-    const inspected = inspectBundle(context, entry.source.commit_oid, entry.source.subdir);
+    const inspected = inspectBundle(context, entry.source.commit_oid, entry.source.subdir, true);
     const mismatches: string[] = [];
     if (inspected.manifest.provider_id !== entry.id) mismatches.push("provider_id");
     if (inspected.manifest.version !== entry.manifest.version) mismatches.push("manifest.version");

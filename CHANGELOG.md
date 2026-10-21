@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.22.10 — 2026-10-21
+
+- Validate `aidlc.knowledge` extensions at provider install and update: manifests declaring `kind: knowledge` without a compliant extension are rejected with `PROVIDER_MANIFEST_INVALID` naming the missing extension (MARS-270).
+- Scope pre-stage knowledge confirmation actions to capabilities that actually declare knowledge topics; legacy locked instances without the extension no longer block `orchestrate next`/`report`, while commit, tree and file digest checks are preserved.
+- Report the missing `aidlc.knowledge` extension explicitly instead of the generic `expected object` knowledge error.
+- Synchronize package, plugin, marketplace and stage-graph versions and regenerate all nine harness distributions.
+
 ## 4.22.9 — 2026-10-19
 
 - Evaluate native Node TypeScript checks using the selected compiler's effective options after local configuration inheritance and CLI overrides; accept valid noEmit checks with suppressed output paths, declarations and maps (MARS-257).

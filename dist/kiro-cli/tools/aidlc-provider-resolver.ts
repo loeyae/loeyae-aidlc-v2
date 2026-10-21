@@ -83,6 +83,7 @@ import {
 } from "./aidlc-project-provider.js";
 import { verifyLockedProviderCache, type ProviderRepositoryManifestV1_1 } from "./aidlc-provider-git.js";
 import { readModuleFacts, matchKnowledgeRequirements } from "./aidlc-module-facts.js";
+import { validateKnowledgePackage } from "./aidlc-provider-knowledge-contract.js";
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const PROFILE_ID = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
@@ -142,6 +143,8 @@ export interface ProviderCandidateInstance {
   readonly intent: ProjectProviderIntent;
   readonly lock: ProjectProviderLockEntry;
   readonly capabilities: readonly ProviderCapabilityDeclaration[];
+  /** Only capabilities backed by an actual knowledge-package topic require confirmation. */
+  readonly knowledge_capabilities?: readonly string[];
   /** Optional declared protocol compatibility; omitted ⇒ assumed compatible. */
   readonly protocol?: ProviderProtocolCompatibility;
   /**
@@ -1542,7 +1545,10 @@ export function readProjectProviderCandidates(projectRoot: string, scope: Provid
       }
     }
     // A validated v1.1 Manifest is compatible by construction (no protocol range needed).
-    candidates.push({ intent, lock, capabilities });
+    const knowledgeCapabilities = manifest.kind === "knowledge" && knowledge !== undefined
+      ? validateKnowledgePackage(knowledge, manifest.version).topics.map(topic => topic.capability_id)
+      : [];
+    candidates.push({ intent, lock, capabilities, knowledge_capabilities: knowledgeCapabilities });
   }
   return candidates;
 }
@@ -1754,6 +1760,9 @@ function buildDirectiveActions(plan: ProviderPlanV1_1, candidates: readonly Prov
     const candidate = byInstance.get(node.provider_instance_id);
     const declaration = candidate?.capabilities.find((entry) => entry.id === node.capability_id);
     if (!candidate || !declaration) continue;
+    // Manifest kind classifies the package, not every capability it contains.
+    // Legacy external-source providers have no knowledge confirmation action.
+    if (declaration.kind === "knowledge" && !candidate.knowledge_capabilities?.includes(node.capability_id)) continue;
     actions.push({
       id: node.node_id,
       node: node.node_id,
