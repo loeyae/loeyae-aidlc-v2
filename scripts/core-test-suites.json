@@ -9,6 +9,10 @@
     "--noEmit"
   ],
   [
+    "tsx",
+    "tests/test_provider_knowledge_contract.ts"
+  ],
+  [
     "node",
     "scripts/test-providers.mjs",
     "local"

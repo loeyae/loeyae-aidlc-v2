@@ -7,11 +7,12 @@ import { readLockedProviderFile } from "./aidlc-provider-git.js";
 import { localProviderArtifactSigner } from "./aidlc-provider-evidence.js";
 import { assertPlanAndNodeCurrent, loadFrozenProviderPlan } from "./aidlc-provider-runner.js";
 import { recomputePlanDigest, recomputePlanId } from "./aidlc-provider-resolver.js";
-import { isPortableProviderPath, PROVIDER_SCHEMA, type KnowledgeReceiptV1_1, type ProviderPlanV1_1, type Sha256Digest } from "./aidlc-provider-types.js";
+import { PROVIDER_SCHEMA, type KnowledgeReceiptV1_1, type ProviderPlanV1_1, type Sha256Digest } from "./aidlc-provider-types.js";
+import { validateKnowledgePackage } from "./aidlc-provider-knowledge-contract.js";
 import { readModuleFacts, matchKnowledgeRequirements, type ModuleFacts } from "./aidlc-module-facts.js";
 
 /** Explicit extension protocol; the existing v1.1 Manifest/Receipt shapes are unchanged. */
-export const KNOWLEDGE_PACKAGE_SCHEMA = "aidlc.knowledge-package/v1";
+export { KNOWLEDGE_PACKAGE_SCHEMA } from "./aidlc-provider-knowledge-contract.js";
 export const KNOWLEDGE_CONFIRMATION_SCHEMA = "aidlc.knowledge-confirmation/v1";
 const STORE = ".aidlc/provider-knowledge";
 const MAX_CONTENT_BYTES = 4 * 1024 * 1024;
@@ -65,32 +66,20 @@ export function loadProviderKnowledge(project: string, input: { plan: string | P
   const plan = checkedPlan(project, input.plan);
   const { node, lock, manifest } = assertPlanAndNodeCurrent(project, plan, input.nodeId);
   if (manifest.kind !== "knowledge") fail("node is not a knowledge capability");
-  const declaration = record(manifest.extensions?.["aidlc.knowledge"]);
-  exact(declaration, ["schema", "version", "topics"]);
+  let declaration: ReturnType<typeof validateKnowledgePackage>;
+  try {
+    declaration = validateKnowledgePackage(manifest.extensions?.["aidlc.knowledge"], manifest.version);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
   const scoped = declaration.schema === "aidlc.knowledge-package/v2";
-  if ((!scoped && declaration.schema !== KNOWLEDGE_PACKAGE_SCHEMA) || declaration.version !== manifest.version) fail("knowledge package schema/version mismatch");
   const facts = scoped ? readModuleFacts(project, plan.scope.module_id) : undefined;
-  if (!Array.isArray(declaration.topics) || !declaration.topics.length) fail("missing topics");
-  const topics = declaration.topics.map((value) => {
-    const topic = record(value);
-    exact(topic, ["capability_id", "topic", "sections"]);
-    text(topic.capability_id); text(topic.topic);
-    return topic;
-  });
-  const matching = topics.filter((topic) => topic.capability_id === node.capability_id);
+  const matching = declaration.topics.filter((topic) => topic.capability_id === node.capability_id);
   if (matching.length !== 1) fail("missing or duplicate capability topic");
   const topic = matching[0];
-  if (!Array.isArray(topic.sections) || !topic.sections.length || topic.sections.length > 128) fail("expected 1..128 declared sections");
-  const ids = new Set<string>();
   let totalBytes = 0;
-  const sections = topic.sections.flatMap((value) => {
-    const section = record(value);
-    exact(section, scoped ? ["id", "path", "digest", "requires"] : ["id", "path", "digest"]);
-    const id = text(section.id);
-    if (ids.has(id)) fail("duplicate section id");
-    ids.add(id);
-    const path = text(section.path);
-    if (!isPortableProviderPath(path) || path.includes(":")) fail("section path escapes package");
+  const sections = topic.sections.flatMap((section) => {
+    const { id, path } = section;
     if (facts && matchKnowledgeRequirements(facts, section.requires) !== "match") return [];
     const bytes = readLockedProviderFile(project, lock, path);
     totalBytes += bytes.length;

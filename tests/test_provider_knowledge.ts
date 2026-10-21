@@ -12,6 +12,7 @@ import { readCurrentProviderSourceRevision, runControlledProvider } from "../cor
 import { canonicalProviderJson } from "../core/tools/aidlc-project-provider.js";
 import { localProviderArtifactSigner, parseProviderEvidence } from "../core/tools/aidlc-provider-evidence.js";
 import { evaluateProviderGate } from "../core/tools/aidlc-provider-gate.js";
+import { fixtureEnvironment } from "./mars243_fixture_session.js";
 
 const repository = resolve(import.meta.dirname, "..");
 const root = mkdtempSync(join(tmpdir(), "aidlc-knowledge-"));
@@ -24,7 +25,8 @@ function git(cwd: string, ...args: string[]): string {
   return result.stdout.trim();
 }
 function cli(...args: string[]): Record<string, any> {
-  const result = spawnSync(process.execPath, [join(repository, "node_modules/tsx/dist/cli.mjs"), join(repository, "bin/cli.ts"), ...args], { cwd: project, encoding: "utf8", shell: false });
+  const env = fixtureEnvironment(project, args[0] === "provider" ? ["orchestrate", "next"] : args);
+  const result = spawnSync(process.execPath, [join(repository, "node_modules/tsx/dist/cli.mjs"), join(repository, "bin/cli.ts"), ...args], { cwd: project, encoding: "utf8", shell: false, env });
   assert.equal(result.status, 0, `${args.join(" ")}: ${result.stdout}\n${result.stderr}`);
   return JSON.parse(result.stdout);
 }
@@ -120,6 +122,11 @@ try {
   ] as const) {
     write(join(pkg, "provider.yaml"), JSON.stringify(manifest(path, expectedDigest, version)));
     git(source, "add", "."); git(source, "commit", "-m", `bad declaration ${path} ${version}`);
+    if (path.startsWith("/") || path.startsWith("../") || version !== "0.1.0") {
+      assert.throws(() => updateProjectProvider(project, "knowledge", "main", { allowFile: true }), error,
+        "invalid package metadata must fail before updating the lock");
+      continue;
+    }
     updateProjectProvider(project, "knowledge", "main", { allowFile: true });
     const badPlan = plan();
     assert.throws(() => loadProviderKnowledge(project, { plan: badPlan, nodeId: badPlan.nodes[0].node_id }), error);
@@ -163,7 +170,7 @@ try {
   rmSync(currentReceiptPath);
   const denied = spawnSync(process.execPath, [join(repository, "node_modules/tsx/dist/cli.mjs"), join(repository, "bin/cli.ts"),
     "orchestrate", "report", "--stage", admitted.stage, "--result", "completed", "--instruction-ack", admitted.stage],
-    { cwd: project, encoding: "utf8", shell: false });
+    { cwd: project, encoding: "utf8", shell: false, env: fixtureEnvironment(project, ["orchestrate", "report", "--stage", admitted.stage]) });
   assert.notEqual(denied.status, 0);
   assert.match(denied.stdout + denied.stderr, /knowledge confirmation is missing/);
   assert.equal(readFileSync(statePath, "utf8"), stateBeforeReport, "report cannot bypass knowledge confirmation");
