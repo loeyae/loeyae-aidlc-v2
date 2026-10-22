@@ -324,7 +324,7 @@ type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
 type StageResult = (typeof VALID_RESULTS)[number];
-const NEXT_FLAGS = new Set(["preview", "scope", "work", "with-prd", "resume", "status", "text", "claim", "module", "owner", "branch", "worktree", "replace-lineage", "provider-approval"]);
+const NEXT_FLAGS = new Set(["preview", "scope", "work", "with-prd", "resume", "status", "text", "claim", "module", "unit", "owner", "branch", "worktree", "replace-lineage", "provider-approval"]);
 const REPORT_FLAGS = new Set(["stage", "result", "user-input", "instruction-ack", "module", "unit", "instance", "owner", "gate-decision"]);
 const SPLIT_FLAGS = new Set(["from", "dry-run", "replace-lineage"]);
 const STATE_FLAGS = new Set(["lineage", "user-input", "reason", "text", "module", "from"]);
@@ -3888,6 +3888,55 @@ function clearActiveContext(state: WorkflowState): void {
   delete state.current_unit;
 }
 
+/** MARS-271 #8: routing context key of a unit instance's own chain position. */
+function unitContextKey(moduleId?: string, unitId?: string): string | null {
+  return moduleId && unitId ? `${moduleId}:${unitId}` : null;
+}
+
+function clearUnitContext(state: WorkflowState, instanceId: string): void {
+  if (!state.unit_contexts) return;
+  for (const [key, context] of Object.entries(state.unit_contexts)) {
+    if (context.stage_instance === instanceId) delete state.unit_contexts[key];
+  }
+  if (Object.keys(state.unit_contexts).length === 0) delete state.unit_contexts;
+}
+
+/**
+ * MARS-271 #8 unit-level parallel chains: when the global current pointer is an
+ * unresolved unit instance of a DIFFERENT unit, moving it would overwrite that
+ * unit's chain position (last-writer-wins). A unit next writes its own context
+ * instead; the single-agent sequential path keeps writing the global pointers.
+ */
+export function applyCurrentContext(state: WorkflowState, instance: StageInstance): void {
+  const unitKey = unitContextKey(instance.module_id, instance.unit_id);
+  const currentGlobal = state.current_stage_instance;
+  const globalHeldByOtherUnit = Boolean(
+    unitKey
+    && currentGlobal
+    && currentGlobal !== instance.instance_id
+    && currentGlobal.includes("@unit:")
+    && !isInstanceResolved(state, currentGlobal)
+  );
+  if (unitKey && globalHeldByOtherUnit) {
+    state.unit_contexts = {
+      ...(state.unit_contexts || {}),
+      [unitKey]: { stage: instance.stage.slug, phase: instance.stage.phase, stage_instance: instance.instance_id },
+    };
+    return;
+  }
+  state.current_stage = instance.stage.slug;
+  state.current_phase = instance.stage.phase;
+  state.current_stage_instance = instance.instance_id;
+  if (instance.module_id) state.current_module = instance.module_id;
+  else delete state.current_module;
+  if (instance.unit_id) state.current_unit = instance.unit_id;
+  else delete state.current_unit;
+  if (unitKey && state.unit_contexts?.[unitKey]) {
+    delete state.unit_contexts[unitKey];
+    if (Object.keys(state.unit_contexts).length === 0) delete state.unit_contexts;
+  }
+}
+
 function selectActiveContext(state: WorkflowState, owns: (instanceId: string) => boolean = () => true): void {
   const next = Object.values(state.active_instances || {}).filter((claim) => owns(claim.stage_instance)).sort((left, right) => left.stage_instance.localeCompare(right.stage_instance))[0];
   if (!next) {
@@ -4687,7 +4736,7 @@ async function handleNext(args: string[]): Promise<Directive> {
     if (!part) return {kind: "error", message: "workflow does not exist; initialize it first"};
     const view = structuredClone(loaded.split ? mergeWorkflowView(loaded.parts, ref) : part.state);
     const all = expandStageInstances(graph, view);
-    const candidates = all.filter(instance => (!loaded.split || sameRef(ownerOfInstance(instance.instance_id), ref)) && (!flags.module || instance.module_id === flags.module));
+    const candidates = all.filter(instance => (!loaded.split || sameRef(ownerOfInstance(instance.instance_id), ref)) && (!flags.module || instance.module_id === flags.module) && (!flags.unit || instance.unit_id === flags.unit));
     const current = candidates.find(instance => instance.instance_id === part.state.current_stage_instance && !isInstanceResolved(view, instance.instance_id));
     view.active_instances = {};
     const search = current ? {instance: current} : findNextInstance(candidates, view, all);
@@ -4740,6 +4789,7 @@ async function handleNext(args: string[]): Promise<Directive> {
         `  Current stage: ${state.current_stage_instance || state.current_stage || "(none)"}\n` +
         `  Active claims: ${Object.values(state.active_instances || {}).map((claim) => `${claim.stage_instance}=${claim.owner}`).join(", ") || "(none)"}\n` +
         `  Context: module=${state.current_module || "-"}, unit=${state.current_unit || "-"}\n` +
+        `  Unit contexts: ${Object.entries(state.unit_contexts || {}).map(([key, context]) => `${key}=${context.stage_instance}`).join(", ") || "(none)"}\n` +
         `  Completed: ${completedCount}/${instances.length} stage instances\n` +
         `  Skipped: ${skippedCount}\n` +
         `  Remaining: ${remaining.length} (${remaining.map((instance) => instance.instance_id).join(", ")})`,
@@ -5021,6 +5071,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
     reconcileStageSummaries(state, instances);
     state.status = "done";
     clearActiveContext(state);
+    delete state.unit_contexts;
     applyPlanningState();
     opts.commit(originalState);
     return {
@@ -5036,6 +5087,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
 
   const effectiveNextInstance = runtimeInstance(nextInstance, planningState);
   if (effectiveNextInstance.instance_id !== binding.stage_instance) return { kind: "error", message: `Bind the exact next instance ${effectiveNextInstance.instance_id} before proceeding.`, ...extras };
+  if (flags.unit && flags.unit !== effectiveNextInstance.unit_id) return { kind: "error", message: `Unit mismatch: --unit ${flags.unit} does not match the bound instance ${effectiveNextInstance.instance_id}.`, ...extras };
   const nextStage = effectiveNextInstance.stage;
   // Construct this fallible hand-off plan before changing current context,
   // claims, or committing state. A malformed graph can therefore never
@@ -5192,13 +5244,9 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
     };
   }
 
-  state.current_stage = nextStage.slug;
-  state.current_phase = nextStage.phase;
-  state.current_stage_instance = nextInstance.instance_id;
-  if (nextInstance.module_id) state.current_module = nextInstance.module_id;
-  else delete state.current_module;
-  if (nextInstance.unit_id) state.current_unit = nextInstance.unit_id;
-  else delete state.current_unit;
+  // MARS-271 #8 unit-level parallel chains: the global current pointer moves only
+  // when it is free or already ours; otherwise the unit records its own context.
+  applyCurrentContext(state, effectiveNextInstance);
   if (claimRequested) assertSessionClaim(PROJECT_ROOT, state, effectiveNextInstance.instance_id);
 
   const gate = nextStage.approval === "block";
@@ -5343,13 +5391,19 @@ async function handleReport(args: string[]): Promise<Directive> {
   } else if (flags.instance) {
     declaredCurrentInstance = instances.find((instance) => instance.instance_id === flags.instance);
   } else {
-    if (state.current_stage !== stageSlug) {
+    // MARS-271 #8: a parallel unit whose chain position lives in unit_contexts (the
+    // global current pointer belongs to a different unit) still reports its own stage.
+    const binding = sessionBinding();
+    const boundMatch = binding?.stage_instance.match(/@module:([a-z0-9][a-z0-9-]*)@unit:([a-z0-9][a-z0-9-]*)$/);
+    const boundUnitKey = boundMatch ? `${boundMatch[1]}:${boundMatch[2]}` : null;
+    const unitContext = boundUnitKey ? state.unit_contexts?.[boundUnitKey] : undefined;
+    if (state.current_stage !== stageSlug && !(unitContext && unitContext.stage === stageSlug)) {
       return {
         kind: "error",
         message: `Stage mismatch: current is "${state.current_stage}", but report is for "${stageSlug}". Cannot report on a stage that is not the active one.`,
       };
     }
-    declaredCurrentInstance = instances.find((instance) => instance.instance_id === state.current_stage_instance);
+    declaredCurrentInstance = instances.find((instance) => instance.instance_id === (state.current_stage === stageSlug ? state.current_stage_instance : unitContext?.stage_instance));
   }
   if (!declaredCurrentInstance || declaredCurrentInstance.stage.slug !== stageSlug) {
     return {
@@ -5523,6 +5577,7 @@ async function handleReport(args: string[]): Promise<Directive> {
       reconcileStageSummaries(state, instances);
       if (state.active_instances?.[currentInstance.instance_id]) delete state.active_instances[currentInstance.instance_id];
       if (state.current_stage_instance === currentInstance.instance_id) clearActiveContext(state);
+      clearUnitContext(state, currentInstance.instance_id);
       break;
 
     case "rejected":

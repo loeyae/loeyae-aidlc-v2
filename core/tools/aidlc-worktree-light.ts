@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
+import { copyFileSync, existsSync, lstatSync, linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { runSync } from "./aidlc-spawn";
 import { loadWorkflowView } from "./aidlc-workflow-layout";
@@ -19,6 +19,8 @@ interface Metadata {
   created_at: string;
   /** 4.9.0: declared nested repositories that `git worktree add` does not check out (absent when none). */
   nested_repos_skipped?: string[];
+  /** MARS-271 #8: the shared baseline warm cache produced the working tree instead of a full checkout. */
+  warm_reused?: boolean;
 }
 
 function text(value: unknown, field: string): string {
@@ -78,7 +80,7 @@ function selection(project: string, instance: string, member: string): void {
 }
 
 function render(metadata: Metadata): string {
-  return `# AI-DLC Lightweight Worktree\n\n- Workflow ID: ${metadata.workflow_id}\n- Stage Instance: ${metadata.stage_instance}\n- Member: ${metadata.member}\n- Base Commit: ${metadata.base_commit}\n- Branch: ${metadata.branch}\n- Worktree Path: ${metadata.worktree_path}\n- Created At: ${metadata.created_at}\n${metadata.nested_repos_skipped ? `- Nested Repos Skipped: ${metadata.nested_repos_skipped.join(", ")}\n` : ""}\n> This metadata is coordination context only. Git review, build and merge policy remain authoritative.\n`;
+  return `# AI-DLC Lightweight Worktree\n\n- Workflow ID: ${metadata.workflow_id}\n- Stage Instance: ${metadata.stage_instance}\n- Member: ${metadata.member}\n- Base Commit: ${metadata.base_commit}\n- Branch: ${metadata.branch}\n- Worktree Path: ${metadata.worktree_path}\n- Created At: ${metadata.created_at}\n${metadata.nested_repos_skipped ? `- Nested Repos Skipped: ${metadata.nested_repos_skipped.join(", ")}\n` : ""}${metadata.warm_reused ? "- Warm Reused: yes\n" : ""}\n> This metadata is coordination context only. Git review, build and merge policy remain authoritative.\n`;
 }
 
 function readMetadata(project: string, instance: string): Metadata {
@@ -131,8 +133,9 @@ export function prepareLightWorktree(projectRoot: string, instance: string, memb
   const state = loadWorkflowView(project)!;
   const branch = requestedBranch || `aidlc-light/${state.workflow_id.slice(0, 12)}/${createHash("sha256").update(instance).digest("hex").slice(0, 16)}`;
   if (!SAFE_BRANCH.test(branch)) throw new Error("branch must match aidlc-light/<safe-name>");
-  git(project, ["worktree", "add", "-b", branch, target, revision.commit]);
-  const metadata: Metadata = { workflow_id: state.workflow_id, stage_instance: instance, member, base_commit: revision.commit, branch, worktree_path: target, created_at: new Date().toISOString(), ...(skipped.length > 0 ? { nested_repos_skipped: skipped } : {}) };
+  const warmReused = warmCheckout(project, target, branch, revision.commit);
+  if (!warmReused) git(project, ["worktree", "add", "-b", branch, target, revision.commit]);
+  const metadata: Metadata = { workflow_id: state.workflow_id, stage_instance: instance, member, base_commit: revision.commit, branch, worktree_path: target, created_at: new Date().toISOString(), ...(skipped.length > 0 ? { nested_repos_skipped: skipped } : {}), warm_reused: warmReused };
   try {
     writeFileSync(metadataPath(project, instance), render(metadata), { encoding: "utf8", flag: "wx", mode: 0o600 });
     const local = join(target, ".aidlc", "worktrees");
@@ -169,6 +172,140 @@ export function lightMergePlan(projectRoot: string, instance: string, member: st
   return { kind: "aidlc.aws-light.merge-plan", authorized: false, workflow_id: metadata.workflow_id, stage_instance: instance, member, branch: metadata.branch, base_commit: metadata.base_commit, head_commit: revision.commit, changed_paths: changed, merge_command: `git -C ${JSON.stringify(project)} merge --no-ff ${JSON.stringify(metadata.branch)}`, ...(skipped.length > 0 ? { nested_repos_skipped: skipped, nested_source_roots: skipped } : {}) };
 }
 
+// ---------------------------------------------------------------------------
+// MARS-271 #8: shared baseline worktree warmup
+// ---------------------------------------------------------------------------
+
+interface WarmMetadata {
+  base_commit: string;
+  warm_path: string;
+  warmed_at: string;
+  files: number;
+}
+
+function warmMetadataPath(project: string): string {
+  const dir = join(project, "aidlc", "active", "worktrees");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return join(dir, "_warm.md");
+}
+
+function renderWarm(metadata: WarmMetadata): string {
+  return `# AI-DLC Shared Baseline Worktree\n\n- Base Commit: ${metadata.base_commit}\n- Warm Path: ${metadata.warm_path}\n- Warmed At: ${metadata.warmed_at}\n- Files: ${metadata.files}\n> Shared read-only warm cache for worktree prepare (MARS-271 #8). Delete the path and this file together; prepare falls back to a full checkout.\n`;
+}
+
+function readWarmMetadata(project: string): WarmMetadata | null {
+  const path = warmMetadataPath(project);
+  if (!existsSync(path)) return null;
+  const markdown = readFileSync(path, "utf8");
+  return {
+    base_commit: scalar(markdown, "Base Commit"),
+    warm_path: scalar(markdown, "Warm Path"),
+    warmed_at: scalar(markdown, "Warmed At"),
+    files: Number(scalar(markdown, "Files")),
+  };
+}
+
+function warmPathFor(project: string): string {
+  return join(dirname(project), `${basename(project)}-aidlc-warm`);
+}
+
+/** Recreate the target working tree from the warm cache via hard links (copy fallback). */
+function linkWarmTree(warm: string, target: string): void {
+  const walk = (from: string, to: string): void => {
+    for (const entry of readdirSync(from, { withFileTypes: true })) {
+      if (entry.name === ".git") continue;
+      const source = join(from, entry.name);
+      const destination = join(to, entry.name);
+      if (entry.isDirectory()) {
+        mkdirSync(destination, { recursive: true });
+        walk(source, destination);
+      } else if (entry.isSymbolicLink()) {
+        symlinkSync(readlinkSync(source), destination);
+      } else {
+        try {
+          linkSync(source, destination);
+        } catch {
+          copyFileSync(source, destination);
+        }
+      }
+    }
+  };
+  walk(warm, target);
+}
+
+/** Valid warm cache: a registered, clean worktree of the same repo at the recorded commit. */
+function usableWarm(project: string, metadata: WarmMetadata | null, commit: string): string | null {
+  if (!metadata || metadata.base_commit !== commit) return null;
+  if (!existsSync(metadata.warm_path) || inside(project, metadata.warm_path)) return null;
+  try {
+    const warm = metadata.warm_path.replace(/\\/g, "/").toLowerCase();
+    const listed = git(project, ["worktree", "list"]).split("\n").some((line) => line.replace(/\\/g, "/").toLowerCase().startsWith(warm));
+    if (!listed) return null;
+    if (git(metadata.warm_path, ["rev-parse", "HEAD"]) !== commit) return null;
+    if (git(metadata.warm_path, ["status", "--porcelain"]) !== "") return null;
+    return metadata.warm_path;
+  } catch {
+    return null;
+  }
+}
+
+export function warmupLightWorktree(projectRoot: string, commitOverride?: string): WarmMetadata & { warm_path: string; reused: boolean } {
+  const project = directory(projectRoot, "project root");
+  if (resolve(git(project, ["rev-parse", "--show-toplevel"])) !== project) throw new Error("worktree warmup must run from the main project root");
+  const revision = readSourceRevision(project);
+  if (!/^[a-f0-9]{40,64}$/i.test(revision.commit) || revision.dirty !== false) throw new Error("worktree warmup requires a clean committed project");
+  const commit = commitOverride || revision.commit;
+  const existing = readWarmMetadata(project);
+  const reusable = usableWarm(project, existing, commit);
+  if (reusable) return { base_commit: commit, warm_path: reusable, warmed_at: existing!.warmed_at, files: existing!.files, reused: true };
+  const warm = warmPathFor(project);
+  if (inside(project, warm)) throw new Error(`warm path must be outside the project: ${warm}`);
+  if (existsSync(warm)) {
+    // Stale cache at a different commit: drop it and re-warm at the current baseline.
+    try { git(project, ["worktree", "remove", "--force", warm]); } catch { /* not a registered worktree */ }
+    if (existsSync(warm)) throw new Error(`warm path already exists and is not a reusable worktree: ${warm}`);
+  }
+  directory(dirname(warm), "warm path parent");
+  git(project, ["worktree", "add", "--detach", warm, commit]);
+  const files = countFiles(warm);
+  const metadata: WarmMetadata = { base_commit: commit, warm_path: warm, warmed_at: new Date().toISOString(), files };
+  writeFileSync(warmMetadataPath(project), renderWarm(metadata), { encoding: "utf8", flag: "w", mode: 0o600 });
+  return { ...metadata, reused: false };
+}
+
+function countFiles(root: string): number {
+  let total = 0;
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === ".git") continue;
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (statSync(path).isFile()) total++;
+    }
+  };
+  walk(root);
+  return total;
+}
+
+/** MARS-271 #8: reuse the warm cache when it matches the prepare commit. */
+function warmCheckout(project: string, target: string, branch: string, commit: string): boolean {
+  const warm = usableWarm(project, readWarmMetadata(project), commit);
+  if (!warm) return false;
+  try {
+    git(project, ["worktree", "add", "--no-checkout", "-b", branch, target, commit]);
+    linkWarmTree(warm, target);
+    git(target, ["reset"]);
+    if (git(target, ["status", "--porcelain"]) !== "") git(target, ["reset", "--hard"]);
+    if (git(target, ["status", "--porcelain"]) !== "") throw new Error("warm-linked worktree is not clean after reset");
+    return true;
+  } catch {
+    // Fall back to the standard full checkout; never leave a half-linked target behind.
+    try { git(project, ["worktree", "remove", "--force", target]); } catch {}
+    try { git(project, ["branch", "-D", branch]); } catch {}
+    return false;
+  }
+}
+
 function main(): void {
   const [command, ...args] = process.argv.slice(2);
   const flags: Record<string, string> = {};
@@ -182,9 +319,12 @@ function main(): void {
   const project = flags.project || process.cwd();
   if (command === "prepare") {
     process.stdout.write(`${JSON.stringify(prepareLightWorktree(project, text(flags.instance, "--instance"), text(flags.member, "--member"), text(flags.path, "--path"), flags.branch), null, 2)}\n`);
+  } else if (command === "warmup") {
+    if (flags.instance || flags.member || flags.path || flags.branch) throw new Error("warmup takes no instance/member/path/branch flags");
+    process.stdout.write(`${JSON.stringify(warmupLightWorktree(project, flags.commit), null, 2)}\n`);
   } else if (command === "verify" || command === "merge-plan") {
     process.stdout.write(`${JSON.stringify(lightMergePlan(project, text(flags.instance, "--instance"), text(flags.member, "--member"), text(flags.path, "--path"), text(flags["review-evidence"], "--review-evidence")), null, 2)}\n`);
-  } else throw new Error("usage: loeyae-aidlc worktree <prepare|verify|merge-plan> [flags]");
+  } else throw new Error("usage: loeyae-aidlc worktree <prepare|warmup|verify|merge-plan> [flags]");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -409,6 +409,9 @@ export function mergeWorkflowView(parts: Map<string, WorkflowPart>, owner: Workf
     selected_optional_stages: [...global.selected_optional_stages],
     history,
     unit_selections: Object.assign({}, ...ordered.map((part) => part.state.unit_selections)),
+    unit_contexts: Object.keys(Object.assign({}, ...ordered.map((part) => part.state.unit_contexts || {}))).length
+      ? Object.assign({}, ...ordered.map((part) => part.state.unit_contexts || {}))
+      : undefined,
     module_selections: Object.assign({}, ...ordered.map((part) => part.state.module_selections)),
     active_instances: Object.assign({}, ...ordered.map((part) => part.state.active_instances)),
     created_at: global.created_at,
@@ -450,6 +453,7 @@ export function extractOwnedState(view: WorkflowState, base: WorkflowState, ref:
     active_instances: Object.fromEntries(Object.entries(view.active_instances || {}).filter(([instance]) => owns(instance))),
     module_selections: ownedSelections(view.module_selections, ref, (entry) => entry),
     unit_selections: ownedSelections(view.unit_selections, ref, (entry) => entry.split(":", 1)[0]),
+    unit_contexts: ownedSelections(view.unit_contexts || {}, ref, (entry) => entry.split(":", 1)[0]),
   };
 }
 

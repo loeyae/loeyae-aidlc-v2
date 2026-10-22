@@ -68,6 +68,10 @@
   ],
   [
     "tsx",
+    "tests/test_mars271_p2_parallel.ts"
+  ],
+  [
+    "tsx",
     "tests/test_i13_executable_behavior.ts"
   ],
   [

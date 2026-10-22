@@ -1348,7 +1348,7 @@ Workflow:
   unit list|select [flags]                              List or self-select a development unit
   module list|select|claim|heartbeat|migrate|inspect|bind|transfer [flags]    Coordinate parallel module instances
   runtime summary|doctor [--module <module-id>]         Inspect the active Markdown workflow(s)
-  worktree prepare|verify|merge-plan [flags]            Prepare or verify a member worktree
+  worktree prepare|warmup|verify|merge-plan [flags]     Prepare or verify a member worktree; warmup pre-checks the shared baseline cache
 
 Quality and utilities:
   document-slices generate|check|plan|recover --module <id> [--unit <id>] [--apply]  Canonical-preserving derived views
@@ -1388,6 +1388,7 @@ Examples:
   loeyae-aidlc orchestrate next --scope feature --work "Fix order export timeout"
   loeyae-aidlc unit select --module module-a --unit unit-a --member alice --branch feat/unit-a
   loeyae-aidlc worktree prepare --instance code-generation@module:module-a@unit:unit-a --member alice --path /absolute/path/to/unit-a
+  loeyae-aidlc worktree warmup  (pre-checkout the shared baseline once; prepare then hard-links it per unit)
   loeyae-aidlc worktree merge-plan --instance code-generation@module:module-a@unit:unit-a --member alice --path /absolute/path/to/unit-a --review-evidence .aidlc/review.json
   loeyae-aidlc orchestrate next --claim --module module-a --owner alice
   loeyae-aidlc orchestrate split --from <workflow-id> --dry-run
