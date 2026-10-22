@@ -181,6 +181,7 @@ void testCreate() {
 `uc_mapping` 必须恰好覆盖 I13 中全部 `new` UC-D（缺 `ucd_modes` 的旧 I13 视为全部 `new`），不得包含 characterization UC-D。I13 没有 `new` UC-D 时，RED 由 producer 写为 `status: "not_required"`、`ucd_ids: []`，不执行命令。
 
 收敛效率（MARS-271）：RED 迭代可用 `evidence run --stage tdd --sensor red-test-evidence --test-filter <expr>` 只跑受影响测试——过滤表达式经 `AIDLC_TEST_FILTER` 环境变量传给受控命令（argv 仍绑定命令清单），并记入证据 `test_filter`。GREEN 与 BASELINE 证据必须来自全量测试运行，携带 `test_filter` 会被门禁拒绝。提交门禁前可先跑 `evidence run --stage tdd --lint` 轻量预检：执行同一批 checker，只输出 lint 报告，不写证据、不改引擎状态。
+收敛期非正式上报（MARS-271）：TDD/门禁收敛迭代轮次可用 `orchestrate checkpoint [--note <text>] [--instance <id>]` 记录非正式进度（`--list` 查看），checkpoint 不写引擎状态、不推进 revision；正式 report 仍由门禁通过后提交，收敛期正式 report 次数由此显著减少。
 
 ### 验证 BASELINE — 存量行为刻画
 

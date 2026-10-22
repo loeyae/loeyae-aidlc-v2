@@ -9,6 +9,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -969,6 +970,23 @@ function validatePhaseObservation(value: Record<string, unknown>, phase: Phase):
   }
 }
 
+/** MARS-271: ids of the I13 `mapping_deferred` entries. */
+function i13MappingDeferredIds(i13: Record<string, unknown>): string[] {
+  return (Array.isArray(i13.mapping_deferred) ? i13.mapping_deferred : [])
+    .map((entry) => (typeof entry === "object" && entry !== null ? (entry as { id?: unknown }).id : undefined))
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
+/** MARS-271: GREEN mapping_debt payload — the deferred UC-Ds of the unit (scoped) or module. */
+function mappingDebtFor(i13: Record<string, unknown>, scope: ReturnType<typeof unitUcdIds> | null): Record<string, unknown> {
+  const entries = (Array.isArray(i13.mapping_deferred) ? i13.mapping_deferred : []).flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const candidate = entry as { id?: unknown; reason?: unknown };
+    return typeof candidate.id === "string" && typeof candidate.reason === "string" ? [{ id: candidate.id, reason: candidate.reason }] : [];
+  }).filter((entry) => !scope?.scoped || scope.all.includes(entry.id));
+  return entries.length > 0 ? { mapping_debt: entries } : {};
+}
+
 function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase: Phase): void {
   assertPhaseConfigBinding(options, phase === "BASELINE" ? "BASELINE" : "RED/GREEN");
   // MARS-271: 受影响方法过滤只服务 RED 收敛迭代;GREEN/BASELINE 最终证据强制全量。
@@ -987,7 +1005,17 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
   };
   const modes = i13.status === "required" ? i13UcdIdsByMode(i13) : { new: [], characterization: [] };
   // 4.8.0: with I13 ucd_units a unit observes only the UC-Ds its unit_refs name.
-  const scope = i13.status === "required" ? unitUcdIds(i13, state.current_unit) : null;
+  // MARS-271 分级映射准入:mapping_deferred UC-D 暂无测试映射,不进入观测 universe。
+  const deferredIds = i13.status === "required" ? i13MappingDeferredIds(i13) : [];
+  const rawScope = i13.status === "required" ? unitUcdIds(i13, state.current_unit) : null;
+  const scope = rawScope && deferredIds.length > 0
+    ? {
+      ...rawScope,
+      all: rawScope.all.filter((id) => !deferredIds.includes(id)),
+      new: rawScope.new.filter((id) => !deferredIds.includes(id)),
+      characterization: rawScope.characterization.filter((id) => !deferredIds.includes(id)),
+    }
+    : rawScope;
   const unitLabel = `unit ${state.current_unit}`;
   if (i13.status === "not_applicable" && phase === "BASELINE") {
     notRequired("I13 declared no executable business behavior, so no UC-D uses tdd_mode characterization");
@@ -1081,6 +1109,9 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
       ...baselineFields,
       // MARS-271: 收敛迭代允许受影响方法过滤;该字段让门禁与报告可分辨过滤运行与全量运行。
       ...(options.testFilter ? { test_filter: options.testFilter } : {}),
+      // MARS-271 分级映射准入:GREEN 证据携带 mapping_debt——本单元/模块 mapping_deferred
+      // 的 UC-D 清单;门禁据此要求映射债显式申报,不随时间静默消失。
+      ...(phase === "GREEN" ? mappingDebtFor(i13, rawScope) : {}),
       observed_command: { id: command.id, phase, argv_digest: commandDigest, cwd: safeCwdLabel(command.cwd || PROJECT_ROOT), exit_code: exitCode, expected_exit_code: expectedExit, duration_ms: duration },
     };
     execution = { id: `builtin:${sensor}`, sensor, argv_digest: phaseObservationDigest(phase, commandDigest), exit_code: 0, status: "passed", duration_ms: duration };
@@ -1089,13 +1120,23 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
   if (!options.output) console.log(JSON.stringify({ status: "passed", output, sensor, phase }, null, 2));
 }
 
-function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | null, state: ProducerState, quiet = false): void {
+function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | null, state: ProducerState, quiet = false): { action: "reused" | "regenerated"; inputs_digest?: string; inputs_changed?: string[] } | undefined {
   const sensor = options.sensor;
   if (!sensor || sensor === "build-test-evidence") fail("semantic producer requires --sensor with a semantic sensor name");
   if (options.commandIds.length > 0) fail("--command-id is only supported for build/test evidence");
   if (sensor === "red-test-evidence" || sensor === "green-test-evidence" || sensor === "baseline-test-evidence") {
     runPhaseProducer(options, state, sensor === "red-test-evidence" ? "RED" : sensor === "green-test-evidence" ? "GREEN" : "BASELINE");
     return;
+  }
+  const output = options.output || evidenceOutput(options.stage, sensor, undefined, state);
+  // MARS-271 选择性失效:刷新已完成实例时,输入指纹未变的受控证据直接复用,
+  // 只有 diff 触及的 artifact 的直接依赖证据才重跑。
+  const inputs = stageInputs(options.stage, state);
+  const prior = priorEvidenceRecord(output);
+  if (options.refresh && inputs && prior && reusableSemanticEvidence(prior, inputs, state)) {
+    const summary = { action: "reused" as const, inputs_digest: inputs.digest };
+    if (!quiet) console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}`, ...summary }, null, 2));
+    return summary;
   }
   const declarations = (config?.commands || []).filter((command) => command.role === "semantic" && command.sensor === sensor);
   if (declarations.length > 1) fail(`allowlist must declare at most one built-in semantic checker for ${sensor}`);
@@ -1104,10 +1145,10 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   if (sensor === "quality-change-impact" && result.payload.applicable === true) {
     result.payload.quality_checkpoint_digest = publishAuthorized(() => recordQualityCheckpoint({ root: PROJECT_ROOT, workflow_id: state.workflow_id, project_workflow_id: state.parent_workflow_id || state.workflow_id, module_id: state.current_module, scope: state.scope, stage: options.stage, ui_route: String(result.payload.ui_route), quality_version: state.quality_gates_version }, result.payload.quality_snapshots as QualitySnapshot[], executionId));
   }
-  const output = options.output || evidenceOutput(options.stage, sensor, undefined, state);
   const unsigned = {
     ...result.payload,
     ...(config?.freshness ? { freshness: config.freshness } : {}),
+    ...(inputs ? { inputs } : {}),
     ...executionContext(state),
     evidence_version: "1",
     timestamp: new Date().toISOString(),
@@ -1116,7 +1157,18 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
     checker: result.execution,
   };
   writeAtomic(output, `${JSON.stringify(producedEvidence(unsigned), null, 2)}\n`);
-  if (!quiet) console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}` }, null, 2));
+  // 失效范围说明:与上一份证据相比,artifact 集合的增删即为本次重刷的直接起因。
+  let inputsChanged: string[] | undefined;
+  if (inputs && prior) {
+    const priorInputs = typeof prior.inputs === "object" && prior.inputs !== null ? prior.inputs as Record<string, unknown> : undefined;
+    const priorArtifacts = Array.isArray(priorInputs?.artifacts)
+      ? (priorInputs!.artifacts as unknown[]).filter((item): item is string => typeof item === "string")
+      : [];
+    inputsChanged = [...new Set([...priorArtifacts.filter((item) => !inputs.artifacts.includes(item)), ...inputs.artifacts.filter((item) => !priorArtifacts.includes(item))])];
+  }
+  const summary = { action: "regenerated" as const, ...(inputs ? { inputs_digest: inputs.digest } : {}), ...(inputsChanged ? { inputs_changed: inputsChanged } : {}) };
+  if (!quiet) console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}`, ...summary }, null, 2));
+  return summary;
 }
 
 interface ProducerOptions {
@@ -1210,15 +1262,16 @@ function parseArgs(args: string[]): ProducerOptions {
   };
 }
 
-function withProducerLock(output: string, action: () => void): void {
+function withProducerLock<T>(output: string, action: () => T): T {
   const safeOutput = safeProjectPath(output, "output");
   mkdirSync(dirname(safeOutput), { recursive: true, mode: 0o700 });
   safeProjectPath(dirname(safeOutput), "output directory", true);
   const lockPath = `${safeOutput}.producer.lock`;
   let lockFd: number | undefined;
+  let result: T;
   try {
     lockFd = openSync(lockPath, "wx", 0o600);
-    action();
+    result = action();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST" && lockFd === undefined) {
       fail(`another evidence producer is already running for ${safeOutput}`);
@@ -1228,6 +1281,7 @@ function withProducerLock(output: string, action: () => void): void {
     if (lockFd !== undefined) closeSync(lockFd);
     if (lockFd !== undefined && existsSync(lockPath)) unlinkSync(lockPath);
   }
+  return result!;
 }
 
 /** Which workflow owns this evidence run: the single workflow, or the split owner of the instance. */
@@ -1281,6 +1335,12 @@ function loadProducerState(options: ProducerOptions): ProducerState | null {
 }
 
 function declaredSemanticSensors(stage: string): string[] {
+  const node = stageGraphNode(stage);
+  const sensors = Array.isArray(node.sensors) ? node.sensors.filter((sensor): sensor is string => typeof sensor === "string") : [];
+  return sensors.filter((sensor) => SEMANTIC_SENSORS.has(sensor));
+}
+
+function stageGraphNode(stage: string): Record<string, unknown> {
   const graphPath = resolve(TOOL_DIR, "data", "stage-graph.json");
   if (!existsSync(graphPath)) fail(`stage graph is missing at ${graphPath}; run loeyae-aidlc graph compile first`);
   let graph: unknown;
@@ -1294,8 +1354,79 @@ function declaredSemanticSensors(stage: string): string[] {
     : [];
   const node = stages.find((item) => item && typeof item === "object" && !Array.isArray(item) && (item as Record<string, unknown>).slug === stage) as Record<string, unknown> | undefined;
   if (!node) fail(`stage ${stage} is not declared in the compiled stage graph`);
-  const sensors = Array.isArray(node.sensors) ? node.sensors.filter((sensor): sensor is string => typeof sensor === "string") : [];
-  return sensors.filter((sensor) => SEMANTIC_SENSORS.has(sensor));
+  return node;
+}
+
+/** MARS-271 选择性失效:单阶段输入指纹的文件数上限,防止退化为全仓扫描。 */
+const INPUTS_FINGERPRINT_CAP = 2000;
+
+/**
+ * MARS-271 选择性失效:指纹化该阶段 consumes 声明的输入工件。digest 由每个文件的
+ * (相对路径, mtime, size) 串接哈希得到——diff 只触及某 artifact 时,只有直接依赖
+ * 它的证据的指纹变化,刷新轮次只重跑这些证据,其余复用。
+ */
+function stageInputs(stage: string, state: ProducerState): { digest: string; artifacts: string[] } | null {
+  const node = stageGraphNode(stage);
+  const consumes = Array.isArray(node.consumes) ? node.consumes.filter((pattern): pattern is string => typeof pattern === "string") : [];
+  const patterns = [...new Set(consumes
+    .map((pattern) => pattern
+      .replaceAll("{module-id}", state.current_module || "")
+      .replaceAll("{unit-id}", state.current_unit || ""))
+    .filter((pattern) => pattern && !/\{[a-z][a-z-]*\}/.test(pattern))
+    .map((pattern) => pattern.replace(/\/+$/, "")))];
+  const artifacts: string[] = [];
+  const entries: string[] = [];
+  let truncated = false;
+  for (const pattern of patterns) {
+    const base = resolve(PROJECT_ROOT, pattern);
+    if (!existsSync(base)) continue;
+    const files: string[] = [];
+    if (statSync(base).isFile()) {
+      files.push(base);
+    } else {
+      for (const entry of readdirSync(base, { recursive: true, withFileTypes: true })) {
+        if (!entry.isFile()) continue;
+        files.push(resolve(entry.parentPath, entry.name));
+        if (files.length >= INPUTS_FINGERPRINT_CAP) { truncated = true; break; }
+      }
+    }
+    for (const file of files) {
+      const info = statSync(file);
+      artifacts.push(relative(PROJECT_ROOT, file).replace(/\\/g, "/"));
+      entries.push(`${relative(PROJECT_ROOT, file).replace(/\\/g, "/")}:${Math.floor(info.mtimeMs)}:${info.size}`);
+    }
+    if (truncated) break;
+  }
+  const digest = createHash("sha256").update([...entries.sort(), truncated ? "#truncated" : ""].join("\n")).digest("hex");
+  return { digest, artifacts };
+}
+
+/** Previously written evidence record of `output`, when it parses. */
+function priorEvidenceRecord(output: string): Record<string, unknown> | null {
+  try {
+    const value = JSON.parse(readFileSync(output, "utf8")) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * MARS-271 选择性失效:已受控、checker 通过、输入指纹与执行上下文都不变的证据
+ * 可以在 --refresh 时复用,不必重跑。RED/GREEN/BASELINE 相位传感器不走该路径。
+ */
+function reusableSemanticEvidence(prior: Record<string, unknown>, inputs: { digest: string }, state: ProducerState): boolean {
+  const producer = typeof prior.producer === "object" && prior.producer !== null ? prior.producer as Record<string, unknown> : undefined;
+  const checker = typeof prior.checker === "object" && prior.checker !== null ? prior.checker as Record<string, unknown> : undefined;
+  const priorInputs = typeof prior.inputs === "object" && prior.inputs !== null ? prior.inputs as Record<string, unknown> : undefined;
+  return producer?.mode === "controlled"
+    && checker?.exit_code === 0
+    && checker.status === "passed"
+    && prior.evidence_version === "1"
+    && priorInputs?.digest === inputs.digest
+    && prior.stage_instance === (state.current_stage_instance || null)
+    && prior.module_id === (state.current_module || null)
+    && prior.unit_id === (state.current_unit || null);
 }
 
 function produceAllSemantic(options: ProducerOptions, state: ProducerState, config: EvidenceConfig | null): void {
@@ -1306,14 +1437,17 @@ function produceAllSemantic(options: ProducerOptions, state: ProducerState, conf
   if (sensors.includes("red-test-evidence") || sensors.includes("green-test-evidence")) assertPhaseConfigBinding(options);
   else if (sensors.includes("baseline-test-evidence")) assertPhaseConfigBinding(options, "BASELINE");
   const outputs: string[] = [];
+  const actions: Array<{ sensor: string; action: "reused" | "regenerated"; inputs_digest?: string; inputs_changed?: string[] }> = [];
   for (const sensor of sensors) {
     const output = evidenceOutput(options.stage, sensor, undefined, state);
-    withProducerLock(output, () => {
-      runSemanticProducer({ ...options, sensor, output }, config, state, true);
-    });
+    const summary = withProducerLock(output, () =>
+      runSemanticProducer({ ...options, sensor, output }, config, state, true));
     outputs.push(output);
+    actions.push({ sensor, ...(summary || { action: "regenerated" as const }) });
   }
-  console.log(JSON.stringify({ status: "passed", stage: options.stage, sensors, outputs }, null, 2));
+  // MARS-271:汇总每个传感器的动作(reused/regenerated)与失效范围,刷新轮次可见
+  // 哪些证据因输入变化被重刷,哪些被复用。
+  console.log(JSON.stringify({ status: "passed", stage: options.stage, sensors, outputs, actions }, null, 2));
 }
 
 /**

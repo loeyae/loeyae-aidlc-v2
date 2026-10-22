@@ -31,7 +31,14 @@ export interface ModuleDescriptor {
    * and symlinks are checked fail-closed by the checker that reads them.
    */
   contract_paths?: string[];
+  /**
+   * MARS-271 审批策略分级:模块级 per-stage 审批层级覆盖(stage slug → block|confirm|notify)。
+   * 契约/架构决策阶段不得降级为 notify;notify 阶段完成后产物进入事后抽审台账。
+   */
+  approval_overrides?: Record<string, ApprovalTier>;
 }
+
+export type ApprovalTier = "block" | "confirm" | "notify";
 
 export const UNIT_CONDITIONAL_STAGES = [
   "functional-design",
@@ -219,20 +226,34 @@ function moduleContractPaths(value: unknown, label: string): string[] | undefine
   return paths;
 }
 
-export function readModuleManifest(projectRoot: string): ModuleDescriptor[] {
-  const value = regularJson(moduleManifestPath(projectRoot), "module manifest");
+/** MARS-271: per-stage approval tier overrides of a module (block | confirm | notify). */
+function approvalOverridesOf(value: unknown, label: string): Record<string, ApprovalTier> | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${label} must be an object of stage slug -> block | confirm | notify`);
+  const tiers = new Set(["block", "confirm", "notify"]);
+  const result: Record<string, ApprovalTier> = {};
+  for (const [slug, tier] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof tier !== "string" || !tiers.has(tier)) throw new Error(`${label}.${slug} must be block | confirm | notify`);
+    result[slug] = tier as ApprovalTier;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+export function readModuleManifest(projectRoot: string): ModuleDescriptor[] {  const value = regularJson(moduleManifestPath(projectRoot), "module manifest");
   if (value.schema_version !== 1) throw new Error("module manifest schema_version must be 1");
   if (!Array.isArray(value.modules) || value.modules.length === 0) throw new Error("module manifest modules must be a non-empty array");
   const modules = value.modules.map((item, index) => {
     const module = record(item, `modules[${index}]`);
     const paths = modulePaths(module.paths, `modules[${index}].paths`);
     const contractPaths = moduleContractPaths(module.contract_paths, `modules[${index}].contract_paths`);
+    const approvalOverrides = approvalOverridesOf(module.approval_overrides, `modules[${index}].approval_overrides`);
     return {
       module_id: contextId(module.module_id, `modules[${index}].module_id`),
       name: nonEmptyString(module.name, `modules[${index}].name`),
       service_id: nonEmptyString(module.service_id, `modules[${index}].service_id`),
       ...(paths ? { paths } : {}),
       ...(contractPaths ? { contract_paths: contractPaths } : {}),
+      ...(approvalOverrides ? { approval_overrides: approvalOverrides } : {}),
     };
   });
   uniqueIds(modules.map((module) => module.module_id), "module manifest");
@@ -410,8 +431,12 @@ export function unitUcdIds(i13: Record<string, unknown>, unitId?: string): UnitU
 export function ucdCoverageGaps(i13: Record<string, unknown>, green: Map<string, string[]>): string[] {
   const units = i13UcdUnits(i13);
   if (!units) return [];
+  // MARS-271 分级映射准入:mapping_deferred UC-D 暂缓测试映射,不构成模块收口缺口。
+  const deferred = new Set((Array.isArray(i13.mapping_deferred) ? i13.mapping_deferred : [])
+    .map((entry) => (typeof entry === "object" && entry !== null ? (entry as { id?: unknown }).id : undefined))
+    .filter((id): id is string => typeof id === "string" && id.length > 0));
   const gaps: string[] = [];
-  for (const id of i13UcdIds(i13)) {
+  for (const id of i13UcdIds(i13).filter((ucd) => !deferred.has(ucd))) {
     const owners = units[id] || [];
     if (owners.length === 0) gaps.push(`${id} names no unit in ucd_units`);
     for (const unit of owners) {

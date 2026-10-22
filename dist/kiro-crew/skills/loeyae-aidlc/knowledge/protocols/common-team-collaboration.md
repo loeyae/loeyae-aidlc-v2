@@ -44,6 +44,16 @@ loeyae-aidlc orchestrate park --module module-a
 
 首次 `next --module` 会把旧单布局透明迁移为 per-module 布局；成员无需先回到顶层 issue 请求人工执行 `split`。split 后，每个模块 state 由该模块自己的 conductor 串行写入，不同模块可并行推进。global/integration conductor 只负责 project 轴阶段、跨模块 barrier、lineage 处置和 integration，不代替模块反复 `next` / `report`。
 
+### 单元级并行状态链（MARS-271）
+
+同一模块内的多个 unit 也可以并行推进（7 个 unit 不再互相排队）。规则：
+
+1. 每个 unit 会话先用 `module bind` 绑定自己的 unit 实例（`bind` 校验该实例在 unit-manifest 中声明）。全局 Current Instance 指针被另一个未完成 unit 占用时，`next` 不再移动它，而是把本 unit 的链位记入 state 的 `Unit Contexts`（按 `<module>:<unit>` 键）；两单元的门禁状态互不覆盖，`orchestrate status` 可同时看到各 unit 的当前位置。
+2. `report` 按声明实例（claim 或 `--instance`）归属到对应 unit：完成自己的实例、释放自己的 claim、清理自己的 Unit Contexts 记录，不触碰其他 unit 的 Current 指针与 claim。`next`/`report` 支持 `--unit <id>` 显式限定。
+3. 证据生产与语义检查按 `--instance`/`--module --unit` 定位，证据路径本就按 unit 分目录，并行单元互不影响。
+4. 委派子任务的运行环境失败（如 `env not found`）自动有限次重试由委派层（Multica 调度/host）负责：引擎侧每次 `next`/`report` 都以声明实例幂等重入，委派方按固定上限重试即可安全恢复，不会造成状态双写。
+5. 共享基线 worktree 预热：`loeyae-aidlc worktree warmup` 在当前干净基线 commit 做一次全量 checkout（`<project>-aidlc-warm`，登记于 `.aidlc/worktrees/_warm.md`）；之后的 `worktree prepare` 用硬链接复用该缓存（metadata 标记 `Warm Reused: yes`），避免每个子任务重复 4000+ 文件 checkout。基线 commit 变化时重新 `warmup`；缓存缺失或损坏时 `prepare` 自动回退全量 checkout。
+
 整体进度不是由顶层 issue 手工推动：引擎在读取时聚合 global、各 module 与 integration state，并据此计算模块完成度和 integration barrier。模块内的真实依赖、consumes/produces、sensor、证据以及用户审批仍然照常阻塞；“等待顶层协调者代报或裁决”本身不得作为模块阻塞理由。
 
 ## 交付标准

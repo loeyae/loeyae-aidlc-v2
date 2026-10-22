@@ -114,7 +114,10 @@ export function bindSession(
 		state.current_stage_instance &&
 		state.current_stage_instance !== options.instance &&
 		!state.completed_stage_instances.includes(state.current_stage_instance) &&
-		!state.skipped_stage_instances.includes(state.current_stage_instance)
+		!state.skipped_stage_instances.includes(state.current_stage_instance) &&
+		// MARS-271 #8: a claimed current instance of a different unit does not block a
+		// parallel unit binding; its owner is recorded in the claim, so no silent race.
+		!state.active_instances[state.current_stage_instance]
 	) {
 		throw new Error(
 			"another stage is still current; bind/transfer that exact stage before continuing",

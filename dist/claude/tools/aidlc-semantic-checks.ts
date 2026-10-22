@@ -671,6 +671,16 @@ function i13Evidence(moduleId = ACTIVE_MODULE): Record<string, unknown> | null {
   return existsSync(path) ? jsonFile(path) : null;
 }
 
+/** MARS-271: I13 `mapping_deferred` entries as [{id, reason}]; malformed entries are dropped. */
+function i13MappingDeferred(record: Record<string, unknown> | null): Array<{ id: string; reason: string }> {
+  if (!record || !Array.isArray(record.mapping_deferred)) return [];
+  return record.mapping_deferred.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const candidate = entry as { id?: unknown; reason?: unknown };
+    return typeof candidate.id === "string" && typeof candidate.reason === "string" ? [{ id: candidate.id, reason: candidate.reason }] : [];
+  });
+}
+
 function testCaseDerivation(): Record<string, unknown> {
   if (!ACTIVE_MODULE) fail("test-case-derivation requires an active module context");
   const caseRoot = join(ROOT, contextual("docs/aidlc/inception/application-design/test-cases"));
@@ -740,6 +750,10 @@ function testCaseDerivation(): Record<string, unknown> {
   const units = ucdUnitRefs(idsFound, declarations);
   const defectRefs = ucdAnchorRefs(idsFound, declarations, "defect_ref");
   const changeRefs = ucdAnchorRefs(idsFound, declarations, "change_ref");
+  // MARS-271 分级映射准入:P1/展示类 UC-D 可声明 mapping_deferred: <reason> 暂缓测试映射,
+  // 带该标记的单元可过 GREEN,但映射债必须在证据 mapping_debt 中显式携带,不得静默消失。
+  // P0 或契约/接口类用例必须 GREEN 前就位映射,禁止暂缓。
+  const mappingDeferred = mappingDeferredEntries(idsFound, declarations);
   return {
     status: "required",
     applicability: "required",
@@ -748,6 +762,7 @@ function testCaseDerivation(): Record<string, unknown> {
     ucd_ids: idsFound,
     ucd_modes: Object.fromEntries(idsFound.map((id) => [id, modes.get(id)!.mode])),
     ...(units ? { ucd_units: units } : {}),
+    ...(mappingDeferred.length > 0 ? { mapping_deferred: mappingDeferred } : {}),
     ...(defectRefs.size > 0 ? { defect_refs: Object.fromEntries([...defectRefs].sort(([left], [right]) => left.localeCompare(right))) } : {}),
     ...(changeRefs.size > 0 ? { change_refs: Object.fromEntries([...changeRefs].sort(([left], [right]) => left.localeCompare(right))) } : {}),
     ...characterizationEvidence(idsFound, modes),
@@ -761,6 +776,37 @@ function testCaseDerivation(): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 // UC-D declarations and tdd_mode (4.6.0 S2)
 // ---------------------------------------------------------------------------
+
+/** Collect `mapping_deferred: <reason>` declarations; P0 and contract/api UC-Ds may not defer. */
+function mappingDeferredEntries(ids: string[], declarations: Map<string, UcdDeclaration>): Array<{ id: string; reason: string }> {
+  const entries: Array<{ id: string; reason: string }> = [];
+  for (const id of ids) {
+    const declaration = declarations.get(id);
+    const deferred = declaration?.fields?.get("mapping_deferred");
+    if (deferred === undefined) continue;
+    if (Array.isArray(deferred)) {
+      fail(`mapping_deferred of UC-D ${id} must be a reason string in the frontmatter of its case file (${relativePath(declaration!.file)})`);
+    }
+    const reason = deferred.trim();
+    if (!reason) fail(`mapping_deferred of UC-D ${id} must declare a non-empty reason (${relativePath(declaration!.file)})`);
+    const priority = declaredField(declaration, "priority");
+    const kind = declaredField(declaration, "type");
+    if (priority === "p0") {
+      fail(`mapping_deferred is not allowed for P0 UC-D ${id}: P0 use cases must have their mapping in place before GREEN (${relativePath(declaration!.file)})`);
+    }
+    if (kind === "contract" || kind === "api") {
+      fail(`mapping_deferred is not allowed for ${kind} UC-D ${id}: contract-related use cases must have their mapping in place before GREEN (${relativePath(declaration!.file)})`);
+    }
+    entries.push({ id, reason });
+  }
+  return entries;
+}
+
+/** Lowercased single-value frontmatter field of a UC-D declaration. */
+function declaredField(declaration: UcdDeclaration | undefined, key: string): string | undefined {
+  const value = declaration?.fields?.get(key);
+  return typeof value === "string" ? value.trim().toLowerCase() : undefined;
+}
 
 type UcdMode = { mode: "new" } | { mode: "characterization"; codeRefs: string[]; reason: string; approvalRef: string };
 
@@ -1167,13 +1213,17 @@ function testQuality(): Record<string, unknown> {
   const modes = [...modesByModule.values()];
   const redSeen = modes.length === 0 || modes.some((mode) => mode.new.length > 0);
   const baselineSeen = modes.some((mode) => mode.characterization.length > 0);
-  const mapping = cases.map((useCase) => {
+  // MARS-271 分级映射准入:mapping_deferred UC-D 免于测试源码映射检查,但以 mapping_debt
+  // 形式在 test-quality 证据中独立可见,映射债不随时间静默消失。
+  const deferredEntries = current ? i13MappingDeferred(current) : [...requiredI13.values()].flatMap(i13MappingDeferred);
+  const deferredIds = new Set(deferredEntries.map((entry) => entry.id));
+  const mapping = cases.filter((useCase) => !deferredIds.has(useCase)).map((useCase) => {
     const matches = testFiles.filter((path) => new RegExp(`\\b${useCase}\\b`).test(text(path)));
     if (matches.length === 0) fail(`${useCase} has no test source mapping`);
     return { use_case: useCase, test_methods: matches.map(relativePath) };
   });
   const testsTotal = greenRequired.reduce((total, record) => total + numberValue(record.tests_total, "green-test-evidence.tests_total"), 0);
-  return { status: "passed", red_seen: redSeen, baseline_seen: baselineSeen, green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping, ...(coverage.length > 0 ? { ucd_coverage: coverage } : {}) };
+  return { status: "passed", red_seen: redSeen, baseline_seen: baselineSeen, green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping, ...(deferredEntries.length > 0 ? { mapping_debt: deferredEntries } : {}), ...(coverage.length > 0 ? { ucd_coverage: coverage } : {}) };
 }
 
 /**

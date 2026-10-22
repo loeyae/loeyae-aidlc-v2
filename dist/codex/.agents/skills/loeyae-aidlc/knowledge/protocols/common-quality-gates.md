@@ -26,12 +26,14 @@ Evidence 路径由当前 directive 的 `evidence_root` 决定：
 - 语义检查时的内置 checker 信息，或构建/测试/静态检查的真实命令结果。
 
 使用 `loeyae-aidlc evidence run` 生成 Evidence。Producer 只执行项目命令清单中受允许的 build、test、check 命令（清单按 `--config` 显式指定 → `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找；RED/GREEN/BASELINE 与 C8 只按 `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找，显式 `--config` 仅在指向同一文件时被接受，否则 producer 拒绝），采用无 shell 执行、路径边界、原子写入和输出脱敏。
+选择性证据失效（MARS-271）：语义 sensor 证据记录 stage `consumes` 工件的输入指纹（`inputs.digest`）；`evidence run --refresh --instance <id>` 对输入指纹、执行上下文与受控状态均未变化的证据直接复用（`action: reused`），只有 diff 触及的 artifact 的直接依赖证据重跑（`action: regenerated`，输出 `inputs_changed` 失效范围）。RED/GREEN/BASELINE 相位证据不走该路径。
 
 ## 阶段质量
 
 - `requires`、`condition`、`consumes`、`produces` 和 sensor 必须全部满足。
 - instruction-only 阶段完成时传入 `--instruction-ack <stage>`。
 - `application-design` 与 `operations-authorization` 等阶段图 `approval: block` 节点需要用户在审阅影响、产物、review、构建和测试状态后显式提交 `--user-input Approve`；`user-stories`、`units-generation`、`infrastructure-design` 和 `code-generation` 的 `notify` 覆盖规划、生成模板及完成标准，展示摘要后复用既有授权；用户显式要求审阅时等待。普通文档不得将 notify 升级为 block。
+- 审批策略分级（MARS-271）：模块可在 module-manifest 的 `approval_overrides` 中按阶段 slug 覆盖审批层级（`block`/`confirm`/`notify`）。引擎级 `block` 阶段（契约/架构决策）禁止降级，只允许维持或加强；`notify` 层级阶段完成后产物自动登记进事后抽审台账（`orchestrate audit --list`），抽审发现经 `orchestrate audit --instance <id> --finding <text> --follow-up <CL|修订>` 回写，notify 类产物不中断推进。
 - Code review 必须覆盖实际改动路径，且 spec/standards 两轴通过、无未解决关键/重要问题；有明确严重度统计的开放建议不阻断。
 - Build/test evidence 按适用性记录真实构建、检查和测试；业务行为需要非零成功测试且无失败，可信无行为范围允许成功确定性检查及零测试数。
 - Worktree merge plan 必须覆盖分支、base/head、review 及改动路径，且永远只提供建议；宿主按项目分支策略、受保护分支流程及用户明确授权决定执行者与整合。设计审批不构成 main 写入、push 或合并授权。

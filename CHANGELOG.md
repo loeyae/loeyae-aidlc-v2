@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.22.12 — 2026-10-22
+
+- Selective evidence invalidation: semantic sensor evidence records an inputs fingerprint (stage consumes artifacts, mtime/size digest); `--refresh` reuses unchanged controlled evidence (`action: reused`) and regenerates only dependents of changed artifacts, reporting `inputs_changed` as the invalidation scope (MARS-271).
+- UC-D tiered mapping admission: frontmatter `mapping_deferred: <reason>` lets P1/display UC-Ds pass GREEN without test mapping; P0 and contract/api cases are refused; GREEN evidence must declare exactly the deferred set as `mapping_debt`, visible in test-quality.
+- Risk-tiered approval: module-manifest `approval_overrides` per stage slug (block/confirm/notify); engine-level block stages cannot be downgraded; notify completions land in a post-hoc audit ledger (`orchestrate audit --list` / write-back with follow-up).
+- Convergence checkpoints: `orchestrate checkpoint [--note|--list]` records informal convergence progress without touching engine state or advancing the revision.
+- Unit-level parallel state chains: `unit_contexts` state records per-unit chain positions; a unit `next` no longer overwrites the global Current Instance held by another unresolved unit, `bindSession` allows parallel unit bindings when the current instance is claimed, and `report` completes/releases/cleans only its own unit's instance, claim and context; `next`/`report` support `--unit`; env-failure retry semantics documented as delegation-layer responsibility on top of per-instance idempotent re-entry.
+- Shared baseline worktree warmup: `worktree warmup` checks out the clean baseline commit once (`<project>-aidlc-warm`, registered in `.aidlc/worktrees/_warm.md`); subsequent `worktree prepare` reuses it via hard links (`Warm Reused: yes` metadata) instead of a 4000+ file checkout per subtask, with automatic full-checkout fallback.
+- Synchronize package, plugin, marketplace and stage-graph versions and regenerate all nine harness distributions.
+
 ## 4.22.11 — 2026-10-22
 
 - Require `blocked_kind` classification (`business-unknown` / `technical-prerequisite`) on every blocked UC-D entry, gate unclassified or illegal values in I13 derivation, and carry classification detail in blocked-completion messages (MARS-271).
