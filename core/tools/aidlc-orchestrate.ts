@@ -2099,6 +2099,9 @@ function phaseEvidenceErrors(
   if (failed === null) errors.push("tests_failed must be a non-negative integer");
   if (evidence.traceability_complete !== true) errors.push("traceability_complete must be true");
   if (!Array.isArray(evidence.uc_mapping) || evidence.uc_mapping.length === 0) errors.push("uc_mapping must be non-empty");
+  // MARS-271: 收敛期受影响方法过滤(test_filter)只允许出现在 RED 证据;GREEN/BASELINE 最终证据强制全量。
+  const testFilter = String(evidence.test_filter ?? "").trim();
+  if (testFilter && phase !== "RED") errors.push(`${phase} evidence must be a full run; test_filter is only allowed for RED convergence iterations`);
   // The controlled producer records the observed test command separately from its
   // built-in checker; RED must have exited 1, GREEN and BASELINE 0.
   const observed = asRecord(evidence.observed_command);

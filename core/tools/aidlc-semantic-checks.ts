@@ -11,7 +11,7 @@ import { deliveryReadiness } from "./aidlc-quality-delivery";
 import { runSync } from "./aidlc-spawn";
 import { reviewIssueErrors } from "./aidlc-evidence-policy";
 import { frontendPlatformPayload } from "./aidlc-frontend-platform";
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "fs";
 import { basename, dirname, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
@@ -256,9 +256,53 @@ function joined(paths: string[]): string { return paths.map(text).join("\n"); }
 function ids(value: string, pattern: RegExp): string[] { return [...new Set([...value.matchAll(pattern)].map((match) => match[0]))].sort(); }
 function count(value: string, pattern: RegExp): number { return [...value.matchAll(pattern)].length; }
 function section(value: string, patterns: RegExp[]): boolean { return patterns.some((pattern) => pattern.test(value)); }
-function noUnresolved(value: string): void {
+/** MARS-271: the unresolved-marker tokens themselves (待决类文字,含未加否定的 阻断). */
+const UNRESOLVED_MARKER_PATTERN = /\b(?:TODO|FIXME|TBD|HACK|NotImplemented)\b|待确认|待定|未解决|未定义|(?<![不非无])阻断/i;
+/** Section headings whose body is historical record, not an open decision (MARS-271). */
+const HISTORICAL_SECTION_PATTERN = /历史|history|changelog|变更记录|决策记录|修订记录|审计记录|操作日志/i;
+
+/**
+ * MARS-271 marker taxonomy: a line carrying an unresolved-marker token is classified by
+ * nature — `pending` (待决: an open decision the artifact still owes), `historical`
+ * (历史记录: a dated/changelog/record entry or an explicitly resolved item) or `note`
+ * (备注: a blockquote or annotated remark). Only `pending` participates in the
+ * unresolved verdict; historical records and notes describe past events or annotations.
+ */
+function classifyUnresolvedLine(line: string, historicalSection: boolean): "pending" | "historical" | "note" | null {
+  if (!UNRESOLVED_MARKER_PATTERN.test(line)) return null;
+  if (historicalSection) return "historical";
+  const body = line.trim().replace(/^\s*(?:[-*+]\s*)*/, "");
+  // 引用块 / 备注行:备注性质。
+  if (/^>/.test(line.trim()) || /^(?:备注|注\s*[:：]|note\s*[:：]|说明\s*[:：]|附注\s*[:：])/i.test(body)) return "note";
+  // 日期前缀(changelog 条目)或显式历史标签:历史记录性质。
+  if (/^(?:历史|history|changelog|变更记录|决策记录|修订记录|审计记录|记录)[:：\s]/i.test(body)) return "historical";
+  if (/^\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?/.test(body)) return "historical";
+  // 已解决/已关闭的条目是历史,不是待决。
+  if (/已解决|已关闭|已处理|\b(?:resolved|closed)\b/i.test(line)) return "historical";
+  return "pending";
+}
+
+/** Pending-marker findings with position and classification, for a detailed failure message. */
+function unresolvedMarkerFindings(label: string, content: string): string[] {
+  const findings: string[] = [];
+  let historicalSection = false;
+  for (const [index, line] of content.split(/\r?\n/).entries()) {
+    const heading = /^#{1,6}\s+(.*)$/.exec(line.trim());
+    if (heading) historicalSection = HISTORICAL_SECTION_PATTERN.test(heading[1]);
+    const kind = classifyUnresolvedLine(line, historicalSection);
+    if (kind === "pending") findings.push(`${label}:${index + 1}: ${line.trim().slice(0, 60)} [待决]`);
+  }
+  return findings;
+}
+
+function noUnresolved(value: string, label = "project artifact"): void {
   // 4.8.1: a negated 阻断 (不阻断 / 非阻断 / 无阻断) describes the absence of a blocker.
-  if (/\b(TODO|FIXME|TBD|HACK|NotImplemented)\b|待确认|待定|未解决|未定义|(?<![不非无])阻断/i.test(value)) fail("unresolved marker found in project artifact");
+  // MARS-271: only 待决 markers fail; 历史/备注 markers are listed in the failure detail.
+  const findings = unresolvedMarkerFindings(label, value);
+  if (findings.length > 0) {
+    const shown = findings.slice(0, 10).join("; ");
+    fail(`unresolved marker found in project artifact: ${shown}${findings.length > 10 ? ` (+${findings.length - 10} more pending markers)` : ""}`);
+  }
 }
 
 function markdownTableCells(line: string): string[] | null {
@@ -426,7 +470,7 @@ function pagePlanContract(): PagePlanContract {
   const requirements = text(requirementsPath);
   const stories = text(storiesPath);
   const content = text(planPath);
-  noUnresolved(content);
+  noUnresolved(content, relativePath(planPath));
   for (const requiredSection of [/页面清单/i, /页面内容契约/i, /操作闭环/i, /未决项/i]) {
     if (!requiredSection.test(content)) fail(`page plan is missing required section ${requiredSection}`);
   }
@@ -652,9 +696,35 @@ function testCaseDerivation(): Record<string, unknown> {
   if (!existsSync(indexPath)) fail(`I13 requires test case index: ${relativePath(indexPath)}`);
   const idsFound = [...new Set((caseContent.match(/\bUC-D-\d+\b/g) || []))];
   if (idsFound.length === 0) fail("I13 test case directory contains no UC-D identifiers");
-  if (/status\s*:\s*blocked|\bblocked\b/i.test(caseContent)) fail("I13 cannot complete while any UC-D is blocked");
   // Each UC-D is counted once, from its own case file; `_index.md` lists cases but never declares them.
   const declarations = ucdDeclarations(caseFiles.filter((path) => basename(path) !== "_index.md"));
+  // MARS-271 blocked 分类学:blocked 用例必须声明 blocked_kind——business-unknown(PRD 缺业务答案,
+  // 唯一允许上报人工的类型)或 technical-prerequisite(代码基线技术前置,须列前置条件与解除路径)。
+  // 无分类的 blocked 条目直接拒绝,避免把两类性质混在一起上报人工复核。
+  const blockedKindValues = ["business-unknown", "technical-prerequisite"];
+  const blockedCases = [...declarations.values()].filter((declaration) => declaration.status === "blocked");
+  const blockedDetail: Array<{ id: string; blocked_kind: string }> = [];
+  for (const declaration of blockedCases) {
+    const kind = declaration.fields?.get("blocked_kind");
+    const normalized = typeof kind === "string" ? kind.trim().toLowerCase() : undefined;
+    if (!normalized || !blockedKindValues.includes(normalized)) {
+      fail(`blocked UC-D ${declaration.id} must declare blocked_kind: business-unknown | technical-prerequisite in the frontmatter of its case file (${relativePath(declaration.file)})`);
+    }
+    if (normalized === "technical-prerequisite") {
+      const prerequisites = declaration.fields?.get("prerequisites");
+      const unblockPath = declaration.fields?.get("unblock_path");
+      const hasPrerequisites = Array.isArray(prerequisites) ? prerequisites.length > 0 : typeof prerequisites === "string" && prerequisites.trim().length > 0;
+      if (!hasPrerequisites) fail(`technical-prerequisite UC-D ${declaration.id} must declare non-empty prerequisites (${relativePath(declaration.file)})`);
+      if (typeof unblockPath !== "string" || unblockPath.trim().length === 0) {
+        fail(`technical-prerequisite UC-D ${declaration.id} must declare unblock_path (${relativePath(declaration.file)})`);
+      }
+    }
+    blockedDetail.push({ id: declaration.id, blocked_kind: normalized });
+  }
+  if (blockedDetail.length > 0 || /status\s*:\s*blocked|\bblocked\b/i.test(caseContent)) {
+    const summary = blockedDetail.length > 0 ? blockedDetail.map((item) => `${item.id} (${item.blocked_kind})`).join("; ") : "see case files";
+    fail(`I13 cannot complete while any UC-D is blocked: ${summary}`);
+  }
   const notReady = idsFound.filter((id) => declarations.get(id)?.status !== "ready");
   if (notReady.length > 0) {
     const detail = notReady.map((id) => {
@@ -1151,6 +1221,10 @@ function phaseEvidenceCheck(sensor: "red-test-evidence" | "green-test-evidence" 
     return record;
   }
   if (record.phase !== phase || record.compile_status !== "passed" || record.environment_status !== "passed" || record.traceability_complete !== true) fail(`${sensor} evidence has invalid phase, compile, environment, or traceability status`);
+  // MARS-271: test_filter 只允许 RED 收敛迭代;GREEN/BASELINE 最终证据强制全量。
+  if (phase !== "RED" && typeof record.test_filter === "string" && record.test_filter.trim().length > 0) {
+    fail(`${sensor} evidence must be a full run; test_filter is only allowed for RED convergence iterations`);
+  }
   numberValue(record.tests_total, `${sensor}.tests_total`);
   const failed = numberValue(record.tests_failed, `${sensor}.tests_failed`);
   if (phase === "RED" && (record.status !== "failed" || record.failure_class !== "behavior" || failed < 1)) fail("RED evidence is not a behavior failure");
@@ -1176,10 +1250,11 @@ function contractBaseline(): Record<string, unknown> {
     if (table.rows.length > 0) sources.push({ path, content: table.lines.join("\n"), table });
   }
   if (sources.length === 0) fail("no contract schema file found");
-  const documents = sources.filter((source) => !source.table).map((source) => source.content).join("\n");
+  const nonTableSources = sources.filter((source) => !source.table);
+  for (const source of nonTableSources) noUnresolved(source.content, relativePath(source.path));
+  const documents = nonTableSources.map((source) => source.content).join("\n");
   const tables = sources.flatMap((source) => (source.table ? [source.table] : []));
-  noUnresolved(documents);
-  for (const table of tables) noUnresolved(table.rows.join("\n"));
+  for (const table of tables) noUnresolved(table.rows.join("\n"), "contract table rows");
   const content = sources.map((source) => source.content).join("\n");
   const owner = documents.match(/(?:owner|负责人|所有者)\s*[:：|]\s*([^\n|]+)/i)?.[1]?.trim()
     || tables.flatMap((table) => table.providers)[0];
@@ -1201,7 +1276,7 @@ function functionalDesign(): Record<string, unknown> {
   files.push(...allFiles("docs/aidlc/construction", /functional-design\/[^/]+\.md$/));
   if (files.length === 0) fail("functional design artifacts are missing");
   const content = joined(files);
-  noUnresolved(content);
+  for (const file of files) noUnresolved(text(file), relativePath(file));
   // 4.8.0: with I13 ucd_units a unit's functional design covers only the unit's own UC-Ds;
   // the module's completeness is reconciled at build-and-test.
   const i13 = ACTIVE_UNIT ? i13Evidence() : null;
@@ -1221,7 +1296,7 @@ function nfrCoverage(): Record<string, unknown> {
   const files = moduleScopedFiles(/(?:nfr|non-functional|非功能)/i).filter((path) => path.endsWith(".md"));
   if (files.length === 0) fail("NFR artifacts are missing");
   const content = joined(files);
-  noUnresolved(content);
+  for (const file of files) noUnresolved(text(file), relativePath(file));
   const nfrIds = ids(content, /NFR-\d+(?:-[A-Za-z0-9_-]+)?/g);
   if (nfrIds.length === 0) fail("no NFR identifiers found");
   const items = nfrIds.map((id) => {
@@ -1241,7 +1316,7 @@ function infrastructure(): Record<string, unknown> {
   const files = moduleScopedFiles(/(?:infrastructure|deployment|deploy|基础设施|部署)/i).filter((path) => path.endsWith(".md"));
   if (files.length === 0) fail("infrastructure design artifacts are missing");
   const content = joined(files);
-  noUnresolved(content);
+  for (const file of files) noUnresolved(text(file), relativePath(file));
   const required = ["deployment", "resources", "migration", "rollback", "runtime_dependencies"];
   const matched = required.filter((item) => {
     const aliases: Record<string, RegExp> = { deployment: /deployment|部署|发布/i, resources: /resources?|资源/i, migration: /migration|迁移/i, rollback: /rollback|回滚/i, runtime_dependencies: /runtime dependencies|运行时依赖|外部依赖/i };
@@ -1259,7 +1334,7 @@ function implementationReport(): Record<string, unknown> {
   const path = join(ROOT, contextual("docs/aidlc/construction/implementation-report.md"));
   if (!existsSync(path)) fail("implementation report is missing");
   const content = text(path);
-  noUnresolved(content);
+  noUnresolved(content, relativePath(path));
   const references = [...new Set(content.match(/\.aidlc\/evidence\/[A-Za-z0-9._/-]+\.json/g) || [])];
   if (references.length === 0) fail("implementation report has no evidence references");
   const missing = references.filter((ref) => !existsSync(join(ROOT, ref)));
@@ -3247,7 +3322,7 @@ function inceptionConsistency(): Record<string, unknown> {
   const requirements = text(requirementsPath);
   const stories = text(storiesPath);
   const report = text(reportPath);
-  noUnresolved(report);
+  noUnresolved(report, relativePath(reportPath));
   const requirementIds = normalizedIds(requirements, REQUIREMENT_ID);
   const storyIds = normalizedIds(stories, STORY_ID);
   if (requirementIds.length === 0 || storyIds.length === 0) fail("requirements and user stories must contain machine identifiers");
@@ -3328,7 +3403,7 @@ function uiAlignment(): Record<string, unknown> {
   const codePlanPath = join(ROOT, contextual("docs/aidlc/construction/plans/code-generation-plan.md"));
   if (!existsSync(codePlanPath)) fail("code-generation plan is missing for UI alignment review");
   const codePlan = text(codePlanPath);
-  noUnresolved(codePlan);
+  noUnresolved(codePlan, relativePath(codePlanPath));
   // MARS-125 (与 MARS-118 对称):选了 UI route 的单元,"code-generation-plan 缺页面对照表章节" 不再等于
   // "本单元无 UI" 而静默 not_applicable——那会让整个 UI 对齐门禁被 "它自己要求的那一节的缺席" 击穿。
   // 口径改为:默认要求页面映射;只有在 code-generation-plan 里用显式豁免标记(复用 MARS-118 的
@@ -4160,7 +4235,47 @@ function structuralInvariants(): Record<string, unknown> {
   const changed = set.baselineRef ? baselineChangedFiles(set.baselineRef) : null;
   if (changed) files = files.filter((path) => changed.has(portableLabel(path)));
 
-  const ops = files.flatMap(persistenceOperations);
+  // MARS-271 增量扫描:每个文件的持久化操作是文件内容的纯函数,按 mtime+size 缓存复用,
+  // 未变更文件不重复解析;清单摘要变化时缓存整体失效。缓存位于 .aidlc/cache(非证据),
+  // 只加速扫描,不改变任何判定。长扫描输出 stderr 进度心跳,避免无输出超时。
+  const cachePath = join(ROOT, ".aidlc", "cache", "structural-invariants", `${ACTIVE_MODULE}.json`);
+  interface ScanCacheEntry { mtime_ms: number; size: number; ops: PersistOp[] }
+  let cacheEntries: Record<string, ScanCacheEntry> = {};
+  try {
+    const saved = JSON.parse(readFileSync(cachePath, "utf8")) as { manifest_digest?: string; entries?: Record<string, ScanCacheEntry> };
+    if (saved && saved.manifest_digest === manifestDigest && saved.entries && typeof saved.entries === "object") cacheEntries = saved.entries;
+  } catch { /* 缓存不可读时按全量重扫 */ }
+  const cacheHits: string[] = [];
+  const cacheMisses: string[] = [];
+  const startedAt = Date.now();
+  const HEARTBEAT_INTERVAL = 500;
+  const fileOps = new Map<string, PersistOp[]>();
+  files.forEach((path, index) => {
+    const label = portableLabel(path);
+    const info = statSync(path);
+    const entry = cacheEntries[label];
+    if (entry && entry.mtime_ms === info.mtimeMs && entry.size === info.size) {
+      cacheHits.push(label);
+      fileOps.set(label, entry.ops);
+    } else {
+      cacheMisses.push(label);
+      fileOps.set(label, persistenceOperations(path));
+    }
+    if ((index + 1) % HEARTBEAT_INTERVAL === 0) {
+      process.stderr.write(`structural-invariants: scanned ${index + 1}/${files.length} files (${cacheMisses.length} parsed, ${cacheHits.length} reused, ${Math.round((Date.now() - startedAt) / 1000)}s)\n`);
+    }
+  });
+  const ops = files.flatMap((path) => fileOps.get(portableLabel(path)) || []);
+  try {
+    const entries: Record<string, ScanCacheEntry> = {};
+    for (const path of files) {
+      const label = portableLabel(path);
+      const info = statSync(path);
+      entries[label] = { mtime_ms: info.mtimeMs, size: info.size, ops: fileOps.get(label) || [] };
+    }
+    mkdirSync(dirname(cachePath), { recursive: true });
+    writeFileSync(cachePath, `${JSON.stringify({ manifest_digest: manifestDigest, entries })}\n`, "utf8");
+  } catch { /* 缓存写失败不影响判定 */ }
   const violations: InvariantViolation[] = [];
   const exemptionsApplied: Array<{ invariant: string; path: string; reason: string; file: string }> = [];
   const exempted = (invariant: string, list: InvariantExemption[], file: string): boolean => {
@@ -4249,6 +4364,7 @@ function structuralInvariants(): Record<string, unknown> {
     persistence_entities_checked: persistenceChecked,
     baseline_ref: set.baselineRef || null,
     files_scanned: files.length,
+    scan_cache: { reused: cacheHits.length, parsed: cacheMisses.length },
     operations_detected: ops.length,
     exemptions_applied: exemptionsApplied,
     violations: [],
