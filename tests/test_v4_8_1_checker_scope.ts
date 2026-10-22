@@ -192,7 +192,7 @@ async function section(name: string, body: () => void | Promise<void>): Promise<
 const UNRELATED_CONTRACT = "# 支付契约笔记（旧系统）\n\n字段含义待确认。\n";
 const MODULE_CONTRACT = "# 订单查询契约\n\nowner: m01\nconsumers: m02, m03\nversion: 1.0.0（向后兼容）\n\nGET /orders/{id} 返回订单详情。\n";
 const NFR = "# 非功能需求\n\n## NFR-001 导出性能\n\n验收：单次导出 10 万行在 30 秒内完成。\n";
-const INFRA = "# 基础设施设计\n\n## deployment\n\n- 部署：蓝绿发布\n- 资源：订单数据库 已配置\n- 迁移 migration：本次无表结构变更\n- 回滚 rollback：切回上一版本镜像\n- 运行时依赖：支付网关 existing\n";
+const INFRA = "# 基础设施设计\n\n## deployment\n\n- 部署：蓝绿发布\n- 资源 resources：订单数据库\n- 迁移 migration：本次无表结构变更\n- 回滚 rollback：切回上一版本镜像\n- 运行时依赖：支付网关\n\n```infrastructure-resources\n" + JSON.stringify({ schema_version: 1, resources: [{ name: "order-db", type: "MySQL", provisioning_status: "provisioned", source_refs: ["services/m01/app.py"], target_environment: "fixture", provisioning_evidence: ["README.md"] }] }) + "\n```\n";
 
 function productContracts(rows: { order: string; orderConsumer: string; pay: string; payConsumer: string }): string {
   return [

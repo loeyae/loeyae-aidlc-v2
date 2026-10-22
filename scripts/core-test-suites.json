@@ -1,6 +1,10 @@
 [
   [
     "tsx",
+    "tests/test_infrastructure_design.ts"
+  ],
+  [
+    "tsx",
     "core/tools/aidlc-graph.ts",
     "compile"
   ],
