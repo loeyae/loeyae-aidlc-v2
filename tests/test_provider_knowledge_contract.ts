@@ -4,10 +4,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { addProjectProvider, setProjectProviderEnabled, updateProjectProvider } from "../core/tools/aidlc-provider-cli.js";
-import { validateProviderRepositoryManifest, providerGitCachePath, verifyLockedProviderCache } from "../core/tools/aidlc-provider-git.js";
+import { addProjectProvider, getProjectProviderStatus, setProjectProviderEnabled, updateProjectProvider } from "../core/tools/aidlc-provider-cli.js";
+import { validateProviderRepositoryManifest, verifyLockedProviderCache } from "../core/tools/aidlc-provider-git.js";
 import { loadProviderKnowledge } from "../core/tools/aidlc-provider-knowledge.js";
-import { createProjectProvidersLock, readProjectProviders, sha256FileDigest, sha256ProviderDigest, writeProjectProviders } from "../core/tools/aidlc-project-provider.js";
+import { PROJECT_PROVIDER_AUDIT_PATH, readProjectProviders, sha256FileDigest, sha256ProviderDigest } from "../core/tools/aidlc-project-provider.js";
 import { defaultResolutionPolicy, resolveProjectProviderPlan } from "../core/tools/aidlc-provider-resolver.js";
 import { readCurrentProviderSourceRevision } from "../core/tools/aidlc-provider-runner.js";
 import { fixtureEnvironment } from "./mars243_fixture_session.js";
@@ -66,13 +66,17 @@ function cli(...args: string[]) {
   return JSON.parse(result.stdout);
 }
 try {
-  for (const extensions of [undefined, {}, { "aidlc.context-source": {} }, { "aidlc.design-resource": {} }, { "aidlc.ui-read-source": {} },
-    { "aidlc.knowledge": null }, { "aidlc.knowledge": [] }, { "aidlc.knowledge": { ...knowledge, schema: "unsupported" } },
+  for (const extensions of [undefined, {}, { "aidlc.knowledge": null }, { "aidlc.knowledge": [] }, { "aidlc.knowledge": { ...knowledge, schema: "unsupported" } },
     { "aidlc.knowledge": { ...knowledge, version: "9.9.9" } }, { "aidlc.knowledge": { ...knowledge, topics: [] } }]) {
     invalid({ ...manifest, extensions });
   }
   for (const schema of ["aidlc.knowledge-package/v1", "aidlc.knowledge-package/v2"]) {
     assert.equal(validateProviderRepositoryManifest({ ...manifest, extensions: { "aidlc.knowledge": { ...knowledge, schema } } }).kind, "knowledge");
+  }
+  // Deprecation window: a knowledge manifest that declares a recognized legacy
+  // external-source protocol instead of aidlc.knowledge stays installable.
+  for (const protocol of ["aidlc.context-source", "aidlc.design-resource", "aidlc.ui-read-source"]) {
+    assert.equal(validateProviderRepositoryManifest({ ...manifest, extensions: { [protocol]: {} } }).kind, "knowledge");
   }
   for (const dir of [source, project]) {
     mkdirSync(dir); git(dir, "init", "-b", "main");
@@ -97,17 +101,18 @@ try {
   const oldState = readProjectProviders(project);
   const legacyManifest = { ...manifest, extensions: sourceContracts };
   const legacyCommit = commit(legacyManifest);
-  assert.throws(() => updateProjectProvider(project, "fixture", "main", { allowFile: true }), /PROVIDER_MANIFEST_INVALID.*aidlc\.knowledge/);
-  assert.equal(readProjectProviders(project).lock.lock_digest, oldState.lock.lock_digest, "failed update preserves lock");
-  // Model an installation made by the old engine: put the immutable old package in
-  // the cache and publish its genuine digests, without weakening production install.
-  const cache = providerGitCachePath(project, sourceUrl);
-  git(cache, "-c", "protocol.file.allow=always", "fetch", sourceUrl, legacyCommit);
-  const oldEntry = oldState.lock.providers[0];
-  const entry = { ...oldEntry, source: { ...oldEntry.source, commit_oid: legacyCommit, tree_oid: git(source, "rev-parse", "HEAD^{tree}") },
-    manifest: { ...oldEntry.manifest, digest: sha256FileDigest(readFileSync(join(source, "provider.yaml"))) } };
-  writeProjectProviders(project, oldState.config, createProjectProvidersLock(oldState.config, [entry]));
-  assert.equal(verifyLockedProviderCache(project, entry).status, "current");
+  // Deprecation window: updating to a legacy external-source manifest (kind knowledge,
+  // no aidlc.knowledge) now installs; the audit trail and provider status carry the
+  // deprecation warning.
+  const legacyUpdate = updateProjectProvider(project, "fixture", "main", { allowFile: true });
+  assert.equal(legacyUpdate.status, "updated");
+  assert.match(legacyUpdate.deprecation || "", /deprecated/);
+  assert.notEqual(readProjectProviders(project).lock.lock_digest, oldState.lock.lock_digest);
+  assert.match(readFileSync(join(project, PROJECT_PROVIDER_AUDIT_PATH), "utf8"), /legacy external-source protocol/);
+  const legacyEntry = readProjectProviders(project).lock.providers[0];
+  assert.equal(legacyEntry.source.commit_oid, legacyCommit);
+  assert.equal(verifyLockedProviderCache(project, legacyEntry).status, "current");
+  assert.match(getProjectProviderStatus(project, "fixture").deprecation || "", /deprecated/);
   const legacy = plan();
   assert.equal(legacy.resolution.resolvable, true);
   assert.equal(legacy.plan.nodes.filter(node => node.required && node.state === "selected").length, 4);
@@ -117,7 +122,7 @@ try {
   assert.deepEqual(readUiReadContract(project, "fixture"), sourceContracts["aidlc.ui-read-source"]);
   assert.throws(() => loadProviderKnowledge(project, { plan: legacy.plan, nodeId: legacy.plan.nodes[0].node_id }), /PROVIDER_KNOWLEDGE_INVALID.*aidlc\.knowledge.*missing/);
   // Cache compatibility must still enforce locked bytes.
-  assert.throws(() => verifyLockedProviderCache(project, { ...entry, manifest: { ...entry.manifest, digest: `sha256:${"0".repeat(64)}` } }), /PROVIDER_LOCK_MISMATCH/);
+  assert.throws(() => verifyLockedProviderCache(project, { ...legacyEntry, manifest: { ...legacyEntry.manifest, digest: `sha256:${"0".repeat(64)}` } }), /PROVIDER_LOCK_MISMATCH/);
 
   cli("orchestrate", "next", "--scope", "express", "--work", "Legacy external sources");
   const next = cli("orchestrate", "next");
