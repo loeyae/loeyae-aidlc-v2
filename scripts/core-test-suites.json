@@ -60,6 +60,10 @@
   ],
   [
     "tsx",
+    "tests/test_mars271_efficiency.ts"
+  ],
+  [
+    "tsx",
     "tests/test_i13_executable_behavior.ts"
   ],
   [
