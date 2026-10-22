@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.22.11 — 2026-10-22
+
+- Require `blocked_kind` classification (`business-unknown` / `technical-prerequisite`) on every blocked UC-D entry, gate unclassified or illegal values in I13 derivation, and carry classification detail in blocked-completion messages (MARS-271).
+- Classify unresolved markers by nature — pending, historical (dated entries, changelog/decision sections, resolved items) and annotation (quote blocks, `备注:`/`注:` lines) — so historical and annotation markers no longer fail contract checks; failures list marker file:line with classification.
+- Add `evidence run --lint` for pre-submission design-input validation: runs the same checkers as the formal gate, produces a lint report only, writes no evidence or engine state, and requires no active instance.
+- Cache structural-invariant scans by manifest digest plus file mtime/size with 500-file progress heartbeats and per-evidence `scan_cache` reuse counts; support `evidence run --test-filter` for RED convergence iterations while GREEN and BASELINE gates mandate full test runs.
+- Synchronize package, plugin, marketplace and stage-graph versions and regenerate all nine harness distributions.
+
 ## 4.22.10 — 2026-10-21
 
 - Validate `aidlc.knowledge` extensions at provider install and update: manifests declaring `kind: knowledge` without a compliant extension are rejected with `PROVIDER_MANIFEST_INVALID` naming the missing extension (MARS-270).

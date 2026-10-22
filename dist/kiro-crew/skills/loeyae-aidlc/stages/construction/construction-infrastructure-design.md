@@ -74,6 +74,8 @@ condition: has_infra_needs
 - 如需要则添加后续问题
 
 ### 步骤 6：生成基础设施设计产物
+- 资源清单按 `infrastructure-completeness` 的 `infrastructure-resources` JSON fence 契约编写。部署前核验项写明 `before-deploy`、Owner、核验条件及 `required_before=deploy`，受控证据保持 `provisioned=false`；已开通项需目标环境与可追溯的资源确认文件。
+- 本阶段 passed 仅证明设计完整，不解除部署前配置、迁移/回滚、认证、实际消费者或 runtime ready 门禁。将部署前核验清单带入 operations-authorization，不以设计证据冒充环境证据。
 - 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design/infrastructure-design.md`
 - 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design/deployment-architecture.md`
 - 如有共享基础设施：创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/shared-infrastructure.md`

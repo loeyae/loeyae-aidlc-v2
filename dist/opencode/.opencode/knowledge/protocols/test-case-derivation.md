@@ -71,6 +71,9 @@ reason: {仅 characterization 必填：为什么给存量行为补回归保护}
 approval_ref: {仅 characterization 必填：批准依据}
 unit_refs: [{unit-id}, ...]              # 可选（4.8.0）：所属单元；同一模块要么全部声明，要么全部不声明
 defect_ref: {bug ticket 或缺陷 REQ 标识}  # 可选（4.13.2/MARS-112）：仅 bugfix scope 的 new UC-D 需要，锚定复现缺陷的追溯身份
+blocked_kind: {business-unknown/technical-prerequisite}  # 仅 status: blocked 必填（MARS-271）
+prerequisites: [{被前置依赖阻塞的具体事项}]  # 仅 blocked_kind: technical-prerequisite 必填
+unblock_path: {技术前置条件的解除路径}      # 仅 blocked_kind: technical-prerequisite 必填
 ---
 
 # UC-D-{编号} {标题}
@@ -103,6 +106,15 @@ defect_ref: {bug ticket 或缺陷 REQ 标识}  # 可选（4.13.2/MARS-112）：�
 - 每个 UC-D 以**自己的用例文件**为准：用例文件 frontmatter（`---` 包围、含 `id: UC-D-xxx` 的块）中的 `status` 决定是否 ready；聚合文件可包含多个这样的块。没有 frontmatter 块的用例文件，按文件名中的 UC-D 编号认定，并读取正文中的 `status:` 行。
 - `_index.md` 只是索引，其中的 `status: ready` 不参与计数；只在 `_index.md` 中出现、没有自己用例文件的 UC-D 视为未 ready。
 - 同一 UC-D 在多个用例文件（或块）中声明会被拒绝。
+
+## blocked 用例分类学（MARS-271）
+
+`status: blocked` 的 UC-D 必须在 frontmatter 声明 `blocked_kind`，引擎在 I13 门禁拦截缺失或取值非法的 blocked 条目：
+
+| 取值 | 含义 | 字段要求 |
+|------|------|----------|
+| `business-unknown` | 业务决策未定（需求方未回答），只能上报人工决策 | 无额外必填字段 |
+| `technical-prerequisite` | 被技术前置条件阻塞 | 必须写非空 `prerequisites`（前置事项列表）与非空 `unblock_path`（解除路径） |
 
 ## TDD 模式（`tdd_mode`）
 

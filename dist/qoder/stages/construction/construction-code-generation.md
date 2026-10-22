@@ -103,7 +103,7 @@ frontmatter 中的 `src/` 是“项目源码根”的规范占位（code-review�
 - **结构不变式(强制,structural-invariants 门禁校验)**：存在 `structural-invariants.json` 时，生成的迁移 DDL、实体类(`@TableName`/`@Table`/`@Entity`)、Prisma model、Mapper SQL 不得影子化已声明的唯一真源、不得重建或写入已收敛/废弃/迁出的对象；`persistence.mode: strict` 下每个新持久化实体都必须在清单中被授权。命中即阻断，违例清单写入 `.aidlc/reports/code-generation/{module-id}/{unit-id}/structural-invariants.blocked.json`；修正实现而非改清单，确需新实体时回到应用设计补声明并重新审批。
 - 不"改进"相邻代码、注释或格式
 - 不重构没坏的东西
-- 测试同样遵循最小充分范围：加载 `common-test-execution-strategy.md`，每轮运行当前 UC-D 与受影响行为测试；扩大到模块/全量必须有影响分析或既定门禁依据
+- 测试同样遵循最小充分范围：加载 `common-test-execution-strategy.md`，每轮运行当前 UC-D 与受影响行为测试；扩大到模块/全量必须有影响分析或既定门禁依据。**GREEN 证据必须是全量测试运行（MARS-271）**：`--test-filter` 只允许用于 tdd 阶段的 RED 收敛迭代，GREEN 证据携带 `test_filter` 会被门禁拒绝。
 - 匹配现有代码风格，即使你会做不同选择
 - 注意到无关死代码时提一下，但不删除
 - 自己的改动产生的孤儿代码（未使用的 import、变量、函数）要清理

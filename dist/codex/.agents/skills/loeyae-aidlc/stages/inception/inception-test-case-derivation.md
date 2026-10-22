@@ -69,7 +69,7 @@ docs/aidlc/modules/{module-id}/inception/clarifications.md
 1. 收集可用的 I7 用户故事 Gherkin 和已批准的 NFR、CR、契约、配置、迁移或一致性风险来源。
 2. 有可执行业务行为时，对每个来源派生至少一个可执行 UC-D；每个用例必须包含 `id`、`source_ref`、`scenario_ref`、`type`、`status`、`service_ids` 和覆盖映射。
 3. 产品 Gherkin 必须原样保留，不得用技术用例引入未经批准的业务语义。
-4. 无法执行的用例标记 `blocked` 并记录待决策项；存在 `blocked` 时不得进入 RED/GREEN。
+4. 无法执行的用例标记 `blocked` 并在 frontmatter 声明 `blocked_kind`（MARS-271）：`business-unknown`（业务决策未定，上报人工）或 `technical-prerequisite`（技术前置条件，须同时写非空 `prerequisites` 与 `unblock_path`）；缺失或取值非法会被 I13 门禁拦截。存在 `blocked` 时不得进入 RED/GREEN。
 5. 在 `docs/aidlc/modules/{module-id}/inception/application-design/test-cases/` 生成 `_index.md`，列出用例、来源、类型、服务、状态和证据位置。
 6. 没有业务行为时只能使用 `non-applicable.json`；不得只在 handoff、计划或聊天文本中声明跳过。
 7. 任何来源未覆盖、执行锚点不真实或必填字段缺失时，不得报告完成。

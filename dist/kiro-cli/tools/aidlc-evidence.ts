@@ -592,7 +592,7 @@ export function semanticCommandArgv(sensor: string, state: { current_module?: st
   return [process.execPath, tsx, checker, "--sensor", sensor, ...scopeArgs];
 }
 
-function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerState): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
+function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerState, behaviour: { blockedReports?: boolean } = {}): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
   const argv = semanticCommandArgv(sensor, state);
   const started = Date.now();
   const result = runSync(argv[0], argv.slice(1), {
@@ -610,7 +610,8 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
     const detail = result.error ? result.error.message : `exit code ${exitCode}`;
     // A checker that fails closed may print a structured blocked report ({status:"blocked", ...}) on
     // stdout. Persist it outside .aidlc/evidence (it is diagnostics, never gate-accepted evidence).
-    const report = blockedReport(stdout);
+    // MARS-271 lint mode writes nothing anywhere, not even diagnostics.
+    const report = behaviour.blockedReports === false ? null : blockedReport(stdout);
     const reportNote = report ? `; blocked report: ${writeBlockedReport(sensor, state, report)}` : "";
     fail(`built-in semantic checker ${sensor} failed: ${detail}; ${tail(stderr) || tail(stdout) || "no output"}${reportNote}`);
   }
@@ -970,6 +971,8 @@ function validatePhaseObservation(value: Record<string, unknown>, phase: Phase):
 
 function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase: Phase): void {
   assertPhaseConfigBinding(options, phase === "BASELINE" ? "BASELINE" : "RED/GREEN");
+  // MARS-271: 受影响方法过滤只服务 RED 收敛迭代;GREEN/BASELINE 最终证据强制全量。
+  if (options.testFilter && phase !== "RED") fail("--test-filter is only supported for RED evidence; GREEN and BASELINE must run the full test suite");
   const sensor = PHASE_SENSORS[phase];
   const i13 = phaseRecord(state);
   const output = options.output || evidenceOutput(options.stage, sensor, undefined, state);
@@ -1053,7 +1056,7 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     const started = Date.now();
     const result = runSync(command.argv[0], command.argv.slice(1), {
       cwd: command.cwd || PROJECT_ROOT,
-      env: semanticCheckerEnv(state, process.env, { AIDLC_PHASE: phase }),
+      env: semanticCheckerEnv(state, process.env, { AIDLC_PHASE: phase, ...(options.testFilter ? { AIDLC_TEST_FILTER: options.testFilter } : {}) }),
       encoding: "utf8",
       shell: false,
       timeout: command.timeout_ms,
@@ -1076,6 +1079,8 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
       ...payload,
       ...scopedIds,
       ...baselineFields,
+      // MARS-271: 收敛迭代允许受影响方法过滤;该字段让门禁与报告可分辨过滤运行与全量运行。
+      ...(options.testFilter ? { test_filter: options.testFilter } : {}),
       observed_command: { id: command.id, phase, argv_digest: commandDigest, cwd: safeCwdLabel(command.cwd || PROJECT_ROOT), exit_code: exitCode, expected_exit_code: expectedExit, duration_ms: duration },
     };
     execution = { id: `builtin:${sensor}`, sensor, argv_digest: phaseObservationDigest(phase, commandDigest), exit_code: 0, status: "passed", duration_ms: duration };
@@ -1127,9 +1132,13 @@ interface ProducerOptions {
   output?: string;
   commandIds: string[];
   allSensors: boolean;
+  /** MARS-271: lightweight validation only — no evidence written, no engine state touched. */
+  lint: boolean;
+  /** MARS-271: AIDLC_TEST_FILTER selector for a RED phase command (convergence iterations). */
+  testFilter?: string;
 }
 
-const USAGE = "usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance> | --module <module-id> [--unit <unit-id>]] [--refresh] [--sensor <sensor>] [--all-sensors] [--config <path>] [--output <path>] [--command-id <id> ...]";
+const USAGE = "usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance> | --module <module-id> [--unit <unit-id>]] [--refresh] [--sensor <sensor>] [--all-sensors] [--config <path>] [--output <path>] [--command-id <id> ...] [--lint] [--test-filter <expr>]";
 
 function parseArgs(args: string[]): ProducerOptions {
   if (args[0] !== "run") fail(USAGE);
@@ -1143,9 +1152,11 @@ function parseArgs(args: string[]): ProducerOptions {
   let output: string | undefined;
   const commandIds: string[] = [];
   let allSensors = false;
+  let lint = false;
+  let testFilter: string | undefined;
   for (let i = 1; i < args.length; i++) {
     const arg = args[i];
-    if (["--stage", "--instance", "--module", "--unit", "--sensor", "--config", "--output", "--command-id"].includes(arg)) {
+    if (["--stage", "--instance", "--module", "--unit", "--sensor", "--config", "--output", "--command-id", "--test-filter"].includes(arg)) {
       const value = args[++i];
       if (!value) fail(`${arg} requires a value`);
       if (arg === "--stage") stage = value;
@@ -1156,8 +1167,11 @@ function parseArgs(args: string[]): ProducerOptions {
       if (arg === "--config") config = value;
       if (arg === "--output") output = value;
       if (arg === "--command-id") commandIds.push(value);
+      if (arg === "--test-filter") testFilter = value;
     } else if (arg === "--all-sensors") {
       allSensors = true;
+    } else if (arg === "--lint") {
+      lint = true;
     } else if (arg === "--refresh") {
       refresh = true;
     } else if (arg === "--help" || arg === "-h") {
@@ -1174,6 +1188,11 @@ function parseArgs(args: string[]): ProducerOptions {
   if (allSensors && sensor) fail("--all-sensors cannot be combined with --sensor; it uses the sensors declared by the active stage");
   if (allSensors && output && stage !== "build-and-test") fail("--output cannot be used with --all-sensors because each sensor has its own canonical evidence path");
   if (allSensors && commandIds.length > 0) fail("--command-id cannot be used with --all-sensors");
+  if (lint && refresh) fail("--lint cannot be combined with --refresh; lint writes no evidence and never regenerates any");
+  if (lint && output) fail("--lint writes no evidence and takes no --output");
+  if (lint && commandIds.length > 0) fail("--lint cannot be combined with --command-id");
+  if (lint && testFilter !== undefined) fail("--lint runs no commands and takes no --test-filter");
+  if (testFilter !== undefined && !testFilter.trim()) fail("--test-filter requires a non-empty selector expression");
   return {
     stage,
     ...(instance ? { instance } : {}),
@@ -1186,6 +1205,8 @@ function parseArgs(args: string[]): ProducerOptions {
     output,
     commandIds,
     allSensors,
+    lint,
+    ...(testFilter !== undefined ? { testFilter } : {}),
   };
 }
 
@@ -1295,8 +1316,57 @@ function produceAllSemantic(options: ProducerOptions, state: ProducerState, conf
   console.log(JSON.stringify({ status: "passed", stage: options.stage, sensors, outputs }, null, 2));
 }
 
+/**
+ * MARS-271 门禁前置 lint:在设计输入提交前轻量校验该阶段的语义传感器——契约完整性、
+ * 字段对齐、签名与现状接口一致性等。不产生正式证据、不写引擎状态、不要求活动工作流
+ * 实例;每个传感器单独运行并捕获失败,报告带结论与错误明细。与正式门禁使用完全相同
+ * 的 checker,仅省略证据发布与状态推进。
+ */
+function lintState(options: ProducerOptions): ProducerState {
+  try {
+    const state = loadProducerState(options);
+    if (state) return state;
+  } catch { /* lint 不要求活动实例;checker 自行读取真实工作流状态 */ }
+  return {
+    workflow_id: "lint",
+    status: "running",
+    current_stage: options.stage,
+    current_stage_instance: null,
+    current_module: options.module,
+    current_unit: options.unit,
+  } as unknown as ProducerState;
+}
+
+function runLintProducer(options: ProducerOptions): void {
+  const sensors = options.sensor ? [options.sensor] : declaredSemanticSensors(options.stage);
+  if (sensors.length === 0) fail(`stage ${options.stage} declares no semantic sensors to lint`);
+  const state = lintState(options);
+  const results = sensors.map((sensor) => {
+    const started = Date.now();
+    try {
+      const { payload } = runSemanticCommand(sensor, DEFAULT_TIMEOUT_MS, state, { blockedReports: false });
+      return { sensor, status: "passed" as const, duration_ms: Date.now() - started, checker_status: String(payload.status) };
+    } catch (error) {
+      return { sensor, status: "failed" as const, duration_ms: Date.now() - started, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+  const failed = results.filter((result) => result.status === "failed");
+  console.log(JSON.stringify({
+    mode: "lint",
+    stage: options.stage,
+    status: failed.length > 0 ? "failed" : "passed",
+    note: "lint report only; no evidence written and no engine state changed",
+    results,
+  }, null, 2));
+  if (failed.length > 0) process.exitCode = 1;
+}
+
 function runProducer(args: string[]): void {
   const options = parseArgs(args);
+  if (options.lint) {
+    runLintProducer(options);
+    return;
+  }
   const state = loadProducerState(options);
   const statusAllowed = state && (state.status === "running" || options.refresh);
   if (!state || !statusAllowed) fail("evidence production requires an active lightweight workflow");

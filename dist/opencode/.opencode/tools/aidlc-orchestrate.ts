@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { evidenceTimeError, reviewIssueErrors } from "./aidlc-evidence-policy";
+import { infrastructureResourceErrors } from "./aidlc-infrastructure.js";
 import { frontendPlatformPayload } from "./aidlc-frontend-platform";
 import { substantiveArtifact } from "./aidlc-artifact-presence";
 import { alternativeCheckBindingErrors, exemptionCheckBindingErrors, evidenceFreshnessBindingErrors, semanticCommandArgv } from "./aidlc-evidence";
@@ -2099,6 +2100,9 @@ function phaseEvidenceErrors(
   if (failed === null) errors.push("tests_failed must be a non-negative integer");
   if (evidence.traceability_complete !== true) errors.push("traceability_complete must be true");
   if (!Array.isArray(evidence.uc_mapping) || evidence.uc_mapping.length === 0) errors.push("uc_mapping must be non-empty");
+  // MARS-271: 收敛期受影响方法过滤(test_filter)只允许出现在 RED 证据;GREEN/BASELINE 最终证据强制全量。
+  const testFilter = String(evidence.test_filter ?? "").trim();
+  if (testFilter && phase !== "RED") errors.push(`${phase} evidence must be a full run; test_filter is only allowed for RED convergence iterations`);
   // The controlled producer records the observed test command separately from its
   // built-in checker; RED must have exited 1, GREEN and BASELINE 0.
   const observed = asRecord(evidence.observed_command);
@@ -2694,22 +2698,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           }
           if (asNumber(evidence.unresolved) !== 0) errors.push("unresolved must be 0");
 
-          // Each resource must be named and provisioned
-          const resources = evidence.resources_enumerated;
-          if (!Array.isArray(resources) || resources.length === 0) {
-            errors.push("resources_enumerated must list at least one infrastructure resource");
-          } else {
-            for (let i = 0; i < resources.length; i++) {
-              const res = asRecord(resources[i]);
-              if (!res) {
-                errors.push(`resources_enumerated[${i}] must be an object`);
-                continue;
-              }
-              if (!asNonEmptyString(res.name)) errors.push(`resources_enumerated[${i}].name is required`);
-              if (!asNonEmptyString(res.type)) errors.push(`resources_enumerated[${i}].type is required`);
-              if (res.provisioned !== true) errors.push(`resources_enumerated[${i}].provisioned must be true`);
-            }
-          }
+          errors.push(...infrastructureResourceErrors(evidence, stage.slug, PROJECT_ROOT));
 
           // Rollback strategy must be defined
           if (!asNonEmptyString(evidence.rollback_strategy)) errors.push("rollback_strategy is required");
