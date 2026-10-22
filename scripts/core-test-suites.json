@@ -64,6 +64,10 @@
   ],
   [
     "tsx",
+    "tests/test_mars271_p1.ts"
+  ],
+  [
+    "tsx",
     "tests/test_i13_executable_behavior.ts"
   ],
   [

@@ -83,6 +83,7 @@ import {
   unitUcdIds,
   type UnitUcdScope,
   moduleInceptionRoot,
+  moduleManifestPath,
   normalizeArtifactLabel,
   readModuleManifest,
   readUnitManifest,
@@ -318,7 +319,7 @@ const PRD_ELIGIBLE_SCOPES = new Set(FULL_WORKFLOW_SCOPES);
 // Subcommands
 // ---------------------------------------------------------------------------
 
-const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format", "baseline", "state", "profile", "registry"] as const;
+const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format", "baseline", "state", "profile", "checkpoint", "audit", "registry"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
@@ -333,6 +334,10 @@ const UPGRADE_FLAGS = new Set(["dry-run", "module", "retire-execution", "instanc
 const DIAGRAM_FORMAT_FLAGS = new Set(["set", "user-input"]);
 // `module` scopes --adopt / --advance / the read-only view to a module sub-workflow (4.10.0); --set / --replace reject it.
 const BASELINE_FLAGS = new Set(["set", "advance", "adopt", "user-input", "reason", "dry-run", "replace", "expect", "module", "approval-ref"]);
+// MARS-271: checkpoint(收敛期非正式上报)与 audit(notify 事后抽审)不写引擎状态,
+// 不要求 session binding;audit --instance 回写抽审台账,checkpoint 只落 checkpoint 文件。
+const CHECKPOINT_FLAGS = new Set(["note", "instance", "list"]);
+const AUDIT_FLAGS = new Set(["list", "module", "instance", "finding", "follow-up"]);
 const MODULE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62})$/;
 /** Appended to every error where the state write succeeded but its audit entry did not. */
 const AUDIT_MISSING = "状态已写入、审计缺失，请人工补记";
@@ -523,12 +528,45 @@ function runtimeStage(instance: StageInstance, state: WorkflowState): StageNode 
     }
   }
 
+  // MARS-271 审批策略分级:模块可在 module-manifest 的 approval_overrides 中按阶段
+  // 覆盖审批层级(block/confirm/notify)。契约/架构决策默认 block 的阶段禁止降级,
+  // 只允许维持或加强;notify/confirm 阶段完成后进入事后抽审台账。
+  let approval = stage.approval;
+  if (instance.module_id) {
+    const override = moduleApprovalOverrides(instance.module_id)[stage.slug];
+    if (override && override !== approval) {
+      if (stage.approval === "block" && override !== "block") {
+        throw new Error(`approval_overrides of module ${instance.module_id} cannot downgrade stage ${stage.slug}: 契约/架构决策阶段保持 block`);
+      }
+      approval = override;
+    }
+  }
+
   return {
     ...stage,
+    approval,
     consumes: [...new Set(consumes)],
     produces: [...new Set(produces)],
     sensors: [...new Set(sensors)],
   };
+}
+
+/** MARS-271: approval tier overrides declared by a module's manifest (cached per run). */
+const moduleApprovalOverrideCache = new Map<string, Record<string, "block" | "confirm" | "notify">>();
+function moduleApprovalOverrides(moduleId: string): Record<string, "block" | "confirm" | "notify"> {
+  const cached = moduleApprovalOverrideCache.get(moduleId);
+  if (cached) return cached;
+  let overrides: Record<string, "block" | "confirm" | "notify"> = {};
+  if (existsSync(moduleManifestPath(PROJECT_ROOT))) {
+    try {
+      const module = readModuleManifest(PROJECT_ROOT).find((item) => item.module_id === moduleId);
+      overrides = module?.approval_overrides || {};
+    } catch {
+      // 解析失败的 manifest 由读取它的正式门禁报告;运行时按默认层级继续。
+    }
+  }
+  moduleApprovalOverrideCache.set(moduleId, overrides);
+  return overrides;
 }
 
 export function runtimeInstance(instance: StageInstance, state: WorkflowState): StageInstance {
@@ -1845,9 +1883,15 @@ function moduleI13Evidence(instance: Pick<StageInstance, "module_id">): I13Conte
   }
 }
 
+/** MARS-271: ids of the I13 `mapping_deferred` entries (P1/display UC-Ds whose test mapping is deferred). */
+function i13MappingDeferredIds(i13: Evidence): string[] {
+  return (Array.isArray(i13.mapping_deferred) ? i13.mapping_deferred : [])
+    .map((entry) => asNonEmptyString(asRecord(entry)?.id))
+    .filter((id): id is string => id !== undefined);
+}
+
 /** `uc_mapping` must name exactly `expected` (by use_case), no more and no less. */
-function ucMappingCoverageErrors(evidence: Evidence, requirement: string, expected: string[]): string[] {
-  const named = (Array.isArray(evidence.uc_mapping) ? evidence.uc_mapping : []).map((entry) => asNonEmptyString(asRecord(entry)?.use_case) || "");
+function ucMappingCoverageErrors(evidence: Evidence, requirement: string, expected: string[]): string[] {  const named = (Array.isArray(evidence.uc_mapping) ? evidence.uc_mapping : []).map((entry) => asNonEmptyString(asRecord(entry)?.use_case) || "");
   const missing = expected.filter((id) => !named.includes(id));
   const unexpected = [...new Set(named.filter((id) => !expected.includes(id)))].map((id) => id || "(entry without use_case)");
   const duplicated = [...new Set(named.filter((id, index) => id && named.indexOf(id) !== index))];
@@ -2031,10 +2075,13 @@ function phaseEvidenceErrors(
   // every UC-D is new.
   const i13 = moduleI13Evidence(instance);
   const i13Value = i13 && "value" in i13 ? i13.value : null;
+  // MARS-271 分级映射准入:mapping_deferred UC-D 暂无测试映射,不进入 RED/BASELINE/GREEN
+  // 覆盖 universe;GREEN 证据必须以 mapping_debt 恰好申报同一批暂缓用例,映射债不得静默消失。
+  const deferredIds = i13Value ? i13MappingDeferredIds(i13Value) : [];
   // 4.8.0: with I13 ucd_units a unit instance is checked against its own UC-D subset;
   // without them (or without a unit) `scope` is the module set and unscoped.
   const scope = i13Value?.status === "required" ? unitUcdIds(i13Value, instance.unit_id) : null;
-  const modes = scope ? { new: scope.new, characterization: scope.characterization } : null;
+  const modes = scope ? { new: scope.new.filter((id) => !deferredIds.includes(id)), characterization: scope.characterization.filter((id) => !deferredIds.includes(id)) } : null;
   const scoped = scope?.scoped === true;
   const unitLabel = `unit ${instance.unit_id}`;
   const emptySubset = scoped && scope!.all.length === 0;
@@ -2144,9 +2191,19 @@ function phaseEvidenceErrors(
   // GREEN observes every UC-D of I13 after the change: new ones turned green and
   // characterization ones still green (4.6.0 S3b); with ucd_units, every UC-D of the unit (4.8.0).
   if (phase === "GREEN" && modes) {
+    const universe = scoped ? scope!.all : asStringArray(i13Value!.ucd_ids) || [];
     errors.push(...(scoped
-      ? ucMappingCoverageErrors(evidence, `GREEN uc_mapping must cover every UC-D of ${unitLabel}`, scope!.all)
-      : ucMappingCoverageErrors(evidence, "GREEN uc_mapping must cover every I13 UC-D", asStringArray(i13Value!.ucd_ids) || [])));
+      ? ucMappingCoverageErrors(evidence, `GREEN uc_mapping must cover every UC-D of ${unitLabel}`, universe.filter((id) => !deferredIds.includes(id)))
+      : ucMappingCoverageErrors(evidence, "GREEN uc_mapping must cover every I13 UC-D", universe.filter((id) => !deferredIds.includes(id)))));
+    const universeDeferred = universe.filter((id) => deferredIds.includes(id));
+    const debtIds = (Array.isArray(evidence.mapping_debt) ? evidence.mapping_debt : [])
+      .map((entry) => asNonEmptyString(asRecord(entry)?.id))
+      .filter((id): id is string => id !== undefined);
+    const missingDebt = universeDeferred.filter((id) => !debtIds.includes(id));
+    const extraDebt = debtIds.filter((id) => !universeDeferred.includes(id));
+    if (missingDebt.length > 0 || extraDebt.length > 0) {
+      errors.push(`GREEN mapping_debt must report exactly the mapping-deferred UC-Ds (${universeDeferred.join(", ") || "none"}): ${[missingDebt.length ? `missing ${missingDebt.join(", ")}` : "", extraDebt.length ? `unexpected ${extraDebt.join(", ")}` : ""].filter(Boolean).join("; ")}`);
+    }
   }
   if (phase === "BASELINE") {
     if (!modes) {
@@ -5462,6 +5519,7 @@ async function handleReport(args: string[]): Promise<Directive> {
     case "completed":
     case "approved":
       state.completed_stage_instances.push(currentInstance.instance_id);
+      recordApprovalAuditEntry(currentInstance, state);
       reconcileStageSummaries(state, instances);
       if (state.active_instances?.[currentInstance.instance_id]) delete state.active_instances[currentInstance.instance_id];
       if (state.current_stage_instance === currentInstance.instance_id) clearActiveContext(state);
@@ -7779,6 +7837,143 @@ async function handleContinue(token: string): Promise<Directive> {
 }
 
 // ---------------------------------------------------------------------------
+// audit — MARS-271 事后抽审台账 (notify 阶段产物抽审发现回写)
+// ---------------------------------------------------------------------------
+
+function approvalAuditPath(moduleId: string): string {
+  return join(PROJECT_ROOT, ".aidlc", "reports", "approval-audit", `${moduleId}.json`);
+}
+
+function readApprovalAudit(moduleId: string): Record<string, unknown>[] {
+  try {
+    const value = JSON.parse(readFileSync(approvalAuditPath(moduleId), "utf8")) as unknown;
+    return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === "object") : [];
+  } catch {
+    return [];
+  }
+}
+
+function approvalAuditModuleIds(): string[] {
+  const dir = join(PROJECT_ROOT, ".aidlc", "reports", "approval-audit");
+  if (!existsSync(dir)) return [];
+  try {
+    return readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => name.replace(/\.json$/, "")).sort();
+  } catch {
+    return [];
+  }
+}
+
+/** MARS-271: notify 层级阶段完成后登记进事后抽审台账,不阻断推进。 */
+function recordApprovalAuditEntry(instance: StageInstance, state: WorkflowState): void {
+  let stage: StageNode;
+  try {
+    stage = runtimeStage(instance, state);
+  } catch {
+    return;
+  }
+  if (stage.approval !== "notify") return;
+  const moduleId = instance.module_id || DEFAULT_MODULE.module_id;
+  const entries = readApprovalAudit(moduleId);
+  entries.push({
+    stage_instance: instance.instance_id,
+    stage: stage.slug,
+    module_id: moduleId,
+    approval: "notify",
+    recorded_at: new Date().toISOString(),
+    sampled: false,
+  });
+  mkdirSync(join(PROJECT_ROOT, ".aidlc", "reports", "approval-audit"), { recursive: true });
+  writeFileSync(approvalAuditPath(moduleId), `${JSON.stringify(entries, null, 2)}\n`, "utf8");
+}
+
+async function handleAudit(rest: string[]): Promise<Directive> {
+  const flags = parseFlags(rest);
+  const unsupported = unsupportedFlag(flags, AUDIT_FLAGS);
+  if (unsupported) {
+    return { kind: "error", message: `Unknown flag --${unsupported}. Usage: audit --list [--module <id>] | audit --instance <id> --finding <text> --follow-up <CL 或修订说明>` };
+  }
+  const moduleIds = flags.module ? [flags.module] : approvalAuditModuleIds();
+  if (flags.list) {
+    const entries = moduleIds.flatMap((moduleId) => readApprovalAudit(moduleId));
+    return { kind: "print", message: JSON.stringify({ kind: "approval-audit", modules: moduleIds, entries }, null, 2) };
+  }
+  if (!flags.instance || !flags.finding || !flags["follow-up"]) {
+    return { kind: "error", message: "audit write-back requires --instance <stage-instance> --finding <text> --follow-up <CL 编号或修订说明>" };
+  }
+  let updated = false;
+  for (const moduleId of moduleIds.length > 0 ? moduleIds : [DEFAULT_MODULE.module_id]) {
+    const entries = readApprovalAudit(moduleId);
+    const entry = entries.find((item) => item.stage_instance === flags.instance);
+    if (!entry) continue;
+    entry.sampled = true;
+    entry.sampled_at = new Date().toISOString();
+    entry.finding = flags.finding;
+    entry.follow_up = flags["follow-up"];
+    mkdirSync(join(PROJECT_ROOT, ".aidlc", "reports", "approval-audit"), { recursive: true });
+    writeFileSync(approvalAuditPath(moduleId), `${JSON.stringify(entries, null, 2)}\n`, "utf8");
+    updated = true;
+    return { kind: "print", message: `已回写抽审发现到 ${flags.instance}: ${flags.finding} → ${flags["follow-up"]}` };
+  }
+  return { kind: "error", message: `approval audit has no entry for stage instance ${flags.instance}` };
+}
+
+// ---------------------------------------------------------------------------
+// checkpoint — MARS-271 收敛期非正式上报通道
+// ---------------------------------------------------------------------------
+
+function checkpointDir(): string {
+  return join(PROJECT_ROOT, ".aidlc", "checkpoints");
+}
+
+function readCheckpoints(instanceId: string): Record<string, unknown>[] {
+  const dir = join(checkpointDir(), instanceId.replace(/[^a-z0-9@_-]/gi, "_"));
+  if (!existsSync(dir)) return [];
+  try {
+    return readdirSync(dir).filter((name) => name.endsWith(".json")).sort().map((name) => JSON.parse(readFileSync(join(dir, name), "utf8")) as Record<string, unknown>);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * MARS-271 收敛期非正式上报:以 checkpoint 形式记录非正式轮次进度,不动引擎状态、
+ * 不推进 revision;正式 report 仍由门禁决定。任意非正式轮可从 checkpoint 恢复上下文。
+ */
+async function handleCheckpoint(rest: string[]): Promise<Directive> {
+  const flags = parseFlags(rest);
+  const unsupported = unsupportedFlag(flags, CHECKPOINT_FLAGS);
+  if (unsupported) {
+    return { kind: "error", message: `Unknown flag --${unsupported}. Usage: checkpoint [--note <text>] [--instance <id>] | checkpoint --list [--instance <id>]` };
+  }
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  const parts = [...loaded.parts.values()];
+  const binding = sessionBinding();
+  const owner = binding ? parts.find((part) => part.state.workflow_id === binding.workflow_id) : undefined;
+  const state = owner?.state || parts.find((part) => part.state.current_stage_instance)?.state || parts[0]?.state;
+  if (!state || !state.current_stage_instance) {
+    return { kind: "error", message: "checkpoint requires an active stage instance; 正式 report 前先进入一个工作流实例" };
+  }
+  const instanceId = flags.instance || state.current_stage_instance;
+  if (flags.list) {
+    const checkpoints = readCheckpoints(instanceId);
+    return { kind: "print", message: JSON.stringify({ kind: "checkpoints", stage_instance: instanceId, checkpoints }, null, 2) };
+  }
+  const dir = join(checkpointDir(), instanceId.replace(/[^a-z0-9@_-]/gi, "_"));
+  mkdirSync(dir, { recursive: true });
+  const record = {
+    stage_instance: instanceId,
+    module_id: state.current_module || null,
+    unit_id: state.current_unit || null,
+    ...(flags.note ? { note: flags.note } : {}),
+    revision: state.revision,
+    workflow_id: state.workflow_id,
+    recorded_at: new Date().toISOString(),
+  };
+  writeFileSync(join(dir, `${Date.now()}.json`), `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  return { kind: "print", message: `已记录非正式 checkpoint:${instanceId}(revision ${state.revision} 未推进);门禁通过后用 report 提交正式证据。` };
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -7802,7 +7997,7 @@ async function main() {
     console.error(
       JSON.stringify({
         kind: "error",
-        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|archive|split|upgrade|diagram-format|baseline|state|profile> [args...]",
+        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|archive|split|upgrade|diagram-format|baseline|state|profile|checkpoint|audit> [args...]",
       })
     );
     process.exit(1);
@@ -7822,7 +8017,9 @@ async function main() {
     process.exit(runRegistryMergeDriver(baseFile, oursFile, theirsFile));
   }
 
-  const readOnly = (cmd === "next" && (rest.includes("--status") || rest.includes("--preview")))
+  // MARS-271: checkpoint 与 audit 只写报告/台账文件,不写工作流状态,豁免 session binding。
+  const readOnly = ["checkpoint", "audit"].includes(cmd)
+    || (cmd === "next" && (rest.includes("--status") || rest.includes("--preview")))
     || (cmd === "upgrade" && (!rest.includes("--retire-execution") || rest.includes("--dry-run")))
     || (cmd === "state" && (!rest.length || ["plan", "rules", "evidence", "measurements", "verify"].includes(rest[0])))
     || (["baseline", "diagram-format", "profile"].includes(cmd) && !rest.some(arg => arg.startsWith("--") && !["--module", "--status"].includes(arg)));
@@ -7873,6 +8070,12 @@ async function main() {
       break;
     case "profile":
       directive = handleProfile(rest);
+      break;
+    case "checkpoint":
+      directive = await handleCheckpoint(rest);
+      break;
+    case "audit":
+      directive = await handleAudit(rest);
       break;
     case "continue":
       directive = await handleContinue(rest[0] || "");

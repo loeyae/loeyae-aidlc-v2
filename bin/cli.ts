@@ -1325,6 +1325,10 @@ Workflow:
   orchestrate report --stage <slug> --result completed [--gate-decision <id>]  Report a completed stage (--module in split layout)
   orchestrate profile escalate --signal <ProfileSignal> [--detail <text>]  Escalate the global execution profile from a recorded risk
   orchestrate park [--module <module-id>]               Park the active workflow or one module workflow
+  orchestrate checkpoint [--note <text>] [--instance <id>]  Record an informal convergence checkpoint (no state/revision change)
+  orchestrate checkpoint --list [--instance <id>]       List recorded informal checkpoints
+  orchestrate audit --list [--module <id>]             List the post-hoc approval audit ledger of notify-tier stages
+  orchestrate audit --instance <id> --finding <text> --follow-up <CL|revise>  Write a sampling finding back into the audit ledger
   orchestrate archive [--reason <text>]                 Archive a parked/done workflow and its evidence to aidlc/archive/
   orchestrate split --from <workflow-id> [--dry-run]    Split into per-module workflows (aidlc/active/registry.md)
   orchestrate split --from <workflow-id> --replace-lineage <id>[,<id>]  Split although git tracks another active workflow lineage (retires it)
