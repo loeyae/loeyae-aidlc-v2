@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.22.13 — 2026-10-22
+
+- Provider install compatibility window: `kind: knowledge` manifests without `extensions["aidlc.knowledge"]` install successfully when they declare a recognized external-source protocol (`aidlc.context-source` / `aidlc.design-resource` / `aidlc.ui-read-source`), with a deprecation warning recorded in install/update audit and `provider status`; manifests with no recognized protocol are still rejected unchanged (MARS-272).
+- `provider disable` semantics: disabled instances no longer produce `PROVIDER_CAPABILITY_MISSING` blocked nodes; `deriveScopeCapabilities` counts enabled bindings only; `provider status` lists `disabled_bound_capabilities` so capabilities kept by disabled instances stay visible; `provider enable` restores the original resolution (MARS-272).
+- Synchronize package, plugin, marketplace and stage-graph versions and regenerate all harness distributions.
+
 ## 4.22.12 — 2026-10-22
 
 - Selective evidence invalidation: semantic sensor evidence records an inputs fingerprint (stage consumes artifacts, mtime/size digest); `--refresh` reuses unchanged controlled evidence (`action: reused`) and regenerates only dependents of changed artifacts, reporting `inputs_changed` as the invalidation scope (MARS-271).

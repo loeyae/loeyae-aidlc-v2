@@ -17,6 +17,8 @@ import {
 } from "./aidlc-project-provider";
 import {
   fetchProviderGitBundle,
+  isLegacyKnowledgeExternalSource,
+  LEGACY_KNOWLEDGE_DEPRECATION,
   verifyLockedProviderCache,
   type ProviderGitBundle,
 } from "./aidlc-provider-git";
@@ -51,6 +53,7 @@ export interface ProviderLifecycleResult {
   readonly history?: string;
   readonly invalidation?: { readonly path: string; readonly affected_artifacts: readonly string[] };
   readonly install_safety?: ProviderGitBundle["install_safety"];
+  readonly deprecation?: string;
 }
 
 export interface ProviderStatusResult {
@@ -67,6 +70,10 @@ export interface ProviderStatusResult {
   readonly lock_digest: Sha256Digest;
   readonly cache?: string;
   readonly diagnostic?: string;
+  /** Set when the installed manifest is a legacy knowledge external source. */
+  readonly deprecation?: string;
+  /** For a disabled instance: the capabilities its bindings still declare. */
+  readonly disabled_bound_capabilities?: readonly string[];
 }
 
 function instanceId(value: string): string {
@@ -155,6 +162,7 @@ function auditLifecycle(projectRoot: string, event: string, result: ProviderLife
     "Invalidation": result.invalidation?.path || "none",
     "Invalidated Artifacts": result.invalidation?.affected_artifacts.length ?? 0,
     Status: result.status,
+    Deprecation: result.deprecation || "-",
   });
 }
 
@@ -245,6 +253,7 @@ export function addProjectProvider(
     trust: entry.trust,
     invalidation,
     install_safety: bundle.install_safety,
+    ...(isLegacyKnowledgeExternalSource(bundle.manifest) ? { deprecation: LEGACY_KNOWLEDGE_DEPRECATION } : {}),
   };
   auditLifecycle(projectRoot, "PROVIDER_ADDED", result);
   return result;
@@ -286,6 +295,7 @@ export function updateProjectProvider(
       previous_lock_digest: state.lock.lock_digest,
       trust: currentLock.trust,
       install_safety: bundle.install_safety,
+      ...(isLegacyKnowledgeExternalSource(bundle.manifest) ? { deprecation: LEGACY_KNOWLEDGE_DEPRECATION } : {}),
     };
     auditLifecycle(projectRoot, "PROVIDER_UPDATE_UNCHANGED", result);
     return result;
@@ -305,6 +315,7 @@ export function updateProjectProvider(
     history,
     invalidation,
     install_safety: bundle.install_safety,
+    ...(isLegacyKnowledgeExternalSource(bundle.manifest) ? { deprecation: LEGACY_KNOWLEDGE_DEPRECATION } : {}),
   };
   auditLifecycle(projectRoot, "PROVIDER_UPDATED", result);
   return result;
@@ -381,6 +392,11 @@ export function removeProjectProvider(projectRoot: string, instanceValue: string
 
 function statusFromState(state: ProjectProviderState, projectRoot: string, intent: ProjectProviderIntent): ProviderStatusResult {
   const entry = state.lock.providers.find((candidate) => candidate.instance_id === intent.instance_id)!;
+  // A disabled instance keeps its bindings so re-enable restores resolution; surface
+  // the capabilities they still declare so a capability never disappears silently.
+  const disabledBoundCapabilities = intent.enabled ? undefined
+    : [...new Set(intent.bindings.flatMap((binding) => binding.capabilities))].sort();
+  const disabledFields = disabledBoundCapabilities ? { disabled_bound_capabilities: disabledBoundCapabilities } : {};
   try {
     const cache = verifyLockedProviderCache(projectRoot, entry);
     return {
@@ -396,6 +412,8 @@ function statusFromState(state: ProjectProviderState, projectRoot: string, inten
       config_digest: entry.project_config_digest,
       lock_digest: state.lock.lock_digest,
       cache: cache.cache_path,
+      ...(isLegacyKnowledgeExternalSource(cache.manifest) ? { deprecation: LEGACY_KNOWLEDGE_DEPRECATION } : {}),
+      ...disabledFields,
     };
   } catch (error) {
     const diagnostic = error instanceof Error ? error.message : String(error);
@@ -412,6 +430,7 @@ function statusFromState(state: ProjectProviderState, projectRoot: string, inten
       config_digest: entry.project_config_digest,
       lock_digest: state.lock.lock_digest,
       diagnostic,
+      ...disabledFields,
     };
   }
 }
@@ -528,6 +547,8 @@ export function providerCliUsage(): string {
     "  knowledge-verify --plan <plan-id|path> --node <node-id> [--project <path>]",
     "  run --plan <plan-id|path> --node <node-id> [--input <id>=<project-relative-path>]... [--timeout <ms>] [--project <path>]",
     "  gate --plan <plan-id|path> [--evidence <evidence-id|path>]... [--waiver <json-file>]... [--fallback <json-file>]... [--project <path>]",
+    "",
+    "disable semantics: a disabled instance does not participate in provider plan resolution (its bindings leave the default capability expression); the bindings are kept — provider status lists them — and enable restores resolution without reinstalling.",
     "",
     "Project MCP connections:",
     "MCP connections require a separate, explicit project approval; Core installation adds none.",

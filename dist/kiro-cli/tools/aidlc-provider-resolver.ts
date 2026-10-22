@@ -877,10 +877,9 @@ function buildCapabilityNodes(input: ResolveProviderPlanInput, capability: strin
       continue;
     }
     if (!candidate.intent.enabled) {
-      // A disabled instance that binds this capability is a blocked node, not a drop.
-      if (candidate.intent.bindings.some((binding) => binding.capabilities.includes(capability))) {
-        hardBlocked.push(blockedInstanceNode(input.scope, capability, candidate.intent.instance_id, "PROVIDER_CAPABILITY_MISSING", `instance ${candidate.intent.instance_id} binds capability ${capability} but is disabled`));
-      }
+      // A disabled instance does not participate in resolution: no node, no blocked
+      // diagnostic. Its bindings stay in project config (provider status lists them)
+      // and re-enable restores resolution without reinstalling.
       continue;
     }
     const match = matchProviderCapability(candidate, capability, input.scope);
@@ -1731,15 +1730,17 @@ export function resolveProjectProviderPlan(
 }
 
 /**
- * The union of capabilities every candidate binds in this scope — INCLUDING disabled,
- * under-declared and incompatible candidates. The default capability expression is
- * derived from this set so a required capability whose only provider is disabled/
- * incompatible still appears in the plan and forces a blocked node (never a vacuous
- * empty all_of that passes).
+ * The union of capabilities every ENABLED candidate binds in this scope. Disabled
+ * instances do not participate in resolution — their bindings stay in project config
+ * (provider status lists them) so a capability whose only provider is disabled simply
+ * leaves the default expression instead of blocking the plan. Under-declared and
+ * incompatible candidates still count so a required capability fails closed instead
+ * of passing vacuously.
  */
 export function deriveScopeCapabilities(candidates: readonly ProviderCandidateInstance[], scope: ProviderScope): string[] {
   const result = new Set<string>();
   for (const candidate of candidates) {
+    if (!candidate.intent.enabled) continue;
     for (const capability of scopeBoundCapabilities(candidate.intent, scope)) result.add(capability);
   }
   return [...result].sort();
