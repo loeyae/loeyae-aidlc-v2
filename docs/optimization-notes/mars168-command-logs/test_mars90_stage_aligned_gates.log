@@ -1,8 +1,0 @@
-PASS CL layer is advisory until user-stories, enforced from user-stories on
-PASS undelivered cross-module contract is advisory before application-design, enforced from it on
-PASS MARS-91: multi-module owner delivery only counts the owner's own application-design instance
-PASS story gate requires every CL covered by some story, not every story to cite a CL
-PASS cross-validation requires the UI generation stages (resolved when skipped)
-
-All 5 MARS-90 sections passed.
-

@@ -885,7 +885,7 @@ policies:
     mkdirSync(join(project, ".aidlc"), { recursive: true });
     write(join(project, ".aidlc", "provider-git-policy.json"), JSON.stringify({ version: 1, allow_file_fixtures: true }) + "\n");
 
-    const { addProjectProvider, setProjectProviderEnabled } = await import("../core/tools/aidlc-provider-cli.js");
+    const { addProjectProvider, getProjectProviderStatus, setProjectProviderEnabled } = await import("../core/tools/aidlc-provider-cli.js");
     addProjectProvider(project, {
       source: sourceUrl,
       ref: "main",
@@ -931,7 +931,7 @@ policies:
     assert.equal(unkNode.selector_result, "unknown");
     assert.ok(unknownProfile.resolution.diagnostics.some((entry) => entry.code === "PROVIDER_SELECTOR_UNKNOWN"));
 
-    // ── item 1: the ONLY provider disabled must NOT become a vacuous empty all_of. ──
+    // ── item 1: the ONLY provider disabled leaves resolution instead of blocking it. ──
     // Restore a matching profile so selection is not the thing under test here.
     write(join(project, PROVIDER_PROFILE_REGISTRY_PATH), JSON.stringify({
       version: 1,
@@ -939,18 +939,23 @@ policies:
       profiles: { web: { facts: { language: "typescript", profiles: ["strict"] } } },
     }) + "\n", "utf8");
     setProjectProviderEnabled(project, "selector-fixture", false);
-    // The default expression must still require the capability the disabled provider binds,
-    // derived from ALL matching-scope bindings (including disabled).
+    // A disabled instance does not participate: its binding leaves the default expression.
     const candidatesAfterDisable = await import("../core/tools/aidlc-provider-resolver.js").then((mod) => mod.readProjectProviderCandidates(project, scope));
-    assert.deepEqual(deriveScopeCapabilities(candidatesAfterDisable, scope), ["framework.selector.validation"], "disabled provider's bound capability must still be derived");
+    assert.deepEqual(deriveScopeCapabilities(candidatesAfterDisable, scope), [], "a disabled provider's bound capability must not be derived");
     const disabled = resolveProjectProviderPlan(project, { scope, source_revision: SOURCE_REVISION, policy: defaultResolutionPolicy() });
-    assert.equal(disabled.resolution.resolvable, false, "a disabled sole provider must NOT pass vacuously");
-    const blockedNode = disabled.plan.nodes.find((node) => node.capability_id === "framework.selector.validation")!;
-    assert.ok(blockedNode, "a blocked node must exist for the disabled provider's capability");
-    assert.equal(blockedNode.state, "blocked");
-    assert.equal(blockedNode.provider_instance_id, "selector-fixture", "the blocked node binds the REAL project instance, not a synthetic id");
+    assert.equal(disabled.resolution.resolvable, true, "a disabled sole provider must not block the plan");
+    assert.equal(disabled.plan.nodes.find((node) => node.capability_id === "framework.selector.validation"), undefined, "a disabled provider's capability produces no node");
+    assert.ok(disabled.provider_context.diagnostics.every((entry) => entry.code !== "PROVIDER_CAPABILITY_MISSING"), "no PROVIDER_CAPABILITY_MISSING diagnostic for a disabled instance");
+    // provider status still lists the disabled instance's bound capabilities.
+    const disabledStatus = getProjectProviderStatus(project, "selector-fixture");
+    assert.equal(disabledStatus.enabled, false);
+    assert.deepEqual(disabledStatus.disabled_bound_capabilities, ["framework.selector.validation"]);
+    setProjectProviderEnabled(project, "selector-fixture", true);
+    const reenabled = resolveProjectProviderPlan(project, { scope, source_revision: SOURCE_REVISION, policy: defaultResolutionPolicy() });
+    assert.equal(reenabled.resolution.resolvable, true, "re-enable restores resolution");
+    assert.equal(reenabled.plan.nodes.find((node) => node.capability_id === "framework.selector.validation")?.state, "selected", "re-enabled provider is selected again");
 
-    console.log("Provider Resolver selectors + disabled-provider tests passed");
+    console.log("Provider Resolver selectors + disable-semantics tests passed");
   } finally {
     if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
     if (previousUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = previousUserProfile;

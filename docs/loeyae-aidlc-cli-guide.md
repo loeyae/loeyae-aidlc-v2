@@ -98,6 +98,10 @@ loeyae-aidlc orchestrate report --stage code-generation --result completed \
   --gate-decision <gate-id>
 ```
 
+`provider disable` 的语义：被停用实例不参与 Provider plan 解析（其绑定能力离开默认能力表达式，不再产生 blocked node），绑定本身保留在项目配置中，`provider status` 会列出停用实例仍绑定的能力；`provider enable` 无需重装即恢复解析。某能力唯一的 Provider 被停用时该能力从默认表达式中消失，`provider status` 的提示用于防止能力静默缺失。
+
+兼容窗口：`kind: knowledge` 且未声明 `extensions["aidlc.knowledge"]`、但声明了已识别外部源协议（`aidlc.context-source` / `aidlc.design-resource` / `aidlc.ui-read-source`）的 Provider 仍可安装（resolver 将其按外部源处理，无知识确认动作）；安装审计与 `provider status` 会记录 deprecation 警告。既无 `aidlc.knowledge` 也无已识别协议的 knowledge manifest 仍被拒收。
+
 Profile selector 决定是否选中该 Provider；选中时该 `implementation-validation` 动作为 required，orchestrate 在未携带通用 GateDecision 时拒绝推进。Core 不存在 compatibility/legacy/shadow/enforce 模式，也没有 Loeyae 专属 stage。完整 Profile、scope、升级和发布清单见 `docs/loeyae-boot-provider-migration.md`。
 
 ## 基线与 lineage
