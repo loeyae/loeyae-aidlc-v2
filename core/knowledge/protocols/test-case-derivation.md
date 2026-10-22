@@ -74,6 +74,7 @@ defect_ref: {bug ticket 或缺陷 REQ 标识}  # 可选（4.13.2/MARS-112）：�
 blocked_kind: {business-unknown/technical-prerequisite}  # 仅 status: blocked 必填（MARS-271）
 prerequisites: [{被前置依赖阻塞的具体事项}]  # 仅 blocked_kind: technical-prerequisite 必填
 unblock_path: {技术前置条件的解除路径}      # 仅 blocked_kind: technical-prerequisite 必填
+mapping_deferred: {暂缓测试映射的原因}          # 可选（MARS-271）：P1/展示类 UC-D 暂缓映射，P0 与 contract/api 禁止
 ---
 
 # UC-D-{编号} {标题}
@@ -115,6 +116,14 @@ unblock_path: {技术前置条件的解除路径}      # 仅 blocked_kind: techn
 |------|------|----------|
 | `business-unknown` | 业务决策未定（需求方未回答），只能上报人工决策 | 无额外必填字段 |
 | `technical-prerequisite` | 被技术前置条件阻塞 | 必须写非空 `prerequisites`（前置事项列表）与非空 `unblock_path`（解除路径） |
+
+## 分级映射准入（MARS-271）
+
+P1/展示类 UC-D 可在 frontmatter 声明 `mapping_deferred: {原因}` 暂缓测试映射，带该标记的单元可过 GREEN，但映射债必须显式申报、不得静默消失：
+
+- **禁止暂缓**：`priority: P0` 或 `type: contract`/`type: api` 的 UC-D 声明 `mapping_deferred` 会被 I13 门禁拒绝（契约相关用例必须 GREEN 前就位映射）。
+- 原因必须非空；数组形态被拒绝。
+- I13 证据以 `mapping_deferred: [{id, reason}]` 记录；GREEN 证据必须以 `mapping_debt` 恰好申报同一批用例（见 `green-test-evidence.md`），`test-quality` 的 `uc_mapping` 检查跳过这些用例并在 `mapping_debt` 中独立展示。
 
 ## TDD 模式（`tdd_mode`）
 

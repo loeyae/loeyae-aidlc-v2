@@ -35,6 +35,17 @@ export interface TeamLightModuleSelection {
   note?: string;
 }
 
+/**
+ * MARS-271 #8: per-unit routing context keyed `<module_id>:<unit_id>`. A unit whose
+ * instance is not the global current pointer records its own chain position here, so
+ * two units of one module advance without overwriting each other's gate state.
+ */
+export interface TeamLightUnitContext {
+  stage: string;
+  phase: string;
+  stage_instance: string;
+}
+
 export interface TeamLightActiveInstance {
   module_id: string;
   stage_instance: string;
@@ -152,6 +163,8 @@ export interface WorkflowState {
   selected_optional_stages: string[];
   history: HistoryEntry[];
   unit_selections: Record<string, TeamLightUnitSelection>;
+  /** MARS-271 #8: only present once a second unit runs in parallel to the global current. */
+  unit_contexts?: Record<string, TeamLightUnitContext>;
   module_selections: Record<string, TeamLightModuleSelection>;
   active_instances: Record<string, TeamLightActiveInstance>;
   created_at: string;
@@ -480,6 +493,28 @@ function parseSelections(markdown: string): Record<string, TeamLightUnitSelectio
   return result;
 }
 
+function parseUnitContexts(markdown: string): Record<string, TeamLightUnitContext> | undefined {
+  const rows = table(markdown, "Unit Contexts");
+  if (rows.length === 0) return undefined;
+  const result: Record<string, TeamLightUnitContext> = {};
+  for (const [index, cells] of rows.entries()) {
+    if (cells.length !== 4) throw new Error(`Unit Contexts row ${index + 1} is malformed`);
+    const key = text(cells[0], "unit context key");
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,62}):[a-z0-9](?:[a-z0-9-]{0,62})$/.test(key)) throw new Error(`invalid unit context key: ${key}`);
+    if (result[key]) throw new Error(`duplicate unit context: ${key}`);
+    const [moduleId, unitId] = key.split(":", 2);
+    const stageInstance = text(cells[3], "unit context instance");
+    const match = /^([a-z0-9-]+)@module:([a-z0-9][a-z0-9-]*)@unit:([a-z0-9][a-z0-9-]*)$/.exec(stageInstance);
+    if (!match || match[2] !== moduleId || match[3] !== unitId) throw new Error(`unit context instance ${stageInstance} does not match key ${key}`);
+    result[key] = {
+      stage: text(cells[1], "unit context stage"),
+      phase: text(cells[2], "unit context phase"),
+      stage_instance: stageInstance,
+    };
+  }
+  return result;
+}
+
 function parseModuleSelections(markdown: string): Record<string, TeamLightModuleSelection> {
   const result: Record<string, TeamLightModuleSelection> = {};
   for (const [index, cells] of table(markdown, "Module Selections").entries()) {
@@ -581,6 +616,7 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
   const currentInstance = scalar(markdown, "Current Instance", false);
   const currentModule = scalar(markdown, "Current Module", false);
   const currentUnit = scalar(markdown, "Current Unit", false);
+  const unitContexts = parseUnitContexts(markdown);
   const optional = list(markdown, "Selected Optional Stages");
   if (optional.some((stage) => stage !== "prd-generation")) throw new Error("unsupported selected optional stage");
   const kind = scalar(markdown, "Workflow Kind", false);
@@ -660,6 +696,7 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
     selected_optional_stages: optional,
     history: parseHistory(markdown),
     unit_selections: parseSelections(markdown),
+    ...(unitContexts ? { unit_contexts: unitContexts } : {}),
     module_selections: parseModuleSelections(markdown),
     active_instances: parseActiveInstances(markdown),
     created_at: iso(scalar(markdown, "Created At"), "Created At"),
@@ -728,7 +765,12 @@ ${Object.entries(state.module_selections || {}).sort(([left], [right]) => left.l
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 ${Object.entries(state.active_instances || {}).sort(([left], [right]) => left.localeCompare(right)).map(([instance, claim]) => `| ${cell(instance)} | ${cell(claim.module_id)} | ${cell(claim.owner)} | ${cell(claim.branch)} | ${cell(claim.worktree)} | ${claim.claimed_at} | ${claim.heartbeat_at} | ${claim.expires_at} | ${cell(claim.session_id)} | ${cell(claim.generation)} | ${cell(claim.handoff)} |`).join("\n") || "| - | - | - | - | - | - | - | - | - | - | - |"}
 
-## History
+${Object.keys(state.unit_contexts || {}).length > 0 ? `## Unit Contexts
+| Unit Context | Stage | Phase | Instance |
+| --- | --- | --- | --- |
+${Object.entries(state.unit_contexts || {}).sort(([left], [right]) => left.localeCompare(right)).map(([unit, context]) => `| ${cell(unit)} | ${cell(context.stage)} | ${cell(context.phase)} | ${cell(context.stage_instance)} |`).join("\n")}
+
+` : ""}## History
 | Stage | Instance | Module | Unit | Result | Timestamp | Input |
 | --- | --- | --- | --- | --- | --- | --- |
 ${state.history.map((entry) => `| ${cell(entry.stage)} | ${cell(entry.instance_id)} | ${cell(entry.module_id)} | ${cell(entry.unit_id)} | ${cell(entry.result)} | ${entry.timestamp} | ${cell(entry.user_input)} |`).join("\n") || "| - | - | - | - | - | - | - |"}
@@ -1033,7 +1075,7 @@ export function withWorkflowInitialization<T>(
     const source = loadWorkflowState(projectRoot);
     if (!source || source.workflow_id !== expected.workflow_id || source.revision !== expected.revision) throw new Error("workflow initialization revision conflict; reread before retrying");
     assertSessionClaim(projectRoot, source, binding!.stage_instance, binding);
-    const redistributed = new Set(["workflow_kind", "current_phase", "current_stage", "current_stage_instance", "current_module", "current_unit", "completed_stages", "skipped_stages", "completed_stage_instances", "skipped_stage_instances", "history", "active_instances", "module_selections", "unit_selections", "status", "retired_lineages"]);
+    const redistributed = new Set(["workflow_kind", "current_phase", "current_stage", "current_stage_instance", "current_module", "current_unit", "completed_stages", "skipped_stages", "completed_stage_instances", "skipped_stage_instances", "history", "active_instances", "module_selections", "unit_selections", "unit_contexts", "status", "retired_lineages"]);
     for (const key of new Set([...Object.keys(source), ...Object.keys(sourcePlan.state)])) {
       if (!redistributed.has(key) && JSON.stringify(source[key as keyof WorkflowState]) !== JSON.stringify(sourcePlan.state[key as keyof WorkflowState])) throw new Error(`initialization cannot change source field ${key}`);
     }
@@ -1043,7 +1085,7 @@ export function withWorkflowInitialization<T>(
       const entries = (values: unknown[]) => values.map(value => JSON.stringify(value)).sort();
       if (JSON.stringify(entries(source[key])) !== JSON.stringify(entries(plans.flatMap(item => item.state[key] as unknown[])))) throw new Error(`initialization must preserve ${key}`);
     }
-    for (const key of ["active_instances", "module_selections", "unit_selections"] as const) {
+    for (const key of ["active_instances", "module_selections", "unit_selections", "unit_contexts"] as const) {
       const entries = (records: Record<string, unknown>[]) => records.flatMap(record => Object.entries(record || {}).map(([name, value]) => JSON.stringify([name, value]))).sort();
       if (JSON.stringify(entries([source[key] || {}])) !== JSON.stringify(entries(plans.map(item => item.state[key] || {})))) throw new Error(`initialization must preserve ${key}`);
     }
@@ -1203,6 +1245,11 @@ function assertSessionMutation(projectRoot: string, existing: WorkflowState, nex
   for (const key of new Set([...Object.keys(existing.unit_selections), ...Object.keys(next.unit_selections)])) {
     if (JSON.stringify(existing.unit_selections[key]) !== JSON.stringify(next.unit_selections[key]) && (!module || !key.startsWith(`${module}:`) || (binding.stage_instance.includes("@unit:") && key !== `${module}:${binding.stage_instance.split("@unit:")[1]}`))) throw new Error(`session cannot select sibling unit ${key}`);
     if (JSON.stringify(existing.unit_selections[key]) !== JSON.stringify(next.unit_selections[key]) && next.unit_selections[key]?.member !== binding.owner) throw new Error("unit selection owner changes require explicit transfer");
+  }
+  // MARS-271 #8: a unit session may only touch its own unit_contexts entry; the global
+  // current pointers of another unit's chain stay owned by that unit's session.
+  for (const key of new Set([...Object.keys(existing.unit_contexts || {}), ...Object.keys(next.unit_contexts || {})])) {
+    if (JSON.stringify(existing.unit_contexts?.[key]) !== JSON.stringify(next.unit_contexts?.[key]) && (!module || !binding.stage_instance.includes("@unit:") || key !== `${module}:${binding.stage_instance.split("@unit:")[1]}`)) throw new Error(`session cannot overwrite sibling unit context ${key}`);
   }
   for (const entry of next.history.slice(existing.history.length)) {
     if (entry.instance_id && entry.instance_id !== binding.stage_instance && !(entry.result === "condition_skipped" && scope(entry.instance_id) === scope(binding.stage_instance))) throw new Error("session cannot report another stage instance");

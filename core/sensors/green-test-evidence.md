@@ -30,6 +30,8 @@ GREEN 观察改动后的全部行为：I13 为 `required` 时，`uc_mapping` 必
 
 GREEN 证据必须来自全量测试运行（MARS-271）：只有 RED 收敛迭代允许 `--test-filter` 过滤（见 `red-test-evidence.md`），GREEN 与 BASELINE 证据携带 `test_filter` 一律被门禁拒绝。
 
+分级映射准入（MARS-271）：I13 声明 `mapping_deferred` 的 UC-D 暂不进入 GREEN 覆盖 universe，但 GREEN 证据必须以 `mapping_debt: [{id, reason}]` 恰好申报同一批暂缓用例——漏报、多报都会被拒；映射债在门禁报告与 `test-quality` 的 `mapping_debt` 中独立可见，不得静默消失。P0 与 `contract`/`api` 类 UC-D 禁止暂缓（见 `test-case-derivation.md`）。
+
 受控证据中 `checker` 为内置检查（`id: builtin:green-test-evidence`，`exit_code: 0`），被观察的测试命令记录在 `observed_command`（`exit_code: 0`）；缺少 `observed_command` 或其退出码不为 0 时门禁拒绝。
 
 与 RED 相同，门禁把 `observed_command.argv_digest` / `id` 绑定到 `code-generation` 命令清单（`.aidlc/commands/code-generation.json` → `.aidlc/evidence-commands.json`，stage 锁定）中唯一一条 `role: green` 命令，并要求 `checker.argv_digest` 等于 `SHA-256(JSON.stringify(["GREEN-observation", observed_command.argv_digest]))`；命令清单缺失、无法解析、stage 不匹配或不是恰好一条 green 命令时拒绝。producer 会拒绝指向其他清单的 `--config`（与默认查找结果不是同一文件时直接报错，不执行命令、不写证据）。
