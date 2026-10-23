@@ -1704,7 +1704,43 @@ const MERMAID_DIAGRAM_TYPES = [
   "C4Context", "C4Container", "C4Component", "C4Dynamic", "C4Deployment", "zenuml",
 ];
 
-interface MermaidBlock { file: string; line: number; source: string }
+interface MermaidStaticPassDeclaration {
+  diagram_id: string;
+  module: string;
+  validation_tier: "STATIC_PASS";
+  diagram_type: "module-internal-simple-flow";
+  all_elements_within_module: true;
+  no_contract_semantics: true;
+  not_architecture_or_delivery_evidence: true;
+}
+
+interface MermaidBlock {
+  file: string;
+  line: number;
+  source: string;
+  static_pass_declaration?: MermaidStaticPassDeclaration;
+}
+
+/**
+ * The declaration deliberately lives immediately above one Mermaid fence. That keeps a
+ * STATIC_PASS claim tied to one source block rather than letting a document-level switch
+ * accidentally downgrade an unrelated architecture or contract diagram in the same file.
+ */
+function mermaidStaticPassDeclaration(line: string | undefined, file: string, fenceLine: number): MermaidStaticPassDeclaration | undefined {
+  if (!line) return undefined;
+  const match = /^\s*<!--\s*aidlc-mermaid-validation:\s*(\{.*\})\s*-->\s*$/.exec(line);
+  if (!match) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(match[1]);
+  } catch {
+    fail(`${file}:${fenceLine - 1} aidlc-mermaid-validation must contain one valid JSON object`);
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    fail(`${file}:${fenceLine - 1} aidlc-mermaid-validation must contain one JSON object`);
+  }
+  return value as MermaidStaticPassDeclaration;
+}
 
 function mermaidBlocks(path: string): MermaidBlock[] {
   const lines = text(path).split(/\r?\n/);
@@ -1718,7 +1754,8 @@ function mermaidBlocks(path: string): MermaidBlock[] {
     index++;
     while (index < lines.length && !new RegExp(`^\\s*${fence[0] === "`" ? "`" : "~"}{${fence.length},}\\s*$`).test(lines[index])) body.push(lines[index++]);
     if (index >= lines.length) fail(`${relativePath(path)}:${start + 1} mermaid code block is not closed`);
-    blocks.push({ file: relativePath(path), line: start + 1, source: body.join("\n") });
+    const file = relativePath(path);
+    blocks.push({ file, line: start + 1, source: body.join("\n"), static_pass_declaration: mermaidStaticPassDeclaration(lines[start - 1], file, start + 1) });
   }
   return blocks;
 }
@@ -1780,6 +1817,50 @@ async function parseMermaidBlocks(blocks: MermaidBlock[]): Promise<"passed" | "n
   return "passed";
 }
 
+function mermaidStaticPassAdmissions(blocks: MermaidBlock[], diagrams: Array<{ file: string; line: number; type: string }>): Record<string, unknown>[] {
+  if (!ACTIVE_MODULE) fail("STATIC_PASS Mermaid diagrams require an active module scope");
+  const admitted = new Set<string>();
+  return blocks.map((block, index) => {
+    const declaration = block.static_pass_declaration;
+    const reference = `${block.file}:${block.line}`;
+    if (!declaration) {
+      fail(`${reference} requires an immediately preceding aidlc-mermaid-validation declaration; Mermaid diagrams cannot implicitly claim STATIC_PASS`);
+    }
+    const requiredString = (field: "diagram_id" | "module" | "validation_tier" | "diagram_type", expected?: string): string => {
+      const value = declaration[field];
+      if (typeof value !== "string" || value.trim().length === 0 || (expected && value !== expected)) {
+        fail(`${reference} declaration.${field} must be ${expected ? JSON.stringify(expected) : "a non-empty string"}`);
+      }
+      return value;
+    };
+    const diagramId = requiredString("diagram_id");
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(diagramId)) fail(`${reference} declaration.diagram_id must be a stable identifier`);
+    if (admitted.has(diagramId)) fail(`${reference} declaration.diagram_id ${diagramId} is duplicated in this validation scope`);
+    admitted.add(diagramId);
+    const module = requiredString("module");
+    if (module !== ACTIVE_MODULE) fail(`${reference} declaration.module must equal active module ${ACTIVE_MODULE}`);
+    requiredString("validation_tier", "STATIC_PASS");
+    requiredString("diagram_type", "module-internal-simple-flow");
+    for (const field of ["all_elements_within_module", "no_contract_semantics", "not_architecture_or_delivery_evidence"] as const) {
+      if (declaration[field] !== true) fail(`${reference} declaration.${field} must be true for STATIC_PASS admission`);
+    }
+    return {
+      ...diagrams[index],
+      diagram_id: diagramId,
+      module,
+      validation_tier: "STATIC_PASS",
+      diagram_type: "module-internal-simple-flow",
+      admission_conditions: {
+        module_internal_simple_flow: true,
+        all_elements_within_module: true,
+        no_contract_semantics: true,
+        not_architecture_or_delivery_evidence: true,
+        explicit_source_declaration: true,
+      },
+    };
+  });
+}
+
 async function mermaidDiagramContract(): Promise<Record<string, unknown>> {
   const stage = workflowState?.current_stage || "";
   const required = MERMAID_STAGE_DOCUMENTS[stage];
@@ -1803,17 +1884,28 @@ async function mermaidDiagramContract(): Promise<Record<string, unknown>> {
   }
   const diagrams = blocks.map((block) => ({ file: block.file, line: block.line, type: mermaidDiagramType(block) }));
   const syntaxParse = await parseMermaidBlocks(blocks);
+  const staticPassAdmissions = mermaidStaticPassAdmissions(blocks, diagrams);
   return {
     status: "passed",
+    final_status: "STATIC_PASS",
     source_format: "mermaid",
     diagrams_checked: diagrams.length,
-    diagrams,
+    diagrams: staticPassAdmissions,
     documents: [...new Set(diagrams.map((diagram) => diagram.file))],
     syntax_checks: "static",
     syntax_parse: syntaxParse,
+    validation_tier: "STATIC_PASS",
+    admission_status: "passed",
+    admission_conditions: [
+      "module-internal-simple-flow",
+      "all-elements-within-active-module",
+      "no-contract-semantics",
+      "not-architecture-or-delivery-evidence",
+      "explicit-source-declaration",
+    ],
     reason: syntaxParse === "passed"
-      ? "diagram format is mermaid (default); static checks and the Mermaid parser passed (syntax only, no rendering). The SVG contract runs only after the user explicitly selects svg"
-      : "diagram format is mermaid (default); static checks passed, the Mermaid parser is not available so real parsing was not executed. The SVG contract runs only after the user explicitly selects svg",
+      ? "module-internal simple-flow declarations passed controlled static checks; this is STATIC_PASS only and does not validate SVG rendering. FULL_CONTRACT runs only after the user explicitly selects svg"
+      : "module-internal simple-flow declarations passed source-level checks, but the optional Mermaid parser was not available. This remains STATIC_PASS only; FULL_CONTRACT runs only after the user explicitly selects svg",
   };
 }
 

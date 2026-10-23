@@ -439,6 +439,61 @@ def test_diagram_contract_follows_recorded_diagram_format() -> None:
         shutil.rmtree(project)
 
 
+def test_mermaid_static_pass_requires_auditable_admission() -> None:
+    """A Mermaid flow may close only through the explicit module-local STATIC_PASS declaration."""
+    project = make_temp(prefix="aidlc-semantic-checkers-mermaid-static-pass-")
+    try:
+        fixture(project)
+        write_checker_state(project, "mermaid")
+        state_uri = (Path(REPO_ROOT) / "core" / "tools" / "aidlc-light-state.ts").as_uri()
+        state_script = f"""
+import {{ loadWorkflowState, saveWorkflowState }} from {json.dumps(state_uri)};
+const state = loadWorkflowState(process.cwd());
+if (!state) throw new Error('fixture state is missing');
+state.current_stage = 'requirements-methods';
+state.current_module = 'm01-orders';
+saveWorkflowState(process.cwd(), state);
+"""
+        state_result = subprocess.run(
+            [*TSX, "--eval", state_script], cwd=project, env=checker_environment(project), capture_output=True, text=True,
+        )
+        assert state_result.returncode == 0, state_result.stderr
+        flows = "docs/aidlc/modules/m01-orders/inception/requirements/business-flows.md"
+        declaration = ('<!-- aidlc-mermaid-validation: {"diagram_id":"order-retry","module":"m01-orders",'
+                       '"validation_tier":"STATIC_PASS","diagram_type":"module-internal-simple-flow",'
+                       '"all_elements_within_module":true,"no_contract_semantics":true,'
+                       '"not_architecture_or_delivery_evidence":true} -->')
+        write(project, flows, f"# Flow\n\n{declaration}\n```mermaid\nflowchart LR\n  A[Retry] --> B[Return]\n```\n")
+        result = run_checker(project, "diagram-contract")
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "passed", payload
+        assert payload["final_status"] == "STATIC_PASS", payload
+        assert payload["validation_tier"] == "STATIC_PASS", payload
+        assert payload["admission_status"] == "passed", payload
+        assert payload["diagrams"] == [{
+            "file": flows, "line": 4, "type": "flowchart", "diagram_id": "order-retry", "module": "m01-orders",
+            "validation_tier": "STATIC_PASS", "diagram_type": "module-internal-simple-flow",
+            "admission_conditions": {
+                "module_internal_simple_flow": True, "all_elements_within_module": True,
+                "no_contract_semantics": True, "not_architecture_or_delivery_evidence": True,
+                "explicit_source_declaration": True,
+            },
+        }], payload
+
+        write(project, flows, "# Flow\n\n```mermaid\nflowchart LR\n  A[Retry] --> B[Return]\n```\n")
+        undeclared = run_checker(project, "diagram-contract")
+        assert undeclared.returncode != 0
+        assert "cannot implicitly claim STATIC_PASS" in undeclared.stderr
+
+        write(project, flows, f"# Flow\n\n{declaration.replace('no_contract_semantics\\\":true', 'no_contract_semantics\\\":false')}\n```mermaid\nflowchart LR\n  A[Retry] --> B[Return]\n```\n")
+        contract = run_checker(project, "diagram-contract")
+        assert contract.returncode != 0
+        assert "declaration.no_contract_semantics must be true" in contract.stderr
+    finally:
+        shutil.rmtree(project)
+
+
 def test_diagram_003_fixed_regression() -> None:
     project = make_temp(prefix="aidlc-diagram-003-regression-")
     try:
@@ -1713,6 +1768,7 @@ if __name__ == "__main__":
     test_prd_pending_questions_contract()
     test_checker_downgrades_legacy_diagram_without_structured_contract()
     test_diagram_contract_follows_recorded_diagram_format()
+    test_mermaid_static_pass_requires_auditable_admission()
     test_diagram_003_fixed_regression()
     test_structural_group_capacity_and_style_contract_pass()
     test_diagram_geometry_gates_fail_closed()

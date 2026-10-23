@@ -8,12 +8,12 @@ evidence_path: .aidlc/evidence/<stage-slug>/diagram-contract.json
 # diagram-contract
 
 ## 目的
-验证需求流程图和应用设计图遵循 V1 SVG/Diagram 契约：稳定 ID、主阅读方向、主轴、业务层级、端口、分支、连通性、分组、统一单色视觉、structural / swimlane / phase region 遮挡、无全局图例/备注、viewBox、FR 映射和 Provider 状态均有结构化证据。纵向滚动允许，水平溢出、裁切、对象越界、标签压线、structural 背景穿透和不可读失败。
+验证需求流程图和应用设计图的分级验证证据。默认 Mermaid 仅验证受控 `STATIC_PASS` 准入和静态语法/结构；本文件其余 V1 SVG/Diagram 契约（稳定 ID、主阅读方向、主轴、业务层级、端口、分支、连通性、分组、统一单色视觉、structural / swimlane / phase region 遮挡、无全局图例/备注、viewBox、FR 映射和 Provider 状态）只在用户明确选择 SVG 的 `FULL_CONTRACT` 下适用。纵向滚动允许，水平溢出、裁切、对象越界、标签压线、structural 背景穿透和不可读失败。
 
 ## 适用范围
 按 workflow state 的 `Diagram Format` 判定（由 `orchestrate diagram-format --set <mermaid|svg>` 记录用户的明确选择，缺省为 mermaid）：
 
-- mermaid：只做 Mermaid 基本检查。requirements-methods 检查 `requirements/business-flows.md`，application-design 检查 `application-design/component-dependency.md`，文档必须至少有一个 `mermaid` 代码块；每个代码块须闭合、首行声明图类型（flowchart/graph 方向为 TB/TD/BT/RL/LR）、包含节点或关系，并通过 loeyae-aidlc 自带 Mermaid 的 `mermaid.parse`（只解析，不渲染、不做视觉验证）。通过时输出 `status: "passed"`、`source_format: "mermaid"`、`diagrams_checked`、`diagrams[]`（file/line/type）、`syntax_checks: "static"` 与 `syntax_parse: "passed"`（parser 不可用时为 `"not_executed"`）。范围内的 `.diagram.json` 或 SVG 文件（可能是外部资产）不触发 SVG 校验。
+- mermaid：仅允许满足 `STATIC_PASS` 准入的模块内简单流程图。requirements-methods 检查 `requirements/business-flows.md`，application-design 检查 `application-design/component-dependency.md`，文档必须至少有一个 `mermaid` 代码块；每个代码块须闭合、首行声明图类型（flowchart/graph 方向为 TB/TD/BT/RL/LR）、包含节点或关系，并通过 loeyae-aidlc 自带 Mermaid 的 `mermaid.parse`（只解析，不渲染、不做视觉验证）。每个 block 紧邻上一行还必须有 `aidlc-mermaid-validation` JSON 声明：稳定 `diagram_id`、当前模块、`validation_tier: "STATIC_PASS"`、`diagram_type: "module-internal-simple-flow"`，以及 `all_elements_within_module`、`no_contract_semantics`、`not_architecture_or_delivery_evidence` 三个 `true` 见证；缺失、重复或不匹配会阻断，不能隐式降级。通过时输出 `status: "passed"`、`final_status: "STATIC_PASS"`、`validation_tier: "STATIC_PASS"`、`admission_status: "passed"`、`source_format: "mermaid"`、`diagrams_checked`、带准入信息的 `diagrams[]`、`syntax_checks: "static"` 与 `syntax_parse: "passed"`（parser 不可用时为 `"not_executed"`）。范围内的 `.diagram.json` 或 SVG 文件（可能是外部资产）不触发 SVG 校验。
 - svg：执行下述完整 SVG 契约，缺少 `.diagram.json` 即失败；门禁拒绝 Mermaid 证据。
 
 ## Evidence 路径
@@ -95,7 +95,7 @@ evidence_path: .aidlc/evidence/<stage-slug>/diagram-contract.json
 
 `final_status` 只有 `PASS`、`STATIC_PASS`、`UNVERIFIED`、`NEEDS_CAPABILITY`、`FAIL`。`status: "passed"` 是受控 producer 的外层写入结果，不是最终验收状态。新格式必须同时输出 `gate_statuses.structure`、`gate_statuses.route_contract`、`gate_statuses.geometry`、`gate_statuses.visual` 和 `gate_statuses.overall`；源级通过时前三层分别为 `STRUCTURE_PASS`、`ROUTE_CONTRACT_PASS`、`GEOMETRY_PASS`，只有真实三视图成功时 visual 才能为 `VISUAL_PASS`，完整通过时 overall 才能为 `OVERALL_PASS`。`PASS` 必须同时有 expected contract、业务语义、源结构、几何和本次真实 Provider 的 `normal`、`fit`、`zoom` 截图/快照；`STATIC_PASS` 不能替代 `PASS`。缺少来源、解析或证据为 `UNVERIFIED`；Provider 能力不可用为 `NEEDS_CAPABILITY`；发现问题为 `FAIL`。旧 `SOURCE_READY` 读取时只映射为 `STATIC_PASS`。
 
-新建或调整图必须提供独立 expected contract、`diagramType`、`designNotes`、完整边 `points`、分组与就地视觉语义、统一视觉样式、空的全局图例/备注集合、FR/REQ 映射和 generation provenance。旧 V1 资产缺少适用结构化字段时，Checker 必须 fail-closed，记录 `migration_status: "MIGRATION_REQUIRED"` 并将 `final_status` 保持为 `UNVERIFIED`；字段存在但非法时为 `FAIL`。`migration_status` 只有在迁移完成后才能为 `passed`。`port_paths_valid` 表示端口、偏移和路径点已完成源级检查。
+`FULL_CONTRACT` SVG 的新建或调整图必须提供独立 expected contract、`diagramType`、`designNotes`、完整边 `points`、分组与就地视觉语义、统一视觉样式、空的全局图例/备注集合、FR/REQ 映射和 generation provenance。旧 V1 SVG 资产缺少适用结构化字段时，Checker 必须 fail-closed，记录 `migration_status: "MIGRATION_REQUIRED"` 并将 `final_status` 保持为 `UNVERIFIED`；字段存在但非法时为 `FAIL`。`migration_status` 只有在迁移完成后才能为 `passed`。`port_paths_valid` 表示端口、偏移和路径点已完成源级检查。
 
 ### Generation closure
 
