@@ -110,3 +110,49 @@ export function ucdDeclarations(files: string[], read: (file: string) => string 
   }
   return declarations;
 }
+
+export interface UcdSourceFile {
+  file: string;
+  sha256: string;
+  ucd_ids: string[];
+}
+
+/**
+ * MARS-273 dual-form `ucd_sources`: the file-level form `{files: [{file, sha256, ucd_ids}]}`
+ * (new derivations) or the legacy per-UC-D map `{ "<UC-D>": {file, sha256} }` (existing
+ * evidence, zero migration). Both normalize to the same sorted file-level shape so that
+ * stored and freshly derived evidence compare equal when sources are unchanged.
+ */
+export function normalizeUcdSources(value: unknown): UcdSourceFile[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "object" || Array.isArray(value)) fail("ucd_sources must be an object");
+  const record = value as Record<string, unknown>;
+  if (record.files !== undefined) {
+    if (!Array.isArray(record.files)) fail("ucd_sources.files must be an array");
+    return record.files.map((entry) => {
+      if (typeof entry !== "object" || entry === null) fail("ucd_sources.files entries must be objects");
+      const { file, sha256, ucd_ids } = entry as Record<string, unknown>;
+      if (typeof file !== "string" || !file.trim()) fail("ucd_sources.files[].file must be a non-empty string");
+      if (typeof sha256 !== "string" || !/^[0-9a-f]{64}$/.test(sha256)) fail(`ucd_sources.files[].sha256 is invalid for ${file}`);
+      if (!Array.isArray(ucd_ids) || ucd_ids.length === 0 || ucd_ids.some((id) => typeof id !== "string" || !/^UC-D-\d+$/.test(id))) {
+        fail(`ucd_sources.files[].ucd_ids is invalid for ${file}`);
+      }
+      return { file: file.replace(/\\/g, "/"), sha256, ucd_ids: [...(ucd_ids as string[])].sort() };
+    }).sort((left, right) => left.file.localeCompare(right.file));
+  }
+  const files = new Map<string, UcdSourceFile>();
+  for (const [id, entry] of Object.entries(record)) {
+    if (!/^UC-D-\d+$/.test(id)) fail(`legacy ucd_sources key ${id} is not a UC-D id`);
+    if (typeof entry !== "object" || entry === null) fail(`legacy ucd_sources entry ${id} must be an object`);
+    const { file, sha256 } = entry as Record<string, unknown>;
+    if (typeof file !== "string" || !file.trim()) fail(`legacy ucd_sources entry ${id} has no file`);
+    if (typeof sha256 !== "string" || !/^[0-9a-f]{64}$/.test(sha256)) fail(`legacy ucd_sources entry ${id} has an invalid sha256`);
+    const key = (file as string).replace(/\\/g, "/");
+    const existing = files.get(key) ?? { file: key, sha256: sha256 as string, ucd_ids: [] };
+    existing.ucd_ids.push(id);
+    files.set(key, existing);
+  }
+  return [...files.values()]
+    .map((entry) => ({ ...entry, ucd_ids: [...new Set(entry.ucd_ids)].sort() }))
+    .sort((left, right) => left.file.localeCompare(right.file));
+}

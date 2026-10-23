@@ -746,6 +746,33 @@ function testCaseDerivation(): Record<string, unknown> {
   }
   const readyCount = idsFound.length;
   if (!/source_ref\s*:/i.test(caseContent)) fail("every I13 test case must declare source_ref");
+  // MARS-273 聚合层覆盖声明:正向覆盖(每个 REQ 来源至少映射一个 UC-D)与反向悬空校验
+  // 收敛到 _index.md 的 source_coverage,每来源声明一次;未声明的存量 I13 走回退路径,
+  // 仅保留 source_ref 存在性检查(存量零迁移)。
+  const coverage = sourceCoverageDeclarations(text(indexPath), relativePath(indexPath));
+  let sourceCoverage: Record<string, string[]> | undefined;
+  if (coverage) {
+    const dangling: string[] = [];
+    for (const [sourceId, ucdIds] of coverage) {
+      if (ucdIds.length === 0) fail(`source_coverage source ${sourceId} maps no UC-D (${relativePath(indexPath)})`);
+      for (const id of ucdIds) {
+        if (!declarations.has(id)) dangling.push(`${sourceId} -> ${id}`);
+      }
+      if (!new RegExp(`\\b${sourceId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(sourceContent)) {
+        dangling.push(`source ${sourceId} not found in I13 source artifacts`);
+      }
+    }
+    const requirementsPath = join(ROOT, contextual("docs/aidlc/inception/requirements.md"));
+    if (existsSync(requirementsPath)) {
+      const reqIds = [...new Set(text(requirementsPath).match(/\bREQ-[A-Z0-9][A-Z0-9_-]*\b/g) || [])];
+      const missing = reqIds.filter((req) => !coverage.has(req));
+      if (missing.length > 0) {
+        fail(`source_coverage must map every requirement source to at least one UC-D; missing: ${missing.join(", ")} (${relativePath(indexPath)})`);
+      }
+    }
+    if (dangling.length > 0) fail(`DANGLING_REF@source_coverage: ${dangling.join("; ")}`);
+    sourceCoverage = Object.fromEntries([...coverage].sort(([left], [right]) => left.localeCompare(right)));
+  }
   const modes = ucdModes(idsFound, declarations);
   const units = ucdUnitRefs(idsFound, declarations);
   const defectRefs = ucdAnchorRefs(idsFound, declarations, "defect_ref");
@@ -768,7 +795,9 @@ function testCaseDerivation(): Record<string, unknown> {
     ...characterizationEvidence(idsFound, modes),
     source_files: sourcePaths.map(relativePath),
     test_case_files: caseFiles.map(relativePath),
-    ucd_sources: Object.fromEntries([...declarations].map(([id, declaration]) => [id, { file: relativePath(declaration.file), sha256: createHash("sha256").update(text(declaration.file)).digest("hex") }])),
+    // MARS-273: ucd_sources 降为逐文件 digest + 文件内 UC-D ID 清单;消费方兼容旧逐条形态。
+    ucd_sources: { files: ucdSourceFileEntries(declarations, text) },
+    ...(sourceCoverage ? { source_coverage: sourceCoverage } : {}),
     index: relativePath(indexPath),
   };
 }
@@ -776,6 +805,70 @@ function testCaseDerivation(): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 // UC-D declarations and tdd_mode (4.6.0 S2)
 // ---------------------------------------------------------------------------
+
+/**
+ * MARS-273: the `source_coverage` aggregate declaration of `_index.md` — one
+ * `source_id: [UC-D ids]` line per source, declared once instead of per case.
+ * Accepted shapes: a top-level `source_coverage:` key with indented sub-keys, or a
+ * fenced code block tagged `source_coverage`. Returns null when nothing is declared
+ * (legacy evidence keeps the source_ref-existence fallback, zero migration).
+ */
+function sourceCoverageDeclarations(content: string, label: string): Map<string, string[]> | null {
+  const lines = content.split(/\r?\n/);
+  let block: string[] | null = null;
+  const fenceStart = lines.findIndex((line) => /^```[A-Za-z]*\s*source_coverage\b/.test(line.trim()));
+  if (fenceStart >= 0) {
+    const fenceEnd = lines.findIndex((line, index) => index > fenceStart && line.trim().startsWith("```"));
+    block = lines.slice(fenceStart + 1, fenceEnd < 0 ? lines.length : fenceEnd);
+  } else {
+    const start = lines.findIndex((line) => /^source_coverage\s*:\s*$/.test(line));
+    if (start >= 0) {
+      const rest = lines.slice(start + 1);
+      const stop = rest.findIndex((line) => line.trim() !== "" && !/^\s/.test(line));
+      block = rest.slice(0, stop < 0 ? rest.length : stop);
+    }
+  }
+  if (block === null) return null;
+  const coverage = new Map<string, string[]>();
+  let listKey: string | undefined;
+  for (const line of block) {
+    if (line.trim() === "" || /^\s*#/.test(line)) continue;
+    const item = /^\s*-\s+(.+)$/.exec(line);
+    if (item) {
+      if (listKey === undefined) fail(`${label}: source_coverage list item outside a source key`);
+      coverage.get(listKey)!.push(item[1].trim());
+      continue;
+    }
+    const pair = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/.exec(line.trim());
+    if (!pair) fail(`${label}: unsupported source_coverage line ${JSON.stringify(line.trim())}`);
+    const [, key, raw] = pair;
+    if (coverage.has(key)) fail(`${label}: source_coverage key ${key} is declared twice`);
+    const value = raw.trim();
+    if (value === "") {
+      coverage.set(key, []);
+      listKey = key;
+    } else {
+      const inline = /^\[(.*)\]$/.exec(value);
+      coverage.set(key, inline ? inline[1].split(",").map((id) => id.trim()).filter(Boolean) : [value]);
+      listKey = undefined;
+    }
+  }
+  return coverage;
+}
+
+/** MARS-273: file-level ucd_sources entries (file digest + UC-D ids per file), sorted. */
+function ucdSourceFileEntries(declarations: Map<string, UcdDeclaration>, read: (path: string) => string): Array<{ file: string; sha256: string; ucd_ids: string[] }> {
+  const files = new Map<string, { file: string; sha256: string; ucd_ids: string[] }>();
+  for (const [id, declaration] of declarations) {
+    const rel = relativePath(declaration.file);
+    const entry = files.get(rel) ?? { file: rel, sha256: createHash("sha256").update(read(declaration.file)).digest("hex"), ucd_ids: [] };
+    entry.ucd_ids.push(id);
+    files.set(rel, entry);
+  }
+  return [...files.values()]
+    .map((entry) => ({ ...entry, ucd_ids: [...new Set(entry.ucd_ids)].sort() }))
+    .sort((left, right) => left.file.localeCompare(right.file));
+}
 
 /** Collect `mapping_deferred: <reason>` declarations; P0 and contract/api UC-Ds may not defer. */
 function mappingDeferredEntries(ids: string[], declarations: Map<string, UcdDeclaration>): Array<{ id: string; reason: string }> {

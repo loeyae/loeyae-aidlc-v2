@@ -53,6 +53,7 @@ Evidence 路径由当前 directive 的 `evidence_root` 决定：
 
 C8 普通行为变更要求实际适用的受控 build/check，以及真实非零通过且零失败的 test。按 `common-c8-role-applicability.md` 复核模块级来源和已批准项目政策；无声明默认要求 build/check，不用三角色配额制造重复检查。业务测试不能被角色不适用声明豁免。
 无可执行业务行为的单元可由可信 I13 not_applicable 或空 UC-D 子集的已批准 ucd_exemption 证明适用性；producer 和门禁重新检查 I13 来源/单元声明。
+I13 的覆盖与悬空校验在聚合层执行（MARS-273）：`_index.md` 的 `source_coverage` 声明每来源至少映射一个 UC-D，悬空引用记 `DANGLING_REF@source_coverage` 拦截；`ucd_sources` 以文件级 digest + UC-D ID 清单对账，旧逐条 file+SHA-256 形态继续兼容，存量证据零迁移。
 此时只要求实际成功的确定性 check；不存在的 build/test 不必新增，测试统计如实为零。空声明、全 skipped、来源不匹配不能放行。
 
 RED、GREEN、BASELINE、build/test、test-quality、I13 和代码审查属于绑定来源的历史观察，纯时间经过不要求重做；未来/畸形时间仍拒绝，来源、命令、scope、实例和基线世代仍须通过门禁。

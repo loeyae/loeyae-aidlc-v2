@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.22.14 — 2026-10-23
+
+- I13 UC-D reverse-tracing bindings tiered downgrade (MARS-273): `story_ref` / `scenario_ref` / the verbatim-Gherkin source-tracing section / the coverage-mapping section / derivation logs become tiered-optional — required only for P0 and `contract`/`api` cases, aligned with the MARS-271 `mapping_deferred` direction; undowngraded gates (`unit_refs`, `tdd_mode`, `defect_ref`, GREEN `uc_mapping`) unchanged.
+- Aggregate `source_coverage` compensation: forward coverage (every source maps at least one ready UC-D) and reverse dangling validation converge to one per-source declaration in `_index.md`; dangling references are machine-rejected via `DANGLING_REF@source_coverage`; legacy I13 evidence without the declaration falls back to the existing `source_ref` existence check with zero migration.
+- `ucd_sources` dual form: the new file-level form (per-file SHA-256 digest + the file's UC-D ID list, `normalizeUcdSources`) alongside the legacy per-UC-D records; deletion-delivery reconciliation compares at file level in both forms and source drift still re-triggers I13.
+- I13 checker aggregate validation (S2): semantic checks execute coverage/dangling on `source_coverage`; `ucd_sources` accepts both forms; unit `req_refs` takes priority for tests-layer convergence (`code_refs_source`).
+- Protocol docs synchronized (`test-case-derivation`, `common-process-overview`, `common-quality-gates`, `quality-gates-v1`); derivation self-check sampling (P0/contract/api full, remainder sampled, default 20%, configurable).
+- `i13NonApplicable` JSON parse errors stabilized across Node versions (`is not valid JSON` semantics instead of engine-specific messages).
+- Synchronize package, plugin, marketplace and stage-graph versions and regenerate all harness distributions.
+
 ## 4.22.13 — 2026-10-22
 
 - Provider install compatibility window: `kind: knowledge` manifests without `extensions["aidlc.knowledge"]` install successfully when they declare a recognized external-source protocol (`aidlc.context-source` / `aidlc.design-resource` / `aidlc.ui-read-source`), with a deprecation warning recorded in install/update audit and `provider status`; manifests with no recognized protocol are still rejected unchanged (MARS-272).
