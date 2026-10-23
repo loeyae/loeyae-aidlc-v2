@@ -34,10 +34,10 @@
 ### 产品行为基线
 
 I7 的 Gherkin 是产品语义唯一基线：
-- 原样复制到“来源溯源”段，不得改写；
+- P0 与 contract/api 用例必须原样复制到“来源溯源”段，不得改写；其余用例按分级降级规则（MARS-273）不要求逐条复制，但语义仍以 I7 为准，不得私自改写；
 - 宽泛、矛盾或无法追溯需求时回退 I7 澄清；
 - 技术不可行时标记 `blocked` 并提交回执，不得私自降低期望；
-- 后续语义变化必须走 CR。
+- 后续语义变化必须走 CR；来源与 UC-D 的覆盖对账收敛到聚合层 `source_coverage`（见“分级降级与聚合层补偿”）。
 
 ### 技术风险基线
 
@@ -58,8 +58,8 @@ I7 的 Gherkin 是产品语义唯一基线：
 id: UC-D-{编号}
 title: {可验证行为}
 source_ref: {US/NFR/CR/契约/配置/一致性场景的稳定引用}
-story_ref: {产品用例必填；技术用例不适用}
-scenario_ref: {产品 Gherkin 场景或技术场景标识}
+story_ref: {分级可选（MARS-273）：P0 与 contract/api 产品用例必填；其余产品用例不要求；技术用例不适用}
+scenario_ref: {分级可选（MARS-273）：P0 与 contract/api 用例必填；其余用例不要求}
 type: {unit/api/e2e/contract/integration/resilience/configuration/migration}
 priority: {P0/P1/P2}
 status: {ready/blocked/deprecated}
@@ -80,7 +80,7 @@ mapping_deferred: {暂缓测试映射的原因}          # 可选（MARS-271）�
 # UC-D-{编号} {标题}
 
 ## 来源溯源
-{产品用例原样复制 Gherkin；技术用例引用批准产物并摘要不可变预期}
+{分级可选（MARS-273）：P0 与 contract/api 用例必填——产品用例原样复制 Gherkin，技术用例引用批准产物并摘要不可变预期；其余用例可省略本段}
 
 ## 执行锚点
 - endpoint/page/topic/config/migration: {实际锚点}
@@ -93,12 +93,14 @@ mapping_deferred: {暂缓测试映射的原因}          # 可选（MARS-271）�
 |---|------|------|
 
 ## 覆盖映射
+{分级可选（MARS-273）：P0 与 contract/api 用例必填；其余用例可省略本段，覆盖对账由聚合层 source_coverage 承担}
 - {来源条件/风险} → 步骤 {N} → 断言 {N}
 
 ## 证据要求
 - {项目现有命令、CI 任务、契约平台或测试平台证据类型}
 
 ## 派生日志
+{分级可选（MARS-273）：可省略本段}
 - 来源、时间、派生者和 CR 变更记录
 ```
 
@@ -124,6 +126,72 @@ P1/展示类 UC-D 可在 frontmatter 声明 `mapping_deferred: {原因}` 暂缓�
 - **禁止暂缓**：`priority: P0` 或 `type: contract`/`type: api` 的 UC-D 声明 `mapping_deferred` 会被 I13 门禁拒绝（契约相关用例必须 GREEN 前就位映射）。
 - 原因必须非空；数组形态被拒绝。
 - I13 证据以 `mapping_deferred: [{id, reason}]` 记录；GREEN 证据必须以 `mapping_debt` 恰好申报同一批用例（见 `green-test-evidence.md`），`test-quality` 的 `uc_mapping` 检查跳过这些用例并在 `mapping_debt` 中独立展示。
+
+## 分级降级与聚合层补偿（MARS-273）
+
+### 分级降级
+
+以下逐条绑定从“全量必填”降为**分级可选**（方向与 MARS-271 `mapping_deferred` 分级准入一致）：
+
+| 绑定项 | 降级后要求 |
+|--------|-----------|
+| `story_ref` | 仅 P0 与 `type: contract` / `type: api` 的产品用例必填，其余不要求 |
+| `scenario_ref` | 仅 P0 与 `type: contract` / `type: api` 用例必填，其余不要求 |
+| 来源溯源段“原样复制 Gherkin” | 仅 P0 与 `type: contract` / `type: api` 用例必填，其余可省略该段 |
+| 覆盖映射段 | 仅 P0 与 `type: contract` / `type: api` 用例必填，其余可省略该段 |
+| 派生日志 | 全部可选 |
+
+- 被降级字段**可选但不得虚构**：写了就必须合法（非空、指向真实来源）。
+- 降级换来的是聚合层补偿：覆盖与悬空校验收敛到 `source_coverage` 一次完成（见下），不再依赖逐条绑定。
+- 未降级项——`unit_refs`、`tdd_mode`、`defect_ref`、GREEN `uc_mapping` 精确覆盖——**不动**，仍是收口门禁骨架。
+
+### `source_coverage` 聚合声明
+
+I13 声明一处聚合覆盖映射，替代逐条绑定承担覆盖对账：
+
+```json
+{
+  "source_coverage": {
+    "<source_id>": ["<UC-D id>", "..."]
+  }
+}
+```
+
+- **格式**：`source_id` 为稳定来源标识（REQ / STORY / NFR / CR / 契约 / 配置 / 一致性场景的 `source_ref` 取值）；值为该来源覆盖的 UC-D ID 非空数组，不得重复。
+- **落点**：二选一，整个 I13 只声明一次，不得逐用例重复——
+  1. I13 证据 JSON 的 `source_coverage` 字段（首选，受控 producer 写入）；
+  2. `_index.md` 中一个独立 `source_coverage` 声明块（同一 JSON/YAML 形态）。
+  两处同时声明且内容不一致时拒绝。
+- **正向覆盖**：每个进入 I13 输入的来源（`source_files` / 来源清单中出现的 source_id）在 `source_coverage` 中至少映射一个 `status: ready` 的 UC-D，缺即拒绝并列出未覆盖来源。
+- **反向悬空**：`source_coverage` 引用的 source_id 必须真实存在；引用不存在来源、或映射到不存在 / 非 ready 的 UC-D，均拒绝（保留 DANGLING_REF 类机器检查，防手误）。
+- UC-D 文件内 `source_ref` 存在性检查不变；`source_coverage` 与各 UC-D `source_ref` 冲突（声明覆盖但 `source_ref` 不含该来源）时以 UC-D 声明为准并拒绝聚合声明。
+
+### 抽样自检（P0 全量 + 其余抽样）
+
+派生自检从全量改为分级：
+
+- **P0 与 `type: contract` / `type: api` 用例**：全量自检（覆盖性、锚点、断言、来源一致性逐条执行）。
+- **其余用例**：抽样自检，默认策略为“每个来源至少抽 1 条，且不少于该来源用例数的 20%”（向上取整）；被抽样用例按全量标准执行。
+- 策略写入本协议并**可配置**：工作流配置项 `i13_selfcheck_sampling`（对象，键 `min_per_source` 默认 1、`ratio` 默认 0.2、`full_types` 默认 `["p0","contract","api"]`）覆盖默认值；配置不得把 P0 / contract / api 移出全量集合。
+- 抽样不豁免聚合层校验：`source_coverage` 正向与反向校验始终全量执行。
+
+### tests 层收敛改走 unit `req_refs`
+
+模块声明 `unit_refs` 时，追溯矩阵 tests 层按单元收敛的 REQ 集合来源变更：
+
+- 每个含业务行为的 unit 必须在 `unit-manifest.json` 声明非空 `req_refs`（REQ ID 数组，每个 ID 必须是 `requirements.md` 中已有 REQ）；此时 tests 层与 `code_refs` 层都以 unit `req_refs` 为准（`code_refs_source: "req_refs"`），**不再扫描 UC-D 文件内 REQ 引用**。
+- 未声明 `req_refs` 的 unit 回退现有行为（`code_refs_source: "ucd_subset"`——UC-D 子集文件内 REQ 扫描），过渡期兼容。
+- `ucd_exemption` unit 不要求 `req_refs`；无 unit 声明时保持模块全集，行为不变。
+- `req_refs` 声明与 `source_coverage` 中的 REQ 覆盖冲突时拒绝并要求修正。
+
+### `ucd_sources` 双形态
+
+I13 证据的 `ucd_sources` 接受两种形态，同一份证据只能用其中一种，混用拒绝：
+
+- **旧形态（逐 UC-D）**：`{ "<UC-D id>": { "file": "<路径>", "sha256": "<该文件 SHA-256>" } }`——每个 UC-D 一条文件与摘要记录。
+- **新形态（逐文件，MARS-273 起首选）**：`{ "<文件路径>": { "sha256": "<该文件 SHA-256>", "ucd_ids": ["<该文件内的 UC-D id>", ...] } }`——每用例文件一条记录，`ucd_ids` 列出该文件声明/包含的全部 UC-D ID。
+- 形态判别以 key 为准：key 匹配 `UC-D-\d+` 为旧形态，key 为文件路径为新形态。
+- 两种形态语义等价：`ucd_ids` 必须与该文件实际声明/包含的 UC-D 完全一致（缺、多、重复均拒绝）；来源文件移动或修改（digest 漂移）须刷新 I13 并重新验证，删除交付对账按各自形态比对（新形态为文件级 digest + ID 清单比对）。
 
 ## TDD 模式（`tdd_mode`）
 
@@ -244,22 +312,34 @@ unit_refs: [u1, u2]          # 跨单元：u1 和 u2 的 GREEN 都必须覆盖�
 
 1. 收集产品 Gherkin 与已批准技术风险来源，建立 `source_ref` 清单。
 2. 对每个来源派生至少一个可执行用例；一个来源有多个独立失败模式时分别派生。
-3. 填写实际执行锚点、受影响服务、前置版本与断言。
-4. 自检覆盖性、锚点、来源一致性和技术可行性。
+3. 填写实际执行锚点、受影响服务、前置版本与断言；P0 与 contract/api 用例按分级规则补齐 `story_ref`、`scenario_ref`、来源溯源段与覆盖映射段。
+4. 自检执行“P0 全量 + 其余抽样”分级策略（见“分级降级与聚合层补偿”），聚合层 `source_coverage` 校验始终全量。
 5. 无法执行的用例标记 `blocked`，记录约束、建议和需要的用户决策。
-6. 生成 `_index.md`，列出用例、来源、类型、服务、状态和证据位置。
+6. 生成 `_index.md`，列出用例、来源、类型、服务、状态和证据位置；`source_coverage` 未在证据内声明时在此声明一次。
 7. 将用例 ID 映射到 RED、GREEN、代码审查和构建测试证据；无可执行业务行为时，将结构化豁免映射到确定性替代验证并直接记录到 handoff.md 与构建测试矩阵。
 
 ## 强制字段
 
-所有用例必须有 `id / source_ref / scenario_ref / type / status / service_ids / 覆盖映射`。产品用例额外强制 `story_ref` 和原样 Gherkin；缺任一必需字段即阻断。
+所有用例必须有 `id / source_ref / type / status / service_ids`。P0 与 `type: contract` / `type: api` 用例额外强制 `story_ref`（产品用例）、`scenario_ref`、来源溯源段原样 Gherkin 与覆盖映射段；其余用例这些字段可选（MARS-273 分级降级，见“分级降级与聚合层补偿”）。缺任一必需字段即阻断；来源覆盖与悬空校验收敛到聚合层 `source_coverage` 全量执行。
 
-## 派生自检
+## 派生自检（P0 全量 + 其余抽样，MARS-273）
+
+全量集合（P0 与 `type: contract` / `type: api` 用例，逐条执行）：
 
 - [ ] 每个产品 Gherkin 场景至少有一个 UC-D
 - [ ] 每个已批准高风险技术场景有对应 UC-D 或明确不适用依据
 - [ ] 每个用例有真实执行锚点和可验证断言
+- [ ] `story_ref`、`scenario_ref`、来源溯源段、覆盖映射段齐备且合法
 - [ ] 产品语义未被技术用例覆盖或改写
+
+抽样集合（其余用例，按默认或配置的抽样策略抽取，抽中者按全量标准执行）：
+
+- [ ] 被抽样用例有真实执行锚点和可验证断言
+- [ ] 被抽样用例来源一致（`source_ref` 合法）
+
+始终全量（不随抽样豁免）：
+
+- [ ] 聚合层 `source_coverage` 正向覆盖与反向悬空校验通过
 - [ ] blocked 用例已进入 `_index.md` 待决策清单
 - [ ] ready 用例已映射到单元与 Construction 证据要求
 
@@ -273,7 +353,7 @@ unit_refs: [u1, u2]          # 跨单元：u1 和 u2 的 GREEN 都必须覆盖�
 
 ## 无行为观察复用
 
-删除交付沿用本协议的适用性、声明来源和单元范围：业务删除按声明 ID 解析真实 `test_case_files`（支持描述性文件名和聚合文件），新 I13 的 `ucd_sources` 记录每个 ID 的文件和 SHA-256，来源移动或修改须刷新 I13 并重新验证。缺文件、重复 ID、跨模块来源和归属漂移均拒绝。未声明 `unit_refs` 时保留模块全集；删除归属可由单单元或唯一匹配的 manifest 需求证明，真实多单元歧义须明确归属。
+删除交付沿用本协议的适用性、声明来源和单元范围：业务删除按声明 ID 解析真实 `test_case_files`（支持描述性文件名和聚合文件），I13 的 `ucd_sources` 按双形态（MARS-273，见“分级降级与聚合层补偿”）记录 UC-D 与来源文件的绑定——旧形态逐 UC-D 记 file+SHA-256，新形态逐文件记 digest 与文件内 UC-D ID 清单；来源移动或修改（digest 漂移）须刷新 I13 并重新验证。缺文件、重复 ID、跨模块来源和归属漂移均拒绝。未声明 `unit_refs` 时保留模块全集；删除归属可由单单元或唯一匹配的 manifest 需求证明，真实多单元歧义须明确归属。
 
 纯配置等可信无行为删除在 `source-deletions.json` 条目声明 `applicability: "not_applicable"` 并省略 `ucd_id`；只接受受控 I13 `not_applicable` 或空单元 UC-D 子集及已批准 `ucd_exemption`。仍需真实删除、基线 blob、授权 `req_refs` 和成功/有效复用的替代检查。业务删除省略该字段保持兼容；实际移除可执行业务行为仍走真实业务 RED/GREEN。
 
