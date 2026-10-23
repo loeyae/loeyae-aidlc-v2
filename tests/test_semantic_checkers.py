@@ -1618,6 +1618,52 @@ def test_design_intent_coverage_brownfield_requires_declaration() -> None:
     finally:
         shutil.rmtree(project)
 
+
+def test_field_path_reconciliation_checks_exception_declarations_only() -> None:
+    project = make_temp(prefix="aidlc-field-path-reconciliation-")
+    declaration_path = "docs/aidlc/construction/data-source-validation.md"
+    try:
+        write(project, "src/orders.ts", """const response = await fetchOrders();
+const total = response.data.total;
+const ordinary = response.data.customer.name;
+""")
+        write(project, declaration_path, """# Data source validation
+```json
+{
+  "field_mapping": {
+    "orders-api": {
+      "confirmed": true,
+      "exceptions": [{
+        "ui_field": "Order total",
+        "source_path": "response.data.total",
+        "status": "⚠️需转换",
+        "impact": "Currency formatting is required",
+        "disposition": "Format with the money formatter"
+      }]
+    }
+  }
+}
+```
+""")
+        passed = run_checker(project, "field-path-reconciliation")
+        assert passed.returncode == 0, passed.stderr
+        payload = json.loads(passed.stdout)
+        assert payload["status"] == "passed"
+        assert payload["sources_confirmed"] == ["orders-api"]
+        assert "response.data.customer.name" in payload["code_access_paths"]
+
+        write(project, declaration_path, (Path(project) / declaration_path).read_text().replace("response.data.total", "response.data.missing"))
+        dangling = run_checker(project, "field-path-reconciliation")
+        assert dangling.returncode != 0
+        assert "DANGLING_EXCEPTION@field_mapping" in dangling.stderr
+
+        write(project, declaration_path, (Path(project) / declaration_path).read_text().replace('"confirmed": true', '"confirmed": false'))
+        invalid = run_checker(project, "field-path-reconciliation")
+        assert invalid.returncode != 0
+        assert "confirmed must be true" in invalid.stderr
+    finally:
+        shutil.rmtree(project)
+
     # brownfield, no markers, no declaration -> fail.
     project = make_temp(prefix="aidlc-design-intent-brownfield-fail-")
     try:
@@ -1682,4 +1728,5 @@ if __name__ == "__main__":
     test_implementation_report_aggregates_selected_artifacts()
     test_implementation_report_ui_page_forward_coverage()
     test_design_intent_coverage_brownfield_requires_declaration()
+    test_field_path_reconciliation_checks_exception_declarations_only()
     print("semantic checker regression tests passed")

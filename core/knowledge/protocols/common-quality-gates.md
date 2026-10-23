@@ -30,6 +30,12 @@ Evidence 路径由当前 directive 的 `evidence_root` 决定：
 
 ## 阶段质量
 
+### C1/C6 字段映射的分级核对
+
+C1 对外部数据源采用按 `source_id` 的聚合确认：每个参与来源确认“除明确异常外所需字段均存在”，仅逐条维护 `🚨不存在` 与 `⚠️需转换` 项。C6 必须全量核对这些异常项；其余字段按可复盘的抽样规则核对，P0 和用户关键展示字段仍全量核对。
+
+当 `data-source-validation.md` 提供 `field_mapping` JSON 声明时，C6 运行 `field-path-reconciliation`。该确定性检查只核对声明的异常路径和约定的 `response.data.xxx` 风格代码访问，拦截异常声明悬空、路径不一致和声明格式错误；它不接入外部 schema，也不把未声明的正常访问判为字段缺失。
+
 - `requires`、`condition`、`consumes`、`produces` 和 sensor 必须全部满足。
 - instruction-only 阶段完成时传入 `--instruction-ack <stage>`。
 - `application-design` 与 `operations-authorization` 等阶段图 `approval: block` 节点需要用户在审阅影响、产物、review、构建和测试状态后显式提交 `--user-input Approve`；`user-stories`、`units-generation`、`infrastructure-design` 和 `code-generation` 的 `notify` 覆盖规划、生成模板及完成标准，展示摘要后复用既有授权；用户显式要求审阅时等待。普通文档不得将 notify 升级为 block。

@@ -93,6 +93,7 @@ const MODULE_CONTEXT_SENSORS = new Set([
   "infrastructure-completeness",
   "frontend-platform-spec",
   "ui-design-alignment",
+  "field-path-reconciliation",
 ]);
 const UNIT_CONTEXT_SENSORS = new Set([
   "review-evidence",
@@ -140,6 +141,7 @@ const SENSOR_NAMES = new Set([
   "nfr-coverage", "infrastructure-completeness", "implementation-report", "frontend-platform-spec",
   "template-completeness", "recovery-evidence",
   "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
+  "field-path-reconciliation",
   "ui-artifact-consistency", "inception-consistency", "test-case-derivation", "red-test-evidence", "green-test-evidence", "baseline-test-evidence",
   "traceability-matrix", "structural-invariants",
 ]);
@@ -901,6 +903,182 @@ function declaredField(declaration: UcdDeclaration | undefined, key: string): st
   return typeof value === "string" ? value.trim().toLowerCase() : undefined;
 }
 
+// ---------------------------------------------------------------------------
+// MARS-273 聚合层 source_coverage:覆盖对账收敛(正向覆盖 + 反向悬空)。
+// 逐条绑定(story_ref / scenario_ref / 溯源 Gherkin 副本)降级为分级可选后,
+// 来源与 UC-D 的覆盖对账只在聚合层执行一次:派生自逐用例 source_ref,声明于
+// _index.md 时机器校验其一致性。未声明时保持存量行为(零迁移兼容)。
+// ---------------------------------------------------------------------------
+
+/** 进入 I13 输入的稳定来源标识(REQ / STORY / US / NFR / CR),聚合层正向覆盖的对象。 */
+const SOURCE_ID_PATTERN = /\b(?:REQ-[A-Z0-9][A-Z0-9_-]*|STORY-\d+|US-\d+|NFR-\d+|CR-\d+)\b/g;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function unquoteValue(value: string): string {
+  const trimmed = value.trim();
+  const quoted = /^"(.*)"$|^'(.*)'$/.exec(trimmed);
+  return quoted ? quoted[1] ?? quoted[2] ?? "" : trimmed.replace(/\s+#.*$/, "").trim();
+}
+
+/** source_ref 的来源 token:`REQ-1`、`REQ-1, REQ-2` 或 `[REQ-1, REQ-2]` 均可;无 frontmatter 的用例文件回退正文行。 */
+function sourceRefTokens(declaration: UcdDeclaration | undefined): string[] {
+  let value: FrontmatterValue | undefined = declaration?.fields?.get("source_ref");
+  if (value === undefined && !declaration?.fields) {
+    const match = /^[^\S\n]*(?:[\s>*-]*\**`?)?source_ref\`?\**\s*[:：]\s*(.+)$/im.exec(declaration?.content ?? "");
+    if (match) value = match[1];
+  }
+  if (value === undefined) return [];
+  const parts = Array.isArray(value) ? value : [value];
+  return parts.flatMap((part) => part.split(/[,;，；、/\s]+/)).map((token) => token.trim()).filter(Boolean);
+}
+
+function normalizeSourceCoverage(coverage: Record<string, string[]>): Record<string, string[]> {
+  const entries = Object.entries(coverage)
+    .map(([source, ucds]): [string, string[]] => [source, [...new Set(ucds)].sort()])
+    .sort(([left], [right]) => left.localeCompare(right));
+  return Object.fromEntries(entries);
+}
+
+/** 逐 UC-D source_ref 聚合出的覆盖映射:source_id → 覆盖它的 UC-D 清单。 */
+function derivedSourceCoverage(ucdIds: string[], declarations: Map<string, UcdDeclaration>): Record<string, string[]> {
+  const coverage = new Map<string, string[]>();
+  for (const id of ucdIds) {
+    for (const source of sourceRefTokens(declarations.get(id))) {
+      const list = coverage.get(source) ?? [];
+      if (!list.includes(id)) list.push(id);
+      coverage.set(source, list);
+    }
+  }
+  return normalizeSourceCoverage(Object.fromEntries(coverage));
+}
+
+/** 极简 YAML 子集:source_coverage: 之下的 `key: [a, b]`、`key: value` 与 `key:` + `- item` 行。 */
+function yamlishSourceCoverage(block: string): Record<string, unknown> | null {
+  const lines = block.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^source_coverage\s*:\s*\{.*\}\s*$/.test(line) || /^source_coverage\s*:\s*$/.test(line));
+  if (start < 0) return null;
+  const flow = /^\s*source_coverage\s*:\s*(\{.*\})\s*$/.exec(lines[start]);
+  if (flow) {
+    try { return { source_coverage: JSON.parse(flow[1]) }; } catch { return null; }
+  }
+  const coverage: Record<string, string[]> = {};
+  let key: string | undefined;
+  for (const line of lines.slice(start + 1)) {
+    if (/^\S/.test(line)) break;
+    if (!line.trim() || /^\s*#/.test(line)) continue;
+    const item = /^\s+-\s+(.*)$/.exec(line);
+    if (item) {
+      if (key === undefined) fail(`source_coverage YAML list item does not belong to a source_id: ${line.trim()}`);
+      coverage[key].push(unquoteValue(item[1]));
+      continue;
+    }
+    const pair = /^\s+([^\s:]+)\s*:\s*(.*)$/.exec(line);
+    if (!pair) fail(`unsupported source_coverage YAML line: ${line.trim()}`);
+    key = pair[1];
+    const raw = pair[2].trim();
+    if (raw === "") {
+      coverage[key] = [];
+      continue;
+    }
+    const inline = /^\[(.*)\]$/.exec(raw);
+    coverage[key] = inline ? inline[1].split(",").map(unquoteValue).filter(Boolean) : [unquoteValue(raw)];
+  }
+  return { source_coverage: coverage };
+}
+
+/**
+ * MARS-273:_index.md 中独立的 source_coverage 声明块(JSON 或 YAML 形态),至多一个。
+ * 声明块用于人工聚合路径;未声明时覆盖对账走证据 JSON 的 producer 派生结果。
+ */
+function declaredSourceCoverage(indexPath: string): Record<string, string[]> | null {
+  const content = existsSync(indexPath) ? text(indexPath) : "";
+  if (!content) return null;
+  const blocks = [...content.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].map((match) => match[1].trim()).filter((block) => /source_coverage/.test(block));
+  if (blocks.length === 0) return null;
+  if (blocks.length > 1) fail(`source_coverage must be declared once in ${relativePath(indexPath)}, found ${blocks.length} declaration blocks`);
+  const label = relativePath(indexPath);
+  const block = blocks[0];
+  let value: unknown;
+  try {
+    const parsed: unknown = JSON.parse(block);
+    value = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>).source_coverage : undefined;
+  } catch {
+    value = yamlishSourceCoverage(block)?.source_coverage;
+  }
+  if (value === undefined) fail(`source_coverage declaration in ${label} must be a JSON object with a source_coverage key or a YAML source_coverage: mapping`);
+  if (value === null || typeof value !== "object" || Array.isArray(value)) fail(`source_coverage in ${label} must be an object of {source_id: [UC-D id, ...]}`);
+  const coverage: Record<string, string[]> = {};
+  for (const [source, ucds] of Object.entries(value as Record<string, unknown>)) {
+    if (!source.trim()) fail(`source_coverage in ${label} has an empty source_id key`);
+    const list = Array.isArray(ucds) ? ucds : typeof ucds === "string" ? [ucds] : null;
+    if (list === null || list.length === 0) fail(`source_coverage.${source} in ${label} must be a non-empty array of UC-D ids`);
+    const mapped: string[] = [];
+    for (const ucd of list) {
+      if (typeof ucd !== "string" || !ucd.trim()) fail(`source_coverage.${source} in ${label} contains a non-string or empty UC-D id`);
+      if (mapped.includes(ucd)) fail(`source_coverage.${source} in ${label} maps ${ucd} twice`);
+      mapped.push(ucd);
+    }
+    coverage[source] = mapped;
+  }
+  return normalizeSourceCoverage(coverage);
+}
+
+/**
+ * MARS-273 聚合层机器校验(仅声明了 source_coverage 时执行,存量零迁移兼容):
+ * 反向悬空(声明引用不存在的来源或用例,DANGLING_REF 类拦截)、与逐条 source_ref
+ * 聚合结果冲突(UC-D 声明为准)、正向覆盖(每个进入 I13 输入的来源至少映射一个
+ * status: ready 的 UC-D)。
+ */
+function validateSourceCoverage(declared: Record<string, string[]>, derived: Record<string, string[]>, sourceContent: string, ucdIds: string[], declarations: Map<string, UcdDeclaration>, indexPath: string): void {
+  const label = relativePath(indexPath);
+  const ready = new Set(ucdIds);
+  for (const [source, ucds] of Object.entries(declared)) {
+    if (!new RegExp(`\\b${escapeRegExp(source)}\\b`).test(sourceContent)) {
+      fail(`DANGLING_REF@source_coverage: ${source} is not a source of this I13 (declared in ${label})`);
+    }
+    for (const ucd of ucds) {
+      const declaration = declarations.get(ucd);
+      if (!declaration) fail(`DANGLING_REF@source_coverage: ${source} maps ${ucd}, which no case file declares (declared in ${label})`);
+      if (!ready.has(ucd) || declaration.status !== "ready") {
+        fail(`source_coverage: ${source} maps ${ucd}, whose status is ${declaration.status ?? "missing"}, not ready (declared in ${label})`);
+      }
+      if (!sourceRefTokens(declaration).includes(source)) {
+        fail(`source_coverage conflict: ${ucd} is declared to cover ${source}, but its own source_ref does not include that source (the UC-D declaration wins; fix the aggregate declaration in ${label})`);
+      }
+    }
+  }
+  const declaredJson = JSON.stringify(declared);
+  const derivedJson = JSON.stringify(derived);
+  if (declaredJson !== derivedJson) {
+    fail(`source_coverage declared in ${label} does not match the aggregate of the UC-D source_ref declarations: declared ${declaredJson} vs derived ${derivedJson}`);
+  }
+  const uncovered = ids(sourceContent, SOURCE_ID_PATTERN).filter((source) => !(source in declared));
+  if (uncovered.length > 0) {
+    fail(`source_coverage must map every source of this I13 to at least one ready UC-D; uncovered: ${uncovered.join(", ")}`);
+  }
+}
+
+/**
+ * MARS-273 ucd_sources 新形态(逐文件,首选):每个用例文件一条
+ * {sha256, ucd_ids} 记录,key 为文件路径。旧逐 UC-D {file, sha256} 形态由
+ * 消费方(aidlc-source-deletions)双形态兼容;形态判别以 key 为准。
+ */
+function fileUcdSources(declarations: Map<string, UcdDeclaration>): Record<string, { sha256: string; ucd_ids: string[] }> {
+  const byFile = new Map<string, { file: string; ids: string[] }>();
+  for (const [id, declaration] of [...declarations].sort(([left], [right]) => left.localeCompare(right))) {
+    const key = relativePath(declaration.file);
+    const entry = byFile.get(key) ?? { file: declaration.file, ids: [] };
+    if (!entry.ids.includes(id)) entry.ids.push(id);
+    byFile.set(key, entry);
+  }
+  return Object.fromEntries([...byFile]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => [key, { sha256: createHash("sha256").update(text(entry.file)).digest("hex"), ucd_ids: entry.ids }]));
+}
+
 type UcdMode = { mode: "new" } | { mode: "characterization"; codeRefs: string[]; reason: string; approvalRef: string };
 
 const CHARACTERIZATION_FIELDS = ["code_refs", "reason", "approval_ref"] as const;
@@ -1434,6 +1612,73 @@ function functionalDesign(): Record<string, unknown> {
   if (!/数据源|data source|repository|database|数据库|表结构/i.test(content)) fail("functional design contains no data source validation");
   if (!/错误|异常|error|exception|失败|timeout|超时/i.test(content)) fail("functional design contains no error handling definition");
   return { status: "passed", data_source_validation: "passed", ambiguities_resolved: true, unresolved_blockers: 0, use_cases_covered: covered.length > 0 ? covered : ["documented functional cases"], interfaces_specified: interfaces, error_handling_defined: true };
+}
+
+// MARS-279: C1 normal-field rows are aggregate declarations. This opt-in C6
+// check deliberately reconciles only declared exceptions against code paths; it
+// cannot (and must not claim to) prove an external provider's real schema.
+type FieldMappingException = { ui_field: string; source_path: string; status: string; impact: string; disposition: string };
+type FieldMappingSource = { source_id: string; exceptions: FieldMappingException[] };
+
+function fieldMappingDeclaration(path: string): FieldMappingSource[] | null {
+  const blocks = [...text(path).matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)].map((match) => match[1].trim())
+    .filter((block) => /"field_mapping"\s*:/.test(block));
+  if (blocks.length === 0) return null;
+  if (blocks.length > 1) fail(`field_mapping must be declared once in ${relativePath(path)}`);
+  let parsed: unknown;
+  try { parsed = JSON.parse(blocks[0]); } catch { fail(`field_mapping declaration in ${relativePath(path)} must be valid JSON`); }
+  const mapping = objectValue(objectValue(parsed, "field_mapping declaration").field_mapping, "field_mapping");
+  const sources: FieldMappingSource[] = [];
+  for (const [sourceId, rawSource] of Object.entries(mapping)) {
+    if (!sourceId.trim()) fail("field_mapping has an empty source_id");
+    const source = objectValue(rawSource, `field_mapping.${sourceId}`);
+    if (source.confirmed !== true) fail(`field_mapping.${sourceId}.confirmed must be true for an aggregate confirmation`);
+    const rawExceptions = source.exceptions;
+    if (!Array.isArray(rawExceptions)) fail(`field_mapping.${sourceId}.exceptions must be an array`);
+    const exceptions = rawExceptions.map((raw, index) => {
+      const entry = objectValue(raw, `field_mapping.${sourceId}.exceptions[${index}]`);
+      const status = stringValue(entry.status, `field_mapping.${sourceId}.exceptions[${index}].status`);
+      if (!/^(?:🚨不存在|⚠️需转换|missing|transform)$/i.test(status)) fail(`field_mapping.${sourceId}.exceptions[${index}].status must be 🚨不存在, ⚠️需转换, missing, or transform`);
+      return {
+        ui_field: stringValue(entry.ui_field, `field_mapping.${sourceId}.exceptions[${index}].ui_field`),
+        source_path: stringValue(entry.source_path, `field_mapping.${sourceId}.exceptions[${index}].source_path`),
+        status,
+        impact: stringValue(entry.impact, `field_mapping.${sourceId}.exceptions[${index}].impact`),
+        disposition: stringValue(entry.disposition, `field_mapping.${sourceId}.exceptions[${index}].disposition`),
+      };
+    });
+    sources.push({ source_id: sourceId.trim(), exceptions });
+  }
+  if (sources.length === 0) fail("field_mapping must declare at least one source_id");
+  return sources;
+}
+
+function normalizedFieldPath(value: string): string { return value.replace(/\?\./g, ".").trim(); }
+
+function codeFieldPaths(): Map<string, string[]> {
+  const found = new Map<string, string[]>();
+  const pattern = /\b(?:response|result|payload)(?:(?:\?\.)|\.)data(?:(?:\?\.)|\.)[A-Za-z_$][\w$]*(?:(?:(?:\?\.)|\.)[A-Za-z_$][\w$]*)*/g;
+  for (const file of scanFiles(ROOT, ".", SOURCE_FILE_PATTERN).filter((candidate) => !TEST_FILE_PATTERN.test(candidate))) {
+    for (const match of text(file).matchAll(pattern)) {
+      const path = normalizedFieldPath(match[0]);
+      const locations = found.get(path) || [];
+      locations.push(relativePath(file));
+      found.set(path, locations);
+    }
+  }
+  return found;
+}
+
+function fieldPathReconciliation(): Record<string, unknown> {
+  const path = join(ROOT, contextual("docs/aidlc/construction/data-source-validation.md"));
+  if (!existsSync(path)) return { status: "not_applicable", reason: "data-source-validation.md is missing" };
+  const sources = fieldMappingDeclaration(path);
+  if (sources === null) return { status: "not_applicable", reason: "field_mapping declaration is absent" };
+  const paths = codeFieldPaths();
+  const exceptions = sources.flatMap((source) => source.exceptions.map((entry) => ({ ...entry, source_id: source.source_id })));
+  const dangling = exceptions.filter((entry) => !paths.has(normalizedFieldPath(entry.source_path)));
+  if (dangling.length > 0) fail(`DANGLING_EXCEPTION@field_mapping: declared exception paths are not accessed by code: ${dangling.map((entry) => `${entry.source_id}:${entry.source_path}`).join(", ")}`);
+  return { status: "passed", sources_confirmed: sources.map((source) => source.source_id), exception_paths_checked: exceptions.map((entry) => ({ source_id: entry.source_id, source_path: normalizedFieldPath(entry.source_path), status: entry.status })), code_access_paths: [...paths.keys()].sort() };
 }
 
 function nfrCoverage(): Record<string, unknown> {
@@ -3827,15 +4072,6 @@ function traceabilityMatrix(): Record<string, unknown> {
   const matrixI13 = ACTIVE_UNIT ? i13Evidence() : null;
   const matrixScope = matrixI13?.status === "required" ? unitUcdIds(matrixI13, ACTIVE_UNIT) : null;
   const unitScope = matrixScope?.scoped ? matrixScope : null;
-  let unitTestReqs: Set<string> | null = null;
-  if (unitScope) {
-    const caseFilesForScope = allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/).filter((path) => basename(path) !== "_index.md");
-    const declarations = ucdDeclarations(caseFilesForScope);
-    unitTestReqs = new Set(unitScope.all.flatMap((id) => {
-      const declaration = declarations.get(id);
-      return declaration ? ids(text(declaration.file), /\bREQ-[A-Z0-9][A-Z0-9_-]*\b/g) : [];
-    }));
-  }
   // 4.11.0 unit scope of the code_refs layer: the unit-manifest `req_refs` of the active
   // unit, else the REQs of its UC-D subset (as the tests layer), else the module set. A
   // ucd_exemption unit (empty UC-D subset by I13 ucd_units) has no code_refs/tests layer.
@@ -3849,6 +4085,33 @@ function traceabilityMatrix(): Record<string, unknown> {
     }
   }
   const unitExemption = unitScope && unitScope.all.length === 0 ? unitDescriptor?.ucd_exemption : undefined;
+  // MARS-273: tests 层收敛与 code_refs 层一致改走 unit req_refs(不再扫描 UC-D 文件内
+  // REQ);未声明 req_refs 的 unit 回退 ucd_subset(过渡期兼容),ucd_exemption unit 无
+  // tests 层。unitScope 下的非空保证保持(供 unit_scope 输出)。
+  let unitTestReqs: Set<string> | null = null;
+  if (!unitExemption && unitDescriptor?.req_refs) {
+    unitTestReqs = new Set(unitDescriptor.req_refs);
+  } else if (unitScope) {
+    const caseFilesForScope = allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/).filter((path) => basename(path) !== "_index.md");
+    const declarations = ucdDeclarations(caseFilesForScope);
+    unitTestReqs = new Set(unitScope.all.flatMap((id) => {
+      const declaration = declarations.get(id);
+      return declaration ? ids(text(declaration.file), /\bREQ-[A-Z0-9][A-Z0-9_-]*\b/g) : [];
+    }));
+  }
+  // MARS-273: unit req_refs 与聚合层 source_coverage 的 REQ 覆盖冲突拒绝并要求修正。
+  const coverageValue = matrixI13?.source_coverage;
+  const declaredCoverage = typeof coverageValue === "object" && coverageValue !== null && !Array.isArray(coverageValue)
+    ? coverageValue as Record<string, unknown>
+    : null;
+  if (declaredCoverage !== null && !unitExemption && unitDescriptor?.req_refs) {
+    for (const ref of unitDescriptor.req_refs) {
+      const ucds = declaredCoverage[ref];
+      if (!Array.isArray(ucds) || ucds.length === 0) {
+        brokenRows.push(`${ref}: UNCOVERED_REQ@source_coverage(unit ${ACTIVE_UNIT}.req_refs 未被聚合层 source_coverage 覆盖)`);
+      }
+    }
+  }
   let unitCodeReqs: Set<string> | null = null;
   let codeRefsSource: "req_refs" | "ucd_subset" | "module" = "module";
   const unknownReqRefs: string[] = [];
@@ -3964,7 +4227,7 @@ function traceabilityMatrix(): Record<string, unknown> {
     ...(ACTIVE_UNIT && (unitScope || codeRefsSource !== "module" || unitExemption) ? {
       unit_scope: {
         unit_id: ACTIVE_UNIT,
-        ...(unitScope ? { ucd_ids: unitScope.all, tests_layer_reqs: [...unitTestReqs!].sort() } : {}),
+        ...(unitScope ? { ucd_ids: unitScope.all, tests_layer_reqs: [...unitTestReqs!].sort() } : unitTestReqs ? { tests_layer_reqs: [...unitTestReqs].sort() } : {}),
         code_refs_layer_reqs: unitExemption ? [] : [...(unitCodeReqs || reqIds)].sort(),
         code_refs_source: unitExemption ? "ucd_exemption" : codeRefsSource,
         ...(unitExemption ? {
@@ -4529,6 +4792,7 @@ const CHECKERS: Record<string, () => Record<string, unknown> | Promise<Record<st
   "test-quality": testQuality,
   "contract-baseline": contractBaseline,
   "functional-design-completeness": functionalDesign,
+  "field-path-reconciliation": fieldPathReconciliation,
   "nfr-coverage": nfrCoverage,
   "infrastructure-completeness": infrastructure,
   "implementation-report": implementationReport,
