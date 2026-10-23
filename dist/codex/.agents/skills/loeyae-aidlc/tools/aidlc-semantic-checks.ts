@@ -93,6 +93,7 @@ const MODULE_CONTEXT_SENSORS = new Set([
   "infrastructure-completeness",
   "frontend-platform-spec",
   "ui-design-alignment",
+  "field-path-reconciliation",
 ]);
 const UNIT_CONTEXT_SENSORS = new Set([
   "review-evidence",
@@ -140,6 +141,7 @@ const SENSOR_NAMES = new Set([
   "nfr-coverage", "infrastructure-completeness", "implementation-report", "frontend-platform-spec",
   "template-completeness", "recovery-evidence",
   "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
+  "field-path-reconciliation",
   "ui-artifact-consistency", "inception-consistency", "test-case-derivation", "red-test-evidence", "green-test-evidence", "baseline-test-evidence",
   "traceability-matrix", "structural-invariants",
 ]);
@@ -1610,6 +1612,73 @@ function functionalDesign(): Record<string, unknown> {
   if (!/数据源|data source|repository|database|数据库|表结构/i.test(content)) fail("functional design contains no data source validation");
   if (!/错误|异常|error|exception|失败|timeout|超时/i.test(content)) fail("functional design contains no error handling definition");
   return { status: "passed", data_source_validation: "passed", ambiguities_resolved: true, unresolved_blockers: 0, use_cases_covered: covered.length > 0 ? covered : ["documented functional cases"], interfaces_specified: interfaces, error_handling_defined: true };
+}
+
+// MARS-279: C1 normal-field rows are aggregate declarations. This opt-in C6
+// check deliberately reconciles only declared exceptions against code paths; it
+// cannot (and must not claim to) prove an external provider's real schema.
+type FieldMappingException = { ui_field: string; source_path: string; status: string; impact: string; disposition: string };
+type FieldMappingSource = { source_id: string; exceptions: FieldMappingException[] };
+
+function fieldMappingDeclaration(path: string): FieldMappingSource[] | null {
+  const blocks = [...text(path).matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)].map((match) => match[1].trim())
+    .filter((block) => /"field_mapping"\s*:/.test(block));
+  if (blocks.length === 0) return null;
+  if (blocks.length > 1) fail(`field_mapping must be declared once in ${relativePath(path)}`);
+  let parsed: unknown;
+  try { parsed = JSON.parse(blocks[0]); } catch { fail(`field_mapping declaration in ${relativePath(path)} must be valid JSON`); }
+  const mapping = objectValue(objectValue(parsed, "field_mapping declaration").field_mapping, "field_mapping");
+  const sources: FieldMappingSource[] = [];
+  for (const [sourceId, rawSource] of Object.entries(mapping)) {
+    if (!sourceId.trim()) fail("field_mapping has an empty source_id");
+    const source = objectValue(rawSource, `field_mapping.${sourceId}`);
+    if (source.confirmed !== true) fail(`field_mapping.${sourceId}.confirmed must be true for an aggregate confirmation`);
+    const rawExceptions = source.exceptions;
+    if (!Array.isArray(rawExceptions)) fail(`field_mapping.${sourceId}.exceptions must be an array`);
+    const exceptions = rawExceptions.map((raw, index) => {
+      const entry = objectValue(raw, `field_mapping.${sourceId}.exceptions[${index}]`);
+      const status = stringValue(entry.status, `field_mapping.${sourceId}.exceptions[${index}].status`);
+      if (!/^(?:🚨不存在|⚠️需转换|missing|transform)$/i.test(status)) fail(`field_mapping.${sourceId}.exceptions[${index}].status must be 🚨不存在, ⚠️需转换, missing, or transform`);
+      return {
+        ui_field: stringValue(entry.ui_field, `field_mapping.${sourceId}.exceptions[${index}].ui_field`),
+        source_path: stringValue(entry.source_path, `field_mapping.${sourceId}.exceptions[${index}].source_path`),
+        status,
+        impact: stringValue(entry.impact, `field_mapping.${sourceId}.exceptions[${index}].impact`),
+        disposition: stringValue(entry.disposition, `field_mapping.${sourceId}.exceptions[${index}].disposition`),
+      };
+    });
+    sources.push({ source_id: sourceId.trim(), exceptions });
+  }
+  if (sources.length === 0) fail("field_mapping must declare at least one source_id");
+  return sources;
+}
+
+function normalizedFieldPath(value: string): string { return value.replace(/\?\./g, ".").trim(); }
+
+function codeFieldPaths(): Map<string, string[]> {
+  const found = new Map<string, string[]>();
+  const pattern = /\b(?:response|result|payload)(?:(?:\?\.)|\.)data(?:(?:\?\.)|\.)[A-Za-z_$][\w$]*(?:(?:(?:\?\.)|\.)[A-Za-z_$][\w$]*)*/g;
+  for (const file of scanFiles(ROOT, ".", SOURCE_FILE_PATTERN).filter((candidate) => !TEST_FILE_PATTERN.test(candidate))) {
+    for (const match of text(file).matchAll(pattern)) {
+      const path = normalizedFieldPath(match[0]);
+      const locations = found.get(path) || [];
+      locations.push(relativePath(file));
+      found.set(path, locations);
+    }
+  }
+  return found;
+}
+
+function fieldPathReconciliation(): Record<string, unknown> {
+  const path = join(ROOT, contextual("docs/aidlc/construction/data-source-validation.md"));
+  if (!existsSync(path)) return { status: "not_applicable", reason: "data-source-validation.md is missing" };
+  const sources = fieldMappingDeclaration(path);
+  if (sources === null) return { status: "not_applicable", reason: "field_mapping declaration is absent" };
+  const paths = codeFieldPaths();
+  const exceptions = sources.flatMap((source) => source.exceptions.map((entry) => ({ ...entry, source_id: source.source_id })));
+  const dangling = exceptions.filter((entry) => !paths.has(normalizedFieldPath(entry.source_path)));
+  if (dangling.length > 0) fail(`DANGLING_EXCEPTION@field_mapping: declared exception paths are not accessed by code: ${dangling.map((entry) => `${entry.source_id}:${entry.source_path}`).join(", ")}`);
+  return { status: "passed", sources_confirmed: sources.map((source) => source.source_id), exception_paths_checked: exceptions.map((entry) => ({ source_id: entry.source_id, source_path: normalizedFieldPath(entry.source_path), status: entry.status })), code_access_paths: [...paths.keys()].sort() };
 }
 
 function nfrCoverage(): Record<string, unknown> {
@@ -4815,6 +4884,7 @@ const CHECKERS: Record<string, () => Record<string, unknown> | Promise<Record<st
   "test-quality": testQuality,
   "contract-baseline": contractBaseline,
   "functional-design-completeness": functionalDesign,
+  "field-path-reconciliation": fieldPathReconciliation,
   "nfr-coverage": nfrCoverage,
   "infrastructure-completeness": infrastructure,
   "implementation-report": implementationReport,

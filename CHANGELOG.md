@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.22.15 — 2026-10-23
+
+- Tier field mapping validation (MARS-279): C1 field-mapping tables switch to per-`source_id` aggregate confirmation — normal fields are no longer maintained as per-row ✅ bookkeeping; only 🚨missing / ⚠️needs-conversion exception rows are declared individually. C6 full-checks exception rows and samples the remainder (P0 and user-critical display fields still full). A deterministic `field-path-reconciliation` check consumes the `field_mapping` JSON declaration in `data-source-validation.md`, intercepting dangling exception paths, path inconsistencies and malformed declarations; it requires no external schema and does not flag undeclared normal access.
+- Tier Mermaid diagram validation (MARS-280): default Mermaid evidence closes at controlled `STATIC_PASS` admission for module-internal simple flow diagrams — each `mermaid` block requires an adjacent `aidlc-mermaid-validation` JSON declaration (stable `diagram_id`, `validation_tier`, `diagram_type` and `all_elements_within_module` / `no_contract_semantics` / `not_architecture_or_delivery_evidence` witnesses); missing, duplicated or mismatching declarations block rather than silently downgrading. The full V1 SVG/Diagram contract (expected contract, structural / route / geometry / visual four-layer validation) now applies only under explicit SVG `FULL_CONTRACT` selection.
+- frontend-platform-spec review sampling (MARS-281): `layout_primitives` / `component_mapping` / `css_constraints` rows are reviewed tiered — key rows (layout-affecting primitives and structural rewrites, interaction-bearing mappings, browser-compat constraints with forbidden patterns) are checked in full against approved sources; remaining pure-style rows are sampled with I13 sample-failure rollback semantics. Empty/placeholder/duplicate rows, missing actual components or required constraints still fail, and SHA-256 source binding machine checks are unchanged.
+- Synchronize package, plugin, marketplace and stage-graph versions and regenerate all harness distributions.
+
 ## 4.22.14 — 2026-10-23
 
 - I13 UC-D reverse-tracing bindings tiered downgrade (MARS-273): `story_ref` / `scenario_ref` / the verbatim-Gherkin source-tracing section / the coverage-mapping section / derivation logs become tiered-optional — required only for P0 and `contract`/`api` cases, aligned with the MARS-271 `mapping_deferred` direction; undowngraded gates (`unit_refs`, `tdd_mode`, `defect_ref`, GREEN `uc_mapping`) unchanged.
