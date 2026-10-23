@@ -471,8 +471,9 @@ saveWorkflowState(process.cwd(), state);
         assert payload["final_status"] == "STATIC_PASS", payload
         assert payload["validation_tier"] == "STATIC_PASS", payload
         assert payload["admission_status"] == "passed", payload
+        # The checker reports native separators; normalize so the assertion holds on both POSIX and Windows.
         assert payload["diagrams"] == [{
-            "file": flows, "line": 4, "type": "flowchart", "diagram_id": "order-retry", "module": "m01-orders",
+            "file": flows.replace("/", os.sep), "line": 4, "type": "flowchart", "diagram_id": "order-retry", "module": "m01-orders",
             "validation_tier": "STATIC_PASS", "diagram_type": "module-internal-simple-flow",
             "admission_conditions": {
                 "module_internal_simple_flow": True, "all_elements_within_module": True,
@@ -486,7 +487,7 @@ saveWorkflowState(process.cwd(), state);
         assert undeclared.returncode != 0
         assert "cannot implicitly claim STATIC_PASS" in undeclared.stderr
 
-        write(project, flows, f"# Flow\n\n{declaration.replace('no_contract_semantics\\\":true', 'no_contract_semantics\\\":false')}\n```mermaid\nflowchart LR\n  A[Retry] --> B[Return]\n```\n")
+        write(project, flows, f"# Flow\n\n{declaration.replace('\"no_contract_semantics\":true', '\"no_contract_semantics\":false')}\n```mermaid\nflowchart LR\n  A[Retry] --> B[Return]\n```\n")
         contract = run_checker(project, "diagram-contract")
         assert contract.returncode != 0
         assert "declaration.no_contract_semantics must be true" in contract.stderr
@@ -1673,6 +1674,47 @@ def test_design_intent_coverage_brownfield_requires_declaration() -> None:
     finally:
         shutil.rmtree(project)
 
+    # brownfield, no markers, no declaration -> fail.
+    project = make_temp(prefix="aidlc-design-intent-brownfield-fail-")
+    try:
+        write_module_manifest(project, ("module-a",))
+        write_module_state(project, "units-generation", {"module-a": None})
+        write(project, reverse_path, "# Reverse engineering\n\n现有 OrderController。\n")
+        write(project, design_path, "# Components\n\nOrderService 负责下单。\n")
+        fail_run = run_checker(project, "design-intent-coverage", "module-a")
+        assert fail_run.returncode != 0, fail_run.stdout
+        assert "no explicit no-change declaration" in fail_run.stderr, fail_run.stderr
+    finally:
+        shutil.rmtree(project)
+
+    # brownfield, explicit no-change declaration -> passed.
+    project = make_temp(prefix="aidlc-design-intent-brownfield-nochange-")
+    try:
+        write_module_manifest(project, ("module-a",))
+        write_module_state(project, "units-generation", {"module-a": None})
+        write(project, reverse_path, "# Reverse engineering\n\n现有 OrderController。\n")
+        write(project, design_path, "# Components\n\n本次仅新增组件。[意图:无结构变更]\n")
+        ok = run_checker(project, "design-intent-coverage", "module-a")
+        assert ok.returncode == 0, ok.stderr
+        payload = json.loads(ok.stdout)
+        assert payload["project_mode"] == "brownfield", payload
+        assert payload["no_change_declared"] is True, payload
+    finally:
+        shutil.rmtree(project)
+
+    # brownfield, a [意图:*] marker not carried by any unit -> fail (existing coverage not regressed).
+    project = make_temp(prefix="aidlc-design-intent-uncovered-")
+    try:
+        write_module_manifest(project, ("module-a",))
+        write_module_state(project, "units-generation", {"module-a": None})
+        write(project, reverse_path, "# Reverse engineering\n\n现有 OrderController。\n")
+        write(project, design_path, "# Components\n\nOrderController [意图:删除]\n")
+        uncovered = run_checker(project, "design-intent-coverage", "module-a")
+        assert uncovered.returncode != 0, uncovered.stdout
+        assert "design intents are not covered" in uncovered.stderr, uncovered.stderr
+    finally:
+        shutil.rmtree(project)
+
 
 def test_field_path_reconciliation_checks_exception_declarations_only() -> None:
     project = make_temp(prefix="aidlc-field-path-reconciliation-")
@@ -1716,47 +1758,6 @@ const ordinary = response.data.customer.name;
         invalid = run_checker(project, "field-path-reconciliation")
         assert invalid.returncode != 0
         assert "confirmed must be true" in invalid.stderr
-    finally:
-        shutil.rmtree(project)
-
-    # brownfield, no markers, no declaration -> fail.
-    project = make_temp(prefix="aidlc-design-intent-brownfield-fail-")
-    try:
-        write_module_manifest(project, ("module-a",))
-        write_module_state(project, "units-generation", {"module-a": None})
-        write(project, reverse_path, "# Reverse engineering\n\n现有 OrderController。\n")
-        write(project, design_path, "# Components\n\nOrderService 负责下单。\n")
-        fail_run = run_checker(project, "design-intent-coverage", "module-a")
-        assert fail_run.returncode != 0, fail_run.stdout
-        assert "no explicit no-change declaration" in fail_run.stderr, fail_run.stderr
-    finally:
-        shutil.rmtree(project)
-
-    # brownfield, explicit no-change declaration -> passed.
-    project = make_temp(prefix="aidlc-design-intent-brownfield-nochange-")
-    try:
-        write_module_manifest(project, ("module-a",))
-        write_module_state(project, "units-generation", {"module-a": None})
-        write(project, reverse_path, "# Reverse engineering\n\n现有 OrderController。\n")
-        write(project, design_path, "# Components\n\n本次仅新增组件。[意图:无结构变更]\n")
-        ok = run_checker(project, "design-intent-coverage", "module-a")
-        assert ok.returncode == 0, ok.stderr
-        payload = json.loads(ok.stdout)
-        assert payload["project_mode"] == "brownfield", payload
-        assert payload["no_change_declared"] is True, payload
-    finally:
-        shutil.rmtree(project)
-
-    # brownfield, a [意图:*] marker not carried by any unit -> fail (existing coverage not regressed).
-    project = make_temp(prefix="aidlc-design-intent-uncovered-")
-    try:
-        write_module_manifest(project, ("module-a",))
-        write_module_state(project, "units-generation", {"module-a": None})
-        write(project, reverse_path, "# Reverse engineering\n\n现有 OrderController。\n")
-        write(project, design_path, "# Components\n\nOrderController [意图:删除]\n")
-        uncovered = run_checker(project, "design-intent-coverage", "module-a")
-        assert uncovered.returncode != 0, uncovered.stdout
-        assert "design intents are not covered" in uncovered.stderr, uncovered.stderr
     finally:
         shutil.rmtree(project)
 
