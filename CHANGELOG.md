@@ -1,6 +1,6 @@
 # Changelog
 
-## 4.22.13 — 2026-10-24
+## 4.22.16 — 2026-10-24
 
 - Module-level planning evidence anchors to a planning baseline scope (`inputs-v2:module:<m>:baseline`): a module-axis instance's digest binds what planning actually consumed (module docs and every unit's declared shared inputs) and excludes downstream `construction/` output plus the module's own source roots, so ordinary downstream implementation changes no longer invalidate completed upstream planning evidence (MARS-277).
 - Legacy `inputs-v2:module:<m>` evidence remains valid while its wide-scope digest still matches; when it drifts, validation names `evidence run --refresh` to re-anchor the record, and a downstream session may perform that refresh under its own unit claim once the upstream instance is completed — no session transfer or upstream claim takeover.
@@ -10,6 +10,29 @@
 - Bounded conflict recovery: workflow-state revision conflicts during `next`/`report` retry the full routing pass up to three times — memoized digests make retries cheap — instead of failing the command; both sessions in a concurrent `next` pair complete.
 - Controlled evidence reuse additionally requires the recorded scope label and a matching current scope digest, so evidence is not reused after its scope drifted even when the inputs fingerprint is unchanged.
 - Synchronize package, plugin, marketplace and stage-graph versions and regenerate all nine harness distributions.
+
+## 4.22.15 — 2026-10-23
+
+- Tier field mapping validation (MARS-279): C1 field-mapping tables switch to per-`source_id` aggregate confirmation — normal fields are no longer maintained as per-row ✅ bookkeeping; only 🚨missing / ⚠️needs-conversion exception rows are declared individually. C6 full-checks exception rows and samples the remainder (P0 and user-critical display fields still full). A deterministic `field-path-reconciliation` check consumes the `field_mapping` JSON declaration in `data-source-validation.md`, intercepting dangling exception paths, path inconsistencies and malformed declarations; it requires no external schema and does not flag undeclared normal access.
+- Tier Mermaid diagram validation (MARS-280): default Mermaid evidence closes at controlled `STATIC_PASS` admission for module-internal simple flow diagrams — each `mermaid` block requires an adjacent `aidlc-mermaid-validation` JSON declaration (stable `diagram_id`, `validation_tier`, `diagram_type` and `all_elements_within_module` / `no_contract_semantics` / `not_architecture_or_delivery_evidence` witnesses); missing, duplicated or mismatching declarations block rather than silently downgrading. The full V1 SVG/Diagram contract (expected contract, structural / route / geometry / visual four-layer validation) now applies only under explicit SVG `FULL_CONTRACT` selection.
+- frontend-platform-spec review sampling (MARS-281): `layout_primitives` / `component_mapping` / `css_constraints` rows are reviewed tiered — key rows (layout-affecting primitives and structural rewrites, interaction-bearing mappings, browser-compat constraints with forbidden patterns) are checked in full against approved sources; remaining pure-style rows are sampled with I13 sample-failure rollback semantics. Empty/placeholder/duplicate rows, missing actual components or required constraints still fail, and SHA-256 source binding machine checks are unchanged.
+- Synchronize package, plugin, marketplace and stage-graph versions and regenerate all harness distributions.
+
+## 4.22.14 — 2026-10-23
+
+- I13 UC-D reverse-tracing bindings tiered downgrade (MARS-273): `story_ref` / `scenario_ref` / the verbatim-Gherkin source-tracing section / the coverage-mapping section / derivation logs become tiered-optional — required only for P0 and `contract`/`api` cases, aligned with the MARS-271 `mapping_deferred` direction; undowngraded gates (`unit_refs`, `tdd_mode`, `defect_ref`, GREEN `uc_mapping`) unchanged.
+- Aggregate `source_coverage` compensation: forward coverage (every source maps at least one ready UC-D) and reverse dangling validation converge to one per-source declaration in `_index.md`; dangling references are machine-rejected via `DANGLING_REF@source_coverage`; legacy I13 evidence without the declaration falls back to the existing `source_ref` existence check with zero migration.
+- `ucd_sources` dual form: the new file-level form (per-file SHA-256 digest + the file's UC-D ID list, `normalizeUcdSources`) alongside the legacy per-UC-D records; deletion-delivery reconciliation compares at file level in both forms and source drift still re-triggers I13.
+- I13 checker aggregate validation (S2): semantic checks execute coverage/dangling on `source_coverage`; `ucd_sources` accepts both forms; unit `req_refs` takes priority for tests-layer convergence (`code_refs_source`).
+- Protocol docs synchronized (`test-case-derivation`, `common-process-overview`, `common-quality-gates`, `quality-gates-v1`); derivation self-check sampling (P0/contract/api full, remainder sampled, default 20%, configurable).
+- `i13NonApplicable` JSON parse errors stabilized across Node versions (`is not valid JSON` semantics instead of engine-specific messages).
+- Synchronize package, plugin, marketplace and stage-graph versions and regenerate all harness distributions.
+
+## 4.22.13 — 2026-10-22
+
+- Provider install compatibility window: `kind: knowledge` manifests without `extensions["aidlc.knowledge"]` install successfully when they declare a recognized external-source protocol (`aidlc.context-source` / `aidlc.design-resource` / `aidlc.ui-read-source`), with a deprecation warning recorded in install/update audit and `provider status`; manifests with no recognized protocol are still rejected unchanged (MARS-272).
+- `provider disable` semantics: disabled instances no longer produce `PROVIDER_CAPABILITY_MISSING` blocked nodes; `deriveScopeCapabilities` counts enabled bindings only; `provider status` lists `disabled_bound_capabilities` so capabilities kept by disabled instances stay visible; `provider enable` restores the original resolution (MARS-272).
+- Synchronize package, plugin, marketplace and stage-graph versions and regenerate all harness distributions.
 
 ## 4.22.12 — 2026-10-22
 

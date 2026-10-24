@@ -24,6 +24,7 @@ import { baselineCodeRef, baselineCommitErrors, baselineKindErrors, epochRepos, 
 import { codeRefRepo, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
 import { evidenceRelativePath, i13UcdIdsByMode as sharedI13UcdIdsByMode, readUnitManifest, stageInstanceId, unitManifestPath, unitUcdIds, verifiedModuleIds, type UcdExemption } from "./aidlc-execution-context";
 import { assertControlledI13 } from "./aidlc-i13-applicability";
+import { normalizeUcdSources } from "./aidlc-ucd-declarations";
 import { evidenceTimeError } from "./aidlc-evidence-policy";
 import { parseTestStats, validTestStats, type TestStats } from "./aidlc-test-stats";
 import { nativeNodeCheckTooling } from "./aidlc-node-check-tooling";
@@ -672,7 +673,17 @@ export function noBehaviorBasis(state: ProducerState): Record<string, unknown> |
   const keys = i13.status === "not_applicable"
     ? ["status", "applicability_inputs_digest", "reason_code", "reason", "approval_ref", "alternative_validation", "validation_command", "source_refs", "source_files"]
     : ["status", "ucd_ids", "ucd_units", ...(i13.ucd_sources !== undefined ? ["ucd_sources"] : [])];
-  for (const key of keys) if (JSON.stringify(i13[key]) !== JSON.stringify(current[key])) fail(`I13 applicability no longer matches its sources: ${key}`);
+  for (const key of keys) {
+    if (key === "ucd_sources") {
+      // MARS-273: dual-form ucd_sources (legacy per-UC-D map vs file-level files list)
+      // compares through its normalized file-level shape; identical sources compare equal.
+      if (JSON.stringify(normalizeUcdSources(i13[key])) !== JSON.stringify(normalizeUcdSources(current[key]))) {
+        fail(`I13 applicability no longer matches its sources: ${key}`);
+      }
+      continue;
+    }
+    if (JSON.stringify(i13[key]) !== JSON.stringify(current[key])) fail(`I13 applicability no longer matches its sources: ${key}`);
+  }
   const exemption = scope?.scoped ? unitUcdExemption(PROJECT_ROOT, state.current_module, state.current_unit!) : undefined;
   if (scope?.scoped && !exemption) fail("empty UC-D subset requires an approved unit ucd_exemption");
   return { kind: exemption ? "unit_exemption" : "i13_not_applicable", module_id: state.current_module, unit_id: state.current_unit ?? null,

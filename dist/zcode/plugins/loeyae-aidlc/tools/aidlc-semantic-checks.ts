@@ -93,6 +93,7 @@ const MODULE_CONTEXT_SENSORS = new Set([
   "infrastructure-completeness",
   "frontend-platform-spec",
   "ui-design-alignment",
+  "field-path-reconciliation",
 ]);
 const UNIT_CONTEXT_SENSORS = new Set([
   "review-evidence",
@@ -140,6 +141,7 @@ const SENSOR_NAMES = new Set([
   "nfr-coverage", "infrastructure-completeness", "implementation-report", "frontend-platform-spec",
   "template-completeness", "recovery-evidence",
   "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
+  "field-path-reconciliation",
   "ui-artifact-consistency", "inception-consistency", "test-case-derivation", "red-test-evidence", "green-test-evidence", "baseline-test-evidence",
   "traceability-matrix", "structural-invariants",
 ]);
@@ -746,11 +748,33 @@ function testCaseDerivation(): Record<string, unknown> {
   }
   const readyCount = idsFound.length;
   if (!/source_ref\s*:/i.test(caseContent)) fail("every I13 test case must declare source_ref");
-  // MARS-273 聚合层:覆盖与悬空校验收敛到 source_coverage 一次执行。派生结果进证据
-  // JSON(受控 producer 落点);_index.md 声明块存在时按同一语义机器校验。
-  const sourceCoverage = derivedSourceCoverage(idsFound, declarations);
-  const declaredCoverage = declaredSourceCoverage(indexPath);
-  if (declaredCoverage !== null) validateSourceCoverage(declaredCoverage, sourceCoverage, sourceContent, idsFound, declarations, indexPath);
+  // MARS-273 聚合层覆盖声明:正向覆盖(每个 REQ 来源至少映射一个 UC-D)与反向悬空校验
+  // 收敛到 _index.md 的 source_coverage,每来源声明一次;未声明的存量 I13 走回退路径,
+  // 仅保留 source_ref 存在性检查(存量零迁移)。
+  const coverage = sourceCoverageDeclarations(text(indexPath), relativePath(indexPath));
+  let sourceCoverage: Record<string, string[]> | undefined;
+  if (coverage) {
+    const dangling: string[] = [];
+    for (const [sourceId, ucdIds] of coverage) {
+      if (ucdIds.length === 0) fail(`source_coverage source ${sourceId} maps no UC-D (${relativePath(indexPath)})`);
+      for (const id of ucdIds) {
+        if (!declarations.has(id)) dangling.push(`${sourceId} -> ${id}`);
+      }
+      if (!new RegExp(`\\b${sourceId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(sourceContent)) {
+        dangling.push(`source ${sourceId} not found in I13 source artifacts`);
+      }
+    }
+    const requirementsPath = join(ROOT, contextual("docs/aidlc/inception/requirements.md"));
+    if (existsSync(requirementsPath)) {
+      const reqIds = [...new Set(text(requirementsPath).match(/\bREQ-[A-Z0-9][A-Z0-9_-]*\b/g) || [])];
+      const missing = reqIds.filter((req) => !coverage.has(req));
+      if (missing.length > 0) {
+        fail(`source_coverage must map every requirement source to at least one UC-D; missing: ${missing.join(", ")} (${relativePath(indexPath)})`);
+      }
+    }
+    if (dangling.length > 0) fail(`DANGLING_REF@source_coverage: ${dangling.join("; ")}`);
+    sourceCoverage = Object.fromEntries([...coverage].sort(([left], [right]) => left.localeCompare(right)));
+  }
   const modes = ucdModes(idsFound, declarations);
   const units = ucdUnitRefs(idsFound, declarations);
   const defectRefs = ucdAnchorRefs(idsFound, declarations, "defect_ref");
@@ -773,8 +797,9 @@ function testCaseDerivation(): Record<string, unknown> {
     ...characterizationEvidence(idsFound, modes),
     source_files: sourcePaths.map(relativePath),
     test_case_files: caseFiles.map(relativePath),
-    ucd_sources: fileUcdSources(declarations),
-    source_coverage: sourceCoverage,
+    // MARS-273: ucd_sources 降为逐文件 digest + 文件内 UC-D ID 清单;消费方兼容旧逐条形态。
+    ucd_sources: { files: ucdSourceFileEntries(declarations, text) },
+    ...(sourceCoverage ? { source_coverage: sourceCoverage } : {}),
     index: relativePath(indexPath),
   };
 }
@@ -782,6 +807,70 @@ function testCaseDerivation(): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 // UC-D declarations and tdd_mode (4.6.0 S2)
 // ---------------------------------------------------------------------------
+
+/**
+ * MARS-273: the `source_coverage` aggregate declaration of `_index.md` — one
+ * `source_id: [UC-D ids]` line per source, declared once instead of per case.
+ * Accepted shapes: a top-level `source_coverage:` key with indented sub-keys, or a
+ * fenced code block tagged `source_coverage`. Returns null when nothing is declared
+ * (legacy evidence keeps the source_ref-existence fallback, zero migration).
+ */
+function sourceCoverageDeclarations(content: string, label: string): Map<string, string[]> | null {
+  const lines = content.split(/\r?\n/);
+  let block: string[] | null = null;
+  const fenceStart = lines.findIndex((line) => /^```[A-Za-z]*\s*source_coverage\b/.test(line.trim()));
+  if (fenceStart >= 0) {
+    const fenceEnd = lines.findIndex((line, index) => index > fenceStart && line.trim().startsWith("```"));
+    block = lines.slice(fenceStart + 1, fenceEnd < 0 ? lines.length : fenceEnd);
+  } else {
+    const start = lines.findIndex((line) => /^source_coverage\s*:\s*$/.test(line));
+    if (start >= 0) {
+      const rest = lines.slice(start + 1);
+      const stop = rest.findIndex((line) => line.trim() !== "" && !/^\s/.test(line));
+      block = rest.slice(0, stop < 0 ? rest.length : stop);
+    }
+  }
+  if (block === null) return null;
+  const coverage = new Map<string, string[]>();
+  let listKey: string | undefined;
+  for (const line of block) {
+    if (line.trim() === "" || /^\s*#/.test(line)) continue;
+    const item = /^\s*-\s+(.+)$/.exec(line);
+    if (item) {
+      if (listKey === undefined) fail(`${label}: source_coverage list item outside a source key`);
+      coverage.get(listKey)!.push(item[1].trim());
+      continue;
+    }
+    const pair = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/.exec(line.trim());
+    if (!pair) fail(`${label}: unsupported source_coverage line ${JSON.stringify(line.trim())}`);
+    const [, key, raw] = pair;
+    if (coverage.has(key)) fail(`${label}: source_coverage key ${key} is declared twice`);
+    const value = raw.trim();
+    if (value === "") {
+      coverage.set(key, []);
+      listKey = key;
+    } else {
+      const inline = /^\[(.*)\]$/.exec(value);
+      coverage.set(key, inline ? inline[1].split(",").map((id) => id.trim()).filter(Boolean) : [value]);
+      listKey = undefined;
+    }
+  }
+  return coverage;
+}
+
+/** MARS-273: file-level ucd_sources entries (file digest + UC-D ids per file), sorted. */
+function ucdSourceFileEntries(declarations: Map<string, UcdDeclaration>, read: (path: string) => string): Array<{ file: string; sha256: string; ucd_ids: string[] }> {
+  const files = new Map<string, { file: string; sha256: string; ucd_ids: string[] }>();
+  for (const [id, declaration] of declarations) {
+    const rel = relativePath(declaration.file);
+    const entry = files.get(rel) ?? { file: rel, sha256: createHash("sha256").update(read(declaration.file)).digest("hex"), ucd_ids: [] };
+    entry.ucd_ids.push(id);
+    files.set(rel, entry);
+  }
+  return [...files.values()]
+    .map((entry) => ({ ...entry, ucd_ids: [...new Set(entry.ucd_ids)].sort() }))
+    .sort((left, right) => left.file.localeCompare(right.file));
+}
 
 /** Collect `mapping_deferred: <reason>` declarations; P0 and contract/api UC-Ds may not defer. */
 function mappingDeferredEntries(ids: string[], declarations: Map<string, UcdDeclaration>): Array<{ id: string; reason: string }> {
@@ -1525,6 +1614,73 @@ function functionalDesign(): Record<string, unknown> {
   return { status: "passed", data_source_validation: "passed", ambiguities_resolved: true, unresolved_blockers: 0, use_cases_covered: covered.length > 0 ? covered : ["documented functional cases"], interfaces_specified: interfaces, error_handling_defined: true };
 }
 
+// MARS-279: C1 normal-field rows are aggregate declarations. This opt-in C6
+// check deliberately reconciles only declared exceptions against code paths; it
+// cannot (and must not claim to) prove an external provider's real schema.
+type FieldMappingException = { ui_field: string; source_path: string; status: string; impact: string; disposition: string };
+type FieldMappingSource = { source_id: string; exceptions: FieldMappingException[] };
+
+function fieldMappingDeclaration(path: string): FieldMappingSource[] | null {
+  const blocks = [...text(path).matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)].map((match) => match[1].trim())
+    .filter((block) => /"field_mapping"\s*:/.test(block));
+  if (blocks.length === 0) return null;
+  if (blocks.length > 1) fail(`field_mapping must be declared once in ${relativePath(path)}`);
+  let parsed: unknown;
+  try { parsed = JSON.parse(blocks[0]); } catch { fail(`field_mapping declaration in ${relativePath(path)} must be valid JSON`); }
+  const mapping = objectValue(objectValue(parsed, "field_mapping declaration").field_mapping, "field_mapping");
+  const sources: FieldMappingSource[] = [];
+  for (const [sourceId, rawSource] of Object.entries(mapping)) {
+    if (!sourceId.trim()) fail("field_mapping has an empty source_id");
+    const source = objectValue(rawSource, `field_mapping.${sourceId}`);
+    if (source.confirmed !== true) fail(`field_mapping.${sourceId}.confirmed must be true for an aggregate confirmation`);
+    const rawExceptions = source.exceptions;
+    if (!Array.isArray(rawExceptions)) fail(`field_mapping.${sourceId}.exceptions must be an array`);
+    const exceptions = rawExceptions.map((raw, index) => {
+      const entry = objectValue(raw, `field_mapping.${sourceId}.exceptions[${index}]`);
+      const status = stringValue(entry.status, `field_mapping.${sourceId}.exceptions[${index}].status`);
+      if (!/^(?:🚨不存在|⚠️需转换|missing|transform)$/i.test(status)) fail(`field_mapping.${sourceId}.exceptions[${index}].status must be 🚨不存在, ⚠️需转换, missing, or transform`);
+      return {
+        ui_field: stringValue(entry.ui_field, `field_mapping.${sourceId}.exceptions[${index}].ui_field`),
+        source_path: stringValue(entry.source_path, `field_mapping.${sourceId}.exceptions[${index}].source_path`),
+        status,
+        impact: stringValue(entry.impact, `field_mapping.${sourceId}.exceptions[${index}].impact`),
+        disposition: stringValue(entry.disposition, `field_mapping.${sourceId}.exceptions[${index}].disposition`),
+      };
+    });
+    sources.push({ source_id: sourceId.trim(), exceptions });
+  }
+  if (sources.length === 0) fail("field_mapping must declare at least one source_id");
+  return sources;
+}
+
+function normalizedFieldPath(value: string): string { return value.replace(/\?\./g, ".").trim(); }
+
+function codeFieldPaths(): Map<string, string[]> {
+  const found = new Map<string, string[]>();
+  const pattern = /\b(?:response|result|payload)(?:(?:\?\.)|\.)data(?:(?:\?\.)|\.)[A-Za-z_$][\w$]*(?:(?:(?:\?\.)|\.)[A-Za-z_$][\w$]*)*/g;
+  for (const file of scanFiles(ROOT, ".", SOURCE_FILE_PATTERN).filter((candidate) => !TEST_FILE_PATTERN.test(candidate))) {
+    for (const match of text(file).matchAll(pattern)) {
+      const path = normalizedFieldPath(match[0]);
+      const locations = found.get(path) || [];
+      locations.push(relativePath(file));
+      found.set(path, locations);
+    }
+  }
+  return found;
+}
+
+function fieldPathReconciliation(): Record<string, unknown> {
+  const path = join(ROOT, contextual("docs/aidlc/construction/data-source-validation.md"));
+  if (!existsSync(path)) return { status: "not_applicable", reason: "data-source-validation.md is missing" };
+  const sources = fieldMappingDeclaration(path);
+  if (sources === null) return { status: "not_applicable", reason: "field_mapping declaration is absent" };
+  const paths = codeFieldPaths();
+  const exceptions = sources.flatMap((source) => source.exceptions.map((entry) => ({ ...entry, source_id: source.source_id })));
+  const dangling = exceptions.filter((entry) => !paths.has(normalizedFieldPath(entry.source_path)));
+  if (dangling.length > 0) fail(`DANGLING_EXCEPTION@field_mapping: declared exception paths are not accessed by code: ${dangling.map((entry) => `${entry.source_id}:${entry.source_path}`).join(", ")}`);
+  return { status: "passed", sources_confirmed: sources.map((source) => source.source_id), exception_paths_checked: exceptions.map((entry) => ({ source_id: entry.source_id, source_path: normalizedFieldPath(entry.source_path), status: entry.status })), code_access_paths: [...paths.keys()].sort() };
+}
+
 function nfrCoverage(): Record<string, unknown> {
   const files = moduleScopedFiles(/(?:nfr|non-functional|非功能)/i).filter((path) => path.endsWith(".md"));
   if (files.length === 0) fail("NFR artifacts are missing");
@@ -1724,7 +1880,43 @@ const MERMAID_DIAGRAM_TYPES = [
   "C4Context", "C4Container", "C4Component", "C4Dynamic", "C4Deployment", "zenuml",
 ];
 
-interface MermaidBlock { file: string; line: number; source: string }
+interface MermaidStaticPassDeclaration {
+  diagram_id: string;
+  module: string;
+  validation_tier: "STATIC_PASS";
+  diagram_type: "module-internal-simple-flow";
+  all_elements_within_module: true;
+  no_contract_semantics: true;
+  not_architecture_or_delivery_evidence: true;
+}
+
+interface MermaidBlock {
+  file: string;
+  line: number;
+  source: string;
+  static_pass_declaration?: MermaidStaticPassDeclaration;
+}
+
+/**
+ * The declaration deliberately lives immediately above one Mermaid fence. That keeps a
+ * STATIC_PASS claim tied to one source block rather than letting a document-level switch
+ * accidentally downgrade an unrelated architecture or contract diagram in the same file.
+ */
+function mermaidStaticPassDeclaration(line: string | undefined, file: string, fenceLine: number): MermaidStaticPassDeclaration | undefined {
+  if (!line) return undefined;
+  const match = /^\s*<!--\s*aidlc-mermaid-validation:\s*(\{.*\})\s*-->\s*$/.exec(line);
+  if (!match) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(match[1]);
+  } catch {
+    fail(`${file}:${fenceLine - 1} aidlc-mermaid-validation must contain one valid JSON object`);
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    fail(`${file}:${fenceLine - 1} aidlc-mermaid-validation must contain one JSON object`);
+  }
+  return value as MermaidStaticPassDeclaration;
+}
 
 function mermaidBlocks(path: string): MermaidBlock[] {
   const lines = text(path).split(/\r?\n/);
@@ -1738,7 +1930,8 @@ function mermaidBlocks(path: string): MermaidBlock[] {
     index++;
     while (index < lines.length && !new RegExp(`^\\s*${fence[0] === "`" ? "`" : "~"}{${fence.length},}\\s*$`).test(lines[index])) body.push(lines[index++]);
     if (index >= lines.length) fail(`${relativePath(path)}:${start + 1} mermaid code block is not closed`);
-    blocks.push({ file: relativePath(path), line: start + 1, source: body.join("\n") });
+    const file = relativePath(path);
+    blocks.push({ file, line: start + 1, source: body.join("\n"), static_pass_declaration: mermaidStaticPassDeclaration(lines[start - 1], file, start + 1) });
   }
   return blocks;
 }
@@ -1800,6 +1993,50 @@ async function parseMermaidBlocks(blocks: MermaidBlock[]): Promise<"passed" | "n
   return "passed";
 }
 
+function mermaidStaticPassAdmissions(blocks: MermaidBlock[], diagrams: Array<{ file: string; line: number; type: string }>): Record<string, unknown>[] {
+  if (!ACTIVE_MODULE) fail("STATIC_PASS Mermaid diagrams require an active module scope");
+  const admitted = new Set<string>();
+  return blocks.map((block, index) => {
+    const declaration = block.static_pass_declaration;
+    const reference = `${block.file}:${block.line}`;
+    if (!declaration) {
+      fail(`${reference} requires an immediately preceding aidlc-mermaid-validation declaration; Mermaid diagrams cannot implicitly claim STATIC_PASS`);
+    }
+    const requiredString = (field: "diagram_id" | "module" | "validation_tier" | "diagram_type", expected?: string): string => {
+      const value = declaration[field];
+      if (typeof value !== "string" || value.trim().length === 0 || (expected && value !== expected)) {
+        fail(`${reference} declaration.${field} must be ${expected ? JSON.stringify(expected) : "a non-empty string"}`);
+      }
+      return value;
+    };
+    const diagramId = requiredString("diagram_id");
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(diagramId)) fail(`${reference} declaration.diagram_id must be a stable identifier`);
+    if (admitted.has(diagramId)) fail(`${reference} declaration.diagram_id ${diagramId} is duplicated in this validation scope`);
+    admitted.add(diagramId);
+    const module = requiredString("module");
+    if (module !== ACTIVE_MODULE) fail(`${reference} declaration.module must equal active module ${ACTIVE_MODULE}`);
+    requiredString("validation_tier", "STATIC_PASS");
+    requiredString("diagram_type", "module-internal-simple-flow");
+    for (const field of ["all_elements_within_module", "no_contract_semantics", "not_architecture_or_delivery_evidence"] as const) {
+      if (declaration[field] !== true) fail(`${reference} declaration.${field} must be true for STATIC_PASS admission`);
+    }
+    return {
+      ...diagrams[index],
+      diagram_id: diagramId,
+      module,
+      validation_tier: "STATIC_PASS",
+      diagram_type: "module-internal-simple-flow",
+      admission_conditions: {
+        module_internal_simple_flow: true,
+        all_elements_within_module: true,
+        no_contract_semantics: true,
+        not_architecture_or_delivery_evidence: true,
+        explicit_source_declaration: true,
+      },
+    };
+  });
+}
+
 async function mermaidDiagramContract(): Promise<Record<string, unknown>> {
   const stage = workflowState?.current_stage || "";
   const required = MERMAID_STAGE_DOCUMENTS[stage];
@@ -1823,17 +2060,28 @@ async function mermaidDiagramContract(): Promise<Record<string, unknown>> {
   }
   const diagrams = blocks.map((block) => ({ file: block.file, line: block.line, type: mermaidDiagramType(block) }));
   const syntaxParse = await parseMermaidBlocks(blocks);
+  const staticPassAdmissions = mermaidStaticPassAdmissions(blocks, diagrams);
   return {
     status: "passed",
+    final_status: "STATIC_PASS",
     source_format: "mermaid",
     diagrams_checked: diagrams.length,
-    diagrams,
+    diagrams: staticPassAdmissions,
     documents: [...new Set(diagrams.map((diagram) => diagram.file))],
     syntax_checks: "static",
     syntax_parse: syntaxParse,
+    validation_tier: "STATIC_PASS",
+    admission_status: "passed",
+    admission_conditions: [
+      "module-internal-simple-flow",
+      "all-elements-within-active-module",
+      "no-contract-semantics",
+      "not-architecture-or-delivery-evidence",
+      "explicit-source-declaration",
+    ],
     reason: syntaxParse === "passed"
-      ? "diagram format is mermaid (default); static checks and the Mermaid parser passed (syntax only, no rendering). The SVG contract runs only after the user explicitly selects svg"
-      : "diagram format is mermaid (default); static checks passed, the Mermaid parser is not available so real parsing was not executed. The SVG contract runs only after the user explicitly selects svg",
+      ? "module-internal simple-flow declarations passed controlled static checks; this is STATIC_PASS only and does not validate SVG rendering. FULL_CONTRACT runs only after the user explicitly selects svg"
+      : "module-internal simple-flow declarations passed source-level checks, but the optional Mermaid parser was not available. This remains STATIC_PASS only; FULL_CONTRACT runs only after the user explicitly selects svg",
   };
 }
 
@@ -4636,6 +4884,7 @@ const CHECKERS: Record<string, () => Record<string, unknown> | Promise<Record<st
   "test-quality": testQuality,
   "contract-baseline": contractBaseline,
   "functional-design-completeness": functionalDesign,
+  "field-path-reconciliation": fieldPathReconciliation,
   "nfr-coverage": nfrCoverage,
   "infrastructure-completeness": infrastructure,
   "implementation-report": implementationReport,

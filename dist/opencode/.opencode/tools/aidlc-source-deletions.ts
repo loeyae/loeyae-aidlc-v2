@@ -7,7 +7,7 @@ import { moduleManifestPath, readModuleManifest, readUnitManifest, unitManifestP
 import { codeRefRepo } from "./aidlc-nested-repos";
 import { declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
 import { substantiveText } from "./aidlc-artifact-presence";
-import { ucdDeclarations } from "./aidlc-ucd-declarations";
+import { normalizeUcdSources, ucdDeclarations, type UcdSourceFile } from "./aidlc-ucd-declarations";
 import { assertControlledI13, i13NonApplicable } from "./aidlc-i13-applicability";
 
 export interface SourceDeletion {
@@ -90,6 +90,12 @@ export function sourceDeletions(root: string, moduleId?: string, unitId?: string
     || i13.test_case_files.some((path: unknown) => typeof path !== "string")
     || JSON.stringify(i13.test_case_files.map(portable).sort()) !== JSON.stringify(caseFiles))) fail("I13 test_case_files no longer matches module sources");
   const declarations = ucdDeclarations(caseFiles.filter(path => !path.endsWith("/_index.md")), path => readLocal(root, path));
+  // MARS-273 dual-form ucd_sources: the legacy per-UC-D map and the file-level
+  // {files: [{file, sha256, ucd_ids}]} form both normalize to file-level entries.
+  const ucdSources = normalizeUcdSources(i13.ucd_sources);
+  const digestOf = (file: string) => createHash("sha256").update(readLocal(root, file)).digest("hex");
+  const ucdSourceMatches = (sources: UcdSourceFile[], file: string, id: string, sha256: string) =>
+    sources.some(entry => entry.file === file && entry.sha256 === sha256 && entry.ucd_ids.includes(id));
   const noBehavior = i13.status === "not_applicable" || i13.status === "required" && scope.scoped && scope.all.length === 0;
   const checkNoBehavior = () => {
     assertControlledI13(root, i13, moduleId);
@@ -105,9 +111,7 @@ export function sourceDeletions(root: string, moduleId?: string, unitId?: string
         const owners = useCase.fields?.get("unit_refs");
         if (useCase.status !== "ready" || !Array.isArray(owners) || !Array.isArray(i13.ucd_units?.[id])
           || JSON.stringify([...owners].sort()) !== JSON.stringify([...i13.ucd_units[id]].sort())) fail("I13 unit ownership sources changed");
-        const recorded = i13.ucd_sources?.[id];
-        if (i13.ucd_sources !== undefined && (!recorded || typeof recorded.file !== "string" || portable(recorded.file) !== useCase.file
-          || recorded.sha256 !== createHash("sha256").update(readLocal(root, useCase.file)).digest("hex"))) fail("I13 affected UC-D source changed");
+        if (ucdSources !== undefined && !ucdSourceMatches(ucdSources, useCase.file, id, digestOf(useCase.file))) fail("I13 affected UC-D source changed");
       }
     }
   };
@@ -127,9 +131,7 @@ export function sourceDeletions(root: string, moduleId?: string, unitId?: string
       if (i13.status !== "required" || !entry.ucd_id || !/^UC-D-\d+$/.test(entry.ucd_id) || !scope.all.includes(entry.ucd_id)) fail(`${ref.path}: affected UC-D does not belong to this unit`);
       const useCase = declarations.get(entry.ucd_id!) ?? fail(`${ref.path}: affected UC-D source missing`);
       if (useCase.status !== "ready") fail(`${ref.path}: affected UC-D source not ready`);
-      const recorded = i13.ucd_sources?.[entry.ucd_id!];
-      if (i13.ucd_sources !== undefined && (!recorded || typeof recorded.file !== "string" || portable(recorded.file) !== useCase.file
-        || recorded.sha256 !== createHash("sha256").update(readLocal(root, useCase.file)).digest("hex"))) fail(`${ref.path}: I13 affected UC-D source changed`);
+      if (ucdSources !== undefined && !ucdSourceMatches(ucdSources, useCase.file, entry.ucd_id!, digestOf(useCase.file))) fail(`${ref.path}: I13 affected UC-D source changed`);
       const source = useCase.fields?.get("source_ref");
       if (useCase.fields && !(Array.isArray(source) ? source.length : source?.trim())) fail(`${ref.path}: affected UC-D source_ref missing`);
       const behavior = useCase.content;

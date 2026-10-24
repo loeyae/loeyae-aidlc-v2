@@ -30,7 +30,14 @@ Evidence 路径由当前 directive 的 `evidence_root` 决定：
 
 ## 阶段质量
 
+### C1/C6 字段映射的分级核对
+
+C1 对外部数据源采用按 `source_id` 的聚合确认：每个参与来源确认“除明确异常外所需字段均存在”，仅逐条维护 `🚨不存在` 与 `⚠️需转换` 项。C6 必须全量核对这些异常项；其余字段按可复盘的抽样规则核对，P0 和用户关键展示字段仍全量核对。
+
+当 `data-source-validation.md` 提供 `field_mapping` JSON 声明时，C6 运行 `field-path-reconciliation`。该确定性检查只核对声明的异常路径和约定的 `response.data.xxx` 风格代码访问，拦截异常声明悬空、路径不一致和声明格式错误；它不接入外部 schema，也不把未声明的正常访问判为字段缺失。
+
 - `requires`、`condition`、`consumes`、`produces` 和 sensor 必须全部满足。
+- 图表质量门禁按格式和验证等级路由：默认 Mermaid 仅可由紧邻 fenced block 的受控 `aidlc-mermaid-validation` 声明进入 `STATIC_PASS`，并由 `diagram-contract` 输出 `final_status: "STATIC_PASS"`、模块、图标识和五项准入见证；未声明或任一见证不足必须阻断，不能因文件中存在 SVG/manifest 而隐式转入或绕过契约。仅用户明确选择 SVG 时执行 `FULL_CONTRACT`，其独立 expected contract、三视图浏览器、structural 遮挡及截图/快照门禁保持强制；`STATIC_PASS` 不可用于替代它们。
 - instruction-only 阶段完成时传入 `--instruction-ack <stage>`。
 - `application-design` 与 `operations-authorization` 等阶段图 `approval: block` 节点需要用户在审阅影响、产物、review、构建和测试状态后显式提交 `--user-input Approve`；`user-stories`、`units-generation`、`infrastructure-design` 和 `code-generation` 的 `notify` 覆盖规划、生成模板及完成标准，展示摘要后复用既有授权；用户显式要求审阅时等待。普通文档不得将 notify 升级为 block。
 - 审批策略分级（MARS-271）：模块可在 module-manifest 的 `approval_overrides` 中按阶段 slug 覆盖审批层级（`block`/`confirm`/`notify`）。引擎级 `block` 阶段（契约/架构决策）禁止降级，只允许维持或加强；`notify` 层级阶段完成后产物自动登记进事后抽审台账（`orchestrate audit --list`），抽审发现经 `orchestrate audit --instance <id> --finding <text> --follow-up <CL|修订>` 回写，notify 类产物不中断推进。
@@ -53,6 +60,7 @@ Evidence 路径由当前 directive 的 `evidence_root` 决定：
 
 C8 普通行为变更要求实际适用的受控 build/check，以及真实非零通过且零失败的 test。按 `common-c8-role-applicability.md` 复核模块级来源和已批准项目政策；无声明默认要求 build/check，不用三角色配额制造重复检查。业务测试不能被角色不适用声明豁免。
 无可执行业务行为的单元可由可信 I13 not_applicable 或空 UC-D 子集的已批准 ucd_exemption 证明适用性；producer 和门禁重新检查 I13 来源/单元声明。
+I13 的覆盖与悬空校验在聚合层执行（MARS-273）：`_index.md` 的 `source_coverage` 声明每来源至少映射一个 UC-D，悬空引用记 `DANGLING_REF@source_coverage` 拦截；`ucd_sources` 以文件级 digest + UC-D ID 清单对账，旧逐条 file+SHA-256 形态继续兼容，存量证据零迁移。
 此时只要求实际成功的确定性 check；不存在的 build/test 不必新增，测试统计如实为零。空声明、全 skipped、来源不匹配不能放行。
 
 RED、GREEN、BASELINE、build/test、test-quality、I13 和代码审查属于绑定来源的历史观察，纯时间经过不要求重做；未来/畸形时间仍拒绝，来源、命令、scope、实例和基线世代仍须通过门禁。

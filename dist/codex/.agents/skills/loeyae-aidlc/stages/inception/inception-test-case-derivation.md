@@ -67,7 +67,7 @@ docs/aidlc/modules/{module-id}/inception/clarifications.md
 ## 执行约束
 
 1. 收集可用的 I7 用户故事 Gherkin 和已批准的 NFR、CR、契约、配置、迁移或一致性风险来源。
-2. 有可执行业务行为时，对每个来源派生至少一个可执行 UC-D；每个用例必须包含 `id`、`source_ref`、`scenario_ref`、`type`、`status`、`service_ids` 和覆盖映射。
+2. 有可执行业务行为时，对每个来源派生至少一个可执行 UC-D；每个用例必须包含 `id`、`source_ref`、`type`、`status`、`service_ids`。`scenario_ref`、`story_ref`、来源溯源 Gherkin 副本和覆盖映射段为分级可选（MARS-273）：P0 与 `type: contract` / `type: api` 用例仍强制，其余不要求。覆盖关系在 `_index.md` 的 `source_coverage` 聚合声明一次（每来源一行，机器校验正向覆盖与悬空引用），不逐用例重复绑定。
 3. 产品 Gherkin 必须原样保留，不得用技术用例引入未经批准的业务语义。
 4. 无法执行的用例标记 `blocked` 并在 frontmatter 声明 `blocked_kind`（MARS-271）：`business-unknown`（业务决策未定，上报人工）或 `technical-prerequisite`（技术前置条件，须同时写非空 `prerequisites` 与 `unblock_path`）；缺失或取值非法会被 I13 门禁拦截。存在 `blocked` 时不得进入 RED/GREEN。
 5. 在 `docs/aidlc/modules/{module-id}/inception/application-design/test-cases/` 生成 `_index.md`，列出用例、来源、类型、服务、状态和证据位置。
@@ -80,9 +80,9 @@ docs/aidlc/modules/{module-id}/inception/clarifications.md
 
 ## 完成标准
 
-删除交付直接使用本阶段的真实用例来源和范围：描述性文件名与聚合文件无需改名或复制，按唯一声明 ID 和 `source_ref` 追溯；新证据记录 `ucd_sources` 文件及摘要以复核漂移。无 `unit_refs` 时保留模块全集兼容范围，删除归属另由单单元或唯一需求归属证明；多单元歧义要求明确归属。可信无行为删除使用 `applicability: "not_applicable"`、省略 `ucd_id`，沿用受控 I13 或空子集的已批准豁免及成功替代检查，不虚构业务用例。
+删除交付直接使用本阶段的真实用例来源和范围：描述性文件名与聚合文件无需改名或复制，按唯一声明 ID 和 `source_ref` 追溯；新证据记录 `ucd_sources` 文件级 digest 与文件内 UC-D ID 清单（MARS-273 双形态，旧逐条形态兼容）以复核漂移。无 `unit_refs` 时保留模块全集兼容范围，删除归属另由单单元或唯一需求归属证明；多单元歧义要求明确归属。可信无行为删除使用 `applicability: "not_applicable"`、省略 `ucd_id`，沿用受控 I13 或空子集的已批准豁免及成功替代检查，不虚构业务用例。
 
-- [ ] 每个产品 Gherkin 场景至少有一个 UC-D，或有结构化 `non-applicable.json` 及确定性替代验证
+- [ ] 每个产品 Gherkin 场景至少有一个 UC-D，或有结构化 `non-applicable.json` 及确定性替代验证；新派生在 `_index.md` 声明 `source_coverage` 聚合覆盖（MARS-273）
 - [ ] 每个已批准高风险技术场景有 UC-D，或有结构化不适用依据
 - [ ] 每个用例有真实执行锚点和可验证断言
 - [ ] `_index.md` 已生成且列出 ready/blocked/deprecated 状态；不适用时目录含 `non-applicable.json`

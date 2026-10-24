@@ -53,6 +53,7 @@ The shopper checks out an order; an external vendor architecture image is refere
 
 ![Vendor architecture](assets/vendor.svg)
 
+<!-- aidlc-mermaid-validation: {"diagram_id":"checkout-flow","module":"m01-trade","validation_tier":"STATIC_PASS","diagram_type":"module-internal-simple-flow","all_elements_within_module":true,"no_contract_semantics":true,"not_architecture_or_delivery_evidence":true} -->
 \`\`\`mermaid
 flowchart TB
   Cart[Cart] --> Pay{Payment approved?}
@@ -118,12 +119,38 @@ try {
   const evidencePath = join(project, ".aidlc", "evidence", "requirements-methods", M01, "diagram-contract.json");
   const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
   assert.equal(evidence.status, "passed");
+  assert.equal(evidence.final_status, "STATIC_PASS");
+  assert.equal(evidence.validation_tier, "STATIC_PASS");
+  assert.equal(evidence.admission_status, "passed");
   assert.equal(evidence.source_format, "mermaid");
   assert.equal(evidence.diagrams_checked, 1);
   // Evidence records the path with the platform separator (\ on Windows); compare it as POSIX.
   const diagrams = (evidence.diagrams as Array<{ file: string }>).map((entry) => ({ ...entry, file: entry.file.replace(/\\/g, "/") }));
-  assert.deepEqual(diagrams, [{ file: flows, line: 9, type: "flowchart" }]);
+  assert.deepEqual(diagrams, [{
+    file: flows,
+    line: 10,
+    type: "flowchart",
+    diagram_id: "checkout-flow",
+    module: M01,
+    validation_tier: "STATIC_PASS",
+    diagram_type: "module-internal-simple-flow",
+    admission_conditions: {
+      module_internal_simple_flow: true,
+      all_elements_within_module: true,
+      no_contract_semantics: true,
+      not_architecture_or_delivery_evidence: true,
+      explicit_source_declaration: true,
+    },
+  }]);
   assert.equal(evidence.syntax_parse, "passed");
+
+  // Mermaid may not be an implicit downgrade: a syntactically valid graph without
+  // its adjacent admission declaration is rejected before it can produce evidence.
+  write(project, flows, BUSINESS_FLOWS.replace(/<!-- aidlc-mermaid-validation: .* -->\n/, ""));
+  failure(project, ["evidence", "run", "--stage", "requirements-methods", "--module", M01, "--refresh"], /cannot implicitly claim STATIC_PASS/);
+  write(project, flows, BUSINESS_FLOWS.replace('"no_contract_semantics":true', '"no_contract_semantics":false'));
+  failure(project, ["evidence", "run", "--stage", "requirements-methods", "--module", M01, "--refresh"], /declaration\.no_contract_semantics must be true/);
+  write(project, flows, BUSINESS_FLOWS);
 
   const report = success(project, ["orchestrate", "report", "--stage", "requirements-methods", "--module", M01, "--result", "completed"]);
   assert.notEqual(report.kind, "error", JSON.stringify(report));

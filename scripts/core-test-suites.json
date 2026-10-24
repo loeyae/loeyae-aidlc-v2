@@ -120,6 +120,10 @@
   ],
   [
     "tsx",
+    "tests/test_mermaid_static_pass.ts"
+  ],
+  [
+    "tsx",
     "tests/test_mars244_boundary.ts"
   ],
   [
