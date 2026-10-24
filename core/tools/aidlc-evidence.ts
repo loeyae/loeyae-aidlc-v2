@@ -27,7 +27,7 @@ import { assertControlledI13 } from "./aidlc-i13-applicability";
 import { evidenceTimeError } from "./aidlc-evidence-policy";
 import { parseTestStats, validTestStats, type TestStats } from "./aidlc-test-stats";
 import { nativeNodeCheckTooling } from "./aidlc-node-check-tooling";
-import { readSourceRevision, commitAncestryErrors } from "./aidlc-revision";
+import { readSourceRevision, commitAncestryErrors, invalidateRevisionCache, withRevisionMemoization } from "./aidlc-revision";
 import { GLOBAL_WORKFLOW, loadWorkflowState, type WorkflowRef, type WorkflowState } from "./aidlc-light-state";
 import { evidenceScopeForInstance, evidenceSourceRevision, integrationStageSlugs, isSplitLayout, loadWorkflowParts, ownerOfInstance, stageAxis } from "./aidlc-workflow-layout";
 
@@ -468,6 +468,9 @@ function runCommand(spec: CommandSpec): CommandResult {
     timeout: spec.timeout_ms,
   });
   const duration = Date.now() - started;
+  // A project command may change any tree content the revision digests cover; the
+  // in-process memoization (MARS-277) must not serve pre-command digests after it.
+  invalidateRevisionCache();
   const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout ? String(result.stdout) : "";
   const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr ? String(result.stderr) : "";
   const exitCode = typeof result.status === "number" ? result.status : 1;
@@ -1090,6 +1093,9 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
       timeout: command.timeout_ms,
     });
     const duration = Date.now() - started;
+    // A phase command runs real project tests; tree content it may produce must not
+    // be served from memoized pre-command digests (MARS-277).
+    invalidateRevisionCache();
     const exitCode = typeof result.status === "number" ? result.status : 1;
     const expectedExit = phase === "RED" ? 1 : 0;
     if (result.error || exitCode !== expectedExit) fail(`controlled ${phase} command ${command.id} must exit ${expectedExit}; got ${exitCode}${result.error ? ` (${result.error.message})` : ""}`);
@@ -1419,11 +1425,22 @@ function reusableSemanticEvidence(prior: Record<string, unknown>, inputs: { dige
   const producer = typeof prior.producer === "object" && prior.producer !== null ? prior.producer as Record<string, unknown> : undefined;
   const checker = typeof prior.checker === "object" && prior.checker !== null ? prior.checker as Record<string, unknown> : undefined;
   const priorInputs = typeof prior.inputs === "object" && prior.inputs !== null ? prior.inputs as Record<string, unknown> : undefined;
+  const priorScope = typeof prior.source_revision === "object" && prior.source_revision !== null ? (prior.source_revision as Record<string, unknown>).scope : undefined;
+  const priorScopeDigest = typeof prior.source_revision === "object" && prior.source_revision !== null ? (prior.source_revision as Record<string, unknown>).scope_digest : undefined;
+  // MARS-277: a record under a different scope label (e.g. the pre-baseline wide module
+  // scope) is never reused as-is, and a scoped record whose digest no longer matches the
+  // current tree must regenerate even when the consumes fingerprint cannot see the change
+  // (stages with an empty consumes list track no artifacts at all).
+  const scope = evidenceScopeForInstance(PROJECT_ROOT, String(state.current_stage_instance));
+  const scopeStillValid = scope.label === "worktree"
+    ? priorScope === undefined
+    : priorScope === scope.label && priorScopeDigest === readSourceRevision(PROJECT_ROOT, scope, nestedSourceRepos(PROJECT_ROOT)).scope_digest;
   return producer?.mode === "controlled"
     && checker?.exit_code === 0
     && checker.status === "passed"
     && prior.evidence_version === "1"
     && priorInputs?.digest === inputs.digest
+    && scopeStillValid
     && prior.stage_instance === (state.current_stage_instance || null)
     && prior.module_id === (state.current_module || null)
     && prior.unit_id === (state.current_unit || null);
@@ -1496,6 +1513,12 @@ function runLintProducer(options: ProducerOptions): void {
 }
 
 function runProducer(args: string[]): void {
+  // MARS-277: the producer checks several sensors per invocation against shared
+  // digest scopes; project commands run inside invalidate the memoized digests.
+  withRevisionMemoization(() => runProducerInner(args));
+}
+
+function runProducerInner(args: string[]): void {
   const options = parseArgs(args);
   if (options.lint) {
     runLintProducer(options);
@@ -1505,8 +1528,29 @@ function runProducer(args: string[]): void {
   const statusAllowed = state && (state.status === "running" || options.refresh);
   if (!state || !statusAllowed) fail("evidence production requires an active lightweight workflow");
   if (!state.current_stage_instance) fail("evidence requires an exact stage instance");
-  assertSessionClaim(PROJECT_ROOT, state, state.current_stage_instance);
-  publicationContext = { ref: producerOwner(options, state.current_stage_instance), instance: state.current_stage_instance, binding: sessionBinding()! };
+  const binding = sessionBinding()!;
+  const ref = producerOwner(options, state.current_stage_instance);
+  // MARS-277 (4.22.13): `--refresh` of a completed module-axis instance may be run by
+  // a downstream session of the same workflow under its own claim — refreshing a
+  // planning baseline must not require taking over the upstream instance's claim.
+  // Unit-axis and active-instance targets keep requiring the exact claim, as before.
+  const rawState = loadWorkflowState(PROJECT_ROOT, ref);
+  const downstreamRefresh = Boolean(
+    options.refresh
+    && binding
+    && rawState
+    && rawState.current_stage_instance !== state.current_stage_instance
+    && rawState.completed_stage_instances.includes(state.current_stage_instance)
+    && !state.current_stage_instance.includes("@unit:")
+    && binding.workflow_id === state.workflow_id
+  );
+  if (downstreamRefresh) {
+    assertSessionClaim(PROJECT_ROOT, rawState!, binding.stage_instance, binding);
+    publicationContext = { ref, instance: binding.stage_instance, binding };
+  } else {
+    assertSessionClaim(PROJECT_ROOT, state, state.current_stage_instance);
+    publicationContext = { ref, instance: state.current_stage_instance, binding };
+  }
   if (state.current_stage !== options.stage) {
     fail(`stage ${options.stage} is not active; current stage is ${state.current_stage || "(none)"}`);
   }

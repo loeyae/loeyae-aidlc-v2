@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.22.13 — 2026-10-24
+
+- Module-level planning evidence anchors to a planning baseline scope (`inputs-v2:module:<m>:baseline`): a module-axis instance's digest binds what planning actually consumed (module docs and every unit's declared shared inputs) and excludes downstream `construction/` output plus the module's own source roots, so ordinary downstream implementation changes no longer invalidate completed upstream planning evidence (MARS-277).
+- Legacy `inputs-v2:module:<m>` evidence remains valid while its wide-scope digest still matches; when it drifts, validation names `evidence run --refresh` to re-anchor the record, and a downstream session may perform that refresh under its own unit claim once the upstream instance is completed — no session transfer or upstream claim takeover.
+- Session binding isolation: `orchestrate next` routes only within the bound unit's chain (module conflict, unit mismatch and cross-module requests are refused); a unit binding no longer overwrites the module-level `module_selections` ownership another session may hold; a displaced unit's chain position is snapshotted into `unit_contexts` instead of being silently discarded.
+- `orchestrate unit inputs --module <m> --unit <u> --paths ... [--shared-paths] [--depends-on-units]` is the controlled repair path for units without declared ownership: first declaration only, executed by the bound session, validated by the engine's scope probe and rolled back on overlap; units-generation completion lists units still missing `evidence_inputs` with a ⚠️ note.
+- Admission-gate cost reduction: scoped revision memoization (one `next`/`report`/`evidence run` pass computes each digest scope once; the cache drops after project commands run), mtime-keyed workflow-state and registry caches, and cheap-fail-first ordering of report gates (missing produces before expensive checks).
+- Bounded conflict recovery: workflow-state revision conflicts during `next`/`report` retry the full routing pass up to three times — memoized digests make retries cheap — instead of failing the command; both sessions in a concurrent `next` pair complete.
+- Controlled evidence reuse additionally requires the recorded scope label and a matching current scope digest, so evidence is not reused after its scope drifted even when the inputs fingerprint is unchanged.
+- Synchronize package, plugin, marketplace and stage-graph versions and regenerate all nine harness distributions.
+
 ## 4.22.12 — 2026-10-22
 
 - Selective evidence invalidation: semantic sensor evidence records an inputs fingerprint (stage consumes artifacts, mtime/size digest); `--refresh` reuses unchanged controlled evidence (`action: reused`) and regenerates only dependents of changed artifacts, reporting `inputs_changed` as the invalidation scope (MARS-271).

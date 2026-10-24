@@ -256,12 +256,20 @@ ${modules.join("\n") || "| - | - | - |"}
 `;
 }
 
+// In-process registry parse memoization (MARS-277), mtime-keyed like the workflow
+// state cache; writes go through updateRegistry, which deletes the entry.
+const registryCache = new Map<string, { mtime: number; registry: WorkflowRegistry | null }>();
+
 export function loadRegistry(projectRoot: string): WorkflowRegistry | null {
   const path = registryPath(projectRoot);
   if (!existsSync(path)) return null;
   const stat = lstatSync(path);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`workflow registry must be a regular non-symlink file: ${path}`);
-  return parseRegistry(readFileSync(path, "utf8"));
+  const cached = registryCache.get(path);
+  if (cached && cached.mtime === stat.mtimeMs) return cached.registry ? structuredClone(cached.registry) : null;
+  const registry = parseRegistry(readFileSync(path, "utf8"));
+  registryCache.set(path, { mtime: stat.mtimeMs, registry });
+  return structuredClone(registry);
 }
 
 export function saveRegistry(projectRoot: string, registry: WorkflowRegistry): void {
@@ -304,6 +312,7 @@ export function updateRegistry(projectRoot: string, mutate: (current: WorkflowRe
       if (current && readFileSync(path, "utf8").replace(/\r\n/g, "\n") === rendered) return next;
       writeFileSync(temporary, rendered, { encoding: "utf8", flag: "wx", mode: 0o600 });
       renameSync(temporary, path);
+      registryCache.delete(path);
       return next;
     } finally {
       if (existsSync(temporary)) unlinkSync(temporary);
@@ -476,8 +485,24 @@ function manifestModules(projectRoot: string): ModuleDescriptor[] {
  * Versioned input scope, independent of storage layout. Unclassified inputs are
  * conservative; only declared private ownership permits source exclusion. Real
  * shared contracts and transitive unit dependencies override private exclusions.
+ *
+ * Module-axis (planning) instances record the `:baseline` scope: their inputs are
+ * the planning documents, declared contracts and every unit's shared paths, while
+ * the module's own source roots and construction tree — the downstream
+ * implementation those stages only plan for — cannot invalidate them (4.22.13,
+ * MARS-277). `legacyEvidenceScopeForInstance` reproduces the pre-baseline wide
+ * module scope, used only to re-check evidence recorded under that label.
  */
 export function evidenceScopeForInstance(projectRoot: string, instanceId: string): DigestScope {
+  return moduleEvidenceScope(projectRoot, instanceId, false);
+}
+
+/** The pre-4.22.13 wide module scope, kept for validating evidence recorded under it. */
+export function legacyEvidenceScopeForInstance(projectRoot: string, instanceId: string): DigestScope {
+  return moduleEvidenceScope(projectRoot, instanceId, true);
+}
+
+function moduleEvidenceScope(projectRoot: string, instanceId: string, legacy: boolean): DigestScope {
   const owner = ownerOfInstance(instanceId);
   const modules = manifestModules(projectRoot);
   if (owner.kind === "module") {
@@ -505,9 +530,12 @@ export function evidenceScopeForInstance(projectRoot: string, instanceId: string
     const privateUnits = units.filter(unit => !relevant.has(unit.unit_id));
     const narrowSources = Boolean(unitId && units.length && units.every(unit => unit.evidence_inputs));
     const privateSource = narrowSources ? privateUnits.flatMap(unit => unit.evidence_inputs!.paths) : [];
-    const sharedPaths = [...(own?.contract_paths || []), ...units.filter(unit => relevant.has(unit.unit_id)).flatMap(unit => unit.evidence_inputs?.shared_paths || [])];
+    // A module-axis baseline binds every unit's shared paths: with no unit bound to
+    // the instance, any declared shared input is a real dependency of the plan.
+    const baseline = !legacy && !unitId;
+    const sharedPaths = [...(own?.contract_paths || []), ...units.filter(unit => baseline || relevant.has(unit.unit_id)).flatMap(unit => unit.evidence_inputs?.shared_paths || [])];
     return {
-      label: `inputs-v2:module:${owner.module_id}${unitId ? `:unit:${unitId}` : ""}`,
+      label: `inputs-v2:module:${owner.module_id}${unitId ? `:unit:${unitId}` : ""}${baseline ? ":baseline" : ""}`,
       projectedInputs: {
         ...(modules.length ? { "docs/aidlc/ideation/module-manifest.json": JSON.stringify({ version: 1, module: own,
           ownership: modules.map(module => ({ module_id: module.module_id, paths: module.paths || [], contract_paths: module.contract_paths || [] })),
@@ -523,6 +551,11 @@ export function evidenceScopeForInstance(projectRoot: string, instanceId: string
         if (underAny(path, sharedPaths)) return false;
         if (narrowSources && privateUnits.some(unit => path.startsWith(`docs/aidlc/modules/${owner.module_id}/construction/${unit.unit_id}/`))) return true;
         if (path.startsWith("docs/aidlc/modules/")) return path.split("/")[3] !== owner.module_id;
+        // The planning baseline stops at what planning actually consumed: the module's
+        // own source roots and construction tree are downstream implementation output.
+        // Integration roots, other modules and their sources stay excluded as before.
+        if (baseline) return path.startsWith(`docs/aidlc/modules/${owner.module_id}/construction/`) || underAny(path, own?.paths || [])
+          || underAny(path, INTEGRATION_ROOTS) || underAny(path, otherPaths);
         return underAny(path, INTEGRATION_ROOTS) || (underAny(path, otherPaths) && !underAny(path, own?.paths || [])) || underAny(path, privateSource);
       },
     };

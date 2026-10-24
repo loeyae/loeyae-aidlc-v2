@@ -84,6 +84,72 @@ function dirtyOf(root: string, ignore: (path: string) => boolean): boolean | nul
   }) : null;
 }
 
+// ---------------------------------------------------------------------------
+// Scoped revision memoization (MARS-277)
+//
+// One `next`/`report` invocation re-validates many evidence records that share the
+// same digest scope; without memoization every check re-runs `git ls-files` and
+// re-hashes the whole scope. Caching is explicitly scoped: it is only active inside
+// `withRevisionMemoization`, which the engine wraps around its admission-gate
+// passes — spans where it knows the digested tree cannot change. Anything that can
+// change the tree the digests cover (an executed project command) must call
+// invalidateRevisionCache(); engine writes stay inside the excluded control plane
+// (aidlc/ .aidlc/) and never need to. Outside a scope, every call computes, so
+// in-process file writes between two readSourceRevision calls are always observed.
+// ---------------------------------------------------------------------------
+
+const revisionCache = new Map<string, SourceRevision>();
+const revisionStats = { calls: 0, computations: 0 };
+let revisionMemoization = false;
+
+/**
+ * Runs `fn` with revision memoization enabled, then drops the cache. Async-safe:
+ * the scope ends when the returned promise settles. Scopes may nest; the cache is
+ cleared when the outermost one ends.
+ */
+export function withRevisionMemoization<T>(fn: () => T): T {
+  const outermost = !revisionMemoization;
+  revisionMemoization = true;
+  const settle = (): void => {
+    if (outermost) {
+      revisionMemoization = false;
+      revisionCache.clear();
+    }
+  };
+  try {
+    const result = fn();
+    if (result && typeof (result as { then?: unknown }).then === "function") {
+      return (result as unknown as Promise<T>).then((value) => { settle(); return value; }, (error) => { settle(); throw error; }) as unknown as T;
+    }
+    settle();
+    return result;
+  } catch (error) {
+    settle();
+    throw error;
+  }
+}
+
+/** Clears every memoized revision; call after running a project command. */
+export function invalidateRevisionCache(): void {
+  revisionCache.clear();
+}
+
+/** Calls vs. real computations since process start; tests use this to prove dedup. */
+export function revisionCacheStats(): { calls: number; computations: number; hits: number } {
+  return { calls: revisionStats.calls, computations: revisionStats.computations, hits: revisionStats.calls - revisionStats.computations };
+}
+
+function cacheKey(root: string, scope: DigestScope | undefined, nested: readonly string[] | undefined): string {
+  return `${root}\0${scope ? scope.label : "worktree"}\0${[...(nested || [])].sort().join(",")}`;
+}
+
+/** HEAD commit of the workflow repository, without hashing the tree. */
+export function currentHead(projectRoot: string): string {
+  const root = realpathSync(resolve(projectRoot));
+  const revision = runSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", shell: false });
+  return revision.status === 0 && typeof revision.stdout === "string" ? revision.stdout.trim() : "unavailable";
+}
+
 /**
  * Revision of one nested repository: its HEAD, whether `git status` reports anything
  * (untracked files included) and a digest over `git ls-files -co --exclude-standard`
@@ -122,6 +188,22 @@ function nestedRevision(projectRoot: string, key: string, scope?: { exclude: (pa
  */
 export function readSourceRevision(projectRoot: string, scope?: DigestScope, nested?: readonly string[]): SourceRevision {
   const scoped = scope && scope.label !== "worktree" ? scope : undefined;
+  const root = realpathSync(resolve(projectRoot));
+  const key = cacheKey(root, scoped, nested);
+  revisionStats.calls++;
+  if (revisionMemoization) {
+    const cached = revisionCache.get(key);
+    if (cached) return structuredClone(cached);
+    const computed = computeSourceRevision(projectRoot, scoped, nested);
+    revisionStats.computations++;
+    revisionCache.set(key, computed);
+    return structuredClone(computed);
+  }
+  revisionStats.computations++;
+  return computeSourceRevision(projectRoot, scoped, nested);
+}
+
+function computeSourceRevision(projectRoot: string, scoped: DigestScope | undefined, nested: readonly string[] | undefined): SourceRevision {
   const root = realpathSync(resolve(projectRoot));
   const revision = runSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", shell: false });
   if (revision.status !== 0 || typeof revision.stdout !== "string") {

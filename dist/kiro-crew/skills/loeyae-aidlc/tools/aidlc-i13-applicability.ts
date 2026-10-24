@@ -26,7 +26,10 @@ export function i13NonApplicable(root: string, moduleId: string, read = (path: s
     .map(name => `${base}/${name}`).filter(path => existsSync(join(root, path)));
   if (!sources.length) throw new Error("I13 requires at least one requirement, story, application-design, or clarification source artifact before declaring not_applicable");
   const path = `${base}/application-design/test-cases/non-applicable.json`;
-  const value = JSON.parse(read(path));
+  let parsed: unknown;
+  try { parsed = JSON.parse(read(path)); } catch (error) { throw new Error(`${path} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${path} must contain a JSON object`);
+  const value = parsed as Record<string, unknown>;
   if (value.schema_version !== "1" || value.status !== "not_applicable") throw new Error("I13 non-applicable record must use schema_version=1 and status=not_applicable");
   // I13 uses a display command string; unit exemptions use an argv array.
   const exemption = ucdExemption({ reason_code: value.reason_code, reason: value.reason, approval_ref: value.approval_ref,

@@ -936,12 +936,22 @@ export function releaseExpiredModuleClaims(state: WorkflowState, now = Date.now(
   return released.sort();
 }
 
+// In-process state parse memoization (MARS-277): one command parses each workflow's
+// Markdown state many times (routing, gates, publication). Keyed by file mtime, so
+// any write — this process via persistWorkflowState or another session — is a miss.
+// Callers get a structuredClone, exactly as a fresh parse would give them.
+const workflowStateCache = new Map<string, { mtime: number; state: WorkflowState | null }>();
+
 export function loadWorkflowState(projectRoot: string, ref: WorkflowRef = GLOBAL_WORKFLOW): WorkflowState | null {
   const path = lightStatePath(projectRoot, ref);
   if (!existsSync(path)) return null;
   const stat = lstatSync(path);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`workflow state must be a regular non-symlink file: ${path}`);
-  return parseLightWorkflowState(readFileSync(path, "utf8"));
+  const cached = workflowStateCache.get(path);
+  if (cached && cached.mtime === stat.mtimeMs) return cached.state ? structuredClone(cached.state) : null;
+  const state = parseLightWorkflowState(readFileSync(path, "utf8"));
+  workflowStateCache.set(path, { mtime: stat.mtimeMs, state });
+  return structuredClone(state);
 }
 
 const CLAIM_TRANSACTION = Symbol("claim transaction");
@@ -1029,6 +1039,7 @@ function persistWorkflowState(projectRoot: string, state: WorkflowState, ref: Wo
     appendAudit(projectRoot, next, ref);
     writeFileSync(temporary, renderLightWorkflowState(next), { encoding: "utf8", flag: "wx", mode: 0o600 });
     renameSync(temporary, path);
+    workflowStateCache.delete(path);
     Object.assign(state, next);
     if (options.afterCommit) {
       const binding = sessionBinding();

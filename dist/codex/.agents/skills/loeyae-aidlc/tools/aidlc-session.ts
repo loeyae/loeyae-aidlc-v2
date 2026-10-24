@@ -175,16 +175,20 @@ export function bindSession(
 	};
 	state.active_instances[options.instance] = claim;
 	const moduleId = /@module:([a-z0-9][a-z0-9-]*)/.exec(options.instance)?.[1];
+	const unitId = /@unit:([a-z0-9][a-z0-9-]*)$/.exec(options.instance)?.[1];
 	if (moduleId) {
-		state.module_selections = {
-			...state.module_selections,
-			[moduleId]: {
-				...state.module_selections?.[moduleId],
-				owner: options.owner,
-				selected_at: now.toISOString(),
-			},
-		};
-		const unitId = /@unit:([a-z0-9][a-z0-9-]*)$/.exec(options.instance)?.[1];
+		// MARS-277: a unit binding owns one unit's chain, not the module; it must not
+		// overwrite the module-level ownership record another session may hold.
+		if (!unitId) {
+			state.module_selections = {
+				...state.module_selections,
+				[moduleId]: {
+					...state.module_selections?.[moduleId],
+					owner: options.owner,
+					selected_at: now.toISOString(),
+				},
+			};
+		}
 		const key = `${moduleId}:${unitId}`;
 		if (unitId && state.unit_selections[key])
 			state.unit_selections[key] = {

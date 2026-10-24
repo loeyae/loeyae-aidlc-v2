@@ -46,7 +46,7 @@ import { sourceDeletions, type VerifiedDeletion } from "./aidlc-source-deletions
 import { codeRefRepo, nestedHead, nestedMigrationCommand, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
 import { CONTRACT_CONSUMER_COLUMN, CONTRACT_ID_COLUMN, CONTRACT_PROVIDER_COLUMN, moduleForValue } from "./aidlc-contract-table";
 import { bestLedgerCheckpoint, checkpointModule, gitRepositoryAvailable, ledgerFetchCommand, ledgerPublishCommand, ledgerRef, moduleContractSnapshot, remoteLedgerRef } from "./aidlc-module-ledger";
-import { COMMIT_ID_PATTERN, commitAncestryErrors, readSourceRevision, type RepoRevision } from "./aidlc-revision";
+import { COMMIT_ID_PATTERN, commitAncestryErrors, currentHead, readSourceRevision, withRevisionMemoization, type RepoRevision } from "./aidlc-revision";
 import { verifyProviderKnowledge } from "./aidlc-provider-knowledge.js";
 import {
   ADOPTION_EXEMPTED_RULES,
@@ -114,6 +114,7 @@ import {
   loadWorkflowState,
   releaseExpiredModuleClaims,
   saveWorkflowState,
+  withWorkflowFileLock,
   withWorkflowInitialization,
   workflowRefKey,
   type DiagramFormat,
@@ -138,6 +139,7 @@ import {
   evidenceSourceRevision,
   evidenceScopeForInstance,
   extractOwnedState,
+  legacyEvidenceScopeForInstance,
   integrationStageSlugs,
   isSplitLayout,
   loadWorkflowParts,
@@ -319,13 +321,14 @@ const PRD_ELIGIBLE_SCOPES = new Set(FULL_WORKFLOW_SCOPES);
 // Subcommands
 // ---------------------------------------------------------------------------
 
-const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format", "baseline", "state", "profile", "checkpoint", "audit", "registry"] as const;
+const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format", "baseline", "state", "profile", "checkpoint", "audit", "unit", "registry"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
 type StageResult = (typeof VALID_RESULTS)[number];
 const NEXT_FLAGS = new Set(["preview", "scope", "work", "with-prd", "resume", "status", "text", "claim", "module", "unit", "owner", "branch", "worktree", "replace-lineage", "provider-approval"]);
 const REPORT_FLAGS = new Set(["stage", "result", "user-input", "instruction-ack", "module", "unit", "instance", "owner", "gate-decision"]);
+const UNIT_INPUTS_FLAGS = new Set(["module", "unit", "paths", "shared-paths", "depends-on-units"]);
 const SPLIT_FLAGS = new Set(["from", "dry-run", "replace-lineage"]);
 const STATE_FLAGS = new Set(["lineage", "user-input", "reason", "text", "module", "from"]);
 const PROFILE_FLAGS = new Set(["signal", "detail", "module"]);
@@ -347,11 +350,20 @@ const INTEGRATION_WORKFLOW: WorkflowRef = { kind: "integration" };
 // Helpers
 // ---------------------------------------------------------------------------
 
+// MARS-277: the compiled graph is immutable for the lifetime of one CLI process;
+// next/report call loadGraph from many admission helpers, so it is parsed once.
+let cachedGraph: StageGraph | undefined;
+let cachedGraphMtime: number | undefined;
+
 export function loadGraph(): StageGraph {
+  const mtime = statSync(GRAPH_PATH).mtimeMs;
+  if (cachedGraph && mtime === cachedGraphMtime) return cachedGraph;
   if (!existsSync(GRAPH_PATH)) {
     throw new Error(`Stage graph not found at ${GRAPH_PATH}. Run 'aidlc-graph.ts compile' first.`);
   }
-  return normalizeExecutionGraph(JSON.parse(readFileSync(GRAPH_PATH, "utf-8")));
+  cachedGraph = normalizeExecutionGraph(JSON.parse(readFileSync(GRAPH_PATH, "utf-8")));
+  cachedGraphMtime = mtime;
+  return cachedGraph;
 }
 
 /** Older cached graphs are diagnostic inputs, never a way to restore execution
@@ -1526,11 +1538,19 @@ function validateEvidence(
       // Split layout: content-addressed within the owning workflow's scope. The commit
       // is provenance only, so another module's commit or write cannot invalidate it.
       const expectedScope = evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
-      if (commit) errors.push(...commitAncestryErrors(PROJECT_ROOT, commit, readSourceRevision(PROJECT_ROOT).commit));
-      if (recordedScope !== expectedScope.label) {
+      if (commit) errors.push(...commitAncestryErrors(PROJECT_ROOT, commit, currentHead(PROJECT_ROOT)));
+      if (recordedScope !== expectedScope.label && recordedScope !== legacyEvidenceScopeForInstance(PROJECT_ROOT, instance.instance_id).label) {
         errors.push(`source_revision.scope ${recordedScope} does not match the ${expectedScope.label} scope of ${instance.instance_id}`);
       } else if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.scope_digest || ""))) {
         errors.push("source_revision.scope_digest must be a SHA-256 digest");
+      } else if (!options.tolerateRevisionDrift && recordedScope !== expectedScope.label) {
+        // Controlled compatibility (4.22.13, MARS-277): module-axis evidence recorded
+        // under the pre-baseline wide scope keeps its own semantics — strict, no drift
+        // tolerance — but a mismatch now says how to migrate to the baseline scope.
+        const legacyScope = legacyEvidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
+        if (sourceRevision.scope_digest !== readSourceRevision(PROJECT_ROOT, legacyScope, nestedKeys).scope_digest) {
+          errors.push(`source_revision.scope_digest no longer matches the ${recordedScope} scope; refresh this evidence ('aidlc evidence run --stage ${stage.slug}${instance.module_id ? ` --module ${instance.module_id}` : ""} --refresh') to re-anchor it to the ${expectedScope.label} scope`);
+        }
       } else if (!options.tolerateRevisionDrift && sourceRevision.scope_digest !== readSourceRevision(PROJECT_ROOT, expectedScope, nestedKeys).scope_digest) {
         errors.push(`source_revision.scope_digest no longer matches the ${recordedScope} scope`);
       }
@@ -3906,6 +3926,8 @@ function clearUnitContext(state: WorkflowState, instanceId: string): void {
  * unresolved unit instance of a DIFFERENT unit, moving it would overwrite that
  * unit's chain position (last-writer-wins). A unit next writes its own context
  * instead; the single-agent sequential path keeps writing the global pointers.
+ * MARS-277 extends the protection to any unresolved global current — a module-axis
+ * planning current held by another session is equally a live chain position.
  */
 export function applyCurrentContext(state: WorkflowState, instance: StageInstance): void {
   const unitKey = unitContextKey(instance.module_id, instance.unit_id);
@@ -3914,7 +3936,6 @@ export function applyCurrentContext(state: WorkflowState, instance: StageInstanc
     unitKey
     && currentGlobal
     && currentGlobal !== instance.instance_id
-    && currentGlobal.includes("@unit:")
     && !isInstanceResolved(state, currentGlobal)
   );
   if (unitKey && globalHeldByOtherUnit) {
@@ -3923,6 +3944,19 @@ export function applyCurrentContext(state: WorkflowState, instance: StageInstanc
       [unitKey]: { stage: instance.stage.slug, phase: instance.stage.phase, stage_instance: instance.instance_id },
     };
     return;
+  }
+  if (!unitKey && currentGlobal && currentGlobal !== instance.instance_id && currentGlobal.includes("@unit:") && !isInstanceResolved(state, currentGlobal)) {
+    // A module/project-axis advance displacing an unresolved unit's global position
+    // snapshots that unit's chain into its own context first, so the position survives.
+    const heldModule = /@module:([a-z0-9][a-z0-9-]*)/.exec(currentGlobal)?.[1];
+    const heldUnit = /@unit:([a-z0-9][a-z0-9-]*)$/.exec(currentGlobal)?.[1];
+    const heldStage = currentGlobal.split("@", 1)[0];
+    if (heldModule && heldUnit) {
+      state.unit_contexts = {
+        ...(state.unit_contexts || {}),
+        [`${heldModule}:${heldUnit}`]: { stage: heldStage, phase: state.current_phase, stage_instance: currentGlobal },
+      };
+    }
   }
   state.current_stage = instance.stage.slug;
   state.current_phase = instance.stage.phase;
@@ -4217,7 +4251,7 @@ function advanceSplit(ctx: EngineContext, graph: StageGraph, args: string[], fla
     state: ctx.view,
     flags,
     commit: probe ? () => undefined : (view) => commitSplitContext(ctx, view),
-    retry: () => handleNext(args),
+    retry: () => nextConflictRetry(args),
     label: workflowLabel(ctx.owner),
     finishedMessage: (count) => `🎉 ${workflowLabel(ctx.owner)}: all ${count} stage instances resolved.`,
     candidate: (instance) => sameRef(ownerOfInstance(instance.instance_id), ctx.owner),
@@ -4724,6 +4758,34 @@ function rmFile(path: string): void {
 // ---------------------------------------------------------------------------
 
 async function handleNext(args: string[]): Promise<Directive> {
+  // MARS-277: one next re-validates many evidence records sharing a digest scope;
+  // the admission passes run no project commands, so the digests are memoized here.
+  // The same wrapper bounds revision-conflict retries across the whole chain.
+  const topLevel = !nextConflictInFlight;
+  if (topLevel) { nextConflictRetries = 0; nextConflictInFlight = true; }
+  try {
+    return await withRevisionMemoization(async () => handleNextInner(args));
+  } finally {
+    if (topLevel) nextConflictInFlight = false;
+  }
+}
+
+let nextConflictRetries = 0;
+let nextConflictInFlight = false;
+
+/** Bounded revision-conflict retry for `next` (MARS-277); over the limit it explains instead of recursing. */
+function nextConflictRetry(args: string[]): Promise<Directive> {
+  nextConflictRetries++;
+  if (nextConflictRetries > CONFLICT_RETRY_LIMIT) {
+    return Promise.resolve({
+      kind: "error",
+      message: `next abandoned after ${CONFLICT_RETRY_LIMIT} revision conflict retries; another session keeps writing the workflow state — reread it and rerun next`,
+    });
+  }
+  return handleNext(args);
+}
+
+async function handleNextInner(args: string[]): Promise<Directive> {
   const graph = loadGraph();
   const flags = parseFlags(args);
   const invalidFlag = unsupportedFlag(flags, NEXT_FLAGS);
@@ -4731,13 +4793,27 @@ async function handleNext(args: string[]): Promise<Directive> {
 
   if ("preview" in flags) {
     const loaded = loadWorkflowParts(PROJECT_ROOT);
-    const ref: WorkflowRef = loaded.split && flags.module ? {kind: "module", module_id: flags.module} : GLOBAL_WORKFLOW;
+    const binding = sessionBinding();
+    const ref: WorkflowRef = loaded.split
+      ? (binding ? ownerOfInstance(binding.stage_instance) : flags.module ? {kind: "module", module_id: flags.module} : GLOBAL_WORKFLOW)
+      : GLOBAL_WORKFLOW;
+    if (loaded.split && binding && flags.module && (ref.kind !== "module" || ref.module_id !== flags.module)) {
+      return { kind: "error", message: "requested module conflicts with session binding" };
+    }
     const part = loaded.parts.get(workflowRefKey(ref));
     if (!part) return {kind: "error", message: "workflow does not exist; initialize it first"};
     const view = structuredClone(loaded.split ? mergeWorkflowView(loaded.parts, ref) : part.state);
     const all = expandStageInstances(graph, view);
-    const candidates = all.filter(instance => (!loaded.split || sameRef(ownerOfInstance(instance.instance_id), ref)) && (!flags.module || instance.module_id === flags.module) && (!flags.unit || instance.unit_id === flags.unit));
-    const current = candidates.find(instance => instance.instance_id === part.state.current_stage_instance && !isInstanceResolved(view, instance.instance_id));
+    // A bound session previews only its own chain (MARS-277): its owning workflow,
+    // and for a unit binding only that unit's instances — the same candidate filter
+    // advance enforces — so it is never routed into another unit or session's work.
+    const boundUnit = binding?.stage_instance.split("@unit:")[1];
+    const candidates = all.filter(instance => (!loaded.split || sameRef(ownerOfInstance(instance.instance_id), ref))
+      && (!binding || sameRef(ownerOfInstance(instance.instance_id), ownerOfInstance(binding.stage_instance)))
+      && (!boundUnit || instance.unit_id === boundUnit)
+      && (!flags.module || instance.module_id === flags.module) && (!flags.unit || instance.unit_id === flags.unit));
+    const current = candidates.find(instance => binding && instance.instance_id === binding.stage_instance && !isInstanceResolved(view, instance.instance_id))
+      || candidates.find(instance => instance.instance_id === part.state.current_stage_instance && !isInstanceResolved(view, instance.instance_id));
     view.active_instances = {};
     const search = current ? {instance: current} : findNextInstance(candidates, view, all);
     const target = search.instance || ("blocked" in search ? search.blocked?.instance : undefined);
@@ -4948,7 +5024,7 @@ async function handleNext(args: string[]): Promise<Directive> {
       && (!sessionBinding()!.stage_instance.includes("@unit:") || instance.unit_id === sessionBinding()!.stage_instance.split("@unit:")[1]),
     flags,
     commit: (value) => saveState(value),
-    retry: () => handleNext(args),
+    retry: () => nextConflictRetry(args),
     label: "Workflow",
     finishedMessage: (count) => `🎉 All ${count} stage instances resolved. Workflow finished.`,
   });
@@ -5254,7 +5330,10 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   try {
     opts.commit(originalState);
   } catch (error) {
-    if (claimRequested && error instanceof Error && error.message.startsWith("workflow state revision conflict")) return opts.retry();
+    // MARS-277: a concurrent writer won the state CAS — reread and retry the whole
+    // routing pass (bounded by nextConflictRetry), with or without --claim. The
+    // retry recomputes cheaply: the revision digests are memoized within this pass.
+    if (error instanceof Error && error.message.startsWith("workflow state revision conflict")) return opts.retry();
     throw error;
   }
 
@@ -5299,6 +5378,13 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
 // ---------------------------------------------------------------------------
 
 async function handleReport(args: string[]): Promise<Directive> {
+  // MARS-277: report gates re-check many evidence records sharing a digest scope.
+  return withRevisionMemoization(async () => handleReportInner(args, 0));
+}
+
+const CONFLICT_RETRY_LIMIT = 3;
+
+async function handleReportInner(args: string[], conflictRetries: number): Promise<Directive> {
   const flags = parseFlags(args);
   const invalidFlag = unsupportedFlag(flags, REPORT_FLAGS);
   if (invalidFlag) return { kind: "error", message: `Unsupported AWS-style report option: --${invalidFlag}` };
@@ -5474,6 +5560,7 @@ async function handleReport(args: string[]): Promise<Directive> {
   };
   if (userInput) entry.user_input = userInput;
   let sourceDeliveryRecord: Record<string, unknown> | undefined;
+  let ownershipNote: string | undefined;
 
   // --- P0 Gate: Validate consumes and produces before allowing completion ---
   if (result === "completed" || result === "approved") {
@@ -5483,6 +5570,19 @@ async function handleReport(args: string[]): Promise<Directive> {
           kind: "error",
           message: `🚫 Cannot complete stage instance "${currentInstance.instance_id}" — canonical consumed artifacts are no longer valid:\n` +
             consumeFailures.map((failure) => `  ❌ ${failure}`).join("\n"),
+        };
+      }
+
+      // MARS-277 cheap-fail-first: produces is a file-presence check; failing it before
+      // the expensive sensor re-validation and automatic evidence production saves a
+      // full gate pass that would only end in the same refusal.
+      const missingProduces = checkProduces(currentInstance);
+      if (missingProduces.length > 0) {
+        return {
+          kind: "error",
+          message: `🚫 Cannot complete stage instance "${currentInstance.instance_id}" — required produces not found:\n` +
+            missingProduces.map((path) => `  ❌ ${path}`).join("\n") +
+            `\n\nGenerate these artifacts first, then report again.`,
         };
       }
 
@@ -5508,16 +5608,6 @@ async function handleReport(args: string[]): Promise<Directive> {
         };
       }
 
-      const missingProduces = checkProduces(currentInstance);
-      if (missingProduces.length > 0) {
-        return {
-          kind: "error",
-          message: `🚫 Cannot complete stage instance "${currentInstance.instance_id}" — required produces not found:\n` +
-            missingProduces.map((path) => `  ❌ ${path}`).join("\n") +
-            `\n\nGenerate these artifacts first, then report again.`,
-        };
-      }
-
       if (stageSlug === "module-division") {
         readModuleManifest(PROJECT_ROOT);
       }
@@ -5534,6 +5624,14 @@ async function handleReport(args: string[]): Promise<Directive> {
               message: `🚫 Cannot complete stage instance "${currentInstance.instance_id}" — each unit must declare conditional_stages; missing: ${missingSelections.join(", ")}.`,
             };
           }
+        }
+        // MARS-277: source ownership declarations are what lets parallel units keep
+        // private files out of each other's evidence scopes. Missing declarations stay
+        // conservative (the wide binding still holds — never a silent gate change) but
+        // the completion says so and names the controlled repair path.
+        const undeclaredOwnership = units.filter(unit => !unit.evidence_inputs).map(unit => unit.unit_id);
+        if (undeclaredOwnership.length > 0) {
+          ownershipNote = `⚠️ Units without declared evidence_inputs: ${undeclaredOwnership.join(", ")} — their files stay conservatively bound to every unit's evidence scope. Declare ownership with 'orchestrate unit inputs --module ${currentInstance.module_id} --unit <unit-id> --paths <paths>' to enable parallel isolation.`;
         }
       }
 
@@ -5612,7 +5710,13 @@ async function handleReport(args: string[]): Promise<Directive> {
   try {
     commit(state);
   } catch (error) {
-    if (claim && error instanceof Error && error.message.startsWith("workflow state revision conflict")) return handleReport(args);
+    // MARS-277: bounded, explainable conflict retry — never an unbounded recursion.
+    if (claim && error instanceof Error && error.message.startsWith("workflow state revision conflict")) {
+      if (conflictRetries >= CONFLICT_RETRY_LIMIT) {
+        throw new Error(`report abandoned after ${CONFLICT_RETRY_LIMIT} revision conflict retries; another session keeps writing the workflow state — reread it and rerun report`);
+      }
+      return handleReportInner(args, conflictRetries + 1);
+    }
     throw error;
   }
 
@@ -5624,7 +5728,7 @@ async function handleReport(args: string[]): Promise<Directive> {
     case "approved":
       return {
         kind: "print",
-        message: `✅ Stage "${stageSlug}" ${result}. Run '${nextCommand} --preview', bind the returned exact instance, then next for the next stage.`,
+        message: `✅ Stage "${stageSlug}" ${result}. Run '${nextCommand} --preview', bind the returned exact instance, then next for the next stage.${ownershipNote ? `\n${ownershipNote}` : ""}`,
         handoff_prompt: `工作目标：${state.work_description}\n当前阶段：${stageSlug} 已完成。\n下一步：运行 orchestrate ${nextCommand} --preview，inspect/bind 精确新 instance 后再 next 获取 directive，并按其产物、review、构建、测试和 sensor 要求继续。`,
         ...extras,
       };
@@ -5641,6 +5745,90 @@ async function handleReport(args: string[]): Promise<Directive> {
         ...extras,
       };
   }
+}
+
+function csvFlag(flags: Record<string, string>, key: string): string[] {
+  return String(flags[key] || "").split(",").map((value) => value.trim()).filter(Boolean);
+}
+
+/**
+ * MARS-277 `orchestrate unit inputs`: the controlled repair that declares a unit's
+ * source ownership (evidence_inputs) for a workflow whose units-generation predates
+ * the declaration. It never guesses ownership, only completes a missing declaration,
+ * and it validates the result against the same scope rules the evidence engine uses
+ * before committing, rolling the manifest back on any violation.
+ */
+async function handleUnit(rest: string[]): Promise<Directive> {
+  const usage = "Usage: orchestrate unit inputs --module <module-id> --unit <unit-id> --paths <path,...> [--shared-paths <path,...>] [--depends-on-units <unit,...>]";
+  if (rest[0] !== "inputs") return { kind: "error", message: usage };
+  const flags = parseFlags(rest.slice(1));
+  const invalid = unsupportedFlag(flags, UNIT_INPUTS_FLAGS);
+  if (invalid) return { kind: "error", message: `Unsupported option: --${invalid}\n${usage}` };
+  const moduleId = flags.module;
+  const unitId = flags.unit;
+  const paths = csvFlag(flags, "paths");
+  if (!moduleId || !unitId || paths.length === 0) return { kind: "error", message: usage };
+  const binding = sessionBinding();
+  const boundModule = binding ? /@module:([a-z0-9][a-z0-9-]*)/.exec(binding.stage_instance)?.[1] : undefined;
+  const boundUnit = binding ? /@unit:([a-z0-9][a-z0-9-]*)$/.exec(binding.stage_instance)?.[1] : undefined;
+  if (!binding || boundModule !== moduleId) return { kind: "error", message: `unit inputs requires a session binding on module ${moduleId} (bind an exact instance of that module first)` };
+  // A unit-bound session declares its own unit's ownership only; another unit's
+  // declaration is another session's responsibility (MARS-277 goal 5).
+  if (boundUnit && boundUnit !== unitId) return { kind: "error", message: `session binding is for unit ${boundUnit}; declare unit ${unitId}'s inputs from that unit's own session` };
+  const ref = sessionRefBinding(binding);
+  const manifestPath = join(PROJECT_ROOT, "docs/aidlc/modules", moduleId, "inception/unit-manifest.json");
+  if (!existsSync(manifestPath)) return { kind: "error", message: `unit manifest not found for module ${moduleId}; units-generation must complete before ownership can be declared` };
+  const units = readUnitManifest(PROJECT_ROOT, moduleId);
+  const unit = units.find((row) => row.unit_id === unitId);
+  if (!unit) return { kind: "error", message: `unknown unit ${unitId} in module ${moduleId}` };
+  if (unit.evidence_inputs) return { kind: "error", message: `unit ${unitId} already declares evidence_inputs; changing declared ownership requires regenerating the manifest through units-generation` };
+  const depends = csvFlag(flags, "depends-on-units");
+  const unknownDeps = depends.filter((dep) => !units.some((row) => row.unit_id === dep));
+  if (unknownDeps.length > 0) return { kind: "error", message: `unknown depends_on_units: ${unknownDeps.join(", ")}` };
+  const sharedPaths = csvFlag(flags, "shared-paths");
+  const evidenceInputs = { version: 1, paths, shared_paths: sharedPaths, depends_on_units: depends };
+  const declaration = withWorkflowFileLock(manifestPath, (): Directive => {
+    const previous = readFileSync(manifestPath, "utf8");
+    const manifest = JSON.parse(previous) as { units?: Record<string, unknown>[] };
+    const rows = manifest.units || [];
+    const target = rows.find((row) => row.unit_id === unitId);
+    if (!target) return { kind: "error", message: `unknown unit ${unitId} in module ${moduleId}` };
+    target.evidence_inputs = evidenceInputs;
+    const temporary = `${manifestPath}.tmp-${process.pid}-${Date.now()}`;
+    try {
+      writeFileSync(temporary, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8" });
+      renameSync(temporary, manifestPath);
+      try {
+        // The engine's own scope rules are the gate: under-module roots and
+        // non-overlapping ownership must hold, or the write is rolled back.
+        evidenceScopeForInstance(PROJECT_ROOT, `ownership-probe@module:${moduleId}@unit:${unitId}`);
+      } catch (error) {
+        writeFileSync(temporary, previous);
+        renameSync(temporary, manifestPath);
+        return { kind: "error", message: `rejected ownership declaration for unit ${unitId}: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    } finally {
+      if (existsSync(temporary)) unlinkSync(temporary);
+    }
+    return { kind: "print" as const, message: "" };
+  });
+  if (declaration.kind === "error") return declaration;
+  appendAuditEvent(PROJECT_ROOT, ref, "UNIT_INPUTS_DECLARED", {
+    "Stage Instance": binding.stage_instance,
+    Module: moduleId,
+    Unit: unitId,
+    Paths: paths.join(", "),
+    "Shared Paths": sharedPaths.join(", "),
+    "Depends On Units": depends.join(", "),
+  });
+  return {
+    kind: "print",
+    message: `✅ Unit ${moduleId}:${unitId} now declares evidence_inputs (${paths.join(", ")}${sharedPaths.length ? `; shared: ${sharedPaths.join(", ")}` : ""}${depends.length ? `; depends on: ${depends.join(", ")}` : ""}). Evidence produced from now on binds this unit's declared inputs; previously produced evidence keeps its recorded scope until refreshed.`,
+  };
+}
+
+function sessionRefBinding(binding: { stage_instance: string; workflow_id: string }): WorkflowRef {
+  return isSplitLayout(PROJECT_ROOT) ? ownerOfInstance(binding.stage_instance) : GLOBAL_WORKFLOW;
 }
 
 function reportOwner(flags: Record<string, string>, stage: StageNode): WorkflowRef | Directive {
@@ -8052,7 +8240,7 @@ async function main() {
     console.error(
       JSON.stringify({
         kind: "error",
-        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|archive|split|upgrade|diagram-format|baseline|state|profile|checkpoint|audit> [args...]",
+        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|archive|split|upgrade|diagram-format|baseline|state|profile|checkpoint|audit|unit> [args...]",
       })
     );
     process.exit(1);
@@ -8134,6 +8322,9 @@ async function main() {
       break;
     case "continue":
       directive = await handleContinue(rest[0] || "");
+      break;
+    case "unit":
+      directive = await handleUnit(rest);
       break;
   }
 
