@@ -52,6 +52,7 @@ export interface UiImpactMatrix {
   unaffected_pages: string[];
   rows: UiImpactRow[];
   unmapped_changes: UiChangeSet;
+  non_ui_changes: UiChangeSet;
   all_changes_mapped: boolean;
 }
 
@@ -125,6 +126,8 @@ export interface UiFreshnessState {
   upstream_commit: string;
   sources: UiSourceSnapshot[];
   pages: UiPageRef[];
+  /** REQ/FR/US/STORY/AC ids registered in the page-plan '## 非UI映射' (non-UI mapping) section. */
+  non_ui_ids: string[];
 }
 
 export interface UiCheckpointReview {
@@ -132,6 +135,7 @@ export interface UiCheckpointReview {
   run_id: string;
   completed_at: string;
   pages: string[];
+  non_ui_changes?: string[];
   section_sha256: string;
 }
 
@@ -420,10 +424,36 @@ export function parseUiPagePlanContent(content: string): UiPageRef[] {
 }
 
 export function readUiPagePlan(projectRoot: string, path: string): UiPageRef[] {
+  return readUiPagePlanSources(projectRoot, path).pages;
+}
+
+/**
+ * Machine-readable non-UI registry (MARS-285): the page-plan '## 非UI映射' (non-UI mapping)
+ * section explicitly lists REQ/FR/US/STORY/AC ids that deliberately map to no page. Changes to
+ * registered ids count as `non_ui_changes` instead of `unmapped_changes`, so purely textual
+ * requirement rewrites stay on the legal post-acceptance `ui reverify` path.
+ */
+export function parseNonUiDeclarations(content: string): string[] {
+  const declared: string[] = [];
+  for (const section of markdownSections(content, /^(?:非\s*UI\s*映射|non-UI\s+mapping)$/i)) {
+    for (const line of section.split("\n")) {
+      const lineIds = ids(line, ID_PATTERN);
+      if (lineIds.length === 0) continue;
+      const pageIds = lineIds.filter((id) => PAGE_PATTERN.test(id));
+      PAGE_PATTERN.lastIndex = 0;
+      if (pageIds.length > 0) fail(`non-UI mapping section must not declare page ids (pages are UI by definition): ${pageIds.join(", ")}`);
+      declared.push(...lineIds);
+    }
+  }
+  return normalizedIds(declared);
+}
+
+export function readUiPagePlanSources(projectRoot: string, path: string): { pages: UiPageRef[]; non_ui_ids: string[] } {
   const file = safeProjectFile(projectRoot, path, "page plan");
-  const pages = parseUiPagePlanContent(readFileSync(file.absolute, "utf8"));
+  const content = readFileSync(file.absolute, "utf8");
+  const pages = parseUiPagePlanContent(content);
   if (pages.length === 0) fail(`page plan contains no PAGE identifiers: ${file.relative}`);
-  return pages;
+  return { pages, non_ui_ids: parseNonUiDeclarations(content) };
 }
 
 function mergePageRefs(...sets: UiPageRef[][]): UiPageRef[] {
@@ -453,13 +483,14 @@ function normalizeChanges(changes: Partial<UiChangeSet>): UiChangeSet {
   };
 }
 
-export function buildUiImpactMatrix(pages: UiPageRef[], rawChanges: Partial<UiChangeSet>): UiImpactMatrix {
+export function buildUiImpactMatrix(pages: UiPageRef[], rawChanges: Partial<UiChangeSet>, nonUiDeclarations: string[] = []): UiImpactMatrix {
   const changes = normalizeChanges(rawChanges);
   const normalizedPages = mergePageRefs(pages);
   const requirementSet = new Set(changes.requirements);
   const storySet = new Set(changes.stories);
   const acSet = new Set(changes.acs);
   const pageSet = new Set(changes.pages);
+  const nonUiSet = new Set(normalizedIds(nonUiDeclarations));
   const rows: UiImpactRow[] = [];
   for (const page of normalizedPages) {
     const affectedByRequirements = page.requirements.filter((id) => requirementSet.has(id));
@@ -483,11 +514,25 @@ export function buildUiImpactMatrix(pages: UiPageRef[], rawChanges: Partial<UiCh
     acs: new Set(normalizedPages.flatMap((page) => page.acs)),
     pages: new Set(normalizedPages.map((page) => page.page_id)),
   };
-  const unmapped = {
+  const unmappedRaw = {
     requirements: changes.requirements.filter((id) => !referenced.requirements.has(id)),
     stories: changes.stories.filter((id) => !referenced.stories.has(id)),
     acs: changes.acs.filter((id) => !referenced.acs.has(id)),
     pages: changes.pages.filter((id) => !referenced.pages.has(id)),
+  };
+  // Registered non-UI ids leave `unmapped_changes` and become the auditable third state
+  // `non_ui_changes`; every entry is backed by an explicit page-plan declaration.
+  const nonUi = {
+    requirements: unmappedRaw.requirements.filter((id) => nonUiSet.has(id)),
+    stories: unmappedRaw.stories.filter((id) => nonUiSet.has(id)),
+    acs: unmappedRaw.acs.filter((id) => nonUiSet.has(id)),
+    pages: unmappedRaw.pages.filter((id) => nonUiSet.has(id)),
+  };
+  const unmapped = {
+    requirements: unmappedRaw.requirements.filter((id) => !nonUiSet.has(id)),
+    stories: unmappedRaw.stories.filter((id) => !nonUiSet.has(id)),
+    acs: unmappedRaw.acs.filter((id) => !nonUiSet.has(id)),
+    pages: unmappedRaw.pages.filter((id) => !nonUiSet.has(id)),
   };
   const allMapped = Object.values(unmapped).every((values) => values.length === 0);
   return {
@@ -500,8 +545,21 @@ export function buildUiImpactMatrix(pages: UiPageRef[], rawChanges: Partial<UiCh
     unaffected_pages: normalizedPages.map((page) => page.page_id).filter((id) => !affectedPages.includes(id)),
     rows,
     unmapped_changes: unmapped,
+    non_ui_changes: nonUi,
     all_changes_mapped: allMapped,
   };
+}
+
+/** Impact-matrix records created before the non-UI registry (MARS-285) lack `non_ui_changes`;
+ * filling the default keeps historical records comparing equal against recomputation. */
+function withLegacyImpactDefaults(matrix: UiImpactMatrix): UiImpactMatrix {
+  const legacy = matrix as Partial<UiImpactMatrix>;
+  return { ...legacy, non_ui_changes: legacy.non_ui_changes ?? emptyChanges() } as UiImpactMatrix;
+}
+
+function nonUiIdsOf(matrix: UiImpactMatrix): string[] {
+  const changes = withLegacyImpactDefaults(matrix).non_ui_changes;
+  return normalizedIds([...changes.requirements, ...changes.stories, ...changes.acs, ...changes.pages]);
 }
 
 function canonicalModulePath(moduleId: string, file: "lock" | "acceptance" | "page-plan" | "requirements" | "user-stories"): string {
@@ -883,6 +941,13 @@ function listField(section: string, name: string): string[] {
   return normalizedIds(value.split(/[，,\s]+/).filter(Boolean));
 }
 
+function optionalListField(section: string, name: string): string[] {
+  const value = sectionField(section, name, false);
+  if (!value) return [];
+  if (/^(?:none|无|n\/a|—|-)[。.]?$/i.test(value)) return [];
+  return normalizedIds(value.split(/[，,\s]+/).filter(Boolean));
+}
+
 function parseReviewReport(projectRoot: string, reportPath: string, expectedPages: string[]): {
   reportPath: string;
   freshnessCheckedAt: string;
@@ -977,12 +1042,13 @@ function buildExpectedAcceptance(projectRoot: string, moduleId: string, route: U
   }
   const pageSource = currentSources.find((source) => source.kind === "page-plan");
   if (!pageSource) fail("UI generation lock has no page-plan source");
-  const currentPages = readUiPagePlan(root, pageSource.path);
+  const planSources = readUiPagePlanSources(root, pageSource.path);
+  const currentPages = planSources.pages;
   const pages = mergePageRefs(loaded.lock.pages, currentPages);
-  const impact = buildUiImpactMatrix(pages, diff.changes);
+  const impact = buildUiImpactMatrix(pages, diff.changes, planSources.non_ui_ids);
   if (!impact.all_changes_mapped) {
     const labels = Object.entries(impact.unmapped_changes).filter(([, values]) => values.length > 0).map(([kind, values]) => `${kind}: ${(values as string[]).join(", ")}`);
-    fail(`UI impact matrix has unmapped requirement changes (${labels.join("; ")}); update page-plan or explicitly mark non-UI stories before acceptance`);
+    fail(`UI impact matrix has unmapped requirement changes (${labels.join("; ")}); map them to pages in the page-plan or register them in its '## 非UI映射' (non-UI mapping) section before acceptance`);
   }
   const review = parseReviewReport(root, reportPath, currentPages.map((page) => page.page_id));
   if (loaded.lock.superseded_visual_reviews?.some(prior => prior.run_id === review.full.run_id || prior.section_sha256 === review.full.section_sha256)) fail("DESIGN_NEW_VISUAL_REVIEW_REQUIRED");
@@ -1093,13 +1159,28 @@ function checkpointDigest(checkpoint: Omit<UiFreshnessCheckpoint, "digest"> | Ui
   return sha256(canonicalJson(body));
 }
 
+function declaredIds(value: unknown, field: string): string[] {
+  const list = requireArray(value, field).map((item, index) => requireString(item, `${field}[${index}]`));
+  for (const id of list) {
+    ID_PATTERN.lastIndex = 0;
+    if (!ID_PATTERN.test(id)) fail(`${field} contains invalid id ${id}`);
+    ID_PATTERN.lastIndex = 0;
+    PAGE_PATTERN.lastIndex = 0;
+    if (PAGE_PATTERN.test(id)) fail(`${field} must not declare page ids: ${id}`);
+    PAGE_PATTERN.lastIndex = 0;
+  }
+  return normalizedIds(list);
+}
+
 function parseFreshnessState(raw: unknown, field: string): UiFreshnessState {
   const value = requireObject(raw, field);
   const upstream = requireString(value.upstream_commit, `${field}.upstream_commit`);
   if (!GIT_OBJECT_PATTERN.test(upstream)) fail(`${field}.upstream_commit must be a git commit id`);
   const sources = requireArray(value.sources, `${field}.sources`).map((source, index) => validateSourceSnapshot(source, `${field}.sources[${index}]`));
   const pages = pageRefsFromUnknown(value.pages, `${field}.pages`);
-  return { upstream_commit: upstream, sources, pages };
+  // States recorded before MARS-285 have no non_ui_ids; they default to an empty registry.
+  const nonUiIds = value.non_ui_ids === undefined ? [] : declaredIds(value.non_ui_ids, `${field}.non_ui_ids`);
+  return { upstream_commit: upstream, sources, pages, non_ui_ids: nonUiIds };
 }
 
 function parseCheckpoints(raw: unknown, moduleId: string, route: UiDesignRoute): UiGenerationCheckpoints {
@@ -1133,6 +1214,7 @@ function parseCheckpoints(raw: unknown, moduleId: string, route: UiDesignRoute):
       requireString(review.run_id, `${field}.review.run_id`);
       requireIso(review.completed_at, `${field}.review.completed_at`);
       requireArray(review.pages, `${field}.review.pages`);
+      if (review.non_ui_changes !== undefined) declaredIds(review.non_ui_changes, `${field}.review.non_ui_changes`);
       if (!SHA256_PATTERN.test(requireString(review.section_sha256, `${field}.review.section_sha256`))) fail(`${field}.review.section_sha256 must be SHA-256`);
     } else if (cp.review !== null) {
       fail(`${field}.review must be null for a freshness-refresh checkpoint`);
@@ -1156,7 +1238,7 @@ function readCheckpointsFile(root: string, moduleId: string, route: UiDesignRout
 }
 
 /** Section `## UI freshness reverification <run_id>` of a review report; distinct from the full-acceptance targeted runs. */
-function freshnessReverificationSections(root: string, reportPath: string): Array<{ report_path: string; run_id: string; completed_at: string; result: string; pages: string[]; section_sha256: string }> {
+function freshnessReverificationSections(root: string, reportPath: string): Array<{ report_path: string; run_id: string; completed_at: string; result: string; pages: string[]; non_ui_changes: string[]; section_sha256: string }> {
   const reportFile = safeProjectFile(root, reportPath, "UI freshness reverification report");
   const content = readFileSync(reportFile.absolute, "utf8");
   return markdownSections(content, /^UI freshness reverification(?:\s+.+)?$/i).map((section, index) => ({
@@ -1165,12 +1247,13 @@ function freshnessReverificationSections(root: string, reportPath: string): Arra
     completed_at: requireIso(sectionField(section, "completed_at"), `UI freshness reverification[${index}].completed_at`),
     result: requireString(sectionField(section, "result"), `UI freshness reverification[${index}].result`),
     pages: listField(section, "pages"),
+    non_ui_changes: optionalListField(section, "non_ui_changes"),
     section_sha256: sha256(section),
   }));
 }
 
-function acceptanceState(acceptance: UiGenerationAcceptance, pages: UiPageRef[]): UiFreshnessState {
-  return { upstream_commit: acceptance.freshness.current_upstream_commit, sources: acceptance.freshness.current_sources, pages };
+function acceptanceState(acceptance: UiGenerationAcceptance, pages: UiPageRef[], nonUiIds: string[] = []): UiFreshnessState {
+  return { upstream_commit: acceptance.freshness.current_upstream_commit, sources: acceptance.freshness.current_sources, pages, non_ui_ids: normalizedIds(nonUiIds) };
 }
 
 /** Deterministic freshness delta between a recorded state and a newer state. */
@@ -1189,7 +1272,9 @@ function computeFreshnessDelta(root: string, lock: UiGenerationLock, baseline: U
     changed_paths: [...new Set([...local.paths, ...upstream.paths])].sort(),
     unclassified_changed_paths: [...new Set([...local.unclassified, ...upstream.unclassified])].sort(),
     changes,
-    impact_matrix: buildUiImpactMatrix(mergePageRefs(baseline.pages, current.pages), changes),
+    // The registry in force is the one recorded in the newer state's page-plan: removing a
+    // declaration re-exposes its ids to the mapped/unmapped gates.
+    impact_matrix: buildUiImpactMatrix(mergePageRefs(baseline.pages, current.pages), changes, current.non_ui_ids || []),
   };
 }
 
@@ -1197,7 +1282,8 @@ function liveFreshnessState(root: string, lock: UiGenerationLock): { state: UiFr
   const observed = resolveGitCommit(root, lock.upstream.ref);
   const sources = lock.sources.map((source) => snapshotUiSource(root, source.kind, source.path));
   const plan = sources.find((source) => source.kind === "page-plan")!;
-  return { state: { upstream_commit: observed, sources, pages: readUiPagePlan(root, plan.path) }, observed };
+  const planSources = readUiPagePlanSources(root, plan.path);
+  return { state: { upstream_commit: observed, sources, pages: planSources.pages, non_ui_ids: planSources.non_ui_ids }, observed };
 }
 
 interface VerifiedChain {
@@ -1209,6 +1295,34 @@ interface VerifiedChain {
   effective: UiFreshnessState;
   headDigest: string;
   runIds: Set<string>;
+}
+
+/**
+ * Verifies the immutable acceptance record against its own recorded snapshots once live sources
+ * legitimately moved on — the same trust level the extended checkpoint chain uses. The recorded
+ * delta is recomputed from the snapshots and git objects, the full-acceptance review section is
+ * re-hashed, and the recorded impact matrix is checked for internal consistency.
+ */
+function verifyAcceptanceRecord(root: string, lock: UiGenerationLock, acceptance: UiGenerationAcceptance): void {
+  const original = freshnessDiff(root, lock, acceptance.freshness.current_sources, requireCommitObject(root, acceptance.freshness.current_upstream_commit, "UI generation acceptance.freshness.current_upstream_commit"));
+  if (!sameValue(original.changedPaths, [...acceptance.freshness.changed_paths].sort()) || !sameValue(original.changes, acceptance.freshness.changes)) {
+    fail("UI generation acceptance freshness record does not match its recorded source snapshots");
+  }
+  const reportFile = safeProjectFile(root, acceptance.full_acceptance.report_path, "UI acceptance report");
+  const fullSections = markdownSections(readFileSync(reportFile.absolute, "utf8"), /^UI full acceptance$/i);
+  if (fullSections.length !== 1 || sha256(fullSections[0]) !== acceptance.full_acceptance.section_sha256) fail("UI full acceptance review section changed after acceptance");
+  const matrix = withLegacyImpactDefaults(acceptance.freshness.impact_matrix);
+  const changes = acceptance.freshness.changes;
+  if (!sameValue([matrix.changed_requirements, matrix.changed_stories, matrix.changed_acs, matrix.changed_pages], [changes.requirements, changes.stories, changes.acs, changes.pages])) {
+    fail("UI generation acceptance impact matrix does not match its recorded changes");
+  }
+  if (matrix.all_changes_mapped !== Object.values(matrix.unmapped_changes).every((values) => values.length === 0)) {
+    fail("UI generation acceptance impact matrix is internally inconsistent");
+  }
+  if (!sameValue(matrix.affected_pages, matrix.rows.map((row) => row.page_id)) || !sameValue(matrix.affected_pages, acceptance.freshness.synchronized_pages)) {
+    fail("UI generation acceptance impact matrix affected pages do not match its rows or synchronized pages");
+  }
+  if ((acceptance.freshness.unclassified_changed_paths || []).length > 0) fail("UI generation acceptance recorded unclassified changes");
 }
 
 /**
@@ -1224,25 +1338,37 @@ function verifyAcceptanceChain(root: string, moduleId: string, route: UiDesignRo
   const runIds = new Set<string>([acceptance.full_acceptance.run_id, ...(acceptance.targeted_reverifications || []).map((entry) => entry.run_id)]);
   if (!checkpoints || checkpoints.checkpoints.length === 0) {
     if (checkpoints && checkpoints.acceptance_digest !== digest) fail("UI generation checkpoints do not belong to the recorded full acceptance");
-    const expected = buildExpectedAcceptance(root, moduleId, route, acceptance.full_acceptance.report_path, acceptance.freshness.current_upstream_commit);
-    if (!sameValue(acceptance, expected)) {
-      fail("UI generation acceptance does not match current source revisions, impact matrix, or review report; a second full acceptance is forbidden — record the change with the controlled 'ui reverify' (sources changed) or 'ui refresh' (pointer only) command");
+    const livePlan = readUiPagePlanSources(root, acceptance.freshness.current_sources.find((source) => source.kind === "page-plan")!.path);
+    // Live recomputation proves the acceptance when nothing moved on. Once locked UI sources
+    // changed, the record is verified against its own snapshots instead — otherwise the first
+    // post-acceptance change could never enter the controlled `ui reverify` chain (MARS-285).
+    // The acceptance-time page mapping is bound to the live plan at the first controlled
+    // extension, the same way the extended chain binds it to checkpoint #1's baseline.
+    let matches = false;
+    try {
+      const expected = buildExpectedAcceptance(root, moduleId, route, acceptance.full_acceptance.report_path, acceptance.freshness.current_upstream_commit);
+      const legacyAcceptance = { ...acceptance, freshness: { ...acceptance.freshness, impact_matrix: withLegacyImpactDefaults(acceptance.freshness.impact_matrix) } };
+      matches = sameValue(legacyAcceptance, expected);
+    } catch {
+      matches = false;
     }
-    return { lock, acceptance, acceptancePath: path, acceptanceDigest: digest, checkpoints, effective: acceptanceState(acceptance, readUiPagePlan(root, acceptance.freshness.current_sources.find((source) => source.kind === "page-plan")!.path)), headDigest: digest, runIds };
+    if (matches) return { lock, acceptance, acceptancePath: path, acceptanceDigest: digest, checkpoints, effective: acceptanceState(acceptance, livePlan.pages, livePlan.non_ui_ids), headDigest: digest, runIds };
+    // The live recompute also carried the route-specific resource gates; keep blocking on a
+    // tampered design resource or Figma manifest exactly as before.
+    verifyLockedHtmlResources(root, moduleId, lock);
+    if (route === "figma-existing") verifyExternalUiReview(root, moduleId, acceptance.full_acceptance.report_path);
+    if (route === "figma-create") verifyCreatedUiReview(root, moduleId, acceptance.full_acceptance.report_path);
+    verifyAcceptanceRecord(root, lock, acceptance);
+    return { lock, acceptance, acceptancePath: path, acceptanceDigest: digest, checkpoints, effective: acceptanceState(acceptance, livePlan.pages, livePlan.non_ui_ids), headDigest: digest, runIds };
   }
   if (checkpoints.acceptance_digest !== digest) fail("UI generation checkpoints do not belong to the recorded full acceptance (acceptance digest mismatch)");
   // The original acceptance cannot be recomputed against live inputs once sources legitimately
   // moved on; verify its recorded deltas and its still-present full acceptance review section.
-  const original = freshnessDiff(root, lock, acceptance.freshness.current_sources, requireCommitObject(root, acceptance.freshness.current_upstream_commit, "UI generation acceptance.freshness.current_upstream_commit"));
-  if (!sameValue(original.changedPaths, [...acceptance.freshness.changed_paths].sort()) || !sameValue(original.changes, acceptance.freshness.changes)) {
-    fail("UI generation acceptance freshness record does not match its recorded source snapshots");
-  }
-  const reportFile = safeProjectFile(root, acceptance.full_acceptance.report_path, "UI acceptance report");
-  const fullSections = markdownSections(readFileSync(reportFile.absolute, "utf8"), /^UI full acceptance$/i);
-  if (fullSections.length !== 1 || sha256(fullSections[0]) !== acceptance.full_acceptance.section_sha256) fail("UI full acceptance review section changed after acceptance");
+  verifyAcceptanceRecord(root, lock, acceptance);
   // The acceptance-time page mapping is bound by the page-plan snapshot (verified live when the
   // chain was first extended) and by the checkpoint digest chain.
-  let previous = acceptanceState(acceptance, parseFreshnessState(checkpoints.checkpoints[0].baseline, "UI generation checkpoint #1.baseline").pages);
+  const firstBaseline = parseFreshnessState(checkpoints.checkpoints[0].baseline, "UI generation checkpoint #1.baseline");
+  let previous = acceptanceState(acceptance, firstBaseline.pages, firstBaseline.non_ui_ids);
   let previousDigest = digest;
   for (const [index, checkpoint] of checkpoints.checkpoints.entries()) {
     const label = `UI generation checkpoint #${index + 1}`;
@@ -1253,7 +1379,7 @@ function verifyAcceptanceChain(root: string, moduleId: string, route: UiDesignRo
     const current = parseFreshnessState(checkpoint.current, `${label}.current`);
     if (!sameValue(baseline, previous)) fail(`${label}.baseline does not equal the previous effective state`);
     const delta = computeFreshnessDelta(root, lock, baseline, current);
-    if (!sameValue(delta.changed_paths, checkpoint.changed_paths) || !sameValue(delta.unclassified_changed_paths, checkpoint.unclassified_changed_paths) || !sameValue(delta.changes, checkpoint.changes) || !sameValue(delta.impact_matrix, checkpoint.impact_matrix)) {
+    if (!sameValue(delta.changed_paths, checkpoint.changed_paths) || !sameValue(delta.unclassified_changed_paths, checkpoint.unclassified_changed_paths) || !sameValue(delta.changes, checkpoint.changes) || !sameValue(delta.impact_matrix, withLegacyImpactDefaults(checkpoint.impact_matrix))) {
       fail(`${label} freshness delta does not match its recorded snapshots`);
     }
     if (checkpoint.type === "freshness-refresh") {
@@ -1263,11 +1389,15 @@ function verifyAcceptanceChain(root: string, moduleId: string, route: UiDesignRo
       if (delta.unclassified_changed_paths.length > 0 || !delta.impact_matrix.all_changes_mapped) fail(`${label} contains unclassified or unmapped changes`);
       const review = checkpoint.review!;
       if (!sameStrings(review.pages, delta.impact_matrix.affected_pages)) fail(`${label}.review.pages must exactly match affected pages`);
+      // Registered non-UI changes are only legal with an explicit review binding to those exact
+      // ids, mirroring how affected pages are bound — declarations cannot be blanket claims.
+      const nonUiIds = nonUiIdsOf(delta.impact_matrix);
+      if (!sameStrings(normalizedIds(review.non_ui_changes || []), nonUiIds)) fail(`${label}.review.non_ui_changes must exactly match the registered non-UI changes: ${nonUiIds.join(", ") || "none"}`);
       if (runIds.has(review.run_id)) fail(`${label}.review.run_id ${review.run_id} is reused`);
       runIds.add(review.run_id);
       const section = freshnessReverificationSections(root, review.report_path).filter((entry) => entry.run_id === review.run_id);
       if (section.length !== 1) fail(`${label} review section ${review.run_id} is missing or duplicated in ${review.report_path}`);
-      if (section[0].section_sha256 !== review.section_sha256 || section[0].result !== "passed" || !sameStrings(section[0].pages, review.pages)) {
+      if (section[0].section_sha256 !== review.section_sha256 || section[0].result !== "passed" || !sameStrings(section[0].pages, review.pages) || !sameStrings(section[0].non_ui_changes, nonUiIds)) {
         fail(`${label} review section ${review.run_id} changed after the checkpoint was recorded`);
       }
     }
@@ -1302,7 +1432,7 @@ export function verifyUiGenerationAcceptance(projectRoot: string, moduleId: stri
   if (route === "figma-existing") verifyExternalUiReview(root, moduleId, chain.acceptance.full_acceptance.report_path);
   if (route === "figma-create") verifyCreatedUiReview(root, moduleId, chain.acceptance.full_acceptance.report_path);
   const live = liveFreshnessState(root, chain.lock);
-  if (!sameValue(live.state.sources, chain.effective.sources) || !sameValue(live.state.pages, chain.effective.pages)) {
+  if (!sameValue(live.state.sources, chain.effective.sources) || !sameValue(live.state.pages, chain.effective.pages) || !sameValue(live.state.non_ui_ids, chain.effective.non_ui_ids)) {
     fail("UI generation acceptance does not match current source revisions; record mapped changes with the controlled 'ui reverify' command (a second full acceptance is forbidden)");
   }
   // Repository-level pointer advance is audit-only; only content drift of locked sources counts.
@@ -1394,8 +1524,9 @@ export function reverifyUiGenerationFreshness(projectRoot: string, options: UiCh
   }
   if (!delta.impact_matrix.all_changes_mapped) {
     const labels = Object.entries(delta.impact_matrix.unmapped_changes).filter(([, values]) => values.length > 0).map(([kind, values]) => `${kind}: ${(values as string[]).join(", ")}`);
-    fail(`UI impact matrix has unmapped requirement changes (${labels.join("; ")}); update page-plan before reverification`);
+    fail(`UI impact matrix has unmapped requirement changes (${labels.join("; ")}); map them to pages in the page-plan or register them in its '## 非UI映射' (non-UI mapping) section before reverification`);
   }
+  const nonUiIds = nonUiIdsOf(delta.impact_matrix);
   const reportPath = options.reportPath || chain.acceptance.full_acceptance.report_path;
   const candidates = freshnessReverificationSections(root, reportPath).filter((entry) => !chain.runIds.has(entry.run_id));
   if (candidates.length !== 1) fail(`review report must contain exactly one new '## UI freshness reverification <run_id>' section (found ${candidates.length})`);
@@ -1403,6 +1534,9 @@ export function reverifyUiGenerationFreshness(projectRoot: string, options: UiCh
   if (review.result !== "passed") fail("UI freshness reverification.result must be passed");
   if (!sameStrings(review.pages, delta.impact_matrix.affected_pages)) {
     fail(`UI freshness reverification.pages must exactly match affected pages: ${delta.impact_matrix.affected_pages.join(", ")}`);
+  }
+  if (!sameStrings(review.non_ui_changes, nonUiIds)) {
+    fail(`UI freshness reverification.non_ui_changes must exactly match the registered non-UI changes: ${nonUiIds.join(", ") || "none"}`);
   }
   return publishScope(root, publication, () => appendCheckpoint(root, chain, options.moduleId, route, {
     type: "targeted-reverification",
@@ -1412,7 +1546,7 @@ export function reverifyUiGenerationFreshness(projectRoot: string, options: UiCh
     baseline: chain.effective,
     current: live.state,
     ...delta,
-    review: { report_path: review.report_path, run_id: review.run_id, completed_at: review.completed_at, pages: normalizedIds(review.pages), section_sha256: review.section_sha256 },
+    review: { report_path: review.report_path, run_id: review.run_id, completed_at: review.completed_at, pages: normalizedIds(review.pages), ...(nonUiIds.length ? { non_ui_changes: nonUiIds } : {}), section_sha256: review.section_sha256 },
   }));
 }
 
@@ -1440,6 +1574,7 @@ function pagesFromJson(projectRoot: string, path: string): UiPageRef[] {
 }
 
 function matrixMarkdown(matrix: UiImpactMatrix): string {
+  const nonUiList = nonUiIdsOf(matrix);
   const lines = [
     "# STORY/AC → 页面影响矩阵",
     "",
@@ -1447,6 +1582,7 @@ function matrixMarkdown(matrix: UiImpactMatrix): string {
     `- 变化 STORY：${matrix.changed_stories.join(", ") || "（无）"}`,
     `- 变化 AC：${matrix.changed_acs.join(", ") || "（无）"}`,
     `- 变化 PAGE：${matrix.changed_pages.join(", ") || "（无）"}`,
+    `- 已登记非UI变化：${nonUiList.join(", ") || "（无）"}`,
     `- 页面总数：${matrix.total_pages}；受影响：${matrix.affected_pages.length}；未受影响：${matrix.unaffected_pages.length}`,
     "",
     "| 受影响页面 | 需求 | STORY | AC | 页面自身变化 |",
@@ -1457,7 +1593,9 @@ function matrixMarkdown(matrix: UiImpactMatrix): string {
   lines.push("");
   if (!matrix.all_changes_mapped) {
     const labels = Object.entries(matrix.unmapped_changes).filter(([, values]) => values.length).map(([kind, values]) => `${kind}: ${values.join(", ")}`);
-    lines.push(`> BLOCKED：存在未映射变化（${labels.join("；")}）。必须先更新 page-plan，禁止把它们判为“无需同步”。`);
+    lines.push(`> BLOCKED：存在未映射变化（${labels.join("；")}）。必须先在 page-plan 中映射到页面，或在「## 非UI映射」节显式登记为非 UI，禁止把它们判为“无需同步”。`);
+  } else if (nonUiList.length) {
+    lines.push(`> 已登记非 UI 变更 [${nonUiList.join(", ")}] 不触发页面同步，复验审查必须逐一绑定这些编号。只同步受影响页面 [${matrix.affected_pages.join(", ") || "无"}]，不重生未受影响页面 [${matrix.unaffected_pages.join(", ") || "无"}]。`);
   } else {
     lines.push(`> 只同步受影响页面 [${matrix.affected_pages.join(", ") || "无"}]，不重生未受影响页面 [${matrix.unaffected_pages.join(", ") || "无"}]。`);
   }
@@ -1556,6 +1694,7 @@ export async function runUiGovernanceCli(args: string[], projectRoot = process.c
       changed_paths: checkpoint.changed_paths,
       affected_pages: checkpoint.impact_matrix.affected_pages,
       unaffected_pages: checkpoint.impact_matrix.unaffected_pages,
+      non_ui_changes: nonUiIdsOf(checkpoint.impact_matrix),
       review_run_id: checkpoint.review?.run_id,
       digest: checkpoint.digest,
       full_acceptance_runs: 1,
@@ -1570,15 +1709,21 @@ export async function runUiGovernanceCli(args: string[], projectRoot = process.c
     return;
   }
   if (command === "impact-matrix") {
-    const pages = argValue(args, "--pages-json")
-      ? pagesFromJson(projectRoot, argValue(args, "--pages-json")!)
-      : readUiPagePlan(projectRoot, requiredArg(args, "--page-plan"));
+    let pages: UiPageRef[];
+    let nonUiIds: string[] = [];
+    if (argValue(args, "--pages-json")) {
+      pages = pagesFromJson(projectRoot, argValue(args, "--pages-json")!);
+    } else {
+      const planSources = readUiPagePlanSources(projectRoot, requiredArg(args, "--page-plan"));
+      pages = planSources.pages;
+      nonUiIds = planSources.non_ui_ids;
+    }
     const matrix = buildUiImpactMatrix(pages, {
       requirements: argList(args, "--changed-requirements"),
       stories: argList(args, "--changed-stories"),
       acs: argList(args, "--changed-acs"),
       pages: argList(args, "--changed-pages"),
-    });
+    }, nonUiIds);
     writeOptionalOutput(projectRoot, argValue(args, "--out"), matrixMarkdown(matrix));
     if (!matrix.all_changes_mapped) fail("impact matrix contains unmapped changes");
     return;

@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.22.17 — 2026-10-27
+
+- Compliant re-verification path for post-acceptance non-UI changes (MARS-285): page-plan gains a machine-readable non-UI mapping registration section (`## 非UI映射`, table or list rows, Chinese/English headings accepted; `PAGE-*` IDs are rejected by definition); the UI impact matrix splits unmapped IDs into a registered `non_ui_changes` class and truly unmapped IDs, `all_changes_mapped` considers only the latter, registration freshness is tracked, and deleting a registration re-exposes the ID.
+- `ui accept` / `ui reverify` admit registered non-UI changes: reverify requires the targeted review's `non_ui_changes` field to match the registration exactly (absent means none), and the checkpoint review records that binding, frozen with the acceptance section's SHA-256; registrations also enter the checkpoint digest chain via `non_ui_ids` state snapshots, so later registration edits require a new targeted re-verification.
+- Zero-checkpoint deadlock fixed: the first source change after acceptance with no checkpoint yet could never pass `ui reverify` (expected re-computation hits the `synchronized_pages` gate); the no-checkpoint branch now falls back to `verifyAcceptanceRecord`, recomputing the recorded delta from recorded snapshots plus git objects and re-hashing the acceptance section (figma/HTML design-resource gates preserved) — anti-forgery strength no weaker than the extended chain.
+- Backward compatibility: legacy impact-matrix records missing `non_ui_changes` default to an empty set (`withLegacyImpactDefaults`), freshness states missing `non_ui_ids` default to `[]`; legacy acceptance chains and checkpoints keep passing.
+- Synchronize package, plugin, marketplace and stage-graph versions and regenerate all nine harness distributions.
+
 ## 4.22.16 — 2026-10-24
 
 - Module-level planning evidence anchors to a planning baseline scope (`inputs-v2:module:<m>:baseline`): a module-axis instance's digest binds what planning actually consumed (module docs and every unit's declared shared inputs) and excludes downstream `construction/` output plus the module's own source roots, so ordinary downstream implementation changes no longer invalidate completed upstream planning evidence (MARS-277).
