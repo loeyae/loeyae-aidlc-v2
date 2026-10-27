@@ -133,7 +133,7 @@ loeyae-aidlc orchestrate state adopt --module <id> --from <commit> --user-input 
 
 因此 `--replace` 只能把基线更正为启动前的 commit，不能改到启动后的提交，否则报 `the baseline must predate the workflow`；启动后产生的提交只能通过 `--advance` 推进到已完成单元的 GREEN commit。已推进过的基线一律拒绝 `--replace`。
 
-嵌套仓库的 `--repo <path>=<commit>` / `--expect-repo` 用法见 `loeyae-aidlc help` 与 README。
+嵌套仓库的 `--repo <path>=<commit>` / `--expect-repo` 用法见 `loeyae-aidlc help` 与 README；多仓库与临时 worktree 的初始化、恢复及证据边界见 `docs/multi-repo-worktree-recovery.md`。
 
 ## 团队 unit 协作
 
@@ -163,6 +163,8 @@ loeyae-aidlc module migrate [--owner <legacy-owner>]
 ```
 
 `next --claim` 只认领当前模块的就绪 module stage instance；claim 写入 `module_id`、`stage_instance`、`owner`、branch/worktree、`claimed_at`、heartbeat 和过期时间。有效 claim 不会被另一端重复认领，超时后可重新领取。模块 report 只结算自己的 claim，`application-design` 等 blocking approval 仍按实例要求真人 `--user-input Approve`。
+
+写入 `next`/`report` 前需要显式会话绑定：`module inspect` 读 claim 与 `expected` 令牌，`module bind`（同会话续期）/ `module transfer --human-instruction-ref`（换会话/换人接手）返回的 binding JSON 以 `AIDLC_SESSION_BINDING` 只传给本会话子命令。claim TTL 30 分钟。会话中断、claim 过期、worktree 恢复的完整路径与演练见 `docs/multi-repo-worktree-recovery.md`。
 
 `product-contracts.md` 与 `runtime-dependencies.md` 中明确的模块关系会作为跨模块准入依赖；消费方会显示等待的提供方阶段。`runtime summary` 同时展示所有活动实例、owner、就绪实例和依赖阻塞。
 
@@ -214,6 +216,9 @@ loeyae-aidlc orchestrate report --stage <slug> --module <module-id> --result com
 ## Worktree 与 review
 
 ```bash
+# 共享基线缓存：在当前干净 HEAD 全量 checkout 一次（<project>-aidlc-warm），prepare 硬链接复用
+loeyae-aidlc worktree warmup
+
 loeyae-aidlc worktree prepare \
   --instance <stage-instance> \
   --member <name> \
@@ -234,7 +239,7 @@ loeyae-aidlc worktree verify \
   --review-evidence <worktree-relative-review-json>
 ```
 
-`prepare` 创建成员选择 unit 对应的 branch/worktree，并写入 Markdown metadata。`verify` / `merge-plan` 验证已提交变更、review 的 `files_reviewed` 覆盖、branch/base 一致性，并输出建议 merge 命令（`authorized: false`）。
+`prepare` 创建成员选择 unit 对应的 branch/worktree，并写入 Markdown metadata。`verify` / `merge-plan` 验证已提交变更、review 的 `files_reviewed` 覆盖、branch/base 一致性，并输出建议 merge 命令（`authorized: false`）。涉及嵌套仓的实例会被 `prepare` / `merge-plan` 拒绝（`cannot isolate`）。warmup 缓存复用、worktree 中断恢复与证据失配重判见 `docs/multi-repo-worktree-recovery.md`。
 
 不会自动 merge、push、删除 worktree、修改工作流完成状态或代替仓库权限持有者执行操作。
 
@@ -255,7 +260,7 @@ loeyae-aidlc attest resolve --base origin/main --head HEAD
 
 每个 semantic sensor 的 Evidence 都由 **确定性 producer** 扫描真实产物机械生成，写到 canonical `evidence_path`（`.aidlc/evidence/<stage>/[<module>/[<unit>/]]<sensor>.json`）。以追溯矩阵为例（sensor `traceability-matrix`）：producer 扫描 `requirements.md` 的 `REQ-xxx` 及其 `track:[backend/frontend/data/infra/nfr/doc-only]` 标签，再按阶段到 `user-stories.md`、`application-design`、功能设计、UC-D、代码源文件、测试里逐层比对该 REQ / `@ReqId` 是否出现，算出 `broken_rows`。给同样的产物永远输出同样的矩阵——这是它能当客观证据的前提。
 
-**Agent 手写证据 = 伪造证据。** 受控证据带防伪印章：`producer.name=loeyae-aidlc-evidence`、`producer.mode=controlled`、`checker.argv_digest`（SHA-256）、`source_revision.worktree_digest`（与当前 git HEAD/worktree 绑定）。手写 JSON 缺印章或印章对不上当前提交，`report` / `next` 会当场拒绝。若看到引擎提示“checkSensors 与 traceability-matrix.json：须由引擎受控 producer 生成，Agent 手写即伪造证据”，那是正常的边界提示，不是需要人工补写矩阵的错误。
+**Agent 手写证据 = 伪造证据。** 受控证据带防伪印章：`producer.name=loeyae-aidlc-evidence`、`producer.mode=controlled`、`checker.argv_digest`（SHA-256）、`source_revision.worktree_digest`（与当前 git HEAD/worktree 绑定）。手写 JSON 缺印章或印章对不上当前提交，`report` / `next` 会当场拒绝。若看到引擎提示“checkSensors 与 traceability-matrix.json：须由引擎受控 producer 生成，Agent 手写即伪造证据”，那是正常的边界提示，不是需要人工补写矩阵的错误。证据摘要绑定产出它的那棵树、换树失配后的重判路径与"可复制 vs 必须重建/重判"边界表见 `docs/multi-repo-worktree-recovery.md`。
 
 ### checkSensors 何时触发
 
