@@ -51,6 +51,7 @@
     "evidence": "tsx core/tools/aidlc-evidence.ts",
     "compile-graph": "tsx core/tools/aidlc-graph.ts compile",
     "scope-table": "tsx core/tools/aidlc-utility.ts scope-table",
+    "test:mars285": "tsx tests/test_mars285_ui_nonui.ts",
     "test:mars168": "tsx tests/run_mars168.ts quality",
     "test:mars168-regression": "tsx tests/run_mars168.ts regression",
     "test:provider-mcp": "tsx tests/test_provider_mcp.ts && tsx tests/test_provider_mcp_apply.ts && tsx tests/test_provider_mcp_recovery_cli.ts",
