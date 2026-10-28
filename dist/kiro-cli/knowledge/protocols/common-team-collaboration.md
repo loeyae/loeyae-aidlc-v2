@@ -52,7 +52,7 @@ loeyae-aidlc orchestrate park --module module-a
 2. `report` 按声明实例（claim 或 `--instance`）归属到对应 unit：完成自己的实例、释放自己的 claim、清理自己的 Unit Contexts 记录，不触碰其他 unit 的 Current 指针与 claim。`next`/`report` 支持 `--unit <id>` 显式限定。
 3. 证据生产与语义检查按 `--instance`/`--module --unit` 定位，证据路径本就按 unit 分目录，并行单元互不影响。
 4. 委派子任务的运行环境失败（如 `env not found`）自动有限次重试由委派层（Multica 调度/host）负责：引擎侧每次 `next`/`report` 都以声明实例幂等重入，委派方按固定上限重试即可安全恢复，不会造成状态双写。
-5. 共享基线 worktree 预热：`loeyae-aidlc worktree warmup` 在当前干净基线 commit 做一次全量 checkout（`<project>-aidlc-warm`，登记于 `.aidlc/worktrees/_warm.md`）；之后的 `worktree prepare` 用硬链接复用该缓存（metadata 标记 `Warm Reused: yes`），避免每个子任务重复 4000+ 文件 checkout。基线 commit 变化时重新 `warmup`；缓存缺失或损坏时 `prepare` 自动回退全量 checkout。
+5. 共享基线 worktree 预热：`loeyae-aidlc worktree warmup` 在当前干净基线 commit 做一次全量 checkout（`<project>-aidlc-warm`，登记于 `aidlc/active/worktrees/_warm.md`）；之后的 `worktree prepare` 用硬链接复用该缓存（metadata 标记 `Warm Reused: yes`），避免每个子任务重复 4000+ 文件 checkout。基线 commit 变化时重新 `warmup`；缓存缺失或损坏时 `prepare` 自动回退全量 checkout。缓存生命周期与清理见 `docs/multi-repo-worktree-recovery.md`。
 
 整体进度不是由顶层 issue 手工推动：引擎在读取时聚合 global、各 module 与 integration state，并据此计算模块完成度和 integration barrier。模块内的真实依赖、consumes/produces、sensor、证据以及用户审批仍然照常阻塞；“等待顶层协调者代报或裁决”本身不得作为模块阻塞理由。
 
@@ -73,6 +73,8 @@ loeyae-aidlc worktree merge-plan \
 ```
 
 `merge-plan` 不会自动 merge 或 push。
+
+会话中断后的恢复（claim 过期、换会话接手、worktree 续用、证据失配重判）遵循 `docs/multi-repo-worktree-recovery.md`：claim 是会话身份不可复制，接手走 `module inspect` → `module transfer --human-instruction-ref`；证据不可搬运，恢复输入后由 `evidence run --refresh` 与 re-attest `report` 重判。
 
 ## 工作流 lineage 与 `aidlc/active/` 合并规范
 

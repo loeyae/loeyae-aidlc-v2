@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.22.18 — 2026-10-28
+
+- Multi-repo and temporary-worktree initialization, recovery and evidence-boundary guide (MARS-286): new `docs/multi-repo-worktree-recovery.md` documents nested-repo declaration via `source-roots.json` (fail-closed validation, pending migration registration, `--repo`/`--expect-repo` usage), `worktree prepare`/`verify`/`merge-plan` inputs and the `authorized: false` boundary, claim lifecycle (30-minute TTL, expiry and transfer semantics, no explicit release yet — tracked), and the evidence boundary (`source_revision.repos` per-repo semantics, digest binds to the tree that produced it, `evidence run --refresh` + re-attest `report` as the native re-validation path), plus a copyable-vs-rebuild boundary table and an end-to-end recovery walkthrough.
+- Cross-references consolidated: CLI guide (worktree/claim/nested-repo/evidence anti-forgery sections), README nested-repo and worktree entry links, and `common-team-collaboration` warmup cache path corrected (`.aidlc/worktrees/_warm.md` -> `aidlc/active/worktrees/_warm.md`).
+- Documentation-only change; no `core/tools/` behavior code touched. Synchronize package, plugin, marketplace and stage-graph versions and regenerate all nine harness distributions.
+
 ## 4.22.17 — 2026-10-27
 
 - Compliant re-verification path for post-acceptance non-UI changes (MARS-285): page-plan gains a machine-readable non-UI mapping registration section (`## 非UI映射`, table or list rows, Chinese/English headings accepted; `PAGE-*` IDs are rejected by definition); the UI impact matrix splits unmapped IDs into a registered `non_ui_changes` class and truly unmapped IDs, `all_changes_mapped` considers only the latter, registration freshness is tracked, and deleting a registration re-exposes the ID.
