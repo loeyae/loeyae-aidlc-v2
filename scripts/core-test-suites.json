@@ -1,6 +1,18 @@
 [
   [
     "tsx",
+    "tests/test_nested_digest_compatibility.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_evidence_progress.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_slice_unit_handoff.ts"
+  ],
+  [
+    "tsx",
     "tests/test_infrastructure_design.ts"
   ],
   [

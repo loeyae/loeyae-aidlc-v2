@@ -1,6 +1,8 @@
 import { assertSessionClaim, withSessionPublication, sessionBinding, type SessionBinding } from "./aidlc-light-state";
 import { createHash, randomUUID } from "crypto";
 import { QUALITY_SENSORS, qualityAdoption, recordQualityCheckpoint, type QualitySnapshot } from "./aidlc-quality-gates";
+import { SLICE_SENSOR, sliceEvidenceErrors, type SliceContext } from "./aidlc-document-slices";
+import { markProgress, startProgressHeartbeat } from "./aidlc-progress";
 import { createRequire } from "module";
 import {
   closeSync,
@@ -1146,17 +1148,25 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
     return;
   }
   const output = options.output || evidenceOutput(options.stage, sensor, undefined, state);
+  const started = Date.now();
+  const progress = (phase: string): void => {
+    markProgress(phase.startsWith("waiting") ? 2 : phase.startsWith("validating") ? 3 : phase.startsWith("publishing") ? 4 : 1);
+    if (options.refresh && process.env.AIDLC_PROGRESS !== "0") process.stderr.write(`[aidlc] evidence ${sensor}: ${phase}; elapsed=${((Date.now() - started) / 1000).toFixed(1)}s; last_progress=${new Date().toISOString()}\n`);
+  };
+  progress("checking inputs and prior evidence");
   // MARS-271 选择性失效:刷新已完成实例时,输入指纹未变的受控证据直接复用,
   // 只有 diff 触及的 artifact 的直接依赖证据才重跑。
   const inputs = stageInputs(options.stage, state);
   const prior = priorEvidenceRecord(output);
-  if (options.refresh && inputs && prior && reusableSemanticEvidence(prior, inputs, state)) {
+  if (options.refresh && inputs && prior && reusableSemanticEvidence(prior, inputs, state)
+    && (sensor !== SLICE_SENSOR || (!sliceEvidenceErrors(producerSliceContext(state), prior).length && !sliceCandidateError(state, prior)))) {
     const summary = { action: "reused" as const, inputs_digest: inputs.digest };
     if (!quiet) console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}`, ...summary }, null, 2));
     return summary;
   }
   const declarations = (config?.commands || []).filter((command) => command.role === "semantic" && command.sensor === sensor);
   if (declarations.length > 1) fail(`allowlist must declare at most one built-in semantic checker for ${sensor}`);
+  progress("waiting for semantic checker subprocess");
   const result = runSemanticCommand(sensor, declarations[0]?.timeout_ms || DEFAULT_TIMEOUT_MS, state);
   const executionId = randomUUID();
   if (sensor === "quality-change-impact" && result.payload.applicable === true) {
@@ -1165,7 +1175,7 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   const unsigned = {
     ...result.payload,
     ...(config?.freshness ? { freshness: config.freshness } : {}),
-    ...(inputs ? { inputs } : {}),
+    ...(inputs ? sensor === SLICE_SENSOR ? { stage_inputs: inputs } : { inputs } : {}),
     ...executionContext(state),
     evidence_version: "1",
     timestamp: new Date().toISOString(),
@@ -1173,11 +1183,19 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
     source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance),
     checker: result.execution,
   };
-  writeAtomic(output, `${JSON.stringify(producedEvidence(unsigned), null, 2)}\n`);
+  const candidate = producedEvidence(unsigned);
+  if (sensor === SLICE_SENSOR) {
+    progress("validating candidate against stage-entry checks");
+    const error = sliceCandidateError(state, candidate);
+    if (error) fail(`document slice evidence candidate rejected before publication: ${error}`);
+  }
+  progress("publishing evidence");
+  writeAtomic(output, `${JSON.stringify(candidate, null, 2)}\n`);
+  progress("publication complete");
   // 失效范围说明:与上一份证据相比,artifact 集合的增删即为本次重刷的直接起因。
   let inputsChanged: string[] | undefined;
   if (inputs && prior) {
-    const priorInputs = typeof prior.inputs === "object" && prior.inputs !== null ? prior.inputs as Record<string, unknown> : undefined;
+    const priorInputs = semanticStageInputs(prior);
     const priorArtifacts = Array.isArray(priorInputs?.artifacts)
       ? (priorInputs!.artifacts as unknown[]).filter((item): item is string => typeof item === "string")
       : [];
@@ -1186,6 +1204,25 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   const summary = { action: "regenerated" as const, ...(inputs ? { inputs_digest: inputs.digest } : {}), ...(inputsChanged ? { inputs_changed: inputsChanged } : {}) };
   if (!quiet) console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}`, ...summary }, null, 2));
   return summary;
+}
+
+function sliceCandidateError(state: ProducerState, candidate: Record<string, unknown>): string | undefined {
+  const checked = runSync(process.execPath, [require.resolve("tsx/cli"), join(TOOL_DIR, "aidlc-slice-candidate.ts")], {
+    cwd: PROJECT_ROOT, encoding: "utf8", input: JSON.stringify({ state, candidate }), shell: false, timeout: DEFAULT_TIMEOUT_MS,
+  });
+  return checked.error?.message || (checked.status !== 0 ? String(checked.stderr || "validator failed").trim() : undefined);
+}
+
+function producerSliceContext(state: ProducerState): SliceContext {
+  return { root: PROJECT_ROOT, workflow_id: state.workflow_id, project_workflow_id: state.parent_workflow_id || state.workflow_id,
+    module_id: state.current_module, scope: state.scope, stage: state.current_stage, ui_route: "not-selected",
+    quality_version: state.quality_gates_version, slices_version: state.document_slices_version,
+    units_executed: state.current_stage === "units-generation" || state.completed_stage_instances.includes(`units-generation@module:${state.current_module}`) };
+}
+
+function semanticStageInputs(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  const value = record.stage_inputs ?? record.inputs;
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 interface ProducerOptions {
@@ -1435,7 +1472,7 @@ function priorEvidenceRecord(output: string): Record<string, unknown> | null {
 function reusableSemanticEvidence(prior: Record<string, unknown>, inputs: { digest: string }, state: ProducerState): boolean {
   const producer = typeof prior.producer === "object" && prior.producer !== null ? prior.producer as Record<string, unknown> : undefined;
   const checker = typeof prior.checker === "object" && prior.checker !== null ? prior.checker as Record<string, unknown> : undefined;
-  const priorInputs = typeof prior.inputs === "object" && prior.inputs !== null ? prior.inputs as Record<string, unknown> : undefined;
+  const priorInputs = semanticStageInputs(prior);
   const priorScope = typeof prior.source_revision === "object" && prior.source_revision !== null ? (prior.source_revision as Record<string, unknown>).scope : undefined;
   const priorScopeDigest = typeof prior.source_revision === "object" && prior.source_revision !== null ? (prior.source_revision as Record<string, unknown>).scope_digest : undefined;
   // MARS-277: a record under a different scope label (e.g. the pre-baseline wide module
@@ -1526,11 +1563,14 @@ function runLintProducer(options: ProducerOptions): void {
 function runProducer(args: string[]): void {
   // MARS-277: the producer checks several sensors per invocation against shared
   // digest scopes; project commands run inside invalidate the memoized digests.
-  withRevisionMemoization(() => runProducerInner(args));
+  const stopHeartbeat = args.includes("--refresh") ? startProgressHeartbeat() : () => {};
+  try { withRevisionMemoization(() => runProducerInner(args)); }
+  finally { stopHeartbeat(); }
 }
 
 function runProducerInner(args: string[]): void {
   const options = parseArgs(args);
+  if (options.refresh && process.env.AIDLC_PROGRESS === undefined) process.env.AIDLC_PROGRESS = "1";
   if (options.lint) {
     runLintProducer(options);
     return;

@@ -132,7 +132,7 @@ import {
 import { buildStagePlan } from "./aidlc-stage-plan";
 import { selectExecutableStages } from "./aidlc-stage-selection";
 import { buildRuleLoadPlan, type RuleLoadPlan } from "./aidlc-rule-load-plan";
-import { buildBusinessDocumentLoadPlan, checkSlices, sliceAdoption, sliceEvidenceErrors, SLICE_SENSOR, type SliceContext, type BusinessDocumentLoadPlan } from "./aidlc-document-slices";
+import { buildBusinessDocumentLoadPlan, buildCanonicalIsolationPlan, checkSlices, sliceAdoption, sliceEvidenceErrors, SLICE_SENSOR, type SliceContext, type BusinessDocumentLoadPlan } from "./aidlc-document-slices";
 import { buildEvidenceReusePlan, type EvidenceReusePlan } from "./aidlc-evidence-reuse-plan";
 import { buildExecutionProfileReleaseMeasurements, type ExecutionProfileReleaseMeasurements } from "./aidlc-execution-profile-measurements";
 import {
@@ -1492,8 +1492,9 @@ function validateEvidence(
   instance: StageInstance,
   required: (value: Evidence) => string[],
   options: SensorCheckOptions = {},
+  candidate?: Evidence,
 ): SensorResult | null {
-  const loaded = loadEvidence(stage, sensor, instance);
+  const loaded = candidate === undefined ? loadEvidence(stage, sensor, instance) : candidateEvidence(stage, sensor, instance, candidate);
   if (loaded.failure) return loaded.failure;
   const evidence = loaded.value as Evidence;
   const errors = required(evidence);
@@ -1580,6 +1581,22 @@ function validateEvidence(
     };
   }
   return null;
+}
+
+function candidateEvidence(stage: StageNode, sensor: string, instance: StageInstance, value: Evidence): { value?: Evidence; failure?: SensorResult } {
+  const raw = JSON.stringify(value);
+  const error = Buffer.byteLength(raw) > MAX_EVIDENCE_BYTES ? `evidence file exceeds ${MAX_EVIDENCE_BYTES} bytes`
+    : value.evidence_version !== "1" ? 'evidence_version must be "1"' : evidenceTimeError(value, sensor);
+  return error ? { failure: { sensor, passed: false, message: `Invalid evidence at ${evidencePath(stage, sensor, instance)}: ${error}` } } : { value };
+}
+
+/** Apply the same semantic and provenance gate to a complete unpublished slice candidate. */
+export function validateSliceCandidate(state: WorkflowState, candidate: Evidence): SensorResult | null {
+  const stage = loadGraph().stages.find(item => item.slug === "units-generation");
+  if (!stage || !state.current_module) throw new Error("slice candidate requires a module units-generation instance");
+  const instance = makeInstance(stage, "module", { module_id: state.current_module });
+  const context = documentSliceContext(state, instance);
+  return validateEvidence(stage, SLICE_SENSOR, instance, evidence => sliceEvidenceErrors(context, evidence), { tolerateRevisionDrift: true }, candidate);
 }
 
 function asRecord(value: unknown): Evidence | null {
@@ -5171,13 +5188,47 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   let ruleLoadPlan: RuleLoadPlan;
   let evidenceReusePlan: EvidenceReusePlan;
   let businessDocumentLoadPlan: BusinessDocumentLoadPlan | undefined;
+  let isolatedEvidenceFailure: string | undefined;
+  const unavailableEvidence: string[] = [];
+  const isolationAllowed = Boolean(effectiveNextInstance.unit_id && effectiveNextInstance.module_id
+    && ["functional-design", "tdd", "code-generation"].includes(nextStage.slug)
+    && completedInstanceIds(planningState).includes(`units-generation@module:${effectiveNextInstance.module_id}`));
+  const recoverableEvidenceFailure = (message: string): boolean => {
+    const text = message.replace(/^DEVELOPMENT_ENTRY_NOT_READY: /, "");
+    if (text.startsWith("Evidence not found:")) return true;
+    if (!text.startsWith("Evidence rejected at ")) return false;
+    const marker = text.indexOf(".json: ");
+    if (marker < 0) return false;
+    const errors = text.slice(marker + ".json: ".length).split("; ");
+    // A source or checker version mismatch is not a passed gate. It may
+    // permit isolated work, but any semantic failure still stops admission.
+    return errors.length > 0 && errors.every(error =>
+      /^source_revision\.scope_digest no longer matches the /.test(error)
+      || /^refresh this evidence \('aidlc evidence run --stage [^']+'\) to re-anchor it to the .+ scope$/.test(error)
+      || error === "semantic checker command no longer matches the controlled producer");
+  };
   try {
-    if (effectiveNextInstance.unit_id && (["feature", "enterprise", "mvp", "classic"].includes(planningState.scope) || sliceAdoption(documentSliceContext(planningState, effectiveNextInstance)).enabled)) businessDocumentLoadPlan = buildBusinessDocumentLoadPlan(documentSliceContext(planningState, effectiveNextInstance), effectiveNextInstance.unit_id);
-    if (businessDocumentLoadPlan?.mode === "derived") {
-      const source = instances.find(i => i.stage.slug === "units-generation" && i.module_id === effectiveNextInstance.module_id);
-      if (!source) throw new Error("SLICE_EVIDENCE_MISSING: units-generation source");
-      const failure = validateEvidence(source.stage, SLICE_SENSOR, source, evidence => sliceEvidenceErrors(documentSliceContext(planningState, effectiveNextInstance), evidence), { tolerateRevisionDrift: true });
-      if (failure) throw new Error(failure.message);
+    if (effectiveNextInstance.unit_id && (["feature", "enterprise", "mvp", "classic"].includes(planningState.scope) || sliceAdoption(documentSliceContext(planningState, effectiveNextInstance)).enabled)) {
+      const context = documentSliceContext(planningState, effectiveNextInstance);
+      try {
+        businessDocumentLoadPlan = buildBusinessDocumentLoadPlan(context, effectiveNextInstance.unit_id);
+        if (businessDocumentLoadPlan.mode === "derived") {
+          const source = instances.find(i => i.stage.slug === "units-generation" && i.module_id === effectiveNextInstance.module_id);
+          if (!source) throw new Error("SLICE_EVIDENCE_MISSING: units-generation source");
+          const failure = validateEvidence(source.stage, SLICE_SENSOR, source, evidence => sliceEvidenceErrors(context, evidence), { tolerateRevisionDrift: true });
+          if (failure) throw new Error(failure.message);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!["functional-design", "tdd", "code-generation"].includes(nextStage.slug)
+          || !completedInstanceIds(planningState).includes(`units-generation@module:${effectiveNextInstance.module_id}`)
+          || !/SLICE_MANIFEST_STALE|SLICE_PROJECTION_DRIFT|SLICE_EVIDENCE_MISSING|Evidence (?:not found|rejected)|Invalid evidence/.test(message)) throw error;
+        // Never infer authority from stale slices. Validate the full canonical
+        // sources and approved mapping before exposing a read-only isolation plan.
+        businessDocumentLoadPlan = buildCanonicalIsolationPlan(context, effectiveNextInstance.unit_id);
+        isolatedEvidenceFailure = message;
+        unavailableEvidence.push(message);
+      }
     }
     ruleLoadPlan = buildRuleLoadPlan(graph, {
       scope: planningState.scope,
@@ -5214,7 +5265,16 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   }
   // Keep all later admission work on the clone too. No speculative condition
   // skip, resume, claim, or current-context write reaches originalState yet.
-  const consumeFailures = checkConsumes(effectiveNextInstance, state, graph, instances);
+  const consumeFailures = checkConsumes(effectiveNextInstance, state, graph, instances).filter(failure => {
+    if (!isolationAllowed || !failure.endsWith(": missing or non-substantive artifact")) return true;
+    const label = failure.slice(0, -": missing or non-substantive artifact".length).replace(/\\/g, "/");
+    if (!isEvidenceArtifactLabel(label) || existsSync(join(PROJECT_ROOT, label))) return true;
+    const stageSlug = /^\.aidlc\/evidence\/([^/]+)\//.exec(label)?.[1];
+    const producer = stageSlug && instances.find(item => item.stage.slug === stageSlug && item.module_id === effectiveNextInstance.module_id && (!item.unit_id || item.unit_id === effectiveNextInstance.unit_id));
+    if (!producer || !completedInstanceIds(state).includes(producer.instance_id)) return true;
+    unavailableEvidence.push(failure);
+    return false;
+  });
   if (consumeFailures.length > 0) {
     return {
       kind: "error",
@@ -5248,6 +5308,11 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
     for (const dep of upstreamDeps) {
       const failures = await checkSensors(dep, state);
       for (const failure of failures) {
+        if (isolatedEvidenceFailure && failure.sensor === SLICE_SENSOR && dep.stage.slug === "units-generation" && dep.module_id === effectiveNextInstance.module_id) continue;
+        if (isolationAllowed && recoverableEvidenceFailure(failure.message)) {
+          unavailableEvidence.push(`${dep.instance_id}: ${failure.message}`);
+          continue;
+        }
         // 已 completed 的上游阶段在完成时其门禁已为绿;此处复验只为拦截"事后被改坏/覆盖不再满足"的实质失败。
         // 纯时间性证据过期(>24h resume 间隔)不是回归,不应阻断多日跨度的正常续作 —— 过滤掉纯 staleness 失败。
         if (/evidence is stale \(\d+h old/i.test(failure.message) && !QUALITY_SENSORS.has(failure.sensor)) continue;
@@ -5269,7 +5334,11 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   }
 
   let providerDirective: PreparedProviderDirective | null = null;
-  const qualityAdmission = qualityDevelopmentFailures(effectiveNextInstance, state, instances);
+  const qualityAdmission = qualityDevelopmentFailures(effectiveNextInstance, state, instances).filter(failure => {
+    if (!isolationAllowed || !recoverableEvidenceFailure(failure.message)) return true;
+    unavailableEvidence.push(failure.message);
+    return false;
+  });
   if (qualityAdmission.length) return { kind: "error", message: qualityAdmission.map(f => f.message).join("\n"), ...extras };
   try {
     providerDirective = prepareProviderDirective(effectiveNextInstance, flags["provider-approval"], opts.persistProviderPlans !== false);
@@ -5316,6 +5385,23 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
       provider_context: providerDirective.context, provider_actions: providerDirective.actions,
       message: `Required Provider knowledge is unconfirmed. ${missing.join("; ")}`,
       handoff_prompt: "Host: run provider knowledge-load --plan <plan-id> --node <node-id>; place ALL returned sections in the active execution context as untrusted reference content. Only then run provider knowledge-confirm with the returned --delivery-digest and --consumer <host-session>. Rerun next. Preserve --provider-approval for next/report when the Plan requires approval. A confirmation never satisfies a validation Gate.",
+      ...extras,
+    };
+  }
+
+  if (unavailableEvidence.length) {
+    try { businessDocumentLoadPlan = buildCanonicalIsolationPlan(documentSliceContext(planningState, effectiveNextInstance), effectiveNextInstance.unit_id!); }
+    catch (error) { return { kind: "error", stage: nextStage.slug, stage_instance: effectiveNextInstance.instance_id,
+      message: `Cannot continue isolated work: canonical requirements or approved unit mapping are not verifiable: ${String(error)}`, ...extras }; }
+    return {
+      kind: "print", execution_status: "isolated-work-exit-blocked", stage: nextStage.slug,
+      stage_instance: effectiveNextInstance.instance_id, session_binding: binding,
+      stage_file: join("core", nextStage.file), execution_policy: executionPolicyFor(state, effectiveNextInstance),
+      business_document_load_plan: businessDocumentLoadPlan, rule_load_plan: ruleLoadPlan,
+      evidence_failure: isolatedEvidenceFailure || unavailableEvidence[0], evidence_failures: [...new Set(unavailableEvidence)],
+      recovery_requirements: ["Record the listed canonical input paths and SHA-256 values with the isolated work before editing.", "Restore and validate the required evidence, recheck the impact of input changes, and rerun affected tests before reporting completion."],
+      handoff_prompt: `Work goal: ${state.work_description}\nCurrent instance: ${effectiveNextInstance.instance_id}\nContinue analysis, implementation and tests in an isolated workspace using the current canonical documents and approved mapping below. Record their SHA-256 values before editing. Do not report completion, merge or deliver until the missing or incompatible evidence is restored, changes are rechecked and affected tests rerun.\n${businessDocumentLoadPlan.files.map(file => `- ${file.path} (sha256 ${file.sha256})`).join("\n")}`,
+      message: "Required evidence is unavailable. Isolated analysis, coding and tests may continue using the listed current canonical inputs; stage completion, merge and delivery remain blocked until evidence is restored and changes and tests are rechecked.",
       ...extras,
     };
   }

@@ -1414,7 +1414,12 @@ function main(): void {
     case "state": throw new Error("The workflow control plane is Markdown only. Start work with orchestrate next --scope <scope> --work <description>.");
     case "recover": throw new Error("Use orchestrate next to continue the active Markdown workflow, or start a new workflow with an explicit work description.");
     case "approve": throw new Error("Use orchestrate report --result approved --user-input Approve for lightweight approval.");
-    case "evidence": run("core/tools/aidlc-evidence.ts", rest); break;
+    case "evidence":
+      // Refresh can scan large and nested repositories. Inherit streams so
+      // progress reaches the user while the producer is still running.
+      if (rest.includes("--refresh")) runInteractive("core/tools/aidlc-evidence.ts", rest);
+      else run("core/tools/aidlc-evidence.ts", rest);
+      break;
     case "document-slices": run("core/tools/aidlc-document-slices.ts", rest); break;
     case "unit": run("core/tools/aidlc-team-light.ts", rest); break;
     case "module": run("core/tools/aidlc-team-light.ts", ["module", ...rest]); break;
