@@ -6,13 +6,13 @@ import { evidenceTimeError } from "./aidlc-evidence-policy";
 import { commitAncestryErrors, readSourceRevision } from "./aidlc-revision";
 
 /** Shared provenance precondition for a no-behavior applicability claim. */
-export function assertControlledI13(root: string, i13: Record<string, unknown>, moduleId: string): void {
+export function assertControlledI13(root: string, i13: Record<string, unknown>, moduleId: string, currentCommit?: string): void {
   const record = (value: unknown) => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
   const producer = record(i13.producer), checker = record(i13.checker), revision = record(i13.source_revision);
   if (i13.evidence_version !== "1" || producer?.name !== "loeyae-aidlc-evidence" || producer.mode !== "controlled" || !producer.execution_id
     || i13.stage_instance !== `test-case-derivation@module:${moduleId}` || i13.module_id !== moduleId || i13.unit_id !== null
     || !revision || !/^[a-f0-9]{64}$/.test(String(revision.worktree_digest)) || !/^[a-f0-9]{40,64}$/.test(String(revision.commit))
-    || commitAncestryErrors(root, String(revision.commit), readSourceRevision(root).commit).length
+    || commitAncestryErrors(root, String(revision.commit), currentCommit ?? readSourceRevision(root).commit).length
     || checker?.id !== "builtin:test-case-derivation" || checker.sensor !== "test-case-derivation" || !/^[a-f0-9]{64}$/.test(String(checker.argv_digest))
     || checker.status !== "passed" || checker.exit_code !== 0 || evidenceTimeError(i13, "test-case-derivation")) throw new Error("no-behavior applicability requires controlled valid I13 evidence");
 }

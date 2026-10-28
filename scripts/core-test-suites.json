@@ -1,4 +1,5 @@
 [
+  ["tsx", "tests/test_historical_red_replay.ts"],
   [
     "tsx",
     "tests/test_nested_digest_compatibility.ts"

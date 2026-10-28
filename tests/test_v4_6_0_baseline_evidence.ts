@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { loadWorkflowState, saveWorkflowState, type WorkflowState } from "../core/tools/aidlc-light-state";
+import { fixtureEnvironment, saveFixtureState } from "./mars243_fixture_session";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -50,7 +51,7 @@ function parsed(stdout: string): Record<string, unknown> {
 }
 
 function run(project: string, args: string[]): Run {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: cleanEnv() });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: { ...cleanEnv(), ...fixtureEnvironment(project, args) } });
   const stdout = result.stdout || "";
   return { status: result.status ?? 1, stdout, out: `${stdout}\n${result.stderr || ""}`, json: parsed(stdout) };
 }
@@ -225,6 +226,7 @@ function tddProject(scope: string, newIds: string[], characterizationIds: string
   write(project, `${CASES}/_index.md`, `# UC-D 索引\n\n${ids.map((id) => `- ${id} 订单导出（source_ref: REQ-001）`).join("\n")}\n`);
   for (const id of newIds) write(project, `${CASES}/${id}.md`, newCase(id));
   for (const id of characterizationIds) write(project, `${CASES}/${id}.md`, characterizationCase(id));
+  ok(project, ["evidence", "run", "--stage", "test-case-derivation"]);
   ok(project, ["orchestrate", "report", "--stage", "test-case-derivation", "--result", "completed"]);
   expect(TDD);
 
@@ -240,6 +242,7 @@ function produce(project: string, sensor: string, extra: string[] = []): Run {
 }
 
 function reportTdd(project: string): Run {
+  ok(project, ["evidence", "run", "--stage", "tdd", "--all-sensors"]);
   return run(project, ["orchestrate", "report", "--stage", "tdd", "--result", "completed"]);
 }
 
@@ -445,9 +448,9 @@ try {
     checks.expect("evidence baseline_commit differs", tampered(project, BASELINE_PATH, (value) => ({ ...value, baseline_commit: commits[0] }), BASE), /baseline_commit .* does not match the workflow baseline/);
     checks.expect("I13 baseline_commit differs", tampered(project, I13_PATH, (value) => ({ ...value, baseline_commit: commits[0] }), BASE), /I13 baseline_commit/);
     const state = loadWorkflowState(project) as WorkflowState;
-    saveWorkflowState(project, { ...state, baseline_commit: commits[0], baseline_source: "replaced" }, undefined, { baselineWrite: true });
+    saveFixtureState(project, { ...state, baseline_commit: commits[0], baseline_source: "replaced" });
     checks.expect("state baseline replaced after BASELINE", gate(project, BASE), /does not match the workflow baseline/);
-    saveWorkflowState(project, { ...(loadWorkflowState(project) as WorkflowState), baseline_commit: baseline, baseline_source: state.baseline_source }, undefined, { baselineWrite: true });
+    saveFixtureState(project, { ...(loadWorkflowState(project) as WorkflowState), baseline_commit: baseline, baseline_source: state.baseline_source });
     assert.equal(gate(project, BASE), "", "restored state baseline");
     // A rebase rewrites history and orphans the baseline commit.
     git(project, ["reset", "-q", "--hard", commits[0]]);

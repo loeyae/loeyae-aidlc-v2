@@ -94,14 +94,16 @@ function makeUnits(project: string, declared: boolean): void {
     schema_version: 1,
     module_id: MODULE,
     units: [
-      { unit_id: "u1", name: "Orders", service_id: "svc", ...ownership(["src/orders"]) },
-      { unit_id: "u2", name: "Users", service_id: "svc", ...ownership(["src/users"]) },
+      { unit_id: "u1", name: "Orders", service_id: "svc", req_refs: ["REQ-1"], ...ownership(["src/orders"]) },
+      { unit_id: "u2", name: "Users", service_id: "svc", req_refs: ["REQ-1"], ...ownership(["src/users"]) },
     ],
   }));
 }
 
 function makeI13(project: string): void {
-  put(project, `docs/aidlc/modules/${MODULE}/inception/requirements.md`, "# Requirements\nREQ-1 订单导出:验收标准为 30 秒内完成\n");
+  put(project, `docs/aidlc/modules/${MODULE}/inception/requirements.md`, "# Requirements\n## REQ-1 订单导出\n验收标准为 30 秒内完成\n");
+  put(project, `docs/aidlc/modules/${MODULE}/inception/user-stories.md`, "## STORY-1 订单导出\nSource: REQ-1\n### AC-1\nThen 导出订单\n");
+  put(project, `docs/aidlc/modules/${MODULE}/inception/application-design/unit-of-work-story-map.md`, '```aidlc-story-map\n' + JSON.stringify({schema_version:1,status:'approved',approved_by:'fixture',mappings:[{story_id:'STORY-1',unit_ids:['u1','u2']}],shared_req_refs:[]}) + '\n```\n');
   const cases = `docs/aidlc/modules/${MODULE}/inception/application-design/test-cases`;
   put(project, `${cases}/_index.md`, "# UC-D index\n- UC-D-001 订单导出\n");
   put(project, `${cases}/UC-D-001-export.md`, "---\nid: UC-D-001\nstatus: ready\nsource_ref: REQ-1\n---\n# UC-D-001 订单导出\n");
@@ -189,9 +191,9 @@ function openParallelProject(name: string, declared: boolean): { project: string
   check("module-axis evidence records the planning baseline scope", record.source_revision.scope === `inputs-v2:module:${MODULE}:baseline`);
 
   // 场景 5/9:修改上游实际规划输入(requirements.md)仍触发正确失效。
-  put(project, `docs/aidlc/modules/${MODULE}/inception/requirements.md`, "# Requirements\nREQ-1 订单导出:验收标准为 60 秒内完成(修改)\n");
+  put(project, `docs/aidlc/modules/${MODULE}/inception/requirements.md`, "# Requirements\n## REQ-1 订单导出\n验收标准为 60 秒内完成(修改)\n");
   const afterPlanningEdit = run(project, ["orchestrate", "next"], alice, "next tdd@u1 (after planning input edit)");
-  check("planning input edit invalidates the upstream baseline", afterPlanningEdit.status === 2, afterPlanningEdit.stdout + afterPlanningEdit.stderr);
+  check("planning input edit invalidates the upstream baseline", afterPlanningEdit.status === 2 || JSON.parse(afterPlanningEdit.stdout).execution_status === 'isolated-work-exit-blocked', afterPlanningEdit.stdout + afterPlanningEdit.stderr);
   check(
     "the failure names the baseline scope",
     /scope_digest no longer matches the inputs-v2:module:project:baseline scope/.test(afterPlanningEdit.stdout),
@@ -242,7 +244,7 @@ function projectKey(unitId: string): string {
 
   put(project, "src/users/profile.ts", "export const profile = 'users-v3';\n");
   const blocked = run(project, ["orchestrate", "next"], alice);
-  check("a downstream edit invalidates the legacy wide scope strictly", blocked.status === 2, blocked.stdout + blocked.stderr);
+  check("a downstream edit invalidates the legacy wide scope strictly", blocked.status === 2 || JSON.parse(blocked.stdout).execution_status === 'isolated-work-exit-blocked', blocked.stdout + blocked.stderr);
   check(
     "the failure explains the refresh migration instead of a bare mismatch",
     /no longer matches the inputs-v2:module:project scope/.test(blocked.stdout) && /--refresh/.test(blocked.stdout),

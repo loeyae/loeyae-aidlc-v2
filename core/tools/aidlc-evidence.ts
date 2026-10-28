@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "crypto";
 import { QUALITY_SENSORS, qualityAdoption, recordQualityCheckpoint, type QualitySnapshot } from "./aidlc-quality-gates";
 import { SLICE_SENSOR, sliceEvidenceErrors, type SliceContext } from "./aidlc-document-slices";
 import { markProgress, startProgressHeartbeat } from "./aidlc-progress";
+import { runHistoricalReplay, replayEvidenceErrors, historicalReplayPrior } from "./aidlc-historical-red";
 import { createRequire } from "module";
 import {
   closeSync,
@@ -1004,6 +1005,42 @@ function mappingDebtFor(i13: Record<string, unknown>, scope: ReturnType<typeof u
 }
 
 function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase: Phase): void {
+  if (options.historicalReplay) {
+    if (phase !== "RED" || options.testFilter || options.explicitConfig || !state.current_module || !state.current_unit) fail("historical_replay requires exact RED module/unit, no --config or test filter");
+    const i13 = phaseRecord(state);
+    const currentHead = runSync("git", ["rev-parse", "HEAD"], { cwd: PROJECT_ROOT, encoding: "utf8", shell: false });
+    if (currentHead.status !== 0) fail("historical_replay requires the workflow's current Git commit");
+    // I13's provenance needs ancestry here; historical/source and current requirements
+    // get separate byte summaries below, without hashing unrelated workflow media twice.
+    assertControlledI13(PROJECT_ROOT, i13, state.current_module, String(currentHead.stdout).trim());
+    if (i13.status !== "required") fail("historical_replay requires executable current I13");
+    const scope = unitUcdIds(i13, state.current_unit);
+    if (!scope.scoped || !scope.new.length || i13MappingDeferredIds(i13).some(id => scope.all.includes(id))) fail("historical_replay requires complete, explicit current unit UC-D mapping without mapping debt");
+    const output = options.output || evidenceOutput(options.stage, PHASE_SENSORS.RED, undefined, state);
+    const identity = { workflow_id: state.workflow_id, module_id: state.current_module, unit_id: state.current_unit };
+    const prior = historicalReplayPrior(PROJECT_ROOT, identity, output);
+    const payload = runHistoricalReplay(PROJECT_ROOT, identity, i13, scope.new, output, prior);
+    if (JSON.stringify(phaseRecord(state)) !== JSON.stringify(i13)) fail("historical_replay: I13 changed during execution");
+    payload.historical_replay.publication_claim = publicationContext?.binding;
+    invalidateRevisionCache();
+    const record = { ...payload, ...executionContext(state), evidence_version: "1", timestamp: new Date().toISOString(), producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() }, source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance), checker: { id: "builtin:red-test-evidence", sensor: PHASE_SENSORS.RED, argv_digest: phaseObservationDigest("RED", payload.observed_command.argv_digest), exit_code: 0, status: "passed" } };
+    const serialized = `${JSON.stringify(record, null, 2)}\n`;
+    if (Buffer.byteLength(serialized) > 512 * 1024) fail("historical_replay canonical evidence exceeds the unchanged 512 KiB gate limit");
+    publishAuthorized(() => {
+      if (prior) {
+        const bytes = readFileSync(output);
+        if (createHash("sha256").update(bytes).digest("hex") !== prior.sha256) fail("historical_replay: prior evidence changed during execution");
+        if (existsSync(prior.path)) {
+          if (createHash("sha256").update(readFileSync(prior.path)).digest("hex") !== prior.sha256) fail("historical_replay: archive conflicts with prior evidence");
+        } else writeAtomicLocked(prior.path, bytes.toString("utf8"));
+      } else if (existsSync(output)) fail("historical_replay: original evidence is no longer missing");
+      const errors = replayEvidenceErrors(PROJECT_ROOT, record, { workflow_id: state.workflow_id, module_id: state.current_module!, unit_id: state.current_unit! }, phaseRecord(state), scope.new);
+      if (errors.length) fail(errors.join("; "));
+      writeAtomicLocked(output, serialized);
+    });
+    console.log(JSON.stringify({ status: "passed", evidence_mode: "historical_replay", output, limitation: payload.historical_replay.limitation }, null, 2));
+    return;
+  }
   assertPhaseConfigBinding(options, phase === "BASELINE" ? "BASELINE" : "RED/GREEN");
   // MARS-271: 受影响方法过滤只服务 RED 收敛迭代;GREEN/BASELINE 最终证据强制全量。
   if (options.testFilter && phase !== "RED") fail("--test-filter is only supported for RED evidence; GREEN and BASELINE must run the full test suite");
@@ -1226,6 +1263,7 @@ function semanticStageInputs(record: Record<string, unknown>): Record<string, un
 }
 
 interface ProducerOptions {
+  historicalReplay?: boolean;
   stage: string;
   instance?: string;
   module?: string;
@@ -1244,7 +1282,7 @@ interface ProducerOptions {
   testFilter?: string;
 }
 
-const USAGE = "usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance> | --module <module-id> [--unit <unit-id>]] [--refresh] [--sensor <sensor>] [--all-sensors] [--config <path>] [--output <path>] [--command-id <id> ...] [--lint] [--test-filter <expr>]";
+const USAGE = "usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance> | --module <module-id> [--unit <unit-id>]] [--refresh] [--sensor <sensor>] [--all-sensors] [--config <path>] [--output <path>] [--command-id <id> ...] [--lint] [--test-filter <expr>] [--historical-replay]";
 
 function parseArgs(args: string[]): ProducerOptions {
   if (args[0] !== "run") fail(USAGE);
@@ -1260,6 +1298,7 @@ function parseArgs(args: string[]): ProducerOptions {
   let allSensors = false;
   let lint = false;
   let testFilter: string | undefined;
+  let historicalReplay = false;
   for (let i = 1; i < args.length; i++) {
     const arg = args[i];
     if (["--stage", "--instance", "--module", "--unit", "--sensor", "--config", "--output", "--command-id", "--test-filter"].includes(arg)) {
@@ -1274,6 +1313,8 @@ function parseArgs(args: string[]): ProducerOptions {
       if (arg === "--output") output = value;
       if (arg === "--command-id") commandIds.push(value);
       if (arg === "--test-filter") testFilter = value;
+    } else if (arg === "--historical-replay") {
+      historicalReplay = true;
     } else if (arg === "--all-sensors") {
       allSensors = true;
     } else if (arg === "--lint") {
@@ -1288,6 +1329,7 @@ function parseArgs(args: string[]): ProducerOptions {
     }
   }
   if (!stage) fail("--stage is required");
+  if (historicalReplay && (stage !== "tdd" || sensor !== "red-test-evidence" || !refresh || allSensors || lint || output || testFilter || config)) fail("--historical-replay requires --stage tdd --sensor red-test-evidence --refresh; no output/config/filter override");
   if (instance && moduleId) fail("--instance and --module are mutually exclusive");
   if (unitId && !moduleId) fail("--unit requires --module");
   if (sensor && sensor !== "build-test-evidence" && !SEMANTIC_SENSORS.has(sensor)) fail(`unsupported semantic sensor: ${sensor}`);
@@ -1301,6 +1343,7 @@ function parseArgs(args: string[]): ProducerOptions {
   if (testFilter !== undefined && !testFilter.trim()) fail("--test-filter requires a non-empty selector expression");
   return {
     stage,
+    historicalReplay,
     ...(instance ? { instance } : {}),
     ...(moduleId ? { module: moduleId } : {}),
     ...(unitId ? { unit: unitId } : {}),
@@ -1592,7 +1635,7 @@ function runProducerInner(args: string[]): void {
     && rawState
     && rawState.current_stage_instance !== state.current_stage_instance
     && rawState.completed_stage_instances.includes(state.current_stage_instance)
-    && !state.current_stage_instance.includes("@unit:")
+    && (!state.current_stage_instance.includes("@unit:") || options.historicalReplay && binding.stage_instance === `code-generation@module:${state.current_module}@unit:${state.current_unit}`)
     && binding.workflow_id === state.workflow_id
   );
   if (downstreamRefresh) {

@@ -39,6 +39,7 @@ import { createRequire } from "module";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
 import { buildTestEvidenceErrors, SEMANTIC_SENSORS, allowlistedAlternativeCommand, allowlistedPhaseCommand, argvDigest, i13CodeRefBlobs, i13UcdIdsByMode, phaseNotRequiredDigest, phaseObservationDigest, ucdExemptionDigest, unitUcdExemption, type Phase } from "./aidlc-evidence";
+import { replayEvidenceErrors, REPLAY_LIMITATION } from "./aidlc-historical-red";
 import { QUALITY_SENSORS, qualityAdoption, qualityEvidenceErrors, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
 import { controlledQualityErrors, developmentAcceptanceErrors } from "./aidlc-quality-delivery";
 import { CANONICAL_SOURCE_PATTERN, SOURCE_ROOTS_CONFIG, declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
@@ -2108,6 +2109,9 @@ function phaseEvidenceErrors(
 ): string[] {
   const errors: string[] = [];
   // RED covers the tdd_mode new UC-Ds and BASELINE the characterization UC-Ds of I13
+  if (evidence.evidence_mode === "historical_replay" && (phase !== "RED" || evidence.status !== "failed")) errors.push("historical_replay must be a failed required RED observation");
+  if (evidence.evidence_mode !== undefined && !["original", "historical_replay"].includes(String(evidence.evidence_mode))) errors.push("unrecognized evidence mode; diagnostics are not controlled phase evidence");
+  if (evidence.evidence_mode !== "historical_replay" && evidence.historical_replay !== undefined) errors.push("historical replay cannot be disguised as original evidence");
   // (4.6.0 S3a), GREEN every UC-D (S3b); I13 without ucd_modes predates 4.6 and means
   // every UC-D is new.
   const i13 = moduleI13Evidence(instance);
@@ -2205,9 +2209,15 @@ function phaseEvidenceErrors(
       // Any allowlist failure rejects: the binding is never skipped.
       const role = phase.toLowerCase();
       try {
+        const historical = evidence.evidence_mode === "historical_replay";
+        if (historical) {
+          if (phase !== "RED" || !instance.module_id || !instance.unit_id || !scoped || !i13Value) errors.push("historical_replay requires exact RED workflow/module/unit and current I13");
+          else errors.push(...replayEvidenceErrors(PROJECT_ROOT, evidence, { workflow_id: state.workflow_id, module_id: instance.module_id, unit_id: instance.unit_id }, i13Value, modes!.new));
+        } else {
         const declared = allowlistedPhaseCommand(stageSlug, phase);
         if (observedDigest !== declared.argv_digest) errors.push(`observed_command.argv_digest does not match the allowlisted ${role} command ${declared.id} in ${normalizeArtifactLabel(relative(PROJECT_ROOT, declared.config))}`);
         if (asNonEmptyString(observed.id) && observed.id !== declared.id) errors.push(`observed_command.id must be ${declared.id}`);
+        }
       } catch (error) {
         errors.push(`cannot bind observed_command to the ${role} command allowlist of stage ${stageSlug}: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -5179,6 +5189,13 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   }
 
   const effectiveNextInstance = runtimeInstance(nextInstance, planningState);
+  if (effectiveNextInstance.stage.slug === "code-generation" && effectiveNextInstance.module_id && effectiveNextInstance.unit_id) {
+    const redPath = join(PROJECT_ROOT, evidenceRelativePath("tdd", "red-test-evidence", "unit", { module_id: effectiveNextInstance.module_id, unit_id: effectiveNextInstance.unit_id }));
+    try {
+      const red = JSON.parse(readFileSync(redPath, "utf8"));
+      extras.red_evidence = { mode: red.evidence_mode || "original", ...(red.evidence_mode === "historical_replay" ? { limitation: REPLAY_LIMITATION, execution: red.historical_replay?.execution, source: red.historical_replay?.source?.commit } : {}) };
+    } catch { /* Missing or invalid evidence is reported by the normal admission gate. */ }
+  }
   if (effectiveNextInstance.instance_id !== binding.stage_instance) return { kind: "error", message: `Bind the exact next instance ${effectiveNextInstance.instance_id} before proceeding.`, ...extras };
   if (flags.unit && flags.unit !== effectiveNextInstance.unit_id) return { kind: "error", message: `Unit mismatch: --unit ${flags.unit} does not match the bound instance ${effectiveNextInstance.instance_id}.`, ...extras };
   const nextStage = effectiveNextInstance.stage;
@@ -5584,6 +5601,12 @@ async function handleReportInner(args: string[], conflictRetries: number): Promi
     };
   }
   const currentInstance = runtimeInstance(declaredCurrentInstance, state);
+  if (currentInstance.stage.slug === "code-generation" && currentInstance.module_id && currentInstance.unit_id) {
+    try {
+      const red = JSON.parse(readFileSync(join(PROJECT_ROOT, evidenceRelativePath("tdd", "red-test-evidence", "unit", { module_id: currentInstance.module_id, unit_id: currentInstance.unit_id })), "utf8"));
+      if (red.evidence_mode === "historical_replay") extras = { ...extras, red_evidence: { mode: "historical_replay", limitation: REPLAY_LIMITATION } };
+    } catch { /* Normal report gates reject missing or invalid evidence. */ }
+  }
   const claim = assertSessionClaim(PROJECT_ROOT, state, currentInstance.instance_id);
   if (claim) {
     const owner = flags.owner || sessionBinding()?.owner || process.env.AIDLC_OWNER || process.env.AIDLC_MEMBER || "unidentified-owner";
