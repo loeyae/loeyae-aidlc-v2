@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { QualityFixture } from "./mars168_fixture";
 import { generateSlices } from "../core/tools/aidlc-document-slices";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 
 const f = new QualityFixture();
 f.stage("cross-validation");
@@ -16,7 +17,10 @@ f.write(`${f.base}/application-design/unit-of-work-story-map.md`, '# Approved ma
     { story_id: "US-001", unit_ids: ["api", "web"] }, { story_id: "US-002", unit_ids: ["api", "web"] },
   ], shared_req_refs: ["REQ-001"],
 }) + '\n```\n');
-generateSlices({ ...f.ctx, slices_version: "1", units_executed: true });
+const previousBinding = process.env.AIDLC_SESSION_BINDING;
+process.env.AIDLC_SESSION_BINDING = fixtureEnvironment(f.root, ["document-slices", "generate", "--module", "shop"]).AIDLC_SESSION_BINDING;
+try { generateSlices({ ...f.ctx, slices_version: "1", units_executed: true }); }
+finally { if (previousBinding === undefined) delete process.env.AIDLC_SESSION_BINDING; else process.env.AIDLC_SESSION_BINDING = previousBinding; }
 f.syncArtifactReview();
 f.pass("artifact-consistency");
 const manifestPath = `${f.base}/document-slices/manifest.json`;

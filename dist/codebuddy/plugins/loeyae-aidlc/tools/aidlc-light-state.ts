@@ -1,7 +1,10 @@
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { realpathSync } from "fs";
+import { readdirSync } from "fs";
+import { join, relative } from "path";
 import { hostname } from "os";
 import { COMMIT_ID_PATTERN } from "./aidlc-revision";
 import {
@@ -905,6 +908,95 @@ function appendAudit(projectRoot: string, state: WorkflowState, ref: WorkflowRef
 }
 
 const initializationAudits = new Set<string>();
+const maintenanceContext = new AsyncLocalStorage<{ active: boolean; approved: boolean; paths: Set<string> }>();
+function maintenanceWrite(path: string): boolean {
+  const context = maintenanceContext.getStore();
+  if (!context?.active || !context.paths.has(path)) return false;
+  if (!context.approved) throw new Error("maintenance write requires --user-input Approve and a non-empty --reason");
+  return true;
+}
+
+/** Read-only CAS projection; a token is a snapshot, never ownership. */
+export function workflowMaintenancePlan(projectRoot: string, targetModule?: string) {
+  projectRoot = realpathSync(projectRoot);
+  if (targetModule && !/^[a-z0-9][a-z0-9-]*$/.test(targetModule)) throw new Error("invalid maintenance module");
+  const refs: WorkflowRef[] = [GLOBAL_WORKFLOW, { kind: "integration" }];
+  const modules = new Set(targetModule ? [targetModule] : []);
+  const directory = join(projectRoot, "aidlc/active/modules");
+  if (existsSync(directory)) {
+    if (lstatSync(directory).isSymbolicLink()) throw new Error("maintenance cannot follow a symlinked modules directory");
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) throw new Error("maintenance cannot follow symlinked module directories");
+      if (entry.isDirectory() && /^[a-z0-9][a-z0-9-]*$/.test(entry.name)) modules.add(entry.name);
+    }
+  }
+  for (const module_id of [...modules].sort()) refs.push({ kind: "module", module_id });
+  const paths = refs.flatMap(ref => [lightStatePath(projectRoot, ref), lightAuditPath(projectRoot, ref)]);
+  paths.push(join(projectRoot, "aidlc/active/registry.md"));
+  const files = paths.sort().map(path => {
+    if (existsSync(path) && (!lstatSync(path).isFile() || lstatSync(path).isSymbolicLink())) throw new Error(`maintenance requires regular files: ${path}`);
+    return { path: relative(projectRoot, path).replace(/\\/g, "/"), sha256: existsSync(path) ? createHash("sha256").update(readFileSync(path)).digest("hex") : null };
+  });
+  const claims = refs.flatMap(ref => {
+    const state = loadWorkflowState(projectRoot, ref);
+    return Object.values(state?.active_instances || {}).map(claim => ({ workflow_id: state!.workflow_id, instance: claim.stage_instance, owner: claim.owner, session_id: claim.session_id || "legacy" }));
+  });
+  return { token: createHash("sha256").update(JSON.stringify(files)).digest("hex"), files, claims, refs };
+}
+
+/** All family state locks and registry lock remain held across async validation.
+ * Ordinary bind/publication writers use the same locks; no session can waive CAS.
+ */
+export async function withQuiescentWorkflowMaintenance<T extends { kind: string }>(projectRoot: string, token: string, targetModule: string | undefined, approved: boolean, publish: () => Promise<T>): Promise<T> {
+  projectRoot = realpathSync(projectRoot);
+  if (sessionBinding()) throw new Error("maintenance requires a separate unbound handoff; release claims and clear the session binding");
+  const before = workflowMaintenancePlan(projectRoot, targetModule);
+  if (before.token !== token) throw new Error("maintenance snapshot changed; reread state maintenance-plan before retrying");
+  const registry = join(projectRoot, "aidlc/active/registry.md");
+  const lockPaths = [...before.refs.map(ref => lightStatePath(projectRoot, ref)).sort(), registry];
+  const locks: { path: string; fd: number }[] = [];
+  const backups = new Map<string, Buffer | undefined>();
+  const context = { active: true, approved, paths: new Set(before.files.map(file => join(projectRoot, file.path))) };
+  const restore = () => {
+    for (const [path, bytes] of backups) {
+      if (bytes === undefined) { if (existsSync(path)) unlinkSync(path); }
+      else if (!existsSync(path) || !readFileSync(path).equals(bytes)) {
+        const temporary = `${path}.maintenance-rollback-${randomUUID()}`;
+        try { writeFileSync(temporary, bytes, { flag: "wx", mode: 0o600 }); renameSync(temporary, path); }
+        finally { if (existsSync(temporary)) unlinkSync(temporary); }
+      }
+      workflowStateCache.delete(path);
+    }
+  };
+  try {
+    for (const path of lockPaths) {
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+      if (realpathSync(dirname(path)) !== dirname(path)) throw new Error("maintenance cannot follow symlinked state directories");
+      locks.push({ path, fd: acquireLock(`${path}.lock`) });
+    }
+    const locked = workflowMaintenancePlan(projectRoot, targetModule);
+    if (locked.token !== before.token) throw new Error("maintenance snapshot changed while acquiring locks; reread before retrying");
+    if (locked.claims.length) throw new Error(`maintenance requires quiescent workflows; release exact claims first: ${locked.claims.map(claim => claim.instance).join(", ")}`);
+    for (const file of locked.files) backups.set(join(projectRoot, file.path), file.sha256 === null ? undefined : readFileSync(join(projectRoot, file.path)));
+    return await maintenanceContext.run(context, async () => {
+      try { const result = await publish(); if (result.kind === "error") restore(); return result; }
+      catch (error) { restore(); throw error; }
+    });
+  } finally {
+    context.active = false;
+    for (const {path, fd} of locks.reverse()) { closeSync(fd); unlinkSync(`${path}.lock`); }
+  }
+}
+
+/** Retire only the caller's exact generation, leaving stage and sibling work intact. */
+export function releaseWorkflowClaim(projectRoot: string, ref: WorkflowRef, instance: string, expected: TeamLightActiveInstance): void {
+  withSessionPublication(projectRoot, ref, instance, () => {
+    const state = loadWorkflowState(projectRoot, ref)!;
+    if (JSON.stringify(state.active_instances[instance]) !== JSON.stringify(expected)) throw new Error("claim changed; reread before release");
+    delete state.active_instances[instance];
+    persistWorkflowState(projectRoot, state, ref, { claimWrite: CLAIM_TRANSACTION, afterCommit: () => appendAuditEvent(projectRoot, ref, "SESSION_RELEASED", { Instance: instance, Owner: expected.owner, Session: expected.session_id || "legacy", Generation: expected.generation || "legacy" }) });
+  });
+}
 
 export function appendAuditEvent(projectRoot: string, ref: WorkflowRef, event: string, fields: Record<string, string>): void {
   const append = (): void => {
@@ -914,7 +1006,7 @@ export function appendAuditEvent(projectRoot: string, ref: WorkflowRef, event: s
   appendFileSync(path, `## ${new Date().toISOString()}\n- Event: ${clean(event)}\n${lines}${lines ? "\n" : ""}\n`, "utf8");
 
   };
-  if (initializationAudits.has(lightStatePath(projectRoot, ref))) { append(); return; }
+  if (initializationAudits.has(lightStatePath(projectRoot, ref)) || maintenanceWrite(lightStatePath(projectRoot, ref))) { append(); return; }
   const state = loadWorkflowState(projectRoot, ref);
   const binding = sessionBinding();
   if (state && (binding || state.current_stage_instance || Object.keys(state.active_instances || {}).length)) {
@@ -1013,6 +1105,7 @@ function assertBaselinePreserved(existing: WorkflowState | null, state: Workflow
 
 export function saveWorkflowState(projectRoot: string, state: WorkflowState, ref: WorkflowRef = GLOBAL_WORKFLOW, options: SaveWorkflowOptions = {}): void {
   const path = lightStatePath(projectRoot, ref);
+  if (maintenanceWrite(path)) { persistWorkflowState(projectRoot, state, ref, options); return; }
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const lock = acquireLock(`${path}.lock`);
   try {
@@ -1033,7 +1126,7 @@ function persistWorkflowState(projectRoot: string, state: WorkflowState, ref: Wo
     if (existing && existing.revision !== state.revision) throw new Error(`workflow state revision conflict: expected ${state.revision}, found ${existing.revision}`);
     if (!existing && state.revision !== 0 && !options.adoptRevision) throw new Error(`workflow state is missing at revision ${state.revision}`);
     if (existing && options.adoptRevision) throw new Error("an adopted workflow state cannot overwrite an existing state");
-    if (existing && options.claimWrite !== CLAIM_TRANSACTION && !initialization) assertSessionMutation(projectRoot, existing, state);
+    if (existing && options.claimWrite !== CLAIM_TRANSACTION && !initialization && !maintenanceWrite(path)) assertSessionMutation(projectRoot, existing, state);
     assertBaselinePreserved(existing, state, ref, options);
     const next = { ...state, version: ENGINE_VERSION, revision: state.revision + 1, updated_at: new Date().toISOString() };
     appendAudit(projectRoot, next, ref);
@@ -1147,6 +1240,7 @@ export function withWorkflowInitialization<T>(
 
 /** Registry publication uses the same dead-owner-safe lock implementation. */
 export function withWorkflowFileLock<T>(path: string, publish: () => T): T {
+  if (maintenanceWrite(path)) return publish();
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const fd = acquireLock(`${path}.lock`);
   try { return publish(); } finally { closeSync(fd); unlinkSync(`${path}.lock`); }
@@ -1260,7 +1354,15 @@ function assertSessionMutation(projectRoot: string, existing: WorkflowState, nex
   // MARS-271 #8: a unit session may only touch its own unit_contexts entry; the global
   // current pointers of another unit's chain stay owned by that unit's session.
   for (const key of new Set([...Object.keys(existing.unit_contexts || {}), ...Object.keys(next.unit_contexts || {})])) {
-    if (JSON.stringify(existing.unit_contexts?.[key]) !== JSON.stringify(next.unit_contexts?.[key]) && (!module || !binding.stage_instance.includes("@unit:") || key !== `${module}:${binding.stage_instance.split("@unit:")[1]}`)) throw new Error(`session cannot overwrite sibling unit context ${key}`);
+    const current = existing.current_stage_instance;
+    const displacedKey = current && /@module:([^@]+)@unit:([^@]+)$/.exec(current);
+    // A project/module advance can preserve the exact displaced global pointer.
+    // It cannot edit an existing sibling context or invent a new chain position.
+    const preservesDisplacedPointer = !existing.unit_contexts?.[key]
+      && !binding.stage_instance.includes("@unit:") && displacedKey
+      && key === `${displacedKey[1]}:${displacedKey[2]}`
+      && JSON.stringify(next.unit_contexts?.[key]) === JSON.stringify({ stage: existing.current_stage, phase: existing.current_phase, stage_instance: current });
+    if (JSON.stringify(existing.unit_contexts?.[key]) !== JSON.stringify(next.unit_contexts?.[key]) && !preservesDisplacedPointer && (!module || !binding.stage_instance.includes("@unit:") || key !== `${module}:${binding.stage_instance.split("@unit:")[1]}`)) throw new Error(`session cannot overwrite sibling unit context ${key}`);
   }
   for (const entry of next.history.slice(existing.history.length)) {
     if (entry.instance_id && entry.instance_id !== binding.stage_instance && !(entry.result === "condition_skipped" && scope(entry.instance_id) === scope(binding.stage_instance))) throw new Error("session cannot report another stage instance");

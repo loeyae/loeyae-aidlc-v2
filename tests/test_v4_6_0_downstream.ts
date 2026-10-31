@@ -1,3 +1,5 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 /**
  * 4.6.0-3 S3b (MARS-49) regression suite: the downstream gates of the tdd BASELINE
  * evidence (code-generation GREEN coverage and the RED / BASELINE re-check,
@@ -46,12 +48,23 @@ function parsed(stdout: string): Record<string, unknown> {
 }
 
 function run(project: string, args: string[]): Run {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: cleanEnv() });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: { ...fixtureEnvironment(project, [...args]), ...(cleanEnv()) } });
   const stdout = result.stdout || "";
   return { status: result.status ?? 1, stdout, out: `${stdout}\n${result.stderr || ""}`, json: parsed(stdout) };
 }
 
 function ok(project: string, args: string[]): Run {
+  // A successful workflow step explicitly runs the controlled producer first.
+  if (args[0] === "orchestrate" && args[1] === "report" && !args.includes("--instruction-ack")) {
+    const stage = args[args.indexOf("--stage") + 1];
+    const scope = ["--module", "--unit"].flatMap(flag => args.includes(flag) ? [flag, args[args.indexOf(flag) + 1]] : []);
+    if (JSON.parse(readFileSync(join(repository, "core/tools/data/stage-graph.json"), "utf8")).stages.find((node: {slug:string}) => node.slug === stage)?.produces.some((path: string) => path.startsWith(".aidlc/evidence/"))) {
+      const owner = args.includes("--module") && existsSync(join(project, "aidlc/active/registry.md"))
+        ? { kind: "module" as const, module_id: args[args.indexOf("--module") + 1] } : undefined;
+      const settled = loadWorkflowState(project, owner)?.status === "done";
+      ok(project, ["evidence", "run", "--stage", stage, "--all-sensors", ...scope, ...(settled ? ["--refresh"] : [])]);
+    }
+  }
   const result = run(project, args);
   assert.equal(result.status, 0, `${args.join(" ")}\n${result.out}`);
   assert.notEqual(result.json.kind, "error", `${args.join(" ")}\n${result.out}`);
@@ -115,6 +128,7 @@ function rejected(result: Run): string {
 }
 
 async function section(name: string, body: () => void | Promise<void>): Promise<void> {
+  if (process.env.AIDLC_ONLY && !name.includes(process.env.AIDLC_ONLY)) return;
   try {
     await body();
     sections.push(name);
@@ -392,7 +406,7 @@ function driveSingle(fixture: Fixture, scope: string, implementation: string, ho
     "- issues_found: 0",
     "- issues_resolved: 0",
     "- issues_open: 0",
-    "- 审查文件: app/exporter.py, tests/test_exporter.py",
+    "- 审查文件: app/exporter.py, app/__init__.py, tests/test_exporter.py",
     "- 修复状态: 无需修复",
     "",
   ].join("\n"));
@@ -496,6 +510,7 @@ try {
     function driveBugfix(): void { driveSingle(fixture, "bugfix", EXPORTER_FIXED, {
       afterTdd: ({ commits, baseline }) => {
         // S1.3 U3 with a real BASELINE evidence file: --replace is refused, nothing written.
+        fixtureEnvironment(project, REPLACE(commits[0], baseline));
         const revision = loadWorkflowState(project)!.revision;
         const refused = run(project, REPLACE(commits[0], baseline));
         checks.expect("U3: --replace with real BASELINE evidence", rejected(refused), /already in use and cannot be replaced[\s\S]*U3 \.aidlc\/evidence\/tdd\/project\/default\/baseline-test-evidence\.json/);
@@ -512,6 +527,7 @@ try {
         rmSync(join(project, SINGLE.green));
         ok(project, ["evidence", "run", "--stage", "code-generation", "--sensor", "green-test-evidence"]);
         assert.equal(gate(project, SINGLE.codeGeneration, "green-test-evidence"), "", "GREEN covering every UC-D passes");
+        ok(project, ["evidence", "run", "--stage", "code-generation", "--all-sensors"]);
 
         // code-generation completion re-checks BASELINE (drift tolerated, provenance not).
         checks.expect("BASELINE producer.mode manual at code-generation", withTampered(project, SINGLE.baseline, (value) => ({ ...value, producer: { ...value.producer, mode: "manual" } }), () => rejected(run(project, ["orchestrate", "report", "--stage", "code-generation", "--result", "completed"]))), /RED gate evidence is invalid[\s\S]*\[baseline-test-evidence\][\s\S]*producer\.mode must be \\*"controlled/);
@@ -519,9 +535,9 @@ try {
         checks.expect("BASELINE source_revision.commit not an ancestor of HEAD", withTampered(project, SINGLE.baseline, (value) => ({ ...value, source_revision: { ...value.source_revision, commit: orphan } }), () => rejected(run(project, ["orchestrate", "report", "--stage", "code-generation", "--result", "completed"]))), new RegExp(`\\[baseline-test-evidence\\][\\s\\S]*source_revision\\.commit ${orphan} is not the current HEAD or one of its ancestors`));
         // The baseline replaced after BASELINE was produced: the old evidence no longer binds.
         const state = loadWorkflowState(project) as WorkflowState;
-        saveWorkflowState(project, { ...state, baseline_commit: commits[0], baseline_source: "replaced" }, undefined, { baselineWrite: true });
+        saveFixtureState(project, { ...state, baseline_commit: commits[0], baseline_source: "replaced" }, undefined, { baselineWrite: true });
         checks.expect("BASELINE produced under the replaced baseline", rejected(run(project, ["orchestrate", "report", "--stage", "code-generation", "--result", "completed"])), /\[baseline-test-evidence\][\s\S]*BASELINE baseline_commit .* does not match the workflow baseline/);
-        saveWorkflowState(project, { ...(loadWorkflowState(project) as WorkflowState), baseline_commit: baseline, baseline_source: state.baseline_source }, undefined, { baselineWrite: true });
+        saveFixtureState(project, { ...(loadWorkflowState(project) as WorkflowState), baseline_commit: baseline, baseline_source: state.baseline_source }, undefined, { baselineWrite: true });
 
         // test-quality follows tdd_mode: characterization needs BASELINE passed, new needs RED failed.
         const quality = (): string => {
@@ -545,7 +561,7 @@ try {
   await section("e2e (c) existing workflow: pre-4.6 state, orchestrate baseline --set, then characterization to implementation-report", () => {
     const { project, commits } = legacyRepository("existing");
     const legacy = createInitialState("refactor", "4.5.4", `workflow-existing-${counter}`, [], "4.6.0 S3b existing workflow");
-    saveWorkflowState(project, legacy);
+    saveFixtureState(project, legacy);
     assert.equal((loadWorkflowState(project) as WorkflowState & Record<string, unknown>).baseline_commit, undefined, "pre-4.6 state has no baseline");
     ok(project, ["orchestrate", "baseline", "--set", commits[1], "--user-input", "Approve", "--reason", "登记存量基线"]);
     const state = loadWorkflowState(project) as WorkflowState & Record<string, unknown>;
@@ -572,7 +588,7 @@ try {
     global.completed_stages = [...globalStages];
     global.completed_stage_instances = [...globalStages];
     global.skipped_stage_instances = [`reverse-engineering@module:${M01}`];
-    saveWorkflowState(project, global);
+    saveFixtureState(project, global);
     write(project, "docs/aidlc/ideation/scenario-module-mapping.md", `# 场景模块映射\n\nREQ-001 订单导出分页属于 ${M01}。\n`);
     ok(project, ["orchestrate", "split", "--from", global.workflow_id]);
     const moduleRef = { kind: "module" as const, module_id: M01 };
@@ -611,7 +627,7 @@ try {
 
     nextModule(`requirements-analysis@module:${M01}`);
     write(project, `${inception}/requirements.md`, "# 需求\n\n## REQ-001 订单导出分页\n\ntrack: [backend]\n\n业务规则：订单导出接口按 50 条分页返回，现有分页行为在本次重构中保持不变。\n");
-    const missingQuality = run(project, ["orchestrate", "report", "--stage", "requirements-analysis", ...moduleArgs, "--result", "completed"]);
+    const missingQuality = run(project, ["evidence", "run", "--stage", "requirements-analysis", ...moduleArgs, "--all-sensors"]);
     assert.notEqual(missingQuality.status, 0);
     assert.match(missingQuality.out, /exactly one authoritative aidlc-quality section/);
     syncQuality();
@@ -619,7 +635,7 @@ try {
     const staleReview = readJson(project, dependencyReview);
     staleReview.inputs[0].sha256 = "0".repeat(64);
     write(project, dependencyReview, JSON.stringify(staleReview));
-    const staleQuality = run(project, ["orchestrate", "report", "--stage", "requirements-analysis", ...moduleArgs, "--result", "completed"]);
+    const staleQuality = run(project, ["evidence", "run", "--stage", "requirements-analysis", ...moduleArgs, "--all-sensors"]);
     assert.notEqual(staleQuality.status, 0);
     assert.match(staleQuality.out, /GATE_EVIDENCE_STALE/);
     report("requirements-analysis");
@@ -627,7 +643,7 @@ try {
     write(project, `${inception}/clarifications.md`, "# 需求澄清\n\nNo clarifications needed.\n\nREQ-001 的分页规则（50 条一页）已在需求中明确，本次重构沿用现有行为。\n");
     report("requirement-clarification");
     nextModule(`requirements-methods@module:${M01}`, [RA]);
-    write(project, `${inception}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单导出分页流程\n\n```mermaid\nflowchart LR\n  A[调用 export_orders] --> B[读取下游订单]\n  B --> C[按 50 条分页返回]\n```\n");
+    write(project, `${inception}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单导出分页流程\n\n<!-- aidlc-mermaid-validation: {\"diagram_id\":\"order-flow\",\"module\":\"m01-trade\",\"validation_tier\":\"STATIC_PASS\",\"diagram_type\":\"module-internal-simple-flow\",\"all_elements_within_module\":true,\"no_contract_semantics\":true,\"not_architecture_or_delivery_evidence\":true} -->\n```mermaid\nflowchart LR\n  A[调用 export_orders] --> B[读取下游订单]\n  B --> C[按 50 条分页返回]\n```\n");
     report("requirements-methods");
     nextModule(`user-stories@module:${M01}`, [RA]);
     write(project, `${inception}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营导出分页订单\n\n- 关联需求：REQ-001\n- 作为运营人员，我希望导出订单时按 50 条分页返回，以便逐页核对。\n\n### AC-001 分页顺序与边界\n\n下游返回 120 条订单时，导出结果为 50、50、20 三页；空列表返回空页列表，上游超时向调用者传播。\n");
@@ -660,7 +676,7 @@ try {
     assert.equal(red.status, "not_required");
     assert.equal(baselineEvidence.status, "passed");
     assert.equal(baselineEvidence.baseline_commit, baseline, "module BASELINE binds the parent baseline");
-    assert.equal(baselineEvidence.source_revision.scope, `module:${M01}`);
+    assert.equal(baselineEvidence.source_revision.scope, `inputs-v2:module:${M01}:unit:default`);
 
     nextModule(`code-generation@module:${M01}@unit:default`, [["--stage", "test-case-derivation", ...moduleArgs]]);
     write(project, "app/exporter.py", EXPORTER_REFACTORED);
@@ -687,7 +703,7 @@ try {
       "- issues_found: 0",
       "- issues_resolved: 0",
       "- issues_open: 0",
-      "- 审查文件: app/exporter.py, tests/test_exporter.py",
+      "- 审查文件: app/exporter.py, app/__init__.py, tests/test_exporter.py",
       "- 修复状态: 无需修复",
       "",
     ].join("\n"));

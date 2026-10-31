@@ -153,7 +153,7 @@ loeyae-aidlc orchestrate park --module module-a
 
 ### 工作流 lineage 保护（4.13.0）
 
-`aidlc/active/` 是团队共享状态，一个项目只有一条工作流 lineage。`next --scope` / `split` 发现 git 中已有另一条未归档 lineage 时拒绝创建（确需作废时加 `--replace-lineage <id>`）；合并后 HEAD 历史出现另一条未退役 lineage 时 `next` / `report` 拒绝继续，由负责人用 `orchestrate state retire --lineage <id> --user-input Approve --reason "<原因>"` 裁决；`orchestrate state verify` 只读检查 lineage 与状态 `Revision` 回退；另一条 lineage 上的模块用 `orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason "<原因>"` 迁入当前 lineage（同一模块只能保留一份）。`registry.md` 只存身份行，只在创建工作流时改变，推进模块不会改写它。合并冲突时禁止对 `aidlc/active/` 整目录「保留本地」，registry 冲突保留双方的模块行。
+`aidlc/active/` 是团队共享状态，一个项目只有一条工作流 lineage。`next --scope` / `split` 发现 git 中已有另一条未归档 lineage 时拒绝创建（确需作废时加 `--replace-lineage <id>`）；合并后 HEAD 历史出现另一条未退役 lineage 时 `next` / `report` 拒绝继续，由负责人用 `orchestrate state retire --lineage <id> --user-input Approve --reason "<原因>"` 裁决；`orchestrate state verify` 只读检查 lineage 与状态 `Revision` 回退；另一条 lineage 上的模块用 `orchestrate state adopt --module <id> --from <commit> --maintenance <maintenance_token> --user-input Approve --reason "<原因>"` 迁入当前 lineage（同一模块只能保留一份）。`registry.md` 只存身份行，只在创建工作流时改变，推进模块不会改写它。合并冲突时禁止对 `aidlc/active/` 整目录「保留本地」，registry 冲突保留双方的模块行。
 
 ### 模块 checkpoint ledger（MARS-159）
 
@@ -161,10 +161,11 @@ loeyae-aidlc orchestrate park --module module-a
 
 ```bash
 loeyae-aidlc orchestrate state checkpoint --module <id>
-loeyae-aidlc orchestrate state recover --module <id> [--user-input Approve --reason "<原因>"]
+loeyae-aidlc orchestrate state maintenance-plan --module <id>
+loeyae-aidlc orchestrate state recover --module <id> --maintenance <maintenance_token> --user-input Approve --reason "<原因>"
 ```
 
-`state recover` 从本地与 remote-tracking ledger 中选最高有效 revision，校验 checkpoint 链、lineage、state/契约 digest 与 module manifest；本地 state 更旧、更新或冲突时必须 `--user-input Approve`（先备份为 `*.bak-*`）；恢复后用 `orchestrate upgrade --dry-run --module <id>` 列出缺失证据，只重验它们。ledger **不会自动 push**：CLI 会输出 `git push origin refs/heads/aidlc/modules/<id>:refs/heads/aidlc/modules/<id>` 并在未发布时警告；全新 clone 默认 fetch 即可拿到 `refs/remotes/origin/aidlc/modules/*`。远端必须保护 `aidlc/modules/*`（禁止删除与 force-push），否则“任何人可恢复”不成立；从未合并、未打 tag、未 checkpoint 也无其他远端引用的已删除分支，git 无法恢复。
+`state recover` 从本地与 remote-tracking ledger 中选最高有效 revision，校验 checkpoint 链、lineage、state/契约 digest 与 module manifest；恢复前须由各领取人释放全部精确 claim、清除维护子进程 binding，重新读取 maintenance-plan，并传入摘要、明确批准与原因；本地冲突先备份为 `*.bak-*`。恢复修订号递增且不恢复历史 claim；恢复后用 `orchestrate upgrade --dry-run --module <id>` 列出缺失证据，只重验它们。ledger **不会自动 push**：CLI 会输出 `git push origin refs/heads/aidlc/modules/<id>:refs/heads/aidlc/modules/<id>` 并在未发布时警告；全新 clone 默认 fetch 即可拿到 `refs/remotes/origin/aidlc/modules/*`。远端必须保护 `aidlc/modules/*`（禁止删除与 force-push），否则“任何人可恢复”不成立；从未合并、未打 tag、未 checkpoint 也无其他远端引用的已删除分支，git 无法恢复。
 
 ### 控制面 git 合并策略（4.13.1，MARS-117）
 
@@ -173,7 +174,7 @@ loeyae-aidlc orchestrate state recover --module <id> [--user-input Approve --rea
 - `.gitattributes`：`aidlc/active/**/audit.md merge=union`（audit 纯追加、块间不重叠，union 保留双方全部事件块、无冲突标记；state/registry 永不用 union）；`aidlc/active/registry.md merge=aidlc-registry`。
 - `.gitignore`：`aidlc/active/**/*.bak-*`（忽略引擎自产备份噪音）。
 - registry 专用 merge driver：按 module id 并集合并身份行（保留双方全部模块、去重稳定排序），投影列丢为占位由下次 `next --status` 重算；同一 module id 指向不同 Workflow ID 的 lineage 分裂判真冲突并保留冲突标记交人工。driver 实现不随仓库分发，引擎在 `install` / `next` 幂等注册 `merge.aidlc-registry.driver` 到本地 `.git/config`；未注册该 driver 的克隆安全回退到默认文本合并（不致命）。`AIDLC_CLI` 可覆盖注册的调用路径。
-- 合并后用 `orchestrate state rebuild` 从各模块 state 重算 registry 投影 / 全局摘要并把 `registry.md` 规范化为身份行（排序去重、清掉残留冲突说明），一键重建而非手改。
+- 合并并完成同样的静止交接后，用 `orchestrate state rebuild --maintenance <maintenance_token> --user-input Approve --reason "<原因>"`（不带 module 的 maintenance-plan 摘要） 从各模块 state 重算 registry 投影 / 全局摘要并把 `registry.md` 规范化为身份行（排序去重、清掉残留冲突说明），一键重建而非手改。
 - split 布局每模块独立 state 文件，天然去争用：两人推进不同模块不会触碰同一文件（无共享时间戳 / Revision 行可撞）。
 - `.gitattributes` / `.gitignore` 属引擎基础设施，不参与证据 provenance digest，下发它们不会使任何证据失效。
 

@@ -1,10 +1,11 @@
+import { fixtureEnvironment } from "./mars243_fixture_session";
 /**
  * 4.5.4 end-to-end fixture: a Python project whose sources live in `app/` (and
  * `web/src/`), with no `src/`, no module-manifest, scope=refactor.
  *
  * The workflow is driven from workspace-detection to implementation-report using
  * only the public CLI. No evidence JSON is written by this test: every gate file
- * comes from the controlled producer (`report` auto-production or `evidence run`).
+ * comes from the controlled producer (`evidence run` before `report`).
  * No placeholder files are added; every artifact carries real fixture content.
  */
 import assert from "node:assert/strict";
@@ -33,7 +34,7 @@ function assertZeroBytePackages(): void {
 }
 
 function run(args: string[]): { status: number; out: string; json: Record<string, unknown> | null } {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8" });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8" , env: fixtureEnvironment(project, [...args]) });
   const out = `${result.stdout || ""}\n${result.stderr || ""}`;
   let json: Record<string, unknown> | null = null;
   try { json = JSON.parse(result.stdout || ""); } catch { json = null; }
@@ -42,6 +43,12 @@ function run(args: string[]): { status: number; out: string; json: Record<string
 
 /** Run a CLI step that must succeed and must not return an error directive. */
 function ok(args: string[]): Record<string, unknown> {
+  // A successful workflow step explicitly runs the controlled producer first.
+  if (args[0] === "orchestrate" && args[1] === "report" && !args.includes("--instruction-ack")) {
+    const stage = args[args.indexOf("--stage") + 1];
+    const scope = ["--module", "--unit"].flatMap(flag => args.includes(flag) ? [flag, args[args.indexOf(flag) + 1]] : []);
+    ok(["evidence", "run", "--stage", stage, "--all-sensors", ...scope]);
+  }
   const result = run(args);
   assert.equal(result.status, 0, `${args.join(" ")}\n${result.out}`);
   assert.notEqual(result.json?.kind, "error", `${args.join(" ")}\n${result.out}`);
@@ -181,7 +188,7 @@ try {
     "- issues_found: 0",
     "- issues_resolved: 0",
     "- issues_open: 0",
-    "- 审查文件: app/exporter.py, tests/test_exporter.py",
+    "- 审查文件: app/exporter.py, web/src/export-button.js, tests/test_exporter.py",
     "- 修复状态: 无需修复",
     "",
   ].join("\n");

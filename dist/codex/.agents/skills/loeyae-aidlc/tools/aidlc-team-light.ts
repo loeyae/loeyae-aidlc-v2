@@ -1,4 +1,4 @@
-import { bindSession, claimToken, sessionRef } from "./aidlc-session";
+import { bindSession, claimToken, sessionRef, releaseSession } from "./aidlc-session";
 import { assertSessionClaim, sessionBinding } from "./aidlc-light-state";
 import { readModuleManifest, readUnitManifest } from "./aidlc-execution-context";
 import {
@@ -214,7 +214,7 @@ export function migrateModuleOwnership(projectRoot: string, owner: string, modul
 function main(): void {
   const raw = process.argv.slice(2);
   if (raw.includes("--help")) {
-    console.log("module inspect --stage-instance <exact-instance>: read expected claim token. module bind|transfer --stage-instance <exact-instance> --owner <stable-owner> --session-id <host-session> --expect <token> [--human-instruction-ref <human-prompt-reference>] [--resume] [--preview]. Set AIDLC_SESSION_BINDING to returned binding JSON only in this session. transfer requires the explicit human source reference; the CLI records provenance and cannot authenticate a human prompt. Same-owner renewal requires the current binding. No machine-global environment binding.");
+    console.log("module inspect --stage-instance <exact-instance>: read expected claim token. module bind|transfer --stage-instance <exact-instance> --owner <stable-owner> --session-id <host-session> --expect <token> [--human-instruction-ref <human-prompt-reference>] [--resume] [--preview]. Set AIDLC_SESSION_BINDING to returned binding JSON only in this session. transfer requires the explicit human source reference; the CLI records provenance and cannot authenticate a human prompt. Same-owner renewal requires the current binding. module release --stage-instance <instance> --expect <inspect.expected> releases only the currently bound exact claim, without advancing or parking the stage. No machine-global environment binding.");
     return;
   }
   const command = raw[0];
@@ -240,12 +240,19 @@ function main(): void {
     return;
   }
   if (command === "module") {
-    if (["inspect", "bind", "transfer"].includes(moduleCommand || "")) {
+    if (["inspect", "bind", "transfer", "release"].includes(moduleCommand || "")) {
       const instance = text(flags["stage-instance"], "--stage-instance");
       const state = loadWorkflowState(project, sessionRef(project, instance));
       if (!state) throw new Error("target workflow does not exist");
       if (moduleCommand === "inspect") {
         process.stdout.write(`${JSON.stringify({ workflow_id: state.workflow_id, claim: state.active_instances[instance] || null, expected: claimToken(state.active_instances[instance]) }, null, 2)}\n`);
+        return;
+      }
+      if (moduleCommand === "release") {
+        const unsupported = Object.keys(flags).find(key => !["project", "stage-instance", "expect"].includes(key));
+        if (unsupported) throw new Error(`module release does not support --${unsupported}; use module inspect for a read-only view`);
+        releaseSession(project, instance, text(flags.expect, "--expect"));
+        process.stdout.write(`${JSON.stringify({ released: instance, message: "Exact session claim released; stage, artifacts and approvals preserved. This binding can no longer publish." }, null, 2)}\n`);
         return;
       }
       if (moduleCommand === "transfer" && !flags["human-instruction-ref"]) throw new Error("transfer requires --human-instruction-ref");

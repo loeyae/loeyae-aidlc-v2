@@ -1,3 +1,4 @@
+import { saveFixtureState } from "./mars243_fixture_session";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
@@ -22,8 +23,8 @@ assert.equal(qualityCodeBaseline(nested.root, "shop", undefined, false), true);
 assert.equal(qualityCodeBaseline(nested.root, "new", undefined, false), false, "global config must not turn sibling source into this module's baseline");
 console.log("PASS MARS-168 lifecycle: archive/new workflow, nested code baselines and module source-root isolation");
 const split = new QualityFixture(); split.pass("quality-change-impact");
-split.state.completed_stages.push("requirements-analysis"); split.state.completed_stage_instances.push("requirements-analysis@module:shop"); saveWorkflowState(split.root, split.state);
-split.state.current_stage = ""; split.state.current_stage_instance = undefined; split.state.current_module = undefined; saveWorkflowState(split.root, split.state);
+split.state.completed_stages.push("requirements-analysis"); split.state.completed_stage_instances.push("requirements-analysis@module:shop"); saveFixtureState(split.root, split.state);
+split.state.current_stage = ""; split.state.current_stage_instance = undefined; split.state.current_module = undefined; saveFixtureState(split.root, split.state);
 const splitResult = split.run("bin/cli.ts", ["orchestrate", "split", "--from", split.state.workflow_id]); assert.equal(splitResult.status, 0, splitResult.stdout + splitResult.stderr);
 assert.equal(loadWorkflowState(split.root, { kind: "module", module_id: "shop" })?.quality_gates_version, "1");
 const refresh = split.run("core/tools/aidlc-evidence.ts", ["run", "--stage", "requirements-analysis", "--module", "shop", "--sensor", "quality-change-impact", "--refresh"]); assert.equal(refresh.status, 0, refresh.stdout + refresh.stderr);

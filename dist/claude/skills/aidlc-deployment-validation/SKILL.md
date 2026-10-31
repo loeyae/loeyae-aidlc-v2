@@ -20,7 +20,7 @@ triggers: 部署配置验证, 交付配置校验, 发布配置检查, deployment
 
 ## 加载
 
-加载发布包中的 `stages/operation/operations.md`（步骤 4 验证部分）。
+加载发布包中的 `stages/operation/operations-authorization.md`（步骤 2 验证配置及步骤 4 质量门禁）。
 
 ## 输出
 

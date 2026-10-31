@@ -1,3 +1,4 @@
+import { fixtureEnvironment, saveFixtureState } from "./mars243_fixture_session";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -27,7 +28,7 @@ f.stage("cross-validation", "skip"); f.section("cross-validation-report", f.deli
 f.state.completed_stages.push("cross-validation", "workflow-planning", "test-case-derivation");
 f.state.completed_stage_instances.push("cross-validation@module:shop", "workflow-planning@module:shop", "test-case-derivation@module:shop");
 f.state.skipped_stages.push("application-design", "units-generation");
-f.state.skipped_stage_instances.push("application-design@module:shop", "units-generation@module:shop"); saveWorkflowState(f.root, f.state);
+f.state.skipped_stage_instances.push("application-design@module:shop", "units-generation@module:shop"); saveFixtureState(f.root, f.state);
 let probe = f.run("tests/mars168_admission_probe.ts", []); assert.equal(probe.status, 0, probe.stderr); assert.deepEqual(JSON.parse(probe.stdout), [], probe.stdout);
 f.write("src/implementation.ts", "// REQ-001 unrelated implementation-only change\nexport const version = 1;\n");
 probe = f.run("tests/mars168_admission_probe.ts", []); assert.deepEqual(JSON.parse(probe.stdout), [], "implementation changes must not stale product readiness");
@@ -40,7 +41,8 @@ const next = new QualityFixture(); next.state.current_stage = ""; next.state.cur
 next.state.completed_stages.push("workspace-detection", "product-inception", "product-contracts", "scenario-module-mapping", "state-template", "reverse-engineering", "requirements-analysis", "requirement-clarification", "requirements-methods");
 for (const slug of ["workspace-detection", "product-inception", "product-contracts", "scenario-module-mapping", "state-template"]) next.state.completed_stage_instances.push(slug);
 for (const slug of ["reverse-engineering", "requirements-analysis", "requirement-clarification", "requirements-methods"]) next.state.completed_stage_instances.push(`${slug}@module:shop`);
-next.write("docs/aidlc/ideation/scenario-module-mapping.md", "REQ-001 Shop source scope mapping"); saveWorkflowState(next.root, next.state);
+next.write("docs/aidlc/ideation/scenario-module-mapping.md", "REQ-001 Shop source scope mapping"); saveFixtureState(next.root, next.state);
+fixtureEnvironment(next.root, ["orchestrate", "next"]);
 const before = readFileSync(join(next.root, "aidlc/active/aidlc-state.md"), "utf8");
 const result = next.run("bin/cli.ts", ["orchestrate", "next"]); assert.notEqual(result.status, 0); assert.match(result.stdout + result.stderr, /quality-change-impact|dependency-readiness|field-capability/);
 assert.equal(readFileSync(join(next.root, "aidlc/active/aidlc-state.md"), "utf8"), before);

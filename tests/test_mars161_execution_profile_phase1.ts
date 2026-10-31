@@ -1,3 +1,5 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -226,8 +228,7 @@ function git(project: string, args: string[]): void {
 function orchestrate(project: string, args: string[]): void {
   const result = spawnSync(process.execPath, [TSX, CLI, "orchestrate", ...args], {
     cwd: project,
-    encoding: "utf8",
-  });
+    encoding: "utf8", env: fixtureEnvironment(project, ["orchestrate", ...args]) });
   assert.equal(result.status, 0, `${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
 }
 
@@ -248,7 +249,7 @@ function loadState(project: string) {
 }
 
 function saveState(project: string, state: ReturnType<typeof createInitialState>): void {
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
 }
 
 {

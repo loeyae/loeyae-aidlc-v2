@@ -21,7 +21,7 @@ triggers: 交付配置, 部署配置生成, 发布配置, deployment config, 生
 
 ## 加载
 
-1. 发布包中的 `stages/operation/operations.md`（步骤 3）；
+1. 发布包中的 `stages/operation/operations-authorization.md`（步骤 1 生成目标相关配置）；
 2. 发布包中的 `stages/operation/operations-templates.md`。
 
 ## 输出

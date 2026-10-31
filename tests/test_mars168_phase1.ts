@@ -1,4 +1,6 @@
+import { saveFixtureState } from "./mars243_fixture_session";
 import assert from "node:assert/strict";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 import { mkdirSync, mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -14,7 +16,7 @@ const state = createInitialState("feature", undefined, undefined, [], "MARS-168 
 state.current_module = "shop"; state.current_stage = "requirements-analysis"; state.current_stage_instance = "requirements-analysis@module:shop"; state.quality_gates_version = "1";
 state.completed_stages = ["module-division"];
 state.completed_stage_instances = ["module-division"];
-saveWorkflowState(root, state);
+saveFixtureState(root, state);
 write("docs/aidlc/ideation/module-manifest.json", JSON.stringify({ schema_version: 1, modules: [{ module_id: "shop", name: "Shop", service_id: "shop", paths: ["src"], depends_on: [] }] }));
 write(`${base}/source.md`, "REQ-001 product source");
 write(`${base}/requirements.md`, '# REQ-001 quality inventory\n```aidlc-quality\n' + JSON.stringify({ version: "1", delivery_scope: "release-a", inputs: [`${base}/source.md`], artifacts: [{ id: "source", path: `${base}/source.md`, sha256: qualityHash("REQ-001 product source"), ids: ["REQ-001"], depends_on: [] }], changes: [] }) + '\n```\n');
@@ -31,7 +33,7 @@ assert.ok(qualityEvidenceErrors(ctx, "quality-change-impact", good).some(e => e.
 assert.throws(() => qualityChangeCheck(ctx), /CHANGE_EVIDENCE_STALE/);
 write(`${base}/source.md`, "REQ-001 product source");
 const tsx = join(repo, "node_modules/tsx/dist/cli.mjs");
-function run(script: string, args: string[]) { const r = spawnSync(process.execPath, [tsx, join(repo, script), ...args], { cwd: root, encoding: "utf8" }); if (!r.stdout) throw new Error(r.stderr || String(r.error)); return r; }
+function run(script: string, args: string[]) { const r = spawnSync(process.execPath, [tsx, join(repo, script), ...args], { cwd: root, encoding: "utf8", env: script.endsWith("aidlc-evidence.ts") ? fixtureEnvironment(root, ["evidence", ...args]) : process.env }); if (!r.stdout) throw new Error(r.stderr || String(r.error)); return r; }
 let gate = run("tests/gate_probe.ts", ["requirements-analysis@module:shop", "sensors", "quality-change-impact"]);
 assert.match(gate.stdout, /GATE_EVIDENCE_MISSING/);
 const producer = run("core/tools/aidlc-evidence.ts", ["run", "--stage", "requirements-analysis", "--module", "shop", "--sensor", "quality-change-impact"]);

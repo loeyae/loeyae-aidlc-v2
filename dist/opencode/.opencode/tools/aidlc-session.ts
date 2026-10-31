@@ -10,6 +10,7 @@ import {
 	bindingFor,
 	loadWorkflowState,
 	saveClaimTransaction,
+	releaseWorkflowClaim,
 	sessionBinding,
 	type SessionBinding,
 	type TeamLightActiveInstance,
@@ -83,6 +84,14 @@ export interface BindOptions {
 	humanInstructionRef?: string;
 	resume?: boolean;
 	preview?: boolean;
+}
+
+export function releaseSession(root: string, instance: string, expected: string): void {
+  const ref = sessionRef(root, instance);
+  const state = loadWorkflowState(root, ref);
+  const claim = state?.active_instances[instance];
+  if (!claim || claimToken(claim) !== expected) throw new Error("claim changed; reread before release");
+  releaseWorkflowClaim(root, ref, instance, claim);
 }
 /** Optimistic one-shot transaction: never retries a stale expected original claim. */
 export function bindSession(

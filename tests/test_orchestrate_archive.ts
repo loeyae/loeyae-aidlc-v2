@@ -1,3 +1,5 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -12,7 +14,7 @@ const tsx = join(repository, "node_modules", "tsx", "dist", "cli.mjs");
 const root = mkdtempSync(join(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir(), "aidlc-archive-"));
 
 function run(cwd: string, args: string[]): { status: number; directive: Record<string, unknown> } {
-  const result = spawnSync(process.execPath, [tsx, cli, "orchestrate", ...args], { cwd, encoding: "utf8" });
+  const result = spawnSync(process.execPath, [tsx, cli, "orchestrate", ...args], { cwd, encoding: "utf8" , env: fixtureEnvironment(cwd, ["orchestrate", ...args]) });
   const text = (result.stdout || "").trim() || (result.stderr || "").trim();
   return { status: result.status ?? 1, directive: JSON.parse(text) as Record<string, unknown> };
 }
@@ -26,7 +28,7 @@ function setStatus(project: string, status: "running" | "parked" | "done", ref?:
   const state = loadWorkflowState(project, ref);
   assert.ok(state);
   state!.status = status;
-  saveWorkflowState(project, state!, ref);
+  saveFixtureState(project, state!, ref);
 }
 
 try {
@@ -50,16 +52,17 @@ try {
   assert.equal(running.directive.kind, "error");
   assert.match(String(running.directive.message), /Only parked or done workflows can be archived.*is running.*orchestrate park/);
 
+  assert.equal(run(project, ["next"]).status, 0);
   assert.equal(run(project, ["park"]).directive.kind, "parked");
   const state = loadWorkflowState(project)!;
   state.active_instances["requirements-analysis"] = { module_id: "", stage_instance: "requirements-analysis", owner: "alice", claimed_at: state.updated_at, heartbeat_at: state.updated_at, expires_at: "2999-01-01T00:00:00.000Z" };
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
   const claimed = run(project, ["archive"]);
   assert.equal(claimed.directive.kind, "error");
   assert.match(String(claimed.directive.message), /unreleased claims: requirements-analysis=alice/);
   const released = loadWorkflowState(project)!;
   released.active_instances = {};
-  saveWorkflowState(project, released);
+  saveFixtureState(project, released);
 
   writeFileSync(join(project, ".aidlc", "evidence", "requirements-analysis", "traceability-matrix.json.producer.lock"), "", "utf8");
   const locked = run(project, ["archive"]);
@@ -105,17 +108,17 @@ try {
   const global = createInitialState("feature", undefined, undefined, [], "Split work");
   global.workflow_kind = "global";
   global.status = "done";
-  saveWorkflowState(split, global);
+  saveFixtureState(split, global);
   const moduleState = createInitialState("feature", undefined, undefined, [], "Split work");
   moduleState.workflow_kind = "module";
   moduleState.module_id = "module-a";
   moduleState.parent_workflow_id = global.workflow_id;
-  saveWorkflowState(split, moduleState, moduleRef);
+  saveFixtureState(split, moduleState, moduleRef);
   const integration = createInitialState("feature", undefined, undefined, [], "Split work");
   integration.workflow_kind = "integration";
   integration.parent_workflow_id = global.workflow_id;
   integration.status = "parked";
-  saveWorkflowState(split, integration, integrationRef);
+  saveFixtureState(split, integration, integrationRef);
   const now = new Date().toISOString();
   saveRegistry(split, {
     version: "1",

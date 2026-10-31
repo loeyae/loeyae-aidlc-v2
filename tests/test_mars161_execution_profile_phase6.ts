@@ -41,7 +41,7 @@ assert.equal(legacy.release_authority, "not_a_gate");
 
 for (const profile of [standard, complex]) {
   const measurement = buildExecutionProfileReleaseMeasurements(graph, { scope: "bugfix", executionProfile: profile });
-  assert.equal(measurement.regression.legacy_standard_parity, true, `${profile.level} retains historical selection`);
+  assert.equal(measurement.regression.legacy_standard_parity, profile.level === "standard", `${profile.level} reports risk-driven additions accurately`);
   assert.deepEqual(measurement.regression.omitted_stage_slugs, [], `${profile.level} has no reduction`);
   assert.equal(measurement.regression.mandatory_rules_retained, true);
 }

@@ -12,7 +12,7 @@ triggers: DOCX 美化, Word 美化, 文档美化, DOCX 检查, Word 样式, docx
 
 Independent Capability — not an AIDLC phase.
 
-本能力按需检查或美化现有 `.docx`。它不调用 46-stage 主状态机，不更新 `docs/aidlc/aidlc-state.json`、handoff、audit 或 Evidence，也不宣布任何 AI-DLC Stage 完成。
+本能力按需检查或美化现有 `.docx`。它独立于阶段编排，不更新 `aidlc/active/aidlc-state.md`、handoff、audit 或 Evidence，也不宣布任何 AI-DLC Stage 完成。
 
 `inspect` 和 `beautify` 由独立、按需 Git 安装并锁定的 `document.docx-style` Provider 承接（Provider 仓库 `providers/docx-style`）。先显式 add/lock/enable 包，再传 `--project <root> --host-provider <instance>`，或显式设置 `AIDLC_DOCX_PROJECT`、`AIDLC_DOCX_HOST_PROVIDER`。缺包时报告 NEEDS_CAPABILITY；不得隐式安装、联网、注册 MCP 或安装字体。该包仅声明 Windows x64。`validate` 是 Core 独立 OPC verifier，无需 Provider。inspect 保持只读；其普通检查和显式自定义样式不要求绑定品牌。
 

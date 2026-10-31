@@ -1,3 +1,4 @@
+import { applyExecutionProfile, classifyExecutionProfile } from "../core/tools/aidlc-execution-profile";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -60,6 +61,7 @@ try {
   const red = get(root, redPath); assert.equal(red.status, "not_applicable");
   assert.equal(gate(root, "red-test-evidence").failures.length, 0);
   const nextReady = loadWorkflowState(root)!;
+  nextReady.execution_profile = applyExecutionProfile({ classified: classifyExecutionProfile({ scope: "express", signals: new Set() }), at: new Date().toISOString() });
   nextReady.completed_stages = ["workspace-detection", "test-case-derivation"];
   nextReady.completed_stage_instances = ["workspace-detection", "test-case-derivation@module:project"];
   saveFixtureState(root, nextReady);
@@ -109,6 +111,7 @@ try {
   ready.completed_stage_instances = ["workspace-detection", "test-case-derivation@module:project", "tdd@module:project@unit:default", "code-generation@module:project@unit:default", "code-review@module:project@unit:default"];
   saveFixtureState(root, ready);
   run(root, ["evidence", "run", "--stage", "build-and-test"]);
+  run(root, ["evidence", "run", "--stage", "build-and-test", "--all-sensors"]);
   const executionsBeforeReport = readFileSync(join(root, ".aidlc/executions"), "utf8");
   run(root, ["orchestrate", "report", "--stage", "build-and-test", "--result", "completed"]);
   assert.equal(readFileSync(join(root, ".aidlc/executions"), "utf8"), executionsBeforeReport, "report repairs only missing semantic evidence, without repeating C8 commands");
@@ -179,6 +182,7 @@ try {
   activate(characterized, "tdd"); assert.ok(gate(characterized, "baseline-test-evidence", true, true).failures.length, "current-epoch gate rejects BASELINE from an earlier generation");
 
   const review = project("suggestions"); activate(review, "code-review");
+  put(review, "src/view.ts", "export const view = 'configuration';\n");
   const reviewPath = "docs/aidlc/modules/project/construction/default/code-review.md";
   const report = (critical: number, important: number, suggestion: number, severity = true) => `# Review\nSpec: passed\nStandards: passed\nreviewer: regression\nfiles: src/view.ts\nissues_found: 1\nissues_resolved: 0\nissues_open: 1\n${severity ? `critical_open: ${critical}\nimportant_open: ${important}\nsuggestion_open: ${suggestion}\n` : ""}`;
   put(review, reviewPath, report(0, 0, 1) + "建议不阻断，remaining suggestion is non-blocking.\n");

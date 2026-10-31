@@ -1,11 +1,20 @@
 {
   "name": "loeyae-aidlc",
-  "version": "4.22.20",
+  "version": "4.23.0",
   "description": "AWS-style lightweight AI-DLC workflow with Markdown state/audit, unit selection, review, build and test.",
-  "author": { "name": "Loeyae Team" },
+  "author": {
+    "name": "Loeyae Team"
+  },
   "homepage": "https://github.com/loeyae/loeyae-aidlc-v2",
   "repository": "https://github.com/loeyae/loeyae-aidlc-v2.git",
   "license": "MIT",
-  "keywords": ["aidlc", "AI-DLC", "workflow", "gates"],
-  "skills": ["./skills/loeyae-aidlc"]
+  "keywords": [
+    "aidlc",
+    "AI-DLC",
+    "workflow",
+    "gates"
+  ],
+  "skills": [
+    "./skills/loeyae-aidlc"
+  ]
 }

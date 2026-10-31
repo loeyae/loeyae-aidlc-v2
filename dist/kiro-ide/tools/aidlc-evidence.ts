@@ -45,6 +45,7 @@ export type Phase = "RED" | "GREEN" | "BASELINE";
 const PHASE_SENSORS: Record<Phase, string> = { RED: "red-test-evidence", GREEN: "green-test-evidence", BASELINE: "baseline-test-evidence" };
 
 export const SEMANTIC_SENSORS = new Set([
+  "global-review-evidence", "deployment-validation",
   "document-slice-consistency",
   ...QUALITY_SENSORS,
   "review-evidence",
@@ -93,6 +94,7 @@ interface EvidenceConfig {
   artifacts?: ArtifactSpec[];
   freshness?: Record<string, unknown>;
   role_applicability?: { module_id: string; package_json: string; roles: ("build" | "check")[] }[];
+  risk_validation?: unknown;
 }
 
 interface CommandResult {
@@ -454,7 +456,42 @@ function parseConfig(path: string, stage: string, allowEmptyCommands = false): E
       return { module_id: moduleId, package_json: nonEmptyString(item.package_json, "role_applicability.package_json"), roles: item.roles as ("build" | "check")[] };
     });
   }
-  return { version: "1", stage, commands, artifacts, ...(roleApplicability ? { role_applicability: roleApplicability } : {}), ...(config.freshness !== undefined ? { freshness: config.freshness as Record<string, unknown> } : {}) };
+  return { version: "1", stage, commands, artifacts, ...(roleApplicability ? { role_applicability: roleApplicability } : {}), ...(config.risk_validation !== undefined ? { risk_validation: config.risk_validation } : {}), ...(config.freshness !== undefined ? { freshness: config.freshness as Record<string, unknown> } : {}) };
+}
+
+/** Each declared deployment artifact maps to a real allowlisted check with the same id. */
+export function deploymentValidationPayload(): Record<string, unknown> {
+  const path = resolveCommandConfigPath(PROJECT_ROOT, "operations-authorization");
+  const config = requireCommandConfig(path, "operations-authorization");
+  if (!config.artifacts?.length) fail("deployment validation requires actual configuration artifacts");
+  const checks = config.commands.filter(command => command.role === "check");
+  for (const artifact of config.artifacts) if (!checks.some(command => command.id === artifact.id)) fail(`deployment artifact ${artifact.id} requires a check command with the same id`);
+  const files = config.artifacts.map(artifact => ({ id: artifact.id, path: safeCwdLabel(artifact.path).replace(/\\/g, "/"), sha256: createHash("sha256").update(readFileSync(artifact.path)).digest("hex") }));
+  const configSha = createHash("sha256").update(readFileSync(path)).digest("hex");
+  const commands = checks.map(runCommand);
+  const payload = { status: "passed", config_sha256: configSha, files, commands };
+  const errors = deploymentValidationErrors(payload);
+  if (errors.length) fail(errors.join("; "));
+  return payload;
+}
+
+export function deploymentValidationErrors(evidence: Record<string, unknown>): string[] {
+  try {
+    const path = resolveCommandConfigPath(PROJECT_ROOT, "operations-authorization");
+    const config = requireCommandConfig(path, "operations-authorization");
+    const files = config.artifacts?.map(artifact => ({ id: artifact.id, path: safeCwdLabel(artifact.path).replace(/\\/g, "/"), sha256: createHash("sha256").update(readFileSync(artifact.path)).digest("hex") }));
+    const commands = Array.isArray(evidence.commands) ? evidence.commands as CommandResult[] : [];
+    const checks = config.commands.filter(command => command.role === "check"), errors: string[] = [];
+    if (evidence.status !== "passed" || !files?.length || JSON.stringify(evidence.files) !== JSON.stringify(files)) errors.push("deployment configuration is missing or changed");
+    if (evidence.config_sha256 !== createHash("sha256").update(readFileSync(path)).digest("hex")) errors.push("deployment command configuration changed");
+    if (commands.length !== checks.length) errors.push("deployment checks must cover every configured check");
+    for (const spec of checks) {
+      const command = commands.find(item => item.id === spec.id);
+      if (!command || command.role !== "check" || command.exit_code !== 0 || command.status !== "passed" || command.argv_digest !== argvDigest(spec.argv) || command.cwd !== safeCwdLabel(spec.cwd || PROJECT_ROOT)) errors.push(`deployment check ${spec.id} is missing, failed or changed`);
+    }
+    for (const artifact of config.artifacts || []) if (!checks.some(command => command.id === artifact.id)) errors.push(`deployment artifact ${artifact.id} has no validation`);
+    return errors;
+  } catch (error) { return [String(error)]; }
 }
 
 function safeCwdLabel(cwd: string): string {
@@ -742,6 +779,20 @@ function c8RoleErrors(commands: { id: unknown; role: unknown }[], config: Eviden
 }
 
 /** Build/test verification shared by producer, scheduler and completion gate. */
+function securityValidationBasis(config: EvidenceConfig, state: ProducerState): Record<string, unknown> | undefined {
+  const profiles = [state.execution_profile, ...[...loadWorkflowParts(PROJECT_ROOT).parts.values()].map(part => part.state.execution_profile)];
+  if (!profiles.some(profile => profile?.active_risks.includes("security_or_sensitive_data"))) return undefined;
+  const records = config.risk_validation;
+  if (!Array.isArray(records)) fail("security risk is unverified: C8 risk_validation must bind acceptance sources and real test/check command_ids");
+  const matches = records.filter(record => record?.risk === "security_or_sensitive_data");
+  if (matches.length !== 1) fail("security risk requires exactly one risk_validation declaration");
+  const record = matches[0];
+  if (!Array.isArray(record.sources) || !record.sources.length || !record.sources.every((path: unknown) => typeof path === "string" && path.trim())
+    || !Array.isArray(record.command_ids) || !record.command_ids.length || new Set(record.command_ids).size !== record.command_ids.length
+    || !record.command_ids.every((id: unknown) => config.commands.some(command => command.id === id && ["test", "check"].includes(command.role)))) fail("security risk_validation requires non-empty local sources and unique allowlisted test/check command_ids");
+  return { risk: record.risk, sources: record.sources.map((path: string) => ({ path, sha256: createHash("sha256").update(readFileSync(requireRegularFile(safeProjectPath(path, "security acceptance source"), "security acceptance source"))).digest("hex") })), command_ids: record.command_ids };
+}
+
 export function buildTestEvidenceErrors(evidence: Record<string, unknown>, state: ProducerState): string[] {
   const errors: string[] = [];
   if (evidence.status !== "passed") errors.push("build/test status must be passed");
@@ -750,6 +801,9 @@ export function buildTestEvidenceErrors(evidence: Record<string, unknown>, state
   const zeroTests = tests?.total === 0 && tests.passed === 0 && tests.failed === 0 && tests.skipped === 0;
   try {
     const config = requireCommandConfig(resolveCommandConfigPath(PROJECT_ROOT, "build-and-test"), "build-and-test");
+    const security = securityValidationBasis(config, state);
+    if (JSON.stringify(evidence.risk_validation) !== JSON.stringify(security)) errors.push("security acceptance sources or validation policy changed; rerun actual security verification");
+    if (security && (security.command_ids as string[]).some(id => !commands.some(command => command.id === id && command.status === "passed" && command.exit_code === 0))) errors.push("security validation commands were not successfully executed");
     const roleBasis = c8RoleBasis(config, state);
     if (JSON.stringify(evidence.role_applicability) !== JSON.stringify(roleBasis)) errors.push("C8 role applicability no longer matches project policy/configuration sources");
     const roles = new Set(commands.map(command => command.role));
@@ -1195,7 +1249,7 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   // 只有 diff 触及的 artifact 的直接依赖证据才重跑。
   const inputs = stageInputs(options.stage, state);
   const prior = priorEvidenceRecord(output);
-  if (options.refresh && inputs && prior && reusableSemanticEvidence(prior, inputs, state)
+  if (options.refresh && inputs && prior && !["global-review-evidence", "deployment-validation"].includes(sensor) && reusableSemanticEvidence(prior, inputs, state, sensor)
     && (sensor !== SLICE_SENSOR || (!sliceEvidenceErrors(producerSliceContext(state), prior).length && !sliceCandidateError(state, prior)))) {
     const summary = { action: "reused" as const, inputs_digest: inputs.digest };
     if (!quiet) console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}`, ...summary }, null, 2));
@@ -1212,11 +1266,11 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   const unsigned = {
     ...result.payload,
     ...(config?.freshness ? { freshness: config.freshness } : {}),
-    ...(inputs ? sensor === SLICE_SENSOR ? { stage_inputs: inputs } : { inputs } : {}),
+    ...(inputs ? sensor === SLICE_SENSOR || Array.isArray(result.payload.inputs) ? { stage_inputs: inputs } : { inputs } : {}),
     ...executionContext(state),
     evidence_version: "1",
     timestamp: new Date().toISOString(),
-    producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: executionId },
+    producer: { name: "loeyae-aidlc-evidence", mode: "controlled", workflow_id: state.workflow_id, execution_id: executionId },
     source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance),
     checker: result.execution,
   };
@@ -1424,7 +1478,7 @@ function loadProducerState(options: ProducerOptions): ProducerState | null {
     current_stage: instance.split("@", 1)[0],
     current_stage_instance: instance,
   };
-  if (moduleMatch || claim) context.current_module = moduleMatch?.[1] || claim!.module_id;
+  if (moduleMatch) context.current_module = moduleMatch[1];
   else delete context.current_module;
   if (unitMatch) context.current_unit = unitMatch[1];
   else delete context.current_unit;
@@ -1512,7 +1566,7 @@ function priorEvidenceRecord(output: string): Record<string, unknown> | null {
  * MARS-271 选择性失效:已受控、checker 通过、输入指纹与执行上下文都不变的证据
  * 可以在 --refresh 时复用,不必重跑。RED/GREEN/BASELINE 相位传感器不走该路径。
  */
-function reusableSemanticEvidence(prior: Record<string, unknown>, inputs: { digest: string }, state: ProducerState): boolean {
+function reusableSemanticEvidence(prior: Record<string, unknown>, inputs: { digest: string }, state: ProducerState, sensor: string): boolean {
   const producer = typeof prior.producer === "object" && prior.producer !== null ? prior.producer as Record<string, unknown> : undefined;
   const checker = typeof prior.checker === "object" && prior.checker !== null ? prior.checker as Record<string, unknown> : undefined;
   const priorInputs = semanticStageInputs(prior);
@@ -1523,10 +1577,19 @@ function reusableSemanticEvidence(prior: Record<string, unknown>, inputs: { dige
   // current tree must regenerate even when the consumes fingerprint cannot see the change
   // (stages with an empty consumes list track no artifacts at all).
   const scope = evidenceScopeForInstance(PROJECT_ROOT, String(state.current_stage_instance));
+  const currentRevision = readSourceRevision(PROJECT_ROOT, scope, nestedSourceRepos(PROJECT_ROOT));
+  const priorRevision = prior.source_revision as Record<string, unknown> | undefined;
   const scopeStillValid = scope.label === "worktree"
-    ? priorScope === undefined
-    : priorScope === scope.label && priorScopeDigest === readSourceRevision(PROJECT_ROOT, scope, nestedSourceRepos(PROJECT_ROOT)).scope_digest;
+    ? (priorScope === undefined || priorScope === "worktree")
+      && priorRevision?.commit === currentRevision.commit
+      && priorRevision?.dirty === currentRevision.dirty
+      && priorRevision?.worktree_digest === currentRevision.worktree_digest
+      && JSON.stringify(priorRevision?.repos || {}) === JSON.stringify(currentRevision.repos || {})
+    : priorScope === scope.label && priorScopeDigest === currentRevision.scope_digest;
   return producer?.mode === "controlled"
+    && producer.workflow_id === state.workflow_id
+    && checker?.argv_digest === argvDigest(semanticCommandArgv(sensor, state))
+    && !evidenceTimeError(prior, sensor)
     && checker?.exit_code === 0
     && checker.status === "passed"
     && prior.evidence_version === "1"
@@ -1676,6 +1739,8 @@ function runProducerInner(args: string[]): void {
     const applicability = noBehaviorBasis(state);
     const roleBasis = c8RoleBasis(config, state);
     const roleErrors = c8RoleErrors(selected, config, roleBasis, !!applicability);
+    const security = securityValidationBasis(config, state);
+    if (security && (security.command_ids as string[]).some(id => !selected.some(command => command.id === id))) fail("selected commands omit required security validation");
     if (roleErrors.length) fail(roleErrors.join("; "));
 
     const commands = selected.map(spec => applicability && spec.role === "check" ? alternativeCheck(spec, state, config.freshness) : runCommand(spec));
@@ -1699,6 +1764,7 @@ function runProducerInner(args: string[]): void {
       commands,
       ...(applicability ? { applicability } : {}),
       ...(roleBasis ? { role_applicability: roleBasis } : {}),
+      ...(security ? { risk_validation: security } : {}),
       ...(config.freshness ? { freshness: config.freshness } : {}),
       tests,
       checks: { status: "passed", command_ids: commands.filter((command) => command.role === "check").map((command) => command.id) },

@@ -8,6 +8,7 @@ export const HISTORICAL_EVIDENCE = new Set([
  * Recovery/provider/external observations and unknown sensors retain the 24h default.
  */
 export const CONTENT_BOUND_EVIDENCE = new Set([
+  "global-review-evidence",
   ...HISTORICAL_EVIDENCE,
   "document-slice-consistency", "contract-baseline", "functional-design-completeness",
   "nfr-coverage", "infrastructure-completeness", "implementation-report",
@@ -44,6 +45,37 @@ export function evidenceTimeError(record: Record<string, unknown>, sensor: strin
 }
 
 /** Legacy open findings remain blocking. New reports partition open findings by severity. */
+export function reviewAxisErrors(content: string): string[] {
+  const lines = content.split(/\r?\n/).map(line => line.replace(/[*`]/g, "").trim().replace(/^[-+]\s+/, ""));
+  const axes = [
+    ["Spec", /^(?:#{1,6}\s*)?(?:Spec(?:\s+Axis)?|规格(?:合规)?)(?:\s*(?:result|结果|审查结果|审查))?\s*[:：]\s*(.+)$/i],
+    ["Standards", /^(?:#{1,6}\s*)?(?:Standards(?:\s+Axis)?|规范|质量)(?:\s*(?:result|结果|审查结果|审查))?\s*[:：]\s*(.+)$/i],
+  ] as const;
+  const errors: string[] = [];
+  for (const [name, expression] of axes) {
+    let section = false;
+    const values: string[] = [];
+    for (const line of lines) {
+      const inline = expression.exec(line);
+      if (inline) { values.push(inline[1]); continue; }
+      if (/^#{1,6}\s/.test(line)) {
+        section = name === "Spec" ? /\bSpec\b|规格/.test(line) : /\bStandards\b|规范|质量/.test(line);
+      } else if (section) {
+        const status = /^(?:状态|status|结果|result)\s*[:：]\s*(.+)$/i.exec(line);
+        if (status) values.push(status[1]);
+      }
+    }
+    if (!values.length) errors.push(`${name} axis requires an explicit conclusion`);
+    for (const value of values) {
+      if (/failed|blocked|unknown|needs?\s+(?:fix|repair)|未通过|不合规|不通过|需要修复|阻断/i.test(value)
+        || !/^(?:[✅✔]\s*)?(?:passed|通过|合规|无需修复|已修复并复审通过)(?:\s*[（(][^()（）\r\n]*[）)])?(?:\s*[。.!！]?\s*)$/i.test(value)) {
+        errors.push(`${name} axis is not passed: ${value}`);
+      }
+    }
+  }
+  return errors;
+}
+
 export function reviewIssueErrors(record: Record<string, unknown>): string[] {
   const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
   const errors: string[] = [];

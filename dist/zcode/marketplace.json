@@ -7,9 +7,13 @@
       "name": "loeyae-aidlc",
       "source": "./loeyae-aidlc",
       "description": "AWS-style lightweight AI-DLC workflow with Markdown state/audit, unit selection, review, build and test.",
-      "version": "4.22.20",
+      "version": "4.23.0",
       "category": "developer-tools",
-      "tags": ["aidlc", "workflow", "gates"],
+      "tags": [
+        "aidlc",
+        "workflow",
+        "gates"
+      ],
       "strict": true
     }
   ]

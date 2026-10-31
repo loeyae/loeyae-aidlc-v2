@@ -1,5 +1,5 @@
 {
-  "version": "4.22.20",
+  "version": "4.23.0",
   "stages": [
     {
       "slug": "workspace-detection",
@@ -1263,12 +1263,14 @@
       "produces": [
         "docs/aidlc/construction/build-test-report.md",
         "docs/aidlc/construction/build-and-test/build-and-test-summary.md",
-        ".aidlc/evidence/build-and-test/build-test-evidence.json"
+        ".aidlc/evidence/build-and-test/build-test-evidence.json",
+        ".aidlc/evidence/build-and-test/global-review-evidence.json"
       ],
       "sensors": [
         "doc-cascade",
         "build-test-evidence",
         "test-quality",
+        "global-review-evidence",
         "no-todo",
         "traceability"
       ],
@@ -1454,10 +1456,12 @@
       "produces": [
         "docs/aidlc/operation/deployment-config.md",
         "docs/aidlc/operation/deployment-guide.md",
-        "docs/aidlc/operation/operations-summary.md"
+        "docs/aidlc/operation/operations-summary.md",
+        ".aidlc/evidence/operations-authorization/deployment-validation.json"
       ],
       "sensors": [
         "doc-cascade",
+        "deployment-validation",
         "no-todo",
         "traceability"
       ],

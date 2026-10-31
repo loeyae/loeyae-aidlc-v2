@@ -51,7 +51,7 @@ loeyae-aidlc worktree warmup
 ```
 
 - 在项目当前**干净已提交**的 HEAD 上做一次全量 checkout，落在项目根的**同级目录** `<project>-aidlc-warm`，并登记于 `aidlc/active/worktrees/_warm.md`（`core/tools/aidlc-worktree-light.ts` · `warmupLightWorktree`、`warmPathFor`）。项目不干净时拒绝：`worktree warmup requires a clean committed project`。
-- 之后的 `worktree prepare` 对同一 commit 用**硬链接**复用该缓存（无法硬链接时回退复制），避免每个子任务重复全量 checkout；元数据标记 `Warm Reused: yes`（`core/tools/aidlc-worktree-light.ts` · `warmCheckout`、`linkWarmTree`）。
+- 之后的 `worktree prepare` 对同一 commit 用**独立文件复制**复用该缓存（原地写入不会改变缓存或其他单元），避免每个子任务重复全量 checkout；元数据标记 `Warm Reused: yes`（`core/tools/aidlc-worktree-light.ts` · `warmCheckout`、`linkWarmTree`）。
 - HEAD（基线）变化后再次 `warmup`：旧缓存是已登记 worktree 时直接移除并按新 commit 重warm；不是可复用 worktree 时报 `warm path already exists and is not a reusable worktree`。`prepare` 遇到 commit 不一致的缓存自动放弃复用（`core/tools/aidlc-worktree-light.ts` · `usableWarm`）。
 - 缓存缺失或损坏（目录被删、未登记、不干净、HEAD 不符）时，`prepare` 自动回退标准 `git worktree add` 全量 checkout，不报错中断（`core/tools/aidlc-worktree-light.ts` · `warmCheckout` 的 catch 分支）。
 - 清理：把 warm 目录与 `_warm.md` **一起**删除（`_warm.md` 里的说明原话即此意）；只删其一不影响正确性——`prepare` 会按"缓存缺失"回退全量 checkout。
