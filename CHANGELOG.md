@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — 2026-10-30 audit remediation
+## 4.23.0 — 2026-10-31
 
 - Require explicit Spec/Standards results and real delivered-file review coverage; bind conditional FINAL_GLOBAL reviews, deployment checks and risk-derived security verification to current inputs. Preserve single-unit lightweight applicability.
 - Copy warm-worktree files independently; route reports to the exact bound unit and enforce the integration barrier on both next and report. Repair I13 source coverage, evidence fingerprints/reuse and valid zero-file TAP coverage tables.
@@ -9,6 +9,21 @@
 - Keep pre-admission project evidence on its project axis: an integration claim's coordination label must not redirect FINAL_GLOBAL evidence into a module subdirectory.
 - Reuse whole-worktree semantic evidence only when commit, dirty state, content digest and nested repository revisions still match; empty consumes lists cannot conceal source drift or a newly failing checker.
 - Run regression commands in a material Git clone with historical objects and independent dependencies; keep installation/build/package barriers. Real-host Agent evaluation remains separate from deterministic engine tests.
+
+- Synchronize package, stage-graph, plugin and marketplace versions at 4.23.0 and regenerate all nine harness distributions.
+
+## 4.22.20 — 2026-10-28
+
+- Add controlled `historical_replay` RED recovery for missing original evidence. Exact workflow/module/unit configuration binds the historical repository, sparse worktree, pre-implementation commit, production implementation ancestry and the real Vitest command without changing other units' stage allowlists.
+- Verify historical source/test/config/lockfile blobs, installed dependency bytes, current I13 and requirements, actual executed methods, assertion failures, runtime errors and raw report SHA-256 values before execution, after execution, at authorized publication and at normal admission. GREEN, skipped or missing tests, mapping gaps, dirty or mismatched sources, environment/compiler failures and unauthorized sessions remain blocking.
+- Keep the existing 512 KiB canonical evidence limit with v2 digest-bound source/report sidecars. Controlled historical refresh retains previous replay files verbatim in an audited archive; original RED and diagnostic records cannot be replaced through this mode. Entry and completion reports identify post-hoc replay and its limits: it does not recover the original execution time or prove integration or business acceptance.
+- Preserve original RED/BASELINE/GREEN semantics; synchronize package, plugin, marketplace and stage-graph versions and regenerate all nine harness distributions.
+
+## 4.22.18 — 2026-10-28
+
+- Multi-repo and temporary-worktree initialization, recovery and evidence-boundary guide (MARS-286): new `docs/multi-repo-worktree-recovery.md` documents nested-repo declaration via `source-roots.json` (fail-closed validation, pending migration registration, `--repo`/`--expect-repo` usage), `worktree prepare`/`verify`/`merge-plan` inputs and the `authorized: false` boundary, claim lifecycle (30-minute TTL, expiry and transfer semantics, no explicit release yet — tracked), and the evidence boundary (`source_revision.repos` per-repo semantics, digest binds to the tree that produced it, `evidence run --refresh` + re-attest `report` as the native re-validation path), plus a copyable-vs-rebuild boundary table and an end-to-end recovery walkthrough.
+- Cross-references consolidated: CLI guide (worktree/claim/nested-repo/evidence anti-forgery sections), README nested-repo and worktree entry links, and `common-team-collaboration` warmup cache path corrected (`.aidlc/worktrees/_warm.md` -> `aidlc/active/worktrees/_warm.md`).
+- Documentation-only change; no `core/tools/` behavior code touched. Synchronize package, plugin, marketplace and stage-graph versions and regenerate all nine harness distributions.
 
 ## 4.22.17 — 2026-10-27
 

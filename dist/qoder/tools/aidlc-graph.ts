@@ -323,7 +323,7 @@ export function validateGraph(graph: { stages: StageNode[]; stage_count: number;
 function sourceGraph(): StageGraph {
   const stages = scanStages();
   return {
-    version: "4.22.17",
+    version: "4.23.0",
     stages,
     stage_count: stages.length,
     scopes: [...VALID_SCOPES].sort(),
