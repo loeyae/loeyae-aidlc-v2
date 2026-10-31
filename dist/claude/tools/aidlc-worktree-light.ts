@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { copyFileSync, existsSync, lstatSync, linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { runSync } from "./aidlc-spawn";
@@ -209,7 +209,7 @@ function warmPathFor(project: string): string {
   return join(dirname(project), `${basename(project)}-aidlc-warm`);
 }
 
-/** Recreate the target working tree from the warm cache via hard links (copy fallback). */
+/** Each worker owns independent mutable files; the warm cache remains reusable. */
 function linkWarmTree(warm: string, target: string): void {
   const walk = (from: string, to: string): void => {
     for (const entry of readdirSync(from, { withFileTypes: true })) {
@@ -222,11 +222,7 @@ function linkWarmTree(warm: string, target: string): void {
       } else if (entry.isSymbolicLink()) {
         symlinkSync(readlinkSync(source), destination);
       } else {
-        try {
-          linkSync(source, destination);
-        } catch {
-          copyFileSync(source, destination);
-        }
+        copyFileSync(source, destination);
       }
     }
   };

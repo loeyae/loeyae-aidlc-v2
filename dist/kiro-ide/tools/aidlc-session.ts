@@ -10,6 +10,7 @@ import {
 	bindingFor,
 	loadWorkflowState,
 	saveClaimTransaction,
+	releaseWorkflowClaim,
 	sessionBinding,
 	type SessionBinding,
 	type TeamLightActiveInstance,
@@ -83,6 +84,14 @@ export interface BindOptions {
 	humanInstructionRef?: string;
 	resume?: boolean;
 	preview?: boolean;
+}
+
+export function releaseSession(root: string, instance: string, expected: string): void {
+  const ref = sessionRef(root, instance);
+  const state = loadWorkflowState(root, ref);
+  const claim = state?.active_instances[instance];
+  if (!claim || claimToken(claim) !== expected) throw new Error("claim changed; reread before release");
+  releaseWorkflowClaim(root, ref, instance, claim);
 }
 /** Optimistic one-shot transaction: never retries a stale expected original claim. */
 export function bindSession(
@@ -222,7 +231,7 @@ export interface WorkflowPublication {
 /** Independent module writers use the exact bound instance, never a merged view's
  * current stage or another module's claim. Capture before computation and publish
  * under the claim/transfer lock with publishScope. */
-export function captureModulePublication(root: string, moduleId: string): WorkflowPublication | undefined {
+export function captureModulePublication(root: string, moduleId: string, options: { derivedFromCompletedUnits?: boolean } = {}): WorkflowPublication | undefined {
 	const ref = isSplitLayout(root) ? { kind: "module" as const, module_id: moduleId } : GLOBAL_WORKFLOW;
 	const state = loadWorkflowState(root, ref);
 	if (!state) {
@@ -232,7 +241,7 @@ export function captureModulePublication(root: string, moduleId: string): Workfl
 	const binding = sessionBinding();
 	if (!binding || /@module:([a-z0-9][a-z0-9-]*)(?:@|$)/.exec(binding.stage_instance)?.[1] !== moduleId)
 		throw new Error("explicit session binding for the exact target module required");
-	if (binding.stage_instance.includes("@unit:")) throw new Error("module-wide publication requires a module-axis claim; a unit claim cannot expand its responsibility");
+	if (binding.stage_instance.includes("@unit:") && !(options.derivedFromCompletedUnits && state.completed_stage_instances.includes(`units-generation@module:${moduleId}`))) throw new Error("module-wide publication requires a module-axis claim; a unit claim cannot expand its responsibility");
 	assertSessionClaim(root, state, binding.stage_instance, binding);
 	if (binding.stage_instance.startsWith("subagent-execution")) throw new Error("retired stage requires migration before managed publication");
 	return { ref, instance: binding.stage_instance, binding: structuredClone(binding) };

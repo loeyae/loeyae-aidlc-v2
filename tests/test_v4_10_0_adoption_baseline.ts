@@ -1,3 +1,5 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 /**
  * 4.10.0 (MARS-92) regression suite: adoption baseline (`orchestrate baseline --adopt`).
  *
@@ -53,7 +55,7 @@ function cleanEnv(): NodeJS.ProcessEnv {
 }
 
 function run(project: string, args: string[]): Run {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: cleanEnv() });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: { ...fixtureEnvironment(project, [...args]), ...(cleanEnv()) } });
   const stdout = result.stdout || "";
   let json: Record<string, unknown> = {};
   try {
@@ -63,6 +65,11 @@ function run(project: string, args: string[]): Run {
 }
 
 function ok(project: string, args: string[]): Run {
+  if (args[0] === "orchestrate" && args[1] === "report" && !args.includes("--instruction-ack")) {
+    const stage = args[args.indexOf("--stage") + 1];
+    const scope = ["--module", "--unit"].flatMap(flag => args.includes(flag) ? [flag, args[args.indexOf(flag) + 1]] : []);
+    if (JSON.parse(readFileSync(join(repository, "core/tools/data/stage-graph.json"), "utf8")).stages.find((node: {slug:string}) => node.slug === stage)?.produces.some((path: string) => path.startsWith(".aidlc/evidence/"))) ok(project, ["evidence", "run", "--stage", stage, "--all-sensors", ...scope]);
+  }
   const result = run(project, args);
   assert.equal(result.status, 0, `${args.join(" ")}\n${result.out}`);
   assert.notEqual(result.json.kind, "error", `${args.join(" ")}\n${result.out}`);
@@ -167,7 +174,7 @@ function fixture(name: string): Fixture {
   // quality-v1 creation/adoption is covered by test_mars168_admission/lifecycle.
   const legacy = createInitialState("feature", "4.10.0", undefined, [], `4.10.0 adoption ${name}`);
   legacy.baseline_commit = workflowCommit; legacy.baseline_source = "created";
-  legacy.baseline_repos = { app: appLegacy }; saveWorkflowState(project, legacy);
+  legacy.baseline_repos = { app: appLegacy }; saveFixtureState(project, legacy);
   // T0 is now; the old process keeps committing the implementation into app/ afterwards.
   write(app, "order_export.py", ORDER_EXPORT);
   git(app, ["add", "-A"]);
@@ -179,7 +186,7 @@ function fixture(name: string): Fixture {
   global.completed_stages = [...globalStages];
   global.completed_stage_instances = [...globalStages];
   global.skipped_stage_instances = [`reverse-engineering@module:${M01}`, `reverse-engineering@module:${M02}`];
-  saveWorkflowState(project, global);
+  saveFixtureState(project, global);
   write(project, "docs/aidlc/ideation/scenario-module-mapping.md", `# 场景模块映射\n\nREQ-001 订单导出属于 ${M01}；账单属于 ${M02}。\n`);
   step(["orchestrate", "split", "--from", global.workflow_id]);
   const nextModule = (expected: string, refreshes: string[][] = []): void => {
@@ -197,7 +204,7 @@ function fixture(name: string): Fixture {
   write(project, `${IN}/clarifications.md`, "# 需求澄清\n\nNo clarifications needed.\n\nREQ-001 的重试行为由接管前的实现定义，本次改动沿用。\n");
   report("requirement-clarification");
   nextModule(`requirements-methods@module:${M01}`, [RA]);
-  write(project, `${IN}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单导出流程\n\n```mermaid\nflowchart LR\n  A[调用导出] --> B{超时?}\n  B -- 是 --> A\n  B -- 否 --> C[返回订单]\n```\n");
+  write(project, `${IN}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单导出流程\n\n<!-- aidlc-mermaid-validation: {\"diagram_id\":\"order-flow\",\"module\":\"m01-trade\",\"validation_tier\":\"STATIC_PASS\",\"diagram_type\":\"module-internal-simple-flow\",\"all_elements_within_module\":true,\"no_contract_semantics\":true,\"not_architecture_or_delivery_evidence\":true} -->\n```mermaid\nflowchart LR\n  A[调用导出] --> B{超时?}\n  B -- 是 --> A\n  B -- 否 --> C[返回订单]\n```\n");
   report("requirements-methods");
   nextModule(`user-stories@module:${M01}`, [RA]);
   write(project, `${IN}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营导出订单\n\n- 关联需求：REQ-001\n- 作为运营人员，我希望订单导出在下游超时时自动重试。\n- 验收标准：接管前实现的重试行为在改动后保持不变。\n");
@@ -206,14 +213,14 @@ function fixture(name: string): Fixture {
   write(project, `${IN}/cross-validation-report.md`, "# 交叉验证报告\n\n- status: passed\n- unresolved_conflicts: 0\n- prd_route: not-selected\n- ui_route: not-selected\n\n| 需求 | 故事 | 结论 |\n| --- | --- | --- |\n| REQ-001 | STORY-001 / US-001 | 一致 |\n");
   report("cross-validation");
   nextModule(`workflow-planning@module:${M01}`, [RA, ["--stage", "user-stories", ...MOD]]);
-  write(project, `${IN}/workflow-plan.md`, "# 工作流规划\n\nREQ-001：单元 u1 改动嵌套仓库 app/；接管前的实现走 BASELINE→GREEN；不需要应用设计。\n\n| 阶段 | 决定 |\n| --- | --- |\n| application-design | skip |\n");
+  write(project, `${IN}/workflow-plan.md`, "# 工作流规划\n\nREQ-001：单元 u1 改动嵌套仓库 app/；接管前的实现走 BASELINE→GREEN；不需要应用设计。\n\n| 阶段 | 决定 |\n| --- | --- |\n| application-design | skip | local implementation only; no new interface or data structure |\n");
   report("workflow-planning");
   write(project, `${IN}/unit-manifest.json`, `${JSON.stringify({ schema_version: 1, module_id: M01, units: [{ unit_id: "u1", name: "Unit u1", service_id: "trade-service", conditional_stages: [] }] }, null, 2)}\n`);
   const moduleRef = { kind: "module" as const, module_id: M01 };
   const moduleState = loadWorkflowState(project, moduleRef)!;
   moduleState.completed_stages.push("units-generation");
   moduleState.completed_stage_instances.push(`units-generation@module:${M01}`);
-  saveWorkflowState(project, moduleState, moduleRef);
+  saveFixtureState(project, moduleState, moduleRef);
   write(project, `${CONSTRUCTION}/functional-design.md`, "# 功能设计 — u1\n\nREQ-001：u1 只补充追溯注释，不改变接管前实现的重试行为；无新增接口与数据结构。\n");
   nextModule(`test-case-derivation@module:${M01}`);
   write(project, `${CASES}/_index.md`, "# UC-D 索引\n\n- UC-D-021 导出超时重试（source_ref: REQ-001）\n");
@@ -240,7 +247,7 @@ async function main(): Promise<void> {
     // ---- Before: --set cannot register the post-T0 implementation, I13 cannot characterize it.
     const setRefused = rejected(run(f.project, ["orchestrate", "baseline", "--set", f.workflowCommit, "--replace", "--expect", f.workflowCommit, "--repo", `app=${f.appAdopted}`, "--expect-repo", `app=${f.appLegacy}`, "--user-input", "Approve", "--reason", "登记接管前实现"]));
     expectRejected("--set of the post-T0 app/ commit", setRefused, /app\/: commit [0-9a-f]{40} committer date \S+ \(self-reported\) is later than the workflow start/);
-    const i13Refused = rejected(run(f.project, ["orchestrate", "report", ...TCD, "--result", "completed"]));
+    const i13Refused = rejected(run(f.project, ["evidence", "run", ...TCD, "--all-sensors"]));
     expectRejected("I13 before adoption", i13Refused, /app\/order_export\.py does not exist in the baseline [0-9a-f]{40} of the nested repository app\//);
     const globalBefore = baselineLines(stateText(f.project));
 
@@ -258,11 +265,11 @@ async function main(): Promise<void> {
     const candidateDate = git(f.app, ["show", "-s", "--format=%cI", f.appAdopted]);
     const tddStartedAt = new Date(Date.parse(candidateDate) - 1_000).toISOString();
     withTddStart.history.push({ stage: "tdd", instance_id: TDD, module_id: M01, unit_id: "u1", result: "rejected", timestamp: tddStartedAt, user_input: "fixture: tdd entered" });
-    saveWorkflowState(f.project, withTddStart, moduleRef);
+    saveFixtureState(f.project, withTddStart, moduleRef);
     expectRejected("--adopt later than the first tdd start", rejected(run(f.project, ADOPT(f, APPROVAL))), /app\/: commit [0-9a-f]{40} committer date \S+ \(self-reported\) is later than the first tdd start of the module/);
     const withoutTddStart = loadWorkflowState(f.project, moduleRef)!;
     withoutTddStart.history = withoutTddStart.history.filter((entry) => entry.stage !== "tdd");
-    saveWorkflowState(f.project, withoutTddStart, moduleRef);
+    saveFixtureState(f.project, withoutTddStart, moduleRef);
 
     // ---- Negative: the module already holds GREEN evidence.
     write(f.project, GREEN, "{}\n");
@@ -336,7 +343,7 @@ async function main(): Promise<void> {
     const appU1 = git(f.app, ["rev-parse", "HEAD"]);
     write(f.project, `${CONSTRUCTION}/plans/code-generation-plan.md`, "# 代码生成计划 — u1\n\n- REQ-001 / UC-D-021：在 app/order_export.py 中补充 REQ-001 追溯注释，接管前的重试行为由 BASELINE 锁定。\n");
     write(f.project, `${CONSTRUCTION}/implementation-summary.md`, "# 实现摘要 — u1\n\nREQ-001 / UC-D-021：app/order_export.py 仅追加注释行，行为不变；tests/test_order_export.py 覆盖 UC-D-021。\n");
-    const generated = run(f.project, ["orchestrate", "report", "--stage", "code-generation", ...UNIT, "--result", "completed"]);
+    const generated = ok(f.project, ["orchestrate", "report", "--stage", "code-generation", ...UNIT, "--result", "completed"]);
     assert.equal(rejected(generated), "", generated.out);
     assert.equal(readJson(f.project, GREEN).source_revision.repos.app.commit, appU1);
     const ADVANCE = ["orchestrate", "baseline", "--advance", f.workflowCommit, "--module", M01, "--expect", f.workflowCommit, "--repo", `app=${appU1}`, "--expect-repo", `app=${f.appAdopted}`, "--user-input", "Approve", "--reason", "u1 已在 app/ 提交"];

@@ -1,3 +1,5 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 /**
  * 4.11.0 (MARS-94) regression suite.
  *
@@ -46,7 +48,7 @@ function cleanEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 }
 
 function run(project: string, args: string[], env: NodeJS.ProcessEnv = {}): Run {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: cleanEnv(env), maxBuffer: 64 * 1024 * 1024 });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: { ...fixtureEnvironment(project, [...args]), ...(cleanEnv(env)) }, maxBuffer: 64 * 1024 * 1024 });
   const stdout = result.stdout || "";
   return { status: result.status ?? 1, stdout, out: `${stdout}\n${result.stderr || ""}` };
 }
@@ -147,7 +149,7 @@ function matrixProject(name: string): string {
   const state: WorkflowState = createInitialState("feature", "4.11.0", `workflow-${name}`, [], "MARS-94 code_refs unit scope");
   state.completed_stages = [...GLOBAL_STAGES];
   state.completed_stage_instances = [...GLOBAL_STAGES];
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
   return project;
 }
 
@@ -208,7 +210,7 @@ function overflowProject(name: string): string {
   state.current_phase = "inception";
   state.current_stage_instance = `requirements-analysis@module:${M01}`;
   state.current_module = M01;
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
   return project;
 }
 
@@ -297,6 +299,7 @@ try {
 
   await section("ENOBUFS: an overflow names the subprocess as its own error", () => {
     const project = overflowProject("enobufs-small");
+    ok(project, ["evidence", "run", "--stage", "requirements-analysis"]);
     const limit = { AIDLC_SUBPROCESS_MAX_BUFFER: String(256 * 1024) };
     const report = run(project, ["orchestrate", "report", "--stage", "requirements-analysis", "--result", "completed"], limit);
     assert.notEqual(report.status, 0, report.out.slice(-2000));

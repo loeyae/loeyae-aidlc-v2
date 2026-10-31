@@ -1,3 +1,6 @@
+import { fixtureEnvironment } from "./mars243_fixture_session";
+import { saveFixtureState } from "./mars243_fixture_session";
+import { loadWorkflowState } from "../core/tools/aidlc-light-state";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -11,7 +14,7 @@ const root = join(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir()
 const project = join(root, "project");
 
 function run(args: string[], cwd = project): { status: number; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8" });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8" , env: fixtureEnvironment(cwd, [...args]) });
   return { status: result.status ?? 1, stdout: result.stdout || "", stderr: result.stderr || "" };
 }
 
@@ -78,6 +81,10 @@ try {
   mkdirSync(join(project, "docs", "aidlc", "modules", "module-a", "inception"), { recursive: true });
   writeFileSync(join(project, "docs", "aidlc", "ideation", "module-manifest.json"), JSON.stringify({ schema_version: 1, modules: [{ module_id: "module-a", name: "Module A", service_id: "service-a" }] }), "utf8");
   writeFileSync(join(project, "docs", "aidlc", "modules", "module-a", "inception", "unit-manifest.json"), JSON.stringify({ schema_version: 1, module_id: "module-a", units: [{ unit_id: "unit-a", name: "Unit A", service_id: "service-a", conditional_stages: [] }] }), "utf8");
+  const unitsReady = loadWorkflowState(project)!;
+  unitsReady.completed_stages.push("units-generation");
+  unitsReady.completed_stage_instances.push("units-generation@module:module-a");
+  saveFixtureState(project, unitsReady);
   const selected = success(["unit", "select", "--module", "module-a", "--unit", "unit-a", "--member", "alice", "--branch", "feat/unit-a"]);
   assert.equal((selected.selection as Record<string, unknown>).member, "alice");
   const runtime = success(["runtime", "summary"]);

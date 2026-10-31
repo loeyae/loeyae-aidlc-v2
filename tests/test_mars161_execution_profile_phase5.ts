@@ -124,7 +124,7 @@ try {
   const complexPlan = buildEvidenceReusePlan(actualGraph, { projectRoot: root, scope: "bugfix", executionProfile: complex, now: NOW });
   const lightweightPlan = buildEvidenceReusePlan(actualGraph, { projectRoot: root, scope: "bugfix", executionProfile: light, now: NOW });
   assert.deepEqual(standardPlan.selected_rule_stages, legacy.selected_rule_stages, "standard preserves legacy evidence scheduling surface");
-  assert.deepEqual(complexPlan.selected_rule_stages, legacy.selected_rule_stages, "complex preserves legacy evidence scheduling surface");
+  assert(legacy.selected_rule_stages.every((slug: string) => complexPlan.selected_rule_stages.includes(slug)), "complex risk retains the historical evidence surface and adds required design");
   assert.deepEqual(legacy.selected_rule_stages.filter((slug) => !lightweightPlan.selected_rule_stages.includes(slug)), ["state-template"], "lightweight mirrors only the Phase-3 safe slice");
   const escalated = applyExecutionProfile({ current: light, classified: classifyExecutionProfile({ scope: "bugfix", current: light, signals: new Set(["security_or_sensitive_data"]) }), at: "2026-10-14T12:01:00.000Z" });
   const restored = buildEvidenceReusePlan(actualGraph, { projectRoot: root, scope: "bugfix", executionProfile: escalated, now: NOW });

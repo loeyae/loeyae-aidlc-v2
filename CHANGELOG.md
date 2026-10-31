@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — 2026-10-30 audit remediation
+
+- Require explicit Spec/Standards results and real delivered-file review coverage; bind conditional FINAL_GLOBAL reviews, deployment checks and risk-derived security verification to current inputs. Preserve single-unit lightweight applicability.
+- Copy warm-worktree files independently; route reports to the exact bound unit and enforce the integration barrier on both next and report. Repair I13 source coverage, evidence fingerprints/reuse and valid zero-file TAP coverage tables.
+- Maintenance CLI change: `state recover`, `state adopt` and `state rebuild` require a fresh `state maintenance-plan` token (`--maintenance`) and explicit approval/reason after all claims are released. `module release --stage-instance ... --expect ...` releases only the caller's exact generation. Maintenance uses family locks, snapshot CAS and rollback; restored history never restores session claims, and recovery advances local revision.
+- Route unbound split-workflow previews into integration after every module is done, including build/test templates and implementation-report. A stale global done flag cannot hide unresolved global stages; preview remains read-only and leaves admission gates intact.
+- Keep pre-admission project evidence on its project axis: an integration claim's coordination label must not redirect FINAL_GLOBAL evidence into a module subdirectory.
+- Reuse whole-worktree semantic evidence only when commit, dirty state, content digest and nested repository revisions still match; empty consumes lists cannot conceal source drift or a newly failing checker.
+- Run regression commands in a material Git clone with historical objects and independent dependencies; keep installation/build/package barriers. Real-host Agent evaluation remains separate from deterministic engine tests.
+
 ## 4.22.17 — 2026-10-27
 
 - Compliant re-verification path for post-acceptance non-UI changes (MARS-285): page-plan gains a machine-readable non-UI mapping registration section (`## 非UI映射`, table or list rows, Chinese/English headings accepted; `PAGE-*` IDs are rejected by definition); the UI impact matrix splits unmapped IDs into a registered `non_ui_changes` class and truly unmapped IDs, `all_changes_mapped` considers only the latter, registration freshness is tracked, and deleting a registration re-exposes the ID.

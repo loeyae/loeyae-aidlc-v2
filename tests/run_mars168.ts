@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 const repo = resolve(import.meta.dirname, "..");
 const root = process.env.AIDLC_MARS168_BASELINE_ROOT ? resolve(process.env.AIDLC_MARS168_BASELINE_ROOT) : repo;
@@ -14,7 +15,7 @@ if (requested.length !== 0 && suites.length !== new Set(requested).size) throw n
 const baseline = root !== repo;
 const output = process.env.AIDLC_TEST_OUTPUT
   ? join(resolve(process.env.AIDLC_TEST_OUTPUT), "mars168", ...(baseline ? ["baseline-39a0399"] : []))
-  : join(repo, "docs/optimization-notes/mars168-command-logs", ...(baseline ? ["baseline-39a0399"] : []));
+  : mkdtempSync(join(tmpdir(), "aidlc-mars168-logs-"));
 mkdirSync(output, { recursive: true });
 const results = [];
 for (const name of suites) {

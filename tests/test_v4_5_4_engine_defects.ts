@@ -1,3 +1,4 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
 /**
  * 4.5.4 regression suite: one section per engine defect (D1-D3, D5-D8), each with
  * the positive case and at least one fail-closed negative case. D4 (I13 path
@@ -123,7 +124,7 @@ function makeProject(name: string, scope = "bugfix"): string {
   const state = createInitialState(scope, "4.5.4", `workflow-${name}`, [], "4.5.4 regression");
   state.completed_stages = ["workspace-detection", "state-template"];
   state.completed_stage_instances = ["workspace-detection", "state-template"];
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
   return project;
 }
 
@@ -143,7 +144,7 @@ function seed(project: string, instance: string, completed: string[] = []): void
   const unitId = /@unit:([a-z0-9-]+)/.exec(instance)?.[1];
   if (moduleId) state.current_module = moduleId; else delete state.current_module;
   if (unitId) state.current_unit = unitId; else delete state.current_unit;
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
 }
 
 const INCEPTION = "docs/aidlc/modules/project/inception";
@@ -238,7 +239,7 @@ try {
     assert.match(moduleArg.out, /active unit is required for semantic sensor test-quality/);
     const state = loadWorkflowState(project) as WorkflowState;
     state.current_module = "project";
-    saveWorkflowState(project, state);
+    saveFixtureState(project, state);
     const stateModule = run(project, ["check", "--sensor", "test-quality"]);
     assert.notEqual(stateModule.status, 0);
     assert.match(stateModule.out, /active unit is required for semantic sensor test-quality/);
@@ -511,6 +512,7 @@ try {
     write(project, ".aidlc/commands/code-generation.json", JSON.stringify({ version: "1", stage: "code-generation", commands: [{ id: "green", role: "green", argv: ["node", "tests/observe.cjs"] }] }));
     seed(project, "code-generation@module:project@unit:default", [redInstance]);
     const report = () => run(project, ["orchestrate", "report", "--stage", "code-generation", "--result", "completed"]);
+    ok(project, ["evidence", "run", "--stage", "code-generation", "--all-sensors"]);
     const completed = report();
     assert.doesNotMatch(completed.out, /RED gate evidence is invalid/);
     assert.equal(completed.status, 0, completed.out);
@@ -522,7 +524,7 @@ try {
     const state = loadWorkflowState(project) as WorkflowState;
     state.completed_stage_instances = state.completed_stage_instances.filter((id) => !id.startsWith("code-generation@"));
     state.completed_stages = state.completed_stages.filter((slug) => slug !== "code-generation");
-    saveWorkflowState(project, state);
+    saveFixtureState(project, state);
     seed(project, "code-generation@module:project@unit:default");
     writeFileSync(redPath, JSON.stringify({ ...red, producer: { ...red.producer, mode: "manual" } }), "utf8");
     const forged = report();
@@ -557,7 +559,7 @@ try {
       const reopened = loadWorkflowState(project) as WorkflowState;
       reopened.completed_stage_instances = reopened.completed_stage_instances.filter((id) => !id.startsWith("code-generation@"));
       reopened.completed_stages = reopened.completed_stages.filter((slug) => slug !== "code-generation");
-      saveWorkflowState(project, reopened);
+      saveFixtureState(project, reopened);
       seed(project, "code-generation@module:project@unit:default");
       writeFileSync(redPath, JSON.stringify({ ...red, source_revision: { ...red.source_revision, commit, worktree_digest: digest } }), "utf8");
       const result = report();
@@ -692,19 +694,19 @@ try {
       if (!consumes.test(actual.consumes)) gaps.push(`${label} consumes: expected ${consumes}, got ${JSON.stringify(actual.consumes)}`);
     };
     const PASS = /^$/;
-    const appFails = /^app\/(?:: missing or smaller than 16 bytes)?$/;
-    const webFails = /^web\/src\/(?:: missing or smaller than 16 bytes)?$/;
+    const appFails = /^app\/(?:: missing or non-substantive artifact)?$/;
+    const webFails = /^web\/src\/(?:: missing or non-substantive artifact)?$/;
 
     // Positive: substantive files next to 0-byte nested package markers satisfy both gates.
     healthyApp();
     healthyWeb();
     expectBoth("large + 0-byte __init__.py files", PASS, PASS);
 
-    // Fail-closed: only files below 16 bytes in a root.
+    // Small executable content is substantive; byte count alone is not a quality rule.
     reset("app");
     for (const init of ["app/__init__.py", "app/orders/__init__.py"]) empty(init);
     write(project, "app/tiny.py", "x = 1\n");
-    expectBoth("root with only small files", appFails, appFails);
+    expectBoth("root with small executable content", PASS, PASS);
     // Fail-closed: empty root directory.
     reset("app");
     mkdirSync(join(project, "app"), { recursive: true });
@@ -736,7 +738,7 @@ try {
     if (!singleProduced.includes(reviewRecord)) gaps.push(`single file produces: expected ${reviewRecord} missing, got ${JSON.stringify(singleProduced)}`);
     seed(project, "build-and-test", [consumeAt]);
     const singleConsumed = (gate(project, "build-and-test", "consumes").failures as string[]);
-    if (!singleConsumed.some((item) => item === "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md: missing or smaller than 16 bytes")) {
+    if (!singleConsumed.some((item) => item === "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md: missing or non-substantive artifact")) {
       gaps.push(`single file consumes: expected the aggregated code-review.md to fail, got ${JSON.stringify(singleConsumed)}`);
     }
     console.log(`    [single file < 16 bytes] produces=${JSON.stringify(singleProduced.filter((item) => item === reviewRecord))} consumes=${JSON.stringify(singleConsumed.filter((item) => item.includes("code-review.md")))}`);
@@ -748,7 +750,7 @@ try {
       const produced = (gate(project, "test-case-derivation@module:project", "produces").missing as string[]).filter((item) => item === caseDir).join(" | ");
       const consumed = (gate(project, "tdd@module:project@unit:default", "consumes").failures as string[]).filter((item) => item.startsWith(caseDir)).join(" | ");
       console.log(`    [test-cases ${label}] produces=${JSON.stringify(produced)} consumes=${JSON.stringify(consumed)}`);
-      const consumeExpected = expected === PASS ? PASS : new RegExp(`^${caseDir.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}: missing or smaller than 16 bytes$`);
+      const consumeExpected = expected === PASS ? PASS : new RegExp(`^${caseDir.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}: missing or non-substantive artifact$`);
       if (!expected.test(produced)) gaps.push(`test-cases ${label} produces: expected ${expected}, got ${JSON.stringify(produced)}`);
       if (!consumeExpected.test(consumed)) gaps.push(`test-cases ${label} consumes: expected ${consumeExpected}, got ${JSON.stringify(consumed)}`);
     };
@@ -787,9 +789,7 @@ try {
     write(project, "app/orders/sixteen.py", sixteenBytes);
     const tracedSixteen = (gate(project, produceAt, "sensors", "traceability").failures as string[]).join("\n");
     console.log(`    [traceability, 16-byte untraced file] ${JSON.stringify(tracedSixteen)}`);
-    if (!/No requirement ID .*app[\\/]orders[\\/]sixteen\.py/.test(tracedSixteen) || /__init__\.py/.test(tracedSixteen)) {
-      gaps.push(`traceability with a 16-byte untraced file: expected only sixteen.py, got ${JSON.stringify(tracedSixteen)}`);
-    }
+    if (tracedSixteen !== "") gaps.push(`comment-only files are not executable trace targets: ${tracedSixteen}`);
     rmSync(join(project, "app/orders/sixteen.py"), { force: true });
     write(project, "app/orders/untraced.py", "def untraced():\n    return None\n");
     const untraced = (gate(project, produceAt, "sensors", "traceability").failures as string[]).join("\n");

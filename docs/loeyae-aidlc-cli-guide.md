@@ -121,7 +121,9 @@ loeyae-aidlc orchestrate baseline --adopt <commit> --module <id> --user-input Ap
 # lineage 检查与裁决
 loeyae-aidlc orchestrate state verify
 loeyae-aidlc orchestrate state retire --lineage <id> --user-input Approve --reason <text>
-loeyae-aidlc orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason <text>
+# 先由各领取人 release 全部精确 claim，并清除维护子进程 binding
+loeyae-aidlc orchestrate state maintenance-plan --module <id>
+loeyae-aidlc orchestrate state adopt --module <id> --from <commit> --maintenance <maintenance_token> --user-input Approve --reason <text>
 ```
 
 `--set` / `--replace` 的提交限制：
@@ -216,7 +218,7 @@ loeyae-aidlc orchestrate report --stage <slug> --module <module-id> --result com
 ## Worktree 与 review
 
 ```bash
-# 共享基线缓存：在当前干净 HEAD 全量 checkout 一次（<project>-aidlc-warm），prepare 硬链接复用
+# 共享基线缓存：在当前干净 HEAD 全量 checkout 一次（<project>-aidlc-warm），prepare 用独立文件复制复用
 loeyae-aidlc worktree warmup
 
 loeyae-aidlc worktree prepare \

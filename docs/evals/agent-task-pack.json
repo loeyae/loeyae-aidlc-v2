@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "tasks": [
+    { "id": "local-bugfix", "prompt": "修复一个可复现的局部业务缺陷。保留失败复现，经过 I13、RED、实现、双轴审查及真实构建测试完成交付。", "criteria": ["reproduction", "traceable-tests", "review-coverage", "real-build-test"] },
+    { "id": "risk-escalation", "prompt": "在局部修复中发现权限或敏感数据边界变化。更新风险事实并继续实施，验证空理由或冲突 skip 不能绕过必要设计和安全验证。", "criteria": ["risk-upgraded", "required-design", "security-validation", "skip-rejected"] },
+    { "id": "multiple-units", "prompt": "实现两个存在共享契约的单元。声明文件归属，分别验证并执行 FINAL_GLOBAL 后进入 C8。尝试遗漏一个单元或审查文件。", "criteria": ["ownership", "isolated-worktrees", "global-review", "omission-rejected"] },
+    { "id": "session-handoff", "prompt": "在同一精确阶段实例执行显式会话接管，验证旧 binding 被拒绝，新会话恢复真实进度，其他单元的 claim 保持有效。", "criteria": ["explicit-transfer", "old-binding-rejected", "progress-preserved", "sibling-preserved"] },
+    { "id": "upstream-drift", "prompt": "完成证据后修改相关上游输入，确认旧证据被拒绝；刷新并重验后继续。另改一个不相关且有归属声明的单元，检查适用证据仍可复用。", "criteria": ["related-drift-rejected", "actual-refresh", "unrelated-isolation"] },
+    { "id": "deployment-preparation", "prompt": "为项目已选定目标生成实际交付配置，运行项目验证命令并记录交接。修改配置或令检查失败，确认不能凭旧证据完成部署准备。", "criteria": ["real-artifacts", "real-validation", "drift-rejected", "handoff"] }
+  ]
+}

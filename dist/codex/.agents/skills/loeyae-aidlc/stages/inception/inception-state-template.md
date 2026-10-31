@@ -14,14 +14,14 @@ requires: [workspace-detection]
 ---
 # handoff.md 派生视图模板
 
-> `docs/aidlc/aidlc-state.json` 是唯一机器状态。本模板只创建或更新 `docs/aidlc/handoff.md` 的人类协作视图；不得直接编辑机器 state，不得用 handoff 覆盖 stage、revision、审批或完成结果。恢复场景不得覆盖已有协作细节。
+> `aidlc/active/aidlc-state.md` 是唯一机器状态。本模板只创建或更新 `docs/aidlc/handoff.md` 的人类协作视图；不得直接编辑机器 state，不得用 handoff 覆盖 stage、revision、审批或完成结果。恢复场景不得覆盖已有协作细节。
 
 > v3 的“下一步交接”由成功 `orchestrate report` 自动生成。模板中的提示词只是字段形状示例，不能手工替代 `handoff_prompt` 或修改机器 state。
 
 ```markdown
 # AI-DLC 协作交接视图
 
-- **状态模式版本**：3（人类派生视图；机器 schema 以 `aidlc-state.json` 为准）
+- **状态模式版本**：3（人类派生视图；机器 schema 以 `aidlc-state.md` 为准）
 
 ## 下一步交接
 | 范围 | Stage 实例 | Module ID | Unit ID | 更新时间 | 提示词 |
@@ -222,4 +222,4 @@ I9 路由判定后立即创建本区块，包括明确跳过的场景。
 - I10 发现产品语义差异时，`设计状态` 必须为 `blocked`；协调开始后改为 `reconcile_in_progress`，全部适用审查通过后才能改为 `approved`。
 - 上游语义变化后，将所有依赖旧语义且尚无代码基线的单元标记为 `rework_required`，并清除或标记失效的旧验证证据。受影响范围是否已有代码基线，以存量实现证据或对应 C8 通过证据判定，不新增脱离证据的全局布尔值。
 - Figma 模式必须增量更新 `设计状态`、`当前批次`、`下一操作` 和 `Figma 页面进度`；创建文件或验证外部链接后立即记录唯一主文件 URL，不得等 I9 全部完成后一次性写入。
-- `aidlc-state.json` 是阶段、模块、单元、choice、跳过和审批恢复的唯一机器状态源；handoff.md 只保存由签名状态、canonical 产物和审计派生的人类摘要。冲突时必须阻断并以编排器验证结果为准，禁止由 handoff 反向覆盖。
+- `aidlc-state.md` 是阶段、模块、单元、choice、跳过和审批恢复的唯一机器状态源；handoff.md 只保存由签名状态、canonical 产物和审计派生的人类摘要。冲突时必须阻断并以编排器验证结果为准，禁止由 handoff 反向覆盖。

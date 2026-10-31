@@ -1,3 +1,6 @@
+import { fixtureGlobalReview } from "./mars243_fixture_session";
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 /**
  * 4.7.0 (MARS-71) regression suite: the workflow baseline chain (epochs) and
  * `orchestrate baseline --advance`.
@@ -23,6 +26,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInitialState, loadWorkflowState, parseLightWorkflowState, renderLightWorkflowState, saveWorkflowState, type WorkflowState } from "../core/tools/aidlc-light-state";
 import { orderQualityFixture } from "./order_quality_fixture";
+import { sessionRef } from "../core/tools/aidlc-session";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -53,12 +57,23 @@ function parsed(stdout: string): Record<string, unknown> {
 }
 
 function run(project: string, args: string[]): Run {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: cleanEnv() });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: { ...fixtureEnvironment(project, [...args]), ...(cleanEnv()) } });
   const stdout = result.stdout || "";
   return { status: result.status ?? 1, stdout, out: `${stdout}\n${result.stderr || ""}`, json: parsed(stdout) };
 }
 
 function ok(project: string, args: string[]): Run {
+  if (args[0] === "orchestrate" && args[1] === "report" && !args.includes("--instruction-ack")) {
+    const stage = args[args.indexOf("--stage") + 1];
+    const scope = ["--module", "--unit"].flatMap(flag => args.includes(flag) ? [flag, args[args.indexOf(flag) + 1]] : []);
+    if (JSON.parse(readFileSync(join(repository, "core/tools/data/stage-graph.json"), "utf8")).stages.find((node: {slug:string}) => node.slug === stage)?.produces.some((path: string) => path.startsWith(".aidlc/evidence/"))) {
+      const owner = existsSync(join(project, "aidlc/active/registry.md"))
+        ? args.includes("--module") ? { kind: "module" as const, module_id: args[args.indexOf("--module") + 1] }
+          : sessionRef(project, stage) : undefined;
+      const settled = loadWorkflowState(project, owner)?.status === "done";
+      ok(project, ["evidence", "run", "--stage", stage, "--all-sensors", ...scope, ...(settled ? ["--refresh", ...(!scope.includes("--module") ? ["--instance", stage] : [])] : [])]);
+    }
+  }
   const result = run(project, args);
   assert.equal(result.status, 0, `${args.join(" ")}\n${result.out}`);
   assert.notEqual(result.json.kind, "error", `${args.join(" ")}\n${result.out}`);
@@ -327,7 +342,7 @@ async function endToEnd(globalDone: boolean): Promise<void> {
       global.current_stage_instance = `requirements-analysis@module:${M01}`;
       global.current_module = M01;
     }
-    saveWorkflowState(project, global);
+    saveFixtureState(project, global);
     write(project, "docs/aidlc/ideation/scenario-module-mapping.md", `# 场景模块映射\n\nREQ-001 订单导出分页属于 ${M01}。\n`);
     ok(project, ["orchestrate", "split", "--from", global.workflow_id]);
     const moduleRef = { kind: "module" as const, module_id: M01 };
@@ -360,6 +375,8 @@ async function endToEnd(globalDone: boolean): Promise<void> {
     };
     const reportUnit = (stage: string, unit: string) => {
       syncQuality(); refreshQuality();
+      const produced = run(project, ["evidence", "run", "--stage", stage, ...unitArgs(unit), "--all-sensors"]);
+      if (produced.status !== 0) return produced;
       return run(project, ["orchestrate", "report", "--stage", stage, ...unitArgs(unit), "--result", "completed"]);
     };
     const ack = (stage: string) => report(stage, ["--instruction-ack", stage]);
@@ -374,7 +391,7 @@ async function endToEnd(globalDone: boolean): Promise<void> {
     write(project, `${inception}/clarifications.md`, "# 需求澄清\n\nNo clarifications needed.\n\nREQ-001 的分页规则（50 条一页）已在需求中明确，本次改动沿用现有行为。\n");
     report("requirement-clarification");
     nextModule(`requirements-methods@module:${M01}`, [RA]);
-    write(project, `${inception}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单导出分页流程\n\n```mermaid\nflowchart LR\n  A[调用 export_orders] --> B[读取下游订单]\n  B --> C[按 50 条分页返回]\n```\n");
+    write(project, `${inception}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单导出分页流程\n\n<!-- aidlc-mermaid-validation: {\"diagram_id\":\"order-flow\",\"module\":\"m01-trade\",\"validation_tier\":\"STATIC_PASS\",\"diagram_type\":\"module-internal-simple-flow\",\"all_elements_within_module\":true,\"no_contract_semantics\":true,\"not_architecture_or_delivery_evidence\":true} -->\n```mermaid\nflowchart LR\n  A[调用 export_orders] --> B[读取下游订单]\n  B --> C[按 50 条分页返回]\n```\n");
     report("requirements-methods");
     nextModule(`user-stories@module:${M01}`, [RA]);
     write(project, `${inception}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营导出分页订单\n\n来源：REQ-001\n- 作为运营人员，我希望导出订单时按 50 条分页返回，以便逐页核对。\n\n### AC-001 分页与空列表\n下游返回 120 条订单时，导出结果为 50、50、20 三页；空列表返回空页列表。\n");
@@ -396,7 +413,7 @@ async function endToEnd(globalDone: boolean): Promise<void> {
     const moduleState = loadWorkflowState(project, moduleRef)!;
     moduleState.completed_stages.push("units-generation");
     moduleState.completed_stage_instances.push(`units-generation@module:${M01}`);
-    saveWorkflowState(project, moduleState, moduleRef);
+    saveFixtureState(project, moduleState, moduleRef);
     ok(project, ["document-slices", "generate", ...moduleArgs]);
     ok(project, ["evidence", "run", "--stage", "units-generation", ...moduleArgs, "--sensor", "document-slice-consistency", "--refresh"]);
     // doc-cascade of code-generation reads stage-level skips: functional-design only counts
@@ -561,6 +578,7 @@ async function endToEnd(globalDone: boolean): Promise<void> {
         assert.equal(value.reattested, true, `${stage} ${unit} re-attests after --advance: ${JSON.stringify(value)}`);
       }
     }
+    fixtureGlobalReview(project);
     const directive = ok(project, ["orchestrate", "next"]).json;
     assert.equal(directive.stage_instance, "build-and-test", JSON.stringify(directive, null, 2));
     writeBuildAndTest(project, ids);
@@ -606,7 +624,9 @@ try {
     const state = loadWorkflowState(project)!;
     const current = state.baseline_commit!;
     state.status = "done";
-    saveWorkflowState(project, state);
+    saveFixtureState(project, state);
+    fixtureEnvironment(project, ADVANCE(commits[1], current, ["--dry-run"]));
+    state.revision = loadWorkflowState(project)!.revision;
     checks.expect("--advance on a done single workflow", rejected(run(project, ADVANCE(commits[1], current, ["--dry-run"]))), /^[\s\S]*is done; baseline --advance requires a running or parked workflow\./);
     checks.expect("--set --replace on a done single workflow", rejected(run(project, ["orchestrate", "baseline", "--set", commits[0], "--replace", "--expect", current, "--user-input", "Approve", "--reason", "x", "--dry-run"])), /is done; its baseline can no longer be registered or replaced\./);
     assert.equal(loadWorkflowState(project)!.revision, state.revision, "nothing was written");
@@ -652,14 +672,14 @@ try {
     const legacy = createInitialState("feature", "4.6.1", "workflow-legacy-chain", [], "legacy chain");
     legacy.baseline_commit = c0;
     legacy.baseline_source = "created";
-    saveWorkflowState(project, legacy);
+    saveFixtureState(project, legacy);
     const reloaded = loadWorkflowState(project)!;
-    saveWorkflowState(project, reloaded);
+    saveFixtureState(project, reloaded);
     assert.doesNotMatch(readFileSync(join(project, "aidlc", "active", "aidlc-state.md"), "utf8"), /Baseline History/, "a 4.6 state stays without a chain");
     const forged = loadWorkflowState(project)!;
     let saveError = "";
     try {
-      saveWorkflowState(project, { ...forged, baseline_commit: c1, baseline_source: "advanced", baseline_history: [c0, c1] });
+      saveFixtureStateWithChecks(project, { ...forged, baseline_commit: c1, baseline_source: "advanced", baseline_history: [c0, c1] });
     } catch (error) {
       saveError = error instanceof Error ? error.message : String(error);
     }

@@ -1,3 +1,6 @@
+import { fixtureGlobalReview, fixtureReviewFiles } from "./mars243_fixture_session";
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 /**
  * 4.8.0 (MARS-75) regression suite: unit-scoped UC-D coverage (`unit_refs`).
  *
@@ -56,12 +59,22 @@ function parsed(stdout: string): Record<string, unknown> {
 }
 
 function run(project: string, args: string[]): Run {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: cleanEnv() });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: { ...fixtureEnvironment(project, [...args]), ...(cleanEnv()) } });
   const stdout = result.stdout || "";
   return { status: result.status ?? 1, stdout, out: `${stdout}\n${result.stderr || ""}`, json: parsed(stdout) };
 }
 
 function ok(project: string, args: string[]): Run {
+  if (args[0] === "orchestrate" && args[1] === "report" && !args.includes("--instruction-ack")) {
+    const stage = args[args.indexOf("--stage") + 1];
+    const scope = ["--module", "--unit"].flatMap(flag => args.includes(flag) ? [flag, args[args.indexOf(flag) + 1]] : []);
+    if (JSON.parse(readFileSync(join(repository, "core/tools/data/stage-graph.json"), "utf8")).stages.find((node: {slug:string}) => node.slug === stage)?.produces.some((path: string) => path.startsWith(".aidlc/evidence/"))) {
+      const owner = args.includes("--module") && existsSync(join(project, "aidlc/active/registry.md"))
+        ? { kind: "module" as const, module_id: args[args.indexOf("--module") + 1] } : undefined;
+      const settled = loadWorkflowState(project, owner)?.status === "done";
+      ok(project, ["evidence", "run", "--stage", stage, "--all-sensors", ...scope, ...(settled ? ["--refresh"] : [])]);
+    }
+  }
   const result = run(project, args);
   assert.equal(result.status, 0, `${args.join(" ")}\n${result.out}`);
   assert.notEqual(result.json.kind, "error", `${args.join(" ")}\n${result.out}`);
@@ -339,6 +352,8 @@ function scenario(name: string, units: UnitSpec[], ucds: Ucd[]): Scenario {
   };
   const reportUnit = (stage: string, unit: string) => {
     if (stage !== "tdd") { syncQuality(); refreshQuality(); }
+    const produced = step(["evidence", "run", "--stage", stage, ...unitArgs(unit), "--all-sensors"], false);
+    if (produced.status !== 0) return produced;
     return step(["orchestrate", "report", "--stage", stage, ...unitArgs(unit), "--result", "completed"], false);
   };
   const ack = (stage: string) => report(stage, ["--instruction-ack", stage]);
@@ -349,7 +364,7 @@ function scenario(name: string, units: UnitSpec[], ucds: Ucd[]): Scenario {
   global.completed_stages = [...globalStages];
   global.completed_stage_instances = [...globalStages];
   global.skipped_stage_instances = [`reverse-engineering@module:${M01}`];
-  saveWorkflowState(project, global);
+  saveFixtureState(project, global);
   write(project, "docs/aidlc/ideation/scenario-module-mapping.md", `# 场景模块映射\n\nREQ-001 订单处理属于 ${M01}。\n`);
   step(["orchestrate", "split", "--from", global.workflow_id]);
   const moduleRef = { kind: "module" as const, module_id: M01 };
@@ -367,7 +382,7 @@ function scenario(name: string, units: UnitSpec[], ucds: Ucd[]): Scenario {
   write(project, `${IN}/clarifications.md`, "# 需求澄清\n\nNo clarifications needed.\n\nREQ-001 的单元划分已在需求中明确，本次改动沿用现有行为。\n");
   report("requirement-clarification");
   nextModule(`requirements-methods@module:${M01}`, [RA]);
-  write(project, `${IN}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单处理流程\n\n```mermaid\nflowchart LR\n  A[接收订单] --> B[按单元处理]\n  B --> C[返回结果]\n```\n");
+  write(project, `${IN}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单处理流程\n\n<!-- aidlc-mermaid-validation: {\"diagram_id\":\"order-flow\",\"module\":\"m01-trade\",\"validation_tier\":\"STATIC_PASS\",\"diagram_type\":\"module-internal-simple-flow\",\"all_elements_within_module\":true,\"no_contract_semantics\":true,\"not_architecture_or_delivery_evidence\":true} -->\n```mermaid\nflowchart LR\n  A[接收订单] --> B[按单元处理]\n  B --> C[返回结果]\n```\n");
   report("requirements-methods");
   nextModule(`user-stories@module:${M01}`, [RA]);
   write(project, `${IN}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营处理订单\n\n来源：REQ-001\n- 作为运营人员，我希望订单按单元交付的能力被正确处理，以便逐项核对。\n\n### AC-001 单元覆盖与模块收口\n每个单元的用例在该单元完成时通过，模块完成时全部通过；无用例的契约单元必须执行批准的替代验证。\n");
@@ -388,7 +403,7 @@ function scenario(name: string, units: UnitSpec[], ucds: Ucd[]): Scenario {
   const moduleState = loadWorkflowState(project, moduleRef)!;
   moduleState.completed_stages.push("units-generation");
   moduleState.completed_stage_instances.push(`units-generation@module:${M01}`);
-  saveWorkflowState(project, moduleState, moduleRef);
+  saveFixtureState(project, moduleState, moduleRef);
   step(["document-slices", "generate", ...moduleArgs]);
   step(["evidence", "run", "--stage", "units-generation", ...moduleArgs, "--sensor", "document-slice-consistency", "--refresh"]);
   for (const unit of units) {
@@ -448,7 +463,8 @@ function codeReview(unit: string, ucdIds: string, files: string): string {
     "- reviewer: aidlc-quality-agent",
     "- execution_context: isolated",
     "- review_only: true",
-    `- Spec 结果: passed（REQ-001 / ${ucdIds}）`,
+    "- Spec 结果: passed",
+    `- 规格覆盖: REQ-001 / ${ucdIds}`,
     "- Standards 结果: passed",
     "- issues_found: 0",
     "- issues_resolved: 0",
@@ -460,6 +476,7 @@ function codeReview(unit: string, ucdIds: string, files: string): string {
 }
 
 function review(s: Scenario, unit: string, ucdIds: string, files: string): void {
+  files = [...new Set([...files.split(",").map(path => path.trim()), ...fixtureReviewFiles(s.project, ["app"])])].join(", ");
   write(s.project, `${construction(unit)}/code-review.md`, codeReview(unit, ucdIds, files));
   write(s.project, `${construction(unit)}/audit.md`, `# 审计 — 单元 ${unit}\n\n代码审查（REQ-001 / ${ucdIds}）结论：passed。\n`);
 }
@@ -504,6 +521,15 @@ function writeImplementationReport(s: Scenario, stages: number, ids: string): vo
  * integration workflow re-checks them upstream.
  */
 function reattestUnits(s: Scenario): void {
+  // The legacy input scope is the whole module. Re-review files introduced by
+  // later units before refreshing earlier unit observations.
+  for (const unit of s.units) {
+    const path = `${construction(unit.id)}/code-review.md`;
+    const report = readFileSync(join(s.project, path), "utf8");
+    assert.match(report, /^- 审查文件:/m);
+    const files = [...fixtureReviewFiles(s.project, ["app"]), "tests/test_features.py"];
+    write(s.project, path, report.replace(/^- 审查文件:.*$/m, `- 审查文件: ${files.join(", ")}`));
+  }
   for (const unit of s.units) {
     for (const stage of ["code-generation", "code-review"]) s.step(["evidence", "run", "--stage", stage, ...unitArgs(unit.id), "--all-sensors", "--refresh"]);
   }
@@ -515,6 +541,7 @@ function reattestUnits(s: Scenario): void {
 /** build-and-test → build-and-test-templates → implementation-report → done. */
 function integrationToEnd(s: Scenario, ids: string): void {
   reattestUnits(s);
+  fixtureGlobalReview(s.project);
   const directive = s.step(["orchestrate", "next"]).json;
   assert.equal(directive.stage_instance, "build-and-test", JSON.stringify(directive, null, 2));
   writeBuildAndTest(s, ids);
@@ -685,6 +712,7 @@ try {
     s.plan.u2.GREEN = ["UC-D-002", "UC-D-003"];
     s.savePlan();
     reattestUnits(s);
+    fixtureGlobalReview(s.project);
     assert.equal(s.step(["orchestrate", "next"]).json.stage_instance, "build-and-test");
     writeBuildAndTest(s, "UC-D-001 / UC-D-002 / UC-D-003");
     // Drop UC-D-003 from u2's GREEN again while build-and-test is active: the project-axis

@@ -1,3 +1,5 @@
+import { workflowMaintenancePlan } from "../core/tools/aidlc-light-state";
+import { releaseFixtureClaims } from "./mars243_fixture_session";
 /**
  * MARS-117: engine-level control-plane git merge strategy (A / B / C).
  *
@@ -73,6 +75,7 @@ function newProject(name: string): string {
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
+  if (process.env.AIDLC_ONLY && !name.includes(process.env.AIDLC_ONLY)) return;
   fn();
   passed++;
   console.log(`  ✓ ${name}`);
@@ -422,7 +425,8 @@ check("state rebuild requires a split layout and gives clear guidance otherwise"
   assert.equal(step.status, 0, JSON.stringify(step.directive));
   // A freshly created single-layout workflow has no registry; rebuild must refuse with
   // split-layout guidance rather than crash.
-  const rebuild = orchestrate(project, ["state", "rebuild"]);
+  releaseFixtureClaims(project);
+  const rebuild = orchestrate(project, ["state", "rebuild", "--maintenance", workflowMaintenancePlan(project).token, "--user-input", "Approve", "--reason", "fixture registry reconciliation"]);
   assert.equal(rebuild.directive.kind, "error");
   assert.ok(String(rebuild.directive.message).includes("split layout"));
 });
@@ -455,7 +459,8 @@ check("state rebuild canonicalizes a registry whose module rows were unioned by 
   writeFileSync(regPath, rendered, "utf8");
   gitOk(project, ["add", "-A"]);
   gitOk(project, ["commit", "-qm", "split by hand"]);
-  const rebuild = orchestrate(project, ["state", "rebuild"]);
+  releaseFixtureClaims(project);
+  const rebuild = orchestrate(project, ["state", "rebuild", "--maintenance", workflowMaintenancePlan(project).token, "--user-input", "Approve", "--reason", "fixture registry reconciliation"]);
   assert.equal(rebuild.directive.kind, "print", JSON.stringify(rebuild.directive));
   const after = parseRegistry(readFileSync(regPath, "utf8"));
   assert.deepEqual(after.modules.map((r) => r.module_id), [M01, M02], "modules canonically sorted");

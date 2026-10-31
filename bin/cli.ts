@@ -1388,7 +1388,7 @@ Examples:
   loeyae-aidlc orchestrate next --scope feature --work "Fix order export timeout"
   loeyae-aidlc unit select --module module-a --unit unit-a --member alice --branch feat/unit-a
   loeyae-aidlc worktree prepare --instance code-generation@module:module-a@unit:unit-a --member alice --path /absolute/path/to/unit-a
-  loeyae-aidlc worktree warmup  (pre-checkout the shared baseline once; prepare then hard-links it per unit)
+  loeyae-aidlc worktree warmup  (pre-checkout the baseline once; prepare copies independent files per unit)
   loeyae-aidlc worktree merge-plan --instance code-generation@module:module-a@unit:unit-a --member alice --path /absolute/path/to/unit-a --review-evidence .aidlc/review.json
   loeyae-aidlc orchestrate next --claim --module module-a --owner alice
   loeyae-aidlc orchestrate split --from <workflow-id> --dry-run
@@ -1396,6 +1396,9 @@ Examples:
   loeyae-aidlc evidence run --stage requirements-analysis --module module-a --refresh
   loeyae-aidlc module inspect --stage-instance application-design@module:module-a
   loeyae-aidlc module bind --stage-instance <instance> --owner alice --session-id <host-session> --expect <inspect.expected>
+  loeyae-aidlc module release --stage-instance <instance> --expect <inspect.expected>
+  loeyae-aidlc orchestrate state maintenance-plan --module module-a
+  loeyae-aidlc orchestrate state recover --module module-a --maintenance <maintenance_token> --user-input Approve --reason "restore checkpoint after quiescent handoff"
   loeyae-aidlc module transfer --stage-instance <instance> --owner bob --session-id <host-session> --expect <inspect.expected> --human-instruction-ref <prompt-reference> [--resume] [--preview]
   Set AIDLC_SESSION_BINDING to the returned binding JSON in this session's child-command environment only.
   loeyae-aidlc module heartbeat --stage-instance application-design@module:module-a --owner alice
@@ -1414,7 +1417,12 @@ function main(): void {
     case "state": throw new Error("The workflow control plane is Markdown only. Start work with orchestrate next --scope <scope> --work <description>.");
     case "recover": throw new Error("Use orchestrate next to continue the active Markdown workflow, or start a new workflow with an explicit work description.");
     case "approve": throw new Error("Use orchestrate report --result approved --user-input Approve for lightweight approval.");
-    case "evidence": run("core/tools/aidlc-evidence.ts", rest); break;
+    case "evidence":
+      // Refresh can scan large and nested repositories. Inherit streams so
+      // progress reaches the user while the producer is still running.
+      if (rest.includes("--refresh")) runInteractive("core/tools/aidlc-evidence.ts", rest);
+      else run("core/tools/aidlc-evidence.ts", rest);
+      break;
     case "document-slices": run("core/tools/aidlc-document-slices.ts", rest); break;
     case "unit": run("core/tools/aidlc-team-light.ts", rest); break;
     case "module": run("core/tools/aidlc-team-light.ts", ["module", ...rest]); break;

@@ -1,3 +1,5 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 /**
  * 4.8.1 (MARS-76) regression suite: semantic checker module scope.
  *
@@ -64,7 +66,7 @@ function parsed(stdout: string): Record<string, unknown> {
 }
 
 function run(project: string, args: string[]): Run {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: cleanEnv() });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: { ...fixtureEnvironment(project, [...args]), ...(cleanEnv()) } });
   const stdout = result.stdout || "";
   return { status: result.status ?? 1, stdout, out: `${stdout}\n${result.stderr || ""}`, json: parsed(stdout) };
 }
@@ -147,7 +149,7 @@ function project(moduleContext = true): string {
     delete state.current_module;
     delete state.current_unit;
   }
-  saveWorkflowState(root, state);
+  saveFixtureState(root, state);
   return root;
 }
 

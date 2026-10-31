@@ -10,7 +10,9 @@ import { artifactConsistency, dependencyReadiness, fieldCapability, storyRuleCon
 import { qualityUiCheck } from "./aidlc-quality-ui";
 import { deliveryReadiness } from "./aidlc-quality-delivery";
 import { runSync } from "./aidlc-spawn";
-import { reviewIssueErrors } from "./aidlc-evidence-policy";
+import { reviewAxisErrors, reviewIssueErrors } from "./aidlc-evidence-policy";
+import { globalReviewPayload, loadGraph, makeInstance, reviewCoverageErrors } from "./aidlc-orchestrate";
+import { deploymentValidationPayload } from "./aidlc-evidence";
 import { frontendPlatformPayload } from "./aidlc-frontend-platform";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "fs";
 import { basename, dirname, join, relative, resolve, sep } from "path";
@@ -135,6 +137,7 @@ function contextAllows(path: string): boolean {
 }
 
 const SENSOR_NAMES = new Set([
+  "global-review-evidence", "deployment-validation",
   "document-slice-consistency",
   ...QUALITY_SENSORS,
   "review-evidence", "test-quality", "contract-baseline", "functional-design-completeness",
@@ -632,8 +635,8 @@ function reviewEvidence(): Record<string, unknown> {
   files.push(...allFiles("docs/aidlc/construction/audit", /\.md$/));
   if (files.length === 0) fail("no code review record found");
   const content = joined(files);
-  if (!section(content, [/spec/i, /规格/]) || !section(content, [/standards/i, /规范/])) fail("review record must contain Spec and Standards axes");
-  if (!section(content, [/passed/i, /通过/, /无需修复/, /已修复并复审通过/])) fail("review record has no passed conclusion");
+  const axisErrors = reviewAxisErrors(content);
+  if (axisErrors.length) fail(axisErrors.join("; "));
   const conclusions = content.replace(/(?:不|非)阻断|non[- ]blocking/gi, "");
   if (/未通过|\bblocked\b|阻断/i.test(conclusions)) fail("review record contains a blocking conclusion");
   const reviewer = content.match(/(?:reviewer|审查者|审查人|reviewed\s+by)\s*[:：]\s*([^\n]+)/i)?.[1]?.trim();
@@ -642,7 +645,7 @@ function reviewEvidence(): Record<string, unknown> {
   const resolved = content.match(/(?:issues?_resolved|已解决|修复问题)\s*[:：]?\s*(\d+)/i)?.[1];
   const open = content.match(/(?:issues?_open|未关闭|开放问题)\s*[:：]?\s*(\d+)/i)?.[1] || "0";
   if (found === undefined || resolved === undefined) fail("review record must contain issue counts");
-  const filesReviewed = [...new Set(content.match(/(?:src|app|lib|test|tests|docs)\/[^\s`),]+/g) || [])];
+  const filesReviewed = [...new Set(content.match(/(?<![\w:/])(?:[\w.@-]+\/)+[\w.@-]+\.[A-Za-z0-9]+/g) || [])];
   if (filesReviewed.length === 0) fail("review record must identify reviewed files");
   const severityKeys = ["critical_open", "important_open", "suggestion_open"];
   const values = severityKeys.map(key => declaredValue(content, key));
@@ -650,6 +653,8 @@ function reviewEvidence(): Record<string, unknown> {
     ? { issues_by_severity: Object.fromEntries(severityKeys.map((key, index) => [key, values[index] === undefined ? NaN : Number(values[index])])) } : {};
   const result = { status: "passed", spec_axis: "passed", standards_axis: "passed", reviewer, files_reviewed: filesReviewed, issues_found: Number(found), issues_resolved: Number(resolved), issues_open: Number(open), ...severity };
   const errors = reviewIssueErrors(result);
+  const stage = loadGraph().stages.find(candidate => candidate.slug === "code-review")!;
+  errors.push(...reviewCoverageErrors(result, makeInstance(stage, "unit", { module_id: ACTIVE_MODULE, unit_id: ACTIVE_UNIT })));
   if (errors.length) fail(errors.join("; "));
   return result;
 }
@@ -751,30 +756,11 @@ function testCaseDerivation(): Record<string, unknown> {
   // MARS-273 聚合层覆盖声明:正向覆盖(每个 REQ 来源至少映射一个 UC-D)与反向悬空校验
   // 收敛到 _index.md 的 source_coverage,每来源声明一次;未声明的存量 I13 走回退路径,
   // 仅保留 source_ref 存在性检查(存量零迁移)。
-  const coverage = sourceCoverageDeclarations(text(indexPath), relativePath(indexPath));
-  let sourceCoverage: Record<string, string[]> | undefined;
-  if (coverage) {
-    const dangling: string[] = [];
-    for (const [sourceId, ucdIds] of coverage) {
-      if (ucdIds.length === 0) fail(`source_coverage source ${sourceId} maps no UC-D (${relativePath(indexPath)})`);
-      for (const id of ucdIds) {
-        if (!declarations.has(id)) dangling.push(`${sourceId} -> ${id}`);
-      }
-      if (!new RegExp(`\\b${sourceId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(sourceContent)) {
-        dangling.push(`source ${sourceId} not found in I13 source artifacts`);
-      }
-    }
-    const requirementsPath = join(ROOT, contextual("docs/aidlc/inception/requirements.md"));
-    if (existsSync(requirementsPath)) {
-      const reqIds = [...new Set(text(requirementsPath).match(/\bREQ-[A-Z0-9][A-Z0-9_-]*\b/g) || [])];
-      const missing = reqIds.filter((req) => !coverage.has(req));
-      if (missing.length > 0) {
-        fail(`source_coverage must map every requirement source to at least one UC-D; missing: ${missing.join(", ")} (${relativePath(indexPath)})`);
-      }
-    }
-    if (dangling.length > 0) fail(`DANGLING_REF@source_coverage: ${dangling.join("; ")}`);
-    sourceCoverage = Object.fromEntries([...coverage].sort(([left], [right]) => left.localeCompare(right)));
-  }
+  const sourceCoverage = derivedSourceCoverage(idsFound, declarations);
+  const explicitCoverage = declaredSourceCoverage(indexPath);
+  const legacyCoverage = explicitCoverage ? null : sourceCoverageDeclarations(text(indexPath), relativePath(indexPath));
+  const declaredCoverage = explicitCoverage || (legacyCoverage ? normalizeSourceCoverage(Object.fromEntries(legacyCoverage)) : null);
+  if (declaredCoverage) validateSourceCoverage(declaredCoverage, sourceCoverage, sourceContent, idsFound, declarations, indexPath);
   const modes = ucdModes(idsFound, declarations);
   const units = ucdUnitRefs(idsFound, declarations);
   const defectRefs = ucdAnchorRefs(idsFound, declarations, "defect_ref");
@@ -798,7 +784,7 @@ function testCaseDerivation(): Record<string, unknown> {
     source_files: sourcePaths.map(relativePath),
     test_case_files: caseFiles.map(relativePath),
     // MARS-273: ucd_sources 降为逐文件 digest + 文件内 UC-D ID 清单;消费方兼容旧逐条形态。
-    ucd_sources: { files: ucdSourceFileEntries(declarations, text) },
+    ucd_sources: fileUcdSources(declarations),
     ...(sourceCoverage ? { source_coverage: sourceCoverage } : {}),
     index: relativePath(indexPath),
   };
@@ -4868,6 +4854,8 @@ function structuralInvariants(): Record<string, unknown> {
 }
 
 const CHECKERS: Record<string, () => Record<string, unknown> | Promise<Record<string, unknown>>> = {
+  "global-review-evidence": () => globalReviewPayload(requiredWorkflowState()),
+  "deployment-validation": deploymentValidationPayload,
   "document-slice-consistency": () => {
     const state = requiredWorkflowState();
     return checkSlices({ ...qualityContext(), slices_version: state.document_slices_version,

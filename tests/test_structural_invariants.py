@@ -84,7 +84,8 @@ def write_json(project: str, path: str, value: dict) -> None:
 def write_state(project: str, stage: str, module_id: str = MODULE) -> None:
     state_uri = (Path(REPO_ROOT) / "core" / "tools" / "aidlc-light-state.ts").as_uri()
     script = (
-        "import { createInitialState, loadWorkflowState, saveWorkflowState } from " + json.dumps(state_uri) + ";\n"
+        "import { createInitialState, loadWorkflowState } from " + json.dumps(state_uri) + ";\n"
+        "import { saveFixtureState as saveWorkflowState } from " + json.dumps((Path(REPO_ROOT) / "tests/mars243_fixture_session.ts").as_uri()) + ";\n"
         "const state = loadWorkflowState(process.cwd()) || createInitialState('feature','4.0.0','invariant-test',[],'invariant test');\n"
         "state.current_phase = 'construction';\n"
         "state.current_stage = " + json.dumps(stage) + ";\n"
@@ -337,16 +338,24 @@ def test_producer_writes_blocked_report_and_no_evidence() -> None:
         "commands": [{"id": "si", "role": "semantic", "sensor": "structural-invariants",
                       "argv": ["loeyae-aidlc", "check", "--sensor", "structural-invariants"]}],
     })
+    binder = os.path.join(project, "_bind.mts")
+    write_json(project, "docs/aidlc/ideation/module-manifest.json", {"schema_version": 1, "modules": [{"module_id": MODULE, "name": "Order", "service_id": "order", "paths": ["src"]}]})
+    write(project, "_bind.mts", "import { fixtureEnvironment, saveFixtureState } from " + json.dumps((Path(REPO_ROOT) / "tests/mars243_fixture_session.ts").as_uri())
+          + ";\nimport { loadWorkflowState } from " + json.dumps((Path(REPO_ROOT) / "core/tools/aidlc-light-state.ts").as_uri())
+          + ";\nconst state=loadWorkflowState(process.cwd());state.current_stage_instance='code-generation@module:" + MODULE + "@unit:default';state.current_unit='default';saveFixtureState(process.cwd(),state);\nconsole.log(fixtureEnvironment(process.cwd(), ['evidence','run','--stage','code-generation']).AIDLC_SESSION_BINDING);\n")
+    bound = subprocess.run([NPX, "--no-install", "--prefix", REPO_ROOT, "tsx", binder], cwd=project, capture_output=True, text=True)
+    assert bound.returncode == 0, bound.stderr
+    environment = {**os.environ, "AIDLC_SESSION_BINDING": bound.stdout.strip()}
     result = subprocess.run([NPX, "--no-install", "--prefix", REPO_ROOT, "tsx", PRODUCER, "run", "--stage", "code-generation",
                              "--sensor", "structural-invariants"],
-                            cwd=project, env=os.environ.copy(), capture_output=True, text=True, encoding="utf-8")
+                            cwd=project, env=environment, capture_output=True, text=True, encoding="utf-8")
     assert result.returncode != 0, result.stdout
-    report_path = os.path.join(project, ".aidlc", "reports", "code-generation", MODULE, "structural-invariants.blocked.json")
+    report_path = os.path.join(project, ".aidlc", "reports", "code-generation", MODULE, "default", "structural-invariants.blocked.json")
     assert os.path.exists(report_path), result.stderr
     with open(report_path, encoding="utf-8") as handle:
         report = json.load(handle)
     assert report["status"] == "blocked" and report["violations"][0]["rule"] == "shadow-entity", report
-    evidence_path = os.path.join(project, ".aidlc", "evidence", "code-generation", MODULE, "structural-invariants.json")
+    evidence_path = os.path.join(project, ".aidlc", "evidence", "code-generation", MODULE, "default", "structural-invariants.json")
     assert not os.path.exists(evidence_path), "blocked run must not write gate evidence"
     leaked = [str(p) for p in Path(project, ".aidlc", "evidence").rglob("*.blocked.json")]
     assert not leaked, f"blocked report must stay outside .aidlc/evidence: {leaked}"

@@ -4,6 +4,7 @@
 
 | 文件 | 类型 | 内容 |
 | --- | --- | --- |
+| `aidlc-audit-remediation-plan-20261030.md` | 计划 | 四维流程审计修复顺序、验收用例、回归与九平台发布验收 |
 | `aidlc-v2-unit-ownership-prompt.md` | 提示词 | 单元所有权与 provenance 协作约定重构 |
 | `aidlc-v45-improvement-prompts.md` | 提示词 | v4.5 初始化问题（P1～P7）改进提示词 |
 | `aidlc-reconciliation-gap-analysis.md` | 分析 | 跨产物对账全量清单与缺口分析 |

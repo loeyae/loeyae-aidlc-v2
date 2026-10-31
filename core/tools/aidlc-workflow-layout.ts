@@ -350,7 +350,7 @@ function assertSameLineage(registry: WorkflowRegistry, label: string, state: Wor
   throw new Error(`workflow lineage conflict: ${label} ${state.workflow_id} belongs to lineage ${state.parent_workflow_id}, but the registry and the global workflow are lineage ${registry.global_workflow_id}. Two lineages are mixed in aidlc/active; restore the files of one lineage from git (orchestrate state verify lists both) instead of merging them.`);
 }
 
-export function loadWorkflowParts(projectRoot: string): WorkflowParts {
+export function loadWorkflowParts(projectRoot: string, missingModuleForRecovery?: string): WorkflowParts {
   const registry = loadRegistry(projectRoot);
   const parts = new Map<string, WorkflowPart>();
   const global = loadWorkflowState(projectRoot, GLOBAL_WORKFLOW);
@@ -361,6 +361,9 @@ export function loadWorkflowParts(projectRoot: string): WorkflowParts {
   for (const row of registry.modules) {
     const ref: WorkflowRef = { kind: "module", module_id: row.module_id };
     const state = loadWorkflowState(projectRoot, ref);
+    // Recovery may reconstruct exactly one absent target. Ordinary readers and
+    // writers still require every registry identity to have a valid state.
+    if (!state && row.module_id === missingModuleForRecovery) continue;
     if (!state) throw new Error(`registry module ${row.module_id} has no workflow state at ${relativeStatePath(projectRoot, ref)}`);
     if (state.workflow_id !== row.workflow_id) throw new Error(`module workflow ${row.module_id} ID ${state.workflow_id} does not match registry ${row.workflow_id}`);
     assertSameLineage(registry, `module workflow ${row.module_id}`, state);

@@ -7,6 +7,18 @@ evidence_path: .aidlc/evidence/<stage-slug>/red-test-evidence.json
 
 # red-test-evidence Sensor
 
+## 历史原件丢失后的受控重放
+
+原始 RED 原件缺失时，可使用 `evidence run --stage tdd --module <module> --unit <unit> --sensor red-test-evidence --refresh --historical-replay`。它只能针对已完成的 TDD 实例，使用该实例的精确领取，或同一 workflow/module/unit 的 code-generation 领取发布。原始 RED 或诊断文件已存在时拒绝覆盖；同范围受控历史补证可以正式刷新，旧文件逐字节归档并以路径及 SHA-256 追溯，新记录仍由真实重跑产生。命令不接受 `--config`、`--output` 或测试过滤，也不会重写全局 TDD 命令。配置与字段见 [历史 RED 重放协议](../knowledge/protocols/historical-red-replay.md)。
+
+证据显式记录 `evidence_mode: historical_replay`，与省略模式字段的旧版原始 RED 及 `original` 模式区分。普通日志或诊断报告不能导入。该模式当前提供受控 Vitest 适配器：生产器在固定历史工作树真实执行，单独收集未处理异常及 suite 编译/环境错误，要求全部实际测试无跳过、至少一个业务 AssertionError，并以实际执行的方法覆盖当前 I13 单元映射。
+
+门禁复验独立源码仓库、完整提交、严格祖先关系、干净的稀疏工作树、源码/测试/配置/锁文件与实际依赖摘要、执行命令、原始报告及其 SHA-256、I13 和当前需求摘要。任一漂移或不可核验条件均拒绝；不把工具升级解释为放行。RED gate 仍会校验原有的受控 envelope、来源提交、checker、观察值与用例覆盖。
+
+历史模式 v2 把逐文件清单放入 `source-inputs.json` 旁证，并在主文件仅记录摘要与数量；详细断言保留在原始 Vitest JSON，主记录保存方法、状态与失败摘要。主文件继续遵守原有 512 KiB 读取上限。v1 历史模式按原有完整字段验证，不因格式升级放宽或篡改。
+
+`next` 的 `red_evidence` 与 code-generation 报告明确展示补证模式及局限。补证只证明本次对历史版本的重放结果，不能证明测试曾在生产实现之前执行，不能恢复原始执行时间，也不能证明跨域联调、业务验收或 U8 全部代码完成。BASELINE `not_required` 仍表示没有 characterization 用例，不表示基线测试通过。
+
 适用于 `tdd` RED 门禁。可执行业务行为必须由受控命令产生：
 
 ```json

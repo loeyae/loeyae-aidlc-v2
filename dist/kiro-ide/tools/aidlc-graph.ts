@@ -141,6 +141,7 @@ const POSITIVE_CONDITIONS = [
 const VALID_CONDITIONS = new Set(["", ...POSITIVE_CONDITIONS, ...POSITIVE_CONDITIONS.map((condition) => `!${condition}`)]);
 
 const VALID_SENSORS = new Set([
+  "global-review-evidence", "deployment-validation",
   "document-slice-consistency",
   ...QUALITY_SENSORS,
   "no-todo", "build-success", "test-pass", "traceability", "doc-cascade", "reviewer-required",

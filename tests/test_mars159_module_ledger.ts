@@ -1,3 +1,7 @@
+import { workflowMaintenancePlan } from "../core/tools/aidlc-light-state";
+import { releaseFixtureClaims } from "./mars243_fixture_session";
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 /**
  * MARS-159 B + C.
  *
@@ -13,7 +17,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { createInitialState, loadWorkflowState, saveWorkflowState, type WorkflowRef, type WorkflowState } from "../core/tools/aidlc-light-state";
+import { createInitialState, loadWorkflowState, parseLightWorkflowState, saveWorkflowState, type WorkflowRef, type WorkflowState } from "../core/tools/aidlc-light-state";
 import { checkpointModule, ledgerRef, verifyLedgerChain } from "../core/tools/aidlc-module-ledger";
 import { readProducedArtifact } from "../core/tools/aidlc-orchestrate";
 
@@ -32,11 +36,20 @@ const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: "AI-DLC", GIT_AUTHOR_EMAIL: "
 const CONTRACTS = "docs/aidlc/ideation/product-contracts.md";
 
 function run(cwd: string, args: string[]): { status: number; directive: Record<string, unknown> } {
+  if (args[0] === "state" && ["recover", "adopt", "rebuild"].includes(args[1])) {
+    const module = args.includes("--module") ? args[args.indexOf("--module")+1] : undefined;
+    args = [...args, "--maintenance", workflowMaintenancePlan(cwd, module).token];
+  }
   const env = { ...process.env };
   delete env.AIDLC_MODULE;
-  const result = spawnSync(process.execPath, [tsx, cli, "orchestrate", ...args], { cwd, encoding: "utf8", env });
+  const result = spawnSync(process.execPath, [tsx, cli, "orchestrate", ...args], { cwd, encoding: "utf8", env: {...fixtureEnvironment(cwd, ["orchestrate", ...args]), ...(env)} });
   const text = (result.stdout || "").trim() || (result.stderr || "").trim();
-  return { status: result.status ?? 1, directive: JSON.parse(text) as Record<string, unknown> };
+  const directive = JSON.parse(text) as Record<string, unknown>;
+  if (directive.binding_required && args[0] === "next" && args.includes("--module")) {
+    const retry = args.filter((arg, i) => arg !== "--work" && args[i - 1] !== "--work");
+    return run(cwd, retry);
+  }
+  return { status: result.status ?? 1, directive };
 }
 
 function git(cwd: string, args: string[]): string {
@@ -74,7 +87,8 @@ function contracts(version = "v1"): string {
 function bump(project: string, ref: WorkflowRef, times: number): number {
   for (let index = 0; index < times; index++) {
     const state = loadWorkflowState(project, ref)!;
-    saveWorkflowState(project, state, ref);
+    state.revision += 1;
+    saveFixtureState(project, state, ref);
   }
   return loadWorkflowState(project, ref)!.revision;
 }
@@ -109,9 +123,10 @@ try {
   state.completed_stages = [...GLOBAL_STAGES];
   state.completed_stage_instances = [...GLOBAL_STAGES];
   state.skipped_stage_instances = [`reverse-engineering@module:${M01}`, `reverse-engineering@module:${M02}`];
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
   const split = run(project, ["split", "--from", LINEAGE]);
   assert.equal(split.status, 0, JSON.stringify(split.directive));
+  releaseFixtureClaims(project);
   const mainCommit = commitAll(project, "split");
   git(project, ["push", "-q", "origin", "main"]);
   const baseM01 = loadWorkflowState(project, M01_REF)!.revision;
@@ -119,18 +134,20 @@ try {
 
   // ---- two modules advance in parallel on feature branches and checkpoint ----
   git(project, ["checkout", "-q", "-b", "feat/m01"]);
-  const m01Revision = bump(project, M01_REF, 4);
+  bump(project, M01_REF, 4);
   const m01Checkpoint = run(project, ["state", "checkpoint", "--module", M01]);
   assert.equal(m01Checkpoint.directive.kind, "print", JSON.stringify(m01Checkpoint.directive));
   assert.match(String(m01Checkpoint.directive.message), /not published/);
   assert.match(String(m01Checkpoint.directive.message), /git push origin refs\/heads\/aidlc\/modules\/m01-trade:refs\/heads\/aidlc\/modules\/m01-trade/);
+  const m01Revision = loadWorkflowState(project, M01_REF)!.revision;
   const m01StateText = readFileSync(join(project, "aidlc/active/modules", M01, "aidlc-state.md"), "utf8");
   commitAll(project, "m01 progress");
   assert.equal(checkpointModule(project, M01, "again").status, "unchanged", "an unchanged state appends nothing");
   git(project, ["checkout", "-q", "main"]);
   git(project, ["checkout", "-q", "-b", "feat/m02"]);
-  const m02Revision = bump(project, M02_REF, 2);
+  bump(project, M02_REF, 2);
   assert.equal(checkpointModule(project, M02, "test").status, "created");
+  const m02Revision = loadWorkflowState(project, M02_REF)!.revision;
   commitAll(project, "m02 progress");
   git(project, ["checkout", "-q", "main"]);
 
@@ -155,12 +172,16 @@ try {
     assert.match(String(refused.directive.message), /older than the checkpoint revision.*--user-input Approve/);
     const recovered = run(project, ["state", "recover", "--module", M01, "--user-input", "Approve", "--reason", "feature branch deleted"]);
     assert.equal(recovered.directive.kind, "print", JSON.stringify(recovered.directive));
-    assert.equal(recovered.directive.revision, m01Revision);
+    assert.equal(recovered.directive.revision, m01Revision + 1);
     assert.equal(recovered.directive.previous_local_revision, baseM01);
     assert.ok(Array.isArray(recovered.directive.backups) && (recovered.directive.backups as string[]).length >= 1, "the local state is backed up");
     assert.ok(Array.isArray(recovered.directive.evidence_missing), "missing evidence is listed for targeted re-verification");
     const restored = readFileSync(join(project, "aidlc/active/modules", M01, "aidlc-state.md"), "utf8");
-    assert.equal(restored, m01StateText, "the module state is restored byte for byte");
+    const restoredState = loadWorkflowState(project, M01_REF)!;
+    assert.equal(restoredState.workflow_id, parseLightWorkflowState(m01StateText).workflow_id);
+    assert.deepEqual(restoredState.active_instances, {}, "historical claims are not restored");
+    assert.equal(restoredState.revision, m01Revision + 1);
+    for (const field of ["history", "completed_stage_instances", "current_stage_instance", "work_description"] as const) assert.deepEqual(restoredState[field], parseLightWorkflowState(m01StateText)[field], `checkpoint content preserved: ${field}`);
     assert.match(readFileSync(join(project, "aidlc/active/audit.md"), "utf8"), /Event: STATE_RECOVERED/);
     assert.equal(run(project, ["state", "recover", "--module", M01]).directive.kind, "print", "a recovered module is up to date");
     git(project, ["checkout", "-q", "--", "."]);
@@ -172,15 +193,33 @@ try {
   git(root, ["clone", "-q", origin, clone]);
   git(clone, ["config", "core.autocrlf", "false"]);
 
+  section("a missing target state recovers while preserving its orphan audit and sibling", () => {
+    const missing = join(root, "missing-target");
+    git(root, ["clone", "-q", origin, missing]);
+    const statePath = join(missing, "aidlc/active/modules", M01, "aidlc-state.md");
+    const auditPath = join(missing, "aidlc/active/modules", M01, "audit.md");
+    const orphanAudit = readFileSync(auditPath, "utf8") + "\n## Orphan local history\nkeep this uncheckpointed observation\n";
+    writeFileSync(auditPath, orphanAudit);
+    rmSync(statePath);
+    const sibling = readFileSync(join(missing, "aidlc/active/modules", M02, "aidlc-state.md"));
+    const restored = run(missing, ["state", "recover", "--module", M01, "--user-input", "Approve", "--reason", "restore missing target without discarding audit"]);
+    assert.equal(restored.directive.kind, "print", JSON.stringify(restored.directive));
+    const backup = (restored.directive.backups as string[]).find(path => path.includes("audit.md.bak-"));
+    assert(backup, "existing orphan audit is backed up even without a local state");
+    assert.equal(readFileSync(join(missing, backup), "utf8"), orphanAudit);
+    assert.deepEqual(loadWorkflowState(missing, M01_REF)!.active_instances, {});
+    assert.deepEqual(readFileSync(join(missing, "aidlc/active/modules", M02, "aidlc-state.md")), sibling);
+  });
+
   section("a fresh clone recovers both modules from the fetched ledger", () => {
     assert.ok(git(clone, ["rev-parse", "--verify", `refs/remotes/origin/aidlc/modules/${M02}`]));
     const m02 = run(clone, ["state", "recover", "--module", M02, "--user-input", "Approve", "--reason", "fresh clone"]);
     assert.equal(m02.directive.kind, "print", JSON.stringify(m02.directive));
-    assert.equal(m02.directive.revision, m02Revision);
-    assert.equal(loadWorkflowState(clone, M02_REF)!.revision, m02Revision);
+    assert.equal(m02.directive.revision, m02Revision + 1);
+    assert.equal(loadWorkflowState(clone, M02_REF)!.revision, m02Revision + 1);
     const m01 = run(clone, ["state", "recover", "--module", M01, "--user-input", "Approve", "--reason", "fresh clone"]);
     assert.equal(m01.directive.kind, "print", JSON.stringify(m01.directive));
-    assert.equal(loadWorkflowState(clone, M01_REF)!.revision, m01Revision);
+    assert.equal(loadWorkflowState(clone, M01_REF)!.revision, m01Revision + 1);
     assert.notEqual(m02Revision, baseM02);
   });
 
@@ -245,7 +284,7 @@ try {
     workflow.current_stage = "product-inception";
     workflow.current_phase = "ideation";
     workflow.current_stage_instance = "product-inception";
-    saveWorkflowState(single, workflow);
+    saveFixtureState(single, workflow);
     write(single, "docs/aidlc/ideation/product-inception.md", Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x54, 0x4f, 0x44, 0x4f]));
     const probeSensor = (sensor: string): string[] => {
       const result = spawnSync(process.execPath, [tsx, probe, "product-inception", "sensors", sensor], { cwd: single, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });

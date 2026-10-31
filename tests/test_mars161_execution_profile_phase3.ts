@@ -1,3 +1,5 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -56,13 +58,16 @@ for (const scope of ["bugfix", "refactor", "express", "workshop", "feature", "mv
     }
   }
 
-  for (const [name, profile] of [["standard", standard], ["complex", complex], ["legacy", undefined]] as const) {
+  for (const [name, profile] of [["standard", standard], ["legacy", undefined]] as const) {
     assert.deepEqual(
       getExecutableStages(graph, scope, [], profile).map((stage) => stage.slug),
       baseline,
       `${scope}/${name} must preserve historical selector parity`,
     );
   }
+
+  const complexSlugs = getExecutableStages(graph, scope, [], complex).map(stage => stage.slug);
+  for (const slug of [...baseline, "application-design", "nfr-requirements", "nfr-design"]) assert.ok(complexSlugs.includes(slug), `${scope}: security escalation retains gates and adds risk-required design`);
 
   const escalated = applyExecutionProfile({
     current: defaultProfile,
@@ -76,8 +81,8 @@ for (const scope of ["bugfix", "refactor", "express", "workshop", "feature", "mv
   assert.equal(escalated.level, "complex", `${scope}: escalation must reach/retain complex`);
   assert.deepEqual(
     getExecutableStages(graph, scope, [], escalated).map((stage) => stage.slug),
-    baseline,
-    `${scope}: profile escalation must restore the standard/complex graph selection`,
+    complexSlugs,
+    `${scope}: profile escalation must use the same risk-required stage closure`,
   );
 }
 
@@ -124,8 +129,7 @@ function git(project: string, args: string[]): void {
 function run(project: string, args: string[]): Record<string, unknown> {
   const result = spawnSync(process.execPath, [TSX, CLI, "orchestrate", ...args], {
     cwd: project,
-    encoding: "utf8",
-  });
+    encoding: "utf8", env: fixtureEnvironment(project, ["orchestrate", ...args]) });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   return JSON.parse(result.stdout) as Record<string, unknown>;
 }
@@ -133,8 +137,7 @@ function run(project: string, args: string[]): Record<string, unknown> {
 function runFailure(project: string, args: string[]): string {
   const result = spawnSync(process.execPath, [TSX, CLI, "orchestrate", ...args], {
     cwd: project,
-    encoding: "utf8",
-  });
+    encoding: "utf8", env: fixtureEnvironment(project, ["orchestrate", ...args]) });
   assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`);
   return `${result.stdout}\n${result.stderr}`;
 }
@@ -184,7 +187,7 @@ try {
 
   const legacy = join(root, "legacy");
   mkdirSync(legacy, { recursive: true });
-  saveWorkflowState(legacy, createInitialState("bugfix", "4.14.1", "legacy-profile", [], "Legacy profile"));
+  saveFixtureState(legacy, createInitialState("bugfix", "4.14.1", "legacy-profile", [], "Legacy profile"));
   assert.match(runFailure(legacy, ["profile", "escalate", "--signal", "security_or_sensitive_data"]), /does not implicitly migrate legacy state/);
 } finally {
   rmSync(root, { recursive: true, force: true });

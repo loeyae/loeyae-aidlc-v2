@@ -1,3 +1,4 @@
+import { fixtureEnvironment, saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
 /**
  * MARS-112 regression: the traceability-matrix gate is no longer a determinate no-op for
  * the lightweight scopes (bugfix / refactor) that skip requirements-analysis and so have
@@ -54,7 +55,7 @@ function cleanEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 }
 
 function run(project: string, args: string[], env: NodeJS.ProcessEnv = {}): Run {
-  const result = spawnSync(process.execPath, [tsx, ...args], { cwd: project, encoding: "utf8", env: cleanEnv(env), maxBuffer: 64 * 1024 * 1024 });
+  const result = spawnSync(process.execPath, [tsx, ...args], { cwd: project, encoding: "utf8", env: { ...cleanEnv(env), AIDLC_SESSION_BINDING: fixtureEnvironment(project, args[0] === cli ? args.slice(1) : args).AIDLC_SESSION_BINDING }, maxBuffer: 64 * 1024 * 1024 });
   const stdout = result.stdout || "";
   return { status: result.status ?? 1, stdout, out: `${stdout}\n${result.stderr || ""}` };
 }
@@ -118,7 +119,7 @@ function lightProject(name: string, scope: string, source: string): string {
   const state: WorkflowState = createInitialState(scope, "4.13.1", `workflow-${name}`, [], `MARS-112 ${scope}`);
   state.completed_stages = [...GLOBAL_STAGES];
   state.completed_stage_instances = [...GLOBAL_STAGES];
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
   return project;
 }
 
@@ -317,7 +318,7 @@ try {
     state.current_stage_instance = instance;
     state.current_module = PROJECT;
     state.current_unit = "default";
-    saveWorkflowState(project, state);
+    saveFixtureState(project, state);
     commit(project, "fixture");
     return project;
   }

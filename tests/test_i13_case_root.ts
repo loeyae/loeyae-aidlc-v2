@@ -1,3 +1,5 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -21,7 +23,7 @@ const scratch = mkdtempSync(join(process.env.KIROCREW_SCRATCH || process.env.TMP
 const MODULE = "project";
 
 function run(project: string, args: string[]): { status: number; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8" });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8" , env: fixtureEnvironment(project, [...args]) });
   return { status: result.status ?? 1, stdout: result.stdout || "", stderr: result.stderr || "" };
 }
 
@@ -43,7 +45,7 @@ function makeI13Project(name: string, caseStatus: "ready" | "blocked"): { projec
   state.current_phase = "inception";
   state.current_stage_instance = `test-case-derivation@module:${MODULE}`;
   state.current_module = MODULE;
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
   assert.ok(loadWorkflowState(project));
   return { project, caseFile };
 }
@@ -114,7 +116,7 @@ try {
     state.current_phase = "inception";
     state.current_stage_instance = `test-case-derivation@module:${MODULE}`;
     state.current_module = MODULE;
-    saveWorkflowState(project, state);
+    saveFixtureState(project, state);
     return { project, casePaths };
   }
 
@@ -277,13 +279,13 @@ try {
     const state = createInitialState("feature", "4.22.12", `workflow-matrix-${name}`, [], "I13 matrix regression");
     state.completed_stages = [...MATRIX_STAGES];
     state.completed_stage_instances = [...MATRIX_STAGES];
-    saveWorkflowState(project, state);
+    saveFixtureState(project, state);
     return project;
   }
 
   function matrix(project: string, unit?: string): { status: number; output: string; record: Record<string, unknown> | null } {
     const result = spawnSync(process.execPath, [tsx, cli, "check", "--sensor", "traceability-matrix", "--module", MODULE, ...(unit ? ["--unit", unit] : [])], {
-      cwd: project, encoding: "utf8", env: { ...process.env, AIDLC_ACTIVE_STAGE: "code-generation" },
+      cwd: project, encoding: "utf8", env: { ...fixtureEnvironment(project, ["check", "--sensor", "traceability-matrix", "--module", MODULE, ...(unit ? ["--unit", unit] : [])]), ...({ ...process.env, AIDLC_ACTIVE_STAGE: "code-generation" }) },
     });
     let record: Record<string, unknown> | null = null;
     try { record = JSON.parse(result.stdout) as Record<string, unknown>; } catch { /* failure output is not JSON */ }

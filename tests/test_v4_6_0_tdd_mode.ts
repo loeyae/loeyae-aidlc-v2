@@ -1,3 +1,5 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 /**
  * 4.6.0-2 (MARS-48) regression suite: I13 `ready_ucd` counted once per UC-D from its
  * own case file (S2.0), the UC-D `tdd_mode` contract (S2.1), and the I13
@@ -6,7 +8,7 @@
  * public CLI (`check`, `evidence run`, `orchestrate report`, `orchestrate baseline`).
  */
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -41,7 +43,7 @@ function parsed(stdout: string): Record<string, unknown> {
 }
 
 function run(project: string, args: string[]): Run {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: cleanEnv() });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: { ...fixtureEnvironment(project, [...args]), ...(cleanEnv()) } });
   const stdout = result.stdout || "";
   return { status: result.status ?? 1, stdout, out: `${stdout}\n${result.stderr || ""}`, json: parsed(stdout) };
 }
@@ -203,6 +205,10 @@ function evidence(project: string): Record<string, unknown> {
 }
 
 function report(project: string): Run {
+  if (!existsSync(join(project, I13_EVIDENCE))) {
+    const produced = run(project, ["evidence", "run", "--stage", "test-case-derivation", "--all-sensors"]);
+    if (produced.status !== 0) return produced;
+  }
   return run(project, ["orchestrate", "report", "--stage", "test-case-derivation", "--result", "completed"]);
 }
 
@@ -377,7 +383,7 @@ try {
       const state = createInitialState("refactor", "4.5.4", id, [], "pre-4.6 workflow");
       state.completed_stages = ["workspace-detection"];
       state.completed_stage_instances = ["workspace-detection"];
-      saveWorkflowState(project, state);
+      saveFixtureState(project, state);
     };
     const legacy = legacyProject("refactor", { createWorkflow: false }).project;
     preBaseline(legacy, "workflow-legacy");
@@ -388,7 +394,7 @@ try {
       const state = createInitialState("feature", "4.5.4", id, [], "pre-4.6 workflow");
       state.completed_stages = ["workspace-detection"];
       state.completed_stage_instances = ["workspace-detection"];
-      saveWorkflowState(project, state);
+      saveFixtureState(project, state);
     };
     const legacyNew = legacyProject("feature", { createWorkflow: false }).project;
     preBaselineFeature(legacyNew, "workflow-legacy-new");
@@ -422,7 +428,7 @@ try {
     writeCases(moved.project, { "UC-D-003-pages.md": ucd("UC-D-003", CHARACTERIZATION) });
     ok(moved.project, ["evidence", "run", "--stage", "test-case-derivation", "--instance", INSTANCE, "--all-sensors"]);
     const state = loadWorkflowState(moved.project) as WorkflowState;
-    saveWorkflowState(moved.project, { ...state, baseline_commit: moved.commits[0], baseline_source: "replaced" }, undefined, { baselineWrite: true });
+    saveFixtureState(moved.project, { ...state, baseline_commit: moved.commits[0], baseline_source: "replaced" }, undefined, { baselineWrite: true });
     checks.expect("state baseline replaced after I13", report(moved.project), /baseline_commit .* does not match the workflow baseline/);
     // Evidence that drops the characterization of a characterization UC-D.
     const dropped = legacyProject();
@@ -446,7 +452,7 @@ try {
     global.completed_stages = [...GLOBAL_STAGES];
     global.completed_stage_instances = [...GLOBAL_STAGES];
     global.skipped_stage_instances = [`reverse-engineering@module:${moduleId}`];
-    saveWorkflowState(project, global);
+    saveFixtureState(project, global);
     ok(project, ["orchestrate", "split", "--from", global.workflow_id]);
     const parentBaseline = String(loadWorkflowState(project)!.baseline_commit);
     assert.equal(baseline, "", "fixture created the workflow after the commits");

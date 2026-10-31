@@ -1,3 +1,7 @@
+import { workflowMaintenancePlan } from "../core/tools/aidlc-light-state";
+import { releaseFixtureClaims } from "./mars243_fixture_session";
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 /**
  * MARS-98 (4.13.0): workflow lineage protection.
  *
@@ -36,11 +40,20 @@ const M01_REF: WorkflowRef = { kind: "module", module_id: M01 };
 const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: "AI-DLC", GIT_AUTHOR_EMAIL: "aidlc@example.invalid", GIT_COMMITTER_NAME: "AI-DLC", GIT_COMMITTER_EMAIL: "aidlc@example.invalid" };
 
 function run(cwd: string, args: string[]): { status: number; directive: Record<string, unknown> } {
+  if (args[0] === "state" && ["recover", "adopt", "rebuild"].includes(args[1])) {
+    const module = args.includes("--module") ? args[args.indexOf("--module")+1] : undefined;
+    args = [...args, "--maintenance", workflowMaintenancePlan(cwd, module).token];
+  }
   const env = { ...process.env };
   delete env.AIDLC_MODULE;
-  const result = spawnSync(process.execPath, [tsx, cli, "orchestrate", ...args], { cwd, encoding: "utf8", env });
+  const result = spawnSync(process.execPath, [tsx, cli, "orchestrate", ...args], { cwd, encoding: "utf8", env: {...fixtureEnvironment(cwd, ["orchestrate", ...args]), ...(env)} });
   const text = (result.stdout || "").trim() || (result.stderr || "").trim();
-  return { status: result.status ?? 1, directive: JSON.parse(text) as Record<string, unknown> };
+  const directive = JSON.parse(text) as Record<string, unknown>;
+  if (directive.binding_required && args[0] === "next" && args.includes("--module")) {
+    const retry = args.filter((arg, i) => arg !== "--work" && args[i - 1] !== "--work");
+    return run(cwd, retry);
+  }
+  return { status: result.status ?? 1, directive };
 }
 
 function git(cwd: string, args: string[]): string {
@@ -88,13 +101,14 @@ function seedWorkflow(project: string, workflowId: string): void {
   state.completed_stages = [...GLOBAL_STAGES];
   state.completed_stage_instances = [...GLOBAL_STAGES];
   state.skipped_stage_instances = [`reverse-engineering@module:${M01}`, `reverse-engineering@module:${M02}`];
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
 }
 
 function bumpModule(project: string, times: number): number {
   for (let index = 0; index < times; index++) {
     const state = loadWorkflowState(project, M01_REF)!;
-    saveWorkflowState(project, state, M01_REF);
+    state.revision += 1;
+    saveFixtureState(project, state, M01_REF);
   }
   return loadWorkflowState(project, M01_REF)!.revision;
 }
@@ -112,13 +126,14 @@ try {
   seedWorkflow(project, LINEAGE_X);
   const splitX = run(project, ["split", "--from", LINEAGE_X]);
   assert.equal(splitX.status, 0, JSON.stringify(splitX.directive));
-  const m01Revision = bumpModule(project, 5);
+  bumpModule(project, 5);
   // A module added after the split gets its own work description (--work on creation only).
   declareM03(project);
   assert.equal(run(project, ["next", "--module", M03, "--work", "Merchant center"]).directive.kind, "run-stage");
   assert.equal(loadWorkflowState(project, M03_REF)!.work_description, "Merchant center");
   assert.match(String(run(project, ["next", "--module", M01, "--work", "Other"]).directive.message), /already exists; --work only describes a module workflow when next --module creates it/);
   const m03Revision = loadWorkflowState(project, M03_REF)!.revision;
+  const m01Revision = loadWorkflowState(project, M01_REF)!.revision;
   const progressCommit = commitAll(project, "lineage X: split and m01/m03 progress");
   // Registry version 2 keeps identity rows only: advancing a module never rewrites it.
   const registryText = readFileSync(join(project, "aidlc", "active", "registry.md"), "utf8");
@@ -182,6 +197,7 @@ try {
   assert.deepEqual((verify.directive.lineage_conflicts as { workflow_id: string }[]).map((item) => item.workflow_id), [LINEAGE_X]);
 
   // ---- state adopt: carry m03 of lineage X over into lineage Y before retiring X. ----
+  releaseFixtureClaims(project);
   const adoptArgs = ["state", "adopt", "--module", M03, "--from", progressCommit, "--user-input", "Approve", "--reason", "keep Zhangyi's m03"];
   assert.match(String(run(project, ["state", "adopt", "--module", M03, "--from", progressCommit, "--reason", "x"]).directive.message), /--user-input must be exactly Approve/);
   assert.match(String(run(project, adoptArgs).directive.message), /not declared in docs\/aidlc\/ideation\/module-manifest\.json/);
@@ -205,6 +221,7 @@ try {
   // The decision is recorded explicitly; progress of X stays recoverable from git.
   assert.match(String(run(project, ["state", "retire", "--lineage", LINEAGE_X, "--reason", "keep Y"]).directive.message), /--user-input must be exactly Approve/);
   assert.match(String(run(project, ["state", "retire", "--lineage", LINEAGE_Y, "--user-input", "Approve", "--reason", "x"]).directive.message), /is the active lineage and cannot be retired/);
+  releaseFixtureClaims(project);
   const retire = run(project, ["state", "retire", "--lineage", LINEAGE_X, "--user-input", "Approve", "--reason", "keep Y, re-register m01"]);
   assert.equal(retire.directive.kind, "print", JSON.stringify(retire.directive));
   assert.match(String(retire.directive.message), new RegExp(`git show ${progressCommit}:./aidlc/active/aidlc-state.md`));
@@ -251,6 +268,7 @@ try {
   const archived = fixture("archived");
   assert.equal(run(archived, ["next", "--scope", "express", "--work", "First work"]).directive.kind, "print");
   commitAll(archived, "first workflow");
+  assert.equal(run(archived, ["next"]).directive.kind, "run-stage", "activate an exact instance before parking");
   assert.equal(run(archived, ["park"]).directive.kind, "parked");
   assert.equal(run(archived, ["archive", "--reason", "done"]).directive.kind, "print");
   commitAll(archived, "archive first workflow");

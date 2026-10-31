@@ -1,6 +1,50 @@
 [
   [
     "tsx",
+    "tests/test_audit_maintenance.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_audit_security.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_audit_deployment.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_audit_global_review.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_audit_routing.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_audit_worktree_isolation.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_audit_review.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_historical_red_replay.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_nested_digest_compatibility.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_evidence_progress.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_slice_unit_handoff.ts"
+  ],
+  [
+    "tsx",
     "tests/test_infrastructure_design.ts"
   ],
   [
@@ -187,20 +231,122 @@
     "tests/test_provider_domain_extraction.ts"
   ],
   [
-    "tsx",
-    "tests/test_v4_7_0_baseline_advance.ts"
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_7_0_baseline_advance.ts",
+    "e2e: split"
   ],
   [
-    "tsx",
-    "tests/test_v4_8_0_unit_ucd_scope.ts"
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_7_0_baseline_advance.ts",
+    "e2e (4.7.1):"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_7_0_baseline_advance.ts",
+    "4.7.1: a done"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_7_0_baseline_advance.ts",
+    "state:"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_7_0_baseline_advance.ts",
+    "single unit, never advanced:"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_8_0_unit_ucd_scope.ts",
+    "e2e: split"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_8_0_unit_ucd_scope.ts",
+    "reconciliation:"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_8_0_unit_ucd_scope.ts",
+    "empty subset:"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_8_0_unit_ucd_scope.ts",
+    "characterization subset:"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_8_0_unit_ucd_scope.ts",
+    "compat: two units"
   ],
   [
     "tsx",
     "tests/test_v4_8_1_checker_scope.ts"
   ],
   [
-    "tsx",
-    "tests/test_v4_9_0_nested_repo.ts"
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_9_0_nested_repo.ts",
+    "RED→GREEN:"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_9_0_nested_repo.ts",
+    "compat: nested"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_9_0_nested_repo.ts",
+    "GREEN: next"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_9_0_nested_repo.ts",
+    "negative:"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_9_0_nested_repo.ts",
+    "dirty:"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_9_0_nested_repo.ts",
+    "A: advanced"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_9_0_nested_repo.ts",
+    "B/C/C2/B2:"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_9_0_nested_repo.ts",
+    "E: a project"
+  ],
+  [
+    "node",
+    "scripts/run-core-case.mjs",
+    "tests/test_v4_9_0_nested_repo.ts",
+    "B1: worktree"
   ],
   [
     "tsx",

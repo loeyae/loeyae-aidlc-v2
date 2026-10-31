@@ -19,7 +19,7 @@ condition: context_compacted
 
 ## 状态源
 
-`docs/aidlc/aidlc-state.json` 是阶段路由、当前 stage、完成、条件跳过和审批结果的唯一机器事实来源。先用编排器验证其签名和 revision，再读取 `docs/aidlc/handoff.md` 补充模块、批次、单元与协作上下文。两者冲突时阻断恢复，禁止由 handoff 反向覆盖机器状态。
+`aidlc/active/aidlc-state.md` 是阶段路由、当前 stage、完成、条件跳过和审批结果的唯一机器事实来源。先用编排器验证当前 workflow、领取代次和 revision，再读取 `docs/aidlc/handoff.md` 补充模块、批次、单元与协作上下文。两者冲突时阻断恢复，禁止由 handoff 反向覆盖机器状态。
 
 ## 恢复步骤
 

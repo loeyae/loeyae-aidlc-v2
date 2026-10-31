@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { fixtureEnvironment, saveFixtureState } from "./mars243_fixture_session";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -57,10 +58,10 @@ export class QualityFixture {
     this.state.current_stage = stage; this.state.current_stage_instance = `${stage}@module:shop`;
     this.state.history = this.state.history.filter(h => h.stage !== "ui-mock");
     if (route !== "not-selected") this.state.history.push({ phase: "inception", stage: "ui-mock", module_id: "shop", result: "completed", user_input: route, timestamp: new Date().toISOString() });
-    saveWorkflowState(this.root, this.state); this.ctx.stage = stage; this.ctx.ui_route = route;
+    saveFixtureState(this.root, this.state); this.ctx.stage = stage; this.ctx.ui_route = route;
   }
   git(args: string[]) { const r = spawnSync("git", args, { cwd: this.root, encoding: "utf8" }); assert.equal(r.status, 0, r.stderr); }
-  run(script: string, args: string[]) { return spawnSync(process.execPath, [join(repository, "node_modules/tsx/dist/cli.mjs"), join(repository, script), ...args], { cwd: this.root, encoding: "utf8" }); }
+  run(script: string, args: string[]) { return spawnSync(process.execPath, [join(repository, "node_modules/tsx/dist/cli.mjs"), join(repository, script), ...args], { cwd: this.root, encoding: "utf8", env: script === "bin/cli.ts" ? fixtureEnvironment(this.root, args) : script.endsWith("aidlc-evidence.ts") ? fixtureEnvironment(this.root, ["evidence", ...args]) : process.env }); }
   produce(sensor: string) { return this.run("core/tools/aidlc-evidence.ts", ["run", "--stage", this.ctx.stage, "--module", "shop", "--sensor", sensor]); }
   gate(sensor: string) { const r = this.run("tests/gate_probe.ts", [`${this.ctx.stage}@module:shop`, "sensors", sensor]); assert.equal(r.status, 0, r.stderr); return JSON.parse(r.stdout).failures as string[]; }
   pass(sensor: string) { const r = this.produce(sensor); assert.equal(r.status, 0, r.stdout + r.stderr); assert.deepEqual(this.gate(sensor), []); }

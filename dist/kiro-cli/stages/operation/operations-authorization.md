@@ -11,9 +11,10 @@ produces:
   - docs/aidlc/operation/deployment-config.md
   - docs/aidlc/operation/deployment-guide.md
   - docs/aidlc/operation/operations-summary.md
+  - .aidlc/evidence/operations-authorization/deployment-validation.json
 approval: block
 condition: has_deployment_needs
-sensors: [doc-cascade]
+sensors: [doc-cascade, deployment-validation]
 ---
 
 # Operations 授权：配置生成、验证与部署授权
@@ -66,6 +67,8 @@ sensors: [doc-cascade]
 
 工具不可用时必须标记"未验证"，提供精确验证命令，不能声明门禁通过。验证失败时最小修复并重跑。
 
+按 `sensors/deployment-validation.md` 将实际配置和对应 check 命令登记到阶段 allowlist，由受控 producer 执行并生成 `deployment-validation` Evidence。每个 artifact id 必须关联同 id 的 check；门禁复核配置摘要和命令绑定，不接受仅有文字记录的验证结果。
+
 ## 步骤 3：生成部署文档
 
 在 `docs/aidlc/operation/` 生成：
@@ -77,6 +80,7 @@ sensors: [doc-cascade]
 - 构建、发布、迁移、验证和回滚步骤
 - 健康检查和最小 smoke test
 - 每条命令的工作目录、参数和预期结果
+- 验收负责人、发布执行责任和部署后运营交接；未知责任保持待确认，不自行授予权限
 
 ### `operations-summary.md`
 

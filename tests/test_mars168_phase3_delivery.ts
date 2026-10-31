@@ -1,3 +1,4 @@
+import { fixtureEnvironment, saveFixtureState } from "./mars243_fixture_session";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -23,7 +24,8 @@ for (const route of ["skip", "not-selected"]) { const other = new QualityFixture
 // Actual report must reject resumed development without product readiness, before writing state.
 const blocked = new QualityFixture();
 blocked.state.current_stage = "functional-design"; blocked.state.current_stage_instance = "functional-design@module:shop@unit:default"; blocked.state.current_unit = "default";
-saveWorkflowState(blocked.root, blocked.state);
+saveFixtureState(blocked.root, blocked.state);
+fixtureEnvironment(blocked.root, ["orchestrate", "report", "--stage", "functional-design", "--module", "shop", "--unit", "default"]);
 const before = readFileSync(join(blocked.root, "aidlc/active/aidlc-state.md"), "utf8");
 const result = blocked.run("bin/cli.ts", ["orchestrate", "report", "--stage", "functional-design", "--module", "shop", "--unit", "default", "--result", "completed"]);
 assert.notEqual(result.status, 0, result.stdout + result.stderr); assert.match(result.stdout + result.stderr, /DEVELOPMENT_ENTRY_NOT_READY/);

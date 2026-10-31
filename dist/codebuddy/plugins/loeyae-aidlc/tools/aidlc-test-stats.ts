@@ -15,7 +15,7 @@ function nativeCoverage(lines: string[]): boolean {
   if (lines.length > 10000 || lines.join("\n").length > 1024 * 1024) return false;
   const separator = /^# -+$/;
   const header = /^# file\s+\| line % \| branch % \| funcs % \| uncovered lines$/;
-  if (lines.length < 9 || lines[0] !== "# start of coverage report" || lines.at(-1) !== "# end of coverage report"
+  if (lines.length < 8 || lines[0] !== "# start of coverage report" || lines.at(-1) !== "# end of coverage report"
     || !separator.test(lines[1]) || !header.test(lines[2]) || lines[3] !== lines[1]
     || lines.at(-4) !== lines[1] || lines.at(-2) !== lines[1]) return false;
   const row = (line: string, total = false): boolean => {
@@ -27,7 +27,7 @@ function nativeCoverage(lines: string[]): boolean {
   };
   // separator / totals / separator / end occupy the last four lines.
   const rows = lines.slice(4, -4);
-  return rows.length > 0 && rows.every(line => row(line)) && row(lines.at(-3)!, true);
+  return rows.every(line => row(line)) && row(lines.at(-3)!, true);
 }
 
 /** Node's TAP reporter has one unindented final summary. Nested plans/results

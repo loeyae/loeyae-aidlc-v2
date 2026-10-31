@@ -3,12 +3,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { QualityFixture } from "./mars168_fixture";
 import type { Dependency, Field } from "../core/tools/aidlc-quality-checks";
-import { saveWorkflowState } from "../core/tools/aidlc-light-state";
+import { saveFixtureState } from "./mars243_fixture_session";
 function report(f: QualityFixture) {
   f.write("docs/aidlc/ideation/scenario-module-mapping.md", "REQ-001 source and consumers map to shop, with SKU localized product labels.");
   f.state.completed_stages.push("scenario-module-mapping"); f.state.completed_stage_instances.push("scenario-module-mapping");
   if (f.ctx.stage === "user-stories") { f.state.completed_stages.push("requirements-analysis"); f.state.completed_stage_instances.push("requirements-analysis@module:shop"); }
-  saveWorkflowState(f.root, f.state);
+  saveFixtureState(f.root, f.state);
+  f.run("bin/cli.ts", ["evidence", "run", "--stage", f.ctx.stage, "--module", "shop", "--all-sensors"]);
   return f.run("bin/cli.ts", ["orchestrate", "report", "--stage", f.ctx.stage, "--module", "shop", "--result", "completed"]);
 }
 const good = new QualityFixture(); const passed = report(good); assert.equal(passed.status, 0, passed.stdout + passed.stderr);

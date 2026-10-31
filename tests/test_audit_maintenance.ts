@@ -1,0 +1,91 @@
+import assert from "node:assert/strict";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { bindSession, claimToken } from "../core/tools/aidlc-session";
+import { loadWorkflowState, saveWorkflowState, withQuiescentWorkflowMaintenance, workflowMaintenancePlan } from "../core/tools/aidlc-light-state";
+import { fixture, cli, snapshot, repository } from "./mars244_fixture";
+import { fixtureEnvironment } from "./mars243_fixture_session";
+
+const f = fixture("code-generation@module:shop@unit:api", true);
+const empty = workflowMaintenancePlan(f.root);
+const first = bindSession(f.root, { instance: "code-generation@module:shop@unit:api", owner: "api", session: "api-session", expected: claimToken(undefined) });
+const sibling = bindSession(f.root, { instance: "requirements-analysis@module:other", owner: "other", session: "other-session", expected: claimToken(undefined) });
+const binding = JSON.stringify(first.binding), otherBinding = JSON.stringify(sibling.binding);
+const output = (result: ReturnType<typeof cli>) => result.stdout + result.stderr;
+const rebuild = (token: string, auth = ["--user-input", "Approve", "--reason", "fixture maintenance"]) => cli(f.root, ["orchestrate", "state", "rebuild", "--maintenance", token, ...auth], "");
+let before = snapshot(f.root);
+const previewRelease = cli(f.root, ["module", "release", "--stage-instance", first.claim.stage_instance, "--expect", claimToken(first.claim), "--preview"], binding);
+assert.notEqual(previewRelease.status, 0, "unsupported preview cannot silently release a claim");
+assert.deepEqual(snapshot(f.root), before);
+assert.match(output(rebuild(empty.token)), /snapshot changed/);
+assert.deepEqual(snapshot(f.root), before);
+assert.match(output(rebuild(workflowMaintenancePlan(f.root).token)), /release exact claims/);
+assert.deepEqual(snapshot(f.root), before);
+const release = (instance: string, token: string, bound: string) => cli(f.root, ["module", "release", "--stage-instance", instance, "--expect", token], bound);
+assert.notEqual(release(first.claim.stage_instance, claimToken(first.claim), otherBinding).status, 0);
+assert.deepEqual(snapshot(f.root), before, "sibling cannot release another session");
+assert.equal(release(first.claim.stage_instance, claimToken(first.claim), binding).status, 0);
+assert.notEqual(cli(f.root, ["orchestrate", "report", "--stage", "code-generation", "--module", "shop", "--unit", "api", "--result", "completed"], binding).status, 0, "released binding cannot publish");
+assert.match(output(rebuild(workflowMaintenancePlan(f.root).token)), /release exact claims/);
+assert.equal(release(sibling.claim.stage_instance, claimToken(sibling.claim), otherBinding).status, 0);
+before = snapshot(f.root);
+assert.match(output(rebuild(workflowMaintenancePlan(f.root).token, [])), /requires --user-input Approve/);
+assert.deepEqual(snapshot(f.root), before);
+const path = join(f.root, f.statePath), original = readFileSync(path);
+await withQuiescentWorkflowMaintenance(f.root, workflowMaintenancePlan(f.root).token, undefined, true, async () => {
+  const state = loadWorkflowState(f.root, { kind: "module", module_id: "shop" })!;
+  state.work_description = "temporary maintenance write";
+  saveWorkflowState(f.root, state, { kind: "module", module_id: "shop" });
+  await Promise.resolve();
+  return { kind: "error" };
+});
+assert.deepEqual(readFileSync(path), original, "failed async transaction rolls back state and audit");
+assert.deepEqual(snapshot(f.root), before);
+const accepted = rebuild(workflowMaintenancePlan(f.root).token);
+assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr);
+assert.equal(JSON.parse(accepted.stdout).kind, "print");
+assert.deepEqual(readFileSync(path), original, "registry rebuild preserves source state");
+const worker = join(f.root, "bind-worker.mts"), ready = join(f.root, "bind-ready");
+writeFileSync(worker, `import {bindSession,claimToken} from ${JSON.stringify(pathToFileURL(join(repository,"core/tools/aidlc-session.ts")).href)};import {writeFileSync} from 'node:fs';writeFileSync(${JSON.stringify(ready)},'ready');console.log(JSON.stringify(bindSession(process.cwd(),{instance:'code-generation@module:shop@unit:api',owner:'racer',session:'racer',expected:claimToken(undefined)})));`);
+let done = false, text = "", errors = "";
+let child: ReturnType<typeof spawn> | undefined;
+let completion: Promise<number | null>;
+await withQuiescentWorkflowMaintenance(f.root, workflowMaintenancePlan(f.root).token, undefined, true, async () => {
+  child = spawn(process.execPath, [join(repository, "node_modules/tsx/dist/cli.mjs"), worker], {cwd:f.root,env:{...process.env,AIDLC_SESSION_BINDING:""}});
+  child.stdout!.on("data", data => text += data);child.stderr!.on("data", data => errors += data);
+  completion = new Promise(resolve => child!.on("close", code => { done = true; resolve(code); }));
+  const deadline = Date.now() + 10_000;
+  while (!existsSync(ready) && Date.now() < deadline && !done) await new Promise(resolve => setTimeout(resolve, 20));
+  assert(existsSync(ready), errors);
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.equal(done, false, "another process cannot bind while async maintenance holds the workflow locks");
+  return {kind:"print"};
+});
+assert.equal(await completion!, 0, errors);
+assert.equal(JSON.parse(text).binding.owner, "racer", "writer resumes after maintenance releases its lock");
+console.log("PASS quiescent maintenance: exact release, stale CAS, sibling protection, approval, rollback, registry rebuild and concurrent bind isolation");
+
+// A read-only preview leaves a resolved module running until its bound next.
+// The fixture must bind a real completed checkpoint when preview has no target.
+const resolved = fixture("code-review@module:shop@unit:api", true);
+const graph = JSON.parse(readFileSync(join(repository, "core/tools/data/stage-graph.json"), "utf8"));
+resolved.state.completed_stage_instances = graph.stages.flatMap((stage: { slug: string; axis: string }) =>
+  stage.axis === "module" ? [`${stage.slug}@module:shop`]
+    : stage.axis === "unit" ? ["api", "web"].map(unit => `${stage.slug}@module:shop@unit:${unit}`) : []);
+resolved.state.completed_stages = graph.stages.filter((stage: { axis: string }) => stage.axis !== "project").map((stage: { slug: string }) => stage.slug);
+resolved.state.current_stage = "";
+delete resolved.state.current_stage_instance;
+resolved.persist();
+const beforePreview = snapshot(resolved.root);
+const preview = cli(resolved.root, ["orchestrate", "next", "--module", "shop", "--preview"], "");
+assert.equal(preview.status, 0, output(preview));
+assert.equal(JSON.parse(preview.stdout).stage_instance, null);
+assert.deepEqual(snapshot(resolved.root), beforePreview, "preview does not persist done or acquire a claim");
+const completedBinding = fixtureEnvironment(resolved.root, ["orchestrate", "next", "--module", "shop"]).AIDLC_SESSION_BINDING;
+assert(completedBinding, "a completed real checkpoint supplies the fixture binding");
+const completedNext = cli(resolved.root, ["orchestrate", "next", "--module", "shop"], completedBinding);
+assert.equal(completedNext.status, 0, output(completedNext));
+assert.equal(JSON.parse(completedNext.stdout).kind, "done");
+console.log("PASS resolved module fixture: read-only null preview, exact checkpoint binding, persisted done");

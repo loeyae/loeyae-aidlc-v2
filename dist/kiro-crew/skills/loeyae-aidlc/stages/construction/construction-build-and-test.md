@@ -13,7 +13,8 @@ produces:
   - docs/aidlc/construction/build-test-report.md
   - docs/aidlc/construction/build-and-test/build-and-test-summary.md
   - .aidlc/evidence/build-and-test/build-test-evidence.json
-sensors: [doc-cascade, build-test-evidence, test-quality]
+  - .aidlc/evidence/build-and-test/global-review-evidence.json
+sensors: [doc-cascade, build-test-evidence, test-quality, global-review-evidence]
 requires: [code-generation, code-review]
 ---
 
@@ -22,6 +23,8 @@ requires: [code-generation, code-review]
 **目的**：实际执行构建与测试命令，修复失败并保存可复现证据。生成说明文档不能替代命令执行。
 
 **适用性**：普通行为变更执行实际所需 build/check 与真实非零通过测试。加载 `common-c8-role-applicability.md`：按模块复核已批准项目政策及来源，无声明默认必需；无独立构建/检查时可按契约记录角色不适用，不制造空 build 或重复执行同一检查。可信 I13 已声明无可执行业务行为，或单元的空 UC-D 子集有已批准 ucd_exemption 时，producer 与完成门禁复核来源和声明后允许用真实成功的确定性 check 完成该范围；不存在的构建/测试记录为不适用，测试数如实为零。C8 项目轴必须覆盖所有模块，任一模块需要构建时不能被其他模块豁免。业务范围仍需真实测试；空声明、全 skipped/todo 或来源失效不能豁免。
+
+**安全风险验证**：任一参与 workflow 的 execution profile 记录 `security_or_sensitive_data` 时，C8 allowlist 必须声明 `risk_validation: [{"risk":"security_or_sensitive_data","sources":["项目安全验收来源路径"],"command_ids":["实际 test/check 命令 ID"]}]`。来源须为项目内真实文件，命令须为当前 allowlist 中实际成功执行的 test/check；producer 与完成门禁复核来源摘要及命令结果。根据实际权限、敏感数据或威胁边界选择验证，不统一安装某个扫描器。缺少适用验证时记录未验证并阻断，不能把设计论证写成已执行检查。
 
 `consumes` 中的 `src/` 是源码根的规范占位，按 `module-manifest` 的 `paths`（本阶段为 project 轴，取所有模块并集）→ `.aidlc/source-roots.json` → 默认 `src/` 解析，规则见 `construction-code-generation.md`“源码根解析”。命令清单优先使用 `.aidlc/commands/build-and-test.json`，不存在时回退 `.aidlc/evidence-commands.json`；显式 `--config` 仅在指向同一默认查找文件时接受，以便门禁重新绑定命令。
 
@@ -38,6 +41,8 @@ requires: [code-generation, code-review]
 1. **每单元双轴审查记录**：`docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md` 中包含通过的 Spec + Standards 结果，且无未解决的关键/重要问题；仅建议开放时按严重度计数契约记录，不阻断。
 2. **最终全局审查记录**（C7 触发时）：审计文件中包含 `FINAL_GLOBAL` 模式审查结论且状态为通过。
 3. **缺失任一记录或结论非通过时，C8 不得开始**——返回缺失步骤并告知用户原因。
+
+最终全局审查按 `sensors/global-review-evidence.md` 形成受控观察。`orchestrate state review-inputs` 只读返回当前单元和输入快照；完成实际 FINAL_GLOBAL 审查并产证后才能进入 C8。有效证据复用仍需核对当前输入，不用“已目测”或快照投影代替审查。
 
 不得以"快速通道""时间紧迫""已目测确认"等理由绕过。C7 条件不满足时只需验证条件 1。
 

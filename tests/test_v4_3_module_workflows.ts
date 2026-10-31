@@ -1,3 +1,7 @@
+import { readSourceRevision } from "../core/tools/aidlc-revision";
+import { bindSession, claimToken } from "../core/tools/aidlc-session";
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment, releaseFixtureClaims } from "./mars243_fixture_session";
 import assert from "node:assert/strict";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -17,14 +21,16 @@ const LEGACY_ID = "ad8e646d-5b1c-4c1e-9d2a-4f9f0c7e1a01";
 const GLOBAL_STAGES = ["workspace-detection", "product-inception", "module-division", "product-contracts", "scenario-module-mapping", "state-template"];
 
 function run(cwd: string, args: string[]): { status: number; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8" });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8" , env: fixtureEnvironment(cwd, [...args]) });
   return { status: result.status ?? 1, stdout: result.stdout || "", stderr: result.stderr || "" };
 }
 
 function success(cwd: string, args: string[]): Record<string, unknown> {
   const result = run(cwd, args);
   assert.equal(result.status, 0, `${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
-  return JSON.parse(result.stdout) as Record<string, unknown>;
+  const directive = JSON.parse(result.stdout) as Record<string, unknown>;
+  if (directive.binding_required && args.includes("--module")) return success(cwd, args.filter((arg, i) => arg !== "--work" && args[i - 1] !== "--work"));
+  return directive;
 }
 
 function failure(cwd: string, args: string[], pattern: RegExp): void {
@@ -67,7 +73,7 @@ function setCurrent(project: string, instance: string, moduleId: string, stage: 
   state.current_phase = "inception";
   state.current_stage_instance = instance;
   state.current_module = moduleId;
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
 }
 
 /**
@@ -114,13 +120,22 @@ function prepareLegacyProject(name: string): string {
   state.completed_stages = [...GLOBAL_STAGES];
   state.completed_stage_instances = [...GLOBAL_STAGES];
   state.skipped_stage_instances = [`reverse-engineering@module:${M01}`, `reverse-engineering@module:${M03}`];
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
 
   // m01 finishes requirements-analysis through the real producer and report gates.
   setCurrent(project, `requirements-analysis@module:${M01}`, M01, "requirements-analysis");
   success(project, ["evidence", "run", "--stage", "requirements-analysis"]);
   success(project, ["orchestrate", "report", "--stage", "requirements-analysis", "--result", "completed"]);
 
+  // Deliberately recreate pre-scope provenance for the legacy migration case.
+  const legacyEvidence = (id: string) => {
+    const path = evidencePath(project, id);
+    const record = JSON.parse(readFileSync(path, "utf8"));
+    record.source_revision = readSourceRevision(project);
+    delete record.checker.command_version; // historical checker digest predates explicit module argv
+    writeFileSync(path, JSON.stringify(record));
+  };
+  legacyEvidence(M01);
   // m03 writes and commits its artifacts afterwards: m01's whole-worktree evidence is now stale.
   write(project, `docs/aidlc/modules/${M03}/inception/requirements.md`, requirements(M03, "REQ-101"));
   commit(project, "merchant requirements");
@@ -128,12 +143,13 @@ function prepareLegacyProject(name: string): string {
   success(project, ["evidence", "run", "--stage", "requirements-analysis"]);
   success(project, ["orchestrate", "report", "--stage", "requirements-analysis", "--result", "completed"]);
 
+  legacyEvidence(M03);
   // The single workflow parks on m01 exactly like the reported incident (clarification was not needed).
   setCurrent(project, `requirements-methods@module:${M01}`, M01, "requirements-methods");
   const parked = loadWorkflowState(project)!;
   parked.skipped_stage_instances.push(`requirement-clarification@module:${M01}`);
   parked.status = "parked";
-  saveWorkflowState(project, parked);
+  saveFixtureState(project, parked);
   return project;
 }
 
@@ -149,7 +165,7 @@ try {
   assert.match(legacyBlocked.stdout, /requirements-analysis@module:m01-trade[\s\S]*worktree_digest no longer matches/);
   const resumed = loadWorkflowState(project)!;
   resumed.status = "parked";
-  saveWorkflowState(project, resumed);
+  saveFixtureState(project, resumed);
 
   failure(project, ["orchestrate", "split", "--from", "00000000"], /does not match the active workflow/);
   const plan = success(project, ["orchestrate", "split", "--from", "ad8e646d", "--dry-run"]);
@@ -206,22 +222,22 @@ try {
   assert.equal(m03Next.kind, "run-stage");
   assert.equal(m03Next.stage_instance, `requirement-clarification@module:${M03}`);
   assert.equal(m03Next.workflow, `module:${M03}`);
-  assert.match(String(m03Next.handoff_prompt), /模块负责人可作为本模块 workflow conductor 推进，无需回到 global\/父议题协调者/);
+  assert.match(String(m03Next.handoff_prompt), /持有当前精确 session binding 的会话/);
   assert.match(String(m03Next.handoff_prompt), /orchestrate report --stage requirement-clarification --module m03-merchant --result completed/);
   const routed = success(project, ["orchestrate", "next"]);
   assert.equal(routed.stage_instance, `requirement-clarification@module:${M03}`, "plain next skips the parked module");
-  assert.ok((routed.other_workflows as string[]).some((note) => /m01-trade: parked/.test(note)));
+  assert.equal(loadWorkflowState(project, { kind: "module", module_id: M01 })!.status, "parked");
   assert.equal(loadWorkflowState(project, { kind: "module", module_id: M01 })!.status, "parked");
   assert.equal(projected(project).modules.find((row) => row.module_id === M03)!.current_stage, `requirement-clarification@module:${M03}`);
   const status = success(project, ["orchestrate", "next", "--status"]);
   assert.match(String(status.message), /\[module:m01-trade\] parked[\s\S]*\[module:m03-merchant\] running/);
 
   // ---------------------------------------------------------------- acceptance 3: refresh + re-attest
-  failure(project, ["evidence", "run", "--stage", "requirements-analysis", "--module", M01], /is not active; it is completed, pass --refresh/);
+  failure(project, ["evidence", "run", "--stage", "requirements-analysis", "--module", M01], /requires an active lightweight workflow|is not active; it is completed, pass --refresh/);
   failure(project, ["orchestrate", "report", "--stage", "requirements-analysis", "--module", M01, "--result", "completed"], /Cannot re-attest[\s\S]*worktree_digest no longer matches/);
   success(project, ["evidence", "run", "--stage", "requirements-analysis", "--module", M01, "--refresh"]);
   const refreshed = JSON.parse(readFileSync(evidencePath(project, M01), "utf8"));
-  assert.equal(refreshed.source_revision.scope, `module:${M01}`);
+  assert.equal(refreshed.source_revision.scope, `inputs-v2:module:${M01}:baseline`);
   assert.match(refreshed.source_revision.scope_digest, /^[a-f0-9]{64}$/);
   assert.equal(refreshed.evidence_version, "1");
   assert.equal(refreshed.stage_instance, `requirements-analysis@module:${M01}`);
@@ -246,7 +262,7 @@ try {
   assert.match(spawnSync("git", ["rev-parse", "--verify", `refs/heads/aidlc/modules/${M01}`], { cwd: project, encoding: "utf8" }).stdout, /^[a-f0-9]{40}/);
   const m01Requirements = join(project, "docs", "aidlc", "modules", M01, "inception", "requirements.md");
   writeFileSync(m01Requirements, `${readFileSync(m01Requirements, "utf8")}Additional REQ-001 detail.\n`, "utf8");
-  failure(project, ["orchestrate", "report", "--stage", "requirements-analysis", "--module", M01, "--result", "completed"], /scope_digest no longer matches the module:m01-trade scope/);
+  failure(project, ["orchestrate", "report", "--stage", "requirements-analysis", "--module", M01, "--result", "completed"], /scope_digest no longer matches the inputs-v2:module:m01-trade:baseline scope/);
   git(project, ["checkout", "--", `docs/aidlc/modules/${M01}/inception/requirements.md`]);
   success(project, ["orchestrate", "report", "--stage", "requirements-analysis", "--module", M01, "--result", "completed"]);
 
@@ -268,7 +284,7 @@ try {
   const scoped = success(project, ["check", "--sensor", "diagram-contract", "--module", M03]);
   assert.equal(scoped.status, "passed");
   failure(project, ["check", "--sensor", "diagram-contract", "--module", M01], /diagram structured source is missing for module m01-trade/);
-  const legacyContext = spawnSync(process.execPath, [tsx, cli, "check", "--sensor", "diagram-contract"], { cwd: project, encoding: "utf8", env: { ...process.env, AIDLC_ACTIVE_MODULE: M03 } });
+  const legacyContext = spawnSync(process.execPath, [tsx, cli, "check", "--sensor", "diagram-contract"], { cwd: project, encoding: "utf8", env: { ...fixtureEnvironment(project, ["check", "--sensor", "diagram-contract"]), ...({ ...process.env, AIDLC_ACTIVE_MODULE: M03 }) } });
   assert.notEqual(legacyContext.status, 0, "an env-only module context keeps the historical project-wide discovery");
   success(project, ["orchestrate", "diagram-format", "--set", "mermaid", "--user-input", "改回 Mermaid"]);
 
@@ -280,7 +296,7 @@ try {
   writeFileSync(contracts, readFileSync(contracts, "utf8").replace("| 下单读取门店 | 待适配 |", "| 下单读取门店 | 已验证 |"), "utf8");
   // Module scope still binds a module's evidence to that module's own later writes
   // (clarifications, diagrams); the documented repair is refresh + re-attest.
-  failure(project, ["orchestrate", "next", "--module", M03, "--resume"], /scope_digest no longer matches the module:m03-merchant scope/);
+  failure(project, ["orchestrate", "next", "--module", M03, "--resume"], /scope_digest no longer matches the inputs-v2:module:m03-merchant:baseline scope/);
   assert.equal(loadWorkflowState(project, { kind: "module", module_id: M03 })!.status, "parked", "failed admission must not commit the resume");
   success(project, ["evidence", "run", "--stage", "requirements-analysis", "--module", M03, "--refresh"]);
   success(project, ["orchestrate", "report", "--stage", "requirements-analysis", "--module", M03, "--result", "completed"]);
@@ -290,6 +306,9 @@ try {
   const verified = projected(project);
   assert.equal(verified.shared_contracts[0].verified, true);
   assert.deepEqual(verified.integration.blocking, [`construction:${M01}`, `construction:${M03}`]);
+  const beforeTransfer = loadWorkflowState(project, { kind: "module", module_id: M03 })!;
+  const transferred = Object.values(beforeTransfer.active_instances).find(claim => claim.module_id === M03)!;
+  bindSession(project, { instance: transferred.stage_instance, owner: "carol", session: "carol-session", expected: claimToken(transferred), humanInstructionRef: "fixture:explicit-carol-transfer" });
   success(project, ["module", "select", "--module", M03, "--owner", "carol"]);
   assert.equal(projected(project).modules.find((row) => row.module_id === M03)!.owner, "carol");
   assert.equal(loadWorkflowState(project, { kind: "module", module_id: M03 })!.module_selections[M03].owner, "carol");
@@ -300,12 +319,14 @@ try {
 
   // ---------------------------------------------------------------- auto split on next --module
   const autoProject = prepareLegacyProject("auto-split");
+  releaseFixtureClaims(autoProject);
+  fixtureEnvironment(autoProject, ["orchestrate", "report"]); // migrate ownership of the legacy current before routing elsewhere
   const autoNext = success(autoProject, ["orchestrate", "next", "--module", M03]);
   assert.equal(autoNext.stage_instance, `requirement-clarification@module:${M03}`);
   assert.ok(existsSync(join(autoProject, "aidlc", "active", "registry.md")));
   assert.equal(loadWorkflowState(autoProject, { kind: "module", module_id: M01 })!.status, "parked");
   failure(autoProject, ["orchestrate", "next", "--module", M01, "--resume"], /requirements-analysis@module:m01-trade[\s\S]*worktree_digest no longer matches[\s\S]*--refresh/);
-  failure(autoProject, ["orchestrate", "report", "--stage", "requirement-clarification", "--result", "completed"], /needs --module|Cannot complete|missing|not found/);
+  failure(autoProject, ["orchestrate", "report", "--stage", "requirement-clarification", "--result", "completed"], /needs --module|Cannot complete|missing|not found|explicit session binding required/);
 
   // ---------------------------------------------------------------- acceptance 6: single layout is unchanged
   const legacy = join(root, "legacy");

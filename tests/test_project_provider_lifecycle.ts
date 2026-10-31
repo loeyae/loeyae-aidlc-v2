@@ -1,3 +1,5 @@
+import { fixtureEnvironment } from "./mars243_fixture_session";
+import { createInitialState, renderLightWorkflowState } from "../core/tools/aidlc-light-state";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -144,7 +146,7 @@ function pushNextCommit(source: string, version: string): string {
 }
 
 function runCli(cwd: string, ...args: string[]): ReturnType<typeof spawnSync> {
-  return spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8", shell: false });
+  return spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8", shell: false , env: fixtureEnvironment(cwd, [...args]) });
 }
 
 const root = mkdtempSync(join(tmpdir(), "aidlc-project-provider-test-"));
@@ -163,7 +165,7 @@ try { chmodSync(maliciousHook, 0o755); } catch { /* Windows mode support is opti
 mkdirSync(join(project, ".aidlc"), { recursive: true });
 write(join(project, ".aidlc", "provider-git-policy.json"), JSON.stringify({ version: 1, allow_file_fixtures: true }) + "\n");
 mkdirSync(join(project, "aidlc", "active"), { recursive: true });
-write(join(project, "aidlc", "active", "aidlc-state.md"), "# fixture state\n");
+write(join(project, "aidlc", "active", "aidlc-state.md"), renderLightWorkflowState(createInitialState("feature", undefined, undefined, [], "provider lifecycle fixture")));
 
 const fixture = createProviderRemote(root, markers);
 const previousHome = process.env.HOME;

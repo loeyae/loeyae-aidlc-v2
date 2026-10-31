@@ -45,6 +45,20 @@ Stop 只是只读回合边界。结束回合可以保留 running 阶段；不需
 
 旧状态保持可读、无关会话可以退出；写入前必须显式 bind，不能把所有遗留实例静默分给当前会话。旧 claim 无 session 时，原 owner 可显式首次绑定，换 owner 需要人类 transfer。领取过期不删除代次或自动接管；当前 binding 可显式重新 bind 续租。已完成实例可显式重新绑定用于受控 refresh；不因换 owner 自动使证据失效。阶段完成后先 inspect/bind 新实例，再 next。
 
+用户要求继续指定单元时，当前精确领取可以用于同一 workflow、同一模块的必要机械操作：对已采用切片且 units-generation 已完成的模块重新生成切片，并用 `evidence run --stage units-generation --module <id> --sensor document-slice-consistency --refresh` 刷新其已完成阶段证据。无需为这些操作转交模块领取；首次采用切片、恢复权威文档和业务审批仍需各自的权限。生成和发布会重新核验当前领取代次，并通过写入锁和来源复核处理并发；遇到冲突须停止并说明，不得覆盖他人工作。刷新时进度写入 stderr，可设置 `AIDLC_PROGRESS=0` 关闭。
+
+`next` 返回 `execution_status: isolated-work-exit-blocked` 时，只能在隔离工作区分析、编码和运行测试。已完成上游阶段的证据缺失，或其来源范围 / 检查器版本与当前工具不兼容，可以触发该状态；证据内容的语义失败不会被降级。先记录返回的权威全文、单元清单和批准映射的路径与 SHA-256；不得把旧切片当作权威输入。该结果不推进 state，也不允许报告完成、合并或交付；恢复证据后复核来源变化和受影响范围，重新运行相应测试，再走正式门禁。缺少其他必需依赖、权威内容或批准映射冲突时仍停止相关实施。
+
 宿主边界：Claude、Codex、CodeBuddy、ZCode、Qoder CLI、Kiro IDE/CLI 的 hook 保留原生输入与成功退出格式；支持的 `session_id` / `thread_id` / `sessionID` 与显式 binding 一致时仅检查该 binding。OpenCode idle adapter 显式传 session_id。KiroCrew 无自动 Stop，Qoder CN Desktop 无 CLI 时也不假定已注册 Stop：在启动/续作入口使用上述显式绑定。没有 binding 时不扫描全项目。损坏/冲突 binding 仅给局部诊断并允许结束，不授予写入权。
 
 受控本地 evidence、Provider Runner 的 accepted Evidence、GateDecision 与 knowledge confirmation receipt 都在工作流锁内重新校验原会话快照后发布。独立 Provider 安装/查询没有工作流时保持可用；执行中若新工作流出现则拒绝自动采用该结果。
+
+## 静止维护交接
+
+`state recover`、`state adopt` 和 `state rebuild` 使用独立维护入口，不继承普通会话的阶段写权限。
+
+1. 各领取人用自己的 binding 执行 `module inspect --stage-instance <instance>`，随后执行 `module release --stage-instance <instance> --expect <expected>`。只释放自己的精确 claim；不改变阶段、业务产物和审批。旧 binding 随即失效。过期领取也不会自动消失或被维护入口接管。
+2. 所有 claim 释放后，读取 `orchestrate state maintenance-plan [--module <id>]`。仍有 claim 时先完成其显式交接，不代替其他会话释放。每次释放都会使旧摘要失效。
+3. 清除本次维护子进程的 `AIDLC_SESSION_BINDING`，使用返回的 `maintenance_token` 执行 `orchestrate state recover --module <id> --maintenance <token> --user-input Approve --reason "<真实原因>"`；adopt 另加 `--from <commit>`，rebuild 不带 module。批准与原因来自实际用户授权。
+
+引擎在所有 workflow 与 registry 的锁内重新核对摘要和静止状态。摘要过期或又有会话领取时拒绝，须重新读取，不自动重试覆盖。失败时回滚受管 state、audit 和 registry，保留用于恢复的备份。恢复与收养不恢复历史 claim；恢复修订号高于本地及检查点，阶段、历史及既有业务审批保留。恢复不授予缺失或过期证据通过资格；重新绑定后按普通门禁补验证，并显式 checkpoint 新状态。

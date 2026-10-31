@@ -1,3 +1,5 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 /**
  * MARS-90 regression suite: stage-aligned traceability-matrix gates.
  *
@@ -40,7 +42,7 @@ function cleanEnv(): NodeJS.ProcessEnv {
 }
 
 function run(project: string, args: string[]): Run {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: cleanEnv() });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: {...fixtureEnvironment(project, [...args]), ...(cleanEnv())} });
   const stdout = result.stdout || "";
   return { status: result.status ?? 1, stdout, out: `${stdout}\n${result.stderr || ""}` };
 }
@@ -99,7 +101,7 @@ function setCurrent(project: string, stage: string): void {
   state.current_phase = "inception";
   state.current_stage_instance = `${stage}@module:${M01}`;
   state.current_module = M01;
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
 }
 
 /** A migrated module (REQ with track) whose requirements analysis embeds a clarification CL-001. */
@@ -119,7 +121,7 @@ function makeProject(name: string, requirementsExtra = ""): string {
   state.completed_stages = [...GLOBAL_STAGES];
   state.completed_stage_instances = [...GLOBAL_STAGES];
   state.skipped_stage_instances = [`reverse-engineering@module:${M01}`];
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
   setCurrent(project, "requirements-analysis");
   return project;
 }
@@ -215,7 +217,7 @@ try {
     const state = loadWorkflowState(project)!;
     state.completed_stage_instances = [...GLOBAL_STAGES, "application-design", `application-design@module:${M01}`];
     state.completed_stages = [...GLOBAL_STAGES, "application-design"];
-    saveWorkflowState(project, state);
+    saveFixtureState(project, state);
     setCurrent(project, "application-design");
     const blocked = matrix(project);
     assert.equal(blocked.contract_status, "BROKEN", JSON.stringify(blocked));
@@ -224,7 +226,7 @@ try {
     // The owner's own instance (hyphenated module id resolved from the manifest) delivers the contract.
     const delivered = loadWorkflowState(project)!;
     delivered.completed_stage_instances = [...delivered.completed_stage_instances, "application-design@module:order-svc"];
-    saveWorkflowState(project, delivered);
+    saveFixtureState(project, delivered);
     const passed = matrix(project);
     assert.equal(passed.contract_status, "passed", JSON.stringify(passed));
     assert.deepEqual(passed.uncovered_contracts, [], JSON.stringify(passed));

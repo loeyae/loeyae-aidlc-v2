@@ -1,6 +1,9 @@
 import { assertSessionClaim, withSessionPublication, sessionBinding, type SessionBinding } from "./aidlc-light-state";
 import { createHash, randomUUID } from "crypto";
 import { QUALITY_SENSORS, qualityAdoption, recordQualityCheckpoint, type QualitySnapshot } from "./aidlc-quality-gates";
+import { SLICE_SENSOR, sliceEvidenceErrors, type SliceContext } from "./aidlc-document-slices";
+import { markProgress, startProgressHeartbeat } from "./aidlc-progress";
+import { runHistoricalReplay, replayEvidenceErrors, historicalReplayPrior } from "./aidlc-historical-red";
 import { createRequire } from "module";
 import {
   closeSync,
@@ -42,6 +45,7 @@ export type Phase = "RED" | "GREEN" | "BASELINE";
 const PHASE_SENSORS: Record<Phase, string> = { RED: "red-test-evidence", GREEN: "green-test-evidence", BASELINE: "baseline-test-evidence" };
 
 export const SEMANTIC_SENSORS = new Set([
+  "global-review-evidence", "deployment-validation",
   "document-slice-consistency",
   ...QUALITY_SENSORS,
   "review-evidence",
@@ -90,6 +94,7 @@ interface EvidenceConfig {
   artifacts?: ArtifactSpec[];
   freshness?: Record<string, unknown>;
   role_applicability?: { module_id: string; package_json: string; roles: ("build" | "check")[] }[];
+  risk_validation?: unknown;
 }
 
 interface CommandResult {
@@ -451,7 +456,42 @@ function parseConfig(path: string, stage: string, allowEmptyCommands = false): E
       return { module_id: moduleId, package_json: nonEmptyString(item.package_json, "role_applicability.package_json"), roles: item.roles as ("build" | "check")[] };
     });
   }
-  return { version: "1", stage, commands, artifacts, ...(roleApplicability ? { role_applicability: roleApplicability } : {}), ...(config.freshness !== undefined ? { freshness: config.freshness as Record<string, unknown> } : {}) };
+  return { version: "1", stage, commands, artifacts, ...(roleApplicability ? { role_applicability: roleApplicability } : {}), ...(config.risk_validation !== undefined ? { risk_validation: config.risk_validation } : {}), ...(config.freshness !== undefined ? { freshness: config.freshness as Record<string, unknown> } : {}) };
+}
+
+/** Each declared deployment artifact maps to a real allowlisted check with the same id. */
+export function deploymentValidationPayload(): Record<string, unknown> {
+  const path = resolveCommandConfigPath(PROJECT_ROOT, "operations-authorization");
+  const config = requireCommandConfig(path, "operations-authorization");
+  if (!config.artifacts?.length) fail("deployment validation requires actual configuration artifacts");
+  const checks = config.commands.filter(command => command.role === "check");
+  for (const artifact of config.artifacts) if (!checks.some(command => command.id === artifact.id)) fail(`deployment artifact ${artifact.id} requires a check command with the same id`);
+  const files = config.artifacts.map(artifact => ({ id: artifact.id, path: safeCwdLabel(artifact.path).replace(/\\/g, "/"), sha256: createHash("sha256").update(readFileSync(artifact.path)).digest("hex") }));
+  const configSha = createHash("sha256").update(readFileSync(path)).digest("hex");
+  const commands = checks.map(runCommand);
+  const payload = { status: "passed", config_sha256: configSha, files, commands };
+  const errors = deploymentValidationErrors(payload);
+  if (errors.length) fail(errors.join("; "));
+  return payload;
+}
+
+export function deploymentValidationErrors(evidence: Record<string, unknown>): string[] {
+  try {
+    const path = resolveCommandConfigPath(PROJECT_ROOT, "operations-authorization");
+    const config = requireCommandConfig(path, "operations-authorization");
+    const files = config.artifacts?.map(artifact => ({ id: artifact.id, path: safeCwdLabel(artifact.path).replace(/\\/g, "/"), sha256: createHash("sha256").update(readFileSync(artifact.path)).digest("hex") }));
+    const commands = Array.isArray(evidence.commands) ? evidence.commands as CommandResult[] : [];
+    const checks = config.commands.filter(command => command.role === "check"), errors: string[] = [];
+    if (evidence.status !== "passed" || !files?.length || JSON.stringify(evidence.files) !== JSON.stringify(files)) errors.push("deployment configuration is missing or changed");
+    if (evidence.config_sha256 !== createHash("sha256").update(readFileSync(path)).digest("hex")) errors.push("deployment command configuration changed");
+    if (commands.length !== checks.length) errors.push("deployment checks must cover every configured check");
+    for (const spec of checks) {
+      const command = commands.find(item => item.id === spec.id);
+      if (!command || command.role !== "check" || command.exit_code !== 0 || command.status !== "passed" || command.argv_digest !== argvDigest(spec.argv) || command.cwd !== safeCwdLabel(spec.cwd || PROJECT_ROOT)) errors.push(`deployment check ${spec.id} is missing, failed or changed`);
+    }
+    for (const artifact of config.artifacts || []) if (!checks.some(command => command.id === artifact.id)) errors.push(`deployment artifact ${artifact.id} has no validation`);
+    return errors;
+  } catch (error) { return [String(error)]; }
 }
 
 function safeCwdLabel(cwd: string): string {
@@ -739,6 +779,20 @@ function c8RoleErrors(commands: { id: unknown; role: unknown }[], config: Eviden
 }
 
 /** Build/test verification shared by producer, scheduler and completion gate. */
+function securityValidationBasis(config: EvidenceConfig, state: ProducerState): Record<string, unknown> | undefined {
+  const profiles = [state.execution_profile, ...[...loadWorkflowParts(PROJECT_ROOT).parts.values()].map(part => part.state.execution_profile)];
+  if (!profiles.some(profile => profile?.active_risks.includes("security_or_sensitive_data"))) return undefined;
+  const records = config.risk_validation;
+  if (!Array.isArray(records)) fail("security risk is unverified: C8 risk_validation must bind acceptance sources and real test/check command_ids");
+  const matches = records.filter(record => record?.risk === "security_or_sensitive_data");
+  if (matches.length !== 1) fail("security risk requires exactly one risk_validation declaration");
+  const record = matches[0];
+  if (!Array.isArray(record.sources) || !record.sources.length || !record.sources.every((path: unknown) => typeof path === "string" && path.trim())
+    || !Array.isArray(record.command_ids) || !record.command_ids.length || new Set(record.command_ids).size !== record.command_ids.length
+    || !record.command_ids.every((id: unknown) => config.commands.some(command => command.id === id && ["test", "check"].includes(command.role)))) fail("security risk_validation requires non-empty local sources and unique allowlisted test/check command_ids");
+  return { risk: record.risk, sources: record.sources.map((path: string) => ({ path, sha256: createHash("sha256").update(readFileSync(requireRegularFile(safeProjectPath(path, "security acceptance source"), "security acceptance source"))).digest("hex") })), command_ids: record.command_ids };
+}
+
 export function buildTestEvidenceErrors(evidence: Record<string, unknown>, state: ProducerState): string[] {
   const errors: string[] = [];
   if (evidence.status !== "passed") errors.push("build/test status must be passed");
@@ -747,6 +801,9 @@ export function buildTestEvidenceErrors(evidence: Record<string, unknown>, state
   const zeroTests = tests?.total === 0 && tests.passed === 0 && tests.failed === 0 && tests.skipped === 0;
   try {
     const config = requireCommandConfig(resolveCommandConfigPath(PROJECT_ROOT, "build-and-test"), "build-and-test");
+    const security = securityValidationBasis(config, state);
+    if (JSON.stringify(evidence.risk_validation) !== JSON.stringify(security)) errors.push("security acceptance sources or validation policy changed; rerun actual security verification");
+    if (security && (security.command_ids as string[]).some(id => !commands.some(command => command.id === id && command.status === "passed" && command.exit_code === 0))) errors.push("security validation commands were not successfully executed");
     const roleBasis = c8RoleBasis(config, state);
     if (JSON.stringify(evidence.role_applicability) !== JSON.stringify(roleBasis)) errors.push("C8 role applicability no longer matches project policy/configuration sources");
     const roles = new Set(commands.map(command => command.role));
@@ -1002,6 +1059,42 @@ function mappingDebtFor(i13: Record<string, unknown>, scope: ReturnType<typeof u
 }
 
 function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase: Phase): void {
+  if (options.historicalReplay) {
+    if (phase !== "RED" || options.testFilter || options.explicitConfig || !state.current_module || !state.current_unit) fail("historical_replay requires exact RED module/unit, no --config or test filter");
+    const i13 = phaseRecord(state);
+    const currentHead = runSync("git", ["rev-parse", "HEAD"], { cwd: PROJECT_ROOT, encoding: "utf8", shell: false });
+    if (currentHead.status !== 0) fail("historical_replay requires the workflow's current Git commit");
+    // I13's provenance needs ancestry here; historical/source and current requirements
+    // get separate byte summaries below, without hashing unrelated workflow media twice.
+    assertControlledI13(PROJECT_ROOT, i13, state.current_module, String(currentHead.stdout).trim());
+    if (i13.status !== "required") fail("historical_replay requires executable current I13");
+    const scope = unitUcdIds(i13, state.current_unit);
+    if (!scope.scoped || !scope.new.length || i13MappingDeferredIds(i13).some(id => scope.all.includes(id))) fail("historical_replay requires complete, explicit current unit UC-D mapping without mapping debt");
+    const output = options.output || evidenceOutput(options.stage, PHASE_SENSORS.RED, undefined, state);
+    const identity = { workflow_id: state.workflow_id, module_id: state.current_module, unit_id: state.current_unit };
+    const prior = historicalReplayPrior(PROJECT_ROOT, identity, output);
+    const payload = runHistoricalReplay(PROJECT_ROOT, identity, i13, scope.new, output, prior);
+    if (JSON.stringify(phaseRecord(state)) !== JSON.stringify(i13)) fail("historical_replay: I13 changed during execution");
+    payload.historical_replay.publication_claim = publicationContext?.binding;
+    invalidateRevisionCache();
+    const record = { ...payload, ...executionContext(state), evidence_version: "1", timestamp: new Date().toISOString(), producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() }, source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance), checker: { id: "builtin:red-test-evidence", sensor: PHASE_SENSORS.RED, argv_digest: phaseObservationDigest("RED", payload.observed_command.argv_digest), exit_code: 0, status: "passed" } };
+    const serialized = `${JSON.stringify(record, null, 2)}\n`;
+    if (Buffer.byteLength(serialized) > 512 * 1024) fail("historical_replay canonical evidence exceeds the unchanged 512 KiB gate limit");
+    publishAuthorized(() => {
+      if (prior) {
+        const bytes = readFileSync(output);
+        if (createHash("sha256").update(bytes).digest("hex") !== prior.sha256) fail("historical_replay: prior evidence changed during execution");
+        if (existsSync(prior.path)) {
+          if (createHash("sha256").update(readFileSync(prior.path)).digest("hex") !== prior.sha256) fail("historical_replay: archive conflicts with prior evidence");
+        } else writeAtomicLocked(prior.path, bytes.toString("utf8"));
+      } else if (existsSync(output)) fail("historical_replay: original evidence is no longer missing");
+      const errors = replayEvidenceErrors(PROJECT_ROOT, record, { workflow_id: state.workflow_id, module_id: state.current_module!, unit_id: state.current_unit! }, phaseRecord(state), scope.new);
+      if (errors.length) fail(errors.join("; "));
+      writeAtomicLocked(output, serialized);
+    });
+    console.log(JSON.stringify({ status: "passed", evidence_mode: "historical_replay", output, limitation: payload.historical_replay.limitation }, null, 2));
+    return;
+  }
   assertPhaseConfigBinding(options, phase === "BASELINE" ? "BASELINE" : "RED/GREEN");
   // MARS-271: 受影响方法过滤只服务 RED 收敛迭代;GREEN/BASELINE 最终证据强制全量。
   if (options.testFilter && phase !== "RED") fail("--test-filter is only supported for RED evidence; GREEN and BASELINE must run the full test suite");
@@ -1146,17 +1239,25 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
     return;
   }
   const output = options.output || evidenceOutput(options.stage, sensor, undefined, state);
+  const started = Date.now();
+  const progress = (phase: string): void => {
+    markProgress(phase.startsWith("waiting") ? 2 : phase.startsWith("validating") ? 3 : phase.startsWith("publishing") ? 4 : 1);
+    if (options.refresh && process.env.AIDLC_PROGRESS !== "0") process.stderr.write(`[aidlc] evidence ${sensor}: ${phase}; elapsed=${((Date.now() - started) / 1000).toFixed(1)}s; last_progress=${new Date().toISOString()}\n`);
+  };
+  progress("checking inputs and prior evidence");
   // MARS-271 选择性失效:刷新已完成实例时,输入指纹未变的受控证据直接复用,
   // 只有 diff 触及的 artifact 的直接依赖证据才重跑。
   const inputs = stageInputs(options.stage, state);
   const prior = priorEvidenceRecord(output);
-  if (options.refresh && inputs && prior && reusableSemanticEvidence(prior, inputs, state)) {
+  if (options.refresh && inputs && prior && !["global-review-evidence", "deployment-validation"].includes(sensor) && reusableSemanticEvidence(prior, inputs, state, sensor)
+    && (sensor !== SLICE_SENSOR || (!sliceEvidenceErrors(producerSliceContext(state), prior).length && !sliceCandidateError(state, prior)))) {
     const summary = { action: "reused" as const, inputs_digest: inputs.digest };
     if (!quiet) console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}`, ...summary }, null, 2));
     return summary;
   }
   const declarations = (config?.commands || []).filter((command) => command.role === "semantic" && command.sensor === sensor);
   if (declarations.length > 1) fail(`allowlist must declare at most one built-in semantic checker for ${sensor}`);
+  progress("waiting for semantic checker subprocess");
   const result = runSemanticCommand(sensor, declarations[0]?.timeout_ms || DEFAULT_TIMEOUT_MS, state);
   const executionId = randomUUID();
   if (sensor === "quality-change-impact" && result.payload.applicable === true) {
@@ -1165,19 +1266,27 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   const unsigned = {
     ...result.payload,
     ...(config?.freshness ? { freshness: config.freshness } : {}),
-    ...(inputs ? { inputs } : {}),
+    ...(inputs ? sensor === SLICE_SENSOR || Array.isArray(result.payload.inputs) ? { stage_inputs: inputs } : { inputs } : {}),
     ...executionContext(state),
     evidence_version: "1",
     timestamp: new Date().toISOString(),
-    producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: executionId },
+    producer: { name: "loeyae-aidlc-evidence", mode: "controlled", workflow_id: state.workflow_id, execution_id: executionId },
     source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance),
     checker: result.execution,
   };
-  writeAtomic(output, `${JSON.stringify(producedEvidence(unsigned), null, 2)}\n`);
+  const candidate = producedEvidence(unsigned);
+  if (sensor === SLICE_SENSOR) {
+    progress("validating candidate against stage-entry checks");
+    const error = sliceCandidateError(state, candidate);
+    if (error) fail(`document slice evidence candidate rejected before publication: ${error}`);
+  }
+  progress("publishing evidence");
+  writeAtomic(output, `${JSON.stringify(candidate, null, 2)}\n`);
+  progress("publication complete");
   // 失效范围说明:与上一份证据相比,artifact 集合的增删即为本次重刷的直接起因。
   let inputsChanged: string[] | undefined;
   if (inputs && prior) {
-    const priorInputs = typeof prior.inputs === "object" && prior.inputs !== null ? prior.inputs as Record<string, unknown> : undefined;
+    const priorInputs = semanticStageInputs(prior);
     const priorArtifacts = Array.isArray(priorInputs?.artifacts)
       ? (priorInputs!.artifacts as unknown[]).filter((item): item is string => typeof item === "string")
       : [];
@@ -1188,7 +1297,27 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   return summary;
 }
 
+function sliceCandidateError(state: ProducerState, candidate: Record<string, unknown>): string | undefined {
+  const checked = runSync(process.execPath, [require.resolve("tsx/cli"), join(TOOL_DIR, "aidlc-slice-candidate.ts")], {
+    cwd: PROJECT_ROOT, encoding: "utf8", input: JSON.stringify({ state, candidate }), shell: false, timeout: DEFAULT_TIMEOUT_MS,
+  });
+  return checked.error?.message || (checked.status !== 0 ? String(checked.stderr || "validator failed").trim() : undefined);
+}
+
+function producerSliceContext(state: ProducerState): SliceContext {
+  return { root: PROJECT_ROOT, workflow_id: state.workflow_id, project_workflow_id: state.parent_workflow_id || state.workflow_id,
+    module_id: state.current_module, scope: state.scope, stage: state.current_stage, ui_route: "not-selected",
+    quality_version: state.quality_gates_version, slices_version: state.document_slices_version,
+    units_executed: state.current_stage === "units-generation" || state.completed_stage_instances.includes(`units-generation@module:${state.current_module}`) };
+}
+
+function semanticStageInputs(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  const value = record.stage_inputs ?? record.inputs;
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
 interface ProducerOptions {
+  historicalReplay?: boolean;
   stage: string;
   instance?: string;
   module?: string;
@@ -1207,7 +1336,7 @@ interface ProducerOptions {
   testFilter?: string;
 }
 
-const USAGE = "usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance> | --module <module-id> [--unit <unit-id>]] [--refresh] [--sensor <sensor>] [--all-sensors] [--config <path>] [--output <path>] [--command-id <id> ...] [--lint] [--test-filter <expr>]";
+const USAGE = "usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance> | --module <module-id> [--unit <unit-id>]] [--refresh] [--sensor <sensor>] [--all-sensors] [--config <path>] [--output <path>] [--command-id <id> ...] [--lint] [--test-filter <expr>] [--historical-replay]";
 
 function parseArgs(args: string[]): ProducerOptions {
   if (args[0] !== "run") fail(USAGE);
@@ -1223,6 +1352,7 @@ function parseArgs(args: string[]): ProducerOptions {
   let allSensors = false;
   let lint = false;
   let testFilter: string | undefined;
+  let historicalReplay = false;
   for (let i = 1; i < args.length; i++) {
     const arg = args[i];
     if (["--stage", "--instance", "--module", "--unit", "--sensor", "--config", "--output", "--command-id", "--test-filter"].includes(arg)) {
@@ -1237,6 +1367,8 @@ function parseArgs(args: string[]): ProducerOptions {
       if (arg === "--output") output = value;
       if (arg === "--command-id") commandIds.push(value);
       if (arg === "--test-filter") testFilter = value;
+    } else if (arg === "--historical-replay") {
+      historicalReplay = true;
     } else if (arg === "--all-sensors") {
       allSensors = true;
     } else if (arg === "--lint") {
@@ -1251,6 +1383,7 @@ function parseArgs(args: string[]): ProducerOptions {
     }
   }
   if (!stage) fail("--stage is required");
+  if (historicalReplay && (stage !== "tdd" || sensor !== "red-test-evidence" || !refresh || allSensors || lint || output || testFilter || config)) fail("--historical-replay requires --stage tdd --sensor red-test-evidence --refresh; no output/config/filter override");
   if (instance && moduleId) fail("--instance and --module are mutually exclusive");
   if (unitId && !moduleId) fail("--unit requires --module");
   if (sensor && sensor !== "build-test-evidence" && !SEMANTIC_SENSORS.has(sensor)) fail(`unsupported semantic sensor: ${sensor}`);
@@ -1264,6 +1397,7 @@ function parseArgs(args: string[]): ProducerOptions {
   if (testFilter !== undefined && !testFilter.trim()) fail("--test-filter requires a non-empty selector expression");
   return {
     stage,
+    historicalReplay,
     ...(instance ? { instance } : {}),
     ...(moduleId ? { module: moduleId } : {}),
     ...(unitId ? { unit: unitId } : {}),
@@ -1344,7 +1478,7 @@ function loadProducerState(options: ProducerOptions): ProducerState | null {
     current_stage: instance.split("@", 1)[0],
     current_stage_instance: instance,
   };
-  if (moduleMatch || claim) context.current_module = moduleMatch?.[1] || claim!.module_id;
+  if (moduleMatch) context.current_module = moduleMatch[1];
   else delete context.current_module;
   if (unitMatch) context.current_unit = unitMatch[1];
   else delete context.current_unit;
@@ -1432,10 +1566,10 @@ function priorEvidenceRecord(output: string): Record<string, unknown> | null {
  * MARS-271 选择性失效:已受控、checker 通过、输入指纹与执行上下文都不变的证据
  * 可以在 --refresh 时复用,不必重跑。RED/GREEN/BASELINE 相位传感器不走该路径。
  */
-function reusableSemanticEvidence(prior: Record<string, unknown>, inputs: { digest: string }, state: ProducerState): boolean {
+function reusableSemanticEvidence(prior: Record<string, unknown>, inputs: { digest: string }, state: ProducerState, sensor: string): boolean {
   const producer = typeof prior.producer === "object" && prior.producer !== null ? prior.producer as Record<string, unknown> : undefined;
   const checker = typeof prior.checker === "object" && prior.checker !== null ? prior.checker as Record<string, unknown> : undefined;
-  const priorInputs = typeof prior.inputs === "object" && prior.inputs !== null ? prior.inputs as Record<string, unknown> : undefined;
+  const priorInputs = semanticStageInputs(prior);
   const priorScope = typeof prior.source_revision === "object" && prior.source_revision !== null ? (prior.source_revision as Record<string, unknown>).scope : undefined;
   const priorScopeDigest = typeof prior.source_revision === "object" && prior.source_revision !== null ? (prior.source_revision as Record<string, unknown>).scope_digest : undefined;
   // MARS-277: a record under a different scope label (e.g. the pre-baseline wide module
@@ -1443,10 +1577,19 @@ function reusableSemanticEvidence(prior: Record<string, unknown>, inputs: { dige
   // current tree must regenerate even when the consumes fingerprint cannot see the change
   // (stages with an empty consumes list track no artifacts at all).
   const scope = evidenceScopeForInstance(PROJECT_ROOT, String(state.current_stage_instance));
+  const currentRevision = readSourceRevision(PROJECT_ROOT, scope, nestedSourceRepos(PROJECT_ROOT));
+  const priorRevision = prior.source_revision as Record<string, unknown> | undefined;
   const scopeStillValid = scope.label === "worktree"
-    ? priorScope === undefined
-    : priorScope === scope.label && priorScopeDigest === readSourceRevision(PROJECT_ROOT, scope, nestedSourceRepos(PROJECT_ROOT)).scope_digest;
+    ? (priorScope === undefined || priorScope === "worktree")
+      && priorRevision?.commit === currentRevision.commit
+      && priorRevision?.dirty === currentRevision.dirty
+      && priorRevision?.worktree_digest === currentRevision.worktree_digest
+      && JSON.stringify(priorRevision?.repos || {}) === JSON.stringify(currentRevision.repos || {})
+    : priorScope === scope.label && priorScopeDigest === currentRevision.scope_digest;
   return producer?.mode === "controlled"
+    && producer.workflow_id === state.workflow_id
+    && checker?.argv_digest === argvDigest(semanticCommandArgv(sensor, state))
+    && !evidenceTimeError(prior, sensor)
     && checker?.exit_code === 0
     && checker.status === "passed"
     && prior.evidence_version === "1"
@@ -1526,11 +1669,14 @@ function runLintProducer(options: ProducerOptions): void {
 function runProducer(args: string[]): void {
   // MARS-277: the producer checks several sensors per invocation against shared
   // digest scopes; project commands run inside invalidate the memoized digests.
-  withRevisionMemoization(() => runProducerInner(args));
+  const stopHeartbeat = args.includes("--refresh") ? startProgressHeartbeat() : () => {};
+  try { withRevisionMemoization(() => runProducerInner(args)); }
+  finally { stopHeartbeat(); }
 }
 
 function runProducerInner(args: string[]): void {
   const options = parseArgs(args);
+  if (options.refresh && process.env.AIDLC_PROGRESS === undefined) process.env.AIDLC_PROGRESS = "1";
   if (options.lint) {
     runLintProducer(options);
     return;
@@ -1552,7 +1698,7 @@ function runProducerInner(args: string[]): void {
     && rawState
     && rawState.current_stage_instance !== state.current_stage_instance
     && rawState.completed_stage_instances.includes(state.current_stage_instance)
-    && !state.current_stage_instance.includes("@unit:")
+    && (!state.current_stage_instance.includes("@unit:") || options.historicalReplay && binding.stage_instance === `code-generation@module:${state.current_module}@unit:${state.current_unit}`)
     && binding.workflow_id === state.workflow_id
   );
   if (downstreamRefresh) {
@@ -1593,6 +1739,8 @@ function runProducerInner(args: string[]): void {
     const applicability = noBehaviorBasis(state);
     const roleBasis = c8RoleBasis(config, state);
     const roleErrors = c8RoleErrors(selected, config, roleBasis, !!applicability);
+    const security = securityValidationBasis(config, state);
+    if (security && (security.command_ids as string[]).some(id => !selected.some(command => command.id === id))) fail("selected commands omit required security validation");
     if (roleErrors.length) fail(roleErrors.join("; "));
 
     const commands = selected.map(spec => applicability && spec.role === "check" ? alternativeCheck(spec, state, config.freshness) : runCommand(spec));
@@ -1616,6 +1764,7 @@ function runProducerInner(args: string[]): void {
       commands,
       ...(applicability ? { applicability } : {}),
       ...(roleBasis ? { role_applicability: roleBasis } : {}),
+      ...(security ? { risk_validation: security } : {}),
       ...(config.freshness ? { freshness: config.freshness } : {}),
       tests,
       checks: { status: "passed", command_ids: commands.filter((command) => command.role === "check").map((command) => command.id) },

@@ -1,3 +1,5 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 /**
  * 4.6.0-1 (MARS-47) regression suite: legacy-code detection by source roots (S1.0),
  * the workflow baseline state fields (S1.1), `orchestrate baseline` view / --set
@@ -51,7 +53,7 @@ function parsed(stdout: string): Record<string, unknown> {
 }
 
 function run(project: string, args: string[]): Run {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: cleanEnv() });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: { ...fixtureEnvironment(project, [...args]), ...(cleanEnv()) } });
   const stdout = result.stdout || "";
   return { status: result.status ?? 1, stdout, out: `${stdout}\n${result.stderr || ""}`, json: parsed(stdout) };
 }
@@ -94,7 +96,7 @@ if (command === "legacy") {
 `, "utf8");
 
 function probe(project: string, command: string, hook: string, args: string[], env: Record<string, string> = {}): Record<string, unknown> {
-  const result = spawnSync(process.execPath, [tsx, PROBE, repository, command, hook, ...args], { cwd: project, encoding: "utf8", env: cleanEnv(env) });
+  const result = spawnSync(process.execPath, [tsx, PROBE, repository, command, hook, ...args], { cwd: project, encoding: "utf8", env: { ...cleanEnv(env), AIDLC_SESSION_BINDING: fixtureEnvironment(project, ["orchestrate", command, ...args]).AIDLC_SESSION_BINDING } });
   const line = (result.stdout || "").trim().split(/\r?\n/).pop() || "";
   const value = parsed(line);
   if (!Object.keys(value).length) return { kind: "error", message: `probe crashed: ${`${result.stdout}\n${result.stderr}`.slice(0, 600)}` };
@@ -172,7 +174,7 @@ function legacyWorkflow(project: string, scope = "refactor", mutate: (state: Wor
   state.completed_stages = ["workspace-detection"];
   state.completed_stage_instances = ["workspace-detection"];
   mutate(state);
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
   return state;
 }
 
@@ -222,7 +224,7 @@ function splitProject(name: string, moduleId = "m01-trade"): { project: string; 
   global.completed_stages = [...GLOBAL_STAGES];
   global.completed_stage_instances = [...GLOBAL_STAGES];
   global.skipped_stage_instances = [`reverse-engineering@module:${moduleId}`];
-  saveWorkflowState(project, global);
+  saveFixtureState(project, global);
   ok(project, ["orchestrate", "split", "--from", global.workflow_id]);
   return { project, commits, workflowId: global.workflow_id };
 }
@@ -238,7 +240,7 @@ function unavailableProject(name: string, commitDate = OLD_DATE, mutate: (state:
   const state = loadWorkflowState(project)!;
   assert.equal(state.baseline_commit, "unavailable", "fixture baseline is unavailable");
   mutate(state);
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
   git(project, ["init", "-q"]);
   git(project, ["checkout", "-q", "-b", "main"]);
   return { project, c1: commit(project, "c1.txt", commitDate) };
@@ -357,7 +359,7 @@ try {
     ok(project, ["orchestrate", "upgrade", "--dry-run"]);
     run(project, ["orchestrate", "park"]);
     const state = loadWorkflowState(project)!;
-    saveWorkflowState(project, state);
+    saveFixtureState(project, state);
     const after = loadWorkflowState(project) as WorkflowState & Record<string, unknown>;
     assert.ok(after.revision > before + 1, `the state was rewritten (revision ${before} -> ${after.revision})`);
     assert.equal(after.status, "parked");
@@ -429,7 +431,7 @@ try {
       const state = loadWorkflowState(project, ref as never) as WorkflowState & Record<string, unknown>;
       mutate(state);
       try {
-        saveWorkflowState(project, state, ref as never);
+        saveFixtureStateWithChecks(project, state, ref as never);
         return { kind: "accepted" };
       } catch (error) {
         return { kind: "error", message: error instanceof Error ? error.message : String(error) };
@@ -445,7 +447,7 @@ try {
     assert.equal(after.baseline_source, "created");
     // A save that leaves the baseline alone still works.
     after.depth = "standard";
-    saveWorkflowState(project, after);
+    saveFixtureState(project, after);
     assert.equal((loadWorkflowState(project) as WorkflowState & Record<string, unknown>).baseline_commit, commits[2]);
   });
 
@@ -636,6 +638,7 @@ try {
 
     // A1: an `unavailable` baseline is corrected with --expect unavailable.
     const dryUnavailable = unavailableProject("s13-unavailable-dry");
+    fixtureEnvironment(dryUnavailable.project, REPLACE(dryUnavailable.c1, "unavailable", "--dry-run"));
     const unavailableRevision = loadWorkflowState(dryUnavailable.project)!.revision;
     const dryRun = ok(dryUnavailable.project, REPLACE(dryUnavailable.c1, "unavailable", "--dry-run")).json;
     assert.equal(dryRun.dry_run, true, JSON.stringify(dryRun));
@@ -704,7 +707,7 @@ try {
     ok(done.project, SET(done.commits[1]));
     const doneState = loadWorkflowState(done.project)!;
     doneState.status = "done";
-    saveWorkflowState(done.project, doneState);
+    saveFixtureState(done.project, doneState);
     checks.expect("R11 done workflow", run(done.project, REPLACE(done.commits[0], done.commits[1])), /done/);
 
     const race = gitProject("s13-race");
@@ -718,7 +721,7 @@ try {
     const moduleRef = { kind: "module" as const, module_id: "m01-trade" };
     const moduleState = loadWorkflowState(split.project, moduleRef)!;
     moduleState.completed_stage_instances.push("tdd@module:m01-trade@unit:default");
-    saveWorkflowState(split.project, moduleState, moduleRef);
+    saveFixtureState(split.project, moduleState, moduleRef);
     checks.expect("U1 in a module sub-workflow", run(split.project, REPLACE(split.commits[0], split.commits[2])), /U1.*m01-trade|m01-trade.*U1/);
     checks.assertAll();
 

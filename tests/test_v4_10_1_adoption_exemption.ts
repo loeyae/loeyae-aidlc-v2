@@ -1,3 +1,5 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 /**
  * 4.10.1 (MARS-93) regression suite: `orchestrate baseline --adopt` ignores ucd_exemption units.
  *
@@ -53,7 +55,7 @@ function cleanEnv(): NodeJS.ProcessEnv {
 }
 
 function run(project: string, args: string[]): Run {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: cleanEnv() });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd: project, encoding: "utf8", env: { ...fixtureEnvironment(project, [...args]), ...(cleanEnv()) } });
   const stdout = result.stdout || "";
   let json: Record<string, unknown> = {};
   try {
@@ -63,6 +65,11 @@ function run(project: string, args: string[]): Run {
 }
 
 function ok(project: string, args: string[]): Run {
+  if (args[0] === "orchestrate" && args[1] === "report" && !args.includes("--instruction-ack")) {
+    const stage = args[args.indexOf("--stage") + 1];
+    const scope = ["--module", "--unit"].flatMap(flag => args.includes(flag) ? [flag, args[args.indexOf(flag) + 1]] : []);
+    if (JSON.parse(readFileSync(join(repository, "core/tools/data/stage-graph.json"), "utf8")).stages.find((node: {slug:string}) => node.slug === stage)?.produces.some((path: string) => path.startsWith(".aidlc/evidence/"))) ok(project, ["evidence", "run", "--stage", stage, "--all-sensors", ...scope]);
+  }
   const result = run(project, args);
   assert.equal(result.status, 0, `${args.join(" ")}\n${result.out}`);
   assert.notEqual(result.json.kind, "error", `${args.join(" ")}\n${result.out}`);
@@ -161,7 +168,7 @@ function fixture(name: string): Fixture {
   global.completed_stages = [...globalStages];
   global.completed_stage_instances = [...globalStages];
   global.skipped_stage_instances = [`reverse-engineering@module:${M01}`];
-  saveWorkflowState(project, global);
+  saveFixtureState(project, global);
   write(project, "docs/aidlc/ideation/scenario-module-mapping.md", `# 场景模块映射\n\nREQ-001 订单导出属于 ${M01}。\n`);
   step(["orchestrate", "split", "--from", global.workflow_id]);
   const quality = orderQualityFixture(project, M01, loadWorkflowState(project, { kind: "module", module_id: M01 })!.workflow_id, {
@@ -202,7 +209,7 @@ function fixture(name: string): Fixture {
   write(project, `${IN}/clarifications.md`, "# 需求澄清\n\nNo clarifications needed.\n\nREQ-001 的重试行为由接管前的实现定义，本次改动沿用。\n");
   report("requirement-clarification");
   nextModule(`requirements-methods@module:${M01}`, [RA]);
-  write(project, `${IN}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单导出流程\n\n```mermaid\nflowchart LR\n  A[调用导出] --> B{超时?}\n  B -- 是 --> A\n  B -- 否 --> C[返回订单]\n```\n");
+  write(project, `${IN}/requirements/business-flows.md`, "# 业务流程\n\n## REQ-001 订单导出流程\n\n<!-- aidlc-mermaid-validation: {\"diagram_id\":\"order-flow\",\"module\":\"m01-trade\",\"validation_tier\":\"STATIC_PASS\",\"diagram_type\":\"module-internal-simple-flow\",\"all_elements_within_module\":true,\"no_contract_semantics\":true,\"not_architecture_or_delivery_evidence\":true} -->\n```mermaid\nflowchart LR\n  A[调用导出] --> B{超时?}\n  B -- 是 --> A\n  B -- 否 --> C[返回订单]\n```\n");
   report("requirements-methods");
   nextModule(`user-stories@module:${M01}`, [RA]);
   write(project, `${IN}/user-stories.md`, "# 用户故事\n\n## STORY-001 / US-001 运营导出订单\n\n来源：REQ-001\n- 作为运营人员，我希望订单导出在下游超时时自动重试。\n\n### AC-001 接管后保持重试契约\n接管前实现的重试行为在改动后保持不变；首次超时随后成功返回订单，连续三次超时向调用者传播；声明单元执行批准的替代验证。\n");
@@ -211,7 +218,7 @@ function fixture(name: string): Fixture {
   write(project, `${IN}/cross-validation-report.md`, "# 交叉验证报告\n\n- status: passed\n- unresolved_conflicts: 0\n- prd_route: not-selected\n- ui_route: not-selected\n\n| 需求 | 故事 | 结论 |\n| --- | --- | --- |\n| REQ-001 | STORY-001 / US-001 | 一致 |\n");
   report("cross-validation");
   nextModule(`workflow-planning@module:${M01}`, [RA, ["--stage", "user-stories", ...MOD]]);
-  write(project, `${IN}/workflow-plan.md`, "# 工作流规划\n\nREQ-001：单元 u0 只声明契约（ucd_exemption），单元 u1 改动嵌套仓库 app/；接管前的实现走 BASELINE→GREEN；不需要应用设计。\n\n| 阶段 | 决定 |\n| --- | --- |\n| application-design | skip |\n");
+  write(project, `${IN}/workflow-plan.md`, "# 工作流规划\n\nREQ-001：单元 u0 只声明契约（ucd_exemption），单元 u1 改动嵌套仓库 app/；接管前的实现走 BASELINE→GREEN；不需要应用设计。\n\n| 阶段 | 决定 |\n| --- | --- |\n| application-design | skip | local implementation only; no new interface or data structure |\n");
   report("workflow-planning");
   write(project, `${IN}/unit-manifest.json`, `${JSON.stringify({ schema_version: 1, module_id: M01, units: [
     { unit_id: "u0", name: "Unit u0", service_id: "trade-service", conditional_stages: [], req_refs: ["REQ-001"], ucd_exemption: EXEMPTION },
@@ -222,7 +229,7 @@ function fixture(name: string): Fixture {
   const moduleState = loadWorkflowState(project, moduleRef)!;
   moduleState.completed_stages.push("units-generation");
   moduleState.completed_stage_instances.push(`units-generation@module:${M01}`);
-  saveWorkflowState(project, moduleState, moduleRef);
+  saveFixtureState(project, moduleState, moduleRef);
   write(project, `${CONSTRUCTION("u0")}/functional-design.md`, "# 功能设计 — u0\n\nREQ-001：u0 只声明订单导出契约，不含业务行为；无 UC-D。\n");
   write(project, `${CONSTRUCTION("u1")}/functional-design.md`, "# 功能设计 — u1\n\nREQ-001 / UC-D-021：u1 只补充追溯注释，不改变接管前实现的重试行为；无新增接口与数据结构。\n");
   nextModule(`test-case-derivation@module:${M01}`);
@@ -322,7 +329,7 @@ async function main(): Promise<void> {
     delete reset.adoption_baseline_repos;
     delete reset.adoption_approval_ref;
     delete reset.adopted_at;
-    saveWorkflowState(f.project, reset, moduleRef, { baselineWrite: true });
+    saveFixtureState(f.project, reset, moduleRef, { baselineWrite: true });
     const refused = rejected(run(f.project, ADOPT(f, appAdopted)));
     expectRejected("--adopt after u1 BASELINE passed", refused, /already holds RED \/ BASELINE \/ GREEN evidence \(\.aidlc\/evidence\/tdd\/m01-trade\/u1\/baseline-test-evidence\.json/);
     assert.doesNotMatch(refused, /u0\/(?:red|baseline)-test-evidence\.json/, "u0's not_required evidence is not listed as held");

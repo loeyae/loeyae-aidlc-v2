@@ -1,9 +1,12 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInitialState, loadWorkflowState, saveWorkflowState } from "../core/tools/aidlc-light-state";
+import { snapshot as rawSnapshot } from "./mars244_fixture";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -17,9 +20,14 @@ const GLOBAL_STAGES = ["workspace-detection", "product-inception", "module-divis
 function run(cwd: string, args: string[], env: Record<string, string> = {}): { status: number; directive: Record<string, unknown> } {
   const baseEnv = { ...process.env };
   delete baseEnv.AIDLC_MODULE;
-  const result = spawnSync(process.execPath, [tsx, cli, "orchestrate", ...args], { cwd, encoding: "utf8", env: { ...baseEnv, ...env } });
+  const result = spawnSync(process.execPath, [tsx, cli, "orchestrate", ...args], { cwd, encoding: "utf8", env: { ...fixtureEnvironment(cwd, ["orchestrate", ...args, ...(!args.includes("--module") && env.AIDLC_MODULE && env.AIDLC_MODULE !== "m09-unknown" ? ["--module", env.AIDLC_MODULE] : [])]), ...({ ...baseEnv, ...env }) } });
   const text = (result.stdout || "").trim() || (result.stderr || "").trim();
-  return { status: result.status ?? 1, directive: JSON.parse(text) as Record<string, unknown> };
+  const directive = JSON.parse(text) as Record<string, unknown>;
+  if (directive.binding_required && args[0] === "next" && args.includes("--module")) {
+    const retry = args.filter((arg, i) => arg !== "--work" && args[i - 1] !== "--work");
+    return run(cwd, retry);
+  }
+  return { status: result.status ?? 1, directive };
 }
 
 function git(cwd: string, args: string[]): void {
@@ -57,7 +65,7 @@ function prepareSplitProject(name: string): string {
   state.completed_stages = [...GLOBAL_STAGES];
   state.completed_stage_instances = [...GLOBAL_STAGES];
   state.skipped_stage_instances = [`reverse-engineering@module:${M01}`, `reverse-engineering@module:${M02}`];
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
   const split = run(project, ["split", "--from", WORKFLOW_ID]);
   assert.equal(split.status, 0, JSON.stringify(split.directive));
   return project;
@@ -95,7 +103,77 @@ try {
   const single = run(project, ["next"]);
   assert.equal(single.directive.kind, "run-stage");
   assert.equal(single.directive.stage_instance, `requirements-analysis@module:${M02}`);
-  assert.ok((single.directive.other_workflows as string[]).some((note) => note.startsWith(`module:${M01}: parked`)));
+  assert.equal(loadWorkflowState(project, { kind: "module", module_id: M01 })!.status, "parked", "bound next preserves the sibling workflow");
+
+  // Unbound integration previews select the real next project instance after
+  // module handoff, and never write state/audit/claims while projecting it.
+  const integrated = prepareSplitProject("integration-preview");
+  const global = loadWorkflowState(integrated)!;
+  global.status = "done";
+  saveFixtureState(integrated, global);
+  for (const moduleId of [M01, M02]) {
+    const ref = { kind: "module" as const, module_id: moduleId };
+    const state = loadWorkflowState(integrated, ref)!;
+    state.status = "done";
+    saveFixtureState(integrated, state, ref);
+  }
+  const integrationRef = { kind: "integration" as const };
+  const integration = loadWorkflowState(integrated, integrationRef)!;
+  const rawPreview = () => {
+    const before = rawSnapshot(integrated);
+    const env = { ...process.env, AIDLC_SESSION_BINDING: "" };
+    delete env.AIDLC_MODULE;
+    const result = spawnSync(process.execPath, [tsx, cli, "orchestrate", "next", "--preview"], { cwd: integrated, encoding: "utf8", env });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.deepEqual(rawSnapshot(integrated), before, "raw preview must not bind or persist routing");
+    return JSON.parse(result.stdout);
+  };
+  for (const [completed, expected] of [
+    [[], "build-and-test"],
+    [["build-and-test"], "build-and-test-templates"],
+    [["build-and-test", "build-and-test-templates"], "implementation-report"],
+  ] as const) {
+    integration.completed_stage_instances = [...completed];
+    integration.completed_stages = [...completed];
+    saveFixtureState(integrated, integration, integrationRef);
+    const projected = rawPreview();
+    assert.equal(projected.workflow, "integration");
+    assert.equal(projected.stage_instance, expected);
+  }
+  const graph = JSON.parse(readFileSync(join(repository, "core/tools/data/stage-graph.json"), "utf8"));
+  for (const moduleId of [M01, M02]) {
+    const ref = { kind: "module" as const, module_id: moduleId };
+    const state = loadWorkflowState(integrated, ref)!;
+    write(integrated, `docs/aidlc/modules/${moduleId}/inception/unit-manifest.json`, JSON.stringify({
+      schema_version: 1, module_id: moduleId,
+      units: [{ unit_id: "default", name: "Default", service_id: moduleId === M01 ? "trade-service" : "product-service", req_refs: [moduleId === M01 ? "REQ-001" : "REQ-201"], conditional_stages: [] }],
+    }));
+    state.completed_stage_instances = graph.stages.flatMap((stage: { slug: string; axis: string }) =>
+      stage.axis === "module" ? [`${stage.slug}@module:${moduleId}`]
+        : stage.axis === "unit" ? [`${stage.slug}@module:${moduleId}@unit:default`] : []);
+    state.completed_stages = graph.stages.filter((stage: { axis: string }) => stage.axis !== "project").map((stage: { slug: string }) => stage.slug);
+    saveFixtureState(integrated, state, ref);
+  }
+  integration.completed_stage_instances = ["build-and-test", "build-and-test-templates", "implementation-report"];
+  integration.completed_stages = [...integration.completed_stage_instances];
+  saveFixtureState(integrated, integration, integrationRef);
+  assert.equal(rawPreview().stage_instance, null);
+  const terminalEnv = fixtureEnvironment(integrated, ["orchestrate", "next"]);
+  assert.equal(JSON.parse(terminalEnv.AIDLC_SESSION_BINDING!).stage_instance, "implementation-report");
+  const terminal = spawnSync(process.execPath, [tsx, cli, "orchestrate", "next"], { cwd: integrated, encoding: "utf8", env: terminalEnv });
+  assert.equal(terminal.status, 0, terminal.stdout + terminal.stderr);
+  assert.equal(JSON.parse(terminal.stdout).kind, "done");
+  assert.equal(loadWorkflowState(integrated, integrationRef)!.status, "done");
+  const parked = loadWorkflowState(integrated, { kind: "module", module_id: M01 })!;
+  parked.status = "parked";
+  saveFixtureState(integrated, parked, { kind: "module", module_id: M01 });
+  assert.notEqual(rawPreview().workflow, "integration", "a parked module is not an integration handoff");
+  parked.status = "done";
+  saveFixtureState(integrated, parked, { kind: "module", module_id: M01 });
+  global.completed_stages = global.completed_stages.filter(stage => stage !== "workspace-detection");
+  global.completed_stage_instances = global.completed_stage_instances.filter(stage => stage !== "workspace-detection");
+  saveFixtureState(integrated, global);
+  assert.equal(rawPreview().workflow, "global", "stale done status cannot hide unresolved global stages");
 
   console.log("split next module routing tests passed");
 } finally {

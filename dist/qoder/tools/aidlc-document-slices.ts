@@ -119,7 +119,9 @@ function atomic(ctx: SliceContext, path: string, body: string | Buffer, exclusiv
   finally { if (fd !== undefined) closeSync(fd); if (created && existsSync(temp)) unlinkSync(temp); }
 }
 export function generateSlices(ctx: SliceContext): Record<string, unknown> {
-  const publication = captureModulePublication(ctx.root, ctx.module_id!);
+  // An already adopted projection may be mechanically refreshed by a downstream
+  // unit session; adoption itself remains a module-level decision.
+  const publication = captureModulePublication(ctx.root, ctx.module_id!, { derivedFromCompletedUnits: present(ctx, `${sliceBase(ctx)}/adoption.json`) });
   if (publication && publication.binding.workflow_id !== ctx.workflow_id) throw new Error("slice workflow identity conflicts with session binding");
   const base = sliceBase(ctx), lock = qualityPath(ctx, `${base}/writer.lock`);
   mkdirSync(dirname(lock), { recursive: true });
@@ -141,10 +143,28 @@ export function generateSlices(ctx: SliceContext): Record<string, unknown> {
         if (present(ctx, path)) { if (read(ctx, path) !== body) throw new Error(`SLICE_OBJECT_TAMPERED: ${path}`); }
         else atomic(ctx, path, body);
       }
-      const affected = sorted([...(old?.views || []).map(v => v.unit_id), ...manifest.views.map(v => v.unit_id)].filter((id): id is string => id !== null).filter(id => JSON.stringify(old?.views.find(v => v.unit_id === id)) !== JSON.stringify(manifest.views.find(v => v.unit_id === id))));
+      const unitIds = sorted([...(old?.views || []).map(v => v.unit_id), ...manifest.views.map(v => v.unit_id)].filter((id): id is string => id !== null));
+      const oldInputs = Array.isArray(old?.inputs) ? old.inputs : [];
+      const inputPaths = sorted([...oldInputs.map(input => input.path), ...manifest.inputs.map(input => input.path)]);
+      const changedInputs = inputPaths.filter(path => oldInputs.find(input => input.path === path)?.sha256 !== manifest.inputs.find(input => input.path === path)?.sha256);
+      const mappingPath = `${qualityBase(ctx)}/application-design/unit-of-work-story-map.md`;
+      const mappingChanged = !old || !Array.isArray(old.inputs) || changedInputs.includes(mappingPath)
+        || oldInputs.some(input => !manifest.inputs.some(current => current.path === input.path));
+      const reasons: Record<string, string[]> = {};
+      for (const id of unitIds) {
+        const previous = old?.views.find(view => view.unit_id === id), current = manifest.views.find(view => view.unit_id === id);
+        const stories = sorted([...(previous?.stories || []), ...(current?.stories || []), ...(previous?.inherited_membership?.stories || []), ...(current?.inherited_membership?.stories || [])]);
+        const why = [...(mappingChanged ? [`approved mapping changed or prior inputs are unrecognized: ${mappingPath}`] : []),
+          ...(JSON.stringify(previous) !== JSON.stringify(current) ? [`unit or inherited content changed: ${id}; input files: ${changedInputs.join(", ") || "unknown"}; potentially involved stories: ${stories.join(", ") || "none"}`] : [])];
+        if (why.length) reasons[id] = why;
+      }
+      const affected = sorted(Object.keys(reasons));
+      const unitFingerprints = Object.fromEntries(manifest.views.filter(view => view.unit_id !== null).map(view => [view.unit_id!, qualityHash(json({ version: 1, mapping: manifest.inputs.find(input => input.path === mappingPath), view }))]));
       for (const input of manifest.inputs) if (qualityInput(ctx, input.path).sha256 !== input.sha256) throw new Error(`SLICE_SOURCE_CHANGED_DURING_GENERATION: ${input.path}`);
       atomic(ctx, manifestPath, json(manifest));
-      return { status: "generated", affected_units: affected, invalidation_reasons: !old ? ["initial-generation"] : manifest.inputs.filter(i => !old!.inputs.some(o => o.path === i.path && o.sha256 === i.sha256)).map(i => i.path), manifest: manifestPath };
+      return { status: "generated", affected_units: affected, affected_unit_reasons: reasons, unit_input_fingerprints: unitFingerprints,
+        fingerprint_scope: "canonical-document-views-and-approved-story-map",
+        invalidation_reasons: !old ? ["initial-generation"] : changedInputs, manifest: manifestPath };
     });
   } finally { closeSync(fd); unlinkSync(lock); }
 }
@@ -168,6 +188,17 @@ export function sliceEvidenceErrors(ctx: SliceContext, evidence: Record<string, 
   } catch (error) { return [String(error)]; }
 }
 export interface BusinessDocumentLoadPlan { mode: "derived" | "canonical"; files: QualityInput[]; bytes: number; estimated_tokens: number; measurement: "utf8-bytes-and-ceil-bytes-divided-by-four" }
+/** A diagnostic work plan from current authority, never from a stale projection. */
+export function buildCanonicalIsolationPlan(ctx: SliceContext, unitId: string): BusinessDocumentLoadPlan {
+  const { manifest } = projection(ctx); // validates the complete approved mapping and denominator
+  if (!manifest.views.some(view => view.unit_id === unitId)) throw new Error(`SLICE_SCOPE: unknown unit ${unitId}`);
+  const paths = manifest.inputs.map(input => input.path);
+  for (const path of ["docs/aidlc/product/contracts.md", "docs/aidlc/ideation/product-contracts.md", `${qualityBase(ctx)}/application-design/shared-interfaces.md`]) if (present(ctx, path)) paths.push(path);
+  const files = [...new Set(paths)].map(path => qualityInput(ctx, path));
+  for (const input of manifest.inputs) if (files.find(file => file.path === input.path)?.sha256 !== input.sha256) throw new Error(`SLICE_SOURCE_CHANGED_DURING_PLANNING: ${input.path}`);
+  const bytes = files.reduce((sum, file) => sum + readFileSync(qualityPath(ctx, file.path)).byteLength, 0);
+  return { mode: "canonical", files, bytes, estimated_tokens: Math.ceil(bytes / 4), measurement: "utf8-bytes-and-ceil-bytes-divided-by-four" };
+}
 export function buildBusinessDocumentLoadPlan(ctx: SliceContext, unitId: string): BusinessDocumentLoadPlan {
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(unitId)) throw new Error("SLICE_SCOPE: invalid unit");
   const adopted = sliceAdoption(ctx).enabled;

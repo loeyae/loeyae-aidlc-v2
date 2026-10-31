@@ -52,7 +52,8 @@ const lightPlan = buildRuleLoadPlan(graph, {
 
 assert.equal(legacy.profile.provenance, "legacy_standard_default");
 assert.deepEqual(names(standardPlan), names(legacy), "standard preserves legacy complete rule selection");
-assert.deepEqual(names(complexPlan), names(legacy), "complex preserves legacy complete rule selection");
+assert(names(legacy).every(slug => names(complexPlan).includes(slug)), "risk upgrade retains mandatory rules");
+assert(names(complexPlan).includes("application-design") && names(complexPlan).includes("nfr-design"), "complex risk adds design rules");
 assert.deepEqual(
   names(legacy).filter((slug) => !names(lightPlan).includes(slug)),
   ["state-template"],

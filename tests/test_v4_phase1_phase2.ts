@@ -1,3 +1,5 @@
+import { saveFixtureState, saveFixtureStateWithChecks } from "./mars243_fixture_session";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -11,7 +13,7 @@ const tsx = join(repository, "node_modules", "tsx", "dist", "cli.mjs");
 const root = mkdtempSync(join(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir(), "aidlc-v4-phase1-phase2-"));
 
 function run(cwd: string, args: string[]): { status: number; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8" });
+  const result = spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8" , env: fixtureEnvironment(cwd, [...args]) });
   return { status: result.status ?? 1, stdout: result.stdout || "", stderr: result.stderr || "" };
 }
 
@@ -95,7 +97,7 @@ function prepareCrossValidationProject(configStage: string | null = "cross-valid
   state.current_phase = "inception";
   state.current_stage_instance = "cross-validation@module:module-a";
   state.current_module = "module-a";
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
   return project;
 }
 
@@ -111,9 +113,11 @@ try {
   assert.equal(JSON.parse(readFileSync(semanticEvidence, "utf8")).evidence_version, "1");
 
   unlinkSync(semanticEvidence);
+  assert.notEqual(run(semanticProject, ["orchestrate", "report", "--stage", "cross-validation", "--result", "completed"]).status, 0, "report cannot fabricate missing evidence");
+  success(semanticProject, ["evidence", "run", "--stage", "cross-validation", "--all-sensors"]);
   const reported = success(semanticProject, ["orchestrate", "report", "--stage", "cross-validation", "--result", "completed"]);
   assert.equal(reported.kind, "print");
-  assert.ok(existsSync(semanticEvidence), "report must auto-produce missing semantic evidence");
+  assert.ok(existsSync(semanticEvidence), "report consumes explicitly produced semantic evidence");
   assert.ok(loadWorkflowState(semanticProject)?.completed_stage_instances.includes("cross-validation@module:module-a"));
 
   const noConfigProject = prepareCrossValidationProject(null);
@@ -122,8 +126,9 @@ try {
   assert.deepEqual(noConfigRun.sensors, ["inception-consistency"]);
   assert.ok(existsSync(noConfigEvidence), "semantic evidence must not require .aidlc/evidence-commands.json");
   unlinkSync(noConfigEvidence);
+  success(noConfigProject, ["evidence", "run", "--stage", "cross-validation", "--all-sensors"]);
   success(noConfigProject, ["orchestrate", "report", "--stage", "cross-validation", "--result", "completed"]);
-  assert.ok(existsSync(noConfigEvidence), "report must auto-produce semantic evidence without a command allowlist");
+  assert.ok(existsSync(noConfigEvidence), "explicit semantic production needs no command allowlist");
 
   const otherStageConfigProject = prepareCrossValidationProject("requirements-analysis");
   success(otherStageConfigProject, ["evidence", "run", "--stage", "cross-validation", "--sensor", "inception-consistency"]);
@@ -136,7 +141,7 @@ try {
   buildState!.current_phase = "construction";
   buildState!.current_stage_instance = "build-and-test";
   delete buildState!.current_module;
-  saveWorkflowState(buildProject, buildState!);
+  saveFixtureState(buildProject, buildState!);
   const buildMissing = run(buildProject, ["evidence", "run", "--stage", "build-and-test"]);
   assert.notEqual(buildMissing.status, 0);
   assert.match(buildMissing.stderr, /command allowlist .* is required for build\/test\/check\/red\/green commands of stage build-and-test; minimal example: .*"stage":"build-and-test"/);
@@ -154,7 +159,7 @@ try {
   mismatchState!.current_module = "module-a";
   mismatchState!.completed_stages = ["workspace-detection", "product-inception", "module-division"];
   mismatchState!.completed_stage_instances = ["workspace-detection", "product-inception", "module-division", "requirements-analysis@module:module-a", "user-stories@module:module-a"];
-  saveWorkflowState(mismatchProject, mismatchState!);
+  saveFixtureState(mismatchProject, mismatchState!);
   const mismatchReport = join(mismatchProject, "docs", "aidlc", "modules", "module-a", "inception", "cross-validation-report.md");
   writeFileSync(mismatchReport, readFileSync(mismatchReport, "utf8").replace("prd_route: not-selected", "prd_route: selected"), "utf8");
   const mismatch = run(mismatchProject, ["check", "--sensor", "inception-consistency"]);
@@ -173,7 +178,7 @@ try {
   assert.ok(moduleState);
   moduleState!.completed_stages = ["workspace-detection", "module-division"];
   moduleState!.completed_stage_instances = ["workspace-detection", "module-division"];
-  saveWorkflowState(moduleProject, moduleState!);
+  saveFixtureState(moduleProject, moduleState!);
   const orchestratedClaimA = success(moduleProject, ["orchestrate", "next", "--claim", "--module", "module-a", "--owner", "alice"]);
   assert.equal(orchestratedClaimA.claimed, true);
   writeFileSync(join(moduleProject, "docs", "aidlc", "ideation", "product-contracts.md"), "| provider | consumer | provider_stage | consumer_stage |\n| module-a | module-b | provider_stage: reverse-engineering | consumer_stage: reverse-engineering |\n", "utf8");
@@ -183,7 +188,7 @@ try {
   const releasedState = loadWorkflowState(moduleProject);
   assert.ok(releasedState);
   releasedState!.completed_stage_instances.push("reverse-engineering@module:module-a");
-  saveWorkflowState(moduleProject, releasedState!);
+  saveFixtureState(moduleProject, releasedState!);
   const orchestratedClaimB = success(moduleProject, ["orchestrate", "next", "--claim", "--module", "module-b", "--owner", "bob"]);
   assert.equal(orchestratedClaimB.claimed, true);
   assert.match(String(orchestratedClaimA.stage_instance), /@module:module-a$/);
@@ -213,11 +218,14 @@ try {
   const leftSnapshot = loadWorkflowState(moduleProject);
   const rightSnapshot = loadWorkflowState(moduleProject);
   assert.ok(leftSnapshot && rightSnapshot);
-  leftSnapshot!.module_selections["module-c"] = { owner: "carol", selected_at: new Date().toISOString() };
-  saveWorkflowState(moduleProject, leftSnapshot!);
-  rightSnapshot!.module_selections["module-d"] = { owner: "dave", selected_at: new Date().toISOString() };
-  assert.throws(() => saveWorkflowState(moduleProject, rightSnapshot!), /workflow state revision conflict/);
-  assert.equal(loadWorkflowState(moduleProject)?.module_selections["module-c"].owner, "carol");
+  leftSnapshot!.updated_at = new Date().toISOString();
+  saveFixtureStateWithChecks(moduleProject, leftSnapshot!);
+  rightSnapshot!.updated_at = "2000-01-01T00:00:00.000Z";
+  const priorBinding = process.env.AIDLC_SESSION_BINDING;
+  process.env.AIDLC_SESSION_BINDING = fixtureEnvironment(moduleProject, ["orchestrate", "report"]).AIDLC_SESSION_BINDING;
+  try { assert.throws(() => saveWorkflowState(moduleProject, rightSnapshot!), /workflow state revision conflict/); }
+  finally { if (priorBinding === undefined) delete process.env.AIDLC_SESSION_BINDING; else process.env.AIDLC_SESSION_BINDING = priorBinding; }
+  assert.notEqual(loadWorkflowState(moduleProject)?.updated_at, rightSnapshot!.updated_at);
 
   console.log("v4 Phase 1/Phase 2 targeted tests passed");
 } finally {
