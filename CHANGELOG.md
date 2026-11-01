@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+## 4.23.1 — 2026-11-01
+
+- Key workflow-state and registry parse caches by actual Markdown content; preserve completion, parked state and registry identity across same-timestamp and same-length writes or atomic replacements.
+- Require the complete FINAL_GLOBAL checklist and current controlled I13/design/GREEN coverage statistics; reject incomplete, failed or stale reviews at entry and completion.
+- Bind semantic evidence and reuse plans to checker implementation, actual dependency bytes and runtime identity; legacy or changed observations require controlled revalidation.
+- Support structured review inventories and quoted Unicode/space paths while retaining boundary and delivery-coverage checks.
+- Update Markdown/HTML validation dependencies and affected transitive packages. Node.js support is now `^22.22.0 || >=24.8.0`, matching mandatory runtime dependencies; Node 20/21/23 and earlier 22/24 releases are no longer supported.
+
+- Synchronize package, stage-graph, plugin and marketplace versions at 4.23.1 and regenerate all nine harness distributions.
+
 ## 4.23.0 — 2026-10-31
 
 - Require explicit Spec/Standards results and real delivered-file review coverage; bind conditional FINAL_GLOBAL reviews, deployment checks and risk-derived security verification to current inputs. Preserve single-unit lightweight applicability.

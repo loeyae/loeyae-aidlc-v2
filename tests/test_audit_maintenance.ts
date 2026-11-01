@@ -1,3 +1,4 @@
+import "./test_audit_state_cache";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";

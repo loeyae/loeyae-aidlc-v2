@@ -1,5 +1,9 @@
 #!/usr/bin/env bun
 import { evidenceTimeError, reviewIssueErrors } from "./aidlc-evidence-policy";
+import { GLOBAL_REVIEW_ITEMS, globalChecklistErrors, globalReviewUcdSources, type GlobalCoverage } from "./aidlc-global-review";
+import { i13NonApplicable } from "./aidlc-i13-applicability";
+import { ucdDeclarations } from "./aidlc-ucd-declarations";
+import { semanticCheckerIdentityErrors } from "./aidlc-checker-identity";
 import { infrastructureResourceErrors } from "./aidlc-infrastructure.js";
 import { frontendPlatformPayload } from "./aidlc-frontend-platform";
 import { substantiveArtifact } from "./aidlc-artifact-presence";
@@ -39,6 +43,7 @@ import { overflowDirective, recordedSubprocessOverflow, runSync, SubprocessOverf
 import { createRequire } from "module";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
 import { fileURLToPath } from "url";
+import { isDeepStrictEqual } from "node:util";
 import { buildTestEvidenceErrors, SEMANTIC_SENSORS, allowlistedAlternativeCommand, allowlistedPhaseCommand, argvDigest, i13CodeRefBlobs, i13UcdIdsByMode, phaseNotRequiredDigest, phaseObservationDigest, ucdExemptionDigest, unitUcdExemption, type Phase } from "./aidlc-evidence";
 import { replayEvidenceErrors, REPLAY_LIMITATION } from "./aidlc-historical-red";
 import { QUALITY_SENSORS, qualityAdoption, qualityEvidenceErrors, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
@@ -1138,14 +1143,19 @@ export function globalReviewPayload(state: WorkflowState): Record<string, unknow
   const issueErrors = reviewIssueErrors(record);
   if (issueErrors.length) throw new Error(issueErrors.join("; "));
   const plan = globalReviewInputPlan(state);
+  const checklistErrors = globalChecklistErrors(record.checklist, plan.ucd_coverage, plan.inputs.map(input => input.path));
+  if (checklistErrors.length) throw new Error(checklistErrors.join("; "));
+  if (plan.ucd_coverage.status !== "passed") throw new Error(`FINAL_GLOBAL coverage blocked: ${plan.ucd_coverage.blocking.join("; ")}`);
+  if (!isDeepStrictEqual(record.ucd_coverage, plan.ucd_coverage)) throw new Error("FINAL_GLOBAL UC-D coverage statistics are missing or changed; review current controlled observations");
   const expected = plan.covered_instances;
   if (JSON.stringify(asStringArray(record.covered_instances)?.sort()) !== JSON.stringify(expected)) throw new Error("FINAL_GLOBAL must cover every selected unit review instance");
   if (JSON.stringify(record.inputs) !== JSON.stringify(plan.inputs)) throw new Error("FINAL_GLOBAL input snapshots are missing, changed or incomplete; refresh the actual review");
   return { ...record, report_sha256: createHash("sha256").update(content).digest("hex") };
 }
 
-export function globalReviewInputPlan(state: WorkflowState): { required: boolean; covered_instances: string[]; inputs: Array<{ path: string; sha256: string; kind?: "deletion" }> } {
-  if (!globalReviewRequired(state)) return { required: false, covered_instances: [], inputs: [] };
+export function globalReviewInputPlan(state: WorkflowState): { required: boolean; covered_instances: string[]; inputs: Array<{ path: string; sha256: string; kind?: "deletion" }>; checklist_items: readonly string[]; ucd_coverage: GlobalCoverage } {
+  const empty: GlobalCoverage = { status: "passed", total: 0, covered: 0, design_covered: 0, units: [], blocking: [] };
+  if (!globalReviewRequired(state)) return { required: false, covered_instances: [], inputs: [], checklist_items: [], ucd_coverage: empty };
   const units = globalReviewUnits(state);
   const inputs = new Set<string>();
   const deletions = new Map<string, { path: string; sha256: string; kind: "deletion" }>();
@@ -1159,6 +1169,7 @@ export function globalReviewInputPlan(state: WorkflowState): { required: boolean
     if (inputs.size > 2000) throw new Error("FINAL_GLOBAL input inventory exceeds 2000 files; narrow declared shared contract paths");
   };
   const modules = existsSync(join(PROJECT_ROOT, "docs/aidlc/ideation/module-manifest.json")) ? readModuleManifest(PROJECT_ROOT) : [];
+  const coverage = globalReviewCoverage(state, units, inputs);
   for (const unit of units) {
     inputs.add(`${unitConstructionRoot(unit.module_id, unit.unit_id)}/code-review.md`);
     const instance = makeInstance(loadGraph().stages.find(stage => stage.slug === "code-review")!, "unit", unit);
@@ -1182,7 +1193,76 @@ export function globalReviewInputPlan(state: WorkflowState): { required: boolean
     ]) if (existsSync(join(PROJECT_ROOT, path))) inputs.add(path);
   }
   const bindings = [...inputs].sort().map(path => ({ path, sha256: createHash("sha256").update(readFileSync(assertProjectPath(join(PROJECT_ROOT, path)))).digest("hex") }));
-  return { required: true, covered_instances: units.map(unit => stageInstanceId("code-review", "unit", unit)).sort(), inputs: [...bindings, ...deletions.values()].sort((a, b) => a.path.localeCompare(b.path)) };
+  return { required: true, covered_instances: units.map(unit => stageInstanceId("code-review", "unit", unit)).sort(), inputs: [...bindings, ...deletions.values()].sort((a, b) => a.path.localeCompare(b.path)), checklist_items: GLOBAL_REVIEW_ITEMS, ucd_coverage: coverage };
+}
+
+/** Reconcile selected module-qualified UC-Ds from controlled I13/GREEN observations.
+ * Completed GREEN may precede later unit commits; its normal phase/ancestry gates
+ * still apply, and every actual input is additionally bound in the review snapshot.
+ */
+function globalReviewCoverage(state: WorkflowState, units: Array<{module_id:string;unit_id:string}>, inputs: Set<string>): GlobalCoverage {
+  const result: GlobalCoverage = { status: "passed", total: 0, covered: 0, design_covered: 0, units: [], blocking: [] };
+  const totals = new Set<string>(), covered = new Set<string>(), designed = new Set<string>();
+  const missingTests = new Set<string>(), missingDesign = new Set<string>();
+  const graph = loadGraph();
+  const bind = (path: string): string => { const absolute = assertProjectPath(join(PROJECT_ROOT, path)); const body = readFileSync(absolute, "utf8"); inputs.add(path); return body; };
+  for (const unit of units) {
+    try {
+      const i13Path = evidenceRelativePath("test-case-derivation", "test-case-derivation", "module", unit);
+      const i13 = asRecord(JSON.parse(bind(i13Path)));
+      if (!i13) throw new Error("I13 must be a controlled object");
+      const i13Instance = makeInstance(graph.stages.find(stage => stage.slug === "test-case-derivation")!, "module", {module_id:unit.module_id});
+      const failure = validateEvidence(i13Instance.stage, "test-case-derivation", i13Instance, value => i13DerivationErrors(value, i13Instance, state), { tolerateRevisionDrift: true });
+      if (failure) throw new Error(failure.message);
+      const owned = i13.status === "required" ? unitUcdIds(i13, unit.unit_id).all : [];
+      const deferred = i13MappingDeferredIds(i13).filter(id => owned.includes(id));
+      const ids = owned.filter(id => !deferred.includes(id));
+      const casePaths = asStringArray(i13.test_case_files) || [];
+      const declarations = ucdDeclarations(casePaths, path => bind(path));
+      if (i13.status === "required") {
+        const sources = globalReviewUcdSources(i13.ucd_sources);
+        if (!sources?.length) throw new Error("I13 lacks controlled case source digests; refresh test-case-derivation");
+        for (const source of sources) if (createHash("sha256").update(bind(source.file)).digest("hex") !== source.sha256) throw new Error(`I13 case source changed: ${source.file}; refresh test-case-derivation`);
+      }
+      for (const id of owned) if (declarations.get(id)?.status !== "ready") throw new Error(`${id} is missing, blocked or not ready in current I13 sources`);
+      if (i13.status === "not_applicable") {
+        const actual = i13NonApplicable(PROJECT_ROOT, unit.module_id, path => bind(path));
+        if (i13.applicability_inputs_digest !== actual.applicability_inputs_digest) throw new Error("I13 not_applicable sources changed");
+      }
+      const greenPath = evidenceRelativePath("code-generation", "green-test-evidence", "unit", unit);
+      const green = asRecord(JSON.parse(bind(greenPath)));
+      if (!green) throw new Error("GREEN observation is missing");
+      const generation = makeInstance(graph.stages.find(stage => stage.slug === "code-generation")!, "unit", unit);
+      const greenFailure = validateEvidence(generation.stage, "green-test-evidence", generation, value => phaseEvidenceErrors(value, "green-test-evidence", "GREEN", {any:true,allNotApplicable:i13.status === "not_applicable"}, "code-generation", generation, state), {tolerateRevisionDrift:true});
+      if (greenFailure) throw new Error(greenFailure.message);
+      const mapped = new Set(greenCoveredUcds(green));
+      for (const entry of Array.isArray(green.uc_mapping) ? green.uc_mapping : []) {
+        for (const method of asStringArray(asRecord(entry)?.test_methods) || []) {
+          const path = method.split(/#|::/)[0];
+          if (/\.(?:ts|tsx|js|cjs|mjs|py|java|kt|go|rs|cs)$/.test(path) && existsSync(join(PROJECT_ROOT,path))) bind(path);
+        }
+      }
+      const base = unitConstructionRoot(unit.module_id, unit.unit_id);
+      const designPaths = [
+        `${base}/functional-design.md`, `${base}/plans/code-generation-plan.md`,
+        ...collectFiles(join(PROJECT_ROOT, base, "functional-design")).filter(path => path.endsWith(".md")).map(path => relative(PROJECT_ROOT, path).replace(/\\/g, "/")),
+      ].filter(path => existsSync(join(PROJECT_ROOT,path)));
+      const designText = designPaths.map(bind).join("\n");
+      const designIds = ids.filter(id => new RegExp(`\\b${escapeExpression(id)}\\b`).test(designText));
+      const coveredIds = ids.filter(id => mapped.has(id));
+      result.units.push({...unit,ucd_ids:ids,covered_ucd_ids:coveredIds,design_ucd_ids:designIds,deferred_ucd_ids:deferred});
+      for (const id of ids) {
+        const key = `${unit.module_id}:${id}`; totals.add(key);
+        if (!coveredIds.includes(id)) { missingTests.add(key); result.blocking.push(`${unit.module_id}/${unit.unit_id}: ${id} has no passing test mapping`); }
+        else covered.add(key);
+        if (!designIds.includes(id)) { missingDesign.add(key); result.blocking.push(`${unit.module_id}/${unit.unit_id}: ${id} has no implementation design/plan mapping`); }
+        else designed.add(key);
+      }
+    } catch (error) { result.blocking.push(`${unit.module_id}/${unit.unit_id}: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+  result.total = totals.size; result.covered = [...covered].filter(key => !missingTests.has(key)).length; result.design_covered = [...designed].filter(key => !missingDesign.has(key)).length;
+  if (result.blocking.length || result.total !== result.covered || result.total !== result.design_covered) result.status = "blocked";
+  return result;
 }
 
 function globalReviewEvidenceErrors(evidence: Record<string, unknown>, state: WorkflowState): string[] {
@@ -1691,6 +1771,7 @@ function validateEvidence(
       errors.push("checker object is required for semantic evidence");
     } else {
       if (checker.id !== `builtin:${sensor}`) errors.push(`checker.id must be builtin:${sensor}`);
+      if (!["red-test-evidence","green-test-evidence","baseline-test-evidence"].includes(sensor)) errors.push(...semanticCheckerIdentityErrors(checker));
       if (checker.sensor !== sensor) errors.push(`checker.sensor must be ${sensor}`);
       if (!/^[a-f0-9]{64}$/.test(String(checker.argv_digest || ""))) errors.push("checker.argv_digest must be a SHA-256 digest");
       if (checker.command_version !== undefined && (checker.command_version !== 2 || checker.argv_digest !== argvDigest(semanticCommandArgv(sensor, { current_module: instance?.module_id, current_unit: instance?.unit_id })))) errors.push("semantic checker command no longer matches the controlled producer");
@@ -2033,6 +2114,28 @@ function i13ModeErrors(evidence: Evidence, ucdIds: string[], state: WorkflowStat
 type I13Context = { value: Evidence } | { error: string };
 
 /** The module's I13 evidence, read by the tdd gate to derive the RED / BASELINE UC-D sets. */
+function i13DerivationErrors(evidence: Evidence, instance: StageInstance, state: WorkflowState): string[] {
+  const errors: string[] = [];
+  if (!["required", "not_applicable"].includes(String(evidence.status))) errors.push('status must be "required" or "not_applicable"');
+  if (evidence.status === "not_applicable") {
+    if (!["pure-declaration", "pure-style", "pure-configuration", "approved-exception"].includes(String(evidence.reason_code))) errors.push("reason_code is not an approved non-applicable code");
+    for (const field of ["reason_code", "reason", "approval_ref", "alternative_validation", "validation_command"]) if (!asNonEmptyString(evidence[field])) errors.push(`${field} is required for not_applicable`);
+    const sourceRefs = asStringArray(evidence.source_refs);
+    if (!sourceRefs || sourceRefs.length === 0) errors.push("source_refs must be non-empty");
+  } else {
+    const total = asPositiveInt(evidence.ucd_total);
+    const ready = asPositiveInt(evidence.ready_ucd);
+    if (total === null || total < 1) errors.push("ucd_total must be >= 1");
+    if (ready === null || ready !== total) errors.push("ready_ucd must equal ucd_total");
+    const ucdIds = asStringArray(evidence.ucd_ids);
+    if (!ucdIds || ucdIds.length === 0) errors.push("ucd_ids must be non-empty");
+    if (!asNonEmptyString(evidence.index)) errors.push("index is required");
+    errors.push(...i13ModeErrors(evidence, ucdIds || [], state, instance));
+    errors.push(...i13UnitErrors(evidence, ucdIds || [], instance));
+  }
+  return errors;
+}
+
 function moduleI13Evidence(instance: Pick<StageInstance, "module_id">): I13Context {
   if (!instance.module_id) return { error: "the tdd gate needs a module context to read the I13 evidence" };
   const path = join(PROJECT_ROOT, evidenceRelativePath("test-case-derivation", "test-case-derivation", "module", { module_id: instance.module_id }));
@@ -2709,27 +2812,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
 
       case "test-case-derivation": {
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
-          const errors: string[] = [];
-          if (!["required", "not_applicable"].includes(String(evidence.status))) errors.push('status must be "required" or "not_applicable"');
-          if (evidence.status === "not_applicable") {
-            if (!["pure-declaration", "pure-style", "pure-configuration", "approved-exception"].includes(String(evidence.reason_code))) errors.push("reason_code is not an approved non-applicable code");
-            for (const field of ["reason_code", "reason", "approval_ref", "alternative_validation", "validation_command"]) if (!asNonEmptyString(evidence[field])) errors.push(`${field} is required for not_applicable`);
-            const sourceRefs = asStringArray(evidence.source_refs);
-            if (!sourceRefs || sourceRefs.length === 0) errors.push("source_refs must be non-empty");
-          } else {
-            const total = asPositiveInt(evidence.ucd_total);
-            const ready = asPositiveInt(evidence.ready_ucd);
-            if (total === null || total < 1) errors.push("ucd_total must be >= 1");
-            if (ready === null || ready !== total) errors.push("ready_ucd must equal ucd_total");
-            const ucdIds = asStringArray(evidence.ucd_ids);
-            if (!ucdIds || ucdIds.length === 0) errors.push("ucd_ids must be non-empty");
-            if (!asNonEmptyString(evidence.index)) errors.push("index is required");
-            errors.push(...i13ModeErrors(evidence, ucdIds || [], state, instance));
-            errors.push(...i13UnitErrors(evidence, ucdIds || [], instance));
-          }
-          return errors;
-        });
+        const failure = validateEvidence(stage, sensor, instance, evidence => i13DerivationErrors(evidence, instance, state));
         if (failure) failures.push(failure);
         break;
       }
@@ -5383,7 +5466,8 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
     return errors.length > 0 && errors.every(error =>
       /^source_revision\.scope_digest no longer matches the /.test(error)
       || /^refresh this evidence \('aidlc evidence run --stage [^']+'\) to re-anchor it to the .+ scope$/.test(error)
-      || error === "semantic checker command no longer matches the controlled producer");
+      || error === "semantic checker command no longer matches the controlled producer"
+      || error === "semantic checker implementation is missing or changed; refresh controlled evidence");
   };
   try {
     if (effectiveNextInstance.unit_id && (["feature", "enterprise", "mvp", "classic"].includes(planningState.scope) || sliceAdoption(documentSliceContext(planningState, effectiveNextInstance)).enabled)) {

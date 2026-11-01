@@ -11,6 +11,7 @@ import { qualityUiCheck } from "./aidlc-quality-ui";
 import { deliveryReadiness } from "./aidlc-quality-delivery";
 import { runSync } from "./aidlc-spawn";
 import { reviewAxisErrors, reviewIssueErrors } from "./aidlc-evidence-policy";
+import { reviewedFiles } from "./aidlc-review-files";
 import { globalReviewPayload, loadGraph, makeInstance, reviewCoverageErrors } from "./aidlc-orchestrate";
 import { deploymentValidationPayload } from "./aidlc-evidence";
 import { frontendPlatformPayload } from "./aidlc-frontend-platform";
@@ -645,7 +646,7 @@ function reviewEvidence(): Record<string, unknown> {
   const resolved = content.match(/(?:issues?_resolved|已解决|修复问题)\s*[:：]?\s*(\d+)/i)?.[1];
   const open = content.match(/(?:issues?_open|未关闭|开放问题)\s*[:：]?\s*(\d+)/i)?.[1] || "0";
   if (found === undefined || resolved === undefined) fail("review record must contain issue counts");
-  const filesReviewed = [...new Set(content.match(/(?<![\w:/])(?:[\w.@-]+\/)+[\w.@-]+\.[A-Za-z0-9]+/g) || [])];
+  const filesReviewed = reviewedFiles(content);
   if (filesReviewed.length === 0) fail("review record must identify reviewed files");
   const severityKeys = ["critical_open", "important_open", "suggestion_open"];
   const values = severityKeys.map(key => declaredValue(content, key));

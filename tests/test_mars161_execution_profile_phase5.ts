@@ -1,3 +1,4 @@
+import {semanticCheckerDigest} from "../core/tools/aidlc-checker-identity";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -42,7 +43,7 @@ function evidence(stageSlug: string, sensor: string, options: { timestamp?: stri
     stage_instance: stageSlug, module_id: null, unit_id: null,
     producer: { name: options.controlled === false ? "other" : "loeyae-aidlc-evidence", mode: options.controlled === false ? "uncontrolled" : "controlled", execution_id: "fixture" },
     source_revision: { commit: "fixture", dirty: false, worktree_digest: "a".repeat(64), ...(options.scope === undefined ? {} : { scope: options.scope }) },
-    checker: { id: `builtin:${sensor}`, sensor, status: "passed", exit_code: 0, argv_digest: "b".repeat(64) },
+    checker: { identity_version: 1, implementation_digest: semanticCheckerDigest(), id: `builtin:${sensor}`, sensor, status: "passed", exit_code: 0, argv_digest: "b".repeat(64) },
   }), "utf8");
 }
 
@@ -87,7 +88,7 @@ try {
   const revisionMismatch = buildEvidenceReusePlan(graph, { projectRoot: root, scope: "bugfix", now: NOW, target: targetFor("advisory"), expectedSourceRevision: { ...expectedRevision, worktree_digest: "c".repeat(64) } });
   assert.equal(revisionMismatch.revalidate.find((entry) => entry.stage_slug === "advisory")?.reason, "invalid_evidence");
   const evidencePath = join(root, ".aidlc", "evidence", "advisory", "advisory-evidence.json");
-  const validAdvisoryRecord = (identity: Record<string, unknown>) => ({ evidence_version: "1", timestamp: "2026-10-14T11:30:00.000Z", stage_instance: "advisory", module_id: null, unit_id: null, ...identity, producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: "x" }, source_revision: expectedRevision, checker: { id: "builtin:advisory-evidence", sensor: "advisory-evidence", status: "passed", exit_code: 0, argv_digest: "b".repeat(64) } });
+  const validAdvisoryRecord = (identity: Record<string, unknown>) => ({ evidence_version: "1", timestamp: "2026-10-14T11:30:00.000Z", stage_instance: "advisory", module_id: null, unit_id: null, ...identity, producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: "x" }, source_revision: expectedRevision, checker: { identity_version: 1, implementation_digest: semanticCheckerDigest(), id: "builtin:advisory-evidence", sensor: "advisory-evidence", status: "passed", exit_code: 0, argv_digest: "b".repeat(64) } });
   for (const [label, identity] of [
     ["wrong stage_instance", { stage_instance: "other" }],
     ["missing stage_instance", { stage_instance: null }],

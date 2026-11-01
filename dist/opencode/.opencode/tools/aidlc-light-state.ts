@@ -1029,10 +1029,10 @@ export function releaseExpiredModuleClaims(state: WorkflowState, now = Date.now(
 }
 
 // In-process state parse memoization (MARS-277): one command parses each workflow's
-// Markdown state many times (routing, gates, publication). Keyed by file mtime, so
-// any write — this process via persistWorkflowState or another session — is a miss.
+// Markdown state many times (routing, gates, publication). Compare the actual text:
+// distinct writes can share a timestamp and length, including atomic replacements.
 // Callers get a structuredClone, exactly as a fresh parse would give them.
-const workflowStateCache = new Map<string, { mtime: number; state: WorkflowState | null }>();
+const workflowStateCache = new Map<string, { content: string; state: WorkflowState }>();
 
 export function loadWorkflowState(projectRoot: string, ref: WorkflowRef = GLOBAL_WORKFLOW): WorkflowState | null {
   const path = lightStatePath(projectRoot, ref);
@@ -1040,9 +1040,10 @@ export function loadWorkflowState(projectRoot: string, ref: WorkflowRef = GLOBAL
   const stat = lstatSync(path);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`workflow state must be a regular non-symlink file: ${path}`);
   const cached = workflowStateCache.get(path);
-  if (cached && cached.mtime === stat.mtimeMs) return cached.state ? structuredClone(cached.state) : null;
-  const state = parseLightWorkflowState(readFileSync(path, "utf8"));
-  workflowStateCache.set(path, { mtime: stat.mtimeMs, state });
+  const content = readFileSync(path, "utf8");
+  if (cached && cached.content === content) return structuredClone(cached.state);
+  const state = parseLightWorkflowState(content);
+  workflowStateCache.set(path, { content, state });
   return structuredClone(state);
 }
 

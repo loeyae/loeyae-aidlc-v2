@@ -8,6 +8,7 @@ import { createInitialState } from '../core/tools/aidlc-light-state';
 import { readSourceRevision } from '../core/tools/aidlc-revision';
 import { saveFixtureState, fixtureEnvironment } from './mars243_fixture_session';
 import { createHash } from 'node:crypto';
+import { semanticCheckerDigest } from '../core/tools/aidlc-checker-identity';
 
 const root = mkdtempSync(join(tmpdir(), 'aidlc-historical-red-'));
 const git = (...args: string[]) => {
@@ -108,7 +109,7 @@ writeFileSync(configPath, JSON.stringify(scopedConfig));
 const i13: any = { status:'required', ucd_ids:['UC-D-001'], ucd_units:{ 'UC-D-001':['default'] },
   evidence_version:'1', timestamp:new Date().toISOString(), stage_instance:'test-case-derivation@module:project', module_id:'project', unit_id:null,
   producer:{name:'loeyae-aidlc-evidence', mode:'controlled', execution_id:'fixture-i13'}, source_revision:readSourceRevision(control),
-  checker:{ id:'builtin:test-case-derivation', sensor:'test-case-derivation', argv_digest:'a'.repeat(64), status:'passed', exit_code:0 } };
+  checker:{ identity_version:1, implementation_digest:semanticCheckerDigest(), id:'builtin:test-case-derivation', sensor:'test-case-derivation', argv_digest:'a'.repeat(64), status:'passed', exit_code:0 } };
 const i13Path = join(control,'.aidlc/evidence/test-case-derivation/project/test-case-derivation.json'); mkdirSync(dirname(i13Path),{recursive:true}); writeFileSync(i13Path,JSON.stringify(i13));
 const output = join(control,'.aidlc/evidence/tdd/project/default/red-test-evidence.json');
 const state = createInitialState('express', '4.22.17', identity.workflow_id, [], 'recover RED');

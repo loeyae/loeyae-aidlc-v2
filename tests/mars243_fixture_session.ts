@@ -55,7 +55,8 @@ export function fixtureGlobalReview(project: string) {
   if (!plan.required) return;
   const path = resolve(project, "docs/aidlc/construction/global-code-review.md");
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, '# Fixture integration review\n\n```aidlc-global-review\n' + JSON.stringify({ mode: "FINAL_GLOBAL", status: "passed", spec_axis: "passed", standards_axis: "passed", reviewer: "fixture-integration-review", issues_found: 0, issues_resolved: 0, issues_open: 0, covered_instances: plan.covered_instances, inputs: plan.inputs }) + '\n```\n');
+  if (plan.ucd_coverage.status !== "passed") throw new Error(`Fixture global coverage is blocked: ${JSON.stringify(plan.ucd_coverage)}`);
+  writeFileSync(path, '# Fixture integration review\n\n```aidlc-global-review\n' + JSON.stringify({ mode: "FINAL_GLOBAL", status: "passed", spec_axis: "passed", standards_axis: "passed", reviewer: "fixture-integration-review", issues_found: 0, issues_resolved: 0, issues_open: 0, covered_instances: plan.covered_instances, inputs: plan.inputs, ucd_coverage:plan.ucd_coverage, checklist:Object.fromEntries(plan.checklist_items.map((id:string)=>[id,{status:"passed",evidence:[plan.inputs[0].path]}])) }) + '\n```\n');
   const args = ["evidence", "run", "--stage", "build-and-test", "--instance", "build-and-test", "--sensor", "global-review-evidence", "--refresh"];
   const produced = run(args, fixtureEnvironment(project, args));
   if (produced.status !== 0) throw new Error(produced.stdout + produced.stderr);

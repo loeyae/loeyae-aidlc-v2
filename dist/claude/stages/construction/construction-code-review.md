@@ -424,6 +424,8 @@ requires: [code-generation]
 - [ ] 所选 UC-D 的真实测试全部通过（0 失败），覆盖和执行状态可由受控证据机器复核；结构化不适用范围按 I13 替代验证检查
 - [ ] 用例点覆盖统计：`已覆盖 UC-D 数 / 总 UC-D 数 = X/Y`，X=Y 才通过
 
+FINAL_GLOBAL 的机器记录遵循 `sensors/global-review-evidence.md`：逐项填写 `checklist`，并核对只读投影的 `ucd_coverage`。生产者、C8 准入和完成校验使用同一契约。统计按模块区分 UC-D，并逐单元核对控制来源、ready 状态、实现设计/代码生成计划及真实 GREEN 映射；已批准的 `mapping_deferred` 在各单元的 `deferred_ucd_ids` 中显式保留，不伪装为已覆盖，也不解除原有映射债规则。
+
 **对账未通过处理**：
 - 缺覆盖：回 TDD 补真实 RED/BASELINE 测试或核验已有测试映射；不得用措辞放行
 - 测试失败：先核对批准需求、测试预期和实现；实现缺陷修实现，测试错误/批准行为变化可有据修测试；禁止降低正确断言伪造通过

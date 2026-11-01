@@ -32,6 +32,8 @@ aidlc/active/audit.md
 
 ## 安装
 
+运行时要求：Node.js `^22.22.0 || >=24.8.0`。该范围与必需的 HTML 验证器依赖一致；Node 20、21、23 及较早的 Node 22/24 不在支持范围内。
+
 ```bash
 npm install -g --ignore-scripts https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
 loeyae-aidlc install

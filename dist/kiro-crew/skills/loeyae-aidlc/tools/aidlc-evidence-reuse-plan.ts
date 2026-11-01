@@ -1,4 +1,5 @@
 import { evidenceTimeError, isEvidenceTimestamp as isIsoDate } from "./aidlc-evidence-policy";
+import {semanticCheckerIdentityErrors} from "./aidlc-checker-identity";
 /**
  * Read-only evidence reuse and validation scheduling for MARS-161 Phase 5.
  *
@@ -156,6 +157,7 @@ function candidateForSensor(
       }
       const checker = isRecord(value.checker) ? value.checker : undefined;
       if (sensor !== "build-test-evidence" && (checker?.id !== `builtin:${sensor}` || checker.sensor !== sensor || checker.status !== "passed" || checker.exit_code !== 0 || typeof checker.argv_digest !== "string" || !/^[a-f0-9]{64}$/.test(checker.argv_digest))) return { failure: "invalid_evidence" };
+      if (checker && !["build-test-evidence","red-test-evidence","green-test-evidence","baseline-test-evidence"].includes(sensor) && semanticCheckerIdentityErrors(checker).length) return {failure:"invalid_evidence"};
       const timestamp = value.timestamp;
       const timeError = evidenceTimeError(value, sensor, nowMs);
       if (timeError) return { failure: timeError.includes("stale") ? "stale_evidence" : timeError.includes("future") ? "future_evidence" : "invalid_evidence" };

@@ -5,7 +5,7 @@ state branches, action targets, success/failure applicability, async result
 entries and base structure evidence. Removed regions remain mapped and must be
 absent. Display/hide/disable follows approved source rules.
 
-HTML generation and I10 use local html-validate 10.4.0 with its recommended rules
+HTML generation and I10 use local html-validate 11.17.0 with its recommended rules
 and parse5 8 DOM traversal. No public upload; no inline validator suppression.
 Every canonical final HTML is validated, not a sample. Duplicate IDs, page-root
 traceability, dangling/wrong-owner ACs and unregistered interactive entries block.

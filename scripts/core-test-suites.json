@@ -32,6 +32,18 @@
     "tests/test_historical_red_replay.ts"
   ],
   [
+    "node",
+    "tests/test_runtime_dependencies.mjs"
+  ],
+  [
+    "tsx",
+    "tests/test_audit_checker_identity.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_audit_review_paths.ts"
+  ],
+  [
     "tsx",
     "tests/test_nested_digest_compatibility.ts"
   ],

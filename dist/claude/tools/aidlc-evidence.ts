@@ -1,5 +1,6 @@
 import { assertSessionClaim, withSessionPublication, sessionBinding, type SessionBinding } from "./aidlc-light-state";
 import { createHash, randomUUID } from "crypto";
+import { semanticCheckerDigest, semanticCheckerIdentityErrors } from "./aidlc-checker-identity";
 import { QUALITY_SENSORS, qualityAdoption, recordQualityCheckpoint, type QualitySnapshot } from "./aidlc-quality-gates";
 import { SLICE_SENSOR, sliceEvidenceErrors, type SliceContext } from "./aidlc-document-slices";
 import { markProgress, startProgressHeartbeat } from "./aidlc-progress";
@@ -638,6 +639,7 @@ export function semanticCommandArgv(sensor: string, state: { current_module?: st
 }
 
 function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerState, behaviour: { blockedReports?: boolean } = {}): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
+  const implementation = semanticCheckerDigest();
   const argv = semanticCommandArgv(sensor, state);
   const started = Date.now();
   const result = runSync(argv[0], argv.slice(1), {
@@ -672,6 +674,7 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
     if (field in payload) fail(`semantic checker must not provide producer-controlled field ${field}`);
   }
   if (typeof payload.status !== "string" || payload.status.trim().length === 0) fail(`semantic checker ${sensor} must provide a non-empty status`);
+  if (implementation !== semanticCheckerDigest(true)) fail("semantic checker implementation changed during execution; rerun controlled evidence");
   return {
     payload,
     execution: {
@@ -679,6 +682,8 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
       sensor,
       argv_digest: argvDigest(argv),
       command_version: 2,
+      identity_version: 1,
+      implementation_digest: implementation,
       exit_code: exitCode,
       status: "passed",
       duration_ms: duration,
@@ -1589,6 +1594,7 @@ function reusableSemanticEvidence(prior: Record<string, unknown>, inputs: { dige
   return producer?.mode === "controlled"
     && producer.workflow_id === state.workflow_id
     && checker?.argv_digest === argvDigest(semanticCommandArgv(sensor, state))
+    && semanticCheckerIdentityErrors(checker).length === 0
     && !evidenceTimeError(prior, sensor)
     && checker?.exit_code === 0
     && checker.status === "passed"

@@ -28,6 +28,10 @@ Evidence 路径由当前 directive 的 `evidence_root` 决定：
 使用 `loeyae-aidlc evidence run` 生成 Evidence。Producer 只执行项目命令清单中受允许的 build、test、check 命令（清单按 `--config` 显式指定 → `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找；RED/GREEN/BASELINE 与 C8 只按 `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找，显式 `--config` 仅在指向同一文件时被接受，否则 producer 拒绝），采用无 shell 执行、路径边界、原子写入和输出脱敏。
 选择性证据失效（MARS-271）：语义 sensor 证据记录 stage `consumes` 工件的输入指纹（`inputs.digest`）；`evidence run --refresh --instance <id>` 对输入指纹、执行上下文与受控状态均未变化的证据直接复用（`action: reused`），只有 diff 触及的 artifact 的直接依赖证据重跑（`action: regenerated`，输出 `inputs_changed` 失效范围）。RED/GREEN/BASELINE 相位证据不走该路径。
 
+语义证据还记录 `checker.identity_version: 1` 和 `implementation_digest`，绑定工具实现、实际运行依赖字节与 Node/平台身份。正常门禁、复用投影和 refresh 使用同一检查。工具同路径升级、依赖变化或旧证据缺少身份时，先受控重跑；失败不覆盖旧证据。执行期间身份变化拒绝发布。相位证据继续使用其真实命令/观察与历史回放专用绑定。
+
+审查文件清单推荐写为单行 JSON：`files_reviewed: ["src/业务.ts", "src/with space.ts"]`；也可在报告中用反引号或引号包住完整路径。明确声明有误时拒绝，不从其他正文猜测替代。绝对、越界、虚构或漏审路径仍阻断。
+
 ## 阶段质量
 
 ### C1/C6 字段映射的分级核对

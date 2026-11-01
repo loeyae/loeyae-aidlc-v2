@@ -1,3 +1,4 @@
+import {semanticCheckerDigest} from "../core/tools/aidlc-checker-identity";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -262,7 +263,7 @@ function parseLintReport(stdout: string): Record<string, unknown> {
       timestamp: new Date().toISOString(),
       producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: `test-${sensor}` },
       source_revision: readSourceRevision(project),
-      checker: { id: `builtin:${sensor}`, sensor, argv_digest: phase ? phaseObservationDigest(phase, observedDigest!) : "a".repeat(64), exit_code: 0, status: "passed" },
+      checker: { identity_version: 1, implementation_digest: semanticCheckerDigest(), id: `builtin:${sensor}`, sensor, argv_digest: phase ? phaseObservationDigest(phase, observedDigest!) : "a".repeat(64), exit_code: 0, status: "passed" },
     };
   };
 

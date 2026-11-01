@@ -256,9 +256,9 @@ ${modules.join("\n") || "| - | - | - |"}
 `;
 }
 
-// In-process registry parse memoization (MARS-277), mtime-keyed like the workflow
-// state cache; writes go through updateRegistry, which deletes the entry.
-const registryCache = new Map<string, { mtime: number; registry: WorkflowRegistry | null }>();
+// Reuse parsed registries only when their actual text is unchanged, including
+// writes from another session that preserve timestamps and file length.
+const registryCache = new Map<string, { content: string; registry: WorkflowRegistry }>();
 
 export function loadRegistry(projectRoot: string): WorkflowRegistry | null {
   const path = registryPath(projectRoot);
@@ -266,9 +266,10 @@ export function loadRegistry(projectRoot: string): WorkflowRegistry | null {
   const stat = lstatSync(path);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`workflow registry must be a regular non-symlink file: ${path}`);
   const cached = registryCache.get(path);
-  if (cached && cached.mtime === stat.mtimeMs) return cached.registry ? structuredClone(cached.registry) : null;
-  const registry = parseRegistry(readFileSync(path, "utf8"));
-  registryCache.set(path, { mtime: stat.mtimeMs, registry });
+  const content = readFileSync(path, "utf8");
+  if (cached && cached.content === content) return structuredClone(cached.registry);
+  const registry = parseRegistry(content);
+  registryCache.set(path, { content, registry });
   return structuredClone(registry);
 }
 

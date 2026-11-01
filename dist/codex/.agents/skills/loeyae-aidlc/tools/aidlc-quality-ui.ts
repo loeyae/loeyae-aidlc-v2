@@ -173,5 +173,5 @@ export function qualityUiCheck(ctx: QualityContext): Record<string, unknown> {
     }
   }
   issues.push(...reviewIssues(ctx, plan, String(plan.value.ui_review || ""), reviewIds, "ui", "UI_RULE_MISMATCH"));
-  return qualityResult(ctx, sensor, [plan, stories, req], issues, { ui_applicable: true, region_count: regions.filter(r => ["added", "changed"].includes(r.change) && !r.decorative_reason).length, traced_count: planning ? null : traced, html_errors: htmlErrors, validator: ctx.ui_route === "html-mock" && !planning ? { name: "html-validate", version: "10.4.0", config_sha256: qualityHash(JSON.stringify(HTML_QUALITY_CONFIG)), execution: "validateStringSync", exit_code: 0 } : null });
+  return qualityResult(ctx, sensor, [plan, stories, req], issues, { ui_applicable: true, region_count: regions.filter(r => ["added", "changed"].includes(r.change) && !r.decorative_reason).length, traced_count: planning ? null : traced, html_errors: htmlErrors, validator: ctx.ui_route === "html-mock" && !planning ? { name: "html-validate", version: qualityRequire("html-validate/package.json").version, config_sha256: qualityHash(JSON.stringify(HTML_QUALITY_CONFIG)), execution: "validateStringSync", exit_code: 0 } : null });
 }

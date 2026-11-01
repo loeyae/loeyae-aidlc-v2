@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { createInitialState, loadWorkflowState } from "../core/tools/aidlc-light-state";
 import { readSourceRevision } from "../core/tools/aidlc-revision";
 import { argvDigest, phaseObservationDigest } from "../core/tools/aidlc-evidence";
+import { semanticCheckerDigest } from "../core/tools/aidlc-checker-identity";
 
 const repository = resolve(import.meta.dirname, "..");
 const cli = join(repository, "bin", "cli.ts");
@@ -79,7 +80,7 @@ function envelope(project: string, sensor: string, payload: Record<string, unkno
     timestamp: new Date().toISOString(),
     producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: `test-${sensor}` },
     source_revision: readSourceRevision(project),
-    checker: { id: `builtin:${sensor}`, sensor, argv_digest: phase ? phaseObservationDigest(phase, observedDigest!) : "a".repeat(64), exit_code: 0, status: "passed" },
+    checker: { identity_version: 1, implementation_digest: semanticCheckerDigest(), id: `builtin:${sensor}`, sensor, argv_digest: phase ? phaseObservationDigest(phase, observedDigest!) : "a".repeat(64), exit_code: 0, status: "passed" },
   };
 }
 
