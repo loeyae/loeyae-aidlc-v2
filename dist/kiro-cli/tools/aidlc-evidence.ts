@@ -29,6 +29,8 @@ import { codeRefRepo, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY }
 import { evidenceRelativePath, i13UcdIdsByMode as sharedI13UcdIdsByMode, readUnitManifest, stageInstanceId, unitManifestPath, unitUcdIds, verifiedModuleIds, type UcdExemption } from "./aidlc-execution-context";
 import { assertControlledI13 } from "./aidlc-i13-applicability";
 import { normalizeUcdSources } from "./aidlc-ucd-declarations";
+import { phaseInputBinding, type PhaseCommandInputs } from "./aidlc-phase-inputs";
+import { phaseExecutionRevision, phaseExecutionScopeForInstance } from "./aidlc-workflow-layout";
 import { evidenceTimeError } from "./aidlc-evidence-policy";
 import { parseTestStats, validTestStats, type TestStats } from "./aidlc-test-stats";
 import { nativeNodeCheckTooling } from "./aidlc-node-check-tooling";
@@ -80,7 +82,7 @@ interface CommandSpec {
   argv: string[];
   cwd?: string;
   timeout_ms?: number;
-  evidence_inputs?: { environment: string[] };
+  evidence_inputs?: { environment: string[]; files?: string[] };
 }
 
 interface ArtifactSpec {
@@ -124,6 +126,34 @@ const require = createRequire(import.meta.url);
 
 function fail(message: string): never {
   throw new Error(message);
+}
+
+// Diagnostic defaults must not become inputs to project commands or their cache.
+let producerCommandEnvironment: NodeJS.ProcessEnv | undefined;
+const projectCommandEnvironment = () => producerCommandEnvironment ?? process.env;
+// process.env is case-insensitive on Windows; copied caller snapshots are ordinary
+// objects. Preserve the OS lookup semantics without dropping any declared input.
+function commandEnvironmentValue(environment: NodeJS.ProcessEnv, key: string): string | null {
+  const actual = process.platform === "win32" ? Object.keys(environment).find(candidate => candidate.toLowerCase() === key.toLowerCase()) : key;
+  return actual === undefined ? null : environment[actual] ?? null;
+}
+const SEMANTIC_CALLER_CONTEXT = "AIDLC_SEMANTIC_CALLER_CONTEXT";
+const SEMANTIC_OVERRIDDEN_KEYS = ["AIDLC_ACTIVE_STAGE", "AIDLC_ACTIVE_MODULE", "AIDLC_ACTIVE_UNIT", "AIDLC_PROGRESS", SEMANTIC_CALLER_CONTEXT];
+
+/** Only the semantic entrypoint passes this restored environment to read-only phase gates.
+ * Producers and direct gates never consume this transport field as execution authority. */
+export function semanticValidationEnvironment(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv | undefined {
+  const encoded = base[SEMANTIC_CALLER_CONTEXT];
+  if (encoded === undefined) return undefined;
+  const value = JSON.parse(encoded);
+  if (value?.version !== 1 || !value.values || Array.isArray(value.values)
+    || Object.keys(value.values).length !== SEMANTIC_OVERRIDDEN_KEYS.length
+    || SEMANTIC_OVERRIDDEN_KEYS.some(key => !Object.hasOwn(value.values, key) || !(value.values[key] === null || typeof value.values[key] === "string"))) fail("invalid semantic caller environment context");
+  const restored = { ...base };
+  for (const key of SEMANTIC_OVERRIDDEN_KEYS) {
+    if (value.values[key] === null) delete restored[key]; else restored[key] = value.values[key];
+  }
+  return restored;
 }
 
 /**
@@ -297,6 +327,20 @@ export function allowlistedAlternativeCommand(stage: string): { id: string; argv
   return { id: checks[0].id, argv_digest: argvDigest(checks[0].argv), cwd: safeCwdLabel(checks[0].cwd || PROJECT_ROOT) };
 }
 
+/** Exact source inputs for controlled no-behavior validation; never a test exemption. */
+export function alternativePhaseInputs(stage: string, moduleId: string, unitId?: string, exemption = false): PhaseCommandInputs {
+  if (exemption) {
+    const declared = unitUcdExemption(PROJECT_ROOT, moduleId, unitId!);
+    if (!declared) throw new Error("unit validation declaration is missing");
+    const config = unitManifestPath(PROJECT_ROOT, moduleId);
+    const scope = phaseExecutionScopeForInstance(PROJECT_ROOT, stageInstanceId("code-generation", "unit", { module_id: moduleId, unit_id: unitId }));
+    return { argv: declared.validation_command, cwd: PROJECT_ROOT, config, projectedConfig: scope.projectedInputs?.[relative(PROJECT_ROOT, config).replace(/\\/g, "/")] };
+  }
+  const config = resolveCommandConfigPath(PROJECT_ROOT, stage), checks = requireCommandConfig(config, stage).commands.filter(command => command.role === "check");
+  if (checks.length !== 1) throw new Error("alternative phase requires exactly one declared check");
+  return { argv: checks[0].argv, cwd: checks[0].cwd, config, files: checks[0].evidence_inputs?.files };
+}
+
 /** The single allowlisted red/green/baseline command of a stage; fails unless exactly one is declared. */
 function phaseCommand(config: EvidenceConfig, stage: string, phase: Phase): CommandSpec {
   const role = phase.toLowerCase() as "red" | "green" | "baseline";
@@ -311,10 +355,10 @@ function phaseCommand(config: EvidenceConfig, stage: string, phase: Phase): Comm
  * the same stage-locked parser the producer uses. Throws when the allowlist is missing,
  * unreadable, locked to another stage, or does not declare exactly one command.
  */
-export function allowlistedPhaseCommand(stage: string, phase: Phase): { id: string; argv_digest: string; config: string } {
+export function allowlistedPhaseCommand(stage: string, phase: Phase): { id: string; argv_digest: string; config: string; argv: string[]; cwd: string; files?: string[] } {
   const config = resolveCommandConfigPath(PROJECT_ROOT, stage);
   const command = phaseCommand(requireCommandConfig(config, stage), stage, phase);
-  return { id: command.id, argv_digest: argvDigest(command.argv), config };
+  return { id: command.id, argv_digest: argvDigest(command.argv), config, argv: command.argv, cwd: command.cwd || PROJECT_ROOT, files: command.evidence_inputs?.files };
 }
 
 function validateArgv(argv: unknown, field: string): string[] {
@@ -419,11 +463,15 @@ function parseConfig(path: string, stage: string, allowEmptyCommands = false, pr
     let evidenceInputs: CommandSpec["evidence_inputs"];
     if (record.evidence_inputs !== undefined) {
       const inputs = record.evidence_inputs as Record<string, unknown> | null;
-      if (!inputs || Array.isArray(inputs) || Object.keys(inputs).some(key => key !== "environment")
+      if (!inputs || Array.isArray(inputs) || Object.keys(inputs).some(key => !["environment", "files"].includes(key))
         || !Array.isArray(inputs.environment) || !inputs.environment.every(key => typeof key === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(key))) {
         fail(`commands[${i}].evidence_inputs must declare environment variable names; source ownership belongs in module/unit manifests`);
       }
       evidenceInputs = { environment: [...new Set(inputs.environment as string[])].sort() };
+      if (inputs.files !== undefined) {
+        if (!Array.isArray(inputs.files) || inputs.files.length > 256 || !inputs.files.every(path => typeof path === "string" && path.trim())) fail(`commands[${i}].evidence_inputs.files must be an array of at most 256 exact project files`);
+        evidenceInputs.files = [...new Set((inputs.files as string[]).map(path => relative(projectRoot, requireRegularFile(path, `commands[${i}].evidence_inputs.files`, projectRoot)).replace(/\\/g, "/")))].sort();
+      }
     }
     const spec = { id, role, sensor, argv, cwd, timeout_ms: timeout, ...(evidenceInputs ? { evidence_inputs: evidenceInputs } : {}) };
     if (role === "semantic") validateSemanticDeclaration(spec);
@@ -510,7 +558,7 @@ function runCommand(spec: CommandSpec): CommandResult {
   const started = Date.now();
   const result = runSync(spec.argv[0], spec.argv.slice(1), {
     cwd,
-    env: process.env,
+    env: projectCommandEnvironment(),
     encoding: "utf8",
     shell: false,
     timeout: spec.timeout_ms,
@@ -644,13 +692,16 @@ export function semanticCommandArgv(sensor: string, state: { current_module?: st
   return [process.execPath, tsx, checker, "--sensor", sensor, ...scopeArgs];
 }
 
-function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerState, behaviour: { blockedReports?: boolean } = {}): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
+function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerState, behaviour: { blockedReports?: boolean; freshDerivation?: boolean } = {}): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
   const implementation = semanticCheckerDigest();
   const argv = semanticCommandArgv(sensor, state);
   const started = Date.now();
+  const caller = projectCommandEnvironment();
+  const checkerEnv = semanticCheckerEnv(state, process.env, sensor === "test-case-derivation" && behaviour.freshDerivation ? { AIDLC_I13_DERIVATION_MODE: "fresh" } : {});
+  checkerEnv[SEMANTIC_CALLER_CONTEXT] = JSON.stringify({ version: 1, values: Object.fromEntries(SEMANTIC_OVERRIDDEN_KEYS.map(key => [key, caller[key] ?? null])) });
   const result = runSync(argv[0], argv.slice(1), {
     cwd: PROJECT_ROOT,
-    env: semanticCheckerEnv(state),
+    env: checkerEnv,
     encoding: "utf8",
     shell: false,
     timeout: timeoutMs,
@@ -804,7 +855,7 @@ function securityValidationBasis(config: EvidenceConfig, state: ProducerState): 
   return { risk: record.risk, sources: record.sources.map((path: string) => ({ path, sha256: createHash("sha256").update(readFileSync(requireRegularFile(safeProjectPath(path, "security acceptance source"), "security acceptance source"))).digest("hex") })), command_ids: record.command_ids };
 }
 
-export function buildTestEvidenceErrors(evidence: Record<string, unknown>, state: ProducerState): string[] {
+export function buildTestEvidenceErrors(evidence: Record<string, unknown>, state: ProducerState, environment?: NodeJS.ProcessEnv): string[] {
   const errors: string[] = [];
   if (evidence.status !== "passed") errors.push("build/test status must be passed");
   const commands = Array.isArray(evidence.commands) ? evidence.commands as Record<string, unknown>[] : [];
@@ -831,7 +882,7 @@ export function buildTestEvidenceErrors(evidence: Record<string, unknown>, state
       const spec = config.commands.find(spec => spec.id === command.id && spec.role === command.role);
       if (!spec || command.argv_digest !== argvDigest(spec.argv) || command.cwd !== safeCwdLabel(spec.cwd || PROJECT_ROOT)) errors.push(`command ${command.id} no longer matches its allowlist`);
       if (command.status !== "passed" || command.exit_code !== 0 || typeof command.duration_ms !== "number" || command.duration_ms < 0) errors.push(`command ${command.id} must have a successful execution`);
-      if (basis && command.role === "check") errors.push(...alternativeCheckBindingErrors(command, "build-and-test", state));
+      if (basis && command.role === "check") errors.push(...alternativeCheckBindingErrors(command, "build-and-test", state, false, environment));
     }
     if (!tests || !Object.values(tests).every(value => Number.isSafeInteger(value) && value >= 0) || tests.total !== tests.passed + tests.failed + tests.skipped
       || tests.failed !== 0 || ((!basis || roles.has("test")) && (tests.total < 1 || tests.passed < 1)) || (!roles.has("test") && !zeroTests)) errors.push("test summary must count real successful tests, or exactly zero for approved no-behavior validation");
@@ -843,10 +894,10 @@ export function buildTestEvidenceErrors(evidence: Record<string, unknown>, state
   return errors;
 }
 
-function alternativeBinding(spec: CommandSpec, state: ProducerState, basis: Record<string, unknown>, freshness?: Record<string, unknown>) {
+function alternativeBinding(spec: CommandSpec, state: ProducerState, basis: Record<string, unknown>, freshness?: Record<string, unknown>, environmentSource = projectCommandEnvironment()) {
   const instance = stageInstanceId("code-generation", state.current_unit ? "unit" : state.current_module ? "module" : "project", { module_id: state.current_module, unit_id: state.current_unit });
   const declaredScope = state.current_module && existsSync(join(PROJECT_ROOT, "docs/aidlc/ideation/module-manifest.json"))
-    ? evidenceScopeForInstance(PROJECT_ROOT, instance) : undefined;
+    ? state.current_unit ? phaseExecutionScopeForInstance(PROJECT_ROOT, instance) : evidenceScopeForInstance(PROJECT_ROOT, instance) : undefined;
   const revision = readSourceRevision(PROJECT_ROOT, declaredScope, nestedSourceRepos(PROJECT_ROOT));
   const inputs = declaredScope
     ? { mode: "declared-ownership", scope: revision.scope, digest: revision.scope_digest }
@@ -855,8 +906,8 @@ function alternativeBinding(spec: CommandSpec, state: ProducerState, basis: Reco
   // binds the complete environment; an explicit list is the command owner's dependency contract.
   const environmentKeys = spec.evidence_inputs
     ? [...new Set([...spec.evidence_inputs.environment, "PATH", "Path", "PATHEXT", "SystemRoot", "ComSpec", "NODE_OPTIONS", "NODE_PATH"])]
-    : Object.keys(process.env).filter(key => key !== "AIDLC_SESSION_BINDING");
-  const environment = { mode: spec.evidence_inputs ? "declared" : "conservative-all", keys: environmentKeys.sort().map(key => [key, process.env[key] ?? null]) };
+    : Object.keys(environmentSource).filter(key => key !== "AIDLC_SESSION_BINDING");
+  const environment = { mode: spec.evidence_inputs ? "declared" : "conservative-all", keys: environmentKeys.sort().map(key => [key, commandEnvironmentValue(environmentSource, key)]) };
   const baseline = workflowBaselineForModule(PROJECT_ROOT, state.current_module);
   const binding = { workflow_id: state.workflow_id, module_id: state.current_module, unit_id: state.current_unit, basis, inputs, baseline, freshness,
     argv_digest: argvDigest(spec.argv), cwd: safeCwdLabel(spec.cwd || PROJECT_ROOT), runtime: { executable: process.execPath, version: process.version },
@@ -881,31 +932,47 @@ function alternativeObservationErrors(execution: Record<string, unknown>, bindin
 }
 
 /** Current-input verification used by phase/C8 gates, including declared environment/config. */
-export function alternativeCheckBindingErrors(execution: Record<string, unknown>, stage: string, state: ProducerState): string[] {
+export function alternativeCheckBindingErrors(execution: Record<string, unknown>, stage: string, state: ProducerState, historical = false, environment?: NodeJS.ProcessEnv): string[] {
   try {
     const config = requireCommandConfig(resolveCommandConfigPath(PROJECT_ROOT, stage), stage);
     const spec = config.commands.find(command => command.id === execution.id && command.role === "check");
     if (!spec) return ["alternative check command is no longer declared"];
     // Legacy observations retain their existing conservative provenance gate.
-    if (execution.input_binding === undefined && !spec.evidence_inputs && !execution.reused_from) return [];
+    if (!historical && execution.input_binding === undefined && !spec.evidence_inputs && !execution.reused_from) return [];
     const basis = noBehaviorBasis(state);
     if (!basis) return ["alternative observation no longer has a trusted applicability basis"];
-    const { binding } = alternativeBinding(spec, state, basis, config.freshness);
-    return alternativeObservationErrors(execution.input_binding === undefined ? { ...execution, input_binding: argvDigest([JSON.stringify(binding)]) } : execution, binding, config.freshness);
+    const { binding } = alternativeBinding(spec, state, basis, config.freshness, environment);
+    return historical ? historicalAlternativeObservationErrors(execution, binding, config.freshness) : alternativeObservationErrors(execution.input_binding === undefined ? { ...execution, input_binding: argvDigest([JSON.stringify(binding)]) } : execution, binding, config.freshness);
   } catch (error) { return [String(error)]; }
 }
 
 /** Empty-subset observations are owned by the unit manifest, rather than a stage allowlist. */
-export function exemptionCheckBindingErrors(execution: Record<string, unknown>, state: ProducerState): string[] {
+export function exemptionCheckBindingErrors(execution: Record<string, unknown>, state: ProducerState, historical = false, environment?: NodeJS.ProcessEnv): string[] {
   try {
-    if (execution.input_binding === undefined && !execution.reused_from) return [];
+    if (!historical && execution.input_binding === undefined && !execution.reused_from) return [];
     const exemption = unitUcdExemption(PROJECT_ROOT, state.current_module!, state.current_unit!);
     const basis = noBehaviorBasis(state);
     if (!exemption || !basis) return ["exemption observation no longer has a trusted applicability basis"];
     const config = optionalSemanticConfig(resolveCommandConfigPath(PROJECT_ROOT, state.current_stage!), state.current_stage!);
-    const { binding } = alternativeBinding({ id: `ucd-exemption:${state.current_unit}`, role: "check", argv: exemption.validation_command }, state, basis, config?.freshness);
-    return alternativeObservationErrors(execution.input_binding === undefined ? { ...execution, input_binding: argvDigest([JSON.stringify(binding)]) } : execution, binding, config?.freshness);
+    const { binding } = alternativeBinding({ id: `ucd-exemption:${state.current_unit}`, role: "check", argv: exemption.validation_command }, state, basis, config?.freshness, environment);
+    return historical ? historicalAlternativeObservationErrors(execution, binding, config?.freshness) : alternativeObservationErrors(execution.input_binding === undefined ? { ...execution, input_binding: argvDigest([JSON.stringify(binding)]) } : execution, binding, config?.freshness);
   } catch (error) { return [String(error)]; }
+}
+
+/** Historical TDD proves an earlier successful observation, not current execution.
+ * The caller must also validate current selected I13/validator inputs and ancestry.
+ * Live GREEN/C8 and cache reuse keep alternativeObservationErrors' exact binding. */
+function historicalAlternativeObservationErrors(execution: Record<string, unknown>, current: Record<string, any>, freshness?: Record<string, unknown>): string[] {
+  try {
+    if (typeof execution.input_binding !== "string" || !/^[a-f0-9]{64}$/.test(execution.input_binding)) return ["historical alternative observation requires its original input binding"];
+    const saved = JSON.parse(readFileSync(requireRegularFile(join(PROJECT_ROOT, ".aidlc/alternative-observations", `${execution.input_binding}.json`), "historical alternative observation"), "utf8"));
+    const original = saved.binding;
+    if (!original?.inputs || !original?.environment || !original?.runtime || !original?.basis || !original?.baseline) return ["historical alternative observation binding is incomplete"];
+    const expected = { ...current, inputs: original.inputs, environment: original.environment, runtime: original.runtime, baseline: original.baseline,
+      basis: { ...current.basis, i13_digest: original.basis.i13_digest } };
+    if (JSON.stringify(expected) !== JSON.stringify(original)) return ["historical alternative declaration or workflow identity changed"];
+    return alternativeObservationErrors(execution, original, freshness);
+  } catch (error) { return [`historical alternative provenance cannot be verified: ${String(error)}`]; }
 }
 
 /** Cache successful alternative checks using validated ownership; unknown inputs stay bound. */
@@ -1115,6 +1182,7 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
   const freshness = optionalSemanticConfig(options.config, options.stage)?.freshness;
   let payload: Record<string, unknown>;
   let execution: Record<string, unknown>;
+  let phaseCommandInputs: PhaseCommandInputs | undefined;
   const notRequired = (reason: string): void => {
     // No UC-D of this phase's tdd_mode: nothing to observe, so no command runs and the
     // allowlist need not declare one. The gate re-derives the verdict from I13.
@@ -1144,6 +1212,7 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     const checks = config.commands.filter((command) => command.role === "check");
     if (checks.length !== 1) fail(`I13 not_applicable requires exactly one controlled check command for ${options.stage}`);
     const check = alternativeCheck(checks[0], state, freshness);
+    phaseCommandInputs = alternativePhaseInputs(options.stage, state.current_module!, state.current_unit);
     const alternativeValidationExecution = {
       id: check.id,
       argv_digest: check.argv_digest,
@@ -1181,6 +1250,7 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
       fail(`${unitLabel} owns no UC-D of module ${moduleId} (unit_refs); declare ucd_exemption for it in ${relative(PROJECT_ROOT, unitManifestPath(PROJECT_ROOT, moduleId)).replace(/\\/g, "/")} (reason_code, reason, approval_ref, alternative_validation, validation_command) before ${phase} can be not_required`);
     }
     const check = alternativeCheck({ id: `ucd-exemption:${unitId}`, role: "check", argv: validateArgv(exemption.validation_command, `${unitLabel} ucd_exemption.validation_command`) }, state, freshness);
+    phaseCommandInputs = alternativePhaseInputs(options.stage, moduleId, unitId, true);
     payload = {
       status: "not_required",
       phase,
@@ -1197,12 +1267,13 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
   } else {
     const config = requireCommandConfig(options.config, options.stage);
     const command = phaseCommand(config, options.stage, phase);
+    phaseCommandInputs = { argv: command.argv, cwd: command.cwd, config: options.config, files: command.evidence_inputs?.files };
     // BASELINE observes the unmodified baseline code: verified before the command runs.
     const baselineFields = phase === "BASELINE" ? baselineCodeRefDigests(i13, state, scope!.scoped ? scope!.characterization : undefined) : {};
     const started = Date.now();
     const result = runSync(command.argv[0], command.argv.slice(1), {
       cwd: command.cwd || PROJECT_ROOT,
-      env: semanticCheckerEnv(state, process.env, { AIDLC_PHASE: phase, ...(options.testFilter ? { AIDLC_TEST_FILTER: options.testFilter } : {}) }),
+      env: semanticCheckerEnv(state, projectCommandEnvironment(), { AIDLC_PHASE: phase, ...(options.testFilter ? { AIDLC_TEST_FILTER: options.testFilter } : {}) }),
       encoding: "utf8",
       shell: false,
       timeout: command.timeout_ms,
@@ -1237,7 +1308,8 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     };
     execution = { id: `builtin:${sensor}`, sensor, argv_digest: phaseObservationDigest(phase, commandDigest), exit_code: 0, status: "passed", duration_ms: duration };
   }
-  writeAtomic(output, `${JSON.stringify({ ...payload!, ...(freshness ? { freshness } : {}), ...executionContext(state), evidence_version: "1", timestamp: new Date().toISOString(), producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() }, source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance), checker: execution! }, null, 2)}\n`);
+  const phaseInputs = phaseInputBinding(PROJECT_ROOT, i13, payload!, state.current_unit, phaseCommandInputs);
+  writeAtomic(output, `${JSON.stringify({ ...payload!, phase_input_binding: phaseInputs, ...(phase === "GREEN" && state.current_stage_instance ? { execution_input_binding: phaseExecutionRevision(PROJECT_ROOT, state.current_stage_instance) } : {}), ...(freshness ? { freshness } : {}), ...executionContext(state), evidence_version: "1", timestamp: new Date().toISOString(), producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() }, source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance), checker: execution! }, null, 2)}\n`);
   if (!options.output) console.log(JSON.stringify({ status: "passed", output, sensor, phase }, null, 2));
 }
 
@@ -1269,7 +1341,7 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   const declarations = (config?.commands || []).filter((command) => command.role === "semantic" && command.sensor === sensor);
   if (declarations.length > 1) fail(`allowlist must declare at most one built-in semantic checker for ${sensor}`);
   progress("waiting for semantic checker subprocess");
-  const result = runSemanticCommand(sensor, declarations[0]?.timeout_ms || DEFAULT_TIMEOUT_MS, state);
+  const result = runSemanticCommand(sensor, declarations[0]?.timeout_ms || DEFAULT_TIMEOUT_MS, state, { freshDerivation: true });
   const executionId = randomUUID();
   if (sensor === "quality-change-impact" && result.payload.applicable === true) {
     result.payload.quality_checkpoint_digest = publishAuthorized(() => recordQualityCheckpoint({ root: PROJECT_ROOT, workflow_id: state.workflow_id, project_workflow_id: state.parent_workflow_id || state.workflow_id, module_id: state.current_module, scope: state.scope, stage: options.stage, ui_route: String(result.payload.ui_route), quality_version: state.quality_gates_version }, result.payload.quality_snapshots as QualitySnapshot[], executionId));
@@ -1682,8 +1754,14 @@ function runProducer(args: string[]): void {
   // MARS-277: the producer checks several sensors per invocation against shared
   // digest scopes; project commands run inside invalidate the memoized digests.
   const stopHeartbeat = args.includes("--refresh") ? startProgressHeartbeat() : () => {};
+  const previousEnvironment = producerCommandEnvironment, previousProgress = process.env.AIDLC_PROGRESS;
+  producerCommandEnvironment = { ...process.env };
   try { withSemanticCheckerIdentityMemoization(() => withRevisionMemoization(() => runProducerInner(args))); }
-  finally { stopHeartbeat(); }
+  finally {
+    producerCommandEnvironment = previousEnvironment;
+    if (previousProgress === undefined) delete process.env.AIDLC_PROGRESS; else process.env.AIDLC_PROGRESS = previousProgress;
+    stopHeartbeat();
+  }
 }
 
 function runProducerInner(args: string[]): void {

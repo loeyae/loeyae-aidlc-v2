@@ -195,8 +195,8 @@ const UCDS: Ucd[] = [
   { id: "UC-D-003", check: "export", title: "导出调用下游并分页", given: "Given 下游返回订单，When 调用 export_orders，Then 结果经 paginate 分页。", codeRef: "app/exporter.py::export_orders" },
 ];
 
-function caseFile(ucd: Ucd): string {
-  return `---\nid: ${ucd.id}\nstatus: ready\nsource_ref: REQ-001\ntdd_mode: characterization\ncode_refs:\n  - ${ucd.codeRef}\nreason: 改动前锁定导出的现有行为\napproval_ref: REVIEW-2026-10-04-01\n---\n# ${ucd.id} ${ucd.title}\n\n${ucd.given}\n`;
+function caseFile(ucd: Ucd, unitRefs?: string[]): string {
+  return `---\nid: ${ucd.id}\nstatus: ready\nsource_ref: REQ-001\n${unitRefs ? `unit_refs: [${unitRefs.join(", ")}]\n` : ""}tdd_mode: characterization\ncode_refs:\n  - ${ucd.codeRef}\nreason: 改动前锁定导出的现有行为\napproval_ref: REVIEW-2026-10-04-01\n---\n# ${ucd.id} ${ucd.title}\n\n${ucd.given}\n`;
 }
 
 function testMethod(ucd: Ucd): string {
@@ -277,7 +277,7 @@ function codeReview(unit: string): string {
   ].join("\n");
 }
 
-function writeBuildAndTest(project: string, ids: string): void {
+function prepareBuildAndTest(project: string): void {
   write(project, "tests/build_check.cjs", "const { readFileSync } = require('node:fs');\nreadFileSync('app/exporter.py', 'utf8');\nconsole.log('build ok');\n");
   write(project, "tests/run_tests.cjs", "const { spawnSync } = require('node:child_process');\nconst result = spawnSync(process.execPath, ['tests/observe_uc.cjs'], { encoding: 'utf8', env: { ...process.env, AIDLC_PHASE: 'GREEN' } });\nprocess.stdout.write(result.stdout.split(/\\r?\\n/).filter((line) => !line.startsWith('{')).join('\\n'));\nprocess.exit(result.status ?? 1);\n");
   write(project, "tests/lint_check.cjs", "const { readFileSync } = require('node:fs');\nif (/\\t/.test(readFileSync('app/exporter.py', 'utf8'))) process.exit(1);\nconsole.log('lint ok');\n");
@@ -286,6 +286,9 @@ function writeBuildAndTest(project: string, ids: string): void {
     { id: "unit-tests", role: "test", argv: ["node", "tests/run_tests.cjs"] },
     { id: "lint", role: "check", argv: ["node", "tests/lint_check.cjs"] },
   ]));
+}
+
+function writeBuildAndTestReports(project: string, ids: string): void {
   write(project, "docs/aidlc/construction/build-test-report.md", `# 构建与测试报告\n\nREQ-001 / ${ids}：构建、单元测试与 lint 均通过（0 failed）。\n`);
   write(project, "docs/aidlc/construction/build-and-test/build-and-test-summary.md", "# 构建与测试摘要\n\nREQ-001 的实现通过构建、测试和静态检查；存量行为由各单元按基线分代产出的 BASELINE 证据锁定。\n");
 }
@@ -426,11 +429,14 @@ async function endToEnd(globalDone: boolean): Promise<void> {
     nextModule(`test-case-derivation@module:${M01}`);
     const caseRoot = `${inception}/application-design/test-cases`;
     write(project, `${caseRoot}/_index.md`, `# UC-D 索引\n\n${UCDS.map((ucd) => `- ${ucd.id} ${ucd.title}（source_ref: REQ-001）`).join("\n")}\n`);
-    for (const ucd of UCDS) write(project, `${caseRoot}/${ucd.id}.md`, caseFile(ucd));
+    // Both planned units intentionally characterize the same behavior/code refs.
+    // Their approved shared requirement cannot infer a unique owner, so declare it.
+    for (const ucd of UCDS) write(project, `${caseRoot}/${ucd.id}.md`, caseFile(ucd, ["u1", "u2"]));
     report("test-case-derivation");
     const I13 = `.aidlc/evidence/test-case-derivation/${M01}/test-case-derivation.json`;
     const i13 = readJson(project, I13);
     assert.deepEqual(i13.ucd_modes, { "UC-D-002": "characterization", "UC-D-003": "characterization" });
+    assert.deepEqual(i13.ucd_units, { "UC-D-002": ["u1", "u2"], "UC-D-003": ["u1", "u2"] });
     assert.equal(i13.baseline_commit, epoch0, "module I13 binds epoch 0");
 
     // ---- u1: BASELINE at epoch 0, annotate the shared code ref, commit, GREEN.
@@ -440,6 +446,8 @@ async function endToEnd(globalDone: boolean): Promise<void> {
     write(project, "tests/__init__.py", "\"\"\"Tests for the order export service (REQ-001).\"\"\"\n");
     write(project, "tests/test_exporter.py", pythonTests());
     write(project, "tests/observe_uc.cjs", observer());
+    // Keep real C8 command inputs stable across both units' phase observations.
+    prepareBuildAndTest(project);
     write(project, ".aidlc/commands/tdd.json", allowlist("tdd", [{ id: "uc-baseline", role: "baseline", argv: OBSERVE }]));
     write(project, ".aidlc/commands/code-generation.json", allowlist("code-generation", [{ id: "uc-green", role: "green", argv: OBSERVE }]));
     assert.equal(reportUnit("tdd", "u1").json.kind !== "error", true);
@@ -581,7 +589,7 @@ async function endToEnd(globalDone: boolean): Promise<void> {
     fixtureGlobalReview(project);
     const directive = ok(project, ["orchestrate", "next"]).json;
     assert.equal(directive.stage_instance, "build-and-test", JSON.stringify(directive, null, 2));
-    writeBuildAndTest(project, ids);
+    writeBuildAndTestReports(project, ids);
     ok(project, ["evidence", "run", "--stage", "build-and-test", "--sensor", "test-quality"]);
     ok(project, ["evidence", "run", "--stage", "build-and-test"]);
     ok(project, ["orchestrate", "report", "--stage", "build-and-test", "--result", "completed"]);

@@ -30,6 +30,8 @@ Evidence 路径由当前 directive 的 `evidence_root` 决定：
 
 语义证据还记录 `checker.identity_version: 1` 和 `implementation_digest`，绑定工具实现、实际运行依赖字节与 Node/平台身份。正常门禁、复用投影和 refresh 使用同一检查。工具同路径升级、依赖变化或旧证据缺少身份时，先受控重跑；失败不覆盖旧证据。执行期间身份变化拒绝发布。相位证据继续使用其真实命令/观察与历史回放专用绑定。
 
+成员切换运行时引发 checker 身份不匹配时，只重验受影响的证据；这不是业务契约或需求冲突，不能据此重写需求、UC-D 或新增测试。`next`/`report` 的 `repair_guidance` 区分映射、历史阶段证据、实际失败和权限状态问题；相同输入再次阻塞时 `action: diagnose`，停止等价重试。其 `.aidlc/continuation/` 记录仅为有界诊断，不推进阶段、不授予门禁资格；`--preview` 保持只读。
+
 审查文件清单推荐写为单行 JSON：`files_reviewed: ["src/业务.ts", "src/with space.ts"]`；也可在报告中用反引号或引号包住完整路径。明确声明有误时拒绝，不从其他正文猜测替代。绝对、越界、虚构或漏审路径仍阻断。
 
 ## 阶段质量

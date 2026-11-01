@@ -30,7 +30,7 @@ condition: has_contract_dependencies
 2. `unit-of-work-dependency.md` 中存在 `contract` 类型依赖；
 3. 对应共享契约已在 I14 产物中完成设计。
 
-以下情况跳过基线物化，并在 `handoff.md` 记录原因后继续 C5：
+以下情况由引擎按适用性跳过基线物化并记录原因后继续 C5：
 
 - 单单元项目；
 - 不存在 `contract` 类型跨单元依赖；
@@ -180,4 +180,4 @@ condition: has_contract_dependencies
 
 ## 平台适配一致性检查
 
-修改本文件的门禁规则、状态转换或依赖就绪判定逻辑后，必须检查 `.claude/workflows/aidlc-construction-batch.js` 中的 `deriveReadiness` 函数是否仍与共享规则一致。不一致时同步更新该适配器，或在 `handoff.md` 记录待同步项。
+修改本文件的门禁规则、状态转换或依赖就绪判定逻辑后，必须检查 `.claude/workflows/aidlc-construction-batch.js` 中的 `deriveReadiness` 函数是否仍与共享规则一致。不一致时同步更新该适配器，或在已有问题记录中保留待同步项；未解决前不能宣称相关门禁一致。

@@ -89,14 +89,14 @@ condition: multi_module
 - 开发/迁移顺序、关键约束和待确认项；
 - 产品级系统基线路径与新鲜度（适用时）。
 
-更新 handoff.md 的产品级进度、活跃层级和基线引用。后续 I3 始终加载 `product-scenario-module-mapping.md`，按具体场景确认边界和主次模块；单模块项目也不得跳过 I3。
+使用 `orchestrate report` 维护产品级进度；基线引用保留在对应产品产物中。后续 I3 始终加载 `product-scenario-module-mapping.md`，按具体场景确认边界和主次模块；单模块项目也不得跳过 I3。
 
 ## 新增或调整模块
 
 1. 读取当前 `modules.md`、`contracts.md` 和相关系统基线切片。
 2. 评估服务、消费者、数据、配置和外部系统影响。
 3. 通过 CR 更新模块边界及机器契约/索引。
-4. 更新逐消费者状态、decision-summary 和 handoff.md。
+4. 在已有契约/消费者记录中更新实际适配状态与决策；流程状态由引擎维护。
 
 不得只追加模块名而跳过运行时影响评估。
 
@@ -109,5 +109,5 @@ condition: multi_module
 - [ ] 跨边界契约有权威来源或"文档契约"标记及逐消费者状态
 - [ ] 不存在以方法签名清单或共享业务 Entity 形成的第二契约事实源
 - [ ] 依赖循环、未知项和阻断项已解决或明确记录
-- [ ] decision-summary 与 handoff.md 已更新
+- [ ] 真实决策已记录在相关产品产物，阶段结果已通过 `orchestrate report` 提交
 - [ ] 已明确后续场景通过 `product-scenario-module-mapping.md` 进入 I3，不以模块菜单替代场景分析

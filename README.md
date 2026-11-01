@@ -128,6 +128,17 @@ loeyae-aidlc orchestrate next \
 
 `next` 返回当前 directive 和 `handoff_prompt`。Agent 必须原样展示下一步提示词，提示中会说明工作目标、当前阶段、当前单元、产物和后续 review/build/test 动作。
 
+状态和审计由 Core 自动维护，构建、测试和完成结论以受控 JSON 证据为准。每个单元保留一份 `code-review.md` 记录真实审查发现；不再普遍要求另写实施摘要、单元审计、两份构建测试汇总或最终叙述报告。业务决策和交付限制仍在相应权威产物中记录，需要正式报告时再按交付要求编写。
+
+需要进度或交接摘要时，可直接读取派生视图：
+
+```bash
+loeyae-aidlc orchestrate state summary
+loeyae-aidlc orchestrate state summary --module module-a --format markdown
+```
+
+命令只读取已有状态及证据引用，不写文件、不重新跑测试；`not_checked` 表示本次查看没有重新验证门禁，不能替代交付验收。若明确需要导出，可将输出保存到 `.aidlc/views/`。普通展示文档的改动不触发新作用域证据失效；显式声明为契约或命令输入的文件仍受校验。旧证据保持原绑定规则，不能因升级自动视为通过。
+
 ## 团队成员选择 unit
 
 ```bash
@@ -168,6 +179,8 @@ loeyae-aidlc orchestrate state recover --module <id> --maintenance <maintenance_
 ```
 
 `state recover` 从本地与 remote-tracking ledger 中选最高有效 revision，校验 checkpoint 链、lineage、state/契约 digest 与 module manifest；恢复前须由各领取人释放全部精确 claim、清除维护子进程 binding，重新读取 maintenance-plan，并传入摘要、明确批准与原因；本地冲突先备份为 `*.bak-*`。恢复修订号递增且不恢复历史 claim；恢复后用 `orchestrate upgrade --dry-run --module <id>` 列出缺失证据，只重验它们。ledger **不会自动 push**：CLI 会输出 `git push origin refs/heads/aidlc/modules/<id>:refs/heads/aidlc/modules/<id>` 并在未发布时警告；全新 clone 默认 fetch 即可拿到 `refs/remotes/origin/aidlc/modules/*`。远端必须保护 `aidlc/modules/*`（禁止删除与 force-push），否则“任何人可恢复”不成立；从未合并、未打 tag、未 checkpoint 也无其他远端引用的已删除分支，git 无法恢复。
+
+`maintenance-plan --module <id>` 支持仅 `Revision` 损坏、身份及领取表完整且已静止的模块，用已验证 ledger 检查点生成受限恢复摘要；领取表不明或有合并标记时仍拒绝。契约表格单元格边缘空白变化按语义等价比较，并审计原始摘要；真实契约差异仍需处理。`split` 会在同一事务内迁移已验证切片的 workflow 身份，后续成员沿用现有切片。
 
 ### 控制面 git 合并策略（4.13.1，MARS-117）
 

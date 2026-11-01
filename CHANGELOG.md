@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 4.24.0 — 2026-11-02
+
+- Derive delivery completion and summaries from controlled state/evidence; remove mandatory duplicate build/test, unit implementation, handoff and final narrative reports. Add read-only `orchestrate state summary [--module <id>] [--format json|markdown]` without running producers or writing files.
+- Keep one canonical unit code-review record and automatic state/audit updates. Exclude exact derived display paths from new evidence scopes while preserving explicit contracts, command inputs and strict legacy evidence validation; deployment routing uses approved plans and runtime configuration.
+- Reuse validated controlled GREEN mappings without requiring duplicate UC-D comments in test source, and index legacy annotations once per selected test file.
+- Derive I13 coverage from source definitions, distinguish case lifecycle status from business response text, and infer complete, unique unit ownership from approved requirement references for new derivations.
+- Apply the same historical RED/BASELINE validation during continuation and completion, binding original test and I13 inputs while allowing normal implementation changes; retain explicit diagnostics for legacy observations whose original inputs cannot be verified.
+- Exclude downstream construction output from planning evidence and include declared shared inputs; return bounded, persistent repair guidance for repeated unchanged blockers without changing workflow progress.
+- Migrate validated slice identities transactionally during workflow split, recover a damaged module Revision only with intact claim state and a verified checkpoint, and audit contract table whitespace equivalence while rejecting meaningful differences.
+- Align continuation and handoff skills with session binding, scoped validation matrices, and exception-only field mappings to prevent repetitive testing and document expansion.
+- Project artifact-review receipt inputs through the same planning or execution scope, preserving shared contracts and review conclusions; verify GREEN using the nested-repository algorithm recorded by its original observation.
+- Verify historical no-behavior observations against their original successful provenance and unchanged validator inputs. Keep current GREEN/C8 environment and baseline checks, while separating internal progress and semantic-routing context from the actual command environment.
+
 ## 4.23.3 — 2026-11-01
 
 - Apply one content/freshness policy to quality admission, downstream delivery checks and controlled evidence reuse; bind configured external windows to the current stage configuration.

@@ -286,6 +286,14 @@ try {
   active("tdd", true);
   run(completed, ["evidence", "run", "--stage", "test-case-derivation", "--sensor", "test-case-derivation", "--instance", "test-case-derivation@module:project", "--refresh"]);
   run(completed, ["evidence", "run", "--stage", "tdd", "--sensor", "red-test-evidence"]);
+  // A completed TDD stage also publishes the controlled no-characterization
+  // verdict. Missing BASELINE evidence is not the same as not_required.
+  run(completed, ["evidence", "run", "--stage", "tdd", "--sensor", "baseline-test-evidence"]);
+  const baseline = read(completed, ".aidlc/evidence/tdd/project/default/baseline-test-evidence.json");
+  assert.equal(baseline.status, "not_required");
+  assert.deepEqual(baseline.ucd_ids, []);
+  assert.equal(baseline.observed_command, undefined, "not_required must not manufacture a test run");
+  assert.equal(baseline.producer.mode, "controlled");
   put(completed, "src/router.cjs", "module.exports=()=>['health'];\n");
   active("code-generation", true);
   run(completed, ["evidence", "run", "--stage", "test-case-derivation", "--sensor", "test-case-derivation", "--instance", "test-case-derivation@module:project", "--refresh"]);

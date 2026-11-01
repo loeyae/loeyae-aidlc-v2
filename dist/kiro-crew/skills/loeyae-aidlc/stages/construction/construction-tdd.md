@@ -19,6 +19,8 @@ requires: [test-case-derivation]
 
 # RED 测试门禁（原 TDD 阶段）
 
+先按 I13 已发布的 `ucd_units`（显式或唯一需求归属推导）确定当前单元集合；下文“全部 new/characterization/UC-D”均指该适用集合。仅缺少归属字段的旧证据保留模块全集兼容含义，需要收敛时先受控刷新 I13，不能在 TDD 中擅自改变范围。
+
 本阶段位于 GREEN 代码生成之前，负责把 I13 的 UC-D 转换为真实测试，并按 UC-D 的 `tdd_mode` 由受控命令观察：
 
 - **新行为**（`tdd_mode: new`，默认）：RED→GREEN。测试因目标行为尚未实现而失败（RED），`code-generation` 实现后通过（GREEN）。
@@ -180,12 +182,12 @@ void testCreate() {
 
 `uc_mapping` 必须恰好覆盖 I13 中全部 `new` UC-D（缺 `ucd_modes` 的旧 I13 视为全部 `new`），不得包含 characterization UC-D。I13 没有 `new` UC-D 时，RED 由 producer 写为 `status: "not_required"`、`ucd_ids: []`，不执行命令。
 
-收敛效率（MARS-271）：RED 迭代可用 `evidence run --stage tdd --sensor red-test-evidence --test-filter <expr>` 只跑受影响测试——过滤表达式经 `AIDLC_TEST_FILTER` 环境变量传给受控命令（argv 仍绑定命令清单），并记入证据 `test_filter`。GREEN 与 BASELINE 证据必须来自全量测试运行，携带 `test_filter` 会被门禁拒绝。提交门禁前可先跑 `evidence run --stage tdd --lint` 轻量预检：执行同一批 checker，只输出 lint 报告，不写证据、不改引擎状态。
+收敛效率（MARS-271）：RED 迭代可用 `evidence run --stage tdd --sensor red-test-evidence --test-filter <expr>` 只跑受影响测试——过滤表达式经 `AIDLC_TEST_FILTER` 环境变量传给受控命令（argv 仍绑定命令清单），并记入证据 `test_filter`。GREEN 与 BASELINE 证据须完成当前单元批准的验证矩阵，不能自动扩为全仓库测试；携带 `test_filter` 会被门禁拒绝。提交门禁前可先跑 `evidence run --stage tdd --lint` 轻量预检：执行同一批 checker，只输出 lint 报告，不写证据、不改引擎状态。
 收敛期非正式上报（MARS-271）：TDD/门禁收敛迭代轮次可用 `orchestrate checkpoint [--note <text>] [--instance <id>]` 记录非正式进度（`--list` 查看），checkpoint 不写引擎状态、不推进 revision；正式 report 仍由门禁通过后提交，收敛期正式 report 次数由此显著减少。
 
 ### 验证 BASELINE — 存量行为刻画
 
-I13 中有 `tdd_mode: characterization` 的 UC-D 时，在修改任何 code ref 之前运行 `evidence run --stage tdd --sensor baseline-test-evidence`（`report` 也会自动产出）。命令清单 `.aidlc/commands/tdd.json` 须声明恰好一条 `role: baseline` 命令，命令输出：
+I13 中有 `tdd_mode: characterization` 的 UC-D 时，在修改任何 code ref 之前显式运行 `evidence run --stage tdd --sensor baseline-test-evidence`。`report` 验证既有阶段证据，不代替 RED/BASELINE/GREEN 的显式观察。命令清单 `.aidlc/commands/tdd.json` 须声明恰好一条 `role: baseline` 命令，命令输出：
 
 ```json
 {

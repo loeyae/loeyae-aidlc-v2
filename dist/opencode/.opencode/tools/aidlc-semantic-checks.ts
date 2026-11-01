@@ -10,16 +10,18 @@ import { artifactConsistency, dependencyReadiness, fieldCapability, storyRuleCon
 import { qualityUiCheck } from "./aidlc-quality-ui";
 import { deliveryReadiness } from "./aidlc-quality-delivery";
 import { runSync } from "./aidlc-spawn";
-import { reviewAxisErrors, reviewIssueErrors } from "./aidlc-evidence-policy";
+import { deliveryConsistencyPayloadErrors, reviewAxisErrors, reviewIssueErrors } from "./aidlc-evidence-policy";
 import { reviewedFiles } from "./aidlc-review-files";
-import { globalReviewPayload, loadGraph, makeInstance, reviewCoverageErrors } from "./aidlc-orchestrate";
+import { checkHistoricalTddSensors, checkPhaseSensors, checkSensors, getExecutableStages, globalReviewPayload, globalReviewRequired, loadGraph, makeInstance, reviewCoverageErrors } from "./aidlc-orchestrate";
+import { projectDeliverySummary } from "./aidlc-delivery-summary";
+import { semanticCheckerEnv, semanticCommandArgv, semanticValidationEnvironment } from "./aidlc-evidence";
 import { deploymentValidationPayload } from "./aidlc-evidence";
 import { frontendPlatformPayload } from "./aidlc-frontend-platform";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "fs";
 import { basename, dirname, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { pointEqual, segmentRelation } from "./diagram-geometry.js";
-import { greenCoveredUcds, i13UcdIdsByMode, i13UcdUnits, moduleManifestPath, portableDirname, readModuleManifest, readUnitManifest, ucdCoverageGaps, unitManifestPath, unitUcdIds, verifiedModuleIds, type ModuleDescriptor, type UnitDescriptor } from "./aidlc-execution-context";
+import { evidenceRelativePath, greenCoveredUcds, i13UcdIdsByMode, i13UcdUnits, moduleManifestPath, portableDirname, readModuleManifest, readUnitManifest, ucdCoverageGaps, unitManifestPath, unitUcdIds, verifiedModuleIds, type ModuleDescriptor, type UnitDescriptor } from "./aidlc-execution-context";
 import { contractTableRowsForModule, type ModuleContractRows } from "./aidlc-contract-table";
 import { scanFiles, SOURCE_FILE_PATTERN, TEST_FILE_PATTERN } from "./aidlc-scan-root";
 import { hasExecutableBehavior } from "./aidlc-executable-behavior";
@@ -28,11 +30,12 @@ import { codeRefRepo, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY }
 import { declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
 import { i13NonApplicable } from "./aidlc-i13-applicability";
 import { ucdDeclarations, type UcdDeclaration, type FrontmatterValue } from "./aidlc-ucd-declarations";
+import { i13SourceDefinitions, indexedTestMappings, inferUcdUnitOwnership } from "./aidlc-ucd-mapping";
 import { deletionTraceText } from "./aidlc-source-deletions";
 import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
 import { readUiGenerationLock, verifyUiGenerationAcceptance, verifyUiGenerationLockAtBaseline, type UiDesignRoute } from "./aidlc-ui-governance";
 import { type WorkflowState } from "./aidlc-light-state";
-import { loadWorkflowView } from "./aidlc-workflow-layout";
+import { evidenceScopeForInstance, loadWorkflowParts, loadWorkflowView, mergeWorkflowView, ownerOfInstance } from "./aidlc-workflow-layout";
 import {
   ExpectedContract,
   expectedContractPath,
@@ -703,7 +706,8 @@ function testCaseDerivation(): Record<string, unknown> {
   if (sourcePaths.length === 0) {
     fail("I13 requires at least one requirement, story, application-design, or clarification source artifact before declaring not_applicable");
   }
-  const sourceContent = sourcePaths.map(text).join("\n");
+  const sourceArtifacts = sourcePaths.map(path => ({ path: relativePath(path), content: text(path) }));
+  const sourceContent = sourceArtifacts.map(artifact => artifact.content).join("\n");
   const caseFiles = existsSync(caseRoot) ? allFiles("docs/aidlc/inception/application-design/test-cases", /\.md$/) : [];
   const caseContent = caseFiles.map(text).join("\n");
   // A present non-applicable.json is validated first and wins over keyword detection;
@@ -713,10 +717,13 @@ function testCaseDerivation(): Record<string, unknown> {
     return i13NonApplicable(ROOT, ACTIVE_MODULE);
   }
   if (!existsSync(indexPath)) fail(`I13 requires test case index: ${relativePath(indexPath)}`);
-  const idsFound = [...new Set((caseContent.match(/\bUC-D-\d+\b/g) || []))];
-  if (idsFound.length === 0) fail("I13 test case directory contains no UC-D identifiers");
+  const referencedIds = [...new Set((caseContent.match(/\bUC-D-\d+\b/g) || []))];
+  if (referencedIds.length === 0) fail("I13 test case directory contains no UC-D identifiers");
   // Each UC-D is counted once, from its own case file; `_index.md` lists cases but never declares them.
   const declarations = ucdDeclarations(caseFiles.filter((path) => basename(path) !== "_index.md"));
+  const deprecatedIds = referencedIds.filter(id => declarations.get(id)?.status === "deprecated");
+  const idsFound = referencedIds.filter(id => !deprecatedIds.includes(id));
+  if (idsFound.length === 0) fail("I13 has no active UC-D; use structured non-applicable evidence when no executable behavior remains");
   // MARS-271 blocked 分类学:blocked 用例必须声明 blocked_kind——business-unknown(PRD 缺业务答案,
   // 唯一允许上报人工的类型)或 technical-prerequisite(代码基线技术前置,须列前置条件与解除路径)。
   // 无分类的 blocked 条目直接拒绝,避免把两类性质混在一起上报人工复核。
@@ -740,8 +747,8 @@ function testCaseDerivation(): Record<string, unknown> {
     }
     blockedDetail.push({ id: declaration.id, blocked_kind: normalized });
   }
-  if (blockedDetail.length > 0 || /status\s*:\s*blocked|\bblocked\b/i.test(caseContent)) {
-    const summary = blockedDetail.length > 0 ? blockedDetail.map((item) => `${item.id} (${item.blocked_kind})`).join("; ") : "see case files";
+  if (blockedDetail.length > 0) {
+    const summary = blockedDetail.map((item) => `${item.id} (${item.blocked_kind})`).join("; ");
     fail(`I13 cannot complete while any UC-D is blocked: ${summary}`);
   }
   const notReady = idsFound.filter((id) => declarations.get(id)?.status !== "ready");
@@ -760,10 +767,13 @@ function testCaseDerivation(): Record<string, unknown> {
   const sourceCoverage = derivedSourceCoverage(idsFound, declarations);
   const explicitCoverage = declaredSourceCoverage(indexPath);
   const legacyCoverage = explicitCoverage ? null : sourceCoverageDeclarations(text(indexPath), relativePath(indexPath));
-  const declaredCoverage = explicitCoverage || (legacyCoverage ? normalizeSourceCoverage(Object.fromEntries(legacyCoverage)) : null);
-  if (declaredCoverage) validateSourceCoverage(declaredCoverage, sourceCoverage, sourceContent, idsFound, declarations, indexPath);
+  const rawCoverage = explicitCoverage || (legacyCoverage ? normalizeSourceCoverage(Object.fromEntries(legacyCoverage)) : null);
+  const declaredCoverage = rawCoverage ? normalizeSourceCoverage(Object.fromEntries(Object.entries(rawCoverage)
+    .map(([source, ucds]) => [source, ucds.filter(id => !deprecatedIds.includes(id))] as const)
+    .filter(([, ucds]) => ucds.length > 0))) : null;
+  if (declaredCoverage) validateSourceCoverage(declaredCoverage, sourceCoverage, sourceContent, i13SourceDefinitions(sourceArtifacts), idsFound, declarations, indexPath);
   const modes = ucdModes(idsFound, declarations);
-  const units = ucdUnitRefs(idsFound, declarations);
+  const units = ucdUnitRefs(idsFound, declarations, sourceArtifacts);
   const defectRefs = ucdAnchorRefs(idsFound, declarations, "defect_ref");
   const changeRefs = ucdAnchorRefs(idsFound, declarations, "change_ref");
   // MARS-271 分级映射准入:P1/展示类 UC-D 可声明 mapping_deferred: <reason> 暂缓测试映射,
@@ -777,7 +787,8 @@ function testCaseDerivation(): Record<string, unknown> {
     ready_ucd: readyCount,
     ucd_ids: idsFound,
     ucd_modes: Object.fromEntries(idsFound.map((id) => [id, modes.get(id)!.mode])),
-    ...(units ? { ucd_units: units } : {}),
+    ...(units || {}),
+    ...(deprecatedIds.length ? { deprecated_ucd_ids: deprecatedIds } : {}),
     ...(mappingDeferred.length > 0 ? { mapping_deferred: mappingDeferred } : {}),
     ...(defectRefs.size > 0 ? { defect_refs: Object.fromEntries([...defectRefs].sort(([left], [right]) => left.localeCompare(right))) } : {}),
     ...(changeRefs.size > 0 ? { change_refs: Object.fromEntries([...changeRefs].sort(([left], [right]) => left.localeCompare(right))) } : {}),
@@ -898,7 +909,6 @@ function declaredField(declaration: UcdDeclaration | undefined, key: string): st
 // ---------------------------------------------------------------------------
 
 /** 进入 I13 输入的稳定来源标识(REQ / STORY / US / NFR / CR),聚合层正向覆盖的对象。 */
-const SOURCE_ID_PATTERN = /\b(?:REQ-[A-Z0-9][A-Z0-9_-]*|STORY-\d+|US-\d+|NFR-\d+|CR-\d+)\b/g;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1019,7 +1029,7 @@ function declaredSourceCoverage(indexPath: string): Record<string, string[]> | n
  * 聚合结果冲突(UC-D 声明为准)、正向覆盖(每个进入 I13 输入的来源至少映射一个
  * status: ready 的 UC-D)。
  */
-function validateSourceCoverage(declared: Record<string, string[]>, derived: Record<string, string[]>, sourceContent: string, ucdIds: string[], declarations: Map<string, UcdDeclaration>, indexPath: string): void {
+function validateSourceCoverage(declared: Record<string, string[]>, derived: Record<string, string[]>, sourceContent: string, sourceDefinitions: string[], ucdIds: string[], declarations: Map<string, UcdDeclaration>, indexPath: string): void {
   const label = relativePath(indexPath);
   const ready = new Set(ucdIds);
   for (const [source, ucds] of Object.entries(declared)) {
@@ -1042,7 +1052,7 @@ function validateSourceCoverage(declared: Record<string, string[]>, derived: Rec
   if (declaredJson !== derivedJson) {
     fail(`source_coverage declared in ${label} does not match the aggregate of the UC-D source_ref declarations: declared ${declaredJson} vs derived ${derivedJson}`);
   }
-  const uncovered = ids(sourceContent, SOURCE_ID_PATTERN).filter((source) => !(source in declared));
+  const uncovered = sourceDefinitions.filter((source) => !(source in declared));
   if (uncovered.length > 0) {
     fail(`source_coverage must map every source of this I13 to at least one ready UC-D; uncovered: ${uncovered.join(", ")}`);
   }
@@ -1276,7 +1286,7 @@ function lightweightScopeMatrix(
  * undeclared UC-D" ambiguity). Returns the I13 `ucd_units`, or undefined when no UC-D
  * declares unit_refs (every UC-D then belongs to every unit, the 4.7.1 behaviour).
  */
-function ucdUnitRefs(ids: string[], declarations: Map<string, UcdDeclaration>): Record<string, string[]> | undefined {
+function ucdUnitRefs(ids: string[], declarations: Map<string, UcdDeclaration>, sourceArtifacts: Array<{ path: string; content: string }>): { ucd_units: Record<string, string[]>; unit_scope_source?: string } | undefined {
   const errors: string[] = [];
   const declared = new Map<string, FrontmatterValue>();
   for (const id of ids) {
@@ -1288,7 +1298,16 @@ function ucdUnitRefs(ids: string[], declarations: Map<string, UcdDeclaration>): 
     const value = declaration.fields?.get("unit_refs");
     if (value !== undefined) declared.set(id, value);
   }
-  if (errors.length === 0 && declared.size === 0) return undefined;
+  if (errors.length === 0 && declared.size === 0) {
+    const prior = i13Evidence();
+    // Published legacy evidence is never reinterpreted on read. A controlled fresh
+    // derivation opts in; evidence already using inference must reproduce its scope.
+    if (prior && prior.unit_scope_source !== "manifest_req_refs" && process.env.AIDLC_I13_DERIVATION_MODE !== "fresh") return undefined;
+    if (!existsSync(unitManifestPath(ROOT, ACTIVE_MODULE!))) return undefined;
+    const manifest = readUnitManifest(ROOT, ACTIVE_MODULE!);
+    if (manifest.length < 2 && prior?.unit_scope_source !== "manifest_req_refs") return undefined;
+    return { ucd_units: inferUcdUnitOwnership(new Map(ids.map(id => [id, sourceRefTokens(declarations.get(id))])), manifest, i13SourceDefinitions(sourceArtifacts)), unit_scope_source: "manifest_req_refs" };
+  }
   let known: string[] = [];
   if (declared.size > 0) {
     try {
@@ -1315,7 +1334,7 @@ function ucdUnitRefs(ids: string[], declarations: Map<string, UcdDeclaration>): 
   const missing = ids.filter((id) => !declared.has(id) && !declarations.get(id)!.bodyUnitRefs);
   if (declared.size > 0 && missing.length > 0) errors.push(`unit_refs must be declared by every UC-D of the module once one declares it; missing: ${missing.join(", ")}`);
   if (errors.length > 0) fail(`I13 UC-D unit_refs contract violated: ${errors.join("; ")}`);
-  return units;
+  return { ucd_units: units };
 }
 
 /**
@@ -1394,7 +1413,7 @@ function characterizationEvidence(ids: string[], modes: Map<string, UcdMode>): R
   return registered ? { characterization: entries, baseline_commit: epoch0, baseline_repos: startRepos, ...kind } : { characterization: entries, baseline_commit: epoch0, ...kind };
 }
 
-function testQuality(): Record<string, unknown> {
+async function testQuality(): Promise<Record<string, unknown>> {
   const current = i13Evidence();
   const allI13 = current ? [current] : evidenceRecords("test-case-derivation", "test-case-derivation");
   if (allI13.length === 0) fail("I13 evidence is missing for test-quality");
@@ -1405,18 +1424,39 @@ function testQuality(): Record<string, unknown> {
   const caseFiles = ACTIVE_MODULE
     ? allFiles("docs/aidlc/inception/application-design/test-cases", /\.md$/)
     : allFiles("docs/aidlc/modules", /test-cases[\\/].*\.md$/);
-  const testFiles = projectFiles(TEST_FILE_PATTERN);
   if (caseFiles.length === 0) fail("UC-D test case files are missing");
   const inUnit = (record: Record<string, unknown>) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT));
-  const greenRecords = evidenceRecords("code-generation", "green-test-evidence").filter(inUnit);
-  const redRecords = evidenceRecords("tdd", "red-test-evidence").filter(inUnit);
-  const baselineRecords = evidenceRecords("tdd", "baseline-test-evidence").filter(inUnit);
+  let greenRecords = evidenceRecords("code-generation", "green-test-evidence").filter(inUnit);
+  let redRecords = evidenceRecords("tdd", "red-test-evidence").filter(inUnit);
+  let baselineRecords = evidenceRecords("tdd", "baseline-test-evidence").filter(inUnit);
+  // The producer always supplies ACTIVE_STAGE. Removing phase metadata cannot
+  // downgrade a publishing run to the legacy read-only annotation diagnostic.
+  const controlledPhases = Boolean(process.env.AIDLC_ACTIVE_STAGE?.trim()) || [...greenRecords, ...redRecords, ...baselineRecords]
+    .some(record => ["producer", "observed_command", "source_revision", "checker", "evidence_version"].some(field => record[field] !== undefined));
+  if (controlledPhases) {
+    // Validation and mapping consumption must use the same canonical files, not a
+    // similarly named extra JSON record elsewhere in the evidence tree.
+    const canonical = (records: Record<string, unknown>[], stage: string, sensor: string) => {
+      const result = new Map<string, Record<string, unknown>>();
+      for (const record of records) {
+        const moduleId = String(record.module_id ?? ACTIVE_MODULE ?? "");
+        const unitId = String(record.unit_id ?? ACTIVE_UNIT ?? "");
+        if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(moduleId) || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(unitId)) fail(`${sensor} mapping requires valid module_id and unit_id`);
+        const key = `${moduleId}/${unitId}`;
+        if (!result.has(key)) result.set(key, jsonFile(join(ROOT, ".aidlc", "evidence", stage, moduleId, unitId, `${sensor}.json`)));
+      }
+      return [...result.values()];
+    };
+    greenRecords = canonical(greenRecords, "code-generation", "green-test-evidence");
+    redRecords = canonical(redRecords, "tdd", "red-test-evidence");
+    baselineRecords = canonical(baselineRecords, "tdd", "baseline-test-evidence");
+  }
   // 4.8.0: in a unit context with I13 ucd_units only the unit's own UC-Ds count.
   const unitScope = ACTIVE_UNIT && current?.status === "required" ? unitUcdIds(current, ACTIVE_UNIT) : null;
   if (unitScope?.scoped && unitScope.all.length === 0) return emptyUnitTestQuality(redRecords, baselineRecords, greenRecords);
-  if (testFiles.length === 0) fail("test source files are missing");
   const inScope = (useCase: string) => !unitScope?.scoped || unitScope.all.includes(/^UC-D-\d+/.exec(useCase)?.[0] || useCase);
-  const cases = ids(joined(caseFiles), /UC-D-\d+(?:-[A-Za-z0-9_-]+)?/g).filter(inScope);
+  const publishedCases = allI13.flatMap(record => Array.isArray(record.ucd_ids) ? record.ucd_ids.filter((id): id is string => typeof id === "string") : []);
+  const cases = [...new Set(publishedCases.length ? publishedCases : ids(joined(caseFiles), /\bUC-D-\d+\b/g))].filter(inScope);
   if (cases.length === 0) fail("no UC-D identifiers found in test case files");
   if (greenRecords.length === 0) fail("GREEN evidence is missing for test-quality");
   if (redRecords.length === 0) fail("RED evidence is missing for test-quality");
@@ -1475,13 +1515,61 @@ function testQuality(): Record<string, unknown> {
   // 形式在 test-quality 证据中独立可见,映射债不随时间静默消失。
   const deferredEntries = current ? i13MappingDeferred(current) : [...requiredI13.values()].flatMap(i13MappingDeferred);
   const deferredIds = new Set(deferredEntries.map((entry) => entry.id));
+  const observedMappings = new Map<string, string[]>();
+  if (controlledPhases) {
+    // Phase-only validation binds the real observation, allowlist and source/test
+    // inputs without recursively running test-quality or unrelated stage sensors.
+    const graph = loadGraph();
+    const alternativeValidationEnvironment = semanticValidationEnvironment();
+    const checkedTdd = new Set<string>();
+    for (const record of greenRecords) {
+      const moduleId = typeof record.module_id === "string" ? record.module_id : ACTIVE_MODULE;
+      const unitId = typeof record.unit_id === "string" ? record.unit_id : ACTIVE_UNIT;
+      if (!moduleId || !unitId) fail("controlled GREEN mapping requires module_id and unit_id");
+      const state = loadWorkflowView(ROOT, moduleId);
+      if (!state) fail(`workflow is missing for controlled GREEN mapping of ${moduleId}/${unitId}`);
+      const context = { module_id: moduleId, unit_id: unitId };
+      const green = makeInstance(graph.stages.find(stage => stage.slug === "code-generation")!, "unit", context);
+      const failures = checkPhaseSensors(green, state, { onlySensors: ["green-test-evidence"], allowDownstreamReportDrift: true, alternativeValidationEnvironment });
+      const key = `${moduleId}/${unitId}`;
+      if (!checkedTdd.has(key)) {
+        const tdd = makeInstance(graph.stages.find(stage => stage.slug === "tdd")!, "unit", context);
+        const completingGreen = workflowState?.current_stage === "code-generation" && !state.completed_stage_instances.includes(green.instance_id);
+        failures.push(...await checkHistoricalTddSensors(tdd, state, { onlySensors: ["red-test-evidence", "baseline-test-evidence"], requireCurrentBaselineEpoch: completingGreen, alternativeValidationEnvironment }));
+        checkedTdd.add(key);
+      }
+      if (failures.length) fail(`test-quality cannot reuse unverified phase mapping for ${key}: ${failures.map(failure => `${failure.sensor}: ${failure.message}`).join("; ")}`);
+      if (record.status !== "passed") continue;
+      for (const entry of record.uc_mapping as Array<Record<string, unknown>>) {
+        if (typeof entry.use_case !== "string" || !Array.isArray(entry.test_methods) || !entry.test_methods.length
+          || entry.test_methods.some(method => typeof method !== "string" || !method.trim())) fail("controlled GREEN uc_mapping must give non-empty test_methods for every use_case");
+        observedMappings.set(entry.use_case, [...new Set([...(observedMappings.get(entry.use_case) || []), ...entry.test_methods as string[]])]);
+      }
+    }
+  }
+  // Older direct semantic checks may still use source annotations. One index is
+  // shared by all active UC-Ds; verified observations need no source-label scan.
+  let legacyMapping: Map<string, string[]> | undefined;
   const mapping = cases.filter((useCase) => !deferredIds.has(useCase)).map((useCase) => {
-    const matches = testFiles.filter((path) => new RegExp(`\\b${useCase}\\b`).test(text(path)));
+    const observed = observedMappings.get(useCase);
+    if (observed) return { use_case: useCase, test_methods: observed };
+    if (controlledPhases) fail(`${useCase} has no verified GREEN test mapping`);
+    legacyMapping ??= indexedTestMappings(testQualitySourceFiles(), text);
+    const matches = legacyMapping.get(useCase) || [];
     if (matches.length === 0) fail(`${useCase} has no test source mapping`);
     return { use_case: useCase, test_methods: matches.map(relativePath) };
   });
   const testsTotal = greenRequired.reduce((total, record) => total + numberValue(record.tests_total, "green-test-evidence.tests_total"), 0);
   return { status: "passed", red_seen: redSeen, baseline_seen: baselineSeen, green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping, ...(deferredEntries.length > 0 ? { mapping_debt: deferredEntries } : {}), ...(coverage.length > 0 ? { ucd_coverage: coverage } : {}) };
+}
+
+function testQualitySourceFiles(): string[] {
+  const files = projectFiles(TEST_FILE_PATTERN);
+  if (!ACTIVE_MODULE || !ACTIVE_UNIT) return files;
+  // Reuse the approved ownership/dependency rules. Unknown/shared files retain
+  // conservative coverage; only proven private inputs of other units are omitted.
+  const scope = evidenceScopeForInstance(ROOT, `code-generation@module:${ACTIVE_MODULE}@unit:${ACTIVE_UNIT}`);
+  return files.filter(path => !scope.exclude(relativePath(path).replace(/\\/g, "/")));
 }
 
 /**
@@ -1703,21 +1791,69 @@ function infrastructure(): Record<string, unknown> {
   return { status: "passed", sections: required, unresolved: 0, ...resources, rollback_strategy: "documented in infrastructure artifacts" };
 }
 
-function implementationReport(): Record<string, unknown> {
-  const path = join(ROOT, contextual("docs/aidlc/construction/implementation-report.md"));
-  if (!existsSync(path)) fail("implementation report is missing");
-  const content = text(path);
-  noUnresolved(content, relativePath(path));
-  const references = [...new Set(content.match(/\.aidlc\/evidence\/[A-Za-z0-9._/-]+\.json/g) || [])];
-  if (references.length === 0) fail("implementation report has no evidence references");
-  const missing = references.filter((ref) => !existsSync(join(ROOT, ref)));
-  if (missing.length > 0) fail(`implementation report references missing evidence: ${missing.join(", ")}`);
-  if (!/all_gates_passed\s*[:：]\s*true|所有.*门禁.*通过|all gates passed/i.test(content)) fail("implementation report does not confirm all gates passed");
-  const scope = content.match(/(?:scope|范围)\s*[:：|]\s*([A-Za-z0-9_-]+)/i)?.[1];
-  const stageCount = content.match(/(?:stages_completed|完成阶段数|阶段数)\s*[:：|]\s*(\d+)/i)?.[1];
-  if (!scope || !stageCount || Number(stageCount) < 1) fail("implementation report lacks scope or completed stage count");
+async function implementationReport(): Promise<Record<string, unknown>> {
+  const state = requiredWorkflowState();
+  const workflows = loadWorkflowParts(ROOT);
+  const graph = loadGraph();
+  const references: string[] = [];
+  const historicalReferences: string[] = [];
+  const revalidated: Array<{ stage: string; sensor: string; module_id?: string; unit_id?: string }> = [];
+  const applicable = new Set(getExecutableStages(graph, state.scope, state.selected_optional_stages, state.execution_profile).map(stage => stage.slug));
+  // Recheck only delivery endpoints and the selected consistency chain. Do not
+  // replay every historic stage or produce evidence while rendering a summary.
+  const verify = async (slug: string, sensors: string[], moduleId?: string, unitId?: string): Promise<void> => {
+    const stage = graph.stages.find(candidate => candidate.slug === slug);
+    if (!stage || sensors.some(sensor => !stage.sensors.includes(sensor))) fail(`delivery summary has no canonical gate for ${slug}: ${sensors.join(", ")}`);
+    const instance = makeInstance(stage, stage.axis, { module_id: moduleId, unit_id: unitId });
+    const owner = workflows.split ? mergeWorkflowView(workflows.parts, ownerOfInstance(instance.instance_id)) : state;
+    if (!owner.completed_stage_instances.includes(instance.instance_id)) fail(`delivery summary requires completed stage ${instance.instance_id}`);
+    const failures = await checkSensors(instance, owner, { onlySensors: sensors, alternativeValidationEnvironment: semanticValidationEnvironment() });
+    if (failures.length) fail(`delivery evidence is not verified for ${instance.instance_id}: ${failures.map(item => `${item.sensor}: ${item.message}`).join("; ")}`);
+    for (const sensor of sensors) references.push(evidenceRelativePath(slug, sensor, stage.axis, instance).replace(/\\/g, "/"));
+  };
+  const terminalSensors = ["build-test-evidence", "test-quality", ...(globalReviewRequired(state) ? ["global-review-evidence"] : [])];
+  await verify("build-and-test", terminalSensors);
+  // Planning evidence records a completed historical observation. Construction
+  // necessarily changes its old wide source scope; never call that scope fresh.
+  const historical = (slug: string, sensor: string, moduleId?: string, unitId?: string): void => {
+    const stage = graph.stages.find(candidate => candidate.slug === slug);
+    if (!stage || !applicable.has(slug) || !stage.sensors.includes(sensor)) fail(`selected delivery history is not applicable: ${slug}/${sensor}`);
+    const instance = makeInstance(stage, stage.axis, { module_id: moduleId, unit_id: unitId });
+    const owner = workflows.split ? mergeWorkflowView(workflows.parts, ownerOfInstance(instance.instance_id)) : state;
+    if (!owner.completed_stage_instances.includes(instance.instance_id)) fail(`delivery summary requires completed stage ${instance.instance_id}`);
+    const label = evidenceRelativePath(slug, sensor, stage.axis, instance).replace(/\\/g, "/");
+    let path = ROOT;
+    for (const segment of label.split("/")) {
+      path = join(path, segment);
+      if (!existsSync(path) || lstatSync(path).isSymbolicLink()) fail(`historical delivery evidence is missing or linked: ${label}`);
+    }
+    if (!lstatSync(path).isFile() || lstatSync(path).size > 512 * 1024) fail(`invalid historical delivery evidence file: ${label}`);
+    const record = jsonFile(path);
+    const producer = record.producer as Record<string, unknown> | undefined;
+    const checker = record.checker as Record<string, unknown> | undefined;
+    if (record.evidence_version !== "1" || producer?.name !== "loeyae-aidlc-evidence" || producer.mode !== "controlled"
+      || typeof producer.execution_id !== "string" || !producer.execution_id || checker?.id !== `builtin:${sensor}`
+      || checker.sensor !== sensor || checker.exit_code !== 0 || checker.status !== "passed" || !record.source_revision) {
+      fail(`historical delivery evidence has no controlled observation provenance: ${label}`);
+    }
+    historicalReferences.push(label);
+  };
+  const revalidate = (slug: string, sensor: "inception-consistency" | "ui-design-alignment" | "prd-completeness", moduleId?: string, unitId?: string): Record<string, unknown> => {
+    const context = { current_stage: slug, current_module: moduleId, current_unit: unitId };
+    const argv = semanticCommandArgv(sensor, context, ROOT);
+    if (sensor === "inception-consistency") argv.push("--current-artifacts");
+    const checked = runSync(argv[0], argv.slice(1), { cwd: ROOT, encoding: "utf8", shell: false, timeout: 60_000,
+      env: semanticCheckerEnv(context, semanticValidationEnvironment() || process.env) });
+    if (checked.error || checked.status !== 0) fail(`current delivery consistency failed for ${sensor}${moduleId ? `/${moduleId}` : ""}${unitId ? `/${unitId}` : ""}: ${checked.error?.message || checked.stderr || checked.stdout}`);
+    const payload = objectValue(JSON.parse(checked.stdout.trim()), `current ${sensor}`);
+    const payloadErrors = deliveryConsistencyPayloadErrors(sensor, payload, { module_id: moduleId, prd_selected: selectedPrdRoute(), ui_route: selectedUiRoute(moduleId) });
+    if (payloadErrors.length) fail(`current delivery consistency did not pass: ${sensor}: ${payloadErrors.join("; ")}`);
+    revalidated.push({ stage: slug, sensor, ...(moduleId ? { module_id: moduleId } : {}), ...(unitId ? { unit_id: unitId } : {}) });
+    return payload;
+  };
+  // Optional prose is a display view: its claims or stale placeholders cannot
+  // authorize or block completion. Decisions remain in their reviewed sources.
 
-  const requiredEvidence: string[] = [];
   const uiModulesVerified: string[] = [];
   // Same participating-module list as the orchestrator gate (D3): never computed twice.
   const modulesVerified = verifiedModuleIds(ROOT, requiredWorkflowState().scope).length;
@@ -1725,19 +1861,21 @@ function implementationReport(): Record<string, unknown> {
   if (workflowState?.current_module || existsSync(join(ROOT, "docs", "aidlc", "ideation", "module-manifest.json"))) {
     const modules = readModuleManifest(ROOT);
     for (const module of modules) {
-      requiredEvidence.push(`.aidlc/evidence/cross-validation/${module.module_id}/inception-consistency.json`);
+      if (applicable.has("cross-validation")) {
+        historical("cross-validation", "inception-consistency", module.module_id);
+        revalidate("cross-validation", "inception-consistency", module.module_id);
+      }
       const route = selectedUiRoute(module.module_id);
-      if (route === "html-mock" || route === "figma-create" || route === "figma-existing") {
-        requiredEvidence.push(`.aidlc/evidence/ui-page-planning/${module.module_id}/ui-artifact-consistency.json`);
-        requiredEvidence.push(route === "html-mock"
-          ? `.aidlc/evidence/ui-mock-generation/${module.module_id}/ui-artifact-consistency.json`
-          : `.aidlc/evidence/ui-figma-generation/${module.module_id}/ui-artifact-consistency.json`);
-        const alignmentFiles = allFiles(`.aidlc/evidence/code-review/${module.module_id}`, /ui-design-alignment\.json$/)
-          .filter((candidate) => {
-            try { return jsonFile(candidate).status === "passed"; } catch { return false; }
-          });
-        if (alignmentFiles.length === 0) fail(`selected UI route for ${module.module_id} has no passed code-review ui-design-alignment evidence`);
-        requiredEvidence.push(...alignmentFiles.map((file) => relativePath(file).replace(/\\/g, "/")));
+      if (applicable.has("ui-page-planning") && (route === "html-mock" || route === "figma-create" || route === "figma-existing")) {
+        historical("ui-page-planning", "ui-artifact-consistency", module.module_id);
+        historical(route === "html-mock" ? "ui-mock-generation" : "ui-figma-generation", "ui-artifact-consistency", module.module_id);
+        const alignments: Record<string, unknown>[] = [];
+        for (const unit of readUnitManifest(ROOT, module.module_id)) {
+          historical("code-review", "ui-design-alignment", module.module_id, unit.unit_id);
+          const alignment = revalidate("code-review", "ui-design-alignment", module.module_id, unit.unit_id);
+          if (alignment.status === "passed") alignments.push(alignment);
+        }
+        if (alignments.length === 0) fail(`selected UI route for ${module.module_id} has no passed current code-review ui-design-alignment`);
         // MARS-125 正向全覆盖(与 MARS-118 的 US→UI mock 层对称):模块 page-plan 中声明的每个 UI 页面
         // 必须至少被一份 passed 对齐证据的 pages_covered 覆盖。多单元分页时承担部分页面的单元若规避对齐
         // (缺页面映射 → 现在 fail,见 uiAlignment),或某页根本无任何单元做对齐,此处正向对账会判 fail,
@@ -1746,9 +1884,7 @@ function implementationReport(): Record<string, unknown> {
         if (existsSync(planPagePath)) {
           const planPages = normalizedIds(text(planPagePath), PAGE_ID);
           const covered = new Set<string>();
-          for (const file of alignmentFiles) {
-            let evidence: Record<string, unknown>;
-            try { evidence = jsonFile(file); } catch { continue; }
+          for (const evidence of alignments) {
             const pages = Array.isArray(evidence.pages_covered) ? evidence.pages_covered : [];
             for (const page of pages) if (typeof page === "string") covered.add(page.toUpperCase());
           }
@@ -1761,7 +1897,8 @@ function implementationReport(): Record<string, unknown> {
       }
     }
     if (prdSelected) {
-      requiredEvidence.push(".aidlc/evidence/prd-generation/prd-completeness.json");
+      historical("prd-generation", "prd-completeness");
+      revalidate("prd-generation", "prd-completeness");
       const prdPath = join(ROOT, "docs/aidlc/ideation/prd.md");
       if (!existsSync(prdPath)) fail("selected PRD is missing during final consistency validation");
       const prdIds = normalizedIds(text(prdPath), REQUIREMENT_ID);
@@ -1772,18 +1909,17 @@ function implementationReport(): Record<string, unknown> {
       if (prdIds.length === 0 || uncovered.length > 0) fail(`selected PRD items are not covered by module cross-validation reports: ${uncovered.join(", ") || "no PRD IDs"}`);
     }
   }
-  const absentReferences = [...new Set(requiredEvidence)].filter((ref) => !references.includes(ref));
-  if (absentReferences.length > 0) fail(`implementation report omits selected consistency evidence: ${absentReferences.join(", ")}`);
-  const missingRequired = [...new Set(requiredEvidence)].filter((ref) => !existsSync(join(ROOT, ref)));
-  if (missingRequired.length > 0) fail(`selected consistency evidence is missing: ${missingRequired.join(", ")}`);
+  const summary = projectDeliverySummary(ROOT, state, { verifiedEvidence: references });
+  if (summary.verification !== "passed") fail(summary.blockers.join("; "));
 
   return {
+    ...summary,
+    evidence_references: [...new Set([...references, ...historicalReferences])].sort(),
+    verified_evidence_references: [...new Set(references)].sort(),
+    historical_evidence_references: [...new Set(historicalReferences)].sort(),
+    revalidated_sensors: revalidated,
     status: "passed",
     summary_complete: true,
-    all_gates_passed: true,
-    scope,
-    stages_completed: Number(stageCount),
-    evidence_references: references,
     selected_artifacts_verified: true,
     modules_verified: modulesVerified,
     prd_verified: prdSelected,
@@ -1818,8 +1954,9 @@ function recoveryEvidence(): Record<string, unknown> {
     fail("context compaction was not detected");
   }
   const state = requiredWorkflowState();
-  if (!existsSync(handoffPath) || handoff.trim().length === 0) fail("Markdown workflow restoration or handoff evidence is missing");
-  return { status: "passed", state_restored: true, handoff_recorded: true, state_revision: state.revision };
+  return { status: "passed", state_restored: true, handoff_recorded: true,
+    handoff_source: handoff.trim() ? "handoff-view" : "workflow-state", state_revision: state.revision,
+    workflow_id: state.workflow_id, stage_instance: state.current_stage_instance || state.current_stage };
 }
 
 function prdCompleteness(): Record<string, unknown> {
@@ -4855,7 +4992,7 @@ function structuralInvariants(): Record<string, unknown> {
 }
 
 const CHECKERS: Record<string, () => Record<string, unknown> | Promise<Record<string, unknown>>> = {
-  "global-review-evidence": () => globalReviewPayload(requiredWorkflowState()),
+  "global-review-evidence": () => globalReviewPayload(requiredWorkflowState(), semanticValidationEnvironment()),
   "deployment-validation": deploymentValidationPayload,
   "document-slice-consistency": () => {
     const state = requiredWorkflowState();
@@ -4899,8 +5036,12 @@ try {
   const sensorIndex = args.indexOf("--sensor");
   const sensor = sensorIndex >= 0 ? args[sensorIndex + 1] : undefined;
   if (!sensor || !SENSOR_NAMES.has(sensor) || !CHECKERS[sensor]) fail("usage: aidlc-semantic-checks.ts --sensor <semantic-sensor>");
+  const currentArtifacts = args.includes("--current-artifacts");
+  if (currentArtifacts && sensor !== "inception-consistency") fail("--current-artifacts is only allowed for inception-consistency");
   assertSemanticContext(sensor);
-  output(await CHECKERS[sensor]());
+  // Final delivery rechecks current canonical artifacts without reopening I10's
+  // earlier quality admission. Controlled producers never add this read-only flag.
+  output(currentArtifacts ? { ...inceptionConsistency(), validation_scope: "current-artifacts" } : await CHECKERS[sensor]());
 } catch (error) {
   if (error instanceof QualityBlocked) output({ status: "blocked", issues: error.issues });
   console.error(`Semantic checker blocked: ${error instanceof Error ? error.message : String(error)}`);

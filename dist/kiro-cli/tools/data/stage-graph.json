@@ -1,5 +1,5 @@
 {
-  "version": "4.23.3",
+  "version": "4.24.0",
   "stages": [
     {
       "slug": "workspace-detection",
@@ -1157,7 +1157,6 @@
       "produces": [
         "src/",
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md",
-        "docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md",
         ".aidlc/evidence/code-generation/{module-id}/{unit-id}/green-test-evidence.json",
         ".aidlc/evidence/code-generation/{module-id}/{unit-id}/test-quality.json",
         ".aidlc/evidence/code-generation/{module-id}/{unit-id}/traceability-matrix.json",
@@ -1209,7 +1208,6 @@
       ],
       "produces": [
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md",
-        "docs/aidlc/modules/{module-id}/construction/{unit-id}/audit.md",
         ".aidlc/evidence/code-review/{module-id}/{unit-id}/review-evidence.json",
         ".aidlc/evidence/code-review/{module-id}/{unit-id}/test-quality.json",
         ".aidlc/evidence/code-review/{module-id}/{unit-id}/ui-design-alignment.json",
@@ -1261,8 +1259,6 @@
         ".aidlc/evidence/code-generation/{module-id}/{unit-id}/green-test-evidence.json"
       ],
       "produces": [
-        "docs/aidlc/construction/build-test-report.md",
-        "docs/aidlc/construction/build-and-test/build-and-test-summary.md",
         ".aidlc/evidence/build-and-test/build-test-evidence.json",
         ".aidlc/evidence/build-and-test/global-review-evidence.json"
       ],
@@ -1271,10 +1267,9 @@
         "build-test-evidence",
         "test-quality",
         "global-review-evidence",
-        "no-todo",
-        "traceability"
+        "no-todo"
       ],
-      "traceability": "required",
+      "traceability": "not_applicable",
       "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
@@ -1342,19 +1337,17 @@
       "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
-        "docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md"
+        ".aidlc/evidence/build-and-test/build-test-evidence.json"
       ],
       "produces": [
-        "docs/aidlc/construction/implementation-report.md",
         ".aidlc/evidence/implementation-report/implementation-report.json"
       ],
       "sensors": [
         "doc-cascade",
         "implementation-report",
-        "no-todo",
-        "traceability"
+        "no-todo"
       ],
-      "traceability": "required",
+      "traceability": "not_applicable",
       "completion_contract": "gated",
       "condition": "",
       "approval": "notify",
@@ -1414,8 +1407,8 @@
       "cross_module_requires": [],
       "scope_waived_requires": [],
       "consumes": [
-        "docs/aidlc/construction/build-test-report.md",
-        "docs/aidlc/construction/implementation-report.md"
+        ".aidlc/evidence/build-and-test/build-test-evidence.json",
+        ".aidlc/evidence/implementation-report/implementation-report.json"
       ],
       "produces": [
         "docs/aidlc/operation/operations-plan.md"

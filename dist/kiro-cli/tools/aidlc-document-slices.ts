@@ -181,6 +181,52 @@ export function checkSlices(ctx: SliceContext): Record<string, unknown> {
   const inputs = [...manifest.inputs, qualityInput(ctx, `${sliceBase(ctx)}/adoption.json`), qualityInput(ctx, path), ...[...objects.keys()].map(p => qualityInput(ctx, p))];
   return { sensor: SLICE_SENSOR, status: "passed", applicable: true, ...identity(ctx), inputs, coverage: manifest.coverage };
 }
+
+/** Called only inside the workflow-initialization transaction. The writer locks
+ * cover validation, identity publication and the caller's registry/state commit;
+ * any failure restores both authority files, leaving approved sources untouched. */
+export function withSliceWorkflowMigration<T>(moves: { from: SliceContext; to: SliceContext }[], publish: () => T): T {
+  const locks: { path: string; fd: number }[] = [];
+  const originals = new Map<string, { ctx: SliceContext; bytes: Buffer }>();
+  const sourceInputs: { ctx: SliceContext; input: QualityInput }[] = [];
+  const prepared: { ctx: SliceContext; path: string; body: string }[] = [];
+  try {
+    for (const { from, to } of [...moves].sort((a, b) => sliceBase(a.from).localeCompare(sliceBase(b.from)))) {
+      if (resolve(from.root) !== resolve(to.root) || from.module_id !== to.module_id || from.scope !== to.scope || from.workflow_id === to.workflow_id) throw new Error("SLICE_MIGRATION_INVALID: source/target identity");
+      const base = sliceBase(from), adoption = `${base}/adoption.json`, manifest = `${base}/manifest.json`;
+      if (!present(from, adoption) && !present(from, manifest)) continue;
+      const lock = qualityPath(from, `${base}/writer.lock`), fd = openSync(lock, "wx");
+      locks.push({ path: lock, fd });
+      writeFileSync(fd, json({ schema_version: 1, pid: process.pid, hostname: hostname() }));
+      const checked = checkSlices(from);
+      for (const input of checked.inputs as QualityInput[]) {
+        if (input.path !== adoption && input.path !== manifest) sourceInputs.push({ ctx: from, input });
+      }
+      for (const path of [adoption, manifest]) {
+        const bytes = readFileSync(qualityPath(from, path)), record = JSON.parse(bytes.toString("utf8"));
+        if ((checked.inputs as QualityInput[]).find(input => input.path === path)?.sha256 !== qualityHash(bytes)) throw new Error(`SLICE_MIGRATION_SOURCE_CHANGED: ${path}`);
+        if (Object.entries(identity(from)).some(([key, value]) => record[key] !== value)) throw new Error("SLICE_MIGRATION_INVALID: prior identity");
+        originals.set(path, { ctx: from, bytes });
+        prepared.push({ ctx: to, path, body: json({ ...record, workflow_id: to.workflow_id }) });
+      }
+    }
+    const validateSources = () => {
+      for (const { ctx, input } of sourceInputs) if (qualityInput(ctx, input.path).sha256 !== input.sha256) throw new Error(`SLICE_MIGRATION_SOURCE_CHANGED: ${input.path}`);
+    };
+    validateSources();
+    for (const [path, original] of originals) if (!readFileSync(qualityPath(original.ctx, path)).equals(original.bytes)) throw new Error(`SLICE_MIGRATION_SOURCE_CHANGED: ${path}`);
+    for (const item of prepared) atomic(item.ctx, item.path, item.body);
+    const result = publish();
+    validateSources();
+    for (const item of prepared) if (read(item.ctx, item.path) !== item.body) throw new Error(`SLICE_MIGRATION_SOURCE_CHANGED: ${item.path}`);
+    return result;
+  } catch (error) {
+    for (const [path, original] of originals) atomic(original.ctx, path, original.bytes);
+    throw error;
+  } finally {
+    for (const lock of locks.reverse()) { closeSync(lock.fd); unlinkSync(lock.path); }
+  }
+}
 export function sliceEvidenceErrors(ctx: SliceContext, evidence: Record<string, unknown>): string[] {
   try {
     const expected = checkSlices(ctx);

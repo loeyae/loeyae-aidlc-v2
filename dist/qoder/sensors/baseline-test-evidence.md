@@ -9,6 +9,8 @@ evidence_path: .aidlc/evidence/tdd/<module-id>/<unit-id>/baseline-test-evidence.
 
 适用于 `tdd` 阶段中 I13 `tdd_mode: characterization` 的 UC-D（存量行为）。新行为走 RED→GREEN，存量行为走 BASELINE→GREEN：BASELINE 证明刻画测试在改动前的基线代码上全部通过，GREEN 证明改动后仍然通过。
 
+续作与完成统一使用 [RED 证据的历史输入绑定规则](red-test-evidence.md)：正常实现变化可保留原 BASELINE，原测试、命令或 I13 来源变化须诊断受影响观察。新增测试不能修复元数据失配；当前单元完成时的 epoch 校验与后续阶段复验历史观察各自保持适用范围。
+
 ## 命令清单
 
 `.aidlc/commands/tdd.json`（或 `.aidlc/evidence-commands.json`）中恰好一条 `role: baseline` 命令，`stage` 为 `tdd`。与 RED/GREEN 相同，只认默认查找顺序；`evidence run --sensor baseline-test-evidence`（或 `--all-sensors`）带指向其他文件的 `--config` 时，在执行任何命令、写任何证据之前拒绝。
@@ -55,7 +57,7 @@ I13 没有 characterization UC-D（含 I13 为 `not_applicable`）时写 `status
 
 按单元收敛（4.8.0）：I13 有 `ucd_units` 时，BASELINE 只覆盖本单元的 characterization UC-D，producer 的前置比对与 `code_ref_digests` 只包含这些 UC-D 的 code ref，门禁复验时“`code_ref_digests` 必须等于 code ref 集合”同样换成本单元子集。按代校验规则不变：其他单元改动了本单元的 code ref 时，本单元的 BASELINE 仍会被拒，需要 `--advance`。本单元没有 characterization UC-D 时写 `not_required`；子集为空时走 `ucd_exemption`（见 `red-test-evidence.md`）。
 
-BASELINE 证据必须来自全量测试运行（MARS-271）：`--test-filter` 只允许用于 RED 收敛迭代（见 `red-test-evidence.md`），BASELINE 证据携带 `test_filter` 一律被门禁拒绝。
+BASELINE 证据须完成当前单元批准的验证矩阵（MARS-271），不自动扩为全仓库测试；`--test-filter` 只允许用于 RED 收敛迭代（见 `red-test-evidence.md`），BASELINE 证据携带 `test_filter` 一律被门禁拒绝。
 
 ## tdd 门禁
 

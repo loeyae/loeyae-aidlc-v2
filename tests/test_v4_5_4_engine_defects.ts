@@ -175,6 +175,7 @@ function produceNotApplicableI13(project: string): void {
 }
 
 async function section(name: string, body: () => void | Promise<void>): Promise<void> {
+  if (process.env.AIDLC_ONLY && !name.startsWith(process.env.AIDLC_ONLY)) return;
   try {
     await body();
     sections.push(name);
@@ -258,13 +259,44 @@ try {
   // ---------------------------------------------------------------- D3
   await section("D3 modules_verified is computed by one shared function", async () => {
     const project = makeProject("d3-report");
+    write(project, "docs/aidlc/ideation/module-manifest.json", JSON.stringify({ schema_version: 1, modules: [{ module_id: "project", name: "Configuration", service_id: "configuration" }] }));
+    write(project, "check.cjs", "const assert=require('node:assert/strict');const fs=require('node:fs');assert.match(fs.readFileSync('README.md','utf8'),/d3-report/);console.log('configuration validated');\n");
+    write(project, ".aidlc/commands/build-and-test.json", JSON.stringify({ version: "1", stage: "build-and-test", commands: [
+      { id: "configuration", role: "check", argv: ["node", "check.cjs"], evidence_inputs: { environment: [] } },
+    ] }));
     produceNotApplicableI13(project);
     seed(project, "implementation-report", ["test-case-derivation@module:project"]);
-    write(project, "docs/aidlc/construction/implementation-report.md", "# 实施报告\n\n- scope: refactor\n- stages_completed: 3\n- all_gates_passed: true\n\nREQ-001 证据：\n\n- .aidlc/evidence/test-case-derivation/project/test-case-derivation.json\n");
+    const incomplete = run(project, ["check", "--sensor", "implementation-report"]);
+    assert.notEqual(incomplete.status, 0);
+    assert.match(incomplete.out, /requires completed stage build-and-test/);
+    seed(project, "implementation-report", ["build-and-test"]);
+    write(project, ".aidlc/evidence/build-and-test/build-test-evidence.json", '{"status":"passed","all_gates_passed":true}');
+    const fabricated = run(project, ["check", "--sensor", "implementation-report"]);
+    assert.notEqual(fabricated.status, 0);
+    assert.match(fabricated.out, /evidence_version|controlled evidence|producer/);
+    seed(project, "build-and-test");
+    ok(project, ["evidence", "run", "--stage", "build-and-test", "--sensor", "build-test-evidence"]);
+    ok(project, ["evidence", "run", "--stage", "build-and-test", "--sensor", "test-quality"]);
+    seed(project, "implementation-report");
     const payload = checker(project, ["--sensor", "implementation-report"]);
     assert.equal(payload.modules_verified, 1);
+    assert.equal(payload.scope, "bugfix");
+    assert.equal(payload.stages_completed, loadWorkflowState(project)!.completed_stage_instances.length);
+    assert.equal(payload.all_gates_passed, true);
+    assert.deepEqual(payload.historical_evidence_references, [], "a light scope with a module manifest does not require inapplicable I10 history");
+    assert.deepEqual(payload.revalidated_sensors, []);
+    assert.equal(existsSync(join(project, "docs/aidlc/construction/implementation-report.md")), false, "simple delivery does not require duplicate prose");
     ok(project, ["evidence", "run", "--stage", "implementation-report", "--sensor", "implementation-report"]);
     assert.deepEqual(gate(project, "implementation-report", "sensors", "implementation-report").failures, []);
+
+    const buildPath = join(project, ".aidlc/evidence/build-and-test/build-test-evidence.json");
+    const originalBuild = readFileSync(buildPath, "utf8");
+    const failedBuild = JSON.parse(originalBuild); failedBuild.commands[0].exit_code = 1;
+    writeFileSync(buildPath, JSON.stringify(failedBuild));
+    const rejected = run(project, ["check", "--sensor", "implementation-report"]);
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.out, /successful execution|successful provenance/);
+    writeFileSync(buildPath, originalBuild);
 
     // Fail-closed: once the participating module set changes, the recorded count is rejected.
     write(project, "docs/aidlc/ideation/module-manifest.json", JSON.stringify({ schema_version: 1, modules: [{ module_id: "orders", name: "Orders", service_id: "orders" }, { module_id: "billing", name: "Billing", service_id: "billing" }] }));

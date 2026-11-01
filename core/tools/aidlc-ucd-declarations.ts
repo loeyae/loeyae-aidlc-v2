@@ -127,6 +127,13 @@ export function normalizeUcdSources(value: unknown): UcdSourceFile[] | undefined
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "object" || Array.isArray(value)) fail("ucd_sources must be an object");
   const record = value as Record<string, unknown>;
+  // The aggregate producer also writes a compact file-keyed form. Normalize it
+  // through the same file-level validator rather than mistaking paths for UC-Ds.
+  const entries = Object.entries(record);
+  if (record.files === undefined && entries.length > 0 && entries.every(([key, entry]) => !/^UC-D-\d+$/.test(key)
+    && entry !== null && typeof entry === "object" && !Array.isArray(entry) && "ucd_ids" in entry)) {
+    return normalizeUcdSources({ files: entries.map(([file, entry]) => ({ ...(entry as Record<string, unknown>), file })) });
+  }
   if (record.files !== undefined) {
     if (!Array.isArray(record.files)) fail("ucd_sources.files must be an array");
     return record.files.map((entry) => {

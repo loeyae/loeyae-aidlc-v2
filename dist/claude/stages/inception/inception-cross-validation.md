@@ -87,7 +87,7 @@ requires: [user-stories, ui-mock-generation, ui-figma-generation]
 **输入文件**：
 - `docs/aidlc/modules/{module-id}/inception/requirements.md`
 - `docs/aidlc/modules/{module-id}/inception/requirements/requirement-verification-questions.md`
-- `docs/aidlc/audit.md`（澄清问答部分）
+- 对应需求/设计问题文件中的实际澄清与批准来源
 - 当前 inception 根下的 `requirements/business-flows.md`
 - 条件适用的 `requirements/data-model.md`
 - 当前场景 `scenario-manifest.md`
@@ -268,10 +268,10 @@ loeyae-aidlc ui accept --module {module-id} --route <html-mock|figma-create|figm
 
 **未通过处理**：
 1. 为每个不一致项分配冲突 ID，在交叉验证报告中记录需求、用户故事、UI 三方描述、影响范围和建议；不得把语义差异直接归因于任一方错误。
-2. 仅缺少证据、命名映射或 page-specs 对应关系的机械性问题可直接修正。涉及产品语义时，将 handoff.md `设计状态` 标记为 `blocked`、记录失败门禁，并按 `common-question-format-guide.md` 创建或更新 `docs/aidlc/modules/{module-id}/inception/ui-mock/ui-conflict-questions.md`。
+2. 仅缺少证据、命名映射或 page-specs 对应关系的机械性问题可直接修正。涉及产品语义时，在当前交叉验证记录中保留实际阻断及失败门禁，并按 `common-question-format-guide.md` 创建或更新 `docs/aidlc/modules/{module-id}/inception/ui-mock/ui-conflict-questions.md`。
 3. 加载并执行 `common-workflow-changes.md` 的“产品产物一致性协调”；该规则统一定义用户裁决选项、禁止提前修改、代码基线分流、就地更新、下游失效和重审恢复。
 4. **定向修正与定向复验**（`common-ui-generation-flow.md` 阶段 7）：按问题清单**只修受影响页面**，保留原 `nodeId`、禁止删除重建已登记 Frame；修复后**只做定向复验**（仅复查受影响页面及其直接依赖）；除非发现共享组件、公共契约或全局设计系统问题，否则**不得再次执行全量验收 e**。
-5. 未决冲突为零且适用审查全部通过后，才能将 handoff.md `设计状态` 更新为 `approved`，`下一操作` 更新为“进入 I11 工作流规划”。
+5. 未决冲突为零且适用审查全部通过后，才能通过 `orchestrate report` 提交通过结果，并按其 `handoff_prompt` 进入 I11 工作流规划。
 
 ---
 
@@ -377,8 +377,8 @@ loeyae-aidlc ui accept --module {module-id} --route <html-mock|figma-create|figm
 
 ## 与步骤完成协议的关系
 
-- 审查步骤本身也是一个步骤，完成后必须执行步骤完成协议（更新 handoff.md、微型摘要、审计记录）
-- 审查步骤在 handoff.md 中记录为 `{步骤编号} 交叉验证 ✅/❌`
+- 审查步骤完成后执行步骤完成协议：提交 `orchestrate report` 并展示 `handoff_prompt`，由引擎维护状态和审计
+- 真实审查结论保留在当前交叉验证产物和受控 Evidence，不另复制统计摘要
 - 如果审查未通过并修正后重新通过，在审计中记录"首次未通过 → 修正后通过"
 
 ---

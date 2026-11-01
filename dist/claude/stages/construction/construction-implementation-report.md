@@ -1,294 +1,45 @@
 ---
 slug: implementation-report
+traceability: not_applicable
 number: "3.8"
 name: 实现报告
 phase: construction
 execution: ALWAYS
 scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
 consumes:
-  - docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md
+  - .aidlc/evidence/build-and-test/build-test-evidence.json
 produces:
-  - docs/aidlc/construction/implementation-report.md
   - .aidlc/evidence/implementation-report/implementation-report.json
 sensors: [doc-cascade, implementation-report]
 requires: [build-and-test]
 ---
 
-# 实施与验收报告
+# 实施与交付核验
 
-> **为什么需要报告**：没有报告 = 不知道做了什么、测了什么、结果如何。报告不是文档仪式，是团队之间传递实施结果的唯一可靠方式。下一个接手人（可能是你自己）需要知道：改了哪些文件、是否通过测试、是否符合规范。
+本阶段在 C8 通过后核验交付证据链，产出受控 `implementation-report.json`。它仍是 Construction 的机器核验阶段；不要求单元微型摘要或阶段完整 Markdown 报告。
 
-## 两级报告体系
+## 执行
 
-| 级别 | 触发时机 | 输出位置 | 大小 |
-|------|----------|----------|------|
-| **单元级微型摘要** | 每个单元代码生成 + 审查通过后 | `docs/aidlc/modules/{module-id}/construction/{unit-id}/implementation-summary.md` | 5-15 行 |
-| **阶段级完整报告** | Construction 构建和测试通过后 | `docs/aidlc/construction/implementation-report.md` | 完整 |
+1. 从当前 workflow、模块/单元 manifest 与受控证据确定本次交付范围。
+2. 运行当前 directive 的受控 producer 和 sensor，核验适用阶段、审查、构建测试及追溯证据。证据缺失或失效时按具体诊断修复，不能用文字摘要替代，也不因汇总工作重复执行仍有效的测试。
+3. 使用 `orchestrate report` 提交结果，由引擎维护 state/audit/ledger；只有门禁通过才能宣称完成。
+4. 简短说明实际结果、未解决风险和证据位置，并原样展示返回的 `handoff_prompt`。需要汇总时读取 `orchestrate state summary`。
 
----
+## 证据完整性
 
-## 第一级：单元级微型摘要（强制，不可跳过）
+受控核验保留以下适用性边界：
 
-### 触发条件
+- 核验实际源码变更、批准的需求/UC-D 追溯、单元 Spec/Standards 审查以及真实构建测试结果；删除交付仍核验代码生成阶段的删除路径、基线 blob、需求归属和适用验证。
+- 多模块交付覆盖 `module-manifest.json` 中的全部适用模块，不能用一个模块的证据替代另一个模块；跨模块核验引用实际交叉验证证据。
+- 仅当初始化签名选择 PRD 时核验 PRD 完整性及 FR 到模块的映射。
+- 仅当模块签名 I9 choice 选择 UI 时核验页面计划、HTML/Figma 分支证据及至少一个通过的单元级 UI 对齐证据。未选或跳过时不要求占位产物。
+- 启用 validation Provider 时消费当前 scope/source revision 的 Core-signed Evidence 与 GateDecision；知识回执不能代替 validation Gate。
+- 不适用项依现有批准来源和门禁记录；未执行、失败或无法核验的项保持真实状态，不写成通过。
 
-每个单元的代码审查（两阶段）通过后，**在标记单元完成之前**，必须生成微型摘要。
+## 展示与人工报告
 
-### 与步骤完成协议的关系
+`orchestrate state summary [--module <id>] [--format json|markdown]` 从现有状态和证据生成只读摘要，默认 JSON；供人阅读时使用 `--format markdown`。命令不写文件、不推进阶段、不代替门禁。简单任务默认直接展示简短结果，不同步多份统计文档；用户明确要求导出时可保存到 `.aidlc/views/`，该视图可随时重建，不作为审批或完成依据。
 
-单元级微型摘要是步骤完成强制协议（见 `core-workflow.md`）的一部分。协议要求的"微型摘要"在 Construction 代码生成步骤中，具体化为本文件定义的格式。
+仅在用户明确要求、交付约定或具体风险需要人工说明时编写完整报告。报告引用现有证据与 `code-review.md`，补充真实业务结论、风险、决策和未验证限制；不复制逐 UC-D 清单、全部命令输出或已由机器维护的计数。报告的受众、位置与内容按该交付要求确定，不新增普遍门禁。
 
-### 输出格式
-
-```markdown
-# 实施摘要 — {unit-name}
-
-**完成时间**：{ISO 时间戳}
-
-## 变更清单
-| 操作 | 文件路径 | 说明 |
-|------|----------|------|
-| 创建 | `src/main/java/.../UserService.java` | 用户服务接口 |
-| 修改 | `src/main/java/.../SecurityConfig.java` | 新增用户认证配置 |
-| 创建 | `src/test/java/.../UserServiceTest.java` | 用户服务单元测试 |
-
-## 测试结果
-- 单元测试：{X} 个通过 / {Y} 个失败
-- 编译状态：✅ 成功 | ❌ 失败
-
-## 规范合规
-- 规格合规审查：✅ 通过
-- 代码质量审查：✅ 通过
-- 框架规范对照：✅ 合规 | ❌ 不合规（{不合规项数}项已修复）
-
-## 关键决策
-- {如有重要技术决策，一句话记录}
-```
-
-### 强制规则
-
-1. **不得跳过**：即使快速通道也必须输出微型摘要（可简化为 3 行：变更文件列表 + 测试结果 + 规范合规）
-2. **时机**：在代码审查通过后、进入下一单元前
-3. **内容必须真实**：测试结果必须来自实际执行的命令输出，不得估算或假设
-4. **变更清单必须完整**：列出本单元所有创建和修改的文件（不含 docs/aidlc/ 下的文档文件）
-
-### 快速通道的简化格式
-
-```markdown
-# 实施摘要 — 快速通道
-
-**完成时间**：{ISO 时间戳}
-**变更文件**：{file1}, {file2}, {file3}
-**测试**：✅ {X} 个通过
-**规范**：✅ 合规
-```
-
----
-
-## 第二级：阶段级完整报告（强制，不可跳过）
-
-### 触发条件
-
-Construction 阶段的"构建和测试"步骤通过后，**在展示 Construction 完成消息之前**，必须生成完整报告。
-
-### 输出格式
-
-```markdown
-# 实施与验收报告
-
-**项目**：{项目名称}
-**生成时间**：{ISO 时间戳}
-**报告类型**：Construction 阶段完整报告
-
----
-
-## 1. 实施概览
-
-| 指标 | 值 |
-|------|---|
-| 工作单元数 | {X} |
-| 总文件变更数 | {X} 个（创建 {Y} + 修改 {Z}） |
-| 总测试数 | {X} |
-| 测试通过率 | {X}% |
-| 代码审查轮次 | {X} |
-| 框架规范合规 | ✅ 全部合规 / ⚠️ {N} 项已修复 |
-
----
-
-## 2. 各单元实施结果
-
-### 单元：{unit-name-1}
-
-| 维度 | 结果 |
-|------|------|
-| 变更文件数 | {X} |
-| 测试通过 | {X}/{Y} |
-| 规格合规 | ✅ 通过 |
-| 代码质量 | ✅ 通过 |
-| 框架规范 | ✅ 合规 |
-
-**变更清单**：
-[从单元级微型摘要汇总]
-
-### 单元：{unit-name-2}
-[同上格式]
-
----
-
-## 3. 构建验证
-
-### 后端构建
-```bash
-# 实际执行的命令
-mvn clean install -DskipTests
-
-# 结果
-BUILD SUCCESS
-```
-- **状态**：✅ 成功
-- **构建时间**：{X}s
-- **产物**：{jar/war 路径}
-
-### 前端构建（如适用）
-```bash
-# 实际执行的命令
-pnpm build
-
-# 结果
-✓ built in Xs
-```
-- **状态**：✅ 成功
-
----
-
-## 4. 测试验证
-
-### 单元测试
-```bash
-# 实际执行的命令
-mvn test
-
-# 关键输出
-Tests run: {X}, Failures: {Y}, Errors: {Z}, Skipped: {W}
-```
-- **状态**：✅ 全部通过 | ❌ {N} 个失败
-- **覆盖率**：{X}%（如有 JaCoCo 报告）
-
-### 集成测试（如执行）
-- **测试场景数**：{X}
-- **通过率**：{X}%
-
-### 前端 Lint（如适用）
-```bash
-# 实际执行的命令
-pnpm lint:all
-
-# 结果
-✓ 0 errors, 0 warnings
-```
-
----
-
-## 5. 规范合规汇总
-
-### 项目规范与 Provider 验证
-
-依据项目已确认的技术事实报告适用规范。启用 validation Provider 时逐项引用当前 scope/source revision 的 Core-signed Evidence 和 GateDecision；不得把知识回执当作规则通过证明。仅加载知识时报告知识来源与宿主确认，不填写 validation 通过。
-
-| 适用规范/能力 | 规则集与锁定版本 | 实际结果 | 受控 Evidence / GateDecision 引用 |
-|---------------|----------------|----------|---------------------------------|
-| {项目实际启用的规范或 validation 能力} | {实际版本与 lock} | {实际结果} | {当前有效引用} |
-
-未启用 Provider 时省略 Provider 行，仅汇总项目实际执行的通用审查、测试和安全检查，不生成专属占位内容。
-
-### 质量门禁结果
-
-| 门禁 | 结果 | 备注 |
-|------|------|------|
-| 代码生成质量门禁 | ✅ | |
-| 安全质量门禁 | ✅ | |
-| 构建和测试质量门禁 | ✅ | |
-
----
-
-## 6. 选择性流程完整性（强制）
-
-报告必须逐项引用以下实际 Evidence 路径：
-
-- 每个模块的 `.aidlc/evidence/cross-validation/{module-id}/inception-consistency.json`；
-- 仅当初始化签名选择 PRD 时，引用 `.aidlc/evidence/prd-generation/prd-completeness.json`，并证明所有 PRD FR 已映射到至少一个模块交叉验证报告；
-- 仅当模块签名 I9 choice 选择 UI 时，引用该模块的页面计划 Evidence、HTML/Figma 分支 Evidence，以及至少一个 `status=passed` 的单元级 `ui-design-alignment` Evidence；
-- PRD 未选、UI condition false 或 `skip` 时，不得伪造占位 Evidence，也不要求这些可选产物。
-
-多模块报告必须覆盖 `module-manifest.json` 中全部模块，不能用一个模块的 Evidence 替代另一个模块。
-
-## 7. 已知限制与待优化项
-
-| # | 类别 | 描述 | 来源 | 优先级 |
-|---|------|------|------|--------|
-| 1 | {性能/代码质量/...} | {描述} | 代码审查-单元X | {高/中/低} |
-
----
-
-## 8. 验收结论
-
-- **实施完整性**：✅ 所有需求已实现 | ❌ {缺失项}
-- **测试充分性**：✅ 测试覆盖充分 | ⚠️ {不足项}
-- **规范符合性**：✅ 符合框架规范 | ⚠️ {偏差项}
-- **可部署状态**：✅ 可部署 | ❌ {阻塞项}
-
-**总体结论**：✅ 验收通过 | ❌ 需要修复后重新验收
-```
-
-### 强制规则
-
-1. **不得跳过**：即使所有单元微型摘要都已生成，仍必须生成阶段级报告（汇总 + 补充构建测试证据）
-2. **证据驱动**：构建验证和测试验证部分**必须包含实际命令输出**，不得写"应该通过"
-3. **汇总来源**：各单元的变更清单和规范对照结果从微型摘要中汇总，不得重新编造
-4. **验收结论不可省略**：必须明确给出"验收通过"或"需要修复"的结论
-5. **待优化项来源**：从代码审查中记录的"建议改进"项 + handoff.md 中的"待优化项"汇总
-
----
-
-## 与工作流的集成
-
-### 在 Construction 阶段的位置
-
-```
-Per-Unit 循环：
-  I13 → RED → GREEN → 两阶段审查 → 框架规范对照
-  → ★ 单元级微型摘要 ★
-  → 进入下一单元
-
-所有单元完成：
-  最终全局审查
-  → 构建和测试
-  → ★ 阶段级完整报告 ★
-  → 展示 Construction 完成消息
-```
-
-### 在步骤完成协议中的角色
-
-- 单元级微型摘要 = 步骤完成协议中代码生成步骤的"微型摘要"具体化
-- 阶段级完整报告 = Construction 阶段的最终输出物（在完成消息之前）
-
-### handoff.md 中的记录
-
-```markdown
-## 实施报告状态
-| 单元 | 微型摘要 | 测试通过 | 规范合规 |
-|------|---------|---------|---------|
-| unit-a | ✅ 已生成 | ✅ 8/8 | ✅ |
-| unit-b | ✅ 已生成 | ✅ 5/5 | ✅ |
-| 阶段级报告 | ✅ 已生成 | - | - |
-```
-
----
-
-## 红旗信号
-
-**绝不：**
-- 跳过微型摘要直接进入下一单元
-- 在测试未实际执行的情况下声称"测试通过"
-- 省略阶段级报告因为"微型摘要已经说了"
-- 验收结论写"基本通过"这种模糊说法
-- 忽略框架规范对照结果
+需求、设计、契约、运行说明等真正业务产物仍按各自阶段要求维护；精简汇总不豁免这些产物、审批或真实验证。

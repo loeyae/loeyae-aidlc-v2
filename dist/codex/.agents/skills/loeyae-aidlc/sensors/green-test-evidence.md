@@ -24,11 +24,19 @@ evidence_path: .aidlc/evidence/<stage-slug>/green-test-evidence.json
 
 GREEN 命令必须退出码为 0，且测试计数为非零/零失败。代码审查和构建测试继续消费该证据并重新验证 UC-D 覆盖。无业务行为时只能消费 I13 的 `not_applicable` 证据和其中声明的确定性替代验证。
 
-GREEN 观察改动后的全部行为：I13 为 `required` 时，`uc_mapping` 必须恰好覆盖 I13 的全部 UC-D——`tdd_mode: new`（RED→GREEN）与 `characterization`（BASELINE→GREEN）都要包含，漏写、多写或重复都会被拒。
+GREEN 观察本单元改动后的全部适用行为：I13 为 `required` 时，`uc_mapping` 必须恰好覆盖下述单元范围的全部 UC-D——`tdd_mode: new`（RED→GREEN）与 `characterization`（BASELINE→GREEN）都要包含，漏写、多写或重复都会被拒。
 
-按单元收敛（4.8.0）：I13 有 `ucd_units` 时，`uc_mapping` 必须恰好覆盖 `unit_refs` 指向本单元的全部 UC-D（报错 `GREEN uc_mapping must cover every UC-D of unit <id>`）。GREEN 的 `not_required` 只允许出现在本单元子集为空且 `ucd_exemption` 的 `validation_command` 已执行通过的情况（见 `red-test-evidence.md`）；子集非空时一律拒绝。模块完整性由 build-and-test 的 `test-quality` 对账和集成屏障 `ucd-coverage:<module>` 保证：每个 UC-D 都必须出现在其 `unit_refs` 中每个 unit 的 GREEN 里。
+按单元收敛：I13 有 `ucd_units`（显式或唯一需求归属推导）时，`uc_mapping` 必须恰好覆盖其中归属本单元的全部 UC-D（报错 `GREEN uc_mapping must cover every UC-D of unit <id>`）；缺少该字段的旧证据保留模块全集兼容含义。GREEN 的 `not_required` 只允许出现在本单元子集为空且 `ucd_exemption` 的 `validation_command` 已执行通过的情况（见 `red-test-evidence.md`）；子集非空时一律拒绝。模块完整性由 build-and-test 的 `test-quality` 对账和集成屏障 `ucd-coverage:<module>` 保证：每个 UC-D 都必须出现在其 `ucd_units` 中每个 unit 的 GREEN 里。
 
-GREEN 证据必须来自全量测试运行（MARS-271）：只有 RED 收敛迭代允许 `--test-filter` 过滤（见 `red-test-evidence.md`），GREEN 与 BASELINE 证据携带 `test_filter` 一律被门禁拒绝。
+GREEN 证据必须完成当前单元批准的验证矩阵（MARS-271），不因“全量”字样自动扩成全仓库测试。只有 RED 收敛迭代允许 `--test-filter` 过滤（见 `red-test-evidence.md`），GREEN 与 BASELINE 证据携带 `test_filter` 一律被门禁拒绝。
+
+新的 GREEN 观察记录 `execution_input_binding`，沿用本单元的来源范围，仅排除规范命名的下游审查记录（当前 `code-review.md`，以及为旧工作流兼容保留的 `audit.md`、`audit/test-case-reconciliation.md` 和 `audit/{unit-id}.md`；这些历史路径不是新增产物要求）。在 test-quality 复用映射时，该摘要仍匹配才能容忍这些报告带来的普通来源摘要变化；显式声明为 shared/contract 的输入优先保持绑定。源码、测试、需求、设计与命令输入变化仍拒绝；无此摘要的旧 GREEN 不会自动获得漂移豁免。C8 对已完成单元验证其原历史基线，不要求已完成单元追随后续单元合法推进的 epoch 重跑。
+
+标准位置 `inception/artifact-review.json` 的一致性收据可能间接引用这些报告。只有格式和 workflow/module 身份有效时，执行摘要按同一范围规则投影其 `inputs`，避免收据把已排除的报告或已证明私有的兄弟单元输入重新引入；结论、审阅人、未解决问题及其他字段完整保留。共享/契约输入优先，收据自身被声明为共享输入时保留原始绑定；无完整单元输入归属时仍采用保守范围。非法收据保留原绑定，符号链接或越界拒绝；实际质量门禁照常独立核验收据。
+
+上游模块规划/I13 也按自身范围投影同一收据，避免只新增下游报告就要求重新派生 UC-D。GREEN 的执行摘要复验沿用原 `source_revision` 记录的嵌套仓库结构；旧记录没有 `repos` 时不会因后来登记嵌套仓库而被静默改用新算法。
+
+替代验证使用真实项目命令的环境。工具自动开启的进度标记和语义检查子进程的路由上下文不应使刚生成的 GREEN 立即失效；用户实际设置的环境变量、当前基线和输入仍须匹配。真正的输入变化只重新执行受影响的批准检查，不通过新增测试修复观察元数据。
 
 分级映射准入（MARS-271）：I13 声明 `mapping_deferred` 的 UC-D 暂不进入 GREEN 覆盖 universe，但 GREEN 证据必须以 `mapping_debt: [{id, reason}]` 恰好申报同一批暂缓用例——漏报、多报都会被拒；映射债在门禁报告与 `test-quality` 的 `mapping_debt` 中独立可见，不得静默消失。P0 与 `contract`/`api` 类 UC-D 禁止暂缓（见 `test-case-derivation.md`）。
 

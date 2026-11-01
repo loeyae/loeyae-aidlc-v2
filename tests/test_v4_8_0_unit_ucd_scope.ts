@@ -26,6 +26,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { loadWorkflowState, saveWorkflowState } from "../core/tools/aidlc-light-state";
+import { unitUcdIds } from "../core/tools/aidlc-execution-context";
 import { orderQualityFixture } from "./order_quality_fixture";
 
 const repository = resolve(import.meta.dirname, "..");
@@ -428,6 +429,7 @@ function scenario(name: string, units: UnitSpec[], ucds: Ucd[]): Scenario {
     ...(hasCharacterization ? [{ id: "uc-baseline", role: "baseline", argv: OBSERVE }] : []),
   ]));
   write(project, ".aidlc/commands/code-generation.json", allowlist("code-generation", [{ id: "uc-green", role: "green", argv: OBSERVE }]));
+  prepareBuildAndTest(project);
 
   const plan: Record<string, Partial<Record<Phase, string[]>>> = {};
   const scoped = ucds.some((ucd) => ucd.unitRefs !== undefined);
@@ -481,15 +483,19 @@ function review(s: Scenario, unit: string, ucdIds: string, files: string): void 
   write(s.project, `${construction(unit)}/audit.md`, `# 审计 — 单元 ${unit}\n\n代码审查（REQ-001 / ${ucdIds}）结论：passed。\n`);
 }
 
-function writeBuildAndTest(s: Scenario, ids: string): void {
-  write(s.project, "tests/build_check.cjs", "const { readFileSync } = require('node:fs');\nreadFileSync('app/__init__.py', 'utf8');\nconsole.log('build ok');\n");
-  write(s.project, "tests/run_tests.cjs", "const { spawnSync } = require('node:child_process');\nconst env = { ...process.env, AIDLC_PHASE: 'GREEN' };\ndelete env.AIDLC_ACTIVE_UNIT;\nconst result = spawnSync(process.execPath, ['tests/observe_uc.cjs'], { encoding: 'utf8', env });\nprocess.stdout.write(result.stdout.split(/\\r?\\n/).filter((line) => !line.startsWith('{')).join('\\n'));\nprocess.exit(result.status ?? 1);\n");
-  write(s.project, "tests/lint_check.cjs", "const { readFileSync } = require('node:fs');\nif (/\\t/.test(readFileSync('app/__init__.py', 'utf8'))) process.exit(1);\nconsole.log('lint ok');\n");
-  write(s.project, ".aidlc/commands/build-and-test.json", allowlist("build-and-test", [
+/** Establish execution inputs before the first TDD/GREEN observation. */
+function prepareBuildAndTest(project: string): void {
+  write(project, "tests/build_check.cjs", "const { readFileSync } = require('node:fs');\nreadFileSync('app/__init__.py', 'utf8');\nconsole.log('build ok');\n");
+  write(project, "tests/run_tests.cjs", "const { spawnSync } = require('node:child_process');\nconst env = { ...process.env, AIDLC_PHASE: 'GREEN' };\ndelete env.AIDLC_ACTIVE_UNIT;\nconst result = spawnSync(process.execPath, ['tests/observe_uc.cjs'], { encoding: 'utf8', env });\nprocess.stdout.write(result.stdout.split(/\\r?\\n/).filter((line) => !line.startsWith('{')).join('\\n'));\nprocess.exit(result.status ?? 1);\n");
+  write(project, "tests/lint_check.cjs", "const { readFileSync } = require('node:fs');\nif (/\\t/.test(readFileSync('app/__init__.py', 'utf8'))) process.exit(1);\nconsole.log('lint ok');\n");
+  write(project, ".aidlc/commands/build-and-test.json", allowlist("build-and-test", [
     { id: "build", role: "build", argv: ["node", "tests/build_check.cjs"] },
     { id: "unit-tests", role: "test", argv: ["node", "tests/run_tests.cjs"] },
     { id: "lint", role: "check", argv: ["node", "tests/lint_check.cjs"] },
   ]));
+}
+
+function writeBuildAndTest(s: Scenario, ids: string): void {
   write(s.project, "docs/aidlc/construction/build-test-report.md", `# 构建与测试报告\n\nREQ-001 / ${ids}：构建、单元测试与 lint 均通过（0 failed）。\n`);
   write(s.project, "docs/aidlc/construction/build-and-test/build-and-test-summary.md", "# 构建与测试摘要\n\nREQ-001 的实现通过构建、测试和静态检查；各单元只交付自己的 UC-D，模块收口对账通过。\n");
 }
@@ -734,6 +740,10 @@ try {
   // ------------------------------------------------------------------ (4)
   await section("empty subset: contract unit u3 without UC-D — refused without ucd_exemption or with a failing validation_command; with it RED/BASELINE/GREEN are not_required and the command runs", () => {
     const checks = rejections();
+    // Optional delivery-only rerun after a terminal-gate fix. Default suite keeps
+    // all rejection scenarios; this mode still executes both units and every gate.
+    const deliveryOnly = process.env.AIDLC_DELIVERY_SMOKE === "1";
+    if (deliveryOnly) console.log("    delivery smoke: approved exemption path; initial negative scenarios are not repeated");
     const ucds = [{ ...UCD1, unitRefs: ["u1"] }];
     const s = scenario("empty-subset", [{ id: "u1" }, { id: "u3" }], ucds);
     s.writeCases(ucds);
@@ -742,6 +752,7 @@ try {
     const log = () => (existsSync(join(s.project, ".aidlc/contract-validation.log")) ? readFileSync(join(s.project, ".aidlc/contract-validation.log"), "utf8").split(/\r?\n/).filter(Boolean).length : 0);
     write(s.project, "app/contract.py", "# REQ-001 u3: cross-unit order contract (declaration only)\nORDER_FIELDS = (\"id\", \"amount\")\n");
 
+    if (!deliveryOnly) {
     s.nextModule(`tdd@module:${M01}@unit:u3`, [TCD]);
     checks.expect("empty subset without ucd_exemption", rejected(s.reportUnit("tdd", "u3")), /unit u3 owns no UC-D of module m01-trade \(unit_refs\); declare ucd_exemption for it in .*unit-manifest\.json/);
     assert.equal(existsSync(join(s.project, RED("u3"))), false, "the refused RED writes no evidence");
@@ -753,6 +764,7 @@ try {
     rmSync(join(s.project, ".aidlc/contract-broken"));
     s.writeUnitManifest([{ id: "u1" }, { id: "u3", exemption: { ...EXEMPTION, approval_ref: "" } }]);
     checks.expect("ucd_exemption without approval_ref", rejected(s.reportUnit("tdd", "u3")), /units\[1\]\.ucd_exemption\.approval_ref must be a non-empty string/);
+    }
     s.writeUnitManifest([{ id: "u1" }, { id: "u3", exemption: EXEMPTION }]);
     // The approved exemption changes canonical unit input; regenerate projections
     // and re-attest admission before accepting the successful controlled report.
@@ -760,7 +772,19 @@ try {
     const before = log();
     const u3Tdd = s.reportUnit("tdd", "u3");
     assert.equal(rejected(u3Tdd), "", u3Tdd.out);
-    assert.ok(log() >= before + 2, `validation_command ran for RED and BASELINE (${before} → ${log()})`);
+    assert.equal(log(), before + 1, `identical RED/BASELINE validation executes once (${before} → ${log()})`);
+    const redValidation = readJson(s.project, RED("u3")).exemption_validation_execution;
+    const baselineValidation = readJson(s.project, BASE("u3")).exemption_validation_execution;
+    assert.ok(typeof redValidation.observation_id === "string" && redValidation.observation_id.length > 0, "RED records a real successful validation observation");
+    assert.equal(redValidation.reused_from, undefined, "RED creates the successful observation in this run");
+    assert.equal(baselineValidation.reused_from, redValidation.observation_id, "BASELINE reuses that exact RED observation");
+    assert.match(redValidation.input_binding, /^[a-f0-9]{64}$/);
+    assert.equal(baselineValidation.input_binding, redValidation.input_binding, "both phases bind the same unchanged validator inputs");
+    const observation = readJson(s.project, `.aidlc/alternative-observations/${redValidation.input_binding}.json`);
+    assert.equal(observation.producer, "loeyae-aidlc-evidence");
+    assert.equal(observation.observation_id, redValidation.observation_id);
+    assert.equal(observation.result.status, "passed");
+    assert.equal(observation.result.exit_code, 0);
     for (const path of [RED("u3"), BASE("u3")]) {
       const evidence = readJson(s.project, path);
       assert.equal(evidence.status, "not_required", path);
@@ -836,35 +860,27 @@ try {
   });
 
   // ------------------------------------------------------------------ (8)
-  await section("compat: two units without unit_refs — RED/GREEN still cover the module set (4.7.1 behaviour, transcript)", () => {
+  await section("compat: two units without unit_refs — legacy evidence retains scope, new ambiguous derivation stops before TDD", () => {
     const checks = rejections();
     const ucds = [UCD1, UCD2];
     const s = scenario("compat", [{ id: "u1" }, { id: "u2" }], ucds);
     s.writeCases(ucds);
-    s.report("test-case-derivation");
-    assert.equal("ucd_units" in readJson(s.project, I13), false, "no unit_refs → no ucd_units");
-    s.nextModule(`tdd@module:${M01}@unit:u1`, [TCD]);
-    assert.equal(rejected(s.reportUnit("tdd", "u1")), "");
-    assert.deepEqual(readJson(s.project, RED("u1")).uc_mapping.map((entry: Json) => entry.use_case), ["UC-D-001", "UC-D-002"], "RED covers the module set");
-    s.nextModule(`code-generation@module:${M01}@unit:u1`, [TCD]);
-    implement(s, "u1", { [UCD1.file]: U1_FILE }, "UC-D-001 / UC-D-002");
-    s.plan.u1.GREEN = ["UC-D-001"];
-    s.savePlan();
-    const partial = rejected(s.reportUnit("code-generation", "u1"));
-    checks.expect("u1 GREEN covering only UC-D-001", partial, /GREEN uc_mapping must cover every I13 UC-D \(UC-D-001, UC-D-002\): missing UC-D-002/);
-    s.plan.u1.GREEN = ["UC-D-001", "UC-D-002"];
-    s.savePlan();
-    const failing = rejected(s.step(["evidence", "run", "--stage", "code-generation", ...unitArgs("u1"), "--sensor", "green-test-evidence"], false));
-    checks.expect("u1 GREEN while UC-D-002 is not implemented", failing, /controlled GREEN command uc-green must exit 0; got 1/);
-    implement(s, "u1", { [UCD1.file]: U1_FILE, [UCD2.file]: U2_FILE }, "UC-D-001 / UC-D-002");
-    s.step(["evidence", "run", "--stage", "code-generation", ...unitArgs("u1"), "--all-sensors"]);
-    assert.equal(rejected(s.reportUnit("code-generation", "u1")), "");
-    s.nextModule(`code-review@module:${M01}@unit:u1`);
-    review(s, "u1", "UC-D-001 / UC-D-002", `${UCD1.file}, ${UCD2.file}`);
-    assert.equal(rejected(s.reportUnit("code-review", "u1")), "");
-    s.nextModule(`tdd@module:${M01}@unit:u2`, [TCD]);
-    // Module-wide RED: both UC-Ds already pass after u1, so u2 cannot observe RED (4.7.1 behaviour).
-    checks.expect("u2 RED after u1 implemented the module set", rejected(s.reportUnit("tdd", "u2")), /controlled RED command uc-red must exit 1; got 0/);
+    const fresh = s.step(["evidence", "run", "--stage", "test-case-derivation", "--module", M01, "--sensor", "test-case-derivation"], false);
+    checks.expect("new multiunit I13 must resolve ownership before RED", rejected(fresh), /Resolve unit-manifest req_refs or declare unit_refs for every active UC-D before TDD/);
+    assert.equal(existsSync(join(s.project, I13)), false, "ambiguous fresh derivation cannot publish a module-wide obligation");
+    // The producer bounds checker stderr to its tail. Check the same inputs
+    // directly for the complete diagnostic without weakening publication checks.
+    const diagnosis = s.step(["check", "--sensor", "test-case-derivation", "--module", M01], false);
+    checks.expect("complete ownership diagnosis names every ambiguous UC-D", rejected(diagnosis), /I13_UNIT_OWNERSHIP:.*UC-D-001.*unit_refs.*UC-D-002.*unit_refs/);
+    assert.equal(existsSync(join(s.project, I13)), false, "diagnostic checks do not publish evidence");
+    // Captured by the controlled 4.23.3 producer at 03a6772 in the pre-fix audit.
+    // This golden checks legacy scope interpretation, not current provenance admission.
+    const legacy = readJson(repository, "tests/fixtures/ucd/legacy-module-wide-i13-4.23.3.json");
+    assert.equal(legacy.producer.mode, "controlled");
+    assert.equal("ucd_units" in legacy, false);
+    for (const unit of ["u1", "u2"]) {
+      assert.deepEqual(unitUcdIds(legacy, unit), { new: ["UC-D-001", "UC-D-002"], characterization: [], all: ["UC-D-001", "UC-D-002"], scoped: false });
+    }
     if (process.env.AIDLC_TRANSCRIPT) writeFileSync(process.env.AIDLC_TRANSCRIPT, `${s.transcript.join("\n")}\n`, "utf8");
     checks.assertAll();
   });

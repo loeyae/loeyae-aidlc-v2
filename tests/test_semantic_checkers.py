@@ -244,7 +244,7 @@ print("route-config=", json.dumps(route_config, sort_keys=True))
     }))
 
 
-def run_checker(project: str, sensor: str, module_id: str = "", unit_id: str = "") -> subprocess.CompletedProcess[str]:
+def run_checker(project: str, sensor: str, module_id: str = "", unit_id: str = "", *, current_artifacts: bool = False) -> subprocess.CompletedProcess[str]:
     if not os.path.exists(os.path.join(project, "aidlc", "active", "aidlc-state.md")):
         write_checker_state(project)
     env = checker_environment(project)
@@ -253,7 +253,7 @@ def run_checker(project: str, sensor: str, module_id: str = "", unit_id: str = "
     if unit_id:
         env["AIDLC_ACTIVE_UNIT"] = unit_id
     return subprocess.run(
-        [*TSX, CHECKER, "--sensor", sensor],
+        [*TSX, CHECKER, "--sensor", sensor, *(["--current-artifacts"] if current_artifacts else [])],
         cwd=project,
         env=env,
         capture_output=True,
@@ -290,8 +290,8 @@ def test_all_checkers_pass_on_realistic_fixture() -> None:
             if sensor == "implementation-report":
                 # 4.5.4 (D3): the checker shares verifiedModuleIds() with the orchestrator gate.
                 # A feature-scope workflow without module-manifest is rejected by both, so the
-                # checker fails closed here; the manifest-backed path is covered by
-                # test_implementation_report_aggregates_selected_artifacts.
+                # checker fails closed here. Controlled no-Markdown delivery is
+                # covered by D3 in test_v4_5_4_engine_defects.ts.
                 assert result.returncode != 0, result.stdout
                 assert "module manifest is missing" in result.stderr, result.stderr
                 continue
@@ -1458,6 +1458,36 @@ def test_inception_consistency_optional_routes() -> None:
         shutil.rmtree(project)
 
 
+def test_inception_current_artifacts_preserves_admission_and_content_checks() -> None:
+    project = make_temp(prefix="aidlc-inception-current-artifacts-")
+    try:
+        write_module_manifest(project)
+        write_cross_validation_inputs(project, "module-a", prd_selected=False, ui_route="skip")
+        write_module_state(project, "cross-validation", {"module-a": "skip"})
+        write(project, "docs/aidlc/modules/module-a/inception/quality-adoption.json", json.dumps({
+            "version": "1", "workflow_id": "module-semantic-fixture", "module_id": "module-a", "scope": "feature",
+            "status": "adopted", "rationale": "approved quality migration", "migration_differences": [],
+            "evidence_plan": ["requirements-analysis", "user-stories", "cross-validation"], "adopted_by": "project-owner",
+        }))
+        ordinary = run_checker(project, "inception-consistency", "module-a")
+        assert ordinary.returncode != 0
+        assert "aidlc-quality" in ordinary.stderr, ordinary.stderr
+        current = run_checker(project, "inception-consistency", "module-a", current_artifacts=True)
+        assert current.returncode == 0, current.stderr
+        payload = json.loads(current.stdout)
+        assert payload["validation_scope"] == "current-artifacts"
+        assert "quality" not in payload, "artifact-only output must not impersonate quality admission"
+        write(project, "docs/aidlc/modules/module-a/inception/user-stories.md", "# Stories\nUS-001 lacks its functional requirement mapping.\n")
+        invalid = run_checker(project, "inception-consistency", "module-a", current_artifacts=True)
+        assert invalid.returncode != 0
+        assert "do not cover functional requirements: FR-001" in invalid.stderr, invalid.stderr
+        wrong_sensor = run_checker(project, "prd-completeness", current_artifacts=True)
+        assert wrong_sensor.returncode != 0
+        assert "current-artifacts is only allowed for inception-consistency" in wrong_sensor.stderr, wrong_sensor.stderr
+    finally:
+        shutil.rmtree(project)
+
+
 def test_ui_alignment_uses_selected_route_and_code_traceability() -> None:
     project = make_temp(prefix="aidlc-ui-alignment-")
     try:
@@ -1573,29 +1603,31 @@ def test_implementation_report_aggregates_selected_artifacts() -> None:
 
         write(project, report_path, report_content(references))
         complete = run_checker(project, "implementation-report")
-        assert complete.returncode == 0, complete.stderr
-        payload = json.loads(complete.stdout)
-        assert payload["modules_verified"] == 2
-        assert payload["prd_verified"] is True
-        assert payload["ui_modules_verified"] == ["module-a"]
+        assert complete.returncode != 0, "Markdown and status-only JSON cannot certify delivery"
+        assert "requires completed stage build-and-test" in complete.stderr, complete.stderr
 
         write(project, report_path, report_content([item for item in references if "module-b/inception" not in item]))
         missing_module = run_checker(project, "implementation-report")
         assert missing_module.returncode != 0
-        assert "omits selected consistency evidence" in missing_module.stderr
+        assert "requires completed stage build-and-test" in missing_module.stderr
 
         write(project, report_path, report_content(references))
         alignment_path = ".aidlc/evidence/code-review/module-a/unit-a/ui-design-alignment.json"
         write(project, alignment_path, json.dumps({"status": "not_applicable", "reason": "not a UI unit"}))
         no_passed_alignment = run_checker(project, "implementation-report")
         assert no_passed_alignment.returncode != 0
-        assert "has no passed code-review" in no_passed_alignment.stderr
+        assert "requires completed stage build-and-test" in no_passed_alignment.stderr
+        os.remove(os.path.join(project, report_path))
+        without_prose = run_checker(project, "implementation-report")
+        assert without_prose.returncode != 0
+        assert "requires completed stage build-and-test" in without_prose.stderr
     finally:
         shutil.rmtree(project)
 
 
 def test_implementation_report_ui_page_forward_coverage() -> None:
-    # MARS-125:每个 UI 页面必须至少被一份 passed 对齐证据的 pages_covered 覆盖(多单元分页正向全覆盖)。
+    # Handwritten page coverage statistics cannot replace controlled delivery evidence.
+    # Actual forward coverage remains enforced after the controlled evidence gates.
     project = make_temp(prefix="aidlc-impl-ui-forward-")
     try:
         write_module_manifest(project, ("module-a",))
@@ -1641,14 +1673,14 @@ PAGE-001 与 PAGE-002 契约。
 
         write(project, report_path, report_content(references))
         full = run_checker(project, "implementation-report")
-        assert full.returncode == 0, full.stderr
-        assert json.loads(full.stdout)["ui_modules_verified"] == ["module-a"]
+        assert full.returncode != 0, "status-only page claims must not certify delivery"
+        assert "requires completed stage build-and-test" in full.stderr, full.stderr
 
         # 某页零覆盖(unit-b 只覆盖 PAGE-002 改为 PAGE-001,PAGE-002 悬空)→ fail。
         write(project, references[4], json.dumps({"status": "passed", "evidence_version": "1", "pages_checked": 1, "pages_covered": ["PAGE-001"]}))
         uncovered = run_checker(project, "implementation-report")
         assert uncovered.returncode != 0, uncovered.stdout
-        assert "PAGE-002: UNCOVERED@ui-design-alignment" in uncovered.stderr
+        assert "requires completed stage build-and-test" in uncovered.stderr, uncovered.stderr
     finally:
         shutil.rmtree(project)
 
@@ -1781,6 +1813,7 @@ if __name__ == "__main__":
     test_module_unit_context_isolation()
     test_ui_artifact_consistency_contracts()
     test_inception_consistency_optional_routes()
+    test_inception_current_artifacts_preserves_admission_and_content_checks()
     test_ui_alignment_uses_selected_route_and_code_traceability()
     test_implementation_report_aggregates_selected_artifacts()
     test_implementation_report_ui_page_forward_coverage()

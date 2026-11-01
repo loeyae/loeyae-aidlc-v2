@@ -347,6 +347,9 @@ function driveSingle(fixture: Fixture, scope: string, implementation: string, ho
   write(project, "tests/__init__.py", "\"\"\"Tests for the order export service.\"\"\"\n");
   write(project, "tests/test_exporter.py", pythonTests(ucds));
   write(project, "tests/observe_uc.cjs", observer(ucds));
+  // Executable C8 inputs exist before phase observations and keep their binding
+  // through downstream review; only the C8 reports are written later.
+  prepareBuildAndTest(project, "app/exporter.py");
   const roles = [
     ...(ucds.some((ucd) => ucd.mode === "new") ? [{ id: "uc-red", role: "red", argv: OBSERVE }] : []),
     ...(characterized.length > 0 ? [{ id: "uc-baseline", role: "baseline", argv: OBSERVE }] : []),
@@ -416,7 +419,7 @@ function driveSingle(fixture: Fixture, scope: string, implementation: string, ho
   // Project-axis build-and-test.
   refresh(project, SINGLE.codeGeneration);
   next(project, "build-and-test");
-  writeBuildAndTest(project, "app/exporter.py", ids);
+  writeBuildAndTestReports(project, ids);
   ok(project, ["evidence", "run", "--stage", "build-and-test", "--sensor", "test-quality"]);
   ok(project, ["evidence", "run", "--stage", "build-and-test"]);
   ok(project, ["orchestrate", "report", "--stage", "build-and-test", "--result", "completed"]);
@@ -427,7 +430,7 @@ function driveSingle(fixture: Fixture, scope: string, implementation: string, ho
   assertDone(project);
 }
 
-function writeBuildAndTest(project: string, source: string, ids: string): void {
+function prepareBuildAndTest(project: string, source: string): void {
   write(project, "tests/build_check.cjs", `const { readFileSync } = require('node:fs');\nreadFileSync(${JSON.stringify(source)}, 'utf8');\nconsole.log('build ok');\n`);
   write(project, "tests/run_tests.cjs", "const { spawnSync } = require('node:child_process');\nconst result = spawnSync(process.execPath, ['tests/observe_uc.cjs'], { encoding: 'utf8', env: { ...process.env, AIDLC_PHASE: 'GREEN' } });\nprocess.stdout.write(result.stdout.split(/\\r?\\n/).filter((line) => !line.startsWith('{')).join('\\n'));\nprocess.exit(result.status ?? 1);\n");
   write(project, "tests/lint_check.cjs", `const { readFileSync } = require('node:fs');\nif (/\\t/.test(readFileSync(${JSON.stringify(source)}, 'utf8'))) process.exit(1);\nconsole.log('lint ok');\n`);
@@ -436,6 +439,9 @@ function writeBuildAndTest(project: string, source: string, ids: string): void {
     { id: "unit-tests", role: "test", argv: ["node", "tests/run_tests.cjs"] },
     { id: "lint", role: "check", argv: ["node", "tests/lint_check.cjs"] },
   ]));
+}
+
+function writeBuildAndTestReports(project: string, ids: string): void {
   write(project, "docs/aidlc/construction/build-test-report.md", `# 构建与测试报告\n\nREQ-001 / ${ids}：构建、单元测试与 lint 均通过（0 failed）。\n`);
   write(project, "docs/aidlc/construction/build-and-test/build-and-test-summary.md", "# 构建与测试摘要\n\nREQ-001 的实现通过构建、测试和静态检查；存量行为由 BASELINE 证据锁定。\n");
 }
@@ -669,6 +675,7 @@ try {
     write(project, "tests/__init__.py", "\"\"\"Tests for the order export service.\"\"\"\n");
     write(project, "tests/test_exporter.py", pythonTests([UCD_PAGINATION]));
     write(project, "tests/observe_uc.cjs", observer([UCD_PAGINATION]));
+    prepareBuildAndTest(project, "app/exporter.py");
     write(project, ".aidlc/commands/tdd.json", allowlist("tdd", [{ id: "uc-baseline", role: "baseline", argv: OBSERVE }]));
     report("tdd");
     const red = readJson(project, `.aidlc/evidence/tdd/${M01}/default/red-test-evidence.json`);
@@ -689,6 +696,8 @@ try {
     const quality = readJson(project, `.aidlc/evidence/code-generation/${M01}/default/test-quality.json`);
     assert.equal(quality.red_seen, false);
     assert.equal(quality.baseline_seen, true);
+    const greenBeforeReview = readFileSync(join(project, `.aidlc/evidence/code-generation/${M01}/default/green-test-evidence.json`), "utf8");
+    const artifactReviewBefore = readFileSync(join(project, `${inception}/artifact-review.json`), "utf8");
 
     nextModule(`code-review@module:${M01}@unit:default`);
     write(project, `${construction}/code-review.md`, [
@@ -709,12 +718,14 @@ try {
     ].join("\n"));
     write(project, `${construction}/audit.md`, `# 审计 — 单元 default\n\n代码审查（REQ-001 / ${UCD_PAGINATION.id}）结论：passed。\n`);
     report("code-review");
+    assert.notEqual(readFileSync(join(project, `${inception}/artifact-review.json`), "utf8"), artifactReviewBefore, "artifact review binds the newly produced review reports");
+    assert.equal(readFileSync(join(project, `.aidlc/evidence/code-generation/${M01}/default/green-test-evidence.json`), "utf8"), greenBeforeReview, "review receipt refresh reuses the same controlled GREEN observation");
     assert.equal(ok(project, ["orchestrate", "next", ...moduleArgs]).json.kind, "done", "module workflow resolved");
 
     // Integration workflow: build-and-test, templates, implementation-report.
     ok(project, ["evidence", "run", "--stage", "code-generation", ...unitArgs, "--refresh"]);
     next(project, "build-and-test");
-    writeBuildAndTest(project, "app/exporter.py", UCD_PAGINATION.id);
+    writeBuildAndTestReports(project, UCD_PAGINATION.id);
     ok(project, ["evidence", "run", "--stage", "build-and-test", "--sensor", "test-quality"]);
     ok(project, ["evidence", "run", "--stage", "build-and-test"]);
     ok(project, ["orchestrate", "report", "--stage", "build-and-test", "--result", "completed"]);

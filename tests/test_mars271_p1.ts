@@ -9,6 +9,7 @@ import { fixtureEnvironment, saveFixtureState } from "./mars243_fixture_session"
 import { readSourceRevision } from "../core/tools/aidlc-revision";
 import { argvDigest, phaseObservationDigest } from "../core/tools/aidlc-evidence";
 import { readModuleManifest } from "../core/tools/aidlc-execution-context";
+import { observeMars271Phases } from "./mars271_phase_fixture";
 
 // MARS-271 P1/P2 engine efficiency: UC-D mapping-deferred admission, selective
 // evidence invalidation, approval tiering with a post-hoc audit ledger, and the
@@ -154,10 +155,6 @@ function makeDeferredI13(project: string, extraFrontmatter: string): void {
       mapping_deferred: [{ id: "UC-D-002", reason: "展示类用例，下一迭代补测试映射" }],
       index: "docs/aidlc/modules/project/inception/application-design/test-cases/_index.md",
     }), "utf8");
-    // RED covers exactly the non-deferred new UC-D.
-    writeFileSync(join(redPath, "red-test-evidence.json"), JSON.stringify(envelope(project, "red-test-evidence", {
-      phase: "RED", status: "failed", failure_class: "behavior", failure_signature: "expected behavior is absent", compile_status: "passed", environment_status: "passed", tests_total: 1, tests_failed: 1, traceability_complete: true, uc_mapping: [{ use_case: "UC-D-001", test_methods: ["behaviorTest"] }],
-    })), "utf8");
     mkdirSync(join(project, "src"), { recursive: true });
     writeFileSync(join(project, "src", "behavior.ts"), "export const behavior = 'REQ-1 UC-D-001 behavior';\n", "utf8");
     const plans = join(project, "docs", "aidlc", "modules", MODULE, "construction", "default", "plans");
@@ -166,11 +163,6 @@ function makeDeferredI13(project: string, extraFrontmatter: string): void {
     writeFileSync(join(project, "docs", "aidlc", "modules", MODULE, "construction", "default", "implementation-summary.md"), "# Summary\nREQ-1 UC-D-001 behavior is implemented and verified by the target test command.\n", "utf8");
     const evidenceRoot = join(project, ".aidlc", "evidence", "code-generation", MODULE, "default");
     mkdirSync(evidenceRoot, { recursive: true });
-    writeFileSync(join(evidenceRoot, "green-test-evidence.json"), JSON.stringify(envelope(project, "green-test-evidence", {
-      phase: "GREEN", status: "passed", compile_status: "passed", environment_status: "passed", tests_total: 1, tests_failed: 0, traceability_complete: true,
-      uc_mapping: [{ use_case: "UC-D-001", test_methods: ["behaviorTest"] }],
-      ...(withDebt ? { mapping_debt: [{ id: "UC-D-002", reason: "展示类用例，下一迭代补测试映射" }] } : {}),
-    })), "utf8");
     writeFileSync(join(evidenceRoot, "test-quality.json"), JSON.stringify(envelope(project, "test-quality", {
       status: "passed", red_seen: true, green_seen: true, tests_total: 1, tests_failed: 0, traceability_complete: true, uc_mapping: [{ use_case: "UC-D-001", test_methods: ["behaviorTest"] }], mapping_debt: [{ id: "UC-D-002", reason: "展示类用例，下一迭代补测试映射" }],
     })), "utf8");
@@ -189,9 +181,15 @@ function makeDeferredI13(project: string, extraFrontmatter: string): void {
     state.current_module = MODULE;
     state.current_unit = "default";
     saveFixtureState(project, state);
-    // The real producer writes the not_required BASELINE (no characterization UC-D declared).
-    const baseline = run(project, ["evidence", "run", "--stage", "tdd", "--module", MODULE, "--unit", "default", "--sensor", "baseline-test-evidence"]);
-    assert.equal(baseline.status, 0, `${baseline.stdout}\n${baseline.stderr}`);
+    const mappingDebt = [{ id: "UC-D-002", reason: "展示类用例，下一迭代补测试映射" }];
+    observeMars271Phases(project, run, mappingDebt);
+    const greenPath = join(evidenceRoot, "green-test-evidence.json");
+    const validGreen = JSON.parse(readFileSync(greenPath, "utf8"));
+    assert.deepEqual(validGreen.mapping_debt, mappingDebt);
+    if (!withDebt) {
+      delete validGreen.mapping_debt;
+      writeFileSync(greenPath, JSON.stringify(validGreen), "utf8");
+    }
     return project;
   };
 

@@ -1324,6 +1324,7 @@ Workflow:
   orchestrate split --from <workflow-id> --replace-lineage <id>[,<id>]  Split although git tracks another active workflow lineage (retires it)
   orchestrate state measurements [--module <module-id>] Read-only execution-profile release measurements
   orchestrate state verify                              Check git for other workflow lineages and state revision regressions (read-only)
+  orchestrate state summary [--module <id>] [--format json|markdown]  Read derived delivery summary without writing or re-running gates
   orchestrate state retire --lineage <id> --user-input Approve --reason <text>  Retire another workflow lineage found in git; the active one stays
   orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason <text>  Carry a module workflow of another lineage over into the active split layout
   orchestrate next --module <id> --work <description>   Create a module workflow added after the split with its own work description

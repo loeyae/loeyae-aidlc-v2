@@ -70,7 +70,9 @@ condition: has_unit_generation_needs
 - [ ] 生成 `docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-dependency.md`，包含带类型的依赖矩阵
 - [ ] 生成 `docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-story-map.md`，映射故事到单元
 - [ ] 在 `unit-manifest.json` 的每个单元写入 `conditional_stages`，只允许：`functional-design`、`nfr-requirements`、`nfr-design`、`infrastructure-design`、`shared-contract-baseline`、`ui-implementation-bridge`
+- [ ] 多单元项目在进入 TDD 前核对 `req_refs`、故事归属与 UC-D 单元范围；批准来源能够唯一定位单元时复用该归属，真实跨单元或有歧义的用例明确声明 `unit_refs`，不要让每个单元重复承接模块全集
 - [ ] 需要单元级定向 freshness 时，可按已批准的单元边界声明 `evidence_inputs: { version: 1, paths: [...], shared_paths: [...], depends_on_units: [...] }`：私有源码/测试路径须位于模块根内且互不重叠；真实共享输入和单元依赖须完整保留。不声明时保守绑定模块输入，不额外增加阶段或审批。
+- [ ] 并行开发前说明当前输入范围；未声明完整归属时可继续使用保守模块范围。仅在选择单元级定向 freshness 时，按实际边界补齐所有单元的输入归属，避免相邻单元反复失效。不得为提高复用率漏掉真实共享契约或传递依赖
 - [ ] 每个 `conditional_stages` 选择必须能追溯到当前单元的需求、故事、技术用例、允许修改范围、依赖矩阵或已批准执行计划；不得把另一个单元的事实复制为本单元选择
 - [ ] `nfr-requirements` 与 `nfr-design` 必须同时选择，且 NFR 或基础设施设计适用时必须同时选择 `functional-design`
 - [ ] **多单元且存在共享契约时**：在 `unit-of-work.md` 生成跨单元共享契约索引，并在 `shared-interfaces.md` 记录其完整设计；不适用时不得创建空表或空文件
@@ -238,12 +240,12 @@ condition: has_unit_generation_needs
 - 以阶段图 `approval` 和引擎 directive 为权威；本阶段为 `notify`，展示摘要后复用既有授权继续。用户显式要求审阅时等待回复；语义冲突先澄清，真正架构/部署强制审批仍按 `block` 执行。普通文档、计划和模板不得将 notify 升级为阻断。
 
 ## 步骤 10：记录策略与授权
-- 在 audit.md 中记录摘要、授权来源及实际审阅回复（如有）
+- 在现有单元规划中保留真实决策、授权例外与实际审阅回复（如有），不复制统计摘要
 - 使用 ISO 8601 时间戳格式
 - 记录实际展示的摘要或审阅提示，不虚构用户回复
 
 ## 步骤 11：更新进度
-- 在 handoff.md 中标记单元规划完成
+- 保存单元规划；阶段状态由 `orchestrate report` 维护
 - 更新"当前状态"部分
 - 准备过渡到单元生成
 
@@ -264,7 +266,7 @@ condition: has_unit_generation_needs
 
 ## 步骤 14：更新进度
 - [ ] 在工作单元计划中将已完成步骤标记为 [x]
-- [ ] 更新 `docs/aidlc/handoff.md` 当前状态
+- [ ] 保存当前真实单元产物，不另写进度副本
 - [ ] 保存所有生成的产物
 
 ## 步骤 15：继续或完成
@@ -314,9 +316,9 @@ condition: has_unit_generation_needs
 - [ ] 验证每个用户故事至少出现在一个单元切片中
 - [ ] 当共享契约索引非空时，验证 `shared-interfaces.md` 覆盖全部进程内共享声明，并仅索引跨进程机器契约
 
-**更新 handoff.md**：
-- [ ] 在 handoff.md 中记录"文档切片已完成"
-- [ ] 更新"单元认领状态"表（团队协作模式）
+**状态与分工**：
+- [ ] 切片完成以受控生成结果与 `document-slice-consistency` Evidence 为准
+- [ ] 团队分工使用现有 `unit select`，不手工复制认领状态
 
 ## 步骤 16：设计意图覆盖检查（I14 完成门禁）
 
@@ -346,19 +348,7 @@ condition: has_unit_generation_needs
    - 归入已有单元（扩展其完成证据和允许修改范围）
    - 新建独立单元承接（补充到 `unit-of-work.md` 和依赖矩阵）
 
-5. **生成覆盖检查报告**：输出到 `docs/aidlc/audit.md`，格式：
-
-```markdown
-## 设计意图覆盖检查报告
-
-检查时间：[ISO 8601 时间戳]
-检查结果：[全部覆盖 / 存在遗漏已修复]
-
-| 设计意图 | 来源文档与位置 | 覆盖单元 | 状态 |
-|----------|---------------|----------|------|
-| 删除 XxxController | components.md §X | BE-N | ✅ |
-| 收敛 YyyService → ZzzService | component-methods.md §Y | （无）→ 归入 BE-M | ✅（已修复） |
-```
+5. **核验覆盖证据**：由受控 `design-intent-coverage` producer 验证设计意图与实际单元归属，在现有 `unit-of-work.md` 中修复具体缺口。引用其 Evidence，不另写覆盖检查统计报告。
 
 **阻断规则**：
 - 所有 ❌ 项均已分配归属并更新产物后，本步骤通过
@@ -416,12 +406,12 @@ condition: has_unit_generation_needs
 - 如用户请求修改，更新单元并按有效策略继续
 
 ## 步骤 19：记录授权与实际回复
-- 在 `docs/aidlc/audit.md` 中记录复用的授权来源；如有实际回复则记录原文及时间戳
+- 在相关单元产物中保留实际审阅决定或授权例外；阶段状态与审计由引擎维护
 - 仅有实际回复时记录确切原文
 - 区分 notify 的既有授权、待显式审阅与 block 审批状态
 
 ## 步骤 20：更新进度
-- 在 `docs/aidlc/handoff.md` 中标记单元生成阶段完成
+- 使用 `orchestrate report` 记录单元生成结果并展示 `handoff_prompt`
 - 更新"当前状态"部分
 - 准备过渡到 CONSTRUCTION 阶段
 
@@ -459,7 +449,7 @@ condition: has_unit_generation_needs
   - 切片质量验证通过（无遗漏）
 - **团队协作模式额外要求**：
   - `unit-of-work.md` 包含认领状态表
-  - handoff.md 中的"单元认领状态"已填充
+  - 已通过现有 `unit select` 记录团队分工
   - 每个单元的可认领条件已明确标注
 - **多单元共享契约额外要求**：
   - 每项共享契约均有稳定 ID、唯一 Owner、明确消费者、权威来源和目标代码路径
@@ -467,7 +457,7 @@ condition: has_unit_generation_needs
   - 跨进程接口未把 Markdown 或进程内代码声明当作机器字段权威来源
 - **设计意图覆盖检查（存量改造项目）**：
   - I12 产物中所有 `[意图:*]` 标记条目均已被至少一个工作单元覆盖
-  - 覆盖检查报告已写入 `docs/aidlc/audit.md`
+  - 受控 `design-intent-coverage` Evidence 已验证实际设计意图归属
   - 无 `[意图:*]` 标记时已记录跳过原因
 - **结构不变式一致性（`structural-invariants` sensor，fail-closed）**：
   - 存在 `structural-invariants.json` 时，单元产物（`unit-of-work*.md` 中的 `[实体:X]` 标记与 ``sql` 块）不得影子化唯一真源、不得新建或写入已声明收敛/废弃/迁出的对象；启用 `persistence.mode: strict` 时每个新实体都必须被授权

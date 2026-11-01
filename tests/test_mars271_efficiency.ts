@@ -8,6 +8,7 @@ import { createInitialState, loadWorkflowState, type WorkflowState } from "../co
 import { fixtureEnvironment, saveFixtureState } from "./mars243_fixture_session";
 import { readSourceRevision } from "../core/tools/aidlc-revision";
 import { argvDigest, phaseObservationDigest } from "../core/tools/aidlc-evidence";
+import { observeMars271Phases } from "./mars271_phase_fixture";
 
 // MARS-271 engine efficiency: blocked taxonomy, unresolved-marker classification,
 // gate-front lint mode, incremental structural-invariants scan cache, and the
@@ -311,8 +312,6 @@ function parseLintReport(stdout: string): Record<string, unknown> {
   mkdirSync(i13Path, { recursive: true });
   mkdirSync(redPath, { recursive: true });
   writeFileSync(join(i13Path, "test-case-derivation.json"), JSON.stringify({ status: "required", ucd_total: 1, ready_ucd: 1, ucd_ids: ["UC-D-001"], index: "docs/aidlc/modules/project/inception/application-design/test-cases/_index.md" }), "utf8");
-  const redPayload = { phase: "RED", status: "failed", failure_class: "behavior", failure_signature: "expected behavior is absent", compile_status: "passed", environment_status: "passed", tests_total: 1, tests_failed: 1, traceability_complete: true, uc_mapping: [{ use_case: "UC-D-001", test_methods: ["behaviorTest"] }] };
-  writeFileSync(join(redPath, "red-test-evidence.json"), JSON.stringify(envelope(greenProject, "red-test-evidence", redPayload)), "utf8");
   mkdirSync(join(greenProject, "src"), { recursive: true });
   writeFileSync(join(greenProject, "src", "behavior.ts"), "export const behavior = 'REQ-1 UC-D-001 behavior';\n", "utf8");
   const plans = join(greenProject, "docs", "aidlc", "modules", MODULE, "construction", "default", "plans");
@@ -321,9 +320,6 @@ function parseLintReport(stdout: string): Record<string, unknown> {
   writeFileSync(join(greenProject, "docs", "aidlc", "modules", MODULE, "construction", "default", "implementation-summary.md"), "# Summary\nREQ-1 UC-D-001 behavior is implemented and verified by the target test command.\n", "utf8");
   const evidenceRoot = join(greenProject, ".aidlc", "evidence", "code-generation", MODULE, "default");
   mkdirSync(evidenceRoot, { recursive: true });
-  writeFileSync(join(evidenceRoot, "green-test-evidence.json"), JSON.stringify(envelope(greenProject, "green-test-evidence", {
-    phase: "GREEN", status: "passed", compile_status: "passed", environment_status: "passed", tests_total: 1, tests_failed: 0, traceability_complete: true, uc_mapping: [{ use_case: "UC-D-001", test_methods: ["behaviorTest"] }], test_filter: "UC-D-001",
-  })), "utf8");
   writeFileSync(join(evidenceRoot, "test-quality.json"), JSON.stringify(envelope(greenProject, "test-quality", {
     status: "passed", red_seen: true, green_seen: true, tests_total: 1, tests_failed: 0, traceability_complete: true, uc_mapping: [{ use_case: "UC-D-001", test_methods: ["behaviorTest"] }],
   })), "utf8");
@@ -342,9 +338,11 @@ function parseLintReport(stdout: string): Record<string, unknown> {
   greenState.current_module = MODULE;
   greenState.current_unit = "default";
   saveFixtureState(greenProject, greenState);
-  // The real producer writes the not_required BASELINE (no characterization UC-D declared).
-  const baseline = run(greenProject, ["evidence", "run", "--stage", "tdd", "--module", MODULE, "--unit", "default", "--sensor", "baseline-test-evidence"]);
-  assert.equal(baseline.status, 0, `${baseline.stdout}\n${baseline.stderr}`);
+  observeMars271Phases(greenProject, run);
+  const greenPath = join(evidenceRoot, "green-test-evidence.json");
+  const validGreen = JSON.parse(readFileSync(greenPath, "utf8"));
+  assert.equal(validGreen.test_filter, undefined);
+  writeFileSync(greenPath, JSON.stringify({ ...validGreen, test_filter: "UC-D-001" }), "utf8");
   const blocked = run(greenProject, ["orchestrate", "report", "--stage", "code-generation", "--result", "completed"]);
   assert.notEqual(blocked.status, 0, "GREEN evidence with a test_filter must be rejected");
   assert.match(`${blocked.stdout}\n${blocked.stderr}`, /test_filter is only allowed for RED|must be a full run/);

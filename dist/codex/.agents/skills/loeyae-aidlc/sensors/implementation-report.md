@@ -2,9 +2,8 @@
 id: implementation-report
 name: Implementation Report
 description: >
-  Verifies the final implementation report references all prior evidence,
-  confirms all gates passed, and provides a complete summary linking scope
-  to outcomes.
+  Verifies applicable delivery evidence and gates, and records a controlled
+  summary linking workflow scope to outcomes. No Markdown report is required.
 evidence_path: .aidlc/evidence/<stage-slug>/implementation-report.json
 ---
 
@@ -12,9 +11,10 @@ evidence_path: .aidlc/evidence/<stage-slug>/implementation-report.json
 
 ## Purpose
 
-The capstone gate for Construction phase. Proves that the implementation
-report is backed by real evidence from prior stages, all gates are confirmed
-green, and the summary is complete.
+The capstone gate for Construction. The controlled producer verifies the
+applicable evidence chain and records the delivery result in JSON. It does
+not require a unit summary or a final Markdown report. A read-only
+`orchestrate state summary` view is for display and cannot satisfy this gate.
 
 ## Evidence Schema
 
@@ -29,8 +29,8 @@ green, and the summary is complete.
   "stages_completed": 12,
   "evidence_references": [
     ".aidlc/evidence/build-and-test/build-test-evidence.json",
-    ".aidlc/evidence/code-review/review-evidence.json",
-    ".aidlc/evidence/tdd/test-quality.json"
+    ".aidlc/evidence/code-review/orders/u1/review-evidence.json",
+    ".aidlc/evidence/code-generation/orders/u1/test-quality.json"
   ]
 }
 ```
@@ -49,10 +49,14 @@ green, and the summary is complete.
 
 ## Producer Responsibility
 
-The agent MUST:
-1. Collect all `.aidlc/evidence/` files produced during Construction
-2. Verify each referenced file exists (engine validates this independently)
-3. Confirm that the workflow state shows all gates passed (no sensor failures)
-4. Record the scope and completion count from the workflow state
-5. Write a human-readable summary in the implementation report document
-6. Only produce this evidence when the full chain is green
+The controlled producer derives scope, completion counts and applicable
+evidence references from the workflow. It validates provenance and required
+gates before publishing the result; existing files or an agent-written
+summary cannot prove success. Module, PRD, UI, deletion and Provider checks
+retain their existing applicability rules.
+
+The agent resolves concrete diagnostics and submits the stage through
+`orchestrate report`; it must not handwrite evidence or duplicate machine
+counts in Markdown. Human reports are only required by an explicit delivery
+request or a specific risk explanation. An explicitly requested summary
+export may be saved under `.aidlc/views/` as a rebuildable display artifact.

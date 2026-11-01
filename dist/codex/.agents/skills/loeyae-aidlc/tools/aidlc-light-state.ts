@@ -916,8 +916,40 @@ function maintenanceWrite(path: string): boolean {
   return true;
 }
 
+export interface MaintenanceRecoveryProjection {
+  module_id: string;
+  checkpoint_commit: string;
+  checkpoint_digest: string;
+  state: WorkflowState;
+}
+export type MaintenanceRecoveryReader = (bytes: Buffer) => MaintenanceRecoveryProjection;
+
+/** A damaged revision is recoverable only when the rest of the state, including
+ * every claim row, is unambiguous. This projection is never persisted or used to
+ * authorize a session; it exists solely for quiescence and identity checks. */
+export function parseMaintenanceRecoveryState(bytes: Buffer, checkpoint: WorkflowState): WorkflowState {
+  const text = bytes.toString("utf8").replace(/\r\n/g, "\n");
+  if (!Buffer.from(bytes.toString("utf8")).equals(bytes) || /^(?:<<<<<<<|=======|>>>>>>>)/m.test(text)) throw new Error("damaged state has ambiguous encoding or merge markers; restore the claim table before maintenance");
+  for (const label of ["Revision", "Workflow ID", "Workflow Kind", "Module", "Parent Workflow ID"]) {
+    if ([...text.matchAll(new RegExp(`^- ${label}:.*$`, "gm"))].length !== 1) throw new Error(`damaged state has ambiguous ${label}; cannot prove quiescence`);
+  }
+  const revision = scalar(text, "Revision");
+  if (Number.isInteger(Number(revision)) && Number(revision) >= 0) throw new Error("unsupported damaged state; only an invalid Revision with an intact claim table can be recovered automatically");
+  const claimHeadings = [...text.matchAll(/^## Active Instances.*$/gm)];
+  if (claimHeadings.length !== 1 || claimHeadings[0][0] !== "## Active Instances") throw new Error("damaged state has no unique Active Instances table; cannot prove quiescence");
+  const rows = section(text, "Active Instances").split("\n");
+  const cells = (row: string) => row.split("|").slice(1, -1).map(value => value.trim());
+  const header = ["Stage Instance", "Module", "Owner", "Branch", "Worktree", "Claimed At", "Heartbeat At", "Expires At", "Session", "Generation", "Handoff"];
+  const width = cells(rows[0] || "").length;
+  if (![8, 11].includes(width) || JSON.stringify(cells(rows[0])) !== JSON.stringify(header.slice(0, width)) || rows.length < 3 || rows.some(row => !row.startsWith("|") || !row.endsWith("|") || cells(row).length !== width) || cells(rows[1]).some(cell => !/^:?-{3,}:?$/.test(cell)) || rows.slice(2).some(row => row.includes("---"))) throw new Error("damaged state has an ambiguous Active Instances table; cannot prove quiescence");
+  const state = parseLightWorkflowState(text.replace(/^- Revision:.*$/m, `- Revision: ${checkpoint.revision}`));
+  if (state.workflow_id !== checkpoint.workflow_id || state.workflow_kind !== "module" || state.module_id !== checkpoint.module_id || state.parent_workflow_id !== checkpoint.parent_workflow_id) throw new Error("damaged state identity does not match the verified ledger checkpoint");
+  if (Object.keys(state.active_instances).length) throw new Error("damaged state still has active claims; restore Revision and release exact claims before maintenance");
+  return state;
+}
+
 /** Read-only CAS projection; a token is a snapshot, never ownership. */
-export function workflowMaintenancePlan(projectRoot: string, targetModule?: string) {
+export function workflowMaintenancePlan(projectRoot: string, targetModule?: string, recoveryReader?: MaintenanceRecoveryReader) {
   projectRoot = realpathSync(projectRoot);
   if (targetModule && !/^[a-z0-9][a-z0-9-]*$/.test(targetModule)) throw new Error("invalid maintenance module");
   const refs: WorkflowRef[] = [GLOBAL_WORKFLOW, { kind: "integration" }];
@@ -933,24 +965,39 @@ export function workflowMaintenancePlan(projectRoot: string, targetModule?: stri
   for (const module_id of [...modules].sort()) refs.push({ kind: "module", module_id });
   const paths = refs.flatMap(ref => [lightStatePath(projectRoot, ref), lightAuditPath(projectRoot, ref)]);
   paths.push(join(projectRoot, "aidlc/active/registry.md"));
+  const contents = new Map<string, Buffer | undefined>();
   const files = paths.sort().map(path => {
     if (existsSync(path) && (!lstatSync(path).isFile() || lstatSync(path).isSymbolicLink())) throw new Error(`maintenance requires regular files: ${path}`);
-    return { path: relative(projectRoot, path).replace(/\\/g, "/"), sha256: existsSync(path) ? createHash("sha256").update(readFileSync(path)).digest("hex") : null };
+    const bytes = existsSync(path) ? readFileSync(path) : undefined;
+    contents.set(path, bytes);
+    return { path: relative(projectRoot, path).replace(/\\/g, "/"), sha256: bytes ? createHash("sha256").update(bytes).digest("hex") : null };
   });
+  let recovery: MaintenanceRecoveryProjection | undefined;
   const claims = refs.flatMap(ref => {
-    const state = loadWorkflowState(projectRoot, ref);
+    const bytes = contents.get(lightStatePath(projectRoot, ref));
+    let state: WorkflowState | undefined;
+    if (bytes) {
+      try { state = parseLightWorkflowState(bytes.toString("utf8").replace(/\r\n/g, "\n")); }
+      catch (error) {
+        if (!targetModule || ref.kind !== "module" || ref.module_id !== targetModule || !recoveryReader) throw error;
+        recovery = recoveryReader(bytes);
+        if (recovery.module_id !== targetModule || recovery.state.module_id !== targetModule || Object.keys(recovery.state.active_instances).length) throw new Error("invalid damaged-state maintenance projection");
+        state = recovery.state;
+      }
+    }
     return Object.values(state?.active_instances || {}).map(claim => ({ workflow_id: state!.workflow_id, instance: claim.stage_instance, owner: claim.owner, session_id: claim.session_id || "legacy" }));
   });
-  return { token: createHash("sha256").update(JSON.stringify(files)).digest("hex"), files, claims, refs };
+  const proof = recovery ? { files, target_module: targetModule, checkpoint_commit: recovery.checkpoint_commit, checkpoint_digest: recovery.checkpoint_digest } : files;
+  return { token: createHash("sha256").update(JSON.stringify(proof)).digest("hex"), files, claims, refs, recovery };
 }
 
 /** All family state locks and registry lock remain held across async validation.
  * Ordinary bind/publication writers use the same locks; no session can waive CAS.
  */
-export async function withQuiescentWorkflowMaintenance<T extends { kind: string }>(projectRoot: string, token: string, targetModule: string | undefined, approved: boolean, publish: () => Promise<T>): Promise<T> {
+export async function withQuiescentWorkflowMaintenance<T extends { kind: string }>(projectRoot: string, token: string, targetModule: string | undefined, approved: boolean, publish: (plan: ReturnType<typeof workflowMaintenancePlan>) => Promise<T>, recoveryReader?: MaintenanceRecoveryReader): Promise<T> {
   projectRoot = realpathSync(projectRoot);
   if (sessionBinding()) throw new Error("maintenance requires a separate unbound handoff; release claims and clear the session binding");
-  const before = workflowMaintenancePlan(projectRoot, targetModule);
+  const before = workflowMaintenancePlan(projectRoot, targetModule, recoveryReader);
   if (before.token !== token) throw new Error("maintenance snapshot changed; reread state maintenance-plan before retrying");
   const registry = join(projectRoot, "aidlc/active/registry.md");
   const lockPaths = [...before.refs.map(ref => lightStatePath(projectRoot, ref)).sort(), registry];
@@ -974,12 +1021,12 @@ export async function withQuiescentWorkflowMaintenance<T extends { kind: string 
       if (realpathSync(dirname(path)) !== dirname(path)) throw new Error("maintenance cannot follow symlinked state directories");
       locks.push({ path, fd: acquireLock(`${path}.lock`) });
     }
-    const locked = workflowMaintenancePlan(projectRoot, targetModule);
+    const locked = workflowMaintenancePlan(projectRoot, targetModule, recoveryReader);
     if (locked.token !== before.token) throw new Error("maintenance snapshot changed while acquiring locks; reread before retrying");
     if (locked.claims.length) throw new Error(`maintenance requires quiescent workflows; release exact claims first: ${locked.claims.map(claim => claim.instance).join(", ")}`);
     for (const file of locked.files) backups.set(join(projectRoot, file.path), file.sha256 === null ? undefined : readFileSync(join(projectRoot, file.path)));
     return await maintenanceContext.run(context, async () => {
-      try { const result = await publish(); if (result.kind === "error") restore(); return result; }
+      try { const result = await publish(locked); if (result.kind === "error") restore(); return result; }
       catch (error) { restore(); throw error; }
     });
   } finally {

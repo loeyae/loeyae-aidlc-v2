@@ -298,16 +298,17 @@ async function main(): Promise<void> {
     assert.match(audit, /- Event: BASELINE_ADOPTED[\s\S]*- TDD Started At: not started/);
     assert.match(audit, new RegExp(`- Ignored Exemption Instances: ${[TDD("u0"), GREEN("u0"), BASE("u0"), RED("u0")].map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(", ")}`));
 
-    // ---- u0's not_required evidence stays valid after adoption (it binds no baseline); the app/ commit is ordinary revision drift of a completed stage.
-    assert.equal(gate(f.project, TDD("u0"), "red-test-evidence", [...MOD, "--drift"]), "", "u0 RED not_required passes its gate re-check");
-    assert.equal(gate(f.project, TDD("u0"), "baseline-test-evidence", [...MOD, "--drift"]), "", "u0 BASELINE not_required passes its gate re-check");
-    assert.equal(gate(f.project, CODEGEN("u0"), "green-test-evidence", [...MOD, "--drift"]), "", "u0 GREEN not_required passes its gate re-check");
+    // Historical observations retain their original provenance; current GREEN must
+    // re-observe actual implementation/baseline changes without explicit ownership.
+    assert.equal(gate(f.project, TDD("u0"), "red-test-evidence", [...MOD, "--historical-tdd"]), "", "u0 historical RED not_required passes its gate re-check");
+    assert.equal(gate(f.project, TDD("u0"), "baseline-test-evidence", [...MOD, "--historical-tdd"]), "", "u0 historical BASELINE not_required passes its gate re-check");
+    assert.match(gate(f.project, CODEGEN("u0"), "green-test-evidence", [...MOD, "--drift"]), /alternative observation inputs\/environment\/declaration changed/, "current GREEN does not ignore actual implementation/adoption drift");
 
     // ---- u1's BASELINE passes against the adoption baseline. The app/ commit drifted the
     // module scope of u0's completed tdd (independent of adoption): refresh it as next asks.
     ok(f.project, ["evidence", "run", ...TCD, "--refresh"]);
-    ok(f.project, ["evidence", "run", "--stage", "tdd", ...UNIT("u0"), "--refresh"]);
     ok(f.project, ["evidence", "run", "--stage", "code-generation", ...UNIT("u0"), "--refresh"]);
+    assert.equal(gate(f.project, CODEGEN("u0"), "green-test-evidence", MOD), "", "one actual alternative re-observation restores current GREEN");
     assert.equal(readJson(f.project, BASE("u0")).status, "not_required", "u0 BASELINE stays not_required after the refresh");
     const i13 = readJson(f.project, I13);
     const blob = git(f.app, ["rev-parse", `${appAdopted}:exporter.py`]);
@@ -321,7 +322,7 @@ async function main(): Promise<void> {
     assert.equal(baseline.baseline_kind, "adoption");
     assert.deepEqual(baseline.baseline_repos, { app: appAdopted });
     assert.equal(gate(f.project, TDD("u1"), "baseline-test-evidence", MOD), "", "u1 BASELINE passes against the adoption baseline");
-    assert.equal(gate(f.project, TDD("u0"), "baseline-test-evidence", [...MOD, "--drift"]), "", "u0 BASELINE not_required still passes");
+    assert.equal(gate(f.project, TDD("u0"), "baseline-test-evidence", [...MOD, "--historical-tdd"]), "", "u0 historical BASELINE not_required still passes");
 
     // ---- Negative: once u1 holds BASELINE passed, adoption is refused again.
     const reset = loadWorkflowState(f.project, moduleRef)!;
@@ -338,7 +339,8 @@ async function main(): Promise<void> {
     failed.push("adoption exemption");
     console.log(`  FAIL adoption exemption\n${error instanceof Error ? error.stack || error.message : String(error)}`);
   } finally {
-    rmSync(scratch, { recursive: true, force: true });
+    if (!process.env.AIDLC_KEEP_FIXTURE) rmSync(scratch, { recursive: true, force: true });
+    else console.log(`retained fixture: ${scratch}`);
   }
   if (failed.length > 0) {
     console.log(`FAILED: ${failed.join(", ")}`);

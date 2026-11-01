@@ -26,7 +26,7 @@ import { createHash } from "crypto";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join, relative } from "path";
 import { runSync } from "./aidlc-spawn";
-import { contractTableRowsForModule } from "./aidlc-contract-table";
+import { contractTableCells, contractTableRowsForModule } from "./aidlc-contract-table";
 import { readModuleManifest } from "./aidlc-execution-context";
 import { lightAuditPath, lightStatePath, parseLightWorkflowState, type WorkflowState } from "./aidlc-light-state";
 
@@ -53,6 +53,29 @@ export interface ModuleContractSnapshot {
   manifest_entry_sha256: string;
   documents: ContractDocumentView[];
   digest: string;
+}
+
+/** Compatibility projection for existing checkpoints: retain their raw digest and
+ * audit it, but do not treat whitespace at table-cell boundaries as a new contract.
+ * Order, headers, inner whitespace, references and role assignments stay exact. */
+export const CONTRACT_EQUIVALENCE_VERSION = "table-cell-whitespace-v1";
+export function equivalentModuleContracts(left: ModuleContractSnapshot, right: ModuleContractSnapshot): boolean {
+  const project = (snapshot: ModuleContractSnapshot): unknown => {
+    if (!snapshot || typeof snapshot.manifest_entry_sha256 !== "string" || !Array.isArray(snapshot.documents)) throw new Error("invalid contract snapshot");
+    const strings = (values: unknown): string[] => {
+      if (!Array.isArray(values) || values.some(value => typeof value !== "string")) throw new Error("invalid contract projection");
+      return values;
+    };
+    return { version: CONTRACT_EQUIVALENCE_VERSION, manifest: snapshot.manifest_entry_sha256, documents: snapshot.documents.map(document => {
+      if (!document || typeof document.path !== "string") throw new Error("invalid contract document");
+      return { path: document.path, rows: strings(document.rows).map(row => {
+        if (!row.trim().startsWith("|") || !row.trim().endsWith("|")) throw new Error("invalid contract row");
+        return contractTableCells(row);
+      }), references: strings(document.references), providers: strings(document.providers), consumers: strings(document.consumers) };
+    }) };
+  };
+  try { return canonical(project(left)) === canonical(project(right)); }
+  catch { return false; }
 }
 
 export interface ModuleCheckpoint {

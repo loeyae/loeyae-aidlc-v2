@@ -153,6 +153,16 @@ try {
   write("tests/__init__.py", "\"\"\"Tests for the order export service.\"\"\"\n");
   write("tests/test_exporter.py", "# REQ-001 UC-D-001\nfrom app.exporter import export_orders\n\n\nclass FlakyClient:\n    def __init__(self):\n        self.calls = 0\n\n    def fetch_orders(self):\n        self.calls += 1\n        if self.calls == 1:\n            raise TimeoutError(\"upstream timeout\")\n        return [\"order-1\"]\n\n\ndef test_export_retries_on_timeout():\n    assert export_orders(FlakyClient()) == [\"order-1\"]\n");
   write("tests/observe_uc.cjs", OBSERVER);
+  // Establish executable validation inputs before the first phase observation.
+  // Adding these scripts after GREEN would correctly invalidate its source scope.
+  write("tests/build_check.cjs", "const { readFileSync } = require('node:fs');\nfor (const file of ['app/__init__.py', 'app/exporter.py']) readFileSync(file, 'utf8');\nconsole.log('build ok');\n");
+  write("tests/run_tests.cjs", "const { spawnSync } = require('node:child_process');\nconst result = spawnSync(process.execPath, ['tests/observe_uc.cjs'], { encoding: 'utf8', env: { ...process.env, AIDLC_PHASE: 'GREEN' } });\nprocess.stdout.write(result.stdout.split(/\\r?\\n/).filter((line) => !line.startsWith('{')).join('\\n'));\nprocess.exit(result.status ?? 1);\n");
+  write("tests/lint_check.cjs", "const { readFileSync } = require('node:fs');\nif (/\\t/.test(readFileSync('app/exporter.py', 'utf8'))) process.exit(1);\nconsole.log('lint ok');\n");
+  write(".aidlc/commands/build-and-test.json", `${JSON.stringify({ version: "1", stage: "build-and-test", commands: [
+    { id: "build", role: "build", argv: ["node", "tests/build_check.cjs"] },
+    { id: "unit-tests", role: "test", argv: ["node", "tests/run_tests.cjs"] },
+    { id: "lint", role: "check", argv: ["node", "tests/lint_check.cjs"] },
+  ] }, null, 2)}\n`);
   write(".aidlc/commands/tdd.json", `${JSON.stringify({ version: "1", stage: "tdd", commands: [{ id: "uc-baseline", role: "baseline", argv: ["node", "tests/observe_uc.cjs"] }] }, null, 2)}\n`);
   ok(["orchestrate", "report", "--stage", "tdd", "--result", "completed"]);
   const baselineEvidence = JSON.parse(readFileSync(join(project, ".aidlc/evidence/tdd/project/default/baseline-test-evidence.json"), "utf8"));
@@ -168,7 +178,6 @@ try {
   write("web/src/export-button.js", "// REQ-001: the export button relies on the backend timeout retry.\nexport function exportLabel() {\n  return 'Export orders';\n}\n");
   const construction = "docs/aidlc/modules/project/construction/default";
   write(`${construction}/plans/code-generation-plan.md`, "# 代码生成计划\n\n- REQ-001 / UC-D-001：在 app/exporter.py 中为 export_orders 增加最多 3 次的超时重试。\n");
-  write(`${construction}/implementation-summary.md`, "# 实现摘要\n\nREQ-001 / UC-D-001 已在 app/exporter.py 实现：超时重试 3 次，tests/test_exporter.py 覆盖。\n");
   write(".aidlc/commands/code-generation.json", `${JSON.stringify({ version: "1", stage: "code-generation", commands: [{ id: "uc-green", role: "green", argv: ["node", "tests/observe_uc.cjs"] }] }, null, 2)}\n`);
   ok(["orchestrate", "report", "--stage", "code-generation", "--result", "completed"]);
   const matrix = JSON.parse(readFileSync(join(project, ".aidlc/evidence/code-generation/project/default/traceability-matrix.json"), "utf8"));
@@ -193,7 +202,6 @@ try {
     "",
   ].join("\n");
   write(`${construction}/code-review.md`, review);
-  write(`${construction}/audit.md`, "# 审计 — 单元 default\n\n代码审查（REQ-001 / UC-D-001）结论：passed，Spec 与 Standards 均通过，无需修复。\n");
   ok(["orchestrate", "report", "--stage", "code-review", "--result", "completed"]);
   const reviewEvidence = JSON.parse(readFileSync(join(project, ".aidlc/evidence/code-review/project/default/review-evidence.json"), "utf8"));
   assert.equal("reviewer_agent" in reviewEvidence, false);
@@ -209,43 +217,21 @@ try {
   assertZeroBytePackages();
   const reattest = ok(["orchestrate", "report", "--stage", "code-review", "--module", "project", "--unit", "default", "--result", "completed"]);
   assert.match(JSON.stringify(reattest), /reattest/i, JSON.stringify(reattest, null, 2));
-  write("tests/build_check.cjs", "const { readFileSync } = require('node:fs');\nfor (const file of ['app/__init__.py', 'app/exporter.py']) readFileSync(file, 'utf8');\nconsole.log('build ok');\n");
-  write("tests/run_tests.cjs", "const { spawnSync } = require('node:child_process');\nconst result = spawnSync(process.execPath, ['tests/observe_uc.cjs'], { encoding: 'utf8', env: { ...process.env, AIDLC_PHASE: 'GREEN' } });\nprocess.stdout.write(result.stdout.split(/\\r?\\n/).filter((line) => !line.startsWith('{')).join('\\n'));\nprocess.exit(result.status ?? 1);\n");
-  write("tests/lint_check.cjs", "const { readFileSync } = require('node:fs');\nif (/\\t/.test(readFileSync('app/exporter.py', 'utf8'))) process.exit(1);\nconsole.log('lint ok');\n");
-  write(".aidlc/commands/build-and-test.json", `${JSON.stringify({ version: "1", stage: "build-and-test", commands: [
-    { id: "build", role: "build", argv: ["node", "tests/build_check.cjs"] },
-    { id: "unit-tests", role: "test", argv: ["node", "tests/run_tests.cjs"] },
-    { id: "lint", role: "check", argv: ["node", "tests/lint_check.cjs"] },
-  ] }, null, 2)}\n`);
-  write("docs/aidlc/construction/build-test-report.md", "# 构建与测试报告\n\nREQ-001 / UC-D-001：构建、单元测试与 lint 均通过（1 passed, 0 failed）。\n");
-  write("docs/aidlc/construction/build-and-test/build-and-test-summary.md", "# 构建与测试摘要\n\nREQ-001 的超时重试实现通过构建、测试和静态检查。\n");
   ok(["evidence", "run", "--stage", "build-and-test", "--sensor", "test-quality"]);
   ok(["evidence", "run", "--stage", "build-and-test"]);
   ok(["orchestrate", "report", "--stage", "build-and-test", "--result", "completed"]);
 
-  // Implementation report: modules_verified agrees between checker and gate (D3).
+  // Completion derives from controlled evidence; no duplicate Markdown reports.
   next("implementation-report");
-  const evidenceRefs = listEvidence(join(project, ".aidlc", "evidence"))
-    .map((path) => path.slice(project.length + 1).replace(/\\/g, "/"))
-    .filter((path) => !path.startsWith(".aidlc/evidence/implementation-report/"))
-    .sort();
-  write("docs/aidlc/construction/implementation-report.md", [
-    "# 实施报告",
-    "",
-    "- scope: refactor",
-    "- stages_completed: 8",
-    "- all_gates_passed: true",
-    "",
-    "REQ-001 / UC-D-001 已完成：app/exporter.py 实现超时重试，RED→GREEN、审查、构建与测试证据如下。",
-    "",
-    "## 证据",
-    "",
-    ...evidenceRefs.map((path) => `- ${path}`),
-    "",
-  ].join("\n"));
   ok(["orchestrate", "report", "--stage", "implementation-report", "--result", "completed"]);
   const report = JSON.parse(readFileSync(join(project, ".aidlc/evidence/implementation-report/implementation-report.json"), "utf8"));
   assert.equal(report.modules_verified, 1);
+  assert.equal(report.all_gates_passed, true);
+  for (const path of [`${construction}/implementation-summary.md`, `${construction}/audit.md`,
+    "docs/aidlc/construction/build-test-report.md", "docs/aidlc/construction/build-and-test/build-and-test-summary.md",
+    "docs/aidlc/construction/implementation-report.md", "docs/aidlc/handoff.md"]) {
+    assert.equal(existsSync(join(project, path)), false, `derived report must not be required or created: ${path}`);
+  }
 
   const done = run(["orchestrate", "next"]);
   assert.equal(done.status, 0, done.out);

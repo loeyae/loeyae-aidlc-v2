@@ -17,10 +17,10 @@
 恢复工作时先运行：
 
 ```bash
-loeyae-aidlc orchestrate next
+loeyae-aidlc orchestrate next --preview
 ```
 
-再读取返回的 `handoff_prompt` 和 `aidlc/active/aidlc-state.md`。提示词帮助成员理解下一步，但不能替代命令、改变阶段或跳过质量门禁。
+再读取返回的 `handoff_prompt` 和当前布局的 state（per-module 布局读取 registry 与目标模块 state）。按下文完成精确 session 绑定后，再运行写入型 `next`。提示词帮助成员理解下一步，但不能替代命令、改变阶段或跳过质量门禁。
 
 ## 团队交接
 
@@ -62,3 +62,7 @@ Stop 只是只读回合边界。结束回合可以保留 running 阶段；不需
 3. 清除本次维护子进程的 `AIDLC_SESSION_BINDING`，使用返回的 `maintenance_token` 执行 `orchestrate state recover --module <id> --maintenance <token> --user-input Approve --reason "<真实原因>"`；adopt 另加 `--from <commit>`，rebuild 不带 module。批准与原因来自实际用户授权。
 
 引擎在所有 workflow 与 registry 的锁内重新核对摘要和静止状态。摘要过期或又有会话领取时拒绝，须重新读取，不自动重试覆盖。失败时回滚受管 state、audit 和 registry，保留用于恢复的备份。恢复与收养不恢复历史 claim；恢复修订号高于本地及检查点，阶段、历史及既有业务审批保留。恢复不授予缺失或过期证据通过资格；重新绑定后按普通门禁补验证，并显式 checkpoint 新状态。
+
+若目标模块仅 `Revision` 损坏，`maintenance-plan --module <id>` 可使用有效 ledger 检查点核验身份，并从完整、无歧义的领取表确认静止状态；返回的 `recovery.repair` 为 `invalid-revision-with-intact-claims`。维护摘要绑定损坏原文、检查点和其他工作流。身份或领取表不可解析、存在合并标记、仍有领取或检查点变化时拒绝恢复，不将读取失败视作无人领取。该受限恢复只用于 `state recover`。
+
+契约恢复比较允许表格单元格边缘空白差异，并在 audit 记录 `table-cell-whitespace-v1` 与恢复前后的原始契约摘要。字段内容、角色、版本、引用和 manifest 的真实变化仍须解决。拆分工作流时，已采用且验证通过的切片身份随模块 workflow 一起迁移；迁移失败整体回滚，不要求换人后重复采用或改写权威文档。

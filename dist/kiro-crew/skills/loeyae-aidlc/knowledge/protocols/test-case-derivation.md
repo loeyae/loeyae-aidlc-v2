@@ -69,7 +69,7 @@ code_refs:                              # 仅 characterization 必填，new 不�
   - {项目相对路径}[::{符号}]
 reason: {仅 characterization 必填：为什么给存量行为补回归保护}
 approval_ref: {仅 characterization 必填：批准依据}
-unit_refs: [{unit-id}, ...]              # 可选（4.8.0）：所属单元；同一模块要么全部声明，要么全部不声明
+unit_refs: [{unit-id}, ...]              # 所属单元；显式声明时覆盖所有活动 UC-D，未声明时按下文规则推导
 defect_ref: {bug ticket 或缺陷 REQ 标识}  # 可选（4.13.2/MARS-112）：仅 bugfix scope 的 new UC-D 需要，锚定复现缺陷的追溯身份
 blocked_kind: {business-unknown/technical-prerequisite}  # 仅 status: blocked 必填（MARS-271）
 prerequisites: [{被前置依赖阻塞的具体事项}]  # 仅 blocked_kind: technical-prerequisite 必填
@@ -110,6 +110,8 @@ mapping_deferred: {暂缓测试映射的原因}          # 可选（MARS-271）�
 - `_index.md` 只是索引，其中的 `status: ready` 不参与计数；只在 `_index.md` 中出现、没有自己用例文件的 UC-D 视为未 ready。
 - 同一 UC-D 在多个用例文件（或块）中声明会被拒绝。
 
+`ready`、`blocked` 和 `deprecated` 取自用例声明的状态字段，不从正文中的业务状态名称推断。`deprecated` 用例可保留原 ID 与历史说明，但不计入本轮活跃用例与覆盖映射；当前需求仍需由活跃用例覆盖。弃用必须有真实需求变更或替代依据，不得把未满足的用例改为 deprecated 来绕过门禁。
+
 ## blocked 用例分类学（MARS-271）
 
 `status: blocked` 的 UC-D 必须在 frontmatter 声明 `blocked_kind`，引擎在 I13 门禁拦截缺失或取值非法的 blocked 条目：
@@ -142,10 +144,12 @@ source_coverage:
 ---
 ```
 
-- **正向覆盖**：每个来源基线中的 source_id（`requirements.md` 的 REQ、用户故事、已批准 NFR/CR 等稳定来源）至少映射一个 UC-D；一个来源有多个独立失败模式时分别派生、同 key 聚合。
+- **正向覆盖**：每个当前批准来源定义中的 source_id（`requirements.md` 的 REQ、用户故事、已批准 NFR/CR 等稳定来源）至少映射一个活跃 UC-D；一个来源有多个独立失败模式时分别派生、同 key 聚合。先固定本轮来源清单；正文中的交叉引用、示例和历史背景编号不能自动变成新增需求。来源定义应处于可识别的标题、列表、表格定义列或行首声明位置；格式有歧义时明确来源定义，不靠虚构用例补齐全文提及的所有编号。
 - **反向悬空**：`source_coverage` 的 ucd_ids 必须是本模块实际存在的 UC-D；引用不存在的 source_id 或 UC-D 记 `DANGLING_REF@source_coverage`，机器拦截。
 - **存量兼容**：未声明 `source_coverage` 的存量 I13 不要求补声明，机器校验回退到 `source_ref` 存在性检查；新派生必须声明。
 - I13 传感器把聚合声明复制进证据的 `source_coverage` 字段；`source_ref` 存在性检查与 DANGLING_REF 保留。
+
+来源和用例已确认后，从各活跃用例的 `source_ref` 一次聚合更新索引。缺映射先核对来源归属和已有用例；只有真实行为或独立失败模式缺覆盖时才新增 UC-D。修复索引不能改变批准范围，也不能为了消除历史引用错误把范围外编号附加到当前用例。
 
 ### `ucd_sources` 双形态
 
@@ -237,8 +241,9 @@ unit_refs: [u1, u2]          # 跨单元：u1 和 u2 的 GREEN 都必须覆盖�
 
 - 可选字段，和 `tdd_mode` 一样只能写在 frontmatter；写在正文会被拒绝。
 - 取值必须是非空列表，不得重复，每个 unit-id 都必须是本模块 `unit-manifest.json` 中已有的 unit。
-- 同一模块内只要有一个 UC-D 写了 `unit_refs`，**全部** UC-D 都必须写，否则拒绝并列出缺失的 UC-D。
-- I13 证据在有声明时输出 `ucd_units: { "<UC-D>": ["<unit-id>", ...] }`；全部不写时不输出该字段，行为与 4.7.1 相同（每个 unit 都覆盖模块全集）。
+- 同一模块内只要有一个活动 UC-D 写了 `unit_refs`，**全部活动** UC-D 都必须写，否则拒绝并列出缺失的 UC-D。
+- I13 证据在有声明时输出 `ucd_units: { "<UC-D>": ["<unit-id>", ...] }`。新的多单元派生全部未声明时，仅在每个活动用例的所有 REQ 来源都能通过已批准 `unit-manifest.json` 的 `req_refs` 唯一归属同一单元时推导，并记录 `unit_scope_source: manifest_req_refs`；跨单元、非 REQ 来源或歧义需显式 `unit_refs`，在 I13 解决，不留到 RED/GREEN 后补模块全集。
+- 已发布且无 `ucd_units` 的旧证据保持原兼容含义，不在读取时静默改变单元范围。需要收敛时受控刷新 I13，再验证受影响的阶段证据；已采用推导的证据会按相同规则复核归属。
 - 模块收口时对账：build-and-test 的 test-quality 和 split 布局的集成屏障（`ucd-coverage:<module>`）要求每个 UC-D 都出现在其 `unit_refs` 中**每个** unit 的 GREEN `uc_mapping` 里，缺一项即失败。
 
 ### 不含 UC-D 的单元（`ucd_exemption`）
@@ -299,7 +304,7 @@ unit_refs: [u1, u2]          # 跨单元：u1 和 u2 的 GREEN 都必须覆盖�
 4. 自检覆盖性、锚点、来源一致性和技术可行性；自检按“P0 全量 + 其余抽样”执行（见“派生自检抽样策略”）。
 5. 无法执行的用例标记 `blocked`，记录约束、建议和需要的用户决策。
 6. 生成 `_index.md`，列出用例、来源、类型、服务、状态、证据位置和 `source_coverage` 聚合声明。
-7. 将用例 ID 映射到 RED、GREEN、代码审查和构建测试证据；无可执行业务行为时，将结构化豁免映射到确定性替代验证并直接记录到 handoff.md 与构建测试矩阵。
+7. 将用例 ID 映射到 RED、GREEN、代码审查和构建测试证据；无可执行业务行为时，将结构化豁免与真实确定性替代验证绑定到受控证据。交接引用现有证据，不另抄到 handoff.md 或逐用例对账 Markdown。
 
 ## 强制字段
 
@@ -326,7 +331,7 @@ unit_refs: [u1, u2]          # 跨单元：u1 和 u2 的 GREEN 都必须覆盖�
 
 ## 无行为观察复用
 
-删除交付沿用本协议的适用性、声明来源和单元范围：业务删除按声明 ID 解析真实 `test_case_files`（支持描述性文件名和聚合文件），新 I13 的 `ucd_sources` 记录文件级 digest 与文件内 UC-D ID 清单（MARS-273 双形态，旧逐条 file+SHA-256 形态继续有效），来源文件移动或内容漂移须刷新 I13 并重新验证。缺文件、重复 ID、跨模块来源和归属漂移均拒绝。未声明 `unit_refs` 时保留模块全集；删除归属可由单单元或唯一匹配的 manifest 需求证明，真实多单元歧义须明确归属。
+删除交付沿用本协议的适用性、声明来源和单元范围：业务删除按声明 ID 解析真实 `test_case_files`（支持描述性文件名和聚合文件），新 I13 的 `ucd_sources` 记录文件级 digest 与文件内 UC-D ID 清单（MARS-273 双形态，旧逐条 file+SHA-256 形态继续有效），来源文件移动或内容漂移须刷新 I13 并重新验证。缺文件、重复 ID、跨模块来源和归属漂移均拒绝。沿用已发布 `ucd_units` 的显式或推导单元子集，仅缺少该字段的旧证据保留模块全集兼容含义；删除归属可由单单元或唯一匹配的 manifest 需求证明，真实多单元歧义须明确归属。
 
 纯配置等可信无行为删除在 `source-deletions.json` 条目声明 `applicability: "not_applicable"` 并省略 `ucd_id`；只接受受控 I13 `not_applicable` 或空单元 UC-D 子集及已批准 `ucd_exemption`。仍需真实删除、基线 blob、授权 `req_refs` 和成功/有效复用的替代检查。业务删除省略该字段保持兼容；实际移除可执行业务行为仍走真实业务 RED/GREEN。
 

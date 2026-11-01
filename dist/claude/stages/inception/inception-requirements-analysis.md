@@ -133,7 +133,7 @@ dependency_review / field_review 的输入绑定审查定位。新增工作流�
 ## 步骤 4：评估当前需求
 
 分析用户提供的所有内容：
-- 意图声明或描述（已记录在 audit.md 中）
+- 用户意图声明与当前工作描述（读取权威 workflow 与已有需求来源）
 - 现有需求文档（如提及则搜索工作区）
 - 粘贴的内容或文件引用
 
@@ -284,7 +284,7 @@ dependency_review / field_review 的输入绑定审查定位。新增工作流�
 
 ## 步骤 12：更新状态跟踪
 
-更新 `docs/aidlc/handoff.md` 标记需求分析完成。
+使用 `orchestrate report` 提交需求分析结果，由引擎维护状态与审计，并展示 `handoff_prompt`。
 
 ## 步骤 13：记录并继续
 

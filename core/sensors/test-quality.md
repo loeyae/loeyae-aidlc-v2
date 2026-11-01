@@ -72,13 +72,13 @@ For a unit with no executable business behavior, the controlled evidence may ins
 - In a unit context whose module I13 declares `ucd_units`, RED / BASELINE requirements, the case list and the UC-D mapping use only the UC-Ds whose `unit_refs` name the unit.
 - A unit whose subset is empty returns `not_applicable` (reason and alternative validation from its `ucd_exemption`) only after its RED / BASELINE / GREEN are the controlled `ucd_exemption` `not_required` records; the gate accepts `not_applicable` only for such a unit or when I13 is `not_applicable`.
 - Without a unit context (build-and-test) the checker reconciles every module with `ucd_units`: each UC-D must be in the passed GREEN `uc_mapping` of every unit its `unit_refs` name; a gap fails with `module <id> UC-D coverage is incomplete: <UC-D> is not covered by the GREEN uc_mapping of unit <unit>`. The split integration barrier blocks with `ucd-coverage:<module>` on the same rule.
-- Without `ucd_units` the behaviour is that of 4.7.1.
+- New multi-unit I13 derivations may infer `ucd_units` from complete, unique approved requirement ownership (`unit_scope_source: manifest_req_refs`). Existing published evidence without `ucd_units` retains its legacy meaning until controlled I13 refresh.
 
 ## Producer Responsibility
 
 The agent MUST:
 1. Consume the I13 evidence before evaluating tests
 2. For executable behavior, judge each module by its I13 `ucd_modes`: `new` UC-Ds require the controlled RED evidence (`status: failed`, behavior failure) before GREEN; `characterization` UC-Ds require the controlled BASELINE evidence (`status: passed`, `tests_failed: 0`); a phase whose mode has no UC-D must be `not_required`
-3. Verify the GREEN evidence and actual test source mapping for every UC-D
+3. Verify controlled GREEN and the applicable historical RED/BASELINE evidence, then reuse their actual `uc_mapping` for every UC-D; duplicate UC-D comments in test source are unnecessary. Direct legacy semantic checks without controlled phase envelopes may index existing source annotations once per selected test file, but those checks do not become trusted gate evidence
 4. For `not_applicable`, verify the I13 reason and deterministic alternative validation
 5. Never fabricate the UC mapping or accept a text-only TDD claim

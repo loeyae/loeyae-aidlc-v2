@@ -30,6 +30,8 @@ triggers: 测试用例派生, UC-D, 测试场景, 验收测试设计, test case 
 
 加载发布包中的 [knowledge/protocols/test-case-derivation.md](../../knowledge/protocols/test-case-derivation.md)。
 
+固定本轮批准来源定义和单元范围后，复用已有用例与执行映射，一次聚合索引。正文交叉引用不增加需求，业务响应 `blocked` 不等于用例被阻塞；只有具体行为或独立失败模式缺覆盖时才新增用例。映射格式、来源归属或证据失效应修复对应问题，不持续扩充测试。多单元来源无法唯一归属时先解决 `unit_refs`，再进入 TDD。
+
 ## 输出
 
 返回新增或更新的 UC-D 文件路径、`_index.md`、来源与覆盖映射、覆盖缺口、冲突、未决项和结构自检结果；无可执行业务行为时返回并验证 `non-applicable.json`（含 `reason_code`、`approval_ref`、`alternative_validation`、`validation_command` 和 `source_refs`）。不得因快速模式或 scope 精简跳过 I13。

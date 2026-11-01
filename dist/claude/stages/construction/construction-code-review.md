@@ -12,7 +12,6 @@ consumes:
   - .aidlc/evidence/code-generation/{module-id}/{unit-id}/green-test-evidence.json
 produces:
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md
-  - docs/aidlc/modules/{module-id}/construction/{unit-id}/audit.md
   - .aidlc/evidence/code-review/{module-id}/{unit-id}/review-evidence.json
   - .aidlc/evidence/code-review/{module-id}/{unit-id}/test-quality.json
   - .aidlc/evidence/code-review/{module-id}/{unit-id}/ui-design-alignment.json
@@ -54,13 +53,13 @@ requires: [code-generation]
 | 独立双轴审查流程、Standards Axis 审查结果、规格合规检查、规格合规审查结果 | 执行审查的一方 |
 | 双轴审查模式说明 | 执行方使用其检查与报告要求；其中审查记录格式由编排方写入时使用 |
 | 最终全局审查清单（含用例点对账的检查与统计） | 执行审查的一方 |
-| 用例点对账的门禁放行、产物文件生成、Construction 完成判定 | 编排方 |
+| 用例点对账的门禁放行、受控证据发布、Construction 完成判定 | 编排方 |
 | 处理审查反馈、对账未通过处理 | 实现者执行修复与补测试，编排方决定复审、回退步骤与升级 |
 | 红旗信号、最终规则 | 双方共同适用 |
 
-`FINAL_GLOBAL` 模式下，执行方必须逐项执行“最终全局审查清单”并给出 UC-D 覆盖统计结论；是否放行、是否生成对账产物、是否判定 Construction 完成由编排方决定。
+`FINAL_GLOBAL` 模式下，执行方必须逐项执行“最终全局审查清单”并引用受控 UC-D 覆盖结果；是否放行及是否判定 Construction 完成由编排方决定。
 
-执行方只产出审查结论与证据，不写 `handoff.md` 或审计文件、不放行质量门禁、不判定单元或 Construction 完成。
+单元审查的唯一权威人工记录为 `docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md`，在同一文件保留 Spec、Standards、问题及复审结论，引用受控验证证据。执行方不手工更新 workflow state/audit，不放行质量门禁、不判定单元或 Construction 完成。
 
 ## 审查模式选择
 
@@ -86,7 +85,7 @@ requires: [code-generation]
 | 所有单元完成后 | 多单元、复杂/高风险，或跨组件/服务、契约、共享配置、数据所有权、安全边界时执行最终全局审查 |
 | 合并前 | 确保整体一致性 |
 
-**阻断语义**：上表"必须审查"中的三项均为硬性阻断——未完成审查或审查未通过时，后续步骤（C8 构建测试、Operations、合并）不得启动。不得以快速通道、时间紧迫或"已目测确认"为由跳过。编排方在进入 C8 前必须验证审计文件中审查记录存在且结论为通过（详见 `construction-build-and-test.md`"审查证据阻断"）。
+**阻断语义**：适用的审查未完成或未通过时，后续步骤（C8 构建测试、Operations、合并）不得启动。不得以快速通道、时间紧迫或"已目测确认"为由跳过。编排方在进入 C8 前验证单元 `code-review.md` 与受控审查证据；C7 触发时还须核验受控全局审查观察（详见 `construction-build-and-test.md`“审查证据阻断”）。
 
 ### 建议审查（可选但有价值）
 
@@ -320,7 +319,7 @@ requires: [code-generation]
 
 ## 双轴审查模式说明
 
-两个审查轴（Standards + Spec）**独立执行、独立报告**：
+两个审查轴（Standards + Spec）**分别检查、分别保留结论**，写入同一份 `code-review.md`：
 
 - 默认执行顺序为 Spec → Standards；两轴判断维度和结论互相独立，不因另一轴结果改变本轴结论。
 
@@ -328,7 +327,7 @@ requires: [code-generation]
 
 可审阅源：`assets/diagram-library.diagram.json`。两轴结论、合并顺序、问题闭环和放行条件仍以本节后续规则为准。
 
-**为什么两轴独立报告？**
+**为什么分别保留两轴结论？**
 - Standards 通过但 Spec 失败 → 需求未满足
 - Spec 通过但 Standards 失败 → 代码质量差
 - 合并排序可能掩盖某轴问题
@@ -383,7 +382,7 @@ requires: [code-generation]
 
 ## 最终全局审查
 
-仅在多单元、复杂/高风险，或跨组件/服务、契约、共享配置、数据所有权、安全边界任务中执行。简单快速通道的单单元任务由单元双轴检查和 C8 影响域验证覆盖，并在审计中记录 C7 跳过原因。
+仅在多单元、复杂/高风险，或跨组件/服务、契约、共享配置、数据所有权、安全边界任务中执行。简单快速通道的单单元任务由单元双轴检查和 C8 影响域验证覆盖，C7 适用性与跳过依据由引擎记录。
 
 触发后执行一次全局审查：
 
@@ -431,9 +430,9 @@ FINAL_GLOBAL 的机器记录遵循 `sensors/global-review-evidence.md`：逐项�
 - 测试失败：先核对批准需求、测试预期和实现；实现缺陷修实现，测试错误/批准行为变化可有据修测试；禁止降低正确断言伪造通过
 - 用例点 blocked：回 I13 待产品决策清单，不得绕过
 
-**对账产物**：生成 `docs/aidlc/modules/{module-id}/construction/{unit-id}/audit/test-case-reconciliation.md`，列出每个 UC-D 的覆盖状态（已覆盖/缺测试/测试失败/blocked），作为 Construction 完成证据。
+**对账记录**：单元 `code-review.md` 引用受控 `test-quality.json` 与 GREEN 映射，FINAL_GLOBAL 引用受控 `ucd_coverage`。只补充实际缺口、风险和裁决，不另写逐 UC-D 覆盖对账 Markdown 或抄写机器统计。
 
-**机器校验辅助**（推荐实施，降低纯纪律门禁风险）：
+**机器核验依据**：
 
 对账以当前单元 I13 的所选 UC-D 与受控 GREEN/BASELINE `uc_mapping`、真实执行状态为准；全局审查汇总选定单元的结果。可复用已存在的 suite/测试方法映射。仅扫描全仓测试标签的脚本不能证明测试被执行或通过，也不能作为缺覆盖时的放行依据。未受影响的存量测试和工具测试无需补标签。
 
@@ -497,7 +496,7 @@ FINAL_GLOBAL 的机器记录遵循 `sensors/global-review-evidence.md`：逐项�
 
 **源码根**：`consumes` 中的 `src/` 是源码根的规范占位，按 `module-manifest` 的 `paths` → `.aidlc/source-roots.json` → 默认 `src/` 解析（见 `construction-code-generation.md`“源码根解析”）。
 
-审查结果记录到单元审计文件 `docs/aidlc/modules/{module-id}/construction/{unit-id}/audit/{unit-id}.md`（每单元一份，包含 Spec Axis / Standards Axis / 修复与复审 / 验证证据索引四个章节）：
+审查结果只记录到 `docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md`，保留 Spec Axis、Standards Axis、问题/修复/复审及验证证据引用。不另建单元 `audit.md`、`audit/{unit-id}.md` 或覆盖对账副本。以下为内容示例，受控字段遵循末尾计数契约：
 
 ```markdown
 ## 代码审查 — 单元 X

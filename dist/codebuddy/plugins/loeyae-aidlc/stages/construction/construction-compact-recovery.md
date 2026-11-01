@@ -19,20 +19,20 @@ condition: context_compacted
 
 ## 状态源
 
-`aidlc/active/aidlc-state.md` 是阶段路由、当前 stage、完成、条件跳过和审批结果的唯一机器事实来源。先用编排器验证当前 workflow、领取代次和 revision，再读取 `docs/aidlc/handoff.md` 补充模块、批次、单元与协作上下文。两者冲突时阻断恢复，禁止由 handoff 反向覆盖机器状态。
+按 `common-session-handoff.md` 读取当前布局的 state/audit（per-module 布局还读取 registry 和目标模块状态），验证精确 workflow、领取代次和 revision。阶段路由与完成状态以引擎为准，交接使用返回的 `handoff_prompt`。旧 `docs/aidlc/handoff.md` 仅是可选上下文；缺失或过期不阻断恢复，也不能覆盖机器状态。
 
 ## 恢复步骤
 
-1. 读取 handoff.md，确认当前阶段、模块、批次、单元及活跃变更请求。
+1. 使用 `orchestrate next --preview` 定位当前 workflow、阶段与模块/单元；需要概览时读取 `orchestrate state summary`。
 2. 若当前阶段不是 Construction，返回 `common-session-continuity.md` 对应阶段路由。
 3. 重新加载当前单元的需求、故事、设计、共享接口和 Construction steering。
-4. 找到第一个状态不是 `complete` 的可执行单元。
-5. 对 `complete` 单元检查验证证据引用；证据缺失或产物不存在时标记 `blocked`，不得推断完成。
-6. 宣布恢复位置，从 `in_progress` 或首个 `pending` 单元继续。
+4. 复用有效的精确 session binding；需要转交时遵循会话契约，不从产物自行选择或重建阶段。
+5. 由当前 directive 的门禁核验所需产物与证据。存在真实缺口时按具体诊断处理，不手工修改 state，也不逐一重跑已完成单元的全部验证。
+6. 运行 `orchestrate next`，展示 `handoff_prompt` 并从引擎确定的恢复点继续；明确恢复暂停实例时追加 `--resume`。
 
 ## 平台适配
 
-Kiro、Claude Code 和 OpenCode 均执行同一恢复步骤。平台 Hook、Workflow 或启动指令只能触发读取 handoff.md，不得引入第二套状态文件或覆盖 handoff.md。
+Kiro、Claude Code 和 OpenCode 均执行同一恢复步骤。平台 Hook、Workflow 或启动指令只触发权威状态读取和引擎恢复，不引入第二套状态文件。
 
 ## 恢复输出
 
@@ -45,6 +45,6 @@ Kiro、Claude Code 和 OpenCode 均执行同一恢复步骤。平台 Hook、Work
 
 ## 无法确定恢复点
 
-- handoff.md 缺失：停止并询问用户是重建状态还是退出 AI-DLC。
-- handoff.md 与产物冲突：列出冲突，标记 blocked，等待用户确认；不得根据文件存在推断测试或审查已通过。
+- state/registry 无法读取或精确领取冲突：按会话契约及引擎诊断恢复，涉及显式转交或维护授权时遵循原要求。
+- 实际产物或证据缺失/失效：处理具体缺口，不得根据文件存在推断测试或审查已通过；派生摘要过期时重新读取，不升级成业务冲突。
 - 活跃变更请求存在：优先恢复 CR 路由，不直接继续代码生成。

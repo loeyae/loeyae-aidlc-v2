@@ -214,7 +214,7 @@
 
 ### 状态文件（State Files）
 跟踪工作流进度和状态的文件。
-- `handoff.md`：整体工作流状态
+- `aidlc-state.md`：引擎维护的工作流状态；`handoff_prompt` 与只读 `orchestrate state summary` 提供交接和概览，旧 `handoff.md` 仅作可选派生视图
 - `audit.md`：所有交互的完整审计记录
 
 ## 团队特有术语
@@ -281,7 +281,7 @@ Construction 阶段成员对 module/unit 的公开协作记录。选择包含成
 极简的项目时间线文件（~2KB），记录每个阶段转换和关键决策的一行摘要。每次恢复会话时必须加载，替代加载完整审计日志。
 
 ### 延迟加载（Lazy Loading）
-恢复会话时不预加载所有前序产出物，而是只加载 handoff.md 和 audit-summary.md，其余文件在 AI 判断需要时才主动读取。
+恢复会话时先读取当前布局的 state/audit 与 `handoff_prompt`，按 directive 加载所需 canonical 产物或受控切片；需要概览时读取 `orchestrate state summary`，不要求 handoff.md 或 audit-summary.md。
 
 ### 分层加载（Layered Loading）
 将 steering 文件和产出物分为多个加载层级（启动时/恢复时/进入阶段时/执行任务时），每个层级只在对应时机加载，避免一次性加载所有文件。

@@ -67,6 +67,10 @@ loeyae-aidlc orchestrate report \
 
 受控 Evidence 记录 source revision、执行结果和 sensor 输出。review evidence 必须覆盖实际改动路径；build/test evidence 必须来自真实命令。worktree merge plan 只提供人工合并建议，绝不自动 merge 或 push。
 
+单元审查的人工记录统一为 `code-review.md`；UC-D 覆盖、构建测试与最终实施核验使用受控 Evidence，不额外要求汇总 Markdown。`orchestrate state summary` 从现有状态与证据只读派生简短摘要，不执行 producer、推进阶段或替代门禁。默认直接展示；用户明确导出时可保存至 `.aidlc/views/`。完整人工报告仅按显式交付或风险说明需要编写，需求、设计、契约及复现说明仍按实际阶段要求维护。
+
+摘要命令支持 `orchestrate state summary [--module <id>] [--format json|markdown]`，默认输出 JSON；`--format markdown` 输出供人阅读的文本。命令本身不写文件。
+
 ## 文档图表格式
 
 阶段需要画图时（复杂结构、分支/循环、多方时序、状态迁移或层级关系明显优于文字/表格），按以下规则确定格式：

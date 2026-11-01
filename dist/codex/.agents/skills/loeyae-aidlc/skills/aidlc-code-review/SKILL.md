@@ -24,7 +24,7 @@ triggers: 代码审查, 代码评审, Code Review, code review, Spec 审查, Sta
 
 ## 输出
 
-返回状态（`DONE`、`NEEDS_CONTEXT` 或 `BLOCKED`）、独立保留结论的 Spec/Standards 审查报告、含定位与严重度的问题清单、修复建议、复审结果，以及证据不足或技术阻断项。`FINAL_GLOBAL` 模式还须给出最终全局审查清单逐项结论与 UC-D 覆盖统计。
+返回状态（`DONE`、`NEEDS_CONTEXT` 或 `BLOCKED`）、分别保留的 Spec/Standards 结论、含定位与严重度的问题清单、修复建议与复审结果，以及证据不足或技术阻断项。单元人工记录只维护 `code-review.md`，引用受控证据，不另写单元 audit 或逐 UC-D 对账副本。`FINAL_GLOBAL` 模式给出最终全局审查清单逐项结论并引用受控 `ucd_coverage`。
 
 ## 禁止事项
 

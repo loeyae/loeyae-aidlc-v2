@@ -1,5 +1,9 @@
 #!/usr/bin/env bun
-import { evidenceTimeError, reviewIssueErrors } from "./aidlc-evidence-policy";
+import { deliveryConsistencyPayloadErrors, evidenceTimeError, reviewIssueErrors } from "./aidlc-evidence-policy";
+import { historicalPhaseInputErrors } from "./aidlc-phase-inputs";
+import { alternativePhaseInputs } from "./aidlc-evidence";
+import { clearRepairGuidance, repairGuidance } from "./aidlc-repair-guidance";
+import { phaseExecutionRevision } from "./aidlc-workflow-layout";
 import { GLOBAL_REVIEW_ITEMS, globalChecklistErrors, globalReviewUcdSources, type GlobalCoverage } from "./aidlc-global-review";
 import { i13NonApplicable } from "./aidlc-i13-applicability";
 import { ucdDeclarations } from "./aidlc-ucd-declarations";
@@ -53,6 +57,9 @@ import { sourceDeletions, type VerifiedDeletion } from "./aidlc-source-deletions
 import { codeRefRepo, nestedHead, nestedMigrationCommand, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
 import { CONTRACT_CONSUMER_COLUMN, CONTRACT_ID_COLUMN, CONTRACT_PROVIDER_COLUMN, moduleForValue } from "./aidlc-contract-table";
 import { bestLedgerCheckpoint, checkpointModule, gitRepositoryAvailable, ledgerFetchCommand, ledgerPublishCommand, ledgerRef, moduleContractSnapshot, remoteLedgerRef } from "./aidlc-module-ledger";
+import { equivalentModuleContracts, CONTRACT_EQUIVALENCE_VERSION } from "./aidlc-module-ledger";
+import { parseMaintenanceRecoveryState, type MaintenanceRecoveryProjection, type MaintenanceRecoveryReader } from "./aidlc-light-state";
+import { withSliceWorkflowMigration } from "./aidlc-document-slices";
 import { COMMIT_ID_PATTERN, commitAncestryErrors, currentHead, readSourceRevision, withRevisionMemoization, type RepoRevision } from "./aidlc-revision";
 import { verifyProviderKnowledge } from "./aidlc-provider-knowledge.js";
 import {
@@ -145,6 +152,7 @@ import { buildRuleLoadPlan, type RuleLoadPlan } from "./aidlc-rule-load-plan";
 import { buildBusinessDocumentLoadPlan, buildCanonicalIsolationPlan, checkSlices, sliceAdoption, sliceEvidenceErrors, SLICE_SENSOR, type SliceContext, type BusinessDocumentLoadPlan } from "./aidlc-document-slices";
 import { buildEvidenceReusePlan, type EvidenceReusePlan } from "./aidlc-evidence-reuse-plan";
 import { buildExecutionProfileReleaseMeasurements, type ExecutionProfileReleaseMeasurements } from "./aidlc-execution-profile-measurements";
+import { projectDeliverySummary, renderDeliverySummaryMarkdown } from "./aidlc-delivery-summary";
 import {
   evidenceSourceRevision,
   evidenceScopeForInstance,
@@ -1132,7 +1140,7 @@ export function globalReviewRequired(state: WorkflowState): boolean {
 }
 
 /** Full global review is a content-bound observation, not an extra human approval. */
-export function globalReviewPayload(state: WorkflowState): Record<string, unknown> {
+export function globalReviewPayload(state: WorkflowState, alternativeEnvironment?: NodeJS.ProcessEnv): Record<string, unknown> {
   if (!globalReviewRequired(state)) return { status: "not_applicable", reason: "single unit without a recorded complex or cross-boundary risk" };
   const path = join(PROJECT_ROOT, "docs/aidlc/construction/global-code-review.md");
   const content = readFileSync(assertProjectPath(path), "utf8");
@@ -1142,7 +1150,7 @@ export function globalReviewPayload(state: WorkflowState): Record<string, unknow
   if (record.mode !== "FINAL_GLOBAL" || record.status !== "passed" || record.spec_axis !== "passed" || record.standards_axis !== "passed" || !asNonEmptyString(record.reviewer)) throw new Error("FINAL_GLOBAL requires passing Spec and Standards results and reviewer identity");
   const issueErrors = reviewIssueErrors(record);
   if (issueErrors.length) throw new Error(issueErrors.join("; "));
-  const plan = globalReviewInputPlan(state);
+  const plan = globalReviewInputPlan(state, alternativeEnvironment);
   const checklistErrors = globalChecklistErrors(record.checklist, plan.ucd_coverage, plan.inputs.map(input => input.path));
   if (checklistErrors.length) throw new Error(checklistErrors.join("; "));
   if (plan.ucd_coverage.status !== "passed") throw new Error(`FINAL_GLOBAL coverage blocked: ${plan.ucd_coverage.blocking.join("; ")}`);
@@ -1153,7 +1161,7 @@ export function globalReviewPayload(state: WorkflowState): Record<string, unknow
   return { ...record, report_sha256: createHash("sha256").update(content).digest("hex") };
 }
 
-export function globalReviewInputPlan(state: WorkflowState): { required: boolean; covered_instances: string[]; inputs: Array<{ path: string; sha256: string; kind?: "deletion" }>; checklist_items: readonly string[]; ucd_coverage: GlobalCoverage } {
+export function globalReviewInputPlan(state: WorkflowState, alternativeEnvironment?: NodeJS.ProcessEnv): { required: boolean; covered_instances: string[]; inputs: Array<{ path: string; sha256: string; kind?: "deletion" }>; checklist_items: readonly string[]; ucd_coverage: GlobalCoverage } {
   const empty: GlobalCoverage = { status: "passed", total: 0, covered: 0, design_covered: 0, units: [], blocking: [] };
   if (!globalReviewRequired(state)) return { required: false, covered_instances: [], inputs: [], checklist_items: [], ucd_coverage: empty };
   const units = globalReviewUnits(state);
@@ -1169,7 +1177,7 @@ export function globalReviewInputPlan(state: WorkflowState): { required: boolean
     if (inputs.size > 2000) throw new Error("FINAL_GLOBAL input inventory exceeds 2000 files; narrow declared shared contract paths");
   };
   const modules = existsSync(join(PROJECT_ROOT, "docs/aidlc/ideation/module-manifest.json")) ? readModuleManifest(PROJECT_ROOT) : [];
-  const coverage = globalReviewCoverage(state, units, inputs);
+  const coverage = globalReviewCoverage(state, units, inputs, alternativeEnvironment);
   for (const unit of units) {
     inputs.add(`${unitConstructionRoot(unit.module_id, unit.unit_id)}/code-review.md`);
     const instance = makeInstance(loadGraph().stages.find(stage => stage.slug === "code-review")!, "unit", unit);
@@ -1200,19 +1208,23 @@ export function globalReviewInputPlan(state: WorkflowState): { required: boolean
  * Completed GREEN may precede later unit commits; its normal phase/ancestry gates
  * still apply, and every actual input is additionally bound in the review snapshot.
  */
-function globalReviewCoverage(state: WorkflowState, units: Array<{module_id:string;unit_id:string}>, inputs: Set<string>): GlobalCoverage {
+function globalReviewCoverage(state: WorkflowState, units: Array<{module_id:string;unit_id:string}>, inputs: Set<string>, alternativeEnvironment?: NodeJS.ProcessEnv): GlobalCoverage {
   const result: GlobalCoverage = { status: "passed", total: 0, covered: 0, design_covered: 0, units: [], blocking: [] };
   const totals = new Set<string>(), covered = new Set<string>(), designed = new Set<string>();
   const missingTests = new Set<string>(), missingDesign = new Set<string>();
   const graph = loadGraph();
+  const workflows = loadWorkflowParts(PROJECT_ROOT);
   const bind = (path: string): string => { const absolute = assertProjectPath(join(PROJECT_ROOT, path)); const body = readFileSync(absolute, "utf8"); inputs.add(path); return body; };
   for (const unit of units) {
     try {
+      // Module observations keep their trusted owner identity during global review.
+      // Resolve it from persisted workflow parts, never from the evidence itself.
+      const ownerState = workflows.split ? mergeWorkflowView(workflows.parts, {kind:"module",module_id:unit.module_id}) : state;
       const i13Path = evidenceRelativePath("test-case-derivation", "test-case-derivation", "module", unit);
       const i13 = asRecord(JSON.parse(bind(i13Path)));
       if (!i13) throw new Error("I13 must be a controlled object");
       const i13Instance = makeInstance(graph.stages.find(stage => stage.slug === "test-case-derivation")!, "module", {module_id:unit.module_id});
-      const failure = validateEvidence(i13Instance.stage, "test-case-derivation", i13Instance, value => i13DerivationErrors(value, i13Instance, state), { tolerateRevisionDrift: true });
+      const failure = validateEvidence(i13Instance.stage, "test-case-derivation", i13Instance, value => i13DerivationErrors(value, i13Instance, ownerState), { tolerateRevisionDrift: true });
       if (failure) throw new Error(failure.message);
       const owned = i13.status === "required" ? unitUcdIds(i13, unit.unit_id).all : [];
       const deferred = i13MappingDeferredIds(i13).filter(id => owned.includes(id));
@@ -1233,7 +1245,7 @@ function globalReviewCoverage(state: WorkflowState, units: Array<{module_id:stri
       const green = asRecord(JSON.parse(bind(greenPath)));
       if (!green) throw new Error("GREEN observation is missing");
       const generation = makeInstance(graph.stages.find(stage => stage.slug === "code-generation")!, "unit", unit);
-      const greenFailure = validateEvidence(generation.stage, "green-test-evidence", generation, value => phaseEvidenceErrors(value, "green-test-evidence", "GREEN", {any:true,allNotApplicable:i13.status === "not_applicable"}, "code-generation", generation, state), {tolerateRevisionDrift:true});
+      const greenFailure = validateEvidence(generation.stage, "green-test-evidence", generation, value => phaseEvidenceErrors(value, "green-test-evidence", "GREEN", {any:true,allNotApplicable:i13.status === "not_applicable"}, "code-generation", generation, ownerState, false, false, alternativeEnvironment), {tolerateRevisionDrift:true});
       if (greenFailure) throw new Error(greenFailure.message);
       const mapped = new Set(greenCoveredUcds(green));
       for (const entry of Array.isArray(green.uc_mapping) ? green.uc_mapping : []) {
@@ -1265,9 +1277,9 @@ function globalReviewCoverage(state: WorkflowState, units: Array<{module_id:stri
   return result;
 }
 
-function globalReviewEvidenceErrors(evidence: Record<string, unknown>, state: WorkflowState): string[] {
+function globalReviewEvidenceErrors(evidence: Record<string, unknown>, state: WorkflowState, alternativeEnvironment?: NodeJS.ProcessEnv): string[] {
   try {
-    const current = globalReviewPayload(state);
+    const current = globalReviewPayload(state, alternativeEnvironment);
     return Object.keys(current).filter(key => JSON.stringify(evidence[key]) !== JSON.stringify(current[key])).map(key => `FINAL_GLOBAL ${key} changed`);
   } catch (error) { return [String(error)]; }
 }
@@ -1625,6 +1637,12 @@ interface SensorCheckOptions {
    * be the current HEAD or one of its ancestors (non-git projects: exact match).
    */
   tolerateRevisionDrift?: boolean;
+  /** Historical phase drift is allowed only with unchanged named tests and I13 inputs. */
+  requireHistoricalPhaseInputs?: boolean;
+  /** GREEN may ignore only named downstream report writes proven by its execution binding. */
+  allowDownstreamReportDrift?: boolean;
+  /** Restored caller environment supplied only by the controlled semantic entrypoint. */
+  alternativeValidationEnvironment?: NodeJS.ProcessEnv;
   /**
    * BASELINE evidence must have been produced in the current epoch of the baseline
    * chain (4.7.0). Set only when completing code-generation of the same unit.
@@ -1704,6 +1722,23 @@ function validateEvidence(
   const evidence = loaded.value as Evidence;
   const errors = required(evidence);
   errors.push(...evidenceFreshnessBindingErrors(stage.slug, evidence));
+  const sourceRevision = asRecord(evidence.source_revision);
+  const nestedCheck = sourceRevision ? nestedRevisionContext(sourceRevision, errors) : undefined;
+  if (sensor === "green-test-evidence" && options.allowDownstreamReportDrift && evidence.execution_input_binding) {
+    const recorded = asRecord(evidence.execution_input_binding);
+    try {
+      const current = phaseExecutionRevision(PROJECT_ROOT, instance.instance_id, nestedCheck?.keys ?? []);
+      if (recorded?.version === "1" && recorded.scope === current.scope && recorded.scope_digest === current.scope_digest) {
+        const i13 = moduleI13Evidence(instance);
+        if (i13 && "value" in i13) {
+          const command = phaseInputCommand(stage.slug, "GREEN", instance, evidence);
+          const bindingErrors = historicalPhaseInputErrors(PROJECT_ROOT, i13.value, evidence, instance.unit_id, command, false);
+          if (!bindingErrors.length) options = { ...options, tolerateRevisionDrift: true };
+          else errors.push(...bindingErrors);
+        }
+      }
+    } catch (error) { errors.push(`GREEN_EXECUTION_INPUT_BINDING_INVALID: ${error instanceof Error ? error.message : String(error)}`); }
+  }
 
   const producer = asRecord(evidence.producer);
   if (!producer) {
@@ -1714,7 +1749,6 @@ function validateEvidence(
     if (!asNonEmptyString(producer.execution_id)) errors.push("producer.execution_id is required");
   }
 
-  const sourceRevision = asRecord(evidence.source_revision);
   if (!sourceRevision) {
     errors.push("source_revision object is required");
   } else {
@@ -1726,7 +1760,6 @@ function validateEvidence(
     // 4.9.0: the algorithm follows the evidence's own structure. Evidence without
     // source_revision.repos is re-checked exactly as in 4.8.1 (nested repositories left
     // out); evidence with it is re-checked per repository.
-    const nestedCheck = nestedRevisionContext(sourceRevision, errors);
     const nestedKeys = nestedCheck?.keys;
     if (recordedScope === undefined || recordedScope === "worktree") {
       // Historical binding: the exact commit, dirty flag and whole-worktree digest.
@@ -1762,6 +1795,25 @@ function validateEvidence(
       }
       // Nested files inside the scope are covered by scope_digest; the repository commits stay in history.
       if (nestedCheck) errors.push(...nestedRevisionErrors(nestedCheck.recorded, readSourceRevision(PROJECT_ROOT, undefined, nestedKeys).repos || {}, { exact: false, ancestry: options.tolerateRevisionDrift === true }));
+    }
+    if (options.requireHistoricalPhaseInputs && evidence.evidence_mode !== "historical_replay") {
+      const scope = recordedScope === undefined || recordedScope === "worktree" ? undefined
+        : recordedScope === evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id).label ? evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id) : legacyEvidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
+      const current = readSourceRevision(PROJECT_ROOT, scope, nestedKeys);
+      const unchanged = scope ? sourceRevision.scope_digest === current.scope_digest
+        : sourceRevision.worktree_digest === current.worktree_digest && sourceRevision.commit === current.commit && sourceRevision.dirty === current.dirty;
+      // Legacy evidence remains valid under its original exact binding. Once that
+      // tree drifts, only selective inputs or the separately verified replay prove it.
+      if (!unchanged) {
+        const i13 = moduleI13Evidence(instance);
+        if (i13 && "value" in i13) {
+          try {
+            const command = phaseInputCommand(stage.slug, sensor === "red-test-evidence" ? "RED" : "BASELINE", instance, evidence);
+            errors.push(...historicalPhaseInputErrors(PROJECT_ROOT, i13.value, evidence, instance.unit_id, command));
+          } catch (error) { errors.push(`PHASE_INPUT_BINDING_INVALID: ${error instanceof Error ? error.message : String(error)}`); }
+        }
+        else errors.push("PHASE_INPUT_BINDING_INVALID: current I13 is unavailable");
+      }
     }
   }
 
@@ -2324,6 +2376,13 @@ function ucdExemptionEvidenceErrors(evidence: Evidence, phase: Phase, instance: 
   return errors;
 }
 
+function phaseInputCommand(stage: string, phase: Phase, instance: StageInstance, evidence: Evidence) {
+  if (evidence.observed_command) return allowlistedPhaseCommand(stage, phase);
+  if (evidence.exemption_validation_execution) return alternativePhaseInputs(stage, instance.module_id!, instance.unit_id, true);
+  if (evidence.alternative_validation_execution) return alternativePhaseInputs(stage, instance.module_id!, instance.unit_id);
+  return undefined;
+}
+
 function phaseEvidenceErrors(
   evidence: Evidence,
   sensor: string,
@@ -2333,8 +2392,21 @@ function phaseEvidenceErrors(
   instance: StageInstance,
   state: WorkflowState,
   requireCurrentBaselineEpoch = false,
+  historicalTdd = false,
+  alternativeEnvironment?: NodeJS.ProcessEnv,
 ): string[] {
+  // Global and integration gates can recheck a module phase. Its identity still
+  // belongs to the persisted module workflow, including alternative observations
+  // and historical replay; the caller's routing cursor is not its owner.
+  if (instance.module_id && !(state.workflow_kind === "module" && state.module_id === instance.module_id)) {
+    const workflows = loadWorkflowParts(PROJECT_ROOT);
+    if (workflows.split) state = mergeWorkflowView(workflows.parts, {kind:"module",module_id:instance.module_id});
+  }
   const errors: string[] = [];
+  const alternativeExecution = asRecord(evidence.exemption_validation_execution) || asRecord(evidence.alternative_validation_execution);
+  if (evidence.phase_input_binding !== undefined && alternativeExecution && !/^[a-f0-9]{64}$/.test(String(alternativeExecution.input_binding || ""))) {
+    errors.push("alternative phase evidence requires its original input binding; new evidence cannot downgrade to legacy provenance");
+  }
   // RED covers the tdd_mode new UC-Ds and BASELINE the characterization UC-Ds of I13
   if (evidence.evidence_mode === "historical_replay" && (phase !== "RED" || evidence.status !== "failed")) errors.push("historical_replay must be a failed required RED observation");
   if (evidence.evidence_mode !== undefined && !["original", "historical_replay"].includes(String(evidence.evidence_mode))) errors.push("unrecognized evidence mode; diagnostics are not controlled phase evidence");
@@ -2360,7 +2432,7 @@ function phaseEvidenceErrors(
     errors.push(...ucdExemptionEvidenceErrors(evidence, phase, instance, scope));
     if (asRecord(evidence.exemption_validation_execution)) errors.push(...exemptionCheckBindingErrors(asRecord(evidence.exemption_validation_execution)!, {
       ...state, current_stage: stageSlug, current_stage_instance: instance.instance_id, current_module: instance.module_id, current_unit: instance.unit_id,
-    }));
+    }, historicalTdd && phase !== "GREEN" && (evidence.phase_input_binding !== undefined || asRecord(evidence.exemption_validation_execution)!.input_binding !== undefined), alternativeEnvironment));
     return errors;
   }
   if (evidence.status === "not_required" && phase === "GREEN" && scoped) {
@@ -2400,7 +2472,7 @@ function phaseEvidenceErrors(
         errors.push(...alternativeCheckBindingErrors(execution, stageSlug, {
           ...state, current_stage: stageSlug, current_stage_instance: instance.instance_id,
           current_module: instance.module_id, current_unit: instance.unit_id,
-        }));
+        }, historicalTdd && phase !== "GREEN" && (evidence.phase_input_binding !== undefined || execution.input_binding !== undefined), alternativeEnvironment));
         if (asRecord(evidence.checker)?.argv_digest !== argvDigest(["I13-not-applicable", phase, current.argv_digest])) errors.push("alternative checker digest does not match its command binding");
       } catch (error) { errors.push(String(error)); }
     }
@@ -2500,6 +2572,25 @@ function phaseEvidenceErrors(
  *
  * Returns list of failed sensor results.
  */
+export function checkPhaseSensors(instance: StageInstance, state: WorkflowState, options: SensorCheckOptions = {}): SensorResult[] {
+  const phases: Record<string, Phase> = { "red-test-evidence": "RED", "baseline-test-evidence": "BASELINE", "green-test-evidence": "GREEN" };
+  return (instance.stage.sensors || []).filter(sensor => phases[sensor] && (!options.onlySensors || options.onlySensors.includes(sensor))).flatMap(sensor => {
+    const failure = validateEvidence(instance.stage, sensor, instance, evidence => phaseEvidenceErrors(evidence, sensor, phases[sensor], i13Applicability(instance), instance.stage.slug, instance, state, options.requireCurrentBaselineEpoch === true, options.requireHistoricalPhaseInputs === true, options.alternativeValidationEnvironment), options);
+    return failure ? [failure] : [];
+  });
+}
+
+export async function checkHistoricalTddSensors(instance: StageInstance, state: WorkflowState, options: Pick<SensorCheckOptions, "onlySensors" | "requireCurrentBaselineEpoch" | "alternativeValidationEnvironment"> = {}): Promise<SensorResult[]> {
+  if (instance.stage.slug !== "tdd") throw new Error("Historical TDD validation requires a tdd instance");
+  const historical = { ...options, tolerateRevisionDrift: true, requireHistoricalPhaseInputs: true };
+  // An explicit phase-only caller has already validated its stage admission. Do not
+  // recurse through slices/UI gates while deriving mappings from controlled phases.
+  const phases = checkPhaseSensors(instance, state, historical);
+  return options.onlySensors ? phases : [...phases, ...await checkSensors(instance, state, {
+    onlySensors: instance.stage.sensors.filter(sensor => !["red-test-evidence", "baseline-test-evidence"].includes(sensor)),
+  })];
+}
+
 export async function checkSensors(instance: StageInstance, state: WorkflowState, options: SensorCheckOptions = {}): Promise<SensorResult[]> {
   const stage = instance.stage;
 
@@ -2819,27 +2910,27 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
       case "red-test-evidence": {
         const applicability = i13Applicability(instance);
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "RED", applicability, stage.slug, instance, state), options);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "RED", applicability, stage.slug, instance, state, false, false, options.alternativeValidationEnvironment), options);
         if (failure) failures.push(failure);
         break;
       }
 
       case "baseline-test-evidence": {
         const applicability = i13Applicability(instance);
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "BASELINE", applicability, stage.slug, instance, state, options.requireCurrentBaselineEpoch === true), options);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "BASELINE", applicability, stage.slug, instance, state, options.requireCurrentBaselineEpoch === true, false, options.alternativeValidationEnvironment), options);
         if (failure) failures.push(failure);
         break;
       }
 
       case "green-test-evidence": {
         const applicability = i13Applicability(instance);
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "GREEN", applicability, stage.slug, instance, state), options);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "GREEN", applicability, stage.slug, instance, state, false, false, options.alternativeValidationEnvironment), { ...options, allowDownstreamReportDrift: true });
         if (failure) failures.push(failure);
         break;
       }
 
       case "build-test-evidence": {
-        const failure = validateEvidence(stage, sensor, instance, evidence => buildTestEvidenceErrors(evidence, { ...state, current_stage: stage.slug, current_stage_instance: instance.instance_id, current_module: instance.module_id, current_unit: instance.unit_id }));
+        const failure = validateEvidence(stage, sensor, instance, evidence => buildTestEvidenceErrors(evidence, { ...state, current_stage: stage.slug, current_stage_instance: instance.instance_id, current_module: instance.module_id, current_unit: instance.unit_id }, options.alternativeValidationEnvironment));
         if (failure) failures.push(failure);
         break;
       }
@@ -2869,7 +2960,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
       case "global-review-evidence": {
         if (!globalReviewRequired(state)) break;
-        const failure = validateEvidence(stage, sensor, instance, evidence => globalReviewEvidenceErrors(evidence, state));
+        const failure = validateEvidence(stage, sensor, instance, evidence => globalReviewEvidenceErrors(evidence, state, options.alternativeValidationEnvironment));
         if (failure) failures.push(failure);
         break;
       }
@@ -3087,23 +3178,9 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
       }
 
       case "prd-completeness": {
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
-          const errors: string[] = [];
-          if (evidence.status !== "passed") errors.push('status must be "passed"');
-          if (!asNonEmptyString(evidence.prd_path)) errors.push("prd_path is required");
-          const sections = asStringArray(evidence.required_sections);
-          if (!sections || sections.length < 6) errors.push("required_sections must list at least 6 PRD sections");
-          if (asPositiveInt(evidence.functional_requirements) === null || (evidence.functional_requirements as number) < 1) errors.push("functional_requirements must be >= 1");
-          // B3:这 4 项从"硬编码 true"升为确定性判定(required_sections 已保证节存在,这里查节内容充实)。
-          if (evidence.acceptance_criteria_complete !== true) errors.push("acceptance_criteria_complete must be true");
-          if (evidence.non_goals_complete !== true) errors.push("non_goals_complete must be true");
-          if (evidence.pending_questions_indexed !== true) errors.push("pending_questions_indexed must be true");
-          if (evidence.source_index_complete !== true) errors.push("source_index_complete must be true");
-          if (evidence.clarification_consistency !== "passed") errors.push('clarification_consistency must be "passed"');
-          if (!["passed", "not_applicable"].includes(String(evidence.business_flow_validation))) errors.push('business_flow_validation must be "passed" or "not_applicable"');
-          if (asNumber(evidence.unresolved_blockers) !== 0) errors.push("unresolved_blockers must be 0");
-          return errors;
-        });
+        const failure = validateEvidence(stage, sensor, instance, evidence => deliveryConsistencyPayloadErrors("prd-completeness", evidence, {
+          module_id: instance.module_id, prd_selected: selectedOptionalStages(state).includes("prd-generation"), ui_route: uiDesignChoice(state, instance.module_id),
+        }));
         if (failure) failures.push(failure);
         break;
       }
@@ -3282,74 +3359,17 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
       }
 
       case "inception-consistency": {
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
-          const errors: string[] = [];
-          if (evidence.status !== "passed") errors.push('status must be "passed"');
-          if (evidence.module_id !== instance.module_id) errors.push(`module_id must be ${instance.module_id || "(none)"}`);
-          if (asPositiveInt(evidence.requirements_checked) === null || (evidence.requirements_checked as number) < 1) errors.push("requirements_checked must be >= 1");
-          if (asPositiveInt(evidence.stories_checked) === null || (evidence.stories_checked as number) < 1) errors.push("stories_checked must be >= 1");
-          const expectedPrd = selectedOptionalStages(state).includes("prd-generation");
-          if (evidence.prd_selected !== expectedPrd) errors.push(`prd_selected must be ${expectedPrd}`);
-          const prdItems = asNumber(evidence.prd_items_checked);
-          if (prdItems === null || (expectedPrd ? prdItems < 1 : prdItems !== 0)) errors.push(`prd_items_checked is inconsistent with selected PRD route`);
-          const expectedUiRoute = uiDesignChoice(state, instance.module_id) || "not-selected";
-          if (evidence.ui_route !== expectedUiRoute) errors.push(`ui_route must match selected UI choice ${expectedUiRoute}`);
-          const uiPages = asNumber(evidence.ui_pages_checked);
-          const uiSelected = expectedUiRoute === "html-mock" || expectedUiRoute === "figma-create" || expectedUiRoute === "figma-existing";
-          if (uiPages === null || (uiSelected ? uiPages < 1 : uiPages !== 0)) errors.push("ui_pages_checked is inconsistent with selected UI route");
-          if (asNumber(evidence.unresolved_conflicts) !== 0) errors.push("unresolved_conflicts must be 0");
-          const freshnessVerified = evidence.ui_freshness_verified === true;
-          const fullAcceptanceRuns = asNumber(evidence.ui_full_acceptance_runs);
-          if (uiSelected) {
-            if (!freshnessVerified) errors.push("ui_freshness_verified must be true for selected UI routes");
-            if (!/^[a-f0-9]{64}$/.test(String(evidence.ui_generation_lock_digest || ""))) errors.push("ui_generation_lock_digest must be SHA-256");
-            if (!/^[a-f0-9]{64}$/.test(String(evidence.ui_generation_acceptance_digest || ""))) errors.push("ui_generation_acceptance_digest must be SHA-256");
-            if (!asNonEmptyString(evidence.ui_upstream_ref)) errors.push("ui_upstream_ref is required");
-            if (!COMMIT_ID_PATTERN.test(String(evidence.ui_baseline_upstream_commit || ""))) errors.push("ui_baseline_upstream_commit must be a git commit id");
-            if (!COMMIT_ID_PATTERN.test(String(evidence.ui_current_upstream_commit || ""))) errors.push("ui_current_upstream_commit must be a git commit id");
-            if (!Array.isArray(evidence.ui_changed_paths)) errors.push("ui_changed_paths must be an array");
-            if (!Array.isArray(evidence.ui_affected_pages)) errors.push("ui_affected_pages must be an array");
-            if (asNumber(evidence.ui_impact_unmapped) !== 0) errors.push("ui_impact_unmapped must be 0");
-            if (fullAcceptanceRuns !== 1) errors.push("ui_full_acceptance_runs must be exactly 1");
-            const targetedRuns = asPositiveInt(evidence.ui_targeted_reverification_runs);
-            if (targetedRuns === null) errors.push("ui_targeted_reverification_runs must be a non-negative integer");
-          } else {
-            if (freshnessVerified) errors.push("ui_freshness_verified must be false when no UI route is selected");
-            if (fullAcceptanceRuns !== 0) errors.push("ui_full_acceptance_runs must be 0 when no UI route is selected");
-          }
-          const artifacts = asStringArray(evidence.artifacts_checked);
-          if (!artifacts || artifacts.length < (uiSelected ? 5 : 3)) errors.push("artifacts_checked must list canonical consistency inputs and UI governance artifacts when selected");
-          return errors;
-        });
+        const failure = validateEvidence(stage, sensor, instance, evidence => deliveryConsistencyPayloadErrors("inception-consistency", evidence, {
+          module_id: instance.module_id, prd_selected: selectedOptionalStages(state).includes("prd-generation"), ui_route: uiDesignChoice(state, instance.module_id),
+        }));
         if (failure) failures.push(failure);
         break;
       }
 
       case "ui-design-alignment": {
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
-          const errors: string[] = [];
-          if (!["passed", "not_applicable"].includes(String(evidence.status))) errors.push('status must be "passed" or "not_applicable"');
-          const selectedChoice = uiDesignChoice(state, instance.module_id);
-          const uiSelected = selectedChoice === "html-mock" || selectedChoice === "figma-create" || selectedChoice === "figma-existing";
-          if (evidence.status === "not_applicable") {
-            if (uiSelected && !asNonEmptyString(evidence.reason)) errors.push("selected UI routes require a reason when the current unit is not applicable");
-            return errors;
-          }
-          const expectedMode = selectedChoice === "html-mock" ? "html-mock" : "figma";
-          if (uiSelected && evidence.design_mode !== expectedMode) errors.push(`design_mode must be ${expectedMode} for selected choice ${selectedChoice}`);
-          if (!["html-mock", "figma"].includes(String(evidence.design_mode))) errors.push('design_mode must be "html-mock" or "figma"');
-          for (const field of ["styles_aligned", "conditional_visibility_aligned", "platform_constraints_respected"]) if (evidence[field] !== true) errors.push(`${field} must be true`);
-          if (asNumber(evidence.unmapped_elements) !== 0) errors.push("unmapped_elements must be 0");
-          if (asNumber(evidence.extra_elements) !== 0) errors.push("extra_elements must be 0");
-          if (asPositiveInt(evidence.pages_checked) === null || (evidence.pages_checked as number) < 1) errors.push("pages_checked must be >= 1");
-          if (asPositiveInt(evidence.elements_checked) === null || (evidence.elements_checked as number) < 1) errors.push("elements_checked must be >= 1");
-          // MARS-125: a passed alignment must enumerate the pages it covered so implementation-report can
-          // reconcile per-page forward coverage across units; the id list must match pages_checked.
-          const pagesCovered = asStringArray(evidence.pages_covered);
-          if (!pagesCovered || pagesCovered.length < 1) errors.push("pages_covered must list the covered PAGE identifiers");
-          else if (pagesCovered.length !== (evidence.pages_checked as number)) errors.push("pages_covered length must equal pages_checked");
-          return errors;
-        });
+        const failure = validateEvidence(stage, sensor, instance, evidence => deliveryConsistencyPayloadErrors("ui-design-alignment", evidence, {
+          module_id: instance.module_id, prd_selected: selectedOptionalStages(state).includes("prd-generation"), ui_route: uiDesignChoice(state, instance.module_id),
+        }));
         if (failure) failures.push(failure);
         break;
       }
@@ -3413,8 +3433,8 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           "nfr-design": [["nfr-requirements", "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements.md"]],
           "code-generation": [["functional-design", "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design.md"]],
           "build-and-test": [["code-review", "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md"]],
-          "implementation-report": [["build-and-test", "docs/aidlc/construction/build-test-report.md"]],
-          "operations-planning": [["implementation-report", "docs/aidlc/construction/implementation-report.md"]],
+          "implementation-report": [["build-and-test", ".aidlc/evidence/build-and-test/build-test-evidence.json"]],
+          "operations-planning": [["implementation-report", ".aidlc/evidence/implementation-report/implementation-report.json"]],
           "operations-authorization": [["operations-planning", "docs/aidlc/operation/operations-plan.md"]],
         };
         const requiredDocs = (cascadeDependencies[stage.slug] || [])
@@ -3669,8 +3689,9 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
     && crossPlatformTarget
     && selectedForUnit("ui-implementation-bridge", true);
 
-  const implementationText = readConditionText(join(PROJECT_ROOT, "docs", "aidlc", "construction", "implementation-report.md"));
-  const deploymentText = `${contextText}\n${implementationText}\n${buildMetadata}`;
+  // A derived summary cannot select or waive deployment; approved planning
+  // inputs and actual runtime configuration remain the routing sources.
+  const deploymentText = `${contextText}\n${buildMetadata}`;
   // operations was split into operations-planning + operations-authorization (both
   // gated by has_deployment_needs). Honor an explicit workflow-plan decision for
   // either new slug; keep "operations" as a backward-compatible alias for plans
@@ -3985,6 +4006,7 @@ export function executionPolicyFor(
       "声明的产物和当前任务所需的实现或分析已完成，声明的检查已有结果或已由指定机制安排，且无阻断问题时，结束当前阶段工作并交付结果。",
       "非阻断且当前无法执行的检查，须记录为未验证及原因；不得为消除未知项扩大范围。",
       "同一检查连续失败两次后，停止等价重试；改用不同诊断路径或返回 NEEDS_CONTEXT/BLOCKED。",
+      "next/report 返回 repair_guidance 时按其分类和最小下一步执行；action=diagnose 时停止等价重试。映射、历史证据漂移、权限或未知失败均不得自动解释为缺少测试。",
       "完成后不得仅为提高信心继续探索无关目录、重复读取未变化内容或重复已通过的检查。",
     ],
     expansion_triggers: [
@@ -4954,6 +4976,10 @@ function performSplit(fromId: string, dryRun: boolean, trigger: string, replaceL
       const currentInventory = legacyEvidenceInventory();
       const evidenceBefore = new Map(currentInventory.map(item => [item.path, readFileSync(item.path)]));
       try {
+        return withSliceWorkflowMigration(planned.filter(item => item.ref.kind === "module").map(item => ({
+          from: { root: PROJECT_ROOT, workflow_id: legacy.workflow_id, module_id: (item.ref as { module_id: string }).module_id, scope: legacy.scope, stage: "units-generation", ui_route: "not-selected" },
+          to: { root: PROJECT_ROOT, workflow_id: item.state.workflow_id, module_id: (item.ref as { module_id: string }).module_id, scope: item.state.scope, stage: "units-generation", ui_route: "not-selected" },
+        })), () => {
         const integration = loadWorkflowState(PROJECT_ROOT, INTEGRATION_WORKFLOW)!;
         saveRegistry(PROJECT_ROOT, {
           version: "1",
@@ -4989,6 +5015,7 @@ function performSplit(fromId: string, dryRun: boolean, trigger: string, replaceL
         }
         commitSource();
         return evidence;
+        });
       } catch (error) {
         for (const [path, bytes] of evidenceBefore) writeFileSync(path, bytes);
         throw error;
@@ -5029,10 +5056,22 @@ async function handleNext(args: string[]): Promise<Directive> {
   const topLevel = !nextConflictInFlight;
   if (topLevel) { nextConflictRetries = 0; nextConflictInFlight = true; }
   try {
-    return await withRevisionMemoization(async () => handleNextInner(args));
+    return await withRevisionMemoization(async () => {
+      const result = await handleNextInner(args);
+      return topLevel ? withRepairGuidance(result, args.includes("--preview") || args.includes("--status")) : result;
+    });
   } finally {
     if (topLevel) nextConflictInFlight = false;
   }
+}
+
+function withRepairGuidance(result: Directive, readOnly = false): Directive {
+  const binding = sessionBinding();
+  // A run-stage response can revisit the same unfinished stage after report failed;
+  // it proves admission, not completion, and must not erase that blocker sequence.
+  if (result.kind !== "error") return result;
+  const guidance = repairGuidance(PROJECT_ROOT, binding ? sessionRefBinding(binding) : GLOBAL_WORKFLOW, String(result.message || "Unknown gate failure"), readOnly);
+  return { ...result, repair_guidance: guidance, message: `${result.message || "Gate failed"}\n\nNext action (${guidance.action}; ${guidance.category}): ${guidance.next_step}` };
 }
 
 let nextConflictRetries = 0;
@@ -5572,7 +5611,9 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
     }
     const upstreamGateFailures: { instance: string; message: string }[] = [];
     for (const dep of upstreamDeps) {
-      const failures = await checkSensors(dep, state);
+      const historicalTdd = dep.stage.slug === "tdd" && effectiveNextInstance.stage.slug === "code-generation"
+        && dep.module_id === effectiveNextInstance.module_id && dep.unit_id === effectiveNextInstance.unit_id;
+      const failures = historicalTdd ? await checkHistoricalTddSensors(dep, state, { requireCurrentBaselineEpoch: true }) : await checkSensors(dep, state);
       for (const failure of failures) {
         if (isolatedEvidenceFailure && failure.sensor === SLICE_SENSOR && dep.stage.slug === "units-generation" && dep.module_id === effectiveNextInstance.module_id) continue;
         if (isolationAllowed && recoverableEvidenceFailure(failure.message)) {
@@ -5732,7 +5773,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
 
 async function handleReport(args: string[]): Promise<Directive> {
   // MARS-277: report gates re-check many evidence records sharing a digest scope.
-  return withRevisionMemoization(async () => handleReportInner(args, 0));
+  return withRevisionMemoization(async () => withRepairGuidance(await handleReportInner(args, 0)));
 }
 
 const CONFLICT_RETRY_LIMIT = 3;
@@ -5952,7 +5993,7 @@ async function handleReportInner(args: string[], conflictRetries: number): Promi
         const redInstance = instances.find((candidate) => candidate.stage.slug === "tdd" && candidate.module_id === currentInstance.module_id && candidate.unit_id === currentInstance.unit_id);
         if (redInstance) {
           // 4.7.0: completing GREEN also demands that the unit's BASELINE belongs to the current epoch.
-          const redFailures = await checkSensors(redInstance, state, { tolerateRevisionDrift: true, requireCurrentBaselineEpoch: true });
+          const redFailures = await checkHistoricalTddSensors(redInstance, state, { requireCurrentBaselineEpoch: true });
           if (redFailures.length > 0) {
             return {
               kind: "error",
@@ -6026,6 +6067,7 @@ async function handleReportInner(args: string[], conflictRetries: number): Promi
       }
   }
 
+  if (result === "completed" || result === "approved") clearRepairGuidance(PROJECT_ROOT, auditRef);
   state.history.push(entry);
 
   // Process result — auto-advance after all applicable gates pass
@@ -6261,7 +6303,7 @@ async function reattestInstance(
   if (stageNode.slug === "code-generation") {
     const redInstance = instances.find((candidate) => candidate.stage.slug === "tdd" && candidate.module_id === instance.module_id && candidate.unit_id === instance.unit_id);
     if (redInstance) {
-      const redFailures = await checkSensors(redInstance, state, { tolerateRevisionDrift: true });
+      const redFailures = await checkHistoricalTddSensors(redInstance, state);
       if (redFailures.length > 0) return { kind: "error", message: `🚫 Cannot re-attest GREEN stage "${instanceId}" — RED gate evidence is invalid:\\n${redFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\\n")}`, ...extras };
     }
   }
@@ -7838,22 +7880,37 @@ function handleProfile(args: string[]): Directive {
 }
 
 // recover/adopt/rebuild additionally require --maintenance <current maintenance_token>.
-const STATE_USAGE = "Usage: orchestrate state maintenance-plan [--module <id>] | orchestrate state review-inputs | orchestrate state plan [--module <id>] | orchestrate state rules [--module <id>] | orchestrate state evidence [--module <id>] | orchestrate state measurements [--module <id>] | orchestrate state verify | orchestrate state rebuild | orchestrate state retire --lineage <workflow-id>[,<workflow-id>] --user-input Approve --reason \"<why>\" | orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason \"<why>\" | orchestrate state checkpoint --module <id> | orchestrate state recover --module <id> [--user-input Approve --reason \"<why>\"]";
+const STATE_USAGE = "Usage: orchestrate state maintenance-plan [--module <id>] | orchestrate state review-inputs | orchestrate state plan [--module <id>] | orchestrate state rules [--module <id>] | orchestrate state evidence [--module <id>] | orchestrate state summary [--module <id>] [--format json|markdown] | orchestrate state measurements [--module <id>] | orchestrate state verify | orchestrate state rebuild | orchestrate state retire --lineage <workflow-id>[,<workflow-id>] --user-input Approve --reason \"<why>\" | orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason \"<why>\" | orchestrate state checkpoint --module <id> | orchestrate state recover --module <id> [--user-input Approve --reason \"<why>\"]";
+
+function damagedMaintenanceReader(moduleId: string | undefined): MaintenanceRecoveryReader | undefined {
+  if (!moduleId || !MODULE_ID_PATTERN.test(moduleId)) return undefined;
+  return bytes => {
+    const ledger = bestLedgerCheckpoint(PROJECT_ROOT, moduleId);
+    if (ledger.errors.length || !ledger.best) throw new Error(`damaged-state maintenance requires a verified ledger checkpoint for ${moduleId}: ${ledger.errors.join("; ") || "checkpoint missing"}`);
+    const best = ledger.best, state = parseMaintenanceRecoveryState(bytes, best.state);
+    const loaded = loadWorkflowParts(PROJECT_ROOT, moduleId, state);
+    if (!loaded.split || loaded.parts.get("global")?.state.workflow_id !== best.checkpoint.lineage) throw new Error("damaged-state maintenance checkpoint does not belong to the active split lineage");
+    return { module_id: moduleId, checkpoint_commit: best.commit, checkpoint_digest: best.checkpoint.digest, state };
+  };
+}
 
 async function handleState(args: string[]): Promise<Directive> {
   const [action, ...rest] = args;
   const flags = parseFlags(rest);
-  const invalidFlag = unsupportedFlag(flags, STATE_FLAGS);
+  const invalidFlag = unsupportedFlag(flags, action === "summary" ? new Set(["module", "format", "text"]) : STATE_FLAGS);
   if (invalidFlag) return { kind: "error", message: `Unsupported state option: --${invalidFlag}. ${STATE_USAGE}` };
   if (flags.text) return { kind: "error", message: `Unexpected state argument: ${flags.text}. ${STATE_USAGE}` };
   if (action === "plan") return stagePlanDirective(flags);
   if (action === "maintenance-plan") {
     if (Object.keys(flags).some(key => key !== "module")) return { kind: "error", message: "state maintenance-plan takes only --module" };
-    const plan = workflowMaintenancePlan(PROJECT_ROOT, flags.module);
-    return { kind: "print", maintenance_token: plan.token, claims: plan.claims, files: plan.files, message: "Read-only maintenance CAS snapshot. Release every exact claim first; then reread this plan and use its token as --maintenance, without a session binding." };
+    const plan = workflowMaintenancePlan(PROJECT_ROOT, flags.module, damagedMaintenanceReader(flags.module));
+    return { kind: "print", maintenance_token: plan.token, claims: plan.claims, files: plan.files,
+      ...(plan.recovery ? { recovery: { module_id: plan.recovery.module_id, checkpoint_commit: plan.recovery.checkpoint_commit, repair: "invalid-revision-with-intact-claims" } } : {}),
+      message: "Read-only maintenance CAS snapshot. Release every exact claim first; then reread this plan and use its token as --maintenance, without a session binding." };
   }
   if (action === "rules") return ruleLoadPlanDirective(flags);
   if (action === "evidence") return evidenceReusePlanDirective(flags);
+  if (action === "summary") return deliverySummaryDirective(flags);
   if (action === "review-inputs") {
     if (Object.keys(flags).length) return { kind: "error", message: "state review-inputs takes no options" };
     const state = loadWorkflowView(PROJECT_ROOT);
@@ -7869,7 +7926,7 @@ async function handleState(args: string[]): Promise<Directive> {
   if (["adopt", "recover", "rebuild"].includes(action)) {
     if (!flags.maintenance || !/^[a-f0-9]{64}$/.test(flags.maintenance)) return { kind: "error", message: "state maintenance-plan is required; pass its current maintenance_token as --maintenance after releasing all claims" };
     const approved = flags["user-input"] === "Approve" && !!flags.reason?.trim() && flags.reason !== "true";
-    return withQuiescentWorkflowMaintenance(PROJECT_ROOT, flags.maintenance, flags.module, approved, () => action === "adopt" ? adoptModuleState(flags) : action === "recover" ? recoverModuleState(flags) : rebuildControlPlane(flags));
+    return withQuiescentWorkflowMaintenance(PROJECT_ROOT, flags.maintenance, flags.module, approved, plan => action === "adopt" ? adoptModuleState(flags) : action === "recover" ? recoverModuleState(flags, plan.recovery) : rebuildControlPlane(flags), action === "recover" ? damagedMaintenanceReader(flags.module) : undefined);
   }
   if (action === "checkpoint") {
     const binding = sessionBinding();
@@ -7877,6 +7934,20 @@ async function handleState(args: string[]): Promise<Directive> {
     return withSessionPublication(PROJECT_ROOT, ownerOfInstance(binding.stage_instance), binding.stage_instance, () => checkpointModuleState(flags), binding);
   }
   return { kind: "error", message: STATE_USAGE };
+}
+
+/** One disposable delivery view; no report file, producer or session write. */
+function deliverySummaryDirective(flags: Record<string, string>): Directive {
+  if (Object.keys(flags).some(key => !["module", "format"].includes(key))) return { kind: "error", message: "state summary takes only --module and --format json|markdown" };
+  if (flags.format !== undefined && !["json", "markdown"].includes(flags.format)) return { kind: "error", message: "state summary --format must be json or markdown" };
+  const moduleId = flags.module;
+  if (moduleId === "true" || (moduleId !== undefined && !MODULE_ID_PATTERN.test(moduleId))) return { kind: "error", message: "state summary --module requires a valid module id" };
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  if (moduleId !== undefined && (!loaded.split || !loaded.parts.has(workflowRefKey(moduleRef(moduleId))))) return { kind: "error", message: `state summary: module ${moduleId} has no active split workflow` };
+  const state = loaded.split ? mergeWorkflowView(loaded.parts, moduleId ? moduleRef(moduleId) : GLOBAL_WORKFLOW) : loaded.parts.get("global")?.state;
+  if (!state) return { kind: "error", message: "No active workflow." };
+  const summary = projectDeliverySummary(PROJECT_ROOT, state);
+  return { kind: "print", delivery_summary: summary, message: renderDeliverySummaryMarkdown(summary) };
 }
 
 /**
@@ -8069,7 +8140,7 @@ function checkpointModuleState(flags: Record<string, string>): Directive {
  * user's explicit approval and keeps a backup. Missing/stale evidence is listed, not
  * trusted: recovery reuses orchestrate upgrade --dry-run and the regular next/report gates.
  */
-async function recoverModuleState(flags: Record<string, string>): Promise<Directive> {
+async function recoverModuleState(flags: Record<string, string>, maintenanceRecovery?: MaintenanceRecoveryProjection): Promise<Directive> {
   const moduleId = flags.module;
   if (!moduleId || moduleId === "true" || !MODULE_ID_PATTERN.test(moduleId)) return { kind: "error", message: `state recover requires --module <module-id>. ${STATE_USAGE}` };
   if ("from" in flags || "lineage" in flags) return { kind: "error", message: `state recover reads the module ledger only; use state adopt --from <commit> for another lineage. ${STATE_USAGE}` };
@@ -8087,7 +8158,8 @@ async function recoverModuleState(flags: Record<string, string>): Promise<Direct
     };
   }
   const best = ledger.best;
-  const loaded = loadWorkflowParts(PROJECT_ROOT, moduleId);
+  if (maintenanceRecovery && (best.commit !== maintenanceRecovery.checkpoint_commit || best.checkpoint.digest !== maintenanceRecovery.checkpoint_digest)) return { kind: "error", message: "maintenance checkpoint changed; reread state maintenance-plan before retrying" };
+  const loaded = loadWorkflowParts(PROJECT_ROOT, moduleId, maintenanceRecovery?.state);
   const global = loaded.parts.get("global")!.state;
   if (best.checkpoint.lineage !== global.workflow_id) {
     return { kind: "error", message: `🚫 Ledger checkpoint ${best.commit.slice(0, 12)} of ${moduleId} belongs to lineage ${best.checkpoint.lineage}, not the active ${global.workflow_id}; carry it over with orchestrate state adopt --module ${moduleId} --from ${best.commit} --user-input Approve --reason "<why>" if it is still wanted.` };
@@ -8101,7 +8173,8 @@ async function recoverModuleState(flags: Record<string, string>): Promise<Direct
   if (contracts.manifest_entry_sha256 !== best.checkpoint.contracts.manifest_entry_sha256) {
     return { kind: "error", message: `🚫 Module ${moduleId} in docs/aidlc/ideation/module-manifest.json differs from the checkpoint ${best.commit.slice(0, 12)}; reconcile the manifest before recovering.` };
   }
-  if (contracts.digest !== best.checkpoint.contracts.digest) {
+  const contractMatch = contracts.digest === best.checkpoint.contracts.digest ? "raw-digest" : equivalentModuleContracts(contracts, best.checkpoint.contracts) ? CONTRACT_EQUIVALENCE_VERSION : undefined;
+  if (!contractMatch) {
     const recorded = new Map(best.checkpoint.contracts.documents.map((document) => [document.path, document]));
     const current = new Map(contracts.documents.map((document) => [document.path, document]));
     const changed = [...new Set([...recorded.keys(), ...current.keys()])].filter((path) => JSON.stringify([recorded.get(path)?.rows, recorded.get(path)?.references]) !== JSON.stringify([current.get(path)?.rows, current.get(path)?.references]));
@@ -8139,7 +8212,8 @@ async function recoverModuleState(flags: Record<string, string>): Promise<Direct
   }
   if (flags["user-input"] !== "Approve" || !flags.reason?.trim() || flags.reason === "true") return { kind: "error", message: "maintenance recovery requires --user-input Approve and a non-empty --reason" };
   recovered.active_instances = {};
-  recovered.revision = Math.max(local?.revision || 0, recovered.revision) + 1;
+  const knownRevisions = maintenanceRecovery && existsSync(auditPath) ? [...readFileSync(auditPath, "utf8").matchAll(/^- Revision: (\d+)\s*$/gm)].map(match => Number(match[1])).filter(Number.isSafeInteger) : [];
+  recovered.revision = Math.max(local?.revision || 0, recovered.revision, ...knownRevisions) + 1;
   recovered.version = ENGINE_VERSION;
   recovered.updated_at = new Date().toISOString();
   const otherWorkflow = [...loaded.parts.entries()].find(([key, part]) => key !== workflowRefKey(ref) && part.state.workflow_id === recovered.workflow_id);
@@ -8180,6 +8254,9 @@ async function recoverModuleState(flags: Record<string, string>): Promise<Direct
     "Module Workflow ID": recovered.workflow_id,
     "Checkpoint Commit": best.commit,
     "Checkpoint Digest": best.checkpoint.digest,
+    "Contract Comparison": contractMatch,
+    "Checkpoint Contract Digest": best.checkpoint.contracts.digest,
+    "Current Contract Digest": contracts.digest,
     Revision: String(recovered.revision),
     "Previous Local Revision": local ? String(local.revision) : "-",
     Approval: "Approve",
@@ -8662,7 +8739,7 @@ async function main() {
     || (cmd === "next" && (rest.includes("--status") || rest.includes("--preview")))
     || (cmd === "next" && isSplitLayout(PROJECT_ROOT) && !sessionBinding() && !rest.includes("--module") && !rest.includes("--scope"))
     || (cmd === "upgrade" && (!rest.includes("--retire-execution") || rest.includes("--dry-run")))
-    || (cmd === "state" && (!rest.length || ["plan", "rules", "evidence", "measurements", "verify", "review-inputs", "maintenance-plan"].includes(rest[0])))
+    || (cmd === "state" && (!rest.length || ["plan", "rules", "evidence", "summary", "measurements", "verify", "review-inputs", "maintenance-plan"].includes(rest[0])))
     || (["baseline", "diagram-format", "profile"].includes(cmd) && !rest.some(arg => arg.startsWith("--") && !["--module", "--status"].includes(arg)));
   if (!readOnly && !(cmd === "state" && ["recover", "adopt", "rebuild"].includes(rest[0]))) {
     const loaded = loadWorkflowParts(PROJECT_ROOT);
@@ -8731,7 +8808,8 @@ async function main() {
   // result, even when a caller swallowed the error on the way up.
   const overflow = recordedSubprocessOverflow();
   if (overflow) directive = overflowDirective(overflow) as unknown as Directive;
-  console.log(JSON.stringify(directive, null, 2));
+  if (cmd === "state" && rest[0] === "summary" && parseFlags(rest).format === "markdown" && directive.kind === "print") console.log(directive.message);
+  else console.log(JSON.stringify(directive, null, 2));
   if (directive.kind === "error") process.exitCode = 2;
 }
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { bindSession, claimToken } from "../core/tools/aidlc-session";
 import { fixture, write, cli, snapshot } from "./mars244_fixture";
 import { spawnSync } from "node:child_process";
@@ -103,7 +104,20 @@ assert.match(rejected.stdout + rejected.stderr, /integration barrier is not read
 const directReport = cli(split.root, ["orchestrate", "report", "--stage", "build-and-test", "--result", "completed"], JSON.stringify(integration));
 assert.notEqual(directReport.status, 0, "report cannot waive the integration barrier by skipping next");
 assert.match(directReport.stdout + directReport.stderr, /integration barrier is not ready/);
-assert.deepEqual(snapshot(split.root), before, "failed integration admission preserves every workflow and artifact");
+const after = snapshot(split.root);
+const diagnosticPath = `.aidlc/continuation/${createHash("sha256").update(`${integration.workflow_id}\n${integration.stage_instance}`).digest("hex")}.json`;
+assert.equal(before[diagnosticPath], undefined, "the fixture starts without a continuation diagnostic");
+assert.deepEqual(Object.keys(after).filter(path => !(path in before)), [diagnosticPath], "failed admission may create only its exact instance diagnostic");
+const diagnostic = JSON.parse(Buffer.from(after[diagnosticPath], "base64").toString("utf8"));
+assert.equal(diagnostic.version, "1");
+assert.equal(diagnostic.workflow_id, integration.workflow_id);
+assert.equal(diagnostic.stage_instance, integration.stage_instance);
+assert.equal(diagnostic.persistence, "recorded");
+assert.ok([1, 2].includes(diagnostic.unchanged_attempts));
+assert.match(diagnostic.fingerprint, /^[a-f0-9]{64}$/);
+assert.equal(JSON.parse(directReport.stdout).repair_guidance.fingerprint, diagnostic.fingerprint, "the returned diagnostic matches the persisted advisory record");
+delete after[diagnosticPath];
+assert.deepEqual(after, before, "failed integration admission preserves every workflow and artifact byte except the validated advisory record");
 console.log("PASS controlled FINAL_GLOBAL: required, every unit, independent results and input freshness");
 
 // Empty consumes lists still bind the actual worktree. Refresh may reuse only

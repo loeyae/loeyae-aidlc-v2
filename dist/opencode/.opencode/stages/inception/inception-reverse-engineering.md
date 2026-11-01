@@ -378,15 +378,9 @@ condition: has_legacy_code
 - [x] code-quality-assessment.md
 ```
 
-## 步骤 12：更新状态跟踪
+## 步骤 12：记录阶段结果
 
-更新 `docs/aidlc/handoff.md`：
-
-```markdown
-## 逆向工程状态
-- [x] 逆向工程 - 完成于 [时间戳]
-- **产物位置**：docs/aidlc/modules/{module-id}/inception/reverse-engineering/
-```
+使用 `orchestrate report` 提交实际分析结果，由引擎维护 state/audit；交接引用现有逆向工程产物。
 
 ## 步骤 13：向用户展示完成消息
 
@@ -410,7 +404,7 @@ condition: has_legacy_code
 ## 步骤 14：展示摘要并按有效授权继续
 
 - 以阶段图 `approval` 和引擎 directive 为权威；本阶段为 `notify`，展示摘要后复用有效既有授权继续。用户明确要求审阅时等待回复；真实未决产品语义先澄清；`block` 审批和安全边界仍须等待，不得以通知替代。
-- 在 audit.md 中记录通知及既有授权来源；有用户实际回复时完整记录，不要求制造确认回复
+- 真实澄清、风险或授权例外保留在相关分析产物；普通通知与阶段状态由引擎记录，不制造确认回复
 
 ## 上下文来源（条件）
 

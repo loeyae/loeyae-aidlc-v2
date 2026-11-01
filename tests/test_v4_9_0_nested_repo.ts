@@ -446,13 +446,15 @@ function splitFixture(name: string, sourceRoots: unknown[] = ["lib", "app"]): Sp
       ucds: Object.fromEntries(all.map((ucd) => [ucd.id, { file: ucd.file, marker: ucd.marker, test: `tests/test_features.py::test_${ucd.id.toLowerCase().replace(/-/g, "_")}` }])),
       phases: { ...Object.fromEntries(UNITS.map((unit) => [unit, { BASELINE: ucds.filter((ucd) => ucd.unit === unit).map((ucd) => ucd.id), GREEN: ucds.filter((ucd) => ucd.unit === unit).map((ucd) => ucd.id) }])), "*": { GREEN: ucds.map((ucd) => ucd.id) } },
     }, null, 2)}\n`);
-    write(project, "tests/test_features.py", `# REQ-001 ${ucds.map((ucd) => ucd.id).join(" ")}\n\n\n${ucds.map((ucd) => `def test_${ucd.id.toLowerCase().replace(/-/g, "_")}():\n    # ${ucd.id}\n    assert True\n`).join("\n\n")}`);
+    // Keep known test inputs stable; only the current approved ucds enter the phase plan above.
+    write(project, "tests/test_features.py", `# REQ-001 ${all.map((ucd) => ucd.id).join(" ")}\n\n\n${all.map((ucd) => `def test_${ucd.id.toLowerCase().replace(/-/g, "_")}():\n    # ${ucd.id}\n    assert True\n`).join("\n\n")}`);
     syncQuality();
   };
   write(project, "tests/__init__.py", "\"\"\"Tests for the order service (REQ-001).\"\"\"\n");
   write(project, "tests/observe_uc.cjs", PLAN_OBSERVER);
   write(project, ".aidlc/commands/tdd.json", allowlist("tdd", [{ id: "uc-baseline", role: "baseline", argv: OBSERVE }]));
   write(project, ".aidlc/commands/code-generation.json", allowlist("code-generation", [{ id: "uc-green", role: "green", argv: OBSERVE }]));
+  prepareSplitBuildAndTest(project);
   return { project, app, epoch0, appCommit, step, nextModule, reportUnit, writeCases };
 }
 
@@ -480,6 +482,18 @@ function hashes(project: string, paths: string[]): Record<string, string> {
   return Object.fromEntries(paths.map((path) => [path, sha256(project, path)]));
 }
 
+/** Establish execution inputs before the first TDD/GREEN observation. */
+function prepareSplitBuildAndTest(project: string): void {
+  write(project, "tests/build_check.cjs", "const { readFileSync } = require('node:fs');\nreadFileSync('app/exporter.py', 'utf8');\nconsole.log('build ok');\n");
+  write(project, "tests/run_tests.cjs", "const { spawnSync } = require('node:child_process');\nconst env = { ...process.env, AIDLC_PHASE: 'GREEN' };\ndelete env.AIDLC_ACTIVE_UNIT;\nconst result = spawnSync(process.execPath, ['tests/observe_uc.cjs'], { encoding: 'utf8', env });\nprocess.stdout.write(result.stdout.split(/\\r?\\n/).filter((line) => !line.startsWith('{')).join('\\n'));\nprocess.exit(result.status ?? 1);\n");
+  write(project, "tests/lint_check.cjs", "console.log('lint ok');\n");
+  write(project, ".aidlc/commands/build-and-test.json", allowlist("build-and-test", [
+    { id: "build", role: "build", argv: ["node", "tests/build_check.cjs"] },
+    { id: "unit-tests", role: "test", argv: ["node", "tests/run_tests.cjs"] },
+    { id: "lint", role: "check", argv: ["node", "tests/lint_check.cjs"] },
+  ]));
+}
+
 /**
  * build-and-test → build-and-test-templates → implementation-report → done. When the
  * integration upstream re-check refuses the completed unit evidence only because later
@@ -498,14 +512,6 @@ function integrationRun(f: SplitFixture, first: Run): void {
   }
   assert.equal(directive.json.stage_instance, "build-and-test", directive.out);
   const ids = [UCD_A, UCD_B, UCD_APP, UCD_APP2].map((ucd) => ucd.id).join(" / ");
-  write(f.project, "tests/build_check.cjs", "const { readFileSync } = require('node:fs');\nreadFileSync('app/exporter.py', 'utf8');\nconsole.log('build ok');\n");
-  write(f.project, "tests/run_tests.cjs", "const { spawnSync } = require('node:child_process');\nconst env = { ...process.env, AIDLC_PHASE: 'GREEN' };\ndelete env.AIDLC_ACTIVE_UNIT;\nconst result = spawnSync(process.execPath, ['tests/observe_uc.cjs'], { encoding: 'utf8', env });\nprocess.stdout.write(result.stdout.split(/\\r?\\n/).filter((line) => !line.startsWith('{')).join('\\n'));\nprocess.exit(result.status ?? 1);\n");
-  write(f.project, "tests/lint_check.cjs", "console.log('lint ok');\n");
-  write(f.project, ".aidlc/commands/build-and-test.json", allowlist("build-and-test", [
-    { id: "build", role: "build", argv: ["node", "tests/build_check.cjs"] },
-    { id: "unit-tests", role: "test", argv: ["node", "tests/run_tests.cjs"] },
-    { id: "lint", role: "check", argv: ["node", "tests/lint_check.cjs"] },
-  ]));
   write(f.project, "docs/aidlc/construction/build-test-report.md", `# 构建与测试报告\n\nREQ-001 / ${ids}：构建、单元测试与 lint 均通过（0 failed）。\n`);
   write(f.project, "docs/aidlc/construction/build-and-test/build-and-test-summary.md", "# 构建与测试摘要\n\nREQ-001 的实现通过构建、测试和静态检查；存量行为由各单元的 BASELINE 证据锁定（u3 在嵌套仓库 app/ 中）。\n");
   f.step(["evidence", "run", "--stage", "build-and-test", "--sensor", "test-quality"]);

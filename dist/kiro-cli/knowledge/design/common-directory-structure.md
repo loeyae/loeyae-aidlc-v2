@@ -8,7 +8,8 @@
 │       ├── audit.md
 │       └── worktrees/
 ├── .aidlc/
-│   └── evidence/
+│   ├── evidence/
+│   └── views/               # 仅显式导出的可重建展示视图
 └── docs/
     └── aidlc/
         ├── ideation/
@@ -25,6 +26,7 @@
 - `aidlc/active/audit.md` 追加状态更新记录。
 - module manifest 列出模块；unit manifest 列出模块内可独立交付的单元与条件阶段。
 - Evidence 路径由当前 directive 的 `evidence_root` 决定。
+- 默认摘要直接读取 `orchestrate state summary`；`.aidlc/views/` 不作为状态、审批或完成依据。
 - 成员在完成 report 后切换上下文；`handoff_prompt` 只提供人类交接说明，不能改变阶段或单元。
 
 ## 文档切片附加约束

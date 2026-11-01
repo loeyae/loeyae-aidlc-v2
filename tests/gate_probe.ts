@@ -11,7 +11,7 @@
  *   --drift           tolerate source revision drift (as the code-generation completion re-check)
  *   --current-epoch   demand BASELINE evidence of the current baseline epoch
  */
-import { checkConsumes, checkProduces, checkSensors, expandStageInstances, loadGraph, runtimeInstance } from "../core/tools/aidlc-orchestrate";
+import { checkConsumes, checkProduces, checkSensors, checkHistoricalTddSensors, expandStageInstances, loadGraph, runtimeInstance } from "../core/tools/aidlc-orchestrate";
 import { loadWorkflowState } from "../core/tools/aidlc-light-state";
 import { loadWorkflowView } from "../core/tools/aidlc-workflow-layout";
 
@@ -25,6 +25,7 @@ const option = (name: string): string | undefined => {
 };
 const moduleId = option("--module");
 const drift = option("--drift") === "true";
+const historical = option("--historical-tdd") === "true";
 const currentEpoch = option("--current-epoch") === "true";
 const [instanceId, mode, sensor] = args;
 const state = moduleId ? loadWorkflowView(process.cwd(), moduleId) : loadWorkflowState(process.cwd());
@@ -38,7 +39,7 @@ const instance = runtimeInstance(found, state);
 try {
   if (mode === "sensors") {
     const options = { ...(drift ? { tolerateRevisionDrift: true } : {}), ...(currentEpoch ? { requireCurrentBaselineEpoch: true } : {}) };
-    const failures = (await checkSensors(instance, state, options)).filter((failure) => !sensor || failure.sensor === sensor);
+    const failures = (await (historical ? checkHistoricalTddSensors(instance, state, options) : checkSensors(instance, state, options))).filter((failure) => !sensor || failure.sensor === sensor);
     console.log(JSON.stringify({ failures: failures.map((failure) => `[${failure.sensor}] ${failure.message}`) }));
   } else if (mode === "produces") {
     console.log(JSON.stringify({ missing: checkProduces(instance) }));

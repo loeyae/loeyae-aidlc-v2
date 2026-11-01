@@ -49,7 +49,7 @@ console.log(JSON.stringify({ has_deployment_needs: evaluateCondition("has_deploy
  * Build a deployment-keyword-free fixture (so inference alone would be false),
  * write the given workflow-plan body, and probe has_deployment_needs.
  */
-function probe(name: string, workflowPlan: string): boolean {
+function probe(name: string, workflowPlan: string, report?: string, runtimeStart = false): boolean {
   const project = join(scratch, name);
   mkdirSync(project, { recursive: true });
   write(project, "docs/aidlc/ideation/module-manifest.json",
@@ -60,7 +60,8 @@ function probe(name: string, workflowPlan: string): boolean {
     "# 需求\n\n## REQ-001 普通功能\n\ntrack: [backend]\n\n一个不含任何部署措辞的纯逻辑需求。\n");
   write(project, "docs/aidlc/inception/workflow-plan.md", workflowPlan);
   // Minimal package.json without a start/serve script so packageHasRuntimeStart is false.
-  write(project, "package.json", `${JSON.stringify({ name: "mars109-fixture", version: "0.0.0" }, null, 2)}\n`);
+  write(project, "package.json", `${JSON.stringify({ name: "mars109-fixture", version: "0.0.0", ...(runtimeStart ? { scripts: { start: "node server.js" } } : {}) }, null, 2)}\n`);
+  if (report !== undefined) write(project, "docs/aidlc/construction/implementation-report.md", report);
   const state = createInitialState("feature", "4.13.0", "00000000-0000-4000-8000-000000000000", [], "MARS-109 probe") as WorkflowState;
   state.completed_stages = ["workspace-detection", "state-template"];
   state.completed_stage_instances = ["workspace-detection", "state-template"];
@@ -74,7 +75,7 @@ function probe(name: string, workflowPlan: string): boolean {
   return JSON.parse(line).has_deployment_needs === true;
 }
 
-const planHeader = "# 工作流计划\n\n| Stage | Decision |\n|-------|----------|\n";
+const planHeader = "# 工作流计划\n\n| Stage | Decision | Evidence |\n|-------|----------|----------|\n";
 
 try {
   // 1. Explicit execute on the new planning slug → deploy needed.
@@ -93,7 +94,7 @@ try {
 
   // 3. Explicit skip on BOTH new slugs → not needed (defined decision overrides inference).
   assert.equal(
-    probe("both-skip", `${planHeader}| \`operations-planning\` | skip |\n| \`operations-authorization\` | skip |\n`),
+    probe("both-skip", `${planHeader}| \`operations-planning\` | skip | approved library-only delivery |\n| \`operations-authorization\` | skip | approved library-only delivery |\n`),
     false,
     "explicit skip on both split stages must make has_deployment_needs false",
   );
@@ -105,10 +106,15 @@ try {
     "legacy operations alias with execute must still make has_deployment_needs true",
   );
   assert.equal(
-    probe("legacy-alias-skip", `${planHeader}| \`operations\` | skip |\n`),
+    probe("legacy-alias-skip", `${planHeader}| \`operations\` | skip | approved library-only delivery |\n`),
     false,
     "legacy operations alias with skip must make has_deployment_needs false",
   );
+
+  assert.equal(probe("summary-cannot-enable", "# 工作流计划\n", "# 实施报告\n\n需要部署，进入生产环境。\n"), false,
+    "an optional delivery narrative cannot introduce deployment requirements");
+  assert.equal(probe("summary-cannot-waive", "# 工作流计划\n", "# 实施报告\n\n无需部署，不需要部署。\n", true), true,
+    "an optional delivery narrative cannot waive deployment required by runtime configuration");
 
   console.log("MARS-109 operations split has_deployment_needs tests passed");
 } finally {

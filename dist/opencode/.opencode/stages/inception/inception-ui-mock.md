@@ -60,14 +60,7 @@ condition: has_ui_requirements
 
 ## 跳过处理
 
-用户明确跳过时，在 handoff.md 的 `UI 设计（I9 条件）` 中记录：
-
-- `UI 设计方式：跳过`；
-- `Figma 来源：不适用`；
-- `页面计划：不适用`；
-- `页面计划状态：不适用`；
-- `设计状态：skipped`；
-- 下一操作和跳过原因。
+用户明确跳过时，按签名 choice 的既有 `orchestrate report` 契约记录选择与原因，由引擎处理条件分支，不另写 UI 状态副本。
 
 已有外部 Figma 文件不属于跳过。
 
@@ -77,7 +70,7 @@ condition: has_ui_requirements
 
 ### 1. 建立页面计划与版本锁定
 
-加载 `inception-ui-page-planning.md`，生成跨模式唯一页面计划。将路径和 `draft` 状态写入 handoff.md，提交用户确认页面计划（这是对**页面范围**的一次确认，不是对每张 Mock 的确认）；确认后把 `页面计划状态` 更新为 `approved`。未确认前不得调用生成 Skill。
+加载 `inception-ui-page-planning.md`，生成跨模式唯一页面计划，并按该阶段契约提交用户确认（这是对**页面范围**的一次确认，不是对每张 Mock 的确认）。页面范围与批准来源保留在 canonical 计划及受控审批记录中，不另抄到 handoff.md。未确认前不得调用生成 Skill。
 
 按 `common-ui-generation-flow.md` 阶段 1，执行 `loeyae-aidlc ui lock --module {module-id} --route html-mock`，由工具记录 PRD/故事/page-plan 的真实 SHA-256、Git blob、ID digest、HEAD 与 upstream commit。`ui-page-planning` 未通过该锁的受控校验前不得生成。
 
@@ -101,15 +94,7 @@ condition: has_ui_requirements
 
 ### 5. I9 状态交接
 
-全量连续生成与每批技术读回完成后，在 handoff.md 中记录：
-
-- `UI 设计方式：html-mock`；
-- `Figma 来源：不适用`；
-- 页面计划路径和 `approved`；
-- `产物位置`；
-- `设计状态：review_pending`；
-- 涉及端、页面数、设计风格和风格来源；
-- `下一操作：执行 I10 UI 设计交叉验证`。
+全量连续生成与每批技术读回完成后，核对 canonical 页面计划、HTML manifest 与受控 Evidence。页面、来源和生成结果保留在这些权威产物中，不另抄页面计数或设计状态到 handoff。
 
 执行 `common-step-completion-protocol.md`，然后进入 I10。不得在 I10 前写入 `approved`。
 

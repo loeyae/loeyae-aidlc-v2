@@ -15,4 +15,6 @@ aidlc/active/aidlc-state.md
 aidlc/active/audit.md
 ```
 
-Agent 不能手工修改状态来跳过门禁，也不能把 Hook 输出当作质量证据。若 `handoff_prompt` 表示无法确认某项信息，必须如实保留该状态而不是宣称完成。
+state/audit/ledger 由引擎维护，Agent 只在已有业务产物或问题记录中补充真实决策、风险与例外，不抄写机器统计。需要简短摘要时读取 `orchestrate state summary`；仅在用户明确导出时保存到 `.aidlc/views/`，不作为阶段产物或门禁依据。
+
+Agent 不能手工修改状态来跳过门禁，也不能把 Hook 输出或派生摘要当作质量证据。若 `handoff_prompt` 表示无法确认某项信息，必须如实保留该状态而不是宣称完成。

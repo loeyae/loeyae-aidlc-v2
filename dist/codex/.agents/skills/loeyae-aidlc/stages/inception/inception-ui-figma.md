@@ -27,13 +27,7 @@ condition: ui_mode_figma
 
 ## 1. 初始化状态
 
-签名 I9 choice 写入 history 后，立即在 handoff.md 派生展示：
-
-- `UI 设计方式：figma`；
-- `Figma 来源`；
-- `设计状态：selected`；
-- 当前批次和下一操作；
-- 外部提供的文件 URL 或流程创建的“待创建”。
+签名 I9 choice 写入 history 后，按该选择进入对应分支；Figma 来源与唯一文件 URL 由 canonical manifest 及受控登记保存，不另维护手工状态表。
 
 ## 2. 身份与能力门禁
 
@@ -46,7 +40,7 @@ condition: ui_mode_figma
 
 ## 3. 建立页面计划
 
-加载 `inception-ui-page-planning.md` 生成跨模式唯一 `page-plan.md`，通过该 Stage 的 `ui-artifact-consistency` 后再提交用户确认。handoff.md 可派生展示路径和审核进度，但不得替代页面计划或 Evidence；未确认前不得调用 Figma 设计 Skill。
+加载 `inception-ui-page-planning.md` 生成跨模式唯一 `page-plan.md`，通过该 Stage 的 `ui-artifact-consistency` 后再提交用户确认。直接引用页面计划与受控批准记录，不另写路径和审核进度副本；未确认前不得调用 Figma 设计 Skill。
 
 外部提供模式还必须将计划项与现有 Page/Frame 对照。缺失页面、无法定位或语义冲突时阻断并请用户或设计方修正，不得静默写入外部文件。
 
@@ -98,7 +92,7 @@ condition: ui_mode_figma
 - 创建模式核对 Variables、Components、Auto Layout 和截图；已有稿分别核对读取来源/资产、只读状态和未验证的行为项，不能将存在截图视为全部通过；
 - `unresolved` 为空。
 
-随后运行受控 `ui-artifact-consistency` Producer。只有 manifest 与 Evidence 均通过后，才能把上述状态派生展示到 handoff.md，并将下一操作写为“执行 I10 UI 设计交叉验证”。
+随后运行受控 `ui-artifact-consistency` Producer。只有 manifest 与 Evidence 均通过后，才可提交阶段结果，并按引擎返回的 `handoff_prompt` 进入 I10 UI 设计交叉验证。
 
 执行 `common-step-completion-protocol.md`，然后进入 I10。不得在 I10 前写入 `approved`。
 

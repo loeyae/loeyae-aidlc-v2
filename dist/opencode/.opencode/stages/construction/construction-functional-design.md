@@ -227,6 +227,6 @@ condition: has_functional_design_needs
 - 如用户请求修改，更新设计并重新验证受影响内容
 
 ### 步骤 9：记录授权来源并更新进度
-- 在 audit.md 中记录通知、既有授权来源及时间戳
+- 在当前设计产物中保留真实决策、风险与授权例外；普通通知不另写审计副本
 - 如发生审阅或澄清，记录用户实际回复及时间戳，不虚构审批
-- 在 handoff.md 中标记功能设计阶段完成
+- 使用 `orchestrate report` 记录功能设计结果并展示 `handoff_prompt`

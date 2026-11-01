@@ -6,8 +6,8 @@ execution: CONDITIONAL
 scopes: [feature, enterprise, mvp]
 requires: [implementation-report]
 consumes:
-  - docs/aidlc/construction/build-test-report.md
-  - docs/aidlc/construction/implementation-report.md
+  - .aidlc/evidence/build-and-test/build-test-evidence.json
+  - .aidlc/evidence/implementation-report/implementation-report.json
 produces:
   - docs/aidlc/operation/operations-plan.md
 approval: notify
@@ -24,14 +24,14 @@ sensors: [doc-cascade]
 ## 前置条件
 
 - Construction 的实际构建和测试已通过并有证据
-- handoff.md 已记录技术栈、构建方式和项目类型
+- 从已确认的项目事实、构建配置与当前 workflow 获取技术栈、构建方式和项目类型
 - 项目是可部署服务，或用户明确要求部署准备
 
-纯库、纯本地工具或用户明确不需要部署时跳过，并在 handoff.md 记录理由。
+纯库、纯本地工具或用户明确不需要部署时，由引擎按适用性跳过并记录理由。
 
 ## 步骤 1：分析部署需求
 
-读取 handoff.md、构建配置和 Construction 证据，识别：
+读取已批准需求与设计、构建配置和 Construction 受控证据，识别：
 
 - 运行制品及启动方式
 - 外部依赖、端口、健康检查和数据迁移
@@ -55,6 +55,6 @@ sensors: [doc-cascade]
 - [ ] 部署需求分析完整（制品、依赖、现有配置、迁移点）
 - [ ] 关键部署决策已逐项与用户确认并记录
 - [ ] 规划文档不含任何环境专属硬编码或密钥
-- [ ] handoff.md 已记录规划结论与下一步（进入 operations-authorization 生成并授权配置）
+- [ ] 使用 `orchestrate report` 记录规划结果，并展示其 `handoff_prompt`（进入 operations-authorization 生成并授权配置）
 
 本阶段为可逆规划，审批为 notify；规划确认后进入 `operations-authorization` 生成目标配置并执行强制审批。

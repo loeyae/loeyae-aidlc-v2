@@ -234,8 +234,10 @@ try {
     const checks = rejections();
     const index = "# UC-D 索引\n\n- UC-D-001 status: ready\n- UC-D-002 status: ready\n";
     const notReady = legacyProject().project;
-    writeCases(notReady, { "UC-D-001-pages.md": ucd("UC-D-001"), "UC-D-002-retry.md": ucd("UC-D-002", { status: "deprecated" }) }, index);
-    checks.expect("case file without status: ready (index says ready)", check(notReady), /every UC-D must declare status: ready[\s\S]*UC-D-002/);
+    // Deprecated cases intentionally leave the active set; an unfinished active
+    // declaration must still be rejected even when the index claims readiness.
+    writeCases(notReady, { "UC-D-001-pages.md": ucd("UC-D-001"), "UC-D-002-retry.md": ucd("UC-D-002", { status: "draft" }) }, index);
+    checks.expect("active case status draft (index says ready)", check(notReady), /every UC-D must declare status: ready[\s\S]*UC-D-002/);
     const missing = legacyProject().project;
     writeCases(missing, { "UC-D-001-pages.md": ucd("UC-D-001"), "UC-D-002-retry.md": ucd("UC-D-002", { status: undefined }) }, index);
     checks.expect("case file without any status", check(missing), /every UC-D must declare status: ready[\s\S]*UC-D-002/);

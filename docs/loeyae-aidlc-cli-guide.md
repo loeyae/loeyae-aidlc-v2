@@ -248,6 +248,10 @@ loeyae-aidlc worktree verify \
 ## Evidence、诊断与溯源
 
 ```bash
+# 从现有状态及证据引用生成只读摘要，不写文件、不重跑测试
+loeyae-aidlc orchestrate state summary
+loeyae-aidlc orchestrate state summary --module <id> --format markdown
+
 # 生成当前阶段声明的所有 semantic sensor Evidence；每个 sensor 写入 canonical evidence_path
 loeyae-aidlc evidence run --stage <stage> --all-sensors
 
@@ -255,6 +259,8 @@ loeyae-aidlc runtime summary
 loeyae-aidlc runtime doctor
 loeyae-aidlc attest resolve --base origin/main --head HEAD
 ```
+
+`state summary` 默认输出 JSON；`--format markdown` 仅改变展示格式。`verification: not_checked` 表示本次查看没有重新验证门禁，文件存在不等于证据当前有效。只有完成命令的受控验证才能给出交付结论。默认无需保存摘要；明确要求导出时可保存到 `.aidlc/views/`。Core 自动维护 state/audit，单元只保留一份人工 `code-review.md`，无需手抄阶段计数、测试统计或另写重复实施/构建汇总。
 
 `evidence run --stage <stage> --all-sensors` 会读取编译后的 `stage-graph.json`，按阶段声明顺序依次运行 semantic checker；省略 `--sensor` 时，非 `build-and-test` 阶段也采用同一行为。`build-and-test` 使用真实命令 allowlist；build/check 默认必需，原生 Node 的来源可核验角色例外见 `core/knowledge/protocols/common-c8-role-applicability.md`（`role_applicability` + 包内批准政策，按全部模块聚合）。Node `--test --test-reporter=tap` 完整汇总可直接产证，业务测试仍须非零通过且零失败。`orchestrate report` 发现缺失 semantic Evidence 时会自动触发该受控产出器，失败仍由 report 门禁阻断。
 

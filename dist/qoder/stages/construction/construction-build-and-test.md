@@ -10,11 +10,10 @@ consumes:
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md
   - .aidlc/evidence/code-generation/{module-id}/{unit-id}/green-test-evidence.json
 produces:
-  - docs/aidlc/construction/build-test-report.md
-  - docs/aidlc/construction/build-and-test/build-and-test-summary.md
   - .aidlc/evidence/build-and-test/build-test-evidence.json
   - .aidlc/evidence/build-and-test/global-review-evidence.json
 sensors: [doc-cascade, build-test-evidence, test-quality, global-review-evidence]
+traceability: not_applicable
 requires: [code-generation, code-review]
 ---
 
@@ -39,7 +38,7 @@ requires: [code-generation, code-review]
 进入本步骤前，编排方必须验证以下证据存在且结论为通过：
 
 1. **每单元双轴审查记录**：`docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md` 中包含通过的 Spec + Standards 结果，且无未解决的关键/重要问题；仅建议开放时按严重度计数契约记录，不阻断。
-2. **最终全局审查记录**（C7 触发时）：审计文件中包含 `FINAL_GLOBAL` 模式审查结论且状态为通过。
+2. **最终全局审查记录**（C7 触发时）：存在通过的受控 `global-review-evidence.json`，其中 `FINAL_GLOBAL` 观察与当前输入匹配。
 3. **缺失任一记录或结论非通过时，C8 不得开始**——返回缺失步骤并告知用户原因。
 
 最终全局审查按 `sensors/global-review-evidence.md` 形成受控观察。`orchestrate state review-inputs` 只读返回当前单元和输入快照；完成实际 FINAL_GLOBAL 审查并产证后才能进入 C8。有效证据复用仍需核对当前输入，不用“已目测”或快照投影代替审查。
@@ -48,7 +47,7 @@ requires: [code-generation, code-review]
 
 ## 步骤 1：识别验证范围和命令
 
-1. 从变更文件、构建配置和 `handoff.md` 识别直接修改的模块、服务与工作单元；读取 I13 `test-cases/_index.md` 和“技术用例执行映射”，确保每个 ready UC-D 进入执行矩阵，I14 跳过时消费 `project/default` 范围。
+1. 从当前 directive、workflow state、变更文件和构建配置识别直接修改的模块、服务与工作单元；引用 I13 声明及受控 `uc_mapping`，确保适用 ready UC-D 已被真实验证覆盖，I14 跳过时消费 `project/default` 范围。
 2. 分布式项目加载 `common-runtime-dependency-analysis.md`，将构建依赖与运行时消费者闭包取并集，划分“必须构建 / 必须测试 / 仅观察”。
 3. 按受影响内容加载契约、配置和一致性治理规则，把消费者适配、版本组合、故障恢复和迁移用例加入矩阵。
 4. 按测试分层策略选择 L1–L4 中最小充分范围，覆盖必要 UC-D 和影响闭包，记录排除依据；不得因单模块、模块数量或进入本阶段自动全量。扩大到 L2/L4 时记录触发原因，L4 可分批，但不能遗漏运行时影响节点。
@@ -107,20 +106,11 @@ TypeScript 开发依赖若仅用于可核实的 noEmit 静态检查，可按 `co
 
 ## 步骤 6：保存验证证据
 
-创建或更新 `build-and-test-summary.md`，至少记录：
+使用 `aidlc-build-test-evidence` 的受控 producer 保存 `.aidlc/evidence/build-and-test/build-test-evidence.json`，绑定实际命令、工作目录、退出码、测试结果、来源及适用制品摘要。已有证据复用仍须满足当前门禁的范围与 freshness 校验；不得手工补写通过结果。
 
-| 字段 | 要求 |
-|------|------|
-| 命令 | 实际执行的完整命令和工作目录 |
-| 范围 | 实际 L1–L4 范围、模块、批次、影响分析、排除依据和扩大/全量触发原因 |
-| 复用 | 原命令、代码/工作树内容标识、时间、范围、证据位置及相关输入未变化的依据；不满足 freshness 校验时重新受控执行 |
-| 结果 | 退出码、通过/失败数量、关键摘要 |
-| 修复 | 失败根因、修改文件、重跑结果 |
-| 时间 | 执行时间 |
-| 外部证据 | CI/契约/测试/配置平台的稳定运行标识、不可变代码提交、适用的制品标识/摘要、范围、结果、位置与时间 |
-| 限制 | 未执行项及原因 |
+影响范围、排除/扩大依据、真实失败根因和未验证限制记录在已有执行计划、命令配置或相关问题记录中。机器已记录的统计不再复制成 `build-test-report.md` 或 `build-and-test-summary.md`。需要查看结果时使用只读 `orchestrate state summary`；用户明确要求导出时可保存至 `.aidlc/views/`，作为可重建展示视图。
 
-不得把密钥、令牌或含敏感信息的完整日志写入文档；保留足以复现和审计的脱敏摘要。
+外部证据须保留稳定运行标识、不可变代码提交、适用制品摘要及结果来源，并通过当前受控门禁。不得把密钥、令牌或敏感完整日志写入文档。
 
 ## 步骤 7：完成判定
 
@@ -130,12 +120,11 @@ TypeScript 开发依赖若仅用于可核实的 noEmit 静态检查，可按 `co
 - [ ] 适用的静态检查实际通过
 - [ ] 选定最小充分范围的必要测试具备实际执行且 0 失败的有效证据；复用满足当前门禁和 freshness 校验
 - [ ] 条件测试已执行，或已记录不适用依据
-- [ ] `build-and-test-summary.md` 包含命令和结果证据
-- [ ] `construction-implementation-report.md` 已生成或更新
-- [ ] handoff.md、计划复选框和审计已同步
+- [ ] 受控 `build-test-evidence.json` 有效，适用审查与质量门禁全部通过
+- [ ] 使用 `orchestrate report` 提交阶段结果，由引擎维护状态和审计；随后按 directive 进入 `implementation-report` 机器核验
 
-因环境、凭据、外部服务或资源限制无法执行时，状态必须是“阻塞/未验证”，并列出用户可执行的精确命令；外部证据只有在包含稳定运行标识、不可变代码提交、适用的制品标识/摘要，且与 handoff.md 当前验证目标一致时才能完成。缺失、无法比较或不匹配时保持“未验证”。
+因环境、凭据、外部服务或资源限制无法执行时，状态必须是“阻塞/未验证”，并列出用户可执行的精确命令；外部证据只有在包含稳定运行标识、不可变代码提交、适用的制品标识/摘要，且与当前 directive 和受控验证范围一致时才能完成。缺失、无法比较或不匹配时保持“未验证”。
 
 ## 完成消息
 
-完成消息只展示实际结果：构建命令数量、测试范围、通过/失败数量、条件测试、证据文件和未验证项。禁止使用“应该通过”“预计成功”或仅凭生成说明文档宣称完成。
+简短说明实际结果与未验证项，引用受控证据或只读摘要，并原样展示成功 `report` 返回的 `handoff_prompt`。不要求固定统计表或另写完成报告；禁止使用“应该通过”“预计成功”或仅凭说明文档宣称完成。

@@ -15,8 +15,8 @@
  * and contract columns are projections the engine refreshes after every write.
  */
 
-import { existsSync, lstatSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
-import { dirname, join, relative, resolve } from "path";
+import { existsSync, lstatSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { readModuleManifest, readUnitManifest, type ModuleDescriptor } from "./aidlc-execution-context";
 import {
@@ -40,6 +40,19 @@ const GRAPH_PATH = join(TOOL_DIR, "data", "stage-graph.json");
 
 /** Project-level roots written only by integration-owned stages. */
 const INTEGRATION_ROOTS = ["docs/aidlc/construction/", "docs/aidlc/operation/"];
+
+/** Reproducible display views, never an implicit source of implementation truth.
+ * Explicit shared contracts and command input declarations retain their binding. */
+function derivedDisplayPath(path: string, stage: string): boolean {
+  // These instructions are downstream display views for other stages, but the
+  // template checker itself must stay bound to the exact documents it verifies.
+  if (stage === "build-and-test-templates" && /^docs\/aidlc\/construction\/build-and-test\/(?:build-instructions|unit-test-instructions)\.md$/.test(path)) return false;
+  return path === "docs/aidlc/handoff.md"
+    || path === "docs/aidlc/construction/build-test-report.md"
+    || path === "docs/aidlc/construction/implementation-report.md"
+    || /^docs\/aidlc\/construction\/build-and-test\/(?:build-and-test-summary|build-instructions|unit-test-instructions)\.md$/.test(path)
+    || /^docs\/aidlc\/modules\/[a-z0-9][a-z0-9-]*\/construction\/[a-z0-9][a-z0-9-]*\/implementation-summary\.md$/.test(path);
+}
 
 interface GraphStageLite {
   slug: string;
@@ -351,7 +364,7 @@ function assertSameLineage(registry: WorkflowRegistry, label: string, state: Wor
   throw new Error(`workflow lineage conflict: ${label} ${state.workflow_id} belongs to lineage ${state.parent_workflow_id}, but the registry and the global workflow are lineage ${registry.global_workflow_id}. Two lineages are mixed in aidlc/active; restore the files of one lineage from git (orchestrate state verify lists both) instead of merging them.`);
 }
 
-export function loadWorkflowParts(projectRoot: string, missingModuleForRecovery?: string): WorkflowParts {
+export function loadWorkflowParts(projectRoot: string, missingModuleForRecovery?: string, recoveryTargetState?: WorkflowState): WorkflowParts {
   const registry = loadRegistry(projectRoot);
   const parts = new Map<string, WorkflowPart>();
   const global = loadWorkflowState(projectRoot, GLOBAL_WORKFLOW);
@@ -361,7 +374,7 @@ export function loadWorkflowParts(projectRoot: string, missingModuleForRecovery?
   if (global.workflow_id !== registry.global_workflow_id) throw new Error(`registry global workflow ${registry.global_workflow_id} does not match ${global.workflow_id}`);
   for (const row of registry.modules) {
     const ref: WorkflowRef = { kind: "module", module_id: row.module_id };
-    const state = loadWorkflowState(projectRoot, ref);
+    const state = row.module_id === missingModuleForRecovery && recoveryTargetState ? recoveryTargetState : loadWorkflowState(projectRoot, ref);
     // Recovery may reconstruct exactly one absent target. Ordinary readers and
     // writers still require every registry identity to have a valid state.
     if (!state && row.module_id === missingModuleForRecovery) continue;
@@ -506,16 +519,65 @@ export function legacyEvidenceScopeForInstance(projectRoot: string, instanceId: 
   return moduleEvidenceScope(projectRoot, instanceId, true);
 }
 
-function moduleEvidenceScope(projectRoot: string, instanceId: string, legacy: boolean): DigestScope {
+/** GREEN execution inputs exclude only named downstream reports, after shared inputs. */
+export function phaseExecutionScopeForInstance(projectRoot: string, instanceId: string): DigestScope {
+  return moduleEvidenceScope(projectRoot, instanceId, false, true);
+}
+
+/** Producers use current declarations; validators pass the recorded, validated
+ * nested keys (an empty list preserves evidence created before nested adoption). */
+export function phaseExecutionRevision(projectRoot: string, instanceId: string, nestedKeys: readonly string[] = nestedSourceRepos(projectRoot)): { version: "1"; scope: string; scope_digest: string } {
+  const scope = phaseExecutionScopeForInstance(projectRoot, instanceId);
+  const revision = readSourceRevision(projectRoot, scope, nestedKeys);
+  return { version: "1", scope: scope.label, scope_digest: revision.scope_digest! };
+}
+
+/** An artifact review receipt also names downstream report and sibling files. Retain its full
+ * semantic record while projecting only the exact input rows already outside
+ * this planning or execution scope. Unknown/malformed receipts keep their original byte binding. */
+function scopedReviewReceipt(projectRoot: string, moduleId: string, label: string, exclude: (path: string) => boolean, sharedPaths: string[]): string | undefined {
+  if (underAny(label, sharedPaths)) return undefined;
+  const path = join(projectRoot, label);
+  let cursor = resolve(projectRoot);
+  for (const segment of label.split("/")) {
+    cursor = join(cursor, segment);
+    if (!existsSync(cursor)) return undefined;
+    if (lstatSync(cursor).isSymbolicLink()) throw new Error(`GREEN_EXECUTION_INPUT_BINDING_INVALID: linked artifact review input ${label}`);
+  }
+  const realRelative = relative(realpathSync(projectRoot), realpathSync(path));
+  if (!lstatSync(path).isFile() || realRelative === ".." || realRelative.startsWith(`..${sep}`) || isAbsolute(realRelative)) throw new Error(`GREEN_EXECUTION_INPUT_BINDING_INVALID: artifact review input is not a project file ${label}`);
+  try {
+    const record = JSON.parse(readFileSync(path, "utf8")) as Record<string, any>;
+    const global = loadWorkflowState(projectRoot), module = loadWorkflowState(projectRoot, { kind: "module", module_id: moduleId });
+    const identities = [module?.workflow_id, global?.workflow_id].filter(Boolean);
+    const nonempty = (value: unknown): value is string => typeof value === "string" && !!value.trim();
+    const strings = (value: unknown): boolean => Array.isArray(value) && value.every(nonempty);
+    if (!record || record.version !== "1" || record.kind !== "artifact" || record.module_id !== moduleId || !identities.includes(record.workflow_id)
+      || !nonempty(record.delivery_scope) || !nonempty(record.reviewer) || !Array.isArray(record.inputs) || !record.inputs.length
+      || !Array.isArray(record.items) || !record.items.every((item: any) => item && nonempty(item.id) && ["supported", "conflict", "unverified"].includes(item.conclusion) && nonempty(item.rationale) && strings(item.references) && strings(item.examples))
+      || !Array.isArray(record.open_findings) || !record.open_findings.every((item: any) => item && nonempty(item.code) && nonempty(item.id) && nonempty(item.message))) return undefined;
+    const paths = new Set<string>();
+    for (const input of record.inputs) {
+      if (!input || !nonempty(input.path) || !/^[a-f0-9]{64}$/.test(String(input.sha256)) || Object.keys(input).some(key => !["path", "sha256"].includes(key))) return undefined;
+      const normalized = input.path.replace(/\\/g, "/");
+      if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized) || normalized.split("/").some((part: string) => !part || part === "." || part === "..") || paths.has(normalized)) return undefined;
+      paths.add(normalized);
+    }
+    return JSON.stringify({ ...record, inputs: record.inputs.filter((input: { path: string }) => !exclude(input.path.replace(/\\/g, "/"))) });
+  } catch { return undefined; }
+}
+
+function moduleEvidenceScope(projectRoot: string, instanceId: string, legacy: boolean, phaseExecution = false): DigestScope {
   const owner = ownerOfInstance(instanceId);
+  const stage = instanceId.split("@", 1)[0];
   const modules = manifestModules(projectRoot);
   if (owner.kind === "module") {
     const own = modules.find(module => module.module_id === owner.module_id);
     const otherPaths = modules.filter((module) => module.module_id !== owner.module_id).flatMap((module) => module.paths || []);
     const unitId = /@unit:([a-z0-9][a-z0-9-]*)$/.exec(instanceId)?.[1];
     const unitManifest = join(projectRoot, "docs/aidlc/modules", owner.module_id, "inception/unit-manifest.json");
-    const units = unitId && existsSync(unitManifest) ? readUnitManifest(projectRoot, owner.module_id) : [];
-    if (units.length && !units.some(unit => unit.unit_id === unitId)) throw new Error(`unknown evidence input unit ${unitId}`);
+    const units = (unitId || !legacy) && existsSync(unitManifest) ? readUnitManifest(projectRoot, owner.module_id) : [];
+    if (unitId && units.length && !units.some(unit => unit.unit_id === unitId)) throw new Error(`unknown evidence input unit ${unitId}`);
     const relevant = new Set<string>(unitId ? [unitId] : []);
     const visit = (id: string): void => {
       for (const dep of units.find(unit => unit.unit_id === id)?.evidence_inputs?.depends_on_units || []) {
@@ -538,40 +600,72 @@ function moduleEvidenceScope(projectRoot: string, instanceId: string, legacy: bo
     // the instance, any declared shared input is a real dependency of the plan.
     const baseline = !legacy && !unitId;
     const sharedPaths = [...(own?.contract_paths || []), ...units.filter(unit => baseline || relevant.has(unit.unit_id)).flatMap(unit => unit.evidence_inputs?.shared_paths || [])];
+    const construction = `docs/aidlc/modules/${owner.module_id}/construction/${unitId}`;
+    const downstreamReports = new Set(unitId ? [`${construction}/code-review.md`, `${construction}/audit.md`, `${construction}/audit/test-case-reconciliation.md`, `${construction}/audit/${unitId}.md`] : []);
+    const exclude = (path: string): boolean => {
+      if (underAny(path, sharedPaths)) return false;
+      if (!legacy && derivedDisplayPath(path, stage)) return true;
+      if (phaseExecution && downstreamReports.has(path)) return true;
+      if (narrowSources && privateUnits.some(unit => path.startsWith(`docs/aidlc/modules/${owner.module_id}/construction/${unit.unit_id}/`))) return true;
+      if (baseline && path.startsWith(`docs/aidlc/modules/${owner.module_id}/construction/`)) return true;
+      if (path.startsWith("docs/aidlc/modules/")) return path.split("/")[3] !== owner.module_id;
+      // Planning consumes upstream artifacts; its own implementation is downstream.
+      if (baseline) return path.startsWith(`docs/aidlc/modules/${owner.module_id}/construction/`) || underAny(path, own?.paths || [])
+        || underAny(path, INTEGRATION_ROOTS) || underAny(path, otherPaths);
+      return underAny(path, INTEGRATION_ROOTS) || (underAny(path, otherPaths) && !underAny(path, own?.paths || [])) || underAny(path, privateSource);
+    };
+    const reviewReceiptPath = `docs/aidlc/modules/${owner.module_id}/inception/artifact-review.json`;
+    const reviewReceipt = !legacy ? scopedReviewReceipt(projectRoot, owner.module_id, reviewReceiptPath, exclude, sharedPaths) : undefined;
     return {
-      label: `inputs-v2:module:${owner.module_id}${unitId ? `:unit:${unitId}` : ""}${baseline ? ":baseline" : ""}`,
+      label: `inputs-v2:module:${owner.module_id}${unitId ? `:unit:${unitId}` : ""}${baseline ? ":baseline" : ""}${phaseExecution ? ":execution-v1" : ""}`,
       projectedInputs: {
+        ...(reviewReceipt !== undefined ? { [reviewReceiptPath]: reviewReceipt } : {}),
         ...(modules.length ? { "docs/aidlc/ideation/module-manifest.json": JSON.stringify({ version: 1, module: own,
           ownership: modules.map(module => ({ module_id: module.module_id, paths: module.paths || [], contract_paths: module.contract_paths || [] })),
         }) } : {}),
-        ...(units.length ? { [`docs/aidlc/modules/${owner.module_id}/inception/unit-manifest.json`]: JSON.stringify({
+        ...(unitId && units.length ? { [`docs/aidlc/modules/${owner.module_id}/inception/unit-manifest.json`]: JSON.stringify({
         version: 1,
         units: narrowSources ? units.filter(unit => relevant.has(unit.unit_id)) : units,
         // Ownership controls exclusions even when sibling business metadata is irrelevant.
         ownership: units.map(unit => ({ unit_id: unit.unit_id, paths: unit.evidence_inputs?.paths || [] })),
         }) } : {}),
       },
-      exclude: (path) => {
-        if (underAny(path, sharedPaths)) return false;
-        if (narrowSources && privateUnits.some(unit => path.startsWith(`docs/aidlc/modules/${owner.module_id}/construction/${unit.unit_id}/`))) return true;
-        if (path.startsWith("docs/aidlc/modules/")) return path.split("/")[3] !== owner.module_id;
-        // The planning baseline stops at what planning actually consumed: the module's
-        // own source roots and construction tree are downstream implementation output.
-        // Integration roots, other modules and their sources stay excluded as before.
-        if (baseline) return path.startsWith(`docs/aidlc/modules/${owner.module_id}/construction/`) || underAny(path, own?.paths || [])
-          || underAny(path, INTEGRATION_ROOTS) || underAny(path, otherPaths);
-        return underAny(path, INTEGRATION_ROOTS) || (underAny(path, otherPaths) && !underAny(path, own?.paths || [])) || underAny(path, privateSource);
-      },
+      exclude,
     };
   }
-  if (owner.kind === "global" && isSplitLayout(projectRoot)) {
+  const splitGlobal = owner.kind === "global" && isSplitLayout(projectRoot);
+  if (legacy) {
+    if (!splitGlobal) return { label: "worktree", exclude: () => false };
     const modulePaths = modules.flatMap((module) => module.paths || []);
     return {
       label: "global",
       exclude: (path) => path.startsWith("docs/aidlc/modules/") || underAny(path, INTEGRATION_ROOTS) || underAny(path, modulePaths),
     };
   }
-  return { label: "worktree", exclude: () => false };
+  const sharedPaths = modules.flatMap(module => [
+    ...(module.contract_paths || []),
+    ...(existsSync(join(projectRoot, "docs/aidlc/modules", module.module_id, "inception/unit-manifest.json"))
+      ? readUnitManifest(projectRoot, module.module_id).flatMap(unit => unit.evidence_inputs?.shared_paths || []) : []),
+  ]);
+  const modulePaths = modules.flatMap(module => module.paths || []);
+  const exclude = (path: string): boolean => {
+    if (underAny(path, sharedPaths)) return false;
+    if (derivedDisplayPath(path, stage)) return true;
+    return splitGlobal && (path.startsWith("docs/aidlc/modules/") || underAny(path, INTEGRATION_ROOTS) || underAny(path, modulePaths));
+  };
+  // A project/integration review receipt must not indirectly rebind display rows.
+  // Split inception still excludes module receipts as before: projecting them here
+  // would introduce a new reverse dependency on downstream module construction.
+  const projectedInputs: Record<string, string> = {};
+  if (!splitGlobal) for (const module of modules) {
+    const path = `docs/aidlc/modules/${module.module_id}/inception/artifact-review.json`;
+    const receipt = scopedReviewReceipt(projectRoot, module.module_id, path, exclude, sharedPaths);
+    if (receipt !== undefined) projectedInputs[path] = receipt;
+  }
+  // Memoization keys include the label; different instruction ownership must not
+  // reuse a C8/project digest computed with the ordinary display exclusions.
+  const stageScope = stage === "build-and-test-templates" ? ":build-and-test-templates" : "";
+  return { label: `inputs-v3:${splitGlobal ? "global" : owner.kind === "integration" ? "integration" : "project"}${stageScope}`, exclude, projectedInputs };
 }
 
 /**

@@ -1,6 +1,26 @@
 [
   [
     "tsx",
+    "tests/test_delivery_summary.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_team_ucd_mapping.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_team_observed_mapping.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_team_continuation_inputs.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_team_handoff_recovery.ts"
+  ],
+  [
+    "tsx",
     "tests/test_audit_quality_freshness.ts"
   ],
   [
