@@ -2,6 +2,9 @@ import { existsSync, readFileSync } from "fs";
 import { qualityBase, qualityChangeIssues, qualityEvidenceErrors, qualityInput, qualityLegacyResult, qualityPath, qualityResult, qualitySection, type QualityContext, type QualityInput, type QualityIssue } from "./aidlc-quality-gates";
 import { artifactConsistency, dependencyReadiness, fieldCapability, storyRuleConsistency } from "./aidlc-quality-checks";
 import { qualityUiCheck } from "./aidlc-quality-ui";
+import { evidenceTimeError } from "./aidlc-evidence-policy";
+import { argvDigest, evidenceFreshnessBindingErrors, semanticCommandArgv } from "./aidlc-evidence";
+import { semanticCheckerIdentityErrors } from "./aidlc-checker-identity";
 
 export function deliveryEvidencePath(ctx: QualityContext, stage: string, sensor: string): string {
   return `.aidlc/evidence/${stage}/${ctx.module_id ? `${ctx.module_id}/` : ""}${sensor}.json`;
@@ -15,8 +18,13 @@ export function controlledQualityErrors(ctx: QualityContext, sensor: string, evi
   const producer = evidence.producer as Record<string, unknown> | undefined;
   const checker = evidence.checker as Record<string, unknown> | undefined;
   if (evidence.evidence_version !== "1" || producer?.name !== "loeyae-aidlc-evidence" || producer.mode !== "controlled" || !producer.execution_id || checker?.id !== `builtin:${sensor}` || checker.sensor !== sensor || checker.exit_code !== 0 || checker.status !== "passed" || !/^[a-f0-9]{64}$/.test(String(checker.argv_digest))) errors.push("GATE_EVIDENCE_MISSING: controlled provenance/execution invalid");
-  const time = Date.parse(String(evidence.timestamp));
-  if (!Number.isFinite(time) || time > Date.now() + 60000 || Date.now() - time > 24 * 3600000) errors.push("GATE_EVIDENCE_STALE: freshness policy (24h)");
+  if (checker) {
+    for (const error of semanticCheckerIdentityErrors(checker)) errors.push(`GATE_EVIDENCE_STALE: ${error}`);
+    if (checker.command_version !== undefined && (checker.command_version !== 2 || checker.argv_digest !== argvDigest(semanticCommandArgv(sensor, { current_module: ctx.module_id }, ctx.root)))) errors.push("GATE_EVIDENCE_STALE: semantic checker command no longer matches the controlled producer");
+  }
+  const timeError = evidenceTimeError(evidence, sensor);
+  if (timeError) errors.push(`GATE_EVIDENCE_STALE: ${timeError}`);
+  for (const error of evidenceFreshnessBindingErrors(ctx.stage, evidence, ctx.root)) errors.push(`GATE_EVIDENCE_STALE: ${error}`);
   const expectedInstance = ctx.module_id ? `${ctx.stage}@module:${ctx.module_id}` : ctx.stage;
   if (evidence.stage_instance !== expectedInstance) errors.push("GATE_SCOPE_MISMATCH: stage instance");
   return errors;

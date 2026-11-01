@@ -4251,12 +4251,16 @@ function missingSemanticEvidence(instance: StageInstance): string[] {
 }
 
 function produceMissingSemanticEvidence(instance: StageInstance, refresh = false): string | null {
-  const missing = missingSemanticEvidence(instance);
+  // Keep the full inventory for upgrade diagnostics. Automatic repair excludes
+  // phase commands even though they share the semantic producer registry.
+  const missing = missingSemanticEvidence(instance)
+    .filter((sensor) => !["red-test-evidence", "green-test-evidence", "baseline-test-evidence"].includes(sensor));
   if (missing.length === 0) return null;
   const evidenceTool = join(__dirname, "aidlc-evidence.ts");
-  // C8's build evidence is separate from its semantic sensors. Repairing a missing
-  // test-quality record must not rerun already completed build/test/check commands.
-  const invocations = instance.stage.slug === "build-and-test" ? missing.map(sensor => ["--sensor", sensor]) : [["--all-sensors"]];
+  // Repair only missing semantic observations. Phase evidence (RED/BASELINE/GREEN
+  // and C8 commands) is validated by the normal gates, never rerun as a side effect
+  // of repairing an unrelated semantic record.
+  const invocations = missing.map(sensor => ["--sensor", sensor]);
   for (const invocation of invocations) {
     const result = runSync(process.execPath, [TSX_CLI, evidenceTool, "run", "--stage", instance.stage.slug, "--instance", instance.instance_id, ...invocation, ...(refresh ? ["--refresh"] : [])], {
       cwd: PROJECT_ROOT,
@@ -4273,7 +4277,7 @@ function produceMissingSemanticEvidence(instance: StageInstance, refresh = false
       return `automatic semantic evidence production failed for ${instance.instance_id} (${missing.join(", ")}): ${detail || `exit code ${result.status}`}`;
     }
   }
-  const stillMissing = missingSemanticEvidence(instance);
+  const stillMissing = missingSemanticEvidence(instance).filter(sensor => missing.includes(sensor));
   return stillMissing.length === 0
     ? null
     : `automatic semantic evidence production did not write: ${stillMissing.join(", ")}`;
@@ -7906,7 +7910,7 @@ function stagePlanDirective(flags: Record<string, string>): Directive {
   return {
     kind: "print",
     stage_plan: plan,
-    message: `StagePlan: ${plan.selected.length} selected (${plan.required.length} graph-required), ${plan.skipped.length} skipped; profile ${plan.profile.level} from ${plan.profile.provenance}. This read-only view matches execution selection; gates and evidence requirements remain unchanged.`,
+    message: `StagePlan: ${plan.selected.length} selected (${plan.required.length} required by graph or risk), ${plan.skipped.length} skipped; profile ${plan.profile.level} from ${plan.profile.provenance}. This read-only view matches execution selection; gates and evidence requirements remain unchanged.`,
   };
 }
 

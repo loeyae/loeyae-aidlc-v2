@@ -1,12 +1,7 @@
-<!-- OpenCode 启动时注入的精简路由；权威流程见 core-workflow.md。 -->
+# 已退役：OpenCode 精简路由
 
-# AI-DLC 路由指令（OpenCode）
+此文件仅为兼容历史引用而保留，已不作为 OpenCode 启动指令或流程路由入口。
 
-- 用户明确提到 AI-DLC/aidlc 时，先加载 `core-workflow.md`，不得直接编码。
-- 未明确使用 AI-DLC 时，复杂功能、架构或多文件任务进入 AI-DLC；简单变更可直接处理。
-- 进入后先执行工作区检测，再按 `common-complexity-assessment.md` 选择路径。
-- 存量分布式系统按实际风险加载运行时依赖、契约、配置和一致性规则；技术适配只有检测到工作区证据时加载。
-- 阶段顺序：Inception（规划）→ Construction（实现与实际验证）→ Operations（部署准备，条件）。
-- Inception 中 I3“场景分析与模块映射”始终执行；业务产物门禁完成后必须触发 PRD 决策检查点，选择产出时在 I11 前执行 I15 汇编和 I16 一致性审查，I16 未通过不得继续 I11 或 Construction。
-- Operations 不覆盖部署后的生产运营。
-- 只加载当前签名路由需要的 steering；恢复时先由编排器验证 `aidlc/active/aidlc-state.md`，再读取 `docs/aidlc/handoff.md` 的派生人类摘要。
+现行入口、控制面与阶段执行规则见 [AI-DLC 核心工作流](core-workflow.md)。阶段选择由编排器依据当前阶段图、scope、execution profile 和用户选择决定；执行时加载当前 directive 的 `rule_load_plan.load_now`。
+
+本文件不再维护独立阶段顺序或审批门禁。PRD 是否生成遵循现行图中的用户可选阶段，恢复会话遵循 [会话交接协议](common-session-handoff.md)。

@@ -8,6 +8,14 @@ import { fileURLToPath } from "node:url";
 const tools = dirname(fileURLToPath(import.meta.url));
 let memo: string | undefined;
 const runtime = { node: process.version, platform: process.platform, arch: process.arch };
+
+/** Share scans within one synchronous producer invocation, never across invocations. */
+export function withSemanticCheckerIdentityMemoization<T>(operation: () => T): T {
+  memo = undefined;
+  try { return operation(); }
+  finally { memo = undefined; }
+}
+
 export function semanticCheckerDigest(refresh = false): string {
   if (memo && !refresh) return memo;
   const hash = createHash("sha256");

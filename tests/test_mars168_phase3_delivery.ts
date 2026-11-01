@@ -17,7 +17,8 @@ f.delivery.pending_items = [{ id: "CL-OPEN", blocking: true, status: "pending", 
 f.delivery.pending_items = []; (f.delivery.package as unknown[]).pop(); f.section("cross-validation-report", f.delivery); f.blocked("delivery-readiness", "DELIVERY_PACKAGE_INCOMPLETE");
 (f.delivery.package as unknown[]).push({ path: `${f.base}/development-handoff.md`, kind: "handoff" }); f.section("cross-validation-report", f.delivery); f.syncArtifactReview(); f.pass("artifact-consistency"); f.pass("delivery-readiness");
 const depPath = `.aidlc/evidence/requirements-analysis/shop/dependency-readiness.json`; const evidence = readFileSync(join(f.root, depPath), "utf8");
-f.write(depPath, JSON.stringify({ ...JSON.parse(evidence), timestamp: "2000-01-01T00:00:00Z" })); f.blocked("delivery-readiness", "GATE_EVIDENCE_STALE");
+f.write(depPath, JSON.stringify({ ...JSON.parse(evidence), timestamp: "2000-01-01T00:00:00Z" })); f.pass("delivery-readiness");
+f.write(depPath, JSON.stringify({ ...JSON.parse(evidence), timestamp: "2000-01-01T00:00:00Z", freshness: { kind: "external", max_age_ms: 3600_000, reason: "Supplier confirmation expires after one hour" } })); f.blocked("delivery-readiness", "GATE_EVIDENCE_STALE");
 f.write(depPath, evidence); f.pass("delivery-readiness");
 f.write(`${f.base}/source.md`, "REQ-001 OMS changed to incremental delivery"); f.blocked("delivery-readiness", "DELIVERY_GATE_NOT_READY");
 for (const route of ["skip", "not-selected"]) { const other = new QualityFixture(); prepare(other, route); other.pass("delivery-readiness"); }

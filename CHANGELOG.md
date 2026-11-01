@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 4.23.3 — 2026-11-01
+
+- Apply one content/freshness policy to quality admission, downstream delivery checks and controlled evidence reuse; bind configured external windows to the current stage configuration.
+- Repair only missing semantic observations during completion/re-attestation, preserving valid GREEN and build/test evidence while keeping failed or missing phase evidence blocking.
+- Derive advisory stage plans from the execution selector, including risk-required stages and their dependencies; retire the obsolete independent slim workflow route.
+- Execute the evidence producer inside the CLI process and scope checker identity memoization to each invocation; retain complete dependency-byte scans and pre/post-execution identity validation.
+
+- Preserve ordinary semantic `--config` freshness compatibility while enforcing recorded external windows; require exact current-stage policy matching whenever the default stage allowlist declares a window.
+- Synchronize package, stage-graph, plugin and marketplace versions at 4.23.3 and regenerate all nine harness distributions.
+
 ## 4.23.2 — 2026-11-01
 
 - Resolve shared skill resources relative to each `SKILL.md` with explicit `../../knowledge/...` and `../../stages/...` links, avoiding incorrect skill-local `references/` paths.

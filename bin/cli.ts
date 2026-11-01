@@ -154,16 +154,6 @@ function run(script: string, args: string[], input?: string): never | void {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-function runInteractive(script: string, args: string[]): never | void {
-  const tsx = require.resolve("tsx/cli");
-  const result = spawnSync(process.execPath, [tsx, resolve(ROOT, script), ...args], {
-    stdio: "inherit",
-    cwd: process.cwd(),
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) process.exit(result.status ?? 1);
-}
-
 function runExternal(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env): number {
   let spec;
   try {
@@ -1407,7 +1397,7 @@ Examples:
 `);
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
     case "orchestrate": {
@@ -1418,10 +1408,9 @@ function main(): void {
     case "recover": throw new Error("Use orchestrate next to continue the active Markdown workflow, or start a new workflow with an explicit work description.");
     case "approve": throw new Error("Use orchestrate report --result approved --user-input Approve for lightweight approval.");
     case "evidence":
-      // Refresh can scan large and nested repositories. Inherit streams so
-      // progress reaches the user while the producer is still running.
-      if (rest.includes("--refresh")) runInteractive("core/tools/aidlc-evidence.ts", rest);
-      else run("core/tools/aidlc-evidence.ts", rest);
+      // Keep the producer in this process: arguments, session binding, cwd and
+      // live progress streams are already available here. Checkers remain isolated.
+      (await import("../core/tools/aidlc-evidence")).runEvidenceCli(rest);
       break;
     case "document-slices": run("core/tools/aidlc-document-slices.ts", rest); break;
     case "unit": run("core/tools/aidlc-team-light.ts", rest); break;
@@ -1457,7 +1446,7 @@ function main(): void {
 }
 
 try {
-  main();
+  await main();
 } catch (error) {
   console.error(`❌ ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;

@@ -1,6 +1,6 @@
 import { assertSessionClaim, withSessionPublication, sessionBinding, type SessionBinding } from "./aidlc-light-state";
 import { createHash, randomUUID } from "crypto";
-import { semanticCheckerDigest, semanticCheckerIdentityErrors } from "./aidlc-checker-identity";
+import { semanticCheckerDigest, semanticCheckerIdentityErrors, withSemanticCheckerIdentityMemoization } from "./aidlc-checker-identity";
 import { QUALITY_SENSORS, qualityAdoption, recordQualityCheckpoint, type QualitySnapshot } from "./aidlc-quality-gates";
 import { SLICE_SENSOR, sliceEvidenceErrors, type SliceContext } from "./aidlc-document-slices";
 import { markProgress, startProgressHeartbeat } from "./aidlc-progress";
@@ -189,12 +189,12 @@ function isInside(root: string, candidate: string): boolean {
   return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
 }
 
-function safeProjectPath(value: string, field: string, mustExist = false): string {
-  const candidate = resolve(PROJECT_ROOT, nonEmptyString(value, field));
-  if (!isInside(PROJECT_ROOT, candidate)) fail(`${field} escapes project root: ${value}`);
+function safeProjectPath(value: string, field: string, mustExist = false, projectRoot = PROJECT_ROOT): string {
+  const candidate = resolve(projectRoot, nonEmptyString(value, field));
+  if (!isInside(projectRoot, candidate)) fail(`${field} escapes project root: ${value}`);
 
-  const rel = relative(PROJECT_ROOT, candidate);
-  let cursor = PROJECT_ROOT;
+  const rel = relative(projectRoot, candidate);
+  let cursor = projectRoot;
   if (rel) {
     for (const segment of rel.split(sep)) {
       cursor = join(cursor, segment);
@@ -206,20 +206,20 @@ function safeProjectPath(value: string, field: string, mustExist = false): strin
   if (mustExist && !existsSync(candidate)) fail(`${field} does not exist: ${candidate}`);
   if (existsSync(candidate)) {
     const real = realpathSync(candidate);
-    if (!isInside(PROJECT_ROOT, real)) fail(`${field} resolves outside project root: ${candidate}`);
+    if (!isInside(projectRoot, real)) fail(`${field} resolves outside project root: ${candidate}`);
   }
   return candidate;
 }
 
-function requireRegularFile(path: string, field: string): string {
-  const safe = safeProjectPath(path, field, true);
+function requireRegularFile(path: string, field: string, projectRoot = PROJECT_ROOT): string {
+  const safe = safeProjectPath(path, field, true, projectRoot);
   const stat = lstatSync(safe);
   if (!stat.isFile() || stat.isSymbolicLink()) fail(`${field} must be a regular non-symlink file: ${safe}`);
   return safe;
 }
 
-function requireDirectory(path: string, field: string): string {
-  const safe = safeProjectPath(path, field, true);
+function requireDirectory(path: string, field: string, projectRoot = PROJECT_ROOT): string {
+  const safe = safeProjectPath(path, field, true, projectRoot);
   const stat = lstatSync(safe);
   if (!stat.isDirectory() || stat.isSymbolicLink()) fail(`${field} must be a regular non-symlink directory: ${safe}`);
   return safe;
@@ -351,32 +351,38 @@ function requireCommandConfig(path: string, stage: string): EvidenceConfig {
 
 /**
  * Built-in semantic checkers need no external command, so the allowlist is optional for them.
- * A missing allowlist or one written for another stage is ignored; a matching one is still validated.
+ * A missing allowlist or a shared allowlist written for another stage is ignored.
+ * A stage-specific file is always validated, including its declared stage.
  */
-function optionalSemanticConfig(path: string, stage: string): EvidenceConfig | null {
+function optionalSemanticConfig(path: string, stage: string, projectRoot = PROJECT_ROOT): EvidenceConfig | null {
   if (!existsSync(path)) return null;
   let declaredStage: unknown;
   try {
     const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> | null;
     declaredStage = value && typeof value === "object" ? value.stage : undefined;
   } catch {
-    return parseConfig(path, stage, true);
+    return parseConfig(path, stage, true, projectRoot);
   }
-  if (declaredStage !== stage) return null;
-  return parseConfig(path, stage, true);
+  if (declaredStage !== stage && resolve(path) !== resolve(projectRoot, STAGE_CONFIG_DIR, `${stage}.json`)) return null;
+  return parseConfig(path, stage, true, projectRoot);
 }
 
-/** A configured external window cannot be omitted or weakened in an envelope. */
-export function evidenceFreshnessBindingErrors(stage: string, evidence: Record<string, unknown>): string[] {
+function configuredFreshnessErrors(config: EvidenceConfig | null, evidence: Record<string, unknown>): string[] {
+  return JSON.stringify(config?.freshness) !== JSON.stringify(evidence.freshness)
+    ? ["evidence freshness no longer matches the stage command configuration"] : [];
+}
+
+/** Declared stage windows constrain admission; producer reuse separately invalidates changed or removed policies. */
+export function evidenceFreshnessBindingErrors(stage: string, evidence: Record<string, unknown>, projectRoot = PROJECT_ROOT): string[] {
   try {
-    const config = optionalSemanticConfig(resolveCommandConfigPath(PROJECT_ROOT, stage), stage);
-    return config?.freshness && JSON.stringify(config.freshness) !== JSON.stringify(evidence.freshness)
-      ? ["evidence freshness no longer matches the stage command configuration"] : [];
+    const root = realpathSync(projectRoot);
+    const config = optionalSemanticConfig(resolveCommandConfigPath(root, stage), stage, root);
+    return config?.freshness === undefined ? [] : configuredFreshnessErrors(config, evidence);
   } catch (error) { return [String(error)]; }
 }
 
-function parseConfig(path: string, stage: string, allowEmptyCommands = false): EvidenceConfig {
-  const configPath = requireRegularFile(path, "config");
+function parseConfig(path: string, stage: string, allowEmptyCommands = false, projectRoot = PROJECT_ROOT): EvidenceConfig {
+  const configPath = requireRegularFile(path, "config", projectRoot);
   let value: unknown;
   try {
     value = JSON.parse(readFileSync(configPath, "utf8"));
@@ -405,7 +411,7 @@ function parseConfig(path: string, stage: string, allowEmptyCommands = false): E
     const sensor = role === "semantic" ? nonEmptyString(record.sensor, `commands[${i}].sensor`) : undefined;
     if (sensor && !SEMANTIC_SENSORS.has(sensor)) fail(`commands[${i}].sensor is not a supported semantic sensor: ${sensor}`);
     const argv = validateArgv(record.argv, `commands[${i}].argv`);
-    const cwd = record.cwd === undefined ? PROJECT_ROOT : requireDirectory(String(record.cwd), `commands[${i}].cwd`);
+    const cwd = record.cwd === undefined ? projectRoot : requireDirectory(String(record.cwd), `commands[${i}].cwd`, projectRoot);
     const timeout = record.timeout_ms === undefined ? 10 * 60 * 1000 : Number(record.timeout_ms);
     if (!Number.isInteger(timeout) || timeout < 1 || timeout > MAX_TIMEOUT_MS) {
       fail(`commands[${i}].timeout_ms must be an integer between 1 and ${MAX_TIMEOUT_MS}`);
@@ -435,7 +441,7 @@ function parseConfig(path: string, stage: string, allowEmptyCommands = false): E
       const id = nonEmptyString(record.id, `artifacts[${i}].id`);
       if (artifactIds.has(id)) fail(`duplicate artifact id: ${id}`);
       artifactIds.add(id);
-      artifacts.push({ id, path: requireRegularFile(String(record.path), `artifacts[${i}].path`) });
+      artifacts.push({ id, path: requireRegularFile(String(record.path), `artifacts[${i}].path`, projectRoot) });
     }
   }
 
@@ -627,12 +633,12 @@ function writeBlockedReport(sensor: string, state: ProducerState, report: Record
   return reportRelative;
 }
 
-export function semanticCommandArgv(sensor: string, state: { current_module?: string; current_unit?: string }): string[] {
+export function semanticCommandArgv(sensor: string, state: { current_module?: string; current_unit?: string }, projectRoot = PROJECT_ROOT): string[] {
   const tsx = require.resolve("tsx/cli");
   const checker = resolve(TOOL_DIR, "aidlc-semantic-checks.ts");
   // Split layout: pass the module scope explicitly so module-owned checkers (diagram-contract)
   // only inspect the module's own artifacts.
-  const scopeArgs = isSplitLayout(PROJECT_ROOT) && state.current_module
+  const scopeArgs = isSplitLayout(projectRoot) && state.current_module
     ? ["--module", state.current_module, ...(state.current_unit ? ["--unit", state.current_unit] : [])]
     : [];
   return [process.execPath, tsx, checker, "--sensor", sensor, ...scopeArgs];
@@ -1254,7 +1260,7 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   // 只有 diff 触及的 artifact 的直接依赖证据才重跑。
   const inputs = stageInputs(options.stage, state);
   const prior = priorEvidenceRecord(output);
-  if (options.refresh && inputs && prior && !["global-review-evidence", "deployment-validation"].includes(sensor) && reusableSemanticEvidence(prior, inputs, state, sensor)
+  if (options.refresh && inputs && prior && !["global-review-evidence", "deployment-validation"].includes(sensor) && configuredFreshnessErrors(config, prior).length === 0 && reusableSemanticEvidence(prior, inputs, state, sensor)
     && (sensor !== SLICE_SENSOR || (!sliceEvidenceErrors(producerSliceContext(state), prior).length && !sliceCandidateError(state, prior)))) {
     const summary = { action: "reused" as const, inputs_digest: inputs.digest };
     if (!quiet) console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}`, ...summary }, null, 2));
@@ -1676,7 +1682,7 @@ function runProducer(args: string[]): void {
   // MARS-277: the producer checks several sensors per invocation against shared
   // digest scopes; project commands run inside invalidate the memoized digests.
   const stopHeartbeat = args.includes("--refresh") ? startProgressHeartbeat() : () => {};
-  try { withRevisionMemoization(() => runProducerInner(args)); }
+  try { withSemanticCheckerIdentityMemoization(() => withRevisionMemoization(() => runProducerInner(args))); }
   finally { stopHeartbeat(); }
 }
 
@@ -1786,11 +1792,16 @@ function runProducerInner(args: string[]): void {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+/** Shared CLI entry; importing producer helpers must not execute a command. */
+export function runEvidenceCli(args: string[]): void {
   try {
-    runProducer(process.argv.slice(2));
+    runProducer(args);
   } catch (error) {
     console.error(`Evidence producer blocked: ${error instanceof Error ? error.message : String(error)}`);
-    process.exit(2);
+    process.exitCode = 2;
   }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  runEvidenceCli(process.argv.slice(2));
 }

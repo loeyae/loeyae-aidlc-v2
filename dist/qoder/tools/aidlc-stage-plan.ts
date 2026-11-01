@@ -7,7 +7,7 @@
 
 import type { StageGraph, StageNode } from "./aidlc-orchestrate";
 import type { ExecutionProfile, ExecutionProfileLevel } from "./aidlc-execution-profile";
-import { selectExecutableStages } from "./aidlc-stage-selection";
+import { riskRequiredStages, selectExecutableStages } from "./aidlc-stage-selection";
 
 export type StagePlanProfileProvenance =
   | "persisted_execution_profile"
@@ -15,6 +15,8 @@ export type StagePlanProfileProvenance =
 
 export type StagePlanReason =
   | "required_by_graph"
+  | "risk_required"
+  | "risk_dependency"
   | "scope_matches"
   | "optional_stage_selected"
   | "scope_not_applicable"
@@ -98,9 +100,9 @@ function entry(
 /**
  * Build a deterministic, read-only projection of graph selection.
  *
- * The predicates intentionally match getExecutableStages().  Phase 3 adds a
- * profile-aware lightweight slice, but only for graph-proven instruction-only
- * stages with neither evidence nor selected-stage dependents.
+ * The production selector owns the candidate set, including risk dependency
+ * closure and the lightweight slice. This projection only explains selection;
+ * stage conditions and user choices are still evaluated by the executor.
  */
 export function buildStagePlan(graph: StageGraph, input: BuildStagePlanInput): StagePlan {
   if (!graph || !Array.isArray(graph.stages)) {
@@ -114,6 +116,7 @@ export function buildStagePlan(graph: StageGraph, input: BuildStagePlanInput): S
   }
 
   const optional = new Set(input.selectedOptionalStages ?? []);
+  const requiredByRisk = riskRequiredStages(input.executionProfile);
   const executable = new Set(
     selectExecutableStages(
       graph.stages,
@@ -129,24 +132,29 @@ export function buildStagePlan(graph: StageGraph, input: BuildStagePlanInput): S
   for (const stage of graph.stages) {
     const scopeEligible = stage.execution === "ALWAYS" || stage.scopes.includes(input.scope);
     const optionalSelected = stage.selection !== "user" || optional.has(stage.slug);
-    if (!scopeEligible) {
-      skipped.push(entry(stage, "skipped", false, "scope_not_applicable"));
-      continue;
-    }
-    if (!optionalSelected) {
-      skipped.push(entry(stage, "skipped", false, "optional_stage_not_selected"));
-      continue;
-    }
     if (!executable.has(stage.slug)) {
-      skipped.push(entry(stage, "skipped", false, "lightweight_instruction_only"));
+      const reason: StagePlanReason = !scopeEligible
+        ? "scope_not_applicable"
+        : !optionalSelected
+          ? "optional_stage_not_selected"
+          : "lightweight_instruction_only";
+      skipped.push(entry(stage, "skipped", false, reason));
       continue;
     }
-    const isRequired = stage.execution === "ALWAYS";
-    const reason: StagePlanReason = isRequired
+
+    // Scope-external candidates can only be introduced by the selector's risk
+    // closure. Do not independently traverse that closure or reapply scope
+    // eligibility: either would let the advisory view drift from execution.
+    const isRequired = stage.execution === "ALWAYS" || requiredByRisk.has(stage.slug) || !scopeEligible;
+    const reason: StagePlanReason = stage.execution === "ALWAYS"
       ? "required_by_graph"
-      : stage.selection === "user"
-        ? "optional_stage_selected"
-        : "scope_matches";
+      : requiredByRisk.has(stage.slug)
+        ? "risk_required"
+        : !scopeEligible
+          ? "risk_dependency"
+          : stage.selection === "user"
+            ? "optional_stage_selected"
+            : "scope_matches";
     const planned = entry(stage, "selected", isRequired, reason);
     selected.push(planned);
     if (isRequired) required.push(planned);

@@ -1,6 +1,22 @@
 [
   [
     "tsx",
+    "tests/test_audit_quality_freshness.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_audit_semantic_phase_reuse.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_audit_stage_plan.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_audit_evidence_process_cost.ts"
+  ],
+  [
+    "tsx",
     "tests/test_audit_maintenance.ts"
   ],
   [
