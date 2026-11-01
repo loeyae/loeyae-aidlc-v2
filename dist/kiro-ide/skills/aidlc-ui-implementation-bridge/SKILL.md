@@ -8,6 +8,12 @@ triggers: Figma 转代码, Mock 转代码, 前端平台规范, 组件映射, 设
 
 开始时宣布："使用 aidlc-ui-implementation-bridge 执行 UI 实现桥接"。
 
+## 资源路径
+
+共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+
+读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+
 ## 输入
 
 调用方必须提供：
@@ -22,7 +28,7 @@ triggers: Figma 转代码, Mock 转代码, 前端平台规范, 组件映射, 设
 
 ## 加载
 
-加载发布包中的 `stages/construction/construction-ui-implementation-bridge.md`。
+加载发布包中的 [stages/construction/construction-ui-implementation-bridge.md](../../stages/construction/construction-ui-implementation-bridge.md)。
 
 本能力由桥接 directive 在 RED 完成后、代码生成前调用，是本单元 spec 的创建/更新入口。Inception 提供批准事实，代码生成消费并复验；不要求前一阶段提前创建本阶段产物。
 

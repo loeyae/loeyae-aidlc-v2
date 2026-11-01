@@ -10,6 +10,12 @@ Independent Capability — not an AIDLC phase.
 
 本能力只处理用户明确要求 SVG 的请求：调用前 workflow state 的 `Diagram Format` 必须已由 `loeyae-aidlc orchestrate diagram-format --set svg --user-input "<用户原话>"` 记录为 svg（见 `core-workflow.md` 的“文档图表格式”）。文档创建或优化的默认 Mermaid 输出由调用 Phase 直接按 Mermaid 标准写入，不调用本能力。
 
+## 资源路径
+
+共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+
+读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+
 ## 输入
 
 调用方提供：
@@ -29,9 +35,9 @@ Independent Capability — not an AIDLC phase.
 
 ## 加载
 
-1. 发布包中的 `knowledge/design/common-diagram-design-standards.md`；
-2. 发布包中的 `knowledge/design/common-svg-diagram-standards.md`；
-3. 发布包中的 `knowledge/design/common-structural-region-occlusion-contract.md`；
+1. 发布包中的 [knowledge/design/common-diagram-design-standards.md](../../knowledge/design/common-diagram-design-standards.md)；
+2. 发布包中的 [knowledge/design/common-svg-diagram-standards.md](../../knowledge/design/common-svg-diagram-standards.md)；
+3. 发布包中的 [knowledge/design/common-structural-region-occlusion-contract.md](../../knowledge/design/common-structural-region-occlusion-contract.md)；
 4. `constraints` 包含 `delivery-business-flow` 时，自动应用交付型流程约束。
 
 Mermaid 可作为文档默认输出，但不由本 SVG Capability 生成；已有 Mermaid 仅在当前请求已明确选择 SVG 迁移时作为业务语义来源读取。二维文本图只用于遗留语义识别。

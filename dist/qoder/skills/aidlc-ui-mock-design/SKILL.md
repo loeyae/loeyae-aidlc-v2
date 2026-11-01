@@ -8,6 +8,12 @@ triggers: UI 原型, HTML Mock, 页面原型, 交互原型, UI mock, 页面 Mock
 
 开始时宣布："使用 aidlc-ui-mock-design 生成 HTML UI Mock"。
 
+## 资源路径
+
+共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+
+读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+
 ## 输入
 
 调用方必须提供：
@@ -21,9 +27,9 @@ triggers: UI 原型, HTML Mock, 页面原型, 交互原型, UI mock, 页面 Mock
 
 ## 加载
 
-1. 发布包中的 `stages/inception/inception-ui-mock-generation.md`；
+1. 发布包中的 [stages/inception/inception-ui-mock-generation.md](../../stages/inception/inception-ui-mock-generation.md)；
 2. 按该文件要求加载 HTML 设计、推导和样式细则（同目录的 `inception-ui-mock-*.md` 文件）；
-3. UI 生成流程（代表页定标·全量连续生成·每批轻量技术读回）见 `knowledge/design/common-ui-generation-flow.md`：调用方按该流程以**连续模式**传入全部页面，本能力不逐页等待用户审批，每批完成后自动技术读回。
+3. UI 生成流程（代表页定标·全量连续生成·每批轻量技术读回）见 [knowledge/design/common-ui-generation-flow.md](../../knowledge/design/common-ui-generation-flow.md)：调用方按该流程以**连续模式**传入全部页面，本能力不逐页等待用户审批，每批完成后自动技术读回。
 
 ## 输出
 

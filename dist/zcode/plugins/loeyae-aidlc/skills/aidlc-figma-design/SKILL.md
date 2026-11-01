@@ -8,6 +8,12 @@ triggers: Figma, Figma 设计, UI 设计稿, 外部设计稿, Figma 页面
 
 开始时宣布："使用 aidlc-figma-design 执行 Figma 设计"。
 
+## 资源路径
+
+共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+
+读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+
 ## 输入
 
 调用方必须提供：
@@ -22,11 +28,11 @@ triggers: Figma, Figma 设计, UI 设计稿, 外部设计稿, Figma 页面
 
 ## 加载
 
-加载发布包中的 `stages/inception/inception-ui-figma-generation.md`。Construction 的 `knowledge/design/common-figma-design-standards.md` 不属于本能力。
+加载发布包中的 [stages/inception/inception-ui-figma-generation.md](../../stages/inception/inception-ui-figma-generation.md)。Construction 的 [knowledge/design/common-figma-design-standards.md](../../knowledge/design/common-figma-design-standards.md) 不属于本能力。
 
-`source=external` 通过 Git 锁定外部只读适配声明和 Core 通用 `consumeExternalUiDesign` 消费入口执行，加载 `knowledge/protocols/ui-readonly-adapter.md`。本 Skill 不直接调用服务读取工具，也不接收网络、凭据或宿主控制面能力。候选映射不可信；canonical manifest 只能由 Core 校验后发布。创建分支仍使用原能力流程，本轮尚未迁移。
+`source=external` 通过 Git 锁定外部只读适配声明和 Core 通用 `consumeExternalUiDesign` 消费入口执行，加载 [knowledge/protocols/ui-readonly-adapter.md](../../knowledge/protocols/ui-readonly-adapter.md)。本 Skill 不直接调用服务读取工具，也不接收网络、凭据或宿主控制面能力。候选映射不可信；canonical manifest 只能由 Core 校验后发布。创建分支仍使用原能力流程，本轮尚未迁移。
 
-UI 生成流程（代表页定标·全量连续生成·每批轻量技术读回）见 `knowledge/design/common-ui-generation-flow.md`：调用方按该流程以**连续模式**传入全部页面，批次仅用于控制写入规模和错误恢复，本能力不逐页等待用户审批，每批完成后自动技术读回。
+UI 生成流程（代表页定标·全量连续生成·每批轻量技术读回）见 [knowledge/design/common-ui-generation-flow.md](../../knowledge/design/common-ui-generation-flow.md)：调用方按该流程以**连续模式**传入全部页面，批次仅用于控制写入规模和错误恢复，本能力不逐页等待用户审批，每批完成后自动技术读回。
 
 ## 输出
 

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 4.23.2 — 2026-11-01
+
+- Resolve shared skill resources relative to each `SKILL.md` with explicit `../../knowledge/...` and `../../stages/...` links, avoiding incorrect skill-local `references/` paths.
+- Clarify the package-root boundary in all 15 affected skills and require checking resource existence with the resolved absolute path reported when missing.
+- Synchronize package, stage-graph, plugin and marketplace versions at 4.23.2 and regenerate all nine harness distributions.
+
 ## 4.23.1 — 2026-11-01
 
 - Key workflow-state and registry parse caches by actual Markdown content; preserve completion, parked state and registry identity across same-timestamp and same-length writes or atomic replacements.

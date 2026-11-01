@@ -8,6 +8,12 @@ triggers: 交付配置, 部署配置生成, 发布配置, deployment config, 生
 
 开始时宣布："使用 aidlc-delivery-config-generation 生成交付配置"。
 
+## 资源路径
+
+共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+
+读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+
 ## 输入
 
 调用方必须提供：
@@ -21,8 +27,8 @@ triggers: 交付配置, 部署配置生成, 发布配置, deployment config, 生
 
 ## 加载
 
-1. 发布包中的 `stages/operation/operations-authorization.md`（步骤 1 生成目标相关配置）；
-2. 发布包中的 `stages/operation/operations-templates.md`。
+1. 发布包中的 [stages/operation/operations-authorization.md](../../stages/operation/operations-authorization.md)（步骤 1 生成目标相关配置）；
+2. 发布包中的 [stages/operation/operations-templates.md](../../stages/operation/operations-templates.md)。
 
 ## 输出
 

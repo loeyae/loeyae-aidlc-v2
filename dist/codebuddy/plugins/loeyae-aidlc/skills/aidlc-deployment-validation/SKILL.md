@@ -8,6 +8,12 @@ triggers: 部署配置验证, 交付配置校验, 发布配置检查, deployment
 
 开始时宣布："使用 aidlc-deployment-validation 验证部署配置"。
 
+## 资源路径
+
+共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+
+读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+
 ## 输入
 
 调用方必须提供：
@@ -20,7 +26,7 @@ triggers: 部署配置验证, 交付配置校验, 发布配置检查, deployment
 
 ## 加载
 
-加载发布包中的 `stages/operation/operations-authorization.md`（步骤 2 验证配置及步骤 4 质量门禁）。
+加载发布包中的 [stages/operation/operations-authorization.md](../../stages/operation/operations-authorization.md)（步骤 2 验证配置及步骤 4 质量门禁）。
 
 ## 输出
 

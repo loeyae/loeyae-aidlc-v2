@@ -8,6 +8,12 @@ triggers: 构建测试证据, 测试证据, 构建证据, 生成测试报告, bu
 
 开始时宣布："使用 aidlc-build-test-evidence 执行构建与测试"。
 
+## 资源路径
+
+共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+
+读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+
 ## 输入
 
 调用方必须提供：
@@ -21,9 +27,9 @@ triggers: 构建测试证据, 测试证据, 构建证据, 生成测试报告, bu
 
 ## 加载
 
-加载发布包中的 `stages/construction/construction-build-and-test.md`。
+加载发布包中的 [stages/construction/construction-build-and-test.md](../../stages/construction/construction-build-and-test.md)。
 
-先加载 `knowledge/standards/common-test-execution-strategy.md`：局部修改默认定向测试及必要关联测试，不因单模块或阶段切换自动全量；失败后先定向复测。已有证据只在符合当前受控执行与 freshness 门禁时复用，否则重跑最小充分命令矩阵，禁止手动改写证据。
+先加载 [knowledge/standards/common-test-execution-strategy.md](../../knowledge/standards/common-test-execution-strategy.md)：局部修改默认定向测试及必要关联测试，不因单模块或阶段切换自动全量；失败后先定向复测。已有证据只在符合当前受控执行与 freshness 门禁时复用，否则重跑最小充分命令矩阵，禁止手动改写证据。
 
 ## 执行
 
@@ -94,7 +100,7 @@ I13 中 `tdd_mode: characterization` 的 UC-D 描述要保留的存量行为（I
 | `green` | `code-generation` | 恰好一条；必须以退出码 0 结束，失败数为 0，`uc_mapping` 覆盖全部 UC-D |
 | `semantic` | 任意阶段 | 可选，仅用于为内置检查器指定 `timeout_ms`；如声明，`argv` 必须是 `["loeyae-aidlc", "check", "--sensor", "<sensor-name>"]`，不要追加 `--module` 等参数；同一 `sensor` 最多声明一次 |
 
-`build-and-test` 按 `knowledge/protocols/common-c8-role-applicability.md` 复核实际角色适用性。业务 test 始终需要真实非零通过且零失败；build/check 默认必需，原生 Node 可使用来源可核验的模块级 `role_applicability` 与包内已批准政策记录不适用，不得复制检查充当构建。聚合范围任一模块需要某角色时仍须覆盖，已配置 build/test/check 不能通过命令选择省略。配置、来源和命令漂移须重新产证；producer/report/gate/重验共用规则。I13 无行为范围的既有成功替代检查/零测试契约保留。
+`build-and-test` 按 [knowledge/protocols/common-c8-role-applicability.md](../../knowledge/protocols/common-c8-role-applicability.md) 复核实际角色适用性。业务 test 始终需要真实非零通过且零失败；build/check 默认必需，原生 Node 可使用来源可核验的模块级 `role_applicability` 与包内已批准政策记录不适用，不得复制检查充当构建。聚合范围任一模块需要某角色时仍须覆盖，已配置 build/test/check 不能通过命令选择省略。配置、来源和命令漂移须重新产证；producer/report/gate/重验共用规则。I13 无行为范围的既有成功替代检查/零测试契约保留。
 
 Node 原生 TAP 输出直接受支持，建议 `node --test --test-reporter=tap ...`，不需附加自造 `1 passed`。完整唯一最终汇总与根 plan/编号必须一致，嵌套 suite 不重复累计，todo/skip 不计通过，取消/失败/全跳过/截断阻断。旧数字摘要仍兼容。详细配置示例、来源、证据字段与解析边界见上述协议。
 

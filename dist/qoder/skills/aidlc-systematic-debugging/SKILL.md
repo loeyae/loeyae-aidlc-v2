@@ -8,13 +8,19 @@ triggers: 系统化调试, 根因分析, 故障定位, 问题排查, debugging, 
 
 开始时宣布："使用 aidlc-systematic-debugging 执行系统化调试"。
 
+## 资源路径
+
+共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+
+读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+
 ## 输入
 
-输入项和证据不足时的处理以发布包中的 `knowledge/standards/common-systematic-debugging.md` 的"输入要求"为准，本文件不复制该清单。无法稳定复现或缺少必要证据时返回 `NEEDS_CONTEXT`，不猜测根因。
+输入项和证据不足时的处理以发布包中的 [knowledge/standards/common-systematic-debugging.md](../../knowledge/standards/common-systematic-debugging.md) 的"输入要求"为准，本文件不复制该清单。无法稳定复现或缺少必要证据时返回 `NEEDS_CONTEXT`，不猜测根因。
 
 ## 加载
 
-加载发布包中的 `knowledge/standards/common-systematic-debugging.md`；实施修复时按该规则加载 `stages/construction/construction-tdd.md`。
+加载发布包中的 [knowledge/standards/common-systematic-debugging.md](../../knowledge/standards/common-systematic-debugging.md)；实施修复时按该规则加载 [stages/construction/construction-tdd.md](../../stages/construction/construction-tdd.md)。
 
 ## 输出
 

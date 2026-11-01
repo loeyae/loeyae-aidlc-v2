@@ -8,6 +8,12 @@ triggers: 逆向工程, 存量系统分析, 代码库分析, 架构发现, rever
 
 开始时宣布："使用 aidlc-reverse-engineering 执行逆向工程"。
 
+## 资源路径
+
+共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+
+读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+
 ## 输入
 
 调用方必须提供：
@@ -20,7 +26,7 @@ triggers: 逆向工程, 存量系统分析, 代码库分析, 架构发现, rever
 
 ## 加载
 
-加载发布包中的 `stages/inception/inception-reverse-engineering.md`。图表需求通过调用 `aidlc-diagram-design` 执行。
+加载发布包中的 [stages/inception/inception-reverse-engineering.md](../../stages/inception/inception-reverse-engineering.md)。图表需求通过调用 `aidlc-diagram-design` 执行。
 
 ## 输出
 
