@@ -3,7 +3,7 @@
 | 场景 | 常见表达 | 执行动作 |
 | --- | --- | --- |
 | 开始新工作 | `使用 AI-DLC`、`开始新工作`、明确说明要实现或修复的内容 | 以 `orchestrate next --scope <scope> --work "<描述>"` 启动 Markdown workflow |
-| 继续工作 | `继续上次工作`、`继续当前项目` | 调用 `orchestrate next`，展示 `handoff_prompt` |
+| 继续工作 | `继续上次工作`、`继续当前项目` | 先查看当前 workflow、目标和领取；按需绑定或交接，再调用 `orchestrate next` 并展示 `handoff_prompt` |
 | 选择单元 | `选择开发单元`、`我负责这个模块` | 使用 `unit list` 或 `unit select` 记录成员与分支 |
 | 人工审批 | `确认架构方案`、`批准部署方案` | 展示影响与质量证据；用户明确批准后以 `--user-input Approve` 报告 |
 | 代码审查 | `代码审查`、`review` | 生成 review evidence，覆盖实际变更路径 |
@@ -11,11 +11,11 @@
 | 合并准备 | `准备合并`、`merge plan` | 创建 worktree merge plan，由人执行实际 merge |
 | 暂停 / 恢复 | `暂停 AI-DLC`、`恢复 AI-DLC` | `orchestrate park` / `orchestrate next --resume` |
 | 查看进度 | `AI-DLC 当前进度` | `orchestrate next --status` 或 `runtime summary` |
-| 缺陷修复 / 重构 | `修复缺陷`、`无行为重构` | 以 `--scope bugfix` / `--scope refactor` 启动，不走 CR |
+| 缺陷修复 / 重构 | `修复缺陷`、`无行为重构` | 以适用的 `bugfix` / `refactor` scope 启动；涉及已批准行为的语义变更时按变更契约处理 |
 | 变更请求 | `发起变更请求`、`需求变更` | 按 `core/knowledge/protocols/change-request-process.md` 分流；已有代码基线的语义变更走 CR1—CR5 |
 | 清理历史 CR | `合并历史 CR 文档`、`清理遗留 CR 文件` | 把已关闭 CR 合并进正式基线后删除暂态文件 |
 | 结束并开始新工作 | `归档当前工作` | 先 `park`（运行中时），再 `orchestrate archive` |
 
 完整实施流程见 `docs/aidlc-ai-tools-implementation-guide.md`。
 
-每个 workflow 的状态和审计位于 `aidlc/active/aidlc-state.md` 与 `aidlc/active/audit.md`。
+单工作流的状态和审计位于 `aidlc/active/aidlc-state.md` 与 `aidlc/active/audit.md`；拆分布局还包含 registry 及各工作流的状态和领取记录。

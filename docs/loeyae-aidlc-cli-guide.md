@@ -17,19 +17,13 @@ aidlc/active/aidlc-state.md
 aidlc/active/audit.md
 ```
 
-当前 workflow 只使用 `aidlc/active/aidlc-state.md` 与 `aidlc/active/audit.md` 管理路由、报告和成员分工。
+单工作流使用 `aidlc/active/aidlc-state.md` 与 `aidlc/active/audit.md` 管理状态和审计；拆分后还使用 registry 及各模块、集成工作流的状态与领取记录。
 
 ### scope 与阶段集合
 
-`execution: ALWAYS` 的阶段对所有 scope 生效，其余阶段按其 `scopes` 声明生效（4.13.0 实测，单模块默认路由）。单模块下阶段数等于实例数；multi-module 下 module/unit 轴阶段按模块数和单元数展开为多个实例：
+阶段选择由当前阶段图、scope、条件及已批准的选择决定；模块和单元轴会按实际数量展开，不能用固定阶段数判断项目进度。支持 `feature`、`enterprise`、`mvp`、`classic`、`express`、`workshop`、`bugfix` 和 `refactor`。使用 `orchestrate state plan` 查看当前计划，实际执行以 `orchestrate next` 返回的 directive 为准。
 
-| scope | 阶段数（单模块下等于实例数） | 说明 |
-|------|------|------|
-| `feature` / `enterprise` / `mvp` | 39 | 完整 Inception → Construction → 条件 Operations |
-| `classic` | 36 | 同上，不含 Operations 尾段 |
-| `express` / `workshop` / `bugfix` / `refactor` | 8 | 轻量链路 |
-
-Core 不再内置任何 Loeyae 专属 stage。外部 Loeyae Provider 通过通用 `code-generation` Hook 注入（`implementation-validation` capability）：未安装 Provider 时行为不变，轻量 scope 实例数为 8。
+Core 不内置 Loeyae 专属 stage。外部 Loeyae Provider 可通过通用 `code-generation` Hook 注入 `implementation-validation` capability；未安装 Provider 时使用 Core 流程。
 
 - `prd-generation` 只在完整 scope 初始化时加 `--with-prd` 才进入。
 - `workspace-detection` 的 `single-module` / `multi-module` 选择只出现在 feature、enterprise、mvp、classic。

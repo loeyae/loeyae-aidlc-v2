@@ -1,18 +1,13 @@
-# 优化调整过程文档
+# 历史设计与问题记录
 
-本目录收纳 loeyae-aidlc 优化调整过程中使用的提示词、技术方案、缺口分析和问题报告，属于过程记录，不是使用手册。使用说明见上级 `docs/` 目录。
+本目录保留可能仍有参考价值的历史设计、项目迁移资料和问题记录。它们反映各自记录时的版本与项目背景，不能替代当前阶段图、Core 协议或使用指南；实际行为以当前代码与协议为准。
 
-| 文件 | 类型 | 内容 |
-| --- | --- | --- |
-| `aidlc-audit-remediation-plan-20261030.md` | 计划 | 四维流程审计修复顺序、验收用例、回归与九平台发布验收 |
-| `aidlc-v2-unit-ownership-prompt.md` | 提示词 | 单元所有权与 provenance 协作约定重构 |
-| `aidlc-v45-improvement-prompts.md` | 提示词 | v4.5 初始化问题（P1～P7）改进提示词 |
-| `aidlc-reconciliation-gap-analysis.md` | 分析 | 跨产物对账全量清单与缺口分析 |
-| `aidlc-gap-ab-design.md` | 方案 | 缺口 A/B：并行协作门禁与跨 module 契约累积对账 |
-| `aidlc-phase-bc-design.md` | 方案 | 门禁加固 Phase B / C |
-| `aidlc-traceability-matrix-design.md` | 方案 | 分类追溯矩阵 |
-| `aidlc-structural-invariants-design.md` | 方案 | 形态一致性门禁（structural-invariants） |
-| `legacy-migration-plan.md` | 计划 | 存量项目追溯 ID 迁移计划（配套 `scripts/legacy-id-migrate.ts`） |
-| `loeyae-aidlc-dart-issue.md` | 问题报告 | 源码扫描缺少 `.dart` 扩展名 |
-| `aidlc-project-git-provider-optimization-design.md` | 方案 | 项目级 Git Provider、Core 集成、首个 Loeyae Boot Provider 迁移与实施计划 |
-| `aidlc-project-git-provider-execution-backlog.md` | 任务清单 | 按阶段、依赖关系和交付物划分的 Provider 实施 backlog |
+- `aidlc-project-git-provider-optimization-design.md`：Provider 抽离设计背景；当前使用方法见上级的 Provider 指南。
+- `aidlc-gap-ab-design.md`、`aidlc-phase-bc-design.md`、`aidlc-reconciliation-gap-analysis.md`：历史门禁与跨产物对账设计。
+- `aidlc-structural-invariants-design.md`、`aidlc-traceability-matrix-design.md`：结构约束及追溯设计背景。
+- `aidlc-ui-mock-us-binding-prompt.md`：历史 UI 与故事映射改造提示。
+- `legacy-migration-plan.md`：针对特定旧项目的历史 ID 迁移计划，不应直接套用于其他项目。
+- `loeyae-aidlc-dart-issue.md`、`loeyae-aidlc-provider问题-20261021.md`：历史问题记录，是否仍适用须结合当前版本重新验证。
+- `m02-aidlc-交开发质量门禁优化-20261014.md`、`m02-aidlc-质量门禁优化落地清单-20261014.md`：特定项目的质量需求与落地清单。
+
+Git 历史保留已移除的阶段验收记录、一次性提示词及实施任务清单。

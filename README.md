@@ -1,392 +1,92 @@
 # Loeyae AI-DLC
 
-基于 AWS-style 轻量协作理念的 AI 驱动开发流程。新 workflow 使用明确工作描述、Markdown 状态与审计、成员自主选择 unit、Git 分支、review、构建和测试。
+Loeyae AI-DLC 是一个面向 AI 辅助软件交付的工作流工具。它把工作目标、阶段、需求与设计产物、代码审查、真实构建测试及交付证据连接起来，支持单人执行和多人按模块、单元协作。
 
-## 核心模型
-
-技术栈知识按已批准模块事实和版本从可选 Git Provider 包加载。模块根目录登记在
-`.aidlc/module-facts.json`，来源摘要与版本状态进入知识交付和签名确认；不按 PC/移动端、
-目录名或旧 handoff 标记选择框架。Vue/Element Plus、UniApp、Spring Cloud/Nacos、
-测试工具和运行时模板均可独立安装并绑定模块/阶段。未安装时沿用项目规范，未知或冲突
-版本不套用默认值。配置格式、受限事实来源及知识权限边界见
-`core/knowledge/protocols/provider-offline-knowledge.md`。
-
-新流程以明确工作描述、Markdown 状态与审计、成员自主选择 unit、Git 分支、review、构建和测试为基础。
-
-```text
-用户明确工作
-  → Markdown workflow
-  → 团队成员选择 unit
-  → 产物 / review / build / test
-  → 人工执行 merge
-```
-
-工作流控制面：
-
-```text
-aidlc/active/aidlc-state.md
-aidlc/active/audit.md
-```
-
-新 workflow 的控制面只包含 `aidlc/active/aidlc-state.md` 与 `aidlc/active/audit.md`。
+流程由 Core 管理；AI 宿主决定模型、执行者和委派方式。具体阶段以项目 scope、适用条件和已批准的选择为准，不以固定阶段数衡量进度。
 
 ## 安装
 
-运行时要求：Node.js `^22.22.0 || >=24.8.0`。该范围与必需的 HTML 验证器依赖一致；Node 20、21、23 及较早的 Node 22/24 不在支持范围内。
+需要 Node.js `^22.22.0 || >=24.8.0`。
 
 ```bash
 npm install -g --ignore-scripts https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
 loeyae-aidlc install
 ```
 
-`--ignore-scripts` 是本次安装的必要参数：本包依赖树（`tsx` 的可选依赖 `fsevents@2.3.3`）在 macOS 上会因上游 npm 元数据错误声明 `gypfile`/`install: node-gyp rebuild` 而触发注定失败的本地编译（tarball 内是预编译二进制、无 `binding.gyp`）。跳过生命周期脚本不影响功能——CLI 与各平台二进制（esbuild、fsevents）安装后即已可用。详见 `docs/loeyae-aidlc-v2-installation.md`。
-
-支持 Kiro Crew、Kiro IDE、Kiro CLI、Claude Code、OpenCode、Codex、CodeBuddy、Qoder 和 ZCode：
+使用 `--ignore-scripts` 避免依赖的安装脚本引发平台构建问题。支持 Kiro Crew、Kiro IDE、Kiro CLI、Claude Code、OpenCode、Codex、CodeBuddy、Qoder 和 ZCode；可以指定宿主或安装到所有受支持的宿主：
 
 ```bash
-loeyae-aidlc install --harness kiro-ide
-loeyae-aidlc install --harness claude
+loeyae-aidlc install --harness codex
 loeyae-aidlc install --all
 ```
 
-## 项目级 Git Provider（4.14.0，MARS-148）
+升级、卸载及安装细节见[安装指南](docs/loeyae-aidlc-v2-installation.md)。
 
-Provider 以项目意图和不可变 lock 管理：`.aidlc/providers.yaml` 保存来源、配置与 binding，`.aidlc/providers.lock.yaml` 保存 commit/tree/Manifest/ruleset/config 摘要。生产 `https`/`ssh` 来源须先在 `.aidlc/provider-git-policy.json` 配置 `allowed_hosts`（可选 `allowed_organizations`）；运行时只使用 lock 中的 commit，不会自动跟随 branch/tag。
+## 开始与继续
 
-```bash
-loeyae-aidlc provider add <git-url> --ref <tag|branch|commit> [--subdir <path>] [--id <provider-id>] [--instance <id>] \
-  [--module <id|*>]... [--unit <id|*>]... [--stage <slug|*>]... [--capability <id>]...
-loeyae-aidlc provider list --project
-loeyae-aidlc provider status <instance-id>
-loeyae-aidlc provider update <instance-id> --ref <tag|branch|commit>
-loeyae-aidlc provider disable <instance-id>
-loeyae-aidlc provider enable <instance-id>
-loeyae-aidlc provider remove <instance-id>
-loeyae-aidlc provider probe
-loeyae-aidlc provider run --plan <plan-id|path> --node <node-id> \
-  [--input <id>=<project-relative-path>]...
-loeyae-aidlc provider gate --plan <plan-id|path> \
-  [--evidence <evidence-id|path>]...
-```
-
-### Loeyae Boot implementation-validation 注入
-
-Core 不再内置任何 Loeyae 专属 stage、sensor 或 compatibility 层。外部 Loeyae Boot Provider 通过通用 `code-generation` 生命周期 Hook 注入（`implementation-validation` capability）：未安装 Provider 时 `code-generation` 行为不变；安装并被 Profile selector 选中时，该动作为 required 并强制通用 GateDecision。不存在 compatibility/legacy/shadow/enforce 模式：
-
-```bash
-loeyae-aidlc provider add <git-url> --ref <tag-or-commit> \
-  --subdir providers/loeyae-boot \
-  --id framework.java-loeyae-boot --instance loeyae-boot \
-  --stage code-generation --capability implementation-validation
-```
-
-完整安装、Profile、运行、Scope 深度、更新/卸载、兼容矩阵与发布清单见 `docs/loeyae-boot-provider-migration.md`。
-
-`provider run` 只执行 frozen Plan 中选中的 node：Runner 从锁定 commit 物化只读 bundle，为显式 `--input` 创建只读快照，使用结构化 argv、最小环境和默认无网络的 `restricted-v1` sandbox。当前 OS 若无法完整落实文件系统、网络、进程与资源隔离，`provider probe` 返回不支持且 `run` fail-closed，不会 best-effort 降级。Provider 只能写 invocation 的 `output/result.json` 与已声明报告；Runner 严格校验后重算 summary、绑定 Plan/lock/revision，并以 Core 本机密钥签发 accepted Evidence。
-
-`provider gate` 只消费签名有效且当前状态为 accepted 的 Evidence；stale、expired、revoked、deferred、缺失或伪造 Evidence 均阻断。waiver/fallback 默认拒绝，必须同时由锁定 Plan、Core policy 和阶段 policy 放行。Provider-backed 阶段报告时必须携带当前 passing GateDecision：
-
-```bash
-loeyae-aidlc orchestrate report --stage <slug> --result completed \
-  --gate-decision <gate-id>
-```
-
-安装/更新只执行隔离的 Git fetch 与对象读取，不 checkout 或执行 Provider entrypoint、hook、submodule、LFS/filter、package manager 和构建脚本。`file://` 与本地绝对路径仅供隔离测试 fixture，需显式 `--allow-file` 或 `AIDLC_PROVIDER_ALLOW_FILE=1`。生命周期变更保留 lock history 和历史 Evidence，并写入失效记录与审计；配置/lock 不一致、cache 缺失、来源或必需 capability 不可用时默认阻断。
-
-Provider selector 使用项目级 `.aidlc/provider-profile.json`。Profile 支持 `extends` 继承，facts 深合并，risk 只升不降；缺失 selector fact 为 `unknown`，必需 capability 会 fail-closed。示例：
-
-```json
-{
-  "version": 1,
-  "active": "typescript-web",
-  "profiles": {
-    "base": { "facts": { "languages": ["typescript"] } },
-    "typescript-web": {
-      "extends": ["base"],
-      "facts": { "frameworks": ["react"], "profiles": ["strict"] },
-      "risk": { "level": "standard", "protected_gate": false }
-    }
-  }
-}
-```
-
-`orchestrate next` 仅从项目 `providers.yaml`、不可变 lock 和本地受验 cache 解析当前 module/unit/stage binding，生成确定性的 `.aidlc/provider-plans/<plan-id>.json`，并在 directive 中返回 `provider_context` / `provider_actions`。每个 action 都绑定 `provider_instance_id + project lock digest + plan node`；不得以全局安装、移动 branch 或同名仓库替代。受保护 Profile/gate 或显式 fallback Plan 会先返回审批提示，审核锁定动作后用 `orchestrate next --provider-approval "<approval-ref>"` 继续。
-
-## 开始新工作
-
-用户先明确要做的事：
-
-```text
-使用 AI-DLC 修复订单导出超时并增加重试
-```
+在目标项目中，使用明确的工作描述启动：
 
 ```bash
 loeyae-aidlc orchestrate next \
   --scope feature \
-  --work "修复订单导出超时并增加重试"
+  --work "实现订单导出超时重试"
 ```
 
-`next` 返回当前 directive 和 `handoff_prompt`。Agent 必须原样展示下一步提示词，提示中会说明工作目标、当前阶段、当前单元、产物和后续 review/build/test 动作。
+根据返回的 directive 执行当前阶段，Agent 原样展示 `handoff_prompt`。常见 scope 包括 `feature`、`enterprise`、`mvp`、`classic`、`express`、`workshop`、`bugfix` 和 `refactor`；具体选择见[实施指南](docs/aidlc-ai-tools-implementation-guide.md)。
 
-状态和审计由 Core 自动维护，构建、测试和完成结论以受控 JSON 证据为准。每个单元保留一份 `code-review.md` 记录真实审查发现；不再普遍要求另写实施摘要、单元审计、两份构建测试汇总或最终叙述报告。业务决策和交付限制仍在相应权威产物中记录，需要正式报告时再按交付要求编写。
-
-需要进度或交接摘要时，可直接读取派生视图：
+继续已有工作时，先查看当前状态和下一步：
 
 ```bash
+loeyae-aidlc orchestrate next --preview
 loeyae-aidlc orchestrate state summary
-loeyae-aidlc orchestrate state summary --module module-a --format markdown
 ```
 
-命令只读取已有状态及证据引用，不写文件、不重新跑测试；`not_checked` 表示本次查看没有重新验证门禁，不能替代交付验收。若明确需要导出，可将输出保存到 `.aidlc/views/`。普通展示文档的改动不触发新作用域证据失效；显式声明为契约或命令输入的文件仍受校验。旧证据保持原绑定规则，不能因升级自动视为通过。
+需要模块视图时可使用 `orchestrate state summary --module <id> --format markdown`。摘要只读取已有状态和证据引用，不写文件或重新运行测试；`not_checked` 表示本次查看未重新验证门禁，不代表检查失败或通过。暂停的工作流使用 `orchestrate next --resume` 恢复。
 
-## 团队成员选择 unit
-
-```bash
-loeyae-aidlc unit list
-loeyae-aidlc unit select \
-  --module module-a \
-  --unit unit-a \
-  --member alice \
-  --branch feat/module-a-unit-a
-```
-
-选择是协作记录，不是分布式锁。若发生重复选择，团队协商或使用显式 `--replace` 更新记录。
-
-### 模块自主推进与整体进度聚合（4.13.3，MARS-133）
-
-受管写入资格按 **WorkflowRef** 的精确 session 领取生效：single layout 只有 global workflow；split layout 的 global、每个 module、integration 分别维护领取资格。`module-division` 完成后，模块负责人可直接推进自己的模块，首次 `next --module` 会透明建立 per-module 布局：
-
-```bash
-loeyae-aidlc orchestrate next --module module-a
-loeyae-aidlc orchestrate report --stage <slug> --module module-a --result completed
-loeyae-aidlc orchestrate park --module module-a
-```
-
-模块只因真实 `requires`、consumes/produces、sensor/evidence、用户审批或 integration barrier 阻塞，不因等待父议题代报而阻塞。`next --status` 每次从所有 module state 动态计算完成度、共享契约与 integration barrier；推进模块无需改写 identity-only `registry.md` 或让父议题手工放行。所有受管发布与 state/audit 写入均要求当前精确 workflow/session/generation 领取；人类显式交接后旧会话不能再写。执行者和委派方式由宿主决定。
-
-### 工作流 lineage 保护（4.13.0）
-
-`aidlc/active/` 是团队共享状态，一个项目只有一条工作流 lineage。`next --scope` / `split` 发现 git 中已有另一条未归档 lineage 时拒绝创建（确需作废时加 `--replace-lineage <id>`）；合并后 HEAD 历史出现另一条未退役 lineage 时 `next` / `report` 拒绝继续，由负责人用 `orchestrate state retire --lineage <id> --user-input Approve --reason "<原因>"` 裁决；`orchestrate state verify` 只读检查 lineage 与状态 `Revision` 回退；另一条 lineage 上的模块用 `orchestrate state adopt --module <id> --from <commit> --maintenance <maintenance_token> --user-input Approve --reason "<原因>"` 迁入当前 lineage（同一模块只能保留一份）。`registry.md` 只存身份行，只在创建工作流时改变，推进模块不会改写它。合并冲突时禁止对 `aidlc/active/` 整目录「保留本地」，registry 冲突保留双方的模块行。
-
-### 模块 checkpoint ledger（MARS-159）
-
-普通 feature branch 被 merge/squash 后删除时，模块 state 与契约视图可能不可达。每个模块有一条 append-only ledger ref `refs/heads/aidlc/modules/<module-id>`：模块 `report` 成功后 Core 用 git plumbing（不动 worktree/index/HEAD）追加 checkpoint，内容为该模块 `aidlc-state.md`、模块 audit、workflow/lineage/revision、前一 checkpoint digest、规范化契约视图（本模块提供/消费行、来源路径与 blob）以及自身 digest。也可手动执行：
-
-```bash
-loeyae-aidlc orchestrate state checkpoint --module <id>
-loeyae-aidlc orchestrate state maintenance-plan --module <id>
-loeyae-aidlc orchestrate state recover --module <id> --maintenance <maintenance_token> --user-input Approve --reason "<原因>"
-```
-
-`state recover` 从本地与 remote-tracking ledger 中选最高有效 revision，校验 checkpoint 链、lineage、state/契约 digest 与 module manifest；恢复前须由各领取人释放全部精确 claim、清除维护子进程 binding，重新读取 maintenance-plan，并传入摘要、明确批准与原因；本地冲突先备份为 `*.bak-*`。恢复修订号递增且不恢复历史 claim；恢复后用 `orchestrate upgrade --dry-run --module <id>` 列出缺失证据，只重验它们。ledger **不会自动 push**：CLI 会输出 `git push origin refs/heads/aidlc/modules/<id>:refs/heads/aidlc/modules/<id>` 并在未发布时警告；全新 clone 默认 fetch 即可拿到 `refs/remotes/origin/aidlc/modules/*`。远端必须保护 `aidlc/modules/*`（禁止删除与 force-push），否则“任何人可恢复”不成立；从未合并、未打 tag、未 checkpoint 也无其他远端引用的已删除分支，git 无法恢复。
-
-`maintenance-plan --module <id>` 支持仅 `Revision` 损坏、身份及领取表完整且已静止的模块，用已验证 ledger 检查点生成受限恢复摘要；领取表不明或有合并标记时仍拒绝。契约表格单元格边缘空白变化按语义等价比较，并审计原始摘要；真实契约差异仍需处理。`split` 会在同一事务内迁移已验证切片的 workflow 身份，后续成员沿用现有切片。
-
-### 控制面 git 合并策略（4.13.1，MARS-117）
-
-引擎在 `install`、`next --scope`、`split` 时**幂等下发**控制面 git 合并策略到项目根，使多人协作的常规合并不再产生伪冲突（已有用户内容逐字节保留，只追加缺失行；用户为同一 pattern 设过不同策略时只报告、不覆盖）：
-
-- `.gitattributes`：`aidlc/active/**/audit.md merge=union`（audit 纯追加、块间不重叠，union 保留双方全部事件块、无冲突标记；state/registry 永不用 union）；`aidlc/active/registry.md merge=aidlc-registry`。
-- `.gitignore`：`aidlc/active/**/*.bak-*`（忽略引擎自产备份噪音）。
-- registry 专用 merge driver：按 module id 并集合并身份行（保留双方全部模块、去重稳定排序），投影列丢为占位由下次 `next --status` 重算；同一 module id 指向不同 Workflow ID 的 lineage 分裂判真冲突并保留冲突标记交人工。driver 实现不随仓库分发，引擎在 `install` / `next` 幂等注册 `merge.aidlc-registry.driver` 到本地 `.git/config`；未注册该 driver 的克隆安全回退到默认文本合并（不致命）。`AIDLC_CLI` 可覆盖注册的调用路径。
-- 合并并完成同样的静止交接后，用 `orchestrate state rebuild --maintenance <maintenance_token> --user-input Approve --reason "<原因>"`（不带 module 的 maintenance-plan 摘要） 从各模块 state 重算 registry 投影 / 全局摘要并把 `registry.md` 规范化为身份行（排序去重、清掉残留冲突说明），一键重建而非手改。
-- split 布局每模块独立 state 文件，天然去争用：两人推进不同模块不会触碰同一文件（无共享时间戳 / Revision 行可撞）。
-- `.gitattributes` / `.gitignore` 属引擎基础设施，不参与证据 provenance digest，下发它们不会使任何证据失效。
-
-## 宿主执行边界
-
-AI-DLC 负责阶段依赖、适用范围、产物与追溯、真实证据、质量验收、用户审批和精确会话领取。宿主自行决定执行者、模型、会话、上下文、并行及委派。单会话可完成同一流程，宿主自行委派时不增加子代理结果格式、结果目录或补走阶段。
-
-正式 directive 顶层保留 `execution_policy` 与 `requires/consumes/produces/sensors/approval`，不再输出 `agent_execution`、lead/support/reviewer persona 或执行模式。审查保留 Spec/Standards 两轴及条件触发的全局审查；默认不要求额外 reviewer 或隔离上下文。用户明确要求的独立审查仍按用户要求验收。
-
-`subagent-execution`、`subagent-evidence` 和 `agent plan/validate-result` 已退休；历史日志不参与门禁。迁移不会补记真实阶段完成或批准决策。详见 [MARS-244 迁移与宿主适配](docs/optimization-notes/mars244-process-boundary-migration.md)。
-
-## 阶段推进
-
-```bash
-# 普通阶段
-loeyae-aidlc orchestrate report --stage <slug> --result completed
-
-# instruction-only 阶段
-loeyae-aidlc orchestrate report \
-  --stage <slug> --result completed --instruction-ack <slug>
-
-# 应用设计和部署决策
-loeyae-aidlc orchestrate report \
-  --stage <slug> --result approved --user-input Approve
-```
-
-流程仍验证 requires、condition、consumes、produces、sensor、review、构建和测试；轻量化降低的是协作身份摩擦，不是质量要求。
-
-## 证据与门禁（producer / sensor）
-
-阶段准出由 **sensor 门禁** 把守，门禁读取的是 **受控证据（controlled evidence）**——落在 `.aidlc/evidence/<stage>/[<module>/[<unit>/]]<sensor>.json` 的 JSON 文件。你不需要手写这些证据，也**不能**手写：
-
-- **证据由确定性 producer 生成，不是人或 AI 写的。** 例如追溯矩阵证据（`traceability-matrix.json`）由 producer 函数扫描 `requirements.md`、`user-stories.md`、设计文档、代码源文件里的 `REQ-xxx` / `@ReqId` 标记，机械算出每个需求是否逐层被覆盖，输出 `broken_rows`。给同样的产物永远输出同样的矩阵。
-- **证据带防伪印章。** 每份受控证据包含 `producer.mode=controlled`、`checker.argv_digest`（SHA-256）、`source_revision.worktree_digest`（与当前 git HEAD/worktree 绑定）。Agent 手写的 JSON 缺印章或印章对不上当前提交，会被 `report` / `next` 当场判为伪造并拒绝。这就是 “Agent 手写即伪造证据” 的含义——它是引擎的正常防护，不是错误。
-
-### 证据什么时候生成
-
-**`report` 会自动生成缺失的语义证据**，你不必单独调用 producer：
+完成阶段时按 directive 使用对应命令：
 
 ```bash
 loeyae-aidlc orchestrate report --stage <slug> --result completed
+# instruction-only 阶段额外传入 --instruction-ack <slug>
+# 应用设计或部署决策按提示使用 --result approved --user-input Approve
 ```
 
-`report` 在完成前会为该阶段声明的语义 sensor 自动运行受控 producer，把缺的证据 JSON 生成出来，然后校验：
+## 协作与证据
 
-1. `consumes` / `produces` 产物齐全；
-2. 每个 sensor 门禁通过（含追溯矩阵 `broken_rows` 为空）。
+单工作流的状态和审计位于 `aidlc/active/aidlc-state.md` 与 `aidlc/active/audit.md`；拆分后还使用 registry 和各工作流的状态。团队可用 `unit list` / `unit select` 记录分工，受管写入和交接仍须符合当前工作流的精确会话领取。跨模块依赖和集成条件由引擎检查；合并与推送由人执行。
 
-`next` 推进下一步时，还会复验上游已完成阶段的门禁是否**仍然**满足——防止上游产物事后被改坏。
+阶段门禁检查实际产物和受控证据。构建、测试必须运行适用的真实命令，Agent 不应手写 Evidence JSON。单元审查在 `code-review.md` 记录 Spec、Standards 和问题；引擎维护状态及审计，无需重复编写单元实施摘要、构建测试汇总或最终报告。业务决策、契约及明确要求的交付报告仍按项目约定保留。
 
-### 门禁失败怎么办
+遇到阻塞时先阅读具体诊断：确认是产物缺失、真实测试失败、证据来源变化，还是状态和领取冲突，再按原因做最小修复。不要仅为消除提示反复增加测试或覆盖他人的状态。
 
-引擎会打印具体的失败 sensor 和原因，按类型处理：
+## Provider 与可选能力
 
-- **证据缺失 / provenance 不匹配** → 重新 `report`，让 producer 重新生成。**不要手写证据 JSON。**
-- **追溯矩阵断链 `REQ-xxx: BROKEN@<layer>`** → 该需求在某一层真的丢了（如活到故事层却在设计层断）。去补那一层的产物：让对应文档/代码里出现该 `REQ` 标记，再 `report`。
-- **未迁移旧项目**（`requirements.md` 无 `REQ-xxx` 或缺 `track` 标签）→ 记 `MIGRATION_REQUIRED`，降级放行并输出缺失清单，不硬阻断。
-- **轻量 scope 缺锚点 `<scope>: ANCHOR_MISSING@<anchor>` / `ANCHOR_UNREFERENCED@code_refs`**（4.13.1，MARS-112/116）→ `bugfix` / `refactor` / `express` / `workshop` 走 8 阶段路径、不经 `requirements-analysis`，没有 `requirements.md` 作 REQ 追溯根。追溯矩阵不再对它们盲判 `not_applicable`，而是改验各自的轻量来源锚点：
-  - `bugfix`：至少一个 `tdd_mode: new` UC-D 的 frontmatter 要声明 `defect_ref`（bug ticket 或缺陷 REQ 标识，如 `BUG-123`），把复现缺陷的 UC-D 锚定到可追溯的缺陷身份；到 `code-generation` 阶段起，交付源码必须引用该锚点，否则记 `ANCHOR_UNREFERENCED@code_refs`。
-  - `express` / `workshop`：至少一个 `tdd_mode: new` UC-D 的 frontmatter 要声明 `change_ref`（变更身份：需求 ticket / 需求条目 / 实验目标 id，如 `TASK-42`、`EXP-7`），机制与 `bugfix` 的 `defect_ref` 完全一致、语义中性；到 `code-generation` 阶段起，交付源码必须引用该锚点，否则记 `ANCHOR_UNREFERENCED@code_refs`。
-  - `refactor`：至少一个 `tdd_mode: characterization` UC-D 要声明非空 `code_refs`（MARS-104 已要求的 baseline 锚点），追溯锚定到存量代码基线。
-  - 其他 scope 在没有 `requirements.md` 时仍为 `not_applicable`，行为不变。
-- **用户故事缺 UI 覆盖 `US-xxx: UNCOVERED@ui-mock`**（4.13.2，MARS-118）→ 模块选了 UI route（`html-mock` / `figma-create` / `figma-existing`）时，`ui-artifact-consistency` 除了校验反向（每个 ui-mock page 的 `stories[]` 引用的 US 真实存在）外，还校验**正向全覆盖**：`user-stories.md` 里每个有界面表现的 US 必须至少被一个 ui-mock page 的 `stories[]` 覆盖。某条有界面 US 零 mock 关联即记 `US-xxx: UNCOVERED@ui-mock`。修复方式二选一：给某个 mock page 的 `stories[]` 加上该 US，或在 `user-stories.md` 该 US 所在行用显式豁免标记 `[ui: n/a]`（也支持 `[无界面]`）声明它无界面表现。**默认不豁免**——无标记的 US 一律要求被 UI 覆盖。未选 UI route 的模块（纯后端等）该检查不适用，不受影响。
+项目可以通过 Git Provider 安装技术知识或验证能力；配置和 lock 固定来源及版本，受控执行和门禁以项目绑定为准。未安装 Provider 时使用 Core 流程。Loeyae Boot 支持通过外部 Provider 接入，详见[Provider 迁移与使用指南](docs/loeyae-boot-provider-migration.md)。
 
-### UI 连续生成与受控验收（4.13.3，MARS-132）
+其他能力包括工作树与合并计划、图表、文档导出和只读上下文。`loeyae-aidlc --help` 查看入口，具体参数见 CLI 指南。
 
-UI route 统一采用“版本锁定 → 代表页定标 → 全量连续生成 → 每批自动技术读回 → 最终需求新鲜度检查 → 一次集中验收 → 定向复验”。不再逐页暂停确认，也不再为每批启动独立 reviewer 循环。
+## 文档
 
-```bash
-# page-plan 完成后、生成前锁定真实输入与 upstream
-loeyae-aidlc ui lock --module <module-id> --route <html-mock|figma-create|figma-existing>
+- [在 AI 工具中实施项目](docs/aidlc-ai-tools-implementation-guide.md)：开工、继续、多人协作及常见阻塞。
+- [CLI 指南](docs/loeyae-aidlc-cli-guide.md)：命令、阶段、证据、协作和维护。
+- [安装与升级](docs/loeyae-aidlc-v2-installation.md)。
+- [多仓库、工作树与恢复](docs/multi-repo-worktree-recovery.md)。
+- [AI-DLC 关键词](docs/ai-dlc-keyword-guide.md)、[Context Source](docs/context-source-usage.md)、[图表视觉 Provider](docs/diagram-visual-provider.md)。
+- [质量门禁协议](core/knowledge/protocols/quality-gates-v1.md)和[文档切片协议](core/knowledge/protocols/common-document-slices.md)：规则与数据契约。
+- [真实宿主 Agent 评测](docs/evals/README.md)：任务包、记录方式及验证范围。
 
-# 最终验收与定向复验记录完成后生成唯一验收登记
-loeyae-aidlc ui accept --module <module-id> --route <route> \
-  --review-report docs/aidlc/modules/<module-id>/inception/cross-validation-report.md
-
-# 独立检查 / 影响矩阵
-loeyae-aidlc ui check --module <module-id>
-loeyae-aidlc ui impact-matrix --page-plan <path> --changed-stories US-001
-```
-
-`ui-generation-lock.json` 封存文件 SHA-256、Git blob、机器 ID 分段摘要、页面映射和 upstream commit；cross-validation 的受控 `inception-consistency` 会重新计算实际正文差异。未映射的 REQ/FR、US/STORY、AC、PAGE 与无法归类的正文变化一律 fail-closed；一个任务只能登记一次 full acceptance，问题修复后只能定向复验。checker 不主动联网，执行 lock/accept 前应先更新本地 remote-tracking ref（默认 `origin/main`）。
-
-验收后的新鲜度（MARS-159）：仓库级 upstream 指针只作审计观察——其他模块推进 `origin/main`、本模块锁定源与页面映射未变时，`ui-page-planning` / `inception-consistency` 直接通过，无需也不允许第二次 `ui accept`。验收后的变化通过 Core 受控、append-only 的 checkpoint 链（`ui-generation-checkpoints.json`）记录：
-
-```bash
-# 锁定源未变、只有指针前进：追加 freshness checkpoint
-loeyae-aidlc ui refresh --module <module-id> --route <route>
-# 锁定源有可映射变化：报告追加 `## UI freshness reverification <run_id>`（pages 必须等于受影响页面）后
-loeyae-aidlc ui reverify --module <module-id> --route <route> --review-report <path>
-```
-
-未映射变化、复验页不匹配、手改 lock/acceptance/checkpoint 或复验段被改写时 fail-closed。
-
-证据文件默认 24 小时过期；跨天续作时上游纯过期不算回归，引擎会放行。
-
-### 源码根与命令清单
-
-- 阶段图中的 `src/` 是源码根的规范占位，按 module-manifest `paths` → `.aidlc/source-roots.json`（`{ "version": "1", "source_roots": ["app", "web/src"] }`）→ 默认 `src/` 解析，适用于 Python 等不使用 `src/` 的项目。
-- 嵌套独立 git 仓库（4.9.0）：业务代码放在被工作流仓库忽略的子仓库（如 `app/` 自带 `.git`）时，在 `source-roots.json` 中写 `{ "path": "app", "repo": "nested" }`（只在这里声明；module-manifest `paths` 不接受对象条目，manifest 管模块归属，source-roots 管仓库拓扑）。声明会被 fail-closed 校验（是仓库根、无符号链接/junction、不互相包含、工作流仓库不跟踪其中文件）。characterization code ref、BASELINE 的 `git hash-object` 与 blob 解析都在子仓库内执行；基线在 `- Baseline Repos: app=<sha>` 里为每个嵌套仓库记录 commit，`baseline_commit` 始终是工作流仓库的 commit；证据的 `source_revision.repos` 记录各子仓库的 commit / dirty / digest，子仓库代码漂移会被发现。`--set` 默认取各子仓库干净的 HEAD（或 `--repo app=<sha>`），`--advance` 必须为每个嵌套仓库显式写 `--repo app=<sha>` 与 `--expect-repo app=<当前 sha>`。已有工作流声明后执行一次受限迁移：`loeyae-aidlc orchestrate baseline --set <当前 commit> --replace --expect <当前 commit> --repo app=<sha> --user-input Approve --reason "<原因>"`（基线已使用或已推进也可以，只补登尚未登记的仓库；`orchestrate baseline` 会打印这条命令）。涉及嵌套仓库的 `attest resolve`、`worktree prepare/merge-plan` 明确拒绝，不涉及的照旧。多仓库与临时 worktree 的初始化、恢复及证据边界指南见 [multi-repo-worktree-recovery](docs/multi-repo-worktree-recovery.md)。
-- 构建/测试/检查命令清单按 `--config` → `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找；RED/GREEN 命令清单只按 `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找，显式 `--config` 仅在指向同一文件时被接受，否则 producer 直接拒绝。文件中的 `stage` 必须与当前阶段一致。
-- 代码审查记录须包含真实 reviewer、Spec/Standards 两轴、审查文件和问题关闭结果；执行者数量和上下文由宿主决定。
-
-### 新行为与存量行为（RED / BASELINE / GREEN）
-
-I13 的每个 UC-D 带 `tdd_mode`：新行为（`new`，默认）走 RED→GREEN，存量行为（`characterization`，须声明 `code_refs`、`reason`、`approval_ref`，并绑定到工作流基线）走 BASELINE→GREEN，不再提供"重构可豁免 TDD"的豁免。
-
-- `tdd` 阶段的 `.aidlc/commands/tdd.json`：有 `new` UC-D 时声明恰好一条 `role: red`，有 characterization UC-D 时声明恰好一条 `role: baseline`。BASELINE 在修改任何 code ref 之前运行：producer 先用 `git hash-object` 比对 code ref 与基线 blob，不一致直接拒绝；命令须退出 0。某一模式没有 UC-D 时对应证据自动为 `not_required`。
-- `code-generation` 的唯一 `role: green` 命令须覆盖全部 UC-D；完成时连同 RED 复验 BASELINE。`test-quality` 按 `ucd_modes` 要求 RED failed / BASELINE passed。
-- 存量工作流（4.6 之前创建、没有基线）先执行 `loeyae-aidlc orchestrate baseline --set <sha> --user-input Approve --reason "<原因>"` 登记基线，再派生 characterization UC-D。split 布局的模块子工作流继承父工作流基线。
-- 多单元基线分代（4.7.0）：基线是一条只能追加的 commit 链（`Baseline History`），每份 BASELINE 证据绑定它产出时的那一代。多个单元依次改动同一批 code ref 时，上一个单元的 `code-generation` 完成并提交后，执行 `loeyae-aidlc orchestrate baseline --advance <该单元 GREEN 证据的 source_revision.commit> --expect <当前基线> --user-input Approve --reason "<原因>"`，再对活动中单元的 tdd 执行普通 `evidence run`。已完成单元的 BASELINE 证据保持有效，不需要 `--refresh`。`--advance` 只能推进到已完成单元的完成点，且不能在某个单元的 BASELINE 与 GREEN 之间执行；`--replace` 用于更正一个尚未使用的基线，推进过的工作流一律拒绝 `--replace`。不带参数的 `orchestrate baseline` 显示当前代与完整链。
-- 按单元收敛 UC-D（4.8.0）：一个模块拆成多个 unit 时，在 UC-D frontmatter 写 `unit_refs: [<unit-id>, ...]`（只能写在 frontmatter；非空、不重复、必须是 `unit-manifest.json` 中的 unit；模块内要么全部声明，要么全部不声明）。I13 输出 `ucd_units`，各 unit 的 RED / BASELINE / GREEN、BASELINE `code_ref_digests`、test-quality、追溯矩阵 tests 层和功能设计只覆盖本单元的 UC-D；build-and-test 的 test-quality 和集成屏障（`ucd-coverage:<module>`）对账：每个 UC-D 都必须出现在其 `unit_refs` 中每个 unit 的 GREEN 里。不拥有 UC-D 的 unit（如契约 unit）须在 `unit-manifest.json` 中声明 `ucd_exemption`（`reason_code`、`reason`、`approval_ref`、`alternative_validation`、`validation_command` argv），producer 执行该命令通过后才写 `not_required`。不声明 `unit_refs` 时行为与 4.7.1 相同。
-- 接管基线（4.10.0）：模块在工作流启动后仍按旧流程提交了实现、后来才交给门禁接管时，用 `loeyae-aidlc orchestrate baseline --adopt <commit> [--repo app=<sha>] --module <id> --user-input Approve --approval-ref "<批准记录>" --reason "<原因>"` 把接管前已存在的实现登记为该模块的 characterization 基线（仅 split 布局；豁免 T0 与状态文件两条规则，要求模块尚无 RED / BASELINE / GREEN 证据且不晚于其第一个 tdd）。该模块的 I13 与 BASELINE 按接管基线解析，证据记录 `baseline_kind: "adoption"`；`--advance --module <id>` 在接管链上推进。未登记的模块行为不变。声明了 `ucd_exemption` 的空 UC-D 子集 unit 已完成的 tdd 及其 `not_required` 证据不阻止接管（4.10.1）。
-- code_refs 按单元收敛（4.11.0）：追溯矩阵的 code_refs 层只扫本模块源码根。unit 上下文按 unit-manifest `units[].req_refs`（如 `["REQ-001"]`）→ 本单元 UC-D 子集引用的 REQ → 模块全集确定检查范围；声明了 `ucd_exemption` 的空 UC-D 子集 unit 的 code_refs / tests 层为 `not_applicable`。build-and-test 仍按模块全集对账。子进程输出溢出（ENOBUFS）作为独立 `kind: "error"` 报出溢出的子进程，`AIDLC_SUBPROCESS_MAX_BUFFER` 可覆盖默认 64 MB 上限。
-- 文件级 sensor 按交付收敛（4.12.0）：已登记基线时，`no-todo`、`traceability` 与 `src/` 产物存在性只看本单元相对基线的变更文件（各仓库分别 diff，嵌套仓库在子仓库内执行；排除 `.gitignore` 命中与二进制文件）；traceability 要求交付文件中至少一个引用本单元 `req_refs` 中的 REQ。交付为空时，声明 `ucd_exemption` 的 unit 判 `not_applicable`（审计 `SOURCE_DELIVERY_NOT_APPLICABLE`），其他 unit 报「本单元未交付任何源码变更」。无基线时检查源码根下已跟踪的文本文件。
-
-## Worktree 与 merge plan
-
-```bash
-loeyae-aidlc worktree prepare \
-  --instance code-generation@module:module-a@unit:unit-a \
-  --member alice \
-  --path /absolute/path/to/module-a-unit-a
-
-loeyae-aidlc worktree merge-plan \
-  --instance code-generation@module:module-a@unit:unit-a \
-  --member alice \
-  --path /absolute/path/to/module-a-unit-a \
-  --review-evidence .aidlc/review.json
-```
-
-`merge-plan` 只验证分支、review 和变更路径覆盖，并输出建议 merge 命令；不会自动 merge 或 push。warmup 共享基线缓存、worktree 中断恢复与证据失配重判见 [multi-repo-worktree-recovery](docs/multi-repo-worktree-recovery.md)。
-
-## 其他能力
-
-```bash
-loeyae-aidlc runtime summary
-loeyae-aidlc runtime doctor
-loeyae-aidlc attest resolve --base origin/main --head HEAD
-loeyae-aidlc extension validate /absolute/path/to/extension
-loeyae-aidlc export --help
-loeyae-aidlc docx --help
-```
-
-## 产品与 UI 质量门禁（MARS-168）
-
-新建 full workflow 启用质量门禁 v1；旧 workflow 保持原门禁，明确采用后再补齐证据。
-需求、故事、UI 和交开发前检查当前输入摘要、依赖确认、字段能力、规则、区域追溯、
-状态反馈及变更复验。HTML Mock 使用本地校验器；Figma、skip 和无 UI 按各自路线检查。
-自然语言结论需要绑定输入的审查记录。字段矩阵与决定仍以既有业务文档为事实来源。
-
-```bash
-loeyae-aidlc evidence run --stage requirements-analysis --module <id>
-loeyae-aidlc quality metrics --module <id>
-npm run test:mars168
-```
-
-采用、证据和交接格式见 [quality-gates-v1](core/knowledge/protocols/quality-gates-v1.md)；
-13 项实现状态、实际测试结果和试点限制见 [验收报告](docs/optimization-notes/mars168-validation.md)。
-
-## 权威文档与派生切片（MARS-169）
-
-完整 `requirements.md` / `user-stories.md` 保持原路径。新完整流程执行单元生成且 ≥2 单元时，
-按批准故事映射生成确定性派生视图；门禁继续读取全文，开发交接加载当前单元与适用共享正文。
-旧流程未采用时保持 canonical 加载，已有采用记录但缺失/过期的切片会阻断。
-
-```bash
-loeyae-aidlc document-slices generate --module <id>
-loeyae-aidlc document-slices check --module <id>
-loeyae-aidlc document-slices plan --module <id> --unit <unit-id>
-loeyae-aidlc document-slices recover --module <id> # dry-run；无冲突时可显式 --apply
-npm run test:mars169
-```
-
-映射、manifest、采用与恢复契约见 [文档切片协议](core/knowledge/protocols/common-document-slices.md)。
+版本变更见 [CHANGELOG](CHANGELOG.md)。
 
 ## 开发
 
 ```bash
+npm ci --ignore-scripts
+npm run typecheck
 npm run build:all
 npm test
 ```
 
-`npm test` 包含 pretest、Core 回归和 `test:provider-local`。后者覆盖受管 MCP apply/cleanup、只读 transport、context 边界、模块事实、DOCX 对抗 fixture 和图表布局；只使用本地数据与本机协议服务，不下载 Provider 或要求真实账户。Python 检查会验证解释器；Windows Store 占位命令不可用时，可在当前进程设置 `AIDLC_TEST_PYTHON` 为已安装 Python 3 的完整路径，不修改系统配置。导出/DOCX 的无包诊断不代表生产渲染或版式验证通过。
-
-Core 聚合入口按 `scripts/core-test-suites.json` 保留原有命令顺序，失败后继续收集后续结果，最后统一返回非零。可用 `AIDLC_TEST_OUTPUT` 指定日志目录；pretest 的原始输出由 npm 正常报告，聚合阶段另存每项命令、退出码和日志。完整聚合清除定向章节过滤、旧基线运行器及用户文档 host 环境变量；定向诊断请直接运行单个测试脚本。质量与文档切片组合也包含在本地回归中。
-
-跨仓测试必须显式运行，并提前准备匹配 revision 的实际 Provider checkout 及依赖：
-
-```bash
-npm run test:provider-local
-npm run test:provider-integration -- --source <Provider-Git-URL> --revision <40-character-SHA> --checkout <matching-clean-checkout> --output <log-directory>
-```
-
-集成入口验证 checkout 的 HEAD 和已跟踪文件，逐项执行实际 Git add/lock、离线及模块知识、context/design 只读协议、Figma 既有稿/创建授权恢复 fixture、真实浏览器三视图、SVG/Markdown 导出、导出 DOCX 的样式修改与非样式保护、63 段抽离审计。Figma/SSOT/design 使用本地真实 MCP 协议服务样本，不证明生产账户或 OAuth 可用。需要本机浏览器、字体、Python；document-render/docx-style 原生执行当前仅声明 Windows x64，DOCX 最终页面版式仍未验证。抽离审计要求 Core Git 历史包含原始章节 revision。
-
-两仓分别执行 `npm test`、`npm run typecheck`；Core 另执行 `npm run build:all` 和 `npx --no-install tsx tests/test_distribution_parity.ts`。集成入口不安装依赖，也不等待 CI；各套件即使失败仍继续收集日志，任一失败返回非零，全部通过返回 0。日志目录包含逐项命令、退出码和范围的 `results.json`、原始日志及供 DOCX 样式测试使用的真实导出文档；未指定 `--output` 时使用独立临时目录并打印位置。
+`npm test` 包含本地 Core 和 Provider 回归；真实跨仓 Provider 集成需准备匹配的 checkout 和环境，命令及限制见 [CLI 指南](docs/loeyae-aidlc-cli-guide.md)。Windows 的 Python 若指向 Store 占位程序，可通过 `AIDLC_TEST_PYTHON` 指定实际 Python 3 路径。
 
 ## License
 
