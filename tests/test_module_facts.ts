@@ -55,5 +55,10 @@ try {
   }
   assert.throws(() => matchKnowledgeRequirements(before, { any_of: [{ any_of: [req] }] }), /alternatives/);
   assert.throws(() => matchKnowledgeRequirements(before, [{ dependency: "npm:vue", exact: "latest" }]), /compatibility/);
-  console.log("Bounded module facts: source digests, lock conflicts, tags, Maven variables/BOM, approved declarations, path/XML/code rejection passed");
+  const snapshots = [{ dependency: "maven:com.loeyae.boot:loeyae-boot-bom", minimum: "3.0.0-SNAPSHOT" }];
+  for (const [version, expected] of [["2.9.9", "mismatch"], ["3.0.0-SNAPSHOT", "match"], ["3.0.0", "match"], ["3.0.4-SNAPSHOT", "match"], ["4.0.0", "match"], ["3.0.0-RC1", "unknown"]] as const) {
+    assert.equal(matchKnowledgeRequirements({ ...before, dependencies: [{ dependency: snapshots[0].dependency, version, status: "known", sources: [] }] }, snapshots), expected);
+  }
+  assert.throws(() => matchKnowledgeRequirements(before, [{ dependency: "npm:vue", minimum: "3.0.0", maximum_exclusive: "2.0.0" }]), /compatibility/);
+  console.log("Bounded module facts: source digests, lock conflicts, tags, Maven variables/BOM, approved declarations, SNAPSHOT boundaries, path/XML/code rejection passed");
 } finally { rmSync(root, { recursive: true, force: true }); }

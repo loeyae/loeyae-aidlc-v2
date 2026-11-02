@@ -5,13 +5,14 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { testPython } from "./run-python.mjs";
+import { integrationOwners, loadIntegrationProviders } from "./provider-integration-plan.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const [mode, ...args] = process.argv.slice(2);
 assert(["local", "integration"].includes(mode), "mode must be local or integration");
 const flags = {};
 for (let i = 0; i < args.length; i += 2) {
-  assert(["--source", "--revision", "--checkout", "--output"].includes(args[i]) && args[i + 1] && !args[i + 1].startsWith("--"), `invalid option ${args[i]}`);
+  assert(["--source", "--revision", "--checkout", "--output", "--providers", "--only"].includes(args[i]) && args[i + 1] && !args[i + 1].startsWith("--"), `invalid option ${args[i]}`);
   assert(!(args[i] in flags), `duplicate option ${args[i]}`);
   flags[args[i]] = args[i + 1];
 }
@@ -19,7 +20,12 @@ const python = testPython();
 const output = flags["--output"] ? resolve(flags["--output"]) : mkdtempSync(join(tmpdir(), `aidlc-provider-${mode}-`));
 mkdirSync(output, { recursive: true });
 const revision = flags["--revision"], source = flags["--source"], checkout = flags["--checkout"] && resolve(flags["--checkout"]);
-if (mode === "integration") {
+assert(mode === "integration" || (!flags["--providers"] && !flags["--only"]), "Provider selection is integration-only");
+assert(!flags["--providers"] || (!source && !revision && !checkout), "use either --providers or the legacy single-checkout flags");
+const providers = flags["--providers"] ? loadIntegrationProviders(flags["--providers"]) : undefined;
+const selected = flags["--only"]?.split(",");
+if (selected) assert(providers && selected.length && selected.every(name => Object.values(integrationOwners).includes(name)), "--only requires known Provider names and --providers");
+if (mode === "integration" && !providers) {
   assert(source && /^[a-f0-9]{40}$/.test(revision ?? "") && checkout, "integration requires --source <Git URL> --revision <40-char SHA> --checkout <matching actual Provider checkout>");
   const git = (...argv) => {
     const result = spawnSync("git", ["-C", checkout, ...argv], { encoding: "utf8" });
@@ -36,6 +42,7 @@ const local = [
   "test_provider_config.py", "test_mcp_config.py", "test_platform_layouts.py",
 ];
 const integration = [
+  ["test_loeyae_boot_selector", source, revision],
   ["test_external_provider_knowledge", source, revision], ["test_module_knowledge", source, revision],
   ["test_context_source", source, revision], ["test_design_resource", source, revision],
   ["test_figma_existing", source, revision], ["test_figma_create", source, revision],
@@ -44,8 +51,20 @@ const integration = [
   ["test_document_export_provider", source, revision], ["test_docx_provider", source, revision, join(output, "document-export.docx")],
   ["test_tech_extraction", checkout],
 ];
-const suites = mode === "local" ? local.map(name => [name]) : integration;
+const omitted = [];
+const suites = mode === "local" ? local.map(name => [name]) : !providers ? integration : integration.flatMap(([name]) => {
+  const owner = integrationOwners[name];
+  if (selected && !selected.includes(owner)) { omitted.push({ name, provider: owner, status: "not_selected" }); return []; }
+  const entry = providers[owner];
+  if (!entry) { omitted.push({ name, provider: owner, status: "not_verified", reason: "Provider checkout not supplied" }); return []; }
+  const parameters = name === "test_tech_extraction" ? [entry.checkout]
+    : name === "test_diagram_visual_provider" ? [entry.checkout, entry.revision, python]
+    : [entry.source, entry.revision, ...(name === "test_docx_provider" ? [join(output, "document-export.docx")] : name === "test_diagram_visual_chain" ? [python] : [])];
+  return [[name, ...parameters]];
+});
 const results = [];
+const save = () => writeFileSync(join(output, "results.json"), JSON.stringify({ mode, source, revision, checkout, providers, python, omitted, results }, null, 2));
+save();
 for (const [name, ...parameters] of suites) {
   const executable = name.endsWith(".py") ? python : process.execPath;
   const argv = name.endsWith(".py") ? [join(root, `tests/${name}`)] : [join(root, "node_modules/tsx/dist/cli.mjs"), join(root, `tests/${name}.ts`), ...parameters];
@@ -58,9 +77,9 @@ for (const [name, ...parameters] of suites) {
   writeFileSync(join(output, `${name}.log`), log);
   results.push({ name, command: [executable, ...argv], exit_code: result.status, signal: result.signal, duration_ms: Date.now() - started,
     scope: mode === "local" ? "deterministic local fixture" : name.includes("figma") || ["test_context_source", "test_design_resource"].includes(name) ? "locked production package with local protocol service fixture; no production account" : "locked production package", log: `${name}.log` });
-  writeFileSync(join(output, "results.json"), JSON.stringify({ mode, source, revision, checkout, python, results }, null, 2));
+  save();
   console.log(`${result.status === 0 ? "PASS" : "FAIL"} ${name} (exit ${result.status})`);
   if (result.status !== 0) console.log(log.slice(-2500));
 }
-console.log(`${results.filter(result => result.exit_code === 0).length}/${results.length} suites passed; logs: ${output}`);
-if (results.some(result => result.exit_code !== 0)) process.exitCode = 1;
+console.log(`${results.filter(result => result.exit_code === 0).length}/${results.length} executed suites passed; ${omitted.filter(item => item.status === "not_verified").length} not verified; ${omitted.filter(item => item.status === "not_selected").length} not selected; logs: ${output}`);
+if (!results.length || results.some(result => result.exit_code !== 0) || omitted.some(item => item.status === "not_verified")) process.exitCode = 1;

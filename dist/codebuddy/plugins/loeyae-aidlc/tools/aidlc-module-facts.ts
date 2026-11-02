@@ -169,7 +169,12 @@ export function readModuleFacts(project: string, moduleId: string | undefined): 
   return { ...body, facts_digest: sha256ProviderDigest(body) };
 }
 
-/** Deliberately small version language: exact or numeric [minimum, maximum). */
+const boundedVersion = (value: unknown): value is string => typeof value === "string" && /^\d+\.\d+\.\d+(?:-SNAPSHOT)?$/.test(value);
+function compareBoundedVersions(a: string, b: string): number {
+  const aa = a.replace(/-SNAPSHOT$/, "").split(".").map(Number), bb = b.replace(/-SNAPSHOT$/, "").split(".").map(Number);
+  return aa[0] - bb[0] || aa[1] - bb[1] || aa[2] - bb[2] || Number(!a.endsWith("-SNAPSHOT")) - Number(!b.endsWith("-SNAPSHOT"));
+}
+/** Exact or bounded release/SNAPSHOT versions. An omitted maximum has no upper bound. */
 export function matchKnowledgeRequirements(facts: ModuleFacts, value: unknown): "match" | "unknown" | "conflict" | "mismatch" {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const alternatives = object(value); fields(alternatives, ["any_of"]);
@@ -182,14 +187,13 @@ export function matchKnowledgeRequirements(facts: ModuleFacts, value: unknown): 
     const requirement = object(entry); fields(requirement, ["dependency", "exact", "minimum", "maximum_exclusive"]);
     if (typeof requirement.dependency !== "string") fail("missing dependency");
     const pinned = requirement.exact !== undefined;
-    if (pinned ? !exactVersion(requirement.exact) || requirement.minimum !== undefined || requirement.maximum_exclusive !== undefined : !/^\d+\.\d+\.\d+$/.test(requirement.minimum) || !/^\d+\.\d+\.\d+$/.test(requirement.maximum_exclusive)) fail("invalid compatibility version");
+    if (pinned ? !exactVersion(requirement.exact) || requirement.minimum !== undefined || requirement.maximum_exclusive !== undefined : !boundedVersion(requirement.minimum) || (requirement.maximum_exclusive !== undefined && (!boundedVersion(requirement.maximum_exclusive) || compareBoundedVersions(requirement.minimum, requirement.maximum_exclusive) >= 0))) fail("invalid compatibility version");
     const fact = facts.dependencies.find(dep => dep.dependency === requirement.dependency);
     if (!fact) return "mismatch";
     if (fact.status !== "known") return fact.status;
     if (pinned) return fact.version === requirement.exact ? "match" : "mismatch";
-    if (!/^\d+\.\d+\.\d+$/.test(fact.version!)) return "unknown";
-    const compare = (a: string, b: string) => { const aa = a.split(".").map(Number), bb = b.split(".").map(Number); return aa[0] - bb[0] || aa[1] - bb[1] || aa[2] - bb[2]; };
-    return compare(fact.version!, requirement.minimum) >= 0 && compare(fact.version!, requirement.maximum_exclusive) < 0 ? "match" : "mismatch";
+    if (!boundedVersion(fact.version) || (fact.version.endsWith("-SNAPSHOT") && !requirement.minimum.endsWith("-SNAPSHOT"))) return "unknown";
+    return compareBoundedVersions(fact.version, requirement.minimum) >= 0 && (requirement.maximum_exclusive === undefined || compareBoundedVersions(fact.version, requirement.maximum_exclusive) < 0) ? "match" : "mismatch";
   });
   return results.includes("conflict") ? "conflict" : results.includes("mismatch") ? "mismatch" : results.includes("unknown") ? "unknown" : "match";
 }

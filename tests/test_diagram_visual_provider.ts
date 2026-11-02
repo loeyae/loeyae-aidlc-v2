@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,10 +22,15 @@ function json(path:string) { return JSON.parse(readFileSync(path,"utf8")); }
 let scenarios=0;
 const variants=["valid","node-collision","edge-collision","group-overlap","global-decoration","sequence-lifeline","label-edge-collision","arrow-label-occlusion","target-port-approach","vertical-scroll","viewport-overflow"];
 for(const variant of variants.filter(x=>!process.env.VISUAL_SCENARIOS||process.env.VISUAL_SCENARIOS.split(",").includes(x))) {
+  // Each scenario is a new receiving project; never carry the previous project's claim.
+  delete process.env.AIDLC_SESSION_BINDING;
   const project=join(root,String(scenarios)); mkdirSync(project);
   const setup=`import sys; sys.path.insert(0,${JSON.stringify(join(repo,"tests"))}); from test_provider_adapter import geometry_fixture; geometry_fixture(sys.argv[1],sys.argv[2],(320,240) if sys.argv[2] in ('vertical-scroll','viewport-overflow') else (800,600))`;
   run(python,["-c",setup,project,variant],repo);
   run("git",["init"],project);
+  mkdirSync(join(project,"docs/aidlc/ideation"),{recursive:true});
+  writeFileSync(join(project,"docs/aidlc/ideation/module-manifest.json"),JSON.stringify({schema_version:1,modules:[{module_id:"test-module",name:"Visual fixture",service_id:"visual"}]}));
+  process.env.AIDLC_SESSION_BINDING = fixtureEnvironment(project,["ui","inspect","--module","test-module"]).AIDLC_SESSION_BINDING;
   writeFileSync(join(project,".aidlc/provider-git-policy.json"),JSON.stringify({version:1,allowed_hosts:fixture?[]:[new URL(source).hostname],allowed_commits:[commit],allow_file_fixtures:fixture}));
   addProjectProvider(project,{source,ref:commit,subdir:"providers/diagram-visual",instance:"visual",allowFile:fixture,trust:"allowlisted-commit"});
   const evidencePath=join(project,".aidlc/evidence/requirements-methods/test-module/diagram-contract.json");

@@ -1,4 +1,5 @@
 [
+  ["node", "tests/test_provider_integration_plan.mjs"],
   [
     "tsx",
     "tests/test_delivery_summary.ts"

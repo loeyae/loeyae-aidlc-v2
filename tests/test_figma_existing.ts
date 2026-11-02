@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { saveFixtureState, fixtureEnvironment } from "./mars243_fixture_session";
 import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
@@ -108,7 +109,8 @@ function setState(route = "figma-existing", approved = true) {
   state.current_stage_instance = `ui-figma-generation@module:${mod}`;
   state.history = [{ timestamp: new Date().toISOString(), stage: "ui-mock", module_id: mod, instance_id: `ui-mock@module:${mod}`, result: "completed", user_input: route },
     ...(approved ? [{ timestamp: new Date().toISOString(), stage: "ui-page-planning", module_id: mod, instance_id: `ui-page-planning@module:${mod}`, result: "approved" as const }] : [])];
-  saveWorkflowState(project, state);
+  saveFixtureState(project, state);
+  process.env.AIDLC_SESSION_BINDING = fixtureEnvironment(project, ["ui", "accept", "--module", mod]).AIDLC_SESSION_BINDING;
 }
 async function zero(action: () => Promise<any>) {
   const before = [network, credentials, tools.length]; const result = await action(); assert.deepEqual([network, credentials, tools.length], before); return result;

@@ -74,6 +74,7 @@ loeyae-aidlc orchestrate report --stage <slug> --result completed
 - [AI-DLC 关键词](docs/ai-dlc-keyword-guide.md)、[Context Source](docs/context-source-usage.md)、[图表视觉 Provider](docs/diagram-visual-provider.md)。
 - [质量门禁协议](core/knowledge/protocols/quality-gates-v1.md)和[文档切片协议](core/knowledge/protocols/common-document-slices.md)：规则与数据契约。
 - [真实宿主 Agent 评测](docs/evals/README.md)：任务包、记录方式及验证范围。
+- [Provider 分仓集成验证](docs/provider-integration-guide.md)：按仓库固定版本、选择能力及检查实际 wire 契约。
 
 版本变更见 [CHANGELOG](CHANGELOG.md)。
 

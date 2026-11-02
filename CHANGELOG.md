@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 4.25.0 — 2026-11-03
+
+- Validate split Provider repositories using independently pinned sources, revisions and clean checkouts; report omitted capabilities as not verified, with explicit selection for targeted runs.
+- Match approved Loeyae Boot knowledge from 3.0.0-SNAPSHOT upward, including explicit SNAPSHOT lower bounds and optional upper bounds; unknown, conflicting and unsupported version forms remain conservative.
+- Complete the existing declarative external-source compatibility window for UI creation and visual adapters, and update external UI/diagram fixtures to current module axes and session claims.
 
 ## 4.24.0 — 2026-11-02
 

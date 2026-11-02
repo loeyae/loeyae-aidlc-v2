@@ -75,6 +75,11 @@ const completeProbe: RestrictedSandboxProbe = {
   controls: { filesystem: true, network: true, environment: true, process: true, resources: true },
 };
 
+// Optional actual author SDK checkout: validate the Request produced by Core,
+// then validate the returned Result before normal Runner admission.
+const protocolCheckout = process.env.AIDLC_PROVIDER_PROTOCOL_CHECKOUT;
+const authorSdk = protocolCheckout ? await import(pathToFileURL(join(protocolCheckout, "dist/sdk/src/index.js")).href) : undefined;
+
 class FixtureSandbox implements RestrictedSandboxAdapter {
   calls = 0;
 
@@ -193,6 +198,13 @@ try {
   let capturedInvocation: PreparedProviderInvocation | undefined;
   const passingSandbox = new FixtureSandbox((invocation) => {
     capturedInvocation = invocation;
+    if (authorSdk) {
+      authorSdk.validateDocument(invocation.request, PROVIDER_SCHEMA.request);
+      authorSdk.validateDocument(providerResult(invocation), PROVIDER_SCHEMA.result);
+      assert.throws(() => authorSdk.validateDocument({ ...invocation.request, permissions: { ...invocation.request.permissions, network: "allowlisted" } }, PROVIDER_SCHEMA.request));
+      assert.throws(() => authorSdk.validateDocument(providerResult(invocation, { checks: [{ rule_id: "bad", severity: "error", status: "failed", message: "failure" }] }), PROVIDER_SCHEMA.result));
+      assert.throws(() => authorSdk.validateDocument({ ...invocation.request, evidence: {} }, PROVIDER_SCHEMA.request));
+    }
     assert.equal(invocation.request.permissions.command.shell, false);
     assert.equal(invocation.request.permissions.network, "denied");
     assert.deepEqual(invocation.request.permissions.environment, []);

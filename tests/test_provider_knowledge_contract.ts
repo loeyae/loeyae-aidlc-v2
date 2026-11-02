@@ -75,7 +75,7 @@ try {
   }
   // Deprecation window: a knowledge manifest that declares a recognized legacy
   // external-source protocol instead of aidlc.knowledge stays installable.
-  for (const protocol of ["aidlc.context-source", "aidlc.design-resource", "aidlc.ui-read-source"]) {
+  for (const protocol of ["aidlc.context-source", "aidlc.design-resource", "aidlc.ui-read-source", "aidlc.ui-create-source", "aidlc.visual"]) {
     assert.equal(validateProviderRepositoryManifest({ ...manifest, extensions: { [protocol]: {} } }).kind, "knowledge");
   }
   for (const dir of [source, project]) {

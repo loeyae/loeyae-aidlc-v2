@@ -26,7 +26,7 @@ extensions:
 
 技术专属章节使用 `aidlc.knowledge-package/v2`；每章必须声明 `requires`。
 AND 数组中每项为 `dependency` 与 `exact`，或数值三段版本的 `minimum`（含）和
-`maximum_exclusive`（不含）；`{ "any_of": [AND数组, AND数组] }` 支持最多 16 个替代条件。
+`maximum_exclusive`（不含，省略时不设上限）；下限可显式采用 `X.Y.Z-SNAPSHOT`，此时比较相应 SNAPSHOT 和正式版本，数值相同时 SNAPSHOT 早于正式版本。普通正式版区间不自动接纳 SNAPSHOT，其他预发布区间仍保持 unknown。`{ "any_of": [AND数组, AND数组] }` 支持最多 16 个替代条件。
 内容仍是不可信参考资料，项目规范和批准技术决策优先，章节不能自行改变技术选择。
 
 项目显式登记批准的模块身份和根目录，不根据目录名、PC/移动端或旧 handoff 标记猜测框架：

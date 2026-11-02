@@ -196,7 +196,7 @@ function jsonObject(value: unknown, field: string): JsonObject {
  *  manifest that declares one of these instead of extensions["aidlc.knowledge"] stays
  *  installable during the deprecation window (the resolver already treats it as an
  *  external source with no knowledge confirmation action). */
-export const LEGACY_KNOWLEDGE_EXTENSION_PROTOCOLS = ["aidlc.context-source", "aidlc.design-resource", "aidlc.ui-read-source"] as const;
+export const LEGACY_KNOWLEDGE_EXTENSION_PROTOCOLS = ["aidlc.context-source", "aidlc.design-resource", "aidlc.ui-read-source", "aidlc.ui-create-source", "aidlc.visual"] as const;
 
 export const LEGACY_KNOWLEDGE_DEPRECATION = 'kind: knowledge without extensions["aidlc.knowledge"] relies on a legacy external-source protocol; deprecated — add aidlc.knowledge or change kind (a future version will reject installation)';
 

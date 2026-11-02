@@ -1,6 +1,6 @@
 # Loeyae Boot Provider 安装与运行
 
-本文适用于 `framework.java-loeyae-boot` `0.1.x` 与 Core `aidlc.provider/v1.1`。Core 已完成领域抽离：不再内置任何 Loeyae 专属 stage、sensor、MCP/skill 规则、`is_loeyae_boot` 检测或 compatibility 迁移层。外部 Loeyae Boot Provider 以项目级 Git lock 安装，并通过通用 `code-generation` 生命周期 Hook 注入，挂载能力为 `implementation-validation`。未安装 Provider 时 `code-generation` 行为完全不变。
+本文适用于 `framework.java-loeyae-boot` `0.2.x` 与 Core `aidlc.provider/v1.1`。Core 已完成领域抽离：不再内置任何 Loeyae 专属 stage、sensor、MCP/skill 规则、`is_loeyae_boot` 检测或 compatibility 迁移层。外部 Loeyae Boot Provider 以项目级 Git lock 安装，并通过通用 `code-generation` 生命周期 Hook 注入，挂载能力为 `implementation-validation`。未安装 Provider 时 `code-generation` 行为完全不变。
 
 > 不存在 compatibility / legacy / shadow / enforce 模式，也不存在 `provider compatibility` 命令或 `loeyae-compliance` 阶段。Core 只保留通用 Provider 生命周期 Hook（通用 Resolver / Runner / Gate）。
 
@@ -9,7 +9,7 @@
 生产 `https`/`ssh` 来源先在 `.aidlc/provider-git-policy.json` 配置 `allowed_hosts`（可选 `allowed_organizations`），再安装固定 tag 或 commit，并显式绑定到通用 `code-generation` Hook：
 
 ```bash
-loeyae-aidlc provider add ssh://git@git.dev.loeyae.com:31022/libraries/loeyae-aidlc-provider.git \
+loeyae-aidlc provider add ssh://git@git.dev.loeyae.com:31022/libraries/loeyae-aidlc-provider-loeyae-boot.git \
   --ref v0.1.0 \
   --subdir providers/loeyae-boot \
   --id framework.java-loeyae-boot \
@@ -42,16 +42,16 @@ Profile selector 决定该 Provider 是否被选中：事实不匹配（selector
 
 ### 离线知识包（独立安装）
 
-实际接收包是同仓的 `providers/loeyae-boot-knowledge`，包含测试基类/工具、Entity 注解、术语、框架版本/Starter 上下文和合规表的实际内容。知识包 commit 为 `2978f09cc86d2643b050e4f79c44115e4f83aea0`；先允许 `git.dev.loeyae.com` 来源并把该 commit 加入项目 `allowed_commits`，再安装：
+知识包位于独立的 `loeyae-aidlc-provider-loeyae-boot-knowledge` 仓库，安装子目录仍为 `providers/loeyae-boot-knowledge`，包含测试基类/工具、Entity 注解、术语、框架版本/Starter 上下文和合规表的实际内容。选择该仓已发布的固定 commit，并在项目 policy 中允许对应来源和 commit 后安装；不要继续使用拆仓前的旧 commit：
 
 ```bash
-loeyae-aidlc provider add ssh://git@git.dev.loeyae.com:31022/libraries/loeyae-aidlc-provider.git \
-  --ref 2978f09cc86d2643b050e4f79c44115e4f83aea0 \
+loeyae-aidlc provider add ssh://git@git.dev.loeyae.com:31022/libraries/loeyae-aidlc-provider-loeyae-boot-knowledge.git \
+  --ref <published-immutable-commit> \
   --subdir providers/loeyae-boot-knowledge --instance loeyae-knowledge \
   --trust allowlisted-commit --stage code-generation --capability framework.conventions
 ```
 
-包为 `kind: knowledge`，通过 `aidlc.knowledge-package/v1` 声明 15 个章节与原始字节摘要。沿用上述 Java / `loeyae-boot` Profile；宿主按 `provider-offline-knowledge.md` 加载当前 Plan/node 的全部章节后显式确认，Core 签发并校验回执。现有 validation 包独立绑定 `implementation-validation`，不能用知识回执代替验证 Evidence 或 GateDecision。
+包为 `kind: knowledge`，通过 `aidlc.knowledge-package/v2` 声明 15 个章节与原始字节摘要。沿用上述 Java / `loeyae-boot` Profile；宿主按 `provider-offline-knowledge.md` 加载当前 Plan/node 中符合批准模块事实与版本条件的章节后显式确认，Core 签发并校验回执。现有 validation 包独立绑定 `implementation-validation`，不能用知识回执代替验证 Evidence 或 GateDecision。
 
 Core 和模板不再强制加载领域 MCP Skill。保留的共享知识服务注册精确位于 `harness/claude/plugin.json`、`harness/kiro-crew/mcp.json`、`harness/qoder/mcp-cn.json` 与 CodeBuddy/Qoder/ZCode 的 `.mcp.json`；该服务还提供 `ai-context-file-guide` 等独立内容，当前离线领域包未替代这些用途，因此本轮不移除共享注册或用户配置。
 
@@ -59,9 +59,11 @@ Core 和模板不再强制加载领域 MCP Skill。保留的共享知识服务�
 
 ```bash
 npx --no-install tsx tests/test_external_provider_knowledge.ts \
-  ssh://git@git.dev.loeyae.com:31022/libraries/loeyae-aidlc-provider.git \
-  2978f09cc86d2643b050e4f79c44115e4f83aea0
+  ssh://git@git.dev.loeyae.com:31022/libraries/loeyae-aidlc-provider-loeyae-boot-knowledge.git \
+  <published-immutable-commit>
 ```
+
+知识适用下限为维护者确认的 `3.0.0-SNAPSHOT`，无上限。模块只有父 POM/BOM/变量版本时，使用批准的精确版本声明；配置与分仓回归入口见 [Provider 分仓集成验证](provider-integration-guide.md)。
 
 ## 2. 运行完整链路
 
@@ -112,7 +114,7 @@ loeyae-aidlc provider remove loeyae-boot
 
 | Core | Provider | 协议/能力 | 状态 |
 |---|---|---|---|
-| Provider 领域抽离后的 Core | `framework.java-loeyae-boot` `0.1.x` | `aidlc.provider/v1.1` + `implementation-validation` | 支持 |
+| Provider 领域抽离后的 Core | `framework.java-loeyae-boot` `0.2.x` | `aidlc.provider/v1.1` + `implementation-validation` | 支持 |
 | 未安装任何 Provider | — | — | `code-generation` 行为不变 |
 | 非 Loeyae Profile | Loeyae Boot Provider | selector false/unknown | 不创建可执行 Plan |
 | Windows/macOS production run | `restricted-v1` | 无完整 OS isolation | fail-closed |

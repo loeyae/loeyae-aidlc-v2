@@ -1,7 +1,8 @@
 /** Actual source checker -> locked production browser adapter -> existing sensor. */
 import assert from "node:assert/strict";
+import { fixtureEnvironment } from "./mars243_fixture_session";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, cpSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -14,21 +15,31 @@ const repo=process.cwd(), project=mkdtempSync(join(tmpdir(),"vc-")), tsx=join(re
 function run(command:string,args:string[]){const r=spawnSync(command,args,{cwd:project,encoding:"utf8",timeout:120000,maxBuffer:8*1024*1024}); assert.equal(r.status,0,`${r.stdout}\n${r.stderr}`);return r.stdout;}
 run(python,["-c",`import sys; sys.path.insert(0,${JSON.stringify(join(repo,"tests"))}); from test_semantic_checkers import fixture; fixture(sys.argv[1],True)`,project]);
 const stateTool=pathToFileURL(join(repo,"core/tools/aidlc-light-state.ts")).href;
-run(process.execPath,[tsx,"--eval",`import {loadWorkflowState,saveWorkflowState} from ${JSON.stringify(stateTool)};const s=loadWorkflowState(process.cwd());s.current_stage='requirements-methods';s.current_phase='inception';s.current_stage_instance='requirements-methods@project';saveWorkflowState(process.cwd(),s);`]);
+const fixtureTool=pathToFileURL(join(repo,"tests/mars243_fixture_session.ts")).href;
+run(process.execPath,[tsx,"--eval",`import {loadWorkflowState} from ${JSON.stringify(stateTool)};import {saveFixtureState} from ${JSON.stringify(fixtureTool)};const s=loadWorkflowState(process.cwd());s.current_stage='requirements-methods';s.current_phase='inception';s.current_module='project';s.current_stage_instance='requirements-methods@module:project';saveFixtureState(process.cwd(),s);`]);
+const oldBase="docs/aidlc/inception",moduleBase="docs/aidlc/modules/project/inception";
+cpSync(join(project,oldBase),join(project,moduleBase),{recursive:true});
+const rebindPaths=(value:string)=>value.replaceAll(oldBase,moduleBase).replaceAll(".aidlc/evidence/requirements-methods/diagram-contract-provider.json", ".aidlc/evidence/requirements-methods/project/diagram-contract-provider.json");
+const rewrite=(directory:string)=>{for(const entry of readdirSync(directory,{withFileTypes:true})){const file=join(directory,entry.name);if(entry.isDirectory())rewrite(file);else writeFileSync(file,rebindPaths(readFileSync(file,"utf8")));}};
+rewrite(join(project,moduleBase));
+mkdirSync(join(project,"docs/aidlc/ideation"),{recursive:true});
+writeFileSync(join(project,"docs/aidlc/ideation/module-manifest.json"),JSON.stringify({schema_version:1,modules:[{module_id:"project",name:"Visual chain",service_id:"visual"}]}));
+writeFileSync(join(project,"generator.py"),rebindPaths(readFileSync(join(project,"generator.py"),"utf8")));
 run("git",["init"]); run("git",["add","."]); run("git",["-c","user.name=Visual Test","-c","user.email=visual@example.invalid","commit","-m","test sources"]);
+process.env.AIDLC_SESSION_BINDING=fixtureEnvironment(project,["ui","inspect","--module","project"]).AIDLC_SESSION_BINDING;
 const source=sourceArg.includes("://")?sourceArg:pathToFileURL(resolve(repo,sourceArg)).href, fixture=source.startsWith("file:");
 writeFileSync(join(project,".aidlc/provider-git-policy.json"),JSON.stringify({version:1,allowed_hosts:fixture?[]:[new URL(source).hostname],allowed_commits:[commit],allow_file_fixtures:fixture}));
 addProjectProvider(project,{source,ref:commit,subdir:"providers/diagram-visual",instance:"visual",allowFile:fixture,trust:"allowlisted-commit"});
-const viewport={width:800,height:600}, base="docs/aidlc/inception/requirements/business-flows";
+const viewport={width:800,height:600}, base="docs/aidlc/modules/project/inception/requirements/business-flows";
 writeFileSync(join(project,"request.json"),JSON.stringify({version:"1",provider:"diagram.visual",stage:"requirements-methods",target_operation:"preview",target_reading_environment:{viewports:{normal:viewport,fit:viewport,zoom:viewport}},diagrams:[{id:"requirements-flow",source_path:`${base}.svg`,manifest_path:`${base}.diagram.json`,expected_contract_path:`${base}.expected.json`}]}));
 const producer=join(repo,"core/tools/aidlc-evidence.ts"), adapter=join(repo,"core/tools/aidlc-diagram-provider.ts");
 run(process.execPath,[tsx,producer,"run","--stage","requirements-methods","--sensor","diagram-contract"]);
-const evidence=join(project,".aidlc/evidence/requirements-methods/diagram-contract.json");
+const evidence=join(project,".aidlc/evidence/requirements-methods/project/diagram-contract.json");
 assert.equal(JSON.parse(readFileSync(evidence,"utf8")).final_status,"STATIC_PASS");
 run(process.execPath,[tsx,adapter,"run","--request","request.json","--host-provider","visual"]);
 assert.equal(JSON.parse(readFileSync(evidence,"utf8")).final_status,"PASS");
 const orchestrator=pathToFileURL(join(repo,"core/tools/aidlc-orchestrate.ts")).href;
-const check=`import {checkSensors} from ${JSON.stringify(orchestrator)};import {loadWorkflowState} from ${JSON.stringify(stateTool)};(async()=>{const state=loadWorkflowState(process.cwd()); const result=await checkSensors({stage:{slug:'requirements-methods',axis:'project',sensors:['diagram-contract']},axis:'project',instance_id:'requirements-methods@project'},state);if(result.length)throw new Error(JSON.stringify(result));console.log('existing diagram-contract sensor: PASS');})()`;
+const check=`import {checkSensors,loadGraph,makeInstance} from ${JSON.stringify(orchestrator)};import {loadWorkflowState} from ${JSON.stringify(stateTool)};(async()=>{const state=loadWorkflowState(process.cwd());const stage=loadGraph().stages.find(s=>s.slug==='requirements-methods'); const result=await checkSensors(makeInstance(stage,'module',{module_id:'project'}),state,{onlySensors:['diagram-contract']});if(result.length)throw new Error(JSON.stringify(result));console.log('existing diagram-contract sensor: PASS');})()`;
 console.log(run(process.execPath,[tsx,"--eval",check]));
 const lockPath=join(project,PROJECT_PROVIDERS_LOCK_PATH), lockBytes=readFileSync(lockPath), driftedLock:any=structuredClone(readProjectProviders(project).lock);
 driftedLock.providers[0].source.commit_oid="0".repeat(40);writeFileSync(lockPath,JSON.stringify(driftedLock));

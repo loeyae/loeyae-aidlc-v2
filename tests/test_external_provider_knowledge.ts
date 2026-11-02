@@ -27,6 +27,9 @@ try {
   write(".aidlc/provider-git-policy.json", { version: 1, allowed_hosts: source.startsWith("file:") ? [] : [new URL(source).hostname], allowed_commits: [commit], allow_file_fixtures: source.startsWith("file:") });
   addProjectProvider(root, { source, ref: commit, subdir: "providers/loeyae-boot-knowledge", instance: "framework-knowledge", trust: "allowlisted-commit", allowFile: source.startsWith("file:"), stages: ["code-generation"], capabilities: ["framework.conventions"] });
   write(PROVIDER_PROFILE_REGISTRY_PATH, { version: 1, active: "framework", profiles: { framework: { facts: { languages: ["java"], frameworks: ["loeyae-boot"] }, risk: { level: "standard", protected_gate: false } } } });
+  mkdirSync(join(root, ".aidlc/decisions"), { recursive: true });
+  write(".aidlc/decisions/app-boot.json", { schema: "aidlc.module-decision/v1", module_id: "app", approved: true, dependencies: [{ dependency: "maven:com.loeyae.boot:loeyae-boot-bom", version: "3.0.4-SNAPSHOT" }] });
+  write(".aidlc/module-facts.json", { schema: "aidlc.module-facts/v1", modules: [{ id: "app", root: ".", declarations: [{ dependency: "maven:com.loeyae.boot:loeyae-boot-bom", version: "3.0.4-SNAPSHOT", decision: ".aidlc/decisions/app-boot.json" }] }] });
   const resolved = resolveProjectProviderPlan(root, { scope: { stage: "code-generation", module_id: "app", unit_id: "unit" }, source_revision: readCurrentProviderSourceRevision(root), policy: defaultResolutionPolicy(), freeze: true });
   assert.equal(resolved.plan.nodes.length, 1);
   const input = { plan: resolved.plan, nodeId: resolved.plan.nodes[0].node_id };
