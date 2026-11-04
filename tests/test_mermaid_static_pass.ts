@@ -1,88 +1,92 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { createInitialState, saveWorkflowState } from "../core/tools/aidlc-light-state";
+import { dirname, join, resolve, sep } from "node:path";
+import { createInitialState } from "../core/tools/aidlc-light-state";
+import { saveFixtureState } from "./mars243_fixture_session";
 
 const repository = resolve(import.meta.dirname, "..");
 const tsx = join(repository, "node_modules", "tsx", "dist", "cli.mjs");
 const checker = join(repository, "core", "tools", "aidlc-semantic-checks.ts");
-const root = mkdtempSync(join(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir(), "aidlc-mermaid-static-pass-"));
+const scratch = realpathSync(process.env.KIROCREW_SCRATCH || process.env.TMPDIR || tmpdir());
+const root = mkdtempSync(join(scratch, "aidlc-mermaid-static-pass-"));
 const moduleId = "m01-orders";
 const flows = `docs/aidlc/modules/${moduleId}/inception/requirements/business-flows.md`;
+const architecture = `docs/aidlc/modules/${moduleId}/inception/application-design/component-dependency.md`;
 
-function write(relative: string, content: string): void {
-  const target = join(root, relative);
+function write(file: string, content: string): void {
+  const target = join(root, file);
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, content, "utf8");
 }
 
-function run(): { status: number; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [tsx, checker, "--sensor", "diagram-contract"], { cwd: root, encoding: "utf8" });
-  return { status: result.status ?? 1, stdout: result.stdout || "", stderr: result.stderr || "" };
+function run() {
+  return spawnSync(process.execPath, [tsx, checker, "--sensor", "diagram-contract"], {
+    cwd: root, encoding: "utf8",
+    env: { ...process.env, AIDLC_ACTIVE_STAGE: "", AIDLC_ACTIVE_MODULE: "", AIDLC_ACTIVE_UNIT: "", AIDLC_SESSION_BINDING: "" },
+  });
 }
 
-function flow(declaration: string): string {
-  return `# Order retry flow\n\n${declaration}\n\`\`\`mermaid\nflowchart LR\n  Retry[Retry order] --> Return[Return result]\n\`\`\`\n`;
+function source(body: string, comment = ""): string {
+  return `# REQ-001 Order behavior\n\n${comment ? `${comment}\n` : ""}\`\`\`mermaid\n${body}\n\`\`\`\n`;
 }
-
-const declaration = "<!-- aidlc-mermaid-validation: {\"diagram_id\":\"order-retry\",\"module\":\"m01-orders\",\"validation_tier\":\"STATIC_PASS\",\"diagram_type\":\"module-internal-simple-flow\",\"all_elements_within_module\":true,\"no_contract_semantics\":true,\"not_architecture_or_delivery_evidence\":true} -->";
 
 try {
-  const state = createInitialState("feature", "4.5.1", "mermaid-static-pass-fixture", [], "Validate Mermaid STATIC_PASS admission");
+  const state = createInitialState("feature", "4.25.0", "mermaid-source-fixture", [], "Validate Mermaid without format escalation");
   state.current_stage = "requirements-methods";
   state.current_module = moduleId;
+  // An absent choice and an explicit Mermaid choice follow the same source checks.
+  saveFixtureState(root, state);
+  const sources = [
+    "flowchart LR\n  Retry[Retry order] --> Return[Return result]",
+    "flowchart LR\n  Orders[Order module] -->|Payment contract| Payments[Payment module]",
+    "sequenceDiagram\n  participant A as Order service\n  participant B as Payment service\n  A->>B: Request payment\n  B-->>A: Payment result",
+    "classDiagram\n  OrderService --> PaymentPort : uses",
+    "stateDiagram-v2\n  [*] --> Pending\n  Pending --> Paid",
+    "erDiagram\n  ORDER ||--o{ ORDER_ITEM : contains",
+  ];
+  for (const body of sources) {
+    write(flows, source(body));
+    const result = run();
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.final_status, "STATIC_PASS");
+    assert.equal(payload.source_format, "mermaid");
+    assert.equal(payload.visual_status, "not_requested");
+    assert.equal(payload.diagrams_checked, 1);
+    assert.equal(payload.diagrams[0].type, body.split(/\s/)[0]);
+    assert.equal(payload.admission_conditions, undefined);
+  }
+
+  // Historic comments are ordinary Markdown comments, not current admission or format authority.
+  const legacy = '<!-- aidlc-mermaid-validation: {"module":"old-module","all_elements_within_module":false,"no_contract_semantics":false,"not_architecture_or_delivery_evidence":false} -->';
+  write(flows, source(sources[1], legacy));
+  assert.equal(run().status, 0);
+
+  state.current_stage = "application-design";
   state.diagram_format = "mermaid";
-  saveWorkflowState(root, state);
+  saveFixtureState(root, state);
+  write(architecture, source(sources[1]));
+  assert.equal(run().status, 0, "architecture and cross-module contracts may remain Mermaid");
 
-  write(flows, flow(declaration));
-  const admitted = run();
-  assert.equal(admitted.status, 0, admitted.stderr);
-  const payload = JSON.parse(admitted.stdout) as Record<string, unknown>;
-  assert.equal(payload.status, "passed");
-  assert.equal(payload.final_status, "STATIC_PASS");
-  assert.equal(payload.validation_tier, "STATIC_PASS");
-  assert.equal(payload.admission_status, "passed");
-  const diagrams = (payload.diagrams as Array<Record<string, unknown>>).map((diagram) => ({
-    ...diagram,
-    file: String(diagram.file).replace(/\\/g, "/"),
-  }));
-  assert.deepEqual(diagrams, [{
-    file: flows,
-    line: 4,
-    type: "flowchart",
-    diagram_id: "order-retry",
-    module: moduleId,
-    validation_tier: "STATIC_PASS",
-    diagram_type: "module-internal-simple-flow",
-    admission_conditions: {
-      module_internal_simple_flow: true,
-      all_elements_within_module: true,
-      no_contract_semantics: true,
-      not_architecture_or_delivery_evidence: true,
-      explicit_source_declaration: true,
-    },
-  }]);
+  // A project-level document does not acquire a module/sidecar prerequisite.
+  state.current_stage = "workflow-planning";
+  state.current_module = undefined;
+  saveFixtureState(root, state);
+  write("docs/aidlc/inception/execution-plan.md", source(sources[2]));
+  assert.equal(run().status, 0, "project-level diagrams do not require a module declaration");
 
-  write(flows, flow(""));
-  const undeclared = run();
-  assert.notEqual(undeclared.status, 0);
-  assert.match(undeclared.stderr, /cannot implicitly claim STATIC_PASS/);
-
-  write(flows, flow(declaration.replace('"no_contract_semantics":true', '"no_contract_semantics":false')));
-  const contractBearing = run();
-  assert.notEqual(contractBearing.status, 0);
-  assert.match(contractBearing.stderr, /declaration\.no_contract_semantics must be true/);
-
+  state.current_stage = "requirements-methods";
+  state.current_module = moduleId;
   state.diagram_format = "svg";
-  saveWorkflowState(root, state);
-  write(flows, flow(declaration));
+  saveFixtureState(root, state);
   const explicitSvg = run();
   assert.notEqual(explicitSvg.status, 0);
   assert.match(explicitSvg.stderr, /the user selected svg/);
 
-  console.log("Mermaid STATIC_PASS admission tests passed");
+  console.log("Mermaid source checks passed: ordinary, cross-module, contract, architecture, sequence, class, state, ER, project scope and legacy-comment compatibility; explicit SVG still requires its contract");
 } finally {
+  assert.ok(realpathSync(root).startsWith(scratch + sep), "fixture cleanup stays inside its scratch directory");
   rmSync(root, { recursive: true, force: true });
 }

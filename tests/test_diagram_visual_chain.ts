@@ -41,6 +41,12 @@ assert.equal(JSON.parse(readFileSync(evidence,"utf8")).final_status,"PASS");
 const orchestrator=pathToFileURL(join(repo,"core/tools/aidlc-orchestrate.ts")).href;
 const check=`import {checkSensors,loadGraph,makeInstance} from ${JSON.stringify(orchestrator)};import {loadWorkflowState} from ${JSON.stringify(stateTool)};(async()=>{const state=loadWorkflowState(process.cwd());const stage=loadGraph().stages.find(s=>s.slug==='requirements-methods'); const result=await checkSensors(makeInstance(stage,'module',{module_id:'project'}),state,{onlySensors:['diagram-contract']});if(result.length)throw new Error(JSON.stringify(result));console.log('existing diagram-contract sensor: PASS');})()`;
 console.log(run(process.execPath,[tsx,"--eval",check]));
+// A real, successfully signed SVG result cannot satisfy a current Mermaid/default route.
+for (const choice of ["state.diagram_format='mermaid';", "delete state.diagram_format;"]) {
+  const wrongFormat = spawnSync(process.execPath, [tsx, "--eval", check.replace("const stage=", `${choice}const stage=`)], { cwd: project, encoding: "utf8" });
+  assert.notEqual(wrongFormat.status, 0);
+  assert.match(wrongFormat.stderr, /diagram format is mermaid/);
+}
 const lockPath=join(project,PROJECT_PROVIDERS_LOCK_PATH), lockBytes=readFileSync(lockPath), driftedLock:any=structuredClone(readProjectProviders(project).lock);
 driftedLock.providers[0].source.commit_oid="0".repeat(40);writeFileSync(lockPath,JSON.stringify(driftedLock));
 assert.throws(()=>verifyVisualEvidence(project,JSON.parse(readFileSync(evidence,"utf8"))),/LOCK|STALE/);writeFileSync(lockPath,lockBytes);
@@ -50,4 +56,4 @@ const generator=join(project,"generator.py"), originalGenerator=readFileSync(gen
 const generatorDrift=spawnSync(process.execPath,[tsx,"--eval",check],{cwd:project,encoding:"utf8"});assert.notEqual(generatorDrift.status,0);writeFileSync(generator,originalGenerator);
 const request=JSON.parse(readFileSync(join(project,"request.json"),"utf8"));request.target_reading_environment.viewports.zoom=undefined;writeFileSync(join(project,"request.json"),JSON.stringify(request));
 const rejected=spawnSync(process.execPath,[tsx,"--eval",check],{cwd:project,encoding:"utf8"}); assert.notEqual(rejected.status,0);assert.match(rejected.stderr,/STALE|source_revision/);
-console.log(JSON.stringify({source_checker:"STATIC_PASS",production_browser:"PASS",existing_sensor:"PASS",input_drift:"rejected",artifacts:project}));
+console.log(JSON.stringify({source_checker:"STATIC_PASS",production_browser:"PASS",existing_sensor:"PASS",format_drift:"rejected",input_drift:"rejected",artifacts:project}));

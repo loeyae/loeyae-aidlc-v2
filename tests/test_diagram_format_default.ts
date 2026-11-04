@@ -52,14 +52,13 @@ const BUSINESS_FLOWS = `# Business flows
 
 ## REQ-001 Checkout flow
 
-The shopper checks out an order; an external vendor architecture image is referenced for context only.
+REQ-001 checkout calls the payment service across module boundaries using the payment contract. An external vendor architecture image is referenced for context only.
 
 ![Vendor architecture](assets/vendor.svg)
 
-<!-- aidlc-mermaid-validation: {"diagram_id":"checkout-flow","module":"m01-trade","validation_tier":"STATIC_PASS","diagram_type":"module-internal-simple-flow","all_elements_within_module":true,"no_contract_semantics":true,"not_architecture_or_delivery_evidence":true} -->
 \`\`\`mermaid
 flowchart TB
-  Cart[Cart] --> Pay{Payment approved?}
+  Cart[Trade module checkout] -->|Payment contract| Pay{Payment service approved?}
   Pay -->|yes| Done[Order created]
   Pay -->|no| Cart
 \`\`\`
@@ -117,7 +116,7 @@ try {
   invalid.push(["# Business flows\n\n## REQ-001\n\n```mermaid\nstateDiagram-v2\n  [*] --> \n  --> B\n```\n", /mermaid syntax error \(Mermaid parser\)/]);
   }
   for (const [content, pattern] of invalid) {
-    write(project, flows, content.replace("```mermaid", BUSINESS_FLOWS.match(/<!-- aidlc-mermaid-validation: .* -->/)![0] + "\n```mermaid"));
+    write(project, flows, content);
     failure(project, ["evidence", "run", "--stage", "requirements-methods", "--module", M01], pattern);
   }
   write(project, flows, BUSINESS_FLOWS);
@@ -127,36 +126,22 @@ try {
   assert.equal(evidence.status, "passed");
   assert.equal(evidence.final_status, "STATIC_PASS");
   assert.equal(evidence.validation_tier, "STATIC_PASS");
-  assert.equal(evidence.admission_status, "passed");
+  assert.equal(evidence.visual_status, "not_requested");
   assert.equal(evidence.source_format, "mermaid");
   assert.equal(evidence.diagrams_checked, 1);
   // Evidence records the path with the platform separator (\ on Windows); compare it as POSIX.
   const diagrams = (evidence.diagrams as Array<{ file: string }>).map((entry) => ({ ...entry, file: entry.file.replace(/\\/g, "/") }));
   assert.deepEqual(diagrams, [{
     file: flows,
-    line: 10,
+    line: 9,
     type: "flowchart",
-    diagram_id: "checkout-flow",
-    module: M01,
-    validation_tier: "STATIC_PASS",
-    diagram_type: "module-internal-simple-flow",
-    admission_conditions: {
-      module_internal_simple_flow: true,
-      all_elements_within_module: true,
-      no_contract_semantics: true,
-      not_architecture_or_delivery_evidence: true,
-      explicit_source_declaration: true,
-    },
   }]);
   assert.equal(evidence.syntax_parse, mermaidAvailable ? "passed" : "not_executed");
 
-  // Mermaid may not be an implicit downgrade: a syntactically valid graph without
-  // its adjacent admission declaration is rejected before it can produce evidence.
-  write(project, flows, BUSINESS_FLOWS.replace(/<!-- aidlc-mermaid-validation: .* -->\n/, ""));
-  failure(project, ["evidence", "run", "--stage", "requirements-methods", "--module", M01], /cannot implicitly claim STATIC_PASS/);
-  write(project, flows, BUSINESS_FLOWS.replace('"no_contract_semantics":true', '"no_contract_semantics":false'));
-  failure(project, ["evidence", "run", "--stage", "requirements-methods", "--module", M01], /declaration\.no_contract_semantics must be true/);
-  write(project, flows, BUSINESS_FLOWS);
+  // Reject wrong-format evidence before asking for any SVG-specific fields or geometry.
+  writeFileSync(evidencePath, JSON.stringify({ ...evidence, source_format: "svg" }));
+  failure(project, ["orchestrate", "report", "--stage", "requirements-methods", "--module", M01, "--result", "completed"], /diagram format is mermaid/);
+  writeFileSync(evidencePath, JSON.stringify(evidence));
 
   const report = success(project, ["orchestrate", "report", "--stage", "requirements-methods", "--module", M01, "--result", "completed"]);
   assert.notEqual(report.kind, "error", JSON.stringify(report));
@@ -171,6 +156,12 @@ try {
   assert.match(readFileSync(join(project, "aidlc", "active", "audit.md"), "utf8"), /DIAGRAM_FORMAT_SET[\s\S]*To: svg[\s\S]*User Input: 业务流程图请用 SVG/);
   failure(project, ["orchestrate", "report", "--stage", "requirements-methods", "--module", M01, "--result", "completed"], /diagram format is svg/);
   failure(project, ["evidence", "run", "--stage", "requirements-methods", "--module", M01], /diagram-contract/);
+
+  const mermaid = success(project, ["orchestrate", "diagram-format", "--set", "mermaid", "--user-input", "继续使用 Mermaid"]);
+  assert.match(String(mermaid.message), /source checks/);
+  assert.doesNotMatch(String(mermaid.message), /not_applicable/);
+  success(project, ["evidence", "run", "--stage", "requirements-methods", "--module", M01]);
+  success(project, ["orchestrate", "report", "--stage", "requirements-methods", "--module", M01, "--result", "completed"]);
 
   console.log("Mermaid default diagram gate tests passed");
 } finally {

@@ -4,7 +4,7 @@
 
 本文件定义图表设计的共享决策规则：何时需要图、表达什么语义、选择什么图型、如何控制粒度、布局和可读性。输出格式必须先按 `core-workflow.md` 的“文档图表格式”确定（默认 Mermaid，仅用户明确指定时使用 SVG）；Mermaid 模式由 `common-mermaid-diagram-standards.md` 与 `common-mermaid-syntax-rules.md` 约束，SVG 模式才使用 Blueprinter 设计规则与 `common-svg-diagram-standards.md`。AIDLC 不内置或运行 Blueprinter。
 
-本文件可被 AI-DLC 流程按需调用，也可独立使用。独立使用时不要求任何 AIDLC 状态（handoff.md、audit.md、审批流程）。涉及 structural / swimlane / phase region 框体时，必须同时遵守 `common-structural-region-occlusion-contract.md`。
+本文件可被 AI-DLC 流程按需调用，也可独立使用。独立使用时不要求任何 AIDLC 状态（handoff.md、audit.md、审批流程）。仅在 SVG 模式中涉及 structural / swimlane / phase region 框体时，才须同时遵守 `common-structural-region-occlusion-contract.md`；Mermaid 分组或泳道不触发 SVG 遮挡契约。
 
 ## 输出格式选择（强制）
 

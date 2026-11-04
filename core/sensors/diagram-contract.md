@@ -1,20 +1,20 @@
 ---
 id: diagram-contract
 name: Diagram Contract
-description: Verifies SVG and diagram structural contracts.
+description: Verifies Mermaid source or explicitly selected SVG contracts.
 evidence_path: .aidlc/evidence/<stage-slug>/diagram-contract.json
 ---
 
 # diagram-contract
 
 ## 目的
-验证需求流程图和应用设计图的分级验证证据。默认 Mermaid 仅验证受控 `STATIC_PASS` 准入和静态语法/结构；本文件其余 V1 SVG/Diagram 契约（稳定 ID、主阅读方向、主轴、业务层级、端口、分支、连通性、分组、统一单色视觉、structural / swimlane / phase region 遮挡、无全局图例/备注、viewBox、FR 映射和 Provider 状态）只在用户明确选择 SVG 的 `FULL_CONTRACT` 下适用。纵向滚动允许，水平溢出、裁切、对象越界、标签压线、structural 背景穿透和不可读失败。
+验证需求流程图和应用设计图的格式对应证据。默认 Mermaid 检查实际源，不限制业务图型、跨模块/跨团队关系或契约/架构语义，不要求逐图准入声明。本文其余 SVG 契约、几何和 Provider 要求仅在用户明确选择 SVG 后适用。业务事实与正文的一致性由当前产物评审核对，源级通过不代表视觉验收。
 
 ## 适用范围
 按 workflow state 的 `Diagram Format` 判定（由 `orchestrate diagram-format --set <mermaid|svg>` 记录用户的明确选择，缺省为 mermaid）：
 
-- mermaid：仅允许满足 `STATIC_PASS` 准入的模块内简单流程图。requirements-methods 检查 `requirements/business-flows.md`，application-design 检查 `application-design/component-dependency.md`，文档必须至少有一个 `mermaid` 代码块；每个代码块须闭合、首行声明图类型（flowchart/graph 方向为 TB/TD/BT/RL/LR）、包含节点或关系，并通过 loeyae-aidlc 自带 Mermaid 的 `mermaid.parse`（只解析，不渲染、不做视觉验证）。每个 block 紧邻上一行还必须有 `aidlc-mermaid-validation` JSON 声明：稳定 `diagram_id`、当前模块、`validation_tier: "STATIC_PASS"`、`diagram_type: "module-internal-simple-flow"`，以及 `all_elements_within_module`、`no_contract_semantics`、`not_architecture_or_delivery_evidence` 三个 `true` 见证；缺失、重复或不匹配会阻断，不能隐式降级。通过时输出 `status: "passed"`、`final_status: "STATIC_PASS"`、`validation_tier: "STATIC_PASS"`、`admission_status: "passed"`、`source_format: "mermaid"`、`diagrams_checked`、带准入信息的 `diagrams[]`、`syntax_checks: "static"` 与 `syntax_parse: "passed"`（parser 不可用时为 `"not_executed"`）。范围内的 `.diagram.json` 或 SVG 文件（可能是外部资产）不触发 SVG 校验。
-- svg：执行下述完整 SVG 契约，缺少 `.diagram.json` 即失败；门禁拒绝 Mermaid 证据。
+- mermaid：requirements-methods 检查 `requirements/business-flows.md`，application-design 检查 `application-design/component-dependency.md`；文档必须至少有一个闭合的 `mermaid` 代码块，声明支持的图型（flowchart/graph 方向为 TB/TD/BT/RL/LR）并包含节点或关系。parser 可用时执行真实解析，不可用时如实记录 `syntax_parse: "not_executed"`。不要求 `aidlc-mermaid-validation`、模块内简单图声明或 SVG 资产；历史声明作为普通注释忽略。输出 `status: "passed"`、`final_status: "STATIC_PASS"`、`validation_tier: "STATIC_PASS"`、`source_format: "mermaid"`、`diagrams_checked`、含 file/line/type 的 `diagrams[]`、`syntax_checks: "static"`、`syntax_parse` 和 `visual_status: "not_requested"`。仅在明确要求视觉验收时单独提供视觉结果，不能把源级检查写成视觉通过。
+- svg：仅用户明确选择后执行下述完整 SVG 契约，缺少 `.diagram.json` 即失败。门禁双向核对当前格式与 `source_format`；Mermaid 模式拒绝 SVG 证据，SVG 模式拒绝 Mermaid 证据。
 
 ## Evidence 路径
 
@@ -22,7 +22,7 @@ evidence_path: .aidlc/evidence/<stage-slug>/diagram-contract.json
 .aidlc/evidence/<stage-slug>/diagram-contract.json
 ```
 
-## 必填字段
+## SVG 模式必填字段
 
 ```json
 {

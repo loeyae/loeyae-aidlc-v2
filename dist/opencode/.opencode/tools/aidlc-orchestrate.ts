@@ -3188,9 +3188,12 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
       case "diagram-contract": {
         const failure = validateEvidence(stage, sensor, instance, (evidence) => {
           const errors: string[] = [];
-          // Mermaid (default) mode: static Mermaid checks; the SVG contract applies only after the user selects SVG.
-          if (evidence.source_format === "mermaid") {
-            if (diagramFormatOf(state) === "svg") errors.push("diagram format is svg (explicitly selected by the user); refresh the evidence so the SVG contract is checked");
+          // Route by the user's current choice before inspecting format-specific payloads.
+          const format = diagramFormatOf(state);
+          if (evidence.source_format !== format) {
+            return [`diagram format is ${format}${format === "svg" ? " (explicitly selected by the user)" : " (default or explicitly selected)"}; refresh diagram-contract evidence for the current format`];
+          }
+          if (format === "mermaid") {
             if (evidence.status !== "passed") errors.push(`Mermaid diagram evidence must be passed (got ${String(evidence.status)}); the stage document must contain valid mermaid code blocks`);
             const checked = asPositiveInt(evidence.diagrams_checked);
             if (checked === null || checked < 1) errors.push("Mermaid diagram evidence must check at least one mermaid code block");
@@ -3202,7 +3205,6 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           if (evidence.status !== "passed") errors.push('status must be "passed" (sensor envelope)');
           const final = diagramFinalStatus(evidence);
           if (!DIAGRAM_FINAL_STATUSES.has(final.status)) errors.push('final_status must be PASS, STATIC_PASS, UNVERIFIED, NEEDS_CAPABILITY or FAIL');
-          if (evidence.source_format !== "svg") errors.push('source_format must be "svg"');
           const diagrams = asPositiveInt(evidence.diagrams_checked);
           if (diagrams === null || diagrams < 1) errors.push("diagrams_checked must be >= 1");
           if (evidence.ids_unique !== true) errors.push("ids_unique must be true");
@@ -3952,7 +3954,7 @@ function diagramFormatPrompt(state: WorkflowState, instance: StageInstance): str
   if (!instance.stage.sensors.includes("diagram-contract")) return "";
   return diagramFormatOf(state) === "svg"
     ? "\n图表格式：svg（用户已明确选择）。按 aidlc-diagram-design 交付 SVG 源与 .diagram.json，并通过 diagram-contract 的 SVG 契约。"
-    : "\n图表格式：mermaid（默认）。直接写 Mermaid fenced block，不生成 SVG、.diagram.json 或 Provider Request，不做渲染验证。只有用户明确要求 SVG 时，先执行 loeyae-aidlc orchestrate diagram-format --set svg --user-input \"<用户原话>\"。";
+    : "\n图表格式：mermaid（默认）。直接写 Mermaid fenced block，跨模块、契约和架构语义不改变格式；不生成 SVG、.diagram.json 或 Provider Request。默认只做源检查；仅明确要求视觉验收或已确认的布局/连线修复才单独渲染。只有用户明确要求 SVG 时，先执行 loeyae-aidlc orchestrate diagram-format --set svg --user-input \"<用户原话>\"。";
 }
 
 function executionTaskLevelFor(instance: StageInstance): ExecutionTaskLevel {
@@ -6621,7 +6623,7 @@ export async function handleDiagramFormat(args: string[], hooks: StateWriteHooks
     changed: true,
     message: requested === "svg"
       ? "✅ Diagram format set to svg. Diagrams are delivered through aidlc-diagram-design (SVG source + .diagram.json) and diagram-contract checks the SVG contract; refresh diagram-contract evidence of completed stages if needed."
-      : "✅ Diagram format set to mermaid. Diagrams are Mermaid fenced blocks; diagram-contract records not_applicable.",
+      : "✅ Diagram format set to mermaid. diagram-contract validates Mermaid source checks; refresh evidence for required stage diagrams. SVG contracts and browser validation are not enabled.",
   };
 }
 

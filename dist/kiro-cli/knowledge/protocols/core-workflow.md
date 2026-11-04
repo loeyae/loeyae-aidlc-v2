@@ -75,7 +75,7 @@ loeyae-aidlc orchestrate report \
 
 阶段需要画图时（复杂结构、分支/循环、多方时序、状态迁移或层级关系明显优于文字/表格），按以下规则确定格式：
 
-1. 默认 Mermaid：直接在目标 Markdown 中写 `mermaid` fenced block，按 `common-mermaid-diagram-standards.md` 与 `common-mermaid-syntax-rules.md` 编写；语法由 `diagram-contract` 用 loeyae-aidlc 自带的 Mermaid parser 校验（只解析，不渲染）。不生成 `.svg`、`.diagram.json`、expected contract 或 Provider Request，也不调用 `aidlc-diagram-design`，不做浏览器渲染验证。
+1. 默认 Mermaid：直接在目标 Markdown 中写 `mermaid` fenced block，按 `common-mermaid-diagram-standards.md` 与 `common-mermaid-syntax-rules.md` 编写；语法由 `diagram-contract` 用项目或宿主可用的 Mermaid parser 校验（只解析，不渲染；不可用时如实记录未执行，不静默安装）。允许跨模块、跨团队、契约、架构和时序等适用图型，不要求逐图准入 JSON。不生成 `.svg`、`.diagram.json`、expected contract 或 Provider Request，也不调用 `aidlc-diagram-design`；默认不做浏览器或 PNG 渲染验证，只有明确要求视觉验收或已确认的布局/连线修复才单独执行。
 2. SVG 仅在用户明确指定时使用：用户明确要求 SVG 时，先记录用户选择：
 
    ```bash
@@ -83,9 +83,9 @@ loeyae-aidlc orchestrate report \
    ```
 
    之后才准备 Diagram Request（`output_format: svg`）调用 `aidlc-diagram-design`，并按 SVG 标准交付 SVG 源与 `.diagram.json`；只有用户要求 `preview`、`render` 或 `export` 时才调用 Provider。不得替用户选择 SVG；用户要求改回时以 `--set mermaid` 记录。
-3. 以下情况都不构成 SVG 要求：目标文档已引用 SVG（可能是外部资产）、目录中存在 `.svg`、阶段声明了 `diagram-contract` 传感器、阶段文档中的 SVG 模板或示例。
+3. 以下情况都不构成 SVG 要求：图表复杂、存在跨模块/跨团队关系、承载接口契约或架构语义、目标文档已引用 SVG（可能是外部资产）、目录中存在 `.svg`、阶段声明了 `diagram-contract` 传感器、阶段文档中的 SVG 模板或示例。
 
-选择记录在 `aidlc/active/aidlc-state.md` 的 `Diagram Format` 字段（缺省为 mermaid），并写入 audit；`orchestrate diagram-format` 不带参数时显示当前格式，directive 的 `diagram_format` 字段同步给出。`diagram-contract` 按该字段判定：mermaid 时只检查 Mermaid（`source_format: mermaid`）——阶段文档（requirements-methods 的 `requirements/business-flows.md`、application-design 的 `application-design/component-dependency.md`）必须至少有一个 `mermaid` 代码块，每个代码块须闭合、声明图类型（flowchart/graph 的方向合法）、包含节点或关系，并通过 Mermaid parser；范围内的 `.diagram.json` 或 SVG 文件不触发 SVG 校验。svg 时执行完整 SVG 契约，Mermaid 证据会被门禁拒绝。格式一经确定不得因工具失败静默切换，需要切换时取得用户明确指示。
+选择记录在 `aidlc/active/aidlc-state.md` 的 `Diagram Format` 字段（缺省为 mermaid），并写入 audit；`orchestrate diagram-format` 不带参数时显示当前格式，directive 的 `diagram_format` 字段同步给出。`diagram-contract` 按该字段判定：mermaid 时只检查 Mermaid（`source_format: mermaid`）——阶段文档（requirements-methods 的 `requirements/business-flows.md`、application-design 的 `application-design/component-dependency.md`）必须至少有一个 `mermaid` 代码块，每个代码块须闭合、声明图类型（flowchart/graph 的方向合法）、包含节点或关系，并在 parser 可用时通过真实解析，不可用时记录未执行；范围内的 `.diagram.json` 或 SVG 文件不触发 SVG 校验。svg 时执行完整 SVG 契约，Mermaid 证据会被门禁拒绝。格式一经确定不得因工具失败静默切换，需要切换时取得用户明确指示。
 
 ## 交接与暂停
 

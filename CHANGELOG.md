@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.25.1 — 2026-11-04
+
+- Keep Mermaid source validation available for cross-module, contract, architecture and project-level diagrams without per-block admission declarations. Apply SVG contracts only after the user's explicit SVG choice, and reject evidence that does not match the current format in either direction.
+- Make Mermaid visual verification conditional on an explicit visual or layout task, correct format-switch guidance, and align diagram standards and parser capability descriptions with the actual checker.
+
 ## 4.25.0 — 2026-11-03
 
 - Validate split Provider repositories using independently pinned sources, revisions and clean checkouts; report omitted capabilities as not verified, with explicit selection for targeted runs.

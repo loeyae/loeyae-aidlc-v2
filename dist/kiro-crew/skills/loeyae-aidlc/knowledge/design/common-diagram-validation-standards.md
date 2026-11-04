@@ -8,45 +8,32 @@
 - SVG、V1 清单、端口和源—SVG 映射：`common-svg-diagram-standards.md`；
 - 本文件：如何用确定性检查和目标 Provider 证据证明结果。
 
-源码检查由 `core/tools/aidlc-semantic-checks.ts` 执行，浏览器检查由 `core/tools/aidlc-diagram-provider.ts` 执行。配置存在不代表 Provider 已实际可用；没有真实执行证据时必须保持 `UNVERIFIED` 或 `NEEDS_CAPABILITY`。
+源码检查由 `core/tools/aidlc-semantic-checks.ts` 执行，SVG 浏览器检查由 `core/tools/aidlc-diagram-provider.ts` 执行。配置存在不代表 Provider 已实际可用；已明确要求的目标操作没有真实执行证据时必须保持 `UNVERIFIED` 或 `NEEDS_CAPABILITY`。未请求的视觉检查记录为 `not_requested`，不因此增加阶段阻断。
 
-## 验证等级、格式路由与准入
+## 验证等级与格式路由
 
-先确定格式，再确定验证等级。除非用户明确选择 SVG，AI-DLC 文档图默认使用 Mermaid；默认 Mermaid 绝不因为仓库中存在 `.diagram.json`、SVG 或外部图片而进入 SVG 契约。用户明确记录 `diagram_format=svg` 时才进入 `FULL_CONTRACT`；显式 SVG 的完整契约、Provider 和 MARS-118/125 防击穿门禁不得降级。
+先按用户的格式选择路由，再验证该格式。除非用户明确选择 SVG，AI-DLC 文档图默认使用 Mermaid；图的复杂度、跨模块/跨团队元素、接口/数据契约、部署或架构语义均不能改变格式，也不能要求用户为通过门禁而改选 SVG。目录中的 SVG、外部图片、历史证据和旧准入声明也不能决定格式。
 
 | 等级 | 适用对象 | 必经验证 | 收口 |
 | --- | --- | --- | --- |
-| `STATIC_PASS` | 声明为模块内简单流程图且满足全部下列准入条件的 Mermaid 图 | 受控 source-level Mermaid 语法、结构及准入声明检查 | `STATIC_PASS`，不声称视觉或 SVG 契约通过 |
-| `FULL_CONTRACT` | 用户明确要求 SVG 的图，以及不满足任一 `STATIC_PASS` 条件的图 | 独立 expected contract 的逐节点/逐边核对、三视图浏览器验证、structural 遮挡契约与截图/快照基线 | 既有四层状态模型 |
+| `STATIC_PASS`（Mermaid） | 默认或明确选择 Mermaid 的流程、时序、状态、ER、组件依赖等适用图型 | fenced block、图型、节点/关系等源结构检查；parser 可用时执行真实语法解析；业务一致性纳入当前产物评审 | 只记录实际完成的源检查，不声称视觉或 SVG 契约通过 |
+| `FULL_CONTRACT`（SVG） | 用户明确选择 SVG 的图 | 独立 expected contract、SVG 源结构与几何；按明确目标操作验证 Provider 及三视图证据 | 既有 SVG 四层状态模型 |
 
-`STATIC_PASS` 只能用于 `module-internal-simple-flow`，并且以下五项必须同时可审计：
+Mermaid 不要求每图 `aidlc-mermaid-validation` JSON、模块内简单流程声明、独立 expected contract、SVG 或 sidecar。历史准入注释按普通 Markdown 注释处理，不授予或限制当前格式与验证范围。项目级图表不因缺少模块上下文而失败；实际受管阶段仍遵守其既有模块/单元权限。
 
-1. 图仅表达一个模块内的顺序、分支、循环或异常处理，不表达部署、系统边界、服务依赖或团队间交互；
-2. 节点、泳道和连接均在一个已定义模块职责内，没有外部团队、外部系统、共享平台或跨模块调用；
-3. 不承载需要逐边确认的接口、消息、数据、安全、权限、SLA 或所有权契约；
-4. 不作为架构决策、跨团队交付接口、运行拓扑或可视化验收的唯一证据；
-5. Mermaid fenced block 紧邻上一行必须有受控 `aidlc-mermaid-validation` JSON 声明，包含稳定 `diagram_id`、当前 `module`、`validation_tier: "STATIC_PASS"`、`diagram_type: "module-internal-simple-flow"` 及前四项的布尔见证。声明缺失、重复、模块不匹配或任一见证不为 `true` 时 fail-closed，不能隐式降级。
+Mermaid 的跨边界关系和契约事实必须可追溯，并在正文及适用的机器契约中保留权威定义；图中表达这些事实不等于改用 SVG。业务事实缺失时补齐事实和评审，不用转换图表格式替代。
 
-声明格式如下；一条声明只绑定紧随其后的一个 Mermaid fenced block：
+Mermaid 默认不做浏览器、PNG 或几何验收；仅在用户明确要求视觉验收，或已确认的交付范围明确包含布局/连线修复时执行。回流边、端口或正交路径本身不触发额外视觉门禁。未请求的视觉检查记为 `not_requested`；已请求但未执行的视觉验收记为 `UNVERIFIED`，不得冒充视觉通过，也不得将该状态扩散为未请求的阶段阻断。
 
-````markdown
-<!-- aidlc-mermaid-validation: {"diagram_id":"checkout-flow","module":"m01-trade","validation_tier":"STATIC_PASS","diagram_type":"module-internal-simple-flow","all_elements_within_module":true,"no_contract_semantics":true,"not_architecture_or_delivery_evidence":true} -->
-```mermaid
-flowchart LR
-  A[开始] --> B[完成]
-```
-````
-
-节点或边数量只能作为维护提示，不能单独决定降级；小图同样可能携带契约或跨团队语义。图一旦出现跨模块/跨团队元素、接口或数据契约、部署或架构语义，或被引用为这类证据，必须停止 `STATIC_PASS`、由用户明确选择 SVG 后以 `FULL_CONTRACT` 补齐完整证据。既有 `FULL_CONTRACT` 图不得批量降级，必须逐图重新证明全部准入条件并在评审中记录。
-
-试点仅限一张符合上述条件的新建或调整的 Mermaid 图；审计记录须保留图标识、模块、声明、运行的静态检查和 `STATIC_PASS` 结果。一个常规变更/评审周期内未出现布局塌陷、节点/文字遮挡、连接路由错误或图意与源码不一致的回流缺陷后，才可推广；发现任一缺陷须暂停推广并收紧白名单或升级该图。
-
+证据格式必须与当前选择双向一致：Mermaid 模式拒绝 SVG 证据，SVG 模式拒绝 Mermaid 证据；切换格式后重新生成受影响的图表证据，不改动无关业务内容。用户明确选择 SVG 时，其完整契约及适用 Provider 防伪门禁保持有效，不能由 Mermaid 证据替代。
 
 ## 统一视觉门禁
 
+从本节起的视觉基线、四层状态、expected/actual、几何、路由、Provider 与重绘细则均为 SVG 专项要求，仅在用户明确选择 SVG 后适用。Mermaid 的源级 `STATIC_PASS` 按前节定义，不表示这些 SVG 层已执行或通过。
+
 以下固定视觉基线仅适用于用户明确选择 SVG 的 `FULL_CONTRACT`：画布 `#ffffff` 且完全不透明；structural 框体及标题 `fill="none" stroke="#666666"`，业务节点默认 `fill="none"`，但 structural 交点节点必须使用不透明 `fill="#ffffff"`；业务节点边框、业务边界、连线、箭头、边标签和业务文字 `#000000`；微软雅黑为首选字体；框体文字 `16`、边标签 `14`；框体与连线线宽 `2`；marker/overlay `10 × 10`；边标签无框、位于所属线段中点法向且实际 bbox 净空至少 `6`；不存在全局图例或全局备注层。structural 框体与连线、标签或箭头相交时必须按 [Structural Region Occlusion Contract](common-structural-region-occlusion-contract.md) 验证实际断口和绘制层级。`STATIC_PASS` Mermaid 图不伪造这些 SVG/浏览器证据。
 
-对 SVG `FULL_CONTRACT` 的 source-only 阶段，checker 必须检查显式 SVG 属性、sidecar 禁用字段、标签源坐标与路径中点关系，并输出 `global_decorations_absent: true`、`visual_style_status: "passed"`、`edge_label_placement_status: "passed"` 后才可进入其 source-level `STATIC_PASS`。视觉 Provider 必须从真实 DOM 读取 computed style、`getBBox()` 与 `getScreenCTM()`，在三视图逐一复核相同约束；`visualStyleErrors` 或 `labelPlacementErrors` 非空必须阻断 `VISUAL_PASS`。source 与 Provider 任一层缺失均不得由另一层代替。此段不适用于已按上节受控声明收口的 Mermaid `STATIC_PASS`。
+对 SVG `FULL_CONTRACT` 的 source-only 阶段，checker 必须检查显式 SVG 属性、sidecar 禁用字段、标签源坐标与路径中点关系，并输出 `global_decorations_absent: true`、`visual_style_status: "passed"`、`edge_label_placement_status: "passed"` 后才可进入其 source-level `STATIC_PASS`。视觉 Provider 必须从真实 DOM 读取 computed style、`getBBox()` 与 `getScreenCTM()`，在三视图逐一复核相同约束；`visualStyleErrors` 或 `labelPlacementErrors` 非空必须阻断 `VISUAL_PASS`。source 与 Provider 任一层缺失均不得由另一层代替。此段仅适用于 SVG，不适用于 Mermaid 的源级 `STATIC_PASS`。
 
 ## Structural Region Occlusion 验收
 
