@@ -106,7 +106,7 @@ function makeI13(project: string): void {
   put(project, `docs/aidlc/modules/${MODULE}/inception/application-design/unit-of-work-story-map.md`, '```aidlc-story-map\n' + JSON.stringify({schema_version:1,status:'approved',approved_by:'fixture',mappings:[{story_id:'STORY-1',unit_ids:['u1','u2']}],shared_req_refs:[]}) + '\n```\n');
   const cases = `docs/aidlc/modules/${MODULE}/inception/application-design/test-cases`;
   put(project, `${cases}/_index.md`, "# UC-D index\n- UC-D-001 订单导出\n");
-  put(project, `${cases}/UC-D-001-export.md`, "---\nid: UC-D-001\nstatus: ready\nsource_ref: REQ-1\n---\n# UC-D-001 订单导出\n");
+  put(project, `${cases}/UC-D-001-export.md`, "---\nid: UC-D-001\nstatus: ready\nsource_ref: REQ-1\nunit_refs: [u1, u2]\n---\n# UC-D-001 订单导出\n");
 }
 
 function unitInstance(stage: string, unit: string): string {

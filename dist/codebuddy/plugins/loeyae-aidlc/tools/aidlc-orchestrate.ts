@@ -2,12 +2,15 @@
 import { deliveryConsistencyPayloadErrors, evidenceTimeError, reviewIssueErrors } from "./aidlc-evidence-policy";
 import { historicalPhaseInputErrors } from "./aidlc-phase-inputs";
 import { alternativePhaseInputs } from "./aidlc-evidence";
-import { clearRepairGuidance, repairGuidance } from "./aidlc-repair-guidance";
+import { clearRepairGuidance, repairGuidance, sensorRepairDiagnostics, type RepairDiagnostic } from "./aidlc-repair-guidance";
 import { phaseExecutionRevision } from "./aidlc-workflow-layout";
 import { GLOBAL_REVIEW_ITEMS, globalChecklistErrors, globalReviewUcdSources, type GlobalCoverage } from "./aidlc-global-review";
 import { i13NonApplicable } from "./aidlc-i13-applicability";
 import { ucdDeclarations } from "./aidlc-ucd-declarations";
 import { semanticCheckerIdentityErrors } from "./aidlc-checker-identity";
+import { sensorInputScope } from "./aidlc-sensor-inputs";
+import { greenGateInputKey } from "./aidlc-gate-inputs";
+import { memoizedSuccessfulGate, validationMemoizationActive } from "./aidlc-revision";
 import { infrastructureResourceErrors } from "./aidlc-infrastructure.js";
 import { frontendPlatformPayload } from "./aidlc-frontend-platform";
 import { substantiveArtifact } from "./aidlc-artifact-presence";
@@ -61,7 +64,7 @@ import { bestLedgerCheckpoint, checkpointModule, gitRepositoryAvailable, ledgerF
 import { equivalentModuleContracts, CONTRACT_EQUIVALENCE_VERSION } from "./aidlc-module-ledger";
 import { parseMaintenanceRecoveryState, type MaintenanceRecoveryProjection, type MaintenanceRecoveryReader } from "./aidlc-light-state";
 import { withSliceWorkflowMigration } from "./aidlc-document-slices";
-import { COMMIT_ID_PATTERN, commitAncestryErrors, currentHead, readSourceRevision, withRevisionMemoization, type RepoRevision } from "./aidlc-revision";
+import { COMMIT_ID_PATTERN, commitAncestryErrors, currentHead, readSourceRevision, withRevisionInvalidation, withRevisionMemoization, type RepoRevision } from "./aidlc-revision";
 import { verifyProviderKnowledge } from "./aidlc-provider-knowledge.js";
 import {
   ADOPTION_EXEMPTED_RULES,
@@ -296,6 +299,7 @@ export interface Directive {
   business_document_load_plan?: BusinessDocumentLoadPlan;
   /** Phase 5: advisory reuse/verification schedule; normal gates remain authoritative. */
   evidence_reuse_plan?: EvidenceReusePlan;
+  repair_diagnostics?: readonly RepairDiagnostic[];
   provider_context?: ProviderDirectiveContext;
   provider_actions?: readonly ProviderDirectiveAction[];
   [key: string]: unknown;
@@ -1568,6 +1572,8 @@ export interface SensorResult {
   sensor: string;
   passed: boolean;
   message: string;
+  /** The actual owning gate, including a prerequisite rechecked by a consumer. */
+  stage_instance?: string;
 }
 
 type Evidence = Record<string, unknown>;
@@ -1717,10 +1723,17 @@ function validateEvidence(
   required: (value: Evidence) => string[],
   options: SensorCheckOptions = {},
   candidate?: Evidence,
+  greenContext?: WorkflowState,
 ): SensorResult | null {
   const loaded = candidate === undefined ? loadEvidence(stage, sensor, instance) : candidateEvidence(stage, sensor, instance, candidate);
-  if (loaded.failure) return loaded.failure;
+  if (loaded.failure) return { ...loaded.failure, stage_instance: instance.instance_id };
   const evidence = loaded.value as Evidence;
+  const key = validationMemoizationActive() && greenContext && sensor === "green-test-evidence" && !options.requireCurrentBaselineEpoch && !options.requireHistoricalPhaseInputs
+    ? greenGateInputKey(PROJECT_ROOT, evidence, { state: greenContext, instance, options: { ...options, onlySensors: undefined } }) : null;
+  return memoizedSuccessfulGate(key, () => validateLoadedEvidence(stage, sensor, instance, required, options, evidence));
+}
+
+function validateLoadedEvidence(stage: StageNode, sensor: string, instance: StageInstance, required: (value: Evidence) => string[], options: SensorCheckOptions, evidence: Evidence): SensorResult | null {
   const errors = required(evidence);
   // Omission provenance is backed by the currently validated GREEN, never by
   // pretending that an original RED observation or RED command binding exists.
@@ -1781,7 +1794,7 @@ function validateEvidence(
     } else {
       // Split layout: content-addressed within the owning workflow's scope. The commit
       // is provenance only, so another module's commit or write cannot invalidate it.
-      const expectedScope = evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
+      const expectedScope = asRecord(evidence.checker)?.identity_version === 2 ? sensorInputScope(PROJECT_ROOT, sensor, instance.instance_id) || evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id) : evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
       if (commit) errors.push(...commitAncestryErrors(PROJECT_ROOT, commit, currentHead(PROJECT_ROOT)));
       if (recordedScope !== expectedScope.label && recordedScope !== legacyEvidenceScopeForInstance(PROJECT_ROOT, instance.instance_id).label) {
         errors.push(`source_revision.scope ${recordedScope} does not match the ${expectedScope.label} scope of ${instance.instance_id}`);
@@ -1828,7 +1841,7 @@ function validateEvidence(
       errors.push("checker object is required for semantic evidence");
     } else {
       if (checker.id !== `builtin:${sensor}`) errors.push(`checker.id must be builtin:${sensor}`);
-      if (!["red-test-evidence","green-test-evidence","baseline-test-evidence"].includes(sensor)) errors.push(...semanticCheckerIdentityErrors(checker));
+      if (!["red-test-evidence","green-test-evidence","baseline-test-evidence"].includes(sensor)) errors.push(...semanticCheckerIdentityErrors(checker, sensor));
       if (checker.sensor !== sensor) errors.push(`checker.sensor must be ${sensor}`);
       if (!/^[a-f0-9]{64}$/.test(String(checker.argv_digest || ""))) errors.push("checker.argv_digest must be a SHA-256 digest");
       if (checker.command_version !== undefined && (checker.command_version !== 2 || checker.argv_digest !== argvDigest(semanticCommandArgv(sensor, { current_module: instance?.module_id, current_unit: instance?.unit_id })))) errors.push("semantic checker command no longer matches the controlled producer");
@@ -1840,6 +1853,7 @@ function validateEvidence(
     return {
       sensor,
       passed: false,
+      stage_instance: instance.instance_id,
       message: `Evidence rejected at ${evidencePath(stage, sensor, instance)}: ${errors.join("; ")}`,
     };
   }
@@ -2589,7 +2603,7 @@ function phaseEvidenceErrors(
 export function checkPhaseSensors(instance: StageInstance, state: WorkflowState, options: SensorCheckOptions = {}): SensorResult[] {
   const phases: Record<string, Phase> = { "red-test-evidence": "RED", "baseline-test-evidence": "BASELINE", "green-test-evidence": "GREEN" };
   return (instance.stage.sensors || []).filter(sensor => phases[sensor] && (!options.onlySensors || options.onlySensors.includes(sensor))).flatMap(sensor => {
-    const failure = validateEvidence(instance.stage, sensor, instance, evidence => phaseEvidenceErrors(evidence, sensor, phases[sensor], i13Applicability(instance), instance.stage.slug, instance, state, options.requireCurrentBaselineEpoch === true, options.requireHistoricalPhaseInputs === true, options.alternativeValidationEnvironment), options);
+    const failure = validateEvidence(instance.stage, sensor, instance, evidence => phaseEvidenceErrors(evidence, sensor, phases[sensor], i13Applicability(instance), instance.stage.slug, instance, state, options.requireCurrentBaselineEpoch === true, options.requireHistoricalPhaseInputs === true, options.alternativeValidationEnvironment), options, undefined, state);
     return failure ? [failure] : [];
   });
 }
@@ -2658,10 +2672,10 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
         const source = expandStageInstances(loadGraph(), state).find(i => i.stage.slug === "units-generation" && i.module_id === instance.module_id);
         if (!source) throw new Error("SLICE_EVIDENCE_MISSING: units-generation source");
         const failure = validateEvidence(source.stage, SLICE_SENSOR, source, evidence => sliceEvidenceErrors(context, evidence), { ...options, tolerateRevisionDrift: true });
-        if (failure) failures.push(failure);
+        if (failure) failures.push({ ...failure, stage_instance: source.instance_id });
       }
     }
-    catch (error) { failures.push({ sensor: SLICE_SENSOR, passed: false, message: String(error) }); }
+    catch (error) { failures.push({ sensor: SLICE_SENSOR, passed: false, stage_instance: `units-generation@module:${instance.module_id}`, message: String(error) }); }
   }
 
   for (const sensor of stage.sensors || []) {
@@ -2969,7 +2983,7 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
 
       case "green-test-evidence": {
         const applicability = i13Applicability(instance);
-        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "GREEN", applicability, stage.slug, instance, state, false, false, options.alternativeValidationEnvironment), { ...options, allowDownstreamReportDrift: true });
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "GREEN", applicability, stage.slug, instance, state, false, false, options.alternativeValidationEnvironment), { ...options, allowDownstreamReportDrift: true }, undefined, state);
         if (failure) failures.push(failure);
         break;
       }
@@ -4331,15 +4345,16 @@ function produceMissingSemanticEvidence(instance: StageInstance, refresh = false
   // Repair only missing semantic observations. Phase evidence (RED/BASELINE/GREEN
   // and C8 commands) is validated by the normal gates, never rerun as a side effect
   // of repairing an unrelated semantic record.
-  const invocations = missing.map(sensor => ["--sensor", sensor]);
-  for (const invocation of invocations) {
-    const result = runSync(process.execPath, [TSX_CLI, evidenceTool, "run", "--stage", instance.stage.slug, "--instance", instance.instance_id, ...invocation, ...(refresh ? ["--refresh"] : [])], {
+  // One producer owns an explicit semantic-only batch; per-record publication
+  // locks and session checks remain inside it. Never expand this to --all-sensors.
+  {
+    const result = withRevisionInvalidation(() => runSync(process.execPath, [TSX_CLI, evidenceTool, "run", "--stage", instance.stage.slug, "--instance", instance.instance_id, "--sensors", missing.join(","), ...(refresh ? ["--refresh"] : [])], {
       cwd: PROJECT_ROOT,
       encoding: "utf8",
       shell: false,
-      timeout: 30 * 60 * 1000,
+      timeout: missing.length * 30 * 60 * 1000,
       env: process.env,
-    });
+    }));
     if (result.status !== 0) {
       const detail = [result.stderr, result.stdout]
         .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
@@ -5119,8 +5134,15 @@ function withRepairGuidance(result: Directive, readOnly = false): Directive {
   // A run-stage response can revisit the same unfinished stage after report failed;
   // it proves admission, not completion, and must not erase that blocker sequence.
   if (result.kind !== "error") return result;
-  const guidance = repairGuidance(PROJECT_ROOT, binding ? sessionRefBinding(binding) : GLOBAL_WORKFLOW, String(result.message || "Unknown gate failure"), readOnly);
-  return { ...result, repair_guidance: guidance, message: `${result.message || "Gate failed"}\n\nNext action (${guidance.action}; ${guidance.category}): ${guidance.next_step}` };
+  const ref = binding ? sessionRefBinding(binding) : GLOBAL_WORKFLOW;
+  const state = loadWorkflowState(PROJECT_ROOT, ref);
+  const failures = Array.isArray(result.sensor_failures) ? result.sensor_failures as Array<{ sensor?: string; message: string; stage_instance?: string }> : [{ message: String(result.message || "Unknown gate failure") }];
+  const diagnostics = sensorRepairDiagnostics(failures, { stage_instance: typeof result.stage_instance === "string" ? result.stage_instance : binding?.stage_instance, completed_stage_instances: state?.completed_stage_instances });
+  const guidance = repairGuidance(PROJECT_ROOT, ref, String(result.message || "Unknown gate failure"), readOnly, diagnostics);
+  const commands = diagnostics.flatMap(item => item.command ? [`Suggested command${item.requires_human_approval ? " (requires actual human approval)" : ""}: ${item.command.map(arg => /^[A-Za-z0-9_./@:-]+$/.test(arg) ? arg : JSON.stringify(arg)).join(" ")}`] : []);
+  const { sensor_failures: _failures, ...directive } = result;
+  const { diagnostics: _diagnostics, ...retrySummary } = guidance;
+  return { ...directive, repair_diagnostics: diagnostics, repair_guidance: retrySummary, message: `${result.message || "Gate failed"}\n\nNext action (${guidance.action}; ${guidance.category}): ${guidance.next_step}${commands.length ? `\n${commands.join("\n")}` : ""}` };
 }
 
 let nextConflictRetries = 0;
@@ -5658,7 +5680,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
         if (completedInstanceIds(state).includes(dep.instance_id)) upstreamDeps.add(dep);
       }
     }
-    const upstreamGateFailures: { instance: string; message: string }[] = [];
+    const upstreamGateFailures: { instance: string; sensor: string; message: string }[] = [];
     for (const dep of upstreamDeps) {
       const historicalTdd = dep.stage.slug === "tdd" && effectiveNextInstance.stage.slug === "code-generation"
         && dep.module_id === effectiveNextInstance.module_id && dep.unit_id === effectiveNextInstance.unit_id;
@@ -5672,18 +5694,18 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
         // 已 completed 的上游阶段在完成时其门禁已为绿;此处复验只为拦截"事后被改坏/覆盖不再满足"的实质失败。
         // 纯时间性证据过期(>24h resume 间隔)不是回归,不应阻断多日跨度的正常续作 —— 过滤掉纯 staleness 失败。
         if (/evidence is stale \(\d+h old/i.test(failure.message) && !QUALITY_SENSORS.has(failure.sensor)) continue;
-        upstreamGateFailures.push({ instance: dep.instance_id, message: `[${failure.sensor}] ${failure.message}` });
+        upstreamGateFailures.push({ instance: dep.instance_id, sensor: failure.sensor, message: `[${failure.sensor}] ${failure.message}` });
       }
     }
     if (upstreamGateFailures.length > 0) {
       return {
         kind: "error",
+        stage_instance: effectiveNextInstance.instance_id,
+        sensor_failures: upstreamGateFailures.map(failure => ({ sensor: failure.sensor, message: failure.message, stage_instance: failure.instance })),
         message: `🚫 无法推进到 "${nextInstance.instance_id}" — 上游阶段的准出门禁已不满足,必须先修复:\n` +
           upstreamGateFailures.map((f) => `  ❌ ${f.instance}: ${f.message}`).join("\n") +
           `\n\n修复上游产物/证据后重新 report 使门禁转绿,再执行 next。` +
-          (opts.reportCommand
-            ? `已完成阶段可先用 evidence run --stage <slug> --module <id> --refresh 重新产证,再以 report --stage <slug> --module <id> --result completed 复验。`
-            : ""),
+          "使用下方精确传感器诊断定位修复范围。",
         ...extras,
       };
     }
@@ -6046,6 +6068,8 @@ async function handleReportInner(args: string[], conflictRetries: number): Promi
           if (redFailures.length > 0) {
             return {
               kind: "error",
+              stage_instance: currentInstance.instance_id,
+              sensor_failures: redFailures.map(failure => ({ ...failure, stage_instance: redInstance.instance_id })),
               message: `🚫 Cannot complete GREEN stage "${currentInstance.instance_id}" — RED gate evidence is invalid:\n${redFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\\n")}`,
             };
           }
@@ -6091,6 +6115,8 @@ async function handleReportInner(args: string[], conflictRetries: number): Promi
       if (sensorFailures.length > 0) {
         return {
           kind: "error",
+          stage_instance: currentInstance.instance_id,
+          sensor_failures: sensorFailures,
           message: `🚫 Cannot complete stage "${stageSlug}" — sensor checks failed:\n` +
             sensorFailures.map((f) => `  ❌ [${f.sensor}] ${f.message}`).join("\n") +
             `\n\nFix sensor failures, then report again.`,
@@ -6353,7 +6379,7 @@ async function reattestInstance(
     const redInstance = instances.find((candidate) => candidate.stage.slug === "tdd" && candidate.module_id === instance.module_id && candidate.unit_id === instance.unit_id);
     if (redInstance) {
       const redFailures = await checkHistoricalTddSensors(redInstance, state);
-      if (redFailures.length > 0) return { kind: "error", message: `🚫 Cannot re-attest GREEN stage "${instanceId}" — RED gate evidence is invalid:\\n${redFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\\n")}`, ...extras };
+      if (redFailures.length > 0) return { kind: "error", stage_instance: instanceId, sensor_failures: redFailures.map(failure => ({ ...failure, stage_instance: redInstance.instance_id })), message: `🚫 Cannot re-attest GREEN stage "${instanceId}" — RED gate evidence is invalid:\\n${redFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\\n")}`, ...extras };
     }
   }
   const automaticEvidenceError = produceMissingSemanticEvidence(instance, true);
@@ -6368,7 +6394,9 @@ async function reattestInstance(
   if (sensorFailures.length > 0) {
     return {
       kind: "error",
-      message: `🚫 Cannot re-attest "${instanceId}" — sensor checks failed:\n${sensorFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\n")}\n\nRefresh evidence with evidence run --stage ${stageNode.slug}${instance.module_id ? ` --module ${instance.module_id}` : ""}${instance.unit_id ? ` --unit ${instance.unit_id}` : ""} --refresh, then re-attest.`,
+      stage_instance: instanceId,
+      sensor_failures: sensorFailures,
+      message: `🚫 Cannot re-attest "${instanceId}" — sensor checks failed:\n${sensorFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\n")}\n\nRepair only the named sensor failures using their exact diagnostics, then re-attest.`,
       ...extras,
     };
   }

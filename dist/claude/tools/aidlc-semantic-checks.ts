@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { verifyDesignResourceConsumption } from "./aidlc-design-resource.js";
+import { templateCompletenessPayload } from "./aidlc-sensor-inputs";
 import { infrastructureResources } from "./aidlc-infrastructure.js";
 import { verifyExternalUiManifest } from "./aidlc-ui-readonly.js";
 import { verifyCreatedUiManifest } from "./aidlc-ui-create.js";
@@ -10,6 +11,7 @@ import { artifactConsistency, dependencyReadiness, fieldCapability, storyRuleCon
 import { qualityUiCheck } from "./aidlc-quality-ui";
 import { deliveryReadiness } from "./aidlc-quality-delivery";
 import { runSync } from "./aidlc-spawn";
+import { withRevisionInvalidation, withRevisionMemoization } from "./aidlc-revision";
 import { deliveryConsistencyPayloadErrors, reviewAxisErrors, reviewIssueErrors } from "./aidlc-evidence-policy";
 import { reviewedFiles } from "./aidlc-review-files";
 import { checkHistoricalTddSensors, checkPhaseSensors, checkSensors, getExecutableStages, globalReviewPayload, globalReviewRequired, loadGraph, makeInstance, reviewCoverageErrors } from "./aidlc-orchestrate";
@@ -1864,8 +1866,8 @@ async function implementationReport(): Promise<Record<string, unknown>> {
     const context = { current_stage: slug, current_module: moduleId, current_unit: unitId };
     const argv = semanticCommandArgv(sensor, context, ROOT);
     if (sensor === "inception-consistency") argv.push("--current-artifacts");
-    const checked = runSync(argv[0], argv.slice(1), { cwd: ROOT, encoding: "utf8", shell: false, timeout: 60_000,
-      env: semanticCheckerEnv(context, semanticValidationEnvironment() || process.env) });
+    const checked = withRevisionInvalidation(() => runSync(argv[0], argv.slice(1), { cwd: ROOT, encoding: "utf8", shell: false, timeout: 60_000,
+      env: semanticCheckerEnv(context, semanticValidationEnvironment() || process.env) }));
     if (checked.error || checked.status !== 0) fail(`current delivery consistency failed for ${sensor}${moduleId ? `/${moduleId}` : ""}${unitId ? `/${unitId}` : ""}: ${checked.error?.message || checked.stderr || checked.stdout}`);
     const payload = objectValue(JSON.parse(checked.stdout.trim()), `current ${sensor}`);
     const payloadErrors = deliveryConsistencyPayloadErrors(sensor, payload, { module_id: moduleId, prd_selected: selectedPrdRoute(), ui_route: selectedUiRoute(moduleId) });
@@ -1957,15 +1959,7 @@ function frontendPlatform(): Record<string, unknown> {
 
 
 function templateCompleteness(): Record<string, unknown> {
-  const directory = join(ROOT, contextual("docs/aidlc/construction/build-and-test"));
-  const expected = ["build-instructions.md", "unit-test-instructions.md"];
-  const templates = expected.map((name) => join(directory, name));
-  if (templates.some((path) => !existsSync(path))) fail("build/test template files are incomplete");
-  for (const path of templates) {
-    const content = text(path);
-    if (content.trim().length < 40 || /\[[^\]]+\]|TODO|TBD/i.test(content)) fail(`${relativePath(path)} contains unresolved template placeholders`);
-  }
-  return { status: "passed", templates: templates.map(relativePath), unresolved: 0 };
+  return templateCompletenessPayload(ROOT, ACTIVE_MODULE, ACTIVE_UNIT);
 }
 
 function recoveryEvidence(): Record<string, unknown> {
@@ -2460,13 +2454,13 @@ function diagramContract(): Record<string, unknown> | Promise<Record<string, unk
     const configuredCwd = metadata.cwd === undefined ? ROOT : resolve(ROOT, requireString(metadata.cwd, `diagram ${id}.generation.cwd`));
     if (!existsSync(configuredCwd) || !statSync(configuredCwd).isDirectory()) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.cwd does not exist: ${configuredCwd}`);
     const before = snapshotProjectFiles();
-    const result = runSync(commandArgv[0], commandArgv.slice(1), {
+    const result = withRevisionInvalidation(() => runSync(commandArgv[0], commandArgv.slice(1), {
       cwd: configuredCwd,
       shell: false,
       encoding: "utf8",
       timeout: 120_000,
       env: { ...process.env, AIDLC_DIAGRAM_ID: id, AIDLC_ROUTE_CONFIG_JSON: JSON.stringify(routeConfig), AIDLC_EXPECTED_CONTRACT_PATH: expectedPath },
-    });
+    }));
     if (result.error || result.status !== 0) {
       const stdout = typeof result.stdout === "string" ? result.stdout.trim() : "";
       const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
@@ -4970,16 +4964,18 @@ const CHECKERS: Record<string, () => Record<string, unknown> | Promise<Record<st
 };
 
 try {
-  const args = process.argv.slice(2);
-  const sensorIndex = args.indexOf("--sensor");
-  const sensor = sensorIndex >= 0 ? args[sensorIndex + 1] : undefined;
-  if (!sensor || !SENSOR_NAMES.has(sensor) || !CHECKERS[sensor]) fail("usage: aidlc-semantic-checks.ts --sensor <semantic-sensor>");
-  const currentArtifacts = args.includes("--current-artifacts");
-  if (currentArtifacts && sensor !== "inception-consistency") fail("--current-artifacts is only allowed for inception-consistency");
-  assertSemanticContext(sensor);
-  // Final delivery rechecks current canonical artifacts without reopening I10's
-  // earlier quality admission. Controlled producers never add this read-only flag.
-  output(currentArtifacts ? { ...inceptionConsistency(), validation_scope: "current-artifacts" } : await CHECKERS[sensor]());
+  await withRevisionMemoization(async () => {
+    const args = process.argv.slice(2);
+    const sensorIndex = args.indexOf("--sensor");
+    const sensor = sensorIndex >= 0 ? args[sensorIndex + 1] : undefined;
+    if (!sensor || !SENSOR_NAMES.has(sensor) || !CHECKERS[sensor]) fail("usage: aidlc-semantic-checks.ts --sensor <semantic-sensor>");
+    const currentArtifacts = args.includes("--current-artifacts");
+    if (currentArtifacts && sensor !== "inception-consistency") fail("--current-artifacts is only allowed for inception-consistency");
+    assertSemanticContext(sensor);
+    // Final delivery rechecks current canonical artifacts without reopening I10's
+    // earlier quality admission. Controlled producers never add this read-only flag.
+    output(currentArtifacts ? { ...inceptionConsistency(), validation_scope: "current-artifacts" } : await CHECKERS[sensor]());
+  });
 } catch (error) {
   if (error instanceof QualityBlocked) output({ status: "blocked", issues: error.issues });
   console.error(`Semantic checker blocked: ${error instanceof Error ? error.message : String(error)}`);

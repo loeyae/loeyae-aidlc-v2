@@ -18,6 +18,26 @@
   ],
   [
     "tsx",
+    "tests/test_repair_actions.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_validation_revision_scope.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_sensor_input_scope.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_checker_import_closure.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_mars277_parallel_units.ts"
+  ],
+  [
+    "tsx",
     "tests/test_team_handoff_recovery.ts"
   ],
   [

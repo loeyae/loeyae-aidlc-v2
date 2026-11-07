@@ -1,4 +1,5 @@
 import { createHash, type Hash } from "crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync } from "fs";
 import { join, relative, resolve } from "path";
 import { runSync } from "./aidlc-spawn";
@@ -101,11 +102,29 @@ function dirtyOf(root: string, ignore: (path: string) => boolean): boolean | nul
 // invalidateRevisionCache(); engine writes stay inside the excluded control plane
 // (aidlc/ .aidlc/) and never need to. Outside a scope, every call computes, so
 // in-process file writes between two readSourceRevision calls are always observed.
+// Independent async requests own separate stores, including semantic subprocess
+// entrypoints. Canonical GREEN validation can also reuse a successful verdict
+// after independently rebuilding its complete mutable control-input key.
 // ---------------------------------------------------------------------------
 
-const revisionCache = new Map<string, SourceRevision>();
+interface RevisionContext { active: boolean; cache: Map<string, SourceRevision>; successfulGates: Set<string> }
+const revisionContexts = new AsyncLocalStorage<RevisionContext>();
+const activeRevisionContexts = new Set<RevisionContext>();
 const revisionStats = { calls: 0, computations: 0 };
-let revisionMemoization = false;
+const gateStats = { calls: 0, computations: 0, hits: 0 };
+
+/** Only success is memoized. Callers must freshly bind all non-source inputs. */
+export function memoizedSuccessfulGate<T>(key: string | null, validate: () => T | null): T | null {
+  gateStats.calls++;
+  const context = revisionContexts.getStore();
+  if (key && context?.active && context.successfulGates.has(key)) { gateStats.hits++; return null; }
+  gateStats.computations++;
+  const result = validate();
+  if (key && context?.active && result === null) context.successfulGates.add(key);
+  return result;
+}
+export function gateCacheStats(): Readonly<typeof gateStats> { return { ...gateStats }; }
+export function validationMemoizationActive(): boolean { return revisionContexts.getStore()?.active === true; }
 
 /**
  * Runs `fn` with revision memoization enabled, then drops the cache. Async-safe:
@@ -113,30 +132,44 @@ let revisionMemoization = false;
  cleared when the outermost one ends.
  */
 export function withRevisionMemoization<T>(fn: () => T): T {
-  const outermost = !revisionMemoization;
-  revisionMemoization = true;
-  const settle = (): void => {
-    if (outermost) {
-      revisionMemoization = false;
-      revisionCache.clear();
+  if (revisionContexts.getStore()?.active) return fn();
+  const context: RevisionContext = { active: true, cache: new Map(), successfulGates: new Set() };
+  activeRevisionContexts.add(context);
+  return revisionContexts.run(context, () => {
+    const settle = (): void => { context.active = false; context.cache.clear(); context.successfulGates.clear(); activeRevisionContexts.delete(context); };
+    try {
+      const result = fn();
+      if (result && typeof (result as { then?: unknown }).then === "function") {
+        return Promise.resolve(result).then(value => { settle(); return value; }, error => { settle(); throw error; }) as T;
+      }
+      settle();
+      return result;
+    } catch (error) {
+      settle();
+      throw error;
     }
-  };
-  try {
-    const result = fn();
-    if (result && typeof (result as { then?: unknown }).then === "function") {
-      return (result as unknown as Promise<T>).then((value) => { settle(); return value; }, (error) => { settle(); throw error; }) as unknown as T;
-    }
-    settle();
-    return result;
-  } catch (error) {
-    settle();
-    throw error;
-  }
+  });
 }
 
-/** Clears every memoized revision; call after running a project command. */
+/** A known mutation invalidates every active request; their snapshots remain isolated. */
 export function invalidateRevisionCache(): void {
-  revisionCache.clear();
+  for (const context of activeRevisionContexts) { context.cache.clear(); context.successfulGates.clear(); }
+}
+
+/** A process may change inputs even when it fails, times out or overflows. */
+export function withRevisionInvalidation<T>(operation: () => T): T {
+  invalidateRevisionCache();
+  try {
+    const result = operation();
+    if (result && typeof (result as { then?: unknown }).then === "function") {
+      return Promise.resolve(result).then(value => { invalidateRevisionCache(); return value; }, error => { invalidateRevisionCache(); throw error; }) as T;
+    }
+    invalidateRevisionCache();
+    return result;
+  } catch (error) {
+    invalidateRevisionCache();
+    throw error;
+  }
 }
 
 /** Calls vs. real computations since process start; tests use this to prove dedup. */
@@ -145,7 +178,8 @@ export function revisionCacheStats(): { calls: number; computations: number; hit
 }
 
 function cacheKey(root: string, scope: DigestScope | undefined, nested: readonly string[] | undefined): string {
-  return `${root}\0${scope ? scope.label : "worktree"}\0${[...(nested || [])].sort().join(",")}`;
+  const projections = createHash("sha256").update(JSON.stringify(Object.entries(scope?.projectedInputs || {}).sort(([a], [b]) => a.localeCompare(b)))).digest("hex");
+  return `${root}\0${scope ? scope.label : "worktree"}\0${projections}\0${[...(nested || [])].sort().join(",")}`;
 }
 
 /** HEAD commit of the workflow repository, without hashing the tree. */
@@ -201,12 +235,13 @@ export function readSourceRevision(projectRoot: string, scope?: DigestScope, nes
   const root = realpathSync(resolve(projectRoot));
   const key = cacheKey(root, scoped, nested);
   revisionStats.calls++;
-  if (revisionMemoization) {
-    const cached = revisionCache.get(key);
+  const context = revisionContexts.getStore();
+  if (context?.active) {
+    const cached = context.cache.get(key);
     if (cached) return structuredClone(cached);
     const computed = computeSourceRevision(projectRoot, scoped, nested);
     revisionStats.computations++;
-    revisionCache.set(key, computed);
+    context.cache.set(key, computed);
     return structuredClone(computed);
   }
   revisionStats.computations++;

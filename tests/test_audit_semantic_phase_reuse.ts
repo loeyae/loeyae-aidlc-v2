@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createInitialState, loadWorkflowState } from "../core/tools/aidlc-light-state";
 import { fixtureEnvironment, saveFixtureState } from "./mars243_fixture_session";
 
@@ -67,9 +68,24 @@ try {
   ready.completed_stages = ["workspace-detection", "state-template", "test-case-derivation", "tdd"];
   ready.completed_stage_instances = ["workspace-detection", "state-template", "test-case-derivation@module:project", "tdd@module:project@unit:default"];
   saveFixtureState(root, ready);
+  const gateCache = spawnSync(process.execPath, [tsx, join(repo, "tests/green_gate_cache_probe.ts")], { cwd: root, encoding: "utf8" });
+  assert.equal(gateCache.status, 0, gateCache.stdout + gateCache.stderr);
+  console.log(`PASS complete GREEN gate cache: ${gateCache.stdout.trim()}`);
+  const revisionTrace = join(root, ".aidlc/revision-profile");
+  mkdirSync(revisionTrace, { recursive: true });
+  const profile = join(revisionTrace, "profile.mjs");
+  writeFileSync(profile, `import fs from 'node:fs';import path from 'node:path';import {revisionCacheStats} from ${JSON.stringify(pathToFileURL(join(repo, "core/tools/aidlc-revision.ts")).href)};process.on('exit',()=>fs.writeFileSync(path.join(process.env.AIDLC_REVISION_PROFILE,process.pid+'.json'),JSON.stringify({argv:process.argv,stats:revisionCacheStats()})));\n`);
   for (const sensor of ["test-quality", "traceability-matrix", "structural-invariants"]) {
-    run(["evidence", "run", "--stage", "code-generation", "--sensor", sensor]);
+    const args = ["evidence", "run", "--stage", "code-generation", "--sensor", sensor];
+    const env = fixtureEnvironment(root, args);
+    run(args, true, sensor === "test-quality" ? { ...env, AIDLC_REVISION_PROFILE: revisionTrace,
+      NODE_OPTIONS: `${env.NODE_OPTIONS || ""} --import ${JSON.stringify(pathToFileURL(join(repo, "node_modules/tsx/dist/loader.mjs")).href)} --import ${JSON.stringify(pathToFileURL(profile).href)}`.trim() } : env);
   }
+  const revisionProfiles = readdirSync(revisionTrace).filter(path => path.endsWith(".json")).map(path => JSON.parse(readFileSync(join(revisionTrace, path), "utf8")));
+  const semanticProfile = revisionProfiles.find(value => value.argv[1]?.endsWith("aidlc-semantic-checks.ts"));
+  assert.ok(semanticProfile, "profile the actual semantic subprocess, not just the producer");
+  assert.ok(semanticProfile.stats.hits > 0 && semanticProfile.stats.computations < semanticProfile.stats.calls, "duplicate source reads within one semantic check reuse real digest computations");
+  console.log(`PASS semantic subprocess revision cache: ${JSON.stringify(semanticProfile.stats)}`);
   const continued = JSON.parse(run(["orchestrate", "next"]));
   assert.equal(continued.kind, "run-stage", "continue after real GREEN must accept historical RED with unchanged test/I13 inputs");
   const bound = fixtureEnvironment(root, ["orchestrate", "next"]);
@@ -120,12 +136,38 @@ try {
   console.log("PASS continuation accepts real historical RED, rejects changed tests/unsafe legacy drift, and bounds repeated blockers without state or test expansion");
   run(["orchestrate", "report", "--stage", "code-generation", "--result", "completed"]);
   const original = readFileSync(join(root, green), "utf8"), before = count();
-  rmSync(join(root, ".aidlc/evidence/code-generation/project/default/test-quality.json"));
-  run(["orchestrate", "report", "--stage", "code-generation", "--instance", "code-generation@module:project@unit:default", "--result", "completed"]);
+  const repairSensors = ["test-quality", "traceability-matrix", "structural-invariants"];
+  for (const sensor of repairSensors) rmSync(join(root, `.aidlc/evidence/code-generation/project/default/${sensor}.json`));
+  const traceDir = join(root, ".aidlc/process-trace");
+  mkdirSync(traceDir, { recursive: true });
+  const preload = join(traceDir, "trace.cjs");
+  writeFileSync(preload, "const fs=require('node:fs'),path=require('node:path');if(require('node:worker_threads').isMainThread)fs.writeFileSync(path.join(process.env.AIDLC_REPAIR_PROCESS_TRACE,process.pid+'.json'),JSON.stringify(process.argv));\n");
+  const reportArgs = ["orchestrate", "report", "--stage", "code-generation", "--instance", "code-generation@module:project@unit:default", "--result", "completed"];
+  const repairEnv = fixtureEnvironment(root, reportArgs);
+  run(reportArgs, true, { ...repairEnv, AIDLC_REPAIR_PROCESS_TRACE: traceDir, NODE_OPTIONS: `${repairEnv.NODE_OPTIONS || ""} --require ${JSON.stringify(preload.replace(/\\/g, "/"))}`.trim() });
+  const processes = readdirSync(traceDir).filter(path => path.endsWith(".json")).map(path => JSON.parse(readFileSync(join(traceDir, path), "utf8")) as string[]);
+  const producers = processes.filter(argv => argv[1]?.endsWith("aidlc-evidence.ts"));
+  assert.equal(producers.length, 1, "three missing semantic records use one producer process");
+  assert.deepEqual(producers[0][producers[0].indexOf("--sensors") + 1].split(",").sort(), repairSensors.sort());
+  for (const sensor of repairSensors) assert.ok(readFileSync(join(root, `.aidlc/evidence/code-generation/project/default/${sensor}.json`), "utf8"));
   assert.equal(count(), before, "automatic semantic repair must not rerun successful GREEN commands");
   assert.equal(readFileSync(join(root, green), "utf8"), original, "valid GREEN evidence stays byte-identical");
   assert.ok(loadWorkflowState(root)!.completed_stage_instances.includes("code-generation@module:project@unit:default"));
   console.log("PASS actual re-attestation fills missing semantic evidence and preserves real GREEN observation");
+  const semanticBytes = () => repairSensors.map(sensor => readFileSync(join(root, `.aidlc/evidence/code-generation/project/default/${sensor}.json`), "utf8"));
+  const semanticBeforeRejections = semanticBytes();
+  for (const sensors of ["test-quality,green-test-evidence", "test-quality,build-test-evidence", "test-quality,test-quality", "test-quality,unknown"]) {
+    const rejected = run(["evidence", "run", "--stage", "code-generation", "--module", "project", "--unit", "default", "--sensors", sensors, "--refresh"], false);
+    assert.match(rejected, /--sensors must name unique supported semantic sensors/);
+  }
+  const crossStage = run(["evidence", "run", "--stage", "code-generation", "--module", "project", "--unit", "default", "--sensors", "test-quality,template-completeness", "--refresh"], false);
+  assert.match(crossStage, /must belong to the enabled sensors/);
+  run(["evidence", "run", "--stage", "code-generation", "--module", "project", "--unit", "default", "--sensors", "test-quality", "--sensor", "test-quality", "--refresh"], false);
+  run(["evidence", "run", "--stage", "code-generation", "--module", "project", "--unit", "default", "--sensors", "test-quality", "--refresh"], false, { ...process.env, AIDLC_SESSION_BINDING: "malformed-session-binding" });
+  assert.deepEqual(semanticBytes(), semanticBeforeRejections, "invalid batches and sessions cannot rewrite even their valid first sensor");
+  assert.equal(count(), before, "rejected batch selections execute no phase command");
+  assert.equal(readFileSync(join(root, green), "utf8"), original);
+  console.log("PASS batch repair rejects phase/build, duplicate, unknown and cross-stage sensors before executing or publishing");
   const historyLength = loadWorkflowState(root)!.history.length;
   const semantic = ".aidlc/evidence/code-generation/project/default/test-quality.json";
   for (const invalid of ["failed", "missing"]) {

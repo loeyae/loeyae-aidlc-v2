@@ -1362,6 +1362,7 @@ Quality and utilities:
   document-slices generate|check|plan|recover --module <id> [--unit <id>] [--apply]  Canonical-preserving derived views
   quality metrics [--module <module-id>]     Read-only quality coverage and return-defect metrics
   evidence run --stage <slug> [flags]       Produce controlled evidence (--module/--unit, --refresh for completed stages)
+  evidence run --stage <slug> --sensors <sensor,...> [flags]  Produce an explicit semantic-only batch; no phase/build/test commands
   attest resolve [flags]                     Read-only commit/diff attribution
   agent [args]                                      Retired compatibility entry (host owns execution)
   provider add|list|status|update|enable|disable|remove [args]  Manage project-level locked Git Providers

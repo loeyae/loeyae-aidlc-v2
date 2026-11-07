@@ -55,6 +55,9 @@ try {
   assert.deepEqual(valid.selected_rule_stages, ruleLoadPlan.selected.map((entry) => entry.slug), "Phase 5 derives solely from the Phase-4 selected rules");
   assert.equal(valid.reuse.length, 1, "valid non-mandatory evidence is reusable");
   assert.equal(valid.reuse[0]?.stage_slug, "advisory");
+  assert(valid.entries.every(entry => entry.stage_slug === "advisory"), "only the exact target's evidence may become current work");
+  assert.deepEqual(valid.deferred_stages, ["gate"]);
+  assert.equal(valid.revalidate.length, 0, "unrelated selected stages must not appear as revalidation work");
   const gatePlan = buildEvidenceReusePlan(graph, { projectRoot: root, scope: "bugfix", now: NOW, target: targetFor("gate"), expectedSourceRevision: expectedRevision });
   assert.equal(gatePlan.verify.length, 1, "valid evidence of a gate is explicitly verified, never blindly reused");
   assert.equal(gatePlan.verify[0]?.stage_slug, "gate");
@@ -121,6 +124,8 @@ try {
   const standard = applyExecutionProfile({ classified: classifyExecutionProfile({ scope: "bugfix", requested_level: "standard" }), at: NOW });
   const complex = applyExecutionProfile({ classified: classifyExecutionProfile({ scope: "bugfix", signals: new Set(["security_or_sensitive_data"]) }), at: NOW });
   const legacy = buildEvidenceReusePlan(actualGraph, { projectRoot: root, scope: "bugfix", now: NOW });
+  assert.equal(legacy.entries.length, 0, "a workflow-wide plan without an exact target has no actionable evidence work");
+  assert.deepEqual(legacy.deferred_stages, legacy.selected_rule_stages);
   const standardPlan = buildEvidenceReusePlan(actualGraph, { projectRoot: root, scope: "bugfix", executionProfile: standard, now: NOW });
   const complexPlan = buildEvidenceReusePlan(actualGraph, { projectRoot: root, scope: "bugfix", executionProfile: complex, now: NOW });
   const lightweightPlan = buildEvidenceReusePlan(actualGraph, { projectRoot: root, scope: "bugfix", executionProfile: light, now: NOW });

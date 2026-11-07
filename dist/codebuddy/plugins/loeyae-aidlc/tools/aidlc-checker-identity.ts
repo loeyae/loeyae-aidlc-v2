@@ -1,31 +1,39 @@
 /** Content identity of the installed semantic checker and its actual runtime dependencies. */
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const tools = dirname(fileURLToPath(import.meta.url));
 let memo: string | undefined;
+let sensorMemo: string | undefined;
+let memoDepth = 0;
 const runtime = { node: process.version, platform: process.platform, arch: process.arch };
 
 /** Share scans within one synchronous producer invocation, never across invocations. */
 export function withSemanticCheckerIdentityMemoization<T>(operation: () => T): T {
   memo = undefined;
+  sensorMemo = undefined;
+  memoDepth++;
   try { return operation(); }
-  finally { memo = undefined; }
+  finally { memo = undefined; sensorMemo = undefined; memoDepth--; }
 }
 
-export function semanticCheckerDigest(refresh = false): string {
-  if (memo && !refresh) return memo;
+export function semanticCheckerDigest(refresh = false, sensor?: string): string {
+  const isolated = sensor === "template-completeness";
+  const cached = isolated ? sensorMemo : memo;
+  if (memoDepth && cached && !refresh) return cached;
   const hash = createHash("sha256");
-  hash.update(JSON.stringify({ version: 1, runtime }));
-  const digestFile = (file: string, label: string) =>
+  hash.update(JSON.stringify({ version: isolated ? 2 : 1, runtime, ...(isolated ? { sensor } : {}) }));
+  const digestFile = (file: string, label: string) => {
+    if (lstatSync(file).isSymbolicLink()) throw new Error(`checker identity cannot follow a content symlink: ${label}`);
     hash
       .update(label)
       .update("\0")
       .update(createHash("sha256").update(readFileSync(file)).digest())
       .update("\0");
+  };
   const walk = (root: string, prefix: string, onlyCode = false) => {
     const visit = (directory: string) => {
       for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) =>
@@ -42,7 +50,35 @@ export function semanticCheckerDigest(refresh = false): string {
     };
     visit(root);
   };
-  walk(tools, "tools", true);
+  if (isolated) {
+    // A deliberately closed import graph. Adding an undeclared import blocks
+    // production until this contract is expanded; it cannot escape the digest.
+    const closure = ["aidlc-template-checker.ts", "aidlc-sensor-inputs.ts", "aidlc-execution-context.ts"];
+    const builtinDependencies = new Set(["fs", "node:fs", "path", "node:path", "crypto", "node:crypto", "url", "node:url"]);
+    for (const name of closure) {
+      const source = readFileSync(join(tools, name), "utf8");
+      const imports: string[] = [];
+      // Recognize a deliberately small, complete declaration grammar, then
+      // reject leftover loading syntax. Never infer "no dependency" from a
+      // matcher that failed on comments, quoted binding names or re-exports.
+      const remaining = source.replace(/\bimport\s+(?:type\s+)?(?:[\w$*,{}\s]+?\s+from\s+)?(["'])([^"'\\\r\n]+)\1\s*;?/g, (statement, _quote, specifier) => {
+        imports.push(specifier);
+        return "";
+      }).replace(/\bimport\s*\.\s*meta\b/g, "");
+      if (/\b(?:import|require|eval)\b/.test(remaining)
+        || /\bexport\s*(?:\/[/*]|(?:type\s+)?(?:\*|\{))/.test(remaining)) {
+        throw new Error(`undeclared checker dependency: unsupported module syntax in ${name}`);
+      }
+      for (const specifier of imports) {
+        // No type-import exemption: `type` can be an ordinary default binding.
+        // Native loader/evaluator modules also require an explicit contract
+        // expansion instead of escaping the graph through an aliased factory.
+        if (!builtinDependencies.has(specifier) && !closure.includes(`${specifier.replace(/^\.\//, "")}.ts`)) throw new Error(`undeclared checker dependency: ${specifier}`);
+      }
+      digestFile(join(tools, name), `tools/${name}`);
+    }
+    digestFile(join(tools, "aidlc-checker-identity.ts"), "tools/aidlc-checker-identity.ts");
+  } else walk(tools, "tools", true);
   let packageRoot = dirname(tools);
   while (dirname(packageRoot) !== packageRoot) {
     const file = join(packageRoot, "package.json");
@@ -89,17 +125,23 @@ export function semanticCheckerDigest(refresh = false): string {
   const file = join(packageRoot, "package.json");
   const pkg = existsSync(file) && JSON.parse(readFileSync(file, "utf8"));
   if (pkg?.name === "loeyae-aidlc") {
-    digestFile(file, "package.json");
+    if (isolated) {
+      const { version: _version, ...configuration } = pkg;
+      hash.update("package.json/configuration\0").update(JSON.stringify(configuration));
+    } else digestFile(file, "package.json");
     for (const name of Object.keys(pkg.dependencies || {}).sort()) dependency(name, packageRoot);
   } else
     for (const name of ["tsx", "yaml", "markdown-it", "html-validate", "parse5", "jszip", "@xmldom/xmldom"])
       dependency(name, tools);
-  memo = hash.digest("hex");
-  return memo;
+  const result = hash.digest("hex");
+  if (isolated) sensorMemo = result;
+  else memo = result;
+  return result;
 }
 
-export function semanticCheckerIdentityErrors(value: Record<string, unknown>): string[] {
-  return value.identity_version === 1 && value.implementation_digest === semanticCheckerDigest()
+export function semanticCheckerIdentityErrors(value: Record<string, unknown>, sensor?: string): string[] {
+  const isolated = sensor === "template-completeness" && value.identity_version === 2;
+  return (value.identity_version === 1 || isolated) && value.implementation_digest === semanticCheckerDigest(false, isolated ? sensor : undefined)
     ? []
     : ["semantic checker implementation is missing or changed; refresh controlled evidence"];
 }

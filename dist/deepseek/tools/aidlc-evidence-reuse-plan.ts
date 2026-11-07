@@ -1,5 +1,7 @@
 import { evidenceTimeError, isEvidenceTimestamp as isIsoDate } from "./aidlc-evidence-policy";
 import {semanticCheckerIdentityErrors} from "./aidlc-checker-identity";
+import { sensorInputScope } from "./aidlc-sensor-inputs";
+import { readSourceRevision } from "./aidlc-revision";
 /**
  * Read-only evidence reuse and validation scheduling for MARS-161 Phase 5.
  *
@@ -65,6 +67,8 @@ export interface EvidenceReusePlan {
   };
   /** Phase-4 selected stage rules from which this plan was derived. */
   readonly selected_rule_stages: readonly string[];
+  /** Selected stages outside the exact target; these are not current repair work. */
+  readonly deferred_stages: readonly string[];
   readonly entries: readonly EvidenceValidationPlanEntry[];
   readonly reuse: readonly EvidenceValidationPlanEntry[];
   readonly verify: readonly EvidenceValidationPlanEntry[];
@@ -140,6 +144,10 @@ function candidateForSensor(
       if (producer?.name !== "loeyae-aidlc-evidence" || producer.mode !== "controlled" || typeof producer.execution_id !== "string" || producer.execution_id.length === 0 || sourceRevision === undefined) return { failure: "invalid_evidence" };
       if (value.stage_instance !== target.instance_id || value.module_id !== (target.module_id ?? null) || value.unit_id !== (target.unit_id ?? null)) return { failure: "invalid_evidence" };
       const sourceScope = typeof sourceRevision.scope === "string" ? sourceRevision.scope : "worktree";
+      if (isRecord(value.checker) && value.checker.identity_version === 2) {
+        const scope = sensorInputScope(projectRoot, sensor, target.instance_id);
+        if (scope) { evidenceScope = scope.label; expected = readSourceRevision(projectRoot, scope, Object.keys(expected.repos || {})); }
+      }
       if (sourceScope !== evidenceScope) return { failure: "incompatible_scope" };
       if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.worktree_digest))) return { failure: "invalid_evidence" };
       if (sourceScope === "worktree") {
@@ -157,7 +165,7 @@ function candidateForSensor(
       }
       const checker = isRecord(value.checker) ? value.checker : undefined;
       if (sensor !== "build-test-evidence" && (checker?.id !== `builtin:${sensor}` || checker.sensor !== sensor || checker.status !== "passed" || checker.exit_code !== 0 || typeof checker.argv_digest !== "string" || !/^[a-f0-9]{64}$/.test(checker.argv_digest))) return { failure: "invalid_evidence" };
-      if (checker && !["build-test-evidence","red-test-evidence","green-test-evidence","baseline-test-evidence"].includes(sensor) && semanticCheckerIdentityErrors(checker).length) return {failure:"invalid_evidence"};
+      if (checker && !["build-test-evidence","red-test-evidence","green-test-evidence","baseline-test-evidence"].includes(sensor) && semanticCheckerIdentityErrors(checker, sensor).length) return {failure:"invalid_evidence"};
       const timestamp = value.timestamp;
       const timeError = evidenceTimeError(value, sensor, nowMs);
       if (timeError) return { failure: timeError.includes("stale") ? "stale_evidence" : timeError.includes("future") ? "future_evidence" : "invalid_evidence" };
@@ -191,7 +199,8 @@ function selectedStages(graph: StageGraph, rulePlan: RuleLoadPlan): StageNode[] 
 
 /**
  * Build an advisory evidence schedule from the Phase-4 selected rule plan.
- * Every selected sensor gets an entry.  It cannot remove a sensor or approve
+ * Only the exact target's sensors get actionable entries. Other selected stages
+ * remain in deferred_stages. This cannot remove a sensor or approve
  * evidence; callers must continue through the normal report/gate pipeline.
  */
 export function buildEvidenceReusePlan(graph: StageGraph, input: BuildEvidenceReusePlanInput): EvidenceReusePlan {
@@ -208,7 +217,8 @@ export function buildEvidenceReusePlan(graph: StageGraph, input: BuildEvidenceRe
     selectedOptionalStages: input.selectedOptionalStages,
     executionProfile: input.executionProfile,
   });
-  const stages = selectedStages(graph, rulePlan);
+  const selected = selectedStages(graph, rulePlan);
+  const stages = input.target ? selected.filter(stage => stage.slug === input.target!.stage_slug) : [];
   const nowMs = Date.parse(input.now);
   const entries: EvidenceValidationPlanEntry[] = [];
 
@@ -251,6 +261,7 @@ export function buildEvidenceReusePlan(graph: StageGraph, input: BuildEvidenceRe
     evidence_scope: evidenceScope,
     profile: profileForPlan(input.executionProfile),
     selected_rule_stages: rulePlan.selected.map((entry) => entry.slug),
+    deferred_stages: selected.filter(stage => stage.slug !== input.target?.stage_slug).map(stage => stage.slug),
     entries,
     reuse: entries.filter((entry) => entry.disposition === "reuse"),
     verify: entries.filter((entry) => entry.disposition === "verify"),

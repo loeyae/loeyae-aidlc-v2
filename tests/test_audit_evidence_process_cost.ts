@@ -88,7 +88,7 @@ import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { runEvidenceCli } from './core/tools/aidlc-evidence.ts';
 import { semanticCheckerDigest, withSemanticCheckerIdentityMemoization } from './core/tools/aidlc-checker-identity.ts';
-const checker = ${JSON.stringify(join(tool, "core/tools/aidlc-semantic-checks.ts"))};
+const checker = ${JSON.stringify(join(tool, "core/tools/aidlc-template-checker.ts"))};
 const originalRead = fs.readFileSync;
 let reads = 0;
 fs.readFileSync = function(...args) { reads++; return originalRead.apply(this, args); };
@@ -118,7 +118,7 @@ assert.equal(batch.status, 0, batch.stdout + batch.stderr);
 
 // Keep the post-execution byte check: a checker that changes its own source while
 // running must never publish evidence, regardless of its successful JSON report.
-const checker = join(tool, "core/tools/aidlc-semantic-checks.ts");
+const checker = join(tool, "core/tools/aidlc-template-checker.ts");
 writeFileSync(checker, `import { appendFileSync as mutateOwnSource } from 'node:fs';
 import { fileURLToPath as ownPath } from 'node:url';
 mutateOwnSource(ownPath(import.meta.url), '\\n// Checker changed during execution.\\n');\n` + readFileSync(checker, "utf8").replace(/^#![^\n]*\n/, ""));
@@ -127,5 +127,14 @@ const changing = run("checker-changing", "cli", [...args, "--refresh"]);
 assert.equal(changing.status, 2, changing.stdout + changing.stderr);
 assert.match(changing.stderr, /semantic checker implementation changed during execution/);
 assert.deepEqual(readFileSync(evidence), lastEvidence, "a checker changed during execution cannot replace evidence");
+// A stable checker may still race its input. The publication lock rechecks bytes
+// after execution, so it cannot attest the old snapshot against the new files.
+writeFileSync(checker, `import { readFileSync as readInput, writeFileSync as changeInput } from 'node:fs';
+const input = 'docs/aidlc/construction/build-and-test/build-instructions.md';
+changeInput(input, readInput(input, 'utf8').replace('actual', 'edited'));\n` + readFileSync(join(repository, "core/tools/aidlc-template-checker.ts"), "utf8"));
+const racingInput = run("input-changing", "cli", [...args, "--refresh"]);
+assert.equal(racingInput.status, 2, racingInput.stdout + racingInput.stderr);
+assert.match(racingInput.stderr, /sensor inputs changed during execution/);
+assert.deepEqual(readFileSync(evidence), lastEvidence, "changed inputs cannot publish a mismatched snapshot");
 console.log(JSON.stringify(observations));
 console.log("PASS AU4232-04: fewer processes, stable CLI/direct/installed behavior, binding, arguments, and evidence reuse");

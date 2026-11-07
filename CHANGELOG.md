@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.26.1 — 2026-11-07
+
+- Reject unusable semantic records during refresh reuse: validate producer/checker identity fields, failed status, source digest and commit ancestry, and the template result shape before returning `reused`. Corrupted records regenerate through the controlled producer instead of repeatedly surviving a targeted repair.
+- Remove the isolated checker's type-import exemption: a default binding named `type` is still a runtime dependency. Restrict native imports to the reviewed fs/path/crypto/url modules so aliased module loaders and evaluators cannot introduce unbound dependencies; retain controlled evidence when these forms are rejected.
+- Recognize project-axis evidence paths in targeted repair diagnostics and retry fingerprints, including Windows separators; preserve the prerequisite's project scope instead of inheriting the consumer's module/unit.
+- Fail closed on commented module keywords, quoted import bindings and re-exports in the isolated checker's declared dependency closure; add direct digest and controlled-publication regressions for previously unrecognized import syntax.
+- Reuse source revision computations inside semantic checker subprocesses with isolated async request scopes, projection-aware keys and exception-safe invalidation around project commands, generators, evidence publication and subprocess boundaries. Deduplicate successful ordinary GREEN gate validation within the same request after freshly binding evidence, control files, test inputs, environment, heads and validation mode; never reuse failures or historical/exemption verdicts.
+- Introduce opt-in sensor dependency contracts for template completeness: content hashes of exact templates, manifests and declared shared inputs; an isolated checker with a closed, versioned implementation identity; pre-publication input rechecks; and content-level invalidation diagnostics. Unrelated source/checker edits and package-version-only changes retain this evidence. Unknown sensors and legacy identities keep conservative full bindings; oversized or unsupported inputs never silently truncate. Repair the shared UC-D ownership declaration in the parallel-unit regression fixture.
+- Return precise per-sensor repair diagnostics, distinguish historical RED approvals from missing tests, and keep retry fingerprints stable across progress timing. Scope actionable reuse plans to the exact target and batch missing semantic observations in one producer without rerunning phase/build/test commands; preserve per-record publication and normal completion gates.
+
 ## 4.26.0 — 2026-11-07
 
 - Add explicit human-approved historical RED omission recovery, bound to the exact workflow/module/unit, current I13 inputs and controlled GREEN bytes. Preserve `RED.status: not_recorded`, revalidate approvals at downstream gates, archive renewed approvals, and reuse approved GREEN during stage-wide recovery. Original RED, Vitest historical replay, BASELINE, GREEN and `not_required` validation retain their existing meanings.

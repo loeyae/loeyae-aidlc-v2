@@ -1,5 +1,7 @@
 # Session 交接提示词
 
+证据复用和门禁失败处理遵循 [Evidence reuse and targeted repair](evidence-reuse-repair.md)：当前目标以外的阶段延后，`verify` 不意味着重跑测试，修复按结构化诊断定位传感器，相同阻断不得等价重试。
+
 `handoff_prompt` 是当前工作流的面向人的交接文本。它来自 `orchestrate next` 与成功的 `orchestrate report`，Agent 必须原样展示。
 
 ## 内容要求
