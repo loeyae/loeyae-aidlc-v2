@@ -6,6 +6,10 @@
   ],
   [
     "tsx",
+    "tests/test_stage_handoff_prompts.ts"
+  ],
+  [
+    "tsx",
     "tests/test_team_ucd_mapping.ts"
   ],
   [

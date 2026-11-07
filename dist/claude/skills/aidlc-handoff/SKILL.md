@@ -12,7 +12,7 @@ triggers: 暂停并交接, 交接当前工作, 生成交接, handoff, aidlc hand
 loeyae-aidlc orchestrate next --preview
 ```
 
-将返回的 `handoff_prompt` 原样展示为可复制文本。提示词必须包含工作目标、当前阶段/实例、module/unit、产物、review/build/test 与下一步。
+面向用户称呼 **BOSS**，展示返回的 `handoff_prompt`，并以独立 `text` 代码块原样展示 `next_stage_prompt`；旧 runtime 缺少该字段时原样展示已有 `handoff_prompt`，不自行猜测下一阶段。提示词必须包含工作目标、当前阶段/实例、module/unit、产物、review/build/test 与下一步。
 
 需要简短进度概览时读取 `orchestrate state summary`，不另写或同步 `handoff.md`、单元实施摘要。用户明确要求导出时可保存到 `.aidlc/views/`，仅作可重建展示；精确领取与路由仍由 state 和会话契约决定。
 

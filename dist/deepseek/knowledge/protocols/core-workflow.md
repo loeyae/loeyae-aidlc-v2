@@ -1,5 +1,11 @@
 # AI-DLC 核心工作流
 
+## 人类交互
+
+AI-DLC 激活后，每次面向用户的自然语言回复首句称呼用户为 **BOSS**，使用户能识别已加载 AI-DLC；用户显式指定其他称呼时遵从用户。称呼规则不作用于命令、JSON、证据、代码或业务产品文案。
+
+阶段 `completed`/`approved` 报告成功后，展示完成摘要和 `handoff_prompt`，再用独立的 `text` 代码块原样展示 `next_stage_prompt`，供当前或新会话复制继续。提示词由完成后的只读路由预览生成，包含下一任务的范围、输入、产物及质量要求；阻断或没有后续阶段时如实说明，不凭空指定任务。未成功报告、`rejected` 或 `revised` 不宣称阶段已完成。提示词不增加额外确认，也不替代领取、准入或明确审批。
+
 ## 启动
 
 每个新 workflow 从用户明确的工作描述开始：
@@ -89,4 +95,4 @@ loeyae-aidlc orchestrate report \
 
 ## 交接与暂停
 
-每个 directive 和成功 report 返回 `handoff_prompt`。必须原样展示它。用户明确要求暂停时执行 `orchestrate park`；使用 `next --resume` 恢复。
+每个 directive 和成功 report 返回 `handoff_prompt`。必须原样展示它；成功完成或复验报告后，另用独立 `text` 代码块展示 `next_stage_prompt`。展示交接不增加确认轮次。用户明确要求暂停时执行 `orchestrate park`；使用 `next --resume` 恢复。

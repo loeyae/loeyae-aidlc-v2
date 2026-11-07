@@ -21,6 +21,7 @@ try {
  const result=spawnSync(process.execPath,[tsx,cli,'orchestrate','report','--module',ref.module_id,'--stage','ui-mock','--instruction-ack','ui-mock','--result','completed','--user-input','skip'],{cwd:project,encoding:'utf8',env:{...process.env,AIDLC_SESSION_BINDING:JSON.stringify(binding),GIT_AUTHOR_NAME:'Fixture',GIT_AUTHOR_EMAIL:'fixture@example.invalid',GIT_COMMITTER_NAME:'Fixture',GIT_COMMITTER_EMAIL:'fixture@example.invalid'}});
  assert.equal(result.status,0,result.stdout+result.stderr);const response=JSON.parse(result.stdout);
  assert.equal(response.module_checkpoint.status,'created',result.stdout);assert.ok(loadWorkflowState(project,ref)!.completed_stage_instances.includes(state.current_stage_instance));
+ assert.match(response.handoff_prompt,/^BOSS，/);assert.equal(response.handoff_status,'updated');assert.match(response.next_stage_prompt,/module:m11-recommend/);assert.ok(!response.next_stage_prompt.includes('modules/other/'));
  assert.ok(git(['show-ref','--verify','refs/heads/aidlc/modules/m11-recommend']).trim());
  console.log('MARS-243 module report/checkpoint finalization passed');
 } finally {rmSync(project,{recursive:true,force:true});}

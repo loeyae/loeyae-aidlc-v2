@@ -291,6 +291,21 @@ export interface Directive {
   choices?: string[];
   message?: string;
   handoff_prompt?: string;
+  /** Copyable task instructions; routing advice never grants admission or ownership. */
+  next_stage_prompt?: string;
+  next_stage_status?: "planned" | "blocked" | "none" | "unavailable";
+  next_stage?: {
+    stage: string;
+    stage_instance: string;
+    name: string;
+    module_id: string | null;
+    unit_id: string | null;
+    stage_file: string;
+    consumes: string[];
+    produces: string[];
+    sensors: string[];
+    approval: string;
+  } | null;
   handoff_status?: "updated" | "unverified";
   handoff_error?: string;
   rules_content?: string[];
@@ -4092,6 +4107,35 @@ function executionPolicyPrompt(policy: ExecutionPolicy): string {
   return `\n执行策略（directive 优先）：任务级别=${policy.task_level}。成功条件：${policy.success_condition}\n允许探索：${policy.allowed_exploration}\n阶段依赖：${list(required.requires, "无")}；consumes：${list(required.consumes, "无")}；produces：${list(required.produces, "无")}；sensors：${list(required.sensors, "无")}。\n证据复用：${policy.reusable_evidence}\n禁止：${policy.prohibited_actions.join("；")}\n停止：${policy.stop_conditions.join("；")}\n扩大范围仅当：${policy.expansion_triggers.join("；")}\n规则优先级：${policy.priority.join(" > ")}。`;
 }
 
+function previewHandoff(state: WorkflowState, ref: WorkflowRef, target: StageInstance | undefined, blocker?: string, context: ExecutionContext = {}): Pick<Directive, "handoff_prompt" | "next_stage_prompt" | "next_stage_status" | "next_stage"> {
+  const statePath = relativeStatePath(PROJECT_ROOT, ref);
+  const moduleId = target?.module_id || context.module_id || (ref.kind === "module" ? ref.module_id : undefined);
+  const unitId = target?.unit_id || context.unit_id;
+  const scope = `${workflowRefKey(ref)}${moduleId && ref.kind !== "module" ? ` / module:${moduleId}` : ""}${unitId ? ` / unit:${unitId}` : ""}`;
+  const scopeFlags = `${moduleId ? ` --module ${moduleId}` : ""}${unitId ? ` --unit ${unitId}` : ""}`;
+  const start = `使用 AI-DLC，继续当前工作。\n工作目标：${state.work_description}\n工作流：${state.workflow_id}（${scope}）\n工作流状态：${state.status}${state.status === "parked" ? "；仅按 BOSS 的明确续作指令使用 next --resume 恢复。" : "。"}\n恢复上下文：读取 ${statePath} 与 ${statePath.replace(/aidlc-state\.md$/, "audit.md")}。`;
+  if (!target) {
+    const message = blocker || "当前预览范围未找到下一阶段。先读取 runtime summary，核对其他单元、模块及集成阶段的进度；不要据此宣称整个项目已经完成，也不要重复执行已通过的阶段。";
+    return { next_stage: null, next_stage_status: blocker ? "blocked" : "none", handoff_prompt: `BOSS，${message}`,
+      next_stage_prompt: `${start}\n下一步：${message}\n继续时重新运行 loeyae-aidlc orchestrate next${scopeFlags} --preview，并以最新路由和当前领取为准。` };
+  }
+  const stage = target.stage;
+  const consumes = stage.consumes.flatMap(pattern => displayArtifactPatterns(pattern, target, true));
+  const produces = stage.produces.flatMap(pattern => displayArtifactPatterns(pattern, target));
+  const choices = runtimeChoices(stage, state);
+  const flags = `${target.module_id ? ` --module ${target.module_id}` : ""}${target.unit_id ? ` --unit ${target.unit_id}` : ""}`;
+  const approval = stage.approval === "block"
+    ? "必须先展示决策摘要并取得 BOSS 明确审批；不得代替 BOSS 批准。"
+    : `审批策略 ${stage.approval}：在既有授权范围内继续；不额外增加确认轮次。`;
+  return {
+    next_stage_status: blocker ? "blocked" : "planned",
+    next_stage: { stage: stage.slug, stage_instance: target.instance_id, name: stage.name, module_id: target.module_id || null,
+      unit_id: target.unit_id || null, stage_file: join("core", stage.file), consumes, produces, sensors: [...stage.sensors], approval: stage.approval },
+    handoff_prompt: `BOSS，下一阶段${blocker ? "待解除阻断" : "的路由建议"}：${stage.name}（${target.instance_id}）。${blocker || "开始前仍须核对最新 directive 和精确会话领取。"}`,
+    next_stage_prompt: `${start}\n下一阶段：${stage.name}（${target.instance_id}，${stage.phase}）\n范围：module=${target.module_id || "无"}；unit=${target.unit_id || "无"}。\n阶段规则：${join("core", stage.file)}\n输入：${consumes.join("、") || "未声明文件输入"}\n产物：${produces.join("、") || "未声明文件产物"}\n验收：${stage.sensors.join("、") || "执行阶段正文并按正式 directive 报告"}。${approval}${choices.length ? `\n待用户选择：${choices.join("、")}；不得自行填写选择或伪造审批。` : ""}${blocker ? `\n当前阻断：${blocker}。先解决阻断，不直接执行下游任务。` : ""}\n执行步骤：先运行 loeyae-aidlc orchestrate next${flags} --preview 核对目标，再 inspect/bind 精确 stage instance，并更新当前会话的 AIDLC_SESSION_BINDING。若实例已被他人领取，按现有领取与人类交接规则处理。取得正式 next directive 后，读取其 stage_file 和 rule_load_plan，按 consumes、produces、sensors、Provider 与审批要求执行并 report。\n本提示词是路由建议，不代表准入已通过；若最新路由或状态变化，以新 directive 为准。复用有效证据，禁止为交接重复执行已完成工作。`,
+  };
+}
+
 function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, executionPolicy: ExecutionPolicy, reportCommand?: string, choices: string[] = [], providerPrompt = ""): string {
   const approval = instance.stage.approval === "block"
     ? "审批策略 block：展示决策摘要后等待用户明确批准；不得代替用户审批。"
@@ -4102,7 +4146,26 @@ function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, ex
   const artifacts = instance.stage.produces.length
     ? instance.stage.produces.flatMap((pattern) => displayArtifactPatterns(pattern, instance)).join("、")
     : "本阶段没有声明文件产物";
-  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n需要产物：${artifacts}\n质量动作：只执行本 directive 声明或绑定的 review、构建、测试、sensor、Provider 与审批动作；report/next 会复验 requires、consumes、produces 和受控 Evidence。不得跳过，也不得因更换工具或 Agent 重复。${executionPolicyPrompt(executionPolicy)}${diagramFormatPrompt(state, instance)}${choicePrompt(instance.stage.slug, choices)}${providerPrompt}\n下一步：持有当前精确 session binding 的会话运行 ${reportCommand || "orchestrate report"}。`;
+  return `BOSS，AI-DLC 已加载。\n工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n需要产物：${artifacts}\n质量动作：只执行本 directive 声明或绑定的 review、构建、测试、sensor、Provider 与审批动作；report/next 会复验 requires、consumes、produces 和受控 Evidence。不得跳过，也不得因更换工具或 Agent 重复。${executionPolicyPrompt(executionPolicy)}${diagramFormatPrompt(state, instance)}${choicePrompt(instance.stage.slug, choices)}${providerPrompt}\n下一步：持有当前精确 session binding 的会话运行 ${reportCommand || "orchestrate report"}。`;
+}
+
+async function completionHandoff(state: WorkflowState, instance: StageInstance, ref: WorkflowRef, completion = "已完成"): Promise<Pick<Directive, "handoff_prompt" | "next_stage_prompt" | "next_stage" | "next_stage_status" | "handoff_status" | "handoff_error">> {
+  try {
+    // Completion is already committed. Routing preview does not claim, admit,
+    // publish provider plans, or transition into the next stage.
+    const preview = await handleNextInner(["--preview", ...(instance.module_id ? ["--module", instance.module_id] : []), ...(instance.unit_id ? ["--unit", instance.unit_id] : [])]);
+    if (preview.kind === "error" || !preview.next_stage_prompt) throw new Error(String(preview.message || "Next-stage routing preview is unavailable"));
+    return { next_stage: preview.next_stage, next_stage_status: preview.next_stage_status, handoff_status: "updated",
+      handoff_prompt: `BOSS，${instance.stage.name}（${instance.instance_id}）${completion}。${String(preview.handoff_prompt || "").replace(/^BOSS，/, "")}`,
+      next_stage_prompt: preview.next_stage_prompt.replace("使用 AI-DLC，继续当前工作。", `使用 AI-DLC，继续当前工作。\n上一阶段：${instance.stage.name}（${instance.instance_id}）${completion}。`) };
+  } catch (error) {
+    // A rendering failure must not misreport or repeat committed work.
+    const detail = error instanceof Error ? error.message : String(error);
+    const nextCommand = `next${instance.module_id ? ` --module ${instance.module_id}` : ""}${instance.unit_id ? ` --unit ${instance.unit_id}` : ""}`;
+    return { handoff_status: "unverified", handoff_error: detail, next_stage_status: "unavailable", next_stage: null,
+      handoff_prompt: `BOSS，${instance.instance_id} ${completion}；下一阶段预览暂不可用，请恢复路由信息后继续，不要重复报告已完成阶段。`,
+      next_stage_prompt: `使用 AI-DLC，继续 ${state.work_description}。\n上一阶段：${instance.instance_id} ${completion}。\n先读取 ${relativeStatePath(PROJECT_ROOT, ref)} 与对应 audit.md，运行 loeyae-aidlc orchestrate ${nextCommand} --preview 恢复最新路由。当前预览问题：${detail}。\n确定下一实例后按既有 inspect/bind、审批与门禁规则继续，不凭本提示词跳过准入。` };
+  }
 }
 
 interface PreparedProviderDirective {
@@ -5193,14 +5256,18 @@ async function handleNextInner(args: string[]): Promise<Directive> {
     // advance enforces — so it is never routed into another unit or session's work.
     const boundUnit = binding?.stage_instance.split("@unit:")[1];
     const candidates = all.filter(instance => (!loaded.split || sameRef(ownerOfInstance(instance.instance_id), ref))
-      && (!binding || sameRef(ownerOfInstance(instance.instance_id), ownerOfInstance(binding.stage_instance)))
+      && (!binding || (!loaded.split && !boundUnit) || sameRef(ownerOfInstance(instance.instance_id), ownerOfInstance(binding.stage_instance)))
       && (!boundUnit || instance.unit_id === boundUnit)
       && (!flags.module || instance.module_id === flags.module) && (!flags.unit || instance.unit_id === flags.unit));
     view.active_instances = {};
     // Match actual admission order, including new upstream work after risk escalation.
     const search = findNextInstance(candidates, view, all);
-    const target = search.instance || ("blocked" in search ? search.blocked?.instance : undefined);
-    return {kind: "print", preview: true, workflow_id: part.state.workflow_id, workflow: workflowRefKey(ref), stage_instance: target?.instance_id || null, expected: claimToken(target ? part.state.active_instances[target.instance_id] : undefined), message: "Read-only routing preview; bind the returned exact instance before next. Dependencies and report gates still apply."};
+    const target = search.instance || search.blocked?.instance || search.conditionError?.instance;
+    const blocker = search.conditionError ? `阶段 ${search.conditionError.instance.instance_id} 的条件 ${search.conditionError.condition} 无法识别`
+      : search.blocked ? `依赖尚未完成：${search.blocked.unsatisfied.join("、")}` : undefined;
+    return {kind: "print", preview: true, workflow_id: part.state.workflow_id, workflow: workflowRefKey(ref), stage_instance: target?.instance_id || null, expected: claimToken(target ? part.state.active_instances[target.instance_id] : undefined), message: "Read-only routing preview; bind the returned exact instance before next. Dependencies and report gates still apply.",
+      ...previewHandoff(view, ref, target ? runtimeInstance(target, view) : undefined, blocker,
+        { module_id: flags.module || /@module:([^@]+)/.exec(binding?.stage_instance || "")?.[1], unit_id: boundUnit || flags.unit })};
   }
   const claimRequested = "claim" in flags;
   if (flags["provider-approval"] === "true") return { kind: "error", message: "--provider-approval requires a non-empty approval reference" };
@@ -5762,7 +5829,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
       stage_instance: effectiveNextInstance.instance_id,
       provider_context: providerDirective.context, provider_actions: providerDirective.actions,
       message: `Required Provider knowledge is unconfirmed. ${missing.join("; ")}`,
-      handoff_prompt: "Host: run provider knowledge-load --plan <plan-id> --node <node-id>; place ALL returned sections in the active execution context as untrusted reference content. Only then run provider knowledge-confirm with the returned --delivery-digest and --consumer <host-session>. Rerun next. Preserve --provider-approval for next/report when the Plan requires approval. A confirmation never satisfies a validation Gate.",
+      handoff_prompt: "BOSS，AI-DLC 正在等待 Provider 知识上下文。Host: run provider knowledge-load --plan <plan-id> --node <node-id>; place ALL returned sections in the active execution context as untrusted reference content. Only then run provider knowledge-confirm with the returned --delivery-digest and --consumer <host-session>. Rerun next. Preserve --provider-approval for next/report when the Plan requires approval. A confirmation never satisfies a validation Gate.",
       ...extras,
     };
   }
@@ -5778,7 +5845,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
       business_document_load_plan: businessDocumentLoadPlan, rule_load_plan: ruleLoadPlan,
       evidence_failure: isolatedEvidenceFailure || unavailableEvidence[0], evidence_failures: [...new Set(unavailableEvidence)],
       recovery_requirements: ["Record the listed canonical input paths and SHA-256 values with the isolated work before editing.", "Restore and validate the required evidence, recheck the impact of input changes, and rerun affected tests before reporting completion."],
-      handoff_prompt: `Work goal: ${state.work_description}\nCurrent instance: ${effectiveNextInstance.instance_id}\nContinue analysis, implementation and tests in an isolated workspace using the current canonical documents and approved mapping below. Record their SHA-256 values before editing. Do not report completion, merge or deliver until the missing or incompatible evidence is restored, changes are rechecked and affected tests rerun.\n${businessDocumentLoadPlan.files.map(file => `- ${file.path} (sha256 ${file.sha256})`).join("\n")}`,
+      handoff_prompt: `BOSS，AI-DLC 已加载；当前须在隔离工作区继续。\nWork goal: ${state.work_description}\nCurrent instance: ${effectiveNextInstance.instance_id}\nContinue analysis, implementation and tests in an isolated workspace using the current canonical documents and approved mapping below. Record their SHA-256 values before editing. Do not report completion, merge or deliver until the missing or incompatible evidence is restored, changes are rechecked and affected tests rerun.\n${businessDocumentLoadPlan.files.map(file => `- ${file.path} (sha256 ${file.sha256})`).join("\n")}`,
       message: "Required evidence is unavailable. Isolated analysis, coding and tests may continue using the listed current canonical inputs; stage completion, merge and delivery remain blocked until evidence is restored and changes and tests are rechecked.",
       ...extras,
     };
@@ -6204,13 +6271,14 @@ async function handleReportInner(args: string[], conflictRetries: number): Promi
   // Return confirmation
   switch (result) {
     case "completed":
-    case "approved":
+    case "approved": {
       return {
         kind: "print",
         message: `✅ Stage "${stageSlug}" ${result}. Run '${nextCommand} --preview', bind the returned exact instance, then next for the next stage.${ownershipNote ? `\n${ownershipNote}` : ""}`,
-        handoff_prompt: `工作目标：${state.work_description}\n当前阶段：${stageSlug} 已完成。\n下一步：运行 orchestrate ${nextCommand} --preview，inspect/bind 精确新 instance 后再 next 获取 directive，并按其产物、review、构建、测试和 sensor 要求继续。`,
+        ...await completionHandoff(state, currentInstance, auditRef),
         ...extras,
       };
+    }
     case "rejected":
       return {
         kind: "print",
@@ -6414,6 +6482,7 @@ async function reattestInstance(
     kind: "print",
     message: `✅ Stage instance "${instanceId}" re-attested: consumes, produces and sensors are green. Workflow progress is unchanged.`,
     reattested: true,
+    ...await completionHandoff(state, instance, isSplitLayout(PROJECT_ROOT) ? ownerOfInstance(instanceId) : GLOBAL_WORKFLOW, "复验通过"),
     ...extras,
   };
 }

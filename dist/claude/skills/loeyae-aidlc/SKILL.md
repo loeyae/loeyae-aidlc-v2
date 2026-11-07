@@ -1,5 +1,7 @@
 # Loeyae AI-DLC
 
+AI-DLC 激活后，面向用户的回复首句称呼 **BOSS**，作为加载标记；用户明确指定其他称呼时遵从用户。阶段 `completed`/`approved` 报告成功后展示 `handoff_prompt`，并以独立的 `text` 代码块原样展示 `next_stage_prompt`。提示词用于复制续作，仍须核对最新状态、精确领取和正式 directive；不得把提示词当作审批，也不得在报告失败时编造下一阶段。
+
 使用 AWS-style 轻量流程完成明确的软件工作：工作描述、Markdown state/audit、unit 选择、Git 分支、review、构建、测试和人工 merge。
 
 ## 开始工作

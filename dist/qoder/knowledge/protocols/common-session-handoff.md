@@ -4,6 +4,12 @@
 
 `handoff_prompt` 是当前工作流的面向人的交接文本。它来自 `orchestrate next` 与成功的 `orchestrate report`，Agent 必须原样展示。
 
+与用户交互时，回复首句称呼 **BOSS**（用户显式指定其他称呼时优先遵从用户）。完成 `completed`/`approved` 报告后，先展示完成摘要和 `handoff_prompt`，再用独立的 `text` 代码块原样展示 `next_stage_prompt`，不能只说“继续下一阶段”或只给一条 next 命令。`next --preview` 也返回该可复制提示词，便于新会话重新读取最新路由。
+
+展示提示词不表示暂停，不增加确认轮次：已获授权的续作展示后继续，只有真实审批门禁或用户明确要求等待时才等待。旧 runtime 未返回 `next_stage_prompt` 时，仅展示已有 `handoff_prompt`，不得自行猜测下一阶段。
+
+`next_stage` 是建议任务的范围与产物摘要；`next_stage_status=planned` 仅表示路由建议，未验证准入。`blocked` 须先解除列出的阻断，`none` 表示当前预览范围没有下一任务，不等于全项目完成；`unavailable` 表示完成已提交但预览失败，应恢复路由信息，不重复报告已完成阶段。复制提示词后仍先预览、inspect/bind 精确实例并取得正式 directive；提示词不携带旧会话的领取凭据，也不授予接管或审批权限。
+
 ## 内容要求
 
 提示词必须清楚说明：

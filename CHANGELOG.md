@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.26.2 — 2026-11-07
+
+- Restore the visible BOSS address across all Harness entrypoints and human handoffs. Completed, approved and re-attested stages now return a copyable `next_stage_prompt` from a fresh read-only routing preview, with exact stage/module/unit, inputs, artifacts, checks and approval requirements. Blocked, exhausted and unavailable routes remain explicit, including the original unit in recovery commands; prompt generation never claims the next instance, repeats completed work or adds approval rounds. Keep single-layout preview routing consistent with non-unit stage transitions.
+
 ## 4.26.1 — 2026-11-07
 
 - Reject unusable semantic records during refresh reuse: validate producer/checker identity fields, failed status, source digest and commit ancestry, and the template result shape before returning `reused`. Corrupted records regenerate through the controlled producer instead of repeatedly surviving a targeted repair.
