@@ -7,6 +7,8 @@ evidence_path: .aidlc/evidence/<stage-slug>/red-test-evidence.json
 
 # red-test-evidence Sensor
 
+已完成单元的原始 RED 历史漏登可走显式审批恢复：`status: not_recorded`、`evidence_mode: historical_omission`，绑定精确 workflow/module/unit、当前 I13 及规范受控 GREEN 的完整 SHA-256。此分支没有 RED 命令观察，不得伪造 `observed_command` 或 RED 失败计数。登记、续批、失效与审计见 [历史 RED 协议](../knowledge/protocols/historical-red-replay.md#historical-red-omission)。真实 RED 与 historical replay 的原验证不变；无 new 用例继续使用 `not_required`。
+
 ## 历史原件丢失后的受控重放
 
 原始 RED 原件缺失时，可使用 `evidence run --stage tdd --module <module> --unit <unit> --sensor red-test-evidence --refresh --historical-replay`。它只能针对已完成的 TDD 实例，使用该实例的精确领取，或同一 workflow/module/unit 的 code-generation 领取发布。原始 RED 或诊断文件已存在时拒绝覆盖；同范围受控历史补证可以正式刷新，旧文件逐字节归档并以路径及 SHA-256 追溯，新记录仍由真实重跑产生。命令不接受 `--config`、`--output` 或测试过滤，也不会重写全局 TDD 命令。配置与字段见 [历史 RED 重放协议](../knowledge/protocols/historical-red-replay.md)。

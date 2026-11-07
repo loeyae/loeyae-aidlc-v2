@@ -54,13 +54,15 @@ For a unit with no executable business behavior, the controlled evidence may ins
 
 ## Validation Rules (fail-closed)
 
+历史漏登的唯一例外是受控 `historical_omission`：逐单元审批原件及其 GREEN 必须通过公共门禁，质量证据写 `red_seen: false`、`red_status: not_recorded`、`red_omission: [{path, sha256, workflow_id, module_id, unit_id, status, reason_code, ucd_ids, green_evidence, approval_ref, approved_by, approved_at, limitation}]`。`status: passed` 表示在明确局限下检查通过，不证明原始 RED 存在。下游消费和复用会重新读取原件；删除、撤销或输入变化必须阻断。模块/项目混合真实 RED 和漏登时，`red_seen` 为 false，摘要只列漏登单元，所有其他单元仍需有效 RED。详见 [历史 RED 协议](../knowledge/protocols/historical-red-replay.md#historical-red-omission)。
+
 | Field | Rule |
 |-------|------|
 | `status` | `"passed"` for executable behavior, or `"not_applicable"` only with I13-derived reason and alternative validation |
 | `green_seen` | Must be `true` for executable behavior |
 | `tests_total` | >= 1 for executable behavior |
 | `tests_failed` | Must be 0 for executable behavior |
-| `red_seen` | Must be `true` when I13 declares a `tdd_mode: new` UC-D (pre-4.6 I13 without `ucd_modes`: every UC-D is new; no readable required I13: always); no free-form exemption replaces I13 |
+| `red_seen` | Must be `true` when I13 declares a `tdd_mode: new` UC-D, except for the explicitly approved, revalidated historical omission above (pre-4.6 I13 without `ucd_modes`: every UC-D is new; no readable required I13: always); no free-form exemption replaces I13 |
 | `baseline_seen` | Must be `true` when I13 declares a `tdd_mode: characterization` UC-D |
 | `traceability_complete` | Must be `true` |
 | `uc_mapping` | Non-empty for executable behavior; empty only for `not_applicable` |

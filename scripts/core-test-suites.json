@@ -69,6 +69,10 @@
     "tests/test_historical_red_replay.ts"
   ],
   [
+    "tsx",
+    "tests/test_historical_red_omission.ts"
+  ],
+  [
     "node",
     "tests/test_runtime_dependencies.mjs"
   ],

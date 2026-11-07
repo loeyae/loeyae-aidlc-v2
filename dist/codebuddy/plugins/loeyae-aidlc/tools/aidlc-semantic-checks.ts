@@ -13,6 +13,7 @@ import { runSync } from "./aidlc-spawn";
 import { deliveryConsistencyPayloadErrors, reviewAxisErrors, reviewIssueErrors } from "./aidlc-evidence-policy";
 import { reviewedFiles } from "./aidlc-review-files";
 import { checkHistoricalTddSensors, checkPhaseSensors, checkSensors, getExecutableStages, globalReviewPayload, globalReviewRequired, loadGraph, makeInstance, reviewCoverageErrors } from "./aidlc-orchestrate";
+import { omissionRegistrationCommand, redOmissionErrors, redOmissionRecord, redOmissionSummary } from "./aidlc-red-omission";
 import { projectDeliverySummary } from "./aidlc-delivery-summary";
 import { semanticCheckerEnv, semanticCommandArgv, semanticValidationEnvironment } from "./aidlc-evidence";
 import { deploymentValidationPayload } from "./aidlc-evidence";
@@ -1459,7 +1460,7 @@ async function testQuality(): Promise<Record<string, unknown>> {
   const cases = [...new Set(publishedCases.length ? publishedCases : ids(joined(caseFiles), /\bUC-D-\d+\b/g))].filter(inScope);
   if (cases.length === 0) fail("no UC-D identifiers found in test case files");
   if (greenRecords.length === 0) fail("GREEN evidence is missing for test-quality");
-  if (redRecords.length === 0) fail("RED evidence is missing for test-quality");
+  if (redRecords.length === 0) fail(`RED evidence is missing and no approved historical-omission record exists. Register an explicit human approval with: ${omissionRegistrationCommand(ACTIVE_MODULE, ACTIVE_UNIT)}`);
   const greenRequired = greenRecords.filter((record) => record.status === "passed");
   if (greenRequired.length === 0 || greenRequired.some((record) => record.phase !== "GREEN" || record.tests_failed !== 0)) fail("GREEN evidence is not passing");
   // 4.6.0 S3b: RED is demanded by the tdd_mode new UC-Ds and BASELINE by the
@@ -1476,6 +1477,15 @@ async function testQuality(): Promise<Record<string, unknown>> {
   const ownerLabel = (record: Record<string, unknown>, modes: { scoped?: boolean } | undefined) => `module ${String(record.module_id)}${modes?.scoped ? ` unit ${String(record.unit_id)}` : ""}`;
   for (const record of redRecords) {
     const modes = modesOf(record);
+    if (record.status === "not_recorded" || record.evidence_mode === "historical_omission") {
+      const moduleId = String(record.module_id ?? ""), unitId = String(record.unit_id ?? "");
+      const state = loadWorkflowView(ROOT, moduleId);
+      const i13 = requiredI13.get(moduleId);
+      if (!controlledPhases || !state || !i13) fail("RED_OMISSION_INVALID: controlled envelope, workflow and current required I13 are mandatory");
+      const errors = redOmissionErrors(ROOT, record, { workflow_id: state.workflow_id, module_id: moduleId, unit_id: unitId }, i13);
+      if (errors.length) fail(errors.join("; "));
+      continue;
+    }
     if (modes && modes.new.length === 0) {
       if (record.status !== "not_required" || record.phase !== "RED") fail(`RED evidence of ${ownerLabel(record, modes)} must be not_required: ${modes.scoped ? "the unit owns" : "its I13 declares"} no tdd_mode new UC-D`);
     } else if (record.status !== "failed" || record.phase !== "RED" || record.failure_class !== "behavior") {
@@ -1560,7 +1570,8 @@ async function testQuality(): Promise<Record<string, unknown>> {
     return { use_case: useCase, test_methods: matches.map(relativePath) };
   });
   const testsTotal = greenRequired.reduce((total, record) => total + numberValue(record.tests_total, "green-test-evidence.tests_total"), 0);
-  return { status: "passed", red_seen: redSeen, baseline_seen: baselineSeen, green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping, ...(deferredEntries.length > 0 ? { mapping_debt: deferredEntries } : {}), ...(coverage.length > 0 ? { ucd_coverage: coverage } : {}) };
+  const omissions = redRecords.filter(record => record.status === "not_recorded").map(record => redOmissionSummary(ROOT, record)).sort((a, b) => String(a.path).localeCompare(String(b.path)));
+  return { status: "passed", red_seen: redSeen && !omissions.length, ...(omissions.length ? { red_status: "not_recorded", red_omission: omissions } : {}), baseline_seen: baselineSeen, green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping, ...(deferredEntries.length > 0 ? { mapping_debt: deferredEntries } : {}), ...(coverage.length > 0 ? { ucd_coverage: coverage } : {}) };
 }
 
 function testQualitySourceFiles(): string[] {
@@ -1606,6 +1617,17 @@ function phaseEvidenceCheck(sensor: "red-test-evidence" | "green-test-evidence" 
   const records = evidenceRecords(stage, sensor).filter((record) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT)));
   if (records.length === 0) fail(`${sensor} evidence is missing`);
   const record = records[records.length - 1];
+  if (record.status === "not_recorded" || record.evidence_mode === "historical_omission") {
+    const moduleId = String(record.module_id ?? ACTIVE_MODULE ?? ""), unitId = String(record.unit_id ?? ACTIVE_UNIT ?? "");
+    const state = loadWorkflowView(ROOT, moduleId);
+    if (phase !== "RED" || !state) fail("RED_OMISSION_INVALID: requires RED and a current workflow");
+    const instance = makeInstance(loadGraph().stages.find(stage => stage.slug === "tdd")!, "unit", { module_id: moduleId, unit_id: unitId });
+    const errors = checkPhaseSensors(instance, state, { onlySensors: [sensor], tolerateRevisionDrift: true, requireHistoricalPhaseInputs: true });
+    if (errors.length) fail(errors.map(error => error.message).join("; "));
+    const canonical = redOmissionRecord(ROOT, moduleId, unitId);
+    if (!canonical) fail("RED_OMISSION_INVALID: canonical historical-omission record is missing");
+    return canonical;
+  }
   if (record.status === "not_applicable") {
     stringValue(record.not_applicable_reason, `${sensor}.not_applicable_reason`);
     stringValue(record.alternative_validation, `${sensor}.alternative_validation`);

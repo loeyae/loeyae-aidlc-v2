@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 4.26.0 — 2026-11-07
 
+- Add explicit human-approved historical RED omission recovery, bound to the exact workflow/module/unit, current I13 inputs and controlled GREEN bytes. Preserve `RED.status: not_recorded`, revalidate approvals at downstream gates, archive renewed approvals, and reuse approved GREEN during stage-wide recovery. Original RED, Vitest historical replay, BASELINE, GREEN and `not_required` validation retain their existing meanings.
 - Add DeepSeek Harness native Skill distribution, PATH detection via `dsh`, user/project installation with `DSH_HOME` support, managed upgrades and uninstall, and installation guidance. Session binding and stage gates remain in Core; this adapter does not register an automatic Stop Hook.
 
 ## 4.25.1 — 2026-11-04

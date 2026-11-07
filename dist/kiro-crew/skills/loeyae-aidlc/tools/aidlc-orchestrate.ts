@@ -50,6 +50,7 @@ import { fileURLToPath } from "url";
 import { isDeepStrictEqual } from "node:util";
 import { buildTestEvidenceErrors, SEMANTIC_SENSORS, allowlistedAlternativeCommand, allowlistedPhaseCommand, argvDigest, i13CodeRefBlobs, i13UcdIdsByMode, phaseNotRequiredDigest, phaseObservationDigest, ucdExemptionDigest, unitUcdExemption, type Phase } from "./aidlc-evidence";
 import { replayEvidenceErrors, REPLAY_LIMITATION } from "./aidlc-historical-red";
+import { redOmissionErrors, redOmissionRecord, redOmissionSummary } from "./aidlc-red-omission";
 import { QUALITY_SENSORS, qualityAdoption, qualityEvidenceErrors, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
 import { controlledQualityErrors, developmentAcceptanceErrors } from "./aidlc-quality-delivery";
 import { CANONICAL_SOURCE_PATTERN, SOURCE_ROOTS_CONFIG, declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
@@ -1721,6 +1722,10 @@ function validateEvidence(
   if (loaded.failure) return loaded.failure;
   const evidence = loaded.value as Evidence;
   const errors = required(evidence);
+  // Omission provenance is backed by the currently validated GREEN, never by
+  // pretending that an original RED observation or RED command binding exists.
+  const omission = sensor === "red-test-evidence" && evidence.status === "not_recorded" && evidence.evidence_mode === "historical_omission";
+  if (omission) options = { ...options, tolerateRevisionDrift: true };
   errors.push(...evidenceFreshnessBindingErrors(stage.slug, evidence));
   const sourceRevision = asRecord(evidence.source_revision);
   const nestedCheck = sourceRevision ? nestedRevisionContext(sourceRevision, errors) : undefined;
@@ -1796,7 +1801,7 @@ function validateEvidence(
       // Nested files inside the scope are covered by scope_digest; the repository commits stay in history.
       if (nestedCheck) errors.push(...nestedRevisionErrors(nestedCheck.recorded, readSourceRevision(PROJECT_ROOT, undefined, nestedKeys).repos || {}, { exact: false, ancestry: options.tolerateRevisionDrift === true }));
     }
-    if (options.requireHistoricalPhaseInputs && evidence.evidence_mode !== "historical_replay") {
+    if (options.requireHistoricalPhaseInputs && evidence.evidence_mode !== "historical_replay" && !omission) {
       const scope = recordedScope === undefined || recordedScope === "worktree" ? undefined
         : recordedScope === evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id).label ? evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id) : legacyEvidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
       const current = readSourceRevision(PROJECT_ROOT, scope, nestedKeys);
@@ -2409,7 +2414,7 @@ function phaseEvidenceErrors(
   }
   // RED covers the tdd_mode new UC-Ds and BASELINE the characterization UC-Ds of I13
   if (evidence.evidence_mode === "historical_replay" && (phase !== "RED" || evidence.status !== "failed")) errors.push("historical_replay must be a failed required RED observation");
-  if (evidence.evidence_mode !== undefined && !["original", "historical_replay"].includes(String(evidence.evidence_mode))) errors.push("unrecognized evidence mode; diagnostics are not controlled phase evidence");
+  if (evidence.evidence_mode !== undefined && !["original", "historical_replay", "historical_omission"].includes(String(evidence.evidence_mode))) errors.push("unrecognized evidence mode; diagnostics are not controlled phase evidence");
   if (evidence.evidence_mode !== "historical_replay" && evidence.historical_replay !== undefined) errors.push("historical replay cannot be disguised as original evidence");
   // (4.6.0 S3a), GREEN every UC-D (S3b); I13 without ucd_modes predates 4.6 and means
   // every UC-D is new.
@@ -2424,6 +2429,15 @@ function phaseEvidenceErrors(
   const modes = scope ? { new: scope.new.filter((id) => !deferredIds.includes(id)), characterization: scope.characterization.filter((id) => !deferredIds.includes(id)) } : null;
   const scoped = scope?.scoped === true;
   const unitLabel = `unit ${instance.unit_id}`;
+  if (evidence.status === "not_recorded" || evidence.evidence_mode === "historical_omission") {
+    if (phase !== "RED" || !instance.module_id || !instance.unit_id || !i13Value) return [...errors, "RED_OMISSION_INVALID: requires exact RED workflow/module/unit and current I13"];
+    try { redOmissionRecord(PROJECT_ROOT, instance.module_id, instance.unit_id); }
+    catch (error) { errors.push(`RED_OMISSION_INVALID: ${error instanceof Error ? error.message : String(error)}`); }
+    errors.push(...redOmissionErrors(PROJECT_ROOT, evidence, { workflow_id: state.workflow_id, module_id: instance.module_id, unit_id: instance.unit_id }, i13Value));
+    const green = makeInstance(loadGraph().stages.find(stage => stage.slug === "code-generation")!, "unit", { module_id: instance.module_id, unit_id: instance.unit_id });
+    errors.push(...checkPhaseSensors(green, state, { onlySensors: ["green-test-evidence"], allowDownstreamReportDrift: true, alternativeValidationEnvironment: alternativeEnvironment }).map(failure => `RED_OMISSION_INVALID: GREEN gate: ${failure.message}`));
+    return errors;
+  }
   const emptySubset = scoped && scope!.all.length === 0;
   const allowedStatuses = phase === "RED" ? ["failed", "not_applicable", "not_required"] : phase === "GREEN" ? (scoped ? ["passed", "not_applicable", "not_required"] : ["passed", "not_applicable"]) : ["passed", "not_required"];
   if (!allowedStatuses.includes(String(evidence.status))) errors.push(`status must be ${allowedStatuses.join(" or ")}`);
@@ -2589,6 +2603,37 @@ export async function checkHistoricalTddSensors(instance: StageInstance, state: 
   return options.onlySensors ? phases : [...phases, ...await checkSensors(instance, state, {
     onlySensors: instance.stage.sensors.filter(sensor => !["red-test-evidence", "baseline-test-evidence"].includes(sensor)),
   })];
+}
+
+/** Re-read exceptions at every consumer; a cached quality verdict cannot retain a revoked approval. */
+export function redOmissionQualityErrors(evidence: Evidence, instance: StageInstance, state: WorkflowState): { errors: string[]; hasOmissions: boolean } {
+  const errors: string[] = [], summaries: Evidence[] = [];
+  const units = expandStageInstances(loadGraph(), state).filter(candidate => candidate.stage.slug === "code-generation"
+    && (!instance.module_id || candidate.module_id === instance.module_id) && (!instance.unit_id || candidate.unit_id === instance.unit_id));
+  for (const unit of units) {
+    if (!unit.module_id || !unit.unit_id) continue;
+    try {
+      const record = redOmissionRecord(PROJECT_ROOT, unit.module_id, unit.unit_id);
+      if (!record) continue;
+      const tdd = makeInstance(loadGraph().stages.find(stage => stage.slug === "tdd")!, "unit", { module_id: unit.module_id, unit_id: unit.unit_id });
+      errors.push(...checkPhaseSensors(tdd, state, { onlySensors: ["red-test-evidence"], tolerateRevisionDrift: true, requireHistoricalPhaseInputs: true }).map(failure => failure.message));
+      summaries.push(redOmissionSummary(PROJECT_ROOT, record));
+    } catch (error) { errors.push(`RED_OMISSION_INVALID: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+  if (summaries.length) for (const unit of units) {
+    if (!unit.module_id || !unit.unit_id || summaries.some(summary => summary.module_id === unit.module_id && summary.unit_id === unit.unit_id)) continue;
+    // An exception for one owner never waives another owner's required RED.
+    if (!existsSync(evidencePath(unit.stage, "green-test-evidence", unit))) continue;
+    const tdd = makeInstance(loadGraph().stages.find(stage => stage.slug === "tdd")!, "unit", { module_id: unit.module_id, unit_id: unit.unit_id });
+    errors.push(...checkPhaseSensors(tdd, state, { onlySensors: ["red-test-evidence"], tolerateRevisionDrift: true, requireHistoricalPhaseInputs: true }).map(failure => failure.message));
+  }
+  const sort = (items: Evidence[]) => [...items].sort((a, b) => String(a.path).localeCompare(String(b.path)));
+  if (summaries.length || evidence.red_status === "not_recorded" || evidence.red_omission !== undefined) {
+    if (!summaries.length) errors.push("RED_OMISSION_INVALID: approved historical-omission record is missing or no longer applicable");
+    if (evidence.red_status !== "not_recorded" || evidence.red_seen !== false) errors.push("historical omission requires red_status not_recorded and red_seen false");
+    if (!Array.isArray(evidence.red_omission) || evidence.red_omission.some(item => !asRecord(item)) || !isDeepStrictEqual(sort(evidence.red_omission || []), sort(summaries))) errors.push("RED_OMISSION_INVALID: red_omission summary no longer matches current per-unit approved records");
+  }
+  return { errors, hasOmissions: summaries.length > 0 };
 }
 
 export async function checkSensors(instance: StageInstance, state: WorkflowState, options: SensorCheckOptions = {}): Promise<SensorResult[]> {
@@ -2994,7 +3039,9 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           if (asNumber(evidence.tests_failed) !== 0) errors.push("tests_failed must be 0");
           const testsTotal = asPositiveInt(evidence.tests_total);
           if (testsTotal === null || testsTotal < 1) errors.push("tests_total must be >= 1");
-          if (evidence.red_seen !== true && (needs.red || !needs.known)) errors.push("red_seen must be true (controlled RED evidence required)");
+          const omission = redOmissionQualityErrors(evidence, instance, state);
+          errors.push(...omission.errors);
+          if (evidence.red_seen !== true && (needs.red || !needs.known) && !omission.hasOmissions) errors.push("red_seen must be true (controlled RED evidence required)");
           if (evidence.baseline_seen !== true && needs.baseline) errors.push("baseline_seen must be true (controlled BASELINE evidence required for the tdd_mode characterization UC-Ds)");
           if (evidence.traceability_complete !== true) errors.push("traceability_complete must be true");
           const ucMapping = evidence.uc_mapping;

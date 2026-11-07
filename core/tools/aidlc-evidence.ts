@@ -5,6 +5,8 @@ import { QUALITY_SENSORS, qualityAdoption, recordQualityCheckpoint, type Quality
 import { SLICE_SENSOR, sliceEvidenceErrors, type SliceContext } from "./aidlc-document-slices";
 import { markProgress, startProgressHeartbeat } from "./aidlc-progress";
 import { runHistoricalReplay, replayEvidenceErrors, historicalReplayPrior } from "./aidlc-historical-red";
+import { omissionFile, omissionHash, phaseRecordPath, redOmissionDigest, redOmissionErrors, redOmissionPayload, redOmissionRecord } from "./aidlc-red-omission";
+import { checkPhaseSensors, loadGraph, makeInstance, redOmissionQualityErrors } from "./aidlc-orchestrate";
 import { createRequire } from "module";
 import {
   closeSync,
@@ -717,7 +719,9 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
     // MARS-271 lint mode writes nothing anywhere, not even diagnostics.
     const report = behaviour.blockedReports === false ? null : blockedReport(stdout);
     const reportNote = report ? `; blocked report: ${writeBlockedReport(sensor, state, report)}` : "";
-    fail(`built-in semantic checker ${sensor} failed: ${detail}; ${tail(stderr) || tail(stdout) || "no output"}${reportNote}`);
+    const omissionDiagnostic = sensor === "test-quality" && /RED_OMISSION_INVALID|RED evidence is missing and no approved historical-omission record exists/.test(stderr || stdout)
+      ? redact(stderr || stdout).slice(0, 4096).trim() : undefined;
+    fail(`built-in semantic checker ${sensor} failed: ${detail}; ${omissionDiagnostic || tail(stderr) || tail(stdout) || "no output"}${reportNote}`);
   }
   let parsed: unknown;
   try {
@@ -1136,7 +1140,60 @@ function mappingDebtFor(i13: Record<string, unknown>, scope: ReturnType<typeof u
   return entries.length > 0 ? { mapping_debt: entries } : {};
 }
 
-function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase: Phase): void {
+function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase: Phase): "reused" | void {
+  if (options.historicalOmission) {
+    if (phase !== "RED" || !state.current_module || !state.current_unit) fail("historical omission requires exact RED module/unit");
+    const identity = { workflow_id: state.workflow_id, module_id: state.current_module, unit_id: state.current_unit };
+    const i13 = phaseRecord(state);
+    const greenInstance = makeInstance(loadGraph().stages.find(stage => stage.slug === "code-generation")!, "unit", { module_id: state.current_module, unit_id: state.current_unit });
+    const validate = (record: Record<string, unknown>): void => {
+      const errors = redOmissionErrors(PROJECT_ROOT, record, identity, phaseRecord(state));
+      errors.push(...checkPhaseSensors(greenInstance, state, { onlySensors: [PHASE_SENSORS.GREEN], allowDownstreamReportDrift: true }).map(failure => failure.message));
+      if (errors.length) fail(errors.join("; "));
+    };
+    const payload = redOmissionPayload(PROJECT_ROOT, identity, i13, options.historicalOmission);
+    validate(payload);
+    const path = phaseRecordPath("tdd", identity.module_id, identity.unit_id, PHASE_SENSORS.RED);
+    const output = join(PROJECT_ROOT, path);
+    const previous = existsSync(output) ? omissionFile(PROJECT_ROOT, path) : undefined;
+    const prior = previous ? JSON.parse(previous.toString("utf8")) : null;
+    if (previous && (!prior || prior.status !== "not_recorded" || prior.evidence_mode !== "historical_omission" || prior.workflow_id !== identity.workflow_id || prior.module_id !== identity.module_id || prior.unit_id !== identity.unit_id)) fail("historical omission cannot replace original RED, historical replay or another workflow/unit record");
+    if (previous && !Buffer.from(previous.toString("utf8")).equals(previous)) fail("historical omission prior approval must be valid UTF-8 for verbatim preservation");
+    if (prior && (prior.evidence_version !== "1" || prior.producer?.name !== "loeyae-aidlc-evidence" || prior.producer?.mode !== "controlled")) fail("historical omission can renew only a controlled prior approval");
+    if (prior && !/^[a-f0-9-]{36}$/.test(String(prior.producer?.execution_id))) fail("historical omission prior controlled execution identity is invalid");
+    const history = prior ? `.aidlc/evidence/historical-red-omission-history/${identity.workflow_id}/${identity.module_id}/${identity.unit_id}/${prior.producer.execution_id}.json` : undefined;
+    const record = { ...payload, ...executionContext(state), evidence_version: "1", timestamp: new Date().toISOString(),
+      producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id: randomUUID() },
+      source_revision: evidenceSourceRevision(PROJECT_ROOT, state.current_stage_instance),
+      checker: { id: "builtin:red-test-evidence", sensor: PHASE_SENSORS.RED, argv_digest: redOmissionDigest(payload), exit_code: 0, status: "passed" },
+      publication_claim: publicationContext?.binding,
+      ...(history ? { supersedes: { path: history, sha256: omissionHash(previous!) } } : {}) };
+    const serialized = `${JSON.stringify(record, null, 2)}\n`;
+    if (Buffer.byteLength(serialized) > 512 * 1024) fail("historical omission canonical evidence exceeds the unchanged 512 KiB gate limit");
+    publishAuthorized(() => {
+      if (previous ? !existsSync(output) || omissionHash(omissionFile(PROJECT_ROOT, path)) !== omissionHash(previous) : existsSync(output)) fail("historical omission: prior RED evidence changed during publication");
+      if (history) {
+        const archived = join(PROJECT_ROOT, history);
+        if (existsSync(archived) && omissionHash(omissionFile(PROJECT_ROOT, history)) !== omissionHash(previous!)) fail("historical omission archive conflicts with prior evidence");
+        writeAtomicLocked(archived, previous!.toString("utf8"));
+      }
+      validate(record);
+      writeAtomicLocked(output, serialized);
+    });
+    console.log(JSON.stringify({ status: "passed", red_status: "not_recorded", output, limitation: payload.limitation }, null, 2));
+    return;
+  }
+  // Stage-wide recovery must preserve the exact GREEN bytes the human approved.
+  // Explicit --sensor green-test-evidence still runs the real command and invalidates that approval.
+  if (phase === "GREEN" && options.preserveApprovedGreen && state.current_module && state.current_unit) {
+    const omission = redOmissionRecord(PROJECT_ROOT, state.current_module, state.current_unit);
+    if (omission) {
+      const tdd = makeInstance(loadGraph().stages.find(stage => stage.slug === "tdd")!, "unit", { module_id: state.current_module, unit_id: state.current_unit });
+      const errors = checkPhaseSensors(tdd, state, { onlySensors: [PHASE_SENSORS.RED], tolerateRevisionDrift: true, requireHistoricalPhaseInputs: true });
+      if (errors.length) fail(errors.map(error => error.message).join("; "));
+      return "reused";
+    }
+  }
   if (options.historicalReplay) {
     if (phase !== "RED" || options.testFilter || options.explicitConfig || !state.current_module || !state.current_unit) fail("historical_replay requires exact RED module/unit, no --config or test filter");
     const i13 = phaseRecord(state);
@@ -1318,8 +1375,8 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   if (!sensor || sensor === "build-test-evidence") fail("semantic producer requires --sensor with a semantic sensor name");
   if (options.commandIds.length > 0) fail("--command-id is only supported for build/test evidence");
   if (sensor === "red-test-evidence" || sensor === "green-test-evidence" || sensor === "baseline-test-evidence") {
-    runPhaseProducer(options, state, sensor === "red-test-evidence" ? "RED" : sensor === "green-test-evidence" ? "GREEN" : "BASELINE");
-    return;
+    const action = runPhaseProducer(options, state, sensor === "red-test-evidence" ? "RED" : sensor === "green-test-evidence" ? "GREEN" : "BASELINE");
+    return { action: action || "regenerated" };
   }
   const output = options.output || evidenceOutput(options.stage, sensor, undefined, state);
   const started = Date.now();
@@ -1333,6 +1390,7 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   const inputs = stageInputs(options.stage, state);
   const prior = priorEvidenceRecord(output);
   if (options.refresh && inputs && prior && !["global-review-evidence", "deployment-validation"].includes(sensor) && configuredFreshnessErrors(config, prior).length === 0 && reusableSemanticEvidence(prior, inputs, state, sensor)
+    && (sensor !== "test-quality" || !redOmissionQualityErrors(prior, makeInstance(loadGraph().stages.find(stage => stage.slug === options.stage)!, state.current_unit ? "unit" : state.current_module ? "module" : "project", { module_id: state.current_module, unit_id: state.current_unit }), state).errors.length)
     && (sensor !== SLICE_SENSOR || (!sliceEvidenceErrors(producerSliceContext(state), prior).length && !sliceCandidateError(state, prior)))) {
     const summary = { action: "reused" as const, inputs_digest: inputs.digest };
     if (!quiet) console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}`, ...summary }, null, 2));
@@ -1401,6 +1459,8 @@ function semanticStageInputs(record: Record<string, unknown>): Record<string, un
 
 interface ProducerOptions {
   historicalReplay?: boolean;
+  historicalOmission?: { approval_ref: string; approved_by: string; approved_at: string };
+  preserveApprovedGreen?: boolean;
   stage: string;
   instance?: string;
   module?: string;
@@ -1419,7 +1479,7 @@ interface ProducerOptions {
   testFilter?: string;
 }
 
-const USAGE = "usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance> | --module <module-id> [--unit <unit-id>]] [--refresh] [--sensor <sensor>] [--all-sensors] [--config <path>] [--output <path>] [--command-id <id> ...] [--lint] [--test-filter <expr>] [--historical-replay]";
+const USAGE = "usage: aidlc-evidence.ts run --stage <stage> [--instance <stage-instance> | --module <module-id> [--unit <unit-id>]] [--refresh] [--sensor <sensor>] [--all-sensors] [--config <path>] [--output <path>] [--command-id <id> ...] [--lint] [--test-filter <expr>] [--historical-replay | --historical-omission --approval-ref <human-ref> --approved-by <name> --approved-at <ISO-8601>]";
 
 function parseArgs(args: string[]): ProducerOptions {
   if (args[0] !== "run") fail(USAGE);
@@ -1436,9 +1496,11 @@ function parseArgs(args: string[]): ProducerOptions {
   let lint = false;
   let testFilter: string | undefined;
   let historicalReplay = false;
+  let historicalOmission = false;
+  const approval: Record<string, string> = {};
   for (let i = 1; i < args.length; i++) {
     const arg = args[i];
-    if (["--stage", "--instance", "--module", "--unit", "--sensor", "--config", "--output", "--command-id", "--test-filter"].includes(arg)) {
+    if (["--stage", "--instance", "--module", "--unit", "--sensor", "--config", "--output", "--command-id", "--test-filter", "--approval-ref", "--approved-by", "--approved-at"].includes(arg)) {
       const value = args[++i];
       if (!value) fail(`${arg} requires a value`);
       if (arg === "--stage") stage = value;
@@ -1450,8 +1512,13 @@ function parseArgs(args: string[]): ProducerOptions {
       if (arg === "--output") output = value;
       if (arg === "--command-id") commandIds.push(value);
       if (arg === "--test-filter") testFilter = value;
+      if (arg === "--approval-ref") approval.approval_ref = value;
+      if (arg === "--approved-by") approval.approved_by = value;
+      if (arg === "--approved-at") approval.approved_at = value;
     } else if (arg === "--historical-replay") {
       historicalReplay = true;
+    } else if (arg === "--historical-omission") {
+      historicalOmission = true;
     } else if (arg === "--all-sensors") {
       allSensors = true;
     } else if (arg === "--lint") {
@@ -1466,6 +1533,9 @@ function parseArgs(args: string[]): ProducerOptions {
     }
   }
   if (!stage) fail("--stage is required");
+  if (historicalOmission && (stage !== "tdd" || sensor !== "red-test-evidence" || !refresh || allSensors || lint || output || testFilter || config || commandIds.length || historicalReplay)) fail("--historical-omission requires --stage tdd --sensor red-test-evidence --refresh; no replay/output/config/filter/command override");
+  if (historicalOmission && ["approval_ref", "approved_by", "approved_at"].some(key => !approval[key]?.trim())) fail("historical omission requires --approval-ref, --approved-by and --approved-at from an explicit human approval");
+  if (!historicalOmission && Object.keys(approval).length) fail("approval fields require --historical-omission");
   if (historicalReplay && (stage !== "tdd" || sensor !== "red-test-evidence" || !refresh || allSensors || lint || output || testFilter || config)) fail("--historical-replay requires --stage tdd --sensor red-test-evidence --refresh; no output/config/filter override");
   if (instance && moduleId) fail("--instance and --module are mutually exclusive");
   if (unitId && !moduleId) fail("--unit requires --module");
@@ -1481,6 +1551,7 @@ function parseArgs(args: string[]): ProducerOptions {
   return {
     stage,
     historicalReplay,
+    ...(historicalOmission ? { historicalOmission: approval as ProducerOptions["historicalOmission"] } : {}),
     ...(instance ? { instance } : {}),
     ...(moduleId ? { module: moduleId } : {}),
     ...(unitId ? { unit: unitId } : {}),
@@ -1696,7 +1767,7 @@ function produceAllSemantic(options: ProducerOptions, state: ProducerState, conf
   for (const sensor of sensors) {
     const output = evidenceOutput(options.stage, sensor, undefined, state);
     const summary = withProducerLock(output, () =>
-      runSemanticProducer({ ...options, sensor, output }, config, state, true));
+      runSemanticProducer({ ...options, sensor, output, preserveApprovedGreen: true }, config, state, true));
     outputs.push(output);
     actions.push({ sensor, ...(summary || { action: "regenerated" as const }) });
   }
@@ -1788,7 +1859,7 @@ function runProducerInner(args: string[]): void {
     && rawState
     && rawState.current_stage_instance !== state.current_stage_instance
     && rawState.completed_stage_instances.includes(state.current_stage_instance)
-    && (!state.current_stage_instance.includes("@unit:") || options.historicalReplay && binding.stage_instance === `code-generation@module:${state.current_module}@unit:${state.current_unit}`)
+    && (!state.current_stage_instance.includes("@unit:") || (options.historicalReplay || options.historicalOmission) && binding.stage_instance === `code-generation@module:${state.current_module}@unit:${state.current_unit}`)
     && binding.workflow_id === state.workflow_id
   );
   if (downstreamRefresh) {

@@ -7,6 +7,8 @@ evidence_path: .aidlc/evidence/<stage-slug>/green-test-evidence.json
 
 # green-test-evidence Sensor
 
+历史 RED 漏登恢复不改变 GREEN 的测试与来源校验。登记审批前须有本单元有效的受控 GREEN；审批绑定其完整文件 SHA-256。阶段级 `evidence run --stage code-generation` 会在验证合法漏登记录后复用该 GREEN，不重新生成时间戳或 execution ID。显式 `--sensor green-test-evidence` 仍执行原受控测试命令，新字节使旧审批失效，须重新审阅并登记。完整恢复顺序见 [历史 RED 协议](../knowledge/protocols/historical-red-replay.md#historical-red-omission)。
+
 适用于 `code-generation` GREEN 门禁。可执行业务行为必须由受控命令产生：
 
 ```json
