@@ -13,10 +13,11 @@ npm install -g --ignore-scripts https://github.com/loeyae/loeyae-aidlc-v2/archiv
 loeyae-aidlc install
 ```
 
-使用 `--ignore-scripts` 避免依赖的安装脚本引发平台构建问题。支持 Kiro Crew、Kiro IDE、Kiro CLI、Claude Code、OpenCode、Codex、CodeBuddy、Qoder 和 ZCode；可以指定宿主或安装到所有受支持的宿主：
+使用 `--ignore-scripts` 避免依赖的安装脚本引发平台构建问题。支持 Kiro Crew、Kiro IDE、Kiro CLI、Claude Code、OpenCode、Codex、CodeBuddy、Qoder、ZCode 和 DeepSeek Harness；可以指定宿主或安装到所有受支持的宿主：
 
 ```bash
 loeyae-aidlc install --harness codex
+loeyae-aidlc install --harness deepseek
 loeyae-aidlc install --all
 ```
 

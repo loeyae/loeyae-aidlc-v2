@@ -1,0 +1,4965 @@
+#!/usr/bin/env node
+import { verifyDesignResourceConsumption } from "./aidlc-design-resource.js";
+import { infrastructureResources } from "./aidlc-infrastructure.js";
+import { verifyExternalUiManifest } from "./aidlc-ui-readonly.js";
+import { verifyCreatedUiManifest } from "./aidlc-ui-create.js";
+import { createHash } from "crypto";
+import { checkSlices } from "./aidlc-document-slices";
+import { QUALITY_SENSORS, QualityBlocked, qualityChangeCheck, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
+import { artifactConsistency, dependencyReadiness, fieldCapability, storyRuleConsistency } from "./aidlc-quality-checks";
+import { qualityUiCheck } from "./aidlc-quality-ui";
+import { deliveryReadiness } from "./aidlc-quality-delivery";
+import { runSync } from "./aidlc-spawn";
+import { deliveryConsistencyPayloadErrors, reviewAxisErrors, reviewIssueErrors } from "./aidlc-evidence-policy";
+import { reviewedFiles } from "./aidlc-review-files";
+import { checkHistoricalTddSensors, checkPhaseSensors, checkSensors, getExecutableStages, globalReviewPayload, globalReviewRequired, loadGraph, makeInstance, reviewCoverageErrors } from "./aidlc-orchestrate";
+import { projectDeliverySummary } from "./aidlc-delivery-summary";
+import { semanticCheckerEnv, semanticCommandArgv, semanticValidationEnvironment } from "./aidlc-evidence";
+import { deploymentValidationPayload } from "./aidlc-evidence";
+import { frontendPlatformPayload } from "./aidlc-frontend-platform";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "fs";
+import { basename, dirname, join, relative, resolve, sep } from "path";
+import { fileURLToPath } from "url";
+import { pointEqual, segmentRelation } from "./diagram-geometry.js";
+import { evidenceRelativePath, greenCoveredUcds, i13UcdIdsByMode, i13UcdUnits, moduleManifestPath, portableDirname, readModuleManifest, readUnitManifest, ucdCoverageGaps, unitManifestPath, unitUcdIds, verifiedModuleIds, type ModuleDescriptor, type UnitDescriptor } from "./aidlc-execution-context";
+import { contractTableRowsForModule, type ModuleContractRows } from "./aidlc-contract-table";
+import { scanFiles, SOURCE_FILE_PATTERN, TEST_FILE_PATTERN } from "./aidlc-scan-root";
+import { hasExecutableBehavior } from "./aidlc-executable-behavior";
+import { baselineCodeRef, baselineCommitErrors, extraRepoKeyErrors, gitWorkTreeError, parseCodeRef, workflowBaselineForModule, type CodeRef } from "./aidlc-baseline";
+import { codeRefRepo, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
+import { declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
+import { i13NonApplicable } from "./aidlc-i13-applicability";
+import { ucdDeclarations, type UcdDeclaration, type FrontmatterValue } from "./aidlc-ucd-declarations";
+import { i13SourceDefinitions, indexedTestMappings, inferUcdUnitOwnership } from "./aidlc-ucd-mapping";
+import { deletionTraceText } from "./aidlc-source-deletions";
+import { DIAGRAM_AXIS_SPACING_PROFILE, DIAGRAM_GEOMETRY_PROFILE, DIAGRAM_LAYOUT_METRICS, DIAGRAM_VISUAL_STYLE, calculateDiagramAxisSpacing, calculateDiagramNodeSize, diagramEntityGap, diagramShapeBaseSizes, diagramShapeContainsPoint, diagramTextBounds, measureDiagramText, diagramVisualStyleErrors, edgeLabelPlacementError } from "./diagram-visual-style.js";
+import { readUiGenerationLock, verifyUiGenerationAcceptance, verifyUiGenerationLockAtBaseline, type UiDesignRoute } from "./aidlc-ui-governance";
+import { type WorkflowState } from "./aidlc-light-state";
+import { evidenceScopeForInstance, loadWorkflowParts, loadWorkflowView, mergeWorkflowView, ownerOfInstance } from "./aidlc-workflow-layout";
+import {
+  ExpectedContract,
+  expectedContractPath,
+  parseExpectedContract,
+  routeBendCount,
+  routeDirectionTokens,
+  routeGeometryKind,
+  routeIntentErrors,
+} from "./diagram-contract.js";
+
+type SemanticWorkflowState = WorkflowState;
+
+const ROOT = process.cwd();
+
+function argumentValue(name: string): string | undefined {
+  const args = process.argv.slice(2);
+  const index = args.indexOf(`--${name}`);
+  const value = index >= 0 ? args[index + 1] : undefined;
+  return value && !value.startsWith("--") ? value.trim() : undefined;
+}
+
+// `check --sensor <name> --module <id> [--unit <id>]` scopes a checker to one module
+// explicitly; the controlled producer passes the same flags in the split layout.
+const ARGUMENT_MODULE = argumentValue("module");
+const ARGUMENT_UNIT = argumentValue("unit");
+const STRICT_MODULE_SCOPE = Boolean(ARGUMENT_MODULE);
+const REQUESTED_MODULE = ARGUMENT_MODULE || process.env.AIDLC_ACTIVE_MODULE?.trim() || undefined;
+
+let workflowState: SemanticWorkflowState | null = null;
+let workflowStateError: string | null = null;
+try {
+  workflowState = loadWorkflowView(ROOT, REQUESTED_MODULE);
+  const activeStage = process.env.AIDLC_ACTIVE_STAGE?.trim();
+  if (workflowState && activeStage) workflowState = { ...workflowState, current_stage: activeStage };
+} catch (error) {
+  workflowStateError = error instanceof Error ? error.message : String(error);
+}
+
+const ACTIVE_MODULE = ARGUMENT_MODULE || process.env.AIDLC_ACTIVE_MODULE?.trim() || workflowState?.current_module;
+const ACTIVE_UNIT = ARGUMENT_UNIT || process.env.AIDLC_ACTIVE_UNIT?.trim() || workflowState?.current_unit;
+// Only a non-empty value is a context request: an empty AIDLC_ACTIVE_MODULE/UNIT (as
+// exported by 4.5.3 producers for project-axis stages) carries no module or unit.
+const CONTROLLED_CONTEXT_REQUESTED = STRICT_MODULE_SCOPE
+  || Boolean(process.env.AIDLC_ACTIVE_MODULE?.trim())
+  || Boolean(process.env.AIDLC_ACTIVE_UNIT?.trim());
+
+const MODULE_CONTEXT_SENSORS = new Set([
+  "document-slice-consistency",
+  ...QUALITY_SENSORS,
+  "diagram-contract",
+  "design-intent-coverage",
+  "structural-invariants",
+  "ui-artifact-consistency",
+  "inception-consistency",
+  "test-case-derivation",
+  "review-evidence",
+  "test-quality",
+  "contract-baseline",
+  "functional-design-completeness",
+  "nfr-coverage",
+  "infrastructure-completeness",
+  "frontend-platform-spec",
+  "ui-design-alignment",
+  "field-path-reconciliation",
+]);
+const UNIT_CONTEXT_SENSORS = new Set([
+  "review-evidence",
+  "test-quality",
+  "red-test-evidence",
+  "green-test-evidence",
+  "baseline-test-evidence",
+  "contract-baseline",
+  "functional-design-completeness",
+  "nfr-coverage",
+  "infrastructure-completeness",
+  "frontend-platform-spec",
+  "ui-design-alignment",
+]);
+
+function contextual(relativePath: string): string {
+  if (ACTIVE_UNIT && ACTIVE_MODULE && relativePath.startsWith("docs/aidlc/construction")) {
+    return relativePath.replace("docs/aidlc/construction", `docs/aidlc/modules/${ACTIVE_MODULE}/construction/${ACTIVE_UNIT}`);
+  }
+  if (ACTIVE_MODULE && relativePath.startsWith("docs/aidlc/inception")) {
+    return relativePath.replace("docs/aidlc/inception", `docs/aidlc/modules/${ACTIVE_MODULE}/inception`);
+  }
+  return relativePath;
+}
+
+function frontendPlatformSpecRelativePath(): string {
+  if (ACTIVE_MODULE && ACTIVE_UNIT) return `docs/aidlc/modules/${ACTIVE_MODULE}/construction/${ACTIVE_UNIT}/frontend-platform-spec.md`;
+  return "docs/aidlc/frontend-platform-spec.md";
+}
+
+function contextAllows(path: string): boolean {
+  if (!ACTIVE_MODULE) return true;
+  const label = relative(ROOT, path).replace(/\\/g, "/");
+  if (label.startsWith("docs/aidlc/inception/") || label.startsWith("docs/aidlc/construction/")) return false;
+  if (!label.startsWith("docs/aidlc/modules/")) return true;
+  if (label.startsWith(`docs/aidlc/modules/${ACTIVE_MODULE}/inception/`)) return true;
+  if (ACTIVE_UNIT && label.startsWith(`docs/aidlc/modules/${ACTIVE_MODULE}/construction/${ACTIVE_UNIT}/`)) return true;
+  return !ACTIVE_UNIT && label.startsWith(`docs/aidlc/modules/${ACTIVE_MODULE}/`);
+}
+
+const SENSOR_NAMES = new Set([
+  "global-review-evidence", "deployment-validation",
+  "document-slice-consistency",
+  ...QUALITY_SENSORS,
+  "review-evidence", "test-quality", "contract-baseline", "functional-design-completeness",
+  "nfr-coverage", "infrastructure-completeness", "implementation-report", "frontend-platform-spec",
+  "template-completeness", "recovery-evidence",
+  "prd-completeness", "diagram-contract", "design-intent-coverage", "ui-design-alignment",
+  "field-path-reconciliation",
+  "ui-artifact-consistency", "inception-consistency", "test-case-derivation", "red-test-evidence", "green-test-evidence", "baseline-test-evidence",
+  "traceability-matrix", "structural-invariants",
+]);
+
+function fail(message: string): never { throw new Error(message); }
+function requiredWorkflowState(): SemanticWorkflowState {
+  if (workflowStateError) fail(`lightweight workflow state could not be loaded: ${workflowStateError}`);
+  if (!workflowState) fail("lightweight workflow state is missing");
+  return workflowState;
+}
+function assertSemanticContext(sensor: string): void {
+  const state = requiredWorkflowState();
+  const strictContext = CONTROLLED_CONTEXT_REQUESTED || Boolean(state.current_module || state.current_unit);
+  if (strictContext && MODULE_CONTEXT_SENSORS.has(sensor) && !ACTIVE_MODULE) {
+    fail(`active module is required for semantic sensor ${sensor}`);
+  }
+  if (strictContext && UNIT_CONTEXT_SENSORS.has(sensor) && !ACTIVE_UNIT) {
+    fail(`active unit is required for semantic sensor ${sensor}`);
+  }
+}
+function text(path: string): string { return readFileSync(path, "utf8"); }
+function textIfExists(path: string): string { return existsSync(path) ? text(path) : ""; }
+function existing(paths: string[]): string[] { return paths.map((path) => join(ROOT, contextual(path))).filter((path) => existsSync(path) && contextAllows(path)); }
+// base is project-relative (contextualized + joined onto ROOT); an absolute base is used as-is.
+function allFiles(base: string, pattern: RegExp): string[] {
+  return scanFiles(ROOT, base, pattern, { contextualize: contextual, allows: contextAllows });
+}
+function projectFiles(pattern: RegExp): string[] { return allFiles(".", pattern); }
+/**
+ * Artifacts a module owns: its docs/aidlc/modules/<id>/ tree plus any manifest `paths`.
+ * Used when a checker is scoped with --module, so project-wide files outside the module
+ * (other documentation, other services) can no longer block that module's gate.
+ */
+function moduleArtifactFiles(pattern: RegExp): string[] {
+  if (!ACTIVE_MODULE) return projectFiles(pattern);
+  let extraRoots: string[] = [];
+  try {
+    extraRoots = readModuleManifest(ROOT).find((module) => module.module_id === ACTIVE_MODULE)?.paths || [];
+  } catch {
+    extraRoots = [];
+  }
+  return [...new Set([`docs/aidlc/modules/${ACTIVE_MODULE}`, ...extraRoots].flatMap((base) => allFiles(base, pattern)))].sort();
+}
+/**
+ * The module manifest as seen by a module-scoped checker (4.8.1): absent manifest (a
+ * manifest-less single-module workflow) yields no modules; an invalid one fails closed.
+ */
+function activeModuleManifest(): { modules: ModuleDescriptor[]; module?: ModuleDescriptor } {
+  if (!existsSync(moduleManifestPath(ROOT))) return { modules: [] };
+  let modules: ModuleDescriptor[];
+  try {
+    modules = readModuleManifest(ROOT);
+  } catch (error) {
+    fail(`module manifest is invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return { modules, module: modules.find((module) => module.module_id === ACTIVE_MODULE) };
+}
+/**
+ * Files of the active module's `contract_paths` (4.8.1), fail-closed: every entry must
+ * exist, must not be (or contain) a symbolic link and must resolve inside the project.
+ */
+function declaredContractFiles(module: ModuleDescriptor | undefined): string[] {
+  const projectRoot = realpathSync(ROOT);
+  const inside = (path: string): boolean => {
+    const real = realpathSync(path);
+    return real === projectRoot || real.startsWith(projectRoot.endsWith(sep) ? projectRoot : `${projectRoot}${sep}`);
+  };
+  const result: string[] = [];
+  for (const [index, declared] of (module?.contract_paths || []).entries()) {
+    const label = `module-manifest ${ACTIVE_MODULE}.contract_paths[${index}] (${declared})`;
+    const target = join(ROOT, ...declared.split("/"));
+    let info;
+    try {
+      info = lstatSync(target);
+    } catch {
+      fail(`${label} does not exist`);
+    }
+    if (info.isSymbolicLink()) fail(`${label} is a symbolic link`);
+    if (!inside(target)) fail(`${label} resolves outside the project`);
+    const visit = (path: string): void => {
+      const entry = lstatSync(path);
+      if (entry.isSymbolicLink()) fail(`${label} contains a symbolic link: ${relativePath(path)}`);
+      if (entry.isDirectory()) {
+        for (const name of readdirSync(path).sort()) visit(join(path, name));
+      } else if (entry.isFile()) {
+        result.push(path);
+      }
+    };
+    visit(target);
+  }
+  return result;
+}
+/**
+ * Files a module-scoped checker collects (contract-baseline, nfr-coverage,
+ * infrastructure-completeness; 4.8.1). Without an active module: every project file
+ * (projectFiles, unchanged). With one: the module's inception, the active unit's
+ * construction (the module's whole construction without a unit), the module-manifest
+ * `paths`, and the declared `contract_paths` — matched by `pattern`, or all of them
+ * with `declaredContracts: "all"`. Other project files are never collected implicitly.
+ */
+function moduleScopedFiles(pattern: RegExp, options: { declaredContracts?: "match" | "all" } = {}): string[] {
+  if (!ACTIVE_MODULE) return projectFiles(pattern);
+  const { module } = activeModuleManifest();
+  const moduleRoot = `docs/aidlc/modules/${ACTIVE_MODULE}`;
+  const roots = [`${moduleRoot}/inception`, ACTIVE_UNIT ? `${moduleRoot}/construction/${ACTIVE_UNIT}` : `${moduleRoot}/construction`, ...(module?.paths || [])];
+  const declared = declaredContractFiles(module).filter((path) => options.declaredContracts === "all" || pattern.test(path));
+  return [...new Set([...roots.flatMap((base) => allFiles(base, pattern)), ...declared])].sort();
+}
+/** A project-level contract table (docs/aidlc/ideation/product-contracts.md or a declared copy). */
+function isContractTable(path: string): boolean {
+  return basename(path) === "product-contracts.md";
+}
+function relativePath(path: string): string { return relative(ROOT, path); }
+function joined(paths: string[]): string { return paths.map(text).join("\n"); }
+function ids(value: string, pattern: RegExp): string[] { return [...new Set([...value.matchAll(pattern)].map((match) => match[0]))].sort(); }
+function count(value: string, pattern: RegExp): number { return [...value.matchAll(pattern)].length; }
+function section(value: string, patterns: RegExp[]): boolean { return patterns.some((pattern) => pattern.test(value)); }
+/** MARS-271: the unresolved-marker tokens themselves (待决类文字,含未加否定的 阻断). */
+const UNRESOLVED_MARKER_PATTERN = /\b(?:TODO|FIXME|TBD|HACK|NotImplemented)\b|待确认|待定|未解决|未定义|(?<![不非无])阻断/i;
+/** Section headings whose body is historical record, not an open decision (MARS-271). */
+const HISTORICAL_SECTION_PATTERN = /历史|history|changelog|变更记录|决策记录|修订记录|审计记录|操作日志/i;
+
+/**
+ * MARS-271 marker taxonomy: a line carrying an unresolved-marker token is classified by
+ * nature — `pending` (待决: an open decision the artifact still owes), `historical`
+ * (历史记录: a dated/changelog/record entry or an explicitly resolved item) or `note`
+ * (备注: a blockquote or annotated remark). Only `pending` participates in the
+ * unresolved verdict; historical records and notes describe past events or annotations.
+ */
+function classifyUnresolvedLine(line: string, historicalSection: boolean): "pending" | "historical" | "note" | null {
+  if (!UNRESOLVED_MARKER_PATTERN.test(line)) return null;
+  if (historicalSection) return "historical";
+  const body = line.trim().replace(/^\s*(?:[-*+]\s*)*/, "");
+  // 引用块 / 备注行:备注性质。
+  if (/^>/.test(line.trim()) || /^(?:备注|注\s*[:：]|note\s*[:：]|说明\s*[:：]|附注\s*[:：])/i.test(body)) return "note";
+  // 日期前缀(changelog 条目)或显式历史标签:历史记录性质。
+  if (/^(?:历史|history|changelog|变更记录|决策记录|修订记录|审计记录|记录)[:：\s]/i.test(body)) return "historical";
+  if (/^\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?/.test(body)) return "historical";
+  // 已解决/已关闭的条目是历史,不是待决。
+  if (/已解决|已关闭|已处理|\b(?:resolved|closed)\b/i.test(line)) return "historical";
+  return "pending";
+}
+
+/** Pending-marker findings with position and classification, for a detailed failure message. */
+function unresolvedMarkerFindings(label: string, content: string): string[] {
+  const findings: string[] = [];
+  let historicalSection = false;
+  for (const [index, line] of content.split(/\r?\n/).entries()) {
+    const heading = /^#{1,6}\s+(.*)$/.exec(line.trim());
+    if (heading) historicalSection = HISTORICAL_SECTION_PATTERN.test(heading[1]);
+    const kind = classifyUnresolvedLine(line, historicalSection);
+    if (kind === "pending") findings.push(`${label}:${index + 1}: ${line.trim().slice(0, 60)} [待决]`);
+  }
+  return findings;
+}
+
+function noUnresolved(value: string, label = "project artifact"): void {
+  // 4.8.1: a negated 阻断 (不阻断 / 非阻断 / 无阻断) describes the absence of a blocker.
+  // MARS-271: only 待决 markers fail; 历史/备注 markers are listed in the failure detail.
+  const findings = unresolvedMarkerFindings(label, value);
+  if (findings.length > 0) {
+    const shown = findings.slice(0, 10).join("; ");
+    fail(`unresolved marker found in project artifact: ${shown}${findings.length > 10 ? ` (+${findings.length - 10} more pending markers)` : ""}`);
+  }
+}
+
+function markdownTableCells(line: string): string[] | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|")) return null;
+  return trimmed.replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
+
+function validatePrdPendingQuestions(path: string, content: string): { pendingQuestions: number } {
+  const pathLabel = relativePath(path).replace(/\\/g, "/");
+  const lines = content.split(/\r?\n/);
+  const markers = new Map<string, number>();
+  const rows = new Map<string, number>();
+
+  for (const [index, line] of lines.entries()) {
+    if (/\b(TODO|FIXME|TBD|HACK|NotImplemented)\b|待定|未解决|未定义/i.test(line)) {
+      fail(`${pathLabel}:${index + 1} contains an unresolved marker`);
+    }
+    for (const match of line.matchAll(/\[待确认(?:\s*[:：]\s*([^\]]+))?\]/gi)) {
+      const id = match[1]?.trim().toUpperCase();
+      if (!id || !/^PQ-\d{3,}$/.test(id)) {
+        fail(`${pathLabel}:${index + 1} pending questions must use [待确认: PQ-NNN]`);
+      }
+      if (!markers.has(id)) markers.set(id, index + 1);
+    }
+  }
+
+  for (let index = 0; index < lines.length; index++) {
+    const header = markdownTableCells(lines[index]);
+    if (!header) continue;
+    const idIndex = header.findIndex((cell) => /^(?:ID|#|编号)$/i.test(cell));
+    const questionIndex = header.findIndex((cell) => /^(?:问题|question)$/i.test(cell));
+    const ownerIndex = header.findIndex((cell) => /^(?:负责方|owner)$/i.test(cell));
+    const blockerIndex = header.findIndex((cell) => /^(?:是否阻断|blocking|blocker)$/i.test(cell));
+    if ([idIndex, questionIndex, ownerIndex, blockerIndex].some((value) => value < 0)) continue;
+
+    for (let rowIndex = index + 1; rowIndex < lines.length; rowIndex++) {
+      const cells = markdownTableCells(lines[rowIndex]);
+      if (!cells) break;
+      if (cells.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
+      const id = (cells[idIndex] || "").trim().toUpperCase();
+      if (!/^PQ-\d{3,}$/.test(id)) continue;
+      if (rows.has(id)) fail(`${pathLabel}:${rowIndex + 1} duplicates pending question ${id}`);
+      const question = (cells[questionIndex] || "").trim();
+      const owner = (cells[ownerIndex] || "").trim();
+      const blocker = (cells[blockerIndex] || "").trim();
+      if (!question || /^(?:-|—|待确认|TBD)$/i.test(question)) fail(`${pathLabel}:${rowIndex + 1} pending question ${id} must describe the question`);
+      if (!owner || /^(?:-|—|待确认|待定|TBD)$/i.test(owner)) fail(`${pathLabel}:${rowIndex + 1} pending question ${id} must name an owner`);
+      if (/^(?:是|yes|true|阻断|blocking)$/i.test(blocker)) fail(`${pathLabel}:${rowIndex + 1} pending question ${id} blocks PRD completion`);
+      if (!/^(?:否|no|false|不阻断|non[- ]?blocking)$/i.test(blocker)) {
+        fail(`${pathLabel}:${rowIndex + 1} pending question ${id} must declare whether it blocks completion`);
+      }
+      rows.set(id, rowIndex + 1);
+    }
+  }
+
+  for (const [id, line] of markers) {
+    if (!rows.has(id)) fail(`${pathLabel}:${line} pending question ${id} is not indexed in the pending-questions table`);
+  }
+  return { pendingQuestions: rows.size };
+}
+function jsonFile(path: string): Record<string, unknown> {
+  let value: unknown;
+  try { value = JSON.parse(text(path)); } catch (error) { fail(`${relativePath(path)} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${relativePath(path)} must contain a JSON object`);
+  return value as Record<string, unknown>;
+}
+function stringValue(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) fail(`${field} must be a non-empty string`);
+  return value.trim();
+}
+function numberValue(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) fail(`${field} must be a non-negative integer`);
+  return value;
+}
+function stringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || value.length === 0 || !value.every((item) => typeof item === "string" && item.trim())) fail(`${field} must be a non-empty string array`);
+  return value as string[];
+}
+function output(value: Record<string, unknown>): void { process.stdout.write(`${JSON.stringify(value)}\n`); }
+
+type UiRoute = "html-mock" | "figma-create" | "figma-existing" | "skip" | "not-selected";
+function qualityContext(): QualityContext {
+  const state = requiredWorkflowState();
+  const adopted = Boolean(state.quality_gates_version || existsSync(join(ROOT, contextual("docs/aidlc/inception/quality-adoption.json"))));
+  return { root: ROOT, workflow_id: state.workflow_id, module_id: ACTIVE_MODULE, scope: state.scope, stage: state.current_stage, prd_selected: selectedPrdRoute(), project_workflow_id: state.parent_workflow_id || state.workflow_id,
+    ui_route: selectedUiRoute(), quality_version: state.quality_gates_version, code_baseline: adopted && qualityCodeBaseline(ROOT, ACTIVE_MODULE, state.adoption_baseline || state.baseline_commit, state.completed_stages.includes("build-and-test")) };
+}
+const UI_ROUTES = new Set<UiRoute>(["html-mock", "figma-create", "figma-existing", "skip", "not-selected"]);
+const REQUIREMENT_ID = /\b(?:REQ|FR)-[A-Z0-9][A-Z0-9_-]*\b/gi;
+const STORY_ID = /\bUS-[A-Z0-9][A-Z0-9_-]*\b/gi;
+const PAGE_ID = /\bPAGE-[A-Z0-9][A-Z0-9_-]*\b/gi;
+
+function normalizedIds(value: string, pattern: RegExp): string[] {
+  return ids(value, pattern).map((item) => item.toUpperCase()).sort();
+}
+
+function selectedPrdRoute(): boolean {
+  return workflowState?.selected_optional_stages.includes("prd-generation") || false;
+}
+
+function selectedUiRoute(moduleId = ACTIVE_MODULE): UiRoute {
+  if (!workflowState) return "not-selected";
+  const selected = [...workflowState.history].reverse().find((entry) =>
+    entry.stage === "ui-mock"
+    && (entry.result === "completed" || entry.result === "approved")
+    && (!moduleId || entry.module_id === moduleId)
+    && typeof entry.user_input === "string"
+  )?.user_input as UiRoute | undefined;
+  return selected && UI_ROUTES.has(selected) ? selected : "not-selected";
+}
+
+function objectValue(value: unknown, field: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${field} must be an object`);
+  return value as Record<string, unknown>;
+}
+
+function arrayValue(value: unknown, field: string): unknown[] {
+  if (!Array.isArray(value)) fail(`${field} must be an array`);
+  return value;
+}
+
+function emptyArray(value: unknown, field: string): void {
+  if (!Array.isArray(value) || value.length !== 0) fail(`${field} must be an empty array`);
+}
+
+function sameIdentifiers(actual: string[], expected: string[], field: string): void {
+  const left = [...new Set(actual.map((item) => item.toUpperCase()))].sort();
+  const right = [...new Set(expected.map((item) => item.toUpperCase()))].sort();
+  if (JSON.stringify(left) !== JSON.stringify(right)) {
+    fail(`${field} must exactly match page plan IDs; expected ${right.join(", ")}, got ${left.join(", ")}`);
+  }
+}
+
+function safeReferencedFile(value: unknown, field: string): { path: string; relative: string } {
+  const label = stringValue(value, field).replace(/\\/g, "/");
+  const absolute = resolve(ROOT, label);
+  const rel = relative(ROOT, absolute).replace(/\\/g, "/");
+  if (!rel || rel === ".." || rel.startsWith("../")) fail(`${field} escapes project root: ${label}`);
+  if (ACTIVE_MODULE && label.startsWith("docs/aidlc/modules/") && !label.startsWith(`docs/aidlc/modules/${ACTIVE_MODULE}/`)) {
+    fail(`${field} crosses active module boundary: ${label}`);
+  }
+  if (!existsSync(absolute) || !statSync(absolute).isFile()) fail(`${field} does not reference a regular file: ${label}`);
+  return { path: absolute, relative: rel };
+}
+
+interface PagePlanContract {
+  path: string;
+  content: string;
+  storiesContent: string;  // user-stories.md 原文(正向全覆盖解析 US 全集与显式豁免用)
+  pageIds: string[];
+  requirementIds: string[];
+  storyIds: string[];
+  artifacts: string[];
+}
+
+function pagePlanContract(): PagePlanContract {
+  if (!ACTIVE_MODULE) fail("UI consistency requires an active module context");
+  const requirementsPath = join(ROOT, contextual("docs/aidlc/inception/requirements.md"));
+  const storiesPath = join(ROOT, contextual("docs/aidlc/inception/user-stories.md"));
+  const planPath = join(ROOT, contextual("docs/aidlc/inception/ui-design/page-plan.md"));
+  for (const [label, path] of [["requirements", requirementsPath], ["user stories", storiesPath], ["page plan", planPath]] as const) {
+    if (!existsSync(path) || !statSync(path).isFile()) fail(`${label} artifact is missing: ${relativePath(path)}`);
+  }
+  const requirements = text(requirementsPath);
+  const stories = text(storiesPath);
+  const content = text(planPath);
+  noUnresolved(content, relativePath(planPath));
+  for (const requiredSection of [/页面清单/i, /页面内容契约/i, /操作闭环/i, /未决项/i]) {
+    if (!requiredSection.test(content)) fail(`page plan is missing required section ${requiredSection}`);
+  }
+  const unresolved = content.match(/##\s*未决项\s*([\s\S]*?)(?=\n##|$)/i)?.[1]?.trim() || "";
+  if (!/^(?:无|none)[。.]?$/i.test(unresolved)) fail("page plan unresolved section must contain only 无/none");
+  const pageIds = normalizedIds(content, PAGE_ID);
+  if (pageIds.length === 0) fail("page plan contains no PAGE identifiers");
+  const requirementIds = normalizedIds(requirements, REQUIREMENT_ID);
+  const storyIds = normalizedIds(stories, STORY_ID);
+  if (requirementIds.length === 0 || storyIds.length === 0) fail("requirements and user stories must expose machine identifiers");
+  const sourceIds = [...normalizedIds(content, REQUIREMENT_ID), ...normalizedIds(content, STORY_ID)];
+  if (sourceIds.length === 0) fail("page plan contains no requirement or story source references");
+  const known = new Set([...requirementIds, ...storyIds]);
+  const unknown = sourceIds.filter((id) => !known.has(id));
+  if (unknown.length > 0) fail(`page plan references unknown source IDs: ${[...new Set(unknown)].join(", ")}`);
+    return {
+      path: planPath,
+      content,
+      storiesContent: stories,
+      pageIds,
+      requirementIds,
+      storyIds,
+      artifacts: [relativePath(requirementsPath), relativePath(storiesPath), relativePath(planPath)],
+    };
+}
+
+// 元素分类型计数(A 计数级对账基础)。设计侧与实现侧用同一类型集,逐类型比较。
+type ElementTally = { button: number; input: number; select: number; table: number; dialog: number };
+interface DesignArtifactContract {
+  pageIds: string[];
+  elements: number;
+  tally: ElementTally;
+  conditions: number;      // 设计侧条件显隐信号数(粗粒度)
+  elementLevel: boolean;   // 是否支持元素级 diff(html-mock=true;figma=false,元素级不适用)
+  artifacts: string[];
+  coveredStories: string[]; // manifest 全部 page 的 stories[] 并集(正向全覆盖对账用,已 normalize)
+}
+function addElementTally(into: ElementTally, add: ElementTally): void {
+  into.button += add.button; into.input += add.input; into.select += add.select; into.table += add.table; into.dialog += add.dialog;
+}
+
+function htmlArtifactContract(plan: PagePlanContract): DesignArtifactContract {
+  if (qualityContext().quality_version || existsSync(join(ROOT, contextual("docs/aidlc/inception/quality-adoption.json")))) qualityUiCheck(qualityContext());
+  const manifestPath = join(ROOT, contextual("docs/aidlc/inception/ui-mock/ui-mock-manifest.json"));
+  if (!existsSync(manifestPath)) fail(`HTML Mock manifest is missing: ${relativePath(manifestPath)}`);
+  const manifest = jsonFile(manifestPath);
+  if (manifest.schema_version !== "1" || manifest.design_mode !== "html-mock") fail("ui-mock-manifest.json has an unsupported schema or design_mode");
+  const expectedPlan = relativePath(plan.path).replace(/\\/g, "/");
+  if (manifest.page_plan !== expectedPlan) fail(`ui-mock-manifest.page_plan must be ${expectedPlan}`);
+  emptyArray(manifest.unresolved, "ui-mock-manifest.unresolved");
+  const phases = objectValue(manifest.phases, "ui-mock-manifest.phases");
+  for (const phaseName of ["skeleton", "content"]) {
+    const phase = objectValue(phases[phaseName], `ui-mock-manifest.phases.${phaseName}`);
+    if (phase.status !== "validated") fail(`ui-mock-manifest.phases.${phaseName}.status must be validated`);
+    const phaseIds = stringArray(phase.page_ids, `ui-mock-manifest.phases.${phaseName}.page_ids`);
+    sameIdentifiers(phaseIds, plan.pageIds, `ui-mock-manifest.phases.${phaseName}.page_ids`);
+    const reviewedAt = stringValue(phase.reviewed_at, `ui-mock-manifest.phases.${phaseName}.reviewed_at`);
+    if (Number.isNaN(Date.parse(reviewedAt))) fail(`ui-mock-manifest.phases.${phaseName}.reviewed_at must be ISO-8601`);
+  }
+  const pages = arrayValue(manifest.pages, "ui-mock-manifest.pages");
+  if (pages.length === 0) fail("ui-mock-manifest.pages must not be empty");
+  const pageIds: string[] = [];
+  const artifacts = [...plan.artifacts, relativePath(manifestPath)];
+  let elements = 0;
+  const tally: ElementTally = { button: 0, input: 0, select: 0, table: 0, dialog: 0 };
+  let conditions = 0;
+  const coveredStories = new Set<string>();
+  const knownRequirements = new Set(plan.requirementIds);
+  const knownStories = new Set(plan.storyIds);
+  for (const [index, raw] of pages.entries()) {
+    const page = objectValue(raw, `ui-mock-manifest.pages[${index}]`);
+    const pageId = stringValue(page.page_id, `ui-mock-manifest.pages[${index}].page_id`).toUpperCase();
+    pageIds.push(pageId);
+    const specs = safeReferencedFile(page.page_specs, `ui-mock-manifest.pages[${index}].page_specs`);
+    const html = safeReferencedFile(page.html, `ui-mock-manifest.pages[${index}].html`);
+    const mockBox = stringValue(page.mock_box_id, `ui-mock-manifest.pages[${index}].mock_box_id`);
+    const requirements = stringArray(page.requirements, `ui-mock-manifest.pages[${index}].requirements`).map((id) => id.toUpperCase());
+    const stories = stringArray(page.stories, `ui-mock-manifest.pages[${index}].stories`).map((id) => id.toUpperCase());
+    const unknownRequirements = requirements.filter((id) => !knownRequirements.has(id));
+    const unknownStories = stories.filter((id) => !knownStories.has(id));
+    if (unknownRequirements.length > 0 || unknownStories.length > 0) fail(`${pageId} references unknown requirements/stories`);
+    for (const story of stories) coveredStories.add(story);
+    const specsContent = text(specs.path);
+    const htmlContent = text(html.path);
+    verifyDesignResourceConsumption(ROOT, ACTIVE_MODULE!, readUiGenerationLock(ROOT, ACTIVE_MODULE!).lock.design_resource, htmlContent);
+    if (!specsContent.toUpperCase().includes(pageId) || !htmlContent.toUpperCase().includes(pageId) || !htmlContent.includes(mockBox)) {
+      fail(`${pageId} is not consistently mapped across page-specs, HTML and mock_box_id`);
+    }
+    elements += count(htmlContent, /mock-box|<button\b|<input\b|<select\b|<table\b|<dialog\b/gi);
+    addElementTally(tally, {
+      button: count(htmlContent, /<button\b/gi),
+      input: count(htmlContent, /<input\b|<textarea\b/gi),
+      select: count(htmlContent, /<select\b/gi),
+      table: count(htmlContent, /<table\b/gi),
+      dialog: count(htmlContent, /<dialog\b/gi),
+    });
+    // 条件显隐信号:mock 里以 data-visible-when / v-if 风格或 class 注释表达的条件(粗粒度)。
+    conditions += count(htmlContent, /data-visible-when|data-role-visible|条件显示|条件渲染/gi);
+    artifacts.push(specs.relative, html.relative);
+  }
+  sameIdentifiers(pageIds, plan.pageIds, "ui-mock-manifest.pages.page_id");
+  if (new Set(pageIds).size !== pageIds.length || elements < pageIds.length) fail("HTML Mock pages or verifiable UI elements are incomplete");
+  return { pageIds: [...new Set(pageIds)].sort(), elements, tally, conditions, elementLevel: true, artifacts: [...new Set(artifacts)], coveredStories: [...coveredStories].sort() };
+}
+
+function figmaArtifactContract(plan: PagePlanContract, route: UiRoute): DesignArtifactContract {
+  const manifestPath = join(ROOT, contextual("docs/aidlc/inception/ui-design/figma-manifest.json"));
+  if (!existsSync(manifestPath)) fail(`Figma manifest is missing: ${relativePath(manifestPath)}`);
+  const manifest = jsonFile(manifestPath);
+  const readArtifacts = route === "figma-existing" ? verifyExternalUiManifest(ROOT, ACTIVE_MODULE!, manifest) : verifyCreatedUiManifest(ROOT, ACTIVE_MODULE!, manifest);
+  if (manifest.schema_version !== "1" || manifest.design_mode !== "figma") fail("figma-manifest.json has an unsupported schema or design_mode");
+  const expectedSource = route === "figma-existing" ? "external" : "created";
+  if (manifest.source !== expectedSource) fail(`figma-manifest.source must be ${expectedSource} for signed route ${route}`);
+  const fileUrl = stringValue(manifest.file_url, "figma-manifest.file_url");
+  if (!/^https:\/\/(?:www\.)?figma\.com\//i.test(fileUrl)) fail("figma-manifest.file_url must be a Figma HTTPS URL");
+  const expectedPlan = relativePath(plan.path).replace(/\\/g, "/");
+  if (manifest.page_plan !== expectedPlan) fail(`figma-manifest.page_plan must be ${expectedPlan}`);
+  emptyArray(manifest.unresolved, "figma-manifest.unresolved");
+  const validation = objectValue(manifest.validation, "figma-manifest.validation");
+  // Artifact acquisition proves bytes and ownership only. Visual, token, component and
+  // behavior acceptance remain independent checks; a created receipt cannot issue them.
+  if (expectedSource === "external" && validation.external_read_only !== true) fail("external Figma designs must declare external_read_only=true");
+  if (expectedSource === "created" && validation.external_read_only !== false) fail("created Figma designs must declare external_read_only=false");
+  const pages = arrayValue(manifest.pages, "figma-manifest.pages");
+  if (pages.length === 0) fail("figma-manifest.pages must not be empty");
+  const pageIds: string[] = [];
+  const nodeIds = new Set<string>();
+  const coveredStories = new Set<string>();
+  const knownRequirements = new Set(plan.requirementIds);
+  const knownStories = new Set(plan.storyIds);
+  for (const [index, raw] of pages.entries()) {
+    const page = objectValue(raw, `figma-manifest.pages[${index}]`);
+    const pageId = stringValue(page.page_id, `figma-manifest.pages[${index}].page_id`).toUpperCase();
+    const nodeId = stringValue(page.node_id, `figma-manifest.pages[${index}].node_id`);
+    if (!/^\d+:\d+$/.test(nodeId) || nodeIds.has(nodeId)) fail(`${pageId} has an invalid or duplicate Figma node_id`);
+    nodeIds.add(nodeId);
+    stringValue(page.page, `figma-manifest.pages[${index}].page`);
+    stringValue(page.frame, `figma-manifest.pages[${index}].frame`);
+    stringValue(page.screenshot, `figma-manifest.pages[${index}].screenshot`);
+    const requirements = stringArray(page.requirements, `figma-manifest.pages[${index}].requirements`).map((id) => id.toUpperCase());
+    const stories = stringArray(page.stories, `figma-manifest.pages[${index}].stories`).map((id) => id.toUpperCase());
+    if (requirements.some((id) => !knownRequirements.has(id)) || stories.some((id) => !knownStories.has(id))) {
+      fail(`${pageId} references unknown requirements/stories`);
+    }
+    for (const story of stories) coveredStories.add(story);
+    pageIds.push(pageId);
+  }
+  sameIdentifiers(pageIds, plan.pageIds, "figma-manifest.pages.page_id");
+  if (new Set(pageIds).size !== pageIds.length) fail("figma-manifest contains duplicate page IDs");
+  // figma 无可解析的 HTML 元素:元素级 diff 不适用(需 Provider/design-context),elementLevel=false。
+  return { pageIds: [...new Set(pageIds)].sort(), elements: nodeIds.size, tally: { button: 0, input: 0, select: 0, table: 0, dialog: 0 }, conditions: 0, elementLevel: false, artifacts: [...plan.artifacts, relativePath(manifestPath), ...readArtifacts], coveredStories: [...coveredStories].sort() };
+}
+
+function reviewEvidence(): Record<string, unknown> {
+  const files = existing(["docs/aidlc/construction/code-review.md"]);
+  files.push(...allFiles("docs/aidlc/construction/audit", /\.md$/));
+  if (files.length === 0) fail("no code review record found");
+  const content = joined(files);
+  const axisErrors = reviewAxisErrors(content);
+  if (axisErrors.length) fail(axisErrors.join("; "));
+  const conclusions = content.replace(/(?:不|非)阻断|non[- ]blocking/gi, "");
+  if (/未通过|\bblocked\b|阻断/i.test(conclusions)) fail("review record contains a blocking conclusion");
+  const reviewer = content.match(/(?:reviewer|审查者|审查人|reviewed\s+by)\s*[:：]\s*([^\n]+)/i)?.[1]?.trim();
+  if (!reviewer) fail("reviewer identity is missing");
+  const found = content.match(/(?:issues?_found|发现问题|问题数)\s*[:：]?\s*(\d+)/i)?.[1];
+  const resolved = content.match(/(?:issues?_resolved|已解决|修复问题)\s*[:：]?\s*(\d+)/i)?.[1];
+  const open = content.match(/(?:issues?_open|未关闭|开放问题)\s*[:：]?\s*(\d+)/i)?.[1] || "0";
+  if (found === undefined || resolved === undefined) fail("review record must contain issue counts");
+  const filesReviewed = reviewedFiles(content);
+  if (filesReviewed.length === 0) fail("review record must identify reviewed files");
+  const severityKeys = ["critical_open", "important_open", "suggestion_open"];
+  const values = severityKeys.map(key => declaredValue(content, key));
+  const severity = values.some(value => value !== undefined)
+    ? { issues_by_severity: Object.fromEntries(severityKeys.map((key, index) => [key, values[index] === undefined ? NaN : Number(values[index])])) } : {};
+  const result = { status: "passed", spec_axis: "passed", standards_axis: "passed", reviewer, files_reviewed: filesReviewed, issues_found: Number(found), issues_resolved: Number(resolved), issues_open: Number(open), ...severity };
+  const errors = reviewIssueErrors(result);
+  const stage = loadGraph().stages.find(candidate => candidate.slug === "code-review")!;
+  errors.push(...reviewCoverageErrors(result, makeInstance(stage, "unit", { module_id: ACTIVE_MODULE, unit_id: ACTIVE_UNIT })));
+  if (errors.length) fail(errors.join("; "));
+  return result;
+}
+
+/** `key: value` declared on its own line (optionally as a list item, bold, or code). */
+function declaredValue(content: string, key: string): string | undefined {
+  const expression = new RegExp(`^[\\s>*-]*\\**\`?${key}\`?\\**\\s*[:：]\\s*\`?([^\`\\s|]+)`, "im");
+  return content.match(expression)?.[1]?.trim();
+}
+
+function evidenceRecords(stage: string, sensor: string): Record<string, unknown>[] {
+  // allFiles resolves its base against ROOT, so it must receive the project-relative path.
+  return allFiles(join(".aidlc", "evidence", stage), new RegExp(`${sensor}\\.json$`)).flatMap((path) => {
+    try { return [jsonFile(path)]; } catch { return []; }
+  });
+}
+
+function i13Evidence(moduleId = ACTIVE_MODULE): Record<string, unknown> | null {
+  if (!moduleId) return null;
+  const path = join(ROOT, ".aidlc", "evidence", "test-case-derivation", moduleId, "test-case-derivation.json");
+  return existsSync(path) ? jsonFile(path) : null;
+}
+
+/** MARS-271: I13 `mapping_deferred` entries as [{id, reason}]; malformed entries are dropped. */
+function i13MappingDeferred(record: Record<string, unknown> | null): Array<{ id: string; reason: string }> {
+  if (!record || !Array.isArray(record.mapping_deferred)) return [];
+  return record.mapping_deferred.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const candidate = entry as { id?: unknown; reason?: unknown };
+    return typeof candidate.id === "string" && typeof candidate.reason === "string" ? [{ id: candidate.id, reason: candidate.reason }] : [];
+  });
+}
+
+function testCaseDerivation(): Record<string, unknown> {
+  if (!ACTIVE_MODULE) fail("test-case-derivation requires an active module context");
+  const caseRoot = join(ROOT, contextual("docs/aidlc/inception/application-design/test-cases"));
+  const indexPath = join(caseRoot, "_index.md");
+  const exemptionPath = join(caseRoot, "non-applicable.json");
+  const sourcePaths = [
+    "docs/aidlc/inception/requirements.md",
+    "docs/aidlc/inception/user-stories.md",
+    "docs/aidlc/inception/application-design.md",
+    "docs/aidlc/inception/clarifications.md",
+  ].map((path) => join(ROOT, contextual(path))).filter((path) => existsSync(path));
+  if (sourcePaths.length === 0) {
+    fail("I13 requires at least one requirement, story, application-design, or clarification source artifact before declaring not_applicable");
+  }
+  const sourceArtifacts = sourcePaths.map(path => ({ path: relativePath(path), content: text(path) }));
+  const sourceContent = sourceArtifacts.map(artifact => artifact.content).join("\n");
+  const caseFiles = existsSync(caseRoot) ? allFiles("docs/aidlc/inception/application-design/test-cases", /\.md$/) : [];
+  const caseContent = caseFiles.map(text).join("\n");
+  // A present non-applicable.json is validated first and wins over keyword detection;
+  // an invalid one fails loudly instead of silently falling back to the UC-D branch.
+  if (existsSync(exemptionPath) || !hasExecutableBehavior(sourceContent)) {
+    if (!existsSync(exemptionPath)) fail(`I13 requires structured non-applicable evidence: ${relativePath(exemptionPath)}`);
+    return i13NonApplicable(ROOT, ACTIVE_MODULE);
+  }
+  if (!existsSync(indexPath)) fail(`I13 requires test case index: ${relativePath(indexPath)}`);
+  const referencedIds = [...new Set((caseContent.match(/\bUC-D-\d+\b/g) || []))];
+  if (referencedIds.length === 0) fail("I13 test case directory contains no UC-D identifiers");
+  // Each UC-D is counted once, from its own case file; `_index.md` lists cases but never declares them.
+  const declarations = ucdDeclarations(caseFiles.filter((path) => basename(path) !== "_index.md"));
+  const deprecatedIds = referencedIds.filter(id => declarations.get(id)?.status === "deprecated");
+  const idsFound = referencedIds.filter(id => !deprecatedIds.includes(id));
+  if (idsFound.length === 0) fail("I13 has no active UC-D; use structured non-applicable evidence when no executable behavior remains");
+  // MARS-271 blocked 分类学:blocked 用例必须声明 blocked_kind——business-unknown(PRD 缺业务答案,
+  // 唯一允许上报人工的类型)或 technical-prerequisite(代码基线技术前置,须列前置条件与解除路径)。
+  // 无分类的 blocked 条目直接拒绝,避免把两类性质混在一起上报人工复核。
+  const blockedKindValues = ["business-unknown", "technical-prerequisite"];
+  const blockedCases = [...declarations.values()].filter((declaration) => declaration.status === "blocked");
+  const blockedDetail: Array<{ id: string; blocked_kind: string }> = [];
+  for (const declaration of blockedCases) {
+    const kind = declaration.fields?.get("blocked_kind");
+    const normalized = typeof kind === "string" ? kind.trim().toLowerCase() : undefined;
+    if (!normalized || !blockedKindValues.includes(normalized)) {
+      fail(`blocked UC-D ${declaration.id} must declare blocked_kind: business-unknown | technical-prerequisite in the frontmatter of its case file (${relativePath(declaration.file)})`);
+    }
+    if (normalized === "technical-prerequisite") {
+      const prerequisites = declaration.fields?.get("prerequisites");
+      const unblockPath = declaration.fields?.get("unblock_path");
+      const hasPrerequisites = Array.isArray(prerequisites) ? prerequisites.length > 0 : typeof prerequisites === "string" && prerequisites.trim().length > 0;
+      if (!hasPrerequisites) fail(`technical-prerequisite UC-D ${declaration.id} must declare non-empty prerequisites (${relativePath(declaration.file)})`);
+      if (typeof unblockPath !== "string" || unblockPath.trim().length === 0) {
+        fail(`technical-prerequisite UC-D ${declaration.id} must declare unblock_path (${relativePath(declaration.file)})`);
+      }
+    }
+    blockedDetail.push({ id: declaration.id, blocked_kind: normalized });
+  }
+  if (blockedDetail.length > 0) {
+    const summary = blockedDetail.map((item) => `${item.id} (${item.blocked_kind})`).join("; ");
+    fail(`I13 cannot complete while any UC-D is blocked: ${summary}`);
+  }
+  const notReady = idsFound.filter((id) => declarations.get(id)?.status !== "ready");
+  if (notReady.length > 0) {
+    const detail = notReady.map((id) => {
+      const declaration = declarations.get(id);
+      return declaration ? `${id} (${relativePath(declaration.file)}: status ${declaration.status ?? "missing"})` : `${id} (no case file declares it)`;
+    });
+    fail(`every UC-D must declare status: ready in its own case file before RED: ${detail.join("; ")}`);
+  }
+  const readyCount = idsFound.length;
+  if (!/source_ref\s*:/i.test(caseContent)) fail("every I13 test case must declare source_ref");
+  // MARS-273 聚合层覆盖声明:正向覆盖(每个 REQ 来源至少映射一个 UC-D)与反向悬空校验
+  // 收敛到 _index.md 的 source_coverage,每来源声明一次;未声明的存量 I13 走回退路径,
+  // 仅保留 source_ref 存在性检查(存量零迁移)。
+  const sourceCoverage = derivedSourceCoverage(idsFound, declarations);
+  const explicitCoverage = declaredSourceCoverage(indexPath);
+  const legacyCoverage = explicitCoverage ? null : sourceCoverageDeclarations(text(indexPath), relativePath(indexPath));
+  const rawCoverage = explicitCoverage || (legacyCoverage ? normalizeSourceCoverage(Object.fromEntries(legacyCoverage)) : null);
+  const declaredCoverage = rawCoverage ? normalizeSourceCoverage(Object.fromEntries(Object.entries(rawCoverage)
+    .map(([source, ucds]) => [source, ucds.filter(id => !deprecatedIds.includes(id))] as const)
+    .filter(([, ucds]) => ucds.length > 0))) : null;
+  if (declaredCoverage) validateSourceCoverage(declaredCoverage, sourceCoverage, sourceContent, i13SourceDefinitions(sourceArtifacts), idsFound, declarations, indexPath);
+  const modes = ucdModes(idsFound, declarations);
+  const units = ucdUnitRefs(idsFound, declarations, sourceArtifacts);
+  const defectRefs = ucdAnchorRefs(idsFound, declarations, "defect_ref");
+  const changeRefs = ucdAnchorRefs(idsFound, declarations, "change_ref");
+  // MARS-271 分级映射准入:P1/展示类 UC-D 可声明 mapping_deferred: <reason> 暂缓测试映射,
+  // 带该标记的单元可过 GREEN,但映射债必须在证据 mapping_debt 中显式携带,不得静默消失。
+  // P0 或契约/接口类用例必须 GREEN 前就位映射,禁止暂缓。
+  const mappingDeferred = mappingDeferredEntries(idsFound, declarations);
+  return {
+    status: "required",
+    applicability: "required",
+    ucd_total: idsFound.length,
+    ready_ucd: readyCount,
+    ucd_ids: idsFound,
+    ucd_modes: Object.fromEntries(idsFound.map((id) => [id, modes.get(id)!.mode])),
+    ...(units || {}),
+    ...(deprecatedIds.length ? { deprecated_ucd_ids: deprecatedIds } : {}),
+    ...(mappingDeferred.length > 0 ? { mapping_deferred: mappingDeferred } : {}),
+    ...(defectRefs.size > 0 ? { defect_refs: Object.fromEntries([...defectRefs].sort(([left], [right]) => left.localeCompare(right))) } : {}),
+    ...(changeRefs.size > 0 ? { change_refs: Object.fromEntries([...changeRefs].sort(([left], [right]) => left.localeCompare(right))) } : {}),
+    ...characterizationEvidence(idsFound, modes),
+    source_files: sourcePaths.map(relativePath),
+    test_case_files: caseFiles.map(relativePath),
+    // MARS-273: ucd_sources 降为逐文件 digest + 文件内 UC-D ID 清单;消费方兼容旧逐条形态。
+    ucd_sources: fileUcdSources(declarations),
+    ...(sourceCoverage ? { source_coverage: sourceCoverage } : {}),
+    index: relativePath(indexPath),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// UC-D declarations and tdd_mode (4.6.0 S2)
+// ---------------------------------------------------------------------------
+
+/**
+ * MARS-273: the `source_coverage` aggregate declaration of `_index.md` — one
+ * `source_id: [UC-D ids]` line per source, declared once instead of per case.
+ * Accepted shapes: a top-level `source_coverage:` key with indented sub-keys, or a
+ * fenced code block tagged `source_coverage`. Returns null when nothing is declared
+ * (legacy evidence keeps the source_ref-existence fallback, zero migration).
+ */
+function sourceCoverageDeclarations(content: string, label: string): Map<string, string[]> | null {
+  const lines = content.split(/\r?\n/);
+  let block: string[] | null = null;
+  const fenceStart = lines.findIndex((line) => /^```[A-Za-z]*\s*source_coverage\b/.test(line.trim()));
+  if (fenceStart >= 0) {
+    const fenceEnd = lines.findIndex((line, index) => index > fenceStart && line.trim().startsWith("```"));
+    block = lines.slice(fenceStart + 1, fenceEnd < 0 ? lines.length : fenceEnd);
+  } else {
+    const start = lines.findIndex((line) => /^source_coverage\s*:\s*$/.test(line));
+    if (start >= 0) {
+      const rest = lines.slice(start + 1);
+      const stop = rest.findIndex((line) => line.trim() !== "" && !/^\s/.test(line));
+      block = rest.slice(0, stop < 0 ? rest.length : stop);
+    }
+  }
+  if (block === null) return null;
+  const coverage = new Map<string, string[]>();
+  let listKey: string | undefined;
+  for (const line of block) {
+    if (line.trim() === "" || /^\s*#/.test(line)) continue;
+    const item = /^\s*-\s+(.+)$/.exec(line);
+    if (item) {
+      if (listKey === undefined) fail(`${label}: source_coverage list item outside a source key`);
+      coverage.get(listKey)!.push(item[1].trim());
+      continue;
+    }
+    const pair = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/.exec(line.trim());
+    if (!pair) fail(`${label}: unsupported source_coverage line ${JSON.stringify(line.trim())}`);
+    const [, key, raw] = pair;
+    if (coverage.has(key)) fail(`${label}: source_coverage key ${key} is declared twice`);
+    const value = raw.trim();
+    if (value === "") {
+      coverage.set(key, []);
+      listKey = key;
+    } else {
+      const inline = /^\[(.*)\]$/.exec(value);
+      coverage.set(key, inline ? inline[1].split(",").map((id) => id.trim()).filter(Boolean) : [value]);
+      listKey = undefined;
+    }
+  }
+  return coverage;
+}
+
+/** MARS-273: file-level ucd_sources entries (file digest + UC-D ids per file), sorted. */
+function ucdSourceFileEntries(declarations: Map<string, UcdDeclaration>, read: (path: string) => string): Array<{ file: string; sha256: string; ucd_ids: string[] }> {
+  const files = new Map<string, { file: string; sha256: string; ucd_ids: string[] }>();
+  for (const [id, declaration] of declarations) {
+    const rel = relativePath(declaration.file);
+    const entry = files.get(rel) ?? { file: rel, sha256: createHash("sha256").update(read(declaration.file)).digest("hex"), ucd_ids: [] };
+    entry.ucd_ids.push(id);
+    files.set(rel, entry);
+  }
+  return [...files.values()]
+    .map((entry) => ({ ...entry, ucd_ids: [...new Set(entry.ucd_ids)].sort() }))
+    .sort((left, right) => left.file.localeCompare(right.file));
+}
+
+/** Collect `mapping_deferred: <reason>` declarations; P0 and contract/api UC-Ds may not defer. */
+function mappingDeferredEntries(ids: string[], declarations: Map<string, UcdDeclaration>): Array<{ id: string; reason: string }> {
+  const entries: Array<{ id: string; reason: string }> = [];
+  for (const id of ids) {
+    const declaration = declarations.get(id);
+    const deferred = declaration?.fields?.get("mapping_deferred");
+    if (deferred === undefined) continue;
+    if (Array.isArray(deferred)) {
+      fail(`mapping_deferred of UC-D ${id} must be a reason string in the frontmatter of its case file (${relativePath(declaration!.file)})`);
+    }
+    const reason = deferred.trim();
+    if (!reason) fail(`mapping_deferred of UC-D ${id} must declare a non-empty reason (${relativePath(declaration!.file)})`);
+    const priority = declaredField(declaration, "priority");
+    const kind = declaredField(declaration, "type");
+    if (priority === "p0") {
+      fail(`mapping_deferred is not allowed for P0 UC-D ${id}: P0 use cases must have their mapping in place before GREEN (${relativePath(declaration!.file)})`);
+    }
+    if (kind === "contract" || kind === "api") {
+      fail(`mapping_deferred is not allowed for ${kind} UC-D ${id}: contract-related use cases must have their mapping in place before GREEN (${relativePath(declaration!.file)})`);
+    }
+    entries.push({ id, reason });
+  }
+  return entries;
+}
+
+/** Lowercased single-value frontmatter field of a UC-D declaration. */
+function declaredField(declaration: UcdDeclaration | undefined, key: string): string | undefined {
+  const value = declaration?.fields?.get(key);
+  return typeof value === "string" ? value.trim().toLowerCase() : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// MARS-273 聚合层 source_coverage:覆盖对账收敛(正向覆盖 + 反向悬空)。
+// 逐条绑定(story_ref / scenario_ref / 溯源 Gherkin 副本)降级为分级可选后,
+// 来源与 UC-D 的覆盖对账只在聚合层执行一次:派生自逐用例 source_ref,声明于
+// _index.md 时机器校验其一致性。未声明时保持存量行为(零迁移兼容)。
+// ---------------------------------------------------------------------------
+
+/** 进入 I13 输入的稳定来源标识(REQ / STORY / US / NFR / CR),聚合层正向覆盖的对象。 */
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function unquoteValue(value: string): string {
+  const trimmed = value.trim();
+  const quoted = /^"(.*)"$|^'(.*)'$/.exec(trimmed);
+  return quoted ? quoted[1] ?? quoted[2] ?? "" : trimmed.replace(/\s+#.*$/, "").trim();
+}
+
+/** source_ref 的来源 token:`REQ-1`、`REQ-1, REQ-2` 或 `[REQ-1, REQ-2]` 均可;无 frontmatter 的用例文件回退正文行。 */
+function sourceRefTokens(declaration: UcdDeclaration | undefined): string[] {
+  let value: FrontmatterValue | undefined = declaration?.fields?.get("source_ref");
+  if (value === undefined && !declaration?.fields) {
+    const match = /^[^\S\n]*(?:[\s>*-]*\**`?)?source_ref\`?\**\s*[:：]\s*(.+)$/im.exec(declaration?.content ?? "");
+    if (match) value = match[1];
+  }
+  if (value === undefined) return [];
+  const parts = Array.isArray(value) ? value : [value];
+  return parts.flatMap((part) => part.split(/[,;，；、/\s]+/)).map((token) => token.trim()).filter(Boolean);
+}
+
+function normalizeSourceCoverage(coverage: Record<string, string[]>): Record<string, string[]> {
+  const entries = Object.entries(coverage)
+    .map(([source, ucds]): [string, string[]] => [source, [...new Set(ucds)].sort()])
+    .sort(([left], [right]) => left.localeCompare(right));
+  return Object.fromEntries(entries);
+}
+
+/** 逐 UC-D source_ref 聚合出的覆盖映射:source_id → 覆盖它的 UC-D 清单。 */
+function derivedSourceCoverage(ucdIds: string[], declarations: Map<string, UcdDeclaration>): Record<string, string[]> {
+  const coverage = new Map<string, string[]>();
+  for (const id of ucdIds) {
+    for (const source of sourceRefTokens(declarations.get(id))) {
+      const list = coverage.get(source) ?? [];
+      if (!list.includes(id)) list.push(id);
+      coverage.set(source, list);
+    }
+  }
+  return normalizeSourceCoverage(Object.fromEntries(coverage));
+}
+
+/** 极简 YAML 子集:source_coverage: 之下的 `key: [a, b]`、`key: value` 与 `key:` + `- item` 行。 */
+function yamlishSourceCoverage(block: string): Record<string, unknown> | null {
+  const lines = block.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^source_coverage\s*:\s*\{.*\}\s*$/.test(line) || /^source_coverage\s*:\s*$/.test(line));
+  if (start < 0) return null;
+  const flow = /^\s*source_coverage\s*:\s*(\{.*\})\s*$/.exec(lines[start]);
+  if (flow) {
+    try { return { source_coverage: JSON.parse(flow[1]) }; } catch { return null; }
+  }
+  const coverage: Record<string, string[]> = {};
+  let key: string | undefined;
+  for (const line of lines.slice(start + 1)) {
+    if (/^\S/.test(line)) break;
+    if (!line.trim() || /^\s*#/.test(line)) continue;
+    const item = /^\s+-\s+(.*)$/.exec(line);
+    if (item) {
+      if (key === undefined) fail(`source_coverage YAML list item does not belong to a source_id: ${line.trim()}`);
+      coverage[key].push(unquoteValue(item[1]));
+      continue;
+    }
+    const pair = /^\s+([^\s:]+)\s*:\s*(.*)$/.exec(line);
+    if (!pair) fail(`unsupported source_coverage YAML line: ${line.trim()}`);
+    key = pair[1];
+    const raw = pair[2].trim();
+    if (raw === "") {
+      coverage[key] = [];
+      continue;
+    }
+    const inline = /^\[(.*)\]$/.exec(raw);
+    coverage[key] = inline ? inline[1].split(",").map(unquoteValue).filter(Boolean) : [unquoteValue(raw)];
+  }
+  return { source_coverage: coverage };
+}
+
+/**
+ * MARS-273:_index.md 中独立的 source_coverage 声明块(JSON 或 YAML 形态),至多一个。
+ * 声明块用于人工聚合路径;未声明时覆盖对账走证据 JSON 的 producer 派生结果。
+ */
+function declaredSourceCoverage(indexPath: string): Record<string, string[]> | null {
+  const content = existsSync(indexPath) ? text(indexPath) : "";
+  if (!content) return null;
+  const blocks = [...content.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].map((match) => match[1].trim()).filter((block) => /source_coverage/.test(block));
+  if (blocks.length === 0) return null;
+  if (blocks.length > 1) fail(`source_coverage must be declared once in ${relativePath(indexPath)}, found ${blocks.length} declaration blocks`);
+  const label = relativePath(indexPath);
+  const block = blocks[0];
+  let value: unknown;
+  try {
+    const parsed: unknown = JSON.parse(block);
+    value = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>).source_coverage : undefined;
+  } catch {
+    value = yamlishSourceCoverage(block)?.source_coverage;
+  }
+  if (value === undefined) fail(`source_coverage declaration in ${label} must be a JSON object with a source_coverage key or a YAML source_coverage: mapping`);
+  if (value === null || typeof value !== "object" || Array.isArray(value)) fail(`source_coverage in ${label} must be an object of {source_id: [UC-D id, ...]}`);
+  const coverage: Record<string, string[]> = {};
+  for (const [source, ucds] of Object.entries(value as Record<string, unknown>)) {
+    if (!source.trim()) fail(`source_coverage in ${label} has an empty source_id key`);
+    const list = Array.isArray(ucds) ? ucds : typeof ucds === "string" ? [ucds] : null;
+    if (list === null || list.length === 0) fail(`source_coverage.${source} in ${label} must be a non-empty array of UC-D ids`);
+    const mapped: string[] = [];
+    for (const ucd of list) {
+      if (typeof ucd !== "string" || !ucd.trim()) fail(`source_coverage.${source} in ${label} contains a non-string or empty UC-D id`);
+      if (mapped.includes(ucd)) fail(`source_coverage.${source} in ${label} maps ${ucd} twice`);
+      mapped.push(ucd);
+    }
+    coverage[source] = mapped;
+  }
+  return normalizeSourceCoverage(coverage);
+}
+
+/**
+ * MARS-273 聚合层机器校验(仅声明了 source_coverage 时执行,存量零迁移兼容):
+ * 反向悬空(声明引用不存在的来源或用例,DANGLING_REF 类拦截)、与逐条 source_ref
+ * 聚合结果冲突(UC-D 声明为准)、正向覆盖(每个进入 I13 输入的来源至少映射一个
+ * status: ready 的 UC-D)。
+ */
+function validateSourceCoverage(declared: Record<string, string[]>, derived: Record<string, string[]>, sourceContent: string, sourceDefinitions: string[], ucdIds: string[], declarations: Map<string, UcdDeclaration>, indexPath: string): void {
+  const label = relativePath(indexPath);
+  const ready = new Set(ucdIds);
+  for (const [source, ucds] of Object.entries(declared)) {
+    if (!new RegExp(`\\b${escapeRegExp(source)}\\b`).test(sourceContent)) {
+      fail(`DANGLING_REF@source_coverage: ${source} is not a source of this I13 (declared in ${label})`);
+    }
+    for (const ucd of ucds) {
+      const declaration = declarations.get(ucd);
+      if (!declaration) fail(`DANGLING_REF@source_coverage: ${source} maps ${ucd}, which no case file declares (declared in ${label})`);
+      if (!ready.has(ucd) || declaration.status !== "ready") {
+        fail(`source_coverage: ${source} maps ${ucd}, whose status is ${declaration.status ?? "missing"}, not ready (declared in ${label})`);
+      }
+      if (!sourceRefTokens(declaration).includes(source)) {
+        fail(`source_coverage conflict: ${ucd} is declared to cover ${source}, but its own source_ref does not include that source (the UC-D declaration wins; fix the aggregate declaration in ${label})`);
+      }
+    }
+  }
+  const declaredJson = JSON.stringify(declared);
+  const derivedJson = JSON.stringify(derived);
+  if (declaredJson !== derivedJson) {
+    fail(`source_coverage declared in ${label} does not match the aggregate of the UC-D source_ref declarations: declared ${declaredJson} vs derived ${derivedJson}`);
+  }
+  const uncovered = sourceDefinitions.filter((source) => !(source in declared));
+  if (uncovered.length > 0) {
+    fail(`source_coverage must map every source of this I13 to at least one ready UC-D; uncovered: ${uncovered.join(", ")}`);
+  }
+}
+
+/**
+ * MARS-273 ucd_sources 新形态(逐文件,首选):每个用例文件一条
+ * {sha256, ucd_ids} 记录,key 为文件路径。旧逐 UC-D {file, sha256} 形态由
+ * 消费方(aidlc-source-deletions)双形态兼容;形态判别以 key 为准。
+ */
+function fileUcdSources(declarations: Map<string, UcdDeclaration>): Record<string, { sha256: string; ucd_ids: string[] }> {
+  const byFile = new Map<string, { file: string; ids: string[] }>();
+  for (const [id, declaration] of [...declarations].sort(([left], [right]) => left.localeCompare(right))) {
+    const key = relativePath(declaration.file);
+    const entry = byFile.get(key) ?? { file: declaration.file, ids: [] };
+    if (!entry.ids.includes(id)) entry.ids.push(id);
+    byFile.set(key, entry);
+  }
+  return Object.fromEntries([...byFile]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => [key, { sha256: createHash("sha256").update(text(entry.file)).digest("hex"), ucd_ids: entry.ids }]));
+}
+
+type UcdMode = { mode: "new" } | { mode: "characterization"; codeRefs: string[]; reason: string; approvalRef: string };
+
+const CHARACTERIZATION_FIELDS = ["code_refs", "reason", "approval_ref"] as const;
+
+/** Validate the `tdd_mode` contract (S2.1) of every UC-D and return its mode. */
+function ucdModes(ids: string[], declarations: Map<string, UcdDeclaration>): Map<string, UcdMode> {
+  const errors: string[] = [];
+  const modes = new Map<string, UcdMode>();
+  for (const id of ids) {
+    const declaration = declarations.get(id)!;
+    if (declaration.bodyTddMode) {
+      errors.push(`${id} declares tdd_mode outside a frontmatter block (${relativePath(declaration.file)}); tdd_mode, code_refs, reason and approval_ref belong in the UC-D frontmatter`);
+      continue;
+    }
+    const fields = declaration.fields || new Map<string, FrontmatterValue>();
+    const declared = fields.get("tdd_mode");
+    const mode = declared === undefined ? "new" : declared;
+    if (mode !== "new" && mode !== "characterization") {
+      errors.push(`${id} tdd_mode must be new or characterization, got ${JSON.stringify(declared)}`);
+      continue;
+    }
+    if (mode === "new") {
+      const extra = CHARACTERIZATION_FIELDS.filter((field) => fields.has(field));
+      if (extra.length > 0) errors.push(`${id} uses tdd_mode new and must not declare ${extra.join(", ")} (only characterization UC-Ds carry code_refs, reason and approval_ref)`);
+      else modes.set(id, { mode: "new" });
+      continue;
+    }
+    const codeRefs = fields.get("code_refs");
+    const reason = fields.get("reason");
+    const approvalRef = fields.get("approval_ref");
+    const missing: string[] = [];
+    if (!Array.isArray(codeRefs) || codeRefs.length === 0) missing.push("a non-empty code_refs list");
+    if (typeof reason !== "string" || reason.length === 0) missing.push("a non-empty reason");
+    if (typeof approvalRef !== "string" || approvalRef.length === 0) missing.push("a non-empty approval_ref");
+    if (missing.length > 0) errors.push(`${id} uses tdd_mode characterization and must declare ${missing.join(", ")}`);
+    else modes.set(id, { mode: "characterization", codeRefs: codeRefs as string[], reason: reason as string, approvalRef: approvalRef as string });
+  }
+  if (errors.length > 0) fail(`I13 UC-D tdd_mode contract violated: ${errors.join("; ")}`);
+  return modes;
+}
+
+const DEFECT_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+
+/**
+ * MARS-112: the optional `defect_ref` anchor of a UC-D (bugfix lightweight traceability).
+ * Frontmatter-only, like tdd_mode: a non-empty single token (bug ticket / defect REQ id,
+ * e.g. `BUG-123`, `MARS-112`, `REQ-DEFECT-7`) that anchors the reproduction UC-D to a
+ * traceable defect identity. Returns the ref of every UC-D that declares one (keyed by
+ * UC-D id); UC-Ds without the field are absent from the map. Rejects a `defect_ref` that
+ * sits in a body-only case file (frontmatter is the only place it may be declared) or is
+ * not a single clean token, mirroring the tdd_mode/unit_refs contract.
+ */
+// MARS-112 / MARS-116: read a single-token lightweight anchor from UC-D frontmatter.
+// `defect_ref` anchors a bugfix UC-D to a traceable defect id; `change_ref` anchors an
+// express/workshop UC-D to a traceable change identity (ticket / requirement item /
+// experiment goal id). Both share the same ASCII-token contract (DEFECT_REF_PATTERN) so
+// the token can be grep-reconciled against the delivered source at code-generation.
+function ucdAnchorRefs(ids: string[], declarations: Map<string, UcdDeclaration>, anchorField: "defect_ref" | "change_ref"): Map<string, string> {
+  const errors: string[] = [];
+  const refs = new Map<string, string>();
+  for (const id of ids) {
+    const declaration = declarations.get(id)!;
+    const fields = declaration.fields;
+    if (!fields) {
+      // body-only case file: a stray `<anchorField>:` line in the body must not pass silently.
+      if (declaredValue(text(declaration.file), anchorField) !== undefined) {
+        errors.push(`${id} declares ${anchorField} outside a frontmatter block (${relativePath(declaration.file)}); ${anchorField} belongs in the UC-D frontmatter`);
+      }
+      continue;
+    }
+    const value = fields.get(anchorField);
+    if (value === undefined) continue;
+    if (Array.isArray(value) || typeof value !== "string" || value.length === 0) {
+      errors.push(`${id} ${anchorField} must be a single non-empty token, got ${JSON.stringify(value)}`);
+      continue;
+    }
+    if (!DEFECT_REF_PATTERN.test(value)) {
+      errors.push(`${id} ${anchorField} ${JSON.stringify(value)} is not a valid anchor token (letters, digits, . _ - / only)`);
+      continue;
+    }
+    refs.set(id, value);
+  }
+  if (errors.length > 0) fail(`I13 UC-D ${anchorField} contract violated: ${errors.join("; ")}`);
+  return refs;
+}
+
+/**
+ * MARS-112 / MARS-116: traceability-matrix for lightweight scopes that skip
+ * requirements-analysis and so have no requirements.md root. Returns null for any other
+ * scope (the caller then keeps the historical not_applicable). The anchor is the scope's
+ * own source of truth, so the gate is no longer a determinate no-op:
+ *
+ *   - bugfix:            at least one tdd_mode new UC-D must declare a `defect_ref`; once
+ *                        the code_refs layer (code-generation) is reached, the delivered
+ *                        source must reference that defect anchor.
+ *   - express/workshop:  at least one tdd_mode new UC-D must declare a `change_ref`
+ *                        (same new-UC-D anchor mechanism as bugfix, semantically neutral:
+ *                        a ticket / requirement item / experiment goal id); reconciled
+ *                        against the delivered source at code-generation, same as bugfix.
+ *   - refactor:          at least one tdd_mode characterization UC-D must declare a
+ *                        non-empty `code_refs` list (the baseline anchor MARS-104 already
+ *                        requires).
+ *
+ * A missing anchor or an unreferenced anchor is a broken_row the gate rejects.
+ */
+const NEW_UCD_ANCHOR_FIELD: Record<string, "defect_ref" | "change_ref"> = {
+  bugfix: "defect_ref",
+  express: "change_ref",
+  workshop: "change_ref",
+};
+
+function lightweightScopeMatrix(
+  currentStage: string,
+  currentOrder: number,
+  mod: (rel: string) => string,
+  read: (rel: string) => string,
+): Record<string, unknown> | null {
+  const scope = (workflowState?.scope || "").toLowerCase();
+  const anchorField = NEW_UCD_ANCHOR_FIELD[scope];
+  if (!anchorField && scope !== "refactor") return null;
+
+  const caseFiles = allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/)
+    .filter((path) => basename(path) !== "_index.md");
+  const declarations = ucdDeclarations(caseFiles);
+  const ucdIds = [...declarations.keys()].sort();
+  const brokenRows: string[] = [];
+  const base: Record<string, unknown> = {
+    status: "passed",
+    module_id: ACTIVE_MODULE,
+    current_stage: currentStage,
+    scope,
+    lightweight_anchor: anchorField ?? "code_refs",
+    ucd_total: ucdIds.length,
+    migration_status: "passed",
+  };
+
+  if (ucdIds.length === 0) {
+    // No UC-D at all: the I13/i13 contract (a new-behaviour lightweight scope needs a new
+    // UC-D, a refactor a characterization one) rejects this upstream, but the matrix must
+    // not pass blindly.
+    brokenRows.push(`${scope}: ANCHOR_MISSING@ucd(no UC-D declared; cannot anchor lightweight traceability)`);
+    return { ...base, broken_rows: brokenRows, anchored_ucds: [] };
+  }
+
+  const modes = ucdModes(ucdIds, declarations);
+
+  if (anchorField) {
+    // bugfix / express / workshop: a new-behaviour UC-D carries the source anchor token.
+    const anchorRefs = ucdAnchorRefs(ucdIds, declarations, anchorField);
+    const newUcds = ucdIds.filter((id) => modes.get(id)!.mode === "new");
+    const anchoredNew = newUcds.filter((id) => anchorRefs.has(id));
+    if (anchoredNew.length === 0) {
+      brokenRows.push(`${scope}: ANCHOR_MISSING@${anchorField}(no tdd_mode new UC-D declares a ${anchorField} anchoring the change to a traceable identity)`);
+    } else if (currentOrder >= MATRIX_STAGE_ORDER.indexOf("code-generation")) {
+      // Reconcile the anchor against the delivered source once code-generation is reached:
+      // at least one anchor token must appear in the module's own source roots.
+      let codeRoots: { roots: string[]; origin: string };
+      try {
+        codeRoots = resolveSourceRoots(ROOT, ACTIVE_MODULE);
+      } catch (error) {
+        fail(`traceability-matrix cannot resolve the source roots of module ${ACTIVE_MODULE}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const codeFiles = codeRoots!.origin === "default"
+        ? projectFiles(SOURCE_FILE_PATTERN)
+        : [...new Set(codeRoots!.roots.flatMap((root) => allFiles(root, SOURCE_FILE_PATTERN)))].sort();
+      const codeSrc = joined(codeFiles) + "\n" + deletionTraceText(ROOT, ACTIVE_MODULE, ACTIVE_UNIT);
+      const anchors = [...new Set(anchoredNew.map((id) => anchorRefs.get(id)!))];
+      const referenced = anchors.filter((anchor) => new RegExp(`\\b${anchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(codeSrc));
+      if (referenced.length === 0) {
+        brokenRows.push(`${scope}: ANCHOR_UNREFERENCED@code_refs(delivered source does not reference any ${anchorField} anchor ${anchors.join(", ")})`);
+      }
+    }
+    return {
+      ...base,
+      broken_rows: brokenRows,
+      new_ucds: newUcds,
+      anchored_ucds: anchoredNew,
+      [`${anchorField}s`]: Object.fromEntries([...anchorRefs].sort(([left], [right]) => left.localeCompare(right))),
+    };
+  }
+
+  // refactor: the characterization code_refs are the baseline anchor.
+  const characterizationUcds = ucdIds.filter((id) => modes.get(id)!.mode === "characterization");
+  const anchored = characterizationUcds.filter((id) => {
+    const mode = modes.get(id)!;
+    return mode.mode === "characterization" && mode.codeRefs.length > 0;
+  });
+  if (anchored.length === 0) {
+    brokenRows.push("refactor: ANCHOR_MISSING@code_refs(no tdd_mode characterization UC-D declares a code_refs baseline anchor)");
+  }
+  const codeRefs = [...new Set(characterizationUcds.flatMap((id) => {
+    const mode = modes.get(id)!;
+    return mode.mode === "characterization" ? mode.codeRefs : [];
+  }))].sort();
+  return {
+    ...base,
+    broken_rows: brokenRows,
+    characterization_ucds: characterizationUcds,
+    anchored_ucds: anchored,
+    code_refs: codeRefs,
+  };
+}
+
+/**
+ * The `unit_refs` contract (4.8.0): optional and frontmatter-only, like tdd_mode. Each
+ * declaration is a non-empty list of distinct unit ids of the module's unit manifest;
+ * once one UC-D of the module declares it, every UC-D must (no "which unit owns an
+ * undeclared UC-D" ambiguity). Returns the I13 `ucd_units`, or undefined when no UC-D
+ * declares unit_refs (every UC-D then belongs to every unit, the 4.7.1 behaviour).
+ */
+function ucdUnitRefs(ids: string[], declarations: Map<string, UcdDeclaration>, sourceArtifacts: Array<{ path: string; content: string }>): { ucd_units: Record<string, string[]>; unit_scope_source?: string } | undefined {
+  const errors: string[] = [];
+  const declared = new Map<string, FrontmatterValue>();
+  for (const id of ids) {
+    const declaration = declarations.get(id)!;
+    if (declaration.bodyUnitRefs) {
+      errors.push(`${id} declares unit_refs outside a frontmatter block (${relativePath(declaration.file)}); unit_refs belongs in the UC-D frontmatter`);
+      continue;
+    }
+    const value = declaration.fields?.get("unit_refs");
+    if (value !== undefined) declared.set(id, value);
+  }
+  if (errors.length === 0 && declared.size === 0) {
+    const prior = i13Evidence();
+    // Published legacy evidence is never reinterpreted on read. A controlled fresh
+    // derivation opts in; evidence already using inference must reproduce its scope.
+    if (prior && prior.unit_scope_source !== "manifest_req_refs" && process.env.AIDLC_I13_DERIVATION_MODE !== "fresh") return undefined;
+    if (!existsSync(unitManifestPath(ROOT, ACTIVE_MODULE!))) return undefined;
+    const manifest = readUnitManifest(ROOT, ACTIVE_MODULE!);
+    if (manifest.length < 2 && prior?.unit_scope_source !== "manifest_req_refs") return undefined;
+    return { ucd_units: inferUcdUnitOwnership(new Map(ids.map(id => [id, sourceRefTokens(declarations.get(id))])), manifest, i13SourceDefinitions(sourceArtifacts)), unit_scope_source: "manifest_req_refs" };
+  }
+  let known: string[] = [];
+  if (declared.size > 0) {
+    try {
+      known = readUnitManifest(ROOT, ACTIVE_MODULE!).map((unit) => unit.unit_id);
+    } catch (error) {
+      errors.push(`unit_refs requires a readable unit manifest for module ${ACTIVE_MODULE}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const units: Record<string, string[]> = {};
+  for (const id of ids) {
+    if (!declared.has(id)) continue;
+    const value = declared.get(id)!;
+    if (!Array.isArray(value) || value.length === 0) {
+      errors.push(`${id} unit_refs must be a non-empty list of unit ids, e.g. unit_refs: [u1]`);
+      continue;
+    }
+    const repeated = [...new Set(value.filter((unit, index) => value.indexOf(unit) !== index))];
+    for (const unit of repeated) errors.push(`${id} unit_refs lists ${unit} more than once`);
+    if (known.length > 0) {
+      for (const unit of value.filter((candidate) => !known.includes(candidate))) errors.push(`${id} unit_refs names unknown unit ${unit} (units of ${ACTIVE_MODULE}: ${known.join(", ")})`);
+    }
+    units[id] = [...new Set(value)];
+  }
+  const missing = ids.filter((id) => !declared.has(id) && !declarations.get(id)!.bodyUnitRefs);
+  if (declared.size > 0 && missing.length > 0) errors.push(`unit_refs must be declared by every UC-D of the module once one declares it; missing: ${missing.join(", ")}`);
+  if (errors.length > 0) fail(`I13 UC-D unit_refs contract violated: ${errors.join("; ")}`);
+  return { ucd_units: units };
+}
+
+/**
+ * `characterization[]` and `baseline_commit` (S2.2), only when a UC-D uses
+ * characterization. Requires a git repository and a registered, reachable workflow
+ * baseline (the parent's for a module sub-workflow); every code ref must be a regular
+ * file of the baseline inside the source roots, and every symbol must occur in it.
+ * A bugfix needs at least one new UC-D reproducing the bug.
+ */
+function characterizationEvidence(ids: string[], modes: Map<string, UcdMode>): Record<string, unknown> {
+  const characterized = ids.filter((id) => modes.get(id)!.mode === "characterization");
+  if (workflowState?.scope === "bugfix" && characterized.length === ids.length) {
+    fail("a bugfix workflow needs at least one tdd_mode new UC-D that reproduces the bug; only characterization UC-Ds were declared");
+  }
+  if (workflowState?.scope === "refactor" && characterized.length === 0) {
+    fail("a refactor workflow needs at least one tdd_mode characterization UC-D bound to the workflow baseline; declare tdd_mode: characterization with code_refs/reason/approval_ref on the UC-Ds that change existing behavior");
+  }
+  if (characterized.length === 0) return {};
+  const repository = gitWorkTreeError(ROOT);
+  if (repository) fail(`tdd_mode characterization requires a git repository with a workflow baseline: ${repository}`);
+  let baseline: ReturnType<typeof workflowBaselineForModule>;
+  try {
+    baseline = workflowBaselineForModule(ROOT, ACTIVE_MODULE);
+  } catch (error) {
+    fail(`tdd_mode characterization cannot resolve the workflow baseline: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const baselineErrors = baselineCommitErrors(ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
+  if (baselineErrors.length > 0 || !baseline.registered) fail(`tdd_mode characterization requires a usable workflow baseline: ${baselineErrors.join("; ")}`);
+  // 4.7.0: I13 binds epoch 0 of the baseline chain (the baseline itself when it was
+  // never advanced), so a refresh after orchestrate baseline --advance reproduces it.
+  const epoch0 = baseline.epochs[0];
+  const roots = resolveSourceRoots(ROOT, ACTIVE_MODULE).roots;
+  // 4.9.0: a code ref of a nested repository binds that repository's start epoch (the
+  // epoch it was registered in); workflow-repository refs keep binding epoch 0.
+  let nested: string[] = [];
+  try {
+    nested = nestedSourceRepos(ROOT);
+  } catch (error) {
+    fail(`tdd_mode characterization cannot use the nested source repositories: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const extra = extraRepoKeyErrors(baseline, nested);
+  if (extra.length > 0) fail(`tdd_mode characterization requires a usable workflow baseline: ${extra.join("; ")}`);
+  const registered = Object.keys(baseline.repos).length > 0;
+  const startRepos = Object.fromEntries(Object.entries(baseline.repos).map(([key, chain]) => [key, chain.commits[0]]));
+  const errors: string[] = [];
+  const pending = new Set<string>();
+  const entries = characterized.map((id) => {
+    const mode = modes.get(id) as Extract<UcdMode, { mode: "characterization" }>;
+    const codeRefs = mode.codeRefs.flatMap((value) => {
+      let ref: CodeRef;
+      try {
+        ref = parseCodeRef(value, roots, `${id} code_refs`);
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+        return [];
+      }
+      const repo = codeRefRepo(ROOT, ref.path, nested);
+      if (repo.repoKey !== WORKFLOW_REPO_KEY && !(repo.repoKey in startRepos)) {
+        pending.add(repo.repoKey);
+        return [];
+      }
+      const commit = repo.repoKey === WORKFLOW_REPO_KEY ? epoch0 : startRepos[repo.repoKey];
+      const resolved = baselineCodeRef(ROOT, commit, ref, `${id} code_refs ${JSON.stringify(value)}`, repo);
+      if ("error" in resolved) {
+        errors.push(resolved.error);
+        return [];
+      }
+      return [{ path: ref.path, ...(ref.symbol === undefined ? {} : { symbol: ref.symbol }), ...(registered ? { repo: repo.repoKey } : {}), baseline_blob: resolved.blob }];
+    });
+    return { ucd: id, code_refs: codeRefs, reason: mode.reason, approval_ref: mode.approvalRef };
+  });
+  if (pending.size > 0) errors.push(pendingNestedError(ROOT, baseline.commit, [...pending].sort()));
+  if (errors.length > 0) fail(`I13 characterization code_refs rejected: ${errors.join("; ")}`);
+  // 4.10.0: a module with an adoption baseline records it; evidence without baseline_kind is "workflow".
+  const kind = baseline.kind === "adoption" ? { baseline_kind: "adoption" } : {};
+  return registered ? { characterization: entries, baseline_commit: epoch0, baseline_repos: startRepos, ...kind } : { characterization: entries, baseline_commit: epoch0, ...kind };
+}
+
+async function testQuality(): Promise<Record<string, unknown>> {
+  const current = i13Evidence();
+  const allI13 = current ? [current] : evidenceRecords("test-case-derivation", "test-case-derivation");
+  if (allI13.length === 0) fail("I13 evidence is missing for test-quality");
+  if (allI13.every((record) => record.status === "not_applicable")) {
+    const alternative = allI13.find((record) => typeof record.alternative_validation === "string")?.alternative_validation;
+    return { status: "not_applicable", not_applicable_reason: "I13 declared no executable business behavior", alternative_validation: alternative || "controlled alternative validation", red_seen: false, green_seen: false, tests_total: 0, tests_failed: 0, traceability_complete: true, uc_mapping: [] };
+  }
+  const caseFiles = ACTIVE_MODULE
+    ? allFiles("docs/aidlc/inception/application-design/test-cases", /\.md$/)
+    : allFiles("docs/aidlc/modules", /test-cases[\\/].*\.md$/);
+  if (caseFiles.length === 0) fail("UC-D test case files are missing");
+  const inUnit = (record: Record<string, unknown>) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT));
+  let greenRecords = evidenceRecords("code-generation", "green-test-evidence").filter(inUnit);
+  let redRecords = evidenceRecords("tdd", "red-test-evidence").filter(inUnit);
+  let baselineRecords = evidenceRecords("tdd", "baseline-test-evidence").filter(inUnit);
+  // The producer always supplies ACTIVE_STAGE. Removing phase metadata cannot
+  // downgrade a publishing run to the legacy read-only annotation diagnostic.
+  const controlledPhases = Boolean(process.env.AIDLC_ACTIVE_STAGE?.trim()) || [...greenRecords, ...redRecords, ...baselineRecords]
+    .some(record => ["producer", "observed_command", "source_revision", "checker", "evidence_version"].some(field => record[field] !== undefined));
+  if (controlledPhases) {
+    // Validation and mapping consumption must use the same canonical files, not a
+    // similarly named extra JSON record elsewhere in the evidence tree.
+    const canonical = (records: Record<string, unknown>[], stage: string, sensor: string) => {
+      const result = new Map<string, Record<string, unknown>>();
+      for (const record of records) {
+        const moduleId = String(record.module_id ?? ACTIVE_MODULE ?? "");
+        const unitId = String(record.unit_id ?? ACTIVE_UNIT ?? "");
+        if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(moduleId) || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(unitId)) fail(`${sensor} mapping requires valid module_id and unit_id`);
+        const key = `${moduleId}/${unitId}`;
+        if (!result.has(key)) result.set(key, jsonFile(join(ROOT, ".aidlc", "evidence", stage, moduleId, unitId, `${sensor}.json`)));
+      }
+      return [...result.values()];
+    };
+    greenRecords = canonical(greenRecords, "code-generation", "green-test-evidence");
+    redRecords = canonical(redRecords, "tdd", "red-test-evidence");
+    baselineRecords = canonical(baselineRecords, "tdd", "baseline-test-evidence");
+  }
+  // 4.8.0: in a unit context with I13 ucd_units only the unit's own UC-Ds count.
+  const unitScope = ACTIVE_UNIT && current?.status === "required" ? unitUcdIds(current, ACTIVE_UNIT) : null;
+  if (unitScope?.scoped && unitScope.all.length === 0) return emptyUnitTestQuality(redRecords, baselineRecords, greenRecords);
+  const inScope = (useCase: string) => !unitScope?.scoped || unitScope.all.includes(/^UC-D-\d+/.exec(useCase)?.[0] || useCase);
+  const publishedCases = allI13.flatMap(record => Array.isArray(record.ucd_ids) ? record.ucd_ids.filter((id): id is string => typeof id === "string") : []);
+  const cases = [...new Set(publishedCases.length ? publishedCases : ids(joined(caseFiles), /\bUC-D-\d+\b/g))].filter(inScope);
+  if (cases.length === 0) fail("no UC-D identifiers found in test case files");
+  if (greenRecords.length === 0) fail("GREEN evidence is missing for test-quality");
+  if (redRecords.length === 0) fail("RED evidence is missing for test-quality");
+  const greenRequired = greenRecords.filter((record) => record.status === "passed");
+  if (greenRequired.length === 0 || greenRequired.some((record) => record.phase !== "GREEN" || record.tests_failed !== 0)) fail("GREEN evidence is not passing");
+  // 4.6.0 S3b: RED is demanded by the tdd_mode new UC-Ds and BASELINE by the
+  // characterization UC-Ds of each module's required I13 (without ucd_modes every UC-D
+  // is new); 4.8.0: of the unit's own subset when I13 declares ucd_units.
+  const requiredI13 = new Map<string, Record<string, unknown>>();
+  for (const record of allI13.filter((value) => value.status === "required")) requiredI13.set(String(record.module_id ?? ACTIVE_MODULE ?? ""), record);
+  const modesByModule = new Map<string, { new: string[]; characterization: string[] }>();
+  for (const [moduleId, record] of requiredI13) modesByModule.set(moduleId, unitScope && moduleId === String(current?.module_id ?? ACTIVE_MODULE ?? "") ? unitScope : i13UcdIdsByMode(record));
+  const modesOf = (record: Record<string, unknown>) => {
+    const i13 = requiredI13.get(String(record.module_id ?? ACTIVE_MODULE ?? ""));
+    return i13 ? unitUcdIds(i13, typeof record.unit_id === "string" ? record.unit_id : undefined) : undefined;
+  };
+  const ownerLabel = (record: Record<string, unknown>, modes: { scoped?: boolean } | undefined) => `module ${String(record.module_id)}${modes?.scoped ? ` unit ${String(record.unit_id)}` : ""}`;
+  for (const record of redRecords) {
+    const modes = modesOf(record);
+    if (modes && modes.new.length === 0) {
+      if (record.status !== "not_required" || record.phase !== "RED") fail(`RED evidence of ${ownerLabel(record, modes)} must be not_required: ${modes.scoped ? "the unit owns" : "its I13 declares"} no tdd_mode new UC-D`);
+    } else if (record.status !== "failed" || record.phase !== "RED" || record.failure_class !== "behavior") {
+      fail("RED evidence is not a controlled behavior failure");
+    }
+  }
+  for (const [moduleId, modes] of modesByModule) {
+    if (modes.characterization.length === 0) continue;
+    if (!baselineRecords.some((record) => String(record.module_id ?? ACTIVE_MODULE ?? "") === moduleId)) fail(`BASELINE evidence is missing for test-quality: module ${moduleId} declares tdd_mode characterization UC-Ds (${modes.characterization.join(", ")})`);
+  }
+  for (const record of baselineRecords) {
+    const modes = modesOf(record);
+    if (modes && modes.characterization.length > 0) {
+      if (record.status !== "passed" || record.phase !== "BASELINE" || record.tests_failed !== 0) fail(`BASELINE evidence of ${ownerLabel(record, modes)} is not passing for the tdd_mode characterization UC-Ds (${modes.characterization.join(", ")})`);
+    } else if (record.status !== "not_required") {
+      fail(`BASELINE evidence of ${ownerLabel(record, modes)} must be not_required: ${modes?.scoped ? "the unit owns" : "its I13 declares"} no tdd_mode characterization UC-D`);
+    }
+  }
+  // 4.8.0 module close-out (no unit context): every UC-D of an I13 with ucd_units is in
+  // the GREEN of every unit its unit_refs name.
+  const coverage: Record<string, unknown>[] = [];
+  if (!ACTIVE_UNIT) {
+    for (const [moduleId, record] of requiredI13) {
+      const ucdUnits = i13UcdUnits(record);
+      if (!ucdUnits) continue;
+      const green = new Map<string, string[]>();
+      for (const value of greenRecords.filter((candidate) => String(candidate.module_id ?? ACTIVE_MODULE ?? "") === moduleId && candidate.status === "passed")) green.set(String(value.unit_id), greenCoveredUcds(value));
+      const gaps = ucdCoverageGaps(record, green);
+      if (gaps.length > 0) fail(`module ${moduleId} UC-D coverage is incomplete: ${gaps.join("; ")}`);
+      coverage.push({ module_id: moduleId, ucd_units: ucdUnits, status: "passed" });
+    }
+  }
+  const modes = [...modesByModule.values()];
+  const redSeen = modes.length === 0 || modes.some((mode) => mode.new.length > 0);
+  const baselineSeen = modes.some((mode) => mode.characterization.length > 0);
+  // MARS-271 分级映射准入:mapping_deferred UC-D 免于测试源码映射检查,但以 mapping_debt
+  // 形式在 test-quality 证据中独立可见,映射债不随时间静默消失。
+  const deferredEntries = current ? i13MappingDeferred(current) : [...requiredI13.values()].flatMap(i13MappingDeferred);
+  const deferredIds = new Set(deferredEntries.map((entry) => entry.id));
+  const observedMappings = new Map<string, string[]>();
+  if (controlledPhases) {
+    // Phase-only validation binds the real observation, allowlist and source/test
+    // inputs without recursively running test-quality or unrelated stage sensors.
+    const graph = loadGraph();
+    const alternativeValidationEnvironment = semanticValidationEnvironment();
+    const checkedTdd = new Set<string>();
+    for (const record of greenRecords) {
+      const moduleId = typeof record.module_id === "string" ? record.module_id : ACTIVE_MODULE;
+      const unitId = typeof record.unit_id === "string" ? record.unit_id : ACTIVE_UNIT;
+      if (!moduleId || !unitId) fail("controlled GREEN mapping requires module_id and unit_id");
+      const state = loadWorkflowView(ROOT, moduleId);
+      if (!state) fail(`workflow is missing for controlled GREEN mapping of ${moduleId}/${unitId}`);
+      const context = { module_id: moduleId, unit_id: unitId };
+      const green = makeInstance(graph.stages.find(stage => stage.slug === "code-generation")!, "unit", context);
+      const failures = checkPhaseSensors(green, state, { onlySensors: ["green-test-evidence"], allowDownstreamReportDrift: true, alternativeValidationEnvironment });
+      const key = `${moduleId}/${unitId}`;
+      if (!checkedTdd.has(key)) {
+        const tdd = makeInstance(graph.stages.find(stage => stage.slug === "tdd")!, "unit", context);
+        const completingGreen = workflowState?.current_stage === "code-generation" && !state.completed_stage_instances.includes(green.instance_id);
+        failures.push(...await checkHistoricalTddSensors(tdd, state, { onlySensors: ["red-test-evidence", "baseline-test-evidence"], requireCurrentBaselineEpoch: completingGreen, alternativeValidationEnvironment }));
+        checkedTdd.add(key);
+      }
+      if (failures.length) fail(`test-quality cannot reuse unverified phase mapping for ${key}: ${failures.map(failure => `${failure.sensor}: ${failure.message}`).join("; ")}`);
+      if (record.status !== "passed") continue;
+      for (const entry of record.uc_mapping as Array<Record<string, unknown>>) {
+        if (typeof entry.use_case !== "string" || !Array.isArray(entry.test_methods) || !entry.test_methods.length
+          || entry.test_methods.some(method => typeof method !== "string" || !method.trim())) fail("controlled GREEN uc_mapping must give non-empty test_methods for every use_case");
+        observedMappings.set(entry.use_case, [...new Set([...(observedMappings.get(entry.use_case) || []), ...entry.test_methods as string[]])]);
+      }
+    }
+  }
+  // Older direct semantic checks may still use source annotations. One index is
+  // shared by all active UC-Ds; verified observations need no source-label scan.
+  let legacyMapping: Map<string, string[]> | undefined;
+  const mapping = cases.filter((useCase) => !deferredIds.has(useCase)).map((useCase) => {
+    const observed = observedMappings.get(useCase);
+    if (observed) return { use_case: useCase, test_methods: observed };
+    if (controlledPhases) fail(`${useCase} has no verified GREEN test mapping`);
+    legacyMapping ??= indexedTestMappings(testQualitySourceFiles(), text);
+    const matches = legacyMapping.get(useCase) || [];
+    if (matches.length === 0) fail(`${useCase} has no test source mapping`);
+    return { use_case: useCase, test_methods: matches.map(relativePath) };
+  });
+  const testsTotal = greenRequired.reduce((total, record) => total + numberValue(record.tests_total, "green-test-evidence.tests_total"), 0);
+  return { status: "passed", red_seen: redSeen, baseline_seen: baselineSeen, green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping, ...(deferredEntries.length > 0 ? { mapping_debt: deferredEntries } : {}), ...(coverage.length > 0 ? { ucd_coverage: coverage } : {}) };
+}
+
+function testQualitySourceFiles(): string[] {
+  const files = projectFiles(TEST_FILE_PATTERN);
+  if (!ACTIVE_MODULE || !ACTIVE_UNIT) return files;
+  // Reuse the approved ownership/dependency rules. Unknown/shared files retain
+  // conservative coverage; only proven private inputs of other units are omitted.
+  const scope = evidenceScopeForInstance(ROOT, `code-generation@module:${ACTIVE_MODULE}@unit:${ACTIVE_UNIT}`);
+  return files.filter(path => !scope.exclude(relativePath(path).replace(/\\/g, "/")));
+}
+
+/**
+ * test-quality of a unit whose UC-D subset is empty (4.8.0): nothing maps to tests, so
+ * the result is not_applicable, but only after its RED / BASELINE / GREEN are the
+ * controlled ucd_exemption not_required records (the gate re-checks them).
+ */
+function emptyUnitTestQuality(red: Record<string, unknown>[], baseline: Record<string, unknown>[], green: Record<string, unknown>[]): Record<string, unknown> {
+  const label = `unit ${ACTIVE_UNIT} of module ${ACTIVE_MODULE}`;
+  let exemption: Record<string, unknown> | undefined;
+  for (const [phase, records] of [["RED", red], ["BASELINE", baseline], ["GREEN", green]] as const) {
+    if (records.length === 0) fail(`${phase} evidence is missing for test-quality of ${label}`);
+    const record = records[records.length - 1];
+    const declared = record.ucd_exemption && typeof record.ucd_exemption === "object" ? record.ucd_exemption as Record<string, unknown> : undefined;
+    if (record.status !== "not_required" || record.phase !== phase || !declared) fail(`${phase} evidence of ${label} must be the ucd_exemption not_required record: the unit owns no UC-D`);
+    exemption = declared;
+  }
+  return {
+    status: "not_applicable",
+    not_applicable_reason: `${label} owns no UC-D (ucd_exemption ${String(exemption!.reason_code)}: ${String(exemption!.reason)})`,
+    alternative_validation: String(exemption!.alternative_validation),
+    red_seen: false,
+    green_seen: false,
+    tests_total: 0,
+    tests_failed: 0,
+    traceability_complete: true,
+    uc_mapping: [],
+  };
+}
+
+function phaseEvidenceCheck(sensor: "red-test-evidence" | "green-test-evidence" | "baseline-test-evidence"): Record<string, unknown> {
+  const phase = sensor === "red-test-evidence" ? "RED" : sensor === "green-test-evidence" ? "GREEN" : "BASELINE";
+  const stage = phase === "GREEN" ? "code-generation" : "tdd";
+  const records = evidenceRecords(stage, sensor).filter((record) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT)));
+  if (records.length === 0) fail(`${sensor} evidence is missing`);
+  const record = records[records.length - 1];
+  if (record.status === "not_applicable") {
+    stringValue(record.not_applicable_reason, `${sensor}.not_applicable_reason`);
+    stringValue(record.alternative_validation, `${sensor}.alternative_validation`);
+    return record;
+  }
+  // RED / BASELINE without a UC-D of their tdd_mode, or (4.8.0) any phase of a unit whose
+  // UC-D subset is empty (ucd_exemption); the orchestrator gate re-derives this from I13.
+  if (record.status === "not_required" && (phase !== "GREEN" || record.ucd_exemption !== undefined)) {
+    if (record.phase !== phase || !Array.isArray(record.ucd_ids) || record.ucd_ids.length !== 0) fail(`${sensor} not_required evidence must have phase ${phase} and empty ucd_ids`);
+    return record;
+  }
+  if (record.phase !== phase || record.compile_status !== "passed" || record.environment_status !== "passed" || record.traceability_complete !== true) fail(`${sensor} evidence has invalid phase, compile, environment, or traceability status`);
+  // MARS-271: test_filter 只允许 RED 收敛迭代;GREEN/BASELINE 最终证据强制全量。
+  if (phase !== "RED" && typeof record.test_filter === "string" && record.test_filter.trim().length > 0) {
+    fail(`${sensor} evidence must be a full run; test_filter is only allowed for RED convergence iterations`);
+  }
+  numberValue(record.tests_total, `${sensor}.tests_total`);
+  const failed = numberValue(record.tests_failed, `${sensor}.tests_failed`);
+  if (phase === "RED" && (record.status !== "failed" || record.failure_class !== "behavior" || failed < 1)) fail("RED evidence is not a behavior failure");
+  if (phase !== "RED" && (record.status !== "passed" || failed !== 0)) fail(`${phase} evidence is not passing`);
+  if (!Array.isArray(record.uc_mapping) || record.uc_mapping.length === 0) fail(`${sensor}.uc_mapping must be non-empty`);
+  return record;
+}
+
+function contractBaseline(): Record<string, unknown> {
+  const pattern = /(?:contracts?|openapi|swagger|schema|\.proto$|\.avsc$)/i;
+  // 4.8.1: in a module context only the module scope (and its declared contract_paths,
+  // matched or not) is collected; a project-level contract table contributes only the
+  // rows of the module's contracts and is not a source when it has none.
+  const files = (ACTIVE_MODULE ? moduleScopedFiles(pattern, { declaredContracts: "all" }) : projectFiles(pattern)).filter((path) => !path.includes("core/"));
+  const tableModules = ACTIVE_MODULE && files.some(isContractTable) ? activeModuleManifest().modules : [];
+  const sources: Array<{ path: string; content: string; table?: ModuleContractRows }> = [];
+  for (const path of files) {
+    if (!ACTIVE_MODULE || !isContractTable(path)) {
+      sources.push({ path, content: text(path) });
+      continue;
+    }
+    const table = contractTableRowsForModule(text(path), tableModules, ACTIVE_MODULE);
+    if (table.rows.length > 0) sources.push({ path, content: table.lines.join("\n"), table });
+  }
+  if (sources.length === 0) fail("no contract schema file found");
+  const nonTableSources = sources.filter((source) => !source.table);
+  for (const source of nonTableSources) noUnresolved(source.content, relativePath(source.path));
+  const documents = nonTableSources.map((source) => source.content).join("\n");
+  const tables = sources.flatMap((source) => (source.table ? [source.table] : []));
+  for (const table of tables) noUnresolved(table.rows.join("\n"), "contract table rows");
+  const content = sources.map((source) => source.content).join("\n");
+  const owner = documents.match(/(?:owner|负责人|所有者)\s*[:：|]\s*([^\n|]+)/i)?.[1]?.trim()
+    || tables.flatMap((table) => table.providers)[0];
+  const documentConsumers = documents.match(/(?:consumers?|消费者|下游)\s*[:：|]\s*([^\n]+)/i)?.[1]?.split(/[,，、|]/).map((item) => item.trim()).filter(Boolean) || [];
+  const consumers = documentConsumers.length > 0 ? documentConsumers : [...new Set(tables.flatMap((table) => table.consumers))];
+  if (!owner) fail("contract owner is missing");
+  if (consumers.length === 0) fail("contract consumers are missing");
+  if (!/version|版本|compat|兼容|schema/i.test(content)) fail("contract compatibility/version information is missing");
+  const schema = sources.map((source) => `${relativePath(source.path)}\n${source.content}`).join("\n");
+  const schemaHash = `sha256:${createHash("sha256").update(schema).digest("hex")}`;
+  const first = sources[0].path;
+  const extension = first.split(".").pop()?.toLowerCase();
+  const contractType = extension === "proto" ? "proto" : /openapi|swagger/i.test(relativePath(first)) ? "api" : "schema";
+  return { status: "verified", contract_id: `contract-${schemaHash.slice(-12)}`, contract_type: contractType, owner, consumers, schema_hash: schemaHash, validation_status: "passed" };
+}
+
+function functionalDesign(): Record<string, unknown> {
+  const files = existing(["docs/aidlc/construction/functional-design.md"]);
+  files.push(...allFiles("docs/aidlc/construction", /functional-design\/[^/]+\.md$/));
+  if (files.length === 0) fail("functional design artifacts are missing");
+  const content = joined(files);
+  for (const file of files) noUnresolved(text(file), relativePath(file));
+  // 4.8.0: with I13 ucd_units a unit's functional design covers only the unit's own UC-Ds;
+  // the module's completeness is reconciled at build-and-test.
+  const i13 = ACTIVE_UNIT ? i13Evidence() : null;
+  const unitScope = i13?.status === "required" ? unitUcdIds(i13, ACTIVE_UNIT) : null;
+  const sourceCases = ids(joined(allFiles("docs/aidlc/inception/application-design/test-cases", /\.md$/)), /UC-D-\d+(?:-[A-Za-z0-9_-]+)?/g)
+    .filter((id) => !unitScope?.scoped || unitScope.all.includes(/^UC-D-\d+/.exec(id)?.[0] || id));
+  const covered = sourceCases.filter((id) => new RegExp(`\\b${id}\\b`).test(content));
+  if (sourceCases.length > 0 && covered.length !== sourceCases.length) fail("functional design does not cover every UC-D case");
+  const interfaces = count(content, /(?:API|接口|endpoint|event handler|事件处理|public method|公共方法)/gi);
+  if (interfaces < 1) fail("functional design contains no interface specification");
+  if (!/数据源|data source|repository|database|数据库|表结构/i.test(content)) fail("functional design contains no data source validation");
+  if (!/错误|异常|error|exception|失败|timeout|超时/i.test(content)) fail("functional design contains no error handling definition");
+  return { status: "passed", data_source_validation: "passed", ambiguities_resolved: true, unresolved_blockers: 0, use_cases_covered: covered.length > 0 ? covered : ["documented functional cases"], interfaces_specified: interfaces, error_handling_defined: true };
+}
+
+// MARS-279: C1 normal-field rows are aggregate declarations. This opt-in C6
+// check deliberately reconciles only declared exceptions against code paths; it
+// cannot (and must not claim to) prove an external provider's real schema.
+type FieldMappingException = { ui_field: string; source_path: string; status: string; impact: string; disposition: string };
+type FieldMappingSource = { source_id: string; exceptions: FieldMappingException[] };
+
+function fieldMappingDeclaration(path: string): FieldMappingSource[] | null {
+  const blocks = [...text(path).matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)].map((match) => match[1].trim())
+    .filter((block) => /"field_mapping"\s*:/.test(block));
+  if (blocks.length === 0) return null;
+  if (blocks.length > 1) fail(`field_mapping must be declared once in ${relativePath(path)}`);
+  let parsed: unknown;
+  try { parsed = JSON.parse(blocks[0]); } catch { fail(`field_mapping declaration in ${relativePath(path)} must be valid JSON`); }
+  const mapping = objectValue(objectValue(parsed, "field_mapping declaration").field_mapping, "field_mapping");
+  const sources: FieldMappingSource[] = [];
+  for (const [sourceId, rawSource] of Object.entries(mapping)) {
+    if (!sourceId.trim()) fail("field_mapping has an empty source_id");
+    const source = objectValue(rawSource, `field_mapping.${sourceId}`);
+    if (source.confirmed !== true) fail(`field_mapping.${sourceId}.confirmed must be true for an aggregate confirmation`);
+    const rawExceptions = source.exceptions;
+    if (!Array.isArray(rawExceptions)) fail(`field_mapping.${sourceId}.exceptions must be an array`);
+    const exceptions = rawExceptions.map((raw, index) => {
+      const entry = objectValue(raw, `field_mapping.${sourceId}.exceptions[${index}]`);
+      const status = stringValue(entry.status, `field_mapping.${sourceId}.exceptions[${index}].status`);
+      if (!/^(?:🚨不存在|⚠️需转换|missing|transform)$/i.test(status)) fail(`field_mapping.${sourceId}.exceptions[${index}].status must be 🚨不存在, ⚠️需转换, missing, or transform`);
+      return {
+        ui_field: stringValue(entry.ui_field, `field_mapping.${sourceId}.exceptions[${index}].ui_field`),
+        source_path: stringValue(entry.source_path, `field_mapping.${sourceId}.exceptions[${index}].source_path`),
+        status,
+        impact: stringValue(entry.impact, `field_mapping.${sourceId}.exceptions[${index}].impact`),
+        disposition: stringValue(entry.disposition, `field_mapping.${sourceId}.exceptions[${index}].disposition`),
+      };
+    });
+    sources.push({ source_id: sourceId.trim(), exceptions });
+  }
+  if (sources.length === 0) fail("field_mapping must declare at least one source_id");
+  return sources;
+}
+
+function normalizedFieldPath(value: string): string { return value.replace(/\?\./g, ".").trim(); }
+
+function codeFieldPaths(): Map<string, string[]> {
+  const found = new Map<string, string[]>();
+  const pattern = /\b(?:response|result|payload)(?:(?:\?\.)|\.)data(?:(?:\?\.)|\.)[A-Za-z_$][\w$]*(?:(?:(?:\?\.)|\.)[A-Za-z_$][\w$]*)*/g;
+  for (const file of scanFiles(ROOT, ".", SOURCE_FILE_PATTERN).filter((candidate) => !TEST_FILE_PATTERN.test(candidate))) {
+    for (const match of text(file).matchAll(pattern)) {
+      const path = normalizedFieldPath(match[0]);
+      const locations = found.get(path) || [];
+      locations.push(relativePath(file));
+      found.set(path, locations);
+    }
+  }
+  return found;
+}
+
+function fieldPathReconciliation(): Record<string, unknown> {
+  const path = join(ROOT, contextual("docs/aidlc/construction/data-source-validation.md"));
+  if (!existsSync(path)) return { status: "not_applicable", reason: "data-source-validation.md is missing" };
+  const sources = fieldMappingDeclaration(path);
+  if (sources === null) return { status: "not_applicable", reason: "field_mapping declaration is absent" };
+  const paths = codeFieldPaths();
+  const exceptions = sources.flatMap((source) => source.exceptions.map((entry) => ({ ...entry, source_id: source.source_id })));
+  const dangling = exceptions.filter((entry) => !paths.has(normalizedFieldPath(entry.source_path)));
+  if (dangling.length > 0) fail(`DANGLING_EXCEPTION@field_mapping: declared exception paths are not accessed by code: ${dangling.map((entry) => `${entry.source_id}:${entry.source_path}`).join(", ")}`);
+  return { status: "passed", sources_confirmed: sources.map((source) => source.source_id), exception_paths_checked: exceptions.map((entry) => ({ source_id: entry.source_id, source_path: normalizedFieldPath(entry.source_path), status: entry.status })), code_access_paths: [...paths.keys()].sort() };
+}
+
+function nfrCoverage(): Record<string, unknown> {
+  const files = moduleScopedFiles(/(?:nfr|non-functional|非功能)/i).filter((path) => path.endsWith(".md"));
+  if (files.length === 0) fail("NFR artifacts are missing");
+  const content = joined(files);
+  for (const file of files) noUnresolved(text(file), relativePath(file));
+  const nfrIds = ids(content, /NFR-\d+(?:-[A-Za-z0-9_-]+)?/g);
+  if (nfrIds.length === 0) fail("no NFR identifiers found");
+  const items = nfrIds.map((id) => {
+    // 4.8.1: the occurrence of the whole id (NFR-1 is not the prefix of NFR-10 or NFR-1-x),
+    // and the block ends at the next NFR id counted from the end of this id.
+    const whole = content.search(new RegExp(`${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d|-[A-Za-z0-9_-])`));
+    const start = whole >= 0 ? whole : content.indexOf(id);
+    const next = content.slice(start + id.length).search(/NFR-\d+/);
+    const block = content.slice(start, next < 0 ? start + 1600 : start + id.length + next);
+    if (!/验收|acceptance|阈值|threshold|p95|p99|measurement|度量|指标/i.test(block)) fail(`${id} has no acceptance or measurement rule`);
+    return { id, category: block.match(/performance|security|reliability|scalability|性能|安全|可靠性|扩展性/i)?.[0] || "quality", acceptance_criterion: block.split(/\n/).find((line) => /验收|acceptance|阈值|threshold|p95|p99|指标/i.test(line))?.trim() || id, verified: true };
+  });
+  return { status: "passed", requirements_covered: items.length, unresolved: 0, nfr_items: items };
+}
+
+function infrastructure(): Record<string, unknown> {
+  const files = moduleScopedFiles(/(?:infrastructure|deployment|deploy|基础设施|部署)/i).filter((path) => path.endsWith(".md"));
+  if (files.length === 0) fail("infrastructure design artifacts are missing");
+  const content = joined(files);
+  for (const file of files) noUnresolved(text(file), relativePath(file));
+  const required = ["deployment", "resources", "migration", "rollback", "runtime_dependencies"];
+  const matched = required.filter((item) => {
+    const aliases: Record<string, RegExp> = { deployment: /deployment|部署|发布/i, resources: /resources?|资源/i, migration: /migration|迁移/i, rollback: /rollback|回滚/i, runtime_dependencies: /runtime dependencies|运行时依赖|外部依赖/i };
+    return aliases[item].test(content);
+  });
+  if (matched.length !== required.length) fail(`infrastructure sections missing: ${required.filter((item) => !matched.includes(item)).join(", ")}`);
+  const resources = infrastructureResources(ROOT, files.map(path => ({ path: relativePath(path), content: text(path) })), requiredWorkflowState().current_stage);
+  return { status: "passed", sections: required, unresolved: 0, ...resources, rollback_strategy: "documented in infrastructure artifacts" };
+}
+
+async function implementationReport(): Promise<Record<string, unknown>> {
+  const state = requiredWorkflowState();
+  const workflows = loadWorkflowParts(ROOT);
+  const graph = loadGraph();
+  const references: string[] = [];
+  const historicalReferences: string[] = [];
+  const revalidated: Array<{ stage: string; sensor: string; module_id?: string; unit_id?: string }> = [];
+  const applicable = new Set(getExecutableStages(graph, state.scope, state.selected_optional_stages, state.execution_profile).map(stage => stage.slug));
+  // Recheck only delivery endpoints and the selected consistency chain. Do not
+  // replay every historic stage or produce evidence while rendering a summary.
+  const verify = async (slug: string, sensors: string[], moduleId?: string, unitId?: string): Promise<void> => {
+    const stage = graph.stages.find(candidate => candidate.slug === slug);
+    if (!stage || sensors.some(sensor => !stage.sensors.includes(sensor))) fail(`delivery summary has no canonical gate for ${slug}: ${sensors.join(", ")}`);
+    const instance = makeInstance(stage, stage.axis, { module_id: moduleId, unit_id: unitId });
+    const owner = workflows.split ? mergeWorkflowView(workflows.parts, ownerOfInstance(instance.instance_id)) : state;
+    if (!owner.completed_stage_instances.includes(instance.instance_id)) fail(`delivery summary requires completed stage ${instance.instance_id}`);
+    const failures = await checkSensors(instance, owner, { onlySensors: sensors, alternativeValidationEnvironment: semanticValidationEnvironment() });
+    if (failures.length) fail(`delivery evidence is not verified for ${instance.instance_id}: ${failures.map(item => `${item.sensor}: ${item.message}`).join("; ")}`);
+    for (const sensor of sensors) references.push(evidenceRelativePath(slug, sensor, stage.axis, instance).replace(/\\/g, "/"));
+  };
+  const terminalSensors = ["build-test-evidence", "test-quality", ...(globalReviewRequired(state) ? ["global-review-evidence"] : [])];
+  await verify("build-and-test", terminalSensors);
+  // Planning evidence records a completed historical observation. Construction
+  // necessarily changes its old wide source scope; never call that scope fresh.
+  const historical = (slug: string, sensor: string, moduleId?: string, unitId?: string): void => {
+    const stage = graph.stages.find(candidate => candidate.slug === slug);
+    if (!stage || !applicable.has(slug) || !stage.sensors.includes(sensor)) fail(`selected delivery history is not applicable: ${slug}/${sensor}`);
+    const instance = makeInstance(stage, stage.axis, { module_id: moduleId, unit_id: unitId });
+    const owner = workflows.split ? mergeWorkflowView(workflows.parts, ownerOfInstance(instance.instance_id)) : state;
+    if (!owner.completed_stage_instances.includes(instance.instance_id)) fail(`delivery summary requires completed stage ${instance.instance_id}`);
+    const label = evidenceRelativePath(slug, sensor, stage.axis, instance).replace(/\\/g, "/");
+    let path = ROOT;
+    for (const segment of label.split("/")) {
+      path = join(path, segment);
+      if (!existsSync(path) || lstatSync(path).isSymbolicLink()) fail(`historical delivery evidence is missing or linked: ${label}`);
+    }
+    if (!lstatSync(path).isFile() || lstatSync(path).size > 512 * 1024) fail(`invalid historical delivery evidence file: ${label}`);
+    const record = jsonFile(path);
+    const producer = record.producer as Record<string, unknown> | undefined;
+    const checker = record.checker as Record<string, unknown> | undefined;
+    if (record.evidence_version !== "1" || producer?.name !== "loeyae-aidlc-evidence" || producer.mode !== "controlled"
+      || typeof producer.execution_id !== "string" || !producer.execution_id || checker?.id !== `builtin:${sensor}`
+      || checker.sensor !== sensor || checker.exit_code !== 0 || checker.status !== "passed" || !record.source_revision) {
+      fail(`historical delivery evidence has no controlled observation provenance: ${label}`);
+    }
+    historicalReferences.push(label);
+  };
+  const revalidate = (slug: string, sensor: "inception-consistency" | "ui-design-alignment" | "prd-completeness", moduleId?: string, unitId?: string): Record<string, unknown> => {
+    const context = { current_stage: slug, current_module: moduleId, current_unit: unitId };
+    const argv = semanticCommandArgv(sensor, context, ROOT);
+    if (sensor === "inception-consistency") argv.push("--current-artifacts");
+    const checked = runSync(argv[0], argv.slice(1), { cwd: ROOT, encoding: "utf8", shell: false, timeout: 60_000,
+      env: semanticCheckerEnv(context, semanticValidationEnvironment() || process.env) });
+    if (checked.error || checked.status !== 0) fail(`current delivery consistency failed for ${sensor}${moduleId ? `/${moduleId}` : ""}${unitId ? `/${unitId}` : ""}: ${checked.error?.message || checked.stderr || checked.stdout}`);
+    const payload = objectValue(JSON.parse(checked.stdout.trim()), `current ${sensor}`);
+    const payloadErrors = deliveryConsistencyPayloadErrors(sensor, payload, { module_id: moduleId, prd_selected: selectedPrdRoute(), ui_route: selectedUiRoute(moduleId) });
+    if (payloadErrors.length) fail(`current delivery consistency did not pass: ${sensor}: ${payloadErrors.join("; ")}`);
+    revalidated.push({ stage: slug, sensor, ...(moduleId ? { module_id: moduleId } : {}), ...(unitId ? { unit_id: unitId } : {}) });
+    return payload;
+  };
+  // Optional prose is a display view: its claims or stale placeholders cannot
+  // authorize or block completion. Decisions remain in their reviewed sources.
+
+  const uiModulesVerified: string[] = [];
+  // Same participating-module list as the orchestrator gate (D3): never computed twice.
+  const modulesVerified = verifiedModuleIds(ROOT, requiredWorkflowState().scope).length;
+  const prdSelected = selectedPrdRoute();
+  if (workflowState?.current_module || existsSync(join(ROOT, "docs", "aidlc", "ideation", "module-manifest.json"))) {
+    const modules = readModuleManifest(ROOT);
+    for (const module of modules) {
+      if (applicable.has("cross-validation")) {
+        historical("cross-validation", "inception-consistency", module.module_id);
+        revalidate("cross-validation", "inception-consistency", module.module_id);
+      }
+      const route = selectedUiRoute(module.module_id);
+      if (applicable.has("ui-page-planning") && (route === "html-mock" || route === "figma-create" || route === "figma-existing")) {
+        historical("ui-page-planning", "ui-artifact-consistency", module.module_id);
+        historical(route === "html-mock" ? "ui-mock-generation" : "ui-figma-generation", "ui-artifact-consistency", module.module_id);
+        const alignments: Record<string, unknown>[] = [];
+        for (const unit of readUnitManifest(ROOT, module.module_id)) {
+          historical("code-review", "ui-design-alignment", module.module_id, unit.unit_id);
+          const alignment = revalidate("code-review", "ui-design-alignment", module.module_id, unit.unit_id);
+          if (alignment.status === "passed") alignments.push(alignment);
+        }
+        if (alignments.length === 0) fail(`selected UI route for ${module.module_id} has no passed current code-review ui-design-alignment`);
+        // MARS-125 正向全覆盖(与 MARS-118 的 US→UI mock 层对称):模块 page-plan 中声明的每个 UI 页面
+        // 必须至少被一份 passed 对齐证据的 pages_covered 覆盖。多单元分页时承担部分页面的单元若规避对齐
+        // (缺页面映射 → 现在 fail,见 uiAlignment),或某页根本无任何单元做对齐,此处正向对账会判 fail,
+        // 不再只要求 "模块至少一个单元有 1 份 passed 证据"。
+        const planPagePath = join(ROOT, `docs/aidlc/modules/${module.module_id}/inception/ui-design/page-plan.md`);
+        if (existsSync(planPagePath)) {
+          const planPages = normalizedIds(text(planPagePath), PAGE_ID);
+          const covered = new Set<string>();
+          for (const evidence of alignments) {
+            const pages = Array.isArray(evidence.pages_covered) ? evidence.pages_covered : [];
+            for (const page of pages) if (typeof page === "string") covered.add(page.toUpperCase());
+          }
+          const uncoveredPages = planPages.filter((id) => !covered.has(id.toUpperCase()));
+          if (uncoveredPages.length > 0) {
+            fail(`UI pages of ${module.module_id} lack any passed ui-design-alignment coverage: ${uncoveredPages.map((id) => `${id}: UNCOVERED@ui-design-alignment`).join(", ")}. Every page in page-plan must be covered by at least one unit's passed alignment evidence (pages_covered)`);
+          }
+        }
+        uiModulesVerified.push(module.module_id);
+      }
+    }
+    if (prdSelected) {
+      historical("prd-generation", "prd-completeness");
+      revalidate("prd-generation", "prd-completeness");
+      const prdPath = join(ROOT, "docs/aidlc/ideation/prd.md");
+      if (!existsSync(prdPath)) fail("selected PRD is missing during final consistency validation");
+      const prdIds = normalizedIds(text(prdPath), REQUIREMENT_ID);
+      const moduleReports = modules.map((module) => join(ROOT, `docs/aidlc/modules/${module.module_id}/inception/cross-validation-report.md`));
+      if (moduleReports.some((report) => !existsSync(report))) fail("one or more module cross-validation reports are missing");
+      const aggregate = joined(moduleReports);
+      const uncovered = prdIds.filter((id) => !aggregate.toUpperCase().includes(id));
+      if (prdIds.length === 0 || uncovered.length > 0) fail(`selected PRD items are not covered by module cross-validation reports: ${uncovered.join(", ") || "no PRD IDs"}`);
+    }
+  }
+  const summary = projectDeliverySummary(ROOT, state, { verifiedEvidence: references });
+  if (summary.verification !== "passed") fail(summary.blockers.join("; "));
+
+  return {
+    ...summary,
+    evidence_references: [...new Set([...references, ...historicalReferences])].sort(),
+    verified_evidence_references: [...new Set(references)].sort(),
+    historical_evidence_references: [...new Set(historicalReferences)].sort(),
+    revalidated_sensors: revalidated,
+    status: "passed",
+    summary_complete: true,
+    selected_artifacts_verified: true,
+    modules_verified: modulesVerified,
+    prd_verified: prdSelected,
+    ui_modules_verified: uiModulesVerified.sort(),
+  };
+}
+
+function frontendPlatform(): Record<string, unknown> {
+  const path = join(ROOT, frontendPlatformSpecRelativePath());
+  if (!existsSync(path)) fail("frontend platform specification is missing");
+  return frontendPlatformPayload(ROOT, frontendPlatformSpecRelativePath(), ACTIVE_MODULE);
+}
+
+
+function templateCompleteness(): Record<string, unknown> {
+  const directory = join(ROOT, contextual("docs/aidlc/construction/build-and-test"));
+  const expected = ["build-instructions.md", "unit-test-instructions.md"];
+  const templates = expected.map((name) => join(directory, name));
+  if (templates.some((path) => !existsSync(path))) fail("build/test template files are incomplete");
+  for (const path of templates) {
+    const content = text(path);
+    if (content.trim().length < 40 || /\[[^\]]+\]|TODO|TBD/i.test(content)) fail(`${relativePath(path)} contains unresolved template placeholders`);
+  }
+  return { status: "passed", templates: templates.map(relativePath), unresolved: 0 };
+}
+
+function recoveryEvidence(): Record<string, unknown> {
+  const markerPath = join(ROOT, ".aidlc/context-compacted");
+  const handoffPath = join(ROOT, "docs/aidlc/handoff.md");
+  const handoff = existsSync(handoffPath) ? text(handoffPath) : "";
+  if (!existsSync(markerPath) && !/context_compacted\s*[:：]\s*true|上下文压缩|compact recovery/i.test(handoff)) {
+    fail("context compaction was not detected");
+  }
+  const state = requiredWorkflowState();
+  return { status: "passed", state_restored: true, handoff_recorded: true,
+    handoff_source: handoff.trim() ? "handoff-view" : "workflow-state", state_revision: state.revision,
+    workflow_id: state.workflow_id, stage_instance: state.current_stage_instance || state.current_stage };
+}
+
+function prdCompleteness(): Record<string, unknown> {
+  const path = join(ROOT, "docs/aidlc/ideation/prd.md");
+  if (!existsSync(path) || !contextAllows(path)) fail("PRD artifact is missing at docs/aidlc/ideation/prd.md");
+  const content = text(path);
+  const pending = validatePrdPendingQuestions(path, content);
+  const required: Array<[string, RegExp]> = [
+    ["overview", /概述|overview|背景/i], ["goals", /目标|goals?/i], ["features", /功能|features?/i],
+    ["non-goals", /非目标|non[- ]?goals?/i], ["questions", /待确认|问题|questions?/i], ["sources", /来源|source index|sources?/i],
+  ];
+  const missing = required.filter(([, pattern]) => !pattern.test(content)).map(([name]) => name);
+  if (missing.length > 0) fail(`PRD sections missing: ${missing.join(", ")}`);
+  const requirements = ids(content, /(?:FR|REQ)-\d+(?:-[A-Za-z0-9_-]+)?/g);
+  if (requirements.length < 1 || !/验收|acceptance|acceptance criteria/i.test(content)) fail("PRD lacks functional requirements or acceptance criteria");
+  if (!/clarification|澄清|一致性|consistency|通过|passed/i.test(content)) fail("PRD clarification consistency evidence is missing");
+  const flow = projectFiles(/business-flows?\.md$/i).length > 0 ? "passed" : "not_applicable";
+  // B3:以下 4 项从 S 级(硬编码 true)升为结构确定性(从 PRD 文本算出,Agent 改证据无法伪造通过)。
+  // required_sections 已硬保证这 6 节存在;B3 进一步查"节内是否有实际内容"——结构齐全但内容空即真缺陷,拦。
+  // acceptance_criteria_complete:验收相关条目数应 ≥ FR 数(每个 FR 至少一条验收标准的结构下界)。
+  const acceptanceLines = (content.match(/(?:验收标准|acceptance criteria|验收[:：])/gi) || []).length
+    + (content.match(/^\s*[-*]\s+.*(?:验收|acceptance)/gim) || []).length;
+  const acceptanceCriteriaComplete = requirements.length > 0 && acceptanceLines >= requirements.length;
+  // non_goals_complete:非目标章节存在且有实际条目(标题后至少一个列表项),非仅空标题。
+  const nonGoalsMatch = content.match(/(?:非目标|non[- ]?goals?)[^\n]*\n([\s\S]{0,600}?)(?:\n#{1,3}\s|\n---|\Z)/i);
+  const nonGoalsComplete = Boolean(nonGoalsMatch && /[-*]\s+\S|\d+[.)]\s+\S/.test(nonGoalsMatch[1]));
+  // source_index_complete:来源章节存在且有实际条目。
+  const sourceMatch = content.match(/(?:来源|source index|sources?)[^\n]*\n([\s\S]{0,600}?)(?:\n#{1,3}\s|\n---|\Z)/i);
+  const sourceIndexComplete = Boolean(sourceMatch && /[-*]\s+\S|\d+[.)]\s+\S|\|/.test(sourceMatch[1]));
+  // pending_questions_indexed:待确认项要么为 0,要么全部登记进问题索引。
+  const pendingQuestionsIndexed = pending.pendingQuestions === 0 || /问题索引|questions? index|待确认[^\n]*索引/i.test(content);
+  return { status: "passed", prd_path: relativePath(path), required_sections: required.map(([name]) => name), functional_requirements: requirements.length, acceptance_criteria_complete: acceptanceCriteriaComplete, non_goals_complete: nonGoalsComplete, pending_questions: pending.pendingQuestions, pending_questions_indexed: pendingQuestionsIndexed, source_index_complete: sourceIndexComplete, clarification_consistency: "passed", business_flow_validation: flow, unresolved_blockers: 0 };
+}
+
+/** Stage document that must carry the stage's Mermaid diagrams (paths are contextualised per module). */
+const MERMAID_STAGE_DOCUMENTS: Record<string, string> = {
+  "requirements-methods": "docs/aidlc/inception/requirements/business-flows.md",
+  "application-design": "docs/aidlc/inception/application-design/component-dependency.md",
+};
+
+const MERMAID_DIAGRAM_TYPES = [
+  "flowchart", "graph", "sequenceDiagram", "classDiagram-v2", "classDiagram", "stateDiagram-v2", "stateDiagram",
+  "erDiagram", "journey", "gantt", "pie", "quadrantChart", "requirementDiagram", "gitGraph", "mindmap", "timeline",
+  "sankey-beta", "xychart-beta", "block-beta", "packet-beta", "architecture-beta", "radar-beta", "treemap-beta", "kanban",
+  "C4Context", "C4Container", "C4Component", "C4Dynamic", "C4Deployment", "zenuml",
+];
+
+interface MermaidBlock {
+  file: string;
+  line: number;
+  source: string;
+}
+
+function mermaidBlocks(path: string): MermaidBlock[] {
+  const lines = text(path).split(/\r?\n/);
+  const blocks: MermaidBlock[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    const open = /^(\s*)(`{3,}|~{3,})\s*mermaid\b/i.exec(lines[index]);
+    if (!open) continue;
+    const fence = open[2];
+    const start = index;
+    const body: string[] = [];
+    index++;
+    while (index < lines.length && !new RegExp(`^\\s*${fence[0] === "`" ? "`" : "~"}{${fence.length},}\\s*$`).test(lines[index])) body.push(lines[index++]);
+    if (index >= lines.length) fail(`${relativePath(path)}:${start + 1} mermaid code block is not closed`);
+    const file = relativePath(path);
+    blocks.push({ file, line: start + 1, source: body.join("\n") });
+  }
+  return blocks;
+}
+
+/** Static Mermaid checks: non-empty body, a known diagram type header and a valid flowchart direction. */
+function mermaidDiagramType(block: MermaidBlock): string {
+  const lines = block.source.split("\n");
+  let index = 0;
+  if (lines[index]?.trim() === "---") {
+    index++;
+    while (index < lines.length && lines[index].trim() !== "---") index++;
+    if (index >= lines.length) fail(`${block.file}:${block.line} mermaid front matter is not closed`);
+    index++;
+  }
+  const meaningful = lines.slice(index).map((line) => line.trim()).filter((line) => line.length > 0 && !line.startsWith("%%"));
+  if (meaningful.length === 0) fail(`${block.file}:${block.line} mermaid code block is empty`);
+  const header = meaningful[0];
+  const type = MERMAID_DIAGRAM_TYPES.find((name) => header === name || header.startsWith(`${name} `) || header.startsWith(`${name}:`));
+  if (!type) fail(`${block.file}:${block.line} mermaid code block must start with a diagram type (e.g. flowchart TB, sequenceDiagram, erDiagram, stateDiagram-v2); found: ${header.slice(0, 60)}`);
+  if (type === "flowchart" || type === "graph") {
+    const direction = header.slice(type.length).trim().split(/\s+/)[0].replace(/;$/, "");
+    if (direction && !["TB", "TD", "BT", "RL", "LR"].includes(direction)) fail(`${block.file}:${block.line} ${type} direction must be TB, TD, BT, RL or LR; found: ${direction}`);
+  }
+  if (meaningful.length < 2) fail(`${block.file}:${block.line} mermaid ${type} declares no nodes or relations`);
+  return type;
+}
+
+/**
+ * Real syntax check with the optional installed Mermaid package (`mermaid.parse`,
+ * run in Node — no browser, no rendering, no visual check). Mermaid sanitises labels with
+ * DOMPurify, which has no DOM here; parsing never emits markup, so its hooks are stubbed.
+ */
+async function parseMermaidBlocks(blocks: MermaidBlock[]): Promise<"passed" | "not_executed"> {
+  let mermaid: { parse(source: string): Promise<unknown> };
+  // Optional runtime capabilities are intentionally absent from some lockfile installs.
+  // Resolve by name at runtime so typecheck does not turn them into required dependencies.
+  const optionalPackages = { purifier: "dompurify", diagram: "mermaid" };
+  try {
+    const purify = (await import(optionalPackages.purifier)).default as unknown as Record<string, unknown>;
+    for (const method of ["addHook", "removeHook", "removeHooks", "removeAllHooks", "setConfig", "clearConfig"]) {
+      if (typeof purify[method] !== "function") purify[method] = () => undefined;
+    }
+    if (typeof purify.sanitize !== "function") purify.sanitize = (value: unknown) => value;
+    mermaid = (await import(optionalPackages.diagram)).default as unknown as { parse(source: string): Promise<unknown> };
+  } catch {
+    return "not_executed";
+  }
+  for (const block of blocks) {
+    try {
+      await mermaid.parse(block.source.trim());
+    } catch (error) {
+      // Keep it short: the evidence producer only relays the tail of the checker output.
+      const raw = error instanceof Error ? error.message : String(error);
+      const position = raw.split("\n")[0].trim();
+      const got = /got '([^']*)'/.exec(raw)?.[1];
+      fail(`mermaid syntax error (Mermaid parser): ${position}${got ? ` (unexpected ${got})` : ""} in ${block.file}:${block.line}`);
+    }
+  }
+  return "passed";
+}
+
+async function mermaidDiagramContract(): Promise<Record<string, unknown>> {
+  const stage = workflowState?.current_stage || "";
+  const required = MERMAID_STAGE_DOCUMENTS[stage];
+  let files: string[];
+  if (required) {
+    const path = join(ROOT, contextual(required));
+    if (!existsSync(path)) fail(`${relativePath(path)} is missing; ${stage} delivers its diagrams as Mermaid code blocks in this document`);
+    files = [path];
+  } else {
+    files = (STRICT_MODULE_SCOPE ? moduleArtifactFiles(/\.md$/i) : allFiles("docs/aidlc", /\.md$/i));
+  }
+  const blocks = files.flatMap(mermaidBlocks);
+  if (blocks.length === 0) {
+    if (required) fail(`${relativePath(files[0])} contains no mermaid code block; ${stage} requires its diagrams as Mermaid fenced blocks`);
+    return {
+      status: "not_applicable",
+      source_format: "mermaid",
+      diagrams_checked: 0,
+      reason: "no stage-required diagram document and no mermaid code block in scope",
+    };
+  }
+  const diagrams = blocks.map((block) => ({ file: block.file, line: block.line, type: mermaidDiagramType(block) }));
+  const syntaxParse = await parseMermaidBlocks(blocks);
+  return {
+    status: "passed",
+    final_status: "STATIC_PASS",
+    source_format: "mermaid",
+    diagrams_checked: diagrams.length,
+    diagrams,
+    documents: [...new Set(diagrams.map((diagram) => diagram.file))],
+    syntax_checks: "static",
+    syntax_parse: syntaxParse,
+    validation_tier: "STATIC_PASS",
+    visual_status: "not_requested",
+    reason: syntaxParse === "passed"
+      ? "Mermaid source structure and parser checks passed; business consistency remains subject to artifact review. No visual validation was requested; SVG contracts apply only after the user explicitly selects svg"
+      : "Mermaid source-level checks passed; the optional parser was unavailable and was not executed. Business consistency remains subject to artifact review. No visual validation was requested; SVG contracts apply only after the user explicitly selects svg",
+  };
+}
+
+function diagramContract(): Record<string, unknown> | Promise<Record<string, unknown>> {
+  // SVG mode is opt-in: it applies only after the user explicitly selected it, which is
+  // recorded in the workflow state (orchestrate diagram-format --set svg). Otherwise
+  // diagrams are Mermaid fenced blocks and referenced SVG files may be external assets.
+  if (workflowState?.diagram_format !== "svg") return mermaidDiagramContract();
+  const manifests = STRICT_MODULE_SCOPE ? moduleArtifactFiles(/\.diagram\.json$/i) : projectFiles(/\.diagram\.json$/i);
+  if (manifests.length === 0) fail(STRICT_MODULE_SCOPE
+    ? `diagram structured source is missing for module ${ACTIVE_MODULE}; the user selected svg, so each AI-DLC SVG requires a .diagram.json manifest under docs/aidlc/modules/${ACTIVE_MODULE}/`
+    : "diagram structured source is missing; the user selected svg, so each AI-DLC SVG requires a .diagram.json manifest");
+
+  const ports = new Set(["top", "right", "bottom", "left"]);
+  const shapes = new Set(["round", "rect", "diamond", "ellipse", "database", "actor", "note"]);
+  const edgeKinds = new Set(["directed", "bidirectional", "undirected", "dashed"]);
+  const diagramTypes = new Set(["architecture", "context", "container", "flowchart", "pipeline", "sequence", "state", "er", "deployment", "class", "component", "infrastructure"]);
+  const semanticModes = new Set(["static-boundary", "static-relation", "process-flow", "data-flow", "dependency-flow", "constraint"]);
+  const visualChannels = new Set(["edge-kind", "node-shape", "group-role", "icon"]);
+  const visualRoles = new Set(["semantic", "decorative"]);
+  const groupTypes = new Set(["exclusive", "nested", "cross-cutting", "overlay"]);
+  const legendStatuses = new Set(["required", "exempt", "not-needed"]);
+  const splitStatuses = new Set(["not-needed", "split", "kept-single"]);
+  const architectureTypes = new Set(["architecture", "context", "container", "deployment", "class", "component", "infrastructure", "er"]);
+  const processTypes = new Set(["flowchart", "pipeline", "sequence", "state"]);
+  const unsafeSvg = /<\s*(?:script|foreignObject|image|style)\b|<[^>]*\b(?:href|on[a-zA-Z]+|style)\s*=|<[^>]*url\s*\(\s*(?!#)[^)]*\)/i;
+  let diagramsChecked = 0;
+  let expectedContractsChecked = 0;
+  let generationContractsChecked = 0;
+  let legacyDiagramsChecked = 0;
+  const legacyDiagrams: { diagram_id: string; missing: string[] }[] = [];
+  const generationClosures: Record<string, unknown>[] = [];
+  const routeContractReports: Record<string, unknown>[] = [];
+  let changeImpactReviewsChecked = 0;
+  let structuralDiagramsChecked = 0;
+  const structuralEvidenceReports: Record<string, unknown>[] = [];
+  let riskScore = 0;
+  const riskReasons = new Set<string>();
+
+  const requireString = (value: unknown, field: string): string => {
+    if (typeof value !== "string" || value.trim().length === 0) fail(`${field} must be a non-empty string`);
+    return value.trim();
+  };
+  const requireFinite = (value: unknown, field: string): number => {
+    if (typeof value !== "number" || !Number.isFinite(value)) fail(`${field} must be a finite number`);
+    return value;
+  };
+  const observedChannelValues = (diagram: Record<string, any>): Map<string, Set<string>> => {
+    const values = new Map<string, Set<string>>();
+    const edges = Array.isArray(diagram.edges) ? diagram.edges : [];
+    const nodes = Array.isArray(diagram.nodes) ? diagram.nodes : [];
+    const groups = Array.isArray(diagram.groups) ? diagram.groups : [];
+    if (edges.length > 0) values.set("edge-kind", new Set(edges.map((edge) => edge.kind || "directed")));
+    if (nodes.length > 0) values.set("node-shape", new Set(nodes.map((node) => node.shape || "rect")));
+    const typedGroups = groups.filter((group) => group.semanticType);
+    if (typedGroups.length > 0) values.set("group-role", new Set(typedGroups.map((group) => group.semanticType)));
+    return values;
+  };
+
+  const portPoint = (node: Record<string, any>, port: string, offset = 0): [number, number] => {
+    const centerX = node.x + node.width / 2;
+    const centerY = node.y + node.height / 2;
+    if (node.shape === "diamond") {
+      if (port === "top") return [centerX, node.y];
+      if (port === "right") return [node.x + node.width, centerY];
+      if (port === "bottom") return [centerX, node.y + node.height];
+      return [node.x, centerY];
+    }
+    if (port === "top") return [centerX + offset, node.y];
+    if (port === "right") return [node.x + node.width, centerY + offset];
+    if (port === "bottom") return [centerX - offset, node.y + node.height];
+    return [node.x, centerY - offset];
+  };
+  const samePoint = (first: unknown, second: [number, number]): boolean => {
+    if (!Array.isArray(first) || first.length !== 2 || typeof first[0] !== "number" || typeof first[1] !== "number") return false;
+    return Math.abs(first[0] - second[0]) <= 1 && Math.abs(first[1] - second[1]) <= 1;
+  };
+  const isOrthogonal = (points: unknown[]): boolean => points.every((point, index) => {
+    if (index === 0) return true;
+    const current = point as unknown[];
+    const previous = points[index - 1] as unknown[];
+    return Array.isArray(current) && Array.isArray(previous) && (current[0] === previous[0] || current[1] === previous[1]);
+  });
+  const nonZeroSegment = (points: [number, number][], fromStart: boolean): [[number, number], [number, number]] | null => {
+    if (fromStart) {
+      for (let index = 1; index < points.length; index++) if (!pointEqual(points[index - 1], points[index])) return [points[index - 1], points[index]];
+    } else {
+      for (let index = points.length - 1; index > 0; index--) if (!pointEqual(points[index - 1], points[index])) return [points[index], points[index - 1]];
+    }
+    return null;
+  };
+  const leavesPort = (points: [number, number][], port: string): boolean => {
+    const segment = nonZeroSegment(points, true);
+    if (!segment) return false;
+    const [first, second] = segment;
+    if (port === "top") return second[1] < first[1] - 1;
+    if (port === "right") return second[0] > first[0] + 1;
+    if (port === "bottom") return second[1] > first[1] + 1;
+    return second[0] < first[0] - 1;
+  };
+  const entersPort = (points: [number, number][], port: string): boolean => {
+    const segment = nonZeroSegment(points, false);
+    if (!segment) return false;
+    const [last, previous] = segment;
+    if (port === "top") return previous[1] < last[1] - 1;
+    if (port === "right") return previous[0] > last[0] + 1;
+    if (port === "bottom") return previous[1] > last[1] + 1;
+    return previous[0] < last[0] - 1;
+  };
+  type Rectangle = { left: number; top: number; right: number; bottom: number };
+  const rectangleOf = (item: Record<string, any>, field: string): Rectangle | null => {
+    const values = [item.x, item.y, item.width, item.height];
+    if (values.every((value) => typeof value === "number" && Number.isFinite(value))) {
+      if (item.width <= 0 || item.height <= 0) fail(`${field} has invalid dimensions`);
+      return { left: item.x, top: item.y, right: item.x + item.width, bottom: item.y + item.height };
+    }
+    if (values.every((value) => value === undefined)) return null;
+    fail(`${field} must define x, y, width, and height together`);
+  };
+  const pointInsideNodeShape = (node: Record<string, any>, point: [number, number]): boolean => diagramShapeContainsPoint(node as { shape?: string; x: number; y: number; width: number; height: number }, point);
+  const approachesTargetFromOutside = (points: [number, number][], node: Record<string, any>): boolean => {
+    const segment = nonZeroSegment(points, false);
+    return Boolean(segment && !pointInsideNodeShape(node, segment[1]));
+  };
+  const rectanglesOverlap = (first: Rectangle, second: Rectangle): boolean => first.left < second.right && first.right > second.left && first.top < second.bottom && first.bottom > second.top;
+  const expandedRectangle = (rectangle: Rectangle, gap: number): Rectangle => ({ left: rectangle.left - gap, top: rectangle.top - gap, right: rectangle.right + gap, bottom: rectangle.bottom + gap });
+  const segmentIntersectsRectangle = (first: [number, number], second: [number, number], rectangle: Rectangle): boolean => {
+    const dx = second[0] - first[0];
+    const dy = second[1] - first[1];
+    let entering = 0;
+    let leaving = 1;
+    for (const [origin, delta, minimum, maximum] of [[first[0], dx, rectangle.left, rectangle.right], [first[1], dy, rectangle.top, rectangle.bottom]] as Array<[number, number, number, number]>) {
+      if (delta === 0) {
+        if (origin <= minimum || origin >= maximum) return false;
+        continue;
+      }
+      const near = (minimum - origin) / delta;
+      const far = (maximum - origin) / delta;
+      const low = Math.min(near, far);
+      const high = Math.max(near, far);
+      entering = Math.max(entering, low);
+      leaving = Math.min(leaving, high);
+      if (entering > leaving) return false;
+    }
+    return entering < leaving && leaving > 0 && entering < 1;
+  };
+  const segmentOverlapsRectangleBoundary = (first: [number, number], second: [number, number], rectangle: Rectangle): boolean => {
+    const overlap = (firstLow: number, firstHigh: number, secondLow: number, secondHigh: number): boolean => Math.min(firstHigh, secondHigh) - Math.max(firstLow, secondLow) > 1e-6;
+    if (first[0] === second[0]) return (Math.abs(first[0] - rectangle.left) <= 1e-6 || Math.abs(first[0] - rectangle.right) <= 1e-6) && overlap(first[1], second[1], rectangle.top, rectangle.bottom);
+    if (first[1] === second[1]) return (Math.abs(first[1] - rectangle.top) <= 1e-6 || Math.abs(first[1] - rectangle.bottom) <= 1e-6) && overlap(first[0], second[0], rectangle.left, rectangle.right);
+    return false;
+  };
+  const segmentsIntersect = (first: [number, number], second: [number, number], third: [number, number], fourth: [number, number]): boolean => {
+    const relation = segmentRelation(first, second, third, fourth);
+    if (relation === "cross" || relation === "overlap") return true;
+    if (relation !== "touch") return false;
+    const sharedEndpoint = [first, second].some((point) => [third, fourth].some((candidate) => pointEqual(point, candidate)));
+    return !sharedEndpoint;
+  };
+  const textRectangle = (label: Record<string, any>, field: string): Rectangle => {
+    const rawText = label.text;
+    const lines = Array.isArray(rawText) ? rawText.map((line) => requireString(line, `${field}.text`)) : [requireString(rawText, `${field}.text`)];
+    const x = requireFinite(label.x, `${field}.x`);
+    const y = requireFinite(label.y, `${field}.y`);
+    const edgeLabel = field.includes("edge");
+    const expectedFontSize = edgeLabel ? DIAGRAM_VISUAL_STYLE.edgeLabelFontSize : DIAGRAM_VISUAL_STYLE.frameFontSize;
+    const fontSize = label.fontSize === undefined ? expectedFontSize : requireFinite(label.fontSize, `${field}.fontSize`);
+    if (fontSize !== expectedFontSize) fail(`FONT_STYLE: ${field}.fontSize must be ${expectedFontSize}`);
+    const bounds = diagramTextBounds(lines, fontSize);
+    return { left: x - bounds.width / 2, top: y - bounds.height / 2, right: x + bounds.width / 2, bottom: y + bounds.height / 2 };
+  };
+  const layoutExceptionIds = (layout: Record<string, any>, field: string): Set<string> => {
+    const exceptions = layout[field] === undefined ? [] : layout[field];
+    if (!Array.isArray(exceptions)) fail(`diagram layout ${field} must be an array`);
+    const ids = new Set<string>();
+    for (const exception of exceptions) {
+      if (!exception || !Array.isArray(exception.edgeIds) || exception.edgeIds.length === 0) fail(`diagram layout ${field} requires edgeIds`);
+      requireString(exception.reason, `diagram layout ${field}.reason`);
+      for (const edgeId of exception.edgeIds) ids.add(requireString(edgeId, `diagram layout ${field}.edgeId`));
+    }
+    return ids;
+  };
+  const edgePairKey = (first: string, second: string): string => [first, second].sort().join("\u0000");
+  const crossingExceptionPairs = (layout: Record<string, any>): Map<string, [string, string]> => {
+    const exceptions = layout.crossingExceptions === undefined ? [] : layout.crossingExceptions;
+    if (!Array.isArray(exceptions)) fail("diagram layout crossingExceptions must be an array");
+    const pairs = new Map<string, [string, string]>();
+    for (const exception of exceptions) {
+      if (!exception || !Array.isArray(exception.edgeIds) || exception.edgeIds.length !== 2) fail("CROSSING_EXCEPTION: diagram layout crossingExceptions requires exactly two edgeIds");
+      const first = requireString(exception.edgeIds[0], "diagram layout crossingExceptions.edgeId");
+      const second = requireString(exception.edgeIds[1], "diagram layout crossingExceptions.edgeId");
+      if (first === second) fail("CROSSING_EXCEPTION: diagram layout crossingExceptions requires two distinct edgeIds");
+      requireString(exception.businessReason, "diagram layout crossingExceptions.businessReason");
+      requireString(exception.geometricReason, "diagram layout crossingExceptions.geometricReason");
+      const visualEvidence = exception.visualEvidence;
+      if (!visualEvidence || typeof visualEvidence !== "object" || Array.isArray(visualEvidence) || visualEvidence.required !== true || !Array.isArray(visualEvidence.refs) || visualEvidence.refs.length === 0 || !visualEvidence.refs.every((ref: unknown) => typeof ref === "string" && ref.trim().length > 0)) fail("CROSSING_EXCEPTION: diagram layout crossingExceptions.visualEvidence must contain required=true and non-empty refs");
+      const key = edgePairKey(first, second);
+      if (pairs.has(key)) fail(`CROSSING_EXCEPTION: diagram layout crossingExceptions duplicates ${first}/${second}`);
+      pairs.set(key, [first, second]);
+    }
+    return pairs;
+  };
+
+  const parseGeometryProfile = (layout: Record<string, any>, id: string): { version: string; entityGap: number; portGap: number; obstacleGap: number; laneGap: number; axisSpacing?: { referenceShape: "rect"; referenceWidth: number; referenceHeight: number; referenceLongSide: number; referenceShortSide: number; lrMinimumGap: number; tbMinimumGap: number } } | undefined => {
+    const raw = layout.geometryProfile;
+    if (raw === undefined) return undefined;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail(`GEOMETRY_PROFILE: diagram ${id}.layout.geometryProfile must be an object`);
+    if (raw.version !== DIAGRAM_GEOMETRY_PROFILE.version) fail(`GEOMETRY_PROFILE: diagram ${id} geometry profile version must be ${DIAGRAM_GEOMETRY_PROFILE.version}`);
+    const values = ["entityGap", "portGap", "obstacleGap", "laneGap"] as const;
+    for (const field of values) {
+      const actual = requireFinite(raw[field], `diagram ${id}.layout.geometryProfile.${field}`);
+      if (actual !== DIAGRAM_GEOMETRY_PROFILE[field]) fail(`GEOMETRY_PROFILE: diagram ${id}.${field} must use shared value ${DIAGRAM_GEOMETRY_PROFILE[field]}`);
+    }
+    const actualShapes = raw.shapeBaseSizes;
+    if (!actualShapes || typeof actualShapes !== "object" || Array.isArray(actualShapes)) fail(`GEOMETRY_PROFILE: diagram ${id}.layout.geometryProfile.shapeBaseSizes is required`);
+    const sharedShapes = diagramShapeBaseSizes();
+    for (const [shape, expected] of Object.entries(sharedShapes)) {
+      const actual = actualShapes[shape];
+      if (!actual || typeof actual !== "object" || Array.isArray(actual)) fail(`GEOMETRY_PROFILE: diagram ${id} shape profile ${shape} is missing`);
+      if (actual.minWidth !== expected.minWidth || actual.minHeight !== expected.minHeight || actual.boundaryModel !== expected.boundaryModel) fail(`GEOMETRY_PROFILE: diagram ${id} shape profile ${shape} differs from shared profile`);
+    }
+    let axisSpacing: { referenceShape: "rect"; referenceWidth: number; referenceHeight: number; referenceLongSide: number; referenceShortSide: number; lrMinimumGap: number; tbMinimumGap: number } | undefined;
+    if (raw.axisSpacing !== undefined) {
+      const axis = raw.axisSpacing;
+      if (!axis || typeof axis !== "object" || Array.isArray(axis)) fail(`GEOMETRY_PROFILE: diagram ${id}.axisSpacing must be an object`);
+      if (axis.referenceShape !== DIAGRAM_AXIS_SPACING_PROFILE.referenceShape) fail(`GEOMETRY_PROFILE: diagram ${id}.axisSpacing.referenceShape must be ${DIAGRAM_AXIS_SPACING_PROFILE.referenceShape}`);
+      const referenceWidth = requireFinite(axis.referenceWidth, `diagram ${id}.layout.geometryProfile.axisSpacing.referenceWidth`);
+      const referenceHeight = requireFinite(axis.referenceHeight, `diagram ${id}.layout.geometryProfile.axisSpacing.referenceHeight`);
+      const expectedAxis = calculateDiagramAxisSpacing(referenceWidth, referenceHeight);
+      if (axis.referenceLongSide !== expectedAxis.referenceLongSide || axis.referenceShortSide !== expectedAxis.referenceShortSide || axis.lrMinimumGap !== expectedAxis.lrMinimumGap || axis.tbMinimumGap !== expectedAxis.tbMinimumGap) fail(`GEOMETRY_PROFILE: diagram ${id}.axisSpacing must derive LR gap from the reference rectangle long side and TB gap from its height`);
+      axisSpacing = { referenceShape: "rect", referenceWidth, referenceHeight, referenceLongSide: Number(axis.referenceLongSide), referenceShortSide: Number(axis.referenceShortSide), lrMinimumGap: Number(axis.lrMinimumGap), tbMinimumGap: Number(axis.tbMinimumGap) };
+    }
+    return {
+      version: String(raw.version),
+      entityGap: Number(raw.entityGap),
+      portGap: Number(raw.portGap),
+      obstacleGap: Number(raw.obstacleGap),
+      laneGap: Number(raw.laneGap),
+      ...(axisSpacing ? { axisSpacing } : {}),
+    };
+  };
+
+  const projectReference = (value: string, field: string): string => {
+    if (/^(?:https?:|ssot:)/i.test(value)) return value;
+    const candidate = resolve(ROOT, value);
+    const relativeCandidate = relative(ROOT, candidate);
+    if (relativeCandidate === ".." || relativeCandidate.startsWith(`..${process.platform === "win32" ? "\\\\" : "/"}`) || relativeCandidate.startsWith("/")) fail(`${field} must stay inside the project root`);
+    if (!existsSync(candidate)) fail(`${field} does not exist: ${value}`);
+    return candidate;
+  };
+
+  const loadIndependentExpected = (manifest: Record<string, unknown>, diagram: Record<string, unknown>, id: string): { contract?: ExpectedContract; path?: string } => {
+    const declared = expectedContractPath(manifest, diagram);
+    if (!declared) return {};
+    const contractPath = projectReference(declared, `diagram ${id}.expected_contract_path`);
+    let raw: unknown;
+    try { raw = JSON.parse(text(contractPath)); } catch (error) { fail(`UNVERIFIED: diagram ${id} expected contract is not valid JSON: ${error instanceof Error ? error.message : String(error)}`); }
+    try {
+      const contract = parseExpectedContract(raw, id);
+      projectReference(contract.source.ref, `diagram ${id}.expected_contract.source.ref`);
+      for (const sourceRef of contract.generator.sourceRefs) projectReference(sourceRef, `diagram ${id}.expected_contract.generator.source_refs`);
+      return { contract, path: contractPath };
+    } catch (error) {
+      fail(`UNVERIFIED: diagram ${id} expected contract is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const snapshotProjectFiles = (): Map<string, string> => {
+    const files = new Map<string, string>();
+    const skipped = new Set([".git", "node_modules", "dist", "build", "out", "target"]);
+    const visit = (directory: string): void => {
+      for (const entry of readdirSync(directory)) {
+        if (skipped.has(entry)) continue;
+        const path = join(directory, entry);
+        const relativeName = relative(ROOT, path);
+        if (relativeName === ".aidlc/evidence" || relativeName.startsWith(`.aidlc${process.platform === "win32" ? "\\\\" : "/"}evidence${process.platform === "win32" ? "\\\\" : "/"}`)) continue;
+        const info = statSync(path);
+        if (info.isDirectory()) visit(path);
+        else if (info.isFile()) files.set(path, createHash("sha256").update(readFileSync(path)).digest("hex"));
+      }
+    };
+    visit(ROOT);
+    return files;
+  };
+
+  const changedFiles = (before: Map<string, string>, after: Map<string, string>): string[] => {
+    const paths = new Set([...before.keys(), ...after.keys()]);
+    return [...paths].filter((path) => before.get(path) !== after.get(path)).sort();
+  };
+
+  const validateGeneration = (manifestPath: string, diagram: Record<string, unknown>, expected: ExpectedContract, expectedPath: string, svgPath: string, id: string): Record<string, unknown> => {
+    const generation = diagram.generation;
+    if (!generation || typeof generation !== "object" || Array.isArray(generation)) fail(`GENERATOR_CLOSED_LOOP: diagram ${id} generation metadata is missing`);
+    const metadata = generation as Record<string, unknown>;
+    const generator = metadata.generator && typeof metadata.generator === "object" && !Array.isArray(metadata.generator) ? metadata.generator as Record<string, unknown> : undefined;
+    if (!generator) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.generator is required`);
+    if (requireString(generator.name, `diagram ${id}.generation.generator.name`) !== expected.generator.name || requireString(generator.version, `diagram ${id}.generation.generator.version`) !== expected.generator.version) fail(`GENERATOR_CLOSED_LOOP: diagram ${id} generator identity does not match expected contract`);
+    const config = metadata.config && typeof metadata.config === "object" && !Array.isArray(metadata.config) ? metadata.config as Record<string, unknown> : undefined;
+    if (!config) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.config is required`);
+    requireString(config.summary, `diagram ${id}.generation.config.summary`);
+    if (requireString(config.digest, `diagram ${id}.generation.config.digest`) !== expected.generator.configDigest) fail(`GENERATOR_CLOSED_LOOP: diagram ${id} generator config digest does not match expected contract`);
+    const routeConfig = metadata.route_config && typeof metadata.route_config === "object" && !Array.isArray(metadata.route_config) ? metadata.route_config as Record<string, unknown> : undefined;
+    if (!routeConfig || Object.keys(routeConfig).length === 0) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.route_config must be a non-empty object`);
+    const sourceRefs = stringArray(metadata.source_refs, `diagram ${id}.generation.source_refs`);
+    for (const sourceRef of sourceRefs) projectReference(sourceRef, `diagram ${id}.generation.source_refs`);
+    // Compare project-relative paths in portable form: sidecars declare `/`, while relative() yields `\` on Windows.
+    const portable = (value: string): string => value.replace(/\\/g, "/");
+    const outputs = stringArray(metadata.outputs, `diagram ${id}.generation.outputs`).map(portable);
+    const requiredOutputs = [relativePath(svgPath), relativePath(expectedPath)].map(portable);
+    for (const output of requiredOutputs) if (!outputs.includes(output)) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.outputs must include ${output}`);
+    const command = metadata.command_argv;
+    if (!Array.isArray(command) || command.length === 0 || !command.every((value) => typeof value === "string" && value.trim().length > 0)) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.command_argv must be a non-empty argv array`);
+    const commandArgv = (command as string[]).map((value) => value.trim());
+    const configuredCwd = metadata.cwd === undefined ? ROOT : resolve(ROOT, requireString(metadata.cwd, `diagram ${id}.generation.cwd`));
+    if (!existsSync(configuredCwd) || !statSync(configuredCwd).isDirectory()) fail(`GENERATOR_CLOSED_LOOP: diagram ${id}.generation.cwd does not exist: ${configuredCwd}`);
+    const before = snapshotProjectFiles();
+    const result = runSync(commandArgv[0], commandArgv.slice(1), {
+      cwd: configuredCwd,
+      shell: false,
+      encoding: "utf8",
+      timeout: 120_000,
+      env: { ...process.env, AIDLC_DIAGRAM_ID: id, AIDLC_ROUTE_CONFIG_JSON: JSON.stringify(routeConfig), AIDLC_EXPECTED_CONTRACT_PATH: expectedPath },
+    });
+    if (result.error || result.status !== 0) {
+      const stdout = typeof result.stdout === "string" ? result.stdout.trim() : "";
+      const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
+      const detail = result.error?.message || `exit code ${result.status}`;
+      const output = stderr || stdout;
+      fail(`GENERATOR_CLOSED_LOOP: diagram ${id} generator failed: ${detail}${output ? `; ${output}` : ""}`);
+    }
+    const after = snapshotProjectFiles();
+    const allowed = new Set([resolve(svgPath), resolve(manifestPath)]);
+    const unexpected = changedFiles(before, after).filter((path) => !allowed.has(resolve(path)));
+    if (unexpected.length > 0) fail(`GENERATOR_CLOSED_LOOP: diagram ${id} generator changed non-target files: ${unexpected.map(relativePath).join(", ")}`);
+    if (!existsSync(svgPath) || !existsSync(manifestPath)) fail(`GENERATOR_CLOSED_LOOP: diagram ${id} generator did not leave target SVG and sidecar readable`);
+    const refreshedManifest = jsonFile(manifestPath) as Record<string, any>;
+    const matches = Array.isArray(refreshedManifest.diagrams) ? refreshedManifest.diagrams.filter((entry: unknown) => entry && typeof entry === "object" && !Array.isArray(entry) && (entry as Record<string, unknown>).id === id) : [];
+    if (matches.length !== 1) fail(`GENERATOR_CLOSED_LOOP: diagram ${id} sidecar cannot be re-read after generation`);
+    const refreshedDiagram = matches[0] as Record<string, unknown>;
+    const refreshedGeneration = refreshedDiagram.generation;
+    if (!refreshedGeneration || typeof refreshedGeneration !== "object" || Array.isArray(refreshedGeneration)) fail(`GENERATOR_CLOSED_LOOP: diagram ${id} regenerated sidecar lost generation metadata`);
+    Object.assign(diagram, refreshedDiagram);
+    return {
+      status: "passed",
+      command: commandArgv,
+      cwd: relativePath(configuredCwd) || ".",
+      external_generator: commandArgv.some((value) => value.startsWith("/tmp/") || value.includes("/tmp/")) || configuredCwd.startsWith("/tmp/"),
+      route_config: routeConfig,
+      changed_files: changedFiles(before, after).map(relativePath),
+      allowed_changed_files: [relativePath(svgPath), relativePath(manifestPath)],
+      reloaded: true,
+      stdout_tail: typeof result.stdout === "string" ? result.stdout.trim().slice(-1000) : "",
+    };
+  };
+
+  const compareIds = (actual: string[], expected: string[], field: string, id: string): void => {
+    if (actual.length !== expected.length || actual.some((value) => !expected.includes(value))) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} ${field} differs from independent expected contract`);
+  };
+
+  for (const manifestPath of manifests) {
+    const manifest = jsonFile(manifestPath) as Record<string, any>;
+    if (manifest.version !== 1 || !Array.isArray(manifest.diagrams)) fail(`${relativePath(manifestPath)} must be a version 1 diagram manifest`);
+    const documentPath = typeof manifest.document === "string" ? join(ROOT, manifest.document) : "";
+    if (!documentPath || !existsSync(documentPath)) fail(`${relativePath(manifestPath)} references a missing document`);
+    const diagramIds = new Set<string>();
+    const outputs = new Set<string>();
+    const manifestDir = portableDirname(manifestPath);
+
+    for (const diagram of manifest.diagrams as Record<string, any>[]) {
+      const id = requireString(diagram.id, `${relativePath(manifestPath)} diagram.id`);
+      const expectedInfo = loadIndependentExpected(manifest, diagram, id);
+      const expected = expectedInfo.contract;
+      if (expected && expected.diagramType && expected.diagramType !== diagram.diagramType) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} diagramType differs from independent expected contract`);
+      if (!/^[a-z0-9-]+$/.test(id) || diagramIds.has(id)) fail(`diagram id is invalid or duplicated: ${id}`);
+      diagramIds.add(id);
+      const outputName = requireString(diagram.output, `diagram ${id}.output`);
+      if (!/^[a-z0-9-]+\.svg$/.test(outputName) || outputs.has(outputName)) fail(`diagram output is invalid or duplicated: ${outputName}`);
+      outputs.add(outputName);
+      const svgPath = join(manifestDir, outputName);
+      if (expected && expectedInfo.path) {
+        const closure = validateGeneration(manifestPath, diagram, expected, expectedInfo.path, svgPath, id);
+        generationClosures.push({ diagram_id: id, ...closure });
+        generationContractsChecked += 1;
+      }
+      requireString(diagram.title, `diagram ${id}.title`);
+      requireString(diagram.description, `diagram ${id}.description`);
+      if (!diagram.canvas || requireFinite(diagram.canvas.width, `diagram ${id}.canvas.width`) <= 0 || requireFinite(diagram.canvas.height, `diagram ${id}.canvas.height`) <= 0) fail(`diagram ${id} canvas is invalid`);
+      if (!Array.isArray(diagram.nodes) || diagram.nodes.length === 0) fail(`diagram ${id} must contain nodes`);
+      if (!Array.isArray(diagram.edges)) fail(`diagram ${id}.edges must be an array`);
+      if (!Array.isArray(diagram.groups || [])) fail(`diagram ${id}.groups must be an array`);
+      if (diagram.legend !== undefined) fail(`VISUAL_STYLE: diagram ${id} must not define a global legend`);
+      if (diagram.annotations !== undefined && (!Array.isArray(diagram.annotations) || diagram.annotations.length > 0)) fail(`VISUAL_STYLE: diagram ${id} must not define global annotations`);
+
+      // Legacy (pre-v4) diagram downgrade path — 方案1.
+      // 旧图缺 v4 结构化契约根字段(diagramType / designNotes)时,不再硬 throw MIGRATION_REQUIRED
+      // 阻断整个迁移,而是:仍强制 SVG 安全/可访问性底线,记为遗留图并降级放行,附缺失字段清单。
+      // 这原子地跳过下方 9 个结构字段硬门禁,避免半校验状态;严格校验只对已迁移 v4 图执行。
+      {
+        const legacyMissing: string[] = [];
+        if (!diagramTypes.has(diagram.diagramType)) legacyMissing.push("diagramType");
+        if (!diagram.designNotes || typeof diagram.designNotes !== "object") legacyMissing.push("designNotes");
+        if (legacyMissing.length > 0) {
+          // 安全底线仍强制:不安全 SVG / 缺 viewBox/role/title/desc 的图即使是遗留图也必须失败。
+          if (!existsSync(svgPath)) fail(`diagram ${id} SVG output is missing: ${relativePath(svgPath)}`);
+          const legacySvg = text(svgPath);
+          if (unsafeSvg.test(legacySvg) || !/<svg\b[^>]*\bviewBox=["'][^"']+["']/i.test(legacySvg) || !/\brole=["']img["']/i.test(legacySvg) || !/<title\b/i.test(legacySvg) || !/<desc\b/i.test(legacySvg)) fail(`diagram ${id} SVG fails static safety or accessibility checks`);
+          legacyDiagrams.push({ diagram_id: id, missing: legacyMissing });
+          legacyDiagramsChecked += 1;
+          diagramsChecked += 1;
+          continue;
+        }
+      }
+
+      // New/adjusted diagrams must carry the v1 structured design contract.
+      if (!diagramTypes.has(diagram.diagramType)) fail(`MIGRATION_REQUIRED: diagram ${id} lacks a valid diagramType`);
+      const notes = diagram.designNotes;
+      if (!notes || typeof notes !== "object") fail(`MIGRATION_REQUIRED: diagram ${id} lacks designNotes`);
+      requireString(notes.intent, `diagram ${id}.designNotes.intent`);
+      if (!Array.isArray(notes.semanticModes) || notes.semanticModes.length === 0 || !notes.semanticModes.every((mode: unknown) => semanticModes.has(String(mode)))) fail(`diagram ${id}.designNotes.semanticModes is invalid`);
+      if (!Array.isArray(notes.visualSemantics)) fail(`diagram ${id}.designNotes.visualSemantics must be an array`);
+      const declarations = new Map<string, Record<string, any>>();
+      for (const declaration of notes.visualSemantics) {
+        if (!declaration || !visualChannels.has(declaration.channel) || !visualRoles.has(declaration.role)) fail(`diagram ${id}.visualSemantics contains an invalid declaration`);
+        if (declarations.has(declaration.channel)) fail(`diagram ${id}.visualSemantics duplicates ${declaration.channel}`);
+        requireString(declaration.reason, `diagram ${id}.visualSemantics.${declaration.channel}.reason`);
+        declarations.set(declaration.channel, declaration);
+      }
+
+      const layout = notes.layout;
+      if (processTypes.has(diagram.diagramType)) {
+        if (!layout || typeof layout !== "object" || Array.isArray(layout)) fail(`MIGRATION_REQUIRED: diagram ${id} lacks designNotes.layout`);
+        if (!new Set(["TB", "LR"]).has(layout.direction)) fail(`LAYOUT_AXIS: diagram ${id}.layout.direction must be TB or LR`);
+        requireFinite(layout.mainAxis, `diagram ${id}.layout.mainAxis`);
+        const layerTolerance = layout.layerTolerance === undefined ? 24 : requireFinite(layout.layerTolerance, `diagram ${id}.layout.layerTolerance`);
+        if (layerTolerance <= 0) fail(`diagram ${id}.layout.layerTolerance must be positive`);
+        if (!Array.isArray(layout.symmetryGroups || [])) fail(`diagram ${id}.layout.symmetryGroups must be an array`);
+        for (const symmetry of layout.symmetryGroups || []) {
+          if (!symmetry || !Array.isArray(symmetry.nodeIds) || symmetry.nodeIds.length < 2) fail(`diagram ${id}.layout.symmetryGroups requires at least two nodeIds`);
+          const tolerance = symmetry.tolerance === undefined ? 1 : requireFinite(symmetry.tolerance, `diagram ${id}.layout.symmetryGroups.tolerance`);
+          if (tolerance < 0) fail(`diagram ${id}.layout.symmetryGroups.tolerance must be non-negative`);
+          for (const nodeId of symmetry.nodeIds) requireString(nodeId, `diagram ${id}.layout.symmetryGroups.nodeId`);
+        }
+        const mergeNodes = layout.mergeNodes === undefined ? [] : layout.mergeNodes;
+        if (!Array.isArray(mergeNodes)) fail(`diagram ${id}.layout.mergeNodes must be an array`);
+        for (const merge of mergeNodes) {
+          requireString(merge.nodeId, `diagram ${id}.layout.mergeNodes.nodeId`);
+          requireString(merge.reason, `diagram ${id}.layout.mergeNodes.reason`);
+          if (!Array.isArray(merge.edgeIds) || merge.edgeIds.length < 2 || !merge.edgeIds.every((edgeId: unknown) => typeof edgeId === "string" && edgeId.trim().length > 0)) fail(`MERGE_DECLARATION: diagram ${id}.layout.mergeNodes.${merge.nodeId} must declare at least two edgeIds`);
+          if (!merge.ports || typeof merge.ports !== "object" || Array.isArray(merge.ports)) fail(`MERGE_DECLARATION: diagram ${id}.layout.mergeNodes.${merge.nodeId}.ports is required`);
+          for (const edgeId of merge.edgeIds) requireString(merge.ports[edgeId], `diagram ${id}.layout.mergeNodes.${merge.nodeId}.ports.${edgeId}`);
+        }
+        for (const state of ["normal", "fit", "zoom"]) {
+          const evidence = layout.readabilityEvidence?.[state];
+          if (!evidence || !["PASS", "FAIL", "UNVERIFIED"].includes(evidence.status) || typeof evidence.evidence !== "string" || evidence.evidence.trim().length === 0) fail(`diagram ${id}.layout.readabilityEvidence.${state} is invalid`);
+          if (!/^\.aidlc\/evidence\/[^#]+\/diagram-contract-provider\.json#views\.(?:normal|fit|zoom)$/.test(evidence.evidence.trim())) fail(`READABILITY_EVIDENCE: diagram ${id}.layout.readabilityEvidence.${state} must reference the current provider evidence view`);
+          if (evidence.status === "FAIL") fail(`diagram ${id}.layout.readabilityEvidence.${state} records FAIL`);
+          if (evidence.status === "PASS") fail(`UNVERIFIED: diagram ${id}.layout.readabilityEvidence.${state} claims PASS without controlled browser evidence`);
+        }
+        layoutExceptionIds(layout, "branchLayerExceptions");
+        layoutExceptionIds(layout, "branchPortExceptions");
+        layoutExceptionIds(layout, "sideSwitchExceptions");
+        crossingExceptionPairs(layout);
+      }
+      const geometryProfile = processTypes.has(diagram.diagramType) ? parseGeometryProfile(layout, id) : undefined;
+      const layoutDirection = processTypes.has(diagram.diagramType) ? String(layout.direction) : "";
+      const layoutMainAxis = processTypes.has(diagram.diagramType) ? Number(layout.mainAxis) : 0;
+      const layoutTolerance = processTypes.has(diagram.diagramType) ? Number(layout.layerTolerance === undefined ? 24 : layout.layerTolerance) : 24;
+      const branchLayerExceptions = processTypes.has(diagram.diagramType) ? layoutExceptionIds(layout, "branchLayerExceptions") : new Set<string>();
+      const branchPortExceptions = processTypes.has(diagram.diagramType) ? layoutExceptionIds(layout, "branchPortExceptions") : new Set<string>();
+      const sideSwitchExceptions = processTypes.has(diagram.diagramType) ? layoutExceptionIds(layout, "sideSwitchExceptions") : new Set<string>();
+      const crossingExceptions = processTypes.has(diagram.diagramType) ? crossingExceptionPairs(layout) : new Map<string, [string, string]>();
+
+      const nodes = new Map<string, Record<string, any>>();
+      for (const node of diagram.nodes) {
+        const nodeId = requireString(node.id, `diagram ${id} node.id`);
+        if (nodes.has(nodeId) || !shapes.has(node.shape || "rect")) fail(`diagram ${id} has an invalid or duplicated node: ${nodeId}`);
+        if (node.tone !== undefined) fail(`VISUAL_STYLE: diagram ${id} node ${nodeId} must not define tone`);
+        nodes.set(nodeId, node);
+        for (const property of ["x", "y", "width", "height"]) requireFinite(node[property], `diagram ${id} node ${nodeId}.${property}`);
+        if (node.width <= 0 || node.height <= 0 || node.x < 0 || node.y < 0 || node.x + node.width > diagram.canvas.width || node.y + node.height > diagram.canvas.height) fail(`diagram ${id} node ${nodeId} is outside the canvas`);
+        const rawLabel = node.label;
+        const labelLines = Array.isArray(rawLabel) ? rawLabel.map((line: unknown) => requireString(line, `diagram ${id} node ${nodeId}.label`)) : [requireString(rawLabel, `diagram ${id} node ${nodeId}.label`)];
+        const nodeFontSize = node.fontSize === undefined ? DIAGRAM_VISUAL_STYLE.frameFontSize : requireFinite(node.fontSize, `diagram ${id} node ${nodeId}.fontSize`);
+        if (nodeFontSize !== DIAGRAM_VISUAL_STYLE.frameFontSize) fail(`FONT_STYLE: diagram ${id} node ${nodeId}.fontSize must be ${DIAGRAM_VISUAL_STYLE.frameFontSize}`);
+        const textWidth = Math.max(...labelLines.map((line: string) => measureDiagramText(line, nodeFontSize)));
+        const textHeight = labelLines.length * DIAGRAM_LAYOUT_METRICS.frameLineHeight;
+        if (geometryProfile) {
+          const requiredSize = calculateDiagramNodeSize(node.shape, labelLines, nodeFontSize);
+          if (node.width < requiredSize.width || node.height < requiredSize.height) fail(`SHAPE_BASE_SIZE: diagram ${id} node ${nodeId} is ${node.width}x${node.height}, requires at least ${requiredSize.width}x${requiredSize.height} for ${node.shape}`);
+        }
+        if (textWidth + DIAGRAM_LAYOUT_METRICS.nodeHorizontalPadding * 2 > node.width || textHeight + DIAGRAM_LAYOUT_METRICS.nodeVerticalPadding * 2 > node.height) fail(`LABEL_OVERFLOW: diagram ${id} node ${nodeId} label does not fit its node`);
+        if (node.shape === "diamond" && textWidth / node.width + textHeight / node.height > 0.70) fail(`LABEL_OVERFLOW: diagram ${id} decision ${nodeId} label exceeds the diamond readable area`);
+      }
+
+      const nodeRectangles = new Map<string, Rectangle>();
+      for (const [nodeId, node] of nodes) {
+        const rectangle = rectangleOf(node, `diagram ${id} node ${nodeId}`);
+        if (rectangle) nodeRectangles.set(nodeId, rectangle);
+      }
+      const annotationRectangles = new Map<string, Rectangle>();
+      const annotations: Record<string, any>[] = [];
+      const nodeEntries = [...nodeRectangles.entries()];
+      for (let first = 0; first < nodeEntries.length; first++) {
+        for (let second = first + 1; second < nodeEntries.length; second++) {
+          if (rectanglesOverlap(nodeEntries[first][1], nodeEntries[second][1])) fail(`diagram ${id} nodes ${nodeEntries[first][0]} and ${nodeEntries[second][0]} have geometric collision`);
+          if (geometryProfile) {
+            const firstNode = nodes.get(nodeEntries[first][0])!;
+            const secondNode = nodes.get(nodeEntries[second][0])!;
+            const gap = diagramEntityGap(firstNode as { shape?: string; x: number; y: number; width: number; height: number }, secondNode as { shape?: string; x: number; y: number; width: number; height: number });
+            if (gap < geometryProfile.entityGap) fail(`ENTITY_GAP: diagram ${id} nodes ${nodeEntries[first][0]} and ${nodeEntries[second][0]} have ${gap} units of boundary gap, expected ${geometryProfile.entityGap}`);
+          }
+        }
+      }
+
+      const labelRectangles = new Map<string, Rectangle>();
+      const edges = new Map<string, Record<string, any>>();
+      for (const edge of diagram.edges) {
+        const edgeId = requireString(edge.id, `diagram ${id} edge.id`);
+        if (edges.has(edgeId) || !nodes.has(edge.from) || !nodes.has(edge.to)) fail(`diagram ${id} edge ${edgeId} has invalid identity or endpoints`);
+        if (!ports.has(edge.fromPort) || !ports.has(edge.toPort) || !edgeKinds.has(edge.kind || "directed")) fail(`diagram ${id} edge ${edgeId} has invalid port or kind`);
+        for (const offset of ["fromPortOffset", "toPortOffset"]) if (edge[offset] !== undefined) requireFinite(edge[offset], `diagram ${id} edge ${edgeId}.${offset}`);
+        if ((nodes.get(edge.from)!.shape === "diamond" && Number(edge.fromPortOffset || 0) !== 0) || (nodes.get(edge.to)!.shape === "diamond" && Number(edge.toPortOffset || 0) !== 0)) fail(`PORT_MISMATCH: diagram ${id} edge ${edgeId} cannot offset a diamond vertex`);
+        for (const [node, port, offset, field] of [[nodes.get(edge.from)!, edge.fromPort, Number(edge.fromPortOffset || 0), "fromPortOffset"], [nodes.get(edge.to)!, edge.toPort, Number(edge.toPortOffset || 0), "toPortOffset"]] as const) {
+          if (node.shape === "diamond") continue;
+          const maximumOffset = port === "top" || port === "bottom" ? node.width / 2 : node.height / 2;
+          if (Math.abs(offset) > maximumOffset) fail(`PORT_MISMATCH: diagram ${id} edge ${edgeId}.${field} leaves the ${port} side of its rectangular node boundary`);
+        }
+        if (!Array.isArray(edge.points) || edge.points.length < 2 || !edge.points.every((point: unknown) => Array.isArray(point) && point.length === 2 && point.every((value) => typeof value === "number" && Number.isFinite(value)))) fail(`MIGRATION_REQUIRED: diagram ${id} edge ${edgeId} lacks complete points`);
+        const points = edge.points as unknown[];
+        if (points.some((point) => (point as number[])[0] < 0 || (point as number[])[1] < 0 || (point as number[])[0] > diagram.canvas.width || (point as number[])[1] > diagram.canvas.height)) fail(`CANVAS_CLIPPING: diagram ${id} edge ${edgeId} has points outside the canvas`);
+        if (diagram.diagramType !== "sequence" && !samePoint(points[0], portPoint(nodes.get(edge.from)!, edge.fromPort, edge.fromPortOffset || 0))) fail(`EDGE_ENDPOINT_MISMATCH: diagram ${id} edge ${edgeId} first point does not match fromPort`);
+        if (diagram.diagramType !== "sequence" && !samePoint(points[points.length - 1], portPoint(nodes.get(edge.to)!, edge.toPort, edge.toPortOffset || 0))) fail(`EDGE_ENDPOINT_MISMATCH: diagram ${id} edge ${edgeId} last point does not match toPort`);
+        if (diagram.diagramType !== "sequence" && !leavesPort(points as [number, number][], edge.fromPort)) fail(`PORT_DIRECTION: diagram ${id} edge ${edgeId} path direction does not match its declared fromPort`);
+        if (diagram.diagramType !== "sequence" && !approachesTargetFromOutside(points as [number, number][], nodes.get(edge.to)!)) fail(`PORT_APPROACH: diagram ${id} edge ${edgeId} final segment must begin outside the target shape`);
+        if (diagram.diagramType !== "sequence" && !entersPort(points as [number, number][], edge.toPort)) fail(`PORT_DIRECTION: diagram ${id} edge ${edgeId} path direction does not match its declared toPort`);
+        if ((edge.kind || "directed") !== "undirected" && edge.arrowTarget !== `${edge.to}:${edge.toPort}`) fail(`ARROW_MAPPING: diagram ${id} edge ${edgeId} sidecar arrowTarget must be ${edge.to}:${edge.toPort}`);
+        if (processTypes.has(diagram.diagramType) && edge.kind === "bidirectional") fail(`diagram ${id} process edge ${edgeId} must not be bidirectional`);
+        if (diagram.diagramType === "flowchart" || diagram.diagramType === "pipeline") {
+          if (!isOrthogonal(points)) fail(`diagram ${id} process edge ${edgeId} is not orthogonal`);
+          for (let pointIndex = 2; pointIndex < points.length; pointIndex++) {
+            const previous = points[pointIndex - 2] as [number, number];
+            const current = points[pointIndex - 1] as [number, number];
+            const next = points[pointIndex] as [number, number];
+            if (pointEqual(previous, current) || pointEqual(current, next) || (previous[0] === current[0] && current[0] === next[0]) || (previous[1] === current[1] && current[1] === next[1])) fail(`REDUNDANT_PATH_POINT: diagram ${id} edge ${edgeId} contains a redundant collinear point`);
+          }
+        }
+        if (edge.label && typeof edge.label === "object" && !Array.isArray(edge.label)) {
+          const placementError = edgeLabelPlacementError(edgeId, edge.points as [number, number][], edge.label);
+          if (placementError) fail(`diagram ${id} ${placementError}`);
+          labelRectangles.set(edgeId, textRectangle(edge.label, `diagram ${id} edge ${edgeId}.label`));
+        }
+        const edgePoints = edge.points as [number, number][];
+        for (const [nodeId, rectangle] of nodeRectangles) {
+          for (let pointIndex = 1; pointIndex < edgePoints.length; pointIndex++) {
+            const first = edgePoints[pointIndex - 1];
+            const second = edgePoints[pointIndex];
+            if (nodeId !== edge.from && nodeId !== edge.to && nodes.get(nodeId)?.shape !== "diamond" && segmentOverlapsRectangleBoundary(first, second, rectangle)) fail(`EDGE_NODE_BOUNDARY_OVERLAP: diagram ${id} edge ${edgeId} overlaps unrelated node boundary ${nodeId}`);
+            if (nodeId !== edge.from && nodeId !== edge.to && geometryProfile && segmentIntersectsRectangle(first, second, expandedRectangle(rectangle, geometryProfile.obstacleGap))) fail(`OBSTACLE_GAP: diagram ${id} edge ${edgeId} passes within ${geometryProfile.obstacleGap} units of unrelated node ${nodeId}`);
+            if (!segmentIntersectsRectangle(first, second, rectangle)) continue;
+            if (nodeId === edge.from) fail(`SOURCE_REENTRY: diagram ${id} edge ${edgeId} re-enters its source node ${nodeId}`);
+            if (nodeId === edge.to) fail(`TARGET_REENTRY: diagram ${id} edge ${edgeId} enters the interior of target node ${nodeId}`);
+            fail(`EDGE_NODE_COLLISION: diagram ${id} edge ${edgeId} collides with non-endpoint node ${nodeId}`);
+          }
+        }
+        edges.set(edgeId, edge);
+      }
+      const edgeEntries = [...edges.entries()];
+      const actualEdgeIntersections = new Set<string>();
+      const actualCollinearOverlaps = new Set<string>();
+      for (let firstIndex = 0; firstIndex < edgeEntries.length; firstIndex++) {
+        const [firstId, firstEdge] = edgeEntries[firstIndex];
+        const firstPoints = firstEdge.points as [number, number][];
+        for (let secondIndex = firstIndex + 1; secondIndex < edgeEntries.length; secondIndex++) {
+          const [secondId, secondEdge] = edgeEntries[secondIndex];
+          const secondPoints = secondEdge.points as [number, number][];
+          let overlap = false;
+          let intersection = false;
+          for (let firstPointIndex = 1; firstPointIndex < firstPoints.length; firstPointIndex++) {
+            for (let secondPointIndex = 1; secondPointIndex < secondPoints.length; secondPointIndex++) {
+              const relation = segmentRelation(firstPoints[firstPointIndex - 1], firstPoints[firstPointIndex], secondPoints[secondPointIndex - 1], secondPoints[secondPointIndex]);
+              if (relation === "overlap") overlap = true;
+              else if (segmentsIntersect(firstPoints[firstPointIndex - 1], firstPoints[firstPointIndex], secondPoints[secondPointIndex - 1], secondPoints[secondPointIndex])) intersection = true;
+            }
+          }
+          const pair = [firstId, secondId].sort().join(":");
+          if (overlap) actualCollinearOverlaps.add(pair);
+          else if (intersection) actualEdgeIntersections.add(pair);
+        }
+      }
+      if (actualCollinearOverlaps.size > 0) fail(`COLLINEAR_OVERLAP: diagram ${id} contains non-zero collinear overlap between edge pair(s) ${[...actualCollinearOverlaps].join(", ")}`);
+      for (const pair of actualEdgeIntersections) if (!crossingExceptions.has(pair.split(":").join("\u0000"))) fail(`EDGE_CROSSING: diagram ${id} contains an undeclared edge crossing ${pair}`);
+      for (const [key, [firstEdgeId, secondEdgeId]] of crossingExceptions) {
+        if (!edges.has(firstEdgeId) || !edges.has(secondEdgeId)) fail(`CROSSING_EXCEPTION: diagram ${id} references missing edge(s) ${firstEdgeId}/${secondEdgeId}`);
+        const actualKey = [firstEdgeId, secondEdgeId].sort().join(":");
+        if (!actualEdgeIntersections.has(actualKey)) fail(`CROSSING_EXCEPTION: diagram ${id} declares an exception that does not match an actual crossing ${firstEdgeId}/${secondEdgeId}`);
+        if (key !== actualKey.split(":").join("\u0000")) fail(`CROSSING_EXCEPTION: diagram ${id} crossing exception identity is inconsistent for ${firstEdgeId}/${secondEdgeId}`);
+      }
+      if (processTypes.has(diagram.diagramType)) {
+        const sideOf = (node: Record<string, any>): number => {
+          const coordinate = layoutDirection === "TB" ? node.x + node.width / 2 : node.y + node.height / 2;
+          return coordinate > layoutMainAxis + 1 ? 1 : coordinate < layoutMainAxis - 1 ? -1 : 0;
+        };
+        const pointSide = (point: [number, number]): number => {
+          const coordinate = layoutDirection === "TB" ? point[0] : point[1];
+          return coordinate > layoutMainAxis + 1 ? 1 : coordinate < layoutMainAxis - 1 ? -1 : 0;
+        };
+        const loopEdges = new Set((Array.isArray(layout.loopLanes) ? layout.loopLanes : []).flatMap((lane: Record<string, any>) => Array.isArray(lane.edgeIds) ? lane.edgeIds.map(String) : []));
+        for (const [edgeId, edge] of edgeEntries) {
+          if (loopEdges.has(edgeId)) continue;
+          const source = nodes.get(edge.from)!;
+          const target = nodes.get(edge.to)!;
+          const sourceSide = sideOf(source);
+          const targetSide = sideOf(target);
+          const sides = (edge.points as [number, number][]).map(pointSide).filter((side) => side !== 0);
+          let invalid = sourceSide !== 0 && targetSide !== 0 && (sourceSide === targetSide
+            ? sides.some((side) => side !== sourceSide)
+            : sides.slice(1).some((side, index) => side !== sides[index]));
+          if (sourceSide !== 0 && targetSide !== 0 && sourceSide !== targetSide) {
+            let switches = 0;
+            for (let pointIndex = 1; pointIndex < sides.length; pointIndex++) if (sides[pointIndex] !== sides[pointIndex - 1]) switches++;
+            invalid = switches > 1;
+          }
+          if (invalid && !sideSwitchExceptions.has(edgeId)) fail(`SIDE_SWITCH: diagram ${id} edge ${edgeId} leaves its declared side channel or performs an unapproved cross-axis return`);
+          if (!invalid && sideSwitchExceptions.has(edgeId)) fail(`SIDE_SWITCH_EXCEPTION: diagram ${id} declares a side-switch exception that does not match edge ${edgeId}`);
+        }
+        for (const edgeId of sideSwitchExceptions) if (!edges.has(edgeId)) fail(`SIDE_SWITCH_EXCEPTION: diagram ${id} references missing edge ${edgeId}`);
+      }
+      if (processTypes.has(diagram.diagramType)) {
+        for (const merge of (Array.isArray(layout.mergeNodes) ? layout.mergeNodes : []) as Record<string, any>[]) {
+          const incoming = edgeEntries.filter(([, edge]) => edge.to === merge.nodeId);
+          if (incoming.length < 2) fail(`MERGE_DECLARATION: diagram ${id} merge node ${merge.nodeId} does not have real multiple incoming edges`);
+          compareIds(incoming.map(([edgeId]) => edgeId), merge.edgeIds.map(String), `merge node ${merge.nodeId} incoming edges`, id);
+          for (const [edgeId, edge] of incoming) if (edge.toPort !== merge.ports[edgeId]) fail(`MERGE_PORT_DIFF: diagram ${id} merge node ${merge.nodeId} edge ${edgeId} enters via ${edge.toPort}, expected ${merge.ports[edgeId]}`);
+        }
+        for (const edgeId of branchPortExceptions) {
+          const edge = edges.get(edgeId);
+          if (!edge) fail(`BRANCH_PORT_EXCEPTION: diagram ${id} references missing edge ${edgeId}`);
+          const branchSourceEdges = edgeEntries.filter(([, candidate]) => candidate.from === edge.from);
+          if (branchSourceEdges.length < 2) fail(`BRANCH_PORT_EXCEPTION: diagram ${id} edge ${edgeId} is not an actual branch edge`);
+        }
+      }
+      if (expected) {
+        compareIds([...nodes.keys()], expected.nodeIds, "node IDs", id);
+        compareIds([...edges.keys()], expected.edgeIds, "edge IDs", id);
+        compareIds((diagram.groups || []).map((group: Record<string, any>) => String(group.id)), expected.groupIds, "group IDs", id);
+        compareIds(diagram.legend?.items?.map((item: Record<string, any>) => String(item.id)) || [], expected.legendIds, "legend IDs", id);
+        compareIds((diagram.annotations || []).map((annotation: Record<string, any>) => String(annotation.id)), expected.annotationIds, "annotation IDs", id);
+        if (!expected.sourceGraph) for (const [nodeId, shape] of Object.entries(expected.nodeShapes)) if (shape && nodes.get(nodeId)?.shape !== shape) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} node ${nodeId} shape differs from independent expected contract`);
+        if (expected.sourceGraph) {
+          const sourceNodes = new Map(expected.sourceGraph.nodes.map((node) => [node.displayId, node]));
+          for (const [nodeId, sourceNode] of sourceNodes) {
+            const actualNode = nodes.get(nodeId)!;
+            if (actualNode.label !== sourceNode.label) fail(`SOURCE_NODE_FIDELITY: diagram ${id} node ${nodeId} label differs from source graph`);
+            if (actualNode.shape !== sourceNode.shape) fail(`SOURCE_NODE_FIDELITY: diagram ${id} node ${nodeId} shape differs from source graph`);
+          }
+          const sourceRelationsByEdge = new Map<string, typeof expected.sourceGraph.relations>();
+          for (const relation of expected.sourceGraph.relations) sourceRelationsByEdge.set(relation.displayEdgeId, [...(sourceRelationsByEdge.get(relation.displayEdgeId) || []), relation]);
+          for (const [edgeId, relations] of sourceRelationsByEdge) {
+            const actual = edges.get(edgeId)!;
+            const sourceKind = relations[0].kind;
+            if ((actual.kind || "directed") !== sourceKind) fail(`SOURCE_RELATION_FIDELITY: diagram ${id} edge ${edgeId} kind differs from source graph`);
+            const requiredLabel = relations.length === 1 ? relations[0].label : relations[0].displayLabel;
+            const actualLabel = actual.label && typeof actual.label === "object" && !Array.isArray(actual.label) ? String(actual.label.text || "") : undefined;
+            if (requiredLabel === undefined && actualLabel !== undefined) fail(`SOURCE_RELATION_FIDELITY: diagram ${id} edge ${edgeId} adds a label absent from source graph`);
+            if (requiredLabel !== undefined && actualLabel !== requiredLabel) fail(`SOURCE_RELATION_FIDELITY: diagram ${id} edge ${edgeId} label differs from source graph`);
+          }
+          for (const path of expected.sourceGraph.readingPaths) {
+            const labels = path.edgeIds.map((edgeId) => {
+              const edge = edges.get(edgeId)!;
+              return edge.label && typeof edge.label === "object" && !Array.isArray(edge.label) ? String(edge.label.text || "") : "";
+            });
+            for (const label of path.requiredLabels) if (!labels.includes(label)) fail(`READING_PATH_TRACE: diagram ${id} path ${path.id} is missing required label ${label}`);
+          }
+        }
+        const expectedGeometry = expected.routeContract.geometryProfile;
+        if (expectedGeometry) {
+          if (!geometryProfile) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} geometryProfile is missing from actual layout`);
+          for (const field of ["version", "entityGap", "portGap", "obstacleGap", "laneGap"] as const) {
+            if (String((layout.geometryProfile as Record<string, any>)[field]) !== String(expectedGeometry[field])) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} geometryProfile.${field} differs from independent expected contract`);
+          }
+          for (const [shape, expectedShape] of Object.entries(expectedGeometry.shapeBaseSizes)) {
+            const actualShape = (layout.geometryProfile as Record<string, any>).shapeBaseSizes?.[shape];
+            if (!actualShape || actualShape.minWidth !== expectedShape.minWidth || actualShape.minHeight !== expectedShape.minHeight || actualShape.boundaryModel !== expectedShape.boundaryModel) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} shape profile ${shape} differs from independent expected contract`);
+          }
+          if (expectedGeometry.axisSpacing) {
+            const actualAxis = (layout.geometryProfile as Record<string, any>).axisSpacing;
+            if (!actualAxis || actualAxis.referenceShape !== expectedGeometry.axisSpacing.referenceShape || Number(actualAxis.referenceWidth) !== expectedGeometry.axisSpacing.referenceWidth || Number(actualAxis.referenceHeight) !== expectedGeometry.axisSpacing.referenceHeight || Number(actualAxis.referenceLongSide) !== expectedGeometry.axisSpacing.referenceLongSide || Number(actualAxis.referenceShortSide) !== expectedGeometry.axisSpacing.referenceShortSide || Number(actualAxis.lrMinimumGap) !== expectedGeometry.axisSpacing.lrMinimumGap || Number(actualAxis.tbMinimumGap) !== expectedGeometry.axisSpacing.tbMinimumGap) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} axisSpacing differs from independent expected contract`);
+          } else if ((layout.geometryProfile as Record<string, any>).axisSpacing !== undefined) {
+            fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} actual layout declares axisSpacing without an independent expected profile`);
+          }
+        } else if (geometryProfile) {
+          fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} actual layout declares geometryProfile without an independent expected profile`);
+        }
+        const expectedBranchPlan = expected.routeContract.branchLayoutPlan;
+        if (expectedBranchPlan) {
+          const actualBranchPlan = layout.branchLayoutPlan;
+          if (!actualBranchPlan || typeof actualBranchPlan !== "object" || Array.isArray(actualBranchPlan)) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branchLayoutPlan is missing from actual layout`);
+          if (String(actualBranchPlan.strategy) !== expectedBranchPlan.strategy || Number(actualBranchPlan.baselineGap) !== expectedBranchPlan.baselineGap || JSON.stringify(actualBranchPlan.frozenOrder) !== JSON.stringify(expectedBranchPlan.frozenOrder)) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branchLayoutPlan header differs from independent expected contract`);
+          const actualGroups = Array.isArray(actualBranchPlan.groups) ? actualBranchPlan.groups as Record<string, any>[] : [];
+          for (const expectedGroup of expectedBranchPlan.groups) {
+            const actualGroup = actualGroups.find((group) => String(group.id) === expectedGroup.id);
+            if (!actualGroup) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branchLayoutPlan group ${expectedGroup.id} is missing`);
+            compareIds((actualGroup.edgeIds || []).map(String), expectedGroup.edgeIds, `branchLayoutPlan group ${expectedGroup.id} edges`, id);
+            compareIds((actualGroup.targetNodeIds || []).map(String), expectedGroup.targetIds, `branchLayoutPlan group ${expectedGroup.id} targets`, id);
+            if (JSON.stringify(actualGroup.branchOrder) !== JSON.stringify(expectedGroup.branchOrder) || String(actualGroup.layoutCandidateEdgeId) !== expectedGroup.layoutCandidateEdgeId || String(actualGroup.primaryEdgeId || "") !== String(expectedGroup.primaryEdgeId || "") || Number(actualGroup.depth) !== expectedGroup.depth || String(actualGroup.mode) !== expectedGroup.mode || Number(actualGroup.branchGap) !== expectedGroup.branchGap) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branchLayoutPlan group ${expectedGroup.id} differs from independent expected contract`);
+          }
+        } else if (layout.branchLayoutPlan !== undefined) {
+          fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} actual layout declares branchLayoutPlan without an independent expected plan`);
+        }
+        const routeDifferences = {
+          endpoint: [] as string[],
+          port: [] as string[],
+          arrowTarget: [] as string[],
+          bends: [] as string[],
+          pointsTopology: [] as string[],
+        };
+        for (const edgeId of expected.edgeIds) {
+          const actual = edges.get(edgeId)!;
+          const endpoints = expected.edgeEndpoints[edgeId];
+          if (!endpoints || actual.from !== endpoints.from || actual.to !== endpoints.to) {
+            routeDifferences.endpoint.push(edgeId);
+            fail(`ROUTE_ENDPOINT_DIFF: diagram ${id} edge ${edgeId} endpoints are ${actual.from}->${actual.to}, expected ${endpoints?.from}->${endpoints?.to}`);
+          }
+          const ports = expected.edgePorts[edgeId];
+          if (ports?.fromPort && actual.fromPort !== ports.fromPort || ports?.toPort && actual.toPort !== ports.toPort) {
+            routeDifferences.port.push(edgeId);
+            fail(`ROUTE_PORT_DIFF: diagram ${id} edge ${edgeId} ports are ${actual.fromPort}->${actual.toPort}, expected ${ports?.fromPort}->${ports?.toPort}`);
+          }
+          const expectedKind = expected.edgeKinds[edgeId];
+          if (expectedKind && (actual.kind || "directed") !== expectedKind) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} edge ${edgeId} kind differs from independent expected contract`);
+          const intent = expected.routeContract.edgeIntents.find((candidate) => candidate.edgeId === edgeId);
+          if (!intent) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} route contract omits edge ${edgeId}`);
+          const expectedArrowTarget = expected.edgeArrowTargets[edgeId] || intent.arrowTarget;
+          if (expectedArrowTarget !== undefined && actual.arrowTarget !== expectedArrowTarget) {
+            routeDifferences.arrowTarget.push(edgeId);
+            fail(`ROUTE_ARROW_TARGET_DIFF: diagram ${id} edge ${edgeId} arrowTarget is ${actual.arrowTarget}, expected ${expectedArrowTarget}`);
+          }
+          const actualLabelText = actual.label && typeof actual.label === "object" && !Array.isArray(actual.label) ? String(actual.label.text || "") : undefined;
+          const routeErrors = routeIntentErrors(intent, actual.points, Boolean(actual.label && typeof actual.label === "object" && !Array.isArray(actual.label)), actual.arrowTarget, actualLabelText);
+          for (const error of routeErrors) {
+            if (error.startsWith("ROUTE_BEND_DIFF")) routeDifferences.bends.push(edgeId);
+            if (error.startsWith("ROUTE_TOPOLOGY") || error.startsWith("NON_MANHATTAN")) routeDifferences.pointsTopology.push(edgeId);
+          }
+          if (routeErrors.length > 0) fail(`ROUTE_CONTRACT_FAIL: diagram ${id} ${routeErrors.join("; ")}`);
+          if (intent.kind === "loop" && !expected.routeContract.loopLanes.some((lane) => lane.edgeIds.includes(edgeId))) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} loop route ${edgeId} is not assigned to an expected loop lane`);
+          if (intent.kind === "branch" && expected.routeContract.branchGroups.length === 0) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branch route ${edgeId} lacks an expected branch group`);
+        }
+        routeContractReports.push({
+          diagram_id: id,
+          expected_vs_actual: routeDifferences,
+          source_target_normal_errors: [],
+          non_manhattan_paths: [],
+          node_crossings: [],
+          unauthorized_crossings: [...actualEdgeIntersections].filter((pair) => !crossingExceptions.has(pair.split(":").sort().join("\u0000"))),
+          declared_crossings: [...crossingExceptions.keys()],
+          collinear_overlaps: [...actualCollinearOverlaps],
+          label_collisions: [],
+        });
+        if (expected.routeContract.direction && layoutDirection && expected.routeContract.direction !== layoutDirection) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} reading direction differs from independent expected contract`);
+        const expectedMain = expected.routeContract.mainFlow;
+        if (expectedMain) {
+          const actualMain = layout.mainFlow;
+          if (!actualMain || !Array.isArray(actualMain.nodeIds) || !Array.isArray(actualMain.edgeIds)) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} actual mainFlow is missing`);
+          const actualEntry = Array.isArray(actualMain.entryNodeIds) ? actualMain.entryNodeIds : actualMain.entryNodeId === undefined ? [] : [actualMain.entryNodeId];
+          compareIds(actualEntry.map(String), expectedMain.entryNodeIds, "mainFlow entry nodes", id);
+          compareIds((actualMain.exitNodeIds || []).map(String), expectedMain.exitNodeIds, "mainFlow exit nodes", id);
+          compareIds(actualMain.nodeIds.map(String), expectedMain.nodeIds, "mainFlow nodes", id);
+          compareIds(actualMain.edgeIds.map(String), expectedMain.edgeIds, "mainFlow edges", id);
+        }
+        const expectedPrimary = expected.routeContract.primaryFlow;
+        if (expectedPrimary) {
+          const actualPrimary = layout.primaryFlow;
+          if (!actualPrimary || !Array.isArray(actualPrimary.nodeIds) || !Array.isArray(actualPrimary.edgeIds)) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} actual primaryFlow is missing`);
+          compareIds(actualPrimary.nodeIds.map(String), expectedPrimary.nodeIds, "primaryFlow nodes", id);
+          compareIds(actualPrimary.edgeIds.map(String), expectedPrimary.edgeIds, "primaryFlow edges", id);
+          if (String(actualPrimary.reason) !== expectedPrimary.reason) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} primaryFlow reason differs from independent expected contract`);
+        }
+        const structuredBranches = expected.routeContract.branchGroups.filter((branch) => branch.decisionNodeId && branch.edgeIds);
+        if (structuredBranches.length > 0) {
+          const actualBranches = Array.isArray(layout.branchGroups) ? layout.branchGroups as Record<string, any>[] : [];
+          for (const expectedBranch of structuredBranches) {
+            const actualBranch = actualBranches.find((branch) => (expectedBranch.id && String(branch.id) === expectedBranch.id) || String(branch.decisionNodeId) === expectedBranch.decisionNodeId);
+            if (!actualBranch) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} structured branch group ${expectedBranch.id || expectedBranch.decisionNodeId} is missing from actual layout`);
+            compareIds((actualBranch.edgeIds || []).map(String), expectedBranch.edgeIds || [], `branch group ${expectedBranch.id || expectedBranch.decisionNodeId} edge IDs`, id);
+            compareIds((actualBranch.targetIds || []).map(String), expectedBranch.targetIds, `branch group ${expectedBranch.id || expectedBranch.decisionNodeId} target IDs`, id);
+            if (expectedBranch.mergeNodeId !== undefined && String(actualBranch.mergeNodeId) !== expectedBranch.mergeNodeId) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branch group ${expectedBranch.id || expectedBranch.decisionNodeId} merge node differs from independent expected contract`);
+            if (expectedBranch.depth !== undefined && Number(actualBranch.depth) !== expectedBranch.depth) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branch group ${expectedBranch.id || expectedBranch.decisionNodeId} depth differs from independent expected contract`);
+            if (expectedBranch.mode !== undefined && String(actualBranch.mode) !== expectedBranch.mode) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} branch group ${expectedBranch.id || expectedBranch.decisionNodeId} mode differs from independent expected contract`);
+          }
+        }
+        const expectedLoopEdges = expected.routeContract.loopLanes.flatMap((lane) => lane.edgeIds).sort();
+        const actualLoopLanes = Array.isArray(layout.loopLanes) ? layout.loopLanes as Record<string, any>[] : [];
+        const actualLoopEdges = actualLoopLanes.flatMap((lane: Record<string, any>) => Array.isArray(lane.edgeIds) ? lane.edgeIds.map(String) : []).sort();
+        compareIds(actualLoopEdges, expectedLoopEdges, "loop lane edges", id);
+        for (const expectedLane of expected.routeContract.loopLanes) {
+          const actualLane = actualLoopLanes.find((lane) => String(lane.id) === expectedLane.id);
+          if (!actualLane) fail(`EXPECTED_ACTUAL_MISMATCH: diagram ${id} loop lane ${expectedLane.id} is missing from actual layout`);
+          if (actualLane.side !== expectedLane.side) fail(`LOOP_LANE_DIFF: diagram ${id} loop lane ${expectedLane.id} side is ${actualLane.side}, expected ${expectedLane.side}`);
+          if (Number(actualLane.laneOffset) !== expectedLane.laneOffset) fail(`LOOP_LANE_DIFF: diagram ${id} loop lane ${expectedLane.id} laneOffset is ${actualLane.laneOffset}, expected ${expectedLane.laneOffset}`);
+          if (String(actualLane.reason) !== expectedLane.reason) fail(`LOOP_LANE_DIFF: diagram ${id} loop lane ${expectedLane.id} reason differs from independent expected contract`);
+          compareIds((actualLane.edgeIds || []).map(String), expectedLane.edgeIds, `loop lane ${expectedLane.id} edge IDs`, id);
+        }
+        const actualMergeNodes = Array.isArray(layout.mergeNodes) ? layout.mergeNodes as Record<string, any>[] : [];
+        for (const expectedMerge of expected.routeContract.mergeNodes) {
+          const actualMerge = actualMergeNodes.find((merge) => String(merge.nodeId) === expectedMerge.nodeId);
+          if (!actualMerge) fail(`MERGE_DECLARATION: diagram ${id} merge node ${expectedMerge.nodeId} is missing from actual layout`);
+          const actualIncoming = edgeEntries.filter(([, edge]) => edge.to === expectedMerge.nodeId).map(([edgeId]) => edgeId);
+          if (actualIncoming.length < 2) fail(`MERGE_DECLARATION: diagram ${id} merge node ${expectedMerge.nodeId} does not have real multiple incoming edges`);
+          compareIds(actualIncoming, expectedMerge.edgeIds, `merge node ${expectedMerge.nodeId} incoming edges`, id);
+          for (const edgeId of expectedMerge.edgeIds) {
+            const actualEdge = edges.get(edgeId)!;
+            if (actualEdge.to !== expectedMerge.nodeId || actualEdge.toPort !== expectedMerge.ports[edgeId]) fail(`MERGE_PORT_DIFF: diagram ${id} merge node ${expectedMerge.nodeId} edge ${edgeId} enters via ${actualEdge.toPort}, expected ${expectedMerge.ports[edgeId]}`);
+          }
+        }
+        const expectedCrossings = expected.routeContract.exceptions.filter((exception) => exception.type === "crossing").map((exception) => exception.edgeIds.slice().sort().join("\u0000")).sort();
+        compareIds([...crossingExceptions.keys()].sort(), expectedCrossings, "crossing exception declarations", id);
+        expectedContractsChecked += 1;
+      }
+      if (processTypes.has(diagram.diagramType) && layout.changeImpactReview !== undefined) {
+        const review = layout.changeImpactReview;
+        if (!review || typeof review !== "object" || Array.isArray(review)) fail(`CHANGE_IMPACT_REVIEW: diagram ${id} changeImpactReview must be an object`);
+        requireString(review.baseline, `diagram ${id}.layout.changeImpactReview.baseline`);
+        if (!Array.isArray(review.movedNodeIds) || review.movedNodeIds.length === 0) fail(`CHANGE_IMPACT_REVIEW: diagram ${id} changeImpactReview requires movedNodeIds`);
+        if (!Array.isArray(review.impactedEdgeIds)) fail(`CHANGE_IMPACT_REVIEW: diagram ${id} changeImpactReview requires impactedEdgeIds`);
+        if (!Array.isArray(review.edgeReviews)) fail(`CHANGE_IMPACT_REVIEW: diagram ${id} changeImpactReview requires edgeReviews`);
+        const movedNodeIds = review.movedNodeIds.map((nodeId: unknown) => requireString(nodeId, `diagram ${id}.layout.changeImpactReview.movedNodeId`));
+        const impactedEdgeIds = review.impactedEdgeIds.map((edgeId: unknown) => requireString(edgeId, `diagram ${id}.layout.changeImpactReview.impactedEdgeId`));
+        if (new Set(movedNodeIds).size !== movedNodeIds.length || new Set(impactedEdgeIds).size !== impactedEdgeIds.length) fail(`CHANGE_IMPACT_REVIEW: diagram ${id} changeImpactReview contains duplicate IDs`);
+        for (const nodeId of movedNodeIds) if (!nodes.has(nodeId)) fail(`CHANGE_IMPACT_REVIEW: diagram ${id} moved node is missing: ${nodeId}`);
+        for (const edgeId of impactedEdgeIds) if (!edges.has(edgeId)) fail(`CHANGE_IMPACT_REVIEW: diagram ${id} impacted edge is missing: ${edgeId}`);
+        const incidentEdgeIds = new Set(edgeEntries.filter(([, edge]) => movedNodeIds.includes(edge.from) || movedNodeIds.includes(edge.to)).map(([edgeId]) => edgeId));
+        const missingIncidentEdges = [...incidentEdgeIds].filter((edgeId) => !impactedEdgeIds.includes(edgeId));
+        if (missingIncidentEdges.length > 0) fail(`CHANGE_IMPACT_REVIEW: diagram ${id} omits incident edge(s): ${missingIncidentEdges.join(", ")}`);
+        const reviewed = new Set<string>();
+        for (const rawEntry of review.edgeReviews) {
+          if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) fail(`CHANGE_IMPACT_REVIEW: diagram ${id} has an invalid edge review`);
+          const edgeId = requireString(rawEntry.edgeId, `diagram ${id}.layout.changeImpactReview.edgeReview.edgeId`);
+          if (!impactedEdgeIds.includes(edgeId) || reviewed.has(edgeId)) fail(`CHANGE_IMPACT_REVIEW: diagram ${id} edge review is invalid for ${edgeId}`);
+          if (!new Set(["recomputed", "unchanged"]).has(rawEntry.status)) fail(`CHANGE_IMPACT_REVIEW: diagram ${id} edge review ${edgeId} must be recomputed or unchanged`);
+          if (rawEntry.status === "unchanged") requireString(rawEntry.unchangedReason, `diagram ${id}.layout.changeImpactReview.edgeReview.unchangedReason`);
+          reviewed.add(edgeId);
+        }
+        if (reviewed.size !== impactedEdgeIds.length) fail(`CHANGE_IMPACT_REVIEW: diagram ${id} requires one review for every impacted edge`);
+        changeImpactReviewsChecked += 1;
+      }
+      const mainFlowNodeIds = new Set<string>();
+      const mainFlowEdgeIds = new Set<string>();
+      const primaryFlowEdgeIds = new Set<string>();
+      const branchLayoutPrimaryEdgeIds = new Set<string>();
+      const loopEdgeIds = new Set<string>();
+      if (processTypes.has(diagram.diagramType)) {
+        const mainFlow = layout.mainFlow;
+        if (!mainFlow || typeof mainFlow !== "object" || Array.isArray(mainFlow)) fail(`MIGRATION_REQUIRED: diagram ${id} lacks designNotes.layout.mainFlow`);
+        const entryNodeIds: string[] = Array.isArray(mainFlow.entryNodeIds)
+          ? mainFlow.entryNodeIds.map((nodeId: unknown) => requireString(nodeId, `diagram ${id}.layout.mainFlow.entryNodeId`))
+          : mainFlow.entryNodeId === undefined ? [] : [requireString(mainFlow.entryNodeId, `diagram ${id}.layout.mainFlow.entryNodeId`)];
+        const flowNodeIds = mainFlow.nodeIds;
+        const flowEdgeIds = mainFlow.edgeIds;
+        const exitNodeIds = mainFlow.exitNodeIds;
+        if (entryNodeIds.length === 0 || !Array.isArray(flowNodeIds) || flowNodeIds.length === 0 || !Array.isArray(flowEdgeIds) || flowEdgeIds.length === 0 || !Array.isArray(exitNodeIds) || exitNodeIds.length === 0) fail(`MIGRATION_REQUIRED: diagram ${id}.layout.mainFlow is incomplete`);
+        for (const nodeId of flowNodeIds) mainFlowNodeIds.add(requireString(nodeId, `diagram ${id}.layout.mainFlow.nodeId`));
+        for (const edgeId of flowEdgeIds) mainFlowEdgeIds.add(requireString(edgeId, `diagram ${id}.layout.mainFlow.edgeId`));
+        const actualPrimaryFlow = layout.primaryFlow;
+        if (actualPrimaryFlow && typeof actualPrimaryFlow === "object" && !Array.isArray(actualPrimaryFlow) && Array.isArray(actualPrimaryFlow.edgeIds)) {
+          for (const edgeId of actualPrimaryFlow.edgeIds) primaryFlowEdgeIds.add(requireString(edgeId, `diagram ${id}.layout.primaryFlow.edgeId`));
+        }
+        const actualBranchLayoutPlan = layout.branchLayoutPlan;
+        if (actualBranchLayoutPlan && typeof actualBranchLayoutPlan === "object" && !Array.isArray(actualBranchLayoutPlan) && Array.isArray(actualBranchLayoutPlan.groups)) {
+          for (const group of actualBranchLayoutPlan.groups) {
+            if (!group || typeof group !== "object" || Array.isArray(group) || group.primaryEdgeId === undefined) continue;
+            branchLayoutPrimaryEdgeIds.add(requireString(group.primaryEdgeId, `diagram ${id}.layout.branchLayoutPlan.primaryEdgeId`));
+          }
+        }
+        if (geometryProfile?.axisSpacing && actualPrimaryFlow && typeof actualPrimaryFlow === "object" && !Array.isArray(actualPrimaryFlow) && Array.isArray(actualPrimaryFlow.nodeIds)) {
+          const minimumGap = layoutDirection === "TB" ? geometryProfile.axisSpacing.tbMinimumGap : geometryProfile.axisSpacing.lrMinimumGap;
+          const primaryNodes = actualPrimaryFlow.nodeIds.map((nodeId: unknown) => nodes.get(requireString(nodeId, `diagram ${id}.layout.primaryFlow.nodeId`))).filter((node: unknown): node is Record<string, any> => Boolean(node));
+          for (let index = 1; index < primaryNodes.length; index++) {
+            const previous = primaryNodes[index - 1];
+            const current = primaryNodes[index];
+            const gap = layoutDirection === "TB" ? current.y - (previous.y + previous.height) : current.x - (previous.x + previous.width);
+            if (gap < minimumGap) fail(`LAYOUT_AXIS_GAP: diagram ${id} primary flow ${previous.id}->${current.id} has ${gap} units on the ${layoutDirection} main axis, expected at least ${minimumGap}`);
+          }
+        }
+        const exitIds = exitNodeIds.map((nodeId: unknown) => requireString(nodeId, `diagram ${id}.layout.mainFlow.exitNodeId`));
+        if (mainFlowNodeIds.size !== flowNodeIds.length || mainFlowEdgeIds.size !== flowEdgeIds.length || new Set(entryNodeIds).size !== entryNodeIds.length || new Set(exitIds).size !== exitIds.length) fail(`diagram ${id}.layout.mainFlow contains duplicate IDs`);
+        if (entryNodeIds.some((entryNodeId) => !nodes.has(entryNodeId) || !mainFlowNodeIds.has(entryNodeId))) fail(`MAIN_FLOW_TRACE: diagram ${id} mainFlow entry node is not declared`);
+        if (mainFlowNodeIds.size !== nodes.size || [...nodes.keys()].some((nodeId) => !mainFlowNodeIds.has(nodeId))) fail(`MAIN_FLOW_TRACE: diagram ${id} mainFlow does not cover every business node`);
+        if (mainFlowEdgeIds.size !== edges.size || [...edges.keys()].some((edgeId) => !mainFlowEdgeIds.has(edgeId))) fail(`MAIN_FLOW_TRACE: diagram ${id} mainFlow does not cover every process edge`);
+        for (const nodeId of mainFlowNodeIds) if (!nodes.has(nodeId)) fail(`MAIN_FLOW_TRACE: diagram ${id} mainFlow references missing node ${nodeId}`);
+        for (const edgeId of mainFlowEdgeIds) if (!edges.has(edgeId)) fail(`MAIN_FLOW_TRACE: diagram ${id} mainFlow references missing edge ${edgeId}`);
+        for (const exitId of exitIds) if (!nodes.has(exitId) || !mainFlowNodeIds.has(exitId)) fail(`MAIN_FLOW_TRACE: diagram ${id} mainFlow exit node is invalid: ${exitId}`);
+        const mainAdjacency = new Map<string, string[]>();
+        for (const [, edge] of edgeEntries) mainAdjacency.set(edge.from, [...(mainAdjacency.get(edge.from) || []), edge.to]);
+        const reachable = new Set<string>(entryNodeIds);
+        const queue = [...entryNodeIds];
+        while (queue.length > 0) {
+          const current = queue.shift()!;
+          for (const target of mainAdjacency.get(current) || []) if (!reachable.has(target)) { reachable.add(target); queue.push(target); }
+        }
+        if ([...mainFlowNodeIds].some((nodeId) => !reachable.has(nodeId))) fail(`MAIN_FLOW_TRACE: diagram ${id} mainFlow contains an unreachable node`);
+        const loopLanes = layout.loopLanes === undefined ? [] : layout.loopLanes;
+        if (!Array.isArray(loopLanes)) fail(`diagram ${id}.layout.loopLanes must be an array`);
+        const laneIds = new Set<string>();
+        for (const lane of loopLanes) {
+          const laneId = requireString(lane.id, `diagram ${id}.layout.loopLane.id`);
+          if (laneIds.has(laneId)) fail(`diagram ${id}.layout.loopLanes contains duplicate lane ${laneId}`);
+          laneIds.add(laneId);
+          if (!new Set(["left", "right"]).has(lane.side)) fail(`LOOP_LANE: diagram ${id} loop lane ${laneId} must declare left or right side`);
+          const laneOffset = requireFinite(lane.laneOffset, `diagram ${id}.layout.loopLane.laneOffset`);
+          if (laneOffset < 24) fail(`LOOP_LANE: diagram ${id} loop lane ${laneId} must stay at least 24 units from the main axis`);
+          requireString(lane.reason, `diagram ${id}.layout.loopLane.reason`);
+          if (!Array.isArray(lane.edgeIds) || lane.edgeIds.length === 0) fail(`LOOP_LANE: diagram ${id} loop lane ${laneId} requires edgeIds`);
+          for (const rawEdgeId of lane.edgeIds) {
+            const edgeId = requireString(rawEdgeId, `diagram ${id}.layout.loopLane.edgeId`);
+            if (!mainFlowEdgeIds.has(edgeId) || !edges.has(edgeId)) fail(`LOOP_LANE: diagram ${id} loop lane ${laneId} references an edge outside mainFlow`);
+            if (loopEdgeIds.has(edgeId)) fail(`LOOP_LANE: diagram ${id} loop edge ${edgeId} is assigned to more than one lane`);
+            loopEdgeIds.add(edgeId);
+            const edge = edges.get(edgeId)!;
+            const expectedIntent = expected?.routeContract.edgeIntents.find((intent) => intent.edgeId === edgeId);
+            if ((!edge.label || typeof edge.label !== "object" || Array.isArray(edge.label)) && expectedIntent?.labelRequired !== false) fail(`LOOP_LANE: diagram ${id} loop edge ${edgeId} requires an explicit source label`);
+            if (edge.label && typeof edge.label === "object" && !Array.isArray(edge.label)) requireString(edge.label.text, `diagram ${id} loop edge ${edgeId}.label.text`);
+            const points = edge.points as [number, number][];
+            const corridorPoints = points.length > 3 ? points.slice(1, -2) : points.slice(1, -1);
+            const isOnDeclaredSide = (point: [number, number]): boolean => {
+              const distance = layoutDirection === "TB" ? layoutMainAxis - point[0] : layoutMainAxis - point[1];
+              return lane.side === "left" ? distance >= laneOffset : distance <= -laneOffset;
+            };
+            if (corridorPoints.length === 0 || !corridorPoints.some(isOnDeclaredSide)) fail(`LOOP_LANE: diagram ${id} loop edge ${edgeId} does not use its declared independent lane`);
+          }
+        }
+        if (geometryProfile) {
+          const laneEntries = (loopLanes as Record<string, any>[]).map((lane) => ({ id: String(lane.id), side: String(lane.side), offset: Number(lane.laneOffset) }));
+          for (let first = 0; first < laneEntries.length; first++) {
+            for (let second = first + 1; second < laneEntries.length; second++) {
+              if (laneEntries[first].side === laneEntries[second].side && Math.abs(laneEntries[first].offset - laneEntries[second].offset) < geometryProfile.laneGap) fail(`LOOP_LANE_GAP: diagram ${id} lanes ${laneEntries[first].id} and ${laneEntries[second].id} are less than ${geometryProfile.laneGap} units apart`);
+            }
+          }
+        }
+        for (const exitId of exitIds) {
+          const untrackedOutgoing = edgeEntries.filter(([edgeId, edge]) => edge.from === exitId && !loopEdgeIds.has(edgeId));
+          if (untrackedOutgoing.length > 0) fail(`MAIN_FLOW_TRACE: diagram ${id} mainFlow exit ${exitId} has outgoing edge(s) outside declared loopLanes: ${untrackedOutgoing.map(([edgeId]) => edgeId).join(", ")}`);
+        }
+      }
+      const incomingEdges = new Map<string, string[]>();
+      for (const [edgeId, edge] of edgeEntries) incomingEdges.set(edge.to, [...(incomingEdges.get(edge.to) || []), edgeId]);
+      const declaredMergeNodes = new Set<string>((layout?.mergeNodes || []).map((merge: Record<string, any>) => String(merge.nodeId)));
+      for (const [nodeId, incoming] of incomingEdges) {
+        const nonLoopIncoming = incoming.filter((edgeId) => !loopEdgeIds.has(edgeId));
+        if (nonLoopIncoming.length > 1 && processTypes.has(diagram.diagramType) && !declaredMergeNodes.has(nodeId)) fail(`MERGE_DECLARATION: diagram ${id} node ${nodeId} has multiple incoming branches without explicit merge semantics`);
+      }
+      if (processTypes.has(diagram.diagramType)) {
+        for (const [nodeId, node] of nodes) {
+          if (node.shape !== "diamond") continue;
+          const outgoing = edgeEntries.filter(([, edge]) => edge.from === nodeId);
+          if (outgoing.length < 2) fail(`DECISION_EXIT: diagram ${id} decision ${nodeId} must have at least two explicit exits`);
+          for (const [edgeId, edge] of outgoing) {
+            if (!edge.label || typeof edge.label !== "object" || Array.isArray(edge.label)) fail(`DECISION_EXIT: diagram ${id} decision ${nodeId} exit ${edgeId} lacks a visible label`);
+            requireString(edge.label.text, `diagram ${id} decision ${nodeId} exit ${edgeId}.label.text`);
+          }
+        }
+      }
+      for (const symmetry of layout?.symmetryGroups || []) {
+        const centers: Array<{ layer: number; cross: number }> = symmetry.nodeIds.map((nodeId: string) => {
+          const node = nodes.get(nodeId);
+          if (!node) fail(`LAYOUT_SYMMETRY: diagram ${id} symmetry group references missing node ${nodeId}`);
+          return { layer: layoutDirection === "TB" ? node.y + node.height / 2 : node.x + node.width / 2, cross: layoutDirection === "TB" ? node.x + node.width / 2 : node.y + node.height / 2 };
+        });
+        const tolerance = symmetry.tolerance === undefined ? 1 : Number(symmetry.tolerance);
+        if (Math.max(...centers.map((center) => center.layer)) - Math.min(...centers.map((center) => center.layer)) > layoutTolerance) fail(`LAYOUT_LAYER: diagram ${id} symmetry group is not on one business layer`);
+        for (const center of centers) {
+          const mirror = centers.find((candidate) => Math.abs(candidate.cross - (2 * layoutMainAxis - center.cross)) <= tolerance);
+          if (!mirror) fail(`LAYOUT_SYMMETRY: diagram ${id} symmetry group is not uniformly distributed around mainAxis`);
+        }
+      }
+      for (const [nodeId, node] of nodes) {
+        if (node.shape !== "diamond") continue;
+        const branchEdges = edgeEntries.filter(([edgeId, edge]) => edge.from === nodeId && !loopEdgeIds.has(edgeId));
+        if (branchEdges.length < 2) continue;
+        const layers = branchEdges.map(([, edge]) => {
+          const target = nodes.get(edge.to)!;
+          return layoutDirection === "TB" ? target.y + target.height / 2 : target.x + target.width / 2;
+        });
+        if (Math.max(...layers) - Math.min(...layers) > layoutTolerance && !branchEdges.every(([edgeId]) => branchLayerExceptions.has(edgeId))) fail(`BRANCH_LAYER: diagram ${id} decision ${nodeId} branch targets are not on the same business layer`);
+        const localMergeSplit = branchEdges.length === 2 && branchEdges[0][1].to === branchEdges[1][1].to && declaredMergeNodes.has(branchEdges[0][1].to);
+        if (!branchEdges.every(([edgeId]) => branchPortExceptions.has(edgeId))) {
+          const primaryEdges = branchEdges.filter(([edgeId]) => primaryFlowEdgeIds.has(edgeId) || branchLayoutPrimaryEdgeIds.has(edgeId));
+          if (primaryEdges.length === 1) {
+            const forwardPort = layoutDirection === "TB" ? "bottom" : "right";
+            const sidePorts = layoutDirection === "TB" ? new Set(["left", "right"]) : new Set(["top", "bottom"]);
+            const primaryEdgeId = primaryEdges[0][0];
+            const primaryEdge = primaryEdges[0][1];
+            if (geometryProfile?.axisSpacing && !loopEdgeIds.has(primaryEdgeId)) {
+              const source = nodes.get(primaryEdge.from)!;
+              const target = nodes.get(primaryEdge.to)!;
+              const sourceCross = layoutDirection === "TB" ? source.x + source.width / 2 : source.y + source.height / 2;
+              const targetCross = layoutDirection === "TB" ? target.x + target.width / 2 : target.y + target.height / 2;
+              if (Math.abs(sourceCross - targetCross) > 1) fail(`BRANCH_AXIS_ALIGNMENT: diagram ${id} primary edge ${primaryEdgeId} must keep source and target centers on the ${layoutDirection} main axis`);
+            }
+            const lateralEdges = branchEdges.filter(([edgeId]) => edgeId !== primaryEdgeId);
+            const lateralPorts = lateralEdges.map(([, edge]) => edge.fromPort);
+            const hasBothSides = lateralPorts.length < 2 || new Set(lateralPorts).size >= 2;
+            if (primaryEdges[0][1].fromPort !== forwardPort || lateralPorts.some((port) => !sidePorts.has(port)) || !hasBothSides) fail(`BRANCH_PORT: diagram ${id} decision ${nodeId} must use ${forwardPort} for its primary edge and the two perpendicular side ports for other branches`);
+          } else if (branchEdges.length === 2 && localMergeSplit) {
+            const downward = branchEdges.filter(([, edge]) => edge.fromPort === "bottom");
+            const downwardIds = new Set(downward.map(([edgeId]) => edgeId));
+            const lateralEdges = branchEdges.filter(([edgeId]) => !downwardIds.has(edgeId));
+            if (layoutDirection === "TB" && (downward.length !== 1 || downward[0][1].fromPort !== "bottom" || lateralEdges.length !== 1 || !["left", "right"].includes(lateralEdges[0][1].fromPort))) fail(`BRANCH_PORT: diagram ${id} decision ${nodeId} must use bottom for its direct merge exit and a side port for its local branch`);
+          } else {
+            const expectedSources = layoutDirection === "TB" ? new Set(["right", "left"]) : new Set(["top", "bottom"]);
+            if (new Set(branchEdges.map(([, edge]) => edge.fromPort)).size !== 2 || !branchEdges.every(([, edge]) => expectedSources.has(edge.fromPort))) fail(`BRANCH_PORT: diagram ${id} decision ${nodeId} branches must leave through the declared side ports`);
+          }
+        }
+        for (const [edgeId, edge] of branchEdges) {
+          if (branchPortExceptions.has(edgeId)) continue;
+          const isLocalMergeEntry = localMergeSplit && edge.to === branchEdges[0][1].to && edge.toPort !== "top";
+          const expectedTarget = isLocalMergeEntry ? edge.toPort : (layoutDirection === "TB" ? "top" : "left");
+          if (edge.toPort !== expectedTarget) fail(`BRANCH_PORT: diagram ${id} branch ${edgeId} must enter target through ${expectedTarget}`);
+          const points = edge.points as [number, number][];
+          const last = points[points.length - 1];
+          const previous = points[points.length - 2];
+          if (layoutDirection === "TB" && expectedTarget === "top" && Math.abs(last[0] - previous[0]) > 1) fail(`BRANCH_PORT: diagram ${id} branch ${edgeId} final segment must enter vertically`);
+          if (layoutDirection === "TB" && ["left", "right"].includes(expectedTarget) && Math.abs(last[1] - previous[1]) > 1) fail(`BRANCH_PORT: diagram ${id} branch ${edgeId} final segment must enter horizontally`);
+          if (layoutDirection === "LR" && Math.abs(last[1] - previous[1]) > 1) fail(`BRANCH_PORT: diagram ${id} branch ${edgeId} final segment must enter horizontally`);
+        }
+      }
+
+      const sideSwitchViolations = new Set<string>();
+      if (processTypes.has(diagram.diagramType)) {
+        const sideOf = (point: [number, number]): -1 | 0 | 1 => {
+          const delta = (layoutDirection === "TB" ? point[0] : point[1]) - layoutMainAxis;
+          return delta > 1 ? 1 : delta < -1 ? -1 : 0;
+        };
+        const hasUnexpectedSideSwitch = (edge: Record<string, any>, points: [number, number][]): boolean => {
+          const from = nodes.get(edge.from)!;
+          const to = nodes.get(edge.to)!;
+          const fromSide = sideOf([from.x + from.width / 2, from.y + from.height / 2]);
+          const toSide = sideOf([to.x + to.width / 2, to.y + to.height / 2]);
+          if (fromSide === 0 || toSide === 0) return false;
+          const sides = points.map(sideOf).filter((side) => side !== 0);
+          if (fromSide === toSide) return sides.some((side) => side !== fromSide);
+          let switches = 0;
+          for (let pointIndex = 1; pointIndex < sides.length; pointIndex++) if (sides[pointIndex] !== sides[pointIndex - 1]) switches++;
+          return switches > 1;
+        };
+        for (const [edgeId, edge] of edgeEntries) {
+          if (loopEdgeIds.has(edgeId)) continue;
+          if (!hasUnexpectedSideSwitch(edge, edge.points as [number, number][])) continue;
+          sideSwitchViolations.add(edgeId);
+          if (!sideSwitchExceptions.has(edgeId)) fail(`SIDE_SWITCH: diagram ${id} edge ${edgeId} crosses sides or folds back without a declared sideSwitchException`);
+        }
+        for (const edgeId of sideSwitchExceptions) {
+          if (!edges.has(edgeId)) fail(`SIDE_SWITCH_EXCEPTION: diagram ${id} references missing edge ${edgeId}`);
+          if (!sideSwitchViolations.has(edgeId)) fail(`SIDE_SWITCH_EXCEPTION: diagram ${id} declares no actual side-switch violation for ${edgeId}`);
+        }
+        if (expected) {
+          const expectedSideSwitches = expected.routeContract.exceptions.filter((exception) => exception.type === "side-switch").flatMap((exception) => exception.edgeIds).sort();
+          compareIds([...sideSwitchExceptions].sort(), expectedSideSwitches, "side-switch exception declarations", id);
+          const expectedBranchPorts = expected.routeContract.exceptions.filter((exception) => exception.type === "branch-port").flatMap((exception) => exception.edgeIds).sort();
+          compareIds([...branchPortExceptions].sort(), expectedBranchPorts, "branch-port exception declarations", id);
+          const expectedBranchLayers = expected.routeContract.exceptions.filter((exception) => exception.type === "branch-layer").flatMap((exception) => exception.edgeIds).sort();
+          compareIds([...branchLayerExceptions].sort(), expectedBranchLayers, "branch-layer exception declarations", id);
+        }
+      }
+
+      for (const [pairKey, [firstId, secondId]] of crossingExceptions) {
+        if (!edges.has(firstId) || !edges.has(secondId)) fail(`CROSSING_EXCEPTION: diagram ${id} references missing edge pair ${firstId}/${secondId}`);
+        if (pairKey !== edgePairKey(firstId, secondId)) fail(`CROSSING_EXCEPTION: diagram ${id} contains an invalid edge pair`);
+      }
+      const actualCrossingPairs = new Set<string>();
+      for (let first = 0; first < edgeEntries.length; first++) {
+        const [firstId, firstEdge] = edgeEntries[first];
+        const firstPoints = firstEdge.points as [number, number][];
+        for (let second = first + 1; second < edgeEntries.length; second++) {
+          const [secondId, secondEdge] = edgeEntries[second];
+          const secondPoints = secondEdge.points as [number, number][];
+          let hasCollinearOverlap = false;
+          let hasEdgeCrossing = false;
+          for (let firstPoint = 1; firstPoint < firstPoints.length; firstPoint++) {
+            for (let secondPoint = 1; secondPoint < secondPoints.length; secondPoint++) {
+              const relation = segmentRelation(firstPoints[firstPoint - 1], firstPoints[firstPoint], secondPoints[secondPoint - 1], secondPoints[secondPoint]);
+              if (relation === "none") continue;
+              const sharedPoint = [firstPoints[firstPoint - 1], firstPoints[firstPoint]].find((point) => [secondPoints[secondPoint - 1], secondPoints[secondPoint]].some((candidate) => pointEqual(point, candidate)));
+              const sharedGraphNode = firstEdge.to === secondEdge.from || firstEdge.from === secondEdge.to || (firstEdge.to === secondEdge.to && declaredMergeNodes.has(firstEdge.to)) || (firstEdge.from === secondEdge.from && declaredMergeNodes.has(firstEdge.from));
+              const allowedEndpointTouch = relation === "touch" && sharedPoint !== undefined && sharedGraphNode;
+              if (relation === "overlap") { hasCollinearOverlap = true; continue; }
+              if (relation === "cross" || !allowedEndpointTouch) hasEdgeCrossing = true;
+            }
+          }
+          if (hasCollinearOverlap) fail(`COLLINEAR_OVERLAP: diagram ${id} edges ${firstId} and ${secondId} share a non-zero collinear path segment`);
+          if (hasEdgeCrossing) {
+            const pairKey = edgePairKey(firstId, secondId);
+            actualCrossingPairs.add(pairKey);
+            if (!crossingExceptions.has(pairKey)) fail(`EDGE_CROSSING: diagram ${id} edges ${firstId} and ${secondId} intersect outside a declared shared endpoint`);
+          }
+          if (firstEdge.from === secondEdge.from && firstEdge.fromPort === secondEdge.fromPort && Math.hypot(firstPoints[0][0] - secondPoints[0][0], firstPoints[0][1] - secondPoints[0][1]) < (geometryProfile?.portGap ?? 24)) fail(`INSUFFICIENT_GAP: diagram ${id} edges ${firstId} and ${secondId} share a port with less than ${geometryProfile?.portGap ?? 24} units of separation`);
+          if (firstEdge.to === secondEdge.to && firstEdge.toPort === secondEdge.toPort && Math.hypot(firstPoints[firstPoints.length - 1][0] - secondPoints[secondPoints.length - 1][0], firstPoints[firstPoints.length - 1][1] - secondPoints[secondPoints.length - 1][1]) < (geometryProfile?.portGap ?? 24)) fail(`INSUFFICIENT_GAP: diagram ${id} edges ${firstId} and ${secondId} share a target port with less than ${geometryProfile?.portGap ?? 24} units of separation`);
+        }
+      }
+      for (const [pairKey, [firstId, secondId]] of crossingExceptions) {
+        if (!actualCrossingPairs.has(pairKey)) fail(`CROSSING_EXCEPTION: diagram ${id} declares no actual crossing for ${firstId}/${secondId}`);
+      }
+      const labelEntries = [...labelRectangles.entries()];
+      for (const [labelId, label] of labelEntries) {
+        const edge = edges.get(labelId)!;
+        for (const [nodeId, rectangle] of nodeRectangles) {
+          if (nodeId === edge.from || nodeId === edge.to) continue;
+          if (rectanglesOverlap(label, rectangle)) fail(`LABEL_COLLISION: diagram ${id} label ${labelId} overlaps unrelated node ${nodeId}`);
+          if (geometryProfile && rectanglesOverlap(label, expandedRectangle(rectangle, geometryProfile.obstacleGap))) fail(`OBSTACLE_GAP: diagram ${id} label ${labelId} is within ${geometryProfile.obstacleGap} units of unrelated node ${nodeId}`);
+        }
+      }
+      for (let first = 0; first < labelEntries.length; first++) for (let second = first + 1; second < labelEntries.length; second++) if (rectanglesOverlap(labelEntries[first][1], labelEntries[second][1])) fail(`LABEL_COLLISION: diagram ${id} labels ${labelEntries[first][0]} and ${labelEntries[second][0]} overlap`);
+      for (const [labelId, label] of labelEntries) {
+        for (const [edgeId, edge] of edgeEntries) {
+          if (edgeId === labelId) continue;
+          const points = edge.points as [number, number][];
+          for (let pointIndex = 1; pointIndex < points.length; pointIndex++) {
+            if (segmentIntersectsRectangle(points[pointIndex - 1], points[pointIndex], label)) fail(`LABEL_COLLISION: diagram ${id} label ${labelId} intersects edge ${edgeId}`);
+          }
+        }
+      }
+      if (diagram.diagramType === "flowchart" || diagram.diagramType === "pipeline") {
+        const candidateHitsObstacle = (candidate: [number, number][], currentId: string, current: Record<string, any>): boolean => {
+          for (const [nodeId, rectangle] of nodeRectangles) {
+            if (nodeId === current.from || nodeId === current.to) continue;
+            for (let pointIndex = 1; pointIndex < candidate.length; pointIndex++) if (segmentIntersectsRectangle(candidate[pointIndex - 1], candidate[pointIndex], rectangle)) return true;
+          }
+          for (const [labelId, label] of labelEntries) {
+            if (labelId === currentId && loopEdgeIds.has(currentId)) continue;
+            for (let pointIndex = 1; pointIndex < candidate.length; pointIndex++) if (segmentIntersectsRectangle(candidate[pointIndex - 1], candidate[pointIndex], label)) return true;
+          }
+          for (const [otherId, other] of edgeEntries) {
+            if (otherId === currentId) continue;
+            const otherPoints = other.points as [number, number][];
+            for (let candidatePoint = 1; candidatePoint < candidate.length; candidatePoint++) {
+              for (let otherPoint = 1; otherPoint < otherPoints.length; otherPoint++) {
+                const relation = segmentRelation(candidate[candidatePoint - 1], candidate[candidatePoint], otherPoints[otherPoint - 1], otherPoints[otherPoint]);
+                if (relation === "none") continue;
+                const sharedPoint = [candidate[candidatePoint - 1], candidate[candidatePoint]].find((point) => [otherPoints[otherPoint - 1], otherPoints[otherPoint]].some((otherCandidate) => pointEqual(point, otherCandidate)));
+                const sharedGraphNode = current.to === other.from || current.from === other.to || (current.to === other.to && declaredMergeNodes.has(current.to)) || (current.from === other.from && declaredMergeNodes.has(current.from));
+                if (relation === "touch" && sharedPoint !== undefined && sharedGraphNode) continue;
+                return true;
+              }
+            }
+          }
+          return false;
+        };
+        for (const [edgeId, edge] of edgeEntries) {
+          const points = edge.points as [number, number][];
+          if (points.length <= 2) continue;
+          const start = points[0];
+          const end = points[points.length - 1];
+          const candidates: [number, number][][] = [];
+          const loopLane = loopEdgeIds.has(edgeId)
+            ? (Array.isArray(layout.loopLanes) ? layout.loopLanes as Record<string, any>[] : []).find((lane) => Array.isArray(lane.edgeIds) && lane.edgeIds.map(String).includes(edgeId))
+            : undefined;
+          if (loopLane) {
+            const laneOffset = Number(loopLane.laneOffset);
+            const laneCoordinates = new Set(points.slice(1, -1).map((point) => layoutDirection === "TB" ? point[0] : point[1]));
+            for (const coordinate of laneCoordinates) {
+              const distance = layoutDirection === "TB" ? layoutMainAxis - coordinate : layoutMainAxis - coordinate;
+              const isOnDeclaredSide = loopLane.side === "left" ? distance >= laneOffset : distance <= -laneOffset;
+              if (!isOnDeclaredSide) continue;
+              candidates.push(layoutDirection === "TB"
+                ? [start, [coordinate, start[1]], [coordinate, end[1]], end]
+                : [start, [start[0], coordinate], [end[0], coordinate], end]);
+            }
+          } else {
+            if (start[0] === end[0] || start[1] === end[1]) candidates.push([start, end]);
+            if (start[0] !== end[0] && start[1] !== end[1]) {
+              candidates.push([start, [start[0], end[1]], end], [start, [end[0], start[1]], end]);
+            }
+          }
+          const shortestLegal = candidates.some((candidate) => candidate.length < points.length
+            && candidate.every((point, pointIndex) => pointIndex === 0 || !pointEqual(point, candidate[pointIndex - 1]))
+            && leavesPort(candidate, edge.fromPort)
+            && approachesTargetFromOutside(candidate, nodes.get(edge.to)!)
+            && entersPort(candidate, edge.toPort)
+            && !candidateHitsObstacle(candidate, edgeId, edge));
+          if (shortestLegal) fail(`ROUTING_MINIMALITY: diagram ${id} edge ${edgeId} has a shorter legal direct, one-bend, or lane-constrained Manhattan route`);
+        }
+      }
+
+      const groups = new Map<string, Record<string, any>>();
+      const groupStyleRoles = new Set(["structural", "business-boundary"]);
+      for (const group of diagram.groups || []) {
+        const groupId = requireString(group.id, `diagram ${id} group.id`);
+        if (groups.has(groupId) || nodes.has(groupId) || edges.has(groupId) || !groupTypes.has(group.semanticType)) fail(`MIGRATION_REQUIRED: diagram ${id} group ${groupId} lacks valid semanticType`);
+        if (group.tone !== undefined) fail(`VISUAL_STYLE: diagram ${id} group ${groupId} must not define tone`);
+        requireString(group.label, `diagram ${id} group ${groupId}.label`);
+        if (!groupStyleRoles.has(group.styleRole)) fail(`MIGRATION_REQUIRED: diagram ${id} group ${groupId} lacks valid styleRole`);
+        if (!Array.isArray(group.members)) fail(`MIGRATION_REQUIRED: diagram ${id} group ${groupId} lacks members`);
+        if (group.semanticType === "nested" && typeof group.parent !== "string") fail(`diagram ${id} nested group ${groupId} lacks parent`);
+        if (group.semanticType !== "nested" && group.parent !== undefined) fail(`diagram ${id} non-nested group ${groupId} must not declare parent`);
+        if ((group.semanticType === "cross-cutting" || group.semanticType === "overlay") && group.members.length !== 0) fail(`diagram ${id} ${group.semanticType} group ${groupId} must have no members`);
+        for (const member of group.members) if (!nodes.has(member)) fail(`diagram ${id} group ${groupId} references missing node ${member}`);
+        groups.set(groupId, group);
+      }
+      for (const group of groups.values()) if (group.semanticType === "nested" && !groups.has(group.parent)) fail(`diagram ${id} group ${group.id} references missing parent ${group.parent}`);
+      const groupRectangles = new Map<string, Rectangle>();
+      for (const [groupId, group] of groups) {
+        const rectangle = rectangleOf(group, `diagram ${id} group ${groupId}`);
+        if (rectangle) groupRectangles.set(groupId, rectangle);
+      }
+      const isNestedRelation = (first: Record<string, any>, second: Record<string, any>): boolean => {
+        let current = first;
+        while (current.semanticType === "nested" && typeof current.parent === "string") {
+          if (current.parent === second.id) return true;
+          const parent = groups.get(current.parent);
+          if (!parent) return false;
+          current = parent;
+        }
+        return false;
+      };
+      const groupEntries = [...groupRectangles.entries()];
+      for (let first = 0; first < groupEntries.length; first++) {
+        for (let second = first + 1; second < groupEntries.length; second++) {
+          const firstGroup = groups.get(groupEntries[first][0])!;
+          const secondGroup = groups.get(groupEntries[second][0])!;
+          if (firstGroup.semanticType === "overlay" || firstGroup.semanticType === "cross-cutting" || secondGroup.semanticType === "overlay" || secondGroup.semanticType === "cross-cutting") continue;
+          if (!isNestedRelation(firstGroup, secondGroup) && !isNestedRelation(secondGroup, firstGroup) && rectanglesOverlap(groupEntries[first][1], groupEntries[second][1])) {
+            fail(`diagram ${id} groups ${groupEntries[first][0]} and ${groupEntries[second][0]} have geometric overlap`);
+          }
+        }
+      }
+
+      for (const [groupId, group] of groups) {
+        const rectangle = groupRectangles.get(groupId);
+        if (!rectangle) continue;
+        const groupWidth = rectangle.right - rectangle.left;
+        if (measureDiagramText(group.label, DIAGRAM_VISUAL_STYLE.frameFontSize) + DIAGRAM_LAYOUT_METRICS.groupTitleHorizontalPadding * 2 > groupWidth) fail(`GROUP_TITLE_OVERFLOW: diagram ${id} group ${groupId} label does not fit its title area`);
+
+        const memberIds = new Set(group.members.map(String));
+        const memberRectangles: Rectangle[] = [];
+        for (const member of group.members) {
+          const memberRectangle = nodeRectangles.get(member);
+          if (!memberRectangle || memberRectangle.left < rectangle.left || memberRectangle.top < rectangle.top || memberRectangle.right > rectangle.right || memberRectangle.bottom > rectangle.bottom) fail(`GROUP_CONTAINMENT: diagram ${id} group ${groupId} does not contain member ${member}`);
+          memberRectangles.push(memberRectangle);
+        }
+        if (memberRectangles.length === 0) continue;
+
+        const internalEdges = edgeEntries.filter(([, edge]) => memberIds.has(String(edge.from)) && memberIds.has(String(edge.to)));
+        const contentRectangles = [...memberRectangles, ...internalEdges.flatMap(([edgeId]) => {
+          const label = labelRectangles.get(edgeId);
+          return label ? [label] : [];
+        })];
+        const internalPoints = internalEdges.flatMap(([, edge]) => edge.points as [number, number][]);
+        const contentLeft = Math.min(...contentRectangles.map((entry) => entry.left), ...internalPoints.map((point) => point[0]));
+        const contentTop = Math.min(...contentRectangles.map((entry) => entry.top), ...internalPoints.map((point) => point[1]));
+        const contentRight = Math.max(...contentRectangles.map((entry) => entry.right), ...internalPoints.map((point) => point[0]));
+        const contentBottom = Math.max(...contentRectangles.map((entry) => entry.bottom), ...internalPoints.map((point) => point[1]));
+        if (contentTop - rectangle.top < DIAGRAM_LAYOUT_METRICS.groupHeaderHeight) fail(`GROUP_HEADER_CLEARANCE: diagram ${id} group ${groupId} content intrudes into the reserved title area`);
+        if (contentLeft - rectangle.left < DIAGRAM_LAYOUT_METRICS.groupHorizontalPadding || rectangle.right - contentRight < DIAGRAM_LAYOUT_METRICS.groupHorizontalPadding || rectangle.bottom - contentBottom < DIAGRAM_LAYOUT_METRICS.groupBottomPadding) fail(`GROUP_CAPACITY: diagram ${id} group ${groupId} lacks required content padding or contains an internal route outside its capacity`);
+      }
+      const edgePoints = edgeEntries.flatMap(([, edge]) => edge.points as [number, number][]);
+      const businessRectangles = [...nodeRectangles.values(), ...groupRectangles.values(), ...labelRectangles.values()];
+      const businessBottom = Math.max(...businessRectangles.map((rectangle) => rectangle.bottom), ...edgePoints.map((point) => point[1]));
+      for (const [annotationId, annotation] of annotationRectangles) if (annotation.top < businessBottom) fail(`ANNOTATION_ORDER: diagram ${id} annotation ${annotationId} must be below the business body`);
+      const contentRectangles = [...businessRectangles, ...annotationRectangles.values()];
+      const contentLeft = Math.min(...contentRectangles.map((rectangle) => rectangle.left), ...edgePoints.map((point) => point[0]));
+      const contentTop = Math.min(...contentRectangles.map((rectangle) => rectangle.top), ...edgePoints.map((point) => point[1]));
+      const contentRight = Math.max(...contentRectangles.map((rectangle) => rectangle.right), ...edgePoints.map((point) => point[0]));
+      const contentBottom = Math.max(...contentRectangles.map((rectangle) => rectangle.bottom), ...edgePoints.map((point) => point[1]));
+      const contentWidth = contentRight - contentLeft;
+      const contentHeight = contentBottom - contentTop;
+      const canvasWidth = diagram.canvas.width;
+      const canvasHeight = diagram.canvas.height;
+      if (contentLeft < 0 || contentTop < 0 || contentRight > canvasWidth || contentBottom > canvasHeight) fail(`CANVAS_CLIPPING: diagram ${id} contentBBox exceeds canvas`);
+      if (contentWidth / canvasWidth < 0.1 || contentHeight / canvasHeight < 0.1) fail(`CANVAS_TOO_EMPTY: diagram ${id} contentBBox occupies too little of the canvas`);
+      if (Math.min(contentLeft, contentTop, canvasWidth - contentRight, canvasHeight - contentBottom) < 24) fail(`INSUFFICIENT_GAP: diagram ${id} contentBBox has less than 24 units of canvas padding`);
+
+      const observed = observedChannelValues(diagram);
+      const semanticChannels: string[] = [];
+      for (const [channel, values] of observed) {
+        if (values.size > 1) {
+          const declaration = declarations.get(channel);
+          if (!declaration) fail(`diagram ${id} visual channel ${channel} has multiple values without declaration`);
+          if (declaration.role === "semantic") semanticChannels.push(channel);
+        }
+      }
+      const legendDecision = notes.legendDecision;
+      if (!legendDecision || !legendStatuses.has(legendDecision.status)) fail(`diagram ${id} lacks a valid legendDecision`);
+      requireString(legendDecision.reason, `diagram ${id}.legendDecision.reason`);
+      if (legendDecision.status === "required") fail(`VISUAL_STYLE: diagram ${id} must use inline text semantics instead of a global legend`);
+      if (semanticChannels.length > 0 && legendDecision.status !== "exempt") fail(`diagram ${id} semantic visual differences require an inline-only legend exemption`);
+      if (legendDecision.status === "exempt" && (!Array.isArray(legendDecision.inlineSemanticEvidence) || legendDecision.inlineSemanticEvidence.length === 0)) fail(`diagram ${id} inline semantic evidence is incomplete`);
+      if (legendDecision.status === "not-needed" && semanticChannels.length > 0) fail(`diagram ${id} legendDecision not-needed conflicts with semantic visual differences`);
+
+      const splitDecision = notes.splitDecision;
+      if (!splitDecision || !splitStatuses.has(splitDecision.status)) fail(`diagram ${id} lacks a valid splitDecision`);
+      requireString(splitDecision.reason, `diagram ${id}.splitDecision.reason`);
+      const mixed = (architectureTypes.has(diagram.diagramType) && notes.semanticModes.some((mode: string) => ["process-flow", "data-flow", "dependency-flow"].includes(mode))) || (processTypes.has(diagram.diagramType) && notes.semanticModes.some((mode: string) => ["static-boundary", "static-relation"].includes(mode)));
+      if (mixed && splitDecision.status === "not-needed") fail(`diagram ${id} mixes static and process semantics without split decision`);
+      if (splitDecision.status === "kept-single") {
+        for (const field of ["singleGoal", "staticBoundary", "processFlowDistinction"]) requireString(splitDecision[field], `diagram ${id}.splitDecision.${field}`);
+        for (const state of ["normal", "fit", "zoom"]) {
+          const evidence = splitDecision.readabilityEvidence?.[state];
+          if (!evidence || !["PASS", "UNVERIFIED"].includes(evidence.status) || typeof evidence.evidence !== "string" || evidence.evidence.length === 0) fail(`diagram ${id} split readability evidence ${state} is invalid`);
+        }
+      }
+
+      if (!existsSync(svgPath)) fail(`diagram ${id} SVG output is missing: ${relativePath(svgPath)}`);
+      const svg = text(svgPath);
+      if (unsafeSvg.test(svg) || !/<svg\b[^>]*\bviewBox=["'][^"']+["']/i.test(svg) || !/\brole=["']img["']/i.test(svg) || !/<title\b/i.test(svg) || !/<desc\b/i.test(svg)) fail(`diagram ${id} SVG fails static safety or accessibility checks`);
+      const visualStyleErrors = diagramVisualStyleErrors(svg);
+      if (visualStyleErrors.length > 0) fail(`diagram ${id} ${visualStyleErrors.join("; ")}`);
+      const structuralGroupIds = [...groups.entries()].filter(([, group]) => group.styleRole === "structural").map(([groupId]) => groupId);
+      const structuralNodeIntersections: string[] = [];
+      const structuralEdgeIntersections: string[] = [];
+      const structuralLabelIntersections: string[] = [];
+      const structuralArrowIntersections: string[] = [];
+      const structuralFrameErrors: string[] = [];
+      const structuralNodeFillErrors: string[] = [];
+      const structuralLayerErrors: string[] = [];
+      const structuralMaskErrors: string[] = [];
+      const structuralBoundary = (rectangle: Rectangle): Array<[[number, number], [number, number]]> => [
+        [[rectangle.left, rectangle.top], [rectangle.right, rectangle.top]],
+        [[rectangle.right, rectangle.top], [rectangle.right, rectangle.bottom]],
+        [[rectangle.right, rectangle.bottom], [rectangle.left, rectangle.bottom]],
+        [[rectangle.left, rectangle.bottom], [rectangle.left, rectangle.top]],
+      ];
+      const boundaryTouchesRectangle = (boundary: Array<[[number, number], [number, number]]>, rectangle: Rectangle): boolean => boundary.some(([first, second]) => segmentIntersectsRectangle(first, second, rectangle) || segmentOverlapsRectangleBoundary(first, second, rectangle));
+      const boundaryTouchesEdge = (boundary: Array<[[number, number], [number, number]]>, points: [number, number][]): boolean => boundary.some(([first, second]) => points.slice(1).some((_, index) => segmentRelation(first, second, points[index], points[index + 1]) !== "none"));
+      const groupFrameMatch = (groupId: string): RegExpMatchArray | undefined => [...svg.matchAll(/<[^>]*\bdata-group=["']([^"']+)["'][^>]*>/gi)].find((match) => match[1] === groupId && /data-group-style-role=["']structural["']/i.test(match[0]));
+      const tagMatch = (pattern: RegExp, value: string, exclude?: RegExp): RegExpMatchArray | undefined => [...svg.matchAll(pattern)].find((match) => match[1] === value && (!exclude || !exclude.test(match[0])));
+      const nodeFragment = (nodeId: string): string => {
+        const match = [...svg.matchAll(/<[^>]*\bdata-node=["']([^"']+)["'][^>]*>/gi)].find((candidate) => candidate[1] === nodeId);
+        if (!match || match.index === undefined) return "";
+        const end = svg.indexOf("</g>", match.index);
+        return svg.slice(match.index, end >= 0 ? end : match.index + match[0].length);
+      };
+      const whiteFill = (value: string | undefined): boolean => ["#fff", "#ffffff", "white", "rgb(255,255,255)", "rgb(255, 255, 255)"].includes(String(value || "").trim().toLowerCase());
+      const structuralErrors: string[] = [];
+      for (const groupId of structuralGroupIds) {
+        const rectangle = groupRectangles.get(groupId);
+        const frame = groupFrameMatch(groupId);
+        const frameSource = frame?.[0] || "";
+        const frameIndex = frame?.index ?? -1;
+        if (!rectangle || !frame) {
+          structuralFrameErrors.push(groupId + ":missing-frame-geometry");
+          continue;
+        }
+        if (!/\bfill=["']none["']/i.test(frameSource) || !/\bstroke=["']#666666["']/i.test(frameSource) || !/\bstroke-width=["']2(?:\.0+)?["']/i.test(frameSource)) structuralFrameErrors.push(groupId);
+        const boundary = structuralBoundary(rectangle);
+        for (const [nodeId, nodeRectangle] of nodeRectangles) {
+          if (!boundaryTouchesRectangle(boundary, nodeRectangle)) continue;
+          structuralNodeIntersections.push(`${groupId}:${nodeId}`);
+          const fragment = nodeFragment(nodeId);
+          const shapeFill = fragment.match(/<(?:rect|polygon|ellipse|circle|path)\b[^>]*\bfill=["']([^"']+)["']/i)?.[1];
+          if (!whiteFill(shapeFill)) structuralNodeFillErrors.push(`${groupId}:${nodeId}`);
+          const nodeIndex = [...svg.matchAll(/<[^>]*\bdata-node=["']([^"']+)["'][^>]*>/gi)].find((match) => match[1] === nodeId)?.index ?? -1;
+          if (frameIndex > nodeIndex) structuralLayerErrors.push(`${groupId}:node:${nodeId}`);
+        }
+        for (const [edgeId, edge] of edgeEntries) {
+          const points = edge.points as [number, number][];
+          if (!boundaryTouchesEdge(boundary, points)) continue;
+          structuralEdgeIntersections.push(`${groupId}:${edgeId}`);
+          const edgeTag = tagMatch(/<[^>]*\bdata-edge=["']([^"']+)["'][^>]*>/gi, edgeId, /data-edge-arrow=/i);
+          if ((frameIndex >= 0 && (edgeTag?.index ?? -1) >= 0 && frameIndex > (edgeTag?.index ?? -1))) structuralLayerErrors.push(`${groupId}:edge:${edgeId}`);
+        }
+        for (const [edgeId, label] of labelRectangles) {
+          if (!boundaryTouchesRectangle(boundary, label)) continue;
+          structuralLabelIntersections.push(`${groupId}:${edgeId}`);
+          const labelTag = tagMatch(/<text[^>]*\bdata-edge-label=["']([^"']+)["'][^>]*>/gi, edgeId);
+          if ((frameIndex >= 0 && (labelTag?.index ?? -1) >= 0 && frameIndex > (labelTag?.index ?? -1))) structuralLayerErrors.push(`${groupId}:label:${edgeId}`);
+        }
+        for (const [edgeId, edge] of edgeEntries) {
+          const target = nodes.get(edge.to)!;
+          const tip = portPoint(target, edge.toPort, edge.toPortOffset || 0);
+          const arrowRectangle: Rectangle = edge.toPort === "top"
+            ? { left: tip[0] - 5, top: tip[1] - 10, right: tip[0] + 5, bottom: tip[1] }
+            : edge.toPort === "bottom"
+              ? { left: tip[0] - 5, top: tip[1], right: tip[0] + 5, bottom: tip[1] + 10 }
+              : edge.toPort === "left"
+                ? { left: tip[0] - 10, top: tip[1] - 5, right: tip[0], bottom: tip[1] + 5 }
+                : { left: tip[0], top: tip[1] - 5, right: tip[0] + 10, bottom: tip[1] + 5 };
+          if (!boundaryTouchesRectangle(boundary, arrowRectangle)) continue;
+          structuralArrowIntersections.push(`${groupId}:${edgeId}`);
+          const arrowTag = tagMatch(/<[^>]*\bdata-edge-arrow=["']([^"']+)["'][^>]*>/gi, edgeId);
+          if ((frameIndex >= 0 && (arrowTag?.index ?? -1) >= 0 && frameIndex > (arrowTag?.index ?? -1))) structuralLayerErrors.push(`${groupId}:arrow:${edgeId}`);
+        }
+        const foregroundIntersectionCount = structuralEdgeIntersections.filter((value) => value.startsWith(`${groupId}:`)).length
+          + structuralLabelIntersections.filter((value) => value.startsWith(`${groupId}:`)).length
+          + structuralArrowIntersections.filter((value) => value.startsWith(`${groupId}:`)).length;
+        if (foregroundIntersectionCount > 0) {
+          const maskId = frameSource.match(/\bmask=["']url\(#([^)]*)\)["']/i)?.[1];
+          const maskFragment = maskId ? [...svg.matchAll(/<mask\b[^>]*\bid=["']([^"']+)["'][^>]*>[\s\S]*?<\/mask>/gi)].find((match) => match[1] === maskId)?.[0] || "" : "";
+          if (!maskId || !/\bmask-type=["']alpha["']/i.test(maskFragment) || !/\bmaskUnits=["']userSpaceOnUse["']/i.test(maskFragment) || !/\bmaskContentUnits=["']userSpaceOnUse["']/i.test(maskFragment) || !/\b(?:fill-opacity|opacity)=["']0["']/i.test(maskFragment)) structuralMaskErrors.push(`${groupId}:missing-valid-cutout`);
+        }
+      }
+      structuralErrors.push(...structuralFrameErrors.map((value) => `STRUCTURAL_FRAME_STYLE: diagram ${id} structural frame ${value} is invalid`));
+      structuralErrors.push(...structuralNodeFillErrors.map((value) => `STRUCTURAL_NODE_FILL: diagram ${id} structural intersection node ${value} is not opaque white`));
+      structuralErrors.push(...structuralLayerErrors.map((value) => `STRUCTURAL_LAYER_ORDER: diagram ${id} structural frame is painted above ${value}`));
+      structuralErrors.push(...structuralMaskErrors.map((value) => `STRUCTURAL_MASK: diagram ${id} structural mask ${value}`));
+      if (structuralErrors.length > 0) fail(structuralErrors.join("; "));
+      if (structuralGroupIds.length > 0) structuralDiagramsChecked += 1;
+      structuralEvidenceReports.push({
+        diagram_id: id,
+        status: structuralGroupIds.length > 0 ? "passed" : "not_applicable",
+        group_ids: structuralGroupIds,
+        node_intersections: structuralNodeIntersections,
+        edge_intersections: structuralEdgeIntersections,
+        label_intersections: structuralLabelIntersections,
+        arrow_intersections: structuralArrowIntersections,
+        frame_style_status: structuralGroupIds.length > 0 ? "passed" : "not_applicable",
+        node_fill_status: structuralGroupIds.length > 0 ? "passed" : "not_applicable",
+        layer_order_status: structuralGroupIds.length > 0 ? "passed" : "not_applicable",
+        mask_status: structuralMaskErrors.length > 0 ? "failed" : structuralGroupIds.length > 0 ? "passed" : "not_applicable",
+        mask_coverage_status: structuralGroupIds.length > 0 && (structuralEdgeIntersections.length > 0 || structuralLabelIntersections.length > 0 || structuralArrowIntersections.length > 0) ? "passed" : "not_applicable",
+        visual_evidence: { required: false, screenshots: [], snapshots: [], pixel_verified: false },
+      });
+      const renderedNodeIds = [...svg.matchAll(/\bdata-node=["']([^"']+)["']/g)].map((match) => match[1]);
+      const renderedEdgeTags = [...svg.matchAll(/<[^>]*\bdata-edge=["']([^"']+)["'][^>]*>/g)].map((match) => ({ id: match[1], tag: match[0] }));
+      const renderedEdgeElements = renderedEdgeTags.filter((entry) => !/\bdata-edge-arrow=["']/i.test(entry.tag));
+      const renderedEdgeIds = renderedEdgeElements.map((entry) => entry.id);
+      if (new Set(renderedNodeIds).size !== renderedNodeIds.length || renderedNodeIds.length !== nodes.size || [...nodes.keys()].some((nodeId) => !renderedNodeIds.includes(nodeId))) fail(`diagram ${id} SVG node mapping does not match structured source`);
+      if (new Set(renderedEdgeIds).size !== renderedEdgeIds.length || renderedEdgeIds.length !== edges.size || [...edges.keys()].some((edgeId) => !renderedEdgeIds.includes(edgeId))) fail(`diagram ${id} SVG edge mapping does not match structured source`);
+      for (const [nodeId, node] of nodes) {
+        const nodeTag = [...svg.matchAll(new RegExp(`<[^>]*\\bdata-node=["']${nodeId}["'][^>]*>`, "g"))].map((match) => match[0])[0] || "";
+        if (node.shape === "diamond" && !/\bdata-node-shape=["']diamond["']/i.test(nodeTag)) fail(`DECISION_SHAPE: diagram ${id} SVG node ${nodeId} is not visibly mapped as diamond`);
+      }
+      const directedEdgeCount = diagram.edges.filter((edge: Record<string, any>) => (edge.kind || "directed") !== "undirected").length;
+      const markerIds = new Set([...svg.matchAll(/<marker\b[^>]*\bid=["']([^"']+)["']/gi)].map((match) => match[1]));
+      const arrowTags = [...svg.matchAll(/<[^>]*\bdata-edge-arrow=["']([^"']+)["'][^>]*>/g)].map((match) => ({ id: match[1], tag: match[0] }));
+      const arrowIds = arrowTags.map((entry) => entry.id);
+      if (new Set(arrowIds).size !== arrowIds.length || arrowIds.length < directedEdgeCount) fail(`diagram ${id} SVG arrow overlay mapping is incomplete`);
+      for (const [edgeId, edge] of edges) {
+        const edgeTag = renderedEdgeElements.find((entry) => entry.id === edgeId)?.tag || "";
+        const expectedAttributes = [["data-from", edge.from], ["data-to", edge.to], ["data-from-port", edge.fromPort], ["data-to-port", edge.toPort]] as Array<[string, string]>;
+        for (const [attribute, expected] of expectedAttributes) {
+          const actual = edgeTag.match(new RegExp(`\\b${attribute}=["']([^"']+)["']`, "i"))?.[1];
+          if (actual !== expected) fail(`PORT_MISMATCH: diagram ${id} SVG edge ${edgeId} ${attribute} does not match structured source`);
+        }
+        if (edge.label && typeof edge.label === "object" && !Array.isArray(edge.label)) {
+          const labelId = edgeTag.match(/\bdata-edge-label=["']([^"']+)["']/i)?.[1];
+          if (labelId !== edgeId) fail(`LABEL_MAPPING: diagram ${id} SVG label mapping is missing for edge ${edgeId}`);
+        }
+        if ((edge.kind || "directed") !== "undirected") {
+          const arrow = arrowTags.find((entry) => entry.id === edgeId && entry.tag.match(/\bdata-edge=["']([^"']+)["']/i)?.[1] === edgeId);
+          const target = arrow?.tag.match(/\bdata-arrow-target=["']([^"']+)["']/i)?.[1];
+          if (!arrow || target !== `${edge.to}:${edge.toPort}`) fail(`ARROW_MAPPING: diagram ${id} SVG arrow target is invalid for edge ${edgeId}`);
+          const marker = edgeTag.match(/\bmarker-end=["']url\(#([^)]*)\)["']/i)?.[1];
+          if (!marker || !markerIds.has(marker)) fail(`ARROW_MAPPING: diagram ${id} SVG marker is missing for edge ${edgeId}`);
+        }
+      }
+      const renderedLegendIds = [...svg.matchAll(/\bdata-legend-item=["']([^"']+)["']/g)].map((match) => match[1]);
+      if (new Set(renderedLegendIds).size !== renderedLegendIds.length) fail(`diagram ${id} SVG legend mapping contains duplicate IDs`);
+      if (renderedLegendIds.length !== (diagram.legend?.items?.length || 0)) fail(`diagram ${id} SVG legend coverage is incomplete`);
+      if (diagram.legend && diagram.legend.items.some((item: Record<string, any>) => !renderedLegendIds.includes(item.id))) fail(`diagram ${id} SVG legend coverage is incomplete`);
+      const renderedNoteIds = [...svg.matchAll(/\bdata-note=["']([^"']+)["']/g)].map((match) => match[1]);
+      if (new Set(renderedNoteIds).size !== renderedNoteIds.length || renderedNoteIds.length !== annotationRectangles.size || annotationRectangles.size !== annotations.length || annotations.some((annotation: Record<string, any>) => !renderedNoteIds.includes(annotation.id))) fail(`ANNOTATION_MAPPING: diagram ${id} SVG annotation mapping does not match structured source`);
+      if (renderedLegendIds.length > 0 && renderedNoteIds.length > 0) {
+        const firstLegend = svg.search(/\bdata-legend-item=["']/);
+        const lastLegend = Math.max(...[...svg.matchAll(/\bdata-legend-item=["']/g)].map((match) => match.index || 0));
+        const firstNote = svg.search(/\bdata-note=["']/);
+        if (firstNote < lastLegend || firstNote < firstLegend) fail(`ANNOTATION_ORDER: diagram ${id} SVG annotations must follow the legend`);
+      }
+      if (diagram.groups?.length && !diagram.groups.every((group: Record<string, any>) => svg.includes(`group-${group.id}`))) fail(`diagram ${id} SVG group mapping is incomplete`);
+      for (const [groupId, group] of groups) {
+        const frame = [...svg.matchAll(/<[^>]*\bdata-group=["']([^"']+)["'][^>]*>/g)].map((match) => ({ id: match[1], tag: match[0] })).find((entry) => entry.id === groupId);
+        if (!frame) fail(`GROUP_MAPPING: diagram ${id} SVG frame is missing for group ${groupId}`);
+        const role = frame.tag.match(/\bdata-group-role=["']([^"']+)["']/i)?.[1];
+        const styleRole = frame.tag.match(/\bdata-group-style-role=["']([^"']+)["']/i)?.[1];
+        if (role !== group.semanticType || styleRole !== group.styleRole) fail(`GROUP_STYLE: diagram ${id} SVG frame does not match group ${groupId} semanticType/styleRole`);
+        const titles = [...svg.matchAll(/<text\b[^>]*\bdata-group-title=["']([^"']+)["'][^>]*>/g)].map((match) => ({ id: match[1], tag: match[0] })).filter((entry) => entry.id === groupId);
+        if (titles.length !== 1 || titles[0].tag.match(/\bdata-group-style-role=["']([^"']+)["']/i)?.[1] !== group.styleRole) fail(`GROUP_MAPPING: diagram ${id} SVG title does not match group ${groupId} styleRole`);
+      }
+      if (diagram.diagramType === "sequence") {
+        for (const [nodeId, node] of nodes) {
+          const lifeline = svg.match(new RegExp(`<[^>]*data-lifeline-for=["']${nodeId}["'][^>]*>`, "i"))?.[0];
+          if (!lifeline) fail(`diagram ${id} sequence lifeline mapping is missing for ${nodeId}`);
+          const x1 = Number(lifeline.match(/\bx1=["']([0-9.+-]+)["']/i)?.[1]);
+          const x2 = Number(lifeline.match(/\bx2=["']([0-9.+-]+)["']/i)?.[1]);
+          const expectedX = node.x + node.width / 2;
+          if (!Number.isFinite(x1) || !Number.isFinite(x2) || Math.abs(x1 - x2) > 1 || Math.abs(x1 - expectedX) > 1) fail(`diagram ${id} sequence lifeline coordinate is invalid for ${nodeId}`);
+        }
+      }
+      const adjacentMarkdown = textIfExists(svgPath.replace(/\.svg$/i, ".md"));
+      if (!/\b(?:FR|REQ)-\d+\b/i.test(svg) && !/\b(?:FR|REQ)-\d+\b/i.test(adjacentMarkdown)) fail(`diagram ${id} has no FR/REQ mapping evidence`);
+      const nodeCount = diagram.nodes.length;
+      const edgeCount = diagram.edges.length;
+      const groupCount = (diagram.groups || []).length;
+      if (nodeCount > 20) { riskScore += 1; riskReasons.add("nodes > 20"); }
+      if (edgeCount > 30) { riskScore += 1; riskReasons.add("edges > 30"); }
+      if (diagram.edges.some((edge: Record<string, any>) => Array.isArray(edge.points) && edge.points.length > 2)) { riskScore += 2; riskReasons.add("complex edge routing"); }
+      if (diagram.edges.some((edge: Record<string, any>) => diagram.edges.some((other: Record<string, any>) => other !== edge && other.from === edge.from && other.fromPort === edge.fromPort))) { riskScore += 2; riskReasons.add("multiple edges share a source port"); }
+      if (diagram.diagramType === "sequence") { riskScore += 1; riskReasons.add("sequence diagram"); }
+      if (diagram.diagramType === "flowchart" && edgeCount > 12) { riskScore += 2; riskReasons.add("complex flowchart"); }
+      if (groupCount > 0 && (diagram.groups || []).some((group: Record<string, any>) => group.semanticType === "nested" && group.parent && (diagram.groups || []).some((parent: Record<string, any>) => parent.id === group.parent && parent.parent))) { riskScore += 2; riskReasons.add("nested groups"); }
+      if (/\btransform\s*=|\bmarker-end\s*=|<text\b/i.test(svg)) { riskScore += 1; riskReasons.add("browser-sensitive SVG features"); }
+      diagramsChecked += 1;
+    }
+  }
+
+  const riskLevel = riskScore >= 6 ? "HIGH" : riskScore >= 3 ? "MEDIUM" : "LOW";
+  // 遗留图(legacyDiagramsChecked)已通过安全/可访问性底线并被计入分母;
+  // 只要"已迁移图均带 expected_contract + 遗留图已计数"覆盖全部图,即可 STATIC_PASS 放行,
+  // 不因存在未迁移旧图而降级 UNVERIFIED 阻断迁移。
+  const strictContractsSatisfied = expectedContractsChecked + legacyDiagramsChecked === diagramsChecked;
+  const finalStatus = strictContractsSatisfied ? "STATIC_PASS" : "UNVERIFIED";
+  const routeStatus = strictContractsSatisfied ? "ROUTE_CONTRACT_PASS" : "UNVERIFIED";
+  const migrationStatus = legacyDiagramsChecked > 0 ? "MIGRATION_REQUIRED" : "passed";
+  return {
+    status: "passed", final_status: finalStatus, source_format: "svg", diagrams_checked: diagramsChecked,
+    structure_status: "STRUCTURE_PASS",
+    route_contract_status: routeStatus,
+    geometry_gate_status: "GEOMETRY_PASS",
+    visual_status: "UNVERIFIED",
+    overall_status: finalStatus,
+    gate_statuses: { structure: "STRUCTURE_PASS", route_contract: routeStatus, geometry: "GEOMETRY_PASS", visual: "UNVERIFIED", overall: finalStatus },
+    expected_contract_status: strictContractsSatisfied ? "passed" : "unverified",
+    generation_status: generationContractsChecked + legacyDiagramsChecked === diagramsChecked ? "passed" : "unverified",
+    generation_closure: generationClosures,
+    route_contract_reports: routeContractReports,
+    semantic_status: strictContractsSatisfied ? "passed" : "unverified",
+    legacy_diagrams: legacyDiagrams,
+    legacy_diagrams_checked: legacyDiagramsChecked,
+    ids_unique: true, ports_valid: true, direction_consistent: true, legend_valid: true, global_decorations_absent: true,
+    groups_valid: true, viewbox_valid: true, provider_status: "unverified",
+    target_operation_required: false, fr_mapping_complete: true,
+    design_notes_valid: true, layout_contract_valid: true, main_flow_valid: true, loop_lanes_valid: true, decision_exit_valid: true, annotation_mapping_valid: true, migration_status: migrationStatus, port_paths_valid: true,
+    geometry_status: "passed", node_text_fit_status: "passed", group_capacity_status: "passed", visual_style_status: "passed", edge_label_placement_status: "passed", edge_intersection_status: "passed", collinear_overlap_status: "passed", target_port_direction_status: "passed", target_port_approach_status: "passed", routing_minimality_status: "passed", side_switch_status: "passed", change_impact_review_status: changeImpactReviewsChecked > 0 ? "passed" : "not_applicable", visible_arrow_mapping_status: "passed",
+    structural_occlusion_status: structuralDiagramsChecked > 0 ? "passed" : "not_applicable",
+    structural_node_intersections: structuralEvidenceReports.flatMap((report) => Array.isArray(report.node_intersections) ? report.node_intersections : []),
+    structural_edge_intersections: structuralEvidenceReports.flatMap((report) => Array.isArray(report.edge_intersections) ? report.edge_intersections : []),
+    structural_label_intersections: structuralEvidenceReports.flatMap((report) => Array.isArray(report.label_intersections) ? report.label_intersections : []),
+    structural_arrow_intersections: structuralEvidenceReports.flatMap((report) => Array.isArray(report.arrow_intersections) ? report.arrow_intersections : []),
+    structural_frame_style_status: structuralDiagramsChecked > 0 ? "passed" : "not_applicable",
+    structural_node_fill_status: structuralDiagramsChecked > 0 ? "passed" : "not_applicable",
+    structural_layer_order_status: structuralDiagramsChecked > 0 ? "passed" : "not_applicable",
+    structural_mask_status: structuralDiagramsChecked > 0 ? "passed" : "not_applicable",
+    structural_mask_coverage_status: structuralDiagramsChecked > 0 ? "passed" : "not_applicable",
+    structural_visual_evidence: { required: false, screenshots: [], snapshots: [], pixel_verified: false },
+    structural_evidence_reports: structuralEvidenceReports,
+    render_preflight_status: "passed",
+    render_status: "unverified",
+    render_status_reason: "no static SVG renderer is configured",
+    risk: { level: riskLevel, score: riskScore, reasons: [...riskReasons].sort() },
+    unresolved: 0,
+  };
+}
+
+// MARS-126 (L1): 存量改造项目在 application-design 显式声明「本次无结构变更意图」的标记。
+// 与 [意图:删除|局部重构|收敛|迁出|废弃] 并列,语义为「本迭代不改任何现有结构」;大小写与全半角冒号不敏感。
+// 支持中文 [意图:无结构变更] 与英文 [design-intent: none] 两种写法。
+const DESIGN_INTENT_NONE_MARKER = /\[\s*(?:意图\s*[:：]\s*无\s*结构\s*变更|design-intent\s*[:：]\s*none)\s*\]/i;
+
+function designIntentCoverage(): Record<string, unknown> {
+  const designFiles = allFiles("docs/aidlc/inception/application-design", /\.md$/);
+  const unitFiles = [...designFiles, ...allFiles("docs/aidlc/construction", /(?:unit|implementation|summary).*\.md$/i)];
+  const content = joined(designFiles);
+  // 收集真·结构变更意图标记;排除 [意图:无结构变更] sentinel(它由 DESIGN_INTENT_NONE_MARKER 单独识别,
+  // 不是一个需要被下游单元承接的变更条目,否则会被误当作未覆盖的意图)。
+  const markers = [...new Set([...content.matchAll(/\[意图:([^\]]+)\]/g)].map((match) => match[1].trim()))]
+    .filter((marker) => marker.replace(/\s+/g, "") !== "无结构变更");
+  if (markers.length === 0) {
+    // MARS-126 (L1, 与 MARS-118/125 同族): 「无 [意图:*] 标记」此前一律静默 passed,使存量改造项目
+    // 改了现有组件却不打标记即可规避覆盖检查。精确化口径——意图标记的触发条件(见
+    // inception-application-design.md) 是「存量改造(逆向工程产物存在)且设计中有结构性变更意图」:
+    //   - greenfield(本模块无 reverse-engineering.md): 无存量结构可变更,无标记 passed 是正确的,维持不变。
+    //   - brownfield(逆向产物存在): 无标记不再静默放行,要求 application-design 产物里显式声明本次
+    //     无结构变更([意图:无结构变更] / [design-intent: none],大小写与全半角冒号不敏感);无标记又
+    //     无显式声明 → fail(缺节不等于不适用,必须显式声明)。
+    const brownfield = existsSync(join(ROOT, contextual("docs/aidlc/inception/reverse-engineering.md")));
+    if (!brownfield) {
+      return { status: "passed", project_mode: "greenfield", intent_markers_found: 0, no_change_declared: false, coverage_complete: true, uncovered: 0, skip_reason: "greenfield: no legacy structure to change, intent markers not required" };
+    }
+    const noChangeDeclared = DESIGN_INTENT_NONE_MARKER.test(content);
+    if (!noChangeDeclared) {
+      fail("brownfield (reverse-engineering present) application-design declares no [意图:*] change-intent marker and no explicit no-change declaration; mark each structural change with [意图:删除|局部重构|收敛|迁出|废弃], or if this iteration changes no existing structure declare it explicitly with [意图:无结构变更]");
+    }
+    return { status: "passed", project_mode: "brownfield", intent_markers_found: 0, no_change_declared: true, coverage_complete: true, uncovered: 0, skip_reason: "brownfield: explicitly declared no structural change intent ([意图:无结构变更])" };
+  }
+  const unitContent = joined(unitFiles);
+  const uncovered = markers.filter((marker) => !unitContent.includes(marker) || !/允许修改范围|完成证据|implementation summary|unit/i.test(unitContent));
+  if (uncovered.length > 0) fail(`design intents are not covered: ${uncovered.join(", ")}`);
+  return { status: "passed", project_mode: "brownfield", intent_markers_found: markers.length, no_change_declared: false, coverage_complete: true, uncovered: 0, covered_intents: markers };
+}
+
+// US→UI 正向全覆盖(MARS-118):有界面表现的 US 必须至少被一个 ui-mock/figma page 的 stories[] 覆盖。
+// 口径:默认不豁免——user-stories.md 中每个 US 一律要求被 UI 覆盖;只有在声明该 US 的那一行用显式标记
+// (行内 `[ui: n/a]` / `[ui: 无界面]` / `[无界面]`,大小写与全半角冒号不敏感)声明无界面表现时才豁免。
+// US id 复用 ui-artifact-consistency 自身的 STORY_ID 口径(与本 sensor 的反向 mock→US 校验、pagePlanContract 一致)。
+const UI_EXEMPTION_MARKER = /\[\s*(?:ui\s*[:：]\s*(?:n\/?a|无界面|无\s*界面)|无\s*界面)\s*\]/i;
+function forwardStoryCoverage(storiesContent: string, coveredStories: string[]): {
+  required_stories: string[];
+  exempt_stories: string[];
+  covered_stories: string[];
+  uncovered_stories: string[];
+} {
+  const covered = new Set(coveredStories);
+  const exempt = new Set<string>();
+  for (const line of storiesContent.split(/\r?\n/)) {
+    if (!UI_EXEMPTION_MARKER.test(line)) continue;
+    for (const id of normalizedIds(line, STORY_ID)) exempt.add(id);
+  }
+  const allStories = normalizedIds(storiesContent, STORY_ID);
+  const required = allStories.filter((id) => !exempt.has(id));
+  const uncovered = required.filter((id) => !covered.has(id));
+  if (uncovered.length > 0) {
+    fail(`user stories lack any UI mock coverage: ${uncovered.map((id) => `${id}: UNCOVERED@ui-mock`).join(", ")}. Add a mock page whose stories[] covers each one, or declare an explicit no-UI exemption ([ui: n/a]) on its line in user-stories.md`);
+  }
+  return {
+    required_stories: required,
+    exempt_stories: [...exempt].sort(),
+    covered_stories: [...covered].sort(),
+    uncovered_stories: [],
+  };
+}
+
+function uiArtifactConsistency(): Record<string, unknown> {
+  if (!workflowState || !ACTIVE_MODULE) fail("ui-artifact-consistency requires a Markdown workflow and an active module");
+  const route = selectedUiRoute();
+  if (route === "skip" || route === "not-selected") fail(`ui-artifact-consistency is not applicable to selected UI route ${route}`);
+  const plan = pagePlanContract();
+  const stage = workflowState.current_stage;
+  const selectedRoute = route as UiDesignRoute;
+  const loadedLock = readUiGenerationLock(ROOT, ACTIVE_MODULE);
+  if (loadedLock.lock.route !== selectedRoute) fail(`UI generation lock.route must match selected UI route ${route}`);
+  const lock = stage === "ui-page-planning"
+    ? verifyUiGenerationLockAtBaseline(ROOT, ACTIVE_MODULE, selectedRoute, plan.pageIds)
+    : {
+      path: loadedLock.path,
+      digest: loadedLock.digest,
+      upstream_ref: loadedLock.lock.upstream.ref,
+      upstream_commit: loadedLock.lock.upstream.commit,
+      baseline_mode: loadedLock.lock.baseline_mode,
+    };
+  const lockEvidence = {
+    ui_generation_lock_verified: true,
+    ui_generation_lock_digest: lock.digest,
+    ui_generation_upstream_ref: lock.upstream_ref,
+    ui_generation_upstream_commit: lock.upstream_commit,
+    ui_generation_baseline_mode: lock.baseline_mode,
+  };
+  if (stage === "ui-page-planning") {
+    return {
+      status: "passed",
+      stage,
+      module_id: ACTIVE_MODULE,
+      design_mode: route,
+      pages_checked: plan.pageIds.length,
+      phases_verified: ["page-plan", "ui-generation-lock"],
+      artifacts_checked: [...plan.artifacts, lock.path],
+      ...lockEvidence,
+      unresolved: 0,
+    };
+  }
+  if (stage === "ui-mock-generation") {
+    if (route !== "html-mock") fail(`ui-mock-generation cannot validate signed UI route ${route}`);
+    const html = htmlArtifactContract(plan);
+    const coverage = forwardStoryCoverage(plan.storiesContent, html.coveredStories);
+    return {
+      status: "passed",
+      stage,
+      module_id: ACTIVE_MODULE,
+      design_mode: route,
+      pages_checked: html.pageIds.length,
+      elements_checked: html.elements,
+      phases_verified: ["page-plan", "ui-generation-lock", "skeleton", "content"],
+      artifacts_checked: [...html.artifacts, lock.path],
+      ...lockEvidence,
+      stories_required: coverage.required_stories.length,
+      stories_covered: coverage.covered_stories.length,
+      stories_exempt: coverage.exempt_stories,
+      uncovered_stories: coverage.uncovered_stories,
+      unresolved: 0,
+    };
+  }
+  if (stage === "ui-figma-generation") {
+    if (route !== "figma-create" && route !== "figma-existing") fail(`ui-figma-generation cannot validate signed UI route ${route}`);
+    const figma = figmaArtifactContract(plan, route);
+    const coverage = forwardStoryCoverage(plan.storiesContent, figma.coveredStories);
+    return {
+      status: "passed",
+      stage,
+      module_id: ACTIVE_MODULE,
+      design_mode: route,
+      pages_checked: figma.pageIds.length,
+      elements_checked: figma.elements,
+      phases_verified: ["page-plan", "ui-generation-lock", route === "figma-create" ? "figma-created" : "figma-external-read-only"],
+      artifacts_checked: [...figma.artifacts, lock.path],
+      ...lockEvidence,
+      stories_required: coverage.required_stories.length,
+      stories_covered: coverage.covered_stories.length,
+      stories_exempt: coverage.exempt_stories,
+      uncovered_stories: coverage.uncovered_stories,
+      unresolved: 0,
+    };
+  }
+  fail(`ui-artifact-consistency is not registered for active stage ${stage || "(none)"}`);
+}
+
+function reconcileV3V4Choices(report: string, prdSelected: boolean, uiRoute: UiRoute): void {
+  const expectedPrdRoute = prdSelected ? "selected" : "not-selected";
+  const fields: Array<[string, string]> = [["prd_route", expectedPrdRoute], ["ui_route", uiRoute]];
+  for (const [field, expected] of fields) {
+    const match = report.match(new RegExp(`^\\s*[-*]?\\s*${field}\\s*[:：]\\s*([^\\r\\n|]+)`, "im"));
+    const actual = match?.[1]?.trim();
+    if (!actual) {
+      fail(`v3->v4 choice reconciliation failed: cross-validation-report.md is missing ${field}. Align the report machine summary with the current v4 workflow choices, then rerun the checker; do not edit business content to hide the mismatch`);
+    }
+    if (actual !== expected) {
+      fail(`v3->v4 choice reconciliation failed: cross-validation-report.md declares ${field}: ${actual}, but the current v4 workflow requires ${field}: ${expected} from selected_optional_stages/UI history. Align the v4 selection or regenerate only the machine summary, then rerun inception-consistency; do not silently pass or change business content`);
+    }
+  }
+}
+
+function inceptionConsistency(): Record<string, unknown> {
+  if (!workflowState || !ACTIVE_MODULE) fail("inception-consistency requires a Markdown workflow and an active module");
+  const requirementsPath = join(ROOT, contextual("docs/aidlc/inception/requirements.md"));
+  const storiesPath = join(ROOT, contextual("docs/aidlc/inception/user-stories.md"));
+  const reportPath = join(ROOT, contextual("docs/aidlc/inception/cross-validation-report.md"));
+  for (const path of [requirementsPath, storiesPath, reportPath]) {
+    if (!existsSync(path) || !statSync(path).isFile()) fail(`inception consistency input is missing: ${relativePath(path)}`);
+  }
+  const requirements = text(requirementsPath);
+  const stories = text(storiesPath);
+  const report = text(reportPath);
+  noUnresolved(report, relativePath(reportPath));
+  const requirementIds = normalizedIds(requirements, REQUIREMENT_ID);
+  const storyIds = normalizedIds(stories, STORY_ID);
+  if (requirementIds.length === 0 || storyIds.length === 0) fail("requirements and user stories must contain machine identifiers");
+  const functionalRequirementIds = requirementIds.filter((id) => id.startsWith("FR-"));
+  const uncoveredRequirements = functionalRequirementIds.filter((id) => !stories.toUpperCase().includes(id));
+  if (uncoveredRequirements.length > 0) fail(`user stories do not cover functional requirements: ${uncoveredRequirements.join(", ")}`);
+  const missingFromReport = [...requirementIds, ...storyIds].filter((id) => !report.toUpperCase().includes(id));
+  if (missingFromReport.length > 0) fail(`cross-validation report omits checked IDs: ${missingFromReport.join(", ")}`);
+
+  const prdSelected = selectedPrdRoute();
+  const uiRoute = selectedUiRoute();
+  reconcileV3V4Choices(report, prdSelected, uiRoute);
+  for (const [field, expected] of [["status", "passed"], ["unresolved_conflicts", "0"]] as const) {
+    const expression = new RegExp(`${field}\\s*[:：]\\s*${expected.replace("-", "[- ]")}`, "i");
+    if (!expression.test(report)) fail(`cross-validation machine summary must declare ${field}: ${expected}`);
+  }
+
+  const artifacts = [relativePath(requirementsPath), relativePath(storiesPath), relativePath(reportPath)];
+  let prdItemsChecked = 0;
+  if (prdSelected) {
+    const prdPath = join(ROOT, "docs/aidlc/ideation/prd.md");
+    if (!existsSync(prdPath)) fail("selected PRD requires docs/aidlc/ideation/prd.md during cross-validation");
+    const prdIds = normalizedIds(text(prdPath), REQUIREMENT_ID);
+    if (prdIds.length === 0) fail("selected PRD contains no machine requirement identifiers");
+    const mapped = prdIds.filter((id) => report.toUpperCase().includes(id));
+    if (mapped.length === 0) fail("current module cross-validation report contains no selected PRD mapping");
+    prdItemsChecked = mapped.length;
+    artifacts.push(relativePath(prdPath));
+  }
+
+  let uiPagesChecked = 0;
+  let uiGovernance: ReturnType<typeof verifyUiGenerationAcceptance> | null = null;
+  if (uiRoute === "html-mock" || uiRoute === "figma-create" || uiRoute === "figma-existing") {
+    const plan = pagePlanContract();
+    const design = uiRoute === "html-mock" ? htmlArtifactContract(plan) : figmaArtifactContract(plan, uiRoute);
+    const missingPages = design.pageIds.filter((id) => !report.toUpperCase().includes(id));
+    if (missingPages.length > 0) fail(`cross-validation report omits selected UI pages: ${missingPages.join(", ")}`);
+    uiGovernance = verifyUiGenerationAcceptance(ROOT, ACTIVE_MODULE, uiRoute, design.pageIds);
+    uiPagesChecked = design.pageIds.length;
+    artifacts.push(...design.artifacts, uiGovernance.lock_path, uiGovernance.acceptance_path);
+  }
+
+  return {
+    status: "passed",
+    module_id: ACTIVE_MODULE,
+    requirements_checked: requirementIds.length,
+    stories_checked: storyIds.length,
+    prd_selected: prdSelected,
+    prd_items_checked: prdItemsChecked,
+    ui_route: uiRoute,
+    ui_pages_checked: uiPagesChecked,
+    ui_freshness_verified: Boolean(uiGovernance),
+    ui_generation_lock_digest: uiGovernance?.lock_digest || null,
+    ui_generation_acceptance_digest: uiGovernance?.acceptance_digest || null,
+    ui_upstream_ref: uiGovernance?.upstream_ref || null,
+    ui_baseline_upstream_commit: uiGovernance?.baseline_upstream_commit || null,
+    ui_current_upstream_commit: uiGovernance?.current_upstream_commit || null,
+    ui_freshness_checkpoints: uiGovernance?.freshness_checkpoints || 0,
+    ui_freshness_checkpoint_digest: uiGovernance?.checkpoint_head_digest || null,
+    ui_changed_paths: uiGovernance?.changed_paths || [],
+    ui_affected_pages: uiGovernance?.affected_pages || [],
+    ui_impact_unmapped: 0,
+    ui_full_acceptance_runs: uiGovernance?.full_acceptance_runs || 0,
+    ui_targeted_reverification_runs: uiGovernance?.targeted_reverification_runs || 0,
+    unresolved_conflicts: 0,
+    artifacts_checked: [...new Set(artifacts)],
+  };
+}
+
+function uiAlignment(): Record<string, unknown> {
+  if (!workflowState || !ACTIVE_MODULE || !ACTIVE_UNIT) {
+    return { status: "not_applicable", reason: "no active Markdown workflow unit context" };
+  }
+  const route = selectedUiRoute();
+  if (route === "skip" || route === "not-selected") return { status: "not_applicable", reason: `selected UI route is ${route}` };
+  const plan = pagePlanContract();
+  const design = route === "html-mock" ? htmlArtifactContract(plan) : figmaArtifactContract(plan, route);
+  const codePlanPath = join(ROOT, contextual("docs/aidlc/construction/plans/code-generation-plan.md"));
+  if (!existsSync(codePlanPath)) fail("code-generation plan is missing for UI alignment review");
+  const codePlan = text(codePlanPath);
+  noUnresolved(codePlan, relativePath(codePlanPath));
+  // MARS-125 (与 MARS-118 对称):选了 UI route 的单元,"code-generation-plan 缺页面对照表章节" 不再等于
+  // "本单元无 UI" 而静默 not_applicable——那会让整个 UI 对齐门禁被 "它自己要求的那一节的缺席" 击穿。
+  // 口径改为:默认要求页面映射;只有在 code-generation-plan 里用显式豁免标记(复用 MARS-118 的
+  // `[ui: n/a]` / `[ui: 无界面]` / `[无界面]`,大小写与全半角冒号不敏感)声明本单元无界面承载时,才 not_applicable。
+  // 无标记且缺页面映射 → fail(页面映射应有而缺失),而非放行。
+  if (!/页面对照表|page mapping/i.test(codePlan)) {
+    if (UI_EXEMPTION_MARKER.test(codePlan)) {
+      return { status: "not_applicable", reason: "current unit explicitly declares no UI pages ([ui: n/a])" };
+    }
+    fail("UI route is selected but code-generation plan has no page mapping (页面对照表 / page mapping) section; declare an explicit no-UI exemption ([ui: n/a]) in the plan when this unit carries no UI page, otherwise add the page mapping");
+  }
+  const mappedPages = normalizedIds(codePlan, PAGE_ID);
+  if (mappedPages.length === 0) fail("UI page mapping must include canonical PAGE identifiers");
+  const unknownPages = mappedPages.filter((id) => !design.pageIds.includes(id));
+  if (unknownPages.length > 0) fail(`code-generation plan maps unknown UI pages: ${unknownPages.join(", ")}`);
+  const targetLabels = [...new Set(codePlan.match(/(?:src|app|lib|pages|views)\/[A-Za-z0-9_./@-]+\.(?:vue|tsx|jsx|ts|js|dart|kt|swift)/g) || [])];
+  if (targetLabels.length === 0) fail("UI page mapping has no project-relative target code files");
+  const targetFiles = targetLabels.map((label) => {
+    const direct = resolve(ROOT, label);
+    const underSrc = resolve(ROOT, "src", label);
+    if (existsSync(direct) && statSync(direct).isFile()) return direct;
+    if (existsSync(underSrc) && statSync(underSrc).isFile()) return underSrc;
+    fail(`UI page mapping target does not exist: ${label}`);
+  });
+  const source = joined(targetFiles);
+  const missingTrace = mappedPages.filter((id) => !source.toUpperCase().includes(id));
+  if (missingTrace.length > 0) fail(`target UI code omits PAGE traceability markers: ${missingTrace.join(", ")}`);
+  if (route !== "html-mock" && count(codePlan, /\b\d+:\d+\b/g) < mappedPages.length) fail("Figma UI mapping lacks nodeId for every mapped page");
+
+  // A 计数级元素对账(仅 html-mock,elementLevel=true):设计侧 vs 实现侧按元素类型计数比较。
+  // 实现侧解析 Vue 3 + Element Plus:el-button/<button>、el-input/el-textarea/<input>、el-select、el-table、el-dialog。
+  // figma 模式无可解析 HTML 元素基准 → 元素级 diff not_applicable,退回页面级(保持既有行为但不再假装 0)。
+  let unmapped = 0;
+  let extra = 0;
+  let stylesAligned = true;
+  let conditionsAligned = true;
+  if (design.elementLevel) {
+    const implTally: ElementTally = {
+      button: count(source, /<el-button\b|<button\b/gi),
+      input: count(source, /<el-input\b|<el-textarea\b|<input\b|<textarea\b/gi),
+      select: count(source, /<el-select\b|<select\b/gi),
+      table: count(source, /<el-table\b|<table\b/gi),
+      dialog: count(source, /<el-dialog\b|<dialog\b/gi),
+    };
+    for (const key of ["button", "input", "select", "table", "dialog"] as const) {
+      const need = design.tally[key];
+      const have = implTally[key];
+      if (have < need) unmapped += need - have;   // 设计有而实现缺
+      if (need > 0 && have > need) extra += have - need; // 实现多于设计(过度实现;仅在设计有该类型时计,避免误伤布局辅助元素)
+    }
+    // 条件显隐:设计声明了条件信号时,实现应有等量或更多的 v-if/v-show。
+    const implConditions = count(source, /\bv-if\b|\bv-show\b/gi);
+    if (design.conditions > 0 && implConditions < design.conditions) conditionsAligned = false;
+    // 样式对账(粗粒度):实现不得硬编码十六进制色值/Element Plus 默认色变量以外的字面色,应引用设计 token(CSS var / SCSS 变量)。
+    const hardcodedColors = count(source, /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)/g);
+    const tokenRefs = count(source, /var\(--[a-z0-9-]+\)|\$[a-z0-9-]+/gi);
+    if (hardcodedColors > 0 && tokenRefs === 0) stylesAligned = false; // 有硬编码色且完全不用 token
+  }
+
+  return {
+    status: "passed",
+    design_mode: route === "html-mock" ? "html-mock" : "figma",
+    unit_scope: "ui",
+    element_diff_mode: design.elementLevel ? "counting" : "page-level-only",
+    pages_checked: mappedPages.length,
+    pages_covered: [...new Set(mappedPages)].sort(),
+    elements_checked: Math.max(design.elements, mappedPages.length),
+    unmapped_elements: unmapped,
+    extra_elements: extra,
+    styles_aligned: stylesAligned,
+    conditional_visibility_aligned: conditionsAligned,
+    platform_constraints_respected: true,
+    artifacts_checked: [...new Set([...design.artifacts, relativePath(codePlanPath), ...targetFiles.map(relativePath)])],
+  };
+}
+
+// 分类追溯矩阵(全覆盖对账治本机制)。以 REQ 为行,按 track 条件化校验每层覆盖,算 coverage_status。
+// 阶段感知:只强制"截至当前阶段应完成的层",未到的层不算断点。规范见 knowledge/common-traceability-id-chain.md。
+type Track = "backend" | "frontend" | "data" | "infra" | "nfr" | "doc-only";
+const TRACKS = new Set<Track>(["backend", "frontend", "data", "infra", "nfr", "doc-only"]);
+// 每层在哪个阶段应被填充,以及该层对哪些 track 适用(*=全部)。顺序即阶段推进顺序。
+const MATRIX_LAYERS: { layer: string; stage: string; tracks: Track[] | "*" }[] = [
+  { layer: "stories",           stage: "user-stories",       tracks: ["backend", "frontend"] },
+  { layer: "acceptance",        stage: "user-stories",       tracks: ["backend", "frontend"] },
+  { layer: "design_components", stage: "application-design",  tracks: ["backend", "data"] },
+  { layer: "pages",             stage: "application-design",  tracks: ["frontend"] },
+  { layer: "test_cases",        stage: "functional-design",   tracks: ["backend", "frontend", "data"] },
+  { layer: "code_refs",         stage: "code-generation",     tracks: "*" },
+  { layer: "tests",             stage: "tdd",                 tracks: ["backend", "frontend", "data"] },
+];
+const MATRIX_STAGE_ORDER = ["requirements-analysis", "requirement-clarification", "user-stories", "application-design", "functional-design", "tdd", "code-generation", "code-review"];
+// B3 修复:真实 stage 图是 DAG,construction 期有多个分叉 stage(shared-contract-baseline / nfr-* /
+// infrastructure-* / ui-implementation-bridge 等)不在上面的
+// 线性序上。裸 indexOf 对它们返回 -1,会使阶段感知守卫 (currentOrder>=0) 整体失效,退化为"全层都判",
+// 对尚未到达的 code_refs/tests 层产生假阳性 BROKEN。故用保守映射:未知 stage 回退到其依赖语义对应的
+// 线性位置下界,绝不高估进度(宁可少判、不误判)。
+const MATRIX_STAGE_FALLBACK: Record<string, string> = {
+  // 均 requires functional-design,与 code-generation 平行 → 保守视为"设计已完成,code 层尚未强制"。
+  "shared-contract-baseline": "functional-design",
+  "nfr-requirements": "functional-design",
+  "nfr-design": "functional-design",
+  "infrastructure-design": "functional-design",
+  // 桥接在 RED 后、GREEN 前创建平台规范，尚不应要求生产代码引用。
+  "ui-implementation-bridge": "tdd",
+  "build-and-test": "code-review",
+  "implementation-report": "code-review",
+  // I13 产出 UC-D；测试层在 RED 阶段校验，映射到 tdd 位置。
+  "test-case-derivation": "tdd",
+};
+function resolveStageOrder(stage: string): number {
+  const direct = MATRIX_STAGE_ORDER.indexOf(stage);
+  if (direct >= 0) return direct;
+  const mapped = MATRIX_STAGE_FALLBACK[stage];
+  if (mapped) return MATRIX_STAGE_ORDER.indexOf(mapped);
+  // 完全未知的 stage:保守下界=application-design(设计层已判,code 层不判),而非退化为全判。
+  return MATRIX_STAGE_ORDER.indexOf("application-design");
+}
+
+function traceabilityMatrix(): Record<string, unknown> {
+  if (!workflowState || !ACTIVE_MODULE) return { status: "not_applicable", reason: "no active Markdown workflow module context" };
+  const currentStage = workflowState.current_stage || "";
+  const currentOrder = resolveStageOrder(currentStage);
+
+  // {module-id} 占位符解析:contextual() 只认 docs/aidlc/inception|construction 前缀替换,不认此占位符,
+  // 故在此显式替换为 ACTIVE_MODULE。否则所有产物路径含字面量 {module-id},existsSync 永远 false,
+  // producer 对任何真实 module 都误判 not_applicable(门禁静默失效)。
+  const mod = (rel: string): string => rel.replace(/\{module-id\}/g, ACTIVE_MODULE);
+  const read = (rel: string): string => existing([mod(rel)]).map(text).join("\n");
+  const reqDoc = read("docs/aidlc/modules/{module-id}/inception/requirements.md");
+  if (!reqDoc.trim()) {
+    // MARS-112 / MARS-116: lightweight scopes skip requirements-analysis, so
+    // requirements.md is never produced and the REQ→code matrix has no root. Instead of
+    // passing blindly (not_applicable), the gate anchors to the scope's own source of
+    // truth: bugfix to a UC-D `defect_ref` reconciled against the delivered source,
+    // express/workshop to a UC-D `change_ref` (same mechanism), refactor to a
+    // characterization UC-D `code_refs` baseline anchor. Any other scope without
+    // requirements.md stays not_applicable (unchanged).
+    const lightweight = lightweightScopeMatrix(currentStage, currentOrder, mod, read);
+    if (lightweight) return lightweight;
+    if (["feature", "enterprise", "mvp", "classic"].includes(workflowState.scope)) fail("CANONICAL_INPUT_MISSING: requirements.md is required; restore any legacy .full.md explicitly");
+    return { status: "not_applicable", reason: "requirements.md not present yet" };
+  }
+
+  // 解析每个 REQ 的 track(段落级:REQ-xxx 到下一个 REQ-xxx 之间找 track: [...])。
+  const reqIds = ids(reqDoc, /\bREQ-[A-Z0-9][A-Z0-9_-]*\b/g);
+  if (reqIds.length === 0) return { status: "not_applicable", reason: "requirements.md has no REQ-xxx IDs (legacy, MIGRATION_REQUIRED)", migration_status: "MIGRATION_REQUIRED" };
+
+  const storyDoc = read("docs/aidlc/modules/{module-id}/inception/user-stories.md");
+  const designDoc = existing([mod("docs/aidlc/modules/{module-id}/inception/application-design.md")]).map(text).join("\n")
+    + "\n" + joined(allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design"), /\.md$/));
+  const fdDoc = joined(allFiles(mod("docs/aidlc/modules/{module-id}/construction"), /functional-design[^/]*\/?[^/]*\.md$/));
+  // UC-D 目录(test-case-derivation 产物)。test_cases 层来源 = 功能设计 + UC-D 目录,使该层在
+  // UC-D 产出阶段(功能设计尚未产出)也能正确判"REQ 是否被 UC-D 覆盖"(缺口1)。
+  const ucdDoc = joined(allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/));
+  // 4.11.0: the code_refs layer only reads the module's own source roots (module-manifest
+  // paths → .aidlc/source-roots.json, nested repositories included), so another module's
+  // code can never cover this module's REQs and large unrelated trees are skipped. A
+  // project that declares no source roots at all (default origin) carries no ownership
+  // information: it keeps the whole-project scan of 4.10.1.
+  let codeRoots: { roots: string[]; origin: string };
+  try {
+    codeRoots = resolveSourceRoots(ROOT, ACTIVE_MODULE);
+  } catch (error) {
+    fail(`traceability-matrix cannot resolve the source roots of module ${ACTIVE_MODULE}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const codeFiles = codeRoots.origin === "default"
+    ? projectFiles(SOURCE_FILE_PATTERN)
+    : [...new Set(codeRoots.roots.flatMap((root) => allFiles(root, SOURCE_FILE_PATTERN)))].sort();
+  const codeSrc = joined(codeFiles) + "\n" + deletionTraceText(ROOT, ACTIVE_MODULE, ACTIVE_UNIT);
+  const testSrc = joined(projectFiles(TEST_FILE_PATTERN));
+
+  const layerText: Record<string, string> = {
+    stories: storyDoc, acceptance: storyDoc, design_components: designDoc,
+    pages: designDoc, test_cases: fdDoc + "\n" + ucdDoc, code_refs: codeSrc, tests: testSrc,
+  };
+
+  // C2 累积对账(从 PRD/澄清起,囊括全部前序产物)。PRD 与 clarifications 均为条件产物:
+  // 缺失时该层 not_applicable、不阻断(避免误伤未跑 PRD/无澄清的项目)。存在时做覆盖对账。
+  // PRD(docs/aidlc/ideation/prd.md,产品级非 module 目录)→ REQ:每个 FR-xxx 是否被某 REQ 段承接。
+  const prdDoc = existing(["docs/aidlc/ideation/prd.md"]).map(text).join("\n");
+  const frIds = prdDoc.trim() ? ids(prdDoc, /\bFR-\d{2,}\b/g) : [];
+  const uncoveredFr = frIds.filter((fr) => !new RegExp(`\\b${fr}\\b`).test(reqDoc));
+  // 澄清(clarifications.md,module 级)→ 下游:每个 CL-xxx 是否被 story/design 引用遵循。
+  const clDoc = read("docs/aidlc/modules/{module-id}/inception/clarifications.md");
+  const clIds = clDoc.trim() ? ids(clDoc, /\bCL-\d{2,}\b/g) : [];
+  const downstreamForCl = storyDoc + "\n" + designDoc + "\n" + fdDoc;
+  const uncoveredCl = clIds.filter((cl) => !new RegExp(`\\b${cl}\\b`).test(downstreamForCl));
+
+  // 缺口B:跨 module 契约累积层。本 module 产物引用的 CT-{OTHER}-* 契约,其 Owner module 是否已交付。
+  // 契约 ID 形态 CT-{MODULE}-{NAME};排除本 module 自有(CT-{THIS}-*)。Owner 从 product-contracts.md 查。
+  // Owner 交付判定:Owner module 的 application-design 已完成(state completed 实例)。存在即对账,无则 NA。
+  const thisModuleToken = ACTIVE_MODULE.replace(/-/g, "").toUpperCase();
+  const moduleArtifacts = reqDoc + "\n" + storyDoc + "\n" + designDoc + "\n" + fdDoc;
+  const allCtIds = ids(moduleArtifacts, /\bCT-[A-Z0-9]+-[A-Z0-9-]+\b/g);
+  // 跨 module 消费的契约 = CT-* 且其 module 段 ≠ 本 module。
+  const consumedContracts = allCtIds.filter((ct) => {
+    const seg = ct.match(/^CT-([A-Z0-9]+)-/)?.[1];
+    return seg && seg !== thisModuleToken;
+  });
+  const prodContracts = existing(["docs/aidlc/ideation/product-contracts.md"]).map(text).join("\n");
+  const completedStages: string[] = Array.isArray(workflowState.completed_stage_instances)
+    ? workflowState.completed_stage_instances
+    : (Array.isArray(workflowState.completed_stages) ? workflowState.completed_stages : []);
+  // MARS-91:Owner 交付只认 `application-design@module:<owner>`。裸 `application-design` 仅在
+  // 单 module 场景(无 module-manifest,或 manifest 只有一个 module 且就是 Owner)兼容回退;
+  // 多 module 下任一 module 完成裸实例都不能让其他 Owner 的契约视为已交付。
+  let manifestModules: ModuleDescriptor[] | null = null;
+  const contractModules = (): ModuleDescriptor[] => (manifestModules ??= activeModuleManifest().modules);
+  // 契约 ID 的 module 段去掉了连字符(CT-{MODULEID}-*),按 manifest 还原真实 module_id。
+  const resolveOwnerModule = (seg: string): string =>
+    contractModules().find((module) => module.module_id.replace(/-/g, "").toUpperCase() === seg)?.module_id || seg.toLowerCase();
+  const ownerDelivered = (ownerModule: string): boolean => {
+    if (completedStages.includes(`application-design@module:${ownerModule}`)) return true;
+    if (!completedStages.includes("application-design")) return false;
+    const modules = contractModules();
+    return modules.length === 0 || (modules.length === 1 && modules[0].module_id === ownerModule);
+  };
+  // MARS-90 阶段感知:消费方真正"使用"契约的是其 application-design(设计层消费 CT);
+  // 在此之前(需求/故事阶段 REQ 文本早期引用 CT)Owner 尚未交付不算断点,只记 advisory。
+  // 契约未在 product-contracts.md(ideation 产物,早于需求)登记属本阶段即可判定的缺口,不受此守卫影响。
+  const contractDeliveryGateActive = currentOrder >= MATRIX_STAGE_ORDER.indexOf("application-design");
+  const uncoveredContracts: string[] = [];
+  const advisoryContractsPending: string[] = [];
+  for (const ct of consumedContracts) {
+    // 从 product-contracts 找该契约行的 Owner module 段(形如 "owner/unit" 或 module 名)。
+    const seg = ct.match(/^CT-([A-Z0-9]+)-/)?.[1] || "";
+    const ownerModule = seg ? resolveOwnerModule(seg) : "";
+    if (!prodContracts.includes(ct)) {
+      uncoveredContracts.push(`${ct}: 契约未在 product-contracts.md 登记(消费了未声明的跨 module 契约)`);
+    } else if (ownerModule && !ownerDelivered(ownerModule)) {
+      const message = `${ct}: Owner module ${ownerModule} 的 application-design 未完成(消费方引用了尚未交付的契约)`;
+      if (contractDeliveryGateActive) uncoveredContracts.push(message);
+      else advisoryContractsPending.push(message);
+    }
+  }
+
+  const rows: Record<string, unknown>[] = [];
+  const brokenRows: string[] = [];
+  const missingTrack: string[] = [];
+  let invariantCache: { ids: Set<string>; error?: string } | null = null;
+  const declaredInvariants = (): { ids: Set<string>; error?: string } => {
+    if (invariantCache) return invariantCache;
+    try {
+      const set = loadInvariantSet(ACTIVE_MODULE);
+      invariantCache = set ? { ids: new Set(set.invariants.map((invariant) => invariant.id)) } : { ids: new Set(), error: "no structural-invariants manifest" };
+    } catch (error) {
+      invariantCache = { ids: new Set(), error: error instanceof Error ? error.message : String(error) };
+    }
+    return invariantCache;
+  };
+  // REQ → track 映射(供 STORY/UC-D 派生继承)。
+  const reqTrack = new Map<string, Track[]>();
+  const reqOwnership = new Map<string, string[]>();
+  for (const req of reqIds) {
+    const start = reqDoc.indexOf(req);
+    const nextIdx = reqDoc.slice(start + req.length).search(/\bREQ-[A-Z0-9]/);
+    const block = reqDoc.slice(start, nextIdx < 0 ? reqDoc.length : start + req.length + nextIdx);
+    const trackMatch = block.match(/track\s*:\s*\[([^\]]*)\]/i);
+    const tracks = (trackMatch ? trackMatch[1].split(",").map((t) => t.trim().toLowerCase()) : []).filter((t): t is Track => TRACKS.has(t as Track));
+    reqTrack.set(req, tracks);
+    // D:形态/归属断言(可选)。REQ 段内 `data_ownership: [INV-xxx]` 声明该需求在数据层归属哪条结构不变式。
+    const ownershipMatch = block.match(/data_ownership\s*:\s*\[([^\]]*)\]/i);
+    if (ownershipMatch) reqOwnership.set(req, ownershipMatch[1].split(",").map((value) => value.trim().toUpperCase()).filter(Boolean));
+  }
+  // STORY/UC-D 的派生 track:从其引用的 REQ 继承(取并集)。用于派生级覆盖诊断。
+  // 在 STORY 段/UC-D 段里找它引用的 REQ-xxx,合并这些 REQ 的 track。
+  const deriveChildTracks = (childId: string, childDoc: string): Track[] => {
+    const start = childDoc.indexOf(childId);
+    if (start < 0) return [];
+    const rest = childDoc.slice(start + childId.length);
+    const nextIdx = rest.search(/\b(?:STORY-\d|UC-D-\d)/);
+    const block = childDoc.slice(start, nextIdx < 0 ? childDoc.length : start + childId.length + nextIdx);
+    const refReqs = ids(block, /\bREQ-[A-Z0-9][A-Z0-9_-]*\b/g);
+    const set = new Set<Track>();
+    for (const r of refReqs) for (const t of reqTrack.get(r) || []) set.add(t);
+    return [...set];
+  };
+  // 4.8.0 unit scope: with I13 ucd_units a unit's tests layer covers only its own UC-Ds and
+  // the REQs those UC-D case files reference; the module set is reconciled at build-and-test.
+  const matrixI13 = ACTIVE_UNIT ? i13Evidence() : null;
+  const matrixScope = matrixI13?.status === "required" ? unitUcdIds(matrixI13, ACTIVE_UNIT) : null;
+  const unitScope = matrixScope?.scoped ? matrixScope : null;
+  // 4.11.0 unit scope of the code_refs layer: the unit-manifest `req_refs` of the active
+  // unit, else the REQs of its UC-D subset (as the tests layer), else the module set. A
+  // ucd_exemption unit (empty UC-D subset by I13 ucd_units) has no code_refs/tests layer.
+  // Without a unit context (build-and-test) the module set is reconciled as before.
+  let unitDescriptor: UnitDescriptor | undefined;
+  if (ACTIVE_UNIT && existsSync(unitManifestPath(ROOT, ACTIVE_MODULE))) {
+    try {
+      unitDescriptor = readUnitManifest(ROOT, ACTIVE_MODULE).find((unit) => unit.unit_id === ACTIVE_UNIT);
+    } catch (error) {
+      fail(`traceability-matrix cannot read the unit manifest of module ${ACTIVE_MODULE}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const unitExemption = unitScope && unitScope.all.length === 0 ? unitDescriptor?.ucd_exemption : undefined;
+  // MARS-273: tests 层收敛与 code_refs 层一致改走 unit req_refs(不再扫描 UC-D 文件内
+  // REQ);未声明 req_refs 的 unit 回退 ucd_subset(过渡期兼容),ucd_exemption unit 无
+  // tests 层。unitScope 下的非空保证保持(供 unit_scope 输出)。
+  let unitTestReqs: Set<string> | null = null;
+  if (!unitExemption && unitDescriptor?.req_refs) {
+    unitTestReqs = new Set(unitDescriptor.req_refs);
+  } else if (unitScope) {
+    const caseFilesForScope = allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/).filter((path) => basename(path) !== "_index.md");
+    const declarations = ucdDeclarations(caseFilesForScope);
+    unitTestReqs = new Set(unitScope.all.flatMap((id) => {
+      const declaration = declarations.get(id);
+      return declaration ? ids(text(declaration.file), /\bREQ-[A-Z0-9][A-Z0-9_-]*\b/g) : [];
+    }));
+  }
+  // MARS-273: unit req_refs 与聚合层 source_coverage 的 REQ 覆盖冲突拒绝并要求修正。
+  const coverageValue = matrixI13?.source_coverage;
+  const declaredCoverage = typeof coverageValue === "object" && coverageValue !== null && !Array.isArray(coverageValue)
+    ? coverageValue as Record<string, unknown>
+    : null;
+  if (declaredCoverage !== null && !unitExemption && unitDescriptor?.req_refs) {
+    for (const ref of unitDescriptor.req_refs) {
+      const ucds = declaredCoverage[ref];
+      if (!Array.isArray(ucds) || ucds.length === 0) {
+        brokenRows.push(`${ref}: UNCOVERED_REQ@source_coverage(unit ${ACTIVE_UNIT}.req_refs 未被聚合层 source_coverage 覆盖)`);
+      }
+    }
+  }
+  let unitCodeReqs: Set<string> | null = null;
+  let codeRefsSource: "req_refs" | "ucd_subset" | "module" = "module";
+  const unknownReqRefs: string[] = [];
+  if (!unitExemption && unitDescriptor?.req_refs) {
+    unitCodeReqs = new Set(unitDescriptor.req_refs);
+    codeRefsSource = "req_refs";
+    unknownReqRefs.push(...unitDescriptor.req_refs.filter((ref) => !reqIds.includes(ref)).sort());
+  } else if (!unitExemption && unitTestReqs && unitTestReqs.size > 0) {
+    unitCodeReqs = new Set(unitTestReqs);
+    codeRefsSource = "ucd_subset";
+  }
+  const storyIdsAll = ids(storyDoc, /\bSTORY-\d{3,}\b/g);
+  const ucdIdsAll = ids(fdDoc + "\n" + joined(allFiles(mod("docs/aidlc/modules/{module-id}/inception/application-design/test-cases"), /\.md$/)), /\bUC-D-\d+\b/g)
+    .filter((id) => !unitScope || unitScope.all.includes(id));
+  const derivedChildren = [
+    ...storyIdsAll.map((id) => ({ id, kind: "STORY", tracks: deriveChildTracks(id, storyDoc) })),
+    ...ucdIdsAll.map((id) => ({ id, kind: "UC-D", tracks: deriveChildTracks(id, fdDoc) })),
+  ];
+
+  for (const req of reqIds) {
+    const tracks = reqTrack.get(req) || [];
+    if (tracks.length === 0) { missingTrack.push(req); }
+    let brokenAt: string | null = null;
+    for (const { layer, stage, tracks: applic } of MATRIX_LAYERS) {
+      const applies = applic === "*" || tracks.some((t) => (applic as Track[]).includes(t));
+      if (!applies) continue;
+      // 阶段感知:该层所属阶段尚未到达时,不算断点(currentOrder 经 resolveStageOrder 恒 >=0)。
+      const layerOrder = MATRIX_STAGE_ORDER.indexOf(stage);
+      if (layerOrder > currentOrder) continue;
+      if (unitExemption && (layer === "code_refs" || layer === "tests")) continue;
+      if (layer === "tests" && unitTestReqs && !unitTestReqs.has(req)) continue;
+      if (layer === "code_refs" && unitCodeReqs && !unitCodeReqs.has(req)) continue;
+      // 覆盖判定:该层文本中出现本 REQ(或其派生 @ReqId 标记)。
+      const covered = new RegExp(`\\b${req}\\b`).test(layerText[layer] || "");
+      if (!covered && brokenAt === null) brokenAt = layer;
+    }
+    // D:归属断言校验(仅声明了 data_ownership 的 REQ;设计阶段起生效)。引用的 INV 必须在结构不变式清单中存在,
+    // 使覆盖型门禁同时具备最小形态校验:需求声明"归属某唯一真源",而该真源未被机器声明 → BROKEN@ownership。
+    const ownership = reqOwnership.get(req) || [];
+    let ownershipStatus = ownership.length > 0 ? "declared" : "not_declared";
+    if (ownership.length > 0 && currentOrder >= MATRIX_STAGE_ORDER.indexOf("application-design")) {
+      const known = declaredInvariants();
+      const unknown = ownership.filter((id) => !known.ids.has(id));
+      if (unknown.length > 0) {
+        ownershipStatus = `unresolved(${unknown.join(", ")}${known.error ? `; ${known.error}` : ""})`;
+        if (brokenAt === null) brokenAt = "ownership";
+      } else {
+        ownershipStatus = "resolved";
+      }
+    }
+    const status = missingTrack.includes(req) ? "MIGRATION_REQUIRED" : (brokenAt ? `BROKEN@${brokenAt}` : "COMPLETE");
+    if (brokenAt) brokenRows.push(`${req}: BROKEN@${brokenAt}`);
+    rows.push({ req, tracks, coverage_status: status, ...(ownership.length > 0 ? { data_ownership: ownership, ownership_status: ownershipStatus } : {}) });
+  }
+  for (const ref of unknownReqRefs) brokenRows.push(`${ref}: UNKNOWN_REQ_REF@unit-manifest(${ACTIVE_UNIT}.req_refs 引用了 requirements.md 中不存在的 REQ)`);
+
+  // 派生级诊断(advisory,不新增硬失败面):STORY/UC-D 继承的 track 若含 backend/frontend/data,
+  // 检查其在对应下游层是否出现;缺失记入 derived_gaps 供审查参考,不直接判 BROKEN(避免命名不规范误报)。
+  const derivedGaps: string[] = [];
+  for (const child of derivedChildren) {
+    if (child.tracks.length === 0) continue;
+    // UC-D 应出现在测试层(@TestCaseId);STORY 应出现在设计或代码层。
+    const layer = child.kind === "UC-D" ? "tests" : "code_refs";
+    const stageOfLayer = child.kind === "UC-D" ? "tdd" : "code-generation";
+    const layerOrder = MATRIX_STAGE_ORDER.indexOf(stageOfLayer);
+    if (layerOrder > currentOrder) continue;
+    const covered = new RegExp(`\\b${child.id}\\b`).test(layerText[layer] || "");
+    if (!covered) derivedGaps.push(`${child.id}(${child.kind}, tracks=${child.tracks.join("/")}) 未出现在 ${layer} 层`);
+  }
+
+  // AC advisory(验收标准可见性,不阻断):每个 STORY 段内是否出现隶属它的 AC-xxx。
+  // 缺失记入 derived_gaps 供审查(存量故事常无 AC),不硬拦——AC 硬约束由故事模板要求新故事标注。
+  for (const sid of storyIdsAll) {
+    const start = storyDoc.indexOf(sid);
+    if (start < 0) continue;
+    const rest = storyDoc.slice(start + sid.length);
+    const nextIdx = rest.search(/\bSTORY-\d/);
+    const block = storyDoc.slice(start, nextIdx < 0 ? storyDoc.length : start + sid.length + nextIdx);
+    if (!/\bAC-\d{2,}\b/.test(block)) derivedGaps.push(`${sid}(STORY) 未标注隶属的 AC-xxx 验收标准 ID`);
+  }
+
+  const legacy = missingTrack.length > 0;
+  // C2:PRD 的 FR 未被任何 REQ 承接、澄清 CL 未被下游遵循,都是累积覆盖漏洞(真实 drift)。
+  // 仅在对应产物存在时生效(frIds/clIds 为空即该层 not_applicable)。
+  // 存量兼容:module 未迁移(legacy=有 REQ 缺 track)时,FR/CL 缺口降级为 advisory 不进 broken_rows
+  // (旧规范未建 FR→REQ 显式链,不硬拦);仅已迁移 module 的累积缺口才计入硬门禁 broken_rows。
+  // 阶段感知(MARS-90):FR→REQ 归属 requirements-analysis(本 producer 最早运行阶段),恒生效;
+  // CL→story/design 的下游层最早是 user-stories,此前(澄清刚完成)story/design 必然不存在,
+  // 不得提前硬拦,降级为 advisory_cl_pending,clarification_cl_total 仍可见。
+  const clGateActive = currentOrder >= MATRIX_STAGE_ORDER.indexOf("user-stories");
+  const enforcedCl = clGateActive ? uncoveredCl : [];
+  const advisoryClPending = clGateActive ? [] : uncoveredCl;
+  const cumulativeBroken = [
+    ...uncoveredFr.map((fr) => `${fr}: UNCOVERED_FR@requirements(PRD 的 FR 未被任何 REQ 承接)`),
+    ...enforcedCl.map((cl) => `${cl}: UNCOVERED_CL@downstream(澄清结论未被 story/design 遵循)`),
+  ];
+  const allBroken = legacy ? [...brokenRows] : [...brokenRows, ...cumulativeBroken, ...uncoveredContracts];
+  const cumulativeStatus = frIds.length === 0 && clIds.length === 0
+    ? "not_applicable(无 PRD/澄清产物)"
+    : legacy
+      ? (cumulativeBroken.length === 0 ? "passed" : "MIGRATION_REQUIRED(存量未迁移,累积缺口降级放行)")
+      : (cumulativeBroken.length === 0 ? "passed" : "BROKEN");
+  // 缺口B 契约层状态:已迁移 module 的跨 module 契约缺口进 allBroken 硬拦;存量降级。
+  const contractStatus = consumedContracts.length === 0
+    ? "not_applicable(无跨 module 契约消费)"
+    : legacy
+      ? (uncoveredContracts.length === 0 ? "passed" : "MIGRATION_REQUIRED(存量未迁移,契约缺口降级放行)")
+      : (uncoveredContracts.length === 0 ? "passed" : "BROKEN");
+  return {
+    status: "passed",
+    module_id: ACTIVE_MODULE,
+    current_stage: currentStage,
+    ...(ACTIVE_UNIT && (unitScope || codeRefsSource !== "module" || unitExemption) ? {
+      unit_scope: {
+        unit_id: ACTIVE_UNIT,
+        ...(unitScope ? { ucd_ids: unitScope.all, tests_layer_reqs: [...unitTestReqs!].sort() } : unitTestReqs ? { tests_layer_reqs: [...unitTestReqs].sort() } : {}),
+        code_refs_layer_reqs: unitExemption ? [] : [...(unitCodeReqs || reqIds)].sort(),
+        code_refs_source: unitExemption ? "ucd_exemption" : codeRefsSource,
+        ...(unitExemption ? {
+          code_refs_layer: "not_applicable(ucd_exemption)",
+          tests_layer: "not_applicable(ucd_exemption)",
+          exemption: { reason_code: unitExemption.reason_code },
+        } : {}),
+      },
+    } : {}),
+    matrix_rows: rows.length,
+    complete_rows: rows.filter((r) => r.coverage_status === "COMPLETE").length,
+    broken_rows: allBroken,
+    missing_track: missingTrack,
+    // C2 累积对账(从 PRD/澄清起):存在即对账,缺失即 not_applicable,存量未迁移则降级。
+    prd_fr_total: frIds.length,
+    uncovered_fr: uncoveredFr,
+    clarification_cl_total: clIds.length,
+    uncovered_cl: uncoveredCl,
+    // 仅存在澄清产物时输出,无 CL 的项目证据结构与 4.9.0 一致。
+    ...(clIds.length > 0 ? { cl_gate: clGateActive ? "enforced" : "not_applicable(用户故事阶段未到达)", advisory_cl_pending: advisoryClPending } : {}),
+    cumulative_status: cumulativeStatus,
+    // 缺口B 跨 module 契约累积层:本 module 消费的 CT-{OTHER}-* 其 Owner 是否交付。
+    consumed_contracts: consumedContracts,
+    uncovered_contracts: uncoveredContracts,
+    ...(consumedContracts.length > 0 ? { advisory_contracts_pending: advisoryContractsPending } : {}),
+    contract_status: contractStatus,
+    derived_children: derivedChildren.length,
+    derived_gaps: derivedGaps,
+    migration_status: legacy ? "MIGRATION_REQUIRED" : "passed",
+    matrix: rows,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// structural-invariants:形态一致性门禁。
+// 覆盖型门禁(traceability-matrix)保证"需求到达下游层",但防不住需求以错误结构形态落地
+// (例如本应并入既有真源的对象被实现成并行/影子实体表)。本 checker 读取设计阶段声明的
+// 机器可读不变式清单(structural-invariants.json),对生成产物(DDL/迁移、实体类、schema、
+// Mapper SQL、设计文档里的 [实体:X] 标记与 ```sql 块)做确定性比对,命中即 fail-closed。
+// 无清单 = not_applicable(向后兼容:未声明不变式的项目不被误伤)。
+// ---------------------------------------------------------------------------
+type InvariantKind = "single-source-of-truth" | "converge" | "deprecated" | "migrate-out";
+const INVARIANT_KINDS = new Set<InvariantKind>(["single-source-of-truth", "converge", "deprecated", "migrate-out"]);
+const INVARIANT_ID = /^INV-[A-Z0-9][A-Z0-9_-]*$/;
+const DEFAULT_STRIP_PREFIXES = ["t_", "tb_", "tbl_"];
+const MODULE_INVARIANTS_PATH = (moduleId: string): string => `docs/aidlc/modules/${moduleId}/inception/application-design/structural-invariants.json`;
+const PRODUCT_INVARIANTS_PATH = "docs/aidlc/ideation/structural-invariants.json";
+
+interface InvariantExemption { path: string; reason: string }
+interface StructuralInvariant {
+  id: string;
+  kind: InvariantKind;
+  source: string;
+  subject: string;
+  ownerModule?: string;
+  canonical: string[];
+  ownerPaths: string[];
+  shadowNames: string[];
+  patterns: RegExp[];
+  writers: string[];
+  targets: string[];
+  toModule?: string;
+  requirements: string[];
+  exemptions: InvariantExemption[];
+}
+interface PersistenceAuthorization { names: string[]; refs: string[] }
+interface InvariantSet {
+  manifests: string[];
+  baselineRef?: string;
+  stripPrefixes: string[];
+  invariants: StructuralInvariant[];
+  persistence?: { authorized: PersistenceAuthorization[]; exemptions: InvariantExemption[] };
+}
+interface PersistOp { op: "create" | "write"; names: string[]; file: string; line: number; via: string }
+interface InvariantViolation {
+  invariant: string;
+  kind: string;
+  rule: string;
+  name: string;
+  file: string;
+  line: number;
+  via: string;
+  requirements: string[];
+  message: string;
+}
+
+function portableLabel(path: string): string { return relative(ROOT, path).replace(/\\/g, "/"); }
+function normalizedPrefix(value: string): string { return value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\*+$/, ""); }
+
+/** 实体/表名蛇形形态:去引号与 schema 前缀、驼峰转蛇形、去表前缀与实体类后缀(保留下划线,供 patterns 匹配)。 */
+function entityForm(name: string, stripPrefixes: string[]): string {
+  let value = name.trim().replace(/[`"'[\]]/g, "");
+  value = value.split(".").pop() || value;
+  value = value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+  for (const prefix of stripPrefixes) {
+    if (value.startsWith(prefix) && value.length > prefix.length) { value = value.slice(prefix.length); break; }
+  }
+  return value.replace(/_(?:entity|do|po|model|table|tbl)$/, "");
+}
+/** 实体/表名归一键:蛇形形态仅保留 [a-z0-9],用于精确比对。 */
+function entityKey(name: string, stripPrefixes: string[]): string {
+  return entityForm(name, stripPrefixes).replace(/[^a-z0-9]/g, "");
+}
+
+function parseInvariantManifest(path: string, requirementIds: Set<string> | null, errors: string[]): Omit<InvariantSet, "manifests"> & { declaredIds: string[] } {
+  const label = portableLabel(path);
+  const raw = jsonFile(path);
+  const err = (message: string): void => { errors.push(`${label}: ${message}`); };
+  if (raw.schema_version !== "1") err('schema_version must be "1"');
+  let baselineRef: string | undefined;
+  if (raw.baseline_ref !== undefined) {
+    if (typeof raw.baseline_ref !== "string" || !/^[A-Za-z0-9._/][A-Za-z0-9._/~^-]*$/.test(raw.baseline_ref)) err("baseline_ref must be a git ref (no leading '-', no whitespace)");
+    else baselineRef = raw.baseline_ref;
+  }
+  let stripPrefixes = DEFAULT_STRIP_PREFIXES;
+  if (raw.strip_prefixes !== undefined) {
+    if (!Array.isArray(raw.strip_prefixes) || !raw.strip_prefixes.every((item) => typeof item === "string" && /^[a-z0-9_]+$/.test(item))) err("strip_prefixes must be an array of lowercase [a-z0-9_] strings");
+    else stripPrefixes = raw.strip_prefixes as string[];
+  }
+  const names = (value: unknown, field: string, required: boolean): string[] => {
+    if (value === undefined && !required) return [];
+    if (!Array.isArray(value) || (required && value.length === 0) || !value.every((item) => typeof item === "string" && item.trim())) {
+      err(`${field} must be a ${required ? "non-empty " : ""}string array`);
+      return [];
+    }
+    return (value as string[]).map((item) => item.trim());
+  };
+  const exemptions = (value: unknown, field: string): InvariantExemption[] => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) { err(`${field} must be an array`); return []; }
+    const result: InvariantExemption[] = [];
+    value.forEach((item, index) => {
+      const record = item && typeof item === "object" && !Array.isArray(item) ? item as Record<string, unknown> : null;
+      const exemptPath = typeof record?.path === "string" ? normalizedPrefix(record.path.trim()) : "";
+      const reason = typeof record?.reason === "string" ? record.reason.trim() : "";
+      if (!exemptPath || exemptPath.startsWith("/") || exemptPath.split("/").includes("..")) err(`${field}[${index}].path must be a project-relative path prefix`);
+      else if (reason.length < 8) err(`${field}[${index}].reason must explain the exemption (>= 8 chars)`);
+      else result.push({ path: exemptPath, reason });
+    });
+    return result;
+  };
+  const invariants: StructuralInvariant[] = [];
+  const declaredIds: string[] = [];
+  if (!Array.isArray(raw.invariants)) err("invariants must be an array");
+  const list = Array.isArray(raw.invariants) ? raw.invariants : [];
+  list.forEach((item, index) => {
+    const field = `invariants[${index}]`;
+    if (!item || typeof item !== "object" || Array.isArray(item)) { err(`${field} must be an object`); return; }
+    const record = item as Record<string, unknown>;
+    const id = typeof record.id === "string" ? record.id.trim() : "";
+    if (!INVARIANT_ID.test(id)) { err(`${field}.id must match INV-XXX`); return; }
+    declaredIds.push(id);
+    const kind = record.kind as InvariantKind;
+    if (!INVARIANT_KINDS.has(kind)) { err(`${id}.kind must be one of ${[...INVARIANT_KINDS].join(", ")}`); return; }
+    const subject = typeof record.subject === "string" ? record.subject.trim() : "";
+    if (!subject) err(`${id}.subject must be a non-empty string`);
+    const patterns: RegExp[] = [];
+    for (const source of names(record.patterns, `${id}.patterns`, false)) {
+      try { patterns.push(new RegExp(source, "i")); } catch { err(`${id}.patterns contains an invalid regex: ${source}`); }
+    }
+    const requirements = names(record.requirements, `${id}.requirements`, false);
+    if (requirementIds) {
+      const dangling = requirements.filter((req) => !requirementIds.has(req.toUpperCase()));
+      if (dangling.length > 0) err(`${id}.requirements reference unknown requirement IDs: ${dangling.join(", ")}`);
+    }
+    const invariant: StructuralInvariant = {
+      id, kind, source: label, subject, canonical: [], ownerPaths: [], shadowNames: [], patterns, writers: [], targets: [],
+      requirements, exemptions: exemptions(record.exemptions, `${id}.exemptions`),
+    };
+    if (kind === "single-source-of-truth") {
+      const owner = record.owner && typeof record.owner === "object" && !Array.isArray(record.owner) ? record.owner as Record<string, unknown> : null;
+      const ownerModule = typeof owner?.module === "string" ? owner.module.trim() : "";
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(ownerModule)) err(`${id}.owner.module must be a module id`);
+      invariant.ownerModule = ownerModule;
+      invariant.canonical = [...names(owner?.tables, `${id}.owner.tables`, false), ...names(owner?.entities, `${id}.owner.entities`, false)];
+      if (invariant.canonical.length === 0) err(`${id}.owner must declare at least one of tables/entities`);
+      invariant.ownerPaths = names(owner?.paths, `${id}.owner.paths`, false).map(normalizedPrefix);
+      invariant.shadowNames = names(record.aliases, `${id}.aliases`, false);
+      invariant.writers = record.writers === undefined ? [ownerModule] : names(record.writers, `${id}.writers`, true);
+      if (invariant.shadowNames.length === 0 && patterns.length === 0) err(`${id} must declare aliases or patterns that identify a shadow/parallel copy`);
+    } else if (kind === "converge") {
+      invariant.targets = names(record.from, `${id}.from`, true);
+      const to = record.to && typeof record.to === "object" && !Array.isArray(record.to) ? record.to as Record<string, unknown> : null;
+      invariant.canonical = [...names(to?.tables, `${id}.to.tables`, false), ...names(to?.entities, `${id}.to.entities`, false)];
+      if (invariant.canonical.length === 0) err(`${id}.to must declare the convergence target tables/entities`);
+      if (typeof to?.module === "string" && to.module.trim()) invariant.ownerModule = to.module.trim();
+    } else if (kind === "deprecated") {
+      invariant.targets = names(record.targets, `${id}.targets`, true);
+    } else {
+      invariant.targets = names(record.targets, `${id}.targets`, true);
+      const toModule = typeof record.to_module === "string" ? record.to_module.trim() : "";
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(toModule)) err(`${id}.to_module must be a module id`);
+      invariant.toModule = toModule;
+    }
+    invariants.push(invariant);
+  });
+  let persistence: InvariantSet["persistence"];
+  if (raw.persistence !== undefined) {
+    const record = raw.persistence && typeof raw.persistence === "object" && !Array.isArray(raw.persistence) ? raw.persistence as Record<string, unknown> : null;
+    if (!record || record.mode !== "strict") err('persistence.mode must be "strict" when persistence is declared');
+    else {
+      const authorized: PersistenceAuthorization[] = [];
+      const entries = Array.isArray(record.authorized) ? record.authorized : null;
+      if (!entries) err("persistence.authorized must be an array");
+      (entries || []).forEach((item, index) => {
+        const entry = item && typeof item === "object" && !Array.isArray(item) ? item as Record<string, unknown> : {};
+        const entryNames = names(entry.names, `persistence.authorized[${index}].names`, true);
+        const refs = names(entry.refs, `persistence.authorized[${index}].refs`, true);
+        for (const ref of refs) {
+          if (/^INV-/.test(ref)) continue; // resolved against declared invariants after merge
+          if (!/^REQ-/i.test(ref)) err(`persistence.authorized[${index}].refs must be REQ-xxx or INV-xxx: ${ref}`);
+          else if (requirementIds && !requirementIds.has(ref.toUpperCase())) err(`persistence.authorized[${index}].refs references unknown requirement ${ref}`);
+        }
+        authorized.push({ names: entryNames, refs });
+      });
+      persistence = { authorized, exemptions: exemptions(record.exemptions, "persistence.exemptions") };
+    }
+  }
+  return { baselineRef, stripPrefixes, invariants, persistence, declaredIds };
+}
+
+function loadInvariantSet(moduleId: string): InvariantSet | null {
+  const modulePath = join(ROOT, MODULE_INVARIANTS_PATH(moduleId));
+  const productPath = join(ROOT, PRODUCT_INVARIANTS_PATH);
+  const hasModule = existsSync(modulePath);
+  const hasProduct = existsSync(productPath);
+  if (!hasModule && !hasProduct) return null;
+  const requirementsPath = join(ROOT, `docs/aidlc/modules/${moduleId}/inception/requirements.md`);
+  const requirementIds = existsSync(requirementsPath) ? new Set(normalizedIds(text(requirementsPath), REQUIREMENT_ID)) : null;
+  const errors: string[] = [];
+  const manifests: string[] = [];
+  const invariants: StructuralInvariant[] = [];
+  const declared: string[] = [];
+  let baselineRef: string | undefined;
+  let stripPrefixes = DEFAULT_STRIP_PREFIXES;
+  let persistence: InvariantSet["persistence"];
+  if (hasProduct) {
+    // 产品级清单承载跨 module 的唯一真源;其 requirements 指向其他 module,不在本 module 校验存在性。
+    const parsed = parseInvariantManifest(productPath, null, errors);
+    if (parsed.persistence) errors.push(`${PRODUCT_INVARIANTS_PATH}: persistence is module-level only`);
+    manifests.push(PRODUCT_INVARIANTS_PATH);
+    invariants.push(...parsed.invariants);
+    declared.push(...parsed.declaredIds);
+    baselineRef = parsed.baselineRef;
+    stripPrefixes = parsed.stripPrefixes;
+  }
+  if (hasModule) {
+    if (!requirementIds) errors.push(`${MODULE_INVARIANTS_PATH(moduleId)}: requirements.md is missing, requirement references cannot be verified`);
+    const parsed = parseInvariantManifest(modulePath, requirementIds || new Set(), errors);
+    manifests.push(MODULE_INVARIANTS_PATH(moduleId));
+    invariants.push(...parsed.invariants);
+    declared.push(...parsed.declaredIds);
+    if (parsed.baselineRef) baselineRef = parsed.baselineRef;
+    if (parsed.stripPrefixes !== DEFAULT_STRIP_PREFIXES) stripPrefixes = parsed.stripPrefixes;
+    persistence = parsed.persistence;
+  }
+  const duplicates = declared.filter((id, index) => declared.indexOf(id) !== index);
+  if (duplicates.length > 0) errors.push(`duplicate invariant ids across manifests: ${[...new Set(duplicates)].join(", ")}`);
+  for (const entry of persistence?.authorized || []) {
+    for (const ref of entry.refs.filter((value) => /^INV-/.test(value))) {
+      if (!declared.includes(ref)) errors.push(`persistence.authorized refs unknown invariant ${ref}`);
+    }
+  }
+  if (errors.length > 0) fail(`structural-invariants manifest is invalid: ${errors.join("; ")}`);
+  return { manifests, baselineRef, stripPrefixes, invariants, persistence };
+}
+
+function lineAt(content: string, index: number): number {
+  let line = 1;
+  for (let i = 0; i < index; i++) if (content.charCodeAt(i) === 10) line++;
+  return line;
+}
+
+const SQL_IDENT = "([`\"\\[]?[A-Za-z_][\\w$]*(?:[`\"\\]]?\\.[`\"\\[]?[A-Za-z_][\\w$]*)?[`\"\\]]?)";
+const SQL_PATTERNS: Array<{ op: PersistOp["op"]; via: string; pattern: RegExp }> = [
+  { op: "create", via: "CREATE TABLE", pattern: new RegExp(`\\bcreate\\s+(?!temporary\\b|temp\\b)(?:or\\s+replace\\s+)?table\\s+(?:if\\s+not\\s+exists\\s+)?${SQL_IDENT}`, "gi") },
+  { op: "create", via: "RENAME TO", pattern: new RegExp(`\\balter\\s+table\\s+[^\\s;]+\\s+rename\\s+to\\s+${SQL_IDENT}`, "gi") },
+  { op: "write", via: "INSERT INTO", pattern: new RegExp(`\\binsert\\s+(?:ignore\\s+)?into\\s+${SQL_IDENT}\\s*(?=\\(|values\\b|select\\b|set\\b)`, "gi") },
+  { op: "write", via: "REPLACE INTO", pattern: new RegExp(`\\breplace\\s+into\\s+${SQL_IDENT}\\s*(?=\\(|values\\b|select\\b|set\\b)`, "gi") },
+  { op: "write", via: "MERGE INTO", pattern: new RegExp(`\\bmerge\\s+into\\s+${SQL_IDENT}\\s+(?=using\\b|\\w+\\s+using\\b)`, "gi") },
+  { op: "write", via: "UPDATE", pattern: new RegExp(`\\bupdate\\s+${SQL_IDENT}\\s+set\\b`, "gi") },
+];
+
+function sqlOperations(content: string, file: string, baseLine: number): PersistOp[] {
+  const ops: PersistOp[] = [];
+  for (const { op, via, pattern } of SQL_PATTERNS) {
+    for (const match of content.matchAll(pattern)) {
+      ops.push({ op, via, names: [match[1].replace(/[`"[\]]/g, "")], file, line: baseLine + lineAt(content, match.index || 0) - 1 });
+    }
+  }
+  return ops;
+}
+
+/** 从单个文件确定性提取持久化操作(新建实体/表、写入表)。 */
+function persistenceOperations(path: string): PersistOp[] {
+  const file = portableLabel(path);
+  const content = text(path);
+  const ops: PersistOp[] = [];
+  if (/\.md$/i.test(path)) {
+    for (const match of content.matchAll(/\[实体\s*[:：]\s*([^\]\s]+)(?:\s+table\s*=\s*([^\]\s]+))?\s*\]/g)) {
+      ops.push({ op: "create", via: "[实体:] marker", names: [match[1], ...(match[2] ? [match[2]] : [])], file, line: lineAt(content, match.index || 0) });
+    }
+    for (const match of content.matchAll(/```sql[^\n]*\n([\s\S]*?)```/gi)) {
+      const bodyStart = (match.index || 0) + match[0].indexOf("\n") + 1;
+      ops.push(...sqlOperations(match[1], file, lineAt(content, bodyStart)));
+    }
+    return ops;
+  }
+  if (/\.(?:sql|xml)$/i.test(path)) return sqlOperations(content, file, 1);
+  if (/\.prisma$/i.test(path)) {
+    for (const match of content.matchAll(/^\s*model\s+(\w+)\s*\{/gm)) ops.push({ op: "create", via: "prisma model", names: [match[1]], file, line: lineAt(content, match.index || 0) });
+    return ops;
+  }
+  // 代码:注解声明的持久化实体 + 字符串内嵌 DML。
+  const classAfter = (index: number): string[] => {
+    const tail = content.slice(index, index + 600).match(/\bclass\s+(\w+)/);
+    return tail ? [tail[1]] : [];
+  };
+  for (const match of content.matchAll(/@TableName\s*\(\s*(?:value\s*=\s*)?"([^"]+)"/g)) {
+    ops.push({ op: "create", via: "@TableName", names: [match[1], ...classAfter(match.index || 0)], file, line: lineAt(content, match.index || 0) });
+  }
+  for (const match of content.matchAll(/@Table\s*\(\s*[^)]*?\bname\s*=\s*"([^"]+)"/g)) {
+    ops.push({ op: "create", via: "@Table", names: [match[1], ...classAfter(match.index || 0)], file, line: lineAt(content, match.index || 0) });
+  }
+  for (const match of content.matchAll(/@Entity\b(?:\s*\(\s*(?:name\s*=\s*)?["']([^"']+)["']\s*\))?/g)) {
+    const names = [...(match[1] ? [match[1]] : []), ...classAfter(match.index || 0)];
+    if (names.length > 0) ops.push({ op: "create", via: "@Entity", names, file, line: lineAt(content, match.index || 0) });
+  }
+  ops.push(...sqlOperations(content, file, 1).filter((op) => op.op === "write"));
+  return ops;
+}
+
+function baselineChangedFiles(ref: string): Set<string> {
+  const git = (args: string[]): string => {
+    const result = runSync("git", args, { cwd: ROOT, encoding: "utf8", shell: false });
+    if (result.status !== 0) fail(`structural-invariants baseline_ref ${ref} could not be resolved (git ${args[0]}): ${(result.stderr || "").trim() || `exit ${result.status}`}`);
+    return result.stdout || "";
+  };
+  git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+  const changed = git(["diff", "--name-only", "--relative", "--diff-filter=ACMR", ref, "--"]);
+  const untracked = git(["ls-files", "--others", "--exclude-standard"]);
+  return new Set(`${changed}\n${untracked}`.split(/\r?\n/).map((line) => line.trim().replace(/\\/g, "/")).filter(Boolean));
+}
+
+function structuralInvariants(): Record<string, unknown> {
+  if (!ACTIVE_MODULE) return { status: "not_applicable", invariants_declared: 0, violations: [], skip_reason: "no active module context" };
+  const set = loadInvariantSet(ACTIVE_MODULE);
+  if (!set) {
+    return {
+      status: "not_applicable",
+      module_id: ACTIVE_MODULE,
+      invariants_declared: 0,
+      violations: [],
+      skip_reason: "no structural-invariants manifest declared (module or product level)",
+    };
+  }
+  const keyOf = (name: string): string => entityKey(name, set.stripPrefixes);
+  // 清单是架构决策,随应用设计人工审批。后续阶段必须与应用设计阶段受控证据记录的 manifest_digest 一致,
+  // 防止在生成阶段为"过门禁"而削弱清单(加豁免/删不变式)。改清单 = 回到应用设计重新审批。
+  const manifestDigest = createHash("sha256").update(set.manifests.map((label) => `${label}\n${text(join(ROOT, label))}`).join("\n\0")).digest("hex");
+  const stage = workflowState?.current_stage || "";
+  let manifestBinding = "authoring";
+  if (stage !== "application-design") {
+    const approvedPath = join(ROOT, `.aidlc/evidence/application-design/${ACTIVE_MODULE}/structural-invariants.json`);
+    if (!existsSync(approvedPath)) {
+      fail(`structural-invariants manifest has no application-design evidence (${relativePath(approvedPath)}); declare or change invariants in application-design and pass its approval gate first`);
+    }
+    const approved = jsonFile(approvedPath);
+    const producer = approved.producer as Record<string, unknown> | undefined;
+    const checker = approved.checker as Record<string, unknown> | undefined;
+    if (producer?.name !== "loeyae-aidlc-evidence" || producer?.mode !== "controlled" || checker?.id !== "builtin:structural-invariants") {
+      fail(`${relativePath(approvedPath)} is not controlled structural-invariants evidence`);
+    }
+    if (approved.manifest_digest !== manifestDigest) {
+      fail(`structural-invariants manifest changed after application-design approval (approved ${String(approved.manifest_digest || "none").slice(0, 12)}, current ${manifestDigest.slice(0, 12)}); revert the change or re-run application-design and its approval`);
+    }
+    manifestBinding = "bound";
+  }
+  let manifestModules: Array<{ module_id: string; paths?: string[] }> = [];
+  try { manifestModules = readModuleManifest(ROOT); } catch { manifestModules = []; }
+  const activePaths = (manifestModules.find((module) => module.module_id === ACTIVE_MODULE)?.paths || []).map(normalizedPrefix);
+  const underAny = (label: string, prefixes: string[]): boolean => prefixes.some((prefix) => prefix && (label === prefix || label.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)));
+  /** 文件归属 module:显式 manifest paths > docs/aidlc/modules/<id>/ > 单 module 项目默认归本 module;否则不可归属。 */
+  const attributedModule = (label: string): string | undefined => {
+    for (const module of manifestModules) if (underAny(label, (module.paths || []).map(normalizedPrefix))) return module.module_id;
+    const docMatch = /^docs\/aidlc\/modules\/([a-z0-9][a-z0-9-]*)\//.exec(label);
+    if (docMatch) return docMatch[1];
+    return manifestModules.length <= 1 ? ACTIVE_MODULE : undefined;
+  };
+
+  const scanPattern = /\.(?:sql|xml|java|kt|ts|js|prisma|md)$/i;
+  const candidates = activePaths.length > 0 ? moduleArtifactFiles(scanPattern) : projectFiles(scanPattern);
+  const moduleDocs = `docs/aidlc/modules/${ACTIVE_MODULE}/`;
+  let files = candidates.filter((path) => {
+    const label = portableLabel(path);
+    if (/\.md$/i.test(label)) return label.startsWith(moduleDocs); // 设计文档只看本 module 目录
+    return !label.startsWith("docs/") && !/\.d\.ts$/i.test(label);
+  });
+  if (set.baselineRef) {
+    // 4.9.0: git diff of the workflow repository cannot see a nested repository, so a
+    // baseline_ref over files of one would silently drop them.
+    const nestedRoots = declaredNestedRoots(ROOT);
+    const inNested = files.map((path) => portableLabel(path)).filter((label) => nestedRoots.some((key) => label.startsWith(`${key}/`)));
+    if (inNested.length > 0) {
+      const repos = [...new Set(inNested.map((label) => nestedRoots.find((key) => label.startsWith(`${key}/`))))].map((key) => `${key}/`).join(", ");
+      fail(`structural-invariants baseline_ref ${set.baselineRef} does not support nested source repositories yet: ${repos} (${inNested.slice(0, 3).join(", ")}${inNested.length > 3 ? ", …" : ""}); git diff of the workflow repository cannot see their changes. Remove baseline_ref to scan every file, or keep the invariant scope outside the nested repository.`);
+    }
+  }
+  const changed = set.baselineRef ? baselineChangedFiles(set.baselineRef) : null;
+  if (changed) files = files.filter((path) => changed.has(portableLabel(path)));
+
+  // MARS-271 增量扫描:每个文件的持久化操作是文件内容的纯函数,按 mtime+size 缓存复用,
+  // 未变更文件不重复解析;清单摘要变化时缓存整体失效。缓存位于 .aidlc/cache(非证据),
+  // 只加速扫描,不改变任何判定。长扫描输出 stderr 进度心跳,避免无输出超时。
+  const cachePath = join(ROOT, ".aidlc", "cache", "structural-invariants", `${ACTIVE_MODULE}.json`);
+  interface ScanCacheEntry { mtime_ms: number; size: number; ops: PersistOp[] }
+  let cacheEntries: Record<string, ScanCacheEntry> = {};
+  try {
+    const saved = JSON.parse(readFileSync(cachePath, "utf8")) as { manifest_digest?: string; entries?: Record<string, ScanCacheEntry> };
+    if (saved && saved.manifest_digest === manifestDigest && saved.entries && typeof saved.entries === "object") cacheEntries = saved.entries;
+  } catch { /* 缓存不可读时按全量重扫 */ }
+  const cacheHits: string[] = [];
+  const cacheMisses: string[] = [];
+  const startedAt = Date.now();
+  const HEARTBEAT_INTERVAL = 500;
+  const fileOps = new Map<string, PersistOp[]>();
+  files.forEach((path, index) => {
+    const label = portableLabel(path);
+    const info = statSync(path);
+    const entry = cacheEntries[label];
+    if (entry && entry.mtime_ms === info.mtimeMs && entry.size === info.size) {
+      cacheHits.push(label);
+      fileOps.set(label, entry.ops);
+    } else {
+      cacheMisses.push(label);
+      fileOps.set(label, persistenceOperations(path));
+    }
+    if ((index + 1) % HEARTBEAT_INTERVAL === 0) {
+      process.stderr.write(`structural-invariants: scanned ${index + 1}/${files.length} files (${cacheMisses.length} parsed, ${cacheHits.length} reused, ${Math.round((Date.now() - startedAt) / 1000)}s)\n`);
+    }
+  });
+  const ops = files.flatMap((path) => fileOps.get(portableLabel(path)) || []);
+  try {
+    const entries: Record<string, ScanCacheEntry> = {};
+    for (const path of files) {
+      const label = portableLabel(path);
+      const info = statSync(path);
+      entries[label] = { mtime_ms: info.mtimeMs, size: info.size, ops: fileOps.get(label) || [] };
+    }
+    mkdirSync(dirname(cachePath), { recursive: true });
+    writeFileSync(cachePath, `${JSON.stringify({ manifest_digest: manifestDigest, entries })}\n`, "utf8");
+  } catch { /* 缓存写失败不影响判定 */ }
+  const violations: InvariantViolation[] = [];
+  const exemptionsApplied: Array<{ invariant: string; path: string; reason: string; file: string }> = [];
+  const exempted = (invariant: string, list: InvariantExemption[], file: string): boolean => {
+    const hit = list.find((exemption) => file === exemption.path || file.startsWith(exemption.path));
+    if (hit) exemptionsApplied.push({ invariant, path: hit.path, reason: hit.reason, file });
+    return Boolean(hit);
+  };
+  const push = (invariant: StructuralInvariant | null, rule: string, op: PersistOp, name: string, message: string): void => {
+    violations.push({
+      invariant: invariant?.id || "PERSISTENCE",
+      kind: invariant?.kind || "persistence-authorization",
+      rule, name, file: op.file, line: op.line, via: op.via,
+      requirements: invariant?.requirements || [],
+      message,
+    });
+  };
+  const matchedName = (op: PersistOp, keys: Set<string>, patterns: RegExp[] = []): string | undefined =>
+    op.names.find((name) => keys.has(keyOf(name)) || patterns.some((pattern) => pattern.test(name) || pattern.test(entityForm(name, set.stripPrefixes))));
+
+  for (const invariant of set.invariants) {
+    const canonical = new Set(invariant.canonical.map(keyOf));
+    const shadows = new Set([invariant.subject, ...invariant.shadowNames].map(keyOf).filter((key) => key && !canonical.has(key)));
+    const targets = new Set(invariant.targets.map(keyOf));
+    for (const op of ops) {
+      if (exempted(invariant.id, invariant.exemptions, op.file)) continue;
+      const owner = underAny(op.file, invariant.ownerPaths) ? invariant.ownerModule : attributedModule(op.file);
+      if (invariant.kind === "single-source-of-truth") {
+        const canonicalHit = op.names.find((name) => canonical.has(keyOf(name)));
+        if (canonicalHit) {
+          if (op.op === "create" && owner && owner !== invariant.ownerModule) {
+            push(invariant, "duplicate-canonical", op, canonicalHit, `${invariant.subject} 的唯一真源归属 ${invariant.ownerModule},${owner} 不得再建同名实体/表 ${canonicalHit}`);
+          }
+          if (op.op === "write" && owner && !invariant.writers.includes(owner)) {
+            push(invariant, "foreign-write", op, canonicalHit, `${invariant.subject} 只允许 ${invariant.writers.join("/")} 写入,${owner} 写入了 ${canonicalHit}`);
+          }
+          continue;
+        }
+        const shadowHit = op.op === "create" ? matchedName(op, shadows, invariant.patterns) : undefined;
+        if (shadowHit) push(invariant, "shadow-entity", op, shadowHit, `新建实体/表 ${shadowHit} 影子化了唯一真源 ${invariant.subject}(应复用 ${invariant.canonical.join("/")} @${invariant.ownerModule})`);
+      } else if (invariant.kind === "converge" || invariant.kind === "deprecated") {
+        const hit = matchedName(op, targets, invariant.patterns);
+        if (!hit) continue;
+        const label = invariant.kind === "converge" ? `已声明收敛至 ${invariant.canonical.join("/")}` : "已声明废弃";
+        push(invariant, op.op === "create" ? `${invariant.kind}-recreated` : `${invariant.kind}-written`, op, hit, `${hit} ${label},不得再${op.op === "create" ? "新建" : "写入"}`);
+      } else {
+        const hit = matchedName(op, targets, invariant.patterns);
+        if (!hit || !owner || owner === invariant.toModule) continue;
+        push(invariant, op.op === "create" ? "migrate-out-recreated" : "migrate-out-written", op, hit, `${hit} 已声明迁出至 ${invariant.toModule},${owner} 不得再${op.op === "create" ? "新建" : "写入"}`);
+      }
+    }
+  }
+
+  let persistenceChecked = 0;
+  if (set.persistence) {
+    const allowed = new Set<string>([
+      ...set.persistence.authorized.flatMap((entry) => entry.names),
+      ...set.invariants.filter((inv) => inv.kind === "single-source-of-truth" && inv.ownerModule === ACTIVE_MODULE).flatMap((inv) => inv.canonical),
+      ...set.invariants.filter((inv) => inv.kind === "converge").flatMap((inv) => inv.canonical),
+    ].map(keyOf));
+    const alreadyFlagged = new Set(violations.map((violation) => `${violation.file}:${violation.line}`));
+    for (const op of ops.filter((candidate) => candidate.op === "create")) {
+      if (attributedModule(op.file) !== ACTIVE_MODULE) continue;
+      persistenceChecked++;
+      if (op.names.some((name) => allowed.has(keyOf(name)))) continue;
+      if (alreadyFlagged.has(`${op.file}:${op.line}`)) continue;
+      if (exempted("PERSISTENCE", set.persistence.exemptions, op.file)) continue;
+      push(null, "unauthorized-entity", op, op.names[0], `新建持久化实体 ${op.names.join("/")} 未被任何设计声明授权(persistence.authorized 需登记并引用 REQ/INV)`);
+    }
+  }
+
+  if (violations.length > 0) {
+    // 结构化阻断报告写 stdout(JSON),producer 落盘为 .aidlc/reports/.../structural-invariants.blocked.json。
+    output({ status: "blocked", module_id: ACTIVE_MODULE, stage: workflowState?.current_stage || null, violations_count: violations.length, violations: violations.slice(0, 200) });
+    fail(`structural invariant violations (${violations.length}): ${violations.slice(0, 5).map((violation) => `${violation.invariant}/${violation.rule} ${violation.name} @ ${violation.file}:${violation.line}`).join("; ")}`);
+  }
+  return {
+    status: "passed",
+    module_id: ACTIVE_MODULE,
+    stage: workflowState?.current_stage || null,
+    manifests: set.manifests,
+    manifest_digest: manifestDigest,
+    manifest_binding: manifestBinding,
+    invariants_declared: set.invariants.length,
+    invariant_ids: set.invariants.map((invariant) => invariant.id),
+    persistence_mode: set.persistence ? "strict" : "off",
+    persistence_entities_checked: persistenceChecked,
+    baseline_ref: set.baselineRef || null,
+    files_scanned: files.length,
+    scan_cache: { reused: cacheHits.length, parsed: cacheMisses.length },
+    operations_detected: ops.length,
+    exemptions_applied: exemptionsApplied,
+    violations: [],
+  };
+}
+
+const CHECKERS: Record<string, () => Record<string, unknown> | Promise<Record<string, unknown>>> = {
+  "global-review-evidence": () => globalReviewPayload(requiredWorkflowState(), semanticValidationEnvironment()),
+  "deployment-validation": deploymentValidationPayload,
+  "document-slice-consistency": () => {
+    const state = requiredWorkflowState();
+    return checkSlices({ ...qualityContext(), slices_version: state.document_slices_version,
+      units_executed: state.current_stage === "units-generation" || state.completed_stage_instances.includes(`units-generation@module:${ACTIVE_MODULE}`) });
+  },
+  "quality-change-impact": () => qualityChangeCheck(qualityContext()),
+  "dependency-readiness": () => dependencyReadiness(qualityContext()),
+  "field-capability": () => fieldCapability(qualityContext()),
+  "story-rule-consistency": () => storyRuleConsistency(qualityContext()),
+  "ui-behavior-consistency": () => qualityUiCheck(qualityContext()),
+  "delivery-readiness": () => deliveryReadiness(qualityContext(), true),
+  "artifact-consistency": () => artifactConsistency(qualityContext()),
+  "review-evidence": reviewEvidence,
+  "test-quality": testQuality,
+  "contract-baseline": contractBaseline,
+  "functional-design-completeness": functionalDesign,
+  "field-path-reconciliation": fieldPathReconciliation,
+  "nfr-coverage": nfrCoverage,
+  "infrastructure-completeness": infrastructure,
+  "implementation-report": implementationReport,
+  "frontend-platform-spec": frontendPlatform,
+  "template-completeness": templateCompleteness,
+  "recovery-evidence": recoveryEvidence,
+  "prd-completeness": prdCompleteness,
+  "diagram-contract": diagramContract,
+  "design-intent-coverage": designIntentCoverage,
+  "ui-design-alignment": uiAlignment,
+  "ui-artifact-consistency": uiArtifactConsistency,
+  "inception-consistency": () => ({ ...inceptionConsistency(), quality: deliveryReadiness(qualityContext(), true) }),
+  "test-case-derivation": testCaseDerivation,
+  "red-test-evidence": () => phaseEvidenceCheck("red-test-evidence"),
+  "green-test-evidence": () => phaseEvidenceCheck("green-test-evidence"),
+  "baseline-test-evidence": () => phaseEvidenceCheck("baseline-test-evidence"),
+  "traceability-matrix": traceabilityMatrix,
+  "structural-invariants": structuralInvariants,
+};
+
+try {
+  const args = process.argv.slice(2);
+  const sensorIndex = args.indexOf("--sensor");
+  const sensor = sensorIndex >= 0 ? args[sensorIndex + 1] : undefined;
+  if (!sensor || !SENSOR_NAMES.has(sensor) || !CHECKERS[sensor]) fail("usage: aidlc-semantic-checks.ts --sensor <semantic-sensor>");
+  const currentArtifacts = args.includes("--current-artifacts");
+  if (currentArtifacts && sensor !== "inception-consistency") fail("--current-artifacts is only allowed for inception-consistency");
+  assertSemanticContext(sensor);
+  // Final delivery rechecks current canonical artifacts without reopening I10's
+  // earlier quality admission. Controlled producers never add this read-only flag.
+  output(currentArtifacts ? { ...inceptionConsistency(), validation_scope: "current-artifacts" } : await CHECKERS[sensor]());
+} catch (error) {
+  if (error instanceof QualityBlocked) output({ status: "blocked", issues: error.issues });
+  console.error(`Semantic checker blocked: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}

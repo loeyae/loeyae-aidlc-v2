@@ -20,6 +20,7 @@ def run_cli(home: Path, args: list, extra_env=None) -> subprocess.CompletedProce
     # Windows host CLIs (and os.homedir()) resolve the profile from USERPROFILE, not HOME. Without this a
     # real host CLI found on PATH would register test fixtures into the developer's own configuration.
     env["USERPROFILE"] = str(home)
+    env["DSH_HOME"] = ""
     env["AIDLC_INSTALL_STATE_DIR"] = str(home / ".config" / "loeyae-aidlc" / "installations")
     if extra_env:
         env.update(extra_env)
@@ -332,6 +333,106 @@ def test_unowned_targets_and_argument_contracts() -> None:
         for args in invalid_cases:
             result = run_cli(home, args)
             assert result.returncode != 0, args
+
+
+def test_deepseek_native_skill_lifecycle() -> None:
+    with tempfile.TemporaryDirectory(prefix="aidlc-deepseek-", dir=str(SCRATCH_ROOT)) as directory:
+        root = Path(directory)
+        home = root / "home"
+        project = root / "project 中文 with spaces"
+        home.mkdir()
+        project.mkdir()
+        target = home / ".dsh" / "skills" / "loeyae-aidlc"
+        config = home / ".dsh" / "config.yaml"
+        config.parent.mkdir()
+        config.write_text("custom: preserve\n")
+
+        installed = run_cli(home, ["install", "--harness", "deepseek"])
+        assert installed.returncode == 0, installed.stderr
+        skill = target / "SKILL.md"
+        assert "name: loeyae-aidlc" in skill.read_text(encoding="utf-8")
+        assert "AIDLC_SESSION_BINDING" in skill.read_text(encoding="utf-8")
+        for resource in ["tools/data/stage-graph.json", "knowledge/protocols/common-session-handoff.md",
+                         "stages/construction/construction-code-generation.md", "skills/aidlc-code-review/SKILL.md"]:
+            assert (target / resource).is_file(), resource
+        assert not (target / "hooks").exists()
+        assert not (home / ".codex").exists()
+        assert not (home / ".agents").exists()
+        before = tree_digest(target)
+        repeated = run_cli(home, ["install", "--harness", "deepseek"])
+        assert repeated.returncode == 0, repeated.stderr
+        assert tree_digest(target) == before
+        failed = run_cli(home, ["install", "--harness", "deepseek"], {"AIDLC_INSTALL_FAILPOINT": "after-assets"})
+        assert failed.returncode != 0
+        assert tree_digest(target) == before
+
+        project_args = ["--harness", "deepseek", "--project", str(project)]
+        installed = run_cli(home, ["install", *project_args])
+        assert installed.returncode == 0, installed.stderr
+        project_skill = project / ".dsh" / "skills" / "loeyae-aidlc" / "SKILL.md"
+        assert project_skill.is_file()
+        assert tree_digest(target) == before
+        removed = run_cli(home, ["uninstall", *project_args])
+        assert removed.returncode == 0, removed.stderr
+        assert not project_skill.exists() and skill.is_file()
+
+        invalid = run_cli(home, ["install", "--harness", "deepseek", "--project", str(root / "missing")])
+        assert invalid.returncode != 0
+        assert "existing, non-symlink directory" in invalid.stderr
+        assert tree_digest(target) == before
+        removed = run_cli(home, ["uninstall", "--harness", "deepseek"])
+        assert removed.returncode == 0, removed.stderr
+        assert not target.exists()
+        assert config.read_text() == "custom: preserve\n"
+
+        # An unmanaged skill must survive both installation and uninstallation attempts.
+        target.mkdir(parents=True)
+        marker = target / "custom.txt"
+        marker.write_text("user-owned")
+        refused = run_cli(home, ["install", "--harness", "deepseek"])
+        assert refused.returncode != 0
+        removed = run_cli(home, ["uninstall", "--harness", "deepseek"])
+        assert marker.read_text() == "user-owned"
+
+
+def test_deepseek_home_and_detection() -> None:
+    with tempfile.TemporaryDirectory(prefix="aidlc-deepseek-home-", dir=str(SCRATCH_ROOT)) as directory:
+        root = Path(directory)
+        home = root / "home"
+        fake_bin = root / "bin"
+        home.mkdir()
+        fake_bin.mkdir()
+        host_env = isolated_host_env(root, fake_bin)
+        # A directory produced by our installer is not proof that dsh is installed.
+        (home / ".dsh" / "skills").mkdir(parents=True)
+        absent = run_cli(home, ["install", "--all"], host_env)
+        assert absent.returncode == 0, absent.stderr
+        assert "No supported host tools were detected" in absent.stdout
+
+        for override, expected_home in [("   ", home / ".dsh"), ("~/custom dsh 中文", home / "custom dsh 中文"),
+                                        ("~", home), (str(root / "external home 中文"), root / "external home 中文")]:
+            env = {**host_env, "DSH_HOME": override}
+            listed = run_cli(home, ["install", "--list"], env)
+            assert listed.returncode == 0, listed.stderr
+            target = expected_home / "skills" / "loeyae-aidlc"
+            assert str(target) in listed.stdout
+            installed = run_cli(home, ["install", "--harness", "deepseek"], env)
+            assert installed.returncode == 0, installed.stderr
+            assert (target / "SKILL.md").is_file()
+            removed = run_cli(home, ["uninstall", "--harness", "deepseek"], env)
+            assert removed.returncode == 0, removed.stderr
+            assert not target.exists()
+
+        write_fake_host_command(fake_bin, "dsh")
+        detected = run_cli(home, ["install", "--all"], host_env)
+        assert detected.returncode == 0, detected.stderr
+        assert "deepseek (" in detected.stdout
+        skill = home / ".dsh" / "skills" / "loeyae-aidlc" / "SKILL.md"
+        assert skill.is_file()
+        # uninstall --all follows ownership even after the host executable disappears.
+        removed = run_cli(home, ["uninstall", "--all"], {**host_env, "PATH": str(root / "no-bin")})
+        assert removed.returncode == 0, removed.stderr
+        assert not skill.exists()
 
 
 def test_opencode_multi_asset_transaction_and_uninstall() -> None:
@@ -902,6 +1003,8 @@ def test_install_all_aggregates_failures_and_continues() -> None:
 
 
 if __name__ == "__main__":
+    test_deepseek_native_skill_lifecycle()
+    test_deepseek_home_and_detection()
     test_managed_upgrade_rollback_and_uninstall()
     test_shared_kiro_global_skill_lifecycle()
     test_unowned_targets_and_argument_contracts()

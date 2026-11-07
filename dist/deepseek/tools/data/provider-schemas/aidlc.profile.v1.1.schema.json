@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:loeyae:aidlc:schema:profile:1.1",
+  "title": "AI-DLC Effective Provider Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "profile_id", "profile_digest", "lineage", "facts", "risk"],
+  "properties": {
+    "schema": { "const": "aidlc.profile/v1.1" },
+    "profile_id": { "$ref": "#/$defs/id" },
+    "profile_digest": { "$ref": "#/$defs/digest" },
+    "lineage": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["profile_id", "digest"],
+        "properties": {
+          "profile_id": { "$ref": "#/$defs/id" },
+          "digest": { "$ref": "#/$defs/digest" }
+        }
+      }
+    },
+    "facts": { "type": "object" },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "protected_gate", "facts_digest"],
+      "properties": {
+        "level": { "enum": ["development", "standard", "protected"] },
+        "protected_gate": { "type": "boolean" },
+        "facts_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "extensions": { "$ref": "#/$defs/extensions" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "extensions": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9-]*)+$" },
+      "additionalProperties": { "type": "object" }
+    }
+  }
+}

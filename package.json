@@ -45,6 +45,7 @@
     "build:codebuddy": "tsx scripts/build.ts --harness codebuddy",
     "build:qoder": "tsx scripts/build.ts --harness qoder",
     "build:zcode": "tsx scripts/build.ts --harness zcode",
+    "build:deepseek": "tsx scripts/build.ts --harness deepseek",
     "build:all": "tsx scripts/build.ts --all",
     "install-skill": "tsx bin/cli.ts install",
     "test": "node scripts/test-core.mjs",

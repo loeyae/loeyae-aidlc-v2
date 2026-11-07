@@ -1,0 +1,90 @@
+---
+slug: test-case-derivation
+number: "2.8.1"
+name: 测试用例派生
+phase: inception
+axis: module
+execution: ALWAYS
+scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
+requires: [workspace-detection]
+consumes: []
+produces:
+  - docs/aidlc/modules/{module-id}/inception/application-design/test-cases/
+  - .aidlc/evidence/test-case-derivation/{module-id}/test-case-derivation.json
+sensors: [test-case-derivation]
+traceability: not_applicable
+condition: ""
+approval: notify
+---
+
+# 测试用例派生（I13）
+
+本阶段对所有会进入 `code-generation` 的 scope 执行，不受快速通道绕过。它加载 `knowledge/protocols/test-case-derivation.md`，将产品行为和已批准的系统级技术风险翻译为可执行测试用例点 UC-D，并建立“需求/设计/CR → 执行锚点 → Construction 证据”的追溯链。
+
+当当前单元确实没有可执行业务行为（纯声明、纯样式、纯配置或其他经批准的例外）时，必须基于至少一个需求、故事、应用设计或澄清来源，在测试用例目录中生成结构化 `non-applicable.json`，写明 `reason_code`、批准依据、`alternative_validation` 和验证命令；I13 传感器据此输出 `status: not_applicable`。RED/GREEN 阶段还必须在命令清单（`.aidlc/commands/<stage>.json`，不存在时为 `.aidlc/evidence-commands.json`）中各声明唯一一个 `role: "check"` 的受控替代验证命令。无行为替代验证的每个阶段必须有真实成功执行记录，或带有效 `reused_from` / `observation_id` 的可复核受绑定观察；无需重复启动同一检查进程。命令、输入、scope、环境、I13/单元声明或基线世代漂移时必须重跑。业务 RED/GREEN 仍独立执行，禁止复用替代检查观察来代替业务断言。缺少来源、文件、成功执行或有效复用记录均不是跳过，而是阻断。
+
+## 轻量 scope 的 UC-D 来源（bugfix / refactor / express / workshop）
+
+本阶段 `execution: ALWAYS`，对所有会进入 `code-generation` 的 scope 执行。I13 producer 要求至少存在一个 UC-D 来源锚点文件（四选一），用于把派生出的 UC-D 追溯回一个受控来源：
+
+```text
+docs/aidlc/modules/{module-id}/inception/requirements.md
+docs/aidlc/modules/{module-id}/inception/user-stories.md
+docs/aidlc/modules/{module-id}/inception/application-design.md
+docs/aidlc/modules/{module-id}/inception/clarifications.md
+```
+
+`feature` / `enterprise` / `mvp` / `classic` 走完整 Inception 路径，上述文件由 `requirements-analysis` / `user-stories` / `application-design` / `requirement-clarification` 等上游阶段产出，本阶段直接消费即可。
+
+**轻量 scope（`bugfix` / `refactor` / `express` / `workshop`）不运行这些上游阶段，不会自动产出任何来源文件。** 这是有意的轻量取舍——执行者针对具体 bug / 重构点 / 微需求直接手写 UC-D，而不是先铺一遍需求/故事/设计。因此在这些 scope 下，**执行者必须在派生 UC-D 之前，手工在上面任一规范路径放置至少一个来源锚点文件**，否则 I13 producer 会以“至少需要一个需求/故事/应用设计/澄清来源文件”硬失败。缺来源不是跳过，而是阻断。
+
+来源锚点文件没有强制 schema，只要求是该路径下的真实 Markdown 文本，并承载 UC-D 的 `source_ref` 可以指向的内容。最小样例（`bugfix`，把 UC-D 锚定到缺陷身份）：
+
+```markdown
+<!-- docs/aidlc/modules/{module-id}/inception/clarifications.md -->
+# 缺陷澄清：订单导出超时（BUG-123）
+
+## 背景
+导出大于 N 条的订单时请求在 30s 处超时，无重试。
+
+## 期望行为
+- 导出失败时按指数退避重试，最多 3 次。
+- 单次导出超时上限提升到可配置值。
+
+## UC-D 来源锚点
+- source_ref: clarifications.md#订单导出超时
+- defect_ref: BUG-123
+```
+
+随后在 `docs/aidlc/modules/{module-id}/inception/application-design/test-cases/` 下派生 UC-D，令其 frontmatter 的 `source_ref` 指向该锚点。各轻量 scope 在追溯矩阵层还要声明一个可追溯身份锚点（见追溯矩阵的轻量来源锚点规则）：
+
+- `bugfix`：至少一个 `new` UC-D 的 frontmatter 声明 `defect_ref`（缺陷 ticket 或缺陷 id，如 `BUG-123`），把复现缺陷的 UC-D 锚定到可追溯的缺陷身份。
+- `express` / `workshop`：至少一个 `new` UC-D 的 frontmatter 声明 `change_ref`（变更身份：需求 ticket、需求条目或实验目标 id，如 `TASK-42`、`EXP-7`），把该微需求/实验锚定到可追溯的变更身份。机制与 `bugfix` 的 `defect_ref` 完全一致，只是语义中性。
+- `refactor`：为 `characterization` UC-D 声明非空 `code_refs`，追溯锚定到存量代码基线。
+
+`defect_ref` / `change_ref` 都是单个 ASCII token（字母、数字、`.` `_` `-` `/`），到 `code-generation` 阶段起，交付源码必须引用该锚点 token（例如在修复/实现处留一行 `// TASK-42` 注释），否则追溯矩阵记 `ANCHOR_UNREFERENCED@code_refs`；完全缺锚点则记 `ANCHOR_MISSING@<字段>`。
+
+## 执行约束
+
+1. 收集可用的 I7 用户故事 Gherkin 和已批准的 NFR、CR、契约、配置、迁移或一致性风险来源。
+2. 有可执行业务行为时，对每个来源派生至少一个可执行 UC-D；每个用例必须包含 `id`、`source_ref`、`type`、`status`、`service_ids`。`scenario_ref`、`story_ref`、来源溯源 Gherkin 副本和覆盖映射段为分级可选（MARS-273）：P0 与 `type: contract` / `type: api` 用例仍强制，其余不要求。覆盖关系在 `_index.md` 的 `source_coverage` 聚合声明一次（每来源一行，机器校验正向覆盖与悬空引用），不逐用例重复绑定。
+3. 产品 Gherkin 必须原样保留，不得用技术用例引入未经批准的业务语义。
+4. 无法执行的用例标记 `blocked` 并在 frontmatter 声明 `blocked_kind`（MARS-271）：`business-unknown`（业务决策未定，上报人工）或 `technical-prerequisite`（技术前置条件，须同时写非空 `prerequisites` 与 `unblock_path`）；缺失或取值非法会被 I13 门禁拦截。存在 `blocked` 时不得进入 RED/GREEN。
+5. 在 `docs/aidlc/modules/{module-id}/inception/application-design/test-cases/` 生成 `_index.md`，列出用例、来源、类型、服务、状态和证据位置。
+6. 没有业务行为时只能使用 `non-applicable.json`；不得只在 handoff、计划或聊天文本中声明跳过。
+7. 任何来源未覆盖、执行锚点不真实或必填字段缺失时，不得报告完成。
+8. 每个 UC-D 可在 frontmatter 声明 `tdd_mode`（`new` 默认 / `characterization`）。`characterization` 只用于基线中已存在的行为，必须写非空 `code_refs`（`<项目相对路径>[::<符号>]`，落在源码根内）、`reason` 和 `approval_ref`；`new` 不得写这三项。`bugfix` 至少保留 1 条 `new` 复现 bug。使用 characterization 前工作流须已登记基线（存量工作流执行 `orchestrate baseline --set`）。
+9. ready 状态以每个 UC-D 自己的声明字段为准，`_index.md` 中的状态和正文业务词汇不代替该字段。已弃用用例可保留历史 ID，但不计入当前活跃覆盖；其原需求若仍适用，必须由其他活跃用例覆盖。
+10. 模块拆成多个 unit 时，在 frontmatter 声明 `unit_refs: [<unit-id>, ...]`：非空、不重复、必须是本模块 `unit-manifest.json` 中的 unit；一旦声明则覆盖全部活动 UC-D。新派生全部未声明时，仅在所有用例的 REQ 来源均由批准的 `req_refs` 唯一确定一个单元时推导，否则先解决归属。各 unit 的 tdd / code-generation 只覆盖本单元的 UC-D，build-and-test 对账模块全集；空子集 unit 须声明 `ucd_exemption`（字段见 `knowledge/protocols/test-case-derivation.md`）。已发布且无归属字段的旧证据保持兼容含义，显式受控刷新后才采用新范围。
+11. `code_refs` 指向嵌套独立 git 仓库（4.9.0，`.aidlc/source-roots.json` 中的 `{ "path": "<dir>", "repo": "nested" }`）时，先确认基线已登记该仓库（`orchestrate baseline` 显示待迁移仓库与迁移命令）。已有工作流新增这类 characterization UC-D：用 `unit_refs` 只分配给还没开始 tdd 的单元；模块原来没用 `unit_refs` 时一次给全部 UC-D 补上，已完成单元的 UC-D 指向它们原来的单元。I13 原本产出失败时，迁移后对活动中的 test-case-derivation 执行普通 `evidence run`；I13 已完成时执行 `evidence run --refresh`。已完成单元的 RED / BASELINE / GREEN 不需要任何操作（按单元子集复验，工作流仓库部分仍绑定第 0 代）。
+
+## 完成标准
+
+删除交付直接使用本阶段的真实用例来源和范围：描述性文件名与聚合文件无需改名或复制，按唯一声明 ID 和 `source_ref` 追溯；新证据记录 `ucd_sources` 文件级 digest 与文件内 UC-D ID 清单（MARS-273 双形态，旧逐条形态兼容）以复核漂移。无 `ucd_units` 的旧证据保留模块全集兼容范围，删除归属另由单单元或唯一需求归属证明；多单元歧义要求明确归属。可信无行为删除使用 `applicability: "not_applicable"`、省略 `ucd_id`，沿用受控 I13 或空子集的已批准豁免及成功替代检查，不虚构业务用例。
+
+- [ ] 每个产品 Gherkin 场景至少有一个 UC-D，或有结构化 `non-applicable.json` 及确定性替代验证；新派生在 `_index.md` 声明 `source_coverage` 聚合覆盖（MARS-273）
+- [ ] 每个已批准高风险技术场景有 UC-D，或有结构化不适用依据
+- [ ] 每个用例有真实执行锚点和可验证断言
+- [ ] `_index.md` 已生成且列出 ready/blocked/deprecated 状态；不适用时目录含 `non-applicable.json`
+- [ ] 证据 producer 输出 `test-case-derivation.json`，明确 `required` 或 `not_applicable`
+- [ ] 用例 ID 可被 RED、GREEN、代码审查和构建测试阶段追溯

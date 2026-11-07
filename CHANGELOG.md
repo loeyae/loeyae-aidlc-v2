@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add DeepSeek Harness native Skill distribution, PATH detection via `dsh`, user/project installation with `DSH_HOME` support, managed upgrades and uninstall, and installation guidance. Session binding and stage gates remain in Core; this adapter does not register an automatic Stop Hook.
+
 ## 4.25.1 — 2026-11-04
 
 - Keep Mermaid source validation available for cross-module, contract, architecture and project-level diagrams without per-block admission declarations. Apply SVG contracts only after the user's explicit SVG choice, and reject evidence that does not match the current format in either direction.

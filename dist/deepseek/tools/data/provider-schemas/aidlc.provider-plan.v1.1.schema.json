@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:loeyae:aidlc:schema:provider-plan:1.1",
+  "title": "AI-DLC Provider Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "plan_id", "plan_digest", "project_lock_digest", "profile_digest", "policy_digest", "source_revision", "scope", "capability_expression", "nodes"],
+  "properties": {
+    "schema": { "const": "aidlc.provider-plan/v1.1" },
+    "plan_id": { "type": "string", "pattern": "^plan-[0-9a-f]{32}$" },
+    "plan_digest": { "$ref": "#/$defs/digest" },
+    "project_lock_digest": { "$ref": "#/$defs/digest" },
+    "profile_digest": { "$ref": "#/$defs/digest" },
+    "policy_digest": { "$ref": "#/$defs/digest" },
+    "source_revision": { "$ref": "#/$defs/sourceRevision" },
+    "scope": { "$ref": "#/$defs/scope" },
+    "capability_expression": { "$ref": "#/$defs/expression" },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "approval": { "$ref": "#/$defs/approval" },
+    "extensions": { "$ref": "#/$defs/extensions" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "gitObjectId": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
+    "nodeId": { "type": "string", "pattern": "^node-[0-9a-f]{24}$" },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage"],
+      "properties": {
+        "project_id": { "type": "string", "minLength": 1 },
+        "module_id": { "$ref": "#/$defs/id" },
+        "unit_id": { "$ref": "#/$defs/id" },
+        "stage": { "$ref": "#/$defs/id" }
+      }
+    },
+    "repoRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "worktree_digest"],
+      "properties": {
+        "commit": { "$ref": "#/$defs/gitObjectId" },
+        "worktree_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "sourceRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "worktree_digest"],
+      "properties": {
+        "commit": { "$ref": "#/$defs/gitObjectId" },
+        "worktree_digest": { "$ref": "#/$defs/digest" },
+        "repos": {
+          "type": "object",
+          "propertyNames": { "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)[^\\u0000]+$" },
+          "additionalProperties": { "$ref": "#/$defs/repoRevision" }
+        }
+      }
+    },
+    "selectorResult": { "enum": ["true", "false", "unknown"] },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" },
+        "message": { "type": "string", "minLength": 1 },
+        "details": { "type": "object" }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "provider_instance_id", "capability_id", "state", "required", "selector_result", "dependencies", "fallback_node_ids", "diagnostics"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/nodeId" },
+        "provider_instance_id": { "$ref": "#/$defs/id" },
+        "capability_id": { "$ref": "#/$defs/id" },
+        "state": { "enum": ["selected", "not_selected", "unknown", "blocked"] },
+        "required": { "type": "boolean" },
+        "selector_result": { "$ref": "#/$defs/selectorResult" },
+        "dependencies": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nodeId" }
+        },
+        "fallback_node_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nodeId" }
+        },
+        "entrypoint_id": { "type": "string", "minLength": 1 },
+        "diagnostics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/diagnostic" }
+        },
+        "extensions": { "$ref": "#/$defs/extensions" }
+      }
+    },
+    "expression": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["capability"],
+          "properties": { "capability": { "$ref": "#/$defs/id" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["all_of"],
+          "properties": {
+            "all_of": { "type": "array", "items": { "$ref": "#/$defs/expression" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["any_of"],
+          "properties": {
+            "any_of": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/expression" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["at_least"],
+          "properties": {
+            "at_least": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "of"],
+              "properties": {
+                "count": { "type": "integer", "minimum": 1 },
+                "of": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/expression" } }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["exactly_one"],
+          "properties": {
+            "exactly_one": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/expression" } }
+          }
+        }
+      ]
+    },
+    "approval": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": { "status": { "enum": ["not_required", "pending"] } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "approval_ref"],
+          "properties": {
+            "status": { "const": "approved" },
+            "approval_ref": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "extensions": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9-]*)+$" },
+      "additionalProperties": { "type": "object" }
+    }
+  }
+}

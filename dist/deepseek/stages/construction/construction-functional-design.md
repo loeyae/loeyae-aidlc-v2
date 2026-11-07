@@ -1,0 +1,232 @@
+---
+slug: functional-design
+number: "3.1"
+name: 功能设计
+phase: construction
+axis: unit
+execution: CONDITIONAL
+scopes: [feature, enterprise, mvp, classic]
+consumes: [docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work.md]
+produces:
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-logic-model.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-rules.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/domain-entities.md
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/data-source-validation.md
+  - .aidlc/evidence/functional-design/{module-id}/{unit-id}/functional-design-completeness.json
+  - .aidlc/evidence/functional-design/{module-id}/{unit-id}/traceability-matrix.json
+  - .aidlc/evidence/functional-design/{module-id}/{unit-id}/structural-invariants.json
+sensors: [doc-cascade, functional-design-completeness, traceability-matrix, structural-invariants]
+requires: [units-generation]
+condition: has_functional_design_needs
+---
+
+以阶段图 `approval` 和引擎 directive 为权威；本阶段为 `notify`，展示摘要后复用有效既有授权继续。用户明确要求审阅时等待回复；真实未决产品语义先澄清；`block` 审批和安全边界仍须等待，不得以通知替代。
+
+# 功能设计
+
+## 目的
+**按单元的详细业务逻辑设计**
+
+功能设计聚焦于：
+- 单元的详细业务逻辑和算法
+- 包含实体和关系的领域模型
+- 详细的业务规则、校验逻辑和约束
+- 技术无关的设计（不涉及基础设施关注点）
+
+**注意**：此阶段以 I14 的工作单元定义为硬输入；应用设计若已触发则作为高层组件增强输入，按条件跳过时不得因此阻断功能设计。
+
+## 前置条件
+- 单元生成必须完成
+- 工作单元产物必须可用
+- 建议完成应用设计（提供高层组件结构）；未触发时使用需求、故事与工作单元定义
+- 执行计划必须将 `functional-design` 标记为 `execute`
+
+## 概述
+为单元设计详细的业务逻辑，技术无关，纯粹聚焦于业务功能。
+
+## 执行步骤
+
+### 步骤 1：分析单元上下文
+- 从 `docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work.md` 读取单元定义
+- 从 `docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-story-map.md` 读取分配的故事
+- 理解单元职责和边界
+
+### 步骤 2：创建功能设计计划
+- 生成包含复选框 [] 的功能设计计划
+- 聚焦业务逻辑、领域模型、业务规则
+- 每个步骤应有复选框 []
+
+### 步骤 3：生成上下文相关的问题
+**指令**：全面分析单元定义和功能设计产物，识别所有澄清后能改善功能设计的领域。主动提问以确保全面理解。
+
+**关键**：有任何可能影响功能设计质量的歧义或缺失细节时，默认提出问题。宁可多问也不要做出错误假设。
+
+- 使用 [回答]: 标签格式嵌入问题
+- 聚焦任何歧义、缺失信息或需要澄清的领域
+- 在用户输入能改善功能设计决策的地方生成问题
+- **有疑问就提问** — 过度自信导致糟糕的设计
+
+**需考虑的问题类别**（评估所有类别）：
+- **业务逻辑建模** — 询问核心实体、工作流、数据转换和业务流程
+- **领域模型** — 询问领域概念、实体关系、数据结构和业务对象
+- **业务规则** — 询问决策规则、校验逻辑、约束和业务策略
+- **数据流** — 询问数据输入、输出、转换和持久化需求
+- **数据源现实性**（强制）— 对该单元每个数据读取操作，追问：
+  - 读取的数据由谁写入？写入入口是否已存在？
+  - 如果依赖其他单元/模块的数据，该单元是否已开发完成或在本次范围内？
+  - 是否存在"假设数据已存在"但实际无写入来源的情况？
+  - 初始数据/种子数据如何准备？是否需要数据迁移脚本？
+- **字段能力确认**（强制）— 对该单元涉及的每个外部数据源（后端接口响应、第三方 API、数据库查询等），按数据源做一次聚合确认：已核对且除明确列出的异常外，所需字段均存在。只逐条记录 UI 需要但不存在、名称不一致或需要转换/聚合的异常字段；不要维护正常字段的逐行 ✅ 簿记。
+- **集成点** — 询问外部系统交互、API 和数据交换
+- **错误处理** — 询问错误场景、校验失败和异常处理
+- **业务场景** — 询问边界情况、替代流程和复杂业务场景
+
+**前端功能设计维度**（如项目包含前端）：
+- **页面状态流转** — 加载中 → 数据展示 → 错误状态 → 空状态
+- **表单校验逻辑** — 前端校验规则、实时校验、提交校验
+- **交互行为设计** — 点击、悬停、拖拽、键盘快捷键等
+- **组件间通信设计** — props/emit/provide-inject/Store 通信模式
+
+### 步骤 4：保存计划
+- 保存为 `docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/functional-design-plan.md`
+- 包含所有 [回答]: 标签供用户输入
+
+### 步骤 5：收集和分析答案
+- 仅对真实未决问题等待用户完成 [回答]: 标签；已有权威信息的条目记录来源，不生成重复问答
+- **强制**：仔细审查所有回复中的模糊或含糊答案
+- **关键**：对任何不清楚的回复添加后续问题 — 不带歧义继续
+- 查找"取决于"、"可能"、"不确定"、"混合"、"介于之间"等回复
+- 如检测到任何歧义则创建澄清问题文件
+- **在所有歧义解决前不得继续**
+
+### 步骤 6：生成功能设计产物
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-logic-model.md`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-rules.md`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/domain-entities.md`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/data-source-validation.md`（数据源现实性验证）
+
+**结构不变式约束**（存在 `structural-invariants.json` 时强制）：`domain-entities.md` 中每个持久化实体用 `[实体:实体名 table=表名]` 标记（DDL 草案放在 ``sql` 块）。`structural-invariants` sensor 在本阶段当场比对：影子化唯一真源、重建/写入已收敛/废弃/迁出对象、strict 模式下未授权的新实体，均 fail-closed 阻断。需要新实体而清单未授权时，回到应用设计补充声明并重新审批，不得在功能设计中自行放行。
+
+**数据源现实性验证产物格式**（`data-source-validation.md`）：
+
+```markdown
+# 数据源现实性验证 — {unit-name}
+
+## 数据读取 → 写入溯源表
+
+| 读取操作 | 读取的数据 | 写入来源 | 来源状态 | 处理方案 |
+|----------|-----------|---------|---------|---------|
+| {方法/接口} | {数据描述} | {写入功能/模块} | ✅已存在/⚠️本次开发/🚨无来源 | {具体方案} |
+
+## 外部依赖确认
+
+| 依赖的外部数据 | 提供方 | 对接状态 | 数据格式确认 |
+|--------------|--------|---------|------------|
+| {数据} | {系统/团队} | ✅已对接/⚠️开发中/🚨未确认 | ✅/❌ |
+
+## 种子/初始数据需求
+
+| 数据 | 初始化方式 | 责任方 | 是否纳入本次范围 |
+|------|-----------|--------|---------------|
+| {数据} | SQL脚本/接口同步/手动录入 | {团队/模块} | 是/否 |
+
+## 字段映射声明
+
+> 对每个参与的外部数据源保留一条聚合确认：该来源已核对，且除下列异常外，所需字段均存在。正常字段不再逐行维护 ✅ 已确认簿记；仅 🚨 不存在和 ⚠️ 需转换项逐条声明。
+
+| 数据源 `source_id` | 聚合确认 | 异常项数量 | 备注 |
+|-------------------|---------|-----------|------|
+| `{source-id}` | 已核对；除下列异常外所需字段均存在 | {N} | {核对范围/契约版本} |
+
+| UI 元素 / 业务含义 | 数据源字段路径 | 异常类型 | 影响与处置 |
+|-------------------|--------------|---------|-----------|
+| {页面字段/列/展示项} | `{response.data.xxx / table.column}` | ⚠️需转换 / 🚨不存在 | {转换规则，或阻断/降级展示/补字段方案} |
+
+每个异常项必须写明 UI/业务字段、源字段路径、异常类型、影响和处置。🚨 项未经解决方案或用户明确知悉不得放行。
+
+需要机器对账时，在 `data-source-validation.md` 的同一章节声明一个 JSON fenced block（每个 `source_id` 恰有一个聚合确认）：
+
+```json
+{
+  "field_mapping": {
+    "{source-id}": {
+      "confirmed": true,
+      "exceptions": [
+        {
+          "ui_field": "{页面字段}",
+          "source_path": "response.data.xxx",
+          "status": "⚠️需转换",
+          "impact": "{影响}",
+          "disposition": "{转换规则或处置}"
+        }
+      ]
+    }
+  }
+}
+```
+
+`field-path-reconciliation` 只校验这个异常清单与约定形态的代码字段访问是否一致；它不验证外部数据源的真实 schema，也不要求正常访问逐条出现在清单中。
+
+## 验证结论
+- 🚨 无来源项数量：{N}
+- ⚠️ 需本次开发项数量：{N}
+- 🚨 字段不存在项数量：{N}
+- 结论：✅ 数据流完整可执行 | ❌ 存在数据空中楼阁风险，需先解决以下问题：
+  1. {问题描述}
+```
+
+**阻塞规则**：
+1. 如果"数据读取→写入溯源表"验证结论为 ❌（存在🚨无来源项且未解决），功能设计不得标记为完成，必须先解决数据来源问题（调整范围或确认依赖）。
+2. 如果"字段映射声明"中存在🚨不存在项，必须标注解决方案（补充字段/调整接口/修改设计）或由用户明确知悉风险后方可放行；未标注方案且未经用户确认的🚨项视为阻断。
+
+**前端功能设计产物**（如为前端单元）：
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/page-state-flow.md`（页面状态流转）
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/form-validation.md`（表单校验逻辑）
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/interaction-design.md`（交互行为设计）
+
+### 步骤 7：展示完成消息
+- 按以下结构展示完成消息：
+     1. **完成公告**（强制）：始终以此开头：
+
+```markdown
+# 🔧 功能设计完成 - [unit-name]
+```
+
+     2. **AI 摘要**（可选）：提供功能设计的结构化要点摘要
+        - 格式："功能设计已创建 [描述]："
+        - 列出关键业务逻辑模型和实体（要点列表）
+        - 列出定义的业务规则和校验逻辑
+        - 提及领域模型结构和关系
+        - 不要包含工作流指令
+        - 保持事实性和内容聚焦
+     3. **格式化工作流消息**（强制）：始终以此格式结尾：
+
+```markdown
+> **📋 产物摘要（可请求审阅）**
+> 请检查功能设计产物：`docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/`
+
+
+
+> **下一步：按有效授权继续；已要求审阅则等待**
+>
+> **你可以：**
+>
+> 🔧 **请求修改** - 根据审查结果要求修改功能设计
+> ✅ **继续下一阶段** - 按有效授权进入**[下一阶段名称]**
+> 📋 **下一步工作提示词** - 成功 `orchestrate report` 后，原样复制返回的 `handoff_prompt`；继续时读取 `aidlc/active/aidlc-state.md` 和 `aidlc/active/audit.md`。
+
+---
+[由 `orchestrate report` 返回的 `handoff_prompt` 动态生成；不得手工伪造]
+---
+```
+
+### 步骤 8：通知并按有效授权继续
+- 以阶段图 `approval` 和引擎 directive 为权威；本阶段为 `notify`，展示摘要后复用有效既有授权继续。用户明确要求审阅时等待回复；真实未决产品语义先澄清；`block` 审批和安全边界仍须等待，不得以通知替代。
+- 必要澄清必须获得真实答案，已有权威来源充分时记录依据，不重复索取确认
+- 如用户请求修改，更新设计并重新验证受影响内容
+
+### 步骤 9：记录授权来源并更新进度
+- 在当前设计产物中保留真实决策、风险与授权例外；普通通知不另写审计副本
+- 如发生审阅或澄清，记录用户实际回复及时间戳，不虚构审批
+- 使用 `orchestrate report` 记录功能设计结果并展示 `handoff_prompt`

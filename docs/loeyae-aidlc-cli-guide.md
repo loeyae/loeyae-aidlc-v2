@@ -305,6 +305,8 @@ extension 只能提供 namespaced Markdown 内容、advisory sensor 描述和 ad
 loeyae-aidlc install
 loeyae-aidlc install --all
 loeyae-aidlc install --harness kiro-ide --project /absolute/path/to/project
+loeyae-aidlc install --harness deepseek
+loeyae-aidlc install --harness deepseek --project /absolute/path/to/project
 loeyae-aidlc uninstall --all
 
 loeyae-aidlc export --help
@@ -314,3 +316,5 @@ loeyae-aidlc version
 ```
 
 Stop Hook 只观察 Markdown workflow 是否仍在运行并提示继续；不会自动 report、生成签名或读取旧 JSON workflow。
+
+DeepSeek Harness（`deepseek`）使用原生 Skill：用户级安装遵循 `DSH_HOME`（默认 `~/.dsh`），项目级安装写入 `<项目>/.dsh/skills/loeyae-aidlc/`。安装器通过 PATH 中的 `dsh` 自动探测；此适配不注册 Stop Hook，启动与续作使用显式 session binding。详见[安装指南](loeyae-aidlc-v2-installation.md#deepseek-harness)。

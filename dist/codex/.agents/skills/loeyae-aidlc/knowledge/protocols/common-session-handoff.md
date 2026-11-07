@@ -51,6 +51,8 @@ Stop 只是只读回合边界。结束回合可以保留 running 阶段；不需
 
 宿主边界：Claude、Codex、CodeBuddy、ZCode、Qoder CLI、Kiro IDE/CLI 的 hook 保留原生输入与成功退出格式；支持的 `session_id` / `thread_id` / `sessionID` 与显式 binding 一致时仅检查该 binding。OpenCode idle adapter 显式传 session_id。KiroCrew 无自动 Stop，Qoder CN Desktop 无 CLI 时也不假定已注册 Stop：在启动/续作入口使用上述显式绑定。没有 binding 时不扫描全项目。损坏/冲突 binding 仅给局部诊断并允许结束，不授予写入权。
 
+DeepSeek Harness 通过原生文件系统 Skill 加载；本适配没有自动 Stop Hook。启动/续作显式 inspect/bind，优先使用宿主暴露的原生 session ID，否则为当前会话显式选择唯一 ID；不假定特定会话环境变量。结束回合允许保留 running 阶段。
+
 受控本地 evidence、Provider Runner 的 accepted Evidence、GateDecision 与 knowledge confirmation receipt 都在工作流锁内重新校验原会话快照后发布。独立 Provider 安装/查询没有工作流时保持可用；执行中若新工作流出现则拒绝自动采用该结果。
 
 ## 静止维护交接

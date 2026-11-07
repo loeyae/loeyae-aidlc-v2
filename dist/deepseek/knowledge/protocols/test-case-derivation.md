@@ -1,0 +1,338 @@
+# 测试用例派生规范（I13）
+
+## 目的
+
+将产品行为和已批准的系统级技术风险翻译为可执行测试用例点 UC-D，建立“需求/设计/CR → 执行锚点 → Construction 证据”的追溯链。
+
+## 前置条件
+
+- 产品行为用例：I7 用户故事已完成，I12 已提供接口、页面或流程锚点。
+- 技术风险用例：已有经批准的 NFR、CR、契约变更、配置变更、迁移设计或一致性场景。
+- 两类来源都不存在时，也必须执行 I13 并生成结构化 `non-applicable.json`；只有传感器验证该记录包含批准依据、原因代码、替代验证和可执行命令后，才能将状态记为 `not_applicable`。
+
+## 结构化不适用/豁免
+
+无可执行业务行为时，在测试用例目录写入 `non-applicable.json`：
+
+```json
+{
+  "schema_version": "1",
+  "status": "not_applicable",
+  "reason_code": "pure-declaration",
+  "reason": "仅生成声明，不包含可执行业务行为",
+  "approval_ref": "REQ-001 / approved design decision",
+  "alternative_validation": "编译、Schema/序列化或配置加载验证",
+  "validation_command": "<项目已有的确定性验证命令>",
+  "source_refs": ["<稳定来源>"]
+}
+```
+
+`reason_code`、`approval_ref`、`alternative_validation`、`validation_command` 和 `source_refs` 均为必填。该文件只能由 I13 传感器验证后产生 `not_applicable`，不得用 handoff、计划或自然语言代替。
+
+## 来源基线规则
+
+### 产品行为基线
+
+I7 的 Gherkin 是产品语义唯一基线：
+- `priority: P0` 与 `type: contract` / `type: api` 用例：原样复制到“来源溯源”段，不得改写（MARS-273 分级降级后仍强制）；其余用例不要求逐条复制 Gherkin 副本；
+- 宽泛、矛盾或无法追溯需求时回退 I7 澄清；语义冲突一律以 I7 为准，不因降级放宽；
+- 技术不可行时标记 `blocked` 并提交回执，不得私自降低期望；
+- 后续语义变化必须走 CR。
+
+### 技术风险基线
+
+技术用例可来源于已批准的 NFR、CR、应用设计或系统基线，必须使用稳定 `source_ref`。技术用例只验证风险和工程行为，不得引入新的产品语义；来源不明确时先询问，不得虚构预期。
+
+## 产物路径与组织
+
+路径：`docs/aidlc/modules/{module-id}/inception/application-design/test-cases/`。`{module-id}` 必须取当前 directive 的 `module_id`，不得读取或写入其他模块目录。
+
+- 用例不超过 20 个时，推荐每个场景一个 `UC-D-{编号}-{名称}.md`。
+- 用例较多或同源强耦合时，可按故事、契约、配置或一致性场景聚合，内部仍以独立 UC-D 分隔。
+- 首次派生确定组织方式后保持一致。
+
+## 用例格式
+
+```markdown
+---
+id: UC-D-{编号}
+title: {可验证行为}
+source_ref: {US/NFR/CR/契约/配置/一致性场景的稳定引用}
+story_ref: {分级可选（MARS-273）：P0 与 contract/api 用例必填，其余不要求}
+scenario_ref: {分级可选（MARS-273）：P0 与 contract/api 用例必填，其余不要求}
+type: {unit/api/e2e/contract/integration/resilience/configuration/migration}
+priority: {P0/P1/P2}
+status: {ready/blocked/deprecated}
+service_ids: [{受影响服务；非分布式项目写不适用}]
+tdd_mode: {new/characterization}        # 可选，默认 new
+code_refs:                              # 仅 characterization 必填，new 不得填写
+  - {项目相对路径}[::{符号}]
+reason: {仅 characterization 必填：为什么给存量行为补回归保护}
+approval_ref: {仅 characterization 必填：批准依据}
+unit_refs: [{unit-id}, ...]              # 所属单元；显式声明时覆盖所有活动 UC-D，未声明时按下文规则推导
+defect_ref: {bug ticket 或缺陷 REQ 标识}  # 可选（4.13.2/MARS-112）：仅 bugfix scope 的 new UC-D 需要，锚定复现缺陷的追溯身份
+blocked_kind: {business-unknown/technical-prerequisite}  # 仅 status: blocked 必填（MARS-271）
+prerequisites: [{被前置依赖阻塞的具体事项}]  # 仅 blocked_kind: technical-prerequisite 必填
+unblock_path: {技术前置条件的解除路径}      # 仅 blocked_kind: technical-prerequisite 必填
+mapping_deferred: {暂缓测试映射的原因}          # 可选（MARS-271）：P1/展示类 UC-D 暂缓映射，P0 与 contract/api 禁止
+---
+
+# UC-D-{编号} {标题}
+
+## 来源溯源
+{P0 与 contract/api：产品用例原样复制 Gherkin，技术用例引用批准产物并摘要不可变预期；其余用例可只写稳定 source_ref，不逐条复制}
+
+## 执行锚点
+- endpoint/page/topic/config/migration: {实际锚点}
+- environment: {所需环境}
+- auth: {认证要求或不适用}
+- preconditions: {前置数据、版本和依赖状态}
+
+## 执行步骤与断言
+| # | 步骤 | 断言 |
+|---|------|------|
+
+## 覆盖映射
+{分级可选（MARS-273）：P0 与 contract/api 保留，其余不要求逐条映射}
+- {来源条件/风险} → 步骤 {N} → 断言 {N}
+
+## 证据要求
+- {项目现有命令、CI 任务、契约平台或测试平台证据类型}
+
+## 派生日志
+{可选（MARS-273）；CR 变更记录仍必须可追溯，可聚合在 _index.md}
+- 来源、时间、派生者和 CR 变更记录
+```
+
+## 用例声明与计数
+
+- 每个 UC-D 以**自己的用例文件**为准：用例文件 frontmatter（`---` 包围、含 `id: UC-D-xxx` 的块）中的 `status` 决定是否 ready；聚合文件可包含多个这样的块。没有 frontmatter 块的用例文件，按文件名中的 UC-D 编号认定，并读取正文中的 `status:` 行。
+- `_index.md` 只是索引，其中的 `status: ready` 不参与计数；只在 `_index.md` 中出现、没有自己用例文件的 UC-D 视为未 ready。
+- 同一 UC-D 在多个用例文件（或块）中声明会被拒绝。
+
+`ready`、`blocked` 和 `deprecated` 取自用例声明的状态字段，不从正文中的业务状态名称推断。`deprecated` 用例可保留原 ID 与历史说明，但不计入本轮活跃用例与覆盖映射；当前需求仍需由活跃用例覆盖。弃用必须有真实需求变更或替代依据，不得把未满足的用例改为 deprecated 来绕过门禁。
+
+## blocked 用例分类学（MARS-271）
+
+`status: blocked` 的 UC-D 必须在 frontmatter 声明 `blocked_kind`，引擎在 I13 门禁拦截缺失或取值非法的 blocked 条目：
+
+| 取值 | 含义 | 字段要求 |
+|------|------|----------|
+| `business-unknown` | 业务决策未定（需求方未回答），只能上报人工决策 | 无额外必填字段 |
+| `technical-prerequisite` | 被技术前置条件阻塞 | 必须写非空 `prerequisites`（前置事项列表）与非空 `unblock_path`（解除路径） |
+
+## 分级映射准入（MARS-271）
+
+P1/展示类 UC-D 可在 frontmatter 声明 `mapping_deferred: {原因}` 暂缓测试映射，带该标记的单元可过 GREEN，但映射债必须显式申报、不得静默消失：
+
+- **禁止暂缓**：`priority: P0` 或 `type: contract`/`type: api` 的 UC-D 声明 `mapping_deferred` 会被 I13 门禁拒绝（契约相关用例必须 GREEN 前就位映射）。
+- 原因必须非空；数组形态被拒绝。
+- I13 证据以 `mapping_deferred: [{id, reason}]` 记录；GREEN 证据必须以 `mapping_debt` 恰好申报同一批用例（见 `green-test-evidence.md`），`test-quality` 的 `uc_mapping` 检查跳过这些用例并在 `mapping_debt` 中独立展示。
+
+## 聚合层覆盖声明（`source_coverage`，MARS-273）
+
+逐用例维护反向溯源绑定成本高、机器收益低。MARS-273 起，正向覆盖与反向悬空校验收敛到聚合层，每来源声明一次，不再逐条重复：
+
+- **落点与格式**：在 `_index.md` 的 frontmatter 声明一次（也可写入文件内以 `source_coverage` 标识的代码块）：
+
+```yaml
+---
+source_coverage:
+  REQ-001: [UC-D-001, UC-D-002]
+  REQ-002: [UC-D-003]
+  NFR-004: [UC-D-007]
+---
+```
+
+- **正向覆盖**：每个当前批准来源定义中的 source_id（`requirements.md` 的 REQ、用户故事、已批准 NFR/CR 等稳定来源）至少映射一个活跃 UC-D；一个来源有多个独立失败模式时分别派生、同 key 聚合。先固定本轮来源清单；正文中的交叉引用、示例和历史背景编号不能自动变成新增需求。来源定义应处于可识别的标题、列表、表格定义列或行首声明位置；格式有歧义时明确来源定义，不靠虚构用例补齐全文提及的所有编号。
+- **反向悬空**：`source_coverage` 的 ucd_ids 必须是本模块实际存在的 UC-D；引用不存在的 source_id 或 UC-D 记 `DANGLING_REF@source_coverage`，机器拦截。
+- **存量兼容**：未声明 `source_coverage` 的存量 I13 不要求补声明，机器校验回退到 `source_ref` 存在性检查；新派生必须声明。
+- I13 传感器把聚合声明复制进证据的 `source_coverage` 字段；`source_ref` 存在性检查与 DANGLING_REF 保留。
+
+来源和用例已确认后，从各活跃用例的 `source_ref` 一次聚合更新索引。缺映射先核对来源归属和已有用例；只有真实行为或独立失败模式缺覆盖时才新增 UC-D。修复索引不能改变批准范围，也不能为了消除历史引用错误把范围外编号附加到当前用例。
+
+### `ucd_sources` 双形态
+
+I13 证据的 `ucd_sources` 从逐 UC-D SHA-256 降级为**逐文件 digest + 文件内 UC-D ID 清单**：
+
+```json
+{
+  "files": [
+    { "file": "UC-D-001-checkout.md", "sha256": "<file digest>", "ucd_ids": ["UC-D-001"] },
+    { "file": "checkout-aggregated.md", "sha256": "<file digest>", "ucd_ids": ["UC-D-002", "UC-D-003"] }
+  ]
+}
+```
+
+- 旧形态（`{ "<UC-D>": { file, sha256 } }`）继续有效，新校验同时接受两种形态；新派生使用文件级形态。
+- 删除交付对账改为文件级 digest 比对（见“无行为观察复用”）；文件内容漂移仍触发重跑 I13。
+- `unit_refs`、`tdd_mode`、`defect_ref`、GREEN `uc_mapping` 不降级，行为不变。
+
+### unit `req_refs` 声明
+
+tests 层收敛改走 unit-manifest `req_refs`（`code_refs_source` 优先级 `req_refs` > `ucd_subset` > `module`）：新单元应在 `unit-manifest.json` 声明本单元的 `req_refs`（REQ 清单），traceability-matrix tests 层据此按单元收敛，不再依赖扫描 UC-D 文件内的 REQ 引用。未声明时回退 `ucd_subset` 路径，行为不变。
+
+### 派生自检抽样策略
+
+派生自检从全量改为“**P0 全量 + 其余抽样**”：
+
+- `priority: P0` 与 `type: contract` / `type: api` 用例：100% 自检；
+- 其余用例按抽样率检查（默认 20%，可由工作流配置覆盖）；
+- 抽样发现漏派时，该来源全量补检；m02 P2-01 回流缺陷度量按首次可发现阶段归类，漏派率上升则回滚降级项。
+
+## TDD 模式（`tdd_mode`）
+
+| 取值 | 含义 | 字段要求 |
+|------|------|----------|
+| `new`（默认） | 新行为，严格 RED→GREEN | 不得写 `code_refs`、`reason`、`approval_ref` |
+| `characterization` | 为基线中已存在的行为补回归保护（BASELINE→GREEN） | 必须写非空 `code_refs`、`reason`、`approval_ref` |
+
+```yaml
+---
+id: UC-D-003
+status: ready
+source_ref: REQ-002
+tdd_mode: characterization
+code_refs:
+  - app/exporter.py::export_orders
+reason: 补齐导出现有分页行为的回归保护，重构前锁定
+approval_ref: REVIEW-2026-10-01-01
+---
+```
+
+- `tdd_mode`、`code_refs`、`reason`、`approval_ref` 只能写在 frontmatter 中。
+- `code_refs` 每项格式 `<项目相对路径>[::<符号>]`：`\` 与 `/` 均可；拒绝绝对路径、盘符、UNC、`.`/`..` 段、控制面目录与符号链接；路径必须落在源码根之内（module-manifest `paths` → `.aidlc/source-roots.json` → 默认 `src`）。
+- I13 用工作流基线（`orchestrate baseline`；模块子工作流使用父工作流的基线）校验：文件在基线中存在且是普通文件；写了符号的，符号须作为完整标识符出现在基线版本的文件文本中（文本匹配，不做 AST 解析）。
+- 使用 characterization 需要 git 仓库与已登记、仍可从 HEAD 到达的基线；存量工作流先执行 `orchestrate baseline --set`。
+- I13 始终绑定基线链的第 0 代（4.7.0）：多单元依次改动共享 code ref 时，用 `orchestrate baseline --advance <上一单元 GREEN 的 commit>` 追加一代，后续单元的 BASELINE 在新一代上观察；I13 不需要因推进而刷新。
+- `bugfix` 至少要有 1 条 `new`（复现 bug）；`refactor` 至少要有 1 条 `characterization`（锚定存量行为的基线），可以全部为 characterization。
+
+## 轻量 scope 的追溯锚点（`defect_ref`，4.13.2 / MARS-112）
+
+`bugfix` / `refactor` 走 8 阶段路径、不经 `requirements-analysis`，没有 `requirements.md` 作 REQ 追溯根。`traceability-matrix` 门禁不再对它们盲判 `not_applicable`，而是改验各自的轻量来源锚点：
+
+- `bugfix`：至少一个 `tdd_mode: new` 的 UC-D 要在 frontmatter 声明 `defect_ref`（bug ticket 或缺陷 REQ 标识，如 `BUG-123`、`REQ-DEFECT-7`，单个清洁 token：字母数字与 `. _ - /`），把复现缺陷的 UC-D 锚定到可追溯的缺陷身份。到 `code-generation` 阶段起，交付源码必须至少引用一个该锚点（否则记 `ANCHOR_UNREFERENCED@code_refs`）；缺锚点记 `ANCHOR_MISSING@defect_ref`。`defect_ref` 只能写在 frontmatter，I13 证据以 `defect_refs` 记录。
+- `refactor`：至少一个 `tdd_mode: characterization` 的 UC-D 要声明非空 `code_refs`（上面已要求的 baseline 锚点），追溯锚定到存量代码基线；缺则记 `ANCHOR_MISSING@code_refs`。
+- 其他 scope 在没有 `requirements.md` 时仍为 `not_applicable`，行为不变。
+
+```yaml
+---
+id: UC-D-001
+status: ready
+source_ref: BUG-123
+tdd_mode: new
+defect_ref: BUG-123          # bugfix：锚定复现缺陷的追溯身份，交付源码须引用它
+---
+```
+
+## 所属单元（`unit_refs`，4.8.0）
+
+一个模块拆成多个 unit 时，用 `unit_refs` 声明每个 UC-D 属于哪些 unit。声明后，各 unit 的 tdd / code-generation 只覆盖本单元的 UC-D：RED、BASELINE、GREEN 的 `uc_mapping`、BASELINE 的 `code_ref_digests`、test-quality、追溯矩阵 tests 层和功能设计都只看本单元子集。
+
+```yaml
+---
+id: UC-D-003
+status: ready
+source_ref: REQ-002
+tdd_mode: new
+unit_refs: [u1, u2]          # 跨单元：u1 和 u2 的 GREEN 都必须覆盖它
+---
+```
+
+- 可选字段，和 `tdd_mode` 一样只能写在 frontmatter；写在正文会被拒绝。
+- 取值必须是非空列表，不得重复，每个 unit-id 都必须是本模块 `unit-manifest.json` 中已有的 unit。
+- 同一模块内只要有一个活动 UC-D 写了 `unit_refs`，**全部活动** UC-D 都必须写，否则拒绝并列出缺失的 UC-D。
+- I13 证据在有声明时输出 `ucd_units: { "<UC-D>": ["<unit-id>", ...] }`。新的多单元派生全部未声明时，仅在每个活动用例的所有 REQ 来源都能通过已批准 `unit-manifest.json` 的 `req_refs` 唯一归属同一单元时推导，并记录 `unit_scope_source: manifest_req_refs`；跨单元、非 REQ 来源或歧义需显式 `unit_refs`，在 I13 解决，不留到 RED/GREEN 后补模块全集。
+- 已发布且无 `ucd_units` 的旧证据保持原兼容含义，不在读取时静默改变单元范围。需要收敛时受控刷新 I13，再验证受影响的阶段证据；已采用推导的证据会按相同规则复核归属。
+- 模块收口时对账：build-and-test 的 test-quality 和 split 布局的集成屏障（`ucd-coverage:<module>`）要求每个 UC-D 都出现在其 `unit_refs` 中**每个** unit 的 GREEN `uc_mapping` 里，缺一项即失败。
+
+### 不含 UC-D 的单元（`ucd_exemption`）
+
+契约类等不含业务行为的 unit 不被任何 `unit_refs` 指向时，必须在 `unit-manifest.json` 的该 unit 下声明结构化豁免：
+
+```json
+{
+  "unit_id": "u3",
+  "name": "订单契约",
+  "service_id": "trade-service",
+  "ucd_exemption": {
+    "reason_code": "pure-declaration",
+    "reason": "只声明跨单元契约，不含业务行为",
+    "approval_ref": "REVIEW-2026-10-05-02",
+    "alternative_validation": "契约结构校验",
+    "validation_command": ["node", "tests/validate_contract.cjs"]
+  }
+}
+```
+
+`reason_code` 取值同 `non-applicable.json`；`validation_command` 是 argv 数组（不经 shell）。受控 producer 先执行该命令，或验证既有成功观察的有效绑定，退出码为 0 才写 RED / BASELINE / GREEN 的 `not_required`（`ucd_ids: []`），门禁复核豁免字段、命令摘要和观察来源；详见下方无行为观察复用规则。子集为空却没有豁免时拒绝；子集非空时 GREEN 不得为 `not_required`。
+
+## 用例类型
+
+| type | 用途 | 典型消费位置 |
+|------|------|--------------|
+| `unit` | 单一逻辑规则 | 单元 TDD |
+| `api` | 单接口行为 | TDD 或 C8 |
+| `e2e` | 用户跨页面/端到端行为 | C8 |
+| `contract` | 提供方与消费者兼容性 | C8 契约验证 |
+| `integration` | 跨服务、消息或外部系统协作 | C8 集成验证 |
+| `resilience` | 超时、重复、乱序、降级、恢复 | C8 故障验证 |
+| `configuration` | 配置绑定、刷新、版本组合与回滚 | C8 配置验证 |
+| `migration` | 数据或接口迁移、版本并存与回退 | C8 迁移验证 |
+
+测试工具必须来自项目现有配置或经用户确认，不得因派生用例擅自引入框架。
+
+## 技术用例触发矩阵
+
+按实际风险加载通用规则并派生：
+
+| 风险来源 | 至少覆盖 |
+|----------|----------|
+| 契约变化 | 提供方、每个受影响消费者、兼容与破坏性路径 |
+| 共享/远程配置 | 绑定、缺失/非法值、刷新或重启、新旧版本组合、回滚 |
+| 跨边界写入 | 幂等、重复、乱序、局部失败、补偿、恢复和对账 |
+| 外部系统 | 超时、重复回调、不可用、恢复和责任边界 |
+| 数据迁移 | 前向、回退、部分执行、版本并存和数据校验 |
+
+不存在对应风险时不创建该类用例。
+
+## 执行流程
+
+1. 收集产品 Gherkin 与已批准技术风险来源，建立 `source_ref` 清单。
+2. 对每个来源派生至少一个可执行用例；一个来源有多个独立失败模式时分别派生。覆盖关系在 `_index.md` 的 `source_coverage` 聚合声明一次（MARS-273），不逐用例重复绑定。
+3. 填写实际执行锚点、受影响服务、前置版本与断言。
+4. 自检覆盖性、锚点、来源一致性和技术可行性；自检按“P0 全量 + 其余抽样”执行（见“派生自检抽样策略”）。
+5. 无法执行的用例标记 `blocked`，记录约束、建议和需要的用户决策。
+6. 生成 `_index.md`，列出用例、来源、类型、服务、状态、证据位置和 `source_coverage` 聚合声明。
+7. 将用例 ID 映射到 RED、GREEN、代码审查和构建测试证据；无可执行业务行为时，将结构化豁免与真实确定性替代验证绑定到受控证据。交接引用现有证据，不另抄到 handoff.md 或逐用例对账 Markdown。
+
+## 强制字段
+
+所有用例必须有 `id / source_ref / type / status / service_ids`；缺任一必需字段即阻断。
+
+分级可选（MARS-273）：`story_ref`、`scenario_ref`、来源溯源段原样 Gherkin 副本、覆盖映射段、派生日志对 `priority: P0` 与 `type: contract` / `type: api` 用例仍然强制；其余用例不要求。正向覆盖与反向悬空校验收敛到聚合层 `source_coverage` 执行（见“聚合层覆盖声明”）。
+
+## 派生自检
+
+- [ ] 每个来源（产品 Gherkin 场景 / 已批准技术风险）在 `source_coverage` 聚合声明中至少映射一个 UC-D（P0 全量核对，其余抽样核对）
+- [ ] 每个已批准高风险技术场景有对应 UC-D 或明确不适用依据
+- [ ] 每个用例有真实执行锚点和可验证断言
+- [ ] 产品语义未被技术用例覆盖或改写
+- [ ] blocked 用例已进入 `_index.md` 待决策清单
+- [ ] ready 用例已映射到单元与 Construction 证据要求
+
+## 禁止行为
+
+- 不改写产品 Gherkin 语义；
+- 不用技术用例引入未经批准的业务行为；
+- 不把文档审阅写成实际执行通过；
+- 不隐藏 blocked、未验证或外部环境依赖；
+- 不因工具缺失删除高风险用例。
+
+## 无行为观察复用
+
+删除交付沿用本协议的适用性、声明来源和单元范围：业务删除按声明 ID 解析真实 `test_case_files`（支持描述性文件名和聚合文件），新 I13 的 `ucd_sources` 记录文件级 digest 与文件内 UC-D ID 清单（MARS-273 双形态，旧逐条 file+SHA-256 形态继续有效），来源文件移动或内容漂移须刷新 I13 并重新验证。缺文件、重复 ID、跨模块来源和归属漂移均拒绝。沿用已发布 `ucd_units` 的显式或推导单元子集，仅缺少该字段的旧证据保留模块全集兼容含义；删除归属可由单单元或唯一匹配的 manifest 需求证明，真实多单元歧义须明确归属。
+
+纯配置等可信无行为删除在 `source-deletions.json` 条目声明 `applicability: "not_applicable"` 并省略 `ucd_id`；只接受受控 I13 `not_applicable` 或空单元 UC-D 子集及已批准 `ucd_exemption`。仍需真实删除、基线 blob、授权 `req_refs` 和成功/有效复用的替代检查。业务删除省略该字段保持兼容；实际移除可执行业务行为仍走真实业务 RED/GREEN。
+
+无行为替代验证的每个阶段必须有真实成功执行记录，或带有效 `reused_from` / `observation_id` 的可复核受绑定观察；无需重复启动同一检查进程。命令、输入、scope、环境、I13/单元声明或基线世代漂移时必须重跑。业务 RED/GREEN 仍独立执行，禁止复用替代检查观察来代替业务断言。

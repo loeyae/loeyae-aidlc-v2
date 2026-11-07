@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { HarnessManifest } from "../scripts/manifest-types";
@@ -14,7 +14,9 @@ const files = [
   "skills/aidlc-build-test-evidence/SKILL.md",
 ];
 let checked = 0;
-for (const harness of readdirSync(join(root, "harness"))) {
+const harnesses = readdirSync(join(root, "harness"))
+  .filter(name => existsSync(join(root, "harness", name, "manifest.ts")));
+for (const harness of harnesses) {
   const manifest = (await import(pathToFileURL(join(root, "harness", harness, "manifest.ts")).href)).default as HarnessManifest;
   for (const file of files) {
     const mapping = manifest.coreDirs.find(mapping => file.startsWith(`${mapping.src}/`));
@@ -24,5 +26,5 @@ for (const harness of readdirSync(join(root, "harness"))) {
     checked++;
   }
 }
-assert.equal(checked, files.length * 9);
-console.log(`PASS ${checked} shared engine, protocol, stage, skill and graph copies across nine distributions`);
+assert.equal(checked, files.length * harnesses.length);
+console.log(`PASS ${checked} shared engine, protocol, stage, skill and graph copies across ${harnesses.length} distributions`);

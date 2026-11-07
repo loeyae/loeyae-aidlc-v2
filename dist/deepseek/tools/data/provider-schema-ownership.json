@@ -1,0 +1,105 @@
+{
+  "schema": "aidlc.schema-ownership/v1",
+  "protocol_version": "1.1",
+  "wire_conventions": {
+    "json_schema_dialect": "https://json-schema.org/draft/2020-12/schema",
+    "canonical_json": "RFC 8785 JCS",
+    "digest_algorithm": "sha256",
+    "digest_pattern": "^sha256:[0-9a-f]{64}$",
+    "timestamp_format": "UTC RFC 3339",
+    "unknown_fields": "reject",
+    "extension_container": "extensions",
+    "extension_namespace_pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9-]*)+$",
+    "wire_path_format": "portable-relative-posix"
+  },
+  "contracts": [
+    {
+      "key": "provider",
+      "discriminator": "aidlc.provider/v1.1",
+      "schema_id": "urn:loeyae:aidlc:schema:provider:1.1",
+      "owner_repository": "loeyae-aidlc-provider",
+      "canonical_path": "schemas/aidlc.provider.v1.1.schema.json",
+      "producer": "provider-author"
+    },
+    {
+      "key": "request",
+      "discriminator": "aidlc.provider-request/v1.1",
+      "schema_id": "urn:loeyae:aidlc:schema:provider-request:1.1",
+      "owner_repository": "loeyae-aidlc-provider",
+      "canonical_path": "schemas/aidlc.provider-request.v1.1.schema.json",
+      "producer": "controlled-runner"
+    },
+    {
+      "key": "result",
+      "discriminator": "aidlc.provider-result/v1.1",
+      "schema_id": "urn:loeyae:aidlc:schema:provider-result:1.1",
+      "owner_repository": "loeyae-aidlc-provider",
+      "canonical_path": "schemas/aidlc.provider-result.v1.1.schema.json",
+      "producer": "provider"
+    },
+    {
+      "key": "evidence",
+      "discriminator": "aidlc.provider-evidence/v1.1",
+      "schema_id": "urn:loeyae:aidlc:schema:provider-evidence:1.1",
+      "owner_repository": "loeyae-aidlc-provider",
+      "canonical_path": "schemas/aidlc.provider-evidence.v1.1.schema.json",
+      "producer": "controlled-runner"
+    },
+    {
+      "key": "conformance",
+      "discriminator": "aidlc.provider-conformance/v1.1",
+      "schema_id": "urn:loeyae:aidlc:schema:provider-conformance:1.1",
+      "owner_repository": "loeyae-aidlc-provider",
+      "canonical_path": "schemas/aidlc.provider-conformance.v1.1.schema.json",
+      "producer": "conformance-runner"
+    },
+    {
+      "key": "knowledgeReceipt",
+      "discriminator": "aidlc.knowledge-receipt/v1.1",
+      "schema_id": "urn:loeyae:aidlc:schema:knowledge-receipt:1.1",
+      "owner_repository": "loeyae-aidlc-provider",
+      "canonical_path": "schemas/aidlc.knowledge-receipt.v1.1.schema.json",
+      "producer": "core"
+    },
+    {
+      "key": "projectProviders",
+      "discriminator": "aidlc.project-providers/v1",
+      "schema_id": "urn:loeyae:aidlc:schema:project-providers:1",
+      "owner_repository": "loeyae-aidlc-v2",
+      "canonical_path": "core/tools/data/provider-schemas/aidlc.project-providers.v1.schema.json",
+      "producer": "core"
+    },
+    {
+      "key": "projectProvidersLock",
+      "discriminator": "aidlc.project-providers-lock/v1",
+      "schema_id": "urn:loeyae:aidlc:schema:project-providers-lock:1",
+      "owner_repository": "loeyae-aidlc-v2",
+      "canonical_path": "core/tools/data/provider-schemas/aidlc.project-providers-lock.v1.schema.json",
+      "producer": "core"
+    },
+    {
+      "key": "profile",
+      "discriminator": "aidlc.profile/v1.1",
+      "schema_id": "urn:loeyae:aidlc:schema:profile:1.1",
+      "owner_repository": "loeyae-aidlc-v2",
+      "canonical_path": "core/tools/data/provider-schemas/aidlc.profile.v1.1.schema.json",
+      "producer": "core"
+    },
+    {
+      "key": "plan",
+      "discriminator": "aidlc.provider-plan/v1.1",
+      "schema_id": "urn:loeyae:aidlc:schema:provider-plan:1.1",
+      "owner_repository": "loeyae-aidlc-v2",
+      "canonical_path": "core/tools/data/provider-schemas/aidlc.provider-plan.v1.1.schema.json",
+      "producer": "core"
+    },
+    {
+      "key": "gateDecision",
+      "discriminator": "aidlc.gate-decision/v1.1",
+      "schema_id": "urn:loeyae:aidlc:schema:gate-decision:1.1",
+      "owner_repository": "loeyae-aidlc-v2",
+      "canonical_path": "core/tools/data/provider-schemas/aidlc.gate-decision.v1.1.schema.json",
+      "producer": "core"
+    }
+  ]
+}

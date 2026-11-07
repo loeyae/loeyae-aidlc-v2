@@ -72,6 +72,12 @@ const KIRO_GLOBAL_SKILL_OWNER = "loeyae-aidlc:kiro-global-skill";
 const KIRO_LEGACY_CLI_SKILL_OWNER = "loeyae-aidlc:kiro-cli";
 const KIRO_LEGACY_IDE_POWER_ROOT = resolve(HOME, ".kiro/powers/loeyae-aidlc");
 const KIRO_LEGACY_IDE_POWER_OWNER = "loeyae-aidlc:kiro-ide";
+const deepSeekHomeOverride = process.env.DSH_HOME;
+const deepSeekHome = deepSeekHomeOverride?.trim()
+  ? deepSeekHomeOverride === "~" ? HOME
+    : /^~[\\/]/.test(deepSeekHomeOverride) ? resolve(HOME, deepSeekHomeOverride.slice(2))
+      : resolve(deepSeekHomeOverride)
+  : resolve(HOME, ".dsh");
 
 const HARNESS_INSTALL_PATHS: Record<string, string> = {
   "kiro-crew": resolve(HOME, ".kiro/crew/skills/loeyae-aidlc"),
@@ -83,6 +89,7 @@ const HARNESS_INSTALL_PATHS: Record<string, string> = {
   codebuddy: CODEBUDDY_USER_MARKETPLACE_ROOT,
   qoder: QODER_USER_PLUGIN_ROOT,
   zcode: ZCODE_GLOBAL_SKILL_ROOT,
+  deepseek: resolve(deepSeekHome, "skills/loeyae-aidlc"),
 };
 
 const HARNESS_DESCRIPTIONS: Record<string, string> = {
@@ -95,6 +102,7 @@ const HARNESS_DESCRIPTIONS: Record<string, string> = {
   codebuddy: "WorkBuddy Enterprise / CodeBuddy (official plugin)",
   qoder: "Qoder CN IDE / Desktop / CLI (native Skill + optional official plugin + host MCP config)",
   zcode: "ZCode (user skill + user Hook/MCP; plugin marketplace also built)",
+  deepseek: "DeepSeek Harness / dsh (native user/project Skill)",
 };
 
 interface DeployOptions {
@@ -304,6 +312,8 @@ function hostEvidence(harness: string): string | undefined {
       return commandOnPath("zcode")
         || windowsDesktopEvidence("zcode")
         || firstExistingPath(applicationPaths("ZCode.app", "Zcode.app"));
+    case "deepseek":
+      return commandOnPath("dsh");
     default:
       return undefined;
   }
@@ -413,8 +423,8 @@ function parseDeployOptions(args: string[], allowList: boolean): DeployOptions {
   if (options.harness && !HARNESS_INSTALL_PATHS[options.harness]) {
     throw new Error(`unknown harness "${options.harness}"; available: ${Object.keys(HARNESS_INSTALL_PATHS).join(", ")}`);
   }
-  if (options.project && !["kiro-ide", "kiro-cli", "codebuddy", "qoder"].includes(options.harness)) {
-    throw new Error("--project requires --harness kiro-ide, kiro-cli, codebuddy, or qoder");
+  if (options.project && !["kiro-ide", "kiro-cli", "codebuddy", "qoder", "deepseek"].includes(options.harness)) {
+    throw new Error("--project requires --harness kiro-ide, kiro-cli, codebuddy, qoder, or deepseek");
   }
   return options;
 }
@@ -1076,7 +1086,7 @@ function installOne(harness: string, customTarget: string, projectTarget: string
     return;
   }
 
-  const target = customTarget ? resolve(customTarget) : HARNESS_INSTALL_PATHS[harness];
+  const target = managedTargetsFor(harness, customTarget, projectTarget)[0];
   if (isSharedKiroGlobalSkill(harness, customTarget) && migrateKiroGlobalSkillOwnership()) {
     console.log(`♻️  Adopted legacy Kiro CLI ownership for the shared global Agent Skill → ${target}`);
   }
@@ -1101,6 +1111,13 @@ function installOne(harness: string, customTarget: string, projectTarget: string
 }
 
 function managedTargetsFor(harness: string, customTarget: string, projectTarget: string): string[] {
+  if (harness === "deepseek" && projectTarget && !customTarget) {
+    const project = resolve(projectTarget);
+    if (!existsSync(project) || !lstatSync(project).isDirectory() || lstatSync(project).isSymbolicLink()) {
+      throw new Error(`--project must be an existing, non-symlink directory: ${project}`);
+    }
+    return [resolve(project, ".dsh/skills/loeyae-aidlc")];
+  }
   if (harness === "codebuddy" && !customTarget) return [getCodeBuddyDeployment(projectTarget).marketplaceRoot];
   if (harness === "qoder" && !customTarget) return [getQoderDeployment(projectTarget).pluginRoot];
   if (harness === "zcode" && !customTarget) return [ZCODE_GLOBAL_SKILL_ROOT];

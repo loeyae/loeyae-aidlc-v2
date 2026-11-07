@@ -13,7 +13,9 @@ for (const name of Object.keys(req("./package.json").dependencies)) {
 }
 const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
 let count = 0;
-for (const name of ["kiro-crew", "kiro-ide", "kiro-cli", "claude", "opencode", "codex", "codebuddy", "qoder", "zcode"]) {
+const harnesses = readdirSync(join(root, "harness"))
+  .filter(name => existsSync(join(root, "harness", name, "manifest.ts")));
+for (const name of harnesses) {
   const { default: manifest } = await import(pathToFileURL(join(root, "harness", name, "manifest.ts")).href);
   const dist = join(root, "dist", name), base = join(dist, manifest.harnessDir), expected = new Set();
   for (const { src, dst } of manifest.coreDirs) for (const source of walk(join(root, "core", src))) {
@@ -35,4 +37,4 @@ assert(Object.keys(JSON.parse(readFileSync(schema, "utf8"))).length);
 const schemas = walk(join(root, "core/tools/data/provider-schemas")).filter(p => p.endsWith(".json"));
 assert(schemas.length > 0);
 for (const p of schemas) JSON.parse(readFileSync(p, "utf8"));
-console.log(`PASS installed distribution parity: 9 harnesses, ${count} files; ${schemas.length} provider schemas`);
+console.log(`PASS installed distribution parity: ${harnesses.length} harnesses, ${count} files; ${schemas.length} provider schemas`);

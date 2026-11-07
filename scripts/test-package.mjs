@@ -118,7 +118,7 @@ try {
   const candidate = install(candidateTarball, "candidate");
   const installedRequire = createRequire(join(candidate, "package.json"));
   run("installed-layout", process.execPath, [installedRequire.resolve("tsx/cli"), join(repo, "tests/package-layout-smoke.mjs"), candidate]);
-  report.checks.push("installed tarball: all nine distributions and runtime dependencies/schemas");
+  report.checks.push("installed tarball: all harness distributions and runtime dependencies/schemas");
   // A real host is never invoked. Claude's required registration is represented by an observable stub.
   const hostLog = join(sandbox, "stub-host.jsonl");
   const stub = join(fakebin, "claude");
@@ -200,7 +200,7 @@ try {
     cli(candidate, "local-workflow-runtime", ["runtime", "summary"], { cwd: local });
     assert(!existsSync(join(local, ".aidlc/providers.yaml")), "generic workflow implicitly installed domain Providers");
   });
-  const harnesses = ["kiro-crew", "kiro-ide", "kiro-cli", "claude", "opencode", "codex", "codebuddy", "qoder", "zcode"];
+  const harnesses = ["kiro-crew", "kiro-ide", "kiro-cli", "claude", "opencode", "codex", "codebuddy", "qoder", "zcode", "deepseek"];
   for (const harness of harnesses) check(`isolated ${harness} install/ownership/uninstall`, () => {
     const target = join(sandbox, `target ${harness} 中文`); mkdirSync(target);
     const args = ["--harness", harness, "--target", target];

@@ -1,0 +1,8831 @@
+#!/usr/bin/env bun
+import { deliveryConsistencyPayloadErrors, evidenceTimeError, reviewIssueErrors } from "./aidlc-evidence-policy";
+import { historicalPhaseInputErrors } from "./aidlc-phase-inputs";
+import { alternativePhaseInputs } from "./aidlc-evidence";
+import { clearRepairGuidance, repairGuidance } from "./aidlc-repair-guidance";
+import { phaseExecutionRevision } from "./aidlc-workflow-layout";
+import { GLOBAL_REVIEW_ITEMS, globalChecklistErrors, globalReviewUcdSources, type GlobalCoverage } from "./aidlc-global-review";
+import { i13NonApplicable } from "./aidlc-i13-applicability";
+import { ucdDeclarations } from "./aidlc-ucd-declarations";
+import { semanticCheckerIdentityErrors } from "./aidlc-checker-identity";
+import { infrastructureResourceErrors } from "./aidlc-infrastructure.js";
+import { frontendPlatformPayload } from "./aidlc-frontend-platform";
+import { substantiveArtifact } from "./aidlc-artifact-presence";
+import { alternativeCheckBindingErrors, exemptionCheckBindingErrors, evidenceFreshnessBindingErrors, semanticCommandArgv } from "./aidlc-evidence";
+import { claimToken } from "./aidlc-session";
+import { retireExecutionCheckpoint } from "./aidlc-retire-execution";
+import { assertSessionClaim, sessionBinding, withSessionPublication } from "./aidlc-light-state";
+import { verifyVisualEvidence } from "./aidlc-visual-provider.js";
+/**
+ * aidlc-orchestrate.ts — The deterministic workflow engine.
+ *
+ * Subcommands:
+ *   next [args...]    — Read state + stage graph, return ONE typed directive (JSON)
+ *   continue <token>  — Internal steering transport (load-steering chain)
+ *   report [flags]    — Record stage outcome, advance state machine
+ *   park              — Park workflow at current inter-stage boundary
+ *   split             — Split a single workflow into per-module workflows (4.3.0)
+ *   baseline          — Show / register / replace (4.6.0) / advance (4.7.0) the workflow baseline commit
+ *
+ * State file: <project>/aidlc/active/aidlc-state.md (single layout). After `split`, the
+ * global, per-module (aidlc/active/modules/<id>/) and integration workflows are indexed
+ * by aidlc/active/registry.md; see aidlc-workflow-layout.ts.
+ * Stage graph: <engine>/core/tools/data/stage-graph.json
+ *
+ * This tool is DETERMINISTIC: same state → same directive.
+ * `next` NEVER mutates state — only `report` and `park` write.
+ *
+ * Gate model: requires (准入) + produces + sensors (准出) guarantee completeness.
+ * Approval remains blocking only for machine-unverifiable decisions declared
+ * with `approval: block`; all other stages auto-advance after gates pass.
+ */
+
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { createHash, randomUUID } from "crypto";
+import { deploymentValidationErrors } from "./aidlc-evidence";
+import { overflowDirective, recordedSubprocessOverflow, runSync, SubprocessOverflowError } from "./aidlc-spawn";
+import { createRequire } from "module";
+import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
+import { fileURLToPath } from "url";
+import { isDeepStrictEqual } from "node:util";
+import { buildTestEvidenceErrors, SEMANTIC_SENSORS, allowlistedAlternativeCommand, allowlistedPhaseCommand, argvDigest, i13CodeRefBlobs, i13UcdIdsByMode, phaseNotRequiredDigest, phaseObservationDigest, ucdExemptionDigest, unitUcdExemption, type Phase } from "./aidlc-evidence";
+import { replayEvidenceErrors, REPLAY_LIMITATION } from "./aidlc-historical-red";
+import { QUALITY_SENSORS, qualityAdoption, qualityEvidenceErrors, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
+import { controlledQualityErrors, developmentAcceptanceErrors } from "./aidlc-quality-delivery";
+import { CANONICAL_SOURCE_PATTERN, SOURCE_ROOTS_CONFIG, declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
+import { sourceDeletions, type VerifiedDeletion } from "./aidlc-source-deletions";
+import { codeRefRepo, nestedHead, nestedMigrationCommand, nestedSourceRepos, pendingNestedError, WORKFLOW_REPO_KEY } from "./aidlc-nested-repos";
+import { CONTRACT_CONSUMER_COLUMN, CONTRACT_ID_COLUMN, CONTRACT_PROVIDER_COLUMN, moduleForValue } from "./aidlc-contract-table";
+import { bestLedgerCheckpoint, checkpointModule, gitRepositoryAvailable, ledgerFetchCommand, ledgerPublishCommand, ledgerRef, moduleContractSnapshot, remoteLedgerRef } from "./aidlc-module-ledger";
+import { equivalentModuleContracts, CONTRACT_EQUIVALENCE_VERSION } from "./aidlc-module-ledger";
+import { parseMaintenanceRecoveryState, type MaintenanceRecoveryProjection, type MaintenanceRecoveryReader } from "./aidlc-light-state";
+import { withSliceWorkflowMigration } from "./aidlc-document-slices";
+import { COMMIT_ID_PATTERN, commitAncestryErrors, currentHead, readSourceRevision, withRevisionMemoization, type RepoRevision } from "./aidlc-revision";
+import { verifyProviderKnowledge } from "./aidlc-provider-knowledge.js";
+import {
+  ADOPTION_EXEMPTED_RULES,
+  ADOPTION_REPLACED_RULES,
+  baselineCodeRef,
+  baselineCommitErrors,
+  baselineEpochErrors,
+  baselineKindErrors,
+  baselineUsage,
+  checkAdoptionCandidate,
+  checkAdvanceTarget,
+  checkBaselineCandidate,
+  checkRepoAdvanceTarget,
+  checkRepoCandidate,
+  currentHeadCommit,
+  epochRepos,
+  extraRepoKeyErrors,
+  modulePhaseEvidence,
+  nestedCommitErrors,
+  nestedDirty,
+  parseCodeRef,
+  pendingRepos,
+  workflowStartedAt,
+  workflowBaseline,
+  workflowBaselineForModule,
+  type CodeRef,
+} from "./aidlc-baseline";
+import {
+  evidenceRelativePath,
+  greenCoveredUcds,
+  i13UcdUnits,
+  isEvidenceArtifactLabel,
+  ucdCoverageGaps,
+  unitUcdIds,
+  type UnitUcdScope,
+  moduleInceptionRoot,
+  moduleManifestPath,
+  normalizeArtifactLabel,
+  readModuleManifest,
+  readUnitManifest,
+  stageInstanceId,
+  substituteArtifactPattern,
+  unitConstructionRoot,
+  type ExecutionAxis,
+  type ExecutionContext,
+  type ModuleDescriptor,
+  type UnitDescriptor,
+  FULL_WORKFLOW_SCOPES,
+  verifiedModuleIds,
+} from "./aidlc-execution-context";
+import {
+  BASELINE_UNAVAILABLE,
+  DIAGRAM_FORMATS,
+  ENGINE_VERSION,
+  GLOBAL_WORKFLOW,
+  adoptionAsBaseline,
+  appendAuditEvent,
+  baselineChain,
+  baselineRepoChains,
+  createInitialState,
+  renderBaselineRepos,
+  lightAuditPath,
+  lightStatePath,
+  parseLightWorkflowState,
+  loadWorkflowState,
+  releaseExpiredModuleClaims,
+  saveWorkflowState,
+  withWorkflowFileLock,
+  withWorkflowInitialization,
+  workflowMaintenancePlan,
+  withQuiescentWorkflowMaintenance,
+  renderLightWorkflowState,
+  workflowRefKey,
+  type DiagramFormat,
+  type HistoryEntry,
+  type WorkflowRef,
+  type WorkflowState,
+} from "./aidlc-light-state";
+import {
+  applyExecutionProfile,
+  classifyExecutionProfile,
+  isProfileSignal,
+  type ExecutionProfile,
+  type ProfileScope,
+} from "./aidlc-execution-profile";
+import { buildStagePlan } from "./aidlc-stage-plan";
+import { riskRequiredStages, selectExecutableStages } from "./aidlc-stage-selection";
+import { buildRuleLoadPlan, type RuleLoadPlan } from "./aidlc-rule-load-plan";
+import { buildBusinessDocumentLoadPlan, buildCanonicalIsolationPlan, checkSlices, sliceAdoption, sliceEvidenceErrors, SLICE_SENSOR, type SliceContext, type BusinessDocumentLoadPlan } from "./aidlc-document-slices";
+import { buildEvidenceReusePlan, type EvidenceReusePlan } from "./aidlc-evidence-reuse-plan";
+import { buildExecutionProfileReleaseMeasurements, type ExecutionProfileReleaseMeasurements } from "./aidlc-execution-profile-measurements";
+import { projectDeliverySummary, renderDeliverySummaryMarkdown } from "./aidlc-delivery-summary";
+import {
+  evidenceSourceRevision,
+  evidenceScopeForInstance,
+  extractOwnedState,
+  legacyEvidenceScopeForInstance,
+  integrationStageSlugs,
+  isSplitLayout,
+  loadWorkflowParts,
+  loadWorkflowView,
+  mergeWorkflowView,
+  ownerOfInstance,
+  relativeStatePath,
+  sameRef,
+  saveRegistry,
+  updateRegistry,
+  withRegistryPublication,
+  type RegistryCrossRequire,
+  type RegistrySharedContract,
+  type WorkflowParts,
+  type WorkflowRegistry,
+} from "./aidlc-workflow-layout";
+import { committedFile, describeConflict, gitHistoryAvailable, lineageConflicts, lineageRemedy, resolveCommit, revisionRegressions, type LineageConflict } from "./aidlc-lineage";
+import { provisionControlPlaneGitStrategy, runRegistryMergeDriver, type ControlPlaneProvisionResult } from "./aidlc-git-merge";
+import { PROJECT_PROVIDERS_LOCK_PATH, PROJECT_PROVIDERS_PATH } from "./aidlc-project-provider";
+import {
+  ProviderResolutionError,
+  assertPlanResolvable,
+  defaultResolutionPolicy,
+  freezeProviderPlan,
+  resolveProjectProviderPlan,
+  type ProviderDirectiveAction,
+  type ProviderDirectiveContext,
+} from "./aidlc-provider-resolver";
+import type { CapabilityExpression, GateDecisionV1_1, ProviderScope, ProviderSourceRevision, Sha256Digest } from "./aidlc-provider-types";
+import { verifyGateDecisionForReport } from "./aidlc-provider-gate";
+
+// ---------------------------------------------------------------------------
+// Paths
+// ---------------------------------------------------------------------------
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ENGINE_ROOT = resolve(__dirname, "..");
+const GRAPH_PATH = join(__dirname, "data", "stage-graph.json");
+const require = createRequire(import.meta.url);
+const TSX_CLI = require.resolve("tsx/cli");
+
+// State lives in the user's project; realpath prevents lexical containment bypasses.
+const PROJECT_ROOT = realpathSync(process.cwd());
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface StageNode {
+  slug: string;
+  number: string;
+  name: string;
+  phase: string;
+  axis: ExecutionAxis;
+  execution: "ALWAYS" | "CONDITIONAL";
+  selection: "automatic" | "user";
+  choices: string[];
+  scopes: string[];
+  requires: string[];
+  cross_module_requires?: string[];
+  scope_waived_requires: string[];
+  consumes: string[];
+  produces: string[];
+  sensors: string[];
+  /** Optional Core-owned Provider capabilities required by this canonical stage. */
+  provider_capabilities?: string[];
+  traceability: "required" | "not_applicable";
+  completion_contract: "gated" | "instruction_only";
+  condition: string;
+  approval: "block" | "confirm" | "notify";
+  file: string;
+}
+
+export interface StageGraph {
+  version: string;
+  stages: StageNode[];
+  stage_count: number;
+}
+
+export interface StageInstance extends ExecutionContext {
+  stage: StageNode;
+  axis: ExecutionAxis;
+  instance_id: string;
+}
+
+export type ExecutionTaskLevel = "question" | "local-change" | "multi-file-feature" | "cross-module-infrastructure";
+
+/**
+ * Deterministic, directive-scoped execution guidance. It is derived from the
+ * current workflow state and stage graph; it does not create a second policy
+ * store or weaken the engine-owned gates.
+ */
+export interface ExecutionPolicy {
+  version: "1";
+  task_level: ExecutionTaskLevel;
+  goal: string;
+  success_condition: string;
+  required: {
+    requires: string[];
+    consumes: string[];
+    produces: string[];
+    sensors: string[];
+    approval: StageNode["approval"];
+    completion_contract: StageNode["completion_contract"];
+  };
+  allowed_exploration: string;
+  reusable_evidence: string;
+  prohibited_actions: string[];
+  stop_conditions: string[];
+  expansion_triggers: string[];
+  priority: string[];
+}
+
+export interface Directive {
+  kind: "load-steering" | "run-stage" | "ask" | "print" | "error" | "done" | "parked";
+  stage?: string;
+  stage_file?: string;
+  name?: string;
+  number?: string;
+  phase?: string;
+  execution_policy?: ExecutionPolicy;
+  gate?: boolean;
+  requires?: string[];
+  consumes?: string[];
+  produces?: string[];
+  sensors?: string[];
+  choices?: string[];
+  message?: string;
+  handoff_prompt?: string;
+  handoff_status?: "updated" | "unverified";
+  handoff_error?: string;
+  rules_content?: string[];
+  /** Phase 4: deterministic instruction loading for the current hand-off. */
+  rule_load_plan?: RuleLoadPlan;
+  business_document_load_plan?: BusinessDocumentLoadPlan;
+  /** Phase 5: advisory reuse/verification schedule; normal gates remain authoritative. */
+  evidence_reuse_plan?: EvidenceReusePlan;
+  provider_context?: ProviderDirectiveContext;
+  provider_actions?: readonly ProviderDirectiveAction[];
+  [key: string]: unknown;
+}
+
+export interface ConditionContext {
+  has_legacy_code: boolean;
+  has_ui_requirements: boolean;
+  has_reverse_output: boolean;
+  multi_module: boolean;
+  has_product_contract_needs: boolean;
+  has_nfr_needs: boolean;
+  has_infra_needs: boolean;
+  has_test_case_sources: boolean;
+  has_contract_dependencies: boolean;
+  context_compacted: boolean;
+  ui_design_selected: boolean;
+  ui_mode_html_mock: boolean;
+  ui_mode_figma: boolean;
+  has_application_design_needs: boolean;
+  has_unit_generation_needs: boolean;
+  has_functional_design_needs: boolean;
+  needs_ui_implementation_bridge: boolean;
+  has_deployment_needs: boolean;
+  has_operations_template_needs: boolean;
+}
+
+const VALID_SCOPES = new Set([
+  "feature",
+  "enterprise",
+  "mvp",
+  "classic",
+  "express",
+  "workshop",
+  "bugfix",
+  "refactor",
+]);
+
+const PRD_ELIGIBLE_SCOPES = new Set(FULL_WORKFLOW_SCOPES);
+
+// ---------------------------------------------------------------------------
+// Subcommands
+// ---------------------------------------------------------------------------
+
+const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format", "baseline", "state", "profile", "checkpoint", "audit", "unit", "registry"] as const;
+type Subcommand = (typeof SUBCOMMANDS)[number];
+
+const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
+type StageResult = (typeof VALID_RESULTS)[number];
+const NEXT_FLAGS = new Set(["preview", "scope", "work", "with-prd", "resume", "status", "text", "claim", "module", "unit", "owner", "branch", "worktree", "replace-lineage", "provider-approval"]);
+const REPORT_FLAGS = new Set(["stage", "result", "user-input", "instruction-ack", "module", "unit", "instance", "owner", "gate-decision"]);
+const UNIT_INPUTS_FLAGS = new Set(["module", "unit", "paths", "shared-paths", "depends-on-units"]);
+const SPLIT_FLAGS = new Set(["from", "dry-run", "replace-lineage"]);
+const STATE_FLAGS = new Set(["lineage", "user-input", "reason", "text", "module", "from", "maintenance"]);
+const PROFILE_FLAGS = new Set(["signal", "detail", "module"]);
+const ARCHIVE_FLAGS = new Set(["reason"]);
+const UPGRADE_FLAGS = new Set(["dry-run", "module", "retire-execution", "instance", "human-instruction-ref"]);
+const DIAGRAM_FORMAT_FLAGS = new Set(["set", "user-input"]);
+// `module` scopes --adopt / --advance / the read-only view to a module sub-workflow (4.10.0); --set / --replace reject it.
+const BASELINE_FLAGS = new Set(["set", "advance", "adopt", "user-input", "reason", "dry-run", "replace", "expect", "module", "approval-ref"]);
+// MARS-271: checkpoint(收敛期非正式上报)与 audit(notify 事后抽审)不写引擎状态,
+// 不要求 session binding;audit --instance 回写抽审台账,checkpoint 只落 checkpoint 文件。
+const CHECKPOINT_FLAGS = new Set(["note", "instance", "list"]);
+const AUDIT_FLAGS = new Set(["list", "module", "instance", "finding", "follow-up"]);
+const MODULE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62})$/;
+/** Appended to every error where the state write succeeded but its audit entry did not. */
+const AUDIT_MISSING = "状态已写入、审计缺失，请人工补记";
+const INTEGRATION_WORKFLOW: WorkflowRef = { kind: "integration" };
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// MARS-277: the compiled graph is immutable for the lifetime of one CLI process;
+// next/report call loadGraph from many admission helpers, so it is parsed once.
+let cachedGraph: StageGraph | undefined;
+let cachedGraphMtime: number | undefined;
+
+export function loadGraph(): StageGraph {
+  const mtime = statSync(GRAPH_PATH).mtimeMs;
+  if (cachedGraph && mtime === cachedGraphMtime) return cachedGraph;
+  if (!existsSync(GRAPH_PATH)) {
+    throw new Error(`Stage graph not found at ${GRAPH_PATH}. Run 'aidlc-graph.ts compile' first.`);
+  }
+  cachedGraph = normalizeExecutionGraph(JSON.parse(readFileSync(GRAPH_PATH, "utf-8")));
+  cachedGraphMtime = mtime;
+  return cachedGraph;
+}
+
+/** Older cached graphs are diagnostic inputs, never a way to restore execution
+ * topology or subagent gates. Real upstream implementation dependencies remain. */
+export function normalizeExecutionGraph(graph: StageGraph): StageGraph {
+  const retiredArtifact = (path: string) => /^(?:\.aidlc\/(?:subagents|evidence\/subagent-execution)|docs\/aidlc\/construction\/subagent-results)(?:\/|$)/.test(path.replace(/\\/g, "/"));
+  const stages = graph.stages.filter(stage => stage.slug !== "subagent-execution").map(source => {
+    const { lead_agent, support_agents, mode, reviewer_agent, ...stage } = source as StageNode & {
+      lead_agent?: unknown; support_agents?: unknown; mode?: unknown; reviewer_agent?: unknown;
+    };
+    return { ...stage,
+      requires: [...new Set(stage.requires.map(dep => dep === "subagent-execution" ? "code-generation" : dep))],
+      consumes: stage.consumes.filter(path => !retiredArtifact(path)),
+      produces: stage.produces.filter(path => !retiredArtifact(path)),
+      sensors: stage.sensors.filter(sensor => sensor !== "subagent-evidence"),
+    };
+  });
+  return { ...graph, stages, stage_count: stages.length };
+}
+
+function loadState(): WorkflowState | null {
+  return loadWorkflowState(PROJECT_ROOT);
+}
+
+function saveState(state: WorkflowState, afterCommit?: () => void): void {
+  saveWorkflowState(PROJECT_ROOT, state, GLOBAL_WORKFLOW, { afterCommit });
+}
+
+/**
+ * Phase 1 has one intentional profile entry point: creation of a new global
+ * workflow. It records the scope default as advisory state only; it does not
+ * alter stage selection, and module/integration workflows never call it.
+ */
+function initializeGlobalExecutionProfile(state: WorkflowState): void {
+  if (state.execution_profile !== undefined) return;
+  const classified = classifyExecutionProfile({
+    scope: state.scope as ProfileScope,
+  });
+  state.execution_profile = applyExecutionProfile({
+    classified,
+    at: state.created_at,
+    actor: "engine",
+  });
+}
+
+/**
+ * MARS-117: provision the control-plane git merge strategy (A: audit merge=union; B:
+ * registry merge driver + local .git/config registration; C: .gitignore of engine
+ * backups) idempotently at the project root. Called from every control-plane creation
+ * path (next --scope, split, a module workflow created after the split) and never
+ * blocks the workflow. Returns human-readable warning lines (a .gitattributes/.gitignore
+ * strategy clash the user set) for the caller to surface in its own message; it never
+ * writes to the workflow audit (provisioning is repository infrastructure, not a
+ * workflow event, and must not break cross-version audit parity).
+ */
+function provisionGitStrategy(): string[] {
+  let result: ControlPlaneProvisionResult;
+  try {
+    result = provisionControlPlaneGitStrategy(PROJECT_ROOT);
+  } catch (error) {
+    return [`⚠️ Could not provision the control-plane git merge strategy (${error instanceof Error ? error.message : String(error)}); audit/registry merges may conflict until it is set up.`];
+  }
+  const warnings: string[] = [];
+  for (const conflict of [...result.gitattributes.conflicts]) {
+    warnings.push(`⚠️ .gitattributes already sets a different merge strategy for ${conflict.pattern} ("${conflict.existing}"); the engine did not overwrite it. For conflict-free control-plane merges use: ${conflict.managed}`);
+  }
+  // Provisioning the git merge strategy is repository infrastructure, not a workflow
+  // event: it is intentionally NOT written to the workflow audit (keeps aidlc/active
+  // audit.md a pure workflow log and preserves cross-version audit parity). The result
+  // is surfaced to the user through the command's own message instead.
+  return warnings;
+}
+
+export function runtimeChoices(stage: StageNode, state: WorkflowState): string[] {
+  if (stage.slug === "workspace-detection" && !FULL_WORKFLOW_SCOPES.has(state.scope)) return [];
+  return stage.choices || [];
+}
+
+/**
+ * Filter stages by scope and the immutable user selections captured in Markdown workflow history.
+ * User-selected stages never enter the default path.
+ *
+ * A persisted lightweight profile is the sole opt-in for the Phase 3 slice.
+ * It may remove only an `ALWAYS` stage which the graph declares as an
+ * instruction-only no-op: it has no sensors or produced artifacts, no
+ * blocking approval, and no selected stage requires it.  In particular, gated stages and every stage
+ * with evidence are retained even when their scope is lightweight.  Missing
+ * (legacy), standard, and complex profiles use the original graph selector
+ * without any change.
+ */
+export function getExecutableStages(
+  graph: StageGraph,
+  scope: string,
+  selectedOptionalStages: string[] = [],
+  executionProfile?: ExecutionProfile,
+): StageNode[] {
+  return selectExecutableStages<StageNode>(graph.stages, scope, selectedOptionalStages, executionProfile);
+}
+
+const DEFAULT_MODULE: ModuleDescriptor = { module_id: "project", name: "Project", service_id: "not-applicable" };
+const DEFAULT_UNIT: UnitDescriptor = { unit_id: "default", name: "Default", service_id: "not-applicable" };
+
+export function selectedOptionalStages(state: WorkflowState): string[] {
+  return state.selected_optional_stages;
+}
+
+const ARCHITECTURE_CHOICES = new Set(["single-module", "multi-module"]);
+const UI_DESIGN_CHOICES = new Set(["html-mock", "figma-create", "figma-existing", "skip"]);
+function recordedStageChoice(state: WorkflowState, stageSlug: string, moduleId?: string): string | undefined {
+  return [...state.history].reverse().find((entry) =>
+    entry.stage === stageSlug
+    && (entry.result === "completed" || entry.result === "approved")
+    && (!moduleId || entry.module_id === moduleId)
+    && typeof entry.user_input === "string"
+  )?.user_input;
+}
+
+export function architectureChoice(state: WorkflowState): string | undefined {
+  const recorded = recordedStageChoice(state, "workspace-detection");
+  return recorded && ARCHITECTURE_CHOICES.has(recorded) ? recorded : undefined;
+}
+
+function uiDesignChoice(state: WorkflowState, moduleId?: string): string | undefined {
+  const recorded = recordedStageChoice(state, "ui-mock", moduleId);
+  return recorded && UI_DESIGN_CHOICES.has(recorded) ? recorded : undefined;
+}
+
+function runtimeStage(instance: StageInstance, state: WorkflowState): StageNode {
+  const stage = instance.stage;
+  let consumes = [...stage.consumes];
+  let produces = [...stage.produces];
+  let sensors = [...stage.sensors];
+
+  if (stage.slug === "build-and-test" && !globalReviewRequired(state)) {
+    sensors = sensors.filter(sensor => sensor !== "global-review-evidence");
+    produces = produces.filter(path => !path.endsWith("/global-review-evidence.json"));
+  }
+
+  if (stage.slug === "code-generation" && buildConditionContext(state, instance).needs_ui_implementation_bridge) {
+    consumes.push(
+      "docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md",
+      ".aidlc/evidence/ui-implementation-bridge/{module-id}/{unit-id}/frontend-platform-spec.json",
+    );
+  }
+
+  if (stage.slug === "cross-validation" && instance.module_id) {
+    if (selectedOptionalStages(state).includes("prd-generation")) {
+      consumes.push(
+        "docs/aidlc/ideation/prd.md",
+        ".aidlc/evidence/prd-generation/prd-completeness.json",
+      );
+    }
+    const choice = uiDesignChoice(state, instance.module_id);
+    if (choice === "html-mock" || choice === "figma-create" || choice === "figma-existing") {
+      consumes.push(
+        "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md",
+        ".aidlc/evidence/ui-page-planning/{module-id}/ui-artifact-consistency.json",
+      );
+      if (choice === "html-mock") {
+        consumes.push(
+          "docs/aidlc/modules/{module-id}/inception/ui-mock/",
+          ".aidlc/evidence/ui-mock-generation/{module-id}/ui-artifact-consistency.json",
+        );
+      } else {
+        consumes.push(
+          "docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json",
+          ".aidlc/evidence/ui-figma-generation/{module-id}/ui-artifact-consistency.json",
+        );
+      }
+    }
+  }
+
+  if (stage.slug === "code-review") {
+    const choice = uiDesignChoice(state, instance.module_id);
+    const uiSelected = choice === "html-mock" || choice === "figma-create" || choice === "figma-existing";
+    if (!uiSelected) {
+      sensors = sensors.filter((sensor) => sensor !== "ui-design-alignment");
+      produces = produces.filter((pattern) => !pattern.endsWith("/ui-design-alignment.json"));
+    }
+  }
+
+  // MARS-271 审批策略分级:模块可在 module-manifest 的 approval_overrides 中按阶段
+  // 覆盖审批层级(block/confirm/notify)。契约/架构决策默认 block 的阶段禁止降级,
+  // 只允许维持或加强;notify/confirm 阶段完成后进入事后抽审台账。
+  let approval = stage.approval;
+  if (instance.module_id) {
+    const override = moduleApprovalOverrides(instance.module_id)[stage.slug];
+    if (override && override !== approval) {
+      if (stage.approval === "block" && override !== "block") {
+        throw new Error(`approval_overrides of module ${instance.module_id} cannot downgrade stage ${stage.slug}: 契约/架构决策阶段保持 block`);
+      }
+      approval = override;
+    }
+  }
+
+  return {
+    ...stage,
+    approval,
+    consumes: [...new Set(consumes)],
+    produces: [...new Set(produces)],
+    sensors: [...new Set(sensors)],
+  };
+}
+
+/** MARS-271: approval tier overrides declared by a module's manifest (cached per run). */
+const moduleApprovalOverrideCache = new Map<string, Record<string, "block" | "confirm" | "notify">>();
+function moduleApprovalOverrides(moduleId: string): Record<string, "block" | "confirm" | "notify"> {
+  const cached = moduleApprovalOverrideCache.get(moduleId);
+  if (cached) return cached;
+  let overrides: Record<string, "block" | "confirm" | "notify"> = {};
+  if (existsSync(moduleManifestPath(PROJECT_ROOT))) {
+    try {
+      const module = readModuleManifest(PROJECT_ROOT).find((item) => item.module_id === moduleId);
+      overrides = module?.approval_overrides || {};
+    } catch {
+      // 解析失败的 manifest 由读取它的正式门禁报告;运行时按默认层级继续。
+    }
+  }
+  moduleApprovalOverrideCache.set(moduleId, overrides);
+  return overrides;
+}
+
+export function runtimeInstance(instance: StageInstance, state: WorkflowState): StageInstance {
+  return { ...instance, stage: runtimeStage(instance, state) };
+}
+
+function completedInstanceIds(state: WorkflowState): string[] {
+  return state.completed_stage_instances || state.completed_stages;
+}
+
+function skippedInstanceIds(state: WorkflowState): string[] {
+  return state.skipped_stage_instances || state.skipped_stages;
+}
+
+function isInstanceResolved(state: WorkflowState, instanceId: string): boolean {
+  return completedInstanceIds(state).includes(instanceId) || skippedInstanceIds(state).includes(instanceId);
+}
+
+export function makeInstance(stage: StageNode, axis: ExecutionAxis, context: ExecutionContext = {}): StageInstance {
+  return { stage, axis, ...context, instance_id: stageInstanceId(stage.slug, axis, context) };
+}
+
+function routingModules(state: WorkflowState): ModuleDescriptor[] {
+  if (!state.completed_stages.includes("module-division")) return [DEFAULT_MODULE];
+  return readModuleManifest(PROJECT_ROOT);
+}
+
+function routingUnits(state: WorkflowState, modules: ModuleDescriptor[]): Array<{ module: ModuleDescriptor; unit: UnitDescriptor }> {
+  return modules.flatMap((module) => {
+    const unitsStage = stageInstanceId("units-generation", "module", { module_id: module.module_id });
+    if (completedInstanceIds(state).includes(unitsStage)) {
+      return readUnitManifest(PROJECT_ROOT, module.module_id).map((unit) => ({ module, unit }));
+    }
+    // A condition-skipped I14 intentionally uses one deterministic default
+    // unit; it must not require a unit-manifest that the skipped Stage did not
+    // produce.
+    return [{ module, unit: DEFAULT_UNIT }];
+  });
+}
+
+/**
+ * Expand the static graph into deterministic project/module/unit instances.
+ * Consecutive module stages run module-major; consecutive unit stages run unit-major.
+ */
+export function expandStageInstances(graph: StageGraph, state: WorkflowState): StageInstance[] {
+  const stages = getExecutableStages(graph, state.scope, selectedOptionalStages(state), state.execution_profile);
+
+  const modules = routingModules(state);
+  const units = routingUnits(state, modules);
+  const instances: StageInstance[] = [];
+  for (let index = 0; index < stages.length;) {
+    const axis = stages[index].axis;
+    let end = index + 1;
+    while (end < stages.length && stages[end].axis === axis) end++;
+    const segment = stages.slice(index, end);
+    if (axis === "project") {
+      instances.push(...segment.map((stage) => makeInstance(stage, "project")));
+    } else if (axis === "module") {
+      for (const module of modules) {
+        instances.push(...segment.map((stage) => makeInstance(stage, "module", { module_id: module.module_id })));
+      }
+    } else {
+      for (const { module, unit } of units) {
+        instances.push(...segment.map((stage) => makeInstance(stage, "unit", { module_id: module.module_id, unit_id: unit.unit_id })));
+      }
+    }
+    index = end;
+  }
+  return instances;
+}
+
+interface ModuleDependency {
+  provider_module: string;
+  consumer_module: string;
+  provider_stage: string;
+  consumer_stage: string;
+  source: string;
+}
+
+function dependencyDocuments(): string[] {
+  const root = join(PROJECT_ROOT, "docs", "aidlc");
+  if (!existsSync(root)) return [];
+  const result: string[] = [];
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name.startsWith(".")) continue;
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) visit(path);
+      else if (entry.isFile() && (entry.name === "product-contracts.md" || entry.name === "runtime-dependencies.md")) result.push(path);
+    }
+  };
+  visit(root);
+  return result.sort();
+}
+
+
+export function moduleDependencyGraph(): ModuleDependency[] {
+  const manifestPath = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "module-manifest.json");
+  if (!existsSync(manifestPath)) return [];
+  const modules = readModuleManifest(PROJECT_ROOT);
+  const dependencies: ModuleDependency[] = [];
+  const append = (providerValue: string, consumerValue: string, providerStageValue: string | undefined, consumerStageValue: string | undefined, source: string): void => {
+    const provider = moduleForValue(modules, providerValue);
+    const consumer = moduleForValue(modules, consumerValue, provider);
+    if (!provider || !consumer || provider === consumer) return;
+    const providerStage = providerStageValue?.replace(/^(?:provider[_ -]?stage|提供方阶段)\s*[:：]\s*/i, "").trim() || "application-design";
+    const consumerStage = consumerStageValue?.replace(/^(?:consumer[_ -]?stage|消费方阶段)\s*[:：]\s*/i, "").trim() || "application-design";
+    dependencies.push({
+      provider_module: provider,
+      consumer_module: consumer,
+      provider_stage: providerStage,
+      consumer_stage: consumerStage,
+      source,
+    });
+  };
+  for (const sourcePath of dependencyDocuments()) {
+    const source = relative(PROJECT_ROOT, sourcePath);
+    const lines = readFileSync(sourcePath, "utf8").split(/\r?\n/);
+    let header: string[] | undefined;
+    for (const line of lines) {
+      if (!line.trim().startsWith("|")) {
+        header = undefined;
+        continue;
+      }
+      const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
+      if (cells.length === 0 || cells.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
+      if (!header) {
+        header = cells;
+        continue;
+      }
+      const index = (patterns: RegExp[]): number => header!.findIndex((cell) => patterns.some((pattern) => pattern.test(cell)));
+      const providerIndex = index([/provider|source|提供方|来源/i]);
+      const consumerIndex = index([/consumer|target|消费者|消费方|目标/i]);
+      if (providerIndex >= 0 && consumerIndex >= 0 && cells[providerIndex] && cells[consumerIndex]) {
+        const providerStageIndex = index([/provider[_ -]?stage|提供方阶段/i]);
+        const consumerStageIndex = index([/consumer[_ -]?stage|消费方阶段/i]);
+        append(cells[providerIndex], cells[consumerIndex], providerStageIndex >= 0 ? cells[providerStageIndex] : undefined, consumerStageIndex >= 0 ? cells[consumerStageIndex] : undefined, source);
+        continue;
+      }
+      const ids = modules.map((module) => module.module_id).filter((moduleId) => line.includes(moduleId));
+      const distinct = [...new Set(ids)];
+      if (distinct.length >= 2) {
+        append(
+          distinct[0],
+          distinct[1],
+          line.match(/(?:provider[_ -]?stage|提供方阶段)\s*[:：|]\s*([a-z0-9][a-z0-9-]*)/i)?.[1],
+          line.match(/(?:consumer[_ -]?stage|消费方阶段)\s*[:：|]\s*([a-z0-9][a-z0-9-]*)/i)?.[1],
+          source,
+        );
+      }
+    }
+  }
+  const unique = new Map<string, ModuleDependency>();
+  for (const dependency of dependencies) unique.set(`${dependency.provider_module}->${dependency.consumer_module}:${dependency.provider_stage}:${dependency.consumer_stage}`, dependency);
+  return [...unique.values()];
+}
+
+// 缺口A:跨 module 契约依赖门禁。消费方阶段推进前,验证其依赖的 provider module 的 provider_stage 已完成。
+// 复用 moduleDependencyGraph()(已从 product-contracts/runtime-dependencies 解析出 provider→consumer 边)
+// 与 completedInstanceIds(阶段实例完成判定)。只判时序(provider 阶段是否完成),不判契约内容(那是 contract-baseline)。
+// 遗留兼容:无跨 module 依赖表 → 空图 → 无 failure,不阻断存量项目。
+export function checkCrossModuleDependencies(instance: StageInstance, state: WorkflowState): string[] {
+  if (instance.axis !== "module" || !instance.module_id) return [];
+  const failures: string[] = [];
+  const completed = new Set(completedInstanceIds(state));
+  const isProviderStageDone = (providerModule: string, providerStage: string): boolean => {
+    // provider module 的 provider_stage 完成 = 存在已完成实例 `<providerStage>@module:<providerModule>`,
+    // 或 project 轴阶段直接以 slug 记完成。
+    const moduleInstanceId = `${providerStage}@module:${providerModule}`;
+    return completed.has(moduleInstanceId) || completed.has(providerStage);
+  };
+  for (const dep of moduleDependencyGraph()) {
+    if (dep.consumer_module !== instance.module_id || dep.consumer_stage !== instance.stage.slug) continue;
+    if (!isProviderStageDone(dep.provider_module, dep.provider_stage)) {
+      failures.push(`跨 module 依赖未就绪: ${dep.provider_module}@${dep.provider_stage} 未完成,但本阶段 ${dep.consumer_module}@${dep.consumer_stage} 消费其契约(来源: ${dep.source})`);
+    }
+  }
+  return failures;
+}
+
+export function dependencyInstances(instance: StageInstance, dependency: string, instances: StageInstance[]): StageInstance[] {
+  const candidates = instances.filter((candidate) => candidate.stage.slug === dependency);
+  if (instance.axis === "project") return candidates;
+  if (instance.axis === "module") {
+    return candidates.filter((candidate) => candidate.axis === "project" || candidate.module_id === instance.module_id);
+  }
+  return candidates.filter((candidate) => {
+    if (candidate.axis === "project") return true;
+    if (candidate.module_id !== instance.module_id) return false;
+    return candidate.axis === "module" || candidate.unit_id === instance.unit_id;
+  });
+}
+
+function checkRequires(instance: StageInstance, instances: StageInstance[], state: WorkflowState): string[] {
+  const missing: string[] = [];
+  for (const dependency of instance.stage.requires || []) {
+    const required = dependencyInstances(instance, dependency, instances);
+    if (required.length === 0) {
+      if (!instance.stage.scope_waived_requires.includes(dependency)) missing.push(dependency);
+      continue;
+    }
+    for (const candidate of required) if (!isInstanceResolved(state, candidate.instance_id)) missing.push(candidate.instance_id);
+  }
+  for (const dependency of instance.stage.cross_module_requires || []) {
+    const required = instances.filter((candidate) => candidate.stage.slug === dependency && candidate.axis === "module" && candidate.module_id !== instance.module_id);
+    if (required.length === 0) missing.push(`cross-module:${dependency}`);
+    else for (const candidate of required) if (!isInstanceResolved(state, candidate.instance_id)) missing.push(candidate.instance_id);
+  }
+  missing.push(...crossModuleRequires(instance, instances, state));
+  return [...new Set(missing)];
+}
+
+export function crossModuleRequires(instance: StageInstance, instances: StageInstance[], state: WorkflowState): string[] {
+  if (instance.axis !== "module" || !instance.module_id) return [];
+  const failures: string[] = [];
+  for (const dependency of moduleDependencyGraph()) {
+    if (dependency.consumer_module !== instance.module_id || dependency.consumer_stage !== instance.stage.slug) continue;
+    const providers = instances.filter((candidate) => candidate.axis === "module" && candidate.module_id === dependency.provider_module && candidate.stage.slug === dependency.provider_stage);
+    if (providers.length === 0) {
+      failures.push(`${dependency.provider_stage}@module:${dependency.provider_module} (from ${dependency.source})`);
+      continue;
+    }
+    for (const provider of providers) if (!isInstanceResolved(state, provider.instance_id)) failures.push(provider.instance_id);
+  }
+  return failures;
+}
+
+
+function reconcileStageSummaries(state: WorkflowState, instances: StageInstance[]): void {
+  for (const stage of getExecutableStages(loadGraph(), state.scope, selectedOptionalStages(state), state.execution_profile)) {
+    const stageInstances = instances.filter((instance) => instance.stage.slug === stage.slug);
+    if (stageInstances.length === 0) continue;
+    const completed = new Set(completedInstanceIds(state));
+    const skipped = new Set(skippedInstanceIds(state));
+    const allResolved = stageInstances.every((instance) => completed.has(instance.instance_id) || skipped.has(instance.instance_id));
+    if (!allResolved) continue;
+    if (stageInstances.every((instance) => skipped.has(instance.instance_id))) {
+      if (!state.skipped_stages.includes(stage.slug)) state.skipped_stages.push(stage.slug);
+    } else if (!state.completed_stages.includes(stage.slug)) {
+      state.completed_stages.push(stage.slug);
+    }
+  }
+}
+
+function assertProjectPath(path: string): string {
+  const candidate = resolve(path);
+  const rel = relative(PROJECT_ROOT, candidate);
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error(`artifact path escapes project root: ${path}`);
+  }
+  if (existsSync(candidate)) {
+    const stat = lstatSync(candidate);
+    if (stat.isSymbolicLink()) throw new Error(`artifact path is a symbolic link: ${path}`);
+    const real = realpathSync(candidate);
+    const realRel = relative(PROJECT_ROOT, real);
+    if (realRel === ".." || realRel.startsWith(`..${sep}`) || isAbsolute(realRel)) {
+      throw new Error(`artifact path resolves outside project root: ${path}`);
+    }
+  }
+  return candidate;
+}
+
+function collectFiles(path: string): string[] {
+  const safe = assertProjectPath(path);
+  if (!existsSync(safe)) return [];
+  const stat = lstatSync(safe);
+  if (stat.isSymbolicLink()) throw new Error(`artifact path is a symbolic link: ${safe}`);
+  if (stat.isFile()) return [safe];
+  if (!stat.isDirectory()) return [];
+
+  const files: string[] = [];
+  for (const entry of readdirSync(safe)) {
+    if (entry.startsWith(".")) continue;
+    files.push(...collectFiles(join(safe, entry)));
+  }
+  return files;
+}
+
+// ---------------------------------------------------------------------------
+// MARS-95: source produce = tracked text files / the unit's delivery set
+// ---------------------------------------------------------------------------
+
+/** A file without NUL bytes (git's own binary heuristic). Unreadable files count as binary. */
+function isTextFile(path: string): boolean {
+  try {
+    return !readFileSync(path).includes(0);
+  } catch {
+    return false;
+  }
+}
+
+/** NUL-separated output of a git command in `cwd`, or null when git fails (not a repository, unknown commit). */
+function gitPaths(cwd: string, args: string[]): string[] | null {
+  const result = runSync("git", args, { cwd, encoding: "utf8", shell: false });
+  if (result.error || result.status !== 0) return null;
+  return result.stdout.split("\0").filter(Boolean);
+}
+
+/**
+ * Repository of a project-relative source root directory: the declared repository it
+ * belongs to (workflow or nested, by `.aidlc/source-roots.json`), the pathspec inside
+ * it, and whether git really resolves the directory to that repository (false for an
+ * undeclared independent repository, or no git at all) — only then can it be diffed
+ * against that repository's baseline.
+ */
+function sourceRootRepo(rel: string, directory: string): { repoRoot: string; repoKey: string; pathspec: string; resolved: boolean } {
+  const repo = codeRefRepo(PROJECT_ROOT, rel, declaredNestedRoots(PROJECT_ROOT));
+  const top = runSync("git", ["rev-parse", "--show-toplevel"], { cwd: directory, encoding: "utf8", shell: false });
+  let resolved = false;
+  if (!top.error && top.status === 0 && top.stdout.trim()) {
+    try {
+      resolved = realpathSync(top.stdout.trim()) === realpathSync(repo.repoRoot);
+    } catch {
+      resolved = false;
+    }
+  }
+  return { repoRoot: repo.repoRoot, repoKey: repo.repoKey, pathspec: repo.relativePath || ".", resolved };
+}
+
+/**
+ * Tracked plus untracked-but-not-ignored files below `directory` (`git ls-files` run in
+ * the directory itself, so git answers for the repository that really holds it), as
+ * absolute paths: existing regular text files only; files matching `.gitignore` (even
+ * when tracked), deleted files, gitlinks and dot-prefixed path segments (as
+ * collectFiles) are dropped; a symbolic link keeps failing closed. Null when the
+ * directory is not inside a git work tree.
+ */
+function trackedTextFiles(directory: string): string[] | null {
+  const listed = gitPaths(directory, ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."]);
+  if (listed === null) return null;
+  const ignored = new Set(gitPaths(directory, ["ls-files", "-z", "--cached", "--ignored", "--exclude-standard", "--", "."]) || []);
+  const files: string[] = [];
+  for (const path of new Set(listed)) {
+    if (ignored.has(path) || path.split("/").some((segment) => segment.startsWith("."))) continue;
+    const absolute = join(directory, ...path.split("/"));
+    if (!existsSync(absolute)) continue;
+    const stat = lstatSync(absolute);
+    if (stat.isSymbolicLink()) throw new Error(`artifact path is a symbolic link: ${absolute}`);
+    if (stat.isFile() && isTextFile(absolute)) files.push(absolute);
+  }
+  return files.sort();
+}
+
+/** Text files of one source root: tracked ones in a git work tree, else (no git) every non-dot text file. */
+function sourceRootFiles(root: string): string[] {
+  const rel = root.replace(/\\/g, "/").replace(/\/+$/, "");
+  const target = assertProjectPath(join(PROJECT_ROOT, ...rel.split("/")));
+  if (!existsSync(target)) return [];
+  if (!lstatSync(target).isDirectory()) return collectFiles(target).filter(isTextFile);
+  return trackedTextFiles(target) ?? collectFiles(target).filter(isTextFile);
+}
+
+interface SourceDelivery {
+  deletions: VerifiedDeletion[];
+  /** `delta`: at least one source root was diffed against a registered baseline; `tracked`: no baseline, the tracked text files. */
+  mode: "delta" | "tracked";
+  /** Expanded source roots (`<root>/`). */
+  roots: string[];
+  /** Delivered (delta) or tracked (fallback) text files, absolute. */
+  files: string[];
+  /** Range each diffed repository was compared with ("." = workflow repository): `<baseline>` or `<baseline>..<completion>`. */
+  baselines: Record<string, string>;
+  /** Roots inside a nested repository a lightweight worktree skipped; judged in the main checkout as before. */
+  delegated: string[];
+  /** Why the delivery set cannot be judged (git diff failed, or an empty delta of a unit without ucd_exemption). */
+  error?: string;
+  /** The delta is empty and the unit declares no ucd_exemption (`error` names it). */
+  emptyDelta?: boolean;
+  /** Empty delta of a unit that declares ucd_exemption: the source produce is not_applicable. */
+  exemption?: { reason_code: string; approval_ref: string; reason: string };
+}
+
+type DeliveryRange = { base: string; head?: string };
+
+/** source_revision of the unit's code-generation GREEN evidence: workflow commit and nested repository commits. */
+function unitGreenRevision(instance: StageInstance): { commit: string; repos: Record<string, string> } | undefined {
+  if (!instance.module_id || !instance.unit_id) return undefined;
+  const path = join(PROJECT_ROOT, ".aidlc", "evidence", "code-generation", instance.module_id, instance.unit_id, "green-test-evidence.json");
+  if (!existsSync(path)) return undefined;
+  try {
+    const revision = asRecord(asRecord(JSON.parse(readFileSync(path, "utf8")))?.source_revision);
+    const commit = asNonEmptyString(revision?.commit);
+    if (!commit) return undefined;
+    const repos = Object.fromEntries(Object.entries(asRecord(revision?.repos) || {}).flatMap(([key, value]) => {
+      const repoCommit = asNonEmptyString(asRecord(value)?.commit);
+      return repoCommit ? [[key, repoCommit]] : [];
+    }));
+    return { commit, repos };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Diff range per repository ("." and nested keys) of the instance's module baseline
+ * (module adoption chain, else the global chain), {} when none is registered:
+ * - the current epoch against the work tree; or
+ * - when the baseline was advanced to this unit's own completion point (its GREEN
+ *   evidence commit is epoch k > 0, `orchestrate baseline --advance`), the unit's
+ *   delivery is the committed range epoch k-1 .. epoch k, so a re-check of a completed
+ *   unit judges what it delivered rather than an empty delta or later units' work.
+ */
+function deliveryRanges(instance: StageInstance): Record<string, DeliveryRange> {
+  if (!instance.module_id) return {};
+  let baseline: ReturnType<typeof workflowBaselineForModule>;
+  try {
+    baseline = workflowBaselineForModule(PROJECT_ROOT, instance.module_id);
+  } catch {
+    return {};
+  }
+  if (!baseline.registered || !COMMIT_ID_PATTERN.test(baseline.commit)) return {};
+  const green = unitGreenRevision(instance);
+  const anchor = green ? baseline.epochs.lastIndexOf(green.commit) : -1;
+  if (anchor > 0) {
+    const before = epochRepos(baseline, anchor - 1);
+    const at = epochRepos(baseline, anchor);
+    const ranges: Record<string, DeliveryRange> = { [WORKFLOW_REPO_KEY]: { base: baseline.epochs[anchor - 1], head: baseline.epochs[anchor] } };
+    for (const [key, commit] of Object.entries(at)) ranges[key] = before[key] ? { base: before[key], head: commit } : { base: commit };
+    return ranges;
+  }
+  const current = epochRepos(baseline, baseline.epochs.length - 1);
+  return Object.fromEntries([[WORKFLOW_REPO_KEY, { base: baseline.commit }], ...Object.entries(current).map(([key, commit]) => [key, { base: commit }])]);
+}
+
+/**
+ * The source files a module/unit stage instance delivers (MARS-95). With a registered
+ * baseline each source root is diffed in its own repository (nested repositories in
+ * their own cwd): `git diff --name-only <baseline>` (commits since the baseline plus
+ * staged and unstaged changes) plus untracked files — or the committed range of a
+ * completed unit (deliveryRanges) — limited to tracked/untracked-not-ignored text
+ * files. Without a baseline (or for a root git does not resolve to its declared
+ * repository) every tracked text file of the root is returned (mode `tracked`, the
+ * 4.11.0 scope minus ignored and binary files). Project-axis instances always use
+ * `tracked`.
+ */
+function sourceDelivery(instance?: StageInstance): SourceDelivery {
+  const roots = expandSourcePattern(CANONICAL_SOURCE_PATTERN, instance);
+  const ranges = instance ? deliveryRanges(instance) : {};
+  const delivery: SourceDelivery = { mode: "tracked", roots, files: [], baselines: {}, delegated: [], deletions: [] };
+  try {
+    delivery.deletions = sourceDeletions(PROJECT_ROOT, instance?.module_id, instance?.unit_id);
+    if (delivery.deletions.length) delivery.mode = "delta";
+  } catch (error) { delivery.error = String(error); }
+  const files = new Set<string>();
+  for (const root of roots) {
+    const rel = root.replace(/\/+$/, "");
+    if (skippedNestedMainCheckout(root)) {
+      // A skipped nested repository is one the unit does not involve: it holds none of
+      // its delivery; its baseline is still named so the worktree and the main checkout
+      // report the same result.
+      delivery.delegated.push(root);
+      const key = codeRefRepo(PROJECT_ROOT, rel, declaredNestedRoots(PROJECT_ROOT)).repoKey;
+      const range = ranges[key];
+      if (range) {
+        delivery.mode = "delta";
+        delivery.baselines[key] = range.head ? `${range.base}..${range.head}` : range.base;
+      }
+      continue;
+    }
+    const target = assertProjectPath(join(PROJECT_ROOT, ...rel.split("/")));
+    if (!existsSync(target)) continue;
+    const repo = lstatSync(target).isDirectory() ? sourceRootRepo(rel, target) : undefined;
+    const range = repo?.resolved ? ranges[repo.repoKey] : undefined;
+    const tracked = repo && range ? trackedTextFiles(target) : null;
+    if (!repo || !range || tracked === null) {
+      for (const file of sourceRootFiles(root)) files.add(file);
+      continue;
+    }
+    delivery.mode = "delta";
+    delivery.baselines[repo.repoKey] = range.head ? `${range.base}..${range.head}` : range.base;
+    const changed = gitPaths(repo.repoRoot, ["diff", "--name-only", "-z", range.base, ...(range.head ? [range.head] : []), "--", repo.pathspec]);
+    if (changed === null) {
+      delivery.error = `git diff against the baseline ${delivery.baselines[repo.repoKey]} failed in ${repo.repoKey === WORKFLOW_REPO_KEY ? "the workflow repository" : `the nested repository ${repo.repoKey}/`}`;
+      continue;
+    }
+    const untracked = range.head ? [] : gitPaths(repo.repoRoot, ["ls-files", "-z", "--others", "--exclude-standard", "--", repo.pathspec]) || [];
+    const delta = new Set([...changed, ...untracked].map((path) => resolve(repo.repoRoot, ...path.split("/"))));
+    for (const file of tracked) if (delta.has(resolve(file))) files.add(file);
+  }
+  delivery.files = [...files].sort();
+  if (delivery.mode === "delta" && !delivery.error && delivery.files.length === 0 && delivery.deletions.length === 0) {
+    let exemption: ReturnType<typeof unitUcdExemption>;
+    try {
+      exemption = instance?.module_id && instance.unit_id ? unitUcdExemption(PROJECT_ROOT, instance.module_id, instance.unit_id) : undefined;
+    } catch {
+      exemption = undefined;
+    }
+    const against = Object.entries(delivery.baselines).map(([key, commit]) => `${key}=${commit}`).join(", ");
+    if (exemption) delivery.exemption = { reason_code: exemption.reason_code, approval_ref: exemption.approval_ref, reason: exemption.reason };
+    else {
+      delivery.emptyDelta = true;
+      delivery.error = `本单元未交付任何源码变更 (no source change in ${roots.join(", ")} since the baseline ${against})`;
+    }
+  }
+  return delivery;
+}
+
+/** Use the same delivered-source scope in the producer and completion gate. */
+export function reviewCoverageErrors(record: Record<string, unknown>, instance: StageInstance): string[] {
+  const reviewed = asStringArray(record.files_reviewed);
+  if (!reviewed?.length) return ["files_reviewed must list at least one file"];
+  const delivery = sourceDelivery(instance);
+  const errors: string[] = [];
+  if (delivery.error && !delivery.emptyDelta) errors.push(delivery.error);
+  const deleted = new Set(delivery.deletions.map(item => item.path));
+  const normalized = new Set<string>();
+  for (const path of reviewed) {
+    if (path.includes("\\") || isAbsolute(path) || path.split("/").includes("..")) { errors.push(`invalid reviewed path: ${path}`); continue; }
+    const target = assertProjectPath(join(PROJECT_ROOT, path));
+    if ((!existsSync(target) || !lstatSync(target).isFile()) && !deleted.has(path)) errors.push(`reviewed file does not exist: ${path}`);
+    else normalized.add(path);
+  }
+  let paths: string[] | undefined;
+  if (instance.module_id && instance.unit_id) {
+    const manifest = join(PROJECT_ROOT, moduleInceptionRoot(instance.module_id), "unit-manifest.json");
+    if (existsSync(manifest)) {
+      const inputs = readUnitManifest(PROJECT_ROOT, instance.module_id).find(unit => unit.unit_id === instance.unit_id)?.evidence_inputs;
+      if (inputs) paths = [...inputs.paths, ...inputs.shared_paths];
+    }
+  }
+  const expected = [...delivery.files.map(file => relative(PROJECT_ROOT, file).replace(/\\/g, "/")), ...deleted]
+    .filter(file => !paths || paths.some(path => file === path || file.startsWith(path.replace(/\/$/, "") + "/")));
+  for (const file of expected) if (!normalized.has(file)) errors.push(`review does not cover delivered file: ${file}`);
+  return errors;
+}
+
+function globalReviewUnits(state: WorkflowState): Array<{ module_id: string; unit_id: string }> {
+  return verifiedModuleIds(PROJECT_ROOT, state.scope).flatMap(module_id => {
+    const path = join(PROJECT_ROOT, moduleInceptionRoot(module_id), "unit-manifest.json");
+    return (existsSync(path) ? readUnitManifest(PROJECT_ROOT, module_id).map(unit => unit.unit_id) : ["default"]).map(unit_id => ({ module_id, unit_id }));
+  });
+}
+
+export function globalReviewRequired(state: WorkflowState): boolean {
+  return state.execution_profile?.level === "complex" || !!state.execution_profile?.active_risks.some(risk => risk !== "provider_or_mandatory_gate") || globalReviewUnits(state).length > 1;
+}
+
+/** Full global review is a content-bound observation, not an extra human approval. */
+export function globalReviewPayload(state: WorkflowState, alternativeEnvironment?: NodeJS.ProcessEnv): Record<string, unknown> {
+  if (!globalReviewRequired(state)) return { status: "not_applicable", reason: "single unit without a recorded complex or cross-boundary risk" };
+  const path = join(PROJECT_ROOT, "docs/aidlc/construction/global-code-review.md");
+  const content = readFileSync(assertProjectPath(path), "utf8");
+  const block = /```aidlc-global-review\s*\n([\s\S]*?)\n```/.exec(content);
+  if (!block) throw new Error("FINAL_GLOBAL requires an aidlc-global-review record in global-code-review.md");
+  const record = JSON.parse(block[1]) as Record<string, unknown>;
+  if (record.mode !== "FINAL_GLOBAL" || record.status !== "passed" || record.spec_axis !== "passed" || record.standards_axis !== "passed" || !asNonEmptyString(record.reviewer)) throw new Error("FINAL_GLOBAL requires passing Spec and Standards results and reviewer identity");
+  const issueErrors = reviewIssueErrors(record);
+  if (issueErrors.length) throw new Error(issueErrors.join("; "));
+  const plan = globalReviewInputPlan(state, alternativeEnvironment);
+  const checklistErrors = globalChecklistErrors(record.checklist, plan.ucd_coverage, plan.inputs.map(input => input.path));
+  if (checklistErrors.length) throw new Error(checklistErrors.join("; "));
+  if (plan.ucd_coverage.status !== "passed") throw new Error(`FINAL_GLOBAL coverage blocked: ${plan.ucd_coverage.blocking.join("; ")}`);
+  if (!isDeepStrictEqual(record.ucd_coverage, plan.ucd_coverage)) throw new Error("FINAL_GLOBAL UC-D coverage statistics are missing or changed; review current controlled observations");
+  const expected = plan.covered_instances;
+  if (JSON.stringify(asStringArray(record.covered_instances)?.sort()) !== JSON.stringify(expected)) throw new Error("FINAL_GLOBAL must cover every selected unit review instance");
+  if (JSON.stringify(record.inputs) !== JSON.stringify(plan.inputs)) throw new Error("FINAL_GLOBAL input snapshots are missing, changed or incomplete; refresh the actual review");
+  return { ...record, report_sha256: createHash("sha256").update(content).digest("hex") };
+}
+
+export function globalReviewInputPlan(state: WorkflowState, alternativeEnvironment?: NodeJS.ProcessEnv): { required: boolean; covered_instances: string[]; inputs: Array<{ path: string; sha256: string; kind?: "deletion" }>; checklist_items: readonly string[]; ucd_coverage: GlobalCoverage } {
+  const empty: GlobalCoverage = { status: "passed", total: 0, covered: 0, design_covered: 0, units: [], blocking: [] };
+  if (!globalReviewRequired(state)) return { required: false, covered_instances: [], inputs: [], checklist_items: [], ucd_coverage: empty };
+  const units = globalReviewUnits(state);
+  const inputs = new Set<string>();
+  const deletions = new Map<string, { path: string; sha256: string; kind: "deletion" }>();
+  const addDeclaredInput = (path: string): void => {
+    const target = assertProjectPath(join(PROJECT_ROOT, path));
+    const info = lstatSync(target);
+    if (info.isDirectory()) {
+      for (const name of readdirSync(target).sort()) addDeclaredInput(`${path.replace(/\/$/, "")}/${name}`);
+    } else if (info.isFile()) inputs.add(relative(PROJECT_ROOT, target).replace(/\\/g, "/"));
+    else throw new Error(`FINAL_GLOBAL input must be a regular project file: ${path}`);
+    if (inputs.size > 2000) throw new Error("FINAL_GLOBAL input inventory exceeds 2000 files; narrow declared shared contract paths");
+  };
+  const modules = existsSync(join(PROJECT_ROOT, "docs/aidlc/ideation/module-manifest.json")) ? readModuleManifest(PROJECT_ROOT) : [];
+  const coverage = globalReviewCoverage(state, units, inputs, alternativeEnvironment);
+  for (const unit of units) {
+    inputs.add(`${unitConstructionRoot(unit.module_id, unit.unit_id)}/code-review.md`);
+    const instance = makeInstance(loadGraph().stages.find(stage => stage.slug === "code-review")!, "unit", unit);
+    const delivery = sourceDelivery(instance);
+    if (delivery.error && !delivery.emptyDelta) throw new Error(delivery.error);
+    for (const file of delivery.files) inputs.add(relative(PROJECT_ROOT, file).replace(/\\/g, "/"));
+    for (const deletion of delivery.deletions) deletions.set(deletion.path, { path: deletion.path, kind: "deletion", sha256: createHash("sha256").update(JSON.stringify(deletion)).digest("hex") });
+    for (const path of modules.find(module => module.module_id === unit.module_id)?.contract_paths || []) addDeclaredInput(path);
+    const manifest = join(PROJECT_ROOT, moduleInceptionRoot(unit.module_id), "unit-manifest.json");
+    if (existsSync(manifest)) {
+      const descriptor = readUnitManifest(PROJECT_ROOT, unit.module_id).find(candidate => candidate.unit_id === unit.unit_id);
+      for (const path of descriptor?.evidence_inputs?.shared_paths || []) addDeclaredInput(path);
+    }
+    const reviewEvidence = evidenceRelativePath("code-review", "review-evidence", "unit", unit);
+    if (existsSync(join(PROJECT_ROOT, reviewEvidence))) inputs.add(reviewEvidence);
+    for (const path of [
+      `${moduleInceptionRoot(unit.module_id)}/requirements.md`,
+      `${moduleInceptionRoot(unit.module_id)}/unit-manifest.json`,
+      `docs/aidlc/ideation/product-contracts.md`,
+      `docs/aidlc/ideation/module-manifest.json`,
+    ]) if (existsSync(join(PROJECT_ROOT, path))) inputs.add(path);
+  }
+  const bindings = [...inputs].sort().map(path => ({ path, sha256: createHash("sha256").update(readFileSync(assertProjectPath(join(PROJECT_ROOT, path)))).digest("hex") }));
+  return { required: true, covered_instances: units.map(unit => stageInstanceId("code-review", "unit", unit)).sort(), inputs: [...bindings, ...deletions.values()].sort((a, b) => a.path.localeCompare(b.path)), checklist_items: GLOBAL_REVIEW_ITEMS, ucd_coverage: coverage };
+}
+
+/** Reconcile selected module-qualified UC-Ds from controlled I13/GREEN observations.
+ * Completed GREEN may precede later unit commits; its normal phase/ancestry gates
+ * still apply, and every actual input is additionally bound in the review snapshot.
+ */
+function globalReviewCoverage(state: WorkflowState, units: Array<{module_id:string;unit_id:string}>, inputs: Set<string>, alternativeEnvironment?: NodeJS.ProcessEnv): GlobalCoverage {
+  const result: GlobalCoverage = { status: "passed", total: 0, covered: 0, design_covered: 0, units: [], blocking: [] };
+  const totals = new Set<string>(), covered = new Set<string>(), designed = new Set<string>();
+  const missingTests = new Set<string>(), missingDesign = new Set<string>();
+  const graph = loadGraph();
+  const workflows = loadWorkflowParts(PROJECT_ROOT);
+  const bind = (path: string): string => { const absolute = assertProjectPath(join(PROJECT_ROOT, path)); const body = readFileSync(absolute, "utf8"); inputs.add(path); return body; };
+  for (const unit of units) {
+    try {
+      // Module observations keep their trusted owner identity during global review.
+      // Resolve it from persisted workflow parts, never from the evidence itself.
+      const ownerState = workflows.split ? mergeWorkflowView(workflows.parts, {kind:"module",module_id:unit.module_id}) : state;
+      const i13Path = evidenceRelativePath("test-case-derivation", "test-case-derivation", "module", unit);
+      const i13 = asRecord(JSON.parse(bind(i13Path)));
+      if (!i13) throw new Error("I13 must be a controlled object");
+      const i13Instance = makeInstance(graph.stages.find(stage => stage.slug === "test-case-derivation")!, "module", {module_id:unit.module_id});
+      const failure = validateEvidence(i13Instance.stage, "test-case-derivation", i13Instance, value => i13DerivationErrors(value, i13Instance, ownerState), { tolerateRevisionDrift: true });
+      if (failure) throw new Error(failure.message);
+      const owned = i13.status === "required" ? unitUcdIds(i13, unit.unit_id).all : [];
+      const deferred = i13MappingDeferredIds(i13).filter(id => owned.includes(id));
+      const ids = owned.filter(id => !deferred.includes(id));
+      const casePaths = asStringArray(i13.test_case_files) || [];
+      const declarations = ucdDeclarations(casePaths, path => bind(path));
+      if (i13.status === "required") {
+        const sources = globalReviewUcdSources(i13.ucd_sources);
+        if (!sources?.length) throw new Error("I13 lacks controlled case source digests; refresh test-case-derivation");
+        for (const source of sources) if (createHash("sha256").update(bind(source.file)).digest("hex") !== source.sha256) throw new Error(`I13 case source changed: ${source.file}; refresh test-case-derivation`);
+      }
+      for (const id of owned) if (declarations.get(id)?.status !== "ready") throw new Error(`${id} is missing, blocked or not ready in current I13 sources`);
+      if (i13.status === "not_applicable") {
+        const actual = i13NonApplicable(PROJECT_ROOT, unit.module_id, path => bind(path));
+        if (i13.applicability_inputs_digest !== actual.applicability_inputs_digest) throw new Error("I13 not_applicable sources changed");
+      }
+      const greenPath = evidenceRelativePath("code-generation", "green-test-evidence", "unit", unit);
+      const green = asRecord(JSON.parse(bind(greenPath)));
+      if (!green) throw new Error("GREEN observation is missing");
+      const generation = makeInstance(graph.stages.find(stage => stage.slug === "code-generation")!, "unit", unit);
+      const greenFailure = validateEvidence(generation.stage, "green-test-evidence", generation, value => phaseEvidenceErrors(value, "green-test-evidence", "GREEN", {any:true,allNotApplicable:i13.status === "not_applicable"}, "code-generation", generation, ownerState, false, false, alternativeEnvironment), {tolerateRevisionDrift:true});
+      if (greenFailure) throw new Error(greenFailure.message);
+      const mapped = new Set(greenCoveredUcds(green));
+      for (const entry of Array.isArray(green.uc_mapping) ? green.uc_mapping : []) {
+        for (const method of asStringArray(asRecord(entry)?.test_methods) || []) {
+          const path = method.split(/#|::/)[0];
+          if (/\.(?:ts|tsx|js|cjs|mjs|py|java|kt|go|rs|cs)$/.test(path) && existsSync(join(PROJECT_ROOT,path))) bind(path);
+        }
+      }
+      const base = unitConstructionRoot(unit.module_id, unit.unit_id);
+      const designPaths = [
+        `${base}/functional-design.md`, `${base}/plans/code-generation-plan.md`,
+        ...collectFiles(join(PROJECT_ROOT, base, "functional-design")).filter(path => path.endsWith(".md")).map(path => relative(PROJECT_ROOT, path).replace(/\\/g, "/")),
+      ].filter(path => existsSync(join(PROJECT_ROOT,path)));
+      const designText = designPaths.map(bind).join("\n");
+      const designIds = ids.filter(id => new RegExp(`\\b${escapeExpression(id)}\\b`).test(designText));
+      const coveredIds = ids.filter(id => mapped.has(id));
+      result.units.push({...unit,ucd_ids:ids,covered_ucd_ids:coveredIds,design_ucd_ids:designIds,deferred_ucd_ids:deferred});
+      for (const id of ids) {
+        const key = `${unit.module_id}:${id}`; totals.add(key);
+        if (!coveredIds.includes(id)) { missingTests.add(key); result.blocking.push(`${unit.module_id}/${unit.unit_id}: ${id} has no passing test mapping`); }
+        else covered.add(key);
+        if (!designIds.includes(id)) { missingDesign.add(key); result.blocking.push(`${unit.module_id}/${unit.unit_id}: ${id} has no implementation design/plan mapping`); }
+        else designed.add(key);
+      }
+    } catch (error) { result.blocking.push(`${unit.module_id}/${unit.unit_id}: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+  result.total = totals.size; result.covered = [...covered].filter(key => !missingTests.has(key)).length; result.design_covered = [...designed].filter(key => !missingDesign.has(key)).length;
+  if (result.blocking.length || result.total !== result.covered || result.total !== result.design_covered) result.status = "blocked";
+  return result;
+}
+
+function globalReviewEvidenceErrors(evidence: Record<string, unknown>, state: WorkflowState, alternativeEnvironment?: NodeJS.ProcessEnv): string[] {
+  try {
+    const current = globalReviewPayload(state, alternativeEnvironment);
+    return Object.keys(current).filter(key => JSON.stringify(evidence[key]) !== JSON.stringify(current[key])).map(key => `FINAL_GLOBAL ${key} changed`);
+  } catch (error) { return [String(error)]; }
+}
+
+/** REQ ids a delivered source file must reference: the unit-manifest req_refs, else any REQ / R id. */
+function deliveryRequirementPattern(instance: StageInstance): { pattern: RegExp; label: string } {
+  let refs: string[] | undefined;
+  if (instance.module_id && instance.unit_id) {
+    try {
+      refs = readUnitManifest(PROJECT_ROOT, instance.module_id).find((unit) => unit.unit_id === instance.unit_id)?.req_refs;
+    } catch {
+      refs = undefined;
+    }
+  }
+  if (refs && refs.length > 0) return { pattern: new RegExp(`\\b(?:${refs.map(escapeExpression).join("|")})\\b`), label: `a REQ of ${instance.unit_id}.req_refs (${refs.join(", ")})` };
+  return { pattern: /\b(?:REQ-[A-Z0-9][A-Z0-9_-]*|R-[0-9]+)\b/i, label: "a requirement ID (REQ-xxx or R-xxx)" };
+}
+
+function artifactPlaceholderNames(pattern: string): string[] {
+  return [...pattern.matchAll(/\{([^{}]+)\}/g)].map((match) => match[1]);
+}
+
+function allowsProjectAggregate(instance: StageInstance | undefined, allowProjectAggregate: boolean): boolean {
+  return Boolean(allowProjectAggregate && instance && instance.axis === "project" && instance.stage.axis === "project");
+}
+
+function instanceArtifactPattern(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string {
+  if (!instance) return pattern;
+  const resolved = substituteArtifactPattern(pattern, instance);
+  const placeholders = artifactPlaceholderNames(resolved);
+  const allowed = allowsProjectAggregate(instance, allowProjectAggregate)
+    ? new Set(["module-id", "unit-id"])
+    : new Set<string>();
+  const invalid = placeholders.filter((placeholder) => !allowed.has(placeholder));
+  if (invalid.length > 0) {
+    throw new Error(`Unresolved artifact placeholder(s) ${invalid.map((name) => `{${name}}`).join(", ")} for stage instance "${instance.instance_id}": ${pattern}`);
+  }
+  return resolved;
+}
+
+function escapeExpression(value: string): string {
+  return value.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+}
+
+function resolveProducePaths(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string[] {
+  // MARS-95: the canonical source produce is the instance's delivery set (changed files
+  // since the baseline), or the tracked text files of the source roots without one.
+  if (pattern === CANONICAL_SOURCE_PATTERN) return sourceDelivery(instance).files;
+  return resolveConcretePaths(pattern, instance, allowProjectAggregate);
+}
+
+function resolveConcretePaths(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string[] {
+  const contextual = instanceArtifactPattern(pattern, instance, allowProjectAggregate).replace(/\\/g, "/");
+  const expansionAllowed = allowsProjectAggregate(instance, allowProjectAggregate);
+  if (contextual.includes("*") && !expansionAllowed) {
+    throw new Error(`Artifact wildcards are not allowed for stage instance "${instance?.instance_id || "unknown"}": ${pattern}`);
+  }
+  const target = join(PROJECT_ROOT, contextual);
+  if (!contextual.includes("*") && !/\{[^}]+\}/.test(contextual)) return collectFiles(target);
+
+  const wildcard = contextual.replace(/\{(?:module-id|unit-id)\}/g, "*");
+  const wildcardIndex = wildcard.indexOf("*");
+  const slashIndex = wildcard.lastIndexOf("/", wildcardIndex);
+  const basePattern = slashIndex >= 0 ? wildcard.slice(0, slashIndex) : ".";
+  const base = join(PROJECT_ROOT, basePattern);
+  if (!existsSync(base) || !statSync(base).isDirectory()) return [];
+  const relativePattern = wildcard.slice(slashIndex + 1);
+  const expression = new RegExp(`^${escapeExpression(relativePattern).replace(/\*/g, "[^/]+")}$`);
+  return collectFiles(base).filter((path) => expression.test(relative(base, path).replace(/\\/g, "/")));
+}
+
+/**
+ * The canonical `src/` produce/consume resolves to the project's source roots
+ * (module-manifest paths, then .aidlc/source-roots.json, then src/); every other
+ * pattern is returned unchanged. Each root is checked on its own, so an empty or
+ * missing configured root still fails the gate.
+ */
+function expandSourcePattern(pattern: string, instance?: StageInstance): string[] {
+  if (pattern !== CANONICAL_SOURCE_PATTERN) return [pattern];
+  return resolveSourceRoots(PROJECT_ROOT, instance?.module_id).roots.map((root) => `${root}/`);
+}
+
+/** Display form of a declared artifact for directives and messages. */
+function displayArtifactPatterns(pattern: string, instance: StageInstance, allowProjectAggregate = false): string[] {
+  return expandSourcePattern(pattern, instance).map((expanded) => instanceArtifactPattern(expanded, instance, allowProjectAggregate));
+}
+
+/**
+ * Check if produces files exist (including directories and dynamic unit paths).
+ */
+/**
+ * Shared presence rule of checkProduces and checkConsumes for one declared artifact
+ * pattern (a canonical `src/` is expanded per source root by the callers first, so
+ * every root is judged on its own). Returns the failure label, or undefined when the
+ * artifact is present.
+ *
+ * - A source root needs real tracked text content, with no minimum byte quota.
+ * - Legal small configuration is accepted; documents retain a substantive size floor.
+ * - Directories need at least one substantive file; aggregates check each file.
+ *
+ * Symbolic links / junctions and paths escaping the project root keep throwing (from
+ * assertProjectPath / collectFiles); each caller keeps its own fail-closed handling.
+ *
+ * MARS-95: `sourceRoot` (an expanded canonical `src/` root) judges only the tracked text
+ * files of the root (`git ls-files`, .gitignore respected, binary files dropped).
+ */
+function artifactPresenceFailure(pattern: string, instance: StageInstance, allowProjectAggregate = false, sourceRoot = false): string | undefined {
+  const qualitySensor = pattern.replace(/\\/g, "/").match(/\/([^/]+)\.json$/)?.[1];
+  if (qualitySensor === SLICE_SENSOR) {
+    const view = loadWorkflowView(PROJECT_ROOT, instance.module_id);
+    if (view && !sliceAdoption(documentSliceContext(view, instance)).enabled) return undefined;
+  }
+  if (qualitySensor && QUALITY_SENSORS.has(qualitySensor)) {
+    const view = loadWorkflowView(PROJECT_ROOT, instance.module_id);
+    if (view && !qualityAdoption(qualityGateContext(view, instance)).enabled) return undefined;
+  }
+  const label = instanceArtifactPattern(pattern, instance, allowProjectAggregate);
+  const contextual = label.replace(/\\/g, "/");
+  const aggregated = contextual.includes("*") || /\{[^}]+\}/.test(contextual);
+  // 4.9.0: a lightweight worktree does not check out nested repositories; a produce or
+  // consume inside a skipped one is judged in the main checkout that holds it.
+  const delegated = aggregated ? undefined : skippedNestedMainCheckout(contextual);
+  if (delegated) return mainCheckoutPresence(delegated, contextual, sourceRoot) ? undefined : label;
+  let directory = contextual.endsWith("/");
+  if (!directory && !aggregated) {
+    const target = assertProjectPath(join(PROJECT_ROOT, contextual));
+    directory = existsSync(target) && lstatSync(target).isDirectory();
+  }
+  if (directory && aggregated) {
+    // A directory artifact expanded across modules/units would let a substantive file of
+    // one module satisfy an empty directory of another; resolveConcretePaths returns only
+    // files, so the concrete directories cannot be judged one by one here. No graph
+    // consume reaches this combination today, so it is rejected instead (fail-closed).
+    throw new Error(`directory artifact cannot be aggregated across modules/units: ${label}`);
+  }
+  const paths = sourceRoot ? sourceRootFiles(contextual) : resolveConcretePaths(pattern, instance, allowProjectAggregate);
+  const present = directory
+    ? paths.some((path) => substantiveArtifact(path, sourceRoot))
+    : paths.length > 0 && paths.every((path) => substantiveArtifact(path, sourceRoot));
+  return present ? undefined : label;
+}
+
+/**
+ * 4.9.0: when PROJECT_ROOT is a lightweight worktree (`.aidlc/worktrees/<id>.md` with
+ * `Nested Repos Skipped`) and `path` lies in a skipped nested repository that the
+ * worktree does not contain, the main checkout (parent of the shared git directory)
+ * holding that nested repository; undefined otherwise (always outside a worktree).
+ */
+function skippedNestedMainCheckout(path: string): string | undefined {
+  const metadataDir = join(PROJECT_ROOT, ".aidlc", "worktrees");
+  if (!existsSync(metadataDir)) return undefined;
+  const skipped = new Set<string>();
+  for (const name of readdirSync(metadataDir).filter((entry) => entry.endsWith(".md"))) {
+    const text = readFileSync(join(metadataDir, name), "utf8");
+    const line = /^- Nested Repos Skipped:\s*(.*)$/m.exec(text)?.[1];
+    if (line) for (const key of line.split(",").map((value) => value.trim()).filter(Boolean)) skipped.add(key);
+  }
+  const key = [...skipped].find((candidate) => path === candidate || path === `${candidate}/` || path.startsWith(`${candidate}/`));
+  if (!key || existsSync(join(PROJECT_ROOT, ...key.split("/")))) return undefined;
+  const common = runSync("git", ["rev-parse", "--git-common-dir"], { cwd: PROJECT_ROOT, encoding: "utf8", shell: false });
+  if (common.error || common.status !== 0) return undefined;
+  const main = dirname(resolve(PROJECT_ROOT, common.stdout.trim()));
+  if (main === resolve(PROJECT_ROOT) || !existsSync(join(main, ...key.split("/"), ".git"))) return undefined;
+  return main;
+}
+
+/** Presence of `path` in the main checkout `root` with the rules of artifactPresenceFailure (no symbolic links). */
+function mainCheckoutPresence(root: string, path: string, source = false): boolean {
+  const target = join(root, ...path.replace(/\/+$/, "").split("/"));
+  if (!existsSync(target)) return false;
+  const walk = (current: string): string[] => {
+    const stat = lstatSync(current);
+    if (stat.isSymbolicLink()) throw new Error(`artifact path is a symbolic link: ${current}`);
+    if (stat.isFile()) return [current];
+    if (!stat.isDirectory()) return [];
+    return readdirSync(current).filter((entry) => !entry.startsWith(".")).flatMap((entry) => walk(join(current, entry)));
+  };
+  const files = source && lstatSync(target).isDirectory() ? trackedTextFiles(target) ?? walk(target).filter(isTextFile) : walk(target);
+  const directory = path.endsWith("/") || lstatSync(target).isDirectory();
+  return directory ? files.some((file) => substantiveArtifact(file, source)) : files.length > 0 && files.every((file) => substantiveArtifact(file, source));
+}
+
+export function checkProduces(instance: StageInstance, options: { completed?: boolean } = {}): string[] {
+  const stage = instance.stage;
+  if (!stage.produces || stage.produces.length === 0) return [];
+  const missing: string[] = [];
+  for (const declared of stage.produces) {
+    if (declared === CANONICAL_SOURCE_PATTERN) {
+      missing.push(...sourcePresenceFailures(instance, options.completed === true));
+      continue;
+    }
+    const failure = artifactPresenceFailure(declared, instance);
+    if (failure !== undefined) missing.push(failure);
+  }
+  return missing;
+}
+
+/**
+ * Presence of the canonical source produce (MARS-95). With a baseline (mode `delta`) the
+ * unit must deliver at least one changed source file across its roots; an empty delta
+ * is not_applicable for a ucd_exemption unit and an explicit failure otherwise (never
+ * the full source set). Without a baseline every root is judged on its own tracked
+ * text files. Roots of a skipped nested repository keep the main-checkout rule.
+ */
+function sourcePresenceFailures(instance: StageInstance, completed: boolean): string[] {
+  const delivery = sourceDelivery(instance);
+  const failures: string[] = [];
+  if (delivery.error && delivery.mode !== "delta") return [delivery.error];
+  for (const root of delivery.delegated) {
+    const failure = artifactPresenceFailure(root, instance, false, true);
+    if (failure !== undefined) failures.push(failure);
+  }
+  if (delivery.mode === "delta") {
+    if (delivery.error && !(completed && delivery.emptyDelta)) failures.push(`${delivery.roots.join(", ")}: ${delivery.error}`);
+    if (delivery.files.length > 0 && !delivery.files.some(path => substantiveArtifact(path, true))) {
+      failures.push(`${delivery.roots.join(", ")}: source delta contains only empty or placeholder content`);
+    }
+    return failures;
+  }
+  for (const root of delivery.roots.filter((candidate) => !delivery.delegated.includes(candidate))) {
+    const failure = artifactPresenceFailure(root, instance, false, true);
+    if (failure !== undefined) failures.push(failure);
+  }
+  return failures;
+}
+
+export function checkConsumes(instance: StageInstance, state: WorkflowState, graph: StageGraph, instances: StageInstance[]): string[] {
+  const stage = instance.stage;
+  const failures: string[] = [];
+  if (stage.slug === "build-and-test" && isSplitLayout(PROJECT_ROOT)) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    const barrier = registryProjection(loaded.registry!, loaded).integration;
+    if (!barrier.barrier_ready) failures.push(`Cross-module integration barrier is not ready: ${barrier.blocking.join(", ")}`);
+  }
+  if (stage.slug === "build-and-test" && globalReviewRequired(state)) {
+    const failure = validateEvidence(stage, "global-review-evidence", instance, evidence => globalReviewEvidenceErrors(evidence, state));
+    if (failure) failures.push(`FINAL_GLOBAL before C8: ${failure.message}; bind the C8 instance and produce global-review-evidence before entering C8`);
+  }
+  for (const pattern of stage.consumes || []) {
+    let resolvedPattern = pattern;
+    let missingLabel: string | undefined;
+    try {
+      resolvedPattern = displayArtifactPatterns(pattern, instance, true).join(", ");
+      const expandedPatterns = expandSourcePattern(pattern, instance);
+      if (expandedPatterns.length === 0) missingLabel = resolvedPattern;
+      // A source consumer accepts a verified removal even when its last file/root is gone.
+      // The producer completion check below still applies.
+      const removal = pattern === CANONICAL_SOURCE_PATTERN ? sourceDelivery(instance) : undefined;
+      if (removal?.error && !removal.emptyDelta) throw new Error(removal.error);
+      for (const expanded of expandedPatterns) {
+        if (removal?.deletions.some(entry => entry.path.startsWith(expanded))) continue;
+        missingLabel = artifactPresenceFailure(expanded, instance, true, pattern === CANONICAL_SOURCE_PATTERN);
+        if (missingLabel !== undefined) break;
+      }
+    } catch (error) {
+      failures.push(`${resolvedPattern}: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    if (missingLabel !== undefined) {
+      failures.push(`${missingLabel}: missing or non-substantive artifact`);
+      continue;
+    }
+    const producers = graph.stages.filter((candidate) => (candidate.produces || []).includes(pattern));
+    if (producers.length === 0) {
+      failures.push(`${resolvedPattern}: no stage declares this canonical produce`);
+      continue;
+    }
+    const completed = new Set(completedInstanceIds(state));
+    const producerCompleted = producers.some((producer) => {
+      const required = dependencyInstances(instance, producer.slug, instances);
+      return required.length > 0 && required.every((candidate) => completed.has(candidate.instance_id));
+    });
+    if (!producerCompleted) {
+      failures.push(`${resolvedPattern}: producer not completed (${producers.map((producer) => producer.slug).join(", ")})`);
+    }
+  }
+  return failures;
+}
+
+// ---------------------------------------------------------------------------
+// Sensors — 准出 quality gates (machine-verifiable checks)
+// ---------------------------------------------------------------------------
+
+export interface SensorResult {
+  sensor: string;
+  passed: boolean;
+  message: string;
+}
+
+type Evidence = Record<string, unknown>;
+
+/** Maximum evidence file size: 512 KB. Prevents unbounded JSON injection. */
+const MAX_EVIDENCE_BYTES = 512 * 1024;
+
+
+
+function evidencePath(stage: StageNode, sensor: string, instance?: StageInstance): string {
+  if (!instance || (instance.axis === "project" && stage.axis !== "project")) {
+    return join(PROJECT_ROOT, ".aidlc", "evidence", stage.slug, `${sensor}.json`);
+  }
+  return join(PROJECT_ROOT, evidenceRelativePath(stage.slug, sensor, instance.axis, instance));
+}
+
+function loadEvidence(stage: StageNode, sensor: string, instance?: StageInstance): { value?: Evidence; failure?: SensorResult } {
+  const path = evidencePath(stage, sensor, instance);
+  if (!existsSync(path)) {
+    return {
+      failure: {
+        sensor,
+        passed: false,
+        message: `Evidence not found: ${path}. Run the controlled evidence producer first.`,
+      },
+    };
+  }
+
+  try {
+    const stat = statSync(path);
+    if (stat.size === 0) {
+      throw new Error("evidence file is empty");
+    }
+    if (stat.size > MAX_EVIDENCE_BYTES) {
+      throw new Error(`evidence file exceeds ${MAX_EVIDENCE_BYTES} bytes (actual: ${stat.size})`);
+    }
+
+    const raw = readFileSync(path, "utf-8");
+    const value = JSON.parse(raw) as Evidence;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("evidence must be a JSON object");
+    }
+    if (value.evidence_version !== "1") {
+      throw new Error('evidence_version must be "1"');
+    }
+
+    const timeError = evidenceTimeError(value, sensor);
+    if (timeError) throw new Error(timeError);
+
+    return { value };
+  } catch (error) {
+    return {
+      failure: {
+        sensor,
+        passed: false,
+        message: `Invalid evidence at ${path}: ${error instanceof Error ? error.message : String(error)}`,
+      },
+    };
+  }
+}
+
+interface SensorCheckOptions {
+  /**
+   * Accept evidence whose source_revision no longer matches the current tree (the
+   * revision fields must still be well-formed). Only used to re-check RED evidence
+   * while completing GREEN: RED is observed on the pre-implementation tree, and the
+   * GREEN implementation necessarily changes that tree. The recorded commit must still
+   * be the current HEAD or one of its ancestors (non-git projects: exact match).
+   */
+  tolerateRevisionDrift?: boolean;
+  /** Historical phase drift is allowed only with unchanged named tests and I13 inputs. */
+  requireHistoricalPhaseInputs?: boolean;
+  /** GREEN may ignore only named downstream report writes proven by its execution binding. */
+  allowDownstreamReportDrift?: boolean;
+  /** Restored caller environment supplied only by the controlled semantic entrypoint. */
+  alternativeValidationEnvironment?: NodeJS.ProcessEnv;
+  /**
+   * BASELINE evidence must have been produced in the current epoch of the baseline
+   * chain (4.7.0). Set only when completing code-generation of the same unit.
+   */
+  requireCurrentBaselineEpoch?: boolean;
+  /** Evaluate only these sensors of the stage (orchestrate baseline --advance anchor check). */
+  onlySensors?: readonly string[];
+}
+
+/**
+ * `source_revision.repos` of an evidence (4.9.0): undefined for evidence without it
+ * (re-checked with the 4.8.1 algorithm). Each recorded repository must still be a
+ * declared nested repository; malformed entries are reported into `errors`.
+ */
+function nestedRevisionContext(sourceRevision: Evidence, errors: string[]): { keys: string[]; recorded: Record<string, Evidence> } | undefined {
+  if (sourceRevision.repos === undefined) return undefined;
+  const repos = asRecord(sourceRevision.repos);
+  if (!repos || Object.keys(repos).length === 0) {
+    errors.push("source_revision.repos must be a non-empty object keyed by nested repository path");
+    return undefined;
+  }
+  let declared: string[] = [];
+  try {
+    declared = nestedSourceRepos(PROJECT_ROOT);
+  } catch (error) {
+    errors.push(`source_revision.repos cannot be re-checked: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
+  const keys = Object.keys(repos).sort();
+  const undeclared = keys.filter((key) => !declared.includes(key));
+  if (undeclared.length > 0) {
+    errors.push(`source_revision.repos records ${undeclared.map((key) => `${key}/`).join(", ")}, which ${SOURCE_ROOTS_CONFIG} no longer declares as a nested repository`);
+    return undefined;
+  }
+  const recorded: Record<string, Evidence> = {};
+  for (const key of keys) {
+    const entry = asRecord(repos[key]);
+    if (!entry || !asNonEmptyString(entry.commit) || (entry.dirty !== null && typeof entry.dirty !== "boolean") || !/^[a-f0-9]{64}$/.test(String(entry.worktree_digest || ""))) {
+      errors.push(`source_revision.repos.${key} needs commit, dirty (boolean or null) and a SHA-256 worktree_digest`);
+      return undefined;
+    }
+    recorded[key] = entry;
+  }
+  return { keys, recorded };
+}
+
+/** Per nested repository comparison: exact (commit, dirty, worktree_digest) or HEAD ancestry of the recorded commit. */
+function nestedRevisionErrors(recorded: Record<string, Evidence>, current: Record<string, RepoRevision>, mode: { exact: boolean; ancestry: boolean }): string[] {
+  const errors: string[] = [];
+  for (const [key, entry] of Object.entries(recorded)) {
+    const active = current[key];
+    const field = `source_revision.repos.${key}`;
+    if (!active) {
+      errors.push(`${field}: the nested repository ${key}/ cannot be read`);
+      continue;
+    }
+    if (mode.exact) {
+      if (entry.commit !== active.commit) errors.push(`${field}.commit ${String(entry.commit)} does not match the current HEAD ${active.commit} of the nested repository ${key}/`);
+      if (entry.dirty !== active.dirty) errors.push(`${field}.dirty no longer matches the nested repository ${key}/`);
+      if (entry.worktree_digest !== active.worktree_digest) errors.push(`${field}.worktree_digest no longer matches the nested repository ${key}/ (its files changed after this evidence was produced)`);
+    }
+    if (mode.ancestry) errors.push(...commitAncestryErrors(join(PROJECT_ROOT, ...key.split("/")), String(entry.commit), active.commit, `${field}.commit`));
+  }
+  return errors;
+}
+
+function validateEvidence(
+  stage: StageNode,
+  sensor: string,
+  instance: StageInstance,
+  required: (value: Evidence) => string[],
+  options: SensorCheckOptions = {},
+  candidate?: Evidence,
+): SensorResult | null {
+  const loaded = candidate === undefined ? loadEvidence(stage, sensor, instance) : candidateEvidence(stage, sensor, instance, candidate);
+  if (loaded.failure) return loaded.failure;
+  const evidence = loaded.value as Evidence;
+  const errors = required(evidence);
+  errors.push(...evidenceFreshnessBindingErrors(stage.slug, evidence));
+  const sourceRevision = asRecord(evidence.source_revision);
+  const nestedCheck = sourceRevision ? nestedRevisionContext(sourceRevision, errors) : undefined;
+  if (sensor === "green-test-evidence" && options.allowDownstreamReportDrift && evidence.execution_input_binding) {
+    const recorded = asRecord(evidence.execution_input_binding);
+    try {
+      const current = phaseExecutionRevision(PROJECT_ROOT, instance.instance_id, nestedCheck?.keys ?? []);
+      if (recorded?.version === "1" && recorded.scope === current.scope && recorded.scope_digest === current.scope_digest) {
+        const i13 = moduleI13Evidence(instance);
+        if (i13 && "value" in i13) {
+          const command = phaseInputCommand(stage.slug, "GREEN", instance, evidence);
+          const bindingErrors = historicalPhaseInputErrors(PROJECT_ROOT, i13.value, evidence, instance.unit_id, command, false);
+          if (!bindingErrors.length) options = { ...options, tolerateRevisionDrift: true };
+          else errors.push(...bindingErrors);
+        }
+      }
+    } catch (error) { errors.push(`GREEN_EXECUTION_INPUT_BINDING_INVALID: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
+  const producer = asRecord(evidence.producer);
+  if (!producer) {
+    errors.push("producer object is required for controlled evidence provenance");
+  } else {
+    if (producer.name !== "loeyae-aidlc-evidence") errors.push('producer.name must be "loeyae-aidlc-evidence"');
+    if (producer.mode !== "controlled") errors.push('producer.mode must be "controlled"');
+    if (!asNonEmptyString(producer.execution_id)) errors.push("producer.execution_id is required");
+  }
+
+  if (!sourceRevision) {
+    errors.push("source_revision object is required");
+  } else {
+    const commit = asNonEmptyString(sourceRevision.commit);
+    if (!commit) errors.push("source_revision.commit is required");
+    if (sourceRevision.dirty !== null && typeof sourceRevision.dirty !== "boolean") errors.push("source_revision.dirty must be boolean or null");
+    const recordedScope = typeof sourceRevision.scope === "string" ? sourceRevision.scope : undefined;
+    if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.worktree_digest || ""))) errors.push("source_revision.worktree_digest must be a SHA-256 digest");
+    // 4.9.0: the algorithm follows the evidence's own structure. Evidence without
+    // source_revision.repos is re-checked exactly as in 4.8.1 (nested repositories left
+    // out); evidence with it is re-checked per repository.
+    const nestedKeys = nestedCheck?.keys;
+    if (recordedScope === undefined || recordedScope === "worktree") {
+      // Historical binding: the exact commit, dirty flag and whole-worktree digest.
+      const activeRevision = readSourceRevision(PROJECT_ROOT, undefined, nestedKeys);
+      const drift = !options.tolerateRevisionDrift;
+      if (drift && commit && commit !== activeRevision.commit) errors.push(`source_revision.commit ${commit} does not match current HEAD ${activeRevision.commit}`);
+      // The tolerated drift is the worktree only: the recorded commit must still be in HEAD's history.
+      if (!drift && commit) errors.push(...commitAncestryErrors(PROJECT_ROOT, commit, activeRevision.commit));
+      if (drift && sourceRevision.dirty !== activeRevision.dirty) errors.push("source_revision.dirty no longer matches the current worktree");
+      if (drift && /^[a-f0-9]{64}$/.test(String(sourceRevision.worktree_digest || "")) && sourceRevision.worktree_digest !== activeRevision.worktree_digest) {
+        errors.push("source_revision.worktree_digest no longer matches the current worktree");
+      }
+      if (nestedCheck) errors.push(...nestedRevisionErrors(nestedCheck.recorded, activeRevision.repos || {}, { exact: drift, ancestry: !drift }));
+    } else {
+      // Split layout: content-addressed within the owning workflow's scope. The commit
+      // is provenance only, so another module's commit or write cannot invalidate it.
+      const expectedScope = evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
+      if (commit) errors.push(...commitAncestryErrors(PROJECT_ROOT, commit, currentHead(PROJECT_ROOT)));
+      if (recordedScope !== expectedScope.label && recordedScope !== legacyEvidenceScopeForInstance(PROJECT_ROOT, instance.instance_id).label) {
+        errors.push(`source_revision.scope ${recordedScope} does not match the ${expectedScope.label} scope of ${instance.instance_id}`);
+      } else if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.scope_digest || ""))) {
+        errors.push("source_revision.scope_digest must be a SHA-256 digest");
+      } else if (!options.tolerateRevisionDrift && recordedScope !== expectedScope.label) {
+        // Controlled compatibility (4.22.13, MARS-277): module-axis evidence recorded
+        // under the pre-baseline wide scope keeps its own semantics — strict, no drift
+        // tolerance — but a mismatch now says how to migrate to the baseline scope.
+        const legacyScope = legacyEvidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
+        if (sourceRevision.scope_digest !== readSourceRevision(PROJECT_ROOT, legacyScope, nestedKeys).scope_digest) {
+          errors.push(`source_revision.scope_digest no longer matches the ${recordedScope} scope; refresh this evidence ('aidlc evidence run --stage ${stage.slug}${instance.module_id ? ` --module ${instance.module_id}` : ""} --refresh') to re-anchor it to the ${expectedScope.label} scope`);
+        }
+      } else if (!options.tolerateRevisionDrift && sourceRevision.scope_digest !== readSourceRevision(PROJECT_ROOT, expectedScope, nestedKeys).scope_digest) {
+        errors.push(`source_revision.scope_digest no longer matches the ${recordedScope} scope`);
+      }
+      // Nested files inside the scope are covered by scope_digest; the repository commits stay in history.
+      if (nestedCheck) errors.push(...nestedRevisionErrors(nestedCheck.recorded, readSourceRevision(PROJECT_ROOT, undefined, nestedKeys).repos || {}, { exact: false, ancestry: options.tolerateRevisionDrift === true }));
+    }
+    if (options.requireHistoricalPhaseInputs && evidence.evidence_mode !== "historical_replay") {
+      const scope = recordedScope === undefined || recordedScope === "worktree" ? undefined
+        : recordedScope === evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id).label ? evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id) : legacyEvidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
+      const current = readSourceRevision(PROJECT_ROOT, scope, nestedKeys);
+      const unchanged = scope ? sourceRevision.scope_digest === current.scope_digest
+        : sourceRevision.worktree_digest === current.worktree_digest && sourceRevision.commit === current.commit && sourceRevision.dirty === current.dirty;
+      // Legacy evidence remains valid under its original exact binding. Once that
+      // tree drifts, only selective inputs or the separately verified replay prove it.
+      if (!unchanged) {
+        const i13 = moduleI13Evidence(instance);
+        if (i13 && "value" in i13) {
+          try {
+            const command = phaseInputCommand(stage.slug, sensor === "red-test-evidence" ? "RED" : "BASELINE", instance, evidence);
+            errors.push(...historicalPhaseInputErrors(PROJECT_ROOT, i13.value, evidence, instance.unit_id, command));
+          } catch (error) { errors.push(`PHASE_INPUT_BINDING_INVALID: ${error instanceof Error ? error.message : String(error)}`); }
+        }
+        else errors.push("PHASE_INPUT_BINDING_INVALID: current I13 is unavailable");
+      }
+    }
+  }
+
+  if (sensor !== "build-test-evidence") {
+    const checker = asRecord(evidence.checker);
+    if (!checker) {
+      errors.push("checker object is required for semantic evidence");
+    } else {
+      if (checker.id !== `builtin:${sensor}`) errors.push(`checker.id must be builtin:${sensor}`);
+      if (!["red-test-evidence","green-test-evidence","baseline-test-evidence"].includes(sensor)) errors.push(...semanticCheckerIdentityErrors(checker));
+      if (checker.sensor !== sensor) errors.push(`checker.sensor must be ${sensor}`);
+      if (!/^[a-f0-9]{64}$/.test(String(checker.argv_digest || ""))) errors.push("checker.argv_digest must be a SHA-256 digest");
+      if (checker.command_version !== undefined && (checker.command_version !== 2 || checker.argv_digest !== argvDigest(semanticCommandArgv(sensor, { current_module: instance?.module_id, current_unit: instance?.unit_id })))) errors.push("semantic checker command no longer matches the controlled producer");
+      if (asNumber(checker.exit_code) !== 0 || checker.status !== "passed") errors.push("checker execution must have passed with exit_code 0");
+    }
+  }
+
+  if (errors.length > 0) {
+    return {
+      sensor,
+      passed: false,
+      message: `Evidence rejected at ${evidencePath(stage, sensor, instance)}: ${errors.join("; ")}`,
+    };
+  }
+  return null;
+}
+
+function candidateEvidence(stage: StageNode, sensor: string, instance: StageInstance, value: Evidence): { value?: Evidence; failure?: SensorResult } {
+  const raw = JSON.stringify(value);
+  const error = Buffer.byteLength(raw) > MAX_EVIDENCE_BYTES ? `evidence file exceeds ${MAX_EVIDENCE_BYTES} bytes`
+    : value.evidence_version !== "1" ? 'evidence_version must be "1"' : evidenceTimeError(value, sensor);
+  return error ? { failure: { sensor, passed: false, message: `Invalid evidence at ${evidencePath(stage, sensor, instance)}: ${error}` } } : { value };
+}
+
+/** Apply the same semantic and provenance gate to a complete unpublished slice candidate. */
+export function validateSliceCandidate(state: WorkflowState, candidate: Evidence): SensorResult | null {
+  const stage = loadGraph().stages.find(item => item.slug === "units-generation");
+  if (!stage || !state.current_module) throw new Error("slice candidate requires a module units-generation instance");
+  const instance = makeInstance(stage, "module", { module_id: state.current_module });
+  const context = documentSliceContext(state, instance);
+  return validateEvidence(stage, SLICE_SENSOR, instance, evidence => sliceEvidenceErrors(context, evidence), { tolerateRevisionDrift: true }, candidate);
+}
+
+function asRecord(value: unknown): Evidence | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Evidence : null;
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asPositiveInt(value: unknown): number | null {
+  const n = asNumber(value);
+  return n !== null && Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+function asStringArray(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value as string[] : null;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+const DIAGRAM_FINAL_STATUSES = new Set(["PASS", "STATIC_PASS", "UNVERIFIED", "NEEDS_CAPABILITY", "FAIL"]);
+
+function diagramFinalStatus(evidence: Evidence): { status: string; legacy: boolean } {
+  if (typeof evidence.final_status === "string") return { status: evidence.final_status, legacy: false };
+  if (evidence.delivery_status === "SOURCE_READY") return { status: "STATIC_PASS", legacy: true };
+  if (evidence.provider_status === "unavailable") return { status: "NEEDS_CAPABILITY", legacy: true };
+  if (evidence.status === "passed" && evidence.provider_status === "passed" && evidence.render_status === "passed") return { status: "PASS", legacy: true };
+  if (evidence.status === "passed" && ["unverified", "not_required"].includes(String(evidence.provider_status)) && evidence.geometry_status === "passed") return { status: "STATIC_PASS", legacy: true };
+  return { status: "UNVERIFIED", legacy: true };
+}
+
+export type ProducedArtifact = { kind: "text"; content: string } | { kind: "binary" } | { kind: "unreadable" };
+
+/** MARS-159 C: distinguishes binary produce (NUL bytes, e.g. .xlsx) from a real read failure. */
+export function readProducedArtifact(path: string): ProducedArtifact {
+  let content: Buffer;
+  try {
+    content = readFileSync(path);
+  } catch {
+    return { kind: "unreadable" };
+  }
+  if (content.includes(0)) return { kind: "binary" };
+  return { kind: "text", content: content.toString("utf-8") };
+}
+
+/** Text content for checks that require text; binary and unreadable both fail closed (null). */
+function producedText(path: string): string | null {
+  const artifact = readProducedArtifact(path);
+  return artifact.kind === "text" ? artifact.content : null;
+}
+
+function artifactLabel(path: string): string {
+  return normalizeArtifactLabel(relative(PROJECT_ROOT, path) || path);
+}
+
+function isEvidenceArtifact(path: string): boolean {
+  return isEvidenceArtifactLabel(artifactLabel(path));
+}
+
+/** I13 evidence records relevant to an instance: its module's, or every module's on the project axis. */
+function i13Records(instance: StageInstance): Record<string, unknown>[] {
+  const root = join(PROJECT_ROOT, ".aidlc", "evidence", "test-case-derivation");
+  if (!existsSync(root)) return [];
+  const paths = instance.module_id
+    ? [join(root, instance.module_id, "test-case-derivation.json")]
+    : collectFiles(root).filter((path) => path.endsWith("test-case-derivation.json"));
+  return paths.flatMap((path) => {
+    try {
+      const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      return value && typeof value === "object" && !Array.isArray(value) ? [value] : [];
+    } catch { return []; }
+  });
+}
+
+function i13Applicability(instance: StageInstance): { any: boolean; allNotApplicable: boolean } {
+  const records = i13Records(instance);
+  return { any: records.length > 0, allNotApplicable: records.length > 0 && records.every((record) => record.status === "not_applicable") };
+}
+
+/**
+ * Which phase evidence the required I13 records demand: RED for tdd_mode new UC-Ds,
+ * BASELINE for characterization UC-Ds. `known` is false when no required I13 record
+ * is readable (callers then keep requiring RED).
+ */
+function i13PhaseNeeds(instance: StageInstance): { known: boolean; red: boolean; baseline: boolean } {
+  // 4.8.0: a unit instance needs the phases of its own UC-D subset (the module set without ucd_units).
+  const modes = i13Records(instance).filter((record) => record.status === "required").map((record) => unitUcdIds(record, instance.unit_id));
+  return {
+    known: modes.length > 0,
+    red: modes.some((mode) => mode.new.length > 0),
+    baseline: modes.some((mode) => mode.characterization.length > 0),
+  };
+}
+
+/**
+ * The unit's UC-D subset (4.8.0): set only for a unit instance whose module I13 is
+ * required and declares `ucd_units`; null otherwise (module set, 4.7.1 behaviour).
+ */
+function unitScopeOf(instance: StageInstance): UnitUcdScope | null {
+  if (!instance.unit_id) return null;
+  const record = i13Records(instance).find((value) => value.status === "required");
+  if (!record) return null;
+  const scope = unitUcdIds(record, instance.unit_id);
+  return scope.scoped ? scope : null;
+}
+
+/**
+ * I13 `ucd_units` (4.8.0): absent, or exactly one non-empty list of distinct unit ids
+ * of the module's unit manifest per UC-D.
+ */
+function i13UnitErrors(evidence: Evidence, ucdIds: string[], instance: StageInstance): string[] {
+  if (evidence.ucd_units === undefined) return [];
+  const record = asRecord(evidence.ucd_units);
+  if (!record) return ["ucd_units must be an object keyed by UC-D"];
+  const errors: string[] = [];
+  const keys = Object.keys(record);
+  if (keys.length !== ucdIds.length || !ucdIds.every((id) => keys.includes(id))) errors.push("ucd_units must have exactly one entry per ucd_ids entry");
+  let known: string[] = [];
+  try {
+    known = instance.module_id ? readUnitManifest(PROJECT_ROOT, instance.module_id).map((unit) => unit.unit_id) : [];
+  } catch (error) {
+    errors.push(`ucd_units cannot be checked against the unit manifest: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  for (const [id, value] of Object.entries(record)) {
+    const units = Array.isArray(value) && value.every((unit) => typeof unit === "string") ? value as string[] : null;
+    if (!units || units.length === 0) {
+      errors.push(`ucd_units.${id} must be a non-empty list of unit ids`);
+      continue;
+    }
+    if (new Set(units).size !== units.length) errors.push(`ucd_units.${id} lists a unit more than once`);
+    const unknown = known.length > 0 ? units.filter((unit) => !known.includes(unit)) : [];
+    if (unknown.length > 0) errors.push(`ucd_units.${id} names unknown units ${unknown.join(", ")}`);
+  }
+  return errors;
+}
+
+/**
+ * Module close-out reconciliation (4.8.0) from the files on disk: the I13 `ucd_units`
+ * of the module against the passed GREEN evidence of each of its units. Returns [] when
+ * the module's I13 has no `ucd_units` (nothing to reconcile).
+ */
+function moduleUcdCoverageGaps(moduleId: string): string[] {
+  const i13Path = join(PROJECT_ROOT, evidenceRelativePath("test-case-derivation", "test-case-derivation", "module", { module_id: moduleId }));
+  if (!existsSync(i13Path)) return [];
+  let i13: Evidence | null = null;
+  try {
+    i13 = asRecord(JSON.parse(readFileSync(i13Path, "utf8")));
+  } catch (error) {
+    return [`I13 evidence cannot be parsed: ${error instanceof Error ? error.message : String(error)}`];
+  }
+  if (!i13 || i13.status !== "required" || !i13UcdUnits(i13)) return [];
+  const green = new Map<string, string[]>();
+  const root = join(PROJECT_ROOT, ".aidlc", "evidence", "code-generation", moduleId);
+  if (existsSync(root)) {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      const path = join(root, entry.name, "green-test-evidence.json");
+      if (!entry.isDirectory() || !existsSync(path)) continue;
+      try {
+        const record = asRecord(JSON.parse(readFileSync(path, "utf8")));
+        if (record && record.status === "passed") green.set(entry.name, greenCoveredUcds(record));
+      } catch {
+        continue;
+      }
+    }
+  }
+  return ucdCoverageGaps(i13, green);
+}
+
+const UCD_MODES = new Set(["new", "characterization"]);
+const BLOB_ID_PATTERN = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+
+/**
+ * I13 `ucd_modes` / `characterization[]` / `baseline_commit` (4.6.0 S2.2). Evidence
+ * without `ucd_modes` predates 4.6 and means every UC-D is new. When a UC-D uses
+ * characterization, the recorded baseline must be the current workflow baseline (the
+ * parent's for a module sub-workflow), still reachable from HEAD, and every code ref
+ * must resolve to the recorded blob inside the source roots.
+ */
+function i13ModeErrors(evidence: Evidence, ucdIds: string[], state: WorkflowState, instance: StageInstance): string[] {
+  const errors: string[] = [];
+  let modes: Record<string, unknown>;
+  if (evidence.ucd_modes === undefined) {
+    if (evidence.characterization !== undefined || evidence.baseline_commit !== undefined) errors.push("characterization and baseline_commit require ucd_modes");
+    modes = Object.fromEntries(ucdIds.map((id) => [id, "new"]));
+  } else {
+    const record = asRecord(evidence.ucd_modes);
+    if (!record) return ["ucd_modes must be an object keyed by UC-D"];
+    modes = record;
+    const keys = Object.keys(record);
+    if (keys.length !== ucdIds.length || !ucdIds.every((id) => keys.includes(id))) errors.push("ucd_modes must have exactly one entry per ucd_ids entry");
+    for (const [id, mode] of Object.entries(record)) if (!UCD_MODES.has(String(mode))) errors.push(`ucd_modes.${id} must be new or characterization`);
+  }
+  const characterized = ucdIds.filter((id) => modes[id] === "characterization");
+  if (state.scope === "bugfix" && ucdIds.length > 0 && characterized.length === ucdIds.length) errors.push("a bugfix workflow needs at least one tdd_mode new UC-D that reproduces the bug");
+  if (state.scope === "refactor" && ucdIds.length > 0 && characterized.length === 0) errors.push("a refactor workflow needs at least one tdd_mode characterization UC-D bound to the workflow baseline");
+  if (characterized.length === 0) {
+    if (evidence.characterization !== undefined) errors.push("characterization must be absent when no UC-D uses tdd_mode characterization");
+    if (evidence.baseline_commit !== undefined) errors.push("baseline_commit must be absent when no UC-D uses tdd_mode characterization");
+    return errors;
+  }
+
+  const entries = Array.isArray(evidence.characterization) ? evidence.characterization : null;
+  if (!entries) return [...errors, "characterization must list every tdd_mode characterization UC-D"];
+  let roots: string[] = [];
+  try {
+    roots = resolveSourceRoots(PROJECT_ROOT, instance.module_id).roots;
+  } catch (error) {
+    errors.push(`source roots cannot be resolved: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const refs: Array<{ ucd: string; ref: CodeRef; blob: string; repo?: string }> = [];
+  const seen = new Set<string>();
+  for (const [index, value] of entries.entries()) {
+    const entry = asRecord(value);
+    const ucd = asNonEmptyString(entry?.ucd);
+    if (!entry || !ucd || !characterized.includes(ucd) || seen.has(ucd)) {
+      errors.push(`characterization[${index}].ucd must name a distinct tdd_mode characterization UC-D`);
+      continue;
+    }
+    seen.add(ucd);
+    if (!asNonEmptyString(entry.reason)) errors.push(`characterization ${ucd} reason is required`);
+    if (!asNonEmptyString(entry.approval_ref)) errors.push(`characterization ${ucd} approval_ref is required`);
+    const codeRefs = Array.isArray(entry.code_refs) ? entry.code_refs : [];
+    if (codeRefs.length === 0) errors.push(`characterization ${ucd} code_refs must be non-empty`);
+    for (const item of codeRefs) {
+      const codeRef = asRecord(item);
+      const path = asNonEmptyString(codeRef?.path);
+      const blob = String(codeRef?.baseline_blob || "");
+      const symbol = codeRef?.symbol;
+      if (!codeRef || !path || !BLOB_ID_PATTERN.test(blob) || (symbol !== undefined && !asNonEmptyString(symbol))) {
+        errors.push(`characterization ${ucd} code_refs entries need path, baseline_blob and an optional non-empty symbol`);
+        continue;
+      }
+      try {
+        const ref = parseCodeRef(symbol === undefined ? path : `${path}::${String(symbol)}`, roots, `characterization ${ucd} code_refs`);
+        if (ref.path !== path) errors.push(`characterization ${ucd} code_refs path ${path} is not normalized`);
+        if (codeRef.repo !== undefined && !asNonEmptyString(codeRef.repo)) errors.push(`characterization ${ucd} code_refs ${path} repo must be "." or a nested repository path`);
+        refs.push({ ucd, ref, blob, ...(codeRef.repo !== undefined ? { repo: String(codeRef.repo) } : {}) });
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+  }
+  const missing = characterized.filter((id) => !seen.has(id));
+  if (missing.length > 0) errors.push(`characterization is missing ${missing.join(", ")}`);
+
+  let baseline: ReturnType<typeof workflowBaselineForModule>;
+  try {
+    baseline = workflowBaselineForModule(PROJECT_ROOT, instance.module_id);
+  } catch (error) {
+    return [...errors, `workflow baseline cannot be resolved: ${error instanceof Error ? error.message : String(error)}`];
+  }
+  const baselineErrors = baselineCommitErrors(PROJECT_ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
+  if (baselineErrors.length > 0 || !baseline.registered) return [...errors, ...baselineErrors];
+  // 4.10.0: the evidence must have been produced against the kind of baseline that applies now.
+  const kindErrors = baselineKindErrors(evidence.baseline_kind, baseline, "I13");
+  if (kindErrors.length > 0) return [...errors, ...kindErrors];
+  // 4.7.0: I13 stays bound to epoch 0 of the baseline chain; --advance never refreshes it.
+  const epoch0 = baseline.epochs[0];
+  if (evidence.baseline_commit !== epoch0) {
+    return [...errors, `baseline_commit ${JSON.stringify(evidence.baseline_commit)} does not match the workflow baseline ${epoch0}${baseline.epochs.length > 1 ? " (epoch 0 of the baseline chain)" : ""}`];
+  }
+  // 4.9.0: I13 with baseline_repos binds each nested repository at its start epoch; I13
+  // without it (and without code_refs[].repo) keeps the 4.8.1 rules.
+  const nestedI13 = evidence.baseline_repos !== undefined;
+  let nested: string[] = [];
+  const registered = Object.keys(baseline.repos).length > 0;
+  if (nestedI13 || registered) {
+    try {
+      nested = nestedSourceRepos(PROJECT_ROOT);
+    } catch (error) {
+      return [...errors, error instanceof Error ? error.message : String(error)];
+    }
+    const extra = extraRepoKeyErrors(baseline, nested);
+    if (extra.length > 0) return [...errors, ...extra];
+  }
+  const startRepos = Object.fromEntries(Object.entries(baseline.repos).map(([key, chain]) => [key, chain.commits[0]]));
+  if (nestedI13) {
+    const recorded = asRecord(evidence.baseline_repos);
+    if (!recorded || JSON.stringify(Object.keys(recorded).sort()) !== JSON.stringify(Object.keys(startRepos).sort())
+      || Object.keys(startRepos).some((key) => recorded[key] !== startRepos[key])) {
+      return [...errors, `baseline_repos ${JSON.stringify(evidence.baseline_repos)} does not match the start-epoch commits of the registered nested repositories ${JSON.stringify(startRepos)}`];
+    }
+  }
+  for (const { ucd, ref, blob, repo } of refs) {
+    if (!nestedI13 && repo !== undefined) {
+      errors.push(`characterization ${ucd} code_refs ${ref.path} records repo ${JSON.stringify(repo)} but the I13 evidence has no baseline_repos`);
+      continue;
+    }
+    const owner = nestedI13 ? codeRefRepo(PROJECT_ROOT, ref.path, nested) : undefined;
+    if (owner && repo !== owner.repoKey) {
+      errors.push(`characterization ${ucd} code_refs ${ref.path} repo ${JSON.stringify(repo)} must be ${JSON.stringify(owner.repoKey)}`);
+      continue;
+    }
+    if (owner && owner.repoKey !== WORKFLOW_REPO_KEY && !(owner.repoKey in startRepos)) {
+      errors.push(pendingNestedError(PROJECT_ROOT, baseline.commit, [owner.repoKey]));
+      continue;
+    }
+    const commit = owner && owner.repoKey !== WORKFLOW_REPO_KEY ? startRepos[owner.repoKey] : epoch0;
+    const resolved = baselineCodeRef(PROJECT_ROOT, commit, ref, `characterization ${ucd} code_refs ${ref.path}`, owner);
+    if ("error" in resolved) errors.push(resolved.error);
+    else if (resolved.blob !== blob) errors.push(`characterization ${ucd} code_refs ${ref.path} baseline_blob ${blob} does not match ${resolved.blob} at the workflow baseline`);
+  }
+  return errors;
+}
+
+type I13Context = { value: Evidence } | { error: string };
+
+/** The module's I13 evidence, read by the tdd gate to derive the RED / BASELINE UC-D sets. */
+function i13DerivationErrors(evidence: Evidence, instance: StageInstance, state: WorkflowState): string[] {
+  const errors: string[] = [];
+  if (!["required", "not_applicable"].includes(String(evidence.status))) errors.push('status must be "required" or "not_applicable"');
+  if (evidence.status === "not_applicable") {
+    if (!["pure-declaration", "pure-style", "pure-configuration", "approved-exception"].includes(String(evidence.reason_code))) errors.push("reason_code is not an approved non-applicable code");
+    for (const field of ["reason_code", "reason", "approval_ref", "alternative_validation", "validation_command"]) if (!asNonEmptyString(evidence[field])) errors.push(`${field} is required for not_applicable`);
+    const sourceRefs = asStringArray(evidence.source_refs);
+    if (!sourceRefs || sourceRefs.length === 0) errors.push("source_refs must be non-empty");
+  } else {
+    const total = asPositiveInt(evidence.ucd_total);
+    const ready = asPositiveInt(evidence.ready_ucd);
+    if (total === null || total < 1) errors.push("ucd_total must be >= 1");
+    if (ready === null || ready !== total) errors.push("ready_ucd must equal ucd_total");
+    const ucdIds = asStringArray(evidence.ucd_ids);
+    if (!ucdIds || ucdIds.length === 0) errors.push("ucd_ids must be non-empty");
+    if (!asNonEmptyString(evidence.index)) errors.push("index is required");
+    errors.push(...i13ModeErrors(evidence, ucdIds || [], state, instance));
+    errors.push(...i13UnitErrors(evidence, ucdIds || [], instance));
+  }
+  return errors;
+}
+
+function moduleI13Evidence(instance: Pick<StageInstance, "module_id">): I13Context {
+  if (!instance.module_id) return { error: "the tdd gate needs a module context to read the I13 evidence" };
+  const path = join(PROJECT_ROOT, evidenceRelativePath("test-case-derivation", "test-case-derivation", "module", { module_id: instance.module_id }));
+  if (!existsSync(path)) return { error: `I13 evidence is missing: ${normalizeArtifactLabel(relative(PROJECT_ROOT, path))}` };
+  try {
+    const value = asRecord(JSON.parse(readFileSync(path, "utf8")));
+    return value ? { value } : { error: "I13 evidence must be a JSON object" };
+  } catch (error) {
+    return { error: `I13 evidence cannot be parsed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+/** MARS-271: ids of the I13 `mapping_deferred` entries (P1/display UC-Ds whose test mapping is deferred). */
+function i13MappingDeferredIds(i13: Evidence): string[] {
+  return (Array.isArray(i13.mapping_deferred) ? i13.mapping_deferred : [])
+    .map((entry) => asNonEmptyString(asRecord(entry)?.id))
+    .filter((id): id is string => id !== undefined);
+}
+
+/** `uc_mapping` must name exactly `expected` (by use_case), no more and no less. */
+function ucMappingCoverageErrors(evidence: Evidence, requirement: string, expected: string[]): string[] {  const named = (Array.isArray(evidence.uc_mapping) ? evidence.uc_mapping : []).map((entry) => asNonEmptyString(asRecord(entry)?.use_case) || "");
+  const missing = expected.filter((id) => !named.includes(id));
+  const unexpected = [...new Set(named.filter((id) => !expected.includes(id)))].map((id) => id || "(entry without use_case)");
+  const duplicated = [...new Set(named.filter((id, index) => id && named.indexOf(id) !== index))];
+  if (missing.length === 0 && unexpected.length === 0 && duplicated.length === 0) return [];
+  const detail = [
+    missing.length ? `missing ${missing.join(", ")}` : "",
+    unexpected.length ? `unexpected ${unexpected.join(", ")}` : "",
+    duplicated.length ? `duplicated ${duplicated.join(", ")}` : "",
+  ].filter(Boolean).join("; ");
+  return [`${requirement} (${expected.join(", ") || "none"}): ${detail}`];
+}
+
+/**
+ * BASELINE binding to the workflow baseline chain (4.7.0 epochs): the evidence's
+ * baseline_commit is one epoch of the chain (the current baseline when it was never
+ * advanced), still reachable from HEAD; I13 is bound to epoch 0; code_ref_digests
+ * name exactly the I13 code refs, each observed unchanged (worktree_blob ==
+ * baseline_blob) at the evidence's own epoch, with that blob re-resolved here. The
+ * worktree is not read: the digests are the record of what BASELINE observed.
+ * `requireCurrentEpoch` (code-generation completion of the same unit) additionally
+ * demands that BASELINE was produced in the current epoch, so a unit's BASELINE and
+ * GREEN never straddle an --advance.
+ */
+function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: StageInstance, requireCurrentEpoch = false, scope: UnitUcdScope | null = null): string[] {
+  const errors: string[] = [];
+  let baseline: ReturnType<typeof workflowBaselineForModule>;
+  try {
+    baseline = workflowBaselineForModule(PROJECT_ROOT, instance.module_id);
+  } catch (error) {
+    return [`workflow baseline cannot be resolved: ${error instanceof Error ? error.message : String(error)}`];
+  }
+  const commitErrors = baselineCommitErrors(PROJECT_ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
+  if (commitErrors.length > 0 || !baseline.registered) return commitErrors;
+  // 4.10.0: BASELINE and its I13 must both be bound to the kind of baseline that applies now.
+  const kindErrors = [...baselineKindErrors(evidence.baseline_kind, baseline, "BASELINE"), ...baselineKindErrors(i13.baseline_kind, baseline, "I13")];
+  if (kindErrors.length > 0) return kindErrors;
+  const chain = baseline.epochs;
+  // 4.9.0: BASELINE evidence with baseline_repos is identified by the workflow commit
+  // together with the nested repository commits of its epoch; evidence without it (and
+  // without code_ref_digests[].repo) is re-checked with the 4.8.1 rules.
+  const nestedEvidence = evidence.baseline_repos !== undefined;
+  let nested: string[] = [];
+  if (nestedEvidence || Object.keys(baseline.repos).length > 0) {
+    try {
+      nested = nestedSourceRepos(PROJECT_ROOT);
+    } catch (error) {
+      return [error instanceof Error ? error.message : String(error)];
+    }
+    const extra = extraRepoKeyErrors(baseline, nested);
+    if (extra.length > 0) return extra;
+  }
+  const recordedRepos = nestedEvidence ? asRecord(evidence.baseline_repos) : null;
+  if (nestedEvidence && !recordedRepos) errors.push("BASELINE baseline_repos must be an object keyed by nested repository path");
+  const sameRepos = (left: Record<string, unknown>, right: Record<string, string>) => JSON.stringify(Object.keys(left).sort()) === JSON.stringify(Object.keys(right).sort()) && Object.keys(right).every((key) => left[key] === right[key]);
+  const epochIndex = typeof evidence.baseline_commit !== "string"
+    ? -1
+    : nestedEvidence
+      ? chain.findIndex((entry, index) => entry === evidence.baseline_commit && recordedRepos !== null && sameRepos(recordedRepos, epochRepos(baseline, index)))
+      : chain.indexOf(evidence.baseline_commit);
+  const epoch = epochIndex >= 0 ? chain[epochIndex] : undefined;
+  const repos = epochIndex >= 0 ? epochRepos(baseline, epochIndex) : {};
+  if (epoch === undefined) {
+    errors.push(nestedEvidence
+      ? `BASELINE baseline_commit ${JSON.stringify(evidence.baseline_commit)} with baseline_repos ${JSON.stringify(evidence.baseline_repos)} does not match any epoch of the workflow baseline chain (${chain.map((entry, index) => [entry, ...Object.entries(epochRepos(baseline, index)).map(([key, sha]) => `${key}=${sha}`)].join(";")).join(", ")})`
+      : `BASELINE baseline_commit ${JSON.stringify(evidence.baseline_commit)} does not match the workflow baseline ${baseline.commit}${chain.length > 1 ? ` or any earlier epoch of the baseline chain (${chain.join(", ")})` : ""}`);
+  } else {
+    if (epochIndex !== chain.length - 1) {
+      if (epoch !== baseline.commit) errors.push(...baselineEpochErrors(PROJECT_ROOT, epoch));
+      for (const [key, sha] of Object.entries(repos)) errors.push(...nestedCommitErrors(PROJECT_ROOT, key, sha, "baseline epoch"));
+    } else {
+      for (const [key, sha] of Object.entries(repos)) errors.push(...nestedCommitErrors(PROJECT_ROOT, key, sha, "workflow baseline commit"));
+    }
+    if (requireCurrentEpoch && epochIndex !== chain.length - 1) {
+      errors.push(`BASELINE baseline_commit ${epoch} is epoch ${epochIndex} of the baseline chain, but the current epoch is ${baseline.commit} (epoch ${chain.length - 1}): a unit's BASELINE and GREEN must complete within one epoch`);
+    }
+  }
+  if (i13.baseline_commit !== chain[0]) errors.push(`I13 baseline_commit ${JSON.stringify(i13.baseline_commit)} does not match the workflow baseline ${chain[0]}${chain.length > 1 ? " (epoch 0 of the baseline chain)" : ""}`);
+
+  let expected: Array<{ path: string; baseline_blob: string }>;
+  try {
+    // 4.8.0: a unit-scoped BASELINE covers only the code refs of its own characterization UC-Ds.
+    expected = i13CodeRefBlobs(i13, scope ? scope.characterization : undefined);
+  } catch (error) {
+    return [...errors, error instanceof Error ? error.message : String(error)];
+  }
+  const digests = Array.isArray(evidence.code_ref_digests) ? evidence.code_ref_digests.map((entry) => asRecord(entry)) : [];
+  const paths = digests.map((entry) => asNonEmptyString(entry?.path) || "");
+  const expectedPaths = expected.map((entry) => entry.path);
+  if (!Array.isArray(evidence.code_ref_digests) || paths.length !== new Set(paths).size || paths.length !== expectedPaths.length || !expectedPaths.every((path) => paths.includes(path))) {
+    errors.push(`code_ref_digests must cover exactly the ${scope ? `characterization code refs of unit ${instance.unit_id}` : "I13 characterization code refs"} (${expectedPaths.join(", ")}), got ${JSON.stringify(paths)}`);
+  }
+  for (const entry of digests) {
+    const path = asNonEmptyString(entry?.path);
+    const recorded = String(entry?.baseline_blob || "");
+    const worktree = String(entry?.worktree_blob || "");
+    if (!entry || !path || !BLOB_ID_PATTERN.test(recorded) || !BLOB_ID_PATTERN.test(worktree)) {
+      errors.push("code_ref_digests entries need path, baseline_blob and worktree_blob git blob ids");
+      continue;
+    }
+    if (worktree !== recorded) errors.push(`code_ref_digests ${path} worktree_blob ${worktree} must equal baseline_blob ${recorded}: BASELINE must observe the unmodified baseline code`);
+    if (!nestedEvidence && entry.repo !== undefined) {
+      errors.push(`code_ref_digests ${path} records repo ${JSON.stringify(entry.repo)} but the BASELINE evidence has no baseline_repos`);
+      continue;
+    }
+    if (epoch === undefined) continue;
+    const owner = nestedEvidence ? codeRefRepo(PROJECT_ROOT, path, nested) : undefined;
+    if (owner && entry.repo !== owner.repoKey) {
+      errors.push(`code_ref_digests ${path} repo ${JSON.stringify(entry.repo)} must be ${JSON.stringify(owner.repoKey)}`);
+      continue;
+    }
+    const nestedKey = owner && owner.repoKey !== WORKFLOW_REPO_KEY ? owner.repoKey : undefined;
+    if (nestedKey && !(nestedKey in repos)) {
+      errors.push(`code_ref_digests ${path} lies in the nested repository ${nestedKey}/, which the workflow baseline did not register at epoch ${epochIndex}${nestedKey in baseline.repos ? ` (registered from epoch ${baseline.repos[nestedKey].start})` : ""}`);
+      continue;
+    }
+    // I13 records the blobs of each repository's start epoch (epoch 0 for the workflow
+    // repository); an evidence of a later epoch is checked against its own epoch only.
+    const declared = expected.find((item) => item.path === path);
+    const startEpoch = nestedKey ? baseline.repos[nestedKey].start : 0;
+    if (epochIndex === startEpoch && declared && declared.baseline_blob !== recorded) errors.push(`code_ref_digests ${path} baseline_blob ${recorded} does not match the I13 baseline_blob ${declared.baseline_blob}`);
+    const resolved = baselineCodeRef(PROJECT_ROOT, nestedKey ? repos[nestedKey] : epoch, { path }, `code_ref_digests ${path}`, owner);
+    if ("error" in resolved) errors.push(resolved.error);
+    else if (resolved.blob !== recorded) errors.push(`code_ref_digests ${path} baseline_blob ${recorded} does not match ${resolved.blob} at the workflow baseline ${nestedKey ? `${repos[nestedKey]} (nested repository ${nestedKey}/)` : epoch}${chain.length > 1 ? ` (epoch ${epochIndex})` : ""}`);
+  }
+  return errors;
+}
+
+/**
+ * RED / BASELINE / GREEN `not_required` of a unit with an empty UC-D subset (4.8.0):
+ * only valid when the subset really is empty, and bound to the unit's `ucd_exemption`
+ * in the unit manifest (fields equal, the executed command is its validation_command,
+ * which exited 0, and the checker digest derives from that execution).
+ */
+function ucdExemptionEvidenceErrors(evidence: Evidence, phase: Phase, instance: StageInstance, scope: UnitUcdScope | null): string[] {
+  const errors: string[] = [];
+  const unitLabel = `unit ${instance.unit_id}`;
+  if (!scope || !scope.scoped || scope.all.length > 0) {
+    errors.push(`${phase} may be not_required by ucd_exemption only when the UC-D subset of ${unitLabel} is empty${scope?.scoped ? `; ${unitLabel}: ${scope.all.join(", ")}` : " (I13 declares no ucd_units)"}`);
+    return errors;
+  }
+  if (evidence.phase !== phase) errors.push(`phase must be ${phase}`);
+  if (!Array.isArray(evidence.ucd_ids) || evidence.ucd_ids.length !== 0) errors.push("not_required evidence must declare ucd_ids: []");
+  let exemption: ReturnType<typeof unitUcdExemption>;
+  try {
+    exemption = unitUcdExemption(PROJECT_ROOT, instance.module_id!, instance.unit_id!);
+  } catch (error) {
+    return [...errors, `${unitLabel} owns no UC-D and its ucd_exemption cannot be read: ${error instanceof Error ? error.message : String(error)}`];
+  }
+  if (!exemption) return [...errors, `${unitLabel} owns no UC-D of module ${instance.module_id} (unit_refs) and declares no ucd_exemption in its unit manifest`];
+  const declared = asRecord(evidence.ucd_exemption);
+  for (const field of ["reason_code", "reason", "approval_ref", "alternative_validation"] as const) {
+    if (declared?.[field] !== exemption[field]) errors.push(`ucd_exemption.${field} does not match the unit manifest ucd_exemption of ${unitLabel}`);
+  }
+  const execution = asRecord(evidence.exemption_validation_execution);
+  const commandDigest = argvDigest(exemption.validation_command);
+  if (!execution) {
+    errors.push("exemption_validation_execution is required");
+  } else {
+    if (execution.argv_digest !== commandDigest) errors.push(`exemption_validation_execution.argv_digest does not match the ucd_exemption validation_command of ${unitLabel}`);
+    if (asNumber(execution.exit_code) !== 0 || execution.status !== "passed") errors.push("exemption_validation_execution must have passed with exit_code 0");
+    if (asNumber(execution.duration_ms) === null) errors.push("exemption_validation_execution.duration_ms must be a number");
+  }
+  const checker = asRecord(evidence.checker);
+  if (checker && checker.argv_digest !== ucdExemptionDigest(phase, commandDigest)) errors.push(`checker.argv_digest does not match the ${phase} ucd_exemption check`);
+  return errors;
+}
+
+function phaseInputCommand(stage: string, phase: Phase, instance: StageInstance, evidence: Evidence) {
+  if (evidence.observed_command) return allowlistedPhaseCommand(stage, phase);
+  if (evidence.exemption_validation_execution) return alternativePhaseInputs(stage, instance.module_id!, instance.unit_id, true);
+  if (evidence.alternative_validation_execution) return alternativePhaseInputs(stage, instance.module_id!, instance.unit_id);
+  return undefined;
+}
+
+function phaseEvidenceErrors(
+  evidence: Evidence,
+  sensor: string,
+  phase: Phase,
+  applicability: { any: boolean; allNotApplicable: boolean },
+  stageSlug: string,
+  instance: StageInstance,
+  state: WorkflowState,
+  requireCurrentBaselineEpoch = false,
+  historicalTdd = false,
+  alternativeEnvironment?: NodeJS.ProcessEnv,
+): string[] {
+  // Global and integration gates can recheck a module phase. Its identity still
+  // belongs to the persisted module workflow, including alternative observations
+  // and historical replay; the caller's routing cursor is not its owner.
+  if (instance.module_id && !(state.workflow_kind === "module" && state.module_id === instance.module_id)) {
+    const workflows = loadWorkflowParts(PROJECT_ROOT);
+    if (workflows.split) state = mergeWorkflowView(workflows.parts, {kind:"module",module_id:instance.module_id});
+  }
+  const errors: string[] = [];
+  const alternativeExecution = asRecord(evidence.exemption_validation_execution) || asRecord(evidence.alternative_validation_execution);
+  if (evidence.phase_input_binding !== undefined && alternativeExecution && !/^[a-f0-9]{64}$/.test(String(alternativeExecution.input_binding || ""))) {
+    errors.push("alternative phase evidence requires its original input binding; new evidence cannot downgrade to legacy provenance");
+  }
+  // RED covers the tdd_mode new UC-Ds and BASELINE the characterization UC-Ds of I13
+  if (evidence.evidence_mode === "historical_replay" && (phase !== "RED" || evidence.status !== "failed")) errors.push("historical_replay must be a failed required RED observation");
+  if (evidence.evidence_mode !== undefined && !["original", "historical_replay"].includes(String(evidence.evidence_mode))) errors.push("unrecognized evidence mode; diagnostics are not controlled phase evidence");
+  if (evidence.evidence_mode !== "historical_replay" && evidence.historical_replay !== undefined) errors.push("historical replay cannot be disguised as original evidence");
+  // (4.6.0 S3a), GREEN every UC-D (S3b); I13 without ucd_modes predates 4.6 and means
+  // every UC-D is new.
+  const i13 = moduleI13Evidence(instance);
+  const i13Value = i13 && "value" in i13 ? i13.value : null;
+  // MARS-271 分级映射准入:mapping_deferred UC-D 暂无测试映射,不进入 RED/BASELINE/GREEN
+  // 覆盖 universe;GREEN 证据必须以 mapping_debt 恰好申报同一批暂缓用例,映射债不得静默消失。
+  const deferredIds = i13Value ? i13MappingDeferredIds(i13Value) : [];
+  // 4.8.0: with I13 ucd_units a unit instance is checked against its own UC-D subset;
+  // without them (or without a unit) `scope` is the module set and unscoped.
+  const scope = i13Value?.status === "required" ? unitUcdIds(i13Value, instance.unit_id) : null;
+  const modes = scope ? { new: scope.new.filter((id) => !deferredIds.includes(id)), characterization: scope.characterization.filter((id) => !deferredIds.includes(id)) } : null;
+  const scoped = scope?.scoped === true;
+  const unitLabel = `unit ${instance.unit_id}`;
+  const emptySubset = scoped && scope!.all.length === 0;
+  const allowedStatuses = phase === "RED" ? ["failed", "not_applicable", "not_required"] : phase === "GREEN" ? (scoped ? ["passed", "not_applicable", "not_required"] : ["passed", "not_applicable"]) : ["passed", "not_required"];
+  if (!allowedStatuses.includes(String(evidence.status))) errors.push(`status must be ${allowedStatuses.join(" or ")}`);
+  if (i13 && "error" in i13) errors.push(`cannot derive the ${phase} UC-D set: ${i13.error}`);
+  if (evidence.status === "not_required" && (emptySubset || evidence.ucd_exemption !== undefined || evidence.exemption_validation_execution !== undefined)) {
+    errors.push(...ucdExemptionEvidenceErrors(evidence, phase, instance, scope));
+    if (asRecord(evidence.exemption_validation_execution)) errors.push(...exemptionCheckBindingErrors(asRecord(evidence.exemption_validation_execution)!, {
+      ...state, current_stage: stageSlug, current_stage_instance: instance.instance_id, current_module: instance.module_id, current_unit: instance.unit_id,
+    }, historicalTdd && phase !== "GREEN" && (evidence.phase_input_binding !== undefined || asRecord(evidence.exemption_validation_execution)!.input_binding !== undefined), alternativeEnvironment));
+    return errors;
+  }
+  if (evidence.status === "not_required" && phase === "GREEN" && scoped) {
+    errors.push(`GREEN may be not_required only when the UC-D subset of ${unitLabel} is empty; ${unitLabel}: ${scope!.all.join(", ")}`);
+    return errors;
+  }
+  if (evidence.status === "not_required" && phase !== "GREEN") {
+    if (evidence.phase !== phase) errors.push(`phase must be ${phase}`);
+    if (!Array.isArray(evidence.ucd_ids) || evidence.ucd_ids.length !== 0) errors.push("not_required evidence must declare ucd_ids: []");
+    const checker = asRecord(evidence.checker);
+    if (checker && checker.argv_digest !== phaseNotRequiredDigest(phase)) errors.push(`checker.argv_digest does not match the ${phase} not_required check`);
+    if (phase === "RED") {
+      if (i13Value && !modes) errors.push(`RED may be not_required only when I13 is required and declares no tdd_mode new UC-D (I13 status ${String(i13Value.status)})`);
+      if (modes && modes.new.length > 0) errors.push(scoped ? `RED may be not_required only when ${unitLabel} owns no tdd_mode new UC-D; new: ${modes.new.join(", ")}` : `RED may be not_required only when I13 declares no tdd_mode new UC-D; new: ${modes.new.join(", ")}`);
+    } else if (modes && modes.characterization.length > 0) {
+      errors.push(scoped ? `BASELINE may be not_required only when ${unitLabel} owns no tdd_mode characterization UC-D; characterization: ${modes.characterization.join(", ")}` : `BASELINE may be not_required only when I13 declares no tdd_mode characterization UC-D; characterization: ${modes.characterization.join(", ")}`);
+    }
+    return errors;
+  }
+  if (evidence.status === "not_applicable") {
+    if (!applicability.any || !applicability.allNotApplicable) errors.push(`${sensor} may be not_applicable only when I13 evidence is not_applicable`);
+    if (!asNonEmptyString(evidence.not_applicable_reason)) errors.push("not_applicable_reason is required");
+    if (!asNonEmptyString(evidence.alternative_validation)) errors.push("alternative_validation is required");
+    const execution = asRecord(evidence.alternative_validation_execution);
+    if (!execution) {
+      errors.push("alternative_validation_execution is required");
+    } else {
+      if (!asNonEmptyString(execution.id)) errors.push("alternative_validation_execution.id is required");
+      if (!/^[a-f0-9]{64}$/.test(String(execution.argv_digest || ""))) errors.push("alternative_validation_execution.argv_digest must be a SHA-256 digest");
+      if (asNumber(execution.exit_code) !== 0 || execution.status !== "passed") errors.push("alternative_validation_execution must have passed with exit_code 0");
+      if (asNumber(execution.duration_ms) === null) errors.push("alternative_validation_execution.duration_ms must be a number");
+      try {
+        const current = allowlistedAlternativeCommand(stageSlug);
+        if (execution.argv_digest !== current.argv_digest || execution.id !== current.id || execution.cwd !== current.cwd) errors.push("alternative validation no longer matches its allowlisted command");
+        // next rechecks upstream instances after report cleared active context. Bind
+        // applicability/input ownership to the instance being checked, not that cursor.
+        errors.push(...alternativeCheckBindingErrors(execution, stageSlug, {
+          ...state, current_stage: stageSlug, current_stage_instance: instance.instance_id,
+          current_module: instance.module_id, current_unit: instance.unit_id,
+        }, historicalTdd && phase !== "GREEN" && (evidence.phase_input_binding !== undefined || execution.input_binding !== undefined), alternativeEnvironment));
+        if (asRecord(evidence.checker)?.argv_digest !== argvDigest(["I13-not-applicable", phase, current.argv_digest])) errors.push("alternative checker digest does not match its command binding");
+      } catch (error) { errors.push(String(error)); }
+    }
+    return errors;
+  }
+  if (evidence.phase !== phase) errors.push(`phase must be ${phase}`);
+  if (evidence.compile_status !== "passed") errors.push("compile_status must be passed");
+  if (evidence.environment_status !== "passed") errors.push("environment_status must be passed");
+  const total = asPositiveInt(evidence.tests_total);
+  const failed = asPositiveInt(evidence.tests_failed);
+  if (total === null || total < 1) errors.push("tests_total must be >= 1");
+  if (failed === null) errors.push("tests_failed must be a non-negative integer");
+  if (evidence.traceability_complete !== true) errors.push("traceability_complete must be true");
+  if (!Array.isArray(evidence.uc_mapping) || evidence.uc_mapping.length === 0) errors.push("uc_mapping must be non-empty");
+  // MARS-271: 收敛期受影响方法过滤(test_filter)只允许出现在 RED 证据;GREEN/BASELINE 最终证据强制全量。
+  const testFilter = String(evidence.test_filter ?? "").trim();
+  if (testFilter && phase !== "RED") errors.push(`${phase} evidence must be a full run; test_filter is only allowed for RED convergence iterations`);
+  // The controlled producer records the observed test command separately from its
+  // built-in checker; RED must have exited 1, GREEN and BASELINE 0.
+  const observed = asRecord(evidence.observed_command);
+  const expectedExit = phase === "RED" ? 1 : 0;
+  if (!observed) {
+    errors.push(`observed_command is required for controlled ${phase} evidence`);
+  } else {
+    if (!asNonEmptyString(observed.id)) errors.push("observed_command.id is required");
+    if (observed.phase !== phase) errors.push(`observed_command.phase must be ${phase}`);
+    const observedDigest = String(observed.argv_digest || "");
+    if (!/^[a-f0-9]{64}$/.test(observedDigest)) {
+      errors.push("observed_command.argv_digest must be a SHA-256 digest");
+    } else {
+      // Bind the observation to the stage's allowlisted command (same resolution and
+      // stage-locked parser as the producer) and the checker digest to the observation.
+      // Any allowlist failure rejects: the binding is never skipped.
+      const role = phase.toLowerCase();
+      try {
+        const historical = evidence.evidence_mode === "historical_replay";
+        if (historical) {
+          if (phase !== "RED" || !instance.module_id || !instance.unit_id || !scoped || !i13Value) errors.push("historical_replay requires exact RED workflow/module/unit and current I13");
+          else errors.push(...replayEvidenceErrors(PROJECT_ROOT, evidence, { workflow_id: state.workflow_id, module_id: instance.module_id, unit_id: instance.unit_id }, i13Value, modes!.new));
+        } else {
+        const declared = allowlistedPhaseCommand(stageSlug, phase);
+        if (observedDigest !== declared.argv_digest) errors.push(`observed_command.argv_digest does not match the allowlisted ${role} command ${declared.id} in ${normalizeArtifactLabel(relative(PROJECT_ROOT, declared.config))}`);
+        if (asNonEmptyString(observed.id) && observed.id !== declared.id) errors.push(`observed_command.id must be ${declared.id}`);
+        }
+      } catch (error) {
+        errors.push(`cannot bind observed_command to the ${role} command allowlist of stage ${stageSlug}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const checker = asRecord(evidence.checker);
+      if (checker && checker.argv_digest !== phaseObservationDigest(phase, observedDigest)) errors.push(`checker.argv_digest does not match the ${phase} observation of observed_command`);
+    }
+    if (asNumber(observed.exit_code) !== expectedExit) errors.push(`observed_command.exit_code must be ${expectedExit}`);
+  }
+  if (phase === "RED") {
+    if (evidence.status !== "failed") errors.push('RED status must be "failed"');
+    if (evidence.failure_class !== "behavior") errors.push('RED failure_class must be "behavior"');
+    if (!asNonEmptyString(evidence.failure_signature)) errors.push("RED failure_signature is required");
+    if (failed === null || failed < 1) errors.push("RED tests_failed must be >= 1");
+    if (modes) errors.push(...ucMappingCoverageErrors(evidence, scoped ? `RED uc_mapping must cover exactly the tdd_mode new UC-Ds of ${unitLabel}` : "RED uc_mapping must cover exactly the tdd_mode new UC-Ds", modes.new));
+  } else if (evidence.status !== "passed" || failed !== 0) {
+    errors.push(`${phase} must be passed with tests_failed=0`);
+  }
+  // GREEN observes every UC-D of I13 after the change: new ones turned green and
+  // characterization ones still green (4.6.0 S3b); with ucd_units, every UC-D of the unit (4.8.0).
+  if (phase === "GREEN" && modes) {
+    const universe = scoped ? scope!.all : asStringArray(i13Value!.ucd_ids) || [];
+    errors.push(...(scoped
+      ? ucMappingCoverageErrors(evidence, `GREEN uc_mapping must cover every UC-D of ${unitLabel}`, universe.filter((id) => !deferredIds.includes(id)))
+      : ucMappingCoverageErrors(evidence, "GREEN uc_mapping must cover every I13 UC-D", universe.filter((id) => !deferredIds.includes(id)))));
+    const universeDeferred = universe.filter((id) => deferredIds.includes(id));
+    const debtIds = (Array.isArray(evidence.mapping_debt) ? evidence.mapping_debt : [])
+      .map((entry) => asNonEmptyString(asRecord(entry)?.id))
+      .filter((id): id is string => id !== undefined);
+    const missingDebt = universeDeferred.filter((id) => !debtIds.includes(id));
+    const extraDebt = debtIds.filter((id) => !universeDeferred.includes(id));
+    if (missingDebt.length > 0 || extraDebt.length > 0) {
+      errors.push(`GREEN mapping_debt must report exactly the mapping-deferred UC-Ds (${universeDeferred.join(", ") || "none"}): ${[missingDebt.length ? `missing ${missingDebt.join(", ")}` : "", extraDebt.length ? `unexpected ${extraDebt.join(", ")}` : ""].filter(Boolean).join("; ")}`);
+    }
+  }
+  if (phase === "BASELINE") {
+    if (!modes) {
+      if (i13Value) errors.push(`BASELINE may be passed only when I13 is required and declares tdd_mode characterization UC-Ds (I13 status ${String(i13Value.status)})`);
+    } else {
+      errors.push(...ucMappingCoverageErrors(evidence, scoped ? `BASELINE uc_mapping must cover exactly the tdd_mode characterization UC-Ds of ${unitLabel}` : "BASELINE uc_mapping must cover exactly the tdd_mode characterization UC-Ds", modes.characterization));
+      if (modes.characterization.length > 0) errors.push(...baselineEvidenceErrors(evidence, i13Value!, instance, requireCurrentBaselineEpoch, scoped ? scope : null));
+    }
+  }
+  return errors;
+}
+
+/**
+ * Run sensors defined on a stage. Each sensor is a named check.
+ * Built-in sensors:
+ *   - 'no-todo': grep produces files for TODO/FIXME/HACK
+ *   - 'build-success': check if .aidlc-build-ok marker exists
+ *   - 'test-pass': check if .aidlc-test-ok marker exists
+ *   - 'traceability': check that produces files reference a requirement ID
+ *
+ * Returns list of failed sensor results.
+ */
+export function checkPhaseSensors(instance: StageInstance, state: WorkflowState, options: SensorCheckOptions = {}): SensorResult[] {
+  const phases: Record<string, Phase> = { "red-test-evidence": "RED", "baseline-test-evidence": "BASELINE", "green-test-evidence": "GREEN" };
+  return (instance.stage.sensors || []).filter(sensor => phases[sensor] && (!options.onlySensors || options.onlySensors.includes(sensor))).flatMap(sensor => {
+    const failure = validateEvidence(instance.stage, sensor, instance, evidence => phaseEvidenceErrors(evidence, sensor, phases[sensor], i13Applicability(instance), instance.stage.slug, instance, state, options.requireCurrentBaselineEpoch === true, options.requireHistoricalPhaseInputs === true, options.alternativeValidationEnvironment), options);
+    return failure ? [failure] : [];
+  });
+}
+
+export async function checkHistoricalTddSensors(instance: StageInstance, state: WorkflowState, options: Pick<SensorCheckOptions, "onlySensors" | "requireCurrentBaselineEpoch" | "alternativeValidationEnvironment"> = {}): Promise<SensorResult[]> {
+  if (instance.stage.slug !== "tdd") throw new Error("Historical TDD validation requires a tdd instance");
+  const historical = { ...options, tolerateRevisionDrift: true, requireHistoricalPhaseInputs: true };
+  // An explicit phase-only caller has already validated its stage admission. Do not
+  // recurse through slices/UI gates while deriving mappings from controlled phases.
+  const phases = checkPhaseSensors(instance, state, historical);
+  return options.onlySensors ? phases : [...phases, ...await checkSensors(instance, state, {
+    onlySensors: instance.stage.sensors.filter(sensor => !["red-test-evidence", "baseline-test-evidence"].includes(sensor)),
+  })];
+}
+
+export async function checkSensors(instance: StageInstance, state: WorkflowState, options: SensorCheckOptions = {}): Promise<SensorResult[]> {
+  const stage = instance.stage;
+
+  const failures: SensorResult[] = [];
+
+  // GREEN consumes the bridge's real output and rechecks its current semantics.
+  // Production edits may change the source revision, but never the approved mappings.
+  if (stage.slug === "code-generation" && buildConditionContext(state, instance).needs_ui_implementation_bridge) {
+    const bridge = loadGraph().stages.find(node => node.slug === "ui-implementation-bridge")!;
+    const bridgeInstance = { ...instance, stage: bridge, instance_id: `ui-implementation-bridge@module:${instance.module_id}@unit:${instance.unit_id}` };
+    failures.push(...await checkSensors(bridgeInstance, state, { ...options, tolerateRevisionDrift: true, onlySensors: ["frontend-platform-spec"] }));
+  }
+
+  // Report is another admission boundary: do not trust a previously issued plan.
+  if (instance.unit_id) {
+    try {
+      const context = documentSliceContext(state, instance);
+      const current = checkSlices(context);
+      if (current.applicable === true) {
+        const source = expandStageInstances(loadGraph(), state).find(i => i.stage.slug === "units-generation" && i.module_id === instance.module_id);
+        if (!source) throw new Error("SLICE_EVIDENCE_MISSING: units-generation source");
+        const failure = validateEvidence(source.stage, SLICE_SENSOR, source, evidence => sliceEvidenceErrors(context, evidence), { ...options, tolerateRevisionDrift: true });
+        if (failure) failures.push(failure);
+      }
+    }
+    catch (error) { failures.push({ sensor: SLICE_SENSOR, passed: false, message: String(error) }); }
+  }
+
+  for (const sensor of stage.sensors || []) {
+    if (options.onlySensors && !options.onlySensors.includes(sensor)) continue;
+    if (sensor === SLICE_SENSOR) {
+      try {
+        const ctx = documentSliceContext(state, instance);
+        const current = checkSlices(ctx);
+        if (current.applicable === false) continue;
+        const failure = validateEvidence(stage, sensor, instance, evidence => sliceEvidenceErrors(ctx, evidence), { ...options, tolerateRevisionDrift: true });
+        if (failure) failures.push(failure);
+      } catch (error) { failures.push({ sensor, passed: false, message: String(error) }); }
+      continue;
+    }
+    if (QUALITY_SENSORS.has(sensor)) {
+      try {
+        const context = qualityGateContext(state, instance);
+        if (!qualityAdoption(context).enabled) continue;
+        const failure = validateEvidence(stage, sensor, instance, evidence => {
+          const errors = controlledQualityErrors(context, sensor, evidence);
+          return errors;
+        }, { ...options, tolerateRevisionDrift: true });
+        if (failure) failures.push({ ...failure, message: `GATE_EVIDENCE_MISSING_OR_INVALID: ${failure.message}` });
+      } catch (error) { failures.push({ sensor, passed: false, message: String(error) }); }
+      continue;
+    }
+    switch (sensor) {
+      case "no-todo": {
+        const todoFiles: string[] = [];
+        const unreadableFiles: string[] = [];
+        // Deleted implementation is no longer executable. Verify its explicit removal
+        // trace; old TODOs are not live code. sourceDelivery checks blob and ownership.
+        const removal = (stage.produces || []).includes(CANONICAL_SOURCE_PATTERN) ? sourceDelivery(instance) : undefined;
+        if (removal?.error && !removal.emptyDelta) unreadableFiles.push(removal.error);
+        for (const pattern of stage.produces || []) {
+          for (const filePath of resolveProducePaths(pattern, instance)) {
+            const artifact = readProducedArtifact(filePath);
+            // Binary produce cannot carry a TODO marker; only a real read failure fails closed.
+            if (artifact.kind === "binary") continue;
+            if (artifact.kind === "unreadable") {
+              unreadableFiles.push(artifactLabel(filePath));
+              continue;
+            }
+            const content = artifact.content;
+            if (/(?:^|\n)\s*(?:(?:\/\/|#|<!--|\*|-)\s*)?\b(?:TODO|FIXME|HACK)\b\s*(?::|\(|\[|$)/im.test(content)) {
+              todoFiles.push(artifactLabel(filePath));
+            }
+          }
+        }
+        // L2 (MARS-125/127): empty-set guard, symmetric to the traceability sensor
+        // (~L2117). no-todo is mounted unconditionally (even on not_applicable stages),
+        // so a stage that declares a NON-evidence produce (every traceability=required
+        // stage) but resolves to zero real files has nothing scanned and would pass
+        // silently — the gate空转. Fail closed in that case. A pure-evidence stage
+        // (shared-contract-baseline / tdd /
+        // compact-recovery; all traceability=not_applicable) declares no non-evidence
+        // produce, so the guard does not fire — no false positive. Directory produces
+        // whose only entries are empty/comment-only markers are not artifacts (same
+        // rule as traceability / produce-presence) and do not satisfy the guard.
+        const nonEvidenceProduces = (stage.produces || []).filter((pattern) => !pattern.startsWith(".aidlc/evidence"));
+        if (todoFiles.length === 0 && unreadableFiles.length === 0 && nonEvidenceProduces.length > 0) {
+          const noTodoTargets = [...new Set(nonEvidenceProduces
+            .flatMap((pattern) => resolveProducePaths(pattern, instance)
+              .filter((filePath) => !pattern.endsWith("/") || substantiveArtifact(filePath, pattern === CANONICAL_SOURCE_PATTERN)))
+            .filter((filePath) => !isEvidenceArtifact(filePath)))];
+          if (noTodoTargets.length === 0 && !removal?.deletions.length) {
+            failures.push({
+              sensor: "no-todo",
+              passed: false,
+              message: `No produced artifact found to scan for TODO/FIXME/HACK (stage declares non-evidence produces ${nonEvidenceProduces.join(", ")} but none resolved to a real file); produce the stage's artifacts before reporting.`,
+            });
+            break;
+          }
+        }
+        if (todoFiles.length > 0 || unreadableFiles.length > 0) {
+          const details = [];
+          if (todoFiles.length > 0) details.push(`TODO/FIXME/HACK in: ${todoFiles.join(", ")}`);
+          if (unreadableFiles.length > 0) details.push(`unreadable produced files: ${unreadableFiles.join(", ")}`);
+          failures.push({
+            sensor: "no-todo",
+            passed: false,
+            message: details.join("; "),
+          });
+        }
+        break;
+      }
+
+      case "build-success": {
+        const markerPath = join(PROJECT_ROOT, ".aidlc-build-ok");
+        if (!existsSync(markerPath)) {
+          failures.push({
+            sensor: "build-success",
+            passed: false,
+            message: "Build marker .aidlc-build-ok not found. Run a successful build first.",
+          });
+        }
+        break;
+      }
+
+      case "test-pass": {
+        const markerPath = join(PROJECT_ROOT, ".aidlc-test-ok");
+        if (!existsSync(markerPath)) {
+          failures.push({
+            sensor: "test-pass",
+            passed: false,
+            message: "Test marker .aidlc-test-ok not found. Run tests successfully first.",
+          });
+        }
+        break;
+      }
+
+      case "traceability": {
+        if (stage.traceability === "not_applicable") break;
+        if (["tdd", "code-generation", "code-review", "build-and-test"].includes(stage.slug)) {
+          const applicability = i13Applicability(instance);
+          if (applicability.allNotApplicable) break;
+        }
+
+        const untraced: string[] = [];
+        const unreadableFiles: string[] = [];
+        // MARS-95: with a baseline the source produce is the unit's delivery set, which as a
+        // whole must reference a REQ of the unit (req_refs) — per-file REQ markers in code
+        // are the traceability-matrix code_refs layer's business. An empty delta is judged
+        // by the produce presence gate. Without a baseline the 4.11.0 per-file rule applies.
+        const delivery = (stage.produces || []).includes(CANONICAL_SOURCE_PATTERN) ? sourceDelivery(instance) : undefined;
+        const deltaSource = delivery?.mode === "delta";
+        let sourceUntraced: string | undefined;
+        if (delivery && deltaSource && delivery.files.length > 0) {
+          const required = deliveryRequirementPattern(instance);
+          const texts = [...delivery.files.map((filePath) => producedText(filePath)), ...delivery.deletions.map(entry => entry.req_refs.join(" "))];
+          if (!texts.some((content) => content !== null && required.pattern.test(content))) {
+            sourceUntraced = `No delivered source file (${delivery.files.map(artifactLabel).join(", ")}) references ${required.label}`;
+          }
+        }
+        // Empty/comment-only markers are not artifacts on their own. Real small source
+        // and configuration remain traceable, matching the shared presence rule.
+        const targets = [...new Set((stage.produces || [])
+          .filter((pattern) => !(deltaSource && pattern === CANONICAL_SOURCE_PATTERN))
+          .flatMap((pattern) => resolveProducePaths(pattern, instance)
+            .filter((filePath) => !pattern.endsWith("/") || substantiveArtifact(filePath, pattern === CANONICAL_SOURCE_PATTERN)))
+          .filter((filePath) => !isEvidenceArtifact(filePath)))];
+
+        if (delivery?.error && !delivery.emptyDelta) sourceUntraced = delivery.error;
+        if (targets.length === 0 && !delivery?.deletions.length) {
+          failures.push({
+            sensor: "traceability",
+            passed: false,
+            message: "No traceability-applicable produced artifact found; declare traceability: not_applicable only for evidence-only stages.",
+          });
+          break;
+        }
+
+        for (const filePath of targets) {
+          const content = producedText(filePath);
+          if (content === null) {
+            unreadableFiles.push(artifactLabel(filePath));
+            continue;
+          }
+          const requirementPattern = /\b(REQ-[A-Z0-9][A-Z0-9_-]*|R-[0-9]+)\b/gi;
+          const matches = content.match(requirementPattern) || [];
+          const semanticBody = content.replace(requirementPattern, "").replace(/[#*_`>\-\s]/g, "");
+          if (matches.length === 0 || semanticBody.length < 20) {
+            untraced.push(artifactLabel(filePath));
+          }
+        }
+        if (untraced.length > 0 || unreadableFiles.length > 0 || sourceUntraced) {
+          const details = [];
+          if (untraced.length > 0) details.push(`No requirement ID (REQ-xxx or R-xxx) found in: ${untraced.join(", ")}`);
+          if (sourceUntraced) details.push(sourceUntraced);
+          if (unreadableFiles.length > 0) details.push(`unreadable produced files: ${unreadableFiles.join(", ")}`);
+          failures.push({
+            sensor: "traceability",
+            passed: false,
+            message: details.join("; "),
+          });
+        }
+        break;
+      }
+
+      case "clarification-traceability": {
+        // 澄清入链的确定性门禁:clarifications.md 必须存在、含 CL-xxx ID、且每条 CL 有实质内容。
+        // 这让澄清结论进入追溯链,可被 user-stories / application-design / cross-validation 下游对账;
+        // 修复"澄清文档是孤儿产物"的根源缺口。ID 规范见 knowledge/common-traceability-id-chain.md。
+        const targets = [...new Set((stage.produces || [])
+          .flatMap((pattern) => resolveProducePaths(pattern, instance))
+          .filter((filePath) => !isEvidenceArtifact(filePath)))];
+        const problems: string[] = [];
+        for (const filePath of targets) {
+          const content = producedText(filePath);
+          if (content === null) { problems.push(`unreadable: ${artifactLabel(filePath)}`); continue; }
+          const clIds = [...new Set((content.match(/\bCL-\d{3,}\b/g) || []))];
+          if (clIds.length === 0) {
+            // 无澄清结论是合法的(澄清可能确认"无歧义"):要求显式声明,避免空文件蒙混。
+            if (!/(?:^|\n)\s*(?:无澄清项|无需澄清|no clarifications?)\b/i.test(content)) {
+              problems.push(`${artifactLabel(filePath)} 无 CL-xxx 澄清条目,也未显式声明"无澄清项"`);
+            }
+            continue;
+          }
+          // 每条 CL 后必须有实质内容(结论文本),不能只有裸 ID。
+          for (const cl of clIds) {
+            const section = content.split(new RegExp(`\\b${cl}\\b`))[1]?.split(/\bCL-\d{3,}\b/)[0] || "";
+            if (section.replace(/[#*_`>\-\s]/g, "").length < 10) problems.push(`${cl} 缺少实质澄清结论内容`);
+          }
+        }
+        if (problems.length > 0) {
+          failures.push({ sensor: "clarification-traceability", passed: false, message: problems.join("; ") });
+        }
+        break;
+      }
+
+      case "story-traceability": {
+        // 用户故事对账(确定性):双向覆盖 + 澄清条件遵循。ID 规范见 knowledge/common-traceability-id-chain.md。
+        //  - 正向:requirements.md 每个 REQ-xxx 必须被至少一个 STORY 的来源声明覆盖;
+        //  - 反向:故事引用的每个 REQ/CL 必须真实存在于上游;
+        //  - 澄清:clarifications.md 存在时,每个 CL-xxx 至少被一个 STORY 引用(遵循);不存在则跳过(澄清阶段可条件跳过);
+        //  - 遗留兼容:requirements.md 无任何 REQ-xxx 时记 not_applicable 不阻断(未迁移旧项目)。
+        const problems: string[] = [];
+        const readModuleArtifact = (relPattern: string): string | null => {
+          try {
+            const rel = instanceArtifactPattern(relPattern, instance, true);
+            if (/[{}]/.test(rel)) return null;
+            const abs = join(PROJECT_ROOT, rel);
+            return existsSync(abs) ? readFileSync(abs, "utf8") : null;
+          } catch { return null; }
+        };
+        const storyTargets = [...new Set((stage.produces || [])
+          .flatMap((pattern) => resolveProducePaths(pattern, instance))
+          .filter((filePath) => !isEvidenceArtifact(filePath)))];
+        const storyContent = storyTargets.map((p) => producedText(p) ?? "").join("\n");
+        const reqContent = readModuleArtifact("docs/aidlc/modules/{module-id}/inception/requirements.md");
+        const clarContent = readModuleArtifact("docs/aidlc/modules/{module-id}/inception/clarifications.md");
+
+        const ids = (text: string | null, re: RegExp) => text ? [...new Set(text.match(re) || [])] : [];
+        const reqIds = ids(reqContent, /\b(?:REQ-[A-Z0-9][A-Z0-9_-]*|R-\d+)\b/g);
+        const storyIds = ids(storyContent, /\bSTORY-\d{3,}\b/g);
+        const clIds = ids(clarContent, /\bCL-\d{3,}\b/g);
+        const storyReqRefs = ids(storyContent, /\b(?:REQ-[A-Z0-9][A-Z0-9_-]*|R-\d+)\b/g);
+        const storyClRefs = ids(storyContent, /\bCL-\d{3,}\b/g);
+
+        if (reqContent === null) {
+          problems.push("requirements.md 不可读或缺失,无法对账");
+        } else if (reqIds.length === 0) {
+          // 未迁移旧项目:需求无 REQ-xxx —— not_applicable,不阻断(仍要求故事非空)。
+          if (storyContent.replace(/[#*_`>\-\s]/g, "").length < 20) problems.push("user-stories.md 内容为空");
+        } else {
+          if (storyIds.length === 0) problems.push("user-stories.md 无 STORY-xxx 故事 ID");
+          // 正向:每个 REQ 被覆盖
+          const uncovered = reqIds.filter((req) => !storyReqRefs.includes(req));
+          if (uncovered.length > 0) problems.push(`未被任何故事覆盖的需求: ${uncovered.join(", ")}`);
+          // 反向:故事引用的 REQ 必须存在
+          const danglingReq = storyReqRefs.filter((req) => !reqIds.includes(req));
+          if (danglingReq.length > 0) problems.push(`故事引用了不存在的需求: ${danglingReq.join(", ")}`);
+          // 澄清遵循(条件):clarifications 存在且有 CL 时,每个 CL 至少被引用一次
+          if (clarContent !== null && clIds.length > 0) {
+            const ignoredCl = clIds.filter((cl) => !storyClRefs.includes(cl));
+            if (ignoredCl.length > 0) problems.push(`澄清结论未被任何故事引用/遵循: ${ignoredCl.join(", ")}`);
+            const danglingCl = storyClRefs.filter((cl) => !clIds.includes(cl));
+            if (danglingCl.length > 0) problems.push(`故事引用了不存在的澄清: ${danglingCl.join(", ")}`);
+          }
+        }
+        if (problems.length > 0) {
+          failures.push({ sensor: "story-traceability", passed: false, message: problems.join("; ") });
+        }
+        break;
+      }
+
+      case "traceability-matrix": {
+        // 全覆盖对账门禁:分类追溯矩阵到本阶段应完成的层必须 100% 覆盖,无 BROKEN@<layer>。
+        // 由确定性 producer(traceabilityMatrix)生成 evidence;此处校验其结论。遗留(缺 track)降级放行。
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (["feature", "enterprise", "mvp", "classic"].includes(state.scope) && instance.module_id && !existsSync(join(PROJECT_ROOT, moduleInceptionRoot(instance.module_id), "requirements.md"))) errors.push("CANONICAL_INPUT_MISSING: requirements.md is required; no .full.md fallback");
+          if (!["passed", "not_applicable"].includes(String(evidence.status))) errors.push('status must be "passed" or "not_applicable"');
+          if (evidence.status === "not_applicable") return errors;
+          const broken = Array.isArray(evidence.broken_rows) ? evidence.broken_rows : [];
+          if (broken.length > 0) errors.push(`追溯矩阵存在断点(某需求在中途层丢失,drift): ${broken.slice(0, 20).join("; ")}`);
+          // 遗留兼容:migration_status=MIGRATION_REQUIRED 允许(旧项目缺 track 标签),但仍报缺失清单供补齐。
+          if (!["passed", "MIGRATION_REQUIRED"].includes(String(evidence.migration_status))) errors.push('migration_status must be "passed" or "MIGRATION_REQUIRED"');
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+
+      case "test-case-derivation": {
+        const failure = validateEvidence(stage, sensor, instance, evidence => i13DerivationErrors(evidence, instance, state));
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "red-test-evidence": {
+        const applicability = i13Applicability(instance);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "RED", applicability, stage.slug, instance, state, false, false, options.alternativeValidationEnvironment), options);
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "baseline-test-evidence": {
+        const applicability = i13Applicability(instance);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "BASELINE", applicability, stage.slug, instance, state, options.requireCurrentBaselineEpoch === true, false, options.alternativeValidationEnvironment), options);
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "green-test-evidence": {
+        const applicability = i13Applicability(instance);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => phaseEvidenceErrors(evidence, sensor, "GREEN", applicability, stage.slug, instance, state, false, false, options.alternativeValidationEnvironment), { ...options, allowDownstreamReportDrift: true });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "build-test-evidence": {
+        const failure = validateEvidence(stage, sensor, instance, evidence => buildTestEvidenceErrors(evidence, { ...state, current_stage: stage.slug, current_stage_instance: instance.instance_id, current_module: instance.module_id, current_unit: instance.unit_id }, options.alternativeValidationEnvironment));
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "review-evidence": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (evidence.status !== "passed") errors.push('status must be "passed"');
+          if (evidence.spec_axis !== "passed") errors.push('spec_axis must be "passed" (design conformance)');
+          if (evidence.standards_axis !== "passed") errors.push('standards_axis must be "passed" (coding standards)');
+          errors.push(...reviewIssueErrors(evidence));
+          errors.push(...reviewCoverageErrors(evidence, instance));
+
+          // Reviewer identity required
+          if (!asNonEmptyString(evidence.reviewer)) errors.push("reviewer must identify who/what performed the review");
+
+          // Files reviewed must be non-empty
+          const filesReviewed = asStringArray(evidence.files_reviewed);
+          if (!filesReviewed || filesReviewed.length === 0) errors.push("files_reviewed must list at least one file");
+
+
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "global-review-evidence": {
+        if (!globalReviewRequired(state)) break;
+        const failure = validateEvidence(stage, sensor, instance, evidence => globalReviewEvidenceErrors(evidence, state, options.alternativeValidationEnvironment));
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "deployment-validation": {
+        const failure = validateEvidence(stage, sensor, instance, deploymentValidationErrors);
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "test-quality": {
+        // RED is required for tdd_mode new UC-Ds and BASELINE for characterization
+        // UC-Ds (4.6.0 S3b); without a readable required I13 RED stays mandatory.
+        const needs = i13PhaseNeeds(instance);
+        const unitScope = unitScopeOf(instance);
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (evidence.status === "not_applicable") {
+            // Only I13 not_applicable, or (4.8.0) a unit whose UC-D subset is empty, has nothing to map.
+            if (unitScope ? unitScope.all.length > 0 : !i13Applicability(instance).allNotApplicable) {
+              errors.push(unitScope ? `test-quality may be not_applicable only when the UC-D subset of unit ${instance.unit_id} is empty; unit ${instance.unit_id}: ${unitScope.all.join(", ")}` : "test-quality may be not_applicable only when I13 evidence is not_applicable");
+            }
+            if (!asNonEmptyString(evidence.not_applicable_reason)) errors.push("not_applicable_reason is required");
+            if (!asNonEmptyString(evidence.alternative_validation)) errors.push("alternative_validation is required");
+            if (evidence.traceability_complete !== true) errors.push("traceability_complete must be true");
+            if (!Array.isArray(evidence.uc_mapping) || evidence.uc_mapping.length !== 0) errors.push("not_applicable uc_mapping must be empty");
+            return errors;
+          }
+          if (evidence.status !== "passed") errors.push('status must be "passed"');
+          if (evidence.green_seen !== true) errors.push("green_seen must be true (GREEN tests passing observed)");
+          if (asNumber(evidence.tests_failed) !== 0) errors.push("tests_failed must be 0");
+          const testsTotal = asPositiveInt(evidence.tests_total);
+          if (testsTotal === null || testsTotal < 1) errors.push("tests_total must be >= 1");
+          if (evidence.red_seen !== true && (needs.red || !needs.known)) errors.push("red_seen must be true (controlled RED evidence required)");
+          if (evidence.baseline_seen !== true && needs.baseline) errors.push("baseline_seen must be true (controlled BASELINE evidence required for the tdd_mode characterization UC-Ds)");
+          if (evidence.traceability_complete !== true) errors.push("traceability_complete must be true");
+          const ucMapping = evidence.uc_mapping;
+          if (!Array.isArray(ucMapping) || ucMapping.length === 0) {
+            errors.push("uc_mapping must be a non-empty array mapping UC-D to test methods");
+          } else {
+            for (let i = 0; i < ucMapping.length; i++) {
+              const entry = asRecord(ucMapping[i]);
+              if (!entry) {
+                errors.push(`uc_mapping[${i}] must be an object`);
+                continue;
+              }
+              if (!asNonEmptyString(entry.use_case)) errors.push(`uc_mapping[${i}].use_case is required`);
+              const tests = asStringArray(entry.test_methods);
+              if (!tests || tests.length === 0) errors.push(`uc_mapping[${i}].test_methods must list at least one test`);
+            }
+          }
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "contract-baseline": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (evidence.status !== "verified") errors.push('status must be "verified"');
+          if (!asNonEmptyString(evidence.contract_id)) errors.push("contract_id is required (non-empty string)");
+          if (!asNonEmptyString(evidence.owner)) errors.push("owner is required (non-empty string)");
+          if (evidence.validation_status !== "passed") errors.push('validation_status must be "passed"');
+
+          // Contract type and version
+          if (!asNonEmptyString(evidence.contract_type)) errors.push("contract_type is required (api/event/schema/proto)");
+
+          // Consumers must acknowledge the baseline
+          const consumers = asStringArray(evidence.consumers);
+          if (!consumers || consumers.length === 0) errors.push("consumers must list at least one dependent");
+
+          // Schema hash for integrity — allows detecting unauthorized changes
+          if (!asNonEmptyString(evidence.schema_hash)) errors.push("schema_hash is required for integrity verification");
+
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "functional-design-completeness": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (evidence.status !== "passed") errors.push('status must be "passed"');
+          if (evidence.data_source_validation !== "passed") errors.push('data_source_validation must be "passed"');
+          if (evidence.ambiguities_resolved !== true) errors.push("ambiguities_resolved must be true");
+          if (asNumber(evidence.unresolved_blockers) !== 0) errors.push("unresolved_blockers must be 0");
+
+          // Must enumerate covered use cases
+          const useCases = asStringArray(evidence.use_cases_covered);
+          if (!useCases || useCases.length === 0) errors.push("use_cases_covered must list at least one covered use case");
+
+          // Interface completeness — every public interface must be specified
+          if (asPositiveInt(evidence.interfaces_specified) === null || (evidence.interfaces_specified as number) < 1) {
+            errors.push("interfaces_specified must be >= 1");
+          }
+
+          // Error handling coverage
+          if (evidence.error_handling_defined !== true) errors.push("error_handling_defined must be true");
+
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "nfr-coverage": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (evidence.status !== "passed") errors.push('status must be "passed"');
+          const covered = asPositiveInt(evidence.requirements_covered);
+          if (covered === null || covered < 1) errors.push("requirements_covered must be at least 1");
+          if (asNumber(evidence.unresolved) !== 0) errors.push("unresolved must be 0");
+
+          // Each NFR must have an acceptance criterion and measurement method
+          const nfrs = evidence.nfr_items;
+          if (!Array.isArray(nfrs) || nfrs.length === 0) {
+            errors.push("nfr_items must list each NFR with its acceptance criterion");
+          } else {
+            for (let i = 0; i < nfrs.length; i++) {
+              const item = asRecord(nfrs[i]);
+              if (!item) {
+                errors.push(`nfr_items[${i}] must be an object`);
+                continue;
+              }
+              if (!asNonEmptyString(item.id)) errors.push(`nfr_items[${i}].id is required`);
+              if (!asNonEmptyString(item.category)) errors.push(`nfr_items[${i}].category is required (performance/security/reliability/...)`);
+              if (!asNonEmptyString(item.acceptance_criterion)) errors.push(`nfr_items[${i}].acceptance_criterion is required`);
+              if (item.verified !== true) errors.push(`nfr_items[${i}].verified must be true`);
+            }
+          }
+
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "infrastructure-completeness": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (evidence.status !== "passed") errors.push('status must be "passed"');
+          const requiredSections = ["deployment", "resources", "migration", "rollback", "runtime_dependencies"];
+          const sections = asStringArray(evidence.sections);
+          if (!sections) {
+            errors.push("sections must be a string array");
+          } else {
+            const missing = requiredSections.filter((section) => !sections.includes(section));
+            if (missing.length > 0) errors.push(`sections missing: ${missing.join(", ")}`);
+          }
+          if (asNumber(evidence.unresolved) !== 0) errors.push("unresolved must be 0");
+
+          errors.push(...infrastructureResourceErrors(evidence, stage.slug, PROJECT_ROOT));
+
+          // Rollback strategy must be defined
+          if (!asNonEmptyString(evidence.rollback_strategy)) errors.push("rollback_strategy is required");
+
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "implementation-report": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (evidence.status !== "passed") errors.push('status must be "passed"');
+          if (evidence.summary_complete !== true) errors.push("summary_complete must be true");
+
+          // Evidence references — must point to real sensor evidence files
+          const references = asStringArray(evidence.evidence_references);
+          if (!references || references.length === 0) {
+            errors.push("evidence_references must not be empty (list prior sensor evidence files)");
+          } else {
+            for (const ref of references) {
+              const refPath = join(PROJECT_ROOT, ref);
+              if (!existsSync(refPath)) {
+                errors.push(`evidence_references: file not found: ${ref}`);
+              }
+            }
+          }
+
+          // Must confirm all prior construction sensors passed
+          if (evidence.all_gates_passed !== true) errors.push("all_gates_passed must be true");
+
+          // Must record scope and stage counts
+          if (!asNonEmptyString(evidence.scope)) errors.push("scope is required");
+          if (asPositiveInt(evidence.stages_completed) === null || (evidence.stages_completed as number) < 1) {
+            errors.push("stages_completed must be >= 1");
+          }
+
+          {
+            const modules = verifiedModuleIds(PROJECT_ROOT, state.scope);
+            if (evidence.selected_artifacts_verified !== true) errors.push("selected_artifacts_verified must be true");
+            if (asNumber(evidence.modules_verified) !== modules.length) errors.push(`modules_verified must be ${modules.length}`);
+            const expectedPrd = selectedOptionalStages(state).includes("prd-generation");
+            if (evidence.prd_verified !== expectedPrd) errors.push(`prd_verified must be ${expectedPrd}`);
+            const expectedUiModules = modules.filter((moduleId) => {
+              const choice = uiDesignChoice(state, moduleId);
+              return choice === "html-mock" || choice === "figma-create" || choice === "figma-existing";
+            });
+            const actualUiModules = asStringArray(evidence.ui_modules_verified);
+            if (!actualUiModules) {
+              errors.push("ui_modules_verified must be an array (empty when no module selected UI)");
+            } else if (JSON.stringify([...actualUiModules].sort()) !== JSON.stringify(expectedUiModules)) {
+              errors.push(`ui_modules_verified must match selected UI choices: ${expectedUiModules.join(", ") || "(none)"}`);
+            }
+          }
+
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "prd-completeness": {
+        const failure = validateEvidence(stage, sensor, instance, evidence => deliveryConsistencyPayloadErrors("prd-completeness", evidence, {
+          module_id: instance.module_id, prd_selected: selectedOptionalStages(state).includes("prd-generation"), ui_route: uiDesignChoice(state, instance.module_id),
+        }));
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "diagram-contract": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          // Route by the user's current choice before inspecting format-specific payloads.
+          const format = diagramFormatOf(state);
+          if (evidence.source_format !== format) {
+            return [`diagram format is ${format}${format === "svg" ? " (explicitly selected by the user)" : " (default or explicitly selected)"}; refresh diagram-contract evidence for the current format`];
+          }
+          if (format === "mermaid") {
+            if (evidence.status !== "passed") errors.push(`Mermaid diagram evidence must be passed (got ${String(evidence.status)}); the stage document must contain valid mermaid code blocks`);
+            const checked = asPositiveInt(evidence.diagrams_checked);
+            if (checked === null || checked < 1) errors.push("Mermaid diagram evidence must check at least one mermaid code block");
+            if (!Array.isArray(evidence.diagrams) || evidence.diagrams.length !== checked) errors.push("Mermaid diagram evidence must list every checked diagram");
+            if (evidence.syntax_checks !== "static") errors.push('Mermaid diagram evidence must record syntax_checks "static"');
+            if (!["passed", "not_executed"].includes(String(evidence.syntax_parse))) errors.push('Mermaid diagram evidence syntax_parse must be "passed" or "not_executed"');
+            return errors;
+          }
+          if (evidence.status !== "passed") errors.push('status must be "passed" (sensor envelope)');
+          const final = diagramFinalStatus(evidence);
+          if (!DIAGRAM_FINAL_STATUSES.has(final.status)) errors.push('final_status must be PASS, STATIC_PASS, UNVERIFIED, NEEDS_CAPABILITY or FAIL');
+          const diagrams = asPositiveInt(evidence.diagrams_checked);
+          if (diagrams === null || diagrams < 1) errors.push("diagrams_checked must be >= 1");
+          if (evidence.ids_unique !== true) errors.push("ids_unique must be true");
+          if (evidence.ports_valid !== true) errors.push("ports_valid must be true");
+          if (evidence.direction_consistent !== true) errors.push("direction_consistent must be true");
+          if (evidence.legend_valid !== true) errors.push("legend_valid must be true");
+          if (evidence.groups_valid !== true) errors.push("groups_valid must be true");
+          if (evidence.viewbox_valid !== true) errors.push("viewbox_valid must be true");
+          if (!["passed", "unverified", "not_required", "unavailable", "failed"].includes(String(evidence.provider_status))) errors.push('provider_status must be "passed", "unverified", "not_required", "unavailable" or "failed"');
+          if (typeof evidence.target_operation_required !== "boolean") errors.push("target_operation_required must be boolean");
+          if (evidence.fr_mapping_complete !== true) errors.push("fr_mapping_complete must be true");
+          if (evidence.design_notes_valid !== true) errors.push("design_notes_valid must be true");
+          // 方案1:遗留图降级路径允许 migration_status="MIGRATION_REQUIRED"(仅在 STATIC_PASS 时);
+          // 完整 PASS 仍要求 migration_status="passed"。
+          if (!["passed", "MIGRATION_REQUIRED"].includes(String(evidence.migration_status))) errors.push('migration_status must be "passed" or "MIGRATION_REQUIRED"');
+          if (evidence.migration_status === "MIGRATION_REQUIRED" && final.status === "PASS") errors.push('migration_status=MIGRATION_REQUIRED cannot report full PASS; legacy diagrams stay at STATIC_PASS');
+          if (evidence.port_paths_valid !== true) errors.push("port_paths_valid must be true");
+
+          const requiredTrueFields = [
+            "layout_contract_valid", "main_flow_valid", "loop_lanes_valid", "decision_exit_valid", "annotation_mapping_valid",
+          ];
+          for (const field of requiredTrueFields) if (evidence[field] !== true) errors.push(`${field} must be true`);
+          const requiredPassedFields = [
+            "geometry_status", "render_preflight_status", "edge_intersection_status", "collinear_overlap_status",
+            "target_port_direction_status", "target_port_approach_status", "routing_minimality_status", "side_switch_status",
+            "visible_arrow_mapping_status",
+          ];
+          for (const field of requiredPassedFields) if (evidence[field] !== "passed") errors.push(`${field} must be "passed"`);
+          if (!["passed", "not_applicable"].includes(String(evidence.change_impact_review_status))) errors.push('change_impact_review_status must be "passed" or "not_applicable"');
+          if (!['passed', 'unverified'].includes(String(evidence.render_status))) errors.push('render_status must be "passed" or "unverified"');
+          const structuralStatusFields = ["structural_occlusion_status", "structural_frame_style_status", "structural_node_fill_status", "structural_layer_order_status", "structural_mask_status", "structural_mask_coverage_status"];
+          for (const field of structuralStatusFields) if (!["passed", "not_applicable"].includes(String(evidence[field]))) errors.push(`${field} must be "passed" or "not_applicable"`);
+          for (const field of ["structural_node_intersections", "structural_edge_intersections", "structural_label_intersections", "structural_arrow_intersections"]) if (!Array.isArray(evidence[field])) errors.push(`${field} must be an array`);
+          const structuralVisualEvidence = asRecord(evidence.structural_visual_evidence);
+          if (!structuralVisualEvidence || typeof structuralVisualEvidence.required !== "boolean" || !Array.isArray(structuralVisualEvidence.screenshots) || !Array.isArray(structuralVisualEvidence.snapshots) || typeof structuralVisualEvidence.pixel_verified !== "boolean") errors.push("structural_visual_evidence must contain required, screenshots, snapshots and pixel_verified");
+          if (asNumber(evidence.unresolved) !== 0) errors.push("unresolved must be 0");
+          const gateStatuses = asRecord(evidence.gate_statuses);
+          if (!final.legacy && !gateStatuses) errors.push("gate_statuses is required for the new diagram contract producer");
+          if (gateStatuses) {
+            if (gateStatuses.structure !== "STRUCTURE_PASS") errors.push("gate_statuses.structure must be STRUCTURE_PASS");
+            if (gateStatuses.route_contract !== "ROUTE_CONTRACT_PASS") errors.push("gate_statuses.route_contract must be ROUTE_CONTRACT_PASS");
+            if (gateStatuses.geometry !== "GEOMETRY_PASS") errors.push("gate_statuses.geometry must be GEOMETRY_PASS");
+            if (!["VISUAL_PASS", "UNVERIFIED", "FAIL"].includes(String(gateStatuses.visual))) errors.push("gate_statuses.visual must be VISUAL_PASS, UNVERIFIED or FAIL");
+            if (final.status === "PASS" && gateStatuses.visual !== "VISUAL_PASS") errors.push("PASS requires gate_statuses.visual=VISUAL_PASS");
+            if (final.status === "PASS" && gateStatuses.overall !== "OVERALL_PASS") errors.push("PASS requires gate_statuses.overall=OVERALL_PASS");
+            if (final.status === "STATIC_PASS" && gateStatuses.overall !== "STATIC_PASS") errors.push("STATIC_PASS requires gate_statuses.overall=STATIC_PASS");
+          }
+          if (!final.legacy) {
+            if (!["passed", "unverified"].includes(String(evidence.expected_contract_status))) errors.push('expected_contract_status must be "passed" or "unverified"');
+            if (!["passed", "unverified"].includes(String(evidence.generation_status))) errors.push('generation_status must be "passed" or "unverified"');
+          }
+          if (final.status === "PASS") {
+            try { verifyVisualEvidence(PROJECT_ROOT, evidence, { project_id: state.workflow_id, stage: stage.slug, scope: instance.instance_id }); }
+            catch (error) { errors.push(error instanceof Error ? error.message : "VISUAL_EVIDENCE_INVALID"); }
+            if (evidence.target_operation_required !== true) errors.push("PASS requires target_operation_required=true");
+            if (evidence.provider_status !== "passed") errors.push("PASS requires provider_status=passed");
+            if (evidence.render_status !== "passed" || evidence.browser_visual_status !== "passed") errors.push("PASS requires latest browser visual evidence");
+            if (!final.legacy && (evidence.expected_contract_status !== "passed" || evidence.generation_status !== "passed")) errors.push("PASS requires expected contract and generator closure");
+            const views = asRecord(asRecord(evidence.provider_validation)?.views);
+            for (const view of ["normal", "fit", "zoom"]) {
+              const entry = views ? asRecord(views[view]) : null;
+              if (!entry || entry.status !== "passed" || !asNonEmptyString(entry.screenshot_path) || !asNonEmptyString(entry.snapshot_path)) errors.push(`PASS requires latest ${view} screenshot and snapshot evidence`);
+            }
+          } else if (final.status === "STATIC_PASS") {
+            if (evidence.target_operation_required === true) errors.push("STATIC_PASS cannot satisfy a required browser operation");
+            if (!final.legacy && (evidence.expected_contract_status !== "passed" || evidence.generation_status !== "passed")) errors.push("STATIC_PASS requires expected contract and generator closure");
+            if (evidence.provider_status === "passed") errors.push("STATIC_PASS cannot report provider passed");
+          } else if (final.status === "UNVERIFIED") {
+            errors.push("final_status=UNVERIFIED is not a completed diagram gate");
+          } else if (final.status === "NEEDS_CAPABILITY") {
+            errors.push("final_status=NEEDS_CAPABILITY requires the requested provider capability");
+          } else if (final.status === "FAIL") {
+            errors.push("final_status=FAIL contains blocking diagram findings");
+          }
+          if (evidence.target_operation_required === true && final.status !== "PASS") errors.push("required browser operation must finish with final_status=PASS");
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "structural-invariants": {
+        // 形态一致性门禁:生成产物不得违反设计声明的结构不变式(唯一真源/收敛/废弃/迁出/持久化授权)。
+        // 无清单 → not_applicable(向后兼容);有清单 → violations 必须为空。证据只能由受控 producer 生成。
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (!["passed", "not_applicable"].includes(String(evidence.status))) errors.push('status must be "passed" or "not_applicable"');
+          const violations = Array.isArray(evidence.violations) ? evidence.violations : null;
+          if (!violations) errors.push("violations must be an array");
+          else if (violations.length > 0) errors.push(`结构不变式违例(形态 drift): ${violations.length} 项`);
+          if (evidence.status === "not_applicable") {
+            if (!asNonEmptyString(evidence.skip_reason)) errors.push("skip_reason is required when not_applicable");
+            return errors;
+          }
+          if (evidence.module_id !== instance.module_id) errors.push(`module_id must be ${instance.module_id || "(none)"}`);
+          const declared = asPositiveInt(evidence.invariants_declared);
+          const persistenceStrict = evidence.persistence_mode === "strict";
+          if (declared === null || (declared < 1 && !persistenceStrict)) errors.push("invariants_declared must be >= 1 (or persistence_mode strict)");
+          if (asPositiveInt(evidence.files_scanned) === null) errors.push("files_scanned must be a non-negative integer");
+          if (!asStringArray(evidence.manifests)?.length) errors.push("manifests must list the invariant manifests that were applied");
+          if (!/^[a-f0-9]{64}$/.test(String(evidence.manifest_digest || ""))) errors.push("manifest_digest must be a SHA-256 digest");
+          const expectedBinding = stage.slug === "application-design" ? "authoring" : "bound";
+          if (evidence.manifest_binding !== expectedBinding) errors.push(`manifest_binding must be ${expectedBinding}`);
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "design-intent-coverage": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (evidence.status !== "passed") errors.push('status must be "passed"');
+          if (evidence.coverage_complete !== true) errors.push("coverage_complete must be true");
+          if (asNumber(evidence.uncovered) !== 0) errors.push("uncovered must be 0");
+          const markers = asPositiveInt(evidence.intent_markers_found);
+          if (markers === null) errors.push("intent_markers_found must be a non-negative integer");
+          if (markers === 0 && !asNonEmptyString(evidence.skip_reason)) errors.push("skip_reason is required when no intent markers exist");
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "ui-artifact-consistency": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (evidence.status !== "passed") errors.push('status must be "passed"');
+          if (evidence.stage !== stage.slug) errors.push(`stage must be ${stage.slug}`);
+          if (evidence.module_id !== instance.module_id) errors.push(`module_id must be ${instance.module_id || "(none)"}`);
+          const expectedChoice = uiDesignChoice(state, instance.module_id);
+          if (evidence.design_mode !== expectedChoice) errors.push(`design_mode must match selected UI choice ${expectedChoice || "not-selected"}`);
+          if (asPositiveInt(evidence.pages_checked) === null || (evidence.pages_checked as number) < 1) errors.push("pages_checked must be >= 1");
+          const phases = asStringArray(evidence.phases_verified);
+          if (!phases || phases.length === 0) errors.push("phases_verified must list validated phases");
+          const artifacts = asStringArray(evidence.artifacts_checked);
+          if (!artifacts || artifacts.length < 4) errors.push("artifacts_checked must include canonical upstream, current artifacts, and ui-generation-lock.json");
+          if (evidence.ui_generation_lock_verified !== true) errors.push("ui_generation_lock_verified must be true");
+          if (!/^[a-f0-9]{64}$/.test(String(evidence.ui_generation_lock_digest || ""))) errors.push("ui_generation_lock_digest must be SHA-256");
+          if (!asNonEmptyString(evidence.ui_generation_upstream_ref)) errors.push("ui_generation_upstream_ref is required");
+          if (!COMMIT_ID_PATTERN.test(String(evidence.ui_generation_upstream_commit || ""))) errors.push("ui_generation_upstream_commit must be a git commit id");
+          if (!["generation-start", "adoption"].includes(String(evidence.ui_generation_baseline_mode))) errors.push("ui_generation_baseline_mode must be generation-start or adoption");
+          if (asNumber(evidence.unresolved) !== 0) errors.push("unresolved must be 0");
+          if (stage.slug === "ui-mock-generation" && (!phases?.includes("skeleton") || !phases?.includes("content"))) {
+            errors.push("HTML Mock consistency must verify skeleton and content phases");
+          }
+          if (stage.slug === "ui-figma-generation" && asPositiveInt(evidence.elements_checked) === null) {
+            errors.push("Figma consistency must report elements_checked");
+          }
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "inception-consistency": {
+        const failure = validateEvidence(stage, sensor, instance, evidence => deliveryConsistencyPayloadErrors("inception-consistency", evidence, {
+          module_id: instance.module_id, prd_selected: selectedOptionalStages(state).includes("prd-generation"), ui_route: uiDesignChoice(state, instance.module_id),
+        }));
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "ui-design-alignment": {
+        const failure = validateEvidence(stage, sensor, instance, evidence => deliveryConsistencyPayloadErrors("ui-design-alignment", evidence, {
+          module_id: instance.module_id, prd_selected: selectedOptionalStages(state).includes("prd-generation"), ui_route: uiDesignChoice(state, instance.module_id),
+        }));
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "frontend-platform-spec": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (evidence.status !== "passed") errors.push('status must be "passed"');
+          try {
+            const path = instance.module_id && instance.unit_id
+              ? `docs/aidlc/modules/${instance.module_id}/construction/${instance.unit_id}/frontend-platform-spec.md`
+              : "docs/aidlc/frontend-platform-spec.md";
+            const current = frontendPlatformPayload(PROJECT_ROOT, path, instance.module_id);
+            for (const key of Object.keys(current)) if (JSON.stringify(evidence[key]) !== JSON.stringify(current[key])) {
+              errors.push(`frontend platform ${key} differs from actual approved mappings; regenerate evidence (legacy Markdown tables remain supported)`);
+            }
+          } catch (error) { errors.push(String(error)); }
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "template-completeness": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (evidence.status !== "passed") errors.push('status must be "passed"');
+          const templates = asStringArray(evidence.templates);
+          if (!templates || templates.length === 0) errors.push("templates must list generated templates");
+          if (asNumber(evidence.unresolved) !== 0) errors.push("unresolved must be 0");
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "recovery-evidence": {
+        const failure = validateEvidence(stage, sensor, instance, (evidence) => {
+          const errors: string[] = [];
+          if (evidence.status !== "passed") errors.push('status must be "passed"');
+          if (evidence.state_restored !== true) errors.push("state_restored must be true");
+          if (evidence.handoff_recorded !== true) errors.push("handoff_recorded must be true");
+          return errors;
+        });
+        if (failure) failures.push(failure);
+        break;
+      }
+
+      case "doc-cascade": {
+        // Verify document cascade: current stage's produces should have
+        // prior chain documents existing
+        const skipped = new Set(state.skipped_stages);
+        const executable = new Set(
+          getExecutableStages(loadGraph(), state.scope, selectedOptionalStages(state), state.execution_profile).map((candidate) => candidate.slug)
+        );
+        const cascadeDependencies: Record<string, Array<[string, string]>> = {
+          "functional-design": [
+            ["application-design", "docs/aidlc/modules/{module-id}/inception/application-design.md"],
+            ["units-generation", "docs/aidlc/modules/{module-id}/inception/unit-manifest.json"],
+          ],
+          "nfr-design": [["nfr-requirements", "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements.md"]],
+          "code-generation": [["functional-design", "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design.md"]],
+          "build-and-test": [["code-review", "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md"]],
+          "implementation-report": [["build-and-test", ".aidlc/evidence/build-and-test/build-test-evidence.json"]],
+          "operations-planning": [["implementation-report", ".aidlc/evidence/implementation-report/implementation-report.json"]],
+          "operations-authorization": [["operations-planning", "docs/aidlc/operation/operations-plan.md"]],
+        };
+        const requiredDocs = (cascadeDependencies[stage.slug] || [])
+          .filter(([dependency]) => executable.has(dependency) && !skipped.has(dependency))
+          .map(([, document]) => document);
+        const missingDocs = requiredDocs.filter((document) => resolveProducePaths(document, instance, true).length === 0);
+        if (missingDocs.length > 0) {
+          failures.push({
+            sensor: "doc-cascade",
+            passed: false,
+            message: `Document cascade broken — missing upstream docs: ${missingDocs.join(", ")}`,
+          });
+        }
+        break;
+      }
+
+      case "reviewer-required": {
+        // The review stage must produce a non-empty review record itself.
+        const reviewProduces = (stage.produces || []).filter((pattern) => !pattern.endsWith("/"));
+        const missingReview = reviewProduces.filter((pattern) => {
+          const resolved = resolveProducePaths(pattern, instance);
+          return resolved.length === 0 || resolved.some((path) => statSync(path).size === 0);
+        });
+        if (reviewProduces.length === 0 || missingReview.length > 0) {
+          failures.push({
+            sensor: "reviewer-required",
+            passed: false,
+            message: missingReview.length > 0
+              ? `Review record is missing or empty: ${missingReview.join(", ")}`
+              : "reviewer-required requires a file produce containing the review record.",
+          });
+        }
+        break;
+      }
+
+      default:
+        // Unknown sensor — warn but don't fail
+        failures.push({
+          sensor,
+          passed: false,
+          message: `Unknown sensor "${sensor}" — cannot evaluate. Register it or remove from stage.`,
+        });
+        break;
+    }
+  }
+
+  return failures;
+}
+
+function qualityGateContext(state: WorkflowState, instance: StageInstance): QualityContext {
+  const adoptionPath = instance.module_id ? `docs/aidlc/modules/${instance.module_id}/inception/quality-adoption.json` : "docs/aidlc/inception/quality-adoption.json";
+  const adopted = Boolean(state.quality_gates_version || existsSync(join(PROJECT_ROOT, adoptionPath)));
+  return { root: PROJECT_ROOT, workflow_id: state.workflow_id, module_id: instance.module_id, scope: state.scope, prd_selected: selectedOptionalStages(state).includes("prd-generation"), project_workflow_id: state.parent_workflow_id || state.workflow_id,
+    stage: instance.stage.slug, ui_route: uiDesignChoice(state, instance.module_id) || "not-selected",
+    quality_version: state.quality_gates_version, code_baseline: adopted && qualityCodeBaseline(PROJECT_ROOT, instance.module_id, state.adoption_baseline || state.baseline_commit, state.completed_stages.includes("build-and-test")) };
+}
+
+function documentSliceContext(state: WorkflowState, instance: StageInstance): SliceContext {
+  // Global/integration operations re-check module GREEN using their own views.
+  // Slice identity belongs to that module's workflow, never to its parent.
+  const owner = instance.module_id ? loadWorkflowView(PROJECT_ROOT, instance.module_id) : null;
+  const scoped = owner && (owner.parent_workflow_id === state.workflow_id
+    || state.workflow_kind === "integration" && !!owner.parent_workflow_id && owner.parent_workflow_id === state.parent_workflow_id) ? owner : state;
+  return { ...qualityGateContext(scoped, instance), slices_version: scoped.document_slices_version,
+    units_executed: instance.stage.slug === "units-generation" || completedInstanceIds(state).includes(`units-generation@module:${instance.module_id}`) };
+}
+
+export function qualityDevelopmentFailures(instance: StageInstance, state: WorkflowState, instances: StageInstance[]): SensorResult[] {
+  if (!["functional-design", "tdd", "code-generation"].includes(instance.stage.slug)) return [];
+  try {
+    const ctx = qualityGateContext(state, instance);
+    if (!qualityAdoption(ctx).enabled) return [];
+    const source = instances.find(i => i.stage.slug === "cross-validation" && i.module_id === instance.module_id);
+    if (!source || !completedInstanceIds(state).includes(source.instance_id)) return [{ sensor: "delivery-readiness", passed: false, message: "DEVELOPMENT_ENTRY_NOT_READY: applicable I10 not completed" }];
+    const executable = new Set(getExecutableStages(loadGraph(), state.scope, selectedOptionalStages(state), state.execution_profile).map(s => s.slug));
+    const required = ["workflow-planning", "application-design", "units-generation", "test-case-derivation", ...(selectedOptionalStages(state).includes("prd-generation") ? ["prd-generation"] : [])];
+    const incomplete = instances.filter(i => required.includes(i.stage.slug) && executable.has(i.stage.slug) && (!i.module_id || i.module_id === instance.module_id) && !completedInstanceIds(state).includes(i.instance_id) && !skippedInstanceIds(state).includes(i.instance_id));
+    if (incomplete.length) return [{ sensor: "delivery-readiness", passed: false, message: `DEVELOPMENT_ENTRY_NOT_READY: applicable downstream/PRD gates incomplete: ${incomplete.map(i => i.instance_id).join(", ")}` }];
+    const context = { ...ctx, stage: "cross-validation" };
+    const failure = validateEvidence(source.stage, "delivery-readiness", source, evidence => {
+      const errors = controlledQualityErrors(context, "delivery-readiness", evidence);
+      return errors;
+    }, { tolerateRevisionDrift: true });
+    const errors = developmentAcceptanceErrors(context);
+    const inceptionFailure = validateEvidence(source.stage, "inception-consistency", source, evidence => {
+      const findings: string[] = [];
+      if (evidence.status !== "passed" || evidence.module_id !== instance.module_id || !asNumber(evidence.requirements_checked) || !asNumber(evidence.stories_checked) || evidence.unresolved_conflicts !== 0) findings.push("DEVELOPMENT_ENTRY_NOT_READY: original I10 consistency conclusion invalid");
+      const quality = asRecord(evidence.quality);
+      if (!quality) findings.push("DEVELOPMENT_ENTRY_NOT_READY: adopted I10 quality aggregation missing");
+      else findings.push(...qualityEvidenceErrors(context, "delivery-readiness", quality));
+      return findings;
+    }, { tolerateRevisionDrift: true });
+    return [...(failure ? [{ ...failure, message: `DEVELOPMENT_ENTRY_NOT_READY: ${failure.message}` }] : []), ...(inceptionFailure ? [{ ...inceptionFailure, message: `DEVELOPMENT_ENTRY_NOT_READY: ${inceptionFailure.message}` }] : []), ...errors.map(message => ({ sensor: "delivery-readiness", passed: false, message }))];
+  } catch (error) { return [{ sensor: "delivery-readiness", passed: false, message: `DEVELOPMENT_ENTRY_NOT_READY: ${String(error)}` }]; }
+}
+
+// ---------------------------------------------------------------------------
+// Condition evaluation — conditional stage execution
+// ---------------------------------------------------------------------------
+
+/**
+ * Build condition context by inspecting project state.
+ */
+function contextualConditionPath(relativePath: string, instance?: StageInstance): string {
+  if (!instance || !instance.module_id || (instance.axis === "project" && instance.stage.axis !== "project")) {
+    return join(PROJECT_ROOT, relativePath);
+  }
+  return join(PROJECT_ROOT, relativePath.replace("docs/aidlc/inception", moduleInceptionRoot(instance.module_id)));
+}
+
+function unitConditionalStageSelections(instance?: StageInstance): Set<string> | undefined {
+  if (instance?.axis !== "unit" || !instance.module_id || !instance.unit_id) return undefined;
+  const manifestPath = join(PROJECT_ROOT, moduleInceptionRoot(instance.module_id), "unit-manifest.json");
+  if (!existsSync(manifestPath)) return undefined;
+  const unit = readUnitManifest(PROJECT_ROOT, instance.module_id)
+    .find((candidate) => candidate.unit_id === instance.unit_id);
+  if (!unit) throw new Error(`unit manifest does not contain active unit ${instance.module_id}/${instance.unit_id}`);
+  return unit.conditional_stages === undefined ? undefined : new Set(unit.conditional_stages);
+}
+
+function readConditionText(path: string): string {
+  if (!existsSync(path)) return "";
+  try {
+    return readFileSync(path, "utf-8");
+  } catch {
+    return "";
+  }
+}
+
+function plannedStageDecision(plan: string, stageSlug: string): boolean | undefined {
+  if (!plan) return undefined;
+  const escaped = stageSlug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rows = [...plan.matchAll(new RegExp(`\\|\\s*\`?${escaped}\`?\\s*\\|\\s*(execute|skip|执行|跳过)\\s*\\|([^\\r\\n|]*)`, "gi"))];
+  if (rows.length === 0) return undefined;
+  if (rows.some(row => /^(skip|跳过)$/i.test(row[1]) && !row[2].trim())) throw new Error(`workflow-plan ${stageSlug}: skip requires non-empty evidence`);
+  return rows.some((row) => /^(execute|执行)$/i.test(row[1]));
+}
+
+function projectModuleConditionText(relativePaths: string[]): string {
+  const manifest = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "module-manifest.json");
+  if (!existsSync(manifest)) return "";
+  try {
+    return readModuleManifest(PROJECT_ROOT).flatMap((module) => relativePaths.map((relativePath) =>
+      readConditionText(join(PROJECT_ROOT, moduleInceptionRoot(module.module_id), relativePath))
+    )).join("\n");
+  } catch {
+    return "";
+  }
+}
+
+function rootBuildMetadata(): string {
+  const buildNames = new Set(["package.json", "pom.xml", "build.gradle", "build.gradle.kts", "pubspec.yaml"]);
+  const excluded = new Set(["node_modules", "vendor", ".venv", "venv", "__pycache__", ".m2", ".gradle", "Pods", ".dart_tool", ".pub-cache", "dist", "build", "out", "target", ".next", ".nuxt", ".turbo", ".cache", "coverage", ".output", ".git", ".idea", ".codegraph"]);
+  const tracked = gitPaths(PROJECT_ROOT, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+  const candidates = tracked === null
+    ? [...buildNames]
+    : tracked.filter((path) => buildNames.has(path.replace(/\\/g, "/").split("/").at(-1) || "") && !path.replace(/\\/g, "/").split("/").some((segment) => excluded.has(segment)));
+  return [...new Set(candidates)]
+    .map((file) => readConditionText(join(PROJECT_ROOT, ...file.replace(/\\/g, "/").split("/"))))
+    .join("\n");
+}
+
+export function buildConditionContext(state: WorkflowState, instance?: StageInstance): ConditionContext {
+  // has_legacy_code: the resolved source roots hold more than 10 pre-existing files.
+  // Evaluated lazily (only the has_legacy_code condition reads it) so an invalid
+  // source-root configuration fails that condition loudly instead of reading as false.
+  let legacyCode: boolean | undefined;
+  const legacyCodeValue = (): boolean => (legacyCode ??= legacySourceFileCount() > LEGACY_CODE_FILE_THRESHOLD);
+
+  // has_ui_requirements: user-stories.md contains 'UI' or '界面'
+  const userStoriesPath = contextualConditionPath("docs/aidlc/inception/user-stories.md", instance);
+  const userStoriesText = readConditionText(userStoriesPath);
+  const has_ui_requirements = /\bUI\b|界面/.test(userStoriesText);
+
+  // has_reverse_output: reverse-engineering.md exists
+  const reverseEngineeringPath = contextualConditionPath("docs/aidlc/inception/reverse-engineering.md", instance);
+  const has_reverse_output = existsSync(reverseEngineeringPath);
+
+  const selectedArchitecture = architectureChoice(state);
+  let multi_module = selectedArchitecture === "multi-module";
+  const moduleManifestPath = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "module-manifest.json");
+  if (!selectedArchitecture && existsSync(moduleManifestPath)) {
+    try {
+      multi_module = readModuleManifest(PROJECT_ROOT).length > 1;
+    } catch { /* invalid manifests are rejected by the module-division report gate */ }
+  }
+
+  const contextDocs = [
+    contextualConditionPath("docs/aidlc/inception/requirements.md", instance),
+    contextualConditionPath("docs/aidlc/inception/application-design.md", instance),
+    contextualConditionPath("docs/aidlc/inception/workflow-plan.md", instance),
+    userStoriesPath,
+  ];
+  let contextText = contextDocs.map(readConditionText).join("\n");
+  let workflowPlanText = readConditionText(contextualConditionPath("docs/aidlc/inception/workflow-plan.md", instance));
+  if (instance?.axis === "project") {
+    const moduleText = projectModuleConditionText(["requirements.md", "application-design.md", "workflow-plan.md", "user-stories.md"]);
+    const modulePlans = projectModuleConditionText(["workflow-plan.md"]);
+    contextText = `${contextText}\n${moduleText}`;
+    workflowPlanText = `${workflowPlanText}\n${modulePlans}`;
+  }
+
+  const unitStageSelections = unitConditionalStageSelections(instance);
+  const requiredByRisk = riskRequiredStages(state.execution_profile);
+  const selectedForUnit = (stageSlug: string, defaultValue: boolean): boolean =>
+    requiredByRisk.has(stageSlug) || (unitStageSelections === undefined ? defaultValue : unitStageSelections.has(stageSlug));
+
+  const moduleHasNfrNeeds = /NFR|非功能|性能|安全|可用性|可靠性|恢复|扩展性/i.test(contextText);
+  const has_nfr_needs = requiredByRisk.has("nfr-requirements") || (unitStageSelections === undefined
+    ? moduleHasNfrNeeds
+    : unitStageSelections.has("nfr-requirements") && unitStageSelections.has("nfr-design"));
+  const moduleHasInfraNeeds = /基础设施|infrastructure|部署拓扑|容器|Kubernetes|Docker|Nacos|缓存|消息队列|分布式|外部系统/i.test(contextText);
+  const has_infra_needs = selectedForUnit("infrastructure-design", moduleHasInfraNeeds);
+  const applicationInstance = instance?.module_id
+    ? stageInstanceId("application-design", "module", { module_id: instance.module_id })
+    : "application-design";
+  const applicationDesignCompleted = completedInstanceIds(state).includes(applicationInstance);
+  const has_test_case_sources = applicationDesignCompleted && (existsSync(userStoriesPath) || has_nfr_needs || has_infra_needs);
+  const moduleHasContractDependencies = /共享契约|shared.?contract|API.?contract|接口契约|proto|protobuf|OpenAPI|swagger/i.test(contextText);
+  const has_contract_dependencies = selectedForUnit("shared-contract-baseline", multi_module || moduleHasContractDependencies);
+
+  const applicationDecision = plannedStageDecision(workflowPlanText, "application-design");
+  const positiveContext = contextText.split(/[\n。;]/).filter(line => !/无需|不涉及|不新增|无新|没有|no new|not applicable/i.test(line)).join("\n");
+  const applicationEvidence = /新接口|新组件|应用服务|编排器|跨模块|跨服务|多端|复杂业务规则|共享配置|数据迁移|一致性|外部故障|数据 Owner|runtime consumer/i.test(positiveContext);
+  if (applicationDecision === false && (requiredByRisk.has("application-design") || applicationEvidence)) throw new Error("workflow-plan application-design: skip conflicts with required risk or design evidence");
+  const has_application_design_needs = requiredByRisk.has("application-design") || (applicationDecision ?? (multi_module || applicationEvidence));
+
+  const functionalDecision = plannedStageDecision(workflowPlanText, "functional-design");
+  const functionalEvidence = /新数据模型|新 schema|schema 变化|业务规则.{0,20}(3|三)条|状态机变化|复杂算法|领域模型/i.test(contextText);
+  const has_functional_design_needs = selectedForUnit("functional-design", functionalDecision ?? functionalEvidence);
+
+  const unitDecision = plannedStageDecision(workflowPlanText, "units-generation");
+  const unitEvidence = /多个工作单元|多单元|跨服务协调|多个包|多个模块|并行开发|工作量超出单次执行/i.test(contextText);
+  if (unitDecision === false && requiredByRisk.has("units-generation")) throw new Error("workflow-plan units-generation: skip conflicts with required risk");
+  const has_unit_generation_needs = requiredByRisk.has("units-generation") || (unitDecision ?? (multi_module || has_functional_design_needs || unitEvidence));
+
+  const buildMetadata = rootBuildMetadata();
+  const productContractText = [
+    readConditionText(join(PROJECT_ROOT, "docs", "aidlc", "ideation", "product-inception.md")),
+    buildMetadata,
+  ].join("\n");
+  const has_product_contract_needs = multi_module
+    || /跨模块|跨服务|跨进程|异步事件|事件\s*(?:schema|契约)|前后端接口|API\s*契约|接口契约|OpenAPI|swagger|webhook|消息队列|外部系统交换/i.test(productContractText);
+
+  // Runtime UI mode is taken from Markdown workflow history, never from handoff text.
+  const uiChoice = uiDesignChoice(state, instance?.module_id);
+  const ui_mode_html_mock = uiChoice === "html-mock";
+  const ui_mode_figma = uiChoice === "figma-create" || uiChoice === "figma-existing";
+  const ui_design_selected = ui_mode_html_mock || ui_mode_figma;
+  const crossPlatformTarget = /Taro|React Native|Flutter|UniApp|uni-app|跨端|小程序|@tarojs|react-native/i.test(`${contextText}\n${buildMetadata}`);
+  const needs_ui_implementation_bridge = ui_design_selected
+    && crossPlatformTarget
+    && selectedForUnit("ui-implementation-bridge", true);
+
+  // A derived summary cannot select or waive deployment; approved planning
+  // inputs and actual runtime configuration remain the routing sources.
+  const deploymentText = `${contextText}\n${buildMetadata}`;
+  // operations was split into operations-planning + operations-authorization (both
+  // gated by has_deployment_needs). Honor an explicit workflow-plan decision for
+  // either new slug; keep "operations" as a backward-compatible alias for plans
+  // authored before the split. An explicit execute on any of them means deploy.
+  const operationsStageDecisions = ["operations-planning", "operations-authorization", "operations"]
+    .map((slug) => plannedStageDecision(workflowPlanText, slug))
+    .filter((decision): decision is boolean => decision !== undefined);
+  const operationsDecision = operationsStageDecisions.length === 0
+    ? undefined
+    : operationsStageDecisions.some((decision) => decision);
+  const explicitlyNoDeployment = /无需部署|不需要部署|纯库|library only|纯本地工具|local-only/i.test(deploymentText);
+  const deploymentFilesExist = ["Dockerfile", "compose.yml", "docker-compose.yml", "Procfile", "Jenkinsfile"]
+    .some((file) => existsSync(join(PROJECT_ROOT, file)))
+    || ["k8s", "kubernetes", "helm"].some((directory) => existsSync(join(PROJECT_ROOT, directory)));
+  const deploymentEvidence = /独立服务|可部署服务|需要部署|部署目标|容器化|Kubernetes|Docker Compose|平台托管|生产发布|deployment target/i.test(deploymentText);
+  const packageHasRuntimeStart = /"(start|serve)"\s*:/.test(readConditionText(join(PROJECT_ROOT, "package.json")));
+  const inferredDeploymentNeed = deploymentFilesExist || deploymentEvidence || packageHasRuntimeStart;
+  const has_deployment_needs = operationsDecision ?? (!explicitlyNoDeployment && inferredDeploymentNeed);
+
+  const operationsText = [
+    "docs/aidlc/operation/operations-plan.md",
+    "docs/aidlc/operation/plans/operations-plan.md",
+    "docs/aidlc/operation/deployment-config.md",
+    "docs/aidlc/operation/operations-summary.md",
+  ].map((path) => readConditionText(join(PROJECT_ROOT, path))).join("\n");
+  const has_operations_template_needs = has_deployment_needs
+    && /(?:可复用|归档|保留|生成).{0,16}(?:模板|template)|(?:模板|template).{0,16}(?:Dockerfile|Docker Compose|Jenkins|Kubernetes|Helm|Kustomize|Nginx)/i.test(operationsText);
+
+  const context_compacted = existsSync(join(PROJECT_ROOT, ".aidlc", "context-compacted"));
+
+  return {
+    get has_legacy_code() {
+      return legacyCodeValue();
+    },
+    has_ui_requirements,
+    has_reverse_output,
+    multi_module,
+    has_product_contract_needs,
+    has_nfr_needs,
+    has_infra_needs,
+    has_test_case_sources,
+    has_contract_dependencies,
+    context_compacted,
+    ui_design_selected,
+    ui_mode_html_mock,
+    ui_mode_figma,
+    has_application_design_needs,
+    has_unit_generation_needs,
+    has_functional_design_needs,
+    needs_ui_implementation_bridge,
+    has_deployment_needs,
+    has_operations_template_needs,
+  };
+}
+
+const LEGACY_CODE_FILE_THRESHOLD = 10;
+/** Build output and dependency directories never count as legacy source. */
+const LEGACY_SCAN_SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build", "target"]);
+
+/**
+ * Number of distinct files under the project's source roots (module-manifest `paths`
+ * → `.aidlc/source-roots.json` → default `src`). A missing root counts as 0 files; an
+ * invalid configuration (absolute, escaping or symbolic-link root) throws. Nested
+ * roots are counted once, and hidden entries keep being ignored as before.
+ */
+function legacySourceFileCount(): number {
+  const files = new Set<string>();
+  const visit = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith(".") || LEGACY_SCAN_SKIPPED_DIRECTORIES.has(entry.name)) continue;
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) visit(fullPath);
+      else if (entry.isFile()) files.add(fullPath);
+    }
+  };
+  for (const sourceRoot of resolveSourceRoots(PROJECT_ROOT).roots) {
+    const path = assertProjectPath(join(PROJECT_ROOT, ...sourceRoot.split("/")));
+    if (!existsSync(path)) continue;
+    if (!lstatSync(path).isDirectory()) throw new Error(`source root is not a directory: ${sourceRoot}`);
+    visit(path);
+  }
+  return files.size;
+}
+
+/**
+ * Evaluate a condition string against the context.
+ * Supported conditions (exact match):
+ *   - 'has_legacy_code'
+ *   - 'has_ui_requirements'
+ *   - '!has_reverse_output' (negated)
+ *   - 'multi_module'
+ *   - '' (empty string — always true)
+ */
+export function evaluateCondition(condition: string, context: ConditionContext): boolean | undefined {
+  if (!condition || condition.trim() === "") return true;
+
+  const trimmed = condition.trim();
+  const negated = trimmed.startsWith("!");
+  const name = negated ? trimmed.slice(1) : trimmed;
+  if (!(name in context)) return undefined;
+
+  const value = (context as unknown as Record<string, boolean>)[name];
+  return negated ? !value : value;
+}
+
+/**
+ * Find the next stage to execute: first executable stage whose
+ * dependencies are all satisfied, condition evaluates to true,
+ * and not yet completed or skipped.
+ */
+function activeClaimed(state: WorkflowState, instanceId: string): boolean {
+  const claim = state.active_instances?.[instanceId];
+  const binding = sessionBinding();
+  if (binding && claim?.session_id === binding.session_id && claim.generation === binding.generation && claim.owner === binding.owner && instanceId === binding.stage_instance && state.workflow_id === binding.workflow_id) return false;
+  return Boolean(claim && Date.parse(claim.expires_at) > Date.now());
+}
+
+function findClaimableModuleInstance(
+  instances: StageInstance[],
+  state: WorkflowState,
+  moduleId: string,
+  all: StageInstance[] = instances,
+): {
+  instance: StageInstance | null;
+  blocked?: { instance: StageInstance; unsatisfied: string[] };
+  conditionError?: { instance: StageInstance; condition: string };
+  skippedByCondition?: { instance: StageInstance; reason: string }[];
+} {
+  let blocked: { instance: StageInstance; unsatisfied: string[] } | undefined;
+  for (const instance of instances) {
+    if (instance.axis !== "module" || instance.module_id !== moduleId || isInstanceResolved(state, instance.instance_id) || activeClaimed(state, instance.instance_id)) continue;
+    const stage = instance.stage;
+    if (stage.condition && stage.condition.trim() !== "") {
+      const conditionResult = evaluateCondition(stage.condition, buildConditionContext(state, instance));
+      if (conditionResult === undefined) return { instance: null, conditionError: { instance, condition: stage.condition } };
+      if (!conditionResult) {
+        state.skipped_stage_instances.push(instance.instance_id);
+        state.history.push({
+          stage: stage.slug,
+          instance_id: instance.instance_id,
+          module_id: instance.module_id,
+          unit_id: instance.unit_id,
+          result: "condition_skipped",
+          timestamp: new Date().toISOString(),
+          user_input: `Auto-skipped: condition "${stage.condition}" evaluated to false`,
+        });
+        continue;
+      }
+    }
+    const unsatisfied = checkRequires(instance, all, state);
+    if (unsatisfied.length === 0) return { instance };
+    return { instance: null, blocked: { instance, unsatisfied } };
+  }
+  return { instance: null, blocked };
+}
+
+function findNextInstance(
+  instances: StageInstance[],
+  state: WorkflowState,
+  all: StageInstance[] = instances,
+): {
+  instance: StageInstance | null;
+  blocked?: { instance: StageInstance; unsatisfied: string[] };
+  conditionError?: { instance: StageInstance; condition: string };
+  skippedByCondition?: { instance: StageInstance; reason: string }[];
+} {
+  const conditionSkips: { instance: StageInstance; reason: string }[] = [];
+
+  for (const instance of instances) {
+    if (isInstanceResolved(state, instance.instance_id) || activeClaimed(state, instance.instance_id)) continue;
+    const stage = instance.stage;
+
+    if (stage.condition && stage.condition.trim() !== "") {
+      const conditionResult = evaluateCondition(stage.condition, buildConditionContext(state, instance));
+      if (conditionResult === undefined) {
+        return {
+          instance: null,
+          conditionError: { instance, condition: stage.condition },
+          skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined,
+        };
+      }
+      if (!conditionResult) {
+        conditionSkips.push({ instance, reason: "condition not met" });
+        state.skipped_stage_instances.push(instance.instance_id);
+        state.history.push({
+          stage: stage.slug,
+          instance_id: instance.instance_id,
+          module_id: instance.module_id,
+          unit_id: instance.unit_id,
+          result: "condition_skipped",
+          timestamp: new Date().toISOString(),
+          user_input: `Auto-skipped: condition "${stage.condition}" evaluated to false`,
+        });
+        reconcileStageSummaries(state, all);
+        continue;
+      }
+    }
+
+    const unsatisfied = checkRequires(instance, all, state);
+    if (unsatisfied.length > 0) {
+      return {
+        instance: null,
+        blocked: { instance, unsatisfied },
+        skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined,
+      };
+    }
+
+    return { instance, skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined };
+  }
+
+  return { instance: null, skippedByCondition: conditionSkips.length > 0 ? conditionSkips : undefined };
+}
+
+function parseFlags(args: string[]): Record<string, string> {
+  const flags: Record<string, string> = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith("--")) {
+      const key = args[i].slice(2);
+      const val = args[i + 1] && !args[i + 1].startsWith("--") ? args[++i] : "true";
+      flags[key] = val;
+    } else {
+      // Positional args become "text"
+      flags.text = (flags.text ? flags.text + " " : "") + args[i];
+    }
+  }
+  return flags;
+}
+
+function unsupportedFlag(flags: Record<string, string>, allowed: ReadonlySet<string>): string | undefined {
+  return Object.keys(flags).find((flag) => !allowed.has(flag));
+}
+
+const CHOICE_DESCRIPTIONS: Record<string, Record<string, string>> = {
+  "workspace-detection": {
+    "single-module": "单一业务模块，不需要跨模块协作和产品级 inception",
+    "multi-module": "多业务模块或多服务，启用产品级 inception（module-division、product-contracts 等）",
+  },
+  "ui-mock": {
+    "html-mock": "生成可离线浏览的结构化 HTML 原型",
+    "figma-create": "创建 Figma 设计，适合团队协作、高保真交付和 Dev Mode",
+    "figma-existing": "使用已有 Figma 设计稿，验证后登记为正式设计基准",
+    skip: "跳过 UI 设计，仅适用于无界面需求或用户明确不需要设计基准",
+  },
+};
+
+function choicePrompt(stageSlug: string, choices: string[]): string {
+  if (choices.length === 0) return "";
+  const descriptions = CHOICE_DESCRIPTIONS[stageSlug] || {};
+  const options = choices.map((choice) => `- ${choice}${descriptions[choice] ? `：${descriptions[choice]}` : ""}`).join("\n");
+  return `\n用户选择：必须向用户提问并等待用户回答后再 report，不得自行选择；将用户回答的选项作为 --user-input 的值。可选项：\n${options}`;
+}
+
+export function diagramFormatOf(state: Pick<WorkflowState, "diagram_format">): DiagramFormat {
+  return state.diagram_format === "svg" ? "svg" : "mermaid";
+}
+
+function diagramFormatPrompt(state: WorkflowState, instance: StageInstance): string {
+  if (!instance.stage.sensors.includes("diagram-contract")) return "";
+  return diagramFormatOf(state) === "svg"
+    ? "\n图表格式：svg（用户已明确选择）。按 aidlc-diagram-design 交付 SVG 源与 .diagram.json，并通过 diagram-contract 的 SVG 契约。"
+    : "\n图表格式：mermaid（默认）。直接写 Mermaid fenced block，跨模块、契约和架构语义不改变格式；不生成 SVG、.diagram.json 或 Provider Request。默认只做源检查；仅明确要求视觉验收或已确认的布局/连线修复才单独渲染。只有用户明确要求 SVG 时，先执行 loeyae-aidlc orchestrate diagram-format --set svg --user-input \"<用户原话>\"。";
+}
+
+function executionTaskLevelFor(instance: StageInstance): ExecutionTaskLevel {
+  if (instance.stage.completion_contract === "instruction_only") return "question";
+  if (instance.axis === "unit") return "local-change";
+  if (instance.axis === "module") return "multi-file-feature";
+  return "cross-module-infrastructure";
+}
+
+function allowedExplorationFor(taskLevel: ExecutionTaskLevel): string {
+  switch (taskLevel) {
+    case "question":
+      return "只回答或收集当前 directive 所需的用户输入；除非 directive 明确要求，否则不修改或探索代码。";
+    case "local-change":
+      return "只检查当前 unit、声明的产物/consumes，以及直接的调用方、被调用方、测试和配置依赖；不得扫描全仓。";
+    case "multi-file-feature":
+      return "只检查当前 module、声明的产物/consumes 和直接 module 依赖；多个文件本身不能升级为全仓审查。";
+    case "cross-module-infrastructure":
+      return "只检查当前 directive 命名的模块、共享契约或基础设施及其直接依赖；不得默认进行全仓审计。";
+  }
+}
+
+export function executionPolicyFor(
+  state: Pick<WorkflowState, "work_description">,
+  instance: StageInstance,
+): ExecutionPolicy {
+  const taskLevel = executionTaskLevelFor(instance);
+  const consumes = instance.stage.consumes.flatMap((pattern) => displayArtifactPatterns(pattern, instance, true));
+  const produces = instance.stage.produces.flatMap((pattern) => displayArtifactPatterns(pattern, instance));
+  return {
+    version: "1",
+    task_level: taskLevel,
+    goal: state.work_description,
+    success_condition: "完成 directive 声明的产物与任务特定工作；所有声明门禁由其所属引擎或角色取得结果，且不存在阻断问题。",
+    required: {
+      requires: [...(instance.stage.requires || [])],
+      consumes,
+      produces,
+      sensors: [...instance.stage.sensors],
+      approval: instance.stage.approval,
+      completion_contract: instance.stage.completion_contract,
+    },
+    allowed_exploration: allowedExplorationFor(taskLevel),
+    reusable_evidence: "仅复用与当前 source revision、provenance、digest 和新鲜度校验匹配的有效受控 Evidence；修复后仅重新执行受影响、已失效或尚未满足的声明检查；不得因更换工具、Agent 或阶段描述重跑等价检查。",
+    prohibited_actions: [
+      "不得因多个文件、角色或工具不同而默认升级为全仓探索、全量测试或重复审查。",
+      "不得跳过、伪造、手写或以 Agent 叙述替代受控 Evidence、sensor、review、build、test 或审批门禁。",
+      "不得追加无关重构、优化、测试。",
+    ],
+    stop_conditions: [
+      "声明的产物和当前任务所需的实现或分析已完成，声明的检查已有结果或已由指定机制安排，且无阻断问题时，结束当前阶段工作并交付结果。",
+      "非阻断且当前无法执行的检查，须记录为未验证及原因；不得为消除未知项扩大范围。",
+      "同一检查连续失败两次后，停止等价重试；改用不同诊断路径或返回 NEEDS_CONTEXT/BLOCKED。",
+      "next/report 返回 repair_guidance 时按其分类和最小下一步执行；action=diagnose 时停止等价重试。映射、历史证据漂移、权限或未知失败均不得自动解释为缺少测试。",
+      "完成后不得仅为提高信心继续探索无关目录、重复读取未变化内容或重复已通过的检查。",
+    ],
+    expansion_triggers: [
+      "当前 requires、consumes、produces、sensor 或 Provider gate 失败。",
+      "直接调用关系、配置或共享契约证据表明影响超出当前边界，或影响范围无法界定。",
+      "存在安全或数据完整性风险，或用户明确要求 exhaustive 调查。",
+    ],
+    priority: [
+      "用户明确要求及安全约束",
+      "当前 AIDLC directive 与强制门禁",
+      "当前任务的执行范围、必需检查和停止条件",
+      "Agent 一般行为准则",
+    ],
+  };
+}
+
+function executionPolicyPrompt(policy: ExecutionPolicy): string {
+  const required = policy.required;
+  const list = (values: readonly string[], empty: string) => values.length > 0 ? values.join("、") : empty;
+  return `\n执行策略（directive 优先）：任务级别=${policy.task_level}。成功条件：${policy.success_condition}\n允许探索：${policy.allowed_exploration}\n阶段依赖：${list(required.requires, "无")}；consumes：${list(required.consumes, "无")}；produces：${list(required.produces, "无")}；sensors：${list(required.sensors, "无")}。\n证据复用：${policy.reusable_evidence}\n禁止：${policy.prohibited_actions.join("；")}\n停止：${policy.stop_conditions.join("；")}\n扩大范围仅当：${policy.expansion_triggers.join("；")}\n规则优先级：${policy.priority.join(" > ")}。`;
+}
+
+function lightweightNextPrompt(state: WorkflowState, instance: StageInstance, executionPolicy: ExecutionPolicy, reportCommand?: string, choices: string[] = [], providerPrompt = ""): string {
+  const approval = instance.stage.approval === "block"
+    ? "审批策略 block：展示决策摘要后等待用户明确批准；不得代替用户审批。"
+    : `审批策略 ${instance.stage.approval}：展示摘要后复用既有授权继续；用户显式要求审阅时等待回复，普通文档和模板不得升级为阻断。`;
+  const unit = approval + "\n" + (instance.module_id && instance.unit_id
+    ? `当前单元：${instance.module_id}/${instance.unit_id}。团队成员可用 unit select 声明负责人与分支。`
+    : "当前阶段不要求成员选择单元；按产物、review、构建和测试门禁推进。");
+  const artifacts = instance.stage.produces.length
+    ? instance.stage.produces.flatMap((pattern) => displayArtifactPatterns(pattern, instance)).join("、")
+    : "本阶段没有声明文件产物";
+  return `工作目标：${state.work_description}\n当前阶段：${instance.stage.name}（${instance.instance_id}，${instance.stage.phase}）\n${unit}\n需要产物：${artifacts}\n质量动作：只执行本 directive 声明或绑定的 review、构建、测试、sensor、Provider 与审批动作；report/next 会复验 requires、consumes、produces 和受控 Evidence。不得跳过，也不得因更换工具或 Agent 重复。${executionPolicyPrompt(executionPolicy)}${diagramFormatPrompt(state, instance)}${choicePrompt(instance.stage.slug, choices)}${providerPrompt}\n下一步：持有当前精确 session binding 的会话运行 ${reportCommand || "orchestrate report"}。`;
+}
+
+interface PreparedProviderDirective {
+  readonly context: ProviderDirectiveContext;
+  readonly actions: readonly ProviderDirectiveAction[];
+  readonly plan: import("./aidlc-provider-types.js").ProviderPlanV1_1;
+}
+
+function stageCapabilityExpression(capabilities: readonly string[]): CapabilityExpression | undefined {
+  if (capabilities.length === 0) return undefined;
+  if (capabilities.length === 1) return { capability: capabilities[0] };
+  return { all_of: [...capabilities].sort().map((capability) => ({ capability })) };
+}
+
+/** Convert the existing provenance reader into the Provider protocol's digest-prefixed shape. */
+function currentProviderSourceRevision(): ProviderSourceRevision {
+  const nested = nestedSourceRepos(PROJECT_ROOT);
+  const revision = readSourceRevision(PROJECT_ROOT, undefined, nested);
+  const checkedDigest = (value: string | null, field: string): Sha256Digest => {
+    if (!value || !/^[0-9a-f]{64}$/.test(value)) throw new ProviderResolutionError("PROVIDER_PLAN_STALE", `${field} is unavailable; ProviderPlan cannot bind the current source revision`);
+    return `sha256:${value}` as Sha256Digest;
+  };
+  if (!COMMIT_ID_PATTERN.test(revision.commit)) {
+    throw new ProviderResolutionError("PROVIDER_PLAN_STALE", "current Git commit is unavailable; ProviderPlan requires an immutable source revision");
+  }
+  const repos: Record<string, { commit: string; worktree_digest: Sha256Digest }> = {};
+  for (const [key, value] of Object.entries(revision.repos || {})) {
+    if (!COMMIT_ID_PATTERN.test(value.commit)) throw new ProviderResolutionError("PROVIDER_PLAN_STALE", `nested repository ${key} commit is unavailable`);
+    repos[key] = { commit: value.commit, worktree_digest: checkedDigest(value.worktree_digest, `source_revision.repos.${key}.worktree_digest`) };
+  }
+  return {
+    commit: revision.commit,
+    worktree_digest: checkedDigest(revision.worktree_digest, "source_revision.worktree_digest"),
+    ...(Object.keys(repos).length > 0 ? { repos } : {}),
+  };
+}
+
+/** Generic Core-owned Provider lifecycle policy id for a stage; no domain stage is special-cased. */
+function stageResolutionPolicyId(stage: string): string {
+  return `aidlc.orchestrate-stage/${stage}`;
+}
+
+/** Resolve only from project intent + immutable lock/cache; never discovers or refreshes a Provider. */
+function prepareProviderDirective(instance: StageInstance, approvalRef: string | undefined, persist: boolean): PreparedProviderDirective | null {
+  const configuredCapabilities = instance.stage.provider_capabilities || [];
+  const hasConfig = existsSync(join(PROJECT_ROOT, PROJECT_PROVIDERS_PATH));
+  const hasLock = existsSync(join(PROJECT_ROOT, PROJECT_PROVIDERS_LOCK_PATH));
+  if (!hasConfig && !hasLock) {
+    if (configuredCapabilities.length > 0) {
+      throw new ProviderResolutionError("PROVIDER_CAPABILITY_MISSING", `stage ${instance.stage.slug} requires Provider capabilities but ${PROJECT_PROVIDERS_PATH} is absent`);
+    }
+    return null;
+  }
+  const result = resolveProjectProviderPlan(PROJECT_ROOT, {
+    scope: {
+      stage: instance.stage.slug,
+      ...(instance.module_id ? { module_id: instance.module_id } : {}),
+      ...(instance.unit_id ? { unit_id: instance.unit_id } : {}),
+    },
+    source_revision: currentProviderSourceRevision(),
+    policy: defaultResolutionPolicy({
+      policy_id: stageResolutionPolicyId(instance.stage.slug),
+      protected_gate: instance.stage.approval === "block",
+    }),
+    capability_expression: stageCapabilityExpression(configuredCapabilities),
+    ...(approvalRef ? { approval_ref: approvalRef } : {}),
+  });
+  // An installed project Provider with no binding for this stage does not add empty
+  // control-plane noise to the directive. Explicit stage capabilities always create nodes.
+  if (result.plan.nodes.length === 0 && configuredCapabilities.length === 0) return null;
+  assertPlanResolvable(result.resolution);
+  const planPath = persist ? freezeProviderPlan(PROJECT_ROOT, result.plan) : undefined;
+  return {
+    context: {
+      ...result.provider_context,
+      plan: { ...result.provider_context.plan, ...(planPath ? { path: planPath } : {}) },
+    },
+    actions: result.provider_actions,
+    plan: result.plan,
+  };
+}
+
+function providerHandoffPrompt(provider: PreparedProviderDirective | null, instance?: StageInstance): string {
+  if (!provider) return "";
+  const actions = provider.actions.map((action) => `${action.provider_instance_id}/${action.capability_id}@${action.plan_node_id}`).join("、");
+  return `\nProvider 计划：${provider.context.plan.id}（${provider.context.plan.digest}），lock=${provider.context.lock_digest}。只能执行 directive.provider_actions 中绑定的项目实例与 Plan node，不得从全局缓存、远端 branch 或同名仓库替换。${actions ? `动作：${actions}。` : ""} 对 validation/command/composite 动作运行 provider run，随后以 provider gate 聚合当前 Evidence；report 必须携带 --gate-decision <gate-id>。缺失或 blocked Gate 不会推进。`;
+}
+
+function providerScopeForInstance(instance: StageInstance): ProviderScope {
+  return {
+    stage: instance.stage.slug,
+    ...(instance.module_id ? { module_id: instance.module_id } : {}),
+    ...(instance.unit_id ? { unit_id: instance.unit_id } : {}),
+  };
+}
+
+interface ProviderGateCheck {
+  readonly failure: string | null;
+  readonly decision?: GateDecisionV1_1;
+}
+
+/** Provider-backed quality actions require a current signed Gate before any workflow mutation. */
+function providerGateCheck(instance: StageInstance, gateReference: string | undefined, approvalRef?: string): ProviderGateCheck {
+  let directive: PreparedProviderDirective | null;
+  try {
+    directive = prepareProviderDirective(instance, approvalRef, false);
+    for (const action of directive?.actions ?? []) {
+      if (action.required && action.required_before === "stage-execution") {
+        verifyProviderKnowledge(PROJECT_ROOT, { plan: directive!.plan, nodeId: action.plan_node_id });
+      }
+    }
+  } catch (error) {
+    return { failure: `Provider Gate prerequisite cannot be resolved: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const requiresGate = directive?.actions.some((action) => action.required && action.type !== "knowledge") === true;
+  if (!requiresGate) {
+    return { failure: gateReference ? `Stage ${instance.instance_id} has no Provider quality action requiring a GateDecision; remove --gate-decision.` : null };
+  }
+  if (!gateReference) {
+    return { failure: `Stage ${instance.instance_id} has required Provider quality actions. Run the bound provider actions and provider gate, then report with --gate-decision <gate-id>.` };
+  }
+  try {
+    const decision = verifyGateDecisionForReport(PROJECT_ROOT, gateReference, {
+      scope: providerScopeForInstance(instance),
+      sourceRevision: currentProviderSourceRevision(),
+      resolutionPolicy: defaultResolutionPolicy({
+        policy_id: stageResolutionPolicyId(instance.stage.slug),
+        protected_gate: instance.stage.approval === "block",
+      }),
+    });
+    return { failure: null, decision };
+  } catch (error) {
+    return { failure: `GateDecision ${gateReference} cannot authorize report: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+function clearActiveContext(state: WorkflowState): void {
+  state.current_stage = "";
+  delete state.current_stage_instance;
+  delete state.current_module;
+  delete state.current_unit;
+}
+
+/** MARS-271 #8: routing context key of a unit instance's own chain position. */
+function unitContextKey(moduleId?: string, unitId?: string): string | null {
+  return moduleId && unitId ? `${moduleId}:${unitId}` : null;
+}
+
+function clearUnitContext(state: WorkflowState, instanceId: string): void {
+  if (!state.unit_contexts) return;
+  for (const [key, context] of Object.entries(state.unit_contexts)) {
+    if (context.stage_instance === instanceId) delete state.unit_contexts[key];
+  }
+  if (Object.keys(state.unit_contexts).length === 0) delete state.unit_contexts;
+}
+
+/**
+ * MARS-271 #8 unit-level parallel chains: when the global current pointer is an
+ * unresolved unit instance of a DIFFERENT unit, moving it would overwrite that
+ * unit's chain position (last-writer-wins). A unit next writes its own context
+ * instead; the single-agent sequential path keeps writing the global pointers.
+ * MARS-277 extends the protection to any unresolved global current — a module-axis
+ * planning current held by another session is equally a live chain position.
+ */
+export function applyCurrentContext(state: WorkflowState, instance: StageInstance): void {
+  const unitKey = unitContextKey(instance.module_id, instance.unit_id);
+  const currentGlobal = state.current_stage_instance;
+  const globalHeldByOtherUnit = Boolean(
+    unitKey
+    && currentGlobal
+    && currentGlobal !== instance.instance_id
+    && !isInstanceResolved(state, currentGlobal)
+  );
+  if (unitKey && globalHeldByOtherUnit) {
+    state.unit_contexts = {
+      ...(state.unit_contexts || {}),
+      [unitKey]: { stage: instance.stage.slug, phase: instance.stage.phase, stage_instance: instance.instance_id },
+    };
+    return;
+  }
+  if (!unitKey && currentGlobal && currentGlobal !== instance.instance_id && currentGlobal.includes("@unit:") && !isInstanceResolved(state, currentGlobal)) {
+    // A module/project-axis advance displacing an unresolved unit's global position
+    // snapshots that unit's chain into its own context first, so the position survives.
+    const heldModule = /@module:([a-z0-9][a-z0-9-]*)/.exec(currentGlobal)?.[1];
+    const heldUnit = /@unit:([a-z0-9][a-z0-9-]*)$/.exec(currentGlobal)?.[1];
+    const heldStage = currentGlobal.split("@", 1)[0];
+    if (heldModule && heldUnit) {
+      state.unit_contexts = {
+        ...(state.unit_contexts || {}),
+        [`${heldModule}:${heldUnit}`]: { stage: heldStage, phase: state.current_phase, stage_instance: currentGlobal },
+      };
+    }
+  }
+  state.current_stage = instance.stage.slug;
+  state.current_phase = instance.stage.phase;
+  state.current_stage_instance = instance.instance_id;
+  if (instance.module_id) state.current_module = instance.module_id;
+  else delete state.current_module;
+  if (instance.unit_id) state.current_unit = instance.unit_id;
+  else delete state.current_unit;
+  if (unitKey && state.unit_contexts?.[unitKey]) {
+    delete state.unit_contexts[unitKey];
+    if (Object.keys(state.unit_contexts).length === 0) delete state.unit_contexts;
+  }
+}
+
+function selectActiveContext(state: WorkflowState, owns: (instanceId: string) => boolean = () => true): void {
+  const next = Object.values(state.active_instances || {}).filter((claim) => owns(claim.stage_instance)).sort((left, right) => left.stage_instance.localeCompare(right.stage_instance))[0];
+  if (!next) {
+    clearActiveContext(state);
+    return;
+  }
+  const stageSlug = next.stage_instance.split("@", 1)[0];
+  const stage = loadGraph().stages.find((candidate) => candidate.slug === stageSlug);
+  state.current_stage = stageSlug;
+  state.current_phase = stage?.phase || state.current_phase;
+  state.current_stage_instance = next.stage_instance;
+  state.current_module = next.module_id;
+  const unitMatch = /@unit:([a-z0-9][a-z0-9-]*)$/.exec(next.stage_instance);
+  if (unitMatch) state.current_unit = unitMatch[1];
+  else delete state.current_unit;
+}
+
+function missingSemanticEvidence(instance: StageInstance): string[] {
+  const view = loadWorkflowView(PROJECT_ROOT, instance.module_id);
+  const adopted = view ? qualityAdoption(qualityGateContext(view, instance)).enabled : false;
+  return instance.stage.sensors
+    .filter((sensor) => SEMANTIC_SENSORS.has(sensor))
+    .filter((sensor) => !QUALITY_SENSORS.has(sensor) || adopted)
+    .filter((sensor) => !existsSync(join(PROJECT_ROOT, evidenceRelativePath(instance.stage.slug, sensor, instance.axis, instance))));
+}
+
+function produceMissingSemanticEvidence(instance: StageInstance, refresh = false): string | null {
+  // Keep the full inventory for upgrade diagnostics. Automatic repair excludes
+  // phase commands even though they share the semantic producer registry.
+  const missing = missingSemanticEvidence(instance)
+    .filter((sensor) => !["red-test-evidence", "green-test-evidence", "baseline-test-evidence"].includes(sensor));
+  if (missing.length === 0) return null;
+  const evidenceTool = join(__dirname, "aidlc-evidence.ts");
+  // Repair only missing semantic observations. Phase evidence (RED/BASELINE/GREEN
+  // and C8 commands) is validated by the normal gates, never rerun as a side effect
+  // of repairing an unrelated semantic record.
+  const invocations = missing.map(sensor => ["--sensor", sensor]);
+  for (const invocation of invocations) {
+    const result = runSync(process.execPath, [TSX_CLI, evidenceTool, "run", "--stage", instance.stage.slug, "--instance", instance.instance_id, ...invocation, ...(refresh ? ["--refresh"] : [])], {
+      cwd: PROJECT_ROOT,
+      encoding: "utf8",
+      shell: false,
+      timeout: 30 * 60 * 1000,
+      env: process.env,
+    });
+    if (result.status !== 0) {
+      const detail = [result.stderr, result.stdout]
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .join("; ")
+        .trim();
+      return `automatic semantic evidence production failed for ${instance.instance_id} (${missing.join(", ")}): ${detail || `exit code ${result.status}`}`;
+    }
+  }
+  const stillMissing = missingSemanticEvidence(instance).filter(sensor => missing.includes(sensor));
+  return stillMissing.length === 0
+    ? null
+    : `automatic semantic evidence production did not write: ${stillMissing.join(", ")}`;
+}
+
+export function artifactRoot(instance: StageInstance): string {
+  if (instance.axis === "module" && instance.module_id) return moduleInceptionRoot(instance.module_id);
+  if (instance.axis === "unit" && instance.module_id && instance.unit_id) return unitConstructionRoot(instance.module_id, instance.unit_id);
+  const phaseDirectory = instance.stage.phase === "operation" ? "operations" : instance.stage.phase;
+  return `docs/aidlc/${phaseDirectory}`;
+}
+
+export function evidenceRoot(instance: StageInstance): string {
+  const parts = [".aidlc", "evidence", instance.stage.slug];
+  if (instance.axis !== "project" && instance.module_id) parts.push(instance.module_id);
+  if (instance.axis === "unit" && instance.unit_id) parts.push(instance.unit_id);
+  return parts.join("/");
+}
+
+// ---------------------------------------------------------------------------
+// Split per-module layout (4.3.0)
+// ---------------------------------------------------------------------------
+
+interface EngineContext {
+  owner: WorkflowRef;
+  loaded: WorkflowParts;
+  view: WorkflowState;
+}
+
+function workflowLabel(ref: WorkflowRef): string {
+  if (ref.kind === "module") return `Module workflow "${ref.module_id}"`;
+  return ref.kind === "integration" ? "Integration workflow" : "Global workflow";
+}
+
+function moduleRef(moduleId: string): WorkflowRef {
+  return { kind: "module", module_id: moduleId };
+}
+
+function openSplitContext(owner: WorkflowRef): EngineContext {
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  if (!loaded.split) throw new Error("split workflow layout is not initialized");
+  // Expiry is checked at the addressed write, never swept across sibling workflows.
+  if (!loaded.parts.has(workflowRefKey(owner))) throw new Error(`${workflowLabel(owner)} does not exist in the registry`);
+  return { owner, loaded, view: mergeWorkflowView(loaded.parts, owner) };
+}
+
+function ownedInstances(instances: StageInstance[], ref: WorkflowRef): StageInstance[] {
+  return instances.filter((instance) => sameRef(ownerOfInstance(instance.instance_id), ref));
+}
+
+function summarizeOwned(state: WorkflowState, instances: StageInstance[]): void {
+  const completed = new Set(state.completed_stage_instances);
+  const skipped = new Set(state.skipped_stage_instances);
+  state.completed_stages = [];
+  state.skipped_stages = [];
+  for (const slug of [...new Set(instances.map((instance) => instance.stage.slug))]) {
+    const group = instances.filter((instance) => instance.stage.slug === slug);
+    if (!group.every((instance) => completed.has(instance.instance_id) || skipped.has(instance.instance_id))) continue;
+    if (group.every((instance) => skipped.has(instance.instance_id))) state.skipped_stages.push(slug);
+    else state.completed_stages.push(slug);
+  }
+}
+
+/** Persist the owner's portion of a mutated view, then refresh the registry projections. */
+function commitSplitContext(ctx: EngineContext, view: WorkflowState = ctx.view, afterCommit?: () => void): void {
+  const key = workflowRefKey(ctx.owner);
+  const part = ctx.loaded.parts.get(key);
+  if (!part) throw new Error(`${workflowLabel(ctx.owner)} is not loaded`);
+  const next = extractOwnedState(view, part.state, ctx.owner);
+  summarizeOwned(next, ownedInstances(expandStageInstances(loadGraph(), view), ctx.owner));
+  saveWorkflowState(PROJECT_ROOT, next, ctx.owner, { afterCommit });
+  ctx.loaded.parts.set(key, { ref: ctx.owner, state: next });
+  view.revision = next.revision;
+  view.updated_at = next.updated_at;
+  refreshRegistry(ctx.loaded);
+}
+
+function markdownTableCells(line: string): string[] {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
+
+/**
+ * Cross-module shared contracts derived from docs/aidlc/ideation/product-contracts.md:
+ * the contract list gives the provider module, the consumer status table gives each
+ * consumer module and whether it is verified (已验证 / verified).
+ */
+function sharedContractProjection(): RegistrySharedContract[] {
+  const path = join(PROJECT_ROOT, "docs", "aidlc", "ideation", "product-contracts.md");
+  if (!existsSync(path)) return [];
+  let modules: ModuleDescriptor[];
+  try {
+    modules = readModuleManifest(PROJECT_ROOT);
+  } catch {
+    return [];
+  }
+  const providers = new Map<string, string>();
+  const consumers = new Map<string, Map<string, boolean>>();
+  let header: string[] | undefined;
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+    if (!line.trim().startsWith("|")) {
+      header = undefined;
+      continue;
+    }
+    const cells = markdownTableCells(line);
+    if (cells.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
+    if (!header) {
+      header = cells;
+      continue;
+    }
+    const column = (pattern: RegExp): number => header!.findIndex((cell) => pattern.test(cell));
+    const idIndex = column(CONTRACT_ID_COLUMN);
+    const contractId = idIndex >= 0 ? cells[idIndex] : "";
+    if (!contractId || contractId === "-") continue;
+    const providerIndex = column(CONTRACT_PROVIDER_COLUMN);
+    const consumerIndex = column(CONTRACT_CONSUMER_COLUMN);
+    const statusIndex = column(/^(?:状态|status)$/i);
+    if (providerIndex >= 0 && consumerIndex < 0) {
+      const provider = moduleForValue(modules, cells[providerIndex] || "");
+      if (provider) providers.set(contractId, provider);
+    } else if (consumerIndex >= 0 && statusIndex >= 0) {
+      const consumer = moduleForValue(modules, cells[consumerIndex] || "");
+      if (!consumer) continue;
+      const status = cells[statusIndex] || "";
+      const verified = /已验证|^verified$/i.test(status) && !/未验证|unverified/i.test(status);
+      const entry = consumers.get(contractId) || new Map<string, boolean>();
+      entry.set(consumer, (entry.get(consumer) ?? true) && verified);
+      consumers.set(contractId, entry);
+    }
+  }
+  const source = relative(PROJECT_ROOT, path).replace(/\\/g, "/");
+  return [...providers.entries()].flatMap(([contractId, provider]) => {
+    const moduleConsumers = [...(consumers.get(contractId) || new Map<string, boolean>()).entries()].filter(([consumer]) => consumer !== provider);
+    if (moduleConsumers.length === 0) return [];
+    return [{
+      contract_id: contractId,
+      provider,
+      consumers: moduleConsumers.map(([consumer]) => consumer),
+      verified: moduleConsumers.every(([, verified]) => verified),
+      source,
+    }];
+  });
+}
+
+function crossModuleRequireProjection(view: WorkflowState, instances: StageInstance[]): RegistryCrossRequire[] {
+  let dependencies: ModuleDependency[];
+  try {
+    dependencies = moduleDependencyGraph();
+  } catch {
+    return [];
+  }
+  return dependencies.map((dependency) => {
+    const providers = instances.filter((candidate) => candidate.axis === "module" && candidate.module_id === dependency.provider_module && candidate.stage.slug === dependency.provider_stage);
+    return {
+      consumer: dependency.consumer_module,
+      consumer_stage: dependency.consumer_stage,
+      provider: dependency.provider_module,
+      provider_stage: dependency.provider_stage,
+      satisfied: providers.length > 0 && providers.every((provider) => isInstanceResolved(view, provider.instance_id)),
+      source: dependency.source,
+    };
+  });
+}
+
+/** Recompute every projection column from the loaded workflow parts; identity rows are kept. */
+function registryProjection(registry: WorkflowRegistry, loaded: WorkflowParts): WorkflowRegistry {
+  const view = mergeWorkflowView(loaded.parts, GLOBAL_WORKFLOW);
+  const instances = expandStageInstances(loadGraph(), view);
+  const resolved = (instance: StageInstance): boolean => isInstanceResolved(view, instance.instance_id);
+  const modules = registry.modules.map((row) => {
+    const state = loaded.parts.get(`module:${row.module_id}`)?.state;
+    if (!state) return row;
+    const own = instances.filter((instance) => instance.module_id === row.module_id && instance.axis !== "project");
+    const inceptionDone = own.filter((instance) => instance.axis === "module").every(resolved);
+    return {
+      ...row,
+      status: state.status,
+      current_stage: state.current_stage_instance || state.current_stage || "-",
+      inception_done: inceptionDone,
+      construction_done: inceptionDone && own.filter((instance) => instance.axis === "unit").every(resolved),
+      owner: state.module_selections?.[row.module_id]?.owner || Object.values(state.active_instances || {})[0]?.owner || "-",
+    };
+  });
+  const registered = new Set(modules.map((row) => row.module_id));
+  const unregistered = [...new Set(instances.filter((instance) => instance.axis !== "project" && instance.module_id && !registered.has(instance.module_id)).map((instance) => instance.module_id as string))];
+  const sharedContracts = sharedContractProjection();
+  const blocking = [
+    ...unregistered.map((moduleId) => `workflow:${moduleId}`),
+    ...modules.filter((row) => !row.construction_done).map((row) => `construction:${row.module_id}`),
+    ...sharedContracts.filter((contract) => !contract.verified).map((contract) => `contract:${contract.contract_id}`),
+    // 4.8.0: a module with I13 ucd_units enters integration only when every UC-D is in
+    // the GREEN of every unit its unit_refs name.
+    ...modules.filter((row) => row.construction_done && moduleUcdCoverageGaps(row.module_id).length > 0).map((row) => `ucd-coverage:${row.module_id}`),
+  ];
+  const integration = loaded.parts.get("integration")?.state;
+  return {
+    ...registry,
+    modules,
+    integration: {
+      ...registry.integration,
+      status: integration?.status || registry.integration.status,
+      current_stage: integration?.current_stage_instance || integration?.current_stage || "-",
+      barrier_ready: blocking.length === 0,
+      blocking,
+    },
+    shared_contracts: sharedContracts,
+    cross_module_requires: crossModuleRequireProjection(view, instances),
+  };
+}
+
+function refreshRegistry(loaded: WorkflowParts): void {
+  // 4.13.0: the file keeps identity rows only (a version-1 registry is rewritten once);
+  // projections live in memory for the rest of this command.
+  const updated = updateRegistry(PROJECT_ROOT, (current) => current as WorkflowRegistry);
+  loaded.registry = registryProjection(updated, loaded);
+}
+
+function reportCommandFor(instance: StageInstance): string {
+  const target = `${instance.module_id ? ` --module ${instance.module_id}` : ""}${instance.unit_id ? ` --unit ${instance.unit_id}` : ""}`;
+  const result = instance.stage.approval === "block" ? "approved --user-input Approve" : "completed";
+  return `orchestrate report --stage ${instance.stage.slug}${target} --result ${result}`;
+}
+
+/** `probe` evaluates the next directive without persisting anything (used to compare modules). */
+function advanceSplit(ctx: EngineContext, graph: StageGraph, args: string[], flags: Record<string, string>, probe = false): Promise<Directive> {
+  const key = workflowRefKey(ctx.owner);
+  const persisted = ctx.loaded.parts.get(key)!.state;
+  return advance(graph, {
+    state: ctx.view,
+    flags,
+    commit: probe ? () => undefined : (view) => commitSplitContext(ctx, view),
+    retry: () => nextConflictRetry(args),
+    label: workflowLabel(ctx.owner),
+    finishedMessage: (count) => `🎉 ${workflowLabel(ctx.owner)}: all ${count} stage instances resolved.`,
+    candidate: (instance) => sameRef(ownerOfInstance(instance.instance_id), ctx.owner),
+    extras: { workflow: key, workflow_id: persisted.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, ctx.owner) },
+    persistProviderPlans: !probe,
+    readOnlyProbe: probe,
+    reportCommand: reportCommandFor,
+  });
+}
+
+function ensureModuleWorkflow(moduleId: string, work?: string): Directive | null {
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  if (loaded.parts.has(`module:${moduleId}`)) {
+    return work === undefined ? null : { kind: "error", message: `Module workflow ${moduleId} already exists; --work only describes a module workflow when next --module creates it.` };
+  }
+  let modules: ModuleDescriptor[];
+  try {
+    modules = readModuleManifest(PROJECT_ROOT);
+  } catch (error) {
+    return { kind: "error", message: `Module manifest is unavailable: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (!modules.some((module) => module.module_id === moduleId)) {
+    return { kind: "error", message: `Unknown module "${moduleId}"; declare it in docs/aidlc/ideation/module-manifest.json first.` };
+  }
+  const global = loaded.parts.get("global")!.state;
+  const ref = moduleRef(moduleId);
+  const state: WorkflowState = {
+    ...createInitialState(global.scope, ENGINE_VERSION, randomUUID(), global.selected_optional_stages, work?.trim() || global.work_description),
+    workflow_kind: "module",
+    module_id: moduleId,
+    parent_workflow_id: global.workflow_id,
+    ...(global.quality_gates_version ? { quality_gates_version: global.quality_gates_version } : {}),
+    ...(global.document_slices_version ? { document_slices_version: global.document_slices_version } : {}),
+    depth: global.depth,
+    current_phase: "inception",
+  };
+  withWorkflowInitialization(PROJECT_ROOT, global, [{ ref: GLOBAL_WORKFLOW, state: global }, { ref, state }], commitSource => withRegistryPublication(PROJECT_ROOT, () => {
+    appendAuditEvent(PROJECT_ROOT, ref, "WORKFLOW_CREATED", { "Parent Workflow ID": global.workflow_id, Trigger: "next --module" });
+    updateRegistry(PROJECT_ROOT, (current) => {
+      const registry = current as WorkflowRegistry;
+      if (registry.global_workflow_id !== global.workflow_id || registry.modules.some((row) => row.module_id === moduleId)) throw new Error("module initialization registry changed; reread before retrying");
+      return {
+        ...registry,
+        modules: [...registry.modules, { module_id: moduleId, workflow_id: state.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, ref), status: "running", current_stage: "-", inception_done: false, construction_done: false, owner: "-" }],
+      };
+    });
+    commitSource();
+  }));
+  // Idempotent: a module created after the split keeps the control-plane merge strategy
+  // provisioned (and registers the driver on a clone that first runs next here).
+  provisionGitStrategy();
+  return null;
+}
+
+function firstLine(value: unknown): string {
+  return String(value || "").split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 2).join(" ");
+}
+
+/**
+ * `next` in the split layout. `--module <id>` advances only that module. Without it the
+ * global workflow goes first (compatible behavior), then the first module that can advance
+ * (blocked, parked or finished modules are reported, never allowed to hold the others),
+ * and finally the integration workflow once its cross-module barrier is ready.
+ */
+async function splitNext(args: string[], flags: Record<string, string>, graph: StageGraph): Promise<Directive> {
+  const binding = sessionBinding();
+  if (binding) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    const bound = [...loaded.parts.values()].find(part => part.state.workflow_id === binding.workflow_id);
+    if (!bound) throw new Error("bound workflow no longer exists");
+    if (flags.module && flags.work && loaded.parts.has(`module:${flags.module}`)) return ensureModuleWorkflow(flags.module, flags.work)!;
+    if (flags.module && !loaded.parts.has(`module:${flags.module}`) && bound.ref.kind === "global") {
+      const failure = ensureModuleWorkflow(flags.module, flags.work);
+      if (failure) return failure;
+      return moduleBindingRequired(flags.module, "Module workflow initialized.");
+    }
+    if (flags.module && (bound.ref.kind !== "module" || bound.ref.module_id !== flags.module)) throw new Error("requested module conflicts with session binding");
+    if (bound.ref.kind === "integration") {
+      const barrier = registryProjection(loaded.registry!, loaded).integration;
+      if (!barrier.barrier_ready) return { kind: "error", workflow: "integration", blocking: barrier.blocking,
+        message: `Cross-module integration barrier is not ready: ${barrier.blocking.join(", ")}. A session binding identifies the owner; it cannot waive module construction or shared-contract readiness.` };
+    }
+    provisionGitStrategy();
+    return advanceSplit(openSplitContext(bound.ref), graph, args, flags);
+  }
+  // Explicit --module wins; AIDLC_MODULE is an equivalent default and never falls back to another module.
+  const envModule = process.env.AIDLC_MODULE?.trim();
+  const targetModule = flags.module || envModule;
+  if (targetModule) {
+    const failure = ensureModuleWorkflow(targetModule, flags.module ? flags.work : undefined);
+    if (failure) return flags.module ? failure : { ...failure, message: `AIDLC_MODULE: ${failure.message}` };
+    return advanceSplit(openSplitContext(moduleRef(targetModule)), graph, args, { ...flags, module: targetModule });
+  }
+  const globalContext = openSplitContext(GLOBAL_WORKFLOW);
+  if (globalContext.loaded.parts.get("global")!.state.status !== "done") {
+    const directive = await advanceSplit(globalContext, graph, args, flags, true);
+    if (directive.kind !== "done") return directive;
+  }
+  const moduleFlags = Object.fromEntries(Object.entries(flags).filter(([key]) => key !== "resume"));
+  const notes: string[] = [];
+  const ready: { module_id: string; stage: string; stage_instance: string; name: string }[] = [];
+  let modulesDone = true;
+  for (const row of openSplitContext(GLOBAL_WORKFLOW).loaded.registry!.modules) {
+    const ctx = openSplitContext(moduleRef(row.module_id));
+    const state = ctx.loaded.parts.get(`module:${row.module_id}`)!.state;
+    if (state.status === "done") continue;
+    modulesDone = false;
+    if (state.status === "parked") {
+      notes.push(`module:${row.module_id}: parked at ${state.current_stage_instance || state.current_stage || "-"} (resume with next --module ${row.module_id} --resume)`);
+      continue;
+    }
+    const probed = await advanceSplit(ctx, graph, args, moduleFlags, true);
+    if (probed.kind === "run-stage") {
+      ready.push({ module_id: row.module_id, stage: String(probed.stage), stage_instance: String(probed.stage_instance), name: String(probed.name) });
+      continue;
+    }
+    // An unbound routing query cannot persist skips or claim another workflow.
+    const directive = probed;
+    if (directive.kind === "done") continue;
+    notes.push(`module:${row.module_id}: ${firstLine(directive.message)}`);
+  }
+  if (ready.length === 1) {
+    const directive = moduleBindingRequired(ready[0].module_id, "One module can advance.");
+    return notes.length ? { ...directive, other_workflows: notes } : directive;
+  }
+  if (ready.length > 1) {
+    return {
+      kind: "ask",
+      ask_type: "module-selection",
+      question: `${ready.length} module workflows can advance. Ask the user which module to work on, then run next --module <module-id> (or set AIDLC_MODULE).`,
+      options: ready.map((item) => item.module_id),
+      modules: ready,
+      command_template: "loeyae-aidlc orchestrate next --module <module-id>",
+      message: `Multiple module workflows can advance; the user must choose one:\n${ready.map((item) => `  • ${item.module_id}: next stage ${item.stage_instance} (${item.name})`).join("\n")}\n  Run: loeyae-aidlc orchestrate next --module <module-id>`,
+      ...(notes.length ? { other_workflows: notes } : {}),
+    };
+  }
+  if (!modulesDone) {
+    const pending = openSplitContext(GLOBAL_WORKFLOW).loaded.registry!.modules.filter((row) => {
+      const state = loadWorkflowState(PROJECT_ROOT, moduleRef(row.module_id));
+      return state && state.status !== "done";
+    });
+    if (pending.length > 0) {
+      return { kind: "error", message: `🚫 No module workflow can advance right now:\n${notes.map((note) => `  • ${note}`).join("\n")}\n  Use next --module <module-id> to work on one module.`, other_workflows: notes };
+    }
+  }
+  const integrationContext = openSplitContext(INTEGRATION_WORKFLOW);
+  if (integrationContext.loaded.parts.get("integration")!.state.status === "done") {
+    return { kind: "done", message: "🎉 All split workflows finished (global, modules and integration)." };
+  }
+  const barrier = registryProjection(integrationContext.loaded.registry!, integrationContext.loaded).integration;
+  if (!barrier.barrier_ready) {
+    return {
+      kind: "error",
+      message: `🚫 Cross-module integration barrier is not ready: ${barrier.blocking.join(", ")}. Every module must finish construction and every shared contract consumer must be 已验证/verified in docs/aidlc/ideation/product-contracts.md.${barrier.blocking.filter((item) => item.startsWith("ucd-coverage:")).map((item) => ` Module ${item.slice("ucd-coverage:".length)} UC-D coverage is incomplete: ${moduleUcdCoverageGaps(item.slice("ucd-coverage:".length)).join("; ")}.`).join("")}`,
+      workflow: "integration",
+      blocking: barrier.blocking,
+    };
+  }
+  const directive = { kind: "print", binding_required: true, message: "Integration is ready. Preview and bind its exact stage instance before next." } as Directive;
+  if (directive.kind === "done") return { ...directive, message: "🎉 All split workflows finished (global, modules and integration)." };
+  return directive;
+}
+
+function moduleBindingRequired(moduleId: string, lead: string): Directive {
+  return {
+    kind: "print", binding_required: true, workflow: `module:${moduleId}`,
+    command_template: `loeyae-aidlc orchestrate next --module ${moduleId} --preview`,
+    message: `${lead} Run orchestrate next --module ${moduleId} --preview, then module inspect/bind for the exact returned stage instance. Pass the new binding only to that session before next. Initialization does not grant ownership of the new workflow.`,
+  };
+}
+
+function splitStatusDirective(graph: StageGraph, moduleId?: string): Directive {
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  const view = mergeWorkflowView(loaded.parts, GLOBAL_WORKFLOW);
+  const instances = expandStageInstances(graph, view);
+  const projection = registryProjection(loaded.registry!, loaded);
+  const refs = moduleId
+    ? [moduleRef(moduleId)]
+    : [GLOBAL_WORKFLOW, ...projection.modules.map((row) => moduleRef(row.module_id)), INTEGRATION_WORKFLOW];
+  const lines = refs.map((ref) => {
+    const state = loaded.parts.get(workflowRefKey(ref))?.state;
+    if (!state) return `  [${workflowRefKey(ref)}] (no workflow yet)`;
+    const own = ownedInstances(instances, ref);
+    const completed = own.filter((instance) => state.completed_stage_instances.includes(instance.instance_id)).length;
+    const skipped = own.filter((instance) => state.skipped_stage_instances.includes(instance.instance_id)).length;
+    const remaining = own.filter((instance) => !isInstanceResolved(view, instance.instance_id)).map((instance) => instance.instance_id);
+    return `  [${workflowRefKey(ref)}] ${state.status} | current: ${state.current_stage_instance || state.current_stage || "(none)"} | completed: ${completed}/${own.length} | skipped: ${skipped} | remaining: ${remaining.length}${remaining.length ? ` (${remaining.slice(0, 6).join(", ")}${remaining.length > 6 ? ", …" : ""})` : ""}`;
+  });
+  const barrier = projection.integration;
+  return {
+    kind: "print",
+    registry: projection,
+    message: `📊 Split Workflow Status (registry: aidlc/active/registry.md)\n` +
+      `  Scope: ${view.scope} | Global workflow: ${projection.global_workflow_id}\n` +
+      `${lines.join("\n")}\n` +
+      `  Integration barrier: ${barrier.barrier_ready ? "ready" : `blocked (${barrier.blocking.join(", ")})`}`,
+  };
+}
+
+interface LegacyEvidence {
+  path: string;
+  instance: string;
+  valid: boolean;
+  record: Record<string, unknown>;
+}
+
+/** Evidence still bound to the whole worktree; `valid` means it would pass the historical check now. */
+function legacyEvidenceInventory(): LegacyEvidence[] {
+  const root = join(PROJECT_ROOT, ".aidlc", "evidence");
+  if (!existsSync(root)) return [];
+  const current = readSourceRevision(PROJECT_ROOT);
+  const inventory: LegacyEvidence[] = [];
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(path);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      let record: Record<string, unknown>;
+      try {
+        record = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const revision = asRecord(record?.source_revision);
+      if (!revision || typeof revision.scope === "string") continue;
+      const segments = relative(root, path).split(sep);
+      const derived = segments.length === 3
+        ? `${segments[0]}@module:${segments[1]}`
+        : segments.length === 4
+          ? `${segments[0]}@module:${segments[1]}@unit:${segments[2]}`
+          : segments[0];
+      const instance = typeof record.stage_instance === "string" && record.stage_instance ? record.stage_instance : derived;
+      if (ownerOfInstance(instance).kind === "integration") continue;
+      inventory.push({
+        path,
+        instance,
+        valid: revision.commit === current.commit && revision.dirty === current.dirty && revision.worktree_digest === current.worktree_digest,
+        record,
+      });
+    }
+  };
+  visit(root);
+  return inventory.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+/** Re-anchor still-valid legacy evidence to its split scope; mismatched evidence needs --refresh. */
+function anchorLegacyEvidence(inventory: LegacyEvidence[]): { anchored: string[]; stale: string[] } {
+  const anchored: string[] = [];
+  const stale: string[] = [];
+  const digests = new Map<string, string | null | undefined>();
+  for (const item of inventory) {
+    const label = relative(PROJECT_ROOT, item.path).replace(/\\/g, "/");
+    if (!item.valid || item.record.quality_version) {
+      stale.push(`${label} (${item.instance})`);
+      continue;
+    }
+    const scope = evidenceScopeForInstance(PROJECT_ROOT, item.instance);
+    if (scope.label === "worktree") continue;
+    if (!digests.has(scope.label)) digests.set(scope.label, readSourceRevision(PROJECT_ROOT, scope).scope_digest);
+    const digest = digests.get(scope.label);
+    if (!digest) {
+      stale.push(`${label} (${item.instance})`);
+      continue;
+    }
+    const record = { ...item.record, source_revision: { ...(item.record.source_revision as Record<string, unknown>), scope: scope.label, scope_digest: digest, anchored_by: "orchestrate split", anchored_at: new Date().toISOString() } };
+    const temporary = `${item.path}.tmp-${process.pid}-${Date.now()}`;
+    try {
+      writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      renameSync(temporary, item.path);
+    } finally { if (existsSync(temporary)) unlinkSync(temporary); }
+    anchored.push(label);
+  }
+  return { anchored, stale };
+}
+
+// ---------------------------------------------------------------------------
+// Workflow lineage protection (4.13.0, MARS-98)
+// ---------------------------------------------------------------------------
+
+/** `--replace-lineage a,b` → ["a", "b"]; a bare flag is an error. */
+function lineageList(value: string | undefined, flag: string): string[] | { error: string } {
+  if (value === undefined) return [];
+  if (value === "true" || value.trim() === "") return { error: `--${flag} requires one or more comma-separated workflow IDs` };
+  return [...new Set(value.split(",").map((item) => item.trim()).filter(Boolean))];
+}
+
+function lineageError(lead: string, current: string | undefined, conflicts: LineageConflict[], extra: Record<string, unknown> = {}): Directive {
+  return {
+    kind: "error",
+    ...(current ? { workflow_id: current } : {}),
+    lineage_conflicts: conflicts,
+    ...extra,
+    message: `${lead}: ${conflicts.map(describeConflict).join("; ")}. ${lineageRemedy(current, conflicts)}`,
+  };
+}
+
+function auditLineageRetired(conflict: LineageConflict, trigger: string, reason?: string): void {
+  appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "LINEAGE_RETIRED", {
+    Lineage: conflict.workflow_id,
+    Trigger: trigger,
+    "Last Present Commit": conflict.last_present_commit || "-",
+    "Seen In": conflict.sightings.map((item) => item.source === "ref" ? `${item.ref}@${item.commit}` : `history@${item.commit}`).join(", "),
+    ...(reason ? { Reason: reason } : {}),
+  });
+}
+
+/**
+ * next / report on an existing workflow: another lineage committed in the history of
+ * HEAD (and neither archived nor retired) means a merge replaced or mixed workflows.
+ */
+function activeLineageError(): Directive | null {
+  const global = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!global) return null;
+  const conflicts = lineageConflicts(PROJECT_ROOT, { current: global.workflow_id, retired: global.retired_lineages });
+  if (conflicts.length === 0) return null;
+  return lineageError(`Workflow lineage conflict: the active workflow is ${global.workflow_id}, but git history also carries another workflow lineage that was neither archived nor retired`, global.workflow_id, conflicts);
+}
+
+/**
+ * Creating a lineage (next --scope on an empty aidlc/active, or split): any other
+ * active lineage in the history of HEAD or at a branch tip must be named in
+ * --replace-lineage. Returns the lineages to retire, or the refusal.
+ */
+function newLineageCheck(retired: readonly string[], replace: string[], exclude: string | undefined, action: string, retryCommand: string): { retire: string[]; conflicts: LineageConflict[] } | Directive {
+  if (replace.length > 0 && !gitHistoryAvailable(PROJECT_ROOT)) return { kind: "error", message: "--replace-lineage needs git history: no other workflow lineage can be found outside a git repository with commits." };
+  const conflicts = lineageConflicts(PROJECT_ROOT, { current: exclude, retired, refs: true });
+  const unknown = replace.filter((id) => !conflicts.some((item) => item.workflow_id === id));
+  if (unknown.length > 0) {
+    return { kind: "error", message: `--replace-lineage ${unknown.join(",")}: no such active workflow lineage in git (history of HEAD or branch tips)${conflicts.length ? `; found: ${conflicts.map((item) => item.workflow_id).join(", ")}` : ""}.` };
+  }
+  const open = conflicts.filter((item) => !replace.includes(item.workflow_id));
+  if (open.length > 0) {
+    return lineageError(
+      `${action} would create a second workflow lineage. git already tracks another active lineage (run git fetch first so remote branches are seen)`,
+      exclude,
+      open,
+      { retry_command: `${retryCommand} --replace-lineage ${open.map((item) => item.workflow_id).join(",")}` },
+    );
+  }
+  return { retire: conflicts.map((item) => item.workflow_id), conflicts };
+}
+
+function splitLineageCheck(legacy: WorkflowState, replace: string[]): { retire: string[]; conflicts: LineageConflict[] } | Directive {
+  if (!gitHistoryAvailable(PROJECT_ROOT)) return replace.length > 0 ? { kind: "error", message: "--replace-lineage needs git history: no other workflow lineage can be found outside a git repository with commits." } : { retire: [], conflicts: [] };
+  // The same workflow already split on another branch: a second split would create a second set of module workflows.
+  const own = lineageConflicts(PROJECT_ROOT, { retired: legacy.retired_lineages, refs: true }).find((item) => item.workflow_id === legacy.workflow_id);
+  const splitRefs = (own?.sightings || []).filter((item) => item.source === "ref" && item.split);
+  if (splitRefs.length > 0) {
+    return {
+      kind: "error",
+      workflow_id: legacy.workflow_id,
+      split_refs: splitRefs.map((item) => ({ ref: item.ref, commit: item.commit })),
+      message: `Workflow ${legacy.workflow_id} is already split on ${splitRefs.map((item) => `${item.ref} (${item.commit.slice(0, 12)})`).join(", ")}. Merge that branch (git merge <ref>) instead of splitting again: a second split creates a second, incompatible set of module workflows.`,
+    };
+  }
+  return newLineageCheck(legacy.retired_lineages || [], replace, legacy.workflow_id, `Splitting workflow ${legacy.workflow_id}`, `orchestrate split --from ${legacy.workflow_id}`);
+}
+
+/**
+ * Split a single-layout workflow into global, per-module and integration workflows without
+ * losing any recorded stage instance, history row, claim or selection.
+ */
+function performSplit(fromId: string, dryRun: boolean, trigger: string, replaceLineage: string[] = []): Directive {
+  if (isSplitLayout(PROJECT_ROOT)) return { kind: "error", message: "The workflow layout is already split; use next --module <module-id>." };
+  const legacy = loadState();
+  if (!legacy) return { kind: "error", message: "No active workflow to split." };
+  const requested = fromId.trim();
+  if (!(legacy.workflow_id === requested || (requested.length >= 8 && legacy.workflow_id.startsWith(requested)))) {
+    return { kind: "error", message: `--from ${requested} does not match the active workflow ${legacy.workflow_id}.` };
+  }
+  const lineage = splitLineageCheck(legacy, replaceLineage);
+  if ("kind" in lineage) return lineage;
+  if (!legacy.completed_stages.includes("module-division")) {
+    return { kind: "error", message: "Per-module workflows require a completed module-division stage and docs/aidlc/ideation/module-manifest.json." };
+  }
+  let modules: ModuleDescriptor[];
+  try {
+    modules = readModuleManifest(PROJECT_ROOT);
+  } catch (error) {
+    return { kind: "error", message: `Module manifest is unavailable: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const instances = expandStageInstances(loadGraph(), legacy);
+  const refs: WorkflowRef[] = [GLOBAL_WORKFLOW, ...modules.map((module) => moduleRef(module.module_id)), INTEGRATION_WORKFLOW];
+  const known = new Set(refs.map(workflowRefKey));
+  const tracked = [
+    ...legacy.completed_stage_instances,
+    ...legacy.skipped_stage_instances,
+    ...Object.keys(legacy.active_instances || {}),
+    ...legacy.history.map((entry) => entry.instance_id).filter((value): value is string => Boolean(value)),
+  ];
+  const orphans = [...new Set(tracked.filter((instance) => !known.has(workflowRefKey(ownerOfInstance(instance)))))];
+  if (orphans.length > 0) {
+    return { kind: "error", message: `Cannot split: ${orphans.join(", ")} belong to modules missing from module-manifest.json. Restore the manifest before splitting.` };
+  }
+  const currentOwner = legacy.current_stage_instance ? ownerOfInstance(legacy.current_stage_instance) : GLOBAL_WORKFLOW;
+  const planned = refs.map((ref) => {
+    const isCurrent = sameRef(ref, currentOwner);
+    const base: WorkflowState = ref.kind === "global"
+      ? { ...legacy, workflow_kind: "global", ...(lineage.retire.length > 0 ? { retired_lineages: [...new Set([...(legacy.retired_lineages || []), ...lineage.retire])] } : {}) }
+      : {
+        ...createInitialState(legacy.scope, ENGINE_VERSION, randomUUID(), legacy.selected_optional_stages, legacy.work_description),
+        workflow_kind: ref.kind,
+        ...(ref.kind === "module" ? { module_id: ref.module_id } : {}),
+        parent_workflow_id: legacy.workflow_id,
+        ...(legacy.quality_gates_version ? { quality_gates_version: legacy.quality_gates_version } : {}),
+        ...(legacy.document_slices_version ? { document_slices_version: legacy.document_slices_version } : {}),
+        depth: legacy.depth,
+        current_phase: legacy.current_phase,
+      };
+    const source: WorkflowState = isCurrent
+      ? legacy
+      : { ...legacy, current_stage: "", current_stage_instance: undefined, current_module: undefined, current_unit: undefined };
+    const state = extractOwnedState(source, base, ref);
+    const own = ownedInstances(instances, ref);
+    summarizeOwned(state, own);
+    const unresolved = own.filter((instance) => !state.completed_stage_instances.includes(instance.instance_id) && !state.skipped_stage_instances.includes(instance.instance_id));
+    state.status = legacy.status === "done" ? "done" : isCurrent ? legacy.status : own.length > 0 && unresolved.length === 0 ? "done" : "running";
+    return { ref, state, total: own.length, completed: state.completed_stage_instances.length, unresolved: unresolved.length };
+  });
+  const inventory = legacyEvidenceInventory();
+  const describe = planned.map((item) => `  [${workflowRefKey(item.ref)}] ${item.state.status} | current: ${item.state.current_stage_instance || "-"} | completed: ${item.completed}/${item.total} | pending: ${item.unresolved}`);
+  const staleCount = inventory.filter((item) => !item.valid).length;
+  if (dryRun) {
+    return {
+      kind: "print",
+      message: `🔎 Split plan for workflow ${legacy.workflow_id} (dry run, nothing written)\n${describe.join("\n")}\n` +
+        `  Evidence: ${inventory.length - staleCount} still valid (will be re-anchored), ${staleCount} already stale (refresh with evidence run --module <id> --refresh).`,
+      split_plan: planned.map((item) => ({ workflow: workflowRefKey(item.ref), status: item.state.status, current: item.state.current_stage_instance || null, completed: item.completed, total: item.total, pending: item.unresolved })),
+      stale_evidence: inventory.filter((item) => !item.valid).map((item) => relative(PROJECT_ROOT, item.path).replace(/\\/g, "/")),
+    };
+  }
+
+  const now = new Date().toISOString();
+  let evidence: ReturnType<typeof anchorLegacyEvidence>;
+  const moduleIds = modules.map((module) => module.module_id).join(", ");
+  try {
+    evidence = withWorkflowInitialization(PROJECT_ROOT, legacy, planned, commitSource => withRegistryPublication(PROJECT_ROOT, () => {
+      if (isSplitLayout(PROJECT_ROOT)) throw new Error("workflow was already split by another maintainer; reread the registry");
+      const currentInventory = legacyEvidenceInventory();
+      const evidenceBefore = new Map(currentInventory.map(item => [item.path, readFileSync(item.path)]));
+      try {
+        return withSliceWorkflowMigration(planned.filter(item => item.ref.kind === "module").map(item => ({
+          from: { root: PROJECT_ROOT, workflow_id: legacy.workflow_id, module_id: (item.ref as { module_id: string }).module_id, scope: legacy.scope, stage: "units-generation", ui_route: "not-selected" },
+          to: { root: PROJECT_ROOT, workflow_id: item.state.workflow_id, module_id: (item.ref as { module_id: string }).module_id, scope: item.state.scope, stage: "units-generation", ui_route: "not-selected" },
+        })), () => {
+        const integration = loadWorkflowState(PROJECT_ROOT, INTEGRATION_WORKFLOW)!;
+        saveRegistry(PROJECT_ROOT, {
+          version: "1",
+          global_workflow_id: legacy.workflow_id,
+          split_from_workflow_id: legacy.workflow_id,
+          split_at: now,
+          updated_at: now,
+          modules: planned.filter((item) => item.ref.kind === "module").map((item) => {
+            const persisted = loadWorkflowState(PROJECT_ROOT, item.ref)!;
+            return { module_id: (item.ref as { module_id: string }).module_id, workflow_id: persisted.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, item.ref), status: persisted.status, current_stage: persisted.current_stage_instance || "-", inception_done: false, construction_done: false, owner: "-" };
+          }),
+          integration: { workflow_id: integration.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, INTEGRATION_WORKFLOW), status: integration.status, current_stage: "-", barrier_ready: false, blocking: [] },
+          shared_contracts: [],
+          cross_module_requires: [],
+        });
+        const evidence = anchorLegacyEvidence(currentInventory);
+        appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "WORKFLOW_SPLIT", {
+          Trigger: trigger,
+          "Split From": legacy.workflow_id,
+          Modules: moduleIds,
+          "Evidence Anchored": String(evidence.anchored.length),
+          "Evidence Stale": String(evidence.stale.length),
+          ...(lineage.retire.length > 0 ? { "Replaced Lineages": lineage.retire.join(", ") } : {}),
+        });
+        for (const conflict of lineage.conflicts) auditLineageRetired(conflict, `orchestrate split --replace-lineage`);
+        for (const item of planned) {
+          if (item.ref.kind === "global") continue;
+          appendAuditEvent(PROJECT_ROOT, item.ref, "WORKFLOW_CREATED", {
+            "Parent Workflow ID": legacy.workflow_id,
+            Trigger: trigger,
+            "Migrated Instances": String(item.state.completed_stage_instances.length + item.state.skipped_stage_instances.length),
+          });
+        }
+        commitSource();
+        return evidence;
+        });
+      } catch (error) {
+        for (const [path, bytes] of evidenceBefore) writeFileSync(path, bytes);
+        throw error;
+      }
+    }));
+  } catch (error) {
+    return { kind: "error", message: `Split aborted and rolled back: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const gitWarnings = provisionGitStrategy();
+  return {
+    kind: "print",
+    message: `✅ Workflow ${legacy.workflow_id} split into per-module workflows (registry: aidlc/active/registry.md)\n${describe.join("\n")}\n` +
+      `  Evidence: ${evidence.anchored.length} re-anchored to their scope, ${evidence.stale.length} stale` +
+      (evidence.stale.length ? ` — refresh completed stages with evidence run --stage <slug> --module <id> --refresh, then report --stage <slug> --module <id> --result completed.` : ".") +
+      "\n  Preview, inspect and explicitly bind each target module/integration workflow before writing; the source binding does not grant child ownership." +
+      (gitWarnings.length ? `\n${gitWarnings.map((line) => `  ${line}`).join("\n")}` : ""),
+    split: {
+      registry: "aidlc/active/registry.md",
+      workflows: planned.map((item) => ({ workflow: workflowRefKey(item.ref), state_path: relativeStatePath(PROJECT_ROOT, item.ref), status: item.state.status })),
+      evidence,
+    },
+  };
+}
+
+function rmFile(path: string): void {
+  const stat = lstatSync(path);
+  if (stat.isFile() || stat.isSymbolicLink()) unlinkSync(path);
+}
+
+// ---------------------------------------------------------------------------
+// next — compute the next directive without mutating state
+// ---------------------------------------------------------------------------
+
+async function handleNext(args: string[]): Promise<Directive> {
+  // MARS-277: one next re-validates many evidence records sharing a digest scope;
+  // the admission passes run no project commands, so the digests are memoized here.
+  // The same wrapper bounds revision-conflict retries across the whole chain.
+  const topLevel = !nextConflictInFlight;
+  if (topLevel) { nextConflictRetries = 0; nextConflictInFlight = true; }
+  try {
+    return await withRevisionMemoization(async () => {
+      const result = await handleNextInner(args);
+      return topLevel ? withRepairGuidance(result, args.includes("--preview") || args.includes("--status")) : result;
+    });
+  } finally {
+    if (topLevel) nextConflictInFlight = false;
+  }
+}
+
+function withRepairGuidance(result: Directive, readOnly = false): Directive {
+  const binding = sessionBinding();
+  // A run-stage response can revisit the same unfinished stage after report failed;
+  // it proves admission, not completion, and must not erase that blocker sequence.
+  if (result.kind !== "error") return result;
+  const guidance = repairGuidance(PROJECT_ROOT, binding ? sessionRefBinding(binding) : GLOBAL_WORKFLOW, String(result.message || "Unknown gate failure"), readOnly);
+  return { ...result, repair_guidance: guidance, message: `${result.message || "Gate failed"}\n\nNext action (${guidance.action}; ${guidance.category}): ${guidance.next_step}` };
+}
+
+let nextConflictRetries = 0;
+let nextConflictInFlight = false;
+
+/** Bounded revision-conflict retry for `next` (MARS-277); over the limit it explains instead of recursing. */
+function nextConflictRetry(args: string[]): Promise<Directive> {
+  nextConflictRetries++;
+  if (nextConflictRetries > CONFLICT_RETRY_LIMIT) {
+    return Promise.resolve({
+      kind: "error",
+      message: `next abandoned after ${CONFLICT_RETRY_LIMIT} revision conflict retries; another session keeps writing the workflow state — reread it and rerun next`,
+    });
+  }
+  return handleNext(args);
+}
+
+async function handleNextInner(args: string[]): Promise<Directive> {
+  const graph = loadGraph();
+  const flags = parseFlags(args);
+  const invalidFlag = unsupportedFlag(flags, NEXT_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported AWS-style workflow option: --${invalidFlag}` };
+
+  if ("preview" in flags) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    const binding = sessionBinding();
+    let ref: WorkflowRef = loaded.split
+      ? (binding ? ownerOfInstance(binding.stage_instance) : flags.module ? {kind: "module", module_id: flags.module} : GLOBAL_WORKFLOW)
+      : GLOBAL_WORKFLOW;
+    if (loaded.split && !binding && !flags.module) {
+      const globalView = mergeWorkflowView(loaded.parts, GLOBAL_WORKFLOW);
+      const globalPending = expandStageInstances(graph, globalView).some(instance => sameRef(ownerOfInstance(instance.instance_id), GLOBAL_WORKFLOW) && !isInstanceResolved(globalView, instance.instance_id));
+      const running = [...loaded.parts.values()].filter(part => part.ref.kind === "module" && part.state.status === "running");
+      if (!globalPending) {
+        if (running.length === 1) ref = running[0].ref;
+        else if ([...loaded.parts.values()].filter(part => part.ref.kind === "module").every(part => part.state.status === "done")) ref = INTEGRATION_WORKFLOW;
+      }
+    }
+    if (loaded.split && binding && flags.module && (ref.kind !== "module" || ref.module_id !== flags.module)) {
+      return { kind: "error", message: "requested module conflicts with session binding" };
+    }
+    const part = loaded.parts.get(workflowRefKey(ref));
+    if (!part) return {kind: "error", message: "workflow does not exist; initialize it first"};
+    const view = structuredClone(loaded.split ? mergeWorkflowView(loaded.parts, ref) : part.state);
+    const all = expandStageInstances(graph, view);
+    // A bound session previews only its own chain (MARS-277): its owning workflow,
+    // and for a unit binding only that unit's instances — the same candidate filter
+    // advance enforces — so it is never routed into another unit or session's work.
+    const boundUnit = binding?.stage_instance.split("@unit:")[1];
+    const candidates = all.filter(instance => (!loaded.split || sameRef(ownerOfInstance(instance.instance_id), ref))
+      && (!binding || sameRef(ownerOfInstance(instance.instance_id), ownerOfInstance(binding.stage_instance)))
+      && (!boundUnit || instance.unit_id === boundUnit)
+      && (!flags.module || instance.module_id === flags.module) && (!flags.unit || instance.unit_id === flags.unit));
+    view.active_instances = {};
+    // Match actual admission order, including new upstream work after risk escalation.
+    const search = findNextInstance(candidates, view, all);
+    const target = search.instance || ("blocked" in search ? search.blocked?.instance : undefined);
+    return {kind: "print", preview: true, workflow_id: part.state.workflow_id, workflow: workflowRefKey(ref), stage_instance: target?.instance_id || null, expected: claimToken(target ? part.state.active_instances[target.instance_id] : undefined), message: "Read-only routing preview; bind the returned exact instance before next. Dependencies and report gates still apply."};
+  }
+  const claimRequested = "claim" in flags;
+  if (flags["provider-approval"] === "true") return { kind: "error", message: "--provider-approval requires a non-empty approval reference" };
+  if (claimRequested && flags.claim !== "true") return { kind: "error", message: "--claim is a boolean flag and does not accept a value" };
+  if (claimRequested && !flags.module) return { kind: "error", message: "--claim requires --module <module-id>" };
+
+  // PRD is a user-selected workflow option, never a default Inception gate.
+  const withPrd = "with-prd" in flags;
+  if (withPrd && flags["with-prd"] !== "true") {
+    return { kind: "error", message: "--with-prd is a boolean flag and does not accept a value" };
+  }
+
+  // Check for --scope flag (initializes a new workflow)
+  const scopeFlag = flags.scope;
+  if (scopeFlag && !VALID_SCOPES.has(scopeFlag)) {
+    return {
+      kind: "error",
+      message: `Unknown scope "${scopeFlag}". Valid scopes: ${[...VALID_SCOPES].join(", ")}`,
+    };
+  }
+
+  if (withPrd && (!scopeFlag || !PRD_ELIGIBLE_SCOPES.has(scopeFlag))) {
+    return {
+      kind: "error",
+      message: "--with-prd is only valid when initializing feature, enterprise, mvp, or classic scope",
+    };
+  }
+
+  // Check for --status flag
+  if ("status" in flags && isSplitLayout(PROJECT_ROOT)) return splitStatusDirective(graph, flags.module);
+  if ("status" in flags) {
+    const state = loadState();
+    if (!state) {
+      return { kind: "print", message: "No active workflow. Start with: aidlc-orchestrate next --scope <scope> \"<description>\"" };
+    }
+    const instances = expandStageInstances(graph, state);
+    const remaining = instances.filter((instance) => !isInstanceResolved(state, instance.instance_id));
+    const completedCount = instances.filter((instance) => completedInstanceIds(state).includes(instance.instance_id)).length;
+    const skippedCount = instances.filter((instance) => skippedInstanceIds(state).includes(instance.instance_id)).length;
+    return {
+      kind: "print",
+      message: `📊 Workflow Status\n` +
+        `  Scope: ${state.scope} | Phase: ${state.current_phase} | Status: ${state.status}\n` +
+        `  PRD option: ${selectedOptionalStages(state).includes("prd-generation") ? "selected" : "not selected"}\n` +
+        `  Current stage: ${state.current_stage_instance || state.current_stage || "(none)"}\n` +
+        `  Active claims: ${Object.values(state.active_instances || {}).map((claim) => `${claim.stage_instance}=${claim.owner}`).join(", ") || "(none)"}\n` +
+        `  Context: module=${state.current_module || "-"}, unit=${state.current_unit || "-"}\n` +
+        `  Unit contexts: ${Object.entries(state.unit_contexts || {}).map(([key, context]) => `${key}=${context.stage_instance}`).join(", ") || "(none)"}\n` +
+        `  Completed: ${completedCount}/${instances.length} stage instances\n` +
+        `  Skipped: ${skippedCount}\n` +
+        `  Remaining: ${remaining.length} (${remaining.map((instance) => instance.instance_id).join(", ")})`,
+    };
+  }
+
+  // An existing workflow is never replaced implicitly: --scope/--work only initialize.
+  // 4.13.0: --module <id> --work <text> describes a module workflow when it is first created.
+  const initializing = Boolean(scopeFlag || (flags.work && !flags.module));
+  if (flags.work === "true") return { kind: "error", message: "--work requires a description" };
+  if (initializing) {
+    const existing = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+    if (existing) {
+      const steps = existing.status === "running"
+        ? "park it with 'orchestrate park', then archive it with 'orchestrate archive'"
+        : "archive it with 'orchestrate archive'";
+      return {
+        kind: "error",
+        workflow_id: existing.workflow_id,
+        status: existing.status,
+        message: `Workflow ${existing.workflow_id} already exists (status: ${existing.status}); --scope/--work only initialize a new workflow. To start new work, ${steps}; to continue it, run 'orchestrate next' without --scope/--work.`,
+      };
+    }
+  }
+
+  // Split per-module layout (4.3.0): route to the owning workflow. A legacy multi-module
+  // workflow is split automatically the first time `next --module <id>` is used without --claim.
+  if ("replace-lineage" in flags && !initializing) {
+    return { kind: "error", message: "--replace-lineage is only valid when initializing a new workflow with next --scope/--work, or on orchestrate split." };
+  }
+  if (!initializing) {
+    const conflict = activeLineageError();
+    if (conflict) return conflict;
+  }
+  if (!isSplitLayout(PROJECT_ROOT) && flags.module && flags.work && !scopeFlag) {
+    return { kind: "error", message: "--module <id> --work <text> only describes a module workflow created after the split (a module added to module-manifest.json later); split creates the workflows of the manifest modules with the global work description." };
+  }
+  if (!isSplitLayout(PROJECT_ROOT) && flags.module && !claimRequested) {
+    const legacy = loadState();
+    if (!legacy) {
+      return { kind: "error", message: "No active workflow. Start with next --scope <scope> --work <description>; per-module workflows start after module-division completes." };
+    }
+    const split = performSplit(legacy.workflow_id, false, "next --module");
+    if (split.kind === "error") return split;
+    return { ...split, ...moduleBindingRequired(flags.module, String(split.message)) };
+  }
+  if (isSplitLayout(PROJECT_ROOT)) {
+    if (withPrd) return { kind: "error", message: "--with-prd can only be selected when initializing a new workflow" };
+    // MARS-117: a clone that first runs next in an existing split layout registers the
+    // registry merge driver in its own .git/config (idempotent, best-effort).
+    return splitNext(args, flags, graph);
+  }
+
+  // Load or create state
+  let state = loadState();
+
+  if (state) {
+    // Do not mutate sibling claims during routing.
+  }
+
+  if (state && withPrd) {
+    return { kind: "error", message: "--with-prd can only be selected when initializing a new workflow" };
+  }
+
+  if (!state) {
+    if (!scopeFlag) {
+      return {
+        kind: "ask",
+        question: "No active AWS-style lightweight workflow found. Which scope should this work use?",
+        options: ["feature", "enterprise", "mvp", "classic", "express", "workshop", "bugfix", "refactor"],
+        ask_type: "scope-selection",
+      } as unknown as Directive;
+    }
+    const workDescription = flags.work || flags.text;
+    if (!workDescription) {
+      return {
+        kind: "ask",
+        question: "Describe the work this new lightweight workflow should perform.",
+        ask_type: "work-description",
+      } as unknown as Directive;
+    }
+    const selectedOptionalStages = withPrd ? ["prd-generation"] : [];
+    // 4.13.0 (MARS-98): never start a second workflow lineage next to one git already tracks.
+    const replace = lineageList(flags["replace-lineage"], "replace-lineage");
+    if ("error" in replace) return { kind: "error", message: replace.error };
+    const lineage = newLineageCheck([], replace, undefined, "Starting a new workflow", `orchestrate next --scope ${scopeFlag} --work "<work>"`);
+    if ("kind" in lineage) return lineage;
+    state = createInitialState(scopeFlag, ENGINE_VERSION, undefined, selectedOptionalStages, workDescription);
+    if (["feature", "enterprise", "mvp", "classic"].includes(scopeFlag)) state.quality_gates_version = "1";
+    if (["feature", "enterprise", "mvp", "classic"].includes(scopeFlag)) state.document_slices_version = "1";
+    initializeGlobalExecutionProfile(state);
+    if (lineage.retire.length > 0) state.retired_lineages = lineage.retire;
+    // Only a new global/single workflow records its baseline; createInitialState stays
+    // baseline-free so module/integration workflows and pre-4.6 states never get one.
+    state.baseline_commit = currentHeadCommit(PROJECT_ROOT);
+    state.baseline_source = "created";
+    // 4.9.0: declared nested repositories record their HEAD too; a dirty or commit-less
+    // nested repository refuses the whole creation before anything is written.
+    let nestedRepos: string[] = [];
+    try {
+      nestedRepos = nestedSourceRepos(PROJECT_ROOT);
+    } catch (error) {
+      return { kind: "error", message: `🚫 Cannot start the workflow: ${error instanceof Error ? error.message : String(error)}. Nothing was written.` };
+    }
+    if (nestedRepos.length > 0) {
+      if (state.baseline_commit === BASELINE_UNAVAILABLE) {
+        return { kind: "error", message: `🚫 Cannot start the workflow: nested source repositories (${nestedRepos.map((key) => `${key}/`).join(", ")}) need the workflow repository to have a HEAD commit. Nothing was written.` };
+      }
+      const problems: string[] = [];
+      const repos: Record<string, string> = {};
+      for (const key of nestedRepos) {
+        const head = nestedHead(PROJECT_ROOT, key);
+        if (!head) {
+          problems.push(`${key}/ has no commit yet`);
+          continue;
+        }
+        const dirty = nestedDirty(PROJECT_ROOT, key);
+        if (dirty !== false) problems.push(`${key}/ ${dirty === null ? "status cannot be read" : "has uncommitted or untracked changes"}`);
+        repos[key] = head;
+      }
+      if (problems.length > 0) {
+        return { kind: "error", message: `🚫 Cannot start the workflow: the baseline records the HEAD of every nested source repository, but ${problems.join("; ")}. Commit or stash the changes in the nested repositories first, then run next --scope again. Nothing was written.` };
+      }
+      state.baseline_repos = repos;
+    }
+    saveState(state);
+    try {
+      appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "BASELINE_COMMIT_RECORDED", {
+        "Workflow ID": state.workflow_id,
+        Commit: state.baseline_commit,
+        Source: "created",
+        ...(state.baseline_repos ? { Repos: renderBaselineRepos(state.baseline_repos) } : {}),
+      });
+      for (const conflict of lineage.conflicts) auditLineageRetired(conflict, "orchestrate next --scope --replace-lineage");
+    } catch (error) {
+      return { kind: "error", message: `Workflow ${state.workflow_id} was created with baseline ${state.baseline_commit}, but the BASELINE_COMMIT_RECORDED audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。` };
+    }
+    const gitWarnings = provisionGitStrategy();
+    return {
+      kind: "print",
+      message: `✅ AWS-style lightweight workflow initialized for: ${workDescription}\n` +
+        `  PRD option: ${withPrd ? "selected" : "not selected"}\n` +
+        `  Baseline commit: ${state.baseline_commit} (created)\n` +
+        (state.baseline_repos ? `  Baseline repos: ${renderBaselineRepos(state.baseline_repos)}\n` : "") +
+        `  Executable stages: ${getExecutableStages(graph, scopeFlag, selectedOptionalStages, state.execution_profile).length}/${graph.stage_count}\n` +
+        `  Run 'next' again to get the first stage directive.` +
+        (gitWarnings.length ? `\n${gitWarnings.map((line) => `  ${line}`).join("\n")}` : ""),
+    };
+  }
+
+  const legacyState = state;
+  return advance(graph, {
+    state: legacyState,
+    candidate: (instance) => sameRef(ownerOfInstance(instance.instance_id), ownerOfInstance(sessionBinding()!.stage_instance))
+      && (!sessionBinding()!.stage_instance.includes("@unit:") || instance.unit_id === sessionBinding()!.stage_instance.split("@unit:")[1]),
+    flags,
+    commit: (value) => saveState(value),
+    retry: () => nextConflictRetry(args),
+    label: "Workflow",
+    finishedMessage: (count) => `🎉 All ${count} stage instances resolved. Workflow finished.`,
+  });
+}
+
+export interface AdvanceOptions {
+  /** Legacy: the workflow state itself. Split: the merged view whose owner is being advanced. */
+  state: WorkflowState;
+  flags: Record<string, string>;
+  commit: (state: WorkflowState) => void;
+  retry: () => Promise<Directive>;
+  label: string;
+  finishedMessage: (count: number) => string;
+  /** Split layout: only the owner's instances are candidates; dependencies still see every instance. */
+  candidate?: (instance: StageInstance) => boolean;
+  extras?: Record<string, unknown>;
+  /** False for split-layout readiness probes: compute the same plan without writing it. */
+  persistProviderPlans?: boolean;
+  /** Internal readiness inspection: no binding, provider publication, claim or commit. */
+  readOnlyProbe?: boolean;
+  reportCommand?: (instance: StageInstance) => string;
+}
+
+/**
+ * Advance one workflow: parked/resume handling, instance selection, admission gates
+ * (requires, consumes, cross-module dependencies, upstream sensor re-check), current
+ * context and optional claim. Shared by the single layout and every split workflow.
+ */
+export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<Directive> {
+  graph = normalizeExecutionGraph(graph);
+  const { flags } = opts;
+  const originalState = opts.state;
+  // Advance is transactional: all fallible planning/admission work operates on
+  // this clone. The caller-visible state changes only after every gate passes.
+  const state = structuredClone(originalState);
+  const planningState = state;
+  const wasParked = originalState.status === "parked";
+  const isResume = "resume" in flags;
+  const claimRequested = "claim" in flags;
+  const extras = opts.extras || {};
+  const binding = sessionBinding();
+  if (!binding && !opts.readOnlyProbe) return { kind: "error", message: "Explicit session binding required before next writes; inspect/bind the exact stage instance.", ...extras };
+  if (binding) assertSessionClaim(PROJECT_ROOT, state, binding.stage_instance, binding);
+
+  // Parked workflow — resume or report parked
+  if (state.status === "parked") {
+    if (!isResume) {
+      return {
+        kind: "parked",
+        stage: state.current_stage,
+        message: `${opts.label} is parked at stage "${state.current_stage}". Pass --resume to continue.`,
+        ...extras,
+      };
+    }
+    // Resume is provisional until planning and every admission gate succeeds.
+    state.status = "running";
+  }
+
+  // Done workflow
+  if (state.status === "done") {
+    return { kind: "done", message: `${opts.label} is already complete.`, ...extras };
+  }
+
+  // Expand the static graph into the currently known execution instances.
+  const instances = expandStageInstances(graph, state);
+  const candidates = (opts.candidate ? instances.filter(opts.candidate) : instances).filter(instance => {
+    const unit = binding?.stage_instance.split("@unit:")[1];
+    return !unit || (instance.unit_id === unit && sameRef(ownerOfInstance(instance.instance_id), ownerOfInstance(binding!.stage_instance)));
+  });
+  // Instance search may record condition skips on the transactional clone.
+  const search = claimRequested
+    ? findClaimableModuleInstance(candidates, planningState, flags.module as string, instances)
+    : findNextInstance(candidates, planningState, instances);
+  const { instance: nextInstance, blocked, conditionError, skippedByCondition } = search;
+
+  const applyPlanningState = (): void => {
+    if (opts.readOnlyProbe) return;
+    const target = originalState as unknown as Record<string, unknown>;
+    const source = planningState as unknown as Record<string, unknown>;
+    for (const key of Object.keys(target)) if (!(key in source)) delete target[key];
+    Object.assign(target, source);
+  };
+
+  if (conditionError) {
+    // Preserve the legacy auto-skip persistence for a running workflow, but
+    // never turn a failed parked resume into a visible state transition.
+    if (!wasParked && skippedByCondition && skippedByCondition.length > 0) {
+      applyPlanningState();
+      if (!opts.readOnlyProbe) opts.commit(originalState);
+    }
+    return {
+      kind: "error",
+      message: `🚫 Unknown stage condition "${conditionError.condition}" on "${conditionError.instance.instance_id}". Register the condition in the engine before continuing.`,
+      ...extras,
+    };
+  }
+
+  if (blocked) {
+    if (!wasParked && skippedByCondition && skippedByCondition.length > 0) {
+      applyPlanningState();
+      if (!opts.readOnlyProbe) opts.commit(originalState);
+    }
+    return {
+      kind: "error",
+      message: `🚫 Stage instance "${blocked.instance.instance_id}" (${blocked.instance.stage.name}) is blocked.\n` +
+        `  Unsatisfied requires: ${blocked.unsatisfied.join(", ")}\n` +
+        `  These stage instances must be completed first.` +
+        (skippedByCondition && skippedByCondition.length > 0
+          ? `\n  ⏭️ Auto-skipped by condition: ${skippedByCondition.map((item) => item.instance.instance_id).join(", ")}`
+          : ""),
+      ...extras,
+    };
+  }
+
+  if (!nextInstance) {
+    if (claimRequested) {
+      if (!wasParked && skippedByCondition && skippedByCondition.length > 0) {
+        applyPlanningState();
+        if (!opts.readOnlyProbe) opts.commit(originalState);
+      }
+      return { kind: "error", message: `Module "${flags.module}" has no unclaimed ready stage instance; inspect dependency waiting and active claims with runtime summary.`, ...extras };
+    }
+    reconcileStageSummaries(state, instances);
+    state.status = "done";
+    clearActiveContext(state);
+    delete state.unit_contexts;
+    applyPlanningState();
+    if (!opts.readOnlyProbe) opts.commit(originalState);
+    return {
+      kind: "done",
+      message: opts.finishedMessage(candidates.length),
+      ...extras,
+    };
+  }
+
+  if (claimRequested && nextInstance && nextInstance.axis !== "module") {
+    return { kind: "error", message: `--claim can only claim a module stage instance; ${nextInstance.instance_id} is ${nextInstance.axis}-axis`, ...extras };
+  }
+
+  const effectiveNextInstance = runtimeInstance(nextInstance, planningState);
+  if (effectiveNextInstance.stage.slug === "code-generation" && effectiveNextInstance.module_id && effectiveNextInstance.unit_id) {
+    const redPath = join(PROJECT_ROOT, evidenceRelativePath("tdd", "red-test-evidence", "unit", { module_id: effectiveNextInstance.module_id, unit_id: effectiveNextInstance.unit_id }));
+    try {
+      const red = JSON.parse(readFileSync(redPath, "utf8"));
+      extras.red_evidence = { mode: red.evidence_mode || "original", ...(red.evidence_mode === "historical_replay" ? { limitation: REPLAY_LIMITATION, execution: red.historical_replay?.execution, source: red.historical_replay?.source?.commit } : {}) };
+    } catch { /* Missing or invalid evidence is reported by the normal admission gate. */ }
+  }
+  if (!opts.readOnlyProbe && effectiveNextInstance.instance_id !== binding!.stage_instance) return { kind: "error", message: `Bind the exact next instance ${effectiveNextInstance.instance_id} before proceeding.`, ...extras };
+  if (flags.unit && flags.unit !== effectiveNextInstance.unit_id) return { kind: "error", message: `Unit mismatch: --unit ${flags.unit} does not match the bound instance ${effectiveNextInstance.instance_id}.`, ...extras };
+  const nextStage = effectiveNextInstance.stage;
+  // Construct this fallible hand-off plan before changing current context,
+  // claims, or committing state. A malformed graph can therefore never
+  // advance a workflow while omitting a selected dependency rule.
+  let ruleLoadPlan: RuleLoadPlan;
+  let evidenceReusePlan: EvidenceReusePlan;
+  let businessDocumentLoadPlan: BusinessDocumentLoadPlan | undefined;
+  let isolatedEvidenceFailure: string | undefined;
+  const unavailableEvidence: string[] = [];
+  const isolationAllowed = Boolean(effectiveNextInstance.unit_id && effectiveNextInstance.module_id
+    && ["functional-design", "tdd", "code-generation"].includes(nextStage.slug)
+    && completedInstanceIds(planningState).includes(`units-generation@module:${effectiveNextInstance.module_id}`));
+  const recoverableEvidenceFailure = (message: string): boolean => {
+    const text = message.replace(/^DEVELOPMENT_ENTRY_NOT_READY: /, "");
+    if (text.startsWith("Evidence not found:")) return true;
+    if (!text.startsWith("Evidence rejected at ")) return false;
+    const marker = text.indexOf(".json: ");
+    if (marker < 0) return false;
+    const errors = text.slice(marker + ".json: ".length).split("; ");
+    // A source or checker version mismatch is not a passed gate. It may
+    // permit isolated work, but any semantic failure still stops admission.
+    return errors.length > 0 && errors.every(error =>
+      /^source_revision\.scope_digest no longer matches the /.test(error)
+      || /^refresh this evidence \('aidlc evidence run --stage [^']+'\) to re-anchor it to the .+ scope$/.test(error)
+      || error === "semantic checker command no longer matches the controlled producer"
+      || error === "semantic checker implementation is missing or changed; refresh controlled evidence");
+  };
+  try {
+    if (effectiveNextInstance.unit_id && (["feature", "enterprise", "mvp", "classic"].includes(planningState.scope) || sliceAdoption(documentSliceContext(planningState, effectiveNextInstance)).enabled)) {
+      const context = documentSliceContext(planningState, effectiveNextInstance);
+      try {
+        businessDocumentLoadPlan = buildBusinessDocumentLoadPlan(context, effectiveNextInstance.unit_id);
+        if (businessDocumentLoadPlan.mode === "derived") {
+          const source = instances.find(i => i.stage.slug === "units-generation" && i.module_id === effectiveNextInstance.module_id);
+          if (!source) throw new Error("SLICE_EVIDENCE_MISSING: units-generation source");
+          const failure = validateEvidence(source.stage, SLICE_SENSOR, source, evidence => sliceEvidenceErrors(context, evidence), { tolerateRevisionDrift: true });
+          if (failure) throw new Error(failure.message);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!["functional-design", "tdd", "code-generation"].includes(nextStage.slug)
+          || !completedInstanceIds(planningState).includes(`units-generation@module:${effectiveNextInstance.module_id}`)
+          || !/SLICE_MANIFEST_STALE|SLICE_PROJECTION_DRIFT|SLICE_EVIDENCE_MISSING|Evidence (?:not found|rejected)|Invalid evidence/.test(message)) throw error;
+        // Never infer authority from stale slices. Validate the full canonical
+        // sources and approved mapping before exposing a read-only isolation plan.
+        businessDocumentLoadPlan = buildCanonicalIsolationPlan(context, effectiveNextInstance.unit_id);
+        isolatedEvidenceFailure = message;
+        unavailableEvidence.push(message);
+      }
+    }
+    ruleLoadPlan = buildRuleLoadPlan(graph, {
+      scope: planningState.scope,
+      selectedOptionalStages: selectedOptionalStages(planningState),
+      executionProfile: planningState.execution_profile,
+      targetStageSlug: nextStage.slug,
+    });
+    evidenceReusePlan = buildEvidenceReusePlan(graph, {
+      projectRoot: PROJECT_ROOT,
+      scope: planningState.scope,
+      selectedOptionalStages: selectedOptionalStages(planningState),
+      executionProfile: planningState.execution_profile,
+      evidenceScope: evidenceScopeForInstance(PROJECT_ROOT, effectiveNextInstance.instance_id).label,
+      target: {
+        stage_slug: nextStage.slug,
+        instance_id: effectiveNextInstance.instance_id,
+        axis: effectiveNextInstance.axis,
+        ...(effectiveNextInstance.module_id ? { module_id: effectiveNextInstance.module_id } : {}),
+        ...(effectiveNextInstance.unit_id ? { unit_id: effectiveNextInstance.unit_id } : {}),
+      },
+      expectedSourceRevision: evidenceSourceRevision(PROJECT_ROOT, effectiveNextInstance.instance_id),
+      sensorFailures: await checkSensors(effectiveNextInstance, planningState, { onlySensors: ["red-test-evidence", "green-test-evidence", "baseline-test-evidence", "build-test-evidence", "review-evidence"] }),
+      now: new Date().toISOString(),
+      ruleLoadPlan,
+    });
+  } catch (error) {
+    return {
+      kind: "error",
+      stage: nextStage.slug,
+      stage_instance: effectiveNextInstance.instance_id,
+      message: `🚫 Rule-load plan blocked for "${effectiveNextInstance.instance_id}": ${error instanceof Error ? error.message : String(error)}`,
+      ...extras,
+    };
+  }
+  // Keep all later admission work on the clone too. No speculative condition
+  // skip, resume, claim, or current-context write reaches originalState yet.
+  const consumeFailures = checkConsumes(effectiveNextInstance, state, graph, instances).filter(failure => {
+    if (!isolationAllowed || !failure.endsWith(": missing or non-substantive artifact")) return true;
+    const label = failure.slice(0, -": missing or non-substantive artifact".length).replace(/\\/g, "/");
+    if (!isEvidenceArtifactLabel(label) || existsSync(join(PROJECT_ROOT, label))) return true;
+    const stageSlug = /^\.aidlc\/evidence\/([^/]+)\//.exec(label)?.[1];
+    const producer = stageSlug && instances.find(item => item.stage.slug === stageSlug && item.module_id === effectiveNextInstance.module_id && (!item.unit_id || item.unit_id === effectiveNextInstance.unit_id));
+    if (!producer || !completedInstanceIds(state).includes(producer.instance_id)) return true;
+    unavailableEvidence.push(failure);
+    return false;
+  });
+  if (consumeFailures.length > 0) {
+    return {
+      kind: "error",
+      message: `🚫 Stage instance "${nextInstance.instance_id}" is missing canonical consumed artifacts:\n${consumeFailures.map((failure) => `  ❌ ${failure}`).join("\n")}`,
+      ...extras,
+    };
+  }
+
+  // 缺口A:跨 module 契约依赖门禁。消费方阶段推进前,provider module 的 provider_stage 必须已完成。
+  const crossModuleFailures = checkCrossModuleDependencies(effectiveNextInstance, state);
+  if (crossModuleFailures.length > 0) {
+    return {
+      kind: "error",
+      message: `🚫 Stage instance "${nextInstance.instance_id}" 跨 module 依赖未就绪:\n${crossModuleFailures.map((failure) => `  ❌ ${failure}`).join("\n")}`,
+      ...extras,
+    };
+  }
+
+  // Harness-independent 准出门禁底座 (Phase A):在发出下一 directive 前,重新校验本阶段所依赖的
+  // 上游 completed 阶段的 sensor(准出门禁)是否仍然满足。这让"想拿下一步指令 → 上游门禁必须现在仍绿"
+  // 成为程序化事实,不依赖 host 是否提供 Stop hook —— kiro-crew 等无自动 hook 的 harness 也据此硬拦。
+  // 只复验已 resolved(completed,非 skipped)的直接 requires 依赖;首个阶段无上游依赖时自然放行。
+  {
+    const upstreamDeps = new Set<StageInstance>();
+    for (const dependency of effectiveNextInstance.stage.requires || []) {
+      for (const dep of dependencyInstances(effectiveNextInstance, dependency, instances)) {
+        if (completedInstanceIds(state).includes(dep.instance_id)) upstreamDeps.add(dep);
+      }
+    }
+    const upstreamGateFailures: { instance: string; message: string }[] = [];
+    for (const dep of upstreamDeps) {
+      const historicalTdd = dep.stage.slug === "tdd" && effectiveNextInstance.stage.slug === "code-generation"
+        && dep.module_id === effectiveNextInstance.module_id && dep.unit_id === effectiveNextInstance.unit_id;
+      const failures = historicalTdd ? await checkHistoricalTddSensors(dep, state, { requireCurrentBaselineEpoch: true }) : await checkSensors(dep, state);
+      for (const failure of failures) {
+        if (isolatedEvidenceFailure && failure.sensor === SLICE_SENSOR && dep.stage.slug === "units-generation" && dep.module_id === effectiveNextInstance.module_id) continue;
+        if (isolationAllowed && recoverableEvidenceFailure(failure.message)) {
+          unavailableEvidence.push(`${dep.instance_id}: ${failure.message}`);
+          continue;
+        }
+        // 已 completed 的上游阶段在完成时其门禁已为绿;此处复验只为拦截"事后被改坏/覆盖不再满足"的实质失败。
+        // 纯时间性证据过期(>24h resume 间隔)不是回归,不应阻断多日跨度的正常续作 —— 过滤掉纯 staleness 失败。
+        if (/evidence is stale \(\d+h old/i.test(failure.message) && !QUALITY_SENSORS.has(failure.sensor)) continue;
+        upstreamGateFailures.push({ instance: dep.instance_id, message: `[${failure.sensor}] ${failure.message}` });
+      }
+    }
+    if (upstreamGateFailures.length > 0) {
+      return {
+        kind: "error",
+        message: `🚫 无法推进到 "${nextInstance.instance_id}" — 上游阶段的准出门禁已不满足,必须先修复:\n` +
+          upstreamGateFailures.map((f) => `  ❌ ${f.instance}: ${f.message}`).join("\n") +
+          `\n\n修复上游产物/证据后重新 report 使门禁转绿,再执行 next。` +
+          (opts.reportCommand
+            ? `已完成阶段可先用 evidence run --stage <slug> --module <id> --refresh 重新产证,再以 report --stage <slug> --module <id> --result completed 复验。`
+            : ""),
+        ...extras,
+      };
+    }
+  }
+
+  let providerDirective: PreparedProviderDirective | null = null;
+  const qualityAdmission = qualityDevelopmentFailures(effectiveNextInstance, state, instances).filter(failure => {
+    if (!isolationAllowed || !recoverableEvidenceFailure(failure.message)) return true;
+    unavailableEvidence.push(failure.message);
+    return false;
+  });
+  if (qualityAdmission.length) return { kind: "error", message: qualityAdmission.map(f => f.message).join("\n"), ...extras };
+  try {
+    providerDirective = prepareProviderDirective(effectiveNextInstance, flags["provider-approval"], !opts.readOnlyProbe && opts.persistProviderPlans !== false);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      kind: "error",
+      stage: nextStage.slug,
+      stage_instance: effectiveNextInstance.instance_id,
+      message: `🚫 Provider resolution blocked for "${effectiveNextInstance.instance_id}": ${message}`,
+      ...(error instanceof ProviderResolutionError ? { provider_diagnostics: error.diagnostics } : {}),
+      ...extras,
+    };
+  }
+  if (providerDirective?.context.plan.status === "pending") {
+    const moduleOption = effectiveNextInstance.module_id ? ` --module ${effectiveNextInstance.module_id}` : "";
+    return {
+      kind: "ask",
+      ask_type: "provider-plan-approval",
+      stage: nextStage.slug,
+      stage_instance: effectiveNextInstance.instance_id,
+      question: `ProviderPlan ${providerDirective.context.plan.id} requires human approval before this stage can start.`,
+      command_template: `loeyae-aidlc orchestrate next${moduleOption} --provider-approval "<approval-ref>"`,
+      message: `ProviderPlan ${providerDirective.context.plan.id} is pending approval. Review its locked instances/actions, then rerun next with --provider-approval <approval-ref>.`,
+      provider_context: providerDirective.context,
+      provider_actions: providerDirective.actions,
+      ...extras,
+    };
+  }
+
+  if (providerDirective) {
+    const missing: string[] = [];
+    for (const action of providerDirective.actions) {
+      if (!action.required || action.required_before !== "stage-execution") continue;
+      try {
+        verifyProviderKnowledge(PROJECT_ROOT, { plan: providerDirective.plan, nodeId: action.plan_node_id });
+      } catch (error) {
+        missing.push(`${action.plan_node_id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (missing.length) return {
+      kind: "ask", ask_type: "provider-knowledge-confirmation", stage: nextStage.slug,
+      stage_instance: effectiveNextInstance.instance_id,
+      provider_context: providerDirective.context, provider_actions: providerDirective.actions,
+      message: `Required Provider knowledge is unconfirmed. ${missing.join("; ")}`,
+      handoff_prompt: "Host: run provider knowledge-load --plan <plan-id> --node <node-id>; place ALL returned sections in the active execution context as untrusted reference content. Only then run provider knowledge-confirm with the returned --delivery-digest and --consumer <host-session>. Rerun next. Preserve --provider-approval for next/report when the Plan requires approval. A confirmation never satisfies a validation Gate.",
+      ...extras,
+    };
+  }
+
+  if (unavailableEvidence.length) {
+    try { businessDocumentLoadPlan = buildCanonicalIsolationPlan(documentSliceContext(planningState, effectiveNextInstance), effectiveNextInstance.unit_id!); }
+    catch (error) { return { kind: "error", stage: nextStage.slug, stage_instance: effectiveNextInstance.instance_id,
+      message: `Cannot continue isolated work: canonical requirements or approved unit mapping are not verifiable: ${String(error)}`, ...extras }; }
+    return {
+      kind: "print", execution_status: "isolated-work-exit-blocked", stage: nextStage.slug,
+      stage_instance: effectiveNextInstance.instance_id, session_binding: binding,
+      stage_file: join("core", nextStage.file), execution_policy: executionPolicyFor(state, effectiveNextInstance),
+      business_document_load_plan: businessDocumentLoadPlan, rule_load_plan: ruleLoadPlan,
+      evidence_failure: isolatedEvidenceFailure || unavailableEvidence[0], evidence_failures: [...new Set(unavailableEvidence)],
+      recovery_requirements: ["Record the listed canonical input paths and SHA-256 values with the isolated work before editing.", "Restore and validate the required evidence, recheck the impact of input changes, and rerun affected tests before reporting completion."],
+      handoff_prompt: `Work goal: ${state.work_description}\nCurrent instance: ${effectiveNextInstance.instance_id}\nContinue analysis, implementation and tests in an isolated workspace using the current canonical documents and approved mapping below. Record their SHA-256 values before editing. Do not report completion, merge or deliver until the missing or incompatible evidence is restored, changes are rechecked and affected tests rerun.\n${businessDocumentLoadPlan.files.map(file => `- ${file.path} (sha256 ${file.sha256})`).join("\n")}`,
+      message: "Required evidence is unavailable. Isolated analysis, coding and tests may continue using the listed current canonical inputs; stage completion, merge and delivery remain blocked until evidence is restored and changes and tests are rechecked.",
+      ...extras,
+    };
+  }
+
+  // MARS-271 #8 unit-level parallel chains: the global current pointer moves only
+  // when it is free or already ours; otherwise the unit records its own context.
+  if (opts.readOnlyProbe) return { kind: "run-stage", preview: true, stage: nextStage.slug, stage_instance: effectiveNextInstance.instance_id, name: nextStage.name, ...extras };
+  applyCurrentContext(state, effectiveNextInstance);
+  if (claimRequested) assertSessionClaim(PROJECT_ROOT, state, effectiveNextInstance.instance_id);
+
+  const gate = nextStage.approval === "block";
+  applyPlanningState();
+  try {
+    if (!opts.readOnlyProbe) opts.commit(originalState);
+  } catch (error) {
+    // MARS-277: a concurrent writer won the state CAS — reread and retry the whole
+    // routing pass (bounded by nextConflictRetry), with or without --claim. The
+    // retry recomputes cheaply: the revision digests are memoized within this pass.
+    if (error instanceof Error && error.message.startsWith("workflow state revision conflict")) return opts.retry();
+    throw error;
+  }
+
+  const directiveChoices = runtimeChoices(nextStage, state);
+  const executionPolicy = executionPolicyFor(state, effectiveNextInstance);
+  return {
+    kind: "run-stage",
+    session_binding: binding,
+    stage: nextStage.slug,
+    stage_instance: effectiveNextInstance.instance_id,
+    axis: effectiveNextInstance.axis,
+    module_id: effectiveNextInstance.module_id || null,
+    unit_id: effectiveNextInstance.unit_id || null,
+    artifact_root: artifactRoot(effectiveNextInstance),
+    evidence_root: evidenceRoot(effectiveNextInstance),
+    stage_file: join("core", nextStage.file),
+    rule_load_plan: ruleLoadPlan,
+    ...(businessDocumentLoadPlan ? { business_document_load_plan: businessDocumentLoadPlan } : {}),
+    evidence_reuse_plan: evidenceReusePlan,
+    name: nextStage.name,
+    number: nextStage.number,
+    phase: nextStage.phase,
+    execution_policy: executionPolicy,
+    gate,
+    approval: nextStage.approval,
+    completion_contract: nextStage.completion_contract,
+    requires: [...(nextStage.requires || [])],
+    consumes: nextStage.consumes.flatMap((pattern) => displayArtifactPatterns(pattern, effectiveNextInstance, true)),
+    produces: nextStage.produces.flatMap((pattern) => displayArtifactPatterns(pattern, effectiveNextInstance)),
+    sensors: nextStage.sensors,
+    choices: directiveChoices,
+    diagram_format: diagramFormatOf(state),
+    ...(providerDirective ? { provider_context: providerDirective.context, provider_actions: providerDirective.actions } : {}),
+    handoff_prompt: lightweightNextPrompt(state, effectiveNextInstance, executionPolicy, opts.reportCommand?.(effectiveNextInstance), directiveChoices, providerHandoffPrompt(providerDirective, effectiveNextInstance)) + (businessDocumentLoadPlan ? `\nBusiness document load plan (${businessDocumentLoadPlan.mode}):\n${businessDocumentLoadPlan.files.map(f => `- ${f.path} (sha256 ${f.sha256})`).join("\n")}\nGates and business edits continue to use canonical requirements.md and user-stories.md.` : ""),
+    ...(claimRequested ? { claimed: true, owner: state.active_instances[effectiveNextInstance.instance_id].owner, claim_expires_at: state.active_instances[effectiveNextInstance.instance_id].expires_at } : {}),
+    ...extras,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// report — validate and record a stage outcome
+// ---------------------------------------------------------------------------
+
+async function handleReport(args: string[]): Promise<Directive> {
+  // MARS-277: report gates re-check many evidence records sharing a digest scope.
+  return withRevisionMemoization(async () => withRepairGuidance(await handleReportInner(args, 0)));
+}
+
+const CONFLICT_RETRY_LIMIT = 3;
+
+async function handleReportInner(args: string[], conflictRetries: number): Promise<Directive> {
+  const flags = parseFlags(args);
+  const invalidFlag = unsupportedFlag(flags, REPORT_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported AWS-style report option: --${invalidFlag}` };
+  const stageSlug = flags.stage;
+  const result = flags.result as StageResult;
+  const userInput = flags["user-input"];
+
+  // Validate required fields
+  if (!stageSlug) {
+    return { kind: "error", message: "report requires --stage <slug>" };
+  }
+  if (!result) {
+    return { kind: "error", message: "report requires --result <outcome>. Valid: " + VALID_RESULTS.join(", ") };
+  }
+  if (!VALID_RESULTS.includes(result)) {
+    return { kind: "error", message: `Invalid result "${result}". Valid: ${VALID_RESULTS.join(", ")}` };
+  }
+
+  // Load state
+  const graph = loadGraph();
+  const stageNode = graph.stages.find((stage) => stage.slug === stageSlug);
+  // 4.13.0 (MARS-98): no stage is reported into a workflow whose lineage git contradicts.
+  const lineageConflict = activeLineageError();
+  if (lineageConflict) return lineageConflict;
+  let state: WorkflowState | null;
+  let commit: (value: WorkflowState) => void;
+  let label = "Workflow";
+  let extras: Record<string, unknown> = {};
+  let finalizeReportAudit = (): void => {};
+  const afterReportCommit = (): void => {
+    try {
+      finalizeReportAudit();
+      const checkpointed = withModuleCheckpoint({ kind: "print", ...extras } as Directive, args);
+      if (checkpointed.module_checkpoint) Object.assign(extras, { module_checkpoint: checkpointed.module_checkpoint, ...(checkpointed.message ? { checkpoint_warning: checkpointed.message } : {}) });
+    } catch (error) { Object.assign(extras, { checkpoint_warning: error instanceof Error ? error.message : String(error) }); }
+  };
+  let ownsInstance: (instanceId: string) => boolean = () => true;
+  let auditRef: WorkflowRef = GLOBAL_WORKFLOW;
+  if (isSplitLayout(PROJECT_ROOT)) {
+    if (!stageNode) return { kind: "error", message: `Unknown stage "${stageSlug}".` };
+    const owner = reportOwner(flags, stageNode);
+    if (owner.kind === "error") return owner as Directive;
+    const ownerRef = owner as WorkflowRef;
+    auditRef = ownerRef;
+    if (!loadWorkflowParts(PROJECT_ROOT).parts.has(workflowRefKey(ownerRef))) {
+      return { kind: "error", message: `${workflowLabel(ownerRef)} does not exist yet; start it with orchestrate next --module ${ownerRef.kind === "module" ? ownerRef.module_id : "<module-id>"}.` };
+    }
+    const context = openSplitContext(ownerRef);
+    state = context.view;
+    commit = (value) => commitSplitContext(context, value, afterReportCommit);
+    label = workflowLabel(ownerRef);
+    ownsInstance = (instanceId) => sameRef(ownerOfInstance(instanceId), ownerRef);
+    extras = { workflow: workflowRefKey(ownerRef), workflow_id: context.loaded.parts.get(workflowRefKey(ownerRef))!.state.workflow_id };
+  } else {
+    state = loadState();
+    commit = (value) => saveState(value, afterReportCommit);
+  }
+  if (!state) {
+    return { kind: "error", message: "No active workflow. Cannot report." };
+  }
+
+  // Re-attestation: an explicitly addressed, already completed instance re-runs its exit
+  // gates (typically after evidence run --refresh) without changing workflow progress.
+  const addressed = addressedInstance(flags, stageNode);
+  if (stageNode && addressed && completedInstanceIds(state).includes(addressed)
+    && addressed !== state.current_stage_instance) {
+    return reattestInstance(state, stageNode, addressed, flags, graph, commit, extras);
+  }
+
+  if (state.status !== "running") {
+    return { kind: "error", message: `${label} is ${state.status}, not running. Cannot report.`, ...extras };
+  }
+
+  if (!stageNode) {
+    return { kind: "error", message: `Unknown stage "${stageSlug}".` };
+  }
+  const instances = expandStageInstances(graph, state);
+  const reportBinding = sessionBinding();
+  const activeCandidates = instances.filter((instance) =>
+    instance.stage.slug === stageSlug && state.active_instances?.[instance.instance_id]
+    && ownsInstance(instance.instance_id)
+    && (!flags.module || instance.module_id === flags.module)
+    && (!flags.unit || instance.unit_id === flags.unit)
+    && (!flags.instance || instance.instance_id === flags.instance)
+    && (!reportBinding || instance.instance_id === reportBinding.stage_instance)
+  );
+  let declaredCurrentInstance: StageInstance | undefined;
+  if (activeCandidates.length > 1 && !flags.module && !flags.instance) {
+    return { kind: "error", message: `Multiple claimed instances are active for stage "${stageSlug}"; report with --module or --instance.` };
+  }
+  if (activeCandidates.length > 0) {
+    declaredCurrentInstance = activeCandidates[0];
+  } else if (flags.instance) {
+    declaredCurrentInstance = instances.find((instance) => instance.instance_id === flags.instance);
+  } else {
+    // MARS-271 #8: a parallel unit whose chain position lives in unit_contexts (the
+    // global current pointer belongs to a different unit) still reports its own stage.
+    const binding = sessionBinding();
+    const boundMatch = binding?.stage_instance.match(/@module:([a-z0-9][a-z0-9-]*)@unit:([a-z0-9][a-z0-9-]*)$/);
+    const boundUnitKey = boundMatch ? `${boundMatch[1]}:${boundMatch[2]}` : null;
+    const unitContext = boundUnitKey ? state.unit_contexts?.[boundUnitKey] : undefined;
+    if (state.current_stage !== stageSlug && !(unitContext && unitContext.stage === stageSlug)) {
+      return {
+        kind: "error",
+        message: `Stage mismatch: current is "${state.current_stage}", but report is for "${stageSlug}". Cannot report on a stage that is not the active one.`,
+      };
+    }
+    declaredCurrentInstance = instances.find((instance) => instance.instance_id === (state.current_stage === stageSlug ? state.current_stage_instance : unitContext?.stage_instance));
+  }
+  if (!declaredCurrentInstance || declaredCurrentInstance.stage.slug !== stageSlug) {
+    return {
+      kind: "error",
+      message: `Active stage instance "${flags.instance || state.current_stage_instance || stageSlug}" no longer exists in the declared module/unit manifests. Restore the current Markdown workflow manifests before reporting.`,
+    };
+  }
+  const currentInstance = runtimeInstance(declaredCurrentInstance, state);
+  if (currentInstance.stage.slug === "code-generation" && currentInstance.module_id && currentInstance.unit_id) {
+    try {
+      const red = JSON.parse(readFileSync(join(PROJECT_ROOT, evidenceRelativePath("tdd", "red-test-evidence", "unit", { module_id: currentInstance.module_id, unit_id: currentInstance.unit_id })), "utf8"));
+      if (red.evidence_mode === "historical_replay") extras = { ...extras, red_evidence: { mode: "historical_replay", limitation: REPLAY_LIMITATION } };
+    } catch { /* Normal report gates reject missing or invalid evidence. */ }
+  }
+  const claim = assertSessionClaim(PROJECT_ROOT, state, currentInstance.instance_id);
+  if (claim) {
+    const owner = flags.owner || sessionBinding()?.owner || process.env.AIDLC_OWNER || process.env.AIDLC_MEMBER || "unidentified-owner";
+    if (claim.owner !== owner) return { kind: "error", message: `Stage instance ${currentInstance.instance_id} is claimed by ${claim.owner}, not ${owner}.` };
+    if (Date.parse(claim.expires_at) <= Date.now()) return { kind: "error", message: `Stage instance ${currentInstance.instance_id} claim expired at ${claim.expires_at}; claim it again before reporting.` };
+    claim.heartbeat_at = new Date().toISOString();
+    claim.expires_at = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+  }
+  if (flags.module && flags.module !== currentInstance.module_id) {
+    return { kind: "error", message: `Module mismatch: active module is "${currentInstance.module_id || "(none)"}", but report specified "${flags.module}".` };
+  }
+  if (flags.unit && flags.unit !== currentInstance.unit_id) {
+    return { kind: "error", message: `Unit mismatch: active unit is "${currentInstance.unit_id || "(none)"}", but report specified "${flags.unit}".` };
+  }
+  if (result === "completed" && stageNode.approval === "block") {
+    return { kind: "error", message: `Stage "${stageSlug}" requires explicit approval. Report --result approved --user-input Approve after presenting the decision summary.` };
+  }
+  if (result === "approved") {
+    if (stageNode.approval !== "block") {
+      return { kind: "error", message: `Stage "${stageSlug}" is not an approval gate and cannot use --result approved.` };
+    }
+    if (userInput !== "Approve") {
+      return { kind: "error", message: `Stage "${stageSlug}" requires --user-input Approve.` };
+    }
+  }
+  if (stageNode.completion_contract === "instruction_only" && result === "completed" && flags["instruction-ack"] !== stageSlug) {
+    return {
+      kind: "error",
+      message: `Stage "${stageSlug}" is instruction-only and cannot be auto-completed by a lifecycle Hook. After executing its body, report again with --instruction-ack ${stageSlug}.`,
+    };
+  }
+  const runtimeChoiceValues = runtimeChoices(stageNode, state);
+  if ((result === "completed" || result === "approved") && runtimeChoiceValues.length > 0) {
+    if (!userInput || !runtimeChoiceValues.includes(userInput)) {
+      return {
+        kind: "error",
+        message: `Stage "${stageSlug}" requires --user-input with one of: ${runtimeChoiceValues.join(", ")}. The choice is stored in Markdown workflow history.`,
+      };
+    }
+  }
+
+  // --- Provider Gate: fail before artifact producers, history or state/audit writes. ---
+  let providerDecision: GateDecisionV1_1 | undefined;
+  if (result === "completed" || result === "approved") {
+      const qualityAdmission = qualityDevelopmentFailures(currentInstance, state, instances);
+      if (qualityAdmission.length) return { kind: "error", message: qualityAdmission.map(f => f.message).join("\n") };
+    const gate = providerGateCheck(currentInstance, flags["gate-decision"], flags["provider-approval"]);
+    if (gate.failure) return { kind: "error", message: `🚫 ${gate.failure}` };
+    providerDecision = gate.decision;
+  }
+
+  // Record history entry
+  const entry: HistoryEntry = {
+    stage: stageSlug,
+    instance_id: currentInstance.instance_id,
+    module_id: currentInstance.module_id,
+    unit_id: currentInstance.unit_id,
+    result,
+    timestamp: new Date().toISOString(),
+  };
+  if (userInput) entry.user_input = userInput;
+  let sourceDeliveryRecord: Record<string, unknown> | undefined;
+  let ownershipNote: string | undefined;
+
+  // --- P0 Gate: Validate consumes and produces before allowing completion ---
+  if (result === "completed" || result === "approved") {
+      const consumeFailures = checkConsumes(currentInstance, state, graph, instances);
+      if (consumeFailures.length > 0) {
+        return {
+          kind: "error",
+          message: `🚫 Cannot complete stage instance "${currentInstance.instance_id}" — canonical consumed artifacts are no longer valid:\n` +
+            consumeFailures.map((failure) => `  ❌ ${failure}`).join("\n"),
+        };
+      }
+
+      // MARS-277 cheap-fail-first: produces is a file-presence check; failing it before
+      // the expensive sensor re-validation and automatic evidence production saves a
+      // full gate pass that would only end in the same refusal.
+      const missingProduces = checkProduces(currentInstance);
+      if (missingProduces.length > 0) {
+        return {
+          kind: "error",
+          message: `🚫 Cannot complete stage instance "${currentInstance.instance_id}" — required produces not found:\n` +
+            missingProduces.map((path) => `  ❌ ${path}`).join("\n") +
+            `\n\nGenerate these artifacts first, then report again.`,
+        };
+      }
+
+      if (stageSlug === "code-generation") {
+        const redInstance = instances.find((candidate) => candidate.stage.slug === "tdd" && candidate.module_id === currentInstance.module_id && candidate.unit_id === currentInstance.unit_id);
+        if (redInstance) {
+          // 4.7.0: completing GREEN also demands that the unit's BASELINE belongs to the current epoch.
+          const redFailures = await checkHistoricalTddSensors(redInstance, state, { requireCurrentBaselineEpoch: true });
+          if (redFailures.length > 0) {
+            return {
+              kind: "error",
+              message: `🚫 Cannot complete GREEN stage "${currentInstance.instance_id}" — RED gate evidence is invalid:\n${redFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\\n")}`,
+            };
+          }
+        }
+      }
+
+      const automaticEvidenceError = produceMissingSemanticEvidence(currentInstance);
+      if (automaticEvidenceError) {
+        return {
+          kind: "error",
+          message: `🚫 Cannot complete stage "${stageSlug}" — ${automaticEvidenceError}`,
+        };
+      }
+
+      if (stageSlug === "module-division") {
+        readModuleManifest(PROJECT_ROOT);
+      }
+      if (stageSlug === "units-generation") {
+        if (!currentInstance.module_id) throw new Error("units-generation requires an active module context");
+        const units = readUnitManifest(PROJECT_ROOT, currentInstance.module_id);
+        if (architectureChoice(state)) {
+          const missingSelections = units
+            .filter((unit) => unit.conditional_stages === undefined)
+            .map((unit) => unit.unit_id);
+          if (missingSelections.length > 0) {
+            return {
+              kind: "error",
+              message: `🚫 Cannot complete stage instance "${currentInstance.instance_id}" — each unit must declare conditional_stages; missing: ${missingSelections.join(", ")}.`,
+            };
+          }
+        }
+        // MARS-277: source ownership declarations are what lets parallel units keep
+        // private files out of each other's evidence scopes. Missing declarations stay
+        // conservative (the wide binding still holds — never a silent gate change) but
+        // the completion says so and names the controlled repair path.
+        const undeclaredOwnership = units.filter(unit => !unit.evidence_inputs).map(unit => unit.unit_id);
+        if (undeclaredOwnership.length > 0) {
+          ownershipNote = `⚠️ Units without declared evidence_inputs: ${undeclaredOwnership.join(", ")} — their files stay conservatively bound to every unit's evidence scope. Declare ownership with 'orchestrate unit inputs --module ${currentInstance.module_id} --unit <unit-id> --paths <paths>' to enable parallel isolation.`;
+        }
+      }
+
+      const sensorFailures = await checkSensors(currentInstance, state);
+      if (sensorFailures.length > 0) {
+        return {
+          kind: "error",
+          message: `🚫 Cannot complete stage "${stageSlug}" — sensor checks failed:\n` +
+            sensorFailures.map((f) => `  ❌ [${f.sensor}] ${f.message}`).join("\n") +
+            `\n\nFix sensor failures, then report again.`,
+        };
+      }
+      // MARS-95: an empty source delivery of a ucd_exemption unit is recorded with its basis.
+      if ((stageNode.produces || []).includes(CANONICAL_SOURCE_PATTERN)) {
+        const delivery = sourceDelivery(currentInstance);
+        if (delivery.exemption) {
+          sourceDeliveryRecord = {
+            status: "not_applicable",
+            reason: "ucd_exemption",
+            roots: delivery.roots,
+            baselines: delivery.baselines,
+            ucd_exemption: delivery.exemption,
+          };
+        } else if (delivery.deletions.length) {
+          sourceDeliveryRecord = {
+            status: "delivered", roots: delivery.roots, baselines: delivery.baselines,
+            deletions: delivery.deletions.map(({ content, ...entry }) => entry),
+          };
+        }
+      }
+  }
+
+  if (result === "completed" || result === "approved") clearRepairGuidance(PROJECT_ROOT, auditRef);
+  state.history.push(entry);
+
+  // Process result — auto-advance after all applicable gates pass
+  switch (result) {
+    case "completed":
+    case "approved":
+      state.completed_stage_instances.push(currentInstance.instance_id);
+      recordApprovalAuditEntry(currentInstance, state);
+      reconcileStageSummaries(state, instances);
+      if (state.active_instances?.[currentInstance.instance_id]) delete state.active_instances[currentInstance.instance_id];
+      if (state.current_stage_instance === currentInstance.instance_id) clearActiveContext(state);
+      clearUnitContext(state, currentInstance.instance_id);
+      break;
+
+    case "rejected":
+      break;
+
+    case "revised":
+      break;
+  }
+
+  if (sourceDeliveryRecord) {
+    const record = sourceDeliveryRecord;
+    extras = { ...extras, source_delivery: record };
+    finalizeReportAudit = () => {
+    if (record.status === "delivered") {
+      appendAuditEvent(PROJECT_ROOT, auditRef, "SOURCE_DELETIONS_DELIVERED", {
+        "Stage Instance": currentInstance.instance_id,
+        Deletions: JSON.stringify(record.deletions),
+      });
+      return;
+    }
+    const exemption = record.ucd_exemption as { reason_code: string; approval_ref: string; reason: string };
+    appendAuditEvent(PROJECT_ROOT, auditRef, "SOURCE_DELIVERY_NOT_APPLICABLE", {
+      "Stage Instance": currentInstance.instance_id,
+      "Source Roots": (record.roots as string[]).join(", "),
+      Baselines: Object.entries(record.baselines as Record<string, string>).map(([key, value]) => `${key}=${value}`).join(", "),
+      "Exemption Reason Code": exemption.reason_code,
+      "Exemption Approval Ref": exemption.approval_ref,
+      "Exemption Reason": exemption.reason,
+    });
+    };
+  }
+  try {
+    commit(state);
+  } catch (error) {
+    // MARS-277: bounded, explainable conflict retry — never an unbounded recursion.
+    if (claim && error instanceof Error && error.message.startsWith("workflow state revision conflict")) {
+      if (conflictRetries >= CONFLICT_RETRY_LIMIT) {
+        throw new Error(`report abandoned after ${CONFLICT_RETRY_LIMIT} revision conflict retries; another session keeps writing the workflow state — reread it and rerun report`);
+      }
+      return handleReportInner(args, conflictRetries + 1);
+    }
+    throw error;
+  }
+
+
+  const nextCommand = currentInstance.module_id ? `next --module ${currentInstance.module_id}` : "next";
+  // Return confirmation
+  switch (result) {
+    case "completed":
+    case "approved":
+      return {
+        kind: "print",
+        message: `✅ Stage "${stageSlug}" ${result}. Run '${nextCommand} --preview', bind the returned exact instance, then next for the next stage.${ownershipNote ? `\n${ownershipNote}` : ""}`,
+        handoff_prompt: `工作目标：${state.work_description}\n当前阶段：${stageSlug} 已完成。\n下一步：运行 orchestrate ${nextCommand} --preview，inspect/bind 精确新 instance 后再 next 获取 directive，并按其产物、review、构建、测试和 sensor 要求继续。`,
+        ...extras,
+      };
+    case "rejected":
+      return {
+        kind: "print",
+        message: `🔄 Stage "${stageSlug}" rejected. Revise and report --result revised, then re-report --result completed.`,
+        ...extras,
+      };
+    case "revised":
+      return {
+        kind: "print",
+        message: `📝 Stage "${stageSlug}" revised. Report --result completed when ready.`,
+        ...extras,
+      };
+  }
+}
+
+function csvFlag(flags: Record<string, string>, key: string): string[] {
+  return String(flags[key] || "").split(",").map((value) => value.trim()).filter(Boolean);
+}
+
+/**
+ * MARS-277 `orchestrate unit inputs`: the controlled repair that declares a unit's
+ * source ownership (evidence_inputs) for a workflow whose units-generation predates
+ * the declaration. It never guesses ownership, only completes a missing declaration,
+ * and it validates the result against the same scope rules the evidence engine uses
+ * before committing, rolling the manifest back on any violation.
+ */
+async function handleUnit(rest: string[]): Promise<Directive> {
+  const usage = "Usage: orchestrate unit inputs --module <module-id> --unit <unit-id> --paths <path,...> [--shared-paths <path,...>] [--depends-on-units <unit,...>]";
+  if (rest[0] !== "inputs") return { kind: "error", message: usage };
+  const flags = parseFlags(rest.slice(1));
+  const invalid = unsupportedFlag(flags, UNIT_INPUTS_FLAGS);
+  if (invalid) return { kind: "error", message: `Unsupported option: --${invalid}\n${usage}` };
+  const moduleId = flags.module;
+  const unitId = flags.unit;
+  const paths = csvFlag(flags, "paths");
+  if (!moduleId || !unitId || paths.length === 0) return { kind: "error", message: usage };
+  const binding = sessionBinding();
+  const boundModule = binding ? /@module:([a-z0-9][a-z0-9-]*)/.exec(binding.stage_instance)?.[1] : undefined;
+  const boundUnit = binding ? /@unit:([a-z0-9][a-z0-9-]*)$/.exec(binding.stage_instance)?.[1] : undefined;
+  if (!binding || boundModule !== moduleId) return { kind: "error", message: `unit inputs requires a session binding on module ${moduleId} (bind an exact instance of that module first)` };
+  // A unit-bound session declares its own unit's ownership only; another unit's
+  // declaration is another session's responsibility (MARS-277 goal 5).
+  if (boundUnit && boundUnit !== unitId) return { kind: "error", message: `session binding is for unit ${boundUnit}; declare unit ${unitId}'s inputs from that unit's own session` };
+  const ref = sessionRefBinding(binding);
+  const manifestPath = join(PROJECT_ROOT, "docs/aidlc/modules", moduleId, "inception/unit-manifest.json");
+  if (!existsSync(manifestPath)) return { kind: "error", message: `unit manifest not found for module ${moduleId}; units-generation must complete before ownership can be declared` };
+  const units = readUnitManifest(PROJECT_ROOT, moduleId);
+  const unit = units.find((row) => row.unit_id === unitId);
+  if (!unit) return { kind: "error", message: `unknown unit ${unitId} in module ${moduleId}` };
+  if (unit.evidence_inputs) return { kind: "error", message: `unit ${unitId} already declares evidence_inputs; changing declared ownership requires regenerating the manifest through units-generation` };
+  const depends = csvFlag(flags, "depends-on-units");
+  const unknownDeps = depends.filter((dep) => !units.some((row) => row.unit_id === dep));
+  if (unknownDeps.length > 0) return { kind: "error", message: `unknown depends_on_units: ${unknownDeps.join(", ")}` };
+  const sharedPaths = csvFlag(flags, "shared-paths");
+  const evidenceInputs = { version: 1, paths, shared_paths: sharedPaths, depends_on_units: depends };
+  const declaration = withWorkflowFileLock(manifestPath, (): Directive => {
+    const previous = readFileSync(manifestPath, "utf8");
+    const manifest = JSON.parse(previous) as { units?: Record<string, unknown>[] };
+    const rows = manifest.units || [];
+    const target = rows.find((row) => row.unit_id === unitId);
+    if (!target) return { kind: "error", message: `unknown unit ${unitId} in module ${moduleId}` };
+    target.evidence_inputs = evidenceInputs;
+    const temporary = `${manifestPath}.tmp-${process.pid}-${Date.now()}`;
+    try {
+      writeFileSync(temporary, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8" });
+      renameSync(temporary, manifestPath);
+      try {
+        // The engine's own scope rules are the gate: under-module roots and
+        // non-overlapping ownership must hold, or the write is rolled back.
+        evidenceScopeForInstance(PROJECT_ROOT, `ownership-probe@module:${moduleId}@unit:${unitId}`);
+      } catch (error) {
+        writeFileSync(temporary, previous);
+        renameSync(temporary, manifestPath);
+        return { kind: "error", message: `rejected ownership declaration for unit ${unitId}: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    } finally {
+      if (existsSync(temporary)) unlinkSync(temporary);
+    }
+    return { kind: "print" as const, message: "" };
+  });
+  if (declaration.kind === "error") return declaration;
+  appendAuditEvent(PROJECT_ROOT, ref, "UNIT_INPUTS_DECLARED", {
+    "Stage Instance": binding.stage_instance,
+    Module: moduleId,
+    Unit: unitId,
+    Paths: paths.join(", "),
+    "Shared Paths": sharedPaths.join(", "),
+    "Depends On Units": depends.join(", "),
+  });
+  return {
+    kind: "print",
+    message: `✅ Unit ${moduleId}:${unitId} now declares evidence_inputs (${paths.join(", ")}${sharedPaths.length ? `; shared: ${sharedPaths.join(", ")}` : ""}${depends.length ? `; depends on: ${depends.join(", ")}` : ""}). Evidence produced from now on binds this unit's declared inputs; previously produced evidence keeps its recorded scope until refreshed.`,
+  };
+}
+
+function sessionRefBinding(binding: { stage_instance: string; workflow_id: string }): WorkflowRef {
+  return isSplitLayout(PROJECT_ROOT) ? ownerOfInstance(binding.stage_instance) : GLOBAL_WORKFLOW;
+}
+
+function reportOwner(flags: Record<string, string>, stage: StageNode): WorkflowRef | Directive {
+  if (flags.instance) return ownerOfInstance(flags.instance);
+  if (flags.module) return moduleRef(flags.module);
+  if (stage.axis === "project") return integrationStageSlugs().has(stage.slug) ? INTEGRATION_WORKFLOW : GLOBAL_WORKFLOW;
+  const matches = [...loadWorkflowParts(PROJECT_ROOT).parts.values()].filter((part) => part.ref.kind === "module"
+    && (part.state.current_stage === stage.slug || Object.keys(part.state.active_instances || {}).some((instance) => instance.startsWith(`${stage.slug}@`))));
+  if (matches.length === 1) return matches[0].ref;
+  return {
+    kind: "error",
+    message: `Split workflow layout: report --stage ${stage.slug} needs --module <module-id>${matches.length > 1 ? ` (active in ${matches.map((part) => workflowRefKey(part.ref)).join(", ")})` : ""}.`,
+  };
+}
+
+function addressedInstance(flags: Record<string, string>, stage: StageNode | undefined): string | undefined {
+  if (!stage) return undefined;
+  if (flags.instance) return flags.instance;
+  if (!flags.module) return undefined;
+  if (stage.axis === "module") return stageInstanceId(stage.slug, "module", { module_id: flags.module });
+  if (stage.axis === "unit" && flags.unit) return stageInstanceId(stage.slug, "unit", { module_id: flags.module, unit_id: flags.unit });
+  return undefined;
+}
+
+/**
+ * Re-verify an already completed stage instance: consumes, produces and sensors must be
+ * green again. It records a `reattested` history row and never changes progress, so it is
+ * allowed while the owning workflow is parked (the usual repair path after a refresh).
+ */
+async function reattestInstance(
+  state: WorkflowState,
+  stageNode: StageNode,
+  instanceId: string,
+  flags: Record<string, string>,
+  graph: StageGraph,
+  commit: (value: WorkflowState) => void,
+  extras: Record<string, unknown>,
+): Promise<Directive> {
+  assertSessionClaim(PROJECT_ROOT, state, instanceId);
+  const result = flags.result as StageResult;
+  const userInput = flags["user-input"];
+  if (result !== "completed" && result !== "approved") {
+    return { kind: "error", message: `Stage instance "${instanceId}" is already completed; re-attest it with --result completed (or approved for approval gates).`, ...extras };
+  }
+  if (result === "completed" && stageNode.approval === "block") {
+    return { kind: "error", message: `Stage "${stageNode.slug}" requires explicit approval. Re-attest with --result approved --user-input Approve.`, ...extras };
+  }
+  if (result === "approved" && (stageNode.approval !== "block" || userInput !== "Approve")) {
+    return { kind: "error", message: stageNode.approval !== "block" ? `Stage "${stageNode.slug}" is not an approval gate and cannot use --result approved.` : `Stage "${stageNode.slug}" requires --user-input Approve.`, ...extras };
+  }
+  if (stageNode.completion_contract === "instruction_only" && flags["instruction-ack"] !== stageNode.slug) {
+    return { kind: "error", message: `Stage "${stageNode.slug}" is instruction-only; re-attest with --instruction-ack ${stageNode.slug}.`, ...extras };
+  }
+  const declaredForProviderGate = expandStageInstances(graph, state).find((instance) => instance.instance_id === instanceId);
+  if (!declaredForProviderGate) return { kind: "error", message: `Stage instance "${instanceId}" no longer exists.`, ...extras };
+  const providerGate = providerGateCheck(runtimeInstance(declaredForProviderGate, state), flags["gate-decision"], flags["provider-approval"]);
+  if (providerGate.failure) return { kind: "error", message: `🚫 ${providerGate.failure}`, ...extras };
+  const instances = expandStageInstances(graph, state);
+  const declared = instances.find((instance) => instance.instance_id === instanceId);
+  if (!declared) {
+    return { kind: "error", message: `Stage instance "${instanceId}" no longer exists in the declared module/unit manifests.`, ...extras };
+  }
+  const instance = runtimeInstance(declared, state);
+  const consumeFailures = checkConsumes(instance, state, graph, instances);
+  if (consumeFailures.length > 0) {
+    return { kind: "error", message: `🚫 Cannot re-attest "${instanceId}" — canonical consumed artifacts are no longer valid:\n${consumeFailures.map((failure) => `  ❌ ${failure}`).join("\\n")}`, ...extras };
+  }
+  if (stageNode.slug === "code-generation") {
+    const redInstance = instances.find((candidate) => candidate.stage.slug === "tdd" && candidate.module_id === instance.module_id && candidate.unit_id === instance.unit_id);
+    if (redInstance) {
+      const redFailures = await checkHistoricalTddSensors(redInstance, state);
+      if (redFailures.length > 0) return { kind: "error", message: `🚫 Cannot re-attest GREEN stage "${instanceId}" — RED gate evidence is invalid:\\n${redFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\\n")}`, ...extras };
+    }
+  }
+  const automaticEvidenceError = produceMissingSemanticEvidence(instance, true);
+  if (automaticEvidenceError) return { kind: "error", message: `🚫 Cannot re-attest "${instanceId}" — ${automaticEvidenceError}`, ...extras };
+  // MARS-95: a completed unit proved its source delivery when it completed; after
+  // --advance its changes are part of the baseline, so an empty delta is not a failure.
+  const missingProduces = checkProduces(instance, { completed: true });
+  if (missingProduces.length > 0) {
+    return { kind: "error", message: `🚫 Cannot re-attest "${instanceId}" — required produces not found:\n${missingProduces.map((path) => `  ❌ ${path}`).join("\n")}`, ...extras };
+  }
+  const sensorFailures = await checkSensors(instance, state);
+  if (sensorFailures.length > 0) {
+    return {
+      kind: "error",
+      message: `🚫 Cannot re-attest "${instanceId}" — sensor checks failed:\n${sensorFailures.map((failure) => `  ❌ [${failure.sensor}] ${failure.message}`).join("\n")}\n\nRefresh evidence with evidence run --stage ${stageNode.slug}${instance.module_id ? ` --module ${instance.module_id}` : ""}${instance.unit_id ? ` --unit ${instance.unit_id}` : ""} --refresh, then re-attest.`,
+      ...extras,
+    };
+  }
+  state.history.push({
+    stage: stageNode.slug,
+    instance_id: instanceId,
+    module_id: instance.module_id,
+    unit_id: instance.unit_id,
+    result: "reattested",
+    timestamp: new Date().toISOString(),
+    user_input: userInput || "exit gates re-verified",
+  });
+  commit(state);
+  return {
+    kind: "print",
+    message: `✅ Stage instance "${instanceId}" re-attested: consumes, produces and sensors are green. Workflow progress is unchanged.`,
+    reattested: true,
+    ...extras,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// park — save workflow for later resume
+// ---------------------------------------------------------------------------
+
+async function handlePark(args: string[] = []): Promise<Directive> {
+  const flags = parseFlags(args);
+  if (isSplitLayout(PROJECT_ROOT)) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    const bound = [...loaded.parts.values()].find(part => part.state.workflow_id === sessionBinding()?.workflow_id);
+    const owner = flags.module ? moduleRef(flags.module) : bound?.ref || GLOBAL_WORKFLOW;
+    if (!loaded.parts.has(workflowRefKey(owner))) return { kind: "error", message: `${workflowLabel(owner)} does not exist.` };
+    const context = openSplitContext(owner);
+    const view = context.view;
+    if (view.status !== "running") return { kind: "error", message: `${workflowLabel(owner)} is ${view.status}, not running. Cannot park.`, workflow: workflowRefKey(owner) };
+    if (!view.current_stage_instance) throw new Error("park requires an exact bound stage instance");
+    assertSessionClaim(PROJECT_ROOT, view, view.current_stage_instance);
+    view.status = "parked";
+    commitSplitContext(context, view);
+    return {
+      kind: "parked",
+      stage: view.current_stage,
+      workflow: workflowRefKey(owner),
+      message: `${workflowLabel(owner)} parked at stage "${view.current_stage}". Resume with 'next ${owner.kind === "module" ? `--module ${owner.module_id} ` : ""}--resume'. Other workflows are unaffected.`,
+    };
+  }
+  if (flags.module) return { kind: "error", message: "park --module requires the per-module layout; split first with orchestrate split --from <workflow-id>." };
+
+  const state = loadState();
+  if (!state) {
+    return { kind: "error", message: "No active workflow to park." };
+  }
+  if (state.status !== "running") {
+    return { kind: "error", message: `Workflow is ${state.status}, not running. Cannot park.` };
+  }
+
+  if (!state.current_stage_instance) throw new Error("park requires an exact bound stage instance");
+  assertSessionClaim(PROJECT_ROOT, state, state.current_stage_instance);
+  if (Object.keys(state.active_instances).some(instance => instance !== state.current_stage_instance && !isInstanceResolved(state, instance))) throw new Error("cannot park another session's active stage; split workflows or transfer the exact target");
+  state.status = "parked";
+  saveState(state);
+
+  return {
+    kind: "parked",
+    stage: state.current_stage,
+    message: `Workflow parked at stage "${state.current_stage}". Resume with 'next --resume'.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// archive — move a parked/done workflow and its evidence out of the active area
+// ---------------------------------------------------------------------------
+
+function lockFiles(root: string): string[] {
+  if (!existsSync(root)) return [];
+  const found: string[] = [];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) found.push(...lockFiles(path));
+    else if (entry.name.endsWith(".lock")) found.push(relative(PROJECT_ROOT, path));
+  }
+  return found;
+}
+
+async function handleArchive(args: string[]): Promise<Directive> {
+  const flags = parseFlags(args);
+  const invalidFlag = unsupportedFlag(flags, ARCHIVE_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported archive option: --${invalidFlag}` };
+  if (flags.reason === "true") return { kind: "error", message: "--reason requires a value" };
+  if (flags.text) return { kind: "error", message: `Unexpected archive argument: ${flags.text}` };
+
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  const global = loaded.parts.get("global");
+  if (!global) return { kind: "error", message: "No active workflow to archive." };
+  const notArchivable = [...loaded.parts.values()].filter((part) => part.state.status !== "parked" && part.state.status !== "done");
+  if (notArchivable.length > 0) {
+    return {
+      kind: "error",
+      message: `Only parked or done workflows can be archived; ${notArchivable.map((part) => `${workflowLabel(part.ref)} is ${part.state.status}`).join(", ")}. Park it first with 'orchestrate park${notArchivable[0].ref.kind === "module" ? ` --module ${notArchivable[0].ref.module_id}` : ""}'.`,
+    };
+  }
+  const archiveBinding = sessionBinding();
+  if (archiveBinding && archiveBinding.workflow_id !== global.state.workflow_id) return { kind: "error", message: "Archiving the full workflow requires the global workflow session binding" };
+  // An explicitly authorized archival command needs its own claim for audit writes.
+  // Other claims still block, including those held by the same owner/session elsewhere.
+  const claims = [...loaded.parts.values()].flatMap((part) => Object.values(part.state.active_instances || {})
+    .filter(claim => !(archiveBinding && part.state.workflow_id === archiveBinding.workflow_id && claim.stage_instance === archiveBinding.stage_instance && claim.session_id === archiveBinding.session_id && claim.generation === archiveBinding.generation))
+    .map((claim) => `${claim.stage_instance}=${claim.owner}`));
+  if (claims.length > 0) return { kind: "error", message: `Workflow has unreleased claims: ${claims.join(", ")}. Release them before archiving.` };
+
+  const activeDir = resolve(PROJECT_ROOT, "aidlc", "active");
+  const evidenceDir = resolve(PROJECT_ROOT, ".aidlc", "evidence");
+  const locks = [...lockFiles(activeDir), ...lockFiles(evidenceDir)];
+  if (locks.length > 0) return { kind: "error", message: `Workflow or evidence locks are held: ${locks.join(", ")}. Wait for the running command to finish before archiving.` };
+
+  const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const target = resolve(PROJECT_ROOT, "aidlc", "archive", `${global.state.workflow_id}-${timestamp}`);
+  const targetLabel = relative(PROJECT_ROOT, target).split(sep).join("/");
+  if (existsSync(target)) return { kind: "error", message: `Archive target already exists: ${targetLabel}` };
+  if (existsSync(join(activeDir, "evidence"))) return { kind: "error", message: "aidlc/active/evidence already exists and would collide with the archived evidence directory." };
+
+  appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "WORKFLOW_ARCHIVED", {
+    "Workflow ID": global.state.workflow_id,
+    Status: global.state.status,
+    Reason: flags.reason || "-",
+    Target: targetLabel,
+  });
+  mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+  renameSync(activeDir, target);
+  const evidenceArchived = existsSync(evidenceDir);
+  if (evidenceArchived) renameSync(evidenceDir, join(target, "evidence"));
+
+  return {
+    kind: "print",
+    workflow_id: global.state.workflow_id,
+    archive_path: targetLabel,
+    evidence_archived: evidenceArchived,
+    message: `📦 Workflow ${global.state.workflow_id} archived to ${targetLabel}${evidenceArchived ? " (evidence included)" : ""}.\n` +
+      `  Start a new workflow with: loeyae-aidlc orchestrate next --scope <scope> --work "<description>"`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// upgrade --dry-run — list completed instances that lack evidence for the current graph
+// ---------------------------------------------------------------------------
+
+/** Sensors whose verdict is read from a controlled evidence file. */
+function evidenceBackedSensor(sensor: string): boolean {
+  return SEMANTIC_SENSORS.has(sensor) || sensor === "build-test-evidence";
+}
+
+function upgradeRecoveryCommands(instance: StageInstance, missing: string[]): string[] {
+  const target = `--stage ${instance.stage.slug} --instance ${instance.instance_id}`;
+  const evidence = instance.stage.slug === "build-and-test"
+    ? missing.map((sensor) => sensor === "build-test-evidence"
+      ? `loeyae-aidlc evidence run ${target} --refresh`
+      : `loeyae-aidlc evidence run ${target} --sensor ${sensor} --refresh`)
+    : [`loeyae-aidlc evidence run ${target} --all-sensors --refresh`];
+  const result = instance.stage.approval === "block" ? "--result approved --user-input Approve" : "--result completed";
+  const ack = instance.stage.completion_contract === "instruction_only" ? ` --instruction-ack ${instance.stage.slug}` : "";
+  return [...evidence, `loeyae-aidlc orchestrate report ${target} ${result}${ack}`];
+}
+
+async function handleUpgrade(args: string[]): Promise<Directive> {
+  const flags = parseFlags(args);
+  const invalidFlag = unsupportedFlag(flags, UPGRADE_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported upgrade option: --${invalidFlag}` };
+  if (flags.text) return { kind: "error", message: `Unexpected upgrade argument: ${flags.text}` };
+  if ("retire-execution" in flags) {
+    if (flags["retire-execution"] !== "true" || (flags["dry-run"] && flags["dry-run"] !== "true")) throw new Error("retirement/dry-run flags must be boolean");
+    return retireExecutionCheckpoint(PROJECT_ROOT, flags.instance || "", flags["human-instruction-ref"] || "", "dry-run" in flags);
+  }
+  if (!("dry-run" in flags)) {
+    return { kind: "error", message: "orchestrate upgrade only supports --dry-run. Run it with --dry-run, then execute the listed recovery commands one instance at a time." };
+  }
+  if (flags["dry-run"] !== "true") return { kind: "error", message: "--dry-run is a boolean flag and does not accept a value" };
+  if (flags.module === "true") return { kind: "error", message: "--module requires a value" };
+  const moduleFilter = flags.module;
+
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  if (!loaded.parts.has("global")) return { kind: "error", message: "No active workflow to check." };
+  if (moduleFilter && loaded.split && !loaded.parts.has(workflowRefKey(moduleRef(moduleFilter)))) {
+    return { kind: "error", message: `Module workflow "${moduleFilter}" does not exist in the registry.` };
+  }
+  const view = loaded.split ? mergeWorkflowView(loaded.parts) : loaded.parts.get("global")!.state;
+  const instances = expandStageInstances(loadGraph(), view);
+  if (moduleFilter && !loaded.split && !instances.some((instance) => instance.module_id === moduleFilter)) {
+    return { kind: "error", message: `Module "${moduleFilter}" is not declared in the module manifest.` };
+  }
+  const completed = new Set(completedInstanceIds(view));
+  const ownerKey = (instanceId: string): string => loaded.split ? workflowRefKey(ownerOfInstance(instanceId)) : "global";
+
+  const pending = instances
+    .filter((instance) => completed.has(instance.instance_id))
+    .filter((instance) => !moduleFilter || instance.module_id === moduleFilter)
+    .map((declared) => {
+      const instance = runtimeInstance(declared, view);
+      // Match producer/admission adoption rules: legacy workflows do not create
+      // quality Evidence until explicitly adopted. Never offer an endless repair.
+      const missingSemantic = new Set(missingSemanticEvidence(instance));
+      const missing = instance.stage.sensors
+        .filter(evidenceBackedSensor)
+        .filter((sensor) => SEMANTIC_SENSORS.has(sensor)
+          ? missingSemantic.has(sensor)
+          : !existsSync(evidencePath(instance.stage, sensor, instance)));
+      return { instance, missing };
+    })
+    .filter((item) => item.missing.length > 0)
+    .map(({ instance, missing }) => ({
+      instance_id: instance.instance_id,
+      stage: instance.stage.slug,
+      module_id: instance.module_id || null,
+      unit_id: instance.unit_id || null,
+      workflow: ownerKey(instance.instance_id),
+      missing_sensors: missing,
+      requires_user_approval: instance.stage.approval === "block",
+      commands: upgradeRecoveryCommands(instance, missing),
+    }));
+
+  const workflows = [...loaded.parts.values()]
+    .filter((part) => !moduleFilter || (part.ref.kind === "module" ? part.ref.module_id === moduleFilter : !loaded.split))
+    .map((part) => ({
+      workflow: workflowRefKey(part.ref),
+      workflow_id: part.state.workflow_id,
+      status: part.state.status,
+      recorded_engine_version: part.state.version || "unknown",
+    }));
+
+  return {
+    kind: "print",
+    dry_run: true,
+    engine_version: ENGINE_VERSION,
+    layout: loaded.split ? "split" : "single",
+    ...(moduleFilter ? { module_id: moduleFilter } : {}),
+    workflows,
+    pending,
+    message: pending.length === 0
+      ? "✅ Every completed stage instance has evidence for the sensors declared by the current stage graph."
+      : `⚠️ ${pending.length} completed stage instance(s) lack evidence for the current stage graph. Run each instance's commands in order; ` +
+        "approval gates (requires_user_approval) must only be re-attested after the user explicitly approves. Nothing was written.",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// diagram-format — record the user's explicit diagram format choice (default mermaid)
+// ---------------------------------------------------------------------------
+
+/** Injection points for handlers that write state then audit (tests simulate failures and races). */
+export interface StateWriteHooks {
+  /** Audit writer; defaults to appendAuditEvent. */
+  appendAudit?: typeof appendAuditEvent;
+  /** Runs after every check passed and before the state is re-read for the write. */
+  beforeWrite?: () => void;
+}
+
+export async function handleDiagramFormat(args: string[], hooks: StateWriteHooks = {}): Promise<Directive> {
+  const flags = parseFlags(args);
+  const invalidFlag = unsupportedFlag(flags, DIAGRAM_FORMAT_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported diagram-format option: --${invalidFlag}` };
+  if (flags.text) return { kind: "error", message: `Unexpected diagram-format argument: ${flags.text}` };
+  const state = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!state) return { kind: "error", message: "No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\"." };
+  const current = diagramFormatOf(state);
+  if (!("set" in flags)) {
+    return {
+      kind: "print",
+      diagram_format: current,
+      message: `Diagram format: ${current}${state.diagram_format ? "" : " (default)"}. Change it only on the user's explicit request: orchestrate diagram-format --set <mermaid|svg> --user-input "<user's words>".`,
+    };
+  }
+  const requested = flags.set;
+  if (!(DIAGRAM_FORMATS as readonly string[]).includes(requested)) return { kind: "error", message: `--set must be one of: ${DIAGRAM_FORMATS.join(", ")}` };
+  const userInput = flags["user-input"];
+  if (!userInput || userInput === "true" || !userInput.trim()) {
+    return { kind: "error", message: "--user-input is required: quote the user's explicit request for this diagram format; never choose it on the user's behalf." };
+  }
+  if (current === requested && state.diagram_format) {
+    return { kind: "print", diagram_format: current, changed: false, message: `Diagram format is already ${current}.` };
+  }
+  state.diagram_format = requested as DiagramFormat;
+  saveWorkflowState(PROJECT_ROOT, state, GLOBAL_WORKFLOW);
+  try {
+    (hooks.appendAudit || appendAuditEvent)(PROJECT_ROOT, GLOBAL_WORKFLOW, "DIAGRAM_FORMAT_SET", {
+      "Workflow ID": state.workflow_id,
+      From: current,
+      To: requested,
+      "User Input": userInput,
+    });
+  } catch (error) {
+    return {
+      kind: "error",
+      diagram_format: requested,
+      message: `Diagram format ${requested} was saved to the workflow state, but the DIAGRAM_FORMAT_SET audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。`,
+    };
+  }
+  return {
+    kind: "print",
+    diagram_format: requested,
+    changed: true,
+    message: requested === "svg"
+      ? "✅ Diagram format set to svg. Diagrams are delivered through aidlc-diagram-design (SVG source + .diagram.json) and diagram-contract checks the SVG contract; refresh diagram-contract evidence of completed stages if needed."
+      : "✅ Diagram format set to mermaid. diagram-contract validates Mermaid source checks; refresh evidence for required stage diagrams. SVG contracts and browser validation are not enabled.",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// baseline — show, register (--set), correct (--set --replace --expect) or advance (--advance, 4.7.0) the workflow baseline
+// ---------------------------------------------------------------------------
+
+function baselineError(message: string, extra: Record<string, unknown> = {}): Directive {
+  return { kind: "error", message, ...extra };
+}
+
+const UNAVAILABLE_T0_NOTE = "The replacement commit's committer date must be no later than the workflow start (T0); if the workflow was created before the repository's first commit, no valid baseline exists and 需要重新开始工作流 (start a new workflow).";
+
+/**
+ * Take every `--<name> <path>=<commit>` pair out of `args` (4.9.0 `--repo` /
+ * `--expect-repo`). The commit must be a full lowercase hex id; a path may appear once.
+ */
+function takeRepoFlags(args: string[], name: string): { rest: string[]; values: Map<string, string> } | { error: string } {
+  const rest: string[] = [];
+  const values = new Map<string, string>();
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] !== `--${name}`) {
+      rest.push(args[index]);
+      continue;
+    }
+    const value = args[index + 1];
+    if (value === undefined || value.startsWith("--")) return { error: `--${name} requires <path>=<commit>` };
+    index++;
+    const match = /^([^=\s]+)=(.*)$/.exec(value);
+    if (!match) return { error: `--${name} must be <path>=<commit>, got ${JSON.stringify(value)}` };
+    const key = match[1].replace(/\\/g, "/").replace(/\/+$/, "");
+    if (!COMMIT_ID_PATTERN.test(match[2])) return { error: `--${name} ${key}=… must name a full 40- or 64-character lowercase hex commit id; abbreviations, revision expressions and branch names are rejected (got ${JSON.stringify(match[2])})` };
+    if (values.has(key)) return { error: `--${name} ${key} is given more than once` };
+    values.set(key, match[2]);
+  }
+  return { rest, values };
+}
+
+/**
+ * References into `paths` (nested repositories about to be registered) made by any
+ * evidence of the workflow: I13 characterization code refs, BASELINE code_ref_digests
+ * and any other `code_refs` / `code_ref_digests` entry. An unreadable evidence counts
+ * as referencing (fail closed). `source_revision.repos` is a revision record, not a reference.
+ */
+function nestedEvidenceReferences(paths: readonly string[]): string[] {
+  const findings: string[] = [];
+  const evidenceRoot = join(PROJECT_ROOT, ".aidlc", "evidence");
+  if (!existsSync(evidenceRoot)) return findings;
+  const inside = (value: unknown) => typeof value === "string" && paths.some((key) => value === key || value.startsWith(`${key}/`));
+  const walk = (value: unknown, label: string, refList: boolean): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, label, refList);
+      return;
+    }
+    const record = asRecord(value);
+    if (!record) return;
+    if (refList && inside(record.path)) findings.push(`${label}: ${String(record.path)}`);
+    for (const [key, item] of Object.entries(record)) {
+      if (key === "source_revision") continue;
+      walk(item, label, key === "code_refs" || key === "code_ref_digests");
+    }
+  };
+  for (const path of collectFiles(evidenceRoot).filter((file) => file.endsWith(".json")).sort()) {
+    const label = normalizeArtifactLabel(relative(PROJECT_ROOT, path));
+    try {
+      walk(JSON.parse(readFileSync(path, "utf8")), label, false);
+    } catch (error) {
+      findings.push(`${label}: cannot be parsed (${error instanceof Error ? error.message : String(error)}); treated as referencing`);
+    }
+  }
+  return findings;
+}
+
+/**
+ * Restricted migration (4.9.0): register nested repositories for a workflow whose
+ * baseline may already be in use or advanced. The workflow commit, Baseline Source and
+ * Baseline History never change; only missing keys are added, from the current epoch.
+ */
+async function registerNestedRepos(flags: Record<string, string>, state: WorkflowState, nested: readonly string[], repoFlags: Map<string, string>, hooks: StateWriteHooks): Promise<Directive> {
+  const current = state.baseline_commit as string;
+  const refuse = (reason: string) => baselineError(`Cannot register the nested repositories for workflow baseline ${current}: ${reason}. Nothing was written.`);
+  if (current === BASELINE_UNAVAILABLE) return refuse(`the workflow commit is ${BASELINE_UNAVAILABLE}; correct it first with --set <commit> --replace --expect ${BASELINE_UNAVAILABLE}`);
+  const registered = state.baseline_repos || {};
+  const adding = [...repoFlags.keys()].sort();
+  const changed = adding.filter((key) => key in registered);
+  if (changed.length > 0) return refuse(`${changed.map((key) => `${key}/`).join(", ")} ${changed.length === 1 ? "is" : "are"} already registered; a registered nested repository cannot be modified or removed here`);
+  const resulting = [...new Set([...Object.keys(registered), ...adding])].sort();
+  if (JSON.stringify(resulting) !== JSON.stringify([...nested].sort())) {
+    const missing = nested.filter((key) => !resulting.includes(key));
+    const extra = resulting.filter((key) => !nested.includes(key));
+    return refuse(`after this registration the nested repositories would be ${resulting.join(", ") || "none"}, but ${SOURCE_ROOTS_CONFIG} declares ${nested.join(", ") || "none"}${missing.length ? `; also pass --repo for ${missing.join(", ")}` : ""}${extra.length ? `; not declared: ${extra.join(", ")}` : ""}`);
+  }
+  const chain = baselineChain(state);
+  const startEpoch = chain.length - 1;
+  const references = nestedEvidenceReferences(adding);
+  if (references.length > 0) return refuse(`evidence of this workflow already refers to ${adding.map((key) => `${key}/`).join(", ")}: ${references.join("; ")}`);
+  const startedAt = workflowStartedAt(state);
+  const repoDirty: Record<string, string> = {};
+  const heads: Record<string, string> = {};
+  for (const key of adding) {
+    const check = checkRepoCandidate(PROJECT_ROOT, key, repoFlags.get(key)!, startedAt);
+    if ("error" in check) return refuse(`${key}=${repoFlags.get(key)}: ${check.error}`);
+    heads[key] = check.head;
+    const dirty = nestedDirty(PROJECT_ROOT, key);
+    repoDirty[key] = dirty === null ? "unknown" : dirty ? "yes" : "no";
+  }
+  const added = Object.fromEntries(adding.map((key) => [key, repoFlags.get(key)!]));
+  const repos = { ...registered, ...added };
+  const scan = `no evidence refers to ${adding.map((key) => `${key}/`).join(", ")}`;
+  const checks = { start_epoch: startEpoch, added_repos: added, heads, repo_dirty: repoDirty, evidence_scan: scan };
+  if ("dry-run" in flags) {
+    return {
+      kind: "print",
+      dry_run: true,
+      changed: true,
+      workflow_id: state.workflow_id,
+      baseline_commit: current,
+      baseline_repos: repos,
+      checks,
+      message: `🔎 ${renderBaselineRepos(added)} pass every nested repository check (dry run, nothing written). Run the same command without --dry-run to register ${adding.length === 1 ? "it" : "them"} from epoch ${startEpoch}.`,
+    };
+  }
+  hooks.beforeWrite?.();
+  const fresh = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!fresh || fresh.revision !== state.revision) {
+    return baselineError(`workflow state revision conflict: expected ${state.revision}, found ${fresh ? fresh.revision : "no workflow"}; nothing was written, re-run the command.`);
+  }
+  if (fresh.baseline_commit !== current || JSON.stringify(baselineChain(fresh)) !== JSON.stringify(chain) || JSON.stringify(baselineRepoChains(fresh)) !== JSON.stringify(baselineRepoChains(state))) {
+    return baselineError(`--expect ${current} is no longer the workflow baseline; nothing was written.`);
+  }
+  const chains = baselineRepoChains(fresh);
+  fresh.baseline_repos = repos;
+  if (fresh.baseline_history !== undefined) {
+    fresh.baseline_repos_history = { ...chains, ...Object.fromEntries(adding.map((key) => [key, { start: startEpoch, commits: [added[key]] }])) };
+  }
+  fresh.history.push({ stage: "baseline", result: "repos-registered", timestamp: new Date().toISOString(), user_input: "Approve" });
+  try {
+    saveWorkflowState(PROJECT_ROOT, fresh, GLOBAL_WORKFLOW, { baselineWrite: true });
+  } catch (error) {
+    return baselineError(`${error instanceof Error ? error.message : String(error)}; nothing was written, re-run the command.`);
+  }
+  const event = "BASELINE_REPOS_REGISTERED";
+  try {
+    (hooks.appendAudit || appendAuditEvent)(PROJECT_ROOT, GLOBAL_WORKFLOW, event, {
+      "Workflow ID": fresh.workflow_id,
+      "Baseline Commit": current,
+      Repos: renderBaselineRepos(added),
+      "Start Epoch": String(startEpoch),
+      "Registered Repos": renderBaselineRepos(repos),
+      "Repo Dirty": adding.map((key) => `${key}=${repoDirty[key]}`).join(", "),
+      "Evidence Scan": scan,
+      Expected: flags.expect,
+      Reason: flags.reason.trim(),
+      "User Input": "Approve",
+    });
+  } catch (error) {
+    return baselineError(`Nested repositories ${renderBaselineRepos(added)} were saved to the workflow state, but the ${event} audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。`, { baseline_commit: current, baseline_repos: repos });
+  }
+  return {
+    kind: "print",
+    changed: true,
+    workflow_id: fresh.workflow_id,
+    baseline_commit: current,
+    baseline_source: fresh.baseline_source,
+    baseline_repos: repos,
+    baseline_epoch: startEpoch,
+    checks,
+    message: `✅ Nested repositories registered for workflow baseline ${current}: ${renderBaselineRepos(added)} (from epoch ${startEpoch}). Baseline Commit, Baseline Source and Baseline History are unchanged.`,
+  };
+}
+
+export async function handleBaseline(args: string[], hooks: StateWriteHooks = {}): Promise<Directive> {
+  // 4.9.0: --repo / --expect-repo <path>=<commit> may repeat; they are taken out before parseFlags.
+  const repoArgs = takeRepoFlags(args, "repo");
+  if ("error" in repoArgs) return baselineError(repoArgs.error);
+  const expectRepoArgs = takeRepoFlags(repoArgs.rest, "expect-repo");
+  if ("error" in expectRepoArgs) return baselineError(expectRepoArgs.error);
+  const repoFlags = repoArgs.values;
+  const expectRepoFlags = expectRepoArgs.values;
+  // 4.10.0: an empty --approval-ref value would otherwise be parsed as a stray positional argument.
+  const approvalIndex = expectRepoArgs.rest.indexOf("--approval-ref");
+  if (approvalIndex >= 0 && (expectRepoArgs.rest[approvalIndex + 1] ?? "").trim() === "") {
+    return baselineError(`--approval-ref is required: name the real approval record of this adoption (review id, ticket, meeting minutes). Usage: ${ADOPT_USAGE}`);
+  }
+  const flags = parseFlags(expectRepoArgs.rest);
+  if (flags.text) return baselineError(`Unexpected baseline argument: ${flags.text}`);
+  const invalidFlag = unsupportedFlag(flags, BASELINE_FLAGS);
+  if (invalidFlag) return baselineError(`Unsupported baseline option: --${invalidFlag}`);
+  for (const flag of ["dry-run", "replace"]) {
+    if (flag in flags && flags[flag] !== "true") return baselineError(`--${flag} is a boolean flag and does not accept a value`);
+  }
+  // 4.10.0: --adopt registers a module's adoption baseline; --module also scopes --advance and the read-only view.
+  if ("approval-ref" in flags && !("adopt" in flags)) return baselineError("--approval-ref is only valid with --adopt <commit> --module <id>");
+  if ("adopt" in flags) {
+    const conflict = ["set", "advance", "replace", "expect"].find((flag) => flag in flags);
+    if (conflict) return baselineError(`--adopt cannot be combined with --${conflict}: --adopt registers the adoption baseline of one module and leaves the global baseline chain unchanged.`);
+    if (expectRepoFlags.size > 0) return baselineError("--expect-repo is not valid with --adopt (there is no current adoption baseline to compare with)");
+    return adoptBaseline(flags, repoFlags, hooks);
+  }
+  if ("module" in flags) {
+    if ("set" in flags || "replace" in flags) {
+      return baselineError("orchestrate baseline --set / --replace only run on the global (or single) workflow; module sub-workflows read the parent workflow's baseline and cannot register their own (use --adopt <commit> --module <id> for an adoption baseline). Drop --module.");
+    }
+    if (!MODULE_ID_PATTERN.test(flags.module || "")) return baselineError(`--module must name a module id, got ${JSON.stringify(flags.module)}`);
+    if (!("advance" in flags)) {
+      const stray = ["expect", "dry-run", "user-input", "reason"].find((flag) => flag in flags);
+      if (stray) return baselineError(`--${stray} is only valid with --adopt <commit> or --advance <commit>`);
+      if (repoFlags.size > 0 || expectRepoFlags.size > 0) return baselineError(`--${repoFlags.size > 0 ? "repo" : "expect-repo"} is only valid with --adopt <commit> or --advance <commit>`);
+      return showModuleBaseline(flags.module);
+    }
+  }
+  const setting = "set" in flags;
+  const advancing = "advance" in flags;
+  if (advancing && (setting || "replace" in flags)) {
+    return baselineError("--advance cannot be combined with --set or --replace: --advance appends a new epoch to the baseline chain, --set/--replace register or correct the baseline itself.");
+  }
+  if (!setting && !advancing) {
+    const stray = ["replace", "expect", "dry-run", "user-input", "reason"].find((flag) => flag in flags);
+    if (stray) return baselineError(`--${stray} is only valid with --set <commit> (or --advance <commit>)`);
+    if (repoFlags.size > 0 || expectRepoFlags.size > 0) return baselineError(`--${repoFlags.size > 0 ? "repo" : "expect-repo"} is only valid with --set <commit> (or --advance <commit>)`);
+  }
+  if (setting && !("replace" in flags) && expectRepoFlags.size > 0) return baselineError("--expect-repo is only valid with --replace (or --advance)");
+
+  const state = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!setting && !advancing) {
+    if (!state) return baselineError("No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\".");
+    const registered = state.baseline_commit !== undefined;
+    const chain = baselineChain(state);
+    // 4.9.0: nested repositories are shown only when registered or declared, so projects without them keep the 4.8.1 output.
+    let declared: string[] = [];
+    let declaredError: string | undefined;
+    try {
+      declared = declaredNestedRoots(PROJECT_ROOT);
+    } catch (error) {
+      declaredError = error instanceof Error ? error.message : String(error);
+    }
+    const repoChains = baselineRepoChains(state);
+    const pending = registered ? declared.filter((key) => !(key in repoChains)) : [];
+    const extra = Object.keys(repoChains).filter((key) => !declared.includes(key));
+    const nestedShown = Object.keys(repoChains).length > 0 || declared.length > 0 || declaredError !== undefined;
+    const migration = pending.length > 0 && state.baseline_commit && state.baseline_commit !== BASELINE_UNAVAILABLE
+      ? nestedMigrationCommand(state.baseline_commit, pending, Object.fromEntries(pending.map((key) => [key, nestedHead(PROJECT_ROOT, key) || "<sha>"])))
+      : undefined;
+    const nestedLines = !nestedShown ? "" : [
+      Object.keys(repoChains).length > 0 ? ` Nested repositories: ${Object.entries(repoChains).map(([key, value]) => `${key}=${value.commits[value.commits.length - 1]} (from epoch ${value.start})`).join(", ")}.` : "",
+      pending.length > 0 ? ` Pending migration (declared nested but not registered): ${pending.map((key) => `${key}/`).join(", ")}; register with: ${migration}` : "",
+      extra.length > 0 ? ` Registered but no longer declared in ${SOURCE_ROOTS_CONFIG}: ${extra.map((key) => `${key}/`).join(", ")} (gates reject this).` : "",
+      declaredError ? ` ${SOURCE_ROOTS_CONFIG} cannot be read: ${declaredError}` : "",
+    ].join("");
+    // 4.10.0: modules with an adoption baseline are listed only when there are any.
+    let adoptions: Record<string, string> = {};
+    try {
+      adoptions = Object.fromEntries([...adoptedModuleStates()].map(([id, moduleState]) => [id, moduleState.adoption_baseline as string]));
+    } catch { /* the read-only view never fails on an unreadable layout */ }
+    const adoptionLine = Object.keys(adoptions).length > 0 ? ` Modules with an adoption baseline (orchestrate baseline --module <id>): ${Object.entries(adoptions).map(([id, sha]) => `${id}=${sha}`).join(", ")}.` : "";
+    return {
+      kind: "print",
+      workflow_id: state.workflow_id,
+      registered,
+      baseline_commit: state.baseline_commit ?? null,
+      baseline_source: state.baseline_source ?? null,
+      baseline_epoch: registered ? chain.length - 1 : null,
+      baseline_history: chain,
+      ...(nestedShown ? {
+        baseline_repos: state.baseline_repos ?? {},
+        baseline_repos_history: repoChains,
+        nested_source_roots: declared,
+        pending_nested_repos: pending,
+        ...(migration ? { migration_command: migration } : {}),
+      } : {}),
+      ...(Object.keys(adoptions).length > 0 ? { adoption_baselines: adoptions } : {}),
+      message: (registered
+        ? chain.length > 1
+          ? `Workflow baseline: ${state.baseline_commit} (source: ${state.baseline_source}, epoch ${chain.length - 1}). Baseline chain: ${chain.map((commit, index) => `#${index} ${commit}`).join(" → ")}.`
+          : `Workflow baseline: ${state.baseline_commit} (source: ${state.baseline_source}).`
+        : "No workflow baseline is registered. Register the commit existing behavior is characterized against with: orchestrate baseline --set <commit> --user-input Approve --reason \"<reason>\" [--dry-run].") + nestedLines + adoptionLine,
+    };
+  }
+  if (advancing) return advanceBaseline(flags, state, hooks, repoFlags, expectRepoFlags, "module" in flags ? flags.module : undefined);
+
+  const target = flags.set;
+  if (!COMMIT_ID_PATTERN.test(target)) {
+    return baselineError(`--set must be a full 40- or 64-character lowercase hex commit id; abbreviations, revision expressions (HEAD~3), branch names and options are rejected (got ${JSON.stringify(target)})`);
+  }
+  if (flags["user-input"] !== "Approve") return baselineError("--user-input must be exactly Approve: registering a baseline requires the user's explicit approval.");
+  if (!flags.reason || flags.reason === "true" || !flags.reason.trim()) return baselineError("--reason is required: state why this commit is the baseline.");
+  const replace = "replace" in flags;
+  if (!replace && "expect" in flags) return baselineError("--expect is only valid with --replace");
+  if (replace && (!flags.expect || flags.expect === "true")) return baselineError("--replace requires --expect <current baseline commit>");
+  if (replace && !COMMIT_ID_PATTERN.test(flags.expect) && flags.expect !== BASELINE_UNAVAILABLE) {
+    return baselineError(`--expect must be a full 40- or 64-character lowercase hex commit id, or exactly ${BASELINE_UNAVAILABLE} when correcting an unavailable baseline (got ${JSON.stringify(flags.expect)})`);
+  }
+
+  if (!state) return baselineError("No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\".");
+  if (state.status === "done") {
+    // 4.7.1: the done global workflow of a split layout still owns the baseline its live sub-workflows inherit.
+    const blocked = doneGlobalBaselineBlocker(state, "its baseline can no longer be registered or replaced");
+    if (blocked) return baselineError(blocked);
+  } else if (state.status !== "running" && state.status !== "parked") return baselineError(`Workflow ${state.workflow_id} is ${state.status}; baseline requires a running or parked workflow.`);
+  if (state.workflow_kind && state.workflow_kind !== "global") return baselineError(`aidlc/active/aidlc-state.md is a ${state.workflow_kind} workflow; baseline only runs on the global workflow.`);
+
+  const current = state.baseline_commit;
+  // 4.9.0: nested source repositories (checked on disk, fail closed).
+  let nested: string[] = [];
+  try {
+    nested = nestedSourceRepos(PROJECT_ROOT);
+  } catch (error) {
+    return baselineError(`Cannot ${replace ? "replace" : "register"} the workflow baseline: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const undeclaredRepo = [...repoFlags.keys()].find((key) => !nested.includes(key));
+  if (undeclaredRepo) return baselineError(`--repo ${undeclaredRepo}=… names no nested repository declared in ${SOURCE_ROOTS_CONFIG} (declared: ${nested.join(", ") || "none"})`);
+  const registeredRepos = state.baseline_repos || {};
+  const extraKeys = Object.keys(registeredRepos).filter((key) => !nested.includes(key)).sort();
+  if (extraKeys.length > 0) {
+    return baselineError(`The workflow baseline registers nested repositories that ${SOURCE_ROOTS_CONFIG} no longer declares: ${extraKeys.map((key) => `${key}/`).join(", ")} (registered: ${Object.keys(registeredRepos).sort().join(", ")}; declared: ${nested.join(", ") || "none"}). Removing a registered nested repository is not supported; restore the declaration or start a new workflow.`);
+  }
+  for (const [key, sha] of expectRepoFlags) {
+    if (!(key in registeredRepos)) return baselineError(`--expect-repo ${key}=${sha}: ${key}/ is not registered in the workflow baseline (registered: ${Object.keys(registeredRepos).sort().join(", ") || "none"})`);
+    if (registeredRepos[key] !== sha) return baselineError(`--expect-repo ${key}=${sha} does not match the current workflow baseline ${key}=${registeredRepos[key]}`);
+  }
+  // Restricted migration: same workflow commit, only adding nested repositories the baseline does not register yet.
+  if (replace && current !== undefined && target === current && repoFlags.size > 0 && [...repoFlags.keys()].every((key) => !(key in registeredRepos))) {
+    if (flags.expect !== current) return baselineError(`--expect ${flags.expect} does not match the current workflow baseline ${current}`);
+    return registerNestedRepos(flags, state, nested, repoFlags, hooks);
+  }
+  const unchanged = (): Directive => ({
+    kind: "print",
+    workflow_id: state.workflow_id,
+    baseline_commit: current,
+    baseline_source: state.baseline_source,
+    changed: false,
+    message: `Workflow baseline is already ${current}; nothing was written.`,
+  });
+  if (!replace) {
+    if (current === target && repoFlags.size > 0) {
+      return baselineError(`Workflow baseline is already ${current}; to register nested repositories for it run: ${nestedMigrationCommand(current, [...repoFlags.keys()], Object.fromEntries(repoFlags))}`);
+    }
+    if (current === target) return unchanged();
+    if (current !== undefined) {
+      const correction = `orchestrate baseline --set ${target} --replace --expect ${current} --user-input Approve --reason "<why>"`;
+      return baselineError(current === BASELINE_UNAVAILABLE
+        ? `Workflow baseline is ${BASELINE_UNAVAILABLE} (source: ${state.baseline_source}): no commit was available when the workflow started. To correct it, run: ${correction}. ${UNAVAILABLE_T0_NOTE}`
+        : `Workflow baseline is already ${current} (source: ${state.baseline_source}). To correct it, run: ${correction}`);
+    }
+  } else {
+    if (current === undefined) return baselineError("No workflow baseline is registered yet, so there is nothing to replace; use --set <commit> without --replace.");
+    // 4.7.0 fail-closed: an advanced baseline chain is append-only and never replaced.
+    if (state.baseline_source === "advanced" || state.baseline_history !== undefined) {
+      return baselineError(`Workflow baseline ${current} was advanced (baseline chain: ${baselineChain(state).join(" → ")}); an advanced baseline chain is append-only and cannot be replaced. Use orchestrate baseline --advance to append an epoch, or start a new workflow.`);
+    }
+    if (flags.expect !== current) return baselineError(`--expect ${flags.expect} does not match the current workflow baseline ${current}`);
+    if (target === current && repoFlags.size === 0) return unchanged();
+  }
+
+  let usage: ReturnType<typeof baselineUsage> | undefined;
+  if (replace) {
+    usage = baselineUsage(PROJECT_ROOT);
+    if (usage.used) {
+      return baselineError(`Workflow baseline ${current} is already in use and cannot be replaced (${usage.summary}): ${usage.findings.join("; ")}`, { usage_check: usage.summary });
+    }
+  }
+  const checked = checkBaselineCandidate(PROJECT_ROOT, state, target);
+  if ("error" in checked) {
+    const restart = current === BASELINE_UNAVAILABLE && /is later than the workflow start/.test(checked.error) ? `. ${UNAVAILABLE_T0_NOTE}` : "";
+    return baselineError(`Cannot use ${target} as the workflow baseline: ${checked.error}${restart}`);
+  }
+  const candidate = checked.candidate;
+  // 4.9.0: every declared nested repository gets a commit: --repo, or its clean HEAD.
+  const newRepos: Record<string, string> = {};
+  const repoDirty: Record<string, string> = {};
+  if (nested.length > 0) {
+    if (replace) {
+      const missingExpect = Object.keys(registeredRepos).filter((key) => !expectRepoFlags.has(key));
+      if (missingExpect.length > 0) return baselineError(`--replace of a baseline with registered nested repositories requires --expect-repo <path>=<current commit> for each of them; missing: ${missingExpect.map((key) => `--expect-repo ${key}=${registeredRepos[key]}`).join(" ")}`);
+    }
+    const problems: string[] = [];
+    for (const key of nested) {
+      const explicit = repoFlags.get(key);
+      const dirty = nestedDirty(PROJECT_ROOT, key);
+      if (explicit) {
+        newRepos[key] = explicit;
+        repoDirty[key] = dirty === null ? "unknown" : dirty ? "yes" : "no";
+        continue;
+      }
+      const head = nestedHead(PROJECT_ROOT, key);
+      if (!head) {
+        problems.push(`${key}/ has no commit yet`);
+        continue;
+      }
+      if (dirty !== false) problems.push(`${key}/ ${dirty === null ? "status cannot be read" : "has uncommitted or untracked changes"}`);
+      newRepos[key] = head;
+      repoDirty[key] = "no (HEAD taken)";
+    }
+    if (problems.length > 0) {
+      return baselineError(`Cannot take the HEAD of the nested repositories as their baseline: ${problems.join("; ")}. Commit or stash the changes first, or name the commit explicitly with --repo <path>=<commit>.`);
+    }
+    for (const key of nested) {
+      const repoCheck = checkRepoCandidate(PROJECT_ROOT, key, newRepos[key], candidate.workflow_started_at);
+      if ("error" in repoCheck) return baselineError(`Cannot use ${key}=${newRepos[key]} as the nested repository baseline: ${repoCheck.error}`);
+    }
+  }
+  const nestedChecks = nested.length > 0 ? { baseline_repos: newRepos, repo_dirty: repoDirty } : {};
+  const anchors = candidate.anchors.length ? candidate.anchors.join(", ") : "none";
+  const checks = {
+    head: candidate.head,
+    committer_date: candidate.committer_date,
+    author_date: candidate.author_date,
+    workflow_started_at: candidate.workflow_started_at,
+    anchor_commits: candidate.anchors,
+    tracked_state_at_commit: candidate.tracked_state,
+    ...(usage ? { usage_check: usage.summary } : {}),
+    ...nestedChecks,
+  };
+  if ("dry-run" in flags) {
+    return {
+      kind: "print",
+      dry_run: true,
+      changed: true,
+      workflow_id: state.workflow_id,
+      baseline_commit: target,
+      ...(nested.length > 0 ? { baseline_repos: newRepos } : {}),
+      ...(replace ? { replaces: current } : {}),
+      checks,
+      message: `🔎 ${target} passes every baseline check (dry run, nothing written). Run the same command without --dry-run to ${replace ? "replace" : "register"} it.`,
+    };
+  }
+
+  hooks.beforeWrite?.();
+  const fresh = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!fresh || fresh.revision !== state.revision) {
+    return baselineError(`workflow state revision conflict: expected ${state.revision}, found ${fresh ? fresh.revision : "no workflow"}; nothing was written, re-run the command.`);
+  }
+  if (fresh.baseline_commit !== current) {
+    return baselineError(`--expect ${current ?? "(none)"} is no longer the workflow baseline (now ${fresh.baseline_commit ?? "none"}); nothing was written.`);
+  }
+  if (JSON.stringify(baselineRepoChains(fresh)) !== JSON.stringify(baselineRepoChains(state))) {
+    return baselineError("the nested repository baseline changed while the command ran; nothing was written, re-run the command.");
+  }
+  const source = replace ? "replaced" : "registered";
+  const replacementCount = fresh.history.filter((entry) => entry.stage === "baseline" && entry.result === "replaced").length + 1;
+  const previousSource = fresh.baseline_source;
+  const previousRepos = fresh.baseline_repos;
+  fresh.baseline_commit = target;
+  fresh.baseline_source = source;
+  if (nested.length > 0) fresh.baseline_repos = newRepos;
+  else delete fresh.baseline_repos;
+  fresh.history.push({ stage: "baseline", result: source, timestamp: new Date().toISOString(), user_input: "Approve" });
+  try {
+    saveWorkflowState(PROJECT_ROOT, fresh, GLOBAL_WORKFLOW, { baselineWrite: true });
+  } catch (error) {
+    return baselineError(`${error instanceof Error ? error.message : String(error)}; nothing was written, re-run the command.`);
+  }
+
+  const dates = {
+    "Committer Date (self-reported)": candidate.committer_date,
+    "Author Date (self-reported)": candidate.author_date,
+    "Workflow Started At": candidate.workflow_started_at,
+    "Anchor Commits": anchors,
+    "Tracked State At Commit": candidate.tracked_state,
+  };
+  const event = replace ? "BASELINE_COMMIT_REPLACED" : "BASELINE_COMMIT_SET";
+  const repoFields: Record<string, string> = nested.length > 0
+    ? {
+      ...(replace ? { "From Repos": previousRepos ? renderBaselineRepos(previousRepos) : "-" } : {}),
+      Repos: renderBaselineRepos(newRepos),
+      "Repo Dirty": Object.keys(repoDirty).sort().map((key) => `${key}=${repoDirty[key]}`).join(", "),
+    }
+    : {};
+  const fields: Record<string, string> = replace
+    ? {
+      "Workflow ID": fresh.workflow_id,
+      From: current as string,
+      "From Source": previousSource || "-",
+      To: target,
+      Expected: flags.expect,
+      ...repoFields,
+      "HEAD At Replacement": candidate.head,
+      ...dates,
+      "Usage Check": usage!.summary,
+      "Replacement Count": String(replacementCount),
+      Reason: flags.reason.trim(),
+      "User Input": "Approve",
+    }
+    : {
+      "Workflow ID": fresh.workflow_id,
+      Commit: target,
+      Source: source,
+      ...repoFields,
+      "HEAD At Registration": candidate.head,
+      ...dates,
+      Reason: flags.reason.trim(),
+      "User Input": "Approve",
+    };
+  try {
+    (hooks.appendAudit || appendAuditEvent)(PROJECT_ROOT, GLOBAL_WORKFLOW, event, fields);
+  } catch (error) {
+    return baselineError(`Workflow baseline ${target} was saved to the workflow state, but the ${event} audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。`, { baseline_commit: target, baseline_source: source });
+  }
+  return {
+    kind: "print",
+    changed: true,
+    workflow_id: fresh.workflow_id,
+    baseline_commit: target,
+    baseline_source: source,
+    ...(nested.length > 0 ? { baseline_repos: newRepos } : {}),
+    ...(replace ? { replaced: current, replacement_count: replacementCount } : {}),
+    checks,
+    message: replace
+      ? `✅ Workflow baseline replaced: ${current} → ${target} (replacement #${replacementCount}).${nested.length > 0 ? ` Nested repositories: ${renderBaselineRepos(newRepos)}.` : ""}`
+      : `✅ Workflow baseline registered: ${target}.${nested.length > 0 ? ` Nested repositories: ${renderBaselineRepos(newRepos)}.` : ""}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// baseline --adopt — register a module's adoption baseline (4.10.0)
+// ---------------------------------------------------------------------------
+
+const ADOPT_USAGE = "orchestrate baseline --adopt <workflow commit> [--repo <path>=<commit>]… --module <id> --user-input Approve --approval-ref \"<approval record>\" --reason \"<reason>\" [--dry-run]";
+
+/** Module sub-workflows (split layout) that registered an adoption baseline, keyed by module id. */
+function adoptedModuleStates(): Map<string, WorkflowState> {
+  const adopted = new Map<string, WorkflowState>();
+  if (!isSplitLayout(PROJECT_ROOT)) return adopted;
+  for (const part of loadWorkflowParts(PROJECT_ROOT).parts.values()) {
+    if (part.ref.kind === "module" && part.state.adoption_baseline !== undefined) adopted.set(part.ref.module_id, part.state);
+  }
+  return adopted;
+}
+
+function moduleOfInstanceId(instanceId: string): string | undefined {
+  return /@module:([a-z0-9][a-z0-9-]*)/.exec(instanceId)?.[1];
+}
+
+/**
+ * Units of a module whose tdd observes no code (4.10.1): the I13 declares `ucd_units`,
+ * the unit owns none of them and the unit manifest declares its `ucd_exemption`. Empty
+ * when the I13 has no `ucd_units` or the I13 / unit manifest cannot be read, so every
+ * unit counts (fail closed).
+ */
+function adoptionExemptUnits(moduleId: string): Set<string> {
+  const exempt = new Set<string>();
+  const i13 = moduleI13Evidence({ module_id: moduleId });
+  if (!("value" in i13)) return exempt;
+  const ucdUnits = i13UcdUnits(i13.value);
+  if (!ucdUnits) return exempt;
+  const owners = new Set(Object.values(ucdUnits).flat());
+  let units: ReturnType<typeof readUnitManifest>;
+  try {
+    units = readUnitManifest(PROJECT_ROOT, moduleId);
+  } catch {
+    return exempt;
+  }
+  for (const unit of units) if (unit.ucd_exemption && !owners.has(unit.unit_id)) exempt.add(unit.unit_id);
+  return exempt;
+}
+
+/**
+ * Earliest recorded start of a tdd instance of the module: the timestamps of its tdd
+ * history entries and the claimed_at of its active tdd claims. `started_at` is undefined
+ * when no tdd instance of the module has a recorded start (the module has not entered
+ * tdd). Instances of `exemptUnits` (4.10.1) observe no code and are listed in `ignored`
+ * instead of being counted.
+ */
+function firstTddStart(state: WorkflowState, moduleId: string, exemptUnits: ReadonlySet<string> = new Set()): { started_at: string | undefined; ignored: string[] } {
+  const isModuleTdd = (instanceId?: string) => !!instanceId && instanceId.split("@", 1)[0] === "tdd" && moduleOfInstanceId(instanceId) === moduleId;
+  const exemptUnit = (unitId?: string) => unitId !== undefined && exemptUnits.has(unitId);
+  const unitOf = (instanceId: string) => /@unit:([a-z0-9][a-z0-9-]*)/.exec(instanceId)?.[1];
+  const ignored = new Set<string>();
+  const times: string[] = [];
+  for (const entry of state.history) {
+    if (entry.stage !== "tdd" || !(isModuleTdd(entry.instance_id) || (!entry.instance_id && entry.module_id === moduleId))) continue;
+    const unitId = entry.instance_id ? unitOf(entry.instance_id) : entry.unit_id;
+    if (exemptUnit(unitId)) ignored.add(entry.instance_id || `tdd@module:${moduleId}@unit:${unitId}`);
+    else times.push(entry.timestamp);
+  }
+  for (const claim of Object.values(state.active_instances || {})) {
+    if (!isModuleTdd(claim.stage_instance)) continue;
+    if (exemptUnit(unitOf(claim.stage_instance))) ignored.add(claim.stage_instance);
+    else times.push(claim.claimed_at);
+  }
+  const valid = times.filter((value) => !Number.isNaN(Date.parse(value)));
+  const startedAt = valid.length === 0 ? undefined : valid.reduce((earliest, value) => (Date.parse(value) < Date.parse(earliest) ? value : earliest));
+  return { started_at: startedAt, ignored: [...ignored].sort() };
+}
+
+/** Read-only view of the baseline that applies to one module (`orchestrate baseline --module <id>`). */
+function showModuleBaseline(moduleId: string): Directive {
+  let baseline: ReturnType<typeof workflowBaselineForModule>;
+  let own: WorkflowState | null = null;
+  try {
+    baseline = workflowBaselineForModule(PROJECT_ROOT, moduleId);
+    if (isSplitLayout(PROJECT_ROOT)) own = loadWorkflowState(PROJECT_ROOT, { kind: "module", module_id: moduleId });
+  } catch (error) {
+    return baselineError(`Cannot resolve the baseline of module ${moduleId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!baseline.registered) {
+    return { kind: "print", module_id: moduleId, baseline_kind: baseline.kind, registered: false, message: `Module ${moduleId} uses the workflow baseline, which is not registered.` };
+  }
+  const adopted = baseline.kind === "adoption" && own;
+  return {
+    kind: "print",
+    module_id: moduleId,
+    baseline_kind: baseline.kind,
+    registered: true,
+    baseline_commit: baseline.commit,
+    baseline_epoch: baseline.epochs.length - 1,
+    baseline_history: baseline.epochs,
+    ...(Object.keys(baseline.repos).length > 0 ? { baseline_repos_history: baseline.repos } : {}),
+    ...(adopted ? { adoption_approval_ref: own!.adoption_approval_ref, adopted_at: own!.adopted_at } : {}),
+    message: adopted
+      ? `Module ${moduleId} uses its adoption baseline ${baseline.commit} (adopted at ${own!.adopted_at}, approval ${own!.adoption_approval_ref}${baseline.epochs.length > 1 ? `, epoch ${baseline.epochs.length - 1}` : ""}).`
+      : `Module ${moduleId} uses the workflow baseline ${baseline.commit}${baseline.epochs.length > 1 ? ` (epoch ${baseline.epochs.length - 1})` : ""}.`,
+  };
+}
+
+/**
+ * `orchestrate baseline --adopt <commit> --module <id>` (4.10.0): register the commit a
+ * module's already existing implementation is characterized against, in the module
+ * sub-workflow. Exempt from the workflow-start (T0) and state-file rules of --set; the
+ * commit must still exist, be HEAD or an ancestor (no shallow clone) and predate the
+ * module's first tdd start, and the module must hold no RED / BASELINE / GREEN
+ * evidence. Nested repositories get a commit each (--repo or their clean HEAD), checked
+ * the same way. The global baseline chain is not touched.
+ */
+async function adoptBaseline(flags: Record<string, string>, repoFlags: Map<string, string>, hooks: StateWriteHooks): Promise<Directive> {
+  const target = flags.adopt;
+  if (!COMMIT_ID_PATTERN.test(target)) {
+    return baselineError(`--adopt must be a full 40- or 64-character lowercase hex commit id; abbreviations, revision expressions (HEAD~3), branch names and options are rejected (got ${JSON.stringify(target)})`);
+  }
+  const moduleId = flags.module;
+  if (moduleId === undefined || moduleId === "true") return baselineError(`--adopt requires --module <id>: an adoption baseline belongs to one module. Usage: ${ADOPT_USAGE}`);
+  if (!MODULE_ID_PATTERN.test(moduleId)) return baselineError(`--module must name a module id, got ${JSON.stringify(moduleId)}`);
+  if (flags["user-input"] !== "Approve") return baselineError("--user-input must be exactly Approve: adopting a baseline requires the user's explicit approval.");
+  const approvalRef = flags["approval-ref"];
+  if (approvalRef === undefined || approvalRef === "true" || !approvalRef.trim()) {
+    return baselineError(`--approval-ref is required: name the real approval record of this adoption (review id, ticket, meeting minutes). Usage: ${ADOPT_USAGE}`);
+  }
+  if (!flags.reason || flags.reason === "true" || !flags.reason.trim()) return baselineError("--reason is required: state why the module's existing implementation is adopted at this commit.");
+  const refuse = (reason: string) => baselineError(`Cannot adopt ${target} as the adoption baseline of module ${moduleId}: ${reason}. Nothing was written.`);
+
+  const global = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!global) return baselineError("No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\".");
+  if (!isSplitLayout(PROJECT_ROOT)) return refuse("the adoption baseline is recorded in the module sub-workflow, which only exists in the split layout; migrate with orchestrate split --from <workflow-id> first");
+  const ref: WorkflowRef = { kind: "module", module_id: moduleId };
+  let moduleState: WorkflowState | null;
+  try {
+    moduleState = loadWorkflowState(PROJECT_ROOT, ref);
+    if (moduleState) workflowBaseline(PROJECT_ROOT, ref);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+  if (!moduleState) return refuse(`there is no module sub-workflow ${moduleId}`);
+  if (moduleState.status !== "running" && moduleState.status !== "parked") return refuse(`the module sub-workflow is ${moduleState.status}; adoption requires a running or parked module`);
+
+  let nested: string[] = [];
+  try {
+    nested = nestedSourceRepos(PROJECT_ROOT);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+  const undeclaredRepo = [...repoFlags.keys()].find((key) => !nested.includes(key));
+  if (undeclaredRepo) return refuse(`--repo ${undeclaredRepo}=… names no nested repository declared in ${SOURCE_ROOTS_CONFIG} (declared: ${nested.join(", ") || "none"})`);
+  const repos: Record<string, string> = {};
+  const repoDirty: Record<string, string> = {};
+  const problems: string[] = [];
+  for (const key of nested) {
+    const explicit = repoFlags.get(key);
+    const dirty = nestedDirty(PROJECT_ROOT, key);
+    if (explicit) {
+      repos[key] = explicit;
+      repoDirty[key] = dirty === null ? "unknown" : dirty ? "yes" : "no";
+      continue;
+    }
+    const head = nestedHead(PROJECT_ROOT, key);
+    if (!head) {
+      problems.push(`${key}/ has no commit yet`);
+      continue;
+    }
+    if (dirty !== false) problems.push(`${key}/ ${dirty === null ? "status cannot be read" : "has uncommitted or untracked changes"}`);
+    repos[key] = head;
+    repoDirty[key] = "no (HEAD taken)";
+  }
+  if (problems.length > 0) return refuse(`cannot take the HEAD of the nested repositories as their adoption commit: ${problems.join("; ")}; commit or stash the changes first, or name the commit explicitly with --repo <path>=<commit>`);
+
+  if (moduleState.adoption_baseline !== undefined) {
+    const same = moduleState.adoption_baseline === target && JSON.stringify(moduleState.adoption_baseline_repos || {}) === JSON.stringify(repos) && moduleState.adoption_baseline_history === undefined;
+    if (same) {
+      return { kind: "print", changed: false, module_id: moduleId, baseline_kind: "adoption", baseline_commit: target, message: `Module ${moduleId} already adopted ${target}; nothing was written.` };
+    }
+    return refuse(`module ${moduleId} already has the adoption baseline ${moduleState.adoption_baseline} (adopted at ${moduleState.adopted_at}); an adoption baseline is registered once and then only advanced with orchestrate baseline --advance <commit> --module ${moduleId} --expect ${moduleState.adoption_baseline} --user-input Approve --reason "<reason>"`);
+  }
+
+  let phaseEvidence: string[];
+  let exemptEvidence: string[];
+  const exemptUnits = adoptionExemptUnits(moduleId);
+  try {
+    ({ held: phaseEvidence, exempt: exemptEvidence } = modulePhaseEvidence(PROJECT_ROOT, moduleId, exemptUnits));
+  } catch (error) {
+    return refuse(`the module evidence cannot be scanned: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (phaseEvidence.length > 0) {
+    return refuse(`module ${moduleId} already holds RED / BASELINE / GREEN evidence (${phaseEvidence.join(", ")}); adoption must happen before the module's tdd produces evidence — invalidate (remove) that evidence first, then adopt`);
+  }
+  const { started_at: tddStartedAt, ignored: ignoredTdd } = firstTddStart(moduleState, moduleId, exemptUnits);
+  // 4.10.1: tdd instances and not_required evidence of ucd_exemption units observed no code.
+  const ignoredExemption = [...ignoredTdd, ...exemptEvidence];
+  const main = checkAdoptionCandidate(PROJECT_ROOT, target, tddStartedAt);
+  if ("error" in main) return refuse(main.error);
+  const repoDates: Record<string, string> = {};
+  for (const key of nested) {
+    const checked = checkAdoptionCandidate(PROJECT_ROOT, repos[key], tddStartedAt, key);
+    if ("error" in checked) return refuse(`${key}=${repos[key]}: ${checked.error}`);
+    repoDates[key] = checked.committer_date;
+  }
+  const scan = `no RED / BASELINE / GREEN evidence of module ${moduleId}`;
+  const checks = {
+    head: main.head,
+    committer_date: main.committer_date,
+    workflow_started_at: workflowStartedAt(global),
+    tdd_started_at: tddStartedAt ?? null,
+    evidence_scan: scan,
+    ...(ignoredExemption.length > 0 ? { ignored_exemption_instances: ignoredExemption } : {}),
+    exempted_rules: [...ADOPTION_EXEMPTED_RULES],
+    replaced_rules: [...ADOPTION_REPLACED_RULES],
+    ...(nested.length > 0 ? { adoption_baseline_repos: repos, repo_committer_dates: repoDates, repo_dirty: repoDirty } : {}),
+  };
+  if ("dry-run" in flags) {
+    return {
+      kind: "print",
+      dry_run: true,
+      changed: true,
+      module_id: moduleId,
+      baseline_kind: "adoption",
+      baseline_commit: target,
+      ...(nested.length > 0 ? { baseline_repos: repos } : {}),
+      checks,
+      message: `🔎 ${target} passes every adoption check for module ${moduleId} (dry run, nothing written). Run the same command without --dry-run to adopt it.`,
+    };
+  }
+
+  hooks.beforeWrite?.();
+  const fresh = loadWorkflowState(PROJECT_ROOT, ref);
+  if (!fresh || fresh.revision !== moduleState.revision) {
+    return baselineError(`module workflow state revision conflict: expected ${moduleState.revision}, found ${fresh ? fresh.revision : "no workflow"}; nothing was written, re-run the command.`);
+  }
+  if (fresh.adoption_baseline !== undefined) return refuse(`module ${moduleId} adopted ${fresh.adoption_baseline} while the command ran`);
+  const adoptedAt = new Date().toISOString();
+  fresh.adoption_baseline = target;
+  if (nested.length > 0) fresh.adoption_baseline_repos = { ...repos };
+  fresh.adoption_approval_ref = approvalRef.trim();
+  fresh.adopted_at = adoptedAt;
+  fresh.history.push({ stage: "baseline", module_id: moduleId, result: "adopted", timestamp: adoptedAt, user_input: "Approve" });
+  try {
+    saveWorkflowState(PROJECT_ROOT, fresh, ref, { baselineWrite: true });
+  } catch (error) {
+    return baselineError(`${error instanceof Error ? error.message : String(error)}; nothing was written, re-run the command.`);
+  }
+  const event = "BASELINE_ADOPTED";
+  try {
+    (hooks.appendAudit || appendAuditEvent)(PROJECT_ROOT, ref, event, {
+      "Workflow ID": fresh.workflow_id,
+      "Parent Workflow ID": global.workflow_id,
+      Module: moduleId,
+      Commit: target,
+      ...(nested.length > 0 ? { Repos: renderBaselineRepos(repos), "Repo Dirty": nested.map((key) => `${key}=${repoDirty[key]}`).join(", "), "Repo Committer Dates (self-reported)": nested.map((key) => `${key}=${repoDates[key]}`).join(", ") } : {}),
+      "HEAD At Adoption": main.head,
+      "Committer Date (self-reported)": main.committer_date,
+      "Workflow Started At": checks.workflow_started_at,
+      "TDD Started At": tddStartedAt || "not started",
+      "Evidence Scan": scan,
+      ...(ignoredExemption.length > 0 ? { "Ignored Exemption Instances": ignoredExemption.join(", ") } : {}),
+      "Exempted Rules": ADOPTION_EXEMPTED_RULES.join("; "),
+      "Replaced Rules": ADOPTION_REPLACED_RULES.join("; "),
+      "Approval Ref": approvalRef.trim(),
+      Reason: flags.reason.trim(),
+      "User Input": "Approve",
+    });
+  } catch (error) {
+    return baselineError(`The adoption baseline ${target} of module ${moduleId} was saved to the module workflow state, but the ${event} audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。`, { module_id: moduleId, baseline_commit: target });
+  }
+  return {
+    kind: "print",
+    changed: true,
+    module_id: moduleId,
+    workflow_id: fresh.workflow_id,
+    baseline_kind: "adoption",
+    baseline_commit: target,
+    ...(nested.length > 0 ? { baseline_repos: repos } : {}),
+    adoption_approval_ref: approvalRef.trim(),
+    adopted_at: adoptedAt,
+    checks,
+    message: `✅ Module ${moduleId} adopted ${target} as its adoption baseline${nested.length > 0 ? ` (nested repositories: ${renderBaselineRepos(repos)})` : ""}. Its characterization UC-Ds and BASELINE now resolve against it; the global baseline chain is unchanged. Refresh the module's I13 evidence (evidence run --stage test-case-derivation --module ${moduleId} --refresh) before its tdd.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// baseline --advance — append an epoch to the workflow baseline chain (4.7.0)
+// ---------------------------------------------------------------------------
+
+/**
+ * Why a done workflow cannot take a baseline write, or undefined when it can (4.7.1).
+ * Only the global workflow of a split layout (registry present, same Global Workflow ID)
+ * qualifies, and only while at least one module or integration sub-workflow is running
+ * or parked: those sub-workflows inherit the global baseline chain via workflowBaseline().
+ * A done single (non-split) workflow is always refused with the pre-4.7.1 text.
+ */
+function doneGlobalBaselineBlocker(state: WorkflowState, refusal: string): string | undefined {
+  const refused = `Workflow ${state.workflow_id} is done; ${refusal}`;
+  let loaded: WorkflowParts;
+  try {
+    loaded = loadWorkflowParts(PROJECT_ROOT);
+  } catch (error) {
+    return `${refused} (the split workflow layout cannot be loaded: ${error instanceof Error ? error.message : String(error)}).`;
+  }
+  if (!loaded.split || !loaded.registry) return `${refused}.`;
+  if (state.workflow_kind && state.workflow_kind !== "global") return `${refused}.`;
+  if (loaded.registry.global_workflow_id !== state.workflow_id) {
+    return `${refused} (registry Global Workflow ID ${loaded.registry.global_workflow_id} does not match it).`;
+  }
+  const live = [...loaded.parts.values()].filter((part) => part.ref.kind !== "global" && (part.state.status === "running" || part.state.status === "parked"));
+  if (live.length === 0) {
+    return `${refused}: it is the global workflow of a split layout, but no module or integration sub-workflow is running or parked.`;
+  }
+  return undefined;
+}
+
+const ADVANCE_USAGE = "orchestrate baseline --advance <commit> --expect <current baseline> --user-input Approve --reason \"<reason>\" [--dry-run]";
+const ADVANCE_USAGE_NESTED = "orchestrate baseline --advance <workflow commit> --repo <path>=<commit>… --expect <current workflow commit> --expect-repo <path>=<current commit>… --user-input Approve --reason \"<reason>\" [--dry-run]";
+
+/** Every workflow part as one merged read view (the global/single state outside the split layout). */
+function baselineScanView(): { view: WorkflowState; parts: WorkflowParts } {
+  const parts = loadWorkflowParts(PROJECT_ROOT);
+  const global = parts.parts.get("global")?.state;
+  if (!global) throw new Error("no active workflow");
+  return { view: parts.split ? mergeWorkflowView(parts.parts, GLOBAL_WORKFLOW) : global, parts };
+}
+
+/** I13 evidence files that declare characterization code refs, project-relative. */
+function characterizationI13Files(): Array<{ path: string; value: Record<string, unknown> }> {
+  const root = join(PROJECT_ROOT, ".aidlc", "evidence", "test-case-derivation");
+  if (!existsSync(root)) return [];
+  return collectFiles(root).filter((path) => path.endsWith("test-case-derivation.json")).sort().map((path) => {
+    const label = normalizeArtifactLabel(relative(PROJECT_ROOT, path));
+    let value: unknown;
+    try {
+      value = JSON.parse(readFileSync(path, "utf8"));
+    } catch (error) {
+      throw new Error(`I13 evidence ${label} cannot be parsed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const record = asRecord(value);
+    if (!record) throw new Error(`I13 evidence ${label} must be a JSON object`);
+    return { path: label, value: record };
+  }).filter((file) => file.value.status === "required" && i13UcdIdsByMode(file.value).characterization.length > 0);
+}
+
+async function advanceBaseline(flags: Record<string, string>, state: WorkflowState | null, hooks: StateWriteHooks, repoFlags: Map<string, string> = new Map(), expectRepoFlags: Map<string, string> = new Map(), moduleId?: string): Promise<Directive> {
+  const target = flags.advance;
+  if (!COMMIT_ID_PATTERN.test(target)) {
+    return baselineError(`--advance must be a full 40- or 64-character lowercase hex commit id; abbreviations, revision expressions (HEAD~3), branch names and options are rejected (got ${JSON.stringify(target)})`);
+  }
+  if (flags["user-input"] !== "Approve") return baselineError("--user-input must be exactly Approve: advancing the baseline requires the user's explicit approval.");
+  if (!flags.reason || flags.reason === "true" || !flags.reason.trim()) return baselineError("--reason is required: state why the baseline advances to this commit.");
+  if (!flags.expect || flags.expect === "true") return baselineError(`--advance requires --expect <current baseline commit> (same optimistic check as --replace). Usage: ${ADVANCE_USAGE}`);
+  if (!COMMIT_ID_PATTERN.test(flags.expect)) return baselineError(`--expect must be a full 40- or 64-character lowercase hex commit id (got ${JSON.stringify(flags.expect)})`);
+
+  // 1. Workflow, git repository and a usable current epoch.
+  if (!state) return baselineError("No active workflow. Start one with orchestrate next --scope <scope> --work \"<description>\".");
+  // 4.10.0: --module advances that module's adoption baseline chain; the global chain is untouched.
+  let adoption: { ref: WorkflowRef; state: WorkflowState } | undefined;
+  if (moduleId !== undefined) {
+    const ref: WorkflowRef = { kind: "module", module_id: moduleId };
+    let moduleState: WorkflowState | null = null;
+    try {
+      moduleState = isSplitLayout(PROJECT_ROOT) ? loadWorkflowState(PROJECT_ROOT, ref) : null;
+    } catch (error) {
+      return baselineError(`Cannot advance the adoption baseline of module ${moduleId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!moduleState || moduleState.adoption_baseline === undefined) {
+      return baselineError(`Module ${moduleId} has no adoption baseline, so there is no module chain to advance: --advance --module only advances an adoption baseline registered with orchestrate baseline --adopt <commit> --module ${moduleId}. To advance the workflow baseline, Drop --module.`);
+    }
+    if (moduleState.status !== "running" && moduleState.status !== "parked") return baselineError(`Module workflow ${moduleId} is ${moduleState.status}; baseline --advance --module requires a running or parked module.`);
+    adoption = { ref, state: moduleState };
+  } else if (state.status === "done") {
+    // 4.7.1: in the split layout the global workflow is legitimately done once the product-level
+    // stages resolve; the module / integration sub-workflows that inherit its chain keep running.
+    const blocked = doneGlobalBaselineBlocker(state, "baseline --advance requires a running or parked workflow");
+    if (blocked) return baselineError(blocked);
+  } else if (state.status !== "running" && state.status !== "parked") return baselineError(`Workflow ${state.workflow_id} is ${state.status}; baseline --advance requires a running or parked workflow.`);
+  if (state.workflow_kind && state.workflow_kind !== "global") return baselineError(`aidlc/active/aidlc-state.md is a ${state.workflow_kind} workflow; baseline only runs on the global workflow.`);
+  const owner = adoption ? adoptionAsBaseline(adoption.state) : state;
+  const ownerSource = adoption ? (adoption.state.adoption_baseline_history !== undefined ? "advanced" : "registered") : state.baseline_source;
+  const chainLabel = adoption ? `adoption baseline of module ${moduleId}` : "workflow baseline";
+  const current = owner.baseline_commit;
+  if (current === undefined || ownerSource === undefined) {
+    return baselineError("No workflow baseline is registered, so there is no epoch to advance from; register one with orchestrate baseline --set <commit> --user-input Approve --reason \"<reason>\".");
+  }
+  if (current === BASELINE_UNAVAILABLE) {
+    return baselineError(`Workflow baseline is ${BASELINE_UNAVAILABLE}; it cannot be advanced. Correct it first with orchestrate baseline --set <commit> --replace --expect ${BASELINE_UNAVAILABLE} --user-input Approve --reason "<why>".`);
+  }
+  if (flags.expect !== current) return baselineError(`--expect ${flags.expect} does not match the current ${chainLabel} ${current}`);
+  const currentErrors = baselineCommitErrors(PROJECT_ROOT, { baseline_commit: current, baseline_source: ownerSource });
+  if (currentErrors.length > 0) return baselineError(`Cannot advance the ${chainLabel}: ${currentErrors.join("; ")}`);
+
+  // 4.9.0: every registered nested repository needs an explicit --repo target (and
+  // --expect-repo); a declared but unregistered one must be migrated first.
+  let nested: string[] = [];
+  try {
+    nested = nestedSourceRepos(PROJECT_ROOT);
+  } catch (error) {
+    return baselineError(`Cannot advance the workflow baseline: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const registeredRepos = owner.baseline_repos || {};
+  const registeredKeys = Object.keys(registeredRepos).sort();
+  const extraKeys = registeredKeys.filter((key) => !nested.includes(key));
+  if (extraKeys.length > 0) {
+    return baselineError(`Cannot advance the workflow baseline: it registers nested repositories that ${SOURCE_ROOTS_CONFIG} no longer declares: ${extraKeys.map((key) => `${key}/`).join(", ")} (registered: ${registeredKeys.join(", ")}; declared: ${nested.join(", ") || "none"}). Restore the declaration or start a new workflow.`);
+  }
+  const pendingKeys = nested.filter((key) => !(key in registeredRepos));
+  if (pendingKeys.length > 0) return baselineError(`Cannot advance the workflow baseline: ${pendingNestedError(PROJECT_ROOT, current, pendingKeys)}`);
+  const strayRepo = [...repoFlags.keys(), ...expectRepoFlags.keys()].find((key) => !(key in registeredRepos));
+  if (strayRepo) return baselineError(`--repo / --expect-repo ${strayRepo}: ${strayRepo}/ is not a registered nested repository of the workflow baseline (registered: ${registeredKeys.join(", ") || "none"})`);
+  const missingRepo = registeredKeys.filter((key) => !repoFlags.has(key));
+  if (missingRepo.length > 0) {
+    return baselineError(`--advance must name the target of every registered nested repository explicitly (there is no default); missing: ${missingRepo.map((key) => `--repo ${key}=<commit>`).join(" ")}. Usage: ${ADVANCE_USAGE_NESTED}`);
+  }
+  const missingExpect = registeredKeys.filter((key) => !expectRepoFlags.has(key));
+  if (missingExpect.length > 0) return baselineError(`--advance requires --expect-repo <path>=<current commit> for every registered nested repository; missing: ${missingExpect.map((key) => `--expect-repo ${key}=${registeredRepos[key]}`).join(" ")}`);
+  for (const [key, sha] of expectRepoFlags) {
+    if (registeredRepos[key] !== sha) return baselineError(`--expect-repo ${key}=${sha} does not match the current workflow baseline ${key}=${registeredRepos[key]}`);
+  }
+  const repoTargets = Object.fromEntries(registeredKeys.map((key) => [key, repoFlags.get(key)!]));
+  const repoMoves: Record<string, boolean> = {};
+  for (const key of registeredKeys) {
+    const checked = checkRepoAdvanceTarget(PROJECT_ROOT, key, registeredRepos[key], repoTargets[key]);
+    if ("error" in checked) return baselineError(`Cannot advance the workflow baseline: ${checked.error}`);
+    repoMoves[key] = checked.moved;
+  }
+
+  // 2. Target: existing commit, HEAD or an ancestor of HEAD, strict descendant of the current epoch.
+  // 4.9.0: with registered nested repositories the workflow commit may stay (at least one repository must advance).
+  const mainStays = registeredKeys.length > 0 && target === current;
+  if (mainStays && !Object.values(repoMoves).some(Boolean)) {
+    return baselineError(`Cannot advance the workflow baseline: neither the workflow repository (${target} is the current epoch) nor any nested repository (${registeredKeys.map((key) => `${key}=${repoTargets[key]}`).join(", ")}) moves; --advance needs at least one strict descendant`);
+  }
+  const gitCheck: { error: string } | { head: string } = mainStays ? { head: currentHeadCommit(PROJECT_ROOT) } : checkAdvanceTarget(PROJECT_ROOT, current, target);
+  if ("error" in gitCheck) return baselineError(`Cannot advance the workflow baseline to ${target}: ${gitCheck.error}`);
+
+  let scan: ReturnType<typeof baselineScanView>;
+  try {
+    scan = baselineScanView();
+  } catch (error) {
+    return baselineError(`Cannot advance the workflow baseline: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const { view, parts } = scan;
+  const graph = loadGraph();
+  const instances = expandStageInstances(graph, view);
+  const completed = new Set(completedInstanceIds(view));
+  // 4.10.0: a module adoption chain only looks at that module; the global chain skips
+  // adopted modules, whose BASELINE / GREEN / I13 are bound to their own chain.
+  let adoptedIds: Set<string>;
+  try {
+    adoptedIds = adoption ? new Set<string>() : new Set(adoptedModuleStates().keys());
+  } catch (error) {
+    return baselineError(`Cannot advance the workflow baseline: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const inScope = (owningModule: string | undefined): boolean => (adoption ? owningModule === moduleId : !(owningModule && adoptedIds.has(owningModule)));
+
+  // 4. Never between a unit's BASELINE and GREEN: no active code-generation, and no unit
+  //    whose controlled BASELINE observation exists while its code-generation is open.
+  const blockers: string[] = [];
+  const unitKey = (instance: StageInstance) => `${instance.module_id}/${instance.unit_id}`;
+  const codeGenerationDone = new Set(instances.filter((instance) => instance.stage.slug === "code-generation" && completed.has(instance.instance_id)).map(unitKey));
+  for (const part of parts.parts.values()) {
+    const open = [...Object.keys(part.state.active_instances || {}), ...(part.state.status !== "done" && part.state.current_stage_instance ? [part.state.current_stage_instance] : [])];
+    for (const id of new Set(open)) {
+      if (id.split("@", 1)[0] === "code-generation" && !completed.has(id) && inScope(moduleOfInstanceId(id))) blockers.push(`${id} is active in the ${workflowRefKey(part.ref)} workflow`);
+    }
+  }
+  for (const instance of instances.filter((candidate) => candidate.stage.slug === "tdd" && inScope(candidate.module_id))) {
+    if (codeGenerationDone.has(unitKey(instance))) continue;
+    const path = evidencePath(instance.stage, "baseline-test-evidence", instance);
+    if (!existsSync(path)) continue;
+    let observed = true;
+    try {
+      observed = asRecord(JSON.parse(readFileSync(path, "utf8")))?.status !== "not_required";
+    } catch { /* unreadable BASELINE evidence counts as observed: fail closed */ }
+    if (observed) blockers.push(`${instance.instance_id} already holds BASELINE evidence (${normalizeArtifactLabel(relative(PROJECT_ROOT, path))}) while code-generation of unit ${unitKey(instance)} is not completed`);
+  }
+  if (blockers.length > 0) {
+    return baselineError(`Cannot advance the ${chainLabel} while a unit sits between its BASELINE and GREEN: ${blockers.join("; ")}. Complete that unit's code-generation first.`);
+  }
+
+  // 3. Anchor: the target is the source_revision.commit of the controlled GREEN evidence
+  //    of a completed code-generation instance that still passes its gate.
+  const anchorErrors: string[] = [];
+  let anchor: { instance: string; path: string; commit: string } | undefined;
+  for (const declared of instances.filter((candidate) => candidate.stage.slug === "code-generation" && completed.has(candidate.instance_id) && inScope(candidate.module_id))) {
+    const instance = runtimeInstance(declared, view);
+    const path = evidencePath(instance.stage, "green-test-evidence", instance);
+    const label = normalizeArtifactLabel(relative(PROJECT_ROOT, path));
+    const loaded = loadEvidence(instance.stage, "green-test-evidence", instance);
+    if (!loaded.value) continue;
+    const anchoredRevision = asRecord(loaded.value.source_revision);
+    if (anchoredRevision?.commit !== target) continue;
+    // 4.9.0: the same GREEN evidence must also record every nested repository target.
+    const anchoredRepos = asRecord(anchoredRevision?.repos);
+    if (registeredKeys.some((key) => asRecord(anchoredRepos?.[key])?.commit !== repoTargets[key])) continue;
+    const failures = await checkSensors(instance, view, { tolerateRevisionDrift: true, onlySensors: ["green-test-evidence"] });
+    if (failures.length > 0) {
+      anchorErrors.push(`${label}: ${failures.map((failure) => failure.message).join("; ")}`);
+      continue;
+    }
+    anchor = { instance: instance.instance_id, path: label, commit: target };
+    break;
+  }
+  if (!anchor) {
+    const nestedTargets = registeredKeys.length > 0 ? ` (with ${registeredKeys.map((key) => `source_revision.repos.${key}.commit ${repoTargets[key]}`).join(", ")})` : "";
+    return baselineError(anchorErrors.length > 0
+      ? `Cannot advance the workflow baseline to ${target}: the GREEN evidence anchored at it no longer passes its gate: ${anchorErrors.join("; ")}`
+      : `Cannot advance the workflow baseline to ${target}: it is not the source_revision.commit${nestedTargets} of the controlled GREEN evidence of any completed code-generation instance. --advance only moves to the completion point of a finished unit; commit that unit's changes${registeredKeys.length > 0 ? " in the workflow repository and every nested repository" : ""} before its GREEN evidence is produced (or refresh it after the commit).`);
+  }
+
+  // 5. Every I13 characterization code ref resolves at the target commit (of its own repository, 4.9.0).
+  const refErrors: string[] = [];
+  try {
+    for (const file of characterizationI13Files().filter((candidate) => inScope(/^\.aidlc\/evidence\/test-case-derivation\/([^/]+)\/test-case-derivation\.json/.exec(candidate.path)?.[1]))) {
+      for (const { path } of i13CodeRefBlobs(file.value)) {
+        const repo = codeRefRepo(PROJECT_ROOT, path, registeredKeys);
+        const repoTarget = repo.repoKey === WORKFLOW_REPO_KEY ? target : repoTargets[repo.repoKey];
+        const resolved = baselineCodeRef(PROJECT_ROOT, repoTarget, { path }, `${file.path} code ref ${path}`, repo);
+        if ("error" in resolved) refErrors.push(resolved.error);
+      }
+    }
+  } catch (error) {
+    refErrors.push(error instanceof Error ? error.message : String(error));
+  }
+  if (refErrors.length > 0) return baselineError(`Cannot advance the workflow baseline to ${target}: the I13 characterization code refs do not resolve there: ${refErrors.join("; ")}`);
+
+  const chain = [...baselineChain(owner), target];
+  const epoch = chain.length - 1;
+  const repoChains = baselineRepoChains(owner);
+  const nextRepoChains = Object.fromEntries(registeredKeys.map((key) => [key, { start: repoChains[key].start, commits: [...repoChains[key].commits, repoTargets[key]] }]));
+  const checks = { head: gitCheck.head, anchor, epoch, baseline_history: chain, ...(registeredKeys.length > 0 ? { baseline_repos: repoTargets, repo_moves: repoMoves } : {}) };
+  if ("dry-run" in flags) {
+    return {
+      kind: "print",
+      dry_run: true,
+      changed: true,
+      ...(adoption ? { module_id: moduleId, baseline_kind: "adoption" } : {}),
+      workflow_id: adoption ? adoption.state.workflow_id : state.workflow_id,
+      baseline_commit: target,
+      advances: current,
+      checks,
+      message: `🔎 ${target} passes every baseline --advance check${adoption ? ` for the adoption baseline of module ${moduleId}` : ""} (dry run, nothing written). Run the same command without --dry-run to advance to epoch ${epoch}.`,
+    };
+  }
+  if (adoption) return writeAdoptionAdvance(adoption, { flags, hooks, current, target, chain, epoch, repoChains, nextRepoChains, registeredKeys, registeredRepos, repoTargets, repoMoves, expectRepoFlags, anchor, head: gitCheck.head, checks });
+
+  hooks.beforeWrite?.();
+  const fresh = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!fresh || fresh.revision !== state.revision) {
+    return baselineError(`workflow state revision conflict: expected ${state.revision}, found ${fresh ? fresh.revision : "no workflow"}; nothing was written, re-run the command.`);
+  }
+  if (fresh.baseline_commit !== current || JSON.stringify(baselineChain(fresh)) !== JSON.stringify(baselineChain(state)) || JSON.stringify(baselineRepoChains(fresh)) !== JSON.stringify(repoChains)) {
+    return baselineError(`--expect ${current} is no longer the workflow baseline (now ${fresh.baseline_commit ?? "none"}); nothing was written.`);
+  }
+  const previousSource = fresh.baseline_source;
+  fresh.baseline_history = chain;
+  fresh.baseline_commit = target;
+  fresh.baseline_source = "advanced";
+  if (registeredKeys.length > 0) {
+    fresh.baseline_repos = { ...repoTargets };
+    fresh.baseline_repos_history = nextRepoChains;
+  }
+  fresh.history.push({ stage: "baseline", result: "advanced", timestamp: new Date().toISOString(), user_input: "Approve" });
+  try {
+    saveWorkflowState(PROJECT_ROOT, fresh, GLOBAL_WORKFLOW, { baselineWrite: true });
+  } catch (error) {
+    return baselineError(`${error instanceof Error ? error.message : String(error)}; nothing was written, re-run the command.`);
+  }
+  const event = "BASELINE_COMMIT_ADVANCED";
+  try {
+    (hooks.appendAudit || appendAuditEvent)(PROJECT_ROOT, GLOBAL_WORKFLOW, event, {
+      "Workflow ID": fresh.workflow_id,
+      From: current,
+      "From Source": previousSource || "-",
+      To: target,
+      Epoch: String(epoch),
+      Chain: chain.join(", "),
+      ...(registeredKeys.length > 0 ? {
+        "From Repos": renderBaselineRepos(registeredRepos),
+        "To Repos": renderBaselineRepos(repoTargets),
+        "Repos Moved": registeredKeys.map((key) => `${key}=${repoMoves[key] ? "yes" : "no"}`).join(", "),
+        "Expected Repos": renderBaselineRepos(Object.fromEntries(expectRepoFlags)),
+      } : {}),
+      Anchor: `${anchor.path} @ ${anchor.commit} (${anchor.instance})`,
+      Expected: flags.expect,
+      HEAD: gitCheck.head,
+      Reason: flags.reason.trim(),
+      "User Input": "Approve",
+    });
+  } catch (error) {
+    return baselineError(`Workflow baseline ${target} was saved to the workflow state, but the ${event} audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。`, { baseline_commit: target, baseline_source: "advanced" });
+  }
+  return {
+    kind: "print",
+    changed: true,
+    workflow_id: fresh.workflow_id,
+    baseline_commit: target,
+    baseline_source: "advanced",
+    advanced: current,
+    baseline_epoch: epoch,
+    baseline_history: chain,
+    ...(registeredKeys.length > 0 ? { baseline_repos: repoTargets } : {}),
+    checks,
+    message: `✅ Workflow baseline advanced: ${current} → ${target} (epoch ${epoch}).${registeredKeys.length > 0 ? ` Nested repositories: ${renderBaselineRepos(repoTargets)}.` : ""} Completed units keep their original BASELINE evidence; run evidence run for the active unit's tdd to observe BASELINE at the new epoch.`,
+  };
+}
+
+interface AdoptionAdvance {
+  flags: Record<string, string>;
+  hooks: StateWriteHooks;
+  current: string;
+  target: string;
+  chain: string[];
+  epoch: number;
+  repoChains: Record<string, { start: number; commits: string[] }>;
+  nextRepoChains: Record<string, { start: number; commits: string[] }>;
+  registeredKeys: string[];
+  registeredRepos: Record<string, string>;
+  repoTargets: Record<string, string>;
+  repoMoves: Record<string, boolean>;
+  expectRepoFlags: Map<string, string>;
+  anchor: { instance: string; path: string; commit: string };
+  head: string;
+  checks: Record<string, unknown>;
+}
+
+/** Write step of `--advance --module` (4.10.0): append the epoch to the module's adoption chain. */
+function writeAdoptionAdvance(adoption: { ref: WorkflowRef; state: WorkflowState }, input: AdoptionAdvance): Directive {
+  const { flags, hooks, current, target, chain, epoch, repoChains, nextRepoChains, registeredKeys, registeredRepos, repoTargets, repoMoves, expectRepoFlags, anchor } = input;
+  const moduleId = adoption.ref.kind === "module" ? adoption.ref.module_id : "";
+  hooks.beforeWrite?.();
+  const fresh = loadWorkflowState(PROJECT_ROOT, adoption.ref);
+  if (!fresh || fresh.revision !== adoption.state.revision) {
+    return baselineError(`module workflow state revision conflict: expected ${adoption.state.revision}, found ${fresh ? fresh.revision : "no workflow"}; nothing was written, re-run the command.`);
+  }
+  const freshOwner = adoptionAsBaseline(fresh);
+  if (freshOwner.baseline_commit !== current || JSON.stringify(baselineChain(freshOwner)) !== JSON.stringify(chain.slice(0, -1)) || JSON.stringify(baselineRepoChains(freshOwner)) !== JSON.stringify(repoChains)) {
+    return baselineError(`--expect ${current} is no longer the adoption baseline of module ${moduleId} (now ${fresh.adoption_baseline ?? "none"}); nothing was written.`);
+  }
+  fresh.adoption_baseline_history = chain;
+  fresh.adoption_baseline = target;
+  if (registeredKeys.length > 0) {
+    fresh.adoption_baseline_repos = { ...repoTargets };
+    fresh.adoption_baseline_repos_history = nextRepoChains;
+  }
+  fresh.history.push({ stage: "baseline", module_id: moduleId, result: "adoption-advanced", timestamp: new Date().toISOString(), user_input: "Approve" });
+  try {
+    saveWorkflowState(PROJECT_ROOT, fresh, adoption.ref, { baselineWrite: true });
+  } catch (error) {
+    return baselineError(`${error instanceof Error ? error.message : String(error)}; nothing was written, re-run the command.`);
+  }
+  const event = "BASELINE_ADOPTION_ADVANCED";
+  try {
+    (hooks.appendAudit || appendAuditEvent)(PROJECT_ROOT, adoption.ref, event, {
+      "Workflow ID": fresh.workflow_id,
+      Module: moduleId,
+      From: current,
+      To: target,
+      Epoch: String(epoch),
+      Chain: chain.join(", "),
+      ...(registeredKeys.length > 0 ? {
+        "From Repos": renderBaselineRepos(registeredRepos),
+        "To Repos": renderBaselineRepos(repoTargets),
+        "Repos Moved": registeredKeys.map((key) => `${key}=${repoMoves[key] ? "yes" : "no"}`).join(", "),
+        "Expected Repos": renderBaselineRepos(Object.fromEntries(expectRepoFlags)),
+      } : {}),
+      Anchor: `${anchor.path} @ ${anchor.commit} (${anchor.instance})`,
+      Expected: flags.expect,
+      HEAD: input.head,
+      Reason: flags.reason.trim(),
+      "User Input": "Approve",
+    });
+  } catch (error) {
+    return baselineError(`The adoption baseline ${target} of module ${moduleId} was saved to the module workflow state, but the ${event} audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。`, { module_id: moduleId, baseline_commit: target });
+  }
+  return {
+    kind: "print",
+    changed: true,
+    module_id: moduleId,
+    workflow_id: fresh.workflow_id,
+    baseline_kind: "adoption",
+    baseline_commit: target,
+    advanced: current,
+    baseline_epoch: epoch,
+    baseline_history: chain,
+    ...(registeredKeys.length > 0 ? { baseline_repos: repoTargets } : {}),
+    checks: input.checks,
+    message: `✅ Adoption baseline of module ${moduleId} advanced: ${current} → ${target} (epoch ${epoch}).${registeredKeys.length > 0 ? ` Nested repositories: ${renderBaselineRepos(repoTargets)}.` : ""} The global baseline chain is unchanged.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// state — lineage / revision verification and lineage retirement (4.13.0, MARS-98)
+// ---------------------------------------------------------------------------
+
+const PROFILE_USAGE = "Usage: orchestrate profile escalate --signal <ProfileSignal> [--detail <text>]";
+
+/**
+ * Record a risk-driven monotonic escalation in the global lineage profile.
+ * Module/integration state inherits this field and legacy state is never
+ * silently migrated by an administrative command.
+ */
+function handleProfile(args: string[]): Directive {
+  const [action, ...rest] = args;
+  const flags = parseFlags(rest);
+  const invalidFlag = unsupportedFlag(flags, PROFILE_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported profile option: --${invalidFlag}. ${PROFILE_USAGE}` };
+  if (action !== "escalate") return { kind: "error", message: PROFILE_USAGE };
+  if (flags.module !== undefined) {
+    return { kind: "error", message: "profile escalation is global-only; module and integration workflows inherit the global execution_profile. Drop --module." };
+  }
+  const signal = flags.signal;
+  if (signal === undefined || signal === "true" || !isProfileSignal(signal)) {
+    return { kind: "error", message: `profile escalate requires a valid --signal. ${PROFILE_USAGE}` };
+  }
+  if (flags.detail === "true") return { kind: "error", message: `--detail requires text. ${PROFILE_USAGE}` };
+
+  const state = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!state) return { kind: "error", message: "No active global workflow. Start one with orchestrate next --scope <scope> --work <description>." };
+  if (state.execution_profile === undefined) {
+    return { kind: "error", message: "This legacy workflow has no execution_profile. Profile escalation does not implicitly migrate legacy state; continue with its conservative standard selection or start a new workflow." };
+  }
+
+  const previous = state.execution_profile;
+  const classified = classifyExecutionProfile({
+    scope: state.scope as ProfileScope,
+    current: previous,
+    signals: new Set([signal]),
+  });
+  const next = applyExecutionProfile({
+    current: previous,
+    classified,
+    at: new Date().toISOString(),
+    actor: "user",
+    ...(flags.detail !== undefined ? { detail: flags.detail } : {}),
+  });
+  state.execution_profile = next;
+  saveWorkflowState(PROJECT_ROOT, state, GLOBAL_WORKFLOW);
+  return {
+    kind: "print",
+    execution_profile: next,
+    message: `Execution profile ${previous.level} → ${next.level} via ${signal}. Global profile persisted; subsequent stage selection now uses ${next.level} graph semantics.`,
+  };
+}
+
+// recover/adopt/rebuild additionally require --maintenance <current maintenance_token>.
+const STATE_USAGE = "Usage: orchestrate state maintenance-plan [--module <id>] | orchestrate state review-inputs | orchestrate state plan [--module <id>] | orchestrate state rules [--module <id>] | orchestrate state evidence [--module <id>] | orchestrate state summary [--module <id>] [--format json|markdown] | orchestrate state measurements [--module <id>] | orchestrate state verify | orchestrate state rebuild | orchestrate state retire --lineage <workflow-id>[,<workflow-id>] --user-input Approve --reason \"<why>\" | orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason \"<why>\" | orchestrate state checkpoint --module <id> | orchestrate state recover --module <id> [--user-input Approve --reason \"<why>\"]";
+
+function damagedMaintenanceReader(moduleId: string | undefined): MaintenanceRecoveryReader | undefined {
+  if (!moduleId || !MODULE_ID_PATTERN.test(moduleId)) return undefined;
+  return bytes => {
+    const ledger = bestLedgerCheckpoint(PROJECT_ROOT, moduleId);
+    if (ledger.errors.length || !ledger.best) throw new Error(`damaged-state maintenance requires a verified ledger checkpoint for ${moduleId}: ${ledger.errors.join("; ") || "checkpoint missing"}`);
+    const best = ledger.best, state = parseMaintenanceRecoveryState(bytes, best.state);
+    const loaded = loadWorkflowParts(PROJECT_ROOT, moduleId, state);
+    if (!loaded.split || loaded.parts.get("global")?.state.workflow_id !== best.checkpoint.lineage) throw new Error("damaged-state maintenance checkpoint does not belong to the active split lineage");
+    return { module_id: moduleId, checkpoint_commit: best.commit, checkpoint_digest: best.checkpoint.digest, state };
+  };
+}
+
+async function handleState(args: string[]): Promise<Directive> {
+  const [action, ...rest] = args;
+  const flags = parseFlags(rest);
+  const invalidFlag = unsupportedFlag(flags, action === "summary" ? new Set(["module", "format", "text"]) : STATE_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported state option: --${invalidFlag}. ${STATE_USAGE}` };
+  if (flags.text) return { kind: "error", message: `Unexpected state argument: ${flags.text}. ${STATE_USAGE}` };
+  if (action === "plan") return stagePlanDirective(flags);
+  if (action === "maintenance-plan") {
+    if (Object.keys(flags).some(key => key !== "module")) return { kind: "error", message: "state maintenance-plan takes only --module" };
+    const plan = workflowMaintenancePlan(PROJECT_ROOT, flags.module, damagedMaintenanceReader(flags.module));
+    return { kind: "print", maintenance_token: plan.token, claims: plan.claims, files: plan.files,
+      ...(plan.recovery ? { recovery: { module_id: plan.recovery.module_id, checkpoint_commit: plan.recovery.checkpoint_commit, repair: "invalid-revision-with-intact-claims" } } : {}),
+      message: "Read-only maintenance CAS snapshot. Release every exact claim first; then reread this plan and use its token as --maintenance, without a session binding." };
+  }
+  if (action === "rules") return ruleLoadPlanDirective(flags);
+  if (action === "evidence") return evidenceReusePlanDirective(flags);
+  if (action === "summary") return deliverySummaryDirective(flags);
+  if (action === "review-inputs") {
+    if (Object.keys(flags).length) return { kind: "error", message: "state review-inputs takes no options" };
+    const state = loadWorkflowView(PROJECT_ROOT);
+    if (!state) return { kind: "error", message: "no active workflow" };
+    return { kind: "print", global_review: globalReviewInputPlan(state), message: "Read-only FINAL_GLOBAL input snapshot; this does not perform a review or issue evidence." };
+  }
+  if (action === "measurements") return executionProfileMeasurementsDirective(flags);
+  if (action === "verify") {
+    if (Object.keys(flags).length > 0) return { kind: "error", message: `state verify takes no options. ${STATE_USAGE}` };
+    return verifyState();
+  }
+  if (action === "retire") return retireLineages(flags);
+  if (["adopt", "recover", "rebuild"].includes(action)) {
+    if (!flags.maintenance || !/^[a-f0-9]{64}$/.test(flags.maintenance)) return { kind: "error", message: "state maintenance-plan is required; pass its current maintenance_token as --maintenance after releasing all claims" };
+    const approved = flags["user-input"] === "Approve" && !!flags.reason?.trim() && flags.reason !== "true";
+    return withQuiescentWorkflowMaintenance(PROJECT_ROOT, flags.maintenance, flags.module, approved, plan => action === "adopt" ? adoptModuleState(flags) : action === "recover" ? recoverModuleState(flags, plan.recovery) : rebuildControlPlane(flags), action === "recover" ? damagedMaintenanceReader(flags.module) : undefined);
+  }
+  if (action === "checkpoint") {
+    const binding = sessionBinding();
+    if (!binding) throw new Error("checkpoint requires explicit session binding");
+    return withSessionPublication(PROJECT_ROOT, ownerOfInstance(binding.stage_instance), binding.stage_instance, () => checkpointModuleState(flags), binding);
+  }
+  return { kind: "error", message: STATE_USAGE };
+}
+
+/** One disposable delivery view; no report file, producer or session write. */
+function deliverySummaryDirective(flags: Record<string, string>): Directive {
+  if (Object.keys(flags).some(key => !["module", "format"].includes(key))) return { kind: "error", message: "state summary takes only --module and --format json|markdown" };
+  if (flags.format !== undefined && !["json", "markdown"].includes(flags.format)) return { kind: "error", message: "state summary --format must be json or markdown" };
+  const moduleId = flags.module;
+  if (moduleId === "true" || (moduleId !== undefined && !MODULE_ID_PATTERN.test(moduleId))) return { kind: "error", message: "state summary --module requires a valid module id" };
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  if (moduleId !== undefined && (!loaded.split || !loaded.parts.has(workflowRefKey(moduleRef(moduleId))))) return { kind: "error", message: `state summary: module ${moduleId} has no active split workflow` };
+  const state = loaded.split ? mergeWorkflowView(loaded.parts, moduleId ? moduleRef(moduleId) : GLOBAL_WORKFLOW) : loaded.parts.get("global")?.state;
+  if (!state) return { kind: "error", message: "No active workflow." };
+  const summary = projectDeliverySummary(PROJECT_ROOT, state);
+  return { kind: "print", delivery_summary: summary, message: renderDeliverySummaryMarkdown(summary) };
+}
+
+/**
+ * MARS-161: an observable graph/profile projection. This command is read-only
+ * and shares the executor's graph/profile selector.
+ */
+function stagePlanDirective(flags: Record<string, string>): Directive {
+  if (Object.keys(flags).some((key) => key !== "module")) {
+    return { kind: "error", message: `state plan takes only --module. ${STATE_USAGE}` };
+  }
+  const moduleId = flags.module;
+  if (moduleId === "true" || (moduleId !== undefined && !MODULE_ID_PATTERN.test(moduleId))) {
+    return { kind: "error", message: `state plan --module requires a valid module id. ${STATE_USAGE}` };
+  }
+  if (moduleId !== undefined) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    if (!loaded.split) {
+      return { kind: "error", message: "state plan --module requires the split workflow layout; start module workflows after orchestrate split." };
+    }
+    if (!loaded.parts.has(workflowRefKey(moduleRef(moduleId)))) {
+      return { kind: "error", message: `state plan: module ${moduleId} has no workflow state in the active split layout.` };
+    }
+  }
+  const state = loadWorkflowView(PROJECT_ROOT, moduleId);
+  if (!state) return { kind: "error", message: "No active workflow." };
+  const plan = buildStagePlan(loadGraph(), {
+    scope: state.scope,
+    selectedOptionalStages: selectedOptionalStages(state),
+    executionProfile: state.execution_profile,
+  });
+  return {
+    kind: "print",
+    stage_plan: plan,
+    message: `StagePlan: ${plan.selected.length} selected (${plan.required.length} required by graph or risk), ${plan.skipped.length} skipped; profile ${plan.profile.level} from ${plan.profile.provenance}. This read-only view matches execution selection; gates and evidence requirements remain unchanged.`,
+  };
+}
+
+/**
+ * MARS-161 Phase 4 read path. This exposes the same selected rule files that
+ * are carried in a run-stage hand-off, without loading files or mutating state.
+ */
+function ruleLoadPlanDirective(flags: Record<string, string>): Directive {
+  if (Object.keys(flags).some((key) => key !== "module")) {
+    return { kind: "error", message: `state rules takes only --module. ${STATE_USAGE}` };
+  }
+  const moduleId = flags.module;
+  if (moduleId === "true" || (moduleId !== undefined && !MODULE_ID_PATTERN.test(moduleId))) {
+    return { kind: "error", message: `state rules --module requires a valid module id. ${STATE_USAGE}` };
+  }
+  if (moduleId !== undefined) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    if (!loaded.split) {
+      return { kind: "error", message: "state rules --module requires the split workflow layout; start module workflows after orchestrate split." };
+    }
+    if (!loaded.parts.has(workflowRefKey(moduleRef(moduleId)))) {
+      return { kind: "error", message: `state rules: module ${moduleId} has no workflow state in the active split layout.` };
+    }
+  }
+  const state = loadWorkflowView(PROJECT_ROOT, moduleId);
+  if (!state) return { kind: "error", message: "No active workflow." };
+  const plan = buildRuleLoadPlan(loadGraph(), {
+    scope: state.scope,
+    selectedOptionalStages: selectedOptionalStages(state),
+    executionProfile: state.execution_profile,
+  });
+  return {
+    kind: "print",
+    rule_load_plan: plan,
+    message: `RuleLoadPlan: ${plan.selected.length} selected stage rules; no target is loaded by this read-only view. Profile ${plan.profile.level} from ${plan.profile.provenance}; mandatory rules and declared dependencies remain selected.`,
+  };
+}
+
+/**
+ * MARS-161 Phase 5 read path. This shares Phase 4's selected-rule plan and
+ * only describes reuse or validation work; it cannot grant a gate pass.
+ */
+function evidenceReusePlanDirective(flags: Record<string, string>): Directive {
+  if (Object.keys(flags).some((key) => key !== "module")) {
+    return { kind: "error", message: `state evidence takes only --module. ${STATE_USAGE}` };
+  }
+  const moduleId = flags.module;
+  if (moduleId === "true" || (moduleId !== undefined && !MODULE_ID_PATTERN.test(moduleId))) {
+    return { kind: "error", message: `state evidence --module requires a valid module id. ${STATE_USAGE}` };
+  }
+  if (moduleId !== undefined) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    if (!loaded.split) return { kind: "error", message: "state evidence --module requires the split workflow layout; start module workflows after orchestrate split." };
+    if (!loaded.parts.has(workflowRefKey(moduleRef(moduleId)))) return { kind: "error", message: `state evidence: module ${moduleId} has no workflow state in the active split layout.` };
+  }
+  const state = loadWorkflowView(PROJECT_ROOT, moduleId);
+  if (!state) return { kind: "error", message: "No active workflow." };
+  const graph = loadGraph();
+  const ruleLoadPlan = buildRuleLoadPlan(graph, {
+    scope: state.scope,
+    selectedOptionalStages: selectedOptionalStages(state),
+    executionProfile: state.execution_profile,
+  });
+  const evidenceScope = state.current_stage_instance
+    ? evidenceScopeForInstance(PROJECT_ROOT, state.current_stage_instance).label
+    : moduleId === undefined ? "worktree" : `module:${moduleId}`;
+  const plan = buildEvidenceReusePlan(graph, {
+    projectRoot: PROJECT_ROOT,
+    scope: state.scope,
+    selectedOptionalStages: selectedOptionalStages(state),
+    executionProfile: state.execution_profile,
+    evidenceScope,
+    now: new Date().toISOString(),
+    ruleLoadPlan,
+  });
+  return {
+    kind: "print",
+    evidence_reuse_plan: plan,
+    message: `EvidenceReusePlan: ${plan.reuse.length} reusable, ${plan.verify.length} mandatory verification, ${plan.revalidate.length} revalidation. Read-only: report and sensor gates remain authoritative.`,
+  };
+}
+
+/**
+ * MARS-161 Phase 6 release-observation path. It shares the profile-aware
+ * selector but is strictly read-only and cannot make a release or gate pass.
+ */
+function executionProfileMeasurementsDirective(flags: Record<string, string>): Directive {
+  if (Object.keys(flags).some((key) => key !== "module")) {
+    return { kind: "error", message: `state measurements takes only --module. ${STATE_USAGE}` };
+  }
+  const moduleId = flags.module;
+  if (moduleId === "true" || (moduleId !== undefined && !MODULE_ID_PATTERN.test(moduleId))) {
+    return { kind: "error", message: `state measurements --module requires a valid module id. ${STATE_USAGE}` };
+  }
+  if (moduleId !== undefined) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    if (!loaded.split) return { kind: "error", message: "state measurements --module requires the split workflow layout; start module workflows after orchestrate split." };
+    if (!loaded.parts.has(workflowRefKey(moduleRef(moduleId)))) return { kind: "error", message: `state measurements: module ${moduleId} has no workflow state in the active split layout.` };
+  }
+  const state = loadWorkflowView(PROJECT_ROOT, moduleId);
+  if (!state) return { kind: "error", message: "No active workflow." };
+  const measurements: ExecutionProfileReleaseMeasurements = buildExecutionProfileReleaseMeasurements(loadGraph(), {
+    scope: state.scope,
+    ...(selectedOptionalStages(state).length > 0
+      ? { selectedOptionalStages: selectedOptionalStages(state) }
+      : {}),
+    ...(state.execution_profile !== undefined
+      ? { executionProfile: state.execution_profile }
+      : {}),
+  });
+  return {
+    kind: "print",
+    execution_profile_measurements: measurements,
+    message: `Execution-profile measurements: ${measurements.regression.measured_selected_stage_count}/${measurements.regression.historical_selected_stage_count} stages selected; ${measurements.regression.omitted_stage_slugs.length} safely omitted; legacy profile migration remains read-only. Advisory only: report, sensor, evidence, approval, and release gates remain authoritative.`,
+  };
+}
+
+/**
+ * MARS-159 B: after a successful module report, append a checkpoint of the module state and
+ * its contract view to the module ledger (refs/heads/aidlc/modules/<id>). Never pushes and
+ * never fails the report: a skipped checkpoint is surfaced as a warning.
+ */
+function withModuleCheckpoint(directive: Directive, args: string[]): Directive {
+  if (directive.kind === "error" || !isSplitLayout(PROJECT_ROOT)) return directive;
+  const workflow = typeof (directive as Record<string, unknown>).workflow === "string" ? String((directive as Record<string, unknown>).workflow) : "";
+  const moduleId = workflow.startsWith("module:") ? workflow.slice("module:".length) : "";
+  if (!moduleId || !MODULE_ID_PATTERN.test(moduleId)) return directive;
+  const flags = parseFlags(args);
+  const result = checkpointModule(PROJECT_ROOT, moduleId, `report ${flags.stage || "-"}`);
+  const note = result.status === "skipped"
+    ? `⚠️ Module checkpoint of ${moduleId} skipped: ${result.reason}.`
+    : result.published ? "" : `⚠️ ${result.warning || `Publish the module checkpoint: ${result.publish_command}`}`;
+  const message = typeof directive.message === "string" && note ? `${directive.message}\n${note}` : directive.message;
+  return { ...directive, ...(message !== undefined ? { message } : {}), module_checkpoint: result } as Directive;
+}
+
+function checkpointModuleState(flags: Record<string, string>): Directive {
+  const moduleId = flags.module;
+  if (!moduleId || moduleId === "true" || !MODULE_ID_PATTERN.test(moduleId)) return { kind: "error", message: `state checkpoint requires --module <module-id>. ${STATE_USAGE}` };
+  if (Object.keys(flags).some((key) => key !== "module")) return { kind: "error", message: `state checkpoint takes only --module. ${STATE_USAGE}` };
+  if (!isSplitLayout(PROJECT_ROOT)) return { kind: "error", message: "state checkpoint needs the split layout (aidlc/active/registry.md); modules belong to per-module workflows." };
+  const result = checkpointModule(PROJECT_ROOT, moduleId, "state checkpoint");
+  if (result.status === "skipped") return { kind: "error", module_checkpoint: result, message: `🚫 Module checkpoint of ${moduleId} not written: ${result.reason}` };
+  return {
+    kind: "print",
+    module_checkpoint: result,
+    message: `${result.status === "created" ? "✅ Module checkpoint appended" : "✅ Module ledger already holds this state"}: ${ledgerRef(moduleId)} @ ${result.commit?.slice(0, 12)} (revision ${result.revision}).` +
+      (result.published ? " Published." : `\n⚠️ ${result.warning}`),
+  };
+}
+
+/**
+ * MARS-159 B: restore a module workflow state from the highest valid checkpoint of its
+ * ledger (local or remote-tracking). The chain, lineage, state/contract digests and the
+ * module manifest are verified first; any overwrite of an existing local state needs the
+ * user's explicit approval and keeps a backup. Missing/stale evidence is listed, not
+ * trusted: recovery reuses orchestrate upgrade --dry-run and the regular next/report gates.
+ */
+async function recoverModuleState(flags: Record<string, string>, maintenanceRecovery?: MaintenanceRecoveryProjection): Promise<Directive> {
+  const moduleId = flags.module;
+  if (!moduleId || moduleId === "true" || !MODULE_ID_PATTERN.test(moduleId)) return { kind: "error", message: `state recover requires --module <module-id>. ${STATE_USAGE}` };
+  if ("from" in flags || "lineage" in flags) return { kind: "error", message: `state recover reads the module ledger only; use state adopt --from <commit> for another lineage. ${STATE_USAGE}` };
+  if (!isSplitLayout(PROJECT_ROOT)) return { kind: "error", message: "state recover needs the split layout (aidlc/active/registry.md); modules belong to per-module workflows." };
+  if (!gitRepositoryAvailable(PROJECT_ROOT)) return { kind: "error", message: "state recover needs a git repository: module checkpoints live in refs/heads/aidlc/modules/<id>." };
+  const ledger = bestLedgerCheckpoint(PROJECT_ROOT, moduleId);
+  if (ledger.errors.length > 0) {
+    return { kind: "error", ledger_errors: ledger.errors, message: `🚫 Module ledger of ${moduleId} failed verification; nothing was recovered:\n  ${ledger.errors.join("\n  ")}` };
+  }
+  if (!ledger.best) {
+    return {
+      kind: "error",
+      message: `🚫 No checkpoint of module ${moduleId} in ${ledgerRef(moduleId)} or ${remoteLedgerRef(moduleId)}. Fetch the ledger first: ${ledgerFetchCommand()}. ` +
+        "A deleted branch whose commits were never merged, tagged, checkpointed or otherwise reachable from a remote ref cannot be recovered by git.",
+    };
+  }
+  const best = ledger.best;
+  if (maintenanceRecovery && (best.commit !== maintenanceRecovery.checkpoint_commit || best.checkpoint.digest !== maintenanceRecovery.checkpoint_digest)) return { kind: "error", message: "maintenance checkpoint changed; reread state maintenance-plan before retrying" };
+  const loaded = loadWorkflowParts(PROJECT_ROOT, moduleId, maintenanceRecovery?.state);
+  const global = loaded.parts.get("global")!.state;
+  if (best.checkpoint.lineage !== global.workflow_id) {
+    return { kind: "error", message: `🚫 Ledger checkpoint ${best.commit.slice(0, 12)} of ${moduleId} belongs to lineage ${best.checkpoint.lineage}, not the active ${global.workflow_id}; carry it over with orchestrate state adopt --module ${moduleId} --from ${best.commit} --user-input Approve --reason "<why>" if it is still wanted.` };
+  }
+  let contracts: ReturnType<typeof moduleContractSnapshot>;
+  try {
+    contracts = moduleContractSnapshot(PROJECT_ROOT, moduleId);
+  } catch (error) {
+    return { kind: "error", message: `🚫 Cannot verify module ${moduleId} against the current checkout: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (contracts.manifest_entry_sha256 !== best.checkpoint.contracts.manifest_entry_sha256) {
+    return { kind: "error", message: `🚫 Module ${moduleId} in docs/aidlc/ideation/module-manifest.json differs from the checkpoint ${best.commit.slice(0, 12)}; reconcile the manifest before recovering.` };
+  }
+  const contractMatch = contracts.digest === best.checkpoint.contracts.digest ? "raw-digest" : equivalentModuleContracts(contracts, best.checkpoint.contracts) ? CONTRACT_EQUIVALENCE_VERSION : undefined;
+  if (!contractMatch) {
+    const recorded = new Map(best.checkpoint.contracts.documents.map((document) => [document.path, document]));
+    const current = new Map(contracts.documents.map((document) => [document.path, document]));
+    const changed = [...new Set([...recorded.keys(), ...current.keys()])].filter((path) => JSON.stringify([recorded.get(path)?.rows, recorded.get(path)?.references]) !== JSON.stringify([current.get(path)?.rows, current.get(path)?.references]));
+    return { kind: "error", message: `🚫 The contract view of ${moduleId} in the current checkout differs from checkpoint ${best.commit.slice(0, 12)} (${changed.join(", ") || "contract documents"}); restore or reconcile the shared contracts before recovering.` };
+  }
+  const ref = moduleRef(moduleId);
+  const statePath = lightStatePath(PROJECT_ROOT, ref);
+  const auditPath = lightAuditPath(PROJECT_ROOT, ref);
+  const localText = existsSync(statePath) ? readFileSync(statePath) : null;
+  let local: WorkflowState | null = null;
+  if (localText) {
+    try {
+      local = parseLightWorkflowState(localText.toString("utf8").replace(/\r\n/g, "\n"));
+    } catch {
+      local = null;
+    }
+  }
+  const recovered = structuredClone(best.state);
+  const checkpointContent = (state: WorkflowState) => JSON.stringify(Object.fromEntries(Object.entries(state).filter(([key]) => !["revision", "version", "updated_at", "active_instances"].includes(key))));
+  const previousRecovery = existsSync(auditPath) ? readFileSync(auditPath, "utf8").split(/\n(?=## )/).reverse().find(block => block.includes("- Event: STATE_RECOVERED\n")) : undefined;
+  const sameRecovery = local && previousRecovery?.includes(`- Checkpoint Commit: ${best.commit}\n`) && previousRecovery.includes(`- Revision: ${local.revision}\n`);
+  if (local && localText && (localText.equals(best.state_text) || (sameRecovery && Object.keys(local.active_instances).length === 0 && checkpointContent(local) === checkpointContent(recovered)))) {
+    return { kind: "print", module_id: moduleId, recovered: false, checkpoint: best.commit, revision: local.revision, message: `✅ Module ${moduleId} is already at the ledger head ${best.commit.slice(0, 12)} (local revision ${local.revision}); nothing to recover.` };
+  }
+  const conflict = localText
+    ? (!local ? "the local state is unreadable"
+      : local.workflow_id !== recovered.workflow_id ? `the local state is workflow ${local.workflow_id}, the checkpoint ${recovered.workflow_id}`
+        : local.revision > recovered.revision ? `the local state revision ${local.revision} is newer than the checkpoint revision ${recovered.revision}`
+          : local.revision === recovered.revision ? `the local state differs from the checkpoint at the same revision ${local.revision}`
+            : `the local state revision ${local.revision} is older than the checkpoint revision ${recovered.revision}`)
+    : "";
+  if (conflict) {
+    if (flags["user-input"] !== "Approve") return { kind: "error", message: `🚫 ${conflict}. Overwriting a local module state needs the user's explicit approval: orchestrate state recover --module ${moduleId} --user-input Approve --reason "<why>" (the local files are backed up first).` };
+    if (!flags.reason || flags.reason === "true" || !flags.reason.trim()) return { kind: "error", message: "--reason is required when an approved recovery overwrites a local module state." };
+  }
+  if (flags["user-input"] !== "Approve" || !flags.reason?.trim() || flags.reason === "true") return { kind: "error", message: "maintenance recovery requires --user-input Approve and a non-empty --reason" };
+  recovered.active_instances = {};
+  const knownRevisions = maintenanceRecovery && existsSync(auditPath) ? [...readFileSync(auditPath, "utf8").matchAll(/^- Revision: (\d+)\s*$/gm)].map(match => Number(match[1])).filter(Number.isSafeInteger) : [];
+  recovered.revision = Math.max(local?.revision || 0, recovered.revision, ...knownRevisions) + 1;
+  recovered.version = ENGINE_VERSION;
+  recovered.updated_at = new Date().toISOString();
+  const otherWorkflow = [...loaded.parts.entries()].find(([key, part]) => key !== workflowRefKey(ref) && part.state.workflow_id === recovered.workflow_id);
+  if (otherWorkflow) return { kind: "error", message: `🚫 Workflow ID ${recovered.workflow_id} of the checkpoint is already used by ${otherWorkflow[0]} in the active layout.` };
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backups: string[] = [];
+  const writeAtomic = (path: string, content: Buffer): void => {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
+    writeFileSync(temporary, content, { flag: "wx", mode: 0o600 });
+    renameSync(temporary, path);
+  };
+  try {
+    for (const path of [statePath, auditPath]) {
+      if (existsSync(path)) {
+        const backup = `${path}.bak-${stamp}`;
+        writeFileSync(backup, readFileSync(path), { flag: "wx", mode: 0o600 });
+        backups.push(relative(PROJECT_ROOT, backup).replace(/\\/g, "/"));
+      }
+    }
+    writeAtomic(statePath, Buffer.from(renderLightWorkflowState(recovered)));
+    if (best.audit_text) writeAtomic(auditPath, best.audit_text);
+    updateRegistry(PROJECT_ROOT, (current) => {
+      const registry = current as WorkflowRegistry;
+      const row = { module_id: moduleId, workflow_id: recovered.workflow_id, state_path: relativeStatePath(PROJECT_ROOT, ref), status: recovered.status, current_stage: "-", inception_done: false, construction_done: false, owner: "-" };
+      const existing = registry.modules.find((item) => item.module_id === moduleId);
+      if (existing && existing.workflow_id === recovered.workflow_id) return registry;
+      return { ...registry, modules: [...registry.modules.filter((item) => item.module_id !== moduleId), row] };
+    });
+    // The ledger head is now the local state; keep the local ledger ref on it.
+    // A recovered state has fresh authority. A subsequent explicitly bound
+    // checkpoint chains it to the verified ledger; recovery never writes refs.
+  } catch (error) {
+    return { kind: "error", message: `state recover failed while writing ${moduleId}: ${error instanceof Error ? error.message : String(error)}${backups.length ? `; backups: ${backups.join(", ")}` : ""}` };
+  }
+  const fields = {
+    Module: moduleId,
+    "Module Workflow ID": recovered.workflow_id,
+    "Checkpoint Commit": best.commit,
+    "Checkpoint Digest": best.checkpoint.digest,
+    "Contract Comparison": contractMatch,
+    "Checkpoint Contract Digest": best.checkpoint.contracts.digest,
+    "Current Contract Digest": contracts.digest,
+    Revision: String(recovered.revision),
+    "Previous Local Revision": local ? String(local.revision) : "-",
+    Approval: "Approve",
+    "Maintenance Token": flags.maintenance,
+    Reason: flags.reason && flags.reason !== "true" ? flags.reason.trim() : "-",
+  };
+  try {
+    appendAuditEvent(PROJECT_ROOT, ref, "STATE_RECOVERED", fields);
+    appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "STATE_RECOVERED", fields);
+  } catch (error) {
+    return { kind: "error", message: `Module ${moduleId} was recovered, but the STATE_RECOVERED audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。` };
+  }
+  const check = await handleUpgrade(["--dry-run", "--module", moduleId]);
+  const missing = Array.isArray(check.pending) ? check.pending as { instance_id: string; missing_sensors: string[] }[] : [];
+  const unpublished = ledger.heads.remote !== best.commit;
+  return {
+    kind: "print",
+    workflow_id: global.workflow_id,
+    module_id: moduleId,
+    recovered: true,
+    checkpoint: best.commit,
+    revision: recovered.revision,
+    previous_local_revision: local ? local.revision : null,
+    backups,
+    evidence_missing: missing,
+    message: `✅ Module ${moduleId} recovered from ledger checkpoint ${best.commit.slice(0, 12)} (revision ${recovered.revision}, chain of ${best.chain_length}).` +
+      (backups.length ? ` Local files backed up: ${backups.join(", ")}.` : "") +
+      (missing.length
+        ? ` ⚠️ ${missing.length} completed instance(s) lack evidence in this checkout: ${missing.map((item) => `${item.instance_id} (${item.missing_sensors.join(", ")})`).join("; ")}. Re-verify only those with orchestrate upgrade --dry-run --module ${moduleId} and the regular report gates.`
+        : " Every completed instance still has its evidence; next/report re-verify the gates.") +
+      (unpublished ? ` ⚠️ The checkpoint is not on the remote; publish it: ${ledgerPublishCommand(moduleId)}.` : "") +
+      " Commit aidlc/active so the team shares the recovered state.",
+  };
+}
+
+/**
+ * MARS-117 (change C): rebuild the registry identity file and recompute the derived
+ * projection / global summary from the per-module workflow states after a merge. The
+ * registry file is identity-only (module -> Workflow ID / State Path); a merge that went
+ * through the aidlc-registry driver already unioned the identity rows, and this command
+ * rewrites them to the canonical, sorted, deduplicated, conflict-note-free form and then
+ * recomputes the status / barrier / contract projections (which the engine never
+ * persists) so the team can one-click rebuild instead of hand-editing. Read-only against
+ * the workflow states; it only ever rewrites registry.md to its canonical identity form.
+ */
+async function rebuildControlPlane(flags: Record<string, string>): Promise<Directive> {
+  if (Object.keys(flags).some(key => !["maintenance", "user-input", "reason"].includes(key))) return { kind: "error", message: `state rebuild takes only maintenance approval options. ${STATE_USAGE}` };
+  if (flags["user-input"] !== "Approve" || !flags.reason?.trim() || flags.reason === "true") return { kind: "error", message: "maintenance rebuild requires --user-input Approve and a non-empty --reason" };
+  if (!isSplitLayout(PROJECT_ROOT)) {
+    return { kind: "error", message: "state rebuild needs the split layout (aidlc/active/registry.md); a single-layout workflow has no registry projection to rebuild." };
+  }
+  let loaded: WorkflowParts;
+  try {
+    loaded = loadWorkflowParts(PROJECT_ROOT);
+  } catch (error) {
+    return { kind: "error", message: `Cannot rebuild: the control plane is inconsistent — ${error instanceof Error ? error.message : String(error)}. Resolve the registry/state conflict (orchestrate state verify) first.` };
+  }
+  // refreshRegistry rewrites registry.md to the canonical identity form (sorted, deduped,
+  // any leftover conflict note dropped) and recomputes the in-memory projection.
+  refreshRegistry(loaded);
+  const projection = loaded.registry!;
+  const modules = projection.modules.map((row) => ({
+    module_id: row.module_id,
+    workflow_id: row.workflow_id,
+    state_path: row.state_path,
+    status: row.status,
+    current_stage: row.current_stage,
+  }));
+  try {
+    appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "CONTROL_PLANE_REBUILT", {
+      Trigger: "state rebuild",
+      Approval: "Approve",
+      Reason: flags.reason,
+      "Maintenance Token": flags.maintenance,
+      Modules: String(modules.length),
+      "Barrier Ready": projection.integration.barrier_ready ? "yes" : "no",
+    });
+  } catch {
+    // Audit is best-effort; the registry rewrite is the contract.
+  }
+  return {
+    kind: "print",
+    workflow_id: projection.global_workflow_id,
+    modules,
+    integration: {
+      workflow_id: projection.integration.workflow_id,
+      status: projection.integration.status,
+      barrier_ready: projection.integration.barrier_ready,
+      blocking: projection.integration.blocking,
+    },
+    message: `✅ Control plane rebuilt from the per-module workflow states (registry.md canonicalized).\n` +
+      `  Global workflow: ${projection.global_workflow_id}\n` +
+      `  Modules (${modules.length}): ${modules.map((row) => `${row.module_id} [${row.status}] @ ${row.current_stage}`).join("; ") || "(none)"}\n` +
+      `  Integration: ${projection.integration.status}, barrier ${projection.integration.barrier_ready ? "ready" : "not ready"}${projection.integration.blocking.length ? ` (blocking: ${projection.integration.blocking.join(", ")})` : ""}\n` +
+      `  Commit aidlc/active/registry.md so the team shares the rebuilt identity index.`,
+  };
+}
+
+/**
+ * 4.13.0: carry one module workflow of another lineage (a commit of the git history)
+ * over into the active split layout. The module keeps its workflow ID, history and
+ * Revision (continued), and is re-parented to the active lineage; evidence is not
+ * trusted blindly — next/report re-verify upstream gates, and missing evidence is listed.
+ */
+async function adoptModuleState(flags: Record<string, string>): Promise<Directive> {
+  const moduleId = flags.module;
+  if (!moduleId || moduleId === "true" || !MODULE_ID_PATTERN.test(moduleId)) return { kind: "error", message: `state adopt requires --module <module-id>. ${STATE_USAGE}` };
+  if (!flags.from || flags.from === "true") return { kind: "error", message: `state adopt requires --from <commit> (a commit of the other lineage that carries the module state). ${STATE_USAGE}` };
+  if (flags["user-input"] !== "Approve") return { kind: "error", message: "--user-input must be exactly Approve: adopting a module from another workflow lineage requires the user's explicit approval." };
+  if (!flags.reason || flags.reason === "true" || !flags.reason.trim()) return { kind: "error", message: "--reason is required: record why this module is adopted." };
+  if (!isSplitLayout(PROJECT_ROOT)) return { kind: "error", message: "state adopt needs the split layout (aidlc/active/registry.md); modules belong to per-module workflows." };
+  if (!gitHistoryAvailable(PROJECT_ROOT)) return { kind: "error", message: "state adopt needs git history: the module state is read from a commit." };
+  const commit = resolveCommit(PROJECT_ROOT, flags.from);
+  if (!commit) return { kind: "error", message: `--from ${flags.from} is not a commit of this repository.` };
+  const ref = moduleRef(moduleId);
+  const statePath = relativeStatePath(PROJECT_ROOT, ref);
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  const global = loaded.parts.get("global")!.state;
+  if (loaded.parts.has(workflowRefKey(ref)) || existsSync(lightStatePath(PROJECT_ROOT, ref))) {
+    return { kind: "error", message: `Module ${moduleId} already has a workflow in the active lineage ${global.workflow_id}; one module has exactly one workflow, so keep that one or the one of ${commit.slice(0, 12)} — state adopt never merges two module workflows.` };
+  }
+  try {
+    if (!readModuleManifest(PROJECT_ROOT).some((module) => module.module_id === moduleId)) {
+      return { kind: "error", message: `Module ${moduleId} is not declared in docs/aidlc/ideation/module-manifest.json of the active checkout; declare it first.` };
+    }
+  } catch (error) {
+    return { kind: "error", message: `Module manifest is unavailable: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const text = committedFile(PROJECT_ROOT, commit, statePath);
+  if (!text) return { kind: "error", message: `${commit} has no ${statePath}.` };
+  let source: WorkflowState;
+  try {
+    source = parseLightWorkflowState(text.replace(/\r\n/g, "\n"));
+  } catch (error) {
+    return { kind: "error", message: `${statePath} at ${commit} is not a readable workflow state: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (source.workflow_kind !== "module" || source.module_id !== moduleId) return { kind: "error", message: `${statePath} at ${commit} is not the module workflow of ${moduleId}.` };
+  const fromLineage = source.parent_workflow_id || "-";
+  if (fromLineage === global.workflow_id) {
+    return { kind: "error", message: `${statePath} at ${commit} already belongs to the active lineage ${global.workflow_id}; restore it with git (git checkout ${commit} -- aidlc/active/modules/${moduleId}) instead of adopting it.` };
+  }
+  if ([...loaded.parts.values()].some((part) => part.state.workflow_id === source.workflow_id)) {
+    return { kind: "error", message: `Workflow ID ${source.workflow_id} of ${moduleId} at ${commit} is already used in the active layout.` };
+  }
+  const audit = committedFile(PROJECT_ROOT, commit, `aidlc/active/modules/${moduleId}/audit.md`);
+  const adopted: WorkflowState = { ...source, active_instances: {}, parent_workflow_id: global.workflow_id };
+  const auditPath = lightAuditPath(PROJECT_ROOT, ref);
+  mkdirSync(dirname(auditPath), { recursive: true, mode: 0o700 });
+  if (audit) writeFileSync(auditPath, audit.replace(/\r\n/g, "\n"), { encoding: "utf8", flag: "wx", mode: 0o600 });
+  try {
+    saveWorkflowState(PROJECT_ROOT, adopted, ref, { adoptRevision: true, baselineWrite: true });
+    updateRegistry(PROJECT_ROOT, (current) => {
+      const registry = current as WorkflowRegistry;
+      if (registry.modules.some((row) => row.module_id === moduleId)) throw new Error(`registry already lists module ${moduleId}`);
+      return { ...registry, modules: [...registry.modules, { module_id: moduleId, workflow_id: adopted.workflow_id, state_path: statePath, status: adopted.status, current_stage: "-", inception_done: false, construction_done: false, owner: "-" }] };
+    });
+  } catch (error) {
+    for (const path of [lightStatePath(PROJECT_ROOT, ref), auditPath]) if (existsSync(path)) rmFile(path);
+    return { kind: "error", message: `state adopt aborted and rolled back: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const fields = {
+    Module: moduleId,
+    "Module Workflow ID": adopted.workflow_id,
+    "From Lineage": fromLineage,
+    "From Commit": commit,
+    "Maintenance Token": flags.maintenance,
+    "Revision": String(adopted.revision),
+    "Completed Instances": String(adopted.completed_stage_instances.length),
+    Reason: flags.reason.trim(),
+  };
+  try {
+    appendAuditEvent(PROJECT_ROOT, ref, "STATE_ADOPTED", fields);
+    appendAuditEvent(PROJECT_ROOT, GLOBAL_WORKFLOW, "STATE_ADOPTED", fields);
+  } catch (error) {
+    return { kind: "error", message: `Module ${moduleId} was adopted, but the STATE_ADOPTED audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。` };
+  }
+  const check = await handleUpgrade(["--dry-run", "--module", moduleId]);
+  const missing = Array.isArray(check.pending) ? check.pending as { instance_id: string; missing_sensors: string[] }[] : [];
+  return {
+    kind: "print",
+    workflow_id: global.workflow_id,
+    module_id: moduleId,
+    module_workflow_id: adopted.workflow_id,
+    from_lineage: fromLineage,
+    from_commit: commit,
+    revision: adopted.revision,
+    completed_instances: adopted.completed_stage_instances.length,
+    evidence_missing: missing,
+    message: `✅ Module ${moduleId} adopted from lineage ${fromLineage} (${commit.slice(0, 12)}) into ${global.workflow_id}: revision ${adopted.revision}, ${adopted.completed_stage_instances.length} completed instance(s).` +
+      (missing.length
+        ? ` ⚠️ ${missing.length} completed instance(s) lack evidence in this checkout: ${missing.map((item) => `${item.instance_id} (${item.missing_sensors.join(", ")})`).join("; ")}. Recover them with orchestrate upgrade --dry-run --module ${moduleId}.`
+        : " Every completed instance still has its evidence; next/report re-verify the gates.") +
+      ` Commit aidlc/active so the team shares it${fromLineage !== "-" ? `, and retire the source lineage once nothing else is needed from it (orchestrate state retire --lineage ${fromLineage} ...)` : ""}.`,
+  };
+}
+
+function verifyState(): Directive {
+  const global = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!global) return { kind: "error", message: "No active workflow to verify." };
+  if (!gitHistoryAvailable(PROJECT_ROOT)) {
+    return { kind: "print", workflow_id: global.workflow_id, git_available: false, message: `Workflow ${global.workflow_id}: no git history (not a git work tree, or no commit yet); lineage and revision checks need git and were skipped.` };
+  }
+  let layoutError: string | undefined;
+  try {
+    loadWorkflowParts(PROJECT_ROOT);
+  } catch (error) {
+    layoutError = error instanceof Error ? error.message : String(error);
+  }
+  const conflicts = lineageConflicts(PROJECT_ROOT, { current: global.workflow_id, retired: global.retired_lineages, refs: true });
+  const regressions = revisionRegressions(PROJECT_ROOT);
+  const ok = !layoutError && conflicts.length === 0 && regressions.length === 0;
+  const lines = [
+    ok ? `✅ Workflow ${global.workflow_id}: one lineage, no revision regressions.` : `🚫 Workflow ${global.workflow_id}: state verification failed.`,
+    ...(layoutError ? [`  Layout: ${layoutError}`] : []),
+    ...conflicts.map((item) => `  Other lineage: ${describeConflict(item)}`),
+    ...(conflicts.length > 0 ? [`  ${lineageRemedy(global.workflow_id, conflicts)}`] : []),
+    ...regressions.map((item) => `  Revision regression: ${item.path} is at revision ${item.current_revision}, but ${item.commit} committed revision ${item.committed_revision} of the same workflow ${item.workflow_id}; the newer state is recoverable with: ${item.restore_command}`),
+    ...(global.retired_lineages?.length ? [`  Retired lineages: ${global.retired_lineages.join(", ")}`] : []),
+  ];
+  return {
+    kind: ok ? "print" : "error",
+    workflow_id: global.workflow_id,
+    git_available: true,
+    lineage_conflicts: conflicts,
+    revision_regressions: regressions,
+    retired_lineages: global.retired_lineages || [],
+    ...(layoutError ? { layout_error: layoutError } : {}),
+    message: lines.join("\n"),
+  };
+}
+
+function retireLineages(flags: Record<string, string>): Directive {
+  const ids = lineageList(flags.lineage, "lineage");
+  if ("error" in ids) return { kind: "error", message: `${ids.error}. ${STATE_USAGE}` };
+  if (ids.length === 0) return { kind: "error", message: `state retire requires --lineage <workflow-id>. ${STATE_USAGE}` };
+  if (flags["user-input"] !== "Approve") return { kind: "error", message: "--user-input must be exactly Approve: retiring a workflow lineage discards it from the team's workflow and requires the user's explicit approval." };
+  if (!flags.reason || flags.reason === "true" || !flags.reason.trim()) return { kind: "error", message: "--reason is required: record why this lineage is retired." };
+  const global = loadWorkflowState(PROJECT_ROOT, GLOBAL_WORKFLOW);
+  if (!global) return { kind: "error", message: "No active workflow." };
+  if (ids.includes(global.workflow_id)) {
+    return { kind: "error", message: `${global.workflow_id} is the active lineage and cannot be retired. To keep another lineage instead, restore its files first (git checkout <commit> -- aidlc/active; orchestrate state verify shows the commit), then retire ${global.workflow_id} from there.` };
+  }
+  if (!gitHistoryAvailable(PROJECT_ROOT)) return { kind: "error", message: "state retire needs git history: no other workflow lineage can be found outside a git repository with commits." };
+  const conflicts = lineageConflicts(PROJECT_ROOT, { current: global.workflow_id, retired: global.retired_lineages, refs: true });
+  const unknown = ids.filter((id) => !conflicts.some((item) => item.workflow_id === id));
+  if (unknown.length > 0) {
+    return { kind: "error", message: `--lineage ${unknown.join(",")}: no such open workflow lineage in git (already retired, archived, or never committed)${conflicts.length ? `; open lineages: ${conflicts.map((item) => item.workflow_id).join(", ")}` : ""}.` };
+  }
+  global.retired_lineages = [...(global.retired_lineages || []), ...ids];
+  saveWorkflowState(PROJECT_ROOT, global, GLOBAL_WORKFLOW);
+  const retired = conflicts.filter((item) => ids.includes(item.workflow_id));
+  try {
+    for (const conflict of retired) auditLineageRetired(conflict, "orchestrate state retire", flags.reason.trim());
+  } catch (error) {
+    return { kind: "error", message: `Lineages ${ids.join(", ")} were retired, but the LINEAGE_RETIRED audit entry could not be written (${error instanceof Error ? error.message : String(error)}): ${AUDIT_MISSING}。` };
+  }
+  const remaining = conflicts.filter((item) => !ids.includes(item.workflow_id));
+  return {
+    kind: "print",
+    workflow_id: global.workflow_id,
+    retired_lineages: global.retired_lineages,
+    remaining_conflicts: remaining,
+    message: `✅ Retired workflow lineage ${ids.join(", ")}; ${global.workflow_id} stays the active lineage.` +
+      (remaining.length ? ` Still open: ${remaining.map((item) => item.workflow_id).join(", ")}.` : "") +
+      ` Commit aidlc/active so the team shares the decision. Progress of a retired lineage stays readable in git: ${retired.map((item) => item.last_present_commit ? `git show ${item.last_present_commit}:./aidlc/active/aidlc-state.md` : item.workflow_id).join("; ")}.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// split — migrate a single-layout workflow into per-module workflows
+// ---------------------------------------------------------------------------
+
+async function handleSplit(args: string[]): Promise<Directive> {
+  const flags = parseFlags(args);
+  const invalidFlag = unsupportedFlag(flags, SPLIT_FLAGS);
+  if (invalidFlag) return { kind: "error", message: `Unsupported split option: --${invalidFlag}` };
+  if (!flags.from || flags.from === "true") return { kind: "error", message: "split requires --from <workflow-id> (the Workflow ID of aidlc/active/aidlc-state.md, or its first 8+ characters)" };
+  if ("dry-run" in flags && flags["dry-run"] !== "true") return { kind: "error", message: "--dry-run is a boolean flag and does not accept a value" };
+  const replace = lineageList(flags["replace-lineage"], "replace-lineage");
+  if ("error" in replace) return { kind: "error", message: replace.error };
+  return performSplit(flags.from, "dry-run" in flags, "orchestrate split", replace);
+}
+
+// ---------------------------------------------------------------------------
+// continue — steering chain transport (placeholder for rule loading)
+// ---------------------------------------------------------------------------
+
+async function handleContinue(token: string): Promise<Directive> {
+  // Load-steering chains are simplified:
+  // The agent loads stage files directly. This is a passthrough.
+  return {
+    kind: "print",
+    message: `[Engine] Continue token "${token}" acknowledged. Agent should load the stage file directly.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// audit — MARS-271 事后抽审台账 (notify 阶段产物抽审发现回写)
+// ---------------------------------------------------------------------------
+
+function approvalAuditPath(moduleId: string): string {
+  return join(PROJECT_ROOT, ".aidlc", "reports", "approval-audit", `${moduleId}.json`);
+}
+
+function readApprovalAudit(moduleId: string): Record<string, unknown>[] {
+  try {
+    const value = JSON.parse(readFileSync(approvalAuditPath(moduleId), "utf8")) as unknown;
+    return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === "object") : [];
+  } catch {
+    return [];
+  }
+}
+
+function approvalAuditModuleIds(): string[] {
+  const dir = join(PROJECT_ROOT, ".aidlc", "reports", "approval-audit");
+  if (!existsSync(dir)) return [];
+  try {
+    return readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => name.replace(/\.json$/, "")).sort();
+  } catch {
+    return [];
+  }
+}
+
+/** MARS-271: notify 层级阶段完成后登记进事后抽审台账,不阻断推进。 */
+function recordApprovalAuditEntry(instance: StageInstance, state: WorkflowState): void {
+  let stage: StageNode;
+  try {
+    stage = runtimeStage(instance, state);
+  } catch {
+    return;
+  }
+  if (stage.approval !== "notify") return;
+  const moduleId = instance.module_id || DEFAULT_MODULE.module_id;
+  const entries = readApprovalAudit(moduleId);
+  entries.push({
+    stage_instance: instance.instance_id,
+    stage: stage.slug,
+    module_id: moduleId,
+    approval: "notify",
+    recorded_at: new Date().toISOString(),
+    sampled: false,
+  });
+  mkdirSync(join(PROJECT_ROOT, ".aidlc", "reports", "approval-audit"), { recursive: true });
+  writeFileSync(approvalAuditPath(moduleId), `${JSON.stringify(entries, null, 2)}\n`, "utf8");
+}
+
+async function handleAudit(rest: string[]): Promise<Directive> {
+  const flags = parseFlags(rest);
+  const unsupported = unsupportedFlag(flags, AUDIT_FLAGS);
+  if (unsupported) {
+    return { kind: "error", message: `Unknown flag --${unsupported}. Usage: audit --list [--module <id>] | audit --instance <id> --finding <text> --follow-up <CL 或修订说明>` };
+  }
+  const moduleIds = flags.module ? [flags.module] : approvalAuditModuleIds();
+  if (flags.list) {
+    const entries = moduleIds.flatMap((moduleId) => readApprovalAudit(moduleId));
+    return { kind: "print", message: JSON.stringify({ kind: "approval-audit", modules: moduleIds, entries }, null, 2) };
+  }
+  if (!flags.instance || !flags.finding || !flags["follow-up"]) {
+    return { kind: "error", message: "audit write-back requires --instance <stage-instance> --finding <text> --follow-up <CL 编号或修订说明>" };
+  }
+  let updated = false;
+  for (const moduleId of moduleIds.length > 0 ? moduleIds : [DEFAULT_MODULE.module_id]) {
+    const entries = readApprovalAudit(moduleId);
+    const entry = entries.find((item) => item.stage_instance === flags.instance);
+    if (!entry) continue;
+    entry.sampled = true;
+    entry.sampled_at = new Date().toISOString();
+    entry.finding = flags.finding;
+    entry.follow_up = flags["follow-up"];
+    mkdirSync(join(PROJECT_ROOT, ".aidlc", "reports", "approval-audit"), { recursive: true });
+    writeFileSync(approvalAuditPath(moduleId), `${JSON.stringify(entries, null, 2)}\n`, "utf8");
+    updated = true;
+    return { kind: "print", message: `已回写抽审发现到 ${flags.instance}: ${flags.finding} → ${flags["follow-up"]}` };
+  }
+  return { kind: "error", message: `approval audit has no entry for stage instance ${flags.instance}` };
+}
+
+// ---------------------------------------------------------------------------
+// checkpoint — MARS-271 收敛期非正式上报通道
+// ---------------------------------------------------------------------------
+
+function checkpointDir(): string {
+  return join(PROJECT_ROOT, ".aidlc", "checkpoints");
+}
+
+function readCheckpoints(instanceId: string): Record<string, unknown>[] {
+  const dir = join(checkpointDir(), instanceId.replace(/[^a-z0-9@_-]/gi, "_"));
+  if (!existsSync(dir)) return [];
+  try {
+    return readdirSync(dir).filter((name) => name.endsWith(".json")).sort().map((name) => JSON.parse(readFileSync(join(dir, name), "utf8")) as Record<string, unknown>);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * MARS-271 收敛期非正式上报:以 checkpoint 形式记录非正式轮次进度,不动引擎状态、
+ * 不推进 revision;正式 report 仍由门禁决定。任意非正式轮可从 checkpoint 恢复上下文。
+ */
+async function handleCheckpoint(rest: string[]): Promise<Directive> {
+  const flags = parseFlags(rest);
+  const unsupported = unsupportedFlag(flags, CHECKPOINT_FLAGS);
+  if (unsupported) {
+    return { kind: "error", message: `Unknown flag --${unsupported}. Usage: checkpoint [--note <text>] [--instance <id>] | checkpoint --list [--instance <id>]` };
+  }
+  const loaded = loadWorkflowParts(PROJECT_ROOT);
+  const parts = [...loaded.parts.values()];
+  const binding = sessionBinding();
+  const owner = binding ? parts.find((part) => part.state.workflow_id === binding.workflow_id) : undefined;
+  const state = owner?.state || parts.find((part) => part.state.current_stage_instance)?.state || parts[0]?.state;
+  if (!state || !state.current_stage_instance) {
+    return { kind: "error", message: "checkpoint requires an active stage instance; 正式 report 前先进入一个工作流实例" };
+  }
+  const instanceId = flags.instance || state.current_stage_instance;
+  if (flags.list) {
+    const checkpoints = readCheckpoints(instanceId);
+    return { kind: "print", message: JSON.stringify({ kind: "checkpoints", stage_instance: instanceId, checkpoints }, null, 2) };
+  }
+  const dir = join(checkpointDir(), instanceId.replace(/[^a-z0-9@_-]/gi, "_"));
+  mkdirSync(dir, { recursive: true });
+  const record = {
+    stage_instance: instanceId,
+    module_id: state.current_module || null,
+    unit_id: state.current_unit || null,
+    ...(flags.note ? { note: flags.note } : {}),
+    revision: state.revision,
+    workflow_id: state.workflow_id,
+    recorded_at: new Date().toISOString(),
+  };
+  writeFileSync(join(dir, `${Date.now()}.json`), `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  return { kind: "print", message: `已记录非正式 checkpoint:${instanceId}(revision ${state.revision} 未推进);门禁通过后用 report 提交正式证据。` };
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+function parseSubcommand(args: string[]): { cmd: Subcommand; rest: string[] } {
+  const cmd = args[0] as Subcommand;
+  if (!SUBCOMMANDS.includes(cmd)) {
+    console.error(
+      JSON.stringify({
+        kind: "error",
+        message: `Unknown subcommand: ${args[0]}. Use: ${SUBCOMMANDS.join(", ")}`,
+      })
+    );
+    process.exit(1);
+  }
+  return { cmd, rest: args.slice(1) };
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  if (args.length === 0) {
+    console.error(
+      JSON.stringify({
+        kind: "error",
+        message: "Usage: aidlc-orchestrate.ts <next|continue|report|park|archive|split|upgrade|diagram-format|baseline|state|profile|checkpoint|audit|unit> [args...]",
+      })
+    );
+    process.exit(1);
+  }
+
+  const { cmd, rest } = parseSubcommand(args);
+
+  // The registry merge driver (change B) is invoked by git with `%O %A %B`; it must
+  // write the merged result back to the ours file and signal clean (0) / conflict (1)
+  // through its exit status, not a JSON directive. Handle it before the directive flow.
+  if (cmd === "registry") {
+    if (rest[0] !== "merge-driver" || rest.length !== 4) {
+      console.error(JSON.stringify({ kind: "error", message: "Usage: orchestrate registry merge-driver <base> <ours> <theirs> (invoked by git via merge=aidlc-registry)" }));
+      process.exit(2);
+    }
+    const [, baseFile, oursFile, theirsFile] = rest;
+    process.exit(runRegistryMergeDriver(baseFile, oursFile, theirsFile));
+  }
+
+  // MARS-271: checkpoint 与 audit 只写报告/台账文件,不写工作流状态,豁免 session binding。
+  const readOnly = ["checkpoint", "audit"].includes(cmd)
+    || (cmd === "next" && (rest.includes("--status") || rest.includes("--preview")))
+    || (cmd === "next" && isSplitLayout(PROJECT_ROOT) && !sessionBinding() && !rest.includes("--module") && !rest.includes("--scope"))
+    || (cmd === "upgrade" && (!rest.includes("--retire-execution") || rest.includes("--dry-run")))
+    || (cmd === "state" && (!rest.length || ["plan", "rules", "evidence", "summary", "measurements", "verify", "review-inputs", "maintenance-plan"].includes(rest[0])))
+    || (["baseline", "diagram-format", "profile"].includes(cmd) && !rest.some(arg => arg.startsWith("--") && !["--module", "--status"].includes(arg)));
+  if (!readOnly && !(cmd === "state" && ["recover", "adopt", "rebuild"].includes(rest[0]))) {
+    const loaded = loadWorkflowParts(PROJECT_ROOT);
+    if (loaded.parts.size > 0 && !(cmd === "next" && rest.includes("--scope") && ![...loaded.parts.values()].some(part => part.state.current_stage_instance))) {
+      const binding = sessionBinding();
+      if (!binding) throw new Error("explicit session binding required before workflow writes; use module inspect/bind");
+      const target = [...loaded.parts.values()].find(part => part.state.workflow_id === binding.workflow_id);
+      if (!target) throw new Error("bound workflow is not active in this project");
+      assertSessionClaim(PROJECT_ROOT, target.state, binding.stage_instance, binding);
+      const requested = parseFlags(rest);
+      const initializingModule = cmd === "next" && target.ref.kind === "global" && requested.module && !loaded.parts.has(`module:${requested.module}`);
+      if (requested.module && (target.ref.kind !== "module" || target.ref.module_id !== requested.module) && loaded.split && !initializingModule) throw new Error("requested module conflicts with exact session binding");
+      // archive verifies every workflow is parked/done and every sibling claim
+      // released. split rejects an already split layout without mutating it.
+      if (cmd === "upgrade" && loaded.parts.size > 1 && !rest.includes("--retire-execution")) throw new Error("whole-project maintenance requires a separate quiescent workflow handoff; a session binding cannot grant sibling ownership");
+    }
+  }
+  let directive: Directive;
+  switch (cmd) {
+    case "next":
+      directive = await handleNext(rest);
+      break;
+    case "report":
+      directive = await handleReport(rest);
+      // The report checkpoint was finalized under its state commit lock.
+      break;
+    case "park":
+      directive = await handlePark(rest);
+      break;
+    case "archive":
+      directive = await handleArchive(rest);
+      break;
+    case "split":
+      directive = await handleSplit(rest);
+      break;
+    case "upgrade":
+      directive = await handleUpgrade(rest);
+      break;
+    case "diagram-format":
+      directive = await handleDiagramFormat(rest);
+      break;
+    case "baseline":
+      directive = await handleBaseline(rest);
+      break;
+    case "state":
+      directive = await handleState(rest);
+      break;
+    case "profile":
+      directive = handleProfile(rest);
+      break;
+    case "checkpoint":
+      directive = await handleCheckpoint(rest);
+      break;
+    case "audit":
+      directive = await handleAudit(rest);
+      break;
+    case "continue":
+      directive = await handleContinue(rest[0] || "");
+      break;
+    case "unit":
+      directive = await handleUnit(rest);
+      break;
+  }
+
+  // 4.11.0: a subprocess overflow is an engine failure of its own, never part of a gate
+  // result, even when a caller swallowed the error on the way up.
+  const overflow = recordedSubprocessOverflow();
+  if (overflow) directive = overflowDirective(overflow) as unknown as Directive;
+  if (cmd === "state" && rest[0] === "summary" && parseFlags(rest).format === "markdown" && directive.kind === "print") console.log(directive.message);
+  else console.log(JSON.stringify(directive, null, 2));
+  if (directive.kind === "error") process.exitCode = 2;
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    const overflow = error instanceof SubprocessOverflowError ? error : recordedSubprocessOverflow();
+    if (overflow) {
+      console.log(JSON.stringify(overflowDirective(overflow), null, 2));
+      process.exit(2);
+    }
+    console.error(JSON.stringify({
+      kind: "error",
+      message: error instanceof Error ? error.message : String(error),
+    }, null, 2));
+    process.exit(2);
+  });
+}

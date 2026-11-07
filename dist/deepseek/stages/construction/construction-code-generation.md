@@ -1,0 +1,564 @@
+---
+slug: code-generation
+number: "3.5.1"
+name: 代码生成
+phase: construction
+axis: unit
+execution: ALWAYS
+scopes: [feature, enterprise, mvp, classic, express, workshop, bugfix, refactor]
+consumes:
+  - docs/aidlc/modules/{module-id}/inception/application-design/test-cases/
+  - .aidlc/evidence/test-case-derivation/{module-id}/test-case-derivation.json
+  - .aidlc/evidence/tdd/{module-id}/{unit-id}/red-test-evidence.json
+produces:
+  - src/
+  - docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md
+  - .aidlc/evidence/code-generation/{module-id}/{unit-id}/green-test-evidence.json
+  - .aidlc/evidence/code-generation/{module-id}/{unit-id}/test-quality.json
+  - .aidlc/evidence/code-generation/{module-id}/{unit-id}/traceability-matrix.json
+  - .aidlc/evidence/code-generation/{module-id}/{unit-id}/structural-invariants.json
+sensors: [doc-cascade, green-test-evidence, test-quality, traceability-matrix, structural-invariants]
+requires: [test-case-derivation, tdd, ui-implementation-bridge]
+scope_waived_requires: [ui-implementation-bridge]
+---
+# 代码生成 - 详细步骤
+
+## 概述
+此阶段是 Construction 的 GREEN 阶段。它只在 I13 和 RED 门禁完成后执行批准的计划，生成最少生产代码并使目标测试转绿。
+- **第一部分 - 规划**：创建详细的代码生成计划，消费 I13 的 UC-D 或结构化豁免证据以及 RED 证据
+- **第二部分 - 生成**：实现生产代码，运行受控 GREEN 测试，并生成可机读的 GREEN/UC-D 证据
+
+**完成边界**：仅有 `src/`、计划或文字 TDD 声明不能完成本阶段；必须存在对应 RED 证据、GREEN 测试通过证据和完整追溯。对于存量项目，"生成"意味着在适当时修改现有文件，而非创建副本。
+
+### 源码根解析
+
+frontmatter 中的 `src/` 是“项目源码根”的规范占位（code-review、build-and-test 的 `consumes` 同样使用它），引擎按以下优先级解析为真实目录，`checkProduces` / `checkConsumes`、`no-todo`、`traceability` 与 directive 中显示的产物都使用解析结果：
+
+1. `docs/aidlc/ideation/module-manifest.json` 中当前模块的 `paths`（project 轴阶段取所有模块 `paths` 的并集）；
+2. 项目配置 `.aidlc/source-roots.json`：
+
+   ```json
+   { "version": "1", "source_roots": ["app", "web/src"] }
+   ```
+
+3. 默认 `src/`。
+
+每个源码根必须是项目根内的相对目录：接受 `/` 或 `\` 分隔与末尾分隔符，拒绝绝对路径（`/x`、`C:\x`、`C:x`、`\\server\share`）、`.`/`..` 段、AI-DLC 控制面（`aidlc/`、`.aidlc/`、`docs/aidlc/`）以及符号链接/junction。配置非法时直接报错，不回退到低优先级。无基线时检查各根的实质文件；有基线时检查本单元的实质源码 delta（含下述可核验删除）。交付仍须满足 `traceability` 与 `no-todo`，不能以未修改的存续文件代替实施。
+
+### 仅删除源码的交付
+
+移除已批准的可执行业务行为仍须 I13 和真实业务 RED/GREEN，不得声明无行为豁免。删除最后一个文件或整个源码根可以是有效实施；在 `.aidlc/evidence/code-generation/{module-id}/{unit-id}/source-deletions.json` 记录：
+
+```json
+{
+  "schema_version": "1",
+  "module_id": "project",
+  "unit_id": "default",
+  "deletions": [{
+    "path": "src/legacy.route.cjs",
+    "baseline_blob": "<git rev-parse BASE:src/legacy.route.cjs>",
+    "req_refs": ["REQ-1"],
+    "ucd_id": "UC-D-001"
+  }]
+}
+```
+
+删除必须存在于该单元基线范围的真实 Git diff 中，基线对象须为非忽略、非二进制、非占位的普通源码文件。`req_refs` 必须属于该单元 manifest，存在于模块的已授权 requirements.md。业务删除的 `ucd_id` 使用 I13 共享声明解析器和真实 `test_case_files` 来源映射；支持规范文件名、描述性文件名和聚合文件，按声明 ID、source_ref 和唯一性核验，拒绝缺失、重复、越界、跨模块或来源漂移。沿用 I13 已发布的 `ucd_units` 单元子集（显式或唯一需求归属推导）；仅缺少该字段的旧证据保持模块全集兼容范围，并由单单元或唯一匹配需求归属证明删除所有权，多单元真实歧义须补充归属。删除清单承接“旧源码 → 新移除需求 → 受影响行为”的追溯；不要求被删除的旧代码提前包含新需求 ID。消费者、追溯矩阵和完成报告重新核验该绑定；报告输出删除路径、blob、需求、适用性、UC-D（适用时）和基线，并写入审计。不存在删除、无归属、伪造证据或仅有无关占位修改均不能满足源码 produce。
+
+可信无行为删除使用同一版本清单，将条目的 `applicability` 设为 `not_applicable` 并省略 `ucd_id`。仅当受控 I13 的 `not_applicable` 来源仍有效，或 I13 明确单元子集为空且 manifest 存在已批准 `ucd_exemption` 时适用；需求授权、真实删除、基线 blob 和范围检查仍全部保留。RED/GREEN 沿用统一适用性门禁，必须有真实成功的确定性替代检查或有效 `reused_from`，复核来源、命令、环境及基线世代漂移。不可仅靠条目声明、路径名称或失败/缺失检查放行，不要求虚构 UC-D 或无关源码修改。省略 `applicability` 的旧清单保持业务删除语义。
+
+被删除的旧实现不再接受当前文件读取或旧 TODO 扫描；必要的授权需求、I13 适用性来源、UC-D（适用时）、基线对象和执行证据仍须真实可读、可复核，缺失时阻断。删除实际可执行业务行为仍须真实业务 RED/GREEN，不得用无行为声明替代。
+
+## 前置条件
+
+**完整流程/精简流程**：
+- 该单元的 I13 测试用例派生必须完成
+- 该单元的 RED 测试门禁必须完成
+- 单元设计和 NFR 产物（如适用）必须可用
+- 单元只能在对应 RED 证据、测试用例和追溯链完整后进入 GREEN
+
+**快速通道**：
+- 工作区检测已完成
+- I13 已完成，并已生成 UC-D 或结构化不适用/豁免证据
+- RED 阶段已完成；存在可执行业务行为时必须有真实测试及受控失败证据
+- 只能压缩计划和说明文档，仍必须按 I13 → RED → GREEN 顺序执行
+
+**CR4 L1/L2 变更模式**（从 CR 进入 Construction 时）：
+- 不创建独立代码生成计划文件
+- 不创建新的单元目录
+- 不创建实施摘要
+- 直接修改受影响的现有代码和测试
+- 审查记录写入现有单元 `code-review.md`
+- 验证通过后回到 CR5 合并门禁
+
+---
+
+## 手术式变更原则
+
+**在代码生成和审查的所有步骤中，严格遵循**：
+- 每一行代码改动必须能追溯到当前单元的需求
+- **追溯标记(强制,traceability-matrix 门禁校验)**：本单元实现的每个 `REQ-xxx` 必须在对应代码处留下可搜索的 `@ReqId REQ-xxx` 标记(注释即可),使追溯矩阵的 `code_refs` 层能确认该需求真的落到了代码。缺标记 → 矩阵 `BROKEN@code_refs` → 门禁阻断。前端页面同时保留 `PAGE-xxx` 标记(见 ui-design-alignment)。
+- 禁止在实现 A 功能时"顺手"重构 B 模块
+- **结构不变式(强制,structural-invariants 门禁校验)**：存在 `structural-invariants.json` 时，生成的迁移 DDL、实体类(`@TableName`/`@Table`/`@Entity`)、Prisma model、Mapper SQL 不得影子化已声明的唯一真源、不得重建或写入已收敛/废弃/迁出的对象；`persistence.mode: strict` 下每个新持久化实体都必须在清单中被授权。命中即阻断，违例清单写入 `.aidlc/reports/code-generation/{module-id}/{unit-id}/structural-invariants.blocked.json`；修正实现而非改清单，确需新实体时回到应用设计补声明并重新审批。
+- 不"改进"相邻代码、注释或格式
+- 不重构没坏的东西
+- 测试同样遵循最小充分范围：加载 `common-test-execution-strategy.md`，每轮运行当前 UC-D 与受影响行为测试；扩大到模块/全仓必须有影响分析或既定门禁依据。**GREEN 必须完整执行当前单元批准的验证矩阵**，不能用 RED 收敛期的临时筛选遗漏其中的用例；完整矩阵不等于全仓测试。`--test-filter` 只允许用于 tdd 阶段的 RED 收敛迭代，GREEN 证据携带 `test_filter` 会被门禁拒绝；定向测试范围应由已配置的真实命令表达。
+- 匹配现有代码风格，即使你会做不同选择
+- 注意到无关死代码时提一下，但不删除
+- 自己的改动产生的孤儿代码（未使用的 import、变量、函数）要清理
+- 审查“建议改进”项保留在本单元 `code-review.md`，不为此扩大当前单元范围
+- **测试**：每一行 diff 都应直接追溯到用户请求
+
+---
+
+# 第一部分：规划
+
+## 步骤 1：分析单元上下文
+- [ ] 读取单元设计生成的设计产物
+- [ ] 读取单元故事映射以理解分配的故事
+- [ ] 识别单元依赖和接口
+- [ ] 验证 I13 用例或结构化不适用/豁免证据已就绪
+- [ ] 验证 RED 测试及其受控失败证据已就绪
+
+## 步骤 1.25：共享契约基线门禁（条件）
+
+**触发条件**：当前单元存在 `contract` 类型跨单元依赖。
+
+- [ ] 加载 `construction-shared-contract-baseline.md`，检查相关基线是否为 `verified`
+- [ ] 对 `contract` 依赖，确认契约 ID、Owner、目标代码路径和实际验证证据均可追溯
+- [ ] 基线未 `verified`、状态为 `blocked` 或 `change_requested` 时，阻断代码规划与生成；不得以接口设计、空实现或消费者私有副本替代
+- [ ] 当前单元是消费者时，只引用 Owner 路径的已验证声明；不得重定义同职责接口、DTO、枚举或 Schema
+- [ ] 单单元或不存在 `contract` 依赖时，记录跳过原因后继续；`implementation` 与 `runtime` 依赖仍按其各自所需状态处理
+
+## 步骤 1.5：前端平台规范门禁（跨端项目）
+
+> **触发条件**：引擎按 canonical 项目目标事实和模块 I9 choice 实例化本单元 `ui-implementation-bridge`；handoff 仅展示结果
+> **跳过条件**：纯 Web 项目或无前端的纯后端单元
+
+- [ ] 检查 `docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md` 是否存在
+- [ ] 验证文件包含四个必填章节（平台声明 / 布局原语 / 组件映射参考 / CSS 约束）
+- [ ] 复验桥接阶段已完成，按真实设计/平台事实验证所需映射和来源覆盖，不设固定行数配额
+
+**通过** → 继续步骤 2
+
+**不通过** → ❌ 阻断，按以下处理：
+- 文件不存在或来源变化：返回 `ui-implementation-bridge` 创建/更新本单元 spec 并重新生成受控证据；不提前写未来阶段产物
+- 文件存在但章节不完整：列出缺失项，要求补充
+- 补充完成后重新验证，通过后继续
+
+## 步骤 2：技术规范与 MCP Skill 加载策略
+
+先核对已批准模块事实和显式 Provider 绑定，按 `provider-offline-knowledge.md` 读取当前模块的真实依赖、lockfile 与版本来源。旧 handoff 技术适配标志仅作迁移线索，不能无条件加载。只消费当前 Plan/node 的兼容知识章节并完成宿主确认；unknown/conflict 保留准确诊断，缺少必需知识不得回退到旧固定规则。项目自身规范和批准技术决策优先。
+
+> ℹ️ **外部 Provider**：Core 不内置任何框架专属 MCP Skill 或合规规则。若项目通过 `provider add ... --stage code-generation --capability implementation-validation` 安装了 Provider，orchestrate 会在 code-generation Hook 通过通用 Resolver/Runner/Gate 注入 `directive.provider_actions`；按 handoff 中的 Provider 指令执行并要求通用 GateDecision。未安装 Provider 时行为不变。
+
+### 渐进式披露原则（Provider Skill）
+
+MCP Skill 服务采用**三层披露**：`outline`（大纲导航）→ `section`（章节加载）→ `content`（全文兜底）。当外部 Provider 在 code-generation Hook 提供 Skill 时适用；未安装 Provider 时本节不适用。
+
+- **优先 `get_skill_section`**：只加载当前单元需要的章节，避免 token 浪费
+- **`get_skill_outline` 导航**：先查大纲，再选择需要的章节
+- **`get_skill_content` 兜底**：仅在章节粒度不够时使用
+- **`search_skill` 定位**：搜索返回章节级定位，可直接用章节标题调用 `get_skill_section`
+
+### 加载执行
+
+**已安装外部 Provider（code-generation 绑定 implementation-validation）**：按 `directive.provider_actions` 与 Provider 自带的 Skill 加载表执行，并在 report 时携带通用 `--gate-decision`。
+
+**未安装 Provider 的普通项目**：
+1. 不调用任何外部 Provider MCP Skill
+2. 加载 `common-tech-security.md`（安全编码规范）
+3. 加载 `common-database-design.md`（数据库设计规范）
+4. 读取项目 `.kiro/steering/structure.md`（如存在）
+5. 读取项目 `.kiro/steering/tech.md`（如存在）
+6. 按项目自身代码风格生成代码
+
+**前端代码**：
+1. 按当前模块事实/版本和显式绑定加载兼容外部知识；PC、移动端、小程序或目录名均不代表特定框架。未启用包时沿用项目自身规范，不添加领域占位。
+2. 当前模块 Markdown history 中 I9 choice 为 `figma-create` 或 `figma-existing` → `common-figma-design-standards.md`
+3. 读取项目 `.kiro/steering/structure.md`（如存在）
+4. 跨端项目 → 加载 `construction-ui-implementation-bridge.md` + 读取 `docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md`
+
+**测试代码**：
+1. 加载 `common-tech-testing.md`
+2. 已安装 Provider 时 → 按 Provider 在 code-generation Hook 提供的测试规则执行
+
+## 步骤 2.5：快速模式 vs 完整模式边界定义
+
+当用户表达"快速推进"、"跳过不必要的步骤"、"简化流程"等意图时，进入快速模式。快速模式**不是**跳过所有步骤，而是对步骤进行分级处理。
+
+### 可以简化的步骤
+
+| 步骤 | 完整模式 | 快速模式 | 简化方式 |
+|------|----------|----------|----------|
+| 代码生成计划 | 记录计划并展示摘要 | 精简计划摘要 | 按阶段图 approval 策略复用既有授权；用户显式要求审阅时等待 |
+| RED/GREEN 门禁 | I13 → RED → GREEN | 可压缩说明文档 | 不得改变执行顺序或证据要求 |
+| 代码审查 | 分别执行两轴检查 | 同一 `code-review.md` 保留两轴结论 | 保留 Spec / Standards 两个独立章节与结论，不减少任一审查轴 |
+| 人工说明 | 记录实际复杂决策与风险 | 记录关键决策与例外 | 有实际决策或例外时补充；状态统计由引擎记录 |
+
+### 绝对不能跳过的步骤
+
+| 步骤 | 原因 |
+|------|------|
+| MCP Skill 加载 | 跳过 = 代码不符合框架规范，后续全部返工 |
+| 前端平台规范门禁（跨端项目） | 跳过 = Mock 翻译无约束，实现必然偏离设计 |
+| 测试编写 | 跳过 = 无法验证正确性，bug 隐藏到生产环境 |
+| 编译验证 | 跳过 = 可能交付无法运行的代码 |
+| 框架规范遵循 | 跳过 = 技术债累积，团队协作成本上升 |
+| 测试基类使用 | 跳过 = 框架升级时测试批量失效 |
+| UI 设计加载（有 UI 设计的前端项目） | 跳过 = 实现与设计脱节，页面偏离设计定义 |
+
+### 判断标准
+
+**一句话原则**：如果跳过某步骤会导致"代码能跑但不符合团队规范"，则该步骤不可跳过。
+
+**快速模式的正确理解**：
+- ✅ 减少文档仪式感（精简摘要，复用既有授权）
+- ✅ 合并可合并的审查步骤
+- ✅ 压缩计划和审计说明，但保留 I13 → RED → GREEN
+- ❌ 以 Code-First 或文字声明替代 RED 证据
+- ❌ 跳过规范加载
+- ❌ 省略测试
+- ❌ 不验证编译
+- ❌ 忽略框架工具类
+
+**时间压力下的正确响应是缩小范围（少做几个功能），而非跳步（做了但做错）。**
+
+## 步骤 3：创建详细单元代码生成计划
+- [ ] 从当前 directive、workflow state 和已确认项目事实读取工作区根目录与项目类型
+- [ ] 确定代码位置（参见关键规则的结构模式）
+- [ ] **仅存量项目**：审查逆向工程 code-structure.md 了解需修改的现有文件
+- [ ] 记录确切路径（绝对不在 docs/aidlc/ 中）
+- [ ] **定义成功标准清单**（强制，在计划头部）：
+
+### 成功标准清单（目标驱动执行）
+
+在代码生成计划的**最前面**，列出本单元的可验证成功标准：
+
+```markdown
+## 成功标准
+- [ ] {功能1}：{可验证的完成条件}
+- [ ] {功能2}：{可验证的完成条件}
+- [ ] 编译通过（exit 0）
+- [ ] 单元测试全部通过（0 失败）
+- [ ] 规格合规审查通过
+- [ ] 外部 Provider 实现验证通过（仅已安装 Provider）
+```
+
+**规则**：
+- 每个标准必须是可执行验证的（"运行 X 命令得到 Y 结果"），不得写"代码质量好"这种模糊标准
+- 成功标准来源：需求文档的验收标准 + 技术约束（编译、测试、规范）
+- 代码生成完成后，逐项勾选成功标准，全部 [x] 才算单元完成
+
+- [ ] 为单元生成创建明确步骤：
+
+### 后端单元步骤模板
+  - 项目结构设置（仅全新项目）
+  - 业务逻辑生成
+  - 业务逻辑单元测试
+  - API 层生成
+  - API 层单元测试
+  - 数据访问层生成
+  - 数据访问层单元测试
+  - 数据库迁移脚本（如有数据模型）
+  - 文档生成（API 文档、README 更新）
+  - 仅按需求、已批准部署决策及现有交付范围准备所需制品；目标相关部署配置由 Operations 授权流程生成
+
+### 前端单元步骤模板
+  - **页面对照表**（有 UI 设计时必须，首步）— 建立设计单元（mock-box 或 Figma Frame）与目标代码文件的映射关系（格式见下方「页面对照表规范」）
+  - **组件映射表**（跨端项目必须，紧随页面对照表）— 对照 UI 设计 + frontend-platform-spec.md 生成本单元的组件映射（格式见 `construction-ui-implementation-bridge.md` 第二部分）
+  - 类型定义（types/）— API 接口类型
+  - API 接口定义（api/）— 调用后端接口
+  - Store 定义（store/）— Pinia 状态管理
+  - 页面组件（views/）— 页面级组件
+  - 业务组件（views/components/）— 页面内子组件
+  - 路由配置（router/modules/）— 路由注册
+  - 国际化（locales/）— 翻译文件
+
+- [ ] 按顺序编号每个步骤
+
+### 页面对照表规范（有 UI 设计的前端项目）
+
+**触发条件**：当前模块 Markdown history 中 I9 choice 为 `html-mock`、`figma-create` 或 `figma-existing`（`skip` 或 condition false 时不生成本表）。设计单元的定位方式按模式区分：
+
+| UI 设计方式 | 设计单元 | 来源 |
+|---------|---------|------|
+| `html-mock` | mock-box | `docs/aidlc/modules/{module-id}/inception/ui-mock/{端}.html` + `{端}-page-specs.md` |
+| `figma-create` / `figma-existing` | Frame | `docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json` 中的唯一主文件 URL、Page/Frame 与 nodeId |
+
+**产出位置**：写入代码生成计划文档头部（与成功标准同级）
+
+**生成方式**：
+
+- **html-mock 模式**：读取 `{端}-page-specs.md` 的页面清单表，补全其中"待 Construction 确定"的目标代码文件列
+- **figma 模式**：读取 canonical `figma-manifest.json` 建立对照表；manifest 缺少页面、nodeId 或截图证据时停止，不得从 handoff.md 补齐机器输入。目标代码文件按项目路由规范推导
+
+**步骤**：
+1. 获取设计单元清单（html-mock 读 page-specs.md；figma 读 canonical `figma-manifest.json` 的 PAGE/Frame/nodeId 映射，并仅用其中 nodeId 调用 `get_metadata` 复核）
+2. 改造页面：目标代码文件已在 Inception 阶段确定（= 改造基础路径），直接引用
+3. 新增页面：根据项目路由规范和目录结构推导目标文件路径，补全该列
+4. 将 PAGE ID 作为可搜索注释或等价元数据写入对应目标代码文件；`ui-design-alignment` 必须能从页面对照表追踪到真实代码文件
+5. 将结果写入代码生成计划；html-mock 模式需**回写更新** `{端}-page-specs.md` 中对应行的"目标代码文件"列
+
+**格式 — html-mock 模式**：
+
+```markdown
+## 页面对照表
+
+> UI 设计方式: html-mock
+> Mock 来源: docs/aidlc/modules/{module-id}/inception/ui-mock/{端}.html
+> page-specs: docs/aidlc/modules/{module-id}/inception/ui-mock/{端}-page-specs.md
+
+| PAGE ID | Mock-box 标题 | page-specs 序号 | 关联 US | 目标代码文件 | 路由路径 | 类型 |
+|---------|----------------|----------------|---------|-------------|---------|------|
+| PAGE-001 | 规则列表 | #1 | US-03 | src/views/rule/list.vue | /rule/list | 局部改动 |
+| PAGE-002 | 新增规则弹窗 | #2 | US-05 | src/views/rule/components/RuleDialog.vue | —（弹窗） | 新增 |
+| PAGE-003 | 规则详情 | #3 | US-07 | src/views/rule/detail.vue | /rule/:id | 新增页面 |
+```
+
+**格式 — figma 模式**：
+
+```markdown
+## 页面对照表
+
+> UI 设计方式: figma
+> Figma 文件: [figma-manifest.json 的 file_url]
+
+| PAGE ID | Figma Page / Frame 名称 | nodeId | 关联 US | 目标代码文件 | 路由路径 | 类型 |
+|---------|---------------------------|--------|---------|-------------|---------|------|
+| PAGE-001 | 平台后台 / 规则列表 | 1:234 | US-03 | src/views/rule/list.vue | /rule/list | 局部改动 |
+| PAGE-002 | 平台后台 / 新增规则弹窗 | 1:256 | US-05 | src/views/rule/components/RuleDialog.vue | —（弹窗） | 新增 |
+| PAGE-003 | 平台后台 / 规则详情 | 1:278 | US-07 | src/views/rule/detail.vue | /rule/:id | 新增页面 |
+```
+
+**nodeId 必填**：figma 模式下 nodeId 是后续调用 `get_design_context` / `get_screenshot` 的唯一入参，缺失将导致无法还原设计。
+
+**填写规则**：
+
+1. **改造页面**：直接引用 Inception 阶段已确定的目标代码文件路径
+2. **新增页面**：根据项目路由规范和目录结构推导目标文件路径；html-mock 模式补全后回写 page-specs.md
+3. **弹窗/子组件**：标注其所属页面，路由路径填"—（弹窗）"或"—（组件）"
+4. **多端项目**：每端一张对照表，标注端名称（figma 模式下端对应 Figma Page）
+
+**阻断规则**：如果某个设计单元无法确定目标代码文件（新增页面且项目无明确目录规范），必须询问用户确认，不得跳过或猜测。html-mock 模式补全后 page-specs.md 中不得残留"待 Construction 确定"。
+- [ ] 包含故事映射引用
+- [ ] 为每个步骤添加复选框 [ ]
+
+## 步骤 4：包含单元生成上下文
+- [ ] 对此单元，包含：
+  - 此单元实现的故事
+  - 对其他单元/服务的依赖
+  - 预期接口和契约
+  - 此单元拥有的数据库实体
+  - 服务边界和职责
+
+## 步骤 5：创建单元计划文档
+- [ ] 将完整计划保存为 `docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md`
+- [ ] 包含步骤编号（步骤 1、步骤 2 等）
+- [ ] 包含单元上下文和依赖
+- [ ] 包含故事可追溯性
+- [ ] 确保计划可逐步执行
+- [ ] 强调此计划是代码生成的唯一真实来源
+
+## 步骤 6：总结单元计划
+- [ ] 向用户提供单元代码生成计划的摘要
+- [ ] 突出单元生成方式
+- [ ] 解释步骤顺序和故事覆盖
+- [ ] 注明总步骤数和预估范围
+
+## 步骤 7：记录计划摘要与授权依据
+- [ ] 在已有计划中保留真实决策、风险例外及其授权来源；已有依据直接引用，不另建单元审计副本
+
+## 步骤 8：按权威审批策略继续
+- [ ] 以阶段图 `approval` 与引擎 directive 的有效审批策略为准；`code-generation` 为 `notify`，普通代码生成展示摘要后复用既有授权继续，不按模式新增阻断
+- [ ] 用户显式要求先审阅计划或结果时，在所要求的检查点等待并记录回复
+- [ ] 架构、部署授权等真正 `block` 节点仍按各自门禁执行；本阶段正文不得覆盖它们
+- [ ] 用户请求修改时更新计划；只有有效策略或用户明确要求等待时才再次确认
+
+## 步骤 9：记录继续依据
+- [ ] 发生显式用户审阅时按既有审批渠道记录真实回复；不得虚构未发生的批准
+- [ ] 普通 notify 复用既有授权，不手工复制引擎状态或计数
+
+## 步骤 10：更新进度
+- [ ] 保存当前计划与必要决策后继续代码生成；阶段状态由 `orchestrate report` 维护
+
+---
+
+# 第二部分：生成
+
+## 步骤 11：加载单元代码生成计划
+- [ ] 从 `docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md` 读取完整计划
+- [ ] 识别下一个未完成的步骤（第一个 [ ] 复选框）
+- [ ] 加载该步骤的上下文（单元、依赖、故事）
+
+## 步骤 12：执行当前步骤
+- [ ] 验证计划中的目标目录（绝对不在 docs/aidlc/ 中）
+- [ ] **仅存量项目**：检查目标文件是否存在
+- [ ] 精确生成当前步骤描述的内容：
+
+### 前端页面组件生成的 Mock 读取规则（条件：当前步骤为页面/组件生成且存在页面对照表）
+
+生成页面级组件（views/）或业务组件（views/components/）前，**必须**执行：
+
+**1. 定位对应 Mock-box**：
+- 读取代码生成计划中的「页面对照表」
+- 找到当前目标代码文件对应的行 → 获得 Mock-box 标题和 page-specs 序号
+- 如果当前文件不在对照表中（纯逻辑组件、工具函数等）→ 跳过本规则
+
+**2. 加载 Mock 内容**：
+- 读取 `docs/aidlc/modules/{module-id}/inception/ui-mock/{端}.html` 中对应序号的 mock-box 完整内容
+- 提取以下信息作为生成约束：
+  - 页面布局结构（各区域从上到下的顺序）
+  - 表单字段列表（名称、类型、必填标记）
+  - 操作按钮列表（位置、文案、触发条件）
+  - 条件表（各状态下的元素显隐/差异规则）
+  - 底部业务规则（计算逻辑、校验边界、联动规则）
+
+**3. 以 Mock 为基线生成代码**：
+- 页面区域顺序 = Mock 中 mock-box 内区域从上到下的顺序
+- 表单字段 = Mock 中定义的字段（不多不少，名称对齐）
+- 操作按钮 = Mock 中定义的按钮（位置、文案、条件渲染一致）
+- 条件渲染逻辑 = Mock 条件表中定义的显隐规则
+- 列表/表格列 = Mock 中表格列定义（顺序、名称一致）
+- 局部改动页面：保留现有元素不变，仅实现 Mock 中橙色标注的新增/变更部分
+
+**4. 记录映射证据**：
+- 在已有页面对照表中保留 Mock 文件及 mock-box 来源引用，不另抄字段、按钮与状态计数
+
+**5. 样式值对齐（有 UI 设计的前端项目，无论纯 Web 或跨端）**：
+
+Mock HTML 中的 CSS 属性值是样式实现的唯一真相源。生成组件 scoped style 时：
+
+a) **Token 引用强制**：当项目存在全局设计 token 文件（`style-anchor.css` 或等效）时，组件样式中禁止硬编码以下属性值，必须引用对应 CSS 变量：
+   - 色值 → `var(--color-*)`
+   - 字号 → `var(--text-*)`
+   - 字重 → `var(--weight-*)`
+   - 圆角 → `var(--radius-*)`
+   - 间距 → `var(--space-*)`
+   - 边框 → `var(--border-*)`
+   - 字体族 → `var(--font-*)`
+
+b) **Class 复刻规则**：当 Mock 的 `<style>` 区块或引用的 CSS 文件中定义了特定 class（如 `.btn-order`, `.tabs`, `.order-card`, `.account-layout`）时，组件 scoped style 必须逐属性复刻该 class 的样式定义值，不得自创替代方案
+
+c) **品牌色守护**：禁止使用 UI 框架默认色值（如 Element Plus `#409EFF`/`#303133`、Material `#1a73e8`、Ant Design `#1890ff`）替代 Mock 中定义的品牌色
+
+d) **自检阻断**：生成代码过程中自检发现 3 个以上应使用 token 但硬编码了等效值的属性 → 停止生成，修正已产出代码再继续
+
+**阻断**：如果对照表中有对应条目但 Mock HTML 文件中找不到该 mock-box → 停止并报告，不得凭记忆或猜测生成。
+
+---
+
+- [ ] 生成最少生产代码并写入正确位置；不可在 RED 前或没有 RED 证据时先写生产代码
+  - **如果文件存在**：就地修改（绝不创建 `ClassName_modified.java`、`ClassName_new.java` 等）
+  - **如果文件不存在**：创建新文件
+- [ ] 写入正确位置：
+  - **应用代码**：按项目结构写入工作区根目录
+  - **文档**：`docs/aidlc/modules/{module-id}/construction/{unit-id}/code/`（仅 markdown）
+  - **构建/配置文件**：工作区根目录
+- [ ] 遵循单元故事需求
+- [ ] 尊重依赖和接口
+
+## 步骤 13：更新进度
+- [ ] 在单元代码生成计划中将已完成步骤标记为 [x]
+- [ ] 当故事的生成完成时，将关联的单元故事标记为 [x]
+- [ ] **仅存量项目**：验证未创建重复文件（如 `ClassName_modified.java` 与 `ClassName.java` 并存）
+- [ ] 运行受控 GREEN 测试，确认目标测试通过且不是环境/编译假绿
+- [ ] 保存所有生成的产物与 GREEN/UC-D 追溯证据
+
+## 步骤 14：继续或完成生成
+- [ ] 如果还有步骤，返回步骤 11
+- [ ] 全部计划步骤完成后，确认当前 directive 要求的 GREEN 与追溯证据有效，再提交阶段结果
+
+## 步骤 15：展示结果
+
+简短说明本次变更、实际验证结果和未解决风险，引用已有计划、受控证据及适用的页面对照表。不另写单元实施摘要或手工同步 `handoff.md`，也不要求固定完工模板。需要统计时读取 `orchestrate state summary`；用户明确导出时可保存至 `.aidlc/views/`。
+
+阶段是否完成以 `orchestrate report` 的门禁结果为准；成功后原样展示返回的 `handoff_prompt`，不能提前宣称后续审查或 Construction 已完成。
+
+## 步骤 16：按有效策略交付结果
+- `notify` 展示结果并继续，不新增普通代码生成的用户确认门禁
+- 用户明确要求审阅时等待其回复；真正强制审批节点继续受引擎控制
+- 用户请求修改时更新代码并重新执行受影响验证
+
+## 步骤 17：记录交付并更新进度
+- 使用 `orchestrate report` 提交实际结果，由引擎写入 state/audit/ledger
+- 如有新增真实决策、风险或用户审阅，保留其来源；不要重复抄写机器统计
+- 原样展示返回的 `handoff_prompt`，后续按该提示及当前状态继续
+
+---
+
+## 代码生成强制规则
+
+- 禁止在代码中留下 TODO、FIXME 或占位符
+- 所有功能必须实现到位，不得省略或跳过
+- 如果某部分无法实现，必须明确告知用户原因并提出替代方案
+- **孤儿清理**：自己的改动产生的未使用 import/变量/函数必须清理
+- **不改进无关代码**：发现无关问题时在已有问题记录或 `code-review.md` 保留定位与风险，不在当前单元修复
+
+### 外部数据源字段来源约束
+
+> 目的：防止从 UI 设计稿/Mock 反推后端字段名导致使用不存在的属性。
+
+**规则**：引用外部数据源字段（后端接口响应字段、第三方 API 字段、数据库列名等）时，**以 C1 的数据源聚合确认与异常清单（`data-source-validation.md`）、实际源码或契约定义为依据**。正常字段已由聚合确认覆盖时无需逐行登记；界面标签不能代替来源验证。
+
+**禁止行为**：
+- ❌ 从 UI Mock/设计稿中的标签文本、表单 name 属性或列标题反推后端字段名
+- ❌ 凭"合理猜测"编造数据源中不存在的字段路径
+- ❌ 使用字段映射表中标记为🚨不存在且未标注解决方案的字段
+
+**与 Mock 基线的边界**（与本文件"Mock 读取规则"不冲突）：
+- UI 展示结构（页面有哪些字段、标签文案、布局顺序）→ **仍以 Mock 为基线**，不变
+- 外部数据源字段路径（JSON 响应中的 key、DB 列名、契约字段名）→ **以字段映射表/源码/契约为准**，Mock 中的 name 属性仅作展示参考
+
+**遇到未覆盖字段时的处理**：
+1. 先核对字段是否属于已确认数据源、范围和契约版本；属于该范围且实际定义一致时直接使用，不因异常清单未逐行列出而回退。
+2. 新数据源或超出原确认范围时，核实实际定义并更新该来源的聚合确认；只有不存在、名称不一致或需转换的字段逐条补入异常清单，记录影响与处置。
+3. 无法核实来源、真实契约变化或异常未解决时停止受影响部分，按既有变更与审批规则处理；不得靠补正常字段表格替代验证。
+
+## 外部 Provider 实现验证（仅已安装 Provider）
+
+> 若项目在 code-generation 绑定了 `implementation-validation` Provider，代码审查阶段 2 时按 Provider 自带的规则执行逐项对照，并以通用 GateDecision 聚合 Evidence。
+> 未安装 Provider 的项目跳过本节。
+
+## 关键规则
+
+### 代码位置规则
+- **应用代码**：仅在工作区根目录（绝不在 docs/aidlc/ 中）
+- **业务文档**：按当前 directive 的 canonical 路径维护；显式导出的展示摘要可保存到 `.aidlc/views/`
+- 生成代码前从当前 directive 与已确认项目事实**读取工作区根目录**
+
+**按项目类型的结构模式**：
+- **存量项目**：使用现有结构（如 `src/main/java/`、`lib/`、`pkg/`）
+- **全新单单元项目**：工作区根目录下 `src/`、`tests/`、`config/`
+- **全新多单元（微服务）**：`{unit-name}/src/`、`{unit-name}/tests/`
+- **全新多单元（单体）**：`src/{unit-name}/`、`tests/{unit-name}/`
+
+### 存量项目文件修改规则
+- 生成前检查文件是否存在
+- 如果存在：就地修改（绝不创建副本如 `ClassName_modified.java`）
+- 如果不存在：创建新文件
+- 生成后验证无重复文件（步骤 13）
+
+### 规划阶段规则
+- 为所有生成活动创建明确的编号步骤
+- 在计划中包含故事可追溯性
+- 记录单元上下文和依赖
+- 按阶段图与引擎有效审批策略执行，复用既有授权；用户要求审阅时等待
+
+### 生成阶段规则
+- **无硬编码逻辑**：仅执行单元计划中写的内容
+- **严格遵循计划**：不偏离步骤顺序
+- **更新复选框**：完成每个步骤后立即标记 [x]
+- **故事可追溯性**：功能实现后标记单元故事 [x]
+- **尊重依赖**：仅在单元依赖满足时实现
+
+## 完成标准
+- 单元代码生成计划已创建，满足有效审批策略及用户显式审阅要求
+- 单元代码生成计划中所有步骤已标记 [x]
+- 所有单元故事已按计划实现
+- 所有代码和测试已生成（测试将在构建和测试阶段执行）
+- 外部 Provider 实现验证已通过（仅已安装 Provider 的项目）
+- 受控 GREEN、质量与追溯证据满足当前 directive；简短结果可从 `orchestrate state summary` 读取
+- 已完成本次需求及现有交付范围所需制品；纯库、本地工具或无部署需求时不要求额外部署文件/监控设施。存在部署或可观测性需求时检查所需制品与策略，Operations 按已批准决策完成部署准备及授权；不自动生产部署，不接管部署后监控、告警或事故响应
+- 已通过 `orchestrate report` 记录结果，并展示返回的 `handoff_prompt`
+- 完整单元已准备好进行构建和验证

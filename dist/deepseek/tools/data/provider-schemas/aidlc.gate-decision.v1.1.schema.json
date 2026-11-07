@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:loeyae:aidlc:schema:gate-decision:1.1",
+  "title": "AI-DLC Provider Gate Decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "decision_id", "status", "plan_id", "plan_digest", "project_lock_digest", "policy_digest", "scope", "source_revision", "evidence", "rule_evaluations", "fallbacks", "waivers", "issued_at", "issuer", "signature"],
+  "properties": {
+    "schema": { "const": "aidlc.gate-decision/v1.1" },
+    "decision_id": { "type": "string", "pattern": "^gate-[0-9a-f]{32}$" },
+    "status": { "enum": ["passed", "passed_with_waiver", "blocked"] },
+    "plan_id": { "type": "string", "pattern": "^plan-[0-9a-f]{32}$" },
+    "plan_digest": { "$ref": "#/$defs/digest" },
+    "project_lock_digest": { "$ref": "#/$defs/digest" },
+    "policy_digest": { "$ref": "#/$defs/digest" },
+    "scope": { "$ref": "#/$defs/scope" },
+    "source_revision": { "$ref": "#/$defs/sourceRevision" },
+    "evidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidenceRef" }
+    },
+    "rule_evaluations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ruleEvaluation" }
+    },
+    "fallbacks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fallback" }
+    },
+    "waivers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/waiver" }
+    },
+    "issued_at": { "$ref": "#/$defs/timestamp" },
+    "issuer": { "const": "aidlc-core" },
+    "signature": { "$ref": "#/$defs/signature" },
+    "extensions": { "$ref": "#/$defs/extensions" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "gitObjectId": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
+    "timestamp": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage"],
+      "properties": {
+        "project_id": { "type": "string", "minLength": 1 },
+        "module_id": { "$ref": "#/$defs/id" },
+        "unit_id": { "$ref": "#/$defs/id" },
+        "stage": { "$ref": "#/$defs/id" }
+      }
+    },
+    "repoRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "worktree_digest"],
+      "properties": {
+        "commit": { "$ref": "#/$defs/gitObjectId" },
+        "worktree_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "sourceRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "worktree_digest"],
+      "properties": {
+        "commit": { "$ref": "#/$defs/gitObjectId" },
+        "worktree_digest": { "$ref": "#/$defs/digest" },
+        "repos": {
+          "type": "object",
+          "propertyNames": { "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)[^\\u0000]+$" },
+          "additionalProperties": { "$ref": "#/$defs/repoRevision" }
+        }
+      }
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_id", "digest", "state"],
+      "properties": {
+        "evidence_id": { "type": "string", "pattern": "^evidence-[0-9a-f]{32}$" },
+        "digest": { "$ref": "#/$defs/digest" },
+        "state": { "enum": ["accepted", "stale", "expired", "revoked"] }
+      }
+    },
+    "ruleEvaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_id", "rule_id", "original_status", "status"],
+      "properties": {
+        "evidence_id": { "type": "string", "pattern": "^evidence-[0-9a-f]{32}$" },
+        "rule_id": { "$ref": "#/$defs/id" },
+        "original_status": { "enum": ["passed", "failed", "not_applicable"] },
+        "status": { "enum": ["passed", "failed", "not_applicable", "waived"] },
+        "waiver_id": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "waived" } }, "required": ["status"] },
+          "then": { "required": ["waiver_id"] },
+          "else": { "not": { "required": ["waiver_id"] } }
+        }
+      ]
+    },
+    "fallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from_node_id", "to_node_id", "trigger_diagnostic", "policy_ref"],
+      "properties": {
+        "from_node_id": { "type": "string", "pattern": "^node-[0-9a-f]{24}$" },
+        "to_node_id": { "type": "string", "pattern": "^node-[0-9a-f]{24}$" },
+        "trigger_diagnostic": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" },
+        "policy_ref": { "type": "string", "minLength": 1 },
+        "approval_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "waiver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["waiver_id", "approval_ref", "reason", "scope", "evidence_id", "rule_ids", "issued_at", "expires_at", "rerun_required_by"],
+      "properties": {
+        "waiver_id": { "type": "string", "minLength": 1 },
+        "approval_ref": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 },
+        "scope": { "$ref": "#/$defs/scope" },
+        "evidence_id": { "type": "string", "pattern": "^evidence-[0-9a-f]{32}$" },
+        "rule_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "issued_at": { "$ref": "#/$defs/timestamp" },
+        "expires_at": { "$ref": "#/$defs/timestamp" },
+        "rerun_required_by": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "key_id", "value"],
+      "properties": {
+        "algorithm": { "type": "string", "minLength": 1 },
+        "key_id": { "type": "string", "minLength": 1 },
+        "value": { "type": "string", "minLength": 1 }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9-]*)+$" },
+      "additionalProperties": { "type": "object" }
+    }
+  }
+}

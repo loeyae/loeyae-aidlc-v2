@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:loeyae:aidlc:schema:project-providers-lock:1",
+  "title": "AI-DLC Project Providers Lock",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "specVersion", "lock_digest", "providers"],
+  "properties": {
+    "apiVersion": { "const": "aidlc.project-providers-lock/v1" },
+    "specVersion": { "const": "1.0.0" },
+    "lock_digest": { "$ref": "#/$defs/digest" },
+    "providers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/provider" }
+    },
+    "extensions": { "$ref": "#/$defs/extensions" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "path": { "type": "string", "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)(?!.*\\\\)(?!.*:)[^\\u0000]+$" },
+    "ruleset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "digest"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "version": { "type": "string", "minLength": 1 },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instance_id", "id", "source", "manifest", "artifacts", "project_config_digest", "trust"],
+      "properties": {
+        "instance_id": { "$ref": "#/$defs/id" },
+        "id": { "$ref": "#/$defs/id" },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["git", "requested_ref", "commit_oid", "object_format", "tree_oid", "subdir"],
+          "properties": {
+            "git": { "type": "string", "minLength": 1 },
+            "requested_ref": { "type": "string", "minLength": 1 },
+            "commit_oid": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
+            "object_format": { "enum": ["sha1", "sha256"] },
+            "tree_oid": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
+            "subdir": { "oneOf": [{ "$ref": "#/$defs/path" }, { "type": "null" }] }
+          }
+        },
+        "manifest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "digest", "rulesets"],
+          "properties": {
+            "version": { "type": "string", "minLength": 1 },
+            "digest": { "$ref": "#/$defs/digest" },
+            "rulesets": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ruleset" } }
+          }
+        },
+        "artifacts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider_lock_digest", "sbom_digest", "entrypoint_digests"],
+          "properties": {
+            "provider_lock_digest": { "$ref": "#/$defs/digest" },
+            "sbom_digest": { "$ref": "#/$defs/digest" },
+            "entrypoint_digests": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": { "$ref": "#/$defs/path" },
+              "additionalProperties": { "$ref": "#/$defs/digest" }
+            }
+          }
+        },
+        "project_config_digest": { "$ref": "#/$defs/digest" },
+        "trust": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {
+            "status": { "enum": ["untrusted", "verified", "revoked"] },
+            "verification_digest": { "$ref": "#/$defs/digest" }
+          },
+          "allOf": [{
+            "if": { "properties": { "status": { "const": "verified" } }, "required": ["status"] },
+            "then": { "required": ["verification_digest"] }
+          }]
+        },
+        "extensions": { "$ref": "#/$defs/extensions" }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9-]*)+$" },
+      "additionalProperties": { "type": "object" }
+    }
+  }
+}
