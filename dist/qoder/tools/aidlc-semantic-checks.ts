@@ -15,7 +15,7 @@ import { withRevisionInvalidation, withRevisionMemoization } from "./aidlc-revis
 import { deliveryConsistencyPayloadErrors, reviewAxisErrors, reviewIssueErrors } from "./aidlc-evidence-policy";
 import { reviewedFiles } from "./aidlc-review-files";
 import { checkHistoricalTddSensors, checkPhaseSensors, checkSensors, getExecutableStages, globalReviewPayload, globalReviewRequired, loadGraph, makeInstance, reviewCoverageErrors } from "./aidlc-orchestrate";
-import { omissionRegistrationCommand, redOmissionErrors, redOmissionRecord, redOmissionSummary } from "./aidlc-red-omission";
+import { omissionRegistrationCommand, redOmissionErrors, tddOmissionErrors, tddOmissionRecord, tddOmissionSummary } from "./aidlc-red-omission";
 import { projectDeliverySummary } from "./aidlc-delivery-summary";
 import { semanticCheckerEnv, semanticCommandArgv, semanticValidationEnvironment } from "./aidlc-evidence";
 import { deploymentValidationPayload } from "./aidlc-evidence";
@@ -1496,10 +1496,18 @@ async function testQuality(): Promise<Record<string, unknown>> {
   }
   for (const [moduleId, modes] of modesByModule) {
     if (modes.characterization.length === 0) continue;
-    if (!baselineRecords.some((record) => String(record.module_id ?? ACTIVE_MODULE ?? "") === moduleId)) fail(`BASELINE evidence is missing for test-quality: module ${moduleId} declares tdd_mode characterization UC-Ds (${modes.characterization.join(", ")})`);
+    if (!baselineRecords.some((record) => String(record.module_id ?? ACTIVE_MODULE ?? "") === moduleId)) fail(`BASELINE evidence is missing and no approved historical-omission record exists: module ${moduleId} declares tdd_mode characterization UC-Ds (${modes.characterization.join(", ")}). Register an explicit human approval with: ${omissionRegistrationCommand(moduleId, ACTIVE_UNIT, "BASELINE")}`);
   }
   for (const record of baselineRecords) {
     const modes = modesOf(record);
+    if (record.status === "not_recorded" || record.evidence_mode === "historical_omission") {
+      const moduleId = String(record.module_id ?? ""), unitId = String(record.unit_id ?? "");
+      const state = loadWorkflowView(ROOT, moduleId), i13 = requiredI13.get(moduleId);
+      if (!controlledPhases || !state || !i13) fail("BASELINE_OMISSION_INVALID: controlled envelope, workflow and current required I13 are mandatory");
+      const errors = tddOmissionErrors(ROOT, record, { workflow_id: state.workflow_id, module_id: moduleId, unit_id: unitId }, i13, "BASELINE");
+      if (errors.length) fail(errors.join("; "));
+      continue;
+    }
     if (modes && modes.characterization.length > 0) {
       if (record.status !== "passed" || record.phase !== "BASELINE" || record.tests_failed !== 0) fail(`BASELINE evidence of ${ownerLabel(record, modes)} is not passing for the tdd_mode characterization UC-Ds (${modes.characterization.join(", ")})`);
     } else if (record.status !== "not_required") {
@@ -1572,8 +1580,9 @@ async function testQuality(): Promise<Record<string, unknown>> {
     return { use_case: useCase, test_methods: matches.map(relativePath) };
   });
   const testsTotal = greenRequired.reduce((total, record) => total + numberValue(record.tests_total, "green-test-evidence.tests_total"), 0);
-  const omissions = redRecords.filter(record => record.status === "not_recorded").map(record => redOmissionSummary(ROOT, record)).sort((a, b) => String(a.path).localeCompare(String(b.path)));
-  return { status: "passed", red_seen: redSeen && !omissions.length, ...(omissions.length ? { red_status: "not_recorded", red_omission: omissions } : {}), baseline_seen: baselineSeen, green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping, ...(deferredEntries.length > 0 ? { mapping_debt: deferredEntries } : {}), ...(coverage.length > 0 ? { ucd_coverage: coverage } : {}) };
+  const summaries = (records: Record<string, unknown>[]) => records.filter(record => record.status === "not_recorded").map(record => tddOmissionSummary(ROOT, record)).sort((a, b) => String(a.path).localeCompare(String(b.path)));
+  const omissions = summaries(redRecords), baselineOmissions = summaries(baselineRecords);
+  return { status: "passed", red_seen: redSeen && !omissions.length, ...(omissions.length ? { red_status: "not_recorded", red_omission: omissions } : {}), baseline_seen: baselineSeen && !baselineOmissions.length, ...(baselineOmissions.length ? { baseline_status: "not_recorded", baseline_omission: baselineOmissions } : {}), green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping, ...(deferredEntries.length > 0 ? { mapping_debt: deferredEntries } : {}), ...(coverage.length > 0 ? { ucd_coverage: coverage } : {}) };
 }
 
 function testQualitySourceFiles(): string[] {
@@ -1622,12 +1631,12 @@ function phaseEvidenceCheck(sensor: "red-test-evidence" | "green-test-evidence" 
   if (record.status === "not_recorded" || record.evidence_mode === "historical_omission") {
     const moduleId = String(record.module_id ?? ACTIVE_MODULE ?? ""), unitId = String(record.unit_id ?? ACTIVE_UNIT ?? "");
     const state = loadWorkflowView(ROOT, moduleId);
-    if (phase !== "RED" || !state) fail("RED_OMISSION_INVALID: requires RED and a current workflow");
+    if (phase === "GREEN" || !state) fail(`${phase}_OMISSION_INVALID: requires RED/BASELINE and a current workflow`);
     const instance = makeInstance(loadGraph().stages.find(stage => stage.slug === "tdd")!, "unit", { module_id: moduleId, unit_id: unitId });
     const errors = checkPhaseSensors(instance, state, { onlySensors: [sensor], tolerateRevisionDrift: true, requireHistoricalPhaseInputs: true });
     if (errors.length) fail(errors.map(error => error.message).join("; "));
-    const canonical = redOmissionRecord(ROOT, moduleId, unitId);
-    if (!canonical) fail("RED_OMISSION_INVALID: canonical historical-omission record is missing");
+    const canonical = tddOmissionRecord(ROOT, moduleId, unitId, phase);
+    if (!canonical) fail(`${phase}_OMISSION_INVALID: canonical historical-omission record is missing`);
     return canonical;
   }
   if (record.status === "not_applicable") {

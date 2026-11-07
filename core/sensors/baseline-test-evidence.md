@@ -13,6 +13,10 @@ evidence_path: .aidlc/evidence/tdd/<module-id>/<unit-id>/baseline-test-evidence.
 
 ## 命令清单
 
+以下命令与观察契约用于真实 BASELINE。历史已实现单元若原始 BASELINE 从未登记、code refs 已变更，可按 [Historical BASELINE omission](../knowledge/protocols/historical-red-replay.md#historical-baseline-omission) 显式登记人类审批：`evidence run --stage tdd --module <module-id> --unit <unit-id> --sensor baseline-test-evidence --refresh --historical-omission --approval-ref "<human approval reference>" --approved-by "<name>" --approved-at "<ISO-8601 with timezone>"`。
+
+恢复记录保持 `phase: BASELINE`、`status: not_recorded`，绑定精确范围、characterization UC-D 集合、当前 I13/有效 GREEN 及真实基线链和 `baseline_refs`。它承认原始观察缺失，不证明实现前测试通过；不能包含 `observed_command`、测试计数、`code_ref_digests` 或 `worktree_blob`。无 characterization 用例继续走 `not_required`；真实原件不得被覆盖。输入、审批或原件变化会使恢复失效，所有下游消费及复用重新校验。正常新单元仍按下述原始命令契约执行。
+
 `.aidlc/commands/tdd.json`（或 `.aidlc/evidence-commands.json`）中恰好一条 `role: baseline` 命令，`stage` 为 `tdd`。与 RED/GREEN 相同，只认默认查找顺序；`evidence run --sensor baseline-test-evidence`（或 `--all-sensors`）带指向其他文件的 `--config` 时，在执行任何命令、写任何证据之前拒绝。
 
 ```json

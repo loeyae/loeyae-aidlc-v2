@@ -1,4 +1,28 @@
-# 历史 RED 受控补证协议 v2
+# 历史 TDD 受控补证协议 v3
+
+## Historical BASELINE omission
+
+历史单元的 characterization 用例确属当前 I13 单元范围，但原始 BASELINE 从未登记、实现已改变对应 code refs，普通 BASELINE producer 会拒绝在变更后的代码上生成原始基线观察。此时已完成的 tdd 实例可通过显式人类审批登记 BASELINE 漏登。优先恢复可验证的真实受控原件；正常单元仍须在实现前运行 BASELINE。无 characterization 用例的单元继续使用 `not_required`，不得以漏登代替。
+
+先生成或验证当前单元完整受控 GREEN。人类须审阅精确 workflow/module/unit、characterization UC-D 集合、I13、原基线链及当前 GREEN，并明确接受：“原始 BASELINE 未登记；未证明实现前特征化测试通过；以当前 GREEN 全通过作为验收依据，不宣称原始 BASELINE 存在。”使用真实审批引用、审批人和带时区的时间登记：
+
+```bash
+loeyae-aidlc evidence run --stage tdd --module <module-id> --unit <unit-id> --sensor baseline-test-evidence --refresh --historical-omission --approval-ref "<human approval reference>" --approved-by "<name>" --approved-at "<ISO-8601 with timezone>"
+```
+
+生产器写入固定位置 `.aidlc/evidence/tdd/<module-id>/<unit-id>/baseline-test-evidence.json`：
+
+- `phase: BASELINE`、`status: not_recorded`、`evidence_mode: historical_omission`、`reason_code: HISTORICAL_OMISSION`；
+- 精确范围身份、当前单元 characterization UC-D 集合、`i13_binding`、规范 GREEN 路径和原始字节 SHA-256、审批字段及上述固定局限声明；
+- 真实 `baseline_commit`、适用时的 `baseline_kind/baseline_repos`，以及 `baseline_refs` 中的 `path/baseline_blob` 和可选 `repo`。这些是可解析的 Git 基线对象，不是工作树测试观察；不允许 `worktree_blob`、`code_ref_digests`、测试计数或 `observed_command`。
+
+基线仍须注册且可解析；原 I13 仍绑定链的起始 epoch、正确的 workflow/adoption 类型及相应 Git blob；嵌套仓库仍校验各自 epoch 提交和 code refs 所属。登记和未完成 code-generation 的验收必须使用当前 epoch，不能跨越基线推进；完成单元在正常批准的 `baseline --advance` 后可继续验证原 epoch，不自动迁移审批到新基线。
+
+会话领取、发布锁、审批格式、固定路径与文件限制沿用 RED 漏登要求。审批不能覆盖真实 BASELINE；续批将旧原件逐字归档到 `.aidlc/evidence/historical-baseline-omission-history/<workflow>/<module>/<unit>/<execution-id>.json`，并绑定 `supersedes.path/sha256`。
+
+GREEN 字节、UC-D 集合、I13 语义或来源、范围身份、基线提交/blob/仓库映射变化，审批缺失、删除或被篡改，均保持阻断并给出明确诊断。下游重新读取审批原件；不能靠旧 `test-quality` 保留已撤销审批。重新执行 GREEN 会使原审批失效，须重新审阅和显式登记。
+
+通过后可生成 code-generation 其他证据并正式 report。`test-quality` 写 `baseline_seen: false`、`baseline_status: not_recorded`、逐单元 `baseline_omission` 摘要；不声称原始 BASELINE 通过。阶段级入口校验并复用审批所绑定的 GREEN 字节，显式单传感器 GREEN 仍执行真实测试。RED 与 BASELINE 漏登各自独立审批，可同时存在；一个单元的例外不免除其他单元的原有义务。`baseline --advance` 继续要求完成实例、真实 GREEN 提交锚点和人类批准；Vitest 历史 RED 重放路径不变。
 
 ## Historical RED omission
 

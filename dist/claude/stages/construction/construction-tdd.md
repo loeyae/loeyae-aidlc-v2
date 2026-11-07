@@ -80,7 +80,9 @@ describe('UC-D-003 超出配额拒绝请求', () => {
 - Construction 末尾对账（见 `construction-code-review.md` 全局审查）要校验本次所选 UC-D 的覆盖与通过状态；方法标记和受控 `uc_mapping` 均可作为可信映射
 - 没有溯源的测试回答"代码做了什么"，有溯源的测试回答"产品要的有没有被验证"——这是本质区别
 
-**不提供豁免**：新行为 RED→GREEN，存量行为 BASELINE→GREEN。纯重构不新增行为时，被改动的存量行为同样必须由 characterization UC-D 关联测试，不能以"本测试无 UC-D 关联"跳过；无可执行业务行为的单元只能走 I13 结构化 `not_applicable`。
+**正常 TDD 不按工作类型豁免**：新行为 RED→GREEN，存量行为 BASELINE→GREEN。纯重构不新增行为时，被改动的存量行为同样必须由 characterization UC-D 关联测试，不能以"本测试无 UC-D 关联"跳过；无可执行业务行为的单元只能走 I13 结构化 `not_applicable`。
+
+历史已实现单元的原始 RED/BASELINE 从未登记时，按 [历史 TDD 补证协议](../../knowledge/protocols/historical-red-replay.md) 核验当前 I13、完整受控 GREEN 与适用基线，再由人类明确批准局限，显式登记对应 `--sensor red-test-evidence` 或 `--sensor baseline-test-evidence` 的 `--refresh --historical-omission`。记录保持 `status: not_recorded`，不宣称原始 RED 或 BASELINE 存在；两阶段分别审批。不得通过重跑当前 GREEN 伪造原始观察，也不得把有对应 UC-D 的漏登改为 `not_required`。正常新单元继续执行完整 TDD。
 
 **违反处理**：所选 UC-D 缺少实际测试/批准替代验证、映射不可验证或测试失败时阻断；复用已有测试映射无需修改未受影响的测试。
 

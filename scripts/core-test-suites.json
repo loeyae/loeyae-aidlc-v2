@@ -1,4 +1,5 @@
 [
+  ["tsx", "tests/test_historical_baseline_omission.ts"],
   ["node", "tests/test_provider_integration_plan.mjs"],
   [
     "tsx",

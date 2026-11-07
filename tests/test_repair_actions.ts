@@ -26,6 +26,15 @@ try {
   assert.equal(approval.stage_instance, "tdd@module:project@unit:default");
   assert(approval.command?.includes("--historical-omission"));
   assert(!approval.command?.includes("--all-sensors"));
+  for (const message of ["BASELINE evidence is missing and no approved historical-omission record exists", "BASELINE_OMISSION_INVALID: GREEN sha256 changed"]) {
+    const baselineApproval = sensorRepairDiagnostics([{ sensor: "test-quality", message }], context)[0];
+    assert.equal(baselineApproval.category, "approval-required");
+    assert.equal(baselineApproval.sensor, "baseline-test-evidence");
+    assert.equal(baselineApproval.stage_instance, "tdd@module:project@unit:default");
+    assert(baselineApproval.command?.includes("baseline-test-evidence"));
+    assert(baselineApproval.command?.includes("--historical-omission"));
+    assert.equal(baselineApproval.requires_human_approval, true);
+  }
   const stale = sensorRepairDiagnostics([{ sensor: "traceability-matrix", message: "evidence scope_digest changed" }], { ...context, completed_stage_instances: [instance] })[0];
   assert.equal(stale.action, "refresh-evidence");
   assert.deepEqual(stale.command, ["loeyae-aidlc", "evidence", "run", "--stage", "code-generation", "--module", "project", "--unit", "default", "--sensor", "traceability-matrix", "--refresh"]);

@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.26.3 — 2026-11-08
+
+- Recover missing historical BASELINE evidence with an explicit, audited human approval bound to the exact workflow/module/unit, characterization UC-Ds, I13 inputs, current GREEN bytes and registered Git baseline chain. Preserve `status: not_recorded`, expose `baseline_status/baseline_omission` in test-quality, and revalidate approvals at every consumer. Keep real BASELINE, `not_required`, RED omission and Vitest replay semantics; archive prior approvals on renewal and reject changed inputs or fabricated observations.
+
 ## 4.26.2 — 2026-11-07
 
 - Restore the visible BOSS address across all Harness entrypoints and human handoffs. Completed, approved and re-attested stages now return a copyable `next_stage_prompt` from a fresh read-only routing preview, with exact stage/module/unit, inputs, artifacts, checks and approval requirements. Blocked, exhausted and unavailable routes remain explicit, including the original unit in recovery commands; prompt generation never claims the next instance, repeats completed work or adds approval rounds. Keep single-layout preview routing consistent with non-unit stage transitions.

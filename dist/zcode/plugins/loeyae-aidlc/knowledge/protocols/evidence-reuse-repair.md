@@ -16,6 +16,7 @@
 - 实际测试失败：先检查原始失败并修复最小原因，不通过扩大测试范围修复元数据。
 - 历史 RED/BASELINE 输入漂移：保留原件并诊断受影响观察，不盲目重跑 RED。
 - `HISTORICAL_RED_APPROVAL_REQUIRED` / `RED_OMISSION_INVALID`：核验原始 RED 是否可恢复，或在当前 GREEN/I13 有效后取得真实人类审批，再使用历史漏登入口。建议命令中的审批占位符不是批准。
+- `HISTORICAL_BASELINE_APPROVAL_REQUIRED` / `BASELINE_OMISSION_INVALID`：核验原始 BASELINE 是否可恢复；实现已修改 characterization code refs 的历史漏登须审阅当前 GREEN/I13 和原基线链，再对精确单元显式审批并使用 `--sensor baseline-test-evidence --refresh --historical-omission`。不通过重复运行当前测试伪造实现前的观察，不改成 `not_required`。
 
 原始错误保留可读；原因代码、目标和 argv 用于宿主选择动作。诊断不能跳过既有会话、来源、审批或测试门禁。
 

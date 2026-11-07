@@ -32,7 +32,7 @@ export interface RepairGuidance {
 
 export function classifyRepair(message: string): { category: RepairCategory; next_step: string } {
   if (/claim|session binding|bind the exact|generation.*mismatch|revision conflict|permission|unauthori[sz]|owner.*mismatch|stage mismatch/i.test(message)) return { category: "permission-state", next_step: "Inspect the exact workflow instance and current claim; bind or recover that state before retrying. Do not change tests." };
-  if (/RED_OMISSION_INVALID|RED evidence is missing and no approved historical-omission record exists/i.test(message)) return { category: "approval-required", next_step: "Restore original controlled RED if available. For a historical omission, verify the current GREEN and I13, obtain explicit human approval, then register or renew the exact unit's omission record. Do not rerun completed GREEN tests to manufacture RED or reuse an old approval for changed GREEN." };
+  if (/(?:RED|BASELINE)_OMISSION_INVALID|(?:RED|BASELINE) evidence is missing and no approved historical-omission record exists/i.test(message)) return { category: "approval-required", next_step: "Restore the original controlled phase evidence if available. For a historical RED/BASELINE omission, verify the current GREEN, I13 and applicable baseline, obtain explicit human approval, then register or renew the exact unit's phase omission record. Do not manufacture historical observations or reuse an old approval for changed GREEN." };
   if (/PHASE_INPUT_BINDING|(?:red|green|baseline)-test-evidence[^\n]*(?:source_revision|stale|epoch|allowlist|observed_command)|(?:RED|GREEN|BASELINE)[^\n]*(?:scope_digest|worktree_digest|epoch)/i.test(message)) return { category: "phase-evidence-stale", next_step: "Compare the named observation, command, selected I13 sources and test inputs. If current GREEN inputs changed, rerun only the affected allowlisted GREEN command once. For historical RED/BASELINE, preserve the original evidence and recover only the affected observation through controlled historical recovery. Do not add tests to repair metadata." };
   // Specific phase causes take precedence over wrappers such as "test-quality
   // failed". Producer tail output may retain only the phase path and recovery hint.
@@ -51,14 +51,15 @@ export function sensorRepairDiagnostics(failures: readonly { sensor?: string; me
     const named = /^(?<stage>[A-Za-z0-9_-]+)(?:@module:(?<module>[A-Za-z0-9_-]+))?(?:@unit:(?<unit>[A-Za-z0-9_-]+))?$/.exec(failure.stage_instance || context.stage_instance || "")?.groups;
     let stage = path?.[1] || named?.stage, module = path ? path[2] : named?.module, unit = path ? path[3] : named?.unit;
     let sensor = path?.[4] || failure.sensor || /built-in semantic checker ([A-Za-z0-9_-]+) failed/.exec(failure.message)?.[1];
-    if (classified.category === "approval-required") { stage = "tdd"; sensor = "red-test-evidence"; }
+    const omissionPhase = /BASELINE_OMISSION_INVALID|BASELINE evidence is missing and no approved historical-omission record exists/i.test(failure.message) ? "BASELINE" : "RED";
+    if (classified.category === "approval-required") { stage = "tdd"; sensor = `${omissionPhase.toLowerCase()}-test-evidence`; }
     else if (!path) {
       const phase = /\b(RED|GREEN|BASELINE)\b|\b(red|green|baseline)-test-evidence/.exec(failure.message);
       if (phase) { const name = (phase[1] || phase[2]).toLowerCase(); sensor = `${name}-test-evidence`; stage = name === "green" ? "code-generation" : "tdd"; }
     }
     const instance = stage ? `${stage}${module ? `@module:${module}` : ""}${unit ? `@unit:${unit}` : ""}` : undefined;
     const diagnostic: RepairDiagnostic = { code: classified.category === "approval-required"
-      ? /RED_OMISSION_INVALID/.test(failure.message) ? "RED_OMISSION_INVALID" : "HISTORICAL_RED_APPROVAL_REQUIRED"
+      ? /(?:RED|BASELINE)_OMISSION_INVALID/.test(failure.message) ? `${omissionPhase}_OMISSION_INVALID` : `HISTORICAL_${omissionPhase}_APPROVAL_REQUIRED`
       : classified.category.toUpperCase().replaceAll("-", "_"), ...classified,
       ...(instance ? { stage_instance: instance } : {}), ...(sensor ? { sensor } : {}),
       ...(path ? { artifact: path[0].replace(/\\/g, "/") } : {}), message: failure.message, action: "inspect", requires_human_approval: classified.category === "approval-required" };

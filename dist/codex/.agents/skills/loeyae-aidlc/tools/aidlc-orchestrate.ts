@@ -53,7 +53,7 @@ import { fileURLToPath } from "url";
 import { isDeepStrictEqual } from "node:util";
 import { buildTestEvidenceErrors, SEMANTIC_SENSORS, allowlistedAlternativeCommand, allowlistedPhaseCommand, argvDigest, i13CodeRefBlobs, i13UcdIdsByMode, phaseNotRequiredDigest, phaseObservationDigest, ucdExemptionDigest, unitUcdExemption, type Phase } from "./aidlc-evidence";
 import { replayEvidenceErrors, REPLAY_LIMITATION } from "./aidlc-historical-red";
-import { redOmissionErrors, redOmissionRecord, redOmissionSummary } from "./aidlc-red-omission";
+import { tddOmissionErrors, tddOmissionRecord, tddOmissionSummary, type OmissionPhase } from "./aidlc-red-omission";
 import { QUALITY_SENSORS, qualityAdoption, qualityEvidenceErrors, qualityCodeBaseline, type QualityContext } from "./aidlc-quality-gates";
 import { controlledQualityErrors, developmentAcceptanceErrors } from "./aidlc-quality-delivery";
 import { CANONICAL_SOURCE_PATTERN, SOURCE_ROOTS_CONFIG, declaredNestedRoots, resolveSourceRoots } from "./aidlc-source-roots";
@@ -1751,8 +1751,8 @@ function validateEvidence(
 function validateLoadedEvidence(stage: StageNode, sensor: string, instance: StageInstance, required: (value: Evidence) => string[], options: SensorCheckOptions, evidence: Evidence): SensorResult | null {
   const errors = required(evidence);
   // Omission provenance is backed by the currently validated GREEN, never by
-  // pretending that an original RED observation or RED command binding exists.
-  const omission = sensor === "red-test-evidence" && evidence.status === "not_recorded" && evidence.evidence_mode === "historical_omission";
+  // pretending that an original TDD observation or command binding exists.
+  const omission = ["red-test-evidence", "baseline-test-evidence"].includes(sensor) && evidence.status === "not_recorded" && evidence.evidence_mode === "historical_omission";
   if (omission) options = { ...options, tolerateRevisionDrift: true };
   errors.push(...evidenceFreshnessBindingErrors(stage.slug, evidence));
   const sourceRevision = asRecord(evidence.source_revision);
@@ -2266,7 +2266,7 @@ function ucMappingCoverageErrors(evidence: Evidence, requirement: string, expect
  * demands that BASELINE was produced in the current epoch, so a unit's BASELINE and
  * GREEN never straddle an --advance.
  */
-function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: StageInstance, requireCurrentEpoch = false, scope: UnitUcdScope | null = null): string[] {
+export function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: StageInstance, requireCurrentEpoch = false, scope: UnitUcdScope | null = null, historicalOmission = false): string[] {
   const errors: string[] = [];
   let baseline: ReturnType<typeof workflowBaselineForModule>;
   try {
@@ -2275,7 +2275,7 @@ function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: Sta
     return [`workflow baseline cannot be resolved: ${error instanceof Error ? error.message : String(error)}`];
   }
   const commitErrors = baselineCommitErrors(PROJECT_ROOT, baseline.registered ? { baseline_commit: baseline.commit, baseline_source: baseline.source } : {});
-  if (commitErrors.length > 0 || !baseline.registered) return commitErrors;
+  if (commitErrors.length > 0 || !baseline.registered) return [...commitErrors, ...(!baseline.registered && historicalOmission ? ["BASELINE omission requires a registered workflow baseline"] : [])];
   // 4.10.0: BASELINE and its I13 must both be bound to the kind of baseline that applies now.
   const kindErrors = [...baselineKindErrors(evidence.baseline_kind, baseline, "BASELINE"), ...baselineKindErrors(i13.baseline_kind, baseline, "I13")];
   if (kindErrors.length > 0) return kindErrors;
@@ -2328,21 +2328,24 @@ function baselineEvidenceErrors(evidence: Evidence, i13: Evidence, instance: Sta
   } catch (error) {
     return [...errors, error instanceof Error ? error.message : String(error)];
   }
-  const digests = Array.isArray(evidence.code_ref_digests) ? evidence.code_ref_digests.map((entry) => asRecord(entry)) : [];
+  // An omission binds real Git baseline objects, without claiming worktree observation.
+  const refField = historicalOmission ? "baseline_refs" : "code_ref_digests";
+  const digests = Array.isArray(evidence[refField]) ? evidence[refField].map((entry: unknown) => asRecord(entry)) : [];
   const paths = digests.map((entry) => asNonEmptyString(entry?.path) || "");
   const expectedPaths = expected.map((entry) => entry.path);
-  if (!Array.isArray(evidence.code_ref_digests) || paths.length !== new Set(paths).size || paths.length !== expectedPaths.length || !expectedPaths.every((path) => paths.includes(path))) {
-    errors.push(`code_ref_digests must cover exactly the ${scope ? `characterization code refs of unit ${instance.unit_id}` : "I13 characterization code refs"} (${expectedPaths.join(", ")}), got ${JSON.stringify(paths)}`);
+  if (!Array.isArray(evidence[refField]) || paths.length !== new Set(paths).size || paths.length !== expectedPaths.length || !expectedPaths.every((path) => paths.includes(path))) {
+    errors.push(`${refField} must cover exactly the ${scope ? `characterization code refs of unit ${instance.unit_id}` : "I13 characterization code refs"} (${expectedPaths.join(", ")}), got ${JSON.stringify(paths)}`);
   }
   for (const entry of digests) {
     const path = asNonEmptyString(entry?.path);
     const recorded = String(entry?.baseline_blob || "");
     const worktree = String(entry?.worktree_blob || "");
-    if (!entry || !path || !BLOB_ID_PATTERN.test(recorded) || !BLOB_ID_PATTERN.test(worktree)) {
-      errors.push("code_ref_digests entries need path, baseline_blob and worktree_blob git blob ids");
+    if (historicalOmission && entry && Object.keys(entry).some(key => !["path", "baseline_blob", "repo"].includes(key))) errors.push("baseline_refs may contain only path, baseline_blob and optional repo; no observed worktree_blob");
+    if (!entry || !path || !BLOB_ID_PATTERN.test(recorded) || (!historicalOmission && !BLOB_ID_PATTERN.test(worktree))) {
+      errors.push(`${refField} entries need path, baseline_blob${historicalOmission ? "" : " and worktree_blob"} git blob ids`);
       continue;
     }
-    if (worktree !== recorded) errors.push(`code_ref_digests ${path} worktree_blob ${worktree} must equal baseline_blob ${recorded}: BASELINE must observe the unmodified baseline code`);
+    if (!historicalOmission && worktree !== recorded) errors.push(`code_ref_digests ${path} worktree_blob ${worktree} must equal baseline_blob ${recorded}: BASELINE must observe the unmodified baseline code`);
     if (!nestedEvidence && entry.repo !== undefined) {
       errors.push(`code_ref_digests ${path} records repo ${JSON.stringify(entry.repo)} but the BASELINE evidence has no baseline_repos`);
       continue;
@@ -2459,12 +2462,13 @@ function phaseEvidenceErrors(
   const scoped = scope?.scoped === true;
   const unitLabel = `unit ${instance.unit_id}`;
   if (evidence.status === "not_recorded" || evidence.evidence_mode === "historical_omission") {
-    if (phase !== "RED" || !instance.module_id || !instance.unit_id || !i13Value) return [...errors, "RED_OMISSION_INVALID: requires exact RED workflow/module/unit and current I13"];
-    try { redOmissionRecord(PROJECT_ROOT, instance.module_id, instance.unit_id); }
-    catch (error) { errors.push(`RED_OMISSION_INVALID: ${error instanceof Error ? error.message : String(error)}`); }
-    errors.push(...redOmissionErrors(PROJECT_ROOT, evidence, { workflow_id: state.workflow_id, module_id: instance.module_id, unit_id: instance.unit_id }, i13Value));
+    if (phase === "GREEN" || !instance.module_id || !instance.unit_id || !i13Value) return [...errors, `${phase}_OMISSION_INVALID: requires exact RED/BASELINE workflow/module/unit and current I13`];
+    try { tddOmissionRecord(PROJECT_ROOT, instance.module_id, instance.unit_id, phase); }
+    catch (error) { errors.push(`${phase}_OMISSION_INVALID: ${error instanceof Error ? error.message : String(error)}`); }
+    errors.push(...tddOmissionErrors(PROJECT_ROOT, evidence, { workflow_id: state.workflow_id, module_id: instance.module_id, unit_id: instance.unit_id }, i13Value, phase));
+    if (phase === "BASELINE") errors.push(...baselineEvidenceErrors(evidence, i13Value, instance, requireCurrentBaselineEpoch, scope, true).map(error => `BASELINE_OMISSION_INVALID: ${error}`));
     const green = makeInstance(loadGraph().stages.find(stage => stage.slug === "code-generation")!, "unit", { module_id: instance.module_id, unit_id: instance.unit_id });
-    errors.push(...checkPhaseSensors(green, state, { onlySensors: ["green-test-evidence"], allowDownstreamReportDrift: true, alternativeValidationEnvironment: alternativeEnvironment }).map(failure => `RED_OMISSION_INVALID: GREEN gate: ${failure.message}`));
+    errors.push(...checkPhaseSensors(green, state, { onlySensors: ["green-test-evidence"], allowDownstreamReportDrift: true, alternativeValidationEnvironment: alternativeEnvironment }).map(failure => `${phase}_OMISSION_INVALID: GREEN gate: ${failure.message}`));
     return errors;
   }
   const emptySubset = scoped && scope!.all.length === 0;
@@ -2635,35 +2639,39 @@ export async function checkHistoricalTddSensors(instance: StageInstance, state: 
 }
 
 /** Re-read exceptions at every consumer; a cached quality verdict cannot retain a revoked approval. */
-export function redOmissionQualityErrors(evidence: Evidence, instance: StageInstance, state: WorkflowState): { errors: string[]; hasOmissions: boolean } {
+export function tddOmissionQualityErrors(evidence: Evidence, instance: StageInstance, state: WorkflowState, phase: OmissionPhase): { errors: string[]; hasOmissions: boolean } {
   const errors: string[] = [], summaries: Evidence[] = [];
+  const name = phase.toLowerCase(), sensor = `${name}-test-evidence`;
   const units = expandStageInstances(loadGraph(), state).filter(candidate => candidate.stage.slug === "code-generation"
     && (!instance.module_id || candidate.module_id === instance.module_id) && (!instance.unit_id || candidate.unit_id === instance.unit_id));
   for (const unit of units) {
     if (!unit.module_id || !unit.unit_id) continue;
     try {
-      const record = redOmissionRecord(PROJECT_ROOT, unit.module_id, unit.unit_id);
+      const record = tddOmissionRecord(PROJECT_ROOT, unit.module_id, unit.unit_id, phase);
       if (!record) continue;
       const tdd = makeInstance(loadGraph().stages.find(stage => stage.slug === "tdd")!, "unit", { module_id: unit.module_id, unit_id: unit.unit_id });
-      errors.push(...checkPhaseSensors(tdd, state, { onlySensors: ["red-test-evidence"], tolerateRevisionDrift: true, requireHistoricalPhaseInputs: true }).map(failure => failure.message));
-      summaries.push(redOmissionSummary(PROJECT_ROOT, record));
-    } catch (error) { errors.push(`RED_OMISSION_INVALID: ${error instanceof Error ? error.message : String(error)}`); }
+      errors.push(...checkPhaseSensors(tdd, state, { onlySensors: [sensor], tolerateRevisionDrift: true, requireHistoricalPhaseInputs: true }).map(failure => failure.message));
+      summaries.push(tddOmissionSummary(PROJECT_ROOT, record));
+    } catch (error) { errors.push(`${phase}_OMISSION_INVALID: ${error instanceof Error ? error.message : String(error)}`); }
   }
   if (summaries.length) for (const unit of units) {
     if (!unit.module_id || !unit.unit_id || summaries.some(summary => summary.module_id === unit.module_id && summary.unit_id === unit.unit_id)) continue;
-    // An exception for one owner never waives another owner's required RED.
+    // An exception for one owner never waives another owner's required observation.
     if (!existsSync(evidencePath(unit.stage, "green-test-evidence", unit))) continue;
     const tdd = makeInstance(loadGraph().stages.find(stage => stage.slug === "tdd")!, "unit", { module_id: unit.module_id, unit_id: unit.unit_id });
-    errors.push(...checkPhaseSensors(tdd, state, { onlySensors: ["red-test-evidence"], tolerateRevisionDrift: true, requireHistoricalPhaseInputs: true }).map(failure => failure.message));
+    errors.push(...checkPhaseSensors(tdd, state, { onlySensors: [sensor], tolerateRevisionDrift: true, requireHistoricalPhaseInputs: true }).map(failure => failure.message));
   }
   const sort = (items: Evidence[]) => [...items].sort((a, b) => String(a.path).localeCompare(String(b.path)));
-  if (summaries.length || evidence.red_status === "not_recorded" || evidence.red_omission !== undefined) {
-    if (!summaries.length) errors.push("RED_OMISSION_INVALID: approved historical-omission record is missing or no longer applicable");
-    if (evidence.red_status !== "not_recorded" || evidence.red_seen !== false) errors.push("historical omission requires red_status not_recorded and red_seen false");
-    if (!Array.isArray(evidence.red_omission) || evidence.red_omission.some(item => !asRecord(item)) || !isDeepStrictEqual(sort(evidence.red_omission || []), sort(summaries))) errors.push("RED_OMISSION_INVALID: red_omission summary no longer matches current per-unit approved records");
+  if (summaries.length || evidence[`${name}_status`] === "not_recorded" || evidence[`${name}_omission`] !== undefined) {
+    if (!summaries.length) errors.push(`${phase}_OMISSION_INVALID: approved historical-omission record is missing or no longer applicable`);
+    if (evidence[`${name}_status`] !== "not_recorded" || evidence[`${name}_seen`] !== false) errors.push(`historical omission requires ${name}_status not_recorded and ${name}_seen false`);
+    const recorded = evidence[`${name}_omission`];
+    if (!Array.isArray(recorded) || recorded.some(item => !asRecord(item)) || !isDeepStrictEqual(sort(recorded || []), sort(summaries))) errors.push(`${phase}_OMISSION_INVALID: ${name}_omission summary no longer matches current per-unit approved records`);
   }
   return { errors, hasOmissions: summaries.length > 0 };
 }
+
+export const redOmissionQualityErrors = (evidence: Evidence, instance: StageInstance, state: WorkflowState) => tddOmissionQualityErrors(evidence, instance, state, "RED");
 
 export async function checkSensors(instance: StageInstance, state: WorkflowState, options: SensorCheckOptions = {}): Promise<SensorResult[]> {
   const stage = instance.stage;
@@ -3070,8 +3078,10 @@ export async function checkSensors(instance: StageInstance, state: WorkflowState
           if (testsTotal === null || testsTotal < 1) errors.push("tests_total must be >= 1");
           const omission = redOmissionQualityErrors(evidence, instance, state);
           errors.push(...omission.errors);
+          const baselineOmission = tddOmissionQualityErrors(evidence, instance, state, "BASELINE");
+          errors.push(...baselineOmission.errors);
           if (evidence.red_seen !== true && (needs.red || !needs.known) && !omission.hasOmissions) errors.push("red_seen must be true (controlled RED evidence required)");
-          if (evidence.baseline_seen !== true && needs.baseline) errors.push("baseline_seen must be true (controlled BASELINE evidence required for the tdd_mode characterization UC-Ds)");
+          if (evidence.baseline_seen !== true && needs.baseline && !baselineOmission.hasOmissions) errors.push("baseline_seen must be true (controlled BASELINE evidence required for the tdd_mode characterization UC-Ds)");
           if (evidence.traceability_complete !== true) errors.push("traceability_complete must be true");
           const ucMapping = evidence.uc_mapping;
           if (!Array.isArray(ucMapping) || ucMapping.length === 0) {
