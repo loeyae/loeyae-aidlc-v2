@@ -1,0 +1,41 @@
+{
+  "run_id": "27d23c71-8336-413a-a7c8-2aa4aacf9545",
+  "lifetime_seconds": 3600,
+  "allowed_operations": [
+    "workflow-write",
+    "stage-report",
+    "decision-record",
+    "evidence-publish",
+    "validation-execute",
+    "design-write",
+    "code-write",
+    "test-write",
+    "environment-write",
+    "candidate-commit"
+  ],
+  "host": {
+    "host_id": "codex-app-server",
+    "version": "1",
+    "entrypoint": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\harness\\codex\\runtime\\aidlc-codex-host.mjs",
+    "config_digest": "9fddb18d55167c31d0138490b0d8c8f1745e58ac6e06296725d58d44b5cf2612"
+  },
+  "resource_limits": {
+    "wall_time_seconds": 3600,
+    "max_equivalent_retries": 2,
+    "max_active_units": 1
+  },
+  "integration_permissions": {
+    "candidate_commit": true,
+    "candidate_integrate": false,
+    "push": false,
+    "protected_branch_write": false,
+    "deploy": false
+  },
+  "write_paths": [
+    "src",
+    "tests",
+    "docs/aidlc/modules/project/construction",
+    "delivery",
+    ".runtime"
+  ]
+}

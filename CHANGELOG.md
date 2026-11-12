@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.27.0 — 2026-11-12
+
+- Make native host execution the default: the host owns implementation, scheduling, testing, repair and continuation. Keep controlled workflow APIs as explicit compatibility interfaces, without requiring H5, claims, probes or stage reports for ordinary local work.
+- Add optional read-only `work` context with bounded Git summaries and selected document reads; separate compact default help from `help legacy`. Split legacy contracts out of default Skills, reuse existing business documents and verification, and remove build/review prerequisite cycles.
+- Stop registering default lifecycle hooks. Preserve user configuration and mixed hook groups while removing recognized legacy AI-DLC commands during upgrades; remove OpenCode idle dispatch.
+- Complete scoped claim recovery, document/context simplification, evidence input/reuse corrections and the explicit controlled-mode autonomy/recovery implementation, retaining original authorization and resource boundaries.
+- Synchronize all ten harness distributions. Validate short execution boundaries, installer migration, source/distribution parity and two freshly implemented native-host pilots with real HTTP, timeout, retry, result navigation and unchanged visual thresholds. Keep cold-start, cross-session and other-host verification limits explicit in the implementation records.
+
 ## 4.26.3 — 2026-11-08
 
 - Recover missing historical BASELINE evidence with an explicit, audited human approval bound to the exact workflow/module/unit, characterization UC-Ds, I13 inputs, current GREEN bytes and registered Git baseline chain. Preserve `status: not_recorded`, expose `baseline_status/baseline_omission` in test-quality, and revalidate approvals at every consumer. Keep real BASELINE, `not_required`, RED omission and Vitest replay semantics; archive prior approvals on renewal and reject changed inputs or fabricated observations.

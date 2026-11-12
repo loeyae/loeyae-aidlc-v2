@@ -1,0 +1,15 @@
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+const root=process.cwd(), failures: string[]=[], counts: Record<string,number>={};
+const files=(dir:string,prefix=""):string[]=>readdirSync(join(dir,prefix),{withFileTypes:true}).flatMap(e=>e.isDirectory()?files(dir,join(prefix,e.name)):[join(prefix,e.name)]);
+for(const name of readdirSync(join(root,"harness"))){
+ const source=join(root,"harness",name), manifestPath=join(source,"manifest.ts");if(!existsSync(manifestPath))continue;
+ const m=(await import(pathToFileURL(manifestPath).href)).default,out=join(root,"dist",name),home=join(out,m.harnessDir);counts[name]=0;
+ const check=(a:string,b:string)=>{counts[name]++;if(!existsSync(b)||!readFileSync(a).equals(readFileSync(b)))failures.push(b);};
+ for(const row of m.coreDirs)for(const f of files(join(root,"core",row.src)))check(join(root,"core",row.src,f),join(home,row.dst,f));
+ for(const row of m.coreDirs){const expected=new Set(files(join(root,"core",row.src)));for(const f of files(join(home,row.dst)))if(!expected.has(f)&&!m.harnessFiles.some((h:any)=>join(h.projectRoot?out:home,h.dst)===join(home,row.dst,f)))failures.push('unexpected:'+join(home,row.dst,f));}
+ for(const row of m.harnessFiles)check(join(source,row.src),join(row.projectRoot?out:home,row.dst));
+}
+const result={harnesses:counts,files_compared:Object.values(counts).reduce((a,b)=>a+b,0),failures,global_install_modified:false};
+writeFileSync(resolve("docs/evals/git-evidence-migration-2026-11-11/distribution-consistency.json"),JSON.stringify(result,null,2)+"\n");console.log(JSON.stringify(result));if(failures.length)process.exitCode=1;

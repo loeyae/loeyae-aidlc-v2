@@ -1,0 +1,93 @@
+[
+  {
+    "name": "observations",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_observations.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-08T19:09:35.571Z",
+    "finished_at": "2026-11-08T19:10:26.274Z",
+    "log": "docs/evals/autonomy/p1-07/observations-final-4.log"
+  },
+  {
+    "name": "native-host",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_native_host.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-08T19:10:26.277Z",
+    "finished_at": "2026-11-08T19:10:45.178Z",
+    "log": "docs/evals/autonomy/p1-07/native-host-final-4.log"
+  },
+  {
+    "name": "native-driver",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_native_host_driver.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-08T19:10:45.179Z",
+    "finished_at": "2026-11-08T19:10:45.391Z",
+    "log": "docs/evals/autonomy/p1-07/native-driver-final-4.log"
+  },
+  {
+    "name": "admission-route",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_autonomous_admission_route.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-08T19:10:45.391Z",
+    "finished_at": "2026-11-08T19:10:48.726Z",
+    "log": "docs/evals/autonomy/p1-07/admission-route-final-4.log"
+  },
+  {
+    "name": "ui-observations",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_observation_ui.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-08T19:09:35.583Z",
+    "finished_at": "2026-11-08T19:10:51.097Z",
+    "log": "docs/evals/autonomy/p1-07/ui-observations-final-4.log"
+  },
+  {
+    "name": "typecheck",
+    "command": [
+      "node",
+      "node_modules/typescript/bin/tsc",
+      "--noEmit"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-08T19:10:48.728Z",
+    "finished_at": "2026-11-08T19:10:53.315Z",
+    "log": "docs/evals/autonomy/p1-07/typecheck-final-4.log"
+  },
+  {
+    "name": "runtime-observations",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_runtime_observations.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-08T19:09:35.577Z",
+    "finished_at": "2026-11-08T19:11:03.960Z",
+    "log": "docs/evals/autonomy/p1-07/runtime-observations-final-4.log"
+  }
+]

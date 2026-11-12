@@ -1,43 +1,17 @@
 ---
 name: aidlc-application-design
-description: "识别主要功能组件、接口和应用服务并生成架构设计产物；不负责架构审批和阶段路由。"
+description: "梳理本次变更的组件、接口、数据和约束，按需要更新现有应用设计。"
 triggers: 架构设计, 应用设计, 组件设计, 服务设计, 应用服务设计, 系统分层
 ---
 
-# 应用设计能力
+# application-design
 
-开始时宣布："使用 aidlc-application-design 执行应用设计"。
+从用户已确认范围、现有代码和设计出发，识别本次真正变化的组件职责、接口、数据流及依赖。未知业务事实明确提出，已有批准直接沿用。
 
-## 资源路径
+优先更新一份现有设计；简单改动可在任务说明中解释，不另写组件、方法、服务和依赖四份副本。NFR 和基础设施仅补充相关约束，复用已有方案。重大新架构决定交由用户确认，可逆细节自主选择并说明。图表只在有助于理解时使用，普通文档内优先 Mermaid。
 
-共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
 
-读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+## 兼容参考
 
-## 输入
-
-调用方必须提供：
-
-- 已批准的需求和用户故事路径；
-- 设计范围和复杂度判定；
-- 已有架构约束（技术栈、部署边界等）。
-
-缺少必要输入时返回 `NEEDS_CONTEXT`。
-
-## 加载
-
-加载发布包中的 [stages/inception/inception-application-design.md](../../stages/inception/inception-application-design.md)。图表需求通过调用 `aidlc-diagram-design` 执行。
-
-## 输出
-
-返回组件列表、组件方法、应用服务、组件依赖和架构设计文档路径。
-
-## 禁止事项
-
-不得：
-
-- 更新项目 state 或 audit；
-- 代替用户的架构审批（本阶段保留 `approval: block`，但审批由编排层负责）；
-- 放行质量门禁；
-- 宣布阶段完成；
-- 伪造 diagram-contract evidence。
+仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-application-design.md)，默认不加载。

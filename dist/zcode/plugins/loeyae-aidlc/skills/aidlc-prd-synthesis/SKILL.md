@@ -1,45 +1,17 @@
 ---
 name: aidlc-prd-synthesis
-description: "基于 Discovery 和已有 Inception 产物合成面向业务方的 PRD 文档；不负责 PRD 审批和阶段完成判定。"
+description: "把已有业务范围、需求和关键决定整合为面向业务方的 PRD，显式保留未知项。"
 triggers: PRD, 产品需求文档, 需求文档合成, 需求整理, PRD synthesis, 业务需求文档
 ---
 
-# PRD 合成能力
+# prd-synthesis
 
-开始时宣布："使用 aidlc-prd-synthesis 合成 PRD"。
+从已有业务材料和用户指令提取目标、角色、主要流程、需求与验收标准。可以先整理已知部分，关键未知项以清晰问题标记，不臆造业务事实或批准。
 
-## 资源路径
+按读者和项目规模选择深度，更新现有 PRD，不重复抄写所有过程文档或另建追踪副本。原始需求保留链接；已有冲突需要澄清，新 ID 只在确有追溯需要时使用。输出文档及影响交付的待决事项即可。
 
-共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
 
-读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+## 兼容参考
 
-## 输入
-
-调用方必须提供：
-
-- 用户描述或 Discovery 结论；
-- 适用的已有 Inception 产物（需求、故事、模块、契约等）；
-- 规模检测信号或显式规模取值（S/M/L）；
-- context-source 检索结果（条件：显式绑定、启用且可信策略授权）。
-
-缺少可靠生成 PRD 所需的信息时返回 `NEEDS_CONTEXT`，不臆造业务规则。
-
-## 加载
-
-加载发布包中的 [stages/ideation/product-prd-generation.md](../../stages/ideation/product-prd-generation.md)。
-
-## 输出
-
-返回生成的 canonical PRD 文件路径（`docs/aidlc/ideation/prd.md`）、待确认项索引、来源索引、澄清一致性结论和业务流程图状态。编排内仅在签名 `selected_optional_stages` 包含 `prd-generation` 时写入该路径，并由调用方运行受控 `prd-completeness` Producer；本能力不生成或伪造 Evidence。独立调用只返回文档结果，不实例化 AI-DLC Stage、state 或占位 Evidence。
-
-## 禁止事项
-
-不得：
-
-- 臆造业务规则（未知项必须分配 `PQ-NNN`、标记 `[待确认: PQ-NNN]`，并登记具体问题、负责方和阻断状态）；
-- 更新项目 state 或 audit；
-- 代替用户审批或放行质量门禁；
-- 宣布 PRD 完成或阶段完成；
-- 伪造 prd-completeness evidence；
-- 执行 Inception 后续阶段。
+仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-prd-synthesis.md)，默认不加载。

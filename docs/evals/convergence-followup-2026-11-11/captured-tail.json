@@ -1,0 +1,9 @@
+{
+  "read_only": true,
+  "phase_execution_binding_equal": true,
+  "recorded": "9c79a78cb06c63288f076bb8015244b99b21ba817e9f682ed029e82e24aba335",
+  "current": "9c79a78cb06c63288f076bb8015244b99b21ba817e9f682ed029e82e24aba335",
+  "raw_review_requires_ui": true,
+  "actual_runtime_requires_ui": false,
+  "selected_ui_still_required": true
+}

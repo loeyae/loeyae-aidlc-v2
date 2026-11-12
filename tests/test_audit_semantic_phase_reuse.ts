@@ -95,6 +95,7 @@ try {
   for (let attempt = 1; attempt <= 2; attempt++) {
     const blocked = JSON.parse(run(["orchestrate", "next"], false, bound));
     assert.match(blocked.message, /PHASE_INPUT_BINDING_CHANGED/);
+    assert.match(blocked.message, /changed inputs: tests\/behavior\.test\.cjs/);
     assert.equal(blocked.repair_guidance.category, "phase-evidence-stale");
     assert.equal(blocked.repair_guidance.unchanged_attempts, attempt);
     assert.equal(blocked.repair_guidance.action, attempt === 2 ? "diagnose" : "repair");
@@ -116,6 +117,7 @@ try {
     put(input, `${originalInput}\n`);
     const rejected = JSON.parse(run(["orchestrate", "next"], false, bound));
     assert.match(rejected.message, /PHASE_INPUT_BINDING_CHANGED/, "adapter/config bytes are historical test inputs even when argv is unchanged");
+    assert.ok(rejected.message.includes(input), 'diagnostic names the actual changed input');
     put(input, originalInput);
   }
   const redPath = ".aidlc/evidence/tdd/project/default/red-test-evidence.json", originalRed = readFileSync(join(root, redPath), "utf8");

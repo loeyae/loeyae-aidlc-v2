@@ -1,0 +1,107 @@
+[
+  {
+    "harness": "deepseek",
+    "attempt": 1,
+    "success": false,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\deepseek",
+    "error": "The process cannot access the file 'E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\deepseek\\knowledge\\protocols\\test-case-derivation.md' because it is being used by another process."
+  },
+  {
+    "harness": "deepseek",
+    "attempt": 2,
+    "success": false,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\deepseek",
+    "error": "The process cannot access the file 'E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\deepseek\\stages\\inception\\inception-ui-page-planning.md' because it is being used by another process."
+  },
+  {
+    "harness": "deepseek",
+    "attempt": 3,
+    "success": false,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\deepseek",
+    "error": "The process cannot access the file 'E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\deepseek\\tools\\aidlc-nested-repos.ts' because it is being used by another process."
+  },
+  {
+    "harness": "deepseek",
+    "attempt": 4,
+    "success": false,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\deepseek",
+    "error": "The process cannot access the file 'E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\deepseek\\tools\\aidlc-provider-gate.ts' because it is being used by another process."
+  },
+  {
+    "harness": "deepseek",
+    "attempt": 5,
+    "success": true,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\deepseek"
+  },
+  {
+    "harness": "kiro-cli",
+    "attempt": 1,
+    "success": false,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-cli",
+    "error": "The process cannot access the file 'E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-cli\\knowledge\\protocols\\core-mcp-readonly.md' because it is being used by another process."
+  },
+  {
+    "harness": "kiro-cli",
+    "attempt": 2,
+    "success": false,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-cli",
+    "error": "The process cannot access the file 'E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-cli\\sensors\\diagram-contract.md' because it is being used by another process."
+  },
+  {
+    "harness": "kiro-cli",
+    "attempt": 3,
+    "success": false,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-cli",
+    "error": "The process cannot access the file 'E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-cli\\tools\\aidlc-workflow-layout.ts' because it is being used by another process."
+  },
+  {
+    "harness": "kiro-cli",
+    "attempt": 4,
+    "success": true,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-cli"
+  },
+  {
+    "harness": "kiro-crew",
+    "attempt": 1,
+    "success": true,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-crew"
+  },
+  {
+    "harness": "kiro-ide",
+    "attempt": 1,
+    "success": true,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-ide"
+  },
+  {
+    "harness": "opencode",
+    "attempt": 1,
+    "success": true,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\opencode"
+  },
+  {
+    "harness": "qoder",
+    "attempt": 1,
+    "success": true,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\qoder"
+  },
+  {
+    "harness": "zcode",
+    "attempt": 1,
+    "success": false,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\zcode",
+    "error": "The process cannot access the file 'E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\zcode\\plugins\\loeyae-aidlc\\stages\\inception\\inception-requirement-clarification.md' because it is being used by another process."
+  },
+  {
+    "harness": "zcode",
+    "attempt": 2,
+    "success": false,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\zcode",
+    "error": "The process cannot access the file 'E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\zcode\\plugins\\loeyae-aidlc\\tools\\aidlc-provider-evidence.ts' because it is being used by another process."
+  },
+  {
+    "harness": "zcode",
+    "attempt": 3,
+    "success": true,
+    "target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\zcode"
+  }
+]

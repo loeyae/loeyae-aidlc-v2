@@ -1,7 +1,8 @@
 import { evidenceTimeError, isEvidenceTimestamp as isIsoDate } from "./aidlc-evidence-policy";
 import {semanticCheckerIdentityErrors} from "./aidlc-checker-identity";
 import { sensorInputScope } from "./aidlc-sensor-inputs";
-import { readSourceRevision } from "./aidlc-revision";
+import { evidenceScopeForInstance, evidenceSourceRevision } from "./aidlc-workflow-layout";
+import { readScopedSourceRevision } from "./aidlc-revision";
 /**
  * Read-only evidence reuse and validation scheduling for MARS-161 Phase 5.
  *
@@ -125,6 +126,10 @@ function candidateForSensor(
   expected: SourceRevision | undefined,
 ): CandidateResult {
   if (!target || target.stage_slug !== stage.slug || !expected) return { failure: "target_not_available" };
+  if (sensor === "contract-baseline") {
+    expected = evidenceSourceRevision(projectRoot, target.instance_id, sensor);
+    evidenceScope = evidenceScopeForInstance(projectRoot, target.instance_id, sensor).label;
+  }
   const label = evidenceRelativePath(stage.slug, sensor, target.axis, target);
   const path = resolve(projectRoot, label);
   const root = realpathSync(projectRoot);
@@ -146,7 +151,7 @@ function candidateForSensor(
       const sourceScope = typeof sourceRevision.scope === "string" ? sourceRevision.scope : "worktree";
       if (isRecord(value.checker) && value.checker.identity_version === 2) {
         const scope = sensorInputScope(projectRoot, sensor, target.instance_id);
-        if (scope) { evidenceScope = scope.label; expected = readSourceRevision(projectRoot, scope, Object.keys(expected.repos || {})); }
+        if (scope) { evidenceScope = scope.label; expected = readScopedSourceRevision(projectRoot, scope, Object.keys(expected.repos || {})); }
       }
       if (sourceScope !== evidenceScope) return { failure: "incompatible_scope" };
       if (!/^[a-f0-9]{64}$/.test(String(sourceRevision.worktree_digest))) return { failure: "invalid_evidence" };

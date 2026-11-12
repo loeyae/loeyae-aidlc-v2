@@ -1,0 +1,13 @@
+{
+  "name": "typecheck",
+  "argv": [
+    "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "node_modules/typescript/bin/tsc",
+    "--noEmit"
+  ],
+  "duration_ms": 3801.6596,
+  "exit_code": 0,
+  "error": null,
+  "signal": null,
+  "real_business_run": false
+}

@@ -1,0 +1,39 @@
+PASS formal routes continue through stages without human continue prompts
+PASS unchanged input route stops within the equivalent retry budget
+PASS new source progress can continue without resetting the wall deadline
+PASS formal errors never start a model turn or fabricate completion
+PASS missing reception plan stops before implementation
+PASS not-ready refresh returns to coordinator and never extends the grant
+PASS not-ready coordinator requests external dependency preflight before admission refresh
+PASS a transient native probe timeout is retried with a real new admission attempt inside the original budget
+PASS admission retries stop for repeated timeout
+PASS admission retries stop for unsupported host
+PASS interrupted native turns are not automatically resumed
+PASS model final is insufficient to complete a batch
+PASS coordinator executes frozen observations and preserves incomplete batch outcome
+PASS coordinator executes frozen observations and preserves failed batch outcome
+PASS exhausted unit switches to another unfinished implement unit
+PASS dependency providers with the same unit ID in another module are still selected
+PASS Core verified verdict controls the single batch endpoint
+PASS Core failed verdict controls the single batch endpoint
+PASS Core blocked verdict controls the single batch endpoint
+PASS Core incomplete verdict controls the single batch endpoint
+PASS unreconciled operations cannot start final convergence
+PASS last unit enters formal C8 after candidate preparation: scope-exhausted
+PASS last unit enters formal C8 after candidate preparation: actual public empty preview
+{"same_tail_driver_comparison":[{"grouped":false,"producers":4,"control_calls":17},{"grouped":true,"producers":1,"control_calls":5}],"real_trial":false}
+PASS Core groups completed C7 repairs before the host re-enters C8
+PASS Native evidence repair is bounded and never enables source writes
+PASS frozen candidate preparation uses the original coordinator and precedes C8
+PASS human-approval diagnostics do not enter automatic evidence repair
+PASS module selection follows frozen implement order within real route candidates
+PASS module selection rejects out-of-scope route code-generation@module:future@unit:a
+PASS module selection rejects out-of-scope route code-generation@module:orders-extra@unit:publish
+PASS module selection rejects out-of-scope route code-generation@module:orders@unit:future
+PASS a real block stage stops without a model approval or source permission
+PASS unresolved human choices stop and are not reinterpreted as notify
+PASS transported exit-2 diagnostics reach bounded evidence repair
+PASS notify stages with genuine user choices retain their choice boundary
+PASS a single ready split module is located and bound without a user prompt
+PASS a binding-required route cannot select a module outside the batch
+Native host driver: 37 scenarios passed; routing fixtures do not verify a business batch

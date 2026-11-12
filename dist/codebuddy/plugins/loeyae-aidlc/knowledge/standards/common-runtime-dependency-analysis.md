@@ -73,3 +73,9 @@
 - [ ] 未知项和冲突未被假设填补
 - [ ] 影响域已映射到设计、工作单元或验证范围
 - [ ] 现有基线记录保留来源新鲜度与未验证项，交接可直接引用
+
+## 显式自主批次消费（P1-05）
+
+将实际依赖映射至 canonical typed edges，绑定具体 CapabilityRef 版本与消费 checkpoint，外部系统明示 ExternalRef。contract/implementation/runtime 所需状态分别为 contract_ready/capability_verified/runtime_ready，不互相替代。共享与上游传递输入纳入 Native source scope，缺少完整输入声明保留模块范围。运行边可作为后置联调计划，但实际观察尚缺时为 unverified；局部替身仅允许命名 local 检查，不能作最终运行证据。交接引用 Core dependency 投影，宿主在实际消费前执行检查；来源变更须重验。
+
+P1-07 为 runtime/external 增加实际 HTTP 功能、版本/健康观察及短期签名凭据。提供者、能力版本、候选、环境/凭据、来源、原始输出和期限均须匹配；外部 Owner 明确。只读 inspect 展示有界历史观察，实际消费还执行 live probe；服务版本漂移、不可达或凭据失效即阻塞，不能用已有 GREEN、旧 receipt 或 JSON ready=true 补齐。内部 contract/implementation 继续执行原 Native gate。

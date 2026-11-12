@@ -1,0 +1,95 @@
+{
+  "rows": [
+    {
+      "name": "test_native_formal_diagnostics",
+      "args": [
+        "tests/test_native_formal_diagnostics.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 80
+    },
+    {
+      "name": "test_native_input_recovery",
+      "args": [
+        "tests/test_native_input_recovery.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 252
+    },
+    {
+      "name": "test_host_progress_boundary",
+      "args": [
+        "tests/test_host_progress_boundary.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 93
+    },
+    {
+      "name": "test_host_progress_limits",
+      "args": [
+        "tests/test_host_progress_limits.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 457
+    },
+    {
+      "name": "test_host_progress_checkpoint",
+      "args": [
+        "tests/test_host_progress_checkpoint.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 84
+    },
+    {
+      "name": "test_host_progress_transport",
+      "args": [
+        "tests/test_host_progress_transport.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 5238
+    },
+    {
+      "name": "test_progress_persistence",
+      "args": [
+        "tests/test_progress_persistence.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 66
+    },
+    {
+      "name": "test_native_model_input",
+      "args": [
+        "tests/test_native_model_input.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 116
+    },
+    {
+      "name": "test_native_tool_channel",
+      "args": [
+        "tests/test_native_tool_channel.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 83
+    },
+    {
+      "name": "test_native_action_policy",
+      "args": [
+        "tests/test_native_action_policy.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 221
+    },
+    {
+      "name": "test_native_reentry_repair",
+      "args": [
+        "tests/test_native_reentry_repair.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 83
+    }
+  ],
+  "passed": true,
+  "real_model": false,
+  "new_pilots": false
+}

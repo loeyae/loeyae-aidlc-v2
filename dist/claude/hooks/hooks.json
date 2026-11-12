@@ -1,17 +1,4 @@
 {
-  "description": "Loeyae AI-DLC deterministic stage completion gate",
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "loeyae-aidlc",
-            "args": ["hook", "--format", "claude"],
-            "timeout": 30
-          }
-        ]
-      }
-    ]
-  }
+  "description": "Native host owns execution and continuation; no default AI-DLC lifecycle hooks",
+  "hooks": {}
 }

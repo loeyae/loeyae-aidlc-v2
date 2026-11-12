@@ -1,0 +1,14 @@
+{
+  "name": "identity",
+  "argv": [
+    "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "--import",
+    "tsx",
+    "tests/test_functional_checker_identity.ts"
+  ],
+  "duration_ms": 864.5170999999998,
+  "exit_code": 0,
+  "error": null,
+  "signal": null,
+  "real_business_run": false
+}

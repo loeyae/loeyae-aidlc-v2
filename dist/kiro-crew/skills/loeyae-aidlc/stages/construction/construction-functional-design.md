@@ -9,10 +9,6 @@ scopes: [feature, enterprise, mvp, classic]
 consumes: [docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work.md]
 produces:
   - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design.md
-  - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-logic-model.md
-  - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-rules.md
-  - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/domain-entities.md
-  - docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/data-source-validation.md
   - .aidlc/evidence/functional-design/{module-id}/{unit-id}/functional-design-completeness.json
   - .aidlc/evidence/functional-design/{module-id}/{unit-id}/traceability-matrix.json
   - .aidlc/evidence/functional-design/{module-id}/{unit-id}/structural-invariants.json
@@ -24,6 +20,10 @@ condition: has_functional_design_needs
 以阶段图 `approval` 和引擎 directive 为权威；本阶段为 `notify`，展示摘要后复用有效既有授权继续。用户明确要求审阅时等待回复；真实未决产品语义先澄清；`block` 审批和安全边界仍须等待，不得以通知替代。
 
 # 功能设计
+
+## 单一设计来源
+
+本阶段只维护一份 functional-design.md，首部写入 `<!-- aidlc-design: functional-design/v1 -->`，并使用二级标题：`业务逻辑`、`业务规则`、`领域实体`、`数据源验证`。各节必须有实质内容；不适用项说明原因。原先四份子文档的语义要求全部保留，本文后续链接均指向这些章节；旧项目未采用此标记时兼容读取原文件，不自动删除。测试用例、真实验证证据、用户选择的 UI/图表源仍按各自契约保存。
 
 ## 目的
 **按单元的详细业务逻辑设计**
@@ -52,10 +52,8 @@ condition: has_functional_design_needs
 - 从 `docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-story-map.md` 读取分配的故事
 - 理解单元职责和边界
 
-### 步骤 2：创建功能设计计划
-- 生成包含复选框 [] 的功能设计计划
-- 聚焦业务逻辑、领域模型、业务规则
-- 每个步骤应有复选框 []
+### 步骤 2：组织设计内容
+- 直接在功能设计正文维护下列四节，不另建计划文件或重复进度表。
 
 ### 步骤 3：生成上下文相关的问题
 **指令**：全面分析单元定义和功能设计产物，识别所有澄清后能改善功能设计的领域。主动提问以确保全面理解。
@@ -93,6 +91,7 @@ condition: has_functional_design_needs
 - 包含所有 [回答]: 标签供用户输入
 
 ### 步骤 5：收集和分析答案
+- 显式自主批次先执行 `common-autonomous-execution.md`：已有来源直接复用，约束内工程细节自主处理，合法 policy/fallback 记录后实施和验证；下列等待/澄清仅针对没有合法兜底的真实产品问题或冲突。未采用模式保持原问答规则。
 - 仅对真实未决问题等待用户完成 [回答]: 标签；已有权威信息的条目记录来源，不生成重复问答
 - **强制**：仔细审查所有回复中的模糊或含糊答案
 - **关键**：对任何不清楚的回复添加后续问题 — 不带歧义继续
@@ -101,14 +100,14 @@ condition: has_functional_design_needs
 - **在所有歧义解决前不得继续**
 
 ### 步骤 6：生成功能设计产物
-- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-logic-model.md`
-- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-rules.md`
-- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/domain-entities.md`
-- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/data-source-validation.md`（数据源现实性验证）
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design.md#业务逻辑`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design.md#业务规则`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design.md#领域实体`
+- 创建 `docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design.md#数据源验证`（数据源现实性验证）
 
-**结构不变式约束**（存在 `structural-invariants.json` 时强制）：`domain-entities.md` 中每个持久化实体用 `[实体:实体名 table=表名]` 标记（DDL 草案放在 ``sql` 块）。`structural-invariants` sensor 在本阶段当场比对：影子化唯一真源、重建/写入已收敛/废弃/迁出对象、strict 模式下未授权的新实体，均 fail-closed 阻断。需要新实体而清单未授权时，回到应用设计补充声明并重新审批，不得在功能设计中自行放行。
+**结构不变式约束**（存在 `structural-invariants.json` 时强制）：`functional-design.md#领域实体` 中每个持久化实体用 `[实体:实体名 table=表名]` 标记（DDL 草案放在 ``sql` 块）。`structural-invariants` sensor 在本阶段当场比对：影子化唯一真源、重建/写入已收敛/废弃/迁出对象、strict 模式下未授权的新实体，均 fail-closed 阻断。需要新实体而清单未授权时，回到应用设计补充声明并重新审批，不得在功能设计中自行放行。
 
-**数据源现实性验证产物格式**（`data-source-validation.md`）：
+**数据源现实性验证产物格式**（`functional-design.md#数据源验证`）：
 
 ```markdown
 # 数据源现实性验证 — {unit-name}
@@ -145,7 +144,7 @@ condition: has_functional_design_needs
 
 每个异常项必须写明 UI/业务字段、源字段路径、异常类型、影响和处置。🚨 项未经解决方案或用户明确知悉不得放行。
 
-需要机器对账时，在 `data-source-validation.md` 的同一章节声明一个 JSON fenced block（每个 `source_id` 恰有一个聚合确认）：
+需要机器对账时，在 `functional-design.md#数据源验证` 的同一章节声明一个 JSON fenced block（每个 `source_id` 恰有一个聚合确认）：
 
 ```json
 {

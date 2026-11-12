@@ -1,0 +1,1 @@
+MARS-244 freshness passed: single/split, unrelated module/unit, shared contract/lock/source/test, dependency and conservative legacy fallback

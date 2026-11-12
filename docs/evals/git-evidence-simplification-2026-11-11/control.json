@@ -1,0 +1,14 @@
+{
+  "name": "control",
+  "argv": [
+    "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "--import",
+    "tsx",
+    "tests/test_control_preparation.ts"
+  ],
+  "duration_ms": 6017.367299999998,
+  "exit_code": 0,
+  "error": null,
+  "signal": null,
+  "real_business_run": false
+}

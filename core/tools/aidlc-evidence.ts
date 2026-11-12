@@ -1,4 +1,8 @@
+import { acquireOwnedLock } from "./aidlc-owned-lock";
+import {assertAttemptRepairEvidence,recordAttemptPhaseFailure} from './aidlc-attempt-repair';
+import {batchImplementationUnits,batchModuleIds} from "./aidlc-batch-scope";
 import { assertSessionClaim, withSessionPublication, sessionBinding, type SessionBinding } from "./aidlc-light-state";
+import { checkCurrentExecutionGrant } from "./aidlc-execution-grant";
 import { createHash, randomUUID } from "crypto";
 import { semanticCheckerDigest, semanticCheckerIdentityErrors, withSemanticCheckerIdentityMemoization } from "./aidlc-checker-identity";
 import { sensorInputs, sensorInputScope, templatePaths, TEMPLATE_SENSOR } from "./aidlc-sensor-inputs";
@@ -24,7 +28,7 @@ import {
   unlinkSync,
   writeSync,
 } from "fs";
-import { runSync } from "./aidlc-spawn";
+import { runSync, businessCommandEnvironment } from "./aidlc-spawn";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { baselineCodeRef, baselineCommitErrors, baselineKindErrors, epochRepos, extraRepoKeyErrors, workflowBaselineForModule } from "./aidlc-baseline";
@@ -37,7 +41,7 @@ import { phaseExecutionRevision, phaseExecutionScopeForInstance } from "./aidlc-
 import { evidenceTimeError } from "./aidlc-evidence-policy";
 import { parseTestStats, validTestStats, type TestStats } from "./aidlc-test-stats";
 import { nativeNodeCheckTooling } from "./aidlc-node-check-tooling";
-import { readSourceRevision, commitAncestryErrors, withRevisionInvalidation, withRevisionMemoization } from "./aidlc-revision";
+import { readScopedSourceRevision, readSourceRevision, commitAncestryErrors, withRevisionInvalidation, withRevisionMemoization } from "./aidlc-revision";
 import { GLOBAL_WORKFLOW, loadWorkflowState, type WorkflowRef, type WorkflowState } from "./aidlc-light-state";
 import { evidenceScopeForInstance, evidenceSourceRevision, integrationStageSlugs, isSplitLayout, loadWorkflowParts, ownerOfInstance, stageAxis } from "./aidlc-workflow-layout";
 
@@ -274,6 +278,7 @@ function evidenceOutput(stage: string, sensor: string, value: string | undefined
 
 function executionContext(state: ProducerState): Record<string, unknown> {
   return {
+    workflow_id: state.workflow_id,
     stage_instance: state.current_stage_instance || null,
     module_id: state.current_module || null,
     unit_id: state.current_unit || null,
@@ -557,11 +562,12 @@ function safeCwdLabel(cwd: string): string {
 }
 
 function runCommand(spec: CommandSpec): CommandResult {
+  checkCurrentExecutionGrant(PROJECT_ROOT, ["validation-execute"]);
   const cwd = requireDirectory(spec.cwd || PROJECT_ROOT, `command ${spec.id} cwd`);
   const started = Date.now();
   const result = withRevisionInvalidation(() => runSync(spec.argv[0], spec.argv.slice(1), {
     cwd,
-    env: projectCommandEnvironment(),
+    env: businessCommandEnvironment(projectCommandEnvironment()),
     encoding: "utf8",
     shell: false,
     timeout: spec.timeout_ms,
@@ -686,13 +692,13 @@ function writeBlockedReport(sensor: string, state: ProducerState, report: Record
 
 export function semanticCommandArgv(sensor: string, state: { current_module?: string; current_unit?: string }, projectRoot = PROJECT_ROOT): string[] {
   const tsx = require.resolve("tsx/cli");
-  const checker = resolve(TOOL_DIR, sensor === TEMPLATE_SENSOR ? "aidlc-template-checker.ts" : "aidlc-semantic-checks.ts");
+  const checker = resolve(TOOL_DIR, sensor === TEMPLATE_SENSOR ? "aidlc-template-checker.ts" : sensor === "functional-design-completeness" ? "aidlc-functional-design-checker.ts" : "aidlc-semantic-checks.ts");
   // Split layout: pass the module scope explicitly so module-owned checkers (diagram-contract)
   // only inspect the module's own artifacts.
-  const scopeArgs = (sensor === TEMPLATE_SENSOR || isSplitLayout(projectRoot)) && state.current_module
+  const scopeArgs = (sensor === TEMPLATE_SENSOR || sensor === "functional-design-completeness" || isSplitLayout(projectRoot)) && state.current_module
     ? ["--module", state.current_module, ...(state.current_unit ? ["--unit", state.current_unit] : [])]
     : [];
-  return [process.execPath, tsx, checker, "--sensor", sensor, ...scopeArgs];
+  return [process.execPath, tsx, ...(sensor === "functional-design-completeness" ? ["--tsconfig", resolve(TOOL_DIR, "data/functional-checker-tsconfig.json")] : []), checker, "--sensor", sensor, ...scopeArgs];
 }
 
 function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerState, behaviour: { blockedReports?: boolean; freshDerivation?: boolean } = {}): { payload: Record<string, unknown>; execution: Record<string, unknown> } {
@@ -744,7 +750,7 @@ function runSemanticCommand(sensor: string, timeoutMs: number, state: ProducerSt
       sensor,
       argv_digest: argvDigest(argv),
       command_version: 2,
-      identity_version: sensor === TEMPLATE_SENSOR ? 2 : 1,
+      identity_version: sensor === TEMPLATE_SENSOR ? 2 : sensor === "functional-design-completeness" ? 3 : 1,
       implementation_digest: implementation,
       exit_code: exitCode,
       status: "passed",
@@ -767,6 +773,8 @@ function phaseRecord(state: ProducerState): Record<string, unknown> {
 /** Re-derive a no-behavior claim from the real I13 sources, never from a C8 flag. */
 export function noBehaviorBasis(state: ProducerState): Record<string, unknown> | null {
   if (!state.current_module) {
+    const selected=batchImplementationUnits(PROJECT_ROOT);
+    if(selected){const bases=selected.map(u=>noBehaviorBasis({...state,current_module:u.module_id,current_unit:u.unit_id}));return bases.length&&bases.every(Boolean)?{kind:"batch_no_behavior",units:bases}:null;}
     const modules = verifiedModuleIds(PROJECT_ROOT, state.scope);
     const bases = modules.map(moduleId => noBehaviorBasis({ ...state, current_module: moduleId, current_unit: undefined }));
     return bases.length && bases.every(Boolean) ? { kind: "project_no_behavior", modules: bases } : null;
@@ -803,7 +811,7 @@ export function noBehaviorBasis(state: ProducerState): Record<string, unknown> |
  */
 function c8RoleBasis(config: EvidenceConfig, state: ProducerState): Record<string, unknown> | undefined {
   if (!config.role_applicability) return undefined;
-  const moduleIds = state.current_module ? [state.current_module] : verifiedModuleIds(PROJECT_ROOT, state.scope);
+  const moduleIds = state.current_module ? [state.current_module] : batchModuleIds(PROJECT_ROOT, state.scope);
   const known = verifiedModuleIds(PROJECT_ROOT, state.scope);
   for (const entry of config.role_applicability) if (!known.includes(entry.module_id)) fail(`unknown role applicability module: ${entry.module_id}`);
   const modules = moduleIds.map(moduleId => {
@@ -911,7 +919,7 @@ function alternativeBinding(spec: CommandSpec, state: ProducerState, basis: Reco
   // binds the complete environment; an explicit list is the command owner's dependency contract.
   const environmentKeys = spec.evidence_inputs
     ? [...new Set([...spec.evidence_inputs.environment, "PATH", "Path", "PATHEXT", "SystemRoot", "ComSpec", "NODE_OPTIONS", "NODE_PATH"])]
-    : Object.keys(environmentSource).filter(key => key !== "AIDLC_SESSION_BINDING");
+    : Object.keys(environmentSource).filter(key => !["AIDLC_SESSION_BINDING", "AIDLC_EXECUTION_GRANT", "AIDLC_AUTONOMY_HOST"].includes(key));
   const environment = { mode: spec.evidence_inputs ? "declared" : "conservative-all", keys: environmentKeys.sort().map(key => [key, commandEnvironmentValue(environmentSource, key)]) };
   const baseline = workflowBaselineForModule(PROJECT_ROOT, state.current_module);
   const binding = { workflow_id: state.workflow_id, module_id: state.current_module, unit_id: state.current_unit, basis, inputs, baseline, freshness,
@@ -1336,7 +1344,7 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     const started = Date.now();
     const result = withRevisionInvalidation(() => runSync(command.argv[0], command.argv.slice(1), {
       cwd: command.cwd || PROJECT_ROOT,
-      env: semanticCheckerEnv(state, projectCommandEnvironment(), { AIDLC_PHASE: phase, ...(options.testFilter ? { AIDLC_TEST_FILTER: options.testFilter } : {}) }),
+      env: semanticCheckerEnv(state, businessCommandEnvironment(projectCommandEnvironment()), { AIDLC_PHASE: phase, ...(options.testFilter ? { AIDLC_TEST_FILTER: options.testFilter } : {}) }),
       encoding: "utf8",
       shell: false,
       timeout: command.timeout_ms,
@@ -1344,6 +1352,13 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     const duration = Date.now() - started;
     const exitCode = typeof result.status === "number" ? result.status : 1;
     const expectedExit = phase === "RED" ? 1 : 0;
+    if (phase === 'GREEN') {
+      let observation: Record<string,unknown> = {};try{observation=phaseObservation(String(result.stdout||'')+'\n'+String(result.stderr||''),phase);}catch{}
+      if(result.error||exitCode!==expectedExit||observation.status!=='passed'||observation.tests_failed!==0){
+        let binding;try{binding=phaseInputBinding(PROJECT_ROOT,i13,observation,state.current_unit,phaseCommandInputs);}catch{}
+        recordAttemptPhaseFailure(PROJECT_ROOT,state.current_stage_instance!,{phase,status:'failed',observation,phase_input_binding:binding||null,source_revision:evidenceSourceRevision(PROJECT_ROOT,state.current_stage_instance),observed_command:{id:command.id,argv_digest:argvDigest(command.argv),exit_code:exitCode,duration_ms:duration},checker:{argv_digest:phaseObservationDigest(phase,argvDigest(command.argv))},stdout:String(result.stdout||''),stderr:String(result.stderr||''),error:result.error?.message||null});
+      }
+    }
     if (result.error || exitCode !== expectedExit) fail(`controlled ${phase} command ${command.id} must exit ${expectedExit}; got ${exitCode}${result.error ? ` (${result.error.message})` : ""}`);
     const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout ? String(result.stdout) : "";
     const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr ? String(result.stderr) : "";
@@ -1373,7 +1388,13 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
   if (!options.output) console.log(JSON.stringify({ status: "passed", output, sensor, phase }, null, 2));
 }
 
-function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | null, state: ProducerState, quiet = false): { action: "reused" | "regenerated"; inputs_digest?: string; inputs_changed?: string[] } | undefined {
+interface SemanticSummary {
+  action: "reused" | "regenerated";
+  inputs_digest?: string;
+  inputs_changed?: string[];
+  evidence_progress?: { version: "1"; transition: "invalid-to-current"; workflow_id: string; stage_instance: string; sensor: string; identity: string };
+}
+function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | null, state: ProducerState, quiet = false): SemanticSummary | undefined {
   const sensor = options.sensor;
   if (!sensor || sensor === "build-test-evidence") fail("semantic producer requires --sensor with a semantic sensor name");
   if (options.commandIds.length > 0) fail("--command-id is only supported for build/test evidence");
@@ -1393,10 +1414,13 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
   const specificInputs = sensorInputs(PROJECT_ROOT, sensor, state.current_module, state.current_unit);
   const inputs = specificInputs || stageInputs(options.stage, state);
   const prior = priorEvidenceRecord(output);
-  if (options.refresh && inputs && prior && !["global-review-evidence", "deployment-validation"].includes(sensor) && configuredFreshnessErrors(config, prior).length === 0 && reusableSemanticEvidence(prior, inputs, state, sensor)
-    && (sensor !== "test-quality" || (["RED", "BASELINE"] as const).every(phase => !tddOmissionQualityErrors(prior, makeInstance(loadGraph().stages.find(stage => stage.slug === options.stage)!, state.current_unit ? "unit" : state.current_module ? "module" : "project", { module_id: state.current_module, unit_id: state.current_unit }), state, phase).errors.length))
-    && (sensor !== SLICE_SENSOR || (!sliceEvidenceErrors(producerSliceContext(state), prior).length && !sliceCandidateError(state, prior)))) {
-    const summary = { action: "reused" as const, inputs_digest: inputs.digest };
+  const current = (record: Record<string, unknown> | null): boolean => Boolean(inputs && record
+    && configuredFreshnessErrors(config, record).length === 0 && reusableSemanticEvidence(record, inputs, state, sensor)
+    && (sensor !== "test-quality" || (["RED", "BASELINE"] as const).every(phase => !tddOmissionQualityErrors(record, makeInstance(loadGraph().stages.find(stage => stage.slug === options.stage)!, state.current_unit ? "unit" : state.current_module ? "module" : "project", { module_id: state.current_module, unit_id: state.current_unit }), state, phase).errors.length))
+    && (sensor !== SLICE_SENSOR || (!sliceEvidenceErrors(producerSliceContext(state), record).length && !sliceCandidateError(state, record))));
+  const priorCurrent = options.refresh && current(prior);
+  if (priorCurrent && !["global-review-evidence", "deployment-validation"].includes(sensor)) {
+    const summary = { action: "reused" as const, inputs_digest: inputs!.digest };
     if (!quiet) console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}`, ...summary }, null, 2));
     return summary;
   }
@@ -1416,7 +1440,7 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
     evidence_version: "1",
     timestamp: new Date().toISOString(),
     producer: { name: "loeyae-aidlc-evidence", mode: "controlled", workflow_id: state.workflow_id, execution_id: executionId },
-    source_revision: readSourceRevision(PROJECT_ROOT, sensorInputScope(PROJECT_ROOT, sensor, String(state.current_stage_instance)) || evidenceScopeForInstance(PROJECT_ROOT, String(state.current_stage_instance)), nestedSourceRepos(PROJECT_ROOT)),
+    source_revision: readSourceRevision(PROJECT_ROOT, sensorInputScope(PROJECT_ROOT, sensor, String(state.current_stage_instance)) || evidenceScopeForInstance(PROJECT_ROOT, String(state.current_stage_instance), sensor), nestedSourceRepos(PROJECT_ROOT)),
     checker: result.execution,
   };
   const candidate = producedEvidence(unsigned);
@@ -1444,7 +1468,24 @@ function runSemanticProducer(options: ProducerOptions, config: EvidenceConfig | 
       inputsChanged = [...new Set([...inputsChanged, ...specificInputs.files.filter(file => oldFiles.get(file.path) !== file.sha256).map(file => file.path)])];
     }
   }
-  const summary = { action: "regenerated" as const, ...(inputs ? { inputs_digest: inputs.digest } : {}), ...(inputsChanged ? { inputs_changed: inputsChanged } : {}) };
+  // A successful command or a new receipt timestamp is not semantic progress.
+  // Attest only an invalid -> current transition under the exact publication
+  // claim. The target excludes receipt time/UUID, so repeating the same repair
+  // (including expiring or deleting its evidence) cannot reset host budgets.
+  const evidenceProgress: SemanticSummary["evidence_progress"] = options.refresh && !priorCurrent && current(candidate) ? {
+    version: "1", transition: "invalid-to-current", workflow_id: state.workflow_id,
+    stage_instance: String(state.current_stage_instance), sensor,
+    identity: createHash("sha256").update(JSON.stringify([
+      // Legacy stageInputs includes mtimes (also of upstream receipts). Those
+      // are freshness hints, never a new semantic target. Specific sensor
+      // inputs are content hashes; the source scope binds all other targets.
+      state.workflow_id, state.current_stage_instance, sensor, specificInputs?.digest,
+      unsigned.source_revision.scope, unsigned.source_revision.scope_digest,
+      !unsigned.source_revision.scope || unsigned.source_revision.scope === "worktree" ? [unsigned.source_revision.commit, unsigned.source_revision.worktree_digest, unsigned.source_revision.repos] : null,
+      result.execution.argv_digest, result.execution.implementation_digest, config?.freshness,
+    ])).digest("hex"),
+  } : undefined;
+  const summary: SemanticSummary = { action: "regenerated", ...(inputs ? { inputs_digest: inputs.digest } : {}), ...(inputsChanged ? { inputs_changed: inputsChanged } : {}), ...(evidenceProgress ? { evidence_progress: evidenceProgress } : {}) };
   if (!quiet) console.log(JSON.stringify({ status: "passed", output, sensor, checker: `builtin:${sensor}`, ...summary }, null, 2));
   return summary;
 }
@@ -1590,21 +1631,8 @@ function withProducerLock<T>(output: string, action: () => T): T {
   mkdirSync(dirname(safeOutput), { recursive: true, mode: 0o700 });
   safeProjectPath(dirname(safeOutput), "output directory", true);
   const lockPath = `${safeOutput}.producer.lock`;
-  let lockFd: number | undefined;
-  let result: T;
-  try {
-    lockFd = openSync(lockPath, "wx", 0o600);
-    result = action();
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST" && lockFd === undefined) {
-      fail(`another evidence producer is already running for ${safeOutput}`);
-    }
-    throw error;
-  } finally {
-    if (lockFd !== undefined) closeSync(lockFd);
-    if (lockFd !== undefined && existsSync(lockPath)) unlinkSync(lockPath);
-  }
-  return result!;
+  const release = acquireOwnedLock(lockPath, 3000);
+  try { return action(); } finally { release(); }
 }
 
 /** Which workflow owns this evidence run: the single workflow, or the split owner of the instance. */
@@ -1748,8 +1776,8 @@ function reusableSemanticEvidence(prior: Record<string, unknown>, inputs: { dige
   // scope) is never reused as-is, and a scoped record whose digest no longer matches the
   // current tree must regenerate even when the consumes fingerprint cannot see the change
   // (stages with an empty consumes list track no artifacts at all).
-  const scope = checker?.identity_version === 2 ? sensorInputScope(PROJECT_ROOT, sensor, String(state.current_stage_instance)) || evidenceScopeForInstance(PROJECT_ROOT, String(state.current_stage_instance)) : evidenceScopeForInstance(PROJECT_ROOT, String(state.current_stage_instance));
-  const currentRevision = readSourceRevision(PROJECT_ROOT, scope, nestedSourceRepos(PROJECT_ROOT));
+  const scope = checker?.identity_version === 2 ? sensorInputScope(PROJECT_ROOT, sensor, String(state.current_stage_instance)) || evidenceScopeForInstance(PROJECT_ROOT, String(state.current_stage_instance), sensor) : evidenceScopeForInstance(PROJECT_ROOT, String(state.current_stage_instance), sensor);
+  const currentRevision = readScopedSourceRevision(PROJECT_ROOT, scope, nestedSourceRepos(PROJECT_ROOT));
   const priorRevision = prior.source_revision as Record<string, unknown> | undefined;
   const scopeStillValid = scope.label === "worktree"
     ? (priorScope === undefined || priorScope === "worktree")
@@ -1792,7 +1820,7 @@ function produceAllSemantic(options: ProducerOptions, state: ProducerState, conf
   if (sensors.includes("red-test-evidence") || sensors.includes("green-test-evidence")) assertPhaseConfigBinding(options);
   else if (sensors.includes("baseline-test-evidence")) assertPhaseConfigBinding(options, "BASELINE");
   const outputs: string[] = [];
-  const actions: Array<{ sensor: string; action: "reused" | "regenerated"; inputs_digest?: string; inputs_changed?: string[] }> = [];
+  const actions: Array<SemanticSummary & { sensor: string }> = [];
   for (const sensor of sensors) {
     const output = evidenceOutput(options.stage, sensor, undefined, state);
     const summary = withProducerLock(output, () =>
@@ -1901,6 +1929,8 @@ function runProducerInner(args: string[]): void {
   if (state.current_stage !== options.stage) {
     fail(`stage ${options.stage} is not active; current stage is ${state.current_stage || "(none)"}`);
   }
+  checkCurrentExecutionGrant(PROJECT_ROOT, ["evidence-publish", "validation-execute"]);
+  assertAttemptRepairEvidence(PROJECT_ROOT,state.current_stage_instance,options.sensor);
 
   if (options.sensors || (options.stage !== "build-and-test" && !options.sensor) || (options.allSensors && options.stage !== "build-and-test")) {
     produceAllSemantic(options, state, optionalSemanticConfig(options.config, options.stage));

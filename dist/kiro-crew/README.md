@@ -1,3 +1,11 @@
+# 默认：宿主直接实施
+
+使用宿主原生工具按用户已明确的设计和验收标准实施、测试、审查及返修。可选 `loeyae-aidlc work` 只读获取 Git/所选输入；无需 H5、claim、专用 worker 或逐阶段 report。真实验收失败继续修复，不得宣称完成；流程记录缺失不阻止独立工作。
+
+## 兼容参考
+
+以下旧 orchestrate、会话及专用 runtime 说明仅在用户明确选择维护旧受管流程时适用，不是默认实施前置条件。
+
 # Loeyae AI-DLC for Kiro Crew
 
 此分发物提供 AWS-style 轻量 AI-DLC Skill：用户明确工作目标后，由 Markdown workflow 协调阶段、单元分工、review、构建、测试和人工 merge。

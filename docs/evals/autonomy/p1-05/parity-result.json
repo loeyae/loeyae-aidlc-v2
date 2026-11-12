@@ -1,0 +1,11 @@
+{
+  "command": [
+    "node",
+    "node_modules/tsx/dist/cli.mjs",
+    "tests/test_distribution_parity.ts"
+  ],
+  "exit_code": 0,
+  "started_at": "2026-11-08T17:21:46.5201172Z",
+  "finished_at": "2026-11-08T17:21:47.4785782Z",
+  "log": "docs/evals/autonomy/p1-05/distribution-parity.log"
+}

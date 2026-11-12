@@ -628,8 +628,8 @@ def test_new_plugin_host_lifecycles() -> None:
         assert sum(
             group.get("hooks", [{}])[0].get("args") == ["hook", "--format", "zcode"]
             for group in stop_groups
-        ) == 1
-        assert zcode_config["hooks"]["enabled"] is True
+        ) == 0
+        assert zcode_config["hooks"]["enabled"] is False
         assert zcode_config["mcp"]["servers"]["figma"] == custom_figma
         assert set(zcode_config["mcp"]["servers"]) == {"figma"}
         assert zcode_config["userSetting"] == "preserve"

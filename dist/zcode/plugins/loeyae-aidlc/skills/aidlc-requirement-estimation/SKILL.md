@@ -155,3 +155,5 @@ docs/aidlc/inception/requirement-estimation.md
 ## 与其他能力的关系
 
 本 Skill 可以单独调用。若 `aidlc-release-forecast` 发现本报告存在，则可读取其中的区间、假设和风险；若不存在，`aidlc-release-forecast` 应基于需求清单独立生成高层预测，而不是阻断。
+
+默认执行和续作遵循 [宿主执行协议](../../knowledge/protocols/host-execution.md)。本能力按需调用，不要求流程状态或阶段记录；实际能力所需输入及文件保护约束保持。

@@ -1,6 +1,14 @@
+# 默认：宿主直接实施
+
+使用宿主原生工具按用户已明确的设计和验收标准实施、测试、审查及返修。可选 `loeyae-aidlc work` 只读获取 Git/所选输入；无需 H5、claim、专用 worker 或逐阶段 report。真实验收失败继续修复，不得宣称完成；流程记录缺失不阻止独立工作。
+
+## 兼容参考
+
+以下旧 orchestrate、会话及专用 runtime 说明仅在用户明确选择维护旧受管流程时适用，不是默认实施前置条件。
+
 # Loeyae AI-DLC for Qoder
 
-Core 安装提供原生 Skill、官方插件注册及 Stop Hook，不默认部署领域 MCP 或 CN bridge。user scope 把 Skill 受管安装到 ~/.qoder-cn/skills/loeyae-aidlc/；检测到 qoder CLI 时继续通过官方 qoder plugins 验证、注册并启用插件。desktop-only 模式仅安装原生 Skill。
+Core 安装提供原生 Skill 和官方插件注册，默认不注册 Stop Hook，不默认部署领域 MCP 或 CN bridge。user scope 把 Skill 受管安装到 ~/.qoder-cn/skills/loeyae-aidlc/；检测到 qoder CLI 时继续通过官方 qoder plugins 验证、注册并启用插件。desktop-only 模式仅安装原生 Skill。
 
 loeyae-aidlc install --harness qoder
 loeyae-aidlc install --harness qoder --project /absolute/path/to/project

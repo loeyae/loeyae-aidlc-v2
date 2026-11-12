@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "modules": [
+    {
+      "module_id": "project",
+      "name": "Order export",
+      "service_id": "project",
+      "paths": [
+        "src",
+        "tests"
+      ]
+    }
+  ]
+}

@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync,
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { sessionBinding, withSessionPublication, type WorkflowRef } from "./aidlc-light-state";
 
-export type RepairCategory = "mapping" | "phase-evidence-stale" | "test-missing" | "test-failed" | "permission-state" | "artifact-stale" | "approval-required" | "unknown";
+export type RepairCategory = "input-defect" | "mapping" | "phase-evidence-stale" | "test-missing" | "test-failed" | "permission-state" | "artifact-stale" | "approval-required" | "unknown";
 export interface RepairDiagnostic {
   code: string;
   category: RepairCategory;
@@ -39,13 +39,14 @@ export function classifyRepair(message: string): { category: RepairCategory; nex
   if (/(?:red|green|baseline)-test-evidence[^\n]*(?:not found|missing|Run the controlled evidence producer first)|(?:Evidence not found|missing)[^\n]*(?:red|green|baseline)-test-evidence|(?:RED|GREEN|BASELINE)[^\n]*evidence[^\n]*missing/i.test(message)) return { category: "test-missing", next_step: "Run the single missing allowlisted phase observation using the existing approved tests; do not generate additional tests merely because evidence is absent." };
   if (/tests_failed|compile_status|environment_status|failure_class|controlled (?:RED|GREEN|BASELINE) command|\bAssertionError\b|\btests?\s+(?:(?:suite|assertion)\s+)?failed\b|status must be passed/i.test(message)) return { category: "test-failed", next_step: "Inspect the actual failing test output and distinguish behavior, build and environment failures; fix the smallest proven cause, then rerun that command once." };
   if (/UC-D.*(?:mapping|归属)|uc_mapping|ucd_units|unit_refs|source_coverage|mapping_debt|mapping_deferred/i.test(message)) return { category: "mapping", next_step: "Inspect only the named UC-D declarations and existing controlled phase mappings; reuse a proven mapping or fix its explicit ownership. Add a test only for a concrete uncovered behavior." };
+  if (/CANONICAL_INPUT_MISSING|CANONICAL_DESIGN_SECTION_REQUIRED|unresolved marker found in project artifact|SLICE_(?:ENCODING|INVALID_ADOPTION|COVERAGE|MAPPING|REQ_RECONCILIATION)\b/i.test(message)) return { category: "input-defect", next_step: "Repair the named canonical input or declaration first. Regenerating evidence from unchanged defective inputs cannot resolve this failure; preserve the original diagnostics and verify only after the input is corrected." };
   if (/SLICE_|CONTRACT_|scope_digest|worktree_digest|canonical consumed|produces|artifact|evidence.*(?:stale|rejected|invalid|missing|not found)/i.test(message)) return { category: "artifact-stale", next_step: "Compare the named canonical artifact and its derived evidence; refresh only that missing or stale derivation under the current claim, then recheck its gate." };
   return { category: "unknown", next_step: "Diagnose the first named failing gate from its original output and required inputs. Do not infer missing tests or widen the task without evidence." };
 }
 
 /** Translate actual sensor failures into exact, advisory repair work. */
 export function sensorRepairDiagnostics(failures: readonly { sensor?: string; message: string; stage_instance?: string }[], context: RepairContext = {}): RepairDiagnostic[] {
-  return failures.map(failure => {
+  const diagnostics = failures.map(failure => {
     const classified = classifyRepair(failure.message);
     const path = /\.aidlc[\\/]evidence[\\/]([A-Za-z0-9_-]+)[\\/](?:([A-Za-z0-9_-]+)[\\/](?:([A-Za-z0-9_-]+)[\\/])?)?([A-Za-z0-9_-]+)\.json/.exec(failure.message);
     const named = /^(?<stage>[A-Za-z0-9_-]+)(?:@module:(?<module>[A-Za-z0-9_-]+))?(?:@unit:(?<unit>[A-Za-z0-9_-]+))?$/.exec(failure.stage_instance || context.stage_instance || "")?.groups;
@@ -67,13 +68,30 @@ export function sensorRepairDiagnostics(failures: readonly { sensor?: string; me
     if (classified.category === "approval-required") {
       diagnostic.action = "human-approval";
       if (command && module && unit) diagnostic.command = [...command, "--refresh", "--historical-omission", "--approval-ref", "<human approval reference>", "--approved-by", "<name>", "--approved-at", "<ISO-8601 with timezone>"];
-    } else if (classified.category === "mapping") diagnostic.action = "repair-inputs";
+    } else if (classified.category === "mapping" || classified.category === "input-defect") diagnostic.action = "repair-inputs";
     else if (command && (classified.category === "artifact-stale" || classified.category === "test-missing")) {
       diagnostic.action = classified.category === "test-missing" ? "run-phase-observation" : "refresh-evidence";
-      diagnostic.command = [...command, ...(instance && context.completed_stage_instances?.includes(instance) ? ["--refresh"] : [])];
+      // A stale derivation does not prove that its GREEN input is stale. Keep
+      // repair scoped to the named semantics; their producer validates GREEN.
+      // A separate phase-input failure must remain a separate stop/diagnosis.
+      const completed = Boolean(instance && context.completed_stage_instances?.includes(instance));
+      diagnostic.command = [...command, ...(completed && !module ? ["--instance", instance!] : []), ...(completed ? ["--refresh"] : [])];
     }
     return diagnostic;
   });
+  // Batch only the failed semantic derivations of one completed instance.
+  // Never mix historical phases, approvals, behavior failures or other units.
+  // The producer still validates every sensor, claim and publication separately.
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.action !== "refresh-evidence" || diagnostic.requires_human_approval || !diagnostic.command?.includes("--refresh") || !diagnostic.command.includes("--sensor") || /^(red|green|baseline)-/.test(diagnostic.sensor || "")) continue;
+    const siblings = diagnostics.filter(d => d.stage_instance === diagnostic.stage_instance && d.action === "refresh-evidence" && !d.requires_human_approval && d.command?.includes("--refresh") && d.command.includes("--sensor") && d.sensor && !/^(red|green|baseline)-/.test(d.sensor));
+    const sensors = [...new Set(siblings.map(d => d.sensor!))];
+    if (sensors.length < 2) continue;
+    const command = diagnostic.command.slice();
+    command.splice(command.indexOf("--sensor"), 2, "--sensors", sensors.join(","));
+    for (const sibling of siblings) sibling.command = command.slice();
+  }
+  return diagnostics;
 }
 
 /** Display-only timing cannot distinguish two otherwise equivalent blockers. */

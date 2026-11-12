@@ -1,0 +1,84 @@
+{
+  "nonce": "95676f66-6462-4bcf-ac98-a2464b06af05",
+  "host": {
+    "host_id": "codex-app-server",
+    "version": "1",
+    "entrypoint": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\harness\\codex\\runtime\\aidlc-codex-host.mjs",
+    "config_digest": "f3817c196b5288b7c2a00bc2b30f8d2c157ba5b70e6bf5108bdcef226dfa0da9"
+  },
+  "limits": {
+    "wall_time_seconds": 180,
+    "max_equivalent_retries": 1,
+    "max_active_units": 1
+  },
+  "observed_at": "2026-11-08T18:01:41.386Z",
+  "valid_until": "2026-11-08T18:07:03.866Z",
+  "capabilities": {
+    "model-turn": {
+      "status": "supported",
+      "probe_refs": [
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/native-host/95676f66-6462-4bcf-ac98-a2464b06af05/probe.json",
+          "digest_mode": "raw-file",
+          "digest": "ed6f48bbc5a2a8cd19f65b50a3ca89898fde974097e7384c4e21556c4b1273d7"
+        }
+      ]
+    },
+    "continuous-session": {
+      "status": "supported",
+      "probe_refs": [
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/native-host/95676f66-6462-4bcf-ac98-a2464b06af05/probe.json",
+          "digest_mode": "raw-file",
+          "digest": "ed6f48bbc5a2a8cd19f65b50a3ca89898fde974097e7384c4e21556c4b1273d7"
+        }
+      ]
+    },
+    "budget-enforcement": {
+      "status": "supported",
+      "probe_refs": [
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/native-host/95676f66-6462-4bcf-ac98-a2464b06af05/probe.json",
+          "digest_mode": "raw-file",
+          "digest": "ed6f48bbc5a2a8cd19f65b50a3ca89898fde974097e7384c4e21556c4b1273d7"
+        }
+      ]
+    },
+    "browser-dom": {
+      "status": "supported",
+      "probe_refs": [
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/native-host/95676f66-6462-4bcf-ac98-a2464b06af05/probe.json",
+          "digest_mode": "raw-file",
+          "digest": "ed6f48bbc5a2a8cd19f65b50a3ca89898fde974097e7384c4e21556c4b1273d7"
+        }
+      ]
+    },
+    "browser-screenshot": {
+      "status": "supported",
+      "probe_refs": [
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/native-host/95676f66-6462-4bcf-ac98-a2464b06af05/probe.json",
+          "digest_mode": "raw-file",
+          "digest": "ed6f48bbc5a2a8cd19f65b50a3ca89898fde974097e7384c4e21556c4b1273d7"
+        }
+      ]
+    },
+    "browser-interaction": {
+      "status": "supported",
+      "probe_refs": [
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/native-host/95676f66-6462-4bcf-ac98-a2464b06af05/probe.json",
+          "digest_mode": "raw-file",
+          "digest": "ed6f48bbc5a2a8cd19f65b50a3ca89898fde974097e7384c4e21556c4b1273d7"
+        }
+      ]
+    }
+  }
+}

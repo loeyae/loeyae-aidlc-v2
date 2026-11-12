@@ -1,0 +1,12 @@
+{
+  "name": "persistence",
+  "argv": [
+    "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "tests/test_progress_persistence.mjs"
+  ],
+  "duration_ms": 77.10879999999997,
+  "exit_code": 0,
+  "error": null,
+  "signal": null,
+  "real_business_run": false
+}

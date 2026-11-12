@@ -1,0 +1,97 @@
+{
+  "schema": "aidlc.admission-plan/v1",
+  "batch_id": "orders",
+  "scope_revision": 1,
+  "lifetime_seconds": 900,
+  "reception": [
+    {
+      "module_id": "project",
+      "ui": "none",
+      "source_refs": [
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/requirements.md",
+          "digest_mode": "raw-file",
+          "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c"
+        }
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command_id": "local-preflight",
+      "argv": [
+        "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+        "pilot/preflight.cjs"
+      ],
+      "timeout_ms": 10000,
+      "input_refs": [
+        {
+          "repository_id": "project",
+          "path": "pilot/preflight.cjs",
+          "digest_mode": "raw-file",
+          "digest": "267031f436d64142ff748d1e0da79c433d31df919c50025d9ed10ee3dd240c21"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/data.json",
+          "digest_mode": "raw-file",
+          "digest": "9358b5e2bcb9b35660fff90d158fba3f8b7fefe258d79066178ed1d7b10733d8"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/oracle.cjs",
+          "digest_mode": "raw-file",
+          "digest": "1caeaa749a3ec27499f205157f7eca02f132e2cf0abd0ca0bd184a276e1d9dad"
+        }
+      ]
+    }
+  ],
+  "validation_bindings": [
+    {
+      "check_id": "complete-acceptance",
+      "covers": [
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/requirements.md",
+          "digest_mode": "raw-file",
+          "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c",
+          "item_id": "AC-001"
+        }
+      ],
+      "command_id": "local-preflight",
+      "assertion": "Frozen actual functional/API/browser/pixel assertions must pass after implementation; preflight checks availability only",
+      "kind": "behavior"
+    }
+  ],
+  "resources": [
+    {
+      "kind": "environment",
+      "input_ref": {
+        "repository_id": "project",
+        "path": "pilot/environment.json",
+        "digest_mode": "raw-file",
+        "digest": "76fdf5b484232d547d89a44c603a67e7347b3fd56b3bc6f3724b1b7fbfff3812"
+      }
+    },
+    {
+      "kind": "test-data",
+      "input_ref": {
+        "repository_id": "project",
+        "path": "pilot/data.json",
+        "digest_mode": "raw-file",
+        "digest": "9358b5e2bcb9b35660fff90d158fba3f8b7fefe258d79066178ed1d7b10733d8"
+      }
+    }
+  ],
+  "environment_variables": [
+    "PILOT_ORIGIN",
+    "PILOT_PORT"
+  ],
+  "native_host_ref": {
+    "repository_id": "project",
+    "path": "pilot/host.json",
+    "digest_mode": "raw-file",
+    "digest": "d25db3f34170337399c262ac7f0779805bfa8ed4a12f54576b75fcc5d7f3a692"
+  }
+}

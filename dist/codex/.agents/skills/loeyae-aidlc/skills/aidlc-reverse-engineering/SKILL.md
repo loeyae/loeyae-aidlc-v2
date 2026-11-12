@@ -1,43 +1,17 @@
 ---
 name: aidlc-reverse-engineering
-description: "分析存量代码库生成业务概述、架构发现和设计产物；不负责阶段路由和完成判定。"
+description: "按本次问题分析存量代码、技术栈和行为，给出可追溯的架构发现。"
 triggers: 逆向工程, 存量系统分析, 代码库分析, 架构发现, reverse engineering, 现有系统梳理
 ---
 
-# 逆向工程能力
+# reverse-engineering
 
-开始时宣布："使用 aidlc-reverse-engineering 执行逆向工程"。
+从指定仓库和任务目标开始，自己读取包、配置、入口和相关调用链，不要求调用方先提供已经检测的技术栈。优先增量和相关范围，不默认扫描整个项目或全部历史文档。
 
-## 资源路径
+区分代码事实、运行验证和推断，记录关键路径与未知项。结论在对话或现有架构说明中即可；只有用户要求完整逆向文档时才生成。需要图示时普通 Mermaid 足够，不为分析创建图表状态或受控产物。
 
-共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
 
-读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+## 兼容参考
 
-## 输入
-
-调用方必须提供：
-
-- 工作区根路径；
-- 已检测到的包、框架和技术栈信息；
-- 逆向分析范围（全量或增量）。
-
-缺少必要输入时返回 `NEEDS_CONTEXT`，不推断项目是否为存量。
-
-## 加载
-
-加载发布包中的 [stages/inception/inception-reverse-engineering.md](../../stages/inception/inception-reverse-engineering.md)。图表需求通过调用 `aidlc-diagram-design` 执行。
-
-## 输出
-
-返回 `docs/aidlc/inception/reverse-engineering.md` 路径、业务概述、架构发现、包关系、基础设施发现和未解决问题。
-
-## 禁止事项
-
-不得：
-
-- 更新项目 state 或 audit；
-- 代替用户审批；
-- 放行质量门禁；
-- 宣布阶段完成；
-- 伪造 evidence。
+仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-reverse-engineering.md)，默认不加载。

@@ -1,0 +1,71 @@
+{
+  "observed_at": "2026-11-11T06:38:53.522Z",
+  "project": "E:/Work/src/project/dfi-mall/dfi-mall-kiro",
+  "read_only": true,
+  "fetch_performed": false,
+  "reason": "Referenced source commits already available locally",
+  "sources": [
+    {
+      "path": "E:\\Work\\src\\project\\dfi-mall\\dfi-mall-kiro\\docs\\aidlc\\modules\\m02-product\\construction\\build-and-test\\CR-M02-002-closure.md",
+      "sha256": "fff4bbd818adb92f6bd5df727ec6dbb8b9c81da82e20b6e5c5ace84e774bfc83"
+    },
+    {
+      "path": "E:\\Work\\src\\project\\dfi-mall\\dfi-mall-kiro\\docs\\aidlc\\modules\\m02-product\\construction\\build-and-test\\CR-M02-002-scoped-validation.md",
+      "sha256": "7ecc250e48960f1831316fba5ef39002ac973c9c0fa6c5ccfab5e9eb282fe9b9"
+    },
+    {
+      "path": "E:\\Work\\src\\project\\dfi-mall\\dfi-mall-kiro\\liudechao\\CR-M02-002-progress.md",
+      "sha256": "c1085e56e736c8180dacec4f24c9d130b492c5f491e594d435ef1dde6989ed4c"
+    }
+  ],
+  "scope": [
+    {
+      "unit": "be-1",
+      "document": "liudechao/m06-search-搜索域联调手册-20261104.md",
+      "included": true
+    },
+    {
+      "unit": "be-5",
+      "document": "liudechao/m06-search-搜索域联调手册-20261104.md",
+      "included": true
+    },
+    {
+      "unit": "be-4",
+      "document": "liudechao/m06-search-搜索域联调手册-20261104.md",
+      "included": true
+    },
+    {
+      "unit": "fe-4",
+      "document": "liudechao/m06-search-搜索域联调手册-20261104.md",
+      "included": true
+    },
+    {
+      "unit": "be-3",
+      "document": "liudechao/m06-search-搜索域联调手册-20261104.md",
+      "included": true
+    },
+    {
+      "unit": "fe-1",
+      "document": "liudechao/m06-search-搜索域联调手册-20261104.md",
+      "included": true
+    }
+  ],
+  "commits": [
+    {
+      "repo": "dfi-mall-microservice",
+      "commit": "c23028b31a652640b6560e5a62f3003619831d38",
+      "observed": "c23028b31a652640b6560e5a62f3003619831d38\n2026-11-06 11:45:28 +0800"
+    },
+    {
+      "repo": "dfi-mall-operation-fe",
+      "commit": "b8ce458ff403a826407f81223b22bca7b923434f",
+      "observed": "b8ce458ff403a826407f81223b22bca7b923434f\n2026-11-06 11:45:38 +0800"
+    }
+  ],
+  "raw_archive_present": false,
+  "limitations": [
+    "Current manifest/scope observation is not a replay of the historical producer.",
+    "Missing archived command logs prevent precise active-time attribution.",
+    "Project closure records describe an approved Native exception and no real browser/device E2E."
+  ]
+}

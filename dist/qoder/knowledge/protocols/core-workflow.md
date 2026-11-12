@@ -1,3 +1,5 @@
+> 适用范围：以下强制路由、凭据和状态写入规则仅适用于显式选择的旧受管引擎。默认实施遵循 [宿主执行协议](host-execution.md)，不加载本协议作为开工或续作门禁。业务质量要求仍按任务需要使用。
+
 # AI-DLC 核心工作流
 
 ## 人类交互
@@ -91,7 +93,7 @@ loeyae-aidlc orchestrate report \
    之后才准备 Diagram Request（`output_format: svg`）调用 `aidlc-diagram-design`，并按 SVG 标准交付 SVG 源与 `.diagram.json`；只有用户要求 `preview`、`render` 或 `export` 时才调用 Provider。不得替用户选择 SVG；用户要求改回时以 `--set mermaid` 记录。
 3. 以下情况都不构成 SVG 要求：图表复杂、存在跨模块/跨团队关系、承载接口契约或架构语义、目标文档已引用 SVG（可能是外部资产）、目录中存在 `.svg`、阶段声明了 `diagram-contract` 传感器、阶段文档中的 SVG 模板或示例。
 
-选择记录在 `aidlc/active/aidlc-state.md` 的 `Diagram Format` 字段（缺省为 mermaid），并写入 audit；`orchestrate diagram-format` 不带参数时显示当前格式，directive 的 `diagram_format` 字段同步给出。`diagram-contract` 按该字段判定：mermaid 时只检查 Mermaid（`source_format: mermaid`）——阶段文档（requirements-methods 的 `requirements/business-flows.md`、application-design 的 `application-design/component-dependency.md`）必须至少有一个 `mermaid` 代码块，每个代码块须闭合、声明图类型（flowchart/graph 的方向合法）、包含节点或关系，并在 parser 可用时通过真实解析，不可用时记录未执行；范围内的 `.diagram.json` 或 SVG 文件不触发 SVG 校验。svg 时执行完整 SVG 契约，Mermaid 证据会被门禁拒绝。格式一经确定不得因工具失败静默切换，需要切换时取得用户明确指示。
+选择记录在 `aidlc/active/aidlc-state.md` 的 `Diagram Format` 字段（缺省为 mermaid），并写入 audit；`orchestrate diagram-format` 不带参数时显示当前格式，directive 的 `diagram_format` 字段同步给出。`diagram-contract` 按该字段判定：mermaid 时只检查 Mermaid（`source_format: mermaid`）——阶段文档（requirements-methods 的 `requirements/business-flows.md`、application-design 的 `application-design.md` 的“组件依赖”节（旧项目兼容 `application-design/component-dependency.md`））必须至少有一个 `mermaid` 代码块，每个代码块须闭合、声明图类型（flowchart/graph 的方向合法）、包含节点或关系，并在 parser 可用时通过真实解析，不可用时记录未执行；范围内的 `.diagram.json` 或 SVG 文件不触发 SVG 校验。svg 时执行完整 SVG 契约，Mermaid 证据会被门禁拒绝。格式一经确定不得因工具失败静默切换，需要切换时取得用户明确指示。
 
 ## 交接与暂停
 

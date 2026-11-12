@@ -1,0 +1,16 @@
+✔ actual thread/start advertises action-specific requirements and explicit write classes (18.5787ms)
+✔ captured write is refused without IO; corrected call uses normal grant/path checks (14.5916ms)
+✔ malformed input cannot evade equivalent retries by changing content/path and gets no idle credit (2.8877ms)
+✔ r14 timeline: acquired input permits argument correction without pretending semantic completion (8.3867ms)
+✔ fresh reads remain bounded by existing unproductive steps; duplicates and missing paths do not reset idle (29.1226ms)
+✔ acquired-input identity survives restore; turn and wall limits still stop fresh input work (6.9429ms)
+✔ native replacement shares missing-field feedback and retry accounting (7.2335ms)
+✔ correction cannot grant permissions or bypass metadata mode and path isolation (4.338ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 98.4698

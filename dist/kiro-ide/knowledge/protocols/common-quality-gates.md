@@ -1,3 +1,5 @@
+> 适用范围：以下强制路由、凭据和状态写入规则仅适用于显式选择的旧受管引擎。默认实施遵循 [宿主执行协议](host-execution.md)，不加载本协议作为开工或续作门禁。业务质量要求仍按任务需要使用。
+
 # 质量门禁
 
 ## 原则
@@ -28,7 +30,7 @@ Evidence 路径由当前 directive 的 `evidence_root` 决定：
 使用 `loeyae-aidlc evidence run` 生成 Evidence。Producer 只执行项目命令清单中受允许的 build、test、check 命令（清单按 `--config` 显式指定 → `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找；RED/GREEN/BASELINE 与 C8 只按 `.aidlc/commands/<stage>.json` → `.aidlc/evidence-commands.json` 查找，显式 `--config` 仅在指向同一文件时被接受，否则 producer 拒绝），采用无 shell 执行、路径边界、原子写入和输出脱敏。
 选择性证据失效（MARS-271）：语义 sensor 证据记录 stage `consumes` 工件的输入指纹（`inputs.digest`）；`evidence run --refresh --instance <id>` 对输入指纹、执行上下文与受控状态均未变化的证据直接复用（`action: reused`），只有 diff 触及的 artifact 的直接依赖证据重跑（`action: regenerated`，输出 `inputs_changed` 失效范围）。RED/GREEN/BASELINE 相位证据不走该路径。
 
-语义证据还记录 `checker.identity_version: 1` 和 `implementation_digest`，绑定工具实现、实际运行依赖字节与 Node/平台身份。正常门禁、复用投影和 refresh 使用同一检查。工具同路径升级、依赖变化或旧证据缺少身份时，先受控重跑；失败不覆盖旧证据。执行期间身份变化拒绝发布。相位证据继续使用其真实命令/观察与历史回放专用绑定。
+语义证据还记录 `checker.identity_version`（普通 1、模板隔离 2、功能设计隔离 3） 和 `implementation_digest`，绑定工具实现、实际运行依赖字节与 Node/平台身份。正常门禁、复用投影和 refresh 使用同一检查。工具同路径升级、依赖变化或旧证据缺少身份时，先受控重跑；失败不覆盖旧证据。执行期间身份变化拒绝发布。相位证据继续使用其真实命令/观察与历史回放专用绑定。
 
 成员切换运行时引发 checker 身份不匹配时，只重验受影响的证据；这不是业务契约或需求冲突，不能据此重写需求、UC-D 或新增测试。`next`/`report` 的 `repair_guidance` 区分映射、历史阶段证据、实际失败和权限状态问题；相同输入再次阻塞时 `action: diagnose`，停止等价重试。其 `.aidlc/continuation/` 记录仅为有界诊断，不推进阶段、不授予门禁资格；`--preview` 保持只读。
 

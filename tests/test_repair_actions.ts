@@ -40,7 +40,25 @@ try {
   assert.deepEqual(stale.command, ["loeyae-aidlc", "evidence", "run", "--stage", "code-generation", "--module", "project", "--unit", "default", "--sensor", "traceability-matrix", "--refresh"]);
   const active = sensorRepairDiagnostics([{ sensor: "traceability-matrix", message: "evidence is invalid" }], context)[0];
   assert(!active.command?.includes("--refresh"), "active stages use ordinary targeted production");
+  assert(active.command?.includes("--sensor"), "active implementations cannot widen a targeted derivation into another GREEN run");
+  for (const sensor of ['test-quality', 'structural-invariants']) {
+    const ordered = sensorRepairDiagnostics([{ sensor, message: 'source_revision.scope_digest no longer matches the input scope' }], { ...context, completed_stage_instances: [instance] })[0];
+    assert(!ordered.command?.includes('--all-sensors'));
+    assert(ordered.command?.includes(sensor));
+    assert.equal(ordered.stage_instance, instance);
+  }
   const historical = sensorRepairDiagnostics([{ sensor: "test-quality", message: "Evidence rejected at .aidlc/evidence/tdd/project/default/red-test-evidence.json: PHASE_INPUT_BINDING_CHANGED" }], context)[0];
+  const review = "code-review@module:project@unit:default";
+  const grouped = sensorRepairDiagnostics([
+    ...["review-evidence", "test-quality", "ui-design-alignment", "traceability-matrix"].map(sensor => ({ sensor, stage_instance: review, message: "source_revision.scope_digest no longer matches the input scope" })),
+    { sensor: "review-evidence", stage_instance: "code-review@module:project@unit:other", message: "evidence is stale" },
+    { sensor: "red-test-evidence", stage_instance: "tdd@module:project@unit:default", message: missing },
+    { sensor: "test-quality", stage_instance: review, message: "tests_failed must be 0" },
+  ], { completed_stage_instances: [review, "code-review@module:project@unit:other"] });
+  for (const row of grouped.slice(0, 4)) assert.deepEqual(row.command, ["loeyae-aidlc", "evidence", "run", "--stage", "code-review", "--module", "project", "--unit", "default", "--sensors", "review-evidence,test-quality,ui-design-alignment,traceability-matrix", "--refresh"]);
+  assert(grouped[4].command?.includes("--sensor"));
+  assert.equal(grouped[5].requires_human_approval, true);
+  assert.equal(grouped[6].command, undefined);
   assert.equal(historical.sensor, "red-test-evidence");
   assert.equal(historical.action, "inspect");
   assert.equal(historical.command, undefined, "historical input drift cannot trigger a blind RED rerun");
@@ -53,6 +71,8 @@ try {
   assert.equal(projectFailure.artifact, projectArtifact, "project-axis evidence paths must be recognized");
   assert.equal(projectFailure.stage_instance, "build-and-test-templates", "project evidence cannot inherit the consumer's module/unit");
   assert.deepEqual(projectFailure.command, ["loeyae-aidlc", "evidence", "run", "--stage", "build-and-test-templates", "--sensor", "template-completeness"]);
+  const completedProject=sensorRepairDiagnostics([{sensor:"template-completeness",message:projectMessage}],{completed_stage_instances:["build-and-test-templates"]})[0];
+  assert.deepEqual(completedProject.command,[...projectFailure.command!,"--instance","build-and-test-templates","--refresh"],"completed project refresh must select its exact instance too");
   const windowsFailure = sensorRepairDiagnostics([{ sensor: "test-quality", message: projectMessage.replaceAll("/", "\\") }], context)[0];
   assert.equal(windowsFailure.artifact, projectArtifact, "Windows evidence paths normalize to the same artifact");
   assert.deepEqual(windowsFailure.command, projectFailure.command);

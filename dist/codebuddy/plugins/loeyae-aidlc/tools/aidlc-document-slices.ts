@@ -173,7 +173,7 @@ export function checkSlices(ctx: SliceContext): Record<string, unknown> {
   if (!adoption.enabled) {
     // A legacy rename must never be mistaken for an empty/unselected document.
     for (const [canonical, legacy] of [["requirements.md", "requirements.full.md"], ["user-stories.md", "stories.full.md"], ["user-stories.md", "user-stories.full.md"]]) if (!present(ctx, `${qualityBase(ctx)}/${canonical}`) && present(ctx, `${qualityBase(ctx)}/${legacy}`)) throw new Error(`SLICE_CANONICAL_MISSING: restore ${canonical} explicitly`);
-    return { sensor: SLICE_SENSOR, status: "not_applicable", applicable: false, applicability_basis: adoption.basis, inputs: [] };
+    return { sensor: SLICE_SENSOR, status: "not_applicable", applicable: false, ...identity(ctx), applicability_basis: adoption.basis, inputs: [] };
   }
   const { manifest, objects } = projection(ctx), path = `${sliceBase(ctx)}/manifest.json`;
   if (json(decode(ctx, path)) !== json(manifest)) throw new Error("SLICE_MANIFEST_STALE: regenerate from canonical sources and approved mapping");
@@ -233,7 +233,20 @@ export function sliceEvidenceErrors(ctx: SliceContext, evidence: Record<string, 
     return ["sensor", "status", "applicable", "workflow_id", "module_id", "scope", "schema_version", "generator_version", "inputs", "coverage", "applicability_basis"].filter(k => JSON.stringify(expected[k]) !== JSON.stringify(evidence[k])).map(k => `SLICE_EVIDENCE_STALE: ${k}`);
   } catch (error) { return [String(error)]; }
 }
-export interface BusinessDocumentLoadPlan { mode: "derived" | "canonical"; files: QualityInput[]; bytes: number; estimated_tokens: number; measurement: "utf8-bytes-and-ceil-bytes-divided-by-four" }
+export interface BusinessDocumentLoadPlan {
+  mode: "derived" | "canonical"; files: QualityInput[]; bytes: number; estimated_tokens: number; measurement: "utf8-bytes-and-ceil-bytes-divided-by-four";
+  reading?: { strategy: string; files: { path: string; role: string; bytes: number; empty: boolean }[]; coverage?: { requirements: number; stories: number; acs: number }; instruction: string };
+}
+function documentReading(ctx: SliceContext, files: QualityInput[], unit?: View): NonNullable<BusinessDocumentLoadPlan["reading"]> {
+  return { strategy: "exact-manifest-files-on-demand", files: files.map(file => {
+    const bytes = readFileSync(qualityPath(ctx, file.path)).byteLength;
+    return { path: file.path, bytes, empty: bytes === 0, role: unit?.inherited?.some(f => f.path === file.path) ? "inherited" : unit?.files.some(f => f.path === file.path) ? "private" : "canonical-or-contract" };
+  }), ...(unit ? { coverage: {
+    requirements: sorted([...unit.requirements, ...(unit.inherited_membership?.requirements || [])]).length,
+    stories: sorted([...unit.stories, ...(unit.inherited_membership?.stories || [])]).length,
+    acs: sorted([...unit.acs, ...(unit.inherited_membership?.acs || [])]).length,
+  } } : {}), instruction: "Read private AND inherited inputs; empty private files do not imply missing coverage. Use state artifact for bounded pages, retaining source sha256. Read exact referenced files, not objects/history directories or whole sibling units. Follow relevant contract/UC-D/UI references; this view does not replace their gates. Byte/4 is a rough estimate, not tokenizer usage or an admission limit." };
+}
 /** A diagnostic work plan from current authority, never from a stale projection. */
 export function buildCanonicalIsolationPlan(ctx: SliceContext, unitId: string): BusinessDocumentLoadPlan {
   const { manifest } = projection(ctx); // validates the complete approved mapping and denominator
@@ -242,18 +255,20 @@ export function buildCanonicalIsolationPlan(ctx: SliceContext, unitId: string): 
   for (const path of ["docs/aidlc/product/contracts.md", "docs/aidlc/ideation/product-contracts.md", `${qualityBase(ctx)}/application-design/shared-interfaces.md`]) if (present(ctx, path)) paths.push(path);
   const files = [...new Set(paths)].map(path => qualityInput(ctx, path));
   for (const input of manifest.inputs) if (files.find(file => file.path === input.path)?.sha256 !== input.sha256) throw new Error(`SLICE_SOURCE_CHANGED_DURING_PLANNING: ${input.path}`);
-  const bytes = files.reduce((sum, file) => sum + readFileSync(qualityPath(ctx, file.path)).byteLength, 0);
-  return { mode: "canonical", files, bytes, estimated_tokens: Math.ceil(bytes / 4), measurement: "utf8-bytes-and-ceil-bytes-divided-by-four" };
+  const reading = documentReading(ctx, files), bytes = reading.files.reduce((sum, file) => sum + file.bytes, 0);
+  return { mode: "canonical", files, bytes, estimated_tokens: Math.ceil(bytes / 4), measurement: "utf8-bytes-and-ceil-bytes-divided-by-four", reading };
 }
 export function buildBusinessDocumentLoadPlan(ctx: SliceContext, unitId: string): BusinessDocumentLoadPlan {
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(unitId)) throw new Error("SLICE_SCOPE: invalid unit");
   const adopted = sliceAdoption(ctx).enabled;
   let files: QualityInput[];
+  let selected: View | undefined;
   if (adopted) {
     checkSlices(ctx);
     const manifest = decode(ctx, `${sliceBase(ctx)}/manifest.json`) as unknown as SliceManifest;
     const unit = manifest.views.find(v => v.unit_id === unitId);
     if (!unit) throw new Error(`SLICE_SCOPE: unknown unit ${unitId}`);
+    selected = unit;
     files = [...unit.inherited!, ...unit.files];
   } else {
     checkSlices(ctx);
@@ -261,8 +276,8 @@ export function buildBusinessDocumentLoadPlan(ctx: SliceContext, unitId: string)
   }
   for (const path of ["docs/aidlc/product/contracts.md", "docs/aidlc/ideation/product-contracts.md", `${qualityBase(ctx)}/application-design/shared-interfaces.md`]) if (present(ctx, path)) files.push(qualityInput(ctx, path));
   files = [...new Map(files.map(f => [f.path, f])).values()];
-  const bytes = files.reduce((sum, f) => sum + readFileSync(qualityPath(ctx, f.path)).byteLength, 0);
-  return { mode: adopted ? "derived" : "canonical", files, bytes, estimated_tokens: Math.ceil(bytes / 4), measurement: "utf8-bytes-and-ceil-bytes-divided-by-four" };
+  const reading = documentReading(ctx, files, selected), bytes = reading.files.reduce((sum, file) => sum + file.bytes, 0);
+  return { mode: adopted ? "derived" : "canonical", files, bytes, estimated_tokens: Math.ceil(bytes / 4), measurement: "utf8-bytes-and-ceil-bytes-divided-by-four", reading };
 }
 function recoverCanonicalUnlocked(ctx: SliceContext, apply: boolean): Record<string, unknown> {
   const base = qualityBase(ctx), actions: { source: string; target: string }[] = [], conflicts: string[] = [];

@@ -21,7 +21,7 @@ import { fixtureEnvironment } from "./mars243_fixture_session";
  * unit_refs) so it can be compared with the 4.7.1 engine.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -625,9 +625,21 @@ try {
     fd("UC-D-001");
     const fdOk = fdCheck();
     checks.expect("u1 FD naming only UC-D-001 passes", fdOk.status === 0 ? "accepted" : fdOk.out, /^accepted$/);
+    const canonicalCasePath = join(s.project, CASES, "UC-D-001.md"), namedCasePath = join(s.project, CASES, "UC-D-001-readable-title.md");
+    const canonicalCase = readFileSync(canonicalCasePath, "utf8");
+    renameSync(canonicalCasePath, namedCasePath);
+    writeFileSync(namedCasePath, canonicalCase + "\nSources: [UC-D-001](UC-D-001-readable-title.md)\n");
+    s.step(["evidence", "run", ...TCD, "--sensor", "test-case-derivation", "--refresh"]);
+    const namedFd = fdCheck();
+    checks.expect("descriptive UC-D filenames do not introduce additional functional cases", namedFd.status === 0 ? "accepted" : namedFd.out, /^accepted$/);
     fd("（未列出用例）");
-    checks.expect("u1 FD without UC-D-001", rejected(fdCheck()), /functional design does not cover every UC-D case/);
+    checks.expect("u1 FD without UC-D-001", rejected(fdCheck()), /functional design does not cover every UC-D case; missing: UC-D-001/);
+    renameSync(namedCasePath, canonicalCasePath);writeFileSync(canonicalCasePath, canonicalCase);
+    s.step(["evidence", "run", ...TCD, "--sensor", "test-case-derivation", "--refresh"]);
     write(s.project, `${construction("u1")}/functional-design.md`, "# 功能设计 — u1\n\nREQ-001：u1 交付自己负责的用例；无新增接口与数据结构。\n");
+    // Focused checker regression can finish here; the default keeps the complete
+    // two-unit RED/GREEN/review/integration flow below unchanged.
+    if (process.env.AIDLC_FD_ONLY === "1") { checks.assertAll(); return; }
 
     // (1)(2) u1: RED and GREEN cover UC-D-001 only.
     s.nextModule(`tdd@module:${M01}@unit:u1`, [TCD]);

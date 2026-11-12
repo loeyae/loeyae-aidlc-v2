@@ -1,0 +1,56 @@
+PASS legacy inspection ignores malformed autonomy sources and writes nothing
+PASS policy reads a frozen handoff record with all baseline constraints
+PASS reject unknown policy field
+PASS reject empty hard constraints
+PASS reject missing original AC
+PASS reject foreign scope
+PASS reject semantic reclassification
+PASS reject document authority
+PASS reject foreign authority scope
+PASS reject unknown predicate
+PASS reject executable predicate
+PASS reject missing predicate refs
+PASS reject duplicate category
+PASS reject unknown fallback check
+PASS reject incompatible defaults
+PASS reject missing precedence authority
+PASS policy has one canonical location; development handoff does not create duplicate policy state
+PASS preview and pending review preserve state/audit and fixed scope
+PASS authorized autonomous refinement follows a real category action
+PASS reject reverse explicit product answer
+PASS reject alter a protected item under an otherwise legal clause
+PASS reject change required acceptance
+PASS reject unregistered affected item
+PASS reject alter fallback behavior
+PASS reject unknown clause
+PASS reject change class escape
+PASS reject source omission
+PASS reject fake pending reviewer
+PASS reject unapproved new human review
+PASS reject unknown decision field
+PASS reject foreign workflow
+PASS reject foreign unit owner
+PASS reject wrong publisher
+PASS reject missing implementation file
+PASS reject unknown evidence check
+PASS reject foreign evidence workflow
+PASS reject foreign evidence batch
+PASS reject evidence drift
+PASS policy escalation and explicit-conflict clauses cannot delegate core conflicts
+PASS source precedence validates explicit provenance and rejects conflicting preference
+PASS expired claim cannot publish even if the proposal and handoff CAS match
+PASS conflicting decisions cannot silently replace an existing slot outcome
+PASS stale handoff CAS, expired/foreign claim and lock contention reject without publication
+PASS completed references leave human review pending and never claim gate verification
+PASS decision update cannot rewrite a chosen behavior or effective design revision
+PASS actual human review reference is separate from engineering completeness
+PASS changed/rejected human review requires actual change input and flags incremental rework
+PASS raw-file frozen handoff refuses decision append before any mutation
+PASS policy approval cannot be reused as a human decision review
+PASS decision append cannot invalidate its own implementation or observation references
+PASS oversized authoring output is rejected before preview or publication
+PASS linked decision file cannot redirect authority outside the project
+PASS split decision publication uses the implement unit's module claim, not a sibling/global claim
+PASS new refinements increment effective_revision without changing the batch denominator
+PASS CLI preview, publication, handoff and summary expose the same decision projection
+Autonomy policy: 55 scenarios passed

@@ -1,0 +1,9 @@
+Error: EPERM, Permission denied: 'E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2\dist\kiro-crew'
+    at rmSync (node:fs:1282:18)
+    at buildHarness (E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2\scripts\build.ts:67:5)
+    at async main (E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2\scripts\build.ts:113:5) {
+  errno: 1,
+  code: 'EPERM',
+  path: 'E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-crew',
+  syscall: 'rm'
+}

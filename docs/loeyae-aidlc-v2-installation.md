@@ -50,19 +50,13 @@ loeyae-aidlc install --harness deepseek --project /absolute/path/to/project
 
 用户级目标为 `~/.dsh/skills/loeyae-aidlc/`，遵循 `DSH_HOME`；项目级目标为 `<项目>/.dsh/skills/loeyae-aidlc/`。两种范围独立，升级或卸载使用相同参数。`--all` 通过 PATH 中的 `dsh` 探测宿主；通过 npx 或源码启动时可显式安装。
 
-在 dsh 会话中加载 `loeyae-aidlc` Skill 后描述工作目标。适配使用原生 Skill，启动/续作显式绑定会话，不注册自动 Stop Hook。自定义插件组合、扫描路径及使用细节见 [DeepSeek Harness 说明](../harness/deepseek/README.md)。
+在 dsh 会话中加载 `loeyae-aidlc` Skill 后描述工作目标。适配使用原生 Skill，由宿主执行与续作，不要求会话绑定，不注册自动 Stop Hook。自定义插件组合、扫描路径及使用细节见 [DeepSeek Harness 说明](../harness/deepseek/README.md)。
 
-### Kiro 项目级 Stop Hook
+### 宿主生命周期与旧钩子清理
 
-全局安装 `kiro-ide` / `kiro-cli` 只部署共享 Skill 并注册 MCP，不会安装 Stop Hook。需要 Hook 时对每个业务项目执行：
+默认分发不注册 Stop Hook，OpenCode 也不派发 idle 自动工作。Codex、ZCode 升级时仅移除精确识别的旧 AI-DLC 命令，保留同组用户命令、其他事件、MCP 与设置。Kiro 可通过 `install --harness kiro-ide --project <existing-directory>` 清理安装器拥有的旧项目钩子；用户文件保持不变，不创建新钩子。
 
-```bash
-loeyae-aidlc install --harness kiro-ide --project /absolute/path/to/project
-```
-
-Hook 写入 `<项目>/.kiro/hooks/loeyae-aidlc.json`。`--project` 支持 `kiro-ide`、`kiro-cli`、`codebuddy`、`qoder`、`deepseek`，不能与 `--all` 同时使用；`deepseek` 用它安装项目级 Skill。
-
-> 注意：`--project` 路径不存在（或是符号链接、不是目录）时，CLI 会**先完成全局 Skill 安装和 MCP 注册**，随后才报错 `--project must be an existing, non-symlink directory` 并以非 0 退出。此时全局 Skill 已安装，只有项目 Hook 未写入；修正路径后重新执行同一条命令即可，无需先卸载。
+`--project` 支持 Kiro、CodeBuddy、Qoder、DeepSeek 对应安装范围；不能与 `--all` 同时使用，路径须为已存在的普通目录。
 
 安装自检使用 `loeyae-aidlc install --list` 与 `loeyae-aidlc version`；`loeyae-aidlc runtime doctor` 需要项目中已有活动 workflow。
 

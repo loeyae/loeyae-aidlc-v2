@@ -1,0 +1,40 @@
+import assert from "node:assert/strict";
+import { workflowContext } from "../core/tools/aidlc-context-view";
+import { readFileSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { fixture, cli } from "./mars244_fixture";
+import { bindSession, claimToken } from "../core/tools/aidlc-session";
+import { loadWorkflowState, migrateWorkflowFacts, rebuildWorkflowView, workflowMaintenancePlan, saveWorkflowState, renderLightWorkflowState, assertSessionClaim } from "../core/tools/aidlc-light-state";
+import { readWorkflowFacts, workflowFactPaths, withReportFactSources } from "../core/tools/aidlc-workflow-facts";
+const env={...process.env}; delete process.env.AIDLC_SESSION_BINDING;
+const instance="application-design@module:shop",f=fixture(instance,true),ref={kind:"module" as const,module_id:"shop"};
+try {
+ f.state.history.push({stage:"requirements-analysis",instance_id:"requirements-analysis@module:shop",result:"approved",timestamp:new Date().toISOString(),user_input:"Approve"}); f.persist();
+ const own=bindSession(f.root,{instance,owner:"owner",session:"owner",expected:claimToken(undefined)});process.env.AIDLC_SESSION_BINDING=JSON.stringify(own.binding);
+ const sibling=readFileSync(join(f.root,"aidlc/active/modules/other/aidlc-state.md")),registry=readFileSync(join(f.root,"aidlc/active/registry.md")),before=loadWorkflowState(f.root,ref)!;
+ migrateWorkflowFacts(f.root,ref);assert.deepEqual(loadWorkflowState(f.root,ref),before);
+ const paths=workflowFactPaths(f.root,join(f.root,f.statePath)),facts=readFileSync(paths.facts);
+ assert.equal(readWorkflowFacts(f.root,join(f.root,f.statePath)).reports[0].user_input,"Approve");
+ unlinkSync(join(f.root,f.statePath));assert.deepEqual(loadWorkflowState(f.root,ref),before);assertSessionClaim(f.root,loadWorkflowState(f.root,ref)!,instance,own.binding);
+ const context=workflowContext(f.root,"shop");assert.equal(context.storage,"facts-and-local-runtime");assert.match(String(context.authority),/aidlc-facts\.json$/);assert.equal(context.verification,"not_checked");
+ rebuildWorkflowView(f.root,ref);assert.equal(readFileSync(join(f.root,f.statePath),"utf8"),renderLightWorkflowState(before));
+ writeFileSync(join(f.root,f.statePath),"forged completed progress");assert.deepEqual(loadWorkflowState(f.root,ref),before);
+ const viewBefore=readFileSync(join(f.root,f.statePath)),auditBefore=readFileSync(join(f.root,f.statePath.replace("aidlc-state.md","audit.md")));
+ const next=loadWorkflowState(f.root,ref)!;next.current_phase="construction";saveWorkflowState(f.root,next,ref);assert.deepEqual(readFileSync(paths.facts),facts,"cursor changes do not rewrite facts");
+ assert.deepEqual(readFileSync(join(f.root,f.statePath)),viewBefore);assert.deepEqual(readFileSync(join(f.root,f.statePath.replace("aidlc-state.md","audit.md"))),auditBefore);assert.throws(()=>workflowMaintenancePlan(f.root,"shop"),/LEGACY_MAINTENANCE_REFUSED/);
+ assert.deepEqual(readFileSync(join(f.root,"aidlc/active/modules/other/aidlc-state.md")),sibling);assert.deepEqual(readFileSync(join(f.root,"aidlc/active/registry.md")),registry);
+ const report=cli(f.root,["orchestrate","report","--stage","application-design","--module","shop","--result","approved","--user-input","Approve"]);assert.notEqual(report.status,0,"fact migration cannot waive missing design/evidence gates");assert.deepEqual(readFileSync(paths.facts),facts);
+ const runtime=readFileSync(paths.runtime);unlinkSync(paths.runtime);assert.throws(()=>loadWorkflowState(f.root,ref),/WORKFLOW_RUNTIME_MISSING/);assert.ok(readWorkflowFacts(f.root,join(f.root,f.statePath)));writeFileSync(paths.runtime,runtime);
+ unlinkSync(paths.facts);assert.throws(()=>loadWorkflowState(f.root,ref),/WORKFLOW_FACTS_MISSING/);writeFileSync(paths.facts,facts);
+ // Persistence fault boundary only: this seeded report is not a business acceptance.
+ const historical=loadWorkflowState(f.root,ref)!;
+ historical.history.push({stage:"application-design",instance_id:instance,result:"revised",timestamp:new Date().toISOString(),user_input:"fixture rework"});
+ const sources={git_commit:"fixture",files:{"design.md":"a".repeat(64)},evidence_checked:false};
+ withReportFactSources(sources,()=>saveWorkflowState(f.root,historical,ref));
+ assert.deepEqual(Object.values(readWorkflowFacts(f.root,join(f.root,f.statePath)).report_sources),[sources]);
+ const published=loadWorkflowState(f.root,ref)!;writeFileSync(paths.runtime,runtime);
+ const interrupted=loadWorkflowState(f.root,ref)!;assert.equal(interrupted.revision,published.revision);assert.deepEqual(interrupted.history,published.history);assert.deepEqual(interrupted.active_instances,before.active_instances);
+ const inspect=cli(f.root,["orchestrate","state","facts","--module","shop"]);assert.equal(inspect.status,0,inspect.stderr);
+ const invalid={...own.binding,generation:"old"};process.env.AIDLC_SESSION_BINDING=JSON.stringify(invalid);assert.throws(()=>migrateWorkflowFacts(f.root,ref),/conflicts|transferred/);
+ console.log("PASS facts migration: lossless approval, deleted/forged view, cursor-only write, sibling preservation, real report refusal, missing authority and stale binding");
+}finally{for(const key of Object.keys(process.env))if(!(key in env))delete process.env[key];Object.assign(process.env,env);rmSync(f.root,{recursive:true,force:true});}

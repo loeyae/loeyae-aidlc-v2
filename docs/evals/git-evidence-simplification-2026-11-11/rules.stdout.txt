@@ -1,0 +1,8 @@
+PASS autonomy rule loading adds only an explicit supplemental protocol
+PASS adopted preview guides autonomous execution without claiming authority or writing state
+PASS real notify report releases its claim and returns to a live same-session coordinator
+PASS coordinator selection requires the held credential and renews through normal binding
+PASS actual CLI routing exit 2 retains structured diagnostics without accepting process failures
+PASS host selection cannot claim a module outside the frozen implement set
+PASS unadopted stages retain original routes and require no new grant or admission
+Autonomous rules: 7 scenarios passed; real CLI, explicit fixture authority; no full native model pilot

@@ -1,0 +1,1 @@
+PASS declared delivery creation/edit/commit preserve execution; full scope, code, shared/baseline, candidate, unknown and executable inputs remain bound; changed declarations and unadopted scopes cannot gain exclusions

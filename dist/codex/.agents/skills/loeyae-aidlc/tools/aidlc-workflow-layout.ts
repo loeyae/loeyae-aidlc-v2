@@ -34,6 +34,7 @@ import {
 } from "./aidlc-light-state";
 import { readSourceRevision, type DigestScope, type SourceRevision } from "./aidlc-revision";
 import { nestedSourceRepos } from "./aidlc-nested-repos";
+import { autonomyBatchProjection, autonomyDependencyInputs, autonomyContractScope, autonomyDeliveryReportPaths } from "./aidlc-dependency-inputs";
 
 const TOOL_DIR = dirname(fileURLToPath(import.meta.url));
 const GRAPH_PATH = join(TOOL_DIR, "data", "stage-graph.json");
@@ -364,6 +365,23 @@ function assertSameLineage(registry: WorkflowRegistry, label: string, state: Wor
   throw new Error(`workflow lineage conflict: ${label} ${state.workflow_id} belongs to lineage ${state.parent_workflow_id}, but the registry and the global workflow are lineage ${registry.global_workflow_id}. Two lineages are mixed in aidlc/active; restore the files of one lineage from git (orchestrate state verify lists both) instead of merging them.`);
 }
 
+/** Exact ownership lookup, preserving registry/lineage checks without reading
+ * unrelated module states. Batch dependency/convergence readers still load parts. */
+export function loadWorkflowPart(projectRoot: string, requested: WorkflowRef): WorkflowPart | undefined {
+  const registry = loadRegistry(projectRoot);
+  const ref = registry ? requested : GLOBAL_WORKFLOW;
+  const global = loadWorkflowState(projectRoot, GLOBAL_WORKFLOW);
+  if (!registry) return global ? { ref, state: global } : undefined;
+  if (!global || global.workflow_id !== registry.global_workflow_id) throw Error("registry global workflow identity mismatch");
+  if (ref.kind === "global") return { ref, state: global };
+  const expected = ref.kind === "module" ? registry.modules.find(row => row.module_id === ref.module_id) : registry.integration;
+  if (!expected) throw Error("target workflow is absent from registry");
+  const state = loadWorkflowState(projectRoot, ref);
+  if (!state || state.workflow_id !== expected.workflow_id) throw Error("target workflow identity does not match registry");
+  assertSameLineage(registry, workflowRefKey(ref), state);
+  return { ref, state };
+}
+
 export function loadWorkflowParts(projectRoot: string, missingModuleForRecovery?: string, recoveryTargetState?: WorkflowState): WorkflowParts {
   const registry = loadRegistry(projectRoot);
   const parts = new Map<string, WorkflowPart>();
@@ -510,7 +528,15 @@ function manifestModules(projectRoot: string): ModuleDescriptor[] {
  * MARS-277). `legacyEvidenceScopeForInstance` reproduces the pre-baseline wide
  * module scope, used only to re-check evidence recorded under that label.
  */
-export function evidenceScopeForInstance(projectRoot: string, instanceId: string): DigestScope {
+export function evidenceScopeForInstance(projectRoot: string, instanceId: string, sensor?: string): DigestScope {
+  // Workflow declarations stay outside the isolated template checker's import graph.
+  if (sensor === "contract-baseline") {
+    const module = /@module:([^@]+)/.exec(instanceId)?.[1], unit = /@unit:([^@]+)/.exec(instanceId)?.[1];
+    if (module && unit) {
+      const scope = autonomyContractScope(projectRoot, module, unit);
+      if (scope) return scope;
+    }
+  }
   return moduleEvidenceScope(projectRoot, instanceId, false);
 }
 
@@ -574,6 +600,7 @@ function moduleEvidenceScope(projectRoot: string, instanceId: string, legacy: bo
   if (owner.kind === "module") {
     const own = modules.find(module => module.module_id === owner.module_id);
     const otherPaths = modules.filter((module) => module.module_id !== owner.module_id).flatMap((module) => module.paths || []);
+    const otherContextPaths = new Set(modules.filter(module => module.module_id !== owner.module_id).flatMap(module => module.context_paths || []));
     const unitId = /@unit:([a-z0-9][a-z0-9-]*)$/.exec(instanceId)?.[1];
     const unitManifest = join(projectRoot, "docs/aidlc/modules", owner.module_id, "inception/unit-manifest.json");
     const units = (unitId || !legacy) && existsSync(unitManifest) ? readUnitManifest(projectRoot, owner.module_id) : [];
@@ -599,13 +626,21 @@ function moduleEvidenceScope(projectRoot: string, instanceId: string, legacy: bo
     // A module-axis baseline binds every unit's shared paths: with no unit bound to
     // the instance, any declared shared input is a real dependency of the plan.
     const baseline = !legacy && !unitId;
-    const sharedPaths = [...(own?.contract_paths || []), ...units.filter(unit => baseline || relevant.has(unit.unit_id)).flatMap(unit => unit.evidence_inputs?.shared_paths || [])];
+    const autonomyInputs = !legacy && unitId && (units.find(u => u.unit_id === unitId)?.autonomy_version === "1" || loadWorkflowState(projectRoot)?.autonomy_contract_version) ? autonomyDependencyInputs(projectRoot, owner.module_id, unitId) : [];
+    const sharedPaths = [...(own?.contract_paths || []), ...units.filter(unit => baseline || relevant.has(unit.unit_id)).flatMap(unit => unit.evidence_inputs?.shared_paths || []), ...autonomyInputs];
+    const versioned = !legacy && (unitId ? units.find(u => u.unit_id === unitId)?.autonomy_version === "1" : units.some(u => u.autonomy_version === "1"));
+    const global = phaseExecution && versioned ? loadWorkflowState(projectRoot) : undefined;
+    const deliveryReports = new Set(global?.autonomy_contract_version === "1"
+      ? autonomyDeliveryReportPaths(projectRoot, global.workflow_id, global.autonomy_batch) : []);
+    const explicitSources = [...(own?.paths || []), ...(own?.context_paths || []), ...units.filter(unit => relevant.has(unit.unit_id)).flatMap(unit => unit.evidence_inputs?.paths || [])];
     const construction = `docs/aidlc/modules/${owner.module_id}/construction/${unitId}`;
     const downstreamReports = new Set(unitId ? [`${construction}/code-review.md`, `${construction}/audit.md`, `${construction}/audit/test-case-reconciliation.md`, `${construction}/audit/${unitId}.md`] : []);
     const exclude = (path: string): boolean => {
       if (underAny(path, sharedPaths)) return false;
+      if (!legacy && otherContextPaths.has(path)) return true;
       if (!legacy && derivedDisplayPath(path, stage)) return true;
       if (phaseExecution && downstreamReports.has(path)) return true;
+      if (phaseExecution && deliveryReports.has(path) && !underAny(path, explicitSources)) return true;
       if (narrowSources && privateUnits.some(unit => path.startsWith(`docs/aidlc/modules/${owner.module_id}/construction/${unit.unit_id}/`))) return true;
       if (baseline && path.startsWith(`docs/aidlc/modules/${owner.module_id}/construction/`)) return true;
       if (path.startsWith("docs/aidlc/modules/")) return path.split("/")[3] !== owner.module_id;
@@ -616,12 +651,15 @@ function moduleEvidenceScope(projectRoot: string, instanceId: string, legacy: bo
     };
     const reviewReceiptPath = `docs/aidlc/modules/${owner.module_id}/inception/artifact-review.json`;
     const reviewReceipt = !legacy ? scopedReviewReceipt(projectRoot, owner.module_id, reviewReceiptPath, exclude, sharedPaths) : undefined;
+    const batchPaths = ["docs/aidlc/ideation/scenario-module-mapping.md", "docs/aidlc/handoff.md"];
+    const batchProjections = versioned ? Object.fromEntries(batchPaths.flatMap(path => { const value = autonomyBatchProjection(projectRoot, path, phaseExecution); return value === undefined ? [] : [[path, value]]; })) : {};
     return {
-      label: `inputs-v2:module:${owner.module_id}${unitId ? `:unit:${unitId}` : ""}${baseline ? ":baseline" : ""}${phaseExecution ? ":execution-v1" : ""}`,
+      label: `inputs-v2:module:${owner.module_id}${unitId ? `:unit:${unitId}` : ""}${baseline ? ":baseline" : ""}${phaseExecution ? ":execution-v1" : ""}${versioned ? ":autonomy-v1" : ""}`,
       projectedInputs: {
+        ...batchProjections,
         ...(reviewReceipt !== undefined ? { [reviewReceiptPath]: reviewReceipt } : {}),
         ...(modules.length ? { "docs/aidlc/ideation/module-manifest.json": JSON.stringify({ version: 1, module: own,
-          ownership: modules.map(module => ({ module_id: module.module_id, paths: module.paths || [], contract_paths: module.contract_paths || [] })),
+          ownership: modules.map(module => ({ module_id: module.module_id, paths: module.paths || [], contract_paths: module.contract_paths || [], ...(module.context_paths ? { context_paths: module.context_paths } : {}) })),
         }) } : {}),
         ...(unitId && units.length ? { [`docs/aidlc/modules/${owner.module_id}/inception/unit-manifest.json`]: JSON.stringify({
         version: 1,
@@ -672,6 +710,6 @@ function moduleEvidenceScope(projectRoot: string, instanceId: string, legacy: bo
  * Source revision recorded by a new piece of evidence. 4.9.0: every declared nested
  * repository (checked fail closed by nestedSourceRepos) gets its own `repos` entry.
  */
-export function evidenceSourceRevision(projectRoot: string, instanceId: string | undefined): SourceRevision {
-  return readSourceRevision(projectRoot, instanceId ? evidenceScopeForInstance(projectRoot, instanceId) : undefined, nestedSourceRepos(projectRoot));
+export function evidenceSourceRevision(projectRoot: string, instanceId: string | undefined, sensor?: string): SourceRevision {
+  return readSourceRevision(projectRoot, instanceId ? evidenceScopeForInstance(projectRoot, instanceId, sensor) : undefined, nestedSourceRepos(projectRoot));
 }

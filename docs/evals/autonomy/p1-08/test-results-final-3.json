@@ -1,0 +1,16 @@
+[
+  {
+    "name": "native-host",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_native_host.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T00:54:19.1985336Z",
+    "finished_at": "2026-11-09T00:54:36.2605966Z",
+    "log": "docs/evals/autonomy/p1-08/native-host-final-3.log",
+    "timing_basis": "log creation/last write; process exit 0 observed separately"
+  }
+]

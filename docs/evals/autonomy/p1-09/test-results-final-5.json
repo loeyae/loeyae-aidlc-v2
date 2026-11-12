@@ -1,0 +1,58 @@
+[
+  {
+    "name": "observations",
+    "command": [
+      "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_observations.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T02:23:24.023Z",
+    "finished_at": "2026-11-09T02:24:00.364Z",
+    "log": "docs/evals/autonomy/p1-09/observations-final-4.log",
+    "reason": "refresh after EOF-only checker identity cleanup"
+  },
+  {
+    "name": "runtime-observations",
+    "command": [
+      "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_runtime_observations.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T02:23:24.030Z",
+    "finished_at": "2026-11-09T02:24:34.250Z",
+    "log": "docs/evals/autonomy/p1-09/runtime-observations-final-4.log",
+    "reason": "refresh after EOF-only checker identity cleanup"
+  },
+  {
+    "name": "typecheck",
+    "command": [
+      "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+      "node_modules/typescript/bin/tsc",
+      "--noEmit"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T02:24:34.250Z",
+    "finished_at": "2026-11-09T02:24:38.751Z",
+    "log": "docs/evals/autonomy/p1-09/typecheck-final-4.log",
+    "reason": "refresh after EOF-only checker identity cleanup"
+  },
+  {
+    "name": "batch-convergence",
+    "command": [
+      "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_batch_convergence.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T02:24:00.366Z",
+    "finished_at": "2026-11-09T02:27:38.496Z",
+    "log": "docs/evals/autonomy/p1-09/batch-convergence-final-4.log",
+    "reason": "refresh after EOF-only checker identity cleanup"
+  }
+]

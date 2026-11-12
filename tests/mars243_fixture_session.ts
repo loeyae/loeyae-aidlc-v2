@@ -97,6 +97,8 @@ export function fixtureEnvironment(
 	project: string,
 	args: string[],
 ): NodeJS.ProcessEnv {
+	if (resolve(project).toLowerCase() === fixtureRepository.toLowerCase())
+		throw new Error("fixtureEnvironment must target an isolated project, never the repository workflow");
 	const flags = Object.fromEntries(
 		args.flatMap((arg, index) =>
 			arg.startsWith("--") ? [[arg.slice(2), args[index + 1]]] : [],

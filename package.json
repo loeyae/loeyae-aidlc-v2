@@ -1,6 +1,6 @@
 {
   "name": "loeyae-aidlc",
-  "version": "4.26.3",
+  "version": "4.27.0",
   "description": "Loeyae AI-DLC — AWS-style lightweight workflow with multi-harness distribution",
   "author": "Loeyae Team",
   "license": "MIT",
@@ -17,6 +17,20 @@
     "README.md"
   ],
   "scripts": {
+    "test:host-execution": "tsx tests/test_host_execution.ts && tsx tests/test_host_execution_distribution.ts && tsx tests/test_host_execution_install.ts",
+    "test:ui-control-performance": "tsx tests/test_browser_session_boundaries.ts && tsx tests/test_browser_reuse.ts && tsx tests/test_control_preparation.ts && tsx tests/test_ui_reuse_integration.ts",
+    "test:selective-preflight": "tsx tests/test_autonomy_draft.ts && tsx tests/test_host_capability_reuse.ts && tsx tests/test_native_configuration_reuse.ts",
+    "test:resource-lifecycle": "tsx tests/test_owned_resource.mjs && tsx tests/test_resource_paths.ts && tsx tests/test_native_resource_unknown.mjs && tsx tests/test_observation_resource_unknown.ts && tsx tests/test_generated_resource_support.ts && tsx tests/test_worker_main_resources.ts",
+    "test:autonomous-rules": "tsx tests/test_autonomous_rules.ts && tsx tests/test_native_host_driver.ts",
+    "test:autonomous-distribution": "tsx tests/test_autonomous_distribution.ts",
+    "test:batch-result": "tsx tests/test_batch_result.ts && tsx tests/test_batch_convergence.ts",
+    "test:autonomy-scope": "tsx tests/test_autonomy_scope.ts",
+    "test:autonomy-policy": "tsx tests/test_autonomy_policy.ts",
+    "test:execution-grant": "tsx tests/test_execution_grant.ts",
+    "test:autonomous-admission": "tsx tests/test_autonomous_admission.ts && tsx tests/test_autonomous_admission_route.ts",
+    "test:native-host": "tsx tests/test_native_host.ts && tsx tests/test_native_host_driver.ts",
+    "test:observations": "tsx tests/test_observations.ts && tsx tests/test_runtime_observations.ts && tsx tests/test_observation_ui.ts",
+    "test:autonomy-dependencies": "tsx tests/test_autonomy_dependencies.ts && tsx tests/test_autonomy_dependency_boundaries.ts",
     "test:module-facts": "tsx tests/test_module_facts.ts",
     "test:module-knowledge": "tsx tests/test_module_knowledge.ts",
     "test:tech-extraction": "tsx tests/test_tech_extraction.ts",

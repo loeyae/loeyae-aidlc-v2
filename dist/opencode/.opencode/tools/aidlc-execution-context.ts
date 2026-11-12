@@ -31,6 +31,8 @@ export interface ModuleDescriptor {
    * and symlinks are checked fail-closed by the checker that reads them.
    */
   contract_paths?: string[];
+  /** Exact module-private Markdown inputs outside canonical module/source trees. */
+  context_paths?: string[];
   /**
    * MARS-271 审批策略分级:模块级 per-stage 审批层级覆盖(stage slug → block|confirm|notify)。
    * 契约/架构决策阶段不得降级为 notify;notify 阶段完成后产物进入事后抽审台账。
@@ -54,6 +56,8 @@ export type UnitConditionalStage = typeof UNIT_CONDITIONAL_STAGES[number];
 const UNIT_CONDITIONAL_STAGE_SET = new Set<string>(UNIT_CONDITIONAL_STAGES);
 
 export interface UnitDescriptor {
+  /** Explicit P1-05 definition/input-scope contract; absent preserves legacy evidence. */
+  autonomy_version?: "1";
   unit_id: string;
   name: string;
   service_id: string;
@@ -246,6 +250,12 @@ export function readModuleManifest(projectRoot: string): ModuleDescriptor[] {  c
     const module = record(item, `modules[${index}]`);
     const paths = modulePaths(module.paths, `modules[${index}].paths`);
     const contractPaths = moduleContractPaths(module.contract_paths, `modules[${index}].contract_paths`);
+    const contextPaths = moduleContractPaths(module.context_paths, `modules[${index}].context_paths`);
+    for (const path of contextPaths || []) {
+      if (!path.includes("/") || !path.endsWith(".md") || /[*?\[\]{}]/.test(path) || path.split("/").some(part => part.startsWith(".")) || path.startsWith("docs/aidlc/") || /(?:^|\/)(?:AGENTS|README|SKILL)\.md$/i.test(path)) {
+        throw new Error(`modules[${index}].context_paths must name exact private Markdown files, not global instructions, source or control inputs`);
+      }
+    }
     const approvalOverrides = approvalOverridesOf(module.approval_overrides, `modules[${index}].approval_overrides`);
     return {
       module_id: contextId(module.module_id, `modules[${index}].module_id`),
@@ -253,10 +263,20 @@ export function readModuleManifest(projectRoot: string): ModuleDescriptor[] {  c
       service_id: nonEmptyString(module.service_id, `modules[${index}].service_id`),
       ...(paths ? { paths } : {}),
       ...(contractPaths ? { contract_paths: contractPaths } : {}),
+      ...(contextPaths ? { context_paths: contextPaths } : {}),
       ...(approvalOverrides ? { approval_overrides: approvalOverrides } : {}),
     };
   });
   uniqueIds(modules.map((module) => module.module_id), "module manifest");
+  const contextOwners = new Set<string>();
+  for (const module of modules) for (const path of module.context_paths || []) {
+    const key = path.toLowerCase();
+    if (contextOwners.has(key)) throw new Error(`duplicate module context path ownership: ${path}`);
+    if (modules.some(row => row.paths?.some(source => key === source.toLowerCase() || key.startsWith(`${source.toLowerCase()}/`)))) {
+      throw new Error(`module context path overlaps source ownership: ${path}`);
+    }
+    contextOwners.add(key);
+  }
   return modules;
 }
 
@@ -311,6 +331,7 @@ export function readUnitManifest(projectRoot: string, moduleId: string): UnitDes
     }
     return {
       unit_id: contextId(unit.unit_id, `units[${index}].unit_id`),
+      ...(unit.autonomy_version !== undefined ? { autonomy_version: unit.autonomy_version === "1" ? "1" as const : (() => { throw new Error("unsupported unit autonomy_version"); })() } : {}),
       name: nonEmptyString(unit.name, `units[${index}].name`),
       service_id: nonEmptyString(unit.service_id, `units[${index}].service_id`),
       ...(conditionalStages !== undefined ? { conditional_stages: conditionalStages } : {}),
@@ -428,7 +449,7 @@ export function unitUcdIds(i13: Record<string, unknown>, unitId?: string): UnitU
  * units' GREEN covers the module). `green` maps unit id → the UC-Ds its passed GREEN
  * covers; a unit without a GREEN record is absent. Returns one message per gap.
  */
-export function ucdCoverageGaps(i13: Record<string, unknown>, green: Map<string, string[]>): string[] {
+export function ucdCoverageGaps(i13: Record<string, unknown>, green: Map<string, string[]>, selectedUnits?:readonly string[]): string[] {
   const units = i13UcdUnits(i13);
   if (!units) return [];
   // MARS-271 分级映射准入:mapping_deferred UC-D 暂缓测试映射,不构成模块收口缺口。
@@ -437,7 +458,8 @@ export function ucdCoverageGaps(i13: Record<string, unknown>, green: Map<string,
     .filter((id): id is string => typeof id === "string" && id.length > 0));
   const gaps: string[] = [];
   for (const id of i13UcdIds(i13).filter((ucd) => !deferred.has(ucd))) {
-    const owners = units[id] || [];
+    const owners = selectedUnits ? (units[id] || []).filter(unit=>selectedUnits.includes(unit)) : units[id] || [];
+    if(selectedUnits&&owners.length===0)continue;
     if (owners.length === 0) gaps.push(`${id} names no unit in ucd_units`);
     for (const unit of owners) {
       const covered = green.get(unit);

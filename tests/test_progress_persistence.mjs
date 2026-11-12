@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import K from '../harness/codex/runtime/host-kernel.cjs';
+const budget=new K.Budget({wall_time_seconds:60,max_equivalent_retries:2,max_active_units:1},Date.now()+60000);
+const p=new K.ProgressBudget(K.supervisionLimits(),budget);let writes=0,stored;
+p.onPersist=s=>{writes++;stored=s;};
+p.beginTurn('implement','code-generation');p.beginStep('read','code-generation','a'.repeat(64));const atBegin=writes;p.endStep('succeeded');assert.equal(writes,atBegin);
+for(let i=0;i<100;i++)p.persist();assert.equal(writes,atBegin);
+p.observation('read','same');assert.equal(writes,atBegin+1);p.checkpoint('evidence','b');assert.equal(writes,atBegin+2);
+const restored=new K.ProgressBudget(K.supervisionLimits(),budget);restored.restore(stored);assert.equal(restored.steps,1);assert.equal(restored.turns,1);assert.equal(restored.checkpoint('evidence','b'),false);
+p.onPersist=()=>{throw Error('disk failed');};assert.throws(()=>p.observation('read','other'),/disk failed/);p.onPersist=s=>{writes++;stored=s;};p.persist();assert.equal(stored.repeats.length,1);
+console.log('PASS no-op persistence 100 calls -> 0 writes; counters/repeats/checkpoints retained, failed writes retried');

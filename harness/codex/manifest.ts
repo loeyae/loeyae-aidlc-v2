@@ -31,6 +31,14 @@ const manifest: HarnessManifest = {
   harnessFiles: [
     { src: "skills/loeyae-aidlc/SKILL.md", dst: "SKILL.md" },
     { src: "README.md", dst: "README.md" },
+    { src: "runtime/aidlc-codex-host.mjs", dst: "runtime/aidlc-codex-host.mjs" },
+    { src: "runtime/host-kernel.cjs", dst: "runtime/host-kernel.cjs" },
+    { src: "runtime/host-model-input.mjs", dst: "runtime/host-model-input.mjs" },
+    { src: "runtime/host-progress.cjs", dst: "runtime/host-progress.cjs" },
+    { src: "runtime/native-tool-channel.mjs", dst: "runtime/native-tool-channel.mjs" },
+    { src: "runtime/host-recovery.mjs", dst: "runtime/host-recovery.mjs" },
+    { src: "runtime/host-worker-recovery.mjs", dst: "runtime/host-worker-recovery.mjs" },
+    { src: "runtime/deny-native.cjs", dst: "runtime/deny-native.cjs" },
     { src: "hooks/hooks.json", dst: "hooks/hooks.json" },
   ],
 };

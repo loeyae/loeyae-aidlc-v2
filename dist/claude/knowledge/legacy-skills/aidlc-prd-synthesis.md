@@ -1,0 +1,44 @@
+# 显式旧受管模式参考
+
+仅在用户明确选择维护旧受管流程或受控 Provider 契约时阅读；默认能力不加载此文件。以下历史规则不覆盖默认宿主协议。
+
+
+# PRD 合成能力
+
+开始时宣布："使用 aidlc-prd-synthesis 合成 PRD"。
+
+## 资源路径
+
+共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+
+读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+
+## 输入
+
+调用方必须提供：
+
+- 用户描述或 Discovery 结论；
+- 适用的已有 Inception 产物（需求、故事、模块、契约等）；
+- 规模检测信号或显式规模取值（S/M/L）；
+- context-source 检索结果（条件：显式绑定、启用且可信策略授权）。
+
+缺少可靠生成 PRD 所需的信息时返回 `NEEDS_CONTEXT`，不臆造业务规则。
+
+## 加载
+
+加载发布包中的 [stages/ideation/product-prd-generation.md](../../stages/ideation/product-prd-generation.md)。
+
+## 输出
+
+返回生成的 canonical PRD 文件路径（`docs/aidlc/ideation/prd.md`）、待确认项索引、来源索引、澄清一致性结论和业务流程图状态。编排内仅在签名 `selected_optional_stages` 包含 `prd-generation` 时写入该路径，并由调用方运行受控 `prd-completeness` Producer；本能力不生成或伪造 Evidence。独立调用只返回文档结果，不实例化 AI-DLC Stage、state 或占位 Evidence。
+
+## 禁止事项
+
+不得：
+
+- 臆造业务规则（未知项必须分配 `PQ-NNN`、标记 `[待确认: PQ-NNN]`，并登记具体问题、负责方和阻断状态）；
+- 更新项目 state 或 audit；
+- 代替用户审批或放行质量门禁；
+- 宣布 PRD 完成或阶段完成；
+- 伪造 prd-completeness evidence；
+- 执行 Inception 后续阶段。

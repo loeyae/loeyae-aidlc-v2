@@ -1,0 +1,14 @@
+{
+  "name": "design",
+  "argv": [
+    "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "--import",
+    "tsx",
+    "tests/test_design_consolidation.ts"
+  ],
+  "duration_ms": 1778.0753,
+  "exit_code": 0,
+  "error": null,
+  "signal": null,
+  "real_business_run": false
+}

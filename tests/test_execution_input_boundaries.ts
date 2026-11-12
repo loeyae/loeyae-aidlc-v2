@@ -1,0 +1,44 @@
+/** Short production Gateway identity boundary; no model, grant or business verdict. */
+import assert from 'node:assert/strict';
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {Gateway} from '../harness/codex/runtime/aidlc-codex-host.mjs';
+import {executionInputIdentity,classifyExecutionChange} from '../core/tools/aidlc-execution-inputs';
+const root=mkdtempSync(join(tmpdir(),'aidlc-it02-inputs-'));
+const put=(p:string,s:string)=>{mkdirSync(join(root,p,'..'),{recursive:true});writeFileSync(join(root,p),s);};
+try {
+  put('src/order.cjs','module.exports=1;');put('oracle.cjs','require("./src/order.cjs");');
+  execFileSync('git',['init','-q'],{cwd:root});execFileSync('git',['add','.'],{cwd:root});
+  execFileSync('git',['-c','user.name=Engineering','-c','user.email=engineering@example.invalid','commit','-qm','fixture'],{cwd:root});
+  const context:any={binding:{stage_instance:'code-generation@module:project@unit:default'},grant:{resource_limits:{wall_time_seconds:60,max_equivalent_retries:1,max_active_units:1},request_started_at:new Date().toISOString(),expires_at:new Date(Date.now()+60000).toISOString()}};
+  let environment={fixture_origin:'one'};
+  const core=async()=>({host_context:{execution_inputs:executionInputIdentity(root,environment)}});
+  const frozen={id:'oracle',input_paths:['oracle.cjs'],operation:'validation-execute',argv:[process.execPath,'oracle.cjs']};
+  const gateway=new Gateway({commands:[frozen,{...frozen,id:'alias'}]},root,context,core);
+  const action={action:'command',id:'oracle'},before=await gateway.retryKey(action);
+  put('src/order.cjs','module.exports=2;');
+  assert.notEqual(await gateway.retryKey(action),before,'Actual source changes must change command identity even when input_paths only names the frozen script');
+  const changed=await gateway.retryKey(action),snapshot=executionInputIdentity(root,environment);
+  assert.equal(await gateway.retryKey({action:'command',id:'alias'}),changed,'Frozen aliases cannot reset failures');
+  put('.aidlc/evidence/output.json','{"success":false}');put('aidlc/active/control.md','new state');
+  assert.equal(await gateway.retryKey(action),changed,'Control/evidence output cannot reset retries');
+  put('docs/aidlc/handoff.md','accepted metadata revision');
+  assert.equal(await gateway.retryKey(action),changed,'Decision metadata cannot buy command retries');
+  assert.notEqual(executionInputIdentity(root,environment).candidate_input_digest,snapshot.candidate_input_digest,'Accepted metadata requires a new final candidate');
+  put('delivery/notes.md','real ordinary delivery document');
+  assert.notEqual(await gateway.retryKey(action),changed,'Ordinary documents are conservatively real inputs');
+  const docs=await gateway.retryKey(action);environment={fixture_origin:'two'};
+  assert.notEqual(await gateway.retryKey(action),docs,'Actual declared environment changes get a new identity');
+  const env=await gateway.retryKey(action),candidate=executionInputIdentity(root,environment).candidate_input_digest;
+  execFileSync('git',['-c','user.name=Engineering','-c','user.email=engineering@example.invalid','commit','--allow-empty','-qm','same bytes'],{cwd:root});
+  assert.equal(await gateway.retryKey(action),env,'A commit alone cannot reset equivalent failures');
+  assert.notEqual(executionInputIdentity(root,environment).candidate_input_digest,candidate,'Serving candidate commit remains significant');
+  rmSync(join(root,'src/order.cjs'));assert.notEqual(await gateway.retryKey(action),env,'Deleting an actual dependency changes input identity');
+  assert.equal(executionInputIdentity(root,null).command_digest,null,'Unknown environment never fabricates an available identity');
+  const unavailable=new Gateway({commands:[frozen]},root,context,async()=>({host_context:{execution_inputs:executionInputIdentity(root,null)}}));
+  await assert.rejects(()=>unavailable.retryKey(action),/HOST_RETRY_INPUTS_UNAVAILABLE/);assert.equal(unavailable.budget.failures.size,0);
+  assert.deepEqual(['src/order.cjs','delivery/notes.md','docs/aidlc/handoff.md','.aidlc/proposals/decisions/w/d.json'].map(classifyExecutionChange),['business-source','documentation','decision-metadata','control-output']);
+  console.log('PASS short command/source/document/metadata/environment/control/commit identity boundaries');
+} finally {rmSync(root,{recursive:true,force:true});}

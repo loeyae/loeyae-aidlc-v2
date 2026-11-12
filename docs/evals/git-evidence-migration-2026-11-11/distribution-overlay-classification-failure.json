@@ -1,0 +1,22 @@
+{
+  "harnesses": {
+    "claude": 314,
+    "codebuddy": 315,
+    "codex": 320,
+    "deepseek": 312,
+    "kiro-cli": 313,
+    "kiro-crew": 313,
+    "kiro-ide": 313,
+    "opencode": 312,
+    "qoder": 314,
+    "zcode": 316
+  },
+  "files_compared": 3142,
+  "failures": [
+    "unexpected:E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\claude\\skills\\loeyae-aidlc\\SKILL.md",
+    "unexpected:E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\codebuddy\\plugins\\loeyae-aidlc\\skills\\loeyae-aidlc\\SKILL.md",
+    "unexpected:E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\qoder\\skills\\loeyae-aidlc\\SKILL.md",
+    "unexpected:E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\zcode\\plugins\\loeyae-aidlc\\skills\\loeyae-aidlc\\SKILL.md"
+  ],
+  "global_install_modified": false
+}

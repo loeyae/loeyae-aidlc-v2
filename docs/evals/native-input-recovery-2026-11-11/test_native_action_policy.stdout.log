@@ -1,0 +1,17 @@
+✔ metadata denies long validation and workflow actions before any dispatch (4.341ms)
+✔ metadata permits bounded reads, design and decision API with live Core checks (16.6378ms)
+✔ denied flags and actor spoofing cannot reach refresh or Core (0.9041ms)
+✔ configuration rejects impossible and exact-ceiling command windows before execution (6.0596ms)
+✔ one descriptor covers model and host roles without exposing host commands to the model (0.187ms)
+✔ every long model and host family fails before transport when its window is denied (0.4594ms)
+✔ actual driver renews before host full observation and again before finalization, or dispatches neither (5.6431ms)
+✔ a missing dispatcher and concurrent requests fail closed without spending equivalent retries (0.718ms)
+✔ a command whose window expires during Core authorization never spawns a child (83.1323ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 128.7619

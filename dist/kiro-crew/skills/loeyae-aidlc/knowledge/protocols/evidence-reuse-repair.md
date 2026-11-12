@@ -8,6 +8,8 @@
 
 `verify` 表示使用正常门禁验证已有证据，不表示重新执行测试。`revalidate` 表示当前证据需要进一步处理，应按其错误诊断选择恢复、补证或修复输入，不自动等同于重跑整个阶段。
 
+初步定位变更可使用 `orchestrate state changes --from <完整提交ID> --paths <JSON数组>`，无需领取或有效进度状态。Git 差异只缩小调查范围，不证明证据仍有效。局部证据核对采用相同算法的 scope-only 摘要，不读取范围外文件；此投影的全仓摘要为 null，不得作为新生产证据或最终候选身份发布。证据生产、实际质量门禁、必要环境和检查器身份验证仍保留。不得为减少重复文档而另建一份人工维护的进度报告，已有摘要与复用计划按需读取。
+
 ## Typed repair diagnostics
 
 失败 directive 返回 `repair_diagnostics`，`repair_guidance` 保留重试摘要，避免重复输出同一组诊断。每项包含原因 `code/category`、目标 `stage_instance/sensor`、可定位时的 `artifact`、原始 `message`、`action`、`next_step` 和 `requires_human_approval`。有确定修复入口时，`command` 提供建议 argv，宿主不得把任意错误日志当作可执行脚本。
@@ -22,9 +24,19 @@
 
 ## Equivalent retry identity
 
+宿主自动派发证据修复时必须读取顶层 `repair_guidance`。`action=diagnose` 停止等价刷新并保留原始失败；不能只挑 `repair_diagnostics.command` 继续执行。首次 `action=repair` 即使 `equivalent_retry_allowed=false` 也可执行一次；后续仍受原授权期限、预算和 Core 判定限制。批量修复按规范化的实际命令与失败输入指纹计数，不按第一条传感器名称计数。
+
+`input-defect` 表示 canonical 输入缺失、必要设计章节缺失、未解决占位符等真实输入问题，动作是 `repair-inputs`，不附带自动刷新命令。先修正输入，再校验；保持同一缺陷重新生产证据不能构成进展。
+
 重试指纹绑定 workflow/instance、结构化失败原因、受影响证据及原测试/I13 输入。进度日志、耗时和展示时间戳不区分阻断。相同原因和输入再次失败时返回 `diagnose`，`equivalent_retry_allowed` 保持 false；修复真实输入或出现不同失败后重新计数。
 
 只读调用不写重试日志；损坏或失效的会话不能发布。日志保存有界的失败标识与计数，不保存无界原始日志。重试日志不缓存“门禁通过”结论，也不限制修复后进行正常验证的次数。
+
+## 外置模块文档的输入归属
+
+模块 manifest 可选 `context_paths` 声明模块私有的精确 Markdown 路径，例如 `"context_paths": ["team/m06-integration.md"]`。它不用于声明源码或全局规则：拒绝通配符、目录、根文档、AGENTS/README/SKILL、隐藏目录、控制面、canonical docs/aidlc 和已声明源码根下的路径；每个路径只允许一个模块拥有。
+
+未声明文件保持保守绑定。`inputs-v2` 的模块/单元范围排除其他模块精确私有路径，自己的文档继续绑定；显式 `contract_paths`、单元 `shared_paths` 和自主依赖输入优先，项目级验证不作此排除。归属声明本身参与输入摘要，改变声明需重新校验，不追认旧证据；旧范围保持原排除语义。不得根据文件名中的模块代号自动忽略文件。跨模块消费者必须显式登记共享输入。
 
 ## Explicit semantic-only batches
 
@@ -63,3 +75,5 @@ loeyae-aidlc evidence run --stage code-generation --module <module-id> --unit <u
 独立检查器的闭合依赖声明仅支持普通静态导入。模块关键字旁带注释、带字符串绑定名的导入、再导出及动态加载均明确拒绝；不以未识别语法推断“无依赖”。需要扩展语法时，必须同步扩展依赖解析和回归覆盖后再生产证据。
 
 所有本地导入（含类型导入）均须属于显式闭包，不以标识符 `type` 推断运行时不加载模块。原生模块也采用显式 fs/path/crypto/url 清单；`node:module`、`node:vm` 等加载或求值入口不能通过别名绕开声明。
+
+功能设计完整性使用 identity_version 3：独立执行文件及七个 TypeScript 文件/固定 tsconfig 的闭合依赖集合，运行依赖为 tsx 及其真实传递依赖。Core 路由、worker 和 UI 检查器不在该执行闭包内；项目来源范围仍沿用 functional-design 阶段范围，没有缩减 UC-D、接口、数据源、错误处理检查。旧记录按其原版本核验，刷新后使用新入口。

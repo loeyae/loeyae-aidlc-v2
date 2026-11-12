@@ -1,3 +1,5 @@
+> 默认入口已调整：由宿主原生工具实施，可选 `loeyae-aidlc work` 读取 Git/选定输入；不要求 H5、claim 或逐阶段 report。见 [宿主执行协议](../core/knowledge/protocols/host-execution.md)。下文 orchestrate/autonomy 的强制规则仅用于显式选择的旧受管兼容路径。
+
 # 在 AI 工具中使用 AI-DLC
 
 本指南适用于已安装 Loeyae AI-DLC 的项目。AI 按当前工作流执行阶段；用户提供目标、回答必要问题、审阅决策和执行最终合并。阶段是否适用以当前 directive 为准。

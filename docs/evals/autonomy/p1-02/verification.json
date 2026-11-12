@@ -1,0 +1,223 @@
+{
+  "task": "P1-02",
+  "verified_at": "2026-11-08T13:37:17.870Z",
+  "kind": "engineering-verification-record",
+  "controlled_aidlc_evidence": false,
+  "source_head": "d2fd48b58c503ecd2e34342a4b7593987e3e625a",
+  "source_sha256": {
+    "core/tools/aidlc-autonomy.ts": "59574d0aa49a870ba48229cba23dce47dea06d97b114c4472e588a4c6e6cc200",
+    "core/tools/aidlc-autonomy-policy.ts": "1c5149bca3a611f4ff8a00357328ba440422d70cae9cf13868f904f76baa7775",
+    "core/tools/aidlc-orchestrate.ts": "06b754e014b7cfaaf08b71eba6d076838cb5d77aad858a869fa39632ef495728",
+    "core/knowledge/standards/common-requirement-integrity.md": "2cac4158c7c62c99c3580840e72cd58a7c11fd7e1ddf5c3cd6052c0a43128e0b",
+    "core/knowledge/protocols/common-workflow-changes.md": "c956428d97f794cceed0194a853293fabdef4b4cdb9c89d49843c4388eac9173",
+    "core/knowledge/protocols/common-session-handoff.md": "211dda9dd24193622572eb1f1c828d5ea73b2b7315f4aa4dab906b457386e422",
+    "core/skills/aidlc-handoff/SKILL.md": "df5436fa04371aba8f4eaeaf21de9bbe63a4832d0086502cbfb36630b867287d",
+    "tests/test_autonomy_policy.ts": "7c48979921b4d0417ae3fd266bfbd834079ce449f434eef6c6ce04d5d91f3b91",
+    "tests/test_autonomy_scope.ts": "2d1fc3a3f9f4f01aa1446b9a2aced5f7b9dd4a11851175a2e69aa056181bbbdc",
+    "bin/cli.ts": "8cfe3e386458019103a348d23524fd361c9cb3ac5692b97258fd3116b62d5181",
+    "package.json": "94447f62bbab45180147ee6032bcee345fcaa02bf80141cc546a439ce14e7cd7",
+    "scripts/core-test-suites.json": "db39bcb46bddde736c8379df0a5e681651d0098c36181ca2d20c9a109adf950f"
+  },
+  "commands": [
+    {
+      "command": "node node_modules/tsx/dist/cli.mjs tests/test_autonomy_policy.ts",
+      "exit_code": 0,
+      "log": "autonomy-policy.log",
+      "log_sha256": "532897053207f47ef00bd87f83483e9ac7ab283e76e7cdc3a1916ebe53253ace",
+      "log_modified_at": "2026-11-08T13:29:41.040Z"
+    },
+    {
+      "command": "node node_modules/tsx/dist/cli.mjs tests/test_autonomy_scope.ts",
+      "exit_code": 0,
+      "log": "autonomy-scope.log",
+      "log_sha256": "5fead607b32796b598f5b86e887799a67e9cc217dc7e7b75774dfb1cf02843b8",
+      "log_modified_at": "2026-11-08T13:24:42.808Z"
+    },
+    {
+      "command": "npm run typecheck",
+      "exit_code": 0,
+      "log": "typecheck.log",
+      "log_sha256": "adad96c92290fe328164626aef9282c44efe84ce57ba0da884d9c0008912ad0d",
+      "log_modified_at": "2026-11-08T13:28:57.378Z"
+    },
+    {
+      "command": "node node_modules/tsx/dist/cli.mjs tests/test_stage_handoff_prompts.ts",
+      "exit_code": 0,
+      "log": "handoff.log",
+      "log_sha256": "e7b4697d063452a518f6a6ca06383c88760c1fd5942d681a2b39a6f752d369e9",
+      "log_modified_at": "2026-11-08T13:24:40.472Z"
+    },
+    {
+      "command": "node node_modules/tsx/dist/cli.mjs tests/test_delivery_summary.ts",
+      "exit_code": 0,
+      "log": "delivery-summary.log",
+      "log_sha256": "c3e79a59641f03e111584828a3a8443c5337688d10f58b9ac4a5cfddbeb16a98",
+      "log_modified_at": "2026-11-08T13:24:31.785Z"
+    },
+    {
+      "command": "node node_modules/tsx/dist/cli.mjs tests/test_mars243_sessions.ts",
+      "exit_code": 0,
+      "log": "sessions.log",
+      "log_sha256": "488297eeff2dd9966031002464b0c922cecea067a322bcf933f3b686038af465",
+      "log_modified_at": "2026-11-08T13:27:20.328Z"
+    },
+    {
+      "command": "node node_modules/tsx/dist/cli.mjs tests/test_mars160_execution_policy.ts",
+      "exit_code": 0,
+      "log": "execution-policy.log",
+      "log_sha256": "38277cfd1885bbe6acbdfc03839bf5d2e4de25c213163813944a3ab6c7863986",
+      "log_modified_at": "2026-11-08T13:27:11.551Z"
+    },
+    {
+      "command": "node node_modules/tsx/dist/cli.mjs tests/test_distribution_parity.ts",
+      "exit_code": 0,
+      "log": "distribution-parity.log",
+      "log_sha256": "a9b527b3ddda79afcc0259094e8d6dec7bb835d799bd98f9d0295444ab3698cc",
+      "log_modified_at": "2026-11-08T13:35:52.366Z"
+    }
+  ],
+  "harness_builds": [
+    {
+      "harness": "claude",
+      "attempt": 1,
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-02/build-claude-attempt-1.log",
+      "log_sha256": "74bd68fa772ed288db2225a0a743dec7e5fac622d3444ec6e3583a7e451f0fc6"
+    },
+    {
+      "harness": "codebuddy",
+      "attempt": 1,
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-02/build-codebuddy-attempt-1.log",
+      "log_sha256": "e261b9fad7a2e14e3b5cf2970c81c8276d32eec0855f2cd62d58b6751c02c725"
+    },
+    {
+      "harness": "codex",
+      "attempt": 1,
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-02/build-codex-attempt-1.log",
+      "log_sha256": "9d4a9d41220a8980369ddb3790ef0ea1429b1c3d7e5cb8c8ca8dcb54f3ced14c"
+    },
+    {
+      "harness": "deepseek",
+      "attempt": 1,
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-02/build-deepseek-attempt-1.log",
+      "log_sha256": "b871e78a5aa25d23799b2e67c9778d51b4e5dd369e460ff00b5a6077ca9a7d8c"
+    },
+    {
+      "harness": "kiro-cli",
+      "attempt": 1,
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-02/build-kiro-cli-attempt-1.log",
+      "log_sha256": "ec7e42f91d480db31e3e3cc0b1cc77abdf827b1a00c2de24378c8f3bc4a2fe77"
+    },
+    {
+      "harness": "kiro-crew",
+      "attempt": 1,
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-02/build-kiro-crew-attempt-1.log",
+      "log_sha256": "8ee6fb9cdb9c8870b5f06fcdc6e211aebc03cedef6a161d28af8fa3084fb258d"
+    },
+    {
+      "harness": "kiro-ide",
+      "attempt": 1,
+      "exit_code": 1,
+      "log": "docs/evals/autonomy/p1-02/build-kiro-ide-attempt-1.log",
+      "log_sha256": "0c919a48e6a03907a88b36077dc4c1a35010ff426879459ae017561de03fc684"
+    },
+    {
+      "harness": "kiro-ide",
+      "attempt": 2,
+      "exit_code": 1,
+      "log": "docs/evals/autonomy/p1-02/build-kiro-ide-attempt-2.log",
+      "log_sha256": "0c919a48e6a03907a88b36077dc4c1a35010ff426879459ae017561de03fc684"
+    },
+    {
+      "harness": "kiro-ide",
+      "attempt": 3,
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-02/build-kiro-ide-attempt-3.log",
+      "log_sha256": "08e89f552c5dc601e64876cb66b1f50b2e9142cd5abb3756fdd2324145ede43b"
+    },
+    {
+      "harness": "opencode",
+      "attempt": 1,
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-02/build-opencode-attempt-1.log",
+      "log_sha256": "b3a13807853eb22624a310508156cc2c0a0d90aedf7ef9342f185853066c499c"
+    },
+    {
+      "harness": "qoder",
+      "attempt": 1,
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-02/build-qoder-attempt-1.log",
+      "log_sha256": "0499d761ada2a084a0a20b9ee3053cd5fb7df5776c06f9a29b6d496194473b8d"
+    },
+    {
+      "harness": "zcode",
+      "attempt": 1,
+      "exit_code": 1,
+      "log": "docs/evals/autonomy/p1-02/build-zcode-attempt-1.log",
+      "log_sha256": "251b478d83002f69ebbf83072393af5fb71ae4f1238e205435af7234b7811dd8"
+    },
+    {
+      "harness": "zcode",
+      "attempt": 2,
+      "exit_code": 1,
+      "log": "docs/evals/autonomy/p1-02/build-zcode-attempt-2.log",
+      "log_sha256": "251b478d83002f69ebbf83072393af5fb71ae4f1238e205435af7234b7811dd8"
+    },
+    {
+      "harness": "zcode",
+      "attempt": 3,
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-02/build-zcode-attempt-3.log",
+      "log_sha256": "eab2fa67c5d5bfb0618c767b2d3034df6ea96f31086167b4d7fa558002d2c63a"
+    }
+  ],
+  "failed_whole_builds": [
+    {
+      "command": "node node_modules/tsx/dist/cli.mjs scripts/build.ts --all",
+      "exit_code": 1,
+      "log": "build-all-attempt-01.log",
+      "sha256": "c66e1a49ddf14058d32ed87e12846bd891d8678557136c0eb58f85f3243377ce"
+    },
+    {
+      "command": "node node_modules/tsx/dist/cli.mjs scripts/build.ts --all",
+      "exit_code": 1,
+      "log": "build-all-attempt-02.log",
+      "sha256": "2f9f53c09efe890b65932bc3448833bfdde143d0d76cd3714db0af4ff1e33cc1"
+    }
+  ],
+  "final_rule_sync": {
+    "source": "core/knowledge/standards/common-requirement-integrity.md",
+    "sha256": "2cac4158c7c62c99c3580840e72cd58a7c11fd7e1ddf5c3cd6052c0a43128e0b",
+    "targets": [
+      "dist/claude/knowledge/standards/common-requirement-integrity.md",
+      "dist/codebuddy/plugins/loeyae-aidlc/knowledge/standards/common-requirement-integrity.md",
+      "dist/codex/.agents/skills/loeyae-aidlc/knowledge/standards/common-requirement-integrity.md",
+      "dist/deepseek/knowledge/standards/common-requirement-integrity.md",
+      "dist/kiro-cli/knowledge/standards/common-requirement-integrity.md",
+      "dist/kiro-crew/skills/loeyae-aidlc/knowledge/standards/common-requirement-integrity.md",
+      "dist/kiro-ide/knowledge/standards/common-requirement-integrity.md",
+      "dist/opencode/.opencode/knowledge/standards/common-requirement-integrity.md",
+      "dist/qoder/knowledge/standards/common-requirement-integrity.md",
+      "dist/zcode/plugins/loeyae-aidlc/knowledge/standards/common-requirement-integrity.md"
+    ]
+  },
+  "unrelated_workflow_sha256": {
+    "aidlc/active/aidlc-state.md": "5e08e34d2e434edf0ab7d2667377080dc0caf06dd8dcfa178b877211c5c93d0f",
+    "aidlc/active/audit.md": "1fa99dba9594b7ee1e2e7ad0d8e72c9b81b87e74f9577879795937b0af998686"
+  },
+  "not_evaluated": [
+    "full-npm-test",
+    "business-pilots",
+    "browser-ui",
+    "host-human-source-authentication",
+    "execution-grant",
+    "autonomous-admission",
+    "continuous-host-driver",
+    "controlled-decision-evidence-and-final-candidate"
+  ]
+}

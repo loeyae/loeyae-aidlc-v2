@@ -1,0 +1,14 @@
+{
+  "name": "mermaid",
+  "argv": [
+    "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "--import",
+    "tsx",
+    "tests/test_mermaid_static_pass.ts"
+  ],
+  "duration_ms": 6765.791199999992,
+  "exit_code": 0,
+  "error": null,
+  "signal": null,
+  "real_business_run": false
+}

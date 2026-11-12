@@ -1,39 +1,19 @@
 ---
 name: aidlc-systematic-debugging
-description: "基于可复现失败和原始证据执行系统化根因分析并给出最小修复与验证结果；不负责故障路由和阶段决策。"
+description: "基于实际错误和可检验假设定位问题，进行最小修复并验证。"
 triggers: 系统化调试, 根因分析, 故障定位, 问题排查, debugging, reproducible failure
 ---
 
-# 系统化调试能力
+# systematic-debugging
 
-开始时宣布："使用 aidlc-systematic-debugging 执行系统化调试"。
+先读取现有错误、代码和必要环境信息；缺稳定复现时主动收集日志或构造最小复现，这正是调试工作，不是开始调查的前置许可。明显语法/路径错误可直接定位修复；复杂、反复或高风险问题逐项检验假设。
 
-## 资源路径
+保留原失败输出，说明根因的证据与不确定性。修复后运行能检验该问题的短测试，再按影响补关联检查。普通修复只需对话说明，重大事件或用户要求时才写专门报告。
 
-共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+相同失败且没有新信息时，不继续原样重跑；缩小复现、改变诊断或说明真实外部阻塞。不能为通过而删除必要断言；其他独立工作继续。
 
-读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
 
-## 输入
+## 兼容参考
 
-输入项和证据不足时的处理以发布包中的 [knowledge/standards/common-systematic-debugging.md](../../knowledge/standards/common-systematic-debugging.md) 的"输入要求"为准，本文件不复制该清单。无法稳定复现或缺少必要证据时返回 `NEEDS_CONTEXT`，不猜测根因。
-
-## 加载
-
-加载发布包中的 [knowledge/standards/common-systematic-debugging.md](../../knowledge/standards/common-systematic-debugging.md)；实施修复时按该规则加载 [stages/construction/construction-tdd.md](../../stages/construction/construction-tdd.md)。
-
-## 输出
-
-返回状态（`DONE`、`NEEDS_CONTEXT` 或 `BLOCKED`）、假设—验证记录、根因证据或明确未决结论、最小修复建议、修复后的验证结果，或继续处理所需上下文。
-
-## 禁止事项
-
-不得：
-
-- 绕过三次失败停止条件；
-- 决定是否回退 Inception 或进入 CR；
-- 更新项目 state 或 audit；
-- 代替用户审批；
-- 放行质量门禁；
-- 宣布阶段完成；
-- 伪造 evidence。
+仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-systematic-debugging.md)，默认不加载。

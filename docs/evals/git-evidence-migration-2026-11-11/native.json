@@ -1,0 +1,12 @@
+{
+  "name": "native",
+  "argv": [
+    "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "tests/test_native_tool_channel.mjs"
+  ],
+  "duration_ms": 91.70390000000043,
+  "exit_code": 0,
+  "error": null,
+  "signal": null,
+  "real_business_run": false
+}

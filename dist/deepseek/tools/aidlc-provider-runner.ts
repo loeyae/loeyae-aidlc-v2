@@ -801,7 +801,7 @@ export interface ControlledProviderRunResult {
 export async function runControlledProvider(project: string, options: ControlledProviderRunOptions): Promise<ControlledProviderRunResult> {
   const projectRoot = realpathSync(resolve(project));
   const plan = typeof options.plan === "string" ? loadFrozenProviderPlan(projectRoot, options.plan) : options.plan;
-  const session = captureScopeSession(projectRoot, plan.scope);
+  const session = captureScopeSession(projectRoot, plan.scope, "provider-execute");
   if (recomputePlanId(plan) !== plan.plan_id || recomputePlanDigest(plan) !== plan.plan_digest) fail("PROVIDER_PLAN_STALE", "Provider Plan identity or digest is invalid");
   if (options.signal?.aborted) fail("PROVIDER_CANCELLED", "Provider invocation was cancelled before start");
   const adapter = options.sandbox ?? new BubblewrapRestrictedSandbox();

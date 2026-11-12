@@ -1,0 +1,45 @@
+✅ Compiled 38 stages → E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2\core\tools\data\stage-graph.json
+🏗️  Loeyae AI-DLC Builder
+   Harnesses: claude, codebuddy, codex, deepseek, kiro-cli, kiro-crew, kiro-ide, opencode, qoder, zcode
+
+🔨 Building harness: claude
+   Output: E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2\dist\claude
+   ✅ Done: 8 core dirs, 4 harness files
+
+🔨 Building harness: codebuddy
+   Output: E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2\dist\codebuddy
+   ✅ Done: 8 core dirs, 5 harness files
+
+🔨 Building harness: codex
+   Output: E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2\dist\codex
+   ✅ Done: 8 core dirs, 9 harness files
+
+🔨 Building harness: deepseek
+   Output: E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2\dist\deepseek
+   ✅ Done: 8 core dirs, 2 harness files
+
+🔨 Building harness: kiro-cli
+   Output: E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2\dist\kiro-cli
+   ✅ Done: 9 core dirs, 2 harness files
+
+🔨 Building harness: kiro-crew
+   Output: E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2\dist\kiro-crew
+   ✅ Done: 8 core dirs, 3 harness files
+
+🔨 Building harness: kiro-ide
+   Output: E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2\dist\kiro-ide
+   ✅ Done: 9 core dirs, 2 harness files
+
+🔨 Building harness: opencode
+   Output: E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2\dist\opencode
+   ✅ Done: 8 core dirs, 2 harness files
+
+🔨 Building harness: qoder
+   Output: E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2\dist\qoder
+   ✅ Done: 8 core dirs, 4 harness files
+
+🔨 Building harness: zcode
+   Output: E:\Work\src\loeyae\loeyae-framework\loeyae-aidlc-v2\dist\zcode
+   ✅ Done: 8 core dirs, 6 harness files
+
+✨ Build complete.

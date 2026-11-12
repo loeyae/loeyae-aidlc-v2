@@ -1,0 +1,431 @@
+[
+  {
+    "name": "stage-policy",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_mars252_policy.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:51:44.677Z",
+    "finished_at": "2026-11-09T01:51:45.532Z",
+    "log": "docs/evals/autonomy/p1-09/stage-policy-final-2.log"
+  },
+  {
+    "name": "sensor-input-scope",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_sensor_input_scope.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:51:44.665Z",
+    "finished_at": "2026-11-09T01:51:49.934Z",
+    "log": "docs/evals/autonomy/p1-09/sensor-input-scope-final-2.log"
+  },
+  {
+    "name": "rule-load-plan",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_mars161_execution_profile_phase4.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:51:49.935Z",
+    "finished_at": "2026-11-09T01:52:05.350Z",
+    "log": "docs/evals/autonomy/p1-09/rule-load-plan-final-2.log"
+  },
+  {
+    "name": "evidence-reuse",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_mars161_execution_profile_phase5.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:52:05.351Z",
+    "finished_at": "2026-11-09T01:52:15.587Z",
+    "log": "docs/evals/autonomy/p1-09/evidence-reuse-final-2.log"
+  },
+  {
+    "name": "autonomous-rules",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_autonomous_rules.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:51:45.534Z",
+    "finished_at": "2026-11-09T01:52:15.726Z",
+    "log": "docs/evals/autonomy/p1-09/autonomous-rules-final-2.log"
+  },
+  {
+    "name": "legacy-stop",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_mars243_stop.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:52:15.726Z",
+    "finished_at": "2026-11-09T01:52:17.848Z",
+    "log": "docs/evals/autonomy/p1-09/legacy-stop-final-2.log"
+  },
+  {
+    "name": "legacy-report",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_mars243_report.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:52:15.588Z",
+    "finished_at": "2026-11-09T01:52:17.869Z",
+    "log": "docs/evals/autonomy/p1-09/legacy-report-final-2.log"
+  },
+  {
+    "name": "operations-split",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_mars109_operations_split.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:52:17.870Z",
+    "finished_at": "2026-11-09T01:52:24.034Z",
+    "log": "docs/evals/autonomy/p1-09/operations-split-final-2.log"
+  },
+  {
+    "name": "batch-result",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_batch_result.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:52:24.034Z",
+    "finished_at": "2026-11-09T01:52:43.149Z",
+    "log": "docs/evals/autonomy/p1-09/batch-result-final-2.log"
+  },
+  {
+    "name": "isolated-policy",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_mars251_policy.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:51:44.672Z",
+    "finished_at": "2026-11-09T01:53:31.222Z",
+    "log": "docs/evals/autonomy/p1-09/isolated-policy-final-2.log"
+  },
+  {
+    "name": "approval-policy",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_mars250_policy.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:52:17.848Z",
+    "finished_at": "2026-11-09T01:53:55.637Z",
+    "log": "docs/evals/autonomy/p1-09/approval-policy-final-2.log"
+  },
+  {
+    "name": "observations",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_observations.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:53:31.223Z",
+    "finished_at": "2026-11-09T01:54:19.856Z",
+    "log": "docs/evals/autonomy/p1-09/observations-final-2.log"
+  },
+  {
+    "name": "ui-observations",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_observation_ui.ts"
+    ],
+    "exit_code": 1,
+    "signal": null,
+    "started_at": "2026-11-09T01:54:19.856Z",
+    "finished_at": "2026-11-09T01:54:52.584Z",
+    "log": "docs/evals/autonomy/p1-09/ui-observations-final-2.log"
+  },
+  {
+    "name": "native-host",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_native_host.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:54:52.584Z",
+    "finished_at": "2026-11-09T01:55:09.329Z",
+    "log": "docs/evals/autonomy/p1-09/native-host-final-2.log"
+  },
+  {
+    "name": "native-driver",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_native_host_driver.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:55:09.330Z",
+    "finished_at": "2026-11-09T01:55:09.640Z",
+    "log": "docs/evals/autonomy/p1-09/native-driver-final-2.log"
+  },
+  {
+    "name": "runtime-observations",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_runtime_observations.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:53:55.638Z",
+    "finished_at": "2026-11-09T01:55:26.952Z",
+    "log": "docs/evals/autonomy/p1-09/runtime-observations-final-2.log"
+  },
+  {
+    "name": "batch-convergence",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_batch_convergence.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:52:43.149Z",
+    "finished_at": "2026-11-09T01:57:13.903Z",
+    "log": "docs/evals/autonomy/p1-09/batch-convergence-final-2.log"
+  },
+  {
+    "name": "dependencies",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_autonomy_dependencies.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:55:09.641Z",
+    "finished_at": "2026-11-09T01:57:34.353Z",
+    "log": "docs/evals/autonomy/p1-09/dependencies-final-2.log"
+  },
+  {
+    "name": "admission-route",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_autonomous_admission_route.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:57:34.354Z",
+    "finished_at": "2026-11-09T01:57:37.444Z",
+    "log": "docs/evals/autonomy/p1-09/admission-route-final-2.log"
+  },
+  {
+    "name": "dependency-preflight",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_autonomous_dependency_preflight.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:57:37.444Z",
+    "finished_at": "2026-11-09T01:57:40.255Z",
+    "log": "docs/evals/autonomy/p1-09/dependency-preflight-final-2.log"
+  },
+  {
+    "name": "boundaries",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_autonomy_dependency_boundaries.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:55:26.968Z",
+    "finished_at": "2026-11-09T01:57:45.011Z",
+    "log": "docs/evals/autonomy/p1-09/boundaries-final-2.log"
+  },
+  {
+    "name": "autonomy-scope",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_autonomy_scope.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:57:40.256Z",
+    "finished_at": "2026-11-09T01:57:59.341Z",
+    "log": "docs/evals/autonomy/p1-09/autonomy-scope-final-2.log"
+  },
+  {
+    "name": "autonomy-policy",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_autonomy_policy.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:57:45.012Z",
+    "finished_at": "2026-11-09T01:58:23.905Z",
+    "log": "docs/evals/autonomy/p1-09/autonomy-policy-final-2.log"
+  },
+  {
+    "name": "sessions",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_mars243_sessions.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:58:23.905Z",
+    "finished_at": "2026-11-09T01:58:33.778Z",
+    "log": "docs/evals/autonomy/p1-09/sessions-final-2.log"
+  },
+  {
+    "name": "layout",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_mars243_layout.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:58:33.779Z",
+    "finished_at": "2026-11-09T01:58:41.542Z",
+    "log": "docs/evals/autonomy/p1-09/layout-final-2.log"
+  },
+  {
+    "name": "handoff",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_stage_handoff_prompts.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:58:41.543Z",
+    "finished_at": "2026-11-09T01:58:58.419Z",
+    "log": "docs/evals/autonomy/p1-09/handoff-final-2.log"
+  },
+  {
+    "name": "delivery-summary",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_delivery_summary.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:58:58.420Z",
+    "finished_at": "2026-11-09T01:59:06.454Z",
+    "log": "docs/evals/autonomy/p1-09/delivery-summary-final-2.log"
+  },
+  {
+    "name": "execution-grant",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_execution_grant.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:57:59.342Z",
+    "finished_at": "2026-11-09T01:59:19.768Z",
+    "log": "docs/evals/autonomy/p1-09/execution-grant-final-2.log"
+  },
+  {
+    "name": "execution-policy",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_mars160_execution_policy.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:59:19.768Z",
+    "finished_at": "2026-11-09T01:59:20.523Z",
+    "log": "docs/evals/autonomy/p1-09/execution-policy-final-2.log"
+  },
+  {
+    "name": "provider-runner",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_provider_runner_gate.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:59:06.455Z",
+    "finished_at": "2026-11-09T01:59:25.922Z",
+    "log": "docs/evals/autonomy/p1-09/provider-runner-final-2.log"
+  },
+  {
+    "name": "typecheck",
+    "command": [
+      "node",
+      "node_modules/typescript/bin/tsc",
+      "--noEmit"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:59:25.922Z",
+    "finished_at": "2026-11-09T01:59:30.365Z",
+    "log": "docs/evals/autonomy/p1-09/typecheck-final-2.log"
+  },
+  {
+    "name": "tdd-gates",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_construction_tdd_gates.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:59:20.524Z",
+    "finished_at": "2026-11-09T01:59:48.849Z",
+    "log": "docs/evals/autonomy/p1-09/tdd-gates-final-2.log"
+  },
+  {
+    "name": "admission",
+    "command": [
+      "node",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_autonomous_admission.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T01:57:13.904Z",
+    "finished_at": "2026-11-09T01:59:54.993Z",
+    "log": "docs/evals/autonomy/p1-09/admission-final-2.log"
+  }
+]

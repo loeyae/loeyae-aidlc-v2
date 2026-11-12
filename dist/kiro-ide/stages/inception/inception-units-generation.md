@@ -329,10 +329,10 @@ condition: has_unit_generation_needs
 **执行步骤**：
 
 1. **遍历变更意图条目**：扫描以下产物中所有 `[意图:删除]`、`[意图:局部重构]`、`[意图:收敛]`、`[意图:迁出]`、`[意图:废弃]` 标记的条目：
-   - `components.md`
-   - `component-methods.md`
-   - `component-dependency.md`
-   - `application-services.md`
+   - `application-design.md#组件列表`
+   - `application-design.md#组件方法`
+   - `application-design.md#组件依赖`
+   - `application-design.md#应用服务`
    - `frontend-components.md`（如存在）
    - `frontend-routes.md`（如存在）
 
@@ -463,3 +463,9 @@ condition: has_unit_generation_needs
   - 存在 `structural-invariants.json` 时，单元产物（`unit-of-work*.md` 中的 `[实体:X]` 标记与 ``sql` 块）不得影子化唯一真源、不得新建或写入已声明收敛/废弃/迁出的对象；启用 `persistence.mode: strict` 时每个新实体都必须被授权
   - 违例清单见 `.aidlc/reports/units-generation/{module-id}/structural-invariants.blocked.json`，修正单元划分或补充设计声明（需重新审批应用设计）后重跑，不得绕过
   - 无清单时 sensor 记为 `not_applicable`，不阻断
+
+## 显式自主批次的单元契约（P1-05）
+
+仅在显式采用 aidlc.autonomy/v1 时，复杂批次的 unit-manifest 条目填写 autonomy_version="1"，完整定义绑定 UnitRef 摘要。将 unit-extension 与 capability records 放入本模块 application-design/unit-of-work.md 的唯一 aidlc-autonomy fence；typed dependency 放入 unit-of-work-dependency.md。冻结前明确行为/AC/UI Owner、私有与共享写范围、共享 Owner/串行策略、能力实际声明文件版本及消费检查点。字段契约见仓库 docs/aidlc-autonomous-contracts-v1.md 第 13 节，不将文档中的 ready 声明当成证据。
+
+读取范围 evidence_inputs 与写权限 write_scope 分别校验；模块内缺少完整输入声明则保留模块证据范围和串行执行。consume 复用固定版本和真实证据，verify 绑定实际检查 ID，两者均不实施写入；有新实现则在交接前改成 implement 并重新冻结范围。内部未实现提供者可以进入计划，但必须能实际执行其生产阶段，消费时再核验。runtime/external 未观测保持 unverified；同阶段依赖环拒绝，后置联调环不得提前解锁。不要为维持进度伪造 Native 完成、跳过 I13 或缩小验收分母。

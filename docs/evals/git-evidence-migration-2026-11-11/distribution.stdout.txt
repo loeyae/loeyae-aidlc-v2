@@ -1,0 +1,4 @@
+PASS Codex shipped protocol and runtime exports match the selected mode contract
+PASS shipped autonomous preview and rule plan preserve source semantics without mutation
+PASS shipped unadopted routes have no autonomous fields or new authority requirements
+Autonomous distribution: 3 scenarios passed; actual shipped Codex CLI, no native model run

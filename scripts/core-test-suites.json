@@ -1,6 +1,187 @@
 [
-  ["tsx", "tests/test_historical_baseline_omission.ts"],
-  ["node", "tests/test_provider_integration_plan.mjs"],
+  ["tsx", "tests/test_host_execution.ts"],
+  ["tsx", "tests/test_host_execution_distribution.ts"],
+  ["tsx", "tests/test_host_execution_install.ts"],
+  ["tsx", "tests/test_worker_recovery.ts"],
+  ["tsx", "tests/test_recovery_worker_process.ts"],
+  ["tsx", "tests/test_run_recovery.ts"],
+  ["tsx", "tests/test_recovery_host_process.ts"],
+  ["tsx", "tests/test_recovery_faults.ts"],
+  ["node", "tests/test_recovery_gateway.mjs"],
+  ["tsx", "tests/test_recovery_parent_cancel.ts"],
+  ["tsx", "tests/test_recovery_startup_cleanup.ts"],
+  ["tsx", "tests/test_autonomy_run.ts"],
+  ["node", "tests/test_native_refresh_tail.mjs"],
+  ["tsx", "tests/test_evidence_refresh_progress.ts"],
+  ["tsx", "tests/test_native_refresh_review.ts"],
+  ["tsx", "tests/test_run_scoped_capabilities.ts"],
+  ["node", "tests/test_admission_refresh_cost.mjs"],
+  [
+    "tsx",
+    "tests/test_attempt_repair_native.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_attempt_repair.ts"
+  ],
+  [
+    "node",
+    "--test",
+    "tests/test_attempt_repair_host.mjs"
+  ],
+  [
+    "node",
+    "--import",
+    "tsx",
+    "--test",
+    "tests/test_attempt_repair_contract.mjs"
+  ],
+  [
+    "tsx",
+    "tests/test_integration_review_entry.ts"
+  ],
+  [
+    "node",
+    "--test",
+    "tests/test_integration_review_gate.mjs"
+  ],
+  [
+    "node",
+    "--test",
+    "tests/test_native_action_policy.mjs"
+  ],
+  [
+    "tsx",
+    "tests/test_autonomous_rules.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_autonomous_distribution.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_batch_result.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_batch_convergence.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_observations.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_runtime_observations.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_observation_ui.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_autonomy_scope.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_autonomy_policy.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_execution_grant.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_autonomous_admission.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_autonomous_admission_route.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_autonomous_dependency_preflight.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_autonomy_dependencies.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_autonomy_dependency_boundaries.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_native_host.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_native_host_driver.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_native_host_readiness.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_native_host_completion.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_native_host_core_convergence.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_native_host_pre_c8.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_native_host_phase_transport.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_native_host_admission_barriers.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_native_host_delegated_scope.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_native_host_delegated_convergence.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_native_host_retries.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_decision_write_contract.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_native_host_window.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_native_host_lifecycle.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_operator_worker.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_operator_prestart.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_historical_baseline_omission.ts"
+  ],
+  [
+    "node",
+    "tests/test_provider_integration_plan.mjs"
+  ],
   [
     "tsx",
     "tests/test_delivery_summary.ts"

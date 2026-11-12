@@ -1,0 +1,76 @@
+{
+  "status": "passed",
+  "module_id": "project",
+  "current_stage": "code-review",
+  "unit_scope": {
+    "unit_id": "default",
+    "tests_layer_reqs": [
+      "REQ-001"
+    ],
+    "code_refs_layer_reqs": [
+      "REQ-001"
+    ],
+    "code_refs_source": "req_refs"
+  },
+  "matrix_rows": 1,
+  "complete_rows": 0,
+  "broken_rows": [],
+  "missing_track": [
+    "REQ-001"
+  ],
+  "prd_fr_total": 0,
+  "uncovered_fr": [],
+  "clarification_cl_total": 0,
+  "uncovered_cl": [],
+  "cumulative_status": "not_applicable(无 PRD/澄清产物)",
+  "consumed_contracts": [],
+  "uncovered_contracts": [],
+  "contract_status": "not_applicable(无跨 module 契约消费)",
+  "derived_children": 3,
+  "derived_gaps": [],
+  "migration_status": "MIGRATION_REQUIRED",
+  "matrix": [
+    {
+      "req": "REQ-001",
+      "tracks": [],
+      "coverage_status": "MIGRATION_REQUIRED"
+    }
+  ],
+  "inputs": {
+    "digest": "40f49f922bb89eebb7e99dbd712a397e1789fa725e0d89726efb71fc64fb7088",
+    "artifacts": [
+      "src/orders.cjs",
+      ".aidlc/evidence/test-case-derivation/project/test-case-derivation.json",
+      ".aidlc/evidence/code-generation/project/default/green-test-evidence.json"
+    ]
+  },
+  "workflow_id": "9145b784-bc71-4d7d-bf82-8d19f1f7b281",
+  "stage_instance": "code-review@module:project@unit:default",
+  "unit_id": "default",
+  "evidence_version": "1",
+  "timestamp": "2026-11-10T16:58:59.104Z",
+  "producer": {
+    "name": "loeyae-aidlc-evidence",
+    "mode": "controlled",
+    "workflow_id": "9145b784-bc71-4d7d-bf82-8d19f1f7b281",
+    "execution_id": "6ae45d1c-afe7-44e9-9909-6ddd73b4ce0a"
+  },
+  "source_revision": {
+    "commit": "688628e7ff68cb5d129e4981a5facedb33d3de95",
+    "dirty": true,
+    "worktree_digest": "0f1c905f74831a65014c08fd52643ef0c6687f4f629873234f56d65fce44ed2e",
+    "scope": "inputs-v2:module:project:unit:default:autonomy-v1",
+    "scope_digest": "6543cb36bfc2fded65254c250efab957722e41f22f8e02b0d157d11d0b9da1e3"
+  },
+  "checker": {
+    "id": "builtin:traceability-matrix",
+    "sensor": "traceability-matrix",
+    "argv_digest": "c87ddc12584bfb096b82eb400f33ffebf22ad4be59dbc69a399da7091cbad301",
+    "command_version": 2,
+    "identity_version": 1,
+    "implementation_digest": "a493f597301fade5ca7000bdda09d9e3b5e5cd9a10667e87e46c92a6d121b215",
+    "exit_code": 0,
+    "status": "passed",
+    "duration_ms": 593
+  }
+}

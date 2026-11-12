@@ -1,0 +1,64 @@
+{
+  "phase": "red",
+  "finished_at": "2026-11-12T06:53:06.068Z",
+  "records": [
+    {
+      "name": "orders",
+      "commit": "231392b35d62609c8bb3ea2eddc803bbc9e0b518",
+      "commands": [
+        {
+          "args": [
+            "tests/behavior.cjs"
+          ],
+          "started_at": "2026-11-12T06:53:04.821Z",
+          "finished_at": "2026-11-12T06:53:04.879Z",
+          "duration_ms": 58,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "Error: Not implemented\n    at exportOrders (E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-orders-20261112\\src\\orders.cjs:2:9)\n    at E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-orders-20261112\\tests\\behavior.cjs:7:26\n    at Object.<anonymous> (E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-orders-20261112\\tests\\behavior.cjs:25:3)\n    at Module._compile (node:internal/modules/cjs/loader:1929:14)\n    at Object..js (node:internal/modules/cjs/loader:2060:10)\n    at Module.load (node:internal/modules/cjs/loader:1651:32)\n    at Module._load (node:internal/modules/cjs/loader:1443:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47\n"
+        },
+        {
+          "args": [
+            "pilot/oracle.cjs"
+          ],
+          "started_at": "2026-11-12T06:53:04.970Z",
+          "finished_at": "2026-11-12T06:53:05.023Z",
+          "duration_ms": 53,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "Error: Not implemented\n    at exportOrders (E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-orders-20261112\\src\\orders.cjs:2:9)\n    at exports.check (E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-orders-20261112\\pilot\\oracle.cjs:2:243)\n    at Object.<anonymous> (E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-orders-20261112\\pilot\\oracle.cjs:7:34)\n    at Module._compile (node:internal/modules/cjs/loader:1929:14)\n    at Object..js (node:internal/modules/cjs/loader:2060:10)\n    at Module.load (node:internal/modules/cjs/loader:1651:32)\n    at Module._load (node:internal/modules/cjs/loader:1443:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47\n"
+        }
+      ],
+      "service_closed": true
+    },
+    {
+      "name": "publish",
+      "commit": "dd5f7b8c0f6f436c4ee771e09a92d0d00ac60914",
+      "commands": [
+        {
+          "args": [
+            "tests/behavior.cjs"
+          ],
+          "started_at": "2026-11-12T06:53:05.826Z",
+          "finished_at": "2026-11-12T06:53:05.881Z",
+          "duration_ms": 55,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "node:assert:152\r\n  throw new AssertionError(obj);\r\n  ^\r\n\r\nAssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\r\n+ actual - expected\r\n\r\n  {\r\n    body: {\r\n+     error: 'not-implemented'\r\n-     error: 'not-ready'\r\n    },\r\n+   status: 501\r\n-   status: 400\r\n  }\r\n\r\n    at Object.<anonymous> (E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-publish-20261112\\tests\\behavior.cjs:3:8)\r\n    at Module._compile (node:internal/modules/cjs/loader:1929:14)\r\n    at Object..js (node:internal/modules/cjs/loader:2060:10)\r\n    at Module.load (node:internal/modules/cjs/loader:1651:32)\r\n    at Module._load (node:internal/modules/cjs/loader:1443:12)\r\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\r\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\r\n    at node:internal/main/run_main_module:33:47 {\r\n  generatedMessage: true,\r\n  code: 'ERR_ASSERTION',\r\n  actual: { status: 501, body: { error: 'not-implemented' } },\r\n  expected: { status: 400, body: { error: 'not-ready' } },\r\n  operator: 'deepStrictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.22.1\r\n"
+        },
+        {
+          "args": [
+            "pilot/oracle.cjs"
+          ],
+          "started_at": "2026-11-12T06:53:05.965Z",
+          "finished_at": "2026-11-12T06:53:06.063Z",
+          "duration_ms": 98,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n501 !== 400\n\n    at exports.check (E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-publish-20261112\\pilot\\oracle.cjs:3:48)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 501,\n  expected: 400,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n"
+        }
+      ],
+      "service_closed": true
+    }
+  ]
+}

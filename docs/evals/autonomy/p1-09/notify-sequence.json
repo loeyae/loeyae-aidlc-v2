@@ -1,0 +1,24 @@
+{
+  "kind": "engineering-real-cli-sequence",
+  "authority": "simulated operator/reception adapter; not business authorization",
+  "stages": [
+    {
+      "stage": "state-template",
+      "session_id": "test-session",
+      "approval": "notify",
+      "command": [
+        "report",
+        "--stage",
+        "state-template",
+        "--result",
+        "completed",
+        "--instruction-ack",
+        "state-template"
+      ],
+      "completed": true,
+      "next_stage": "requirements-analysis"
+    }
+  ],
+  "human_continuation_inputs": 0,
+  "business_verified": false
+}

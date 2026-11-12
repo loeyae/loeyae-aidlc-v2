@@ -1,0 +1,2087 @@
+{
+  "kind": "actual-native-model-received-public-preview",
+  "source_log": ".worktrees/aidlc-p1-10-orders-r6/.aidlc/host-runs/66b4e9c0-76e5-4a8f-b0c8-9f1f5f557a81/native-events.jsonl",
+  "event_at": "2026-11-09T09:10:42.782Z",
+  "captured_at": "2026-11-09T09:15:36.6029055Z",
+  "response": {
+    "kind": "print",
+    "preview": true,
+    "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+    "workflow": "global",
+    "stage_instance": null,
+    "expected": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+    "message": "Read-only routing preview; bind the returned exact instance before next. Dependencies and report gates still apply.",
+    "next_stage": null,
+    "next_stage_status": "none",
+    "handoff_prompt": "BOSS，当前预览范围未找到下一阶段。先读取 runtime summary，核对其他单元、模块及集成阶段的进度；不要据此宣称整个项目已经完成，也不要重复执行已通过的阶段。\nDelegated decisions: 1; human review pending: 1; incomplete records: 3. Pending review alone does not pause implementation; preserve explicit requirements and use only the pinned policy clauses. Engineering gates remain required.",
+    "next_stage_prompt": "使用 AI-DLC，继续当前工作。\n工作目标：P1-10 real Codex orders: # SCENARIO-001 Ordered order export  ## REQ-001 Ordered pagination Fetch the complete ordered upstream list exactly once and preserve every row and value in order. Return pages of 50; return [] for empty input. Propagate the original upstream timeout/error object unchanged. No UI is in scope. No network stub may replace the acceptance upstream.  ## AC-001 Pagination and failure acceptance 120 rows produce 50/50/20. Also verify 0, 1, 49, 50, 51, 100 and 101 rows; flattening must equal the entire original ordered list. A real upstream timeout must reach the caller unchanged, without partial results. Repeated calls are independent.  ## GAP-001 Compatible internal decomposition The implementation's internal helper layout is unspecified. The Agent may use a single function or private helper while retaining the exported exportOrders(upstream) interface and all REQ-001 behavior. Record the choice, implementation and validation for later human review. This does not authorize changing pagination, ordering or failure propagation.\n工作流：5e90cb94-5db7-4b34-8076-0850d3295e1d（global / module:project / unit:default）\n工作流状态：running。\n恢复上下文：读取 aidlc/active/aidlc-state.md 与 aidlc/active/audit.md。\n下一步：当前预览范围未找到下一阶段。先读取 runtime summary，核对其他单元、模块及集成阶段的进度；不要据此宣称整个项目已经完成，也不要重复执行已通过的阶段。\n继续时重新运行 loeyae-aidlc orchestrate next --module project --unit default --preview，并以最新路由和当前领取为准。\n自主批次：读取 core/knowledge/protocols/common-autonomous-execution.md，按当前授权连续实施，无需逐阶段人工确认；真实 block、暂停和缺少权限仍阻断，合法委托记录后继续。",
+    "autonomy_scope": {
+      "enabled": true,
+      "validation_level": "scope-only",
+      "execution_authorized": false,
+      "gates_evaluated": false,
+      "snapshot": {
+        "version": "1",
+        "batch_id": "orders",
+        "scope_revision": 1,
+        "source_path": "docs/aidlc/ideation/scenario-module-mapping.md",
+        "record_digest": "d7a3f74329a70109397303e571353cf795e8c81e66dde0184153ab76bba039a4",
+        "scope_digest": "72ce8ec1445e42ce28e45ce1820954b50561dd8eca5f113b819a3aeb70101056"
+      },
+      "goal": "Correct complete ordered pagination with original upstream failures, in one real Codex session",
+      "scenario_refs": [
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/requirements.md",
+          "digest_mode": "raw-file",
+          "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c",
+          "item_id": "SCENARIO-001"
+        }
+      ],
+      "dependency_refs": [],
+      "dependency_definition_refs": [
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/application-design/unit-of-work.md",
+          "digest_mode": "json-record-v1",
+          "selector": {
+            "record_type": "unit-extension",
+            "record_id": "default-definition"
+          },
+          "digest": "fe163a1ca54ad4844517e08bf3db545792871ffb8755755a88b763237aa4f3d7"
+        }
+      ],
+      "acceptance_refs": [
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/requirements.md",
+          "digest_mode": "raw-file",
+          "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c",
+          "item_id": "AC-001"
+        }
+      ],
+      "ui_refs": [],
+      "units": [
+        {
+          "unit_ref": {
+            "workflow_ref": {
+              "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+              "owner_kind": "global"
+            },
+            "module_id": "project",
+            "unit_id": "default",
+            "definition_digest": "453f5e5c3475c6f0e4285e6312418e1b1f01e26ace1b8c6c345b346b6b20a50a"
+          },
+          "role": "implement",
+          "expected_capabilities": [],
+          "evidence_refs": []
+        }
+      ],
+      "consumer_closure": [],
+      "baseline_inputs": [
+        {
+          "repository_id": "project",
+          "path": ".aidlc/commands/build-and-test.json",
+          "digest_mode": "raw-file",
+          "digest": "e874ccdcda2338787d30bf5661fb0a426d3c7f12e7c0c164b000253082074053"
+        },
+        {
+          "repository_id": "project",
+          "path": ".aidlc/commands/code-generation.json",
+          "digest_mode": "raw-file",
+          "digest": "35d8a0290efce34c41178212527f979f27a318f154b22bb02914ecef363158ad"
+        },
+        {
+          "repository_id": "project",
+          "path": ".aidlc/commands/tdd.json",
+          "digest_mode": "raw-file",
+          "digest": "1f4eba729ef26526ff85999c2c70fe3a7855f8acb1cd702c5b1aa8065f27eae4"
+        },
+        {
+          "repository_id": "project",
+          "path": "README.md",
+          "digest_mode": "raw-file",
+          "digest": "6c7a2e13c11ec91a9e63aeb8782f0b5b25e36af2d1e865c492bb8516fe2e2c2b"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/ideation/module-manifest.json",
+          "digest_mode": "raw-file",
+          "digest": "6f50a9014b601f8742a768d56c7bd26466ea58feb473fbc54cdb4f67bef2e474"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/acceptance-review.json",
+          "digest_mode": "raw-file",
+          "digest": "85dfa75c3da04b338530255c0afc6a8b746a9a89ecd50a4d9335dc009c41fdeb"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/application-design/test-cases/UC-D-001-pagination.md",
+          "digest_mode": "raw-file",
+          "digest": "9c40b7af1e43eefd03429cca1b2f6310ff47d25fbf2e451a4bb92c9443fbd9d4"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/application-design/test-cases/UC-D-002-independent-calls.md",
+          "digest_mode": "raw-file",
+          "digest": "dec32a0de6538a0b05e70977ba201fc1d49d0b0f9911e10cc95c78177b5e0214"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/application-design/test-cases/UC-D-003-failure-propagation.md",
+          "digest_mode": "raw-file",
+          "digest": "2cce4c5b3cfcdf190a89aac910672e17af9cf03253c7fe1be9df89af6389ea30"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/application-design/test-cases/_index.md",
+          "digest_mode": "raw-file",
+          "digest": "a5ad1e92101edfd80ec46dd7d1e1a54163e1d824a2dc967d5a533b6b28ee574c"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/application-design/unit-of-work.md",
+          "digest_mode": "raw-file",
+          "digest": "cda2c13d0e0497ff53badced08a1125b2898a935646a38b6ba01f1e84a366e64"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/cross-validation-report.md",
+          "digest_mode": "raw-file",
+          "digest": "00b37753af2e307685d95aa5cfc1c4f208e1b31592ea3672063122623e6e5c69"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/development-handoff.md",
+          "digest_mode": "raw-file",
+          "digest": "ae461736e43acd35b700559f55ed3ff3720950aa2414af524495d94be9613e60"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/requirements.md",
+          "digest_mode": "raw-file",
+          "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/technical-review.json",
+          "digest_mode": "raw-file",
+          "digest": "30aa5fbb919eeaf1ca052e523d6461d2e2c4b46be045e7ef15dfaf3468dd898f"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/unit-manifest.json",
+          "digest_mode": "raw-file",
+          "digest": "5221a37ad05161603fa848a3525d664d49b98cbf8dc9c22fd6680c07bd7ba9d6"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/user-stories.md",
+          "digest_mode": "raw-file",
+          "digest": "57da48014a14045bcd47d27d559cd35d305a9e43948943692e4473e836b079f4"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/admission-plan.json",
+          "digest_mode": "raw-file",
+          "digest": "d65754816a67d20c770e1ce61b8795ef3addd68654e6853d4df7a57e9c7422bb"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/candidate.cjs",
+          "digest_mode": "raw-file",
+          "digest": "8e8b0379954b0677748e0b97e028f6ef58eadecc1089d49f03ccf38246e862ec"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/data.json",
+          "digest_mode": "raw-file",
+          "digest": "9358b5e2bcb9b35660fff90d158fba3f8b7fefe258d79066178ed1d7b10733d8"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/design-provenance.json",
+          "digest_mode": "raw-file",
+          "digest": "cabdb38ab786c1933416b84c3a40029401d579562a1450a2815966509469522f"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/environment.json",
+          "digest_mode": "raw-file",
+          "digest": "76fdf5b484232d547d89a44c603a67e7347b3fd56b3bc6f3724b1b7fbfff3812"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/grant-request.json",
+          "digest_mode": "raw-file",
+          "digest": "1937d61e30abf99bfad6bd2cff5d4f47325ff0fdd894ff9e371b9844dccfb689"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/host-prepared-01a1bf5f-2330-7ab1-bc09-9dcc17466f87.json",
+          "digest_mode": "raw-file",
+          "digest": "25e31084a923c4425eb629792ac6002c6d69df5fcf565f1f1364851017be912a"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/host-seed.json",
+          "digest_mode": "raw-file",
+          "digest": "12dba64f9e585564ebb879cf70bc20a967a83ae1851e66e5032cd19b20fde87c"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/host.json",
+          "digest_mode": "raw-file",
+          "digest": "6635c4adab1ca2e4ab4838fbb6435cdbc19db464c3b275773224973b72e25fe1"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/native-phase.cjs",
+          "digest_mode": "raw-file",
+          "digest": "56cdde8c8db2754849308da5b7a8af064daa416ff9f1d06ed58779e3b396cc9b"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/native-run-guide.md",
+          "digest_mode": "raw-file",
+          "digest": "86f0aba540bc6c80e13cf1294ff11f99f31113af8a2d92c8665345655e9e58ab"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/observation-environment.json",
+          "digest_mode": "raw-file",
+          "digest": "a89bafccbaf792ec0026a41db5b77c6813e37a4f19d4f26de0d730c83e64b644"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/observation-plan.json",
+          "digest_mode": "raw-file",
+          "digest": "e416f006069eda6e8e5c0f213567e4645d1cbc99e5d5ccf43116c00a45121a7b"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/oracle.cjs",
+          "digest_mode": "raw-file",
+          "digest": "1caeaa749a3ec27499f205157f7eca02f132e2cf0abd0ca0bd184a276e1d9dad"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/preflight.cjs",
+          "digest_mode": "raw-file",
+          "digest": "267031f436d64142ff748d1e0da79c433d31df919c50025d9ed10ee3dd240c21"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/prework.md",
+          "digest_mode": "raw-file",
+          "digest": "a6669558738c0fc5154b17f5354a0634cb4c3894c6895788971d6283230e6a52"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/server.cjs",
+          "digest_mode": "raw-file",
+          "digest": "627d9214392f1b7cbf919bcabf0ed87a4c69a67fd512ca048d8b2b3a2a7aff8b"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/source-refs.cjs",
+          "digest_mode": "raw-file",
+          "digest": "fa15b88827a6c938ac27e01747d07c99efb7a6fc9703f309bbe5de23e9ca3268"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/spec.md",
+          "digest_mode": "raw-file",
+          "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/ucds.json",
+          "digest_mode": "raw-file",
+          "digest": "58caaeca712280a7eff37fb61848811c56ed382ba046273dbad21cdd10e3cd77"
+        }
+      ],
+      "policy_ref": {
+        "repository_id": "project",
+        "path": "docs/aidlc/modules/project/inception/development-handoff.md",
+        "digest_mode": "json-record-v1",
+        "selector": {
+          "record_type": "policy",
+          "record_id": "orders-policy"
+        },
+        "digest": "e948d4997b658527e91c6596fe5a86e6c9a44cb743fdba4606f9f8d33120833f",
+        "policy_id": "orders-policy",
+        "policy_revision": 1
+      },
+      "validation_matrix_ref": {
+        "repository_id": "project",
+        "path": "docs/aidlc/modules/project/inception/development-handoff.md",
+        "digest_mode": "json-record-v1",
+        "selector": {
+          "record_type": "validation-matrix",
+          "record_id": "orders-matrix"
+        },
+        "digest": "332a1bfea4ad59a37191e1bc5da1d261a0cccaee14822da6aa3fe0672bca075e"
+      },
+      "integration_owner": "coordinator",
+      "delivery_artifacts": [
+        {
+          "artifact_id": "candidate",
+          "kind": "candidate",
+          "required": true,
+          "target_path": "delivery/candidate.md"
+        },
+        {
+          "artifact_id": "run-instructions",
+          "kind": "run-instructions",
+          "required": true,
+          "target_path": "delivery/run.md"
+        },
+        {
+          "artifact_id": "evidence-index",
+          "kind": "evidence-index",
+          "required": true,
+          "target_path": "delivery/evidence.md"
+        },
+        {
+          "artifact_id": "decision-index",
+          "kind": "decision-index",
+          "required": true,
+          "target_path": "delivery/decisions.md"
+        }
+      ],
+      "pending_validation": [
+        "policy-semantics",
+        "execution-grant",
+        "dependency-readiness-and-provenance",
+        "ui-applicability",
+        "runtime-and-acceptance-gates"
+      ]
+    },
+    "autonomy_decisions": {
+      "enabled": true,
+      "validation_level": "policy-and-decision-records",
+      "execution_authorized": false,
+      "effective_revision": 1,
+      "engineering_verification": "not_evaluated",
+      "policy": {
+        "schema": "aidlc.autonomy/v1",
+        "record_type": "policy",
+        "record_id": "orders-policy",
+        "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+        "revision": 1,
+        "inputs": [
+          {
+            "repository_id": "project",
+            "path": "docs/aidlc/modules/project/inception/requirements.md",
+            "digest_mode": "raw-file",
+            "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c"
+          }
+        ],
+        "policy_id": "orders-policy",
+        "policy_revision": 1,
+        "scope_refs": [
+          {
+            "batch_id": "orders",
+            "scope_revision": 1
+          }
+        ],
+        "hard_constraints": [
+          {
+            "repository_id": "project",
+            "path": "docs/aidlc/modules/project/inception/requirements.md",
+            "digest_mode": "raw-file",
+            "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c",
+            "item_id": "REQ-001"
+          }
+        ],
+        "validation_requirements": [
+          {
+            "repository_id": "project",
+            "path": "docs/aidlc/modules/project/inception/requirements.md",
+            "digest_mode": "raw-file",
+            "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c",
+            "item_id": "AC-001"
+          }
+        ],
+        "source_precedence": [],
+        "delegated_categories": [],
+        "fallback_rules": [
+          {
+            "rule_id": "internal-layout",
+            "when": {
+              "kind": "missing-detail",
+              "refs": [
+                {
+                  "repository_id": "project",
+                  "path": "docs/aidlc/modules/project/inception/requirements.md",
+                  "digest_mode": "raw-file",
+                  "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c",
+                  "item_id": "GAP-001"
+                }
+              ],
+              "expected": "unspecified"
+            },
+            "default_behavior": "Keep the existing single exported async function without adding a public API",
+            "constraints": [
+              {
+                "repository_id": "project",
+                "path": "docs/aidlc/modules/project/inception/requirements.md",
+                "digest_mode": "raw-file",
+                "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c",
+                "item_id": "REQ-001"
+              }
+            ],
+            "required_checks": [
+              "complete-acceptance"
+            ]
+          }
+        ],
+        "allowed_change_classes": [
+          "implementation-refinement",
+          "baseline-defect-fix",
+          "behavior-preserving-refactor"
+        ],
+        "escalation_conditions": [],
+        "authority_ref": {
+          "source_kind": "host-user-message",
+          "source_locator": "codex://current-conversation/P1-10-and-delegated-engineering-policy",
+          "source_digest": "bb683d8d910a2bb29858e6e71838d8c938c3a023075d0a429f74f91136299395",
+          "scope_summary": "orders/1",
+          "actor_locator": "current-user"
+        }
+      },
+      "decisions": [
+        {
+          "decision_id": "orders-gap-001-internal-layout",
+          "revision": 1,
+          "effective_revision": 1,
+          "policy_clause": "fallback:internal-layout",
+          "chosen_option": "Keep the existing single exported async function without adding a public API",
+          "unit_ref": {
+            "workflow_ref": {
+              "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+              "owner_kind": "global"
+            },
+            "module_id": "project",
+            "unit_id": "default",
+            "definition_digest": "453f5e5c3475c6f0e4285e6312418e1b1f01e26ace1b8c6c345b346b6b20a50a"
+          },
+          "human_review": {
+            "status": "pending"
+          },
+          "implementation_refs": [],
+          "validation_refs": [],
+          "record_status": "incomplete",
+          "completion_blockers": [
+            "implementation-missing",
+            "validation-missing",
+            "validation-check-missing:complete-acceptance"
+          ]
+        }
+      ],
+      "human_review_summary": {
+        "pending": 1,
+        "accepted": 0,
+        "change-requested": 0,
+        "rejected": 0
+      },
+      "completion_blockers": [
+        "orders-gap-001-internal-layout:implementation-missing",
+        "orders-gap-001-internal-layout:validation-missing",
+        "orders-gap-001-internal-layout:validation-check-missing:complete-acceptance"
+      ],
+      "handoff_digest": "95f783ed9384634cf2990a321a6a963f224516440b61e70d619bfceb26423fdc"
+    },
+    "autonomous_execution": {
+      "mode": "autonomous-batch",
+      "protocol_file": "core/knowledge/protocols/common-autonomous-execution.md",
+      "routine_stage_confirmation": "not-required",
+      "module_selection": "frozen-implement-units",
+      "protected_gates": "unchanged",
+      "execution_authorized": false
+    },
+    "execution_grant": {
+      "enabled": true,
+      "ref": {
+        "version": "1",
+        "grant_id": "36b715ba-4ef9-4ed8-beb9-21ce8b41aa65",
+        "run_id": "66b4e9c0-76e5-4a8f-b0c8-9f1f5f557a81",
+        "digest": "7f770778d39ddb4186302c3542e8663c9107029ad05f055072b0527a206f9026"
+      },
+      "status": "active",
+      "revocation_revision": 1,
+      "expires_at": "2026-11-09T09:50:16.399Z",
+      "allowed_operations": [
+        "workflow-write",
+        "stage-report",
+        "decision-record",
+        "evidence-publish",
+        "validation-execute",
+        "design-write",
+        "code-write",
+        "test-write",
+        "environment-write",
+        "candidate-commit"
+      ],
+      "successor_policy": "disabled",
+      "execution_authorized": false,
+      "admission_evaluated": false
+    },
+    "autonomous_admission": {
+      "enabled": true,
+      "schema": "aidlc.admission-receipt/v1",
+      "admission_result": "ready-with-delegated-decisions",
+      "preview": false,
+      "batch_ref": {
+        "version": "1",
+        "batch_id": "orders",
+        "scope_revision": 1,
+        "source_path": "docs/aidlc/ideation/scenario-module-mapping.md",
+        "record_digest": "d7a3f74329a70109397303e571353cf795e8c81e66dde0184153ab76bba039a4",
+        "scope_digest": "72ce8ec1445e42ce28e45ce1820954b50561dd8eca5f113b819a3aeb70101056"
+      },
+      "grant_ref": {
+        "version": "1",
+        "grant_id": "36b715ba-4ef9-4ed8-beb9-21ce8b41aa65",
+        "run_id": "66b4e9c0-76e5-4a8f-b0c8-9f1f5f557a81",
+        "digest": "7f770778d39ddb4186302c3542e8663c9107029ad05f055072b0527a206f9026"
+      },
+      "policy_ref": {
+        "repository_id": "project",
+        "path": "docs/aidlc/modules/project/inception/development-handoff.md",
+        "digest_mode": "json-record-v1",
+        "selector": {
+          "record_type": "policy",
+          "record_id": "orders-policy"
+        },
+        "digest": "e948d4997b658527e91c6596fe5a86e6c9a44cb743fdba4606f9f8d33120833f",
+        "policy_id": "orders-policy",
+        "policy_revision": 1
+      },
+      "baseline_inputs": [
+        {
+          "repository_id": "project",
+          "path": "pilot/admission-plan.json",
+          "digest_mode": "raw-file",
+          "digest": "d65754816a67d20c770e1ce61b8795ef3addd68654e6853d4df7a57e9c7422bb"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/host.json",
+          "digest_mode": "raw-file",
+          "digest": "6635c4adab1ca2e4ab4838fbb6435cdbc19db464c3b275773224973b72e25fe1"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/cross-validation-report.md",
+          "digest_mode": "raw-file",
+          "digest": "00b37753af2e307685d95aa5cfc1c4f208e1b31592ea3672063122623e6e5c69"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/requirements.md",
+          "digest_mode": "raw-file",
+          "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/user-stories.md",
+          "digest_mode": "raw-file",
+          "digest": "57da48014a14045bcd47d27d559cd35d305a9e43948943692e4473e836b079f4"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/development-handoff.md",
+          "digest_mode": "raw-file",
+          "digest": "ae461736e43acd35b700559f55ed3ff3720950aa2414af524495d94be9613e60"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/acceptance-review.json",
+          "digest_mode": "raw-file",
+          "digest": "85dfa75c3da04b338530255c0afc6a8b746a9a89ecd50a4d9335dc009c41fdeb"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/technical-review.json",
+          "digest_mode": "raw-file",
+          "digest": "30aa5fbb919eeaf1ca052e523d6461d2e2c4b46be045e7ef15dfaf3468dd898f"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/application-design/unit-of-work.md",
+          "digest_mode": "raw-file",
+          "digest": "cda2c13d0e0497ff53badced08a1125b2898a935646a38b6ba01f1e84a366e64"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/preflight.cjs",
+          "digest_mode": "raw-file",
+          "digest": "267031f436d64142ff748d1e0da79c433d31df919c50025d9ed10ee3dd240c21"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/data.json",
+          "digest_mode": "raw-file",
+          "digest": "9358b5e2bcb9b35660fff90d158fba3f8b7fefe258d79066178ed1d7b10733d8"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/oracle.cjs",
+          "digest_mode": "raw-file",
+          "digest": "1caeaa749a3ec27499f205157f7eca02f132e2cf0abd0ca0bd184a276e1d9dad"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/environment.json",
+          "digest_mode": "raw-file",
+          "digest": "76fdf5b484232d547d89a44c603a67e7347b3fd56b3bc6f3724b1b7fbfff3812"
+        },
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/native-host/6618b55d-e1ef-472e-8299-940a9f988663/probe.json",
+          "digest_mode": "raw-file",
+          "digest": "ae615074dc7c8002e0eb09fd64dc5a15f3971c1c9af297691639b838fb0857b0"
+        }
+      ],
+      "unit_definition_digests": [
+        {
+          "workflow_ref": {
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+            "owner_kind": "global"
+          },
+          "module_id": "project",
+          "unit_id": "default",
+          "definition_digest": "453f5e5c3475c6f0e4285e6312418e1b1f01e26ace1b8c6c345b346b6b20a50a"
+        }
+      ],
+      "dependency_versions": [],
+      "dependency_plan": {
+        "enabled": true,
+        "validation_level": "dependency-and-write-scope",
+        "execution_authorized": false,
+        "business_verified": false,
+        "admission_ready": true,
+        "units": [
+          {
+            "unit_ref": {
+              "workflow_ref": {
+                "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+                "owner_kind": "global"
+              },
+              "module_id": "project",
+              "unit_id": "default",
+              "definition_digest": "453f5e5c3475c6f0e4285e6312418e1b1f01e26ace1b8c6c345b346b6b20a50a"
+            },
+            "role": "implement",
+            "private_paths": [
+              "src",
+              "tests",
+              "delivery",
+              "docs/aidlc/modules/project/construction"
+            ],
+            "shared_writes": [],
+            "evidence_scope": "declared-with-transitive-inputs",
+            "effective_inputs": [
+              "src",
+              "tests"
+            ],
+            "capability_refs": []
+          }
+        ],
+        "dependencies": [],
+        "definition_refs": [
+          {
+            "repository_id": "project",
+            "path": "docs/aidlc/modules/project/inception/application-design/unit-of-work.md",
+            "digest_mode": "json-record-v1",
+            "selector": {
+              "record_type": "unit-extension",
+              "record_id": "default-definition"
+            },
+            "digest": "fe163a1ca54ad4844517e08bf3db545792871ffb8755755a88b763237aa4f3d7"
+          }
+        ],
+        "evidence_refs": [],
+        "serial_execution_required": true,
+        "dependency_frontier": [
+          {
+            "unit_ref": {
+              "workflow_ref": {
+                "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+                "owner_kind": "global"
+              },
+              "module_id": "project",
+              "unit_id": "default",
+              "definition_digest": "453f5e5c3475c6f0e4285e6312418e1b1f01e26ace1b8c6c345b346b6b20a50a"
+            },
+            "checkpoint": "shared-contract-baseline",
+            "dependencies_ready": true,
+            "blocked_by": [],
+            "native_gates_evaluated": false,
+            "execution_authorized": false
+          },
+          {
+            "unit_ref": {
+              "workflow_ref": {
+                "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+                "owner_kind": "global"
+              },
+              "module_id": "project",
+              "unit_id": "default",
+              "definition_digest": "453f5e5c3475c6f0e4285e6312418e1b1f01e26ace1b8c6c345b346b6b20a50a"
+            },
+            "checkpoint": "tdd",
+            "dependencies_ready": true,
+            "blocked_by": [],
+            "native_gates_evaluated": false,
+            "execution_authorized": false
+          },
+          {
+            "unit_ref": {
+              "workflow_ref": {
+                "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+                "owner_kind": "global"
+              },
+              "module_id": "project",
+              "unit_id": "default",
+              "definition_digest": "453f5e5c3475c6f0e4285e6312418e1b1f01e26ace1b8c6c345b346b6b20a50a"
+            },
+            "checkpoint": "code-generation",
+            "dependencies_ready": true,
+            "blocked_by": [],
+            "native_gates_evaluated": false,
+            "execution_authorized": false
+          }
+        ]
+      },
+      "environment_refs": [
+        {
+          "repository_id": "project",
+          "path": "pilot/environment.json",
+          "digest_mode": "raw-file",
+          "digest": "76fdf5b484232d547d89a44c603a67e7347b3fd56b3bc6f3724b1b7fbfff3812"
+        },
+        {
+          "repository_id": "project",
+          "path": "pilot/data.json",
+          "digest_mode": "raw-file",
+          "digest": "9358b5e2bcb9b35660fff90d158fba3f8b7fefe258d79066178ed1d7b10733d8"
+        }
+      ],
+      "capability_probe_refs": [
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/native-host/6618b55d-e1ef-472e-8299-940a9f988663/probe.json",
+          "digest_mode": "raw-file",
+          "digest": "ae615074dc7c8002e0eb09fd64dc5a15f3971c1c9af297691639b838fb0857b0"
+        }
+      ],
+      "host_observation": {
+        "nonce": "6618b55d-e1ef-472e-8299-940a9f988663",
+        "host": {
+          "host_id": "codex-app-server",
+          "version": "1",
+          "entrypoint": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\harness\\codex\\runtime\\aidlc-codex-host.mjs",
+          "config_digest": "5b6de9c1ae82101d596ce46fe8510b76a9b93f1d6adc22a01064e83aa7693998"
+        },
+        "limits": {
+          "wall_time_seconds": 3600,
+          "max_equivalent_retries": 2,
+          "max_active_units": 1
+        },
+        "observed_at": "2026-11-09T09:09:36.884Z",
+        "valid_until": "2026-11-09T09:15:07.279Z",
+        "capabilities": {
+          "model-turn": {
+            "status": "supported",
+            "probe_refs": [
+              {
+                "repository_id": "project",
+                "path": ".aidlc/evidence/native-host/6618b55d-e1ef-472e-8299-940a9f988663/probe.json",
+                "digest_mode": "raw-file",
+                "digest": "ae615074dc7c8002e0eb09fd64dc5a15f3971c1c9af297691639b838fb0857b0"
+              }
+            ]
+          },
+          "continuous-session": {
+            "status": "supported",
+            "probe_refs": [
+              {
+                "repository_id": "project",
+                "path": ".aidlc/evidence/native-host/6618b55d-e1ef-472e-8299-940a9f988663/probe.json",
+                "digest_mode": "raw-file",
+                "digest": "ae615074dc7c8002e0eb09fd64dc5a15f3971c1c9af297691639b838fb0857b0"
+              }
+            ]
+          },
+          "budget-enforcement": {
+            "status": "supported",
+            "probe_refs": [
+              {
+                "repository_id": "project",
+                "path": ".aidlc/evidence/native-host/6618b55d-e1ef-472e-8299-940a9f988663/probe.json",
+                "digest_mode": "raw-file",
+                "digest": "ae615074dc7c8002e0eb09fd64dc5a15f3971c1c9af297691639b838fb0857b0"
+              }
+            ]
+          }
+        }
+      },
+      "command_config_digest": "c19809d9f4d2e1b9bf1b5262cc0c2895cdc1e352533a39b5c197227fd694de18",
+      "checks": [
+        {
+          "check_id": "scope-policy",
+          "required": true,
+          "status": "passed",
+          "reason": "current inputs checked",
+          "input_refs": [
+            {
+              "repository_id": "project",
+              "path": "pilot/admission-plan.json",
+              "digest_mode": "raw-file",
+              "digest": "d65754816a67d20c770e1ce61b8795ef3addd68654e6853d4df7a57e9c7422bb"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/host.json",
+              "digest_mode": "raw-file",
+              "digest": "6635c4adab1ca2e4ab4838fbb6435cdbc19db464c3b275773224973b72e25fe1"
+            }
+          ]
+        },
+        {
+          "check_id": "execution-grant",
+          "required": true,
+          "status": "passed",
+          "reason": "current inputs checked",
+          "input_refs": [
+            {
+              "repository_id": "project",
+              "path": "pilot/admission-plan.json",
+              "digest_mode": "raw-file",
+              "digest": "d65754816a67d20c770e1ce61b8795ef3addd68654e6853d4df7a57e9c7422bb"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/host.json",
+              "digest_mode": "raw-file",
+              "digest": "6635c4adab1ca2e4ab4838fbb6435cdbc19db464c3b275773224973b72e25fe1"
+            }
+          ]
+        },
+        {
+          "check_id": "design-reception",
+          "required": true,
+          "status": "passed",
+          "reason": "current inputs checked",
+          "input_refs": [
+            {
+              "repository_id": "project",
+              "path": "pilot/admission-plan.json",
+              "digest_mode": "raw-file",
+              "digest": "d65754816a67d20c770e1ce61b8795ef3addd68654e6853d4df7a57e9c7422bb"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/host.json",
+              "digest_mode": "raw-file",
+              "digest": "6635c4adab1ca2e4ab4838fbb6435cdbc19db464c3b275773224973b72e25fe1"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/cross-validation-report.md",
+              "digest_mode": "raw-file",
+              "digest": "00b37753af2e307685d95aa5cfc1c4f208e1b31592ea3672063122623e6e5c69"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/requirements.md",
+              "digest_mode": "raw-file",
+              "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/user-stories.md",
+              "digest_mode": "raw-file",
+              "digest": "57da48014a14045bcd47d27d559cd35d305a9e43948943692e4473e836b079f4"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/development-handoff.md",
+              "digest_mode": "raw-file",
+              "digest": "ae461736e43acd35b700559f55ed3ff3720950aa2414af524495d94be9613e60"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/acceptance-review.json",
+              "digest_mode": "raw-file",
+              "digest": "85dfa75c3da04b338530255c0afc6a8b746a9a89ecd50a4d9335dc009c41fdeb"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/technical-review.json",
+              "digest_mode": "raw-file",
+              "digest": "30aa5fbb919eeaf1ca052e523d6461d2e2c4b46be045e7ef15dfaf3468dd898f"
+            }
+          ]
+        },
+        {
+          "check_id": "dependency-readiness",
+          "required": true,
+          "status": "passed",
+          "reason": "unit ownership, versioned capabilities, staged dependencies and transitive inputs checked; pending runtime is not runtime_ready",
+          "input_refs": [
+            {
+              "repository_id": "project",
+              "path": "pilot/admission-plan.json",
+              "digest_mode": "raw-file",
+              "digest": "d65754816a67d20c770e1ce61b8795ef3addd68654e6853d4df7a57e9c7422bb"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/host.json",
+              "digest_mode": "raw-file",
+              "digest": "6635c4adab1ca2e4ab4838fbb6435cdbc19db464c3b275773224973b72e25fe1"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/cross-validation-report.md",
+              "digest_mode": "raw-file",
+              "digest": "00b37753af2e307685d95aa5cfc1c4f208e1b31592ea3672063122623e6e5c69"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/requirements.md",
+              "digest_mode": "raw-file",
+              "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/user-stories.md",
+              "digest_mode": "raw-file",
+              "digest": "57da48014a14045bcd47d27d559cd35d305a9e43948943692e4473e836b079f4"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/development-handoff.md",
+              "digest_mode": "raw-file",
+              "digest": "ae461736e43acd35b700559f55ed3ff3720950aa2414af524495d94be9613e60"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/acceptance-review.json",
+              "digest_mode": "raw-file",
+              "digest": "85dfa75c3da04b338530255c0afc6a8b746a9a89ecd50a4d9335dc009c41fdeb"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/technical-review.json",
+              "digest_mode": "raw-file",
+              "digest": "30aa5fbb919eeaf1ca052e523d6461d2e2c4b46be045e7ef15dfaf3468dd898f"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/application-design/unit-of-work.md",
+              "digest_mode": "raw-file",
+              "digest": "cda2c13d0e0497ff53badced08a1125b2898a935646a38b6ba01f1e84a366e64"
+            }
+          ]
+        },
+        {
+          "check_id": "validation-plan",
+          "required": true,
+          "status": "passed",
+          "reason": "current inputs checked",
+          "input_refs": [
+            {
+              "repository_id": "project",
+              "path": "pilot/admission-plan.json",
+              "digest_mode": "raw-file",
+              "digest": "d65754816a67d20c770e1ce61b8795ef3addd68654e6853d4df7a57e9c7422bb"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/host.json",
+              "digest_mode": "raw-file",
+              "digest": "6635c4adab1ca2e4ab4838fbb6435cdbc19db464c3b275773224973b72e25fe1"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/cross-validation-report.md",
+              "digest_mode": "raw-file",
+              "digest": "00b37753af2e307685d95aa5cfc1c4f208e1b31592ea3672063122623e6e5c69"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/requirements.md",
+              "digest_mode": "raw-file",
+              "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/user-stories.md",
+              "digest_mode": "raw-file",
+              "digest": "57da48014a14045bcd47d27d559cd35d305a9e43948943692e4473e836b079f4"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/development-handoff.md",
+              "digest_mode": "raw-file",
+              "digest": "ae461736e43acd35b700559f55ed3ff3720950aa2414af524495d94be9613e60"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/acceptance-review.json",
+              "digest_mode": "raw-file",
+              "digest": "85dfa75c3da04b338530255c0afc6a8b746a9a89ecd50a4d9335dc009c41fdeb"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/technical-review.json",
+              "digest_mode": "raw-file",
+              "digest": "30aa5fbb919eeaf1ca052e523d6461d2e2c4b46be045e7ef15dfaf3468dd898f"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/application-design/unit-of-work.md",
+              "digest_mode": "raw-file",
+              "digest": "cda2c13d0e0497ff53badced08a1125b2898a935646a38b6ba01f1e84a366e64"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/preflight.cjs",
+              "digest_mode": "raw-file",
+              "digest": "267031f436d64142ff748d1e0da79c433d31df919c50025d9ed10ee3dd240c21"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/data.json",
+              "digest_mode": "raw-file",
+              "digest": "9358b5e2bcb9b35660fff90d158fba3f8b7fefe258d79066178ed1d7b10733d8"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/oracle.cjs",
+              "digest_mode": "raw-file",
+              "digest": "1caeaa749a3ec27499f205157f7eca02f132e2cf0abd0ca0bd184a276e1d9dad"
+            }
+          ]
+        },
+        {
+          "check_id": "environment",
+          "required": true,
+          "status": "passed",
+          "reason": "current inputs checked",
+          "input_refs": [
+            {
+              "repository_id": "project",
+              "path": "pilot/admission-plan.json",
+              "digest_mode": "raw-file",
+              "digest": "d65754816a67d20c770e1ce61b8795ef3addd68654e6853d4df7a57e9c7422bb"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/host.json",
+              "digest_mode": "raw-file",
+              "digest": "6635c4adab1ca2e4ab4838fbb6435cdbc19db464c3b275773224973b72e25fe1"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/cross-validation-report.md",
+              "digest_mode": "raw-file",
+              "digest": "00b37753af2e307685d95aa5cfc1c4f208e1b31592ea3672063122623e6e5c69"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/requirements.md",
+              "digest_mode": "raw-file",
+              "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/user-stories.md",
+              "digest_mode": "raw-file",
+              "digest": "57da48014a14045bcd47d27d559cd35d305a9e43948943692e4473e836b079f4"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/development-handoff.md",
+              "digest_mode": "raw-file",
+              "digest": "ae461736e43acd35b700559f55ed3ff3720950aa2414af524495d94be9613e60"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/acceptance-review.json",
+              "digest_mode": "raw-file",
+              "digest": "85dfa75c3da04b338530255c0afc6a8b746a9a89ecd50a4d9335dc009c41fdeb"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/technical-review.json",
+              "digest_mode": "raw-file",
+              "digest": "30aa5fbb919eeaf1ca052e523d6461d2e2c4b46be045e7ef15dfaf3468dd898f"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/application-design/unit-of-work.md",
+              "digest_mode": "raw-file",
+              "digest": "cda2c13d0e0497ff53badced08a1125b2898a935646a38b6ba01f1e84a366e64"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/preflight.cjs",
+              "digest_mode": "raw-file",
+              "digest": "267031f436d64142ff748d1e0da79c433d31df919c50025d9ed10ee3dd240c21"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/data.json",
+              "digest_mode": "raw-file",
+              "digest": "9358b5e2bcb9b35660fff90d158fba3f8b7fefe258d79066178ed1d7b10733d8"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/oracle.cjs",
+              "digest_mode": "raw-file",
+              "digest": "1caeaa749a3ec27499f205157f7eca02f132e2cf0abd0ca0bd184a276e1d9dad"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/environment.json",
+              "digest_mode": "raw-file",
+              "digest": "76fdf5b484232d547d89a44c603a67e7347b3fd56b3bc6f3724b1b7fbfff3812"
+            }
+          ]
+        },
+        {
+          "check_id": "host-capabilities",
+          "required": true,
+          "status": "passed",
+          "reason": "current inputs checked",
+          "input_refs": [
+            {
+              "repository_id": "project",
+              "path": "pilot/admission-plan.json",
+              "digest_mode": "raw-file",
+              "digest": "d65754816a67d20c770e1ce61b8795ef3addd68654e6853d4df7a57e9c7422bb"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/host.json",
+              "digest_mode": "raw-file",
+              "digest": "6635c4adab1ca2e4ab4838fbb6435cdbc19db464c3b275773224973b72e25fe1"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/cross-validation-report.md",
+              "digest_mode": "raw-file",
+              "digest": "00b37753af2e307685d95aa5cfc1c4f208e1b31592ea3672063122623e6e5c69"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/requirements.md",
+              "digest_mode": "raw-file",
+              "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/user-stories.md",
+              "digest_mode": "raw-file",
+              "digest": "57da48014a14045bcd47d27d559cd35d305a9e43948943692e4473e836b079f4"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/development-handoff.md",
+              "digest_mode": "raw-file",
+              "digest": "ae461736e43acd35b700559f55ed3ff3720950aa2414af524495d94be9613e60"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/acceptance-review.json",
+              "digest_mode": "raw-file",
+              "digest": "85dfa75c3da04b338530255c0afc6a8b746a9a89ecd50a4d9335dc009c41fdeb"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/technical-review.json",
+              "digest_mode": "raw-file",
+              "digest": "30aa5fbb919eeaf1ca052e523d6461d2e2c4b46be045e7ef15dfaf3468dd898f"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/application-design/unit-of-work.md",
+              "digest_mode": "raw-file",
+              "digest": "cda2c13d0e0497ff53badced08a1125b2898a935646a38b6ba01f1e84a366e64"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/preflight.cjs",
+              "digest_mode": "raw-file",
+              "digest": "267031f436d64142ff748d1e0da79c433d31df919c50025d9ed10ee3dd240c21"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/data.json",
+              "digest_mode": "raw-file",
+              "digest": "9358b5e2bcb9b35660fff90d158fba3f8b7fefe258d79066178ed1d7b10733d8"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/oracle.cjs",
+              "digest_mode": "raw-file",
+              "digest": "1caeaa749a3ec27499f205157f7eca02f132e2cf0abd0ca0bd184a276e1d9dad"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/environment.json",
+              "digest_mode": "raw-file",
+              "digest": "76fdf5b484232d547d89a44c603a67e7347b3fd56b3bc6f3724b1b7fbfff3812"
+            },
+            {
+              "repository_id": "project",
+              "path": ".aidlc/evidence/native-host/6618b55d-e1ef-472e-8299-940a9f988663/probe.json",
+              "digest_mode": "raw-file",
+              "digest": "ae615074dc7c8002e0eb09fd64dc5a15f3971c1c9af297691639b838fb0857b0"
+            }
+          ]
+        },
+        {
+          "check_id": "execution-preflight",
+          "required": true,
+          "status": "passed",
+          "reason": "current inputs checked",
+          "input_refs": [
+            {
+              "repository_id": "project",
+              "path": "pilot/admission-plan.json",
+              "digest_mode": "raw-file",
+              "digest": "d65754816a67d20c770e1ce61b8795ef3addd68654e6853d4df7a57e9c7422bb"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/host.json",
+              "digest_mode": "raw-file",
+              "digest": "6635c4adab1ca2e4ab4838fbb6435cdbc19db464c3b275773224973b72e25fe1"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/cross-validation-report.md",
+              "digest_mode": "raw-file",
+              "digest": "00b37753af2e307685d95aa5cfc1c4f208e1b31592ea3672063122623e6e5c69"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/requirements.md",
+              "digest_mode": "raw-file",
+              "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/user-stories.md",
+              "digest_mode": "raw-file",
+              "digest": "57da48014a14045bcd47d27d559cd35d305a9e43948943692e4473e836b079f4"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/development-handoff.md",
+              "digest_mode": "raw-file",
+              "digest": "ae461736e43acd35b700559f55ed3ff3720950aa2414af524495d94be9613e60"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/acceptance-review.json",
+              "digest_mode": "raw-file",
+              "digest": "85dfa75c3da04b338530255c0afc6a8b746a9a89ecd50a4d9335dc009c41fdeb"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/technical-review.json",
+              "digest_mode": "raw-file",
+              "digest": "30aa5fbb919eeaf1ca052e523d6461d2e2c4b46be045e7ef15dfaf3468dd898f"
+            },
+            {
+              "repository_id": "project",
+              "path": "docs/aidlc/modules/project/inception/application-design/unit-of-work.md",
+              "digest_mode": "raw-file",
+              "digest": "cda2c13d0e0497ff53badced08a1125b2898a935646a38b6ba01f1e84a366e64"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/preflight.cjs",
+              "digest_mode": "raw-file",
+              "digest": "267031f436d64142ff748d1e0da79c433d31df919c50025d9ed10ee3dd240c21"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/data.json",
+              "digest_mode": "raw-file",
+              "digest": "9358b5e2bcb9b35660fff90d158fba3f8b7fefe258d79066178ed1d7b10733d8"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/oracle.cjs",
+              "digest_mode": "raw-file",
+              "digest": "1caeaa749a3ec27499f205157f7eca02f132e2cf0abd0ca0bd184a276e1d9dad"
+            },
+            {
+              "repository_id": "project",
+              "path": "pilot/environment.json",
+              "digest_mode": "raw-file",
+              "digest": "76fdf5b484232d547d89a44c603a67e7347b3fd56b3bc6f3724b1b7fbfff3812"
+            },
+            {
+              "repository_id": "project",
+              "path": ".aidlc/evidence/native-host/6618b55d-e1ef-472e-8299-940a9f988663/probe.json",
+              "digest_mode": "raw-file",
+              "digest": "ae615074dc7c8002e0eb09fd64dc5a15f3971c1c9af297691639b838fb0857b0"
+            }
+          ]
+        }
+      ],
+      "delegated_decision_refs": [
+        {
+          "decision_id": "orders-gap-001-internal-layout",
+          "effective_revision": 1
+        }
+      ],
+      "decision_digest": "cfda0f34d8b48b0a8b47a49f0181547051bda6a40cc0e898090e746a797993be",
+      "environment_variables": [
+        "PILOT_ORIGIN",
+        "PILOT_PORT"
+      ],
+      "executables": [
+        "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+        "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\harness\\codex\\runtime\\aidlc-codex-host.mjs"
+      ],
+      "environment_binding": {
+        "variables": [
+          [
+            "PILOT_ORIGIN",
+            "813c2f1455047ceb3ed28998dcec45386d088ba0c680502305b728db6eb6d527"
+          ],
+          [
+            "PILOT_PORT",
+            "e57936409fa8b2898bee573ba77a1250956587fa7d0602fce652c53fce2129c1"
+          ]
+        ],
+        "executables": [
+          [
+            "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+            "86f361a88f4cc3ecaf1ea93236b0d8edf07bf00fe87ad9f60305513f58fc2c17"
+          ],
+          [
+            "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\harness\\codex\\runtime\\aidlc-codex-host.mjs",
+            "79d77e7f78b01e15f507c3be4d9e96985d67100f2538e7dcf5900416b2aa0ef3"
+          ]
+        ]
+      },
+      "command_observations": [
+        {
+          "command_id": "local-preflight",
+          "argv_digest": "ac9b4f9881e6a8b8821dc25348e6837ad185443ed65095c7677cb0be01dd52c9",
+          "exit_code": 0,
+          "signal": null,
+          "error": null,
+          "stdout_digest": "a7d53d34ece33402f29af93d6218222feff5dd9b3138ef9cfcf16653a7bbad77",
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "observed_at": "2026-11-09T09:10:07.425Z"
+        }
+      ],
+      "issued_at": "2026-11-09T09:10:07.425Z",
+      "valid_until": "2026-11-09T09:15:07.279Z",
+      "producer": {
+        "name": "loeyae-aidlc-admission",
+        "mode": "controlled",
+        "execution_id": "eb4f2930-6ad9-45e2-b2d4-4002fe73dd53"
+      },
+      "checker": {
+        "id": "builtin:autonomous-admission",
+        "version": "1"
+      },
+      "checker_digest": "63cc5aa819fde46d6896cc0c344b4918fad9aa6c56b908f0cf3dcd5204579869",
+      "execution_authorized": false,
+      "business_verified": false,
+      "issuer_provenance": {
+        "key_id": "7fa7d104022a416777ae6fdb4dd66dbd53878f12d2572b34565df25b404359eb",
+        "algorithm": "ed25519",
+        "signature": "FzYIpbECnB2rGCmTUXeB0J/6Y08UM3q0rJz4DbToae6q4hbsJFHnWJMoPtDPpFWLdXQA+GBTR4ASnJsih0TlDg=="
+      },
+      "receipt_ref": {
+        "path": ".aidlc/evidence/autonomous-admission/orders/1/1ddd088d-3779-4f98-aa31-7e0ae3c50704.json",
+        "digest": "d51a97766c5acd158c1a92e89417bcca66526bdad4cb30b6e0cd62e64464d6b1"
+      }
+    },
+    "autonomy_dependencies": {
+      "enabled": true,
+      "validation_level": "dependency-and-write-scope",
+      "execution_authorized": false,
+      "business_verified": false,
+      "admission_ready": true,
+      "units": [
+        {
+          "unit_ref": {
+            "workflow_ref": {
+              "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+              "owner_kind": "global"
+            },
+            "module_id": "project",
+            "unit_id": "default",
+            "definition_digest": "453f5e5c3475c6f0e4285e6312418e1b1f01e26ace1b8c6c345b346b6b20a50a"
+          },
+          "role": "implement",
+          "private_paths": [
+            "src",
+            "tests",
+            "delivery",
+            "docs/aidlc/modules/project/construction"
+          ],
+          "shared_writes": [],
+          "evidence_scope": "declared-with-transitive-inputs",
+          "effective_inputs": [
+            "src",
+            "tests"
+          ],
+          "capability_refs": []
+        }
+      ],
+      "dependencies": [],
+      "definition_refs": [
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/application-design/unit-of-work.md",
+          "digest_mode": "json-record-v1",
+          "selector": {
+            "record_type": "unit-extension",
+            "record_id": "default-definition"
+          },
+          "digest": "fe163a1ca54ad4844517e08bf3db545792871ffb8755755a88b763237aa4f3d7"
+        }
+      ],
+      "evidence_refs": [],
+      "serial_execution_required": true,
+      "dependency_frontier": [
+        {
+          "unit_ref": {
+            "workflow_ref": {
+              "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+              "owner_kind": "global"
+            },
+            "module_id": "project",
+            "unit_id": "default",
+            "definition_digest": "453f5e5c3475c6f0e4285e6312418e1b1f01e26ace1b8c6c345b346b6b20a50a"
+          },
+          "checkpoint": "shared-contract-baseline",
+          "dependencies_ready": true,
+          "blocked_by": [],
+          "native_gates_evaluated": false,
+          "execution_authorized": false
+        },
+        {
+          "unit_ref": {
+            "workflow_ref": {
+              "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+              "owner_kind": "global"
+            },
+            "module_id": "project",
+            "unit_id": "default",
+            "definition_digest": "453f5e5c3475c6f0e4285e6312418e1b1f01e26ace1b8c6c345b346b6b20a50a"
+          },
+          "checkpoint": "tdd",
+          "dependencies_ready": true,
+          "blocked_by": [],
+          "native_gates_evaluated": false,
+          "execution_authorized": false
+        },
+        {
+          "unit_ref": {
+            "workflow_ref": {
+              "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+              "owner_kind": "global"
+            },
+            "module_id": "project",
+            "unit_id": "default",
+            "definition_digest": "453f5e5c3475c6f0e4285e6312418e1b1f01e26ace1b8c6c345b346b6b20a50a"
+          },
+          "checkpoint": "code-generation",
+          "dependencies_ready": true,
+          "blocked_by": [],
+          "native_gates_evaluated": false,
+          "execution_authorized": false
+        }
+      ]
+    },
+    "autonomous_batch_result": {
+      "enabled": true,
+      "schema": "aidlc.batch-result/v1",
+      "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+      "batch_ref": {
+        "version": "1",
+        "batch_id": "orders",
+        "scope_revision": 1,
+        "source_path": "docs/aidlc/ideation/scenario-module-mapping.md",
+        "record_digest": "d7a3f74329a70109397303e571353cf795e8c81e66dde0184153ab76bba039a4",
+        "scope_digest": "72ce8ec1445e42ce28e45ce1820954b50561dd8eca5f113b819a3aeb70101056"
+      },
+      "scope_revision": 1,
+      "effective_revision": 1,
+      "grant_ref": {
+        "version": "1",
+        "grant_id": "36b715ba-4ef9-4ed8-beb9-21ce8b41aa65",
+        "run_id": "66b4e9c0-76e5-4a8f-b0c8-9f1f5f557a81",
+        "digest": "7f770778d39ddb4186302c3542e8663c9107029ad05f055072b0527a206f9026"
+      },
+      "candidate_ref": null,
+      "environment_refs": [],
+      "acceptance_observations": [],
+      "ui_observations": [],
+      "observation_ref": null,
+      "native": {
+        "status": "blocked",
+        "failures": [
+          {
+            "sensor": "test-quality",
+            "passed": false,
+            "stage_instance": "code-generation@module:project@unit:default",
+            "message": "Evidence rejected at E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-p1-10-orders-r6\\.aidlc\\evidence\\code-generation\\project\\default\\test-quality.json: source_revision.scope_digest no longer matches the inputs-v2:module:project:unit:default:autonomy-v1 scope",
+            "status": "blocked"
+          },
+          {
+            "sensor": "traceability-matrix",
+            "passed": false,
+            "stage_instance": "code-generation@module:project@unit:default",
+            "message": "Evidence rejected at E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-p1-10-orders-r6\\.aidlc\\evidence\\code-generation\\project\\default\\traceability-matrix.json: source_revision.scope_digest no longer matches the inputs-v2:module:project:unit:default:autonomy-v1 scope",
+            "status": "blocked"
+          },
+          {
+            "sensor": "structural-invariants",
+            "passed": false,
+            "stage_instance": "code-generation@module:project@unit:default",
+            "message": "Evidence rejected at E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-p1-10-orders-r6\\.aidlc\\evidence\\code-generation\\project\\default\\structural-invariants.json: source_revision.scope_digest no longer matches the inputs-v2:module:project:unit:default:autonomy-v1 scope",
+            "status": "blocked"
+          },
+          {
+            "stage_instance": "build-and-test",
+            "sensor": "stage-completion",
+            "status": "incomplete",
+            "message": "required Native instance is not completed"
+          },
+          {
+            "sensor": "build-test-evidence",
+            "passed": false,
+            "message": "Evidence not found: E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-p1-10-orders-r6\\.aidlc\\evidence\\build-and-test\\build-test-evidence.json. Run the controlled evidence producer first.",
+            "stage_instance": "build-and-test",
+            "status": "blocked"
+          },
+          {
+            "sensor": "test-quality",
+            "passed": false,
+            "message": "Evidence not found: E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-p1-10-orders-r6\\.aidlc\\evidence\\build-and-test\\test-quality.json. Run the controlled evidence producer first.",
+            "stage_instance": "build-and-test",
+            "status": "blocked"
+          }
+        ],
+        "refs": [
+          {
+            "path": ".aidlc/evidence/test-case-derivation/project/test-case-derivation.json",
+            "digest": "7c92fe76299060822cde8a1e71959c1edb990cdeafc8996e9ad09688d3aaaca6",
+            "sensor": "test-case-derivation",
+            "stage_instance": "test-case-derivation@module:project",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+          },
+          {
+            "path": ".aidlc/evidence/tdd/project/default/red-test-evidence.json",
+            "digest": "4477495332e6f2cd9b3dd52fe3f34dcc9af3cc81fbe9fab450a3ed285732a2df",
+            "sensor": "red-test-evidence",
+            "stage_instance": "tdd@module:project@unit:default",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+          },
+          {
+            "path": ".aidlc/evidence/tdd/project/default/baseline-test-evidence.json",
+            "digest": "92bfaaecbb8c89e752d69d8dfc9b3e22ea8bcb5a77e2001ddfd5f2b677804547",
+            "sensor": "baseline-test-evidence",
+            "stage_instance": "tdd@module:project@unit:default",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+          },
+          {
+            "path": ".aidlc/evidence/code-generation/project/default/green-test-evidence.json",
+            "digest": "ec97442d87fb1ec4d92d5e93a3ed9f5e7aa0e0fa3aa50243908480043be6797b",
+            "sensor": "green-test-evidence",
+            "stage_instance": "code-generation@module:project@unit:default",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+          },
+          {
+            "path": ".aidlc/evidence/code-generation/project/default/test-quality.json",
+            "digest": "649bce40e6b14d2910c05e1acda0f583cce438ea27bc9c5bc4d7571a05f3d616",
+            "sensor": "test-quality",
+            "stage_instance": "code-generation@module:project@unit:default",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+          },
+          {
+            "path": ".aidlc/evidence/code-generation/project/default/traceability-matrix.json",
+            "digest": "56d088d221439e825677f3733f638c5033f91662ee43f8e7c3e286d37950fb92",
+            "sensor": "traceability-matrix",
+            "stage_instance": "code-generation@module:project@unit:default",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+          },
+          {
+            "path": ".aidlc/evidence/code-generation/project/default/structural-invariants.json",
+            "digest": "fe548bb1ade405649fa53b152c798e7d943618f1c1c4785b1ed10ae0888db5d8",
+            "sensor": "structural-invariants",
+            "stage_instance": "code-generation@module:project@unit:default",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+          },
+          {
+            "path": ".aidlc/evidence/code-review/project/default/review-evidence.json",
+            "digest": "d7d6484701367c0774f5ba7cf785a4e4cc05d803fc48e0a5ee52e1f776c925eb",
+            "sensor": "review-evidence",
+            "stage_instance": "code-review@module:project@unit:default",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+          },
+          {
+            "path": ".aidlc/evidence/code-review/project/default/test-quality.json",
+            "digest": "076c84dfcb0c57eb5861c754e7eeb4699fe1e1e7778e5a4807e907481107a0de",
+            "sensor": "test-quality",
+            "stage_instance": "code-review@module:project@unit:default",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+          },
+          {
+            "path": ".aidlc/evidence/code-review/project/default/traceability-matrix.json",
+            "digest": "0611299845d366583e7d27f980522b8769582485bd2cca4f3b04a380b3d26578",
+            "sensor": "traceability-matrix",
+            "stage_instance": "code-review@module:project@unit:default",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+          }
+        ],
+        "checked": [
+          {
+            "stage_instance": "test-case-derivation@module:project",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+            "sensors": [
+              "test-case-derivation",
+              "no-todo"
+            ],
+            "status": "passed"
+          },
+          {
+            "stage_instance": "tdd@module:project@unit:default",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+            "sensors": [
+              "red-test-evidence",
+              "baseline-test-evidence",
+              "no-todo"
+            ],
+            "status": "passed"
+          },
+          {
+            "stage_instance": "code-generation@module:project@unit:default",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+            "sensors": [
+              "doc-cascade",
+              "green-test-evidence",
+              "test-quality",
+              "traceability-matrix",
+              "structural-invariants",
+              "no-todo",
+              "traceability"
+            ],
+            "status": "blocked"
+          },
+          {
+            "stage_instance": "code-review@module:project@unit:default",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+            "sensors": [
+              "reviewer-required",
+              "review-evidence",
+              "test-quality",
+              "traceability-matrix",
+              "no-todo",
+              "traceability"
+            ],
+            "status": "passed"
+          },
+          {
+            "stage_instance": "build-and-test",
+            "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+            "sensors": [
+              "doc-cascade",
+              "build-test-evidence",
+              "test-quality",
+              "no-todo"
+            ],
+            "status": "blocked"
+          }
+        ],
+        "global_review_required": false
+      },
+      "review_refs": [
+        {
+          "path": ".aidlc/evidence/code-review/project/default/review-evidence.json",
+          "digest": "d7d6484701367c0774f5ba7cf785a4e4cc05d803fc48e0a5ee52e1f776c925eb",
+          "sensor": "review-evidence",
+          "stage_instance": "code-review@module:project@unit:default",
+          "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+        },
+        {
+          "path": ".aidlc/evidence/code-review/project/default/test-quality.json",
+          "digest": "076c84dfcb0c57eb5861c754e7eeb4699fe1e1e7778e5a4807e907481107a0de",
+          "sensor": "test-quality",
+          "stage_instance": "code-review@module:project@unit:default",
+          "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+        },
+        {
+          "path": ".aidlc/evidence/code-review/project/default/traceability-matrix.json",
+          "digest": "0611299845d366583e7d27f980522b8769582485bd2cca4f3b04a380b3d26578",
+          "sensor": "traceability-matrix",
+          "stage_instance": "code-review@module:project@unit:default",
+          "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+        }
+      ],
+      "build_refs": [],
+      "test_refs": [
+        {
+          "path": ".aidlc/evidence/test-case-derivation/project/test-case-derivation.json",
+          "digest": "7c92fe76299060822cde8a1e71959c1edb990cdeafc8996e9ad09688d3aaaca6",
+          "sensor": "test-case-derivation",
+          "stage_instance": "test-case-derivation@module:project",
+          "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+        },
+        {
+          "path": ".aidlc/evidence/tdd/project/default/red-test-evidence.json",
+          "digest": "4477495332e6f2cd9b3dd52fe3f34dcc9af3cc81fbe9fab450a3ed285732a2df",
+          "sensor": "red-test-evidence",
+          "stage_instance": "tdd@module:project@unit:default",
+          "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+        },
+        {
+          "path": ".aidlc/evidence/tdd/project/default/baseline-test-evidence.json",
+          "digest": "92bfaaecbb8c89e752d69d8dfc9b3e22ea8bcb5a77e2001ddfd5f2b677804547",
+          "sensor": "baseline-test-evidence",
+          "stage_instance": "tdd@module:project@unit:default",
+          "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+        },
+        {
+          "path": ".aidlc/evidence/code-generation/project/default/green-test-evidence.json",
+          "digest": "ec97442d87fb1ec4d92d5e93a3ed9f5e7aa0e0fa3aa50243908480043be6797b",
+          "sensor": "green-test-evidence",
+          "stage_instance": "code-generation@module:project@unit:default",
+          "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+        },
+        {
+          "path": ".aidlc/evidence/code-generation/project/default/test-quality.json",
+          "digest": "649bce40e6b14d2910c05e1acda0f583cce438ea27bc9c5bc4d7571a05f3d616",
+          "sensor": "test-quality",
+          "stage_instance": "code-generation@module:project@unit:default",
+          "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+        },
+        {
+          "path": ".aidlc/evidence/code-review/project/default/test-quality.json",
+          "digest": "076c84dfcb0c57eb5861c754e7eeb4699fe1e1e7778e5a4807e907481107a0de",
+          "sensor": "test-quality",
+          "stage_instance": "code-review@module:project@unit:default",
+          "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d"
+        }
+      ],
+      "risk_refs": [],
+      "decision_refs": [
+        {
+          "decision_id": "orders-gap-001-internal-layout",
+          "revision": 1,
+          "effective_revision": 1,
+          "policy_clause": "fallback:internal-layout",
+          "chosen_option": "Keep the existing single exported async function without adding a public API",
+          "unit_ref": {
+            "workflow_ref": {
+              "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+              "owner_kind": "global"
+            },
+            "module_id": "project",
+            "unit_id": "default",
+            "definition_digest": "453f5e5c3475c6f0e4285e6312418e1b1f01e26ace1b8c6c345b346b6b20a50a"
+          },
+          "human_review": {
+            "status": "pending"
+          },
+          "implementation_refs": [],
+          "validation_refs": [],
+          "record_status": "incomplete",
+          "completion_blockers": [
+            "implementation-missing",
+            "validation-missing",
+            "validation-check-missing:complete-acceptance"
+          ]
+        }
+      ],
+      "human_review_summary": {
+        "pending": 1,
+        "accepted": 0,
+        "change-requested": 0,
+        "rejected": 0,
+        "status": "pending"
+      },
+      "decision_digest": "fafd44cd570d68f3f3ba16637c358e7a217f3e903834d3589bb717dd34a6c826",
+      "delivery_artifacts": [
+        {
+          "artifact_id": "candidate",
+          "kind": "candidate",
+          "required": true,
+          "target_path": "delivery/candidate.md",
+          "status": "present",
+          "input_ref": {
+            "repository_id": "project",
+            "path": "delivery/candidate.md",
+            "digest_mode": "raw-file",
+            "digest": "170eb5010bdfd20ef125a1381fcc17094715d6f15a8e7293cb03bd8a7676c486"
+          }
+        },
+        {
+          "artifact_id": "run-instructions",
+          "kind": "run-instructions",
+          "required": true,
+          "target_path": "delivery/run.md",
+          "status": "missing",
+          "input_ref": null
+        },
+        {
+          "artifact_id": "evidence-index",
+          "kind": "evidence-index",
+          "required": true,
+          "target_path": "delivery/evidence.md",
+          "status": "missing",
+          "input_ref": null
+        },
+        {
+          "artifact_id": "decision-index",
+          "kind": "decision-index",
+          "required": true,
+          "target_path": "delivery/decisions.md",
+          "status": "missing",
+          "input_ref": null
+        }
+      ],
+      "dependency_refs": [],
+      "checks": [
+        {
+          "check_id": "delegated-records",
+          "status": "passed"
+        },
+        {
+          "check_id": "delegated-completeness",
+          "status": "incomplete",
+          "reason": "orders-gap-001-internal-layout:implementation-missing; orders-gap-001-internal-layout:validation-missing; orders-gap-001-internal-layout:validation-check-missing:complete-acceptance"
+        },
+        {
+          "check_id": "admission",
+          "status": "blocked",
+          "reason": "Error: ADMISSION_INPUT_CHANGED: receipt expired/clock invalid"
+        },
+        {
+          "check_id": "observation-receipt",
+          "status": "incomplete",
+          "reason": "Error: AUTONOMY_SCHEMA_INVALID: missing/linked input .aidlc/evidence/autonomous-observations/orders/1/current.json"
+        },
+        {
+          "check_id": "current-matrix",
+          "status": "incomplete",
+          "reason": "Error: AUTONOMY_SCHEMA_INVALID: missing/linked input .aidlc/evidence/autonomous-observations/orders/1/current.json"
+        },
+        {
+          "check_id": "final-candidate",
+          "status": "incomplete",
+          "reason": "No fixed clean final candidate"
+        },
+        {
+          "check_id": "dependency-consumption",
+          "status": "passed"
+        },
+        {
+          "check_id": "native:code-generation@module:project@unit:default:test-quality",
+          "status": "blocked",
+          "reason": "Evidence rejected at E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-p1-10-orders-r6\\.aidlc\\evidence\\code-generation\\project\\default\\test-quality.json: source_revision.scope_digest no longer matches the inputs-v2:module:project:unit:default:autonomy-v1 scope"
+        },
+        {
+          "check_id": "native:code-generation@module:project@unit:default:traceability-matrix",
+          "status": "blocked",
+          "reason": "Evidence rejected at E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-p1-10-orders-r6\\.aidlc\\evidence\\code-generation\\project\\default\\traceability-matrix.json: source_revision.scope_digest no longer matches the inputs-v2:module:project:unit:default:autonomy-v1 scope"
+        },
+        {
+          "check_id": "native:code-generation@module:project@unit:default:structural-invariants",
+          "status": "blocked",
+          "reason": "Evidence rejected at E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-p1-10-orders-r6\\.aidlc\\evidence\\code-generation\\project\\default\\structural-invariants.json: source_revision.scope_digest no longer matches the inputs-v2:module:project:unit:default:autonomy-v1 scope"
+        },
+        {
+          "check_id": "native:build-and-test:stage-completion",
+          "status": "incomplete",
+          "reason": "required Native instance is not completed"
+        },
+        {
+          "check_id": "native:build-and-test:build-test-evidence",
+          "status": "blocked",
+          "reason": "Evidence not found: E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-p1-10-orders-r6\\.aidlc\\evidence\\build-and-test\\build-test-evidence.json. Run the controlled evidence producer first."
+        },
+        {
+          "check_id": "native:build-and-test:test-quality",
+          "status": "blocked",
+          "reason": "Evidence not found: E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-p1-10-orders-r6\\.aidlc\\evidence\\build-and-test\\test-quality.json. Run the controlled evidence producer first."
+        },
+        {
+          "check_id": "artifact:candidate",
+          "status": "passed"
+        },
+        {
+          "check_id": "artifact:run-instructions",
+          "status": "incomplete",
+          "reason": "Error: AUTONOMY_SCHEMA_INVALID: missing/linked input delivery/run.md"
+        },
+        {
+          "check_id": "artifact:evidence-index",
+          "status": "incomplete",
+          "reason": "Error: AUTONOMY_SCHEMA_INVALID: missing/linked input delivery/evidence.md"
+        },
+        {
+          "check_id": "artifact:decision-index",
+          "status": "incomplete",
+          "reason": "Error: AUTONOMY_SCHEMA_INVALID: missing/linked input delivery/decisions.md"
+        }
+      ],
+      "source_refs": [
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/test-case-derivation/project/test-case-derivation.json",
+          "digest_mode": "raw-file",
+          "digest": "7c92fe76299060822cde8a1e71959c1edb990cdeafc8996e9ad09688d3aaaca6"
+        },
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/tdd/project/default/red-test-evidence.json",
+          "digest_mode": "raw-file",
+          "digest": "4477495332e6f2cd9b3dd52fe3f34dcc9af3cc81fbe9fab450a3ed285732a2df"
+        },
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/tdd/project/default/baseline-test-evidence.json",
+          "digest_mode": "raw-file",
+          "digest": "92bfaaecbb8c89e752d69d8dfc9b3e22ea8bcb5a77e2001ddfd5f2b677804547"
+        },
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/code-generation/project/default/green-test-evidence.json",
+          "digest_mode": "raw-file",
+          "digest": "ec97442d87fb1ec4d92d5e93a3ed9f5e7aa0e0fa3aa50243908480043be6797b"
+        },
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/code-generation/project/default/test-quality.json",
+          "digest_mode": "raw-file",
+          "digest": "649bce40e6b14d2910c05e1acda0f583cce438ea27bc9c5bc4d7571a05f3d616"
+        },
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/code-generation/project/default/traceability-matrix.json",
+          "digest_mode": "raw-file",
+          "digest": "56d088d221439e825677f3733f638c5033f91662ee43f8e7c3e286d37950fb92"
+        },
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/code-generation/project/default/structural-invariants.json",
+          "digest_mode": "raw-file",
+          "digest": "fe548bb1ade405649fa53b152c798e7d943618f1c1c4785b1ed10ae0888db5d8"
+        },
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/code-review/project/default/review-evidence.json",
+          "digest_mode": "raw-file",
+          "digest": "d7d6484701367c0774f5ba7cf785a4e4cc05d803fc48e0a5ee52e1f776c925eb"
+        },
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/code-review/project/default/test-quality.json",
+          "digest_mode": "raw-file",
+          "digest": "076c84dfcb0c57eb5861c754e7eeb4699fe1e1e7778e5a4807e907481107a0de"
+        },
+        {
+          "repository_id": "project",
+          "path": ".aidlc/evidence/code-review/project/default/traceability-matrix.json",
+          "digest_mode": "raw-file",
+          "digest": "0611299845d366583e7d27f980522b8769582485bd2cca4f3b04a380b3d26578"
+        },
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/handoff.md",
+          "digest_mode": "raw-file",
+          "digest": "95f783ed9384634cf2990a321a6a963f224516440b61e70d619bfceb26423fdc"
+        },
+        {
+          "repository_id": "project",
+          "path": "delivery/candidate.md",
+          "digest_mode": "raw-file",
+          "digest": "170eb5010bdfd20ef125a1381fcc17094715d6f15a8e7293cb03bd8a7676c486"
+        }
+      ],
+      "state_facts": [
+        {
+          "workflow_id": "5e90cb94-5db7-4b34-8076-0850d3295e1d",
+          "kind": {
+            "kind": "global"
+          },
+          "baseline": null,
+          "adoption": null,
+          "profile": null,
+          "completed": [
+            "code-generation@module:project@unit:default",
+            "code-review@module:project@unit:default",
+            "tdd@module:project@unit:default",
+            "test-case-derivation@module:project"
+          ],
+          "skipped": [],
+          "choices": []
+        }
+      ],
+      "native_context": "d921ff7c5982f94b9b3fdfa313ef3449b0ec5bb527130dd1281c8a1a5db869df",
+      "working_revision": {
+        "commit": "e0f5b9ac899aaaea6eeaa3464c1e6546c7de9c94",
+        "worktree_digest": "da9d3916f6313976c6a5a5411a6061319175ce798ca5d362327e29b91cd8b1b7"
+      },
+      "checker_digest": "b40e7cf08a6bf49366d8f11a570fc63e72d83778ca5f778b1cfe43df8a37f7ba",
+      "started_at": "2026-11-09T09:09:15.298Z",
+      "ended_at": "2026-11-09T09:09:19.84Z",
+      "valid_until": "2026-11-09T09:09:19.84Z",
+      "engineering_result": "blocked",
+      "lifecycle_status": "blocked",
+      "batch_completed": false,
+      "workflow_completed": false,
+      "business_verified": false,
+      "producer": {
+        "name": "loeyae-aidlc-batch-result",
+        "mode": "controlled",
+        "execution_id": "e3e2b779-a726-4271-8152-3092c98405c6",
+        "stage_instance": "workspace-detection"
+      },
+      "convergence_digest": "d6c4cf56bf8d8b7ca0e0bc0e6da865d29172d4f9eaaf1c505932b0668319509b",
+      "result_id": "4d83192a-730c-4a27-a5ce-bf112fbebce2",
+      "issuer_provenance": {
+        "key_id": "7fa7d104022a416777ae6fdb4dd66dbd53878f12d2572b34565df25b404359eb",
+        "algorithm": "ed25519",
+        "signature": "YlDE33Zr8ww6T4QZjBhPt4HSID6quBe6AicVb1/Lp7qfUfN3R0kNJMc4ad1Rt+KJBAM6pbqtMsuD1nVkiJ9GCA=="
+      },
+      "result_ref": {
+        "version": "1",
+        "result_id": "4d83192a-730c-4a27-a5ce-bf112fbebce2",
+        "batch_id": "orders",
+        "scope_revision": 1,
+        "path": ".aidlc/evidence/autonomous-results/orders/1/4d83192a-730c-4a27-a5ce-bf112fbebce2.json",
+        "digest": "de831cdf876ead1a8fbbfc0beaa695f863249866d300d5ea2a09ea86a57b72a9"
+      },
+      "current_status": "stale",
+      "current_blockers": [
+        "Error: RESULT_NATIVE_CONTEXT_CHANGED",
+        "Error: RESULT_WORKING_INPUT_CHANGED",
+        "Error: RESULT_SOURCE_CHANGED: .aidlc/evidence/code-generation/project/default/test-quality.json"
+      ],
+      "execution_authorized": false
+    }
+  },
+  "business_verified": false
+}

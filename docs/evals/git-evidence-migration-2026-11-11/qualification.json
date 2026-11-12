@@ -1,0 +1,14 @@
+{
+  "name": "qualification",
+  "argv": [
+    "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "--import",
+    "tsx",
+    "tests/test_native_channel_qualification.ts"
+  ],
+  "duration_ms": 8096.979800000001,
+  "exit_code": 0,
+  "error": null,
+  "signal": null,
+  "real_business_run": false
+}

@@ -1,0 +1,1 @@
+PASS captured repair class reentry: original operation not dispatched, raw directive retained, driver consumes once, hard blocks and original deadline preserved

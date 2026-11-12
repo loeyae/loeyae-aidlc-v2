@@ -1,0 +1,14 @@
+{
+  "name": "short",
+  "argv": [
+    "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "--import",
+    "tsx",
+    "tests/test_git_evidence_simplification.ts"
+  ],
+  "duration_ms": 4405.6422,
+  "exit_code": 0,
+  "error": null,
+  "signal": null,
+  "real_business_run": false
+}

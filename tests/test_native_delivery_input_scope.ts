@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';import {rmSync} from 'node:fs';import {fixture,write,git} from './mars244_fixture';import {phaseExecutionRevision,evidenceScopeForInstance} from '../core/tools/aidlc-workflow-layout';import {readScopedSourceRevision} from '../core/tools/aidlc-revision';import {autonomyDigest} from '../core/tools/aidlc-autonomy-files';import {autonomyDeliveryReportPaths} from '../core/tools/aidlc-dependency-inputs';
+const instance='code-generation@module:shop@unit:api',f=fixture(instance),source='docs/aidlc/ideation/scenario-module-mapping.md',reports=['delivery/run.md','delivery/evidence.md','delivery/decisions.md'];
+const batch:any={schema:'aidlc.autonomy/v1',record_type:'batch',record_id:'orders',workflow_id:f.state.workflow_id,revision:1,batch_id:'orders',scope_revision:1,inputs:[{path:f.base+'/requirements.md'}],delivery_artifacts:reports.map((target_path,i)=>({artifact_id:'report-'+i,kind:['run-instructions','evidence-index','decision-index'][i],target_path,required:true}))};
+const seal=()=>{write(f.root,source,'```aidlc-autonomy\n'+JSON.stringify({schema:'aidlc.autonomy-source/v1',records:[batch]})+'\n```\n');f.state.autonomy_contract_version='1';f.state.autonomy_batch={version:'1',batch_id:'orders',scope_revision:1,source_path:source,record_digest:autonomyDigest(batch),scope_digest:'a'.repeat(64)};f.persist();};
+const phase=()=>phaseExecutionRevision(f.root,instance,[]).scope_digest,full=()=>readScopedSourceRevision(f.root,evidenceScopeForInstance(f.root,instance),[]).scope_digest;
+try{
+ (f.units[0] as any).autonomy_version='1';write(f.root,f.base+'/unit-manifest.json',{schema_version:1,module_id:'shop',units:f.units});seal();
+ const before=phase(),ordinary=full();for(const p of reports)write(f.root,p,'# Actual delivery record\n');assert.equal(phase(),before);assert.notEqual(full(),ordinary);git(f.root,'add','.');git(f.root,'commit','-qm','delivery records');assert.equal(phase(),before);
+ for(const p of reports){write(f.root,p,'# Updated record\n');assert.equal(phase(),before);}
+ write(f.root,'delivery/unknown.md','Unknown input');assert.notEqual(phase(),before);rmSync(f.root+'/delivery/unknown.md');
+ write(f.root,'src/shop/api/code.ts','Changed behavior');assert.notEqual(phase(),before);write(f.root,'src/shop/api/code.ts','api');assert.equal(phase(),before);
+ for(const p of ['delivery/candidate.md','delivery/run.cjs','delivery/other.md','src/shop/api/data.md','shared/report.md'])write(f.root,p,'before');
+ batch.delivery_artifacts.push({kind:'candidate',target_path:'delivery/candidate.md'},{kind:'run-instructions',target_path:'delivery/run.cjs'},{kind:'other',target_path:'delivery/other.md'},{kind:'run-instructions',target_path:'src/shop/api/data.md'},{kind:'evidence-index',target_path:'shared/report.md'});
+ f.units[0].evidence_inputs.shared_paths.push('shared/report.md');write(f.root,f.base+'/unit-manifest.json',{schema_version:1,module_id:'shop',units:f.units});seal();
+ for(const p of ['delivery/candidate.md','delivery/run.cjs','delivery/other.md','src/shop/api/data.md','shared/report.md']){const prior=phase();write(f.root,p,'changed');assert.notEqual(phase(),prior,p+' remains an input');}
+ batch.baseline_inputs=[{path:'delivery/run.md'}];seal();const protectedBefore=phase();write(f.root,'delivery/run.md','baseline changed');assert.notEqual(phase(),protectedBefore,'explicit baseline outranks report role');
+ const selected=autonomyDeliveryReportPaths(f.root,f.state.workflow_id,f.state.autonomy_batch);assert.ok(!selected.includes('delivery/run.md'));assert.ok(selected.includes('delivery/evidence.md'));
+ batch.delivery_artifacts[1].target_path='delivery/new.md';write(f.root,source,'```aidlc-autonomy\n'+JSON.stringify({schema:'aidlc.autonomy-source/v1',records:[batch]})+'\n```\n');assert.throws(phase,/adopted delivery declaration changed/);
+ seal();delete f.state.autonomy_contract_version;delete f.state.autonomy_batch;f.persist();const unadopted=phase();write(f.root,'delivery/decisions.md','unadopted change');assert.notEqual(phase(),unadopted);
+ console.log('PASS declared delivery creation/edit/commit preserve execution; full scope, code, shared/baseline, candidate, unknown and executable inputs remain bound; changed declarations and unadopted scopes cannot gain exclusions');
+}finally{rmSync(f.root,{recursive:true,force:true});}

@@ -11,10 +11,6 @@ consumes:
   - docs/aidlc/modules/{module-id}/inception/user-stories.md
 produces:
   - docs/aidlc/modules/{module-id}/inception/application-design.md
-  - docs/aidlc/modules/{module-id}/inception/application-design/components.md
-  - docs/aidlc/modules/{module-id}/inception/application-design/component-methods.md
-  - docs/aidlc/modules/{module-id}/inception/application-design/application-services.md
-  - docs/aidlc/modules/{module-id}/inception/application-design/component-dependency.md
   - .aidlc/evidence/application-design/{module-id}/diagram-contract.json
   - .aidlc/evidence/application-design/{module-id}/traceability-matrix.json
   - .aidlc/evidence/application-design/{module-id}/structural-invariants.json
@@ -24,6 +20,10 @@ condition: has_application_design_needs
 approval: block
 ---
 # 应用设计 - 详细步骤
+
+## 单一设计来源
+
+本阶段只维护一份 application-design.md，首部写入 `<!-- aidlc-design: application-design/v1 -->`，并使用二级标题：`组件列表`、`组件方法`、`应用服务`、`组件依赖`。各节必须有实质内容；不适用项说明原因。原先四份子文档的语义要求全部保留，本文后续链接均指向这些章节；旧项目未采用此标记时兼容读取原文件，不自动删除。测试用例、真实验证证据、用户选择的 UI/图表源仍按各自契约保存。
 
 ## 目的
 **高层组件识别和应用服务/编排器设计**
@@ -56,10 +56,10 @@ approval: block
 
 ### 3. 在计划中包含强制设计产物
 - **始终**在设计计划中包含这些强制产物：
-  - [ ] 生成 components.md，包含组件定义和高层职责
-  - [ ] 生成 component-methods.md，包含方法签名（详细业务规则在功能设计中定义）
-  - [ ] 生成 application-services.md，包含应用服务/编排器定义和编排模式
-  - [ ] 生成 component-dependency.md，包含依赖关系和通信模式
+  - [ ] 生成 application-design.md#组件列表，包含组件定义和高层职责
+  - [ ] 生成 application-design.md#组件方法，包含方法签名（详细业务规则在功能设计中定义）
+  - [ ] 生成 application-design.md#应用服务，包含应用服务/编排器定义和编排模式
+  - [ ] 生成 application-design.md#组件依赖，包含依赖关系和通信模式
   - [ ] 验证设计完整性和一致性
 
 **分布式系统产物**（按条件）：
@@ -147,20 +147,20 @@ approval: block
 
 ### 10. 生成应用设计产物
 - 执行批准的计划生成设计产物
-- 创建 `docs/aidlc/modules/{module-id}/inception/application-design/components.md`，包含：
+- 创建 `docs/aidlc/modules/{module-id}/inception/application-design.md#组件列表`，包含：
   - 组件名称和用途
   - 组件职责
   - 组件接口
-- 创建 `docs/aidlc/modules/{module-id}/inception/application-design/component-methods.md`，包含：
+- 创建 `docs/aidlc/modules/{module-id}/inception/application-design.md#组件方法`，包含：
   - 每个组件的方法签名
   - 每个方法的高层用途
   - 输入/输出类型
   - 注意：详细业务规则将在功能设计中定义（按单元，CONSTRUCTION 阶段）
-- 创建 `docs/aidlc/modules/{module-id}/inception/application-design/application-services.md`，包含：
+- 创建 `docs/aidlc/modules/{module-id}/inception/application-design.md#应用服务`，包含：
   - 应用服务/编排器定义
   - 边界内编排职责
   - 组件交互和用例编排
-- 创建 `docs/aidlc/modules/{module-id}/inception/application-design/component-dependency.md`，包含：
+- 创建 `docs/aidlc/modules/{module-id}/inception/application-design.md#组件依赖`，包含：
   - 显示关系的依赖矩阵（表格）
   - 组件间通信模式
   - 组件依赖图和数据流图——按 `core-workflow.md` 的“文档图表格式”默认写 Mermaid fenced block；仅用户明确要求 SVG 时调用 `aidlc-diagram-design`：
@@ -172,7 +172,7 @@ approval: block
 
 触发条件：项目为存量改造（逆向工程产物存在），且设计中存在对现有组件、方法或服务的结构性变更意图。
 
-在 `components.md`、`component-methods.md`、`component-dependency.md`、`application-services.md` 中，对每个涉及结构性变更的条目，在其名称后标注变更意图标签：
+在 `application-design.md#组件列表`、`application-design.md#组件方法`、`application-design.md#组件依赖`、`application-design.md#应用服务` 中，对每个涉及结构性变更的条目，在其名称后标注变更意图标签：
 
 | 标签 | 含义 | 示例 |
 |------|------|------|

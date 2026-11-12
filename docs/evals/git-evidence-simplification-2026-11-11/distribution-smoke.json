@@ -1,0 +1,28 @@
+{
+  "kind": "actual-selected-distribution-cli-smoke",
+  "harness": "codex",
+  "observations": [
+    {
+      "mode": "adopted",
+      "guidance": {
+        "mode": "autonomous-batch",
+        "protocol_file": "core/knowledge/protocols/common-autonomous-execution.md",
+        "routine_stage_confirmation": "not-required",
+        "module_selection": "frozen-implement-units",
+        "protected_gates": "unchanged",
+        "execution_authorized": false
+      },
+      "protocols": [
+        "core/knowledge/protocols/common-autonomous-execution.md"
+      ],
+      "readonly": true
+    },
+    {
+      "mode": "unadopted",
+      "route": "print",
+      "new_authority_created": false,
+      "readonly": true
+    }
+  ],
+  "business_verified": false
+}

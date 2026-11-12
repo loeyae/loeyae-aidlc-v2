@@ -28,7 +28,8 @@ import { join, relative } from "path";
 import { runSync } from "./aidlc-spawn";
 import { contractTableCells, contractTableRowsForModule } from "./aidlc-contract-table";
 import { readModuleManifest } from "./aidlc-execution-context";
-import { lightAuditPath, lightStatePath, parseLightWorkflowState, type WorkflowState } from "./aidlc-light-state";
+import { lightAuditPath, lightStatePath, loadWorkflowState, renderLightWorkflowState, parseLightWorkflowState, type WorkflowState } from "./aidlc-light-state";
+import { factStorageActive } from "./aidlc-workflow-facts";
 
 export const LEDGER_REMOTE = "origin";
 const MODULE_ID = /^[a-z0-9](?:[a-z0-9-]{0,62})$/;
@@ -353,8 +354,8 @@ export function checkpointModule(root: string, moduleId: string, trigger: string
     if (!gitRepositoryAvailable(root)) return { ...base, status: "skipped", reason: "not a git repository", published: false };
     const ref = { kind: "module" as const, module_id: moduleId };
     const statePath = lightStatePath(root, ref);
-    if (!existsSync(statePath)) return { ...base, status: "skipped", reason: `module ${moduleId} has no workflow state`, published: false };
-    const stateText = readFileSync(statePath);
+    if (!existsSync(statePath) && !factStorageActive(root, statePath)) return { ...base, status: "skipped", reason: `module ${moduleId} has no workflow state`, published: false };
+    const stateText = factStorageActive(root, statePath) ? Buffer.from(renderLightWorkflowState(loadWorkflowState(root, ref)!)) : readFileSync(statePath);
     const state = parseLightWorkflowState(stateText.toString("utf8").replace(/\r\n/g, "\n"));
     if (state.workflow_kind !== "module" || state.module_id !== moduleId) return { ...base, status: "skipped", reason: `${statePath} is not the module workflow of ${moduleId}`, published: false };
     const auditPath = lightAuditPath(root, ref);

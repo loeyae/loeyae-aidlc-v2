@@ -1,0 +1,192 @@
+{
+  "schema": "aidlc.git-evidence-simplification-engineering/v1",
+  "date": "2026-11-11",
+  "scope": "G1-G5 compatibility migration",
+  "all_selected_checks_passed": true,
+  "full_git_state_migration_complete": false,
+  "pending": [
+    "G6 authoritative fact migration and reconstructible progress",
+    "G7 canonical design/acceptance with derived artifacts",
+    "G8 checker dependency isolation, durable event coalescing and lock diagnostics",
+    "G9 verified native host adapter"
+  ],
+  "results": [
+    {
+      "name": "short",
+      "argv": [
+        "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+        "--import",
+        "tsx",
+        "tests/test_git_evidence_simplification.ts"
+      ],
+      "duration_ms": 4405.6422,
+      "exit_code": 0,
+      "error": null,
+      "signal": null,
+      "real_business_run": false
+    },
+    {
+      "name": "control",
+      "argv": [
+        "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+        "--import",
+        "tsx",
+        "tests/test_control_preparation.ts"
+      ],
+      "duration_ms": 6017.367299999998,
+      "exit_code": 0,
+      "error": null,
+      "signal": null,
+      "real_business_run": false
+    },
+    {
+      "name": "grants",
+      "argv": [
+        "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+        "--import",
+        "tsx",
+        "tests/test_execution_grant.ts"
+      ],
+      "duration_ms": 59203.526000000005,
+      "exit_code": 0,
+      "error": null,
+      "signal": null,
+      "real_business_run": false
+    },
+    {
+      "name": "recovery",
+      "argv": [
+        "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+        "--import",
+        "tsx",
+        "tests/test_run_recovery.ts"
+      ],
+      "duration_ms": 13349.907900000006,
+      "exit_code": 0,
+      "error": null,
+      "signal": null,
+      "real_business_run": false
+    },
+    {
+      "name": "rules",
+      "argv": [
+        "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+        "--import",
+        "tsx",
+        "tests/test_autonomous_rules.ts"
+      ],
+      "duration_ms": 26954.5199,
+      "exit_code": 0,
+      "error": null,
+      "signal": null,
+      "real_business_run": false
+    },
+    {
+      "name": "scope",
+      "argv": [
+        "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+        "--import",
+        "tsx",
+        "tests/test_mars244_scope.ts"
+      ],
+      "duration_ms": 6720.6048,
+      "exit_code": 0,
+      "error": null,
+      "signal": null,
+      "real_business_run": false
+    },
+    {
+      "name": "typecheck",
+      "argv": [
+        "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+        "node_modules/typescript/bin/tsc",
+        "--noEmit"
+      ],
+      "duration_ms": 3801.6596,
+      "exit_code": 0,
+      "error": null,
+      "signal": null,
+      "real_business_run": false
+    },
+    {
+      "name": "build",
+      "argv": [
+        "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+        "--import",
+        "tsx",
+        "scripts/build.ts",
+        "--all"
+      ],
+      "duration_ms": 9345.161,
+      "exit_code": 0,
+      "error": null,
+      "signal": null,
+      "real_business_run": false
+    },
+    {
+      "name": "distribution",
+      "argv": [
+        "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+        "--import",
+        "tsx",
+        "tests/test_autonomous_distribution.ts"
+      ],
+      "duration_ms": 5729.351400000001,
+      "exit_code": 0,
+      "error": null,
+      "signal": null,
+      "real_business_run": false
+    }
+  ],
+  "source": {
+    "path": "source.json",
+    "sha256": "d4d276dff8a670d33eda9ee3f9182182088a4aee903fe529c722cf8e51662734"
+  },
+  "raw_evidence": {
+    "build.json": "9dcc8fa569e15e0e2533d2d526ee673dfd0fad38e1630e6aba44a20b8a37fd36",
+    "build.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "build.stdout.txt": "2748ba97a7996949df844fb4cb0880e7d19c3b7e2d37ede22b91096b6bc4e650",
+    "control.json": "9d6951bc489e493402a6bc6845328c3c4a94670890c8df548cee963bca12f30d",
+    "control.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "control.stdout.txt": "07c635d227860ce9afe5a7285ba08aa26cd3877e794fb383d010afdeeb13c534",
+    "distribution-consistency.json": "e82fbff12b19a28d30634104d0d28734e192e29c110bf8c9d03be35b3310a8d2",
+    "distribution-smoke.json": "75f4385ea5d8f1916ad6d32dd307c88ddf24d72dbca2c401171c993a46c86d53",
+    "distribution.json": "664845ade3724f26af0dbb229c2aae46db88518a7c1a558aeb887ca5b07d380d",
+    "distribution.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "distribution.stdout.txt": "5d412bbc48b9540814de3c7a8da5a565eb1ba222dd12215dd057d1a2569e0efa",
+    "grants.json": "4fd828f3dd3337891779cc5771534d0ea86f38f3171a8ed2c4d9bc97ac745ff4",
+    "grants.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "grants.stdout.txt": "53ba97094b92fb5ba7ce1829b7a61dffe3e2ca5b4090c5351fc05b516e9c776e",
+    "notify-sequence.json": "705da79a292595b64135c638f806440163a7723102d80ddd7cb34311fa5f5a99",
+    "preservation.json": "cd0a2a78c3bffb436e5bd1a2292dd0d353bb2054c50d775a0bb03cfcb6e5245f",
+    "recovery.json": "0373460bc45975d7f8feb66c81dd88ac4fd70ec41f3b2b84b6e99087bcb9a064",
+    "recovery.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "recovery.stdout.txt": "50c82f1167503cb26bd577581978ce3cc789f1b59aba3a18d3b32e5f2e3dec0a",
+    "rules.json": "fd3e240277012680590f47ea46df4d108599efad5d869ba20f006fdaaa7865f6",
+    "rules.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "rules.stdout.txt": "22115830f6bd62c06b62b6230f10bc879f944c92e85bfca2d181d014e2665e5f",
+    "scope.json": "2da13ccb14668726a16b3a8b69e3d539b5ba722187d40ccb7781d7b3cb1825d3",
+    "scope.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "scope.stdout.txt": "d1566a907c064ed9c7da058fb94ddc60824f1680e13289dfbfaa2ecb808af117",
+    "short.json": "6cacc103979eb825fe661ed174b35c905fc713300d3420d55ab71902a5f63d34",
+    "short.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "short.stdout.txt": "9fe23c852e4c931a0ac82852b1a649c60cecc453275fd753015629ad1e7af4fd",
+    "source.json": "d4d276dff8a670d33eda9ee3f9182182088a4aee903fe529c722cf8e51662734",
+    "typecheck.json": "b1fd907e0e13b060cd9831a090900adcf167571808a5ae503ab3497b580ab99a",
+    "typecheck.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "typecheck.stdout.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "plan": {
+    "path": "docs/aidlc-git-evidence-simplification-plan.md",
+    "sha256": "ebf8536e70e7fd9a1fbb0130c154f7a419687a99442d332cca4414fbf9ad8628"
+  },
+  "tests": {
+    "tests/test_git_evidence_simplification.ts": "da74001e037082de8015118e612f07c8aef81664c0a53f28f1fe6142e55834ba",
+    "tests/test_control_preparation.ts": "2ccb89b8d6288a1f5f03fd675694cf4ce8f3690e098324ea53834118e232b368",
+    "tests/test_execution_grant.ts": "40d2309af6128c7c7f698306c8f5fd588b48c7a3fb3fd725bc20fd52cacbe67f",
+    "tests/test_autonomous_rules.ts": "a3c944349c5b01173485fc78f69a06a852c0a3f19fa7ac2c76c4ade38ff0e175"
+  },
+  "real_business_runs": 0,
+  "real_h5": 0,
+  "global_install_modified": false
+}

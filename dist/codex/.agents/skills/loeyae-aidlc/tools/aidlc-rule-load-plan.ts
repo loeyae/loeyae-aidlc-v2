@@ -10,6 +10,7 @@
 import type { ExecutionProfile } from "./aidlc-execution-profile";
 import type { StageGraph, StageNode } from "./aidlc-orchestrate";
 import { selectExecutableStages } from "./aidlc-stage-selection";
+export const AUTONOMOUS_EXECUTION_PROTOCOL = "core/knowledge/protocols/common-autonomous-execution.md";
 
 export type RuleLoadPlanProfileProvenance =
   | "persisted_execution_profile"
@@ -31,6 +32,8 @@ export interface RuleLoadPlanEntry {
 }
 
 export interface RuleLoadPlan {
+  /** Present only for explicitly adopted batches; does not authorize execution. */
+  readonly supplemental_protocols?: readonly string[];
   readonly version: "1";
   readonly strategy: "selected_stage_rules_progressively";
   readonly scope: string;
@@ -44,6 +47,7 @@ export interface RuleLoadPlan {
 }
 
 export interface BuildRuleLoadPlanInput {
+  readonly autonomyContractVersion?: "1";
   readonly scope: string;
   readonly selectedOptionalStages?: readonly string[];
   readonly executionProfile?: ExecutionProfile;
@@ -149,6 +153,7 @@ export function buildRuleLoadPlan(graph: StageGraph, input: BuildRuleLoadPlanInp
   }));
 
   return {
+    ...(input.autonomyContractVersion === "1" ? { supplemental_protocols: [AUTONOMOUS_EXECUTION_PROTOCOL] } : {}),
     version: "1",
     strategy: "selected_stage_rules_progressively",
     scope: input.scope,

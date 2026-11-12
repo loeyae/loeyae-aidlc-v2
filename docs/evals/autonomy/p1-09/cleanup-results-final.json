@@ -1,0 +1,62 @@
+﻿[
+    {
+        "harness":  "claude",
+        "attempt":  1,
+        "success":  true,
+        "target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\claude"
+    },
+    {
+        "harness":  "codebuddy",
+        "attempt":  1,
+        "success":  true,
+        "target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\codebuddy"
+    },
+    {
+        "harness":  "codex",
+        "attempt":  1,
+        "success":  true,
+        "target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\codex"
+    },
+    {
+        "harness":  "deepseek",
+        "attempt":  1,
+        "success":  true,
+        "target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\deepseek"
+    },
+    {
+        "harness":  "kiro-cli",
+        "attempt":  1,
+        "success":  true,
+        "target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-cli"
+    },
+    {
+        "harness":  "kiro-crew",
+        "attempt":  1,
+        "success":  true,
+        "target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-crew"
+    },
+    {
+        "harness":  "kiro-ide",
+        "attempt":  1,
+        "success":  true,
+        "target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-ide"
+    },
+    {
+        "harness":  "opencode",
+        "attempt":  1,
+        "success":  true,
+        "target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\opencode"
+    },
+    {
+        "harness":  "qoder",
+        "attempt":  1,
+        "success":  true,
+        "target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\qoder"
+    },
+    {
+        "harness":  "zcode",
+        "attempt":  1,
+        "success":  true,
+        "target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\zcode"
+    }
+]

@@ -1,0 +1,19 @@
+{
+  "schema": "aidlc.it-07-final-audit/v1",
+  "status": "passed-engineering-only",
+  "source_snapshot_digest": "196791093833f10e9a91b3575aaba43e9fe0211c0fa0f5fa859171fd28c23e86",
+  "source_files": 735,
+  "immutable_archive_files_verified": 755,
+  "history_hashes_verified": 590,
+  "root_preserved": true,
+  "root_authority_absent": true,
+  "real_trials_permitted": false,
+  "decision": "HOLD",
+  "it07_blockers": [],
+  "it08_review_pending": true,
+  "record_hashes": {
+    "docs/aidlc-autonomous-implementation-p1.md": "7096d6dd2f902a4813e7862f0f52d03534dbd1a5119af5279a65c86977e1b585",
+    "docs/evals/autonomy/p1-10/README.md": "7812fe27d8c5418f170b97936d3e9712cf17503a303fa365a613ea2b9120c833",
+    "docs/evals/autonomy/p1-10/integration-audit-2026-11-10/review-status.json": "d62b12c5fcac083691a8c55a9c5542d50b2082dcf7c3694c1dc867663cf7138e"
+  }
+}

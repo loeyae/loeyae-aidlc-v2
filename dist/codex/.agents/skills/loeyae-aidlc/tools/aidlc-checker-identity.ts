@@ -7,25 +7,25 @@ import { fileURLToPath } from "node:url";
 
 const tools = dirname(fileURLToPath(import.meta.url));
 let memo: string | undefined;
-let sensorMemo: string | undefined;
+const sensorMemo = new Map<string, string>();
 let memoDepth = 0;
 const runtime = { node: process.version, platform: process.platform, arch: process.arch };
 
 /** Share scans within one synchronous producer invocation, never across invocations. */
 export function withSemanticCheckerIdentityMemoization<T>(operation: () => T): T {
   memo = undefined;
-  sensorMemo = undefined;
+  sensorMemo.clear();
   memoDepth++;
   try { return operation(); }
-  finally { memo = undefined; sensorMemo = undefined; memoDepth--; }
+  finally { memo = undefined; sensorMemo.clear(); memoDepth--; }
 }
 
 export function semanticCheckerDigest(refresh = false, sensor?: string): string {
-  const isolated = sensor === "template-completeness";
-  const cached = isolated ? sensorMemo : memo;
+  const isolated = sensor === "template-completeness" || sensor === "functional-design-completeness";
+  const cached = isolated ? sensorMemo.get(sensor!) : memo;
   if (memoDepth && cached && !refresh) return cached;
   const hash = createHash("sha256");
-  hash.update(JSON.stringify({ version: isolated ? 2 : 1, runtime, ...(isolated ? { sensor } : {}) }));
+  hash.update(JSON.stringify({ version: sensor === "functional-design-completeness" ? 3 : isolated ? 2 : 1, runtime, ...(isolated ? { sensor } : {}) }));
   const digestFile = (file: string, label: string) => {
     if (lstatSync(file).isSymbolicLink()) throw new Error(`checker identity cannot follow a content symlink: ${label}`);
     hash
@@ -53,7 +53,9 @@ export function semanticCheckerDigest(refresh = false, sensor?: string): string 
   if (isolated) {
     // A deliberately closed import graph. Adding an undeclared import blocks
     // production until this contract is expanded; it cannot escape the digest.
-    const closure = ["aidlc-template-checker.ts", "aidlc-sensor-inputs.ts", "aidlc-execution-context.ts"];
+    const closure = sensor === "functional-design-completeness"
+      ? ["aidlc-functional-design-checker.ts", "aidlc-functional-design-inputs.ts", "aidlc-design-documents.ts", "aidlc-artifact-presence.ts", "aidlc-unresolved-markers.ts", "aidlc-scan-root.ts", "aidlc-execution-context.ts", "data/functional-checker-tsconfig.json"]
+      : ["aidlc-template-checker.ts", "aidlc-sensor-inputs.ts", "aidlc-execution-context.ts"];
     const builtinDependencies = new Set(["fs", "node:fs", "path", "node:path", "crypto", "node:crypto", "url", "node:url"]);
     for (const name of closure) {
       const source = readFileSync(join(tools, name), "utf8");
@@ -125,22 +127,24 @@ export function semanticCheckerDigest(refresh = false, sensor?: string): string 
   const file = join(packageRoot, "package.json");
   const pkg = existsSync(file) && JSON.parse(readFileSync(file, "utf8"));
   if (pkg?.name === "loeyae-aidlc") {
-    if (isolated) {
+    if (sensor === "functional-design-completeness") {
+      hash.update("package-runtime-config\0").update(JSON.stringify({ type: pkg.type, imports: pkg.imports, tsx: pkg.dependencies?.tsx }));
+    } else if (isolated) {
       const { version: _version, ...configuration } = pkg;
       hash.update("package.json/configuration\0").update(JSON.stringify(configuration));
     } else digestFile(file, "package.json");
-    for (const name of Object.keys(pkg.dependencies || {}).sort()) dependency(name, packageRoot);
+    for (const name of (sensor === "functional-design-completeness" ? ["tsx"] : Object.keys(pkg.dependencies || {}).sort())) dependency(name, packageRoot);
   } else
-    for (const name of ["tsx", "yaml", "markdown-it", "html-validate", "parse5", "jszip", "@xmldom/xmldom"])
+    for (const name of (sensor === "functional-design-completeness" ? ["tsx"] : ["tsx", "yaml", "markdown-it", "html-validate", "parse5", "jszip", "@xmldom/xmldom"]))
       dependency(name, tools);
   const result = hash.digest("hex");
-  if (isolated) sensorMemo = result;
+  if (isolated) sensorMemo.set(sensor!, result);
   else memo = result;
   return result;
 }
 
 export function semanticCheckerIdentityErrors(value: Record<string, unknown>, sensor?: string): string[] {
-  const isolated = sensor === "template-completeness" && value.identity_version === 2;
+  const isolated = (sensor === "template-completeness" && value.identity_version === 2) || (sensor === "functional-design-completeness" && value.identity_version === 3);
   return (value.identity_version === 1 || isolated) && value.implementation_digest === semanticCheckerDigest(false, isolated ? sensor : undefined)
     ? []
     : ["semantic checker implementation is missing or changed; refresh controlled evidence"];

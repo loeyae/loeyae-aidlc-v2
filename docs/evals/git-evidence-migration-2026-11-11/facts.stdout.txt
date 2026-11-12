@@ -1,0 +1,1 @@
+PASS facts migration: lossless approval, deleted/forged view, cursor-only write, sibling preservation, real report refusal, missing authority and stale binding

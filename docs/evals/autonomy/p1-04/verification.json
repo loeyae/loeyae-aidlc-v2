@@ -1,0 +1,245 @@
+{
+  "task": "P1-04",
+  "verified_at": "2026-11-08T15:30:54.802Z",
+  "kind": "engineering-verification-record",
+  "controlled_aidlc_evidence": false,
+  "source_head": "d2fd48b58c503ecd2e34342a4b7593987e3e625a",
+  "source_sha256": {
+    "core/tools/aidlc-autonomous-admission.ts": "ae7b17a2ce573686bdf51c133ca298410acb360a97c9f040af4e08aca412be73",
+    "core/tools/aidlc-grant-store.ts": "1b976baeef57d8963b9d0d58739f0511c98265ce33cf092eb57cba4292f093c2",
+    "core/tools/aidlc-execution-grant.ts": "c0ef920f099c30364aa4520b97ea40817b928d2d302c19cafadb7c6c772a87fc",
+    "core/tools/aidlc-light-state.ts": "9b79a4d3db25ead75c87f9a4662964ecb1f1691e7d7736be15b35e950383747c",
+    "core/tools/aidlc-session.ts": "aa9e2af28d1bf88554f1dab3251292a06330448f59c2471085d481e1f783ac2b",
+    "core/tools/aidlc-orchestrate.ts": "f519f482cf99c6198d7883349f032f566cd7ce880982360862ebb634d5d07352",
+    "core/tools/aidlc-autonomy.ts": "83782ce07fc4bb74ac069dc1eda54b19b2e9fd0661669d1071389f89721c69b4",
+    "core/tools/aidlc-autonomy-policy.ts": "5b5ffdad65b4ad246ebcb08d0542d09e535b27a4f5d7e67419f4a911f507a753",
+    "core/tools/aidlc-autonomy-files.ts": "81bf9fb0696eeb5190c62ba1ebf4c27affff5715a04761adf417ab9c00e38d90",
+    "core/tools/data/stage-graph.json": "11f8b0dd7f5d0bb219ea318489c763634d0252d2cb8c05778dbe33520cd5da15",
+    "core/knowledge/protocols/common-session-handoff.md": "e3e8bf5f5850ef7a137b40b6922f7559af56757f40fed944a984784911f48e88",
+    "core/knowledge/protocols/common-step-completion-protocol.md": "0334fdcbd99a1f4ab5973bb5840df91611e3dfa698f370a7ec4886f6213bada0",
+    "core/stages/construction/construction-tdd.md": "b852c03070af19d60b76ceb67a91cddb22f48deedbb0060486ceb1698bb6dd1a",
+    "core/stages/construction/construction-code-generation.md": "b2394cf5d8968b657b694c557989598b39472b9a3211e14ebe3626b55cb2aeed",
+    "core/stages/construction/construction-shared-contract-baseline.md": "60af61090eab558ca2a04896c887caf8816bea73eda8e619651056ca2b251e33",
+    "tests/test_autonomous_admission.ts": "160962a261c0d07a55113cf2937f6a6ede602db705672fca46302001a27a2f5a",
+    "tests/test_autonomous_admission_route.ts": "da09f80ecfa372d57243305dbc3f35696b77c1b0dc00ec0bf1a9edddda6c6c7f",
+    "tests/test_autonomous_dependency_preflight.ts": "60b65abdebd0433b962cb83caf005f0a45f63d26ba5f22105ea889d2de5f1c75",
+    "tests/test_execution_grant.ts": "63457b3c2f66e91eba54b596cd47eb4a9bef74101cdd2baddfd1cbeb6ab26d5c",
+    "scripts/core-test-suites.json": "5d46e793bf8b18782a58ec57654b999f006b4980e2f61a01fbf97d38b416242a",
+    "package.json": "25ecb5a035cc367a49ce805f65ac33facbea795a0faf14107e83fc701006c874",
+    "bin/cli.ts": "20c55a3052ab870e8f2046c504e687c25786ea4b723b767143a06be7db0b9b9c",
+    "docs/aidlc-autonomous-contracts-v1.md": "b4e48ec55d5ea59847d01072bd4cece533b421b189f64b2abb9141991c19d499",
+    "docs/aidlc-autonomous-implementation-design.md": "e52161a4efcf2bbf66e141ecf636bfe6c70aecbbaaa82289140baea331c3a484",
+    "docs/aidlc-autonomous-implementation-p1.md": "28fecfd5b1a4087de5148834ed39f6009c1a32e231f3ab8c8050e5b001a3ec9f",
+    "docs/evals/autonomy/p1-04/README.md": "641120d3944366ce1ad26c3b9b4c120e76204065e679e7d77e98a1e58e076ae4",
+    "docs/evals/autonomy/p1-04/code-review.md": "0454e9e6a1724a999974c3ea3e9805ef04f08b86b54172e593a97ec49e954731"
+  },
+  "tests": [
+    {
+      "name": "admission",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_autonomous_admission.ts"
+      ],
+      "exit_code": 0,
+      "reported_scenarios": 40,
+      "log": "docs/evals/autonomy/p1-04/admission-verified.log",
+      "log_sha256": "5b7101041a9e3b0c9fd0a263c8257cefdda1ac4680d2ecfdcc07f127273814b4"
+    },
+    {
+      "name": "native-route",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_autonomous_admission_route.ts"
+      ],
+      "exit_code": 0,
+      "reported_scenarios": 1,
+      "log": "docs/evals/autonomy/p1-04/admission-route-verified.log",
+      "log_sha256": "a38a5249e1e9429a2765de793416d5afd01626b52f2e15ec5c6dcb7d737814da"
+    },
+    {
+      "name": "dependency-preflight",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_autonomous_dependency_preflight.ts"
+      ],
+      "exit_code": 0,
+      "reported_scenarios": 3,
+      "log": "docs/evals/autonomy/p1-04/dependency-preflight-verified.log",
+      "log_sha256": "d33e5e52decab82be613096d78e2ea52784ba68d8d517b18a7cc0421a1b5be4e"
+    },
+    {
+      "name": "scope",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_autonomy_scope.ts"
+      ],
+      "exit_code": 0,
+      "reported_scenarios": 44,
+      "log": "docs/evals/autonomy/p1-04/autonomy-scope.log",
+      "log_sha256": "5fead607b32796b598f5b86e887799a67e9cc217dc7e7b75774dfb1cf02843b8"
+    },
+    {
+      "name": "policy",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_autonomy_policy.ts"
+      ],
+      "exit_code": 0,
+      "reported_scenarios": 55,
+      "log": "docs/evals/autonomy/p1-04/autonomy-policy.log",
+      "log_sha256": "532897053207f47ef00bd87f83483e9ac7ab283e76e7cdc3a1916ebe53253ace"
+    },
+    {
+      "name": "grant",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_execution_grant.ts"
+      ],
+      "exit_code": 0,
+      "reported_scenarios": 48,
+      "log": "docs/evals/autonomy/p1-04/execution-grant.log",
+      "log_sha256": "aefede60193a7864b1599b16327582d3dc75d35436239edd910279309955bb78"
+    },
+    {
+      "name": "sessions",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_mars243_sessions.ts"
+      ],
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-04/sessions.log",
+      "log_sha256": "488297eeff2dd9966031002464b0c922cecea067a322bcf933f3b686038af465"
+    },
+    {
+      "name": "layout",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_mars243_layout.ts"
+      ],
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-04/layout.log",
+      "log_sha256": "16d89bae3ba8c64dc8a02013d765c9887c1a403760676c374e6d3d4436d6f3f7"
+    },
+    {
+      "name": "handoff",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_stage_handoff_prompts.ts"
+      ],
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-04/handoff.log",
+      "log_sha256": "e7b4697d063452a518f6a6ca06383c88760c1fd5942d681a2b39a6f752d369e9"
+    },
+    {
+      "name": "delivery-summary",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_delivery_summary.ts"
+      ],
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-04/delivery-summary.log",
+      "log_sha256": "c3e79a59641f03e111584828a3a8443c5337688d10f58b9ac4a5cfddbeb16a98"
+    },
+    {
+      "name": "provider-runner",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_provider_runner_gate.ts"
+      ],
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-04/provider-runner.log",
+      "log_sha256": "c3801a57d2a09fed9ab5a96c45a7118c5aaf8f5b0491e694e2454f02d8d84197"
+    },
+    {
+      "name": "execution-policy",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_mars160_execution_policy.ts"
+      ],
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-04/execution-policy.log",
+      "log_sha256": "38277cfd1885bbe6acbdfc03839bf5d2e4de25c213163813944a3ab6c7863986"
+    },
+    {
+      "name": "distribution-parity",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_distribution_parity.ts"
+      ],
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-04/distribution-parity.log",
+      "log_sha256": "162fcbb03760e7dc1717bc247912845bce61d66f661e9759745ccb9fdcd6f80c"
+    },
+    {
+      "name": "typecheck",
+      "command": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "--noEmit"
+      ],
+      "exit_code": 0,
+      "log": "docs/evals/autonomy/p1-04/typecheck-verified.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "build_results": "docs/evals/autonomy/p1-04/build-results.json",
+  "final_harnesses": [
+    "claude",
+    "codebuddy",
+    "codex",
+    "deepseek",
+    "kiro-cli",
+    "kiro-crew",
+    "kiro-ide",
+    "opencode",
+    "qoder",
+    "zcode"
+  ],
+  "build_failed_attempts": [
+    {
+      "phase": "final",
+      "harness": "deepseek",
+      "attempt": 1,
+      "exit_code": 1,
+      "log": "docs/evals/autonomy/p1-04/build-deepseek-verified-attempt-1.log"
+    }
+  ],
+  "distribution_parity": {
+    "files": 2825,
+    "harnesses": 10
+  },
+  "preserved_workflow": {
+    "state_sha256": "5e08e34d2e434edf0ab7d2667377080dc0caf06dd8dcfa178b877211c5c93d0f",
+    "audit_sha256": "1fa99dba9594b7ee1e2e7ad0d8e72c9b81b87e74f9577879795937b0af998686",
+    "control_paths_present": {
+      ".git/aidlc/autonomy": false,
+      ".aidlc/autonomy/grants": false,
+      ".aidlc/evidence/autonomous-admission": false
+    }
+  },
+  "engineering_exit": "passed",
+  "business_admission": "not-ready",
+  "business_verified": false,
+  "native_host_adapter_integrated": false,
+  "full_npm_test_run": false,
+  "actual_business_pilots_run": false,
+  "integration_blockers": [
+    "P1-05 dependency/version/consumer/shared-input/write-scope semantics",
+    "P1-06 trusted native host capability adapter and continuous driver",
+    "real pilot reception/resources/runtime grant",
+    "P1-07/08 actual business/UI/candidate acceptance"
+  ]
+}

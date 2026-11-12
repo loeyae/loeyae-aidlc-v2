@@ -1,0 +1,18 @@
+{
+  "root": "D:\\Users\\loeye\\AppData\\Local\\Temp\\aidlc-p106-observe-7t8QY1",
+  "config": {
+    "schema": "aidlc.codex-host/v1",
+    "codex_entrypoint": "E:/Work/repo/node/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe",
+    "core_cli": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\bin\\cli.ts",
+    "commands": []
+  },
+  "challenge": {
+    "nonce": "bf4c8a49-905a-4577-9db3-7991a4feefb2",
+    "limits": {
+      "wall_time_seconds": 180,
+      "max_equivalent_retries": 1,
+      "max_active_units": 1
+    }
+  },
+  "started_at": "2026-11-08T17:32:33.949Z"
+}

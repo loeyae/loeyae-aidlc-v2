@@ -1,0 +1,617 @@
+{
+  "schema": "aidlc.observation-plan/v1",
+  "batch_id": "orders",
+  "scope_revision": 1,
+  "lifetime_seconds": 300,
+  "environment_ref": {
+    "repository_id": "project",
+    "path": "pilot/observation-environment.json",
+    "digest_mode": "raw-file",
+    "digest": "a89bafccbaf792ec0026a41db5b77c6813e37a4f19d4f26de0d730c83e64b644"
+  },
+  "candidate_artifact_paths": [
+    "src/orders.cjs",
+    "tests/ucd.cjs"
+  ],
+  "ui_applicability": {
+    "kind": "none",
+    "source_refs": [
+      {
+        "repository_id": "project",
+        "path": "docs/aidlc/modules/project/inception/requirements.md",
+        "digest_mode": "raw-file",
+        "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c"
+      }
+    ]
+  },
+  "checks": [
+    {
+      "check_id": "complete-acceptance",
+      "kind": "command",
+      "covers": [
+        {
+          "repository_id": "project",
+          "path": "docs/aidlc/modules/project/inception/requirements.md",
+          "digest_mode": "raw-file",
+          "digest": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c",
+          "item_id": "AC-001"
+        }
+      ],
+      "argv": [
+        "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+        "pilot/oracle.cjs"
+      ],
+      "timeout_ms": 10000,
+      "assertions": [
+        {
+          "assertion_id": "sizes",
+          "pointer": "/sizes",
+          "op": "equal",
+          "expected": [
+            50,
+            50,
+            20
+          ]
+        },
+        {
+          "assertion_id": "all-rows",
+          "pointer": "/flattened",
+          "op": "equal",
+          "expected": [
+            {
+              "id": 0,
+              "label": "order-0"
+            },
+            {
+              "id": 1,
+              "label": "order-1"
+            },
+            {
+              "id": 2,
+              "label": "order-2"
+            },
+            {
+              "id": 3,
+              "label": "order-3"
+            },
+            {
+              "id": 4,
+              "label": "order-4"
+            },
+            {
+              "id": 5,
+              "label": "order-5"
+            },
+            {
+              "id": 6,
+              "label": "order-6"
+            },
+            {
+              "id": 7,
+              "label": "order-7"
+            },
+            {
+              "id": 8,
+              "label": "order-8"
+            },
+            {
+              "id": 9,
+              "label": "order-9"
+            },
+            {
+              "id": 10,
+              "label": "order-10"
+            },
+            {
+              "id": 11,
+              "label": "order-11"
+            },
+            {
+              "id": 12,
+              "label": "order-12"
+            },
+            {
+              "id": 13,
+              "label": "order-13"
+            },
+            {
+              "id": 14,
+              "label": "order-14"
+            },
+            {
+              "id": 15,
+              "label": "order-15"
+            },
+            {
+              "id": 16,
+              "label": "order-16"
+            },
+            {
+              "id": 17,
+              "label": "order-17"
+            },
+            {
+              "id": 18,
+              "label": "order-18"
+            },
+            {
+              "id": 19,
+              "label": "order-19"
+            },
+            {
+              "id": 20,
+              "label": "order-20"
+            },
+            {
+              "id": 21,
+              "label": "order-21"
+            },
+            {
+              "id": 22,
+              "label": "order-22"
+            },
+            {
+              "id": 23,
+              "label": "order-23"
+            },
+            {
+              "id": 24,
+              "label": "order-24"
+            },
+            {
+              "id": 25,
+              "label": "order-25"
+            },
+            {
+              "id": 26,
+              "label": "order-26"
+            },
+            {
+              "id": 27,
+              "label": "order-27"
+            },
+            {
+              "id": 28,
+              "label": "order-28"
+            },
+            {
+              "id": 29,
+              "label": "order-29"
+            },
+            {
+              "id": 30,
+              "label": "order-30"
+            },
+            {
+              "id": 31,
+              "label": "order-31"
+            },
+            {
+              "id": 32,
+              "label": "order-32"
+            },
+            {
+              "id": 33,
+              "label": "order-33"
+            },
+            {
+              "id": 34,
+              "label": "order-34"
+            },
+            {
+              "id": 35,
+              "label": "order-35"
+            },
+            {
+              "id": 36,
+              "label": "order-36"
+            },
+            {
+              "id": 37,
+              "label": "order-37"
+            },
+            {
+              "id": 38,
+              "label": "order-38"
+            },
+            {
+              "id": 39,
+              "label": "order-39"
+            },
+            {
+              "id": 40,
+              "label": "order-40"
+            },
+            {
+              "id": 41,
+              "label": "order-41"
+            },
+            {
+              "id": 42,
+              "label": "order-42"
+            },
+            {
+              "id": 43,
+              "label": "order-43"
+            },
+            {
+              "id": 44,
+              "label": "order-44"
+            },
+            {
+              "id": 45,
+              "label": "order-45"
+            },
+            {
+              "id": 46,
+              "label": "order-46"
+            },
+            {
+              "id": 47,
+              "label": "order-47"
+            },
+            {
+              "id": 48,
+              "label": "order-48"
+            },
+            {
+              "id": 49,
+              "label": "order-49"
+            },
+            {
+              "id": 50,
+              "label": "order-50"
+            },
+            {
+              "id": 51,
+              "label": "order-51"
+            },
+            {
+              "id": 52,
+              "label": "order-52"
+            },
+            {
+              "id": 53,
+              "label": "order-53"
+            },
+            {
+              "id": 54,
+              "label": "order-54"
+            },
+            {
+              "id": 55,
+              "label": "order-55"
+            },
+            {
+              "id": 56,
+              "label": "order-56"
+            },
+            {
+              "id": 57,
+              "label": "order-57"
+            },
+            {
+              "id": 58,
+              "label": "order-58"
+            },
+            {
+              "id": 59,
+              "label": "order-59"
+            },
+            {
+              "id": 60,
+              "label": "order-60"
+            },
+            {
+              "id": 61,
+              "label": "order-61"
+            },
+            {
+              "id": 62,
+              "label": "order-62"
+            },
+            {
+              "id": 63,
+              "label": "order-63"
+            },
+            {
+              "id": 64,
+              "label": "order-64"
+            },
+            {
+              "id": 65,
+              "label": "order-65"
+            },
+            {
+              "id": 66,
+              "label": "order-66"
+            },
+            {
+              "id": 67,
+              "label": "order-67"
+            },
+            {
+              "id": 68,
+              "label": "order-68"
+            },
+            {
+              "id": 69,
+              "label": "order-69"
+            },
+            {
+              "id": 70,
+              "label": "order-70"
+            },
+            {
+              "id": 71,
+              "label": "order-71"
+            },
+            {
+              "id": 72,
+              "label": "order-72"
+            },
+            {
+              "id": 73,
+              "label": "order-73"
+            },
+            {
+              "id": 74,
+              "label": "order-74"
+            },
+            {
+              "id": 75,
+              "label": "order-75"
+            },
+            {
+              "id": 76,
+              "label": "order-76"
+            },
+            {
+              "id": 77,
+              "label": "order-77"
+            },
+            {
+              "id": 78,
+              "label": "order-78"
+            },
+            {
+              "id": 79,
+              "label": "order-79"
+            },
+            {
+              "id": 80,
+              "label": "order-80"
+            },
+            {
+              "id": 81,
+              "label": "order-81"
+            },
+            {
+              "id": 82,
+              "label": "order-82"
+            },
+            {
+              "id": 83,
+              "label": "order-83"
+            },
+            {
+              "id": 84,
+              "label": "order-84"
+            },
+            {
+              "id": 85,
+              "label": "order-85"
+            },
+            {
+              "id": 86,
+              "label": "order-86"
+            },
+            {
+              "id": 87,
+              "label": "order-87"
+            },
+            {
+              "id": 88,
+              "label": "order-88"
+            },
+            {
+              "id": 89,
+              "label": "order-89"
+            },
+            {
+              "id": 90,
+              "label": "order-90"
+            },
+            {
+              "id": 91,
+              "label": "order-91"
+            },
+            {
+              "id": 92,
+              "label": "order-92"
+            },
+            {
+              "id": 93,
+              "label": "order-93"
+            },
+            {
+              "id": 94,
+              "label": "order-94"
+            },
+            {
+              "id": 95,
+              "label": "order-95"
+            },
+            {
+              "id": 96,
+              "label": "order-96"
+            },
+            {
+              "id": 97,
+              "label": "order-97"
+            },
+            {
+              "id": 98,
+              "label": "order-98"
+            },
+            {
+              "id": 99,
+              "label": "order-99"
+            },
+            {
+              "id": 100,
+              "label": "order-100"
+            },
+            {
+              "id": 101,
+              "label": "order-101"
+            },
+            {
+              "id": 102,
+              "label": "order-102"
+            },
+            {
+              "id": 103,
+              "label": "order-103"
+            },
+            {
+              "id": 104,
+              "label": "order-104"
+            },
+            {
+              "id": 105,
+              "label": "order-105"
+            },
+            {
+              "id": 106,
+              "label": "order-106"
+            },
+            {
+              "id": 107,
+              "label": "order-107"
+            },
+            {
+              "id": 108,
+              "label": "order-108"
+            },
+            {
+              "id": 109,
+              "label": "order-109"
+            },
+            {
+              "id": 110,
+              "label": "order-110"
+            },
+            {
+              "id": 111,
+              "label": "order-111"
+            },
+            {
+              "id": 112,
+              "label": "order-112"
+            },
+            {
+              "id": 113,
+              "label": "order-113"
+            },
+            {
+              "id": 114,
+              "label": "order-114"
+            },
+            {
+              "id": 115,
+              "label": "order-115"
+            },
+            {
+              "id": 116,
+              "label": "order-116"
+            },
+            {
+              "id": 117,
+              "label": "order-117"
+            },
+            {
+              "id": 118,
+              "label": "order-118"
+            },
+            {
+              "id": 119,
+              "label": "order-119"
+            }
+          ]
+        },
+        {
+          "assertion_id": "boundaries",
+          "pointer": "/cases",
+          "op": "equal",
+          "expected": [
+            {
+              "count": 0,
+              "sizes": []
+            },
+            {
+              "count": 1,
+              "sizes": [
+                1
+              ]
+            },
+            {
+              "count": 49,
+              "sizes": [
+                49
+              ]
+            },
+            {
+              "count": 50,
+              "sizes": [
+                50
+              ]
+            },
+            {
+              "count": 51,
+              "sizes": [
+                50,
+                1
+              ]
+            },
+            {
+              "count": 100,
+              "sizes": [
+                50,
+                50
+              ]
+            },
+            {
+              "count": 101,
+              "sizes": [
+                50,
+                50,
+                1
+              ]
+            },
+            {
+              "count": 120,
+              "sizes": [
+                50,
+                50,
+                20
+              ]
+            }
+          ]
+        },
+        {
+          "assertion_id": "original-timeout",
+          "pointer": "/timeout",
+          "op": "equal",
+          "expected": "propagated-original"
+        },
+        {
+          "assertion_id": "real-upstream",
+          "pointer": "/runtime",
+          "op": "equal",
+          "expected": "actual-http"
+        }
+      ]
+    }
+  ]
+}

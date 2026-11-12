@@ -1,46 +1,19 @@
 ---
 name: aidlc-delivery-config-generation
-description: "基于确认的部署决策生成与目标环境匹配的交付配置文件；不负责部署审批和阶段路由。"
+description: "按实际部署目标生成或调整必要的运行与交付配置，复用已有配置。"
 triggers: 交付配置, 部署配置生成, 发布配置, deployment config, 生成部署文件
 ---
 
-# 交付配置生成能力
+# delivery-config-generation
 
-开始时宣布："使用 aidlc-delivery-config-generation 生成交付配置"。
+从项目读取现有构建、启动方式和部署配置；新项目没有旧配置是正常情况。仅澄清本次确实需要的目标环境、端口、运行制品和敏感配置来源。
 
-## 资源路径
+只生成目标需要的文件：例如选定容器方案才写 Dockerfile，不同时产出不使用的 Compose、Kubernetes 和多套 CI 模板。已有 CI/部署文件优先增量修改。配置生成与静态校验可在授权范围内直接做，实际发布按用户授权处理。
 
-共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+检查语法、引用、启动命令、权限和密钥处理；把结果写入既有交付说明或对话，不额外生成阶段计划。
 
-读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
 
-## 输入
+## 兼容参考
 
-调用方必须提供：
-
-- 确认的部署决策（目标、环境、CI/CD、容器、网络参数）；
-- 运行制品信息和启动方式；
-- 项目技术栈和构建方式；
-- 已有部署/CI 配置（存量优先）。
-
-缺少必要输入时返回 `NEEDS_CONTEXT`。
-
-## 加载
-
-1. 发布包中的 [stages/operation/operations-authorization.md](../../stages/operation/operations-authorization.md)（步骤 1 生成目标相关配置）；
-2. 发布包中的 [stages/operation/operations-templates.md](../../stages/operation/operations-templates.md)。
-
-## 输出
-
-返回生成的配置文件路径（Dockerfile、docker-compose、k8s manifests、CI pipeline 等）和验证结果。
-
-## 禁止事项
-
-不得：
-
-- 更新项目 state 或 audit；
-- 代替用户的部署审批（本阶段保留 `approval: block`，审批由编排层负责）；
-- 放行质量门禁；
-- 无依据替换现有部署配置；
-- 宣布 Operations 完成；
-- 伪造 evidence。
+仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-delivery-config-generation.md)，默认不加载。

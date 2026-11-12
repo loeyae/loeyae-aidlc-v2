@@ -1,0 +1,18 @@
+✔ supervision is frozen and can only tighten known positive limits (1.0583ms)
+✔ actual host configuration validates limits and pins their changes into HostRef (366.9867ms)
+✔ interleaved identical outcomes stop; genuinely new observed inputs are not equivalent (2.2051ms)
+✔ raw observations and heartbeats do not reset idle or unproductive steps (1.11ms)
+✔ actual novel work resets idle, oscillation and duplicate checkpoints do not (0.2415ms)
+✔ step/turn/run limits remain separate and survive new turns or input changes (0.5613ms)
+✔ step time and turn time are independently enforced (0.4327ms)
+✔ known bounded work pauses idle/model time, never the original wall or its own deadline (0.5044ms)
+✔ nested and overlapping intervals produce a single additive phase partition (0.4726ms)
+✔ trace accepts only safe structured fields, never private bindings or arbitrary payloads (0.4096ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 379.7733

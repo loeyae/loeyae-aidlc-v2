@@ -1,0 +1,17 @@
+{
+  "harnesses": {
+    "claude": 314,
+    "codebuddy": 315,
+    "codex": 320,
+    "deepseek": 312,
+    "kiro-cli": 313,
+    "kiro-crew": 313,
+    "kiro-ide": 313,
+    "opencode": 312,
+    "qoder": 314,
+    "zcode": 316
+  },
+  "files_compared": 3142,
+  "failures": [],
+  "global_install_modified": false
+}

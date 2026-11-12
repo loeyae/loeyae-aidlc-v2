@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from "fs";
+import { existsSync, lstatSync, readdirSync, statSync } from "fs";
 import * as nodePath from "path";
 
 type PathApi = Pick<typeof nodePath, "isAbsolute" | "join">;
@@ -40,7 +40,7 @@ export function scanFiles(
   root: string,
   base: string,
   pattern: RegExp,
-  options: { contextualize?: (path: string) => string; allows?: (path: string) => boolean } = {},
+  options: { contextualize?: (path: string) => string; allows?: (path: string) => boolean; matchRelativeToRoot?: boolean } = {},
 ): string[] {
   const start = resolveScanRoot(root, base, options.contextualize);
   if (!existsSync(start)) return [];
@@ -50,9 +50,10 @@ export function scanFiles(
     for (const entry of readdirSync(directory)) {
       if (SKIPPED_ENTRIES.includes(entry)) continue;
       const path = nodePath.join(directory, entry);
+      if (options.matchRelativeToRoot && lstatSync(path).isSymbolicLink()) throw new Error(`linked contract source is not supported: ${path}`);
       const info = statSync(path);
       if (info.isDirectory()) visit(path);
-      else if (pattern.test(path) && allows(path)) result.push(path);
+      else if (pattern.test(options.matchRelativeToRoot ? nodePath.relative(root, path).replace(/\\/g, "/") : path) && allows(path)) result.push(path);
     }
   };
   visit(start);

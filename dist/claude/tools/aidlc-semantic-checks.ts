@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+import { noUnresolved, unresolvedMarkerFindings } from "./aidlc-unresolved-markers";
+import { functionalDesignPayload } from "./aidlc-functional-design-inputs";
+import { canonicalDesign, designDocuments, withoutSupersededDesigns } from "./aidlc-design-documents";
+import {batchImplementationUnits,batchI13Modes,batchUcdCoverageGaps,batchModuleIds} from "./aidlc-batch-scope";
+import { hasAutonomyUnit } from "./aidlc-dependency-inputs";
 import { verifyDesignResourceConsumption } from "./aidlc-design-resource.js";
 import { templateCompletenessPayload } from "./aidlc-sensor-inputs";
 import { infrastructureResources } from "./aidlc-infrastructure.js";
@@ -12,12 +17,12 @@ import { qualityUiCheck } from "./aidlc-quality-ui";
 import { deliveryReadiness } from "./aidlc-quality-delivery";
 import { runSync } from "./aidlc-spawn";
 import { withRevisionInvalidation, withRevisionMemoization } from "./aidlc-revision";
-import { deliveryConsistencyPayloadErrors, reviewAxisErrors, reviewIssueErrors } from "./aidlc-evidence-policy";
+import { deliveryConsistencyPayloadErrors, reviewAxisErrors, reviewIssueErrors, hasBlockingReviewConclusion } from "./aidlc-evidence-policy";
 import { reviewedFiles } from "./aidlc-review-files";
 import { checkHistoricalTddSensors, checkPhaseSensors, checkSensors, getExecutableStages, globalReviewPayload, globalReviewRequired, loadGraph, makeInstance, reviewCoverageErrors } from "./aidlc-orchestrate";
 import { omissionRegistrationCommand, redOmissionErrors, tddOmissionErrors, tddOmissionRecord, tddOmissionSummary } from "./aidlc-red-omission";
 import { projectDeliverySummary } from "./aidlc-delivery-summary";
-import { semanticCheckerEnv, semanticCommandArgv, semanticValidationEnvironment } from "./aidlc-evidence";
+import { semanticCheckerEnv, semanticCommandArgv, semanticValidationEnvironment, noBehaviorBasis } from "./aidlc-evidence";
 import { deploymentValidationPayload } from "./aidlc-evidence";
 import { frontendPlatformPayload } from "./aidlc-frontend-platform";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "fs";
@@ -177,7 +182,7 @@ function textIfExists(path: string): string { return existsSync(path) ? text(pat
 function existing(paths: string[]): string[] { return paths.map((path) => join(ROOT, contextual(path))).filter((path) => existsSync(path) && contextAllows(path)); }
 // base is project-relative (contextualized + joined onto ROOT); an absolute base is used as-is.
 function allFiles(base: string, pattern: RegExp): string[] {
-  return scanFiles(ROOT, base, pattern, { contextualize: contextual, allows: contextAllows });
+  return withoutSupersededDesigns(scanFiles(ROOT, base, pattern, { contextualize: contextual, allows: contextAllows }));
 }
 function projectFiles(pattern: RegExp): string[] { return allFiles(".", pattern); }
 /**
@@ -252,13 +257,13 @@ function declaredContractFiles(module: ModuleDescriptor | undefined): string[] {
  * `paths`, and the declared `contract_paths` — matched by `pattern`, or all of them
  * with `declaredContracts: "all"`. Other project files are never collected implicitly.
  */
-function moduleScopedFiles(pattern: RegExp, options: { declaredContracts?: "match" | "all" } = {}): string[] {
+function moduleScopedFiles(pattern: RegExp, options: { declaredContracts?: "match" | "all"; relativePaths?: boolean } = {}): string[] {
   if (!ACTIVE_MODULE) return projectFiles(pattern);
   const { module } = activeModuleManifest();
   const moduleRoot = `docs/aidlc/modules/${ACTIVE_MODULE}`;
   const roots = [`${moduleRoot}/inception`, ACTIVE_UNIT ? `${moduleRoot}/construction/${ACTIVE_UNIT}` : `${moduleRoot}/construction`, ...(module?.paths || [])];
   const declared = declaredContractFiles(module).filter((path) => options.declaredContracts === "all" || pattern.test(path));
-  return [...new Set([...roots.flatMap((base) => allFiles(base, pattern)), ...declared])].sort();
+  return [...new Set([...roots.flatMap((base) => options.relativePaths ? scanFiles(ROOT, base, pattern, { contextualize: contextual, allows: contextAllows, matchRelativeToRoot: true }) : allFiles(base, pattern)), ...declared])].sort();
 }
 /** A project-level contract table (docs/aidlc/ideation/product-contracts.md or a declared copy). */
 function isContractTable(path: string): boolean {
@@ -269,54 +274,6 @@ function joined(paths: string[]): string { return paths.map(text).join("\n"); }
 function ids(value: string, pattern: RegExp): string[] { return [...new Set([...value.matchAll(pattern)].map((match) => match[0]))].sort(); }
 function count(value: string, pattern: RegExp): number { return [...value.matchAll(pattern)].length; }
 function section(value: string, patterns: RegExp[]): boolean { return patterns.some((pattern) => pattern.test(value)); }
-/** MARS-271: the unresolved-marker tokens themselves (待决类文字,含未加否定的 阻断). */
-const UNRESOLVED_MARKER_PATTERN = /\b(?:TODO|FIXME|TBD|HACK|NotImplemented)\b|待确认|待定|未解决|未定义|(?<![不非无])阻断/i;
-/** Section headings whose body is historical record, not an open decision (MARS-271). */
-const HISTORICAL_SECTION_PATTERN = /历史|history|changelog|变更记录|决策记录|修订记录|审计记录|操作日志/i;
-
-/**
- * MARS-271 marker taxonomy: a line carrying an unresolved-marker token is classified by
- * nature — `pending` (待决: an open decision the artifact still owes), `historical`
- * (历史记录: a dated/changelog/record entry or an explicitly resolved item) or `note`
- * (备注: a blockquote or annotated remark). Only `pending` participates in the
- * unresolved verdict; historical records and notes describe past events or annotations.
- */
-function classifyUnresolvedLine(line: string, historicalSection: boolean): "pending" | "historical" | "note" | null {
-  if (!UNRESOLVED_MARKER_PATTERN.test(line)) return null;
-  if (historicalSection) return "historical";
-  const body = line.trim().replace(/^\s*(?:[-*+]\s*)*/, "");
-  // 引用块 / 备注行:备注性质。
-  if (/^>/.test(line.trim()) || /^(?:备注|注\s*[:：]|note\s*[:：]|说明\s*[:：]|附注\s*[:：])/i.test(body)) return "note";
-  // 日期前缀(changelog 条目)或显式历史标签:历史记录性质。
-  if (/^(?:历史|history|changelog|变更记录|决策记录|修订记录|审计记录|记录)[:：\s]/i.test(body)) return "historical";
-  if (/^\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?/.test(body)) return "historical";
-  // 已解决/已关闭的条目是历史,不是待决。
-  if (/已解决|已关闭|已处理|\b(?:resolved|closed)\b/i.test(line)) return "historical";
-  return "pending";
-}
-
-/** Pending-marker findings with position and classification, for a detailed failure message. */
-function unresolvedMarkerFindings(label: string, content: string): string[] {
-  const findings: string[] = [];
-  let historicalSection = false;
-  for (const [index, line] of content.split(/\r?\n/).entries()) {
-    const heading = /^#{1,6}\s+(.*)$/.exec(line.trim());
-    if (heading) historicalSection = HISTORICAL_SECTION_PATTERN.test(heading[1]);
-    const kind = classifyUnresolvedLine(line, historicalSection);
-    if (kind === "pending") findings.push(`${label}:${index + 1}: ${line.trim().slice(0, 60)} [待决]`);
-  }
-  return findings;
-}
-
-function noUnresolved(value: string, label = "project artifact"): void {
-  // 4.8.1: a negated 阻断 (不阻断 / 非阻断 / 无阻断) describes the absence of a blocker.
-  // MARS-271: only 待决 markers fail; 历史/备注 markers are listed in the failure detail.
-  const findings = unresolvedMarkerFindings(label, value);
-  if (findings.length > 0) {
-    const shown = findings.slice(0, 10).join("; ");
-    fail(`unresolved marker found in project artifact: ${shown}${findings.length > 10 ? ` (+${findings.length - 10} more pending markers)` : ""}`);
-  }
-}
 
 function markdownTableCells(line: string): string[] | null {
   const trimmed = line.trim();
@@ -407,7 +364,7 @@ function qualityContext(): QualityContext {
 const UI_ROUTES = new Set<UiRoute>(["html-mock", "figma-create", "figma-existing", "skip", "not-selected"]);
 const REQUIREMENT_ID = /\b(?:REQ|FR)-[A-Z0-9][A-Z0-9_-]*\b/gi;
 const STORY_ID = /\bUS-[A-Z0-9][A-Z0-9_-]*\b/gi;
-const PAGE_ID = /\bPAGE-[A-Z0-9][A-Z0-9_-]*\b/gi;
+const PAGE_ID = /(?<![A-Z0-9_-])PAGE-[A-Z0-9][A-Z0-9_-]*\b/gi;
 
 function normalizedIds(value: string, pattern: RegExp): string[] {
   return ids(value, pattern).map((item) => item.toUpperCase()).sort();
@@ -644,8 +601,7 @@ function reviewEvidence(): Record<string, unknown> {
   const content = joined(files);
   const axisErrors = reviewAxisErrors(content);
   if (axisErrors.length) fail(axisErrors.join("; "));
-  const conclusions = content.replace(/(?:不|非)阻断|non[- ]blocking/gi, "");
-  if (/未通过|\bblocked\b|阻断/i.test(conclusions)) fail("review record contains a blocking conclusion");
+  if (hasBlockingReviewConclusion(content)) fail("review record contains a blocking conclusion");
   const reviewer = content.match(/(?:reviewer|审查者|审查人|reviewed\s+by)\s*[:：]\s*([^\n]+)/i)?.[1]?.trim();
   if (!reviewer) fail("reviewer identity is missing");
   const found = content.match(/(?:issues?_found|发现问题|问题数)\s*[:：]?\s*(\d+)/i)?.[1];
@@ -1418,8 +1374,13 @@ function characterizationEvidence(ids: string[], modes: Map<string, UcdMode>): R
 
 async function testQuality(): Promise<Record<string, unknown>> {
   const current = i13Evidence();
-  const allI13 = current ? [current] : evidenceRecords("test-case-derivation", "test-case-derivation");
+  const batchUnits=!ACTIVE_UNIT?batchImplementationUnits(ROOT):undefined;
+  const allI13 = (current ? [current] : evidenceRecords("test-case-derivation", "test-case-derivation")).filter(r=>!batchUnits||batchUnits.some(u=>u.module_id===String(r.module_id??ACTIVE_MODULE??"")));
   if (allI13.length === 0) fail("I13 evidence is missing for test-quality");
+  if(batchUnits&&allI13.every(r=>batchI13Modes(ROOT,String(r.module_id??ACTIVE_MODULE??""),r).all.length===0)){
+    const basis=noBehaviorBasis(requiredWorkflowState());if(!basis)fail("selected batch units lack a controlled no-behavior basis");
+    return {status:"not_applicable",not_applicable_reason:"Selected batch units own no executable UC-D",alternative_validation:"controlled Native alternative validation for every selected unit",no_behavior_basis:basis,batch_scope_units:batchUnits,red_seen:false,green_seen:false,tests_total:0,tests_failed:0,traceability_complete:true,uc_mapping:[]};
+  }
   if (allI13.every((record) => record.status === "not_applicable")) {
     const alternative = allI13.find((record) => typeof record.alternative_validation === "string")?.alternative_validation;
     return { status: "not_applicable", not_applicable_reason: "I13 declared no executable business behavior", alternative_validation: alternative || "controlled alternative validation", red_seen: false, green_seen: false, tests_total: 0, tests_failed: 0, traceability_complete: true, uc_mapping: [] };
@@ -1428,7 +1389,7 @@ async function testQuality(): Promise<Record<string, unknown>> {
     ? allFiles("docs/aidlc/inception/application-design/test-cases", /\.md$/)
     : allFiles("docs/aidlc/modules", /test-cases[\\/].*\.md$/);
   if (caseFiles.length === 0) fail("UC-D test case files are missing");
-  const inUnit = (record: Record<string, unknown>) => !ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT));
+  const inUnit = (record: Record<string, unknown>) => (!ACTIVE_MODULE || (record.module_id === ACTIVE_MODULE && (!ACTIVE_UNIT || record.unit_id === ACTIVE_UNIT))) && (!batchUnits||batchUnits.some(u=>u.module_id===record.module_id&&u.unit_id===record.unit_id));
   let greenRecords = evidenceRecords("code-generation", "green-test-evidence").filter(inUnit);
   let redRecords = evidenceRecords("tdd", "red-test-evidence").filter(inUnit);
   let baselineRecords = evidenceRecords("tdd", "baseline-test-evidence").filter(inUnit);
@@ -1457,7 +1418,7 @@ async function testQuality(): Promise<Record<string, unknown>> {
   // 4.8.0: in a unit context with I13 ucd_units only the unit's own UC-Ds count.
   const unitScope = ACTIVE_UNIT && current?.status === "required" ? unitUcdIds(current, ACTIVE_UNIT) : null;
   if (unitScope?.scoped && unitScope.all.length === 0) return emptyUnitTestQuality(redRecords, baselineRecords, greenRecords);
-  const inScope = (useCase: string) => !unitScope?.scoped || unitScope.all.includes(/^UC-D-\d+/.exec(useCase)?.[0] || useCase);
+  const inScope = (useCase: string) => (!unitScope?.scoped || unitScope.all.includes(/^UC-D-\d+/.exec(useCase)?.[0] || useCase)) && (!batchUnits||allI13.some(r=>batchI13Modes(ROOT,String(r.module_id??ACTIVE_MODULE??""),r).all.includes(useCase)));
   const publishedCases = allI13.flatMap(record => Array.isArray(record.ucd_ids) ? record.ucd_ids.filter((id): id is string => typeof id === "string") : []);
   const cases = [...new Set(publishedCases.length ? publishedCases : ids(joined(caseFiles), /\bUC-D-\d+\b/g))].filter(inScope);
   if (cases.length === 0) fail("no UC-D identifiers found in test case files");
@@ -1471,7 +1432,7 @@ async function testQuality(): Promise<Record<string, unknown>> {
   const requiredI13 = new Map<string, Record<string, unknown>>();
   for (const record of allI13.filter((value) => value.status === "required")) requiredI13.set(String(record.module_id ?? ACTIVE_MODULE ?? ""), record);
   const modesByModule = new Map<string, { new: string[]; characterization: string[] }>();
-  for (const [moduleId, record] of requiredI13) modesByModule.set(moduleId, unitScope && moduleId === String(current?.module_id ?? ACTIVE_MODULE ?? "") ? unitScope : i13UcdIdsByMode(record));
+  for (const [moduleId, record] of requiredI13) modesByModule.set(moduleId, unitScope && moduleId === String(current?.module_id ?? ACTIVE_MODULE ?? "") ? unitScope : batchUnits?batchI13Modes(ROOT,moduleId,record):i13UcdIdsByMode(record));
   const modesOf = (record: Record<string, unknown>) => {
     const i13 = requiredI13.get(String(record.module_id ?? ACTIVE_MODULE ?? ""));
     return i13 ? unitUcdIds(i13, typeof record.unit_id === "string" ? record.unit_id : undefined) : undefined;
@@ -1523,9 +1484,10 @@ async function testQuality(): Promise<Record<string, unknown>> {
       if (!ucdUnits) continue;
       const green = new Map<string, string[]>();
       for (const value of greenRecords.filter((candidate) => String(candidate.module_id ?? ACTIVE_MODULE ?? "") === moduleId && candidate.status === "passed")) green.set(String(value.unit_id), greenCoveredUcds(value));
-      const gaps = ucdCoverageGaps(record, green);
+      const gaps = batchUcdCoverageGaps(ROOT,moduleId,record,green);
       if (gaps.length > 0) fail(`module ${moduleId} UC-D coverage is incomplete: ${gaps.join("; ")}`);
-      coverage.push({ module_id: moduleId, ucd_units: ucdUnits, status: "passed" });
+      const owned=batchUnits?Object.fromEntries(Object.entries(ucdUnits).map(([id,owners])=>[id,owners.filter(unit=>batchUnits.some(u=>u.module_id===moduleId&&u.unit_id===unit))]).filter(([,owners])=>(owners as string[]).length)):ucdUnits;
+      coverage.push({ module_id: moduleId, ucd_units: owned, status: "passed" });
     }
   }
   const modes = [...modesByModule.values()];
@@ -1582,7 +1544,7 @@ async function testQuality(): Promise<Record<string, unknown>> {
   const testsTotal = greenRequired.reduce((total, record) => total + numberValue(record.tests_total, "green-test-evidence.tests_total"), 0);
   const summaries = (records: Record<string, unknown>[]) => records.filter(record => record.status === "not_recorded").map(record => tddOmissionSummary(ROOT, record)).sort((a, b) => String(a.path).localeCompare(String(b.path)));
   const omissions = summaries(redRecords), baselineOmissions = summaries(baselineRecords);
-  return { status: "passed", red_seen: redSeen && !omissions.length, ...(omissions.length ? { red_status: "not_recorded", red_omission: omissions } : {}), baseline_seen: baselineSeen && !baselineOmissions.length, ...(baselineOmissions.length ? { baseline_status: "not_recorded", baseline_omission: baselineOmissions } : {}), green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping, ...(deferredEntries.length > 0 ? { mapping_debt: deferredEntries } : {}), ...(coverage.length > 0 ? { ucd_coverage: coverage } : {}) };
+  return { status: "passed", ...(batchUnits?{batch_scope_units:batchUnits.map(u=>({module_id:u.module_id,unit_id:u.unit_id}))}:{}), red_seen: redSeen && !omissions.length, ...(omissions.length ? { red_status: "not_recorded", red_omission: omissions } : {}), baseline_seen: baselineSeen && !baselineOmissions.length, ...(baselineOmissions.length ? { baseline_status: "not_recorded", baseline_omission: baselineOmissions } : {}), green_seen: true, tests_total: testsTotal, tests_failed: 0, traceability_complete: true, uc_mapping: mapping, ...(deferredEntries.length > 0 ? { mapping_debt: deferredEntries } : {}), ...(coverage.length > 0 ? { ucd_coverage: coverage } : {}) };
 }
 
 function testQualitySourceFiles(): string[] {
@@ -1664,11 +1626,12 @@ function phaseEvidenceCheck(sensor: "red-test-evidence" | "green-test-evidence" 
 }
 
 function contractBaseline(): Record<string, unknown> {
-  const pattern = /(?:contracts?|openapi|swagger|schema|\.proto$|\.avsc$)/i;
+  const versioned = Boolean(ACTIVE_MODULE && ACTIVE_UNIT && hasAutonomyUnit(ROOT, ACTIVE_MODULE, ACTIVE_UNIT));
+  const pattern = versioned ? /(?:^|[\/])(?:contracts?|schemas?|openapi|swagger)(?:[\/]|$)|(?:^|[\/])[^\/]*(?:contracts?|openapi|swagger|schema)[^\/]*\.[^\/]+$|\.schema$|\.proto$|\.avsc$/i : /(?:contracts?|openapi|swagger|schema|\.proto$|\.avsc$)/i;
   // 4.8.1: in a module context only the module scope (and its declared contract_paths,
   // matched or not) is collected; a project-level contract table contributes only the
   // rows of the module's contracts and is not a source when it has none.
-  const files = (ACTIVE_MODULE ? moduleScopedFiles(pattern, { declaredContracts: "all" }) : projectFiles(pattern)).filter((path) => !path.includes("core/"));
+  const files = (ACTIVE_MODULE ? moduleScopedFiles(pattern, { declaredContracts: "all", relativePaths: versioned }) : projectFiles(pattern)).filter((path) => !path.includes("core/"));
   const tableModules = ACTIVE_MODULE && files.some(isContractTable) ? activeModuleManifest().modules : [];
   const sources: Array<{ path: string; content: string; table?: ModuleContractRows }> = [];
   for (const path of files) {
@@ -1701,26 +1664,7 @@ function contractBaseline(): Record<string, unknown> {
   return { status: "verified", contract_id: `contract-${schemaHash.slice(-12)}`, contract_type: contractType, owner, consumers, schema_hash: schemaHash, validation_status: "passed" };
 }
 
-function functionalDesign(): Record<string, unknown> {
-  const files = existing(["docs/aidlc/construction/functional-design.md"]);
-  files.push(...allFiles("docs/aidlc/construction", /functional-design\/[^/]+\.md$/));
-  if (files.length === 0) fail("functional design artifacts are missing");
-  const content = joined(files);
-  for (const file of files) noUnresolved(text(file), relativePath(file));
-  // 4.8.0: with I13 ucd_units a unit's functional design covers only the unit's own UC-Ds;
-  // the module's completeness is reconciled at build-and-test.
-  const i13 = ACTIVE_UNIT ? i13Evidence() : null;
-  const unitScope = i13?.status === "required" ? unitUcdIds(i13, ACTIVE_UNIT) : null;
-  const sourceCases = ids(joined(allFiles("docs/aidlc/inception/application-design/test-cases", /\.md$/)), /UC-D-\d+(?:-[A-Za-z0-9_-]+)?/g)
-    .filter((id) => !unitScope?.scoped || unitScope.all.includes(/^UC-D-\d+/.exec(id)?.[0] || id));
-  const covered = sourceCases.filter((id) => new RegExp(`\\b${id}\\b`).test(content));
-  if (sourceCases.length > 0 && covered.length !== sourceCases.length) fail("functional design does not cover every UC-D case");
-  const interfaces = count(content, /(?:API|接口|endpoint|event handler|事件处理|public method|公共方法)/gi);
-  if (interfaces < 1) fail("functional design contains no interface specification");
-  if (!/数据源|data source|repository|database|数据库|表结构/i.test(content)) fail("functional design contains no data source validation");
-  if (!/错误|异常|error|exception|失败|timeout|超时/i.test(content)) fail("functional design contains no error handling definition");
-  return { status: "passed", data_source_validation: "passed", ambiguities_resolved: true, unresolved_blockers: 0, use_cases_covered: covered.length > 0 ? covered : ["documented functional cases"], interfaces_specified: interfaces, error_handling_defined: true };
-}
+function functionalDesign(): Record<string, unknown> { return functionalDesignPayload(ROOT, ACTIVE_MODULE, ACTIVE_UNIT); }
 
 // MARS-279: C1 normal-field rows are aggregate declarations. This opt-in C6
 // check deliberately reconciles only declared exceptions against code paths; it
@@ -1778,7 +1722,8 @@ function codeFieldPaths(): Map<string, string[]> {
 }
 
 function fieldPathReconciliation(): Record<string, unknown> {
-  const path = join(ROOT, contextual("docs/aidlc/construction/data-source-validation.md"));
+  const main = join(ROOT, contextual("docs/aidlc/construction/functional-design.md"));
+  const path = canonicalDesign(main, "functional-design") ? main : [join(ROOT, contextual("docs/aidlc/construction/functional-design/data-source-validation.md")), join(ROOT, contextual("docs/aidlc/construction/data-source-validation.md"))].find(existsSync) || main;
   if (!existsSync(path)) return { status: "not_applicable", reason: "data-source-validation.md is missing" };
   const sources = fieldMappingDeclaration(path);
   if (sources === null) return { status: "not_applicable", reason: "field_mapping declaration is absent" };
@@ -1892,7 +1837,7 @@ async function implementationReport(): Promise<Record<string, unknown>> {
   const modulesVerified = verifiedModuleIds(ROOT, requiredWorkflowState().scope).length;
   const prdSelected = selectedPrdRoute();
   if (workflowState?.current_module || existsSync(join(ROOT, "docs", "aidlc", "ideation", "module-manifest.json"))) {
-    const modules = readModuleManifest(ROOT);
+    const modules = readModuleManifest(ROOT).filter(m=>batchModuleIds(ROOT,state.scope).includes(m.module_id));
     for (const module of modules) {
       if (applicable.has("cross-validation")) {
         historical("cross-validation", "inception-consistency", module.module_id);
@@ -1903,7 +1848,7 @@ async function implementationReport(): Promise<Record<string, unknown>> {
         historical("ui-page-planning", "ui-artifact-consistency", module.module_id);
         historical(route === "html-mock" ? "ui-mock-generation" : "ui-figma-generation", "ui-artifact-consistency", module.module_id);
         const alignments: Record<string, unknown>[] = [];
-        for (const unit of readUnitManifest(ROOT, module.module_id)) {
+        for (const unit of readUnitManifest(ROOT, module.module_id).filter(u=>!batchImplementationUnits(ROOT)||batchImplementationUnits(ROOT)!.some(b=>b.module_id===module.module_id&&b.unit_id===u.unit_id))) {
           historical("code-review", "ui-design-alignment", module.module_id, unit.unit_id);
           const alignment = revalidate("code-review", "ui-design-alignment", module.module_id, unit.unit_id);
           if (alignment.status === "passed") alignments.push(alignment);
@@ -2112,7 +2057,8 @@ async function parseMermaidBlocks(blocks: MermaidBlock[]): Promise<"passed" | "n
 
 async function mermaidDiagramContract(): Promise<Record<string, unknown>> {
   const stage = workflowState?.current_stage || "";
-  const required = MERMAID_STAGE_DOCUMENTS[stage];
+  const main = join(ROOT, contextual("docs/aidlc/inception/application-design.md"));
+  const required = stage === "application-design" && canonicalDesign(main, "application-design") ? relative(ROOT, main) : MERMAID_STAGE_DOCUMENTS[stage];
   let files: string[];
   if (required) {
     const path = join(ROOT, contextual(required));
@@ -2151,6 +2097,8 @@ async function mermaidDiagramContract(): Promise<Record<string, unknown>> {
 }
 
 function diagramContract(): Record<string, unknown> | Promise<Record<string, unknown>> {
+  const main = join(ROOT, contextual("docs/aidlc/inception/application-design.md"));
+  if (workflowState?.current_stage === "application-design" && canonicalDesign(main, "application-design")) designDocuments(main, "application-design");
   // SVG mode is opt-in: it applies only after the user explicitly selected it, which is
   // recorded in the workflow state (orchestrate diagram-format --set svg). Otherwise
   // diagrams are Mermaid fenced blocks and referenced SVG files may be external assets.

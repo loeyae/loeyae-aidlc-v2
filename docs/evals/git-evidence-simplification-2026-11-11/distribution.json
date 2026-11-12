@@ -1,0 +1,14 @@
+{
+  "name": "distribution",
+  "argv": [
+    "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "--import",
+    "tsx",
+    "tests/test_autonomous_distribution.ts"
+  ],
+  "duration_ms": 5729.351400000001,
+  "exit_code": 0,
+  "error": null,
+  "signal": null,
+  "real_business_run": false
+}

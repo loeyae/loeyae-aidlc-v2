@@ -1,0 +1,67 @@
+{
+  "status": "passed",
+  "red_seen": true,
+  "baseline_seen": false,
+  "green_seen": true,
+  "tests_total": 3,
+  "tests_failed": 0,
+  "traceability_complete": true,
+  "uc_mapping": [
+    {
+      "use_case": "UC-D-001",
+      "test_methods": [
+        "tests/ucd.cjs#UC-D-001"
+      ]
+    },
+    {
+      "use_case": "UC-D-002",
+      "test_methods": [
+        "tests/ucd.cjs#UC-D-002"
+      ]
+    },
+    {
+      "use_case": "UC-D-003",
+      "test_methods": [
+        "tests/ucd.cjs#UC-D-003"
+      ]
+    }
+  ],
+  "inputs": {
+    "digest": "dafa048695635c9847ca4d62e1705156578ed1e3a338c7616248476265285000",
+    "artifacts": [
+      "src/orders.cjs",
+      ".aidlc/evidence/test-case-derivation/project/test-case-derivation.json",
+      ".aidlc/evidence/code-generation/project/default/green-test-evidence.json"
+    ]
+  },
+  "workflow_id": "9145b784-bc71-4d7d-bf82-8d19f1f7b281",
+  "stage_instance": "code-review@module:project@unit:default",
+  "module_id": "project",
+  "unit_id": "default",
+  "evidence_version": "1",
+  "timestamp": "2026-11-10T17:02:48.708Z",
+  "producer": {
+    "name": "loeyae-aidlc-evidence",
+    "mode": "controlled",
+    "workflow_id": "9145b784-bc71-4d7d-bf82-8d19f1f7b281",
+    "execution_id": "5d5fe9f7-f092-421b-aae3-f919097a9beb"
+  },
+  "source_revision": {
+    "commit": "d009f132252e29c12cee2d0438d9209aa596e368",
+    "dirty": false,
+    "worktree_digest": "09e79e8ae857a7a6c654334cef1671c8c65e9af18d57a55a107e202dc348095f",
+    "scope": "inputs-v2:module:project:unit:default:autonomy-v1",
+    "scope_digest": "872beff640096d5ed9bc01aa7cbaa2ccd49f93ce17a47a975f5d1bbafc26f6a7"
+  },
+  "checker": {
+    "id": "builtin:test-quality",
+    "sensor": "test-quality",
+    "argv_digest": "44e25cb2ae72ef230760b035f8ce0a7a8e89d706eb1ec2711102a71d1cbfcc3a",
+    "command_version": 2,
+    "identity_version": 1,
+    "implementation_digest": "a493f597301fade5ca7000bdda09d9e3b5e5cd9a10667e87e46c92a6d121b215",
+    "exit_code": 0,
+    "status": "passed",
+    "duration_ms": 1088
+  }
+}

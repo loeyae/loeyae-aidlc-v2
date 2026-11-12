@@ -1,0 +1,546 @@
+{
+  "thread_id": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+  "model": "gpt-6.1-sol",
+  "native_config_digest": "395bd1ea99b19a54be4b5d2aa4621c6aa6043bcec3f75bece8d7d19c326bd307",
+  "nonce": "bf4c8a49-905a-4577-9db3-7991a4feefb2",
+  "tools": [
+    {
+      "action": "read",
+      "path": "nonce.txt"
+    },
+    {
+      "action": "read",
+      "path": "nonce.txt"
+    }
+  ],
+  "turns": [
+    {
+      "id": "01a1bc38-9b63-7f43-a255-65715c99bb86",
+      "rootTurnId": "01a1bc38-9b63-7f43-a255-65715c99bb86",
+      "items": [
+        {
+          "type": "agentMessage",
+          "id": "msg_0871e08914c7ede5016af0b27058e887d08b8485f85520d706",
+          "text": "bf4c8a49-905a-4577-9db3-7991a4feefb2",
+          "phase": "final_answer",
+          "memoryCitation": null,
+          "delivery": null,
+          "questions": null
+        }
+      ],
+      "itemsView": "summary",
+      "status": "completed",
+      "error": null,
+      "startedAt": 1794159189,
+      "completedAt": 1794159214,
+      "durationMs": 24535
+    },
+    {
+      "id": "01a1bc39-01b9-7c03-8ba2-0eedb274e5e7",
+      "rootTurnId": "01a1bc39-01b9-7c03-8ba2-0eedb274e5e7",
+      "items": [
+        {
+          "type": "agentMessage",
+          "id": "msg_0871e08914c7ede5016af0b2773e3087d08596c8ca12f2e6df",
+          "text": "bf4c8a49-905a-4577-9db3-7991a4feefb2",
+          "phase": "final_answer",
+          "memoryCitation": null,
+          "delivery": null,
+          "questions": null
+        }
+      ],
+      "itemsView": "summary",
+      "status": "completed",
+      "error": null,
+      "startedAt": 1794159215,
+      "completedAt": 1794159219,
+      "durationMs": 4673
+    },
+    {
+      "id": "01a1bc39-148e-7de3-a71d-7271e7b2cc5e",
+      "rootTurnId": "01a1bc39-148e-7de3-a71d-7271e7b2cc5e",
+      "items": [],
+      "itemsView": "notLoaded",
+      "status": "interrupted",
+      "error": null,
+      "startedAt": 1794159219,
+      "completedAt": 1794159222,
+      "durationMs": 3096
+    }
+  ],
+  "cancellation": {
+    "status": "cancelled",
+    "exit_code": 1,
+    "signal": null,
+    "error": null,
+    "started": true,
+    "reconciled": true,
+    "pid": 22096,
+    "stdout": "",
+    "stderr": ""
+  },
+  "budget_denied": true,
+  "events": [
+    {
+      "method": "item/started",
+      "params": {
+        "item": {
+          "type": "userMessage",
+          "id": "01a1bc38-c39a-72a2-bcc1-be1c923599ab",
+          "clientId": null,
+          "content": [
+            {
+              "type": "text",
+              "text": "Call aidlc_action with action read and path nonce.txt. Return the exact returned text. No other tool.",
+              "text_elements": []
+            }
+          ]
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc38-9b63-7f43-a255-65715c99bb86",
+        "startedAtMs": 1794159199267
+      },
+      "emittedAtMs": 1794159199660
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "type": "userMessage",
+          "id": "01a1bc38-c39a-72a2-bcc1-be1c923599ab",
+          "clientId": null,
+          "content": [
+            {
+              "type": "text",
+              "text": "Call aidlc_action with action read and path nonce.txt. Return the exact returned text. No other tool.",
+              "text_elements": []
+            }
+          ]
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc38-9b63-7f43-a255-65715c99bb86",
+        "completedAtMs": 1794159199366
+      },
+      "emittedAtMs": 1794159199790
+    },
+    {
+      "method": "item/started",
+      "params": {
+        "item": {
+          "type": "dynamicToolCall",
+          "id": "exec-c1c6500d-b986-439a-b171-aa182ac75e87",
+          "namespace": null,
+          "tool": "aidlc_action",
+          "arguments": {
+            "action": "read",
+            "path": "nonce.txt"
+          },
+          "status": "inProgress",
+          "contentItems": null,
+          "success": null,
+          "durationMs": null
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc38-9b63-7f43-a255-65715c99bb86",
+        "startedAtMs": 1794159206495
+      },
+      "emittedAtMs": 1794159206607
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "type": "dynamicToolCall",
+          "id": "exec-c1c6500d-b986-439a-b171-aa182ac75e87",
+          "namespace": null,
+          "tool": "aidlc_action",
+          "arguments": {
+            "action": "read",
+            "path": "nonce.txt"
+          },
+          "status": "completed",
+          "contentItems": [
+            {
+              "type": "inputText",
+              "text": "\"bf4c8a49-905a-4577-9db3-7991a4feefb2\""
+            }
+          ],
+          "success": true,
+          "durationMs": 908
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc38-9b63-7f43-a255-65715c99bb86",
+        "completedAtMs": 1794159207403
+      },
+      "emittedAtMs": 1794159207486
+    },
+    {
+      "method": "item/started",
+      "params": {
+        "item": {
+          "type": "agentMessage",
+          "id": "msg_0871e08914c7ede5016af0b27058e887d08b8485f85520d706",
+          "text": "",
+          "phase": "final_answer",
+          "memoryCitation": null,
+          "delivery": null,
+          "questions": null
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc38-9b63-7f43-a255-65715c99bb86",
+        "startedAtMs": 1794159212087
+      },
+      "emittedAtMs": 1794159212088
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "type": "agentMessage",
+          "id": "msg_0871e08914c7ede5016af0b27058e887d08b8485f85520d706",
+          "text": "bf4c8a49-905a-4577-9db3-7991a4feefb2",
+          "phase": "final_answer",
+          "memoryCitation": null,
+          "delivery": null,
+          "questions": null
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc38-9b63-7f43-a255-65715c99bb86",
+        "completedAtMs": 1794159212402
+      },
+      "emittedAtMs": 1794159212494
+    },
+    {
+      "method": "turn/completed",
+      "params": {
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turn": {
+          "id": "01a1bc38-9b63-7f43-a255-65715c99bb86",
+          "rootTurnId": "01a1bc38-9b63-7f43-a255-65715c99bb86",
+          "items": [
+            {
+              "type": "agentMessage",
+              "id": "msg_0871e08914c7ede5016af0b27058e887d08b8485f85520d706",
+              "text": "bf4c8a49-905a-4577-9db3-7991a4feefb2",
+              "phase": "final_answer",
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            }
+          ],
+          "itemsView": "summary",
+          "status": "completed",
+          "error": null,
+          "startedAt": 1794159189,
+          "completedAt": 1794159214,
+          "durationMs": 24535
+        }
+      },
+      "emittedAtMs": 1794159214991
+    },
+    {
+      "method": "item/started",
+      "params": {
+        "item": {
+          "type": "userMessage",
+          "id": "01a1bc39-0203-7cb3-a440-13bd75177fd2",
+          "clientId": null,
+          "content": [
+            {
+              "type": "text",
+              "text": "In this same session call aidlc_action again to read nonce.txt, then return the exact nonce again.",
+              "text_elements": []
+            }
+          ]
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc39-01b9-7c03-8ba2-0eedb274e5e7",
+        "startedAtMs": 1794159215117
+      },
+      "emittedAtMs": 1794159215117
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "type": "userMessage",
+          "id": "01a1bc39-0203-7cb3-a440-13bd75177fd2",
+          "clientId": null,
+          "content": [
+            {
+              "type": "text",
+              "text": "In this same session call aidlc_action again to read nonce.txt, then return the exact nonce again.",
+              "text_elements": []
+            }
+          ]
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc39-01b9-7c03-8ba2-0eedb274e5e7",
+        "completedAtMs": 1794159215117
+      },
+      "emittedAtMs": 1794159215128
+    },
+    {
+      "method": "item/started",
+      "params": {
+        "item": {
+          "type": "dynamicToolCall",
+          "id": "exec-35ed3da5-a236-41dc-9c89-fe3883c29233",
+          "namespace": null,
+          "tool": "aidlc_action",
+          "arguments": {
+            "action": "read",
+            "path": "nonce.txt"
+          },
+          "status": "inProgress",
+          "contentItems": null,
+          "success": null,
+          "durationMs": null
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc39-01b9-7c03-8ba2-0eedb274e5e7",
+        "startedAtMs": 1794159217085
+      },
+      "emittedAtMs": 1794159217085
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "type": "dynamicToolCall",
+          "id": "exec-35ed3da5-a236-41dc-9c89-fe3883c29233",
+          "namespace": null,
+          "tool": "aidlc_action",
+          "arguments": {
+            "action": "read",
+            "path": "nonce.txt"
+          },
+          "status": "completed",
+          "contentItems": [
+            {
+              "type": "inputText",
+              "text": "\"bf4c8a49-905a-4577-9db3-7991a4feefb2\""
+            }
+          ],
+          "success": true,
+          "durationMs": 1
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc39-01b9-7c03-8ba2-0eedb274e5e7",
+        "completedAtMs": 1794159217086
+      },
+      "emittedAtMs": 1794159217096
+    },
+    {
+      "method": "item/started",
+      "params": {
+        "item": {
+          "type": "agentMessage",
+          "id": "msg_0871e08914c7ede5016af0b2773e3087d08596c8ca12f2e6df",
+          "text": "",
+          "phase": "final_answer",
+          "memoryCitation": null,
+          "delivery": null,
+          "questions": null
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc39-01b9-7c03-8ba2-0eedb274e5e7",
+        "startedAtMs": 1794159218884
+      },
+      "emittedAtMs": 1794159218884
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "type": "agentMessage",
+          "id": "msg_0871e08914c7ede5016af0b2773e3087d08596c8ca12f2e6df",
+          "text": "bf4c8a49-905a-4577-9db3-7991a4feefb2",
+          "phase": "final_answer",
+          "memoryCitation": null,
+          "delivery": null,
+          "questions": null
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc39-01b9-7c03-8ba2-0eedb274e5e7",
+        "completedAtMs": 1794159219137
+      },
+      "emittedAtMs": 1794159219147
+    },
+    {
+      "method": "turn/completed",
+      "params": {
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turn": {
+          "id": "01a1bc39-01b9-7c03-8ba2-0eedb274e5e7",
+          "rootTurnId": "01a1bc39-01b9-7c03-8ba2-0eedb274e5e7",
+          "items": [
+            {
+              "type": "agentMessage",
+              "id": "msg_0871e08914c7ede5016af0b2773e3087d08596c8ca12f2e6df",
+              "text": "bf4c8a49-905a-4577-9db3-7991a4feefb2",
+              "phase": "final_answer",
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            }
+          ],
+          "itemsView": "summary",
+          "status": "completed",
+          "error": null,
+          "startedAt": 1794159215,
+          "completedAt": 1794159219,
+          "durationMs": 4673
+        }
+      },
+      "emittedAtMs": 1794159219853
+    },
+    {
+      "method": "item/started",
+      "params": {
+        "item": {
+          "type": "userMessage",
+          "id": "01a1bc39-14c6-7303-b2fa-45d6fca32977",
+          "clientId": null,
+          "content": [
+            {
+              "type": "text",
+              "text": "Call aidlc_action with action command and id hold exactly once. Wait for the result.",
+              "text_elements": []
+            }
+          ]
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc39-148e-7de3-a71d-7271e7b2cc5e",
+        "startedAtMs": 1794159219919
+      },
+      "emittedAtMs": 1794159219919
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "type": "userMessage",
+          "id": "01a1bc39-14c6-7303-b2fa-45d6fca32977",
+          "clientId": null,
+          "content": [
+            {
+              "type": "text",
+              "text": "Call aidlc_action with action command and id hold exactly once. Wait for the result.",
+              "text_elements": []
+            }
+          ]
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc39-148e-7de3-a71d-7271e7b2cc5e",
+        "completedAtMs": 1794159219919
+      },
+      "emittedAtMs": 1794159219931
+    },
+    {
+      "method": "item/started",
+      "params": {
+        "item": {
+          "type": "agentMessage",
+          "id": "msg_0871e08914c7ede5016af0b27a054c87d0ae5cc78bc899277c",
+          "text": "",
+          "phase": "commentary",
+          "memoryCitation": null,
+          "delivery": null,
+          "questions": null
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc39-148e-7de3-a71d-7271e7b2cc5e",
+        "startedAtMs": 1794159221637
+      },
+      "emittedAtMs": 1794159221637
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "type": "agentMessage",
+          "id": "msg_0871e08914c7ede5016af0b27a054c87d0ae5cc78bc899277c",
+          "text": "I’ll call `hold` once and wait for the result.",
+          "phase": "commentary",
+          "memoryCitation": null,
+          "delivery": null,
+          "questions": null
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc39-148e-7de3-a71d-7271e7b2cc5e",
+        "completedAtMs": 1794159221954
+      },
+      "emittedAtMs": 1794159221964
+    },
+    {
+      "method": "item/started",
+      "params": {
+        "item": {
+          "type": "dynamicToolCall",
+          "id": "exec-e431e45a-41c8-43dd-ab27-e23462f854f6",
+          "namespace": null,
+          "tool": "aidlc_action",
+          "arguments": {
+            "action": "command",
+            "id": "hold"
+          },
+          "status": "inProgress",
+          "contentItems": null,
+          "success": null,
+          "durationMs": null
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc39-148e-7de3-a71d-7271e7b2cc5e",
+        "startedAtMs": 1794159222379
+      },
+      "emittedAtMs": 1794159222379
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "type": "dynamicToolCall",
+          "id": "exec-e431e45a-41c8-43dd-ab27-e23462f854f6",
+          "namespace": null,
+          "tool": "aidlc_action",
+          "arguments": {
+            "action": "command",
+            "id": "hold"
+          },
+          "status": "completed",
+          "contentItems": [
+            {
+              "type": "inputText",
+              "text": "{\"status\":\"cancelled\",\"exit_code\":1,\"signal\":null,\"error\":null,\"started\":true,\"reconciled\":true,\"pid\":22096,\"stdout\":\"\",\"stderr\":\"\"}"
+            }
+          ],
+          "success": true,
+          "durationMs": 183
+        },
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turnId": "01a1bc39-148e-7de3-a71d-7271e7b2cc5e",
+        "completedAtMs": 1794159222563
+      },
+      "emittedAtMs": 1794159222584
+    },
+    {
+      "method": "turn/completed",
+      "params": {
+        "threadId": "01a1bc38-6b30-7660-9de4-82d667375a2c",
+        "turn": {
+          "id": "01a1bc39-148e-7de3-a71d-7271e7b2cc5e",
+          "rootTurnId": "01a1bc39-148e-7de3-a71d-7271e7b2cc5e",
+          "items": [],
+          "itemsView": "notLoaded",
+          "status": "interrupted",
+          "error": null,
+          "startedAt": 1794159219,
+          "completedAt": 1794159222,
+          "durationMs": 3096
+        }
+      },
+      "emittedAtMs": 1794159223090
+    }
+  ]
+}

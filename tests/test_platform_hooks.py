@@ -55,34 +55,18 @@ saveWorkflowState(process.cwd(), state);
 def main() -> None:
     kiro_hook = json.loads((ROOT / "core" / "hooks" / "kiro" / "aidlc-gates.json").read_text())
     assert kiro_hook["version"] == "1"
-    assert kiro_hook["hooks"][0]["trigger"] == "Stop"
-    assert "loeyae-aidlc hook --format kiro" in kiro_hook["hooks"][0]["action"]["command"]
-
-    claude_hooks = json.loads((ROOT / "harness" / "claude" / "hooks" / "hooks.json").read_text())
-    assert claude_hooks["hooks"]["Stop"][0]["hooks"][0]["args"] == ["hook", "--format", "claude"]
-
-    codebuddy_hooks = json.loads((ROOT / "harness" / "codebuddy" / "hooks" / "hooks.json").read_text())
-    assert codebuddy_hooks["hooks"]["Stop"][0]["hooks"][0]["command"] == "loeyae-aidlc hook --format codebuddy"
-
-    qoder_hooks = json.loads((ROOT / "harness" / "qoder" / "hooks" / "hooks.json").read_text())
-    assert qoder_hooks["hooks"]["Stop"][0]["hooks"][0]["command"] == "loeyae-aidlc hook --format qoder-cli"
-
-    zcode_hooks = json.loads((ROOT / "harness" / "zcode" / "hooks" / "hooks.json").read_text())
-    zcode_process = zcode_hooks["hooks"]["Stop"][0]["hooks"][0]
-    assert zcode_process["type"] == "process"
-    assert zcode_process["args"] == ["hook", "--format", "zcode"]
-
-    codex_hooks = json.loads((ROOT / "harness" / "codex" / "hooks" / "hooks.json").read_text())
-    codex_group = codex_hooks["hooks"]["Stop"][0]
-    assert codex_group["id"] == "loeyae-aidlc-stop-gate"
-    assert "--format codex" in codex_group["hooks"][0]["command"]
+    assert kiro_hook["hooks"] == []
+    for harness in ["claude", "codex", "codebuddy", "qoder", "zcode"]:
+        hooks = json.loads((ROOT / "harness" / harness / "hooks" / "hooks.json").read_text())
+        assert hooks["hooks"] == {}
 
     plugin = (ROOT / "harness" / "opencode" / "plugins" / "loeyae-aidlc.js").read_text()
-    assert 'event.type !== "session.idle"' in plugin
-    assert '"--format", "opencode"' in plugin
-    assert "<missing-session-id>" in plugin
-    assert "Symbol.for" in plugin and "activeGuards" in plugin
-    assert "throw new Error" in plugin
+    assert "host-execution.md" in plugin
+    assert "session.idle" not in plugin
+    assert "Bun.spawnSync" not in plugin
+    assert "activeGuards" not in plugin
+    assert "session.prompt" not in plugin
+    assert "config.instructions" in plugin
 
     with tempfile.TemporaryDirectory(prefix="loeyae-platform-hooks-") as directory:
         home = Path(directory)
@@ -92,16 +76,15 @@ def main() -> None:
         result = run_cli(["install", "--harness", "kiro-ide", "--project", str(project)], ROOT, home)
         assert result.returncode == 0, result.stdout + result.stderr
         project_hook = project / ".kiro" / "hooks" / "loeyae-aidlc.json"
-        assert json.loads(project_hook.read_text()) == kiro_hook
+        assert not project_hook.exists()
 
         foreign_project = home / "foreign-project"
         foreign_hook = foreign_project / ".kiro" / "hooks" / "loeyae-aidlc.json"
         foreign_hook.parent.mkdir(parents=True)
         foreign_hook.write_text('{"owner":"user"}\n')
         rejected = run_cli(["install", "--harness", "kiro-ide", "--project", str(foreign_project)], ROOT, home)
-        assert rejected.returncode != 0
+        assert rejected.returncode == 0, rejected.stdout + rejected.stderr
         assert foreign_hook.read_text() == '{"owner":"user"}\n'
-        assert "unowned install target" in rejected.stderr
 
         unsafe_target = home / "existing-project"
         unsafe_target.mkdir()
@@ -120,7 +103,7 @@ def main() -> None:
             result = run_cli(["install", "--harness", "codex"], ROOT, home)
             assert result.returncode == 0, result.stdout + result.stderr
         registered = json.loads(codex_path.read_text())["hooks"]["Stop"]
-        assert sum(group.get("id") == "loeyae-aidlc-stop-gate" for group in registered) == 1
+        assert sum(group.get("id") == "loeyae-aidlc-stop-gate" for group in registered) == 0
         assert custom_group in registered
         result = run_cli(["uninstall", "--harness", "codex"], ROOT, home)
         assert result.returncode == 0, result.stdout + result.stderr

@@ -5,12 +5,14 @@ import { evidenceRelativePath, type ExecutionAxis } from "./aidlc-execution-cont
 import type { WorkflowState } from "./aidlc-light-state";
 
 export interface DeliverySummaryVerification {
+  batchResult?: Record<string,any>;
   /** Only the caller's successful controlled-evidence checks may populate this field. */
   verifiedEvidence?: readonly string[];
   blockers?: readonly string[];
 }
 
 export interface DeliverySummary {
+  autonomous_batch_result?: Record<string,any>;
   summary_version: "1";
   workflow_id: string;
   project_workflow_id: string;
@@ -68,6 +70,7 @@ export function projectDeliverySummary(root: string, state: WorkflowState, check
   if (checked && references.length === 0) blockers.push("No controlled delivery evidence was verified.");
   const verification = blockers.length ? "blocked" : checked ? "passed" : "not_checked";
   return {
+    ...(checks.batchResult?{autonomous_batch_result:checks.batchResult}:{}),
     summary_version: "1", workflow_id: state.workflow_id, project_workflow_id: state.parent_workflow_id || state.workflow_id,
     ...(moduleId ? { module_id: moduleId } : {}), scope: state.scope,
     current_stage_instance: state.current_stage_instance || state.current_stage,
@@ -89,5 +92,6 @@ export function renderDeliverySummaryMarkdown(summary: DeliverySummary): string 
     ...(summary.evidence_references.length ? summary.evidence_references.map(label => `- ${escape(label)}`) : ["No evidence references recorded."])];
   if (summary.narrative_references.length) lines.push("", "## Decisions and limitations", "", ...summary.narrative_references.map(label => `- ${escape(label)}`));
   if (summary.blockers.length) lines.push("", "## Blocking findings", "", ...summary.blockers.map(message => `- ${escape(message)}`));
+  if(summary.autonomous_batch_result){const b=summary.autonomous_batch_result;lines.push("",`- Batch engineering result: ${escape(String(b.engineering_result))}`,`- Current applicability: ${escape(String(b.current_status))}`,`- Batch completed: ${b.batch_completed===true}`,`- Human decision review: ${escape(String(b.human_review_summary?.status||"not-required"))}`);}
   return `${lines.join("\n")}\n`;
 }

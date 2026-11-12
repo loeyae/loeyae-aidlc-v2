@@ -1,0 +1,139 @@
+{
+  "recorded_at": "2026-11-11T07:19:16.648Z",
+  "result": "engineering-passed",
+  "implemented": [
+    "C1 scoped read-only context and public artifact views",
+    "C2 append-only delta audit for new legacy state events",
+    "C3 inherited/private reading plan without changing stored slice identity",
+    "C4 CLI/skills/ten-harness entry and distribution synchronization"
+  ],
+  "checks": [
+    {
+      "command": "node --import tsx tests/test_context_simplification.ts",
+      "chunk": "b5d489",
+      "seconds": 1.4313956,
+      "result": "passed"
+    },
+    {
+      "command": "node --import tsx tests/test_context_slices_cli.ts",
+      "chunk": "cdf13c",
+      "seconds": 5.6075739,
+      "result": "passed"
+    },
+    {
+      "command": "node --import tsx tests/test_mars243_sessions.ts",
+      "chunk": "79e614",
+      "seconds": 9.8493117,
+      "result": "passed"
+    },
+    {
+      "command": "node --import tsx tests/test_stage_handoff_prompts.ts",
+      "chunks": [
+        "7c19b6",
+        "4183b9"
+      ],
+      "seconds": null,
+      "note": "Process yielded after 10 seconds; final poll confirmed exit 0. No inferred total duration.",
+      "result": "passed"
+    },
+    {
+      "command": "node --import tsx tests/test_workflow_facts.ts",
+      "chunk": "f1d299",
+      "seconds": 3.0554277,
+      "result": "passed"
+    },
+    {
+      "command": "node --import tsx tests/test_native_host_driver.ts",
+      "chunk": "a36538",
+      "seconds": 0.3833748,
+      "scenarios": 37,
+      "result": "passed"
+    },
+    {
+      "command": "node node_modules/typescript/bin/tsc --noEmit",
+      "chunk": "dd94b7",
+      "seconds": 3.9305453,
+      "result": "passed"
+    }
+  ],
+  "source_hashes": {
+    "core/tools/aidlc-context-view.ts": "512b7885927aaeb24f529c32af300f3958dcfb3336ae70a059dfcc438e4ef042",
+    "core/tools/aidlc-light-state.ts": "712ab97216f877a37e5d539c0d9dc6b91bcfc08a00d74c1f08d6354add252e94",
+    "core/tools/aidlc-document-slices.ts": "27b99d6b2d9edf6417713dd4b11fd394f077236620dcacd5b1345e962fa16fd7",
+    "core/tools/aidlc-orchestrate.ts": "94eed34b19b2ffaf637c3251c12cee97994ce7edc67bed78235df2a82b8d10af",
+    "harness/codex/runtime/host-kernel.cjs": "f62b816cbf3ac8be67fae6a2aca3e6f69e90e33f0827087043666e958fd1b5ea",
+    "harness/opencode/plugins/loeyae-aidlc.js": "28f0406dea4130995f9bd94b5b15e333df9fadb54bc62713c8e0460c7f8a821b",
+    "bin/cli.ts": "1f0dc11f5b4cc2f6a104839ee142293ab0c800055d84579666765613714a8689",
+    "core/skills/aidlc-continuity/SKILL.md": "f2b2d4d69e73b2e390673f260eb34b1d4a0cacad6ec911a6723e72b3115e74f9",
+    "core/skills/aidlc-handoff/SKILL.md": "6f0f28394df0c1d5ef35063fa429ce9d6a749e2e9f91cfc0a27b39cf24fd5458",
+    "core/knowledge/protocols/common-session-handoff.md": "112440b06a8cec3962d3c4807031cc1b5b43f2f9a06dc72f734f3f20fcd5e259",
+    "core/knowledge/protocols/common-session-continuity.md": "12dbb505722afaf0ee385f1529b5a3a9b9bf5837675fa58b7e9eb56b82d298e6",
+    "tests/test_context_simplification.ts": "ec7b9ebcf2c39b7f724f973c6854d0ad3b4392e2144fb59a4ff8f90afd88a7c3",
+    "tests/test_context_slices_cli.ts": "f5fbe6e03240e08de2fdec29ee5c2034b65ce47006adbbb76f3366e75fbb7c4b",
+    "tests/test_workflow_facts.ts": "89c27bab45f804a3209e29284c6fce1c31bbb082f3865f8ae176989620b58ed3"
+  },
+  "distribution": {
+    "harnesses": {
+      "claude": 315,
+      "codebuddy": 316,
+      "codex": 321,
+      "deepseek": 313,
+      "kiro-cli": 314,
+      "kiro-crew": 314,
+      "kiro-ide": 314,
+      "opencode": 313,
+      "qoder": 315,
+      "zcode": 317
+    },
+    "files_compared": 3152,
+    "failures": [],
+    "global_install_modified": false
+  },
+  "measurements": {
+    "project": "project-readonly-measurement.json",
+    "fixture": {
+      "claims": 1000,
+      "unchanged_audit_fields_bytes": 137,
+      "one_claim_changed_audit_fields_bytes": 809,
+      "command_record_bytes": 310980,
+      "command_summary_bytes": 535,
+      "context_bytes": 1058
+    },
+    "meaning": "Output byte sizes, not model tokens, business validation or end-to-end speedup."
+  },
+  "initial_failures": [
+    {
+      "chunks": [
+        "9230f7",
+        "229926"
+      ],
+      "cause": "Non-exported moduleRef import in the new view; replaced with existing WorkflowRef shape before boundary verification."
+    },
+    {
+      "chunk": "09339b",
+      "cause": "Protocol CRLF/trailing whitespace found in final diff check; normalized, synchronized to all ten outputs, final check passed (05a5d0)."
+    }
+  ],
+  "build": {
+    "command": "node --import tsx .artifacts/build-retain-root.ts --all",
+    "chunk": "2638d1",
+    "seconds": 1.5331044,
+    "log": "distribution-build.log",
+    "note": "Existing Windows directory-preserving generator; final protocol whitespace sync followed by all-manifest byte/extras check (76352e)."
+  },
+  "preserved": {
+    "aidlc/active/aidlc-state.md": "5e08e34d2e434edf0ab7d2667377080dc0caf06dd8dcfa178b877211c5c93d0f",
+    "aidlc/active/audit.md": "1fa99dba9594b7ee1e2e7ad0d8e72c9b81b87e74f9577879795937b0af998686"
+  },
+  "root_state_unchanged": true,
+  "business_project_changed": false,
+  "global_install_changed": false,
+  "business_tests_or_model_or_H5_run": false,
+  "limitations": [
+    "Existing 229 MB business documents and old audit records are retained, not deleted or rewritten.",
+    "Business project still needs deployment of the matching engine to adopt the new defaults.",
+    "Business slice inherited content was inspected, not revalidated as business acceptance.",
+    "No new context scheduler, token admission gate, forced facts migration or general cross-unit test deduplication.",
+    "G9 actual native-host replacement qualification remains outside this change."
+  ]
+}

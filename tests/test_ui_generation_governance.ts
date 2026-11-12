@@ -52,6 +52,8 @@ function run(project: string, args: string[]): { status: number; stdout: string;
 function pagePlan(second = false): string {
   return `# UI 页面计划
 
+Provenance: ui-page-planning@module:module-a; source ui-page-plan.md.
+
 ## 页面清单
 | ID | 端 | 页面名称 | 类型 | 来源 | 改造基础 | 目标代码文件 | 角色与权限 | 状态差异 |
 |----|----|----------|------|------|----------|--------------|------------|----------|
@@ -273,7 +275,10 @@ try {
   assert.equal(missingAc.all_changes_mapped, false);
   assert.deepEqual(missingAc.unmapped_changes.acs, ["AC-999"]);
 
-  const missingCli = run(repository, ["ui", "dry-run", "--pages", "3", "--changed-stories", "US-999"]);
+  assert.throws(() => fixtureEnvironment(repository, ["ui", "dry-run"]), /isolated project/);
+  const missingProject = join(root, "no-workflow");
+  mkdirSync(missingProject);
+  const missingCli = run(missingProject, ["ui", "dry-run", "--pages", "3", "--changed-stories", "US-999"]);
   assert.notEqual(missingCli.status, 0);
   assert.match(`${missingCli.stdout}\n${missingCli.stderr}`, /unmapped|no page mapping/i);
 

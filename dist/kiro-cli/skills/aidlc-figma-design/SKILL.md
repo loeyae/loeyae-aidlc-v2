@@ -1,54 +1,19 @@
 ---
 name: aidlc-figma-design
-description: "基于已批准 UI 页面计划创建 Figma 设计，或只读登记外部设计稿；不负责 I9 路由和审批。"
+description: "使用宿主已有 Figma 工具读取、创建或调整指定设计，保留设计来源与视觉验证。"
 triggers: Figma, Figma 设计, UI 设计稿, 外部设计稿, Figma 页面
 ---
 
-# Figma 设计能力
+# figma-design
 
-开始时宣布："使用 aidlc-figma-design 执行 Figma 设计"。
+已有设计可凭用户提供的链接/节点直接读取，使用当前宿主可用的 Figma 工具；不先构造编排层能力凭据。确认操作是只读还是修改，按已有授权执行。没有工具权限时说明真实缺口，可继续已有导出稿支持的工作，不伪造读取成功。
 
-## 资源路径
+创建或修改只涉及本次明确范围，优先复用组件与样式；检查页面状态、尺寸、布局、文本及交互含义。批量工作可分批执行和技术读回，不逐页请求重复批准。
 
-共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+保留文件/节点链接、必要截图和未解决问题，优先更新现有设计说明。不为读取设计强制建立页面计划、manifest 或独立审查证明。
 
-读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
 
-## 输入
+## 兼容参考
 
-调用方必须提供：
-
-- 已批准页面计划路径；
-- `source=created` 或 `source=external`；
-- 编排层已验证的 Figma 能力结果；
-- 目标文件或创建目标；
-- 设计资源和当前批次。
-
-缺少任一输入时返回 `NEEDS_CONTEXT`，不推断流程状态或来源模式。
-
-## 加载
-
-加载发布包中的 [stages/inception/inception-ui-figma-generation.md](../../stages/inception/inception-ui-figma-generation.md)。Construction 的 [knowledge/design/common-figma-design-standards.md](../../knowledge/design/common-figma-design-standards.md) 不属于本能力。
-
-`source=external` 通过 Git 锁定外部只读适配声明和 Core 通用 `consumeExternalUiDesign` 消费入口执行，加载 [knowledge/protocols/ui-readonly-adapter.md](../../knowledge/protocols/ui-readonly-adapter.md)。本 Skill 不直接调用服务读取工具，也不接收网络、凭据或宿主控制面能力。候选映射不可信；canonical manifest 只能由 Core 校验后发布。创建分支仍使用原能力流程，本轮尚未迁移。
-
-UI 生成流程（代表页定标·全量连续生成·每批轻量技术读回）见 [knowledge/design/common-ui-generation-flow.md](../../knowledge/design/common-ui-generation-flow.md)：调用方按该流程以**连续模式**传入全部页面，批次仅用于控制写入规模和错误恢复，本能力不逐页等待用户审批，每批完成后自动技术读回。
-
-## 输出
-
-返回当前模块 canonical `docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json` 的路径和完整内容：主文件 URL、每个 PAGE 对应的 Page/Frame/nodeId、设计资源验证、截图引用和未解决问题。`source=created` 必须记录 `external_read_only=false`；`source=external` 必须只读并记录 `external_read_only=true`。
-
-已有稿读取失败返回 `NEEDS_CAPABILITY` 或 `UNVERIFIED`，不伪造截图或 passed。读取/资产完整性、行为语义和视觉审核分别验证；集中视觉报告必须绑定当前 manifest 的 `figma_manifest_sha256`，新快照不能复用旧审核。
-
-本能力不生成 Evidence；调用方必须按签名 I9 choice 校验 source，并在当前 Stage 实例中通过受控 Producer 运行 `ui-artifact-consistency`。未选择 Figma、UI condition=false 或选择 `skip` 时不得调用本能力、创建 manifest 或要求占位 Evidence。
-
-## 禁止事项
-
-不得：
-
-- 更新项目 state 或 audit；
-- 切换 UI 模式；
-- 等待或代替用户审批；
-- 执行 I10（交叉验证）；
-- 宣布 I9/I10 完成；
-- 伪造 evidence。
+仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-figma-design.md)，默认不加载。

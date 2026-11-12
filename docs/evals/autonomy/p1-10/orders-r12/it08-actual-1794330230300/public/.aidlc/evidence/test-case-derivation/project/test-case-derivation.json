@@ -1,0 +1,107 @@
+{
+  "status": "required",
+  "applicability": "required",
+  "ucd_total": 3,
+  "ready_ucd": 3,
+  "ucd_ids": [
+    "UC-D-001",
+    "UC-D-002",
+    "UC-D-003"
+  ],
+  "ucd_modes": {
+    "UC-D-001": "new",
+    "UC-D-002": "new",
+    "UC-D-003": "new"
+  },
+  "change_refs": {
+    "UC-D-001": "REQ-001",
+    "UC-D-002": "REQ-001",
+    "UC-D-003": "REQ-001"
+  },
+  "source_files": [
+    "docs\\aidlc\\modules\\project\\inception\\requirements.md",
+    "docs\\aidlc\\modules\\project\\inception\\user-stories.md"
+  ],
+  "test_case_files": [
+    "docs\\aidlc\\modules\\project\\inception\\application-design\\test-cases\\UC-D-001-pagination.md",
+    "docs\\aidlc\\modules\\project\\inception\\application-design\\test-cases\\UC-D-002-independent-calls.md",
+    "docs\\aidlc\\modules\\project\\inception\\application-design\\test-cases\\UC-D-003-failure-propagation.md",
+    "docs\\aidlc\\modules\\project\\inception\\application-design\\test-cases\\_index.md"
+  ],
+  "ucd_sources": {
+    "docs\\aidlc\\modules\\project\\inception\\application-design\\test-cases\\UC-D-001-pagination.md": {
+      "sha256": "9c40b7af1e43eefd03429cca1b2f6310ff47d25fbf2e451a4bb92c9443fbd9d4",
+      "ucd_ids": [
+        "UC-D-001"
+      ]
+    },
+    "docs\\aidlc\\modules\\project\\inception\\application-design\\test-cases\\UC-D-002-independent-calls.md": {
+      "sha256": "dec32a0de6538a0b05e70977ba201fc1d49d0b0f9911e10cc95c78177b5e0214",
+      "ucd_ids": [
+        "UC-D-002"
+      ]
+    },
+    "docs\\aidlc\\modules\\project\\inception\\application-design\\test-cases\\UC-D-003-failure-propagation.md": {
+      "sha256": "2cce4c5b3cfcdf190a89aac910672e17af9cf03253c7fe1be9df89af6389ea30",
+      "ucd_ids": [
+        "UC-D-003"
+      ]
+    }
+  },
+  "source_coverage": {
+    "AC-001": [
+      "UC-D-001",
+      "UC-D-002",
+      "UC-D-003"
+    ],
+    "GAP-001": [
+      "UC-D-001",
+      "UC-D-002"
+    ],
+    "REQ-001": [
+      "UC-D-001",
+      "UC-D-002",
+      "UC-D-003"
+    ],
+    "US-001": [
+      "UC-D-001",
+      "UC-D-002",
+      "UC-D-003"
+    ]
+  },
+  "index": "docs\\aidlc\\modules\\project\\inception\\application-design\\test-cases\\_index.md",
+  "inputs": {
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "artifacts": []
+  },
+  "workflow_id": "9145b784-bc71-4d7d-bf82-8d19f1f7b281",
+  "stage_instance": "test-case-derivation@module:project",
+  "module_id": "project",
+  "unit_id": null,
+  "evidence_version": "1",
+  "timestamp": "2026-11-10T16:49:17.339Z",
+  "producer": {
+    "name": "loeyae-aidlc-evidence",
+    "mode": "controlled",
+    "workflow_id": "9145b784-bc71-4d7d-bf82-8d19f1f7b281",
+    "execution_id": "5c1e4173-6be1-4ba8-8856-1e6c5c2f13c0"
+  },
+  "source_revision": {
+    "commit": "688628e7ff68cb5d129e4981a5facedb33d3de95",
+    "dirty": true,
+    "worktree_digest": "f5bee0c58bc14fa330382be4abf63d6439477faa1e1bfb2d27d5febba7ac3ca9",
+    "scope": "inputs-v2:module:project:baseline:autonomy-v1",
+    "scope_digest": "1b2fc068cc2eb73f29a9b1dcdb41e34f0c929829d44a5eeea1fff4c8643150f2"
+  },
+  "checker": {
+    "id": "builtin:test-case-derivation",
+    "sensor": "test-case-derivation",
+    "argv_digest": "2232efd1860cdead961547fe45881a91f67dd2d792c57d896c6cf6f214730d32",
+    "command_version": 2,
+    "identity_version": 1,
+    "implementation_digest": "a493f597301fade5ca7000bdda09d9e3b5e5cd9a10667e87e46c92a6d121b215",
+    "exit_code": 0,
+    "status": "passed",
+    "duration_ms": 696
+  }
+}

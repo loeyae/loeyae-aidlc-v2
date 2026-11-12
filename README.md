@@ -2,7 +2,7 @@
 
 Loeyae AI-DLC 是一个面向 AI 辅助软件交付的工作流工具。它把工作目标、阶段、需求与设计产物、代码审查、真实构建测试及交付证据连接起来，支持单人执行和多人按模块、单元协作。
 
-流程由 Core 管理；AI 宿主决定模型、执行者和委派方式。具体阶段以项目 scope、适用条件和已批准的选择为准，不以固定阶段数衡量进度。
+默认由 AI 宿主原生工具实施、调度、测试和返修；Core 提供按需工作方法和验收依据，不将流程状态或凭据作为本地编码前置条件。旧受管引擎保留为显式兼容接口。
 
 ## 安装
 
@@ -25,40 +25,25 @@ loeyae-aidlc install --all
 
 ## 开始与继续
 
-在目标项目中，使用明确的工作描述启动：
+直接向宿主交代本次范围、已确认设计、验收标准与约束，Agent 按已有授权持续实施、测试、审查和返修。可选读取简短上下文：
 
 ```bash
-loeyae-aidlc orchestrate next \
-  --scope feature \
-  --work "实现订单导出超时重试"
+loeyae-aidlc work --work "实现订单导出超时重试" --paths '["src","tests"]'
+loeyae-aidlc work --input docs/design.md
+loeyae-aidlc work --details --paths '["src","tests"]'
 ```
 
-根据返回的 directive 执行当前阶段，Agent 原样展示 `handoff_prompt`。常见 scope 包括 `feature`、`enterprise`、`mvp`、`classic`、`express`、`workshop`、`bugfix` 和 `refactor`；具体选择见[实施指南](docs/aidlc-ai-tools-implementation-guide.md)。
+该命令只读 Git 与显式选择的文件，不创建 workflow/state/audit/claim/grant，不调用模型、探针或测试。没有它也可直接实施。续作从实际代码和验证结果开始，不要求恢复旧阶段指针。
 
-继续已有工作时，先查看当前状态和下一步：
+默认只输出最多 20 条状态、2 KiB 状态摘要和 diff 总量，并标明总条数及截断。详细变更按 `--details --paths` 请求；默认帮助仅展示常用入口，`help legacy` 查看旧受管命令。默认安装不注册 Stop Hook；升级只移除可识别的 AI-DLC 旧钩子，保留用户钩子和其他配置。
 
-```bash
-loeyae-aidlc orchestrate next --preview
-loeyae-aidlc orchestrate state summary
-```
+按约定的功能和 UI 状态/尺寸执行真实验证，失败继续修复；不能因缺文档或旧状态冲突停止独立工作。只重验受实际输入变化影响的结果，纯交付说明不使业务测试失效。交付分别报告业务完成、验证缺口与性能，8 分钟不是通用执行限制。详见 [宿主执行协议](core/knowledge/protocols/host-execution.md)。
 
-需要模块视图时可使用 `orchestrate state summary --module <id> --format markdown`。摘要只读取已有状态和证据引用，不写文件或重新运行测试；`not_checked` 表示本次查看未重新验证门禁，不代表检查失败或通过。暂停的工作流使用 `orchestrate next --resume` 恢复。
+默认只维护必要的业务需求、设计、代码和测试，交付摘要在对话中即可；确需持久化时更新一份现有任务说明。不要生成重复状态权威或加载全部历史文档。
 
-完成阶段时按 directive 使用对应命令：
+## 旧受管兼容
 
-```bash
-loeyae-aidlc orchestrate report --stage <slug> --result completed
-# instruction-only 阶段额外传入 --instruction-ack <slug>
-# 应用设计或部署决策按提示使用 --result approved --user-input Approve
-```
-
-## 协作与证据
-
-单工作流的状态和审计位于 `aidlc/active/aidlc-state.md` 与 `aidlc/active/audit.md`；拆分后还使用 registry 和各工作流的状态。团队可用 `unit list` / `unit select` 记录分工，受管写入和交接仍须符合当前工作流的精确会话领取。跨模块依赖和集成条件由引擎检查；合并与推送由人执行。
-
-阶段门禁检查实际产物和受控证据。构建、测试必须运行适用的真实命令，Agent 不应手写 Evidence JSON。单元审查在 `code-review.md` 记录 Spec、Standards 和问题；引擎维护状态及审计，无需重复编写单元实施摘要、构建测试汇总或最终报告。业务决策、契约及明确要求的交付报告仍按项目约定保留。
-
-遇到阻塞时先阅读具体诊断：确认是产物缺失、真实测试失败、证据来源变化，还是状态和领取冲突，再按原因做最小修复。不要仅为消除提示反复增加测试或覆盖他人的状态。
+`orchestrate`、`module`、`autonomy` 和专用宿主 wrapper 仍可显式调用，其原有授权和状态保护不变。只有需要维护旧受管流程时才使用；不要求普通实施先采用它们。调用 work 不迁移旧运行、不解除旧 claim、不恢复旧 grant，也不宣称旧失败已通过。保留旧记录，在安全独立范围由宿主继续；不得覆盖他人修改或接管未知活动进程。
 
 ## Provider 与可选能力
 
@@ -93,3 +78,7 @@ npm test
 ## License
 
 MIT
+
+## 旧实验与迁移参考
+
+P1/P2 的签名批次、H5、专用 Codex runtime、后继恢复和事实存储迁移均属于显式兼容功能，不是默认实施要求。历史契约与失败记录保留于 [自主实施设计](docs/aidlc-autonomous-implementation-design.md) 和 [P2 记录](docs/aidlc-autonomous-implementation-p2.md)。本轮默认路径调整及验证见 [修复方案](docs/aidlc-host-execution-repair-plan.md)。

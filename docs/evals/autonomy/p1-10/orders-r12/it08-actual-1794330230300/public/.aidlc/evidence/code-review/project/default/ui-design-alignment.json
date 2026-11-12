@@ -1,0 +1,42 @@
+{
+  "status": "not_applicable",
+  "reason": "selected UI route is not-selected",
+  "inputs": {
+    "digest": "dafa048695635c9847ca4d62e1705156578ed1e3a338c7616248476265285000",
+    "artifacts": [
+      "src/orders.cjs",
+      ".aidlc/evidence/test-case-derivation/project/test-case-derivation.json",
+      ".aidlc/evidence/code-generation/project/default/green-test-evidence.json"
+    ]
+  },
+  "workflow_id": "9145b784-bc71-4d7d-bf82-8d19f1f7b281",
+  "stage_instance": "code-review@module:project@unit:default",
+  "module_id": "project",
+  "unit_id": "default",
+  "evidence_version": "1",
+  "timestamp": "2026-11-10T17:03:06.937Z",
+  "producer": {
+    "name": "loeyae-aidlc-evidence",
+    "mode": "controlled",
+    "workflow_id": "9145b784-bc71-4d7d-bf82-8d19f1f7b281",
+    "execution_id": "351213b2-23fc-4018-acfa-726647715221"
+  },
+  "source_revision": {
+    "commit": "d009f132252e29c12cee2d0438d9209aa596e368",
+    "dirty": false,
+    "worktree_digest": "09e79e8ae857a7a6c654334cef1671c8c65e9af18d57a55a107e202dc348095f",
+    "scope": "inputs-v2:module:project:unit:default:autonomy-v1",
+    "scope_digest": "872beff640096d5ed9bc01aa7cbaa2ccd49f93ce17a47a975f5d1bbafc26f6a7"
+  },
+  "checker": {
+    "id": "builtin:ui-design-alignment",
+    "sensor": "ui-design-alignment",
+    "argv_digest": "27399e76c38c4a4b261bacfb763b01cafed9825101225162b5b56199d832262b",
+    "command_version": 2,
+    "identity_version": 1,
+    "implementation_digest": "a493f597301fade5ca7000bdda09d9e3b5e5cd9a10667e87e46c92a6d121b215",
+    "exit_code": 0,
+    "status": "passed",
+    "duration_ms": 620
+  }
+}

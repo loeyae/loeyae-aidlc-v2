@@ -19,6 +19,12 @@ requires: [code-generation, code-review]
 
 # 构建和测试
 
+## 显式自主批次实际观察（P1-07）
+
+除本阶段原有审查、构建、UC-D 和 Native gates 外，自主批次还须按冻结 ObservationPlan 执行真实功能、runtime/external 及适用 UI 检查。原全局协调 binding 调用 `orchestrate autonomy observe run --input <冻结计划.json>`；候选应为已按授权准备的实际 clean commit，服务版本对应该候选。UI 必须覆盖冻结 PAGE/状态/角色/视口、关键元素/动作，执行坐标输入、DOM 断言及整页/关键区域 PNG 差异分析。
+
+`autonomy observe inspect` 返回的受控 passed 只是该候选/环境的观察；原始输出/截图或源码、环境、授权、checker 漂移均须重验。观察不能代替原审查/RED/GREEN/C8/UI full acceptance，也不发布 batch verified；P1-08 负责汇合完整矩阵、最终候选和委托决策。缺少真实观察或 runtime 依赖活性不得用文字或普通 JSON passed 通过。
+
 **目的**：实际执行构建与测试命令，修复失败并保存可复现证据。生成说明文档不能替代命令执行。
 
 **适用性**：普通行为变更执行实际所需 build/check 与真实非零通过测试。加载 `common-c8-role-applicability.md`：按模块复核已批准项目政策及来源，无声明默认必需；无独立构建/检查时可按契约记录角色不适用，不制造空 build 或重复执行同一检查。可信 I13 已声明无可执行业务行为，或单元的空 UC-D 子集有已批准 ucd_exemption 时，producer 与完成门禁复核来源和声明后允许用真实成功的确定性 check 完成该范围；不存在的构建/测试记录为不适用，测试数如实为零。C8 项目轴必须覆盖所有模块，任一模块需要构建时不能被其他模块豁免。业务范围仍需真实测试；空声明、全 skipped/todo 或来源失效不能豁免。
@@ -128,3 +134,9 @@ TypeScript 开发依赖若仅用于可核实的 noEmit 静态检查，可按 `co
 ## 完成消息
 
 简短说明实际结果与未验证项，引用受控证据或只读摘要，并原样展示成功 `report` 返回的 `handoff_prompt`。不要求固定统计表或另写完成报告；禁止使用“应该通过”“预计成功”或仅凭说明文档宣称完成。
+
+## 显式自主批次的聚合范围与终结（P1-08）
+
+未采用批次时按原项目范围执行。已采用时，聚合 requires、审查输入、UC-D 所有权与 C8 角色仅纳入本批次 implement 单元/模块；原始模块 I13 仍完整核验，未选 future 单元、consume/verify 不变成本次新增实施。consume/verify 的依赖和所选 PAGE 还原证据仍在消费边界核验；不能借范围过滤跳过适用的全局审查或 UI full acceptance。
+
+C8 本身通过仍不发布 BatchResult。由原全局协调 binding 执行 `autonomy batch finalize`，汇合实际最终候选、完整功能/UI 矩阵、全部适用 Native 门禁、委托决策、交付物与真实依赖。工程 verified 与人类评审 pending 分开；partial、阶段耗尽或模型 final 不作完成依据。只有 inspect 显示 current verified 才有 batch_completed=true，项目 done 继续遵守原工作流。

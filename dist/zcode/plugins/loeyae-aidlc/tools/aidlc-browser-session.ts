@@ -1,0 +1,43 @@
+/** One owned Chrome per validation operation; isolated disposable contexts, never a recovery manager. */
+import {spawn} from 'node:child_process';import {mkdtempSync,readFileSync,lstatSync,realpathSync,promises as fs} from 'node:fs';import {join,dirname,basename} from 'node:path';import {tmpdir} from 'node:os';import {createRequire} from 'node:module';import {randomUUID} from 'node:crypto';
+import {businessCommandEnvironment} from './aidlc-spawn';
+const R=createRequire(import.meta.url)('./aidlc-owned-resource.cjs');type Row=Record<string,any>;
+export async function waitForDevToolsPort(path:string,deadline:number,isClosed:()=>boolean,diagnostics:()=>string,readText:(p:string)=>string=p=>readFileSync(p,'utf8')):Promise<number>{
+ let lastCode='';while(!isClosed()&&Date.now()<deadline){try{const port=Number(readText(path).split(/\r?\n/)[0]);if(!Number.isInteger(port)||port<1||port>65535)throw Error('CHROME_PORT_INVALID');return port;}catch(error){const code=(error as NodeJS.ErrnoException).code;if(code!=='ENOENT'&&code!=='EBUSY')throw error;lastCode=code;}await new Promise(r=>setTimeout(r,Math.max(1,Math.min(25,deadline-Date.now()))));}throw Error(`CHROME_START_FAILED: ${diagnostics()}${lastCode?` (${lastCode})`:''}`);
+}
+export class BrowserSession {
+ readonly id=randomUUID();readonly profile:string;readonly resource:any;readonly limits:any;socket?:WebSocket;socketResource:any;private pending=new Map<number,any>();private serial=0;private subscribers=new Set<(m:Row)=>void>();private closure?:Promise<any>;private dead=false;private active?:Row;
+ readonly issues:Row[]=[];readonly metrics={browser_startups:1,contexts_created:0,contexts_disposed:0,startup_ms:0,context_setup_ms:0,observation_ms:0,context_cleanup_ms:0,browser_close_ms:0};
+ constructor(readonly browser:string,readonly options:Row){
+  this.limits=R.resourceLimits(options.limits);this.profile=mkdtempSync(join(tmpdir(),'aidlc-ui-observe-'));
+  const child=spawn(browser,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--remote-debugging-address=127.0.0.1','--remote-debugging-port=0',`--user-data-dir=${this.profile}`,'about:blank'],{env:businessCommandEnvironment(process.env),windowsHide:true,shell:false,detached:process.platform!=='win32',stdio:['ignore','ignore','pipe']});
+  this.resource=R.ownChild(child,{kind:'browser',owner:options.owner||this.id,tree:true,deadline_at:options.deadline_at,limits:this.limits,log:options.log});child.stderr?.on('data',(b:any)=>{this.diagnostics=(this.diagnostics+b).slice(-1000);});child.once('close',()=>{this.dead=true;this.rejectPending(Error('BROWSER_PROCESS_CLOSED'));});
+  this.resource.requestClose=()=>{if(this.socket?.readyState===1)this.socket.send(JSON.stringify({id:++this.serial,method:'Browser.close',params:{}}));};
+ }
+ private diagnostics='';
+ async start(deadline:number){const start=performance.now();try{const port=await waitForDevToolsPort(join(this.profile,'DevToolsActivePort'),deadline,()=>this.resource.close_observed,()=>this.diagnostics),path=readFileSync(join(this.profile,'DevToolsActivePort'),'utf8').split(/\r?\n/)[1];if(!/^\/devtools\/browser\/[a-f0-9-]+$/.test(path))throw Error('CHROME_BROWSER_ENDPOINT_INVALID');
+   const socket=this.socket=new WebSocket(`ws://127.0.0.1:${port}${path}`);this.socketResource=R.ownSocket(socket,{owner:this.id,limits:this.limits,log:this.options.log,requestClose:()=>socket.close(),force:()=>{(socket as any).terminate?.();},detach:()=>{(socket as any).unref?.();}});
+   socket.addEventListener('close',()=>{this.dead=true;this.rejectPending(Error('CDP_CLOSED'));});socket.addEventListener('error',()=>this.rejectPending(Error('CDP_CONNECTION_FAILED')));
+   socket.addEventListener('message',e=>{let m:Row;try{m=JSON.parse(String(e.data));}catch{this.rejectPending(Error('CDP_INVALID_MESSAGE'));return;}if(m.id){const p=this.pending.get(m.id);if(p){this.pending.delete(m.id);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result);}}else for(const listener of this.subscribers)listener(m);});
+   await R.bounded(new Promise<void>((res,rej)=>{socket.addEventListener('open',()=>res(),{once:true});socket.addEventListener('error',()=>rej(Error('CDP_CONNECTION_FAILED')),{once:true});socket.addEventListener('close',()=>rej(Error('CDP_CLOSED')),{once:true});}),R.deadlineAfter(Math.max(0,deadline-Date.now())),'CDP_CONNECTION_TIMEOUT');
+  }finally{this.metrics.startup_ms+=performance.now()-start;}}
+ private rejectPending(error:Error){for(const p of this.pending.values())p.reject(error);this.pending.clear();}
+ call(method:string,params:Row,deadline:number,sessionId?:string):Promise<any>{
+  if(this.dead||this.socket?.readyState!==1)return Promise.reject(Error('BROWSER_SESSION_CLOSED'));if(Date.now()>=deadline)return Promise.reject(Error('CDP_TIMEOUT: '+method));
+  return new Promise((res,rej)=>{const id=++this.serial,timer=setTimeout(()=>{this.pending.delete(id);rej(Error('CDP_TIMEOUT: '+method));},Math.max(1,deadline-Date.now()));const finish=(fn:any)=>(v:any)=>{clearTimeout(timer);fn(v);};this.pending.set(id,{resolve:finish(res),reject:finish(rej)});try{this.socket!.send(JSON.stringify({id,method,params,...(sessionId?{sessionId}:{})}));}catch(error){this.pending.delete(id);clearTimeout(timer);rej(error);}});
+ }
+ async openCase(deadline:number){if(this.active||this.issues.length||this.closure||this.dead||this.socket?.readyState!==1)throw Error('BROWSER_CASE_NOT_AVAILABLE');const start=performance.now(),c:Row={context_id:null,target_id:null,session_id:null,create_requested:true};this.active=c;
+  try{c.context_id=(await this.call('Target.createBrowserContext',{disposeOnDetach:true},deadline)).browserContextId;this.metrics.contexts_created++;c.target_id=(await this.call('Target.createTarget',{url:'about:blank',browserContextId:c.context_id},deadline)).targetId;c.session_id=(await this.call('Target.attachToTarget',{targetId:c.target_id,flatten:true},deadline)).sessionId;return c;}
+  catch(error){await this.closeCase(c);throw error;}finally{this.metrics.context_setup_ms+=performance.now()-start;}}
+ subscribe(c:Row,listener:(m:Row)=>void){const f=(m:Row)=>{if(m.sessionId===c.session_id)listener(m);};this.subscribers.add(f);return ()=>this.subscribers.delete(f);}
+ async closeCase(c:Row){const start=performance.now(),end=Date.now()+this.limits.close_grace_ms+this.limits.terminate_ms+this.limits.force_ms;try{
+   if(!c.context_id&&c.create_requested)throw Error('BROWSER_CONTEXT_CREATION_UNCONFIRMED');if(c.context_id){await this.call('Target.disposeBrowserContext',{browserContextId:c.context_id},end);const contexts=await this.call('Target.getBrowserContexts',{},end),targets=await this.call('Target.getTargets',{},end);if(contexts.browserContextIds.includes(c.context_id)||targets.targetInfos.some((t:Row)=>t.browserContextId===c.context_id||t.targetId===c.target_id))throw Error('BROWSER_CASE_CLOSE_UNCONFIRMED');this.metrics.contexts_disposed++;}
+   return {reconciled:true,context_id:c.context_id,target_id:c.target_id};
+  }catch(error){const facts={kind:'browser-context',owner:this.id,context_id:c.context_id,target_id:c.target_id,status:'unknown',reconciled:false};this.issues.push(facts);throw R.resourceError(facts,error);}
+  finally{this.active=undefined;this.metrics.context_cleanup_ms+=performance.now()-start;}}
+ close(){if(this.closure)return this.closure;this.closure=(async()=>{const start=performance.now();if(this.active)this.issues.push({kind:'browser-context',owner:this.id,context_id:this.active.context_id,target_id:this.active.target_id,status:'unknown',reconciled:false});this.rejectPending(Error('CDP_CLOSED'));const end=R.deadlineAfter(this.limits.close_grace_ms+this.limits.terminate_ms+this.limits.force_ms),results=await Promise.all([this.resource.close({deadline:end}),this.socketResource?this.socketResource.close({deadline:end}):Promise.resolve({reconciled:true})]);
+   const reconciled=results.every(r=>r.reconciled)&&!this.issues.length&&!this.active;
+   if(reconciled){try{if(lstatSync(this.profile).isSymbolicLink()||dirname(realpathSync(this.profile))!==realpathSync(tmpdir())||!basename(this.profile).startsWith('aidlc-ui-observe-'))throw Error('BROWSER_PROFILE_SCOPE_CHANGED');await R.bounded(fs.rm(this.profile,{recursive:true,force:true,maxRetries:2,retryDelay:50}),end,'PROFILE_CLEANUP_DEADLINE');}catch{this.issues.push({kind:'profile',owner:this.id,status:'unknown',reconciled:false});}}
+   this.metrics.browser_close_ms+=performance.now()-start;return {reconciled:reconciled&&!this.issues.length,resources:[...results,...this.issues],...(!reconciled||this.issues.length?{retained_paths:[this.profile]}:{}),metrics:{...this.metrics}};
+  })();return this.closure;}
+}

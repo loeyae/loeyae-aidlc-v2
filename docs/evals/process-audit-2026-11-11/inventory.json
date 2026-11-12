@@ -1,0 +1,624 @@
+{
+  "stage_count": 38,
+  "scope_catalog": [
+    {
+      "scope": "bugfix",
+      "catalog_stages": 8,
+      "always": [
+        "workspace-detection",
+        "state-template",
+        "test-case-derivation",
+        "tdd",
+        "code-generation",
+        "code-review",
+        "build-and-test",
+        "implementation-report"
+      ],
+      "conditional": 0
+    },
+    {
+      "scope": "classic",
+      "catalog_stages": 35,
+      "always": [
+        "workspace-detection",
+        "state-template",
+        "test-case-derivation",
+        "tdd",
+        "code-generation",
+        "code-review",
+        "build-and-test",
+        "implementation-report"
+      ],
+      "conditional": 27
+    },
+    {
+      "scope": "enterprise",
+      "catalog_stages": 38,
+      "always": [
+        "workspace-detection",
+        "state-template",
+        "test-case-derivation",
+        "tdd",
+        "code-generation",
+        "code-review",
+        "build-and-test",
+        "implementation-report"
+      ],
+      "conditional": 30
+    },
+    {
+      "scope": "express",
+      "catalog_stages": 8,
+      "always": [
+        "workspace-detection",
+        "state-template",
+        "test-case-derivation",
+        "tdd",
+        "code-generation",
+        "code-review",
+        "build-and-test",
+        "implementation-report"
+      ],
+      "conditional": 0
+    },
+    {
+      "scope": "feature",
+      "catalog_stages": 38,
+      "always": [
+        "workspace-detection",
+        "state-template",
+        "test-case-derivation",
+        "tdd",
+        "code-generation",
+        "code-review",
+        "build-and-test",
+        "implementation-report"
+      ],
+      "conditional": 30
+    },
+    {
+      "scope": "mvp",
+      "catalog_stages": 38,
+      "always": [
+        "workspace-detection",
+        "state-template",
+        "test-case-derivation",
+        "tdd",
+        "code-generation",
+        "code-review",
+        "build-and-test",
+        "implementation-report"
+      ],
+      "conditional": 30
+    },
+    {
+      "scope": "refactor",
+      "catalog_stages": 8,
+      "always": [
+        "workspace-detection",
+        "state-template",
+        "test-case-derivation",
+        "tdd",
+        "code-generation",
+        "code-review",
+        "build-and-test",
+        "implementation-report"
+      ],
+      "conditional": 0
+    },
+    {
+      "scope": "workshop",
+      "catalog_stages": 8,
+      "always": [
+        "workspace-detection",
+        "state-template",
+        "test-case-derivation",
+        "tdd",
+        "code-generation",
+        "code-review",
+        "build-and-test",
+        "implementation-report"
+      ],
+      "conditional": 0
+    }
+  ],
+  "artifact_catalog": [
+    {
+      "stage": "workspace-detection",
+      "condition": "",
+      "axis": "project",
+      "human_readable": [],
+      "machine": [],
+      "sensor_count": 0
+    },
+    {
+      "stage": "product-inception",
+      "condition": "multi_module",
+      "axis": "project",
+      "human_readable": [
+        "docs/aidlc/ideation/product-inception.md"
+      ],
+      "machine": [],
+      "sensor_count": 2
+    },
+    {
+      "stage": "module-division",
+      "condition": "",
+      "axis": "project",
+      "human_readable": [
+        "docs/aidlc/ideation/module-division.md"
+      ],
+      "machine": [
+        "docs/aidlc/ideation/module-manifest.json"
+      ],
+      "sensor_count": 2
+    },
+    {
+      "stage": "product-contracts",
+      "condition": "has_product_contract_needs",
+      "axis": "project",
+      "human_readable": [
+        "docs/aidlc/ideation/product-contracts.md"
+      ],
+      "machine": [],
+      "sensor_count": 2
+    },
+    {
+      "stage": "prd-generation",
+      "condition": "",
+      "axis": "project",
+      "human_readable": [
+        "docs/aidlc/ideation/prd.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/prd-generation/prd-completeness.json"
+      ],
+      "sensor_count": 3
+    },
+    {
+      "stage": "scenario-module-mapping",
+      "condition": "",
+      "axis": "project",
+      "human_readable": [
+        "docs/aidlc/ideation/scenario-module-mapping.md"
+      ],
+      "machine": [],
+      "sensor_count": 2
+    },
+    {
+      "stage": "state-template",
+      "condition": "",
+      "axis": "project",
+      "human_readable": [],
+      "machine": [],
+      "sensor_count": 0
+    },
+    {
+      "stage": "reverse-engineering",
+      "condition": "has_legacy_code",
+      "axis": "module",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/inception/reverse-engineering.md"
+      ],
+      "machine": [],
+      "sensor_count": 2
+    },
+    {
+      "stage": "requirements-analysis",
+      "condition": "",
+      "axis": "module",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/inception/requirements.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/requirements-analysis/{module-id}/traceability-matrix.json",
+        ".aidlc/evidence/requirements-analysis/{module-id}/quality-change-impact.json",
+        ".aidlc/evidence/requirements-analysis/{module-id}/dependency-readiness.json",
+        ".aidlc/evidence/requirements-analysis/{module-id}/field-capability.json"
+      ],
+      "sensor_count": 6
+    },
+    {
+      "stage": "requirement-clarification",
+      "condition": "",
+      "axis": "module",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/inception/clarifications.md"
+      ],
+      "machine": [],
+      "sensor_count": 3
+    },
+    {
+      "stage": "requirements-methods",
+      "condition": "",
+      "axis": "module",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/inception/requirements/business-flows.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/requirements-methods/{module-id}/diagram-contract.json"
+      ],
+      "sensor_count": 3
+    },
+    {
+      "stage": "user-stories",
+      "condition": "",
+      "axis": "module",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/inception/user-stories.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/user-stories/{module-id}/traceability-matrix.json",
+        ".aidlc/evidence/user-stories/{module-id}/story-rule-consistency.json",
+        ".aidlc/evidence/user-stories/{module-id}/quality-change-impact.json",
+        ".aidlc/evidence/user-stories/{module-id}/artifact-consistency.json"
+      ],
+      "sensor_count": 7
+    },
+    {
+      "stage": "ui-mock",
+      "condition": "has_ui_requirements",
+      "axis": "module",
+      "human_readable": [],
+      "machine": [],
+      "sensor_count": 0
+    },
+    {
+      "stage": "ui-page-planning",
+      "condition": "ui_design_selected",
+      "axis": "module",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/inception/ui-design/page-plan.md"
+      ],
+      "machine": [
+        "docs/aidlc/modules/{module-id}/inception/ui-design/ui-generation-lock.json",
+        ".aidlc/evidence/ui-page-planning/{module-id}/ui-artifact-consistency.json",
+        ".aidlc/evidence/ui-page-planning/{module-id}/ui-behavior-consistency.json"
+      ],
+      "sensor_count": 4
+    },
+    {
+      "stage": "ui-figma",
+      "condition": "ui_mode_figma",
+      "axis": "module",
+      "human_readable": [],
+      "machine": [],
+      "sensor_count": 0
+    },
+    {
+      "stage": "ui-figma-generation",
+      "condition": "ui_mode_figma",
+      "axis": "module",
+      "human_readable": [],
+      "machine": [
+        "docs/aidlc/modules/{module-id}/inception/ui-design/figma-manifest.json",
+        ".aidlc/evidence/ui-figma-generation/{module-id}/ui-artifact-consistency.json",
+        ".aidlc/evidence/ui-figma-generation/{module-id}/ui-behavior-consistency.json"
+      ],
+      "sensor_count": 4
+    },
+    {
+      "stage": "ui-mock-generation",
+      "condition": "ui_mode_html_mock",
+      "axis": "module",
+      "human_readable": [],
+      "machine": [
+        "docs/aidlc/modules/{module-id}/inception/ui-mock/ui-mock-manifest.json",
+        ".aidlc/evidence/ui-mock-generation/{module-id}/ui-artifact-consistency.json",
+        ".aidlc/evidence/ui-mock-generation/{module-id}/ui-behavior-consistency.json"
+      ],
+      "sensor_count": 4
+    },
+    {
+      "stage": "cross-validation",
+      "condition": "",
+      "axis": "module",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/inception/cross-validation-report.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/cross-validation/{module-id}/inception-consistency.json",
+        ".aidlc/evidence/cross-validation/{module-id}/quality-change-impact.json",
+        ".aidlc/evidence/cross-validation/{module-id}/delivery-readiness.json",
+        ".aidlc/evidence/cross-validation/{module-id}/artifact-consistency.json"
+      ],
+      "sensor_count": 6
+    },
+    {
+      "stage": "workflow-planning",
+      "condition": "",
+      "axis": "module",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/inception/workflow-plan.md"
+      ],
+      "machine": [],
+      "sensor_count": 2
+    },
+    {
+      "stage": "application-design",
+      "condition": "has_application_design_needs",
+      "axis": "module",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/inception/application-design.md",
+        "docs/aidlc/modules/{module-id}/inception/application-design/components.md",
+        "docs/aidlc/modules/{module-id}/inception/application-design/component-methods.md",
+        "docs/aidlc/modules/{module-id}/inception/application-design/application-services.md",
+        "docs/aidlc/modules/{module-id}/inception/application-design/component-dependency.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/application-design/{module-id}/diagram-contract.json",
+        ".aidlc/evidence/application-design/{module-id}/traceability-matrix.json",
+        ".aidlc/evidence/application-design/{module-id}/structural-invariants.json"
+      ],
+      "sensor_count": 5
+    },
+    {
+      "stage": "units-generation",
+      "condition": "has_unit_generation_needs",
+      "axis": "module",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/inception/units.md",
+        "docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work.md",
+        "docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-dependency.md",
+        "docs/aidlc/modules/{module-id}/inception/application-design/unit-of-work-story-map.md"
+      ],
+      "machine": [
+        "docs/aidlc/modules/{module-id}/inception/unit-manifest.json",
+        ".aidlc/evidence/units-generation/{module-id}/design-intent-coverage.json",
+        ".aidlc/evidence/units-generation/{module-id}/structural-invariants.json",
+        ".aidlc/evidence/units-generation/{module-id}/document-slice-consistency.json"
+      ],
+      "sensor_count": 5
+    },
+    {
+      "stage": "test-case-derivation",
+      "condition": "",
+      "axis": "module",
+      "human_readable": [],
+      "machine": [
+        ".aidlc/evidence/test-case-derivation/{module-id}/test-case-derivation.json"
+      ],
+      "sensor_count": 2
+    },
+    {
+      "stage": "functional-design",
+      "condition": "has_functional_design_needs",
+      "axis": "unit",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-logic-model.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-rules.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/domain-entities.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/data-source-validation.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/functional-design/{module-id}/{unit-id}/functional-design-completeness.json",
+        ".aidlc/evidence/functional-design/{module-id}/{unit-id}/traceability-matrix.json",
+        ".aidlc/evidence/functional-design/{module-id}/{unit-id}/structural-invariants.json"
+      ],
+      "sensor_count": 6
+    },
+    {
+      "stage": "nfr-requirements",
+      "condition": "has_nfr_needs",
+      "axis": "unit",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements/nfr-requirements.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-requirements/tech-stack-decisions.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/nfr-requirements/{module-id}/{unit-id}/nfr-coverage.json"
+      ],
+      "sensor_count": 3
+    },
+    {
+      "stage": "nfr-design",
+      "condition": "has_nfr_needs",
+      "axis": "unit",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-design.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-design/nfr-design-patterns.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/nfr-design/logical-components.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/nfr-design/{module-id}/{unit-id}/nfr-coverage.json"
+      ],
+      "sensor_count": 4
+    },
+    {
+      "stage": "infrastructure-design",
+      "condition": "has_infra_needs",
+      "axis": "unit",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design/infrastructure-design.md",
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/infrastructure-design/deployment-architecture.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/infrastructure-design/{module-id}/{unit-id}/infrastructure-completeness.json"
+      ],
+      "sensor_count": 3
+    },
+    {
+      "stage": "shared-contract-baseline",
+      "condition": "has_contract_dependencies",
+      "axis": "unit",
+      "human_readable": [],
+      "machine": [
+        ".aidlc/evidence/shared-contract-baseline/{module-id}/{unit-id}/contract-baseline.json"
+      ],
+      "sensor_count": 2
+    },
+    {
+      "stage": "tdd",
+      "condition": "",
+      "axis": "unit",
+      "human_readable": [],
+      "machine": [
+        ".aidlc/evidence/tdd/{module-id}/{unit-id}/red-test-evidence.json",
+        ".aidlc/evidence/tdd/{module-id}/{unit-id}/baseline-test-evidence.json"
+      ],
+      "sensor_count": 3
+    },
+    {
+      "stage": "ui-implementation-bridge",
+      "condition": "needs_ui_implementation_bridge",
+      "axis": "unit",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/frontend-platform-spec.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/ui-implementation-bridge/{module-id}/{unit-id}/frontend-platform-spec.json"
+      ],
+      "sensor_count": 3
+    },
+    {
+      "stage": "code-generation",
+      "condition": "",
+      "axis": "unit",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/plans/code-generation-plan.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/code-generation/{module-id}/{unit-id}/green-test-evidence.json",
+        ".aidlc/evidence/code-generation/{module-id}/{unit-id}/test-quality.json",
+        ".aidlc/evidence/code-generation/{module-id}/{unit-id}/traceability-matrix.json",
+        ".aidlc/evidence/code-generation/{module-id}/{unit-id}/structural-invariants.json"
+      ],
+      "sensor_count": 7
+    },
+    {
+      "stage": "code-review",
+      "condition": "",
+      "axis": "unit",
+      "human_readable": [
+        "docs/aidlc/modules/{module-id}/construction/{unit-id}/code-review.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/code-review/{module-id}/{unit-id}/review-evidence.json",
+        ".aidlc/evidence/code-review/{module-id}/{unit-id}/test-quality.json",
+        ".aidlc/evidence/code-review/{module-id}/{unit-id}/ui-design-alignment.json",
+        ".aidlc/evidence/code-review/{module-id}/{unit-id}/traceability-matrix.json"
+      ],
+      "sensor_count": 7
+    },
+    {
+      "stage": "build-and-test",
+      "condition": "",
+      "axis": "project",
+      "human_readable": [],
+      "machine": [
+        ".aidlc/evidence/build-and-test/build-test-evidence.json",
+        ".aidlc/evidence/build-and-test/global-review-evidence.json"
+      ],
+      "sensor_count": 5
+    },
+    {
+      "stage": "build-and-test-templates",
+      "condition": "",
+      "axis": "project",
+      "human_readable": [
+        "docs/aidlc/construction/build-and-test/build-instructions.md",
+        "docs/aidlc/construction/build-and-test/unit-test-instructions.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/build-and-test-templates/template-completeness.json"
+      ],
+      "sensor_count": 3
+    },
+    {
+      "stage": "implementation-report",
+      "condition": "",
+      "axis": "project",
+      "human_readable": [],
+      "machine": [
+        ".aidlc/evidence/implementation-report/implementation-report.json"
+      ],
+      "sensor_count": 3
+    },
+    {
+      "stage": "compact-recovery",
+      "condition": "context_compacted",
+      "axis": "project",
+      "human_readable": [],
+      "machine": [
+        ".aidlc/evidence/compact-recovery/recovery-evidence.json"
+      ],
+      "sensor_count": 2
+    },
+    {
+      "stage": "operations-planning",
+      "condition": "has_deployment_needs",
+      "axis": "project",
+      "human_readable": [
+        "docs/aidlc/operation/operations-plan.md"
+      ],
+      "machine": [],
+      "sensor_count": 3
+    },
+    {
+      "stage": "operations-authorization",
+      "condition": "has_deployment_needs",
+      "axis": "project",
+      "human_readable": [
+        "docs/aidlc/operation/deployment-config.md",
+        "docs/aidlc/operation/deployment-guide.md",
+        "docs/aidlc/operation/operations-summary.md"
+      ],
+      "machine": [
+        ".aidlc/evidence/operations-authorization/deployment-validation.json"
+      ],
+      "sensor_count": 4
+    },
+    {
+      "stage": "operations-templates",
+      "condition": "has_operations_template_needs",
+      "axis": "project",
+      "human_readable": [],
+      "machine": [],
+      "sensor_count": 2
+    }
+  ],
+  "installed_comparison": [
+    {
+      "file": "aidlc-session.ts",
+      "repository_sha256": "be571b4a2d0f7e0712d2e5b83be8fa87121ca717b4dabfe6249218958d8f332b",
+      "installed_sha256": "ff56e0bfaedb6d19b374b9791b6a4a58cd7c73f1c314186d0f2ef21f16011918",
+      "same": false
+    },
+    {
+      "file": "aidlc-light-state.ts",
+      "repository_sha256": "739aecfbb6f36d8df88226c2035da442e5bd69207b6252688de2e4d2aa342cee",
+      "installed_sha256": "9f39db443d3462d6b97a7e53817737ebf99a072b681ed4da5c9f3c1d7b9c8606",
+      "same": false
+    }
+  ],
+  "orders_r12_historical": {
+    "source": "docs/evals/autonomy/p1-10/orders-r12/it08-actual-1794330230300/operator/result.json",
+    "end_reason": "no-progress-step-limit",
+    "business_verified": false,
+    "timing": {
+      "schema": "aidlc.execution-timing-summary/v1",
+      "wall_duration_ms": 876095.5058,
+      "phases_ms": {
+        "unattributed": 2635.4289000004064,
+        "host-control": 314495.4394999993,
+        "producer": 53214.25140000018,
+        "admission-refresh": 38875.56149999995,
+        "model-rpc": 456177.3910000003,
+        "queue": 18.45520000043325,
+        "evidence-publication": 10628.474600000074,
+        "cleanup": 50.50370000011753
+      },
+      "active_spans": 0,
+      "intervals_double_counted": false,
+      "model_time_meaning": "model-rpc includes native/RPC wait; never inferred model thinking",
+      "grant_request_to_supervision_ms": 21114,
+      "before_supervision_attribution": "unattributed"
+    },
+    "steps": 194,
+    "turns": 4,
+    "not_current_runtime_benchmark": true
+  }
+}

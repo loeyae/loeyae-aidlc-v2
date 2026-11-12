@@ -1,4 +1,8 @@
 #!/usr/bin/env bun
+import { designBundleFailures } from "./aidlc-design-documents";
+import {attemptRepairDirective,assertAttemptRepairStage} from './aidlc-attempt-repair';
+import { autonomyRunDirective } from './aidlc-autonomy-run';
+import { operationReceipt, committedReport } from './aidlc-run-recovery';
 import { deliveryConsistencyPayloadErrors, evidenceTimeError, reviewIssueErrors } from "./aidlc-evidence-policy";
 import { historicalPhaseInputErrors } from "./aidlc-phase-inputs";
 import { alternativePhaseInputs } from "./aidlc-evidence";
@@ -19,6 +23,18 @@ import { claimToken } from "./aidlc-session";
 import { retireExecutionCheckpoint } from "./aidlc-retire-execution";
 import { assertSessionClaim, sessionBinding, withSessionPublication } from "./aidlc-light-state";
 import { verifyVisualEvidence } from "./aidlc-visual-provider.js";
+import { autonomyDirective, projectAutonomyScope } from "./aidlc-autonomy";
+import { autonomyPolicyDirective, projectAutonomyDecisions } from "./aidlc-autonomy-policy";
+import { checkCurrentExecutionGrant, executionGrantDirective, executionGrantProjection } from "./aidlc-execution-grant";
+import { admissionDirective, admissionProjection } from "./aidlc-autonomous-admission";
+import { assertAdmissionReceipt, IMPLEMENTATION_ENTRY_STAGES } from "./aidlc-grant-store";
+import { assertAutonomyDependencyAccess, autonomyDependenciesDirective, autonomyImplementationCandidate, autonomyImplementationFilter, projectAutonomyDependencies } from "./aidlc-autonomy-dependencies";
+import { autonomyNeedsContractBaseline } from "./aidlc-dependency-inputs";
+import { observationsDirective } from "./aidlc-observations";
+import {batchResultDirective,projectBatchResult} from "./aidlc-batch-result";
+import {batchImplementationUnits,batchUcdCoverageGaps} from "./aidlc-batch-scope";
+import { nativeHostDirective } from "./aidlc-native-host";
+import { factStorageActive, readWorkflowFacts, withReportFactSources } from "./aidlc-workflow-facts";
 /**
  * aidlc-orchestrate.ts — The deterministic workflow engine.
  *
@@ -64,7 +80,7 @@ import { bestLedgerCheckpoint, checkpointModule, gitRepositoryAvailable, ledgerF
 import { equivalentModuleContracts, CONTRACT_EQUIVALENCE_VERSION } from "./aidlc-module-ledger";
 import { parseMaintenanceRecoveryState, type MaintenanceRecoveryProjection, type MaintenanceRecoveryReader } from "./aidlc-light-state";
 import { withSliceWorkflowMigration } from "./aidlc-document-slices";
-import { COMMIT_ID_PATTERN, commitAncestryErrors, currentHead, readSourceRevision, withRevisionInvalidation, withRevisionMemoization, type RepoRevision } from "./aidlc-revision";
+import { COMMIT_ID_PATTERN, commitAncestryErrors, currentHead, gitChangeView, readScopedSourceRevision, readSourceRevision, withRevisionInvalidation, withRevisionMemoization, type RepoRevision } from "./aidlc-revision";
 import { verifyProviderKnowledge } from "./aidlc-provider-knowledge.js";
 import {
   ADOPTION_EXEMPTED_RULES,
@@ -130,6 +146,8 @@ import {
   lightStatePath,
   parseLightWorkflowState,
   loadWorkflowState,
+  migrateWorkflowFacts,
+  rebuildWorkflowView,
   releaseExpiredModuleClaims,
   saveWorkflowState,
   withWorkflowFileLock,
@@ -152,11 +170,12 @@ import {
 } from "./aidlc-execution-profile";
 import { buildStagePlan } from "./aidlc-stage-plan";
 import { riskRequiredStages, selectExecutableStages } from "./aidlc-stage-selection";
-import { buildRuleLoadPlan, type RuleLoadPlan } from "./aidlc-rule-load-plan";
+import { AUTONOMOUS_EXECUTION_PROTOCOL, buildRuleLoadPlan, type RuleLoadPlan } from "./aidlc-rule-load-plan";
 import { buildBusinessDocumentLoadPlan, buildCanonicalIsolationPlan, checkSlices, sliceAdoption, sliceEvidenceErrors, SLICE_SENSOR, type SliceContext, type BusinessDocumentLoadPlan } from "./aidlc-document-slices";
 import { buildEvidenceReusePlan, type EvidenceReusePlan } from "./aidlc-evidence-reuse-plan";
 import { buildExecutionProfileReleaseMeasurements, type ExecutionProfileReleaseMeasurements } from "./aidlc-execution-profile-measurements";
 import { projectDeliverySummary, renderDeliverySummaryMarkdown } from "./aidlc-delivery-summary";
+import { workflowContext, artifactView } from "./aidlc-context-view";
 import {
   evidenceSourceRevision,
   evidenceScopeForInstance,
@@ -359,7 +378,7 @@ const PRD_ELIGIBLE_SCOPES = new Set(FULL_WORKFLOW_SCOPES);
 // Subcommands
 // ---------------------------------------------------------------------------
 
-const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format", "baseline", "state", "profile", "checkpoint", "audit", "unit", "registry"] as const;
+const SUBCOMMANDS = ["next", "continue", "report", "park", "archive", "split", "upgrade", "diagram-format", "baseline", "state", "profile", "checkpoint", "audit", "unit", "registry", "autonomy"] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const VALID_RESULTS = ["completed", "approved", "rejected", "revised"] as const;
@@ -690,7 +709,8 @@ export function expandStageInstances(graph: StageGraph, state: WorkflowState): S
     }
     index = end;
   }
-  return instances;
+  const allowed=autonomyImplementationFilter(PROJECT_ROOT);
+  return instances.filter(i=>i.axis!=="unit"||i.stage.phase!=="construction"||allowed(i.stage.slug,i.module_id,i.unit_id));
 }
 
 interface ModuleDependency {
@@ -1149,6 +1169,7 @@ export function reviewCoverageErrors(record: Record<string, unknown>, instance: 
 }
 
 function globalReviewUnits(state: WorkflowState): Array<{ module_id: string; unit_id: string }> {
+  const batch=batchImplementationUnits(PROJECT_ROOT);if(batch)return batch.map(({module_id,unit_id})=>({module_id,unit_id}));
   return verifiedModuleIds(PROJECT_ROOT, state.scope).flatMap(module_id => {
     const path = join(PROJECT_ROOT, moduleInceptionRoot(module_id), "unit-manifest.json");
     return (existsSync(path) ? readUnitManifest(PROJECT_ROOT, module_id).map(unit => unit.unit_id) : ["default"]).map(unit_id => ({ module_id, unit_id }));
@@ -1344,6 +1365,19 @@ function escapeExpression(value: string): string {
   return value.replace(/[.+^${}()|[\]\\]/g, "\\$&");
 }
 
+/** Historical input snapshot, never a substitute for a current gate verdict. */
+function reportFactSources(instance: StageInstance, evidenceChecked: boolean) {
+  const files: Record<string, string> = {}, unresolved: string[] = [];
+  for (const pattern of [...instance.stage.consumes, ...instance.stage.produces]) {
+    try {
+      const paths = resolveProducePaths(pattern, instance, true);
+      if (!paths.length) unresolved.push(pattern);
+      for (const path of paths) if (lstatSync(path).isFile()) files[relative(PROJECT_ROOT, path).replace(/\\/g, "/")] = createHash("sha256").update(readFileSync(path)).digest("hex");
+    } catch { unresolved.push(pattern); }
+  }
+  return { git_commit: currentHead(PROJECT_ROOT), files, unresolved_patterns: [...new Set(unresolved)], stage_instance: instance.instance_id, evidence_checked: evidenceChecked };
+}
+
 function resolveProducePaths(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string[] {
   // MARS-95: the canonical source produce is the instance's delivery set (changed files
   // since the baseline), or the tracked text files of the source roots without one.
@@ -1352,6 +1386,7 @@ function resolveProducePaths(pattern: string, instance?: StageInstance, allowPro
 }
 
 function resolveConcretePaths(pattern: string, instance?: StageInstance, allowProjectAggregate = false): string[] {
+  if(instance&&allowProjectAggregate){const scoped=expandSourcePattern(pattern,instance);if(scoped.length!==1||scoped[0]!==pattern)return scoped.flatMap(p=>resolveConcretePaths(p,instance,allowProjectAggregate));}
   const contextual = instanceArtifactPattern(pattern, instance, allowProjectAggregate).replace(/\\/g, "/");
   const expansionAllowed = allowsProjectAggregate(instance, allowProjectAggregate);
   if (contextual.includes("*") && !expansionAllowed) {
@@ -1378,6 +1413,9 @@ function resolveConcretePaths(pattern: string, instance?: StageInstance, allowPr
  * missing configured root still fails the gate.
  */
 function expandSourcePattern(pattern: string, instance?: StageInstance): string[] {
+  if(instance?.axis==="project"&&instance.stage.phase==="construction"&&/\{(?:module-id|unit-id)\}/.test(pattern)){
+    const units=batchImplementationUnits(PROJECT_ROOT);if(units)return [...new Set(units.map(u=>pattern.replaceAll("{module-id}",u.module_id).replaceAll("{unit-id}",u.unit_id)))];
+  }
   if (pattern !== CANONICAL_SOURCE_PATTERN) return [pattern];
   return resolveSourceRoots(PROJECT_ROOT, instance?.module_id).roots.map((root) => `${root}/`);
 }
@@ -1493,6 +1531,10 @@ export function checkProduces(instance: StageInstance, options: { completed?: bo
     }
     const failure = artifactPresenceFailure(declared, instance);
     if (failure !== undefined) missing.push(failure);
+  }
+  if (stage.slug === "application-design" || stage.slug === "functional-design") {
+    const main = stage.produces.find(p => p.endsWith('/' + stage.slug + '.md'));
+    if (main) missing.push(...designBundleFailures(resolve(PROJECT_ROOT, instanceArtifactPattern(main, instance)), stage.slug));
   }
   return missing;
 }
@@ -1809,7 +1851,7 @@ function validateLoadedEvidence(stage: StageNode, sensor: string, instance: Stag
     } else {
       // Split layout: content-addressed within the owning workflow's scope. The commit
       // is provenance only, so another module's commit or write cannot invalidate it.
-      const expectedScope = asRecord(evidence.checker)?.identity_version === 2 ? sensorInputScope(PROJECT_ROOT, sensor, instance.instance_id) || evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id) : evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
+      const expectedScope = asRecord(evidence.checker)?.identity_version === 2 ? sensorInputScope(PROJECT_ROOT, sensor, instance.instance_id) || evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id, sensor) : evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id, sensor);
       if (commit) errors.push(...commitAncestryErrors(PROJECT_ROOT, commit, currentHead(PROJECT_ROOT)));
       if (recordedScope !== expectedScope.label && recordedScope !== legacyEvidenceScopeForInstance(PROJECT_ROOT, instance.instance_id).label) {
         errors.push(`source_revision.scope ${recordedScope} does not match the ${expectedScope.label} scope of ${instance.instance_id}`);
@@ -1820,19 +1862,19 @@ function validateLoadedEvidence(stage: StageNode, sensor: string, instance: Stag
         // under the pre-baseline wide scope keeps its own semantics — strict, no drift
         // tolerance — but a mismatch now says how to migrate to the baseline scope.
         const legacyScope = legacyEvidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
-        if (sourceRevision.scope_digest !== readSourceRevision(PROJECT_ROOT, legacyScope, nestedKeys).scope_digest) {
+        if (sourceRevision.scope_digest !== readScopedSourceRevision(PROJECT_ROOT, legacyScope, nestedKeys).scope_digest) {
           errors.push(`source_revision.scope_digest no longer matches the ${recordedScope} scope; refresh this evidence ('aidlc evidence run --stage ${stage.slug}${instance.module_id ? ` --module ${instance.module_id}` : ""} --refresh') to re-anchor it to the ${expectedScope.label} scope`);
         }
-      } else if (!options.tolerateRevisionDrift && sourceRevision.scope_digest !== readSourceRevision(PROJECT_ROOT, expectedScope, nestedKeys).scope_digest) {
+      } else if (!options.tolerateRevisionDrift && sourceRevision.scope_digest !== readScopedSourceRevision(PROJECT_ROOT, expectedScope, nestedKeys).scope_digest) {
         errors.push(`source_revision.scope_digest no longer matches the ${recordedScope} scope`);
       }
       // Nested files inside the scope are covered by scope_digest; the repository commits stay in history.
-      if (nestedCheck) errors.push(...nestedRevisionErrors(nestedCheck.recorded, readSourceRevision(PROJECT_ROOT, undefined, nestedKeys).repos || {}, { exact: false, ancestry: options.tolerateRevisionDrift === true }));
+      if (nestedCheck) errors.push(...nestedRevisionErrors(nestedCheck.recorded, readScopedSourceRevision(PROJECT_ROOT, expectedScope, nestedKeys).repos || {}, { exact: false, ancestry: options.tolerateRevisionDrift === true }));
     }
     if (options.requireHistoricalPhaseInputs && evidence.evidence_mode !== "historical_replay" && !omission) {
       const scope = recordedScope === undefined || recordedScope === "worktree" ? undefined
         : recordedScope === evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id).label ? evidenceScopeForInstance(PROJECT_ROOT, instance.instance_id) : legacyEvidenceScopeForInstance(PROJECT_ROOT, instance.instance_id);
-      const current = readSourceRevision(PROJECT_ROOT, scope, nestedKeys);
+      const current = scope ? readScopedSourceRevision(PROJECT_ROOT, scope, nestedKeys) : readSourceRevision(PROJECT_ROOT, undefined, nestedKeys);
       const unchanged = scope ? sourceRevision.scope_digest === current.scope_digest
         : sourceRevision.worktree_digest === current.worktree_digest && sourceRevision.commit === current.commit && sourceRevision.dirty === current.dirty;
       // Legacy evidence remains valid under its original exact binding. Once that
@@ -2057,7 +2099,7 @@ function moduleUcdCoverageGaps(moduleId: string): string[] {
       }
     }
   }
-  return ucdCoverageGaps(i13, green);
+  return batchUcdCoverageGaps(PROJECT_ROOT,moduleId,i13,green);
 }
 
 const UCD_MODES = new Set(["new", "characterization"]);
@@ -3742,7 +3784,8 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
   const applicationDesignCompleted = completedInstanceIds(state).includes(applicationInstance);
   const has_test_case_sources = applicationDesignCompleted && (existsSync(userStoriesPath) || has_nfr_needs || has_infra_needs);
   const moduleHasContractDependencies = /共享契约|shared.?contract|API.?contract|接口契约|proto|protobuf|OpenAPI|swagger/i.test(contextText);
-  const has_contract_dependencies = selectedForUnit("shared-contract-baseline", multi_module || moduleHasContractDependencies);
+  const autonomousContract = Boolean(instance?.module_id && instance.unit_id && loadWorkflowState(PROJECT_ROOT)?.autonomy_contract_version && autonomyNeedsContractBaseline(PROJECT_ROOT, instance.module_id, instance.unit_id));
+  const has_contract_dependencies = selectedForUnit("shared-contract-baseline", multi_module || moduleHasContractDependencies || autonomousContract);
 
   const applicationDecision = plannedStageDecision(workflowPlanText, "application-design");
   const positiveContext = contextText.split(/[\n。;]/).filter(line => !/无需|不涉及|不新增|无新|没有|no new|not applicable/i.test(line)).join("\n");
@@ -4123,7 +4166,7 @@ function previewHandoff(state: WorkflowState, ref: WorkflowRef, target: StageIns
   const unitId = target?.unit_id || context.unit_id;
   const scope = `${workflowRefKey(ref)}${moduleId && ref.kind !== "module" ? ` / module:${moduleId}` : ""}${unitId ? ` / unit:${unitId}` : ""}`;
   const scopeFlags = `${moduleId ? ` --module ${moduleId}` : ""}${unitId ? ` --unit ${unitId}` : ""}`;
-  const start = `使用 AI-DLC，继续当前工作。\n工作目标：${state.work_description}\n工作流：${state.workflow_id}（${scope}）\n工作流状态：${state.status}${state.status === "parked" ? "；仅按 BOSS 的明确续作指令使用 next --resume 恢复。" : "。"}\n恢复上下文：读取 ${statePath} 与 ${statePath.replace(/aidlc-state\.md$/, "audit.md")}。`;
+  const start = `使用 AI-DLC，继续当前工作。\n工作目标：${state.work_description}\n工作流：${state.workflow_id}（${scope}）\n工作流状态：${state.status}${state.status === "parked" ? "；仅按 BOSS 的明确续作指令使用 next --resume 恢复。" : "。"}\n恢复上下文：运行 loeyae-aidlc orchestrate state context${ref.kind === "integration" ? " --integration" : scopeFlags}，再核对最新路由；${statePath} 是状态来源，不默认整读 state/audit 或历史快照。`;
   if (!target) {
     const message = blocker || "当前预览范围未找到下一阶段。先读取 runtime summary，核对其他单元、模块及集成阶段的进度；不要据此宣称整个项目已经完成，也不要重复执行已通过的阶段。";
     return { next_stage: null, next_stage_status: blocker ? "blocked" : "none", handoff_prompt: `BOSS，${message}`,
@@ -4174,7 +4217,7 @@ async function completionHandoff(state: WorkflowState, instance: StageInstance, 
     const nextCommand = `next${instance.module_id ? ` --module ${instance.module_id}` : ""}${instance.unit_id ? ` --unit ${instance.unit_id}` : ""}`;
     return { handoff_status: "unverified", handoff_error: detail, next_stage_status: "unavailable", next_stage: null,
       handoff_prompt: `BOSS，${instance.instance_id} ${completion}；下一阶段预览暂不可用，请恢复路由信息后继续，不要重复报告已完成阶段。`,
-      next_stage_prompt: `使用 AI-DLC，继续 ${state.work_description}。\n上一阶段：${instance.instance_id} ${completion}。\n先读取 ${relativeStatePath(PROJECT_ROOT, ref)} 与对应 audit.md，运行 loeyae-aidlc orchestrate ${nextCommand} --preview 恢复最新路由。当前预览问题：${detail}。\n确定下一实例后按既有 inspect/bind、审批与门禁规则继续，不凭本提示词跳过准入。` };
+      next_stage_prompt: `使用 AI-DLC，继续 ${state.work_description}。\n上一阶段：${instance.instance_id} ${completion}。\n先运行 loeyae-aidlc orchestrate state context${ref.kind === "module" ? ` --module ${ref.module_id}` : ref.kind === "integration" ? " --integration" : ""}，运行 loeyae-aidlc orchestrate ${nextCommand} --preview 恢复最新路由，不整读 audit。当前预览问题：${detail}。\n确定下一实例后按既有 inspect/bind、审批与门禁规则继续，不凭本提示词跳过准入。` };
   }
 }
 
@@ -4930,7 +4973,7 @@ function anchorLegacyEvidence(inventory: LegacyEvidence[]): { anchored: string[]
     }
     const scope = evidenceScopeForInstance(PROJECT_ROOT, item.instance);
     if (scope.label === "worktree") continue;
-    if (!digests.has(scope.label)) digests.set(scope.label, readSourceRevision(PROJECT_ROOT, scope).scope_digest);
+    if (!digests.has(scope.label)) digests.set(scope.label, readScopedSourceRevision(PROJECT_ROOT, scope).scope_digest);
     const digest = digests.get(scope.label);
     if (!digest) {
       stale.push(`${label} (${item.instance})`);
@@ -5038,6 +5081,7 @@ function performSplit(fromId: string, dryRun: boolean, trigger: string, replaceL
   if (isSplitLayout(PROJECT_ROOT)) return { kind: "error", message: "The workflow layout is already split; use next --module <module-id>." };
   const legacy = loadState();
   if (!legacy) return { kind: "error", message: "No active workflow to split." };
+  if (legacy.autonomy_contract_version) return { kind: "error", message: "BATCH_SCOPE_CHANGED: split changes adopted UnitRef ownership; finalize the workflow layout before explicit batch adoption." };
   const requested = fromId.trim();
   if (!(legacy.workflow_id === requested || (requested.length >= 8 && legacy.workflow_id.startsWith(requested)))) {
     return { kind: "error", message: `--from ${requested} does not match the active workflow ${legacy.workflow_id}.` };
@@ -5187,6 +5231,9 @@ function rmFile(path: string): void {
 // ---------------------------------------------------------------------------
 
 async function handleNext(args: string[]): Promise<Directive> {
+  const global = loadWorkflowState(PROJECT_ROOT);
+  const autonomy = global?.autonomy_contract_version ? projectAutonomyScope(PROJECT_ROOT, global) : undefined;
+  const decisions = autonomy ? projectAutonomyDecisions(PROJECT_ROOT) : undefined;
   // MARS-277: one next re-validates many evidence records sharing a digest scope;
   // the admission passes run no project commands, so the digests are memoized here.
   // The same wrapper bounds revision-conflict retries across the whole chain.
@@ -5195,7 +5242,16 @@ async function handleNext(args: string[]): Promise<Directive> {
   try {
     return await withRevisionMemoization(async () => {
       const result = await handleNextInner(args);
-      return topLevel ? withRepairGuidance(result, args.includes("--preview") || args.includes("--status")) : result;
+      const directive = topLevel ? withRepairGuidance(result, args.includes("--preview") || args.includes("--status")) : result;
+      return autonomy ? { ...directive, autonomy_scope: autonomy, autonomy_decisions: decisions,
+        autonomous_execution: { mode: "autonomous-batch", protocol_file: AUTONOMOUS_EXECUTION_PROTOCOL,
+          routine_stage_confirmation: "not-required", module_selection: "frozen-implement-units", protected_gates: "unchanged", execution_authorized: false },
+        execution_grant: executionGrantProjection(PROJECT_ROOT),
+        autonomous_admission: admissionProjection(PROJECT_ROOT),
+        autonomy_dependencies: projectAutonomyDependencies(PROJECT_ROOT, { preparation_only: true }),
+        autonomous_batch_result: projectBatchResult(PROJECT_ROOT),
+        ...(directive.next_stage_prompt ? { next_stage_prompt: `${directive.next_stage_prompt}\n自主批次：读取 ${AUTONOMOUS_EXECUTION_PROTOCOL}，按当前授权连续实施，无需逐阶段人工确认；真实 block、暂停和缺少权限仍阻断，合法委托记录后继续。` } : {}),
+        ...(directive.handoff_prompt ? { handoff_prompt: `${directive.handoff_prompt}\nDelegated decisions: ${decisions!.decisions.length}; human review pending: ${decisions!.human_review_summary.pending}; incomplete records: ${decisions!.completion_blockers.length}. Pending review alone does not pause implementation; preserve explicit requirements and use only the pinned policy clauses. Engineering gates remain required.` } : {}) } : directive;
     });
   } finally {
     if (topLevel) nextConflictInFlight = false;
@@ -5265,7 +5321,8 @@ async function handleNextInner(args: string[]): Promise<Directive> {
     // and for a unit binding only that unit's instances — the same candidate filter
     // advance enforces — so it is never routed into another unit or session's work.
     const boundUnit = binding?.stage_instance.split("@unit:")[1];
-    const candidates = all.filter(instance => (!loaded.split || sameRef(ownerOfInstance(instance.instance_id), ref))
+    const implementationCandidate = autonomyImplementationFilter(PROJECT_ROOT);
+    const candidates = all.filter(instance => implementationCandidate(instance.stage.slug, instance.module_id, instance.unit_id) && (!loaded.split || sameRef(ownerOfInstance(instance.instance_id), ref))
       && (!binding || (!loaded.split && !boundUnit) || sameRef(ownerOfInstance(instance.instance_id), ownerOfInstance(binding.stage_instance)))
       && (!boundUnit || instance.unit_id === boundUnit)
       && (!flags.module || instance.module_id === flags.module) && (!flags.unit || instance.unit_id === flags.unit));
@@ -5526,6 +5583,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   const extras = opts.extras || {};
   const binding = sessionBinding();
   if (!binding && !opts.readOnlyProbe) return { kind: "error", message: "Explicit session binding required before next writes; inspect/bind the exact stage instance.", ...extras };
+  if (binding?.stage_instance.includes("@unit:") && !autonomyImplementationCandidate(PROJECT_ROOT, binding.stage_instance.split("@")[0], /@module:([^@]+)/.exec(binding.stage_instance)?.[1], /@unit:([^@]+)/.exec(binding.stage_instance)?.[1])) return { kind: "error", message: "DEPENDENCY_NOT_READY: consume/verify or outside-batch unit is not implementation work", ...extras };
   if (binding) assertSessionClaim(PROJECT_ROOT, state, binding.stage_instance, binding);
 
   // Parked workflow — resume or report parked
@@ -5549,7 +5607,8 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
 
   // Expand the static graph into the currently known execution instances.
   const instances = expandStageInstances(graph, state);
-  const candidates = (opts.candidate ? instances.filter(opts.candidate) : instances).filter(instance => {
+  const implementationCandidate = autonomyImplementationFilter(PROJECT_ROOT);
+  const candidates = (opts.candidate ? instances.filter(opts.candidate) : instances).filter(instance => implementationCandidate(instance.stage.slug, instance.module_id, instance.unit_id)).filter(instance => {
     const unit = binding?.stage_instance.split("@unit:")[1];
     return !unit || (instance.unit_id === unit && sameRef(ownerOfInstance(instance.instance_id), ownerOfInstance(binding!.stage_instance)));
   });
@@ -5599,6 +5658,10 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   }
 
   if (!nextInstance) {
+    if (loadWorkflowState(PROJECT_ROOT)?.autonomy_contract_version) {
+      const batch=projectBatchResult(PROJECT_ROOT);
+      if(flags.module||flags.unit||claimRequested||!batch.batch_completed)return {kind:"print",execution_status:"scope-exhausted",workflow_completed:false,batch_completed:batch.batch_completed===true,needs_batch_finalization:batch.batch_completed!==true,autonomous_batch_result:batch,message:"Native scope exhausted; batch result and remaining project gates are evaluated separately.",...extras};
+    }
     if (claimRequested) {
       if (!wasParked && skippedByCondition && skippedByCondition.length > 0) {
         applyPlanningState();
@@ -5624,6 +5687,14 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
   }
 
   const effectiveNextInstance = runtimeInstance(nextInstance, planningState);
+  if (loadWorkflowState(PROJECT_ROOT)?.autonomy_contract_version && IMPLEMENTATION_ENTRY_STAGES.some(stage => stage === effectiveNextInstance.stage.slug)) {
+    try { assertAdmissionReceipt(PROJECT_ROOT, loadWorkflowState(PROJECT_ROOT)!); }
+    catch (error) { return { kind: "error", stage: effectiveNextInstance.stage.slug, stage_instance: effectiveNextInstance.instance_id, autonomous_admission: admissionProjection(PROJECT_ROOT), message: String(error instanceof Error ? error.message : error), ...extras }; }
+  }
+  if (loadWorkflowState(PROJECT_ROOT)?.autonomy_contract_version) {
+    try { assertAutonomyDependencyAccess(PROJECT_ROOT, binding ? { ...binding, stage_instance: effectiveNextInstance.instance_id } : undefined, ["workflow-write"], undefined, effectiveNextInstance.stage.slug); }
+    catch (error) { return { kind: "error", stage: effectiveNextInstance.stage.slug, stage_instance: effectiveNextInstance.instance_id, message: String(error instanceof Error ? error.message : error), ...extras }; }
+  }
   if (effectiveNextInstance.stage.slug === "code-generation" && effectiveNextInstance.module_id && effectiveNextInstance.unit_id) {
     const redPath = join(PROJECT_ROOT, evidenceRelativePath("tdd", "red-test-evidence", "unit", { module_id: effectiveNextInstance.module_id, unit_id: effectiveNextInstance.unit_id }));
     try {
@@ -5684,6 +5755,7 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
       }
     }
     ruleLoadPlan = buildRuleLoadPlan(graph, {
+      autonomyContractVersion: loadWorkflowState(PROJECT_ROOT)?.autonomy_contract_version,
       scope: planningState.scope,
       selectedOptionalStages: selectedOptionalStages(planningState),
       executionProfile: planningState.execution_profile,
@@ -5761,7 +5833,11 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
     for (const dep of upstreamDeps) {
       const historicalTdd = dep.stage.slug === "tdd" && effectiveNextInstance.stage.slug === "code-generation"
         && dep.module_id === effectiveNextInstance.module_id && dep.unit_id === effectiveNextInstance.unit_id;
-      const failures = historicalTdd ? await checkHistoricalTddSensors(dep, state, { requireCurrentBaselineEpoch: true }) : await checkSensors(dep, state);
+      // Recheck the same runtime contract that admitted the completed report.
+      // Raw graph nodes still contain conditional sensors (for example UI on a
+      // no-UI unit); requiring those here invents a new gate during convergence.
+      const effectiveDep = runtimeInstance(dep, state);
+      const failures = historicalTdd ? await checkHistoricalTddSensors(effectiveDep, state, { requireCurrentBaselineEpoch: true }) : await checkSensors(effectiveDep, state);
       for (const failure of failures) {
         if (isolatedEvidenceFailure && failure.sensor === SLICE_SENSOR && dep.stage.slug === "units-generation" && dep.module_id === effectiveNextInstance.module_id) continue;
         if (isolationAllowed && recoverableEvidenceFailure(failure.message)) {
@@ -6043,6 +6119,7 @@ async function handleReportInner(args: string[], conflictRetries: number): Promi
     };
   }
   const currentInstance = runtimeInstance(declaredCurrentInstance, state);
+  if (["completed","approved"].includes(result)) {try{assertAttemptRepairStage(PROJECT_ROOT,currentInstance.instance_id);}catch(e){return {kind:"error",message:String(e)};}}
   if (currentInstance.stage.slug === "code-generation" && currentInstance.module_id && currentInstance.unit_id) {
     try {
       const red = JSON.parse(readFileSync(join(PROJECT_ROOT, evidenceRelativePath("tdd", "red-test-evidence", "unit", { module_id: currentInstance.module_id, unit_id: currentInstance.unit_id })), "utf8"));
@@ -6220,6 +6297,8 @@ async function handleReportInner(args: string[], conflictRetries: number): Promi
   }
 
   if (result === "completed" || result === "approved") clearRepairGuidance(PROJECT_ROOT, auditRef);
+  const operationRef=operationReceipt(PROJECT_ROOT,args);
+  if(operationRef)entry.operation_ref=operationRef;
   state.history.push(entry);
 
   // Process result — auto-advance after all applicable gates pass
@@ -6264,7 +6343,9 @@ async function handleReportInner(args: string[], conflictRetries: number): Promi
     };
   }
   try {
-    commit(state);
+    if (factStorageActive(PROJECT_ROOT, lightStatePath(PROJECT_ROOT, auditRef))) {
+      withReportFactSources(reportFactSources(currentInstance, ["completed", "approved"].includes(result)), () => commit(state!));
+    } else commit(state);
   } catch (error) {
     // MARS-277: bounded, explainable conflict retry — never an unbounded recursion.
     if (claim && error instanceof Error && error.message.startsWith("workflow state revision conflict")) {
@@ -6487,7 +6568,8 @@ async function reattestInstance(
     timestamp: new Date().toISOString(),
     user_input: userInput || "exit gates re-verified",
   });
-  commit(state);
+  if (factStorageActive(PROJECT_ROOT, lightStatePath(PROJECT_ROOT, ownerOfInstance(instanceId)))) withReportFactSources(reportFactSources(instance, true), () => commit(state));
+  else commit(state);
   return {
     kind: "print",
     message: `✅ Stage instance "${instanceId}" re-attested: consumes, produces and sensors are green. Workflow progress is unchanged.`,
@@ -8036,7 +8118,7 @@ function handleProfile(args: string[]): Directive {
 }
 
 // recover/adopt/rebuild additionally require --maintenance <current maintenance_token>.
-const STATE_USAGE = "Usage: orchestrate state maintenance-plan [--module <id>] | orchestrate state review-inputs | orchestrate state plan [--module <id>] | orchestrate state rules [--module <id>] | orchestrate state evidence [--module <id>] | orchestrate state summary [--module <id>] [--format json|markdown] | orchestrate state measurements [--module <id>] | orchestrate state verify | orchestrate state rebuild | orchestrate state retire --lineage <workflow-id>[,<workflow-id>] --user-input Approve --reason \"<why>\" | orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason \"<why>\" | orchestrate state checkpoint --module <id> | orchestrate state recover --module <id> [--user-input Approve --reason \"<why>\"]";
+const STATE_USAGE = "Usage: orchestrate state context [--module <id> --unit <id> | --integration] | orchestrate state artifact --path <relative> [--offset <n> --limit <n>] | orchestrate state facts|migrate-facts|rebuild-view [--module <id> | --integration] | orchestrate state changes [--from <commit-id>] [--paths <JSON array>] | orchestrate state maintenance-plan [--module <id>] | orchestrate state review-inputs | orchestrate state plan [--module <id>] | orchestrate state rules [--module <id>] | orchestrate state evidence [--module <id>] | orchestrate state summary [--module <id>] [--format json|markdown] | orchestrate state measurements [--module <id>] | orchestrate state verify | orchestrate state rebuild | orchestrate state retire --lineage <workflow-id>[,<workflow-id>] --user-input Approve --reason \"<why>\" | orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason \"<why>\" | orchestrate state checkpoint --module <id> | orchestrate state recover --module <id> [--user-input Approve --reason \"<why>\"]";
 
 function damagedMaintenanceReader(moduleId: string | undefined): MaintenanceRecoveryReader | undefined {
   if (!moduleId || !MODULE_ID_PATTERN.test(moduleId)) return undefined;
@@ -8053,6 +8135,27 @@ function damagedMaintenanceReader(moduleId: string | undefined): MaintenanceReco
 async function handleState(args: string[]): Promise<Directive> {
   const [action, ...rest] = args;
   const flags = parseFlags(rest);
+  if (["facts", "migrate-facts", "rebuild-view"].includes(action)) {
+    if (Object.keys(flags).some(key => key !== "module" && key !== "integration") || flags.module && flags.integration || flags.module && !MODULE_ID_PATTERN.test(flags.module) || flags.integration && flags.integration !== "true") return { kind: "error", message: "state facts|migrate-facts|rebuild-view takes --module <id> or --integration" };
+    const ref: WorkflowRef = flags.module ? { kind: "module", module_id: flags.module } : flags.integration ? { kind: "integration" } : GLOBAL_WORKFLOW;
+    if (action === "migrate-facts") migrateWorkflowFacts(PROJECT_ROOT, ref);
+    if (action === "rebuild-view") rebuildWorkflowView(PROJECT_ROOT, ref);
+    const facts = readWorkflowFacts(PROJECT_ROOT, lightStatePath(PROJECT_ROOT, ref));
+    return { kind: "print", workflow_facts: facts || null, message: facts ? "Durable facts are authoritative; Markdown is a disposable view. Historical approval is preserved, current evidence validity is not inferred." : "Legacy workflow: facts have not been migrated." };
+  }
+  if (action === "changes") {
+    if (Object.keys(flags).some(key => !["from", "paths"].includes(key))) return { kind: "error", message: "state changes takes only --from <commit-id> and --paths <JSON array>" };
+    const paths = flags.paths === undefined ? [] : JSON.parse(flags.paths);
+    return { kind: "print", git_changes: gitChangeView(PROJECT_ROOT, flags.from, paths), message: "Read-only Git content comparison, including uncommitted and untracked files. No claim is required; no approval, evidence validity or completion is inferred." };
+  }
+  if (action === "context") {
+    if (Object.keys(flags).some(key => !["module", "unit", "integration"].includes(key)) || flags.integration !== undefined && flags.integration !== "true") return { kind: "error", message: "state context takes only --module/--unit or --integration" };
+    return { kind: "print", context_view: workflowContext(PROJECT_ROOT, flags.module, flags.unit, flags.integration === "true"), message: "Read-only current context. Use fresh next --preview for routing; no gates or authorization inferred." };
+  }
+  if (action === "artifact") {
+    if (Object.keys(flags).some(key => !["path", "offset", "limit"].includes(key))) return { kind: "error", message: "state artifact takes only --path, --offset and --limit" };
+    return { kind: "print", artifact_view: artifactView(PROJECT_ROOT, flags.path, flags.offset === undefined ? 0 : Number(flags.offset), flags.limit === undefined ? 8000 : Number(flags.limit)), message: "Read-only artifact view; original bytes and normal gates remain authoritative." };
+  }
   const invalidFlag = unsupportedFlag(flags, action === "summary" ? new Set(["module", "format", "text"]) : STATE_FLAGS);
   if (invalidFlag) return { kind: "error", message: `Unsupported state option: --${invalidFlag}. ${STATE_USAGE}` };
   if (flags.text) return { kind: "error", message: `Unexpected state argument: ${flags.text}. ${STATE_USAGE}` };
@@ -8102,8 +8205,9 @@ function deliverySummaryDirective(flags: Record<string, string>): Directive {
   if (moduleId !== undefined && (!loaded.split || !loaded.parts.has(workflowRefKey(moduleRef(moduleId))))) return { kind: "error", message: `state summary: module ${moduleId} has no active split workflow` };
   const state = loaded.split ? mergeWorkflowView(loaded.parts, moduleId ? moduleRef(moduleId) : GLOBAL_WORKFLOW) : loaded.parts.get("global")?.state;
   if (!state) return { kind: "error", message: "No active workflow." };
-  const summary = projectDeliverySummary(PROJECT_ROOT, state);
-  return { kind: "print", delivery_summary: summary, message: renderDeliverySummaryMarkdown(summary) };
+  const summary = projectDeliverySummary(PROJECT_ROOT, state, loaded.parts.get("global")?.state.autonomy_contract_version?{batchResult:projectBatchResult(PROJECT_ROOT)}:{});
+  const decisions = loaded.parts.get("global")?.state.autonomy_contract_version ? projectAutonomyDecisions(PROJECT_ROOT) : undefined;
+  return { kind: "print", delivery_summary: summary, ...(decisions ? { autonomy_decisions: decisions } : {}), ...(loaded.parts.get("global")?.state.execution_grant_version ? { execution_grant: executionGrantProjection(PROJECT_ROOT) } : {}), message: renderDeliverySummaryMarkdown(summary) };
 }
 
 /**
@@ -8165,6 +8269,7 @@ function ruleLoadPlanDirective(flags: Record<string, string>): Directive {
   const state = loadWorkflowView(PROJECT_ROOT, moduleId);
   if (!state) return { kind: "error", message: "No active workflow." };
   const plan = buildRuleLoadPlan(loadGraph(), {
+    autonomyContractVersion: loadWorkflowState(PROJECT_ROOT)?.autonomy_contract_version,
     scope: state.scope,
     selectedOptionalStages: selectedOptionalStages(state),
     executionProfile: state.execution_profile,
@@ -8197,6 +8302,7 @@ function evidenceReusePlanDirective(flags: Record<string, string>): Directive {
   if (!state) return { kind: "error", message: "No active workflow." };
   const graph = loadGraph();
   const ruleLoadPlan = buildRuleLoadPlan(graph, {
+    autonomyContractVersion: loadWorkflowState(PROJECT_ROOT)?.autonomy_contract_version,
     scope: state.scope,
     selectedOptionalStages: selectedOptionalStages(state),
     executionProfile: state.execution_profile,
@@ -8877,6 +8983,7 @@ async function main() {
   }
 
   const { cmd, rest } = parseSubcommand(args);
+  if(cmd==='report'){const committed=committedReport(PROJECT_ROOT,rest);if(committed){console.log(JSON.stringify(committed));return;}}
 
   // The registry merge driver (change B) is invoked by git with `%O %A %B`; it must
   // write the merged result back to the ours file and signal clean (0) / conflict (1)
@@ -8892,10 +8999,15 @@ async function main() {
 
   // MARS-271: checkpoint 与 audit 只写报告/台账文件,不写工作流状态,豁免 session binding。
   const readOnly = ["checkpoint", "audit"].includes(cmd)
+    // These control entries perform their own exact grant/operation/publication
+    // checks; applying workflow-write here would self-lock dependency preflight.
+    || (cmd === "autonomy" && ["grant", "admission", "dependencies", "observe", "host", "batch", "repair", "run"].includes(rest[0]))
+    || (cmd === "autonomy" && (rest[0] === "inspect" || rest.includes("--preview")))
+    || (cmd === "autonomy" && ["policy", "decisions"].includes(rest[0]))
     || (cmd === "next" && (rest.includes("--status") || rest.includes("--preview")))
     || (cmd === "next" && isSplitLayout(PROJECT_ROOT) && !sessionBinding() && !rest.includes("--module") && !rest.includes("--scope"))
     || (cmd === "upgrade" && (!rest.includes("--retire-execution") || rest.includes("--dry-run")))
-    || (cmd === "state" && (!rest.length || ["plan", "rules", "evidence", "summary", "measurements", "verify", "review-inputs", "maintenance-plan"].includes(rest[0])))
+    || (cmd === "state" && (!rest.length || ["context", "artifact", "facts", "rebuild-view", "changes", "plan", "rules", "evidence", "summary", "measurements", "verify", "review-inputs", "maintenance-plan"].includes(rest[0])))
     || (["baseline", "diagram-format", "profile"].includes(cmd) && !rest.some(arg => arg.startsWith("--") && !["--module", "--status"].includes(arg)));
   if (!readOnly && !(cmd === "state" && ["recover", "adopt", "rebuild"].includes(rest[0]))) {
     const loaded = loadWorkflowParts(PROJECT_ROOT);
@@ -8911,6 +9023,7 @@ async function main() {
       // archive verifies every workflow is parked/done and every sibling claim
       // released. split rejects an already split layout without mutating it.
       if (cmd === "upgrade" && loaded.parts.size > 1 && !rest.includes("--retire-execution")) throw new Error("whole-project maintenance requires a separate quiescent workflow handoff; a session binding cannot grant sibling ownership");
+      if (!["park", "archive"].includes(cmd)) checkCurrentExecutionGrant(PROJECT_ROOT, cmd === "report" ? ["workflow-write", "stage-report"] : cmd === "autonomy" && rest[0] === "record" ? ["decision-record"] : ["workflow-write"], undefined, cmd === "next" && rest.includes("--resume"));
     }
   }
   let directive: Directive;
@@ -8919,6 +9032,13 @@ async function main() {
       directive = await handleNext(rest);
       break;
     case "report":
+      if (loadWorkflowState(PROJECT_ROOT)?.autonomy_contract_version) {
+        projectAutonomyScope(PROJECT_ROOT);
+        const decisions = projectAutonomyDecisions(PROJECT_ROOT), flags = parseFlags(rest);
+        if (["build-and-test", "implementation-report", "merge-planning"].includes((flags.stage || "").split("@")[0]) && ["completed", "approved"].includes(flags.result) && decisions.completion_blockers.length) {
+          throw new Error(`AUTONOMY_DECISION_INCOMPLETE: ${decisions.completion_blockers.join(", ")}`);
+        }
+      }
       directive = await handleReport(rest);
       // The report checkpoint was finalized under its state commit lock.
       break;
@@ -8942,6 +9062,10 @@ async function main() {
       break;
     case "state":
       directive = await handleState(rest);
+      break;
+    case "autonomy":
+      if (rest[0] === "run") { directive = autonomyRunDirective(PROJECT_ROOT, rest.slice(1)) as unknown as Directive; break; }
+      directive = rest[0] === "repair" ? attemptRepairDirective(PROJECT_ROOT,rest.slice(1)) as unknown as Directive : rest[0] === "batch" ? batchResultDirective(PROJECT_ROOT,rest.slice(1)) as unknown as Directive : rest[0] === "observe" ? await observationsDirective(PROJECT_ROOT,rest.slice(1)) as unknown as Directive : rest[0] === "host" ? nativeHostDirective(PROJECT_ROOT, rest.slice(1)) as unknown as Directive : rest[0] === "dependencies" ? autonomyDependenciesDirective(PROJECT_ROOT, rest.slice(1)) as unknown as Directive : rest[0] === "admission" ? admissionDirective(PROJECT_ROOT, rest.slice(1)) as unknown as Directive : rest[0] === "grant" ? await executionGrantDirective(PROJECT_ROOT, rest.slice(1)) as unknown as Directive : ["policy", "decisions", "record"].includes(rest[0]) ? autonomyPolicyDirective(PROJECT_ROOT, rest) : autonomyDirective(PROJECT_ROOT, rest);
       break;
     case "profile":
       directive = handleProfile(rest);

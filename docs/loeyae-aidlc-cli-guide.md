@@ -1,3 +1,5 @@
+> 默认入口已调整：由宿主原生工具实施，可选 `loeyae-aidlc work` 读取 Git/选定输入；不要求 H5、claim 或逐阶段 report。见 [宿主执行协议](../core/knowledge/protocols/host-execution.md)。下文 orchestrate/autonomy 的强制规则仅用于显式选择的旧受管兼容路径。
+
 # Loeyae AI-DLC CLI 使用手册
 
 ## 新 workflow
@@ -70,6 +72,76 @@ loeyae-aidlc orchestrate diagram-format [--set <mermaid|svg> --user-input "<用�
 `run-stage` 还会返回只读的 `rule_load_plan`：`load_now` 是当前阶段及其已选依赖应加载的阶段规则，`deferred` 是已选但应在后续阶段交接时再加载的规则，`selected` 是完整的执行器选中集合。可用 `loeyae-aidlc orchestrate state rules [--module <id>]` 查看不带当前目标的计划。该计划只减少交接上下文，不会跳过阶段、审批、`requires`、产物、sensor、evidence 或 Provider gate；这些 engine gate 始终具有最终约束力。
 
 `loeyae-aidlc orchestrate state measurements [--module <id>]` 输出只读的 `execution_profile_measurements`：它对照历史 standard 选择结果，展示当前 profile 的选中/省略阶段、mandatory 规则保留情况和 legacy 迁移边界。该命令不写入 global 或 module WorkflowState，不能授予任何 report、sensor、evidence、approval 或 release gate pass；在 split 布局指定 `--module` 时，module 视图继承 global `execution_profile`。
+
+## 自主实施批次范围（P1-01）
+
+P1-01 提供显式采用、范围校验和只读投影。未采用的 workflow 保持既有流程，即使设计文档已包含自主实施记录也不会自动启用。
+
+```bash
+# 读取已采用范围；未采用时 enabled=false，不扫描来源文件
+loeyae-aidlc orchestrate autonomy inspect
+
+# 使用刚读取的 global WorkflowState revision 校验拟采用的唯一批次
+loeyae-aidlc orchestrate autonomy adopt --batch <batch-id> --expect <revision> --preview
+
+# 持有当前 global 项目阶段的有效 session binding 后，正式采用
+loeyae-aidlc orchestrate autonomy adopt --batch <batch-id> --expect <revision>
+```
+
+批次位于 `docs/aidlc/ideation/scenario-module-mapping.md` 或轻量流程的 `docs/aidlc/handoff.md`，只能有一处 batch 来源。来源为唯一闭合的 `aidlc-autonomy` JSON 围栏，顶层包含 `schema: "aidlc.autonomy-source/v1"` 与 `records`。完整字段见[契约 v1](aidlc-autonomous-contracts-v1.md)；采用前需已有真实模块和单元清单、场景/AC 定义、policy 与验证矩阵引用，不会自动生成这些输入。
+
+正式采用将 `Autonomy Contract Version: 1` 和批次摘要写入既有 global Markdown state，并在既有 audit 中记录批次版本与范围摘要；不新建进度控制面。preview 和 inspect 均不领取阶段、不修改 state/audit。重复采用同一未变化批次为幂等读取；过期 revision、跨 workflow 引用、路径越界、摘要变化、上游依赖遗漏或下游消费者缺少验证/排除记录均拒绝。
+
+采用后的 `next` 返回 `autonomy_scope` 并重新核验固定分母；CLI `report` 也先复核。修改已绑定的 AC、UI 引用、单元定义、基线或相关依赖后，必须先恢复来源或显式建立新 workflow，不能原地静默缩减范围。采用前须完成布局选择，采用后拒绝会改变 UnitRef 归属的 split。追加无关 decision 或调整 JSON 对象键顺序不会使未变化的 record 引用失效。
+
+`validation_level=scope-only`、`execution_authorized=false`、`gates_evaluated=false` 描述范围投影本身的边界。consume 就绪性另由 dependencies 核验，空 UI 列表也不证明无 UI。当前分别通过 policy/decisions、grant、admission、dependencies、observe 和 batch 读取与执行后续受控能力；范围采用本身不启动无人值守交付，原阶段门禁继续生效。
+
+## 自主策略与委托决策（P1-02）
+
+采用批次后可以读取完整策略与决策投影：
+
+```bash
+loeyae-aidlc orchestrate autonomy policy
+loeyae-aidlc orchestrate autonomy decisions
+loeyae-aidlc orchestrate autonomy record --input proposal.json --expect <handoff-sha256|absent> --preview
+loeyae-aidlc orchestrate autonomy record --input proposal.json --expect <handoff-sha256|absent>
+```
+
+`--expect` 取 decisions 返回的 handoff_digest；没有 handoff 时使用 absent。正式发布需要目标 implement 单元所属 workflow 的精确有效 binding，recorded_by 使用 `<owner>/<session_id>`。记录位于 handoff 的唯一 autonomy 段，不新建进度或审批状态。若 handoff 已被 raw-file 冻结，必须在新 workflow 的采用前使用段级引用，不能靠追加记录破坏基线。
+
+策略与 proposal 的完整结构、合法类别、AuthorityRef、更新修订规则见[契约第 4.3 节](aidlc-autonomous-contracts-v1.md#43-p1-02-实现契约)。category/fallback 只允许既定空白的细化，不允许反转明确产品回答或删减 AC/UI；策略来源须由宿主核实为真实人类确认。已有 P1-01 的简化 policy 不能冒充完整策略，缺字段会拒绝，需要按显式新 workflow/策略基线迁移，不能绕过已冻结摘要。
+
+next 的 handoff 和 state summary 会区分 pending 事后复核与缺失实施/验证。pending 本身不暂停实施；缺项或 change-requested/rejected 会显示阻断/返工原因，并阻止工程完成报告跳过这些缺项。引用齐全仅为 recorded-not-verified，继续执行原有受控质量门禁；本步不签发运行授权、不启动持久宿主循环。
+
+## 单会话 ExecutionGrant（P1-03）
+
+先完成批次采用、完整策略和 global 项目阶段的精确 session binding，再由真实操作人确认一次运行授权。request JSON 只描述请求，不是批准凭据；字段与枚举见[契约第 5.3 节](aidlc-autonomous-contracts-v1.md#53-p1-03-实现契约)。
+
+```bash
+# 只读校验与展示；需要已有执行会话 binding，不创建新的领取
+loeyae-aidlc orchestrate autonomy grant issue --input grant-request.json --preview
+
+# 真实操作终端确认完整请求摘要；不能用管道或 --user-input 代替
+loeyae-aidlc orchestrate autonomy grant issue --input grant-request.json
+
+# 当前会话传入实际 AIDLC_AUTONOMY_HOST 后，取得 ref
+loeyae-aidlc orchestrate autonomy grant bind
+
+# 将 ref 作为 AIDLC_EXECUTION_GRANT 仅传给本会话 Core 子进程
+loeyae-aidlc orchestrate autonomy grant check --operation code-write --path src/orders/publish.ts
+loeyae-aidlc orchestrate autonomy grant inspect
+
+# 独立的实际操作输入撤销；无须依赖已过期的运行 grant
+loeyae-aidlc orchestrate autonomy grant revoke --expect 1 --reason "停止本次运行"
+```
+
+Agent 不得代输终端确认，也不能把模拟 TTY、普通文档、Provider 输出或测试记录当作人类批准。当前实现的是可信操作端约定下的终端入口，不宣称终端证明人类身份或已接入 Codex 原生聊天回执。
+
+bind 返回 `execution_grant.ref`，同时返回 current session_binding 与 host。每个新阶段仍需 inspect/bind 原生领取，更新 AIDLC_SESSION_BINDING；同一 owner/session 的 grant 不因此续期。新 session、host/config、越界模块/单元、过期或撤销均拒绝，P1 不自动继承、不替换或延长既有 grant。
+
+state 中的 Execution Grant Version/引用只由受管签发激活；普通保存不能修改或移除。签名 grant/approval/revocation 在 `.aidlc/autonomy/grants/`；私钥与撤销锚点位于 Git common directory，不能复制进业务产物。删除撤销 JSON 不会使旧授权恢复。已提交的重复撤销返回原状态，不再要求批准。
+
+宿主在真实工具副作用前检查具体操作及目标；Core 在状态、决策和证据发布时再次检查。提交/整合、push、受保护分支和部署各自独立。inspect 的 active 只描述签名记录和期限，不能代替具体 check、原有审批、P1-04 准入或功能/UI 门禁。并发与重试预算由后续宿主驱动落实，不能从配置字段推定已经执行。
 
 ## 项目级 Provider 与 Loeyae 迁移
 
@@ -318,3 +390,49 @@ loeyae-aidlc version
 Stop Hook 只观察 Markdown workflow 是否仍在运行并提示继续；不会自动 report、生成签名或读取旧 JSON workflow。
 
 DeepSeek Harness（`deepseek`）使用原生 Skill：用户级安装遵循 `DSH_HOME`（默认 `~/.dsh`），项目级安装写入 `<项目>/.dsh/skills/loeyae-aidlc/`。安装器通过 PATH 中的 `dsh` 自动探测；此适配不注册 Stop Hook，启动与续作使用显式 session binding。详见[安装指南](loeyae-aidlc-v2-installation.md#deepseek-harness)。
+
+## 自主批次多单元依赖（P1-05）
+
+显式采用后可运行 orchestrate autonomy dependencies inspect，只读显示能力版本、consume/verify、分阶段依赖、共享输入/写范围与 dependency_frontier。消费检查调用 orchestrate autonomy dependencies check --checkpoint <实际 stage 或矩阵 check ID>，要求当前有效 grant、精确活动 session binding 及 validation-execute 权限。
+
+多单元交接前在 canonical 单元清单显式设置 autonomy_version="1" 并冻结 unit-extension/capability/dependency，契约见 docs/aidlc-autonomous-contracts-v1.md 第 13 节。inspect 不授权，runtime/external 未有实际运行观察时不会 ready。consume/verify 不进入实施候选；scope-exhausted 不代表批次/项目完成，仍需候选与完整验收。Codex 宿主执行工具前校验，observe 提供实际运行/UI 生产者，batch 汇合最终结果；其他宿主的实际适配不能由共享分发推导。
+
+## Codex 宿主运行入口（P1-06）
+
+使用已安装 Codex Skill 的 runtime/aidlc-codex-host.mjs：prepare <seed-config> <new-frozen-config> 输出可复用 thread_id、配置及 HostRef；identity <config> 只计算身份；run <config> <same-thread-id> 消费已签发的实际单会话授权。运行前仍须现有精确 binding 和批准的 HostRef/接收计划。详见 harness/codex/README.md 与 contracts-v1 第 14 节。
+
+orchestrate autonomy host context / select --instance <exact-instance> 是宿主私有控制 IPC；不将 binding 注入模型，也不用于授予新权限。阶段路由、审批、证据和最终批次完成保持原门禁。当前入口只接入 Codex；不推导其他 Harness 已具备相同工具拦截或取消能力。
+
+## 候选实际观察（P1-07）
+
+`orchestrate autonomy observe run --input <冻结计划.json>` 在原全局协调 binding、实际 validation-execute/evidence-publish 授权及有效准入下执行 command/HTTP/UI 检查。计划须事先冻结，矩阵检查与 AC/UI 组合不能删减。候选须为真实 clean commit，实际服务版本须对应候选；UI 执行坐标交互、DOM 及 PNG 整页/关键区域差异检查。计划 schema、环境变量/外部版本身份与容差要求见 contracts-v1 第 15 节。
+
+`orchestrate autonomy observe inspect` 只读核验当前签名、候选、环境、来源、原始文件及有效期；缺失/漂移为 unverified。runtime/external 只有对应真实观察通过才可 ready，实际消费仍重查服务版本/健康。观察 passed 不发布 batch verified，原 Native gates 和 P1-08 最终候选/决策/完整矩阵汇合仍须完成。
+
+前置外部依赖可先执行 `orchestrate autonomy observe run --dependency-preflight --input <同一冻结计划.json>`，在实际 grant 和全局准备领取下只执行 ExternalRef HTTP 子集，不要求已取得完整实施准入；结果仅 partial，无相应检查时 not-applicable 且不签凭据。随后重新运行 admission，其他硬条件必须通过。消费者普通编码不改未变外部契约的就绪依据；完整矩阵仍要求当前 clean 候选，不能消费 partial 冒充通过。
+
+## 最终批次结果（P1-08）
+
+在原全局协调实例、同会话 grant 与有效准入下执行：
+
+```sh
+loeyae-aidlc orchestrate autonomy batch finalize --preview
+loeyae-aidlc orchestrate autonomy batch finalize
+loeyae-aidlc orchestrate autonomy batch inspect
+```
+
+preview 不运行 Native 汇合或发布凭据，不能当作验收。finalize 同时核验实际最终候选、完整 matrix、Native I13/TDD/审查/C8/适用 UI 与全局审查、依赖消费、交付物和委托决策；结果为 verified/failed/blocked/incomplete。pending 人类评审单独保留，验证引用和实施缺项仍阻塞。引用和签名格式见契约第 16 节。
+
+inspect、next 和 state summary 只读投影历史工程结论与 current/stale/unknown。只有 current verified 才给出 batch_completed=true；结果不自动令项目 done。范围耗尽、观察 passed、模型 final 和宿主正常退出均不能替代终结。
+
+Codex 宿主可配置冻结 candidate_command，必须指向 operation=candidate-commit/candidate-integrate 的既有 command ID；命令负责按授权准备 clean 最终候选及实际版本匹配环境，原 grant、工具前校验和预算不变。宿主串行进入正式 C8、执行完整观察、终结后以 Core 当前结果退出。细节见 harness/codex/README.md。
+
+## 自主与未采用模式的执行语义（P1-09）
+
+自主批次的完整操作顺序为：人类完成有限范围及 H1–H3 → 显式 adopt → prepare 得到原生 thread 并按协议绑定 → 真实操作端签发同会话 grant → 原协调实例执行 admission → 选定 Codex runtime run 持续消费正式 next/report/evidence → 当前完整矩阵及 Native 门禁汇合 → batch inspect 的 current verified。具体冻结顺序和 HostRef/AdmissionPlan 绑定以契约第 14～16 节为准；不能用此概览省略真实接收、授权或实际探针。
+
+`next.autonomous_execution` 是只读指导，`execution_authorized=false`；它声明普通阶段不要求逐阶段确认，并指向 `core/knowledge/protocols/common-autonomous-execution.md`。`rule_load_plan.supplemental_protocols` 在已采用模式显式加载同一协议。notify/none 的展示后继续、已有确定来源直接复用、合法 policy/fallback 记录后实现与验证；human_review=pending 留待后续复核。真实 block、明确暂停/审阅、来源冲突且无合法兜底、授权不足和全部质量门禁仍阻断。
+
+已冻结 implement 单元的模块选择由受支持宿主在正式路由候选内完成，复用原 select/bind，不再重复询问已确认分工；不选择未来/consume/verify 实施或他人领取。Core 的普通多模块路由仍返回 module-selection，未采用模式继续由用户选择。旧 workflow 不增加自主协议字段、grant 或 admission 门禁，也不会因加载 Skill 获得运行权限。
+
+宿主保留 CLI 正常退出 2 的结构化 next 诊断，只有明确无需人工审批的 Native 刷新才可有界修复；进程中断、未知退出、伪造文本或其他命令失败均不转换为修复许可。遇到真实 block/选择问题停止，不允许模型代填 Approve。P1 已有 attempt 或新会话不自动恢复；完整真实双试点仍按 P1-10 验收。

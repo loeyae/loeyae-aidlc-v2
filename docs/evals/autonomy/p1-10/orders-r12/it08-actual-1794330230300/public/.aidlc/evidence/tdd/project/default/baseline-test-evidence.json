@@ -1,0 +1,58 @@
+{
+  "status": "not_required",
+  "phase": "BASELINE",
+  "ucd_ids": [],
+  "not_required_reason": "I13 declares no tdd_mode characterization UC-D",
+  "phase_input_binding": {
+    "version": "1",
+    "i13_digest": "1de0c300f3692b1e6883dfb10eada1438fc5d81bad504ad52538690c2b100807",
+    "files": [
+      {
+        "path": "docs/aidlc/modules/project/inception/application-design/test-cases/UC-D-001-pagination.md",
+        "sha256": "9c40b7af1e43eefd03429cca1b2f6310ff47d25fbf2e451a4bb92c9443fbd9d4"
+      },
+      {
+        "path": "docs/aidlc/modules/project/inception/application-design/test-cases/UC-D-002-independent-calls.md",
+        "sha256": "dec32a0de6538a0b05e70977ba201fc1d49d0b0f9911e10cc95c78177b5e0214"
+      },
+      {
+        "path": "docs/aidlc/modules/project/inception/application-design/test-cases/UC-D-003-failure-propagation.md",
+        "sha256": "2cce4c5b3cfcdf190a89aac910672e17af9cf03253c7fe1be9df89af6389ea30"
+      },
+      {
+        "path": "docs/aidlc/modules/project/inception/requirements.md",
+        "sha256": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c"
+      },
+      {
+        "path": "docs/aidlc/modules/project/inception/user-stories.md",
+        "sha256": "57da48014a14045bcd47d27d559cd35d305a9e43948943692e4473e836b079f4"
+      }
+    ],
+    "unresolved_test_methods": []
+  },
+  "workflow_id": "9145b784-bc71-4d7d-bf82-8d19f1f7b281",
+  "stage_instance": "tdd@module:project@unit:default",
+  "module_id": "project",
+  "unit_id": "default",
+  "evidence_version": "1",
+  "timestamp": "2026-11-10T16:51:41.434Z",
+  "producer": {
+    "name": "loeyae-aidlc-evidence",
+    "mode": "controlled",
+    "execution_id": "c21048dc-73ac-4ce4-baa2-07e56fdf6a70"
+  },
+  "source_revision": {
+    "commit": "688628e7ff68cb5d129e4981a5facedb33d3de95",
+    "dirty": true,
+    "worktree_digest": "cc2980c18477d4da314fb21f81748bbca92876644a3634f0a8efe46585b5dbc1",
+    "scope": "inputs-v2:module:project:unit:default:autonomy-v1",
+    "scope_digest": "a46c6edfd9e6a6750b9d40b933c092e63ec5da7cdbbb039b5bddebeb11128ad0"
+  },
+  "checker": {
+    "id": "builtin:baseline-test-evidence",
+    "sensor": "baseline-test-evidence",
+    "argv_digest": "0a1befa666bf461136995db92c39e45fc5f111344440f3c3fba61f16a46ad218",
+    "exit_code": 0,
+    "status": "passed"
+  }
+}

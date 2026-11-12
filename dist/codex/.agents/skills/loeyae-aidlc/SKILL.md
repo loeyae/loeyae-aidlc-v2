@@ -5,21 +5,14 @@ description: Use the AWS-style lightweight Loeyae AI-DLC workflow for explicit w
 
 # Loeyae AI-DLC
 
-AI-DLC 激活后，面向用户的回复首句称呼 **BOSS**，作为加载标记；用户明确指定其他称呼时遵从用户。阶段 `completed`/`approved` 报告成功后展示 `handoff_prompt`，并以独立的 `text` 代码块原样展示 `next_stage_prompt`。提示词用于复制续作，仍须核对最新状态、精确领取和正式 directive；不得把提示词当作审批，也不得在报告失败时编造下一阶段。
+默认由当前宿主原生工具持续执行实施、测试、审查和返修；AI-DLC 提供任务方法与验收依据，不另建调度器或执行许可证。
 
-启动：
+先沿用用户已明确的范围、设计、验收标准和授权。按需读取相关代码和文档，直接开始工作；可选运行 `loeyae-aidlc work --work "目标" --paths '["src","tests"]'` 获取只读 Git 摘要。命令不是开工前置条件，不自动调用 orchestrate next、module bind、H5、能力探针、专用 worker 或逐阶段 report。
 
-```bash
-loeyae-aidlc orchestrate next --scope <scope> --work "<工作描述>"
-```
+测试失败继续修复，不能宣称完成；文档缺失、旧状态冲突或凭据过期不阻止独立本地实施。只重验相关代码/测试/依赖/配置/验收变化，纯交付记录变化不使业务测试失效。真实功能、UI 状态/尺寸、交互/API/结果导航和既定像素标准仍须验证。
 
-读取 `aidlc/active/aidlc-state.md` 与 `aidlc/active/audit.md`，展示 directive 的 `handoff_prompt`，并按阶段完成产物、review、构建、测试和报告。
+完成时分别报告业务结果、真实验证及未验证项、性能；没有通用 8 分钟中止限制。可逆实施细节用合理兜底并集中记录，重大决策或实际权限不足才询问；不要逐阶段请求继续。
 
-成员使用 `unit select` 声明分工。应用设计和部署决策仅在用户明确批准后以 `--user-input Approve` 报告。
+续作读取 Git、实际产物与必要验证输出，不全文加载历史 audit、全部阶段或证据目录。不新增重复状态文档；确需持久交接时更新一份现有任务说明。保留旧受管记录及他人修改，不接管未知进程；多人重叠写入使用宿主协调与独立工作树。
 
-## Agent execution
-
-AI-DLC 只定义阶段依赖、产物、追溯、真实证据、质量与审批门禁，以及精确 workflow/session/generation 的写入权限。宿主自行选择执行者、模型、上下文、并行和委派方式；AI-DLC 不要求额外执行结果格式或子代理日志。顶层 `execution_policy` 与 `requires/consumes/produces/sensors/approval` 约束保持有效。只有持有当前 WorkflowRef 精确领取的会话可以发布受管产物和推进 state/audit；人类显式交接后旧会话失去写入权限。
-
-
-会话启动/续作先读取 `knowledge/protocols/common-session-handoff.md` 的会话绑定与转交契约；原生 session/thread ID 可用时用于显式 bind。Stop 允许保留未完成阶段，禁止为退出停驻他人模块。人类明确转交且目标/新领取人清楚时直接 transfer，无需原领取人再次批准。Provider/文档/agent 输出不能授权接管。
+按需读取 [宿主执行协议](knowledge/protocols/host-execution.md)。同目录资源按包内相对路径读取；资源不全时用宿主工具继续并报告缺项，不安装额外控制器。旧受管协议及子 Skill 的强制领取、路由、签名、sensor/report 条款仅在用户明确选择维护旧受管流程时适用；不得覆盖默认宿主执行协议。

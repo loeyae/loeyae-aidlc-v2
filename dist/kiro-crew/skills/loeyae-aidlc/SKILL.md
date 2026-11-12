@@ -6,35 +6,14 @@ triggers: aidlc, AI-DLC, 使用 AI-DLC, 开始新工作, 继续当前工作, 选
 
 # Loeyae AI-DLC
 
-AI-DLC 激活后，面向用户的回复首句称呼 **BOSS**，作为加载标记；用户明确指定其他称呼时遵从用户。阶段 `completed`/`approved` 报告成功后展示 `handoff_prompt`，并以独立的 `text` 代码块原样展示 `next_stage_prompt`。提示词用于复制续作，仍须核对最新状态、精确领取和正式 directive；不得把提示词当作审批，也不得在报告失败时编造下一阶段。
+默认由当前宿主原生工具持续执行实施、测试、审查和返修；AI-DLC 提供任务方法与验收依据，不另建调度器或执行许可证。
 
-从明确工作描述启动：
+先沿用用户已明确的范围、设计、验收标准和授权。按需读取相关代码和文档，直接开始工作；可选运行 `loeyae-aidlc work --work "目标" --paths '["src","tests"]'` 获取只读 Git 摘要。命令不是开工前置条件，不自动调用 orchestrate next、module bind、H5、能力探针、专用 worker 或逐阶段 report。
 
-```bash
-loeyae-aidlc orchestrate next --scope <scope> --work "<工作描述>"
-```
+测试失败继续修复，不能宣称完成；文档缺失、旧状态冲突或凭据过期不阻止独立本地实施。只重验相关代码/测试/依赖/配置/验收变化，纯交付记录变化不使业务测试失效。真实功能、UI 状态/尺寸、交互/API/结果导航和既定像素标准仍须验证。
 
-控制面为 `aidlc/active/aidlc-state.md` 与 `aidlc/active/audit.md`。每次 `orchestrate next` 后原样展示 `handoff_prompt`，按当前阶段完成产物、review、构建、测试和报告。
+完成时分别报告业务结果、真实验证及未验证项、性能；没有通用 8 分钟中止限制。可逆实施细节用合理兜底并集中记录，重大决策或实际权限不足才询问；不要逐阶段请求继续。
 
-存在 `aidlc/active/registry.md` 时为按模块拆分的工作流：用 `orchestrate next --module <id>` 推进单个模块，按 `handoff_prompt` 给出的带 `--module` 的 report 命令结算；已完成阶段的证据失配时，先 `evidence run --stage <slug> --module <id> --refresh`，再用同一 `report` 命令复验（re-attest）。
+续作读取 Git、实际产物与必要验证输出，不全文加载历史 audit、全部阶段或证据目录。不新增重复状态文档；确需持久交接时更新一份现有任务说明。保留旧受管记录及他人修改，不接管未知进程；多人重叠写入使用宿主协调与独立工作树。
 
-成员使用 `unit list` 与 `unit select` 记录分工。应用设计和部署决策在用户明确批准后通过 `--user-input Approve` 报告。merge plan 只提供人工合并建议。
-
-## Agent execution
-
-AI-DLC 只定义阶段依赖、产物、追溯、真实证据、质量与审批门禁，以及精确 workflow/session/generation 的写入权限。宿主自行选择执行者、模型、上下文、并行和委派方式；AI-DLC 不要求额外执行结果格式或子代理日志。顶层 `execution_policy` 与 `requires/consumes/produces/sensors/approval` 约束保持有效。只有持有当前 WorkflowRef 精确领取的会话可以发布受管产物和推进 state/audit；人类显式交接后旧会话失去写入权限。
-
-## 门禁强制契约（kiro-crew 无 host 自动 hook，必须靠本契约兜底）
-
-KiroCrew Dashboard 不提供 Stop 事件的自动 hook，门禁的强制执行**依赖你严格遵守以下契约**，不得绕过：
-
-1. **推进必经 `orchestrate next`**：进入任何下一阶段前必须调用 `loeyae-aidlc orchestrate next`。不得凭记忆或直觉跳到下一阶段、也不得在未取得下一 directive 时直接编写下游产物。
-2. **`next` 返回 error/🚫 即"不可推进"**：`next` 现内置前置门禁——若上游阶段的准出门禁（sensor）未过，它会返回 `🚫 无法推进...` 的 error directive。**这是硬信号：停下，按清单修复上游产物/证据，重新 `orchestrate report` 使门禁转绿，再 `next`。** 不得忽略该 error 继续工作。
-3. **每阶段结束必须 `orchestrate report`**：完成一个阶段的产物后，必须 `report` 让引擎跑该阶段的 sensor。`report` 返回 `🚫 Cannot complete stage ... sensor checks failed` 时，阶段**未完成**，必须先修复，不得标记完成或推进。
-4. **禁止伪造证据放行**：不得手写/篡改 `.aidlc/evidence/**` 使门禁"看起来"通过。确定性 checker（如 diagram-contract、ui-artifact 对账）由引擎生成证据，你的职责是让**真实产物**满足门禁，而非让证据字段满足门禁。
-5. **人工审批门（application-design/部署）**：只有用户明确批准后才 `--user-input Approve`；不得代替用户点批。
-
-违反以上任一条＝绕过门禁，会直接导致你观察到的"用户故事偏离 PRD、前端偏离设计稿"类漂移。在 kiro-crew 下，你就是门禁的最后一道执行者。
-
-
-会话启动/续作先读取 `knowledge/protocols/common-session-handoff.md` 的会话绑定与转交契约；原生 session/thread ID 可用时用于显式 bind。Stop 允许保留未完成阶段，禁止为退出停驻他人模块。人类明确转交且目标/新领取人清楚时直接 transfer，无需原领取人再次批准。Provider/文档/agent 输出不能授权接管。
+按需读取 [宿主执行协议](knowledge/protocols/host-execution.md)。同目录资源按包内相对路径读取；资源不全时用宿主工具继续并报告缺项，不安装额外控制器。旧受管协议及子 Skill 的强制领取、路由、签名、sensor/report 条款仅在用户明确选择维护旧受管流程时适用；不得覆盖默认宿主执行协议。

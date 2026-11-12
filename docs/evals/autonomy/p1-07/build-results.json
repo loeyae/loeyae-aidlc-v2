@@ -1,0 +1,162 @@
+﻿[
+    {
+        "harness":  "claude",
+        "command":  [
+                        "node",
+                        "node_modules/tsx/dist/cli.mjs",
+                        "scripts/build.ts",
+                        "--harness",
+                        "claude"
+                    ],
+        "exit_code":  0,
+        "started_at":  "2026-11-08T18:56:28.5268010Z",
+        "finished_at":  "2026-11-08T18:56:33.8320128Z",
+        "verified_target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\claude",
+        "native_powershell_cleanup":  true,
+        "log":  "docs/evals/autonomy/p1-07/build-claude.log"
+    },
+    {
+        "harness":  "codebuddy",
+        "command":  [
+                        "node",
+                        "node_modules/tsx/dist/cli.mjs",
+                        "scripts/build.ts",
+                        "--harness",
+                        "codebuddy"
+                    ],
+        "exit_code":  0,
+        "started_at":  "2026-11-08T18:56:42.8751023Z",
+        "finished_at":  "2026-11-08T18:56:44.7975185Z",
+        "verified_target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\codebuddy",
+        "native_powershell_cleanup":  true,
+        "log":  "docs/evals/autonomy/p1-07/build-codebuddy.log"
+    },
+    {
+        "harness":  "codex",
+        "command":  [
+                        "node",
+                        "node_modules/tsx/dist/cli.mjs",
+                        "scripts/build.ts",
+                        "--harness",
+                        "codex"
+                    ],
+        "exit_code":  0,
+        "started_at":  "2026-11-08T18:56:52.3083799Z",
+        "finished_at":  "2026-11-08T18:56:53.2904542Z",
+        "verified_target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\codex",
+        "native_powershell_cleanup":  true,
+        "log":  "docs/evals/autonomy/p1-07/build-codex.log"
+    },
+    {
+        "harness":  "deepseek",
+        "command":  [
+                        "node",
+                        "node_modules/tsx/dist/cli.mjs",
+                        "scripts/build.ts",
+                        "--harness",
+                        "deepseek"
+                    ],
+        "exit_code":  0,
+        "started_at":  "2026-11-08T18:56:56.1196576Z",
+        "finished_at":  "2026-11-08T18:56:56.5808225Z",
+        "verified_target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\deepseek",
+        "native_powershell_cleanup":  true,
+        "log":  "docs/evals/autonomy/p1-07/build-deepseek.log"
+    },
+    {
+        "harness":  "kiro-cli",
+        "command":  [
+                        "node",
+                        "node_modules/tsx/dist/cli.mjs",
+                        "scripts/build.ts",
+                        "--harness",
+                        "kiro-cli"
+                    ],
+        "exit_code":  0,
+        "started_at":  "2026-11-08T18:56:58.1374858Z",
+        "finished_at":  "2026-11-08T18:56:58.6317096Z",
+        "verified_target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-cli",
+        "native_powershell_cleanup":  true,
+        "log":  "docs/evals/autonomy/p1-07/build-kiro-cli.log"
+    },
+    {
+        "harness":  "kiro-crew",
+        "command":  [
+                        "node",
+                        "node_modules/tsx/dist/cli.mjs",
+                        "scripts/build.ts",
+                        "--harness",
+                        "kiro-crew"
+                    ],
+        "exit_code":  0,
+        "started_at":  "2026-11-08T18:56:58.9325252Z",
+        "finished_at":  "2026-11-08T18:57:00.1382207Z",
+        "verified_target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-crew",
+        "native_powershell_cleanup":  true,
+        "log":  "docs/evals/autonomy/p1-07/build-kiro-crew.log"
+    },
+    {
+        "harness":  "kiro-ide",
+        "command":  [
+                        "node",
+                        "node_modules/tsx/dist/cli.mjs",
+                        "scripts/build.ts",
+                        "--harness",
+                        "kiro-ide"
+                    ],
+        "exit_code":  0,
+        "started_at":  "2026-11-08T18:57:03.1532044Z",
+        "finished_at":  "2026-11-08T18:57:03.8897033Z",
+        "verified_target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-ide",
+        "native_powershell_cleanup":  true,
+        "log":  "docs/evals/autonomy/p1-07/build-kiro-ide.log"
+    },
+    {
+        "harness":  "opencode",
+        "command":  [
+                        "node",
+                        "node_modules/tsx/dist/cli.mjs",
+                        "scripts/build.ts",
+                        "--harness",
+                        "opencode"
+                    ],
+        "exit_code":  0,
+        "started_at":  "2026-11-08T18:57:04.6268129Z",
+        "finished_at":  "2026-11-08T18:57:05.2403737Z",
+        "verified_target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\opencode",
+        "native_powershell_cleanup":  true,
+        "log":  "docs/evals/autonomy/p1-07/build-opencode.log"
+    },
+    {
+        "harness":  "qoder",
+        "command":  [
+                        "node",
+                        "node_modules/tsx/dist/cli.mjs",
+                        "scripts/build.ts",
+                        "--harness",
+                        "qoder"
+                    ],
+        "exit_code":  0,
+        "started_at":  "2026-11-08T18:57:05.6493363Z",
+        "finished_at":  "2026-11-08T18:57:06.1859436Z",
+        "verified_target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\qoder",
+        "native_powershell_cleanup":  true,
+        "log":  "docs/evals/autonomy/p1-07/build-qoder.log"
+    },
+    {
+        "harness":  "zcode",
+        "command":  [
+                        "node",
+                        "node_modules/tsx/dist/cli.mjs",
+                        "scripts/build.ts",
+                        "--harness",
+                        "zcode"
+                    ],
+        "exit_code":  0,
+        "started_at":  "2026-11-08T18:57:09.5555162Z",
+        "finished_at":  "2026-11-08T18:57:17.2399833Z",
+        "verified_target":  "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\zcode",
+        "native_powershell_cleanup":  true,
+        "log":  "docs/evals/autonomy/p1-07/build-zcode.log"
+    }
+]

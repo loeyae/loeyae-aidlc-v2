@@ -1,0 +1,125 @@
+{
+  "prepared_at": "2026-11-12T06:52:13.852Z",
+  "executor": "current Codex desktop native tools",
+  "fresh_model_context": false,
+  "source_cli": "E:/Work/repo/node/node_modules/loeyae-aidlc/bin/cli.js",
+  "installed_protocol_sha256": "b33cc515a58873578874699a1a0d46ffb6e964e1a00095665426bb4e0b964a4c",
+  "pilots": [
+    {
+      "name": "orders",
+      "root": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-orders-20261112",
+      "inputs": [
+        {
+          "path": "pilot/oracle.cjs",
+          "sha256": "1caeaa749a3ec27499f205157f7eca02f132e2cf0abd0ca0bd184a276e1d9dad"
+        },
+        {
+          "path": "pilot/server.cjs",
+          "sha256": "627d9214392f1b7cbf919bcabf0ed87a4c69a67fd512ca048d8b2b3a2a7aff8b"
+        },
+        {
+          "path": "pilot/spec.md",
+          "sha256": "8854501939f7e3d56aa1050373c83dbb9ced6708019dce74e76caa66a3566a6c"
+        }
+      ]
+    },
+    {
+      "name": "publish",
+      "root": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-publish-20261112",
+      "inputs": [
+        {
+          "path": "pilot/full-api.cjs",
+          "sha256": "86e9c1b74d6adfed2f6a0adeb40d5f6d5616797424c2ea028a11f5bc3d4660b8"
+        },
+        {
+          "path": "pilot/host.json",
+          "sha256": "8e584a994951d053113afb0410dd6d3a186d8599e534984a6d4e8ad55be94d71"
+        },
+        {
+          "path": "pilot/observation-plan.json",
+          "sha256": "ed55c608e95be13a56539cf2b9bcbece704196a0f6d73b8bd43fce6ea586a526"
+        },
+        {
+          "path": "pilot/oracle.cjs",
+          "sha256": "a9fe80e0e804cb83399d279bcc62d646c79a12a8bf0afc4ba8cfe589c61c4be5"
+        },
+        {
+          "path": "pilot/server.cjs",
+          "sha256": "627d9214392f1b7cbf919bcabf0ed87a4c69a67fd512ca048d8b2b3a2a7aff8b"
+        },
+        {
+          "path": "pilot/spec.md",
+          "sha256": "dc482247c468e81cbcfd1a988c2478ccb40997171c61b4a833a0d9a554d32bc5"
+        },
+        {
+          "path": "pilot/test-support.cjs",
+          "sha256": "16b6ff70e57e354d5b427b21e7575b274ff2580bd184b2777c2b616ad06f1053"
+        },
+        {
+          "path": "design/draft-390.html",
+          "sha256": "6f290d39ba90aa608d859fd2d509c16882a3c7438e6fcdb9f7d6905d2d00f1b0"
+        },
+        {
+          "path": "design/draft-390.png",
+          "sha256": "f78c3908a73d417382ffb8e297c7f3d24ddf491cbedf32cff42381e6e91e2dbd"
+        },
+        {
+          "path": "design/draft-800.html",
+          "sha256": "6f290d39ba90aa608d859fd2d509c16882a3c7438e6fcdb9f7d6905d2d00f1b0"
+        },
+        {
+          "path": "design/draft-800.png",
+          "sha256": "8e818c9f32fca620485be89c75c1b58262dfc7cb0a125f2fa19a93cfc61f76eb"
+        },
+        {
+          "path": "design/error-390.html",
+          "sha256": "9ff1d8a7e9e08215c8713e0ed8efeb7202ad48a07e94e5a4b069d82198049139"
+        },
+        {
+          "path": "design/error-390.png",
+          "sha256": "2afb7ac01289ab4c6fa600e81b95331e70af60210078cc814de13fe66def5e9f"
+        },
+        {
+          "path": "design/error-800.html",
+          "sha256": "9ff1d8a7e9e08215c8713e0ed8efeb7202ad48a07e94e5a4b069d82198049139"
+        },
+        {
+          "path": "design/error-800.png",
+          "sha256": "4de1aa49d6b2484a4bb179be68e31ae0f0310bd04de7a3fd41c70a1f5226d1ed"
+        },
+        {
+          "path": "design/published-390.html",
+          "sha256": "1f0b24acad08c26b47bee0ed1d56ba5a9b940412d930c885fd831b282447c7c1"
+        },
+        {
+          "path": "design/published-390.png",
+          "sha256": "6b4906f64343940539924feeadf4e45d3edab470289552acf6a59b2b7b731162"
+        },
+        {
+          "path": "design/published-800.html",
+          "sha256": "1f0b24acad08c26b47bee0ed1d56ba5a9b940412d930c885fd831b282447c7c1"
+        },
+        {
+          "path": "design/published-800.png",
+          "sha256": "56bc927e8f6346b0e8963562a810e4eddcc5e8fd18bc03982bbc74f9e35ece37"
+        },
+        {
+          "path": "design/ready-390.html",
+          "sha256": "a70bdedf80affd3093544ea7ccc3990c4d46c4cd35b3778549df4f8cd02b7a6a"
+        },
+        {
+          "path": "design/ready-390.png",
+          "sha256": "64227f02d0559507b6f538fd5529c774d581ba38c46ee0e1a8c7afcbba6757df"
+        },
+        {
+          "path": "design/ready-800.html",
+          "sha256": "a70bdedf80affd3093544ea7ccc3990c4d46c4cd35b3778549df4f8cd02b7a6a"
+        },
+        {
+          "path": "design/ready-800.png",
+          "sha256": "30c22ae244f65e3257ba789a2e57b0929fd800a5697a16e75dc24490899be311"
+        }
+      ]
+    }
+  ]
+}

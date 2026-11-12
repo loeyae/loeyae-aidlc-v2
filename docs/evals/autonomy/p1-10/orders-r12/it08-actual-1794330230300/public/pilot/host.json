@@ -1,0 +1,55 @@
+{
+  "schema": "aidlc.codex-host/v1",
+  "codex_entrypoint": "E:/Work/repo/node/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe",
+  "core_cli": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\bin\\cli.ts",
+  "commands": [
+    {
+      "id": "frozen-oracle",
+      "argv": [
+        "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+        "pilot/oracle.cjs"
+      ],
+      "operation": "validation-execute",
+      "timeout_ms": 10000,
+      "input_paths": [
+        "pilot/oracle.cjs"
+      ],
+      "write_paths": []
+    },
+    {
+      "id": "source-refs",
+      "argv": [
+        "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+        "pilot/source-refs.cjs"
+      ],
+      "operation": "validation-execute",
+      "timeout_ms": 5000,
+      "input_paths": [
+        "pilot/source-refs.cjs"
+      ],
+      "write_paths": []
+    },
+    {
+      "id": "candidate",
+      "argv": [
+        "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+        "pilot/candidate.cjs"
+      ],
+      "operation": "candidate-commit",
+      "timeout_ms": 30000,
+      "input_paths": [
+        "pilot/candidate.cjs"
+      ],
+      "write_paths": [
+        {
+          "path": ".runtime",
+          "operation": "environment-write"
+        }
+      ]
+    }
+  ],
+  "native_config_digest": "9d300415673c3fcf9c7ca3db7d7cd9635756caa15c5c3e44d899ae6079ff289e",
+  "admission_plan": "pilot/admission-plan.json",
+  "observation_plan": "pilot/observation-plan.json",
+  "candidate_command": "candidate"
+}

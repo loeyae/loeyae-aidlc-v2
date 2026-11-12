@@ -11,6 +11,8 @@
  * the overflow surfaces as its own `kind: "error"` at the top of the process tree.
  */
 import { spawnSync, type SpawnSyncOptions, type SpawnSyncOptionsWithBufferEncoding, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from "child_process";
+import {createRequire} from 'node:module';
+const resourceFacts=createRequire(import.meta.url)('./aidlc-owned-resource.cjs');
 
 /** Default output limit of a buffered child process (stdout and stderr each). */
 export const DEFAULT_SUBPROCESS_MAX_BUFFER = 64 * 1024 * 1024;
@@ -18,6 +20,11 @@ export const DEFAULT_SUBPROCESS_MAX_BUFFER = 64 * 1024 * 1024;
 export const SUBPROCESS_MAX_BUFFER_ENV = "AIDLC_SUBPROCESS_MAX_BUFFER";
 /** Marker of an overflow message; also how a parent recognizes an overflowed child. */
 export const SUBPROCESS_OVERFLOW_MARKER = "AIDLC_SUBPROCESS_ENOBUFS";
+
+/** Business tests/observers receive execution inputs, never the Core publication credentials. */
+export function businessCommandEnvironment(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(base).filter(([key]) => !/^AIDLC_(SESSION_BINDING|COORDINATOR_BINDING|EXECUTION_GRANT|AUTONOMY_HOST|RESOURCE_OWNER)$/.test(key.toUpperCase())));
+}
 
 const PROPAGATED = new RegExp(`${SUBPROCESS_OVERFLOW_MARKER}: [^\\n]*?argv=(\\[[^\\n]*?\\]) maxBuffer=(\\d+)`);
 
@@ -84,6 +91,7 @@ export function runSync(command: string, args: readonly string[], options: Spawn
 export function runSync(command: string, args: readonly string[], options: SpawnSyncOptions, behaviour: { propagate?: boolean } = {}): SpawnSyncReturns<string | Buffer> {
   const maxBuffer = subprocessMaxBuffer();
   const result = spawnSync(command, args, { ...options, maxBuffer });
+  if(behaviour.propagate!==false){const facts=resourceFacts.parseResourceFailure(String(result.stderr??''),true);if(facts)resourceFacts.announceResourceFailure(facts);}
   if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOBUFS") {
     raise(new SubprocessOverflowError(subprocessHead([command, ...args]), maxBuffer));
   }

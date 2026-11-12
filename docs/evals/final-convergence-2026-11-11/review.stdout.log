@@ -1,0 +1,2 @@
+PASS audit review: independent axes, missing/conflicting results, real paths and changed-file coverage
+PASS parallel report selects the exact bound unit among same-stage claims

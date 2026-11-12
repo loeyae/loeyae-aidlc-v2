@@ -1,0 +1,18 @@
+{
+  "kind": "exact-test-side-effect-rollback",
+  "source_test": "tests/test_ui_generation_governance.ts missing-baseline CLI branch accidentally called fixtureEnvironment(repository)",
+  "fixture_guard_added": true,
+  "original_hashes": {
+    "state": "5e08e34d2e434edf0ab7d2667377080dc0caf06dd8dcfa178b877211c5c93d0f",
+    "audit": "1fa99dba9594b7ee1e2e7ad0d8e72c9b81b87e74f9577879795937b0af998686"
+  },
+  "contaminated_hashes": {
+    "state": "96cdaa1e26b86f1ca93958ada3f883b72861f74354d78c512757f9fb2d1f400a",
+    "audit": "3f678a06312ebce358515d64ed33c01f523231db2f835f49e3a58af168ae869b"
+  },
+  "exact_original_bytes_restored": true,
+  "local_raw_backup": "D:\\Users\\loeye\\AppData\\Local\\Temp\\aidlc-root-fixture-incident-IXoGbn",
+  "workflow_authority_reconstructed": false,
+  "actual_pilot_state_modified": false,
+  "at": "2026-11-09T05:28:28.311Z"
+}

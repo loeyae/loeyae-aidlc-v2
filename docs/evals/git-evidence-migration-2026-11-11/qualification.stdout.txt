@@ -1,0 +1,1 @@
+PASS signed capability requirements, exact HostRef/config and revocation; fixture evidence only

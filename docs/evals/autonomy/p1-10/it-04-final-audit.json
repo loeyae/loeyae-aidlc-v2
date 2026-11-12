@@ -1,0 +1,10 @@
+{
+  "kind": "it-04-final-evidence-audit",
+  "source_files": 715,
+  "source_digest": "1ed8b114c1f742c57e64a19c492ea59044ca1cb44b3fafa5d1894994c3ddaa40",
+  "archive_files_verified": 281,
+  "history_hashes_verified": 590,
+  "root_authority_absent": true,
+  "hold": true,
+  "business_verified": false
+}

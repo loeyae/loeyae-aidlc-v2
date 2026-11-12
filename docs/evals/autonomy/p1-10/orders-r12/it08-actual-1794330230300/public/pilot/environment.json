@@ -1,0 +1,5 @@
+{
+  "isolated": true,
+  "owner": "internal-pilot",
+  "purpose": "P1-10 actual local service; not a simulated remote dependency"
+}

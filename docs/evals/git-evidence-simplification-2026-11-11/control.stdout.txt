@@ -1,0 +1,11 @@
+PASS public reads require no Core round trip; private paths and deadline remain enforced
+PASS command has two control requests instead of three; live post-check remains
+PASS mismatched binding preparation starts no command
+PASS mismatched grant preparation starts no command
+PASS mismatched checks preparation starts no command
+PASS mismatched expiry preparation starts no command
+PASS mismatched stale-time preparation starts no command
+PASS revocation after the actual command refuses the result without a cached allow
+PASS model host preparation and metadata commands are refused before Core
+PASS actual Core advertises the API and checks each original permission without writes
+Control preparation: 10 short boundaries passed; no real business/model proof

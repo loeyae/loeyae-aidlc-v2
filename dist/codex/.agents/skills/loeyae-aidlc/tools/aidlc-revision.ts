@@ -195,7 +195,7 @@ export function currentHead(projectRoot: string): string {
  * of that repository, keyed by repository-relative paths. Files of the nested
  * repository whose project-relative path is in `scoped` also feed `scopeDigest`.
  */
-function nestedRevision(projectRoot: string, key: string, scope?: { exclude: (path: string) => boolean; digest: Hash }): RepoRevision {
+function nestedRevision(projectRoot: string, key: string, scope?: { exclude: (path: string) => boolean; digest: Hash }, scopedOnly = false): RepoRevision {
   const progress = revisionProgress(`nested repository ${key}`);
   progress("waiting for git revision and status");
   const repoRoot = join(projectRoot, key);
@@ -210,6 +210,10 @@ function nestedRevision(projectRoot: string, key: string, scope?: { exclude: (pa
   let count = 0;
   for (const path of files.sort()) {
     const projectPath = `${key}/${path}`;
+    if (scopedOnly) {
+      if (scope && !scope.exclude(projectPath)) digestFile(repoRoot, path, projectPath, [scope.digest]);
+      continue;
+    }
     const targets = scope && !scope.exclude(projectPath) ? [digest, scope.digest] : [digest];
     if (targets.length === 1) {
       digestFile(repoRoot, path, path, targets);
@@ -220,7 +224,7 @@ function nestedRevision(projectRoot: string, key: string, scope?: { exclude: (pa
     if (++count % 250 === 0) progress(`hashed ${count}/${files.length} files`, true);
   }
   progress(`completed ${count} files`);
-  return { commit: head, dirty, worktree_digest: digest.digest("hex") };
+  return { commit: head, dirty, worktree_digest: scopedOnly ? null : digest.digest("hex") };
 }
 
 /**
@@ -230,25 +234,32 @@ function nestedRevision(projectRoot: string, key: string, scope?: { exclude: (pa
  * the 4.8.1 structure and algorithm, byte for byte; re-checks of evidence without
  * `source_revision.repos` always call it that way.
  */
-export function readSourceRevision(projectRoot: string, scope?: DigestScope, nested?: readonly string[]): SourceRevision {
+export function readSourceRevision(projectRoot: string, scope?: DigestScope, nested?: readonly string[], scopedOnly = false): SourceRevision {
   const scoped = scope && scope.label !== "worktree" ? scope : undefined;
+  scopedOnly = scopedOnly && !!scoped;
   const root = realpathSync(resolve(projectRoot));
-  const key = cacheKey(root, scoped, nested);
+  const key = cacheKey(root, scoped, nested) + (scopedOnly ? ":scope-only" : ":full");
   revisionStats.calls++;
   const context = revisionContexts.getStore();
   if (context?.active) {
     const cached = context.cache.get(key);
     if (cached) return structuredClone(cached);
-    const computed = computeSourceRevision(projectRoot, scoped, nested);
+    const computed = computeSourceRevision(projectRoot, scoped, nested, scopedOnly);
     revisionStats.computations++;
     context.cache.set(key, computed);
     return structuredClone(computed);
   }
   revisionStats.computations++;
-  return computeSourceRevision(projectRoot, scoped, nested);
+  return computeSourceRevision(projectRoot, scoped, nested, scopedOnly);
 }
 
-function computeSourceRevision(projectRoot: string, scoped: DigestScope | undefined, nested: readonly string[] | undefined): SourceRevision {
+/** For comparison only: intentionally omits whole-worktree digests. Producers and
+ * final candidate barriers keep readSourceRevision's complete provenance. */
+export function readScopedSourceRevision(projectRoot: string, scope: DigestScope, nested?: readonly string[]): SourceRevision {
+  return readSourceRevision(projectRoot, scope, nested, true);
+}
+
+function computeSourceRevision(projectRoot: string, scoped: DigestScope | undefined, nested: readonly string[] | undefined, scopedOnly = false): SourceRevision {
   const root = realpathSync(resolve(projectRoot));
   const progress = revisionProgress(`main repository ${root}`);
   progress(`waiting for git revision and status; scope=${scoped?.label || "worktree"}`);
@@ -280,6 +291,10 @@ function computeSourceRevision(projectRoot: string, scoped: DigestScope | undefi
     if (++count % 250 === 0) progress(`hashed ${count}/${files.length} files`, true);
     const inScope = Boolean(scopeDigest && !scoped!.exclude(path));
     const projection = scoped?.projectedInputs?.[path];
+    if (scopedOnly) {
+      if (inScope && projection === undefined && !(nestedKeys.length > 0 && inNested(path))) digestFile(root, path, path, [scopeDigest!]);
+      continue;
+    }
     if (inScope && projection !== undefined) {
       digestFile(root, path, path, [digest]);
       continue;
@@ -291,12 +306,12 @@ function computeSourceRevision(projectRoot: string, scoped: DigestScope | undefi
   }
   const repos: Record<string, RepoRevision> = {};
   progress(`main scan complete: ${count} files`);
-  for (const key of nestedKeys) repos[key] = nestedRevision(root, key, scoped ? { exclude: scoped.exclude, digest: scopeDigest! } : undefined);
+  for (const key of nestedKeys) repos[key] = nestedRevision(root, key, scoped ? { exclude: scoped.exclude, digest: scopeDigest! } : undefined, scopedOnly);
   progress("source digest complete");
   return {
     commit: revision.stdout.trim(),
     dirty,
-    worktree_digest: digest.digest("hex"),
+    worktree_digest: scopedOnly ? null : digest.digest("hex"),
     ...(scoped ? { scope: scoped.label, scope_digest: scopeDigest!.digest("hex") } : {}),
     ...(nestedKeys.length > 0 ? { repos } : {}),
   };
@@ -315,6 +330,49 @@ function revisionProgress(label: string): (message: string, throttle?: boolean) 
 
 /** SHA-1 (40) or SHA-256 (64) object id; anything else (refs, options, "unavailable") is not a commit id. */
 export const COMMIT_ID_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
+/** Disposable content view. Never reads workflow state, binds a session or infers approval. */
+export function gitChangeView(projectRoot: string, from?: string, paths: string[] = []) {
+  const root = realpathSync(projectRoot);
+  if (from !== undefined && !COMMIT_ID_PATTERN.test(from)) throw Error("GIT_BASELINE_REQUIRES_COMMIT_ID");
+  if (!Array.isArray(paths) || paths.length > 128 || paths.some(p => typeof p !== "string" || !p || p.includes("\\") || p.startsWith("/") || /[\x00-\x1f:]/.test(p) || p.split("/").some(c => !c || c === "." || c === ".." || c.toLowerCase() === ".git"))) throw Error("GIT_CHANGE_PATH_INVALID");
+  const git = (args: string[]): string => {
+    const r = runSync("git", args, { cwd: root, encoding: "utf8", shell: false });
+    if (r.status !== 0 || typeof r.stdout !== "string") throw Error("GIT_CHANGE_READ_FAILED");
+    return r.stdout;
+  };
+  if (realpathSync(git(["rev-parse", "--show-toplevel"]).trim()) !== root) throw Error("GIT_CHANGE_REQUIRES_REPOSITORY_ROOT");
+  const head = git(["rev-parse", "--verify", "HEAD^{commit}"]).trim();
+  const baseline = from || head;
+  git(["cat-file", "-e", `${baseline}^{commit}`]);
+  const selected = [...new Set(paths)].sort();
+  const specs = selected.map(p => `:(literal)${p}`);
+  const changed = git(["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", baseline, "--", ...specs]).split("\0").filter(Boolean);
+  const untracked = git(["ls-files", "--others", "--exclude-standard", "-z", "--", ...specs]).split("\0").filter(Boolean);
+  const conflicts = git(["ls-files", "--unmerged", "-z", "--", ...specs]).split("\0").filter(Boolean).map(row => row.slice(row.indexOf("\t") + 1));
+  const files = [...new Set([...changed, ...untracked])].sort().map(p => {
+    // Git may return paths through a nested symlink; never follow an ancestor.
+    const segments = p.split("/");
+    let cursor = root;
+    for (const segment of segments.slice(0, -1)) {
+      cursor = join(cursor, segment);
+      if (existsSync(cursor) && lstatSync(cursor).isSymbolicLink()) throw Error("GIT_CHANGE_SYMLINK_ANCESTOR");
+    }
+    const absolute = join(root, p);
+    let kind: string = "deleted", content_digest: string | null = null;
+    // lstat also sees a dangling symlink; existsSync alone does not.
+    try {
+      const stat = lstatSync(absolute);
+      kind = stat.isSymbolicLink() ? "symlink" : stat.isFile() ? "file" : "directory";
+      if (kind !== "directory") content_digest = createHash("sha256").update(kind === "symlink" ? readlinkSync(absolute) : readFileSync(absolute)).digest("hex");
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    return { path: p, kind, untracked: untracked.includes(p), content_digest };
+  });
+  return { schema: "aidlc.git-change-view/v1", baseline_commit: baseline, head_commit: head, paths: selected, files,
+    conflicts: [...new Set(conflicts)].sort(), requires_nested_inspection: files.filter(f => f.kind === "directory").map(f => f.path),
+    change_digest: createHash("sha256").update(JSON.stringify({ baseline, selected, files })).digest("hex"),
+    completion: "not_evaluated", approval: "not_inferred", read_only: true };
+}
 
 /**
  * Errors when `recorded` is not the current HEAD or one of its ancestors. Used where the

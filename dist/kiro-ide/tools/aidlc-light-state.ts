@@ -1,17 +1,22 @@
 import { randomUUID, createHash } from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { realpathSync } from "fs";
 import { readdirSync } from "fs";
 import { join, relative } from "path";
 import { hostname } from "os";
-import { COMMIT_ID_PATTERN } from "./aidlc-revision";
+import { COMMIT_ID_PATTERN, currentHead } from "./aidlc-revision";
+import { workflowFactPaths, factStorageActive, loadFactState, persistFactState, readWorkflowFacts } from "./aidlc-workflow-facts";
 import {
   assertExecutionProfile,
   type ExecutionProfile,
   type ExecutionProfileEvent,
 } from "./aidlc-execution-profile";
+import { assertAutonomySnapshot, assertAutonomyBatchResultRef, type AutonomyBatchResultRef, type AutonomyBatchSnapshot } from "./aidlc-autonomy-state";
+import { assertExecutionGrantRef, checkExecutionGrant, readIssuedGrant, readBatchResult, validateGrantInputs, withGrantControl, type ExecutionGrantRef, type GrantOperation } from "./aidlc-grant-store";
+import { canonicalAutonomyJson } from "./aidlc-autonomy-files";
+import { assertAutonomyDependencyAccess } from "./aidlc-autonomy-dependencies";
 
 export interface HistoryEntry {
   stage: string;
@@ -21,6 +26,7 @@ export interface HistoryEntry {
   module_id?: string;
   unit_id?: string;
   user_input?: string;
+  operation_ref?: string;
 }
 
 export interface TeamLightUnitSelection {
@@ -149,6 +155,12 @@ export interface WorkflowState {
    */
   execution_profile?: ExecutionProfile;
   quality_gates_version?: string;
+  /** Explicitly adopted scope only; absence preserves the legacy workflow. */
+  autonomy_contract_version?: "1";
+  autonomy_batch?: AutonomyBatchSnapshot;
+  autonomy_batch_result_ref?: AutonomyBatchResultRef;
+  execution_grant_version?: "1";
+  execution_grant_ref?: ExecutionGrantRef;
   document_slices_version?: string;
   revision: number;
   scope: string;
@@ -237,12 +249,16 @@ function table(markdown: string, title: string): string[][] {
 
 function parseHistory(markdown: string): HistoryEntry[] {
   return table(markdown, "History").map((cells, index) => {
-    if (cells.length !== 7) throw new Error(`History row ${index + 1} is malformed`);
+    if (cells.length !== 7 && cells.length !== 8) throw new Error(`History row ${index + 1} is malformed`);
     const entry: HistoryEntry = { stage: text(cells[0], "history stage"), result: text(cells[4], "history result"), timestamp: iso(cells[5], "history timestamp") };
     if (cells[1] !== "-") entry.instance_id = text(cells[1], "history instance");
     if (cells[2] !== "-") entry.module_id = text(cells[2], "history module");
     if (cells[3] !== "-") entry.unit_id = text(cells[3], "history unit");
     if (cells[6] !== "-") entry.user_input = clean(cells[6]);
+    if(cells.length===8&&cells[7]!=="-"){
+      if(!/^[a-f0-9]{64}$/.test(cells[7]))throw Error('invalid operation receipt');
+      entry.operation_ref=cells[7];
+    }
     return entry;
   });
 }
@@ -607,6 +623,49 @@ export function createInitialState(scope: string, version = ENGINE_VERSION, work
   };
 }
 
+function autonomyFields(markdown: string): Pick<WorkflowState, "autonomy_contract_version" | "autonomy_batch"> {
+  const markers = [...markdown.matchAll(/^- Autonomy Contract Version:\s*([^\r\n]*)/gm)];
+  if (!markers.length) return {}; // A source document alone never opts a legacy workflow in.
+  if (markers.length !== 1 || markers[0][1].trim() !== "1") throw new Error("AUTONOMY_SCHEMA_INVALID: unsupported or duplicate autonomy version");
+  const bodies = [...markdown.matchAll(/^## Autonomy Batch\r?\n([\s\S]*?)(?=^## |$(?![\s\S]))/gm)];
+  if (bodies.length !== 1) throw new Error("AUTONOMY_SCHEMA_INVALID: adopted workflow requires one batch snapshot");
+  const match = /^\s*```json\r?\n([\s\S]*?)\r?\n```\s*$/.exec(bodies[0][1]);
+  if (!match) throw new Error("AUTONOMY_SCHEMA_INVALID: malformed batch snapshot");
+  const snapshot: unknown = JSON.parse(match[1]);
+  assertAutonomySnapshot(snapshot);
+  return { autonomy_contract_version: "1", autonomy_batch: snapshot };
+}
+
+function assertAutonomyFields(state: WorkflowState): void {
+  if (state.autonomy_contract_version === undefined && state.autonomy_batch === undefined) return;
+  if (state.autonomy_contract_version !== "1" || state.workflow_kind === "module" || state.workflow_kind === "integration") {
+    throw new Error("AUTONOMY_SCHEMA_INVALID: autonomy adoption belongs to the global workflow, version 1");
+  }
+  assertAutonomySnapshot(state.autonomy_batch);
+}
+
+function executionGrantFields(markdown: string): Pick<WorkflowState, "execution_grant_version" | "execution_grant_ref"> {
+  const markers = [...markdown.matchAll(/^- Execution Grant Version:\s*([^\r\n]*)/gm)];
+  if (!markers.length) return {};
+  if (markers.length !== 1 || markers[0][1].trim() !== "1") throw new Error("EXECUTION_GRANT_INVALID: unsupported/duplicate managed grant version");
+  const bodies = [...markdown.matchAll(/^## Execution Grant\r?\n([\s\S]*?)(?=^## |$(?![\s\S]))/gm)];
+  const match = bodies.length === 1 && /^\s*```json\r?\n([\s\S]*?)\r?\n```\s*$/.exec(bodies[0][1]);
+  if (!match) throw new Error("EXECUTION_GRANT_INVALID: one managed grant reference is required");
+  const ref: unknown = JSON.parse(match[1]); assertExecutionGrantRef(ref);
+  return { execution_grant_version: "1", execution_grant_ref: ref };
+}
+function batchResultFields(markdown:string):Pick<WorkflowState,"autonomy_batch_result_ref"> {
+  const sections=[...markdown.matchAll(/^## Autonomy Batch Result\r?\n([\s\S]*?)(?=^## |$(?![\s\S]))/gm)];
+  if(!sections.length)return {};
+  const match=sections.length===1&&/^\s*```json\r?\n([\s\S]*?)\r?\n```\s*$/.exec(sections[0][1]);
+  if(!match)throw Error("BATCH_RESULT_REF_INVALID");const ref:unknown=JSON.parse(match[1]);assertAutonomyBatchResultRef(ref);return {autonomy_batch_result_ref:ref};
+}
+function assertExecutionGrantOwnership(state: WorkflowState): void {
+  if (state.execution_grant_version === undefined && state.execution_grant_ref === undefined) return;
+  if (state.execution_grant_version !== "1" || state.autonomy_contract_version !== "1" || state.workflow_kind === "module" || state.workflow_kind === "integration") throw new Error("EXECUTION_GRANT_INVALID: managed grant belongs to an explicitly adopted global workflow");
+  assertExecutionGrantRef(state.execution_grant_ref);
+}
+
 export function parseLightWorkflowState(markdown: string): WorkflowState {
   if (!markdown.startsWith("# AI-DLC Lightweight Workflow\n")) throw new Error("state is not an AWS-style lightweight workflow Markdown document");
   const scope = scalar(markdown, "Scope");
@@ -665,7 +724,16 @@ export function parseLightWorkflowState(markdown: string): WorkflowState {
   if (executionProfile !== undefined && (kind === "module" || kind === "integration")) {
     throw new Error(`${kind} sub-workflow state must not carry Execution Profile; it belongs to the global workflow`);
   }
+  const autonomy = autonomyFields(markdown);
+  const grant = executionGrantFields(markdown);
+  assertExecutionGrantOwnership({ ...autonomy, ...grant, workflow_kind: kind || undefined } as WorkflowState);
+  if (autonomy.autonomy_contract_version && (kind === "module" || kind === "integration")) {
+    throw new Error("AUTONOMY_SCHEMA_INVALID: autonomy adoption belongs to the global workflow");
+  }
   return {
+    ...autonomy,
+    ...grant,
+    ...batchResultFields(markdown),
     format: "markdown-workflow",
     version: scalar(markdown, "Engine Version"),
     ...(scalar(markdown, "Quality Gates Version", false) ? { quality_gates_version: scalar(markdown, "Quality Gates Version", false) } : {}),
@@ -717,6 +785,8 @@ function cell(value: string | undefined): string {
 
 export function renderLightWorkflowState(state: WorkflowState): string {
   assertExecutionProfileOwnership(state);
+  assertAutonomyFields(state);
+  assertExecutionGrantOwnership(state);
   return `# AI-DLC Lightweight Workflow
 
 > AWS-style lightweight collaboration controlled by this Markdown state and its audit log.
@@ -728,7 +798,7 @@ export function renderLightWorkflowState(state: WorkflowState): string {
 - Revision: ${state.revision}
 - Engine Version: ${clean(state.version)}
 ${state.quality_gates_version ? `- Quality Gates Version: ${clean(state.quality_gates_version)}\n` : ""}
-${state.document_slices_version ? `- Document Slices Version: ${clean(state.document_slices_version)}\n` : ""}
+${state.document_slices_version ? `- Document Slices Version: ${clean(state.document_slices_version)}\n` : ""}${state.autonomy_contract_version ? `- Autonomy Contract Version: ${state.autonomy_contract_version}\n` : ""}${state.execution_grant_version ? `- Execution Grant Version: 1\n` : ""}
 ${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state.module_id ? `- Module: ${clean(state.module_id)}\n` : ""}${state.parent_workflow_id ? `- Parent Workflow ID: ${clean(state.parent_workflow_id)}\n` : ""}${state.diagram_format ? `- Diagram Format: ${state.diagram_format}\n` : ""}${state.baseline_commit !== undefined ? `- Baseline Commit: ${clean(state.baseline_commit)}\n- Baseline Source: ${clean(state.baseline_source || "")}\n` : ""}${state.baseline_history !== undefined ? `- Baseline History: ${state.baseline_history.map(clean).join(", ")}\n` : ""}${state.baseline_repos !== undefined ? `- Baseline Repos: ${clean(renderBaselineRepos(state.baseline_repos))}\n` : ""}${state.baseline_repos_history !== undefined ? `- Baseline Repos History: ${clean(renderBaselineReposHistory(state.baseline_repos_history))}\n` : ""}${renderAdoption(state)}${state.retired_lineages?.length ? `- Retired Lineages: ${state.retired_lineages.map(clean).join(", ")}\n` : ""}- Depth: ${clean(state.depth)}
 - Current Phase: ${clean(state.current_phase)}
 - Current Stage: ${cell(state.current_stage)}
@@ -738,7 +808,7 @@ ${state.workflow_kind ? `- Workflow Kind: ${state.workflow_kind}\n` : ""}${state
 - Created At: ${state.created_at}
 - Updated At: ${state.updated_at}
 
-## Selected Optional Stages
+${state.autonomy_batch ? `## Autonomy Batch\n\n\`\`\`json\n${JSON.stringify(state.autonomy_batch)}\n\`\`\`\n\n` : ""}${state.execution_grant_ref ? `## Execution Grant\n\n\`\`\`json\n${JSON.stringify(state.execution_grant_ref)}\n\`\`\`\n\n` : ""}${state.autonomy_batch_result_ref ? `## Autonomy Batch Result\n\n\`\`\`json\n${JSON.stringify(state.autonomy_batch_result_ref)}\n\`\`\`\n\n` : ""}## Selected Optional Stages
 ${bullet(state.selected_optional_stages)}
 
 ## Completed Stages
@@ -774,9 +844,9 @@ ${Object.keys(state.unit_contexts || {}).length > 0 ? `## Unit Contexts
 ${Object.entries(state.unit_contexts || {}).sort(([left], [right]) => left.localeCompare(right)).map(([unit, context]) => `| ${cell(unit)} | ${cell(context.stage)} | ${cell(context.phase)} | ${cell(context.stage_instance)} |`).join("\n")}
 
 ` : ""}## History
-| Stage | Instance | Module | Unit | Result | Timestamp | Input |
-| --- | --- | --- | --- | --- | --- | --- |
-${state.history.map((entry) => `| ${cell(entry.stage)} | ${cell(entry.instance_id)} | ${cell(entry.module_id)} | ${cell(entry.unit_id)} | ${cell(entry.result)} | ${entry.timestamp} | ${cell(entry.user_input)} |`).join("\n") || "| - | - | - | - | - | - | - |"}
+| Stage | Instance | Module | Unit | Result | Timestamp | Input |${state.history.some(e=>e.operation_ref)?' Operation |':''}
+| --- | --- | --- | --- | --- | --- | --- |${state.history.some(e=>e.operation_ref)?' --- |':''}
+${state.history.map((entry) => `| ${cell(entry.stage)} | ${cell(entry.instance_id)} | ${cell(entry.module_id)} | ${cell(entry.unit_id)} | ${cell(entry.result)} | ${entry.timestamp} | ${cell(entry.user_input)} |${state.history.some(e=>e.operation_ref)?` ${cell(entry.operation_ref)} |`:''}`).join("\n") || "| - | - | - | - | - | - | - |"}
 ${renderExecutionProfile(state.execution_profile)}
 `;
 }
@@ -901,10 +971,33 @@ function acquireLock(path: string): number {
   }
 }
 
-function appendAudit(projectRoot: string, state: WorkflowState, ref: WorkflowRef): void {
+export function stateAuditDelta(state: WorkflowState, previous?: WorkflowState): Record<string, string> {
+  const identity = (claim: TeamLightActiveInstance | undefined) => claim ? {
+    owner: claim.owner, session: claim.session_id || "legacy", generation: claim.generation || "legacy",
+    branch: claim.branch, worktree: claim.worktree, claimed_at: claim.claimed_at,
+    expires_at: claim.expires_at, heartbeat_at: claim.heartbeat_at,
+    handoff_sha256: createHash("sha256").update(claim.handoff || "").digest("hex"),
+  } : null;
+  const before = previous?.active_instances || {}, after = state.active_instances || {};
+  const changes = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort().filter(key => JSON.stringify(before[key]) !== JSON.stringify(after[key]))
+    .map(instance => ({ instance, before: identity(before[instance]), after: identity(after[instance]) }));
+  const fields: Record<string, string> = { "Audit Format": "delta-v1", "Workflow ID": state.workflow_id, Revision: String(state.revision),
+    "Current Instance": cell(state.current_stage_instance), Status: state.status };
+  if (!previous || previous.work_description !== state.work_description) fields.Work = clean(state.work_description);
+  if (changes.length) fields["Claim Changes"] = JSON.stringify(changes);
+  for (const [key, value, prior] of [
+    ["Autonomy Batch", state.autonomy_batch, previous?.autonomy_batch],
+    ["Execution Grant", state.execution_grant_ref, previous?.execution_grant_ref],
+    ["Batch Result", state.autonomy_batch_result_ref, previous?.autonomy_batch_result_ref],
+  ] as const) if (JSON.stringify(value) !== JSON.stringify(prior)) fields[key] = JSON.stringify(value || null);
+  return fields;
+}
+
+function appendAudit(projectRoot: string, state: WorkflowState, ref: WorkflowRef, previous?: WorkflowState): void {
   const path = lightAuditPath(projectRoot, ref);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  appendFileSync(path, `## ${new Date().toISOString()}\n- Event: STATE_UPDATED\n- Revision: ${state.revision}\n- Work: ${clean(state.work_description)}\n${state.workflow_kind ? `- Workflow: ${workflowRefKey(ref)}\n` : ""}- Current Instance: ${cell(state.current_stage_instance)}\n- Active Instances: ${Object.keys(state.active_instances || {}).sort().join(", ") || "-"}\n- Instance Owners: ${Object.values(state.active_instances || {}).map((claim) => `${claim.stage_instance}=${claim.owner}`).sort().join(", ") || "-"}\n- Session Claims: ${Object.values(state.active_instances || {}).map(claim => `${claim.stage_instance}=${claim.session_id || "legacy"}/${claim.generation || "legacy"};${claim.handoff || ""}`).join("; ")}\n- Status: ${state.status}\n\n`, "utf8");
+  const fields = { ...stateAuditDelta(state, previous), Workflow: workflowRefKey(ref) };
+  appendFileSync(path, `## ${new Date().toISOString()}\n- Event: STATE_UPDATED\n${Object.entries(fields).map(([key, value]) => `- ${key}: ${clean(value)}`).join("\n")}\n\n`, "utf8");
 }
 
 const initializationAudits = new Set<string>();
@@ -963,6 +1056,7 @@ export function workflowMaintenancePlan(projectRoot: string, targetModule?: stri
     }
   }
   for (const module_id of [...modules].sort()) refs.push({ kind: "module", module_id });
+  if (refs.some(ref => factStorageActive(projectRoot, lightStatePath(projectRoot, ref)))) throw Error("WORKFLOW_FACT_LEGACY_MAINTENANCE_REFUSED: use scoped claim recovery or rebuild-view; legacy Markdown rollback cannot restore fact storage");
   const paths = refs.flatMap(ref => [lightStatePath(projectRoot, ref), lightAuditPath(projectRoot, ref)]);
   paths.push(join(projectRoot, "aidlc/active/registry.md"));
   const contents = new Map<string, Buffer | undefined>();
@@ -1042,7 +1136,7 @@ export function releaseWorkflowClaim(projectRoot: string, ref: WorkflowRef, inst
     if (JSON.stringify(state.active_instances[instance]) !== JSON.stringify(expected)) throw new Error("claim changed; reread before release");
     delete state.active_instances[instance];
     persistWorkflowState(projectRoot, state, ref, { claimWrite: CLAIM_TRANSACTION, afterCommit: () => appendAuditEvent(projectRoot, ref, "SESSION_RELEASED", { Instance: instance, Owner: expected.owner, Session: expected.session_id || "legacy", Generation: expected.generation || "legacy" }) });
-  });
+  }, undefined, "session-control");
 }
 
 export function appendAuditEvent(projectRoot: string, ref: WorkflowRef, event: string, fields: Record<string, string>): void {
@@ -1058,7 +1152,7 @@ export function appendAuditEvent(projectRoot: string, ref: WorkflowRef, event: s
   const binding = sessionBinding();
   if (state && (binding || state.current_stage_instance || Object.keys(state.active_instances || {}).length)) {
     if (!binding) throw new Error("audit append requires explicit session binding");
-    withSessionPublication(projectRoot, ref, binding.stage_instance, append, binding);
+    withSessionPublication(projectRoot, ref, binding.stage_instance, append, binding, event === "SESSION_RELEASED" ? "session-control" : "workflow-write");
     return;
   }
   append();
@@ -1081,22 +1175,65 @@ export function releaseExpiredModuleClaims(state: WorkflowState, now = Date.now(
 // Callers get a structuredClone, exactly as a fresh parse would give them.
 const workflowStateCache = new Map<string, { content: string; state: WorkflowState }>();
 
+const readSnapshots = new WeakMap<WorkflowState, WorkflowState>();
+function rememberState(state: WorkflowState): WorkflowState {
+  const copy = structuredClone(state);
+  readSnapshots.set(copy, structuredClone(state));
+  return copy;
+}
 export function loadWorkflowState(projectRoot: string, ref: WorkflowRef = GLOBAL_WORKFLOW): WorkflowState | null {
   const path = lightStatePath(projectRoot, ref);
+  const factState = loadFactState(projectRoot, path);
+  if (factState) return rememberState(parseLightWorkflowState(renderLightWorkflowState(factState)));
   if (!existsSync(path)) return null;
   const stat = lstatSync(path);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`workflow state must be a regular non-symlink file: ${path}`);
   const cached = workflowStateCache.get(path);
   const content = readFileSync(path, "utf8");
-  if (cached && cached.content === content) return structuredClone(cached.state);
+  if (cached && cached.content === content) return rememberState(cached.state);
   const state = parseLightWorkflowState(content);
   workflowStateCache.set(path, { content, state });
-  return structuredClone(state);
+  return rememberState(state);
+}
+
+/** Rebase only independent claim/selection changes. Never rebase business progress,
+ * approval, scope or overlapping ownership. Called again under the publication lock. */
+function rebaseIndependentClaims(state: WorkflowState, current: WorkflowState): void {
+  if (state.revision === current.revision) return;
+  const base = readSnapshots.get(state);
+  if (!base || base.workflow_id !== current.workflow_id) return;
+  const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const maps = new Set(["active_instances", "module_selections", "unit_selections"]);
+  for (const key of new Set([...Object.keys(base), ...Object.keys(current)])) {
+    if (["revision", "updated_at"].includes(key)) continue;
+    if (!maps.has(key) && !equal((base as any)[key], (current as any)[key])) return;
+  }
+  const binding = sessionBinding();
+  if (binding && !equal(base.active_instances[binding.stage_instance], current.active_instances[binding.stage_instance])) return;
+  const merged: Record<string, unknown> = {};
+  for (const key of maps) {
+    const before = (base as any)[key] || {}, after = (state as any)[key] || {}, latest = (current as any)[key] || {};
+    const result = { ...latest };
+    for (const entry of new Set([...Object.keys(before), ...Object.keys(after)])) {
+      if (equal(before[entry], after[entry])) continue;
+      if (!equal(before[entry], latest[entry])) return;
+      if (after[entry] === undefined) delete result[entry]; else result[entry] = after[entry];
+    }
+    merged[key] = Object.keys(result).length ? result : (current as any)[key] === undefined && (state as any)[key] === undefined ? undefined : result;
+  }
+  Object.assign(state, merged, { revision: current.revision, updated_at: current.updated_at });
+  readSnapshots.set(state, structuredClone(current));
 }
 
 const CLAIM_TRANSACTION = Symbol("claim transaction");
 
 export interface SaveWorkflowOptions {
+  /** Activation still requires a genuine signed grant, matching source and initial binding. */
+  executionGrantActivation?: boolean;
+  /** P1-01 explicit opt-in only. Never grants execution or stage completion. */
+  autonomyWrite?: boolean;
+  /** Fallible read-only input validation under the state CAS lock, before audit/write. */
+  beforeCommit?: () => void;
   /** Private transaction token; callers cannot grant claim-write authority with a boolean. */
   claimWrite?: symbol;
   /** Synchronous audit/receipt finalization under the same committed-state lock. */
@@ -1154,6 +1291,12 @@ function assertBaselinePreserved(existing: WorkflowState | null, state: Workflow
 export function saveWorkflowState(projectRoot: string, state: WorkflowState, ref: WorkflowRef = GLOBAL_WORKFLOW, options: SaveWorkflowOptions = {}): void {
   const path = lightStatePath(projectRoot, ref);
   if (maintenanceWrite(path)) { persistWorkflowState(projectRoot, state, ref, options); return; }
+  const nested = publicationLocks.get(path);
+  if (nested) {
+    const binding = sessionBinding();
+    if (!binding || Object.entries(nested).some(([key, value]) => binding[key as keyof SessionBinding] !== value)) throw new Error("nested state publication has a conflicting binding");
+    persistWorkflowState(projectRoot, state, ref, options); return;
+  }
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const lock = acquireLock(`${path}.lock`);
   try {
@@ -1166,6 +1309,30 @@ export function saveWorkflowState(projectRoot: string, state: WorkflowState, ref
 
 /** Private writer: its caller owns the exact state lock. */
 function persistWorkflowState(projectRoot: string, state: WorkflowState, ref: WorkflowRef, options: SaveWorkflowOptions, initialization = false): void {
+  const global = loadWorkflowState(projectRoot), existing = loadWorkflowState(projectRoot, ref);
+  if (existing) {
+    rebaseIndependentClaims(state, existing);
+    // A no-op is not a publication. Do not touch timestamps, claims or audit.
+    if (!options.beforeCommit && !options.afterCommit && JSON.stringify(state) === JSON.stringify(existing)) return;
+  }
+  const publish = () => persistWorkflowStateInner(projectRoot, state, ref, options, initialization);
+  if (options.claimWrite === CLAIM_TRANSACTION || maintenanceWrite(lightStatePath(projectRoot, ref))) return publish();
+  if (!global?.execution_grant_version) {
+    if (global?.autonomy_contract_version && !(existing?.status === "running" && state.status === "parked" && JSON.stringify({ ...existing, status: "parked" }) === JSON.stringify(state))) checkExecutionGrant(projectRoot, global, sessionBinding(), ["workflow-write"]);
+    return publish();
+  }
+  const binding = sessionBinding();
+  if (!existing || !binding) throw new Error("EXECUTION_GRANT_INVALID: active managed state write needs a current exact claim");
+  assertSessionClaim(projectRoot, existing, binding.stage_instance, binding);
+  // Stopping is a safe control-plane downgrade, never a way to resume/complete work.
+  if (existing.status === "running" && state.status === "parked" && JSON.stringify({ ...existing, status: "parked" }) === JSON.stringify(state)) return publish();
+  if (existing.status === "parked" && state.status === "parked") throw new Error("EXECUTION_GRANT_INVALID: parked workflows cannot publish business progress");
+  const reports = state.history.slice(existing.history.length).some(row => ["completed", "approved"].includes(row.result)) || JSON.stringify(state.completed_stage_instances) !== JSON.stringify(existing.completed_stage_instances);
+  const resultOnly=state.autonomy_batch_result_ref!==undefined&&canonicalAutonomyJson({...state,autonomy_batch_result_ref:existing.autonomy_batch_result_ref})===canonicalAutonomyJson({...existing,autonomy_batch_result_ref:existing.autonomy_batch_result_ref});
+  return withGrantControl(projectRoot, () => { checkExecutionGrant(projectRoot, global, binding, reports ? ["workflow-write", "stage-report"] : ["workflow-write"]); if(!resultOnly)assertAutonomyDependencyAccess(projectRoot, binding, reports ? ["workflow-write", "stage-report"] : ["workflow-write"]); return publish(); });
+}
+
+function persistWorkflowStateInner(projectRoot: string, state: WorkflowState, ref: WorkflowRef, options: SaveWorkflowOptions, initialization = false): void {
   const path = lightStatePath(projectRoot, ref);
   const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
   try {
@@ -1176,20 +1343,77 @@ function persistWorkflowState(projectRoot: string, state: WorkflowState, ref: Wo
     if (existing && options.adoptRevision) throw new Error("an adopted workflow state cannot overwrite an existing state");
     if (existing && options.claimWrite !== CLAIM_TRANSACTION && !initialization && !maintenanceWrite(path)) assertSessionMutation(projectRoot, existing, state);
     assertBaselinePreserved(existing, state, ref, options);
+    assertAutonomyFields(state);
+    assertExecutionGrantOwnership(state);
+    if(state.autonomy_batch_result_ref){
+      if(state.autonomy_contract_version!=="1"||state.workflow_kind==="module"||state.workflow_kind==="integration")throw Error("BATCH_RESULT_OWNER_INVALID");
+      assertAutonomyBatchResultRef(state.autonomy_batch_result_ref);
+      if(JSON.stringify(existing?.autonomy_batch_result_ref)!==JSON.stringify(state.autonomy_batch_result_ref)){
+        const result=readBatchResult(projectRoot,state.autonomy_batch_result_ref);
+        if(canonicalAutonomyJson(result.batch_ref)!==canonicalAutonomyJson(state.autonomy_batch)||canonicalAutonomyJson(result.grant_ref)!==canonicalAutonomyJson(state.execution_grant_ref))throw Error("BATCH_RESULT_STATE_BINDING_INVALID");
+      }
+    }else if(existing?.autonomy_batch_result_ref)throw Error("BATCH_RESULT_CANNOT_BE_REMOVED");
+    if (JSON.stringify(existing?.execution_grant_ref) !== JSON.stringify(state.execution_grant_ref) || existing?.execution_grant_version !== state.execution_grant_version) {
+      if (!existing || existing.execution_grant_version || !options.executionGrantActivation || state.execution_grant_version !== "1") throw new Error("EXECUTION_GRANT_INVALID: managed grant activation must be explicit; ordinary saves cannot replace/remove it");
+      const approved = readIssuedGrant(projectRoot, state.execution_grant_ref!);
+      if (approved.revoked || approved.grant.baseline_digest !== state.autonomy_batch?.scope_digest || canonicalAutonomyJson(approved.grant.executor_constraints.initial_binding) !== canonicalAutonomyJson(sessionBinding()) || Date.now() >= Date.parse(approved.grant.expires_at)) throw new Error("EXECUTION_GRANT_INVALID: activation grant/initial claim/baseline is invalid");
+      validateGrantInputs(projectRoot, approved.grant.inputs);
+    }
+    if (existing) {
+      const changed = existing.autonomy_contract_version !== state.autonomy_contract_version
+        || JSON.stringify(existing.autonomy_batch) !== JSON.stringify(state.autonomy_batch);
+      if (changed && (!options.autonomyWrite || existing.autonomy_contract_version !== undefined)) {
+        throw new Error("BATCH_SCOPE_CHANGED: adoption must be explicit and an adopted scope cannot be replaced by an ordinary save");
+      }
+    }
+    options.beforeCommit?.();
     const next = { ...state, version: ENGINE_VERSION, revision: state.revision + 1, updated_at: new Date().toISOString() };
-    appendAudit(projectRoot, next, ref);
-    writeFileSync(temporary, renderLightWorkflowState(next), { encoding: "utf8", flag: "wx", mode: 0o600 });
-    renameSync(temporary, path);
+    const factMode = factStorageActive(projectRoot, path);
+    if (factMode) persistFactState(projectRoot, path, next);
+    if (!factMode) {
+      appendAudit(projectRoot, next, ref, existing || undefined);
+      writeFileSync(temporary, renderLightWorkflowState(next), { encoding: "utf8", flag: "wx", mode: 0o600 });
+      if(next.history.some(entry=>entry.operation_ref)){const fd=openSync(temporary,'r+');try{fsyncSync(fd);}finally{closeSync(fd);}}
+      renameSync(temporary, path);
+    }
     workflowStateCache.delete(path);
     Object.assign(state, next);
+    readSnapshots.set(state, structuredClone(next));
     if (options.afterCommit) {
       const binding = sessionBinding();
+      const previous = publicationLocks.get(path);
       if (binding) publicationLocks.set(path, binding);
-      try { options.afterCommit(); } finally { if (binding) publicationLocks.delete(path); }
+      try { options.afterCommit(); } finally { if (previous) publicationLocks.set(path, previous); else if (binding) publicationLocks.delete(path); }
     }
   } finally {
     if (existsSync(temporary)) unlinkSync(temporary);
   }
+}
+
+/** Explicit, scope-local, lossless migration using the current publication guard. */
+export function migrateWorkflowFacts(projectRoot: string, ref: WorkflowRef): void {
+  const binding = sessionBinding();
+  if (!binding) throw Error("WORKFLOW_FACT_MIGRATION_REQUIRES_BINDING");
+  withSessionPublication(projectRoot, ref, binding.stage_instance, () => {
+    const path = lightStatePath(projectRoot, ref), state = loadWorkflowState(projectRoot, ref);
+    if (!state) throw Error("WORKFLOW_FACT_MIGRATION_REQUIRES_STATE");
+    if (readWorkflowFacts(projectRoot, path)) return;
+    persistFactState(projectRoot, path, state, { state_sha256: createHash("sha256").update(readFileSync(path)).digest("hex"), git_commit: currentHead(projectRoot) });
+    appendAuditEvent(projectRoot, ref, "WORKFLOW_FACTS_MIGRATED", { "Workflow ID": state.workflow_id, "Source Revision": String(state.revision), "Reports": String(state.history.length) });
+  }, binding, "workflow-write");
+}
+
+/** Only the disposable Markdown view is written. No claims, facts or gates change. */
+export function rebuildWorkflowView(projectRoot: string, ref: WorkflowRef): string {
+  const path = lightStatePath(projectRoot, ref);
+  if (!factStorageActive(projectRoot, path)) throw Error("WORKFLOW_FACT_MIGRATION_REQUIRED");
+  const lock = acquireLock(path + ".lock"), temp = path + ".view-" + randomUUID();
+  try {
+    const state = loadWorkflowState(projectRoot, ref)!;
+    const body = renderLightWorkflowState(state);
+    writeFileSync(temp, body, { flag: "wx", mode: 0o600 }); renameSync(temp, path);
+    workflowStateCache.delete(path); return body;
+  } finally { if (existsSync(temp)) unlinkSync(temp); closeSync(lock); unlinkSync(path + ".lock"); }
 }
 
 /**
@@ -1253,7 +1477,7 @@ export function withWorkflowInitialization<T>(
     }
     // Snapshot only while holding all corresponding locks. Existing audit bytes
     // belong to their owner and must survive both initialization and failures.
-    for (const item of plans) for (const path of [lightStatePath(projectRoot, item.ref), lightAuditPath(projectRoot, item.ref)]) {
+    for (const item of plans) for (const path of [lightStatePath(projectRoot, item.ref), lightAuditPath(projectRoot, item.ref), ...(factStorageActive(projectRoot, lightStatePath(projectRoot, item.ref)) ? Object.values(workflowFactPaths(projectRoot, lightStatePath(projectRoot, item.ref))) : [])]) {
       if (existsSync(path) && (!lstatSync(path).isFile() || lstatSync(path).isSymbolicLink())) throw new Error(`initialization target must be a regular file: ${path}`);
       before.set(path, existsSync(path) ? readFileSync(path) : undefined);
     }
@@ -1341,7 +1565,9 @@ export interface SessionBinding {
 
 export function sessionBinding(raw = process.env.AIDLC_SESSION_BINDING): SessionBinding | undefined {
   if (!raw?.trim()) return undefined;
-  const value = JSON.parse(raw) as SessionBinding;
+  let value: SessionBinding;
+  try { value = JSON.parse(raw); } catch { throw new Error("invalid session binding: expected a JSON object; inspect the target and restore its exact binding or explicitly transfer to a new session"); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid session binding: expected a JSON object; inspect the target and restore its exact binding or explicitly transfer to a new session");
   for (const key of ["project_root", "workflow_id", "stage_instance", "owner", "session_id", "generation"] as const) {
     if (typeof value[key] !== "string" || !value[key].trim()) throw new Error(`invalid session binding: ${key}`);
   }
@@ -1420,12 +1646,19 @@ function assertSessionMutation(projectRoot: string, existing: WorkflowState, nex
 const publicationLocks = new Map<string, SessionBinding>();
 
 /** Evidence publication and transfer use the SAME workflow lock: no check/rename gap. */
-export function withSessionPublication<T>(projectRoot: string, ref: WorkflowRef, instance: string, publish: () => T, binding = sessionBinding()): T {
+export function withSessionPublication<T>(projectRoot: string, ref: WorkflowRef, instance: string, publish: () => T, binding = sessionBinding(), operation: GrantOperation | "session-control" | "grant-control" = "evidence-publish"): T {
   const path = lightStatePath(projectRoot, ref);
+  const guarded = (): T => {
+    const global = loadWorkflowState(projectRoot);
+    if (operation === "session-control") return publish();
+    if (!global?.execution_grant_version) { if (global?.autonomy_contract_version) checkExecutionGrant(projectRoot, global, binding, [operation as GrantOperation]); return publish(); }
+    if (loadWorkflowState(projectRoot, ref)?.status === "parked") throw new Error("EXECUTION_GRANT_INVALID: parked workflows cannot publish");
+    return withGrantControl(projectRoot, () => { checkExecutionGrant(projectRoot, global, binding, [operation as GrantOperation]); assertAutonomyDependencyAccess(projectRoot, binding, [operation as GrantOperation]); return publish(); });
+  };
   const nested = publicationLocks.get(path);
   if (nested) {
     if (!binding || Object.entries(nested).some(([key, value]) => binding[key as keyof SessionBinding] !== value)) throw new Error("nested publication has a conflicting session binding");
-    return publish();
+    return guarded();
   }
   const lock = acquireLock(`${path}.lock`);
   try {
@@ -1433,7 +1666,7 @@ export function withSessionPublication<T>(projectRoot: string, ref: WorkflowRef,
     if (!state) throw new Error("workflow disappeared before evidence publication");
     assertSessionClaim(projectRoot, state, instance, binding);
     publicationLocks.set(path, binding!);
-    return publish();
+    return guarded();
   } finally {
     publicationLocks.delete(path);
     closeSync(lock);
@@ -1445,6 +1678,7 @@ export function withSessionPublication<T>(projectRoot: string, ref: WorkflowRef,
 /** Narrow ownership CAS: accepts only claim/selection handoff fields, never arbitrary workflow mutations. */
 export function saveClaimTransaction(projectRoot: string, next: WorkflowState, ref: WorkflowRef, target: string, expectedClaim: TeamLightActiveInstance | undefined): void {
   const existing = loadWorkflowState(projectRoot, ref);
+  if (existing) rebaseIndependentClaims(next, existing);
   if (!existing || existing.workflow_id !== next.workflow_id || existing.revision !== next.revision) throw new Error("claim changed; reread before retrying transfer");
   const canonical = (value: unknown): string => JSON.stringify(value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : null);
   const previous = existing.active_instances[target];

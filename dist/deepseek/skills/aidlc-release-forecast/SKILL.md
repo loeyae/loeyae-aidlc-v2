@@ -167,3 +167,5 @@ docs/aidlc/inception/release-forecast.md
 ## 与其他能力的关系
 
 本 Skill 可以独立调用。存在 `docs/aidlc/inception/requirement-estimation.md` 时优先复用其估算区间、假设和风险；不存在时仍应基于需求清单独立生成高层预测。详细工作单元排期属于后续可选深化，不是本 Skill 的默认职责。
+
+默认执行和续作遵循 [宿主执行协议](../../knowledge/protocols/host-execution.md)。本能力按需调用，不要求流程状态或阶段记录；实际能力所需输入及文件保护约束保持。

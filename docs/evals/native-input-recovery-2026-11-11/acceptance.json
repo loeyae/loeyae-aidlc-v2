@@ -1,0 +1,335 @@
+{
+  "schema": "aidlc.native-input-recovery-acceptance/v1",
+  "at": "2026-11-11T09:35:05.792Z",
+  "source_snapshot_digest": "abc8eae56026f81a828199acdd0e2e4a5a93df60e32aca9e58298b456a0df087",
+  "passed": true,
+  "checks": [
+    {
+      "name": "test_host_progress_limits",
+      "args": [
+        "tests/test_host_progress_limits.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 443,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_host_progress_limits.stdout.log",
+        "sha256": "fc25e9b63b8669a2a4a9b66b7f0c56ed3135d9620ecfab52a8fd663aaba20bd9"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_host_progress_limits.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "test_host_progress_checkpoint",
+      "args": [
+        "tests/test_host_progress_checkpoint.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 79,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_host_progress_checkpoint.stdout.log",
+        "sha256": "6a72c1c91d1154eadef2c25b0a86145a00a54af755666a270da28fc68485c7ec"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_host_progress_checkpoint.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "test_host_progress_boundary",
+      "args": [
+        "tests/test_host_progress_boundary.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 92,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_host_progress_boundary.stdout.log",
+        "sha256": "676279bef0f48883011c2936e6aa93f43f2e871c80981110d85991e701fcb1bd"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_host_progress_boundary.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "test_progress_persistence",
+      "args": [
+        "tests/test_progress_persistence.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 59,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_progress_persistence.stdout.log",
+        "sha256": "3bd1d006d906f6d51d81589fba10e55da180a91e6b42da67399d01a6cff73b2c"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_progress_persistence.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "test_host_progress_transport",
+      "args": [
+        "tests/test_host_progress_transport.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 4947,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_host_progress_transport.stdout.log",
+        "sha256": "a3dd7fca1d57c1f132f5cbdfae0404fbe93e658d24f1e743538e42dcf5269c83"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_host_progress_transport.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "test_native_tool_channel",
+      "args": [
+        "tests/test_native_tool_channel.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 80,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_native_tool_channel.stdout.log",
+        "sha256": "3bfa31640f9c6b5e3e73093d442db71d6e72ede73434c2f25ea656ac82b4a2ed"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_native_tool_channel.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "test_native_model_input",
+      "args": [
+        "tests/test_native_model_input.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 95,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_native_model_input.stdout.log",
+        "sha256": "325b5465310462df036da9c662cf2f2e14250bda28f9c2563e34757a36020ce3"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_native_model_input.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "test_native_reentry_repair",
+      "args": [
+        "tests/test_native_reentry_repair.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 78,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_native_reentry_repair.stdout.log",
+        "sha256": "fc7e9fd42b780746807ff516669311c09666e45eb54e9201700ff163123c2bf6"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_native_reentry_repair.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "test_native_action_policy",
+      "args": [
+        "tests/test_native_action_policy.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 207,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_native_action_policy.stdout.log",
+        "sha256": "a224b3f8e928f66528176fe9e5cb67d1b3293670eec72e292d627001012a4579"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_native_action_policy.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "test_native_input_recovery",
+      "args": [
+        "tests/test_native_input_recovery.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 210,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_native_input_recovery.stdout.log",
+        "sha256": "879b122da06094aacf85eb2228691bc4dc430c8fd61055a4e430ca53f99327ac"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/test_native_input_recovery.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "driver",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_native_host_driver.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 223,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/driver.stdout.log",
+        "sha256": "0fe92b425d162579d2d32e1a2c708e7491076c02d727b239e9a4319a39e5c149"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/driver.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "gateway",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_native_host.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 16089,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/gateway.stdout.log",
+        "sha256": "bce049195afe5be706da5b2b7d300f11c3bb198f63071d24530d16aad55aaf58"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/gateway.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "typecheck",
+      "args": [
+        "node_modules/typescript/bin/tsc",
+        "--noEmit"
+      ],
+      "exit_code": 0,
+      "duration_ms": 4396,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/typecheck.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/typecheck.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "build",
+      "args": [
+        "--import",
+        "tsx",
+        "scripts/build.ts",
+        "--all"
+      ],
+      "exit_code": 0,
+      "duration_ms": 13147,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/build.stdout.log",
+        "sha256": "15b5423fc2e9dda8d49b0dddb46869704a67bb750555418234720c94bbed9a21"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/build.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "parity",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_distribution_parity.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 685,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/parity.stdout.log",
+        "sha256": "6f482d1bd078242aad8d738555589db06d8b7aa7e921be26d1996d56cd2b2614"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/parity.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "shipped",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_autonomous_distribution.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 6019,
+      "stdout": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/shipped.stdout.log",
+        "sha256": "5d412bbc48b9540814de3c7a8da5a565eb1ba222dd12215dd057d1a2569e0efa"
+      },
+      "stderr": {
+        "path": "docs/evals/native-input-recovery-2026-11-11/shipped.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ],
+  "coverage": {
+    "captured_failure_boundaries": 8,
+    "progress_limits": 10,
+    "action_policy": 9,
+    "core_gateway": 30,
+    "driver": 37,
+    "distribution_files": 3163,
+    "harnesses": 10,
+    "shipped_cli": 3
+  },
+  "source_impact": {
+    "changed": [
+      "harness/codex/README.md",
+      "harness/codex/runtime/aidlc-codex-host.mjs",
+      "harness/codex/runtime/host-kernel.cjs",
+      "harness/codex/runtime/host-progress.cjs",
+      "harness/codex/runtime/native-tool-channel.mjs",
+      "tests/fixtures/native-r14-write.json",
+      "tests/test_host_progress_limits.mjs",
+      "tests/test_native_input_recovery.mjs"
+    ],
+    "execution": [
+      "harness/codex/README.md",
+      "harness/codex/runtime/aidlc-codex-host.mjs",
+      "harness/codex/runtime/host-kernel.cjs",
+      "harness/codex/runtime/host-progress.cjs",
+      "harness/codex/runtime/native-tool-channel.mjs"
+    ],
+    "verification": [
+      "tests/fixtures/native-r14-write.json",
+      "tests/test_host_progress_limits.mjs",
+      "tests/test_native_input_recovery.mjs"
+    ],
+    "documentation": [],
+    "execution_evidence_reusable": false,
+    "current_verification_sources_validated": false,
+    "required_checks": [
+      "affected-runtime-and-integration"
+    ],
+    "execution_authorized": false
+  },
+  "preserved_root_workflow": {
+    "aidlc/active/aidlc-state.md": "5e08e34d2e434edf0ab7d2667377080dc0caf06dd8dcfa178b877211c5c93d0f",
+    "aidlc/active/audit.md": "1fa99dba9594b7ee1e2e7ad0d8e72c9b81b87e74f9577879795937b0af998686"
+  },
+  "limits_changed": false,
+  "core_state_contract_changed": false,
+  "new_pilots": false,
+  "new_grants": false,
+  "real_model": false,
+  "full_business_verified": false,
+  "publish_ui_verified": false,
+  "original_failure_evidence": "docs/evals/autonomy/p1-10/input-rerun-2026-11-11/result.json",
+  "remaining": [
+    "Live model completion with the new source and tool schema",
+    "RED/GREEN and final candidate/batch convergence",
+    "Actual publish two-size ten-case UI acceptance"
+  ],
+  "entry": "HOLD"
+}

@@ -1,0 +1,193 @@
+{
+  "recorded_at": "2026-11-11T06:40:57.087Z",
+  "engineering_result": "passed",
+  "business_trial_run": false,
+  "business_project_modified": false,
+  "global_install_modified": false,
+  "checks": [
+    {
+      "argv": [
+        "node",
+        "--import",
+        "tsx",
+        "tests/test_delivery_efficiency.ts"
+      ],
+      "chunk": "89ad0b",
+      "elapsed_seconds": 2.3130803,
+      "result": "pass",
+      "coverage": "document scope digest, unknown/shared/source/legacy boundaries, ownership validation, input-defect classification"
+    },
+    {
+      "argv": [
+        "node",
+        "tests/test_native_evidence_repair.mjs"
+      ],
+      "chunk": "a6edb0",
+      "elapsed_seconds": 0.2424014,
+      "result": "pass",
+      "coverage": "canonical retry key and actual driver route/finalize; diagnosis dispatched zero producer/model calls; original grant unchanged"
+    },
+    {
+      "argv": [
+        "node",
+        "--import",
+        "tsx",
+        "tests/test_repair_actions.ts"
+      ],
+      "chunk": "2bf0c6",
+      "elapsed_seconds": 0.6328799,
+      "result": "pass"
+    },
+    {
+      "argv": [
+        "node",
+        "--import",
+        "tsx",
+        "tests/test_mars244_scope.ts"
+      ],
+      "chunk": "b1d9b5",
+      "elapsed_seconds": 6.3349238,
+      "result": "pass"
+    },
+    {
+      "argv": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "--noEmit"
+      ],
+      "chunk": "ca176d",
+      "elapsed_seconds": 4.536016,
+      "result": "pass"
+    },
+    {
+      "argv": [
+        "node",
+        "tests/test_attempt_repair_host.mjs"
+      ],
+      "chunk": "045486",
+      "elapsed_seconds": 0.3503348,
+      "result": "pass",
+      "scenarios": 2
+    },
+    {
+      "argv": [
+        "node",
+        "--import",
+        "tsx",
+        "tests/test_native_host_driver.ts"
+      ],
+      "chunk": "6c5091",
+      "elapsed_seconds": 0.4056629,
+      "result": "pass",
+      "scenarios": 37
+    }
+  ],
+  "timing_basis": "Tool-reported elapsed wall time for one successful execution; not business delivery speed or aggregate CPU time.",
+  "environment_failures": [
+    {
+      "chunk": "355832",
+      "command": "node --import tsx tests/test_delivery_efficiency.ts",
+      "error": "sandbox spawn EPERM before tests; identical command succeeded with engineering child-process permission",
+      "counted_as_product_failure": false
+    }
+  ],
+  "build": {
+    "argv": [
+      "node",
+      "--import",
+      "tsx",
+      ".artifacts/build-retain-root.ts",
+      "--all"
+    ],
+    "chunk": "9cb9e7",
+    "result": "passed",
+    "elapsed_seconds": 1.5062628,
+    "log": "distribution-build.log",
+    "method": "Existing Windows directory-preserving generator; source builder unchanged; manifest byte and unexpected-core-file checks required"
+  },
+  "distribution": {
+    "harnesses": {
+      "claude": 314,
+      "codebuddy": 315,
+      "codex": 320,
+      "deepseek": 312,
+      "kiro-cli": 313,
+      "kiro-crew": 313,
+      "kiro-ide": 313,
+      "opencode": 312,
+      "qoder": 314,
+      "zcode": 316
+    },
+    "files_compared": 3142,
+    "failures": [],
+    "global_install_modified": false
+  },
+  "state": [
+    {
+      "path": "aidlc/active/aidlc-state.md",
+      "expected": "5e08e34d2e434edf0ab7d2667377080dc0caf06dd8dcfa178b877211c5c93d0f",
+      "observed": "5e08e34d2e434edf0ab7d2667377080dc0caf06dd8dcfa178b877211c5c93d0f",
+      "unchanged": true
+    },
+    {
+      "path": "aidlc/active/audit.md",
+      "expected": "1fa99dba9594b7ee1e2e7ad0d8e72c9b81b87e74f9577879795937b0af998686",
+      "observed": "1fa99dba9594b7ee1e2e7ad0d8e72c9b81b87e74f9577879795937b0af998686",
+      "unchanged": true
+    }
+  ],
+  "source_files": [
+    {
+      "path": "core/tools/aidlc-execution-context.ts",
+      "sha256": "a203ae95be77f2e0688e05434d9ffed81eee17ab1d5ecddaba86b2e56085b2a0"
+    },
+    {
+      "path": "core/tools/aidlc-workflow-layout.ts",
+      "sha256": "e2b8a0428f471c6b6bea5527cbfeb90bcf87bbf1592dc0621833fd6fc83f02ea"
+    },
+    {
+      "path": "core/tools/aidlc-repair-guidance.ts",
+      "sha256": "c425b653295833dab67fe2dd55c204bad5e91e7e8287d35ffa0eb8bb1789677a"
+    },
+    {
+      "path": "harness/codex/runtime/aidlc-codex-host.mjs",
+      "sha256": "f88b70481b8443858e6e1ffc7c824e968be6db453867bac123bb3829a5b60f8a"
+    },
+    {
+      "path": "core/knowledge/standards/common-test-execution-strategy.md",
+      "sha256": "c2324df1ec889fc1270ad4086a0fc31d70572ca2624612dc0b59b905705359e6"
+    },
+    {
+      "path": "core/knowledge/protocols/evidence-reuse-repair.md",
+      "sha256": "6d80e1a4f8afcdc000ca90fab0c0df7c54d71e2d20ceaa983b4be3c6a39a2aef"
+    },
+    {
+      "path": "core/stages/inception/inception-workspace-detection.md",
+      "sha256": "a80e08b73b11fa7e7774b4a6871f6841f55a794e9f899b5a4e51a9ee7f0825ef"
+    },
+    {
+      "path": "core/stages/ideation/product-module-division.md",
+      "sha256": "50d8a505fa0052bec85fbbf3f93adee6d97b36779269b08e5fdf7bd93cb1c3d9"
+    },
+    {
+      "path": "tests/test_delivery_efficiency.ts",
+      "sha256": "051a4dc471384191dad1f30baa4d3ce3457c351a877c5a615fcf4264b4d94031"
+    },
+    {
+      "path": "tests/test_native_evidence_repair.mjs",
+      "sha256": "b0fc05cc98cd3b8d04153a2e042c7ea13ae315131c5f58c22c0e292a386e5248"
+    }
+  ],
+  "observations": {
+    "historical_elapsed_minutes": 1468,
+    "historical_convergence_minutes": 854,
+    "confirmed_unrelated_document_currently_included_in_units": 6
+  },
+  "remaining": [
+    "Business project adoption of reviewed private-document ownership and compatible local CR engine is not performed.",
+    "No claim of arbitrary cross-unit shared-test deduplication.",
+    "Historical Native exception and absent browser/device E2E remain as recorded.",
+    "G9 real-host replacement-interface qualification remains open.",
+    "Archived original business command logs are absent; active/wait time and end-to-end speedup are unmeasured."
+  ]
+}

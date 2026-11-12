@@ -1,0 +1,7 @@
+const fs=require('fs'),path=require('path'),cp=require('child_process'),assert=require('assert/strict');
+const root=process.cwd(),dist=path.resolve(root,'dist'),dir='docs/evals/autonomy/p1-05';
+assert.equal(fs.realpathSync(dist).toLowerCase(),dist.toLowerCase());
+const harnesses=fs.readdirSync('harness').filter(n=>fs.existsSync(path.join('harness',n,'manifest.ts'))),results=[];
+for(const name of harnesses){const target=path.resolve(dist,name);assert.equal(path.dirname(target).toLowerCase(),dist.toLowerCase());if(fs.existsSync(target)){assert(!fs.lstatSync(target).isSymbolicLink());assert.equal(fs.realpathSync(target).toLowerCase(),target.toLowerCase());}let ok=false;
+for(let attempt=1;attempt<=3;attempt++){const log=path.join(dir,`build-${name}-${attempt}.log`),args=['node_modules/tsx/dist/cli.mjs','scripts/build.ts','--harness',name],start=new Date().toISOString();const r=cp.spawnSync(process.execPath,args,{encoding:'utf8',timeout:120000,windowsHide:true,maxBuffer:4*1024*1024});fs.writeFileSync(log,(r.stdout||'')+(r.stderr||'')+(r.error?'\n'+String(r.error):''));results.push({harness:name,attempt,command:['node',...args],exit_code:r.status,signal:r.signal,error:r.error?String(r.error):undefined,started_at:start,finished_at:new Date().toISOString(),verified_target:target,log:log.replaceAll('\\','/')});fs.writeFileSync(path.join(dir,'build-results.json'),JSON.stringify(results,null,2)+'\n');console.log(`${name} attempt ${attempt}: ${r.status}`);if(r.status===0){ok=true;break;}}
+if(!ok){process.exitCode=1;break;}}

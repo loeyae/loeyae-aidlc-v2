@@ -1,0 +1,165 @@
+{
+  "schema": "aidlc.delivery-input-boundary-acceptance/v1",
+  "at": "2026-11-11T11:38:47.598Z",
+  "engineering_passed": true,
+  "source_snapshot_digest": "c126fe15a93a3304235eee6f3bdeb7031c897ee82c1d890cbc7ddf6b30f00194",
+  "checks": [
+    {
+      "name": "delivery-scope",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_native_delivery_input_scope.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 4138,
+      "error": null,
+      "stdout": {
+        "path": "docs/evals/delivery-input-boundary-2026-11-11/delivery-scope.stdout.log",
+        "digest": "f6ca9278fb437b7296e0f212aad534b3429bedb09ad5693fbfea8986feb53eae"
+      },
+      "stderr": {
+        "path": "docs/evals/delivery-input-boundary-2026-11-11/delivery-scope.stderr.log",
+        "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "decision-scope",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_native_final_convergence.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 2950,
+      "error": null,
+      "stdout": {
+        "path": "docs/evals/delivery-input-boundary-2026-11-11/decision-scope.stdout.log",
+        "digest": "eec9d4f201aa1a9f35a34589747c0de608f89ae7438dbce347fc938fbc2618df"
+      },
+      "stderr": {
+        "path": "docs/evals/delivery-input-boundary-2026-11-11/decision-scope.stderr.log",
+        "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "repair-actions",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_repair_actions.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 385,
+      "error": null,
+      "stdout": {
+        "path": "docs/evals/delivery-input-boundary-2026-11-11/repair-actions.stdout.log",
+        "digest": "b3e245778639fe6d72828ca16181c81a47b5ef984b30c264d6a0a031bcb5b129"
+      },
+      "stderr": {
+        "path": "docs/evals/delivery-input-boundary-2026-11-11/repair-actions.stderr.log",
+        "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "typecheck",
+      "args": [
+        "node_modules/typescript/bin/tsc",
+        "--noEmit"
+      ],
+      "exit_code": 0,
+      "duration_ms": 4492,
+      "error": null,
+      "stdout": {
+        "path": "docs/evals/delivery-input-boundary-2026-11-11/typecheck.stdout.log",
+        "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "docs/evals/delivery-input-boundary-2026-11-11/typecheck.stderr.log",
+        "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "build",
+      "args": [
+        "--import",
+        "tsx",
+        "scripts/build.ts",
+        "--all"
+      ],
+      "exit_code": 0,
+      "duration_ms": 8377,
+      "error": null,
+      "stdout": {
+        "path": "docs/evals/delivery-input-boundary-2026-11-11/build.stdout.log",
+        "digest": "15b5423fc2e9dda8d49b0dddb46869704a67bb750555418234720c94bbed9a21"
+      },
+      "stderr": {
+        "path": "docs/evals/delivery-input-boundary-2026-11-11/build.stderr.log",
+        "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "parity",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_distribution_parity.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 5855,
+      "error": null,
+      "stdout": {
+        "path": "docs/evals/delivery-input-boundary-2026-11-11/parity.stdout.log",
+        "digest": "6f482d1bd078242aad8d738555589db06d8b7aa7e921be26d1996d56cd2b2614"
+      },
+      "stderr": {
+        "path": "docs/evals/delivery-input-boundary-2026-11-11/parity.stderr.log",
+        "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "shipped",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_autonomous_distribution.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 6175,
+      "error": null,
+      "stdout": {
+        "path": "docs/evals/delivery-input-boundary-2026-11-11/shipped.stdout.log",
+        "digest": "5d412bbc48b9540814de3c7a8da5a565eb1ba222dd12215dd057d1a2569e0efa"
+      },
+      "stderr": {
+        "path": "docs/evals/delivery-input-boundary-2026-11-11/shipped.stderr.log",
+        "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ],
+  "reproduction": {
+    "path": "docs/evals/delivery-input-boundary-2026-11-11/reproduction.json",
+    "digest": "4b241b038ac45c45fdfcb0a87a562d6c8b42d94da21e398b14aef354b855c20f"
+  },
+  "captured_actual_gate": {
+    "path": "docs/evals/delivery-input-boundary-2026-11-11/repaired-tail.json",
+    "digest": "0a3302bc818e3c429b826a2393baf61910d78fdb9dee020d7828c918762e2f5f"
+  },
+  "preserved_root_workflow": {
+    "aidlc/active/aidlc-state.md": "5e08e34d2e434edf0ab7d2667377080dc0caf06dd8dcfa178b877211c5c93d0f",
+    "aidlc/active/audit.md": "1fa99dba9594b7ee1e2e7ad0d8e72c9b81b87e74f9577879795937b0af998686"
+  },
+  "old_real_trial_overwritten": false,
+  "old_grant_resumed": false,
+  "original_phase_commands_rerun": false,
+  "current_source_real_trial": false,
+  "current_source_full_L2": false,
+  "remaining": [
+    "Full current-source release qualification",
+    "Actual orders final batch success",
+    "Publish real UI trial",
+    "Real efficiency target and repeated command/document overhead"
+  ],
+  "entry": "HOLD"
+}

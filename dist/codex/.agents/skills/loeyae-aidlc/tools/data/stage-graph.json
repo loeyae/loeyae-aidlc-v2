@@ -1,5 +1,5 @@
 {
-  "version": "4.26.3",
+  "version": "4.27.0",
   "stages": [
     {
       "slug": "workspace-detection",
@@ -739,10 +739,6 @@
       ],
       "produces": [
         "docs/aidlc/modules/{module-id}/inception/application-design.md",
-        "docs/aidlc/modules/{module-id}/inception/application-design/components.md",
-        "docs/aidlc/modules/{module-id}/inception/application-design/component-methods.md",
-        "docs/aidlc/modules/{module-id}/inception/application-design/application-services.md",
-        "docs/aidlc/modules/{module-id}/inception/application-design/component-dependency.md",
         ".aidlc/evidence/application-design/{module-id}/diagram-contract.json",
         ".aidlc/evidence/application-design/{module-id}/traceability-matrix.json",
         ".aidlc/evidence/application-design/{module-id}/structural-invariants.json"
@@ -871,10 +867,6 @@
       ],
       "produces": [
         "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design.md",
-        "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-logic-model.md",
-        "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/business-rules.md",
-        "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/domain-entities.md",
-        "docs/aidlc/modules/{module-id}/construction/{unit-id}/functional-design/data-source-validation.md",
         ".aidlc/evidence/functional-design/{module-id}/{unit-id}/functional-design-completeness.json",
         ".aidlc/evidence/functional-design/{module-id}/{unit-id}/traceability-matrix.json",
         ".aidlc/evidence/functional-design/{module-id}/{unit-id}/structural-invariants.json"

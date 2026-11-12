@@ -107,3 +107,5 @@ loeyae-aidlc docx beautify "/absolute/path/input.docx" \
 ## 文档导出边界
 
 `loeyae-aidlc export` 由已锁定的 `document.render` Provider 执行；需要显式 `--host-provider <instance>` 和项目 Provider 配置。仅支持 Markdown→DOCX/PDF、SVG→PNG，未启用时不下载安装。Core 锁定输入及本地依赖快照、验证候选后受管发布。DOCX 生成与 `docx inspect/beautify/validate` 是独立操作，导出成功不代表页面版式已审阅。图表视觉 Provider 的 preview/render 不能充当文档 export。
+
+默认执行和续作遵循 [宿主执行协议](../../knowledge/protocols/host-execution.md)。本能力按需调用，不要求流程状态或阶段记录；实际能力所需输入及文件保护约束保持。

@@ -145,13 +145,21 @@ function orchestrationScript(): string {
   return "core/tools/aidlc-orchestrate.ts";
 }
 
+export function usesOperatorConsole(script: string, args: readonly string[], input?: string): boolean {
+  return script === orchestrationScript() && input === undefined
+    && args[0] === "autonomy" && args[1] === "grant"
+    && ["issue", "revoke"].includes(args[2]) && !args.includes("--preview");
+}
+
 function run(script: string, args: string[], input?: string): never | void {
   const tsx = require.resolve("tsx/cli");
   // 4.11.0: the shared 64 MB limit (Node's default 1 MB overflowed on large reports);
   // an overflow throws a SubprocessOverflowError naming the child. The child's own
   // output, including an overflow it reported, is passed through unchanged.
   const result = runSync(process.execPath, [tsx, resolve(ROOT, script), ...args], {
-    stdio: "pipe",
+    // Actual operator capture must see the caller's real terminal. Pipe callers
+    // stay pipes and are still rejected by Core; no TTY or approval is synthesized.
+    stdio: usesOperatorConsole(script, args, input) ? "inherit" : "pipe",
     cwd: process.cwd(),
     encoding: "utf8",
     input,
@@ -844,33 +852,20 @@ function unregisterQoderPlugin(deployment: QoderDeployment, cli: string): void {
   if (status !== 0) throw new Error(`Qoder CLI plugin unregister failed: ${PLUGIN_NAME}`);
 }
 
-function isZcodeHookGroup(group: unknown): boolean {
-  if (!isRecord(group) || !Array.isArray(group.hooks)) return false;
-  return group.hooks.some((hook) => isRecord(hook)
+function isZcodeHook(hook: unknown): boolean {
+  return isRecord(hook)
     && hook.command === "loeyae-aidlc"
     && Array.isArray(hook.args)
-    && JSON.stringify(hook.args) === JSON.stringify(["hook", "--format", "zcode"]));
+    && JSON.stringify(hook.args) === JSON.stringify(["hook", "--format", "zcode"]);
 }
 
-function registerZcodeConfig(pluginRoot: string): void {
-  const hookDefaults = JSON.parse(readFileSync(resolve(pluginRoot, "hooks/hooks.json"), "utf8"));
-  const desiredGroups = Array.isArray(hookDefaults?.hooks?.Stop) ? hookDefaults.hooks.Stop : [];
-  const result = updateSharedJson(ZCODE_GLOBAL_CONFIG_PATH, (current) => {
-    if (current.hooks !== undefined && !isRecord(current.hooks)) throw new Error(`ZCode hooks config must be an object: ${ZCODE_GLOBAL_CONFIG_PATH}`);
-    const hooks = isRecord(current.hooks) ? { ...current.hooks } : {};
-    if (hooks.events !== undefined && !isRecord(hooks.events)) throw new Error(`ZCode hook events must be an object: ${ZCODE_GLOBAL_CONFIG_PATH}`);
-    const events = isRecord(hooks.events) ? { ...hooks.events } : {};
-    const existingStop = Array.isArray(events.Stop) ? events.Stop : [];
-    const retainedStop = existingStop.filter((group) => !isZcodeHookGroup(group));
-    const nextStop = [...retainedStop, ...desiredGroups];
-    events.Stop = nextStop;
-
-    return {
-      value: { ...current, hooks: { ...hooks, enabled: true, events } },
-      result: { hookChanged: JSON.stringify(existingStop) !== JSON.stringify(nextStop) || hooks.enabled !== true },
-    };
+function removeOwnedHooks(groups: unknown[], owned: (hook: unknown) => boolean): unknown[] {
+  return groups.flatMap(group => {
+    if (!isRecord(group) || !Array.isArray(group.hooks)) return [group];
+    const hooks = group.hooks.filter(hook => !owned(hook));
+    if (hooks.length === group.hooks.length) return [group];
+    return hooks.length ? [{ ...group, hooks }] : [];
   });
-  console.log(result.hookChanged ? "🔒 Registered ZCode user Stop Hook." : "🔒 ZCode user Stop Hook already current.");
 }
 
 function unregisterZcodeConfig(): void {
@@ -881,7 +876,7 @@ function unregisterZcodeConfig(): void {
     if (!isRecord(hooks.events)) return { value: current, result: 0 };
     const events = { ...hooks.events };
     const existingStop = Array.isArray(events.Stop) ? events.Stop : [];
-    const retainedStop = existingStop.filter((group) => !isZcodeHookGroup(group));
+    const retainedStop = removeOwnedHooks(existingStop, isZcodeHook);
     const count = existingStop.length - retainedStop.length;
     if (retainedStop.length) events.Stop = retainedStop;
     else delete events.Stop;
@@ -892,41 +887,6 @@ function unregisterZcodeConfig(): void {
   if (removed) console.log("🔓 Removed ZCode user Stop Hook; shared MCP services were preserved.");
 }
 
-function hookCommand(group: unknown): string {
-  if (!isRecord(group) || !Array.isArray(group.hooks)) return "";
-  const command = group.hooks.find((hook) => isRecord(hook) && typeof hook.command === "string");
-  return isRecord(command) ? String(command.command) : "";
-}
-
-function registerCodexHooks(sourcePath: string): void {
-  const defaults = JSON.parse(readFileSync(sourcePath, "utf8"));
-  const result = updateSharedJson(CODEX_GLOBAL_HOOKS_PATH, (current) => {
-    const currentHooks = isRecord(current.hooks) ? { ...current.hooks } : {};
-    let changed = false;
-    for (const [event, rawGroups] of Object.entries(defaults.hooks || {})) {
-      const desiredGroups = (Array.isArray(rawGroups) ? rawGroups : []).map((group) => ({ ...(group as Record<string, unknown>), id: CODEX_HOOK_ID }));
-      const existingGroups = Array.isArray(currentHooks[event]) ? [...currentHooks[event] as unknown[]] : [];
-      for (const desired of desiredGroups) {
-        const indices = existingGroups.map((group, index) => isRecord(group) && (group.id === CODEX_HOOK_ID || hookCommand(group) === "loeyae-aidlc hook --format codex") ? index : -1).filter((index) => index >= 0);
-        if (indices.length === 0) {
-          existingGroups.push(desired);
-          changed = true;
-        } else {
-          if (JSON.stringify(existingGroups[indices[0]]) !== JSON.stringify(desired)) changed = true;
-          existingGroups[indices[0]] = desired;
-          for (const duplicate of indices.slice(1).reverse()) {
-            existingGroups.splice(duplicate, 1);
-            changed = true;
-          }
-        }
-      }
-      currentHooks[event] = existingGroups;
-    }
-    return { value: { ...current, hooks: currentHooks }, result: changed };
-  });
-  console.log(result ? `🔒 Registered Codex lifecycle Hook: ${CODEX_HOOK_ID}` : "🔒 Codex lifecycle Hook already current; preserved existing hooks.");
-}
-
 function unregisterCodexHooks(): void {
   if (!existsSync(CODEX_GLOBAL_HOOKS_PATH)) return;
   const removed = updateSharedJson(CODEX_GLOBAL_HOOKS_PATH, (current) => {
@@ -934,10 +894,10 @@ function unregisterCodexHooks(): void {
     let count = 0;
     for (const [event, rawGroups] of Object.entries(hooks)) {
       if (!Array.isArray(rawGroups)) continue;
-      const retained = rawGroups.filter((group) => {
-        const owned = isRecord(group) && (group.id === CODEX_HOOK_ID || hookCommand(group) === "loeyae-aidlc hook --format codex");
+      const retained = removeOwnedHooks(rawGroups, hook => {
+        const owned = isRecord(hook) && hook.command === "loeyae-aidlc hook --format codex";
         if (owned) count++;
-        return !owned;
+        return owned;
       });
       if (retained.length) hooks[event] = retained;
       else delete hooks[event];
@@ -945,28 +905,6 @@ function unregisterCodexHooks(): void {
     return { value: { ...current, hooks }, result: count };
   });
   if (removed) console.log(`🔓 Removed Codex lifecycle Hook: ${CODEX_HOOK_ID}`);
-}
-
-function projectHookAsset(harness: string, projectRoot: string, distRoot: string): ManagedAsset | undefined {
-  if (!["kiro-ide", "kiro-cli"].includes(harness)) return undefined;
-  const project = resolve(projectRoot);
-  if (!existsSync(project) || !lstatSync(project).isDirectory() || lstatSync(project).isSymbolicLink()) {
-    throw new Error(`--project must be an existing, non-symlink directory: ${project}`);
-  }
-  const source = resolve(distRoot, "hooks/aidlc-gates.json");
-  if (!existsSync(source)) throw new Error(`Kiro lifecycle Hook config not found: ${source}`);
-  return { source, target: resolve(project, ".kiro/hooks/loeyae-aidlc.json"), kind: "file" };
-}
-
-function installProjectHook(harness: string, projectRoot: string, distRoot: string, migrateLegacy: boolean): void {
-  const asset = projectHookAsset(harness, projectRoot, distRoot);
-  if (!asset) return;
-  installManagedAssets("loeyae-aidlc:kiro-project-hook", [asset], undefined, {
-    migrateLegacy,
-    validateLegacyTarget: assertRecognizedLegacyTarget,
-    onLegacyBackup: reportLegacyBackup,
-  });
-  console.log(`🔒 Installed ${harness} project Stop Hook → ${asset.target}`);
 }
 
 function uninstallProjectHook(harness: string, projectRoot: string): void {
@@ -1054,7 +992,7 @@ function installOne(harness: string, customTarget: string, projectTarget: string
   if (harness === "zcode" && !customTarget) {
     installManagedAssets(owner, [
       { source, target: ZCODE_GLOBAL_SKILL_ROOT, kind: "directory" },
-    ], () => registerZcodeConfig(ZCODE_GLOBAL_SKILL_ROOT), migrationOptions);
+    ], () => unregisterZcodeConfig(), migrationOptions);
     console.log(`✅ Installed loeyae-aidlc v${PKG.version} (${harness}) → ${ZCODE_GLOBAL_SKILL_ROOT}`);
     return;
   }
@@ -1091,10 +1029,10 @@ function installOne(harness: string, customTarget: string, projectTarget: string
     console.log(`♻️  Adopted legacy Kiro CLI ownership for the shared global Agent Skill → ${target}`);
   }
   const activate = (): void => {
-    if (harness === "codex" && !customTarget) registerCodexHooks(resolve(source, "hooks/hooks.json"));
+    if (harness === "codex" && !customTarget) unregisterCodexHooks();
   };
   installManagedAssets(owner, [{ source, target, kind: "directory" }], activate, migrationOptions);
-  if (projectTarget) installProjectHook(harness, projectTarget, distRoot, migrateLegacy);
+  if (projectTarget) uninstallProjectHook(harness, projectTarget);
   if (harness === "kiro-ide" && !customTarget) {
     try {
       if (removeManagedLegacyKiroIdePower()) {
@@ -1319,18 +1257,75 @@ function provisionProjectGitStrategyOnInstall(): void {
 }
 
 function help(): void {
+  console.log(`loeyae-aidlc v${PKG.version} — native host execution
+
+The host implements, tests, reviews and repairs under existing user permissions.
+No workflow, claim, H5 or stage report is required for ordinary work.
+
+  work [--work <goal>] [--paths <JSON array>]  Optional read-only Git summary
+  work --input <file>                        Read one selected document excerpt
+  work --details --paths <JSON array>        Request detailed Git output
+  work --help                               Show view options
+  install --harness <host>                   Install/update host assets
+  uninstall --harness <host>                 Remove installer-owned host assets
+  version                                   Show package version
+  help legacy                               Explicit managed workflow/tool reference
+
+Work can continue directly with host tools without invoking this CLI.
+Missing process documents do not prohibit work; real failures must be repaired
+before claiming completion. Deployment follows the user's actual authorization.`);
+}
+
+function legacyHelp(): void {
   console.log(`
 loeyae-aidlc v${PKG.version} — AWS-style Lightweight AI-DLC
 
 Usage:
   loeyae-aidlc <command> [options]
 
-Workflow:
+Default — native host execution (no AI-DLC execution gate):
+  work --work <goal> [--paths <JSON array>] [--input <file>]  Optional read-only Git/input context
+  work [--from <full commit>]                          Continue from actual artifacts; no claim/grant required
+  The host implements, tests and repairs under existing user permissions. Performance is a separate observation.
+
+Legacy managed workflow (explicit compatibility commands, not required for native execution):
   orchestrate next --scope <scope> --work <description>  Start a new Markdown workflow
   orchestrate next [--module <module-id>]               Read the next directive (per-module after split)
   orchestrate next [--module <id>] --provider-approval <ref>  Continue an approved protected/fallback ProviderPlan
   orchestrate report --stage <slug> --result completed [--gate-decision <id>]  Report a completed stage (--module in split layout)
   orchestrate profile escalate --signal <ProfileSignal> [--detail <text>]  Escalate the global execution profile from a recorded risk
+  orchestrate autonomy inspect                          Read the adopted batch scope (no grant or gate evaluation)
+  orchestrate autonomy policy                          Validate the pinned autonomy policy (read-only)
+  orchestrate autonomy decisions                       Project decisions, record blockers and human review (read-only)
+  orchestrate autonomy record --input <json> --expect <handoff-sha256|absent> [--preview]  Record under its live claim; managed grants require Core proposal_path staging
+  orchestrate autonomy grant issue --input <request.json> [--preview]  Issue only after exact operator-terminal confirmation
+  orchestrate autonomy grant inspect                   Read signed grant status; no execution permission is implied
+  orchestrate autonomy grant bind                      Validate this same session and return its grant reference
+  orchestrate autonomy admission run --input <frozen-plan.json> [--preview]  Receive design and run bounded preflight
+  orchestrate autonomy admission draft --batch <id> --input <plan.json> [--observations <plan.json>] [--grant-request <request.json>]  Read-only pre-adoption static validation; no grant/probe/commands
+  orchestrate autonomy host prepare --checks <json-array> [--context]  Trusted host action-local checks and input identity; no cached authorization
+  orchestrate autonomy admission inspect               Project ready / ready-with-delegated-decisions / not-ready
+  orchestrate autonomy dependencies [inspect]          Read staged dependencies, capability versions and write responsibility
+  orchestrate autonomy dependencies check --checkpoint <stage|check-id>  Revalidate this exact consumption point
+  orchestrate autonomy admission check                 Revalidate managed receipt before implementation
+  orchestrate autonomy observe run [--dependency-preflight] --input <frozen-plan.json>  Execute actual assertions; external preflight remains partial
+  orchestrate autonomy observe inspect                 Read candidate-bound controlled observations; never a batch completion
+  orchestrate autonomy batch finalize [--preview]       Converge final candidate, full matrix, Native gates and decisions
+  orchestrate autonomy batch inspect                   Read signed batch result and current/stale applicability
+  orchestrate autonomy repair inspect                  Inspect a controlled failure and same-attempt repair state
+  orchestrate autonomy run inspect                     Read durable checkpoints; does not authorize recovery
+  Codex runtime: supervise <frozen-config> <original-thread> (explicit successor policy required)
+  orchestrate autonomy run checkpoint --input <file> --expect <head-digest|absent>
+                                                      Host-only P2 checkpoint observation under a live grant
+  orchestrate autonomy repair request --kind <code-defect|test-correction|scope-change|unknown> --unit <module/unit> --failure <raw-sha256> --reason <diagnosis>
+  orchestrate autonomy repair start --pid <owned-host>  Harness-only first-start registration; never resume
+  orchestrate autonomy repair apply --expect <digest>  Harness-only Core-derived rollback under an exact binding
+    Adopted batches use current grant/admission and formal routes; notify/none need no per-stage confirmation.
+    Frozen implement units guide host scheduling; block approvals, user pause and all quality gates remain.
+    Unadopted workflows retain existing module selection and approvals; previews never authorize execution.
+  orchestrate autonomy grant check --operation <class> [--path <target>]  Recheck before a tool side effect
+  orchestrate autonomy grant revoke --expect <revision> --reason <text> [--preview]  Revoke via a separate operator input
+  orchestrate autonomy adopt --batch <id> --expect <revision> [--preview]  Explicitly freeze one batch; preview writes nothing
   orchestrate park [--module <module-id>]               Park the active workflow or one module workflow
   orchestrate checkpoint [--note <text>] [--instance <id>]  Record an informal convergence checkpoint (no state/revision change)
   orchestrate checkpoint --list [--instance <id>]       List recorded informal checkpoints
@@ -1342,6 +1337,12 @@ Workflow:
   orchestrate state measurements [--module <module-id>] Read-only execution-profile release measurements
   orchestrate state verify                              Check git for other workflow lineages and state revision regressions (read-only)
   orchestrate state summary [--module <id>] [--format json|markdown]  Read derived delivery summary without writing or re-running gates
+  orchestrate state context [--module <id> --unit <id> | --integration]  Read compact current context without audit/history loading
+  orchestrate state artifact --path <relative.md|json> [--offset <n>] [--limit <1..16000>]  Page public Markdown or summarize JSON evidence
+  orchestrate state facts [--module <id> | --integration]  Read durable historical facts without a live claim
+  orchestrate state migrate-facts [--module <id> | --integration]  Explicit lossless migration using the current binding
+  orchestrate state rebuild-view [--module <id> | --integration]  Rebuild the disposable Markdown view only
+  orchestrate state changes [--from <commit-id>] [--paths <JSON array>]  Compare Git content without workflow state or claims; includes dirty and untracked files
   orchestrate state retire --lineage <id> --user-input Approve --reason <text>  Retire another workflow lineage found in git; the active one stays
   orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason <text>  Carry a module workflow of another lineage over into the active split layout
   orchestrate next --module <id> --work <description>   Create a module workflow added after the split with its own work description
@@ -1419,12 +1420,16 @@ Examples:
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
+    case "work": {
+      (await import("../core/tools/aidlc-host-work")).runHostWorkCli(rest);
+      break;
+    }
     case "orchestrate": {
       run(orchestrationScript(), rest);
       break;
     }
-    case "state": throw new Error("The workflow control plane is Markdown only. Start work with orchestrate next --scope <scope> --work <description>.");
-    case "recover": throw new Error("Use orchestrate next to continue the active Markdown workflow, or start a new workflow with an explicit work description.");
+    case "state": throw new Error("Use work for read-only native-host context; help legacy lists explicit managed workflow commands.");
+    case "recover": throw new Error("Continue native work from actual code/Git with work; use help legacy only when maintaining managed workflow records.");
     case "approve": throw new Error("Use orchestrate report --result approved --user-input Approve for lightweight approval.");
     case "evidence":
       // Keep the producer in this process: arguments, session binding, cwd and
@@ -1447,7 +1452,9 @@ async function main(): Promise<void> {
     case "diagram-provider": run("core/tools/aidlc-diagram-provider.ts", rest); break;
     case "export": run("core/tools/aidlc-export.ts", rest); break;
     case "docx": run("core/tools/aidlc-docx.ts", rest); break;
-    case "hook": run("core/tools/aidlc-platform-hook.ts", rest, readFileSync(0, "utf8")); break;
+    case "hook":
+      if (process.env.AIDLC_SESSION_BINDING) run("core/tools/aidlc-platform-hook.ts", rest, readFileSync(0, "utf8"));
+      break;
     case "install": deploy(rest, "install"); break;
     case "uninstall": deploy(rest, "uninstall"); break;
     case "build": run("scripts/build.ts", rest); break;
@@ -1459,14 +1466,16 @@ async function main(): Promise<void> {
     case "help":
     case "--help":
     case "-h":
-    case undefined: help(); break;
+    case undefined: rest.includes("legacy") ? legacyHelp() : help(); break;
     default: throw new Error(`unknown command: ${command}; run 'loeyae-aidlc help' for usage`);
   }
 }
 
-try {
-  await main();
-} catch (error) {
-  console.error(`❌ ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    await main();
+  } catch (error) {
+    console.error(`❌ ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  }
 }

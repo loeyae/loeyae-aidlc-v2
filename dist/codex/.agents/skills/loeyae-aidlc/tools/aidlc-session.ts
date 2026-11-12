@@ -1,8 +1,10 @@
+import { assertAutonomyDependencyAccess } from "./aidlc-autonomy-dependencies";
 import { randomUUID, createHash } from "crypto";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { verifiedModuleIds, readUnitManifest } from "./aidlc-execution-context";
+import { checkExecutionGrant, type GrantOperation } from "./aidlc-grant-store";
 import {
 	GLOBAL_WORKFLOW,
 	assertSessionClaim,
@@ -84,6 +86,8 @@ export interface BindOptions {
 	humanInstructionRef?: string;
 	resume?: boolean;
 	preview?: boolean;
+	/** Trusted recovery caller fences a new attempt even before the old lease expires. */
+	rotateGeneration?: boolean;
 }
 
 export function releaseSession(root: string, instance: string, expected: string): void {
@@ -156,17 +160,20 @@ export function bindSession(
 			binding.workflow_id !== state.workflow_id ||
 			binding.project_root !== bindingFor(root, state, previous).project_root
 		)
-			throw new Error("renewal requires the current session binding");
+			throw new Error("renewal requires the current session binding; if it was lost, inspect the exact target and explicitly transfer to a new session with a human instruction reference (resume is only for the parked current instance)");
 	}
 	const now = new Date();
+	// An ordinary heartbeat is not a change of owner. Expired recovery and
+	// transfer still fence previous writers with a fresh generation.
+	const renewal = Boolean(previous?.generation && !transfer && !options.rotateGeneration && Date.parse(previous.expires_at) > now.getTime());
 	const claim: TeamLightActiveInstance = {
 		module_id:
 			/@module:([a-z0-9][a-z0-9-]*)/.exec(options.instance)?.[1] || ref.kind,
 		stage_instance: options.instance,
 		owner: options.owner,
 		session_id: options.session,
-		generation: randomUUID(),
-		claimed_at: now.toISOString(),
+		generation: renewal ? previous!.generation : randomUUID(),
+		claimed_at: renewal ? previous!.claimed_at : now.toISOString(),
 		heartbeat_at: now.toISOString(),
 		expires_at: new Date(now.getTime() + 30 * 60 * 1000).toISOString(),
 		...(previous?.branch ? { branch: previous.branch } : {}),
@@ -250,6 +257,7 @@ export function captureModulePublication(root: string, moduleId: string, options
 export function captureScopeSession(
 	root: string,
 	scope: { stage: string; module_id?: string; unit_id?: string },
+	operation: GrantOperation = "evidence-publish",
 ): WorkflowPublication | undefined {
 	const instance = `${scope.stage}${scope.module_id ? `@module:${scope.module_id}` : ""}${scope.unit_id ? `@unit:${scope.unit_id}` : ""}`;
 	const ref = sessionRef(root, instance);
@@ -263,6 +271,8 @@ export function captureScopeSession(
 	}
 	const binding = sessionBinding();
 	assertSessionClaim(root, state, instance, binding);
+	const global = loadWorkflowState(root); if (global?.autonomy_contract_version || global?.execution_grant_version) checkExecutionGrant(root, global, binding, [operation]);
+	assertAutonomyDependencyAccess(root, binding, [operation]);
 	return { ref, instance, binding: structuredClone(binding!) };
 }
 export function publishScope<T>(

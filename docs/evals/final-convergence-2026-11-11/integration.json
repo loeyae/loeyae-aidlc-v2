@@ -1,0 +1,76 @@
+{
+  "rows": [
+    {
+      "name": "captured-tail",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_native_final_convergence.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 3456
+    },
+    {
+      "name": "review",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_audit_review.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 29151
+    },
+    {
+      "name": "policy",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_autonomy_policy.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 30405
+    },
+    {
+      "name": "phase-reuse",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_audit_semantic_phase_reuse.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 73635
+    },
+    {
+      "name": "driver",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_native_host_driver.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 216
+    },
+    {
+      "name": "gateway",
+      "args": [
+        "--import",
+        "tsx",
+        "tests/test_native_host.ts"
+      ],
+      "exit_code": 0,
+      "duration_ms": 15514
+    },
+    {
+      "name": "typecheck",
+      "args": [
+        "node_modules/typescript/bin/tsc",
+        "--noEmit"
+      ],
+      "exit_code": 0,
+      "duration_ms": 4725
+    }
+  ],
+  "passed": true,
+  "real_model": false,
+  "new_pilots": false
+}

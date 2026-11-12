@@ -76,6 +76,13 @@ export function reviewAxisErrors(content: string): string[] {
   return errors;
 }
 
+/** Recognize explicit negation without erasing a separate blocking conclusion. */
+export function hasBlockingReviewConclusion(content: string): boolean {
+  if (/(?:并非|不是|并不是|不|非)无阻断/.test(content)) return true;
+  const conclusions = content.replace(/(?:不|非|无)阻断|non[- ]blocking/gi, "");
+  return /未通过|\bblocked\b|阻断/i.test(conclusions);
+}
+
 export function reviewIssueErrors(record: Record<string, unknown>): string[] {
   const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
   const errors: string[] = [];

@@ -2,87 +2,23 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 
-const pluginDir = path.dirname(fileURLToPath(import.meta.url));
-const configRoot = path.resolve(pluginDir, "..");
-const bundledRoot = path.join(configRoot, "loeyae-aidlc");
-const harnessRoot = fs.existsSync(path.join(configRoot, "tools")) ? configRoot : bundledRoot;
-const enginePath = path.join(harnessRoot, "tools", "aidlc-orchestrate.ts");
-const stagePath = path.join(harnessRoot, "stages");
-const ACTIVE_GUARDS = Symbol.for("loeyae-aidlc.opencode.active-guards");
-const activeGuards = globalThis[ACTIVE_GUARDS] || new Map();
-globalThis[ACTIVE_GUARDS] = activeGuards;
+const configRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const harnessRoot = fs.existsSync(path.join(configRoot, "tools")) ? configRoot : path.join(configRoot, "loeyae-aidlc");
+const protocolPath = path.join(harnessRoot, "knowledge/protocols/host-execution.md");
 
-function requireRuntime() {
-  if (!fs.existsSync(enginePath) || !fs.existsSync(stagePath)) {
-    throw new Error(`Loeyae AI-DLC runtime is incomplete: expected ${enginePath} and ${stagePath}`);
-  }
-}
-
-function bootstrap() {
-  return `<EXTREMELY_IMPORTANT>\nLoeyae AI-DLC v2 已启用。面向用户的回复首句称呼 BOSS（用户指定其他称呼时遵从用户）。阶段 completed/approved 报告成功后展示 handoff_prompt，再用独立 text 代码块原样展示 next_stage_prompt，供复制续作；仍须核对最新路由、精确领取及正式 directive，不在失败时编造下一阶段。使用 ${enginePath} 的确定性引擎获取下一阶段；不得自行跳步。阶段规则位于 ${stagePath}。完成后必须报告结果，所有准入、准出和传感器门禁必须通过。\nPRD 只在初始化时由用户通过 --with-prd 选择。完整 scope 的 workspace-detection 是运行时架构 choice：choice_required=true 时展示 single-module、multi-module，并用 --instruction-ack workspace-detection --user-input <choice> 写入签名 history；单模块仍登记唯一模块，product-inception 被条件跳过，product-contracts 仅在多模块或存在跨边界事实时执行；快速 scope 不要求该 choice。ui-mock 也是运行时 choice：choice_required=true 时展示 choices，并用 --instruction-ack ui-mock --user-input <choice> 记录 html-mock、figma-create、figma-existing 或 skip；不得并行执行分支或从 handoff.md 改变路由。application-design、units-generation、functional-design、operations 按 workflow-plan.md 的 execute/skip + evidence 自动路由；I14 执行时新签名 unit-manifest.json 必须逐单元声明 conditional_stages，旧清单缺字段时保守回退模块级条件；Operations condition=false 不产生审批，operations-templates 仅在明确要求归档可复用模板时执行。\n</EXTREMELY_IMPORTANT>`;
-}
-
-async function enforceIdleGate(client, sessionId) {
-  const key = sessionId || "<missing-session-id>";
-  const existing = activeGuards.get(key);
-  if (existing) return existing;
-
-  const guard = (async () => {
-    let result;
-    try {
-      result = Bun.spawnSync(["loeyae-aidlc", "hook", "--format", "opencode"], {
-        cwd: process.cwd(),
-        stdin: new TextEncoder().encode(JSON.stringify({ cwd: process.cwd(), session_id: sessionId })),
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-    } catch (error) {
-      const message = `AI-DLC lifecycle guard could not start: ${String(error)}`;
-      if (!sessionId) throw new Error(message);
-      await client.session.prompt({
-        path: { id: sessionId },
-        body: { parts: [{ type: "text", text: message }] },
-      });
-      return;
-    }
-
-    if (result.exitCode === 0) return;
-    const message = new TextDecoder().decode(result.stderr?.length ? result.stderr : result.stdout).trim()
-      || "AI-DLC stage gate rejected stopping.";
-    if (!sessionId) throw new Error(`${message}\nOpenCode did not provide a session ID, so the AI-DLC gate cannot safely continue the session.`);
-    await client.session.prompt({
-      path: { id: sessionId },
-      body: { parts: [{ type: "text", text: `${message}\nReview the local session binding; ending a turn does not complete a stage.` }] },
-    });
-  })();
-
-  activeGuards.set(key, guard);
-  try {
-    return await guard;
-  } finally {
-    if (activeGuards.get(key) === guard) activeGuards.delete(key);
-  }
-}
-
-export const LoeyaeAidlcPlugin = async ({ client }) => ({
+// Native host owns execution and idle/continuation. No lifecycle guard or Core dispatch.
+export const LoeyaeAidlcPlugin = async () => ({
   config: async (config) => {
-    requireRuntime();
     config.instructions = config.instructions || [];
-    if (!config.instructions.includes(enginePath)) config.instructions.push(enginePath);
+    config.instructions = config.instructions.filter(value => value !== path.join(harnessRoot, "tools/aidlc-orchestrate.ts"));
+    if (fs.existsSync(protocolPath) && !config.instructions.includes(protocolPath)) config.instructions.push(protocolPath);
   },
   "experimental.chat.messages.transform": async (_input, output) => {
-    requireRuntime();
-    if (!output.messages.length) return;
-    const firstUser = output.messages.find((message) => message.info.role === "user");
-    if (!firstUser || !firstUser.parts.length) return;
-    if (firstUser.parts.some((part) => part.type === "text" && part.text.includes("Loeyae AI-DLC v2 已启用"))) return;
-    const firstPart = firstUser.parts[0];
-    firstUser.parts.unshift({ ...firstPart, type: "text", text: bootstrap() });
-  },
-  event: async ({ event }) => {
-    if (event.type !== "session.idle") return;
-    requireRuntime();
-    const sessionId = event.properties?.sessionID || event.properties?.session_id;
-    await enforceIdleGate(client, sessionId);
+    const firstUser = output.messages.find(message => message.info.role === "user");
+    if (!firstUser?.parts.length) return;
+    const marker = "Loeyae AI-DLC：宿主直接实施";
+    if (firstUser.parts.some(part => part.type === "text" && part.text.includes(marker))) return;
+    firstUser.parts.unshift({ ...firstUser.parts[0], type: "text", text:
+      `${marker}。按用户已确认目标和验收标准使用原生工具连续实施、测试、审查和返修。可选 work 命令只读查看 Git/选定输入，不创建 workflow/claim/grant，不要求 H5 或逐阶段 report。流程记录缺失不阻止开发，测试失败继续修复且不得宣称完成。按需读取 ${protocolPath}；旧受管协议只在用户明确选择维护旧流程时使用。` });
   },
 });

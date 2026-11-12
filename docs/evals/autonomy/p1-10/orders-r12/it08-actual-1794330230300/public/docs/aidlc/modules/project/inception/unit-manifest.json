@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "module_id": "project",
+  "units": [
+    {
+      "unit_id": "default",
+      "name": "orders",
+      "service_id": "project",
+      "conditional_stages": [],
+      "req_refs": [
+        "REQ-001"
+      ],
+      "autonomy_version": "1",
+      "evidence_inputs": {
+        "version": 1,
+        "paths": [
+          "src",
+          "tests"
+        ],
+        "shared_paths": [],
+        "depends_on_units": []
+      }
+    }
+  ]
+}

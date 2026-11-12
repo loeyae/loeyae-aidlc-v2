@@ -1,0 +1,15 @@
+{
+  "name": "build",
+  "argv": [
+    "C:\\Users\\loeye\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "--import",
+    "tsx",
+    "scripts/build.ts",
+    "--all"
+  ],
+  "duration_ms": 8647.1324,
+  "exit_code": 1,
+  "error": null,
+  "signal": null,
+  "real_business_run": false
+}

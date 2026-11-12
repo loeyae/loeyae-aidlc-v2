@@ -1,45 +1,17 @@
 ---
 name: aidlc-user-story-generation
-description: "将已批准需求转化为以用户为中心的故事和验收标准；不负责 I7 路由和完成判定。"
+description: "把已有需求转化为用户场景和可验证验收标准，复用已有故事。"
 triggers: 用户故事, 故事生成, 验收标准, 用户场景, user story, acceptance criteria
 ---
 
-# 用户故事生成能力
+# user-story-generation
 
-开始时宣布："使用 aidlc-user-story-generation 生成用户故事"。
+读取已确认需求和现有故事，围绕用户目标、成功路径、失败与边界提炼验收标准。不要求先取得交叉验证报告或固定深度参数；未知业务规则明确标注，必要时澄清。
 
-## 资源路径
+只补充缺失的行为，避免把同一需求换写成多份重复故事。故事和验收保存在已有业务文档/任务清单，需要专门文档时再生成。输出可用于直接实现和测试的标准，不以阶段记录代替业务完整性。
 
-共享资源路径以本 `SKILL.md` 所在目录为基准：`../..` 是发布包根目录，包含 `knowledge/`、`stages/` 等目录。下文链接中的 `../../` 必须保留，不按项目工作目录解析，也不改写为本技能的 `references/`。
+默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
 
-读取前确认目标文件存在；缺失时报告解析后的绝对路径并返回 `NEEDS_CONTEXT`。
+## 兼容参考
 
-## 输入
-
-调用方必须提供：
-
-- 已批准的需求文档路径；
-- 已通过交叉验证的需求（I6 通过）；
-- 深度指南取值（全面/标准/精简）；
-- 模块或服务范围。
-
-缺少必要输入时返回 `NEEDS_CONTEXT`，不推断需求审批状态。
-
-## 加载
-
-加载发布包中的 [stages/inception/inception-user-stories.md](../../stages/inception/inception-user-stories.md)。
-
-## 输出
-
-返回 `docs/aidlc/inception/user-stories.md` 路径、用户画像、故事列表、验收标准和未解决问题。
-
-## 禁止事项
-
-不得：
-
-- 更新项目 state 或 audit；
-- 代替用户审批；
-- 放行质量门禁；
-- 修改需求文档；
-- 宣布阶段完成；
-- 伪造 evidence。
+仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-user-story-generation.md)，默认不加载。

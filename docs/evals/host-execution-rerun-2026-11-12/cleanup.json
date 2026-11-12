@@ -1,0 +1,47 @@
+{
+  "cleaned_at": "2026-11-12T06:50:48.8912690Z",
+  "deleted": [
+    {
+      "path": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-orders-20261112\\src",
+      "kind": "directory"
+    },
+    {
+      "path": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-orders-20261112\\tests",
+      "kind": "directory"
+    },
+    {
+      "path": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-orders-20261112\\.gitignore",
+      "kind": "file"
+    },
+    {
+      "path": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-orders-20261112\\README.md",
+      "kind": "file"
+    },
+    {
+      "path": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-publish-20261112\\.runtime",
+      "kind": "directory"
+    },
+    {
+      "path": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-publish-20261112\\src",
+      "kind": "directory"
+    },
+    {
+      "path": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-publish-20261112\\tests",
+      "kind": "directory"
+    },
+    {
+      "path": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-publish-20261112\\.gitignore",
+      "kind": "file"
+    },
+    {
+      "path": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\.worktrees\\aidlc-host-publish-20261112\\README.md",
+      "kind": "file"
+    }
+  ],
+  "retained": [
+    "frozen pilot inputs",
+    "design baselines",
+    "Git history",
+    "external historical run evidence"
+  ]
+}

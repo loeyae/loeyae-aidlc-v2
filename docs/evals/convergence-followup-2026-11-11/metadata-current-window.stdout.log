@@ -1,0 +1,11 @@
+NATIVE_PRODUCER test-case-derivation/test-case-derivation
+NATIVE_PRODUCER tdd/red-test-evidence
+NATIVE_PRODUCER tdd/baseline-test-evidence
+NATIVE_PRODUCER code-generation/green-test-evidence
+NATIVE_PRODUCER code-generation/test-quality
+NATIVE_PRODUCER code-generation/traceability-matrix
+NATIVE_PRODUCER code-generation/structural-invariants
+NATIVE_PRODUCER code-review/review-evidence
+NATIVE_PRODUCER code-review/test-quality
+NATIVE_PRODUCER code-review/traceability-matrix
+PASS actual public CLI emits an empty local preview after C7, without scope-exhausted

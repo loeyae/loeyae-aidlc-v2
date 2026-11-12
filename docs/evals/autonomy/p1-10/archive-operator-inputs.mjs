@@ -1,0 +1,11 @@
+// Supplement old, immutable archives with exact public operator request/reload inputs.
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';
+const key=process.argv[2];if(!['orders-r6','publish-r10'].includes(key))throw Error('Explicit ended third-round pilot required');
+const dir=path.join(import.meta.dirname,key),manifestPath=path.join(dir,'actual-run/manifest.json'),manifest=JSON.parse(fs.readFileSync(manifestPath));
+if(!manifest.actual_exit.operations_reconciled||!manifest.actual_exit.claims_reconciled||manifest.actual_exit.pending_unknown.length)throw Error('Run must be reconciled');
+const out=path.join(dir,'supplemental-operator-inputs');fs.mkdirSync(out);const sha=b=>crypto.createHash('sha256').update(b).digest('hex'),rows=[];
+const privateNames=new Set(['binding','initial_binding','session_binding','coordinator_binding','generation','private_key']);
+function check(v){if(Array.isArray(v))return v.forEach(check);if(v&&typeof v==='object')for(const [k,x] of Object.entries(v)){if(privateNames.has(k))throw Error('Private authority is retained only in its original location');check(x);}}
+for(const name of fs.readdirSync(path.join(manifest.original_root,'.runtime')).filter(n=>/^h5-request-[a-f0-9]{64}\.json$|^reload-(request|ack)\.json$/.test(n))){const from=path.join(manifest.original_root,'.runtime',name),s=fs.lstatSync(from);if(!s.isFile()||s.isSymbolicLink()||s.nlink!==1)throw Error('Linked input');const b=fs.readFileSync(from);check(JSON.parse(b));fs.writeFileSync(path.join(out,name),b,{flag:'wx'});rows.push({original_path:'.runtime/'+name,saved_path:name,sha256:sha(b),bytes:b.length});}
+fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify({kind:'byte-preserving-public-operator-input-supplement',key,run_id:manifest.run_id,original_archive_manifest_sha256:sha(fs.readFileSync(manifestPath)),files:rows,scope:'Raw request inputs and owned-service reload records; not the normalized signed grant or a replacement approval',authority_copied:false,original_archive_changed:false,archived_at:new Date().toISOString()},null,2)+'\n',{flag:'wx'});
+console.log(JSON.stringify({key,output:out,files:rows.length,original_archive_changed:false}));

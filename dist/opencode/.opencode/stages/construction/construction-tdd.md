@@ -19,6 +19,20 @@ requires: [test-case-derivation]
 
 # RED 测试门禁（原 TDD 阶段）
 
+## 自主宿主执行摘要
+
+首次测试写入也需要当前正式 directive、精确领取、有效准入和原 ExecutionGrant。先读取当前单元 I13、UC-D 原文、批准需求和现有测试；适用集合按 I13 的 ucd_units/归属确定，不能擅自减少验收。
+
+new 行为：编写真实断言，在业务实现前以冻结命令取得因目标行为未实现而失败的 RED（failure_class=behavior）；先确认合规实现能使断言通过。characterization：在未修改基线代码上取得真实全通过 BASELINE。保留原错误对象、边界、失败和重复调用语义；mock 不得替代要求的真实依赖验证。RED/BASELINE 的 uc_mapping 必须恰好覆盖适用 UC-D；编译、环境或测试自身错误不能算 RED。
+
+本阶段不前置生产实现。接受 RED 后冻结其命名测试输入，GREEN 由 code-generation 负责；真实测试缺陷需要 Core 决定新的 TDD 周期，禁止静默改测试或历史证据。存量项目、重构和 bugfix 不自动豁免；无业务行为须消费 I13 的结构化 not_applicable 与替代验证。例外必须有真实授权且走受控证据。
+
+通过当前阶段所有 sensors 后 report，立即交回宿主。遇到共享契约、混合 new/characterization、替代验证或测试缺陷，先按目录读取相关详细章节；不重复已完成上游阶段，不将预检通过当作 RED/BASELINE。
+
+## 阶段背景与适用集合
+
+显式采用自主批次时，测试代码的首次写入同样属于实施。开始前须取得有效 autonomous-admission receipt 和当前 ExecutionGrant / 精确 binding；未知能力、缺少设计资源、测试数据或必要浏览器不能降级为 passed。准入保留本阶段 I13 和真实 RED/BASELINE 的全部门禁，不把预检命令通过计作 RED/BASELINE。
+
 先按 I13 已发布的 `ucd_units`（显式或唯一需求归属推导）确定当前单元集合；下文“全部 new/characterization/UC-D”均指该适用集合。仅缺少归属字段的旧证据保留模块全集兼容含义，需要收敛时先受控刷新 I13，不能在 TDD 中擅自改变范围。
 
 本阶段位于 GREEN 代码生成之前，负责把 I13 的 UC-D 转换为真实测试，并按 UC-D 的 `tdd_mode` 由受控命令观察：

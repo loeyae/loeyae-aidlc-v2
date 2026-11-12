@@ -1,0 +1,904 @@
+{
+  "task": "P1-07",
+  "kind": "engineering-and-actual-observation-verification",
+  "verified_at": "2026-11-08T19:14:03.891Z",
+  "source_head": "d2fd48b58c503ecd2e34342a4b7593987e3e625a",
+  "controlled_business_evidence": false,
+  "source_sha256": {
+    "core/tools/aidlc-observations.ts": "adb259f4cc3751c929d01dac5a9cf15451a76653e898dc74967a11a6ba9c1599",
+    "core/tools/aidlc-observation-inputs.ts": "87a837d58b6053c6300040e7e962b3f63c31283e87058c6a681a8b5d32bb481d",
+    "core/tools/aidlc-observation-browser.ts": "eaa028f8baec75f84424c984a267211e6cd67f24aad6e28ac2feeff1e49bc848",
+    "core/tools/aidlc-observation-live.ts": "28e104b8e3bfa679a80f379adeab902315fdec1fcf2023523cd8635b9728f97a",
+    "core/tools/aidlc-autonomy.ts": "521747f08acb6bcb929956b2d5942c20d8a21e78f576bfdc6313ce6cf793e565",
+    "core/tools/aidlc-autonomy-dependencies.ts": "972dda31679d14a978eef4b6aa4565ad22cd514c688fbb0806ceb407e3382694",
+    "core/tools/aidlc-grant-store.ts": "c202e380b500e7cacd4086e08cc21fb647a785557fbb7120c058f24df31c0768",
+    "core/tools/aidlc-orchestrate.ts": "7c5ecbf193c0417ce6fc981493531d7af7c500dda6ca65438a5a871a07820b4c",
+    "harness/codex/runtime/aidlc-codex-host.mjs": "1f86901d93512800fbc66d823ebe4412341b1a626a38977ea904270a46116019",
+    "harness/codex/runtime/host-kernel.cjs": "56c777f970406343ffca72b95dc714a00270b14d9196efad772a5407fe7e296b",
+    "harness/codex/README.md": "290cbfdd8e28d9842e20380f5c4424c193fe481c868337f72d326524460cbfd7",
+    "bin/cli.ts": "5e5545994cb2e505e51c078bdc599303d4ec3f0036503c81a22fcdf3403dfe32",
+    "package.json": "13f3b88b82945c992f7b65db74c29fd8d5dcc7eeaca0c1d07745580110380938",
+    "scripts/core-test-suites.json": "cf0e40e07890636dbaaaf1316a8b0311513a428302cc5c5922c33ff38152c1d8",
+    "tests/helpers/observation-fixture.ts": "8e257d56759a3051bc3baca139ed0f44f21173d8d015636785979084dfc20401",
+    "tests/test_observations.ts": "c3d859533ea7944d83f2bc60394e46ae7eceeac7f62926122b226ccbb0cb79d3",
+    "tests/test_observation_ui.ts": "1437d0a7dbbc7645535bd819aed61a42d100d09acae62f0a809cde7d1f820560",
+    "tests/test_runtime_observations.ts": "21b113593edaa402152fa31618d84d4fdd0bdd37e42fb3f8b99999247123bcee",
+    "tests/test_native_host_driver.ts": "489788736c5d15c9cfa7f8a9490e0374a37fe0cdc77fdeffac41db2ea7f5bbc9",
+    "core/knowledge/protocols/common-session-handoff.md": "52d9b8038e1f272f0d210c8549b8fe1832834d7b00bd15677ff4bed2c3e34bae",
+    "core/knowledge/protocols/common-step-completion-protocol.md": "940cc46f61f3a6e176773c705f528cac596195d371d5bca16530e6814cd4ada1",
+    "core/knowledge/standards/common-runtime-dependency-analysis.md": "a1b0fdd6da0fd58efdffa942f8dd839c89dc0a1e38af16aa4ea0fdc6f9de1635",
+    "core/knowledge/standards/common-requirement-integrity.md": "9fc5ba72eeeb43172fac25607ecba3780bb2100612aeacec3a4ff5c4580ba5a9",
+    "core/stages/construction/construction-build-and-test.md": "5347d8e3858068cc56bd3b727f6fc6e38f2615cc9d7498299aa40e8fc7faaa90",
+    "core/stages/construction/construction-code-review.md": "0b86e76cdca5ebb59e961c88c7ad933c7f67d0e1bc21cde02a407ad38273a82c",
+    "docs/aidlc-autonomous-contracts-v1.md": "ea5e8aa8908b36a413399ee39d9d0752b1e7c57b393a1bb275f31f590a1ed56a",
+    "docs/aidlc-autonomous-implementation-design.md": "0ce9dc32d617effc8f3bf941ebbc873a627419b2214034f877f70119293be396",
+    "docs/aidlc-autonomous-implementation-p1.md": "60ebd9b64c37414ad135d39525c2dcd625fb26bf0c48c58d8530ce4f48829f59",
+    "docs/loeyae-aidlc-cli-guide.md": "ad6afb67291eea92514f20729828e398eb31a285d75931c849ddba93f5d14c9a",
+    "docs/evals/autonomy/p1-07/README.md": "5054b3715c16a0c8cb4622c235621b26da3e445b6e1160511440cafb499995d1",
+    "docs/evals/autonomy/p1-07/code-review.md": "276885134500a6b7c847164f81b19f0c36ccd3c4d92cd95e477af2abc0116071"
+  },
+  "checker_identity": {
+    "checker_digest": "486752b945d815760ce761b4eda95caca732448d544f976f358690c38d1a009c",
+    "node": "v24.22.1",
+    "platform": "win32",
+    "arch": "x64"
+  },
+  "tests": [
+    {
+      "name": "observations",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_observations.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:09:35.571Z",
+      "finished_at": "2026-11-08T19:10:26.274Z",
+      "log": "docs/evals/autonomy/p1-07/observations-final-4.log",
+      "log_sha256": "d74af960d09b88c63cb788135705140fa155e98c8ad13f02214c645b4e62cd9d"
+    },
+    {
+      "name": "runtime-observations",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_runtime_observations.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:09:35.577Z",
+      "finished_at": "2026-11-08T19:11:03.960Z",
+      "log": "docs/evals/autonomy/p1-07/runtime-observations-final-4.log",
+      "log_sha256": "f78e119623d5627feb7d019a493b44e2a3df0cd89147f29838141966dcac021a"
+    },
+    {
+      "name": "native-driver",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_native_host_driver.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:10:45.179Z",
+      "finished_at": "2026-11-08T19:10:45.391Z",
+      "log": "docs/evals/autonomy/p1-07/native-driver-final-4.log",
+      "log_sha256": "0c751c3e5ebfba6a8a3e6939620050a454192a55150eddb413a63d8fbc7a0b1b"
+    },
+    {
+      "name": "native-host",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_native_host.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:10:26.277Z",
+      "finished_at": "2026-11-08T19:10:45.178Z",
+      "log": "docs/evals/autonomy/p1-07/native-host-final-4.log",
+      "log_sha256": "482b3e4cca80227560ec7566c9d544260bbe661d635e5bbce9b5573afd27a5c0"
+    },
+    {
+      "name": "ui-observations",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_observation_ui.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:09:35.583Z",
+      "finished_at": "2026-11-08T19:10:51.097Z",
+      "log": "docs/evals/autonomy/p1-07/ui-observations-final-4.log",
+      "log_sha256": "dfcd987b80e892b0460c31ead22b6e2d80a4c53ff8ff0ad2635300aec67349d2"
+    },
+    {
+      "name": "dependencies",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_autonomy_dependencies.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:04:27.434Z",
+      "finished_at": "2026-11-08T19:06:49.641Z",
+      "log": "docs/evals/autonomy/p1-07/dependencies-final-3.log",
+      "log_sha256": "a828232e667c8608d72d1424a21b91cc84ae4261322829a7aa9df4cd0f973283"
+    },
+    {
+      "name": "admission-route",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_autonomous_admission_route.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:10:45.391Z",
+      "finished_at": "2026-11-08T19:10:48.726Z",
+      "log": "docs/evals/autonomy/p1-07/admission-route-final-4.log",
+      "log_sha256": "c023c6014d53128533de262071e5537266e66e24e90d1f970c396d913b8a3044"
+    },
+    {
+      "name": "dependency-preflight",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_autonomous_dependency_preflight.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:06:49.535Z",
+      "finished_at": "2026-11-08T19:06:52.705Z",
+      "log": "docs/evals/autonomy/p1-07/dependency-preflight-final-3.log",
+      "log_sha256": "1b21141520ccf0e78ae4ea58ff3ab4c79bd91373991151a6acc7ee0de55354ed"
+    },
+    {
+      "name": "boundaries",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_autonomy_dependency_boundaries.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:04:28.582Z",
+      "finished_at": "2026-11-08T19:06:46.063Z",
+      "log": "docs/evals/autonomy/p1-07/boundaries-final-3.log",
+      "log_sha256": "220be106a3de5660bc4625fd8c8c0db41223e96d0dd59a04ca00ab77fac5c3d8"
+    },
+    {
+      "name": "autonomy-scope",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_autonomy_scope.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:06:49.641Z",
+      "finished_at": "2026-11-08T19:07:10.235Z",
+      "log": "docs/evals/autonomy/p1-07/autonomy-scope-final-3.log",
+      "log_sha256": "88296178e59c42561fd143232c8c7b9cf696091f07e095c01922b0c94412f1c5"
+    },
+    {
+      "name": "autonomy-policy",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_autonomy_policy.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:06:52.706Z",
+      "finished_at": "2026-11-08T19:07:37.094Z",
+      "log": "docs/evals/autonomy/p1-07/autonomy-policy-final-3.log",
+      "log_sha256": "3bc29d288db25133a65a7b16dccb482788f3e1fe628e956b30c3fac2443a481d"
+    },
+    {
+      "name": "sessions",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_mars243_sessions.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:07:37.094Z",
+      "finished_at": "2026-11-08T19:07:47.973Z",
+      "log": "docs/evals/autonomy/p1-07/sessions-final-3.log",
+      "log_sha256": "a1bdee39652793183f6b9d0244715e86f349f974b1980604f9db2e7c80bd5910"
+    },
+    {
+      "name": "admission",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_autonomous_admission.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:04:34.818Z",
+      "finished_at": "2026-11-08T19:07:40.615Z",
+      "log": "docs/evals/autonomy/p1-07/admission-final-3.log",
+      "log_sha256": "99cbe82b9ead23201da415dd52ec3458fec91968db80e65c92fc3053c3436881"
+    },
+    {
+      "name": "layout",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_mars243_layout.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:07:40.615Z",
+      "finished_at": "2026-11-08T19:07:49.225Z",
+      "log": "docs/evals/autonomy/p1-07/layout-final-3.log",
+      "log_sha256": "6de58b3615224b7df2e2a94483c149e32bf68eb1c82acef9cc5685051aaf338e"
+    },
+    {
+      "name": "delivery-summary",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_delivery_summary.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:07:49.225Z",
+      "finished_at": "2026-11-08T19:07:58.008Z",
+      "log": "docs/evals/autonomy/p1-07/delivery-summary-final-3.log",
+      "log_sha256": "f1235682cf9369bbe309eef5ee397bfb0f098e553e489426f218189091305eab"
+    },
+    {
+      "name": "handoff",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_stage_handoff_prompts.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:07:47.974Z",
+      "finished_at": "2026-11-08T19:08:06.306Z",
+      "log": "docs/evals/autonomy/p1-07/handoff-final-3.log",
+      "log_sha256": "a0f2c8e92f034d0719ea015fd59b38bcd8c0fd3a60e51945695dc5d8fbd98d70"
+    },
+    {
+      "name": "execution-policy",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_mars160_execution_policy.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:08:06.306Z",
+      "finished_at": "2026-11-08T19:08:07.111Z",
+      "log": "docs/evals/autonomy/p1-07/execution-policy-final-3.log",
+      "log_sha256": "34c3a81b7740e1afb112d048b4fff8c171da8b971ccda53b372bfee447c6c723"
+    },
+    {
+      "name": "provider-runner",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_provider_runner_gate.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:07:58.009Z",
+      "finished_at": "2026-11-08T19:08:19.152Z",
+      "log": "docs/evals/autonomy/p1-07/provider-runner-final-3.log",
+      "log_sha256": "87f53c1ecbe950620ecf6282f5cae32096aeaf5d78400055d130343b00aa2309"
+    },
+    {
+      "name": "typecheck",
+      "command": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "--noEmit"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:10:48.728Z",
+      "finished_at": "2026-11-08T19:10:53.315Z",
+      "log": "docs/evals/autonomy/p1-07/typecheck-final-4.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "execution-grant",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_execution_grant.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:07:10.235Z",
+      "finished_at": "2026-11-08T19:08:39.161Z",
+      "log": "docs/evals/autonomy/p1-07/execution-grant-final-3.log",
+      "log_sha256": "e480b2cc1c1d0a53a0986a3bfa7c39982054f538f2e451b3ae90d43ebf953e85"
+    },
+    {
+      "name": "tdd-gates",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_construction_tdd_gates.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:08:07.111Z",
+      "finished_at": "2026-11-08T19:08:39.079Z",
+      "log": "docs/evals/autonomy/p1-07/tdd-gates-final-3.log",
+      "log_sha256": "4b62d5743ae042843b04eb3b1dea288c8367ac6a3d961834e8750c8c54f6bb31"
+    }
+  ],
+  "samples": [
+    {
+      "name": "orders-actual",
+      "status_at_observation": "passed",
+      "actual_checks": 2,
+      "ui_combinations": 0,
+      "candidate_ref": {
+        "candidate_id": "7ba860b45eb570dcb0b8512586b5d1d0dacc133891dba7f96d796c82183c477b",
+        "repositories": [
+          {
+            "repository_id": "project",
+            "commit": "6d088683538d57dce9ca2ebb74af70d5da9e7c1f",
+            "tree_digest": "fb01d926eacbda485244fea97c676cc4bc6eb61d5c1546e1bdb62460e5df1104",
+            "dirty": false,
+            "relevant_inputs": [
+              {
+                "repository_id": "project",
+                "path": "src/server.cjs",
+                "digest_mode": "raw-file",
+                "digest": "985de5433033c9ba56bf778f2f625ae6ef92e275e7508c513ef7c062fb5edebe"
+              },
+              {
+                "repository_id": "project",
+                "path": "src/orders.cjs",
+                "digest_mode": "raw-file",
+                "digest": "947ab23ca24a6d4eddd48454cf8d65783aa0940559271b823908fc311a0a0c11"
+              },
+              {
+                "repository_id": "project",
+                "path": "src/observe.cjs",
+                "digest_mode": "raw-file",
+                "digest": "d1fd256d9b81af5b59893138dcf86d2913b45d2da8d68f8263831a27238c05dd"
+              },
+              {
+                "repository_id": "project",
+                "path": "src/web.html",
+                "digest_mode": "raw-file",
+                "digest": "f5f7cbb1ac860f8b0367d2fd592cedf4ffd3d8c9f6229e82c60ef3e29f919119"
+              }
+            ]
+          }
+        ],
+        "artifacts": [
+          {
+            "repository_id": "project",
+            "path": "src/server.cjs",
+            "digest_mode": "raw-file",
+            "digest": "985de5433033c9ba56bf778f2f625ae6ef92e275e7508c513ef7c062fb5edebe"
+          },
+          {
+            "repository_id": "project",
+            "path": "src/orders.cjs",
+            "digest_mode": "raw-file",
+            "digest": "947ab23ca24a6d4eddd48454cf8d65783aa0940559271b823908fc311a0a0c11"
+          },
+          {
+            "repository_id": "project",
+            "path": "src/observe.cjs",
+            "digest_mode": "raw-file",
+            "digest": "d1fd256d9b81af5b59893138dcf86d2913b45d2da8d68f8263831a27238c05dd"
+          },
+          {
+            "repository_id": "project",
+            "path": "src/web.html",
+            "digest_mode": "raw-file",
+            "digest": "f5f7cbb1ac860f8b0367d2fd592cedf4ffd3d8c9f6229e82c60ef3e29f919119"
+          }
+        ]
+      },
+      "signature_verified": true,
+      "source_and_raw_hashes_verified": true,
+      "archived_fixture_authority": true,
+      "business_verified": false,
+      "receipt_sha256": "34d230ce87b55d177a7af2ecf3fa8e4590e049627f0ddc4e0afd7471c2db121f",
+      "manifest_sha256": "e867e0eccb32b93cdd22cf4d1c510241ed7de45f083838a3c52446a6543c5167"
+    },
+    {
+      "name": "publish-actual",
+      "status_at_observation": "passed",
+      "actual_checks": 13,
+      "ui_combinations": 10,
+      "candidate_ref": {
+        "candidate_id": "98d932fac8e70f4f8ae3d5984be6ea225e01a575f9d2639f3332886209a8cfb4",
+        "repositories": [
+          {
+            "repository_id": "project",
+            "commit": "5d6ce791628f9f1bf412a2029e091316a9d4b015",
+            "tree_digest": "2eb85004e1e288a8ac17efc8ab73dacf16be50ff112f0611d3fb93694738df96",
+            "dirty": false,
+            "relevant_inputs": [
+              {
+                "repository_id": "project",
+                "path": "src/server.cjs",
+                "digest_mode": "raw-file",
+                "digest": "985de5433033c9ba56bf778f2f625ae6ef92e275e7508c513ef7c062fb5edebe"
+              },
+              {
+                "repository_id": "project",
+                "path": "src/orders.cjs",
+                "digest_mode": "raw-file",
+                "digest": "947ab23ca24a6d4eddd48454cf8d65783aa0940559271b823908fc311a0a0c11"
+              },
+              {
+                "repository_id": "project",
+                "path": "src/observe.cjs",
+                "digest_mode": "raw-file",
+                "digest": "d1fd256d9b81af5b59893138dcf86d2913b45d2da8d68f8263831a27238c05dd"
+              },
+              {
+                "repository_id": "project",
+                "path": "src/web.html",
+                "digest_mode": "raw-file",
+                "digest": "f5f7cbb1ac860f8b0367d2fd592cedf4ffd3d8c9f6229e82c60ef3e29f919119"
+              }
+            ]
+          }
+        ],
+        "artifacts": [
+          {
+            "repository_id": "project",
+            "path": "src/server.cjs",
+            "digest_mode": "raw-file",
+            "digest": "985de5433033c9ba56bf778f2f625ae6ef92e275e7508c513ef7c062fb5edebe"
+          },
+          {
+            "repository_id": "project",
+            "path": "src/orders.cjs",
+            "digest_mode": "raw-file",
+            "digest": "947ab23ca24a6d4eddd48454cf8d65783aa0940559271b823908fc311a0a0c11"
+          },
+          {
+            "repository_id": "project",
+            "path": "src/observe.cjs",
+            "digest_mode": "raw-file",
+            "digest": "d1fd256d9b81af5b59893138dcf86d2913b45d2da8d68f8263831a27238c05dd"
+          },
+          {
+            "repository_id": "project",
+            "path": "src/web.html",
+            "digest_mode": "raw-file",
+            "digest": "f5f7cbb1ac860f8b0367d2fd592cedf4ffd3d8c9f6229e82c60ef3e29f919119"
+          }
+        ]
+      },
+      "signature_verified": true,
+      "source_and_raw_hashes_verified": true,
+      "archived_fixture_authority": true,
+      "business_verified": false,
+      "receipt_sha256": "84f11cb45611e26e2a31b01ccd6810caffa0cb5f5e1574a6305d1b2ac58c22ab",
+      "manifest_sha256": "bd334b5911c4ddb48812f6a0215104a3b076549dc27699d129577be7b133db06"
+    },
+    {
+      "name": "runtime-actual",
+      "status_at_observation": "passed",
+      "actual_checks": 2,
+      "ui_combinations": 0,
+      "candidate_ref": {
+        "candidate_id": "2bbb5cb70bf509f1f6b236bc3b95d9ade8aeccec49b17298d3ccffebe5d3da7f",
+        "repositories": [
+          {
+            "repository_id": "project",
+            "commit": "2d24489f603f1892244aacf9bb6729c696a0d87d",
+            "tree_digest": "167a35ac2a302e57e14964888f4755ab0cf19bea5b70a8593717304bbd01386a",
+            "dirty": false,
+            "relevant_inputs": [
+              {
+                "repository_id": "project",
+                "path": "src/backend/service.cjs",
+                "digest_mode": "raw-file",
+                "digest": "c4401bfe02dd9616a93c791f40634878d8d671d4a8005be4dc5c744d56a542e7"
+              },
+              {
+                "repository_id": "project",
+                "path": "src/backend/api.schema",
+                "digest_mode": "raw-file",
+                "digest": "c2d89937d3669e6fa05ca391d7fce6319d1131716cec73a119c2dfa396ff9133"
+              }
+            ]
+          }
+        ],
+        "artifacts": [
+          {
+            "repository_id": "project",
+            "path": "src/backend/service.cjs",
+            "digest_mode": "raw-file",
+            "digest": "c4401bfe02dd9616a93c791f40634878d8d671d4a8005be4dc5c744d56a542e7"
+          },
+          {
+            "repository_id": "project",
+            "path": "src/backend/api.schema",
+            "digest_mode": "raw-file",
+            "digest": "c2d89937d3669e6fa05ca391d7fce6319d1131716cec73a119c2dfa396ff9133"
+          }
+        ]
+      },
+      "signature_verified": true,
+      "source_and_raw_hashes_verified": true,
+      "archived_fixture_authority": true,
+      "business_verified": false,
+      "receipt_sha256": "9cb99f260f502a3ded946987d670981a06f642749d58a21b92ae4158bde709c9",
+      "manifest_sha256": "09be3ef125ab94f637db1df5457267c02734cfdbba7542034b199f99d7ae1efb"
+    },
+    {
+      "name": "external-actual",
+      "status_at_observation": "passed",
+      "actual_checks": 2,
+      "ui_combinations": 0,
+      "candidate_ref": {
+        "candidate_id": "82848894646ba4909c620d874ebc9eee892b7ab0301bcaa3abe6e2e4cd0a49e0",
+        "repositories": [
+          {
+            "repository_id": "project",
+            "commit": "e19b21b5b0588afefca1ae6bc3065c21b672edba",
+            "tree_digest": "eeb88e51a6d79d228120f7a43bec8dc79aa63704fd21310f833c060bfdeb1bb7",
+            "dirty": false,
+            "relevant_inputs": [
+              {
+                "repository_id": "project",
+                "path": "src/backend/service.cjs",
+                "digest_mode": "raw-file",
+                "digest": "c4401bfe02dd9616a93c791f40634878d8d671d4a8005be4dc5c744d56a542e7"
+              },
+              {
+                "repository_id": "project",
+                "path": "src/backend/api.schema",
+                "digest_mode": "raw-file",
+                "digest": "c2d89937d3669e6fa05ca391d7fce6319d1131716cec73a119c2dfa396ff9133"
+              }
+            ]
+          }
+        ],
+        "artifacts": [
+          {
+            "repository_id": "project",
+            "path": "src/backend/service.cjs",
+            "digest_mode": "raw-file",
+            "digest": "c4401bfe02dd9616a93c791f40634878d8d671d4a8005be4dc5c744d56a542e7"
+          },
+          {
+            "repository_id": "project",
+            "path": "src/backend/api.schema",
+            "digest_mode": "raw-file",
+            "digest": "c2d89937d3669e6fa05ca391d7fce6319d1131716cec73a119c2dfa396ff9133"
+          }
+        ]
+      },
+      "signature_verified": true,
+      "source_and_raw_hashes_verified": true,
+      "archived_fixture_authority": true,
+      "business_verified": false,
+      "receipt_sha256": "e73305f6d67dd319966a2b6c19ebca4d2268299f9961912a761581b0f0d1d526",
+      "manifest_sha256": "66be6c155cec6a43a3d239ad8808ca7e0fefb73bf3ee54957310a05caf15076e"
+    },
+    {
+      "name": "external-preflight-actual",
+      "status_at_observation": "partial",
+      "actual_checks": 2,
+      "ui_combinations": 0,
+      "candidate_ref": {
+        "candidate_id": "297483aa5dbdad23becd424de5ebc4430c8617237385093915b87246e4c6a3d8",
+        "repositories": [
+          {
+            "repository_id": "project",
+            "commit": "fe73b878e5841bbdcf0424ae757c9e125aba9c1e",
+            "tree_digest": "766ac655dd7a737402bf443191e18361083a1632d77ac058ec9d7dfdd0474daf",
+            "dirty": false,
+            "relevant_inputs": [
+              {
+                "repository_id": "project",
+                "path": "fixtures/runtime-observation-plan.json",
+                "digest_mode": "raw-file",
+                "digest": "6ced2b5208aae8d9036efbe3d7ea68655f927ebcb56ad80ecde105968b0682dd"
+              }
+            ]
+          }
+        ],
+        "artifacts": [
+          {
+            "repository_id": "project",
+            "path": "fixtures/runtime-observation-plan.json",
+            "digest_mode": "raw-file",
+            "digest": "6ced2b5208aae8d9036efbe3d7ea68655f927ebcb56ad80ecde105968b0682dd"
+          }
+        ]
+      },
+      "signature_verified": true,
+      "source_and_raw_hashes_verified": true,
+      "archived_fixture_authority": true,
+      "business_verified": false,
+      "receipt_sha256": "b418f17346e337351492fb1a11b42d694c175da458fe460ed76b7d4e84fe471f",
+      "manifest_sha256": "7c4c39338330414adfe0a197919893173e4d3cd73136c9f5d4576ebf7a0f5a80"
+    }
+  ],
+  "builds": [
+    {
+      "harness": "claude",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "scripts/build.ts",
+        "--harness",
+        "claude"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-11-08T19:11:54.3164880Z",
+      "finished_at": "2026-11-08T19:11:54.7282580Z",
+      "verified_target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\claude",
+      "native_powershell_cleanup": true,
+      "log": "docs/evals/autonomy/p1-07/build-claude-final.log",
+      "log_sha256": "228c466221d7b6ae938c52e58f467f26c0d19d87848ea6bc33b5f67a1acaaf8e"
+    },
+    {
+      "harness": "codebuddy",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "scripts/build.ts",
+        "--harness",
+        "codebuddy"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-11-08T19:11:54.9011962Z",
+      "finished_at": "2026-11-08T19:11:55.4462347Z",
+      "verified_target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\codebuddy",
+      "native_powershell_cleanup": true,
+      "log": "docs/evals/autonomy/p1-07/build-codebuddy-final.log",
+      "log_sha256": "594b8e8354f688ebe0e2ca46242b2c0eb5120850e46e4b04c720d26e1417760e"
+    },
+    {
+      "harness": "codex",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "scripts/build.ts",
+        "--harness",
+        "codex"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-11-08T19:11:55.5817729Z",
+      "finished_at": "2026-11-08T19:12:01.0425872Z",
+      "verified_target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\codex",
+      "native_powershell_cleanup": true,
+      "log": "docs/evals/autonomy/p1-07/build-codex-final.log",
+      "log_sha256": "263b23c8faea4d87451f5d2ab31c80c7243b4cd96a1e3ba678cfa73ee4a7a4ee"
+    },
+    {
+      "harness": "deepseek",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "scripts/build.ts",
+        "--harness",
+        "deepseek"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-11-08T19:12:01.1416723Z",
+      "finished_at": "2026-11-08T19:12:01.5945380Z",
+      "verified_target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\deepseek",
+      "native_powershell_cleanup": true,
+      "log": "docs/evals/autonomy/p1-07/build-deepseek-final.log",
+      "log_sha256": "41118c15fdf991faf415c0580855eca38e5e88839e2b98d425b96ecc21a6fd6b"
+    },
+    {
+      "harness": "kiro-cli",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "scripts/build.ts",
+        "--harness",
+        "kiro-cli"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-11-08T19:12:01.7171112Z",
+      "finished_at": "2026-11-08T19:12:04.8946638Z",
+      "verified_target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-cli",
+      "native_powershell_cleanup": true,
+      "log": "docs/evals/autonomy/p1-07/build-kiro-cli-final.log",
+      "log_sha256": "5efa25b30076cfebef32a033aa436a4c2728cdaa15efb3224d6e067191a6225c"
+    },
+    {
+      "harness": "kiro-crew",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "scripts/build.ts",
+        "--harness",
+        "kiro-crew"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-11-08T19:12:05.0302364Z",
+      "finished_at": "2026-11-08T19:12:05.4766599Z",
+      "verified_target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-crew",
+      "native_powershell_cleanup": true,
+      "log": "docs/evals/autonomy/p1-07/build-kiro-crew-final.log",
+      "log_sha256": "4eb1f803dd4f24cdb48678886f821b4dc506d07d4c84bd136acca1936b4e5010"
+    },
+    {
+      "harness": "kiro-ide",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "scripts/build.ts",
+        "--harness",
+        "kiro-ide"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-11-08T19:12:05.5924494Z",
+      "finished_at": "2026-11-08T19:12:06.3126917Z",
+      "verified_target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\kiro-ide",
+      "native_powershell_cleanup": true,
+      "log": "docs/evals/autonomy/p1-07/build-kiro-ide-final.log",
+      "log_sha256": "c3318edbbd1ad2edf7a82efb3dac5ff75f65deccffd531d91afad75c2c3a62d4"
+    },
+    {
+      "harness": "opencode",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "scripts/build.ts",
+        "--harness",
+        "opencode"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-11-08T19:12:06.6847310Z",
+      "finished_at": "2026-11-08T19:12:08.2122025Z",
+      "verified_target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\opencode",
+      "native_powershell_cleanup": true,
+      "log": "docs/evals/autonomy/p1-07/build-opencode-final.log",
+      "log_sha256": "9adb06c44f3fbff54add478cd0c0810b6b27b66a623b4262d9d6d11bc2ada88d"
+    },
+    {
+      "harness": "qoder",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "scripts/build.ts",
+        "--harness",
+        "qoder"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-11-08T19:12:08.8597434Z",
+      "finished_at": "2026-11-08T19:12:10.5548300Z",
+      "verified_target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\qoder",
+      "native_powershell_cleanup": true,
+      "log": "docs/evals/autonomy/p1-07/build-qoder-final.log",
+      "log_sha256": "9cc44b23083d61d2aff33fa58a4aba359c7557f811c4470c659295c7094597d4"
+    },
+    {
+      "harness": "zcode",
+      "command": [
+        "node",
+        "node_modules/tsx/dist/cli.mjs",
+        "scripts/build.ts",
+        "--harness",
+        "zcode"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-11-08T19:12:11.0908887Z",
+      "finished_at": "2026-11-08T19:12:14.2612168Z",
+      "verified_target": "E:\\Work\\src\\loeyae\\loeyae-framework\\loeyae-aidlc-v2\\dist\\zcode",
+      "native_powershell_cleanup": true,
+      "log": "docs/evals/autonomy/p1-07/build-zcode-final.log",
+      "log_sha256": "bcb7bab46b5254a348c4a919b6f9b6410a5d7b9917e15a2d50d8ffed76dce84d"
+    }
+  ],
+  "additional_checks": [
+    {
+      "name": "distribution-parity",
+      "command": [
+        "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+        "node_modules/tsx/dist/cli.mjs",
+        "tests/test_distribution_parity.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:13:11.085Z",
+      "finished_at": "2026-11-08T19:13:11.967Z",
+      "log": "docs/evals/autonomy/p1-07/distribution-parity.log",
+      "log_sha256": "a6ec3bca507eb1f7101e42aee9678af6384e945ae940aaa7161ee28c0dfacc00"
+    },
+    {
+      "name": "checker-identity",
+      "command": [
+        "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+        "node_modules/tsx/dist/cli.mjs",
+        "docs/evals/autonomy/p1-07/checker-final.ts"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:13:11.093Z",
+      "finished_at": "2026-11-08T19:13:11.695Z",
+      "log": "docs/evals/autonomy/p1-07/checker-identity-final.json",
+      "log_sha256": "62525000a9e8a9df0b452878021144c87ed965a157090c1c954b1d8aeacfb959"
+    },
+    {
+      "name": "public-inspect",
+      "command": [
+        "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+        "bin/cli.js",
+        "orchestrate",
+        "autonomy",
+        "observe",
+        "inspect"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:13:11.098Z",
+      "finished_at": "2026-11-08T19:13:12.262Z",
+      "log": "docs/evals/autonomy/p1-07/public-inspect-final.json",
+      "log_sha256": "b2ccedce43122478fd0b1d88ed89a4699cd71bd35061948d11f3b0706333ca74"
+    },
+    {
+      "name": "whitespace",
+      "command": [
+        "git",
+        "-c",
+        "core.whitespace=cr-at-eol",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "started_at": "2026-11-08T19:13:11.105Z",
+      "finished_at": "2026-11-08T19:13:12.130Z",
+      "log": "docs/evals/autonomy/p1-07/whitespace-final.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "distribution_parity": {
+    "name": "distribution-parity",
+    "command": [
+      "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_distribution_parity.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-08T19:13:11.085Z",
+    "finished_at": "2026-11-08T19:13:11.967Z",
+    "log": "docs/evals/autonomy/p1-07/distribution-parity.log",
+    "log_sha256": "a6ec3bca507eb1f7101e42aee9678af6384e945ae940aaa7161ee28c0dfacc00"
+  },
+  "preserved_workflow": {
+    "state_sha256": "5e08e34d2e434edf0ab7d2667377080dc0caf06dd8dcfa178b877211c5c93d0f",
+    "audit_sha256": "1fa99dba9594b7ee1e2e7ad0d8e72c9b81b87e74f9577879795937b0af998686",
+    "authority_and_host_directories_absent": [
+      ".git/aidlc/autonomy",
+      ".aidlc/autonomy/grants",
+      ".aidlc/evidence/autonomous-admission",
+      ".aidlc/evidence/native-host",
+      ".aidlc/evidence/autonomous-observations",
+      ".aidlc/host-runs"
+    ]
+  },
+  "limits": [
+    "Protocol authority/reception is simulated; actual local Node/HTTP/Chrome behavior is separately observed",
+    "Sample receipts are archived isolated-fixture records, not current project grants, fresh runtime leases or formal business approval",
+    "No full npm test, final business batch, complete unattended pilot, P2 restart or successor recovery",
+    "P1-08 final candidate/Native/decision/acceptance convergence remains separate; all observations keep business_verified=false",
+    "One local Chrome browser path exercised; other hosts and native UI platforms require their own adapters",
+    "Frozen trusted command footprint and isolated endpoints are reviewed contracts, not arbitrary shell or OS/network confinement"
+  ]
+}

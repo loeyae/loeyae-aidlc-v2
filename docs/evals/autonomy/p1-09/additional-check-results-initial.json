@@ -1,0 +1,87 @@
+[
+  {
+    "name": "public-legacy-rules",
+    "command": [
+      "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+      "bin/cli.js",
+      "orchestrate",
+      "state",
+      "rules"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T02:20:39.754Z",
+    "finished_at": "2026-11-09T02:20:41.707Z",
+    "log": "docs/evals/autonomy/p1-09/public-legacy-rules.json"
+  },
+  {
+    "name": "selected-distribution-smoke",
+    "command": [
+      "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_autonomous_distribution.ts"
+    ],
+    "exit_code": 1,
+    "signal": null,
+    "started_at": "2026-11-09T02:20:39.764Z",
+    "finished_at": "2026-11-09T02:20:49.278Z",
+    "log": "docs/evals/autonomy/p1-09/distribution-smoke.log"
+  },
+  {
+    "name": "distribution-parity",
+    "command": [
+      "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+      "node_modules/tsx/dist/cli.mjs",
+      "tests/test_distribution_parity.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T02:20:39.776Z",
+    "finished_at": "2026-11-09T02:20:49.240Z",
+    "log": "docs/evals/autonomy/p1-09/distribution-parity.log"
+  },
+  {
+    "name": "checker-identity",
+    "command": [
+      "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+      "node_modules/tsx/dist/cli.mjs",
+      "docs/evals/autonomy/p1-09/checker-final.ts"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T02:20:39.783Z",
+    "finished_at": "2026-11-09T02:20:40.883Z",
+    "log": "docs/evals/autonomy/p1-09/checker-identity-final.json"
+  },
+  {
+    "name": "public-inspect",
+    "command": [
+      "C:\\Program Files\\WindowsApps\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\dependencies\\node\\bin\\node.exe",
+      "bin/cli.js",
+      "orchestrate",
+      "autonomy",
+      "batch",
+      "inspect"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "started_at": "2026-11-09T02:20:39.790Z",
+    "finished_at": "2026-11-09T02:20:41.831Z",
+    "log": "docs/evals/autonomy/p1-09/public-inspect-final.json"
+  },
+  {
+    "name": "whitespace",
+    "command": [
+      "git",
+      "-c",
+      "core.whitespace=cr-at-eol",
+      "diff",
+      "--check"
+    ],
+    "exit_code": 2,
+    "signal": null,
+    "started_at": "2026-11-09T02:20:39.799Z",
+    "finished_at": "2026-11-09T02:20:41.695Z",
+    "log": "docs/evals/autonomy/p1-09/whitespace-final.log"
+  }
+]

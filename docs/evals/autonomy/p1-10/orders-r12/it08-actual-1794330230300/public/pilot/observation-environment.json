@@ -1,0 +1,16 @@
+{
+  "schema": "aidlc.observation-environment/v1",
+  "isolated": true,
+  "endpoints": {
+    "app": {
+      "origin": "${PILOT_ORIGIN}",
+      "version_path": "/version",
+      "kind": "candidate",
+      "header_variables": {}
+    }
+  },
+  "variables": [
+    "PILOT_ORIGIN"
+  ],
+  "inputs": []
+}

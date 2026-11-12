@@ -88,6 +88,11 @@ export function historicalPhaseInputErrors(root: string, i13: RecordValue, evide
     const current = phaseInputBinding(root, i13, evidence, unitId, command);
     if (binding.version !== "1") return ["PHASE_INPUT_BINDING_INVALID: unsupported version"];
     if (requireResolvedTests && current.unresolved_test_methods.length && !command?.files?.length) return ["PHASE_INPUT_BINDING_UNRESOLVED: declare the existing test source/config/helper files in command evidence_inputs.files for symbolic test methods before verifying historical revision drift; do not add tests or rename established test methods"];
-    return JSON.stringify(binding) === JSON.stringify(current) ? [] : ["PHASE_INPUT_BINDING_CHANGED: original test inputs or selected I13 sources changed; diagnose the affected observation without adding unrelated tests"];
+    if (JSON.stringify(binding) === JSON.stringify(current)) return [];
+    const prior = new Map((Array.isArray(binding.files) ? binding.files : []).map(file => [file.path, file.sha256]));
+    const next = new Map(current.files.map(file => [file.path, file.sha256]));
+    const changed = [...new Set([...prior.keys(), ...next.keys()])].filter(path => prior.get(path) !== next.get(path)).sort();
+    const detail = changed.length ? `; changed inputs: ${changed.slice(0, 16).join(", ")}${changed.length > 16 ? ` (+${changed.length - 16} more)` : ""}` : "; selected I13 semantics or command binding changed";
+    return [`PHASE_INPUT_BINDING_CHANGED: original test inputs or selected I13 sources changed; diagnose the affected observation without adding unrelated tests${detail}`];
   } catch (error) { return [`PHASE_INPUT_BINDING_INVALID: ${error instanceof Error ? error.message : String(error)}`]; }
 }

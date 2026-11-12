@@ -25,7 +25,8 @@ try {
   assert.notEqual(produce(report("Spec result: passed\nStandards result: passed", "src/does-not-exist.ts")).status, 0);
   write(f.root, "src/shop/api/added.ts", "export const added = 1;\n");
   assert.notEqual(produce(report("Spec result: passed\nStandards result: passed")).status, 0, "new source must be reviewed");
-  const valid = produce(report("Spec result: passed\nStandards result: passed", "src/shop/api/code.ts src/shop/api/added.ts"));
+  assert.notEqual(produce(report("Spec result: passed\nStandards result: passed\n无阻断修复；仍存在阻断问题", "src/shop/api/code.ts src/shop/api/added.ts")).status, 0, "a negation cannot hide a separate blocker");
+  const valid = produce(report("Spec result: passed\nStandards result: passed\n无阻断修复；非阻断建议不影响交付。", "src/shop/api/code.ts src/shop/api/added.ts"));
   assert.equal(valid.status, 0, valid.stdout + valid.stderr);
   renameSync(join(f.root, "src/shop/api/code.ts"), join(f.root, "src/shop/api/renamed.ts"));
   const renamed = produce(report("Spec result: passed\nStandards result: passed", "src/shop/api/renamed.ts src/shop/api/added.ts"));

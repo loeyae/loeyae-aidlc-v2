@@ -1,0 +1,87 @@
+{
+  "rows": [
+    {
+      "name": "test_native_input_recovery",
+      "args": [
+        "tests/test_native_input_recovery.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 187
+    },
+    {
+      "name": "test_host_progress_limits",
+      "args": [
+        "tests/test_host_progress_limits.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 443
+    },
+    {
+      "name": "test_host_progress_checkpoint",
+      "args": [
+        "tests/test_host_progress_checkpoint.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 79
+    },
+    {
+      "name": "test_host_progress_boundary",
+      "args": [
+        "tests/test_host_progress_boundary.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 92
+    },
+    {
+      "name": "test_progress_persistence",
+      "args": [
+        "tests/test_progress_persistence.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 59
+    },
+    {
+      "name": "test_host_progress_transport",
+      "args": [
+        "tests/test_host_progress_transport.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 4947
+    },
+    {
+      "name": "test_native_tool_channel",
+      "args": [
+        "tests/test_native_tool_channel.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 80
+    },
+    {
+      "name": "test_native_model_input",
+      "args": [
+        "tests/test_native_model_input.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 95
+    },
+    {
+      "name": "test_native_reentry_repair",
+      "args": [
+        "tests/test_native_reentry_repair.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 78
+    },
+    {
+      "name": "test_native_action_policy",
+      "args": [
+        "tests/test_native_action_policy.mjs"
+      ],
+      "exit_code": 0,
+      "duration_ms": 207
+    }
+  ],
+  "passed": true,
+  "real_model": false,
+  "new_pilots": false
+}

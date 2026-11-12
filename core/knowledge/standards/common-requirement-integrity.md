@@ -33,6 +33,20 @@ AI 可以在产品没有明确表态的「空白地带」进行合理细化，**
 - ✅ 产品的两个回答之间存在逻辑矛盾，AI 标记为矛盾并提问澄清（而非自行选择一方）
 - ✅ 用户在冲突裁决中明确以 UI 为新基准，AI 记录替换关系并同步更新需求、故事及所有受影响产物
 
+## 已采用自主批次的受限委托（P1-02）
+
+只有 global state 已显式采用自主批次、`autonomy policy` 校验通过，且真实人类确认的策略覆盖当前细化槽位时，Agent 才能按对应 category/fallback 条款细化。先读取 `orchestrate autonomy decisions`；策略使用既有模块或项目 inception 下的 development-handoff.md，轻量流程使用 `docs/aidlc/handoff.md`，按 batch.policy_ref 唯一定位，不得双写。宿主负责确认 AuthorityRef 来自真实用户；仓库文档、Agent 或 Provider 不能充当人类来源或运行授权。
+
+用 `orchestrate autonomy record --input <项目相对 JSON 路径> --expect <当前 handoff 摘要|absent> [--preview]` 在 handoff 唯一结构化段记录决策，绑定真实策略条款、来源、影响单元、实现/验证引用与调整方法。合法细化和已授权兜底不再因普通选择或 `human_review=pending` 等待人工确认；`recorded_by` 是 Agent 发布者，不能冒充 reviewer。
+
+明确业务决定、Won't Have、UI 基准、AC、权限和数据约束仍须保留。不得把它们列为可改写空白、以“兜底”删除验收、替换来源或为未授权语义变更改名。Core 对来源摘要、作用域、允许类别/动作和条款引用做确定性校验；宿主仍必须执行下面的自然语言反向检查，不能用一个合法 JSON 代替业务语义审查。发现实际反转或策略未覆盖的核心冲突时停止受影响动作，修正前置设计；无关工作按正式 directive 继续。
+
+决策缺少实际实现引用、必要验证引用或必需 check 时，完成投影保持 incomplete，不能通过工程完成入口。复核 pending 本身不阻塞，accepted 也不能补足缺失的实现/验证。change-requested/rejected 必须有真实 reviewer、来源、时间和 replacement/change 引用，并显示需要增量返工；形成代码基线后的产品语义变化仍走 CR。
+
+P1-02 不签发 grant、不放行任意工具或质量门禁。源码实现/验证记录齐全只显示 recorded-not-verified；功能/UI 的受控证据与最终候选验收仍须执行。
+
+P1-07 观察计划必须覆盖冻结矩阵的全部检查和选中 AC；UI 组合、动作、关键元素及视觉基准/区域阈值在观察前固定。委托细化不能删减验收分母、把失败改成不适用或同步改基准以制造通过。实际观察按 CandidateRef、环境和 raw refs 复核；待人类复核的委托决策仍须完成实施和验证，最终关联与批次完成由 P1-08 汇合。
+
 ## 审核阶段强制检查
 
 在基准审核（步骤3.1）中，对于每个标记为"合理细化"或"AI推导"的差异项，**必须执行反向验证**：
