@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { bindSession, claimToken } from "../core/tools/aidlc-session";
 import { createInitialState, loadWorkflowState } from "../core/tools/aidlc-light-state";
+import { ownerOfInstance } from "../core/tools/aidlc-workflow-layout";
 import { saveFixtureState } from "./mars243_fixture_session";
 import { fixture, git, snapshot } from "./mars244_fixture";
 
@@ -95,9 +96,15 @@ function unitPreview(mode: "planned" | "blocked" | "none") {
   const response = run(unit.root, binding, ["next", "--module", "shop", "--unit", "api", "--preview"]);
   assert.deepEqual(snapshot(unit.root), before);
   assert.equal(response.next_stage_status, mode);
-  assert.match(response.next_stage_prompt, /--module shop --unit api --preview/, "even an exhausted chain preserves the copied routing scope");
   if (mode === "none") {
     assert.equal(response.next_stage, null);
+    assert.match(response.handoff_prompt, /当前范围（global \/ module:shop \/ unit:api）没有下一候选阶段/);
+    assert.match(response.handoff_prompt, /module:shop \/ unit:web/);
+    assert.match(response.handoff_prompt, /module:other/);
+    assert.match(response.next_stage_prompt, /loeyae-aidlc runtime summary/);
+    assert.match(response.next_stage_prompt, /status、dependency_waiting 与 owner/);
+    assert.match(response.next_stage_prompt, /module inspect --stage-instance <目标实例>/);
+    assert(!response.next_stage_prompt.includes("next --module shop --unit api --preview"), "exhausted handoffs must not loop over the same unit");
     assert.match(response.next_stage_prompt, /不要据此宣称整个项目已经完成/);
   } else {
     assert.equal(response.next_stage.module_id, "shop"); assert.equal(response.next_stage.unit_id, "api");
@@ -108,6 +115,46 @@ function unitPreview(mode: "planned" | "blocked" | "none") {
 }
 for (const mode of ["planned", "blocked", "none"] as const) unitPreview(mode);
 console.log("PASS unit handoffs preserve exact module/unit; blockers and exhausted chains never route into sibling work");
+
+// A terminal route needs delivery verification, not an endless next-preview loop.
+const terminal = project();
+const terminalState = loadWorkflowState(terminal.root)!;
+terminalState.completed_stage_instances = graph.stages.filter((stage: any) => stage.scopes.includes("express")).map((stage: any) => stage.axis === "project" ? stage.slug
+  : `${stage.slug}@module:project${stage.axis === "unit" ? "@unit:default" : ""}`);
+saveFixtureState(terminal.root, terminalState);
+const terminalBefore = snapshot(terminal.root);
+const terminalPreview = run(terminal.root, terminal.binding, ["next", "--preview"]);
+assert.equal(terminalPreview.next_stage_status, "none");
+assert.equal(terminalPreview.next_stage, null);
+assert.match(terminalPreview.handoff_prompt, /项目路由中的阶段均已记录完成或跳过/);
+assert.match(terminalPreview.next_stage_prompt, /loeyae-aidlc orchestrate state summary/);
+assert.match(terminalPreview.next_stage_prompt, /阶段记录不等于验收已通过/);
+assert(!terminalPreview.next_stage_prompt.includes("next --preview"));
+assert.deepEqual(snapshot(terminal.root), terminalBefore);
+console.log("PASS terminal handoffs request delivery verification without repeating completed stages or claiming acceptance");
+
+// Split layouts must include sibling modules and integration in the scope handoff.
+const splitExhausted = fixture("code-review@module:shop@unit:api", true);
+const splitGlobal = loadWorkflowState(splitExhausted.root)!;
+splitGlobal.completed_stage_instances = graph.stages.filter((stage: any) => stage.axis === "project" && ownerOfInstance(stage.slug).kind === "global").map((stage: any) => stage.slug);
+splitGlobal.completed_stages = ["module-division"];
+saveFixtureState(splitExhausted.root, splitGlobal);
+splitExhausted.state.completed_stage_instances = graph.stages.flatMap((stage: any) => stage.axis === "module" ? [`${stage.slug}@module:shop`]
+  : stage.axis === "unit" ? [`${stage.slug}@module:shop@unit:api`] : []);
+splitExhausted.persist();
+const siblingBinding = bindSession(splitExhausted.root, { instance: "tdd@module:shop@unit:web", owner: "other-member", session: "sibling-owner", expected: claimToken(undefined) });
+const exhaustedBinding = JSON.stringify(bindSession(splitExhausted.root, { instance: "code-review@module:shop@unit:api", owner: "fixture", session: "split-exhausted", expected: claimToken(undefined) }).binding);
+const splitBefore = snapshot(splitExhausted.root);
+const splitPreview = run(splitExhausted.root, exhaustedBinding, ["next", "--module", "shop", "--unit", "api", "--preview"]);
+assert.equal(splitPreview.next_stage_status, "none");
+assert.equal(splitPreview.next_stage, null);
+assert.match(splitPreview.handoff_prompt, /module:shop \/ unit:web/);
+assert.match(splitPreview.handoff_prompt, /module:other/);
+assert.match(splitPreview.handoff_prompt, /integration/);
+assert(!splitPreview.next_stage_prompt.includes("next --module shop --unit api --preview"));
+assert.deepEqual(snapshot(splitExhausted.root), splitBefore);
+assert.equal(loadWorkflowState(splitExhausted.root, { kind: "module", module_id: "shop" })!.active_instances[siblingBinding.claim.stage_instance].generation, siblingBinding.claim.generation);
+console.log("PASS split exhausted handoffs identify sibling and integration work without changing claims or workflow state");
 
 const architecture = fixture("application-design@module:shop", true);
 const architectureIndex = graph.stages.findIndex((stage: any) => stage.slug === "application-design");

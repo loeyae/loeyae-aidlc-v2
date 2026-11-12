@@ -1,6 +1,6 @@
 # AI-DLC 开发流程概览
 
-**用途**：仅用于展示流程全貌，不定义规则。权威路由见 `core-workflow.md`，步骤详情见对应 steering。
+**用途**：仅用于展示流程全貌，不定义规则。默认执行见 [宿主执行协议](host-execution.md)；只有显式选择旧受管流程时，阶段路由才使用 `core-workflow.md` 和对应 steering。
 
 ## 生命周期边界
 
@@ -12,6 +12,8 @@ AI-DLC 覆盖完整开发流程：需求与验收定义、I13 测试用例派生
 2. Construction：按单元设计 → I13 测试用例派生 → RED 测试门禁 → GREEN 实现 → 规格审查 → 质量审查 → 全局审查 → 实际构建和测试。
 3. Operations（条件）：部署目标确认 → 目标相关配置 → 配置验证 → 部署/回滚说明。
 4. Change Request：定位 → 影响评估 → 计划 → 逐层回写与实现 → 一致性验证。
+
+局部 CR 在已有授权下连续完成上述适用动作；L1/L2 直接修改并验证受影响范围，不重新启动整套 Inception。跨边界、迁移或架构变化才按实际影响返回相关设计步骤。
 
 ## Mermaid 视图
 
@@ -25,9 +27,12 @@ flowchart LR
     Operations --> Done
     Done --> Change{"发生需求变更"}
     Change -->|"是"| ChangeRequest["Change Request"]
-    ChangeRequest --> Inception
+    ChangeRequest --> Risk{"影响范围"}
+    Risk -->|"局部 L1/L2"| Patch["定向修改与验证"]
+    Patch --> Done
+    Risk -->|"涉及设计或边界变化"| Inception
 ```
 
 ## 自适应原则
 
-复杂度仅决定文档深度和条件步骤，不削弱 TDD、两阶段审查、实际构建测试和证据要求。快速通道、精简流程、完整流程及各步骤条件以 `common-complexity-assessment.md` 和 `core-workflow.md` 为准。
+复杂度决定实际分析和验证范围，既有质量与验收标准保留。默认宿主不引入受管阶段与签名证据要求；旧受管流程的快速通道、精简流程和步骤条件见 `common-complexity-assessment.md` 与 `core-workflow.md`。

@@ -1357,6 +1357,7 @@ Legacy managed workflow (explicit compatibility commands, not required for nativ
   unit list|select [flags]                              List or self-select a development unit
   module list|select|claim|heartbeat|migrate|inspect|bind|transfer [flags]    Coordinate parallel module instances
   runtime summary|doctor [--module <module-id>]         Inspect the active Markdown workflow(s)
+  cr inspect --config <stage.json> [--extension <manifest.json>]  Read-only CR compatibility/test-impact inspection
   worktree prepare|warmup|verify|merge-plan [flags]     Prepare or verify a member worktree; warmup pre-checks the shared baseline cache
 
 Quality and utilities:
@@ -1424,6 +1425,7 @@ async function main(): Promise<void> {
       (await import("../core/tools/aidlc-host-work")).runHostWorkCli(rest);
       break;
     }
+    case "cr": (await import("../core/tools/aidlc-cr")).runCrCli(rest); break;
     case "orchestrate": {
       run(orchestrationScript(), rest);
       break;

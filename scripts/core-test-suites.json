@@ -193,6 +193,10 @@
   ],
   [
     "tsx",
+    "tests/test_cr_execution.ts"
+  ],
+  [
+    "tsx",
     "tests/test_team_ucd_mapping.ts"
   ],
   [

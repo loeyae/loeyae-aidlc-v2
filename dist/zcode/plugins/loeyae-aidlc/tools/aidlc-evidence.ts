@@ -38,6 +38,8 @@ import { assertControlledI13 } from "./aidlc-i13-applicability";
 import { normalizeUcdSources } from "./aidlc-ucd-declarations";
 import { phaseInputBinding, type PhaseCommandInputs } from "./aidlc-phase-inputs";
 import { phaseExecutionRevision, phaseExecutionScopeForInstance } from "./aidlc-workflow-layout";
+import { selectCrTests, changedCrPaths } from "./aidlc-cr";
+import { parsePhaseReuse, phaseObservationBinding, loadPhaseObservation, executePhaseObservation, newPhaseObservation, localObservationFile, observationHash, regressionCoverageErrors, type PhaseReuse, type PhaseObservationRef } from "./aidlc-phase-observation";
 import { evidenceTimeError } from "./aidlc-evidence-policy";
 import { parseTestStats, validTestStats, type TestStats } from "./aidlc-test-stats";
 import { nativeNodeCheckTooling } from "./aidlc-node-check-tooling";
@@ -90,6 +92,8 @@ interface CommandSpec {
   cwd?: string;
   timeout_ms?: number;
   evidence_inputs?: { environment: string[]; files?: string[] };
+  observation_reuse?: PhaseReuse;
+  regression_tests?: string[];
 }
 
 interface ArtifactSpec {
@@ -363,10 +367,10 @@ function phaseCommand(config: EvidenceConfig, stage: string, phase: Phase): Comm
  * the same stage-locked parser the producer uses. Throws when the allowlist is missing,
  * unreadable, locked to another stage, or does not declare exactly one command.
  */
-export function allowlistedPhaseCommand(stage: string, phase: Phase): { id: string; argv_digest: string; config: string; argv: string[]; cwd: string; files?: string[] } {
+export function allowlistedPhaseCommand(stage: string, phase: Phase): { id: string; argv_digest: string; config: string; argv: string[]; cwd: string; files?: string[]; regression_tests?: string[] } {
   const config = resolveCommandConfigPath(PROJECT_ROOT, stage);
   const command = phaseCommand(requireCommandConfig(config, stage), stage, phase);
-  return { id: command.id, argv_digest: argvDigest(command.argv), config, argv: command.argv, cwd: command.cwd || PROJECT_ROOT, files: command.evidence_inputs?.files };
+  return { id: command.id, argv_digest: argvDigest(command.argv), config, argv: command.argv, cwd: command.cwd || PROJECT_ROOT, files: command.evidence_inputs?.files, regression_tests: command.regression_tests };
 }
 
 function validateArgv(argv: unknown, field: string): string[] {
@@ -481,7 +485,18 @@ function parseConfig(path: string, stage: string, allowEmptyCommands = false, pr
         evidenceInputs.files = [...new Set((inputs.files as string[]).map(path => relative(projectRoot, requireRegularFile(path, `commands[${i}].evidence_inputs.files`, projectRoot)).replace(/\\/g, "/")))].sort();
       }
     }
-    const spec = { id, role, sensor, argv, cwd, timeout_ms: timeout, ...(evidenceInputs ? { evidence_inputs: evidenceInputs } : {}) };
+    const observationReuse = record.observation_reuse === undefined ? undefined : parsePhaseReuse(record.observation_reuse);
+    if (observationReuse && (role !== "green" || !evidenceInputs?.files?.length)) fail("CR observation reuse requires a GREEN command and declared execution input files");
+    let regressionTests: string[] | undefined;
+    if (record.regression_tests !== undefined) {
+      if (!Array.isArray(record.regression_tests) || record.regression_tests.length > 2048 || !record.regression_tests.every(method => typeof method === "string" && method.trim())) fail("regression_tests must name exact additional test methods");
+      regressionTests = [...new Set(record.regression_tests as string[])].sort();
+    }
+    if (record.test_impact !== undefined) {
+      const selected = selectCrTests(record.test_impact as any, changedCrPaths(projectRoot));
+      regressionTests = [...new Set([...(regressionTests || []), ...selected.methods])].sort();
+    }
+    const spec = { id, role, sensor, argv, cwd, timeout_ms: timeout, ...(evidenceInputs ? { evidence_inputs: evidenceInputs } : {}), ...(observationReuse ? { observation_reuse: observationReuse } : {}), ...(regressionTests ? { regression_tests: regressionTests } : {}) };
     if (role === "semantic") validateSemanticDeclaration(spec);
     commands.push(spec);
   }
@@ -1151,6 +1166,46 @@ function mappingDebtFor(i13: Record<string, unknown>, scope: ReturnType<typeof u
   return entries.length > 0 ? { mapping_debt: entries } : {};
 }
 
+function reusablePhaseContext(command: CommandSpec, state: ProducerState, i13: Record<string, any>, config: string, freshness?: Record<string, unknown>) {
+  const reuse = command.observation_reuse!;
+  if (!state.current_module || !state.current_unit || !reuse.units.includes(state.current_unit)) fail("CR_OBSERVATION_UNIT_MISMATCH");
+  const env = semanticCheckerEnv({ ...state, current_stage: "code-generation" }, businessCommandEnvironment(projectCommandEnvironment()), { AIDLC_PHASE: "GREEN",
+    AIDLC_CR_ID: reuse.cr_id, AIDLC_PHASE_UNITS: JSON.stringify(reuse.units), AIDLC_REGRESSION_TESTS: JSON.stringify(command.regression_tests || []) });
+  // Shared runners must explicitly consume the declared units, never inherit a caller's unit.
+  delete env.AIDLC_ACTIVE_UNIT;
+  const execution = { argv: command.argv, cwd: command.cwd || PROJECT_ROOT, timeout_ms: command.timeout_ms!, env };
+  const inputs = { workflow: state.workflow_id, module: state.current_module, freshness: freshness || null,
+    units: reuse.units.map(unit => ({ unit, source: phaseExecutionRevision(PROJECT_ROOT, `code-generation@module:${state.current_module}@unit:${unit}`),
+      phase_inputs: phaseInputBinding(PROJECT_ROOT, i13, { uc_mapping: [] }, unit, { argv: command.argv, cwd: command.cwd, config, files: command.evidence_inputs?.files }) })) };
+  return { execution, binding: phaseObservationBinding(PROJECT_ROOT, reuse, execution, inputs) };
+}
+
+/** Recheck an immutable execution against the current command and input scope; never runs tests. */
+export function phaseObservationEvidenceErrors(stage: string, evidence: Record<string, any>): string[] {
+  try {
+    const config = optionalSemanticConfig(resolveCommandConfigPath(PROJECT_ROOT, stage), stage);
+    const command = config?.commands.find(command => command.role === "green");
+    const required = command?.regression_tests || [];
+    const errors = regressionCoverageErrors(required, evidence);
+    if (!command?.observation_reuse) return evidence.execution_observation ? [...errors, "CR_OBSERVATION_CONFIG_REMOVED"] : errors;
+    const state = loadWorkflowState(PROJECT_ROOT, isSplitLayout(PROJECT_ROOT) ? { kind: "module", module_id: evidence.module_id } : GLOBAL_WORKFLOW);
+    if (!state) return [...errors, "CR_OBSERVATION_WORKFLOW_MISSING"];
+    const context = { ...state, current_module: evidence.module_id, current_unit: evidence.unit_id };
+    const { binding } = reusablePhaseContext(command, context, phaseRecord(context), resolveCommandConfigPath(PROJECT_ROOT, stage), config?.freshness);
+    const current = loadPhaseObservation(PROJECT_ROOT, binding), ref = evidence.execution_observation as PhaseObservationRef;
+    if (!current || !ref || current.ref.path !== ref.path || current.ref.key !== ref.key || current.ref.sha256 !== ref.sha256
+      || current.ref.observation_id !== ref.observation_id || current.ref.executed_at !== ref.executed_at) return [...errors, "CR_OBSERVATION_INPUTS_CHANGED_OR_MISSING"];
+    const raw = phaseObservation(current.saved.stdout + "\n" + current.saved.stderr, "GREEN");
+    validatePhaseObservation(raw, "GREEN");
+    const scoped: Record<string, any> = { ...raw, uc_mapping: (raw.uc_mapping as any[]).filter(row => (evidence.ucd_ids || []).includes(row.use_case)) };
+    for (const key of ["tests_total", "tests_failed", "compile_status", "environment_status", "traceability_complete", "status", "uc_mapping", "regression_test_methods"]) {
+      if (JSON.stringify(evidence[key]) !== JSON.stringify(scoped[key])) errors.push(`CR_OBSERVATION_PAYLOAD_MISMATCH: ${key}`);
+    }
+    if (evidence.observed_command?.duration_ms !== current.saved.duration_ms || evidence.observed_command?.executed_at !== current.saved.executed_at) errors.push("CR_OBSERVATION_EXECUTION_MISMATCH");
+    return errors;
+  } catch (error) { return [`CR_OBSERVATION_INVALID: ${error instanceof Error ? error.message : String(error)}`]; }
+}
+
 function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase: Phase): "reused" | void {
   if (options.historicalOmission) {
     if (phase === "GREEN" || !state.current_module || !state.current_unit) fail("historical omission requires exact RED/BASELINE module/unit");
@@ -1254,6 +1309,7 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
   let payload: Record<string, unknown>;
   let execution: Record<string, unknown>;
   let phaseCommandInputs: PhaseCommandInputs | undefined;
+  let observationRef: PhaseObservationRef | undefined;
   const notRequired = (reason: string): void => {
     // No UC-D of this phase's tdd_mode: nothing to observe, so no command runs and the
     // allowlist need not declare one. The gate re-derives the verdict from I13.
@@ -1342,14 +1398,51 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     // BASELINE observes the unmodified baseline code: verified before the command runs.
     const baselineFields = phase === "BASELINE" ? baselineCodeRefDigests(i13, state, scope!.scoped ? scope!.characterization : undefined) : {};
     const started = Date.now();
-    const result = withRevisionInvalidation(() => runSync(command.argv[0], command.argv.slice(1), {
+    let executionDuration: number | undefined;
+    let result: { status: number | null; stdout?: string | Buffer | null; stderr?: string | Buffer | null; error?: Error };
+    if (command.observation_reuse) {
+      if (phase !== "GREEN" || options.testFilter) fail("CR observation reuse supports unfiltered GREEN only");
+      const context = reusablePhaseContext(command, state, i13, options.config, freshness);
+      const key = observationHash(JSON.stringify(context.binding));
+      const cachePath = localObservationFile(PROJECT_ROOT, `.aidlc/phase-observations/${key}.json`);
+      mkdirSync(dirname(cachePath), { recursive: true, mode: 0o700 });
+      const release = acquireOwnedLock(`${cachePath}.execution.lock`, 3000);
+      try {
+        const prior = loadPhaseObservation(PROJECT_ROOT, context.binding);
+        if (prior) {
+          observationRef = prior.ref; executionDuration = prior.saved.duration_ms;
+          result = { status: 0, stdout: prior.saved.stdout, stderr: prior.saved.stderr };
+        } else {
+          const run = withRevisionInvalidation(() => executePhaseObservation(context.execution));
+          result = run.result; executionDuration = run.duration_ms;
+          if (!run.result.error && run.result.status === 0) {
+            const raw = phaseObservation(String(run.result.stdout || "") + "\n" + String(run.result.stderr || ""), phase);
+            validatePhaseObservation(raw, phase);
+            const requiredIds = [...new Set(command.observation_reuse.units.flatMap(unit => unitUcdIds(i13, unit).all))].filter(id => !deferredIds.includes(id));
+            if (requiredIds.some(id => !(raw.uc_mapping as any[]).some(row => row.use_case === id))) fail("CR_OBSERVATION_COVERAGE_MISSING: shared runner must cover every declared unit");
+            const regressionErrors = regressionCoverageErrors(command.regression_tests || [], raw);
+            if (regressionErrors.length) fail(regressionErrors.join("; "));
+            const after = reusablePhaseContext(command, state, phaseRecord(state), options.config, freshness);
+            if (JSON.stringify(after.binding) !== JSON.stringify(context.binding)) fail("CR_OBSERVATION_INPUTS_CHANGED_DURING_EXECUTION");
+            observationRef = publishAuthorized(() => {
+              const observed = newPhaseObservation(PROJECT_ROOT, context.binding, run);
+              const rawPath = localObservationFile(PROJECT_ROOT, observed.ref.path);
+              if (existsSync(rawPath)) fail("CR_OBSERVATION_ID_COLLISION");
+              writeAtomicLocked(rawPath, observed.bytes);
+              writeAtomicLocked(cachePath, JSON.stringify({ version: "1", path: observed.ref.path, sha256: observed.ref.sha256 }) + "\n");
+              return observed.ref;
+            });
+          }
+        }
+      } finally { release(); }
+    } else result = withRevisionInvalidation(() => runSync(command.argv[0], command.argv.slice(1), {
       cwd: command.cwd || PROJECT_ROOT,
-      env: semanticCheckerEnv(state, businessCommandEnvironment(projectCommandEnvironment()), { AIDLC_PHASE: phase, ...(options.testFilter ? { AIDLC_TEST_FILTER: options.testFilter } : {}) }),
+      env: semanticCheckerEnv(state, businessCommandEnvironment(projectCommandEnvironment()), { AIDLC_PHASE: phase, ...(command.regression_tests ? { AIDLC_REGRESSION_TESTS: JSON.stringify(command.regression_tests) } : {}), ...(options.testFilter ? { AIDLC_TEST_FILTER: options.testFilter } : {}) }),
       encoding: "utf8",
       shell: false,
       timeout: command.timeout_ms,
     }));
-    const duration = Date.now() - started;
+    const duration = executionDuration ?? Date.now() - started;
     const exitCode = typeof result.status === "number" ? result.status : 1;
     const expectedExit = phase === "RED" ? 1 : 0;
     if (phase === 'GREEN') {
@@ -1364,6 +1457,9 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
     const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr ? String(result.stderr) : "";
     payload = phaseObservation(`${stdout}\n${stderr}`, phase);
     validatePhaseObservation(payload, phase);
+    const regressionErrors = regressionCoverageErrors(command.regression_tests || [], payload);
+    if (regressionErrors.length) fail(regressionErrors.join("; "));
+    if (observationRef && scope!.scoped) payload = { ...payload, uc_mapping: (payload.uc_mapping as any[]).filter(row => scope!.all.includes(row.use_case)) };
     // The observed test command legitimately exits 1 for RED, so it is recorded as
     // observed_command; `checker` describes the built-in producer check that validated
     // the observation (same contract as every other semantic sensor).
@@ -1379,7 +1475,8 @@ function runPhaseProducer(options: ProducerOptions, state: ProducerState, phase:
       // MARS-271 分级映射准入:GREEN 证据携带 mapping_debt——本单元/模块 mapping_deferred
       // 的 UC-D 清单;门禁据此要求映射债显式申报,不随时间静默消失。
       ...(phase === "GREEN" ? mappingDebtFor(i13, rawScope) : {}),
-      observed_command: { id: command.id, phase, argv_digest: commandDigest, cwd: safeCwdLabel(command.cwd || PROJECT_ROOT), exit_code: exitCode, expected_exit_code: expectedExit, duration_ms: duration },
+      ...(observationRef ? { execution_observation: observationRef } : {}),
+      observed_command: { id: command.id, phase, argv_digest: commandDigest, cwd: safeCwdLabel(command.cwd || PROJECT_ROOT), exit_code: exitCode, expected_exit_code: expectedExit, duration_ms: duration, ...(observationRef ? { executed_at: observationRef.executed_at } : {}) },
     };
     execution = { id: `builtin:${sensor}`, sensor, argv_digest: phaseObservationDigest(phase, commandDigest), exit_code: 0, status: "passed", duration_ms: duration };
   }

@@ -111,6 +111,14 @@ function signed(root: string, body: Row): Row {
   const key = issuer(root, true);
   return { ...body, issuer_provenance: { key_id: key.key_id, algorithm: "ed25519", signature: sign(null, Buffer.from(json(body)), key.private_key).toString("base64") } };
 }
+/** Internal producer receipt, using the existing project issuer; no CLI issuer or new authority. */
+export function sealPhaseExecution(root: string, body: Row): Row {
+  if (body.schema !== "aidlc.phase-execution/v1" || body.producer !== "loeyae-aidlc-evidence" || body.exit_code !== 0) throw Error("CR_OBSERVATION_PROVENANCE_INVALID");
+  return signed(root, body);
+}
+export function verifyPhaseExecution(root: string, body: unknown): Row {
+  return verified(root, body, "aidlc.phase-execution/v1");
+}
 function verified(root: string, value: unknown, schema: string): Row {
   const row = object(value, "signed receipt"), { issuer_provenance: proof, ...body } = row, key = issuer(root);
   const p = object(proof, "issuer_provenance", ["key_id", "algorithm", "signature"]);

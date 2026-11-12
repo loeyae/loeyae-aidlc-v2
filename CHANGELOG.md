@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.27.2 — 2026-11-12
+
+- Add read-only CR compatibility and declared test-impact inspection before business test execution. Select supplemental regressions from source dependencies as well as UC-D mapping, and verify the runner's actual coverage.
+- Add explicitly configured, read-only GREEN execution reuse within one CR and worktree. Preserve signed immutable raw results and execution times, independently qualify each unit, serialize identical commands, and reject changed inputs, expired environments or tampered results.
+- Classify CR compatibility and observation defects without refreshing the whole business chain. Keep native host execution as the default and retain existing controlled behavior when reuse is not configured.
+- Improve exhausted-stage handoffs with actual remaining scopes and delivery verification, and narrow local CR analysis, documentation and testing to the real impact.
+
 ## 4.27.1 — 2026-11-12
 
 - Include the native host action policy and functional checker TypeScript configuration in Git-backed releases. Both were present locally but excluded by the data-directory ignore rule, causing remote installations to fail during CLI startup with MODULE_NOT_FOUND.

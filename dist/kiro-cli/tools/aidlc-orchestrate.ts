@@ -5,7 +5,7 @@ import { autonomyRunDirective } from './aidlc-autonomy-run';
 import { operationReceipt, committedReport } from './aidlc-run-recovery';
 import { deliveryConsistencyPayloadErrors, evidenceTimeError, reviewIssueErrors } from "./aidlc-evidence-policy";
 import { historicalPhaseInputErrors } from "./aidlc-phase-inputs";
-import { alternativePhaseInputs } from "./aidlc-evidence";
+import { alternativePhaseInputs, phaseObservationEvidenceErrors } from "./aidlc-evidence";
 import { clearRepairGuidance, repairGuidance, sensorRepairDiagnostics, type RepairDiagnostic } from "./aidlc-repair-guidance";
 import { phaseExecutionRevision } from "./aidlc-workflow-layout";
 import { GLOBAL_REVIEW_ITEMS, globalChecklistErrors, globalReviewUcdSources, type GlobalCoverage } from "./aidlc-global-review";
@@ -2579,6 +2579,7 @@ function phaseEvidenceErrors(
   // MARS-271: 收敛期受影响方法过滤(test_filter)只允许出现在 RED 证据;GREEN/BASELINE 最终证据强制全量。
   const testFilter = String(evidence.test_filter ?? "").trim();
   if (testFilter && phase !== "RED") errors.push(`${phase} evidence must be a full run; test_filter is only allowed for RED convergence iterations`);
+  if (phase === "GREEN") errors.push(...phaseObservationEvidenceErrors(stageSlug, evidence));
   // The controlled producer records the observed test command separately from its
   // built-in checker; RED must have exited 1, GREEN and BASELINE 0.
   const observed = asRecord(evidence.observed_command);
@@ -4160,7 +4161,7 @@ function executionPolicyPrompt(policy: ExecutionPolicy): string {
   return `\n执行策略（directive 优先）：任务级别=${policy.task_level}。成功条件：${policy.success_condition}\n允许探索：${policy.allowed_exploration}\n阶段依赖：${list(required.requires, "无")}；consumes：${list(required.consumes, "无")}；produces：${list(required.produces, "无")}；sensors：${list(required.sensors, "无")}。\n证据复用：${policy.reusable_evidence}\n禁止：${policy.prohibited_actions.join("；")}\n停止：${policy.stop_conditions.join("；")}\n扩大范围仅当：${policy.expansion_triggers.join("；")}\n规则优先级：${policy.priority.join(" > ")}。`;
 }
 
-function previewHandoff(state: WorkflowState, ref: WorkflowRef, target: StageInstance | undefined, blocker?: string, context: ExecutionContext = {}): Pick<Directive, "handoff_prompt" | "next_stage_prompt" | "next_stage_status" | "next_stage"> {
+function previewHandoff(state: WorkflowState, ref: WorkflowRef, target: StageInstance | undefined, blocker?: string, context: ExecutionContext = {}, remaining: StageInstance[] = []): Pick<Directive, "handoff_prompt" | "next_stage_prompt" | "next_stage_status" | "next_stage"> {
   const statePath = relativeStatePath(PROJECT_ROOT, ref);
   const moduleId = target?.module_id || context.module_id || (ref.kind === "module" ? ref.module_id : undefined);
   const unitId = target?.unit_id || context.unit_id;
@@ -4168,9 +4169,21 @@ function previewHandoff(state: WorkflowState, ref: WorkflowRef, target: StageIns
   const scopeFlags = `${moduleId ? ` --module ${moduleId}` : ""}${unitId ? ` --unit ${unitId}` : ""}`;
   const start = `使用 AI-DLC，继续当前工作。\n工作目标：${state.work_description}\n工作流：${state.workflow_id}（${scope}）\n工作流状态：${state.status}${state.status === "parked" ? "；仅按 BOSS 的明确续作指令使用 next --resume 恢复。" : "。"}\n恢复上下文：运行 loeyae-aidlc orchestrate state context${ref.kind === "integration" ? " --integration" : scopeFlags}，再核对最新路由；${statePath} 是状态来源，不默认整读 state/audit 或历史快照。`;
   if (!target) {
-    const message = blocker || "当前预览范围未找到下一阶段。先读取 runtime summary，核对其他单元、模块及集成阶段的进度；不要据此宣称整个项目已经完成，也不要重复执行已通过的阶段。";
+    // Exhausting a bound chain is a scope boundary, not a project completion.
+    // Use the already loaded merged view; do not scan evidence or claim sibling work.
+    const pendingScopes = new Map<string, { count: number; first: string }>();
+    for (const instance of remaining) {
+      const key = `${workflowRefKey(ownerOfInstance(instance.instance_id))}${instance.unit_id ? ` / unit:${instance.unit_id}` : ""}`;
+      const pending = pendingScopes.get(key);
+      if (pending) pending.count++;
+      else pendingScopes.set(key, { count: 1, first: instance.instance_id });
+    }
+    const pending = [...pendingScopes].slice(0, 6).map(([key, value]) => `${key}：${value.count} 个（如 ${value.first}）`).join("；");
+    const message = blocker || (remaining.length
+      ? `当前范围（${scope}）没有下一候选阶段；项目仍有 ${remaining.length} 个未完成实例，涉及 ${pendingScopes.size} 个范围：${pending}${pendingScopes.size > 6 ? "；其余范围见摘要" : ""}。\n下一步：运行 loeyae-aidlc runtime summary，核对上述实例的 status、dependency_waiting 与 owner，区分可继续、依赖等待及他人领取的工作。在已有授权内选择目标后，运行 loeyae-aidlc module inspect --stage-instance <目标实例>，按现有 inspect/bind 规则交接，再预览目标范围并继续；当前单元的旧 binding 不能用于领取其他单元。不要据此宣称整个项目已经完成，也不要重复执行已通过的阶段。`
+      : `当前范围（${scope}）及项目路由中的阶段均已记录完成或跳过。\n下一步：运行 loeyae-aidlc orchestrate state summary 核对交付记录，结合实际产物与已有测试结果核验验收标准，报告业务结果、真实验证及未验证项、性能。阶段记录不等于验收已通过；只重验受影响或缺少验证的内容，不要重复执行已通过的阶段。`);
     return { next_stage: null, next_stage_status: blocker ? "blocked" : "none", handoff_prompt: `BOSS，${message}`,
-      next_stage_prompt: `${start}\n下一步：${message}\n继续时重新运行 loeyae-aidlc orchestrate next${scopeFlags} --preview，并以最新路由和当前领取为准。` };
+      next_stage_prompt: `${start}\n${message}` };
   }
   const stage = target.stage;
   const consumes = stage.consumes.flatMap(pattern => displayArtifactPatterns(pattern, target, true));
@@ -5334,7 +5347,8 @@ async function handleNextInner(args: string[]): Promise<Directive> {
       : search.blocked ? `依赖尚未完成：${search.blocked.unsatisfied.join("、")}` : undefined;
     return {kind: "print", preview: true, workflow_id: part.state.workflow_id, workflow: workflowRefKey(ref), stage_instance: target?.instance_id || null, expected: claimToken(target ? part.state.active_instances[target.instance_id] : undefined), message: "Read-only routing preview; bind the returned exact instance before next. Dependencies and report gates still apply.",
       ...previewHandoff(view, ref, target ? runtimeInstance(target, view) : undefined, blocker,
-        { module_id: flags.module || /@module:([^@]+)/.exec(binding?.stage_instance || "")?.[1], unit_id: boundUnit || flags.unit })};
+        { module_id: flags.module || /@module:([^@]+)/.exec(binding?.stage_instance || "")?.[1], unit_id: boundUnit || flags.unit },
+        target ? [] : all.filter(instance => !isInstanceResolved(view, instance.instance_id)))};
   }
   const claimRequested = "claim" in flags;
   if (flags["provider-approval"] === "true") return { kind: "error", message: "--provider-approval requires a non-empty approval reference" };
