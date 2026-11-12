@@ -64,7 +64,8 @@ function pack(cwd, label) {
   assert.deepEqual(info.files.filter(({ path }) => /(^|\/)(\.npmrc|\.gitconfig|id_rsa|id_ed25519|credentials|known_hosts)$|(^|\/)\.env($|\.)/.test(path)), [], "tarball contains credential/configuration files");
   const paths = new Set(info.files.map(f => f.path));
   if (label === "candidate") assert(info.bundled.includes("html-validate"), "bundle the validator runtime to avoid npm optional test-peer resolution crashes");
-  for (const p of ["bin/cli.js", "bin/cli.ts", "core/tools/data/stage-graph.json", "core/tools/data/provider-schema-ownership.json", "scripts/build.ts"])
+  for (const p of ["bin/cli.js", "bin/cli.ts", "core/tools/data/stage-graph.json", "core/tools/data/provider-schema-ownership.json", "scripts/build.ts",
+    ...(label === "candidate" ? ["core/tools/data/native-host-action-policy.json", "core/tools/data/functional-checker-tsconfig.json"] : [])])
     assert(paths.has(p), `missing packaged runtime ${p}`);
   const digest = createHash("sha256").update(readFileSync(tarball)).digest("hex");
   report[label] = { version: info.version, filename: tarball, sha256: digest, files: info.entryCount, integrity: info.integrity, bundled: info.bundled };

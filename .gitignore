@@ -3,6 +3,8 @@ node_modules/
 .aidlc/mcp-readonly/
 core/tools/data/*
 !core/tools/data/stage-graph.json
+!core/tools/data/native-host-action-policy.json
+!core/tools/data/functional-checker-tsconfig.json
 !core/tools/data/provider-schema-ownership.json
 !core/tools/data/provider-schemas/
 !core/tools/data/provider-schemas/*.json

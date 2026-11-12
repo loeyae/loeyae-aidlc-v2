@@ -1,4 +1,5 @@
 [
+  ["node", "tests/test_release_runtime_data.mjs"],
   ["tsx", "tests/test_host_execution.ts"],
   ["tsx", "tests/test_host_execution_distribution.ts"],
   ["tsx", "tests/test_host_execution_install.ts"],

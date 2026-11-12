@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.27.1 — 2026-11-12
+
+- Include the native host action policy and functional checker TypeScript configuration in Git-backed releases. Both were present locally but excluded by the data-directory ignore rule, causing remote installations to fail during CLI startup with MODULE_NOT_FOUND.
+- Check runtime data against Git's release tree as well as local distributions and package contents, preventing ignored local files from masking incomplete releases.
+
 ## 4.27.0 — 2026-11-12
 
 - Make native host execution the default: the host owns implementation, scheduling, testing, repair and continuation. Keep controlled workflow APIs as explicit compatibility interfaces, without requiring H5, claims, probes or stage reports for ordinary local work.
