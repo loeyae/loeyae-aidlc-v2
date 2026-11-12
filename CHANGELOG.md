@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.27.3 — 2026-11-13
+
+- Separate default CR guidance from explicitly selected managed stage and evidence contracts; legacy records alone never select managed execution.
+- Distinguish implementation, acceptance and authorized closeout. Pending external acceptance does not restart implementation, and temporary CR cleanup cannot substitute for completion or delete the only uncommitted record.
+- Maintain each decision/result once and reference it across existing summaries; keep business definitions and actual consumers synchronized without mandatory duplicate planning artifacts.
+- Align managed stage guidance with scoped validation: delivery notes alone do not demand business test reruns, while real input changes and existing controlled checks remain enforced.
+
 ## 4.27.2 — 2026-11-12
 
 - Add read-only CR compatibility and declared test-impact inspection before business test execution. Select supplemental regressions from source dependencies as well as UC-D mapping, and verify the runner's actual coverage.

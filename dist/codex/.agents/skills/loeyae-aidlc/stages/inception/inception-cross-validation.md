@@ -18,6 +18,9 @@ produces:
 sensors: [quality-change-impact, artifact-consistency, delivery-readiness, inception-consistency]
 requires: [user-stories, ui-mock-generation, ui-figma-generation]
 ---
+
+> **适用范围：显式受管执行。** 本文的阶段、领取、计划、产证与 report 要求只在用户明确选择维护旧受管流程时适用。默认宿主使用 [宿主执行协议](../../knowledge/protocols/host-execution.md)，可按需要参考本文的业务检查，不继承流程前置条件。
+
 # Inception 产物交叉验证（强制审查）
 
 **目的**：确保 Inception 阶段各产物之间保持一致性，问题发现越早成本越低。

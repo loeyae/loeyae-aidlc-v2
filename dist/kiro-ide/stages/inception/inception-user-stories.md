@@ -17,6 +17,9 @@ produces:
 sensors: [story-traceability, traceability-matrix, story-rule-consistency, quality-change-impact, artifact-consistency]
 requires: [requirements-analysis]
 ---
+
+> **适用范围：显式受管执行。** 本文的阶段、领取、计划、产证与 report 要求只在用户明确选择维护旧受管流程时适用。默认宿主使用 [宿主执行协议](../../knowledge/protocols/host-execution.md)，可按需要参考本文的业务检查，不继承流程前置条件。
+
 # 用户故事 - 详细步骤
 
 ## 审批与继续策略

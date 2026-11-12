@@ -65,6 +65,20 @@ try {
   assert(!fs.existsSync(path.join(root, ".aidlc")), "no grant/probe/receipt/worker state created");
   pass("native RED -> repair -> GREEN -> late delivery documents -> continuation, no AI-DLC execution gate");
 
+  // A real legacy CR is task input, not an instruction to enter managed mode.
+  const crPath = "docs/aidlc/change-requests/CR-existing.md";
+  write(crPath, "# Existing CR\n- [ ] refresh / re-attest / ui reverify\nLocal verification passed; QA pending. Only uncommitted record.\n");
+  const crBefore = fs.readFileSync(path.join(root, crPath));
+  const pending = cli("--input", crPath);
+  assert.equal(pending.mode, "host");
+  assert.equal(pending.execution.ai_dlc_execution_gate, false);
+  assert.equal(pending.acceptance.business, "not_evaluated");
+  assert.deepEqual(fs.readFileSync(path.join(root, crPath)), crBefore);
+  assert.deepEqual(fs.readFileSync(path.join(root, "aidlc/active/aidlc-state.md")), state);
+  assert.deepEqual(fs.readFileSync(path.join(root, "aidlc/active/audit.md")), audit);
+  assert(!fs.existsSync(path.join(root, ".aidlc")));
+  pass("legacy CR input neither selects managed execution, closes pending acceptance nor deletes the only record");
+
   write("design.md", "design\n".repeat(2000));
   const docs = hostWorkContext(root, { inputs: ["design.md", "missing.md"] });
   assert(docs.inputs[0].truncated); assert(docs.inputs[0].text!.length <= 4096);
