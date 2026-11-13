@@ -1,8 +1,0 @@
-import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';
-const dir=path.join(import.meta.dirname,'publish-r2'),manifest=JSON.parse(fs.readFileSync(path.join(dir,'preparation.json'),'utf8')),root=manifest.root;
-const lock=JSON.parse(fs.readFileSync(path.join(root,'docs/aidlc/modules/project/inception/ui-design/ui-generation-lock.json'),'utf8'));
-const sha=v=>crypto.createHash('sha256').update(v).digest('hex'),changes=[];
-const requests=[];for(const round of fs.readdirSync(dir).filter(n=>n.startsWith('prework-'))){const file=path.join(dir,round,'tools.jsonl');if(fs.existsSync(file))for(const line of fs.readFileSync(file,'utf8').trim().split('\n')){const row=JSON.parse(line);if(row.event==='request'&&row.arguments?.action==='write')requests.push({...row.arguments,round});}}
-for(const source of lock.sources){const current=fs.readFileSync(path.join(root,source.path));if(sha(current)===source.sha256)continue;const found=requests.find(r=>r.path===source.path&&sha(r.content)===source.sha256);changes.push({path:source.path,locked_sha256:source.sha256,current_sha256:sha(current),locked_content_found:!!found,source_round:found?.round,locked_content:found?.content,current_content:current.toString('utf8')});}
-const out=path.join(dir,'ui-lock-drift-'+Date.now()+'.json');fs.writeFileSync(out,JSON.stringify({kind:'actual-immutable-ui-lock-source-comparison',lock_sha256:sha(fs.readFileSync(path.join(root,'docs/aidlc/modules/project/inception/ui-design/ui-generation-lock.json'))),changes},null,2)+'\n',{flag:'wx'});
-console.log(JSON.stringify({file:out,changes:changes.map(({path,locked_sha256,current_sha256,locked_content_found,source_round})=>({path,locked_sha256,current_sha256,locked_content_found,source_round}))}));

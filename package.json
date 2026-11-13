@@ -1,6 +1,6 @@
 {
   "name": "loeyae-aidlc",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "description": "Goal-directed AI-DLC methods with one execution contract and progressive disclosure",
   "author": "Loeyae Team",
   "license": "MIT",
@@ -19,6 +19,7 @@
     "scripts/generate-methods.ts"
   ],
   "scripts": {
+    "prepack": "node --import tsx scripts/build.ts --all",
     "build": "tsx scripts/build.ts",
     "build:all": "tsx scripts/build.ts --all",
     "build:claude": "tsx scripts/build.ts --harness claude",
@@ -35,6 +36,7 @@
     "test": "node scripts/test-core.mjs",
     "test:install": "node scripts/run-python.mjs tests/test_installer_lifecycle.py",
     "test:package": "node scripts/test-package.mjs",
+    "test:providers": "node scripts/test-providers.mjs",
     "install-skill": "tsx bin/cli.ts install"
   },
   "dependencies": {

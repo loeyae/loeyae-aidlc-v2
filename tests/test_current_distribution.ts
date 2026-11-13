@@ -2,9 +2,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
 const root=process.cwd();
 const walk=(dir:string):string[]=>fs.readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(dir,e.name)):[path.join(dir,e.name)]);
 const sourceEntry=fs.readFileSync("core/ENTRY.md","utf8");
+if(fs.existsSync(path.join(root,".git"))){
+ const tracked=spawnSync("git",["ls-files","--","dist"],{cwd:root,encoding:"utf8",windowsHide:true});
+ assert.equal(tracked.status,0,tracked.stderr);assert.equal(tracked.stdout.trim(),"","generated host copies must not be tracked in Git");
+}
 let files=0;
 for(const name of fs.readdirSync("harness")){
  const manifest=(await import(pathToFileURL(path.join(root,"harness",name,"manifest.ts")).href)).default;

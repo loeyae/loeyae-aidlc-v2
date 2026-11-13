@@ -2,6 +2,8 @@
 
 安装包向十个宿主分发同一套目标导向的当前执行规则与按需方法。5.x 已移除旧阶段调度器；升级边界见 [README](../README.md)。
 
+源码仓库不保存生成的 `dist/`。正式 npm tarball 在打包时生成并携带全部宿主分发；下面的 Git 源码归档安装保留源码和运行依赖，由 `loeyae-aidlc install` 首次按需构建所选宿主，不需要开发依赖或手工复制分发文件。
+
 ```bash
 npm install -g --ignore-scripts https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
 loeyae-aidlc install
@@ -58,23 +60,17 @@ loeyae-aidlc install --harness deepseek --project /absolute/path/to/project
 
 `--project` 支持 Kiro、CodeBuddy、Qoder、DeepSeek 对应安装范围；不能与 `--all` 同时使用，路径须为已存在的普通目录。
 
-安装自检使用 `loeyae-aidlc install --list` 与 `loeyae-aidlc version`；`loeyae-aidlc runtime doctor` 需要项目中已有活动 workflow。
+安装自检使用 `loeyae-aidlc install --list` 与 `loeyae-aidlc version`；随后在对应宿主确认入口可加载。安装自检不创建项目 workflow。
 
 ## 更新（升级到新版本）
 
-升级到新版本时，按以下四步顺序执行（先清理旧安装，再装新版）：
+正常升级直接更新 CLI 并重新安装宿主资产。安装器会核对所有权、备份并替换自己的文件；遇到用户修改时拒绝覆盖，先保留和处理差异，不用卸载绕过保护。
 
 ```bash
-# 1. 卸载已部署到各 harness 的资产
-loeyae-aidlc uninstall --all
-
-# 2. 从 npm 全局卸载旧的 CLI 包
-npm uninstall -g loeyae-aidlc
-
-# 3. 从 npm 全局安装新版本 CLI 包（--ignore-scripts 是固定参数，原因见上文）
+# 1. 更新 CLI（--ignore-scripts 是固定参数，原因见上文）
 npm install -g --ignore-scripts https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
 
-# 4. 重新部署到所有检测到的 harness
+# 2. 更新检测到的宿主资产；也可只指定本次使用的 --harness
 loeyae-aidlc install --all
 ```
 

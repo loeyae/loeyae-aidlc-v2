@@ -1,2 +1,2 @@
-// Current tests use independent temporary workspaces; legacy suite is retained in tests/legacy-suite-4.x.json.
+// Current tests use independent temporary workspaces. Retired tests remain in Git history.
 import './test-current.mjs';

@@ -1,7 +1,0 @@
-{
-  "schema": "aidlc.integration-entry/v1",
-  "decision": "HOLD",
-  "reason": "review-not-go",
-  "execution_authorized": false,
-  "business_verified": false
-}

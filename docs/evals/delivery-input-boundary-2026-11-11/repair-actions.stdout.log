@@ -1,2 +1,0 @@
-PASS typed repair diagnostics distinguish approvals, targeted refresh and historical observations
-PASS progress timing cannot reset retries; actual inputs and failures reset them; preview and invalid sessions cannot publish

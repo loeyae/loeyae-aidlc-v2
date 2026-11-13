@@ -1,9 +1,0 @@
-{
-  "read_only": true,
-  "recorded": "834c6589fbc78cb8cf472410163189636cd94a0f97db1f9d07f5efa7864e2f26",
-  "current": "834c6589fbc78cb8cf472410163189636cd94a0f97db1f9d07f5efa7864e2f26",
-  "exact_match": true,
-  "actual_phase_gate_failures": [],
-  "original_state_audit_green_unchanged": true,
-  "executed_commands": 0
-}

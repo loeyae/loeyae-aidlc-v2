@@ -1,1 +1,0 @@
-PASS native UI adapter contract: exact user event, nonce, request digest, HostRef/config, deadline, opaque one-use token; fixture only

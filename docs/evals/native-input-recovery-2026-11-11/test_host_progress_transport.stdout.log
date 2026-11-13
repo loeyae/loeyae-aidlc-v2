@@ -1,8 +1,0 @@
-PASS actual wire loop
-PASS actual wire idle
-PASS actual wire long
-PASS actual wire unknown
-PASS actual wire driver-loop
-PASS actual wire early-long
-PASS actual wire insufficient-budget
-Host progress transport: 7 engineering scenarios passed

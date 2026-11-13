@@ -7,8 +7,7 @@ import { createRequire } from "node:module";
 const [root] = process.argv.slice(2);
 const req = createRequire(join(root, "package.json"));
 for (const name of Object.keys(req("./package.json").dependencies)) {
-  // The MCP SDK intentionally exposes subpaths; it has no root index module.
-  const entry = req.resolve(name === "@modelcontextprotocol/sdk" ? `${name}/client/index.js` : name);
+  const entry = req.resolve(name);
   assert(entry.startsWith(join(root, "node_modules")) || entry.startsWith(join(root, "..")), `dependency resolved outside installation: ${name}: ${entry}`);
 }
 const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);

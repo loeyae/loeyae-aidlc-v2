@@ -1,8 +1,0 @@
-{
-  "kind": "print",
-  "autonomous_observations": {
-    "status": "unverified",
-    "reason": "Error: OBSERVATION_BATCH_REQUIRED",
-    "business_verified": false
-  }
-}

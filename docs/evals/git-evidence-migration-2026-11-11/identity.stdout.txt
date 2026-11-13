@@ -1,2 +1,0 @@
-{"phase":"checker-identity","broad":{"digest":"b19a587cf4b8835efede93e11164939a890515a8543f211dea2fc8612286ee62","files":2030,"bytes":34948639,"duration_ms":303.26149999999996},"local":{"digest":"70648b6014130d2d90ece28582902c4515a19cd60f168f5b5a8662b6bcd06488","files":70,"bytes":12479296,"duration_ms":45.697900000000004},"real_business_run":false}
-PASS actual independent closure, unrelated control change stable, relevant change invalidated, undeclared dependency refused

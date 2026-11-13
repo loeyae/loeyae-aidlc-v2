@@ -12,7 +12,7 @@ AIDLC 5 以用户目标、实际实现与验收为中心，提供一套执行规
 - loeyae-aidlc assess --input result.json：对已有真实事实生成完成视图；不运行检查、不写状态、不授予权限。
 - loeyae-aidlc help tools：查看独立 docx、export 和 Provider 能力；它们不调度任务。
 
-完整行为见 [执行规则](core/knowledge/protocols/host-execution.md)、[完成判定](core/knowledge/protocols/completion.md)、[验证](core/knowledge/protocols/verification.md) 与 [权限](core/knowledge/protocols/permissions.md)。方法目录由技能元信息生成，不需手工维护第二份说明。
+完整行为见 [执行规则](core/knowledge/protocols/host-execution.md)、[完成判定](core/knowledge/protocols/completion.md)、[验证](core/knowledge/protocols/verification.md) 与 [权限](core/knowledge/protocols/permissions.md)。[方法目录](core/knowledge/methods.md) 由技能元信息生成，不需手工维护第二份说明。
 
 ## 从 4.x 升级
 
@@ -28,4 +28,10 @@ Provider 的来源锁定与独立文档工具保留。知识包使用当前章�
 
 npm run build:all 生成全部宿主；npm run typecheck 检查类型；npm test 验证当前行为、权限边界、来源完整性、独立文档工具与分发一致性。npm run test:install 检查安装所有权保护；npm run test:package 检查实际发布包。
 
-入口唯一来源是 core/ENTRY.md；任务方法在 core/skills，详细规则在 core/knowledge/protocols。宿主只保留布局和必要适配。详见 [CLI](docs/loeyae-aidlc-cli-guide.md)、[实施指南](docs/aidlc-ai-tools-implementation-guide.md)、[重建方案与结果](docs/aidlc-rebuild-plan-2026-11-13.md)。
+Git 仅维护源码、当前测试和使用说明，`dist/` 不入库。`npm pack` 的 prepack 从源码生成完整分发，发布包仍包含十个宿主的安装文件；使用 Git 源码归档并以 `--ignore-scripts` 安装时，CLI 在首次安装所选宿主时构建，运行依赖已包含构建所需工具。不能手工修改 `dist/`。
+
+失效测试和一次性评估记录通过 Git 历史查阅；新验证原始输出使用系统临时目录或 `.artifacts/`，只在现有任务说明中引用必要结论。当前测试范围与真实外部验收限制见 [测试说明](tests/README.md)。
+
+入口唯一来源是 core/ENTRY.md；任务方法在 core/skills，详细规则在 core/knowledge/protocols。宿主只保留布局和必要适配。使用说明见 [安装与升级](docs/loeyae-aidlc-v2-installation.md)、[CLI](docs/loeyae-aidlc-cli-guide.md)、[Provider](docs/provider-integration-guide.md)。
+
+`docs/` 只维护当前使用指南；执行规则直接引用 core，不另写一份实施或关键词说明。一次性方案、执行记录和过时指南通过 Git 历史查阅；需要保留的本地原稿放在 `docs/archive/`（已忽略），不作为现行规则或安装内容。

@@ -1,1 +1,0 @@
-PASS canonical documents, missing sections, unresolved decisions, UC-D coverage, isolated CLI and per-sensor identity

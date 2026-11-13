@@ -1,5 +1,13 @@
 # Changelog
 
+## 5.0.1 — 2026-11-13
+
+- Remove obsolete engine tests, fixtures and one-time evaluations from the current tree; preserve their original versions in Git. Retain and run current source-trust, document, completion and installation protections.
+- Stop tracking generated host distributions. Build all distributions in prepack, retain ready-to-install release contents, and verify automatic builds from source archives installed with lifecycle scripts disabled.
+- Require explicit goal and integration coverage for complex projects using one existing task source. Add a real local multi-consumer/HTTP regression while keeping methods optional, validation scoped and permissions unchanged.
+- Correct installation guidance: normal upgrades preserve ownership checks without mandatory uninstall/reinstall cycles or retired runtime commands.
+- Keep only current installation, CLI and Provider guides in docs; archive duplicate guidance and task-specific records locally under ignored docs/archive, with direct links to the canonical rules and method catalog.
+
 ## 5.0.0 — 2026-11-13
 
 - Rebuild AIDLC around one goal-directed host execution contract for ordinary work, CRs and continuation. Preserve project quality requirements, real acceptance and user/host permissions.

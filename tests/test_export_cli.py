@@ -113,9 +113,9 @@ const exported = true;
 
 
 def test_help() -> None:
-    result = run_cli("help")
+    result = run_cli("help", "tools")
     assert result.returncode == 0, result.stderr
-    assert "export <md|svg>" in result.stdout
+    assert "export --help" in result.stdout
     export_help = run_cli("export", "--help")
     assert export_help.returncode == 0, export_help.stderr
     assert "export md <input.md> --to <docx|pdf>" in export_help.stdout

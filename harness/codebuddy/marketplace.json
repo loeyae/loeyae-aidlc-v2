@@ -5,13 +5,13 @@
     "url": "https://github.com/loeyae"
   },
   "description": "AWS-style lightweight AI-DLC plugin marketplace for CodeBuddy.",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "plugins": [
     {
       "name": "loeyae-aidlc",
       "source": "./plugins/loeyae-aidlc",
       "description": "Task-focused AI-DLC methods, on-demand references and actual verification using native host tools.",
-      "version": "5.0.0",
+      "version": "5.0.1",
       "skills": [
         "./plugins/loeyae-aidlc/skills/loeyae-aidlc"
       ]

@@ -1,5 +1,8 @@
 node_modules/
 .artifacts/
+/dist/
+/docs/evals/
+/docs/archive/
 .aidlc/mcp-readonly/
 *.tsbuildinfo
 .DS_Store

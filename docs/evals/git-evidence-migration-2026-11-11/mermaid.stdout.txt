@@ -1,1 +1,0 @@
-Mermaid source checks passed: ordinary, cross-module, contract, architecture, sequence, class, state, ER, project scope and legacy-comment compatibility; explicit SVG still requires its contract

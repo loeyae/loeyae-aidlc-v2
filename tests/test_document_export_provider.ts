@@ -259,7 +259,7 @@ import { requireEnabledProviderCapability } from "../core/tools/aidlc-project-pr
 const selected = requireEnabledProviderCapability(
 	root,
 	"document.render",
-	{ project_id: "adversary", stage: "export", scope: "fixture" },
+	{ project_id: "adversary", stage: "export", module_id: "fixture" },
 	{ protectedGate: true },
 ).find((x) => x.intent.instance_id === "documents")!;
 const baseManifest = verifyLockedProviderCache(root, selected.lock).manifest;

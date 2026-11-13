@@ -3,8 +3,8 @@
  * build.ts — Unified packager that compiles core/ + harness/<name>/ into dist/<name>/
  *
  * Usage:
- *   bun scripts/build.ts --harness kiro-crew    # build one harness
- *   bun scripts/build.ts --all                  # build all harnesses
+ *   node --import tsx scripts/build.ts --harness kiro-crew
+ *   node --import tsx scripts/build.ts --all
  *
  * Steps per harness:
  *   1. Load harness/<name>/manifest.ts
@@ -12,8 +12,8 @@
  *   3. Copy coreDirs from core/ into dist/<name>/<harnessDir>/
  *   4. Copy harnessFiles from harness/<name>/ into dist/<name>/
  *   5. Apply rulesRename if configured
- *   6. Compile stage graph (core/tools/aidlc-graph.ts compile)
- *   7. Report summary
+ *   6. Generate the entry from core/ENTRY.md and report the result
+ * dist is disposable build output, included in release tarballs, never in Git.
  */
 
 import { existsSync, mkdirSync, cpSync, rmSync, readdirSync, readFileSync, writeFileSync } from "fs";
@@ -32,16 +32,16 @@ const ALL_HARNESSES = readdirSync(HARNESS_DIR).filter((d) =>
   existsSync(join(HARNESS_DIR, d, "manifest.ts"))
 );
 
-function parseArgs(): { harnesses: string[] } {
+function parseArgs(): { harnesses: string[]; all: boolean } {
   const args = process.argv.slice(2);
-  if (args.includes("--all")) {
-    return { harnesses: ALL_HARNESSES };
+  if (args.length === 1 && args[0] === "--all") {
+    return { harnesses: ALL_HARNESSES, all: true };
   }
   const idx = args.indexOf("--harness");
-  if (idx >= 0 && args[idx + 1]) {
-    return { harnesses: [args[idx + 1]] };
+  if (args.length === 2 && idx === 0 && ALL_HARNESSES.includes(args[1])) {
+    return { harnesses: [args[1]], all: false };
   }
-  console.error("Usage: bun scripts/build.ts --harness <name> | --all");
+  console.error("Usage: node --import tsx scripts/build.ts --harness <known name> | --all");
   process.exit(1);
 }
 
@@ -111,8 +111,14 @@ async function buildHarness(name: string) {
 }
 
 async function main() {
+  const { harnesses, all } = parseArgs();
+  // Validate the exact generated root before removing stale hosts or orphan files.
+  // A release must not accidentally package output left over from an older version.
+  if (all) {
+    if (relative(ROOT, DIST_DIR) !== "dist") throw Error("Unsafe distribution root");
+    rmSync(DIST_DIR, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
   generateMethods(ROOT);
-  const { harnesses } = parseArgs();
   console.log(`🏗️  Loeyae AI-DLC Builder`);
   console.log(`   Harnesses: ${harnesses.join(", ")}`);
 

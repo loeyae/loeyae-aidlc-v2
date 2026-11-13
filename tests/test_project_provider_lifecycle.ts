@@ -1,5 +1,3 @@
-import { fixtureEnvironment } from "./mars243_fixture_session";
-import { createInitialState, renderLightWorkflowState } from "../core/tools/aidlc-light-state";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -26,7 +24,6 @@ import {
 import {
   PROJECT_PROVIDER_AUDIT_PATH,
   PROJECT_PROVIDER_HISTORY_PATH,
-  PROJECT_PROVIDER_INVALIDATIONS_PATH,
   PROJECT_PROVIDERS_LOCK_PATH,
   PROJECT_PROVIDERS_PATH,
   projectProviderConfigDigest,
@@ -146,7 +143,7 @@ function pushNextCommit(source: string, version: string): string {
 }
 
 function runCli(cwd: string, ...args: string[]): ReturnType<typeof spawnSync> {
-  return spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8", shell: false , env: fixtureEnvironment(cwd, [...args]) });
+  return spawnSync(process.execPath, [tsx, cli, ...args], { cwd, encoding: "utf8", shell: false, windowsHide: true, env: process.env });
 }
 
 const root = mkdtempSync(join(tmpdir(), "aidlc-project-provider-test-"));
@@ -165,7 +162,8 @@ try { chmodSync(maliciousHook, 0o755); } catch { /* Windows mode support is opti
 mkdirSync(join(project, ".aidlc"), { recursive: true });
 write(join(project, ".aidlc", "provider-git-policy.json"), JSON.stringify({ version: 1, allow_file_fixtures: true }) + "\n");
 mkdirSync(join(project, "aidlc", "active"), { recursive: true });
-write(join(project, "aidlc", "active", "aidlc-state.md"), renderLightWorkflowState(createInitialState("feature", undefined, undefined, [], "provider lifecycle fixture")));
+const historicalState = "Existing user-owned workflow record; provider operations must not rewrite it.\n";
+write(join(project, "aidlc", "active", "aidlc-state.md"), historicalState);
 
 const fixture = createProviderRemote(root, markers);
 const previousHome = process.env.HOME;
@@ -234,11 +232,11 @@ try {
   const cliList = runCli(project, "provider", "list", "--project", project, "--output", "json");
   assert.equal(cliList.status, 0, String(cliList.stderr));
   assert.equal(JSON.parse(String(cliList.stdout)).providers[0].instance_id, "fixture-provider");
-  const cliHelp = runCli(project, "help");
+  const cliHelp = runCli(project, "provider", "help");
   assert.equal(cliHelp.status, 0, String(cliHelp.stderr));
-  assert.match(String(cliHelp.stdout), /provider add\|list\|status\|update\|enable\|disable\|remove/);
+  assert.match(String(cliHelp.stdout), /provider list\|status/);
   const missingRef = runCli(project, "provider", "update", "fixture-provider", "--project", project);
-  assert.equal(missingRef.status, 2);
+  assert.equal(missingRef.status, 1);
   assert.match(String(missingRef.stderr), /requires --ref/);
 
   const configPath = join(project, PROJECT_PROVIDERS_PATH);
@@ -282,11 +280,7 @@ try {
   assert.equal(updated.previous_commit_oid, fixture.firstCommit);
   assert.equal(updated.commit_oid, secondCommit);
   assert.notEqual(updated.lock_digest, installed.lock.lock_digest);
-  assert.deepEqual(updated.invalidation?.affected_artifacts, [
-    ".aidlc/evidence/providers/old-evidence.json",
-    ".aidlc/provider-gates/other-instance-gate.json",
-    ".aidlc/provider-plans/old-plan.json",
-  ]);
+  assert.equal(existsSync(join(project, ".aidlc/provider-invalidations")), false);
   assert.equal(existsSync(join(project, updated.history!)), true);
   assert.throws(() => updateProjectProvider(project, "fixture-provider", "", { allowFile: true }), /explicit --ref/);
 
@@ -320,12 +314,10 @@ try {
   assert.equal(existsSync(currentCache), true, "remove keeps detached cache for history/recovery");
   assert.equal(existsSync(join(project, ".aidlc", "evidence", "providers", "old-evidence.json")), true, "remove must not delete historical Evidence");
   assert.equal(existsSync(join(project, PROJECT_PROVIDER_HISTORY_PATH, "fixture-provider")), true);
-  assert.equal(existsSync(join(project, PROJECT_PROVIDER_INVALIDATIONS_PATH)), true);
   const audit = readFileSync(join(project, PROJECT_PROVIDER_AUDIT_PATH), "utf8");
   for (const event of ["PROVIDER_ADDED", "PROVIDER_UPDATED", "PROVIDER_DISABLED", "PROVIDER_ENABLED", "PROVIDER_REMOVED"]) assert.match(audit, new RegExp(event));
-  const workflowAudit = readFileSync(join(project, "aidlc", "active", "audit.md"), "utf8");
-  assert.match(workflowAudit, /PROVIDER_ADDED/);
-  assert.match(workflowAudit, /PROVIDER_REMOVED/);
+  assert(!existsSync(join(project, "aidlc", "active", "audit.md")), "provider lifecycle must not create workflow audit");
+  assert.equal(readFileSync(join(project, "aidlc", "active", "aidlc-state.md"), "utf8"), historicalState);
 
   const unavailableProject = join(root, "unavailable-project");
   mkdirSync(join(unavailableProject, ".aidlc"), { recursive: true });

@@ -34,5 +34,29 @@
   [
     "tsx",
     "tests/test_current_distribution.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_project_delivery.ts"
+  ],
+  [
+    "tsx",
+    "tests/test_project_provider_lifecycle.ts"
+  ],
+  [
+    "node",
+    "tests/test_provider_integration_plan.mjs"
+  ],
+  [
+    "python",
+    "tests/test_docx_inspect.py"
+  ],
+  [
+    "python",
+    "tests/test_docx_beautify.py"
+  ],
+  [
+    "python",
+    "tests/test_export_cli.py"
   ]
 ]

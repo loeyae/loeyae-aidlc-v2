@@ -50,7 +50,11 @@ function run(name, command, args, settings = {}) {
 }
 const npmRun = (name, args, cwd = workspace) => run(name, process.execPath, [npm, ...args], { cwd });
 function pack(cwd, label) {
-  const info = JSON.parse(npmRun(`pack-${label}`, ["pack", "--json", "--pack-destination", output], cwd))[0];
+  const stdout = npmRun(`pack-${label}`, ["pack", "--json", "--pack-destination", output], cwd);
+  // npm may prefix --json output with lifecycle/build logs. The final top-level
+  // JSON array is the pack result; retain the complete raw output in the log.
+  const start = stdout.lastIndexOf("\n[");
+  const info = JSON.parse(start < 0 ? stdout : stdout.slice(start + 1))[0];
   const tarball = join(output, `${label}-${info.filename}`);
   // Keep both versions even if their package versions happen to match.
   const original = join(output, info.filename);
@@ -110,7 +114,30 @@ server.listen(0, "127.0.0.1", () => console.log(\`listening \${server.address().
 try {
   report.core_revision = run("core-revision", "git", ["rev-parse", "HEAD"], { cwd: repo }).trim();
   report.npm_version = npmRun("npm-version", ["--version"]).trim();
-  const candidateTarball = pack(repo, "candidate");
+  // A clean source archive has neither dist nor node_modules. Match the contents
+  // used by the documented Git archive install, even with uncommitted source edits.
+  const sourceTree = join(sandbox, "source-only"); mkdirSync(sourceTree);
+  for (const file of ["package.json", "package-lock.json", ...json(join(repo, "package.json")).files.filter(p => p !== "dist/")]) {
+    const target = join(sourceTree, file); mkdirSync(dirname(target), { recursive: true });
+    cpSync(join(repo, file), target, { recursive: true });
+  }
+  assert(!existsSync(join(sourceTree, "dist"))); assert(!existsSync(join(sourceTree, "node_modules")));
+  const sourceTarball = join(output, "source-only.tgz");
+  run("source-archive", "tar", ["-czf", sourceTarball, "-C", sandbox, "source-only"]);
+  const sourceInstalled = install(sourceTarball, "source-installed");
+  assert(!existsSync(join(sourceInstalled, "dist")), "source archive unexpectedly contained generated output");
+  const sourceTarget = join(sandbox, "source-only target 中文"), sourceArgs = ["--harness", "codex", "--target", sourceTarget];
+  cli(sourceInstalled, "source-install-builds-on-demand", ["install", ...sourceArgs]);
+  assert(existsSync(join(sourceTarget, "SKILL.md")));
+  assert(!existsSync(join(sourceInstalled, "dist", "claude")), "single host source install built unrelated hosts");
+  cli(sourceInstalled, "source-uninstall", ["uninstall", ...sourceArgs]);
+  report.checks.push("clean source archive, production dependencies only, ignored lifecycle scripts, on-demand single-host install");
+  // npm pack must build all hosts itself and remove obsolete generated files.
+  const obsolete = join(sourceInstalled, "dist", "obsolete-host"); mkdirSync(obsolete);
+  writeFileSync(join(obsolete, "stale.txt"), "must not enter the release");
+  const candidateTarball = pack(sourceInstalled, "candidate");
+  assert(!existsSync(obsolete), "prepack retained obsolete generated output");
+  report.checks.push("prepack regenerates all hosts with production dependencies and clears stale output");
   const candidate = install(candidateTarball, "candidate");
   const installedRequire = createRequire(join(candidate, "package.json"));
   run("installed-layout", process.execPath, [installedRequire.resolve("tsx/cli"), join(repo, "tests/package-layout-smoke.mjs"), candidate]);
@@ -153,7 +180,7 @@ try {
   try {
     const globalPrefix = join(sandbox, "global-prefix");
     npmRun("npm-install-global-remote", ["install", "-g", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", globalPrefix, `${archiveServer.url}/${encodeURIComponent(basename(candidateTarball))}`]);
-    const globalRoot = join(globalPrefix, "node_modules", "loeyae-aidlc");
+    const globalRoot = join(globalPrefix, ...(process.platform === "win32" ? [] : ["lib"]), "node_modules", "loeyae-aidlc");
     const globalRequire = createRequire(join(globalRoot, "package.json"));
     check("global remote tarball: real version, bin shim and CLI startup (TS executed via installed tsx)", () => {
       assert.equal(json(join(globalRoot, "package.json")).version, report.candidate.version);
@@ -162,6 +189,16 @@ try {
       assert.match(cli(globalRoot, "global-help", ["--help"]), /goal-directed host execution/);
       assert.match(cli(globalRoot, "global-version", ["--version"]), new RegExp(report.candidate.version.replaceAll(".", "\\.")));
     });
+    const sourcePrefix = join(sandbox, "global-source-prefix");
+    npmRun("npm-install-global-source", ["install", "-g", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", sourcePrefix, `${archiveServer.url}/source-only.tgz`]);
+    const sourceGlobal = join(sourcePrefix, ...(process.platform === "win32" ? [] : ["lib"]), "node_modules", "loeyae-aidlc");
+    assert(!existsSync(join(sourceGlobal, "dist")));
+    const sourceGlobalTarget = join(sandbox, "global source target"), sourceGlobalArgs = ["--harness", "codex", "--target", sourceGlobalTarget];
+    cli(sourceGlobal, "global-source-install", ["install", ...sourceGlobalArgs]);
+    cli(sourceGlobal, "global-source-uninstall", ["uninstall", ...sourceGlobalArgs]);
+    cli(sourceGlobal, "global-source-build-all", ["build", "--all"]);
+    run("global-source-layout", process.execPath, [createRequire(join(sourceGlobal, "package.json")).resolve("tsx/cli"), join(repo, "tests/package-layout-smoke.mjs"), sourceGlobal]);
+    report.checks.push("real HTTP source archive global install with --ignore-scripts; on-demand install and ten-host parity");
     // The platform package ships its executable at the package root (esbuild.exe on Windows,
     // bin/esbuild elsewhere); resolving the package keeps this independent of hoisting.
     const esbuildPlatform = dirname(globalRequire.resolve(`@esbuild/${process.platform}-${process.arch}/package.json`));
@@ -224,7 +261,8 @@ try {
     npmRun("npm-rollback", ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", ...(options["--previous-legacy-peer-deps"] ? ["--legacy-peer-deps"] : []), previousTarball], previousPrefix);
     cli(previous, "rollback", ["install", ...args]);
     assert.match(cli(previous, "rollback-version", ["--version"]), new RegExp(report.previous.version.replaceAll(".", "\\.")));
-    cli(previous, "rollback-graph", ["graph", "validate"]);
+    if (Number(report.previous.version.split(".")[0]) < 5) cli(previous, "rollback-graph", ["graph", "validate"]);
+    else cli(previous, "rollback-methods", ["methods"]);
     cli(previous, "rollback-uninstall", ["uninstall", ...args]);
     assert(!existsSync(target));
     npmRun("npm-uninstall", ["uninstall", "--no-audit", "--no-fund", "loeyae-aidlc"], previousPrefix);
