@@ -2,6 +2,7 @@
   ["node", "tests/test_release_runtime_data.mjs"],
   ["tsx", "tests/test_host_execution.ts"],
   ["tsx", "tests/test_host_execution_distribution.ts"],
+  ["tsx", "tests/test_plan_progress_inputs.ts"],
   ["tsx", "tests/test_host_execution_install.ts"],
   ["tsx", "tests/test_worker_recovery.ts"],
   ["tsx", "tests/test_recovery_worker_process.ts"],

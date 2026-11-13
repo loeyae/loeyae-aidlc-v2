@@ -56,9 +56,9 @@ loeyae-aidlc work --details --paths '["src","tests"]'
 - [在 AI 工具中实施项目](docs/aidlc-ai-tools-implementation-guide.md)：开工、继续、多人协作及常见阻塞。
 - [CLI 指南](docs/loeyae-aidlc-cli-guide.md)：命令、阶段、证据、协作和维护。
 - [安装与升级](docs/loeyae-aidlc-v2-installation.md)。
-- [多仓库、工作树与恢复](docs/multi-repo-worktree-recovery.md)。
-- [AI-DLC 关键词](docs/ai-dlc-keyword-guide.md)、[Context Source](docs/context-source-usage.md)、[图表视觉 Provider](docs/diagram-visual-provider.md)。
-- [质量门禁协议](core/knowledge/protocols/quality-gates-v1.md)和[文档切片协议](core/knowledge/protocols/common-document-slices.md)：规则与数据契约。
+- [多仓库、工作树与恢复](docs/multi-repo-worktree-recovery.md)：默认宿主恢复与显式受管兼容参考。
+- [AI-DLC 关键词](docs/ai-dlc-keyword-guide.md)：默认动作与受管命令分列；另见 [Context Source](docs/context-source-usage.md)、[图表视觉 Provider](docs/diagram-visual-provider.md)。
+- [质量门禁协议](core/knowledge/protocols/quality-gates-v1.md)和[文档切片协议](core/knowledge/protocols/common-document-slices.md)：显式受管模式的规则与数据契约。
 - [真实宿主 Agent 评测](docs/evals/README.md)：任务包、记录方式及验证范围。
 - [Provider 分仓集成验证](docs/provider-integration-guide.md)：按仓库固定版本、选择能力及检查实际 wire 契约。
 

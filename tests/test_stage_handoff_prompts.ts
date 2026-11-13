@@ -106,6 +106,11 @@ function unitPreview(mode: "planned" | "blocked" | "none") {
     assert.match(response.next_stage_prompt, /module inspect --stage-instance <目标实例>/);
     assert(!response.next_stage_prompt.includes("next --module shop --unit api --preview"), "exhausted handoffs must not loop over the same unit");
     assert.match(response.next_stage_prompt, /不要据此宣称整个项目已经完成/);
+    const exhausted = run(unit.root, binding, ["next"]);
+    assert.equal(exhausted.execution_status, "scope-exhausted");
+    assert.equal(exhausted.workflow_completed, false);
+    assert.equal(loadWorkflowState(unit.root)!.status, "running");
+    assert.deepEqual(snapshot(unit.root), before, "single-layout unit exhaustion cannot finish or rewrite the workflow");
   } else {
     assert.equal(response.next_stage.module_id, "shop"); assert.equal(response.next_stage.unit_id, "api");
     assert.match(response.next_stage_prompt, /--module shop --unit api --preview/);
@@ -155,6 +160,38 @@ assert(!splitPreview.next_stage_prompt.includes("next --module shop --unit api -
 assert.deepEqual(snapshot(splitExhausted.root), splitBefore);
 assert.equal(loadWorkflowState(splitExhausted.root, { kind: "module", module_id: "shop" })!.active_instances[siblingBinding.claim.stage_instance].generation, siblingBinding.claim.generation);
 console.log("PASS split exhausted handoffs identify sibling and integration work without changing claims or workflow state");
+
+const splitActual = run(splitExhausted.root, exhaustedBinding, ["next", "--module", "shop", "--unit", "api"]);
+assert.equal(splitActual.execution_status, "scope-exhausted");
+assert.equal(splitActual.workflow_completed, false);
+assert.equal(splitActual.handoff_prompt, splitPreview.handoff_prompt);
+const workflowFiles = (files: Record<string, string>) => Object.fromEntries(Object.entries(files).filter(([path]) => path.startsWith("aidlc/")));
+assert.deepEqual(workflowFiles(snapshot(splitExhausted.root)), workflowFiles(splitBefore), "formal next preserves all claims and workflow state at a unit boundary");
+assert.equal(loadWorkflowState(splitExhausted.root, { kind: "module", module_id: "shop" })!.status, "running");
+
+// Finishing every owned instance may close this module, while its siblings and
+// integration remain explicitly pending in the same completion handoff.
+const completeState = loadWorkflowState(splitExhausted.root, { kind: "module", module_id: "shop" })!;
+completeState.completed_stage_instances.push(...graph.stages.filter((stage: any) => stage.axis === "unit").map((stage: any) => `${stage.slug}@module:shop@unit:web`));
+splitExhausted.persist(completeState);
+const otherBefore = snapshot(splitExhausted.root, "aidlc/active/modules/other");
+const trulyDone = run(splitExhausted.root, exhaustedBinding, ["next", "--module", "shop", "--unit", "api"]);
+assert.equal(trulyDone.kind, "done");
+assert.equal(trulyDone.workflow_completed, true);
+assert.equal(loadWorkflowState(splitExhausted.root, { kind: "module", module_id: "shop" })!.status, "done");
+assert.match(trulyDone.handoff_prompt, /module:other/);
+assert.match(trulyDone.handoff_prompt, /integration/);
+assert.match(trulyDone.next_stage_prompt, /工作流状态：done/);
+assert.deepEqual(snapshot(splitExhausted.root, "aidlc/active/modules/other"), otherBefore);
+const inconsistentDone = loadWorkflowState(splitExhausted.root, { kind: "module", module_id: "shop" })!;
+inconsistentDone.completed_stage_instances = inconsistentDone.completed_stage_instances.filter(id => id !== "code-generation@module:shop@unit:web");
+splitExhausted.persist(inconsistentDone);
+const inconsistentBefore = workflowFiles(snapshot(splitExhausted.root));
+const inconsistent = run(splitExhausted.root, exhaustedBinding, ["next", "--module", "shop", "--unit", "api"], false);
+assert.equal(inconsistent.workflow_completed, false);
+assert.match(inconsistent.message, /WORKFLOW_COMPLETION_MISMATCH/);
+assert.deepEqual(workflowFiles(snapshot(splitExhausted.root)), inconsistentBefore, "an inconsistent historical done record is diagnosed without silently rewriting it");
+console.log("PASS formal next distinguishes exhausted units from resolved workflows and preserves pending project work");
 
 const architecture = fixture("application-design@module:shop", true);
 const architectureIndex = graph.stages.findIndex((stage: any) => stage.slug === "application-design");

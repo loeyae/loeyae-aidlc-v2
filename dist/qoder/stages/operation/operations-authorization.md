@@ -8,9 +8,6 @@ requires: [operations-planning]
 consumes:
   - docs/aidlc/operation/operations-plan.md
 produces:
-  - docs/aidlc/operation/deployment-config.md
-  - docs/aidlc/operation/deployment-guide.md
-  - docs/aidlc/operation/operations-summary.md
   - .aidlc/evidence/operations-authorization/deployment-validation.json
 approval: block
 condition: has_deployment_needs
@@ -50,7 +47,7 @@ sensors: [doc-cascade, deployment-validation]
 - 密钥、Token、密码和 kubeconfig 使用 Secret、凭据系统或环境变量引用。
 - 生产发布不得默认自动触发；是否需要审批、分阶段或自动发布以规划确认结果为准。
 
-配置写入 `docs/aidlc/operation/deployment-config.md`（或规划指定的具体文件）。
+配置写入规划指定的实际文件，并在部署验证 allowlist 的 `artifacts` 中登记。实际配置是权威来源，不另建 `deployment-config.md` 抄写副本；已有说明文档保留并按其实际用途维护。
 
 ## 步骤 2：验证配置
 
@@ -69,11 +66,9 @@ sensors: [doc-cascade, deployment-validation]
 
 按 `sensors/deployment-validation.md` 将实际配置和对应 check 命令登记到阶段 allowlist，由受控 producer 执行并生成 `deployment-validation` Evidence。每个 artifact id 必须关联同 id 的 check；门禁复核配置摘要和命令绑定，不接受仅有文字记录的验证结果。
 
-## 步骤 3：生成部署文档
+## 步骤 3：维护必要部署说明
 
-在 `docs/aidlc/operation/` 生成：
-
-### `deployment-guide.md`
+复用项目现有运行手册、README 或部署指南，仅补充实际缺失或变化的内容。尚无合适位置时可使用 `docs/aidlc/operation/deployment-guide.md`，不因路径不同要求复制一份：
 
 - 制品、环境和依赖前置条件
 - 配置/Secret 清单及来源
@@ -82,12 +77,7 @@ sensors: [doc-cascade, deployment-validation]
 - 每条命令的工作目录、参数和预期结果
 - 验收负责人、发布执行责任和部署后运营交接；未知责任保持待确认，不自行授予权限
 
-### `operations-summary.md`
-
-- 实际生成文件及用途
-- 已确认的部署决策（来自 operations-plan.md）
-- 每项配置验证的命令、结果和限制
-- 未生成项及原因
+部署决定引用 `operations-plan.md`，文件与检查结果引用实际配置和 `deployment-validation` 证据；不重复录入命令结果或强制创建 `operations-summary.md`。只在现有说明中补充证据未表达的限制、风险及未生成项原因。用户明确要求的独立交付文档仍按要求提供。
 
 ## 步骤 4：质量门禁与授权
 

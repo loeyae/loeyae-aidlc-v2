@@ -17,6 +17,16 @@ assert(managed.includes('"observation_reuse"') && managed.includes("change_reque
 assert(host.includes("不构成受管模式选择") && host.includes("实施、验收、提交/合并"));
 assert(host.includes("多单元引用同一运行结果") && host.includes("不自动删除历史文件"));
 assert(host.includes("不能把整个 Markdown 文件或目录排除") && host.includes("保留现有保守校验"));
+const cleanup = cr.slice(cr.indexOf("## 历史 CR 文档批量合并"), cr.indexOf("## 完成消息"));
+assert(cr.includes("### 统一关闭与清理条件"));
+assert(cleanup.includes("统一关闭与清理条件") && cleanup.includes("未提交的新内容"));
+assert(!cleanup.includes("已关闭/已完成") && !cleanup.includes("可直接删除"));
+for (const file of ["docs/ai-dlc-keyword-guide.md", "docs/multi-repo-worktree-recovery.md"]) {
+  const guide = fs.readFileSync(file, "utf8");
+  const boundary = guide.indexOf("## 显式受管兼容");
+  assert(boundary > 0 && guide.slice(0, boundary).includes("宿主执行协议"), file);
+  assert(!/orchestrate next|controlled Evidence|orchestrate baseline/.test(guide.slice(0, boundary)), `${file}: default guidance must not route into legacy commands`);
+}
 for (const stage of ["construction/construction-code-generation", "construction/construction-build-and-test", "inception/inception-user-stories", "inception/inception-cross-validation"]) {
   const body = fs.readFileSync(`core/stages/${stage}.md`, "utf8");
   assert(body.includes("适用范围：显式受管执行"), stage);

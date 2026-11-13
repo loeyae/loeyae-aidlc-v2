@@ -1802,8 +1802,8 @@ function validateLoadedEvidence(stage: StageNode, sensor: string, instance: Stag
   if (sensor === "green-test-evidence" && options.allowDownstreamReportDrift && evidence.execution_input_binding) {
     const recorded = asRecord(evidence.execution_input_binding);
     try {
-      const current = phaseExecutionRevision(PROJECT_ROOT, instance.instance_id, nestedCheck?.keys ?? []);
-      if (recorded?.version === "1" && recorded.scope === current.scope && recorded.scope_digest === current.scope_digest) {
+      const current = phaseExecutionRevision(PROJECT_ROOT, instance.instance_id, nestedCheck?.keys ?? [], recorded?.version === "1" ? "1" : "2");
+      if ((recorded?.version === "1" || recorded?.version === "2") && recorded.scope === current.scope && recorded.scope_digest === current.scope_digest) {
         const i13 = moduleI13Evidence(instance);
         if (i13 && "value" in i13) {
           const command = phaseInputCommand(stage.slug, "GREEN", instance, evidence);
@@ -3846,8 +3846,6 @@ export function buildConditionContext(state: WorkflowState, instance?: StageInst
   const operationsText = [
     "docs/aidlc/operation/operations-plan.md",
     "docs/aidlc/operation/plans/operations-plan.md",
-    "docs/aidlc/operation/deployment-config.md",
-    "docs/aidlc/operation/operations-summary.md",
   ].map((path) => readConditionText(join(PROJECT_ROOT, path))).join("\n");
   const has_operations_template_needs = has_deployment_needs
     && /(?:可复用|归档|保留|生成).{0,16}(?:模板|template)|(?:模板|template).{0,16}(?:Dockerfile|Docker Compose|Jenkins|Kubernetes|Helm|Kustomize|Nginx)/i.test(operationsText);
@@ -5614,13 +5612,18 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
     state.status = "running";
   }
 
-  // Done workflow
+  // Completion belongs to the whole owning workflow, never the bound unit's
+  // candidate chain. In a single layout the owner is the entire project.
+  const instances = expandStageInstances(graph, state);
+  const completionInstances = isSplitLayout(PROJECT_ROOT) && opts.candidate ? instances.filter(opts.candidate) : instances;
+  const unresolvedOwned = () => completionInstances.filter(instance => !isInstanceResolved(state, instance.instance_id));
   if (state.status === "done") {
-    return { kind: "done", message: `${opts.label} is already complete.`, ...extras };
+    const pending = unresolvedOwned();
+    if (pending.length) return { kind: "error", workflow_completed: false,
+      message: `WORKFLOW_COMPLETION_MISMATCH: ${opts.label} is recorded done but has ${pending.length} unresolved stage instances. Inspect runtime summary and reconcile the recorded workflow before advancing.`, ...extras };
+    return { kind: "done", workflow_completed: true, message: `${opts.label} has all owned stage instances resolved; business acceptance is evaluated separately.`, ...extras };
   }
 
-  // Expand the static graph into the currently known execution instances.
-  const instances = expandStageInstances(graph, state);
   const implementationCandidate = autonomyImplementationFilter(PROJECT_ROOT);
   const candidates = (opts.candidate ? instances.filter(opts.candidate) : instances).filter(instance => implementationCandidate(instance.stage.slug, instance.module_id, instance.unit_id)).filter(instance => {
     const unit = binding?.stage_instance.split("@unit:")[1];
@@ -5683,6 +5686,19 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
       }
       return { kind: "error", message: `Module "${flags.module}" has no unclaimed ready stage instance; inspect dependency waiting and active claims with runtime summary.`, ...extras };
     }
+    const remaining = instances.filter(instance => !isInstanceResolved(state, instance.instance_id));
+    const ref = isSplitLayout(PROJECT_ROOT) && binding ? ownerOfInstance(binding.stage_instance) : GLOBAL_WORKFLOW;
+    const handoff = () => previewHandoff(state, ref, undefined, undefined,
+      { module_id: flags.module || /@module:([^@]+)/.exec(binding?.stage_instance || "")?.[1], unit_id: flags.unit || binding?.stage_instance.split("@unit:")[1] }, remaining);
+    if (unresolvedOwned().length) {
+      // Exhaustion itself writes nothing and preserves sibling claims/contexts.
+      if (!wasParked && skippedByCondition?.length) {
+        applyPlanningState();
+        if (!opts.readOnlyProbe) opts.commit(originalState);
+      }
+      return { kind: "print", execution_status: "scope-exhausted", workflow_completed: false,
+        message: "Current execution scope exhausted; the owning workflow still has unresolved stage instances.", ...extras, ...handoff() };
+    }
     reconcileStageSummaries(state, instances);
     state.status = "done";
     clearActiveContext(state);
@@ -5691,8 +5707,10 @@ export async function advance(graph: StageGraph, opts: AdvanceOptions): Promise<
     if (!opts.readOnlyProbe) opts.commit(originalState);
     return {
       kind: "done",
-      message: opts.finishedMessage(candidates.length),
+      message: opts.finishedMessage(completionInstances.length),
+      workflow_completed: true,
       ...extras,
+      ...handoff(),
     };
   }
 

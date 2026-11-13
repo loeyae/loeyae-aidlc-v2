@@ -42,14 +42,14 @@ import { buildConditionContext, evaluateCondition } from ${JSON.stringify(orches
 import { loadWorkflowState } from ${JSON.stringify(lightStateUrl)};
 const state = loadWorkflowState(process.cwd());
 const ctx = buildConditionContext(state);
-console.log(JSON.stringify({ has_deployment_needs: evaluateCondition("has_deployment_needs", ctx) }));
+console.log(JSON.stringify({ has_deployment_needs: evaluateCondition("has_deployment_needs", ctx), has_operations_template_needs: evaluateCondition("has_operations_template_needs", ctx) }));
 `;
 
 /**
  * Build a deployment-keyword-free fixture (so inference alone would be false),
  * write the given workflow-plan body, and probe has_deployment_needs.
  */
-function probe(name: string, workflowPlan: string, report?: string, runtimeStart = false): boolean {
+function probe(name: string, workflowPlan: string, report?: string, runtimeStart = false, templateSource?: string): boolean {
   const project = join(scratch, name);
   mkdirSync(project, { recursive: true });
   write(project, "docs/aidlc/ideation/module-manifest.json",
@@ -62,6 +62,7 @@ function probe(name: string, workflowPlan: string, report?: string, runtimeStart
   // Minimal package.json without a start/serve script so packageHasRuntimeStart is false.
   write(project, "package.json", `${JSON.stringify({ name: "mars109-fixture", version: "0.0.0", ...(runtimeStart ? { scripts: { start: "node server.js" } } : {}) }, null, 2)}\n`);
   if (report !== undefined) write(project, "docs/aidlc/construction/implementation-report.md", report);
+  if (templateSource) write(project, `docs/aidlc/operation/${templateSource}.md`, "# 部署决定\n保留可复用 Docker 模板。\n");
   const state = createInitialState("feature", "4.13.0", "00000000-0000-4000-8000-000000000000", [], "MARS-109 probe") as WorkflowState;
   state.completed_stages = ["workspace-detection", "state-template"];
   state.completed_stage_instances = ["workspace-detection", "state-template"];
@@ -72,7 +73,7 @@ function probe(name: string, workflowPlan: string, report?: string, runtimeStart
   const result = spawnSync(process.execPath, [tsx, probeFile], { cwd: project, encoding: "utf8" });
   assert.equal(result.status, 0, `probe failed (${name}):\n${result.stdout}\n${result.stderr}`);
   const line = (result.stdout || "").trim().split(/\r?\n/).filter(Boolean).pop() || "{}";
-  return JSON.parse(line).has_deployment_needs === true;
+  return JSON.parse(line)[templateSource ? "has_operations_template_needs" : "has_deployment_needs"] === true;
 }
 
 const planHeader = "# 工作流计划\n\n| Stage | Decision | Evidence |\n|-------|----------|----------|\n";
@@ -115,6 +116,10 @@ try {
     "an optional delivery narrative cannot introduce deployment requirements");
   assert.equal(probe("summary-cannot-waive", "# 工作流计划\n", "# 实施报告\n\n无需部署，不需要部署。\n", true), true,
     "an optional delivery narrative cannot waive deployment required by runtime configuration");
+  assert.equal(probe("template-summary", "# 工作流计划\n", undefined, true, "operations-summary"), false,
+    "a repeated summary cannot select an additional template stage");
+  assert.equal(probe("template-plan", "# 工作流计划\n", undefined, true, "operations-plan"), true,
+    "the authoritative planning decision can select the template stage");
 
   console.log("MARS-109 operations split has_deployment_needs tests passed");
 } finally {

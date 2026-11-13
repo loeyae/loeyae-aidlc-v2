@@ -18,3 +18,5 @@ description: Binds actual deployment configuration files to successful allowlist
 ```
 
 `evidence run --stage operations-authorization --sensor deployment-validation` 执行真实检查，记录配置摘要、命令摘要、工作目录和成功退出状态。配置缺失、命令失败、配置或 allowlist 漂移、遗漏验证均阻断阶段完成。工具不可用保持未验证，不用文本“通过”代替执行。该证据不授予实际部署权限。
+
+阶段产物检查消费此证据，真实文件由本 sensor 按登记的 `artifacts` 验证；不要求额外的 `deployment-config.md` 或 `operations-summary.md`。运行说明复用项目现有位置，规划和实际部署授权仍独立核验。

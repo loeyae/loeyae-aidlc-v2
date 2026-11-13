@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.27.4 — 2026-11-13
+
+- Check the whole owning workflow before marking it done; a completed unit returns scope-exhausted while sibling work remains. Keep handoffs consistent with persisted completion and diagnose inconsistent historical done records.
+- Add GREEN execution input binding v2 for task-list progress in the canonical unit plan. Keep business text, opaque examples, declared command inputs and historical v1 bindings strict; progress updates reuse the original GREEN without rerunning or rewriting it.
+- Apply the same acceptance, closeout and durable-record conditions to individual CRs and historical cleanup, preserving uncommitted or unique records.
+- Separate default host actions from managed commands in keyword and multi-repository recovery guides.
+- Validate actual deployment artifacts without mandatory parallel config/summary Markdown files; reuse existing runbooks and derive template selection from planning decisions.
+
 ## 4.27.3 — 2026-11-13
 
 - Separate default CR guidance from explicitly selected managed stage and evidence contracts; legacy records alone never select managed execution.

@@ -35,6 +35,7 @@ import {
 import { readSourceRevision, type DigestScope, type SourceRevision } from "./aidlc-revision";
 import { nestedSourceRepos } from "./aidlc-nested-repos";
 import { autonomyBatchProjection, autonomyDependencyInputs, autonomyContractScope, autonomyDeliveryReportPaths } from "./aidlc-dependency-inputs";
+import { markdownSourceLines } from "./aidlc-document-parser";
 
 const TOOL_DIR = dirname(fileURLToPath(import.meta.url));
 const GRAPH_PATH = join(TOOL_DIR, "data", "stage-graph.json");
@@ -545,17 +546,38 @@ export function legacyEvidenceScopeForInstance(projectRoot: string, instanceId: 
   return moduleEvidenceScope(projectRoot, instanceId, true);
 }
 
-/** GREEN execution inputs exclude only named downstream reports, after shared inputs. */
-export function phaseExecutionScopeForInstance(projectRoot: string, instanceId: string): DigestScope {
-  return moduleEvidenceScope(projectRoot, instanceId, false, true);
+/** v2 also projects task-list progress in the unit plan. v1 keeps its exact old binding. */
+export function phaseExecutionScopeForInstance(projectRoot: string, instanceId: string, version: "1" | "2" = "2"): DigestScope {
+  return moduleEvidenceScope(projectRoot, instanceId, false, version);
 }
 
 /** Producers use current declarations; validators pass the recorded, validated
  * nested keys (an empty list preserves evidence created before nested adoption). */
-export function phaseExecutionRevision(projectRoot: string, instanceId: string, nestedKeys: readonly string[] = nestedSourceRepos(projectRoot)): { version: "1"; scope: string; scope_digest: string } {
-  const scope = phaseExecutionScopeForInstance(projectRoot, instanceId);
+export function phaseExecutionRevision(projectRoot: string, instanceId: string, nestedKeys: readonly string[] = nestedSourceRepos(projectRoot), version: "1" | "2" = "2"): { version: "1" | "2"; scope: string; scope_digest: string } {
+  const scope = phaseExecutionScopeForInstance(projectRoot, instanceId, version);
   const revision = readSourceRevision(projectRoot, scope, nestedKeys);
-  return { version: "1", scope: scope.label, scope_digest: revision.scope_digest! };
+  return { version, scope: scope.label, scope_digest: revision.scope_digest! };
+}
+
+/** Only task-list marks in the canonical execution plan are display progress.
+ * Preserve all text, whitespace, examples, HTML and declared business inputs. */
+function planProgressInput(projectRoot: string, label: string, protectedPaths: string[]): string | undefined {
+  if (underAny(label, protectedPaths)) return undefined;
+  let cursor = resolve(projectRoot);
+  for (const segment of label.split("/")) {
+    cursor = join(cursor, segment);
+    if (!existsSync(cursor)) return undefined;
+    if (lstatSync(cursor).isSymbolicLink()) throw new Error(`GREEN_EXECUTION_INPUT_BINDING_INVALID: linked plan input ${label}`);
+  }
+  if (!lstatSync(cursor).isFile()) return undefined;
+  const text = readFileSync(cursor, "utf8");
+  // Frontmatter is an unknown data contract, not an execution checklist.
+  const header = /^(?:\uFEFF)?---\r?\n/.test(text) ? /^(?:\uFEFF)?---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)(?:\r?\n|$)/.exec(text)?.[0] : "";
+  if (header === undefined) return undefined;
+  const scanned = markdownSourceLines(text);
+  if (scanned.unclosedFence) return undefined;
+  return scanned.lines.map(line => line.opaque || line.start < header.length ? line.text
+    : line.text.replace(/^(\s*(?:[-+*]|\d+[.)])[ \t]+\[)[ xX](\](?=[ \t]))/, "$1 $2")).join("");
 }
 
 /** An artifact review receipt also names downstream report and sibling files. Retain its full
@@ -593,7 +615,7 @@ function scopedReviewReceipt(projectRoot: string, moduleId: string, label: strin
   } catch { return undefined; }
 }
 
-function moduleEvidenceScope(projectRoot: string, instanceId: string, legacy: boolean, phaseExecution = false): DigestScope {
+function moduleEvidenceScope(projectRoot: string, instanceId: string, legacy: boolean, phaseExecution: false | "1" | "2" = false): DigestScope {
   const owner = ownerOfInstance(instanceId);
   const stage = instanceId.split("@", 1)[0];
   const modules = manifestModules(projectRoot);
@@ -634,6 +656,8 @@ function moduleEvidenceScope(projectRoot: string, instanceId: string, legacy: bo
       ? autonomyDeliveryReportPaths(projectRoot, global.workflow_id, global.autonomy_batch) : []);
     const explicitSources = [...(own?.paths || []), ...(own?.context_paths || []), ...units.filter(unit => relevant.has(unit.unit_id)).flatMap(unit => unit.evidence_inputs?.paths || [])];
     const construction = `docs/aidlc/modules/${owner.module_id}/construction/${unitId}`;
+    const planPath = `${construction}/plans/code-generation-plan.md`;
+    const planProjection = phaseExecution === "2" && unitId ? planProgressInput(projectRoot, planPath, [...sharedPaths, ...explicitSources]) : undefined;
     const downstreamReports = new Set(unitId ? [`${construction}/code-review.md`, `${construction}/audit.md`, `${construction}/audit/test-case-reconciliation.md`, `${construction}/audit/${unitId}.md`] : []);
     const exclude = (path: string): boolean => {
       if (underAny(path, sharedPaths)) return false;
@@ -652,11 +676,12 @@ function moduleEvidenceScope(projectRoot: string, instanceId: string, legacy: bo
     const reviewReceiptPath = `docs/aidlc/modules/${owner.module_id}/inception/artifact-review.json`;
     const reviewReceipt = !legacy ? scopedReviewReceipt(projectRoot, owner.module_id, reviewReceiptPath, exclude, sharedPaths) : undefined;
     const batchPaths = ["docs/aidlc/ideation/scenario-module-mapping.md", "docs/aidlc/handoff.md"];
-    const batchProjections = versioned ? Object.fromEntries(batchPaths.flatMap(path => { const value = autonomyBatchProjection(projectRoot, path, phaseExecution); return value === undefined ? [] : [[path, value]]; })) : {};
+    const batchProjections = versioned ? Object.fromEntries(batchPaths.flatMap(path => { const value = autonomyBatchProjection(projectRoot, path, Boolean(phaseExecution)); return value === undefined ? [] : [[path, value]]; })) : {};
     return {
-      label: `inputs-v2:module:${owner.module_id}${unitId ? `:unit:${unitId}` : ""}${baseline ? ":baseline" : ""}${phaseExecution ? ":execution-v1" : ""}${versioned ? ":autonomy-v1" : ""}`,
+      label: `inputs-v2:module:${owner.module_id}${unitId ? `:unit:${unitId}` : ""}${baseline ? ":baseline" : ""}${phaseExecution ? `:execution-v${phaseExecution}` : ""}${versioned ? ":autonomy-v1" : ""}`,
       projectedInputs: {
         ...batchProjections,
+        ...(planProjection !== undefined ? { [planPath]: planProjection } : {}),
         ...(reviewReceipt !== undefined ? { [reviewReceiptPath]: reviewReceipt } : {}),
         ...(modules.length ? { "docs/aidlc/ideation/module-manifest.json": JSON.stringify({ version: 1, module: own,
           ownership: modules.map(module => ({ module_id: module.module_id, paths: module.paths || [], contract_paths: module.contract_paths || [], ...(module.context_paths ? { context_paths: module.context_paths } : {}) })),

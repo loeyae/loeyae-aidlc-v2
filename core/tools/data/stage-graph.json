@@ -1439,9 +1439,6 @@
         "docs/aidlc/operation/operations-plan.md"
       ],
       "produces": [
-        "docs/aidlc/operation/deployment-config.md",
-        "docs/aidlc/operation/deployment-guide.md",
-        "docs/aidlc/operation/operations-summary.md",
         ".aidlc/evidence/operations-authorization/deployment-validation.json"
       ],
       "sensors": [

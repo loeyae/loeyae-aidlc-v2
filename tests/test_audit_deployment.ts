@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { repository } from "./mars244_fixture";
@@ -13,6 +13,7 @@ const run = () => cli(f.root, args, JSON.stringify(binding));
 assert.notEqual(run().status, 0, "unconfigured validation must fail");
 write(f.root, "deploy/config.json", { port: 8080 });
 write(f.root, "validate.cjs", "const fs=require('fs');if(JSON.parse(fs.readFileSync('deploy/config.json')).port!==8080)process.exit(1);\n");
+write(f.root, "README.md", "# Deployment\nUse deploy/config.json with the approved target; run node validate.cjs before release and retain the previous artifact for rollback.\n");
 write(f.root, ".aidlc/commands/operations-authorization.json", { version: "1", stage: instance, artifacts: [{ id: "config", path: "deploy/config.json" }], commands: [{ id: "config", role: "check", argv: ["node", "validate.cjs"] }] });
 const valid = run(); assert.equal(valid.status, 0, valid.stdout + valid.stderr);
 const evidence = JSON.parse(readFileSync(join(f.root, ".aidlc/evidence/operations-authorization/deployment-validation.json"), "utf8"));
@@ -23,6 +24,12 @@ const gate = () => {
   return JSON.parse(result.stdout).failures;
 };
 assert.deepEqual(gate(), [], "real gate accepts successful bound validation");
+const produces = spawnSync(process.execPath, [join(repository, "node_modules/tsx/dist/cli.mjs"), join(repository, "tests/gate_probe.ts"), instance, "produces"], { cwd: f.root, encoding: "utf8" });
+assert.equal(produces.status, 0, produces.stdout + produces.stderr);
+assert.deepEqual(JSON.parse(produces.stdout).missing, [], "actual validated files do not require parallel Markdown copies");
+for (const file of ["deployment-config", "deployment-guide", "operations-summary"]) assert.equal(existsSync(join(f.root, `docs/aidlc/operation/${file}.md`)), false);
+unlinkSync(join(f.root, "deploy/config.json"));
+assert.ok(gate().length, "missing actual configuration remains blocking without a Markdown stand-in");
 write(f.root, "deploy/config.json", { port: -1 });
 assert.ok(gate().length, "configuration drift invalidates earlier evidence");
 assert.notEqual(run().status, 0, "failed validation cannot produce evidence");

@@ -39,7 +39,7 @@ try {
   put(`${cases}/_index.md`, "UC-D-001 status: ready source_ref: REQ-1\n");
   put(`${cases}/UC-D-001.md`, "---\nid: UC-D-001\nstatus: ready\nsource_ref: REQ-1\n---\nGiven a caller When checking behavior Then return true.\n");
   const construction = "docs/aidlc/modules/project/construction/default";
-  put(`${construction}/plans/code-generation-plan.md`, "# Plan\nREQ-1 UC-D-001 implement behavior returning true and verify tests/behavior.test.cjs.\n");
+  put(`${construction}/plans/code-generation-plan.md`, "# Plan\n- [ ] REQ-1 UC-D-001 implement behavior returning true and verify tests/behavior.test.cjs.\n");
   put(`${construction}/implementation-summary.md`, "# Summary\nREQ-1 UC-D-001 implemented in src/behavior.cjs and verified by tests/behavior.test.cjs.\n");
   for (const [stage, role] of [["tdd", "red"], ["code-generation", "green"]]) {
     put(`.aidlc/commands/${stage}.json`, { version: "1", stage, commands: [{ id: role, role, argv: ["node", "scripts/observe.cjs"] }] });
@@ -81,6 +81,23 @@ try {
     run(args, true, sensor === "test-quality" ? { ...env, AIDLC_REVISION_PROFILE: revisionTrace,
       NODE_OPTIONS: `${env.NODE_OPTIONS || ""} --import ${JSON.stringify(pathToFileURL(join(repo, "node_modules/tsx/dist/loader.mjs")).href)} --import ${JSON.stringify(pathToFileURL(profile).href)}`.trim() } : env);
   }
+  const planPath = `${construction}/plans/code-generation-plan.md`;
+  const planBefore = readFileSync(join(root, planPath), "utf8");
+  const greenBeforeProgress = readFileSync(join(root, green), "utf8"), executionCountBeforeProgress = count();
+  const probeGreen = () => {
+    const result = spawnSync(process.execPath, [tsx, join(repo, "tests/gate_probe.ts"), "code-generation@module:project@unit:default", "sensors", "green-test-evidence"], { cwd: root, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    return JSON.parse(result.stdout).failures;
+  };
+  assert.equal(JSON.parse(greenBeforeProgress).execution_input_binding.version, "2");
+  put(planPath, planBefore.replace("[ ]", "[x]"));
+  assert.deepEqual(probeGreen(), [], "plan progress alone preserves the actual GREEN gate");
+  assert.equal(readFileSync(join(root, green), "utf8"), greenBeforeProgress, "no rewrite, refresh or new signature is needed");
+  assert.equal(count(), executionCountBeforeProgress, "progress does not rerun RED/GREEN commands");
+  put(planPath, planBefore.replace("returning true", "returning false"));
+  assert.ok(probeGreen().length, "changed plan semantics still invalidate GREEN");
+  put(planPath, planBefore);
+  console.log("PASS actual GREEN survives pure plan progress without rerun or rewrite; changed behavior remains blocking");
   const revisionProfiles = readdirSync(revisionTrace).filter(path => path.endsWith(".json")).map(path => JSON.parse(readFileSync(join(revisionTrace, path), "utf8")));
   const semanticProfile = revisionProfiles.find(value => value.argv[1]?.endsWith("aidlc-semantic-checks.ts"));
   assert.ok(semanticProfile, "profile the actual semantic subprocess, not just the producer");

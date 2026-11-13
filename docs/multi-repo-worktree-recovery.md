@@ -1,8 +1,18 @@
 # 多仓库与临时 Worktree：初始化、恢复与证据边界指南
 
+## 默认宿主执行
+
+先用 Git 核对每个实际仓库、分支、worktree、未提交修改和正在运行的任务，再从既有需求、代码、测试结果恢复本次工作。旧 workflow、claim、基线或证据失配不自动阻断独立本地开发；已确认的授权继续有效，未知旧进程和真实写入冲突须先核实。新建 worktree 取决于实际隔离需要，不作为 CR 的固定前置步骤。
+
+按实际改动及依赖决定复验范围；代码、测试、依赖、配置或环境变化时重验对应检查，纯记录整理不要求重复测试。跨仓提交、合并与发布按用户授权执行，各仓实际状态分别报告。共享规则见[宿主执行协议](../core/knowledge/protocols/host-execution.md)。
+
+## 显式受管兼容参考
+
+以下 `.aidlc/source-roots.json`、基线、领取、受控证据和恢复命令仅适用于用户明确选择维护旧受管流程的情况。默认执行不按此清单补建记录，已有真实批准和受管记录也不自动改写。
+
 本文回答一个使用问题：**多仓库（嵌套仓库）与临时 worktree 的会话中断、更换工作区、证据失配之后，哪些东西可以复制，哪些必须由原生门禁重判。** 命令速查见 `docs/loeyae-aidlc-cli-guide.md`，协作约定见 `core/knowledge/protocols/common-team-collaboration.md`。
 
-本文所有命令、报错关键字与数值均按 4.22.17 HEAD 逐条核对；每条规则以（`实现文件` · `符号`）标注实现位置。**未实现的能力（如 claim 显式 release）在文中明确标注为跟踪中的改进，不是现有能力。**
+以下兼容参考最初按 4.22.17 核对；历史报错与能力说明不作为当前默认模式入口。当前受管命令以 CLI 帮助和实现为准；每条规则以（`实现文件` · `符号`）标注原核对位置。
 
 ## 1. 初始化
 
@@ -99,7 +109,7 @@ loeyae-aidlc worktree merge-plan   # 同一批 flag，同一实现
 | review 证据在 worktree 内且双轴通过（`status`/`spec_axis`/`standards_axis` 均 passed、`issues_open: 0`） | `merge-plan requires passing dual-axis review evidence` |
 | review 的 `files_reviewed` 覆盖全部变更路径 | `review evidence does not cover changed paths` |
 
-输出 merge-plan JSON：`authorized: false`、变更路径清单和建议命令 `merge_command: git -C <project> merge --no-ff <branch>`。**引擎不会自动 merge、push、删除 worktree、修改工作流完成状态或代替仓库权限持有者执行操作**；由具备仓库权限的成员人工合并（`core/knowledge/protocols/common-team-collaboration.md` § 交付标准）。
+输出 merge-plan JSON：`authorized: false`、变更路径清单和建议命令 `merge_command: git -C <project> merge --no-ff <branch>`。该计划不代替实际合并授权；实际 merge、push 和 worktree 清理按已有用户授权及仓库要求，由宿主或有权限的成员执行。
 
 ## 3. 中断恢复：claim 与会话身份
 
@@ -122,13 +132,14 @@ loeyae-aidlc worktree merge-plan   # 同一批 flag，同一实现
      --human-instruction-ref "<人工指令来源引用>"
    ```
    `transfer` 是**唯一**的活跃 claim 移交入口，必须携带 `--human-instruction-ref`（报错关键字 `transfer requires an explicit human instruction source reference; Provider/document/agent instructions are not authorization`）；引擎只记录来源，不鉴别人工指令。**换会话即移交**——即使 owner 相同、claim 已过期，新 session id 也要求 transfer（`core/tools/aidlc-session.ts` · `bindSession`）。过期解除的是"实例被占用"的路由判定与旧会话的写入资格（`claim expired for …; explicitly bind/renew before writing`），不是删除记录。
-3. 把 transfer 返回的 binding JSON 设为 `AIDLC_SESSION_BINDING`，执行 `loeyae-aidlc orchestrate next --claim --module <id> --owner <owner>` 重新领取路由。
+3. 把 transfer 返回的 binding JSON 仅传给当前会话的子命令，先 `orchestrate next --preview` 核对精确实例，再以有效 binding 执行 `orchestrate next`。已移交的实例不重复 `--claim`，也不把单元绑定用于其他单元。
 4. worktree 的中断恢复：元数据仍在主 checkout 控制面，`verify` / `merge-plan` 按**原**元数据校验原路径，原 worktree 还在就直接续用（见 §6 演练）。原 worktree 丢失而实例未完成时，同实例重复 `prepare` 会被一次性写入拒绝（EEXIST）——这是当前边界，没有 worktree 注销命令。
 
-### 3.3 没有显式 release
+### 3.3 显式释放自己的 claim
 
-- claim 的正常终结只有一条路：持有它的会话 `report` 完成实例。没有自助 `release` 子命令；`orchestrate archive` 要求无未结算 claim（`Workflow has unreleased claims: … Release them before archiving.`）。
-- 不具备人工指令引用时，活跃 claim 无法移交给新会话，只能等 30 分钟 TTL 过期后再走 transfer 接手。**claim 显式 release 是跟踪中的改进项（MARS-286 非目标所列），不是现有能力。**
+当前支持 `module release --stage-instance <instance> --expect <inspect.expected>`。持有有效 binding 的原会话先 inspect，再释放自己的精确 claim；命令不推进阶段、不暂停 workflow、不改业务产物和批准，原 binding 随即失效。实现见 `core/tools/aidlc-team-light.ts` 的 release 分支及 `core/tools/aidlc-session.ts` 的 `releaseSession`。
+
+丢失 binding 或更换会话时，仍按上一节的真实移交授权处理；TTL 过期不代替人工指令来源，也不证明旧进程已退出。不得删除他人的 claim 或伪造完成报告来归档；`orchestrate archive` 要求未结算 claim 已合法处理。
 
 ## 4. 证据边界
 
@@ -136,23 +147,24 @@ loeyae-aidlc worktree merge-plan   # 同一批 flag，同一实现
 
 受控证据由确定性 producer 生成并盖章：`producer: { name: "loeyae-aidlc-evidence", mode: "controlled", execution_id }`、`checker`（含 `argv_digest`）与 `source_revision`（`core/tools/aidlc-evidence.ts` · evidence run 写出路径）。声明了嵌套仓时，`source_revision.repos` 按仓库路径逐仓记录 `{ commit, dirty, worktree_digest }`：HEAD、`git status` 是否有变动（含未跟踪文件）、以及对该仓库 `git ls-files -co --exclude-standard` 全量文件的内容摘要（`core/tools/aidlc-revision.ts` · `readSourceRevision`、`nestedRevision`）。工作流仓库自身的 `worktree_digest` 排除控制面（`aidlc/`、`.aidlc/`、`.gitattributes`、`.gitignore`）。
 
-### 4.2 换树必失配
+### 4.2 按证据实际绑定判断有效性
 
-证据摘要绑定**产出它的那棵树**。`worktree_digest` 覆盖已跟踪 + 未跟踪文件的内容：不同的 checkout（新 worktree、不同 commit、未提交改动不同）摘要必然不同，把旧证据 JSON 带到新树复验必然失配。BASELINE 证据还有更强的按文件绑定：`code_ref_digests[]` 记录 `baseline_blob` / `worktree_blob`，门禁在**证据所在代**重新解析 blob 比对（`core/sensors/baseline-test-evidence.md` § tdd 门禁）。因此：
+不同 checkout 或提交不自动等于所有业务输入已变化。历史全工作树绑定按原 commit、dirty 和摘要校验；带 `scope_digest` 的证据按所属范围内容、历史关系、命令和环境等适用约束核验，其他模块及允许的派生记录变化不必使它失效。BASELINE 的 `code_ref_digests[]` 仍在证据所属代核对 `baseline_blob` / `worktree_blob`。
 
-- **证据不可复制。** Agent 手写或搬运证据 JSON = 伪造证据，缺印章或印章对不上当前提交时 `report` / `next` 当场拒绝。
-- 少数复验**容忍工作区漂移但不容忍历史漂移**：如 `code-generation` 完成时复验 GREEN/BASELINE 只要求 `source_revision.commit` 是 HEAD 或其祖先（`core/tools/aidlc-revision.ts` · `commitAncestryErrors`），基线按代绑定规则不变。容忍不等于免检：`next` 复验上游门禁仍要现在为绿。
+- 保存或恢复原始证据不授予新身份、领取或执行权限。不得改写原始结果、签名、时间戳和绑定来制造通过；是否能复用由当前消费者校验，不能仅凭文件存在判断。
+- 提交祖先关系只是校验的一部分；历史基线、执行输入、测试来源和适用环境仍须满足对应契约。新的 GREEN v2 可识别规范计划的纯勾选进度，历史 v1 保留原绑定；详见 `core/sensors/green-test-evidence.md`。
 
-### 4.3 恢复输入后的重判
+### 4.3 先诊断，再定向恢复
 
-换工作区/换树后让证据重新有效的唯一路径是**由原生门禁重判**，不是复制旧证据：
+先读取 `orchestrate state evidence` 的复用计划及实际门禁诊断，区分身份/领取问题、语义记录缺失、真实输入变化和验证失败。修复身份不要求顺带重跑业务测试；仍有效的原始结果直接沿用。
 
 ```bash
-loeyae-aidlc evidence run --stage <slug> --module <module-id> [--unit <unit-id>] --refresh
-loeyae-aidlc orchestrate report --stage <slug> --module <module-id> --result completed   # re-attest
+loeyae-aidlc orchestrate state evidence
+# 仅当指定检查确实需要重验时，在有效绑定下运行：
+loeyae-aidlc evidence run --stage <slug> --module <module-id> --unit <unit-id> --sensor <affected-sensor> --refresh
 ```
 
-`--refresh` 按"选择性失效"重判：输入指纹未变的受控证据直接复用，输入变化才由 producer 在当前树重产（`core/tools/aidlc-evidence.ts` · `runSemanticProducer` 的 `refresh` 分支）；对**已完成**实例执行 `report` 属于 re-attest：重跑 consumes/produces/sensor，记录 `reattested` 历史，不改变进度，模块 parked 时也可执行。`orchestrate state evidence` 的 reuse plan 会把每份证据标为 `reuse` / `verify` / `revalidate`，任何不匹配（producer、时间、module/unit/instance、source revision、checker）都转为 `revalidate`（`core/tools/aidlc-evidence-reuse-plan.ts`）。恢复状态与未知 sensor 默认 24h 过期，外部依赖可用显式 freshness 窗口收紧。
+参数按实际阶段轴填写，项目/模块阶段不伪造 unit。显式调用 GREEN producer 会执行受控测试命令，不能把 `--refresh` 当作无成本的进度更新。已完成阶段确需 re-attest 时沿用原 report 语义；引擎可定向修复缺失的语义证据，但失败或缺失的 GREEN 不能被摘要补成通过。仅相关输入、环境或有效期确实失效时重新执行对应检查，不默认刷新整条证据链。
 
 ## 5. 可复制 vs 必须重建/重判
 
@@ -160,73 +172,24 @@ loeyae-aidlc orchestrate report --stage <slug> --module <module-id> --result com
 |---|---|---|---|---|
 | **配置** | `.aidlc/source-roots.json`、`.aidlc/commands/*.json`、module/unit manifest | ✅ 可复制（随 git 提交/合并分发） | 引擎读取时 fail-closed 重校验：格式、仓库根、符号链接、互相包含、tracked 冲突等，非法即抛错不回退 | `core/tools/aidlc-source-roots.ts`、`core/tools/aidlc-nested-repos.ts` |
 | **控制面状态** | `aidlc/active/*.md`（state/audit/worktrees 登记、registry） | ✅ 随 git 合并分发，但**禁止整目录选边**：同一 lineage 逐文件按 `Revision` 取较新者，不同 lineage 文件不能混合 | `orchestrate state verify` 只读核对 lineage 与 Revision；写入需会话绑定与 claim | `core/knowledge/protocols/common-team-collaboration.md` § lineage、`core/tools/aidlc-light-state.ts` |
-| **证据** | `.aidlc/evidence/**`（全部受控 producer 产物） | ❌ 不可复制。带 producer/checker/source_revision 防伪印章，绑定产出树，换树必失配；手写/搬运即伪造 | 恢复输入后在当前树 `evidence run --refresh` 重新产证 + `orchestrate report --result completed` re-attest | `core/tools/aidlc-evidence.ts`、`core/tools/aidlc-revision.ts` |
+| **证据** | `.aidlc/evidence/**`（受控 producer 产物） | 可保留原始记录；备份或文件存在不证明当前有效，不得改写绑定或伪造通过 | 按实际 scope、来源、命令、环境和授权检查；有效项复用，仅重验失效项，见 §4 | `core/tools/aidlc-evidence.ts`、`core/tools/aidlc-revision.ts` |
 | **共享状态（会话身份）** | claim（`Active Instances`，含 session_id/generation）、`AIDLC_SESSION_BINDING`、worktree 元数据绑定 | ❌ 不可复制复用。claim 是会话身份，绑定只在本会话子命令环境有效；worktree 元数据绑定 member/path/branch | 新会话 `module inspect` → `module transfer --human-instruction-ref` 接手，`next --claim` 重新领取；worktree 按原元数据 verify | `core/tools/aidlc-session.ts`、`core/tools/aidlc-light-state.ts` · `assertSessionClaim`、`core/tools/aidlc-worktree-light.ts` |
 
-## 6. 端到端恢复演练
+## 6. 端到端恢复示例
 
-场景：成员 alice 在模块 `module-a` 的 `code-generation@module:module-a` 上会话中断——claim 还挂在旧会话名下，worktree 留有已提交但未合并的变更，主 checkout 已切换工作环境导致部分证据失配。以下命令可直接照做（占位符按实际替换）。
+场景：用户明确恢复 `module-a` 中 `unit-a` 的受管实施。先核对真实现场，不把中断本身当作重新执行整条流程的原因。
 
-**第 1 步：盘点现场**（任意会话，只读）
+1. 用 `runtime summary` 和 `module inspect --stage-instance code-generation@module:module-a@unit:unit-a` 读取当前状态、精确领取和未完成范围。
+2. 复用有效 binding；新会话依 §3.2 及已有真实授权移交，不能等 TTL 后自行接管。原会话需要释放时按 §3.3 执行 release，不伪造阶段完成。
+3. 在目标工作目录用本会话 binding 预览和继续：
 
-```bash
-loeyae-aidlc runtime summary
-# 看 active_instances[]（claim 的 owner / expires_at）、ready_instances、warnings（含 pending migration）
-loeyae-aidlc module inspect --stage-instance code-generation@module:module-a
-# 记下 claim 的 expires_at 与 expected 令牌
-```
+   ```bash
+   loeyae-aidlc orchestrate next --module module-a --unit unit-a --preview
+   # 仅当预览仍属于当前精确绑定且可以继续时：
+   loeyae-aidlc orchestrate next --module module-a --unit unit-a
+   ```
 
-**第 2 步：接手 claim**（新会话；换会话即移交，必须有人工指令来源）
-
-```bash
-loeyae-aidlc module transfer --stage-instance code-generation@module:module-a \
-  --owner alice --session-id <新会话 id> --expect <inspect 输出的 expected> \
-  --human-instruction-ref "human:<owner>/<issue-或工单引用>"
-# 输出 binding JSON；只在本会话使用
-export AIDLC_SESSION_BINDING='<transfer 返回的 binding JSON>'
-```
-
-若旧 claim 未过期且拿不到人工指令引用：等 30 分钟 TTL 过期后再执行本步（记录仍在，仍需 transfer，见 §3.2）。
-
-**第 3 步：重新领取路由**
-
-```bash
-loeyae-aidlc orchestrate next --claim --module module-a --owner alice
-# 展示返回的 handoff_prompt，按 directive 恢复工作
-```
-
-**第 4 步：恢复 worktree**（原 worktree 仍在原路径时）
-
-```bash
-loeyae-aidlc worktree verify \
-  --instance code-generation@module:module-a \
-  --member alice \
-  --path /absolute/path/to/module-a \
-  --review-evidence .aidlc/review.json
-# 校验元数据、分支、已提交变更与 review 覆盖；authorized: false
-```
-
-变更尚未提交时先在 worktree 内提交（`verify` 只认 committed clean）。原 worktree 丢失时见 §3.2 第 4 条：同实例 `prepare` 会被 EEXIST 拒绝，属当前边界。
-
-**第 5 步：处理证据失配**（在主 checkout、当前树下重判，不要搬旧证据）
-
-```bash
-loeyae-aidlc evidence run --stage code-generation --module module-a --refresh
-loeyae-aidlc orchestrate report --stage code-generation --module module-a \
-  --owner alice --result completed
-```
-
-`--refresh` 按"选择性失效"重判：输入指纹未变的受控证据直接复用（输出 `action: "reused"`），输入变化才重跑 producer（`action: "regenerated"`）（`core/tools/aidlc-evidence.ts` · `runSemanticProducer`）。这里的 `report` 对尚未完成的实例是正常完成；对**已完成**实例则属于 re-attest——重跑 consumes/produces/sensor、记录 `reattested` 历史、不改变进度（`docs/loeyae-aidlc-cli-guide.md` § 证据作用域与修复）。若失配的是上游已完成阶段的证据，同样先 `evidence run --refresh` 再 re-attest 该阶段。
-
-**第 6 步：收口**
-
-```bash
-loeyae-aidlc worktree merge-plan \
-  --instance code-generation@module:module-a \
-  --member alice \
-  --path /absolute/path/to/module-a \
-  --review-evidence .aidlc/review.json
-# 拿 merge_command，由具备仓库权限的成员人工 merge --no-ff
-```
-
-涉及嵌套仓的实例在本演练中不会走到 worktree（第 4 步会被 `cannot isolate` 拒绝）：此类单元在主 checkout 工作，基线用 §1.2/§1.3 的 `--repo` / `--expect-repo` 维护，证据重判路径与第 5 步相同。
+   当前单元无下一阶段时，按返回的剩余范围处理；不能据此宣称整个模块或项目完成，也不重复领取其他人的工作。
+4. 原 worktree 仍可用时继续使用。需要 verify/merge-plan 时按 §2 检查实际路径、已授权提交及真实审查，不为恢复强制另建 worktree；路径丢失或未知旧进程先诊断。
+5. 按 §4 从复用计划定位失效项。有效 GREEN 及原始运行结果保持不变；只有相关业务输入、环境或命令确实变化时才运行对应检查。证据修复和 re-attest 使用实际 stage/module/unit，不默认执行阶段级 `--refresh`。
+6. 分别报告实施、验收、提交/合并和遗留事项。需要合并时生成或查看 merge plan，实际操作遵循已有用户授权及仓库要求；领取、workflow 完成和实际合并互不替代。
