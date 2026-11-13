@@ -9,16 +9,12 @@ import {
   parseProviderYaml,
   projectProviderConfigDigest,
   readProjectProviders,
-  recordProviderInvalidation,
   sha256ProviderDigest,
   writeProjectProviders,
   type ProjectProviderState,
-  type ProviderInvalidationRecord,
 } from "./aidlc-project-provider";
 import {
   fetchProviderGitBundle,
-  isLegacyKnowledgeExternalSource,
-  LEGACY_KNOWLEDGE_DEPRECATION,
   verifyLockedProviderCache,
   type ProviderGitBundle,
 } from "./aidlc-provider-git";
@@ -27,19 +23,9 @@ import type {
   ProjectProviderIntent,
   ProjectProviderLockEntry,
   ProjectProvidersLockV1,
-  ProviderFallbackRecord,
-  ProviderWaiver,
   Sha256Digest,
 } from "./aidlc-provider-types";
-import {
-  probeRestrictedV1Sandbox,
-  runControlledProvider,
-  type ProviderRunInput,
-} from "./aidlc-provider-runner";
-import { evaluateProviderGate } from "./aidlc-provider-gate";
-import { loadProviderKnowledge, confirmProviderKnowledge, verifyProviderKnowledge } from "./aidlc-provider-knowledge.js";
-import { previewProviderMcp } from "./aidlc-provider-mcp.js";
-import { applyProviderMcp, planProviderMcp, planProviderMcpCleanup, cleanupProviderMcp, statusProviderMcp, recoverProviderMcp } from "./aidlc-provider-mcp-apply.js";
+import { catalogProviderKnowledge, loadProviderKnowledge } from "./aidlc-task-knowledge.js";
 
 export interface ProviderLifecycleResult {
   readonly status: "added" | "updated" | "enabled" | "disabled" | "removed" | "unchanged";
@@ -51,9 +37,7 @@ export interface ProviderLifecycleResult {
   readonly previous_lock_digest: Sha256Digest | null;
   readonly trust?: ProjectProviderLockEntry["trust"];
   readonly history?: string;
-  readonly invalidation?: { readonly path: string; readonly affected_artifacts: readonly string[] };
   readonly install_safety?: ProviderGitBundle["install_safety"];
-  readonly deprecation?: string;
 }
 
 export interface ProviderStatusResult {
@@ -70,8 +54,6 @@ export interface ProviderStatusResult {
   readonly lock_digest: Sha256Digest;
   readonly cache?: string;
   readonly diagnostic?: string;
-  /** Set when the installed manifest is a legacy knowledge external source. */
-  readonly deprecation?: string;
   /** For a disabled instance: the capabilities its bindings still declare. */
   readonly disabled_bound_capabilities?: readonly string[];
 }
@@ -131,25 +113,6 @@ function replaceLock(state: ProjectProviderState, entry: ProjectProviderLockEntr
   return state.lock.providers.map((candidate) => candidate.instance_id === entry.instance_id ? entry : candidate);
 }
 
-function lifecycleInvalidation(
-  projectRoot: string,
-  action: ProviderInvalidationRecord["action"],
-  instance: string,
-  reason: string,
-  previousLockDigest: Sha256Digest | null,
-  lock: ProjectProvidersLockV1,
-): ProviderLifecycleResult["invalidation"] {
-  if (previousLockDigest === lock.lock_digest) return undefined;
-  const invalidation = recordProviderInvalidation(projectRoot, {
-    instance_id: instance,
-    action,
-    reason,
-    old_lock_digest: previousLockDigest,
-    new_lock_digest: lock.lock_digest,
-  });
-  return { path: invalidation.path, affected_artifacts: invalidation.record.affected_artifacts };
-}
-
 function auditLifecycle(projectRoot: string, event: string, result: ProviderLifecycleResult): void {
   appendProviderLifecycleAudit(projectRoot, event, {
     "Provider Instance": result.instance_id,
@@ -159,10 +122,7 @@ function auditLifecycle(projectRoot: string, event: string, result: ProviderLife
     "Previous Lock Digest": result.previous_lock_digest || "-",
     "Lock Digest": result.lock_digest,
     "Lock History": result.history || "-",
-    "Invalidation": result.invalidation?.path || "none",
-    "Invalidated Artifacts": result.invalidation?.affected_artifacts.length ?? 0,
     Status: result.status,
-    Deprecation: result.deprecation || "-",
   });
 }
 
@@ -242,7 +202,6 @@ export function addProjectProvider(
   };
   const lock = createProjectProvidersLock(config, [...state.lock.providers, entry]);
   writeProjectProviders(projectRoot, config, lock, { expectedLockDigest: state.persisted ? state.lock.lock_digest : null });
-  const invalidation = lifecycleInvalidation(projectRoot, "add", instance, `Provider ${instance} was added`, state.persisted ? state.lock.lock_digest : null, lock);
   const result: ProviderLifecycleResult = {
     status: "added",
     instance_id: instance,
@@ -251,9 +210,7 @@ export function addProjectProvider(
     lock_digest: lock.lock_digest,
     previous_lock_digest: state.persisted ? state.lock.lock_digest : null,
     trust: entry.trust,
-    invalidation,
     install_safety: bundle.install_safety,
-    ...(isLegacyKnowledgeExternalSource(bundle.manifest) ? { deprecation: LEGACY_KNOWLEDGE_DEPRECATION } : {}),
   };
   auditLifecycle(projectRoot, "PROVIDER_ADDED", result);
   return result;
@@ -295,14 +252,12 @@ export function updateProjectProvider(
       previous_lock_digest: state.lock.lock_digest,
       trust: currentLock.trust,
       install_safety: bundle.install_safety,
-      ...(isLegacyKnowledgeExternalSource(bundle.manifest) ? { deprecation: LEGACY_KNOWLEDGE_DEPRECATION } : {}),
     };
     auditLifecycle(projectRoot, "PROVIDER_UPDATE_UNCHANGED", result);
     return result;
   }
   writeProjectProviders(projectRoot, config, lock, { expectedLockDigest: state.lock.lock_digest });
   const history = archiveProjectProviderLock(projectRoot, state.lock.lock_digest, currentLock, "update");
-  const invalidation = lifecycleInvalidation(projectRoot, "update", instance, `Provider ${instance} ref changed to ${refValue.trim()}`, state.lock.lock_digest, lock);
   const result: ProviderLifecycleResult = {
     status: "updated",
     instance_id: instance,
@@ -313,9 +268,7 @@ export function updateProjectProvider(
     previous_lock_digest: state.lock.lock_digest,
     trust: nextEntry.trust,
     history,
-    invalidation,
     install_safety: bundle.install_safety,
-    ...(isLegacyKnowledgeExternalSource(bundle.manifest) ? { deprecation: LEGACY_KNOWLEDGE_DEPRECATION } : {}),
   };
   auditLifecycle(projectRoot, "PROVIDER_UPDATED", result);
   return result;
@@ -348,7 +301,6 @@ export function setProjectProviderEnabled(projectRoot: string, instanceValue: st
   writeProjectProviders(projectRoot, config, lock, { expectedLockDigest: state.lock.lock_digest });
   const action = enabled ? "enable" : "disable";
   const history = archiveProjectProviderLock(projectRoot, state.lock.lock_digest, currentLock, action);
-  const invalidation = lifecycleInvalidation(projectRoot, action, instance, `Provider ${instance} was ${enabled ? "enabled" : "disabled"}`, state.lock.lock_digest, lock);
   const result: ProviderLifecycleResult = {
     status: enabled ? "enabled" : "disabled",
     instance_id: instance,
@@ -359,7 +311,6 @@ export function setProjectProviderEnabled(projectRoot: string, instanceValue: st
     previous_lock_digest: state.lock.lock_digest,
     trust: currentLock.trust,
     history,
-    invalidation,
   };
   auditLifecycle(projectRoot, enabled ? "PROVIDER_ENABLED" : "PROVIDER_DISABLED", result);
   return result;
@@ -375,7 +326,6 @@ export function removeProjectProvider(projectRoot: string, instanceValue: string
   const lock = createProjectProvidersLock(config, state.lock.providers.filter((provider) => provider.instance_id !== instance));
   writeProjectProviders(projectRoot, config, lock, { expectedLockDigest: state.lock.lock_digest });
   const history = archiveProjectProviderLock(projectRoot, state.lock.lock_digest, currentLock, "remove");
-  const invalidation = lifecycleInvalidation(projectRoot, "remove", instance, `Provider ${instance} was removed`, state.lock.lock_digest, lock);
   const result: ProviderLifecycleResult = {
     status: "removed",
     instance_id: instance,
@@ -384,7 +334,6 @@ export function removeProjectProvider(projectRoot: string, instanceValue: string
     lock_digest: lock.lock_digest,
     previous_lock_digest: state.lock.lock_digest,
     history,
-    invalidation,
   };
   auditLifecycle(projectRoot, "PROVIDER_REMOVED", result);
   return result;
@@ -412,7 +361,6 @@ function statusFromState(state: ProjectProviderState, projectRoot: string, inten
       config_digest: entry.project_config_digest,
       lock_digest: state.lock.lock_digest,
       cache: cache.cache_path,
-      ...(isLegacyKnowledgeExternalSource(cache.manifest) ? { deprecation: LEGACY_KNOWLEDGE_DEPRECATION } : {}),
       ...disabledFields,
     };
   } catch (error) {
@@ -453,9 +401,9 @@ interface ParsedCli {
   readonly options: Readonly<Record<string, string | readonly string[] | boolean>>;
 }
 
-const BOOLEAN_OPTIONS = new Set(["release-all", "allow-file", "required-for-protected-gates"]);
-const REPEATABLE_OPTIONS = new Set(["input", "evidence", "waiver", "fallback", "module", "unit", "stage", "capability", "approve-config"]);
-const VALUE_OPTIONS = new Set(["ref", "subdir", "id", "instance", "project", "config", "trust", "output", "plan", "node", "timeout", "mode", "delivery-digest", "consumer", "host-config", "host-domains", ...REPEATABLE_OPTIONS]);
+const BOOLEAN_OPTIONS = new Set(["allow-file", "required-for-protected-gates"]);
+const REPEATABLE_OPTIONS = new Set(["module", "unit", "stage", "capability"]);
+const VALUE_OPTIONS = new Set(["ref", "subdir", "id", "instance", "project", "config", "trust", "output", "method", "sections", ...REPEATABLE_OPTIONS]);
 
 function parseCli(args: readonly string[]): ParsedCli {
   const positionals: string[] = [];
@@ -522,107 +470,18 @@ function assertOptions(parsed: ParsedCli, allowed: readonly string[]): void {
 }
 
 export function providerCliUsage(): string {
-  return [
-    "Usage: loeyae-aidlc provider <command> [options]",
-    "",
-    "  add <git-url> [--ref <ref>] [--subdir <path>] [--id <provider-id>] [--instance <id>]",
-    "      [--module <id|*>]... [--unit <id|*>]... [--stage <slug|*>]... [--capability <id>]...",
-    "      [--config <file-or-inline-yaml>] [--trust <mode>] [--required-for-protected-gates] [--project <path>]",
-    "  list [--project [path]]",
-    "  status <instance-id> [--project <path>]",
-    "  update <instance-id> --ref <ref> [--project <path>]",
-    "  enable <instance-id> [--project <path>]",
-    "  disable <instance-id> [--project <path>]",
-    "  remove <instance-id> [--project <path>]",
-    "  probe [--project <path>]",
-    "  mcp-preview --host-config <json-path> [--host-domains <json-path>] [--project <path>]",
-    "  mcp-status --host-config <json-path> [--host-domains <json-path>] [--project <path>]",
-    "  mcp-recover --host-config <json-path> --plan <original-json-file> [--host-domains <json-path>] [--project <path>]",
-    "  mcp-cleanup-plan --host-config <json-path> [--host-domains <json-path>] [--release-all] [--project <path>]",
-    "  mcp-cleanup --host-config <json-path> --plan <json-file> [--host-domains <json-path>] [--release-all] [--project <path>]",
-    "  mcp-plan --host-config <json-path> [--host-domains <json-path>] [--project <path>]",
-    "  mcp-apply --host-config <json-path> --plan <json-file> [--approve-config <digest>]... [--host-domains <json-path>] [--project <path>]",
-    "  knowledge-load --plan <plan-id|path> --node <node-id> [--project <path>]",
-    "  knowledge-confirm --plan <plan-id|path> --node <node-id> --delivery-digest <digest> --consumer <host-session> [--project <path>]",
-    "  knowledge-verify --plan <plan-id|path> --node <node-id> [--project <path>]",
-    "  run --plan <plan-id|path> --node <node-id> [--input <id>=<project-relative-path>]... [--timeout <ms>] [--project <path>]",
-    "  gate --plan <plan-id|path> [--evidence <evidence-id|path>]... [--waiver <json-file>]... [--fallback <json-file>]... [--project <path>]",
-    "",
-    "disable semantics: a disabled instance does not participate in provider plan resolution (its bindings leave the default capability expression); the bindings are kept — provider status lists them — and enable restores resolution without reinstalling.",
-    "",
-    "Project MCP connections:",
-    "MCP connections require a separate, explicit project approval; Core installation adds none.",
-    "For Core installation, --project selects deployment/Hook scope only. Existing host connections and ownership are preserved.",
-    "For enabled Providers with locked aidlc.mcp metadata, select an explicit host JSON file:",
-    "  loeyae-aidlc provider mcp-preview --project <project> --host-config <host.json>",
-    "  loeyae-aidlc provider mcp-plan --project <project> --host-config <host.json>",
-    "Save the plan as UTF-8 JSON, review changes[].config_digest, then approve each configuration:",
-    "  loeyae-aidlc provider mcp-apply --project <project> --host-config <host.json> --plan <plan.json> --approve-config <digest>",
-    "No Provider/disabled instance: no connections. Missing metadata: resolve the Provider capability gap first.",
-    "The managed adapter supports JSON mcpServers only; ZCode mcp.servers, Codex/OpenCode and plugin-managed formats need a supported adapter; do not apply directly to them.",
-    "Cleanup is separate from uninstall: review provider mcp-cleanup-plan, then provider mcp-cleanup with the same explicit target and saved plan.",
-    "",
-    "file:// and absolute-path sources are test-fixture-only and require --allow-file or AIDLC_PROVIDER_ALLOW_FILE=1.",
-    `Production https/ssh sources require host allowlisting in .aidlc/provider-git-policy.json.`,
-  ].join("\n");
+ return "provider add <git-url> --ref <ref> [--instance <id>] [--subdir <path>] [--allow-file]\nprovider list|status <id>|update <id> --ref <ref>|enable <id>|disable <id>|remove <id>\nprovider knowledge-catalog|knowledge-load <id> --capability <id> [--module <id>] [--method <name>] [--sections <JSON array>]\nExplicit pinning only; no automatic installs, stage execution, confirmations or grants. Knowledge is never validation.";
 }
-
 export function runProviderCli(args = process.argv.slice(2)): unknown {
-  const [command, ...rest] = args;
-  if (!command || command === "help" || command === "--help" || command === "-h") return { usage: providerCliUsage() };
-  const parsed = parseCli(rest);
-  const root = project(parsed);
-  if (command === "mcp-status" || command === "mcp-recover") {
-    assertOptions(parsed, ["host-config", "host-domains", "project", "output", ...(command === "mcp-recover" ? ["plan"] : [])]);
-    const hostConfig = option(parsed, "host-config");
-    if (!hostConfig || parsed.positionals.length) throw new Error(`${command} requires --host-config and no positional arguments`);
-    const input = { hostConfig, hostDomains: option(parsed, "host-domains") };
-    if (command === "mcp-status") return statusProviderMcp(root, input);
-    const planPath = option(parsed, "plan");
-    if (!planPath) throw new Error("mcp-recover requires --plan with the original saved transaction plan; do not recreate authorization");
-    let originalPlan: unknown;
-    try { originalPlan = JSON.parse(readFileSync(resolve(root, planPath), "utf8")); }
-    catch { throw new Error("mcp-recover requires a readable original JSON plan; preserve transaction artifacts"); }
-    return recoverProviderMcp(root, { ...input, plan: originalPlan });
-  }
-  if (command === "mcp-cleanup-plan" || command === "mcp-cleanup") {
-    assertOptions(parsed, ["host-config", "host-domains", "project", "output", "release-all", ...(command === "mcp-cleanup" ? ["plan"] : [])]);
-    const hostConfig = option(parsed, "host-config");
-    if (!hostConfig || parsed.positionals.length) throw new Error(`${command} requires --host-config and no positional arguments`);
-    const input = { hostConfig, hostDomains: option(parsed, "host-domains"), releaseAll: parsed.options["release-all"] === true };
-    if (command === "mcp-cleanup-plan") return planProviderMcpCleanup(root, input);
-    const planPath = option(parsed, "plan");
-    if (!planPath) throw new Error("mcp-cleanup requires --plan");
-    return cleanupProviderMcp(root, { ...input, plan: JSON.parse(readFileSync(resolve(root, planPath), "utf8")) });
-  }
-  if (command === "mcp-plan" || command === "mcp-apply") {
-    assertOptions(parsed, ["host-config", "host-domains", "project", "output", ...(command === "mcp-apply" ? ["plan", "approve-config"] : [])]);
-    const hostConfig = option(parsed, "host-config");
-    if (!hostConfig || parsed.positionals.length) throw new Error(`${command} requires --host-config and no positional arguments`);
-    const input = { hostConfig, hostDomains: option(parsed, "host-domains") };
-    if (command === "mcp-plan") return planProviderMcp(root, input);
-    const planPath = option(parsed, "plan");
-    if (!planPath) throw new Error("mcp-apply requires --plan");
-    return applyProviderMcp(root, { ...input, plan: JSON.parse(readFileSync(resolve(root, planPath), "utf8")), approvedConfigs: optionValues(parsed, "approve-config") });
-  }
-  if (command === "mcp-preview") {
-    assertOptions(parsed, ["host-config", "host-domains", "project", "output"]);
-    const hostConfig = option(parsed, "host-config");
-    if (!hostConfig || parsed.positionals.length) throw new Error("mcp-preview requires --host-config and no positional arguments");
-    return previewProviderMcp(root, { hostConfig, hostDomains: option(parsed, "host-domains") });
-  }
-  if (["knowledge-load", "knowledge-confirm", "knowledge-verify"].includes(command)) {
-    assertOptions(parsed, ["plan", "node", "project", "output", ...(command === "knowledge-confirm" ? ["delivery-digest", "consumer"] : [])]);
-    const plan = option(parsed, "plan");
-    const nodeId = option(parsed, "node");
-    if (!plan || !nodeId || parsed.positionals.length) throw new Error(`${command} requires --plan and --node, without positional arguments`);
-    if (command === "knowledge-load") return loadProviderKnowledge(root, { plan, nodeId });
-    if (command === "knowledge-verify") return verifyProviderKnowledge(root, { plan, nodeId });
-    const deliveryDigest = option(parsed, "delivery-digest");
-    const consumer = option(parsed, "consumer");
-    if (!deliveryDigest || !consumer) throw new Error("knowledge-confirm requires --delivery-digest and --consumer after host context loading");
-    return confirmProviderKnowledge(root, { plan, nodeId, deliveryDigest, consumer });
-  }
+ const [command, ...rest] = args;
+ if (!command || ["help", "--help", "-h"].includes(command)) return {usage: providerCliUsage()};
+ const parsed = parseCli(rest), root = project(parsed);
+ if (["knowledge-catalog", "knowledge-load"].includes(command)) {
+   assertOptions(parsed, ["project", "capability", "module", "method", "output", ...(command === "knowledge-load" ? ["sections"] : [])]);
+   if (parsed.positionals.length !== 1 || optionValues(parsed,"capability").length !== 1 || optionValues(parsed,"module").length > 1) throw Error("Knowledge requires one instance, one capability and at most one module");
+   const input = {instance: parsed.positionals[0], capability: optionValues(parsed,"capability")[0], module: optionValues(parsed,"module")[0], method: option(parsed,"method"), sectionIds: option(parsed,"sections") ? JSON.parse(option(parsed,"sections")!) : undefined};
+   return command === "knowledge-catalog" ? catalogProviderKnowledge(root,input) : loadProviderKnowledge(root,input);
+ }
   if (command === "add") {
     assertOptions(parsed, ["ref", "subdir", "id", "instance", "project", "config", "trust", "required-for-protected-gates", "allow-file", "module", "unit", "stage", "capability", "output"]);
     if (parsed.positionals.length !== 1) throw new Error("provider add requires exactly one <git-url>");
@@ -663,92 +522,16 @@ export function runProviderCli(args = process.argv.slice(2)): unknown {
     assertOptions(parsed, ["project", "output"]);
     if (parsed.positionals.length !== 1) throw new Error(`provider ${command} requires exactly one <instance-id>`);
     const result = setProjectProviderEnabled(root, parsed.positionals[0], command === "enable");
-    return command === "disable" ? { ...result, mcp_cleanup_hint: "Review provider mcp-cleanup-plan --host-config <explicit.json>, then provider mcp-cleanup --plan <saved.json>; shared host configuration has not been scanned." } : result;
+    return result;
   }
   if (command === "remove") {
     assertOptions(parsed, ["project", "output"]);
     if (parsed.positionals.length !== 1) throw new Error("provider remove requires exactly one <instance-id>");
-    return { ...removeProjectProvider(root, parsed.positionals[0]), mcp_cleanup_hint: "Review provider mcp-cleanup-plan --host-config <explicit.json>, then provider mcp-cleanup --plan <saved.json>; shared host configuration has not been scanned." };
+    return removeProjectProvider(root, parsed.positionals[0]);
   }
   throw new Error(`unknown provider command: ${command}`);
 }
 
-function parsePositiveInteger(value: string | undefined, label: string): number | undefined {
-  if (value === undefined) return undefined;
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new Error(`${label} must be a positive integer`);
-  return parsed;
-}
-
-function parseRunInput(value: string): ProviderRunInput {
-  const separator = value.indexOf("=");
-  if (separator <= 0 || separator === value.length - 1) throw new Error(`--input must use <id>=<project-relative-path>: ${value}`);
-  return { id: value.slice(0, separator), path: value.slice(separator + 1) };
-}
-
-function readJsonRecords<T>(root: string, references: readonly string[], label: string): T[] {
-  const result: T[] = [];
-  for (const reference of references) {
-    const path = resolve(root, reference);
-    if (!existsSync(path)) throw new Error(`${label} file does not exist: ${reference}`);
-    const stat = lstatSync(path);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 8 * 1024 * 1024) throw new Error(`${label} must be a small regular non-symlink file: ${reference}`);
-    let value: unknown;
-    try { value = JSON.parse(readFileSync(path, "utf8")) as unknown; } catch (error) { throw new Error(`${label} is invalid JSON (${reference}): ${error instanceof Error ? error.message : String(error)}`); }
-    if (Array.isArray(value)) result.push(...value as T[]);
-    else result.push(value as T);
-  }
-  return result;
-}
-
-/** Async execution commands are separated so existing lifecycle API calls remain synchronous. */
-export async function runProviderCliAsync(args = process.argv.slice(2)): Promise<unknown> {
-  const [command, ...rest] = args;
-  if (command !== "probe" && command !== "run" && command !== "gate") return runProviderCli(args);
-  const parsed = parseCli(rest);
-  const root = project(parsed);
-  if (command === "probe") {
-    assertOptions(parsed, ["project", "output"]);
-    if (parsed.positionals.length !== 0) throw new Error("provider probe does not accept positional arguments");
-    return probeRestrictedV1Sandbox();
-  }
-  const plan = option(parsed, "plan");
-  if (!plan) throw new Error(`provider ${command} requires --plan <plan-id|path>`);
-  if (command === "run") {
-    assertOptions(parsed, ["plan", "node", "input", "timeout", "project", "output"]);
-    if (parsed.positionals.length !== 0) throw new Error("provider run does not accept positional arguments");
-    const node = option(parsed, "node");
-    if (!node) throw new Error("provider run requires --node <node-id>");
-    const timeout = parsePositiveInteger(option(parsed, "timeout"), "--timeout");
-    return runControlledProvider(root, {
-      plan,
-      nodeId: node,
-      inputs: optionValues(parsed, "input").map(parseRunInput),
-      ...(timeout ? { limits: { wall_time_ms: timeout } } : {}),
-    });
-  }
-  assertOptions(parsed, ["plan", "evidence", "waiver", "fallback", "project", "output"]);
-  if (parsed.positionals.length !== 0) throw new Error("provider gate does not accept positional arguments");
-  return evaluateProviderGate(root, {
-    plan,
-    evidence: optionValues(parsed, "evidence"),
-    waivers: readJsonRecords<ProviderWaiver>(root, optionValues(parsed, "waiver"), "waiver"),
-    fallbacks: readJsonRecords<ProviderFallbackRecord>(root, optionValues(parsed, "fallback"), "fallback"),
-  });
-}
-
-async function main(): Promise<void> {
-  const result = await runProviderCliAsync();
-  if (typeof result === "object" && result !== null && "usage" in result) {
-    process.stdout.write(`${(result as { usage: string }).usage}\n`);
-  } else {
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  }
-}
-
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch((error) => {
-    console.error(`Provider command blocked: ${error instanceof Error ? error.message : String(error)}`);
-    process.exitCode = 2;
-  });
+ try { console.log(JSON.stringify(runProviderCli(),null,2)); } catch(error) { console.error(String(error)); process.exitCode=1; }
 }

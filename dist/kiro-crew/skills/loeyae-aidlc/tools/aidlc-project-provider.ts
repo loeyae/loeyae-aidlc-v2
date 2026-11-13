@@ -30,13 +30,11 @@ import {
   type Sha256Digest,
   isPortableProviderPath,
 } from "./aidlc-provider-types";
-import { appendAuditEvent, GLOBAL_WORKFLOW, lightStatePath } from "./aidlc-light-state";
 
 export const PROJECT_PROVIDERS_PATH = ".aidlc/providers.yaml";
 export const PROJECT_PROVIDERS_LOCK_PATH = ".aidlc/providers.lock.yaml";
 export const PROJECT_PROVIDER_AUDIT_PATH = ".aidlc/providers.audit.md";
 export const PROJECT_PROVIDER_HISTORY_PATH = ".aidlc/providers.lock.history";
-export const PROJECT_PROVIDER_INVALIDATIONS_PATH = ".aidlc/provider-invalidations";
 
 const PROVIDER_ID = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
 const EXTENSION_NAMESPACE = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9-]*)+$/;
@@ -46,7 +44,6 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const LOCK_WAIT_MS = 3_000;
 const LOCK_STALE_MS = 30_000;
 const MAX_AUDIT_VALUE = 2_000;
-const MAX_INVALIDATION_SCAN_BYTES = 8 * 1024 * 1024;
 
 export type ProviderConfigurationDiagnostic =
   | "PROVIDER_CONFIG_INVALID"
@@ -76,19 +73,6 @@ export interface ProjectProviderState {
   readonly config_path: string;
   readonly lock_path: string;
   readonly persisted: boolean;
-}
-
-export interface ProviderInvalidationRecord {
-  readonly schema: "aidlc.provider-invalidation/v1";
-  readonly invalidation_id: string;
-  readonly instance_id: string;
-  readonly action: "add" | "update" | "enable" | "disable" | "remove";
-  readonly reason: string;
-  readonly old_lock_digest: Sha256Digest | null;
-  readonly new_lock_digest: Sha256Digest;
-  readonly invalidated_at: string;
-  readonly state: "stale";
-  readonly affected_artifacts: readonly string[];
 }
 
 function fail(diagnostic: ProviderConfigurationDiagnostic, message: string): never {
@@ -693,96 +677,6 @@ export function appendProviderLifecycleAudit(projectRoot: string, event: string,
   const sanitized = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, auditValue(value)]));
   const lines = Object.entries(sanitized).map(([key, value]) => `- ${key}: ${value}`).join("\n");
   appendFileSync(auditPath, `## ${new Date().toISOString()}\n- Event: ${auditValue(event)}\n${lines}${lines ? "\n" : ""}\n`, "utf8");
-  if (existsSync(lightStatePath(root, GLOBAL_WORKFLOW))) appendAuditEvent(root, GLOBAL_WORKFLOW, event, sanitized);
-}
-
-function walkJsonFiles(root: string, directory: string, output: string[]): void {
-  if (!existsSync(directory)) return;
-  const stat = lstatSync(directory);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) return;
-  for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
-    const absolute = join(directory, entry.name);
-    const itemStat = lstatSync(absolute);
-    if (itemStat.isSymbolicLink()) continue;
-    if (itemStat.isDirectory()) walkJsonFiles(root, absolute, output);
-    else if (itemStat.isFile() && entry.name.endsWith(".json") && itemStat.size <= MAX_INVALIDATION_SCAN_BYTES) {
-      output.push(relative(root, absolute).replace(/\\/g, "/"));
-    }
-  }
-}
-
-function containsString(value: unknown, expected: string): boolean {
-  if (value === expected) return true;
-  if (Array.isArray(value)) return value.some((entry) => containsString(entry, expected));
-  if (isRecord(value)) return Object.values(value).some((entry) => containsString(entry, expected));
-  return false;
-}
-
-export function providerArtifactsBoundToLock(projectRoot: string, lockDigest: Sha256Digest | null, _instanceId?: string): string[] {
-  if (!lockDigest) return [];
-  const root = resolvedProjectRoot(projectRoot);
-  safeAidlcDirectory(root);
-  const files: string[] = [];
-  for (const candidate of [
-    resolve(root, ".aidlc/provider-plans"),
-    resolve(root, ".aidlc/evidence/providers"),
-    resolve(root, ".aidlc/provider-gates"),
-  ]) walkJsonFiles(root, candidate, files);
-  return files.filter((path) => {
-    try {
-      const value = JSON.parse(readFileSync(resolve(root, path), "utf8")) as unknown;
-      return containsString(value, lockDigest);
-    } catch {
-      return false;
-    }
-  }).sort();
-}
-
-export function recordProviderInvalidation(
-  projectRoot: string,
-  input: Omit<ProviderInvalidationRecord, "schema" | "invalidation_id" | "invalidated_at" | "state" | "affected_artifacts">,
-): { readonly path: string; readonly record: ProviderInvalidationRecord } {
-  const root = resolvedProjectRoot(projectRoot);
-  const invalidationDirectory = safeProviderSubdirectory(root, PROJECT_PROVIDER_INVALIDATIONS_PATH);
-  const invalidatedAt = new Date().toISOString();
-  const invalidationId = `provider-invalidation-${invalidatedAt.replace(/[^0-9]/g, "").slice(0, 17)}-${randomBytes(4).toString("hex")}`;
-  const record: ProviderInvalidationRecord = {
-    schema: "aidlc.provider-invalidation/v1",
-    invalidation_id: invalidationId,
-    instance_id: identifier(input.instance_id, "invalidation.instance_id"),
-    action: input.action,
-    reason: text(input.reason, "invalidation.reason"),
-    old_lock_digest: input.old_lock_digest,
-    new_lock_digest: input.new_lock_digest,
-    invalidated_at: invalidatedAt,
-    state: "stale",
-    affected_artifacts: providerArtifactsBoundToLock(root, input.old_lock_digest, input.instance_id),
-  };
-  const path = resolve(invalidationDirectory, `${invalidationId}.json`);
-  atomicWrite(path, `${JSON.stringify(record, null, 2)}\n`);
-  return { path: relative(root, path).replace(/\\/g, "/"), record };
-}
-
-function artifactLockDigest(value: unknown): string | undefined {
-  if (!isRecord(value)) return undefined;
-  for (const key of ["project_lock_digest", "lock_digest"] as const) {
-    if (typeof value[key] === "string" && DIGEST.test(value[key] as string)) return value[key] as string;
-  }
-  if (isRecord(value.plan)) {
-    const nested = artifactLockDigest(value.plan);
-    if (nested) return nested;
-  }
-  if (isRecord(value.provider_instance)) {
-    const nested = artifactLockDigest(value.provider_instance);
-    if (nested) return nested;
-  }
-  return undefined;
-}
-
-export function assertProviderArtifactCurrent(value: unknown, currentLockDigest: Sha256Digest): void {
-  const bound = artifactLockDigest(value);
-  if (!bound) fail("PROVIDER_PLAN_STALE", "Provider artifact does not bind project_lock_digest");
-  if (bound !== currentLockDigest) fail("PROVIDER_EVIDENCE_STALE", `Provider artifact binds ${bound}, current lock is ${currentLockDigest}`);
 }
 
 function bindingMatches(intent: ProjectProviderIntent, capability: string, scope: ProviderScope): boolean {

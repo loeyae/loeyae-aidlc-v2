@@ -13,7 +13,3 @@ triggers: Figma 转代码, Mock 转代码, 前端平台规范, 组件映射, 设
 保持设计指定状态/尺寸和交互，实际运行验证视觉与功能。平台说明是实施辅助，不是开始编码的先决文件。
 
 默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
-
-## 兼容参考
-
-仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-ui-implementation-bridge.md)，默认不加载。

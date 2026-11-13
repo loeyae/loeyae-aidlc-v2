@@ -9,6 +9,6 @@
     "outDir": "./dist",
     "rootDir": "."
   },
-  "include": ["core/**/*.ts", "harness/**/*.ts", "scripts/**/*.ts"],
+  "include": ["bin/**/*.ts", "core/**/*.ts", "harness/**/*.ts", "scripts/**/*.ts", "tests/test_current_execution.ts", "tests/test_current_distribution.ts", "tests/test_task_knowledge.ts"],
   "exclude": ["node_modules", "dist"]
 }

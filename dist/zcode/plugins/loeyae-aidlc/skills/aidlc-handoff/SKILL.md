@@ -9,4 +9,5 @@ description: Summarize scope, actual implementation, verification and remaining 
 
 交付分别说明实施、验收和提交/合并及 CR 收口。QA 或外部决定待完成时只保留相应待办；实际缺陷才返修。按宿主协议维护一处决定和结果摘要，多单元引用同一验证记录；既有摘要不因文件存在就逐份同步。关闭条件满足后才按项目约定整理 CR，未提交或唯一记录不得提前删除。
 
-旧状态损坏或 claim 过期不阻止独立本地工作。保留旧记录及他人修改，未知进程不接管。只有用户明确要求维护旧受管流程时才加载 [旧会话协议](../../knowledge/protocols/common-session-handoff.md)，原授权保护不因本 Skill 解除。
+旧状态损坏或 claim 过期不阻止独立本地工作。保留旧记录及他人修改，未知进程不接管。
+所有结论遵循 [统一完成判定](../../knowledge/protocols/completion.md)，未知、失败、过期和外部待办不能省略。

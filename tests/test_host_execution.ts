@@ -103,21 +103,26 @@ try {
   assert.equal(cli("--paths", '["src"]').git.status_summary.entries, 1);
   const help = run(process.execPath, [path.join(repo, "bin/cli.js"), "--help"]);
   const legacyHelp = run(process.execPath, [path.join(repo, "bin/cli.js"), "help", "legacy"]);
-  assert.equal(help.status, 0); assert.equal(legacyHelp.status, 0);
+  assert.equal(help.status, 0); assert.notEqual(legacyHelp.status, 0);
   assert(Buffer.byteLength(help.stdout) < 4096);
-  assert(help.stdout.includes("work") && legacyHelp.stdout.includes("orchestrate"));
-  assert(legacyHelp.stdout.length > help.stdout.length);
+  assert(help.stdout.includes("work") && legacyHelp.stderr.includes("Unknown help topic"));
+  const beforeHelp = git("status", "--porcelain");
+  assert(help.stdout.includes("help [tools"));
+  const toolHelp = run(process.execPath, [path.join(repo, "bin/cli.js"), "help", "tools"]);
+  assert.equal(toolHelp.status, 0, toolHelp.stderr);
+  assert(toolHelp.stdout.includes("docx --help") && toolHelp.stdout.includes("export --help"));
+  assert(!toolHelp.stdout.includes("orchestrate"));
+  for (const tool of ["docx", "export"]) {
+    const topic = run(process.execPath, [path.join(repo, "bin/cli.js"), "help", tool]);
+    const direct = run(process.execPath, [path.join(repo, "bin/cli.js"), tool, "--help"]);
+    assert.equal(topic.status, 0, topic.stderr); assert.equal(direct.status, 0, direct.stderr);
+    assert.equal(topic.stdout, direct.stdout, `${tool}: topic help uses the actual command's usage`);
+    assert(topic.stdout.includes(tool) && topic.stdout.includes("--"));
+  }
+  assert.equal(git("status", "--porcelain"), beforeHelp, "discovering capabilities must not write project files");
+  assert(!fs.existsSync(path.join(root, ".aidlc")));
   pass("large dirty tree returns bounded default context, explicit details and scoped view; short help separates legacy");
 
-  const hook = run(process.execPath, [tsx, path.join(repo, "core/tools/aidlc-platform-hook.ts")]);
-  assert.equal(hook.status, 0, hook.stderr); assert.equal(hook.stdout, "");
-  pass("legacy stop hook remains nonblocking even with invalid binding");
-  const nativeStop = spawnSync(process.execPath, [path.join(repo, "bin/cli.js"), "hook", "--format", "codex"], {
-    cwd: root, encoding: "utf8", timeout: 5000,
-    env: { ...process.env, AIDLC_SESSION_BINDING: "" },
-  });
-  assert.equal(nativeStop.status, 0); assert.equal(nativeStop.stdout, ""); assert.equal(nativeStop.stderr, "");
-  pass("unbound native Stop returns without loading TypeScript/Core");
   console.log(JSON.stringify({ passed: true, records, real_host_model: false, new_pilot: false }, null, 2));
 } finally {
   // Both roots are created above by mkdtemp under the OS temporary directory.

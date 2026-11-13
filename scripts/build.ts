@@ -16,11 +16,11 @@
  *   7. Report summary
  */
 
-import { existsSync, mkdirSync, cpSync, rmSync, readdirSync } from "fs";
-import { join, resolve, dirname } from "path";
+import { existsSync, mkdirSync, cpSync, rmSync, readdirSync, readFileSync, writeFileSync } from "fs";
+import { join, resolve, dirname, relative, isAbsolute } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
-import { compile as compileGraph } from "../core/tools/aidlc-graph";
 import type { HarnessManifest } from "./manifest-types.ts";
+import { generateMethods } from "./generate-methods.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -62,9 +62,11 @@ async function buildHarness(name: string) {
   console.log(`\n🔨 Building harness: ${name}`);
   console.log(`   Output: ${outDir}`);
 
+  const rel = relative(DIST_DIR, outDir);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw Error("Unsafe distribution output");
   // Clean
   if (existsSync(outDir)) {
-    rmSync(outDir, { recursive: true });
+    rmSync(outDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }
   mkdirSync(outDir, { recursive: true });
 
@@ -100,11 +102,16 @@ async function buildHarness(name: string) {
     }
   }
 
+  const entryPath = join(outDir, manifest.skillEntryPath);
+  const prefix = relative(dirname(entryPath), harnessOutDir).replaceAll("\\", "/");
+  const entry = readFileSync(join(CORE_DIR, "ENTRY.md"), "utf8").replaceAll("{{root}}", prefix ? prefix + "/" : "");
+  mkdirSync(dirname(entryPath), { recursive: true });
+  writeFileSync(entryPath, entry);
   console.log(`   ✅ Done: ${coreCount} core dirs, ${harnessCount} harness files`);
 }
 
 async function main() {
-  compileGraph();
+  generateMethods(ROOT);
   const { harnesses } = parseArgs();
   console.log(`🏗️  Loeyae AI-DLC Builder`);
   console.log(`   Harnesses: ${harnesses.join(", ")}`);

@@ -15,31 +15,16 @@ import type { HarnessManifest } from "../../scripts/manifest-types.ts";
 const manifest: HarnessManifest = {
   name: "codex",
   harnessDir: ".agents/skills/loeyae-aidlc",
-  orchestratorSkillPath: ".agents/skills/loeyae-aidlc/SKILL.md",
+  skillEntryPath: ".agents/skills/loeyae-aidlc/SKILL.md",
 
   coreDirs: [
     { src: "tools", dst: "tools" },
-    { src: "stages/ideation", dst: "stages/ideation" },
-    { src: "stages/inception", dst: "stages/inception" },
-    { src: "stages/construction", dst: "stages/construction" },
-    { src: "stages/operation", dst: "stages/operation" },
     { src: "knowledge", dst: "knowledge" },
-    { src: "sensors", dst: "sensors" },
     { src: "skills", dst: "skills" },
   ],
 
   harnessFiles: [
-    { src: "skills/loeyae-aidlc/SKILL.md", dst: "SKILL.md" },
     { src: "README.md", dst: "README.md" },
-    { src: "runtime/aidlc-codex-host.mjs", dst: "runtime/aidlc-codex-host.mjs" },
-    { src: "runtime/host-kernel.cjs", dst: "runtime/host-kernel.cjs" },
-    { src: "runtime/host-model-input.mjs", dst: "runtime/host-model-input.mjs" },
-    { src: "runtime/host-progress.cjs", dst: "runtime/host-progress.cjs" },
-    { src: "runtime/native-tool-channel.mjs", dst: "runtime/native-tool-channel.mjs" },
-    { src: "runtime/host-recovery.mjs", dst: "runtime/host-recovery.mjs" },
-    { src: "runtime/host-worker-recovery.mjs", dst: "runtime/host-worker-recovery.mjs" },
-    { src: "runtime/deny-native.cjs", dst: "runtime/deny-native.cjs" },
-    { src: "hooks/hooks.json", dst: "hooks/hooks.json" },
   ],
 };
 

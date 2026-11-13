@@ -299,9 +299,9 @@ def test_unowned_targets_and_argument_contracts() -> None:
         backups = list(legacy_target.parent.glob(f"{legacy_target.name}.pre-managed-backup-*"))
         assert len(backups) == 1 and (backups[0] / legacy_marker.name).read_text() == "preserve legacy customization"
         assert not (legacy_target / legacy_marker.name).exists()
-        assert (legacy_target / "tools" / "aidlc-orchestrate.ts").is_file()
+        assert (legacy_target / "tools" / "aidlc-host-work.ts").is_file()
 
-        managed_graph = legacy_target / "tools" / "data" / "stage-graph.json"
+        managed_graph = legacy_target / "SKILL.md"
         managed_graph.write_text(managed_graph.read_text() + "\n")
         modified = run_cli(home, ["install", "--harness", "kiro-cli", "--migrate-legacy"])
         assert modified.returncode != 0 and "was modified" in modified.stderr
@@ -351,9 +351,9 @@ def test_deepseek_native_skill_lifecycle() -> None:
         assert installed.returncode == 0, installed.stderr
         skill = target / "SKILL.md"
         assert "name: loeyae-aidlc" in skill.read_text(encoding="utf-8")
-        assert "AIDLC_SESSION_BINDING" in skill.read_text(encoding="utf-8")
-        for resource in ["tools/data/stage-graph.json", "knowledge/protocols/common-session-handoff.md",
-                         "stages/construction/construction-code-generation.md", "skills/aidlc-code-review/SKILL.md"]:
+        assert "host-execution.md" in skill.read_text(encoding="utf-8")
+        for resource in ["tools/aidlc-completion.ts", "knowledge/protocols/completion.md",
+                         "knowledge/methods.json", "skills/aidlc-code-review/SKILL.md"]:
             assert (target / resource).is_file(), resource
         assert not (target / "hooks").exists()
         assert not (home / ".codex").exists()
@@ -443,7 +443,7 @@ def test_opencode_multi_asset_transaction_and_uninstall() -> None:
         assert installed.returncode == 0, installed.stdout + installed.stderr
         plugin = home / ".config" / "opencode" / "plugins" / "loeyae-aidlc.js"
         assets = home / ".config" / "opencode" / "loeyae-aidlc"
-        assert plugin.is_file() and (assets / "tools" / "aidlc-orchestrate.ts").is_file()
+        assert plugin.is_file() and (assets / "tools" / "aidlc-host-work.ts").is_file()
         plugin_before = plugin.read_bytes()
         assets_before = tree_digest(assets)
 
@@ -519,8 +519,8 @@ def test_core_mcp_lifecycle() -> None:
         zcode_path = home / ".zcode/cli/config.json"
         guidance = run_cli(home, ["provider", "help"], env)
         assert guidance.returncode == 0, guidance.stdout + guidance.stderr
-        assert "Core installation adds none" in guidance.stdout
-        assert "provider mcp-apply" in guidance.stdout and "--approve-config" in guidance.stdout
+        assert "no automatic installs" in guidance.stdout
+        assert "provider mcp-apply" not in guidance.stdout and "--approve-config" not in guidance.stdout
         for host in hosts:
             args = ["--harness", host]
             if host in ("kiro-ide", "kiro-cli", "qoder", "codebuddy"):
@@ -530,7 +530,7 @@ def test_core_mcp_lifecycle() -> None:
             assert "MCP connections require" not in result.stdout
             assert "provider mcp-apply" not in result.stdout
             assert all(not path.exists() for path in paths)
-        assert "mcp" not in json.loads(zcode_path.read_text())
+        assert not zcode_path.exists() or "mcp" not in json.loads(zcode_path.read_text())
         assert not list(home.rglob("*.aidlc-mcp-*"))
 
         historical = {
@@ -550,8 +550,9 @@ def test_core_mcp_lifecycle() -> None:
             sidecar.write_bytes(b'{"other-project":"preserve verbatim"}\r\n')
             before[path] = path.read_bytes()
             before[sidecar] = sidecar.read_bytes()
-        zcode = json.loads(zcode_path.read_text())
+        zcode = json.loads(zcode_path.read_text()) if zcode_path.exists() else {}
         zcode["mcp"] = {"servers": historical, "unknown": "keep"}
+        zcode_path.parent.mkdir(parents=True, exist_ok=True)
         zcode_path.write_text(json.dumps(zcode))
         for operation in ("install", "uninstall", "install", "uninstall"):
             for host in hosts:
@@ -614,7 +615,7 @@ def test_new_plugin_host_lifecycles() -> None:
         assert sum("plugins enable loeyae-aidlc --scope user" in line for line in qoder_log) == 2
         qoder_cn_skill = home / ".qoder-cn" / "skills" / "loeyae-aidlc" / "SKILL.md"
         assert qoder_cn_skill.is_file()
-        assert "Markdown state/audit" in qoder_cn_skill.read_text()
+        assert "host-execution.md" in qoder_cn_skill.read_text()
         expected_qoder_mcp = {"figma"}
         for config_path in qoder_mcp_config_paths:
             config = json.loads(config_path.read_text())
@@ -802,7 +803,7 @@ def test_install_all_detects_qoder_cn_desktop_without_cli() -> None:
         qoder_cn_skill = home / ".qoder-cn" / "skills" / "loeyae-aidlc" / "SKILL.md"
         assert not (qoder_assets / "mcp-cn.json").exists()
         assert qoder_cn_skill.is_file()
-        assert "Markdown state/audit" in qoder_cn_skill.read_text()
+        assert "host-execution.md" in qoder_cn_skill.read_text()
 
         repeated = run_cli(home, ["install", "--all"], env)
         assert repeated.returncode == 0, repeated.stdout + repeated.stderr
@@ -860,8 +861,11 @@ def test_qoder_cn_native_skill_migration() -> None:
         home.mkdir()
         fake_bin.mkdir()
         native_skill.mkdir(parents=True)
-        skill_source = ROOT / "dist" / "qoder" / "skills" / "loeyae-aidlc" / "SKILL.md"
-        native_skill.joinpath("SKILL.md").write_text(skill_source.read_text() + "\nmanual-probe-copy\n")
+        # A real old-format fixture, independent of the current generated entry.
+        native_skill.joinpath("SKILL.md").write_text(
+            "---\nname: loeyae-aidlc\ndescription: Markdown state/audit\n---\n"
+            "loeyae-aidlc orchestrate next\nmanual-probe-copy\n"
+        )
         env = isolated_host_env(root, fake_bin)
         env.update({
             "QODER_CONFIG_DIR": str(home / ".qoder"),

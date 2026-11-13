@@ -13,7 +13,3 @@ triggers: 工作单元, 单元拆分, 依赖矩阵, 故事映射, 工作单元�
 依赖未就绪只限制相关工作；已明确范围和批准不逐单元重复询问。
 
 默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
-
-## 兼容参考
-
-仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-unit-generation.md)，默认不加载。

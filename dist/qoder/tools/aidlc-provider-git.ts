@@ -192,21 +192,6 @@ function jsonObject(value: unknown, field: string): JsonObject {
   return visit(value, field) as JsonObject;
 }
 
-/** External-source protocols that predate the knowledge contract. A knowledge-kind
- *  manifest that declares one of these instead of extensions["aidlc.knowledge"] stays
- *  installable during the deprecation window (the resolver already treats it as an
- *  external source with no knowledge confirmation action). */
-export const LEGACY_KNOWLEDGE_EXTENSION_PROTOCOLS = ["aidlc.context-source", "aidlc.design-resource", "aidlc.ui-read-source", "aidlc.ui-create-source", "aidlc.visual"] as const;
-
-export const LEGACY_KNOWLEDGE_DEPRECATION = 'kind: knowledge without extensions["aidlc.knowledge"] relies on a legacy external-source protocol; deprecated — add aidlc.knowledge or change kind (a future version will reject installation)';
-
-/** True when a knowledge-kind manifest relies on a legacy external-source protocol
- *  instead of the knowledge contract. */
-export function isLegacyKnowledgeExternalSource(manifest: Pick<ProviderRepositoryManifestV1_1, "kind" | "extensions">): boolean {
-  return manifest.kind === "knowledge" && manifest.extensions?.["aidlc.knowledge"] === undefined
-    && LEGACY_KNOWLEDGE_EXTENSION_PROTOCOLS.some((protocol) => manifest.extensions?.[protocol] !== undefined);
-}
-
 export function validateProviderRepositoryManifest(value: unknown, options: { locked?: boolean } = {}): ProviderRepositoryManifestV1_1 {
   if (!isRecord(value)) fail("PROVIDER_MANIFEST_INVALID", "provider.yaml must contain an object");
   exact(value, ["schema", "provider_id", "name", "version", "kind", "capabilities", "selectors", "entrypoint", "ruleset", "artifacts", "policies", "extensions"], "provider.yaml");
@@ -241,11 +226,8 @@ export function validateProviderRepositoryManifest(value: unknown, options: { lo
   if (network !== "none" && network !== "allowlisted") fail("PROVIDER_MANIFEST_INVALID", "provider.yaml.policies.network must be none or allowlisted");
   const writes = strings(value.policies.writes, "provider.yaml.policies.writes").map((candidate, index) => safePath(candidate, `provider.yaml.policies.writes[${index}]`));
   const extensions = value.extensions === undefined ? undefined : jsonObject(value.extensions, "provider.yaml.extensions");
-  // Old locks may contain knowledge-kind external sources with no knowledge package.
-  // Keep those readable offline, and keep manifests that declare a recognized legacy
-  // external-source protocol installable as a deprecation window; every other
-  // knowledge manifest must satisfy the contract.
-  if (kind === "knowledge" && !(options.locked && extensions?.["aidlc.knowledge"] === undefined) && !isLegacyKnowledgeExternalSource({ kind: kind as ProviderRepositoryManifestV1_1["kind"], extensions })) {
+  // The current knowledge contract applies equally to new installs and pinned caches.
+  if (kind === "knowledge") {
     try {
       validateKnowledgePackage(extensions?.["aidlc.knowledge"], version);
     } catch (error) {

@@ -1,9 +1,9 @@
 import { isPortableProviderPath } from "./aidlc-provider-types.js";
 
-export const KNOWLEDGE_PACKAGE_SCHEMA = "aidlc.knowledge-package/v1";
+export const KNOWLEDGE_PACKAGE_SCHEMA = "aidlc.knowledge-package/v3";
 
 export interface KnowledgePackage {
-  readonly schema: typeof KNOWLEDGE_PACKAGE_SCHEMA | "aidlc.knowledge-package/v2";
+  readonly schema: typeof KNOWLEDGE_PACKAGE_SCHEMA;
   readonly version: string;
   readonly topics: readonly {
     readonly capability_id: string;
@@ -13,6 +13,8 @@ export interface KnowledgePackage {
       readonly path: string;
       readonly digest: string;
       readonly requires?: unknown;
+      readonly required: boolean;
+      readonly description: string;
     }[];
   }[];
 }
@@ -34,8 +36,8 @@ export function validateKnowledgePackage(value: unknown, version: string): Knowl
   if (value === undefined) fail("missing required extension for knowledge manifest");
   const declaration = record(value);
   exact(declaration, ["schema", "version", "topics"]);
-  const scoped = declaration.schema === "aidlc.knowledge-package/v2";
-  if ((!scoped && declaration.schema !== KNOWLEDGE_PACKAGE_SCHEMA) || declaration.version !== version) fail("knowledge package schema/version mismatch");
+  if (declaration.schema !== KNOWLEDGE_PACKAGE_SCHEMA) fail(`knowledge package schema must be ${KNOWLEDGE_PACKAGE_SCHEMA}; rebuild the package and update its pinned lock before loading`);
+  if (declaration.version !== version) fail("knowledge package version mismatch");
   if (!Array.isArray(declaration.topics) || !declaration.topics.length) fail("missing topics");
   const capabilities = new Set<string>();
   for (const value of declaration.topics as unknown[]) {
@@ -49,7 +51,9 @@ export function validateKnowledgePackage(value: unknown, version: string): Knowl
     const ids = new Set<string>();
     for (const value of topic.sections as unknown[]) {
       const section = record(value);
-      exact(section, scoped ? ["id", "path", "digest", "requires"] : ["id", "path", "digest"]);
+      exact(section, ["id", "path", "digest", "requires", "required", "description"]);
+      if (typeof section.required !== "boolean") fail("sections must explicitly declare required");
+      text(section.description);
       const id = text(section.id);
       if (ids.has(id)) fail("duplicate section id");
       ids.add(id);
@@ -57,6 +61,7 @@ export function validateKnowledgePackage(value: unknown, version: string): Knowl
       if (!isPortableProviderPath(path) || path.includes(":")) fail("section path escapes package");
       text(section.digest);
     }
+    if (!(topic.sections as Record<string, unknown>[]).some(section => section.required === true)) fail("topics must declare required base constraints");
   }
   return declaration as unknown as KnowledgePackage;
 }

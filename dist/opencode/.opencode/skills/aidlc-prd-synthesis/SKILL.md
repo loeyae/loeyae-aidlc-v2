@@ -10,8 +10,6 @@ triggers: PRD, 产品需求文档, 需求文档合成, 需求整理, PRD synthes
 
 按读者和项目规模选择深度，更新现有 PRD，不重复抄写所有过程文档或另建追踪副本。原始需求保留链接；已有冲突需要澄清，新 ID 只在确有追溯需要时使用。输出文档及影响交付的待决事项即可。
 
+仅修改已有内容时，按需读取 [局部修改方法](../../knowledge/protocols/prd-patch.md)，保留原路径、未受影响章节和既有版本约定。
+
 默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
-
-## 兼容参考
-
-仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-prd-synthesis.md)，默认不加载。

@@ -11,8 +11,6 @@
  * the overflow surfaces as its own `kind: "error"` at the top of the process tree.
  */
 import { spawnSync, type SpawnSyncOptions, type SpawnSyncOptionsWithBufferEncoding, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from "child_process";
-import {createRequire} from 'node:module';
-const resourceFacts=createRequire(import.meta.url)('./aidlc-owned-resource.cjs');
 
 /** Default output limit of a buffered child process (stdout and stderr each). */
 export const DEFAULT_SUBPROCESS_MAX_BUFFER = 64 * 1024 * 1024;
@@ -91,7 +89,6 @@ export function runSync(command: string, args: readonly string[], options: Spawn
 export function runSync(command: string, args: readonly string[], options: SpawnSyncOptions, behaviour: { propagate?: boolean } = {}): SpawnSyncReturns<string | Buffer> {
   const maxBuffer = subprocessMaxBuffer();
   const result = spawnSync(command, args, { ...options, maxBuffer });
-  if(behaviour.propagate!==false){const facts=resourceFacts.parseResourceFailure(String(result.stderr??''),true);if(facts)resourceFacts.announceResourceFailure(facts);}
   if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOBUFS") {
     raise(new SubprocessOverflowError(subprocessHead([command, ...args]), maxBuffer));
   }

@@ -5,19 +5,13 @@ import type { HarnessManifest } from "../../scripts/manifest-types.ts";
 const manifest: HarnessManifest = {
   name: "deepseek",
   harnessDir: ".",
-  orchestratorSkillPath: "SKILL.md",
+  skillEntryPath: "SKILL.md",
   coreDirs: [
     { src: "tools", dst: "tools" },
-    { src: "stages/ideation", dst: "stages/ideation" },
-    { src: "stages/inception", dst: "stages/inception" },
-    { src: "stages/construction", dst: "stages/construction" },
-    { src: "stages/operation", dst: "stages/operation" },
     { src: "knowledge", dst: "knowledge" },
-    { src: "sensors", dst: "sensors" },
     { src: "skills", dst: "skills" },
   ],
   harnessFiles: [
-    { src: "SKILL.md", dst: "SKILL.md" },
     { src: "README.md", dst: "README.md" },
   ],
 };

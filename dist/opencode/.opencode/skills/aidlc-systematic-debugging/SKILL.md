@@ -13,7 +13,3 @@ triggers: 系统化调试, 根因分析, 故障定位, 问题排查, debugging, 
 相同失败且没有新信息时，不继续原样重跑；缩小复现、改变诊断或说明真实外部阻塞。不能为通过而删除必要断言；其他独立工作继续。
 
 默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
-
-## 兼容参考
-
-仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-systematic-debugging.md)，默认不加载。

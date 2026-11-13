@@ -1,4 +1,0 @@
-{
-  "description": "Native host owns execution and continuation; no default AI-DLC lifecycle hooks",
-  "hooks": {}
-}

@@ -21,7 +21,6 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 import { runSync } from "../core/tools/aidlc-spawn";
-import { provisionControlPlaneGitStrategy } from "../core/tools/aidlc-git-merge";
 import {
   hasManagedInstallation,
   installManagedAssets,
@@ -141,25 +140,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function orchestrationScript(): string {
-  return "core/tools/aidlc-orchestrate.ts";
-}
-
-export function usesOperatorConsole(script: string, args: readonly string[], input?: string): boolean {
-  return script === orchestrationScript() && input === undefined
-    && args[0] === "autonomy" && args[1] === "grant"
-    && ["issue", "revoke"].includes(args[2]) && !args.includes("--preview");
-}
-
 function run(script: string, args: string[], input?: string): never | void {
   const tsx = require.resolve("tsx/cli");
   // 4.11.0: the shared 64 MB limit (Node's default 1 MB overflowed on large reports);
   // an overflow throws a SubprocessOverflowError naming the child. The child's own
   // output, including an overflow it reported, is passed through unchanged.
   const result = runSync(process.execPath, [tsx, resolve(ROOT, script), ...args], {
-    // Actual operator capture must see the caller's real terminal. Pipe callers
-    // stay pipes and are still rejected by Core; no TTY or approval is synthesized.
-    stdio: usesOperatorConsole(script, args, input) ? "inherit" : "pipe",
+    stdio: "pipe",
     cwd: process.cwd(),
     encoding: "utf8",
     input,
@@ -648,7 +635,7 @@ function createClaudeCatalogSource(): { root: string; file: string } {
     plugins: [{
       name: "loeyae-aidlc",
       source: "./plugins/loeyae-aidlc",
-      description: "AWS-style lightweight AI-DLC workflow with Markdown state/audit, unit selection, review, build and test.",
+      description: "Task-focused AI-DLC methods, on-demand references and actual verification using native host tools.",
       version: PKG.version,
     }],
   };
@@ -1217,7 +1204,6 @@ function deploy(args: string[], operation: "install" | "uninstall"): void {
       ? "⚠️  Restart affected platforms to activate."
       : `✅ Uninstalled ${harnesses.length} installer-owned global platform installation${harnesses.length === 1 ? "" : "s"}.`);
     if (operation === "install") {
-      provisionProjectGitStrategyOnInstall();
     }
     return;
   }
@@ -1225,259 +1211,55 @@ function deploy(args: string[], operation: "install" | "uninstall"): void {
   if (operation === "install") installOne(harness, options.target, options.project, options.migrateLegacy);
   else uninstallOne(harness, options.target, options.project);
   if (operation === "install") {
-    provisionProjectGitStrategyOnInstall();
-  }
-}
-
-/**
- * MARS-117: on install, idempotently provision the control-plane git merge strategy in
- * the project where install was run (process.cwd()): the `.gitattributes` union rule for
- * audit, the registry merge driver attribute, the `.gitignore` of engine backups, and
- * the local `.git/config` registration of the registry merge driver. Best-effort and
- * non-fatal — a project that is not a git work tree, or that already has everything, is a
- * silent no-op; a user-set clashing merge strategy is reported, never overwritten.
- */
-function provisionProjectGitStrategyOnInstall(): void {
-  const projectRoot = process.cwd();
-  try {
-    const result = provisionControlPlaneGitStrategy(projectRoot);
-    const added = [...result.gitattributes.added, ...result.gitignore.added];
-    if (added.length > 0) {
-      console.log(`🔧 Provisioned control-plane git merge strategy in ${projectRoot}: ${added.join(", ")}.`);
-    }
-    if (result.driver.registered) {
-      console.log("🔧 Registered the aidlc-registry merge driver in this repository's .git/config.");
-    }
-    for (const conflict of result.gitattributes.conflicts) {
-      console.warn(`⚠️  .gitattributes already sets a different merge strategy for ${conflict.pattern} ("${conflict.existing}"); left unchanged. For conflict-free control-plane merges use: ${conflict.managed}`);
-    }
-  } catch (error) {
-    console.warn(`⚠️  Could not provision the control-plane git merge strategy in ${projectRoot}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 function help(): void {
-  console.log(`loeyae-aidlc v${PKG.version} — native host execution
+  console.log(`loeyae-aidlc v${PKG.version} — goal-directed host execution
 
-The host implements, tests, reviews and repairs under existing user permissions.
-No workflow, claim, H5 or stage report is required for ordinary work.
+  work [--work <goal>] [--paths <JSON array>]  Optional read-only context
+  methods [read <id>]                        Catalog first; read one method
+  assess --input <relative-file.json>        Derive completion from supplied facts
+  provider help                             Explicit source pinning and knowledge
+  docx --help | export --help                Independent document tools
+  install | uninstall [--harness <name>]     Ownership-protected host installation
+  build --all | --harness <name>             Generate current host distributions
+  help [tools|docx|export|provider|migration]
+  version
 
-  work [--work <goal>] [--paths <JSON array>]  Optional read-only Git summary
-  work --input <file>                        Read one selected document excerpt
-  work --details --paths <JSON array>        Request detailed Git output
-  work --help                               Show view options
-  install --harness <host>                   Install/update host assets
-  uninstall --harness <host>                 Remove installer-owned host assets
-  version                                   Show package version
-  help legacy                               Explicit managed workflow/tool reference
-
-Work can continue directly with host tools without invoking this CLI.
-Missing process documents do not prohibit work; real failures must be repaired
-before claiming completion. Deployment follows the user's actual authorization.`);
+The host executes under user and host permissions. Required verification and
+unresolved acceptance remain visible. No command is a prerequisite for work.`);
 }
-
-function legacyHelp(): void {
-  console.log(`
-loeyae-aidlc v${PKG.version} — AWS-style Lightweight AI-DLC
-
-Usage:
-  loeyae-aidlc <command> [options]
-
-Default — native host execution (no AI-DLC execution gate):
-  work --work <goal> [--paths <JSON array>] [--input <file>]  Optional read-only Git/input context
-  work [--from <full commit>]                          Continue from actual artifacts; no claim/grant required
-  The host implements, tests and repairs under existing user permissions. Performance is a separate observation.
-
-Legacy managed workflow (explicit compatibility commands, not required for native execution):
-  orchestrate next --scope <scope> --work <description>  Start a new Markdown workflow
-  orchestrate next [--module <module-id>]               Read the next directive (per-module after split)
-  orchestrate next [--module <id>] --provider-approval <ref>  Continue an approved protected/fallback ProviderPlan
-  orchestrate report --stage <slug> --result completed [--gate-decision <id>]  Report a completed stage (--module in split layout)
-  orchestrate profile escalate --signal <ProfileSignal> [--detail <text>]  Escalate the global execution profile from a recorded risk
-  orchestrate autonomy inspect                          Read the adopted batch scope (no grant or gate evaluation)
-  orchestrate autonomy policy                          Validate the pinned autonomy policy (read-only)
-  orchestrate autonomy decisions                       Project decisions, record blockers and human review (read-only)
-  orchestrate autonomy record --input <json> --expect <handoff-sha256|absent> [--preview]  Record under its live claim; managed grants require Core proposal_path staging
-  orchestrate autonomy grant issue --input <request.json> [--preview]  Issue only after exact operator-terminal confirmation
-  orchestrate autonomy grant inspect                   Read signed grant status; no execution permission is implied
-  orchestrate autonomy grant bind                      Validate this same session and return its grant reference
-  orchestrate autonomy admission run --input <frozen-plan.json> [--preview]  Receive design and run bounded preflight
-  orchestrate autonomy admission draft --batch <id> --input <plan.json> [--observations <plan.json>] [--grant-request <request.json>]  Read-only pre-adoption static validation; no grant/probe/commands
-  orchestrate autonomy host prepare --checks <json-array> [--context]  Trusted host action-local checks and input identity; no cached authorization
-  orchestrate autonomy admission inspect               Project ready / ready-with-delegated-decisions / not-ready
-  orchestrate autonomy dependencies [inspect]          Read staged dependencies, capability versions and write responsibility
-  orchestrate autonomy dependencies check --checkpoint <stage|check-id>  Revalidate this exact consumption point
-  orchestrate autonomy admission check                 Revalidate managed receipt before implementation
-  orchestrate autonomy observe run [--dependency-preflight] --input <frozen-plan.json>  Execute actual assertions; external preflight remains partial
-  orchestrate autonomy observe inspect                 Read candidate-bound controlled observations; never a batch completion
-  orchestrate autonomy batch finalize [--preview]       Converge final candidate, full matrix, Native gates and decisions
-  orchestrate autonomy batch inspect                   Read signed batch result and current/stale applicability
-  orchestrate autonomy repair inspect                  Inspect a controlled failure and same-attempt repair state
-  orchestrate autonomy run inspect                     Read durable checkpoints; does not authorize recovery
-  Codex runtime: supervise <frozen-config> <original-thread> (explicit successor policy required)
-  orchestrate autonomy run checkpoint --input <file> --expect <head-digest|absent>
-                                                      Host-only P2 checkpoint observation under a live grant
-  orchestrate autonomy repair request --kind <code-defect|test-correction|scope-change|unknown> --unit <module/unit> --failure <raw-sha256> --reason <diagnosis>
-  orchestrate autonomy repair start --pid <owned-host>  Harness-only first-start registration; never resume
-  orchestrate autonomy repair apply --expect <digest>  Harness-only Core-derived rollback under an exact binding
-    Adopted batches use current grant/admission and formal routes; notify/none need no per-stage confirmation.
-    Frozen implement units guide host scheduling; block approvals, user pause and all quality gates remain.
-    Unadopted workflows retain existing module selection and approvals; previews never authorize execution.
-  orchestrate autonomy grant check --operation <class> [--path <target>]  Recheck before a tool side effect
-  orchestrate autonomy grant revoke --expect <revision> --reason <text> [--preview]  Revoke via a separate operator input
-  orchestrate autonomy adopt --batch <id> --expect <revision> [--preview]  Explicitly freeze one batch; preview writes nothing
-  orchestrate park [--module <module-id>]               Park the active workflow or one module workflow
-  orchestrate checkpoint [--note <text>] [--instance <id>]  Record an informal convergence checkpoint (no state/revision change)
-  orchestrate checkpoint --list [--instance <id>]       List recorded informal checkpoints
-  orchestrate audit --list [--module <id>]             List the post-hoc approval audit ledger of notify-tier stages
-  orchestrate audit --instance <id> --finding <text> --follow-up <CL|revise>  Write a sampling finding back into the audit ledger
-  orchestrate archive [--reason <text>]                 Archive a parked/done workflow and its evidence to aidlc/archive/
-  orchestrate split --from <workflow-id> [--dry-run]    Split into per-module workflows (aidlc/active/registry.md)
-  orchestrate split --from <workflow-id> --replace-lineage <id>[,<id>]  Split although git tracks another active workflow lineage (retires it)
-  orchestrate state measurements [--module <module-id>] Read-only execution-profile release measurements
-  orchestrate state verify                              Check git for other workflow lineages and state revision regressions (read-only)
-  orchestrate state summary [--module <id>] [--format json|markdown]  Read derived delivery summary without writing or re-running gates
-  orchestrate state context [--module <id> --unit <id> | --integration]  Read compact current context without audit/history loading
-  orchestrate state artifact --path <relative.md|json> [--offset <n>] [--limit <1..16000>]  Page public Markdown or summarize JSON evidence
-  orchestrate state facts [--module <id> | --integration]  Read durable historical facts without a live claim
-  orchestrate state migrate-facts [--module <id> | --integration]  Explicit lossless migration using the current binding
-  orchestrate state rebuild-view [--module <id> | --integration]  Rebuild the disposable Markdown view only
-  orchestrate state changes [--from <commit-id>] [--paths <JSON array>]  Compare Git content without workflow state or claims; includes dirty and untracked files
-  orchestrate state retire --lineage <id> --user-input Approve --reason <text>  Retire another workflow lineage found in git; the active one stays
-  orchestrate state adopt --module <id> --from <commit> --user-input Approve --reason <text>  Carry a module workflow of another lineage over into the active split layout
-  orchestrate next --module <id> --work <description>   Create a module workflow added after the split with its own work description
-  orchestrate upgrade --dry-run [--module <module-id>]  List completed stages missing evidence after an engine upgrade (read-only)
-  orchestrate diagram-format [--set <mermaid|svg> --user-input <text>]  Show or record the user's diagram format (default mermaid)
-  orchestrate baseline [--set <commit> --user-input Approve --reason <text> [--replace --expect <commit|unavailable>] [--dry-run]]  Show, register or replace the workflow baseline commit (--expect unavailable corrects a baseline recorded outside git; the new commit must still predate the workflow start)
-  orchestrate baseline --advance <commit> --expect <current baseline> --user-input Approve --reason <text> [--dry-run]  Advance the baseline to a completed unit's code-generation GREEN commit (multi-unit characterization; completed units keep their BASELINE evidence)
-    4.9.0 nested repositories ({ "path": "app", "repo": "nested" } in .aidlc/source-roots.json):
-      --set ... [--repo <path>=<commit>]...  each nested repository takes --repo, or its clean HEAD; --replace also needs --expect-repo <path>=<current commit> per registered repository
-      --set <current> --replace --expect <current> --repo <path>=<commit>...  register missing nested repositories only (restricted migration; works on used/advanced baselines)
-      --advance <commit> --repo <path>=<commit>... --expect <current> --expect-repo <path>=<current commit>...  every registered repository explicit; at least one advances
-  unit list|select [flags]                              List or self-select a development unit
-  module list|select|claim|heartbeat|migrate|inspect|bind|transfer [flags]    Coordinate parallel module instances
-  runtime summary|doctor [--module <module-id>]         Inspect the active Markdown workflow(s)
-  cr inspect --config <stage.json> [--extension <manifest.json>]  Read-only CR compatibility/test-impact inspection
-  worktree prepare|warmup|verify|merge-plan [flags]     Prepare or verify a member worktree; warmup pre-checks the shared baseline cache
-
-Quality and utilities:
-  document-slices generate|check|plan|recover --module <id> [--unit <id>] [--apply]  Canonical-preserving derived views
-  quality metrics [--module <module-id>]     Read-only quality coverage and return-defect metrics
-  evidence run --stage <slug> [flags]       Produce controlled evidence (--module/--unit, --refresh for completed stages)
-  evidence run --stage <slug> --sensors <sensor,...> [flags]  Produce an explicit semantic-only batch; no phase/build/test commands
-  attest resolve [flags]                     Read-only commit/diff attribution
-  agent [args]                                      Retired compatibility entry (host owns execution)
-  provider add|list|status|update|enable|disable|remove [args]  Manage project-level locked Git Providers
-  provider add <git-url> --stage <slug> --capability <id> [...]  Install with an explicit project binding
-  provider probe|run|gate [args]                       Probe restricted-v1, execute a Plan node, and issue GateDecision
-  provider mcp-preview --host-config <json-path> [--host-domains <json-path>]  Preview required MCP connections offline
-  provider mcp-cleanup-plan --host-config <json-path> [--release-all] [...]  Review release and cleanup
-  provider mcp-cleanup --host-config <json-path> --plan <json-file> [--release-all] [...]  Execute reviewed cleanup
-  provider mcp-plan --host-config <json-path> [...]    Produce a versioned managed MCP execution plan
-  provider mcp-apply --host-config <json-path> --plan <json-file> --approve-config <digest> [...]  Apply approved additions
-  extension validate|compose|status [flags] Restricted additive extension metadata
-  check --sensor <name> [--module <id>]      Run a deterministic semantic checker (module-scoped with --module)
-  ui lock|accept|refresh|reverify|check|resource-css|resource-rebaseline|impact-matrix|dry-run  Lock UI inputs/resources, consume styles, verify freshness and visual acceptance
-  diagram-provider run [options]            Run diagram validation
-  export <md|svg> <file> --to <format>      Export Markdown or SVG
-  docx <inspect|beautify|validate> [args]   Inspect or conservatively restyle DOCX
-
-Platform:
-  install [options]                         Deploy installer-owned assets
-  uninstall [options]                       Remove verified installer-owned assets
-  build --harness <name> | --all            Compile dist output
-  graph <compile|validate>                  Stage graph operations
-  version | help                            Version or this help
-
-Lightweight workflow:
-  Markdown workflow state and audit are stored in aidlc/active/.
-  After orchestrate split, each module has aidlc/active/modules/<id>/, cross-module integration has
-  aidlc/active/integration/, and aidlc/active/registry.md indexes them.
-  Team members select units directly; review, build, test and merge-plan provide delivery evidence.
-
-Examples:
-  loeyae-aidlc orchestrate next --scope feature --work "Fix order export timeout"
-  loeyae-aidlc unit select --module module-a --unit unit-a --member alice --branch feat/unit-a
-  loeyae-aidlc worktree prepare --instance code-generation@module:module-a@unit:unit-a --member alice --path /absolute/path/to/unit-a
-  loeyae-aidlc worktree warmup  (pre-checkout the baseline once; prepare copies independent files per unit)
-  loeyae-aidlc worktree merge-plan --instance code-generation@module:module-a@unit:unit-a --member alice --path /absolute/path/to/unit-a --review-evidence .aidlc/review.json
-  loeyae-aidlc orchestrate next --claim --module module-a --owner alice
-  loeyae-aidlc orchestrate split --from <workflow-id> --dry-run
-  loeyae-aidlc orchestrate next --module module-b
-  loeyae-aidlc evidence run --stage requirements-analysis --module module-a --refresh
-  loeyae-aidlc module inspect --stage-instance application-design@module:module-a
-  loeyae-aidlc module bind --stage-instance <instance> --owner alice --session-id <host-session> --expect <inspect.expected>
-  loeyae-aidlc module release --stage-instance <instance> --expect <inspect.expected>
-  loeyae-aidlc orchestrate state maintenance-plan --module module-a
-  loeyae-aidlc orchestrate state recover --module module-a --maintenance <maintenance_token> --user-input Approve --reason "restore checkpoint after quiescent handoff"
-  loeyae-aidlc module transfer --stage-instance <instance> --owner bob --session-id <host-session> --expect <inspect.expected> --human-instruction-ref <prompt-reference> [--resume] [--preview]
-  Set AIDLC_SESSION_BINDING to the returned binding JSON in this session's child-command environment only.
-  loeyae-aidlc module heartbeat --stage-instance application-design@module:module-a --owner alice
-  loeyae-aidlc worktree prepare --instance application-design@module:module-a --member alice --path /absolute/path/to/module-a
-  loeyae-aidlc orchestrate report --stage application-design --result approved --user-input Approve
-`);
+function topicHelp(topic?: string): void {
+  if (!topic) return help();
+  if (topic === "tools") { console.log("docx --help | export --help | provider help | methods | assess --input <file>"); return; }
+  if (["docx", "export", "provider"].includes(topic)) { run(`core/tools/aidlc-${topic === "provider" ? "provider-cli" : topic}.ts`, ["--help"]); return; }
+  if (topic === "migration") { console.log("AIDLC 5 uses one host execution contract. Old stage orchestration and wrappers are removed. Preserve business documents, real approvals, validation results and unknown processes. Resume from actual code/Git and acceptance; do not regenerate old workflow records. Installation replaces only owned assets and removes only recognized AIDLC hooks. Read README.md and knowledge/protocols/host-execution.md."); return; }
+  throw new Error(`Unknown help topic: ${topic}; use help or help migration`);
 }
-
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
-    case "work": {
-      (await import("../core/tools/aidlc-host-work")).runHostWorkCli(rest);
-      break;
+    case "work": (await import("../core/tools/aidlc-host-work")).runHostWorkCli(rest); break;
+    case "methods": (await import("../core/tools/aidlc-methods")).runMethodsCli(rest); break;
+    case "assess": {
+      if (rest.length !== 2 || rest[0] !== "--input") throw Error("assess --input <relative-file.json>; optional read-only projection, no commands executed");
+      const { readHostInput } = await import("../core/tools/aidlc-host-work");
+      const input = readHostInput(process.cwd(), rest[1], 64 * 1024);
+      if (input.status !== "read" || input.truncated) throw Error("Assessment input missing or exceeds 64 KiB");
+      console.log(JSON.stringify((await import("../core/tools/aidlc-completion")).evaluateCompletion(JSON.parse(input.text!)), null, 2)); break;
     }
-    case "cr": (await import("../core/tools/aidlc-cr")).runCrCli(rest); break;
-    case "orchestrate": {
-      run(orchestrationScript(), rest);
-      break;
-    }
-    case "state": throw new Error("Use work for read-only native-host context; help legacy lists explicit managed workflow commands.");
-    case "recover": throw new Error("Continue native work from actual code/Git with work; use help legacy only when maintaining managed workflow records.");
-    case "approve": throw new Error("Use orchestrate report --result approved --user-input Approve for lightweight approval.");
-    case "evidence":
-      // Keep the producer in this process: arguments, session binding, cwd and
-      // live progress streams are already available here. Checkers remain isolated.
-      (await import("../core/tools/aidlc-evidence")).runEvidenceCli(rest);
-      break;
-    case "document-slices": run("core/tools/aidlc-document-slices.ts", rest); break;
-    case "unit": run("core/tools/aidlc-team-light.ts", rest); break;
-    case "module": run("core/tools/aidlc-team-light.ts", ["module", ...rest]); break;
-    case "attest":
-    case "attestation": run("core/tools/aidlc-attestation-resolver.ts", rest); break;
-    case "runtime": run("core/tools/aidlc-runtime-light.ts", rest); break;
-    case "agent": run("core/tools/aidlc-agent-runtime.ts", rest); break;
     case "provider": run("core/tools/aidlc-provider-cli.ts", rest); break;
-    case "extension": run("core/tools/aidlc-extension.ts", rest); break;
-    case "worktree": run("core/tools/aidlc-worktree-light.ts", rest); break;
-    case "check": run("core/tools/aidlc-semantic-checks.ts", rest); break;
-    case "ui": run("core/tools/aidlc-ui-governance.ts", rest); break;
-    case "quality": run("core/tools/aidlc-quality-metrics.ts", rest); break;
-    case "diagram-provider": run("core/tools/aidlc-diagram-provider.ts", rest); break;
-    case "export": run("core/tools/aidlc-export.ts", rest); break;
     case "docx": run("core/tools/aidlc-docx.ts", rest); break;
-    case "hook":
-      if (process.env.AIDLC_SESSION_BINDING) run("core/tools/aidlc-platform-hook.ts", rest, readFileSync(0, "utf8"));
-      break;
+    case "export": run("core/tools/aidlc-export.ts", rest); break;
     case "install": deploy(rest, "install"); break;
     case "uninstall": deploy(rest, "uninstall"); break;
     case "build": run("scripts/build.ts", rest); break;
-    case "graph": run("core/tools/aidlc-graph.ts", rest); break;
-    case "scope-table": run("core/tools/aidlc-utility.ts", ["scope-table"]); break;
-    case "version":
-    case "--version":
-    case "-v": console.log(`loeyae-aidlc v${PKG.version}`); break;
-    case "help":
-    case "--help":
-    case "-h":
-    case undefined: rest.includes("legacy") ? legacyHelp() : help(); break;
-    default: throw new Error(`unknown command: ${command}; run 'loeyae-aidlc help' for usage`);
+    case "version": case "--version": case "-v": console.log(`loeyae-aidlc v${PKG.version}`); break;
+    case "help": case "--help": case "-h": case undefined: topicHelp(rest[0]); break;
+    default: throw new Error(`Unsupported command: ${command}. Use help for current methods or help migration; historical workflow commands do not execute.`);
   }
 }
-
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try {
-    await main();
-  } catch (error) {
-    console.error(`❌ ${error instanceof Error ? error.message : String(error)}`);
-    process.exitCode = 1;
-  }
+  try { await main(); } catch (error) { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; }
 }

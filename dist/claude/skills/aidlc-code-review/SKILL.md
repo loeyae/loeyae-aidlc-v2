@@ -14,6 +14,7 @@ triggers: 代码审查, 代码评审, Code Review, code review, Spec 审查, Sta
 
 默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
 
-## 兼容参考
 
-仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-code-review.md)，默认不加载。
+涉及接口、数据、安全或配置时按需读取 [工程检查](../../knowledge/protocols/engineering-checks.md)。
+
+所有结论遵循 [统一完成判定](../../knowledge/protocols/completion.md)，未知、失败、过期和外部待办不能省略。

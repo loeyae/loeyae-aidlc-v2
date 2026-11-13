@@ -3,6 +3,7 @@ import { existsSync, lstatSync, openSync, readSync, closeSync } from "node:fs";
 import { resolve, relative, isAbsolute, sep, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { evaluateCompletion } from "./aidlc-completion.js";
 
 export interface HostWorkOptions {
   work?: string;
@@ -28,6 +29,16 @@ function localPath(root: string, value: string): string {
   return rel.replaceAll(sep, "/") || ".";
 }
 
+export function readHostInput(project: string, value: string, limit = 4096) {
+  const root = resolve(project), path = localPath(root, value), full = resolve(root, path);
+  if (!existsSync(full)) return { path, status: "missing", text: null, truncated: false };
+  if (!lstatSync(full).isFile()) throw Error("Input must be a file");
+  const buffer = Buffer.alloc(limit + 1), fd = openSync(full, "r");
+  let size: number;
+  try { size = readSync(fd, buffer, 0, buffer.length, 0); } finally { closeSync(fd); }
+  return { path, status: "read", text: new TextDecoder().decode(buffer.subarray(0, Math.min(size, limit)), {stream: true}), truncated: size > limit };
+}
+
 export function hostWorkContext(project: string, options: HostWorkOptions = {}) {
   const root = resolve(project);
   const paths = (options.paths || []).map(p => localPath(root, p));
@@ -45,15 +56,7 @@ export function hostWorkContext(project: string, options: HostWorkOptions = {}) 
       return null;
     }
   }
-  const inputs = (options.inputs || []).map(value => {
-    const path = localPath(root, value), full = resolve(root, path);
-    if (!existsSync(full)) return { path, status: "missing", text: null, truncated: false };
-    if (!lstatSync(full).isFile()) throw Error("Input must be a file");
-    const buffer = Buffer.alloc(4097), fd = openSync(full, "r");
-    let size: number;
-    try { size = readSync(fd, buffer, 0, buffer.length, 0); } finally { closeSync(fd); }
-    return { path, status: "read", text: buffer.subarray(0, Math.min(size, 4096)).toString("utf8"), truncated: size > 4096 };
-  });
+  const inputs = (options.inputs || []).map(value => readHostInput(root, value));
   const status = git(["status", "--short", "--untracked-files=normal", "--", ...paths]);
   const statusLines = status ? status.split(/\r?\n/) : [];
   const statusPreview = status === null ? null : options.details ? status : preview(statusLines.slice(0, 20).join("\n"), 2048);
@@ -75,6 +78,7 @@ export function hostWorkContext(project: string, options: HostWorkOptions = {}) 
       next: "Use the agreed goal and acceptance criteria; implement, test, review and repair with native tools. This optional view neither grants permission nor requires a stage report.",
       continuity: "Use current code, Git and actual test results. Preserve legacy records and other workers; do not restart or take over an unknown live process.",
     },
+    completion: evaluateCompletion(),
     acceptance: {
       business: "not_evaluated", verification: "not_evaluated", performance: "not_measured",
       required: "Check every agreed feature and applicable UI state/size against real behavior. Record actual commands/results and unresolved gaps. Failed tests require repair; missing process records do not forbid work.",

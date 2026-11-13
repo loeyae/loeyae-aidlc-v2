@@ -13,7 +13,3 @@ triggers: Figma, Figma 设计, UI 设计稿, 外部设计稿, Figma 页面
 保留文件/节点链接、必要截图和未解决问题，优先更新现有设计说明。不为读取设计强制建立页面计划、manifest 或独立审查证明。
 
 默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
-
-## 兼容参考
-
-仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-figma-design.md)，默认不加载。

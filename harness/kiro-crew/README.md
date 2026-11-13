@@ -1,46 +1,5 @@
-# 默认：宿主直接实施
+# AIDLC for kiro-crew
 
-使用宿主原生工具按用户已明确的设计和验收标准实施、测试、审查及返修。可选 `loeyae-aidlc work` 只读获取 Git/所选输入；无需 H5、claim、专用 worker 或逐阶段 report。真实验收失败继续修复，不得宣称完成；流程记录缺失不阻止独立工作。
+运行 loeyae-aidlc install --harness kiro-crew 安装当前规则。宿主负责执行与权限，AIDLC 提供任务方法和完成判断。安装保留用户配置，只替换拥有的文件并清理识别出的 AIDLC 旧 hook。
 
-## 兼容参考
-
-以下旧 orchestrate、会话及专用 runtime 说明仅在用户明确选择维护旧受管流程时适用，不是默认实施前置条件。
-
-# Loeyae AI-DLC for Kiro Crew
-
-此分发物提供 AWS-style 轻量 AI-DLC Skill：用户明确工作目标后，由 Markdown workflow 协调阶段、单元分工、review、构建、测试和人工 merge。
-
-## 使用方式
-
-```bash
-loeyae-aidlc orchestrate next --scope feature --work "修复订单导出超时"
-loeyae-aidlc orchestrate next
-```
-
-控制面：
-
-```text
-aidlc/active/aidlc-state.md
-aidlc/active/audit.md
-```
-
-Agent 应原样展示每个 directive 的 `handoff_prompt`。该提示词包含工作目标、当前阶段、单元、产物和下一步质量动作。
-
-## 团队开发
-
-```bash
-loeyae-aidlc unit list
-loeyae-aidlc unit select --module module-a --unit unit-a --member alice --branch feat/unit-a
-```
-
-成员选择是协作记录；review、构建、测试和 merge plan 才是交付依据。
-
-## 审批与交付
-
-应用设计和部署决策使用：
-
-```bash
-loeyae-aidlc orchestrate report --stage <slug> --result approved --user-input Approve
-```
-
-完成分支工作后生成 merge plan，并由具有仓库权限的成员人工执行 merge。
+入口从 core/ENTRY.md 生成；按需查阅方法目录与执行规则。此分发不含旧阶段图、wrapper、claim/grant 或阶段 report；历史业务资料和真实批准继续作为参考。

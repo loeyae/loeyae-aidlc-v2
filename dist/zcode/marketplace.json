@@ -6,8 +6,8 @@
     {
       "name": "loeyae-aidlc",
       "source": "./loeyae-aidlc",
-      "description": "AWS-style lightweight AI-DLC workflow with Markdown state/audit, unit selection, review, build and test.",
-      "version": "4.27.4",
+      "description": "Task-focused AI-DLC methods, on-demand references and actual verification using native host tools.",
+      "version": "5.0.0",
       "category": "developer-tools",
       "tags": [
         "aidlc",

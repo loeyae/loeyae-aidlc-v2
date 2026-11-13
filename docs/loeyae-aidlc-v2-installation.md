@@ -1,6 +1,6 @@
 # Loeyae AI-DLC 安装
 
-安装包分发 AWS-style 轻量 AI-DLC workflow 到支持的 harness。
+安装包向十个宿主分发同一套目标导向的当前执行规则与按需方法。5.x 已移除旧阶段调度器；升级边界见 [README](../README.md)。
 
 ```bash
 npm install -g --ignore-scripts https://github.com/loeyae/loeyae-aidlc-v2/archive/refs/heads/main.tar.gz
@@ -85,7 +85,7 @@ loeyae-aidlc install --all
 安装后从明确工作描述开始：
 
 ```bash
-loeyae-aidlc orchestrate next --scope feature --work "修复订单导出超时"
+loeyae-aidlc work --work "修复订单导出超时"
 ```
 
-workflow state 和 audit 写入目标项目的 `aidlc/active/`。团队成员使用 unit selection、Git 分支、review、构建、测试和 merge plan 协作交付。
+该命令只读提供上下文，不创建状态、审计或执行许可。宿主按已确认目标与权限连续实施和验证；跨会话需要记录时更新一份现有任务说明。安装不修改项目 Git 合并策略，业务资料及真实批准继续保留。

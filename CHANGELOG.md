@@ -1,5 +1,15 @@
 # Changelog
 
+## 5.0.0 — 2026-11-13
+
+- Rebuild AIDLC around one goal-directed host execution contract for ordinary work, CRs and continuation. Preserve project quality requirements, real acceptance and user/host permissions.
+- Remove the managed stage engine, graph, sensors, wrappers, lifecycle gates and compatibility commands from source and distributions. Historical records remain user-owned reference material; unsupported commands fail without executing.
+- Generate all ten host entry points from one source and the method catalog from skill metadata. Load only the selected method or applicable required/selected knowledge chapters.
+- Derive completion from explicit scope, implementation, current verification, acceptance and requested delivery/closure facts. Empty, partial, missing, failed and stale facts cannot prove overall completion; the projection grants no permissions and is optional.
+- Preserve source pinning, package integrity, independent DOCX/export candidate validation and installer ownership protections. Remove stage plans and signed reading receipts from knowledge delivery.
+- Stop provisioning project control-plane Git settings. Keep existing business documents, actual approvals, unknown processes and user configuration; no Loeyae Boot package change is part of this release.
+- Preserve historical engine tests and replace the active suite with current behavior and retained tool/installation checks.
+
 ## 4.27.4 — 2026-11-13
 
 - Check the whole owning workflow before marking it done; a completed unit returns scope-exhausted while sibling work remains. Keep handoffs consistent with persisted completion and diagnose inconsistent historical done records.

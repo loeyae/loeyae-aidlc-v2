@@ -1,7 +1,6 @@
 /** Real tarball acceptance. No registry publication, source imports or dependency copying.
  * npm run test:package -- [--output DIR] [--previous-ref COMMIT]
- *   [--provider-source URL --provider-revision SHA --trusted-documents]
- * External Providers and trusted document execution are deliberately opt-in.
+ * External renderers are tested separately with their own pinned packages.
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -16,14 +15,11 @@ const repo = fileURLToPath(new URL("..", import.meta.url));
 const options = {};
 for (let i = 2; i < process.argv.length; i++) {
   const key = process.argv[i];
-  assert(["--output", "--previous-ref", "--previous-legacy-peer-deps", "--provider-source", "--provider-revision", "--trusted-documents"].includes(key), `unknown option ${key}`);
+  assert(["--output", "--previous-ref", "--previous-legacy-peer-deps"].includes(key), `unknown option ${key}`);
   assert(!(key in options), `duplicate ${key}`);
-  options[key] = ["--trusted-documents", "--previous-legacy-peer-deps"].includes(key) ? true : process.argv[++i];
+  options[key] = ["--previous-legacy-peer-deps"].includes(key) ? true : process.argv[++i];
   assert(options[key] && !String(options[key]).startsWith("--"), `missing ${key}`);
 }
-assert.equal(!!options["--provider-source"], !!options["--provider-revision"], "Provider source and revision must be supplied together");
-if (options["--provider-revision"]) assert(/^[a-f0-9]{40}$/.test(options["--provider-revision"]));
-assert(!options["--trusted-documents"] || options["--provider-source"], "trusted documents require an explicit locked Provider");
 assert(!options["--previous-legacy-peer-deps"] || options["--previous-ref"], "previous peer workaround requires --previous-ref");
 const output = resolve(options["--output"] || mkdtempSync(join(tmpdir(), "aidlc-package-evidence-")));
 mkdirSync(output, { recursive: true });
@@ -63,10 +59,9 @@ function pack(cwd, label) {
   assert.deepEqual(forbidden, [], "tarball contains local state or developer files");
   assert.deepEqual(info.files.filter(({ path }) => /(^|\/)(\.npmrc|\.gitconfig|id_rsa|id_ed25519|credentials|known_hosts)$|(^|\/)\.env($|\.)/.test(path)), [], "tarball contains credential/configuration files");
   const paths = new Set(info.files.map(f => f.path));
-  if (label === "candidate") assert(info.bundled.includes("html-validate"), "bundle the validator runtime to avoid npm optional test-peer resolution crashes");
-  for (const p of ["bin/cli.js", "bin/cli.ts", "core/tools/data/stage-graph.json", "core/tools/data/provider-schema-ownership.json", "scripts/build.ts",
-    ...(label === "candidate" ? ["core/tools/data/native-host-action-policy.json", "core/tools/data/functional-checker-tsconfig.json"] : [])])
-    assert(paths.has(p), `missing packaged runtime ${p}`);
+  const required = label === "candidate" ? ["bin/cli.js","bin/cli.ts","core/ENTRY.md","core/knowledge/methods.json","core/tools/aidlc-completion.ts","scripts/build.ts"] : ["bin/cli.js","bin/cli.ts"];
+  for(const p of required) assert(paths.has(p),`missing packaged runtime ${p}`);
+  if(label === "candidate") assert(![...paths].some(p=>!p.startsWith("node_modules/") && /aidlc-orchestrate|stage-graph|aidlc-autonomy|legacy-skills|host-worker|host-kernel/.test(p)), "retired runtime packaged");
   const digest = createHash("sha256").update(readFileSync(tarball)).digest("hex");
   report[label] = { version: info.version, filename: tarball, sha256: digest, files: info.entryCount, integrity: info.integrity, bundled: info.bundled };
   writeFileSync(join(output, `${label}-files.json`), JSON.stringify(info.files, null, 2)); save();
@@ -127,13 +122,13 @@ try {
   if (process.platform === "win32") writeFileSync(`${stub}.cmd`, `@"${process.execPath}" "%~dp0claude" %*\r\n`);
   else { const { chmodSync } = await import("node:fs"); chmodSync(stub, 0o755); }
   env.PATH = `${fakebin}${process.platform === "win32" ? ";" : ":"}${process.env.PATH}`;
-  check("installed CLI help/version and graph data", () => {
-    assert.match(cli(candidate, "help", ["--help"]), /Usage:/);
+  check("installed CLI help/version and current methods", () => {
+    assert.match(cli(candidate, "help", ["--help"]), /goal-directed host execution/);
     assert.match(cli(candidate, "version", ["--version"]), new RegExp(report.candidate.version.replaceAll(".", "\\.")));
-    cli(candidate, "graph-compile", ["graph", "compile"]);
-    cli(candidate, "graph-validate", ["graph", "validate"]);
+    cli(candidate, "method-catalog", ["methods"]);
+    cli(candidate, "method-read", ["methods", "read", "aidlc-application-design"]);
     cli(candidate, "provider-help", ["provider", "help"]);
-    assert.match(cli(candidate, "runtime-summary", ["runtime", "summary"], { expected: 2 }), /no active AWS-style lightweight workflow/);
+    assert.match(cli(candidate, "retired-runtime", ["runtime", "summary"], { expected: 1 }), /Unsupported command/);
   });
   // Behavioral regression for the macOS tarball install fix: the supported install command must
   // disable lifecycle scripts (fsevents@2.3.3 metadata declares a node-gyp build the tarball
@@ -164,7 +159,7 @@ try {
       assert.equal(json(join(globalRoot, "package.json")).version, report.candidate.version);
       const globalShim = process.platform === "win32" ? join(globalPrefix, "loeyae-aidlc.cmd") : join(globalPrefix, "bin", "loeyae-aidlc");
       assert(existsSync(globalShim), `missing global bin shim ${globalShim}`);
-      assert.match(cli(globalRoot, "global-help", ["--help"]), /Usage:/);
+      assert.match(cli(globalRoot, "global-help", ["--help"]), /goal-directed host execution/);
       assert.match(cli(globalRoot, "global-version", ["--version"]), new RegExp(report.candidate.version.replaceAll(".", "\\.")));
     });
     // The platform package ships its executable at the package root (esbuild.exe on Windows,
@@ -185,21 +180,12 @@ try {
   const host = join(workspace, "host.json");
   const original = { userSetting: "keep-user-field", mcpServers: { unknownLegacy: { command: "user-pinned", disabled: true } } };
   writeFileSync(host, JSON.stringify(original));
-  check("provider-free safe MCP paths", () => {
-    const args = ["--project", workspace, "--host-config", host];
-    const plan = JSON.parse(cli(candidate, "empty-plan", ["provider", "mcp-plan", ...args]));
-    assert.equal(plan.changes.length, 0);
-    const saved = join(workspace, "empty-plan.json"); writeFileSync(saved, JSON.stringify(plan));
-    assert.equal(JSON.parse(cli(candidate, "empty-recover", ["provider", "mcp-recover", ...args, "--plan", saved])).status, "unchanged");
-    assert.equal(JSON.parse(cli(candidate, "empty-status", ["provider", "mcp-status", ...args])).status, "no-transaction");
-    assert.deepEqual(json(host), original);
-  });
-  check("provider-free local workflow", () => {
-    const local = join(sandbox, "local-workflow"); mkdirSync(local);
-    const directive = JSON.parse(cli(candidate, "local-workflow-next", ["orchestrate", "next", "--scope", "express", "--work", "Package smoke workflow"], { cwd: local }));
-    assert.notEqual(directive.kind, "error");
-    cli(candidate, "local-workflow-runtime", ["runtime", "summary"], { cwd: local });
-    assert(!existsSync(join(local, ".aidlc/providers.yaml")), "generic workflow implicitly installed domain Providers");
+  check("no implicit provider, workflow or host configuration mutation", () => {
+    const local = join(sandbox,"local-work");mkdirSync(local);
+    const work = JSON.parse(cli(candidate,"local-work",["work","--work","Package smoke"],{cwd:local}));
+    assert.equal(work.completion.overall,"not_evaluated");assert.equal(work.execution.ai_dlc_execution_gate,false);
+    assert(!existsSync(join(local,".aidlc")));assert.deepEqual(json(host),original);
+    cli(candidate,"retired-orchestrate",["orchestrate","next"],{cwd:local,expected:1});assert(!existsSync(join(local,"aidlc")));
   });
   const harnesses = ["kiro-crew", "kiro-ide", "kiro-cli", "claude", "opencode", "codex", "codebuddy", "qoder", "zcode", "deepseek"];
   for (const harness of harnesses) check(`isolated ${harness} install/ownership/uninstall`, () => {
@@ -212,13 +198,6 @@ try {
     cli(candidate, `uninstall-${harness}`, ["uninstall", ...args]);
     assert.equal(readdirSync(env.AIDLC_INSTALL_STATE_DIR).filter(p => p.endsWith(".json")).length, 0);
   });
-  if (options["--provider-source"]) {
-    run("installed-provider-suite", process.execPath, [installedRequire.resolve("tsx/cli"), join(repo, "tests/package-provider-smoke.mjs"), candidate, workspace,
-      options["--provider-source"], options["--provider-revision"], ...(options["--trusted-documents"] ? ["--trusted-documents"] : [])], { timeout: 1200000, env: { ...env, AIDLC_PACKAGE_PROVIDER_LOG: join(output, "provider-commands.json") } });
-    report.checks.push("installed locked production Provider suite");
-    for (const name of ["provider-commands.json", "document.docx", "document.pdf", "diagram.png", "styled.docx"])
-      if (existsSync(join(workspace, name))) cpSync(join(workspace, name), join(output, name));
-  } else report.skipped.push("external Provider suite: supply --provider-source and --provider-revision");
   if (options["--previous-ref"]) {
     const ref = options["--previous-ref"];
     const archive = join(sandbox, "previous.tar"), source = join(sandbox, "previous-source"); mkdirSync(source);
@@ -228,10 +207,6 @@ try {
     const previousTarball = pack(source, "previous");
     const previous = install(previousTarball, "previous");
     const previousPrefix = resolve(previous, "../..");
-    if (options["--provider-source"] && options["--trusted-documents"]) {
-      run("installed-rollback-journal", process.execPath, [installedRequire.resolve("tsx/cli"), join(repo, "tests/package-rollback-smoke.mjs"), candidate, previous, workspace]);
-      report.checks.push("actual old CLI preserves new pending journal; compatible installed candidate recovers before downgrade");
-    }
     const target = join(sandbox, "upgrade target 中文"), args = ["--harness", "codex", "--target", target];
     check("actual previous tarball upgrade/rollback and user edit protection", () => {
       cli(previous, "previous-help", ["--help"]);

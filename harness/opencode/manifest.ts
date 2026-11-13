@@ -11,16 +11,11 @@ import type { HarnessManifest } from "../../scripts/manifest-types.ts";
 const manifest: HarnessManifest = {
   name: "opencode",
   harnessDir: ".opencode",
-  orchestratorSkillPath: ".opencode/plugins/loeyae-aidlc.js",
+  skillEntryPath: ".opencode/SKILL.md",
 
   coreDirs: [
     { src: "tools", dst: "tools" },
-    { src: "stages/ideation", dst: "stages/ideation" },
-    { src: "stages/inception", dst: "stages/inception" },
-    { src: "stages/construction", dst: "stages/construction" },
-    { src: "stages/operation", dst: "stages/operation" },
     { src: "knowledge", dst: "knowledge" },
-    { src: "sensors", dst: "sensors" },
     { src: "skills", dst: "skills" },
   ],
 

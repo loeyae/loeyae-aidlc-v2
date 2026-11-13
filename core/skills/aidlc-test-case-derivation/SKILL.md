@@ -13,7 +13,3 @@ triggers: 测试用例派生, UC-D, 测试场景, 验收测试设计, test case 
 输出测试位置、覆盖范围和真实缺口；后续由宿主运行并根据结果返修，不宣称未运行测试通过。
 
 默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
-
-## 兼容参考
-
-仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-test-case-derivation.md)，默认不加载。

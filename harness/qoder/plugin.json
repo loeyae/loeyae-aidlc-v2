@@ -1,8 +1,8 @@
 {
   "name": "loeyae-aidlc",
-  "version": "4.27.4",
+  "version": "5.0.0",
   "displayName": "Loeyae AI-DLC",
-  "description": "AWS-style lightweight AI-DLC workflow with Markdown state/audit, unit selection, review, build and test.",
+  "description": "Task-focused AI-DLC methods, on-demand references and actual verification using native host tools.",
   "author": {
     "name": "Loeyae Team"
   },
@@ -15,6 +15,5 @@
     "workflow",
     "gates"
   ],
-  "skills": "./skills",
-  "hooks": "./hooks/hooks.json"
+  "skills": "./skills"
 }

@@ -33,8 +33,8 @@ export interface HarnessManifest {
   name: string;
   /** Target directory name in the user's project (e.g. .kiro, .claude) */
   harnessDir: string;
-  /** Path to the orchestrator SKILL.md within the dist output */
-  orchestratorSkillPath: string;
+  /** Path to the shared SKILL.md within the dist output */
+  skillEntryPath: string;
 
   /** Core directories to copy from core/ into dist/<harness>/<harnessDir>/ */
   coreDirs: CoreDirMapping[];

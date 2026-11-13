@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 
@@ -29,12 +29,11 @@ for (const name of harnesses) {
     assert.deepEqual(readFileSync(target), readFileSync(source), `packaged harness file differs: ${target}`);
     expected.add(target); count++;
   }
+  const entry=join(dist,manifest.skillEntryPath), prefix=relative(dirname(entry),base).replaceAll("\\","/");
+  assert.equal(readFileSync(entry,"utf8"),readFileSync(join(root,"core/ENTRY.md"),"utf8").replaceAll("{{root}}",prefix?prefix+"/":""));expected.add(entry);count++;
   assert.deepEqual(walk(dist).sort(), [...expected].sort(), `unexpected packaged ${name} files`);
 }
-// Load real runtime schema data rather than merely checking the directory exists.
-const schema = join(root, "core/tools/data/provider-schema-ownership.json");
-assert(Object.keys(JSON.parse(readFileSync(schema, "utf8"))).length);
-const schemas = walk(join(root, "core/tools/data/provider-schemas")).filter(p => p.endsWith(".json"));
-assert(schemas.length > 0);
-for (const p of schemas) JSON.parse(readFileSync(p, "utf8"));
-console.log(`PASS installed distribution parity: ${harnesses.length} harnesses, ${count} files; ${schemas.length} provider schemas`);
+const methods=JSON.parse(readFileSync(join(root,"core/knowledge/methods.json"),"utf8"));
+assert.equal(methods.length,21);
+for(const p of walk(join(root,"core"))) assert(!/aidlc-orchestrate|stage-graph|aidlc-autonomy|legacy-skills/.test(p),`retired runtime in package: ${p}`);
+console.log(`PASS installed distribution parity: ${harnesses.length} harnesses, ${count} files; ${methods.length} current methods`);

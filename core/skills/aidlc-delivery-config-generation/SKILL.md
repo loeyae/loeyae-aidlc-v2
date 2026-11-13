@@ -13,7 +13,3 @@ triggers: 交付配置, 部署配置生成, 发布配置, deployment config, 生
 检查语法、引用、启动命令、权限和密钥处理；把结果写入既有交付说明或对话，不额外生成阶段计划。
 
 默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
-
-## 兼容参考
-
-仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-delivery-config-generation.md)，默认不加载。

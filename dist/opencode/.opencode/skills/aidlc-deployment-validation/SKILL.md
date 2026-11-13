@@ -12,6 +12,5 @@ triggers: 部署配置验证, 交付配置校验, 发布配置检查, deployment
 
 默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
 
-## 兼容参考
 
-仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-deployment-validation.md)，默认不加载。
+涉及接口、数据、安全或配置时按需读取 [工程检查](../../knowledge/protocols/engineering-checks.md)。

@@ -13,7 +13,3 @@ triggers: 画图, 图表设计, 业务流程图, 系统架构图, 架构图, 流
 通常只交付所需图源和必要说明；不默认生成 expected-contract、sidecar、Provider Request 或签名证据。用户明确要求受控 Provider/旧图表产证时才使用兼容契约。
 
 默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
-
-## 兼容参考
-
-仅明确使用旧受管/受控产证模式时读取 [旧契约](../../knowledge/legacy-skills/aidlc-diagram-design.md)，默认不加载。
