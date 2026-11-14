@@ -11,14 +11,20 @@ const project = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-project-delivery-")
 const repo = process.cwd();
 const write = (name: string, text: string) => fs.writeFileSync(path.join(project, name), text);
 const met = (id: string, evidence: string): CompletionFact => ({ id, status: "met", evidence });
+let checkRun = 0;
 function check(name: string, expected: number): CompletionFact {
   const result = spawnSync(process.execPath, [name], { cwd: project, encoding: "utf8", windowsHide: true, timeout: 20000 });
-  write(`${name}.log`, `node ${name}\nexit=${result.status}\n${result.stdout}${result.stderr}`);
+  const evidence = `${name}.${++checkRun}.log`;
+  write(evidence, `node ${name}\nexit=${result.status}\n${result.stdout}${result.stderr}`);
   assert.equal(result.status, expected, result.stderr);
-  return { id: name, status: result.status === 0 ? "met" : "unmet", evidence: `${name}.log` };
+  return { id: name, status: result.status === 0 ? "met" : "unmet", evidence };
 }
 try {
-  write("requirements.md", "Cart quantities must be positive integers; inventory may be zero. Only authorized users may order; reject unavailable stock. Verify both consumers and the HTTP order flow.\n");
+  write("requirements.md", "Cart quantities must be positive integers within the product limit; inventory may be zero. Only authorized users may order; reject unavailable stock. Verify both consumers and the HTTP order flow.\nCart limit: 3\n");
+  // The acceptance oracle is fixed before implementation. Its limit comes from
+  // the original product source, not the agent's chosen test subset or a new ledger.
+  write("product.acceptance.cjs", "const a=require('node:assert/strict'),fs=require('node:fs'),cart=require('./cart.cjs');const limit=Number(fs.readFileSync('requirements.md','utf8').match(/^Cart limit: (\\d+)$/m)?.[1]);a.ok(Number.isSafeInteger(limit)&&limit>0);a.equal(cart('buyer',limit),limit);a.throws(()=>cart('buyer',limit+1),/quantity/);\n");
+  const oracle = fs.readFileSync(path.join(project, "product.acceptance.cjs"));
   write("shared.cjs", "module.exports = n => Number.isInteger(n) && n > 0;\n");
   write("cart.cjs", "const valid=require('./shared.cjs'); module.exports=(role,n)=>{if(role!=='buyer')throw Error('forbidden');if(!valid(n))throw Error('quantity');return n;};\n");
   write("inventory.cjs", "const valid=require('./shared.cjs'); module.exports=n=>{if(!valid(n,{allowZero:true}))throw Error('stock');return n;};\n");
@@ -36,7 +42,7 @@ const accepted=await call(1);a.equal(accepted.status,200);a.equal(await accepted
     scope: "Local cart and inventory project acceptance", coverage: "partial",
     implementation: [met("cart", "cart.cjs")],
     verification: [check("cart.test.cjs", 0)],
-    acceptance: [met("cart-fields", "cart.test.cjs.log")],
+    acceptance: [{ id: "all-agreed-cart-behavior", status: "unknown" }],
   };
   assert.equal(evaluateCompletion(partial).overall, "not_evaluated", "a passed module is not the project");
   const broken: CompletionInput = {
@@ -46,12 +52,26 @@ const accepted=await call(1);a.equal(accepted.status,200);a.equal(await accepted
   };
   assert.equal(evaluateCompletion(broken).overall, "incomplete", "shared changes must cover other consumers");
   write("shared.cjs", "module.exports=(n,{allowZero=false}={})=>Number.isInteger(n)&&n>=(allowZero?0:1);\n");
-  const fixed: CompletionInput = {
+  const consumerChecks = [check("cart.test.cjs", 0), check("inventory.test.cjs", 0), check("integration.test.cjs", 0)];
+  const missingGoal = check("product.acceptance.cjs", 1);
+  const failedGoalOutput = fs.readFileSync(path.join(project, missingGoal.evidence!));
+  assert(consumerChecks.every(f => f.status === "met"), "consumer and HTTP success can still omit an original product requirement");
+  const goalGap: CompletionInput = {
+    ...broken, verification: consumerChecks,
+    implementation: [...broken.implementation, { ...missingGoal, id: "cart-limit" }],
+    acceptance: [...consumerChecks, missingGoal],
+  };
+  assert.equal(evaluateCompletion(goalGap).overall, "incomplete", "actual acceptance against original goals detects the omitted limit");
+  write("cart.cjs", fs.readFileSync(path.join(project, "cart.cjs"), "utf8").replace("if(!valid(n))", "if(!valid(n)||n>3)"));
+  const repairedChecks = [check("cart.test.cjs", 0), consumerChecks[1], check("integration.test.cjs", 0)];
+  let fixed: CompletionInput = {
     ...broken,
-    verification: [check("cart.test.cjs", 0), check("inventory.test.cjs", 0), check("integration.test.cjs", 0)],
-    acceptance: [met("cart-behavior-and-auth", "cart.test.cjs.log"), met("inventory-boundaries", "inventory.test.cjs.log"), met("local-HTTP-flow", "integration.test.cjs.log")],
+    implementation: [...broken.implementation, met("cart-limit", "cart.cjs")],
+    verification: repairedChecks,
+    acceptance: [...repairedChecks, check("product.acceptance.cjs", 0)],
   };
   assert.equal(evaluateCompletion(fixed).overall, "complete");
+  assert.deepEqual(fs.readFileSync(path.join(project, missingGoal.evidence!)), failedGoalOutput, "repair preserves the original failed result");
   for (const missing of ["security-CI", "migration-rollback", "performance-target"]) {
     assert.notEqual(evaluateCompletion({ ...fixed, verification: [...fixed.verification, { id: missing, status: "unknown" }] }).overall, "complete", `required ${missing} cannot be omitted`);
   }
@@ -70,8 +90,23 @@ const accepted=await call(1);a.equal(accepted.status,200);a.equal(await accepted
   write("delivery-note.md", "Reference the existing test logs. No implementation, acceptance or authorization change.\n");
   const second = assess(); assert.equal(second.status, 0, second.stderr); assert.equal(second.stdout, first.stdout);
   fixed.verification.forEach((f, i) => assert.deepEqual(fs.readFileSync(path.join(project, f.evidence!)), snapshots[i]));
+
+  // A confirmed business change in Markdown invalidates its corresponding
+  // acceptance even though code and the previously green implementation tests did not change.
+  const cartBefore = fs.readFileSync(path.join(project, "cart.cjs"));
+  write("requirements.md", fs.readFileSync(path.join(project, "requirements.md"), "utf8").replace("Cart limit: 3", "Cart limit: 2"));
+  assert.deepEqual(fs.readFileSync(path.join(project, "cart.cjs")), cartBefore);
+  assert.equal(evaluateCompletion({ ...fixed, acceptance: fixed.acceptance.map(f => f.id === "product.acceptance.cjs" ? { ...f, status: "stale" } : f) }).overall, "incomplete");
+  const changedGoal = check("product.acceptance.cjs", 1);
+  assert.equal(evaluateCompletion({ ...fixed, acceptance: fixed.acceptance.map(f => f.id === changedGoal.id ? changedGoal : f) }).overall, "incomplete");
+  write("cart.cjs", cartBefore.toString("utf8").replace("n>3", "n>2"));
+  const changedChecks = [check("cart.test.cjs", 0), consumerChecks[1], check("integration.test.cjs", 0)];
+  fixed = { ...fixed, verification: changedChecks, acceptance: [...changedChecks, check("product.acceptance.cjs", 0)] };
+  assert.equal(evaluateCompletion(fixed).overall, "complete");
+  assert.deepEqual(fs.readFileSync(path.join(project, "product.acceptance.cjs")), oracle, "neither repair weakens the product oracle");
+  assert.deepEqual(fs.readFileSync(path.join(project, consumerChecks[1].evidence!)), snapshots[1], "unaffected inventory verification is reused across goal repairs");
   assert(!fs.existsSync(path.join(project, ".aidlc"))); assert(!fs.existsSync(path.join(project, "aidlc")));
-  console.log("PASS project coverage: module-only success, shared-consumer failure/repair, actual HTTP authorization and stock flow, missing required checks, external acceptance, stale results, delivery/closure boundaries and read-only evidence reuse");
+  console.log("PASS project coverage: original goal omission despite green consumer/HTTP checks, unchanged product oracle, semantic Markdown change vs delivery-note reuse, shared-consumer repair, required checks, external acceptance, stale results and delivery/permission boundaries");
 } finally {
   assert(path.relative(os.tmpdir(), project).startsWith("aidlc-project-delivery-"));
   fs.rmSync(project, { recursive: true, force: true });

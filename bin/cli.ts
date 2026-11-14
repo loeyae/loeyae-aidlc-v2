@@ -960,16 +960,20 @@ function installOne(harness: string, customTarget: string, projectTarget: string
       }
     }, migrationOptions);
     if (deployment.scope === "user") {
-      installManagedAssets(
-        QODER_CN_SKILL_OWNER,
-        [{
-          source: resolve(deployment.pluginRoot, "skills/loeyae-aidlc"),
-          target: QODER_CN_USER_SKILL_ROOT,
-          kind: "directory",
-        }],
-        undefined,
-        { ...migrationOptions, validateLegacyTarget: assertRecognizedQoderCnSkillTarget },
-      );
+      const nativeSource = mkdtempSync(resolve(tmpdir(), "loeyae-aidlc-qoder-cn-"));
+      try {
+        const prefix = path.relative(QODER_CN_USER_SKILL_ROOT, deployment.pluginRoot).replaceAll("\\", "/");
+        const entry = readFileSync(resolve(ROOT, "core/ENTRY.md"), "utf8").replaceAll("{{root}}", prefix ? `${prefix}/` : "");
+        writeFileSync(resolve(nativeSource, "SKILL.md"), entry, { mode: 0o600 });
+        installManagedAssets(
+          QODER_CN_SKILL_OWNER,
+          [{ source: nativeSource, target: QODER_CN_USER_SKILL_ROOT, kind: "directory" }],
+          undefined,
+          { ...migrationOptions, validateLegacyTarget: assertRecognizedQoderCnSkillTarget },
+        );
+      } finally {
+        rmSync(nativeSource, { recursive: true, force: true });
+      }
       console.log(`🧩 Installed Qoder CN user Skill → ${QODER_CN_USER_SKILL_ROOT}`);
     }
     console.log(`✅ Installed loeyae-aidlc v${PKG.version} (${harness}, ${deployment.scope}) → ${deployment.pluginRoot}`);

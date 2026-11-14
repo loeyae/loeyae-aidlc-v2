@@ -241,6 +241,8 @@ try {
     report.previous_revision = run("previous-revision", "git", ["rev-parse", `${ref}^{commit}`], { cwd: repo }).trim();
     run("previous-archive", "git", ["archive", "--format=tar", "--output", archive, report.previous_revision], { cwd: repo });
     run("previous-extract", "tar", ["-xf", archive, "-C", source]);
+    // Source-only releases build dist during prepack; bootstrap their own runtime dependencies first.
+    npmRun("npm-install-previous-source", ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", ...(options["--previous-legacy-peer-deps"] ? ["--legacy-peer-deps"] : [])], source);
     const previousTarball = pack(source, "previous");
     const previous = install(previousTarball, "previous");
     const previousPrefix = resolve(previous, "../..");

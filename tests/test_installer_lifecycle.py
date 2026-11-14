@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -31,6 +32,16 @@ def run_cli(home: Path, args: list, extra_env=None) -> subprocess.CompletedProce
         capture_output=True,
         text=True,
     )
+
+
+def assert_qoder_cn_knowledge_links(home: Path) -> None:
+    skill = home / ".qoder-cn" / "skills" / "loeyae-aidlc" / "SKILL.md"
+    assets = home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc"
+    targets = {(skill.parent / link).resolve() for link in re.findall(r"\]\(([^)]+)\)", skill.read_text(encoding="utf-8"))}
+    for relative in ["knowledge/methods.md", "knowledge/protocols/host-execution.md"]:
+        target = assets / relative
+        assert target.resolve() in targets, f"native Skill must link to the shared installed {relative}"
+        assert target.read_bytes() == (ROOT / "core" / relative).read_bytes()
 
 
 def write_node_stub(path: Path, body: str) -> Path:
@@ -615,7 +626,7 @@ def test_new_plugin_host_lifecycles() -> None:
         assert sum("plugins enable loeyae-aidlc --scope user" in line for line in qoder_log) == 2
         qoder_cn_skill = home / ".qoder-cn" / "skills" / "loeyae-aidlc" / "SKILL.md"
         assert qoder_cn_skill.is_file()
-        assert "host-execution.md" in qoder_cn_skill.read_text()
+        assert_qoder_cn_knowledge_links(home)
         expected_qoder_mcp = {"figma"}
         for config_path in qoder_mcp_config_paths:
             config = json.loads(config_path.read_text())
@@ -803,7 +814,7 @@ def test_install_all_detects_qoder_cn_desktop_without_cli() -> None:
         qoder_cn_skill = home / ".qoder-cn" / "skills" / "loeyae-aidlc" / "SKILL.md"
         assert not (qoder_assets / "mcp-cn.json").exists()
         assert qoder_cn_skill.is_file()
-        assert "host-execution.md" in qoder_cn_skill.read_text()
+        assert_qoder_cn_knowledge_links(home)
 
         repeated = run_cli(home, ["install", "--all"], env)
         assert repeated.returncode == 0, repeated.stdout + repeated.stderr

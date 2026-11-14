@@ -21,18 +21,19 @@ function context(project: string, input: KnowledgeInput) {
   if (!topic) throw Error("Knowledge topic missing");
   const facts = readModuleFacts(project, input.module);
   const sections = topic.sections.map(section => ({ ...section, compatibility: section.requires ? matchKnowledgeRequirements(facts, section.requires) : "match" }));
-  for (const section of sections) if (section.required && ["unknown", "conflict"].includes(section.compatibility)) throw Error(`Required section compatibility unresolved: ${section.id}`);
   return { state, lock, topic, facts, sections };
 }
 export function catalogProviderKnowledge(project: string, input: KnowledgeInput) {
   const { state, lock, topic, facts, sections } = context(project, input);
   return { provider: input.instance, capability: input.capability, topic: topic.topic, project_lock_digest: state.lock.lock_digest,
     source_commit: lock.source.commit_oid, module_facts: facts,
-    sections: sections.map(({ id, path, digest, description, required, compatibility }) => ({ id, path, digest, description, required, compatibility })),
+    sections: sections.map(({ id, path, digest, description, required, requires, compatibility }) => ({ id, path, digest, description, required, ...(requires !== undefined ? { requires } : {}), compatibility })),
     gate_eligible: false, permissions_granted: false };
 }
 export function loadProviderKnowledge(project: string, input: KnowledgeInput) {
   const { state, lock, topic, facts, sections } = context(project, input);
+  // Discovery must expose unresolved conditions; loading still requires them resolved.
+  for (const section of sections) if (section.required && ["unknown", "conflict"].includes(section.compatibility)) throw Error(`Required section compatibility unresolved: ${section.id}; inspect knowledge-catalog requirements and module_facts`);
   if (input.sectionIds !== undefined && (!Array.isArray(input.sectionIds) || input.sectionIds.length > 128
     || input.sectionIds.some(id => typeof id !== "string" || !id.trim()) || new Set(input.sectionIds).size !== input.sectionIds.length)) throw Error("Expected unique section ids (at most 128)");
   const selected = new Set(input.sectionIds ?? []);

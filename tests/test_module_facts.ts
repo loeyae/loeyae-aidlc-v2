@@ -16,6 +16,8 @@ try {
   assert.equal(before.dependencies.find(d => d.dependency === "runtime:pnpm")!.version, "9.15.0");
   assert.equal(before.dependencies[0].version, "3.5.12");
   assert.equal(matchKnowledgeRequirements(before, req), "match");
+  assert.equal(matchKnowledgeRequirements(readModuleFacts(root, undefined), req), "unknown", "missing module identity is not evidence of inapplicability");
+  assert.equal(matchKnowledgeRequirements({ ...before, dependencies: [] }, req), "mismatch", "known module without the dependency remains inapplicable");
   assert.equal(before.dependencies[0].sources.length, 2);
   write("package-lock.json", { lockfileVersion: 3, packages: { "": { dependencies: { vue: "^4.0.0" } }, "node_modules/vue": { version: "3.5.12" } } });
   assert.equal(readModuleFacts(root, "app").dependencies[0].status, "conflict");

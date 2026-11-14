@@ -189,7 +189,8 @@ export function matchKnowledgeRequirements(facts: ModuleFacts, value: unknown): 
     const pinned = requirement.exact !== undefined;
     if (pinned ? !exactVersion(requirement.exact) || requirement.minimum !== undefined || requirement.maximum_exclusive !== undefined : !boundedVersion(requirement.minimum) || (requirement.maximum_exclusive !== undefined && (!boundedVersion(requirement.maximum_exclusive) || compareBoundedVersions(requirement.minimum, requirement.maximum_exclusive) >= 0))) fail("invalid compatibility version");
     const fact = facts.dependencies.find(dep => dep.dependency === requirement.dependency);
-    if (!fact) return "mismatch";
+    // No identified module is missing context, not proof that a rule is inapplicable.
+    if (!fact) return facts.root === null ? "unknown" : "mismatch";
     if (fact.status !== "known") return fact.status;
     if (pinned) return fact.version === requirement.exact ? "match" : "mismatch";
     if (!boundedVersion(fact.version) || (fact.version.endsWith("-SNAPSHOT") && !requirement.minimum.endsWith("-SNAPSHOT"))) return "unknown";

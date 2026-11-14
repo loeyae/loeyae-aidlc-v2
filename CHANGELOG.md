@@ -1,5 +1,14 @@
 # Changelog
 
+## 5.0.2 — 2026-11-14
+
+- Allow knowledge catalog discovery when required applicability is unknown or conflicting; expose requirements and module facts while keeping content loading, source integrity and capability boundaries strict. Treat unidentified modules as unknown rather than inapplicable.
+- Unify document verification by semantic impact. Reuse unaffected results for delivery notes, while business definitions, generated inputs and acceptance changes still require the relevant checks.
+- Clarify cross-session handoffs, authorization provenance, uncertain operation outcomes and shared-contract integration using existing task sources and native host tools, without new workflow records or execution gates.
+- Check completion against original goals and the integrated candidate. Extend local regressions with an independent product oracle, omitted goals, semantic Markdown changes and preserved failed results; retain explicit limits on real host recovery and collaboration validation.
+- Bootstrap the previous release's production dependencies before packaging its Git archive for upgrade/rollback acceptance, keeping dependency install scripts disabled.
+- Resolve the Qoder CN native Skill's links from its actual install location to the shared rules, preserving ownership checks without copying the knowledge tree.
+
 ## 5.0.1 — 2026-11-13
 
 - Remove obsolete engine tests, fixtures and one-time evaluations from the current tree; preserve their original versions in Git. Retain and run current source-trust, document, completion and installation protections.
