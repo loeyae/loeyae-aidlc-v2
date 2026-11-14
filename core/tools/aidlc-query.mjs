@@ -91,13 +91,85 @@ function cases(lines, refs, { records, consumed }) {
   };
 }
 
+function headingRange(lines, outline, selector) {
+  const number = /^\d+$/.test(selector) ? Number(selector) : null;
+  if (number !== null && (number < 1 || number > lines.length)) throw Error("Line outside the selected file.");
+  const matches = number !== null ? outline.filter(h => h.line <= number).slice(-1) : outline.filter(h => h.title === selector);
+  if (matches.length !== 1) throw Error("Heading missing or ambiguous; locate an exact line first.");
+  const selected = matches[0];
+  return { ...selected, end: (outline.find(h => h.line > selected.line && h.level <= selected.level)?.line ?? lines.length + 1) - 1 };
+}
+
+// Reuse supplied cases results; do not reread case files or fabricate a located set.
+export function reconcile(project, file, selector, results) {
+  if (!selector || !Array.isArray(results) || !results.length) throw Error("reconcile requires a record section and nonempty cases query results.");
+  const wanted = new Set(), sources = [];
+  for (const result of results) {
+    if (result?.mode !== "cases" || typeof result.file !== "string" || !Array.isArray(result.candidates) || !Array.isArray(result.unparsedReferenceLines)) throw Error("Supply complete cases results, not a hand-written ID list.");
+    for (const candidate of result.candidates) {
+      if (typeof candidate?.id !== "string" || !/^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+$/.test(candidate.id)) throw Error("Invalid candidate ID.");
+      wanted.add(candidate.id);
+    }
+    sources.push({ file: result.file, candidates: result.candidates.length, unresolvedLines: result.unparsedReferenceLines });
+  }
+  const input = source(project, file), lines = input.text.split("\n"), selected = headingRange(lines, headings(lines), selector);
+  const families = [...new Set([...wanted].map(id => id.match(/^(.*-)(\d+)$/)?.[1]).filter(Boolean))].sort((a, b) => b.length - a.length);
+  const prefix = [...families.map(f => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*?-"].join("|");
+  const notation = new RegExp(`(?<![\\dA-Za-z])(?:(${prefix}))?(\\d+)(?:\\s*[～~–-]\\s*(?:(${prefix}))?(\\d+))?(?!\\d)`, "g");
+  const represented = new Set(), unresolvedNotation = []; let fence = null;
+  for (let i = selected.line - 1; i < selected.end; i++) {
+    const delimiter = lines[i].match(/^\s*(`{3,}|~{3,})/);
+    if (delimiter) {
+      if (!fence) fence = delimiter[1];
+      else if (delimiter[1][0] === fence[0] && delimiter[1].length >= fence.length) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    // Abbreviated IDs inherit a prefix only within a list in the same table cell/line.
+    for (const cell of /^\s*\|/.test(lines[i]) ? cells(lines[i]) : [lines[i]]) {
+      const text = cell.replace(/(?<![\w-])L\d+(?:[～~–-]\d+)?/g, "");
+      for (const id of ids(text)) if (wanted.has(id)) represented.add(id);
+      let family = null, previousEnd = 0;
+      for (const m of text.matchAll(notation)) {
+        if (m[1]) family = m[1];
+        else if (!/^[\s,，、/;；:：`()[\]]*$/.test(text.slice(previousEnd, m.index))) family = null;
+        previousEnd = m.index + m[0].length;
+        if (!family) continue;
+        const first = Number(m[2]), last = Number(m[4] ?? m[2]);
+        if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || last < first || (m[3] && m[3] !== family)) {
+          unresolvedNotation.push({ line: i + 1, notation: m[0] }); continue;
+        }
+        for (const id of wanted) {
+          const suffix = id.startsWith(family) ? id.slice(family.length) : "";
+          if (/^\d+$/.test(suffix) && suffix.length === m[2].length && Number(suffix) >= first && Number(suffix) <= last) represented.add(id);
+        }
+      }
+    }
+  }
+  return { file: input.file, mode: "reconcile", section: { start: selected.line, end: selected.end }, sources,
+    candidates: wanted.size, represented: represented.size, unrecorded: [...wanted].filter(id => !represented.has(id)), unresolvedNotation,
+    meaning: "Literal mentions in the selected record only. Review dispositions, input applicability and unqueried references; no acceptance, authorization or completeness decision, including when candidates or unrecorded are empty." };
+}
+
 export function query(project, [mode, file, ...args]) {
-  if (!file) throw Error("locate <file> <literal> | section <file> [heading or line] | json <file> [field.path ...] | cases <file> <reference-ID ...>");
-  if (!["locate", "section", "json", "cases"].includes(mode)) throw Error("Unknown query mode.");
+  if (!file) throw Error("locate <file> <literal> | section <file> [heading or line] | json <file> [field.path ...] | references <story-file> <STORY/AC-ID ...> | cases <file> <reference-ID ...>");
+  if (!["locate", "section", "json", "references", "cases"].includes(mode)) throw Error("Unknown query mode.");
   const input = source(project, file), lines = input.text.split("\n");
   const outline = mode === "json" ? [] : headings(lines);
-  const parsed = mode === "json" ? null : recordsIn(lines);
+  const parsed = ["json", "references"].includes(mode) ? null : recordsIn(lines);
   const base = { file: input.file, mode };
+  if (mode === "references") {
+    if (!args.length || args.some(id => !/^(STORY|AC)-[A-Z0-9-]+$/.test(id))) throw Error("Select existing STORY/AC IDs from one explicit story source.");
+    const references = new Set(), selections = [];
+    for (const id of new Set(args)) {
+      const matches = outline.filter(h => ids(h.title).includes(id));
+      if (matches.length !== 1) throw Error(`Missing or ambiguous STORY/AC heading: ${id}`);
+      const selected = headingRange(lines, outline, String(matches[0].line));
+      selections.push({ id, start: selected.line, end: selected.end });
+      for (const h of outline.filter(h => h.line >= selected.line && h.line <= selected.end)) for (const ref of ids(h.title)) if (/^(STORY|AC)-/.test(ref)) references.add(ref);
+    }
+    return { ...base, selections, references: [...references], meaning: "Selected headings and all descendant STORY/AC headings, excluding code examples. Review other consumers, aliases and dependencies; not a semantic impact decision." };
+  }
   if (mode === "locate") {
     if (args.length !== 1 || !args[0]) throw Error("locate requires one literal ID or term.");
     return { ...base, matches: lines.flatMap((line, i) => {
@@ -116,9 +188,7 @@ export function query(project, [mode, file, ...args]) {
     if (number !== null && (number < 1 || number > lines.length)) throw Error("Line outside the selected file.");
     const record = number !== null && parsed.records.find(r => r.line <= number && r.end >= number);
     if (record) return { ...base, id: record.id, start: record.line, end: record.end, content: lines.slice(record.line - 1, record.end).join("\n"), meaning: "Complete selected structured record, including its own metadata." };
-    const matches = number !== null ? outline.filter(h => h.line <= number).slice(-1) : outline.filter(h => h.title === args[0]);
-    if (matches.length !== 1) throw Error("Heading missing or ambiguous; locate an exact line first.");
-    const selected = matches[0], end = outline.find(h => h.line > selected.line && h.level <= selected.level)?.line ?? lines.length + 1;
+    const selected = headingRange(lines, outline, args[0]), end = selected.end + 1;
     const children = outline.filter(h => h.line > selected.line && h.line < end);
     const contentEnd = children[0]?.line ?? end;
     return { ...base, start: selected.line, end: end - 1, contentEnd: contentEnd - 1,
@@ -145,6 +215,16 @@ export function query(project, [mode, file, ...args]) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { console.log(JSON.stringify(query(process.cwd(), process.argv.slice(2)))); }
+  try {
+    const [mode, file, selector, ...extra] = process.argv.slice(2);
+    if (mode === "reconcile") {
+      if (!file || !selector || extra.length || process.stdin.isTTY) throw Error("Pipe cases JSON/JSONL into reconcile <record-file> <exact heading or line>.");
+      const text = fs.readFileSync(0, "utf8").trim();
+      if (!text) throw Error("No cases results supplied; an empty input is not evidence.");
+      let values;
+      try { values = JSON.parse(text); } catch { values = text.split(/\r?\n/).filter(l => l.trim()).map(l => JSON.parse(l)); }
+      console.log(JSON.stringify(reconcile(process.cwd(), file, selector, Array.isArray(values) ? values : [values])));
+    } else console.log(JSON.stringify(query(process.cwd(), process.argv.slice(2))));
+  }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }
