@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.0.4 — 2026-11-14
+
+- Scope discovery, verification and command output from the first read. Locate relevant sections and artifact/dependency entry points instead of dumping long documents, expanding broad queries or fingerprinting entire workspaces.
+- Keep continuation facts in the existing authoritative record. Preserve valid navigation links without copying status, dates, approvals or test counts; new sessions alone do not require document updates.
+- Preserve original goals, complete generated deliverables and required quality/permission checks. Explicit package integrity verification still covers missing, mismatched and unexpected members, including packaged dependencies.
+- Validate fresh-model continuation with an isolated real CR and an invalid delivery package. Retain native traces and failed exploratory observations outside product records, without adding recurring model checks or workflow gates.
+
 ## 5.0.3 — 2026-11-14
 
 - Add on-demand guidance for legacy-project takeover: recover confirmed goals and applicable authorization, reconcile obsolete action prompts in existing entries, and preserve project quality checks, historical evidence and other contributors' work.
