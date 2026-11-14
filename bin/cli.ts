@@ -1224,6 +1224,7 @@ function help(): void {
   work [--work <goal>] [--paths <JSON array>]  Optional read-only context
   methods [read <id>]                        Catalog first; read one method
   assess --input <relative-file.json>        Derive completion from supplied facts
+  rules --help                              Scoped project rules and host entry fragments
   provider help                             Explicit source pinning and knowledge
   docx --help | export --help                Independent document tools
   install | uninstall [--harness <name>]     Ownership-protected host installation
@@ -1236,7 +1237,7 @@ unresolved acceptance remain visible. No command is a prerequisite for work.`);
 }
 function topicHelp(topic?: string): void {
   if (!topic) return help();
-  if (topic === "tools") { console.log("docx --help | export --help | provider help | methods | assess --input <file>"); return; }
+  if (topic === "tools") { console.log("docx --help | export --help | provider help | rules --help | methods | assess --input <file>"); return; }
   if (["docx", "export", "provider"].includes(topic)) { run(`core/tools/aidlc-${topic === "provider" ? "provider-cli" : topic}.ts`, ["--help"]); return; }
   if (topic === "migration") { console.log("AIDLC 5 uses one host execution contract. Old stage orchestration and wrappers are removed. Preserve business documents, real approvals, validation results and unknown processes. Resume from actual code/Git and acceptance; do not regenerate old workflow records. Installation replaces only owned assets and removes only recognized AIDLC hooks. Read README.md and knowledge/protocols/host-execution.md."); return; }
   throw new Error(`Unknown help topic: ${topic}; use help or help migration`);
@@ -1245,6 +1246,7 @@ async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
     case "work": (await import("../core/tools/aidlc-host-work")).runHostWorkCli(rest); break;
+    case "rules": (await import("../core/tools/aidlc-project-rules")).runProjectRulesCli(rest); break;
     case "methods": (await import("../core/tools/aidlc-methods")).runMethodsCli(rest); break;
     case "assess": {
       if (rest.length !== 2 || rest[0] !== "--input") throw Error("assess --input <relative-file.json>; optional read-only projection, no commands executed");

@@ -9,6 +9,10 @@
   ],
   [
     "tsx",
+    "tests/test_project_rules.ts"
+  ],
+  [
+    "tsx",
     "tests/test_current_execution.ts"
   ],
   [

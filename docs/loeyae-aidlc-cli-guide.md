@@ -5,6 +5,7 @@ CLI 提供可选只读上下文、方法查询、完成视图、安装和独立�
 | 命令 | 用途 |
 | --- | --- |
 | work --work <目标> --paths <JSON数组> | 有界 Git 摘要，可用 --input 读取单个已有文档片段 |
+| rules catalog / select / load / adapter | 按仓库与路径选择规则，只读查询/单份正文/宿主入口片段，见[项目规范协议](../core/knowledge/protocols/project-rules.md) |
 | methods / methods read <id> | 查看目录 / 仅打开指定方法 |
 | assess --input <相对JSON路径> | 读取已有结果，生成完成结论；不执行命令或写入状态 |
 | provider help | 显式锁定来源、更新、启停及按需读取知识 |
