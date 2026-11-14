@@ -1,5 +1,13 @@
 # Changelog
 
+## 5.0.6 — 2026-11-14
+
+- Add a stateless, read-only query helper for precise document navigation, structured report projection and complete literal STORY/AC reference discovery. Load applicable instructions before querying business materials; retain file boundaries and path confinement.
+- Reconcile all located affected cases with the existing authoritative CR or task record, including setup, consumer, error and concurrency behavior. Preserve unconfirmed requirements, stable navigation and full product goals without duplicate ledgers or approvals.
+- Start verification with short behavioral regressions, stop dependent expensive trials after decisive failures, and reuse applicable evidence and tools when relevant inputs are unchanged. Consolidate necessary fresh-session verification once the candidate is stable; preserve independent checks, required full validation, completion criteria and permission boundaries.
+- Extend the existing test runner with exact suite selection and optional fail-fast execution. Retain raw failures and explicit not-run results, distinguish selected checks from full runs, and refuse to overwrite previous evidence.
+- Validate query behavior, reference write-back, runner failure handling and current-rule continuation using focused tests and existing real-CR inputs. Retain observed query-adherence and performance limits rather than claiming universal speedups.
+
 ## 5.0.5 — 2026-11-14
 
 - Make default native queries concrete: locate IDs and files before expanding sections, project wide tables and logs to relevant fields, and keep complete semantic comparisons inside the process.

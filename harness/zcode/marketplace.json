@@ -7,7 +7,7 @@
       "name": "loeyae-aidlc",
       "source": "./loeyae-aidlc",
       "description": "Task-focused AI-DLC methods, on-demand references and actual verification using native host tools.",
-      "version": "5.0.5",
+      "version": "5.0.6",
       "category": "developer-tools",
       "tags": [
         "aidlc",

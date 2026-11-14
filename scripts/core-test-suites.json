@@ -1,5 +1,13 @@
 [
   [
+    "node",
+    "tests/test_verification_runner.mjs"
+  ],
+  [
+    "node",
+    "tests/test_scoped_query.mjs"
+  ],
+  [
     "tsx",
     "tests/test_current_execution.ts"
   ],
