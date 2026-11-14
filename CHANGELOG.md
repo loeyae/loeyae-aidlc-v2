@@ -1,5 +1,13 @@
 # Changelog
 
+## 5.0.3 — 2026-11-14
+
+- Add on-demand guidance for legacy-project takeover: recover confirmed goals and applicable authorization, reconcile obsolete action prompts in existing entries, and preserve project quality checks, historical evidence and other contributors' work.
+- Locate known retired workflow references only in explicitly selected input previews. Explain truncated coverage and link the current takeover rules without executing legacy scripts, changing project state or adding gates.
+- Reconcile duplicate documents through their existing sources while preserving unique acceptance, referenced anchors and generated deliverable contracts. A missing generator does not authorize replacing required full output with an index.
+- Check original CR goals and actual dependencies before accepting green test subsets; keep unaffected results reusable and prevent incomplete handoffs from expanding a local CR into full-module revalidation.
+- Validate actual fresh-model continuation with isolated dfi-mall CR copies. Correct and recheck generated-document loss and scope-expansion behavior; retain explicit limits on other-host, automatic wake-up and interrupted external-operation recovery.
+
 ## 5.0.2 — 2026-11-14
 
 - Allow knowledge catalog discovery when required applicability is unknown or conflicting; expose requirements and module facts while keeping content loading, source integrity and capability boundaries strict. Treat unidentified modules as unknown rather than inapplicable.

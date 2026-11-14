@@ -13,7 +13,9 @@ CLI 提供可选只读上下文、方法查询、完成视图、安装和独立�
 | build --all | 从单一入口和规则源重建十个宿主 |
 | help migration | 查看不兼容升级说明 |
 
-assess 的事实对象包含 scope、coverage、implementation、verification、acceptance，以及实际要求时的 delivery、closure、unresolved。每组事实包含唯一 id、status（met/unmet/unknown/stale）和真实 evidence 引用；缺少事实或依据不会评估为通过。coverage 只有已确认完整覆盖时填写 complete。事实来自宿主真实工作，CLI 不认证内容真实性。无需为了调用此命令新增文档。
+work 仅检查显式选择的输入预览；发现旧流程命令时返回行号和按需接手规则，不执行脚本或修改项目。截断内容会提示继续读取相关原文；没有发现旧命令不证明项目已清理，也不证明目标覆盖完整。
+
+assess 的事实对象包含 scope、coverage、implementation、verification、acceptance，以及实际要求时的 delivery、closure、unresolved。每组事实包含唯一 id、status（met/unmet/unknown/stale）和真实 evidence 引用；缺少事实或依据不会评估为通过。coverage 只有从原始目标反查实际结果后才可填写 complete；遗漏目标后输入全绿子集仍可能得到 complete，CLI 不认证事实或覆盖真实性。无需为了调用此命令新增文档。
 
 示例：本地实现与测试通过，但真实 API 验收等待时，implementation 与 verification 可以满足，acceptance 必须记录对应 unknown/unmet；不得把本地测试成功作为全部完成。提交、合并和部署保持独立动作，不从测试结果推断权限。
 

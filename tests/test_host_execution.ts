@@ -73,6 +73,8 @@ try {
   assert.equal(pending.mode, "host");
   assert.equal(pending.execution.ai_dlc_execution_gate, false);
   assert.equal(pending.acceptance.business, "not_evaluated");
+  assert.deepEqual(pending.inputs[0].retired_workflow_lines, [2]);
+  assert(fs.existsSync(pending.execution.continuity_guide));
   assert.deepEqual(fs.readFileSync(path.join(root, crPath)), crBefore);
   assert.deepEqual(fs.readFileSync(path.join(root, "aidlc/active/aidlc-state.md")), state);
   assert.deepEqual(fs.readFileSync(path.join(root, "aidlc/active/audit.md")), audit);
@@ -82,6 +84,7 @@ try {
   write("design.md", "design\n".repeat(2000));
   const docs = hostWorkContext(root, { inputs: ["design.md", "missing.md"] });
   assert(docs.inputs[0].truncated); assert(docs.inputs[0].text!.length <= 4096);
+  assert(docs.notes.some(note => note.includes("truncated")), "a bounded preview must not imply complete source coverage");
   assert.equal(docs.inputs[1].status, "missing");
   assert.throws(() => hostWorkContext(root, { inputs: ["../secret"] }));
   assert.throws(() => hostWorkContext(root, { paths: ["C:outside"] }));
@@ -89,6 +92,30 @@ try {
   const unavailable = hostWorkContext(nonGit);
   assert(unavailable.notes.length); assert.equal(unavailable.execution.ai_dlc_execution_gate, false);
   pass("bounded optional document reads, missing inputs/no Git remain diagnostic, traversal rejected");
+
+  // A project can have obsolete entry instructions without any machine state.
+  // Detection is limited to chosen inputs; a missing signal is not a clean bill.
+  const legacyEntry = path.join(nonGit, "handoff.md");
+  fs.writeFileSync(legacyEntry, "# Next\nloeyae-aidlc orchestrate next\nnode scripts/aidlc/cr-engine-4.27.2.mjs inspect\nKeep required CI and the real deployment approval.\n");
+  const entryBytes = fs.readFileSync(legacyEntry);
+  const withoutInputs = hostWorkContext(nonGit);
+  assert(!("continuity_guide" in withoutInputs.execution), "ordinary views do not load the legacy-project guide");
+  const selected = hostWorkContext(nonGit, { inputs: ["handoff.md"] });
+  assert.equal(selected.legacy_records_present, false);
+  assert.deepEqual(selected.inputs[0].retired_workflow_lines, [2, 3]);
+  assert(fs.existsSync(selected.execution.continuity_guide!));
+  assert.equal(selected.completion.overall, "not_evaluated");
+  assert.equal(selected.completion.permissions_granted, false);
+  assert.equal(selected.execution.ai_dlc_execution_gate, false);
+  assert.deepEqual(fs.readFileSync(legacyEntry), entryBytes);
+  assert.deepEqual(fs.readdirSync(nonGit), ["handoff.md"], "context must not create a migration ledger or edit project rules");
+  fs.writeFileSync(legacyEntry, "Approved release needs CI, security review and deployment permission.\n");
+  const projectPolicy = hostWorkContext(nonGit, { inputs: ["handoff.md"] });
+  assert(!projectPolicy.inputs[0].retired_workflow_lines, "ordinary approval/CI requirements are not obsolete AIDLC commands");
+  fs.writeFileSync(legacyEntry, "x".repeat(5000) + "\nloeyae-aidlc orchestrate next\n");
+  const hidden = hostWorkContext(nonGit, { inputs: ["handoff.md"] });
+  assert(hidden.inputs[0].truncated); assert(!hidden.inputs[0].retired_workflow_lines);
+  pass("selected legacy references are diagnostic only; current policy and unseen content never become waived requirements");
 
   for (let i = 0; i < 200; i++) write(`change-${String(i).padStart(3, "0")}-${"x".repeat(70)}.txt`, "changed\n");
   const compact = cli();

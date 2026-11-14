@@ -29,14 +29,22 @@ function localPath(root: string, value: string): string {
   return rel.replaceAll(sep, "/") || ".";
 }
 
-export function readHostInput(project: string, value: string, limit = 4096) {
+export function readHostInput(project: string, value: string, limit = 4096): {
+  path: string; status: "missing" | "read"; text: string | null; truncated: boolean; retired_workflow_lines?: number[];
+} {
   const root = resolve(project), path = localPath(root, value), full = resolve(root, path);
   if (!existsSync(full)) return { path, status: "missing", text: null, truncated: false };
   if (!lstatSync(full).isFile()) throw Error("Input must be a file");
   const buffer = Buffer.alloc(limit + 1), fd = openSync(full, "r");
   let size: number;
   try { size = readSync(fd, buffer, 0, buffer.length, 0); } finally { closeSync(fd); }
-  return { path, status: "read", text: new TextDecoder().decode(buffer.subarray(0, Math.min(size, limit)), {stream: true}), truncated: size > limit };
+  const text = new TextDecoder().decode(buffer.subarray(0, Math.min(size, limit)), {stream: true});
+  // Only locate references in explicitly selected previews. Never interpret a
+  // document as authority, scan project history or execute a legacy wrapper.
+  const retired = /\b(?:loeyae-aidlc\s+(?:orchestrate|runtime|attest|approve|evidence|cr|autonomy)\b|orchestrate\s+(?:next|report)\b|re-attest\b|cr-engine(?:-[\d.]+)?\.mjs\b)/i;
+  const lines = text.split(/\r?\n/).flatMap((line, i) => retired.test(line) ? [i + 1] : []).slice(0, 8);
+  return { path, status: "read", text, truncated: size > limit,
+    ...(lines.length ? { retired_workflow_lines: lines } : {}) };
 }
 
 export function hostWorkContext(project: string, options: HostWorkOptions = {}) {
@@ -57,6 +65,11 @@ export function hostWorkContext(project: string, options: HostWorkOptions = {}) 
     }
   }
   const inputs = (options.inputs || []).map(value => readHostInput(root, value));
+  const legacyRecords = ["aidlc/active/aidlc-state.md", ".aidlc/workflow-registry.json"]
+    .some(p => existsSync(resolve(root, p)));
+  const legacyReferences = inputs.some(input => input.retired_workflow_lines?.length);
+  if (inputs.some(input => input.truncated)) notes.push("Selected inputs are truncated previews, not full goal coverage. Read the relevant original sources with host tools before assessing completion.");
+  if (legacyRecords || legacyReferences) notes.push("Historical workflow references do not select an execution mode or prove approval/completion. Preserve business facts, applicable project checks and permission boundaries; reconcile only the current in-scope guidance.");
   const status = git(["status", "--short", "--untracked-files=normal", "--", ...paths]);
   const statusLines = status ? status.split(/\r?\n/) : [];
   const statusPreview = status === null ? null : options.details ? status : preview(statusLines.slice(0, 20).join("\n"), 2048);
@@ -70,13 +83,13 @@ export function hostWorkContext(project: string, options: HostWorkOptions = {}) 
       changes: options.details || changes === null ? changes : preview(changes, 1024),
       detail_hint: options.details ? null : "Use --details with --paths for full bounded Git output; no new session or state is required.",
     },
-    legacy_records_present: ["aidlc/active/aidlc-state.md", ".aidlc/workflow-registry.json"]
-      .some(p => existsSync(resolve(root, p))),
+    legacy_records_present: legacyRecords,
     notes,
     execution: {
       owner: "native-host", permission_source: "user-and-host", ai_dlc_execution_gate: false,
       next: "Use the agreed goal and acceptance criteria; implement, test, review and repair with native tools. This optional view neither grants permission nor requires a stage report.",
-      continuity: "Use current code, Git and actual test results. Preserve legacy records and other workers; do not restart or take over an unknown live process.",
+      continuity: "Recover goals from original requirements and confirmed changes, then compare current code and applicable results. A handoff or green test subset cannot establish full coverage. Preserve unique records and other workers; query pending operations before retrying.",
+      ...(legacyRecords || legacyReferences ? { continuity_guide: resolve(dirname(fileURLToPath(import.meta.url)), "../knowledge/protocols/project-continuity.md") } : {}),
     },
     completion: evaluateCompletion(),
     acceptance: {
