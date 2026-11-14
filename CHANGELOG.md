@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.0.5 — 2026-11-14
+
+- Make default native queries concrete: locate IDs and files before expanding sections, project wide tables and logs to relevant fields, and keep complete semantic comparisons inside the process.
+- Follow existing STORY/AC references through affected cases, setup dependencies and consumers. Treat old case ranges, first-N previews and green historical assertions as incomplete evidence of changed behavior.
+- Record concrete omissions and next actions in the existing authorized CR or task continuation. Preserve valid navigation, historical records and other contributors' files without new ledgers or gates.
+- Validate fresh-model continuation against the real dfi-mall CR, preserving full product goals, completion boundaries, permissions and required package integrity checks. Acceptance tracing improved; query/output adherence remains variable and the observed runs do not establish lower overall cost.
+
 ## 5.0.4 — 2026-11-14
 
 - Scope discovery, verification and command output from the first read. Locate relevant sections and artifact/dependency entry points instead of dumping long documents, expanding broad queries or fingerprinting entire workspaces.
