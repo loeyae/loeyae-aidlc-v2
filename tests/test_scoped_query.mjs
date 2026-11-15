@@ -38,6 +38,29 @@ try {
   assert.equal(projected.fields[5].matches, 0);
   assert(!JSON.stringify(projected).includes("LARGE_RAW_LOG"));
 
+  // Selecting a scalar must not unfold a report's embedded SQL or stack trace.
+  const longFields = query(root, ["json", "results.json", "suites.0.log", "suites.*.log"]);
+  for (const field of longFields.fields) {
+    assert.equal(field.matches, 1);
+    assert.equal(typeof field.values[0], "object", "long scalar content must be omitted before serialization");
+    assert.deepEqual(field.values, [{ type: "string", length: 65000, omitted: true }]);
+  }
+  const sqlSnapshot = JSON.stringify({ sql: "SELECT '中文';\n".repeat(20000), empty: "", flag: false, absent: null, count: 0 });
+  put("snapshot.json", sqlSnapshot);
+  const scalarFields = query(root, ["json", "snapshot.json", "sql", "empty", "flag", "absent", "count"]);
+  assert.deepEqual(scalarFields.fields.map(f => f.values[0]), [
+    { type: "string", length: JSON.parse(sqlSnapshot).sql.length, omitted: true }, "", false, null, 0,
+  ]);
+  const jsonCli = spawnSync(process.execPath, [fileURLToPath(new URL("../core/tools/aidlc-query.mjs", import.meta.url)), "json", "snapshot.json", "sql"], { cwd: root, encoding: "utf8", maxBuffer: 4096 });
+  assert.equal(jsonCli.status, 0, jsonCli.stderr || jsonCli.error?.message);
+  assert.deepEqual(JSON.parse(jsonCli.stdout).fields[0].values, scalarFields.fields[0].values);
+  assert(!jsonCli.stdout.includes("SELECT"), "CLI must project before output, not rely on downstream truncation");
+  assert.equal(fs.readFileSync(path.join(root, "snapshot.json"), "utf8"), sqlSnapshot, "projection preserves original evidence");
+  put("strings.json", JSON.stringify({ values: ["S".repeat(1000), "L".repeat(1001)] }));
+  const strings = query(root, ["json", "strings.json", "values.*"]).fields[0];
+  assert.equal(strings.matches, 2, "omission must preserve every selected match");
+  assert.deepEqual(strings.values, ["S".repeat(1000), { type: "string", length: 1001, omitted: true }]);
+
   put("qa.md", "| ID | Title | Source |\n| --- | --- | --- |\n| TC-X-001 | normal | STORY-0207; AC-020702 |\n| TC-X-171 | sold out | AC-020702; AC-020703 |\n| TC-X-172 | boundary \\| limit | AC-020703 |\n| TC-X-175 | concurrent | AC-020702; TC-X-172 |\n| TC-X-176 | unrelated | AC-999999 |\nUnstructured AC-020703 needs inspection\n");
   const candidates = query(root, ["cases", "qa.md", "AC-020702", "AC-020703"]);
   assert.deepEqual(candidates.candidates.map(r => r.id), ["TC-X-001", "TC-X-171", "TC-X-172", "TC-X-175"]);

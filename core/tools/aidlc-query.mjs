@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ids = text => [...new Set(text.match(/\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\b/g) ?? [])];
+const maxJsonStringLength = 1000;
 const shape = value => Array.isArray(value)
   ? { type: "array", length: value.length, itemTypes: [...new Set(value.map(v => v === null ? "null" : Array.isArray(v) ? "array" : typeof v))], itemKeys: [...new Set(value.flatMap(v => v && typeof v === "object" && !Array.isArray(v) ? Object.keys(v) : []))] }
   : value && typeof value === "object" ? { type: "object", keys: Object.keys(value) }
@@ -208,7 +209,9 @@ export function query(project, [mode, file, ...args]) {
     };
     return { ...base, fields: args.map(selector => {
       const values = select(value, selector.split("."));
-      return { selector, matches: values.length, values: values.map(v => v && typeof v === "object" ? shape(v) : v) };
+      return { selector, matches: values.length, values: values.map(v =>
+        typeof v === "string" && v.length > maxJsonStringLength ? { ...shape(v), omitted: true }
+          : v && typeof v === "object" ? shape(v) : v) };
     }) };
   }
   return { ...base, ...cases(lines, args, parsed) };

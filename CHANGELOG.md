@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.0.7 — 2026-11-15
+
+- Recompute regression scope after each repair from the new changes and affected consumers. Reuse still-applicable passing results while retaining failures, unrun checks and required CI.
+- Finish required formatting before consolidated verification. Distinguish behavior evidence from checksum and packaged-resource checks when a later nonsemantic edit is necessary.
+- Project long JSON strings to explicit type, length and omission metadata instead of emitting embedded SQL or logs. Preserve match counts, short scalar values and original evidence.
+- Surface instruction-first loading in skill discovery metadata so report queries wait until the applicable rules are available. Verify focused decisions and initial report reads without adding workflow gates.
+
 ## 5.0.6 — 2026-11-14
 
 - Add a stateless, read-only query helper for precise document navigation, structured report projection and complete literal STORY/AC reference discovery. Load applicable instructions before querying business materials; retain file boundaries and path confinement.
