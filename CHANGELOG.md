@@ -1,5 +1,11 @@
 # Changelog
 
+## 5.0.9 — 2026-11-17
+
+- Distinguish targeted repair verification from complete failure collection. Keep independent diagnostics running on stable inputs instead of restarting the suite after the first failure; stop affected work when prerequisites become invalid.
+- Trace shared failure causes through fixtures, assertions and consumers, then consolidate necessary full-suite, type, build and integration checks. Reuse applicable evidence without adding workflow gates or fixed full-run counts.
+- Check CI failure inputs against the local baseline and retain uncertainty when intermittent failures cannot be reproduced reliably.
+
 ## 5.0.8 — 2026-11-17
 
 - Consolidate shared execution rules into one source, embed them in generated host entries, and shorten general-purpose skills and detailed protocols while preserving authorization, acceptance tracing, evidence reuse and completion boundaries.
