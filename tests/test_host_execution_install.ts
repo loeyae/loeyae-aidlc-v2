@@ -34,7 +34,9 @@ try {
     setting: "preserve", hooks: { Stop: [custom, { id: "mixed", hooks: [user] }], Other: [custom] },
   });
   const installed = path.join(home, ".agents/skills/loeyae-aidlc");
-  assert(fs.readFileSync(path.join(installed, "SKILL.md"), "utf8").includes("host-execution.md"));
+  const distribution = path.join(repo, "dist/codex/.agents/skills/loeyae-aidlc");
+  assert.deepEqual(fs.readFileSync(path.join(installed, "SKILL.md")), fs.readFileSync(path.join(distribution, "SKILL.md")), "install preserves the complete entry with embedded rules");
+  assert.deepEqual(fs.readFileSync(path.join(installed, "knowledge/protocols/host-execution.md")), fs.readFileSync(path.join(repo, "core/knowledge/protocols/host-execution.md")), "standalone methods retain the same shared rules");
   const work = spawnSync(process.execPath, ["--import", pathToFileURL(path.join(repo, "node_modules/tsx/dist/loader.mjs")).href,
     path.join(installed, "tools/aidlc-host-work.ts"), "--help"], { cwd: repo, env, encoding: "utf8", timeout: 20000 });
   assert.equal(work.status, 0, work.stderr);

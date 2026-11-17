@@ -32,6 +32,6 @@ Git 仅维护源码、当前测试和使用说明，`dist/` 不入库。`npm pac
 
 失效测试和一次性评估记录通过 Git 历史查阅；新验证原始输出使用系统临时目录或 `.artifacts/`，只在现有任务说明中引用必要结论。当前测试范围与真实外部验收限制见 [测试说明](tests/README.md)。
 
-入口唯一来源是 core/ENTRY.md；任务方法在 core/skills，详细规则在 core/knowledge/protocols。宿主只保留布局和必要适配。使用说明见 [安装与升级](docs/loeyae-aidlc-v2-installation.md)、[CLI](docs/loeyae-aidlc-cli-guide.md)、[Provider](docs/provider-integration-guide.md)。
+入口模板在 core/ENTRY.md；构建时嵌入 core/knowledge/protocols/host-execution.md 的共用规则，并调整相对链接。入口调用一次即可读到规则，独立方法仅在规则未加载时读取同一来源。任务方法在 core/skills，专项参考按场景读取；需求、故事与设计遇到关键未知时共用定向澄清方法。宿主只保留布局和必要适配。使用说明见 [安装与升级](docs/loeyae-aidlc-v2-installation.md)、[CLI](docs/loeyae-aidlc-cli-guide.md)、[Provider](docs/provider-integration-guide.md)。
 
 `docs/` 只维护当前使用指南；执行规则直接引用 core，不另写一份实施或关键词说明。一次性方案、执行记录和过时指南通过 Git 历史查阅；需要保留的本地原稿放在 `docs/archive/`（已忽略），不作为现行规则或安装内容。

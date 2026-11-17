@@ -12,7 +12,7 @@ const manifest: HarnessManifest = {
   ],
 
   harnessFiles: [
-    { src: "README.md", dst: "README.md" },
+    { src: "../kiro-ide/README.md", dst: "README.md" },
   ],
 };
 

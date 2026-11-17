@@ -2,6 +2,8 @@
 
 `npm test` builds all hosts and runs every suite in `scripts/core-test-suites.json`. It covers short-run selection and failure reporting, compact read-only queries (navigation, JSON projection, complete reference candidates, structured case boundaries and path confinement), repository-scoped rule selection (shared requirements, include/exclude/task matching, dependency union, real Git identity/worktrees, new files, source confinement and read-only host fragments), completion boundaries, read-only host context, explicit method selection, source pinning and knowledge integrity, module facts, hostile DOCX/export candidates, host detection, owned installation and ten-host distribution consistency. Knowledge discovery exposes unknown/conflicting applicability while required content stays blocked; an unidentified module cannot silently skip conditional requirements. The project case runs local consumers and HTTP checks, then an independent product oracle against the original requirements: green implementation tests can still miss a goal. It distinguishes semantic Markdown changes from delivery-note updates, preserves failed outputs and reuses unaffected results. Required CI, external acceptance and delivery remain separate completion conditions.
 
+Entry checks compare the embedded execution rules and resolved links with the standalone source, including Markdown heading anchors. Installer lifecycle checks cover Qoder CN's separately generated native entry and the identical payload shared by Kiro IDE and CLI.
+
 Use the same runner for a short regression, then widen verification according to the actual change:
 
 ```text

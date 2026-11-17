@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.0.8 — 2026-11-17
+
+- Consolidate shared execution rules into one source, embed them in generated host entries, and shorten general-purpose skills and detailed protocols while preserving authorization, acceptance tracing, evidence reuse and completion boundaries.
+- Add focused design clarification inspired by grilling: investigate available facts, ask dependent business questions in small rounds, continue independent work and write decisions back to the original requirements or design.
+- Use the same entry renderer for distribution builds and Qoder CN native installs. Share the canonical Kiro README so CLI and IDE installations keep identical managed assets.
+- Validate embedded rules, resolved links and anchors, native installation lifecycles, real source/tarball upgrades and independent clarification behavior without adding workflow gates.
+
 ## 5.0.7 — 2026-11-15
 
 - Recompute regression scope after each repair from the new changes and affected consumers. Reuse still-applicable passing results while retaining failures, unrun checks and required CI.

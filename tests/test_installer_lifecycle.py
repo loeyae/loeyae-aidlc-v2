@@ -37,11 +37,30 @@ def run_cli(home: Path, args: list, extra_env=None) -> subprocess.CompletedProce
 def assert_qoder_cn_knowledge_links(home: Path) -> None:
     skill = home / ".qoder-cn" / "skills" / "loeyae-aidlc" / "SKILL.md"
     assets = home / ".config" / "loeyae-aidlc" / "host-assets" / "qoder" / "user" / "loeyae-aidlc"
-    targets = {(skill.parent / link).resolve() for link in re.findall(r"\]\(([^)]+)\)", skill.read_text(encoding="utf-8"))}
-    for relative in ["knowledge/methods.md", "knowledge/protocols/host-execution.md"]:
+    targets = {(skill.parent / link.split("#", 1)[0]).resolve()
+               for link in re.findall(r"\]\(([^)]+)\)", skill.read_text(encoding="utf-8"))
+               if not re.match(r"(?:[a-z][a-z\d+.-]*:|#)", link, re.I)}
+    for relative in ["knowledge/methods.md", "knowledge/protocols/project-rules.md",
+                     "knowledge/protocols/design-clarification.md", "knowledge/protocols/verification.md",
+                     "knowledge/protocols/completion.md"]:
         target = assets / relative
         assert target.resolve() in targets, f"native Skill must link to the shared installed {relative}"
         assert target.read_bytes() == (ROOT / "core" / relative).read_bytes()
+    assert (assets / "knowledge/protocols/host-execution.md").read_bytes() == (
+        ROOT / "core/knowledge/protocols/host-execution.md").read_bytes()
+    def resolve_links(text: str, base: Path) -> str:
+        def resolve_link(match):
+            link = match.group(1)
+            if re.match(r"(?:[a-z][a-z\d+.-]*:|#)", link, re.I):
+                return match.group(0)
+            location, marker, anchor = link.partition("#")
+            return f"]({(base / location).resolve()}{marker}{anchor})"
+        return re.sub(r"\]\(([^)]+)\)", resolve_link, text)
+    rules = (assets / "knowledge/protocols/host-execution.md").read_text(encoding="utf-8").strip()
+    rules = re.sub(r"^# ", "## ", rules, flags=re.M)
+    entry = skill.read_text(encoding="utf-8")
+    assert "{{" not in entry, "native installation must assemble the entry template"
+    assert resolve_links(entry, skill.parent).count(resolve_links(rules, assets / "knowledge/protocols")) == 1
 
 
 def write_node_stub(path: Path, body: str) -> Path:
@@ -362,7 +381,9 @@ def test_deepseek_native_skill_lifecycle() -> None:
         assert installed.returncode == 0, installed.stderr
         skill = target / "SKILL.md"
         assert "name: loeyae-aidlc" in skill.read_text(encoding="utf-8")
-        assert "host-execution.md" in skill.read_text(encoding="utf-8")
+        assert skill.read_bytes() == (ROOT / "dist" / "deepseek" / "SKILL.md").read_bytes()
+        assert (target / "knowledge/protocols/host-execution.md").read_bytes() == (
+            ROOT / "core/knowledge/protocols/host-execution.md").read_bytes()
         for resource in ["tools/aidlc-completion.ts", "knowledge/protocols/completion.md",
                          "knowledge/methods.json", "skills/aidlc-code-review/SKILL.md"]:
             assert (target / resource).is_file(), resource

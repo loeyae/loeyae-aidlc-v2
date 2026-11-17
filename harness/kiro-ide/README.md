@@ -4,4 +4,4 @@ Kiro IDE 与 CLI 共用一个全局 Skill。使用 loeyae-aidlc install --harnes
 
 多端项目沿共享的 knowledge/protocols/project-rules.md 加载规范。rules adapter --host kiro 只输出同一工作区根内的条件候选提示与短入口，正文仍在各仓库 .agents/rules/；复杂条件由统一选择器判断。旧 always/资源通配符需在项目迁移时清理，不能假定全局安装已改变项目加载方式。
 
-安装仅替换拥有的文件并清理识别出的 AIDLC 旧 hook。保留用户配置、历史业务资料与真实批准。入口由 core/ENTRY.md 生成，不包含旧阶段调度器。
+安装仅替换拥有的文件并清理识别出的 AIDLC 旧 hook。保留用户配置、历史业务资料与真实批准。入口由 core/ENTRY.md 与共用执行规则组装，不包含旧阶段调度器；两种宿主从本文件生成同一份分发说明。

@@ -12,7 +12,7 @@
  *   3. Copy coreDirs from core/ into dist/<name>/<harnessDir>/
  *   4. Copy harnessFiles from harness/<name>/ into dist/<name>/
  *   5. Apply rulesRename if configured
- *   6. Generate the entry from core/ENTRY.md and report the result
+ *   6. Assemble core/ENTRY.md with the shared execution rules and report the result
  * dist is disposable build output, included in release tarballs, never in Git.
  */
 
@@ -21,6 +21,7 @@ import { join, resolve, dirname, relative, isAbsolute } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import type { HarnessManifest } from "./manifest-types.ts";
 import { generateMethods } from "./generate-methods.js";
+import { renderSkillEntry } from "../core/tools/aidlc-entry.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -104,7 +105,11 @@ async function buildHarness(name: string) {
 
   const entryPath = join(outDir, manifest.skillEntryPath);
   const prefix = relative(dirname(entryPath), harnessOutDir).replaceAll("\\", "/");
-  const entry = readFileSync(join(CORE_DIR, "ENTRY.md"), "utf8").replaceAll("{{root}}", prefix ? prefix + "/" : "");
+  const entry = renderSkillEntry(
+    readFileSync(join(CORE_DIR, "ENTRY.md"), "utf8"),
+    readFileSync(join(CORE_DIR, "knowledge/protocols/host-execution.md"), "utf8"),
+    prefix ? `${prefix}/` : "",
+  );
   mkdirSync(dirname(entryPath), { recursive: true });
   writeFileSync(entryPath, entry);
   console.log(`   ✅ Done: ${coreCount} core dirs, ${harnessCount} harness files`);

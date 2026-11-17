@@ -4,12 +4,10 @@ description: "按已确认语义制作 Mermaid 或显式要求的 SVG 图表，�
 triggers: 画图, 图表设计, 业务流程图, 系统架构图, 架构图, 流程图, 泳道图, 时序图, 状态图, ER 图, 部署图, diagram, architecture diagram, flowchart, sequence diagram, svg
 ---
 
-# diagram-design
+# 图表设计
 
-先确定图要表达的业务事实与关系，复用用户描述或实际代码/文档。默认在现有 Markdown 中使用 Mermaid；用户要求 SVG 时直接用宿主工具制作可编辑 SVG，无需先写流程状态。
+未加载时先读[共用规则](../../knowledge/protocols/host-execution.md)，已加载则复用。
 
-核对节点/关系完整性、阅读方向、标签、线条、容器和文字边界；SVG 注意遮挡、可读性和尺寸。预览或导出有明确用途时才渲染；没有实际渲染就不宣称视觉验证通过。保留语义来源，不从生成图反向杜撰验收事实。
+从用户描述或实际代码/文档确定节点、关系和语义来源。默认在原 Markdown 中使用 Mermaid；明确要求 SVG 时制作可编辑 SVG。
 
-通常只交付所需图源和必要说明；不默认生成 expected-contract、sidecar、Provider Request 或签名证据。用户明确要求受控 Provider/旧图表产证时才使用兼容契约。
-
-默认由宿主执行，结果和必要业务文档是工作依据；共享边界见 [宿主执行协议](../../knowledge/protocols/host-execution.md)。
+核对关系完整性、阅读方向、标签、连线和容器边界，SVG 另检查遮挡与尺寸。预览或导出有实际用途时渲染，未渲染不宣称视觉验证通过。交付所需图源与说明；仅在明确要求受控 Provider 时使用对应契约，图形不能反向证明业务验收。

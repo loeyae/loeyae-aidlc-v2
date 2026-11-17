@@ -21,6 +21,7 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 import { runSync } from "../core/tools/aidlc-spawn";
+import { renderSkillEntry } from "../core/tools/aidlc-entry";
 import {
   hasManagedInstallation,
   installManagedAssets,
@@ -963,7 +964,11 @@ function installOne(harness: string, customTarget: string, projectTarget: string
       const nativeSource = mkdtempSync(resolve(tmpdir(), "loeyae-aidlc-qoder-cn-"));
       try {
         const prefix = path.relative(QODER_CN_USER_SKILL_ROOT, deployment.pluginRoot).replaceAll("\\", "/");
-        const entry = readFileSync(resolve(ROOT, "core/ENTRY.md"), "utf8").replaceAll("{{root}}", prefix ? `${prefix}/` : "");
+        const entry = renderSkillEntry(
+          readFileSync(resolve(ROOT, "core/ENTRY.md"), "utf8"),
+          readFileSync(resolve(ROOT, "core/knowledge/protocols/host-execution.md"), "utf8"),
+          prefix ? `${prefix}/` : "",
+        );
         writeFileSync(resolve(nativeSource, "SKILL.md"), entry, { mode: 0o600 });
         installManagedAssets(
           QODER_CN_SKILL_OWNER,
