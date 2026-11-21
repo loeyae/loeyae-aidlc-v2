@@ -1,5 +1,11 @@
 # Changelog
 
+## 5.0.10 — 2026-11-21
+
+- Review changes to tests, acceptance criteria, review rules and verifiers against applicable original requirements. Evaluate known defects and valid controls, retain missed findings and false positives, and allow confirmed requirement changes without adding workflow gates or ledgers.
+- Select engineering checks from concrete change risks, including transaction boundaries and concurrency consistency. Limit fresh-session verification to changes affecting model or host behavior and reuse existing tests and evidence.
+- Resolve Python only for selected suites that use it directly or declare an indirect dependency in the existing test catalog. Keep Node-only regressions runnable without Python while preserving explicit failures for required interpreters and coverage for direct, indirect, mixed and full selections.
+
 ## 5.0.9 — 2026-11-17
 
 - Distinguish targeted repair verification from complete failure collection. Keep independent diagnostics running on stable inputs instead of restarting the suite after the first failure; stop affected work when prerequisites become invalid.

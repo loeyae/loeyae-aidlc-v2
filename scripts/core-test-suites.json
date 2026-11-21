@@ -29,7 +29,8 @@
   ],
   [
     "tsx",
-    "tests/test_docx_provider_fixture.ts"
+    "tests/test_docx_provider_fixture.ts",
+    { "requiresPython": true }
   ],
   [
     "tsx",

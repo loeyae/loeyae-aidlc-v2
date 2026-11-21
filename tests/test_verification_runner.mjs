@@ -47,7 +47,35 @@ try {
   assert.equal(listed.status, 0, listed.stderr); assert(listed.stdout.includes('test_verification_runner'));
   const bad = spawnSync(process.execPath, ['scripts/test-core.mjs', '--suite', 'not-a-suite'], { encoding: 'utf8', windowsHide: true });
   assert.equal(bad.status, 1); assert(bad.stderr.includes('Unknown suite')); assert(!bad.stdout.includes('PASS'));
-  console.log('PASS verification runner: exact selection, owned short-run stop, independent checks, truthful not-run results, original evidence preservation and empty/invalid-run rejection');
+
+  const withoutPython = { ...process.env, AIDLC_TEST_PYTHON: path.join(root, 'missing-python') };
+  const nodeOutput = path.join(root, 'node-only');
+  const nodeOnly = spawnSync(process.execPath, ['scripts/test-core.mjs', '--suite', 'test_provider_integration_plan', '--suite', 'test_current_distribution', '--fail-fast'], {
+    encoding: 'utf8', windowsHide: true, env: { ...withoutPython, AIDLC_TEST_OUTPUT: nodeOutput },
+  });
+  assert.equal(nodeOnly.status, 0, `A Node-only selection must run without Python: ${nodeOnly.stdout}${nodeOnly.stderr}`);
+  const nodeSummary = JSON.parse(fs.readFileSync(path.join(nodeOutput, 'results.json'), 'utf8'));
+  assert.equal(nodeSummary.exit, 0); assert.equal(nodeSummary.selection.scope, 'selected');
+  assert.deepEqual(nodeSummary.selection.suites, ['test_current_distribution', 'test_provider_integration_plan']);
+  assert.deepEqual(nodeSummary.records.map(r => [r.name, r.exit]), [['build', 0], ['test_current_distribution', 0], ['test_provider_integration_plan', 0]]);
+  assert.deepEqual(nodeSummary.not_run, []);
+
+  for (const [name, args] of [
+    ['python-direct', ['--suite', 'test_docx_inspect']],
+    ['python-fixture', ['--suite', 'test_docx_provider_fixture']],
+    ['python-mixed', ['--suite', 'test_provider_integration_plan', '--suite', 'test_docx_provider_fixture']],
+    ['python-full', []],
+  ]) {
+    const output = path.join(root, name);
+    const result = spawnSync(process.execPath, ['scripts/test-core.mjs', ...args], {
+      encoding: 'utf8', windowsHide: true, env: { ...withoutPython, AIDLC_TEST_OUTPUT: output },
+    });
+    assert.equal(result.status, 1, `${name}: missing Python must not become a pass`);
+    assert.match(result.stderr, /Python 3 unavailable/);
+    assert(!result.stdout.includes('PASS'), `${name}: dependency failure must precede build and test execution`);
+    assert(!fs.existsSync(output), `${name}: an unstarted selection must not claim verification evidence`);
+  }
+  console.log('PASS verification runner: exact selection, owned short-run stop, independent checks, truthful not-run results, original evidence preservation, empty/invalid-run rejection and scoped direct/indirect Python requirements');
 } finally {
   assert(path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep));
   fs.rmSync(root, { recursive: true, force: true });

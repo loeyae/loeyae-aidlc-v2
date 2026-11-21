@@ -60,10 +60,19 @@ export async function main(argv = process.argv.slice(2)) {
   const suites = JSON.parse(readFileSync(join(root, 'scripts/core-test-suites.json'), 'utf8'));
   const options = selectSuites(suites, argv);
   if (options.list) { for (const [, file] of options.selected) console.log(`${suiteName(file)}\t${file}`); return 0; }
-  const env = { ...process.env, AIDLC_TEST_PYTHON: testPython(), PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', AIDLC_EXPORT_PROJECT: '', AIDLC_EXPORT_HOST_PROVIDER: '', AIDLC_DOCX_PROJECT: '', AIDLC_DOCX_HOST_PROVIDER: '' };
-  const tasks = [{ name: 'build', command: [process.execPath, '--import', 'tsx', 'scripts/build.ts', '--all'], stopOnFailure: true }];
-  for (const [engine, file, ...args] of options.selected) {
+  const selected = options.selected.map(([engine, file, ...args]) => {
+    // Optional dependency metadata stays in the existing catalog, after any CLI arguments.
+    const metadata = typeof args.at(-1) === 'object' ? args.pop() : {};
     if (!['tsx', 'node', 'python'].includes(engine)) throw Error('Unexpected suite engine');
+    if (!metadata || Array.isArray(metadata) || Object.keys(metadata).some(key => key !== 'requiresPython')
+      || (metadata.requiresPython !== undefined && typeof metadata.requiresPython !== 'boolean')
+      || args.some(arg => typeof arg !== 'string')) throw Error(`Invalid suite configuration: ${file}`);
+    return { engine, file, args, requiresPython: engine === 'python' || metadata.requiresPython === true };
+  });
+  const env = { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', AIDLC_EXPORT_PROJECT: '', AIDLC_EXPORT_HOST_PROVIDER: '', AIDLC_DOCX_PROJECT: '', AIDLC_DOCX_HOST_PROVIDER: '' };
+  if (selected.some(suite => suite.requiresPython)) env.AIDLC_TEST_PYTHON = testPython();
+  const tasks = [{ name: 'build', command: [process.execPath, '--import', 'tsx', 'scripts/build.ts', '--all'], stopOnFailure: true }];
+  for (const { engine, file, args } of selected) {
     tasks.push({ name: suiteName(file), command: engine === 'python' ? [env.AIDLC_TEST_PYTHON, file, ...args] : [process.execPath, ...(engine === 'tsx' ? ['--import', 'tsx'] : []), file, ...args] });
   }
   const selection = { scope: options.scope, suites: options.selected.map(([, file]) => suiteName(file)), available: options.available };
