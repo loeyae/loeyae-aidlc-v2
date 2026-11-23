@@ -22,8 +22,10 @@ assert.equal(evaluateCompletion({...complete(),unresolved:["known defect"],closu
 assert.equal(evaluateCompletion(complete()).permissions_granted,false);
 assert.throws(()=>evaluateCompletion({...complete(),approved:true}),/Unknown/);
 assert.throws(()=>evaluateCompletion({...complete(),verification:[met("dup"),met("dup")]}),/duplicate/);
-const catalog=methodCatalog();assert.equal(catalog.length,21);assert(catalog.every(m=>!Object.hasOwn(m,"content")));
+const catalog=methodCatalog();assert.equal(catalog.length,22);assert(catalog.every(m=>!Object.hasOwn(m,"content")));
 const method=readMethod("aidlc-application-design");assert(method.includes("组件"));assert(!method.includes("aidlc-figma-design"));
+assert.equal(catalog.find(m=>m.id==="aidlc-acceptance-validation")?.path,"skills/aidlc-acceptance-validation/SKILL.md");
+assert(readMethod("aidlc-acceptance-validation").includes("../../knowledge/protocols/completion.md"));
 assert.throws(()=>readMethod("../../package.json"),/Unknown/);
 const project=fs.mkdtempSync(path.join(os.tmpdir(),"aidlc-current-")),repo=process.cwd();
 function cli(args:string[]){return spawnSync(process.execPath,[path.join(repo,"bin/cli.js"),...args],{cwd:project,encoding:"utf8",timeout:20000,windowsHide:true,env:{...process.env,AIDLC_SESSION_BINDING:"obsolete",AIDLC_EXECUTION_GRANT:"invalid"}});}

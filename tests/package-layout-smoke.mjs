@@ -40,6 +40,7 @@ for (const name of harnesses) {
   assert.deepEqual(walk(dist).sort(), [...expected].sort(), `unexpected packaged ${name} files`);
 }
 const methods=JSON.parse(readFileSync(join(root,"core/knowledge/methods.json"),"utf8"));
-assert.equal(methods.length,21);
+assert.equal(methods.length,22);
+assert(methods.some(method=>method.id==='aidlc-acceptance-validation'));
 for(const p of walk(join(root,"core"))) assert(!/aidlc-orchestrate|stage-graph|aidlc-autonomy|legacy-skills/.test(p),`retired runtime in package: ${p}`);
 console.log(`PASS installed distribution parity: ${harnesses.length} harnesses, ${count} files; ${methods.length} current methods`);

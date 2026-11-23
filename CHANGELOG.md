@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Preserve the user's end-to-end objective across methods. Continue authorized work from application design through actual acceptance while keeping design-only and assessment requests bounded.
+- Inherit existing architecture and implementation conventions for ongoing projects. Connect design increments to original goals, implementation entry points, dependencies and verification prerequisites; reuse explicit decision delegation without adding phase approvals.
+- Add an on-demand acceptance method that checks real business behavior against original requirements, repairs gaps and preserves external acceptance and delivery boundaries. Execution and scheduling remain native-host responsibilities.
+
 ## 5.0.10 — 2026-11-21
 
 - Review changes to tests, acceptance criteria, review rules and verifiers against applicable original requirements. Evaluate known defects and valid controls, retain missed findings and false positives, and allow confirmed requirement changes without adding workflow gates or ledgers.

@@ -1,7 +1,12 @@
 [
   {
+    "id": "aidlc-acceptance-validation",
+    "description": "按原始目标与 AC 执行约定业务验收，核对真实行为、覆盖和证据，发现缺口后继续返修。",
+    "path": "skills/aidlc-acceptance-validation/SKILL.md"
+  },
+  {
     "id": "aidlc-application-design",
-    "description": "梳理本次变更的组件、接口、数据和约束，按需要更新现有应用设计。",
+    "description": "继承已有架构与实现规范，设计本次变更的组件、接口、数据和可验证业务增量。",
     "path": "skills/aidlc-application-design/SKILL.md"
   },
   {

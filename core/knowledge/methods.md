@@ -2,7 +2,8 @@
 
 由技能元信息生成；只选择当前问题需要的方法，不按顺序执行或批量加载。质量、权限和完成边界见[执行规则](protocols/host-execution.md)。
 
-- [aidlc-application-design](../skills/aidlc-application-design/SKILL.md)：梳理本次变更的组件、接口、数据和约束，按需要更新现有应用设计。
+- [aidlc-acceptance-validation](../skills/aidlc-acceptance-validation/SKILL.md)：按原始目标与 AC 执行约定业务验收，核对真实行为、覆盖和证据，发现缺口后继续返修。
+- [aidlc-application-design](../skills/aidlc-application-design/SKILL.md)：继承已有架构与实现规范，设计本次变更的组件、接口、数据和可验证业务增量。
 - [aidlc-approval](../skills/aidlc-approval/SKILL.md)：审阅尚未授权的重大业务、架构或部署决定，记录用户真实答复。
 - [aidlc-build-test-evidence](../skills/aidlc-build-test-evidence/SKILL.md)：运行项目真实构建与测试，解释结果并选择最小充分复验范围。
 - [aidlc-code-review](../skills/aidlc-code-review/SKILL.md)：审查实际变更的需求符合性、正确性、安全和可维护性，给出可定位的问题。
