@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- 补充宿主原生续作与外部操作结果恢复：复用原目标、授权和任务句柄，结果未知先查询权威端，持续推进剩余验收。
+- 新增只读 `provider inspect` 并对齐真实 CLI、MCP 与纯声明包入口；宿主继续负责执行，不增加阶段审批、Runner 或状态机。
+
 - Preserve the user's end-to-end objective across methods. Continue authorized work from application design through actual acceptance while keeping design-only and assessment requests bounded.
 - Inherit existing architecture and implementation conventions for ongoing projects. Connect design increments to original goals, implementation entry points, dependencies and verification prerequisites; reuse explicit decision delegation without adding phase approvals.
 - Add an on-demand acceptance method that checks real business behavior against original requirements, repairs gaps and preserves external acceptance and delivery boundaries. Execution and scheduling remain native-host responsibilities.

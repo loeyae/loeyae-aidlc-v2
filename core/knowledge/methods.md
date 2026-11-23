@@ -7,7 +7,7 @@
 - [aidlc-approval](../skills/aidlc-approval/SKILL.md)：审阅尚未授权的重大业务、架构或部署决定，记录用户真实答复。
 - [aidlc-build-test-evidence](../skills/aidlc-build-test-evidence/SKILL.md)：运行项目真实构建与测试，解释结果并选择最小充分复验范围。
 - [aidlc-code-review](../skills/aidlc-code-review/SKILL.md)：审查实际变更的需求符合性、正确性、安全和可维护性，给出可定位的问题。
-- [aidlc-continuity](../skills/aidlc-continuity/SKILL.md)：Continue from actual code, Git and verification using native host tools.
+- [aidlc-continuity](../skills/aidlc-continuity/SKILL.md)：用宿主原生能力恢复原目标、已有任务和外部操作结果，持续推进剩余实施与验收。
 - [aidlc-delivery-config-generation](../skills/aidlc-delivery-config-generation/SKILL.md)：按实际部署目标生成或调整必要的运行与交付配置，复用已有配置。
 - [aidlc-deployment-validation](../skills/aidlc-deployment-validation/SKILL.md)：检查指定交付配置的语法、引用、安全边界及实际可执行性，不默认执行部署。
 - [aidlc-diagram-design](../skills/aidlc-diagram-design/SKILL.md)：按已确认语义制作 Mermaid 或显式要求的 SVG 图表，并验证可读性和关系正确性。

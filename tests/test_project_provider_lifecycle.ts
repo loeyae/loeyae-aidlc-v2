@@ -16,6 +16,8 @@ import { pathToFileURL } from "node:url";
 import {
   addProjectProvider,
   getProjectProviderStatus,
+  inspectProjectProvider,
+  runProviderCli,
   listProjectProviders,
   removeProjectProvider,
   setProjectProviderEnabled,
@@ -214,6 +216,16 @@ try {
   assert.equal(listProjectProviders(project)[0].status, "current");
   assert.equal(getProjectProviderStatus(project, "fixture-provider").source.commit_oid, fixture.firstCommit);
   assert.equal(existsSync(providerGitCachePath(project, fixture.sourceUrl)), true);
+  const beforeInspection = readFileSync(join(project, PROJECT_PROVIDERS_LOCK_PATH), "utf8");
+  const inspection = inspectProjectProvider(project, "fixture-provider");
+  assert.equal(inspection.source.commit_oid, fixture.firstCommit);
+  assert.equal(inspection.declaration.entrypoint.path, "bin/validate.js");
+  assert.equal(inspection.cache.kind, "bare-git");
+  assert.deepEqual(inspection.execution, { owner: "host", automatic: false, permissions_granted: false });
+  assert.deepEqual(runProviderCli(["inspect", "fixture-provider", "--project", project]), inspection);
+  assert.equal(readFileSync(join(project, PROJECT_PROVIDERS_LOCK_PATH), "utf8"), beforeInspection);
+  assert.equal(existsSync(join(markers, "entrypoint-ran")), false, "inspect must not execute a declaration");
+  assert.throws(() => runProviderCli(["inspect", "fixture-provider", "--ref", "main", "--project", project]), /not valid/);
 
   for (const [label, ref] of [["tag-provider", "v0.1.0"], ["commit-provider", fixture.firstCommit]] as const) {
     const refProject = join(root, label);
@@ -290,6 +302,7 @@ try {
 
   const disabled = setProjectProviderEnabled(project, "fixture-provider", false);
   assert.equal(disabled.status, "disabled");
+  assert.equal(inspectProjectProvider(project, "fixture-provider").enabled, false);
   assert.throws(() => requireEnabledProviderCapability(project, "framework.test.validation", { stage: "code-generation" }), /disabled instances/);
   assert.equal(existsSync(join(project, ".aidlc", "evidence", "providers", "old-evidence.json")), true, "disable must preserve historical Evidence");
 
@@ -302,6 +315,7 @@ try {
   const cacheBackup = `${currentCache}.offline`;
   renameSync(currentCache, cacheBackup);
   assert.equal(getProjectProviderStatus(project, "fixture-provider").status, "blocked");
+  assert.throws(() => inspectProjectProvider(project, "fixture-provider"), /PROVIDER_SOURCE_UNAVAILABLE/);
   assert.match(getProjectProviderStatus(project, "fixture-provider").diagnostic || "", /PROVIDER_SOURCE_UNAVAILABLE/);
   assert.throws(() => requireEnabledProviderCapability(project, "framework.test.validation", { stage: "code-generation" }), /PROVIDER_SOURCE_UNAVAILABLE/);
   renameSync(cacheBackup, currentCache);

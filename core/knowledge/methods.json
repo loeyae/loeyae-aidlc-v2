@@ -26,7 +26,7 @@
   },
   {
     "id": "aidlc-continuity",
-    "description": "Continue from actual code, Git and verification using native host tools.",
+    "description": "用宿主原生能力恢复原目标、已有任务和外部操作结果，持续推进剩余实施与验收。",
     "path": "skills/aidlc-continuity/SKILL.md"
   },
   {

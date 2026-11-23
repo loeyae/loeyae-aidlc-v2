@@ -8,4 +8,4 @@ knowledge-catalog <instance> --capability <id> 只返回章节元信息、适用
 
 知识包使用当前 aidlc.knowledge-package/v3 契约，显式声明 required、description 和内容哈希。旧包由维护者按现行规则重建并显式更新锁；框架不自动删减或假定旧章节可选。未识别模块不能当作条件不适用；必需章节的适用性未知或冲突、请求章节不适用、锁或哈希不符时拒绝正文加载。目录仍须通过来源、锁、清单与能力绑定校验；报告缺项，不把拒绝转成无关本地工作禁令。
 
-知识结果始终 gate_eligible=false、permissions_granted=false；读取成功不能证明业务完成、质量通过或获得部署权限。Provider 的命令/MCP 操作由宿主按照真实工具权限执行；AIDLC 不保留旧受管 runner 和阶段门禁。
+知识结果始终 gate_eligible=false、permissions_granted=false；读取成功不能证明业务完成、质量通过或获得部署权限。Provider 的命令/MCP 操作按[宿主调用入口](provider-invocation.md)由宿主按照真实工具权限执行；AIDLC 不保留旧受管 runner 和阶段门禁。

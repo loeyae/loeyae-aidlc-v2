@@ -396,6 +396,25 @@ export function getProjectProviderStatus(projectRoot: string, instanceValue: str
   return statusFromState(state, projectRoot, intent);
 }
 
+export function inspectProjectProvider(projectRoot: string, instanceValue: string) {
+  const instance = instanceId(instanceValue);
+  const state = readProjectProviders(projectRoot, false);
+  const intent = state.config.providers.find((provider) => provider.instance_id === instance);
+  if (!intent) throw new Error(`Provider instance is not installed: ${instance}`);
+  const entry = state.lock.providers.find((provider) => provider.instance_id === instance)!;
+  const verified = verifyLockedProviderCache(projectRoot, entry);
+  return {
+    instance_id: instance,
+    enabled: intent.enabled,
+    source: entry.source,
+    lock_digest: state.lock.lock_digest,
+    bindings: intent.bindings,
+    declaration: verified.manifest,
+    cache: { path: verified.cache_path, kind: "bare-git" },
+    execution: { owner: "host", automatic: false, permissions_granted: false },
+  };
+}
+
 interface ParsedCli {
   readonly positionals: string[];
   readonly options: Readonly<Record<string, string | readonly string[] | boolean>>;
@@ -470,7 +489,7 @@ function assertOptions(parsed: ParsedCli, allowed: readonly string[]): void {
 }
 
 export function providerCliUsage(): string {
- return "provider add <git-url> --ref <ref> [--instance <id>] [--subdir <path>] [--allow-file]\nprovider list|status <id>|update <id> --ref <ref>|enable <id>|disable <id>|remove <id>\nprovider knowledge-catalog|knowledge-load <id> --capability <id> [--module <id>] [--method <name>] [--sections <JSON array>]\nExplicit pinning only; no automatic installs, stage execution, confirmations or grants. Knowledge is never validation.";
+ return "provider add <git-url> --ref <ref> [--instance <id>] [--subdir <path>] [--allow-file]\nprovider list|status <id>|inspect <id>|update <id> --ref <ref>|enable <id>|disable <id>|remove <id>\nprovider knowledge-catalog|knowledge-load <id> --capability <id> [--module <id>] [--method <name>] [--sections <JSON array>]\nExplicit pinning only; no automatic installs, stage execution, confirmations or grants. Knowledge is never validation.";
 }
 export function runProviderCli(args = process.argv.slice(2)): unknown {
  const [command, ...rest] = args;
@@ -510,6 +529,11 @@ export function runProviderCli(args = process.argv.slice(2)): unknown {
     assertOptions(parsed, ["project", "output"]);
     if (parsed.positionals.length !== 1) throw new Error("provider status requires exactly one <instance-id>");
     return getProjectProviderStatus(root, parsed.positionals[0]);
+  }
+  if (command === "inspect") {
+    assertOptions(parsed, ["project", "output"]);
+    if (parsed.positionals.length !== 1) throw new Error("provider inspect requires exactly one <instance-id>");
+    return inspectProjectProvider(root, parsed.positionals[0]);
   }
   if (command === "update") {
     assertOptions(parsed, ["ref", "project", "allow-file", "output"]);
