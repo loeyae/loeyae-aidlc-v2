@@ -1,5 +1,11 @@
 # Changelog
 
+## 5.0.12 — 2026-11-26
+
+- Make pinned Provider discovery and host materialization explicit, retaining native execution and the original package integrity boundary.
+- Preserve external-operation query identifiers when issuing authorized writes and verify that recovered success belongs to the original request and input version.
+- Distinguish Agent actions from test setup and recovery triggers in behavioral evidence; preserve file encoding and line endings before consolidated verification.
+
 ## 5.0.11 — 2026-11-23
 
 - 补充宿主原生续作与外部操作结果恢复：复用原目标、授权和任务句柄，结果未知先查询权威端，持续推进剩余验收。
